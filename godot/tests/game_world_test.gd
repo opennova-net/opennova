@@ -1088,6 +1088,22 @@ func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 	water.set_world_rendering_enabled(false)
 
 
+# The water goes dormant with its mission: a loading present ahead of the next
+# load's head draws no mirror (a present draws the screen alone, D-NET-NEW-L3-37).
+func test_unload_puts_the_water_to_sleep() -> void:
+	var world := WorldFixture.make_world(self)
+	assert_eq(WorldFixture.load_mission(
+			world, _minimal_assets_dir(), WorldFixture.MINIMAL_MISSION), OK)
+	var water: Water = world.get_node("Water")
+	water.water_height = 10.0
+	water.set_world_rendering_enabled(true)
+	assert_true(world.is_water_render_active(), "the precondition: a live water pass")
+	world.unload()
+	assert_false(world.is_water_render_active(), "the teardown stops the water's rendering")
+	assert_eq(water.get_reflection_viewport().render_target_update_mode,
+			SubViewport.UPDATE_DISABLED, "and its mirror's target")
+
+
 func test_unload_synchronously_retires_effect_light_state() -> void:
 	var root_dir := _stage_lit_building_fixture("effect_light_unload")
 	var world := WorldFixture.make_world(self)

@@ -769,6 +769,10 @@ void GameWorld::unload() {
 	join_terrain_preloaded_ = false;
 	terrain_textures_pending_ = false;
 	stop_water_render_stats();
+	// The water goes dormant with its mission (its strips and its mirror's target with it), so no
+	// loading present ahead of the next load's head draws the mirror: a present draws the screen
+	// alone (engine hud/loading_screen.h carries the witness, D-NET-NEW-L3-37).
+	set_water_world_rendering_enabled(false);
 	// Net-session teardown: the preload sim/root, the notification latches, the
 	// typed request staging, and the NovaWorld gate registration.
 	drive_.reset();
