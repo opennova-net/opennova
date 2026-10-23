@@ -35,7 +35,7 @@ void GameWorld::route_mission_effects(const Array &p_effects) {
 		if (kind == "dialog_wav") {
 			// WAC wave/pwave: a scripted voice .wav by filename on its own channel.
 			if (audio != nullptr) {
-				audio->sync_script_voice();
+				audio->follow_script_voice();
 			}
 		}
 	}

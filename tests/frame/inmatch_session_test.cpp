@@ -1,6 +1,7 @@
 #include <runtime/inmatch/session.h>
 
 #include <runtime/controls/controls.h> // action_code (the head gate pins)
+#include <runtime/hud/hud_toggles.h> // HudToggleState (the scene gate's view word)
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/radar_contacts.h>
 
@@ -282,6 +283,98 @@ int main() {
 		full.delta_seconds = TickAccumulator::kTickDt * 10.0;
 		if (!expect(session.advance(full).ticks_run() == 2,
 				"final wait: the main loop banks from a fresh history")) return 1;
+	}
+
+	// The status page stands in for the scene frame (Session::draws_scene): the session takes
+	// the verdict after its drain, a dedicated host's frame always the page, a peer's while
+	// the authority's view word is up, and runs the scene frame's own legs on it alone. Under
+	// the page no start frame counts down (the next frame banks its full time), no cine ends;
+	// the frames drawn after it count the three start frames down again
+	// [orig: GameLoop_RenderFrame @0x521310 - `jz` @0x521355, the view word @0x521CD6,
+	//  is_authority @0x521CDF..0x521CE6; Render_ProcessMainSceneFrame @0x5CAEFF..0x5CAF0E
+	//  (the re-base countdown), @0x5CADFC -> Cine_RenderOrEndPlayback @0x575A50].
+	{
+		opennova::hud::HudToggleState view_up;
+		view_up.server_status_view = true;
+		opennova::hud::HudToggleState view_down;
+		{
+			TickProbe target;
+			target.probe_kind = RoleKind::ListenHost;
+			Session session(target);
+			if (!load(session)) return 1;
+			// An SP end-of-round cine past its last event (an empty list ends at 0).
+			target.kernel.world.epilog.active = true;
+			target.kernel.world.epilog.frame = 0;
+			FrameInput paged;
+			paged.delta_seconds = TickAccumulator::kTickDt * 10.0;
+			paged.since_render_seconds = 0.0;
+			paged.hud_toggles = &view_up;
+			const FrameOutcome first = session.advance(paged);
+			if (!expect(!first.scene_drawn && !session.last_scene_drawn(),
+					"page: a listen host's view word stands the page in")) return 1;
+			if (!expect(first.ticks_run() == 0,
+					"page: the load's re-base still banks only the time since the render")) return 1;
+			if (!expect(target.kernel.world.epilog.active,
+					"page: no cine ends under the status page")) return 1;
+			if (!expect(session.advance(paged).ticks_run() != 0,
+					"page: no start frame counted down, so the next frame banks its time")) return 1;
+			FrameInput drawn = paged;
+			drawn.hud_toggles = &view_down;
+			const FrameOutcome back = session.advance(drawn);
+			if (!expect(back.scene_drawn && session.last_scene_drawn(),
+					"page: the view word down draws the scene")) return 1;
+			if (!expect(!target.kernel.world.epilog.active,
+					"page: the scene frame's cine pass ends the cine past its end")) return 1;
+		}
+		{
+			// The countdown waits for the frames drawn: after one page frame, the frames drawn
+			// count the three start frames down from the first of them, so the fourth frame
+			// drawn is still re-based (had the page frame counted one, it would bank).
+			TickProbe target;
+			target.probe_kind = RoleKind::ListenHost;
+			Session session(target);
+			if (!load(session)) return 1;
+			FrameInput paged;
+			paged.delta_seconds = 0.0;
+			paged.since_render_seconds = 0.0;
+			paged.hud_toggles = &view_up;
+			(void)session.advance(paged);
+			FrameInput idle = paged;
+			idle.hud_toggles = &view_down;
+			for (int frame = 0; frame < 3; ++frame) (void)session.advance(idle);
+			FrameInput drawn;
+			drawn.delta_seconds = TickAccumulator::kTickDt * 10.0;
+			drawn.since_render_seconds = 0.0;
+			drawn.hud_toggles = &view_down;
+			if (!expect(session.advance(drawn).ticks_run() == 0,
+					"page: the fourth frame drawn banks only the time since its render")) return 1;
+			if (!expect(session.advance(drawn).ticks_run() != 0,
+					"page: the countdown spent, the full frame time banks again")) return 1;
+		}
+		{
+			TickProbe target;
+			target.probe_kind = RoleKind::DedicatedHost;
+			Session session(target);
+			if (!load(session)) return 1;
+			FrameInput frame;
+			frame.delta_seconds = TickAccumulator::kTickDt;
+			if (!expect(!session.advance(frame).scene_drawn,
+					"page: a dedicated host's frame is always the page")) return 1;
+			frame.hud_toggles = &view_down;
+			if (!expect(!session.advance(frame).scene_drawn && !session.draws_scene(&view_down),
+					"page: whatever its view word")) return 1;
+		}
+		{
+			TickProbe target;
+			target.probe_kind = RoleKind::Joiner;
+			Session session(target);
+			if (!load(session)) return 1;
+			FrameInput frame;
+			frame.delta_seconds = TickAccumulator::kTickDt;
+			frame.hud_toggles = &view_up;
+			if (!expect(session.advance(frame).scene_drawn,
+					"page: a joiner is not the authority, it draws the scene")) return 1;
+		}
 	}
 
 	// Pause, a manual step and a reset keep the bank and its smoothing history

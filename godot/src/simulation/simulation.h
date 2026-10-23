@@ -821,6 +821,10 @@ public:
 		ROLE_DEDICATED_HOST = static_cast<int>(opennova::inmatch::RoleKind::DedicatedHost),
 	};
 	int session_role() const { return static_cast<int>(session_.kind()); }
+	// The scene gate (engine inmatch::Session::draws_scene): the role's verdict on
+	// `p_toggles`' status view, for a frame the session did not advance (an advanced frame's
+	// own verdict, taken after its drain, rides MissionFrameOutcome::is_scene_drawn).
+	bool session_draws_scene(const Ref<HudToggles> &p_toggles) const;
 	int session_state() const { return static_cast<int>(session_.state()); }
 	// The fixed logic-tick quantum (1/62.5 s) — the ONE cadence constant,
 	// re-exported from the engine accumulator for GDScript composition.
@@ -1739,7 +1743,11 @@ public:
 	// fire pass's; the bound form wraps the same rows for the tests.
 	void drain_sound_emitter_events(std::vector<opennova::world::SoundEmitterEvent> &r_events);
 	// Typed audio presentation/acknowledgement seam; WAC owns the channel state.
+	// script_voice_frame is the scene frame's update (a joiner's decoded-row anchor first, then
+	// the anchor reset and the gain: engine ScriptVoiceChannel::frame); script_voice_state the
+	// channel as it stands, with no reset (ScriptVoiceChannel::sample).
 	opennova::world::ScriptVoiceChannel::Frame script_voice_frame(const Vector3 &p_listener);
+	opennova::world::ScriptVoiceChannel::Frame script_voice_state(const Vector3 &p_listener) const;
 	void finish_script_voice(uint64_t p_serial, const opennova::lwf::WavPcm *p_clip);
 	void set_script_voice_resolver(opennova::world::ScriptVoiceChannel::SetResolver p_resolver);
 	bool play_script_wave(const String &p_filename);

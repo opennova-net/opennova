@@ -1444,7 +1444,11 @@ struct ClientState {
 	// The frame loop's open decision, once per frame: true exactly once per
 	// arming while no other menu is up (UI_IsMenuScreenOpen @0x5cab67), the latch
 	// stamped whether or not the shell's open succeeds; untriggered, the latch
-	// clears.
+	// clears. Both legs are the scene frame's: a frame the status page stands in
+	// for takes no decision (the shell asks on the scene gate's verdict alone)
+	// [orig: Render_ProcessMainSceneFrame @0x5CAB83 / @0x5CAB8B, the clear's
+	//  Game_CloseInGameScreens call @0x5CAC9C; the scene arm GameLoop_RenderFrame
+	//  @0x521CE8].
 	bool take_death_menu_open(bool triggered, bool menu_open) {
 		if (!triggered) {
 			death_menu_open_latch = false;

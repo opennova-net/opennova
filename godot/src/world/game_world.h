@@ -538,6 +538,9 @@ public:
 	// The live table's rows whose bodies the last frame ran, in table order (a structural seam:
 	// the scene gate's skip is visible here).
 	PackedStringArray get_last_frame_legs() const;
+	// The last frame's scene gate verdict (FrameContext::scene_drawn): the shell's own scene
+	// legs after the world frame (the death.mnu latch) run on it.
+	bool get_last_frame_scene_drawn() const { return last_frame_scene_drawn_; }
 	// Re-evaluates only camera-dependent production render state for an
 	// exact-pose visual capture (the settle contract and the frozen-pose leg
 	// order live with the replay table in game_world_frame.cpp).
@@ -727,6 +730,7 @@ private:
 	LegResult leg_session(FrameContext &r_ctx);
 	LegResult leg_remote_admin(FrameContext &r_ctx);
 	LegResult leg_scene_gate(FrameContext &r_ctx);
+	LegResult leg_script_voice(FrameContext &r_ctx);
 	LegResult leg_local_view(FrameContext &r_ctx);
 	LegResult leg_scene_environment(FrameContext &r_ctx);
 	LegResult leg_environment_nodes(FrameContext &r_ctx);
@@ -1127,6 +1131,7 @@ private:
 	int64_t device_frame_start_us_ = 0;
 	// Bit i: the live table's row i ran its body in the last frame (get_last_frame_legs).
 	uint64_t last_frame_run_mask_ = 0;
+	bool last_frame_scene_drawn_ = true;
 	// Identity latch for measured render time on the water reflection RTT.
 	ObjectID stats_water_vp_id_;
 	// Edge latch for the compositor passes' RD GPU timestamps (F3 capture

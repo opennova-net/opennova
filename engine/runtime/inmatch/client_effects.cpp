@@ -473,9 +473,14 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             }
         }
     }
+}
+
+void ClientRuntime::track_voice_anchor(world::World &world) const {
     // An entity voice anchored on a decoded row follows that row, and stops
-    // once the row is gone or dead, as a freed or dead anchor stops it.
-    // [orig: Audio_UpdateAmbientStream @0x4ED9E8..0x4EDA2A]
+    // once the row is gone or dead, as a freed or dead anchor stops it: the
+    // scene frame's voice update, never the update's.
+    // [orig: Audio_UpdateAmbientStream @0x4ED9E8..0x4EDA2A, called from
+    //  Render_ProcessMainSceneFrame @0x5CA348 alone]
     const world::EntityHandle anchor = world.script.voice.speaker();
     if (anchor.valid() && role_ == Role::Joiner) {
         const replication::ClientEntityState *row = state().find(anchor.packed);

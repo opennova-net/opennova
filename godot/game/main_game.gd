@@ -1513,9 +1513,14 @@ func _on_join_deploy_pick_required() -> void:
 # (PAUSED / ARMORY / DEPLOY / END_ROUND all hold a screen), so the latch is
 # never burned under another screen and the open retries on the next clear
 # frame. Closing is the presenter's own affair. NOT yet modeled (hud-re
-# D-HUD-19 residuals): the spawn-success suppression gate.
+# D-HUD-19 residuals): the spawn-success suppression gate. The latch is the
+# scene frame's, so a frame the status page stands in for neither opens the
+# screen nor clears the latch (GameWorld's scene gate; the latch's witness
+# lives on ClientState.death_menu_open_latch).
 func _maybe_open_death_menu() -> void:
 	if _state == State.MENU or _world == null:
+		return
+	if not _world.get_last_frame_scene_drawn():
 		return
 	var sim: Simulation = _world.get_sim()
 	if sim == null:

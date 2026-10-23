@@ -12,7 +12,6 @@
 #include <runtime/renderer/scene_pass_gates.h>
 #include <runtime/environment/water_mirror.h>
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the frame clock)
-#include <runtime/hud/hud_server_status.h> // main_frame_draws_scene (the scene gate)
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/environment.hpp>
@@ -112,6 +111,10 @@ const GameWorld::FrameLeg GameWorld::kFrameLegs[] = {
 	// scene's rows (kSceneLeg) run, or the status page stands in for them. The session's
 	// update, the net-session edges, the audio and the finish run either way.
 	{ "scene_gate", kNoSlot, &GameWorld::leg_scene_gate, kLegNone },
+	// The scene frame's scripted-voice update heads it, ahead of its camera compose: the
+	// validation that completes a released line, the anchor reset and the stream's gain. Under
+	// the status page it does not run, so the busy word WaveReady reads holds there.
+	{ "script_voice", kNoSlot, &GameWorld::leg_script_voice, kSceneLeg },
 	// Place the local-player camera/viewmodel from the state the session tick
 	// just produced, BEFORE every camera-driven render leg reads it (D-RORD-8).
 	// It also hands the entity presenter the frame's virtual-display verdict
@@ -513,19 +516,32 @@ GameWorld::LegResult GameWorld::leg_remote_admin(FrameContext &r_ctx) {
 GameWorld::LegResult GameWorld::leg_scene_gate(FrameContext &r_ctx) {
 	// The page stands in for the scene frame: a dedicated host's always (no session peer), a
 	// listen host's or a single player's while its status view is up; a joiner draws the
-	// scene. The view word is the HUD toggles' after this frame's drain (engine
-	// hud_server_status.h main_frame_draws_scene carries the witness).
+	// scene. The session took the verdict after its drain, where retail's render callback
+	// reads its view word, and ran its own scene legs on it; a frame the session did not
+	// advance takes the role's verdict on the view word as it stands (engine
+	// inmatch::Session::draws_scene carries the witness).
 	const Ref<Simulation> sim = get_sim();
 	if (sim.is_null()) {
-		r_ctx.scene_drawn = true;
+		r_ctx.scene_drawn = last_frame_scene_drawn_ = true;
 		return kLegSkipped;
 	}
-	const int role = sim->session_role();
-	const Ref<HudToggles> toggles =
-			r_ctx.input.is_valid() ? r_ctx.input->get_hud_toggles() : Ref<HudToggles>();
-	r_ctx.scene_drawn = opennova::hud::main_frame_draws_scene(
-			role != Simulation::ROLE_DEDICATED_HOST, role != Simulation::ROLE_JOINER,
-			toggles.is_valid() && toggles->is_server_status_view());
+	if (r_ctx.outcome.is_valid()) {
+		r_ctx.scene_drawn = r_ctx.outcome->is_scene_drawn();
+	} else {
+		r_ctx.scene_drawn = sim->session_draws_scene(
+				r_ctx.input.is_valid() ? r_ctx.input->get_hud_toggles() : Ref<HudToggles>());
+	}
+	last_frame_scene_drawn_ = r_ctx.scene_drawn;
+	return kLegRan;
+}
+
+GameWorld::LegResult GameWorld::leg_script_voice(FrameContext &r_ctx) {
+	// Retail's scene frame is the voice update's one caller, right ahead of its camera
+	// compose (engine world::ScriptVoiceChannel::frame carries the witness). The listener is
+	// the frame head's (leg_begin), as retail's is the render callback's first leg's.
+	MissionAudio *audio = get_mission_audio();
+	if (!world_ready_ || audio == nullptr) return kLegSkipped;
+	audio->update_script_voice();
 	return kLegRan;
 }
 

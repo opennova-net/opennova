@@ -15,6 +15,10 @@ namespace opennova::mission {
 class MissionKernel;
 }
 
+namespace opennova::hud {
+struct HudToggleState;
+}
+
 namespace opennova::inmatch {
 
 class ClientRuntime;
@@ -243,6 +247,11 @@ struct FrameInput {
 	// world::TickAccumulator::bank carries the witness.
 	bool frame_lock = false;
 	uint32_t frame_stamp_ms = 0;
+	// The shell's HUD toggles, whose status view the frame's input rows may flip during the
+	// drain: the session reads the word after the drain, where retail's render callback reads
+	// it (Session::draws_scene). Null when the shell has none (a dedicated serve, a probe's
+	// direct frame): the view reads as down.
+	const hud::HudToggleState *hud_toggles = nullptr;
 };
 
 struct TickInput {
@@ -320,6 +329,9 @@ struct FrameOutcome {
 	// The frame lock's last clock read when it slept (0 = it did not): the stamp the
 	// embedder's next frame measures its elapsed from [orig: Game_MainLoop @0x52B8DB].
 	uint32_t frame_stamp_ms = 0;
+	// The render callback's choice after the drain: the scene frame, or the status page in its
+	// place (Session::draws_scene). The embedder runs its scene legs on this verdict.
+	bool scene_drawn = true;
 
 	int32_t ticks_run() const { return static_cast<int32_t>(ticks.size()); }
 	bool terminal() const {
@@ -592,6 +604,20 @@ public:
 	void set_frame_lock_clock(world::FrameLockClock *clock);
 	const SessionError &last_error() const { return last_error_; }
 	const FramePerf &last_perf() const { return last_perf_; }
+	// THE SCENE GATE. Retail's render callback draws EITHER the scene frame or the status
+	// page: a frame with no session peer (a dedicated host) always takes the page, a peer's
+	// takes it while the authority's status view is up (hud::main_frame_draws_scene carries
+	// the witness), the word read after the update's drain. The scene frame's state legs run
+	// on its verdict alone: the session's cine pass, its HUD radar step and its mission-start
+	// re-base countdown here, the embedder's scene legs on FrameOutcome::scene_drawn.
+	// `toggles` null reads the view as down.
+	// [orig: GameLoop_RenderFrame @0x521310 - is_mp_session_peer @0x52134E / `jz` @0x521355;
+	//  the view word @0x521CD6, is_authority @0x521CDF..0x521CE6; Render_ProcessMainSceneFrame
+	//  @0x521CE8 or Server_DrawStatusScreen @0x521CEF]
+	bool draws_scene(const hud::HudToggleState *toggles) const;
+	// The last advanced frame's verdict (FrameOutcome::scene_drawn): the embedder's scene
+	// passes that run inside its session step read it.
+	bool last_scene_drawn() const { return last_scene_drawn_; }
 	// The main loop's frame statistics the authority's status page shows:
 	// the frames rendered during the last 62 logic updates and the CPU share
 	// of the frame-rate window (world::TickAccumulator::cpu_percent). A paused
@@ -611,12 +637,13 @@ public:
 		return {frames_last_second_, accumulator_.cpu_percent()};
 	}
 
-	// THE FRAME'S RADAR STEP. Retail's HUD pass runs on every rendered
-	// frame, the in-game menu's included (the menu only stops the
-	// single-player ticks), and its radar update ages the local player's
+	// THE FRAME'S RADAR STEP. Retail's HUD pass runs on every frame that draws
+	// the scene, the in-game menu's included (the menu only stops the
+	// single-player ticks; the status page stands in for the whole scene
+	// frame, draws_scene), and its radar update ages the local player's
 	// contacts and the retained minimap banks (the 0x6B designations, the
 	// transient slots, the linked markers' lapse) by the ticks since its last
-	// run. The session runs that step after each frame's tick drain, paused
+	// run. The session runs that step after each scene frame's tick drain, paused
 	// or not, so the aging never waits on the embedder's HUD
 	// (inmatch::step_hud_radar carries the legs). The embedder hands over the
 	// HUD pass's own gates whenever its HUD compiles
@@ -733,6 +760,7 @@ private:
 	CameraSample latest_camera_;
 	SessionError last_error_;
 	FramePerf last_perf_;
+	bool last_scene_drawn_ = true;
 	// The HUD pass's gates as the embedder last handed them, and the radar
 	// step's last snapshot.
 	uint32_t hud_radar_gates_ = kHudRadarGatesDefault;

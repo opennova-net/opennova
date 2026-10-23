@@ -81,6 +81,11 @@ public:
 
 	// Stable nearest-first sort; only three visible slots have live targets.
 	// [orig: Scar_SortSlotsByDistance @0x57FE60; FaceAnim_RenderAllSlots; Render_ScarSlot @0x580170]
+	// The scene frame's pass alone: a frame the status page stands in for steps no counter,
+	// so the update's look cadence holds there (the embedder runs it on the session's
+	// verdict, inmatch::Session::last_scene_drawn) [orig: Render_ProcessMainSceneFrame
+	// @0x5CA50C -> FaceAnim_RenderAllSlots @0x580360, ++dword_26C7768 @0x580367; its reader
+	// FaceAnim_UpdateSlot @0x57FA50 (the read @0x57FA60)].
 	void compile_draws(World &world, int32_t camera_x, int32_t camera_y,
 			bool first_person, std::vector<FacialDraw> &out);
 

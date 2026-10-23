@@ -1902,6 +1902,8 @@ func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 				"the gate, the audio and the finish run on every frame: %s" % [legs])
 		assert_eq(legs.has("terrain"), serve_and_play,
 				"the scene's rows run on a listen host's frame alone: %s" % [legs])
+		assert_eq(world.get_last_frame_scene_drawn(), serve_and_play,
+				"the shell's scene legs read the same verdict")
 		if serve_and_play:
 			var view_up := HudToggles.new()
 			view_up.session_init(true, false) # the status view stands up
@@ -1910,9 +1912,12 @@ func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 			paged.set_hud_toggles(view_up)
 			world.tick(Vector3.ZERO, Transform3D.IDENTITY, 1.0 / 62.0, paged)
 			legs = Array(world.get_last_frame_legs())
-			assert_false(legs.has("terrain") or legs.has("particles") or legs.has("local_view"),
+			assert_false(legs.has("terrain") or legs.has("particles") or legs.has("local_view")
+					or legs.has("script_voice"),
 					"a listen host's status view stands in for the scene's rows: %s" % [legs])
 			assert_true(legs.has("audio"), "its audio still runs: %s" % [legs])
+			assert_false(world.get_last_frame_scene_drawn(),
+					"the shell's scene legs (the death.mnu latch) stand down under the page")
 		world.unload()
 
 

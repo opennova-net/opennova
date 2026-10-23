@@ -9,7 +9,8 @@ extends GutTest
 
 func test_frame_leg_table_is_the_witnessed_order() -> void:
 	assert_eq(Array(GameWorld.frame_leg_names()), [
-		"begin", "session", "remote_admin", "scene_gate", "local_view", "scene_environment",
+		"begin", "session", "remote_admin", "scene_gate", "script_voice", "local_view",
+		"scene_environment",
 		"environment_nodes", "terrain", "water", "network", "blink",
 		"occlusion", "foliage", "iris", "sun_veil", "lights", "ragdolls", "materials", "framefx",
 		"slot_shadows", "particles", "precipitation", "scene_overlay",
@@ -42,6 +43,14 @@ func test_local_view_precedes_every_camera_consumer() -> void:
 			"the ragdolls read the avatar the local view posed this frame")
 	assert_lt(names.find("ragdolls"), names.find("materials"),
 			"the ragdolls pose their bodies before the materials leg writes the bones")
+	# Render_ProcessMainSceneFrame calls Audio_UpdateAmbientStream (@0x5CA348) right ahead of
+	# its camera compose (@0x5CA34D): the scene's first row.
+	assert_eq(names.find("script_voice"), names.find("scene_gate") + 1,
+			"the scene frame's voice update heads the scene rows")
+	assert_eq(local_view, names.find("script_voice") + 1,
+			"the camera compose follows the voice update")
+	assert_true(GameWorld.frame_leg_draws_scene("script_voice"),
+			"the voice update is the scene frame's, not the update's")
 
 
 # The status page stands in for retail's whole scene frame (GameLoop_RenderFrame draws

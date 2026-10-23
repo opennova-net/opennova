@@ -1153,6 +1153,8 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_static_method("GameWorld", D_METHOD("frame_leg_draws_scene", "name"),
 			&GameWorld::frame_leg_draws_scene);
 	ClassDB::bind_method(D_METHOD("get_last_frame_legs"), &GameWorld::get_last_frame_legs);
+	ClassDB::bind_method(D_METHOD("get_last_frame_scene_drawn"),
+			&GameWorld::get_last_frame_scene_drawn);
 	ClassDB::bind_method(D_METHOD("debug_refresh_render_pose", "camera"),
 			&GameWorld::debug_refresh_render_pose);
 	ClassDB::bind_method(D_METHOD("get_runtime_perf_counters"), &GameWorld::get_runtime_perf_counters);

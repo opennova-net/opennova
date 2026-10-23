@@ -2,6 +2,7 @@
 #include "util/axes.h"
 
 #include <formats/gamecfg/game_cfg.h>  // gamecfg::defaults (DialogueLevel)
+#include <runtime/inmatch/client_runtime.h> // ClientRuntime::track_voice_anchor
 #include <runtime/inmatch/host_role.h> // HostRole::dialog_line_loaded
 #include <runtime/mission/mission_kernel.h>
 
@@ -10,7 +11,16 @@ using namespace godot;
 opennova::world::ScriptVoiceChannel::Frame Simulation::script_voice_frame(
         const Vector3 &p_listener) {
     const auto listener = godot_to_mission(p_listener);
+    // A joiner's decoded-row speaker rides its replica row (ClientRuntime::track_voice_anchor),
+    // inside the same update.
+    if (runtime_ != nullptr) runtime_->track_voice_anchor(kernel_->world);
     return kernel_->world.script.voice.frame(kernel_->world, {listener.x, listener.y, listener.z});
+}
+
+opennova::world::ScriptVoiceChannel::Frame Simulation::script_voice_state(
+        const Vector3 &p_listener) const {
+    const auto listener = godot_to_mission(p_listener);
+    return kernel_->world.script.voice.sample(kernel_->world, {listener.x, listener.y, listener.z});
 }
 
 void Simulation::finish_script_voice(uint64_t p_serial, const opennova::lwf::WavPcm *p_clip) {

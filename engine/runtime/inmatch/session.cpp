@@ -3,6 +3,8 @@
 #include <base/io/perf_clock.h>
 #include <runtime/controls/controls.h> // action_code (the console's by-code dispatch)
 #include <runtime/hud/hud_frame.h> // HudFrameCompiler::kRadarGate*
+#include <runtime/hud/hud_server_status.h> // main_frame_draws_scene (the scene gate)
+#include <runtime/hud/hud_toggles.h> // HudToggleState::server_status_view
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the frame lock clock)
 #include <runtime/inmatch/mission_exit.h> // kMissionExitReset (the quit row's exit)
@@ -976,6 +978,13 @@ TickOutcome Session::run_one_tick(const TickInput &input) {
 	return out;
 }
 
+bool Session::draws_scene(const hud::HudToggleState *toggles) const {
+	// The role carries the two process words: is_mp_session_peer is clear on a dedicated host
+	// alone, is_authority on a joiner alone.
+	return hud::main_frame_draws_scene(kind_ != RoleKind::DedicatedHost, kind_ != RoleKind::Joiner,
+			toggles != nullptr && toggles->server_status_view);
+}
+
 void Session::step_cine_render_frame() {
 	// The rendered frame's cine pass, after the frame's logic updates: the SP
 	// end-of-round cine marks its frame drawn, or stops past its last event
@@ -1088,8 +1097,10 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		// A frame whose updates all stayed paused ran no tick.
 		if (out.ticks.empty() && !out.terminal()) out.status = FrameStatus::NotRunning;
 		last_perf_ = out.perf;
+		// The render callback's choice after the drain (draws_scene); both arms count.
+		out.scene_drawn = last_scene_drawn_ = draws_scene(input.hud_toggles);
 		count_rendered_frame();
-		if (!out.terminal()) {
+		if (!out.terminal() && out.scene_drawn) {
 			step_cine_render_frame();
 			step_hud_radar_frame();
 		}
@@ -1097,6 +1108,7 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	}
 	if (state_ != State::Running) {
 		out.status = FrameStatus::NotRunning;
+		out.scene_drawn = last_scene_drawn_ = draws_scene(input.hud_toggles);
 		last_perf_ = out.perf;
 		return out;
 	}
@@ -1132,13 +1144,17 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	// end of the drain, and the updates the drain ran, a paused one too [orig:
 	// @0x52ba4f; @0x52ba9b..0x52baa1].
 	accumulator_.record_frame_work(world::frame_tick_count_ms() - frame_start_ms, out.perf.updates);
+	// The render callback reads its view word after the drain and draws the scene frame or the
+	// status page in its place (draws_scene); each arm's render counts.
+	out.scene_drawn = last_scene_drawn_ = draws_scene(input.hud_toggles);
 	// Each update counted toward the 62-update second inside the loop; this
 	// frame's render counts now.
 	count_rendered_frame();
 	// Each of the first frames drawn after the mission start counts down and
-	// raises the re-base flag [orig: Render_ProcessMainSceneFrame
-	// @0x5caeff..0x5caf0e].
-	if (start_rebase_frames_ > 0) {
+	// raises the re-base flag, the scene frame's tail: a frame the status page
+	// stands in for counts none down [orig: Render_ProcessMainSceneFrame
+	// @0x5caeff..0x5caf0e, the scene arm @0x521CE8 alone].
+	if (out.scene_drawn && start_rebase_frames_ > 0) {
 		--start_rebase_frames_;
 		rebase_clock_ = true;
 	}
@@ -1158,10 +1174,13 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		rebase_clock_ = true;
 	}
 	last_perf_ = out.perf;
-	// The frame's render follows the drain: the cine pass, then the HUD pass
+	// The frame's render follows the drain: the scene frame's cine pass, then its HUD pass;
+	// the status page runs neither, so under it no cine ends and the radar ages nothing
 	// [orig: Game_MainLoop's Game_ProcessMainFrame drain, then the render's
-	// cine pass and HUD_RenderAllOverlays].
-	if (!out.terminal()) {
+	// cine pass and HUD_RenderAllOverlays; Render_ProcessMainSceneFrame @0x5CADFC ->
+	// Cine_RenderOrEndPlayback, @0x5CAD04 -> HUD_RenderAllOverlays, the scene arm
+	// @0x521CE8 alone].
+	if (!out.terminal() && out.scene_drawn) {
 		step_cine_render_frame();
 		step_hud_radar_frame();
 	}

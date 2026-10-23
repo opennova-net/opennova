@@ -41,7 +41,10 @@ using namespace sim_internal;
 
 
 void Simulation::advance_facial_presentation(const Vector3 &p_camera) {
-    if (!kernel_ || !p_camera.is_finite()) return;
+    // The scene frame's pass: its counter (the facial update's 64-frame look cadence) steps
+    // on a frame that draws the scene alone, never under the status page (engine
+    // world::FacialSystem::compile_draws carries the witness).
+    if (!kernel_ || !p_camera.is_finite() || !session_.last_scene_drawn()) return;
     std::vector<opennova::world::FacialDraw> rows;
     int32_t camera[3];
     fixed3_from_godot(p_camera, camera);

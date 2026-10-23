@@ -108,7 +108,8 @@ void MissionAudio::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("advance_dialog_tick"), &MissionAudio::advance_dialog_tick);
 	ClassDB::bind_method(D_METHOD("resolve_dialog_wave", "wav_id"), &MissionAudio::resolve_dialog_wave);
 	ClassDB::bind_method(D_METHOD("play_wac_wave", "filename"), &MissionAudio::play_wac_wave);
-	ClassDB::bind_method(D_METHOD("sync_script_voice"), &MissionAudio::sync_script_voice);
+	ClassDB::bind_method(D_METHOD("follow_script_voice"), &MissionAudio::follow_script_voice);
+	ClassDB::bind_method(D_METHOD("update_script_voice"), &MissionAudio::update_script_voice);
 	ClassDB::bind_method(D_METHOD("_on_script_voice_finished", "serial", "player_id"),
 			&MissionAudio::_on_script_voice_finished);
 	ClassDB::bind_method(D_METHOD("set_time_of_day_hhmm", "hhmm"), &MissionAudio::set_time_of_day_hhmm);
@@ -720,7 +721,7 @@ bool MissionAudio::play_wac_wave(const String &p_filename) {
 	const Ref<Simulation> sim = _simulation();
 	if (sim.is_valid()) {
 		const bool loaded = sim->play_script_wave(p_filename);
-		sync_script_voice();
+		follow_script_voice();
 		return loaded;
 	}
 	// Standalone tooling shares the same interrupt-before-load rule.
@@ -776,7 +777,7 @@ void MissionAudio::set_time_of_day_hhmm(double p_hhmm) {
 }
 
 void MissionAudio::advance_ticks(int64_t p_logic_tick) {
-	sync_script_voice();
+	follow_script_voice();
 	if (mixer_.is_null()) {
 		return;
 	}
@@ -821,7 +822,9 @@ void MissionAudio::tick(const Vector3 &p_camera_pos, double p_delta) {
 	// The frame this pass mixes renders: the next dialog tick starts a fresh
 	// line's hold (runtime/audio/dialog_queue DialogQueue::tick).
 	dialog_frame_rendered_ = true;
-	sync_script_voice();
+	// The scripted voice's device follows its channel here; its update is the scene frame's
+	// (update_script_voice).
+	follow_script_voice();
 	int writes = 0;
 	if (mixer_.is_null()) {
 		perf_markers_ = 0;

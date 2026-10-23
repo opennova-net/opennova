@@ -700,6 +700,10 @@ public:
 	// clients retain the authority's already-applied gameplay state.
 	// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 — cb(entity, 4, 0) @0x42ebf5]
 	void apply_received_effects(world::World &world);
+	// The scripted voice's decoded-row anchor (a joiner's 0x2D speaker), for the scene
+	// frame's voice update ahead of ScriptVoiceChannel::frame: its live position, or the
+	// voice's stop once the row is gone or dead (client_effects.cpp carries the witness).
+	void track_voice_anchor(world::World &world) const;
 
 	// THE COMMAND MAP'S SQUAD AND WAYPOINT SENDS (client_squad.cpp): each
 	// queues its one reliable C2S (a joiner on its held one-shot queue, the

@@ -84,10 +84,9 @@ public:
 	void set_sequence(int64_t p_sequence);
 	int64_t get_sequence() const;
 
-	// The HUD toggles this frame's input rows drive (the shell's): the world reads their
-	// status view after the session's drain, where retail's render callback reads its word
-	// (GameWorld's scene gate; engine hud_server_status.h main_frame_draws_scene). Null when
-	// the shell has none.
+	// The HUD toggles this frame's input rows drive (the shell's): the session reads their
+	// status view after its drain, where retail's render callback reads its word (engine
+	// inmatch::Session::draws_scene; FrameInput::hud_toggles). Null when the shell has none.
 	void set_hud_toggles(const Ref<HudToggles> &p_toggles) { hud_toggles_ = p_toggles; }
 	Ref<HudToggles> get_hud_toggles() const { return hud_toggles_; }
 
@@ -125,6 +124,7 @@ private:
 	int64_t tick_us_ = 0;
 	String error_;
 	uint32_t frame_stamp_ms_ = 0;
+	bool scene_drawn_ = true;
 
 protected:
 	static void _bind_methods();
@@ -140,6 +140,9 @@ public:
 	// The frame lock's last clock read when it slept, else 0 (engine inmatch::FrameOutcome::
 	// frame_stamp_ms); C++ only.
 	uint32_t get_frame_stamp_ms() const { return frame_stamp_ms_; }
+	// The render callback's choice after the drain: the scene frame, or the status page in its
+	// place (engine inmatch::Session::draws_scene); C++ only, GameWorld's scene gate reads it.
+	bool is_scene_drawn() const { return scene_drawn_; }
 
 	void assign(const opennova::inmatch::FrameOutcome &p_value);
 };

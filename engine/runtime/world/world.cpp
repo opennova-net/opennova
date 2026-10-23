@@ -706,7 +706,8 @@ void World::run_entity_pass(const TickContext &ctx) {
     // latest-intent rows on the same logic clock so old entity lifetimes cannot
     // occupy mailbox admission indefinitely.
     out.sound_emitters.prune(logic_tick);
-    script.voice.refresh(*this);
+    // The scripted voice's anchor reset and validation are the scene frame's, never the
+    // update's (ScriptVoiceChannel::frame).
     lap.mark(devtools::Slot::SIM_WORLD_HOUSEKEEPING);
 }
 

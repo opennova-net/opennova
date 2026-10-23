@@ -199,7 +199,14 @@ public:
 	// uses the same interruption rule and tolerates a missing .wav extension.
 	// Returns true if the file resolved and played.
 	bool play_wac_wave(const String &p_filename);
-	void sync_script_voice();
+	// The scripted voice's device follows the channel as it stands (a start's clip at its
+	// start gain, a stop), with no anchor reset: after a command, and on every frame.
+	void follow_script_voice();
+	// The scene frame's voice update: the validation (a released channel completes), the
+	// anchor reset, then the stream's distance gain and position. GameWorld's script_voice
+	// row runs it on a frame that draws the scene alone; under the status page the busy word
+	// holds (engine world::ScriptVoiceChannel::frame carries the witness).
+	void update_script_voice();
 	// Pump for the mission clock; HHMM like MissionEnvironment.time_of_day.
 	void set_time_of_day_hhmm(double p_hhmm);
 	// World-driven eval clock: the world tick pushes the sim's logic tick after each
@@ -260,6 +267,7 @@ private:
 	void _on_script_voice_finished(int64_t p_serial, int64_t p_player_id);
 	void _install_voice_resolver();
 	void _stop_script_voice(bool p_report_finished);
+	void _follow_script_voice(const opennova::world::ScriptVoiceChannel::Frame &p_frame);
 	Ref<AudioStreamWAV> _resolve_wav(const String &p_filename);
 	Ref<AudioStreamWAV> _resolve_candidate_stream(const Ref<AmbientLayer> &p_descriptor);
 	Ref<AudioStreamWAV> _validate_candidate_stream(int p_candidate_id,
@@ -343,6 +351,9 @@ private:
 	ObjectID wac_voice_id_;
 	ObjectID script_voice_id_;
 	opennova::world::ScriptVoiceChannel::Frame script_voice_frame_;
+	// The device ran the voice's clip out (its `finished`): the physical channel's release,
+	// which the next scene frame's validation reads (update_script_voice).
+	bool script_voice_released_ = false;
 	HashMap<String, Ref<AudioStreamWAV>> wac_wav_cache_; // filename(lower) -> stream (or null)
 	int64_t perf_tick_us_ = 0;
 	int perf_markers_ = 0;

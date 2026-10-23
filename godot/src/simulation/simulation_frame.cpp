@@ -259,6 +259,10 @@ opennova::inmatch::FrameInput Simulation::begin_session_frame(
 		// The frame's updates, the first included, pull their own input frames
 		// from the shell's device router (engine inmatch::TickInputSource).
 		input.tick_source = p_input->tick_source();
+		// The shell's HUD toggles, whose view word the session reads after its drain (engine
+		// inmatch::Session::draws_scene); the frame input holds them through the advance.
+		const Ref<HudToggles> toggles = p_input->get_hud_toggles();
+		if (toggles.is_valid()) input.hud_toggles = &toggles->state();
 	}
 	if (input.camera.listener_valid) {
 		set_sound_listener(Vector3(input.camera.position[0],
@@ -279,6 +283,10 @@ opennova::inmatch::FrameInput Simulation::begin_session_frame(
 						: kDefaultDialogueLevel);
 	}
 	return input;
+}
+
+bool Simulation::session_draws_scene(const Ref<HudToggles> &p_toggles) const {
+	return session_.draws_scene(p_toggles.is_valid() ? &p_toggles->state() : nullptr);
 }
 
 Ref<MissionFrameOutcome> Simulation::advance_session_frame(
