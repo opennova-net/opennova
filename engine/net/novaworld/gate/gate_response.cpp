@@ -74,6 +74,13 @@ bool parse_ipv4_octets(const std::string &text, std::array<uint8_t, 4> &out) {
 // post-ip/port requirement.
 bool gate_response_parse(std::string_view body, GateResponse &out) {
 	out = GateResponse{};
+	// The parse ends at the first NUL: the line reader stops a line there, and a read that
+	// starts on it fails, which ends the loop. The live gate's reply ends with one.
+	// [orig: Napi_ReadLineFromBuffer @0x616CC0 - a NUL where a line starts @0x616CEE returns -2
+	//  @0x616D01, a line's copy stops at a NUL @0x616D17 and the next read is left on it
+	//  @0x616D49..0x616D52; CNapiFileReader_ReadAndTokenizeLine @0x6336E0 - -1 @0x633737;
+	//  CNapiGateManager_ProcessResponse @0x4CED20 - the loop's test @0x4CF4E7]
+	body = body.substr(0, body.find('\0'));
 
 	size_t i = 0;
 	while (i < body.size()) {

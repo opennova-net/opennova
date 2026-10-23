@@ -369,6 +369,36 @@ bool check_empty_returns_false() {
 	return true;
 }
 
+// The live gate's reply is its CRLF lines and one NUL (LN S1b, 2026-10-23). The parse ends at the
+// first NUL: a trailing one changes nothing, and no byte past one is read, a line it cuts read up
+// to it (D-NET-NEW-L9-33).
+// [orig: Napi_ReadLineFromBuffer @0x616CC0 - @0x616CEE / @0x616D01, @0x616D17, @0x616D49..0x616D52;
+//  CNapiFileReader_ReadAndTokenizeLine @0x6336E0 - @0x633737; CNapiGateManager_ProcessResponse
+//  @0x4CED20 - @0x4CF4E7]
+bool check_parse_ends_at_nul() {
+	const std::string text = "GATEPROTOCOL \"1.0\"\r\n"
+			"VAR \"LobbyName\" \"jop_2_consumer\"\r\n"
+			"VAR \"udpnovaworld\" \"198.51.100.7:64206\"\r\n"
+			"VAR \"TimeOnGateServer\" \"Fri Oct 23 21:02:43 2026\"\r\n";
+	std::string live = text;
+	live.push_back('\0');
+	opennova::GateResponse bare;
+	opennova::GateResponse ended;
+	if (!expect(opennova::gate_response_parse(text, bare) && opennova::gate_response_parse(live, ended),
+			"a reply parses with its trailing NUL and without")) return false;
+	if (!expect(ended.var_count == 2 && bare.var_count == 2 && ended.lobby_name == "jop_2_consumer" &&
+			ended.udp_novaworld == std::vector<std::string>{"198.51.100.7:64206"},
+			"the trailing NUL adds nothing")) return false;
+	std::string cut = "VAR \"LobbyName\" \"jop_2_consumer\"\r\nVAR \"UDPCODE1\" ab";
+	cut.push_back('\0');
+	cut += "c\r\nVAR \"udpnovaworld\" \"198.51.100.7:64206\"\r\n";
+	opennova::GateResponse r;
+	if (!expect(opennova::gate_response_parse(cut, r) && r.var_count == 2 && r.udp_code1 == "ab" &&
+			r.udp_novaworld.empty(),
+			"the parse ends at a NUL, the line it cuts read up to it")) return false;
+	return true;
+}
+
 } // namespace
 
 int main() {
@@ -385,6 +415,7 @@ int main() {
 	if (!check_every_udpnovaworld_line_is_kept()) return 1;
 	if (!check_string_fields_are_cut()) return 1;
 	if (!check_empty_returns_false()) return 1;
+	if (!check_parse_ends_at_nul()) return 1;
 	std::printf("OK: gate response KV parser (quoted + unquoted; 19 retail VARs + CUS/PVT)\n");
 	return 0;
 }

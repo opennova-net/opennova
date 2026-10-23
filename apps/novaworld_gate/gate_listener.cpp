@@ -72,8 +72,21 @@ namespace {
 // zone is this service's choice, UTC; the witness's is unrecorded). An alias
 // tag answers in its own title's shape: the JO demo's live reply is
 // unrecorded, so its tag keeps the POST pair, this service's address in the
-// startupurl and no TimeOnGateServer, though it plays in JO's lobby. No reply
-// ends with a NUL byte (the live one's length leaves that open).
+// startupurl and no TimeOnGateServer, though it plays in JO's lobby.
+//
+// Every reply's text goes out with one NUL after it, the live gate's C string
+// with its terminator: each of the live JO gate's replies in the LN S1b record
+// (2026-10-23) is its CRLF lines and a single trailing NUL. The client keeps the
+// datagram's bytes whole, NUL included, and its line reader ends the parse at the
+// first NUL it meets, so a reply with no NUL parses alike [orig:
+// CNapiGateManager_ProbeThreadProc @0x6339E0 - the received length decrypted (the call
+// @0x633BCC) and handed whole to the buffer (the call @0x633BE3);
+// CNapiGateManager_SetResponseBuffer @0x633650 - the received length kept
+// @0x6336C6, its own NUL past it @0x6336BC; Napi_ReadLineFromBuffer @0x616CC0 - a
+// NUL where a line starts @0x616CEE returns -2 @0x616D01;
+// CNapiFileReader_ReadAndTokenizeLine @0x6336E0 - the call @0x633729, -1 @0x633737;
+// CNapiGateManager_ProcessResponse @0x4CED20 - the loop's read @0x4CF4DE, which goes
+// on only while it is not negative @0x4CF4E7].
 //
 // Every address it names comes from the config or the lobby instances' rows,
 // never from a port another listener bound (the lobbies and web run in other
@@ -444,7 +457,9 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 			fields.time_on_gate_server = gate_clock_text(std::time(nullptr));
 		const std::string body = build_gate_response(fields);
 
+		// The text and its terminating NUL (the live gate's reply, LN S1b).
 		std::vector<uint8_t> reply_inner(body.begin(), body.end());
+		reply_inner.push_back(0);
 		opennova::nwu_decrypt(reply_inner.data(), reply_inner.size(),
 		                      opennova::GATE_NWU_KEY);
 		// Wrap in the LSB-scatter CRC envelope retail expects.

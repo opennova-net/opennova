@@ -18,7 +18,8 @@
 // in asctime's shape after the reflected pair); the JO demo's alias of JO's tag,
 // whose live reply is unrecorded, gets JO's lobby in the reply this gate always
 // sent, byte for byte; OpenNova's tag (its row's own, a JO row) gets its row's
-// values in JO's live shape; a tag no row answers to gets nothing. A
+// values in JO's live shape; a tag no row answers to gets nothing. Every
+// reply's text ends with one NUL, as the live gate's does. A
 // configured GLSVSS leg (ONNET_GLSVSS_*) stands in for a row with none, never
 // for DFX2's own.
 //
@@ -188,7 +189,11 @@ int expect_lobby(uint16_t port, const std::string &tag, const Lobby &lobby) {
 		std::fprintf(stderr, "  no gate reply to %s from :%u\n", tag.c_str(), port);
 	TEST_EXPECT(got.has_value());
 	const std::string want = expected_reply(port, got->client_port, lobby);
+	// The text ends with one NUL, its only one, as each of the live JO gate's replies does
+	// (LN S1b, 2026-10-23; D-NET-NEW-L9-33).
 	std::string text = got->text;
+	TEST_EXPECT(!text.empty() && text.back() == '\0' && text.find('\0') == text.size() - 1);
+	text.pop_back();
 	if (lobby.witnessed) {
 		const std::string head = "VAR " + std::string(1, '"') + "TimeOnGateServer" +
 				std::string(1, '"') + " " + std::string(1, '"');
