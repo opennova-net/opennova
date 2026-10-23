@@ -977,10 +977,10 @@ void JoinerRole::pump() {
 	//  Player_BuildTag0CInputBody @0x42C46F..0x42C4A3]
 	// A pass of the mission start's final wait for the S2C 0x0F (judged here, ahead of its
 	// receive: the pass whose receive takes the 0x0F is the wait's too) runs the receive and the
-	// send alone: no input pass, no main frame. Its receive's writes on the world land (the
-	// handlers' writes: L's birth, its record, the 0x0F's pose, the mirrors below); the entity
-	// update, the World's tick and the frame's later legs wait for the game loop's first frame,
-	// whose net frame builds the first 0x0C from L as the 0x0F left it (D-NET-NEW-L2-48).
+	// send alone: no input pass, no main frame. Its receive's writes land (L's birth, its record,
+	// the 0x0F's pose, the mirrors, the drains, the session words); the vehicle poll, the proxies,
+	// the World's tick and the later legs wait for the game loop's first frame, whose net frame
+	// builds the first 0x0C from L as the 0x0F left it (D-NET-NEW-L2-48).
 	// [orig: Game_StartMission @0x524360 - the final wait @0x526295..0x5262E5: Input_ResetKeyQueue
 	//  @0x526288 ahead of it, the ESC read @0x5262A2..0x5262AD, CNapiNetwork_PumpManagerReceive
 	//  @0x5262B4, CNapiNetwork_PumpClientProtocolRecv @0x5262BE, CNapiNetwork_PumpClientProtocolSend
@@ -1034,16 +1034,11 @@ void JoinerRole::pump() {
 	//  call @0x5260C1].
 	if (!had_local && local_spawned_) lp.latch_attack_defend_role(rt.game_type());
 	lap.mark(devtools::Slot::SIM_CLIENT_MIRROR);
-	// The final wait's pass ends with its send (final_wait_pass above).
-	if (final_wait_pass) {
-		++now_tick_;
-		return;
-	}
 	// The vehicle screen's poll, after the client net frame and ahead of the
 	// entity update, its 0x42 left for the next send boundary (vehicle_menu.h).
 	// [orig: Game_ProcessMainFrame -- Client_ProcessNetworkFrame @0x526692,
 	//  VehicleMenu_PollAvailability @0x5266A1, Entity_UpdateAllEntities @0x52674B]
-	rt.poll_vehicle_menu(world, kernel.items_table());
+	if (!final_wait_pass) rt.poll_vehicle_menu(world, kernel.items_table());
 
 	// Received projectile/reload gameplay is a live input to this frame's
 	// entity/round/weapon pumps; applying it here is the retail recv-before-actions
@@ -1056,7 +1051,7 @@ void JoinerRole::pump() {
 	//  the Weapon_UpdateAllProjectiles call @0x4C223A, the Entity_BuildProximityLists_Pool01
 	//  call @0x4C240A; Projectile_RaycastProximitySlots @0x4E5340 (the slot gate on the
 	//  copy @0x4E55E6..0x4E575A, g_DynProxEntity @0x4E5760)]
-	sync_wire_collision_proxies_live();
+	if (!final_wait_pass) sync_wire_collision_proxies_live();
 	lap.mark(devtools::Slot::SIM_CLIENT_PROXIES);
 	sync_replica_weapon_slots(rt.state(), world, self_wire_handle());
 	apply_gameplay_events();
@@ -1083,6 +1078,14 @@ void JoinerRole::pump() {
 	if (rt.mp_attributes_revision() != mp_attributes_revision_seen_) stamp_mission_rules();
     materializer_.fill_minefield_actors(rt.state(), self_wire_handle(), world.minefields.remote_actors);
 	stamp_spectator_motor(kernel, runtime.get(), /*joiner=*/true); // this frame's receive folded
+	// A final-wait pass ends here: the handler writes above land in it, as the client table's
+	// handlers run in the wait's receive, ahead of the first frame's input (a 0x0F's cease fire).
+	// [orig: Game_StartMission @0x524360 - @0x5262BE ahead of @0x5262DA; NapiNPClientMsg_0x00F
+	//  @0x42E200 (@0x42E316); Game_ProcessMainFrame @0x5263F0 - Input_ProcessFrame @0x52661D]
+	if (final_wait_pass) {
+		++now_tick_;
+		return;
+	}
 	// The replica pool-0 rows through the own body's slot take their visits inside the
 	// World's entity pass, after its proximity build and ahead of its pool-0 walk. Each
 	// visited person's proxy then takes its live Position and its live dead bit (a death

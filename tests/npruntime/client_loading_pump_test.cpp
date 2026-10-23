@@ -1026,6 +1026,59 @@ bool run_the_final_wait_end_ends_the_mode_init() {
 			"final wait end: the game loop's ticks end nothing");
 }
 
+// D-NET-NEW-L2-48 (V-ROLL-AP's order note): the pass whose receive takes the S2C 0x0F is the
+// final wait's, and what its receive's handlers write lands in that pass, as retail's
+// handlers write it inside the wait's receive; the game loop's first frame (its input pass
+// ahead of its net frame) then reads it. A 0x0F carrying the cease-fire flag stores
+// g_InCeaseFire, the fire row's gate; a 0x34 behind it plays its sound; a 0x25 raises
+// g_RoundOver. The first game-loop frame applies none of them a second time.
+// [orig: Game_StartMission @0x524360 - CNapiNetwork_PumpClientProtocolRecv @0x5262BE ahead
+//  of the send @0x5262DA; NapiNPClientMsg_0x00F @0x42E200 - `test cl, 8` @0x42E311,
+//  g_InCeaseFire @0x42E316; NapiNPClientMsg_PlaySoundByName @0x4283A0;
+//  NapiNPClientMsg_GameReset @0x422800 - g_RoundOver @0x422849; Game_ProcessMainFrame
+//  @0x5263F0 - Input_ProcessFrame @0x52661D ahead of Client_ProcessNetworkFrame @0x526692;
+//  Input_HandleActionBinding_0 @0x4E0420 - g_InCeaseFire @0x4E07C2]
+bool run_the_0x0f_pass_lands_its_handler_writes() {
+	const auto pin_sounds = [](const mission::MissionKernel &kernel) {
+		std::size_t n = 0;
+		for (const world::ScriptSoundEvent &event : kernel.world.out.script_sounds)
+			if (event.name == "PIN_SOUND") ++n;
+		return n;
+	};
+	PlaySoundCommand sound;
+	sound.sound_name = "PIN_SOUND"; // flag 0: the flat play
+	std::vector<uint8_t> world_state(23 + kWorldStateAmmoPoolCount * 4 + 4, 0);
+	world_state[22] = 0x08; // the game flags' cease-fire bit
+	{
+		RoleHarness h;
+		if (!expect(drive_to_the_final_wait(h, 0, {self_spawn_record()}),
+				"0x0F pass writes: the final wait runs"))
+			return false;
+		(void)h.frame({first_grant(), make_protocol_message(0x0F, world_state),
+				make_protocol_message(s2c::PLAY_SOUND, encode_play_sound(sound))});
+		if (!expect(h.client.in_game_loop() && h.role.take_final_wait_end(),
+				"0x0F pass writes: the pass is the final wait's"))
+			return false;
+		if (!expect(h.kernel->world.rules.cease_fire,
+				"0x0F pass writes: the 0x0F's cease fire stands for the first frame's fire gate"))
+			return false;
+		if (!expect(pin_sounds(*h.kernel) == 1, "0x0F pass writes: the 0x34 plays in the pass"))
+			return false;
+		(void)h.frame();
+		if (!expect(pin_sounds(*h.kernel) == 1,
+				"0x0F pass writes: the first game-loop frame plays it no second time"))
+			return false;
+	}
+	RoleHarness h;
+	if (!expect(drive_to_the_final_wait(h, 0, {self_spawn_record()}),
+			"0x0F pass writes: the final wait runs (the 0x25)"))
+		return false;
+	(void)h.frame({first_grant(), make_protocol_message(0x0F, world_state),
+			make_protocol_message(s2c::GAME_RESET, {})});
+	return expect(h.client.in_game_loop() && h.kernel->world.match.outcome().ended,
+			"0x0F pass writes: the 0x25's round-over latch lands in the pass");
+}
+
 // The main frame's 62-frame quality fold steps in the game loop's frames alone and starts
 // from the mission start's zero: no fold runs in the join's waits (a host scalar landing
 // there moves no level), the first game-loop frame folds at once, the next fold is 62
@@ -1798,6 +1851,7 @@ int main() {
 	ok = run_a_bodyless_joiner_pings() && ok;
 	ok = run_the_release_pass_bears_l_and_the_first_frame_ships_its_uplink() && ok;
 	ok = run_the_final_wait_end_ends_the_mode_init() && ok;
+	ok = run_the_0x0f_pass_lands_its_handler_writes() && ok;
 	ok = run_the_quality_fold_starts_with_the_game_loop() && ok;
 	ok = run_the_link_indicators_step_in_the_main_frame_alone() && ok;
 	ok = run_the_net_readout_records_each_frame() && ok;
