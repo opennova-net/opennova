@@ -2773,10 +2773,15 @@ func test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload() -> void:
 
 
 
-# The joiner's body takes the mission start's Player_InitPlayer class word: the class byte
-# of the side its team names from the join's character profile (team 1 or 3 the first
-# side), whatever class the shell's pre-spawn kit apply carried (the engine's
-# JoinerRole::stamp_init_player_class and spawn_loadout_plan carry the witness).
+# The joiner's body takes the mission start's Player_InitPlayer class word at its birth: the
+# class byte of the side its team names from the join's character profile (team 1 or 3 the
+# first side), whatever class the shell's pre-spawn kit apply carried. The body is born in the
+# mission start, ahead of the host's answer to its 0x2F (D-NET-NEW-L2-52), so the S2C 0x5A's
+# handler then stores its grant word on the body and on its side's word: the class the joiner's
+# 0x2F submitted and the host granted back. No weapon profile is loaded here, so that 0x2F
+# carries the fresh record's side class, 8. Neither is the pre-spawn apply's 5 (the engine's
+# JoinerRole::stamp_init_player_class, the joiner's 0x5A grant leg and spawn_loadout_plan
+# carry the witness).
 func test_joiner_body_takes_its_sides_class_word_over_the_prespawn_apply() -> void:
 	var mission := _combat_mission()
 	var host := Simulation.new()
@@ -2809,10 +2814,8 @@ func test_joiner_body_takes_its_sides_class_word_over_the_prespawn_apply() -> vo
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
 		return
-	var team := joiner.get_local_player_team()
-	var expected := 6 if team == 1 or team == 3 else 7
-	assert_eq(joiner.get_local_player_class(), expected,
-			"the body's class is its team's side word, not the pre-spawn apply's 5")
+	assert_eq(joiner.get_local_player_class(), 8,
+			"the body's class is the 0x5A's grant word past the side word, not the pre-spawn apply's 5")
 
 
 
