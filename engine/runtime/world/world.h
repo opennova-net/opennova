@@ -968,6 +968,12 @@ struct WorldOutbox {
     // witness); the joiner role drains them into its send queue. The authority
     // never fills it.
     std::vector<uint16_t> detach_requests;
+    // The local player's C2S 0x1D stance requests the sim raised past the input
+    // dispatcher's stance rows, by action id, in raise order: the mount request's crouch
+    // (0xA9) for a ForceCrouch def (player_weapon.cpp mount_queue_switch_out carries the
+    // witness). The role queues each on its own client connection as the stance key's
+    // (Role::flush_stance_requests); a role with no client connection drops them.
+    std::vector<uint16_t> stance_requests;
     // A client's C2S 0x0F entity requests the movers raised, in raise order, by World handle
     // (the ewep mover's stale-ground pair, ai_system.cpp carries the witness); the joiner role
     // drains them into its carrier-repair queue, its own body L by its wire handle. The

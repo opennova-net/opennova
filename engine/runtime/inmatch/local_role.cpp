@@ -54,8 +54,10 @@ void LocalRole::run_tick(const TickInput &) {
 	// [orig: Game_ProcessMainFrame -- Camera_ComputeThirdPersonView @0x526781,
 	//  the WeaponAction_ProcessAllEntities call @0x526786]
 	kernel.world.pump_weapon_actions();
-	// Its reloads have no dispatcher to reach out of a session.
+	// Its reloads have no dispatcher to reach out of a session, nor its mount requests'
+	// 0x1Ds a client connection.
 	kernel.world.out.weapon_reloads.clear();
+	flush_stance_requests();
 	tail.restart();
 	kernel.resolve_new_infantry_adm_ids();
 	tail.mark(devtools::Slot::SIM_ADM_RESOLVE);

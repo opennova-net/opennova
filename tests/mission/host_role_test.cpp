@@ -1410,6 +1410,23 @@ int main() {
 		role.run_tick(tick_input(0));
 		CHECK(lp.stance_latch() == 0 && !lp.input.prone && !lp.input.crouch);
 		CHECK(body_stance() == w::InfantryState::Stance::kStand);
+		// A stance request the sim raised (a ForceCrouch def's mount request: the
+		// crouch's 0xA9) rides the same path, queued on the host's own client within the
+		// frame that raised it, past none of the key's gates.
+		// [orig: Player_MountWeaponSlot @0x4DFA40 - CNapiNetwork_QueueReliableMessage(0x1D,
+		//  1, 0) @0x4DFC30]
+		kernel.world.out.stance_requests.push_back(0xA9);
+		role.run_tick(tick_input(0));
+		CHECK(kernel.world.out.stance_requests.empty());
+		CHECK(lp.stance_latch() == 0);
+		CHECK(host.host_loop.c2s_pending() == 1);
+		role.run_tick(tick_input(0));
+		CHECK(lp.stance_latch() == 1 && lp.input.crouch && !lp.input.prone);
+		CHECK(body_stance() == w::InfantryState::Stance::kCrouch);
+		CHECK(role.request_stance(0));
+		role.run_tick(tick_input(0));
+		role.run_tick(tick_input(0));
+		CHECK(lp.stance_latch() == 0 && body_stance() == w::InfantryState::Stance::kStand);
 		// The host's chat line, emote and radio call take the same path as
 		// its 0x1D: queued on its own client connection at the press, sent by
 		// that frame's client frame, dispatched by the next frame's server

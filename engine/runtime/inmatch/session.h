@@ -394,6 +394,13 @@ public:
 		(void)stance;
 		return false;
 	}
+	// One C2S 0x1D stance request the sim raised (World::out.stance_requests), by action id,
+	// queued as the stance key's on the role's client connection with none of the key's
+	// gates; a role with no client connection sends nothing. False = nothing sent.
+	virtual bool queue_stance_action(uint16_t action_id) {
+		(void)action_id;
+		return false;
+	}
 	virtual void run_tick(const TickInput &input) = 0;
 	virtual bool session_lost(SessionError &error) const { (void)error; return false; }
 	virtual bool reset_to_baseline(SessionError &error) = 0;
@@ -503,6 +510,11 @@ public:
 	// console-queued one, past their rows' head: the role's C2S 0x1D
 	// (send_stance_request). 0 stand / 1 crouch / 2 prone. True = sent.
 	bool request_stance(int stance);
+	// The sim's raised stance requests (World::out.stance_requests), each through
+	// queue_stance_action in raise order, the list emptied: the input drain runs it past
+	// each record, and each role at its frame's legs that raise them (the receive's 0x5A
+	// apply, the tick, the weapon walk).
+	void flush_stance_requests();
 	// One drained record, dispatched by its code (drain_input_events): the arms the role
 	// owns, every other code to the embedder's leg its origin names. The pause row (catalog
 	// row 70, code 25, flags 0x05000800: no bit 0, so it runs under the pause) is the role's

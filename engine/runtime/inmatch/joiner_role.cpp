@@ -1165,6 +1165,9 @@ void JoinerRole::pump() {
 	// (world/infantry_death.cpp carries the witness).
 	for (const uint16_t target : world.out.detach_requests) (void)rt.queue_detach_packet(target);
 	world.out.detach_requests.clear();
+	// The mount requests' 0x1Ds the receive (a 0x5A apply) and the tick raised, in raise
+	// order (world/player_weapon.cpp mount_queue_switch_out carries the witness).
+	flush_stance_requests();
 	// The movers' C2S 0x0F requests, raised in the entity update behind this frame's send
 	// block, queue for the next boundary in raise order; the own body L asks by its wire handle
 	// H, the one slot retail's body is (world/ai_system.cpp's ewep mover carries the witness).
@@ -1276,6 +1279,7 @@ void JoinerRole::pump() {
 		tick_local_weapon();
 		lp.tick_medic_cooldown(rt.local_player_dead()); // Player_UpdatePerFrame's cooldown leg
 	}
+	flush_stance_requests(); // the weapon walk's mount requests (a UseGun staging, an auto switch)
 	lap.mark(devtools::Slot::SIM_CLIENT_PLAYER);
 	++now_tick_;
 }

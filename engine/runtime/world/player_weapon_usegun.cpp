@@ -106,11 +106,15 @@ void queue_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w,
 	// leg: a refused or gated word stays stored with nothing retained.
 	// [orig: Entity_AttachToUseGunSlot @0x546B80 (the Player_MountWeaponSlot call @0x546C38);
 	//  Entity_DetachFromVehicle @0x4355F0 (@0x43565F)]
+	// An attach's or swap's mounted slot is a gun's; a detach's switch back mounts a personal
+	// slot [orig: Entity_AttachToUseGunSlot @0x546B80 (@0x546C38, the owner @0x546C73);
+	// Entity_DetachFromVehicle @0x4355F0 (@0x43565F)].
+	const bool gun_slot = w.usegun_switch == LocalUseGunSwitch::kAttach ||
+			w.usegun_switch == LocalUseGunSwitch::kSwap;
 	mount_queue_switch_out(world, w, local_weapon_view(world, w), same_category,
-			world.tables.weapons.by_index(w.usegun_switch == LocalUseGunSwitch::kAttach ||
-							w.usegun_switch == LocalUseGunSwitch::kSwap
-					? w.usegun_pending_weapon_adm
-					: w.usegun_saved_adm));
+			world.tables.weapons.by_index(gun_slot ? w.usegun_pending_weapon_adm
+			                                       : w.usegun_saved_adm),
+			/*personal_slot=*/!gun_slot);
 }
 
 void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {

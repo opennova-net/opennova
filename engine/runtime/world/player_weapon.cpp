@@ -175,9 +175,13 @@ WeaponSwitchGates local_weapon_switch_gates(const World &world,
 // category, a forced SWITCHFROM, refused over a running SWITCHTO / SWITCHFROM, whose queue
 // lowers the view (the saved-game load word is zero in a session); then the six view-bias
 // words clear, and the first-person camera interp binds the mounted slot, engaging an optic
-// def's scope while the byte is set. All of it at the request, a refused or gated queue's
-// included: the next SWITCHFROM / SWITCHRANK completion commits the stored word and writes
-// none of it (commit_mount's view_writes).
+// def's scope while the byte is set. Ahead of the bind a ForceCrouch def sends the stance
+// key's crouch, a reliable C2S 0x1D of action id 0xA9, through the seat-flag query: an
+// OnlyScoped def's only while the mounted slot's owner is not the local player (a gun's
+// slot, whose owner its attach writes past the mount; `personal_slot` false) or the
+// promoted byte, as written above, is set. All of it at the request, a refused or gated
+// queue's included: the next SWITCHFROM / SWITCHRANK completion commits the stored word and
+// writes none of it (commit_mount's view_writes).
 // [orig: Player_MountWeaponSlot @0x4DFA40 - AbsorbPitch @0x4DFA7A..0x4DFA86, Pitch = 0
 //  @0x4DFAA9, the offset @0x4DFAB3..0x4DFAB7, else 0 @0x4DFABE; @0x4DFB16; ForceScoped
 //  @0x4DFB23..0x4DFB2F, g_WeaponScopeActive = 1 @0x4DFB31, dword_B76808 = Def+0xA0
@@ -186,12 +190,16 @@ WeaponSwitchGates local_weapon_switch_gates(const World &world,
 //  @0x4DFB7B..0x4DFB8B, the interp test @0x4DFB8D..0x4DFB93, WeaponSlot_TryQueueSwitchRank
 //  @0x4DFB96, WeaponSlot_ForceQueueSwitchFrom @0x4DFB9E, its return @0x4DFBA6, nextAction == 7
 //  @0x4DFBAA..0x4DFBBA, dword_A892C8 @0x4DFBBC, the lower @0x4DFBC5, the bias clear
-//  @0x4DFBCF..0x4DFBE8, the bind and engage @0x4DFC35..0x4DFC9A; WeaponAction_ProcessFrame
+//  @0x4DFBCF..0x4DFBE8, Entity_CheckWeaponSeatFlags(slot, 0x40000) @0x4DFBF2..0x4DFC02 and the
+//  0x1D @0x4DFC04..0x4DFC30, the bind and engage @0x4DFC35..0x4DFC9A; Entity_CheckWeaponSeatFlags
+//  @0x540D00 (the slot's def @0x540D09, OnlyScoped @0x540D19..0x540D22, the owner +0x24
+//  @0x540D24..0x540D2D, g_WeaponScopeActive @0x540D2F); Entity_AttachToUseGunSlot @0x546B80
+//  (the gun slot's owner @0x546C73 past the mount @0x546C38); WeaponAction_ProcessFrame
 //  @0x540E60 (@0x5413B1..0x5413EC); callers Entity_AttachToUseGunSlot @0x546B80 (@0x546C38),
 //  Entity_AttachToVehicleSlot @0x4946D0 (@0x494838), Entity_DetachFromVehicle @0x4355F0
 //  (@0x43565F), NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (@0x4296F4)]
 void mount_queue_switch_out(World &world, LocalPlayerWeapon &w, PlayerViewState *view,
-		bool same_category, const WeaponTableEntry *target) {
+		bool same_category, const WeaponTableEntry *target, bool personal_slot) {
 	WeaponInstallData data;
 	const bool has_data =
 			target != nullptr && install_data_by_name(world, target->name, false, data);
@@ -221,12 +229,13 @@ void mount_queue_switch_out(World &world, LocalPlayerWeapon &w, PlayerViewState 
 			view != nullptr) {
 		player_view_start_weapon_lower(*view);
 	}
-	if (view != nullptr) {
-		player_view_mount_clear_bias(*view);
-		if (has_data)
-			player_view_weapon_mount_bind(*view, data.flags, data.view_hip_pose,
-					data.view_ads_pose);
-	}
+	if (view != nullptr) player_view_mount_clear_bias(*view);
+	if (target != nullptr && (target->flags & DEF_WEAPON_FLAG_FORCECROUCH) != 0 &&
+			((target->flags & DEF_WEAPON_FLAG_ONLYSCOPED) == 0 || !personal_slot ||
+			 (view != nullptr && view->scope_settled)))
+		world.out.stance_requests.push_back(LocalPlayer::kStanceActionIds[1]);
+	if (view != nullptr && has_data)
+		player_view_weapon_mount_bind(*view, data.flags, data.view_hip_pose, data.view_ads_pose);
 }
 
 bool commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
@@ -354,7 +363,8 @@ void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
 			mount_queue_switch_out(world, w, &view, out.same_category,
 					target != nullptr && target->adm_index >= 0
 							? world.tables.weapons.by_index(static_cast<uint8_t>(target->adm_index))
-							: nullptr);
+							: nullptr,
+					/*personal_slot=*/true);
 			break;
 		}
 		default:

@@ -196,6 +196,7 @@ public:
 	// [orig: Input_HandleActionBinding_0 cases 169/170/172 @0x4e0d77..0x4e0e87,
 	//  no latch write; the latch @0x430562 / @0x430570]
 	bool send_stance_request(int stance) override;
+	bool queue_stance_action(uint16_t action_id) override { return queue_stance_change(action_id); }
 	// Choose the use-item seat request without mutating the local body.
 	// The caller applies the equipped weapon's busy gate before this action.
 	bool queue_mount_toggle();

@@ -264,6 +264,16 @@ bool Role::request_stance(int stance) {
 	return send_stance_request(stance);
 }
 
+void Role::flush_stance_requests() {
+	// [orig: Player_MountWeaponSlot @0x4DFA40 - CNapiNetwork_QueueReliableMessage(0x1D, 1, 0)
+	//  @0x4DFC30 at the request, the stance key's own message (Input_HandleActionBinding_0
+	//  @0x4E0420 - @0x4E0DCA / @0x4E0DE7)]
+	if (kernel_ == nullptr) return;
+	std::vector<uint16_t> &requests = kernel_->world.out.stance_requests;
+	for (const uint16_t action_id : requests) (void)queue_stance_action(action_id);
+	requests.clear();
+}
+
 void Role::store_mission_exit(int32_t reason) {
 	if (kernel_ != nullptr) kernel_->world.mission_exit_reason = reason;
 }
@@ -303,7 +313,12 @@ void Role::drain_input_events(TickInputSource *source, uint32_t held_action_bits
 		(void)input_events_.push({event.code, event.p1, event.p2, kDeferredMarker, false,
 				controls::InputEventOrigin::Device});
 	controls::InputEventRecord record;
-	while (input_events_.pop(record)) dispatch_record(record, source);
+	while (input_events_.pop(record)) {
+		dispatch_record(record, source);
+		// A record's mount request queues its 0x1D at once, ahead of a later record's
+		// sends (mount_queue_switch_out).
+		flush_stance_requests();
+	}
 	pause_flips_ = false;
 	// The frame's tail behind the drain: the USE row's release edge (TickInputSource::
 	// end_input_frame) [orig: Input_ProcessFrame @0x49D520 - @0x49D6C1..0x49D6DC].

@@ -24,9 +24,10 @@ bool commit_mount(World &world, LocalPlayerWeapon &w, const std::string &name,
 		bool preserve_slot_state, bool view_writes);
 
 // Player_MountWeaponSlot's request on the mounted slot's def `target`, every local mount's leg
-// (player_weapon.cpp carries the witness). Defined in player_weapon.cpp.
+// (player_weapon.cpp carries the witness); `personal_slot`: the mounted slot is one of the
+// local player's own (its owner is L), not a gun's. Defined in player_weapon.cpp.
 void mount_queue_switch_out(World &world, LocalPlayerWeapon &w, PlayerViewState *view,
-		bool same_category, const WeaponTableEntry *target);
+		bool same_category, const WeaponTableEntry *target, bool personal_slot);
 
 // Whether the pending slot's def is Emplaced (the FSM's pending_emplaced). Defined in
 // player_weapon_usegun.cpp.

@@ -953,6 +953,11 @@ bool HostRole::send_respawn_request() {
 			state.client_runtime->queue_respawn_request();
 }
 
+bool HostRole::queue_stance_action(uint16_t action_id) {
+	// The host's own client connection, as the key's 0x1D; a dedicated host has none.
+	return state.client_runtime != nullptr && state.client_runtime->queue_stance_change(action_id);
+}
+
 bool HostRole::send_stance_request(int stance) {
 	if (kernel_ == nullptr || stance < 0 || stance > 2 || !state.client_runtime) return false;
 	if (!kernel_->local.stance_request_allowed()) return false;
@@ -1090,6 +1095,9 @@ void HostRole::run_tick(const TickInput &input) {
 		}
 	}
 	kernel.world.out.weapon_reloads.clear();
+	// The tick's and the weapon walk's mount requests queue their 0x1Ds on the host's own
+	// client in raise order (world/player_weapon.cpp mount_queue_switch_out).
+	flush_stance_requests();
 	tail.mark(devtools::Slot::SIM_PLAYER_TAIL);
 	// The host's measurable net leg for the stats board: the ClientState fold
 	// (host_loop -> ClientState). The S2C serialize/emit half rides inside
@@ -1107,6 +1115,7 @@ void HostRole::run_tick(const TickInput &input) {
 		state.client_runtime->set_local_player_position(kernel.world);
 		state.client_runtime->Client_ProcessNetworkFrame(now);
 		state.client_runtime->apply_received_effects(kernel.world);
+		flush_stance_requests(); // a 0x5A apply's mount request
 		state.client_runtime->flush_host_sends(); // the receive handlers' own sends
 		// The vehicle screen's poll after the client net frame, its 0x42 left
 		// for the next frame's send (vehicle_menu.h) [orig: Game_ProcessMainFrame --

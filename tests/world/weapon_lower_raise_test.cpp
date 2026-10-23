@@ -199,6 +199,34 @@ constexpr const char *kWeaponDef =
 		"\t\tdelaystart 2\r\n"
 		"\t\tdelayend 2\r\n"
 		"\tend\r\n"
+		"end\r\n"
+		// A ForceCrouch def (category 5) and two ForceCrouch + OnlyScoped ranks (category 7),
+		// the retail mortar's pair of flags (L7-s26 row 4).
+		"weapon \"WPN_CROUCHER\"\r\n"
+		"\tcategory 5\r\n"
+		"\trank 0\r\n"
+		"\tclipsize 1\r\n"
+		"\tstartrounds 10\r\n"
+		"\tammoclass CLASS_762MM 1\r\n"
+		"\tflags ForceCrouch\r\n"
+		"end\r\n"
+		"weapon \"WPN_PIT_A\"\r\n"
+		"\tcategory 7\r\n"
+		"\trank 0\r\n"
+		"\tclipsize 1\r\n"
+		"\tstartrounds 10\r\n"
+		"\tammoclass CLASS_762MM 1\r\n"
+		"\tflags ForceCrouch\r\n"
+		"\tflags OnlyScoped\r\n"
+		"end\r\n"
+		"weapon \"WPN_PIT_B\"\r\n"
+		"\tcategory 7\r\n"
+		"\trank 1\r\n"
+		"\tclipsize 1\r\n"
+		"\tstartrounds 10\r\n"
+		"\tammoclass CLASS_762MM 1\r\n"
+		"\tflags ForceCrouch\r\n"
+		"\tflags OnlyScoped\r\n"
 		"end\r\n";
 
 constexpr int32_t kRifle = 3 * weapon_combo::kRanksPerCategory;
@@ -1083,6 +1111,53 @@ void test_the_mount_request_writes_the_view_words() {
 	}
 }
 
+// --- the mount request's crouch (L7-s26 row 4) ------------------------------------------
+
+// A ForceCrouch def's mount request raises the stance key's crouch, the reliable C2S 0x1D of
+// action id 0xA9, through the seat-flag query: an OnlyScoped def's only while the promoted
+// scope byte, as the request wrote it, is set (the mounted personal slot's owner is the local
+// player). A cross-category mount clears the byte ahead of the query, so a mortar mounted from
+// another category raises none; a same-category one under a raised byte does.
+// [orig: Player_MountWeaponSlot @0x4DFA40 - g_WeaponScopeActive = 0 @0x4DFB60,
+//  Entity_CheckWeaponSeatFlags(slot, 0x40000) @0x4DFBF2..0x4DFC02, NetPacket_WriteInt16C(0xA9)
+//  @0x4DFC04..0x4DFC13, CNapiNetwork_QueueReliableMessage(0x1D, 1, 0) @0x4DFC1B..0x4DFC30;
+//  Entity_CheckWeaponSeatFlags @0x540D00 (@0x540D19..0x540D35)]
+void test_a_force_crouch_mount_requests_the_crouch() {
+	const std::vector<uint16_t> crouch{0xA9};
+	{
+		const auto rig = std::make_unique<Rig>(std::vector<WeaponKitEntry>{
+				WeaponKitEntry{"WPN_RIFLE", -1, -1, -1}, WeaponKitEntry{"WPN_CROUCHER", -1, -1, -1}});
+		rig->tick();
+		rig->world.out.stance_requests.clear();
+		rig->press(5);
+		CHECK(rig->world.out.stance_requests == crouch);
+	}
+	{
+		const auto rig = std::make_unique<Rig>(std::vector<WeaponKitEntry>{
+				WeaponKitEntry{"WPN_RIFLE", -1, -1, -1}, WeaponKitEntry{"WPN_PIT_A", -1, -1, -1}});
+		rig->tick();
+		rig->view().scope_settled = true;
+		rig->world.out.stance_requests.clear();
+		rig->press(7); // another category: the byte drops ahead of the query
+		CHECK(!rig->view().scope_settled);
+		CHECK(rig->world.out.stance_requests.empty());
+	}
+	{
+		const auto rig = std::make_unique<Rig>(std::vector<WeaponKitEntry>{
+				WeaponKitEntry{"WPN_PIT_A", -1, -1, -1}, WeaponKitEntry{"WPN_PIT_B", -1, -1, -1}});
+		rig->tick();
+		CHECK(rig->inventory().equipped_combo == 7 * weapon_combo::kRanksPerCategory);
+		rig->view().scope_settled = true;
+		rig->world.out.stance_requests.clear();
+		rig->press(7); // the other rank, one category: the byte stands
+		CHECK(rig->world.out.stance_requests == crouch);
+		rig->view().scope_settled = false;
+		rig->world.out.stance_requests.clear();
+		rig->press(7);
+		CHECK(rig->world.out.stance_requests.empty());
+	}
+}
+
 } // namespace
 
 int main() {
@@ -1102,6 +1177,7 @@ int main() {
 	test_a_claimants_detach_holds_its_equipped_slot_ready();
 	test_a_loadout_apply_mounts_its_selected_slot();
 	test_the_mount_request_writes_the_view_words();
+	test_a_force_crouch_mount_requests_the_crouch();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;
