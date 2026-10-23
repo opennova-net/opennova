@@ -8,6 +8,7 @@
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
+#include <godot_cpp/templates/vector.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
@@ -32,6 +33,14 @@ public:
 
 	Ref<Shader> get_shader_for_key(int32_t key);
 	void configure_material_for_key(const Ref<ShaderMaterial> &material, int32_t key);
+	// The renderer's effect set at its start: every shader resource the descriptor table reaches
+	// (each technique's blend, coverage and cull policies) and the environment mirror's
+	// post-multiply proxies, loaded and held for the process, so no material's first bind loads
+	// one (engine renderer/object_shader_template.h carries the witness, D-NET-NEW-L3-40). Loads
+	// once; returns the resources that call loaded.
+	int load_effect_set();
+	// The effect set's held resources (a test seam).
+	int get_effect_set_size() const { return static_cast<int>(effect_set_.size()); }
 
 	int32_t classify(const String &shader_tag,
 			int32_t material_flags,
@@ -74,6 +83,8 @@ protected:
 private:
 	static ObjectShaderCache *singleton;
 	std::unordered_map<uint32_t, Ref<Shader>> cache;
+	Vector<Ref<Shader>> effect_set_; // load_effect_set
+	bool effect_set_loaded_ = false;
 	Ref<ImageTexture> phong_map_texture;
 	float water_split_height = 0.0f;
 	bool water_camera_above = true;

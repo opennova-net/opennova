@@ -191,6 +191,8 @@ void ObjectShaderCache::clear() {
 void ObjectShaderCache::_bind_methods() {
 	ClassDB::bind_static_method("ObjectShaderCache", D_METHOD("get_singleton"), &ObjectShaderCache::get_singleton);
 	ClassDB::bind_method(D_METHOD("get_shader_for_key", "key"), &ObjectShaderCache::get_shader_for_key);
+	ClassDB::bind_method(D_METHOD("load_effect_set"), &ObjectShaderCache::load_effect_set);
+	ClassDB::bind_method(D_METHOD("get_effect_set_size"), &ObjectShaderCache::get_effect_set_size);
 	ClassDB::bind_method(D_METHOD("configure_material_for_key", "material", "key"), &ObjectShaderCache::configure_material_for_key);
 	ClassDB::bind_method(D_METHOD("classify", "shader_tag", "material_flags", "emissive_type", "is_glass_flag", "alpha_test_byte"), &ObjectShaderCache::classify);
 	ClassDB::bind_method(D_METHOD("get_known_shader_tags"), &ObjectShaderCache::get_known_shader_tags);
@@ -263,6 +265,53 @@ Ref<Shader> ObjectShaderCache::get_shader_for_key(int32_t key) {
 			String("Object shader resource failed to load: ") + path);
 	cache[ukey] = shader;
 	return shader;
+}
+
+int ObjectShaderCache::load_effect_set() {
+	if (effect_set_loaded_) {
+		return 0;
+	}
+	effect_set_loaded_ = true;
+	using opennova::renderer::ObjectBlendMode;
+	using opennova::renderer::ObjectCullPolicy;
+	using opennova::renderer::ObjectShaderTechnique;
+	ResourceLoader *loader = ResourceLoader::get_singleton();
+	const int64_t before = effect_set_.size();
+	const auto load = [this, loader](const String &p_path) {
+		if (p_path.is_empty() || !loader->exists(p_path, "Shader")) {
+			return;
+		}
+		const Ref<Shader> shader = loader->load(p_path, "Shader");
+		if (shader.is_valid()) {
+			effect_set_.push_back(shader);
+		}
+	};
+	const ObjectBlendMode blends[] = { ObjectBlendMode::Opaque, ObjectBlendMode::AlphaBlend,
+		ObjectBlendMode::Additive, ObjectBlendMode::Multiplicative };
+	for (uint8_t technique = static_cast<uint8_t>(ObjectShaderTechnique::Fixed);
+			technique <= static_cast<uint8_t>(ObjectShaderTechnique::GlassSkinned); ++technique) {
+		for (const ObjectBlendMode blend : blends) {
+			for (const bool alpha_test : { false, true }) {
+				for (const ObjectCullPolicy cull :
+						{ ObjectCullPolicy::Back, ObjectCullPolicy::Disabled }) {
+					opennova::renderer::ObjectShaderPipelineDescriptor pipeline;
+					pipeline.technique = static_cast<ObjectShaderTechnique>(technique);
+					pipeline.blend = blend;
+					pipeline.alpha_test = alpha_test;
+					pipeline.cull = cull;
+					load(shader_resource_path(pipeline));
+				}
+			}
+		}
+	}
+	// The environment mirror's post-multiply proxies (create_material's BmTxMirrT P3).
+	for (const char *cutout : { "", "_cutout" }) {
+		for (const char *sided : { "", "_double_sided" }) {
+			load(String("res://shaders/object/postmultiply/environment_textured") + cutout + sided +
+					".gdshader");
+		}
+	}
+	return static_cast<int>(effect_set_.size() - before);
 }
 
 void ObjectShaderCache::configure_material_for_key(

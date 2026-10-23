@@ -15,6 +15,7 @@
 
 #include "network/lan_session.h" // the browse's held-server pump
 #include "network/net_session_policy.h"
+#include "object/object_shader_cache.h" // load_effect_set (the renderer's start)
 #include "resource_index/launch_flags.h" // the server log switches
 #include "resource_index/resource_root.h" // session_title (the connect log header)
 #include "rtxt/rtxt_string_file.h" // installed_text_override (the admin's process gametext)
@@ -94,6 +95,12 @@ void GameWorld::_ready() {
 		// (LanSession::set_process_held_server, D-NET-NEW-L1-26).
 		LanSession::set_process_held_server(&client_process_.unstopped_server,
 				&client_process_.disconnect_latch, &logs);
+	}
+	// The renderer's effect set loads as the renderer starts, ahead of any mission: a model
+	// material's first bind, a wire spawn's or a load's, finds its shader loaded (engine
+	// renderer/object_shader_template.h carries the witness, D-NET-NEW-L3-40).
+	if (!Engine::get_singleton()->is_editor_hint()) {
+		ObjectShaderCache::get_singleton()->load_effect_set();
 	}
 	// The world's own process step exists for exactly one thing: the joiner
 	// preload wait the session drive steps (switched on by load_as_joiner,
