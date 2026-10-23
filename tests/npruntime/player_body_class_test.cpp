@@ -1876,6 +1876,15 @@ void test_an_ewep_row_local_body_is_destroyed_in_place() {
 		body->spawn_position.x.q16 = 0x00012345;
 		body->sub_type = 2;
 		body->player_slot_id = 4;
+		// More words of the block, and one past it (animSlot +0x374).
+		body->team = 2;
+		body->display_name = "Lead";
+		body->minimap_net_id = 0x0405;
+		body->player_class = 8;
+		body->eye_offset_z = 0xD000;
+		body->ref_num = 7;
+		body->carry_flags = 0x10100;
+		body->anim_slot = 3;
 		r.world->rules.mp_session = true;
 		r.world->rules.mp_session_peer = true;
 		r.world->rules.logic_authority = false;
@@ -1899,6 +1908,16 @@ void test_an_ewep_row_local_body_is_destroyed_in_place() {
 		// The memset zeroes the subType byte; the destroy's tail stores 0xFF in the slot byte.
 		CHECK(body->sub_type == (local ? 0 : 2));
 		CHECK(body->player_slot_id == (local ? 0xFF : 4));
+		// D-NET-NEW-L5-28: the memset's other words: Team, the Name, the NetId, playerClass, the
+		// eye triple, refNum and the +0x2C carry bits; animSlot past the block stays.
+		CHECK(body->team == (local ? 0 : 2));
+		CHECK(body->display_name.empty() == local);
+		CHECK(body->minimap_net_id == (local ? 0 : 0x0405));
+		CHECK(body->player_class == (local ? 0 : 8));
+		CHECK(body->eye_offset_z == (local ? 0 : 0xD000));
+		CHECK(body->ref_num == (local ? 0 : 7));
+		CHECK(body->carry_flags == (local ? 0u : 0x10100u));
+		CHECK(body->anim_slot == 3);
 		CHECK(body->spawn_position.x.q16 == 0x00012345);
 		CHECK(ae->inf.leg_yaw[0] == 0x40000000);
 		CHECK(!local || r.world->cached.local_player == self);

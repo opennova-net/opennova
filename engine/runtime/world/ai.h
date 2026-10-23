@@ -606,6 +606,12 @@ PhysicsClass body_move_row(const World &world, const AiEntity &body, const Entit
 // [orig: Entity_UpdateTransformAndTurret @0x440CA0]
 void person_ewep_mover(World &world, AiEntity &e, Entity &body);
 
+// The memset over a body's first 0x2B4 bytes that Entity_Destroy and the 0x18 record each run: every
+// word ours keeps of that block comes back zero, the words past it stay (ai_system.cpp carries the
+// list). [orig: Entity_Destroy @0x43E810 - the memset @0x43EA70; NapiNPClientMsg_FullEntitySpawn
+// @0x433780 - the memset @0x433821]
+void clear_body_block_below_2b4(AiEntity &e, Entity &body);
+
 // A body's DcbId (+0x7C) as the org1 update reads it: its stagger key and its think's aim-pitch
 // seed. A placed person's is its record's (AiEntity::net_id). A player body's is its class
 // init's: the plyr row's stamps 10000 + the slot byte (+0x154), an org row's and an item row's

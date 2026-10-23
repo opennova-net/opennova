@@ -767,45 +767,112 @@ static void person_ewep_anchored_attach(World &world, AiEntity &e, Entity &body,
     body.roll_bam = e.roll = frame.roll;
 }
 
-// Entity_Destroy over the local player's own body, which stays the local player's (retail's
-// g_LocalPlayerEntity keeps naming the slot): the memset over +0..+0x2B4 leaves it no def
-// (+0x1C / +0x20), so the pool-0 walk runs nothing over it (its +0x1C4 is 0), its uplink stops
-// (the serializer's def test) and its record applies are dropped (the case-2 def test);
-// Position and the Yaw / Pitch / Roll words 0, Flags 0, Health 0, no ground (+0x28), no mount
-// (+0x168 / +0x16C), no occupant (+0x170), +0x2AC 0, savedLivePose 0, the velocity triple 0,
-// the subType byte (+0x214) 0; then the destroy's tail stores 0xFF in the slot byte (+0x154).
-// Its words past +0x2B4 stay. A 0x18 of its handle rebuilds it (JoinerRole::rebuild_local_from_full_spawn).
-// [orig: Entity_Destroy @0x43E810 - the memset @0x43EA70, +0x154 @0x43EA78;
-//  Entity_UpdateAllEntities @0x4C2100 - the null test @0x4C246F; Pool_SerializeEntityViaVTable
-//  @0x4D64E0 - the def test @0x4D654F..0x4D6554; NetPacket_SerializePlayerState @0x4C09C0 - the
-//  def test @0x4C0F92]
-static void destroy_local_body_in_place(AiEntity &e, Entity &body) {
+// The memset over a body's first 0x2B4 bytes, which Entity_Destroy runs ahead of its tail and the
+// 0x18 record runs again ahead of its stores: every word ours keeps of that block, by its entity.h
+// offset, comes back zero (the def +0x1C / +0x20, Flags +0x24, the ground +0x28, the cause / carry
+// dword +0x2C, the model +0x30, Position and the Yaw / Pitch / Roll words, the eye triple
+// +0x6C..+0x74, the owning connection +0x78, the SSN +0x7C, savedLivePose, the velocity triple,
+// the Name +0xF4, the command group +0x11C, Health +0x11E, mana +0x120, +0x122, +0x124, the corpse
+// timer +0x148, the slot byte +0x154, +0x155, +0x156, the mount byte +0x157, the NetId +0x15C, the
+// ammo-def word +0x160, Team +0x162, the mount +0x168 / +0x16C, the occupant +0x170, the ride
+// hold +0x174, the last attacker +0x178, the toggle fallback +0x180, the radar / heat words
+// +0x1A6 / +0x1A4, the death tick +0x1AC, the reviving latch +0x1E0, the target refcount +0x212,
+// subType +0x214, refNum +0x215, the location +0x280, playerClass +0x294, +0x2AC and the
+// equipped ADM index +0x2B0, whose zero is the null def). Its words past +0x2B4 stay
+// (the spawn backup, animSlot +0x374, the lean and radio words). The GRM facial slot (+0x1B8) is
+// an allocation ours releases with the row, the bounding-box centre (+0x1FC) the model's stamp.
+// [orig: Entity_Destroy @0x43E810 - `push 2B4h` @0x43EA69, the memset @0x43EA70;
+//  NapiNPClientMsg_FullEntitySpawn @0x433780 - Entity_Destroy @0x433815, `push 2B4h` @0x43381A,
+//  the memset @0x433821]
+void clear_body_block_below_2b4(AiEntity &e, Entity &body) {
     body.has_item_def = false;
     body.item_type_index = 0;
     body.item_id = 0;
     body.has_graphic_model = false;
+    body.flags = 0;
+    body.engine_flags = 0;
+    body.ground_target = {};
+    body.carry_flags = 0;
+    body.cause_flags = 0;
     body.position.set_q16(FixedVec3{0, 0, 0});
     body.heading = e.heading = 0;
     body.pitch_bam = e.pitch = 0;
     body.roll_bam = e.roll = 0;
-    body.flags = 0;
-    body.engine_flags = 0;
-    body.alive = true;
-    body.health = 0;
-    e.health = 0;
-    body.ground_target = {};
-    body.mounted = false;
-    body.mount_target = {};
-    body.mount_type = SeatType::None;
-    body.mount_bone = 0;
-    body.primary_occupant = {};
-    body.spawn_phase = 0;
-    body.sub_type = 0;
+    body.eye_offset_x = 0;
+    body.eye_offset_y = 0;
+    body.eye_offset_z = 0;
+    body.owner_connection_id = 0;
+    body.net_id = 0;
     std::fill_n(body.saved_live_pos, 3, 0);
     body.saved_live_yaw = 0;
     body.saved_live_pitch = 0;
     body.saved_live_roll = 0;
     for (int axis = 0; axis < 3; ++axis) e.inf.vel[axis] = 0;
+    body.display_name.clear();
+    body.group_id = 0;
+    body.alive = true;
+    body.health = 0;
+    e.health = 0;
+    body.mana = 0;
+    body.ammo_count = 0;
+    body.damage_state = 0;
+    body.corpse_timer = 0;
+    body.player_slot_id = 0;
+    body.script_fire_userpoint_counter = 0;
+    body.occlusion_latch = 0;
+    body.mount_bone = 0;
+    body.minimap_net_id = 0;
+    body.ammo_def_word = 0;
+    body.team = 0;
+    body.mounted = false;
+    body.mount_target = {};
+    body.mount_type = SeatType::None;
+    body.primary_occupant = {};
+    body.ride_link_hold = 0;
+    body.last_attacker = {};
+    body.mount_toggle_fallback = {};
+    body.radar_sig = 0;
+    body.heat_sig = 0;
+    body.death_tick = 0;
+    body.medic_reviving = false;
+    body.ai_target_refcount = 0;
+    body.sub_type = 0;
+    body.ref_num = 0;
+    body.location_index = 0;
+    body.player_class = 0;
+    body.spawn_phase = 0;
+    body.equipped_adm_index = 0;
+    // The AI entity's mirrors of the same block: the DcbId +0x7C, the relation key +0x11C, Team
+    // +0x162, the body heading +0x8C, the eye triple, org2's jump latch / org1's target heading
+    // +0x1A8, and the chase's stage +0x234..+0x244 and its count / bucket +0x27C / +0x27E.
+    e.net_id = 0;
+    e.relmat_id = 0;
+    e.team = 0;
+    e.inf.body_heading = 0;
+    e.inf.eye_offset_x = 0;
+    e.inf.eye_offset_y = 0;
+    e.inf.eye_offset_z = 0;
+    e.inf.jump_cooldown = 0;
+    e.inf.target_heading = 0;
+    std::fill_n(e.net_smooth_target, 3, 0);
+    e.net_smooth_heading = 0;
+    e.net_smooth_pitch = 0;
+    e.net_interp_progress = 0;
+    e.net_interp_steps = 0;
+}
+
+// Entity_Destroy over the local player's own body, which stays the local player's (retail's
+// g_LocalPlayerEntity keeps naming the slot): the memset over +0..+0x2B4 (clear_body_block_below_2b4)
+// leaves it no def, so the pool-0 walk runs nothing over it (its +0x1C4 is 0), its uplink stops (the
+// serializer's def test) and its record applies are dropped (the case-2 def test); then the
+// destroy's tail stores 0xFF in the slot byte (+0x154). A 0x18 of its handle rebuilds it
+// (JoinerRole::rebuild_local_from_full_spawn).
+// [orig: Entity_Destroy @0x43E810 - the memset @0x43EA70, +0x154 @0x43EA78;
+//  Entity_UpdateAllEntities @0x4C2100 - the null test @0x4C246F; Pool_SerializeEntityViaVTable
+//  @0x4D64E0 - the def test @0x4D654F..0x4D6554; NetPacket_SerializePlayerState @0x4C09C0 - the
+//  def test @0x4C0F92]
+static void destroy_local_body_in_place(AiEntity &e, Entity &body) {
+    clear_body_block_below_2b4(e, body);
     body.player_slot_id = 0xFF;
 }
 

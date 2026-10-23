@@ -406,6 +406,11 @@ void test_the_full_spawn_rebuilds_the_local_body() {
 	self.spawn_byte_154 = 5;
 	self.target_handle = r.ground.packed;
 	self.spawn_sub_type = 2;
+	self.spawn_ref_num = 6;
+	// Words of the block the record does not store (D-NET-NEW-L5-28).
+	body.eye_offset_z = 0xD000;
+	body.carry_flags = 0x10100;
+	body.display_name = "Lead";
 	opennova::inmatch::rebuild_local_body_words(r.world, body, ai, self);
 	expect(body.has_item_def && body.item_type_index == 1 && body.item_id == 0x14B9,
 			"the record's type word binds the def");
@@ -420,6 +425,10 @@ void test_the_full_spawn_rebuilds_the_local_body() {
 			"its ground entity, no mount, the velocity cleared");
 	expect(body.spawn_position.x.q16 == 0x00012345, "the words past +0x2B4 stay");
 	expect(body.sub_type == 2, "the record's subType lands on +0x214");
+	expect(body.ref_num == 6 && body.display_name.empty(),
+			"the record's refNum lands on +0x215; a non-AIData def's Name is the record's empty one");
+	expect(body.eye_offset_z == 0 && body.carry_flags == 0,
+			"the memset clears the block's words the record does not store");
 	// The ground link names the record's slot whether or not it holds a row: a ground the shared
 	// destroy removed stays linked (its mark is the stale-ground leg's to read); a handle the
 	// decode resolved to none (0xFFFF, or past the pool tables) links nothing.

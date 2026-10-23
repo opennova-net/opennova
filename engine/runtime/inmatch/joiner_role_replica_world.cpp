@@ -517,12 +517,13 @@ void JoinerRole::fold_local_record() {
 }
 
 // A 0x18 naming the joiner's own handle rebuilds its body in place: retail's slot is the one
-// g_LocalPlayerEntity names, so the record's stores land on L. The record's def by its type word,
-// its Flags word, Position and the Yaw / Pitch words, Health the def's healthMax, its Team,
-// NetId, animSlot, class word and +0x154 slot byte, its ground entity (+0x28), no occupant and
-// no mount, the lean 0, the model init's savedLivePose; then the def's class init (the plyr
-// row's: the equipped default, the DcbId). The record's subType byte lands on +0x214. The words
-// past +0x2B4 stay. The record's +0x16C and +0x170 handles are not modeled here: L stays
+// g_LocalPlayerEntity names, so the record's stores land on L. The destroy and the memset clear
+// the block below +0x2B4 (world::clear_body_block_below_2b4); then the record's def by its type
+// word, its Flags word, Position and the Yaw / Pitch words, Health the def's healthMax, its Team,
+// NetId, animSlot, class word and +0x154 slot byte, refNum, the Name (an AIData def's), its
+// ground entity (+0x28), no occupant and no mount, the lean 0, the model init's savedLivePose;
+// then the def's class init (the plyr row's: the equipped default, the DcbId) and its traits.
+// The record's subType byte lands on +0x214. The words past +0x2B4 stay. The record's +0x16C and +0x170 handles are not modeled here: L stays
 // unmounted, with no occupant.
 // [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - Entity_Destroy @0x433815, the memset
 //  @0x433821, Flags @0x433B69, Position / Yaw @0x433B77..0x433B8C, NetId / Team / Pitch / class /
@@ -532,6 +533,9 @@ void JoinerRole::fold_local_record() {
 //  init @0x433E82]
 void rebuild_local_body_words(world::World &world, world::Entity &local, world::AiEntity &local_ai,
 		const replication::ClientEntityState &self) {
+	// The destroy and the memset first, so every word of the block the record does not store
+	// reads zero (D-NET-NEW-L5-28) [orig: Entity_Destroy @0x433815, the memset @0x433821].
+	world::clear_body_block_below_2b4(local_ai, local);
 	world::bind_player_item_row(world, local, world::item_index_by_type_id(world, self.type_id));
 	local.flags = self.spawn_entity_flags;
 	local.engine_flags = self.spawn_entity_flags;
@@ -551,6 +555,10 @@ void rebuild_local_body_words(world::World &world, world::Entity &local, world::
 	local.player_class = self.spawn_player_class;
 	local.player_slot_id = self.spawn_byte_154;
 	local.sub_type = self.spawn_sub_type;
+	// refNum, and the Name a def with the AIData attribute copies (the host writes it only for
+	// such a def, so the record's is empty otherwise) [orig: @0x433B94; @0x433D3E..0x433D61].
+	local.ref_num = self.spawn_ref_num;
+	local.display_name = self.display_name;
 	local.owner_connection_id = self.spawn_owner_connection_id;
 	local.group_id = 0;
 	// The ground link is the slot the record's handle names, used or not: none only for 0xFFFF
