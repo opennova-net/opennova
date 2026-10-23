@@ -92,6 +92,13 @@ func test_the_effect_warm_forces_one_frame() -> void:
 		assert_false(names.has("forced_draw_2"), "no second forced frame: %s" % [names])
 		assert_true(names.find("force_sync") > names.find("forced_draw_1"),
 				"the drain follows the one frame: %s" % [names])
+		# The skinned models the first revealed frame would build draw in that one frame
+		# (D-NET-NEW-LF-15): their leg runs ahead of it, and nothing of it outlives the warm.
+		var person := names.find("person_pipelines")
+		assert_true(person >= 0 and person < names.find("forced_draw_1"),
+				"the person warm runs ahead of the forced frame: %s" % [names])
+	assert_null(world.get_node_or_null("PersonPipelineWarm"),
+			"the person warm's models are freed inside the load")
 	world.unload()
 
 
@@ -1934,7 +1941,7 @@ func test_a_dedicated_host_loads_no_effect_system() -> void:
 # spawn, no pipeline warm, no forced frame); a listen host's runs the same freeze, then the warm.
 # Neither builds a listed model at the freeze (D-NET-NEW-L3-25, D-NET-NEW-L3-31).
 func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
-	var warm_legs := ["effects_warm", "effect_spawn", "present_pipelines",
+	var warm_legs := ["effects_warm", "effect_spawn", "present_pipelines", "person_pipelines",
 			"forced_draw_1", "force_sync", "warm_reset"]
 	for serve_and_play in [true, false]:
 		var world := WorldFixture.make_world(self)

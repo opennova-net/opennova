@@ -613,6 +613,14 @@ void MissionRoot::warm_present_pipelines(const Vector3 &p_at_position) {
 	}
 }
 
+int MissionRoot::warm_wire_spawn_pipelines(const PackedFloat32Array &p_snap, int p_stride,
+		Node3D *p_parent, PackedStringArray &r_graphics) {
+	EntityPresenter *presenter = entities();
+	return presenter != nullptr
+			? presenter->warm_wire_spawn_pipelines(p_snap, p_stride, p_parent, r_graphics)
+			: 0;
+}
+
 Ref<ThrowablePresentStats> MissionRoot::get_throwable_present_stats() const {
 	if (EntityPresenter *presenter = entities()) {
 		return presenter->get_throwable_present_stats();

@@ -26,7 +26,9 @@
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/file_access.hpp>
+#include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
+#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/callable_method_pointer.hpp>
@@ -1636,8 +1638,10 @@ void GameWorld::build_minimap_water_mask() {
 // once (no coroutine — the load path stays callable without await), then
 // clear the warm spawns exactly like the sim-restart path (reset +
 // re-register the persistent item effects). Returns the count. The mission
-// start's models build nothing here: the freeze ahead of it resolved their
-// materials alone (load_mission_internal, D-NET-NEW-L3-31). Retail's load draws
+// start's listed models build nothing here: the freeze ahead of it resolved their
+// materials alone (load_mission_internal, D-NET-NEW-L3-31); the frame draws, and
+// then frees, the skinned models the first revealed frame would build
+// (build_person_pipeline_warm, D-NET-NEW-LF-15). Retail's load draws
 // no world frame at all, its presents the loading screen alone (engine
 // hud/loading_screen.h carries the witness): the one forced frame is the
 // device's pipeline warm, and a second compiled nothing in either load LP
@@ -1704,12 +1708,19 @@ int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTim
 	// Pipeline compiles need real draws. Skip the forced frames inside the
 	// editor embedder (re-entrant editor drawing); the texture warm above still
 	// runs there, and the shipped game is what the full warm protects.
+	Node3D *person_warm = nullptr;
 	if (is_inside_tree() && !Engine::get_singleton()->is_editor_hint()) {
 		// MainGame keeps World hidden behind the opaque loading CanvasLayer.
 		// Temporarily expose it so the particle domains, tracer MeshInstance,
 		// and deterministic helper quads are actually submitted to force_draw.
 		const bool was_visible = is_visible();
 		set_visible(true);
+		// The skinned models the first revealed frame would build draw in this frame too, so
+		// their pipelines compile here, behind the loading screen, not in that frame's draw
+		// (D-NET-NEW-LF-15; the one forced frame stays one, D-NET-NEW-L3-47).
+		leg("person_pipelines");
+		person_warm = build_person_pipeline_warm(warm_pos);
+		leg_end();
 		RenderingServer *rs = RenderingServer::get_singleton();
 		leg("forced_draw_1");
 		rs->force_draw(true);
@@ -1722,6 +1733,12 @@ int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTim
 		set_visible(was_visible);
 	}
 	leg("warm_reset");
+	// Freed here, past the drained frame, so the frees are the load's and not a later frame's
+	// SceneTree tail (D-NET-NEW-L3-31's 314-model free landed there).
+	if (person_warm != nullptr) {
+		remove_child(person_warm);
+		memdelete(person_warm);
+	}
 	if (effect_world != nullptr) {
 		effect_world->reset_runtime_state();
 		if (restore_particles_hidden) {
@@ -1738,6 +1755,63 @@ int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTim
 	UtilityFunctions::print_verbose(vformat(
 			"GameWorld: effect warm pass — %d effect(s) precompiled, %d unresolved texture(s)", spawned, unresolved));
 	return spawned;
+}
+
+// The first revealed frame made the local body, its view model and the wire walk's first cold
+// spawns, and its draw compiled their pipelines (LP-s22's 03tr-dm cells: "surface 31" in that
+// draw, the presenter's builds 125..167 ms in the 0x0F frame). Retail's mission start leaves
+// nothing of the kind to its first frames: its models load and its rows initialize from them ahead
+// of the 0x0B (engine mission/mission_load_plan.h carries the witness, D-NET-NEW-LF-15). Here
+// those models are made once, drawn by the load's one forced frame and freed; the later builds of
+// the same identities find their meshes, materials and rigs made (ObjectData's submesh memo, the
+// placer's data and rig caches) and their pipelines compiled.
+Node3D *GameWorld::build_person_pipeline_warm(const Vector3 &p_position) {
+	const Ref<Simulation> sim = get_sim();
+	MissionRoot *runtime = get_runtime();
+	if (sim.is_null() || runtime == nullptr || placer_.is_null()) {
+		return nullptr;
+	}
+	Node3D *warm = memnew(Node3D);
+	warm->set_name("PersonPipelineWarm");
+	add_child(warm);
+	warm->set_global_position(p_position);
+	// The builds' wall time and their scene and load profiles (an instrument, --verbose).
+	const bool profile = OS::get_singleton()->is_stdout_verbose();
+	const uint64_t start_usec = profile ? Time::get_singleton()->get_ticks_usec() : 0;
+	if (profile) {
+		(void)ObjectModel::take_build_profile();
+		(void)placer_->take_load_profile();
+	}
+	PackedStringArray graphics;
+	// The local body: a joiner's type word and character id are its learned record's ahead of
+	// L's birth (Simulation::get_local_player_type_id).
+	if (sim->has_local_player() || (sim->is_joiner() && sim->get_joiner_self_handle() > 0)) {
+		if (ObjectModel *body = placer_->build_player_animated_model(
+					sim->get_local_player_type_id(), warm, sim->get_local_player_character_id())) {
+			graphics.push_back(body->get_graphic_name());
+		}
+	}
+	const int viewmodel_parts =
+			player_visuals_.is_valid() ? player_visuals_->build_viewmodel_pipeline_warm(warm) : 0;
+	const int wire_models = runtime->warm_wire_spawn_pipelines(
+			sim->get_present_snapshot(), sim->get_present_stride(), warm, graphics);
+	if (profile) {
+		const MissionObjectPlacer::LoadProfile loads = placer_->take_load_profile();
+		UtilityFunctions::print_verbose(vformat(
+				"GameWorld: person pipeline warm: %d ms, %d view model part(s), %d wire identity model(s) "
+				"(%s) (model files %d read %d ms, animation maps %d read %d ms); scene %s",
+				static_cast<int>((Time::get_singleton()->get_ticks_usec() - start_usec) / 1000),
+				viewmodel_parts, wire_models, String(", ").join(graphics), loads.data_loads,
+				static_cast<int>(loads.data_us / 1000), loads.rig_loads,
+				static_cast<int>(loads.rig_us / 1000),
+				ObjectModel::format_build_profile(ObjectModel::take_build_profile())));
+	}
+	if (warm->get_child_count() == 0) {
+		remove_child(warm);
+		memdelete(warm);
+		return nullptr;
+	}
+	return warm;
 }
 
 // Mission-start load of EVERY mounted .ptl into the runtime effect world

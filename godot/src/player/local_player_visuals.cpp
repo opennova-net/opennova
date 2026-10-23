@@ -510,6 +510,46 @@ Node3D *LocalPlayerVisuals::build_local_player_viewmodel() {
 	return container;
 }
 
+int LocalPlayerVisuals::build_viewmodel_pipeline_warm(Node3D *p_parent) {
+	const Ref<MissionObjectPlacer> mission_placer = placer();
+	if (mission_placer.is_null() || p_parent == nullptr || viewmodel_weapon_cleared_) {
+		return 0;
+	}
+	const Ref<PlayerViewmodelDef> def = local_player_viewmodel_def();
+	if (def.is_null()) {
+		return 0;
+	}
+	// The spec and the two builds are build_local_player_viewmodel's.
+	const Ref<PlayerVisualSpec> character_spec = local_player_visual_spec();
+	const Ref<FpViewmodelSpec> spec = Simulation::fp_viewmodel_spec(true, def->get_gfx1(),
+			character_spec.is_valid() ? character_spec->get_arms() : String(), def->get_animadm(),
+			def->get_flags());
+	const String gun_name = spec->get_gun();
+	if (gun_name.is_empty()) {
+		return 0;
+	}
+	const String arms_name = spec->get_arms();
+	const String adm_name = spec->get_adm();
+	ObjectModel *const parts[] = {
+		spec->get_show_arms() && !arms_name.is_empty()
+				? mission_placer->build_model_from_graphic(arms_name, adm_name, p_parent, "anim_wpn_idle", gun_name)
+				: nullptr,
+		mission_placer->build_model_from_graphic(gun_name, adm_name, p_parent, "anim_wpn_idle", gun_name),
+	};
+	int built = 0;
+	for (ObjectModel *part : parts) {
+		if (part == nullptr) {
+			continue;
+		}
+		// The rig's per-part stamps (PlayerViewmodelRig::update_viewmodel).
+		part->set_presentation_layer(ObjectModel::PRESENTATION_LAYER_VIEWMODEL);
+		part->set_viewmodel_pass(true);
+		part->set_viewmodel_rig(true);
+		++built;
+	}
+	return built;
+}
+
 MissionObjectPlacer::LoadProfile LocalPlayerVisuals::take_placer_load_profile() {
 	const Ref<MissionObjectPlacer> mission_placer = placer();
 	return mission_placer.is_valid() ? mission_placer->take_load_profile()

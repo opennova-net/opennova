@@ -7,6 +7,7 @@
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/object.hpp>
+#include <godot_cpp/templates/hash_set.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <runtime/inmatch/wire_present.h>
@@ -1392,6 +1393,54 @@ void EntityPresenter::update_wire_person_overlays(const WireRow &row, ObjectMode
 	}
 	(*existing)->present(overlays, body, body_visible, placer_.ptr(), container(),
 			PersonOverlayModels::PRESENT_WORLD);
+}
+
+// The rows the cold walk above builds a node for are the ones it does not skip or defer: a
+// typed row other than the local player's, a wire-only row where only those draw, and no row
+// carrying a placed .bms identity (the placed representation draws it). One build per visual
+// identity: a second row of the same identity finds its meshes, materials and rig made.
+int EntityPresenter::warm_wire_spawn_pipelines(const PackedFloat32Array &p_snap, int p_stride,
+		Node3D *p_parent, PackedStringArray &r_graphics) {
+	Simulation *s = sim();
+	if (s == nullptr || placer_.is_null() || p_parent == nullptr || p_stride < PF_STRIDE) {
+		return 0;
+	}
+	const int local_handle = s->has_local_player() ? s->get_local_player_wire_handle() : -1;
+	const float *snap = p_snap.ptr();
+	const int count = int(p_snap.size() / p_stride);
+	HashSet<int32_t> warmed;
+	int built = 0;
+	for (int i = 0; i < count; ++i) {
+		const int base = i * p_stride;
+		const int type_id = int(snap[base + PF_TYPE_ID]);
+		const int handle = int(snap[base + PF_WIRE_HANDLE]);
+		const int character_id = int(snap[base + PF_CHARACTER_ID]) & 0xffff;
+		if (type_id == 0 || handle == local_handle) {
+			continue;
+		}
+		const int d_kind = int(snap[base + PF_KIND]);
+		const int d_index = int(snap[base + PF_INDEX]);
+		if (synthetic_origin_only_ && !(d_kind == opennova::world::kSpawnOriginKindNone &&
+												 d_index == opennova::world::kSpawnOriginIndexNone)) {
+			continue;
+		}
+		if (d_kind >= 0 && d_kind <= 3 && d_index >= 0 &&
+				d_index != opennova::world::kSpawnOriginIndexNone) {
+			continue;
+		}
+		const int32_t visual_identity = int32_t((uint32_t(type_id) << 16) | uint32_t(character_id));
+		if (warmed.has(visual_identity)) {
+			continue;
+		}
+		warmed.insert(visual_identity);
+		ObjectModel *node = placer_->build_player_animated_model(type_id, p_parent, character_id);
+		if (node == nullptr) {
+			continue;
+		}
+		r_graphics.push_back(node->get_graphic_name());
+		++built;
+	}
+	return built;
 }
 
 } // namespace godot

@@ -70,7 +70,17 @@
 //    HUD_LoadAllTextures @0x587205 (its materials, GfxShader_CreateForTexture
 //    called @0x59E024 / @0x59E07E / @0x59E094 / @0x59E199 / @0x59E21F),
 //    ViewFx_InitShadersAndTextures @0x587217, CTipSystem_Init @0x587270, the
-//    reduced arm @0x58727A: its freeze @0x58728C and return].
+//    reduced arm @0x58727A: its freeze @0x58728C and return];
+//  - every pool's models (the weapon overlays with them) reload and every
+//    pool's rows initialize from them ahead of the 0x0B, so the first frames
+//    past the load build no model. The shell's one forced frame draws the
+//    skinned models its first revealed frame would otherwise build (the local
+//    body, its view model, one model per identity the wire walk cold-spawns),
+//    freed past it, so their meshes, rigs and pipelines are made in the load
+//    (GameWorld's person_pipelines leg, D-NET-NEW-LF-15)
+//    [orig: Game_StartMission @0x524360 - Game_ReloadEntityModelsAndCallbacks
+//    called @0x52550E, Entity_InitAllFromModels called @0x52567F, the 0x0B's
+//    queue called @0x52624B].
 
 namespace opennova::mission {
 

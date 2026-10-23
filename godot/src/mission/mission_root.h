@@ -173,6 +173,10 @@ public:
 	// tracer ribbon materials) behind the loading screen; see GameWorld's
 	// effect warm.
 	void warm_present_pipelines(const Vector3 &p_at_position);
+	// The same frame's warm of the wire walk's cold spawns (EntityPresenter::
+	// warm_wire_spawn_pipelines): their models under `p_parent`, which the caller frees.
+	int warm_wire_spawn_pipelines(const PackedFloat32Array &p_snap, int p_stride, Node3D *p_parent,
+			PackedStringArray &r_graphics);
 	// Throwable-presentation counters (ThrowablePresentStats, typed per ADR
 	// 0017; built per call).
 	Ref<ThrowablePresentStats> get_throwable_present_stats() const;

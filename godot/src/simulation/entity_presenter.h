@@ -9,6 +9,7 @@
 #include <godot_cpp/templates/hash_map.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
+#include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
@@ -337,6 +338,14 @@ public:
 	Ref<ScarPresentStats> get_scar_present_stats() const;
 	bool has_active_wreck_fire(const String &p_owner_key) const;
 	void warm_fire_pipelines(const Vector3 &p_position);
+	// The load's forced frame's warm of the wire walk's cold spawns (GameWorld::
+	// build_person_pipeline_warm): one model per visual identity (type word, character id) among
+	// the snapshot's rows the walk would build a node for, under `p_parent`, so their meshes,
+	// materials and rigs are made and their pipelines compile in that frame instead of the
+	// first revealed one. The caller frees them past the frame; nothing here is registered.
+	// Appends each built model's graphic to `r_graphics` and returns the count.
+	int warm_wire_spawn_pipelines(const PackedFloat32Array &p_snap, int p_stride, Node3D *p_parent,
+			PackedStringArray &r_graphics);
 	Ref<ArrayMesh> fire_ribbon_mesh() const;
 	// The owned "Scars" child (the device read seam: its ScarWorld mesh).
 	ScarPresenter *scar_presenter() const;
