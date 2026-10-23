@@ -213,6 +213,93 @@ bool run_the_reset_on_a_dead_body_resolves_nothing() {
 	              "dead reset: the tail's list runs on the body");
 }
 
+// A pool-2 ladder: one CL (type-4) box, x -1..1, y -1..0.25, z -2..1.5 off the entity's
+// origin, its first plane the +Y face (the ladder's facing).
+w::CollisionModel ladder_model() {
+	w::CollisionModel model;
+	const auto plane = [&](int16_t x, int16_t y, int16_t z, int32_t dist) {
+		w::CollisionPlane p;
+		p.nx = x;
+		p.ny = y;
+		p.nz = z;
+		p.dist = dist;
+		model.planes.push_back(p);
+	};
+	plane(0, 16384, 0, -kOne / 4);
+	plane(0, -16384, 0, -kOne);
+	plane(16384, 0, 0, -kOne);
+	plane(-16384, 0, 0, -kOne);
+	plane(0, 0, 16384, -(kOne + kOne / 2));
+	plane(0, 0, -16384, -2 * kOne);
+	w::CollisionVolume volume;
+	volume.type = w::bvol_type::kLadderCL;
+	volume.min_x = -kOne;
+	volume.max_x = kOne;
+	volume.min_y = -kOne;
+	volume.max_y = kOne / 4;
+	volume.min_z = -2 * kOne;
+	volume.max_z = kOne + kOne / 2;
+	volume.plane_count = 6;
+	model.volumes.push_back(volume);
+	w::CollisionSection section;
+	section.volume_count = 1;
+	model.sections.push_back(section);
+	return model;
+}
+
+// The reset resolves through the tick's one resolver, its ladder entry included: a live player
+// body reset on a ladder's CL volume, its savedLivePose above the anchor and its look level,
+// takes the from-above entry (no facing test) and latches the ladder (Flags 0x100000), which
+// only the climb channels set (a resolve without them keeps the raw ground link alone).
+// [orig: Entity_ResetToSpawnState @0x4B9610 - the pushes @0x4B9752..0x4B9754, the call
+//  @0x4B9755; Entity_MovementCollisionResolver @0x4B2BD0 - `sub edi, [esi+88h]` @0x4B327D,
+//  the player gate @0x4B329F..0x4B32D7 (its Pitch read @0x4B32C8), the fresh entry's latch
+//  `or ecx, 100000h` @0x4B32DD stored @0x4B32E5, the snap from above @0x4B330D..0x4B3319]
+bool run_the_reset_resolve_enters_a_ladder() {
+	auto world = std::make_unique<w::World>();
+	auto collision = std::make_unique<w::CollisionWorld>();
+	Source source;
+	world->registry.configure_pool(0, 8);
+	world->registry.configure_pool(2, 4);
+	world->collision = collision.get();
+	world->ai.collision = collision.get();
+	world->ai.root_motion = &source;
+	world->ai.is_authority = true;
+	w::PlayerSpawn spawn;
+	spawn.position.x.q16 = 8 * kOne;
+	spawn.position.y.q16 = 8 * kOne;
+	spawn.position.z.q16 = 0;
+	spawn.team = 1;
+	const w::EntityHandle body = w::spawn_remote_player(*world, spawn);
+	w::Entity &e = *world->registry.get(body);
+	e.item_type_index = 3;
+	e.bound_radius = 1;
+	e.flags &= ~(w::kEntityFlagInAir | w::kEntityFlagLadderContact);
+	e.engine_flags &= ~(w::kEntityFlagInAir | w::kEntityFlagLadderContact);
+	w::Entity ladder;
+	ladder.kind = w::EntityKind::Building;
+	ladder.position = {8.0f, 8.0f, 0.0f};
+	ladder.heading = w::placed_heading_bam(90); // the identity rotation
+	ladder.bound_radius = 30;
+	ladder.alive = true;
+	const w::EntityHandle ladder_h = world->registry.spawn(2, ladder);
+	collision->assign_entity(ladder_h, collision->add_model(ladder_model()));
+	for (int i = 0; i < 17; ++i) collision->build_tick_tables(*world);
+	if (!expect(collision->candidate_count(body) >= 1, "ladder: the body's slice holds the ladder"))
+		return false;
+	// The last stamp 1.5 units off the +Y face and 2 units up: above the anchor.
+	e.saved_live_pos[0] = 8 * kOne;
+	e.saved_live_pos[1] = 9 * kOne + kOne / 2;
+	e.saved_live_pos[2] = 2 * kOne;
+	e.saved_live_valid = true;
+	w::AiEntity &ai = *world->ai.for_handle(body);
+	ai.pitch = 0;
+	world->entity_update_counter = 1;
+	w::entity_reset_to_spawn_state(*world, world->ai, e);
+	return expect((world->registry.get(body)->flags & w::kEntityFlagLadderContact) != 0,
+	              "ladder: the reset's resolve latches the ladder from above");
+}
+
 // Retail's reset neither reads nor stores MoveOrder: the stance bits are the player deploy's own
 // clear, ahead of its call (V-ROLL-BF N1 on D-NET-NEW-L5-65), so a body the reset alone resets (a
 // teleport, an NPC respawn, the joiner's arm) keeps them, and its motor mirror with them.
@@ -365,6 +452,7 @@ int main() {
 	ok &= run_the_reset_resolves_a_live_body_out_of_a_wall();
 	ok &= run_the_reset_on_a_dead_body_resolves_nothing();
 	ok &= run_the_reset_leaves_the_stance_bits();
+	ok &= run_the_reset_resolve_enters_a_ladder();
 	ok &= run_the_deploy_pushes_the_body_out_of_a_wall();
 	ok &= run_a_joiner_bodys_death_edge_reads_its_flags();
 	if (!ok) return 1;

@@ -10,6 +10,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/infantry_internal.h>
+#include <runtime/world/infantry_ladder.h> // make_ladder_resolve_io (the reset's resolve)
 #include <runtime/world/local_player.h> // LocalPlayer::view / radar (the class init's local resets)
 #include <runtime/world/player_spawn.h> // player_item_row (the bound row's class)
 #include <runtime/world/world.h>
@@ -604,13 +605,21 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity,
                 //  Entity_MovementCollisionResolver - the read @0x4B2EE2..0x4B2EFB]
                 const int32_t eye_offset[3] = {
                         inf.eye_offset_x, inf.eye_offset_y, inf.eye_offset_z};
+                // The tick's one resolver, so its ladder entry runs as it does in an update:
+                // the gate against the anchor reads savedLivePose.Z (+0x88), which the reset
+                // leaves, and the entry's lift reads the stance bits.
+                // [orig: Entity_ResetToSpawnState @0x4B9610 - the three pushes @0x4B9752..0x4B9754;
+                //  Entity_MovementCollisionResolver @0x4B2BD0 - `sub edi, [esi+88h]` @0x4B327D,
+                //  MoveOrder @0x4B331E, +0xEC00 @0x4B3332, +0x9C00 @0x4B3342, +0x5000 @0x4B334B]
+                const LadderResolveIO lio = make_ladder_resolve_io(
+                        *body, entity.saved_live_valid ? entity.saved_live_pos[2] : pos[2]);
                 const int32_t clearance = ai.collision->resolve_entity(
                         world, entity.handle, body->collide_state, pos.data(),
                         inf.vel, inf.vel[2], frame.capsule_bottom, frame.capsule_top,
                         heading, 0, (flags & kEntityFlagPlayer) != 0,
                         ai.is_authority, world.logic_tick, inf.anim_state,
                         infantry_anim_flags(inf.anim_state), body->health,
-                        nullptr, nullptr, eye_offset);
+                        nullptr, &lio, eye_offset);
                 body->self->position.set_q16({pos[0], pos[1], pos[2]});
                 if (clearance <= 0) body->self->position.z.q16 -= clearance;
             }

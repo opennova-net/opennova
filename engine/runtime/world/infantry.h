@@ -738,8 +738,8 @@ struct InfantryState {
         aimed_shot_available = false;
         idle_counter = 0;
         // The lean keys (MoveOrder 0x40 / 0x80) are not a respawn's either: the record's respawn
-        // arm stores no MoveOrder (the host's deploy clears the stance bits alone,
-        // infantry_respawn_snap), and the next pack rewrites them.
+        // arm stores no MoveOrder (the host's deploy clears the stance bits alone, ahead of its
+        // reset, Server_ReleasePlayerDeployment), and the next pack rewrites them.
         // [orig: NetPacket_SerializePlayerState @0x4C09C0 - the arm @0x4C1109..0x4C114C;
         //  Player_PackInputStateToEntity @0x4DF450 - the MoveOrder store @0x4DF68F, 0x40
         //  @0x4DF71F, 0x80 @0x4DF737]
