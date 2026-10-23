@@ -104,7 +104,18 @@ void warmup_permutation_and_root_motion() {
         CHECK(r.body().self->position.x.q16 == 8 * 65536 && r.body().self->position.y.q16 == 8 * 65536);
         CHECK(r.body().self->position.z.q16 == 65536);
         CHECK(r.body().inf.last_events == 0);
-        CHECK(r.entity().net_anim_phase == std::min(steps[i] + 1, 255));
+        // The warm-up mirrors the record's anim ratio byte. An 11-tick warm-up ends inside the
+        // walk fade (1/15), where the byte is the fade's float weight over its step, truncated:
+        // the quotient is 10.9999997 at 53 and 64 bits and 11 at 24, so the test pins the mirror
+        // and the two-value window, never the edge (Q3-11). Past the fade, a source without the
+        // retail clock gives the elapsed ticks.
+        // [orig: NetPacket_SerializePlayerState @0x4C0CF2..0x4C0D35]
+        const uint8_t ratio = r.entity().net_anim_phase;
+        CHECK(ratio == wire_anim_ratio(r.body().inf, &r.source));
+        if (r.body().inf.body_blend_active())
+            CHECK(steps[i] + 1 < 15 && (ratio == steps[i] || ratio == steps[i] + 1));
+        else
+            CHECK(ratio == std::min(steps[i] + 1, 255));
         CHECK(r.entity().npc_respawns == 3 && r.body().inf.magazine == 23);
         CHECK(r.entity().spawn_position.z == 0);
         CHECK(r.body().inf.aim_point[0] == 6 * 65536); // saved X + three units
