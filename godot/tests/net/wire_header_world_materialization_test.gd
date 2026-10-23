@@ -471,9 +471,11 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	# The zone pick is the DEATH flow now (the initial join deploys with no
 	# C2S 0x0E — retail sends none): kill on the authority, wait out the
 	# 3-second fresh-death pick penalty, then re-pick the streamed zone to
-	# land beside the carrier. The lone joiner on this dedicated host is
-	# pool-0 slot-0: wire handle 0 (get_joiner_self_handle's unbound sentinel
-	# is indistinguishable here).
+	# land beside the carrier. The authority kills the joiner's own H by its
+	# wire handle: this dedicated host's mission start spawned its own row's
+	# hidden body first (D-NET-352), so H is not pool-0 slot 0.
+	# [orig: Game_StartMission @0x524360 - the Server_InitAllPlayerEntitiesForRound
+	#  call @0x525BAF; D-NET-NEW-L7-39]
 	# The fixture's team-owned spawn zone holds the joining slot at the deploy
 	# overlay (the join sets the slot's undeployed bit whenever the mission has
 	# spawn zones), and every 0x0A re-hides a held slot's body. A hidden body's
@@ -504,7 +506,9 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		OS.delay_msec(2)
 	assert_true(join_hold_released,
 			"the overlay's default pick releases the join hold")
-	assert_eq(host.debug_kill_player_entity(0), OK)
+	var joiner_h := joiner.get_local_player_wire_handle()
+	assert_gt(joiner_h, 0, "the joiner's H is bound past the host row's body")
+	assert_eq(host.debug_kill_player_entity(joiner_h), OK)
 	var death_pick_pending := false
 	for _tick in range(240):
 		host.step()

@@ -179,6 +179,12 @@ void MissionKernel::bind_spawned_body(w::EntityHandle handle) {
 				[](int32_t) -> uint8_t { return 0; }, &assets(), handle);
 	mission::resolve_ai_weapons(world, *items, handle, &assets());
 	ensure_collision_instance(world, handle);
+	// The model init's facial slot, at the spawn: a person row takes its append-only slot
+	// there, not at the next tick's pass (a round init's body, the local player's among them,
+	// has its face from its birth; D-NET-NEW-L7-39) [orig: Entity_SpawnFromAnimSlotProperty
+	//  @0x43C390 - Entity_InitFromModel (the call @0x43C492) -> FaceAnim_AllocEntitySlot
+	//  (the call @0x40E22E)].
+	if (w::Entity *body = world.registry.get(handle)) world.facials.initialize_entity(world, *body);
 	// The host's spawn builds the slices after its model init, so the body's
 	// first slice reads the bound radius the model stamped.
 	// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - EntityDef_LoadModelsAndCallbacks

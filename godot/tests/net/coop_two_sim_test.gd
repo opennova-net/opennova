@@ -1241,10 +1241,14 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
 		return
+	# H by its wire handle: the Serve Only host's mission start also spawned its own row's
+	# hidden player body (D-NET-352, D-NET-NEW-L7-39) [orig: Game_StartMission @0x524360 -
+	# the Server_InitAllPlayerEntitiesForRound call @0x525BAF].
 	var host_joiner_index := -1
+	var joiner_h := joiner.get_local_player_wire_handle()
 	for ai_index in range(host.get_entity_count()):
 		var card: EntityCard = host.entity_card_by_ai_index(ai_index)
-		if card.get_item_id() == 0x14B9:
+		if card.get_item_id() == 0x14B9 and card.get_wire_handle() == joiner_h:
 			host_joiner_index = ai_index
 			break
 	assert_gte(host_joiner_index, 0,

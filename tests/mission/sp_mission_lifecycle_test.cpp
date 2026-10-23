@@ -197,16 +197,23 @@ void test_counter_step_plays_text_end_on_arrival() {
 // D-NET-NEW-L7-39: the single player's session create adds its own slot with no body (the own
 // arm stores g_LocalPlayerEntity, which every teardown zeroes), and its mission start's round
 // init spawns the body, hidden, past the PreMission pass; Player_InitPlayer and the start's
-// local-player block leave it hidden until the own join, which clears it. A restart's start
-// (Game_StartMission(1)) runs the same pass and round init. So the PreMission pass meets no
-// local player: its ShowWinSubgoal shows the objective and plays no NEW_GOAL (the null test).
+// local-player block leave it hidden until the own join, which clears it. So a first start's
+// PreMission pass meets no local player: its ShowWinSubgoal shows the objective and plays no
+// NEW_GOAL (the null test). A restart's start (Game_StartMission(1)) runs the same pass and
+// round init, but retail's restart destroys the entities without clearing g_LocalPlayerEntity
+// (only Player_InitPlayer's memset does, past the pass), so its pass reads the destroyed row and
+// plays NEW_GOAL at its Position; ours has no body there. The restart leg pins ours, a
+// deliberate fix of that dangling read (D-NET-NEW-L7-40, PERMANENT, ratified by the
+// maintainer 2026-10-23, Q-L7-39-1 (a)).
 // [orig: Server_PlayerAdd's own arm @0x51CC33..0x51CC60; Game_TeardownMission - the memset of
 //  g_LocalPlayerEntity @0x522774..0x522780; Game_StartMission @0x524360 - the
 //  EventTrigger_UpdateAllWithFlag2 call @0x525B86, the Server_InitAllPlayerEntitiesForRound call
 //  @0x525BAF, the Player_InitPlayer call @0x525BBC; EventAction_Dispatch case 35 - the
 //  g_LocalPlayerEntity test @0x4546E7..0x4546F1; Entity_SpawnFromAnimSlotProperty - Flags |=
 //  0x101 @0x43C508; Server_OnPlayerJoin - the clear @0x51A7DA; Game_RestartRoundSP - the
-//  Game_StartMission call @0x5263DB]
+//  Game_StartMission call @0x5263DB; Game_DestroyAllEntitiesAndReset @0x5235C0 (Entity_Destroy
+//  called @0x5235FA, no store to g_LocalPlayerEntity); Player_InitPlayer - the memset called
+//  @0x4E1602; EventAction_Dispatch case 35 - Sound_PlayAtPosition called @0x45470C]
 void test_the_local_body_is_born_at_the_round_init() {
 	const std::map<std::string, std::string> files;
 	for (const bool restart : {false, true}) {

@@ -535,7 +535,8 @@ static void test_board_walk_reaches_a_kernel_named_point() {
 
 // A spawned body's first candidate slice reads the bound radius its model
 // init stamps: the host's and the joiner's bind, and a spawn once the
-// collision world is up, build the slices after the model init.
+// collision world is up, build the slices after the model init. The same bind
+// gives a person row its facial slot.
 // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - Entity_InitFromModel
 //  called @0x43C492, the Entity_BuildProximityListsFromPools call @0x43C4EB]
 static void test_player_spawn_slice_reads_its_model_radius() {
@@ -552,6 +553,10 @@ static void test_player_spawn_slice_reads_its_model_radius() {
 		return;
 	}
 	CHECK(!mount.empty() && test_io::write_file(root + "/SliceMount.3di", mount));
+	// The person row's face, SliceMount.GRM by its graphic (the authored GRM fixture).
+	const std::vector<uint8_t> face = test_io::read_file(
+			std::string(test_paths_repo_root(__FILE__)) + "/fixtures/grm/person.grm");
+	CHECK(!face.empty() && test_io::write_file(root + "/SliceMount.grm", face));
 	// Retail's head row, the player's (its model the same mount), and the
 	// placed mount.
 	static const char kItems[] =
@@ -599,9 +604,17 @@ static void test_player_spawn_slice_reads_its_model_radius() {
 		spawn.health = 100;
 		const w::EntityHandle remote = w::spawn_remote_player(world, spawn);
 		CHECK(remote.valid());
+		CHECK(world.registry.get(remote) != nullptr &&
+				world.facials.for_entity(*world.registry.get(remote)) == nullptr);
 		kernel.bind_spawned_body(remote);
 		const w::Entity *body = world.registry.get(remote);
 		CHECK(body != nullptr && body->bound_radius > 0.0f);
+		// The bind is the spawn's model init: the person row takes its facial slot there, with
+		// no tick between, as a round init's body (the local player's) does (D-NET-NEW-L7-39,
+		// V-ROLL-BB F1) [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 -
+		//  Entity_InitFromModel (the call @0x43C492) -> FaceAnim_AllocEntitySlot (the call
+		//  @0x40E22E)].
+		CHECK(body != nullptr && world.facials.for_entity(*body) != nullptr);
 		CHECK(kernel.collision.candidate_count(remote) == 1);
 		// A spawn after the boot through the kernel's own spawn.
 		spawn.position = {10.0f, 20.0f - (4.0f + 1.5f * radius), 0.0f};
