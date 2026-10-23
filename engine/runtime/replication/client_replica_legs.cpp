@@ -6,6 +6,7 @@
 
 #include <runtime/world/entity.h>   // kEntityFlag*, kItemAttribLandable
 #include <runtime/world/infantry.h> // infantry_anim_flags
+#include <runtime/world/infantry_view.h>
 #include <base/io/bam.h>
 
 #include <cstdint>
@@ -14,13 +15,8 @@ namespace opennova::replication {
 
 namespace {
 
-constexpr int32_t kRowLegChaseClamp = 0x3000000;
-constexpr int32_t kRowLegTwistLimit = 0x30000000;
 constexpr int32_t kRowLegReplantMin = 59652320;
 constexpr int32_t kRowLegReplantSnap = 357913920;
-constexpr int32_t kRowViewYawLimit = 0x55555500;
-constexpr int32_t kRowPitchLimit = 0x38E38E00;
-constexpr int32_t kRowPronePitchLimit = 0x1C71C700;
 
 inline int32_t row_abs_bam(int32_t v) { return io::bam_abs(v); }
 
@@ -29,38 +25,22 @@ constexpr int32_t kRowOrg1LegTwistLimit = 0x20000000;
 
 } // namespace
 
-// The org2 view phase on a decoded row, with no locality test: a free-standing row's after its
-// chase apply and ahead of its dead tail, ride and conform (row_root_motion_tick), a seated one's
-// after its chase count and ahead of its ride link and mounted site (visit_remote_row's seated
-// branch, whose record lands Flags 0x40). Retail's also precedes its death edge, which the visit
-// runs first here: the edge writes no word the phase reads but Flags 0x40, which a
-// free-standing row's record never sets.
-// - under a canopy (Flags 0x20) the body heading (+0x8C) chases a sixteenth of the way to the
-//   Yaw and both re-plant targets (+0x2E4 / +0x2E8) take it;
-// - on a ladder, carried or under a canopy (Flags 0x100060) the leg model is skipped: the Yaw is
-//   held within 0x55555500 (120 degrees) of the body heading, unless its mount's config
-//   (+0x86C) is 3 or its ground entity is a vehicle in its crash state (+0x2EC;
-//   `yaw_clamp_skipped`), and both legs (+0x2D4 / +0x2D8) take the body heading, their targets
-//   left as they stand;
-// - otherwise the LEGS chase the Yaw and the body heading is their midpoint, the root delta
-//   rotating by the BODY, so a turning peer's feet lead its torso: a movement state (+0x2BC's
-//   flag bit 0) re-plants both targets on the Yaw, an idle one each leg past 0x38E38E0 off it and
-//   either past 0x15555540 or on its 64-tick window (the left's 32 ticks behind); each leg
-//   steps a quarter, clamped to 0x3000000, and is held within 0x30000000 of the Yaw;
-// - then the Pitch is held within 0x38E38E00 (80 degrees) of savedLivePitch (+0x90), 0x1C71C700
-//   (40) while prone (MoveOrder 0x100, the record's stance bit) with none of Flags 0x10A000,
-//   unless its mount is a vehicle in its crash state (`pitch_clamp_skipped`).
-// world::infantry_org2_view_tick is the authority's twin.
+// The org2 view phase on a decoded row (world::infantry_org2_view_phase, the authority's body tick's
+// kernel too): a free-standing row's after its chase apply and ahead of its dead tail, ride and
+// conform (row_root_motion_tick), a seated one's after its chase count and ahead of its ride link
+// and mounted site (visit_remote_row's seated branch, whose record lands Flags 0x40). Retail's also
+// precedes its death edge, which the visit runs first here: the edge writes no word the phase
+// reads but Flags 0x40, which a free-standing row's record never sets. The row's words are the
+// decoded Yaw and Pitch, the body heading, legs and targets its passes keep, and savedLivePitch;
+// its prone local the record's stance bit (MoveOrder 0x100) under the prologue's gates
+// (world::infantry_org2_prone_local: a seated row's record lands Flags 0x40 for a vehicle seat,
+// and `living_mount` is a live seated row's carrier row, which a client spawns from its def);
+// its window key the update's.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the prone gate @0x4B416C..0x4B4183, the
-//  canopy chase @0x4B4945..0x4B496C, the skip test @0x4B4972..0x4B4978, the mount config test
-//  @0x4B4AC6..0x4B4ADE, the ground test @0x4B4AE0..0x4B4AF9 (Entity_HasActiveParent @0x402BB0
-//  called @0x4B4AE9), the clamp @0x4B4AFB..0x4B4B42, the legs @0x4B4B5F..0x4B4B6B, the selector
-//  @0x4B497E..0x4B4984, the idle windows @0x4B4991..0x4B49E3 (the key @0x4B467A), the chases
-//  @0x4B49E9..0x4B4AA3, the midpoint @0x4B4AA9..0x4B4ABB, the mount's crash test
-//  @0x4B4B82..0x4B4BA0, the pitch clamp @0x4B4BA2..0x4B4BC6; the record's stance bits
-//  NetPacket_SerializePlayerState @0x4C09C0 - @0x4C11FD..0x4C1242]
+//  phase @0x4B4945..0x4B4BC6; the record's stance bits NetPacket_SerializePlayerState @0x4C09C0 -
+//  @0x4C11FD..0x4C1242]
 void row_org2_view_phase(ClientEntityState &es, uint32_t key, bool yaw_clamp_skipped,
-		bool pitch_clamp_skipped) {
+		bool pitch_clamp_skipped, bool living_mount) {
 	// A row no spawn's class init or respawn reset stamped (rm_leg_seeded) takes the stamp here.
 	if (!es.rm_leg_seeded) {
 		es.rm_leg_yaw[0] = es.rm_leg_yaw[1] = es.heading_bam;
@@ -69,62 +49,19 @@ void row_org2_view_phase(ClientEntityState &es, uint32_t key, bool yaw_clamp_ski
 		es.rm_leg_seeded = true;
 	}
 	const uint32_t flags = es.rm_entity_flags;
-	if ((flags & world::kEntityFlagParachute) != 0u) {
-		es.rm_body_heading = io::bam_add(es.rm_body_heading,
-				io::bam_sar(io::bam_add(io::bam_sub(es.heading_bam, es.rm_body_heading), 8), 4));
-		es.rm_leg_target[0] = es.rm_leg_target[1] = es.rm_body_heading;
-	}
-	if ((flags & 0x100060u) != 0u) {
-		if (!yaw_clamp_skipped) {
-			const int32_t d = io::bam_sub(es.heading_bam, es.rm_body_heading);
-			if (d > kRowViewYawLimit)
-				es.heading_bam = io::bam_add(es.rm_body_heading, kRowViewYawLimit);
-			if (d < -kRowViewYawLimit)
-				es.heading_bam = io::bam_sub(es.rm_body_heading, kRowViewYawLimit);
-		}
-		es.rm_leg_yaw[0] = es.rm_leg_yaw[1] = es.rm_body_heading;
-	} else {
-		const int32_t yaw = es.heading_bam;
-		const int current = es.net_anim_current >= 0 ? static_cast<int>(es.net_anim_current)
-		                                             : static_cast<int>(es.anim_state_id);
-		if ((world::infantry_anim_flags(current) & 0x1u) != 0) {
-			es.rm_leg_target[1] = yaw;
-			es.rm_leg_target[0] = yaw;
-		} else {
-			const int32_t dl = io::bam_sub(yaw, es.rm_leg_yaw[1]);
-			if (row_abs_bam(dl) > kRowLegReplantMin &&
-			    (row_abs_bam(dl) > kRowLegReplantSnap || ((key - 32) & 63u) == 0))
-				es.rm_leg_target[1] = yaw;
-			const int32_t dr = io::bam_sub(yaw, es.rm_leg_yaw[0]);
-			if (row_abs_bam(dr) > kRowLegReplantMin &&
-			    (row_abs_bam(dr) > kRowLegReplantSnap || (key & 63u) == 0))
-				es.rm_leg_target[0] = yaw;
-		}
-		for (int leg = 0; leg < 2; ++leg) {
-			const int32_t ldiff = io::bam_sub(es.rm_leg_target[leg], es.rm_leg_yaw[leg]);
-			int32_t lstep = io::bam_sar(io::bam_add(ldiff, 2), 2);
-			if (lstep > kRowLegChaseClamp) lstep = kRowLegChaseClamp;
-			if (lstep < -kRowLegChaseClamp) lstep = -kRowLegChaseClamp;
-			es.rm_leg_yaw[leg] = io::bam_add(es.rm_leg_yaw[leg], lstep);
-			const int32_t twist = io::bam_sub(es.rm_leg_yaw[leg], yaw);
-			if (twist > kRowLegTwistLimit)
-				es.rm_leg_yaw[leg] = io::bam_add(yaw, kRowLegTwistLimit);
-			else if (twist < -kRowLegTwistLimit)
-				es.rm_leg_yaw[leg] = io::bam_sub(yaw, kRowLegTwistLimit);
-		}
-		es.rm_body_heading = io::bam_add(
-				es.rm_leg_yaw[1],
-				io::bam_sar(io::bam_sub(es.rm_leg_yaw[0], es.rm_leg_yaw[1]), 1));
-	}
-	if (pitch_clamp_skipped) return;
-	const bool prone = (es.net_stance_bits & 0x1u) != 0u &&
-			(flags & (world::kEntityFlagInAir | world::kEntityFlagDrowning |
-			          world::kEntityFlagLadderContact)) == 0u;
-	const int32_t limit = prone ? kRowPronePitchLimit : kRowPitchLimit;
-	if (io::bam_sub(es.pitch_bam, es.rm_body_pitch) > limit)
-		es.pitch_bam = io::bam_add(es.rm_body_pitch, limit);
-	if (io::bam_sub(es.pitch_bam, es.rm_body_pitch) < -limit)
-		es.pitch_bam = io::bam_sub(es.rm_body_pitch, limit);
+	world::Org2ViewGates gates;
+	gates.flags = flags;
+	gates.anim_state = es.net_anim_current >= 0 ? static_cast<int>(es.net_anim_current)
+	                                            : static_cast<int>(es.anim_state_id);
+	gates.tick = key;
+	gates.prone = world::infantry_org2_prone_local((es.net_stance_bits & 0x1u) != 0u, flags,
+			living_mount);
+	gates.yaw_clamp_skipped = yaw_clamp_skipped;
+	gates.pitch_clamp_skipped = pitch_clamp_skipped;
+	world::infantry_org2_view_phase(
+			world::Org2ViewWords{es.heading_bam, es.pitch_bam, es.rm_body_heading, es.rm_leg_yaw,
+					es.rm_leg_target, es.rm_body_pitch},
+			gates);
 }
 
 // The org1 leg chase on a free-standing row, after its body chase: rm_leg_yaw[0] / [1] are the

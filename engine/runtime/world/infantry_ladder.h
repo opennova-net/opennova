@@ -24,17 +24,6 @@ void ladder_push_back(EntityPosition &pos, int32_t yaw_bam);
 //  0x4b76c9/0x4b8019]
 void ladder_unlatch(Entity *ent);
 
-// While latched, the view yaw is clamped to ±120° (0x55555500) of the body
-// heading — the ladder does not let the mouse spin the aim behind the climber;
-// the clamped write reaches the mouse accumulator through the embedder
-// write-back. The parachute/carried legs of the same 0x100060 gate and its
-// carried-parent exemptions ride their slices.
-// [orig: gate @ 0x4b4978; clamp ±0x55555500 @ 0x4b4b04-0x4b4b42;
-//  g_LocalPlayerLookYaw mirror @ 0x4b4b2a]
-// `yaw` is the body's Yaw word: the local player's look accumulator, any other
-// player body's own heading.
-void infantry_ladder_view_clamp(int32_t &yaw, int32_t body_heading, uint32_t entity_flags);
-
 // The climb-motor channels the resolver's CL legs read and write, built over
 // this entity's InfantryState. The returned struct holds POINTERS into
 // e/e.inf — build it at the resolve call site and consume it immediately.

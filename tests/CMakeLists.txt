@@ -5391,6 +5391,12 @@ add_executable(netsim_client_replica_pipeline_body_exits_test
 target_link_libraries(netsim_client_replica_pipeline_body_exits_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME netsim_client_replica_pipeline_body_exits
     COMMAND netsim_client_replica_pipeline_body_exits_test)
+# D-NET-NEW-L5-47..49: the player body's view phase both bodies share, and the authority's seated
+# body running it (the skip branch's legs, the seat Yaw clamp and its skips, the crashed mount's
+# pitch skip, the prone local's mount clear).
+add_executable(infantry_org2_view_test world/infantry_org2_view_test.cpp)
+target_link_libraries(infantry_org2_view_test PRIVATE opennova_runtime)
+add_test(NAME infantry_org2_view COMMAND infantry_org2_view_test)
 
 # --- parity lane L6 (stream/16.16) ---
 # D-NET-507: the entity position is retail's 16.16 words from the BMS spawn through a

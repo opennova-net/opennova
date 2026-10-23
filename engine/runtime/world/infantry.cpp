@@ -29,6 +29,7 @@
 #include <runtime/world/dir_table.h>
 #include <runtime/world/infantry_ladder.h>
 #include <runtime/world/infantry_sound.h>
+#include <runtime/world/infantry_view.h>
 #include <runtime/world/collision_force.h>
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/entity_spawn.h>
@@ -48,16 +49,12 @@ constexpr int32_t kBodyTurnClamp = 69273360;
 // Leg-chain chase constants, per motor (D-INF-12 closure, byte-witnessed 2026-07-16).
 // org1 (NPC) [orig: @0x4bea11-0x4beb12]: quarter-step (sixteenth when def+84&0x200),
 // rate clamp ±0x5000000 (~7 deg), twist limit ±0x20000000 (45 deg) from the BODY.
-// org2 (player) [orig: @0x4b49e9-0x4b4aa9]: quarter-step, rate clamp ±0x3000000
-// (~4.2 deg), twist limit ±0x30000000 (67.5 deg) from the render YAW.
-// Shared re-plant hysteresis [orig: @0x4be977-0x4be9cc / @0x4b4991-0x4b49e3]:
+// org2 (player): infantry_view.cpp. The org1 re-plant hysteresis [orig: @0x4be977-0x4be9cc]:
 // |Δ| > 59652320 (~5 deg) and (|Δ| > 357913920 (~30 deg) or the leg's 64-tick
 // window) — the LEFT leg's window runs 32 ticks behind the right's ((tick-32)&0x3F
-// vs tick&0x3F [orig: @0x4be991/@0x4be9bb; org2 ebp = tick&0x3F @0x4b4680]).
+// vs tick&0x3F [orig: @0x4be991/@0x4be9bb]).
 constexpr int32_t kLegChaseClamp = 83886080;        // 0x5000000, org1
 constexpr int32_t kLegTwistLimit = 0x20000000;      // org1, vs body
-constexpr int32_t kLegChaseClampOrg2 = 0x3000000;   // org2 [orig: @0x4b49fb]
-constexpr int32_t kLegTwistLimitOrg2 = 0x30000000;  // org2, vs yaw [orig: @0x4b4a23]
 constexpr int32_t kLegReplantMin = 59652320;
 constexpr int32_t kLegReplantSnap = 357913920;
 // [orig: gravity, witnessed per tick with the ladder/drowning skip (Flags 0x108000,
@@ -648,121 +645,6 @@ void infantry_org1_heading_chase(AiEntity &e, const Entity *ent, uint32_t key) {
     infantry_look_tick(inf, e.heading, e.pitch);
 }
 
-// The org2 view/leg phase precedes the scoped additions, before later
-// animation selection or ladder movement consumes aim. It runs for every player
-// body: the legs chase the body's Yaw word and the look pitch clamps about the
-// body pitch whoever owns the body; the local player's Yaw and Pitch are its look
-// accumulators (the mouse), any other body's its own words (a remote player's the
-// read-apply and the chase write). [orig: Entity_UpdateInfantryPlayerBody
-// @0x4B4945..0x4B4BC6, no locality test but the g_LocalPlayerLookYaw mirrors
-// @0x4B4B1C / @0x4B4B4B; scoped additions @0x4B5C78..0x4B5C91]
-// `tick` is the raw current_tick the org2 prologue banks [orig: @0x4B4147].
-static void infantry_org2_view_tick(AiEntity &e, const Entity *tick_entity, uint32_t tick) {
-    InfantryState &inf = e.inf;
-    const bool local = inf.is_local_player;
-    // org2 on-foot [orig: Entity_UpdateInfantryPlayerBody @0x4b4945-0x4b4ac1].
-    // There is NO body chase: the LEGS chase the mouse yaw (+0x10) directly and
-    // the body heading is written as their midpoint — the legs lead, the body
-    // follows, and the §14 torso twist is (yaw − leg midpoint). The parachute
-    // (Flags 0x20) sixteenth-step body chase @0x4b494d runs first, below; the
-    // seat-bone follow @0x4b654e is the mounted pose (ai_system.cpp).
-    //
-    // While latched on a ladder the view yaw is clamped to ±120° of the
-    // body heading (infantry_ladder.cpp). [orig: gate @ 0x4b4978; clamp
-    // @ 0x4b4b04-0x4b4b42]
-    const uint32_t leg_flags = tick_entity != nullptr
-            ? (tick_entity->flags | tick_entity->engine_flags)
-            : 0u;
-    int32_t &yaw_word = local ? inf.target_heading : e.heading;
-    if ((leg_flags & kEntityFlagParachute) != 0) {
-        const int32_t delta = io::bam_add(io::bam_sub(yaw_word, inf.body_heading), 8) >> 4;
-        inf.body_heading = io::bam_add(inf.body_heading, delta);
-    }
-    infantry_ladder_view_clamp(yaw_word, inf.body_heading, leg_flags);
-    if (local)
-        e.heading = inf.target_heading; // mouse-instant render/aim yaw [orig:
-                                        // Input_HandleActionBinding @0x49ad40 writes +0x10]
-    const int32_t yaw = e.heading;
-    if ((leg_flags & (kEntityFlagLadderContact | kEntityFlagMounted |
-                      kEntityFlagParachute)) != 0) {
-        // Latched on a ladder, carried, or under a chute: the whole
-        // re-plant / chase / midpoint model is SKIPPED and both legs snap
-        // to the body heading — the legs stay locked to the ladder while
-        // the torso alone twists toward the view [orig: `test ecx,100060h;
-        // jnz loc_4B4AC6` @0x4b4972..0x4b4978; the tail `mov eax,[esi+8Ch];
-        // mov [esi+2D4h],eax; mov [esi+2D8h],eax` @0x4b4b5f..0x4b4b6b].
-        inf.leg_target[0] = inf.body_heading;
-        inf.leg_target[1] = inf.body_heading;
-        inf.leg_yaw[0] = inf.body_heading;
-        inf.leg_yaw[1] = inf.body_heading;
-    } else if ((infantry_anim_flags(inf.anim_state) & 0x1u) != 0) {
-        // A movement state re-plants both feet on the yaw every tick.
-        // [orig: @0x4b4984 flag-table bit0 -> @0x4b49dd/@0x4b49e3]
-        inf.leg_target[1] = yaw;
-        inf.leg_target[0] = yaw;
-    } else {
-        // Idle: per-leg re-plant measured vs the CURRENT LEG YAW (org1 measures
-        // vs the target), left window 32 ticks behind the right. Both windows
-        // key on the RAW tick banked at @0x4B4147, unstaggered.
-        // [orig: L @0x4b4993/@0x4b49ad-0x4b49bc ((tick-32)&0x3F);
-        //  R @0x4b499b/@0x4b49d0-0x4b49e3 (ebp = tick&0x3F @0x4B467A..0x4B4683)]
-        const int32_t dl = io::bam_sub(yaw, inf.leg_yaw[1]);
-        if (abs_bam(dl) > kLegReplantMin &&
-            (abs_bam(dl) > kLegReplantSnap || ((tick - 32) & 63u) == 0))
-            inf.leg_target[1] = yaw;
-        const int32_t dr = io::bam_sub(yaw, inf.leg_yaw[0]);
-        if (abs_bam(dr) > kLegReplantMin &&
-            (abs_bam(dr) > kLegReplantSnap || (tick & 63u) == 0))
-            inf.leg_target[0] = yaw;
-    }
-    const bool leg_model_skipped =
-            (leg_flags & (kEntityFlagLadderContact | kEntityFlagMounted |
-                          kEntityFlagParachute)) != 0;
-    for (int leg = 0; leg < 2 && !leg_model_skipped; ++leg) {
-        // Quarter-step, rate clamp ±0x3000000 (~4.2 deg/tick — 3/5 the org1
-        // rate), twist limit ±0x30000000 (67.5 deg) vs the YAW, not the body.
-        // [orig: R @0x4b49e9-0x4b4a43; L @0x4b4a49-0x4b4aa9]
-        const int32_t ldiff = io::bam_sub(inf.leg_target[leg], inf.leg_yaw[leg]);
-        int32_t lstep = io::bam_sar(io::bam_add(ldiff, 2), 2);
-        if (lstep > kLegChaseClampOrg2) lstep = kLegChaseClampOrg2;
-        if (lstep < -kLegChaseClampOrg2) lstep = -kLegChaseClampOrg2;
-        inf.leg_yaw[leg] = io::bam_add(inf.leg_yaw[leg], lstep);
-        const int32_t twist = io::bam_sub(inf.leg_yaw[leg], yaw);
-        if (twist > kLegTwistLimitOrg2)
-            inf.leg_yaw[leg] = io::bam_add(yaw, kLegTwistLimitOrg2);
-        else if (twist < -kLegTwistLimitOrg2)
-            inf.leg_yaw[leg] = io::bam_sub(yaw, kLegTwistLimitOrg2);
-    }
-    // bodyHeading = legL + (legR - legL)/2. [orig: @0x4b4aa9-0x4b4abb]
-    if (!leg_model_skipped)
-        inf.body_heading = io::bam_add(
-            inf.leg_yaw[1], io::bam_sar(io::bam_sub(inf.leg_yaw[0], inf.leg_yaw[1]), 1));
-    // The motor-side look-pitch clamp RELATIVE TO THE BODY PITCH: ±80 deg,
-    // ±40 deg while effectively prone, measured from the slope-conformed
-    // body pitch (+0x90) rather than level — prone uphill shifts the window.
-    // Skipped only for a seat in a vehicle parent flagged +0x2EC (mounted
-    // bodies leave this block earlier). "Effectively prone" = the prone
-    // latch with none of Flags 0x10A000 (in air / drowning / ladder).
-    // [orig: @0x4b4b71..0x4b4bc6 — limit select @0x4b4b76/@0x4b4b7d, the
-    //  two-sided clamp on +0x14 against +0x90 @0x4b4ba2..0x4b4bc6;
-    //  prone_local gate @0x4b416c..0x4b4183]
-    {
-        const bool prone_effective =
-                inf.stance == InfantryState::Stance::kProne &&
-                (leg_flags & (kEntityFlagInAir | kEntityFlagDrowning |
-                              kEntityFlagLadderContact)) == 0;
-        // 0x1C71C700 (+40 deg) / 0x38E38E00 (+80 deg) — the same two BAM
-        // constants player_look.h names for the input-side clamp.
-        const int32_t limit = prone_effective ? 0x1C71C700 : 0x38E38E00;
-        int32_t &pitch_word = local ? inf.look_pitch : e.pitch;
-        if (pitch_word - e.body_pitch > limit) pitch_word = e.body_pitch + limit;
-        if (pitch_word - e.body_pitch < -limit) pitch_word = e.body_pitch - limit;
-    }
-    // The original clamp writes entity Pitch directly; publish our input
-    // mirror before the following drift and later body consumers read it.
-    if (local) e.pitch = inf.look_pitch;
-}
-
 // See the ai.h declaration.
 PhysicsClass body_move_row(const World &world, const AiEntity &e, const Entity *ent) {
     const bool player_body = e.inf.is_local_player || e.net_is_remote_peer ||
@@ -1132,17 +1014,20 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         weight_inputs.clipweight_fp16 = held->clipweight_fp16;
     }
     if (!npc_body) infantry_weapon_weight_spread_tick(e.inf, weight_inputs);
-    // Keep the on-foot view clamp/leg phase before scoped drift. The mounted
-    // branch still consumes the same already-drifted look when posing its seat.
-    // This phase has no PRNG draws, so recoil/yaw/pitch sampling stays ordered.
-    // [orig: view/legs @0x4B4945..0x4B4BC6 before drift @0x4B5966]
-    const bool view_prepared = !npc_body && !client_wire_peer && !mounted_for_spread;
+    // The view phase (infantry_view.cpp) runs for every player body the authority
+    // moves, seated or not, ahead of the scoped drift: a seated body's Flags 0x40
+    // takes its skip branch (the Yaw held about the body heading its last seat
+    // carry left, the legs on it), and its seat pose later reads the clamped look.
+    // This phase has no PRNG draws.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the phase @0x4B4945..0x4B4BC6
+    //  ahead of the drift @0x4B5966 and the mounted site's returns @0x4B6907 / @0x4B6977]
     // The org2 body reads the RAW current_tick for its leg re-plant windows:
     // the prologue stores it into the frame slot and the leg phase masks that
     // slot, with no per-entity stagger term (that term is org1's alone).
     // [orig: Entity_UpdateInfantryPlayerBody store @0x4B4147; read
     //  @0x4B467A..0x4B4683 (ebp = tick & 0x3F)]
-    if (view_prepared) infantry_org2_view_tick(e, tick_entity, logic_tick);
+    if (!npc_body && !client_wire_peer)
+        infantry_org2_view_tick(world, e, tick_entity, logic_tick);
     // [orig: Entity_UpdateInfantryPlayerBody @ 0x4B40E0, local-only gate @0x4B5966]
     if (world.local_player_state != nullptr)
         world.local_player_state->apply_scoped_aim_drift(e, logic_tick);
@@ -1530,15 +1415,6 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // (No ground sample here: neither organic motor samples the ground ahead of
     // its vertical block. The clearance is the movement resolver's ground-settle
     // tail at every resolve, below.)
-
-    // 5. The org2 heading/leg chase (org1 chased above, before its fire pass).
-    if (!npc_body) {
-        // A stale mount can fall back to the ordinary mover during this tick.
-        // Valid mounted bodies returned above; ordinary player bodies already
-        // ran the view phase ahead of their scoped drift.
-        // Raw tick, not the org1 stagger key [orig: @0x4B4147 / @0x4B467A].
-        if (!view_prepared) infantry_org2_view_tick(e, tick_entity, logic_tick);
-    }
 
     // 6. The org2 slope pass: conform-or-decay body_pitch/roll + the steep-ground
     // slide (org1 ran its pass after the corpse leg). Cadence lives inside (org2

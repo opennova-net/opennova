@@ -1,6 +1,7 @@
 // The ladder climb legs of the infantry motor (the D-COL-5 port), split out of
 // infantry.cpp (W3-7 size gate): the org2 on-ladder override + dismounts, the
-// org1 on-ladder block, the view clamp, and the resolver-IO build. The gravity
+// org1 on-ladder block, and the resolver-IO build (the ladder's view clamp is the
+// org2 view phase's, infantry_view.cpp). The gravity
 // variant, the jump/bottom exit tails, and the root/gravity gates stay inline
 // in tick_infantry where the witnessed flow interleaves them.
 // Witness record: docs/world/world-wac-ai-re.md §30.
@@ -29,15 +30,6 @@ void ladder_unlatch(Entity *ent) {
     if (ent == nullptr) return;
     ent->flags &= ~kEntityFlagLadderContact;
     ent->engine_flags &= ~kEntityFlagLadderContact;
-}
-
-void infantry_ladder_view_clamp(int32_t &yaw, int32_t body_heading, uint32_t entity_flags) {
-    if ((entity_flags & (kEntityFlagLadderContact | kEntityFlagParachute)) == 0) return;
-    const int32_t d = io::bam_sub(yaw, body_heading);
-    if (d > 1431655680)
-        yaw = io::bam_add(body_heading, 1431655680);
-    else if (d < -1431655680)
-        yaw = io::bam_sub(body_heading, 1431655680);
 }
 
 LadderResolveIO make_ladder_resolve_io(AiEntity &e, int32_t tick_start_z) {

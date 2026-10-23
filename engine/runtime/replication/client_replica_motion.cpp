@@ -920,7 +920,8 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		const bool ground_crashed = es.resolved_ground != wire_handle::kInvalid &&
 				player_io->ground_crashed != nullptr && *player_io->ground_crashed &&
 				(*player_io->ground_crashed)(es.resolved_ground);
-		row_org2_view_phase(es, key, ground_crashed, /*pitch_clamp_skipped=*/false);
+		row_org2_view_phase(es, key, ground_crashed, /*pitch_clamp_skipped=*/false,
+				/*living_mount=*/false);
 		if ((es.rm_entity_flags & world::kEntityFlagDead) != 0) {
 			es.rm_aim_word = es.rm_body_pitch;
 			es.heading_bam = es.rm_body_heading;
@@ -1828,9 +1829,11 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 		// the skip branch: the Yaw held 120 degrees about the body heading its last seat carry left
 		// unless its mount's config (+0x86C) is 3 or its mount, its ground since the pass's head, is
 		// a vehicle in its crash state; the legs on the body heading; the Pitch held about
-		// savedLivePitch unless that mount is crashed (D-NET-NEW-L5-46).
+		// savedLivePitch unless that mount is crashed (D-NET-NEW-L5-46), its prone limit cleared
+		// for a live row on its carrier (the prologue's mount clear).
 		// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the ground = mount store @0x4B41B4,
-		//  the view phase @0x4B4945..0x4B4BC6 ahead of the ride link and the mounted site]
+		//  the prone clear @0x4B46FC..0x4B471B, the view phase @0x4B4945..0x4B4BC6 ahead of the
+		//  ride link and the mounted site]
 		// The seat frame serves the phase's mount config and the mounted site's seat carry.
 		const bool seated_player = es.cls == EntityClass::Player && es.handle != self_handle;
 		ReplicaSeatFrame seat;
@@ -1844,7 +1847,7 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 					replica_ground_crashed_resolver_(es.carrier_handle);
 			row_org2_view_phase(es, rm_key,
 					(seat.mount_config_valid && seat.mount_config == 3) || mount_crashed,
-					mount_crashed);
+					mount_crashed, mount != nullptr && !es.net_health_zero);
 		}
 		// A seated body's pass still refreshes its ride link off the seat's
 		// ground link (the record's store) [orig: @0x4B5EA9..0x4B5F2C;
