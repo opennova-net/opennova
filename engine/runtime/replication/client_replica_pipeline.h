@@ -716,6 +716,14 @@ public:
 	void set_replica_adm_resolver(ReplicaAdmResolver resolver) {
 		replica_adm_resolver_ = std::move(resolver);
 	}
+	// Whether a ground entity (a wire handle) is a vehicle (def type 1) in its crash state (its
+	// +0x2EC byte): a player row on a ladder or under a canopy standing on one keeps its Yaw
+	// unclamped [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - Entity_HasActiveParent
+	// @0x402BB0 called @0x4B4AE9, `cmp byte ptr [edi+2ECh], 0` @0x4B4AF2].
+	using ReplicaGroundCrashedResolver = std::function<bool(uint16_t ground)>;
+	void set_replica_ground_crashed_resolver(ReplicaGroundCrashedResolver resolver) {
+		replica_ground_crashed_resolver_ = std::move(resolver);
+	}
 	// A seated row's seat type (+0x168: 1 sitex, 2 ctrlx, 3 UseGun, 5 drvrx), the
 	// type of the carrier's seat whose bone the record names, which the attach
 	// stamps from the carrier model's userpoint; 0 for none. The embedder answers
@@ -899,8 +907,9 @@ private:
 	void apply_entity_remove(const std::vector<uint8_t> &body);  // 0x12
 	void apply_objective_entity_state(const std::vector<uint8_t> &body); // 0x2F
 	// A seated player row's body pass (client_replica_motion.cpp): its primary
-	// channel, the seat carry, a passenger's lean keys and the mounted eye.
-	void tick_seated_body(ClientEntityState &es);
+	// channel, the seat carry (from `seat`, its resolved seat frame, or none), a
+	// passenger's lean keys and the mounted eye.
+	void tick_seated_body(ClientEntityState &es, const ReplicaSeatFrame *seat);
 	// One row's whole visit in tick_remote_motion's walk, and the walk's corpse
 	// erase (client_replica_motion.cpp).
 	void visit_remote_row(ClientEntityState &es, uint16_t self_handle, uint32_t rm_key);
@@ -978,6 +987,7 @@ private:
 	ReplicaDefAttribResolver replica_def_attrib_resolver_;
 	ReplicaDefAttribResolver replica_def_attrib2_resolver_;
 	ReplicaAdmResolver replica_adm_resolver_;
+	ReplicaGroundCrashedResolver replica_ground_crashed_resolver_;
 	ReplicaSeatTypeResolver replica_seat_type_resolver_;
 	ReplicaSeatFrameResolver replica_seat_frame_resolver_;
 	CarrierPoseProvider carrier_pose_provider_;

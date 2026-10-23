@@ -95,8 +95,9 @@ inline bool aim_overlay_inputs_for_client(
 	out.aim_pitch = entity.pitch_bam;
 	// The body chain turns by +0x8C and the two leg chains by +0x2D4 / +0x2D8, whatever the
 	// row's class (D-NET-NEW-L5-42): an org1 row's body chase and leg chase (row_org1_legs) keep
-	// those words, a player row's leg chase (row_leg_chase) its legs and their midpoint, and each
-	// class's spawn init and respawn reset stamp them with the Yaw. A host's view chases no row;
+	// those words, a player row's view phase (row_org2_view_phase) its legs and their midpoint,
+	// and each class's spawn init and respawn reset stamp them with the Yaw. A host's view chases
+	// no row;
 	// its persons present the World's bodies, whose own updates keep the words (present_rows.cpp).
 	// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - `mov edx, [ebp+8Ch]` @0x4B1819 (the
 	//  body matrix @0x4B182E), `mov ecx, [ebp+2D4h]` @0x4B1833 (@0x4B1845), `mov eax, [ebp+2D8h]`

@@ -856,7 +856,7 @@ struct ClientEntityState {
 	// Whether a player row's leg words hold retail's stamps: its spawn's class init
 	// (seed_player_init_words), its respawn record's reset or its seated site's. A row none
 	// stamped (no row in play: every row arrives by a 0x0C or a 0x18) takes the stamp at its
-	// first leg chase (row_leg_chase).
+	// first view phase (row_org2_view_phase).
 	bool rm_leg_seeded = false;
 	// Parked by the body walk past the own body's slot: the row's visit, its
 	// selection and its lean ramp wait for the after-self leg

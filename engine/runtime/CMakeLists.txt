@@ -433,6 +433,7 @@ add_library(opennova_runtime STATIC
     # --- parity lane L2 sources ---
     # --- parity lane L3 sources ---
     # --- parity lane L5 sources ---
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_legs.cpp # the organic replica bodies' leg phases (split off client_replica_motion.cpp)
     # --- parity lane L6 sources ---
     # inmatch — the in-match session (ex net/inmatch + net/npruntime, ADR 0043
     # d4): the fixed-tick session, the listen-host frame, the IDA-faithful

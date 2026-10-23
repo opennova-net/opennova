@@ -7,6 +7,7 @@
 #include <runtime/replication/client_replica_pipeline.h>
 
 #include "client_replica_body_arbitration.h"
+#include "client_replica_legs.h"
 
 #include <runtime/audio/sound_profile.h>            // kSlot* (the replica mover legs' profile slots)
 #include <runtime/terrain_query/height_field.h>        // remote-person terrain settle
@@ -298,124 +299,6 @@ inline int32_t chase_step(int32_t d, int32_t n) {
 } // namespace
 
 namespace {
-
-// The org2 leg-chain chase applied to a decoded row: the LEGS chase the wire
-// yaw and the body heading is their midpoint — the root delta rotates by the
-// BODY, so a turning peer's feet lead its torso exactly as on the authority
-// [orig: Entity_UpdateInfantryPlayerBody @0x4b4945..0x4b4ac1 — movement
-// re-plant @0x4b49dd/@0x4b49e3; idle windows ((tick-32)&0x3F / tick&0x3F)
-// @0x4b49ad..0x4b49e3; quarter-step clamp ±0x3000000 @0x4b49fb; twist
-// ±0x30000000 vs the yaw @0x4b4a23; midpoint @0x4b4ab5. The authoritative
-// sibling is infantry.cpp's player leg block — same constants, same shape.]
-constexpr int32_t kRowLegChaseClamp = 0x3000000;
-constexpr int32_t kRowLegTwistLimit = 0x30000000;
-constexpr int32_t kRowLegReplantMin = 59652320;
-constexpr int32_t kRowLegReplantSnap = 357913920;
-
-inline int32_t row_abs_bam(int32_t v) { return io::bam_abs(v); }
-
-
-void row_leg_chase(ClientEntityState &es, uint32_t key) {
-	const int32_t yaw = es.heading_bam;
-	// A row no spawn's class init or respawn reset stamped (rm_leg_seeded) takes the stamp here.
-	if (!es.rm_leg_seeded) {
-		es.rm_leg_yaw[0] = es.rm_leg_yaw[1] = yaw;
-		es.rm_leg_target[0] = es.rm_leg_target[1] = yaw;
-		es.rm_body_heading = yaw;
-		es.rm_leg_seeded = true;
-	}
-	if ((world::infantry_anim_flags(es.rm_state) & 0x1u) != 0) {
-		es.rm_leg_target[1] = yaw;
-		es.rm_leg_target[0] = yaw;
-	} else {
-		const int32_t dl = io::bam_sub(yaw, es.rm_leg_yaw[1]);
-		if (row_abs_bam(dl) > kRowLegReplantMin &&
-		    (row_abs_bam(dl) > kRowLegReplantSnap || ((key - 32) & 63u) == 0))
-			es.rm_leg_target[1] = yaw;
-		const int32_t dr = io::bam_sub(yaw, es.rm_leg_yaw[0]);
-		if (row_abs_bam(dr) > kRowLegReplantMin &&
-		    (row_abs_bam(dr) > kRowLegReplantSnap || (key & 63u) == 0))
-			es.rm_leg_target[0] = yaw;
-	}
-	for (int leg = 0; leg < 2; ++leg) {
-		const int32_t ldiff = io::bam_sub(es.rm_leg_target[leg], es.rm_leg_yaw[leg]);
-		int32_t lstep = io::bam_sar(io::bam_add(ldiff, 2), 2);
-		if (lstep > kRowLegChaseClamp) lstep = kRowLegChaseClamp;
-		if (lstep < -kRowLegChaseClamp) lstep = -kRowLegChaseClamp;
-		es.rm_leg_yaw[leg] = io::bam_add(es.rm_leg_yaw[leg], lstep);
-		const int32_t twist = io::bam_sub(es.rm_leg_yaw[leg], yaw);
-		if (twist > kRowLegTwistLimit)
-			es.rm_leg_yaw[leg] = io::bam_add(yaw, kRowLegTwistLimit);
-		else if (twist < -kRowLegTwistLimit)
-			es.rm_leg_yaw[leg] = io::bam_sub(yaw, kRowLegTwistLimit);
-	}
-	es.rm_body_heading = io::bam_add(
-			es.rm_leg_yaw[1],
-			io::bam_sar(io::bam_sub(es.rm_leg_yaw[0], es.rm_leg_yaw[1]), 1));
-}
-
-// The org1 leg chase on a free-standing row, after its body chase: rm_leg_yaw[0] / [1] are the
-// right / left leg yaws (+0x2D4 / +0x2D8), rm_leg_target[0] / [1] their re-plant targets
-// (+0x2E4 / +0x2E8). A walking body (a movement state, or the def's attrib 0x200) half-snaps the
-// right leg to the target heading (+0x1A8), pulls the left a quarter of what the right leaves,
-// and re-plants both on the target; an idle one re-plants a leg on the midpoint of the target and
-// the body heading (+0x8C) when it drifts past 0x38E38E0 and either past 0x15555540 or on the
-// leg's 64-tick window (the left's 32 ticks behind the right's). Each leg then chases its target
-// a quarter (a sixteenth with attrib 0x200), the step clamped to +-0x5000000, and is held within
-// 0x20000000 of the body heading. The carried test ahead of them (Flags 0x40 snaps both legs to
-// +0x8C) never holds here: a free-standing record's carried bit is clear (the host's detach
-// clears it), and a dead seated body's death edge clears it every tick. `key` is the update's
-// stagger key, the tick plus 36 times the DcbId (+0x7C), which a client's replica holds at 0:
-// the spawns clear it (0x0C memset 0x388, 0x18 memset 0x2B4) and no client path stores it.
-// world::infantry_org1_heading_chase is the authority's twin.
-// [orig: Entity_UpdateInfantryAI @0x4B9910 - the key @0x4B9948..0x4B9959, the carried test
-//  @0x4BE934..0x4BE93E -> @0x4BEB0C, the selector @0x4BE944..0x4BE967, the idle re-plant
-//  @0x4BE969..0x4BE9CC (L @0x4BE977..0x4BE9A7, R @0x4BE9AD..0x4BE9CC), the walk path
-//  @0x4BE9D4..0x4BEA0B, R's chase @0x4BEA11..0x4BEA87, L's @0x4BEA8D..0x4BEB04; the death edge's
-//  Flags &= ~0xC0 @0x4B9D35, the dead legs' Flags &= ~0x40 @0x4B9D63; Entity_DetachFromVehicle
-//  @0x4355F0 - @0x435910; NapiNPClientMsg_0x00C @0x42E730 - the memset @0x42E7E9..0x42E7F1;
-//  NapiNPClientMsg_FullEntitySpawn @0x433780 - the memset @0x433821; Entity_InitOrganicAI
-//  @0x4BFCC0, Entity_InitFromItemDef @0x49E550, Entity_InitFromModel @0x40DC30,
-//  Entity_AllocateAISlot @0x40D2C0, NetPacket_SerializeInfantryEntityState @0x4C0320 and
-//  Entity_ResetToSpawnState @0x4B9610 store no +0x7C; Entity_WarmUpOrganicAnimation @0x4B8B20
-//  reads it @0x4B8B3F / @0x4B8B81]
-constexpr int32_t kRowOrg1LegChaseClamp = 0x5000000;
-constexpr int32_t kRowOrg1LegTwistLimit = 0x20000000;
-
-void row_org1_legs(ClientEntityState &es, uint32_t key, uint32_t def_attrib, int current_state) {
-	const bool landable = (def_attrib & world::kItemAttribLandable) != 0u;
-	const int32_t target = es.net_target_heading_bam;
-	const int32_t body = es.rm_body_heading;
-	if (landable || (world::infantry_anim_flags(current_state) & 0x1u) != 0u) {
-		es.rm_leg_yaw[0] = io::bam_add(es.rm_leg_yaw[0],
-				io::bam_sar(io::bam_sub(target, es.rm_leg_yaw[0]), 1));
-		es.rm_leg_yaw[1] = io::bam_add(es.rm_leg_yaw[1],
-				io::bam_sar(io::bam_sub(target, es.rm_leg_yaw[0]), 2));
-		es.rm_leg_target[0] = target;
-		es.rm_leg_target[1] = target;
-	} else {
-		const int32_t mid = io::bam_add(target, io::bam_sar(io::bam_sub(body, target), 1));
-		const int32_t dl = row_abs_bam(io::bam_sub(mid, es.rm_leg_target[1]));
-		if ((dl > kRowLegReplantSnap || ((key - 32u) & 0x3Fu) == 0u) && dl > kRowLegReplantMin)
-			es.rm_leg_target[1] = mid;
-		const int32_t dr = row_abs_bam(io::bam_sub(mid, es.rm_leg_target[0]));
-		if ((dr > kRowLegReplantSnap || (key & 0x3Fu) == 0u) && dr > kRowLegReplantMin)
-			es.rm_leg_target[0] = mid;
-	}
-	for (int leg = 0; leg < 2; ++leg) {
-		const int32_t d = io::bam_sub(es.rm_leg_target[leg], es.rm_leg_yaw[leg]);
-		int32_t step = landable ? io::bam_sar(io::bam_add(d, 8), 4)
-		                        : io::bam_sar(io::bam_add(d, 2), 2);
-		if (step > kRowOrg1LegChaseClamp) step = kRowOrg1LegChaseClamp;
-		if (step < -kRowOrg1LegChaseClamp) step = -kRowOrg1LegChaseClamp;
-		es.rm_leg_yaw[leg] = io::bam_add(es.rm_leg_yaw[leg], step);
-		const int32_t twist = io::bam_sub(es.rm_leg_yaw[leg], body);
-		if (twist > kRowOrg1LegTwistLimit)
-			es.rm_leg_yaw[leg] = io::bam_add(body, kRowOrg1LegTwistLimit);
-		else if (twist < -kRowOrg1LegTwistLimit)
-			es.rm_leg_yaw[leg] = io::bam_sub(body, kRowOrg1LegTwistLimit);
-	}
-}
 
 // The row's AnimMap primary channel + root integration — retail's remote body
 // runs the SAME machinery as the authority [orig: Entity_UpdateInfantryPlayerBody
@@ -908,6 +791,24 @@ bool row_channel_advance(ClientEntityState &es, world::IRootMotionSource &src,
 	return have;
 }
 
+// What a free-standing player row's body pass reads beyond its own words: the carrier pose and
+// the ground's occupant words for its ride and ride link, and whether its ground entity is a
+// vehicle in its crash state, which lifts its view phase's Yaw clamp.
+struct RowPlayerPassIo {
+	const ClientReplicaPipeline::CarrierPoseProvider *carrier = nullptr;
+	const ClientReplicaPipeline::GroundOccupantProvider *ground_words = nullptr;
+	const ClientState *state = nullptr;
+	const ClientReplicaPipeline::ReplicaGroundCrashedResolver *ground_crashed = nullptr;
+};
+
+// A player row's deck ride, then its ride link [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 -
+// the ride @0x4B52A0, the link @0x4B5EA9..0x4B5F2C].
+void row_player_ride(ClientEntityState &es, const RowPlayerPassIo &io) {
+	if (io.carrier != nullptr && *io.carrier) row_deck_ride(es, *io.carrier, /*aim_adds=*/true);
+	if (io.ground_words != nullptr && *io.ground_words && io.state != nullptr)
+		row_ride_link(es, *io.state, *io.ground_words);
+}
+
 // The terrain-gradient slide of a row with no ground entity (resolved_ground, retail's +0x28),
 // over the motors' shared arithmetic (world::infantry_gradient_slide): a row whose Flags carry
 // none of 0x90A000 (indoors, the ladder, afloat, in the air) samples the terrain's height
@@ -944,13 +845,20 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
                           const terrain::TerrainHeightField *terrain,
                           const RowConformIo &conform_io,
                           uint32_t key, bool is_self, bool starved, int death_state,
+                          const RowPlayerPassIo *player_io,
                           const ClientReplicaPipeline::ReplicaContactResolver *resolver,
                           const ClientReplicaPipeline::ReplicaBoundRadiusResolver *bound_resolver,
                           const ClientReplicaPipeline::ReplicaPeerSphere *peers,
                           int32_t peer_count, uint32_t tick, int32_t water_z,
                           std::vector<ClientReplicaPipeline::ReplicaSlotSound> &sounds) {
+	// The player body rotates its root pair at its update's head, by the body heading its last
+	// pass left: ahead of this pass's view phase and ride (D-NET-NEW-L5-46).
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - +0x8C @0x4B41E4, the rotation's
+	//  stores @0x4B4251 / @0x4B4255, ahead of the view phase @0x4B4945 and the ride @0x4B52A0]
+	const int32_t head_body_heading = es.rm_body_heading;
 	if (es.rm_adm_id < 0) {
-		// The body pass's slope conform does not wait on the animation table.
+		// The body pass's ride and slope conform do not wait on the animation table.
+		if (player_io != nullptr) row_player_ride(es, *player_io);
 		if (es.cls == EntityClass::Player && !is_self && !starved)
 			row_body_conform(es, es.net_anim_current >= 0
 					? static_cast<int>(es.net_anim_current)
@@ -996,20 +904,30 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	// @0x40b64b..0x40b65d precedes the insert @0x40b662..0x40b737].
 	const bool released = row_channel_prepare(es, src, rings, target_state);
 	if (bottom_reset_state) es.rm_prev_bottom_live = false;
-	// The legs keep chasing whatever the clip coverage is — the body heading
-	// is presentation state, not clip state (a clipless wire state must not
-	// freeze the torso mid-twist).
-	// A starved row (the chase capped at 512) advances its channel only: the
-	// body pass returns right after the chase, and the AnimMap update ran at
-	// its top [orig: org2 @0x4b4669..0x4b4670 -> @0x4b83a8; org1 @0x4b9c39;
-	// AnimMap_UpdateDualChannels @0x4B41C9 / @0x4b9a26].
-	if (es.cls == EntityClass::Player && !starved) row_leg_chase(es, key);
-	// The org2 dead tail: a latched-dead body's view yaw follows the leg-chased
-	// body heading every tick (the local player's look is its own motor's)
-	// [orig: Entity_UpdateInfantryPlayerBody @0x4b4d30..0x4b4d4c].
-	if (es.cls == EntityClass::Player && !is_self && !starved &&
-			(es.rm_entity_flags & world::kEntityFlagDead) != 0)
-		es.heading_bam = es.rm_body_heading;
+	// A free-standing player row's view phase (row_org2_view_phase), then its dead tail and its
+	// ride (row_player_ride), in its pass's order: the legs keep chasing whatever the clip
+	// coverage is (a clipless wire state must not freeze the torso mid-twist). A starved row (the
+	// chase capped at 512) advances its channel only: the body pass returns right after the
+	// chase, and the AnimMap update ran at its top [orig: org2 @0x4b4669..0x4b4670 ->
+	// @0x4b83a8; org1 @0x4b9c39; AnimMap_UpdateDualChannels @0x4B41C9 / @0x4b9a26]. The own row's
+	// look and legs are its World body's.
+	// The org2 dead tail: a latched-dead body's +0x2D0 takes savedLivePitch, its Yaw the body
+	// heading, and Flags drops 0x60, every tick, ahead of the ride.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the view phase @0x4B4945..0x4B4BC6, the
+	//  dead tail `test byte ptr [esi+24h], 2` @0x4B4D30, +0x2D0 @0x4B4D46, Yaw @0x4B4D4C, `and
+	//  dword ptr [esi+24h], 0FFFFFF9Fh` @0x4B4D5F, the ride @0x4B52A0]
+	if (player_io != nullptr) {
+		const bool ground_crashed = es.resolved_ground != wire_handle::kInvalid &&
+				player_io->ground_crashed != nullptr && *player_io->ground_crashed &&
+				(*player_io->ground_crashed)(es.resolved_ground);
+		row_org2_view_phase(es, key, ground_crashed, /*pitch_clamp_skipped=*/false);
+		if ((es.rm_entity_flags & world::kEntityFlagDead) != 0) {
+			es.rm_aim_word = es.rm_body_pitch;
+			es.heading_bam = es.rm_body_heading;
+			es.rm_entity_flags &= ~0x60u;
+		}
+		row_player_ride(es, *player_io);
+	}
 	world::RootMotionFrame frame;
 	const bool have = row_channel_advance(es, src, rings, released, frame);
 	// The player body's slope conform follows the eye in the body pass, ahead of
@@ -1072,13 +990,14 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		                               es.roll_bam, es.rm_body_pitch, es.eye_offset);
 		row_body_conform(es, target_state, conform_io);
 	}
-	// Rotation heading: the body heading entity+0x8C, never the look Yaw: org2's is
-	// the leg-chased midpoint [orig: Entity_UpdateInfantryPlayerBody @0x4B41E4, Q22
-	// rotate @0x4B41F0..0x4B4255], org1's its body chase's [orig:
-	// Entity_UpdateInfantryAI @0x4B9910 - `fild dword ptr [esi+8Ch]` @0x4BF001]. This
-	// tick's freshly-chased body heading is used (retail consumes the same-tick
-	// value: the chase runs earlier in the same body pass).
-	const int32_t move_heading = es.rm_body_heading;
+	// Rotation heading: the body heading entity+0x8C, never the look Yaw. Org2 rotates at its
+	// update's head, so by the leg-chased midpoint its LAST pass left (and that pass's ride)
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B41E4, Q22 rotate @0x4B41F0..0x4B4255, ahead of
+	// the view phase @0x4B4945]; org1 rotates after its body chase, by this tick's [orig:
+	// Entity_UpdateInfantryAI @0x4B9910 - `fild dword ptr [esi+8Ch]` @0x4BF001, after the chase
+	// @0x4BE8FD].
+	const int32_t move_heading =
+			es.cls == EntityClass::Player ? head_body_heading : es.rm_body_heading;
 	// The own player's row is locally predicted world-side; its chase is the
 	// 48/512 soft reconciliation only — no root add (risk-listed; retail's
 	// local player integrates in its OWN motor, not the remote path). The
@@ -1577,7 +1496,7 @@ static bool row_corpse_tail(ClientEntityState &es, bool edge_this_tick, bool org
 //  @0x4B668B..0x4B66A3; the passenger test `cmp [esi+168h], 1` @0x4B6684, left
 //  @0x4B66B5, right @0x4B66C3; the local test @0x4B66CD; the eye @0x4B66D9..0x4B68FC (the
 //  extent cap @0x4B66D9..0x4B66EC)]
-void ClientReplicaPipeline::tick_seated_body(ClientEntityState &es) {
+void ClientReplicaPipeline::tick_seated_body(ClientEntityState &es, const ReplicaSeatFrame *seat) {
 	world::RootMotionFrame frame;
 	bool have = false;
 	if (root_motion_ != nullptr && es.rm_adm_id >= 0) {
@@ -1615,12 +1534,10 @@ void ClientReplicaPipeline::tick_seated_body(ClientEntityState &es) {
 	}
 	// The seat carry: the seat bone's yaw into the body heading, its roll into
 	// Roll, its pitch into savedLivePitch.
-	ReplicaSeatFrame seat;
-	if (carrier != nullptr && replica_seat_frame_resolver_ &&
-			replica_seat_frame_resolver_(carrier->handle, carrier->type_id, es.mount_bone, seat)) {
-		es.rm_body_heading = seat.heading;
-		es.roll_bam = seat.roll;
-		es.rm_body_pitch = seat.pitch;
+	if (carrier != nullptr && seat != nullptr) {
+		es.rm_body_heading = seat->heading;
+		es.roll_bam = seat->roll;
+		es.rm_body_pitch = seat->pitch;
 	}
 	// The mounted site: the four leg words take the body heading, so the legs
 	// leave the seat from it.
@@ -1764,19 +1681,25 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 	conform_io.tick = rm_key;
 	auto organic_chase_tail = [&](ClientEntityState &row, bool is_self,
 	                              bool starved = false, int16_t death_state = -1) {
-		if (row.cls == EntityClass::Player && !is_self && !starved && carrier_pose_provider_)
-			row_deck_ride(row, carrier_pose_provider_, org1_ride_aim_adds(row));
-		// The body pass's ride link, after the ride and ahead of the integrate; a starved
-		// body returned ahead of both [orig: @0x4B5EA9..0x4B5F2C; the starved return
-		// @0x4B4669..0x4B4670]; the client's own body runs the World's.
-		if (!is_self && !starved && row.cls == EntityClass::Player && ground_occupant_provider_)
-			row_ride_link(row, state_, ground_occupant_provider_);
+		// A free-standing player row's ride and ride link run inside its body pass, after its
+		// view phase and dead tail (row_root_motion_tick); a starved body returned ahead of
+		// all three [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the ride @0x4B52A0, the
+		// link @0x4B5EA9..0x4B5F2C; the starved return @0x4B4669..0x4B4670]; the client's own
+		// body runs the World's.
+		RowPlayerPassIo player_io;
+		player_io.carrier = &carrier_pose_provider_;
+		player_io.ground_words = &ground_occupant_provider_;
+		player_io.state = &state_;
+		player_io.ground_crashed = &replica_ground_crashed_resolver_;
+		const bool player_pass = row.cls == EntityClass::Player && !is_self && !starved;
+		if (player_pass && root_motion_ == nullptr) row_player_ride(row, player_io);
 		// The own row's channel shadows the World body's, which serves the rings
 		// for that body: a second serve would double its plays (D-NET-196).
 		if (root_motion_ != nullptr)
 			row_root_motion_tick(row, *root_motion_, is_self ? nullptr : anim_rings_,
 			                     remote_motion_terrain_, conform_io,
-			                     rm_key, is_self, starved, death_state, &replica_contact_resolver_,
+			                     rm_key, is_self, starved, death_state,
+			                     player_pass ? &player_io : nullptr, &replica_contact_resolver_,
 			                     &replica_bound_radius_resolver_,
 			                     contact_peer_scratch_.data(),
 			                     static_cast<int32_t>(contact_peer_scratch_.size()),
@@ -1901,6 +1824,28 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 			es.rm_look_due = true;
 			es.rm_look_seated = true;
 		}
+		// A seated player row's view phase (row_org2_view_phase), its record's Flags 0x40 taking
+		// the skip branch: the Yaw held 120 degrees about the body heading its last seat carry left
+		// unless its mount's config (+0x86C) is 3 or its mount, its ground since the pass's head, is
+		// a vehicle in its crash state; the legs on the body heading; the Pitch held about
+		// savedLivePitch unless that mount is crashed (D-NET-NEW-L5-46).
+		// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the ground = mount store @0x4B41B4,
+		//  the view phase @0x4B4945..0x4B4BC6 ahead of the ride link and the mounted site]
+		// The seat frame serves the phase's mount config and the mounted site's seat carry.
+		const bool seated_player = es.cls == EntityClass::Player && es.handle != self_handle;
+		ReplicaSeatFrame seat;
+		bool seat_resolved = false;
+		if (seated_player) {
+			const ClientEntityState *mount = state_.find(es.carrier_handle);
+			if (mount != nullptr && replica_seat_frame_resolver_)
+				seat_resolved = replica_seat_frame_resolver_(
+						mount->handle, mount->type_id, es.mount_bone, seat);
+			const bool mount_crashed = replica_ground_crashed_resolver_ &&
+					replica_ground_crashed_resolver_(es.carrier_handle);
+			row_org2_view_phase(es, rm_key,
+					(seat.mount_config_valid && seat.mount_config == 3) || mount_crashed,
+					mount_crashed);
+		}
 		// A seated body's pass still refreshes its ride link off the seat's
 		// ground link (the record's store) [orig: @0x4B5EA9..0x4B5F2C;
 		// the ground store @0x4C1353].
@@ -1911,9 +1856,8 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 		// (bone 0 is a deck, not a seat) [orig: Entity_UpdateInfantryPlayerBody
 		// @0x4B40E0 - the dual update call @0x4B41DF, the site selector on the mount
 		// word +0x16C @0x4B637C..0x4B638F].
-		if (es.cls == EntityClass::Player && es.handle != self_handle &&
-				es.mount_bone != 0)
-			tick_seated_body(es);
+		if (seated_player && es.mount_bone != 0)
+			tick_seated_body(es, seat_resolved ? &seat : nullptr);
 		return;
 	}
 	// No vehicle mover tests wire bit 0 [orig: Entity_UpdatePool1Slot calls the mover

@@ -1490,6 +1490,13 @@ void JoinerRole::wire_frame_providers() {
 	// A 0x18 body's channel, stamped in the handler as resolve_row_adm_ids stamps the rest.
 	rt.view().set_replica_adm_resolver(
 			[this](uint16_t type_id) { return kernel_->adm_id_for_runtime_type(type_id); });
+	// A player row's ground in its crash state, read off the World's vehicle (its def type and
+	// its +0x2EC byte) [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B4AE0..0x4B4AF9].
+	rt.view().set_replica_ground_crashed_resolver([this](uint16_t ground) {
+		const world::Entity *e =
+				world_ != nullptr ? world_->registry.get(world::EntityHandle{ground}) : nullptr;
+		return e != nullptr && e->has_item_def && e->item_type == 1 && e->veh.crashed != 0;
+	});
 	// An org1 deck ride reads its parent's second attrib word (the IsTurret bit) from the same
 	// items.def [orig: Entity_UpdateInfantryAI @0x4B9910 - `test dword ptr [eax+58h], 1000h`
 	//  @0x4BA823].

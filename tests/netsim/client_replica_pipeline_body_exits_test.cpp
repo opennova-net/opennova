@@ -1201,6 +1201,174 @@ void test_full_spawn_registers_the_channel() {
 	}
 }
 
+// Every clip walks 0x2000 forward a tick, the bodies' capsule as BodySource's.
+struct WalkSource final : public opennova::world::IRootMotionSource {
+	bool has_clip(int, int) const override { return true; }
+	bool advance(int, int, int32_t &phase, opennova::world::RootMotionFrame &out) override {
+		++phase;
+		out = {};
+		out.dx = 0x2000;
+		out.capsule_bottom = 1 << 16;
+		out.capsule_top = 2 << 16;
+		return true;
+	}
+	int32_t clip_length_ticks(int, int, int) const override { return 62; }
+	bool clip_loops(int, int, int) const override { return true; }
+};
+
+// A player row spawned by a 0x0C at Yaw 0 (its class init stamps its legs and body heading
+// 0), then one record at the anchor, its yaw byte `yaw`.
+std::unique_ptr<ns::ClientReplicaPipeline> spawned_player_view(
+		opennova::world::IRootMotionSource &src, uint8_t yaw, uint8_t flags = 0) {
+	auto view = make_view(src);
+	nw::OrganicSpawnRecord rec;
+	rec.slot_id = 0x0003;
+	rec.def_type = 3;
+	rec.item_type_id = kPlayerType;
+	nw::OrganicSpawnBatch batch;
+	batch.records.push_back(rec);
+	batch.entity_count = 1;
+	view->apply(nw::s2c::ENTITY_SPAWN_BATCH, nw::encode_organic_spawn_batch(batch));
+	view->apply(0x0A, frame({{0x0003, nw::EntityClass::Player, flags, 0xFFFF, 0, yaw}}));
+	view->state().find(0x0003)->rm_adm_id = 0;
+	return view;
+}
+
+// D-NET-NEW-L5-46: a free-standing player row's view phase, in its body pass's order.
+// - The root turns by the body heading the LAST pass left (0 here): the clip's 0x2000 goes along
+//   +x, then the legs chase the Yaw 0x40000000 a clamped 0x3000000 and are held 0x30000000
+//   off it (0x10000000), the body heading their midpoint.
+// - A deck turning 0x1000000 rides after the leg chase: the legs chase the old Yaw (no
+//   re-plant), the ride turns the Yaw and the body heading after the midpoint.
+// - On a ladder the Yaw half a turn off the body is held 0x55555500 off it and the legs take
+//   the body heading, unless the ground is a vehicle in its crash state.
+// - Under a canopy the body heading chases a sixteenth of the way to the Yaw (0x4000000) and
+//   the legs and targets take it.
+// - The Pitch is held 0x38E38E00 off savedLivePitch, 0x1C71C700 while prone.
+// - A dead body's tail: +0x2D0 takes savedLivePitch, the Yaw the body heading, Flags drops 0x60.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the rotation @0x4B41E4..0x4B4255, the
+//  canopy chase @0x4B4945..0x4B496C, the clamp @0x4B4AFB..0x4B4B42 (the crash skip
+//  @0x4B4AE0..0x4B4AF9), the legs @0x4B4B5F..0x4B4B6B, the chases @0x4B49E9..0x4B4ABB, the
+//  pitch clamp @0x4B4B71..0x4B4BC6, the dead tail @0x4B4D30..0x4B4D5F, the ride @0x4B52A0]
+void test_player_view_phase() {
+	{
+		WalkSource src;
+		auto view = spawned_player_view(src, 0x40);
+		ns::ClientEntityState &es = *view->state().find(0x0003);
+		view->tick_remote_motion(0xFFFF);
+		expect(es.x == fixed_of(100.0) + 0x2000 && es.y == fixed_of(200.0),
+				"the root turns by the body heading the last pass left");
+		expect(es.rm_leg_yaw[0] == 0x10000000 && es.rm_leg_yaw[1] == 0x10000000 &&
+						es.rm_body_heading == 0x10000000,
+				"then the legs chase the Yaw and the body heading is their midpoint");
+	}
+	{
+		BodySource src;
+		auto view = spawned_player_view(src, 0x00);
+		static constexpr uint16_t kDeck = 0x1009; // static: MSVC needs no capture for it
+		view->set_carrier_pose_provider(
+				[](uint16_t handle, ns::ClientReplicaPipeline::CarrierPose &out) {
+					if (handle != kDeck) return false;
+					out = ns::ClientReplicaPipeline::CarrierPose{};
+					out.pos[0] = out.saved_pos[0] = fixed_of(100.0);
+					out.pos[1] = out.saved_pos[1] = fixed_of(200.0);
+					out.yaw = 0x01000000;
+					out.bound_radius = 0x7FFFFFFF;
+					return true;
+				});
+		ns::ClientEntityState &es = *view->state().find(0x0003);
+		view->tick_remote_motion(0xFFFF); // the snap
+		es.resolved_ground = kDeck;
+		view->tick_remote_motion(0xFFFF);
+		expect(es.rm_leg_yaw[0] == 0 && es.rm_leg_yaw[1] == 0 &&
+						es.rm_body_heading == 0x01000000 && es.heading_bam == 0x01000000,
+				"the ride turns the Yaw and the body heading after the leg chase");
+	}
+	for (const bool crashed : {false, true}) {
+		BodySource src;
+		auto view = spawned_player_view(src, 0x80);
+		view->set_replica_ground_crashed_resolver(
+				[crashed](uint16_t ground) { return crashed && ground == kHull; });
+		ns::ClientEntityState &es = *view->state().find(0x0003);
+		es.rm_entity_flags = nw::world::kEntityFlagLadderContact;
+		es.resolved_ground = kHull;
+		view->tick_remote_motion(0xFFFF);
+		expect(es.heading_bam == (crashed ? static_cast<int32_t>(0x80000000u)
+		                                  : static_cast<int32_t>(0xAAAAAB00u)) &&
+						es.rm_leg_yaw[0] == 0 && es.rm_leg_yaw[1] == 0,
+				crashed ? "on a crashed vehicle the ladder's Yaw is not clamped"
+				        : "on a ladder the Yaw is held 120 degrees off the body, the legs on it");
+	}
+	{
+		BodySource src;
+		auto view = spawned_player_view(src, 0x40);
+		ns::ClientEntityState &es = *view->state().find(0x0003);
+		es.rm_entity_flags = nw::world::kEntityFlagParachute;
+		view->tick_remote_motion(0xFFFF);
+		expect(es.rm_body_heading == 0x04000000 && es.rm_leg_yaw[0] == 0x04000000 &&
+						es.rm_leg_target[1] == 0x04000000 && es.heading_bam == 0x40000000,
+				"under a canopy the body heading chases a sixteenth and the legs take it");
+	}
+	for (const bool prone : {false, true}) {
+		BodySource src;
+		auto view = spawned_player_view(src, 0x00);
+		ns::ClientEntityState &es = *view->state().find(0x0003);
+		view->tick_remote_motion(0xFFFF); // the snap
+		es.pitch_bam = 0x40000000;
+		es.net_stance_bits = prone ? 1 : 0;
+		view->tick_remote_motion(0xFFFF);
+		expect(es.pitch_bam == (prone ? 0x1C71C700 : 0x38E38E00),
+				prone ? "a prone body's Pitch is held 40 degrees off savedLivePitch"
+				      : "the Pitch is held 80 degrees off savedLivePitch");
+	}
+	// A seated row (its record lands Flags 0x40) takes the skip branch: the Yaw half a turn off
+	// the body heading its last seat carry left (0) is held 0x55555500 off it unless the mount's
+	// config is 3 or the mount is crashed; the Pitch is held off savedLivePitch unless the mount
+	// is crashed.
+	for (const int seated_case : {0, 1, 2}) {
+		const bool config3 = seated_case == 1;
+		const bool crashed = seated_case == 2;
+		BodySource src;
+		auto view = spawned_player_view(src, 0x00);
+		view->set_replica_seat_frame_resolver([config3](uint16_t, uint16_t, uint8_t,
+				ns::ClientReplicaPipeline::ReplicaSeatFrame &out) {
+			out = {};
+			out.mount_config_valid = true;
+			out.mount_config = config3 ? 3 : 0;
+			return true;
+		});
+		view->set_replica_ground_crashed_resolver(
+				[crashed](uint16_t ground) { return crashed && ground == kHull; });
+		view->apply(0x0A, frame({{0x0003, nw::EntityClass::Player,
+				static_cast<uint8_t>(nw::world::kEntityFlagMounted), kHull, 0, 0x00}}));
+		ns::ClientEntityState &es = *view->state().find(0x0003);
+		tick(*view);
+		es.heading_bam = static_cast<int32_t>(0x80000000u);
+		es.pitch_bam = 0x40000000;
+		es.recoil_pitch = 0;
+		view->tick_remote_motion(0xFFFF);
+		const bool unclamped = config3 || crashed;
+		expect(es.heading_bam == (unclamped ? static_cast<int32_t>(0x80000000u)
+		                                    : static_cast<int32_t>(0xAAAAAB00u)),
+				unclamped ? "a config-3 or crashed mount leaves the seated Yaw unclamped"
+				          : "the seated Yaw is held 120 degrees off the body heading");
+		expect(es.pitch_bam == (crashed ? 0x40000000 : 0x38E38E00),
+				crashed ? "a crashed mount leaves the seated Pitch unclamped"
+				        : "the seated Pitch is held 80 degrees off savedLivePitch");
+	}
+	{
+		BodySource src;
+		auto view = spawned_player_view(src, 0x40, static_cast<uint8_t>(nw::world::kEntityFlagDead));
+		ns::ClientEntityState &es = *view->state().find(0x0003);
+		es.rm_entity_flags = nw::world::kEntityFlagDead | nw::world::kEntityFlagParachute;
+		es.rm_body_pitch = 0x00100000;
+		view->tick_remote_motion(0xFFFF);
+		expect(es.rm_aim_word == es.rm_body_pitch && es.heading_bam == es.rm_body_heading &&
+						(es.rm_entity_flags & 0x60u) == 0,
+				"a dead body's tail aims +0x2D0 at savedLivePitch and its Yaw at the body heading");
+	}
+}
+
 // A terrain rising toward +x: each texel (one unit, its column the position's whole units) is
 // `per_texel` raw above the one before it over x 64..191, so the gradient under x = 100 is
 // (raw(101) - raw(99), 0) = (2 * per_texel, 0).
@@ -1219,21 +1387,6 @@ struct SlopeTerrain {
 		field.dim = kDim;
 		field.layout.sector_grid = sector_grid.data();
 	}
-};
-
-// Every clip walks 0x2000 forward a tick, the bodies' capsule as BodySource's.
-struct WalkSource final : public opennova::world::IRootMotionSource {
-	bool has_clip(int, int) const override { return true; }
-	bool advance(int, int, int32_t &phase, opennova::world::RootMotionFrame &out) override {
-		++phase;
-		out = {};
-		out.dx = 0x2000;
-		out.capsule_bottom = 1 << 16;
-		out.capsule_top = 2 << 16;
-		return true;
-	}
-	int32_t clip_length_ticks(int, int, int) const override { return 62; }
-	bool clip_loops(int, int, int) const override { return true; }
 };
 
 // The slide pair under a gradient of (1000, 0): x = -((419392 * 1000 + 0x8000) >> 16), y = 0.
@@ -1364,6 +1517,7 @@ int main() {
 	test_org1_deck_ride_precedes_the_body_chase();
 	test_jump_loop_word_is_org1s();
 	test_full_spawn_registers_the_channel();
+	test_player_view_phase();
 	test_player_gradient_slide_replaces_the_world_pair();
 	test_infantry_gradient_slide_replaces_the_clip_pair();
 	test_authority_rows_never_starve();
