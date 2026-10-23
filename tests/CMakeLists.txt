@@ -5281,6 +5281,11 @@ add_test(NAME anim_wire_ratio COMMAND anim_wire_ratio_test)
 add_executable(npruntime_entity_info_query_reply_test npruntime/entity_info_query_reply_test.cpp)
 target_link_libraries(npruntime_entity_info_query_reply_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_entity_info_query_reply COMMAND npruntime_entity_info_query_reply_test)
+# The AI rifle rounds' damage on a person: the PKM's first-tick 114 / 142 and the AK74's 75
+# after one flight tick, the aikill case's first hits (L4-s31).
+add_executable(ai_round_damage_test world/ai_round_damage_test.cpp)
+target_link_libraries(ai_round_damage_test PRIVATE opennova_runtime)
+add_test(NAME ai_round_damage COMMAND ai_round_damage_test)
 
 # --- parity lane L5 (client replica) ---
 # The joiner's own player record Flags folded into L under 0xE1 and echoed by the same
