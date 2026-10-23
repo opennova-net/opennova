@@ -221,6 +221,9 @@ public:
 		final_wait_end_ = false;
 		return ended;
 	}
+	// The mission start's final wait for the S2C 0x0F, as the last update left it: a frame
+	// that ends inside it renders nothing (Session::renders carries the witness).
+	bool in_final_wait() const override { return runtime && runtime->in_final_wait(); }
 	bool session_lost(SessionError &error) const override;
 	bool reset_to_baseline(SessionError &error) override;
 	void close() override;

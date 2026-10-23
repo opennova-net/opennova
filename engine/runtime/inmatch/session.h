@@ -336,6 +336,10 @@ struct FrameOutcome {
 	// The frame lock's last clock read when it slept (0 = it did not): the stamp the
 	// embedder's next frame measures its elapsed from [orig: Game_MainLoop @0x52B8DB].
 	uint32_t frame_stamp_ms = 0;
+	// The main frame's render callback runs (Session::renders): false only while a joiner's
+	// mission start is in its final wait for the S2C 0x0F, which renders nothing (no audio legs,
+	// no scene, no page; scene_drawn is false with it). The embedder runs its render legs on it.
+	bool rendered = true;
 	// The render callback's choice after the drain: the scene frame, or the status page in its
 	// place (Session::draws_scene). The embedder runs its scene legs on this verdict.
 	bool scene_drawn = true;
@@ -449,6 +453,10 @@ public:
 	// first frame follows (Session::advance carries the witness). Every other role's
 	// mission start ends at the load's (Session::complete_load).
 	virtual bool take_final_wait_end() { return false; }
+	// Inside a joiner's mission start, its final wait for the S2C 0x0F (ClientRuntime::
+	// in_final_wait): a busy loop inside the Game Loop mode's initialize, so no main frame
+	// renders while it runs (Session::renders). No other role has one.
+	virtual bool in_final_wait() const { return false; }
 
 	// The frame's input onto the local player, shared by every role: the update's drain
 	// (drain_input_events, with the tick's source), then the movement keys, mouse look and
@@ -640,7 +648,23 @@ public:
 	// [orig: GameLoop_RenderFrame @0x521310 - is_mp_session_peer @0x52134E / `jz` @0x521355;
 	//  the view word @0x521CD6, is_authority @0x521CDF..0x521CE6; Render_ProcessMainSceneFrame
 	//  @0x521CE8 or Server_DrawStatusScreen @0x521CEF]
+	// A frame that does not render (renders) draws neither.
 	bool draws_scene(const hud::HudToggleState *toggles) const;
+	// THE RENDER GATE. Whether the main frame's render callback runs at all. A joiner's mission
+	// start ends in its final wait for the S2C 0x0F, a busy loop inside the Game Loop mode's
+	// initialize that pumps the window, reads ESC, receives, sends and tests its exit, and
+	// renders nothing: no listener or emitter update, no scene, no page, no present (the
+	// loading screen's 100 % present ahead of it stays up). Its passes are our frames' updates
+	// (JoinerRole::run_tick), so a frame whose drain leaves the role inside the wait renders
+	// nothing; the frame whose drain takes the 0x0F renders.
+	// [orig: Game_StartMission @0x524360 - the final wait @0x526295..0x5262E5: Game_PumpWindowMessages
+	//  @0x52629D, Input_DequeueKeyEvent @0x5262A2, CNapiNetwork_PumpManagerReceive @0x5262B4,
+	//  CNapiNetwork_PumpClientProtocolRecv @0x5262BE, CNapiGameSession_ProcessPeriodicUpdate
+	//  @0x5262C8, CNapiNetwork_PumpClientProtocolSend @0x5262DA, the exit test @0x5262DF;
+	//  GameLoop_Init @0x526370 (the call @0x526377); GameLoop_RenderFrame @0x521310 -
+	//  Audio_UpdateListenerFromView @0x52131E, SharedMem_UpdateEngineSoundState @0x521329,
+	//  SoundEmitter_UpdateAndMixTop8 @0x521341]
+	bool renders() const { return role_ == nullptr || !role_->in_final_wait(); }
 	// Whether the session's entities are presented at all. A dedicated host (no session peer)
 	// never takes the scene arm its entities are collected and drawn in, and its mission start
 	// jumps over the render subsystems' init: nothing presents its entities, and what its

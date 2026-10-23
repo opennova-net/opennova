@@ -1172,6 +1172,8 @@ void GameWorld::_bind_methods() {
 			&GameWorld::frame_leg_draws_scene);
 	ClassDB::bind_static_method("GameWorld", D_METHOD("frame_leg_in_world", "name"),
 			&GameWorld::frame_leg_in_world);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("frame_leg_in_render", "name"),
+			&GameWorld::frame_leg_in_render);
 	ClassDB::bind_method(D_METHOD("get_last_frame_legs"), &GameWorld::get_last_frame_legs);
 	ClassDB::bind_method(D_METHOD("get_last_frame_scene_drawn"),
 			&GameWorld::get_last_frame_scene_drawn);

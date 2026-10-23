@@ -191,6 +191,7 @@ void MissionFrameOutcome::assign(const opennova::inmatch::FrameOutcome &p_value)
 	tick_us_ = p_value.perf.tick_us;
 	error_ = opennova::to_gd(p_value.error.message);
 	frame_stamp_ms_ = p_value.frame_stamp_ms;
+	rendered_ = p_value.rendered;
 	scene_drawn_ = p_value.scene_drawn;
 	world_skipped_ = p_value.world_skipped;
 }

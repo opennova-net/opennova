@@ -828,6 +828,9 @@ public:
 	// `p_toggles`' status view, for a frame the session did not advance (an advanced frame's
 	// own verdict, taken after its drain, rides MissionFrameOutcome::is_scene_drawn).
 	bool session_draws_scene(const Ref<HudToggles> &p_toggles) const;
+	// The render gate (engine inmatch::Session::renders) for a frame the session did not
+	// advance: false inside a joiner's final wait (MissionFrameOutcome::is_rendered otherwise).
+	bool session_renders() const { return session_.renders(); }
 	// Whether the session's entities are presented at all (engine
 	// inmatch::Session::presents_entities): never on a dedicated host.
 	bool session_presents_entities() const { return session_.presents_entities(); }

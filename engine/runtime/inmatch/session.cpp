@@ -996,8 +996,9 @@ TickOutcome Session::run_one_tick(const TickInput &input) {
 bool Session::draws_scene(const hud::HudToggleState *toggles) const {
 	// The role carries the two process words: is_mp_session_peer is clear on a dedicated host
 	// alone, is_authority on a joiner alone.
-	return hud::main_frame_draws_scene(kind_ != RoleKind::DedicatedHost, kind_ != RoleKind::Joiner,
-			toggles != nullptr && toggles->server_status_view);
+	return renders() &&
+			hud::main_frame_draws_scene(kind_ != RoleKind::DedicatedHost, kind_ != RoleKind::Joiner,
+					toggles != nullptr && toggles->server_status_view);
 }
 
 void Session::step_cine_render_frame() {
@@ -1102,12 +1103,15 @@ void Session::step_map_overlay_death_clear(const FrameOutcome &out) {
 
 void Session::step_scene_head(const FrameInput &input, FrameOutcome &out) {
 	mission::MissionKernel *kernel = role_ != nullptr ? role_->kernel() : nullptr;
+	// A frame inside a joiner's final wait runs no render callback (renders), so none of its
+	// legs below.
+	out.rendered = renders();
 	// The render callback's first leg, the listener update, asks a session peer's cine
 	// whether it plays, whatever the callback draws next, so a cine past its last event
 	// stops under the status page too [orig: GameLoop_RenderFrame @0x52131E ->
 	//  Audio_UpdateListenerFromView @0x43B400 - is_mp_session_peer @0x43B40A, the
 	//  Cine_IsPlaybackActive call @0x43B40C].
-	if (kernel != nullptr && kind_ != RoleKind::DedicatedHost)
+	if (out.rendered && kernel != nullptr && kind_ != RoleKind::DedicatedHost)
 		(void)kernel->world.epilog.playback_active();
 	out.scene_drawn = draws_scene(input.hud_toggles);
 	// The scene frame's head word: a playing cine, or the command map over the menu
@@ -1177,6 +1181,7 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	}
 	if (state_ != State::Running) {
 		out.status = FrameStatus::NotRunning;
+		out.rendered = renders();
 		out.scene_drawn = draws_scene(input.hud_toggles);
 		last_perf_ = out.perf;
 		return out;
@@ -1218,8 +1223,8 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	// arm's render counts.
 	step_scene_head(input, out);
 	// Each update counted toward the 62-update second inside the loop; this
-	// frame's render counts now.
-	count_rendered_frame();
+	// frame's render counts now (a frame inside the final wait renders none).
+	if (out.rendered) count_rendered_frame();
 	// Each of the first frames drawn after the mission start counts down and
 	// raises the re-base flag, the scene frame's tail: a frame the status page
 	// stands in for counts none down [orig: Render_ProcessMainSceneFrame
@@ -1232,7 +1237,8 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	// its three frames ahead of that wait, which renders nothing, so they are the first
 	// three drawn after the S2C 0x0F; the mode's initialize returns only then, and the
 	// main loop resets its bank, smoothing and phase and reads its clock after it. The
-	// frames that drew the wait (ours do) bank nothing of what follows.
+	// frames that ran the wait's passes (ours do; they render nothing, renders) bank nothing
+	// of what follows.
 	// [orig: Game_StartMission @0x524360 - dword_24C1174 = 3 @0x525E1F, the final wait
 	//  @0x526295..0x5262E5 (no render); Render_ProcessMainSceneFrame @0x5CAEFF..0x5CAF0E;
 	//  Game_MainLoop @0x52B630 - the mode-init reset @0x52B70F..0x52B757 (the smoothing

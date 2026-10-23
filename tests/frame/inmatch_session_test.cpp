@@ -72,11 +72,15 @@ struct TickProbe final : Role {
 	void write_profile_frame() override { profile_ticks.push_back(kernel.world.logic_tick); }
 	// The update count at which a joiner's final wait ends (0: never), once.
 	size_t final_wait_end_after = 0;
+	// The role reports its final wait (Role::in_final_wait) until the update that ends it.
+	bool waiting = false;
 	bool take_final_wait_end() override {
 		if (final_wait_end_after == 0 || inputs.size() != final_wait_end_after) return false;
 		final_wait_end_after = 0;
+		waiting = false;
 		return true;
 	}
+	bool in_final_wait() const override { return waiting; }
 };
 
 bool load(Session &session) {
@@ -259,7 +263,9 @@ int main() {
 		FrameInput wait;
 		wait.delta_seconds = TickAccumulator::kTickDt * 10.0;
 		wait.since_render_seconds = 0.0;
-		// The load's re-based frames are spent while the joiner still waits.
+		// The probe reports no wait here, so these frames render and spend the load's re-based
+		// frames (a joiner's wait frames render nothing and spend none: the render gate below);
+		// either way the wait's end arms three afresh.
 		for (int frame = 0; frame < 4; ++frame) (void)session.advance(wait);
 		// The 0x0F lands in the first update of a 1 s frame: of the clamped bank's 32
 		// updates, the others never run.
@@ -283,6 +289,56 @@ int main() {
 		full.delta_seconds = TickAccumulator::kTickDt * 10.0;
 		if (!expect(session.advance(full).ticks_run() == 2,
 				"final wait: the main loop banks from a fresh history")) return 1;
+	}
+
+	// THE RENDER GATE (Session::renders). A joiner's final wait for the S2C 0x0F is a busy loop
+	// inside the Game Loop mode's initialize that renders nothing; its passes are our frames'
+	// updates, so a frame whose drain leaves the role inside the wait runs no render callback,
+	// neither the scene nor the page (FrameOutcome::rendered and scene_drawn down), and spends
+	// none of the load's three re-based frames; the frame whose drain takes the 0x0F renders. A
+	// listen host's page frame renders, the page in the scene's place
+	// [orig: Game_StartMission @0x524360 - the final wait @0x526295..0x5262E5 (no
+	//  GameLoop_RenderFrame); GameLoop_Init @0x526370 (the call @0x526377);
+	//  Render_ProcessMainSceneFrame @0x5CAEFF..0x5CAF0E].
+	{
+		TickProbe target;
+		target.probe_kind = RoleKind::Joiner;
+		target.waiting = true;
+		Session session(target);
+		if (!load(session)) return 1;
+		if (!expect(!session.renders() && !session.draws_scene(nullptr),
+				"render gate: the final wait renders nothing")) return 1;
+		FrameInput wait;
+		wait.delta_seconds = TickAccumulator::kTickDt * 10.0;
+		wait.since_render_seconds = 0.0;
+		const FrameOutcome first = session.advance(wait);
+		if (!expect(first.status == FrameStatus::Ok && !first.rendered && !first.scene_drawn,
+				"render gate: a wait frame runs no render callback")) return 1;
+		// The load's re-base is the first frame's alone: that frame rendered nothing, so the next
+		// banks its full 160 ms over the seed-only history, its updates the wait's passes
+		// ((7 * 16 + 2576 + 4) >> 3 = 336 units, 5 quanta from phase 0, 2 updates).
+		const FrameOutcome second = session.advance(wait);
+		if (!expect(second.ticks_run() == 2 && !second.rendered && !second.scene_drawn,
+				"render gate: the wait spends none of the load's re-based frames")) return 1;
+		target.final_wait_end_after = target.inputs.size() + 1;
+		const FrameOutcome taken = session.advance(wait);
+		if (!expect(taken.ticks_run() == 1 && taken.rendered && taken.scene_drawn &&
+					session.renders(),
+				"render gate: the frame whose drain takes the 0x0F renders")) return 1;
+	}
+	{
+		opennova::hud::HudToggleState view_up;
+		view_up.server_status_view = true;
+		TickProbe target;
+		target.probe_kind = RoleKind::ListenHost;
+		Session session(target);
+		if (!load(session)) return 1;
+		FrameInput paged;
+		paged.delta_seconds = TickAccumulator::kTickDt;
+		paged.hud_toggles = &view_up;
+		const FrameOutcome out = session.advance(paged);
+		if (!expect(out.rendered && !out.scene_drawn,
+				"render gate: the status page renders, in the scene's place")) return 1;
 	}
 
 	// The status page stands in for the scene frame (Session::draws_scene): the session takes

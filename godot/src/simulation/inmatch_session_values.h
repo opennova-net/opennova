@@ -127,6 +127,7 @@ private:
 	int64_t tick_us_ = 0;
 	String error_;
 	uint32_t frame_stamp_ms_ = 0;
+	bool rendered_ = true;
 	bool scene_drawn_ = true;
 	bool world_skipped_ = false;
 
@@ -144,6 +145,9 @@ public:
 	// The frame lock's last clock read when it slept, else 0 (engine inmatch::FrameOutcome::
 	// frame_stamp_ms); C++ only.
 	uint32_t get_frame_stamp_ms() const { return frame_stamp_ms_; }
+	// The main frame's render callback ran: false inside a joiner's final wait for the S2C 0x0F
+	// (engine inmatch::Session::renders); C++ only, GameWorld's scene gate reads it.
+	bool is_rendered() const { return rendered_; }
 	// The render callback's choice after the drain: the scene frame, or the status page in its
 	// place (engine inmatch::Session::draws_scene); C++ only, GameWorld's scene gate reads it.
 	bool is_scene_drawn() const { return scene_drawn_; }
