@@ -1445,13 +1445,15 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
                         ((flags & 0x100u) ? 2 : 0) | ((flags & 0x200u) ? 1 : 0));
             }
 		}
-		// Every remote player record then re-picks the body's def by its class: a
-		// live record's class is the field-17 nibble the health apply stores, a
-		// dead record skips that apply and keeps the class it had; the camouflage
-		// item for the mission climate is looked up as a row, and a row other than
-		// the body's rebinds it (the def, its models and bone types). The row then
-		// carries the new type, so the next record of the old one fails the
-		// pre-apply check above and queues the C2S 0x0F (D-NET-348).
+		// Every player record then re-picks the body's def by its class: a live
+		// remote record's class is the field-17 nibble the health apply stores, a
+		// dead record skips that apply and keeps the class it had, and the client's
+		// own record skips it always (the resolver reads L's class word,
+		// D-NET-NEW-L2-57); the camouflage item for the mission climate is looked up
+		// as a row, and a row other than the body's rebinds it (the def, its models
+		// and bone types). The row then carries the new type, so the next record of
+		// the old one fails the pre-apply check above and queues the C2S 0x0F
+		// (D-NET-348).
 		// [orig: NetPacket_SerializePlayerState @0x4C09C0 -
 		//  the Entity_SetHealthFromDifficultyByte @0x4AD580 call @0x4C11BA (its class store
 		//  @0x4AD5A2),
@@ -1465,10 +1467,8 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 					: static_cast<uint8_t>(rec.player.health_class_byte & 0x0Fu);
 			uint16_t row_type = 0;
 			if (replica_player_cammo_resolver_(rec.handle, player_class, row_type) &&
-					row_type != es.type_id) {
-				es.type_id = row_type;
-				es.cls = classify(row_type);
-			}
+					row_type != es.type_id)
+				retype_row(es, row_type);
 		}
 		// Every player record, dead or alive, then lands its flags byte on a remote
 		// body's Flags bits 0 and 2..7 (the dead bit stays the row's own): the

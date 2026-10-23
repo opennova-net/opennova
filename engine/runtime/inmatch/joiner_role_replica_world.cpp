@@ -285,6 +285,16 @@ bool JoinerRole::init_local_player_at_mission_start() {
 	if (!rt.has_self_handle() || local_spawned_) return false;
 	const JoinerConnection::SelfSpawn &sp = rt.spawn_pose();
 	world::PlayerSpawn spawn = spawn_from_self(sp);
+	// L is the client's own pool-0 slot, so it binds the row its slot holds when the init finds
+	// it: the class's camouflage item the mission start's reload stored there ahead of the init
+	// (reload_pool0_row_channels), not the record's type word (D-NET-NEW-L2-57). The init
+	// itself stores no def.
+	// [orig: Game_StartMission @0x524360 - Game_ReloadEntityModelsAndCallbacks called
+	//  @0x52550E ahead of Player_InitPlayer called @0x525BBC; Game_ReloadEntityModelsAndCallbacks
+	//  @0x522830 - the index store @0x522CAA, the def store @0x522CC6; Player_InitPlayer
+	//  @0x4E15F0 - Player_FindLocalPlayerEntity called @0x4E17E4]
+	if (const replication::ClientEntityState *row = rt.state().find(rt.self_handle()))
+		if (row->type_id != 0) spawn.item_type_id = row->type_id;
 	stamp_mission_start_identity(spawn);
 	const world::EntityHandle h = world::spawn_player(world, spawn);
 	local_spawned_ = h.valid();

@@ -202,9 +202,10 @@ public:
 	//  NapiNPClientMsg_0x010 @0x433400 - Pool_UpdateMaxUsed called @0x433771;
 	//  Game_StartMission @0x524360 - Entity_InitAllFromModels called @0x52567F]
 	void materialize_world_stream();
-	// The mission start's model reload, its pool-0 leg's animation maps: each decoded pool-0
-	// person row's channel from its row (a player's at its class's camouflage item), the .adm
-	// loaded and registered in the load, ahead of the rows' init (D-NET-NEW-L2-56). The embedder
+	// The mission start's model reload, its pool-0 leg: each decoded pool-0 player row (the
+	// client's own included) re-typed to its class's camouflage item (D-NET-NEW-L2-57), and each
+	// person row's channel from its row, the .adm loaded and registered in the load, ahead of
+	// the rows' init and of L's birth (D-NET-NEW-L2-56). The embedder
 	// runs it at the reload's place in a joiner's mission start (joiner_role.cpp carries the
 	// witness).
 	void reload_pool0_row_channels();

@@ -607,7 +607,7 @@ void run_client_leg(const std::string &fixture_root, const RunSpec &spec) {
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	server_tx.outbound_message_limit = 0; // the replaying host retains nothing
 
-	const inmatch::ClientRuntime::UplinkBuilder uplink = [](PlayerExtendedUplink &) { return true; };
+	const inmatch::ClientRuntime::UplinkBuilder uplink = [](PlayerExtendedUplink &, uint16_t &) { return true; };
 
 	const uint64_t tick_us = static_cast<uint64_t>(io::kTickMs) * 1000u;
 	const uint64_t t0 = down.packets.front().ts_us;

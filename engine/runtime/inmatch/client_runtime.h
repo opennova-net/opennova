@@ -466,7 +466,7 @@ public:
 	// Returns the framed datagrams to ship (handshake replies + burst + the per-frame housekeeping +
 	// the 0x0C). `uplink` is the §5.10 0x0C extended body (the OUTPUT of Player_BuildTag0CInputBody; the
 	// raw-input->entity motor, step 5a, runs host-side per ADR 0012 R1 and is NOT part of the headless
-	// client). The witnessed per-frame housekeeping is now PORTED (P6, §5.44): the 0x34 keepalive
+	// client); its sub-header carries the spawn record's type word, this entry having no local body. The witnessed per-frame housekeeping is now PORTED (P6, §5.44): the 0x34 keepalive
 	// (29760-tick), the 0x4C net-quality report (310-tick), the 0x2C RTT ping (every deployed frame),
 	// and the send_holdoff_countdown send-block gate — all on the Joiner role (HostClient's own-loopback
 	// housekeeping stays deferred-and-logged). seed_session() replay mode suppresses them for byte-parity.
@@ -474,10 +474,14 @@ public:
 	                                                             uint32_t now_tick = 0);
 	// The uplink BUILT at the send block, after this frame's receive fold, as
 	// the writer runs there: the builder fills the body (false = none this
-	// frame) and is called only when the deployed send block opens.
+	// frame) and is called only when the deployed send block opens. It also
+	// writes the sub-header's type word, which the serializer reads off the local
+	// body's def as it stands then (the reload's and the records' re-picks
+	// included, D-NET-NEW-L2-57); it arrives holding the spawn record's word.
 	// [orig: Client_ProcessNetworkFrame -- PumpClientProtocolRecv @0x42C228
-	//  ahead of Player_BuildTag0CInputBody @0x42C482]
-	using UplinkBuilder = std::function<bool(PlayerExtendedUplink &)>;
+	//  ahead of Player_BuildTag0CInputBody @0x42C482; Pool_SerializeEntityViaVTable
+	//  @0x4D64E0 - the def's type word @0x4D659F]
+	using UplinkBuilder = std::function<bool(PlayerExtendedUplink &, uint16_t &item_type_id)>;
 	// The receive handlers' writes on the embedder's own world (the local player's
 	// birth and its record, kit, team and world-state folds), run once per frame
 	// right after the receive pump, ahead of the send block whether or not its

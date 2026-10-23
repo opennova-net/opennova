@@ -667,14 +667,19 @@ void JoinerRole::rearm_row_adm_ids() {
 // A joiner's pool 0 is its replica's person rows, which its stream's spawn records built ahead
 // of the reload (replica_pool0_bodies), so their channels are stamped here, in the load, and
 // the frame's row pass (resolve_row_adm_ids) leaves a stamped row as it stands (D-NET-NEW-L2-56).
-// The rows keep their record's type: only the channel is the reload's.
+// A player row (the client's own included: retail's L is its pool-0 slot) takes the camouflage
+// row here, as the reload stores it, so the first record's pre-apply check and L's birth read
+// that row, not the record's type (D-NET-NEW-L2-57). A climate past the three the format names
+// reads a stale word there in retail (no stock mission); ours takes the desert row (PERMANENT,
+// D-NET-NEW-L2-58).
 // [orig: Game_StartMission @0x524360 - Game_ReloadEntityModelsAndCallbacks called @0x52550E,
 //  ahead of Entity_InitAllFromModels called @0x52567F; Game_ReloadEntityModelsAndCallbacks
 //  @0x522830 - the pool-1 leg's load @0x5229B8, the pool-2 leg's @0x522B16, the pool-0 walk
 //  @0x522C0C..0x522C33, the Flags 0x100 test @0x522C52 (its jz @0x522C59), the class word +0x294
-//  and the climate's property @0x522C5B..0x522C90, CharAttr_GetCammoTypeId called @0x522C91,
-//  ItemList_FindIndexByTypeId called @0x522CA2, the animDef test @0x522D07,
-//  AnimMap_LoadAdmFile called @0x522D14, AnimMap_RegisterEntity called @0x522D38]
+//  and the climate's property @0x522C5B..0x522C90 (the stale word's jnz @0x522C6D),
+//  CharAttr_GetCammoTypeId called @0x522C91, ItemList_FindIndexByTypeId called @0x522CA2, the
+//  index store `mov [esi+1Ch], eax` @0x522CAA, the def store @0x522CC6, the animDef test
+//  @0x522D07, AnimMap_LoadAdmFile called @0x522D14, AnimMap_RegisterEntity called @0x522D38]
 void JoinerRole::reload_pool0_row_channels() {
 	if (kernel_ == nullptr || !runtime) return;
 	mission::MissionKernel &kernel = *kernel_;
@@ -683,7 +688,6 @@ void JoinerRole::reload_pool0_row_channels() {
 	for (replication::ClientEntityState &es : runtime->state().entities) {
 		if ((es.handle >> 12) != 0 || es.type_id == 0) continue;
 		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry) continue;
-		uint16_t type_id = es.type_id;
 		if ((es.rm_entity_flags & world::kEntityFlagPlayer) != 0u && !w.tables.item_rows.empty() &&
 				w.tables.class_cammo_installed) {
 			// The class word as the stream left it: a compact's class nibble, else the spawn's.
@@ -692,8 +696,10 @@ void JoinerRole::reload_pool0_row_channels() {
 					: es.spawn_player_class;
 			const int32_t index = world::item_index_by_type_id(
 					w, world::player_cammo_type_id(w, player_class));
-			type_id = static_cast<uint16_t>(w.tables.item_rows[static_cast<size_t>(index)].type_id);
+			runtime->view().retype_row(es,
+					static_cast<uint16_t>(w.tables.item_rows[static_cast<size_t>(index)].type_id));
 		}
+		const uint16_t type_id = es.type_id;
 		const int adm_id = kernel.adm_id_for_runtime_type(type_id);
 		if (adm_id < -1) continue; // the sources are not armed: the frame's pass resolves it
 		es.rm_adm_id = static_cast<int16_t>(adm_id);
@@ -1671,20 +1677,31 @@ void JoinerRole::wire_frame_providers() {
 				out.decay_effect = item->particledeath[0] != '\0';
 				return true;
 			});
-	// A remote player record's def re-pick (D-NET-348): the class's camouflage
-	// item for this world's climate, looked up as an items row (the first row
-	// for a miss), as the joiner's spawn binds it; the client's own record is
-	// fold_local_record's, and a world with no charattr / items tables keeps
-	// the spawn's row.
-	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the climate pick
-	//  @0x4C1248..0x4C129C, ItemList_FindIndexByTypeId @0x4C129D]
+	// A player record's def re-pick (D-NET-348): the class's camouflage item for
+	// this world's climate, looked up as an items row (the first row for a
+	// miss), as the joiner's spawn binds it; a world with no charattr / items
+	// tables keeps the spawn's row. The client's own record lands on L, its
+	// pool-0 slot: it skips the class store, so the pick reads L's own class
+	// word, and the self row takes the row fold_local_record binds on L, which
+	// the next self record's pre-apply check reads (a body with no def drops
+	// the record ahead of the pick) (D-NET-NEW-L2-57).
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the def test @0x4C0F92,
+	//  L's jump past the class store `cmp edi, g_LocalPlayerEntity; jz` @0x4C11AC..0x4C11B2
+	//  (Entity_SetHealthFromDifficultyByte called @0x4C11BA), the climate pick
+	//  @0x4C1248..0x4C129C, ItemList_FindIndexByTypeId @0x4C129D;
+	//  NapiNPClientMsg_0x00A @0x42FEC0 - the slot's def type and index
+	//  @0x4307BC..0x4307C4]
 	rt.view().set_replica_player_cammo_resolver(
 			[this](uint16_t handle, uint8_t player_class, uint16_t &type_id) {
 				const world::World &w = kernel_->world;
-				if (runtime->has_self_handle() && handle == runtime->self_handle())
-					return false;
 				if (w.tables.item_rows.empty() || !w.tables.class_cammo_installed)
 					return false;
+				if (runtime->has_self_handle() && handle == runtime->self_handle()) {
+					const world::Entity *local =
+							local_spawned_ ? w.registry.get(w.cached.local_player) : nullptr;
+					if (local == nullptr || !local->has_item_def) return false;
+					player_class = local->player_class;
+				}
 				const int32_t index = world::item_index_by_type_id(
 						w, world::player_cammo_type_id(w, player_class));
 				type_id = static_cast<uint16_t>(
@@ -2106,18 +2123,21 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	// The builder at the send block, on L as the receive left it (a respawn arm's redeployed
 	// body included, D-NET-NEW-L2-55). Its own refusals: no body, a Health word of 0, the dead
 	// bit (no alive latch, D-NET-433), and its serializer's no def (a body its own ewep update
-	// destroyed).
+	// destroyed). The sub-header's type word is L's def's as it stands: the row the mission
+	// start's reload bound, then each self record's camouflage re-pick (D-NET-NEW-L2-57).
 	// [orig: Player_BuildTag0CInputBody @0x42A550 - `cmp word [eax+11Eh], 0; jz`
 	//  @0x42A58F..0x42A597, `test byte [eax+24h], 2; jnz` @0x42A599..0x42A59D;
-	//  Pool_SerializeEntityViaVTable @0x4D64E0 - the def test @0x4D654F..0x4D6554]
+	//  Pool_SerializeEntityViaVTable @0x4D64E0 - the def test @0x4D654F..0x4D6554, the def's
+	//  type word `mov ax, [eax+50h]` @0x4D659B, stored at +2 @0x4D659F]
 	const std::vector<std::vector<uint8_t>> outs = rt.Client_ProcessNetworkFrame(
-			[&](PlayerExtendedUplink &up) {
+			[&](PlayerExtendedUplink &up, uint16_t &item_type_id) {
 		if (!local_spawned_ || !world.cached.local_player.valid()) return false;
 		const world::Entity *e = world.registry.get(world.cached.local_player);
 		const world::AiEntity *ae = world.ai.for_handle(world.cached.local_player);
 		if (e == nullptr || ae == nullptr || world::retail_signed_i16(e->health) == 0 ||
 				(e->flags & 2u) != 0u || !e->has_item_def)
 			return false;
+		item_type_id = static_cast<uint16_t>(e->item_id);
 		// The interest list scores the decoded entities against L; the HUD
 		// target cursor is the HUD pass's last build of its record (the lock
 		// word, else the aim-ray entity), named by its wire handle (a

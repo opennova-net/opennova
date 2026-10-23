@@ -277,14 +277,20 @@ public:
 	// A player record's def re-pick: the embedder answers the wire type of the
 	// items row its class's camouflage item binds at the mission climate (the
 	// row ItemList_FindIndexByTypeId finds, the first row for a miss), or false
-	// where the record lands elsewhere (the client's own record) or no charattr /
-	// items tables are installed.
+	// where none binds (no charattr / items tables installed; the client's own
+	// record, which picks by its local body's class word, with no body or def).
 	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the climate pick
 	//  @0x4C1248..0x4C129C, ItemList_FindIndexByTypeId @0x4C129D]
 	using ReplicaPlayerCammoResolver =
 			std::function<bool(uint16_t handle, uint8_t player_class, uint16_t &type_id)>;
 	void set_replica_player_cammo_resolver(ReplicaPlayerCammoResolver resolver) {
 		replica_player_cammo_resolver_ = std::move(resolver);
+	}
+	// A def re-pick's row: the wire type of the items row it bound, and the record class that
+	// type classifies as (a player record's re-pick, the mission start's reload).
+	void retype_row(ClientEntityState &es, uint16_t type_id) const {
+		es.type_id = type_id;
+		es.cls = classify(type_id);
 	}
 	// The embedder's global hit record, which the 0x13's class callback reads
 	// [orig: g_ProjectileHitRecord @0xB7C620 via Projectile_GetHitRecord

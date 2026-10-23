@@ -2059,11 +2059,13 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 
 		// (0x0C) the C2S player uplink — unchanged P5 path, same deploy gate. [orig: Client_ProcessNetworkFrame @0x42c46f..0x42c4a3]
 		PlayerExtendedUplink built_uplink;
-		if (build_uplink != nullptr && deployed_joiner && (*build_uplink)(built_uplink)) {
+		uint16_t uplink_type = joiner_->spawn_pose().item_type_id;
+		if (build_uplink != nullptr && deployed_joiner &&
+				(*build_uplink)(built_uplink, uplink_type)) {
 			const PlayerExtendedUplink *uplink = &built_uplink;
 			EntityPacketSubHeader sub;
 			sub.handle = joiner_->self_handle();
-			sub.item_type_id = joiner_->spawn_pose().item_type_id;
+			sub.item_type_id = uplink_type;
 			sub.sub_op = ENTITY_SUB_OP_EXTENDED;
 			std::vector<uint8_t> payload = encode_entity_packet_sub_header(sub);
 			std::vector<uint8_t> extended = encode_player_extended_uplink(*uplink);
@@ -2354,7 +2356,7 @@ bool ClientRuntime::step_send_pump_loop() {
 std::vector<std::vector<uint8_t>>
 ClientRuntime::Client_ProcessNetworkFrame(const PlayerExtendedUplink &uplink,
 		uint32_t now_tick) {
-	const UplinkBuilder copy = [&uplink](PlayerExtendedUplink &out) {
+	const UplinkBuilder copy = [&uplink](PlayerExtendedUplink &out, uint16_t &) {
 		out = uplink;
 		return true;
 	};

@@ -4162,11 +4162,15 @@ bool run_respawn_key_before_the_first_tail() {
 //  climate pick @0x4C1248..0x4C129C, ItemList_FindIndexByTypeId @0x4C129D, the compare
 //  @0x4C12A5, the stores @0x4C12B8..0x4C12D6]
 bool run_the_self_record_rebinds_ls_camouflage_row() {
+	// The camouflage rows are plyr rows (a player body's class row), so the re-typed self
+	// row's records decode as a player's.
 	static const char kItems[] =
 			"begin \"Null\"\r\n id 100000\r\n type marker\r\nend\r\n"
-			"begin \"Player #1, Multiplayer\"\r\n id 105305\r\n type person\r\n hp 150\r\n move_function org2\r\nend\r\n"
+			"begin \"Player #1, Multiplayer\"\r\n id 105305\r\n ai_function plyr\r\n type person\r\n hp 150\r\n"
+			" move_function org2\r\nend\r\n"
 			"begin \"Player #1, Single player\"\r\n id 105310\r\n type person\r\n hp 120\r\n move_function org2\r\nend\r\n"
-			"begin \"Generic Soldier\"\r\n id 105311\r\n type person\r\n hp 100\r\n move_function org2\r\nend\r\n";
+			"begin \"Generic Soldier\"\r\n id 105311\r\n ai_function plyr\r\n type person\r\n hp 100\r\n"
+			" move_function org2\r\nend\r\n";
 	static const char kCharattr[] =
 		"[CHARACTER1]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
 		"[CHARACTER2]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
@@ -4191,6 +4195,9 @@ bool run_the_self_record_rebinds_ls_camouflage_row() {
 	// The joiner's charattr.def words reach the world at each frame's end
 	// (JoinerRole::sync_class_attribute_flags).
 	h.role.runtime->set_charattr_table(table);
+	h.role.runtime->view().set_item_catalog(
+			std::make_shared<const replication::ItemReplicationCatalog>(
+					replication::ItemReplicationCatalog::from_items_def(items)));
 	h.role.run_tick(h.input);
 	auto &row = h.role.runtime->state().upsert(0x0005);
 	row.cls = EntityClass::Player;
@@ -4218,11 +4225,17 @@ bool run_the_self_record_rebinds_ls_camouflage_row() {
 		local = h.kernel->local.player();
 		ok = expect(local != nullptr && local->item_type_index == 3 && local->item_id == 0x14BF,
 				"camouflage row: the self record rebinds L to its class's desert row (5311)");
+		ok = ok && expect(h.role.runtime->state().find(0x0005) != nullptr &&
+						h.role.runtime->state().find(0x0005)->type_id == 0x14BF,
+				"camouflage row: the self row takes L's row, which the next self record's "
+				"pre-apply check reads (D-NET-NEW-L2-57)");
 		if (ok) {
 			// The index compares first: a record whose row is the body's own stores
 			// nothing, so a word another writer moved keeps its value
-			// [orig: @0x4C12A5..0x4C12A8 -> @0x4C12F4].
+			// [orig: @0x4C12A5..0x4C12A8 -> @0x4C12F4]. The record names the row's
+			// type, or its pre-apply check drops it.
 			local->health_max = 77;
+			fu.records.front().type_id = 0x14BF;
 			std::vector<uint8_t> again;
 			frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
 					{make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(fu))}, again);
@@ -4282,6 +4295,8 @@ bool run_a_remote_record_repicks_its_rows_camouflage_row() {
 			std::make_shared<const replication::ItemReplicationCatalog>(
 					replication::ItemReplicationCatalog::from_items_def(items)));
 	h.role.run_tick(h.input);
+	// L's own class word: class 5, whose desert row is the rows' 5305.
+	if (w::Entity *local = h.kernel->local.player()) local->player_class = 5;
 	for (uint16_t handle : {kRemote, kSelf}) {
 		auto &row = h.role.runtime->state().upsert(handle);
 		row.cls = EntityClass::Player;
@@ -4318,8 +4333,163 @@ bool run_a_remote_record_repicks_its_rows_camouflage_row() {
 			"remote camouflage row: a class-6 record re-types the remote row to 5311");
 	ok = ok && expect(remote->cls == EntityClass::Player,
 			"remote camouflage row: the re-typed row's class follows its plyr row");
-	ok = ok && expect(self != nullptr && self->type_id == w::kPlayerInfantryTypeId,
-			"remote camouflage row: the self row is left to L's fold");
+	ok = ok && expect(h.kernel->local.player() != nullptr && self != nullptr &&
+					self->type_id == w::kPlayerInfantryTypeId,
+			"remote camouflage row: the self row picks by L's class word (5: 5305), not the "
+			"record's class-6 nibble (D-NET-NEW-L2-57)");
+	opennova::def::def_free_items(&items);
+	return ok;
+}
+
+// D-NET-NEW-L2-57: the mission start's model reload re-types every pool-0 player row (Flags
+// 0x100), the client's own included, to its class's camouflage item for the climate; a row
+// without the bit keeps its type. L is born on the row its slot holds then. The first records'
+// pre-apply check reads the re-typed rows (a record of the stream's old type drops and queues a
+// C2S 0x0F by its handle), and the 0x0C's sub-header carries L's def's type word, which each self
+// record's re-pick by L's class word then moves, the self row with it. The stream typed every
+// row 5310; desert: class 5 -> 5305, class 6 -> 5311.
+// [orig: Game_StartMission @0x524360 - Game_ReloadEntityModelsAndCallbacks called @0x52550E ahead
+//  of Player_InitPlayer called @0x525BBC; Game_ReloadEntityModelsAndCallbacks @0x522830 - the
+//  Flags 0x100 test @0x522C52, CharAttr_GetCammoTypeId called @0x522C91,
+//  ItemList_FindIndexByTypeId called @0x522CA2, the index store @0x522CAA; NapiNPClientMsg_0x00A
+//  @0x42FEC0 - the slot's def type and index @0x4307BC..0x4307C4, the 0x0F @0x4307E9;
+//  NetPacket_SerializePlayerState @0x4C09C0 - the climate pick @0x4C1248..0x4C129C;
+//  Pool_SerializeEntityViaVTable @0x4D64E0 - the def's type word @0x4D659B / @0x4D659F]
+bool run_the_mission_start_reload_repicks_the_player_rows() {
+	static const char kItems[] =
+			"begin \"Null\"\r\n id 100000\r\n type marker\r\nend\r\n"
+			"begin \"Player #1, Multiplayer\"\r\n id 105305\r\n ai_function plyr\r\n type person\r\n hp 150\r\n"
+			" move_function org2\r\nend\r\n"
+			"begin \"Player #1, Single player\"\r\n id 105310\r\n ai_function plyr\r\n type person\r\n hp 120\r\n"
+			" move_function org2\r\nend\r\n"
+			"begin \"Generic Soldier\"\r\n id 105311\r\n ai_function plyr\r\n type person\r\n hp 100\r\n"
+			" move_function org2\r\nend\r\n";
+	static const char kCharattr[] =
+		"[CHARACTER1]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
+		"[CHARACTER2]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
+		"[CHARACTER3]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
+		"[CHARACTER4]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5310\r\nARCTIC_CAMMO\t= 5310\r\n"
+		"[CHARACTER5]\r\nJUNGLE_CAMMO\t= 5310\r\nDESERT_CAMMO\t= 5305\r\nARCTIC_CAMMO\t= 5311\r\n"
+		"[CHARACTER6]\r\nJUNGLE_CAMMO\t= 9999\r\nDESERT_CAMMO\t= 5311\r\nARCTIC_CAMMO\t= 5305\r\n";
+	constexpr uint16_t kSelf = 0x0005;
+	constexpr uint16_t kRemote = 0x0007;
+	constexpr uint16_t kSoldier = 0x0009;
+	constexpr uint16_t kStreamType = 5310;
+	opennova::def::DefItemsFile items{};
+	if (!expect(opennova::def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(kItems),
+						sizeof(kItems) - 1, &items) == 0,
+				"reload re-pick: the items parse"))
+		return false;
+	Harness h;
+	w::World &world = h.kernel->world;
+	opennova::mission::resolve_item_traits(world, items, {}, nullptr);
+	world.tables.bms_climate = 0;
+	inmatch::CharAttrTable table;
+	inmatch::charattr_load(table, reinterpret_cast<const uint8_t *>(kCharattr), sizeof(kCharattr) - 1);
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, kSelf, kStreamType);
+	// The boot's charattr.def words are in the world ahead of the load (the shell's install),
+	// and each frame's end keeps them (JoinerRole::sync_class_attribute_flags).
+	h.role.runtime->set_charattr_table(table);
+	inmatch::install_class_attribute_flags(world, h.role.runtime->charattr_table(), table);
+	h.role.runtime->view().set_item_catalog(
+			std::make_shared<const replication::ItemReplicationCatalog>(
+					replication::ItemReplicationCatalog::from_items_def(items)));
+	// The stream's pool-0 rows: the client's own and a remote player (Flags 0x100), and a
+	// person without the bit, every one typed 5310.
+	struct Streamed {
+		uint16_t handle;
+		uint8_t player_class;
+		uint32_t flags;
+	};
+	for (const Streamed &s : {Streamed{kSelf, 5, w::kEntityFlagPlayer},
+				 Streamed{kRemote, 6, w::kEntityFlagPlayer}, Streamed{kSoldier, 6, 0u}}) {
+		auto &row = h.role.runtime->state().upsert(s.handle);
+		row.cls = EntityClass::Player;
+		row.type_id = kStreamType;
+		row.rm_entity_flags = s.flags;
+		row.spawn_player_class = s.player_class;
+	}
+	h.role.reload_pool0_row_channels();
+	const auto type_of = [&h](uint16_t handle) -> int {
+		const replication::ClientEntityState *row = h.role.runtime->state().find(handle);
+		return row != nullptr ? row->type_id : -1;
+	};
+	bool ok = expect(type_of(kSelf) == 5305 && type_of(kRemote) == 5311,
+			"reload re-pick: each player row takes its class's desert row (5: 5305, 6: 5311)");
+	ok = ok && expect(type_of(kSoldier) == kStreamType,
+			"reload re-pick: a row without Flags 0x100 keeps the stream's type");
+	ok = ok && expect(h.role.runtime->state().find(kRemote)->cls == EntityClass::Player,
+			"reload re-pick: the re-typed row's class follows its plyr row");
+	// L is born (the seeded session's edge) on the row its slot holds.
+	h.role.run_tick(h.input);
+	w::Entity *local = h.kernel->local.player();
+	ok = ok && expect(local != nullptr && local->item_id == 5305 && local->item_type_index == 1,
+			"reload re-pick: L is born on the reload's row (5305), not the record's 5310");
+	if (!ok) {
+		opennova::def::def_free_items(&items);
+		return false;
+	}
+	local->player_class = 5; // the mission start's init: L's side class word
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	const auto frame = [&](std::initializer_list<std::pair<uint16_t, uint16_t>> records) {
+		FrameUpdate fu;
+		fu.carried_handle = 0xFFFF;
+		fu.health = 100;
+		for (const std::pair<uint16_t, uint16_t> &r : records) {
+			FrameUpdateRecord rec;
+			rec.handle = r.first;
+			rec.type_id = r.second;
+			rec.cls = EntityClass::Player;
+			rec.player.carrier_handle = 0xFFFF;
+			rec.player.health_class_byte = 0x26; // tier 2, class 6
+			fu.records.push_back(rec);
+		}
+		std::vector<uint8_t> packet;
+		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+				{make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(fu))}, packet);
+		auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+		h.role.runtime->receive(datagram.data(), datagram.size());
+		h.role.run_tick(h.input);
+	};
+	const auto uplink_type = [&h]() -> int {
+		ProtocolMessage message;
+		EntityPacketSubHeader sub;
+		size_t header_bytes = 0;
+		if (!h.socket.last_message(c2s::ENTITY_UPLINK, message) ||
+				!decode_entity_packet_sub_header(message.payload.data(), message.payload.size(),
+						sub, header_bytes))
+			return -1;
+		return sub.item_type_id;
+	};
+	const auto asks_for = [&h](uint16_t handle) {
+		int count = 0;
+		for (const ProtocolMessage &m : h.socket.messages_with(c2s::ENTITY_INFO_QUERY))
+			if (m.payload.size() == 2 && (m.payload[0] | (m.payload[1] << 8)) == handle) ++count;
+		return count;
+	};
+	// The first 0x0A: the self record names the reload's row, the remote one the stream's 5310.
+	h.socket.datagrams.clear();
+	frame({{kSelf, 5305}, {kRemote, kStreamType}});
+	h.role.run_tick(h.input);
+	ok = expect(asks_for(kRemote) == 1 && asks_for(kSelf) == 0,
+			"reload re-pick: the remote record of the old type drops and asks its 0x0F; the self "
+			"record applies");
+	ok = ok && expect(type_of(kRemote) == 5311,
+			"reload re-pick: the dropped record leaves the remote row's re-picked type");
+	ok = ok && expect(uplink_type() == 5305,
+			"reload re-pick: the 0x0C's sub-header carries L's def's type (5305), not the record's "
+			"5310");
+	// L's class word moves to 6: the next self record re-picks L by it, the self row with it, and
+	// the 0x0C follows.
+	local->player_class = 6;
+	frame({{kSelf, 5305}});
+	local = h.kernel->local.player();
+	ok = ok && expect(local != nullptr && local->item_id == 0x14BF && type_of(kSelf) == 0x14BF,
+			"reload re-pick: the self record re-picks L and its row by L's class word (6: 5311)");
+	ok = ok && expect(uplink_type() == 0x14BF,
+			"reload re-pick: the next 0x0C carries the re-picked type (5311)");
 	opennova::def::def_free_items(&items);
 	return ok;
 }
@@ -5779,6 +5949,7 @@ int main() {
 	ok &= run_the_spawn_takes_its_sides_class_word();
 	ok &= run_the_self_record_rebinds_ls_camouflage_row();
 	ok &= run_a_remote_record_repicks_its_rows_camouflage_row();
+	ok &= run_the_mission_start_reload_repicks_the_player_rows();
 	ok &= run_a_self_team_assign_reinits_l();
 	ok &= run_deploy_action_converts_a_dead_permanent_death_player();
 	ok &= run_deploy_action_head_resets_input_and_dialogs();
