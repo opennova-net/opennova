@@ -571,6 +571,11 @@ public:
 	// -> CUIStringTable_LookupString @ 0x6527c0 over CWnd_GetInheritedTextRsrc @ 0x646AB0;
 	// the Mods list's base row, Options_PopulateModList @ 0x559fe2].
 	std::string widget_string(int index, const std::string &key) const;
+	// The text the string table `table` names gives a key the game's code names, whatever
+	// table a widget inherits, the key itself on a miss [orig: UIStringTable_LookupAndDup
+	// @ 0x63b290 -> CUIStringTable_LookupString @ 0x6527c0 with the table's file name, the
+	// key's copy on a miss @ 0x63b2f0; the host screen's MAX_PLAYERS @ 0x5561bc].
+	std::string table_string(const std::string &table, const std::string &key) const;
 	// Authored-or-runtime effective disabled (the pump's state-1 test).
 	bool widget_disabled(int index, const MenuFrameState &state) const;
 	// The parsed window a document widget compiles (null for a part or out of range): what an

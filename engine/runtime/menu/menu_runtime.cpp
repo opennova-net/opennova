@@ -764,6 +764,10 @@ std::string MenuRuntime::widget_string(int id, const std::string &key) const {
 	return index >= 0 && frame_ != nullptr ? frame_->widget_string(index, key) : key;
 }
 
+std::string MenuRuntime::table_string(const std::string &table, const std::string &key) const {
+	return frame_ != nullptr ? frame_->table_string(table, key) : key;
+}
+
 std::string MenuRuntime::item_value(int id, int row) const {
 	const mnu::Items *items = menu_items_container(index_.window(id));
 	if (items == nullptr || row < 0 || row >= static_cast<int>(items->items.size()))

@@ -9,6 +9,8 @@
 #include "common/test_expect.h"
 #include <formats/mnu/mnu.h>
 #include <runtime/menu/menu_runtime.h>
+#include <runtime/menu/menu_state_frame.h>
+#include <runtime/menu/menu_text_tables.h>
 #include <limits>
 #include <memory>
 #include <string>
@@ -149,11 +151,73 @@ int untouched_dialog() {
     TEST_EXPECT(cfg.game_name == "Renamed" && cfg.sv_punkbuster == 0 && cfg.replay == 0);
     return 0;
 }
+// The connection speed's recommended player count: rows 0..17 the table under the title's
+// screen cap, row 18 the cap, any other row 0; the populate shows it in
+// STATIC_MAXPLAYERS_RECOMMENDATION through menutxt.bin's MAX_PLAYERS format (the key itself on a
+// miss), and nothing reads it back (D-NET-NEW-L8-43).
+// [orig: UI_MapSliderIndexToMaxPlayers @0x555F00 (the switch @0x555F0B, the cap @0x555F1F,
+//  row 18 @0x555F86); UI_PopulateHostSettingsFromConfig @0x555FE0 - @0x55619C..0x5561F8;
+//  UIStringTable_LookupAndDup @0x63B290 (the key's copy on a miss @0x63B2F0)]
+// [orig: UI_MapSliderIndexToMaxPlayers @0x5540B0 (dfx2.exe), the same table under its cap]
+int max_players_recommendation() {
+    const int32_t rows[18] = {1, 2, 2, 2, 3, 3, 4, 5, 6, 8, 9, 11, 14, 16, 21, 23, 26, 32};
+    for (int32_t i = 0; i < 18; ++i) TEST_EXPECT(map_slider_index_to_max_players(i, 64) == rows[i]);
+    TEST_EXPECT(map_slider_index_to_max_players(18, 64) == 64);
+    TEST_EXPECT(map_slider_index_to_max_players(18, 100) == 100);
+    TEST_EXPECT(map_slider_index_to_max_players(17, 16) == 16 && map_slider_index_to_max_players(13, 16) == 16);
+    TEST_EXPECT(map_slider_index_to_max_players(19, 64) == 0 && map_slider_index_to_max_players(-1, 64) == 0);
+
+    mnu::Document doc = host_dialog_document();
+    doc.screens[0].roots[0].children.push_back(control("CONNECTIONSPEED", mnu::WindowType::SpinList,
+            {{"28.8", ""}, {"LAN", "18"}}));
+    doc.screens[0].roots[0].children.push_back(
+            control("STATIC_MAXPLAYERS_RECOMMENDATION", mnu::WindowType::Static));
+    opennova::menu::MenuTextTables tables;
+    auto menutxt = std::make_shared<opennova::rtxt::File>();
+    menutxt->sections.push_back({"Menu", 1});
+    menutxt->entries.push_back({"MAX_PLAYERS", "Up to %d players", {}, 0});
+    tables.set_table("menutxt.bin", menutxt);
+    opennova::menu::MenuStateFrame frame;
+    frame.set_configure([&](const std::string& name, opennova::menu::MenuFrameCompiler& compiler) {
+        const mnu::Screen* found = name.empty() ? doc.first_screen() : doc.find_screen(name);
+        compiler.set_text_tables(&tables);
+        compiler.configure(found);
+        return found != nullptr;
+    });
+    auto screen = std::make_unique<opennova::menu::MenuRuntime>();
+    screen->set_frame(&frame);
+    TEST_EXPECT(screen->open_document(&doc, std::string(), std::string(kHostDialogScreen)));
+    const int label = screen->find_screen_control(std::string(kHostDialogScreen),
+                                                  "STATIC_MAXPLAYERS_RECOMMENDATION");
+    TEST_EXPECT(label >= 0);
+    gamecfg::GameCfg cfg;
+    cfg.nwisptype = 13;
+    populate_host_screen(*screen, cfg);
+    TEST_EXPECT(screen->get_widget_text(label) == "Up to 16 players");
+    cfg.nwisptype = 18;
+    populate_host_screen(*screen, cfg);
+    TEST_EXPECT(screen->get_widget_text(label) == "Up to 64 players");
+    gamecfg::GameCfg dfx2;
+    dfx2.table = gamecfg::ConfigTable::Dfx2;
+    dfx2.nwisptype = 18;
+    populate_host_screen(*screen, dfx2);
+    TEST_EXPECT(screen->get_widget_text(label) == "Up to 100 players");
+    // A frame with no menutxt.bin: the key itself, sprintf'd as the format.
+    auto bare = std::make_unique<opennova::menu::MenuRuntime>();
+    TEST_EXPECT(bare->open_document(&doc, std::string(), std::string(kHostDialogScreen)));
+    cfg.nwisptype = 13;
+    populate_host_screen(*bare, cfg);
+    const int bare_label = bare->find_screen_control(std::string(kHostDialogScreen),
+                                                     "STATIC_MAXPLAYERS_RECOMMENDATION");
+    TEST_EXPECT(bare_label >= 0 && bare->get_widget_text(bare_label) == "MAX_PLAYERS");
+    return 0;
+}
 } // namespace
 
 int main() {
     if (title_caps() != 0) return 1;
     if (untouched_dialog() != 0) return 1;
+    if (max_players_recommendation() != 0) return 1;
     gamecfg::GameCfg cfg;
     const auto read = [&](const char* name, const char* value) {
         return apply_host_dialog_control(cfg, name, value);

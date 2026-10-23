@@ -73,6 +73,14 @@ std::string host_dialog_value(const gamecfg::GameCfg& cfg, std::string_view cont
 // [orig: UI_PopulateHostSettingsFromConfig @0x555FE0 - per control in
 //  host_settings.cpp]
 void populate_host_screen(menu::MenuRuntime& screen, gamecfg::GameCfg& cfg);
+// The player count the host screen recommends for a CONNECTIONSPEED row (the block's
+// nwisptype): rows 0..17 map to 1, 2, 2, 2, 3, 3, 4, 5, 6, 8, 9, 11, 14, 16, 21, 23, 26, 32
+// under the title's screen cap, row 18 the cap itself, any other row 0. The populate shows
+// it in STATIC_MAXPLAYERS_RECOMMENDATION through menutxt.bin's MAX_PLAYERS format
+// (populate_host_screen); nothing reads it back.
+// [orig: UI_MapSliderIndexToMaxPlayers @0x555F00 (the cap g_HostScreenMaxPlayers @0x555F1F /
+//  @0x555F86)] [orig: UI_MapSliderIndexToMaxPlayers @0x5540B0, g_HostMaxPlayersCap (dfx2.exe)]
+int32_t map_slider_index_to_max_players(int32_t slider_index, int32_t host_screen_cap);
 // START's read of the screen into the block, each control it holds in the
 // read's order through apply_host_dialog_control: a spin list its selected
 // row's value= (GAME_LOCATION the row's name), an edit its text, a checkbox

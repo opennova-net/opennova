@@ -195,6 +195,12 @@ public:
 		(void)index;
 		return key;
 	}
+	// The text the string table `table` names gives a key, the key itself on a miss
+	// (MenuFrameCompiler::table_string); a frame that loads no table answers the key.
+	virtual std::string table_string(const std::string &table, const std::string &key) const {
+		(void)table;
+		return key;
+	}
 	// The open popup (a shown MODAL window) as a pre-order index, -1 none: the
 	// frame's pump then serves its subtree alone.
 	virtual void set_open_popup(int index) = 0;
@@ -454,6 +460,9 @@ public:
 	// The text the widget's string table gives a key the game's code names, the key itself on
 	// a miss or off-screen (MenuFrameSeam::widget_string).
 	std::string widget_string(int id, const std::string &key) const;
+	// The text the string table `table` names gives a key the game's code names, the key
+	// itself on a miss (MenuFrameSeam::table_string).
+	std::string table_string(const std::string &table, const std::string &key) const;
 	// The authored item `value=` attribute of a row.
 	std::string item_value(int id, int row) const;
 	// Retail's select-by-value seed [orig: SpinList_SelectItemByValue

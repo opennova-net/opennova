@@ -257,6 +257,8 @@ public:
 	std::string widget_mnemonic(int p_index) const;
 	// The text the widget's string table gives a key (MenuFrameCompiler::widget_string).
 	std::string widget_string(int p_index, const std::string &p_key) const;
+	// The text the named string table gives a key (MenuFrameCompiler::table_string).
+	std::string table_string(const std::string &p_table, const std::string &p_key) const;
 	// The open popup (a shown MODAL window's index, -1 none): the pump serves
 	// its subtree alone (MenuFrameState::popup_root).
 	void set_open_popup(int p_index);

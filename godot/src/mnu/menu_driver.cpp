@@ -309,6 +309,10 @@ public:
 		MenuFrame *f = frame();
 		return f != nullptr ? f->widget_string(index, key) : key;
 	}
+	std::string table_string(const std::string &table, const std::string &key) const override {
+		MenuFrame *f = frame();
+		return f != nullptr ? f->table_string(table, key) : key;
+	}
 	void set_open_popup(int index) override {
 		if (MenuFrame *f = frame()) f->set_open_popup(index);
 	}

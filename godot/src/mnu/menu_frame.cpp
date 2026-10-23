@@ -813,6 +813,10 @@ std::string MenuFrame::widget_string(int p_index, const std::string &p_key) cons
 	return configured_ ? compiler_.widget_string(p_index, p_key) : p_key;
 }
 
+std::string MenuFrame::table_string(const std::string &p_table, const std::string &p_key) const {
+	return configured_ ? compiler_.table_string(p_table, p_key) : p_key;
+}
+
 void MenuFrame::set_open_popup(int p_index) {
 	state_.popup_root = p_index;
 }

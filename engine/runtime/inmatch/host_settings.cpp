@@ -4,6 +4,7 @@
 #include <formats/mnu/mnu.h>
 #include <runtime/menu/menu_flow.h>
 #include <runtime/menu/menu_runtime.h>
+#include <runtime/hud/hud_game_text.h> // hud_sprintf (the CRT sprintf over a localized format)
 
 #include <algorithm>
 #include <cstdlib>
@@ -237,6 +238,30 @@ void populate_host_screen(menu::MenuRuntime& screen, gamecfg::GameCfg& cfg) {
                 break;
         }
     }
+    // The recommendation label past CONNECTIONSPEED: menutxt.bin's MAX_PLAYERS (the key on
+    // a miss) as the sprintf format of the connection speed's player count, set as the
+    // label's text. It reads only nwisptype, which no other control's show moves.
+    // [orig: UI_PopulateHostSettingsFromConfig @0x555FE0 - UI_FindScreenControl
+    //  ("STATIC_MAXPLAYERS_RECOMMENDATION") @0x55619C, UIStringTable_LookupAndDup("menutxt.bin",
+    //  "MAX_PLAYERS") @0x5561BC, UI_MapSliderIndexToMaxPlayers(nwiSpType_540) @0x5561CF, sprintf
+    //  @0x5561DB, the SetText vtable+0x4C call @0x5561F1, the free @0x5561F8]
+    const int label = host_screen_control(screen, "STATIC_MAXPLAYERS_RECOMMENDATION");
+    if (label >= 0) {
+        const std::string format = screen.table_string("menutxt.bin", "MAX_PLAYERS");
+        screen.set_widget_text(label, hud::hud_sprintf(format,
+                map_slider_index_to_max_players(cfg.nwisptype,
+                        title_player_caps(block_title(cfg)).host_screen)));
+    }
+}
+
+int32_t map_slider_index_to_max_players(int32_t slider_index, int32_t host_screen_cap) {
+    // [orig: UI_MapSliderIndexToMaxPlayers @0x555F00 - the switch @0x555F0B, the cap test
+    //  @0x555F1F, row 18 the cap @0x555F86]
+    static constexpr int32_t kRowPlayers[18] = {1, 2, 2, 2, 3, 3, 4, 5, 6, 8, 9, 11, 14, 16,
+                                                21, 23, 26, 32};
+    if (slider_index == 18) return host_screen_cap;
+    const int32_t players = slider_index >= 0 && slider_index < 18 ? kRowPlayers[slider_index] : 0;
+    return players > host_screen_cap ? host_screen_cap : players;
 }
 
 void read_host_screen(const menu::MenuRuntime& screen, gamecfg::GameCfg& cfg) {

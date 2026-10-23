@@ -162,6 +162,12 @@ void test_text_tables(const fnt_font_t *font) {
 	CHECK(c.widget_authored_text(4) == "OTHER", "a key outside section menu shows raw");
 	CHECK(c.widget_authored_text(5) == "SECOND", "only the first menu section is searched");
 	CHECK(c.widget_authored_text(6) == "expansion", "the override table is searched first");
+	// A lookup through a table the code names, whatever a widget inherits (D-NET-NEW-L8-43)
+	// [orig: UIStringTable_LookupAndDup @ 0x63b290 -> CUIStringTable_LookupString @ 0x6527c0;
+	// the key's copy on a miss @ 0x63b2f0].
+	CHECK(c.table_string("PANEL.bin", "K") == "panel", "the named table, its name in any case");
+	CHECK(c.table_string("root.bin", "OVER") == "expansion", "the override first");
+	CHECK(c.table_string("gone.bin", "K") == "K", "a table never named: the key");
 	// No table at all: the raw key.
 	opennova::mnu::Document bare = parse_or_die(screen(button("A", "<STRING type=\"id\">K</STRING>")));
 	MenuFrameCompiler b;
@@ -178,6 +184,7 @@ void test_text_tables(const fnt_font_t *font) {
 	m.set_text_tables(&missing);
 	m.configure(one.first_screen());
 	CHECK(m.widget_authored_text(1) == "OVER", "a table that did not load gives the key");
+	CHECK(m.table_string("root.bin", "OVER") == "OVER", "the named table did not load: the key");
 	CHECK(opennova::menu::screen_text_rsrc_names(*doc.first_screen()) ==
 					std::vector<std::string>({ "root.bin", "panel.bin" }),
 			"the screen's tables, each once");
