@@ -12,6 +12,7 @@
 
 #include <cstdio>
 #include <string>
+#include <utility>
 #include <vector>
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
@@ -131,9 +132,25 @@ static bool test_login_success_concrete() {
 	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest, "login() -> prepare request")) return false;
 	expect(r.request.method == nw::HttpMethod::Get && r.request.valid, "prepare is a GET");
 	expect(r.request.url == "http://gs.opennova.test:8080/NWStart.dll?prepare=1", "prepare hits startup_url");
+	// D-NET-NEW-L9-26: the identity set is in the jar before the web lobby's first request, which
+	// carries it in its order (the live nwuid for the empty NWUID), and every cookie a page sets
+	// follows it in the later Cookie lists, the UDP statements' var-list included.
+	// [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1570 - CUIBrowser_AddFormField @0x4D16A9..
+	//  @0x4D17AA; CNapiSession_ReadLocaleInfo @0x4CE390 - the jar's walk @0x4CE3E5]
+	expect(r.request.headers == std::vector<std::string>{"Cookie: NWUID=ABCDEF0123456789;",
+	                                                      "Cookie: CountryName=us;"},
+	       "the prepare GET carries the identity cookies, in their order");
 
 	// PREPARE response: the server issues the EPASK bundle as a cookie. Concrete url -> straight to POST.
-	r = f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
+	const std::string epask_cookie = make_epask_cookie();
+	r = f.on_login_response(true, 200, set_cookie("EPASK=" + epask_cookie), {});
+	{
+		const std::vector<std::pair<std::string, std::string>> vars = f.session_cookie_vars();
+		std::vector<std::string> names;
+		for (const auto &kv : vars) names.push_back(kv.first);
+		expect(names == std::vector<std::string>{"NWUID", "CountryName", "EPASK"},
+		       "the Cookie var-list leads with the identity set, the page's cookies after it");
+	}
 	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest, "prepare -> POST (concrete skips NWSTART)"))
 		return false;
 	expect(r.request.method == nw::HttpMethod::Post, "login leg is a POST");

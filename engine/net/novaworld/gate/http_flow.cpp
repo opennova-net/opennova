@@ -299,7 +299,14 @@ void LobbyHttpFlow::merge_response_cookies(const std::vector<std::string> &respo
 	if (!values.empty()) jar_.merge_set_cookie_values(values);
 }
 
-// [orig: seed_identity_cookies()] — identity_vars -> jar, with the live nwuid for the empty NWUID entry.
+// The identity set into the jar (identity_vars, the live nwuid for the empty NWUID entry), ahead of
+// every cookie a page sets: retail's connection-up writes them as browser form fields before the
+// web lobby's first request, so the first request carries them and every later Cookie list (the
+// headers, the UDP statements' "Cookie" var-list) leads with them (D-NET-NEW-L9-26).
+// [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1570 - CUIBrowser_AddFormField NWUID (the call
+//  @0x4D16A9), NWCDKIID @0x4D16ED, NWCDKIIDEXP1 @0x4D1702, NWPSSK @0x4D1724, NWUSID @0x4D1746,
+//  NWHWI @0x4D17AA; CNapiSession_ReadLocaleInfo @0x4CE390 - the jar's walk in its order (the call
+//  @0x4CE3E5), CNapiVarList_SetOrCreate per entry (the call @0x4CE443)]
 void LobbyHttpFlow::seed_identity_cookies() {
 	for (const auto &kv : ctx_.identity_vars) {
 		std::string value = kv.second;
@@ -338,6 +345,7 @@ LoginResult LobbyHttpFlow::login(const std::string &username, const std::string 
 	if (!refusal.empty()) return login_fail(refusal);
 	const std::string prepare_url = resolve_startup_url();
 	if (prepare_url.empty()) return login_fail("no gate startup_url yet — connect first");
+	seed_identity_cookies();
 	login_user_ = username;
 	login_pass_ = password;
 	login_step_ = LoginStep::Prepare;
@@ -433,7 +441,6 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 				login_step_ = LoginStep::Idle;
 				return login_fail("bad EPASK bundle: params rejected (modulus <= 258 or exponent 0)");
 			}
-			seed_identity_cookies();
 			const bool templated =
 					!ctx_.startup_url.empty() && startup_url_is_templated(ctx_.startup_url);
 			if (templated) {
