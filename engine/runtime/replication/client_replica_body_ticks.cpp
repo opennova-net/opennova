@@ -115,16 +115,22 @@ void ClientReplicaPipeline::arms_dip_row(ClientEntityState &es) {
 	if (lag < -0x0E38E380) es.torso_roll = io::bam_add(es.roll_bam, -0x0E38E380);
 }
 
+// The recoil chase and its PRNG draw are the org2 and org1 body updates' own, so a person
+// bound to an item row (person_takes_item_row) draws nothing and keeps its words (D-NET-892).
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the +0x380 block @0x4B57EB..0x4B5839,
+//  PRNG_Next16 @0x4B581B; Entity_UpdateInfantryAI @0x4B9910 - @0x4BE7FD..0x4BE84B,
+//  PRNG_Next16 @0x4BE82D; Entity_UpdateAllEntities @0x4C2100 - the +0x1C4 call @0x4C2472]
 void ClientReplicaPipeline::tick_recoil() {
 	for (ClientEntityState &es : state_.entities) {
 		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry)
 			continue;
+		if (person_takes_item_row(es, parked_self_)) continue;
 		// [orig: PRNG_Next16 @0x6130a0, dword_31BFBB0] The low bit selects the
 		// recoil-yaw sign; prng16_ keeps the complete state because decoded rows
 		// share one stream rather than owning one generator each. Other
 		// process-global retail consumers remain outside this view's bounded
 		// call-history seam.
-		const int32_t random16 = io::rotating_prng_next16(prng16_); // unconditional [orig: body updater]
+		const int32_t random16 = io::rotating_prng_next16(prng16_); // unconditional [orig: @0x4B581B / @0x4BE82D]
 		const int32_t step = io::bam_sar(io::bam_add(es.recoil_pitch, 4), 3);
 		const int32_t half = io::bam_sar(step, 1);
 		es.recoil_pitch = io::bam_sub(es.recoil_pitch, half);

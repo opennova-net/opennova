@@ -22,9 +22,12 @@
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 
+#include <base/io/rotating_prng.h>
+
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -102,6 +105,119 @@ void test_the_walk_runs_the_bound_move_row() {
 	staged(bare, 0x0025, kEwepType);
 	bare.tick_remote_motion(kNone);
 	expect(bare.state().find(0x0025)->x == (10 << 16), "an unresolved type keeps its chase");
+}
+
+// The joiner's production walk (the own-body split and the pool-1 interleave) parks every pool-0
+// row and visits it in its parked half. A person bound to an item row runs that row's update
+// alone there: none of the org2 body's legs (the lean decay, the arms dip with the torso roll,
+// the seat follow, the selection, the lean ramp), and the frame's recompose gives it no seat
+// pose either; an org2 rider keeps every one.
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the +0x1C4 call @0x4C2472;
+//  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the decay @0x4B5C97, the dip
+//  @0x4B5CAB..0x4B5CE7, the site selector @0x4B637C..0x4B638F, the ramp @0x4B7DBF]
+void test_the_split_walk_runs_no_body_legs_over_an_item_row() {
+	auto view = std::make_unique<ns::ClientReplicaPipeline>();
+	view->set_remote_motion_mode(true);
+	view->set_self_body_split(true);
+	view->set_pool1_interleave(true);
+	view->set_item_catalog(person_catalog());
+	std::vector<uint16_t> ewep_calls;
+	view->set_person_ewep_mover([&](ns::ClientEntityState &row) {
+		ewep_calls.push_back(row.handle);
+		return false;
+	});
+	ns::ClientEntityState &carrier = view->state().upsert(0x1001);
+	carrier.cls = EntityClass::Vehicle;
+	carrier.x = 100 << 16;
+	const auto rider = [&](uint16_t handle, uint16_t type) {
+		ns::ClientEntityState &row = staged(*view, handle, type);
+		row.x = 5 << 16;
+		row.carrier_handle = 0x1001;
+		row.net_seat_valid = true;
+		row.net_seat_local[0] = 1 << 16;
+		row.lean_angle = 0x01000000;
+		row.move_input = static_cast<uint8_t>(w::Entity::kMoveOrderLeanLeft);
+		row.pitch_kick_accum = 0x00100000;
+		row.arms_dip_ticks = 4;
+		row.roll_bam = 0x10000000;
+	};
+	rider(0x0021, kEwepType);
+	rider(0x0023, kOrg2Type);
+	staged(*view, 0x0024, kOrg2Type); // the joiner's own row
+	view->tick_remote_motion(0x0024);
+	view->tick_remote_motion_after_self();
+	view->refresh_carried_entities();
+	const ns::ClientEntityState *ewep = view->state().find(0x0021);
+	const ns::ClientEntityState *org2 = view->state().find(0x0023);
+	expect(ewep_calls.size() == 1 && ewep_calls[0] == 0x0021, "the parked item row runs its update");
+	expect(ewep->x == (5 << 16), "the item row takes no seat pose, in its visit or the recompose");
+	expect(ewep->lean_angle == 0x01000000, "no lean decay and no lean ramp");
+	expect(ewep->pitch_kick_accum == 0x00100000 && ewep->arms_dip_ticks == 4 &&
+			ewep->torso_roll == 0, "no arms dip and no torso roll");
+	expect(org2->x != (5 << 16), "the org2 rider takes its seat");
+	expect(org2->lean_angle != 0x01000000, "and its lean legs");
+	expect(org2->pitch_kick_accum != 0x00100000 && org2->arms_dip_ticks != 4 &&
+			org2->torso_roll != 0, "and its dip and roll");
+}
+
+// The recoil chase and its PRNG draw belong to the org2 and org1 updates: an item-row person
+// draws nothing and keeps its recoil, Yaw and Pitch words, so the shared stream's draws fall to
+// the org rows alone.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B57EB..0x4B5839, PRNG_Next16
+//  @0x4B581B; Entity_UpdateInfantryAI @0x4B9910 - @0x4BE7FD..0x4BE84B, PRNG_Next16 @0x4BE82D]
+void test_the_recoil_draws_nothing_for_an_item_row() {
+	auto view = std::make_unique<ns::ClientReplicaPipeline>();
+	view->set_item_catalog(person_catalog());
+	staged(*view, 0x0021, kEwepType).recoil_pitch = 0x40000;
+	staged(*view, 0x0023, kOrg2Type).recoil_pitch = 0x40000;
+	// The org2 row's chase with one draw a tick, and with the item row's draw ahead of it.
+	const auto expected = [](int draws_per_tick) {
+		uint32_t state = w::World::kMissionPrng16Seed;
+		int32_t recoil = 0x40000, heading = 0, pitch = 0;
+		for (int tick = 0; tick < 8; ++tick) {
+			for (int d = 1; d < draws_per_tick; ++d)
+				(void)opennova::io::rotating_prng_next16(state);
+			const int32_t random16 = opennova::io::rotating_prng_next16(state);
+			const int32_t step = (recoil + 4) >> 3;
+			const int32_t half = step >> 1;
+			recoil -= half;
+			if (recoil <= 0x300) recoil = 0;
+			pitch += step >> 3;
+			heading += (random16 & 1) == 0 ? half : -half;
+		}
+		return std::make_pair(heading, pitch);
+	};
+	expect(expected(1) != expected(2), "the oracle tells the draw counts apart");
+	for (int tick = 0; tick < 8; ++tick) view->tick_recoil();
+	const ns::ClientEntityState *e = view->state().find(0x0021);
+	const ns::ClientEntityState *o = view->state().find(0x0023);
+	expect(e->recoil_pitch == 0x40000 && e->heading_bam == 0 && e->pitch_bam == 0,
+			"the item row keeps its words");
+	expect(std::make_pair(o->heading_bam, o->pitch_bam) == expected(1),
+			"the org2 row's chase takes every draw");
+}
+
+// Every call is one C2S 0x0F: two persons on one stale ground in one walk ask for the ground
+// twice, each ahead of its own body.
+// [orig: CNapiNetwork_QueueReliableMessage @0x4C4FA0 -> CNapiNPConnection_QueueMessage
+//  @0x628640 (no dedupe); Entity_UpdateTransformAndTurret @0x440CA0 - @0x440DAB, @0x440E29]
+void test_every_repair_request_is_queued() {
+	auto view = std::make_unique<ns::ClientReplicaPipeline>();
+	view->set_remote_motion_mode(true);
+	view->set_self_body_split(true);
+	view->set_pool1_interleave(true);
+	view->set_item_catalog(person_catalog());
+	view->set_person_ewep_mover([](ns::ClientEntityState &) { return true; });
+	staged(*view, 0x0021, kEwepType).resolved_ground = 0x1004;
+	staged(*view, 0x0022, kEwepType).resolved_ground = 0x1004;
+	staged(*view, 0x0024, kOrg2Type);
+	view->tick_remote_motion(0x0024);
+	view->tick_remote_motion_after_self();
+	const std::vector<uint16_t> repairs = view->drain_carrier_repair_requests();
+	expect(repairs == std::vector<uint16_t>({0x1004, 0x0021, 0x1004, 0x0022}),
+			"the ground's request ahead of each body's, both kept");
+	expect(view->state().find(0x0021) == nullptr && view->state().find(0x0022) == nullptr,
+			"both bodies leave after the walk");
 }
 
 struct Rig {
@@ -310,6 +426,9 @@ int main() {
 	test_the_full_spawn_rebuilds_the_local_body();
 	test_the_respawn_edge_runs_the_reset();
 	test_the_walk_runs_the_bound_move_row();
+	test_the_split_walk_runs_no_body_legs_over_an_item_row();
+	test_the_recoil_draws_nothing_for_an_item_row();
+	test_every_repair_request_is_queued();
 	test_the_update_runs_over_the_rows_words();
 	test_the_stale_ground_leg();
 	test_the_rider_leg();

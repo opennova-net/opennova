@@ -1869,11 +1869,22 @@ void ClientReplicaPipeline::visit_parked_rows(std::vector<uint16_t> &rows) {
 	// tick_lean_decay / tick_arms_dip skipped it (D-NET-196).
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the decay @0x4B5C97..0x4B5CA5,
 	//  the dip @0x4B5CAB..0x4B5CE7, the torso roll @0x4B5CFF..0x4B5D67]
+	// A person whose bound move row is an item row's (person_takes_item_row) runs that row's
+	// update alone: the decay, the dip, the seat follow, the selection and the ramp are the org2
+	// body's legs, which its +0x1C4 never calls (D-NET-892).
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the +0x1C4 call @0x4C2472;
+	//  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the decay @0x4B5C97, the dip
+	//  @0x4B5CAB..0x4B5CE7, the selection gate @0x4B5D71, the site selector
+	//  @0x4B637C..0x4B638F, the ramp @0x4B7DBF]
 	for (const uint16_t handle : rows) {
 		const auto it = row_by_handle.find(handle);
 		if (it == row_by_handle.end()) continue;
 		ClientEntityState &es = state_.entities[it->second];
 		es.rm_parked = false;
+		if (person_takes_item_row(es, parked_self_)) {
+			visit_remote_row(es, parked_self_, parked_tick_);
+			continue;
+		}
 		lean_decay_row(es);
 		arms_dip_row(es);
 		// A compact-carried row's own update poses it on its carrier as the carrier
@@ -1904,6 +1915,7 @@ void ClientReplicaPipeline::visit_parked_rows(std::vector<uint16_t> &rows) {
 		const auto it = row_by_handle.find(handle);
 		if (it == row_by_handle.end()) continue;
 		ClientEntityState &es = state_.entities[it->second];
+		if (person_takes_item_row(es, parked_self_)) continue;
 		select_row_weapon_channel(es, parked_self_, parked_tick_);
 		lean_ramp_row(es);
 	}

@@ -291,9 +291,12 @@ void ClientReplicaPipeline::land_compact_pose(ClientEntityState &es, int32_t wx,
 	es.net_interp_progress = 0; // [orig: @0x4C0FFC — bucket +0x27E is NOT reset]
 }
 
+// Every call is one C2S 0x0F: retail's reliable queue creates a message per call, so two
+// requests for one handle in a frame (two children of one stale carrier, two records of one
+// slot) both go out.
+// [orig: CNapiNetwork_QueueReliableMessage @0x4C4FA0 -> CNapiNPConnection_QueueMessage
+//  @0x628640, NapiNPMessage_Create @0x6286C3; the calls @0x440DAB / @0x440E29, @0x4307E9]
 void ClientReplicaPipeline::queue_carrier_repair(uint16_t handle) {
-	for (uint16_t h : carrier_repair_requests_)
-		if (h == handle) return;
 	carrier_repair_requests_.push_back(handle);
 }
 
@@ -526,8 +529,13 @@ void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 			// A row the walk parked takes its carrier at its own visit instead,
 			// as a pool-0 rider's own update poses it at its mounted site in the
 			// pool-0 walk (visit_parked_rows, D-NET-196); until then it keeps
-			// the pose its last tick left.
-			if (!child.rm_parked && follows_carrier_seat(child))
+			// the pose its last tick left. A person bound to an item row takes no seat
+			// pose: that is the org2 body's mounted site, which its +0x1C4 never runs
+			// (D-NET-892) [orig: Entity_UpdateAllEntities @0x4C2100 - the +0x1C4 call
+			// @0x4C2472; Entity_UpdateInfantryPlayerBody @0x4B40E0 - the site selector
+			// @0x4B637C..0x4B638F].
+			if (!child.rm_parked && follows_carrier_seat(child) &&
+					!person_takes_item_row(child, parked_self_))
 				follow_carrier_seat(child, find_row(child.carrier_handle));
 
 			if (persistent_carrier[child_index] == wire_handle::kInvalid) continue;
