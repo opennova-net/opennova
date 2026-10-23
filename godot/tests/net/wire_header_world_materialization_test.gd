@@ -210,10 +210,14 @@ func _present_position_for_type(sim: Simulation, type_id: int) -> Vector3:
 	return Vector3.INF
 
 
-func _player_index(sim: Simulation) -> int:
+# The player body with this wire handle: a Serve Only host's mission start also spawns
+# its own row's hidden body (D-NET-352, D-NET-NEW-L7-39) [orig: Game_StartMission @0x524360 -
+# the Server_InitAllPlayerEntitiesForRound call @0x525BAF], so the first 0x14B9 card is not H.
+func _player_index(sim: Simulation, wire_handle: int) -> int:
 	for index in range(sim.get_entity_count()):
 		var card: EntityCard = sim.entity_card_by_ai_index(index)
-		if card != null and card.get_item_id() == 0x14B9:
+		if card != null and card.get_item_id() == 0x14B9 \
+				and card.get_wire_handle() == wire_handle:
 			return index
 	return -1
 
@@ -580,7 +584,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 			"the single in-range candidate is the full-bright nearest label")
 	assert_true(joiner.local_player_toggle_mount(),
 			"the decoded child exposes its authored UseGun seat")
-	var host_player_index := _player_index(host)
+	var host_player_index := _player_index(host, joiner.get_local_player_wire_handle())
 	assert_gte(host_player_index, 0)
 	var mounted_echoed := false
 	for _tick in range(240):
