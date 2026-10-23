@@ -189,7 +189,7 @@ void test_seated_player_runs_the_phase(Mount kind) {
 		vehicle.emplaced_config = 3;
 	}
 	if (kind == Mount::kCrashed) vehicle.veh.crashed = 1;
-	world.registry.spawn(1, vehicle);
+	const w::EntityHandle vh = world.registry.spawn(1, vehicle);
 	w::Entity body;
 	body.net_id = 100;
 	body.kind = w::EntityKind::Organic;
@@ -203,7 +203,9 @@ void test_seated_player_runs_the_phase(Mount kind) {
 	ae->inf.active = true;
 	ae->inf.is_local_player = true;
 	ae->inf.stance = w::InfantryState::Stance::kProne;
-	CHECK(world.commands.mount(100, 200));
+	// By handle: a local player body answers an SSN lookup by its DcbId (10000 + its slot byte),
+	// not its record word (entity_dcb_id, D-NET-NEW-L4-21).
+	CHECK(world.commands.mount(bh, vh));
 	const w::Entity *occ = world.registry.get(bh);
 	CHECK(occ != nullptr && occ->mounted &&
 			((occ->flags | occ->engine_flags) & w::kEntityFlagMounted) != 0);
