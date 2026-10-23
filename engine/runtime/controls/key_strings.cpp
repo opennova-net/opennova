@@ -73,7 +73,7 @@ bool has_key_strings() {
 std::string key_string(const char *key, const char *fallback) {
   // [orig: KeyHelp_GetStringWithFallback @0x51ed40] -- no table -> fallback
   // (@0x51ed47); section/key miss -> fallback (@0x51ed76); the entry's text
-  // otherwise (@0x51ed78). The debug bit (dword_24C1930 & 0x10000 -> "&"
+  // otherwise (@0x51ed78). The debug bit (g_DebugCheatFlags & 0x10000 -> "&"
   // @0x51ed53) is a developer switch this port does not carry.
   if (!g_key_strings_loaded || key == nullptr) {
     return marker_stripped(fallback);

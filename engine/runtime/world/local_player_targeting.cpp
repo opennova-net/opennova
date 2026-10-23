@@ -149,7 +149,7 @@ TargetRef guided_heat_target(World &world, const Entity &owner, const AiEntity &
     // The validator's Player test: out while the local cheat word's 0x800 bit is up
     // (World::rules.ai_rules_skip_local_player) and once the round has ended
     // [orig: Entity_ValidateWeaponTarget @0x53A400 - the 0x100 test @0x53A466, `test
-    //  dword_24C1930, 800h` @0x53A46E..0x53A478, g_RoundOver @0x53A482..0x53A489].
+    //  g_DebugCheatFlags, 800h` @0x53A46E..0x53A478, g_RoundOver @0x53A482..0x53A489].
     const auto player_out = [&world](uint32_t flags) {
         return (flags & kEntityFlagPlayer) != 0 &&
                 (world.rules.ai_rules_skip_local_player || world.match.outcome().ended);

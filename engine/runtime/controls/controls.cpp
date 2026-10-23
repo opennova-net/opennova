@@ -127,6 +127,13 @@ static const ActionDef k_catalog[] = {
     // [orig: row 112 @0x8188E8 — code 502, mode 2 (death screen), class 13, no
     //  keys; its default is the RIGHT mouse button (+24 mask 0x2)]
     {112, "DecSpectatorTarget", "Spectator Target -", ActionClass::Spectator, 0x00, 0x00, 0x04000800, 0, 0x2, 0x0, 0, 0, 2, 80003},
+    // The cheat row whose code 123 flips the local AI-ignores-the-player bit: no key, flags
+    // 0x10 (the dispatcher's head drops it in a session), mode 1, class 9, its "!Medpack" text,
+    // and a token field that holds no text but the 4-byte command CRC 0xFF623840 (row +0x4B,
+    // little-endian), which Client_ProcessLocalCommand's out-of-session arm matches.
+    // [orig: row 116 @0x818A98 (code 123, flags 0x10, mode 1, class 9; the token dword
+    //  @0x818AE3); Client_ProcessLocalCommand @0x520BF0 - the CRC walk @0x520E17..0x520E30]
+    {116, "@8b\xFF", "Medpack", ActionClass::Cheat, 0x00, 0x00, 0x00000010, 0, 0x0, 0x0, 0, 0, 1, 0},
 };
 
 const ActionDef *catalog(std::size_t *out_count) {
@@ -316,7 +323,8 @@ namespace {
 
 // The static rows' +0x00 action codes, row 0..118, byte-read from the
 // catalog [orig: word_8159A8 + 108 * row]. The port's catalog carries rows
-// 0..112 (row 66 and rows 113..118 are not modelled); the codes cover all 119.
+// 0..112 and the cheat row 116 (row 66 and rows 113..115, 117, 118 are not
+// modelled); the codes cover all 119.
 constexpr int16_t k_action_codes[119] = {
     166, 164, 152, 151, 156, 157, 148, 147, 153, 170,
     169, 172, 154, 155, 158, 159, 425, 182, 183, 184,

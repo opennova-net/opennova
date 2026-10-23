@@ -39,7 +39,7 @@ struct MissionText {
 
 	// MissionText_GetString: the found text, "" with no mission table or no
 	// entry [orig: MissionText_GetString @0x51EB50: the g_TextMission test
-	// @0x51EB57, the lookup @0x51EB76]. The debug bit (dword_24C1930 & 0x10000
+	// @0x51EB57, the lookup @0x51EB76]. The debug bit (g_DebugCheatFlags & 0x10000
 	// -> "&" @0x51EB59..0x51EB6A) is a developer switch this port does not
 	// carry.
 	std::string get_string(const std::string &section, const std::string &key) const;

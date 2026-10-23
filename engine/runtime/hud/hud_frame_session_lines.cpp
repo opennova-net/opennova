@@ -56,7 +56,7 @@ void HudFrameCompiler::element_squad_orders(const HudFrameState &state, float w,
 	// They hold until overwritten, cancelled with an empty line or cleared at
 	// the mission start. The status view's gate is the overlay's: its page
 	// replaces the scene frame's HUD whole.
-	// [orig: HUD_DrawSquadOrderLines @0x59aee0 — `test dword_24C1930, 0x2000000`
+	// [orig: HUD_DrawSquadOrderLines @0x59aee0 — `test g_DebugCheatFlags, 0x2000000`
 	//  @0x59aee3 and the level `jge` @0x59aefb, nothing else before the anchor
 	//  @0x59af0a..0x59af2a; the loop @0x59af30..0x59af68 over byte_2721DB8 up
 	//  to g_HUDTrackedTarget, HUD_DrawTextRightAligned_HalfBright
@@ -131,7 +131,7 @@ void HudFrameCompiler::element_game_info(const HudFrameState &state, float w, fl
 	// "In the Zone": the TRGTCNT slot, KOTH or team KOTH, and the local player
 	// inside a neutral hill (any positive coverage) [orig: dword_2723CC8
 	// (slot 18) @0x59CCF1; the type tests @0x59CDD0..0x59CDDB; the dead debug
-	// arm dword_24C1930 & 0x8000000; CaptureZone_FindMaxProximityCoverage
+	// arm g_DebugCheatFlags & 0x8000000; CaptureZone_FindMaxProximityCoverage
 	// @0x59CDE8].
 	bool drew = false;
 	if (state.declutter_visible[kDeclutterTrgtCnt] && (game_type == 1u || game_type == 0x10001u) &&

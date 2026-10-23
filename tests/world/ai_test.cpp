@@ -4470,7 +4470,7 @@ int main() {
             //  @0x4677C9; PlayerClass_InitEntity @0x4B1149..0x4B1173].
             CHECK(out.net_id == 10000);
             // The local cheat word's 0x800 bit excludes the LOCAL player from that leg
-            // [orig: `test dword_24C1930,800h` @0x467141].
+            // [orig: `test g_DebugCheatFlags,800h` @0x467141].
             w.cached.local_player = EntityHandle::make(0, 1);
             w.rules.ai_rules_skip_local_player = true;
             AiTarget out2{};

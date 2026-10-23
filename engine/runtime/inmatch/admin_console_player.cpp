@@ -472,7 +472,7 @@ std::string AdminConsole::status_report() {
 	out += "CURRENT # PLAYERS: " + std::to_string(slots.size() + (host ? 1u : 0u)) + "\r\n";
 	out += "CURRENT MAP: " + mission.map_file + "\r\n";
 	// The NULL arm's Overlays key; the waypoint family's "&" rides the debug word
-	// dword_24C1930's 0x10000 (an input-binding toggle), clear on a server.
+	// g_DebugCheatFlags's 0x10000 (an input-binding toggle), clear on a server.
 	// [orig: GameType_GetAbbreviation @0x520FD0]
 	const uint32_t game_type = mission.game_type;
 	const char *key = game_type::abbreviation_overlay_key(game_type);

@@ -276,7 +276,7 @@ struct PlayerActionFrame {
 	// (Input_DisableScrollLock), each through the dispatcher's head by its own code; -1 is the
 	// USE release tail, past no head. A held forward key's own event (its fourth argument 0),
 	// the back and strafe keys, the held USE row and the Respawn press; the embedder's device
-	// turns the toggle off. The case's 0x20 gate on dword_24C1930 is dead (no writer sets the
+	// turns the toggle off. The case's 0x20 gate on g_DebugCheatFlags is dead (no writer sets the
 	// bit: Game_StartMission's stores @0x525B25 / @0x525B5C / @0x525C3B and the 0x400 / 0x100 /
 	// 0x800 toggles @0x49B937 / @0x4DC9C5 / @0x4E07A4 are its only writes).
 	// The device's turn-off sends a Scroll Lock press and release (VK and scan 0x91, the

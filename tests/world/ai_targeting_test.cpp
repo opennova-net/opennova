@@ -262,7 +262,7 @@ static void test_helo_search_reads_the_arc_signed() {
 // 16 ticks after its death tick only, and rejects a Player target while the
 // local cheat word's 0x800 bit is up.
 // [orig: Entity_ValidateWeaponTarget `test cl,2; jnz` @0x53A425..0x53A428,
-//  the window @0x53A434..0x53A443; `test dword_24C1930,800h`
+//  the window @0x53A434..0x53A443; `test g_DebugCheatFlags,800h`
 //  @0x53A46E..0x53A478]
 static void test_validator_gates_destroyed_and_cheat_targets() {
     Scanner s;

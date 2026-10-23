@@ -232,7 +232,7 @@ struct HudRoleFacts {
 	// [orig: HUD_DrawEmotesMenu @0x5bff00 (VMacros_BuildRemappedName(buf, i, 0xC, local)
 	//  @0x5bff9e, the title @0x5bff25..0x5bff57); HUD_DrawRadioTitleMenu
 	//  @0x5bfb90 (VMacros_BuildRemappedName(buf, i, 6, local) @0x5bfc2e, the title
-	//  @0x5bfbb5..0x5bfbe7); the dword_24C1930 & 0x10000 arms are dead: no
+	//  @0x5bfbb5..0x5bfbe7); the g_DebugCheatFlags & 0x10000 arms are dead: no
 	//  writer sets that bit]
 	hud::HudVoiceMacroMenuState emotes_menu;
 	hud::HudVoiceMacroMenuState radio_menu;

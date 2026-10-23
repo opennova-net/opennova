@@ -7,7 +7,9 @@
 // main frame's mouse pump (D-NET-NEW-LI-2), across the frames, an input reset and the
 // single-player pause, and a latched fire press's binding test at its
 // dispatch (D-NET-NEW-LI-3).
+#include <base/vfs/vfs.h> // vfs_version_crc (CRC_ComputeCustomTable: the cheat line's CRC)
 #include <runtime/controls/controls.h> // action_code (the pause row's record)
+#include <runtime/inmatch/client_console.h> // the console's command CRC arm (the cheat row)
 #include <runtime/devtools/scripted_input.h>
 #include <runtime/hud/hud_toggles.h> // the HUD toggle rows' catalog rows
 #include <runtime/inmatch/mission_exit.h> // kMissionExitReset (the quit record)
@@ -1228,6 +1230,70 @@ void test_a_reset_ahead_drops_the_use_record_and_the_tail_follows_the_drain() {
 
 } // namespace
 
+// D-NET-NEW-LI-26 (LI-s24, L8-s27 FOUND 1): the cheat row 116 (code 123) is the one writer of
+// the local cheat word's 0x800 bit, World::rules.ai_rules_skip_local_player. It has no key
+// (flags 0x10, mode 1, class 9) and its token field holds the 4-byte command CRC 0xFF623840,
+// so only a console line whose CRC is that value reaches it, through Client_ProcessLocalCommand's
+// out-of-session arm. Past the dispatcher's head (whose 0x10 test drops it in a session) the
+// troop class callback's case flips the bit, each record once.
+// [orig: row 116 @0x818A98 (the token dword @0x818AE3); Client_ProcessLocalCommand @0x520BF0 -
+//  `cmp g_NapiNPCtx.is_in_session, 0` @0x520DE5, CRC_ComputeCustomTable @0x520E0D, the walk
+//  @0x520E17..0x520E30; Input_HandleActionBinding @0x49AD40 - the 0x10 test
+//  @0x49AE1C..0x49AE23; Input_HandleActionBinding_0 @0x4E0420 - case 123 @0x4E07A4]
+void test_the_cheat_row_flips_the_ai_skip_bit_out_of_a_session_only() {
+	using opennova::controls::ActionClass;
+	using opennova::controls::InputEventOrigin;
+	const opennova::controls::ActionDef *row = opennova::controls::action_for_code(123);
+	CHECK(row != nullptr && row->id == 116 && row->flags == 0x10u && row->modes == 1u &&
+					row->cls == ActionClass::Cheat && row->default_key == 0 &&
+					row->default_key2 == 0 && row->default_mouse == 0 && row->default_joy == 0,
+			"record 123 is the static row 116: flags 0x10, mode 1, class 9, no key");
+	uint32_t token = 0;
+	for (int i = 0; row != nullptr && i < 4 && row->token[i] != '\0'; ++i)
+		token |= static_cast<uint32_t>(static_cast<uint8_t>(row->token[i])) << (8 * i);
+	CHECK(token == 0xFF623840u, "its token field's first dword is the command CRC");
+	CHECK(client_binding_by_crc(static_cast<int32_t>(0xFF623840u)) == 123,
+			"the CRC walk finds record 123");
+	// A line whose CRC is the token (a test line, four bytes chosen for the CRC).
+	const std::string line = "LI-s24 \xA8\xB5\x97[";
+	CHECK(opennova::vfs_version_crc(reinterpret_cast<const uint8_t *>(line.data()), line.size()) ==
+					static_cast<int32_t>(0xFF623840u),
+			"the test line's CRC is the row's token");
+	auto role = std::make_unique<TickRecorder>();
+	spawn_local_player(*role);
+	opennova::world::World &world = role->kernel.world;
+	ClientLocalCommandSeams seams;
+	seams.queue_action = [&role](int32_t code, int32_t p1, int32_t p2, int32_t p3) {
+		(void)role->input_events().push({code, p1, p2, p3, false, InputEventOrigin::Console});
+	};
+	seams.in_session = true;
+	CHECK(!client_process_local_command(line, seams) && role->input_events().empty(),
+			"in a session the CRC arm takes no line");
+	seams.in_session = false;
+	CHECK(client_process_local_command(line, seams) && !role->input_events().empty(),
+			"out of one it queues the record");
+	Session session(*role);
+	CHECK(load(session), "the session runs");
+	FrameInput three;
+	three.delta_seconds = TickAccumulator::kTickDt * 3.0;
+	CHECK(!world.rules.ai_rules_skip_local_player, "a mission starts with the bit clear");
+	CHECK(session.advance(three).ticks_run() == 3, "three updates");
+	CHECK(world.rules.ai_rules_skip_local_player && role->input_events().empty(),
+			"the drain's record flips the bit on");
+	CHECK(client_process_local_command(line, seams), "the line again");
+	(void)session.advance(three);
+	CHECK(!world.rules.ai_rules_skip_local_player, "the next record flips it off");
+	// In a session the record still reaches the queue (the S2C 0x06 echo's binding walk can
+	// queue it), and the head's 0x10 test drops it.
+	world.rules.mp_session = true;
+	CHECK(!role->action_head_admits(123), "the head drops record 123 in a session");
+	CHECK(role->input_events().push({123, 0, 0, 0, false, InputEventOrigin::Console}),
+			"a record 123 in a session");
+	(void)session.advance(three);
+	CHECK(!world.rules.ai_rules_skip_local_player && role->input_events().empty(),
+			"a session's record is taken and flips nothing");
+}
+
 int main() {
 	test_steps_land_on_their_ticks_inside_a_six_tick_frame();
 	test_a_frame_sample_alone_quantizes_to_the_frame();
@@ -1248,6 +1314,7 @@ int main() {
 	test_the_weapon_rows_take_the_whole_head();
 	test_the_hud_toggle_rows_take_the_whole_head();
 	test_a_reset_ahead_drops_the_use_record_and_the_tail_follows_the_drain();
+	test_the_cheat_row_flips_the_ai_skip_bit_out_of_a_session_only();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

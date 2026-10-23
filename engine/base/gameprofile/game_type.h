@@ -268,7 +268,7 @@ constexpr const char *overlay_label_key(uint32_t g) {
 // QUERY report prints. It is overlay_label_key's ladder save that the unnamed type 8
 // (FlagMe here) has no rung: "" [orig: GameType_GetAbbreviation @ 0x520fd0, the
 // `!hasSecondParam` arm; the waypoint family's STROVER28, or "&" under the debug word
-// dword_24C1930's 0x10000].
+// g_DebugCheatFlags's 0x10000].
 constexpr const char *abbreviation_overlay_key(uint32_t g) {
 	if (g == kFlagMe) return "";
 	return overlay_label_key(g);

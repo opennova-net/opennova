@@ -496,7 +496,10 @@ Dictionary ControlsModel::save_blob() const {
 	const opennova::controls::ActionDef *cat = opennova::controls::catalog(&n);
 	for (std::size_t i = 0; i < n; ++i) {
 		const opennova::controls::BindingRecord *r = bindings_.record(static_cast<int>(i));
-		if (r == nullptr || cat[i].token == nullptr) continue;
+		// The rows a player's binding table carries: those whose flags hold 0x4000000 (engine
+		// profile/player_profiles.cpp default_binding_table carries the witness); the cheat
+		// row's token field is its command CRC, no text (engine controls/controls.cpp).
+		if (r == nullptr || cat[i].token == nullptr || (cat[i].flags & 0x4000000u) == 0) continue;
 		PackedInt32Array values;
 		values.push_back(r->primary);
 		values.push_back(r->secondary);

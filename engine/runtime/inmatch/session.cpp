@@ -436,6 +436,23 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 		if (source != nullptr) source->dispatch_record(record);
 		return;
 	}
+	// The cheat row 116 (code 123, flags 0x10; the console's out-of-session command CRC
+	// queues it) past the head, whose 0x10 test drops it in a session: the troop class
+	// callback's case flips the local cheat word's 0x800 bit, the AI target walks' and the
+	// weapon validator's skip-the-local-player arm (World::rules.ai_rules_skip_local_player),
+	// and takes the record. So no session ever sets the bit, and each mission start's fresh
+	// world clears it as Game_StartMission's store does (World::rules carries that cite).
+	// [orig: Input_HandleActionBinding @0x49AD40 - the 0x10 test @0x49AE1C..0x49AE23, the
+	//  def+0x170 callback @0x49AEB6; Input_HandleActionBinding_0 @0x4E0420 - case 123
+	//  `xor g_DebugCheatFlags, 800h` @0x4E07A4]
+	constexpr int kAiIgnoresPlayerCheatRow = 116;
+	if (code == controls::action_code(kAiIgnoresPlayerCheatRow)) {
+		if (action_head_admits(code)) {
+			world::World &world = kernel_->world;
+			world.rules.ai_rules_skip_local_player = !world.rules.ai_rules_skip_local_player;
+		}
+		return;
+	}
 	if (record.origin == controls::InputEventOrigin::Device) {
 		if (source != nullptr) source->dispatch_record(record);
 		return;

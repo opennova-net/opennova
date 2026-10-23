@@ -131,7 +131,7 @@ struct ServerStatusPageState {
 // GateTypeAbbrev text (the Co-op family's "COOP") [orig: the
 // GameText_GetString("Server", ..) calls of Server_DrawStatusScreen and
 // HUD_DrawPlayerScoreList; GameType_GetAbbreviation(g_GameType, 1) @0x520fd0,
-// whose dword_24C1930 & 0x10000 arm has no writer].
+// whose g_DebugCheatFlags & 0x10000 arm has no writer].
 ServerStatusText server_status_text(const GameTextLookup &gametext, uint32_t game_type);
 
 // The quit dialog's Overlays key: STROVER_QUITSERVER on an authority in a

@@ -52,11 +52,11 @@ struct SpectatorMotorState {
 	uint8_t target_seat_type = 0;
 	int32_t target_body_roll = 0;
 	// The fast-flight gate: the per-recipient SU flag (S2C 0x24 "SU n"). Its
-	// alternative, bit 2 of the local cheat word dword_24C1930, has no writer
+	// alternative, bit 2 of the local cheat word g_DebugCheatFlags, has no writer
 	// in the image (Game_StartMission stores the whole word 0 or 0x2000000
 	// @0x525b25 / @0x525b5c; the toggles flip 0x100 / 0x400 / 0x800), so that
 	// arm is dead. [orig: g_ScoreboardStatusSuffixEnabled @0xA85B49, read
-	// @0x4b2a35; `test byte ptr dword_24C1930, 2` @0x4b2a42]
+	// @0x4b2a35; `test byte ptr g_DebugCheatFlags, 2` @0x4b2a42]
 	bool su_flag = false;
 	// The replica's count of death-screen rising edges last seated on the
 	// local entity (spectator_seat_eye): the role's edge bookkeeping.

@@ -1677,7 +1677,7 @@ void HudFrameCompiler::element_breath_bar(const HudFrameState &state, float w, f
 	}
 	// The BREATHTIME declutter slot, then a positive breathtime
 	// [orig: @0x59D6F3, @0x59D70F]. The count forced to 1 under
-	// dword_24C1930 & 0x8000000 is a dead arm: nothing sets that bit.
+	// g_DebugCheatFlags & 0x8000000 is a dead arm: nothing sets that bit.
 	if (!state.declutter_visible[kDeclutterBreathTime] || state.breath_time <= 0) {
 		return;
 	}

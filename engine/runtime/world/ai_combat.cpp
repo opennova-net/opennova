@@ -87,7 +87,7 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out, bool var
                     // The class-0 pool-0 leg: Player-flagged only; the LOCAL player is
                     // excluded while the local cheat word's 0x800 bit is up [orig:
                     // `test ebx,100h` @0x46712D; candidate == g_LocalPlayerEntity
-                    // @0x467139 && `test dword_24C1930,800h` @0x467141].
+                    // @0x467139 && `test g_DebugCheatFlags,800h` @0x467141].
                     if ((c->engine_flags & kEntityFlagPlayer) == 0) continue;
                     if (h == world.cached.local_player && world.rules.ai_rules_skip_local_player)
                         continue;
@@ -709,7 +709,7 @@ bool AiSystem::weapon_target_metrics(World &world, AiEntity &e, const Entity &ta
 		return false;
 	// A Player target is out while the local cheat word's 0x800 bit is up
 	// (World::rules.ai_rules_skip_local_player) and once the round has
-	// ended [orig: `test dword_24C1930,800h` @0x53A46E..0x53A478;
+	// ended [orig: `test g_DebugCheatFlags,800h` @0x53A46E..0x53A478;
 	// g_RoundOver @0x53A482..0x53A489].
 	if ((target_flags & kEntityFlagPlayer) != 0 &&
 			(world.rules.ai_rules_skip_local_player || world.match.outcome().ended))

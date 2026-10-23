@@ -593,7 +593,7 @@ WeaponAmmoSeat entity_ammo_seat(const World &world, const Entity &entity) {
 }
 
 int32_t weapon_seat_pool(const WeaponAmmoSeat &seat, int class_id, int32_t own) {
-    // [orig: Entity_GetScoreValueBySlotType @0x5406E0 - its dword_24C1930 & 0x100 cap
+    // [orig: Entity_GetScoreValueBySlotType @0x5406E0 - its g_DebugCheatFlags & 0x100 cap
     //  leg @0x5406E3 is the infinite-ammo cheat's bit (Server_ToggleDedicatedFlag
     //  @0x4DC9C5 from action 121), which the port's cheat bindings do not set (its
     //  World::rules.ignore_weapon_ammo_cost mirror stays clear)]
@@ -926,7 +926,7 @@ std::array<WeaponSlotBarCategory, 10> weapon_inventory_slot_bar_scan(const Weapo
     //  step 65 (one category), the 1..5 skip @0x599D24, the def pointer
     //  slot+0x20 @0x599D36, the first-hit record + `i += def[940/4]`
     //  @0x599D40..0x599D4D, the count @0x599D51]. The debug fill under
-    //  dword_24C1930 & 0x8000000 @0x599D75 is dead: nothing sets the bit.
+    //  g_DebugCheatFlags & 0x8000000 @0x599D75 is dead: nothing sets the bit.
     std::array<WeaponSlotBarCategory, 10> out{};
     for (int category = 0; category < 10; ++category) {
         if (category >= 1 && category <= 5) continue;

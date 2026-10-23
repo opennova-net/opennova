@@ -734,7 +734,7 @@ struct SessionRules {
     // change. [orig: dword_A87050; Input_HandleActionBinding @0x49AD40 (`test ecx,
     //  ecx` @0x49ADDD, `cmp dword_A87050, 0` @0x49ADE1)]
     bool pause_word = false;
-    bool ignore_weapon_ammo_cost = false; // dword_24C1930 bit 0x100
+    bool ignore_weapon_ammo_cost = false; // g_DebugCheatFlags bit 0x100
     bool cease_fire = false; // g_InCeaseFire @ 0x24C196C
     // The player profile's auto-reload word as the mission start's session copy
     // leaves it (profile::session_input): one process global the weapon action
@@ -805,12 +805,13 @@ struct SessionRules {
 	//  @0x551D80..0x551D91; Config_SetDefaults @0x54D352); AI_TickState_VehicleDead
 	//  @0x467EE9, Entity_UpdateVehicleAIMovement @0x461246]
 	bool vehicle_respawns = true;
-    // The local debug/cheat word's 0x800 bit (dword_24C1930): the SM feed's
+    // The local debug/cheat word's 0x800 bit (g_DebugCheatFlags): the SM feed's
     // class-0 player leg skips the LOCAL player and the weapon validator
     // rejects every Player target while it is up [orig: `test
-    // dword_24C1930,800h` @0x467141, @0x53A46E]. Input action 123 toggles it
-    // (@0x4E07A4) and Game_StartMission zeroes it (@0x525B25); no net wire
-    // carries it. Defaults clear.
+    // g_DebugCheatFlags,800h` @0x467141, @0x53A46E]. The cheat row's input
+    // action 123 toggles it (@0x4E07A4; inmatch::Role::dispatch_record), out
+    // of a session only, and Game_StartMission zeroes it (@0x525B25): a fresh
+    // mission's world starts clear. No net wire carries it.
     bool ai_rules_skip_local_player = false;
     // The difficulty word: outside a session the local player's health
     // ceiling doubles at -1 and halves at 1 (max_health_with_difficulty,
