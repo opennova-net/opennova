@@ -4893,7 +4893,7 @@ func test_loadout_weapon_category_switch_changes_equipped_weapon() -> void:
 		"switching to a secondary in the accepted loadout changes the equipped weapon")
 
 
-func test_weapon_switch_requested_during_draw_commits_without_a_second_press() -> void:
+func test_weapon_switch_requested_during_draw_is_refused_until_a_second_press() -> void:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var sim := Simulation.new()
@@ -4926,14 +4926,27 @@ func test_weapon_switch_requested_during_draw_commits_without_a_second_press() -
 	assert_eq(sim.get_local_player_weapon_state().current_action, 6,
 		"the newly equipped secondary is drawing through SWITCHTO")
 
-	# One press during that draw must be remembered and committed after it settles.
+	# A press during that draw is refused: the mount stores the pending word, but the
+	# held slot's SWITCHFROM is never queued over a running SWITCHTO and no request is
+	# retained, so the draw runs out on the secondary [orig: Player_MountWeaponSlot
+	# @0x4DFA40 (WeaponSlot_ForceQueueSwitchFrom @0x4DFB9E); WeaponSlot_ForceQueueSwitchFrom
+	# @0x53F170 (the SWITCHFROM / SWITCHTO refusal @0x53F17A..0x53F185)].
+	sim.request_local_player_weapon_category(3)
+	for _tick in range(120):
+		sim.step()
+	assert_eq(sim.get_local_player_weapon_name(), "WPN_colt45",
+		"a switch requested during the draw is refused")
+	assert_ne(sim.get_local_player_weapon_state().current_action, 6,
+		"the secondary's draw ran out")
+
+	# A second press, over no draw, switches.
 	sim.request_local_player_weapon_category(3)
 	for _tick in range(120):
 		sim.step()
 		if sim.get_local_player_weapon_name() == "WPN_M4AUTO":
 			break
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_M4AUTO",
-		"a switch requested during draw does not require a second press")
+		"a press after the draw commits")
 
 
 func test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose() -> void:

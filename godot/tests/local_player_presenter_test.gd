@@ -356,6 +356,24 @@ func _frame_until(world: GameWorld, presenter: LocalPlayerPresenter, camera: Cam
 	return false
 
 
+# Whether the held weapon is past its draw (neither running nor queuing SWITCHTO): a
+# category key over a running draw is refused, its SWITCHFROM never queued, and no
+# request is retained [orig: WeaponSlot_ForceQueueSwitchFrom @0x53F170 (the SWITCHFROM /
+# SWITCHTO refusal @0x53F17A..0x53F185)].
+func _not_drawing(world: GameWorld) -> bool:
+	var view := world.local_player_weapon_view()
+	return int(view.current_action) != 6 and int(view.next_action) != 6
+
+
+# Ticks the world with no presenter until the held weapon is past its draw.
+func _tick_until_drawn(world: GameWorld, camera: Camera3D, max_ticks: int = 120) -> bool:
+	for i in max_ticks:
+		if _not_drawing(world):
+			return true
+		world.tick(camera.global_position, camera.global_transform, TICK)
+	return _not_drawing(world)
+
+
 func _look(presenter: LocalPlayerPresenter, relative: Vector2, active: bool = true) -> bool:
 	var motion := InputEventMouseMotion.new()
 	motion.relative = relative
@@ -1559,6 +1577,9 @@ func test_weapon_switch_events_are_owned_by_the_presenter_from_setup_to_teardown
 			"the sim's switch walk runs without any presenter")
 	assert_eq(String(world.local_player_weapon_name()), "WPN_M4AUTO",
 			"the presentation weapon waits for a consumer")
+	# A category key over a running draw is refused, so each key below waits for the
+	# held weapon's draw to run out.
+	assert_true(_tick_until_drawn(world, camera), "the satchel's draw runs out")
 
 	# setup() discards exactly the pre-attachment history.
 	var presenter := _attach_presenter(world, camera)
@@ -1575,6 +1596,8 @@ func test_weapon_switch_events_are_owned_by_the_presenter_from_setup_to_teardown
 		return String(sim.get_local_player_weapon_name()) == "WPN_M4AUTO"),
 			"the live switch back to the primary completes")
 	_frame(world, presenter, camera, 2)
+	assert_true(_frame_until(world, presenter, camera, func() -> bool:
+		return _not_drawing(world)), "the primary's draw runs out")
 	var vm_before: Node3D = presenter.viewmodel()
 	assert_not_null(vm_before)
 	sim.request_local_player_weapon_category(7)
@@ -1591,6 +1614,7 @@ func test_weapon_switch_events_are_owned_by_the_presenter_from_setup_to_teardown
 	# teardown() releases the callback: later events accumulate again and the
 	# presentation freezes at its last owned state.
 	presenter.teardown()
+	assert_true(_tick_until_drawn(world, camera), "the satchel's draw runs out")
 	sim.request_local_player_weapon_category(3)
 	for i in 45:
 		world.tick(camera.global_position, camera.global_transform, TICK)

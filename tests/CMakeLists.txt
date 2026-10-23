@@ -5497,6 +5497,11 @@ add_test(NAME mounted_fire_path COMMAND mounted_fire_path_test)
 add_executable(usegun_refusal_test world/usegun_refusal_test.cpp)
 target_link_libraries(usegun_refusal_test PRIVATE opennova_runtime)
 add_test(NAME usegun_refusal COMMAND usegun_refusal_test)
+# L7-s23 FOUND: the weapon view's lower / raise interp gates a same-category mount's SWITCHRANK;
+# the mount queues at once (no SWITCHTO deferral); a pending Emplaced word holds the draw (-901).
+add_executable(weapon_lower_raise_test world/weapon_lower_raise_test.cpp)
+target_link_libraries(weapon_lower_raise_test PRIVATE opennova_runtime)
+add_test(NAME weapon_lower_raise COMMAND weapon_lower_raise_test)
 # D-NET-336: the host's walk pumps a remote player's own slot the accepted C2S 0x06 armed,
 # and its reload cycles, a request each cycle, until the player's own C2S 0x25 refills it.
 add_executable(npruntime_remote_slot_pump_test npruntime/remote_slot_pump_test.cpp)

@@ -330,6 +330,53 @@ void player_view_promote_tick(PlayerViewState &v) {
             v.weapon_pose_interp.active = false;
         if (!v.weapon_pose_interp.active) v.scope_settled = v.scope_engaged;
     }
+    // The weapon view's lower / raise interp, behind its own latch; no callback
+    // runs at its drop [orig: Player_UpdatePerFrame @0x4DE4FD..0x4DE522].
+    if (v.weapon_lower_raise_interp.active)
+        player_view_bias_interp_step(v.weapon_lower_raise_interp, v.weapon_lower_raise_hip_pose);
+}
+
+namespace {
+
+// The lowered pose: the def's view position with Z 65536.0 lower (the x87
+// subtraction stored to a float) and the three rotation words zero.
+// [orig: Player_StartWeaponLowerRaiseInterp @0x4DF960 - Bone +0xF4 / +0xF8 / +0xFC
+//  @0x4DF972..0x4DF991, `fsub flt_7C32BC` @0x4DF99B, the zero words @0x4DF985 /
+//  @0x4DF98D / @0x4DF9B4]
+PlayerViewPose weapon_lowered_pose(const PlayerViewPose &view_pose) {
+    PlayerViewPose lowered;
+    lowered.position_q16[0] = view_pose.position_q16[0];
+    lowered.position_q16[1] = view_pose.position_q16[1];
+    lowered.position_q16[2] = static_cast<float>(
+            static_cast<double>(view_pose.position_q16[2]) - kWeaponLowerDropQ16);
+    return lowered;
+}
+
+} // namespace
+
+void player_view_start_weapon_lower(PlayerViewState &v) {
+    // [orig: Player_StartWeaponLowerRaiseInterp @0x4DF960 type 0 - entitySlotPtr
+    //  @0x4DF9A1, Setup(31, &Bone, lowered) @0x4DFA19..0x4DFA35]
+    v.weapon_lower_raise_hip_pose = v.weapon_hip_pose;
+    player_view_bias_interp_setup(v.weapon_lower_raise_interp,
+                                  static_cast<uint32_t>(kWeaponLowerRaiseSteps), v.weapon_hip_pose,
+                                  weapon_lowered_pose(v.weapon_hip_pose));
+}
+
+void player_view_start_weapon_raise(PlayerViewState &v, bool emplaced) {
+    // [orig: Player_StartWeaponLowerRaiseInterp @0x4DF960 type 1 - the Flags 0x80 test
+    //  @0x4DF9D1..0x4DF9DB, Setup(1, lowered, +0x10C) @0x4DF9F0 / Setup(31, lowered,
+    //  +0x10C) @0x4DFA0F]
+    v.weapon_lower_raise_hip_pose = v.weapon_hip_pose;
+    player_view_bias_interp_setup(
+            v.weapon_lower_raise_interp,
+            static_cast<uint32_t>(emplaced ? kWeaponRaiseStepsEmplaced : kWeaponLowerRaiseSteps),
+            weapon_lowered_pose(v.weapon_hip_pose), v.weapon_hip_pose);
+}
+
+bool player_view_weapon_lower_raise_active(const PlayerViewState &v) {
+    // [orig: g_WeaponLowerRaiseInterp.activeFlag, tested @0x4DFB8D]
+    return v.weapon_lower_raise_interp.active;
 }
 
 void player_view_anchor_tick(PlayerViewState &v, const int32_t position_q16[3],

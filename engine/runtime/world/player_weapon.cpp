@@ -160,14 +160,16 @@ WeaponSwitchGates local_weapon_switch_gates(const World &world,
 	return gates;
 }
 
-// With a pending slot, SWITCHFROM is instant when the EquippedSlot's def or the
-// pending slot's def is Emplaced, whichever mount staged it: the UseGun transition's,
-// or a personal one, a key away from a gun's slot held on foot included (D-NET-420).
-// [orig: WeaponAction_SwitchFrom @0x5433B0 - the local player and g_PendingWeaponSlot
-//  @0x543417, the EquippedSlot def's Flags 0x80 @0x54342E, the pending def's
-//  @0x543435..0x543448, the sentinel @0x54344A]
-bool local_usegun_switch_is_instant(const World &world,
-		const LocalPlayerWeapon &w, const WeaponInventory *inventory) {
+namespace {
+
+// The local player's g_PendingWeaponSlot as the switch state holds it, whichever mount
+// stored it: the UseGun transition's (the gun's slot, or the slot its switch back
+// restores), or a personal one, a key away from a gun's slot held on foot included
+// (D-NET-420). `from` is the EquippedSlot's def, `to` the pending slot's; false with no
+// pending slot.
+bool local_pending_switch_defs(const World &world, const LocalPlayerWeapon &w,
+		const WeaponInventory *inventory, const WeaponTableEntry *&from,
+		const WeaponTableEntry *&to) {
 	const WeaponTable &table = world.tables.weapons;
 	const auto personal_def = [&](int32_t combo) -> const WeaponTableEntry * {
 		const WeaponInventorySlot *slot = inventory != nullptr ? inventory->slot(combo) : nullptr;
@@ -175,21 +177,48 @@ bool local_usegun_switch_is_instant(const World &world,
 				? table.by_index(static_cast<uint8_t>(slot->adm_index))
 				: nullptr;
 	};
-	const WeaponTableEntry *from = nullptr;
-	const WeaponTableEntry *to = nullptr;
+	from = nullptr;
+	to = nullptr;
 	if (w.usegun_switch != LocalUseGunSwitch::kNone) {
 		from = table.by_index(w.usegun_slot_active ? w.usegun_weapon_adm : w.usegun_saved_adm);
 		to = table.by_index(w.usegun_switch == LocalUseGunSwitch::kAttach ||
 						w.usegun_switch == LocalUseGunSwitch::kSwap
 				? w.usegun_pending_weapon_adm
 				: w.usegun_saved_adm);
-	} else if (w.switch_in_flight && inventory != nullptr) {
+		return true;
+	}
+	if (w.switch_in_flight && inventory != nullptr) {
 		from = w.usegun_slot_active ? table.by_index(w.usegun_weapon_adm)
 		                            : personal_def(inventory->equipped_combo);
 		to = personal_def(inventory->pending_combo);
-	} else {
-		return false; // no pending slot
+		return true;
 	}
+	return false;
+}
+
+// A draw holds while the pending slot's def is Emplaced (the FSM's pending_emplaced).
+// [orig: WeaponAction_SwitchTo @0x5431D0 - g_PendingWeaponSlot @0x543226..0x54322D, its
+//  def's Flags 0x80 @0x54322F..0x54323E]
+bool local_pending_slot_is_emplaced(const World &world, const LocalPlayerWeapon &w,
+		const WeaponInventory *inventory) {
+	const WeaponTableEntry *from = nullptr;
+	const WeaponTableEntry *to = nullptr;
+	return local_pending_switch_defs(world, w, inventory, from, to) && to != nullptr &&
+			(to->flags & weapon_flag::kEmplaced) != 0;
+}
+
+} // namespace
+
+// With a pending slot, SWITCHFROM is instant when the EquippedSlot's def or the
+// pending slot's def is Emplaced (local_pending_switch_defs).
+// [orig: WeaponAction_SwitchFrom @0x5433B0 - the local player and g_PendingWeaponSlot
+//  @0x543417, the EquippedSlot def's Flags 0x80 @0x54342E, the pending def's
+//  @0x543435..0x543448, the sentinel @0x54344A]
+bool local_usegun_switch_is_instant(const World &world,
+		const LocalPlayerWeapon &w, const WeaponInventory *inventory) {
+	const WeaponTableEntry *from = nullptr;
+	const WeaponTableEntry *to = nullptr;
+	if (!local_pending_switch_defs(world, w, inventory, from, to)) return false;
 	const int32_t flags = (from != nullptr ? from->flags : 0) |
 			(to != nullptr ? to->flags : 0);
 	return (flags & weapon_flag::kEmplaced) != 0;
@@ -766,7 +795,7 @@ void local_weapon_detach_mount(World &world, LocalPlayerWeapon &w,
 	w.nvg_scope_restore = false; // [orig: dword_B76554 = 0 @0x4dfb75]
 }
 
-void commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
+bool commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
 		WeaponInventory *inventory, bool select) {
 	// The pending -> equipped commit [orig: the switchfrom/switchrank completion
 	// consumes g_PendingWeaponSlot; EquippedSlot swap + the equippedAdmIndex stamp
@@ -777,7 +806,7 @@ void commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
 	// Player_ResetCameraAndMovementState, Player_MountWeaponSlot].
 	w.switch_in_flight = false;
 	w.switch_deferred_action = -1;
-	if (inventory == nullptr) return;
+	if (inventory == nullptr) return false;
 	// The completing action is the EquippedSlot's, a borrowed slot held on foot's
 	// included, read before the commit replaces it.
 	const bool completed_rank = w.active &&
@@ -785,7 +814,7 @@ void commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
 	Entity *e = world.registry.get(world.cached.local_player);
 	const int32_t combo = inventory->pending_combo;
 	const WeaponInventorySlot *slot = inventory->slot(combo);
-	if (slot == nullptr || slot->adm_index < 0) return;
+	if (slot == nullptr || slot->adm_index < 0) return false;
 	inventory->equipped_combo = combo;
 	// The personal slot is the EquippedSlot now: a borrow held on foot ends
 	// (D-NET-420) [orig: WeaponAction_SwitchFrom @0x5433B0 (the store @0x543475) /
@@ -820,7 +849,7 @@ void commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
 	w.start_in_switchto = !select && !completed_rank;
 	if (e == nullptr) {
 		w.presentation_pending = true;
-		return;
+		return true;
 	}
 	// The entity was present: emit directly, exactly as before (the manual-switch and
 	// armory paths are unchanged), and drop any latch so it cannot replay a duplicate.
@@ -834,6 +863,7 @@ void commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
 	// [orig: WeaponAction_SwitchFrom @0x5433B0 - WeaponSlot_TryQueueSwitchTo @0x5434A3]
 	event.installed = def != nullptr && commit_mount(world, w, def->name, false);
 	w.events.push_back(std::move(event));
+	return true;
 }
 
 void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
@@ -865,28 +895,31 @@ void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
 			// early-outs (no equipped slot or def) [orig: @0x4dfa4d..0x4dfa74,
 			// dword_B76554 = 0 @0x4dfb75].
 			w.nvg_scope_restore = false;
+			// The word is stored (pending_combo); whichever SWITCHFROM / SWITCHRANK
+			// completes next commits it. The mount queues on the EquippedSlot at once,
+			// with no retained request: a same-category mount queues SWITCHRANK
+			// (WeaponSlot_TryQueueSwitchRank, which preempts a draw through the
+			// pump's counter-0 transition) unless the weapon view's lower / raise interp
+			// runs, when it queues nothing; a cross-category mount force-queues
+			// SWITCHFROM, which a running SWITCHTO or SWITCHFROM refuses, and a
+			// SWITCHFROM it queued lowers the weapon view (the saved-game load word it
+			// also tests is zero in every session).
+			// [orig: Player_MountWeaponSlot @0x4DFA40 - g_PendingWeaponSlot @0x4DFB16, the
+			//  category compare @0x4DFB7B..0x4DFB8B, the interp test @0x4DFB8D..0x4DFB93,
+			//  WeaponSlot_TryQueueSwitchRank @0x4DFB96; WeaponSlot_ForceQueueSwitchFrom
+			//  @0x4DFB9E, its return @0x4DFBA6, the EquippedSlot's nextAction == 7
+			//  @0x4DFBAA..0x4DFBBA, dword_A892C8 @0x4DFBBC, Player_StartWeaponLowerRaiseInterp(0)
+			//  @0x4DFBC5; WeaponAction_ProcessFrame @0x540E60 - the transition
+			//  @0x5413B1..0x5413EC]
 			w.switch_in_flight = true;
+			w.switch_deferred_action = -1;
 			WeaponSlotState *active_slot = active_local_weapon_slot(world, w);
-			const int32_t action = out.same_category
-					? weapon_action::kSwitchRank
-					: weapon_action::kSwitchFrom;
-			if (active_slot->current == weapon_action::kSwitchTo) {
-				// The witnessed writer refuses during SWITCHTO. Unlike the original
-				// dispatcher, this shell supplies one press edge, so retain it beside
-				// the already-stamped pending combo and keep restoring next after
-				// SWITCHTO's delay-start initializer writes its resume action.
-				w.switch_deferred_action = action;
-				active_slot->next = action;
-			} else if (active_slot->next == weapon_action::kSwitchTo) {
-				// The draw is queued but has not entered yet. Preserve it; the
-				// post-tick latch below attaches the requested outgoing action.
-				w.switch_deferred_action = action;
-			} else if (out.same_category) {
-				w.switch_deferred_action = -1;
-				weapon_fsm_queue_switch_rank(*active_slot);
-			} else {
-				w.switch_deferred_action = -1;
-				weapon_fsm_queue_switch_from(*active_slot);
+			if (out.same_category) {
+				if (!player_view_weapon_lower_raise_active(view))
+					weapon_fsm_queue_switch_rank(*active_slot);
+			} else if (weapon_fsm_queue_switch_from(*active_slot) &&
+					active_slot->next == weapon_action::kSwitchFrom) {
+				player_view_start_weapon_lower(view);
 			}
 			break;
 		}
@@ -1315,9 +1348,15 @@ void mount_install(World &world, LocalPlayerWeapon &w, const WeaponInstallData &
 		}
 	}
 	// A walk outcome that mounted but has not committed yet (its outgoing
-	// SWITCHFROM was displaced by this mount) resumes through the deferred latch
-	// once the draw completes, so the pending combo still commits.
-	if (w.switch_in_flight)
+	// SWITCHFROM was displaced by this mount's fresh slot) resumes through the
+	// deferred latch once the draw completes, so the pending combo still commits.
+	// A slot-preserving mount (an EquippedSlot store) displaces nothing: a word the
+	// switch-out left stored (a gated same-category mount's, a refused SWITCHFROM's)
+	// stays stored with nothing queued, as retail's g_PendingWeaponSlot does until
+	// a completion [orig: Player_MountWeaponSlot @0x4DFB8D..0x4DFB9E;
+	// g_PendingWeaponSlot's only commits WeaponAction_SwitchFrom @0x543475 /
+	// WeaponAction_SwitchRank @0x543539].
+	if (w.switch_in_flight && !preserve_slot_state)
 		w.switch_deferred_action = weapon_action::kSwitchFrom;
 	// A mount leaves a running PowerThrow windup alone: the walk clears it ahead of the mount
 	// (local_weapon_walk_clears_windup, past the walk's own gates), and a mount no walk runs (a
@@ -1785,6 +1824,23 @@ bool local_weapon_press_fire(World &world, LocalPlayerWeapon &w, const PlayerVie
 	return true;
 }
 
+namespace {
+
+// A local SWITCHFROM completion's raise, past its commit and the draw it queued: the
+// committed EquippedSlot's def, as the commit mounted it (commit_mount), one step for an
+// Emplaced def. A SWITCHRANK's commit raises nothing.
+// [orig: WeaponAction_SwitchFrom @0x5433B0 - the store @0x543475,
+//  WeaponSlot_TryQueueSwitchTo @0x5434A3, Player_StartWeaponLowerRaiseInterp(1) @0x5434AA;
+//  WeaponAction_SwitchRank @0x543500 calls none]
+void start_local_weapon_raise(const World &world, const LocalPlayerWeapon &w,
+		PlayerViewState &view) {
+	const WeaponFsmDef *def = local_equipped_slot_def(world, w);
+	player_view_start_weapon_raise(view,
+			def != nullptr && (def->flags & weapon_flag::kEmplaced) != 0);
+}
+
+} // namespace
+
 void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		LocalWeaponPumpIO &io) {
 	io.map_command = 0;
@@ -1922,6 +1978,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	LocalWeaponScope scope(world, w, view);
 	in.scope = &scope;
 	in.instant_emplaced_switch = local_usegun_switch_is_instant(world, w, io.inventory);
+	in.pending_emplaced = local_pending_slot_is_emplaced(world, w, io.inventory);
 	// The heat window is a deadline against the logic tick, not a stored level.
 	// [orig: current_tick @ 0x24C1968]
 	in.current_tick = static_cast<int32_t>(world.logic_tick);
@@ -2267,7 +2324,10 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	//  WeaponSlot_TryQueueSwitchRank @0x53F1C0]
 	if (w.usegun_switch != LocalUseGunSwitch::kNone && ev.switch_completed) {
 		w.usegun_switch_action = active_slot.current;
+		const bool completed_from = active_slot.current == weapon_action::kSwitchFrom;
 		commit_local_usegun_weapon_switch(world, w);
+		// A SWITCHFROM's commit raises the weapon view on the stored slot's def.
+		if (completed_from && w.active) start_local_weapon_raise(world, w, view);
 		// The switch back hands the personal slot to its readers again, which read
 		// a bucket weapon's rounds through the seat as it now stands: the mirror the
 		// staging pump read through the gunner seat (the gun's clip) does not carry
@@ -2319,8 +2379,13 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// WeaponAction_SwitchFrom @0x5433B0 (the local completion @0x543464..0x543475);
 	// WeaponAction_SwitchRank @0x543500 (@0x543528..0x543539)].
 	if (io.inventory != nullptr && (!borrowed_usegun_slot || w.usegun_on_foot) &&
-			w.switch_in_flight && ev.switch_completed)
-		commit_pending_weapon_switch(world, w, io.inventory, false);
+			w.switch_in_flight && ev.switch_completed) {
+		// The completing action, read before the commit replaces the slot: a
+		// SWITCHFROM's commit draws the stored slot and raises the weapon view.
+		const bool completed_from = active_slot.current == weapon_action::kSwitchFrom;
+		if (commit_pending_weapon_switch(world, w, io.inventory, false) && completed_from)
+			start_local_weapon_raise(world, w, view);
+	}
 	// The FSM's scope legs already ran inside the tick (LocalWeaponScope);
 	// the serials count the calls for the dev tools.
 	if (ev.unscope) ++w.unscope_serial;

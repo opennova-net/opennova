@@ -473,10 +473,16 @@ void local_weapon_detach_mount(World &world, LocalPlayerWeapon &w,
 // The pending -> equipped commit and the shared switch-outcome routing. The commit
 // mounts the committed slot's def at once (local_weapon_install_by_name): a switch
 // action's completion draws it (SWITCHTO), a SWITCHRANK's and a select's do not.
+// True when it stored the pending slot (one with a weapon). The routing's mount
+// stores the word and queues the EquippedSlot's switch-out at once: a same-category
+// mount SWITCHRANK unless the weapon view's lower / raise interp runs, a
+// cross-category one SWITCHFROM (refused over a running SWITCHTO / SWITCHFROM), whose
+// queue lowers the weapon view (player_view_start_weapon_lower).
 // [orig: WeaponAction_SwitchFrom @0x5433B0 - the store @0x543475,
 //  WeaponSlot_TryQueueSwitchTo @0x5434A3; WeaponAction_SwitchRank @0x543500 - the store
-//  @0x543539, no SWITCHTO; Player_SelectWeaponSlot @0x4DD680 - the store @0x4DD704]
-void commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
+//  @0x543539, no SWITCHTO; Player_SelectWeaponSlot @0x4DD680 - the store @0x4DD704;
+//  Player_MountWeaponSlot @0x4DFA40 - @0x4DFB7B..0x4DFBC5]
+bool commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
                                   WeaponInventory *inventory, bool select);
 void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
                                   WeaponInventory *inventory,

@@ -440,8 +440,11 @@ void handler_switchto(const WeaponFsmDef &, const WeaponFsmAction &desc,
         slot.phase = weapon_phase::kDone;
         return;
     }
-    // (the instant-switch -901 branch reads the pending slot's def Flags & 0x80 —
-    //  weapon-switch seam [orig: @ 0x54323e])
+    // The local player's pending slot naming an Emplaced def holds the draw: -901
+    // on every call, so the timer never turns positive while the word stays.
+    // [orig: the local test @0x54321E, g_PendingWeaponSlot @0x543226..0x54322D, its
+    //  def's Flags 0x80 @0x54322F..0x54323E, -901 @0x543240]
+    if (in.is_local && in.pending_emplaced) slot.switch_timer = -901;
     if (slot.switch_timer <= 0) {
         slot.switch_timer = static_cast<int16_t>(slot.switch_timer + 30); // [orig: @ 0x54327b]
         slot.counter = desc.delay_end;
@@ -848,13 +851,14 @@ void weapon_fsm_queue_scope_down(WeaponSlotState &slot) {
         slot.next = weapon_action::kIdle;
 }
 
-void weapon_fsm_queue_switch_from(WeaponSlotState &slot) {
+bool weapon_fsm_queue_switch_from(WeaponSlotState &slot) {
     // [orig: WeaponSlot_ForceQueueSwitchFrom @ 0x53f170 — refused while SWITCHFROM
-    //  or SWITCHTO is current; a complete phase resets the slot and queues
-    //  SWITCHFROM, otherwise the action is forced back to idle first]
+    //  or SWITCHTO is current (0 @0x53F1BD); a complete phase resets the slot and queues
+    //  SWITCHFROM, otherwise the action is forced back to idle first (1 @0x53F19B /
+    //  @0x53F1B7)]
     if (slot.current == weapon_action::kSwitchFrom ||
         slot.current == weapon_action::kSwitchTo)
-        return;
+        return false;
     if (slot.phase == weapon_phase::kDone || slot.phase == weapon_phase::kHeld ||
         slot.phase == weapon_phase::kNone) {
         slot.counter = 0;       // [orig: *(slot+0) = 0]
@@ -866,6 +870,7 @@ void weapon_fsm_queue_switch_from(WeaponSlotState &slot) {
     } else {
         slot.next = weapon_action::kIdle;
     }
+    return true;
 }
 
 void weapon_fsm_queue_switch_rank(WeaponSlotState &slot) {

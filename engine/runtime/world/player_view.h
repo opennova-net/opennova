@@ -38,6 +38,15 @@ class World;
 constexpr int32_t kScopeEaseSteps = 15;
 constexpr int32_t kScopeEaseStepsInset = 7;
 constexpr int32_t kScopeEaseStepsHipfire = 1;
+// The weapon view's lower / raise ease lengths: 31 steps, a raise onto an
+// Emplaced def (Flags 0x80) one [orig: Player_StartWeaponLowerRaiseInterp @0x4DF960 -
+// the lower's 31 @0x4DFA2E, the raise's 1 @0x4DF9E9 / 31 @0x4DFA08 behind the
+// Flags 0x80 test @0x4DF9D1..0x4DF9DB].
+constexpr int32_t kWeaponLowerRaiseSteps = 31;
+constexpr int32_t kWeaponRaiseStepsEmplaced = 1;
+// The lowered pose's drop: 65536.0 off the def's view Z [orig: flt_7C32BC,
+// subtracted @0x4DF99B].
+constexpr double kWeaponLowerDropQ16 = 65536.0;
 // [orig: g_CameraFovTargetQ16 @ 0x26C6848 default 0x500000 = 80.0 horizontal degrees]
 constexpr float kPlayerCameraFovHDeg = 80.0f;
 // [orig: binocular camera fov constant in Player_UpdateFirstPersonCamera]
@@ -409,6 +418,19 @@ struct PlayerViewState {
     PlayerViewPose weapon_ads_pose;
     PlayerViewBiasInterp weapon_pose_interp;
     bool weapon_pose_bound = false; // fpCameraInterp.entitySlotPtr + its non-null Def
+    // THE WEAPON VIEW'S LOWER / RAISE INTERP, the same interpolator on its own
+    // record [orig: g_WeaponLowerRaiseInterp @0x82CEA0 -- the counter +0,
+    // entitySlotPtr +76, activeFlag +80]: a cross-category mount's queued
+    // SWITCHFROM lowers the held def's view pose, a SWITCHFROM completion raises
+    // the committed one's (player_view_start_weapon_lower / _raise). Its active
+    // latch is the same-category mount's gate (player_view_weapon_lower_raise_active).
+    // `weapon_lower_raise_hip_pose` is the bound slot's def +0x10C at the start,
+    // the step's bias reference. Its published bias words are not presented: the
+    // first-person view reads `weapon_pose_interp`'s. A mission start's fresh view
+    // starts it idle, as Player_InitPlayer's clear does [orig: Player_InitPlayer
+    // @0x4E15F0 (@0x4E171C / @0x4E1722), called @0x525BBC].
+    PlayerViewBiasInterp weapon_lower_raise_interp;
+    PlayerViewPose weapon_lower_raise_hip_pose;
     // The movement-held latch: written by the input pack only, from the packed
     // word's direction bits, so a joiner's latches once per send boundary.
     // [orig: g_MovementKeyHeld @ 0xB7653B; Player_PackInputStateToEntity
@@ -623,10 +645,42 @@ void player_view_tick(PlayerViewState &v, const int32_t eye_q16[3]);
 // (g_ScopeEngaged != 0) @0x4de4f7; the stepper reports done on the call AFTER
 // the last moving lane snapped, so a 15-step authored ease promotes on tick
 // 16, and an unbound slot (null entitySlotPtr/Def) deactivates on its first
-// step @0x4DDD2B..0x4DDDBC and promotes at once]. A paused single-player
+// step @0x4DDD2B..0x4DDDBC and promotes at once]. Then the weapon view's
+// lower / raise interp steps behind its own active latch, through the same
+// stepper; its completion callback has no writer, so its drop runs nothing
+// [orig: Player_UpdatePerFrame @0x4DE4FD..0x4DE522 - the latch test @0x4DE4FD,
+// Player_StepFpViewBiasInterp @0x4DE50A, g_WeaponLowerRaiseDoneCallback
+// @0x4DE517..0x4DE522].
+// Retail steps both once per main frame, and the main frame is the logic tick
+// (Game_ProcessMainFrame @0x5263F0 advances g_CurrentTick once per call), so
+// this leg runs once per tick. A paused single-player
 // update skips it, as Client_ProcessNetworkFrame skips Player_UpdatePerFrame
 // under the pause word [orig: @0x42C184..0x42C18E].
 void player_view_promote_tick(PlayerViewState &v);
+
+// The weapon view's lower: the held def's view pose (its Bone +0xF4, which the
+// weapon.def parse copies into the hip pose +0x10C, so `weapon_hip_pose`) eased
+// in 31 steps to the lowered pose, the same X / Y, Z 65536.0 lower and the three
+// rotation words zero. A cross-category mount runs it when its forced SWITCHFROM
+// queued (handle_weapon_switch_outcome). [orig: Player_StartWeaponLowerRaiseInterp
+// @0x4DF960 type 0 - the lowered pose @0x4DF969..0x4DF9B4, entitySlotPtr
+// @0x4DF9A1, Setup(31, &Bone, lowered) @0x4DFA19..0x4DFA35; the pos copy
+// WeaponDefs_ParseLineCallback @0x5446DB..0x544717]
+void player_view_start_weapon_lower(PlayerViewState &v);
+
+// The weapon view's raise: the lowered pose of the def a SWITCHFROM completion
+// committed (its view pose `weapon_hip_pose` as the commit's mount bound it)
+// eased to that hip pose in 31 steps, or 1 for an Emplaced def (Flags 0x80).
+// A running interp eases on from its current pose (CNetPlayerInterp_Setup).
+// [orig: Player_StartWeaponLowerRaiseInterp @0x4DF960 type 1 - Setup(1 / 31,
+// lowered, +0x10C) @0x4DF9C0..0x4DFA0F; called by WeaponAction_SwitchFrom
+// @0x5433B0 @0x5434AA, after WeaponSlot_TryQueueSwitchTo @0x5434A3]
+void player_view_start_weapon_raise(PlayerViewState &v, bool emplaced);
+
+// The lower / raise interp's active latch: a same-category mount queues no
+// SWITCHRANK while it is set [orig: Player_MountWeaponSlot @0x4DFB8D..0x4DFB93,
+// g_WeaponLowerRaiseInterp.activeFlag].
+bool player_view_weapon_lower_raise_active(const PlayerViewState &v);
 
 // The follow anchor's update, whatever the view mode: a seeded anchor chases
 // `eye_q16` a quarter step in 16.16, `(target - anchor + 4) >> 2` [orig:

@@ -399,6 +399,11 @@ struct WeaponFsmInputs {
     // computes this because the standalone slot does not know its target def.
     // [orig: WeaponAction_SwitchFrom @0x543417..0x54344a]
     bool instant_emplaced_switch = false;
+    // The local player's pending slot names an Emplaced def (Flags 0x80): its
+    // SWITCHTO holds the draw at the -901 sentinel, 30 back to -871 on every call,
+    // for as long as the word does. The pending-slot owner computes it.
+    // [orig: WeaponAction_SwitchTo @0x5431D0 - @0x54321E..0x543240]
+    bool pending_emplaced = false;
     // The logic tick, needed because the heat level is derived from a deadline
     // rather than stored. [orig: current_tick @ 0x24C1968]
     int32_t current_tick = 0;
@@ -536,8 +541,10 @@ void weapon_fsm_queue_scope_down(WeaponSlotState &slot);
 // WeaponSlot_TryQueueSwitchRank @ 0x53f1c0]: queue SWITCHFROM (cross-category holster)
 // or SWITCHRANK (same-category flip) on the OUTGOING weapon's slot when its phase is
 // complete ({0, 4, 0x40}); an in-flight action forces idle instead. The caller commits
-// pending -> equipped when the queued action's active phase finishes.
-void weapon_fsm_queue_switch_from(WeaponSlotState &slot);
+// pending -> equipped when the queued action's active phase finishes. The SWITCHFROM
+// writer returns false when a running SWITCHFROM or SWITCHTO refuses it, else true
+// (Player_MountWeaponSlot's lower tests it).
+bool weapon_fsm_queue_switch_from(WeaponSlotState &slot);
 void weapon_fsm_queue_switch_rank(WeaponSlotState &slot);
 // Queue SWITCHTO on a newly committed target only when it is not already drawing
 // and its phase is DONE/NONE; a busy target is allowed to settle to IDLE. READY
