@@ -67,6 +67,16 @@ inline ScenePassGates scene_pass_gates(uint32_t blink_flags,
 // (`occlusion_water_visible` false).
 // [orig: Terrain_RenderWorldScene @ 0x5c93cb / @ 0x5c95d2..0x5c95ea;
 //  g_BlinkWaterVisible @ 0x29ACE40]
+// Those passes are the scene's strip alone, each drawn under g_WaterActive
+// [orig: Terrain_RenderWaterPass @ 0x610640, the test @0x610647]. The label
+// reaches nothing else of the water. The scene's mirror prerender gates on
+// g_WaterActive alone [orig: Render_TerrainScene @ 0x610c80, the test
+// @0x610cd2 ahead of the call @0x610ce0], past which only the height stands
+// [orig: Render_MainScene @ 0x5c1240, the branch @0x5c1268]; the bloom's water
+// redraw gates on neither [orig: FrameFX_RenderGlowSource @ 0x582940, the call
+// @0x582a5d], only on the eye's side (env::water_surface_sides). So a label
+// that skips the strip leaves the mirror rendering and the redraw drawing. The
+// weapon Inset pass holds the same with its own label and g_WaterActive.
 inline bool scene_water_visible(uint32_t blink_flags, bool occlusion_water_visible) {
 	return (blink_flags & world::kBlinkWaterOffBit) == 0 || occlusion_water_visible;
 }
@@ -78,13 +88,14 @@ inline bool scene_water_visible(uint32_t blink_flags, bool occlusion_water_visib
 // and the scene core latches its water label from them ahead of its two water
 // passes [orig: Terrain_RenderWorldScene @ 0x5c93b8..0x5c93cd ahead of
 // @ 0x5c95d4..0x5c95ea]. A letter that clears on a tick therefore draws the
-// terrain (the indoors letter) or the water (the water letter) in that tick's
-// own frame, so a device that already ran those passes closed this frame
-// re-runs them on the edge. A letter that sets needs no edge: the pass it
-// closes is simply skipped from that frame on.
+// terrain (the indoors letter) in that tick's own frame, so a device that
+// already ran that pass closed this frame re-runs it on the edge. The water
+// letter takes no edge: its label gates the strips alone (scene_water_visible),
+// and it lands on them with the frame's collect, after the letters. A letter
+// that sets needs no edge: the pass it closes is simply skipped from that frame
+// on.
 struct ScenePassGateEdges {
 	bool terrain_opened = false;
-	bool water_opened = false;
 };
 
 inline ScenePassGateEdges scene_pass_gate_edges(uint32_t prev_letters,
@@ -92,7 +103,6 @@ inline ScenePassGateEdges scene_pass_gate_edges(uint32_t prev_letters,
 	const uint32_t cleared = prev_letters & ~next_letters;
 	ScenePassGateEdges edges;
 	edges.terrain_opened = (cleared & world::kBlinkIndoorsBit) != 0;
-	edges.water_opened = (cleared & world::kBlinkWaterOffBit) != 0;
 	return edges;
 }
 

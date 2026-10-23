@@ -64,12 +64,14 @@ class Water;
 //    visibility is re-asserted first each frame and this frame's hides land
 //    on top. The leg table keeps that order; nothing here
 //    reorders it.
-//  * water.visible has TWO writers in one frame: GameWorld.
-//    render_water_frame reads LAST frame's blink-water verdict
-//    (Water.set_blink_water_visible, exactly as retail reads it — the
-//    Terrain_SetupViewAndLighting 0x60fe40 witness cited on that leg),
-//    then apply_frame below rewrites the node's visibility from THIS
-//    frame's verdict. Both stay.
+//  * the water reads the collect twice in one frame: GameWorld.
+//    render_water_frame's water-active test reads the latch the last
+//    scene's water pass stored (Water::latch_blink_water, exactly as retail
+//    reads it — the Terrain_SetupViewAndLighting 0x60fe40 witness cited on
+//    that leg), then apply_frame below lands THIS frame's water letter label
+//    on the strip (Water::set_blink_water_views) and stores the latch. The
+//    label reaches the strips alone, never the node, the mirrors or the
+//    bloom's redraw (renderer::scene_water_visible).
 //  * the world's is_water_render_active() gate decides the water_z handed to
 //    run_occlusion_frame: an inactive water (no load, a load in progress)
 //    passes the -100000 sentinel, never its retained authored height.
@@ -159,8 +161,8 @@ public:
 		return inset_foliage_mask_anchors_;
 	}
 
-	// The probe A/B seam, entering the occlusion skip: restore the water to
-	// the authored blink state, then release every occlusion override.
+	// The probe A/B seam, entering the occlusion skip: restore the water
+	// strip to the authored blink state, then release every occlusion override.
 	// Mission blink/indoors semantics remain authoritative (release keeps
 	// them; iris keeps sampling on the world).
 	void enter_probe_skip();
@@ -258,7 +260,7 @@ private:
 	// The local player's latched blink letters (render-occlusion-re.md §4):
 	// accum bit 0x2 hides the terrain render, the detail-foliage passes (not
 	// the MODEL masks) and the mirror's sky bracket, bit 0x4 the main frame's
-	// sky bracket (apply_scene_pass_gates), bit 0x8 the water passes.
+	// sky bracket (apply_scene_pass_gates), bit 0x8 the water strips.
 	uint32_t blink_letters_ = 0;
 	bool blink_indoors_ = false;
 	// The last terrain gate written (edge-triggered).

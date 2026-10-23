@@ -139,15 +139,19 @@ public:
 	// it stands here (the main collect's of this frame), then the Inset's pass
 	// stores its own for the next frame's main scene.
 	void latch_inset_blink_water(bool p_water_pass_runs, bool p_visible);
-	// Each view's water letter gate while the weapon Inset renders: the Inset
-	// scene core draws its water passes on its own collect's
-	// g_BlinkWaterVisible (engine: world/occlusion.h OcclusionView). While the
-	// Inset pass draws (advance_inset_frame) each view has its own strip: the
-	// main view's on MAIN_VIEW_WATER (the beauty camera admits it, neither the
-	// Inset nor either mirror mask does), the Inset's on its own bit; a view
-	// whose gate is down draws none, and the node hides with both down.
-	// (true, true) with the Inset down restores the ordinary strip.
+	// Each view's water letter label (renderer::scene_water_visible): the
+	// main collect's, and the Inset scene core's on its own collect's
+	// g_BlinkWaterVisible (engine: world/occlusion.h OcclusionView). A label
+	// gates its view's strip alone: the mirrors render on their g_WaterActive
+	// and the bloom's redraw draws on its side whatever the labels say. While
+	// the Inset pass draws (advance_inset_frame) each view has its own strip:
+	// the main view's on MAIN_VIEW_WATER (the beauty camera admits it, neither
+	// the Inset nor either mirror mask does), the Inset's on its own bit; with
+	// the Inset down the main label gates the one strip on the water layer. A
+	// view whose label is down draws no strip. (p, p) with the Inset down sets
+	// the main view's label.
 	void set_blink_water_views(bool p_main, bool p_inset);
+	bool is_main_view_water() const { return main_view_water_; }
 	bool is_water_pass_active() const;
 	// The weapon Inset pass's own water (engine environment/water_mirror.h
 	// inset_mirror_source carries the witness): its g_WaterActive over its own
@@ -324,7 +328,7 @@ private:
 	MirrorRig inset_mirror_;
 	// The mirror cameras' one clear environment (_apply_reflection_clear).
 	Ref<Environment> reflection_environment_;
-	// The views' water letter gates (set_blink_water_views).
+	// The views' water letter labels (set_blink_water_views).
 	bool main_view_water_ = true;
 	bool inset_view_water_ = true;
 	// The Inset pass's water this frame (advance_inset_frame).

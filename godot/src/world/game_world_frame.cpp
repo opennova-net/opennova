@@ -1122,18 +1122,16 @@ void GameWorld::apply_blink_frame() {
 			water_->set_mirror_scene_outdoors(!occlusion_->is_blink_indoors());
 		}
 		// The letters gate the frame they are read in (renderer::
-		// scene_pass_gate_edges), but this frame's terrain and water legs ran
-		// before this tick's letters reached the gates: a pass the new
-		// letters reopen re-runs here, so it draws this frame and not the
-		// next. The water leg needs no re-run for a terrain reopen: the hidden
-		// terrain leg already tracked this frame's visible bounds. The camera
-		// is already placed (local_view), and the foliage leg after this one
-		// takes the re-run terrain's detail cells.
+		// scene_pass_gate_edges), but this frame's terrain leg ran before this
+		// tick's letters reached the gates: a pass the new letters reopen
+		// re-runs here, so it draws this frame and not the next. The water leg
+		// takes no letter (its label lands on the strips with the occlusion
+		// row) and needs no re-run for a terrain reopen: the hidden terrain leg
+		// already tracked this frame's visible bounds. The camera is already
+		// placed (local_view), and the foliage leg after this one takes the
+		// re-run terrain's detail cells.
 		if (reopened.terrain_opened) {
 			render_terrain_frame();
-		}
-		if (reopened.water_opened) {
-			render_water_frame();
 		}
 	}
 }

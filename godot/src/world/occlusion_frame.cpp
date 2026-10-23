@@ -120,12 +120,13 @@ opennova::renderer::ScenePassGateEdges OcclusionFrame::apply_blink_gates(bool p_
 	// retail's override is implicit; the remaining g_BlinkWaterVisible legs
 	// (a camera building straddling the water plane, the window latch) ride
 	// the section-mask slice (engine: runtime/renderer/scene_pass_gates.h).
+	// The label reaches the strips alone (renderer::scene_water_visible).
 	const bool water_off =
 			!opennova::renderer::scene_water_visible(static_cast<uint32_t>(flags), false);
 	if (water_off != blink_water_suppressed_) {
 		blink_water_suppressed_ = water_off;
 		if (Water *w = water()) {
-			w->set_visible(!water_off);
+			w->set_blink_water_views(!water_off, !water_off);
 		}
 	}
 	return edges;
@@ -307,7 +308,7 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
 	}
 
 	// The g_BlinkWaterVisible override legs the slice-1 gate deferred: with the
-	// authored water letter suppressing (accum bit 0x8), the water still renders
+	// authored water letter suppressing (accum bit 0x8), the water strip still draws
 	// when the frame latched the exterior or a camera building straddles the
 	// water plane. [orig: @ 0x5c93cb / @ 0x5c95d2 + g_BlinkWaterVisible
 	// @ 0x29ACE40]
@@ -315,7 +316,9 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
 	if (w != nullptr) {
 		const bool water_passes =
 				opennova::renderer::scene_water_visible(blink_letters_, s->occlusion_water_visible());
-		w->set_visible(water_passes);
+		// The main view's label, on its strip alone (the Inset's lands with
+		// apply_inset_frame).
+		w->set_blink_water_views(water_passes, water_passes);
 		// The scene's water passes store this collect's verdict in the latch
 		// the next scenes' water-active tests read (Water::latch_blink_water).
 		w->latch_blink_water(water_passes, s->occlusion_water_visible());
@@ -460,9 +463,9 @@ void OcclusionFrame::release_inset() {
 	}
 	inset_active_ = false;
 	inset_foliage_mask_anchors_ = PackedVector3Array();
-	// The strip back on the water layer, at the main view's gate.
+	// The strip back on the water layer, at the main view's label.
 	if (Water *w = water()) {
-		const bool main_water = w->is_visible();
+		const bool main_water = w->is_main_view_water();
 		w->set_blink_water_views(main_water, main_water);
 	}
 	for (const KeyValue<uint64_t, ObjectID> &entry : inset_nodes_) {
@@ -487,7 +490,7 @@ void OcclusionFrame::release_inset() {
 
 void OcclusionFrame::enter_probe_skip() {
 	if (Water *w = water()) {
-		w->set_visible(!blink_water_suppressed_);
+		w->set_blink_water_views(!blink_water_suppressed_, !blink_water_suppressed_);
 	}
 	release_overrides(false);
 }
@@ -628,10 +631,8 @@ void OcclusionFrame::reset_blink_frame_gates() {
 	if (Celestial *c = celestial()) {
 		c->set_sky_pass_gates(true, true);
 	}
-	if (blink_water_suppressed_) {
-		if (Water *w = water()) {
-			w->set_visible(true);
-		}
+	if (Water *w = water()) {
+		w->set_blink_water_views(true, true);
 	}
 	blink_indoors_ = false;
 	blink_water_suppressed_ = false;

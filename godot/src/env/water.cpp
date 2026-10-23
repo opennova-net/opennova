@@ -98,6 +98,7 @@ void Water::_bind_methods() {
 			&Water::set_blink_water_visible);
 	ClassDB::bind_method(D_METHOD("set_blink_water_views", "main", "inset"),
 			&Water::set_blink_water_views);
+	ClassDB::bind_method(D_METHOD("is_main_view_water"), &Water::is_main_view_water);
 	ClassDB::bind_method(D_METHOD("get_blink_water_latch"), &Water::get_blink_water_latch);
 	ClassDB::bind_method(D_METHOD("latch_blink_water", "water_pass_runs", "visible"),
 			&Water::latch_blink_water);
@@ -356,8 +357,9 @@ void Water::latch_inset_blink_water(bool p_water_pass_runs, bool p_visible) {
 			opennova::env::water_pass_latch(blink_water_visible_, p_water_pass_runs, p_visible);
 }
 
+// The labels reach the strips alone; the node, the mirrors and the bloom's
+// redraw keep drawing (renderer::scene_water_visible carries the witness).
 void Water::set_blink_water_views(bool p_main, bool p_inset) {
-	set_visible(p_main || p_inset);
 	main_view_water_ = p_main;
 	inset_view_water_ = p_inset;
 	_apply_strip_layers();
@@ -365,9 +367,9 @@ void Water::set_blink_water_views(bool p_main, bool p_inset) {
 
 void Water::_apply_strip_layers() {
 	if (mesh_instance_ != nullptr) {
-		const uint32_t layer = !inset_open_ ? uint32_t(VISUAL_LAYER_WATER)
-				: main_view_water_ ? uint32_t(visual_layers::MAIN_VIEW_WATER)
-								   : 0u;
+		const uint32_t layer = !main_view_water_ ? 0u
+				: !inset_open_ ? uint32_t(VISUAL_LAYER_WATER)
+							   : uint32_t(visual_layers::MAIN_VIEW_WATER);
 		if (mesh_instance_->get_layer_mask() != layer) {
 			mesh_instance_->set_layer_mask(layer);
 		}
@@ -783,7 +785,10 @@ void Water::advance_frame(double) {
 	// Blink-visible water last frame means no prerender and no strip), and the
 	// FrameFX bloom pass's nightvision redraw, which is the above-water call
 	// alone and not gated on g_WaterActive. Both skip an eye exactly on the
-	// plane (environment/water_frame.h water_surface_sides).
+	// plane (environment/water_frame.h water_surface_sides). The scene's
+	// water letter label reaches the beauty strip alone, through its layer
+	// (set_blink_water_views; renderer/scene_pass_gates.h scene_water_visible):
+	// neither the mirror nor the redraw reads it.
 	const opennova::env::WaterSurfaceSides sides =
 			opennova::env::water_surface_sides(static_cast<float>(cam_pos.y),
 					water_height_);
@@ -803,7 +808,9 @@ void Water::advance_frame(double) {
 
 	// env #30: refresh the mirror camera before this frame's strip rebuild —
 	// the SubViewport renders ahead of the main view, like the witnessed
-	// prerender (itself gated on g_WaterActive).
+	// prerender (itself gated on g_WaterActive alone, the letter
+	// notwithstanding: the strip marches under a skipping label too, so the
+	// mirror the bloom's redraw samples still renders).
 	if (beauty_active) {
 		_update_reflection_camera(view_cam, drawing.projection, drawing.frame_perspective);
 	}
