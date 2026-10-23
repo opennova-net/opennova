@@ -4258,6 +4258,21 @@ bool run_the_respawn_arm_resolves_nothing_in_the_receive() {
 	if (!expect(local_ai->inf.anim_state == kDeathState && local_ai->inf.anim_pending == 0,
 			"arm reset: L's body channel stays on the corpse's death state"))
 		return false;
+	if (local->position.y.q16 <= kOne / 4) {
+		// What the release frame's update left, for a red run's log.
+		const auto &dbg = h.kernel->collision.local_resolve_debug;
+		std::fprintf(stderr,
+				"arm reset: L at (%d, %d, %d) flags %08x state %d airborne %d bound %d "
+				"slice %d root_motion %d resolve %d radii (%d, %d, %d) capsule (%d, %d) "
+				"dbg_res (%d, %d)\n",
+				local->position.x.q16, local->position.y.q16, local->position.z.q16,
+				local->flags | local->engine_flags, local_ai->inf.anim_state,
+				local_ai->inf.airborne ? 1 : 0, local->bound_radius.q16,
+				h.kernel->collision.candidate_count(local->handle),
+				world.ai.root_motion != nullptr ? 1 : 0, dbg.valid ? 1 : 0, dbg.radii[0],
+				dbg.radii[1], dbg.radii[2], dbg.capsule_bottom, dbg.capsule_top,
+				local_ai->inf.dbg_res_dx, local_ai->inf.dbg_res_dy);
+	}
 	return expect(local->position.y.q16 > kOne / 4,
 			"arm reset: L's own update pushes it out of the wall along +Y");
 }

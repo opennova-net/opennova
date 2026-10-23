@@ -29,6 +29,8 @@
 
 #include <runtime/inmatch/loopback_channel.h>
 
+#include <base/gameprofile/game_type.h>
+
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h> // placed_heading_bam
 #include <runtime/world/collision.h>
@@ -228,11 +230,15 @@ bool run_the_reset_leaves_the_stance_bits() {
 	              "stance: the reset keeps the stance bits and their mirror");
 }
 
-// The host's deploy places a dead body on the 6002 start (123, 456, 7), a quarter unit into a
-// wall whose +Y face its corpse's slice holds, and clears the dead bit ahead of the reset: the
-// deploy leaves the body pushed out along +Y, its X the start's. The host's world is the
-// authority and runs the root-motion clips; the body carries the bound radius its model's init
-// stamps, which the contact force's clamp reads (a zero radius clamps every push to nothing).
+// The host's deploy places a dead body on a Co-op start (6094) at (123, 456, 7), a quarter unit
+// into a wall whose +Y face its corpse's slice holds, and clears the dead bit ahead of the reset:
+// the deploy leaves the body pushed out along +Y, its X the start's. The Co-op marker arm
+// places with no warm-up (the scored arm's warm-up resolves the body itself, ahead of the
+// reset), so the reset's resolve is the one that pushes. The host's world is the authority and
+// runs the root-motion clips; the body carries the bound radius its model's init stamps, which
+// the contact force's clamp reads (a zero radius clamps every push to nothing).
+// [orig: Server_PositionPlayerForSpawn @0x50CF60 - the Co-op marker arm's copy and its jump
+//  past the warm-up @0x50D460, the scored arm's Entity_WarmUpOrganicAnimation @0x50D572]
 // [orig: Entity_ComputeBoneCollisionForce @0x4AE150 - the clamp's `shl ecx, 7` @0x4AEEC6;
 //  Entity_InitFromModel @0x40DC30 - the +0 store @0x40E076]
 bool run_the_deploy_pushes_the_body_out_of_a_wall() {
@@ -248,7 +254,7 @@ bool run_the_deploy_pushes_the_body_out_of_a_wall() {
 	world->registry.configure_pool(3, 16);
 	w::Entity start;
 	start.kind = w::EntityKind::Marker;
-	start.item_id = 6002; // the non-team fallback player start
+	start.item_id = 6094; // the Co-op primary start
 	start.position = {123.0f, 456.0f, 7.0f};
 	start.heading = w::placed_heading_bam(30);
 	world->registry.spawn(3, start);
@@ -268,6 +274,7 @@ bool run_the_deploy_pushes_the_body_out_of_a_wall() {
 	inmatch::NapiNPServerCtx ctx;
 	inmatch::GameConfig settings;
 	settings.max_players = 8;
+	settings.game_type = opennova::game_type::kCoop;
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient,
 	                        inmatch::SocketMode::Socketless, /*host_key=*/0, &loop, settings);
 	ctx.world = world.get();
@@ -311,6 +318,11 @@ bool run_the_deploy_pushes_the_body_out_of_a_wall() {
 	if (!expect(body->net_stance_bits == 0 &&
 	                    motor->inf.stance == w::InfantryState::Stance::kStand,
 	            "deploy: the deploy's own clear stands the body")) return false;
+	if (body->spawn_position.y.q16 != 456 * kOne || body->position.y.q16 <= 456 * kOne)
+		std::fprintf(stderr, "deploy: spawn backup (%d, %d, %d), position (%d, %d, %d)\n",
+		             body->spawn_position.x.q16, body->spawn_position.y.q16,
+		             body->spawn_position.z.q16, body->position.x.q16, body->position.y.q16,
+		             body->position.z.q16);
 	if (!expect(body->position.x.q16 == 123 * kOne, "deploy: the body stands on the start's X"))
 		return false;
 	if (!expect(body->spawn_position.y.q16 == 456 * kOne,
