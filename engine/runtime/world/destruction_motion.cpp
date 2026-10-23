@@ -43,11 +43,14 @@ void entity_process_falling_death(
 					*terrain, e.position.x.q16, e.position.y.q16);
 			e.ground_target = {};
 		}
+		// The husk's collision section 0 z words, by the up row's sign.
+		// [orig: Entity_ProcessFallingDeathPhysics @0x461D30 - +0x6C row 0's +0x58
+		//  @0x461E25..0x461E36, +0x54 @0x461E3A..0x461E4B]
 		if (ground != INT32_MIN && traits != nullptr) {
 			if (entity_placement_matrix(e).m[10] >= 0)
-				ground = io::bam_sub(ground, to_fixed(std::abs(traits->husk_rest_min_z)));
+				ground = io::bam_sub(ground, io::bam_abs(traits->husk_rest_z_lo_q16));
 			else
-				ground = io::bam_add(ground, to_fixed(std::abs(traits->husk_rest_max_z)));
+				ground = io::bam_add(ground, io::bam_abs(traits->husk_rest_z_hi_q16));
 		}
 		const int32_t z = io::bam_add(pos[2], m.slide_z);
 		if (ground == INT32_MIN || z > ground) {

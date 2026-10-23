@@ -6,6 +6,7 @@
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
 
+#include <base/io/bam.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_index.h>
 #include <formats/mission/mission.h> // kItemIdOffset
@@ -751,8 +752,8 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 			// model [orig: @ 0x4934af..0x4934c3 huskFinalModel ?: huskModel] —
 			// the opposite preference from the collision husk pick above. Its
 			// LOD-0 part table feeds the death-piece loop bound [orig:
-			// renderObj[8]+52 @ 0x49361a] and section 0's z extents (the wreck
-			// ground-rest offset [orig: @ 0x461e23-0x461e4b]); its level table,
+			// renderObj[8]+52 @ 0x49361a], its collision section 0's z words the
+			// wreck's ground rest (below); its level table,
 			// COBJ centres and bound radius feed the piece spawn and draw
 			// (world::DeathPieceModel). Its own cache, independent of the
 			// collision cache: a husk graphic can double as some entity's main
@@ -787,26 +788,22 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 						}
 					}
 					info.model.radius_q16 = world::model_bound_radius_q16_from_3di(*piece_m3);
-					// Section 0 owns the first opaque+alpha strip run (strips are
-					// stored sequentially per render object).
-					if (lod.render_objects != nullptr && lod.render_object_count > 0 &&
-					    lod.strips != nullptr) {
-						const ThreediRenderObject &p0 = lod.render_objects[0];
-						const int32_t p0_strip_count = p0.num_strips + p0.num_alpha_strips;
-						bool any = false;
-						for (int32_t pr = 0; pr < p0_strip_count; ++pr) {
-							const size_t idx = static_cast<size_t>(pr);
-							if (idx >= lod.strip_count) break;
-							const ThreediTriangleStrip &prim = lod.strips[idx];
-							info.rest_min_z =
-									any ? std::min(info.rest_min_z, prim.min[2])
-									    : prim.min[2];
-							info.rest_max_z =
-									any ? std::max(info.rest_max_z, prim.max[2])
-									    : prim.max[2];
-							any = true;
-						}
-					}
+				}
+				// The wreck's rest extents are the collision block's section-0 row: the
+				// loader copies each COBJ record's min / max words into a 108-byte row,
+				// z min at +0x54 and z max at +0x58 (the model's +0xB0 is the block, its
+				// +0x6C the row array), which both falling-death legs and the class
+				// init's husk floor read. Words in the model's own (mission) axes, z up.
+				// [orig: Threedi_BuildCollisionModelFromChunks @0x5B3BF0 - the row
+				//  stores @0x5B4021..0x5B4027 / @0x5B403F..0x5B4045, the block at the
+				//  loader's +0xB4 = model+0xB0 (ThreediGp_LoadFromFile @0x5B5B65,
+				//  ThreediGp_LoadModel returns the def +4 @0x5B6273);
+				//  Entity_ProcessFallingDeathPhysics @0x461E25..0x461E4B]
+				if (piece_m3 != nullptr && piece_m3->collision != nullptr &&
+				    piece_m3->collision->objects != nullptr &&
+				    piece_m3->collision->object_count > 0) {
+					info.rest_z_lo_q16 = piece_m3->collision->objects[0].min[2];
+					info.rest_z_hi_q16 = piece_m3->collision->objects[0].max[2];
 				}
 				hs = state.husk_pieces_by_graphic.emplace(
 						piece_key, std::move(info)).first;
@@ -844,8 +841,8 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				}
 				if (!t->piece_model.loaded() && info.model.loaded())
 					t->piece_model = info.model;
-				t->husk_rest_min_z = info.rest_min_z;
-				t->husk_rest_max_z = info.rest_max_z;
+				t->husk_rest_z_lo_q16 = info.rest_z_lo_q16;
+				t->husk_rest_z_hi_q16 = info.rest_z_hi_q16;
 				// brain[12] is the husk floor's absolute value, read from the
 				// husk (the final one when it loaded, else the first) by the class
 				// init under brain[11]'s gate: the helicopter family always, the
@@ -861,7 +858,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 								(husk_vt->brain_class == world::VehicleBrainClass::Ground &&
 										husk_ai->profile.subtype != 1)))
 					husk_ai->brain.f[world::AiBrain::kHuskFloor] =
-							world::to_fixed(std::abs(t->husk_rest_min_z));
+							io::bam_abs(t->husk_rest_z_lo_q16);
 			}
 			// Only entity+52's FIRST husk model joins this signed max. A
 			// huskFinal-only definition has no substitute operand here.

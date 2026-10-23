@@ -1944,13 +1944,20 @@ void tick_item_death_motion(World &world, Entity &entity,
 			} else if (terrain != nullptr && terrain->valid())
 				ground = terrain::height_field_height_bilinear_fixed(
 						*terrain, e->position.x.q16, e->position.y.q16);
-			// The wreck rests with section 0's lowest extent on the ground
-    // [orig: ground -= |sec0 z min| @ 0x461e23-0x461e4b]. The ground above
-    // is the object-aware probe (terrain plus posed models, retail's mask
-    // 0x200000 @ 0x461e1a); the inverted += |z max| leg
-    // (@ 0x494034-0x49405e) is not taken here (world-wac-ai-re.md D-ITEM-9).
-    if (traits != nullptr && ground != INT32_MIN)
-        ground = io::bam_sub(ground, to_fixed(std::abs(traits->husk_rest_min_z)));
+			// The wreck rests on its husk's collision section 0: the ground less
+    // |z min| upright, plus |z max| inverted, by the sign of the head matrix's
+    // up row (this leg never turns the wreck, so the live Euler words are the
+    // head's). The ground above is the object-aware probe (terrain plus posed
+    // models, retail's mask 0x200000 @ 0x461e1a).
+    // [orig: Entity_UpdateFallingDeathPhysics @0x493F70 - the up row
+    //  @0x493F8E..0x493F9D, its sign test @0x49402F..0x494034, +0x58
+    //  @0x494036..0x494047, +0x54 @0x49404D..0x49405E]
+    if (traits != nullptr && ground != INT32_MIN) {
+        if (entity_placement_matrix(*e).m[10] >= 0)
+            ground = io::bam_sub(ground, io::bam_abs(traits->husk_rest_z_lo_q16));
+        else
+            ground = io::bam_add(ground, io::bam_abs(traits->husk_rest_z_hi_q16));
+    }
     const int32_t old_top_q16 = entity_top_q16(*e);
     // The pose advances by the velocity words, word arithmetic (D-NET-507).
     // [orig: Entity_UpdateFallingDeathPhysics @0x493F70 - @0x494077..0x49407D,

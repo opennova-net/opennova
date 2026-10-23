@@ -2314,7 +2314,7 @@ void test_dead_item_landing_split() {
     // Generic item (unit_type 0): silent contact restores the complete pre-move
     // pose. Contact clears slide_z while horizontal velocity remains live.
     ItemDeathTraits t = barrel_traits();
-    t.husk_rest_min_z = -0.25f;
+    t.husk_rest_z_lo_q16 = -16384; // -0.25 u
     t.particlefinale = "Effect_VehDrtPuftrk";
     Entity *item = drop(700, t);
     const Vec3 item_before = item->position;
@@ -3075,8 +3075,8 @@ void test_generic_wreck_zero_velocity_and_inverted_rest() {
 	CHECK(e.veh.slide_z == -334);
 	CHECK(e.position.z < seed.position.z); // zero velocity does not suppress gravity
 	ItemDeathTraits t;
-	t.husk_rest_min_z = -0.25f;
-	t.husk_rest_max_z = 2.0f;
+	t.husk_rest_z_lo_q16 = -16384; // -0.25 u
+	t.husk_rest_z_hi_q16 = 2 << 16;
 	w.tables.item_death_traits.set(e.item_id, t);
 	e.position = { 8, 8, ground + 1 };
 	e.roll_bam = spawn_angle_bam(180);
@@ -3090,6 +3090,47 @@ void test_generic_wreck_zero_velocity_and_inverted_rest() {
 	e.veh.slide_z = -65536;
 	tick_dead_items(w, &flat.field, 0.0f, w.out.destruction); // dry: the water word 0
 	CHECK(e.position.x == 9 && e.position.z < ground + 1); // upright lower bound permits this step
+}
+
+// The routed falling leg rests a wreck by its head matrix's up row: upright on the ground less
+// its husk's collision section 0 |z min|, rolled over on the ground plus |z max|. The tail
+// commits the integrated pose either way.
+// [orig: Entity_UpdateFallingDeathPhysics @0x493F70 - the up row @0x493F8E..0x493F9D, its sign
+//  test @0x49402F..0x494034, +0x58 @0x494036..0x494047, +0x54 @0x49404D..0x49405E, the landing
+//  test @0x494108..0x49410C, the tail @0x49421C..0x494221]
+void test_routed_wreck_rests_by_its_up_row() {
+	for (const bool inverted : { false, true }) {
+		auto storage = std::make_unique<World>();
+		World &w = *storage;
+		seed_ammo(w);
+		w.registry.configure_pool(1, 4);
+		FlatField flat(0x4000);
+		ItemDeathTraits t = barrel_traits();
+		t.unit_type = 1;
+		t.husk_rest_z_lo_q16 = -16384; // -0.25 u
+		t.husk_rest_z_hi_q16 = 2 * 65536;
+		w.tables.item_death_traits.set(706, t);
+		Entity seed;
+		seed.kind = EntityKind::Item;
+		seed.item_id = 706;
+		seed.bound_radius = 2.0f;
+		seed.engine_flags = kEntityFlagHusk | kEntityFlagDead;
+		seed.death_motion = DeathMotionMode::Falling;
+		Entity &e = *w.registry.get(w.registry.spawn(1, seed));
+		e.roll_bam = inverted ? spawn_angle_bam(180) : 0;
+		e.veh.yaw_seeded = false;
+		const int32_t ground = opennova::terrain::height_field_height_bilinear_fixed(
+				flat.field, 8 * 65536, 8 * 65536);
+		// 1/16 u above the inverted rest line, falling 1/8 u this tick.
+		const int32_t z0 = ground + 2 * 65536 + 4096;
+		e.position.set_q16({ 8 * 65536, 8 * 65536, z0 });
+		e.veh.slide_z = -8192 + 334;
+		tick_dead_items(w, &flat.field, 0.0f, w.out.destruction); // dry: the water word 0
+		CHECK(e.veh.slide_z == -8192);
+		CHECK(e.position.z.q16 == z0 - 8192);
+		CHECK(e.death_motion ==
+				(inverted ? DeathMotionMode::Generic : DeathMotionMode::Falling));
+	}
 }
 
 // State-23 boundary and full live-state restoration through the public system.
@@ -5368,6 +5409,7 @@ int main() {
 	test_vehicle_death_kills_authored_children();
 	test_vehicle_respawn_lifecycle();
 	test_generic_wreck_zero_velocity_and_inverted_rest();
+	test_routed_wreck_rests_by_its_up_row();
 	test_wreck_fire_crackle_rolls_on_the_engine_prng();
 	test_death_piece_trail_effect_rows();
     test_explosion_damage_gates();

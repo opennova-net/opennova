@@ -3205,6 +3205,100 @@ void test_a_hull_commits_its_death_the_update_after_health_zero() {
 	}
 }
 
+// D-NET-897's falling-death stop: a dying hull (state 21) under the routed falling callback
+// lands on its husk's collision section 0 floor, the ground less |z min| (retail's Dsuv1X, the
+// 03TR SUV's husk: -20522), the tail commits the integrated pose below it, the generic callback
+// holds it there, and the next 16-tick think finds it still and commits 23 (DEAD) although the
+// velocity words still read a moving hull. Retail's 03TR hull 0x1014 (LP-s15 h897, run a): z
+// 70792 (2812 above its floor 67980) and slide -4060 at 4814; it lands at 4815 at 66398 with
+// the slide -4394, takes 0 at 4816 and commits 23 at 4817 with the clock at 15.
+// [orig: Entity_UpdateFallingDeathPhysics @0x493F70 - +0x54 @0x49404D..0x49405E, the landing
+//  test @0x494108..0x49410C, the tail @0x494215..0x494221; Entity_ProcessFallingDeathPhysics
+//  @0x461D30 - the stop @0x461E67..0x461EA2; AI_TickState_VehicleDying @0x467CD0 - the call
+//  @0x467CE8 ahead of the speed and still tests; AI_HandleEvent_VehicleDying @0x457F50]
+void test_a_dying_hull_rests_on_its_husk_floor_and_dies_on_the_first_still_visit() {
+	const int failures_before = failures;
+	Rig r(30.0f);
+	VehicleTraits traits = truck_traits();
+	traits.family = VehicleFamily::Ground;
+	r.w.vehicles.traits.set(r.veh().item_id, traits);
+	ItemDeathTraits death;
+	death.unit_type = 1; // the routed falling callback
+	death.has_husk = true;
+	death.husk_model_loaded = true;
+	death.kz = 10.0f;
+	death.husk_rest_z_lo_q16 = -20522;
+	death.husk_rest_z_hi_q16 = 118053;
+	r.w.tables.item_death_traits.set(r.veh().item_id, death);
+	r.w.tables.ammo.entries.resize(2);
+	r.w.tables.ammo.entries[0].name = "AT_NULL";
+	r.w.tables.ammo.entries[0].valid = true;
+	AmmoTableEntry &blast = r.w.tables.ammo.entries[1];
+	blast.name = kAmmoKzOrganicBlast;
+	blast.valid = true;
+	blast.kztype = ammo_kz::kRadiusBlast;
+	blast.kz_damage = 1000;
+	blast.kz_minradius = 0.5f;
+	blast.kz_maxradius = 5.0f;
+	// A flat ten-unit field, dry.
+	std::vector<uint16_t> heights(16 * 16, 10 * 256);
+	std::vector<int> sectors(256, 1);
+	opennova::terrain::TerrainHeightField terrain;
+	terrain.heightmap = heights.data();
+	terrain.dim = 16;
+	terrain.layout.sector_grid = sectors.data();
+	r.w.tables.terrain = &terrain;
+	r.w.env.water_z = INT32_MIN;
+	AiEntity &hull = test_common::brain_hull(r.w, r.veh_h);
+	AiBrain &b = hull.brain;
+	b.f[AiBrain::kCurState] = 21;
+	b.f[AiBrain::kPendState] = 21;
+	b.f[AiBrain::kStep] = 16;
+	Entity &v = r.veh();
+	v.health = 0;
+	v.alive = false;
+	v.flags |= kEntityFlagDead | kEntityFlagHusk;
+	v.engine_flags |= kEntityFlagDead | kEntityFlagHusk;
+	v.death_motion = DeathMotionMode::Falling;
+	v.spawn_phase = 2; // the think comes on the third update
+	const int32_t ground = opennova::terrain::height_field_height_bilinear_fixed(
+			terrain, v.position.x.q16, v.position.y.q16);
+	const int32_t floor = ground - 20522;
+	const int32_t x0 = v.position.x.q16;
+	const int32_t y0 = v.position.y.q16;
+	v.position.set_q16({x0, y0, floor + 2812});
+	v.veh.vel_x = 1176;
+	v.veh.vel_y = -3923;
+	v.veh.slide_z = -4060;
+	TickContext ctx{};
+	ctx.is_authority = true;
+	// 4815: no think; the routed callback lands and commits the integrated pose.
+	r.w.update_all_entities(ctx);
+	++r.w.logic_tick;
+	const int32_t rest = floor + 2812 - 4394;
+	CHECK(v.position.z.q16 == rest);
+	CHECK(v.position.x.q16 == x0 + 1176 && v.position.y.q16 == y0 - 3923);
+	CHECK(v.veh.slide_z == -4394);
+	CHECK(v.death_motion == DeathMotionMode::Generic);
+	CHECK(b.f[AiBrain::kCurState] == 21);
+	// 4816: the generic callback holds the pose and zeroes the fall.
+	r.w.update_all_entities(ctx);
+	++r.w.logic_tick;
+	CHECK(v.position.z.q16 == rest && v.position.x.q16 == x0 + 1176);
+	CHECK(v.veh.slide_z == 0);
+	CHECK(v.veh.vel_x == 1176 && v.veh.vel_y == -3923);
+	CHECK(b.f[AiBrain::kCurState] == 21);
+	// 4817: the think finds the hull still and the destroy event commits 23.
+	r.w.update_all_entities(ctx);
+	CHECK(b.f[AiBrain::kCurState] == 23);
+	CHECK(v.spawn_phase == 15);
+	CHECK(v.position.z.q16 == rest);
+	if (failures != failures_before)
+		std::printf("  (dying hull: state %d pend %d clock %d z %d (rest %d) slide %d motion %d)\n",
+				b.f[AiBrain::kCurState], b.f[AiBrain::kPendState], v.spawn_phase,
+				v.position.z.q16, rest, v.veh.slide_z, int(v.death_motion));
+}
+
 // The AI-driver leg: an NPC in the ctrl seat + a staged brain waypoint drives the truck
 // toward the node; no controller parks it (SM state 22, no movement).
 // [orig: @0x48bc12-0x48c034 / the parked stamp @0x48c002-0x48c02d]
@@ -5719,6 +5813,7 @@ int main() {
     test_script_remove_releases_carrier_and_occupant_ownership();
 	test_vehicle_pending_death_survives_drive_tick();
 	test_a_hull_commits_its_death_the_update_after_health_zero();
+	test_a_dying_hull_rests_on_its_husk_floor_and_dies_on_the_first_still_visit();
 	test_seat_frame_matches_collision_frame();
 	test_usegun_attach_presnaps_local_look();
     test_host_crewed_helicopter_rotor_turns();

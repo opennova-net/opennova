@@ -257,11 +257,16 @@ struct ItemDeathTraits {
     // piece spawn and the piece draw read it [orig: Entity_SpawnDeathPieces
     // @ 0x4934af..0x4934c3 huskFinalModel ?: huskModel]. Empty = no model.
     DeathPieceModel piece_model;
-    // Section 0's z extents (units) — the dead-wreck ground rest offset
-    // [orig: ground -= |sec0 z min| upright / += |sec0 z max| inverted
-    // @ 0x461e23-0x461e4b / @ 0x494034-0x49405e].
-    float husk_rest_min_z = 0.0f;
-    float husk_rest_max_z = 0.0f;
+    // The piece model's collision section 0 z min / z max words (16.16, the
+    // model's axes, z up): the dead wreck's ground rest offset, ground -= |z min|
+    // upright, += |z max| inverted, and the class init's husk floor |z min|.
+    // [orig: the model+0xB0 block's +0x6C row 0, +0x54 / +0x58
+    //  (Threedi_BuildCollisionModelFromChunks @0x5B3BF0 - @0x5B4027 / @0x5B4045);
+    //  Entity_ProcessFallingDeathPhysics @0x461E25..0x461E4B;
+    //  Entity_UpdateFallingDeathPhysics @0x49402D..0x49405E;
+    //  Entity_InitVehicleAIFromDef @0x468839..0x468858]
+    int32_t husk_rest_z_lo_q16 = 0;
+    int32_t husk_rest_z_hi_q16 = 0;
     bool is_decoration = false; // def type 2 (+0x5C) — no death glow light
                                 // [orig: @ 0x4934ee], and the death kick DROPS
                                 // instead of popping [orig: @ 0x493969]

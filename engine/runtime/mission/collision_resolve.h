@@ -33,12 +33,12 @@ std::unordered_map<int, const opennova::def::DefItemDef *> item_defs_by_id(
 		const opennova::def::DefItemsFile &items);
 
 // The first-husk piece-model metadata retail derives at death time (section
-// count, per-section centers, section 0's z extents).
+// count, per-section centers, collision section 0's z words).
 struct CollisionHuskPieceInfo {
 	int32_t sections = 0;
 	world::DeathPieceModel model;
-	float rest_min_z = 0.0f;
-	float rest_max_z = 0.0f;
+	int32_t rest_z_lo_q16 = 0;
+	int32_t rest_z_hi_q16 = 0;
 };
 
 // Mission-lifetime collision graphic caches. The initial mission sweep and

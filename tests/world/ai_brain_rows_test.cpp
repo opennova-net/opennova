@@ -501,7 +501,7 @@ void test_ground_samples_add_the_brain_floors() {
     traits.has_husk = true;
     traits.husk_model_loaded = true;
     traits.primary_husk_loaded = true;
-    traits.husk_rest_min_z = -5.0f;
+    traits.husk_rest_z_lo_q16 = -5 * 65536;
     w.tables.item_death_traits.set(500, traits);
     AiThinkCtx ctx{&w.ai, &ai, &w, nullptr};
     const auto land_z = [&]() {

@@ -73,6 +73,24 @@ std::vector<uint8_t> with_renamed_user_point(std::vector<uint8_t> bytes, const c
     return bytes;
 }
 
+// The model with its collision section 0's z min / z max words replaced, written
+// back through the parity writer (the committed fixtures all author section 0
+// from z 0, so a nonzero floor needs its own words).
+std::vector<uint8_t> with_section0_z_words(const std::vector<uint8_t> &bytes, int32_t z_lo,
+                                           int32_t z_hi) {
+    Threedi3di3 model{};
+    std::vector<uint8_t> out;
+    const bool read = threedi_3di3_read_memory(bytes.data(), bytes.size(), &model) == 0;
+    CHECK(read && model.collision != nullptr && model.collision->object_count > 0);
+    if (read && model.collision != nullptr && model.collision->object_count > 0) {
+        model.collision->objects[0].min[2] = z_lo;
+        model.collision->objects[0].max[2] = z_hi;
+        CHECK(threedi_3di3_write_memory(&model, out) == 0);
+    }
+    threedi_3di3_free(&model);
+    return out;
+}
+
 // A fresh loose asset root under the temp dir.
 struct TempRoot {
     std::string dir;
@@ -293,12 +311,18 @@ static void test_missing_husk_assets_leave_the_live_model_gate_clear() {
 // binds: brain[11] from the intact model's CMDL floor and brain[12] from the
 // husk, both under one class gate: the helicopter family always, the vehicle
 // family unless its profile is a boat (subtype 1). An entity without a brain
-// takes neither. [orig: Entity_InitHelicopterAIFromDef @0x4684E2..0x468527;
+// takes neither. The husk floor and the wreck's two rest words are the husk's
+// collision section 0 z min / z max words (the loader's row +0x54 / +0x58), not
+// a render extent; the oracle words are retail's Dsuv1X (the 03TR SUV's husk):
+// section 0 z from -20522 to 118053 (D-NET-897).
+// [orig: Entity_InitHelicopterAIFromDef @0x4684E2..0x468527;
 //  Entity_InitVehicleAIFromDef `cmp [edi+14h],ebx` @0x46881C, stores
-//  @0x468836/@0x468858]
+//  @0x468836/@0x468858, the +0xB0 -> +0x6C -> +0x54 read @0x468847..0x468850;
+//  Threedi_BuildCollisionModelFromChunks @0x5B3BF0 - @0x5B4027 / @0x5B4045]
 static void test_class_init_seeds_the_brain_floors() {
     const std::vector<uint8_t> house = test_io::read_file(repo_path("fixtures/threedi/synth/house.3di"));
-    const std::vector<uint8_t> armory = test_io::read_file(repo_path("fixtures/threedi/synth/armory.3di"));
+    const std::vector<uint8_t> armory = with_section0_z_words(
+            test_io::read_file(repo_path("fixtures/threedi/synth/armory.3di")), -20522, 118053);
     const Items items(text_bytes(
             "begin \"Floor witness heli\"\r\n"
             "  id 105098\r\n"
@@ -356,10 +380,11 @@ static void test_class_init_seeds_the_brain_floors() {
     CHECK(mission::resolve_collision_instances(w, items.file, state, deps) == 3);
 
     const ItemDeathTraits *t = w.tables.item_death_traits.get(5098);
-    CHECK(t != nullptr && t->husk_model_loaded && t->husk_rest_min_z != 0.0f);
+    CHECK(t != nullptr && t->husk_model_loaded);
     if (t == nullptr) return;
+    CHECK(t->husk_rest_z_lo_q16 == -20522 && t->husk_rest_z_hi_q16 == 118053);
     const AiBrain &hb = w.ai.for_handle(heli)->brain;
-    CHECK(hb.f[AiBrain::kHuskFloor] == to_fixed(std::abs(t->husk_rest_min_z)));
+    CHECK(hb.f[AiBrain::kHuskFloor] == 20522);
     CHECK(hb.f[AiBrain::kModelFloor] == w.registry.get(heli)->veh.air_probe_z_off);
     const AiBrain &bb = w.ai.for_handle(boat)->brain;
     CHECK(bb.f[AiBrain::kModelFloor] == 0 && bb.f[AiBrain::kHuskFloor] == 0);
