@@ -842,6 +842,15 @@ int main() {
 		CHECK(kernel.local.input.look_heading == body->heading &&
 		      kernel.local.input.look_pitch == body->pitch);
 		CHECK(body->inf.vel[0] == 0 && body->inf.vel[1] == 0 && body->inf.vel[2] == 0);
+		// Nothing else: the resolver's idle-skip counter (retail's +0x373, stepped in its
+		// 11..20 band [orig: Entity_MovementCollisionResolver @0x4B2BD0 (@0x4B2CBC..0x4B2CD2)])
+		// survives ApplyPose on every role, so a body posed above its floor hovers in the skip
+		// band as retail's does; the dev tool's teleport resets it.
+		body->collide_state.skip_counter = 15;
+		CHECK(kernel.local.apply_pose(pos_q16, static_cast<int32_t>(0xC0000000u), -268435456));
+		CHECK(body->collide_state.skip_counter == 15);
+		kernel.local.teleport_local_player(w::Vec3{ 12.5f, -3.25f, 128.75f }, 0.0, 0.0);
+		CHECK(body->collide_state.skip_counter == 0);
 	}
 
 	// set_entity_position / set_entity_health round-trip the same dual store.

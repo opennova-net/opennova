@@ -11,9 +11,12 @@ extends GameProbe
 ## code | "press": code | "look_px": [dx, dy] | "char": "c" | "end": true}]},
 ## codes being retail action codes and a char one typed character (backspace,
 ## return or printable ASCII; the seam replays it as a keystroke, which an
-## open chat or command line takes). The setup pose lands first: a host or single player
-## takes teleport_local_player, a joiner the ApplyPose write on its own L
-## (Simulation.debug_apply_local_pose), which its next C2S 0x0C uplink carries.
+## open chat or command line takes). The setup pose lands first, on every role as
+## the onHook bridge's ApplyPose write on the local player's L
+## (Simulation.debug_apply_local_pose): Position, heading and pitch, the air velocity
+## zeroed, the resolver's idle-skip counter kept (retail's +0x373 survives
+## ApplyPose, so a host posed above its floor settles as retail's does); a joiner's
+## next C2S 0x0C uplink carries it.
 ## Then the script arms, the next device sample latches its start logic tick,
 ## and the verdict reports {start_logic_tick, end_logic_tick, steps: [{index,
 ## applied_logic_tick[, release_logic_tick]}], setup}. `wait` false returns as
@@ -172,15 +175,9 @@ func _apply_setup(setup_value: Variant) -> Dictionary:
 		"pitch": float(pitch),
 		"logic_tick": sim.get_logic_tick(),
 	}
-	var write_error: Error
-	if sim.is_joiner():
-		out.write = "apply_local_pose"
-		write_error = sim.debug_apply_local_pose(position[0], position[1], position[2],
-				float(yaw), float(pitch))
-	else:
-		out.write = "teleport_local_player"
-		write_error = sim.debug_teleport_local_player(
-				Vector3(position[0], position[1], position[2]), float(yaw), float(pitch))
+	out.write = "apply_local_pose"
+	var write_error: Error = sim.debug_apply_local_pose(position[0], position[1], position[2],
+			float(yaw), float(pitch))
 	out.role = _role(sim)
 	if write_error != OK:
 		out.error = "the %s write refused the setup pose (error %d)" % [out.write, write_error]

@@ -1936,8 +1936,9 @@ public:
 
 	Error debug_teleport_local_player(const Vector3 &p_mission_pos, float p_yaw_deg,
 			float p_pitch_deg);
-	// The joiner's setup pose (devtools; engine LocalPlayer::apply_pose, double-precise words):
-	// ERR_UNAVAILABLE unless a joiner with L; ERR_INVALID_PARAMETER for an unencodable pose.
+	// The scenario setup pose on any role (devtools; engine LocalPlayer::apply_pose, the
+	// bridge's ApplyPose write, double-precise words): ERR_UNAVAILABLE without L;
+	// ERR_INVALID_PARAMETER for an unencodable pose.
 	Error debug_apply_local_pose(double p_x, double p_y, double p_z, double p_yaw_deg,
 			double p_pitch_deg);
 	// The parity runner's slot staging (engine: runtime/inmatch/slot_staging.h): the host's

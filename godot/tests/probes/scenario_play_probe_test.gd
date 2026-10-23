@@ -2,7 +2,7 @@ extends GutTest
 
 # scenario_play over the REAL shell frame loop (WorldFixture.boot_shell, the
 # minimal mission started through the front end): the registered probe, its
-# typed arguments, the single-player setup pose (teleport_local_player), the
+# typed arguments, the single-player setup pose (apply_local_pose, every role's), the
 # script armed on the shared binding model and played by the shell's own
 # frames, and the verdict's record; then the wait-false / collect split and
 # the refusals. The joiner's pose write rides tests/net/joiner_apply_pose_test.
@@ -75,7 +75,7 @@ func test_scenario_play_plays_a_script_through_the_shell_frame() -> void:
 	var data := verdict.data
 	assert_eq(data.state, "finished")
 	assert_eq(data.role, "local")
-	assert_eq(data.setup.write, "teleport_local_player", "single player keeps the teleport")
+	assert_eq(data.setup.write, "apply_local_pose", "every role takes the bridge's ApplyPose write")
 	var start := int(data.start_logic_tick)
 	assert_gt(start, 0, "the start latched on a live logic tick")
 	var steps: Array = data.steps
@@ -92,7 +92,7 @@ func test_scenario_play_plays_a_script_through_the_shell_frame() -> void:
 			"the press releases on a later sample")
 	assert_eq(int(data.end_logic_tick), int(steps[3].applied_logic_tick))
 	# Ground-plane checks: a fresh spawn may still be settling onto the
-	# terrain, so the teleported height is the motor's to correct.
+	# terrain, so the posed height is the motor's to correct.
 	var landed: Vector3 = sim.get_local_player_position()
 	var landed_flat := Vector2(landed.x, landed.z)
 	assert_gt(landed_flat.distance_to(Vector2(home.x, home.z)), 4.0,

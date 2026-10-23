@@ -8,8 +8,9 @@ extends GutTest
 # of the joiner chases each uplink as retail's authority does: a gap within
 # 2 units steps a tenth of the way per uplink until it falls inside the 0x2AAA
 # deadband, and a gap over 2 units is dropped with no snap (D-NET-NEW-LP-2).
-# Anything but a joiner with L refuses it: teleport_local_player is the host's
-# and single player's write.
+# The host and a single player take the same write on their own L (the
+# scenario driver's setup pose on every role); only a session without L
+# refuses it.
 
 const AI_TYPE := 0x14BF # Generic Soldier (items.def 105311, org1 Person)
 
@@ -89,8 +90,11 @@ func test_a_joiner_pose_write_rides_its_uplink_to_the_host() -> void:
 
 	assert_eq(joiner.debug_apply_local_pose(target.x, target.y, target.z, 0.0, 120.0),
 			ERR_INVALID_PARAMETER, "a pitch past 90 has no ApplyPose word")
-	assert_eq(host.debug_apply_local_pose(0.0, 0.0, 0.0, 0.0, 0.0), ERR_UNAVAILABLE,
-			"the host keeps teleport_local_player: no joiner pose write")
+	# Godot (x, y up, z) -> mission (x, -z, y): the host's own spot.
+	var host_at: Vector3 = host.get_local_player_position()
+	assert_eq(host.debug_apply_local_pose(host_at.x, -host_at.z, host_at.y, 30.0, -5.0), OK,
+			"the host takes the same ApplyPose write on its own L")
+	assert_almost_eq(float(host.get_local_player_yaw_deg()), 30.0, 0.01, "the host's L faces it")
 
 
 # Steps the pair `frames` times (the sender first: its net leg ships L's pose ahead of its
@@ -107,12 +111,14 @@ func _host_copy_after(host: Simulation, joiner: Simulation, handle: int, frames:
 	return at
 
 
-func test_no_session_and_single_player_refuse_the_joiner_write() -> void:
+func test_no_session_refuses_and_single_player_takes_the_pose_write() -> void:
 	var bare := Simulation.new()
 	assert_eq(bare.debug_apply_local_pose(0.0, 0.0, 0.0, 0.0, 0.0), ERR_UNAVAILABLE,
 			"no mission, no L")
 	var world := WorldFixture.boot_minimal(self)
 	var sim := world.get_sim()
 	assert_true(sim.has_local_player())
-	assert_eq(sim.debug_apply_local_pose(0.0, 0.0, 0.0, 0.0, 0.0), ERR_UNAVAILABLE,
-			"single player keeps teleport_local_player")
+	assert_eq(sim.debug_apply_local_pose(0.0, 0.0, 0.0, 60.0, 5.0), OK,
+			"a single player takes the ApplyPose write on its own L")
+	assert_almost_eq(float(sim.get_local_player_yaw_deg()), 60.0, 0.01, "L faces the written yaw")
+	assert_almost_eq(float(sim.get_local_player_pitch_deg()), 5.0, 0.01, "and its pitch")

@@ -1089,14 +1089,17 @@ Error Simulation::debug_teleport_local_player(const Vector3 &p_mission_pos,
 	return OK;
 }
 
-// The scenario driver's joiner setup: teleport_local_player is the authority's
-// write (HOST_ONLY in the debug table), while a joiner's own L is client-owned
-// state its C2S 0x0C uplink reports, so the joiner takes the retail bridge's
-// ApplyPose write on L instead. The pose arrives as doubles so the Q16/BAM
-// words match the retail driver's conversion of the same script.
+// The scenario driver's setup pose on every role: the retail bridge's ApplyPose
+// write on the local player's L (Position, Rotation X / Y, AirVelocity zeroed),
+// which the onHook driver gives a retail actor on any role. It leaves the
+// resolver's idle-skip counter alone, as ApplyPose leaves retail's +0x373, so a
+// body posed above its floor settles as retail's does; teleport_local_player
+// (the dev F3 tool) zeroes it. On a joiner its next C2S 0x0C uplink carries the
+// pose. The pose arrives as doubles so the Q16/BAM words match the retail
+// driver's conversion of the same script.
 Error Simulation::debug_apply_local_pose(double p_x, double p_y, double p_z, double p_yaw_deg,
 		double p_pitch_deg) {
-	if (!kernel_ || !is_joiner() || !kernel_->world.cached.local_player.valid()) {
+	if (!kernel_ || !kernel_->world.cached.local_player.valid()) {
 		return ERR_UNAVAILABLE;
 	}
 	opennova::devtools::ScriptPose pose;

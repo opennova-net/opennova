@@ -612,7 +612,14 @@ the authority), so a joiner pose sets only the heading, which the client keeps
 through the snap (the copy is skipped for the local player,
 @0x4B434D..0x4B4353). Within two units the client glides to the host's
 position over 48 or 512 ticks (+0x27E @0x4B4490 / @0x4B449E). A scenario that
-needs a place uses the host as its actor, or stages the joiner (below).
+needs a place uses the host as its actor, or stages the joiner (below). Both
+drivers write the pose as the onHook bridge's ApplyPose does: Position, heading
+and pitch, the air velocity zeroed, nothing else. An OpenNova actor takes it
+through `scenario_play`'s `apply_local_pose` on every role, so the resolver's
+idle-skip counter (+0x373, `Entity_MovementCollisionResolver @0x4B2BD0`,
+@0x4B2CBC..0x4B2CD2) carries over on both hosts and a host posed above its floor
+hovers in the skip band as retail's does (L5-s30's read of the old hostkill
+pose); the dev tool's `teleport_local_player` resets it.
 
 A scenario may also list `staging` (E5): `[{"slot": n, "position_bms": [x, y,
 z]}]`, positions the host gives players' slots, so the snap above carries them
