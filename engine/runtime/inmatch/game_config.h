@@ -120,6 +120,16 @@ struct GameConfig {
 	std::string server_password;               // [orig game_settings +0x20] BuildFlags |0x8
 	std::string side_a_password;               // [orig game_settings +0x40] BuildFlags |0x20; join-reject 19
 	std::string side_b_password;               // [orig game_settings +0x60] BuildFlags |0x10; join-reject 20
+	// The team pick's own pair, g_SidePasswordA / g_SidePasswordB: every first-load mission
+	// start copies the cfg block's two side passwords into them, and nothing else writes them
+	// (not the create's clear of a game that is no team game, not an admin SET), so a create
+	// or a map change sets them from the side_a / side_b_password its config carries (the cfg
+	// block's words), apply_mission_side_passwords. Only Server_AssignPlayerTeam reads them
+	// (D-NET-NEW-L1-44's DIVERGENT). [orig: Game_ApplySessionSettingsToGlobals @0x551500 -
+	//  strncpy(g_SidePasswordA, sideAPassword_383, 0x11) @0x552043, (g_SidePasswordB,
+	//  sideBPassword_394, 0x11) @0x552054; Server_AssignPlayerTeam @0x4FE310 - @0x4FE41C..0x4FE6C9]
+	std::string mission_side_a_password;
+	std::string mission_side_b_password;
 	// Signed spectator limit: 0 disables spectating, -1 shares max_players, and
 	// a positive value is the game-layer join's spectator count (DPC 15); it
 	// never widens the 0x42 gate (join_capacity) nor the slot table: a spectator

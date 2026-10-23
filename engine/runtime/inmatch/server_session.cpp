@@ -126,6 +126,16 @@ void resolve_mission_config(NapiNPServerCtx &ctx, const GameConfig &config,
 
 } // namespace
 
+void apply_mission_side_passwords(GameConfig &config) {
+	// One 17-byte field's string: the word when it is shorter than 17 characters, else its
+	// first 17 and the string of the field behind it.
+	const auto field = [](const std::string &word, const std::string &behind) {
+		return word.size() < 17 ? word : word.substr(0, 17) + behind;
+	};
+	config.mission_side_b_password = field(config.side_b_password, config.country.substr(0, 3));
+	config.mission_side_a_password = field(config.side_a_password, config.mission_side_b_password);
+}
+
 void continue_session(NapiNPServerCtx &ctx, const GameConfig &config,
 		const rtxt::File *text_override) {
 	// game_settings is the create's: a map change writes none of it, so its server and side
@@ -134,7 +144,12 @@ void continue_session(NapiNPServerCtx &ctx, const GameConfig &config,
 	//  @0x4C9826; the admin password arms CAdminServer_HandleSetCommand @0x405A60 - CAITask_SetName
 	//  (+0x20) @0x40620A, CAdminServer_SetSidePassword (+0x40 / +0x60) @0x406247 / @0x406284;
 	//  Game_StartMission @0x524360 reads its name @0x5244BC and writes none of it]
+	// The team pick's pair is the mission start's: the next config's cfg block side passwords,
+	// copied before game_settings' replace them (D-NET-NEW-L1-44's DIVERGENT).
+	// [orig: Game_StartMission @0x524360 - the first-load flag @0x5243A4,
+	//  Game_ApplySessionSettingsToGlobals @0x524662 under it @0x52465E]
 	GameConfig next = config;
+	apply_mission_side_passwords(next);
 	next.server_password = ctx.config.server_password;
 	next.side_a_password = ctx.config.side_a_password;
 	next.side_b_password = ctx.config.side_b_password;
@@ -183,9 +198,15 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 	//  CNapiGameSession_BuildAndCreateSession - @0x569678, @0x56967F].
 	ctx.session_game_type = config.game_type;
 	ctx.session_mp_attributes = config.mp_attributes;
-	// A create of a game that is no team game clears game_settings' two side passwords, so no
-	// side-password leg (the join check's 18 / 19 / 20, the form post's 17, the team pick) sees
-	// the cfg block's words in that session; an admin SET writes them again (D-NET-NEW-L1-44).
+	// The session's first mission start copies the cfg block's side passwords into the team
+	// pick's pair, which the clear below leaves alone (D-NET-NEW-L1-44's DIVERGENT).
+	// [orig: GameLoop_Init @0x526370 - Game_StartMission(0) @0x526377 after the create; the
+	//  first-load flag @0x5243A4, Game_ApplySessionSettingsToGlobals @0x524662]
+	apply_mission_side_passwords(ctx.config);
+	// A create of a game that is no team game clears game_settings' two side passwords, so the
+	// join check's leg (18 / 19 / 20), the form post's 17, the balance gate and BuildFlags see
+	// none of the cfg block's words in that session; an admin SET writes them again. The team
+	// pick reads its own pair, the mission start's (D-NET-NEW-L1-44).
 	// [orig: CNapiGameSession_CreateSession @0x4C97C0 - `test dword ptr [ebp+0F34h], 10000h`
 	//  @0x4C98E2, side B +0xEC8 @0x4C98FC, side A +0xEA8 @0x4C990F]
 	if ((ctx.session_game_type & 0x10000u) == 0) {

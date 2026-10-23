@@ -430,11 +430,13 @@ int main() {
 						std::vector<uint8_t>({1, 2, 1}),
 					"an inactive host slot (a listen host) counts nothing")) return 1;
 		}
-		chosen.side_a_password = "side-a";
+		// The pick reads the mission start's pair, g_SidePasswordA / B (D-NET-NEW-L1-44's
+		// DIVERGENT) [orig: Server_AssignPlayerTeam @0x4FE41C, @0x4FE464].
+		chosen.mission_side_a_password = "side-a";
 		if (!expect(reserve_sequence(chosen, {0xFF}) ==
 					std::vector<uint8_t>({2}),
 				"an empty JSP selects the only unprotected side")) return 1;
-		chosen.side_b_password = "side-b";
+		chosen.mission_side_b_password = "side-b";
 		if (!expect(reserve_sequence(chosen, {0xFF}) ==
 					std::vector<uint8_t>({0}),
 				"an empty JSP cannot select either protected side")) return 1;
@@ -464,8 +466,8 @@ int main() {
 					four, true, mixed, mixed.back()) == 2,
 				"four-team mixed-index lookup is reproduced exactly")) return 1;
 
-		four.side_a_password = "side-a";
-		four.side_b_password = "side-b";
+		four.mission_side_a_password = "side-a";
+		four.mission_side_b_password = "side-b";
 		if (!expect(reserve_sequence(four, {0xFF}) ==
 					std::vector<uint8_t>({3}),
 				"four-team password flags feed retail's mixed-index availability lookup")) return 1;
@@ -481,7 +483,10 @@ int main() {
 			tdm_locked.game_type = opennova::game_type::kTeamDeathmatch;
 			tdm_locked.num_teams = 4;
 			tdm_locked.mp_attributes = inmatch::GameConfig::kMpAttribTeamChoose;
+			// The add's test reads the cfg block's word (ours: game_settings'), the pick's
+			// availability row the mission start's pair: the block's word in both.
 			tdm_locked.side_a_password = "side-a";
+			tdm_locked.mission_side_a_password = "side-a";
 			std::vector<inmatch::NapiNPConnection> roster(3);
 			for (std::size_t i = 0; i < 2; ++i) {
 				roster[i].reply.player_slot = static_cast<uint8_t>(i);
@@ -538,7 +543,7 @@ int main() {
 		{
 			inmatch::GameConfig prefix;
 			prefix.game_type = opennova::game_type::kAttackDefend;
-			prefix.side_a_password = "abcdefghijklmnop"; // 16 chars, the field's full width
+			prefix.mission_side_a_password = "abcdefghijklmnop"; // 16 chars and its NUL
 			std::vector<inmatch::NapiNPConnection> roster(1);
 			roster.back().char_vars.team_request = 0xFF;
 			roster.back().join_password = "abcdefghijklmnopQRS";

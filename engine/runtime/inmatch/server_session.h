@@ -64,6 +64,19 @@ enum class CreateSessionResult : uint8_t {
 	ProcessExit,
 };
 
+// The mission start's copies of the cfg block's two side passwords into the team pick's pair
+// (GameConfig::mission_side_a_password / _b): `config`'s side_a / side_b_password, the cfg
+// block's words a create's or a map change's config carries, each through strncpy 0x11 into a
+// 17-byte field. A word of 17 or more characters fills its field with no NUL, so the pick reads
+// it running on into the field behind it: side A's into g_SidePasswordB, side B's into
+// g_SessionCountryCode (config.country's first three characters; no instruction addresses the
+// zeroed bytes behind those, so the string ends there).
+// [orig: Game_ApplySessionSettingsToGlobals @0x551500 - strncpy(g_SessionCountryCode,
+//  country_3C5, 3) @0x55200D, strncpy(g_SidePasswordA, sideAPassword_383, 0x11) @0x552043,
+//  strncpy(g_SidePasswordB, sideBPassword_394, 0x11) @0x552054; g_SidePasswordA @0x24D1FF5,
+//  g_SidePasswordB @0x24D2006, g_SessionCountryCode @0x24D2017]
+void apply_mission_side_passwords(GameConfig &config);
+
 // Step 3 — the shared SP/MP session creator [orig: CNapiGameSession_CreateSession @0x4c97c0].
 // A nonzero `config.multiplayer_reset` (the cfg block's `mpreset`, which the
 // ServerCommand SetMPReset writes) creates nothing and returns ProcessExit.
@@ -81,7 +94,8 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 // The next mission inside the same session (net-re §5.70.6): the session
 // config takes `config` (the next map's identity on the host screen's or the
 // host file's rules) but keeps the create's game_settings passwords (the server
-// and side passwords, D-NET-NEW-L1-42), every mission-start reset of the context runs (the
+// and side passwords, D-NET-NEW-L1-42), the team pick's pair takes `config`'s side
+// passwords (apply_mission_side_passwords), every mission-start reset of the context runs (the
 // scoreboard counter, the round-end state, both transfer tokens, the
 // mission-data block, the advertised flag words, the stored exit reason),
 // and the connection list, the protocol state and the session identity stay.

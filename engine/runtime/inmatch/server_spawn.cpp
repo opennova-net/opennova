@@ -84,8 +84,18 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 
 	const uint8_t active_teams =
 			opennova::game_type::active_team_count(gt, config.num_teams);
-	const bool side_a_locked = !config.side_a_password.empty();
-	const bool side_b_locked = !config.side_b_password.empty();
+	// Every side-password read of the pick is the mission start's pair, g_SidePasswordA / B
+	// (GameConfig::mission_side_a_password), not game_settings' words the join legs read: a
+	// create of no team game clears only game_settings', and an admin SET writes the block and
+	// game_settings' at once but reaches this pair only at the next mission start
+	// (D-NET-NEW-L1-44's DIVERGENT). [orig: Server_AssignPlayerTeam @0x4FE310 - g_SidePasswordA
+	//  @0x4FE41C / @0x4FE434 / @0x4FE4D0 / @0x4FE52E / @0x4FE6AE, g_SidePasswordB @0x4FE464 /
+	//  @0x4FE47D / @0x4FE4E9 / @0x4FE553 / @0x4FE6C9; their one writer
+	//  Game_ApplySessionSettingsToGlobals @0x552043 / @0x552054]
+	const std::string &side_a_password = config.mission_side_a_password;
+	const std::string &side_b_password = config.mission_side_b_password;
+	const bool side_a_locked = !side_a_password.empty();
+	const bool side_b_locked = !side_b_password.empty();
 
 	// The add event carries only the first 16 characters of the submitted JSP
 	// (Napi_CopyString(event+80, net_cfg.fid, 17) = 16 chars + NUL), and that
@@ -101,9 +111,9 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 	// Each side arm answers with the side's team through the side-to-team map
 	// [orig: g_RotationSideTeam0 @0x4FE456, g_RotationSideTeam1 @0x4FE492].
 	if (side_a_locked && opennova::strutil::iequals(
-			config.side_a_password.c_str(), submitted_password.c_str())) return side_team[0];
+			side_a_password.c_str(), submitted_password.c_str())) return side_team[0];
 	if (side_b_locked && opennova::strutil::iequals(
-			config.side_b_password.c_str(), submitted_password.c_str())) return side_team[1];
+			side_b_password.c_str(), submitted_password.c_str())) return side_team[1];
 	// Without a match, two-team mode selects an unlocked side or fails.
 	// [orig: @0x4FE4AE..0x4FE519 -- side B's team @0x4FE56D, side A's
 	//  @0x4FE507]
@@ -118,12 +128,15 @@ uint8_t assign_player_team(const GameConfig &config, bool is_in_session,
 	// Server_PlayerAdd overwrites the add event's preference byte with -1
 	// BEFORE the assignment runs whenever the game type is exactly 0x10000
 	// (TDM) and either side password is set, so a TDM host with any locked
-	// side never honors TR; only the four-team path can observe the
-	// difference, since the two-team count legs above already decided.
-	// [orig: Server_PlayerAdd @0x51CC76..0x51CC91 (event+97 = -1), passed as
+	// side never honors TR. That test reads the cfg block's live side words, not
+	// the pick's pair; ours takes game_settings' (config.side_a_password), which
+	// an admin SET writes with the block's.
+	// [orig: Server_PlayerAdd @0x51CC76..0x51CC91 (event+97 = -1; gameType_3F0 @0x51CC6C,
+	// sideAPassword_383 @0x51CC78, sideBPassword_394 @0x51CC85), passed as
 	// teamPref @0x51CF24; assignment @0x4FE51A..0x4FE587]
 	uint8_t team_request = joining.char_vars.team_request;
-	if (gt == opennova::game_type::kTeamDeathmatch && (side_a_locked || side_b_locked))
+	if (gt == opennova::game_type::kTeamDeathmatch &&
+			(!config.side_a_password.empty() || !config.side_b_password.empty()))
 		team_request = 0xFF;
 	if ((config.mp_attributes & GameConfig::kMpAttribTeamChoose) != 0) {
 		// [orig: side A's team @0x4FE543, side B's @0x4FE56D]

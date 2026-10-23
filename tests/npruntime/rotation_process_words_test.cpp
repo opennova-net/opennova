@@ -85,7 +85,7 @@ uint8_t side_a_team(HostRotation &rotation) {
 	GameConfig config;
 	config.game_type = game_type::kTeamDeathmatch;
 	config.num_teams = 2;
-	config.side_a_password = "blue";
+	config.mission_side_a_password = "blue"; // the pick's pair, the mission start's
 	std::vector<NapiNPConnection> roster(1);
 	roster[0].join_password = "blue";
 	return Server_ReservePlayerTeam(config, true, roster, roster[0], &rotation);

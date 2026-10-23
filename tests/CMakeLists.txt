@@ -5104,6 +5104,12 @@ add_executable(npruntime_side_password_gate_test npruntime/side_password_gate_te
 target_link_libraries(npruntime_side_password_gate_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_side_password_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_side_password_gate COMMAND npruntime_side_password_gate_test)
+# D-NET-NEW-L1-44's DIVERGENT: the team pick reads the mission start's side-password pair
+# (g_SidePasswordA / B), which neither the create's clear nor an admin SET writes.
+add_executable(npruntime_team_pick_side_passwords_test npruntime/team_pick_side_passwords_test.cpp)
+target_link_libraries(npruntime_team_pick_side_passwords_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_team_pick_side_passwords_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_team_pick_side_passwords COMMAND npruntime_team_pick_side_passwords_test)
 
 # --- parity lane L2 (joiner) ---
 # The joiner's mission-start submissions (D-NET-531, D-NET-NEW-R3-4): the computed C2S 0x0B
