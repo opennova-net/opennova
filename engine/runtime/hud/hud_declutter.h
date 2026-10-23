@@ -162,6 +162,14 @@ public:
 	// [orig: HUD_ResetAllOverlayBuffers @ 0x59DD40 - `mov g_HUDItemFlashLastTick, esi` @ 0x59DD7D;
 	//  called from Game_InitNewRound @ 0x4227A7 and HUD_InitOverlaySystem @ 0x5A4949]
 	void reset_last_tick() { last_tick_ = 0; }
+	// The timers are process words: no mission start, round init or HUD init writes them, so
+	// a timer armed in one mission keeps its count into the next, where the start's HUD init
+	// has zeroed the last tick alone. The embedder rebuilds its HUD per mission and carries
+	// the timers into the new one (GameHudPresenter); the last tick stays the new one's.
+	// [orig: g_HUDItemFlashTimers @ 0x2723CF8 - its writers the tick's walk @ 0x59A9F7 and the
+	//  arm's store @ 0x5A302A; HUD_InitOverlaySystem @ 0x5A4620 - the HUD_ResetAllOverlayBuffers
+	//  call @ 0x5A4949]
+	void carry_timers(const std::array<int32_t, kCount> &timers) { timers_ = timers; }
 	int32_t timer(int index) const {
 		return index >= 0 && index < kCount ? timers_[static_cast<std::size_t>(index)] : 0;
 	}

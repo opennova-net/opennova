@@ -65,6 +65,10 @@ const SCRIPT_CHAT_ARGB := -1
 # mission has a local player (ensure_game_hud(); the GUT files build the real one
 # over a staged root).
 var _game_hud: HudOverlay = null
+# The 16 HUD item flash timers across the per-mission overlay rebuild: retail's are process
+# words no mission start resets, so a timer armed in one mission keeps its count into the next
+# (engine hud_declutter.h HudItemFlash::carry_timers carries the witness).
+var _item_flash_carry := PackedInt32Array()
 # Whether the HUD's textures leg ran the full arm (false: a dedicated host's reduced
 # arm, which loads no terrain picture).
 var _hud_full_arm := true
@@ -219,6 +223,7 @@ func set_chat_presets(macros: PackedStringArray) -> void:
 func teardown(restart := false) -> void:
 	finish_hud_hidden_capture()
 	if _game_hud != null:
+		_item_flash_carry = _game_hud.get_item_flash_timers()
 		_game_hud.queue_free()
 		_game_hud = null
 	if _world != null:
@@ -404,6 +409,9 @@ func _on_hud_textures_load(full_arm: bool) -> void:
 func _init_overlay_system(mission_file: String) -> void:
 	_game_hud = HudOverlay.new()
 	_game_hud.name = "GameHud"
+	# The item flash timers the last mission's overlay held; the new overlay's last tick is
+	# zero, as the start's HUD init leaves it.
+	_game_hud.carry_item_flash_timers(_item_flash_carry)
 	# The /NOHUD launch flag clears the overlay master word for the process.
 	_game_hud.set_no_hud(LaunchFlags.no_hud())
 	# The F1 help pages rebuild from the live bindings at every mission start.

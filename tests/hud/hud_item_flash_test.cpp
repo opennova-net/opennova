@@ -63,6 +63,25 @@ static void test_the_reset_zeroes_the_last_tick_and_keeps_the_timers() {
 	CHECK(flash.timer(2) == 35);
 }
 
+static void test_the_timers_outlive_a_mission() {
+	// The timers are process words no mission start writes: the next mission's HUD takes
+	// them as the last one left them, over its own zero last tick, so its first pass at the
+	// restarted clock's tick 30 takes the 30 ticks off.
+	// [orig: g_HUDItemFlashTimers @0x2723CF8 - the tick's walk @0x59A9F7, the arm's store
+	//  @0x5A302A; HUD_InitOverlaySystem @0x5A4620 - the HUD_ResetAllOverlayBuffers call
+	//  @0x5A4949]
+	HudItemFlash last;
+	last.tick(5000);
+	last.set(9, 0x400);
+	last.tick(5100);
+	HudItemFlash next;
+	next.carry_timers(last.timers());
+	CHECK(next.timer(9) == 0x400 - 100);
+	next.tick(30);
+	CHECK(next.timer(9) == 0x400 - 130);
+	CHECK(next.timer(8) == 0);
+}
+
 static void test_map_gate_draws_idle_or_lit_phase() {
 	CHECK(hud_item_flash_shown(0));
 	CHECK(hud_item_flash_shown(0x10));
@@ -88,6 +107,7 @@ static void test_level_zero_side_path_keeps_the_stored_level() {
 int main() {
 	test_timers_count_down_by_the_tick_delta();
 	test_the_reset_zeroes_the_last_tick_and_keeps_the_timers();
+	test_the_timers_outlive_a_mission();
 	test_map_gate_draws_idle_or_lit_phase();
 	test_level_zero_side_path_keeps_the_stored_level();
 	if (failures) {

@@ -373,6 +373,13 @@ public:
 	// / HudDeclutter::apply_level). The compiler holds the timers; its overlay
 	// pass counts them down on the logic tick set_frame_clocks carries.
 	void set_item_flash(int p_index, int p_value);
+	// The 16 timers as this overlay holds them, and the carry a new mission's overlay takes
+	// from the torn-down one's (GameHudPresenter): retail's timers are process words no mission
+	// start resets, the start zeroing their last tick alone (engine hud_declutter.h
+	// HudItemFlash::carry_timers carries the witness). The carry stores the timers only: no
+	// layer rebuild, no tick.
+	PackedInt32Array get_item_flash_timers() const;
+	void carry_item_flash_timers(const PackedInt32Array &p_timers);
 	// The showhud 2-bit FP-view flags (engine: runtime/hud/hud_toggles.cpp): bit 0 = the FP gun (consumed by the viewmodel rig, not
 	// here), bit 1 = the corner spinmap block.
 	void set_showhud_flags(int p_flags);

@@ -1335,6 +1335,11 @@ public:
 	// [orig: RenderState_SetLayerVisibilityByIndex @0x5A3020 - the store @0x5A302A].
 	void set_item_flash(int index, int32_t value) { item_flash_.set(index, value); }
 	const HudItemFlash &item_flash() const { return item_flash_; }
+	// A torn-down HUD's timers into this one, which keeps its last tick (HudItemFlash::
+	// carry_timers carries the witness): no layer rebuild, no tick.
+	void carry_item_flash_timers(const std::array<int32_t, HudItemFlash::kCount> &timers) {
+		item_flash_.carry_timers(timers);
+	}
 
 	// The HUD-owned gates the radar legs ride, as bits the embedder hands the
 	// session's per-frame radar step (inmatch/session.h; world::radar_hud_frame):
@@ -1675,7 +1680,8 @@ private:
 	// return @0x5A80C4, the store @0x5A810C; the cycle @0x49AFE0 / @0x49AFE7].
 	bool hud_palette2_refreshed_ = false;
 	// The item flash timers and their last tick (set_item_flash): BSS-zero, never
-	// cleared; only the overlay-buffer reset zeroes the last tick.
+	// cleared; only the overlay-buffer reset zeroes the last tick. A new mission's HUD
+	// takes the last one's timers (carry_item_flash_timers).
 	HudItemFlash item_flash_;
 	// THE ENTITY-INFO RECORD'S MAP FIELDS (g_HUDEntityInfo) as the pass's head last built them:
 	// the waypoint's active byte and position, and the nearest FARP. The head builds them past

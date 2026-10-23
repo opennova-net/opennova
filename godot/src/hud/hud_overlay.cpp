@@ -273,6 +273,9 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::get_hud_detail_level);
 	ClassDB::bind_method(D_METHOD("set_item_flash", "index", "value"),
 			&HudOverlay::set_item_flash);
+	ClassDB::bind_method(D_METHOD("get_item_flash_timers"), &HudOverlay::get_item_flash_timers);
+	ClassDB::bind_method(D_METHOD("carry_item_flash_timers", "timers"),
+			&HudOverlay::carry_item_flash_timers);
 	ClassDB::bind_method(D_METHOD("set_showhud_flags", "flags"),
 			&HudOverlay::set_showhud_flags);
     ClassDB::bind_method(D_METHOD("set_aspect_mode", "mode"), &HudOverlay::set_aspect_mode);
@@ -1541,6 +1544,22 @@ void HudOverlay::set_item_flash(int p_index, int p_value) {
 	compiler_.set_item_flash(p_index, p_value);
 	declutter_.apply_level(0);
 	state_.declutter_visible = declutter_.visible();
+	queue_redraw();
+}
+
+PackedInt32Array HudOverlay::get_item_flash_timers() const {
+	PackedInt32Array out;
+	out.resize(opennova::hud::HudItemFlash::kCount);
+	for (int i = 0; i < opennova::hud::HudItemFlash::kCount; ++i)
+		out.set(i, compiler_.item_flash().timer(i));
+	return out;
+}
+
+void HudOverlay::carry_item_flash_timers(const PackedInt32Array &p_timers) {
+	std::array<int32_t, opennova::hud::HudItemFlash::kCount> timers{};
+	for (int i = 0; i < opennova::hud::HudItemFlash::kCount && i < p_timers.size(); ++i)
+		timers[static_cast<size_t>(i)] = p_timers[i];
+	compiler_.carry_item_flash_timers(timers);
 	queue_redraw();
 }
 
