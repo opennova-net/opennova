@@ -828,7 +828,9 @@ private:
 	void start_mission_audio(const Ref<MissionData> &p_mission, const String &p_bms_name);
 	// `p_spawn_effects` false: the catalog was warmed already (a join's effect system load), so
 	// only the models and the presenters' fire pipelines draw in the forced frames.
-	int warm_effect_world_catalog(const PackedStringArray &p_models, bool p_spawn_effects = true);
+	// `p_timeline` (may be null) takes the warm's legs as nested spans (an instrument).
+	int warm_effect_world_catalog(const PackedStringArray &p_models, bool p_spawn_effects = true,
+			const Ref<LoadTimeline> &p_timeline = Ref<LoadTimeline>());
 	// A new effect world under this world with every mounted .ptl of `p_resource_root` parsed
 	// at the session's words (the mission start's head's, load_join_effect_system's and a
 	// dedicated host's start_effect_world's).
@@ -899,6 +901,9 @@ private:
 	Ref<MissionPlacementStats> mission_stats_;
 	Ref<MissionObjectPlacer> placer_; // kept so mission audio reuses its item database
 	Ref<LoadTimeline> last_load_timeline_; // the most recent load_mission timing
+	// load_mission's timeline (its mount and document spans, an instrument), which
+	// load_mission_internal goes on with.
+	Ref<LoadTimeline> entry_timeline_;
 	Ref<WeaponDatabase> weapon_db_; // weapon.def, lazy per mounted root (FP viewmodel)
 	ObjectID music_director_id_;
 	ObjectID mission_audio_id_;

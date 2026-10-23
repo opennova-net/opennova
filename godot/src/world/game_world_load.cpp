@@ -151,8 +151,15 @@ int GameWorld::load_world(const String &p_dir) {
 int GameWorld::load_mission(const String &p_bms_name, const String &p_dir) {
 	emit_signal(kSignalLoadProgress,
 			MissionData::load_progress_percent(MissionData::LOAD_STAGE_MISSION_SETUP));
+	// The load's timeline from its entry: the root's mount and the document's parse lead its
+	// spans (an instrument).
+	Ref<LoadTimeline> timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
+	last_load_timeline_ = timeline;
+	timeline->span("mount");
 	Ref<ResourceRoot> resource_root = resolve_root(p_dir);
+	timeline->end_span();
 	if (resource_root.is_null()) {
+		timeline->finish();
 		return ERR_CANT_OPEN;
 	}
 	// The runtime BMS path bypasses loose overrides even under /d.
@@ -160,16 +167,21 @@ int GameWorld::load_mission(const String &p_bms_name, const String &p_dir) {
 	if (!resource_root->has_file(p_bms_name, ResourceRoot::LOOKUP_FORCE_ARCHIVE_ONLY)) {
 		emit_signal(kSignalLoadFailed,
 				vformat("%s not found in %s", p_bms_name, resource_root->get_root_dir()));
+		timeline->finish();
 		return ERR_FILE_NOT_FOUND;
 	}
+	timeline->span("document");
 	Ref<MissionData> mission;
 	mission.instantiate();
 	if (mission->open_from_resource_root(resource_root, p_bms_name,
 				ResourceRoot::LOOKUP_FORCE_ARCHIVE_ONLY) != OK) {
 		emit_signal(kSignalLoadFailed,
 				vformat("failed to parse %s: %s", p_bms_name, mission->get_last_error()));
+		timeline->finish();
 		return ERR_CANT_OPEN;
 	}
+	timeline->end_span();
+	entry_timeline_ = timeline;
 	return load_mission_internal(mission, p_bms_name, resource_root);
 }
 
@@ -240,17 +252,23 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// witness).
 	const bool head_loaded = wire_header_join && join_terrain_preloaded_;
 	join_terrain_preloaded_ = false;
-	Ref<LoadTimeline> timeline;
+	// load_mission's entry timeline, when it ran (its mount and document spans).
+	Ref<LoadTimeline> timeline = entry_timeline_;
+	entry_timeline_.unref();
 	if (head_loaded) {
-		timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
-		last_load_timeline_ = timeline;
+		if (timeline.is_null()) {
+			timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
+			last_load_timeline_ = timeline;
+		}
 	} else {
 		// A host's map change starts the next mission ahead of its terrain, and pumps its
 		// session through the load's stages, as retail's load does (engine
 		// inmatch/map_change.h; HostRole::begin_next_mission_load / pump_load_stage).
 		drive_.begin_next_host_mission_load(p_mission, p_bms_name, p_resource_root);
-		timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
-		last_load_timeline_ = timeline;
+		if (timeline.is_null()) {
+			timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
+			last_load_timeline_ = timeline;
+		}
 		copy_mission_start_options();
 		// Then the mission start's effect system at the copies' words, past the head's per-slot
 		// reset and ahead of the window's first pumps and the terrain, on every load but a
@@ -372,7 +390,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	warm_effect_world_catalog(challenge_sim.is_valid()
 					? challenge_sim->get_mission_start_model_files()
 					: PackedStringArray(),
-			!effects_preloaded);
+			!effects_preloaded, timeline);
 	timeline->end_span();
 	// A host's mission start past its device stages: phase B opens with the render arm's
 	// last pump, then the PreMission pass, the round init and Player_InitPlayer, as retail's
@@ -1336,7 +1354,15 @@ Node3D *GameWorld::build_model_warm(const PackedStringArray &p_models, const Vec
 // every listed row's models, its husk family among them, and the freeze
 // builds their buffers, so a death's swap builds nothing (D-NET-NEW-L5-8; the
 // witness: engine inmatch/loaded_model_list.h, mission_start_model_list).
-int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models, bool p_spawn_effects) {
+int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models, bool p_spawn_effects,
+		const Ref<LoadTimeline> &p_timeline) {
+	// The legs as nested spans of the caller's timeline (an instrument).
+	const auto leg = [&p_timeline](const char *p_name) {
+		if (p_timeline.is_valid()) p_timeline->span(p_name);
+	};
+	const auto leg_end = [&p_timeline]() {
+		if (p_timeline.is_valid()) p_timeline->end_span();
+	};
 	// A dedicated host has no effect world (start_effect_world): its mission start's models
 	// still build and draw here, as retail's dedicated freeze still builds its model buffers
 	// (engine inmatch/host_role.h open_next_mission_load_window carries the witness).
@@ -1357,9 +1383,13 @@ int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models, bool
 	if (restore_particles_hidden) {
 		effect_world->set_particles_hidden(false);
 	}
+	leg("effect_spawn");
 	const int spawned =
 			p_spawn_effects && effect_world != nullptr ? effect_world->warm_all_effects(warm_pos) : 0;
+	leg_end();
+	leg("model_warm");
 	Node3D *model_warm = build_model_warm(p_models, warm_pos);
+	leg_end();
 	// A warmed catalog still draws the presenters' fire pipelines below.
 	if (spawned <= 0 && model_warm == nullptr && (p_spawn_effects || get_runtime() == nullptr)) {
 		if (effect_world != nullptr) {
@@ -1371,6 +1401,7 @@ int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models, bool
 		return 0;
 	}
 	// The tracer ribbon pipelines compile in the same forced frames.
+	leg("present_pipelines");
 	MissionRoot *runtime = get_runtime();
 	if (runtime != nullptr) {
 		runtime->warm_present_pipelines(warm_pos);
@@ -1380,6 +1411,7 @@ int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models, bool
 				get_sim().is_valid() ? get_sim()->particle_force_field() : nullptr);
 		effect_world->render_now(get_frame_clock_ms());
 	}
+	leg_end();
 	// Pipeline compiles need real draws. Skip the forced frames inside the
 	// editor embedder (re-entrant editor drawing); the texture warm above still
 	// runs there, and the shipped game is what the full warm protects.
@@ -1390,18 +1422,25 @@ int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models, bool
 		const bool was_visible = is_visible();
 		set_visible(true);
 		RenderingServer *rs = RenderingServer::get_singleton();
+		leg("forced_draw_1");
 		rs->force_draw(true);
+		leg_end();
+		leg("forced_draw_2");
 		if (effect_world != nullptr) {
 			effect_world->advance_simulation_tick(Simulation::tick_dt(),
 					get_sim().is_valid() ? get_sim()->particle_force_field() : nullptr);
 			effect_world->render_now(get_frame_clock_ms());
 		}
 		rs->force_draw(true);
+		leg_end();
 		// The reset below cancels any unserviced compositor warm request. Drain
 		// the forced draws first so threaded renderers cannot race that cancel.
+		leg("force_sync");
 		rs->force_sync();
+		leg_end();
 		set_visible(was_visible);
 	}
+	leg("warm_reset");
 	if (model_warm != nullptr) {
 		model_warm->queue_free();
 	}
@@ -1415,6 +1454,7 @@ int GameWorld::warm_effect_world_catalog(const PackedStringArray &p_models, bool
 	if (light_director_.is_valid()) {
 		light_director_->reattach();
 	}
+	leg_end();
 	const int64_t unresolved =
 			effect_world != nullptr ? effect_world->get_unresolved_texture_names().size() : 0;
 	UtilityFunctions::print_verbose(vformat(

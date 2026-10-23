@@ -1826,9 +1826,11 @@ func test_a_dedicated_host_loads_no_effect_system() -> void:
 		assert_not_null(timeline)
 		if serve_and_play:
 			assert_not_null(world.get_effect_world(), "a listen host's world has its effect system")
-			if timeline != null and timeline.spans().size() >= 2:
-				assert_eq(timeline.spans()[0].name, "effect_system")
-				assert_eq(timeline.spans()[1].name, "environment")
+			if timeline != null:
+				var names := Array(timeline.span_names())
+				var effect_system := names.find("effect_system")
+				assert_true(effect_system >= 0 and names.find("environment") == effect_system + 1,
+						"the effect system leads the environment: %s" % [names])
 		else:
 			assert_null(world.get_effect_world(), "a dedicated host's world loads none")
 			if timeline != null:
@@ -2492,15 +2494,18 @@ func test_terrain_load_failure_finishes_its_perf_timeline() -> void:
 		return
 	assert_eq(timeline.label, "Mission load %s" % bms_name)
 	var spans := timeline.spans()
-	# The mission start's effect system loads ahead of its terrain, as retail's does past the
-	# head's per-slot reset (CEffectSystem_Init @0x524980 ahead of Game_LoadTerrainDuringConnect
-	# @0x524F7C; GameWorld::load_mission_internal carries the witness).
-	assert_eq(spans.size(), 3)
-	if spans.size() == 3:
-		assert_eq(spans[0].name, "effect_system")
-		assert_eq(spans[1].name, "environment")
-		assert_eq(spans[2].name, "terrain")
-		assert_gt(spans[2].end_us, 0,
+	# The entry's mount and document, then the mission start's effect system ahead of its
+	# terrain, as retail's loads it past the head's per-slot reset (CEffectSystem_Init @0x524980
+	# ahead of Game_LoadTerrainDuringConnect @0x524F7C; engine inmatch/host_role.h
+	# open_next_mission_load_window carries the witness).
+	assert_eq(spans.size(), 5)
+	if spans.size() == 5:
+		assert_eq(spans[0].name, "mount")
+		assert_eq(spans[1].name, "document")
+		assert_eq(spans[2].name, "effect_system")
+		assert_eq(spans[3].name, "environment")
+		assert_eq(spans[4].name, "terrain")
+		assert_gt(spans[4].end_us, 0,
 			"finish closes the terrain span left open by the early return")
 
 
