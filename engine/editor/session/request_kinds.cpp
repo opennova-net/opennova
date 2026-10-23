@@ -578,8 +578,8 @@ constexpr RequestKindRow kRows[] = {
 	Request(K::Export, "export", serve_export,
 			"A build, then the build copied into export_dir (left out, the project's export folder; "
 			"taken from the project's folder when relative; refused inside the project but its export "
-			"folder) as what ships: a standalone game's archives and loose files (the runtime's folder "
-			"under runtime/ when project.opennova's export.include_runtime asks), an expansion's "
+			"folder) as what ships: a standalone game's archives and loose files (the runtime's files "
+			"beside them when project.opennova's export.include_runtime asks), an expansion's "
 			"expansion/<name>/ laid out as in an install, with export.json naming the project. The "
 			"folder is replaced only when missing, empty or an export of this project (export.folder). "
 			"An operation (the outcome names it); a build running already serves it and exports once it "

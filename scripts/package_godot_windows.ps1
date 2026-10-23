@@ -1,6 +1,6 @@
 # Build and export the Windows products. Produces
 # dist/opennova-game-windows-v<version>.zip (opennova.exe, its matching native
-# dependencies and, in assets/, OpenNova's own game: the OpenNova Editor's export of
+# dependencies and, beside them, OpenNova's own game: the OpenNova Editor's export of
 # the base game project assets/, ADR 0048 d8, with each expansion project under
 # expansions/ exported into its expansion/<name>/, ADR 0046 T5) and
 # dist/opennova-editor-windows-v<version>.zip (editor/ = the OpenNova Editor,
@@ -276,7 +276,7 @@ function Invoke-GodotExport {
 # logs, so a package whose main scene cannot load (e.g. a missing per-product
 # run/main_scene feature override in project.godot) still shipped, crashing on
 # first launch. Runs against the staged zip layout (exe, GDExtension DLL and
-# assets/ side by side), with a throwaway directory for everything it writes,
+# PFF archives side by side), with a throwaway directory for everything it writes,
 # so nothing lands in the stage. $UserArgs are the game's own arguments (after
 # Godot's `--`). Returns the combined output.
 function Invoke-GodotAppBoot {
@@ -307,7 +307,7 @@ function Invoke-GodotAppBoot {
         # the 0.0.16 and 0.0.17 zips shipped the packager's profile, its Windows
         # login the callsign. --working-dir names the throwaway profile instead,
         # as the editor's Play names its run directory, and the process starts
-        # there too. user:// sits under APPDATA, above. The bundled assets/ still
+        # there too. user:// sits under APPDATA, above. The bundled game files still
         # resolve from the exe's folder (BootRootMount.bundled_assets_dir), so the
         # staged layout is what boots.
         $proc = Start-Process `
@@ -351,7 +351,7 @@ function Test-GodotAppBoot {
 
     Write-Host "=== Boot smoke: opennova-runtime ==="
     # No arguments: the bundled game's menu (ADR 0048), from the base game's
-    # build in assets/ (its archives mounted, not a loose folder), its music
+    # build beside the exe (its archives mounted, not a loose folder), its music
     # streaming when --quit-after ends it.
     $bundled = Invoke-GodotAppBoot -ExePath $ExePath -UserArgs "" -ExpectedExit 0
     if ($bundled -match "bundled assets not found|no menu found in resource dir") {
@@ -370,7 +370,7 @@ function Test-GodotAppBoot {
     }
 }
 
-# The editor zip's two exes (ADR 0046 d1). The Play child ships no assets/ (Play
+# The editor zip's two exes (ADR 0046 d1). The Play child ships no game data (Play
 # always hands it --resource-dir), so it proves its scene and variant load
 # through the same usage error; the editor loads its variant and says so.
 function Test-EditorAppBoot {
@@ -557,14 +557,19 @@ Invoke-GodotExport -PresetName "OpenNova Play Runtime" -OutputPath $PLAY_EXE
 Write-Host "=== Exporting opennova-editor.exe ==="
 Invoke-GodotExport -PresetName "OpenNova Editor" -OutputPath $EDITOR_EXE
 
-# --- the game zip: opennova.exe + its runtime DLL + OpenNova's own game in assets/ ---
+# --- the game zip: opennova.exe + its runtime DLL + the game's files side by side ---
 $stagePath = New-StageDir ".stage-opennova-game-windows"
 try {
     # Each file staged, as its path in the stage: the only files the zip may
     # hold (Assert-StageHoldsOnly). The base game's export is staged by this
-    # script too: every file Export-BaseGame put in assets\, listed before the
-    # boot smoke runs.
+    # script too: its files listed before adding the runtime and running the
+    # boot smoke.
     $staged = New-Object System.Collections.Generic.List[string]
+    Export-BaseGame -GameDir $stagePath
+    $stagePrefix = [IO.Path]::GetFullPath($stagePath).TrimEnd('\') + '\'
+    foreach ($file in @(Get-ChildItem -LiteralPath $stagePath -Recurse -File -Force)) {
+        $staged.Add($file.FullName.Substring($stagePrefix.Length))
+    }
     $stagedExe = Join-Path $stagePath "opennova.exe"
     Copy-Item -LiteralPath $RUNTIME_EXE -Destination $stagedExe
     $staged.Add("opennova.exe")
@@ -573,17 +578,11 @@ try {
     foreach ($name in @(Copy-ImGuiLibs -ExeDir $DIST -Destination $stagePath -Required ($ExportMode -eq "debug"))) {
         $staged.Add($name)
     }
-    $gameDir = Join-Path $stagePath "assets"
-    Export-BaseGame -GameDir $gameDir
-    $stagePrefix = [IO.Path]::GetFullPath($stagePath).TrimEnd('\') + '\'
-    foreach ($file in @(Get-ChildItem -LiteralPath $gameDir -Recurse -File -Force)) {
-        $staged.Add($file.FullName.Substring($stagePrefix.Length))
-    }
     $launchHelp = @"
 OpenNova
 
-Run opennova.exe. It plays OpenNova's own small game (assets\), more of which
-is coming. To play Joint Operations itself, press PLAY RETAIL and choose your
+Run opennova.exe. It plays OpenNova's own small game from the files beside it.
+To play Joint Operations itself, press PLAY RETAIL and choose your
 Joint Operations folder. The folder is remembered; CHANGE FOLDER picks another.
 
 Online: open NovaWorld from Joint Operations' multiplayer menu and choose
@@ -596,7 +595,7 @@ Loose data:
   opennova.exe -- --resource-dir "C:\MyGameData" --loose-root /d
 
 Use /game <code> and /exp <name> to select a game or expansion. OpenNova's own
-expansions ship in assets\expansion\; the main menu's MODS lists them, or start
+expansions ship in expansion\; the main menu's MODS lists them, or start
 one with, for example:
   opennova.exe -- /exp onjo1
 "@
