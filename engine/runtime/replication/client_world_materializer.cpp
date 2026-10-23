@@ -508,7 +508,6 @@ ClientWorldSyncResult ClientWorldMaterializer::sync(
 		}
 		child->emplacement_parent = world::EntityHandle{};
 		child->emplacement_parent_spawn_id = 0;
-		child->ground_target = world::EntityHandle{};
 		// Only materialized pool-1..3 lifetimes resolve. A pool-0 handle is a wire
 		// identity with no native row here: the joiner's own body L need not sit
 		// at its wire slot, and a remote slot equal to L's handle must not name
@@ -519,8 +518,19 @@ ClientWorldSyncResult ClientWorldMaterializer::sync(
 				return nullptr;
 			return owned(world, handle); // generation-safe: a foreign reuse stays clear
 		};
-		if (const world::Entity *target = resolve(row->target_handle))
-			child->ground_target = target->handle;
+		// The record stores +0x28 once, a word naming none storing the slot memset's null; a
+		// 0x10 record stores none at all. After it the slot's +0x28 is the row's own (the
+		// mission start's class init, a 0x18's, the movers), so a row whose record named no
+		// TARGET keeps what those cached since; a named one re-resolves here, the slot
+		// pointer's stand-in (D-NET-NEW-L6-40).
+		// [orig: NapiNPClientMsg_0x00D @0x432C40 - the store @0x4332D7;
+		//  NapiNPClientMsg_0x010 @0x433400 - the slot memset @0x43348C, no +0x28 store;
+		//  NapiNPClientMsg_FullEntitySpawn @0x433780 - the store @0x433CDD]
+		if (row->target_handle != 0xFFFFu) {
+			child->ground_target = world::EntityHandle{};
+			if (const world::Entity *target = resolve(row->target_handle))
+				child->ground_target = target->handle;
+		}
 		// The structural carrier a child rides is its TARGET; a parent names it
 		// only when no target is streamed and it is not the pool-0 occupant
 		// back-ref. Classes with their own compact motion never take one (the

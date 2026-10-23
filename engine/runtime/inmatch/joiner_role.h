@@ -391,6 +391,9 @@ private:
 	// caches (collision/occlusion instances, item traits, seat specs) for the
 	// retired/spawned/updated rows.
 	void on_replica_world_changed(const replication::ClientWorldSyncResult &sync);
+	// The fold's 0x18 rows, in slot order, take their def+0x148 class init: a gnrc / gnrl /
+	// gnl2 row's ground cache (D-NET-NEW-L6-40).
+	void run_full_spawn_ground_caches(const replication::ClientWorldSyncResult &sync);
 	// The authoritative mount relation changed: the view effects (binocular
 	// latch) and the mounted input heading follow.
 	void on_mount_changed();

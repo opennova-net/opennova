@@ -2,6 +2,7 @@
 
 #include <base/io/strutil.h>
 #include <formats/def/def.h>
+#include <runtime/world/destruction.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/local_player.h>
 #include <runtime/world/player_weapon.h>
@@ -413,6 +414,10 @@ void powerup_bind_entities(World &world, const def::DefItemsFile &items) {
         // [orig: @0x442D60..0x442E18]: no shipped Powerup item authors
         // particlefx, and the userpoint's one reader overwrites it unread
         // (D-PWR-3).
+        // Then the row's def+0x148 class init, a gnrc / gnrl / gnl2 row's being its ground
+        // cache (D-NET-NEW-L6-39) [orig: Powerup_InitAllEntities @0x4432A0 - the def+0x148
+        //  load @0x4432DE and call @0x4432E9 (pool 1), @0x44332A / @0x443335 (pool 2)].
+        run_ground_cache_class_init(world, *e);
     }
 }
 

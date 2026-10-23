@@ -660,6 +660,7 @@ void JoinerRole::on_replica_world_changed(const replication::ClientWorldSyncResu
 	materializer_.set_local_player(self_wire_handle(), kernel.world.cached.local_player);
 	(void)materializer_.sync(runtime->state(), kernel.world);
 	kernel.refresh_collision_instances();
+	run_full_spawn_ground_caches(sync); // a 0x18 row's class init (D-NET-NEW-L6-40)
 }
 
 // The authoritative mount relation changed: the view effects refresh and the

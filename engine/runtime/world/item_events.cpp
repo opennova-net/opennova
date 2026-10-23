@@ -141,23 +141,28 @@ void cache_ground_entity_below(World &world, Entity &e) {
 			world, e.handle, FixedVec3{ x, y, z }, FixedVec3{ x, y, io::bam_sub(z, 0xA0000) });
 }
 
+void run_ground_cache_class_init(World &world, Entity &e) {
+	// [orig: the rows gnrc @0x8130C0, gnrl @0x8130D8 and gnl2 @0x8130F0 carry
+	//  Entity_CacheGroundEntityBelow @0x407D60 as their def+0x148, every other row another init
+	//  or none; each caller's `if (def)` / `if (def+0x148)` gates]
+	if (!e.has_item_def)
+		return;
+	const ItemDeathTraits *traits = world.tables.item_death_traits.get(e.item_id);
+	if (traits == nullptr)
+		return;
+	if (traits->death_class == ItemDeathClass::kGnrc ||
+			traits->death_class == ItemDeathClass::kGnrl ||
+			traits->death_class == ItemDeathClass::kGnl2)
+		cache_ground_entity_below(world, e);
+}
+
 void run_ground_cache_class_inits(World &world) {
 	// [orig: Entity_InitAllFromModels @0x40E460 - the def+0x148 calls over pool 2 @0x40E55B,
-	//  pool 3 @0x40E59A, pool 1 @0x40E5D3 and pool 0 after it; the rows gnrc @0x8130C0, gnrl
-	//  @0x8130D8 and gnl2 @0x8130F0 carry Entity_CacheGroundEntityBelow @0x407D60 there, every
-	//  other row another init or none]
+	//  pool 3 @0x40E59A, pool 1 @0x40E5D3 and pool 0 after it]
 	for (const int pool : { 2, 3, 1, 0 }) {
 		for (size_t i = 0; i < world.registry.pool_capacity(pool); ++i) {
-			Entity *e = world.registry.get(EntityHandle::make(pool, uint16_t(i)));
-			if (e == nullptr || !e->has_item_def)
-				continue;
-			const ItemDeathTraits *traits = world.tables.item_death_traits.get(e->item_id);
-			if (traits == nullptr)
-				continue;
-			if (traits->death_class == ItemDeathClass::kGnrc ||
-					traits->death_class == ItemDeathClass::kGnrl ||
-					traits->death_class == ItemDeathClass::kGnl2)
-				cache_ground_entity_below(world, *e);
+			if (Entity *e = world.registry.get(EntityHandle::make(pool, uint16_t(i))))
+				run_ground_cache_class_init(world, *e);
 		}
 	}
 }

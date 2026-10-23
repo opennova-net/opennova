@@ -18,6 +18,7 @@
 
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/destruction.h> // run_ground_cache_class_init (a 0x18 row's class init)
 #include <runtime/world/entity_spawn.h>  // entity_reset_to_spawn_state (redeploy release)
 #include <runtime/world/geom.h>
 #include <runtime/world/mount_controls.h> // emplaced_command_call (the ewep row over a decoded person)
@@ -185,6 +186,32 @@ bool run_replica_person_ewep(world::World &world, replication::ClientState &stat
 world::Entity *JoinerRole::replica_world_entity(
 		world::World &world, world::EntityHandle handle) {
 	return materializer_.replica_world_entity(world, handle, kernel_->wire_header_world);
+}
+
+// A 0x18 record runs its row's def+0x148 class init after its ground word landed: a gnrc / gnrl /
+// gnl2 row whose word named none takes the entity a 10-unit drop from it meets
+// (D-NET-NEW-L6-40). The 0x0D / 0x10 rows take theirs at the mission start's pass
+// (occlusion_init_mission), their records calling none.
+// [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - the +0x28 store @0x433CDD, the def+0x148
+//  load @0x433E74 and call @0x433E82; NapiNPClientMsg_0x00D @0x432C40 and
+//  NapiNPClientMsg_0x010 @0x433400 call no init]
+void JoinerRole::run_full_spawn_ground_caches(const replication::ClientWorldSyncResult &sync) {
+	mission::MissionKernel &kernel = *kernel_;
+	std::vector<world::EntityLifetime> full_spawns;
+	for (const world::EntityLifetime lifetime : sync.spawned) {
+		const replication::ClientEntityState *wire =
+				runtime->state().find(lifetime.handle.packed);
+		if (wire != nullptr && wire->spawn_tag == s2c::FULL_ENTITY_SPAWN)
+			full_spawns.push_back(lifetime);
+	}
+	std::sort(full_spawns.begin(), full_spawns.end(),
+			[](const world::EntityLifetime &a, const world::EntityLifetime &b) {
+				return a.handle.packed < b.handle.packed;
+			});
+	for (const world::EntityLifetime lifetime : full_spawns) {
+		if (world::Entity *row = kernel.world.registry.get(lifetime))
+			world::run_ground_cache_class_init(kernel.world, *row);
+	}
 }
 
 void JoinerRole::materialize_world_stream() {

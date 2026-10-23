@@ -4,6 +4,7 @@
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/mission/item_traits.h>
 #include <runtime/mission/seat_spec_extract.h>
+#include <runtime/world/destruction.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/player_spawn.h>
 #include <formats/aip/aip.h>
@@ -165,6 +166,12 @@ world::EntityHandle MissionKernel::spawn_deployable(uint16_t item_id, uint8_t te
 		entity.ai_text_file.assign(item->default_aip, length);
 		init_item_class_brain(handle);
 	}
+	// The same def+0x148 call is a gnrc / gnrl / gnl2 row's ground cache: the row takes the
+	// entity a 10-unit drop from it meets as its ground link, which its 0x18 broadcast and its
+	// later 0x0D TARGET carry (D-NET-NEW-L6-39).
+	// [orig: Entity_SpawnDeployable @0x51C2B0 - the def+0x148 load @0x51C454, the call
+	//  @0x51C462; Entity_CacheGroundEntityBelow @0x407D60]
+	world::run_ground_cache_class_init(world, *world.registry.get(handle));
 	mission::resolve_ai_weapons(world, *table, handle, &assets());
 	// The bound sphere, the deployable bit, then the addeweap children, which copy the
 	// carrier's Flags [orig: Entity_ComputeBoundingSphere @0x5C69A0 (the call @0x51C48D),

@@ -130,6 +130,14 @@ ItemDeathClass item_death_class_from_tag(const char *ai_function);
 // raycast_nearest_entity), none for bare ground.
 // [orig: Entity_CacheGroundEntityBelow @0x407D60]
 void cache_ground_entity_below(World &world, Entity &e);
+// One row's def+0x148 class init as far as it is that cache: a gnrc / gnrl / gnl2 row runs it,
+// every other row's init is another (or none). The load's pass, a deployable's spawn, the
+// powerup walk and a joiner's 0x18 record call it.
+// [orig: the gnrc @0x8130C0, gnrl @0x8130D8 and gnl2 @0x8130F0 rows' third dword
+//  Entity_CacheGroundEntityBelow @0x407D60; the def+0x148 calls Entity_InitAllFromModels
+//  @0x40E55B, Entity_SpawnDeployable @0x51C462, Powerup_InitAllEntities @0x4432E9 / @0x443335,
+//  NapiNPClientMsg_FullEntitySpawn @0x433E82]
+void run_ground_cache_class_init(World &world, Entity &e);
 // The load's class inits of those rows, over pools 2, 3, 1 and 0 as the model init runs them.
 // [orig: Entity_InitAllFromModels @0x40E460]
 void run_ground_cache_class_inits(World &world);
