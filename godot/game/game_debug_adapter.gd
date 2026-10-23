@@ -651,4 +651,6 @@ func _current_viewport() -> Viewport:
 
 func _deferred_quit() -> void:
 	if _shell != null:
+		# The process's end names its path in the log (D-NET-310).
+		push_warning("GameDebugAdapter: game_control quit (the MCP endpoint) ends the process")
 		_shell.request_quit()

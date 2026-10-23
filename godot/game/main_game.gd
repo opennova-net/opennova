@@ -174,6 +174,10 @@ func _on_player_options_changed(state: PlayerOptions.State) -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		# Every path that ends the process names itself in the log, since the
+		# SceneTree's quit prints nothing (D-NET-310: a joiner's process ended with
+		# no log line).
+		push_warning("MainGame: the window's close request ends the process")
 		request_quit()
 	elif what == NOTIFICATION_APPLICATION_FOCUS_IN or what == NOTIFICATION_APPLICATION_FOCUS_OUT:
 		# The window procedure clears the key state on gaining and on losing the
@@ -1145,6 +1149,7 @@ func request_quit() -> void:
 func exit_process(code := 0) -> void:
 	if _process_exit_pending:
 		return
+	push_warning("MainGame: game.cfg's mpreset ends the process (exit code %d)" % code)
 	_process_exit_pending = true
 	_quit_requested = true
 	var client: NovaWorldClient = null
@@ -1173,6 +1178,7 @@ func is_process_exit_pending() -> bool:
 # 1 after the main loop's save of game.cfg, which every end of the scene loop
 # runs (docs/gamecfg/game-cfg-re.md, the save points).
 func _quit_failed_boot() -> void:
+	push_warning("MainGame: the game-data mount failed; the process ends (exit code 1)")
 	GameCfgStore.save()
 	get_tree().quit(1)
 
@@ -2025,6 +2031,7 @@ func _teardown_world_to_menu(exit_reason := GameWorld.MISSION_EXIT_QUIT) -> void
 		# The "quit" row's exit (reason 2): the mission comes down (its session's reset sends
 		# the record as it stands), and the game ends as the main loop's does, game.cfg saved
 		# (engine inmatch/mission_exit.h PostMissionRoute::exits_game carries the witness).
+		push_warning("MainGame: exit reason 2 (the session reset) ends the process")
 		_teardown_world(false, false)
 		request_quit()
 		return
@@ -2164,6 +2171,7 @@ func _on_exit_to_desktop() -> void:
 	# The main menu's EXIT saves the player profile and game.cfg before the
 	# game quits (engine: runtime/profile/player_profiles.h, the save
 	# points; docs/gamecfg/game-cfg-re.md).
+	push_warning("MainGame: the main menu's EXIT ends the process")
 	PlayerProfile.save()
 	GameCfgStore.save()
 	request_quit()
