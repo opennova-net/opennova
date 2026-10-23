@@ -867,6 +867,47 @@ int main() {
         CHECK(r.found && approx(r.position.x, 1.0f) && r.heading_bam == placed_heading_bam(90));
     }
 
+    // --- D-NET-NEW-L1-39: a deploy onto a spawn entity whose model carries a "psp"
+    //     userpoint places the player on that point through the entity's euler
+    //     placement; with none, on the entity's position raised 1.0. The point is the
+    //     ASH_I5A bunker's (Cbunker2.3di "psp": 1402, 10164, -475902, its interior floor
+    //     spot 7.26 under the model's origin; the retail host's x8 capture deploy landed
+    //     at carrier-local (0.02, 0.16, -7.28)). An unturned entity's placement is the
+    //     identity, so the words are the entity's plus the point's. A zone with no 6007
+    //     scatter row keeps that spot (the walk's choice 0).
+    // [orig: Server_PositionPlayerForSpawn @0x50CF60 - ModelGPM_FindUserpointByName
+    //  (+0x30, aPsp @0x7CF9C4) @0x50CFEE, Math_BuildFixedPointMatrixFromEulerAngles @0x50D002,
+    //  Math_FixedPointTransformPoint22 @0x50D00E, else +0x10000 @0x50D01C]
+    {
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
+        w.registry.configure_pool(0, 4);
+        w.registry.configure_pool(1, 8);
+        w.registry.configure_pool(3, 4);
+        const EntityHandle bunker = spawn_zone(w, 1, 1, 1);
+        Entity &b = *w.registry.get(bunker);
+        b.position.set_q16({-29158932, -27103068, 1409679}); // (-444.93, -413.56, 21.51)
+        b.heading = 0;
+        b.pitch_bam = 0;
+        b.roll_bam = 0;
+        b.spawn_point_valid = true;
+        b.spawn_point[0] = 1402;
+        b.spawn_point[1] = 10164;
+        b.spawn_point[2] = -475902;
+        SpawnPointResult r = resolve_player_spawn_pose(
+            w, EntityHandle{}, bunker, 0, 1, 0x10010u);
+        CHECK(r.found);
+        CHECK(r.position.x.q16 == -29158932 + 1402);
+        CHECK(r.position.y.q16 == -27103068 + 10164);
+        CHECK(r.position.z.q16 == 1409679 - 475902);
+        CHECK(r.heading_bam == 0);
+
+        b.spawn_point_valid = false; // a model with no "psp": the raised arm
+        r = resolve_player_spawn_pose(w, EntityHandle{}, bunker, 0, 1, 0x10010u);
+        CHECK(r.found && r.position.x.q16 == -29158932 &&
+              r.position.z.q16 == 1409679 + 0x10000);
+    }
+
     if (failures == 0) std::printf("OK spawn_select\n");
     return failures == 0 ? 0 : 1;
 }

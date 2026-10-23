@@ -50,6 +50,30 @@ SpawnPointResult entity_pose(const Entity &entity) {
     return out;
 }
 
+// The spawn entity's position words as the placement leaves them: its model's "psp"
+// userpoint (Entity::spawn_point) through the entity's euler placement over its six
+// words, else the copied position raised 1.0, the z word's +0x10000 (D-NET-507). The
+// angle words stay the entity's copies (D-NET-NEW-L1-39).
+// [orig: Server_PositionPlayerForSpawn @0x50CF60 - ModelGPM_FindUserpointByName(+0x30,
+//  aPsp @0x7CF9C4) @0x50CFEE, Math_BuildFixedPointMatrixFromEulerAngles over the entity's
+//  +4 words @0x50D002, Math_FixedPointTransformPoint22 into the player's +4 @0x50D00E, else
+//  `add dword ptr [eax+0Ch], 10000h` @0x50D01C]
+void place_on_spawn_point(const Entity &entity, SpawnPointResult &out) {
+    if (!entity.spawn_point_valid) {
+        out.position.z.q16 = io::bam_add(out.position.z.q16, 0x10000);
+        return;
+    }
+    int32_t words[3];
+    entity_orientation_words(entity, words);
+    const int32_t origin[3] = {
+        entity.position.x.q16, entity.position.y.q16, entity.position.z.q16};
+    const CollisionMatrix placement =
+        collision_matrix_from_euler(words[0], words[1], words[2], origin);
+    int32_t placed[3];
+    placement.transform_point(entity.spawn_point, placed);
+    out.position.set_q16({placed[0], placed[1], placed[2]});
+}
+
 SpawnPointResult marker_pose(const World &world, const Entity &marker) {
     SpawnPointResult out = entity_pose(marker);
     const Entity *parent = world.registry.get(marker.ground_target);
@@ -176,13 +200,11 @@ SpawnPointResult best_marker_pose(World &world, int32_t marker_type,
 // first-32 radius-gated type-6007 scatter markers within the zone, the shared
 // g_SpawnCycleCounter % (count+1) round-robin (0 = the zone entity itself, else
 // the (i-1)th 6007 marker parent-transformed), and the +0x10000 no-userpoint z arm].
-// The runtime-set model-userpoint name remains unrecovered; retain the exact
-// no-userpoint +1 z arm rather than inventing a name.
+// Ahead of the walk the zone entity's own spot is its model's "psp" userpoint, else
+// its position raised 1.0 (place_on_spawn_point, D-NET-NEW-L1-39).
 SpawnPointResult target_pose(World &world, const Entity &target) {
     SpawnPointResult out = entity_pose(target);
-    // The z word's +0x10000 (D-NET-507).
-    // [orig: Server_PositionPlayerForSpawn @0x50CF60 - `add dword ptr [eax+0Ch], 10000h` @0x50D01C]
-    out.position.z.q16 = io::bam_add(out.position.z.q16, 0x10000);
+    place_on_spawn_point(target, out);
     if (target.zone_number == 0)
         return out;
 
@@ -233,9 +255,10 @@ SpawnPointResult objective_coop_entity_pose(const World &world, uint8_t team) {
     if (selected == nullptr)
         return {};
     SpawnPointResult out = entity_pose(*selected);
-    // Unrecovered userpoint name: the exact absent arm, the z word's +0x10000.
-    // [orig: Server_PositionPlayerForSpawn @0x50CF60 - `add dword ptr [ebx+0Ch], 10000h` @0x50D55D]
-    out.position.z.q16 = io::bam_add(out.position.z.q16, 0x10000);
+    // [orig: Server_PositionPlayerForSpawn @0x50CF60 - the find @0x50D533,
+    //  Math_BuildFixedPointMatrixFromEulerAngles @0x50D547, Math_FixedPointTransformPoint22
+    //  @0x50D553, else `add dword ptr [ebx+0Ch], 10000h` @0x50D55D]
+    place_on_spawn_point(*selected, out);
     return out;
 }
 

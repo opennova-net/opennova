@@ -152,6 +152,25 @@ bool graphic_model_deploy_point(const DefItemDef *def, const assets::AssetStore 
     return true;
 }
 
+// That model's first "psp" userpoint, as the model-space words a deploy onto the
+// entity (Server_PositionPlayerForSpawn's target arm, its objective Co-op arm)
+// transforms; false with none (D-NET-NEW-L1-39).
+// [orig: Server_PositionPlayerForSpawn @0x50CF60 - ModelGPM_FindUserpointByName
+//  (+0x30, aPsp @0x7CF9C4) called @0x50CFEE / @0x50D533; ModelGPM_FindUserpointByName
+//  @0x5B2170]
+bool graphic_model_spawn_point(const DefItemDef *def, const assets::AssetStore *models,
+                               int32_t out[3]) {
+    if (!graphic_model_loads(def, models)) return false;
+    const assets::Model model = models->model(std::string(def->graphic));
+    const int row = threedi::threedi_3di3_find_user_point(model.get(), "psp");
+    if (row < 0) return false;
+    const threedi::ThreediUserPoint &point = model->user_points[row];
+    out[0] = point.x;
+    out[1] = point.y;
+    out[2] = point.z;
+    return true;
+}
+
 // One row's spawn traits (world::PlayerTemplate) from its def; a missing row
 // (null) reads none and keeps the seed's type id. The model slot is what the
 // row's graphic load returned, which a spawn copies into +0x30.
@@ -371,6 +390,8 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 				e->has_graphic_model ? graphic_model_collision_objects(def, models) : 0;
 		e->deploy_point_valid = e->has_graphic_model &&
 				graphic_model_deploy_point(def, models, e->deploy_point);
+		e->spawn_point_valid = e->has_graphic_model &&
+				graphic_model_spawn_point(def, models, e->spawn_point);
 		// The physics callback table's ewep row selects the gun update. A
 		// section clone's template pins its update callback (the floating
 		// physics) whatever its def, on every resolve.

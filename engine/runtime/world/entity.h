@@ -512,6 +512,15 @@ struct Entity {
     //  ModelGPM_FindUserpointByName calls @0x51C63D / @0x51C654 on +0x30)]
     bool deploy_point_valid = false;
     int32_t deploy_point[3] = {};
+    // That model's first "psp" userpoint (the player spawn point, an LFP's interior
+    // floor spot): the model-space position words (16.16) a deploy onto this entity,
+    // or the objective Co-op no-pick arm's spawn entity, places the player at
+    // through the entity's euler placement; invalid with none (or no model), where
+    // the placement rises 1.0 over the entity instead (D-NET-NEW-L1-39).
+    // [orig: Server_PositionPlayerForSpawn @0x50CF60 - ModelGPM_FindUserpointByName
+    //  (+0x30, aPsp @0x7CF9C4) called @0x50CFEE / @0x50D533]
+    bool spawn_point_valid = false;
+    int32_t spawn_point[3] = {};
     // The graphic model's XY half-extents (mission axes, 16.16), stamped by
     // the same model-resolve seam. The minimap blip drawer sizes footprint-
     // class blips from these; 0 = unstamped (the 10-wu class fallback).
