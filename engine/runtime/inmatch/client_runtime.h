@@ -570,33 +570,26 @@ public:
 	// The command entry's sender, Client_ProcessConsoleCommand's client half: the
 	// one-second guard (which compares the tick with the last stamp minus 1000,
 	// unsigned, so it drops a line only after the tick ran backwards or within the
-	// tick's first second), Client_ProcessLocalCommand's arms (client_console.h),
-	// then a session peer queues the raw line as reliable C2S 0x04 [line][NUL]
-	// (user param 0): a joiner on its connection, the listen host's own client over
-	// its loopback to its own server. An authority that is not a peer (a single-player
-	// host's own client) runs the authority's arms (set_authority_console: the NETLOG
-	// handler, BAN / PUNT) and then the client's walk (client_parse_and_execute), its
-	// lines to the SYSTEM ring and its sends nowhere (no connection). True when the
-	// line was taken. VERSION's version and title words default to the title's
-	// (gameprofile's version text, g_TitleText) when the embedder sets none.
+	// tick's first second), Client_ProcessLocalCommand's arms (client_console.h) over
+	// the session word, then a session peer queues the raw line as reliable C2S 0x04
+	// [line][NUL] (user param 0): a joiner on its connection in the session; a host's
+	// own client, always a peer (connection mode 3: the listen host and single player
+	// alike, D-NET-NEW-LI-27), on its local client connection to its own server, whose
+	// handler runs NETLOG / STAT and echoes the rest back as S2C 0x06, which runs the
+	// client's walk (run_console_echo). An authority that is no peer is a host that
+	// does not play (mode 1), which has no client: its console is AdminConsole's. True
+	// when the line was taken. VERSION's version and title words default to the
+	// title's (gameprofile's version text, g_TitleText) when the embedder sets none.
 	// [orig: Client_ProcessConsoleCommand @0x520E80 - the guard @0x520ea4..0x520ec7,
 	//  Client_ProcessLocalCommand @0x520BF0 (the call @0x520EEC), the peer test @0x520EF8,
-	//  NetPacket_WriteNullableString @0x42A430 and QueueReliableMessage(4, 1, 0) @0x520f29; the authority test @0x520F49,
-	//  Server_HandleAdminNetlogCommand @0x520F55, Server_HandleBanPuntCommand @0x520F63,
-	//  NapiClientCmd_ParseAndExecute @0x520F70; Game_ParseCommandLineAndInit @0x4A7310 (the title
-	//  sprintf @0x4A7D30..0x4A7D3C, g_TitleText)]
+	//  NetPacket_WriteNullableString @0x42A430 and QueueReliableMessage(4, 1, 0) @0x520f29;
+	//  Game_ParseCommandLineAndInit @0x4A7310 (the title sprintf @0x4A7D30..0x4A7D3C,
+	//  g_TitleText)]
 	bool console_command(const std::string &line);
 	// The local arms' seams the embedder owns (SAVEKEYS, SAVENFO, VERSION's words);
 	// in_session, version_line and queue_action are this runtime's.
 	void set_local_command_seams(ClientLocalCommandSeams seams) {
 		local_command_seams_ = std::move(seams);
-	}
-	// The authority's arms of a console line on an authority that is no session peer,
-	// over the host's context (Server_HandleAdminNetlogCommand, then
-	// Server_HandleBanPuntCommand, each with no sender): true when one took the line.
-	// The embedder holding the context sets it; unset, the walk alone runs.
-	void set_authority_console(std::function<bool(const std::string &line)> arms) {
-		authority_console_ = std::move(arms);
 	}
 	// Input_QueueEvent as the console calls it (the local command's binding CRC arm and
 	// the S2C 0x06 walk's binding arm): a record per action into the input frame's event
@@ -1650,7 +1643,6 @@ private:
 	uint32_t console_guard_ms_ = 0;   // [orig: g_ConsoleCommandLastTick @0x24D1E04]
 	ClientLocalCommandSeams local_command_seams_;
 	ClientConsoleQueueAction console_action_sink_;
-	std::function<bool(const std::string &line)> authority_console_;
 	controls::InputEventQueue *input_events_ = nullptr; // the role's (queue_console_action)
 	// GetTickCount (the console guard, the S2C 0x58's receipt stamp): the joiner's
 	// monotonic clock, else the process's steady clock.

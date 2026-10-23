@@ -407,6 +407,65 @@ void check_listen_host_console_punts_only_through_server(
 	CHECK(punted != nullptr && punted->host_disconnect_sent == punts);
 }
 
+// D-NET-NEW-LI-27 (LI-s25 row 0, LI-s24 FOUND 1): single player is connection mode 3, host and
+// client, out of a session. Its typed line reaches the command entry through the host's own
+// client: the local arms read the session word (clear), so the binding CRC arm queues the cheat
+// row's record 123 at once, whose dispatch flips the AI-skips-the-local-player bit
+// (D-NET-NEW-LI-26). A line the local arms leave rides the local client connection as C2S 0x04,
+// the peer's leg: the client frame sends it, the next frame's server receive runs the
+// console-line handler, which echoes it to the sender as S2C 0x06, and that frame's client
+// receive runs the walk, whose binding arm queues the named record (the respawn row's 55).
+// [orig: SinglePlayer_StartMission @0x561AF0 - 3 pushed @0x561BD9, the call @0x561BE0;
+//  CNapiGameSession_CreateSession @0x4C97C0 - CNapiNPConnection_Create(.., 2) @0x4C9B9C;
+//  Client_ProcessConsoleCommand @0x520E80 - Client_ProcessLocalCommand @0x520EEC, the peer
+//  test @0x520EF8, the 0x04 @0x520F29; Client_ProcessLocalCommand @0x520BF0 - the session test
+//  @0x520DE5, the CRC walk @0x520E17..0x520E30; Server_TickUpdate @0x51D7E0 -
+//  CNapiNetwork_PumpServerProtocolRecv called @0x51D895 (no session test ahead of it);
+//  NapiNPServerMsg_HandleConsoleLine @0x5199D0 - the S2C 0x06 @0x519AC5;
+//  Client_ProcessNetworkFrame @0x42C180 - CNapiNetwork_PumpClientProtocolRecv @0x42C228;
+//  NapiClientCmd_ParseAndExecute @0x4329C0 - the name walk @0x432a64..0x432a94]
+void check_single_player_console_line_rides_the_loopback(
+		std::map<std::string, std::string> &files) {
+	auto kernel_storage = std::make_unique<ms::MissionKernel>();
+	auto &kernel = *kernel_storage;
+	auto role_storage = std::make_unique<inmatch::HostRole>(inmatch::RoleKind::SinglePlayer,
+			nullptr);
+	auto &role = *role_storage;
+	role.bind(kernel);
+	inmatch::ListenHostState &host = role.state;
+	kernel.open_document(two_entity_mission(), "sp_console", source_over(&files));
+	ms::KernelBootOptions options;
+	options.game_type = mission_game_type(kernel.mission);
+	options.bringup_net_session = [&] { role.bring_up_singleplayer(); };
+	std::string error;
+	CHECK(kernel.boot(options, error));
+	CHECK(host.client_runtime != nullptr);
+	if (host.client_runtime == nullptr) return;
+	CHECK(host.host_owner.ctx.is_mp_session_peer != 0 && host.host_owner.ctx.is_authority != 0 &&
+			!kernel.world.rules.mp_session);
+	for (int i = 0; i < 70; ++i) role.run_tick(tick_input(0)); // past the console's first second
+	controls::InputEventQueue &events = role.input_events();
+	events.reset();
+	// The cheat line: a test line whose CRC is row 116's token dword 0xFF623840.
+	const std::string cheat = "LI-s24 \xA8\xB5\x97[";
+	CHECK(host.client_runtime->console_command(cheat));
+	CHECK(events.size() == 1 && events.at(0).code == 123 &&
+			events.at(0).origin == controls::InputEventOrigin::Console);
+	CHECK(!kernel.world.rules.ai_rules_skip_local_player);
+	role.drain_input_events(nullptr, 0);
+	CHECK(events.empty() && kernel.world.rules.ai_rules_skip_local_player);
+	// The name line: no local arm takes it, so nothing is queued until the echo.
+	const int32_t respawn = controls::action_code(68);
+	CHECK(respawn == 55);
+	CHECK(host.client_runtime->console_command("respawn"));
+	CHECK(events.empty());
+	role.run_tick(tick_input(0)); // the client frame sends the 0x04, after the server's receive
+	CHECK(events.empty());
+	role.run_tick(tick_input(0)); // the server's receive echoes it, the client's receive walks it
+	CHECK(events.size() == 1 && events.at(0).code == respawn &&
+			events.at(0).origin == controls::InputEventOrigin::Console);
+}
+
 // Its own frame: main's locals already fill the 1 MB test stack.
 void check_quality_report_runs_on(std::map<std::string, std::string> &files) {
 	// --- the 0x4C report's count is the process's: a remade client runs on --
@@ -1353,6 +1412,7 @@ int main() {
 	check_head_preround_reads_the_own_clients_copy(files);
 	check_listen_host_console_punts_only_through_server(files, "PUNT ALL", /*punts=*/false);
 	check_listen_host_console_punts_only_through_server(files, "SERVER PUNT ALL", /*punts=*/true);
+	check_single_player_console_line_rides_the_loopback(files);
 
 	// --- the authority's own stance rides its looped-back C2S 0x1D ----------
 	// The server handler latches the host's own player from the 0x1D its own

@@ -551,16 +551,6 @@ void Simulation::install_console_seams() {
 			break;
 		}
 	});
-	// The authority's arms, NETLOG then BAN / PUNT with no sender (engine
-	// inmatch/client_runtime.h set_authority_console carries the witness).
-	runtime_->set_authority_console([this](const std::string &p_line) {
-		inmatch::NapiNPServerCtx *ctx = host_ctx();
-		if (ctx == nullptr) return false;
-		std::vector<opennova::ProtocolMessage> no_slot_replies;
-		if (inmatch::Server_HandleAdminNetlogCommand(*ctx, p_line, nullptr, no_slot_replies))
-			return true;
-		return inmatch::Server_HandleBanPuntCommand(*ctx, p_line);
-	});
 }
 
 opennova::inmatch::RemoteAdminBinding Simulation::remote_admin_binding() {

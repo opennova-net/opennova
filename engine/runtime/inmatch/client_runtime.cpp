@@ -2150,10 +2150,13 @@ bool ClientRuntime::console_command(const std::string &line) {
 	const uint32_t now = console_tick_ms();
 	if (console_guard_ms_ != 0 && now < console_guard_ms_ - 1000u) return false;
 	console_guard_ms_ = now;
-	const bool peer = role_ == Role::Joiner ? joiner_ != nullptr && joiner_->in_session()
-	                                        : view_.mp_session();
+	// The local arms read the session word (g_NapiNPCtx.is_in_session): a joiner's
+	// connection, else the authority's session, clear in single player
+	// [orig: Client_ProcessLocalCommand @0x520BF0 - `cmp g_NapiNPCtx.is_in_session` @0x520DE5].
+	const bool in_session = role_ == Role::Joiner ? joiner_ != nullptr && joiner_->in_session()
+	                                              : view_.mp_session();
 	ClientLocalCommandSeams seams = local_command_seams_;
-	seams.in_session = peer;
+	seams.in_session = in_session;
 	const TitleIdentity *title = joiner_ != nullptr ? joiner_->title() : view_.title();
 	if (seams.version_text.empty() && title != nullptr) {
 		const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_id(title->game_id);
@@ -2175,38 +2178,28 @@ bool ClientRuntime::console_command(const std::string &line) {
 		(void)queue_console_action(code, p1, p2, p3);
 	};
 	if (client_process_local_command(line, seams)) return true;
-	if (peer) {
-		std::vector<uint8_t> body(line.begin(), line.end());
-		body.push_back(0);
-		if (role_ == Role::HostClient)
-			return queue_host_message(c2s::ADMIN_NETLOG_COMMAND, std::move(body));
-		ProtocolMessage message = make_protocol_message(c2s::ADMIN_NETLOG_COMMAND, std::move(body));
-		message.retention_flushes = 0; // user param 0: held until acknowledged
-		send_queue_.push_back(std::move(message));
-		return true;
-	}
-	// An authority that is no peer (a joiner never is one): the NETLOG handler and
-	// BAN / PUNT over the host's context, then the client's walk, whose lines reach
-	// the SYSTEM ring; with no connection, what the walk queues is sent nowhere.
-	// [orig: Client_ProcessConsoleCommand @0x520F49..0x520F7A]
-	if (role_ != Role::HostClient) return false;
-	if (authority_console_ && authority_console_(line)) return true;
-	std::vector<ProtocolMessage> nowhere;
-	std::vector<std::string> lines;
-	ClientConsoleContext walk;
-	walk.authority = true;
-	walk.in_session = view_.mp_session();
-	walk.novaworld = novaworld_link_.novaworld;
-	walk.server_commands = &view_.state().server_commands;
-	walk.state = &console_state_;
-	walk.queued = &nowhere;
-	walk.system_lines = &lines;
-	walk.queue_action = seams.queue_action;
-	const bool taken = client_parse_and_execute(line, walk);
-	for (std::string &text : lines)
-		pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::System,
-				hud::kHudColorWhite, std::move(text), false});
-	return taken;
+	// The peer bit (g_NapiNPCtx.is_mp_session_peer) is the connection mode's client half. A
+	// host's own client exists only on a host that also plays, connection mode 3, which single
+	// player is too, so it is always a peer: its line rides its local client connection to its
+	// own server in a session or out of one, and the server's echo runs the client's walk
+	// (D-NET-NEW-LI-27). A host that does not play (mode 1) has no client here: its console is
+	// AdminConsole's. A joiner's line rides its connection in the session.
+	// [orig: Client_ProcessConsoleCommand @0x520E80 - `cmp g_NapiNPCtx.is_mp_session_peer`
+	//  @0x520EF8, QueueReliableMessage(4, 1, 0) @0x520F29; CGameSession_SetConnectionMode
+	//  @0x4C49F0 - mode 3's two bits @0x4C4A16..0x4C4A1B, the stores @0x4C4A2B..0x4C4A31;
+	//  SinglePlayer_StartMission @0x561AF0 - 3 pushed @0x561BD9, the call @0x561BE0;
+	//  CNapiGameSession_CreateSession @0x4C97C0 - the +0x60 / +0x64 tests @0x4C9B6A..0x4C9B76,
+	//  CNapiNPConnection_Create(.., 2) @0x4C9B9C stored at +0xE60 @0x4C9BA6, the connection
+	//  CNapiNetwork_QueueReliableMessage @0x4C4FA0 queues on]
+	if (role_ != Role::HostClient && !in_session) return false;
+	std::vector<uint8_t> body(line.begin(), line.end());
+	body.push_back(0);
+	if (role_ == Role::HostClient)
+		return queue_host_message(c2s::ADMIN_NETLOG_COMMAND, std::move(body));
+	ProtocolMessage message = make_protocol_message(c2s::ADMIN_NETLOG_COMMAND, std::move(body));
+	message.retention_flushes = 0; // user param 0: held until acknowledged
+	send_queue_.push_back(std::move(message));
+	return true;
 }
 
 bool ClientRuntime::queue_console_action(int32_t code, int32_t p1, int32_t p2, int32_t p3) {

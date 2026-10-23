@@ -1584,12 +1584,12 @@ public:
 	// SAVEKEYS dumps into keylist.key. Null: SAVEKEYS is taken and writes nothing.
 	void set_controls_model(const Ref<ControlsModel> &p_model) { controls_model_ = p_model; }
 	// The console command's seams on the role's client runtime (engine
-	// inmatch/client_runtime.h set_local_command_seams / set_authority_console):
-	// SAVEKEYS' keylist.key over the controls model, SAVENFO's debug.nfo over the
-	// world and its items.def rows, VERSION's version and title words, both files in
-	// the process's working directory (the log devices'); and the authority's arms
-	// (NETLOG, BAN / PUNT) over the host's context for an authority that is no
-	// session peer (D-NET-710). Run whenever the role hands a fresh runtime.
+	// inmatch/client_runtime.h set_local_command_seams): SAVEKEYS' keylist.key over
+	// the controls model, SAVENFO's debug.nfo over the world and its items.def rows,
+	// VERSION's version and title words, both files in the process's working
+	// directory (the log devices'). A host's own client is a session peer, single
+	// player's too (D-NET-NEW-LI-27): its server's handler takes the authority's arms.
+	// Run whenever the role hands a fresh runtime.
 	void install_console_seams();
 	// The remote-admin console's seams over this session (C++ only; the game world's admin
 	// pump binds them, engine inmatch/remote_admin.h): the process block and its save, the

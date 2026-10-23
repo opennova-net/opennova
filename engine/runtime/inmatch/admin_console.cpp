@@ -775,21 +775,25 @@ bool AdminConsole::local_command(const std::string &line) {
 }
 
 // The process's console line (Client_ProcessConsoleCommand, the typed console's sender too). A
-// session peer (a listen host, a joiner) is its own client's: the client runs the one-second
-// guard and Client_ProcessLocalCommand's arms over its own seams and rings, then queues the line
-// to its server as reliable C2S 0x04, whose authority half echoes back as S2C 0x06 whatever
-// NETLOG does not take (Server_HandleConsoleCommandMessage); ClientRuntime::console_command
-// carries that half. An authority that is not a peer runs the local arms, then the NETLOG
-// handler (a `STAT` prefix taken whole; NETLOG toggling the net log and going on),
-// Server_HandleBanPuntCommand, then NapiClientCmd_ParseAndExecute: its debug commands and the
-// server command table's walk (client_console.h); its key-binding queue is the input layer's
-// (D-NET-710). Its one-second guard compares the tick with the last stamp minus 1000, so it
-// never drops a line.
+// session peer (a listen host, single player, a joiner) is its own client's: the client runs the
+// one-second guard and Client_ProcessLocalCommand's arms over its own seams and rings, then queues
+// the line to its server as reliable C2S 0x04, whose authority half echoes back as S2C 0x06
+// whatever NETLOG does not take (Server_HandleConsoleCommandMessage);
+// ClientRuntime::console_command carries that half. An authority that is not a peer runs the
+// local arms, then the NETLOG handler (a `STAT` prefix taken whole; NETLOG toggling the net log
+// and going on), Server_HandleBanPuntCommand, then NapiClientCmd_ParseAndExecute: its debug
+// commands and the server command table's walk (client_console.h); its key-binding queue is the
+// input layer's (D-NET-710). Its one-second guard compares the tick with the last stamp minus
+// 1000, so it never drops a line.
 // [orig: CAdminServer_HandleCmdCommand @0x404997 (j_Client_ProcessConsoleCommand);
 //  Client_ProcessConsoleCommand @0x520E80 — the guard, Client_ProcessLocalCommand @0x520EEC, the
-//  peer's QueueReliableMessage(4) with NetPacket_WriteNullableString @0x42A430, the authority's
-//  Server_HandleAdminNetlogCommand(line, 0) @0x5175D0, Server_HandleBanPuntCommand(line, 0)
-//  @0x50B380, NapiClientCmd_ParseAndExecute @0x4329C0 (the call @0x520f70)]
+//  peer's QueueReliableMessage(4) with NetPacket_WriteNullableString @0x42A430, the authority
+//  test @0x520F49, the authority's Server_HandleAdminNetlogCommand(line, 0) @0x5175D0 (the call
+//  @0x520F55), Server_HandleBanPuntCommand(line, 0) @0x50B380 (the call @0x520F63),
+//  NapiClientCmd_ParseAndExecute @0x4329C0 (the call @0x520f70, its taken test @0x520F7A)]
+// Only a host that does not play reaches the authority's arms here: connection mode 1 clears
+// the peer bit, and a host's own client (mode 3, single player too) is always a peer
+// (ClientRuntime::console_command, D-NET-NEW-LI-27).
 void AdminConsole::console_command(const std::string &line) {
 	if (ctx_.is_mp_session_peer != 0) {
 		if (seams_.host_client != nullptr) (void)seams_.host_client->console_command(line);

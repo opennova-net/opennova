@@ -3656,29 +3656,33 @@ bool run_console_command_sends_the_line() {
 	if (!expect(saw_line, "the listen host's own client sends its line over the loopback"))
 		return false;
 
-	// An authority that is no session peer (a single-player host's own client): the
-	// authority's arms first (NETLOG, BAN / PUNT over the host's context), then the
-	// client's walk, whose lines reach the SYSTEM ring; a line neither takes is not taken
-	// [orig: Client_ProcessConsoleCommand @0x520F49..0x520F7A].
+	// D-NET-NEW-LI-27: a host's own client out of a session (single player, connection mode
+	// 3) is a session peer too. A line the local arms leave leaves as C2S 0x04 over its
+	// loopback, byte for byte the listen host's, and nothing of the client's walk runs until
+	// the server's S2C 0x06 echo comes back (no SYSTEM line, no debug word flipped here).
+	// [orig: Client_ProcessConsoleCommand @0x520E80 - the peer test @0x520EF8, the 0x04
+	//  @0x520F29; CGameSession_SetConnectionMode @0x4C49F0 - mode 3 @0x4C4A16..0x4C4A1B;
+	//  SinglePlayer_StartMission @0x561AF0 - 3 pushed @0x561BD9]
 	ns::LoopbackChannel sp_loop;
 	inmatch::ClientRuntime sp_view(sp_loop);
 	sp_view.view().set_mp_session(false);
-	std::vector<std::string> authority_lines;
-	sp_view.set_authority_console([&authority_lines](const std::string &line) {
-		authority_lines.push_back(line);
-		return line.rfind("NETLOG", 0) == 0;
-	});
-	if (!expect(sp_view.console_command("NETLOG") && authority_lines.size() == 1,
-			"a non-peer authority's NETLOG goes to the authority's arms"))
+	if (!expect(sp_view.console_command("NETLOG"), "the single-player client takes its line"))
 		return false;
-	if (!expect(sp_view.console_command("CLIENTDEBUGMESSAGELIST") && authority_lines.size() == 2,
-			"the authority's arms pass the debug command to the client's walk, which takes it"))
+	if (!expect(sp_view.console_command("CLIENTDEBUGMESSAGELIST"), "and its next one"))
 		return false;
 	sp_view.Client_ProcessNetworkFrame(1);
-	bool sent = false;
-	while (sp_loop.host_recv(datagram)) sent = sent || datagram.tag == c2s::ADMIN_NETLOG_COMMAND;
-	return expect(!sent && !sp_view.console_command("nothing takes this"),
-			"a non-peer authority queues no C2S 0x04; an untaken line is not taken");
+	std::vector<std::vector<uint8_t>> sp_lines;
+	while (sp_loop.host_recv(datagram))
+		if (datagram.tag == c2s::ADMIN_NETLOG_COMMAND) sp_lines.push_back(datagram.body);
+	const std::string debug_list = "CLIENTDEBUGMESSAGELIST";
+	std::vector<uint8_t> debug_body(debug_list.begin(), debug_list.end());
+	debug_body.push_back(0);
+	if (!expect(sp_lines == std::vector<std::vector<uint8_t>>{
+	                             {'N', 'E', 'T', 'L', 'O', 'G', 0}, debug_body},
+			"both lines leave over the loopback as C2S 0x04 [line][NUL], in order"))
+		return false;
+	return expect(sp_view.drain_ring_posts().empty(),
+			"the client's walk waits for the echo: no SYSTEM line yet");
 }
 
 // L5-s3 / V-L5-s3: the client's entity-update body (the movers, the tracked target's
