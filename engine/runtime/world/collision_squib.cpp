@@ -22,9 +22,12 @@ CollisionRay int_context_ray(const FixedVec3 &start, const FixedVec3 &end, int32
     distance = vec_len_ftol(io::bam_sub(end.x,start.x),
             io::bam_sub(end.y,start.y),io::bam_sub(end.z,start.z));
     if (distance < 16) return ray;
-    // IntContext divides by the truncated/clamped length.
+    // IntContext divides 65536.0f by the truncated / clamped length first, then scales each
+    // component by that factor [orig: `fdivr ds:flt_7C32BC` @0x53867D, the products
+    // @0x538683..0x5386A2].
+    const double k = 65536.0 / distance;
     for (int a=0;a<3;++a)
-        ray.dir[a]=int32_t(double(io::bam_sub(ray.end[a],ray.start[a])) * 65536.0/distance);
+        ray.dir[a]=int32_t(double(io::bam_sub(ray.end[a],ray.start[a])) * k);
     return ray;
 }
 } // namespace
@@ -70,6 +73,62 @@ bool CollisionWorld::sun_ray_clear_of_entities(const World &world, const FixedVe
             if (e && pool_row_hits_ray(world,handle,*e,ray,local,local_row)) return false;
         }
     return true;
+}
+
+EntityHandle CollisionWorld::raycast_nearest_entity(const World &world, EntityHandle exclude,
+        const FixedVec3 &start, const FixedVec3 &end) const {
+    using namespace detail;
+    int32_t length=0;
+    const CollisionRay ray=int_context_ray(start,end,length);
+    if (length < 16) return {}; // [orig: Physics_InitRayContext's 1 return @0x538668]
+    int32_t lo[3], hi[3];
+    for (int a=0;a<3;++a) {
+        lo[a]=std::min(ray.start[a],ray.end[a]);
+        hi[a]=std::max(ray.start[a],ray.end[a]);
+    }
+    // One pool's walk: the nearest face hit, its distance; 0 is no hit.
+    // [orig: Physics_RaycastEntityPool @0x4143E0]
+    const auto walk=[&](int pool, EntityHandle &hit) {
+        int32_t best=length; // [orig: ctx+0x60 = ctx+0x24 @0x4143FF]
+        bool any=false;
+        CollisionTargetView view;
+        std::vector<CollisionMatrix> matrices;
+        for (size_t i=0;i<world.registry.pool_capacity(pool);++i) {
+            const auto handle=EntityHandle::make(pool,uint16_t(i));
+            const Entity *e=world.registry.get(handle);
+            // [orig: the +0x1C and bound gates @0x41445C..0x41446E]
+            if (e==nullptr || e->item_type_index==0 || e->bound_radius.q16==0) continue;
+            const int32_t r=e->bound_radius.q16;
+            const int32_t p[3]={e->position.x.q16,e->position.y.q16,e->position.z.q16};
+            // The bound box, wrapping adds and signed compares [orig: @0x414470..0x4144A6].
+            bool outside=false;
+            for (int a=0;a<3;++a)
+                outside|=lo[a]>io::bam_add(p[a],r) || hi[a]<io::bam_sub(p[a],r);
+            if (outside || handle==exclude) continue; // [orig: the excludes @0x4144A8..0x4144BA]
+            // [orig: the line distance @0x4144BC..0x4145C5]
+            if (ray_line_distance(ray.start,ray.dir,p)>r) continue;
+            const CollisionTargetView *target=target_view(world,handle,view,matrices);
+            if (target==nullptr) continue; // [orig: the bone data's null @0x4145EF]
+            if (collision_raycast_entity_faces(*target,ray.start,ray.end,ray.dir,length,best)) {
+                hit=handle;
+                any=true;
+            }
+        }
+        return any ? best : 0; // [orig: @0x414968..0x414994]
+    };
+    // Pool 2's hit stands when nearer than the length; pool 1's when strictly nearer than that.
+    // [orig: Physics_RaycastNearestEntity @0x5394B0 - pool 2 @0x5394ED, `jge` @0x5394FF, pool 1
+    //  @0x53950E, `jge` @0x53951E]
+    EntityHandle best_entity, hit;
+    int32_t best_distance=length;
+    const int32_t d2=walk(2,hit);
+    if (d2!=0 && d2<best_distance) {
+        best_entity=hit;
+        best_distance=d2;
+    }
+    const int32_t d1=walk(1,hit);
+    if (d1!=0 && d1<best_distance) return hit;
+    return best_entity;
 }
 
 ProjectileHit CollisionWorld::trace_squib(World &world, EntityHandle source,

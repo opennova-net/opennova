@@ -125,6 +125,15 @@ enum class ItemDeathClass : uint8_t {
 // (whole-string, case-insensitive; a miss and the empty tag are the null row).
 ItemDeathClass item_death_class_from_tag(const char *ai_function);
 
+// The gnrc / gnrl / gnl2 rows' class init: an entity with no ground link takes the nearest pool-2
+// or pool-1 entity a 10-unit drop from its position meets (CollisionWorld::
+// raycast_nearest_entity), none for bare ground.
+// [orig: Entity_CreateBoundingProxy @0x407D60 (IDB name; it builds no proxy)]
+void cache_ground_entity_below(World &world, Entity &e);
+// The load's class inits of those rows, over pools 2, 3, 1 and 0 as the model init runs them.
+// [orig: Entity_InitAllFromModels @0x40E460]
+void run_ground_cache_class_inits(World &world);
+
 // The render facts of a death piece's model, host-fed from the loaded .3di
 // (the ItemDeathTraits carrier precedent): the per-LOD RLOD thresholds and
 // section counts the piece draw walks, the COBJ section centres every piece

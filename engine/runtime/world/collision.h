@@ -633,6 +633,20 @@ struct RayFaceHit {
 bool collision_raycast_faces(const CollisionTargetView &target, const int32_t start[3],
                              const int32_t end[3], uint32_t ammo_flags, RayFaceHit &out,
                              const int32_t *ray_dir = nullptr, int32_t ray_length = 0);
+// The nearest-entity walker's face test over one entity: each enabled section's CFAC faces whose
+// box meets the section-local segment's, bit 2 of the flags clear and the material not 16, that
+// the segment crosses (either way) at |d0| * length / (|d0| + |d1|) along `dir` inside the
+// triangle. `best` (the ray length at the walk's start) takes each strictly nearer hit's
+// distance; true when one did.
+// [orig: Physics_RaycastEntityPool @0x4143E0 - the section walk @0x414620..0x41495D (the disabled
+//  bit @0x414620, Matrix_Transpose3x3WithNegateCol3 @0x414633, the local start / end / direction
+//  @0x414646 / @0x41465C / @0x414675), the face box @0x4146F0..0x414738, bit 2 of +0x24
+//  @0x41473E, the material byte +0x28 == 16 under the context's zero +0x48 @0x414748..0x414756,
+//  the crossing @0x4147E2..0x4147F2, the distance @0x4147F8..0x41485A, the test point
+//  @0x41485C..0x4148CD, Math_PointInTriangle2D @0x4148E6, the strict `<` @0x4148F2..0x4148F5]
+bool collision_raycast_entity_faces(const CollisionTargetView &target, const int32_t start[3],
+                                    const int32_t end[3], const int32_t dir[3], int32_t length,
+                                    int32_t &best);
 
 // A person section's hit radius (Q16) about its bone: 45 percent of the
 // authored COBJ radius (65 for section 14, the head) plus the fixed 0xCCC floor
@@ -1420,6 +1434,18 @@ public:
     //  g_LocalPlayerEntity @0x5acea7 / @0x5ad2c4]
     bool sun_ray_clear_of_entities(const World &world, const FixedVec3 &start,
             const FixedVec3 &end) const;
+    // The nearest entity the segment meets: pool 2's nearest face hit, then pool 1's when it is
+    // strictly nearer; `exclude` skipped. Each pool walks its rows in slot order: a row with a
+    // type ordinal (+0x1C) and a bound word whose bound box holds the segment's box and whose
+    // centre lies within the bound of the line, its faces through
+    // collision_raycast_entity_faces. A segment under 16 meets nothing, as does a hit at 0.
+    // [orig: Physics_RaycastNearestEntity @0x5394B0 (pool 2 @0x5394ED, the `jge` @0x5394FF, pool
+    //  1 @0x53950E, the `jge` @0x53951E); Physics_InitRayContext @0x5385E0;
+    //  Physics_RaycastEntityPool @0x4143E0 (the +0x1C and bound gates @0x414452..0x41446E, the
+    //  box @0x414470..0x4144A9, the excludes @0x4144AB..0x4144BD, the line distance
+    //  @0x4144BF..0x4145C7, the bone data @0x4145E4, the return @0x414968)]
+    EntityHandle raycast_nearest_entity(const World &world, EntityHandle exclude,
+            const FixedVec3 &start, const FixedVec3 &end) const;
 
     ProjectileHit trace_knife_impact(const World &world,
                                      const ProjectileTrace &trace) const;

@@ -130,6 +130,38 @@ ItemDeathClass item_death_class_from_tag(const char *ai_function) {
 	return ItemDeathClass::kNull; // [orig: the row-0 miss default @0x407dee]
 }
 
+void cache_ground_entity_below(World &world, Entity &e) {
+	// [orig: Entity_CreateBoundingProxy @0x407D60 - the `cmp [esi+28h], 0; jnz` @0x407D68, the
+	//  ray (x, y, z) -> (x, y, z - 0xA0000) @0x407D6E..0x407D9D, Physics_RaycastNearestEntity
+	//  @0x5394B0 (the call @0x407DA1), the store @0x407DA9]
+	if (e.ground_target.valid() || world.collision == nullptr)
+		return;
+	const int32_t x = e.position.x.q16, y = e.position.y.q16, z = e.position.z.q16;
+	e.ground_target = world.collision->raycast_nearest_entity(
+			world, e.handle, FixedVec3{ x, y, z }, FixedVec3{ x, y, io::bam_sub(z, 0xA0000) });
+}
+
+void run_ground_cache_class_inits(World &world) {
+	// [orig: Entity_InitAllFromModels @0x40E460 - the def+0x148 calls over pool 2 @0x40E55B,
+	//  pool 3 @0x40E59A, pool 1 @0x40E5D3 and pool 0 after it; the rows gnrc @0x8130C0, gnrl
+	//  @0x8130D8 and gnl2 @0x8130F0 carry Entity_CreateBoundingProxy @0x407D60 there, every other
+	//  row another init or none]
+	for (const int pool : { 2, 3, 1, 0 }) {
+		for (size_t i = 0; i < world.registry.pool_capacity(pool); ++i) {
+			Entity *e = world.registry.get(EntityHandle::make(pool, uint16_t(i)));
+			if (e == nullptr || !e->has_item_def)
+				continue;
+			const ItemDeathTraits *traits = world.tables.item_death_traits.get(e->item_id);
+			if (traits == nullptr)
+				continue;
+			if (traits->death_class == ItemDeathClass::kGnrc ||
+					traits->death_class == ItemDeathClass::kGnrl ||
+					traits->death_class == ItemDeathClass::kGnl2)
+				cache_ground_entity_below(world, *e);
+		}
+	}
+}
+
 namespace {
 
 // [orig: Server_SendItemDeathState @0x50C840]

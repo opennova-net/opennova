@@ -20,6 +20,7 @@
 #include <runtime/wac/wac_layered_load.h>
 #include <runtime/world/ammo_table_build.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/destruction.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/mount_controls.h>
@@ -245,6 +246,11 @@ void MissionKernel::retire_replica_entity(const w::EntityLifetime &lifetime) {
 }
 
 void MissionKernel::occlusion_init_mission() {
+	// The model init's class inits come first: the gnrc / gnrl / gnl2 rows cache the entity under
+	// them as their ground link, both roles, over the attached models and the placements.
+	// [orig: Game_StartMission - Entity_InitAllFromModels @0x52567F (no role gate) ->
+	//  Entity_CreateBoundingProxy @0x407D60 per row]
+	w::run_ground_cache_class_inits(world);
 	collision.build_initial_tables(world);
 	// The mission-start blink stamp runs ahead of the portal init.
 	// [orig: Game_StartMission — Entity_BuildProximityListsForPools12
