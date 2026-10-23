@@ -5392,6 +5392,8 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 			"the host must not reset the emplacement's persistent slot")
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_AVENGER")
 	var handed_off := sim.get_local_player_weapon_state()
+	# Read ahead of the switch's install below: the bar's def is the EquippedSlot's, the
+	# gun's from the commit on, not the PowerThrow personal def still installed.
 	assert_false(handed_off.windup_active,
 			"the borrowed gun's def (no PowerThrow flag) draws no charge bar")
 	assert_eq(handed_off.fired_serial, personal_fired_before)

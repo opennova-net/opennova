@@ -445,12 +445,22 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 
 // The def of the slot a borrow of `gun` holds: its own, or its carrier's when the
 // route sends it there; 0xFF with no slot.
-static uint8_t borrowed_slot_adm(World &world, Entity &gun) {
-	WeaponSlotState *slot = world.vehicles.resolve_mounted_ammo_slot(gun);
+static uint8_t borrowed_slot_adm(const World &world, const Entity &gun) {
+	const WeaponSlotState *slot = world.vehicles.resolve_mounted_ammo_slot(gun);
 	if (slot == nullptr) return 0xFF;
 	if (slot == &gun.primary_weapon_slot) return gun.primary_weapon_slot_adm;
 	const Entity *carrier = world.registry.get(gun.ground_target);
 	return carrier != nullptr ? carrier->primary_weapon_slot_adm : uint8_t{0xFF};
+}
+
+// The gun whose slot L's borrow holds as the EquippedSlot (active_local_weapon_slot's
+// borrowed leg); null when no borrow holds a resolved slot and the EquippedSlot is the
+// personal slot.
+static const Entity *local_borrowed_gun(const World &world, const LocalPlayerWeapon &w) {
+	if (!w.usegun_slot_active || !w.usegun_mount.valid()) return nullptr;
+	const Entity *gun = world.registry.get(w.usegun_mount);
+	return gun != nullptr && world.vehicles.resolve_mounted_ammo_slot(*gun) != nullptr
+			? gun : nullptr;
 }
 
 // The def of L's EquippedSlot, the slot the weapon walk pumps (active_local_weapon_slot):
@@ -459,20 +469,27 @@ static uint8_t borrowed_slot_adm(World &world, Entity &gun) {
 // D-WPN-52), else the personal slot, which holds the installed def. `has_def` is false
 // for a slot with no def; the adm is the def's index by name (0xFF for one the table
 // lacks).
-static uint8_t local_equipped_slot_def_adm(World &world, const LocalPlayerWeapon &w,
+static uint8_t local_equipped_slot_def_adm(const World &world, const LocalPlayerWeapon &w,
 		bool &has_def) {
-	if (w.usegun_slot_active && w.usegun_mount.valid()) {
-		if (Entity *gun = world.registry.get(w.usegun_mount)) {
-			if (world.vehicles.resolve_mounted_ammo_slot(*gun) != nullptr) {
-				const uint8_t slot_adm = borrowed_slot_adm(world, *gun);
-				has_def = slot_adm != 0xFF;
-				return slot_adm;
-			}
-		}
+	if (const Entity *gun = local_borrowed_gun(world, w)) {
+		const uint8_t slot_adm = borrowed_slot_adm(world, *gun);
+		has_def = slot_adm != 0xFF;
+		return slot_adm;
 	}
 	has_def = !w.def_name.empty();
 	return has_def ? static_cast<uint8_t>(world.tables.weapons.index_of(w.def_name.c_str()))
 	               : uint8_t{0xFF};
+}
+
+const WeaponFsmDef *local_equipped_slot_def(const World &world, const LocalPlayerWeapon &w) {
+	// [orig: WeaponAction_SwitchFrom @0x5433B0 / WeaponAction_SwitchRank @0x543500 - the
+	//  commits' EquippedSlot stores @0x543475 / @0x543539; the readers take the slot's def
+	//  +0x20: HUD_DrawPowerThrowChargeBar @0x59986C, WeaponSlot_HasAmmoAvailable @0x541B39]
+	if (const Entity *gun = local_borrowed_gun(world, w)) {
+		const WeaponTableEntry *row = world.tables.weapons.by_index(borrowed_slot_adm(world, *gun));
+		return row != nullptr ? &row->action_fsm : nullptr;
+	}
+	return &w.def;
 }
 
 // The adm byte a local fire names: the firing slot's def, looked up by its name; only a

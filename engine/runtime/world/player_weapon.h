@@ -344,6 +344,15 @@ WeaponSlotState *active_local_weapon_slot(World &world, LocalPlayerWeapon &w);
 const WeaponSlotState *active_local_weapon_slot(const World &world,
                                                const LocalPlayerWeapon &w);
 
+// The def of the EquippedSlot (active_local_weapon_slot): under a borrow the borrowed
+// slot's def, its table row's descriptors (null for a row the table lacks), which the
+// installed def (LocalPlayerWeapon::def) matches only once the switch's install runs;
+// else the personal slot's installed def. The commit stores the EquippedSlot, and its
+// readers take that slot's def. [orig: WeaponAction_SwitchFrom @0x5433B0 - the store
+// @0x543475; WeaponAction_SwitchRank @0x543500 - the store @0x543539;
+// HUD_DrawPowerThrowChargeBar @0x59986C, WeaponSlot_HasAmmoAvailable @0x541B39]
+const WeaponFsmDef *local_equipped_slot_def(const World &world, const LocalPlayerWeapon &w);
+
 // The adm byte a local fire names (the round's adm and the C2S 0x06 off7): the
 // firing slot's def by name, the shooter's AdmDef byte (+0x2B0) for a slot with no
 // def. [orig: WeaponAction_Fire @0x542B10 - @0x542C1C..0x542C3F]

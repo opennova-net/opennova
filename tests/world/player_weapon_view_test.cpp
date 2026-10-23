@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <string>
 
 #include <base/io/bam.h>
@@ -222,6 +223,42 @@ void test_power_throw_windup() {
 	CHECK(!rig.view().windup_active);
 }
 
+// The bar's def reads are the EquippedSlot's: under a borrow the gun slot's def row, from the
+// commit's store on, whatever def the switch's install has yet to replace; the ammo test reads
+// that row over the borrowed slot. [orig: HUD_DrawPowerThrowChargeBar @0x599830 - the
+// EquippedSlot's def @0x59986C, WeaponSlot_HasAmmoAvailable @0x59988F (its def @0x541B39);
+// WeaponAction_SwitchFrom @0x5433B0 - the EquippedSlot store @0x543475]
+void test_power_throw_windup_reads_the_equipped_slot_def() {
+	const std::unique_ptr<Rig> owned = std::make_unique<Rig>();
+	Rig &rig = *owned;
+	rig.w.logic_tick = 25;
+	rig.weapon.def.flags = weapon_flag::kPowerThrow; // the personal def the install replaces
+	rig.weapon.power_throw_start_tick = 10;
+	CHECK(rig.view().windup_active); // no borrow: the personal slot's def draws
+	rig.w.tables.weapons.entries.resize(3);
+	WeaponTableEntry &gun_row = rig.w.tables.weapons.entries[2];
+	gun_row.valid = true;
+	gun_row.action_fsm.clip_capacity = 100;
+	rig.w.registry.configure_pool(1, 2);
+	Entity seed;
+	seed.kind = EntityKind::Item;
+	seed.has_item_def = true;
+	seed.item_attrib = kItemAttribEweap;
+	seed.primary_weapon_slot_adm = 2;
+	seed.primary_weapon_slot.clip = 100;
+	const EntityHandle gun = rig.w.registry.spawn(1, seed);
+	rig.weapon.usegun_mount = gun; // the Rig's borrow holds the gun's slot
+	LocalPlayerWeaponView v = rig.view();
+	CHECK(v.clip == 100);
+	CHECK(!v.windup_active && v.windup_held_ticks == 0);
+	gun_row.action_fsm.flags = weapon_flag::kPowerThrow;
+	v = rig.view();
+	CHECK(v.windup_active && v.windup_held_ticks == 15);
+	// The borrowed slot is empty and the personal one loaded: no bar.
+	rig.w.registry.get(gun)->primary_weapon_slot.clip = 0;
+	CHECK(rig.weapon.slot.clip == 17 && !rig.view().windup_active);
+}
+
 void test_crosshair_spread_rows() {
 	Rig rig;
 	AiEntity &body = rig.body();
@@ -362,6 +399,7 @@ int main() {
 	test_effect_anchor_tracks_the_committed_usegun_slot();
 	test_first_person_action_model_needs_gfx1_and_animadm();
 	test_power_throw_windup();
+	test_power_throw_windup_reads_the_equipped_slot_def();
 	test_crosshair_spread_rows();
 	test_heat_clamps();
 	test_round_ring_read_back();

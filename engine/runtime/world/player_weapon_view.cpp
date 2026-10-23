@@ -83,9 +83,13 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 	// @ 0x599830 (ex kong "HUD_DrawWeaponReloadBar" misnomer — it only draws the
 	// windup): gates = def+8 sign bit @0x59986C..0x59987B, g_FireChargeStartTick != 0
 	// @0x599881, WeaponSlot_HasAmmoAvailable @0x59988F (rounds loaded or in the pool, a
-	// clipless def's pool); the drawer derives the fill from held ticks].
-	const bool windup_active = (w.def.flags & weapon_flag::kPowerThrow) != 0 &&
-			w.power_throw_start_tick != 0 && weapon_fsm_has_ammo_available(w.def, active_slot);
+	// clipless def's pool); the drawer derives the fill from held ticks]. Both def reads
+	// are the EquippedSlot's def (slot+0x20 @0x59986C, @0x541B39): a borrow's slot is the
+	// gun's from its commit on, while the installed def follows at the switch's install.
+	const WeaponFsmDef *slot_def = local_equipped_slot_def(world, w);
+	const bool windup_active = slot_def != nullptr &&
+			(slot_def->flags & weapon_flag::kPowerThrow) != 0 && w.power_throw_start_tick != 0 &&
+			weapon_fsm_has_ammo_available(*slot_def, active_slot);
 	v.windup_active = windup_active;
 	v.windup_held_ticks = windup_active
 			? static_cast<int32_t>(world.logic_tick - w.power_throw_start_tick)
