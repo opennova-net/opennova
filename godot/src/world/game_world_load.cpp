@@ -656,6 +656,14 @@ void GameWorld::place_mission_objects(const Ref<MissionData> &p_mission) {
 			"GameWorld: placed %d mission objects (%d batched / %d animated, %d unresolved, %d markers)",
 			mission_stats_->get_placed(), mission_stats_->get_batched(), mission_stats_->get_animated(),
 			mission_stats_->get_unresolved(), mission_stats_->get_markers()));
+	// The placement run's own unit spans (an instrument), as the streamed placement prints them.
+	UtilityFunctions::print_verbose(vformat(
+			"GameWorld: placement units: bucket %d ms, statics %d ms, models %d ms (%d graphics, %d batches, %d static shadow batches)",
+			static_cast<int>(mission_stats_->get_span_bucket_entities_usec() / 1000),
+			static_cast<int>(mission_stats_->get_span_static_batches_usec() / 1000),
+			static_cast<int>(mission_stats_->get_span_animated_models_usec() / 1000),
+			mission_stats_->get_graphics(), mission_stats_->get_batches(),
+			mission_stats_->get_static_shadow_batches()));
 }
 
 // Tear down a loaded world so the shell can return to the menu (or load a
