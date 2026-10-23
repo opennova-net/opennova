@@ -134,6 +134,26 @@ void test_roster_and_facts() {
 	ctx.transport_mode = inmatch::NetworkType::Lan;
 	inmatch::fill_server_status_page(page, ctx, &world);
 	CHECK(!page.mp_session_peer && !page.novaworld);
+	// The roster's in-game test reads the slot's own state word: a punt writes
+	// none, so a punted joiner still reads in game; the round end moves every
+	// joined slot to 7, the host's own row included, and each reads grey
+	// through the linger.
+	// [orig: Server_DrawStatusScreen @0x50A2D0 (`cmp dword ptr [ebx+20h], 6`
+	//  @0x50A66C, 0xFFA0A0A0 @0x50A672); CNapiNPConnection_QueueDisconnectEvent
+	//  @0x4C7EF0 (no slot write); Server_ProcessRoundEnd @0x5164F0 (the 6 -> 7
+	//  store @0x51685E)]
+	inmatch::NapiNPConnection &host_row = ctx.np_protocol.connection_list[0];
+	inmatch::NapiNPConnection &joe_row = ctx.np_protocol.connection_list[1];
+	joe_row.host_disconnect_sent = true;
+	inmatch::fill_server_status_page(page, ctx, &world);
+	CHECK(page.slots[0].in_game && page.slots[2].in_game);
+	host_row.slot_state = inmatch::PlayerSlotState::RoundOver;
+	joe_row.host_disconnect_sent = false;
+	joe_row.slot_state = inmatch::PlayerSlotState::RoundOver;
+	inmatch::fill_server_status_page(page, ctx, &world);
+	CHECK(page.slots[0].active && !page.slots[0].in_game);
+	CHECK(page.slots[2].active && !page.slots[2].in_game);
+	CHECK(hud::server_status_roster_cell(page, 2, 0u).color == 0xFFA0A0A0u);
 }
 
 // A Serve Only host's own slot 0 has no connection, but the round init keeps it active and

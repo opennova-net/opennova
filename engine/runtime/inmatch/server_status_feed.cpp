@@ -35,12 +35,17 @@ void fill_server_status_page(hud::ServerStatusPageState &page, const NapiNPServe
 		slot.active = true;
 		// +5: the host's own slot, the loopback connection
 		slot.local = c.link.mode == replication::TransportMode::Loopback;
-		// +0x20 == 6: the port's completed initial-state burst is the slot's
-		// in-game state (napi_np_connection.h is_in_match). +0x188E3 is never
+		// +0x20 == 6: the slot's own state word, joined. The round end moves
+		// every joined slot to 7, so through the linger the roster draws each
+		// one grey; a punt writes no slot word, so a punted slot keeps its
+		// colour until the teardown erases its row. +0x188E3 is never
 		// set in JO (its stores write 0), so `loading` stays clear and no
 		// spectator row takes the loading colour (D-NET-505) [orig:
-		//  HUD_DrawPlayerScoreList @0x500448; Server_PlayerAdd @0x51CD5D].
-		slot.in_game = is_in_match(c);
+		//  Server_DrawStatusScreen @0x50A2D0 (`cmp dword ptr [ebx+20h], 6`
+		//  @0x50A66C, 0xFFA0A0A0 @0x50A672); Server_ProcessRoundEnd @0x5164F0
+		//  (the 6 -> 7 store @0x51685E); HUD_DrawPlayerScoreList @0x500448;
+		//  Server_PlayerAdd @0x51CD5D].
+		slot.in_game = c.slot_state == PlayerSlotState::Joined;
 		slot.spectator = c.link.spectator; // +0x188D7
 		slot.name = c.reply.player_name;   // +0x28
 		// The seconds since the connection last parsed a session packet; the
