@@ -218,16 +218,24 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 	}
 	if (!select_parent) {
 		// A detach's switch back completes its mount: g_PendingWeaponSlot, the slot
-		// local_weapon_detach_mount staged, becomes the EquippedSlot.
-		// [orig: WeaponAction_SwitchFrom @0x5433B0 (the store @0x543475) /
-		//  WeaponAction_SwitchRank @0x543500 (the store @0x543539)]
+		// local_weapon_detach_mount staged (or a later mount's store over it), becomes
+		// the EquippedSlot whenever it is set, whatever it holds by then, and the AdmDef
+		// byte takes that slot's def as it stands (none: 0xFF).
+		// [orig: WeaponAction_SwitchFrom @0x5433B0 (the non-null test
+		//  @0x54346C..0x543473, the store @0x543475, the stamp @0x543481..0x543496;
+		//  AdmDef_GetIndexFromPtr @0x53FE60 (-1 for a null def)) /
+		//  WeaponAction_SwitchRank @0x543500 (the store @0x543539, the stamp @0x54355A)]
 		if (w.usegun_switch == LocalUseGunSwitch::kDetach &&
 				world.local_player_state != nullptr &&
 				world.local_player_state->inventory_valid) {
 			WeaponInventory &inventory = world.local_player_state->inventory;
 			const WeaponInventorySlot *pending = inventory.slot(inventory.pending_combo);
-			if (pending != nullptr && pending->adm_index == w.usegun_saved_adm)
+			if (pending != nullptr) {
 				inventory.equipped_combo = inventory.pending_combo;
+				w.usegun_saved_adm = pending->adm_index >= 0
+						? static_cast<uint8_t>(pending->adm_index)
+						: uint8_t{0xFF};
+			}
 		}
 		w.usegun_slot_active = false;
 		next_adm = w.usegun_saved_adm;

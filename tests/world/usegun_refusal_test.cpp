@@ -681,6 +681,82 @@ void test_a_borrowed_seat_detach_mounts_the_current_slot() {
 	}
 }
 
+// The detach's switch-back completion stores g_PendingWeaponSlot whenever it is set,
+// whatever the slot holds by then: the slot the detach staged, one a later mount's
+// store put over it (a weapon key during the switch back), or a slot a grant's rebuild
+// emptied. The AdmDef byte takes the stored slot's def as it stands, none giving 0xFF.
+// [orig: WeaponAction_SwitchFrom @0x5433B0 (the non-null test @0x54346C..0x543473,
+//  the store @0x543475, the stamp @0x543481..0x543496); AdmDef_GetIndexFromPtr
+//  @0x53FE60 (-1 for a null def); Player_MountWeaponSlot @0x4DFA40
+//  (g_PendingWeaponSlot @0x4DFB16)]
+void test_the_detach_completion_stores_the_pending_slot_as_it_stands() {
+	constexpr uint8_t kPistolAdm = 2;
+	constexpr uint8_t kShotgunAdm = 3;
+	constexpr int32_t kPistolCombo = 2 * 65;
+	constexpr int32_t kShotgunCombo = 4 * 65;
+	enum class Case { kAsStaged, kRestaged, kEmptied };
+	for (const Case c : {Case::kAsStaged, Case::kRestaged, Case::kEmptied}) {
+		Rig r;
+		w::World &world = r.world;
+		world.tables.weapons.entries.resize(4);
+		w::WeaponTableEntry &pistol = world.tables.weapons.entries[kPistolAdm];
+		pistol.name = "WPN_M9";
+		pistol.valid = true;
+		pistol.category = 2;
+		w::WeaponTableEntry &shotgun = world.tables.weapons.entries[kShotgunAdm];
+		shotgun.name = "WPN_SHOTGUN";
+		shotgun.valid = true;
+		shotgun.category = 4;
+		world.cached.local_player = r.requester_h;
+		auto local = std::make_unique<w::LocalPlayer>(world);
+		world.local_player_state = local.get();
+		w::WeaponInventory &inventory = local->inventory;
+		inventory.reset(world.tables.weapons);
+		local->inventory_valid = true;
+		inventory.slots[kRifleCombo].adm_index = kRifleAdm;
+		inventory.slots[kPistolCombo].adm_index = kPistolAdm;
+		inventory.slots[kShotgunCombo].adm_index = kShotgunAdm;
+		inventory.equipped_combo = kRifleCombo; // the personal slot the attach left
+		// The borrow on the gun, and the switch back the seat's detach staged: its
+		// mount stored the pistol's slot.
+		w::LocalPlayerWeapon &weapon = local->weapon;
+		weapon.active = true;
+		weapon.usegun_slot_active = true;
+		weapon.usegun_mount = r.gun_h;
+		weapon.usegun_weapon_adm = kGunAdm;
+		weapon.usegun_switch = w::LocalUseGunSwitch::kDetach;
+		weapon.usegun_switch_action = w::weapon_action::kSwitchRank;
+		inventory.pending_combo = kPistolCombo;
+		weapon.usegun_saved_adm = kPistolAdm;
+		if (c == Case::kRestaged) inventory.pending_combo = kShotgunCombo;
+		if (c == Case::kEmptied) inventory.slots[kPistolCombo].adm_index = -1;
+		weapon.events.clear();
+
+		w::commit_local_usegun_weapon_switch(world, weapon);
+		CHECK(weapon.usegun_switch == w::LocalUseGunSwitch::kNone);
+		CHECK(!weapon.usegun_slot_active);
+		switch (c) {
+			case Case::kAsStaged:
+				CHECK(inventory.equipped_combo == kPistolCombo);
+				CHECK(r.requester().equipped_adm_index == kPistolAdm);
+				CHECK(!weapon.events.empty() && weapon.events.back().switch_to_weapon == "WPN_M9");
+				break;
+			case Case::kRestaged:
+				CHECK(inventory.equipped_combo == kShotgunCombo);
+				CHECK(r.requester().equipped_adm_index == kShotgunAdm);
+				CHECK(!weapon.events.empty() &&
+						weapon.events.back().switch_to_weapon == "WPN_SHOTGUN");
+				break;
+			case Case::kEmptied:
+				CHECK(inventory.equipped_combo == kPistolCombo);
+				CHECK(r.requester().equipped_adm_index == 0xFF);
+				CHECK(!weapon.events.empty() && weapon.events.back().clear_weapon);
+				break;
+		}
+		world.local_player_state = nullptr;
+	}
+}
+
 // D-NET-336 (the walk's leg): a reload the authority's walk begins on another row's
 // slot queues its C2S 0x25 for the host's own dispatcher, which broadcasts S2C 0x49:
 // a UseGun gunner's addresses the gun (an EWeap: 0xFFFF), a slot held on foot the
@@ -932,6 +1008,7 @@ int main() {
 	test_a_weapon_key_ends_a_slot_held_on_foot();
 	test_a_ctrlx_seat_saves_a_gun_held_on_foot();
 	test_a_borrowed_seat_detach_mounts_the_current_slot();
+	test_the_detach_completion_stores_the_pending_slot_as_it_stands();
 	test_the_walk_relays_an_authority_reload();
 	test_a_dedicated_host_refills_no_gun();
 	test_an_unoccupied_gun_relays_its_reload();
