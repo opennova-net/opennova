@@ -7,8 +7,12 @@
 #include <formats/def/def.h>
 #include <formats/threedi/threedi_build.h>
 #include <runtime/renderer/fp_viewmodel_spec.h>
+#include <runtime/world/local_player.h>
 #include <runtime/world/player_view.h>
+#include <runtime/world/player_weapon.h>
+#include <runtime/world/weapon_fsm.h>
 #include <runtime/world/weapon_table_build.h>
+#include <runtime/world/world.h>
 
 #include <cmath>
 #include <cstdio>
@@ -16,6 +20,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -45,6 +50,64 @@ const WeaponTimingRow *row(const WeaponTimingEntryPlan &plan, int id) {
 	return nullptr;
 }
 
+// The ticks the game fires a planned entry on, counted from its press: the entry's rows
+// mounted on a live local player (an inventory-less install's full magazine), one quiet
+// update, then the trigger held from a press record. Each update's input frame dispatches
+// the fire records the last pump deferred (LocalPlayer::deferred_events through
+// fire_record, as inmatch::Role::drain_input_events does), then the local pump runs.
+// [orig: Input_ProcessFrame @0x49D520 (Input_FlushDeferredEvents @0x49D591);
+//  Input_HandleActionBinding_0 @0x4E0420 (case 0x95)]
+std::vector<int> game_shot_ticks(const WeaponTimingEntryPlan &plan, int updates) {
+	namespace w = opennova::world;
+	auto world = std::make_unique<w::World>();
+	auto local = std::make_unique<w::LocalPlayer>(*world);
+	world->registry.configure_pool(0, 4);
+	w::Entity body;
+	body.kind = w::EntityKind::Organic;
+	body.alive = true;
+	body.health = 100;
+	body.flags = w::kEntityFlagPlayer;
+	world->cached.local_player = world->registry.spawn(0, body);
+	world->local_player_state = local.get();
+	w::WeaponInstallData data;
+	data.name = plan.name;
+	data.clipsize = 10000;
+	data.startrounds = 10000;
+	if (plan.mode == "auto") data.flags = static_cast<int32_t>(opennova::def::DEF_WEAPON_FLAG_AUTO);
+	for (const auto &r : plan.rows) {
+		w::WeaponFsmActionRow def_row;
+		std::snprintf(def_row.name, sizeof(def_row.name), "%s", w::kWeaponActionSuffixes[r.action]);
+		std::snprintf(def_row.function, sizeof(def_row.function), "%s", r.function.c_str());
+		def_row.delaystart = r.delaystart;
+		def_row.delayend = r.delayend;
+		data.rows.push_back(def_row);
+	}
+	w::local_weapon_install(*world, local->weapon, data, false, false, nullptr, local->view);
+	std::vector<int> shots;
+	for (int t = -1; t < updates; ++t) {
+		const bool held = t >= 0;
+		local->set_weapon_input(held, false, false);
+		if (t == 0) (void)local->fire_record(true, false); // the press record
+		std::vector<w::LocalPlayer::DeferredInputEvent> deferred;
+		deferred.swap(local->deferred_events);
+		for (const auto &record : deferred)
+			if (record.code == w::LocalPlayer::kDeferredFireCode) (void)local->fire_record(held, false);
+		const uint32_t fired = local->weapon.fired_serial;
+		++world->logic_tick;
+		local->pump_local_weapon();
+		if (local->weapon.fired_serial != fired) shots.push_back(t);
+	}
+	return shots;
+}
+
+// The plan's shot ticks for its firing run.
+std::vector<int> plan_shot_ticks(const WeaponTimingEntryPlan &plan) {
+	std::vector<int> shots;
+	for (const auto &e : plan.events)
+		if (e.scenario == wa::kFire && e.kind == "shot") shots.push_back(e.tick);
+	return shots;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -70,6 +133,13 @@ int main(int argc, char **argv) {
 		if (e.scenario == wa::kReload && e.kind == "reload_ammo") CHECK(e.tick == 0);
 	}
 	CHECK(shots == 3);
+	// The measured cycle is the one the game fires: the held trigger refires through the
+	// deferred fire record the recoil window queues, dispatched at the next input frame.
+	{
+		const std::vector<int> game = game_shot_ticks(auto_plan, 11);
+		CHECK(game == plan_shot_ticks(auto_plan));
+		CHECK((game == std::vector<int>{0, 5, 10}));
+	}
 	// The fire clip shows until the next shot restarts it: two ticks of pose
 	// under a three-tick recovery (the counter-zero tick does not step it).
 	bool fire_shown = false;
@@ -84,6 +154,7 @@ int main(int argc, char **argv) {
 	CHECK(plan.entries.size() == 3);
 	if (plan.entries.size() == 3) {
 		CHECK(plan.entries[0].cycle_ticks == 8 && row(plan.entries[0], wa::kFire)->delayend == 6);
+		CHECK((game_shot_ticks(plan.entries[0], 17) == std::vector<int>{0, 8, 16}));
 		CHECK(plan.entries[1].cycle_ticks == 8 && row(plan.entries[1], wa::kFire)->delayend == 5);
 		CHECK(plan.entries[1].ready_tick == 7); // the next press is accepted the following tick
 		CHECK(plan.entries[2].cycle_ticks == 8 && row(plan.entries[2], wa::kFire)->delayend == 6);
