@@ -5399,7 +5399,8 @@ add_test(NAME contact_stability_byte COMMAND contact_stability_byte_test)
 add_executable(contact_depth_views_test world/contact_depth_views_test.cpp)
 target_link_libraries(contact_depth_views_test PRIVATE opennova_runtime)
 add_test(NAME contact_depth_views COMMAND contact_depth_views_test)
-# D-NET-NEW-L6-16 / D-NET-NEW-L6-17: the tracked solve's extend-loop and respawn legs, the crash-state latch.
+# D-NET-NEW-L6-16 / -17 / -19: the tracked solve's extend-loop and respawn legs, the crash-state latch, the
+# grounded arm's crashed block.
 add_executable(tracked_contact_legs_test world/tracked_contact_legs_test.cpp)
 target_link_libraries(tracked_contact_legs_test PRIVATE opennova_runtime)
 add_test(NAME tracked_contact_legs COMMAND tracked_contact_legs_test)

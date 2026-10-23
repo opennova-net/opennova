@@ -1,5 +1,6 @@
-// The tracked contact solve's extend-loop and respawn legs (D-NET-NEW-L6-16) and the aircraft and
-// tracked crash-state latch (D-NET-NEW-L6-17).
+// The tracked contact solve's extend-loop and respawn legs (D-NET-NEW-L6-16), the aircraft and
+// tracked crash-state latch (D-NET-NEW-L6-17) and the grounded arm's crashed block
+// (D-NET-NEW-L6-19).
 // - The extend loop resets every oscillator's remaining range to 0xFFFF, after the pad quad's
 //   chassis-force clear. [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - the quad
 //   @0x47DAE2 and Entity_ClearSuspensionForces @0x47DAF2; the reset @0x47DB70]
@@ -92,9 +93,9 @@ struct Rig {
 
 	Entity &e() { return *world.registry.get(hull); }
 
-	void solve(int32_t z) {
+	void solve(int32_t z, int32_t vz = -400) {
 		Entity &v = e();
-		v.veh.slide_z = -400; // the mover's dribble: no rest tick
+		v.veh.slide_z = vz; // -400: the mover's dribble, no rest tick
 		int32_t px = 100 << 16, py = 200 << 16, pz = z;
 		detail::ground_contact_solve(world, v, truck(), v.veh, px, py, px, py, pz);
 	}
@@ -213,6 +214,50 @@ void test_the_crash_latch_per_family() {
 	}
 }
 
+// D-NET-NEW-L6-19: the grounded arm's crashed block, ahead of the airborne clear. A crashed hull
+// still falling past 0x1000 rebounds at |vz >> 1| capped 0x5000 and strikes its pads (the strike
+// forces fold into the chassis pose at once, none left queued); slower, it stops and re-enters the
+// crash state (+0x2EF), as does a crashed hull already down. The latched hull then settles in the
+// fit (crashed, frozen, slow and upright: +0x2F0).
+// [orig: @0x47E7F5..0x47E8E0; Entity_ApplyLightVehicleSuspensionForces @0x463750 (the call
+//  @0x47E861); Entity_ClearSuspensionForces @0x468980 (the call @0x47E870)]
+void test_the_grounded_crashed_block() {
+	const auto crashed_hull = [](Rig &rig, bool in_air) -> Entity & {
+		Entity &v = rig.e();
+		v.health = 0; // no wreck-rest burning
+		v.veh.crashed = 1;
+		if (in_air)
+			v.flags |= kEntityFlagInAir;
+		return v;
+	};
+	{
+		auto rig = std::make_unique<Rig>(true);
+		Entity &v = crashed_hull(*rig, true);
+		rig->solve(kPadsDown, -0x14000);
+		CHECK(v.veh.slide_z == 0x5000);
+		CHECK(v.veh.crashed == 1 && v.veh.byte_2ef == 0);
+		CHECK(v.veh.chassis_active);
+		for (const auto &force : v.veh.chassis_forces) CHECK(force.rate == 0);
+		CHECK((v.flags & kEntityFlagInAir) == 0);
+	}
+	{
+		auto rig = std::make_unique<Rig>(true);
+		Entity &v = crashed_hull(*rig, true);
+		rig->solve(kPadsDown, -0x800);
+		CHECK(v.veh.slide_z == 0);
+		CHECK(v.veh.byte_2ef == 1);
+		CHECK(v.veh.settle_2f0 == 1 && v.veh.crashed == 0);
+	}
+	{
+		auto rig = std::make_unique<Rig>(true);
+		Entity &v = crashed_hull(*rig, false);
+		rig->solve(kPadsDown, -0x14000);
+		CHECK(v.veh.byte_2ef == 1);
+		CHECK(v.veh.settle_2f0 == 1 && v.veh.crashed == 0);
+		CHECK(!v.veh.chassis_active);
+	}
+}
+
 } // namespace
 
 int main() {
@@ -220,6 +265,7 @@ int main() {
 	test_a_pad_pair_marks_the_hull_respawned();
 	test_the_client_window_runs_only_grounded();
 	test_the_crash_latch_per_family();
+	test_the_grounded_crashed_block();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

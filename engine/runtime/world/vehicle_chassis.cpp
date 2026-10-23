@@ -329,15 +329,15 @@ void vehicle_queue_suspension_force(
 	force.scratch = 3;
 }
 
-// A crashed tank striking the ground on its tracks. The first strike in each
-// speed band plays one tumble cue; every call re-enters the crash state and
-// queues one force per wheel: supported wheels press along -up, clear wheels
-// lift along +up, each stiffened by the hull's forward tilt. A missing input
-// only enters the crash state.
-// [orig: Entity_ApplyWheelSuspensionForces @0x463560, called from
-//  Entity_ProcessWheeledVehiclePhysics @0x478A9F / @0x478C4D]
-void vehicle_apply_wheel_suspension_forces(World &world, Entity &e, const VehicleTraits &traits,
-		bool has_contact, const int32_t *support, const CollisionMatrix *matrix) {
+namespace {
+
+// The strike both force helpers run, instruction for instruction but for the two rate constants:
+// the first strike in each speed band plays one tumble cue; every call re-enters the crash state
+// and queues one force per wheel: supported wheels press along -up at 8000 less tilt * press_k,
+// clear wheels lift along +up at 800 less tilt * lift_k, tilt being the hull's |forward.z| as a
+// fraction. A missing input only enters the crash state.
+void apply_strike_forces(World &world, Entity &e, const VehicleTraits &traits, bool has_contact,
+		const int32_t *support, const CollisionMatrix *matrix, float press_k, float lift_k) {
 	auto &m = e.veh;
 	if (!has_contact || support == nullptr || matrix == nullptr) {
 		// [orig: @0x463563..0x463583 -> @0x463727..0x46373A]
@@ -375,15 +375,36 @@ void vehicle_apply_wheel_suspension_forces(World &world, Entity &e, const Vehicl
 	if (tilt < 0.0)
 		tilt = 0.0;
 	for (int k = 0; k < 4; ++k) {
-		// [orig: `cmp dword ptr [edx], 0; jle` @0x4636C2; flt_7C6EA8 = -3000.0,
-		//  flt_7C6EA4 = -1000.0; Entity_QueueSuspensionForce call @0x463704]
+		// [orig: `cmp dword ptr [edx], 0; jle` @0x4636C2 / @0x4638B2; Entity_QueueSuspensionForce
+		//  calls @0x463704 / @0x4638F4]
 		if (support[k] > 0)
 			vehicle_queue_suspension_force(
-					m, k, io::bam_sub(8000, int32_t(tilt * double(-3000.0f))), down);
+					m, k, io::bam_sub(8000, int32_t(tilt * double(press_k))), down);
 		else
 			vehicle_queue_suspension_force(
-					m, k, io::bam_sub(800, int32_t(tilt * double(-1000.0f))), up);
+					m, k, io::bam_sub(800, int32_t(tilt * double(lift_k))), up);
 	}
+}
+
+} // namespace
+
+// A crashed tank striking the ground on its tracks.
+// [orig: Entity_ApplyWheelSuspensionForces @0x463560 (flt_7C6EA8 = -3000.0, flt_7C6EA4 = -1000.0),
+//  called from Entity_ProcessWheeledVehiclePhysics @0x478A9F / @0x478C4D]
+void vehicle_apply_wheel_suspension_forces(World &world, Entity &e, const VehicleTraits &traits,
+		bool has_contact, const int32_t *support, const CollisionMatrix *matrix) {
+	apply_strike_forces(world, e, traits, has_contact, support, matrix, -3000.0f, -1000.0f);
+}
+
+// A crashed tracked hull striking the ground: the tank's strike with the lighter press and lift.
+// Its only callers are the tracked solve's (the IDB's "light" names the rates, not the light solve).
+// [orig: Entity_ApplyLightVehicleSuspensionForces @0x463750 (the cues @0x463794..0x463829, +0x2EC
+//  @0x463832, flt_7C3310 @0x46386F, flt_7C6EB0 = -1500.0 / flt_7C6EAC = -700.0 @0x46388E..0x463894,
+//  the support words at a 12-byte stride from +8 @0x46389C / @0x4638F9; the missing-input arm
+//  @0x463917..0x46392A), called from Entity_ProcessTrackedVehiclePhysics @0x47E56C / @0x47E861]
+void vehicle_apply_tracked_suspension_forces(World &world, Entity &e, const VehicleTraits &traits,
+		bool has_contact, const int32_t *support, const CollisionMatrix *matrix) {
+	apply_strike_forces(world, e, traits, has_contact, support, matrix, -1500.0f, -700.0f);
 }
 
 // Apply this tick's retained matrix BEFORE advancing its identity blend.

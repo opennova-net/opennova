@@ -53,6 +53,16 @@ void air_contact_tail(World &world, Entity &veh, const VehicleTraits &traits, in
 	m.plat_airborne_ticks = (veh.flags & kEntityFlagInAir) != 0 ? m.plat_airborne_ticks + 1 : 0;
 }
 
+// A tank or tracked contact arm entering the crash state: both crash bytes and the inlined
+// Entity_ClearSuspensionState.
+// [orig: tank @0x478991..0x4789DD, @0x478C80..0x478CCC; tracked @0x47E894..0x47E8E0;
+//  Entity_ClearSuspensionState @0x4592B0]
+void contact_enter_crash(Entity::VehicleMotorState &m) {
+	m.byte_2ef = 1;
+	m.crashed = 1;
+	vehicle_clear_chassis(m);
+}
+
 } // namespace
 
 void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &traits, Entity::VehicleMotorState &m, int32_t start_x, int32_t start_y, int32_t &px, int32_t &py, int32_t &pz) {
@@ -632,6 +642,37 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 	// in-air flag as it stands before the clear below; the extend loop above read the request
 	// the previous tick's window left. [orig: @0x47E791..0x47E7F5]
 	world.vehicles.suspension_client_crash_window(veh, SuspensionFamily::Tracked);
+	// The pad-rectangle bounding quad, in the witnessed winding: corner k sits over pad k, so the
+	// identity lift pairing below is geometric [orig: Entity_ComputeBoundingQuad @0x45B6E0
+	// non-square arm, called @0x47DAE2/@0x47DB54 (or after the crash state's rebuilds @0x47DF71 /
+	// @0x47E05E): c0=(+f,+s), c1=(+f,-s), c2=(-f,-s), c3=(-f,+s), each corner the origin plus two
+	// separately rounded Q16 row products].
+	int32_t c[4][3];
+	vehicle_bounding_quad(basis.q22, half_w, half_h, px, py, pz, c);
+	// A crashed hull still falling fast rebounds at half speed (capped 0x5000) and strikes its pads
+	// through the tracked strike forces off the force records, folding them into the chassis pose
+	// at once; a crashed hull falling slower stops and re-enters the crash state, as does every
+	// crashed hull already down.
+	// [orig: @0x47E7F5..0x47E8E0: the crashed test @0x47E7F5, the in-air test @0x47E803, the
+	//  rebound @0x47E80C..0x47E844, Entity_ApplyLightVehicleSuspensionForces @0x463750 (the call
+	//  @0x47E861, the records from var_1CC), Entity_ClearSuspensionForces @0x468980 (the call
+	//  @0x47E870); vz = 0 @0x47E880; the latch +0x2EF / +0x2EC and Entity_ClearSuspensionState's
+	//  stores inline @0x47E894..0x47E8E0]
+	if (m.crashed) {
+		if ((veh.flags & kEntityFlagInAir) != 0 && io::bam_abs(m.slide_z) > 0x1000 &&
+				!m.settle_2f0) {
+			m.slide_z = io::bam_abs(io::bam_sar(m.slide_z, 1));
+			if (io::bam_abs(m.slide_z) > 0x5000)
+				m.slide_z = 0x5000;
+			const int32_t support[4] = { rec[0], rec[1], rec[2], rec[3] };
+			vehicle_apply_tracked_suspension_forces(world, veh, traits, true, support, &basis.q22);
+			vehicle_clear_chassis_forces(veh, c, 0);
+		} else {
+			if ((veh.flags & kEntityFlagInAir) != 0)
+				m.slide_z = 0;
+			contact_enter_crash(m);
+		}
+	}
 	// ---- pad contact: airborne clears unconditionally [orig: @0x47E8EE].
 	veh.flags &= ~kEntityFlagInAir;
     // The grounded spring loop over this tick's force records, its contact tests
@@ -642,18 +683,12 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
     // @0x47E8E7..0x47E956; `sub [esp+edi+..+var_1C4], eax` @0x47EBC3].
     world.vehicles.suspension_grounded_loop(veh, traits, 4, rec, pad_contact,
                                      sink_growth, corner_adj);
-    // The pad-rectangle bounding quad, in the witnessed winding — corner k
-    // sits over pad k, so the identity lift pairing is geometric here
-    // [orig: Entity_ComputeBoundingQuad @0x45B6E0 non-square arm, called
-    // @0x47DAE2/@0x47DB54: c0=(+f,+s), c1=(+f,-s), c2=(-f,-s), c3=(-f,+s), each
-    // corner the origin plus two separately rounded Q16 row products;
-    // corner_z[k] += the resolved rec_k @0x47EBF7..0x47EC05 and the catch-up
+    // Each corner lifts by its resolved record and the catch-up term
+    // [orig: corner_z[k] += the resolved rec_k @0x47EBF7..0x47EC05 and the catch-up
     // term @0x47E9EF]. A crashed hull with a spring skips the rest of each
     // pad's step, its lift included; with no spring every pad lifts
     // [orig: `cmp byte ptr [esi+2ECh], 0; jnz loc_47EC0C` @0x47E9B5 / @0x47EA33,
     //  the spring-0 jump to the lift @0x47E973..0x47E998].
-    int32_t c[4][3];
-    vehicle_bounding_quad(basis.q22, half_w, half_h, px, py, pz, c);
     const bool lift = traits.spring == 0 || m.crashed == 0;
     for (int k = 0; k < 4; ++k)
         c[k][2] = io::bam_add(io::bam_add(c[k][2], lift ? rec[k] : 0), corner_adj[k]);
@@ -747,15 +782,6 @@ void wheeled_second_pass(World &world, Entity &veh, int32_t (&probes)[13][3],
 	vehicle_contact_mass_share(world, veh, hit, dx, dy, averaged, 13);
 	px += dx;
 	py += dy;
-}
-
-// A tank contact arm entering the crash state: both crash bytes and the
-// inlined Entity_ClearSuspensionState.
-// [orig: @0x478991..0x4789DD; @0x478C80..0x478CCC; Entity_ClearSuspensionState @0x4592B0]
-void wheeled_enter_crash(Entity::VehicleMotorState &m) {
-	m.byte_2ef = 1;
-	m.crashed = 1;
-	vehicle_clear_chassis(m);
 }
 
 } // namespace
@@ -1026,7 +1052,7 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 		if (latched && support) {
 			m.wreck_2fc = 1;
 			std::fill_n(m.plat_acc, 4, 0);
-			wheeled_enter_crash(m);
+			contact_enter_crash(m);
 		}
 	}
 
@@ -1108,7 +1134,7 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 					m.skid_sound_latched = true;
 					world.vehicles.play_contact_sound(veh, traits, 25);
 				}
-				wheeled_enter_crash(m);
+				contact_enter_crash(m);
 			}
 			veh.flags &= ~kEntityFlagInAir;
 			fit_contacts = slot_contacts; // [orig: @0x478ACA..0x478AD8]
@@ -1161,10 +1187,10 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 				vehicle_clear_chassis_forces(veh, dest, 0);
 			} else {
 				m.slide_z = 0;
-				wheeled_enter_crash(m);
+				contact_enter_crash(m);
 			}
 		} else {
-			wheeled_enter_crash(m);
+			contact_enter_crash(m);
 		}
 	}
 	veh.flags &= ~kEntityFlagInAir; // [orig: @0x478CD3]
