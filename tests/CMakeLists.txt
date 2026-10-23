@@ -5611,6 +5611,9 @@ add_test(NAME reload_at_dispatch COMMAND reload_at_dispatch_test)
 add_executable(fire_press_leg_test world/fire_press_leg_test.cpp)
 target_link_libraries(fire_press_leg_test PRIVATE opennova_runtime)
 add_test(NAME fire_press_leg COMMAND fire_press_leg_test)
+add_executable(fire_send_cease_fire_test world/fire_send_cease_fire_test.cpp)
+target_link_libraries(fire_send_cease_fire_test PRIVATE opennova_runtime)
+add_test(NAME fire_send_cease_fire COMMAND fire_send_cease_fire_test)
 
 # --- parity lane R3L (R3-lite replay) ---
 # R3-lite: the retail capture run_20260426_120859's S2C stream replayed into a seeded joiner

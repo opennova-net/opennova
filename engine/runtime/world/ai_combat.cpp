@@ -600,6 +600,12 @@ bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
                              int32_t yaw_bam, int32_t pitch_bam, int32_t ammo_index,
                              int32_t fire_mode, uint8_t fire_adm) {
     if (world.tables.ammo.by_index(ammo_index) == nullptr) return false;
+    // The send refuses every shot under a cease fire at its head: no round, no ring
+    // record. The slot's fire action ran all the same (it ignores the send's return), so
+    // the caller's fire legs stand. [orig: Entity_FireWeaponAndSendPacket @0x42BD80 -
+    //  g_InCeaseFire @0x42BDB3, the exit @0x42BDC5 -> @0x42C07A; WeaponAction_Fire's call
+    //  @0x542C5E]
+    if (world.rules.cease_fire) return true;
 
     RoundEvent ev;
     ev.shooter_handle = e.handle.packed;

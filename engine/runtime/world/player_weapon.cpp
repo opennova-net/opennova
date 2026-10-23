@@ -1781,13 +1781,24 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
                 local_weapon_fire_pose(world, w, ev.fired_clip_before_consume,
                         player_view_scope_settled(view), pose);
                 const FixedVec3 fire_origin{pose[0], pose[1], pose[2]};
-				// The authority arm first passes its own-slot gate, then the
-				// round validation. [orig: Entity_FireWeaponAndSendPacket
-				//  @0x42be3a ahead of Server_ClientFiredRound @0x42bf34]
-				const bool accepted = !io.is_authority ||
+				// The fire tail reads the gun's point for the slot as the FSM
+				// leaves it: next = RECOIL (the mflash column), the clip spent. It
+				// runs whatever the send below did: the action ignores the send's
+				// return. [orig: WeaponAction_Fire tail @0x542D1F..0x542D5B; the
+				//  send's call @0x542C5E]
+				world.vehicles.weapon_recoil(*shooter,
+						w.def.actions[weapon_action::kFire].action_value, adm,
+						active_local_weapon_slot(world, w)->clip, 1);
+				// The send refuses every shot under a cease fire at its head: no
+				// round, no ring record, no C2S 0x06. Past it, the authority arm
+				// passes its own-slot gate, then the round validation.
+				// [orig: Entity_FireWeaponAndSendPacket @0x42BD80 - g_InCeaseFire
+				//  @0x42BDB3, the exit @0x42BDC5 -> @0x42C07A; @0x42be3a ahead of
+				//  Server_ClientFiredRound @0x42bf34]
+				const bool accepted = !world.rules.cease_fire && (!io.is_authority ||
 						(io.authority_fire_admitted &&
 						 weapon_fire_owner_status(world, *shooter, adm, false) == 0 &&
-						 weapon_fire_origin_status(world, *shooter, *adm, fire_origin, false) == 0);
+						 weapon_fire_origin_status(world, *shooter, *adm, fire_origin, false) == 0));
 				if (accepted) {
 				// The round bearing frame IS the engine heading frame: RoundSim's
 				// (cos, sin) mission-axis mapping is wire-validated on the 0x06 yaw
@@ -1807,12 +1818,6 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
                 // The +0xC word, an entity or a round (a flare the heat lock took).
                 const TargetRef fire_target = AiSlot::target_of(p->slot.f[3]);
                 shooter->last_fire_target = fire_target;
-				// The fire tail reads the gun's point for the slot as the FSM
-				// leaves it: next = RECOIL (the mflash column), the clip spent.
-				// [orig: WeaponAction_Fire tail @0x542D1F..0x542D5B]
-				world.vehicles.weapon_recoil(*shooter,
-						w.def.actions[weapon_action::kFire].action_value, adm,
-						active_local_weapon_slot(world, w)->clip, 1);
 
 				RoundEvent round_event;
 				round_event.shooter_handle = !io.is_authority

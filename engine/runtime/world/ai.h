@@ -1062,7 +1062,9 @@ public:
     // The record takes the slot's fire action's adm-indexed arm: `fire_mode` the
     // action's mode byte, `fire_adm` the slot's weapon, the gunner (the slot's owner)
     // the shooter. Host-only (the caller is authority-gated). An aircraft's or a
-    // handler's fire is Weapon_FireProcess, RoundSim::fire_source.
+    // handler's fire is Weapon_FireProcess, RoundSim::fire_source. False only when the
+    // ammo row is missing; a cease fire refuses the pair at the send's head and still
+    // answers true (the fire action ignores the send's return).
     // [orig: WeaponAction_Fire - the mode byte @0x542C11, the adm @0x542C1C..0x542C2F,
     //  Entity_FireWeaponAndSendPacket @0x542C5E -> Server_ClientFiredRound's local pass
     //  (the flags and adm into the ring @0x50C780..0x50C790) -> RoundData_AddRound
