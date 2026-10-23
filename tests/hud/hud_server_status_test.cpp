@@ -374,6 +374,35 @@ void test_dedicated_host_twin(const fnt_font_t *font) {
 		state.hud_color_index = 2;
 	}
 	{
+		// The hudcolor cycle stores the palette entry as it stands (D-NET-NEW-L8-42): no
+		// gameplay pass has refreshed a dedicated host's entry 2, so the cycle round to 2
+		// stores the HUD init's placeholder, black [orig: case 10 @0x49AFC7, the store
+		// @0x49AFE7; the refresh HUD_RenderAllOverlays @0x5A810C].
+		HudFrameCompiler compiler;
+		make(compiler);
+		state.hud_color_index = 1;
+		CHECK(compiler.compile_server_status_page(state, page, 10000, true, 1024.0f, 768.0f));
+		CHECK(impact_colors(compiler.server_status_page_list(), half_bright_argb(0xFF00FF00u), 2));
+		state.hud_color_index = 2;
+		CHECK(compiler.compile_server_status_page(state, page, 10200, true, 1024.0f, 768.0f));
+		CHECK(impact_colors(compiler.server_status_page_list(), 0xFF000000u, 2));
+	}
+	{
+		// A listen host's scene frame refreshed entry 2 from the hudpos text colour, so the
+		// same cycle stores that colour.
+		HudFrameCompiler compiler;
+		make(compiler);
+		state.hud_color_index = 1;
+		state.end_round.shown = false;
+		(void)compiler.compile(state, 1024.0f, 768.0f);
+		state.end_round.shown = true;
+		state.hud_color_index = 2;
+		page.mp_session_peer = true;
+		CHECK(compiler.compile_server_status_page(state, page, 10000, true, 1024.0f, 768.0f));
+		CHECK(impact_colors(compiler.server_status_page_list(), half_bright_argb(layout.hud_text), 2));
+		page.mp_session_peer = false;
+	}
+	{
 		// A listen host's scene frame restamped the twin from the hudpos text
 		// colour before its page went up.
 		HudFrameCompiler compiler;

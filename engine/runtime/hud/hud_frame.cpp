@@ -566,6 +566,9 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 // Render_ProcessMainSceneFrame @0x5cac50 -> HUD_BuildMapOverlayView @0x5a7e10].
 void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float surface_w,
 		float surface_h) {
+	// The pass refreshes palette entry 2 from the hudpos text colour at its head, ahead of
+	// the /NOHUD gate (hud_palette2_refreshed_ carries the witness).
+	hud_palette2_refreshed_ = true;
 	if ((state.overlay_master & 2u) == 0u) {
 		element_(HudElement::Spinmap, [&] { element_spinmap(state, surface_w, surface_h); });
 		return;
@@ -1677,10 +1680,15 @@ void HudFrameCompiler::sync_hud_colors_active(const HudFrameState &state) {
 	const int idx = state.hud_color_index >= 0 && state.hud_color_index <= 5
 			? state.hud_color_index
 			: 2;
+	// The cycle stores the palette entry as it stands, entry 2 the placeholder until a
+	// gameplay overlay pass has refreshed it (hud_palette2_refreshed_)
+	// [orig: Input_HandleActionBinding @0x49AD40 - case 10 @0x49AFC7, `mov eax,
+	//  g_HUDColors.palette[eax*4]` @0x49AFE0, the store @0x49AFE7].
 	if (hud_colors_active_index_ < 0)
 		hud_colors_active_ = kHudSchemeTableAtInit[idx] | 0xFF000000u;
 	else if (idx != hud_colors_active_index_)
-		hud_colors_active_ = hud_palette(idx);
+		hud_colors_active_ = idx == 2 && !hud_palette2_refreshed_ ? kHudSchemeTableAtInit[2]
+		                                                          : hud_palette(idx);
 	hud_colors_active_index_ = idx;
 }
 

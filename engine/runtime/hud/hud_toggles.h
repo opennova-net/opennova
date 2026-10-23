@@ -45,7 +45,7 @@ struct HudKeyEdge {
 
 // The toggles' shared state — the retail globals.
 struct HudToggleState {
-	int hud_color_index = kHudColorIndexDefault;      // [orig: g_HUDColors.active's index]
+	int hud_color_index = kHudColorIndexDefault;      // [orig: g_HUDColorIndex @0x24D20B8]
 	int hud_detail_level = kHudDetailLevelDefault;    // the LIVE declutter level
 	uint32_t showhud_flags = kShowHudFlagsDefault;    // [orig: g_FpWeaponViewFlags]
 	FriendlyTagMode friendly_tag_mode = kFriendlyTagModeDefault; // [orig: g_FriendlyTagsMode]

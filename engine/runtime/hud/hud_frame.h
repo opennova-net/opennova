@@ -1638,6 +1638,14 @@ private:
 	// page, which no gameplay pass precedes, keeps the seed.
 	uint32_t hud_colors_active_ = 0;
 	int hud_colors_active_index_ = -1; // -1 = not seeded yet
+	// Whether a gameplay overlay pass has refreshed g_HUDColors.palette entry 2 from the
+	// hudpos text colour since the HUD init left it the 0xFF010101 placeholder: the pass
+	// stores it at its head, past its early-outs, and nothing else writes the entry, so a
+	// dedicated host's (no gameplay pass) keeps the placeholder, which the hudcolor cycle's
+	// raw palette[index] store then reads (D-NET-NEW-L8-42) [orig: HUD_RenderAllOverlays
+	// @0x5A8070 - the level-3 return @0x5A80C4, the store @0x5A810C; the cycle @0x49AFE0 /
+	// @0x49AFE7].
+	bool hud_palette2_refreshed_ = false;
 	int silhouette_stamp_ = 0;
 	uint64_t silhouette_vehicle_ = 0;
 	std::string silhouette_weapon_;
