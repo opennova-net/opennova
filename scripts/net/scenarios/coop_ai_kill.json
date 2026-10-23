@@ -7,6 +7,12 @@
   "staging": [
     {"slot": 1, "position_bms": [243.3, 840.05, 42.88]}
   ],
+  "staging_tick_phase": {
+    "modulus": 256,
+    "value": 176,
+    "tolerance": 7,
+    "why": "Which camp AI perceives, turns on and hits the staged joiner first is set by the host tick the staging lands on, not by the game (L4-s32, ruling R-L4-s32-1): each AI's think key is g_CurrentTick + 36 x DcbId (Entity_UpdateInfantryAI @0x4B9948..0x4B9953), perception runs when key & 0x1F is 0 with its range staged by (key >> 5) & 3 (@0x4BBE3E..0x4BBEB3: phases 1 and 3 reach 6 units at most), and the aim error is a sawtooth in the same key, so every topology stages at one host tick mod 256. The shooters' DcbIds are their 01TR.bms records' +8 words (Entity_SpawnFromBMSRecord @0x40EBC1): 0x0000 6, 0x0027 41 and 0x0028 42 stand within 6 units of the spot and perceive every 32 ticks, at host tick mod 32 = 8, 28 and 24; 0x0001 7, 0x0006 10 and 0x0019 35 stand 17 to 28 units off and see that far only on range phases 0 and 2, every 64 ticks, at host tick mod 64 = 4, 24 and 20. 176 (48 mod 64) sits 8 ticks after 0x0000's boundary at 168 and 8 before 0x0028's at 184, the widest gap between them, so a staging that lands within 7 ticks of it keeps every AI's first perception; x8's OR host staged at 174 and drew class A, the class retail's x8 RR and x9 RO drew (L4-s32's table)."
+  },
   "setup": {"pose": {"position_bms": [243.3, 840.05, 42.88], "yaw": 288, "pitch": -32}},
   "steps": [
     {"tick": 0, "down": 149},

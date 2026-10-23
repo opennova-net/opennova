@@ -702,9 +702,17 @@ static func _build_definitions() -> Array[ProbeDef]:
 				+ "{slot, position_bms} writes the three Position words of the body that player "
 				+ "slot holds (the authority-side twin of the onHook bridge's apply_pose_slot); "
 				+ "position only, any other field refused; a result per entry, passing only if "
-				+ "every entry staged.",
+				+ "every entry staged. `phase_modulus` above 0 stages on the first frame whose "
+				+ "logic tick reaches `phase_value` mod `phase_modulus`, at most "
+				+ "`phase_tolerance` past it (the runner's staging_tick_phase).",
 				NET + "stage_slot_probe.gd", {
 					"staging": { "type": "array", "minItems": 1, "items": { "type": "object" } },
+					"phase_modulus": { "type": "integer", "minimum": 0, "maximum": 1024,
+							"default": 0 },
+					"phase_value": { "type": "integer", "minimum": 0, "maximum": 1023,
+							"default": 0 },
+					"phase_tolerance": { "type": "integer", "minimum": 0, "maximum": 64,
+							"default": 0 },
 				}, ["staging"], false, true, 60_000),
 		ProbeDef.make("use_press_trace",
 				"The USE readout (Simulation.debug_use_press_trace): the engine's last 64 USE "

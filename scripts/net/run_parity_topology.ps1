@@ -310,7 +310,7 @@ function Read-ParityScenario {
     }
     $spec = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
     $expected = @("schema", "name", "mission", "game_type", "actor", "prelude",
-        "setup", "staging", "steps", "settle_seconds", "expect", "ends_joiner_session")
+        "setup", "staging", "staging_tick_phase", "steps", "settle_seconds", "expect", "ends_joiner_session")
     $extra = @($spec.PSObject.Properties.Name | Where-Object { $_ -notin $expected })
     if ($extra.Count -gt 0) {
         throw "Scenario $Path has unknown fields: $($extra -join ', ')"
@@ -410,6 +410,26 @@ function Read-ParityScenario {
                     @($fields | Where-Object { $_ -notin @("slot", "position_bms") }).Count -gt 0) {
                 throw "Scenario $($spec.name): each staging entry is a slot 0..254 and its position_bms [x, y, z], no heading"
             }
+        }
+    }
+    # R-L4-s32-1: the host tick the staging lands on, {modulus, value,
+    # tolerance, why} (Invoke-ScenarioStaging): every topology stages when the
+    # host's tick mod `modulus` reaches `value`, and a staging that lands more
+    # than `tolerance` ticks off it fails the cell. One lap of the modulus is at
+    # most 1024 ticks (16.5 s), inside the stage_slot probe's wait.
+    if ($spec.PSObject.Properties.Name -contains "staging_tick_phase") {
+        $phase = $spec.staging_tick_phase
+        if (-not ($spec.PSObject.Properties.Name -contains "staging")) {
+            throw "Scenario $($spec.name): staging_tick_phase times a staging, and it lists none"
+        }
+        $fields = @(if ($phase -is [pscustomobject]) { $phase.PSObject.Properties.Name })
+        if ((@($fields | Sort-Object) -join ",") -cne "modulus,tolerance,value,why" -or
+                -not (Test-JsonInteger $phase.modulus) -or $phase.modulus -lt 2 -or $phase.modulus -gt 1024 -or
+                -not (Test-JsonInteger $phase.value) -or $phase.value -lt 0 -or $phase.value -ge $phase.modulus -or
+                -not (Test-JsonInteger $phase.tolerance) -or $phase.tolerance -lt 1 -or
+                $phase.tolerance -gt 64 -or 2 * $phase.tolerance -ge $phase.modulus -or
+                $phase.why -isnot [string] -or [string]::IsNullOrWhiteSpace($phase.why)) {
+            throw "Scenario $($spec.name): staging_tick_phase is {modulus 2..1024, value 0..modulus-1, tolerance 1..64 under half the modulus, why}"
         }
     }
     # A menu click is onHook's (click: opennova-int #75, a named menu widget
@@ -2115,16 +2135,91 @@ function Write-ScenarioPoseSnapshot {
 # host's [orig: Entity_UpdateInfantryPlayerBody @0x4B42C1..0x4B434A]. The
 # snapshot format needs an orientation, so the retail leg writes yaw 0 and
 # pitch 0; the player's own client puts its heading back on the next frame.
+#
+# A scenario's staging_tick_phase (R-L4-s32-1) stages on one host-tick phase on
+# every topology: a camp AI's think key is the host's g_CurrentTick + 36 x
+# DcbId [orig: Entity_UpdateInfantryAI @0x4B9948..0x4B9953], its perception
+# runs when the key & 0x1F is 0 with its range staged by (key >> 5) & 3
+# [orig: @0x4BBE3E..0x4BBEB3] and its aim error is a sawtooth in the same key,
+# so which AI sees, turns on and hits a staged player first is set by the tick
+# the staging lands on (L4-s32: one aim class gives the same shot on both
+# hosts). An OpenNova host stages inside the stage_slot probe on the first
+# frame whose logic tick reaches the value (exact; the probe reports it). A
+# retail host's tick is onhook_pool_entities' logic_tick, g_CurrentTick at its
+# frame callback: the runner reads it until the value is at most 6 ticks
+# ahead and stages, the pose landing on the frame callback after
+# onhook_load_debug_snapshot returns (from the read's sample to the landing
+# about 5 ticks: x8 / x9's 35..51 ms reads, 31..65 ms calls, one frame), so the
+# landing centres on the value as the probe's does; a read after the last
+# entry bounds it. A staging outside value +- tolerance fails the cell.
+function Get-TickPhaseOffset {
+    param([long] $Tick, $Phase)
+    # The signed distance from the phase's value, in -modulus/2 .. modulus/2-1.
+    $modulus = [long] $Phase.modulus
+    $half = [long] [Math]::Floor($modulus / 2)
+    return (((($Tick - [long] $Phase.value + $half) % $modulus) + $modulus) % $modulus) - $half
+}
+
+function Read-RetailHostTick {
+    param([Parameter(Mandatory = $true)] [string] $RetailHostInstanceId)
+    $pool = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_pool_entities" -Arguments @{
+        instance_id = $RetailHostInstanceId
+        pool = 0
+        max = 1
+    })
+    if (-not ($pool.PSObject.Properties.Name -contains "logic_tick") -or $null -eq $pool.logic_tick) {
+        throw "Staging tick phase: the retail host's pool read carries no logic_tick (its g_CurrentTick did not resolve)"
+    }
+    return [long] $pool.logic_tick
+}
+
+function Wait-RetailHostTickPhase {
+    param([Parameter(Mandatory = $true)] [string] $RetailHostInstanceId, [Parameter(Mandatory = $true)] $Phase)
+    $leadTicks = 6
+    $modulus = [long] $Phase.modulus
+    $started = [DateTime]::UtcNow
+    $deadline = $started.AddSeconds(30)
+    $reads = 0
+    while ($true) {
+        $tick = Read-RetailHostTick -RetailHostInstanceId $RetailHostInstanceId
+        ++$reads
+        $ahead = ((([long] $Phase.value - $tick) % $modulus) + $modulus) % $modulus
+        if ($ahead -le $leadTicks) {
+            return [pscustomobject][ordered]@{
+                tick = $tick
+                ahead = $ahead
+                lead_ticks = $leadTicks
+                reads = $reads
+                waited_ms = [int] ([DateTime]::UtcNow - $started).TotalMilliseconds
+            }
+        }
+        if ([DateTime]::UtcNow -ge $deadline) {
+            throw "Staging tick phase: the retail host's tick never came within $leadTicks of $($Phase.value) mod $modulus in 30 s ($reads reads, last $tick)"
+        }
+        # Sleep through most of the gap at 62 ticks a second; the last 8 ticks
+        # are read back to back.
+        $sleepTicks = $ahead - $leadTicks - 8
+        if ($sleepTicks -gt 0) { Start-Sleep -Milliseconds ([int] ($sleepTicks * 1000 / 62)) }
+    }
+}
+
 function Invoke-ScenarioStaging {
     param([string] $RetailHostInstanceId = "")
     $spec = $script:ScenarioSpec
     if (-not ($spec.PSObject.Properties.Name -contains "staging")) { return $null }
+    $phase = if ($spec.PSObject.Properties.Name -contains "staging_tick_phase") { $spec.staging_tick_phase } else { $null }
     if ($Topology -in @("OR", "OO")) {
         $staging = @(@($spec.staging) | ForEach-Object {
             @{ slot = [int] $_.slot; position_bms = @($_.position_bms) }
         })
+        $probeArgs = @{ staging = $staging }
+        if ($phase) {
+            $probeArgs.phase_modulus = [int] $phase.modulus
+            $probeArgs.phase_value = [int] $phase.value
+            $probeArgs.phase_tolerance = [int] $phase.tolerance
+        }
         $status = Invoke-GameProbe -Port $HostMcpPort -Name "stage_slot" -Process $script:OpenNovaHost `
-            -TimeoutSeconds 120 -PollMs 500 -Arguments @{ staging = $staging }
+            -TimeoutSeconds 120 -PollMs 500 -Arguments $probeArgs
         $data = if ($status.verdict) { $status.verdict.data } else { $null }
         $entries = @(if ($data -and $data.PSObject.Properties["entries"]) { $data.entries })
         $refused = @($entries | Where-Object { [string] $_.result -ne "staged" } |
@@ -2136,26 +2231,63 @@ function Invoke-ScenarioStaging {
                 else { [string] $status.error }
             throw "OpenNova host did not stage scenario $($spec.name): state=$($status.state) $why"
         }
-        return [pscustomobject]@{ driver = "stage_slot"; logic_tick = $data.logic_tick; entries = $entries }
+        $tickPhase = $null
+        if ($phase) {
+            $offset = Get-TickPhaseOffset -Tick ([long] $data.logic_tick) -Phase $phase
+            if ([Math]::Abs($offset) -gt [long] $phase.tolerance) {
+                throw "OpenNova host staged scenario $($spec.name) at tick $($data.logic_tick), $offset off $($phase.value) mod $($phase.modulus) (tolerance $($phase.tolerance))"
+            }
+            $tickPhase = [pscustomobject][ordered]@{
+                modulus = [int] $phase.modulus
+                value = [int] $phase.value
+                tolerance = [int] $phase.tolerance
+                staged_tick = [long] $data.logic_tick
+                offset = $offset
+                waited_ms = $(if ($data.PSObject.Properties["tick_phase"]) { $data.tick_phase.waited_ms } else { $null })
+            }
+        }
+        return [pscustomobject]@{ driver = "stage_slot"; logic_tick = $data.logic_tick; entries = $entries; tick_phase = $tickPhase }
     }
     if (-not $RetailHostInstanceId) {
         throw "Scenario staging on $Topology needs the retail host's instance id"
     }
+    # The snapshots are written first, so the phase read leads straight into
+    # the first call.
+    $paths = @(for ($index = 0; $index -lt @($spec.staging).Count; ++$index) {
+        $path = Join-Path $RunRoot "scenario-staging-$index.debug_snapshot.json"
+        Write-ScenarioPoseSnapshot -Path $path -Pose ([pscustomobject]@{
+            position_bms = @(@($spec.staging)[$index].position_bms); yaw = 0; pitch = 0
+        })
+        $path
+    })
+    $before = if ($phase) { Wait-RetailHostTickPhase -RetailHostInstanceId $RetailHostInstanceId -Phase $phase } else { $null }
     $applied = [System.Collections.Generic.List[object]]::new()
     $index = 0
     foreach ($entry in @($spec.staging)) {
-        $path = Join-Path $RunRoot "scenario-staging-$index.debug_snapshot.json"
-        Write-ScenarioPoseSnapshot -Path $path -Pose ([pscustomobject]@{
-            position_bms = @($entry.position_bms); yaw = 0; pitch = 0
-        })
         $applied.Add((Get-StructuredResult (Invoke-OnHookTool -Name "onhook_load_debug_snapshot" -Arguments @{
             instance_id = $RetailHostInstanceId
-            path = $path
+            path = $paths[$index]
             target_slot = [int] $entry.slot
         })))
         ++$index
     }
-    return [pscustomobject]@{ driver = "onhook_load_debug_snapshot"; entries = $applied.ToArray() }
+    $tickPhase = $null
+    if ($phase) {
+        $after = Read-RetailHostTick -RetailHostInstanceId $RetailHostInstanceId
+        $tickPhase = [pscustomobject][ordered]@{
+            modulus = [int] $phase.modulus
+            value = [int] $phase.value
+            tolerance = [int] $phase.tolerance
+            read_before = $before
+            tick_after = $after
+            offset_before = Get-TickPhaseOffset -Tick $before.tick -Phase $phase
+            offset_after = Get-TickPhaseOffset -Tick $after -Phase $phase
+        }
+        if ([Math]::Abs($tickPhase.offset_after) -gt [long] $phase.tolerance) {
+            throw "Retail host staged scenario $($spec.name) between ticks $($before.tick) and $after, past $($phase.value) mod $($phase.modulus) + $($phase.tolerance)"
+        }
+    }
+    return [pscustomobject]@{ driver = "onhook_load_debug_snapshot"; entries = $applied.ToArray(); tick_phase = $tickPhase }
 }
 
 # One read of a player's own body for the window-open wait: a retail process's
