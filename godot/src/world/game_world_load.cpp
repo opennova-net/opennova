@@ -12,6 +12,7 @@
 
 #include <base/gameprofile/resource_missing.h>
 #include <formats/mission/bms_edit.h>
+#include <runtime/inmatch/joiner_role.h> // run_loading_step (the loading steps' periodic update)
 #include <runtime/inmatch/loaded_model_list.h> // avatar_combo_models (the 0x11's avatar loads)
 #include <runtime/ragdoll/ragdoll_option.h>
 #include <runtime/environment/celestial_frame.h> // builds_celestial_draws (the bodies' arm)
@@ -686,15 +687,12 @@ void GameWorld::pulse_load_progress(int p_percent) {
 // witness, D-NET-NEW-L2-54): the drive holds that simulation until the runtime adopts it. The
 // join's update runs the NovaWorld session's own half past its manager receive; any other load (a
 // NovaWorld host's) runs that half alone, the process's held session's pump (engine:
-// inmatch::ClientProcessState::nwu_periodic_update, D-NET-NEW-L9-25).
+// inmatch::run_loading_step, D-NET-NEW-L9-25).
 void GameWorld::pump_join_load_step() {
 	Ref<Simulation> sim = get_sim();
 	if (sim.is_null()) sim = drive_.join_preload_simulation();
-	if (sim.is_valid() && sim->is_joiner()) {
-		sim->pump_join_mission_start_periodic_update();
-		return;
-	}
-	if (client_process_.nwu_periodic_update) client_process_.nwu_periodic_update();
+	opennova::inmatch::run_loading_step(sim.is_valid() ? sim->loading_step_joiner() : nullptr,
+			client_process_);
 }
 
 // Populate the world with the mission's placed objects under the mission

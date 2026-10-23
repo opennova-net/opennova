@@ -1046,10 +1046,6 @@ void Simulation::push_join_mission_start_first_loadout() {
 	if (joiner_role_ != nullptr) joiner_role_->push_mission_start_first_loadout();
 }
 
-void Simulation::pump_join_mission_start_periodic_update() {
-	if (joiner_role_ != nullptr) joiner_role_->pump_mission_start_periodic_update();
-}
-
 void Simulation::materialize_join_world_stream() {
 	if (joiner_role_ != nullptr) joiner_role_->materialize_world_stream();
 }

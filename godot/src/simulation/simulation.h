@@ -941,11 +941,9 @@ public:
 	// ClientRuntime::push_mission_start_first_loadout): the first 0x2F; nothing before the
 	// release or after the leg ran.
 	void push_join_mission_start_first_loadout();
-	// The NovaWorld session's periodic update at a step of a declared load (that one, the 0x11's
-	// terrain, the final 0x64's effects; engine:
-	// inmatch::JoinerRole::pump_mission_start_periodic_update, D-NET-NEW-L2-54): a NovaWorld
-	// join's reads the socket, a LAN join's nothing.
-	void pump_join_mission_start_periodic_update();
+	// The join's role a loading step runs its periodic update on (engine: inmatch::run_loading_step,
+	// D-NET-NEW-L2-54, D-NET-NEW-L9-25), null on any other session.
+	opennova::inmatch::JoinerRole *loading_step_joiner() const { return joiner_role_; }
 	// The streamed pools into the World ahead of the settle's placement (engine:
 	// inmatch::JoinerRole::materialize_world_stream, D-NET-NEW-L2-38).
 	void materialize_join_world_stream();

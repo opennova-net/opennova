@@ -622,4 +622,13 @@ private:
 	std::vector<world::CollisionWorld::ReplicaPeer> replica_peer_scratch_;
 };
 
+// One loading step of a mission load (the embedder's, standing for retail's), whatever the role:
+// a join's periodic update (JoinerRole::pump_mission_start_periodic_update: its manager receive,
+// then the NovaWorld session's half), any other load's (a NovaWorld host's) the session's half
+// alone (ClientProcessState::nwu_periodic_update, D-NET-NEW-L9-25); nothing without a held
+// NovaWorld session.
+// [orig: Game_StartMission @0x524360 - CNapiGameSession_ProcessPeriodicUpdate called at its
+//  loading steps with no role test, the head's call @0x5243CA among them]
+void run_loading_step(JoinerRole *joiner, const ClientProcessState &process);
+
 } // namespace opennova::inmatch

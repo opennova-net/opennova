@@ -869,7 +869,9 @@ private:
 	// A loading step of a join's declared loads (the S2C 0x11's terrain, the final 0x64's
 	// effects, the 0x1A's stage emits): the NovaWorld session's periodic update on the join's
 	// simulation, the drive's until the runtime adopts it (engine
-	// inmatch::JoinerRole::pump_mission_start_periodic_update, D-NET-NEW-L2-54); no-ops elsewhere.
+	// inmatch::JoinerRole::pump_mission_start_periodic_update, D-NET-NEW-L2-54); on any other load
+	// (a NovaWorld host's) the held session's half alone (engine: inmatch::run_loading_step,
+	// D-NET-NEW-L9-25); nothing without a NovaWorld session.
 	void pump_join_load_step();
 	// The terrain's .trn, overcast.def and the named .env over the engine
 	// defaults, as the time-of-day load reads them; never fails.

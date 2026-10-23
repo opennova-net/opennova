@@ -1854,17 +1854,29 @@ bool run_a_loading_step_answers_a_ping_on_novaworld() {
 	return true;
 }
 
-// D-NET-NEW-L9-25: each periodic update of a NovaWorld join's load runs the process's NovaWorld
-// session's own half (its NOVAWORLDUDP protocol's pump, its state and GLSVSS legs) past the
-// update's manager receive. At the embedder's loading step the WR ping's pong is already on the
-// socket when the session's half runs; nothing runs outside a declared load or on a LAN join. In
-// the mission start's legs the session's half runs once per periodic update: the first leg's six
-// (one ahead of its receive, one past it, one per send pump of the four) and the push's four.
+// D-NET-NEW-L9-25: each periodic update of a mission load runs the process's NovaWorld session's
+// own half (its NOVAWORLDUDP protocol's pump, its state and GLSVSS legs), whatever the role. A
+// host's loading step (no join) runs it alone, once, and nothing without a held session. A
+// NovaWorld join's runs it past the update's manager receive: the WR ping's pong is already on
+// the socket when the session's half runs; nothing runs outside a declared load or on a LAN
+// join. In the mission start's legs the session's half runs once per periodic update: the first
+// leg's six (one ahead of its receive, one past it, one per send pump of the four) and the push's
+// four.
 // [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - NapiNPManager_Pump(flags 4) @0x4D441F
-//  ahead of NapiNPProtocol_Pump(-1) @0x4D442E; Game_StartMission @0x524360 - the updates
-//  @0x525405..0x52571F, @0x52578E, @0x525889, @0x5258BC, @0x525962, @0x525A57, @0x525A8E,
-//  @0x525B09, @0x525BE3, @0x525D33]
+//  ahead of NapiNPProtocol_Pump(-1) @0x4D442E; Game_StartMission @0x524360 - the head's update
+//  @0x5243CA (no role test), the updates @0x525405..0x52571F, @0x52578E, @0x525889, @0x5258BC,
+//  @0x525962, @0x525A57, @0x525A8E, @0x525B09, @0x525BE3, @0x525D33]
 bool run_a_loading_step_runs_the_novaworld_sessions_update() {
+	{
+		// A host's load: no join to pump, the held session's half alone.
+		inmatch::ClientProcessState process;
+		int updates = 0;
+		inmatch::run_loading_step(nullptr, process); // no NovaWorld session held: nothing
+		process.nwu_periodic_update = [&updates] { ++updates; };
+		inmatch::run_loading_step(nullptr, process);
+		if (!expect(updates == 1, "host: a loading step runs the held session's half alone"))
+			return false;
+	}
 	for (const bool novaworld : {true, false}) {
 		// The process outlives the harness whose runtime points at it.
 		inmatch::ClientProcessState process;
@@ -1879,7 +1891,7 @@ bool run_a_loading_step_runs_the_novaworld_sessions_update() {
 			return false;
 		h.load_declared = true;
 		sent_at_update.clear();
-		h.role.pump_mission_start_periodic_update();
+		inmatch::run_loading_step(&h.role, process);
 		if (!expect(sent_at_update.empty(), "session update: nothing outside a declared load"))
 			return false;
 		(void)h.frame({make_protocol_message(0x1A, {})});
@@ -1888,7 +1900,7 @@ bool run_a_loading_step_runs_the_novaworld_sessions_update() {
 		h.client.receive(ping.data(), ping.size());
 		sent_at_update.clear();
 		const std::size_t from = h.socket.sent.size();
-		h.role.pump_mission_start_periodic_update();
+		inmatch::run_loading_step(&h.role, process);
 		if (!expect(novaworld ? sent_at_update == std::vector<std::size_t>{from + 1}
 		                      : sent_at_update.empty(),
 				novaworld ? "NovaWorld: the loading step runs the session's half past the pong"

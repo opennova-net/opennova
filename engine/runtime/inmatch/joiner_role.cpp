@@ -274,6 +274,14 @@ void JoinerRole::pump_mission_start_periodic_update() {
 		client_process_->nwu_periodic_update();
 }
 
+void run_loading_step(JoinerRole *joiner, const ClientProcessState &process) {
+	if (joiner != nullptr) {
+		joiner->pump_mission_start_periodic_update();
+		return;
+	}
+	if (process.nwu_periodic_update) process.nwu_periodic_update();
+}
+
 // Drain every datagram pending on the socket into the runtime's recv fold
 // (the witnessed poll-before-logic order [orig: Game_ProcessMainFrame
 // @0x5263f0]). A held node's joiner's datagram (a server an earlier error-arm exit left
