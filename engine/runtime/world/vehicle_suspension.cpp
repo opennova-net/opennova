@@ -66,7 +66,7 @@ void store_osc(Entity::VehicleMotorState::WheelOsc &w, const ConformOscillator &
 //  0x47e32c airborne]: the corner target drops by the sink beyond one growth
 //  step, and a drop past -5000 while falling marks the hard landing.
 void catch_up(Entity::VehicleMotorState &m, int k, int32_t growth, bool grounded,
-              const bool contact[4], int32_t corner_adj[4], bool tank = false, bool bike = false) {
+              const bool contact[4], int32_t corner_adj[4], bool tank = false) {
 	int32_t c = m.plat_acc[k] - growth;
 	if (grounded && tank) {
 		// The tank's grounded twin skips the WHOLE block — the pair clear
@@ -81,17 +81,10 @@ void catch_up(Entity::VehicleMotorState &m, int k, int32_t growth, bool grounded
 		return; // [orig: test/jle @0x47e307..0x47e309]
 	}
 	c = -c;
-	// `entity+0x60 > 0` is the override freeze (never set here); k < 4 always.
-    // [orig: Entity_ProcessLightVehiclePhysics @ 0x47B4AA, 0x47B992]
-    if (!bike || !m.wheelie_request) corner_adj[k] += c;
+	corner_adj[k] += c;
 	if (grounded) {
-		// A same-side pad pair in contact clears the marker instead
-		// [orig: @0x47e9f6..0x47ea12; the bike's pair clear
-		//  Entity_ProcessLightVehiclePhysics @0x479600 -- `cmp var_250, edx;
-		//  jz; cmp var_24C, edx; jz; mov [esi+2EEh], dl` (dl == 0)
-		//  @0x47B977..0x47B986 inside the two-wheel loop @0x47B930..0x47BB7D].
-		if (bike ? (contact[0] && contact[1]) :
-                ((contact[0] && contact[3]) || (contact[1] && contact[2]))) {
+		// A same-side pad pair in contact clears the marker instead [orig: @0x47e9f6..0x47ea12].
+		if ((contact[0] && contact[3]) || (contact[1] && contact[2])) {
 			m.landing_2ee = 0;
 			return;
 		}
@@ -219,8 +212,7 @@ void VehicleSystem::suspension_grounded_loop(Entity &veh, const VehicleTraits &t
 		// [orig: @0x47e9a1..0x47e9bc].
 		if (!contact[k] && m.crash_request == 0) {
 			if (m.crashed != 0) continue;
-			catch_up(m, k, growth, /*grounded=*/true, contact, corner_adj,
-                    false, traits.family == VehicleFamily::Bike);
+			catch_up(m, k, growth, /*grounded=*/true, contact, corner_adj);
 		}
 		if (m.crashed != 0) continue; // [orig: @0x47ea33..0x47ea3a]
 		ConformOscillator osc = load_osc(m.wheel_osc[k]);
@@ -375,6 +367,76 @@ void VehicleSystem::suspension_air_grounded_loop(Entity &veh, const VehicleTrait
 	}
 }
 
+// The bike's own grounded loop over its two wheels, with no crash gate anywhere: a wheel off
+// the ground drops its corner by its sink beyond one growth step (only past it; no hard-landing
+// marker: the +0x2EE store there needs both wheels down inside the one-wheel-off test, so it is
+// dead), then the tracked loop's impulse, settle term (against wheel 0's amplitude) and compress
+// arm, and the free decay gated on the two wheel sinks alone; the resolved depth lifts the
+// corner. The entity+0x60 freeze (the record held at the pair's max) is never set here.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - the loop @0x47B8CE..0x47BB7D (the wheel
+//  body @0x47B930): the min
+//  @0x47B8CE..0x47B90F (100000 init @0x47B598), spring 0 to the lift @0x47B933..0x47B93A; the
+//  catch-up @0x47B960..0x47B9A0 (`sub eax, 64h; test eax, eax; jle` @0x47B96E..0x47B973, the dead
+//  store @0x47B977..0x47B986, +0x60 @0x47B98C, +0x3DD @0x47B992); the impulse @0x47B9A7..0x47BA14
+//  (thr @0x47B9AF..0x47B9C2); the settle term @0x47BA16..0x47BA86 (`[esi+304h]` @0x47BA2D); the
+//  compress @0x47BA89..0x47BAEC (Suspension_CompressWheelQuadratic @0x45CFB0, the calls @0x47BAD0
+//  / @0x47BAE4); the decay @0x47BAEE..0x47BB18 (sinks 0 / 1 @0x47BAFC / @0x47BB04,
+//  Suspension_OscillateWheelFast @0x45D110, the call @0x47BB13); `sub [esp+edi+..+var_1F4], eax`
+//  @0x47BB1B; +0x60 @0x47BB22]
+void VehicleSystem::suspension_bike_grounded_loop(Entity &veh, const VehicleTraits &traits,
+		int32_t depth[2], const bool contact[2], int32_t corner_adj[2]) {
+	World &world = world_;
+	Entity::VehicleMotorState &m = veh.veh;
+	if (traits.spring == 0)
+		return;
+	const int32_t min_depth = std::min(100000, std::min(depth[0], depth[1]));
+	const int32_t travel = conform_travel_from_def(traits.spring_comp);
+	const int32_t thr = traits.spring_comp <= 10 ? kImpulseThresholdSoft : kImpulseThresholdHard;
+	int32_t loose_shock = 0;
+	int32_t &shock = shock_field(world, veh, traits, loose_shock);
+	for (int k = 0; k < 2; ++k) {
+		if (!contact[k]) {
+			const int32_t c = m.plat_acc[k] - kSinkGrowthBike;
+			if (c > 0 && !m.wheelie_request)
+				corner_adj[k] -= c;
+		}
+		ConformOscillator osc = load_osc(m.wheel_osc[k]);
+		if (m.plat_acc[k] > thr && contact[k]) {
+			const int32_t a = std::abs(m.plat_acc[k]);
+			const int32_t sq = wrap_mul(wrap_mul(traits.mass, a), a);
+			osc.energy += conform_half_energy(sq);
+			if (osc.energy < 0) osc.energy = 0x1000000;
+			m.spring_energy += static_cast<int32_t>(
+					static_cast<double>(osc.energy) * static_cast<double>(1.25f));
+		} else if (m.spring_energy <= 0) {
+			int32_t e = depth[k] - min_depth;
+			if (e > m.wheel_osc[0].amplitude) {
+				e -= m.wheel_osc[0].amplitude;
+				if (e > 0) {
+					if (e > kSpringStepCap) e = kSpringStepCap;
+					const int32_t sq = wrap_mul(wrap_mul(2 * traits.spring, e), e);
+					osc.energy += conform_half_energy(sq);
+				}
+			}
+		}
+		int32_t delta = 0;
+		if (osc.energy > 0) {
+			const int32_t q = (2 * osc.energy) / (2 * traits.spring);
+			int32_t step = static_cast<int32_t>(std::sqrt(static_cast<double>(q)));
+			if (step <= 0) osc.energy = 0;
+			if (step > kSpringStepCap) step = kSpringStepCap;
+			delta = conform_spring_compress(osc, m.wheel_comp[k], m.spring_energy,
+			                                step, travel, traits.spring);
+		} else if (osc.amplitude != 0 && m.plat_acc[0] < kOscillateSinkCeiling &&
+		           m.plat_acc[1] < kOscillateSinkCeiling) {
+			delta = conform_spring_oscillate(osc, m.wheel_comp[k], m.spring_energy,
+			                                 shock, traits.spring, m.slide_z);
+		}
+		depth[k] -= delta;
+		store_osc(m.wheel_osc[k], osc);
+	}
+}
+
 // The bike's own airborne loop, not the platform twin: no settled or crash
 // gate, the spring step per wheel, then the corner droop only while the nose
 // is above -0x1000 or the flight is under 16 ticks. The droop scales the
@@ -384,7 +446,7 @@ void VehicleSystem::suspension_air_grounded_loop(Entity &veh, const VehicleTrait
 //  @0x47B401..0x47B4E6: compress @0x47B431 / oscillate @0x47B444, the gate
 //  @0x47B44C..0x47B45D (fwd.z from Math_ExtractRow0FromFixedPoint22 @0x4798D6,
 //  +0x3D4), the rear clear @0x47B461..0x47B48A, the droop `fmul flt_7C6F68`
-//  (-1.5f) @0x47B498..0x47B4BC, the hard-landing mark @0x47B4BE..0x47B4CE]
+//  (-1.5f) @0x47B498..0x47B4BC under !+0x3DD @0x47B4AA, the hard-landing mark @0x47B4BE..0x47B4CE]
 void VehicleSystem::suspension_bike_airborne_loop(Entity &veh, const VehicleTraits &traits,
 		int32_t fwd_z16, int32_t corner_adj[2]) {
 	World &world = world_;

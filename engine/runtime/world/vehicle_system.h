@@ -334,6 +334,12 @@ public:
     //  growth step, and a diagonal pair in contact clears the hard-landing marker.
     void suspension_air_grounded_loop(Entity &veh, const VehicleTraits &traits,
 			int32_t depth[4], const bool contact[4], int32_t growth, int32_t corner_adj[4]);
+    // 3a''. The bike's GROUNDED spring loop [orig: Entity_ProcessLightVehiclePhysics @0x479600,
+    //  the loop @0x47B8CE..0x47BB7D]: two wheels and no crash gate; the catch-up only past one
+    //  growth step, with no hard-landing marker; the tracked loop's impulse, settle term and
+    //  compress arm; the free decay gated on the two wheel sinks.
+    void suspension_bike_grounded_loop(Entity &veh, const VehicleTraits &traits, int32_t depth[2],
+			const bool contact[2], int32_t corner_adj[2]);
     // 3b. The AIRBORNE spring loop [orig: @0x47E283..0x47E344], gated on
     //  settle_2f0 == 0: energy > 0 → compress by the full 4095 step, else amp != 0
     //  → free decay; then the catch-up under !crashed && !crash_request. The

@@ -510,6 +510,26 @@ void bike_sinks_flush_under_water() {
     }
 }
 
+// D-NET-NEW-L6-29: the bike's grounded spring loop has no crash gate: a crashed bike landing hard
+// on its front wheel takes the impulse and compresses that wheel's spring.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - the loop @0x47B8CE..0x47BB7D, the impulse
+//  @0x47B9A7..0x47BA14]
+void bike_crashed_wheel_takes_the_landing_impulse() {
+    Rig r;
+    auto t = r.traits(VehicleFamily::Bike, true);
+    t.spring = 8;
+    t.spring_comp = 20;
+    t.shock = 4;
+    auto &v = r.entity();
+    auto &m = v.veh;
+    m.crashed = 1;
+    m.plat_acc[0] = 6000; // past the 5000 threshold (spring_comp > 10)
+    int32_t z = to_fixed(v.position.z);
+    r.contact(t, z);
+    CHECK((v.flags & kEntityFlagInAir) == 0);
+    CHECK(m.wheel_comp[0] != 0);
+}
+
 // A climbing track can be supported by its inboard belly station while its
 // outer wheel is clear. Retail uses max(wheel, belly) for sink growth, spring
 // catch-up and the retained-contact tail. [orig: @ 0x4784CC..0x47853A,
@@ -1070,6 +1090,7 @@ int main() {
     bike_pair_clear_is_ungated();
     bike_unleaned_drops_lean_rates();
     bike_sinks_flush_under_water();
+    bike_crashed_wheel_takes_the_landing_impulse();
     bike_off_contact_planar_forward();
     vehicle_respawn_reseeds_destroy_timer();
     bike_indestructible_hull_skips_impact_damage();

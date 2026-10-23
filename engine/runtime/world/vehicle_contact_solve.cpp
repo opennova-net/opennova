@@ -1860,13 +1860,9 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 		light_tail();
 		return;
 	}
-    // The bike's spring loop over its two wheel depths (the quadratic/fast
-    // pair, the same kernels as the tracked solve; run with the tracked loop's
-    // shape — vehicle_suspension.h names the bike's own loop a residual)
-    // [orig: the light solve's Suspension_CompressWheelQuadratic @0x47B431 /
-    //  @0x47BAD0 and OscillateWheelFast calls].
-    world.vehicles.suspension_grounded_loop(veh, traits, 2, rec, wheel_contact,
-                                     kSinkGrowthBike, corner_adj);
+	// The bike's own spring loop over its two wheel records (vehicle_suspension.cpp).
+	// [orig: @0x47B8CE..0x47BB7D]
+	world.vehicles.suspension_bike_grounded_loop(veh, traits, rec, wheel_contact, corner_adj);
     int32_t axle[4][3];
     light_bounding_quad(traits, basis, px, py, pz, axle);
     int32_t cf[3], cr[3];
