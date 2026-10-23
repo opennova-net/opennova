@@ -288,10 +288,13 @@ int main() {
 	// The status page stands in for the scene frame (Session::draws_scene): the session takes
 	// the verdict after its drain, a dedicated host's frame always the page, a peer's while
 	// the authority's view word is up, and runs the scene frame's own legs on it alone. Under
-	// the page no start frame counts down (the next frame banks its full time), no cine ends;
-	// the frames drawn after it count the three start frames down again
+	// the page no start frame counts down (the next frame banks its full time); a session
+	// peer's listener update, the render callback's first leg, still asks whether a cine
+	// plays, which stops one past its last event; the frames drawn after it count the three
+	// start frames down again
 	// [orig: GameLoop_RenderFrame @0x521310 - `jz` @0x521355, the view word @0x521CD6,
-	//  is_authority @0x521CDF..0x521CE6; Render_ProcessMainSceneFrame @0x5CAEFF..0x5CAF0E
+	//  is_authority @0x521CDF..0x521CE6, Audio_UpdateListenerFromView @0x52131E ->
+	//  Cine_IsPlaybackActive @0x43B40C; Render_ProcessMainSceneFrame @0x5CAEFF..0x5CAF0E
 	//  (the re-base countdown), @0x5CADFC -> Cine_RenderOrEndPlayback @0x575A50].
 	{
 		opennova::hud::HudToggleState view_up;
@@ -314,17 +317,18 @@ int main() {
 					"page: a listen host's view word stands the page in")) return 1;
 			if (!expect(first.ticks_run() == 0,
 					"page: the load's re-base still banks only the time since the render")) return 1;
-			if (!expect(target.kernel.world.epilog.active,
-					"page: no cine ends under the status page")) return 1;
+			if (!expect(!target.kernel.world.epilog.active,
+					"page: the listener update's cine test stops it under the page")) return 1;
 			if (!expect(session.advance(paged).ticks_run() != 0,
 					"page: no start frame counted down, so the next frame banks its time")) return 1;
 			FrameInput drawn = paged;
 			drawn.hud_toggles = &view_down;
+			target.kernel.world.epilog.active = true;
 			const FrameOutcome back = session.advance(drawn);
-			if (!expect(back.scene_drawn,
-					"page: the view word down draws the scene")) return 1;
+			if (!expect(back.scene_drawn && !back.world_skipped,
+					"page: the view word down draws the scene and its world")) return 1;
 			if (!expect(!target.kernel.world.epilog.active,
-					"page: the scene frame's cine pass ends the cine past its end")) return 1;
+					"page: the drawn frame ends the cine past its end")) return 1;
 		}
 		{
 			// The countdown waits for the frames drawn: after one page frame, the frames drawn
@@ -697,6 +701,59 @@ int main() {
 		if (!expect(crossing_frame > 0 &&
 				session.frame_statistics().frames_last_second == crossing_frame,
 				"the 62nd update publishes the frames drawn before its frame")) return 1;
+	}
+
+	// The drawn scene frame's world-skip word: a playing cine, or the command map as the open
+	// menu screen. The frame's HUD pass (the radar step: here the incoming-lock tone it
+	// re-registers) does not run, and the word reaches the local view, whose facial and
+	// Inset passes it stops (world::FacialSystem::render_scene_passes,
+	// world::LocalPlayerViewFrame::inset_scope_active). A cine past its last event stops at
+	// the head's test and skips nothing.
+	// [orig: Render_ProcessMainSceneFrame - ebx @0x5CA171..0x5CA190 (Cine_IsPlaybackActive
+	//  @0x575960; UI_IsMenuScreenOpen && g_CmapScreenOpen), the skips @0x5CA4EA..0x5CA4EC and
+	//  @0x5CA620..0x5CA640 past HUD_RenderAllOverlays @0x5CAD04; the tone's re-register
+	//  HUD_RenderAllOverlays @0x5A8185..0x5A81BF]
+	{
+		auto target = std::make_unique<TickProbe>();
+		Session session(*target);
+		if (!load(session)) return 1;
+		opennova::world::World &world = target->kernel.world;
+		world.registry.configure_pool(0, 4);
+		opennova::world::Entity seed;
+		seed.alive = true;
+		seed.health = 100;
+		const opennova::world::EntityHandle local = world.registry.spawn(0, seed);
+		world.cached.local_player = local;
+		world.ai.attach(local);
+		target->kernel.local.radar.lock_tone = opennova::world::kRadarLockToneTicks;
+		FrameInput frame;
+		frame.delta_seconds = 0.0;
+		frame.since_render_seconds = 0.0;
+		frame.command_map_open = true;
+		const FrameOutcome mapped = session.advance(frame);
+		if (!expect(mapped.scene_drawn && mapped.world_skipped &&
+				target->kernel.local.view.world_skipped,
+				"world skip: the command map over the menu skips the world")) return 1;
+		if (!expect(world.out.sound_emitters.empty(),
+				"world skip: no HUD pass re-registers the tone")) return 1;
+		frame.command_map_open = false;
+		const FrameOutcome drawn = session.advance(frame);
+		if (!expect(!drawn.world_skipped && !target->kernel.local.view.world_skipped &&
+				world.out.sound_emitters.size() == 1,
+				"world skip: the world drawn, the HUD pass re-registers the tone")) return 1;
+		opennova::world::CineEvent event;
+		event.duration = 50;
+		world.epilog.events.push_back(event);
+		world.epilog.active = true;
+		world.epilog.frame = 0;
+		const FrameOutcome cine = session.advance(frame);
+		if (!expect(cine.world_skipped && world.epilog.active &&
+				world.out.sound_emitters.size() == 1,
+				"world skip: a cine before its last event skips the world")) return 1;
+		world.epilog.frame = 50;
+		const FrameOutcome ended = session.advance(frame);
+		if (!expect(!ended.world_skipped && !world.epilog.active,
+				"world skip: a cine past its last event stops at the head")) return 1;
 	}
 
 	// A paused single-player frame's updates run the legs retail's main frame

@@ -1125,9 +1125,12 @@ void fill_view_context(World *world, LocalPlayerWeapon &w, const PlayerViewState
 	// [orig: Render_ProcessMainSceneFrame @0x5CA6AB..0x5CA6BF (g_NVGActive &&
 	//  !g_CameraMode takes the NVG branch), the Inset gate @0x5CA937..0x5CA945 and
 	//  call @0x5CA949 in the other].
+	// A frame that skips its world runs no Inset pass either: the gate sits in the
+	// world block (player_view.h PlayerViewState::world_skipped carries the witness).
+	out.world_skipped = v.world_skipped;
 	out.inset_scope_active = optical_view && out.scope_details_scoped &&
 			(w.def.flags2 & DEF_WEAPON_FLAG2_INSET) && !v.binoculars_view_active &&
-			(!v.nvg_active || v.camera_mode != 0);
+			(!v.nvg_active || v.camera_mode != 0) && !v.world_skipped;
 	// The FP draw's own gates (player_present.h fp_viewmodel_retail_submit):
 	// the alive gate reads the local dead bit and the decided winner; the draw
 	// skips the showhud test for an Emplaced def and skips the model for a

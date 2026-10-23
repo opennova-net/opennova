@@ -435,6 +435,9 @@ struct LocalPlayerViewFrame {
 	// its own slot-zero offsets after the main scene has sampled its camera.
 	// [orig: Render_WeaponInsetScene @0x5C9841..0x5C9903]
 	bool inset_scope_active = false;
+	// The frame's world-skip word (PlayerViewState::world_skipped): neither facial pass
+	// runs (FacialSystem::render_scene_passes).
+	bool world_skipped = false;
 	PlayerCameraPose inset_camera;
 	float inset_fov_over_zoom = 0;
     bool scope_camera_zero_active = false;

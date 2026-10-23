@@ -259,7 +259,8 @@ void test_look_back_uses_the_placement_heading() {
 // The scene frame's passes: the main scene's, then the weapon Inset scene's own on a
 // frame that runs that pass, each one counter step and one sort from its own pass's eye,
 // so an Inset frame steps the update's 64-frame look cadence twice; a frame with no
-// local player draws no scene. [orig: Render_ProcessMainSceneFrame @0x5CA137, @0x5CA50C;
+// local player draws no scene, and one that skips its world runs neither pass.
+// [orig: Render_ProcessMainSceneFrame @0x5CA137, @0x5CA171..0x5CA190, @0x5CA50C;
 //  the Inset call @0x5CA949 -> Render_WeaponInsetScene @0x5C99BC; FaceAnim_RenderAllSlots
 //  ++dword_26C7768 @0x580367; Scar_SortSlotsByDistance @0x57FE72..0x57FE78]
 void test_scene_passes_step_once_per_pass() {
@@ -279,6 +280,11 @@ void test_scene_passes_step_once_per_pass() {
 	CHECK(f->world.facials.display_frame() == 3);
 	// The Inset pass sorted last, from its own eye.
 	CHECK(f->slot(near_inset).priority == 0 && f->slot(near_main).priority == 1);
+	// A frame that skips its world (a cine plays, or the command map is the open menu
+	// screen) runs neither pass [orig: @0x5CA4EA..0x5CA4EC; @0x5CA620..0x5CA640].
+	view.world_skipped = true;
+	f->world.facials.render_scene_passes(f->world, view, draws);
+	CHECK(f->world.facials.display_frame() == 3);
 }
 
 // The local body's in-place destroy (the ewep row's stale-ground leg on a joiner) frees its face

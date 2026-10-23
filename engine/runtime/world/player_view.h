@@ -464,6 +464,13 @@ struct PlayerViewState {
     // admin `set` commands, no wire fold yet).
     bool death_screen_active = false;
     int death_screen_submode = 0;
+    // The drawn scene frame skips its world: a cine plays, or the command map is the open
+    // menu screen. The camera compose still runs; the main scene's terrain prepass and
+    // facial pass, the world and the Inset pass inside it do not. The session sets it
+    // each frame it advances (inmatch::Session::advance, FrameOutcome::world_skipped)
+    // [orig: Render_ProcessMainSceneFrame @0x5CA171..0x5CA190 (ebx), the skips
+    //  @0x5CA4EA..0x5CA4EC and @0x5CA620..0x5CA640].
+    bool world_skipped = false;
     bool local_dead = false;
     bool round_ended = false;
     // The client's decided round winner (g_EndRoundWinnerTeam, the S2C

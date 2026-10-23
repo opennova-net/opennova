@@ -293,6 +293,12 @@ struct EpilogCine {
 	// last event draws a cine frame, else the cine stops
 	// [orig: Cine_RenderOrEndPlayback @0x575A50 -> Cine_RenderOverlays @0x570BB0].
 	void render_pass();
+	// Whether a cine plays: one whose timeline is before its last event plays; one past it
+	// stops here (the render callback asks first, from the listener update, then the scene
+	// frame's head, whose world-skip word it raises)
+	// [orig: Cine_IsPlaybackActive @0x575960 - the running gate @0x575960, the time-range
+	//  recalc @0x57596C, past the end the stop @0x57598A].
+	bool playback_active();
 	// The timeline's last frame: the largest start + duration, 0 for an empty
 	// list [orig: CineNode_RecalcTimeRange @0x5701C0].
 	int32_t end_frame() const;

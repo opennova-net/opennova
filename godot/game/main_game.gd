@@ -2352,6 +2352,9 @@ func _process(delta: float) -> void:
 	# The frame loop feeds the session the time since the last render: the
 	# mission-start frames bank only that (Session::advance).
 	frame_input.since_render_seconds = _world.get_seconds_since_render()
+	# The command map as the open menu screen: the scene frame then skips its world
+	# (engine inmatch::FrameInput::command_map_open).
+	frame_input.command_map_open = _state == State.COMMAND_MAP
 	var probe_t1 := Time.get_ticks_usec() if timing else 0
 	var skip_world := probe_enabled and _perf_probe.skip_world
 	if not skip_world:

@@ -278,8 +278,10 @@ void FacialSystem::compile_draws(World &world, int32_t camera_x, int32_t camera_
 
 void FacialSystem::render_scene_passes(World &world, const LocalPlayerViewFrame &view,
 		std::vector<FacialDraw> &out) {
-	// No local player, no scene frame [orig: Render_ProcessMainSceneFrame @0x5CA137].
-	if (!view.camera_pose_valid) return;
+	// No local player, no scene frame [orig: Render_ProcessMainSceneFrame @0x5CA137]; a frame
+	// that skips its world runs neither pass [orig: `test ebx, ebx; jnz` @0x5CA4EA..0x5CA4EC
+	// past the main pass, @0x5CA620..0x5CA640 past the world and the Inset].
+	if (!view.camera_pose_valid || view.world_skipped) return;
 	// The sort's local-player skip reads the camera mode [orig: Scar_SortSlotsByDistance
 	// @0x57FED6..0x57FEE5].
 	const bool first_person = view.camera_mode == 0;

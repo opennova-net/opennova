@@ -1867,7 +1867,13 @@ void test_inset_pass_runs_in_the_non_nvg_fork_alone() {
     CHECK(local_player_scope_toggle(lw.w, up, view, up.slot));
     settle_ease(view);
     local_player_view_frame(&lw.w, up, view, tracker, frame);
-    CHECK(frame.inset_scope_active && frame.fp_inset_scoped);
+    CHECK(frame.inset_scope_active && frame.fp_inset_scoped && !frame.world_skipped);
+    // A frame that skips its world (the session's word) runs no Inset pass either: the
+    // gate sits in the world block [orig: Render_ProcessMainSceneFrame @0x5CA620..0x5CA640].
+    view.world_skipped = true;
+    local_player_view_frame(&lw.w, up, view, tracker, frame);
+    CHECK(!frame.inset_scope_active && frame.fp_inset_scoped && frame.world_skipped);
+    view.world_skipped = false;
 
     LocalPlayerWeapon caught = scoped_weapon(DEF_WEAPON_FLAG_SCOPED, DEF_WEAPON_FLAG2_INSET);
     PlayerViewState raising;

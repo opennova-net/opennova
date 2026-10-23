@@ -1055,6 +1055,28 @@ void Session::count_rendered_frame() {
 		role_->observe_frame_statistics(frames_last_second_, accumulator_.cpu_percent());
 }
 
+void Session::step_scene_head(const FrameInput &input, FrameOutcome &out) {
+	mission::MissionKernel *kernel = role_ != nullptr ? role_->kernel() : nullptr;
+	// The render callback's first leg, the listener update, asks a session peer's cine
+	// whether it plays, whatever the callback draws next, so a cine past its last event
+	// stops under the status page too [orig: GameLoop_RenderFrame @0x52131E ->
+	//  Audio_UpdateListenerFromView @0x43B400 - is_mp_session_peer @0x43B40A, the
+	//  Cine_IsPlaybackActive call @0x43B40C].
+	if (kernel != nullptr && kind_ != RoleKind::DedicatedHost)
+		(void)kernel->world.epilog.playback_active();
+	out.scene_drawn = draws_scene(input.hud_toggles);
+	// The scene frame's head word: a playing cine, or the command map over the menu
+	// [orig: Render_ProcessMainSceneFrame - the Cine_IsPlaybackActive call @0x5CA171,
+	//  UI_IsMenuScreenOpen @0x5CA17F and g_CmapScreenOpen @0x5CA188, ebx @0x5CA17D / @0x5CA190].
+	bool skipped = false;
+	if (out.scene_drawn && kernel != nullptr) {
+		const bool cine = kernel->world.epilog.playback_active();
+		skipped = cine || input.command_map_open;
+	}
+	out.world_skipped = skipped;
+	if (kernel != nullptr) kernel->local.view.world_skipped = skipped;
+}
+
 void Session::step_hud_radar_frame() {
 	if (role_ == nullptr || role_->kernel() == nullptr) return;
 	static_assert(kHudRadarGatesDefault == hud::HudFrameCompiler::kRadarGatePass,
@@ -1097,11 +1119,12 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		// A frame whose updates all stayed paused ran no tick.
 		if (out.ticks.empty() && !out.terminal()) out.status = FrameStatus::NotRunning;
 		last_perf_ = out.perf;
-		// The render callback's choice after the drain (draws_scene); both arms count.
-		out.scene_drawn = draws_scene(input.hud_toggles);
+		// The render callback's choice after the drain (draws_scene, with the head's cine and
+		// world-skip legs); both arms count.
+		step_scene_head(input, out);
 		count_rendered_frame();
 		if (!out.terminal() && out.scene_drawn) {
-			step_hud_radar_frame();
+			if (!out.world_skipped) step_hud_radar_frame();
 			step_cine_render_frame();
 		}
 		return out;
@@ -1145,8 +1168,9 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	// @0x52ba4f; @0x52ba9b..0x52baa1].
 	accumulator_.record_frame_work(world::frame_tick_count_ms() - frame_start_ms, out.perf.updates);
 	// The render callback reads its view word after the drain and draws the scene frame or the
-	// status page in its place (draws_scene); each arm's render counts.
-	out.scene_drawn = draws_scene(input.hud_toggles);
+	// status page in its place (draws_scene, with the head's cine and world-skip legs); each
+	// arm's render counts.
+	step_scene_head(input, out);
 	// Each update counted toward the 62-update second inside the loop; this
 	// frame's render counts now.
 	count_rendered_frame();
@@ -1175,13 +1199,14 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	}
 	last_perf_ = out.perf;
 	// The frame's render follows the drain: the scene frame's HUD pass, then its cine pass;
-	// the status page runs neither, so under it no cine ends and the radar ages nothing
-	// [orig: Game_MainLoop's Game_ProcessMainFrame drain, then the render's
-	// HUD_RenderAllOverlays and cine pass; Render_ProcessMainSceneFrame @0x5CAD04 (@0x5CACE3
-	// for a chase view from a control seat) -> HUD_RenderAllOverlays, then @0x5CADFC ->
+	// the status page runs neither, so under it the radar ages nothing, and a frame that
+	// skips its world runs no HUD pass [orig: Game_MainLoop's Game_ProcessMainFrame drain,
+	// then the render's HUD_RenderAllOverlays and cine pass; Render_ProcessMainSceneFrame
+	// @0x5CAD04 (@0x5CACE3 for a chase view from a control seat) -> HUD_RenderAllOverlays,
+	// inside the world block @0x5CA620..0x5CA640 jumps past, then @0x5CADFC ->
 	// Cine_RenderOrEndPlayback, the scene arm @0x521CE8 alone].
 	if (!out.terminal() && out.scene_drawn) {
-		step_hud_radar_frame();
+		if (!out.world_skipped) step_hud_radar_frame();
 		step_cine_render_frame();
 	}
 	return out;

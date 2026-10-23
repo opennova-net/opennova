@@ -520,6 +520,15 @@ void EpilogCine::build_win_screen(const World &world) {
 			hud::kGameTextEpilogKeyInfo.key, 0, 700, -2, 140, 140, 1024, 100, 1, 0xFFFFFF));
 }
 
+bool EpilogCine::playback_active() {
+	// [orig: Cine_IsPlaybackActive @0x575960 - `cmp g_CinePlaying, 0` @0x575960, the
+	//  recalc @0x57596C, `jl` @0x57597C (still playing: 1), the stop @0x57598A]
+	if (!active) return false;
+	if (frame < end_frame()) return true;
+	active = false;
+	return false;
+}
+
 void EpilogCine::render_pass() {
 	// [orig: Cine_RenderOrEndPlayback @0x575A57 — the running gate; the time-range recalc
 	//  @0x575A59; the draw @0x575A8A -> Cine_RenderOverlays, whose tail raises

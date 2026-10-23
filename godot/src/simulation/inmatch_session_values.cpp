@@ -16,6 +16,10 @@ void MissionFrameInput::_bind_methods() {
 			&MissionFrameInput::set_since_render_seconds);
 	ClassDB::bind_method(D_METHOD("get_since_render_seconds"),
 			&MissionFrameInput::get_since_render_seconds);
+	ClassDB::bind_method(D_METHOD("set_command_map_open", "open"),
+			&MissionFrameInput::set_command_map_open);
+	ClassDB::bind_method(D_METHOD("is_command_map_open"),
+			&MissionFrameInput::is_command_map_open);
 	ClassDB::bind_method(D_METHOD("get_camera_position"),
 			&MissionFrameInput::get_camera_position);
 	ClassDB::bind_method(D_METHOD("set_movement", "forward", "back", "left",
@@ -36,6 +40,8 @@ void MissionFrameInput::_bind_methods() {
 			"set_delta_seconds", "get_delta_seconds");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "since_render_seconds"),
 			"set_since_render_seconds", "get_since_render_seconds");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "command_map_open"),
+			"set_command_map_open", "is_command_map_open");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "sequence"),
 			"set_sequence", "get_sequence");
 }

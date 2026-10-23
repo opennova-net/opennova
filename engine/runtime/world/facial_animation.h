@@ -93,10 +93,12 @@ public:
 	// counter): the main scene's, from the eye of the frame's camera compose, then the
 	// weapon Inset scene's own when that pass runs, from its own compose's eye. An Inset
 	// frame steps the counter twice, which moves the update's 64-frame look cadence. A
-	// frame with no local player draws no scene.
+	// frame with no local player draws no scene, and a frame that skips its world (a cine
+	// plays, or the command map is the open menu screen) runs neither pass.
 	// [orig: Game_MainLoop @0x52B630 (the render callback every iteration, the call
 	//  @0x52BAC6, after the update drain); Render_ProcessMainSceneFrame @0x5CA137 (no local
-	//  player: no scene frame),
+	//  player: no scene frame), @0x5CA171..0x5CA190 (the world-skip word: the skips
+	//  @0x5CA4EA..0x5CA4EC and @0x5CA620..0x5CA640),
 	//  @0x5CA50C -> FaceAnim_RenderAllSlots, the Inset gate @0x5CA937..0x5CA945 and call
 	//  @0x5CA949 -> Render_WeaponInsetScene @0x5C9740 -> FaceAnim_RenderAllSlots @0x5C99BC;
 	//  each pass's eye the viewport its own Viewport_BuildProjectionMatrix built

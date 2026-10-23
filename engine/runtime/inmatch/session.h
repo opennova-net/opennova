@@ -252,6 +252,12 @@ struct FrameInput {
 	// it (Session::draws_scene). Null when the shell has none (a dedicated serve, a probe's
 	// direct frame): the view reads as down.
 	const hud::HudToggleState *hud_toggles = nullptr;
+	// The command map is the open menu screen: a menu screen is up and the CMAP flag holds
+	// (the commander row's open raises it, the in-game screens' close lowers it). The scene
+	// frame then skips its world (FrameOutcome::world_skipped)
+	// [orig: Render_ProcessMainSceneFrame @0x5CA17F..0x5CA190 (UI_IsMenuScreenOpen &&
+	//  g_CmapScreenOpen); the open, Input_HandleActionBinding case 221 @0x49B920 / @0x49B928].
+	bool command_map_open = false;
 };
 
 struct TickInput {
@@ -332,6 +338,13 @@ struct FrameOutcome {
 	// The render callback's choice after the drain: the scene frame, or the status page in its
 	// place (Session::draws_scene). The embedder runs its scene legs on this verdict.
 	bool scene_drawn = true;
+	// The drawn scene frame skips its world: a cine plays (Cine_IsPlaybackActive), or the
+	// command map is the open menu screen (FrameInput::command_map_open). Its camera compose
+	// still runs; its facial passes, its Inset pass and its HUD pass do not. The session
+	// stamps it into the local view (world::PlayerViewState::world_skipped)
+	// [orig: Render_ProcessMainSceneFrame @0x5CA171..0x5CA190 (ebx); the skips
+	//  @0x5CA4EA..0x5CA4EC and @0x5CA620..0x5CA640 -> loc_5CAD2D].
+	bool world_skipped = false;
 
 	int32_t ticks_run() const { return static_cast<int32_t>(ticks.size()); }
 	bool terminal() const {
@@ -735,6 +748,10 @@ private:
 	void count_update_into_second();
 	void count_rendered_frame();
 	void step_hud_radar_frame();
+	// The render callback's cine and world-skip legs after the drain: the listener update's
+	// cine test on a session peer, under the page too, then the drawn scene frame's
+	// world-skip word, stamped into the local view.
+	void step_scene_head(const FrameInput &input, FrameOutcome &out);
 	static int64_t now_us();
 
 	Role *role_ = nullptr;

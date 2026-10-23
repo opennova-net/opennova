@@ -58,6 +58,9 @@ public:
 	// Seconds since the previous frame's render finished (negative: unsampled).
 	void set_since_render_seconds(double p_seconds);
 	double get_since_render_seconds() const;
+	// The command map is the open menu screen (engine inmatch::FrameInput::command_map_open).
+	void set_command_map_open(bool p_open) { value_.command_map_open = p_open; }
+	bool is_command_map_open() const { return value_.command_map_open; }
 	void set_camera_sample(const Vector3 &p_position,
 			const Vector3 &p_forward, bool p_listener_valid = true);
 	// The camera sample as stamped: the driver pushes it to the present
