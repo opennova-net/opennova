@@ -5775,6 +5775,77 @@ void test_an_anchorless_child_copies_only_a_stale_carrier() {
     CHECK(child_saved_is(0x20000));
 }
 
+// An anchored addeweap child's savedLivePose takes its own Position and Yaw / Pitch / Roll
+// words as they stood before the compose (never its carrier's, and whatever the carrier's
+// matrix bit), so after each compose it holds the previous compose's pose: the class init's
+// compose stores its spawn words. [orig: Entity_UpdateTransformAndTurret @0x440CA0 -
+// Bone_BuildAttachmentMatrix @0x44109D, savedLivePose @0x4410A2..0x4410D7,
+// Math_FixedPointMatrixToEulerAngles @0x4410DD; Entity_InitBoneReferences @0x441470 (the
+// class init's update @0x44164B)]
+void test_an_anchored_child_saves_its_previous_pose() {
+    auto wp = std::make_unique<World>();
+    World &w = *wp;
+    w.registry.configure_pool(1, 4);
+    FakeMountedPoseProvider provider;
+    w.pose_provider = &provider;
+    Entity carrier;
+    carrier.kind = EntityKind::Item;
+    carrier.has_item_def = true;
+    carrier.position = {10.0f, 20.0f, 3.0f};
+    carrier.heading = placed_heading_bam(90);
+    carrier.health = 100;
+    carrier.alive = true;
+    // A mover's tail set the carrier's bit; its savedLivePose words differ from the child's.
+    carrier.engine_flags |= kEntityFlagMatrixBuilt;
+    carrier.saved_live_pos[0] = 0x10001;
+    carrier.saved_live_yaw = 0x10004;
+    carrier.saved_live_valid = true;
+    const EntityHandle carrier_h = w.registry.spawn(1, carrier);
+    Entity child;
+    child.kind = EntityKind::Item;
+    child.position = {50.0f, 60.0f, 7.0f};
+    child.heading = placed_heading_bam(30);
+    child.pitch_bam = spawn_angle_bam(4);
+    child.roll_bam = spawn_angle_bam(-5);
+    child.emplacement_parent = carrier_h;
+    const EntityHandle child_h = w.registry.spawn(1, child);
+    Seat anchor;
+    anchor.type = SeatType::Gunner;
+    anchor.bone_index = 2; // the 1-based anchor row
+    anchor.attachment_frame = true;
+    const auto compose = [&]() {
+        w.vehicles.pose_mounted_occupant(*w.registry.get(child_h), *w.registry.get(carrier_h),
+                                         anchor);
+    };
+    const auto child_saved_is = [&](const FixedVec3 &pos, int32_t yaw, int32_t pitch,
+                                    int32_t roll) {
+        const Entity &c = *w.registry.get(child_h);
+        return c.saved_live_valid && c.saved_live_pos[0] == pos.x &&
+               c.saved_live_pos[1] == pos.y && c.saved_live_pos[2] == pos.z &&
+               c.saved_live_yaw == yaw && c.saved_live_pitch == pitch &&
+               c.saved_live_roll == roll;
+    };
+    CHECK(!w.registry.get(child_h)->saved_live_valid);
+    // The class init's compose: the spawn words are saved, the bone frame's are taken.
+    const MountedPose first = pose_degrees({11.0f, 12.0f, 13.0f}, 21, -8, 9);
+    provider.pose = first;
+    compose();
+    CHECK(child_saved_is(FixedVec3{to_fixed(50.0f), to_fixed(60.0f), to_fixed(7.0f)},
+                         placed_heading_bam(30), spawn_angle_bam(4), spawn_angle_bam(-5)));
+    CHECK(w.registry.get(child_h)->position.x.q16 == first.position.x.q16);
+    CHECK(w.registry.get(child_h)->heading == first.heading);
+    // The next tick's compose saves the first frame's words.
+    const MountedPose second = pose_degrees({14.0f, 15.0f, 16.0f}, 25, -4, 3);
+    provider.pose = second;
+    compose();
+    CHECK(child_saved_is(first.position.q16(), first.heading, first.pitch, first.roll));
+    CHECK(w.registry.get(child_h)->position.y.q16 == second.position.y.q16);
+    CHECK(w.registry.get(child_h)->roll_bam == second.roll);
+    // A frame that did not move leaves a zero delta.
+    compose();
+    CHECK(child_saved_is(second.position.q16(), second.heading, second.pitch, second.roll));
+}
+
 // D-NET-586: the process refuses the requester on its dead bit alone: a body at zero
 // Health or with its life cleared but no dead bit is still admitted (its death edge
 // raises the bit, D-AI-9), and the bit in either Flags view refuses.
@@ -5798,6 +5869,7 @@ void test_the_rider_gate_reads_the_dead_bit_alone() {
 int main() {
     test_the_rider_gate_reads_the_dead_bit_alone();
     test_an_anchorless_child_copies_only_a_stale_carrier();
+    test_an_anchored_child_saves_its_previous_pose();
     test_use_scan_poses_every_seat_kind_live();
     test_claimant_detach_cuts_vehicle_slot_action();
     test_npc_detach_zeroes_the_equipped_byte();

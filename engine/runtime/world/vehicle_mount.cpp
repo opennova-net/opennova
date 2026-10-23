@@ -437,6 +437,13 @@ MountedPose VehicleSystem::pose_mounted_occupant(Entity &occ, const Entity &vehi
             occ.saved_live_valid = vehicle.saved_live_valid;
         }
     }
+    // An anchored addeweap child's savedLivePose (+0x80..+0x94) takes its own Position and
+    // Yaw / Pitch / Roll words as they stand, before the bone frame's euler replaces them:
+    // after each compose it holds the previous compose's pose, which the priority walk's
+    // displacement and the fire-origin compare read (D-NET-507). [orig:
+    //  Entity_UpdateTransformAndTurret @0x440CA0 - Bone_BuildAttachmentMatrix @0x44109D,
+    //  savedLivePose @0x4410A2..0x4410D7, Math_FixedPointMatrixToEulerAngles @0x4410DD]
+    if (seat.attachment_frame && seat.bone_index != 0) stamp_saved_live_pose(occ);
     // The seat point's words are the occupant's (D-NET-507); a composed addeweap
     // frame's are the child's own.
     // [orig: Math_FixedPointMatrixToEulerAngles @0x613481..0x61348C]
