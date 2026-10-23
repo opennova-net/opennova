@@ -7,6 +7,7 @@
 //  Entity_CheckCollisionState @0x462A30 - @0x462E26..0x462E4F]
 #include <runtime/world/collision.h>
 #include <runtime/world/destruction.h>
+#include <runtime/world/entity.h>
 #include <runtime/world/world.h>
 
 #include <cstdint>
@@ -180,12 +181,39 @@ void test_the_class_rows() {
 	CHECK(!rig->get(drum).ground_target.valid());
 }
 
+// Pool 2's hit stands against a pool-1 hit at the same distance (pool 1 must be strictly
+// nearer); a husked hull is met at its intact model, the walk reading entity+0x30 whatever Flags 4
+// holds (its husk quad here lies past the drop).
+// [orig: Physics_RaycastNearestEntity @0x5394B0 - the `jge` @0x53951E; Physics_RaycastEntityPool
+//  @0x4143E0 - `mov esi, [ecx+30h]` @0x4145CF]
+void test_the_tie_and_the_husk() {
+	const CollisionModel deck = quad_model();
+	{
+		auto rig = std::make_unique<Rig>();
+		rig->spawn(1, 1294, 0.0f, &deck);
+		const EntityHandle crate = rig->spawn(2, 4302, 0.0f, &deck); // the same quad height
+		const EntityHandle barrel = rig->spawn(2, 4301, 3.0f, nullptr, true);
+		cache_ground_entity_below(rig->world, rig->get(barrel));
+		CHECK(rig->get(barrel).ground_target == crate);
+	}
+	{
+		auto rig = std::make_unique<Rig>();
+		const EntityHandle truck = rig->spawn(1, 1294, 0.0f, &deck);
+		rig->collision.assign_entity_husk(truck, rig->collision.add_model(quad_model(5, 0, -20)));
+		rig->get(truck).engine_flags |= kEntityFlagHusk;
+		const EntityHandle barrel = rig->spawn(2, 4301, 3.0f, nullptr, true);
+		cache_ground_entity_below(rig->world, rig->get(barrel));
+		CHECK(rig->get(barrel).ground_target == truck);
+	}
+}
+
 } // namespace
 
 int main() {
 	test_the_drop_finds_the_deck();
 	test_the_pools_and_the_exclude();
 	test_the_class_rows();
+	test_the_tie_and_the_husk();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

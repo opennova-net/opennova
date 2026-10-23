@@ -1441,9 +1441,9 @@ public:
     // collision_raycast_entity_faces. A segment under 16 meets nothing, as does a hit at 0.
     // [orig: Physics_RaycastNearestEntity @0x5394B0 (pool 2 @0x5394ED, the `jge` @0x5394FF, pool
     //  1 @0x53950E, the `jge` @0x53951E); Physics_InitRayContext @0x5385E0;
-    //  Physics_RaycastEntityPool @0x4143E0 (the +0x1C and bound gates @0x414452..0x41446E, the
-    //  box @0x414470..0x4144A9, the excludes @0x4144AB..0x4144BD, the line distance
-    //  @0x4144BF..0x4145C7, the bone data @0x4145E4, the return @0x414968)]
+    //  Physics_RaycastEntityPool @0x4143E0 (the +0x1C and bound gates @0x41445C..0x41446E, the
+    //  box @0x414470..0x4144A6, the excludes @0x4144A8..0x4144BA, the line distance
+    //  @0x4144BC..0x4145C5, the bone data @0x4145E4, the return @0x414968)]
     EntityHandle raycast_nearest_entity(const World &world, EntityHandle exclude,
             const FixedVec3 &start, const FixedVec3 &end) const;
 
@@ -2079,9 +2079,13 @@ private:
         uint32_t candidate = 0;
     };
 
+    // husk_swap false keeps the intact model on a husked row: the ground drop's pool walk reads
+    // entity+0x30 whatever Flags 4 holds [orig: Physics_RaycastEntityPool @0x4143E0 - the
+    // `mov esi, [ecx+30h]` @0x4145CF, its +0xA8 callback @0x4145D2..0x4145E2].
     const CollisionTargetView *target_view(const World &world, EntityHandle h,
                                            CollisionTargetView &scratch,
-                                           std::vector<CollisionMatrix> &mat_scratch) const;
+                                           std::vector<CollisionMatrix> &mat_scratch,
+                                           bool husk_swap = true) const;
     // One candidate entity vs one radiused segment: the cheap-metadata broad
     // phase, then live section matrices for survivors (shared by sound and the
     // slice-scoped iris/entity sun casts).

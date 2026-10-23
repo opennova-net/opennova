@@ -107,7 +107,8 @@ EntityHandle CollisionWorld::raycast_nearest_entity(const World &world, EntityHa
             if (outside || handle==exclude) continue; // [orig: the excludes @0x4144A8..0x4144BA]
             // [orig: the line distance @0x4144BC..0x4145C5]
             if (ray_line_distance(ray.start,ray.dir,p)>r) continue;
-            const CollisionTargetView *target=target_view(world,handle,view,matrices);
+            // The intact model whatever the husk bit [orig: `mov esi, [ecx+30h]` @0x4145CF].
+            const CollisionTargetView *target=target_view(world,handle,view,matrices,false);
             if (target==nullptr) continue; // [orig: the bone data's null @0x4145EF]
             if (collision_raycast_entity_faces(*target,ray.start,ray.end,ray.dir,length,best)) {
                 hit=handle;

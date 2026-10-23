@@ -23,7 +23,8 @@ using namespace detail; // the shared fixed-point helpers, unqualified as before
 
 const CollisionTargetView *CollisionWorld::target_view(const World &world, EntityHandle h,
                                                        CollisionTargetView &scratch,
-                                                       std::vector<CollisionMatrix> &mats) const {
+                                                       std::vector<CollisionMatrix> &mats,
+                                                       bool husk_swap) const {
     const Instance *instance = live_instance(world, h);
     if (instance == nullptr) return nullptr;
     const Entity *e = world.registry.get(h);
@@ -33,7 +34,7 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     // serving, the witnessed fallback [orig: Flags & 4 && huskModel picks
     // entity+52 in Entity_RaycastCollisionModel @ 0x413086 and the pool walk
     // @ 0x538720; the contact pick @ 0x4ae233].
-    const bool using_husk =
+    const bool using_husk = husk_swap &&
             (e->engine_flags & kEntityFlagHusk) != 0 && instance->husk_model_id >= 0;
     int32_t model_id =
             using_husk ? instance->husk_model_id : instance->model_id;
