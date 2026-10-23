@@ -787,7 +787,7 @@ func test_second_scene_backend_draws_the_particle_into_its_own_target() -> void:
 
 	var renderer := ParticleRenderer.new()
 	renderer.scene = _single_quad_scene("impact", 0)
-	renderer.image_provider = _overlap_image  # opaque red
+	renderer.image_provider = _overlap_source_image  # opaque red
 	renderer.set_water_plane(-100.0, null)
 	renderer.set_second_scene_camera(second_camera)
 	viewport.add_child(renderer)
@@ -941,7 +941,7 @@ func test_second_scene_view_follows_every_renderer_lifecycle_leg() -> void:
 	assert_engine_error_count(0)
 
 
-func _overlap_image(name: String) -> Image:
+func _overlap_source_image(name: String) -> Image:
 	var image := Image.create(32, 32, false, Image.FORMAT_RGBA8)
 	var color := Color(0.5, 0.5, 1.0, 1.0)
 	if name == "impact.tga":
@@ -1021,7 +1021,7 @@ void fragment() {
 	scene.open([file])
 	var renderer := ParticleRenderer.new()
 	renderer.scene = scene
-	renderer.image_provider = _overlap_image
+	renderer.image_provider = _overlap_source_image
 	renderer.set_water_plane(-100.0, null)
 	viewport.add_child(renderer)
 	renderer.attach_distortion_row(fx)
@@ -1170,7 +1170,7 @@ func test_bump_adds_its_specular_colour_and_does_not_fog() -> void:
 	viewport.add_child(background)
 	var renderer := ParticleRenderer.new()
 	renderer.scene = _live_lit_scene()
-	renderer.image_provider = _overlap_image
+	renderer.image_provider = _overlap_source_image
 	renderer.set_water_plane(-100.0, null)
 	var fog_source := _live_fog_source()
 	viewport.add_child(fog_source)
@@ -1222,7 +1222,7 @@ func _thermal_pixel(blend: int, thermal: bool, background: Color,
 	viewport.add_child(clear)
 	var renderer := ParticleRenderer.new()
 	renderer.scene = _single_quad_scene("thermal", blend)
-	renderer.image_provider = _overlap_image
+	renderer.image_provider = _overlap_source_image
 	renderer.set_water_plane(1.5 if far_side else -100.0, null)
 	var source := _thermal_view_source(thermal)
 	viewport.add_child(source)
@@ -1283,7 +1283,7 @@ func test_atlas_pages_carry_their_three_point_mip_levels() -> void:
 		viewport.add_child(camera)
 		var renderer := ParticleRenderer.new()
 		renderer.scene = _single_quad_scene("mips%d" % blend, blend)
-		renderer.image_provider = _overlap_image
+		renderer.image_provider = _overlap_source_image
 		viewport.add_child(renderer)
 		renderer.render_now(GameWorld.current_frame_clock_ms())
 		var pages: Array = renderer.get_debug_draw_list_report().get("atlas_pages", [])
@@ -1314,7 +1314,7 @@ func test_atlas_pages_follow_the_session_compression_and_density() -> void:
 	viewport.add_child(camera)
 	var renderer := ParticleRenderer.new()
 	renderer.scene = _single_quad_scene("pagewords", 0)
-	renderer.image_provider = _overlap_image
+	renderer.image_provider = _overlap_source_image
 	viewport.add_child(renderer)
 	var cases := [
 		# [texcompression, density, flags, dxt5, device side]
@@ -1440,7 +1440,7 @@ func test_views_build_particles_in_the_scene_pass_stride() -> void:
 	_overlap_spawn(scene, "stride", 0.0)
 	var renderer := ParticleRenderer.new()
 	renderer.scene = scene
-	renderer.image_provider = _overlap_image
+	renderer.image_provider = _overlap_source_image
 	viewport.add_child(renderer)
 	var built := {}
 	for words in [[2, false], [1, false], [0, false], [2, true], [0, true]]:
