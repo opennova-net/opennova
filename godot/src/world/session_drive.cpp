@@ -38,10 +38,6 @@ constexpr const char *kSignalSessionLost = "session_lost";
 // is hosted by the NovaWorld session the shell hands over.
 constexpr const char *kChannelNovaWorld = "NovaWorld";
 
-int64_t now_ms() {
-	return static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
-}
-
 // The joiner's mission-start window readout (an instrument, D-NET-NEW-L2-35 (b)): each mark
 // prints the process frame and the wall clock in unix milliseconds under --verbose, so the
 // window from the S2C 0x1A to the C2S 0x0B splits against the capture's own timestamps.
@@ -230,7 +226,6 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	// expansion/<name>/version.txt under this install root (D-NET-166).
 	join_preload_sim_->set_join_expansion_version_root(resource_root->get_root_dir());
 	join_preload_root_ = resource_root;
-	policy_->arm_preload(now_ms());
 	world_->set_process(true);
 	return OK;
 }
@@ -240,10 +235,12 @@ void SessionDrive::step_preload() {
 		world_->set_process(false);
 		return;
 	}
-	// The connect exchange, until the S2C 0x11 ends the sync-tail wait, inside the
-	// ConnectOrHost window. A mission start the round-over gate abandoned restarts for the
-	// host's next mission in the runtime (engine inmatch/joiner_connection.h
-	// mission_start_aborted), so that mission is identified anew at its own 0x11.
+	// The connect exchange, until the S2C 0x11 ends the sync-tail wait, with no deadline: a
+	// join the host holds in its queue waits on, as retail's join screen does (engine
+	// inmatch/join_session_policy.h, D-NET-NEW-L2-44). A mission start the round-over gate
+	// abandoned restarts for the host's next mission in the runtime (engine
+	// inmatch/joiner_connection.h mission_start_aborted), so that mission is identified anew
+	// at its own 0x11.
 	if (!join_preload_sim_->is_join_preload_ready()) {
 		join_identified_ = false;
 		// Every mission start's 0x11 runs this shell's terrain load ahead of the 0x0A (a first
@@ -263,12 +260,10 @@ void SessionDrive::step_preload() {
 			world_->load_join_effect_system(join_preload_root_);
 			join_preload_sim_->end_join_mission_data_load();
 		}
-		// The abandoned start's game loop runs no window: it lingers until the round's end
-		// stores exit 4 (retail's game loop has no clock; the next mission's identification
-		// arms the stream wait's window again; engine inmatch::ClientRuntime::run_frame and
-		// JoinerConnection::mission_start_aborted carry the witness).
-		if (join_preload_sim_->is_join_mission_start_aborted()) policy_->disarm_preload();
-		const int step = policy_->preload_step(join_preload_sim_->get_join_error(), now_ms());
+		// The abandoned start's game loop lingers until the round's end stores exit 4 (engine
+		// inmatch::ClientRuntime::run_frame and JoinerConnection::mission_start_aborted carry
+		// the witness).
+		const int step = policy_->preload_step(join_preload_sim_->get_join_error());
 		if (step == NetSessionPolicy::STEP_FAIL) {
 			fail_join_preload(policy_->fail_reason());
 			return;
@@ -296,7 +291,7 @@ void SessionDrive::step_preload() {
 	Ref<Simulation> sim = join_preload_sim_;
 	opennova::inmatch::JoinerRole::MissionStartLegs legs;
 	legs.after_pass = [&]() {
-		const int step = policy_->preload_step(sim->get_join_error(), now_ms());
+		const int step = policy_->preload_step(sim->get_join_error());
 		if (step == NetSessionPolicy::STEP_FAIL) {
 			fail_join_preload(policy_->fail_reason());
 			return false;
@@ -309,7 +304,6 @@ void SessionDrive::step_preload() {
 	legs.load = [&]() {
 		join_window_mark("load_begin");
 		world_->set_process(false);
-		policy_->disarm_preload();
 		const String bms = policy_->promoted_mission_file();
 		Ref<ResourceRoot> resource_root = join_preload_root_;
 		if (resource_root.is_null()) {
@@ -329,16 +323,14 @@ void SessionDrive::step_preload() {
 			clear_pending_session();
 			return false;
 		}
-		// Post-load joiner watchdog: the admission tail (the mission start's loadout and
-		// status -> the grants -> the S2C 0x0F) is server-driven with no protocol-level
-		// timeout, so a stalled or incompatible host would leave the player loaded but hidden
-		// forever. The policy reuses the retail ConnectOrHost window from the load and
-		// composes a stage-named failure -- the reachable analog of retail's post-load
-		// network-wait failure returns (engine: runtime/inmatch/join_session_policy.h). It
-		// covers only SERVER-owed transitions: at the player-paced deployment pick the
-		// watchdog ends (retail's DEATH screen simply waits; net-re 5.61).
-		// A reload's admission tail has no window either (net-re §5.70.7).
-		if (!reloading_join_) policy_->arm_admission_watch(now_ms());
+		// Post-load joiner watch: the admission tail (the mission start's loadout and
+		// status -> the grants -> the S2C 0x0F) is server-driven, and a join error it
+		// latches fails the join. Like retail's waits it has no deadline (engine:
+		// runtime/inmatch/join_session_policy.h, D-NET-NEW-L2-44). It covers only
+		// SERVER-owed transitions: at the player-paced deployment pick the watch ends
+		// (retail's DEATH screen simply waits; net-re 5.61). A reload's admission tail
+		// has no watch (net-re §5.70.7).
+		if (!reloading_join_) policy_->arm_admission_watch();
 		reloading_join_ = false;
 		return true;
 	};
@@ -412,10 +404,6 @@ bool SessionDrive::load_join_terrain() {
 		return false;
 	}
 	join_preload_sim_->set_join_sync_tail_loading(false);
-	// The world stream's wait gets its own ConnectOrHost window from the load's end, as the
-	// admission tail had from its world-ready (a reload's has none).
-	if (!reloading_join_) policy_->arm_preload(now_ms());
-	else policy_->disarm_preload();
 	return true;
 }
 
@@ -598,7 +586,7 @@ String SessionDrive::switch_join_expansion(const Ref<ResourceRoot> &p_root,
 
 // The per-frame admission/deploy/loss observer: read the joiner state,
 // forward it to the native edge machine, execute what the returned flags
-// say. The ordering, the latches, the windows, and every reason text live in
+// say. The ordering, the latches, and every reason text live in
 // the policy (loss wins over every admission edge; the deploy latch re-arms
 // when pending clears; admission-ready is once per join and holds for the
 // cold wire drain behind the loading hold (engine: runtime/inmatch/joiner_connection.h)).
@@ -625,16 +613,11 @@ void SessionDrive::update_joiner_admission_signals() {
 	// loop runs either way (SessionDrive::cancel_admission_wait).
 	const bool initial_admission_complete =
 			sim->is_join_initial_admission_complete() || sim->is_join_game_loop();
-	// The join error + admission stage only matter to the armed watchdog --
-	// read them exactly when the old inline machine did.
+	// The join error only matters to the armed watch.
 	String join_error;
-	String admission_stage;
-	if (policy_->is_admission_watch_active()) {
-		join_error = sim->get_join_error();
-		admission_stage = sim->get_join_admission_stage();
-	}
+	if (policy_->is_admission_watch_active()) join_error = sim->get_join_error();
 	const int pre = policy_->begin_admission_frame(loss_reason, deploy_pending,
-			initial_admission_complete, join_error, admission_stage, now_ms());
+			initial_admission_complete, join_error);
 	if (pre & NetSessionPolicy::EMIT_SESSION_LOST) {
 		// MainGame handles this signal synchronously and unloads the world.
 		// All drive/policy mutation is already finished, so no owner method
@@ -654,8 +637,8 @@ void SessionDrive::update_joiner_admission_signals() {
 	}
 	// The revealed world must not race the budgeted cold wire materialization
 	// (EntityPresenter.DEFAULT_COLD_SPAWN_BUDGET): the policy holds the
-	// no-pick reveal -- with its watchdog deadline still armed -- until the
-	// presenter's deferred-spawn queue drains behind the loading hold.
+	// no-pick reveal, with its watch still armed, until the presenter's
+	// deferred-spawn queue drains behind the loading hold.
 	const int post = policy_->finish_admission_frame(settle_ok, world_->is_join_wire_present_drained());
 	if (post & NetSessionPolicy::SETTLE_FAILED) {
 		world_->report_join_wire_asset_failure(policy_->fail_reason());
@@ -691,15 +674,15 @@ bool SessionDrive::cancel_admission_wait() {
 	// Outside that wait the ESC aborts nothing: the load is one synchronous call, and after
 	// the 0x0F the game loop runs, the shell's cold-spawn hold notwithstanding (engine
 	// inmatch/join_session_policy.h, D-NET-NEW-L2-39).
-	// A join the drive already failed (a stall, a settle failure) left its mission start:
+	// A join the drive already failed (a join error, a settle failure) left its mission start:
 	// there is no final wait to leave, whatever the doomed runtime reads until the shell's
 	// unload (engine inmatch/join_session_policy.h fail_reason carries the witness).
 	if (!policy_->fail_reason().is_empty()) return false;
 	MissionRoot *runtime = world_->get_runtime();
 	Ref<Simulation> sim = runtime != nullptr ? runtime->get_sim() : Ref<Simulation>();
 	if (sim.is_null() || !sim->cancel_join_final_wait()) return false;
-	// The wait is over: the game loop runs, and the watch's window covers no server-owed
-	// transition of the wait any more.
+	// The wait is over: the game loop runs, and the watch covers no server-owed transition
+	// of the wait any more.
 	policy_->disarm_admission_watch();
 	return true;
 }
@@ -720,7 +703,6 @@ void SessionDrive::fail_join_preload(const String &p_reason) {
 
 void SessionDrive::cancel_join_preload() {
 	world_->set_process(false);
-	policy_->disarm_preload();
 	join_preload_sim_.unref();
 	join_preload_root_.unref();
 	join_identified_ = false;
@@ -793,7 +775,7 @@ int SessionDrive::reload_as_joiner() {
 	}
 	// The kept connection is the preload's: the reload's legs ran from
 	// Simulation::begin_joiner_reload, and step_preload loads the next map at
-	// its 0x1A as a first join's does, with no window armed.
+	// its 0x1A as a first join's does.
 	policy_->reset_for_join();
 	pending_join_ = last_join_target_;
 	join_preload_sim_ = kept_sim_;

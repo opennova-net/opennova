@@ -1028,8 +1028,8 @@ public:
 	// or the host's advertised override; < 0 disables the reap) — the fallback for a host
 	// that vanishes without a goodbye. Armed from the accepted 0x82 (retail state 5) onward
 	// with no gameplay gate: the join stages, the world stream, the deploy screen and the
-	// in-match phases all reap the same way; the shell's 60 s admission watchdogs merely
-	// run alongside it. The reap is evaluated by the send pump (pump()), so in match it
+	// in-match phases all reap the same way, and no join wait has a deadline of its own
+	// (D-NET-NEW-L2-44), so this reap is what ends a join a vanished host left. The reap is evaluated by the send pump (pump()), so in match it
 	// fires at the first open send boundary past the window (reap_silent_session). (3) The host's 0x86 SERVER_GOODBYE burst (its reap, StopServer, a
 	// replacement, its answer to our own leave) is the third cause, handled like (1).
 	//

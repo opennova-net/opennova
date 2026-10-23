@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <memory>
 // P5 — inmatch::ClientRuntime (the headless Client_ProcessNetworkFrame role), always-on:
 //
 //  (A) Full in-process round-trip — client_runtime <-> the REAL np server legs <-> Server_TickUpdate
@@ -1126,11 +1127,30 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 // [orig: UI_JoinSelectedSession @0x569bf4..0x569bfa; Game_ApplySessionSettingsToGlobals
 //  @0x551d20..0x551d30, strncpy 0x11 @0x55202a; NapiNPClientMsg_MissionMapNames
 //  @0x427e6c; the 0x0B's read @0x52621f].
-bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
+// `held_in_the_queue` runs the join a host's balance gate holds after its 0x02 handler: the
+// p195 tdh-sidepw RO, whose side-A password met a host whose own player holds side A under
+// balance_join = 1 (2:0 against max(1, ceil(0 * 0.5))). The host nags the held joiner with
+// its S2C 0x03 on every pump pass past 1000 ms, about every 2 s, for as long as the gate
+// holds; retail's join screen shows the queue line off that record and waits, its
+// connection acking each nag, until the S2C 0x05. No wait of the join has a deadline
+// (D-NET-NEW-L2-44: ours failed this join at 60 s with its goodbyes).
+// [orig: NapiNPServerMsg_0x002 @0x512FD0 (the sends @0x5130AC..0x5131D5);
+//  CNapiServer_ProcessPendingPlayerSpawns @0x4C8DC0 - the side-password team @0x4C8ED1, the
+//  balance gate @0x4C8F0A..0x4C8F74, the nag @0x4C8F7A..0x4C8FD1;
+//  MultiPlayer_JoinSessionStateMachine @0x56A320 - the session tests @0x56A6DF / @0x56A758,
+//  the queue line @0x56A75E..0x56A8F1 (its one clock read @0x56A7A2)]
+bool run_retail_post_auth_prelude(const std::string &side_password = {},
+		bool held_in_the_queue = false) {
 	constexpr uint32_t kServerKey = 0x11223344u;
 	constexpr uint32_t kConnectionId = 3;
 	const std::string server_scrk = "SERVER-RETAIL-PRELUDE-SCRK";
-	inmatch::JoinerConnection joiner("RetailPrelude");
+	// The held join runs on a test clock, so its hold outlasts any 60 s window.
+	uint64_t clock_ms = 1000;
+	std::unique_ptr<inmatch::JoinerConnection> joiner_owner = held_in_the_queue
+			? std::make_unique<inmatch::JoinerConnection>(
+					  "RetailPrelude", [&clock_ms] { return clock_ms; })
+			: std::make_unique<inmatch::JoinerConnection>("RetailPrelude");
+	inmatch::JoinerConnection &joiner = *joiner_owner;
 	joiner.set_title(&kJo);
 	joiner.set_join_request(inmatch::JoinRole::Player, "", "", side_password);
 
@@ -1313,6 +1333,99 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {}) {
 				client_messages[0].payload[7] == 0x00,
 			"padding echo preserves the retail challenge position")) {
 		return false;
+	}
+
+	if (held_in_the_queue) {
+		// The 0x02 handler's records as the p195 RO's retail host framed them (frame 13):
+		// the holdoff settings pair, the 0x01 verification, the 0x7A, the 0x7B and the
+		// 0x03 [queued 1][position 1][length 1].
+		const std::vector<uint8_t> nag = {0x01, 0x01, 0x00, 0x01, 0x00};
+		server_seq.last_inbound_seq = 5;
+		uint32_t client_seq = 5;
+		int acks = 0;
+		// Every C2S packet of the hold is a header-only ACK: no record, no goodbye.
+		auto take_acks = [&](const std::vector<std::vector<uint8_t>> &packets) {
+			for (const std::vector<uint8_t> &packet : packets) {
+				if (!decode_client_session(packet, client_auth.scrk, client_header,
+						client_messages) || !client_messages.empty() || packet.size() != 18)
+					return false;
+				client_seq = client_header.seq_num;
+				++acks;
+			}
+			return true;
+		};
+		const std::vector<uint8_t> admission_datagram = frame_server_session(
+				server_seq, server_scrk, client_auth.ck,
+				{
+						make_protocol_message(
+								0x00, {0x00, 0x08, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x00, 0x00},
+								0xA0),
+						make_protocol_message(
+								0x00, {0x01, 0x08, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x00, 0x00},
+								0xA0),
+						make_protocol_message(0x01, {0x01, 0x00, 0x00, 0x00}),
+						make_protocol_message(0x7A, {0x00}),
+						make_protocol_message(0x7B, retail_full_player_info()),
+						make_protocol_message(0x03, nag),
+				});
+		if (!expect(take_acks(joiner.handle_datagram(admission_datagram.data(),
+						admission_datagram.size()).outbound) &&
+						take_acks(joiner.pump(0)) && acks == 1,
+				"held: the 0x02 handler's records draw one header-only ACK")) {
+			return false;
+		}
+		// The nags, one every 2 s for 72 s, past the 60 s our join screen gave the host.
+		for (int pass = 0; pass < 36; ++pass) {
+			clock_ms += 2000;
+			acks = 0;
+			server_seq.last_inbound_seq = client_seq;
+			const std::vector<uint8_t> nag_datagram = frame_server_session(
+					server_seq, server_scrk, client_auth.ck,
+					{make_protocol_message(0x03, nag)});
+			if (!expect(take_acks(joiner.handle_datagram(nag_datagram.data(),
+							nag_datagram.size()).outbound) &&
+							take_acks(joiner.pump(0)) && acks == 1,
+					"held: each nag draws one header-only ACK and nothing else")) {
+				return false;
+			}
+			if (!expect(joiner.in_pre_game() && !joiner.session_lost() &&
+							joiner.last_error().empty() &&
+							joiner.join_screen_stage() == inmatch::JoinScreenStage::Queued,
+					"held: the join screen waits in the queue, no deadline")) {
+				return false;
+			}
+		}
+		// The queue line's record: next in line, its elapsed time from the first queued
+		// record's stamp (the not-queued -> queued edge alone stamps it).
+		const inmatch::JoinQueueRecord &queue = joiner.join_queue();
+		if (!expect(queue.queued && queue.position == 1 && queue.length == 1 &&
+						queue.queued_since_ms == 1000,
+				"held: the queue record is the host's, stamped at the first nag")) {
+			return false;
+		}
+		// The gate admits: the spawn pump's own 0x03 [0], the settings pair, the 0x05, the
+		// 0x04 and the 0x7B; the joiner answers with frame 17's group.
+		server_seq.last_inbound_seq = client_seq;
+		const std::vector<uint8_t> held_start_datagram = frame_server_session(
+				server_seq, server_scrk, client_auth.ck,
+				{
+						make_protocol_message(0x03, {0x00}),
+						initial_settings[0],
+						initial_settings[1],
+						make_protocol_message(0x05, {0x01}),
+						make_protocol_message(0x04, retail_slot_assignment()),
+						make_protocol_message(0x7B, retail_full_player_info()),
+				});
+		const inmatch::JoinerConnection::PollResult held_start_result = joiner.handle_datagram(
+				held_start_datagram.data(), held_start_datagram.size());
+		return expect(held_start_result.outbound.size() == 1 &&
+						decode_client_session(held_start_result.outbound[0], client_auth.scrk,
+								client_header, client_messages) &&
+						client_messages.size() == 5 && client_messages[0].tag == 0x4E &&
+						client_messages[1].tag == 0x03 && client_messages[2].tag == 0x48 &&
+						client_messages[3].tag == 0x47 && client_messages[4].tag == 0x33 &&
+						joiner.in_mission_start() && !joiner.in_pre_game(),
+				"held: the admission after the hold starts the game as a prompt one does");
 	}
 
 	// Retail frame 14 is a post-handshake metadata bundle. With no semantic reply the
@@ -8971,6 +9084,7 @@ int main() {
 	                run_retail_post_auth_prelude() &&
 	                run_retail_post_auth_prelude("TeamPassword1234") &&
 	                run_retail_post_auth_prelude("TeamPassword12345678") &&
+	                run_retail_post_auth_prelude("blue1", /*held_in_the_queue=*/true) &&
 	                run_novaworld_join_tokens_ride_the_wire() &&
 	                run_early_sync_tail_latch() &&
 	                run_client_reducer_preserves_packet_message_order() &&

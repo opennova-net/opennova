@@ -4259,9 +4259,9 @@ add_executable(inmatch_joiner_role_test npruntime/joiner_role_test.cpp)
 target_link_libraries(inmatch_joiner_role_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME inmatch_joiner_role COMMAND inmatch_joiner_role_test)
 
-# The joiner session-drive policy (S10b): the two 0xEA60 reachable-analog windows, the S2C 0x7B
-# promote validation, the admission/deploy/loss edge machine (frame ORDERING locked: loss > abort >
-# settle > window > edges), and the D-NET-178 expansion reconcile decision.
+# The joiner session-drive policy (S10b): the preload's failure edge (no join wait has a deadline,
+# D-NET-NEW-L2-44), the S2C 0x7B promote validation, the admission/deploy/loss edge machine (frame
+# ORDERING locked: loss > settle > join error > edges), and the D-NET-178 expansion reconcile decision.
 add_executable(npruntime_join_session_policy_test npruntime/join_session_policy_test.cpp)
 target_link_libraries(npruntime_join_session_policy_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_join_session_policy COMMAND npruntime_join_session_policy_test)

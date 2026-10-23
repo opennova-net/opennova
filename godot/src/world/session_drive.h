@@ -36,13 +36,13 @@ class NovaWorldClient;
 // 0043 slice G10), a plain member of the C++ GameWorld: request staging
 // (HostSessionOptions / JoinTarget, ADR 0017), the authenticated-before-load
 // joiner preload sim, the S2C 0x7B promote, the expansion reconcile
-// (D-NET-178), the post-load admission watchdog + per-frame
+// (D-NET-178), the post-load admission watch + per-frame
 // admission/deploy/loss observer, the session-loss latch, the ESC aborts, and
 // NovaWorld gate registration for a browsable listen host.
 //
-// The POLICY of all of that -- the two ConnectOrHost windows (0xEA60), the
-// promote validation, the admission/deploy/loss edge machine with its latches,
-// and the expansion reconcile DECISION -- is native
+// The POLICY of all of that -- the preload's failure edge (no join wait has a
+// deadline, D-NET-NEW-L2-44), the promote validation, the admission/deploy/loss
+// edge machine with its latches, and the expansion reconcile DECISION -- is native
 // (engine/runtime/inmatch/join_session_policy.cpp, bound as
 // NetSessionPolicy). This drive keeps the lifetime: it reads simulation state,
 // forwards it to the policy each frame, and executes exactly what the returned
@@ -76,8 +76,8 @@ public:
 	int load_as_joiner(const Ref<JoinTarget> &p_target);
 	// Drive one frame of the witnessed pre-world connect/session exchange
 	// while the loading screen is visible (the world's _process while a
-	// preload is pending). The deadline is the retail ConnectOrHost window
-	// (0xEA60; the policy owns it). Synchronous on purpose.
+	// preload is pending), with no deadline: a join error or the session's loss
+	// ends it (the policy owns the edge). Synchronous on purpose.
 	void step_preload();
 	bool is_preload_pending() const { return join_preload_sim_.is_valid(); }
 	// ESC/abort for the only interruptible load leg: the joiner's pre-load
@@ -112,7 +112,7 @@ public:
 	void stage_runtime_options(const Ref<MissionSetupOptions> &p_opts);
 	// Post-runtime-start hook, called by the world once its runtime is live:
 	// a hosting NovaWorld session meets its match (bind_nw_host). (The
-	// joiner's admission watchdog arms inside this drive's own load entries,
+	// joiner's admission watch arms inside this drive's own load entries,
 	// not here.)
 	void on_runtime_started(const Ref<MissionSetupOptions> &p_opts, const String &p_bms_name);
 	// Per-frame observer, called from the world's tick after the runtime
