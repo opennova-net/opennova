@@ -174,8 +174,9 @@ public:
 	// --- NWJoin handshake ---
 	// Begin: returns the first NWJoin GET (NeedRequest) or Failed. [orig: join()]
 	JoinResult join(uint32_t rid);
-	// Feed a completed join response; FIRST reads NWJOINSESSIONTAG -> the ?rid=&tag= GET, SECOND parses
-	// the .joi -> {host, port}. [orig: on_join_request_completed()]
+	// Feed a completed join response; FIRST is the relay page, whose META refresh is the second GET
+	// (the bare NWJoin.dll on the service's relay, its tag the jar's NWJOINSESSIONTAG cookie), SECOND
+	// parses the .joi -> {host, port}. [orig: on_join_request_completed()]
 	JoinResult on_join_response(bool transport_ok, int code, const std::vector<std::string> &response_headers,
 	                            const std::vector<uint8_t> &body);
 	bool join_active() const { return join_step_ != JoinStep::Idle; }
@@ -212,12 +213,15 @@ private:
 	enum class JoinStep { Idle, First, Second };
 	enum class HostStep { Idle, Fetching };
 
-	std::vector<std::string> request_headers(bool form_content_type) const; // Content-Type + Cookie lines
+	// The menu browser's GET headers and its form post's (each past the request line and Host).
+	std::vector<std::string> request_headers() const;
+	std::vector<std::string> post_headers(std::size_t content_length) const;
 	void merge_response_cookies(const std::vector<std::string> &response_headers);
 	void seed_identity_cookies();
 	LoginResult login_post();                 // the /NWLogin.dll POST (the 13-field form), or Failed
 	std::string gsb_url() const;
-	std::string nwlogin_poll_url() const;     // /NWLogin.dll?tag=<LOGINSESSIONTAG>
+	// A relay page's META refresh as an absolute URL ("" when it names none).
+	std::string relay_refresh_url(const std::vector<uint8_t> &body) const;
 	void capture_globals(const std::vector<uint8_t> &body);
 	std::string absolute_url(const std::string &url) const;
 	HostKeyResult host_get(const std::string &url);
@@ -229,7 +233,6 @@ private:
 	int login_poll_count_ = 0;
 	std::string login_user_, login_pass_;
 	JoinStep join_step_ = JoinStep::Idle;
-	uint32_t join_rid_ = 0;
 	HostStep host_step_ = HostStep::Idle;
 	int host_hops_ = 0;
 	std::map<std::string, std::string> globals_; // upper-cased name -> value

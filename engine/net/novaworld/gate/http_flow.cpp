@@ -223,7 +223,6 @@ void LobbyHttpFlow::reset() {
 	login_user_.clear();
 	login_pass_.clear();
 	join_step_ = JoinStep::Idle;
-	join_rid_ = 0;
 }
 
 // (see godot/src/network/novaworld_client.cpp http_base()) — three derivation tiers.
@@ -275,13 +274,34 @@ std::string LobbyHttpFlow::resolve_startup_url() const {
 	return su;
 }
 
-// [orig: request_headers()] — optional form Content-Type, then ONE "Cookie:"
-// header per cookie (retail's IB3 client emits each cookie as its own
-// "Cookie: name=value;" line, not a merged header)
-// [orig: CUIBrowser_SendHTTPRequest @ 0x658840].
-std::vector<std::string> LobbyHttpFlow::request_headers(bool form_content_type) const {
-	std::vector<std::string> h;
-	if (form_content_type) h.push_back("Content-Type: application/x-www-form-urlencoded");
+// The menu browser's GET headers past the transport's request line and Host, in its order: the
+// image-first Accept, Accept-Language, the IBrowse User-Agent, Pragma, then ONE "Cookie:" header
+// per jar entry (each cookie its own "Cookie: name=value;" line, not a merged header). No
+// If-Modified-Since: the browser writes it only for a page it holds a date for, and the flow
+// caches none (D-NET-NEW-L9-31).
+// [orig: CUIBrowser_SendHTTPRequest @0x658840 - "Host: %s" @0x658959, the Accept @0x658969,
+//  Accept-Language @0x658979, User-Agent @0x658989, the If-Modified-Since date test
+//  @0x658994..0x65899C, Pragma @0x6589D5, the Cookie lines @0x658A44..0x658AC0]
+std::vector<std::string> LobbyHttpFlow::request_headers() const {
+	std::vector<std::string> h{"Accept: image/jpeg, image/x-pcx, image/pcx, image/png, text/html",
+			"Accept-Language: en", "User-Agent: NovaLogic IBrowse 2.0", "Pragma: no-cache"};
+	for (const std::string &line : jar_.cookie_header_lines()) {
+		h.push_back("Cookie: " + line);
+	}
+	return h;
+}
+
+// The form post's headers past its request line and Host, in its order: Accept, Accept-Language,
+// the User-Agent, the body's Content-Length, the lower-case-t Content-type, then the Cookie lines
+// (D-NET-NEW-L9-31). The transport writes no Content-Length of its own past this one.
+// [orig: GopherWebWidget_SendHttpPost @0x658B30 - "Host: %s" @0x658BAE, "Accept: text/html"
+//  @0x658BBE, Accept-Language @0x658BCE, User-Agent @0x658BDE, "Content-Length: %d" @0x658BEF,
+//  "Content-type: application/x-www-form-urlencoded" @0x658BFF, the Cookie lines from its jar
+//  read @0x658C67]
+std::vector<std::string> LobbyHttpFlow::post_headers(std::size_t content_length) const {
+	std::vector<std::string> h{"Accept: text/html", "Accept-Language: en",
+			"User-Agent: NovaLogic IBrowse 2.0", "Content-Length: " + std::to_string(content_length),
+			"Content-type: application/x-www-form-urlencoded"};
 	for (const std::string &line : jar_.cookie_header_lines()) {
 		h.push_back("Cookie: " + line);
 	}
@@ -354,7 +374,7 @@ LoginResult LobbyHttpFlow::login(const std::string &username, const std::string 
 	req.valid = true;
 	req.method = HttpMethod::Get;
 	req.url = prepare_url;
-	req.headers = request_headers(false);
+	req.headers = request_headers();
 	return login_need(std::move(req));
 }
 
@@ -395,16 +415,21 @@ LoginResult LobbyHttpFlow::login_post() {
 	req.valid = true;
 	req.method = HttpMethod::Post;
 	req.url = http_base() + "/NWLogin.dll";
-	req.headers = request_headers(true);
+	req.headers = post_headers(body.size());
 	req.body = std::move(body);
 	return login_need(std::move(req));
 }
 
-std::string LobbyHttpFlow::nwlogin_poll_url() const {
-	const std::string base = http_base();
-	const std::string *tag = jar_.find("LOGINSESSIONTAG");
-	if (tag && !tag->empty()) return base + "/NWLogin.dll?tag=" + *tag;
-	return base + "/NWLogin.dll";
+// A relay page's next request: the menu browser follows the page's META refresh to the URL it
+// names (the service's relay names the bare .dll, whose session tag rides the jar's cookie), so
+// the login's polls and the join's second leg go where the page sends them, as the host leg's do
+// (D-NET-NEW-L9-31). Empty when the page names none.
+// [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620 - HTTP-EQUIV REFRESH @0x655670, the URL= scan
+//  @0x6556D7, a leading quote skipped @0x6556F4..0x6556F6, the copy to a closing quote
+//  @0x655703 / @0x655707]
+std::string LobbyHttpFlow::relay_refresh_url(const std::vector<uint8_t> &body) const {
+	const std::string next = meta_refresh_url(to_string_body(body));
+	return next.empty() ? std::string() : absolute_url(next);
 }
 
 LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
@@ -458,7 +483,7 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 						"&newupdateavailable=" + pages.new_update +
 						"&newupdateavailablewithbypass=" + pages.new_update_bypass +
 						"&junction=" + pages.junction;
-				req.headers = request_headers(false);
+				req.headers = request_headers();
 				return login_need(std::move(req));
 			}
 			return login_post();
@@ -479,13 +504,18 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 				if (!message.empty()) return login_fail(message);
 				return login_fail("login rejected (no session tag)");
 			}
+			const std::string next = relay_refresh_url(body);
+			if (next.empty()) {
+				login_step_ = LoginStep::Idle;
+				return login_fail("login: the answer is no relay page");
+			}
 			login_step_ = LoginStep::Poll;
 			login_poll_count_ = 0;
 			HttpRequestSpec req;
 			req.valid = true;
 			req.method = HttpMethod::Get;
-			req.url = nwlogin_poll_url();
-			req.headers = request_headers(false);
+			req.url = next;
+			req.headers = request_headers();
 			return login_need(std::move(req));
 		}
 		case LoginStep::Poll: {
@@ -507,15 +537,16 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 				return login_fail(message);
 			}
 			constexpr int kMaxLoginPolls = 10;
-			if (++login_poll_count_ >= kMaxLoginPolls) {
+			const std::string next = relay_refresh_url(body);
+			if (next.empty() || ++login_poll_count_ >= kMaxLoginPolls) {
 				login_step_ = LoginStep::Idle;
 				return login_fail("login did not complete (no account handle)");
 			}
 			HttpRequestSpec req;
 			req.valid = true;
 			req.method = HttpMethod::Get;
-			req.url = nwlogin_poll_url();
-			req.headers = request_headers(false);
+			req.url = next;
+			req.headers = request_headers();
 			return login_need(std::move(req));
 		}
 		case LoginStep::Idle:
@@ -542,7 +573,7 @@ HttpRequestSpec LobbyHttpFlow::gsb_request() const {
 	req.valid = true;
 	req.method = HttpMethod::Get;
 	req.url = url;
-	req.headers = request_headers(false);
+	req.headers = request_headers();
 	return req;
 }
 
@@ -562,7 +593,6 @@ JoinResult LobbyHttpFlow::join(uint32_t rid) {
 	const std::string refusal = title_identity_refusal(*ctx_.title, TitleIdentityPart::WebFlow);
 	if (!refusal.empty()) return join_fail(refusal);
 	if (http_base().empty()) return join_fail("no server base URL — connect first");
-	join_rid_ = rid;
 	join_step_ = JoinStep::First;
 	const TitlePages &pages = *ctx_.title->pages;
 	HttpRequestSpec req;
@@ -574,7 +604,7 @@ JoinResult LobbyHttpFlow::join(uint32_t rid) {
 			"&success=" + pages.join + "&failure=" + pages.main + "&relay=" + pages.relay +
 			"&msgbase=" + pages.msgbase + "&nodb=" + pages.no_db +
 			"&pfid=" + std::to_string(*ctx_.title->pfid) + "&mode=Login&rid=" + std::to_string(rid);
-	req.headers = request_headers(false);
+	req.headers = request_headers();
 	return join_need(std::move(req));
 }
 
@@ -593,14 +623,20 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 
 	switch (step) {
 		case JoinStep::First: {
-			const std::string *tag = jar_.find("NWJOINSESSIONTAG");
+			// The relay page refreshes to the second leg (relay_refresh_url).
+			const std::string next = relay_refresh_url(body);
+			if (next.empty()) {
+				join_step_ = JoinStep::Idle;
+				const std::string message = extract_message(body);
+				if (!message.empty()) return join_fail(message);
+				return join_fail("join: the answer is no relay page");
+			}
 			join_step_ = JoinStep::Second;
 			HttpRequestSpec req;
 			req.valid = true;
 			req.method = HttpMethod::Get;
-			req.url = http_base() + "/NWJoin.dll?rid=" + std::to_string(join_rid_) +
-					((tag && !tag->empty()) ? ("&tag=" + *tag) : std::string());
-			req.headers = request_headers(false);
+			req.url = next;
+			req.headers = request_headers();
 			return join_need(std::move(req));
 		}
 		case JoinStep::Second: {
@@ -698,7 +734,7 @@ HostKeyResult LobbyHttpFlow::host_get(const std::string &url) {
 	req.valid = true;
 	req.method = HttpMethod::Get;
 	req.url = absolute;
-	req.headers = request_headers(false);
+	req.headers = request_headers();
 	return host_need(std::move(req));
 }
 

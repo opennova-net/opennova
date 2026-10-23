@@ -1069,12 +1069,17 @@ void test_play_uses_current_http_cookies() {
 	flow.set_context(context);
 	flow.login("synthetic", "synthetic");
 	flow.on_login_response(true, 200, {"Set-Cookie: EPASK=3:65537:fixture"}, {});
-	flow.on_login_response(true, 200, {"Set-Cookie: LOGINSESSIONTAG=login"}, {});
+	// The POST's answer is the relay page, its refresh the poll (D-NET-NEW-L9-31).
+	const std::string login_relay = "<META http-equiv=\"refresh\" CONTENT=0;URL=\"NWLogin.dll\">";
+	flow.on_login_response(true, 200, {"Set-Cookie: LOGINSESSIONTAG=login"},
+			std::vector<uint8_t>(login_relay.begin(), login_relay.end()));
 	const auto login = flow.on_login_response(true, 200,
 			{"Set-Cookie: NWHANDLE=synthetic", "Set-Cookie: PCID=account"}, {});
 	if (!expect(login.kind == LoginResult::Kind::Succeeded, "cookie refresh: HTTP login succeeds")) return;
 	flow.join(777);
-	flow.on_join_response(true, 200, {"Set-Cookie: NWJOINSESSIONTAG=join"}, {});
+	const std::string join_relay = "<META http-equiv=\"refresh\" CONTENT=0;URL=\"NWJoin.dll\">";
+	flow.on_join_response(true, 200, {"Set-Cookie: NWJOINSESSIONTAG=join"},
+			std::vector<uint8_t>(join_relay.begin(), join_relay.end()));
 	// NK is the .joi's only dial authority (URL_ParseConnectionQueryString @0x54e146).
 	const std::string joi = "<TITLE>[NK=" + url_cipher_encode("192.0.2.1:32768", URL_CIPHER_KEY_NK) +
 			"&NI=192.0.2.1&NP=32768&GS=x]</TITLE>";
@@ -1098,7 +1103,8 @@ void test_play_uses_current_http_cookies() {
 	// the first successful NWJoin is a valid source for this request.
 	respond_all(server, sent(client, client.stop_playing()));
 	flow.join(778);
-	flow.on_join_response(true, 200, {"Set-Cookie: NWJOINSESSIONTAG=retry"}, {});
+	flow.on_join_response(true, 200, {"Set-Cookie: NWJOINSESSIONTAG=retry"},
+			std::vector<uint8_t>(join_relay.begin(), join_relay.end()));
 	flow.on_join_response(true, 200,
 			{"Set-Cookie: NWPF=38", "Set-Cookie: NWPF2=1", "Set-Cookie: PUBJOINTICKET=ticket-2",
 			 "Set-Cookie: NWCDKIID=issued", "Set-Cookie: CountryName=remote"},

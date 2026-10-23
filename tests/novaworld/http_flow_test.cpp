@@ -32,6 +32,13 @@ static bool expect(bool cond, const char *msg) {
 static std::vector<uint8_t> bytes(const std::string &s) {
 	return std::vector<uint8_t>(s.begin(), s.end());
 }
+// The service's relay pages (apps/novaworld_web/templates/jop_2_relay.htm): a META refresh to the
+// bare .dll, whose session tag rides the jar's cookie.
+static std::vector<uint8_t> relay_to(const std::string &dll) {
+	const std::string page = "<HTML><HEAD><TITLE></TITLE><META http-equiv=\"refresh\" CONTENT=0;URL=\"" +
+			dll + "\"></HEAD></HTML>";
+	return std::vector<uint8_t>(page.begin(), page.end());
+}
 static std::vector<std::string> set_cookie(const std::string &nv) {
 	return {"Set-Cookie: " + nv};
 }
@@ -163,15 +170,47 @@ static bool test_login_success_concrete() {
 	expect(contains(r.request.body, "NAME=") && contains(r.request.body, "PASSWORD="), "form carries NAME + PASSWORD");
 	expect(contains(r.request.body, "success=") && contains(r.request.body, "failure="), "form carries the success/failure fields");
 	expect(contains(r.request.body, "pfid="), "form carries the pfid field");
-	bool form_ct = false;
-	for (const std::string &h : r.request.headers)
-		if (contains(h, "Content-Type: application/x-www-form-urlencoded")) form_ct = true;
-	expect(form_ct, "POST sets the form Content-Type");
+	// The form post's headers in the menu browser's order, past its request line and Host
+	// (D-NET-NEW-L9-31). [orig: GopherWebWidget_SendHttpPost @0x658B30 - @0x658BBE, @0x658BCE,
+	//  @0x658BDE, @0x658BEF, @0x658BFF, the Cookie lines from @0x658C67]
+	expect(r.request.headers.size() >= 5 && r.request.headers[0] == "Accept: text/html" &&
+	               r.request.headers[1] == "Accept-Language: en" &&
+	               r.request.headers[2] == "User-Agent: NovaLogic IBrowse 2.0" &&
+	               r.request.headers[3] == "Content-Length: " + std::to_string(r.request.body.size()) &&
+	               r.request.headers[4] == "Content-type: application/x-www-form-urlencoded",
+	       "POST carries the browser's headers in its order, the lower-case-t Content-type");
+	for (std::size_t i = 5; i < r.request.headers.size(); ++i)
+		expect(contains(r.request.headers[i], "Cookie: "), "the POST's cookie lines follow its form headers");
 
-	// POST response: LOGINSESSIONTAG -> the poll GET (carries ?tag=).
-	r = f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=tag123"), {});
+	// POST response: LOGINSESSIONTAG and the relay page -> the poll GET its META refresh names, the
+	// bare NWLogin.dll (the tag rides the jar's cookie), with the browser's GET headers.
+	// [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620; CUIBrowser_SendHTTPRequest @0x658840 -
+	//  @0x658969, @0x658979, @0x658989, @0x6589D5]
+	r = f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=tag123"), relay_to("NWLogin.dll"));
 	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest, "POST -> poll")) return false;
-	expect(contains(r.request.url, "/NWLogin.dll?tag=tag123"), "poll carries the session tag");
+	expect(r.request.url == "http://gs.opennova.test:8080/NWLogin.dll",
+	       "poll follows the relay page's refresh to the bare NWLogin.dll");
+	expect(r.request.headers.size() >= 4 &&
+	               r.request.headers[0] == "Accept: image/jpeg, image/x-pcx, image/pcx, image/png, text/html" &&
+	               r.request.headers[1] == "Accept-Language: en" &&
+	               r.request.headers[2] == "User-Agent: NovaLogic IBrowse 2.0" &&
+	               r.request.headers[3] == "Pragma: no-cache",
+	       "a GET carries the browser's headers in its order");
+	{
+		bool tag_cookie = false;
+		for (const std::string &h : r.request.headers)
+			if (h == "Cookie: LOGINSESSIONTAG=tag123;") tag_cookie = true;
+		expect(tag_cookie, "the poll's session tag rides its cookie line");
+	}
+	// A POST answer that is no relay page leaves the login there.
+	{
+		nw::LobbyHttpFlow g;
+		g.set_context(concrete_ctx());
+		g.login("p", "s");
+		g.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
+		const nw::LoginResult stuck = g.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t"), {});
+		expect(stuck.kind == nw::LoginResult::Kind::Failed, "a POST answer with no refresh fails the login");
+	}
 
 	// POLL response: NWHANDLE + PCID -> success.
 	r = f.on_login_response(true, 200, {"Set-Cookie: NWHANDLE=PlayerOne", "Set-Cookie: PCID=42"}, {});
@@ -210,7 +249,8 @@ static bool test_login_templated_nwstart() {
 	// Captured live .204 success needs two poll GETs. The first response is
 	// still the relay page, where @MESSAGE@ is progress rather than failure.
 	const std::string relay_page =
-			"<HTML><IB3_SUBST name=\"@MESSAGE@\">Contacting login databases..."
+			"<HTML><HEAD><META http-equiv=\"refresh\" CONTENT=0;URL=\"NWLogin.dll\"></HEAD>"
+			"<IB3_SUBST name=\"@MESSAGE@\">Contacting login databases..."
 			"<BR></IB3_SUBST></HTML>";
 	r = f.on_login_response(true, 200,
 			{"Set-Cookie: LOGINSESSIONTAG=live-tag", "Set-Cookie: NWHANDLE=",
@@ -221,8 +261,8 @@ static bool test_login_templated_nwstart() {
 	r = f.on_login_response(true, 200, {}, bytes(relay_page));
 	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest,
 	            "pending relay message keeps polling")) return false;
-	expect(contains(r.request.url, "/NWLogin.dll?tag=live-tag"),
-	       "second poll retains the login session tag");
+	expect(contains(r.request.url, "/NWLogin.dll") && !contains(r.request.url, "tag="),
+	       "second poll follows the relay page's refresh, its tag in the jar");
 	r = f.on_login_response(true, 200,
 			{"Set-Cookie: NWHANDLE=ljim", "Set-Cookie: PCID=A-A02-085D18"}, {});
 	if (!expect(r.kind == nw::LoginResult::Kind::Succeeded,
@@ -316,7 +356,7 @@ static bool test_login_failures() {
 		f.set_context(concrete_ctx());
 		f.login("p", "s");
 		f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
-		f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t"), {});
+		f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t"), relay_to("NWLogin.dll"));
 		const std::string page =
 				"<IB3_SUBST name=\"@GENERIC@\">This account cannot sign in.</IB3_SUBST>";
 		nw::LoginResult r = f.on_login_response(true, 200, {}, bytes(page));
@@ -330,11 +370,11 @@ static bool test_login_failures() {
 		f.set_context(concrete_ctx());
 		f.login("p", "s");
 		f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
-		f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t"), {});
+		f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t"), relay_to("NWLogin.dll"));
 		nw::LoginResult r;
 		bool failed = false;
 		for (int i = 0; i < 12; ++i) {
-			r = f.on_login_response(true, 200, {}, {});
+			r = f.on_login_response(true, 200, {}, relay_to("NWLogin.dll"));
 			if (r.kind == nw::LoginResult::Kind::Failed) { failed = true; break; }
 		}
 		expect(failed, "poll exhausts after kMaxLoginPolls without NWHANDLE");
@@ -378,10 +418,12 @@ static bool test_join_resolves() {
 	expect(contains(r.request.url, "/NWJoin.dll?needexpkey=jop_2_key2err.htm"), "NWJoin first leg literal");
 	expect(contains(r.request.url, "mode=Login&rid=777"), "NWJoin first leg carries the rid");
 
-	// FIRST response: NWJOINSESSIONTAG -> the second leg (?rid=&tag=).
-	r = f.on_join_response(true, 200, set_cookie("NWJOINSESSIONTAG=jtag"), {});
+	// FIRST response: NWJOINSESSIONTAG and the relay page -> the second leg its META refresh names,
+	// the bare NWJoin.dll, the tag in the jar (the LN S1b retail joiner's second GET; D-NET-NEW-L9-31).
+	r = f.on_join_response(true, 200, set_cookie("NWJOINSESSIONTAG=jtag"), relay_to("NWJoin.dll"));
 	if (!expect(r.kind == nw::JoinResult::Kind::NeedRequest, "NWJoin FIRST -> SECOND")) return false;
-	expect(contains(r.request.url, "/NWJoin.dll?rid=777&tag=jtag"), "NWJoin second leg carries rid + tag");
+	expect(r.request.url == "http://gs.opennova.test:8080/NWJoin.dll",
+	       "NWJoin second leg follows the relay page's refresh");
 
 	// SECOND response: the .joi body resolves host:port from the decoded NK (the
 	// only dial authority) and carries the proxy triple + lobby number verbatim
@@ -421,7 +463,7 @@ static bool test_join_resolves() {
 	nw::LobbyHttpFlow f2;
 	f2.set_context(concrete_ctx());
 	f2.join(1);
-	f2.on_join_response(true, 200, {}, {});
+	f2.on_join_response(true, 200, {}, relay_to("NWJoin.dll"));
 	nw::JoinResult bad = f2.on_join_response(true, 200, {}, bytes("no brackets here"));
 	expect(bad.kind == nw::JoinResult::Kind::Failed, "join with no .joi connection -> Failed");
 	expect(bad.reason == "join: no connection string in .joi", "malformed .joi keeps its fallback reason");
@@ -430,7 +472,7 @@ static bool test_join_resolves() {
 	nw::LobbyHttpFlow f3;
 	f3.set_context(concrete_ctx());
 	f3.join(2);
-	f3.on_join_response(true, 200, {}, {});
+	f3.on_join_response(true, 200, {}, relay_to("NWJoin.dll"));
 	const std::string rejection =
 			"<IB3_SUBST name=\"@GENERIC@\">This game requires the Team Sabre expansion."
 			"<BR><I>Choose another game.</I></IB3_SUBST>";
@@ -456,7 +498,7 @@ static bool test_host_resolves() {
 	f.set_context(concrete_ctx());
 	f.login("player", "secret");
 	f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
-	f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=tag123"), {});
+	f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=tag123"), relay_to("NWLogin.dll"));
 	const std::string main_page =
 			"<HTML><BODY><A HREF=\"jop_2_host1.htm\">Host</A>"
 			"<IB3_GLOBAL name=\"@HOST_URL@\">http://gs.opennova.test:8080/nwhost.dll</IB3_GLOBAL>"

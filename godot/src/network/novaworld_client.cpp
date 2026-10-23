@@ -862,12 +862,28 @@ void NovaWorldClient::sync_flow_context() {
 	flow_.set_context(std::move(ctx));
 }
 
-// Map one HttpRequestSpec onto a given HTTPRequest child node (method/url/headers/body).
+// Map one HttpRequestSpec onto a given HTTPRequest child node (method/url/headers/body). The
+// menu browser's header set is the flow's (engine: LobbyHttpFlow::request_headers / post_headers,
+// D-NET-NEW-L9-31), which names its User-Agent, Accept and a post's Content-Length, so the
+// transport adds none of its own; Host leads them, as the browser's does, and no Accept-Encoding
+// rides along. Godot's client still writes its request line as HTTP/1.1 where the browser's is
+// HTTP/1.0.
 Error NovaWorldClient::ship_spec(HTTPRequest *http, const opennova::HttpRequestSpec &spec) {
 	PackedStringArray headers;
+	// The URL's host, with its port unless it is 80 (Godot's own Host rule).
+	const std::string &url = spec.url;
+	const std::size_t scheme = url.find("://");
+	const std::size_t host_at = scheme == std::string::npos ? 0 : scheme + 3;
+	const std::size_t path_at = url.find('/', host_at);
+	std::string authority = url.substr(host_at,
+			path_at == std::string::npos ? std::string::npos : path_at - host_at);
+	if (authority.size() > 3 && authority.compare(authority.size() - 3, 3, ":80") == 0)
+		authority.resize(authority.size() - 3);
+	headers.push_back(opennova::to_gd("Host: " + authority));
 	for (const std::string &h : spec.headers) {
 		headers.push_back(opennova::to_gd(h));
 	}
+	http->set_accept_gzip(false);
 	const HTTPClient::Method method = (spec.method == opennova::HttpMethod::Post)
 		? HTTPClient::METHOD_POST : HTTPClient::METHOD_GET;
 	return http->request(opennova::to_gd(spec.url), headers, method, opennova::to_gd(spec.body));

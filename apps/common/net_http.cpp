@@ -93,10 +93,14 @@ HttpReply http_exchange(const std::string &method, const std::string &url,
 	const bool has_body = method != "GET";
 	std::string request = method + " " + path + " HTTP/1.0\r\n";
 	request += "Host: " + authority + "\r\n";
+	// A caller that places its own Content-Length (the NovaWorld web flow's form post, which writes
+	// it where the menu browser does) gets no second one.
+	bool length_given = false;
 	for (const std::string &line : headers) {
 		request += line + "\r\n";
+		if (strutil::starts_with_icase(line, "Content-Length:")) length_given = true;
 	}
-	if (has_body) {
+	if (has_body && !length_given) {
 		request += "Content-Length: " + std::to_string(body.size()) + "\r\n";
 	}
 	request += "\r\n";
