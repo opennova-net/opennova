@@ -221,6 +221,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_map_source.cpp # a char map and a foliage map made from a picture
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_alpha.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_device_job.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_geometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_planner.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_raster.cpp
@@ -645,6 +646,7 @@ set(_opennova_terrain_fp_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_alpha.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_device_job.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_geometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_planner.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_raster.cpp

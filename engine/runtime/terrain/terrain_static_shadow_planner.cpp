@@ -3,7 +3,6 @@
 #include <base/io/hash.h>
 
 #include <runtime/mission/placement_traits.h>
-#include <runtime/terrain/row_stripes.h>
 
 #include <algorithm>
 #include <chrono>
@@ -20,18 +19,6 @@ constexpr std::size_t kMaxUnsupportedAttribution = 128;
 // cache capacity; twice that comfortably covers epoch transitions.
 constexpr std::size_t kMaxCachedPlans =
 		2 * TerrainTileCompositionCache::kCapacity;
-
-std::array<float, 3> transform_point(const std::array<float, 12> &transform,
-		const std::array<float, 3> &point) {
-	std::array<float, 3> out{};
-	for (int row = 0; row < 3; ++row) {
-		out[row] = transform[static_cast<std::size_t>(row) * 3] * point[0] +
-				transform[static_cast<std::size_t>(row) * 3 + 1] * point[1] +
-				transform[static_cast<std::size_t>(row) * 3 + 2] * point[2] +
-				transform[9 + static_cast<std::size_t>(row)];
-	}
-	return out;
-}
 
 // The binding hashed the Godot basis rows then origin; the record carries the
 // same value order.
@@ -525,6 +512,109 @@ TerrainStaticShadowPagePlanResult TerrainStaticShadowPlanner::plan(
 	return result;
 }
 
+bool TerrainStaticShadowPlanner::walk_device_job(const CachedPlan &cached,
+		TerrainStaticShadowDeviceJob &r_job) {
+	const TerrainStaticShadowPageJob &page_job = cached.job;
+	const std::vector<uint8_t> &supported = cached.supported;
+	r_job.page = page_job.page;
+	r_job.surface_to_light = world_light_;
+	MaterialStateTable material_states;
+	// The page's caster surfaces in collector / ROBJ / strip order, each with the material
+	// state its draw takes at this tick (the material states resolve serially, in draw
+	// order): one device draw per surface that casts.
+	for (std::size_t draw_index = 0; draw_index < page_job.draws.size(); ++draw_index) {
+		if (supported[draw_index] == 0) continue;
+		const TerrainStaticShadowProjectionDraw &draw = page_job.draws[draw_index];
+		const auto caster_it = casters_->records.find(draw.caster_key);
+		if (caster_it == casters_->records.end() ||
+				caster_it->second.geometry == nullptr ||
+				caster_it->second.geometry->key != draw.geometry.geometry_key ||
+				// Same two-slot cap as classify_draw
+				// [orig: @ 0x60d889..0x60d894].
+				draw.geometry.lod_index > 1) {
+			return false;
+		}
+		const TerrainStaticShadowPlannerCaster &caster = caster_it->second;
+		const TerrainStaticShadowResolvedGeometry &geometry = *caster.geometry;
+		const CasterMaterialStates &states = caster_material_states(
+				material_states, draw.caster_key, caster);
+		const std::vector<TerrainStaticShadowResolvedSurface> &surfaces =
+				geometry.surfaces[draw.geometry.lod_index];
+		for (std::size_t surface_index = 0; surface_index < surfaces.size(); ++surface_index) {
+			const TerrainStaticShadowResolvedSurface &surface = surfaces[surface_index];
+			if (surface.render_object != draw.geometry.render_object_index) {
+				continue;
+			}
+			if (surface.material_index < 0 ||
+					surface.material_index >= static_cast<int>(geometry.materials.size())) {
+				return false;
+			}
+			const TerrainStaticShadowResolvedMaterial &material =
+					geometry.materials[static_cast<std::size_t>(surface.material_index)];
+			if (!material.casts_projected_shadow) {
+				continue;
+			}
+			const TerrainStaticShadowMaterialState &material_state =
+					states[static_cast<std::size_t>(surface.material_index)];
+			if (material_state.issues != kTerrainStaticShadowUnsupportedNone) {
+				return false;
+			}
+			const std::size_t count = surface.indices.size() / 3;
+			if (count == 0) continue;
+			diagnostics_.frame_triangles += count;
+			if (material.alpha_test_enabled) {
+				diagnostics_.frame_alpha_test_triangles += count;
+			}
+			diagnostics_.frame_blend_triangles[static_cast<std::size_t>(material.blend)] += count;
+			TerrainStaticShadowDeviceDraw out;
+			out.geometry = caster.geometry;
+			out.lod_index = draw.geometry.lod_index;
+			out.surface_index = static_cast<uint32_t>(surface_index);
+			out.triangle_count = static_cast<uint32_t>(count);
+			out.world_transform = caster.world_transform;
+			out.ground_y = caster.ground_y;
+			out.blend = material.blend;
+			out.two_sided = material.two_sided;
+			out.alpha_test_enabled = material.alpha_test_enabled;
+			out.alpha_test_inverted = material.alpha_test_inverted;
+			out.alpha_ref = material.alpha_ref;
+			out.alpha_scale = material_state.alpha_scale;
+			out.transforms_uv = material.samples_diffuse_alpha;
+			out.uv = material_state.uv;
+			out.alpha_texture = material_state.alpha_texture;
+			r_job.draws.push_back(std::move(out));
+			r_job.triangle_count += count;
+		}
+	}
+	return true;
+}
+
+bool TerrainStaticShadowPlanner::build_device_job(const TerrainTilePageKey &page,
+		TerrainStaticShadowDeviceJob &r_job) {
+	r_job = TerrainStaticShadowDeviceJob{};
+	if (!enabled_) return false;
+	try {
+		const CachedPlan *cached = plan_for(page);
+		if (cached == nullptr || !cached->valid) return false;
+		++diagnostics_.frame_raster_count;
+		r_job.page = page;
+		r_job.surface_to_light = world_light_;
+		if (cached->job.draws.empty()) return true;
+		const auto walk_started = std::chrono::steady_clock::now();
+		const bool walked = walk_device_job(*cached, r_job);
+		const uint64_t walk_us = static_cast<uint64_t>(
+				std::chrono::duration_cast<std::chrono::microseconds>(
+						std::chrono::steady_clock::now() - walk_started)
+						.count());
+		// The device projects the vertices: the walk is the whole build.
+		diagnostics_.frame_triangle_walk_us += walk_us;
+		diagnostics_.frame_triangle_build_us += walk_us;
+		return walked;
+	} catch (const std::bad_alloc &) {
+		return false;
+	}
+}
+
 bool TerrainStaticShadowPlanner::rasterize(const TerrainTilePageKey &page,
 		TerrainStaticShadowAlphaPage &page_alpha) {
 	if (!enabled_ || !page_alpha.is_valid() ||
@@ -534,225 +624,37 @@ bool TerrainStaticShadowPlanner::rasterize(const TerrainTilePageKey &page,
 	try {
 		const CachedPlan *cached = plan_for(page);
 		if (cached == nullptr || !cached->valid) return false;
-		const TerrainStaticShadowPageJob &page_job = cached->job;
-		const std::vector<uint8_t> &supported = cached->supported;
-		if (page_job.content.value != page_alpha.content.value) return false;
+		if (cached->job.content.value != page_alpha.content.value) return false;
 		++diagnostics_.frame_raster_count;
-		if (page_job.draws.empty()) return true;
+		if (cached->job.draws.empty()) return true;
 
+		// The device job's walk, then its vertices projected on the lane pool (disjoint runs
+		// of the same order: the raster input is identical to a serial build).
 		const auto build_started = std::chrono::steady_clock::now();
-		TerrainStaticShadowRasterInput input;
-		input.threads = raster_threads_;
-		std::unordered_map<const TerrainStaticShadowAlphaPyramid *, int32_t>
-				texture_indices;
-		MaterialStateTable material_states;
-		// Lay the page's triangles out in collector/ROBJ/strip order first
-		// (the material states and texture slots resolve serially, in draw
-		// order), then project disjoint runs of that same order on the lane
-		// pool: the raster input is identical to a serial build.
-		struct SurfaceRun {
-			const TerrainStaticShadowPlannerCaster *caster = nullptr;
-			const TerrainStaticShadowResolvedSurface *surface = nullptr;
-			const TerrainStaticShadowResolvedMaterial *material = nullptr;
-			const TerrainStaticShadowMaterialState *material_state = nullptr;
-			int32_t texture_index = -1;
-			std::size_t first_triangle = 0;
-		};
-		std::vector<SurfaceRun> runs;
-		std::size_t triangle_total = 0;
-		for (std::size_t draw_index = 0; draw_index < page_job.draws.size();
-				++draw_index) {
-			if (supported[draw_index] == 0) continue;
-			const TerrainStaticShadowProjectionDraw &draw =
-					page_job.draws[draw_index];
-			const auto caster_it = casters_->records.find(draw.caster_key);
-			if (caster_it == casters_->records.end() ||
-					caster_it->second.geometry == nullptr ||
-					caster_it->second.geometry->key !=
-							draw.geometry.geometry_key ||
-					// Same two-slot cap as classify_draw
-					// [orig: @ 0x60d889..0x60d894].
-					draw.geometry.lod_index > 1) {
-				return false;
-			}
-			const TerrainStaticShadowPlannerCaster &caster = caster_it->second;
-			const TerrainStaticShadowResolvedGeometry &geometry =
-					*caster.geometry;
-			const CasterMaterialStates &states = caster_material_states(
-					material_states, draw.caster_key, caster);
-			const std::vector<TerrainStaticShadowResolvedSurface> &surfaces =
-					geometry.surfaces[draw.geometry.lod_index];
-			for (const TerrainStaticShadowResolvedSurface &surface :
-					surfaces) {
-				if (surface.render_object !=
-						draw.geometry.render_object_index) {
-					continue;
-				}
-				if (surface.material_index < 0 ||
-						surface.material_index >=
-								static_cast<int>(geometry.materials.size())) {
-					return false;
-				}
-				const TerrainStaticShadowResolvedMaterial &material =
-						geometry.materials[static_cast<std::size_t>(
-								surface.material_index)];
-				if (!material.casts_projected_shadow) {
-					continue;
-				}
-				const TerrainStaticShadowMaterialState &material_state =
-						states[static_cast<std::size_t>(surface.material_index)];
-				if (material_state.issues !=
-						kTerrainStaticShadowUnsupportedNone) {
-					return false;
-				}
-				int32_t texture_index = -1;
-				const TerrainStaticShadowAlphaPyramid *identity =
-						material_state.alpha_texture;
-				if (identity != nullptr) {
-					const auto existing = texture_indices.find(identity);
-					if (existing != texture_indices.end()) {
-						texture_index = existing->second;
-					} else {
-						texture_index = static_cast<int32_t>(
-								input.alpha_textures.size());
-						TerrainStaticShadowAlphaTextureView view;
-						view.mips = identity->mips.data();
-						view.mip_count = identity->mips.size();
-						view.mip_filter = TerrainStaticShadowMipFilter::Linear;
-						input.alpha_textures.push_back(view);
-						texture_indices[identity] = texture_index;
-					}
-				}
-				const std::size_t count = surface.indices.size() / 3;
-				if (count == 0) continue;
-				diagnostics_.frame_triangles += count;
-				if (material.alpha_test_enabled) {
-					diagnostics_.frame_alpha_test_triangles += count;
-				}
-				diagnostics_.frame_blend_triangles[
-						static_cast<std::size_t>(material.blend)] += count;
-				runs.push_back({ &caster, &surface, &material, &material_state,
-						texture_index, triangle_total });
-				triangle_total += count;
-			}
-		}
-		input.triangles.resize(triangle_total);
+		TerrainStaticShadowDeviceJob device_job;
+		if (!walk_device_job(*cached, device_job)) return false;
 		diagnostics_.frame_triangle_walk_us += static_cast<uint64_t>(
 				std::chrono::duration_cast<std::chrono::microseconds>(
 						std::chrono::steady_clock::now() - build_started)
 						.count());
-
-		struct LaneResult {
-			bool failed = false;
-			bool has_bounds = false;
-			float min_u = 0.0f, min_v = 0.0f, max_u = 0.0f, max_v = 0.0f;
-		};
-		// A lane per ~4k triangles, up to the raster's width.
-		const std::size_t lanes = std::clamp<std::size_t>(
-				triangle_total / 4096, 1, std::max<std::size_t>(raster_threads_, 1));
-		std::vector<LaneResult> lane_results(lanes);
-		run_row_stripe_lanes(lanes, [&](std::size_t lane) noexcept {
-			LaneResult &result = lane_results[lane];
-			const std::size_t begin = triangle_total * lane / lanes;
-			const std::size_t end = triangle_total * (lane + 1) / lanes;
-			if (begin >= end) return;
-			// The run holding `begin`: the last run starting at or before it.
-			std::size_t run_index = static_cast<std::size_t>(std::upper_bound(
-					runs.begin(), runs.end(), begin,
-					[](std::size_t value, const SurfaceRun &run) {
-						return value < run.first_triangle;
-					}) - runs.begin()) - 1;
-			TerrainStaticShadowProjectionInput projection;
-			projection.page = page_job.page;
-			projection.surface_to_light = world_light_;
-			for (std::size_t slot = begin; slot < end; ++slot) {
-				while (run_index + 1 < runs.size() &&
-						runs[run_index + 1].first_triangle <= slot) {
-					++run_index;
-				}
-				const SurfaceRun &run = runs[run_index];
-				const TerrainStaticShadowResolvedSurface &surface = *run.surface;
-				const TerrainStaticShadowResolvedMaterial &material = *run.material;
-				const TerrainStaticShadowMaterialState &material_state =
-						*run.material_state;
-				const TerrainStaticShadowPlannerCaster &caster = *run.caster;
-				projection.caster_ground_y = caster.ground_y;
-				const std::size_t index = (slot - run.first_triangle) * 3;
-				TerrainStaticShadowRasterTriangle &triangle = input.triangles[slot];
-				triangle.blend = material.blend;
-				triangle.two_sided = material.two_sided;
-				triangle.alpha_texture_index = run.texture_index;
-				triangle.alpha_test_enabled = material.alpha_test_enabled;
-				triangle.alpha_test_inverted =
-						material.alpha_test_inverted;
-				triangle.alpha_ref = material.alpha_ref;
-				triangle.alpha_scale = material_state.alpha_scale;
-				for (int corner = 0; corner < 3; ++corner) {
-					const int32_t vertex_index = surface.indices[
-							index + static_cast<std::size_t>(corner)];
-					const std::array<float, 3> &local_base =
-							surface.vertices[static_cast<std::size_t>(
-									vertex_index)];
-					const std::array<float, 3> local{
-						local_base[0] + surface.render_object_offset[0],
-						local_base[1] + surface.render_object_offset[1],
-						local_base[2] + surface.render_object_offset[2],
-					};
-					const std::array<float, 3> world = transform_point(
-							caster.world_transform, local);
-					const std::array<float, 2> &uv = surface.uvs[
-							static_cast<std::size_t>(vertex_index)];
-					TerrainStaticShadowWorldVertex source;
-					source.x = world[0];
-					source.y = world[1];
-					source.z = world[2];
-					if (material.samples_diffuse_alpha) {
-						source.texture_u =
-								uv[0] * material_state.uv.m00 +
-								uv[1] * material_state.uv.m10 +
-								material_state.uv.m20;
-						source.texture_v =
-								uv[0] * material_state.uv.m01 +
-								uv[1] * material_state.uv.m11 +
-								material_state.uv.m21;
-					} else {
-						source.texture_u = uv[0];
-						source.texture_v = uv[1];
-					}
-					if (!project_terrain_static_shadow_vertex(projection,
-							source, triangle.vertices[corner])) {
-						result.failed = true;
-						return;
-					}
-					const TerrainStaticShadowRasterVertex &projected =
-							triangle.vertices[corner];
-					if (!result.has_bounds) {
-						result.min_u = result.max_u = projected.page_u;
-						result.min_v = result.max_v = projected.page_v;
-						result.has_bounds = true;
-					} else {
-						result.min_u = std::min(result.min_u, projected.page_u);
-						result.min_v = std::min(result.min_v, projected.page_v);
-						result.max_u = std::max(result.max_u, projected.page_u);
-						result.max_v = std::max(result.max_v, projected.page_v);
-					}
-				}
-			}
-		});
-		for (const LaneResult &result : lane_results) {
-			if (result.failed) return false;
-			if (!result.has_bounds) continue;
+		TerrainStaticShadowRasterInput input;
+		TerrainStaticShadowProjectedBounds bounds;
+		if (!build_terrain_static_shadow_device_raster_input(device_job, raster_threads_, input,
+					&bounds)) {
+			return false;
+		}
+		if (bounds.valid) {
 			if (!diagnostics_.frame_has_projected_bounds) {
-				diagnostics_.frame_min_u = result.min_u;
-				diagnostics_.frame_min_v = result.min_v;
-				diagnostics_.frame_max_u = result.max_u;
-				diagnostics_.frame_max_v = result.max_v;
+				diagnostics_.frame_min_u = bounds.min_u;
+				diagnostics_.frame_min_v = bounds.min_v;
+				diagnostics_.frame_max_u = bounds.max_u;
+				diagnostics_.frame_max_v = bounds.max_v;
 				diagnostics_.frame_has_projected_bounds = true;
 			} else {
-				diagnostics_.frame_min_u = std::min(diagnostics_.frame_min_u, result.min_u);
-				diagnostics_.frame_min_v = std::min(diagnostics_.frame_min_v, result.min_v);
-				diagnostics_.frame_max_u = std::max(diagnostics_.frame_max_u, result.max_u);
-				diagnostics_.frame_max_v = std::max(diagnostics_.frame_max_v, result.max_v);
+				diagnostics_.frame_min_u = std::min(diagnostics_.frame_min_u, bounds.min_u);
+				diagnostics_.frame_min_v = std::min(diagnostics_.frame_min_v, bounds.min_v);
+				diagnostics_.frame_max_u = std::max(diagnostics_.frame_max_u, bounds.max_u);
+				diagnostics_.frame_max_v = std::max(diagnostics_.frame_max_v, bounds.max_v);
 			}
 		}
 		diagnostics_.frame_triangle_build_us += static_cast<uint64_t>(

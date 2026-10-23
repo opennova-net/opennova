@@ -16,6 +16,7 @@
 #include <runtime/terrain/row_stripes.h>
 #include <runtime/terrain/terrain_scorch.h>
 #include <runtime/terrain/terrain_static_shadow_alpha.h>
+#include <runtime/terrain/terrain_static_shadow_device_job.h>
 #include <runtime/terrain/terrain_static_shadow_planner.h>
 #include <runtime/terrain/terrain_tile_composer.h>
 #include <runtime/terrain/terrain_tile_composition_cache.h>
@@ -109,6 +110,10 @@ public:
 		uint64_t shadow_rgb_changed_bytes = 0;
 		uint64_t shadow_base_nonzero_alpha_bytes = 0;
 		TerrainStaticShadowPlannerDiagnostics shadow_diagnostics;
+		// A job enqueued for the device pass: the page's casters as the device draws them,
+		// with `pixels` the composed page before them (its A the DOT3 light alpha the temp
+		// target starts from). The embedder draws the job into the uploaded layer.
+		std::shared_ptr<const TerrainStaticShadowDeviceJob> device_shadow;
 	};
 
 	explicit TerrainTileCompositionWorker(Threads threads = Threads::for_hardware());
@@ -124,11 +129,13 @@ public:
 	void cancel(bool clear_sources);
 	// False when no sources are installed, the worker is stopping, or the
 	// demand policy rejects the job (the queue is full of newer work).
+	// `device_shadow`: the page's static shadow is the embedder's device pass (the
+	// completion carries its device job), not this worker's CPU raster.
 	bool enqueue(const TerrainTileCompositionJob &job,
 			const std::shared_ptr<const SourceSnapshot> &sources, const std::array<float, 3> &tint,
 			const TerrainTileLightEpoch &light, TerrainScorchPagePlan scorch, uint64_t demand_frame,
 			const std::shared_ptr<const TerrainStaticShadowCompilationSnapshot> &shadow,
-			uint32_t shadow_material_time_ms, bool capture_diagnostics);
+			uint32_t shadow_material_time_ms, bool capture_diagnostics, bool device_shadow = false);
 
 	std::optional<Completion> take_completion();
 	// Blocks until every job of the current epoch has completed (or been
@@ -188,6 +195,7 @@ private:
 		// never carries time, the job does.
 		uint32_t shadow_material_time_ms = 0;
 		bool capture_diagnostics = false;
+		bool device_shadow = false;
 	};
 
 	void worker_loop();

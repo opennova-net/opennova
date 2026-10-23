@@ -4,7 +4,9 @@
 // has completed; a completion a predicate rejects stays queued while an
 // allowed one behind it drains; an epoch bump drops everything queued; a
 // one-worker, no-lane-thread budget composes the same bytes as the hardware
-// sizing, whose page rasters take every lane of the pool.
+// sizing, whose page rasters take every lane of the pool; a page enqueued for the
+// device pass leaves composed with its casters' device job, which drawn and applied
+// gives the CPU raster's bytes.
 #include <runtime/terrain/terrain_tile_composition_worker.h>
 
 #include <algorithm>
@@ -13,6 +15,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <optional>
 #include <thread>
 
 using opennova::terrain::Rgba8Image;
@@ -73,6 +76,37 @@ std::shared_ptr<TerrainTileCompositionWorker::SourceSnapshot> solid_sources() {
 	snapshot->heightfield_normal = std::make_shared<const opennova::terrain::TerrainTileQuadrantSource>(
 			opennova::terrain::build_terrain_tile_quadrant_source(solid_image(2, 2, { 128, 128, 255, 128 })));
 	return snapshot;
+}
+
+// A one-triangle opaque caster standing at world (x, 4, z): front-facing under the ordinary
+// CULLMODE CCW once projected (the planner test's box).
+opennova::terrain::TerrainStaticShadowPlannerCaster box_caster(float x, float z) {
+	auto geometry = std::make_shared<opennova::terrain::TerrainStaticShadowResolvedGeometry>();
+	geometry->key = 0x1234;
+	geometry->render_object_counts = { 1, 0 };
+	geometry->materials.push_back(opennova::terrain::TerrainStaticShadowResolvedMaterial{});
+	opennova::terrain::TerrainStaticShadowResolvedSurface surface;
+	surface.render_object = 0;
+	surface.material_index = 0;
+	surface.vertices = { { 0.0f, 0.0f, 0.0f }, { 6.0f, 0.0f, 0.0f }, { 0.0f, 6.0f, 0.0f } };
+	surface.uvs = { { 0.0f, 0.0f }, { 1.0f, 0.0f }, { 0.0f, 1.0f } };
+	surface.indices = { 0, 2, 1 };
+	geometry->surfaces[0].push_back(std::move(surface));
+	opennova::terrain::TerrainStaticShadowRenderObjectCoverage coverage;
+	coverage.authored_surface_count = 1;
+	coverage.valid_surface_count = 1;
+	geometry->coverage[0].push_back(coverage);
+	geometry->model_radius_fixed = 6 << 16;
+	opennova::terrain::TerrainStaticShadowPlannerCaster record;
+	record.bms_id = 42;
+	record.entity_kind = 2; // building
+	record.active = true;
+	record.graphic = "Box";
+	record.world_transform = { 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, x, 4.0f, z };
+	record.origin_q16 = { static_cast<int32_t>(x * 65536.0f), static_cast<int32_t>(-z * 65536.0f) };
+	record.geometry = geometry;
+	record.caster_identity = 7;
+	return record;
 }
 
 // One page composed on a worker of its own with the given budget.
@@ -153,6 +187,56 @@ int main() {
 	done = worker.take_completion();
 	CHECK(done.has_value() && done->job.target.layer == a.target.layer);
 	CHECK(worker.pending_jobs() == 0);
+
+	// The device form of a shadowed page: the worker composes the page and walks its casters
+	// into a device job, leaving the page as composed (its A the DOT3 light alpha the temp
+	// target starts from); that job drawn into the page (here on the CPU, its oracle) and
+	// applied gives the CPU raster's bytes.
+	// [orig: Terrain_CollectAndRenderTileModels @0x60D250 - Render_SubmitEntity (the call
+	//  @0x60D971), CRenderBatchQueue_SortAndFlush (the call @0x60D97D); the temp-blue
+	//  composite PolyTrn_RenderTile @0x60E0C6..0x60E19D]
+	{
+		opennova::TerrainTilePageKey shadow_page_key{};
+		shadow_page_key.sector_origin_x = 100;
+		shadow_page_key.page_lod_level = 4; // a 64-unit span
+		auto shadow = std::make_shared<opennova::terrain::TerrainStaticShadowCompilationSnapshot>();
+		shadow->revision = 1;
+		shadow->planner.set_light({ 0.3f, 0.9f, 0.3f }, { 127, 200, 200 });
+		shadow->planner.replace_casters({ box_caster(108.0f, 8.0f) }, false);
+		CHECK(shadow->planner.plan(shadow_page_key).raster_required);
+		std::array<std::optional<TerrainTileCompositionWorker::Completion>, 2> modes;
+		for (std::size_t mode = 0; mode < modes.size(); ++mode) {
+			TerrainTileCompositionWorker shadow_worker(TerrainTileCompositionWorker::Threads{ 1, 0 });
+			opennova::TerrainTileCompositionCache shadow_cache;
+			shadow_cache.begin_frame(0);
+			shadow_cache.begin_frame(0);
+			shadow_worker.install_sources(solid_sources());
+			const opennova::TerrainTileCompositionJob shadow_job = job_for(shadow_cache, 100, 4);
+			CHECK(shadow_worker.enqueue(shadow_job, shadow_worker.sources(), tint, light, {}, 11,
+					shadow, 0, false, /*device_shadow=*/mode == 1));
+			shadow_worker.wait_idle();
+			modes[mode] = shadow_worker.take_completion();
+		}
+		CHECK(modes[0].has_value() && modes[0]->success && modes[0]->shadow_attempted &&
+				modes[0]->device_shadow == nullptr);
+		CHECK(modes[1].has_value() && modes[1]->success && modes[1]->shadow_attempted &&
+				modes[1]->device_shadow != nullptr);
+		if (modes[0].has_value() && modes[1].has_value() && modes[1]->device_shadow != nullptr) {
+			const opennova::terrain::TerrainStaticShadowDeviceJob &device_job =
+					*modes[1]->device_shadow;
+			CHECK(device_job.draws.size() == 1 && device_job.triangle_count == 1);
+			CHECK(modes[1]->pixels.pixels != modes[0]->pixels.pixels);
+			opennova::terrain::Rgba8Image device_pixels = modes[1]->pixels;
+			opennova::terrain::TerrainStaticShadowAlphaPage alpha_page =
+					opennova::terrain::begin_terrain_static_shadow_alpha_page(
+							modes[1]->job, device_pixels, {});
+			CHECK(opennova::terrain::rasterize_terrain_static_shadow_device_job(
+					device_job, alpha_page, 1));
+			CHECK(opennova::terrain::apply_terrain_static_shadow_alpha_page(
+					modes[1]->job, alpha_page, device_pixels));
+			CHECK(device_pixels.pixels == modes[0]->pixels.pixels);
+		}
+	}
 
 	// An epoch bump drops the queue (and the completions of in-flight work).
 	CHECK(worker.enqueue(job_for(cache, 3, 1), worker.sources(), tint, light, {}, 9, nullptr, 0, false));

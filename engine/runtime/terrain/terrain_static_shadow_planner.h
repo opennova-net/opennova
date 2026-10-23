@@ -18,6 +18,7 @@
 
 #include <runtime/terrain/terrain_static_shadow.h>
 #include <runtime/terrain/terrain_static_shadow_alpha.h>
+#include <runtime/terrain/terrain_static_shadow_device_job.h>
 #include <runtime/terrain/terrain_static_shadow_geometry.h>
 #include <runtime/terrain/terrain_static_shadow_raster.h>
 #include <runtime/terrain/terrain_tile_composition_cache.h>
@@ -188,8 +189,16 @@ public:
 	}
 
 	TerrainStaticShadowPagePlanResult plan(const TerrainTilePageKey &page);
+	// The planned page's raster on the CPU: its device job (build_device_job's walk) with
+	// the vertices projected here and rasterized into `page_alpha`.
 	bool rasterize(const TerrainTilePageKey &page,
 			TerrainStaticShadowAlphaPage &page_alpha);
+	// The planned page's casters as the device draws them: the walk over the plan's draws
+	// (each caster surface with its material state at the planner's tick), the CPU's whole
+	// share of the device pass. False where the plan cannot be drawn (rasterize fails there
+	// too); an empty job for a page with no draws.
+	bool build_device_job(const TerrainTilePageKey &page,
+			TerrainStaticShadowDeviceJob &r_job);
 
 private:
 	// The adopted caster snapshot. Immutable once published: every planner copy
@@ -239,6 +248,7 @@ private:
 			const TerrainStaticShadowProjectionDraw &draw,
 			const DrawSupport &support);
 	const CachedPlan *plan_for(const TerrainTilePageKey &page);
+	bool walk_device_job(const CachedPlan &cached, TerrainStaticShadowDeviceJob &r_job);
 
 	bool enabled_ = true;
 	std::vector<int32_t> suppressed_ids_;
