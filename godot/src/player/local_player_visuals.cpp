@@ -328,7 +328,7 @@ void LocalPlayerVisuals::apply_local_player_spawn_loadout() {
 	switch (plan.action) {
 		case opennova::world::SpawnLoadoutAction::kNone:
 		case opennova::world::SpawnLoadoutAction::kSyncInventory:
-			sync_local_player_weapon_from_inventory(spawn_sim);
+			sync_local_player_weapon_from_inventory(spawn_sim, /*p_mount=*/true);
 			return;
 		case opennova::world::SpawnLoadoutAction::kApplyKit:
 			break;
@@ -338,17 +338,23 @@ void LocalPlayerVisuals::apply_local_player_spawn_loadout() {
 		kit.push_back(WeaponKitEntry::make(opennova::to_gd(row.name), row.clips));
 	}
 	if (!spawn_sim->apply_local_player_loadout(kit, plan.player_class)) {
-		sync_local_player_weapon_from_inventory(spawn_sim);
+		sync_local_player_weapon_from_inventory(spawn_sim, /*p_mount=*/true);
 		return;
 	}
 	if (plan.after_apply == opennova::world::SpawnLoadoutAfterApply::kClearWeapon) {
 		clear_local_player_weapon();
 		return;
 	}
-	sync_local_player_weapon_from_inventory(spawn_sim);
+	// The apply mounts once, in the sim: offline its select's commit mounts the equipped
+	// slot's def and its mount request queues SWITCHRANK on that slot, which plays out; in a
+	// session the host's grant does both later. The viewmodel follows the equipped def with no
+	// second sim mount over the running switch (the engine's player_loadout.cpp
+	// select_current_slot carries the witness).
+	sync_local_player_weapon_from_inventory(spawn_sim, /*p_mount=*/false);
 }
 
-void LocalPlayerVisuals::sync_local_player_weapon_from_inventory(const Ref<Simulation> &p_sim) {
+void LocalPlayerVisuals::sync_local_player_weapon_from_inventory(const Ref<Simulation> &p_sim,
+		bool p_mount) {
 	const Ref<PlayerInventory> inventory = p_sim->get_local_player_inventory();
 	if (inventory.is_null() || !inventory->get_valid()) {
 		return;
@@ -361,7 +367,11 @@ void LocalPlayerVisuals::sync_local_player_weapon_from_inventory(const Ref<Simul
 		clear_local_player_weapon();
 		return;
 	}
-	set_local_player_weapon_by_name(equipped);
+	if (p_mount) {
+		set_local_player_weapon_by_name(equipped);
+	} else {
+		present_local_player_weapon(equipped);
+	}
 }
 
 void LocalPlayerVisuals::clear_local_player_weapon() {

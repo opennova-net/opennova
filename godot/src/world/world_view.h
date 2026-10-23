@@ -61,26 +61,23 @@ protected:
 
 	GDVIRTUAL0R(Ref<WeaponDatabase>, _weapon_database)
 	GDVIRTUAL0R(Ref<PlayerViewmodelDef>, _local_player_viewmodel_def)
-	GDVIRTUAL2R(bool, _set_local_player_weapon_by_name, String, bool)
+	GDVIRTUAL1R(bool, _present_local_player_weapon, String)
 	GDVIRTUAL0(_clear_local_player_weapon)
 
 	virtual Ref<WeaponDatabase> weapon_database_impl() const { return Ref<WeaponDatabase>(); }
 	virtual Ref<PlayerViewmodelDef> local_player_viewmodel_def_impl() const {
 		return Ref<PlayerViewmodelDef>();
 	}
-	virtual bool set_local_player_weapon_by_name_impl(const String &p_weapon_name,
-			bool p_preserve_slot_state) {
-		return false;
-	}
+	virtual bool present_local_player_weapon_impl(const String &p_weapon_name) { return false; }
 	virtual void clear_local_player_weapon_impl() {}
 
 public:
 	Ref<WeaponDatabase> weapon_database();
 	// The equipped weapon's viewmodel definition, null when none is mounted.
 	Ref<PlayerViewmodelDef> local_player_viewmodel_def();
-	// Point the FP viewmodel + action FSM at `weapon_name` (the armory apply).
-	bool set_local_player_weapon_by_name(const String &p_weapon_name,
-			bool p_preserve_slot_state = false);
+	// Point the FP viewmodel at `weapon_name`, the def the armory apply mounted in the sim (the
+	// apply's select and mount; the presentation side alone, no second sim mount).
+	bool present_local_player_weapon(const String &p_weapon_name);
 	// The authored NONE row: no rendered/action weapon.
 	void clear_local_player_weapon();
 };
@@ -116,8 +113,7 @@ protected:
 	Ref<ResourceRoot> resource_root_impl() const override;
 	Ref<WeaponDatabase> weapon_database_impl() const override;
 	Ref<PlayerViewmodelDef> local_player_viewmodel_def_impl() const override;
-	bool set_local_player_weapon_by_name_impl(const String &p_weapon_name,
-			bool p_preserve_slot_state) override;
+	bool present_local_player_weapon_impl(const String &p_weapon_name) override;
 	void clear_local_player_weapon_impl() override;
 	GameWorld *world() const;
 

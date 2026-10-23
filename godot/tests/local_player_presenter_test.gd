@@ -356,6 +356,16 @@ func _frame_until(world: GameWorld, presenter: LocalPlayerPresenter, camera: Cam
 	return false
 
 
+# The spawn kit's apply mounts the slot its select stored, which plays SWITCHRANK on that
+# slot (engine world/player_loadout.cpp select_current_slot carries the witness): frames
+# until it has run out, the weapon idling with nothing queued.
+func _frame_until_weapon_idle(world: GameWorld, presenter: LocalPlayerPresenter,
+		camera: Camera3D) -> bool:
+	return _frame_until(world, presenter, camera, func() -> bool:
+		var view := world.local_player_weapon_view()
+		return int(view.current_action) == 0 and int(view.next_action) == 0)
+
+
 # Whether the held weapon is past its draw (neither running nor queuing SWITCHTO): a
 # category key over a running draw is refused, its SWITCHFROM never queued, and no
 # request is retained [orig: WeaponSlot_ForceQueueSwitchFrom @0x53F170 (the SWITCHFROM /
@@ -1471,6 +1481,8 @@ func test_fire_event_plays_the_fsm_clip_on_both_real_viewmodel_parts() -> void:
 	await get_tree().process_frame
 	var sim := world.get_sim()
 	_frame(world, presenter, camera, 2)
+	assert_true(_frame_until_weapon_idle(world, presenter, camera),
+			"the spawn kit's SWITCHRANK on its own slot runs out")
 	assert_eq(presenter.vm_parts().size(), 2)
 	for part_v in presenter.vm_parts():
 		assert_eq(String((part_v as ObjectModel).get_active_body_clip()),
@@ -1520,6 +1532,8 @@ func _assert_fire_mode_change_frames(ticks_per_frame: int) -> void:
 	var presenter := _attach_presenter(world, camera)
 	await get_tree().process_frame
 	_frame(world, presenter, camera, 2)
+	assert_true(_frame_until_weapon_idle(world, presenter, camera),
+			"the spawn kit's SWITCHRANK on its own slot runs out")
 	var sim := world.get_sim()
 	var previous_model := presenter.viewmodel()
 	var starting_weapon := String(sim.get_local_player_weapon_name())

@@ -65,13 +65,12 @@ Ref<PlayerViewmodelDef> ArmoryWorldView::local_player_viewmodel_def() {
 	return local_player_viewmodel_def_impl();
 }
 
-bool ArmoryWorldView::set_local_player_weapon_by_name(const String &p_weapon_name,
-		bool p_preserve_slot_state) {
+bool ArmoryWorldView::present_local_player_weapon(const String &p_weapon_name) {
 	bool out = false;
-	if (GDVIRTUAL_CALL(_set_local_player_weapon_by_name, p_weapon_name, p_preserve_slot_state, out)) {
+	if (GDVIRTUAL_CALL(_present_local_player_weapon, p_weapon_name, out)) {
 		return out;
 	}
-	return set_local_player_weapon_by_name_impl(p_weapon_name, p_preserve_slot_state);
+	return present_local_player_weapon_impl(p_weapon_name);
 }
 
 void ArmoryWorldView::clear_local_player_weapon() {
@@ -84,14 +83,13 @@ void ArmoryWorldView::clear_local_player_weapon() {
 void ArmoryWorldView::_bind_methods() {
 	GDVIRTUAL_BIND(_weapon_database);
 	GDVIRTUAL_BIND(_local_player_viewmodel_def);
-	GDVIRTUAL_BIND(_set_local_player_weapon_by_name, "weapon_name", "preserve_slot_state");
+	GDVIRTUAL_BIND(_present_local_player_weapon, "weapon_name");
 	GDVIRTUAL_BIND(_clear_local_player_weapon);
 	ClassDB::bind_method(D_METHOD("weapon_database"), &ArmoryWorldView::weapon_database);
 	ClassDB::bind_method(D_METHOD("local_player_viewmodel_def"),
 			&ArmoryWorldView::local_player_viewmodel_def);
-	ClassDB::bind_method(D_METHOD("set_local_player_weapon_by_name", "weapon_name",
-			"preserve_slot_state"), &ArmoryWorldView::set_local_player_weapon_by_name,
-			DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("present_local_player_weapon", "weapon_name"),
+			&ArmoryWorldView::present_local_player_weapon);
 	ClassDB::bind_method(D_METHOD("clear_local_player_weapon"),
 			&ArmoryWorldView::clear_local_player_weapon);
 }
@@ -149,10 +147,11 @@ Ref<PlayerViewmodelDef> LiveArmoryWorldView::local_player_viewmodel_def_impl() c
 	return w != nullptr ? w->local_player_viewmodel_def() : Ref<PlayerViewmodelDef>();
 }
 
-bool LiveArmoryWorldView::set_local_player_weapon_by_name_impl(const String &p_weapon_name,
-		bool p_preserve_slot_state) {
+bool LiveArmoryWorldView::present_local_player_weapon_impl(const String &p_weapon_name) {
 	GameWorld *w = world();
-	return w != nullptr && w->set_local_player_weapon_by_name(p_weapon_name, p_preserve_slot_state);
+	if (w == nullptr) return false;
+	const Ref<LocalPlayerVisuals> visuals = w->local_player_visuals();
+	return visuals.is_valid() && visuals->present_local_player_weapon(p_weapon_name);
 }
 
 void LiveArmoryWorldView::clear_local_player_weapon_impl() {

@@ -5351,6 +5351,17 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 		WeaponKitEntry.make("WPN_M4AUTO"),
 		WeaponKitEntry.make("WPN_M4"),
 	], 1))
+	# The apply mounts the slot its select stored, which plays SWITCHRANK on that slot
+	# (engine world/player_loadout.cpp select_current_slot carries the witness); the def
+	# object below installs over the idle slot once that has run out.
+	var apply_settled := false
+	for _settle in range(240):
+		var settling := sim.get_local_player_weapon_state()
+		if int(settling.current_action) == 0 and int(settling.next_action) == 0:
+			apply_settled = true
+			break
+		sim.step()
+	assert_true(apply_settled, "the apply's SWITCHRANK on its own slot runs out")
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(_sim_def_root().path_join("weapon.def")), OK)
 	var personal_idx := weapons.find_weapon("WPN_M4AUTO")

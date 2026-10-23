@@ -2398,9 +2398,19 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 
 	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	joiner.set_local_player_weapon(_fixture_m4(), {})
-	for _settle in range(3):
+	# The host's grant answers the submit: its apply selects the M4 and mounts the slot it
+	# selected, which plays SWITCHRANK on that slot (engine world/player_loadout.cpp
+	# select_current_slot carries the witness), and a trigger press during a switch queues
+	# no fire. Settle until the granted M4 idles with nothing queued.
+	var granted := false
+	for _settle in range(120):
 		joiner.step()
 		host.step()
+		var settled := joiner.get_local_player_weapon_state()
+		if String(joiner.get_local_player_inventory().equipped_name) == "WPN_M4AUTO" 				and int(settled.current_action) == 0 and int(settled.next_action) == 0:
+			granted = true
+			break
+	assert_true(granted, "the granted M4 idles past its SWITCHRANK")
 
 	# Empty the magazine through the real local FSM/C2S fire path. Stop pumping
 	# the host on the exact joiner frame that queues the empty-slot reload, so its

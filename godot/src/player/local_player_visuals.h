@@ -201,7 +201,10 @@ private:
 	MissionEnvironment *environment() const;
 	Ref<MissionData> loaded_mission() const;
 	void set_first_person_model_available(bool p_available);
-	void sync_local_player_weapon_from_inventory(const Ref<Simulation> &p_sim);
+	// The viewmodel onto the inventory's equipped weapon: `p_mount` mounts it in the sim too
+	// (set_local_player_weapon_by_name), else the sim already mounted it (an apply's select)
+	// and only the render side follows (present_local_player_weapon).
+	void sync_local_player_weapon_from_inventory(const Ref<Simulation> &p_sim, bool p_mount);
 
 	// The GameWorld whose local player these visuals present (public surface only).
 	ObjectID world_id_;

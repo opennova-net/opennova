@@ -357,15 +357,18 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 				_player_presenter.refresh_viewmodel()
 			close()
 			return
-		# The sim re-selected + committed the equipped slot during the apply; install
-		# the viewmodel for it now (the commit event would also catch up next tick).
+		# The apply's select committed and mounted the equipped slot in the sim, and its
+		# mount request queued SWITCHRANK on that slot (engine world/player_loadout.cpp
+		# select_current_slot carries the witness): present the viewmodel for it now, with
+		# no second sim mount over that switch (the commit event would also catch up next
+		# tick).
 		var equipped := primary
 		if sim != null:
 			var equipped_name := sim.get_local_player_inventory().equipped_name
 			if not equipped_name.is_empty():
 				equipped = equipped_name
 		if not equipped.is_empty() \
-				and _view.set_local_player_weapon_by_name(equipped) \
+				and _view.present_local_player_weapon(equipped) \
 				and _player_presenter != null:
 			_player_presenter.refresh_viewmodel()
 	close()
