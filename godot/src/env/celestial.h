@@ -35,9 +35,9 @@ class ObjectModel;
 // per-frame body selection (environment/celestial_frame.h) and the witnessed
 // fixed-point math already in engine/formats/env (env_celestial.h, the glare
 // occlusion state runtime/environment/glare_occlusion.h advances). Renders the sun/moon/glare 3DI bodies named
-// in the mission .env, attached to the sky at camera + direction * 64; retail
-// loads the star 3DI but never draws it (env_celestial.h carries the
-// witness). This node keeps only device work: the ObjectModel children with
+// in the mission .env, attached to the sky at camera + direction * 64; the star
+// 3DI and upl.3di load as data and are never drawn, as in retail
+// (celestial_frame.h and env_celestial.h carry the witness). This node keeps only device work: the ObjectModel children with
 // per-surface material installs, per-frame shader-parameter pushes, and the
 // two terrain line-of-sight rays the glare occlusion window consumes. Each
 // body renders its authored SELFLUM material at its own UPL_INTENSITY
@@ -274,6 +274,10 @@ private:
 	// glare_occlusion.h; env #14, docs/env/env-tod-re.md "Celestial bodies").
 	opennova::env::GlareOcclusionState glare_occlusion_{};
 	HashMap<String, Body> bodies_;
+	// The leg's two models no frame draws, held as loaded (null when the mount has no such file, or
+	// for the star when the environment names none): the star model and upl.3di.
+	Ref<ObjectData> star_data_;
+	Ref<ObjectData> upl_data_;
 	// name-signature change detection (undo/scrub safe rebuilds).
 	HashMap<String, String> loaded_names_;
 	bool draws_bodies_ = true;

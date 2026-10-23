@@ -209,6 +209,7 @@ void Celestial::_rebuild_if_needed() {
 	for (const Spec &spec : wanted) {
 		signature[spec.key] = spec.name;
 	}
+	signature["star"] = env_data->get_star_3di();
 	if (signature.size() == loaded_names_.size()) {
 		bool same = true;
 		for (const KeyValue<String, String> &kv : signature) {
@@ -283,6 +284,12 @@ void Celestial::_rebuild_if_needed() {
 		_bind_body_surfaces(body);
 		bodies_[spec.key] = body;
 	}
+	// The leg then loads the star model (a named one) and upl.3di as data on every arm, neither
+	// ever built: no frame draws them (engine environment/celestial_frame.h kCelestialUplModel
+	// carries the witness, D-NET-NEW-L3-41).
+	const String star_name = env_data->get_star_3di();
+	star_data_ = star_name.strip_edges().is_empty() ? Ref<ObjectData>() : _load_object_data(star_name);
+	upl_data_ = _load_object_data(String(opennova::env::kCelestialUplModel));
 	_apply_sky_pass_gates();
 }
 
@@ -827,6 +834,9 @@ Dictionary Celestial::get_diagnostics() const {
 	}
 	diag["bodies"] = bodies;
 	diag["built"] = !bodies_.is_empty();
+	// The leg's undrawn loads: whether the star model and upl.3di are loaded.
+	diag["star_loaded"] = star_data_.is_valid();
+	diag["upl_loaded"] = upl_data_.is_valid();
 	return diag;
 }
 

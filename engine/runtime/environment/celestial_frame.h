@@ -65,6 +65,21 @@ constexpr bool builds_celestial_draws(bool dedicated_host) noexcept {
 	return !dedicated_host;
 }
 
+// The same leg loads two models no frame draws: the star model the environment names (when it
+// names one) and upl.3di (always), past the glare. Their only reader is the star-field renderer,
+// which has no caller (env_celestial.h), so each is a loaded model def and nothing more. Every
+// load is skipped while its model global is set; the teardown clears all five, and every
+// multiplayer start (GameLoop_Init's Game_StartMission(0)) destroys the model defs ahead of the
+// loads, so each mission start loads all five again (D-NET-NEW-L3-41).
+// [orig: EffectWorld_LoadCelestialModels @0x5ADC50 - the star's ThreediGp_LoadModel call @0x5ADCFE
+//  behind its name test, upl.3di's @0x5ADD2A ("upl.3di" @0x7DA0C8), then Star_GenerateInstanceTable
+//  @0x5AC850 (the call @0x5ADD40); g_CelestialStarModel / g_CelestialUplModel read only by
+//  Star_RenderField_Unused @0x5AD9C0 besides the load and the reset; Game_TeardownMission @0x522350 -
+//  EffectWorld_ResetCelestialModels @0x5ABFF0 (the call @0x52270E); GameLoop_Init @0x526370 -
+//  Game_StartMission(0) (the call @0x526377); Game_StartMission - EffectWorld_DestroyAllAndInitDeviceCaps
+//  @0x5B5710 (the call @0x524A6F, on a start that is not a restart)]
+inline constexpr const char *kCelestialUplModel = "upl.3di";
+
 // One call of the water-glint leg [orig: Environment_UpdateSunGlare @ 0x5ad130, once
 // per scene pass from Terrain_RenderWorldScene @ 0x5c96c0: the main scene's,
 // then the weapon Inset pass's at its own camera and view, on the same

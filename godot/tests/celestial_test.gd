@@ -300,6 +300,44 @@ func test_no_star_field_is_drawn() -> void:
 	assert_null(fixture.celestial.get_node_or_null("StarField"))
 
 
+func test_the_star_model_and_upl_load_as_data_and_never_build() -> void:
+	# The leg loads the star model it names and upl.3di past the glare, and no
+	# frame draws either: their only reader has no caller
+	# [orig: EffectWorld_LoadCelestialModels @ 0x5adc50, the calls @ 0x5adcfe /
+	# @ 0x5add2a; Star_RenderField_Unused @ 0x5ad9c0]. No sun, moon or glare here,
+	# so nothing builds at all.
+	var fixture := _make_fixture("", "")
+	var celestial: Celestial = fixture.celestial
+	var diag := celestial.get_diagnostics()
+	assert_true(bool(diag.get("star_loaded", false)), "the named star model loads")
+	assert_false(bool(diag.get("upl_loaded", true)), "the mount holds no upl.3di")
+	assert_false(bool(diag.get("built", true)))
+	assert_eq(celestial.get_child_count(), 0, "neither model builds a node")
+
+	# A mount with upl.3di: the next leg (a resource root set) loads it too.
+	var dir := OS.get_cache_dir().path_join("opennova_celestial_upl_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
+	var model := ProjectSettings.globalize_path(MODEL_FIXTURE_ROOT).path_join(MODEL_NAME)
+	for file_name in [MODEL_NAME, "upl.3di"]:
+		assert_eq(DirAccess.copy_absolute(model, dir.path_join(file_name)), OK)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(dir), OK)
+	celestial.set_resource_root(root)
+	diag = celestial.get_diagnostics()
+	assert_true(bool(diag.get("star_loaded", false)))
+	assert_true(bool(diag.get("upl_loaded", false)), "upl.3di loads whatever the .env names")
+	assert_eq(celestial.get_child_count(), 0, "neither model builds a node")
+
+	# An environment that names no star model loads none; upl.3di still loads.
+	var env: MissionEnvironment = fixture.environment
+	env.environment_data.set_star_3di("")
+	celestial.set_resource_root(root)
+	diag = celestial.get_diagnostics()
+	assert_false(bool(diag.get("star_loaded", true)), "no star name, no star load")
+	assert_true(bool(diag.get("upl_loaded", false)))
+	TestFs.remove_dir_recursive(dir)
+
+
 func test_glare_submits_only_a_positive_alpha() -> void:
 	# The glow's beauty submit is skipped at a non-positive alpha
 	# [orig: Render_SkyboxSunGlow @ 0x5ad0ae]; the view dot is the MAIN
