@@ -94,7 +94,8 @@ int main() {
 
 	// Lifecycle transitions are explicit and invalid transitions are inert.
 	{
-		TickProbe target;
+		auto target_heap = std::make_unique<TickProbe>();
+		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!expect(session.state() == State::Unloaded,
 				"new session is unloaded")) return 1;
@@ -117,7 +118,8 @@ int main() {
 
 	// One frame sample feeds every catch-up tick, with edges consumed once.
 	{
-		TickProbe target;
+		auto target_heap = std::make_unique<TickProbe>();
+		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!load(session)) return 1;
 		FrameInput in;
@@ -158,7 +160,8 @@ int main() {
 	// bank drains nothing under 4 ms (16 + 32 units), and the next 14 ms frame
 	// drains one quantum on the tick phase.
 	{
-		TickProbe target;
+		auto target_heap = std::make_unique<TickProbe>();
+		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!load(session)) return 1;
 		FrameInput first;
@@ -180,7 +183,8 @@ int main() {
 	// post-stall fast-forward, not a dropped backlog
 	// [orig: Game_MainLoop @0x52B630 — clamp @0x52B83E, EMA @0x52B85B].
 	{
-		TickProbe target;
+		auto target_heap = std::make_unique<TickProbe>();
+		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!load(session)) return 1;
 		FrameInput hitch;
@@ -200,7 +204,8 @@ int main() {
 	// (a steady 16 ms stream closes it on frame 118), then its average
 	// [orig: Game_MainLoop g_StatsAvgFps @0x52B98F, drain @0x52BA08].
 	{
-		TickProbe target;
+		auto target_heap = std::make_unique<TickProbe>();
+		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!load(session)) return 1;
 		FrameInput frame;
@@ -221,7 +226,8 @@ int main() {
 	// Game_StartMission @0x525e1f; Render_ProcessMainSceneFrame
 	// @0x5caeff..0x5caf0e; Game_MainLoop @0x52B75C, @0x52bac8..0x52bad2].
 	{
-		TickProbe target;
+		auto target_heap = std::make_unique<TickProbe>();
+		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!load(session)) return 1;
 		FrameInput slow;
@@ -259,7 +265,8 @@ int main() {
 	// Render_ProcessMainSceneFrame @0x5CAEFF..0x5CAF0E (the count-down @0x5CAF08);
 	// Game_MainLoop @0x52B70F..0x52B757, @0x52B766].
 	{
-		TickProbe target;
+		auto target_heap = std::make_unique<TickProbe>();
+		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!load(session)) return 1;
 		FrameInput wait;
@@ -303,7 +310,8 @@ int main() {
 	//  GameLoop_RenderFrame); GameLoop_Init @0x526370 (the call @0x526377);
 	//  Render_ProcessMainSceneFrame @0x5CAEFF..0x5CAF0E].
 	{
-		TickProbe target;
+		auto target_heap = std::make_unique<TickProbe>();
+		TickProbe &target = *target_heap;
 		target.probe_kind = RoleKind::Joiner;
 		target.waiting = true;
 		Session session(target);
@@ -331,7 +339,8 @@ int main() {
 	{
 		opennova::hud::HudToggleState view_up;
 		view_up.server_status_view = true;
-		TickProbe target;
+		auto target_heap = std::make_unique<TickProbe>();
+		TickProbe &target = *target_heap;
 		target.probe_kind = RoleKind::ListenHost;
 		Session session(target);
 		if (!load(session)) return 1;
@@ -359,7 +368,8 @@ int main() {
 		view_up.server_status_view = true;
 		opennova::hud::HudToggleState view_down;
 		{
-			TickProbe target;
+			auto target_heap = std::make_unique<TickProbe>();
+			TickProbe &target = *target_heap;
 			target.probe_kind = RoleKind::ListenHost;
 			Session session(target);
 			if (!load(session)) return 1;
@@ -392,7 +402,8 @@ int main() {
 			// The countdown waits for the frames drawn: after one page frame, the frames drawn
 			// count the three start frames down from the first of them, so the fourth frame
 			// drawn is still re-based (had the page frame counted one, it would bank).
-			TickProbe target;
+			auto target_heap = std::make_unique<TickProbe>();
+			TickProbe &target = *target_heap;
 			target.probe_kind = RoleKind::ListenHost;
 			Session session(target);
 			if (!load(session)) return 1;
@@ -414,7 +425,8 @@ int main() {
 					"page: the countdown spent, the full frame time banks again")) return 1;
 		}
 		{
-			TickProbe target;
+			auto target_heap = std::make_unique<TickProbe>();
+			TickProbe &target = *target_heap;
 			target.probe_kind = RoleKind::DedicatedHost;
 			Session session(target);
 			if (!load(session)) return 1;
@@ -427,7 +439,8 @@ int main() {
 					"page: whatever its view word")) return 1;
 		}
 		{
-			TickProbe target;
+			auto target_heap = std::make_unique<TickProbe>();
+			TickProbe &target = *target_heap;
 			target.probe_kind = RoleKind::Joiner;
 			Session session(target);
 			if (!load(session)) return 1;
@@ -445,7 +458,8 @@ int main() {
 	// @0x52B715 / @0x52B71B, the EMA's store @0x52B866, the drain's phase @0x52BA6B);
 	// Game_RestartRoundSP @0x5263A0]. Manual step and reset stay local-only.
 	{
-		TickProbe target;
+		auto target_heap = std::make_unique<TickProbe>();
+		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!load(session)) return 1;
 		FrameInput hitch;
@@ -671,7 +685,8 @@ int main() {
 	//  @0x57E9B0 called @0x526774, the pause test @0x526779; the clock
 	//  @0x57E9C7, the tickdown @0x57E9DA]
 	{
-		TickProbe target;
+		auto target_heap = std::make_unique<TickProbe>();
+		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!load(session)) return 1;
 		auto &weather = target.kernel.world.weather;
@@ -690,7 +705,8 @@ int main() {
 
 	// Network roles cannot pause, step, or reset.
 	{
-		TickProbe target;
+		auto target_heap = std::make_unique<TickProbe>();
+		TickProbe &target = *target_heap;
 		target.probe_kind = RoleKind::ListenHost;
 		Session session(target);
 		if (!load(session)) return 1;
@@ -713,7 +729,8 @@ int main() {
 
 	// Joiners expose their pre-load connection state.
 	{
-		TickProbe target;
+		auto target_heap = std::make_unique<TickProbe>();
+		TickProbe &target = *target_heap;
 		target.probe_kind = RoleKind::Joiner;
 		Session session(target);
 		if (!expect(session.begin_connect().applied() &&
@@ -725,7 +742,8 @@ int main() {
 
 	// A terminal tick cancels the rest of the batch and fails the session.
 	{
-		TickProbe target;
+		auto target_heap = std::make_unique<TickProbe>();
+		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!load(session)) return 1;
 		target.next_status = TickStatus::SessionLost;
@@ -743,7 +761,8 @@ int main() {
 	// [orig: Game_ProcessMainFrame @0x5267ab..0x5267df; GameLoop_RenderFrame
 	// @0x521cf9].
 	{
-		TickProbe target;
+		auto target_heap = std::make_unique<TickProbe>();
+		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!load(session)) return 1;
 		if (!expect(session.frame_statistics().frames_last_second == 0,
