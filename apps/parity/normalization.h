@@ -304,6 +304,22 @@ inline constexpr Normalization kNormalizations[] = {
 			"01tr-coop-aikill RR-aa (5.4 ms from the 0x0B to the bundle) and tdh-i3a-tdm-late "
 			"RR's late joiner (9.5 ms) carry the 0x57 ahead of the 0x40, their partners (180 "
 			"and 195 ms) the 0x40 first" },
+	{ "order.S.clock", MaskKind::Field, 'S', 0, "first_order clock", 0,
+			"a S2C stream runs on two clocks: the joiner's admission (its first S2C 0x0F) and "
+			"the host's mission clock, which the 0x0A timer block carries as "
+			"g_RoundTimeRemaining / 62 (NetPacket_WritePlayerState @0x4FF6B0, @0x4FFA8D..0x4FFAA8) "
+			"and the main frame steps down with g_CurrentTick (Game_ProcessMainFrame @0x5265B4, "
+			"@0x526602). The case does not fix the host tick a joiner is admitted on, so an "
+			"event on the mission clock and one on the admission order by it: x10's 03tr-dm RO "
+			"(admitted 4.76 s earlier on the mission clock than RR) took the hull 0x1014's death "
+			"(S 0x26, 0x13, 0x34: 37.47 s after the 0x0F on RR, 42.27 s on RO, the same mission "
+			"time to 0.03 s) after the datagram of 0x39, 0x43 and 0x68 that every run takes 41.7 s "
+			"after its 0x0F, 9 inversions, every one such a pair. Where both runs carry the "
+			"timer (a round with a time limit; co-op's is -1) and their admissions lie more "
+			"than 1 s apart on the mission clock, an identity whose first occurrences agree "
+			"within 0.5 s on one clock only is that clock's, and the first-occurrence order "
+			"counts no pair across the two; an identity on neither clock orders against every "
+			"other (the maintainer's ruling on Q-LX-s28-1, (a))" },
 	{ "order.C.0x20", MaskKind::FirstOrder, 'C', 0x020, "ENTITY_CHECKSUM_REPLY", 0,
 			"answers S2C 0x30, whose half of the 0x30/0x31 alternation is process-global" },
 	{ "order.C.0x21", MaskKind::FirstOrder, 'C', 0x021, "CHECKSUM_REPLY", 0,

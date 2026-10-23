@@ -2776,6 +2776,64 @@ void test_order_rules() {
 	}
 }
 
+// order.S.clock (Q-LX-s28-1 (a)): a S2C event on the host's mission clock and one on the
+// joiner's admission order by the host tick the joiner was admitted on. The 0x0A timer
+// block carries the round clock as g_RoundTimeRemaining / 62 [orig: NetPacket_WritePlayerState
+// @0x4FF6B0 (@0x4FFA8D..0x4FFAA8)], stepped down a tick per 16 ms with g_CurrentTick
+// [orig: Game_ProcessMainFrame @0x5263F0 (@0x5265B4, @0x526602)]. Every scripted run takes
+// its S2C 0x0F at 1.38 s; `zero` is the wall time its round clock reaches zero.
+void test_order_clock() {
+	auto clocked = [](uint32_t seed, int64_t zero_ms, uint64_t death, uint64_t datagram) {
+		wire::ParityTrace trace = scripted(seed);
+		for (wire::ParityFrameState &f : trace.frames)
+			if (f.timer_present)
+				f.timer_seconds = zero_ms < 0
+						? -1
+						: int32_t((zero_ms * int64_t(kMs) - int64_t(f.ts_ns)) /
+								  (16 * int64_t(kMs)) / 62);
+		splice(trace, 'S', 0x013, death, bytes({ 0x14, 0x10, 0 }));
+		splice(trace, 'S', 0x039, datagram, bytes({ 1 }));
+		return trace;
+	};
+	// 03TR's shape: RR (and RR-aa) take the death 2 s before the datagram; the subject was
+	// admitted 4 s earlier on the mission clock, so the same death comes 2 s after it.
+	const wire::ParityTrace rr = clocked(1, 600000, 8 * kSec, 10 * kSec);
+	const wire::ParityTrace aa = clocked(2, 600000, 8 * kSec, 10 * kSec);
+	{
+		const Case c = judge_case(rr, aa, clocked(3, 604000, 12 * kSec, 10 * kSec));
+		expect_row(c, 'S', "first_order", "", "pass");
+		const VerdictRow *row = find_row(c.verdict.rows, 'S', "first_order");
+		check(row && row->value.distance == 0.0 &&
+						row->value.detail.find(
+								"; 1 across the admission and mission clocks left out "
+								"(admitted -") != std::string::npos,
+				"the cross-clock pair is left out, and the row says so (" +
+						(row ? row->value.detail : std::string("no row")) + ")");
+	}
+	// Without the round clock (co-op's -1) nothing tells the clocks apart: the pair counts.
+	expect_row(judge_case(rr, aa, clocked(3, -1, 12 * kSec, 10 * kSec)), 'S', "first_order", "",
+			"fail", "FIRST_ORDER_MISMATCH");
+	// Admitted at the same mission time: the death's 4 s is its own, on neither clock.
+	expect_row(judge_case(rr, aa, clocked(3, 600000, 12 * kSec, 10 * kSec)), 'S', "first_order", "",
+			"fail", "FIRST_ORDER_MISMATCH");
+	// Admitted 2 s earlier, the death 4 s later: off the mission clock by 2 s, it counts.
+	expect_row(judge_case(rr, aa, clocked(3, 602000, 12 * kSec, 10 * kSec)), 'S', "first_order", "",
+			"fail", "FIRST_ORDER_MISMATCH");
+	// The C2S order takes no clock: a C2S pair inverted the same way still counts.
+	{
+		auto c2s = [&clocked](uint32_t seed, int64_t zero_ms, uint64_t first, uint64_t second) {
+			wire::ParityTrace trace = clocked(seed, zero_ms, 8 * kSec, 10 * kSec);
+			splice(trace, 'C', 0x026, first, bytes({ 1 }));
+			splice(trace, 'C', 0x027, second, bytes({ 2 }));
+			return trace;
+		};
+		expect_row(
+				judge_case(c2s(1, 600000, 8 * kSec, 10 * kSec), c2s(2, 600000, 8 * kSec, 10 * kSec),
+						c2s(3, 604000, 12 * kSec, 10 * kSec)),
+				'C', "first_order", "", "fail", "FIRST_ORDER_MISMATCH");
+	}
+}
+
 void test_frame_rules() {
 	{
 		// flags2 counts sends: an offset counter passes, a step of two does not.
@@ -3594,6 +3652,7 @@ int main() {
 	test_world_records();
 	test_reply_rules();
 	test_order_rules();
+	test_order_clock();
 	test_steady_rules();
 	test_frame_rules();
 	test_frame_draws();

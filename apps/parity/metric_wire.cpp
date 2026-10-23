@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <iterator>
 #include <map>
@@ -234,6 +235,82 @@ BurstTails burst_tails(const RunFacts &run, uint64_t end_ns) {
 	return out;
 }
 
+// order.S.clock: a S2C stream runs on two clocks, the joiner's admission (its first
+// S2C 0x0F) and the host's mission clock. The 0x0A timer block carries the latter as
+// g_RoundTimeRemaining / 62 [orig: NetPacket_WritePlayerState @0x4FF6B0 (the read
+// @0x4FFA8D, the divide @0x4FFA97..0x4FFAA8; -1 under the pre-round delay or with no
+// time left, @0x4FFA81..0x4FFA95)], which the main frame steps down by g_CurrentTick's
+// own step [orig: Game_ProcessMainFrame @0x5263F0 (`add g_CurrentTick, ebx` @0x5265B4,
+// `sub g_RoundTimeRemaining, ebx` @0x526602)], one tick per 16 ms (io::kTickMs). The
+// wall time a run's round clock reaches zero is a frame's capture time plus
+// (62 x seconds + 31) ticks, to within half a 62-tick step.
+constexpr int64_t kClockToleranceNs = 500ll * 1000000ll;
+constexpr int64_t kClockSpreadNs = 2000ll * 1000000ll;
+
+struct RunClocks {
+	bool valid = false;
+	int64_t join_ns = 0; // the first S2C 0x0F
+	int64_t zero_ns = 0; // the round clock's zero, the median over the timer blocks
+};
+
+RunClocks run_clocks(const RunFacts &run) {
+	RunClocks clocks;
+	for (const wire::ParityEvent &event : run.trace.events)
+		if (event.dir == 'S' && event_identity(event) == 0x00F) {
+			clocks.join_ns = int64_t(event.ts_ns);
+			break;
+		}
+	std::vector<int64_t> zeros;
+	constexpr int64_t kTickNs = int64_t(io::kTickMs) * 1000000ll;
+	for (const wire::ParityFrameState &frame : run.trace.frames)
+		if (frame.timer_present && frame.timer_seconds >= 0)
+			zeros.push_back(int64_t(frame.ts_ns) +
+					(int64_t(io::kTicksPerSecondInt) * frame.timer_seconds +
+							io::kTicksPerSecondInt / 2) *
+							kTickNs);
+	if (clocks.join_ns == 0 || zeros.empty())
+		return clocks;
+	const auto spread = std::minmax_element(zeros.begin(), zeros.end());
+	// A restarted round (the timer jumps) or a run without one leaves no single clock.
+	if (*spread.second - *spread.first > kClockSpreadNs)
+		return clocks;
+	std::nth_element(zeros.begin(), zeros.begin() + zeros.size() / 2, zeros.end());
+	clocks.zero_ns = zeros[zeros.size() / 2];
+	clocks.valid = true;
+	return clocks;
+}
+
+// Each identity both orders hold, on the clock its first occurrences agree on within the
+// tolerance in the two runs ('M' the mission clock, 'J' the admission), when the runs'
+// admissions lie more than twice the tolerance apart on the mission clock; an identity
+// on neither clock has no entry. `offset_ns` is the subject's admission on the mission
+// clock less RR's.
+std::map<uint16_t, char> order_clocks(const RunFacts &rr, const TagProfile &a,
+		const RunFacts &other, const TagProfile &b, const std::vector<uint16_t> &identities,
+		int64_t &offset_ns) {
+	std::map<uint16_t, char> out;
+	offset_ns = 0;
+	const RunClocks ca = run_clocks(rr), cb = run_clocks(other);
+	if (!ca.valid || !cb.valid)
+		return out;
+	offset_ns = (cb.join_ns - cb.zero_ns) - (ca.join_ns - ca.zero_ns);
+	if (std::llabs(offset_ns) <= 2 * kClockToleranceNs)
+		return out;
+	for (const uint16_t identity : identities) {
+		const std::vector<uint64_t> &ta = a.tags.at(identity).times,
+									&tb = b.tags.at(identity).times;
+		const int64_t first_a = int64_t(*std::min_element(ta.begin(), ta.end()));
+		const int64_t first_b = int64_t(*std::min_element(tb.begin(), tb.end()));
+		const int64_t on_join = (first_b - cb.join_ns) - (first_a - ca.join_ns);
+		const int64_t on_mission = (first_b - cb.zero_ns) - (first_a - ca.zero_ns);
+		if (std::llabs(on_mission) <= kClockToleranceNs)
+			out[identity] = 'M';
+		else if (std::llabs(on_join) <= kClockToleranceNs)
+			out[identity] = 'J';
+	}
+	return out;
+}
+
 void compare_tags(
 		const RunFacts &rr, const RunFacts &other, char dir, std::vector<MetricValue> &out) {
 	static_assert(has_normalization("event.gameplay_body"));
@@ -438,18 +515,50 @@ void compare_tags(
 	auto ordered = [dir, sync_phase](uint16_t identity) {
 		return !first_order_excluded(dir, identity) && !(sync_phase && identity == 0x022);
 	};
-	std::vector<std::string> order_a, order_b;
+	std::vector<uint16_t> ids_a, ids_b;
 	for (const uint16_t identity : a.first_order)
 		if (b.tags.count(identity) && ordered(identity))
-			order_a.push_back(identity_key(identity));
+			ids_a.push_back(identity);
 	for (const uint16_t identity : b.first_order)
 		if (a.tags.count(identity) && ordered(identity))
-			order_b.push_back(identity_key(identity));
+			ids_b.push_back(identity);
+	// S2C pairs across the two clocks are left out (order.S.clock): their order is the
+	// host tick the joiner was admitted on, which the case does not fix.
+	static_assert(has_normalization("order.S.clock"));
+	int64_t offset_ns = 0;
+	const std::map<uint16_t, char> clock = dir == 'S'
+			? order_clocks(rr, a, other, b, ids_a, offset_ns)
+			: std::map<uint16_t, char>{};
+	auto across = [&clock](uint16_t x, uint16_t y) {
+		const auto cx = clock.find(x), cy = clock.find(y);
+		return cx != clock.end() && cy != clock.end() && cx->second != cy->second;
+	};
+	std::map<uint16_t, size_t> position;
+	for (size_t i = 0; i < ids_b.size(); ++i)
+		position.emplace(ids_b[i], i);
+	size_t inversions = 0, left_out = 0;
+	for (size_t i = 0; i < ids_a.size(); ++i)
+		for (size_t j = i + 1; j < ids_a.size(); ++j)
+			if (position.at(ids_a[i]) > position.at(ids_a[j]))
+				++(across(ids_a[i], ids_a[j]) ? left_out : inversions);
+	std::vector<std::string> order_a, order_b;
+	for (const uint16_t identity : ids_a)
+		order_a.push_back(identity_key(identity));
+	for (const uint16_t identity : ids_b)
+		order_b.push_back(identity_key(identity));
 	MetricValue order = metric(dir, "first_order", "", "FIRST_ORDER_MISMATCH");
-	order.distance = double(order_inversions(order_a, order_b));
+	order.distance = double(inversions);
 	order.subject = render_list(order_b);
 	order.reference = render_list(order_a);
 	order.detail = "pairwise inversions between the first-occurrence orders";
+	if (left_out != 0) {
+		char text[160];
+		std::snprintf(text, sizeof text,
+				"; %zu across the admission and mission clocks left out (admitted %+.2f s "
+				"apart on the mission clock)",
+				left_out, double(offset_ns) / 1e9);
+		order.detail += text;
+	}
 	out.push_back(order);
 }
 
