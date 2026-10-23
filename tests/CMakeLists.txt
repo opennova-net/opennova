@@ -5686,6 +5686,12 @@ add_test(NAME gate_metrics_reports COMMAND gate_metrics_reports_test)
 add_executable(npruntime_join_gate_ping_test npruntime/join_gate_ping_test.cpp)
 target_link_libraries(npruntime_join_gate_ping_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_join_gate_ping COMMAND npruntime_join_gate_ping_test)
+# The mission start's server-info update inside the host boot: past a map change's head, ahead
+# of the load window's first pump, the next kernel and its terrain.
+add_executable(npruntime_host_boot_mission_start_update_test npruntime/host_boot_mission_start_update_test.cpp)
+target_link_libraries(npruntime_host_boot_mission_start_update_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_host_boot_mission_start_update_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_host_boot_mission_start_update COMMAND npruntime_host_boot_mission_start_update_test)
 
 # --- parity lane LI (input seam) ---
 add_executable(inmatch_tick_input_source_test frame/tick_input_source_test.cpp)

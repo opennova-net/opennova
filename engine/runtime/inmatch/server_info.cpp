@@ -41,8 +41,12 @@ void read_session_listing_columns(
 	// The mission environment's time-of-day class (World::env, the host boot's)
 	// [orig: g_EnvTimeOfDayEnum @0x24D2364, read @0x4FF038]
 	if (ctx.world != nullptr) r.time_of_day = ctx.world->env.time_of_day_enum;
-	// [orig: g_RoundTimeRemaining @0x24C1958, read @0x4FED57]
-	r.round_time_remaining_ticks = ctx.world != nullptr ? ctx.world->match.remaining_ticks() : -1;
+	// [orig: g_RoundTimeRemaining @0x24C1958, read @0x4FED57]. With no world (a map change's
+	// load, its old World gone with the teardown) the registration's own stands: the global holds
+	// the last round's value until the next mission start's store, which follows its update
+	// [orig: Game_StartMission - `mov g_RoundTimeRemaining, esi` (-1) @0x524A5D and the limit's
+	//  store @0x525251, both past Lobby_UpdateServerInfo @0x5248F5].
+	if (ctx.world != nullptr) r.round_time_remaining_ticks = ctx.world->match.remaining_ticks();
 	// [orig: the strlen of the password @0x24D1FE4 @0x4FEDCA..0x4FEDDD]
 	r.password = !config.server_password.empty();
 	// [orig: `test byte g_RulesFlags, 1` @0x4FEE48]

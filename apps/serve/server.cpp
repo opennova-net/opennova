@@ -305,21 +305,48 @@ bool Server::start_session(std::string &error) {
 	return true;
 }
 
-// The listing meets the mission that just started: the live source reads the
-// new kernel and the kept server context, takes the map's columns, and both
-// lists go out in full at once, as every mission start on a NovaWorld authority
-// in session runs the server-info update outside its 1860-tick timer. The
-// starting map's is the fresh host's first full Host list: its host result
-// published nothing (D-NET-465)
-// [orig: Game_StartMission @0x5248c6..0x524903 -> Lobby_UpdateServerInfo
-//  @0x5248f5, CPlayerManager_RebuildLists(1) @0x524903 ->
-//  CNapiGameSession_SendHostUpdate @0x4d45b5].
+// The mission start's server-info update, which the host boot runs past the mission text and a
+// map change's head, ahead of the load window and the loads (HostBootRequest::
+// mission_start_update). The update reads the globals as they stand there: the session settings
+// the start applied, the rotation's game type, the mission text's title or else the header's name,
+// the header's climate (the validate read the header ahead of it), TimeOfDay's class the apply
+// cleared, and the last round's clock (a fresh process's 0), the session's own columns over them
+// once it is bound (a map change's settings, title, lock and keys). Every mission start on a
+// NovaWorld authority in session runs it outside the 1860-tick timer, both lists whole; the
+// starting map's is the fresh host's first full Host list, its host result having published
+// nothing (D-NET-465), and its METPROTOCOL ID report follows (g_SessionRoundCount == 0,
+// D-NET-NEW-L9-22). The session's periodic update then sends them, so they leave the load's
+// length ahead of the round's first refresh
+// [orig: Game_StartMission @0x524360 - Game_ApplySessionSettingsToGlobals called @0x524662
+//  (`xor ebp, ebp` @0x552064, the g_EnvTimeOfDayEnum store @0x55207B),
+//  BMS_LoadAndValidateHeader called @0x524774 (g_BmsHeaderBlock read @0x40E2A9 / @0x40E2D4),
+//  TextResource_LoadMissionTextBin @0x5247CE, the gates @0x5248C6..0x5248DC,
+//  Lobby_UpdateServerInfo called @0x5248F5, CPlayerManager_RebuildLists(1) called @0x524903 ->
+//  CNapiGameSession_SendHostUpdate @0x4d45b5, Server_SendMetricsToGate called @0x524928,
+//  CNapiGameSession_ProcessPeriodicUpdate called @0x52493D; g_RoundTimeRemaining's stores
+//  @0x524A5D / @0x525251 follow].
+void Server::run_mission_start_update(const std::string &header_name, int32_t climate) {
+	if (listing_ == nullptr || lister_ == nullptr || lister_->finished()) return;
+	HostRegistration r = listing_columns();
+	// [orig: Lobby_UpdateServerInfo - MissionText_GetString("info", "title") @0x4FE989..0x4FE993,
+	//  the header's name when it reads empty @0x4FE99D..0x4FE9AD; the climate @0x4FE9D5]
+	const std::string title = boot_.mission_text.get_string("info", "title");
+	r.mission_name = !title.empty() ? title : header_name;
+	r.region_index = climate;
+	// [orig: g_EnvTimeOfDayEnum read @0x4FF038; g_RoundTimeRemaining read @0x4FED57]
+	r.time_of_day = 0;
+	r.round_time_remaining_ticks = kernel_ ? kernel_->world.match.remaining_ticks() : 0;
+	listing_->set_base(std::move(r));
+	lister_->publish_server_info(rotation_.round_count);
+	(void)lister_->tick(wall_ms());
+}
+
+// The listing meets the mission that just started: the live source reads the new kernel and the
+// kept server context, its columns the map's from here; its update went out at the mission start
+// (run_mission_start_update).
 void Server::bind_listing() {
 	listing_->set_base(listing_columns());
 	listing_->bind(*role_, *kernel_, *lister_);
-	// The first mission's METPROTOCOL ID report rides it (g_SessionRoundCount == 0,
-	// D-NET-NEW-L9-22). [orig: Game_StartMission @0x524908..0x524928]
-	lister_->publish_server_info(rotation_.round_count);
 }
 
 // Game_Run's read, before the mount: no weapon table yet (every avail_wpn
@@ -560,6 +587,14 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 
 	// The engine's one host boot (ADR 0051 d4), the game's own order.
 	inmatch::HostBootRequest request;
+	// A listed server's mission start publishes its listing ahead of the load, from the header
+	// this read validated (run_mission_start_update).
+	if (listing_ != nullptr) {
+		request.mission_start_update = [this, header_name = doc.get_mission_name(),
+				climate = static_cast<int32_t>(doc.header.climate)] {
+			run_mission_start_update(header_name, climate);
+		};
+	}
 	request.mission = std::move(doc);
 	request.mission_basename = basename;
 	request.files = mission::boot_files_from_index(index_);
@@ -782,6 +817,8 @@ HostRegistration Server::listing_columns() const {
 	r.gcc = vfs_country_code(options_.resource_dir);
 	r.expansion = index_.mounted_expansion();
 	r.tracers = (config.mp_attributes & inmatch::GameConfig::kMpAttribNoTracers) == 0;
+	// [orig: dword_24D218C read @0x4FECD7]
+	r.skins = config.allow_custom_skins != 0;
 	r.game_type = game_text(have_gametext_ ? &gametext_ : nullptr, "GateTypeAbbrev",
 			game_type::host_abbreviation_key(rotation_.list.map_game_type), std::string());
 	if (const inmatch::MissionRotationEntry *entry = rotation_.list.current()) {

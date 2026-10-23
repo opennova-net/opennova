@@ -128,8 +128,8 @@ private:
 
 // A Lister on a synthetic clock, 10 ms a pass. Once it hosts, the game server
 // behind it starts its mission: the mission start's update publishes the whole
-// Host list, the HostKey with it, as opennova-serve's Server::bind_listing runs
-// it (the host result publishes nothing, D-NET-465).
+// Host list, the HostKey with it, as opennova-serve's Server::run_mission_start_update
+// runs it (the host result publishes nothing, D-NET-465).
 struct ListerRun {
 	opennova::serve::Lister &lister;
 	uint32_t now = 0;

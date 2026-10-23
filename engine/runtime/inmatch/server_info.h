@@ -25,6 +25,7 @@ struct NapiNPServerCtx;
 
 // Overwrite `r`'s session-owned columns from the host context (its config, its
 // join lock, its world's round clock, its mission and the round init's GameServerBaffleKey).
+// A context with no world or no mission (a map change's load) leaves `r`'s columns they own.
 // `gametext` resolves the GateTypeAbbrev text of the session's game type (an empty lookup or a
 // missing key: "").
 void read_session_listing_columns(

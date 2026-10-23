@@ -238,6 +238,11 @@ private:
 	bool route_mission_exit(int32_t reason);
 	bool open_socket(std::string &error);
 	bool host_on_novaworld(std::string &error, const std::atomic<bool> *cancel);
+	// The mission start's server-info update inside the host boot (HostBootRequest::
+	// mission_start_update), ahead of the load: the starting map's or the next one's columns as
+	// the update reads them there (`header_name` and `climate`, the mission's BMS header's), the
+	// publish, then the NovaWorld session's periodic update, which sends it.
+	void run_mission_start_update(const std::string &header_name, int32_t climate);
 	// The listing over the mission that just started (the first, or a map change's next).
 	void bind_listing();
 	HostRegistration listing_columns() const;

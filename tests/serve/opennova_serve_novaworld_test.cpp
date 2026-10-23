@@ -162,16 +162,24 @@ int main() {
 	};
 	// The first full Host list is the starting map's mission start's: the host result published
 	// nothing (D-NET-465), and the request's Host list (BuildHostVarLists' first run) carries no
-	// GameType [orig: Game_StartMission @0x5248c6..0x524903].
+	// GameType. It left inside the start, ahead of the load and of every frame, as the mission
+	// start publishes and its periodic update sends before the load: TimeOfDay is the class the
+	// settings apply cleared (UNKNOWN) and TimeLeft the fresh process's round clock (0)
+	// [orig: Game_StartMission @0x524360 - Game_ApplySessionSettingsToGlobals called @0x524662
+	//  (the g_EnvTimeOfDayEnum store @0x55207B), Lobby_UpdateServerInfo called @0x5248F5,
+	//  CPlayerManager_RebuildLists(1) called @0x524903, CNapiGameSession_ProcessPeriodicUpdate
+	//  called @0x52493D; g_RoundTimeRemaining's stores @0x524A5D / @0x525251 follow].
 	std::optional<LobbyState> lobby;
-	for (int f = 0; f < 300 && !(lobby && var_has(lobby->last_host_update["Host"], "GameType"));
+	for (int f = 0; f < 500 && !(lobby && var_has(lobby->last_host_update["Host"], "GameType"));
 			++f) {
-		CHECK(server.frame(kFrame));
 		std::this_thread::sleep_for(2ms);
 		lobby = row();
 	}
 	CHECK(lobby.has_value());
 	if (!lobby) return 1;
+	CHECK(var(lobby->last_host_update["Host"], "TimeOfDay") == "Unknown");
+	CHECK(var(lobby->last_host_update["Host"], "TimeLeft") == "0");
+	CHECK(var(lobby->last_host_update["Host"], "MissionName") == "Serve Test Map");
 
 	// The service's only endpoint is the source of the host's NWU datagrams:
 	// the game socket.

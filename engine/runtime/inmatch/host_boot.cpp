@@ -285,8 +285,11 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 		head.server_text = boot.server_text;
 		head.next_mission = true;
 		request.host->begin_next_mission_load(std::move(head));
-		request.host->open_next_mission_load_window();
 	}
+	// The mission start's server-info update and its periodic update, past the head and ahead of
+	// the window and the loads (HostBootRequest::mission_start_update carries the witness).
+	if (request.host != nullptr && request.mission_start_update) request.mission_start_update();
+	if (stage_pumps) request.host->open_next_mission_load_window();
 
 	if (!request.session->begin_load().applied()) {
 		error = "the session did not enter its load";

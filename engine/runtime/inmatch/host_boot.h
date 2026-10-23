@@ -138,6 +138,19 @@ struct HostBootRequest {
 	std::function<mission::MissionKernel &()> fresh_kernel;
 	std::function<void(mission::MissionKernel &)> before_terrain;
 	std::function<void(bool fresh_runtime)> after_bringup;
+	// The mission start's server-info update, an authority's: a NovaWorld embedder publishes
+	// its listing's both lists whole (the first mission's ID report after them), then runs its
+	// NovaWorld session's periodic update, which sends them. The boot runs it past the mission
+	// text and a map change's head (the session settings, the per-slot reset), ahead of the load
+	// window and every load, so the update leaves the load's length ahead of the round's first
+	// refresh. An embedder that runs a map change's head itself runs it there. Optional.
+	// [orig: Game_StartMission @0x524360 - TextResource_LoadMissionTextBin @0x5247CE,
+	//  Server_ResetAllPlayerSlotFrameState @0x5248BC, the gates @0x5248C6..0x5248DC,
+	//  Lobby_UpdateServerInfo called @0x5248F5, CPlayerManager_RebuildLists(1) called @0x524903,
+	//  Server_SendMetricsToGate called @0x524928, CNapiGameSession_ProcessPeriodicUpdate called
+	//  @0x52493D; ahead of Server_PumpNetworkTransport @0x524A63 and the terrain's
+	//  Game_LoadTerrainDuringConnect @0x524B26..0x5251CD]
+	std::function<void()> mission_start_update;
 };
 
 // What phase A leaves for phase B and for the embedder to retain. Not
