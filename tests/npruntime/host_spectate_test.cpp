@@ -76,6 +76,8 @@ struct Rig {
 		cfg.config.side_a_password = side_a_password;
 		cfg.config.side_b_password = side_b_password;
 		inmatch::start_host_session(*owner, cfg);
+		// The session onto its World (the create reads none): its rules, the own add.
+		inmatch::bind_host_session_world(*owner, cfg);
 		// The own add binds no body: the mission start's round init spawns it
 		// (D-NET-NEW-L7-39).
 		inmatch::init_all_player_entities_for_round(owner->ctx);

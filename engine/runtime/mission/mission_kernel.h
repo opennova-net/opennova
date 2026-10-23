@@ -118,10 +118,11 @@ struct KernelBootOptions {
 	std::function<std::string(int32_t)> people_name_resolver;
 	// The net half's session bring-up (inmatch::HostRole::bring_up_singleplayer,
 	// or HostRole::bring_up for a LAN host, serve-and-play or dedicated),
-	// invoked between the world wiring and the system registration — exactly
-	// where the SP listen host stands up inside the load
-	// [orig: SinglePlayer_StartMission @0x561af0]. Null = the bare no-net
-	// kernel (the AI-path/convoy drives).
+	// invoked between the world wiring and the system registration: the
+	// mission's World under the session, which the host boot created ahead of
+	// the load (HostRole::create_session; a hook with no create ahead of it
+	// creates first) [orig: SinglePlayer_StartMission @0x561af0]. Null = the
+	// bare no-net kernel (the AI-path/convoy drives).
 	std::function<void()> bringup_net_session;
 };
 

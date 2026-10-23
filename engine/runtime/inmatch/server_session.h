@@ -112,6 +112,13 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 void continue_session(NapiNPServerCtx &ctx, const GameConfig &config,
 		const rtxt::File *text_override);
 
+// The CRT stream the session's draws take: the bound World's (World::crt_rand, which a host's
+// bring-up took from the process), else the process's (NapiNPServerCtx::process_crt_rand: a
+// host's create runs ahead of its first mission's World), else null, whose draws read 0.
+// [orig: rand @0x76B00A, one per-thread stream; Server_AllocatePlayerSlotTable @0x51C180 - srand
+//  @0x51C1AA]
+io::CrtRand *session_crt_rand(NapiNPServerCtx &ctx);
+
 // [orig: NapiNPProtocol_StartServer @0x62b5e0] — host-only. Stamps host_key / host_start_tick,
 // copies the MP TLV max_players, and sets host_running = 1 (HandleClientHello rejects while it is
 // 0); the protocol's magic key (+0x530) is the create's, not the start's (D-NET-NEW-L1-20). No-op

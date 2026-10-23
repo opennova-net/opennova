@@ -184,6 +184,8 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	host_cfg.host_key = 0x0FE0E112u; // deterministic (HostConfig: "deterministic for tests")
 	host_cfg.serve_and_play = false;
 	inmatch::start_host_session(owner, host_cfg);
+	// The session onto its World (the create reads none): its rules, the own add.
+	inmatch::bind_host_session_world(owner, host_cfg);
 
 	MemoryDatagramSocket sock;
 	// The joiner's wall clock follows the host ticks this script drives (16 ms each), so its

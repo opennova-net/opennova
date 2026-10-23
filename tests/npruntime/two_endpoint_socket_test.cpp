@@ -143,6 +143,8 @@ int main() {
 	host_cfg.socket_mode = inmatch::SocketMode::Lan;
 	host_cfg.serve_and_play = false;
 	inmatch::start_host_session(owner, host_cfg); // the SAME §5.0 bring-up the game's host runs
+	// The session onto its World (the create reads none): its rules, the own add.
+	inmatch::bind_host_session_world(owner, host_cfg);
 
 	// ---- joiner: a headless ClientRuntime over the joiner socket ----
 	const std::string kName = "SocketJoiner";

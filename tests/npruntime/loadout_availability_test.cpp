@@ -256,6 +256,8 @@ void test_the_first_mission_builds_the_table() {
 		cfg.config.class_availability[2] = 2;
 		world->registry.configure_pool(0, 4);
 		inmatch::start_host_session(*owner, cfg);
+		// The session onto its World (the create reads none): its rules, the own add.
+		inmatch::bind_host_session_world(*owner, cfg);
 		const std::vector<std::pair<uint8_t, uint8_t>> expected = session
 				? std::vector<std::pair<uint8_t, uint8_t>>{{1, 0}, {2, 0}, {3, 0}, {kMortarAdm, 2}}
 				: std::vector<std::pair<uint8_t, uint8_t>>{};

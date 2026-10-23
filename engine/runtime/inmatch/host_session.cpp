@@ -762,9 +762,6 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 	// it: the status report's UP-TIME, the S2C 0x58's uptime, the 0x81's UT and the S2C 0x02
 	// probe read it (host_tick_count_ms; D-NET-NEW-L8-27).
 	owner.ctx.process_clock_ms = cfg.clock_ms;
-	// And the World's, which the 0x26 sender's entity+560 stamp and the S2C 0x19 / 0x1A / 0x0F
-	// stamps read (world::authority_tick_count_ms; D-NET-NEW-L8-28).
-	if (owner.ctx.world != nullptr) owner.ctx.world->tick_count_ms = cfg.clock_ms;
 	// The process's log devices and the socket address, ahead of the session
 	// create whose server start logs HOST STARTED and whose round init clears
 	// the punt table.
@@ -839,19 +836,6 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 			const uint8_t spectate = static_cast<uint8_t>(cfg.config.join_spectate);
 			connection.link.spectator = spectate != 0;
 			connection.join_spectator_request = spectate;
-			// Out of a session the side-A class word is the mission's, not the profile's: its
-			// type byte (the header's +0x22A, the mission list entry's +0x1134) when it is 1, 2
-			// or 3, else 1; side B's is left (D-PLAYERINFO-33). The mission start's Player_InitPlayer
-			// re-stamps the single player's team-1 body from it (Player_InitPlayerSideWords).
-			// [orig: Game_ApplySessionSettingsToGlobals @0x551500 (@0x551707..0x551725: the entry
-			//  @0x551707, its +0x1134 into g_CharClassTeam1 @0x55170B..0x551714, 1 @0x551725);
-			//  MissionList_ScanAndBuildFromFiles @0x563170 (optionA_1134 = the header's byte
-			//  @0x563365)]
-			// (Out of a session: the socketless single player, the rules word's fact below.)
-			if (cfg.socket_mode == SocketMode::Socketless && owner.ctx.mission != nullptr) {
-				const uint8_t type = static_cast<uint8_t>(owner.ctx.mission->header.mission_type);
-				connection.char_vars.char_class[0] = type >= 1 && type <= 3 ? type : uint8_t{1};
-			}
 		}
 	}
 	// A Serve Only host's own row takes the profile the host runs under (the shell's player
@@ -862,18 +846,44 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 	PlayerSession_InitHostRowFromProfile(owner.ctx, cfg.local_character_vars
 			? *cfg.local_character_vars
 			: fresh_profile_character_vars(owner.ctx.characters));
+	return CreateSessionResult::Created;
+}
+
+void bind_host_session_world(HostOwner &owner, const HostConfig &cfg) {
+	if (owner.ctx.world == nullptr) return;
+	// The World's GetTickCount, the session's process clock, which the 0x26 sender's entity+560
+	// stamp and the S2C 0x19 / 0x1A / 0x0F stamps read (world::authority_tick_count_ms;
+	// D-NET-NEW-L8-28), as a map change's next World takes it.
+	owner.ctx.world->tick_count_ms = owner.ctx.process_clock_ms;
+	// Out of a session the side-A class word is the mission's, not the profile's: its type byte
+	// (the header's +0x22A, the mission list entry's +0x1134) when it is 1, 2 or 3, else 1; side
+	// B's is left (D-PLAYERINFO-33). The mission start's Player_InitPlayer re-stamps the single
+	// player's team-1 body from it (Player_InitPlayerSideWords).
+	// [orig: Game_ApplySessionSettingsToGlobals @0x551500 (@0x551707..0x551725: the entry
+	//  @0x551707, its +0x1134 into g_CharClassTeam1 @0x55170B..0x551714, 1 @0x551725), called by
+	//  Game_StartMission @0x524662; MissionList_ScanAndBuildFromFiles @0x563170 (optionA_1134 =
+	//  the header's byte @0x563365)]
+	// (Out of a session: the socketless single player, the rules word's fact.)
+	if (cfg.socket_mode == SocketMode::Socketless && owner.ctx.mission != nullptr) {
+		const uint8_t type = static_cast<uint8_t>(owner.ctx.mission->header.mission_type);
+		for (NapiNPConnection &connection : owner.ctx.np_protocol.connection_list)
+			if (connection.type == NapiNPConnection::kTypeClientSide)
+				connection.char_vars.char_class[0] = type >= 1 && type <= 3 ? type : uint8_t{1};
+	}
 	configure_session_world(owner, cfg);
 	apply_first_mission_settings(owner, cfg);
-	if (cfg.serve_and_play && owner.ctx.world != nullptr) {
-		// Serve-and-play: the host's own add, inside the create, which spawns no body: the
-		// mission start's round init spawns it past the PreMission pass and then queues the
-		// own client's load-time stream (HostRole::init_round_after_premission,
-		// D-NET-NEW-L7-39). A dedicated/headless HostOnly session has no local-player
-		// connection [orig: Server_PlayerAdd's own arm @0x51CC33..0x51CC60; Game_StartMission
-		// @0x524360 - the Server_InitAllPlayerEntitiesForRound call @0x525BAF].
+	if (cfg.serve_and_play) {
+		// Serve-and-play: the host's own add, which spawns no body: the mission start's round init
+		// spawns it past the PreMission pass and then queues the own client's load-time stream
+		// (HostRole::init_round_after_premission, D-NET-NEW-L7-39). Retail's runs inside the create
+		// (its own connection's new-connection callback); ours's needs the World its add reads, and
+		// nothing reads the add between the two. A dedicated/headless HostOnly session has no
+		// local-player connection [orig: NapiNPServer_HandleNewConnection @0x4C8040 - the local
+		// arm's Server_BuildPlayerInfoAndAdd call @0x4C82A5; Server_PlayerAdd's own arm
+		// @0x51CC33..0x51CC60; Game_StartMission @0x524360 - the
+		// Server_InitAllPlayerEntitiesForRound call @0x525BAF].
 		Server_ProcessPendingPlayerSpawns(owner.ctx, *owner.ctx.world);
 	}
-	return CreateSessionResult::Created;
 }
 
 void continue_host_session(HostOwner &owner, const HostConfig &cfg) {

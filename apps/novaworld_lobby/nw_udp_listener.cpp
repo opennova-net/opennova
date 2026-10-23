@@ -315,6 +315,8 @@ void NwUdpListener::initialize_jo_host() {
 	// [orig: CNapiNPConnection_PumpStateMachine @0x6292E0 - `sub esi, [ebp+5E8h]` @0x62935C]
 	config.clock_ms = inmatch::host_monotonic_milliseconds;
 	inmatch::start_host_session(*jo_owner_, config);
+	// The session onto its World (the create reads none): its rules, the own add.
+	inmatch::bind_host_session_world(*jo_owner_, config);
 }
 
 void NwUdpListener::reset_per_run_state(const char *reason) {

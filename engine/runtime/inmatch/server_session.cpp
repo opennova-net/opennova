@@ -35,6 +35,11 @@ void set_transport_mode(NapiNPServerCtx &ctx, SocketMode socket) {
 	ctx.socket_state = socket;
 }
 
+io::CrtRand *session_crt_rand(NapiNPServerCtx &ctx) {
+	if (ctx.world != nullptr) return &ctx.world->crt_rand;
+	return ctx.process_crt_rand;
+}
+
 // [orig: NapiNPProtocol_StartServer @0x62b5e0] — see header. Host-only.
 void start_server(NapiNPServerCtx &ctx, const SessionStartup &startup) {
 	if (!ctx.is_authority) return;
@@ -229,15 +234,16 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 	}
 	// Retail seeds the process CRT stream from the clock once when the host
 	// allocates its player-slot table and immediately spends one draw on the
-	// table's anti-cheat base offset (`rand() % 25145`); the simulation's owned
-	// stream takes the session seed instead (a reproducible session, D-NET-115)
-	// and spends that same first draw so every later consumer sees retail's
-	// draw index. A context without a world keeps the CRT default state.
+	// table's anti-cheat base offset (`rand() % 25145`); the owned stream takes
+	// the session seed instead (a reproducible session, D-NET-115) and spends
+	// that same first draw so every later consumer sees retail's draw index. The
+	// stream is the process's ahead of the first mission's World, which takes it
+	// at its bring-up (session_crt_rand); a context with neither keeps none.
 	// [orig: Server_AllocatePlayerSlotTable @0x51C1A4..0x51C1BC — srand
 	// @0x51C1AA, rand @0x51C1AF]
-	if (ctx.world != nullptr) {
-		ctx.world->crt_rand.seed(startup.session_seed_id);
-		(void)ctx.world->crt_rand.next();
+	if (io::CrtRand *stream = session_crt_rand(ctx)) {
+		stream->seed(startup.session_seed_id);
+		(void)stream->next();
 	}
 	ctx.is_in_session = 1; // gates the whole replication loop (+0x58)
 	// The title the start installs below (start_server) builds the block.
@@ -293,7 +299,8 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 		if (ctx.is_in_session != 0 && ctx.is_authority != 0 &&
 				ctx.transport_mode == NetworkType::NovaWorld) {
 			p.magic_reflect = 1;
-			const uint32_t draw = ctx.world != nullptr ? ctx.world->crt_rand.next() : 0u;
+			io::CrtRand *stream = session_crt_rand(ctx);
+			const uint32_t draw = stream != nullptr ? stream->next() : 0u;
 			p.magic_key = (p.host_start_tick + draw) % 0xDBBA0u + 0x186A0u;
 		} else {
 			p.magic_reflect = 0;

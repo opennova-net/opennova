@@ -205,13 +205,6 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	charattr_restrictions.no_crosshair_spread = host_cfg.config.no_crosshair_spread != 0;
 	charattr_restrictions.no_scope_drift = host_cfg.config.no_scope_drift != 0;
 
-	// The /PROFILE log opens a fresh file for this mission, ahead of its load,
-	// headed by the map file name [orig: Game_StartMission @0x524475..0x524487
-	//  -> ServerLog_OpenForWrite(&g_ServerLog, g_ProfileLogPath), BEGN over
-	//  g_MapFileName @0x4e2067].
-	if (request.host != nullptr && host_cfg.logs.profile != nullptr)
-		(void)host_cfg.logs.profile->open(host_cfg.config.mission_file);
-
 	// The loose score.ini into the session config (apply_session_score_ini).
 	if (request.host != nullptr && request.session_score_ini)
 		apply_session_score_ini(files, host_cfg.config);
@@ -268,6 +261,38 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	// GameText_GetString("server", "C2Blue" / "C2Red") @0x51902E / @0x51909C].
 	if (request.host != nullptr)
 		boot.server_text = read_host_server_text(files, boot.mission_text.override_table.get());
+
+	// A fresh session's create, ahead of its mission start: the round-state init seeds the
+	// process's CRT stream and draws the slot table's offset, GameServerBaffleKey and the PCIDKey
+	// ring, then the create, before any World exists, so the mission start's server-info update
+	// already carries both keys and every CRT draw of the load follows the create's seed
+	// (HostRole::create_session, D-NET-NEW-L1-50). A set `mpreset` word ends the process there,
+	// ahead of the mission start's every leg: the session never enters its load.
+	// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - Server_InitNewRoundState called
+	//  @0x5695B3, CNapiGameSession_CreateSession called @0x56997D (@0x4C97E7..0x4C97F0 ->
+	//  crt_exit(0)); Game_HostMultiplayerSession @0x4A65A0 - the call @0x4A6759, then
+	//  Game_MainLoop(&g_GameModeGameLoop) @0x4A6767; MultiPlayer_JoinSessionStateMachine
+	//  @0x56A320 - state 2's call @0x56A46A; SinglePlayer_StartMission @0x561AF0 -
+	//  @0x561C23, @0x561E65, UI_NavHistoryPush(&g_GameModeGameLoop) @0x561E85; GameLoop_Init
+	//  @0x526370 - Game_StartMission(0) called @0x526377]
+	if (request.host != nullptr && !request.next_mission) {
+		HostBringup create;
+		create.host_cfg = host_cfg;
+		create.mission_text = boot.mission_text;
+		create.server_text = boot.server_text;
+		if (request.host->create_session(create) == CreateSessionResult::ProcessExit) {
+			boot.session_create = CreateSessionResult::ProcessExit;
+			error = "mpreset is set: the session create ends the process (exit code 0)";
+			return false;
+		}
+	}
+
+	// The /PROFILE log opens a fresh file for this mission, ahead of its load,
+	// headed by the map file name [orig: Game_StartMission @0x524475..0x524487
+	//  -> ServerLog_OpenForWrite(&g_ServerLog, g_ProfileLogPath), BEGN over
+	//  g_MapFileName @0x4e2067].
+	if (request.host != nullptr && host_cfg.logs.profile != nullptr)
+		(void)host_cfg.logs.profile->open(host_cfg.config.mission_file);
 
 	// A map change's load head, when the embedder ran none ahead of its own loads (a
 	// headless host): the start's world-free legs and the window's first pumps, then the
@@ -427,18 +452,6 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	};
 	std::string boot_error;
 	const bool booted = kernel.boot(options, boot_error);
-	// The host's session create ended the process: retail exits there, ahead
-	// of every later leg of the mission start, so the boot stops and reports
-	// it [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0 -> crt_exit(0),
-	// from SinglePlayer_StartMission @0x561E65 and
-	// CNapiGameSession_BuildAndCreateSession @0x56997D (which the PreMenu's
-	// state 2 calls, MultiPlayer_JoinSessionStateMachine @0x56A46A), both
-	// before the Game Loop's Game_StartMission].
-	if (request.host != nullptr && request.host->session_create() == CreateSessionResult::ProcessExit) {
-		boot.session_create = CreateSessionResult::ProcessExit;
-		error = "mpreset is set: the session create ends the process (exit code 0)";
-		return false;
-	}
 	if (!booted) {
 		error = "the mission boot failed: " + boot_error;
 		return false;

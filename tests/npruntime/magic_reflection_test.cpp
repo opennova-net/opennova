@@ -218,6 +218,8 @@ void test_the_owner_sends_the_answer_to_the_named_address() {
 	cfg.host_start_tick = kStartTick;
 	cfg.session_seed_id = kSeed;
 	(void)inmatch::start_host_session(*owner, cfg);
+	// The session onto its World (the create reads none): its rules, the own add.
+	inmatch::bind_host_session_world(*owner, cfg);
 	CHECK(owner->ctx.np_protocol.magic_reflect == 1);
 	RecordingSocket socket;
 	socket.inbound.push_back(magic_datagram(kNamed, owner->ctx.np_protocol.magic_key));

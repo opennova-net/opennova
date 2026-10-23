@@ -10,6 +10,8 @@
 
 #include <functional>
 
+#include <base/io/crt_rand.h>                   // the process's CRT stream (process_crt_rand)
+
 #include <runtime/inmatch/character_registry.h> // the host's Avatars.def combos (g_AvatarDefs)
 #include <runtime/inmatch/chat_flood.h>        // the console chat's flood table
 #include <runtime/inmatch/file_transfer_session.h> // the process's S2C 0x02 probe words
@@ -328,6 +330,13 @@ struct NapiNPServerCtx {
 	// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - CNapiGameSession_SendPlayerRemovedIfHosting
 	//  called @0x51B5F3, NapiLinkedList_RemoveByUserData on the PlayerList called @0x51B601]
 	const std::function<void(int player_number)> *nwu_player_removed = nullptr;
+	// The process's CRT stream (ClientProcessState::crt_rand), which the session's draws take
+	// while no World is bound: a host's create, ahead of its first mission's World, seeds it and
+	// draws its keys there (session_crt_rand); null on a context no host role brought up (its
+	// draws read 0 without a World).
+	// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - Server_InitNewRoundState called
+	//  @0x5695B3 ahead of the Game Loop's Game_StartMission (GameLoop_Init's call @0x526377)]
+	io::CrtRand *process_crt_rand = nullptr;
 	// ctx+0xE60 past the own client's leave: retail's own type-2 connection stays allocated in
 	// state 6 (its pump state machine has no state-6 arm and nothing destroys it before the
 	// session reset), holding the record its leave latched, which the post-mission router's

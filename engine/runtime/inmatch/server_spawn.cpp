@@ -5,6 +5,7 @@
 #include <runtime/inmatch/server_chat.h> // broadcast_player_joined_text (the add's 0x32 line)
 #include <runtime/inmatch/server_squad_registry.h>
 #include <runtime/inmatch/server_initial_state.h> // Server_OnPlayerJoin (the 0x0B's join)
+#include <runtime/inmatch/server_session.h> // session_crt_rand (the round init's draws)
 #include <runtime/inmatch/server_message_dispatch.h> // broadcast_player_sync_on_join (the add's 0x46)
 #include <runtime/inmatch/server_files.h> // server_logs_punt (the join's HMCRC / CMCRC lines)
 #include <runtime/inmatch/server_tick.h> // Server_StageHostPunt (the join's checksum punts)
@@ -454,8 +455,11 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	// [orig: Server_InitNewRoundState @0x51C8E0 - GetTickCount @0x51CB69, rand @0x51CB6D, the
 	//  unsigned add @0x51CB74, div 0xDBBA0 @0x51CB7B, + 0x186A0 @0x51CB82, g_GameServerBaffleKey
 	//  @0x51CB88; after Server_AllocatePlayerSlotTable's srand / rand (from @0x51C97B)]
+	// The stream is the session's (session_crt_rand): the process's at a host's create, ahead of
+	// its first mission's World.
+	io::CrtRand *stream = session_crt_rand(ctx);
 	{
-		const uint32_t draw = ctx.world != nullptr ? ctx.world->crt_rand.next() : 0u;
+		const uint32_t draw = stream != nullptr ? stream->next() : 0u;
 		ctx.game_server_baffle_key = (ctx.np_protocol.host_start_tick + draw) % 0xDBBA0u + 0x186A0u;
 	}
 	// The cookie-key ring starts right after it, authority or not: slot 0 from the same tick and
@@ -466,7 +470,7 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	//  @0x4DBC20 - GetTickCount @0x4DBC3D, rand @0x4DBC45, the store @0x4DBC5B]
 	ctx.server_info_update_timer = 0;
 	ctx.cookie_key_table.init(ctx.np_protocol.host_start_tick,
-			static_cast<int>(ctx.world != nullptr ? ctx.world->crt_rand.next() : 0u));
+			static_cast<int>(stream != nullptr ? stream->next() : 0u));
 	// The designation table clears on every round init, authority or not
 	// [orig: memset(g_ServerDesignations, 0, 0x1B74) @0x51cb95..0x51cba5].
 	ctx.designations.fill(ServerDesignation{});
@@ -490,13 +494,6 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	ctx.player_row_free_ticks.fill(0);
 	ctx.orphaned_player_rows.clear();
 	init_host_slot_row(ctx);
-	// Server_ResetRoundCounters copies the configured StartDelay seconds into the
-	// one live pre-round timer. Keep the timer on World: it is the authority
-	// phase predicate and the source of the phase-0 0x0A projection, rather
-	// than a second connection-local countdown.
-	// [orig: Server_ResetRoundCounters @0x516C50, store @0x516C8D]
-	if (ctx.world != nullptr)
-		ctx.world->preround_delay_seconds = ctx.config.start_delay;
 	// The stock round initializer clears the global S2C 0x79 countdown. Its next
 	// Server_TickUpdate boundary therefore emits immediately and reloads 0x136.
 	// [orig: Server_InitNewRoundState @0x51CA9E]

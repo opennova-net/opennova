@@ -69,7 +69,6 @@
 //  @0x524A63, @0x524F76, @0x524F8C, @0x525256, @0x5253EA, @0x52589D, @0x5258E5,
 //  @0x5259EC (an own client's), @0x525A5C, @0x525AC5]
 
-#include <base/io/crt_rand.h>
 #include <runtime/mission/mission_catalog.h>
 
 #include <cstdint>
@@ -96,11 +95,6 @@ struct HostMapChange {
 	// The teardown ran on the current kernel: its entities are gone and its
 	// PostMission pass ran, so the role's close skips both.
 	bool torn_down = false;
-	// The process CRT stream: retail seeds it once per session (at the slot
-	// table's allocation), so the next mission's World continues it.
-	// [orig: Server_AllocatePlayerSlotTable @0x51C1AA, srand's only session
-	//  caller]
-	io::CrtRand crt_rand;
 };
 
 enum class MapChangeStep : uint8_t {

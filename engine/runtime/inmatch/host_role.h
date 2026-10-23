@@ -241,18 +241,35 @@ public:
 	// game type, socketless, its session words the profile record's
 	// (singleplayer_game_config) [orig: SinglePlayer_StartMission @0x561af0].
 	void bring_up_singleplayer(const playersav::ProfileRecord *profile = nullptr);
+	// The session create of a fresh session, ahead of its first mission's World and of the
+	// mission start (the host boot runs it at its head, ahead of the mission-start update and the
+	// loads): the reset of a server an earlier error-arm exit left unstopped, a fresh owner over
+	// the process's words, the gametext "Server" strings, the round count, then
+	// start_host_session, whose round-state init seeds the process's CRT stream and draws the
+	// slot table's offset, GameServerBaffleKey and the PCIDKey ring (and a NovaWorld authority's
+	// magic key), so the mission start's update already carries both keys and every draw of the
+	// load follows the create's seed (D-NET-NEW-L1-50). ProcessExit: the `mpreset` word refused
+	// it. The bring-up that follows runs the mission's half (bring_up).
+	// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - Server_InitNewRoundState called
+	//  @0x5695B3, CNapiGameSession_CreateSession called @0x56997D; GameLoop_Init's
+	//  Game_StartMission call @0x526377 follows]
+	CreateSessionResult create_session(const HostBringup &bringup);
 	// The shell's general bring-up (the LAN host or its SP listen server with
-	// the shell's mission text and terrain tiles). The rules word is the
+	// the shell's mission text and terrain tiles), the mission's half under the
+	// session create: the World under the session (the process's CRT stream onto
+	// it), the mission's text and tiles, the session's rules and the host's own add
+	// (bind_host_session_world), the client view and the load's pumps. A caller that
+	// ran no create_session for this load has it run first. The rules word is the
 	// config's mpattrib in a session and 0x4204 for a socketless host, the
 	// shell's single player (D-NET-405).
 	void bring_up(const HostBringup &bringup);
 	// The embedder's bring-up record for the next boot-hook bring_up(): staged
 	// right before the kernel boots (the text, tiles and config are final by
 	// then), consumed by the hook.
-	void stage_bringup(HostBringup bringup) {
-		staged_bringup_ = std::move(bringup);
-		session_create_ = CreateSessionResult::Created;
-	}
+	void stage_bringup(HostBringup bringup) { staged_bringup_ = std::move(bringup); }
+	// The process's CRT stream (ClientProcessState::crt_rand), which a map change's teardown
+	// hands the old World's back to (map_change.h).
+	io::CrtRand &process_crt_rand() { return client_process_->crt_rand; }
 	bool bring_up() override;
 	// The last bring-up's session create: ProcessExit when the config's
 	// `mpreset` word refused it (server_session.h), which leaves the role with
@@ -320,7 +337,11 @@ public:
 	void write_profile_frame() override;
 
 private:
-	void reset_state(const inmatch::GameConfig &config, bool serve_and_play, bool in_session,
+	// The create's fresh owner over the process's words (create_session, bring_up_singleplayer).
+	void reset_session(bool serve_and_play);
+	// The mission's World under the created session: the context's world and mission, the
+	// process's CRT stream onto the World, the rule words.
+	void bind_session_world(const inmatch::GameConfig &config, bool serve_and_play, bool in_session,
 			const TitleIdentity *title);
 	// The rule words the world reads at tick time, from the session config and the title the
 	// session speaks (null: JO's).
@@ -356,6 +377,8 @@ private:
 	RoleKind kind_ = RoleKind::ListenHost;
 	HostBringup staged_bringup_;
 	CreateSessionResult session_create_ = CreateSessionResult::Created;
+	// create_session ran for the load in hand (the bring-up's mission half spends it).
+	bool create_ran_ = false;
 	// A map change's load: its head ran (begin_next_mission_load), and the window's pumps
 	// the head and the stages ran ahead of the bring-up, which runs the rest.
 	bool next_mission_head_run_ = false;

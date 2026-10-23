@@ -221,12 +221,22 @@ struct HostConfig {
 	std::optional<std::string> ban_directory;
 };
 
-// Stand `owner` up through the shared in-match host bring-up the Godot host uses. `serve_and_play` selects HostClient and registers the type-2 loopback; otherwise it selects
-// HostOnly and creates no local player. When serve-and-play also has a World, spawn the host player
-// and queue its initial-state burst before the first per-frame 0x0A.
-// ProcessExit when the session create refused on `cfg.config.multiplayer_reset`
+// Stand `owner`'s session up: the session create every host runs ahead of its first mission's
+// World (HostRole::create_session). `serve_and_play` selects HostClient and registers the type-2
+// loopback; otherwise it selects HostOnly and creates no local player. The round-state init draws
+// on the session's CRT stream (session_crt_rand: the process's while no World is bound). Reads no
+// World. ProcessExit when the session create refused on `cfg.config.multiplayer_reset`
 // (server_session.h): no session stands and nothing past the create ran.
+// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - Server_InitNewRoundState called
+//  @0x5695B3, CNapiGameSession_CreateSession called @0x56997D]
 CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg);
+
+// The created session onto its first mission's World (`owner.ctx.world`, set by the caller once
+// the load built it): the World's clock stamp, a socketless single player's side-A class word,
+// the session's rules (the match, the spawn waves, the rule words), the first mission's class
+// mask and weapon table, then on serve-and-play the host's own add, which spawns no body. A
+// no-op with no World.
+void bind_host_session_world(HostOwner &owner, const HostConfig &cfg);
 
 // The map change's continue (net-re §5.70.6): the next mission inside the SAME
 // session, at its load's world-free head (HostRole::begin_next_mission_load). The

@@ -19,6 +19,7 @@
 #include <runtime/inmatch/session_transport.h>        // ISessionTransport
 #include <runtime/inmatch/vehicle_menu.h>             // VehicleMenu (vehicle.mnu VEHICLE)
 #include <runtime/world/weapon_inventory.h>          // LoadoutWeaponNameList (the process's name list)
+#include <base/io/crt_rand.h>                         // CrtRand (the process's CRT stream)
 
 #include <net/npwire/ingame_decode.h>     // PlayerExtendedUplink (the §5.10 0x0C body)
 
@@ -133,6 +134,16 @@ struct ClientProcessState {
 	// round init, keeps it. [orig: Server_InitNewRoundState @0x51C8E0 (the store @0x51CBA0); Game_RestartRoundSP
 	//  @0x5263A0 -> Game_StartMission(1) @0x5263DB, no round init]
 	uint32_t round_state_init_tick = 0;
+	// The process's CRT stream (rand / srand's per-thread state, io/crt_rand.h). A host's session
+	// create seeds it and draws the session's keys before any mission World exists; each mission's
+	// World takes it at the bring-up (World::crt_rand) and a map change's teardown hands it back,
+	// so every load of the session draws on from the create's seed, as retail's one stream does.
+	// [orig: Server_InitNewRoundState @0x51C8E0 - Server_AllocatePlayerSlotTable called @0x51C97B
+	//  (srand @0x51C1AA, the session's one seed, and its rand), the key's rand @0x51CB6D;
+	//  CNapiGameSession_BuildAndCreateSession @0x5694D0 calls it @0x5695B3 and
+	//  SinglePlayer_StartMission @0x561AF0 @0x561C23, each ahead of its create and of the Game
+	//  Loop's Game_StartMission (GameLoop_Init @0x526370, the call @0x526377)]
+	io::CrtRand crt_rand;
 	// ctx+0xD94, the client callback's disconnect latch (mission_exit.h ProcessDisconnectLatch):
 	// process-lived, first-wins, cleared at a join's connect start. The host's own client writes
 	// it at its teardown (NapiNPServerCtx::client_disconnect_latch), a joiner at its connected

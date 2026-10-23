@@ -15,7 +15,9 @@
 // clock and its devices.
 //
 //   boot_host_mission (A): the loose score.ini into the session config, the
-//     mission .til, the mission text, the gametext "Server" strings,
+//     mission .til, the mission text, the gametext "Server" strings, a fresh
+//     session's create (HostRole::create_session: its round-state init's CRT
+//     seed and key draws, ahead of every World and of the mission start),
 //     Session::begin_load, the fresh kernel and its open, the terrain field
 //     with the placed tiles and the .TSD table, the environment and the water
 //     plane (both before the PreMission pass), the HostRole's staged
@@ -166,11 +168,11 @@ struct HostBoot {
 	// The authority role the boot ran (null for a joiner): phase B ends its
 	// load (HostRole::finish_mission_load).
 	HostRole *host = nullptr;
-	// The bring-up's session create (server_session.h). ProcessExit: the
-	// session config's `mpreset` word was set, so the create refused and
-	// phase A returned false; the embedder ends its process with exit code 0,
-	// as retail's create does, and runs no phase B. A joiner's boot and a map
-	// change's create no session and keep Created.
+	// The fresh session's create (server_session.h), at phase A's head. ProcessExit:
+	// the session config's `mpreset` word was set, so the create refused and
+	// phase A returned false ahead of the session's load; the embedder ends its
+	// process with exit code 0, as retail's create does, and runs no phase B. A
+	// joiner's boot and a map change's create no session and keep Created.
 	// [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0 -> crt_exit(0)]
 	CreateSessionResult session_create = CreateSessionResult::Created;
 	// The request's render_arm_deferred on an authority boot, and the load end phase B left

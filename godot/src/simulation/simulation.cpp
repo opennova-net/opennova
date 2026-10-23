@@ -567,8 +567,10 @@ void Simulation::finish_kernel_boot() {
 }
 
 // The kernel boot's bringup_net_session hook: the active role's own bring-up
-// (the listen host stands its inmatch session up between the world wiring
-// and the system registration (engine: runtime/inmatch/host_role.cpp);
+// (the listen host binds the mission's World under its inmatch session between
+// the world wiring and the system registration, its session created ahead of the
+// load by the host boot, or here for a kernel-direct load (engine:
+// runtime/inmatch/host_role.cpp HostRole::create_session);
 // a joiner (re)builds its non-authority ClientRuntime at the same point; the
 // bare no-net world installs nothing), then the binding's tail: the live
 // runtime pointer, the retained join inputs on a fresh joiner runtime, the

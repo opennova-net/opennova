@@ -276,6 +276,8 @@ bool run_soak(const SoakCase &soak) {
 	host_cfg.socket_mode = inmatch::SocketMode::Lan;
 	host_cfg.serve_and_play = false;
 	inmatch::start_host_session(owner, host_cfg);
+	// The session onto its World (the create reads none): its rules, the own add.
+	inmatch::bind_host_session_world(owner, host_cfg);
 
 	// ---- the impaired wire: one host endpoint routing to every joiner's ----
 	uint64_t now_ms = 0;

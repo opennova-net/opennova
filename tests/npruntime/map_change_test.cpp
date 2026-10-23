@@ -10,6 +10,7 @@
 // has the sides back.
 #include <base/gameprofile/game_type.h>
 #include <base/gameprofile/gameprofile.h>
+#include <base/io/crt_rand.h>
 #include <net/title/title_identity.h>
 #include <formats/def/def.h>
 #include <formats/mission/bms.h>
@@ -234,6 +235,8 @@ struct PlayHost {
 	def::DefItemsFile items{};
 	net::ScopedSocket socket;
 	std::unique_ptr<net::NetDatagramSocket> datagrams;
+	// The session config's StartDelay seconds for the next boot.
+	uint32_t start_delay = 0;
 
 	PlayHost() {
 		uint16_t port = 0;
@@ -274,6 +277,7 @@ struct PlayHost {
 		r.role = &role;
 		r.host = &role;
 		r.host_cfg.config.server_name = "Play Host";
+		r.host_cfg.config.start_delay = start_delay;
 		r.host_cfg.config.game_type = game_type::kAttackDefend;
 		r.host_cfg.config.mission_file = "ADMAP.BMS";
 		r.host_cfg.config.max_players = 9;
@@ -347,8 +351,30 @@ void test_play_host_map_change() {
 				host.role.state.host_owner.ctx.mission_exit_reason, host.kernel->world.mission_exit_reason,
 				unsigned(host.role.state.host_owner.ctx.is_in_session));
 	CHECK(ended);
+	// The CRT stream crosses the map change through the process: the teardown hands the old
+	// World's back and the next World takes it at its bring-up, so the next mission's draws run on
+	// from the session's one seed (D-NET-NEW-L1-50) [orig: Server_AllocatePlayerSlotTable
+	// @0x51C180 - srand @0x51C1AA, the session's one seed; Game_StartMission @0x524360 seeds
+	// nothing].
+	const io::CrtRand before = host.kernel->world.crt_rand;
 	CHECK(inmatch::begin_host_map_change(host.role, host.catalog) == inmatch::MapChangeStep::NextMission);
+	CHECK(host.role.process_crt_rand().state == before.state);
+	host.start_delay = 9;
 	CHECK(host.boot_map(/*next_mission=*/true));
+	// The next mission's round counters' reset copies its StartDelay into the pre-round timer, as
+	// every mission start's does in a session on the authority (D-NET-NEW-L1-51) [orig:
+	// Server_ResetRoundCounters @0x516C50 - the session test @0x516C66, the authority test @0x516C80,
+	// the g_PreRoundDelayTimer store @0x516C8D; Game_StartMission's call @0x525B90].
+	CHECK(host.kernel->world.preround_delay_seconds == 9u);
+	{
+		io::CrtRand walk = before;
+		bool continued = walk.state == host.kernel->world.crt_rand.state;
+		for (int i = 0; i < 4096 && !continued; ++i) {
+			(void)walk.next();
+			continued = walk.state == host.kernel->world.crt_rand.state;
+		}
+		CHECK(continued);
+	}
 	inmatch::NapiNPConnection *own = host.loopback();
 	CHECK(own != nullptr && own->link.owned_entity.valid());
 	if (own == nullptr || !own->link.owned_entity.valid()) return;

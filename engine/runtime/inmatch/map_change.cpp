@@ -288,7 +288,11 @@ MapChangeStep begin_host_map_change(HostRole &role,
 	role.pump_load();
 	if (kernel != nullptr) {
 		Server_RunPostMissionSweep(ctx, *kernel); // its actions send at their calls
-		role.map_change.crt_rand = kernel->world.crt_rand;
+		// The old World hands the CRT stream back to the process, whose next World takes it:
+		// retail seeds it once per session (at the slot table's allocation), so the next
+		// mission continues it [orig: Server_AllocatePlayerSlotTable @0x51C1AA, srand's only
+		// session caller].
+		role.process_crt_rand() = kernel->world.crt_rand;
 	}
 	role.map_change.torn_down = true;
 	reset_all_player_slots(role);

@@ -36,8 +36,11 @@
 #include "common/boot_file_source.h"
 #include "common/synthetic_mission.h"
 
+#include <base/io/crt_rand.h>
+
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -482,15 +485,17 @@ int main() {
 	}
 
 	// --- D-NET-385: the session create's mpreset exit, reported to the
-	// embedder. A set word refuses the create inside the kernel boot's bring-up:
-	// phase A returns false with the exit outcome, no session stands, and the
-	// session stays Loading for the embedder, which ends its process with code
-	// 0 and runs no phase B. A clear word boots as ever. The dedicated host
-	// first, then a listen host (serve-and-play), whose clear boot registers
-	// its own type-2 loopback connection and builds its HostClient view: with
-	// the word set the role's bring-up returns at the refused create, before
-	// either.
-	// [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0 -> crt_exit(0)]
+	// embedder. A set word refuses the create at phase A's head, ahead of the
+	// mission start (D-NET-NEW-L1-50): phase A returns false with the exit
+	// outcome, no session stands, the session never entered its load and no
+	// kernel was made; the embedder ends its process with code 0 and runs no
+	// phase B. A clear word boots as ever. The dedicated host first, then a
+	// listen host (serve-and-play), whose clear boot registers its own type-2
+	// loopback connection and builds its HostClient view: with the word set
+	// the create returns refused, before either.
+	// [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0 -> crt_exit(0),
+	//  called @0x56997D from CNapiGameSession_BuildAndCreateSession, ahead of
+	//  GameLoop_Init's Game_StartMission call @0x526377]
 	{
 		Host host;
 		std::string error;
@@ -503,7 +508,8 @@ int main() {
 		const inmatch::NapiNPServerCtx &ctx = host.role.state.host_owner.ctx;
 		CHECK(ctx.is_in_session == 0);
 		CHECK(ctx.np_protocol.host_running == 0);
-		CHECK(host.session.state() == inmatch::State::Loading);
+		CHECK(host.session.state() != inmatch::State::Loading);
+		CHECK(host.kernel == nullptr);
 
 		Host clear;
 		CHECK(inmatch::boot_host_mission(clear.request(0), clear.boot, error));
@@ -541,7 +547,60 @@ int main() {
 		CHECK(loopbacks(reset.role.state.host_owner.ctx) == 0);
 		CHECK(reset.role.state.host_owner.ctx.is_in_session == 0);
 		CHECK(reset.role.state.host_owner.ctx.total_logins == 0);
-		CHECK(reset.session.state() == inmatch::State::Loading);
+		CHECK(reset.session.state() != inmatch::State::Loading);
+		CHECK(reset.kernel == nullptr);
+	}
+
+	// --- D-NET-NEW-L1-50: the session create runs ahead of the mission start. Phase A's head
+	// creates a fresh session before any World exists: its round-state init seeds the process's
+	// CRT stream with the session seed and draws the slot table's offset, GameServerBaffleKey and
+	// the PCIDKey ring there, so both keys stand before the fresh kernel is made (the mission
+	// start's server-info update reads them ahead of its loads), and the mission's World takes the
+	// stream at the bring-up: the load's next draw is the create's fourth.
+	// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - Server_InitNewRoundState called
+	//  @0x5695B3 (Server_AllocatePlayerSlotTable's srand @0x51C1AA and rand @0x51C1AF, the key's
+	//  rand @0x51CB6D, CSessionIdRing_Init's rand @0x4DBC45), CNapiGameSession_CreateSession called
+	//  @0x56997D; GameLoop_Init's Game_StartMission call @0x526377]
+	{
+		static constexpr uint32_t kSeed = 424242u;
+		static constexpr uint32_t kStartTick = 90000u;
+		Host host;
+		inmatch::HostBootRequest r = host.request(0);
+		r.host_cfg.session_seed_id = kSeed;
+		r.host_cfg.host_start_tick = kStartTick;
+		r.host_cfg.host_key = 0x1234u;
+		r.host_cfg.config.start_delay = 7;
+		// The stream the create leaves: the seed, the slot table's draw, the key's, the ring's.
+		io::CrtRand stream;
+		stream.seed(kSeed);
+		(void)stream.next();
+		const uint32_t key_draw = stream.next();
+		const uint32_t ring_draw = stream.next();
+		bool created_before_kernel = false;
+		uint32_t key_at_kernel = 0;
+		uint32_t ring_at_kernel = 0;
+		const std::function<mission::MissionKernel &()> make_kernel = std::move(r.fresh_kernel);
+		r.fresh_kernel = [&]() -> mission::MissionKernel & {
+			const inmatch::NapiNPServerCtx &ctx = host.role.state.host_owner.ctx;
+			created_before_kernel = ctx.is_in_session == 1 && ctx.world == nullptr;
+			key_at_kernel = ctx.game_server_baffle_key;
+			ring_at_kernel = static_cast<uint32_t>(ctx.cookie_key_table.current());
+			return make_kernel();
+		};
+		uint32_t stream_at_bringup = 0;
+		r.after_bringup = [&](bool) { stream_at_bringup = host.kernel->world.crt_rand.state; };
+		std::string error;
+		CHECK(inmatch::boot_host_mission(std::move(r), host.boot, error));
+		CHECK(created_before_kernel);
+		CHECK(key_at_kernel == (kStartTick + key_draw) % 0xDBBA0u + 0x186A0u);
+		CHECK(ring_at_kernel == ((kStartTick + ring_draw) & 0xFFFFFFu) + 0x1000000u);
+		CHECK(host.role.process_crt_rand().state == stream.state);
+		CHECK(stream_at_bringup == stream.state);
+		// The pre-round timer is the mission start's round counters' (D-NET-NEW-L1-51), past the
+		// PreMission pass: the World the create never saw takes the session's StartDelay there
+		// [orig: Server_ResetRoundCounters @0x516C50 - the g_PreRoundDelayTimer store @0x516C8D;
+		//  Game_StartMission's call @0x525B90].
+		CHECK(host.kernel != nullptr && host.kernel->world.preround_delay_seconds == 7u);
 	}
 
 	// --- a role with no HostRole (the game's joiner) skips the authority's legs

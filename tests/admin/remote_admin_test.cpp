@@ -1096,6 +1096,8 @@ void test_host_uptime_reads_the_process_clock() {
 	cfg.serve_and_play = false;
 	cfg.clock_ms = [&clock] { return clock; };
 	(void)inmatch::start_host_session(*owner, cfg);
+	// The session onto its World (the create reads none): its rules, the own add.
+	inmatch::bind_host_session_world(*owner, cfg);
 	inmatch::NapiNPServerCtx &ctx = owner->ctx;
 	expect(ctx.np_protocol.host_start_tick == 7000u && ctx.round_state_init_tick == 7000u,
 	       "the start and the round init stamp the process clock at the create");

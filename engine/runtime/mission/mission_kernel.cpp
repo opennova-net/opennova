@@ -424,9 +424,9 @@ void MissionKernel::register_mission_systems() {
 	// g_BmsClimate, which the player spawns read for their camouflage row
 	// (D-NET-348) [orig: Entity_SpawnFromAnimSlotProperty @0x43C391].
 	world.tables.bms_climate = static_cast<int32_t>(mission.header.climate);
-	// The net half stands its session up here — between the world wiring and
-	// the system registration, exactly where the SP listen host's bring-up
-	// sits inside the load (inmatch::HostRole::bring_up_singleplayer)
+	// The net half binds the mission's World under its session here — between the
+	// world wiring and the system registration; a host boot created the session
+	// ahead of the load (inmatch::HostRole::create_session)
 	// [orig: SinglePlayer_StartMission @0x561af0].
 	if (bringup_net_session_) bringup_net_session_();
 	// The mission's script systems register in the faithful within-tick

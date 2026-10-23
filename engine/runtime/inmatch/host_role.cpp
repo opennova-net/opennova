@@ -67,13 +67,14 @@ HostRole::HostRole(RoleKind kind,
 // (the HostClient view follows on serve-and-play, taking the catalog this
 // role holds).
 bool HostRole::bring_up() {
-	session_create_ = CreateSessionResult::Created;
 	// The session title's override table is the bring-up's mission text's (the mount's).
 	staged_bringup_.host_cfg.text_override = staged_bringup_.mission_text.override_table.get();
-	if (staged_bringup_.next_mission)
+	if (staged_bringup_.next_mission) {
+		session_create_ = CreateSessionResult::Created;
 		bring_up_next_mission(staged_bringup_);
-	else
+	} else {
 		bring_up(staged_bringup_);
+	}
 	return false;
 }
 
@@ -99,22 +100,40 @@ static bool rules_in_session(const inmatch::HostConfig &host_cfg) {
 	return host_cfg.socket_mode != inmatch::SocketMode::Socketless;
 }
 
-// The shared bring-up preamble: a fresh loopback + owner over the kernel's
-// world and mission, the rule words the world reads at tick time, and the
-// is_in_session fact.
-void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_play, bool in_session,
-		const TitleIdentity *title) {
-	mission::MissionKernel &kernel = *kernel_;
+// The create's preamble, ahead of any mission World: a fresh loopback and owner, whose context
+// takes the session's rotation and the process's words (the CRT stream the create seeds and
+// draws, the client disconnect latch, the NovaWorld removal leg, the file-transfer session words).
+void HostRole::reset_session(bool serve_and_play) {
 	state.client_runtime.reset();
-    local_round_reset_seen_ = kernel.local.round_reset_revision;
 	state.host_loop = replication::LoopbackChannel{};
 	state.host_owner = inmatch::HostOwner{};
 	state.host_owner.serve_and_play = serve_and_play;
-	state.host_owner.ctx.world = &kernel.world;
-	state.host_owner.ctx.mission = &kernel.mission;
-	state.host_owner.ctx.mission_text_loaded = false;
-	state.host_owner.ctx.rotation = rotation_;
+	state.host_owner.host_loopback = &state.host_loop;
+	NapiNPServerCtx &ctx = state.host_owner.ctx;
+	ctx.rotation = rotation_;
+	ctx.process_crt_rand = &client_process_->crt_rand;
+	ctx.client_disconnect_latch = &client_process_->disconnect_latch;
+	ctx.nwu_player_removed = &client_process_->nwu_player_removed;
+	ctx.file_transfer_session = &client_process_->file_transfer_session;
 	map_change = HostMapChange{};
+}
+
+// The mission's World under the created session: the context's world and mission, the
+// process's CRT stream onto the World (the create seeded and drew it, so the load draws on from
+// the create's seed: World::crt_rand is the stream while the World lives), the rule words the
+// world reads at tick time, and the is_in_session fact.
+// [orig: Server_AllocatePlayerSlotTable @0x51C180 - srand @0x51C1AA, from
+//  Server_InitNewRoundState called @0x5695B3 (CNapiGameSession_BuildAndCreateSession) and
+//  @0x561C23 (SinglePlayer_StartMission), ahead of GameLoop_Init's Game_StartMission call
+//  @0x526377, which seeds nothing]
+void HostRole::bind_session_world(const inmatch::GameConfig &config, bool serve_and_play,
+		bool in_session, const TitleIdentity *title) {
+	mission::MissionKernel &kernel = *kernel_;
+	local_round_reset_seen_ = kernel.local.round_reset_revision;
+	NapiNPServerCtx &ctx = state.host_owner.ctx;
+	ctx.world = &kernel.world;
+	ctx.mission = &kernel.mission;
+	kernel.world.crt_rand = client_process_->crt_rand;
 	apply_rule_words(config, serve_and_play, in_session, title);
 }
 
@@ -308,19 +327,16 @@ void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 	mission::MissionKernel &kernel = *kernel_;
 	const inmatch::GameConfig config = singleplayer_game_config(
 			game_type::for_mission_attribs(kernel.mission.header.attrib_flags), profile);
+	// The create: the start's round-state init, then the session create, ahead of the Game Loop's
+	// mission start [orig: SinglePlayer_StartMission - Server_InitNewRoundState called @0x561C23,
+	// CNapiGameSession_CreateSession called @0x561E65, UI_NavHistoryPush(&g_GameModeGameLoop)
+	// @0x561E85 -> GameLoop_Init's Game_StartMission call @0x526377].
 	// The create's reset stops a server an earlier error-arm exit left unstopped; the start
 	// closed any socket first, so nothing reaches the wire [orig: SinglePlayer_StartMission -
 	// SetTransportMode(1) @0x561BEB, CNapiGameSession_CreateSession called @0x561E65 ->
 	// ResetActiveSession @0x4C97CC]
 	stop_unstopped_server(client_process_->unstopped_server, ServerLogs{}, nullptr, nullptr);
-	reset_state(config, /*serve_and_play=*/true, /*in_session=*/false, /*title=*/nullptr);
-	state.host_owner.host_loopback = &state.host_loop;
-	// The authority's start steps the process's file-transfer session words, which the context
-	// reads [orig: Game_StartMission @0x524360 (the add @0x5244B4, the store @0x5244C6)].
-	state.host_owner.ctx.file_transfer_session = &client_process_->file_transfer_session;
-	state.host_owner.ctx.client_disconnect_latch = &client_process_->disconnect_latch;
-	state.host_owner.ctx.nwu_player_removed = &client_process_->nwu_player_removed;
-	client_process_->file_transfer_session.start_mission();
+	reset_session(/*serve_and_play=*/true);
 	inmatch::HostConfig host_cfg;
 	host_cfg.config = config;
 	host_cfg.socket_mode = inmatch::SocketMode::Socketless;
@@ -330,6 +346,12 @@ void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 	host_cfg.session_seed_id = state.session_seed_id;
 	session_create_ = inmatch::start_host_session(state.host_owner, host_cfg);
 	if (session_create_ == CreateSessionResult::ProcessExit) return; // the process ends
+	// Then the mission's World under it.
+	bind_session_world(config, /*serve_and_play=*/true, /*in_session=*/false, /*title=*/nullptr);
+	// The authority's start steps the process's file-transfer session words, which the context
+	// reads [orig: Game_StartMission @0x524360 (the add @0x5244B4, the store @0x5244C6)].
+	client_process_->file_transfer_session.start_mission();
+	inmatch::bind_host_session_world(state.host_owner, host_cfg);
 	// The authority's mission start sets the report clocks loading (D-NET-NEW-L9-22).
 	inmatch::gate_clocks_mission_start(state.host_owner.ctx);
 	keep_round_state_init_tick();
@@ -338,13 +360,21 @@ void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 	make_client_runtime(config.game_type);
 }
 
-// The shell's bring-up: the LAN host from its consolidated server config, or
-// its SP listen server; serve_and_play false is the dedicated (no local
-// player) form of the same session [orig: the §5.0 mode-3 listen server].
-void HostRole::bring_up(const HostBringup &bringup) {
-	mission::MissionKernel &kernel = *kernel_;
-	const inmatch::HostConfig &host_cfg = bringup.host_cfg;
+// See host_role.h. The session create ahead of its first mission's World: the reset of a server an
+// earlier error-arm exit left unstopped, a fresh owner, the round count, then start_host_session
+// (the round-state init's draws and the create, on the process's CRT stream).
+// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - Server_InitNewRoundState called
+//  @0x5695B3, Game_ApplySessionSettingsToGlobals called @0x5695B8, CNapiGameSession_CreateSession
+//  called @0x56997D; its callers Game_HostMultiplayerSession @0x4A65A0 (the call @0x4A6759, then
+//  Game_MainLoop(&g_GameModeGameLoop) @0x4A6767) and the PreMenu's
+//  MultiPlayer_JoinSessionStateMachine @0x56A320 (state 2, the call @0x56A46A), both ahead of
+//  GameLoop_Init's Game_StartMission call @0x526377]
+CreateSessionResult HostRole::create_session(const HostBringup &bringup) {
+	inmatch::HostConfig host_cfg = bringup.host_cfg;
+	// The session title's override table is the bring-up's mission text's (the mount's).
+	host_cfg.text_override = bringup.mission_text.override_table.get();
 	if (host_cfg.client_process != nullptr) client_process_ = host_cfg.client_process;
+	create_ran_ = true;
 	// A server an earlier error-arm exit left unstopped stops first, over this session's socket
 	// (the host screen opened it), ahead of the create
 	// [orig: PreMenu_HostSetup @0x5691F0 - CNapiGameSession_ResetActiveSession called @0x5691F5,
@@ -374,26 +404,11 @@ void HostRole::bring_up(const HostBringup &bringup) {
 						host_cfg.clock_ms ? host_cfg.clock_ms() : host_clock_ms(state.host_owner),
 						slot);
 			});
-	reset_state(host_cfg.config, host_cfg.serve_and_play, rules_in_session(host_cfg),
-			host_cfg.title);
-	state.host_owner.host_loopback = &state.host_loop;
-	NapiNPServerCtx &ctx = state.host_owner.ctx;
-	// The authority's mission start steps the process's file-transfer session words, which the
-	// context reads [orig: Game_StartMission @0x524360 (the add @0x5244B4, the store @0x5244C6)].
-	ctx.file_transfer_session = &client_process_->file_transfer_session;
-	ctx.client_disconnect_latch = &client_process_->disconnect_latch;
-	ctx.nwu_player_removed = &client_process_->nwu_player_removed;
-	client_process_->file_transfer_session.start_mission();
-	// The fresh context stands inside the mission load, which holds the spawn gate
-	// until its end (finish_mission_load) [orig: Game_StartMission @0x524398].
-	ctx.net_spawn_suspended = 1;
-	inmatch::set_server_text(ctx, bringup.server_text);
-	ctx.terrain_til_data = bringup.terrain_til_data; // S2C 0x45 terrain-tile load source (empty => skipped, §5.37)
-	ctx.mission_text_loaded = bringup.mission_text.loaded;
-	ctx.mission_briefing3 = bringup.mission_text.briefing3();
-	ctx.mission_briefing2 = bringup.mission_text.briefing2();
-	ctx.mission_text_title = bringup.mission_text.get_string("info", "title");
-	inmatch::install_mission_location_names(ctx, kernel.world, kernel.mission, bringup.mission_text);
+	reset_session(host_cfg.serve_and_play);
+	// The process's gametext "Server" strings, loaded at its start: the round-state init names a
+	// dedicated host's own row from them [orig: Game_InitSubsystems @0x4A6CD0 loads gametext.bin;
+	// Server_InitNewRoundState - GameText_GetString("Server", "STRSRV19") @0x51C9CD].
+	inmatch::set_server_text(state.host_owner.ctx, bringup.server_text);
 	// A host session's start zeroes the round count [orig: UI_HandleHostSessionStart
 	// @0x556EAB; HostDialog_StartSession @0x5587BD].
 	if (rotation_ != nullptr) rotation_->round_count = 0;
@@ -402,7 +417,41 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	// [orig: Game_ApplySessionSettingsToGlobals @0x552145..0x55219E;
 	//  CNapiGameSession_InitRandomSeedOrRequest @0x51E983].
 	session_create_ = inmatch::start_host_session(state.host_owner, host_cfg);
+	return session_create_;
+}
+
+// The shell's bring-up: the LAN host from its consolidated server config, or
+// its SP listen server; serve_and_play false is the dedicated (no local
+// player) form of the same session [orig: the §5.0 mode-3 listen server]. Its
+// mission half under the session create, which the host boot runs ahead of the
+// mission (create_session); a caller that ran none has it run here first.
+void HostRole::bring_up(const HostBringup &bringup) {
+	if (!create_ran_) (void)create_session(bringup);
+	create_ran_ = false;
 	if (session_create_ == CreateSessionResult::ProcessExit) return; // the process ends
+	mission::MissionKernel &kernel = *kernel_;
+	const inmatch::HostConfig &host_cfg = bringup.host_cfg;
+	bind_session_world(host_cfg.config, host_cfg.serve_and_play, rules_in_session(host_cfg),
+			host_cfg.title);
+	NapiNPServerCtx &ctx = state.host_owner.ctx;
+	// The authority's mission start steps the process's file-transfer session words, which the
+	// context reads [orig: Game_StartMission @0x524360 (the add @0x5244B4, the store @0x5244C6)].
+	client_process_->file_transfer_session.start_mission();
+	// The context stands inside the mission load, which holds the spawn gate
+	// until its end (finish_mission_load) [orig: Game_StartMission @0x524398].
+	ctx.net_spawn_suspended = 1;
+	ctx.terrain_til_data = bringup.terrain_til_data; // S2C 0x45 terrain-tile load source (empty => skipped, §5.37)
+	ctx.mission_text_loaded = bringup.mission_text.loaded;
+	ctx.mission_briefing3 = bringup.mission_text.briefing3();
+	ctx.mission_briefing2 = bringup.mission_text.briefing2();
+	ctx.mission_text_title = bringup.mission_text.get_string("info", "title");
+	inmatch::install_mission_location_names(ctx, kernel.world, kernel.mission, bringup.mission_text);
+	// The integrity tables the mission's def loads built, past the create [orig: Game_StartMission
+	//  - AmmoDef_LoadAll @0x525495, WeaponDefs_LoadFile @0x5254BD].
+	ctx.config.integrity_sources = host_cfg.config.integrity_sources;
+	// The session onto its first mission's World: its clock, its rules, the first mission's
+	// settings and the host's own add (bind_host_session_world).
+	inmatch::bind_host_session_world(state.host_owner, host_cfg);
 	// The mission start that follows the create sets both report clocks loading
 	// (D-NET-NEW-L9-22) [orig: Game_StartMission @0x524360 - CServerTick_SetState(1) @0x5244A4 /
 	//  @0x5244AF, after the create's constructs].
@@ -417,8 +466,8 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	}
 	// Retail's session host stands its session up before its mission load and pumps it
 	// through the load, so a remote's hello, connect and admission legs are answered
-	// inside the load; ours's session exists from here, ahead of the PreMission pass,
-	// where retail's last in-load pumps fall: all of the load's pumps run here, each
+	// inside the load; ours's pumps run here, at the bring-up, ahead of the PreMission
+	// pass, where retail's last in-load pumps fall: all of the load's pumps run here, each
 	// stepping the connections' send clocks as retail's do (D-NET-116), but the render
 	// arm's when the embedder's device stages run them (render_arm_pumps).
 	// [orig: Server_PumpNetworkTransport @0x4FD960 from Game_StartMission @0x52589D /
@@ -526,7 +575,9 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	ctx.host_client = nullptr;
 	apply_rule_words(host_cfg.config, host_cfg.serve_and_play, rules_in_session(host_cfg),
 			host_cfg.title);
-	kernel.world.crt_rand = map_change.crt_rand;
+	// The process's CRT stream the teardown handed back, onto the next mission's World: the
+	// session's one seed runs on (ClientProcessState::crt_rand).
+	kernel.world.crt_rand = client_process_->crt_rand;
 	ctx.terrain_til_data = bringup.terrain_til_data;
 	inmatch::install_mission_location_names(ctx, kernel.world, kernel.mission, bringup.mission_text);
 	// A first load's second chat clear, past the stages' pumps, so a line a joiner sent
@@ -582,6 +633,17 @@ void HostRole::init_round_after_premission() {
 //  SinglePlayer_StartMission @0x561AF0's game loop) and Game_RestartRoundSP (the call
 //  @0x5263DB)]
 void HostRole::run_round_init() {
+	// The round counters' reset copies the configured StartDelay seconds into the one live
+	// pre-round timer, in a session on the authority, at every mission start, a map change's
+	// included. The timer stays on the World: it is the authority's phase predicate and the
+	// source of the phase-0 0x0A projection, rather than a second connection-local countdown
+	// (D-NET-NEW-L1-51).
+	// [orig: Server_ResetRoundCounters @0x516C50 - the session test @0x516C66, the authority test
+	//  @0x516C80, `mov eax, g_StartDelay` @0x516C88, the g_PreRoundDelayTimer store @0x516C8D;
+	//  called by Game_StartMission @0x525B90]
+	const NapiNPServerCtx &ctx = state.host_owner.ctx;
+	if (ctx.is_in_session != 0 && ctx.is_authority != 0)
+		kernel_->world.preround_delay_seconds = ctx.config.start_delay;
 	if (staged_bringup_.round_counters_tail) staged_bringup_.round_counters_tail();
 	init_round_after_premission();
 	init_local_player_at_mission_start();
