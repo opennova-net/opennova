@@ -576,8 +576,9 @@ void test_round_end_abandons_a_joiners_mission_start() {
 	CHECK(!client.mission_start_released() && !client.in_match());
 	CHECK(inmatch::Server_ExecuteServerCommand(host.ctx(), &host.kernel->world, "Cycle", "", {})
 					.handled);
-	// The round end's 0x25 raises the gate in the wait and zeroes the linger, so the frame
-	// that abandons the start runs out the linger and restarts it for the next mission.
+	// The round end's 0x25 raises the gate in the wait and zeroes the linger; the pass that
+	// abandons the start is the wait's, so the game loop's first frame runs out the linger
+	// (D-NET-NEW-L2-48) and the frame after it restarts the start for the next mission.
 	CHECK(run_until([&] {
 		return host.missions == 2 && client.in_match() && client.is_deployed();
 	}, 4000));

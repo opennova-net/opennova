@@ -523,10 +523,11 @@ bool carries(const std::vector<std::vector<uint8_t>> &packets, uint8_t tag) {
 // wait: the loop spins, building at every pass, and runs no client net frame, so neither the
 // frame's 0x2C ping, its 0x0C uplink nor its 0x4C report leaves before the 0x0F (checkpoint
 // c1: our joiner's 0x2C and 0x0C rode the 0x0B, ahead of the load requests). The 0x0F ends
-// the wait: its completion burst leads, the first 0x2C and 0x0C ride the first game-loop
-// boundary behind it, and from there the frame's countdown gate paces the block, one boundary
-// per dictated period, the frames that build exactly the input pack's; under no holdoff
-// every frame opens and a one-shot queued before a frame leaves in it.
+// the wait, whose pass it is: that pass sends its completion burst alone when its countdown
+// is spent (the early form), else nothing; the first 0x2C and 0x0C ride the game loop's first
+// open boundary (the late form's behind the burst), and from there the frame's countdown gate
+// paces the block, one boundary per dictated period, the frames that build exactly the input
+// pack's; under no holdoff every frame opens and a one-shot queued before a frame leaves in it.
 // [orig: Game_StartMission's final wait @0x526295..0x5262e5 (the send @0x5262da, the exit
 //  @0x5262df on g_ClientWorldStateLoaded, set only by NapiNPClientMsg_0x00F @0x42e2cd; its
 //  burst @0x42e5af..0x42e6ab); Client_ProcessNetworkFrame @0x42c3dd ->
@@ -548,12 +549,19 @@ bool run_an_early_release_stays_in_the_final_wait() {
 					"final wait: no 0x2C, 0x0C or 0x4C leaves before the 0x0F"))
 				return false;
 		}
+		// The late form (13 of 18 RR joins): the 0x0F lands on a pass whose countdown is not
+		// spent, so that pass (the wait's) sends nothing and the burst rides the game loop's
+		// first open boundary, the frame's 0x2C and 0x0C behind it.
+		while (h.client.send_holdoff_countdown() <= 1) (void)h.frame();
 		std::vector<uint8_t> world_state(23, 0);
 		std::vector<std::vector<uint8_t>> sent =
 				h.frame({make_protocol_message(0x0F, world_state)});
+		if (!expect(sent.empty(), "late form: the 0x0F's pass holds its burst behind the countdown"))
+			return false;
 		for (int i = 0; sent.empty() && i < 8; ++i) sent = h.frame();
 		if (!expect(h.packets(sent, {{0x28, 0x29, 0x2D, 0x32, 0x22, 0x23, 0x2C, 0x0C}}),
-				"the 0x0F ends the wait: its burst leads, the first 0x2C and 0x0C behind it"))
+				"late form: the burst leads the game loop's first boundary, its 0x2C and 0x0C "
+				"behind it"))
 			return false;
 		int opened_frames = 0;
 		int last_opened = -1;
@@ -574,6 +582,27 @@ bool run_an_early_release_stays_in_the_final_wait() {
 			}
 		}
 		if (!expect(opened_frames == 3, "game loop: one send boundary per dictated period of 6"))
+			return false;
+	}
+	{
+		// The early form (5 of 18 RR joins): the 0x0F lands on a pass whose countdown is spent,
+		// so that pass's send ships the burst alone; the first 0x2C and 0x0C ride the game loop's
+		// first open boundary, a dictated period on (D-NET-NEW-L2-48).
+		Harness h;
+		h.uplink = true;
+		if (!drive_to_an_early_in_match_release(h, 6)) return false;
+		while (h.client.send_holdoff_countdown() > 1) (void)h.frame();
+		std::vector<uint8_t> world_state(23, 0);
+		if (!expect(h.packets(h.frame({make_protocol_message(0x0F, world_state)}),
+		                    {{0x28, 0x29, 0x2D, 0x32, 0x22, 0x23}}),
+				"early form: the 0x0F's pass (the wait's) sends its burst alone"))
+			return false;
+		int frames = 0;
+		std::vector<std::vector<uint8_t>> sent;
+		for (; sent.empty() && frames < 8; ++frames) sent = h.frame();
+		if (!expect(frames == 6 && h.packets(sent, {{0x2C, 0x0C}}),
+				"early form: the game loop's first open boundary, a period on, carries the "
+				"first 0x2C and 0x0C"))
 			return false;
 	}
 	Harness h;
@@ -770,10 +799,12 @@ bool run_a_self_team_assign_waits_for_the_mission_starts_player_init() {
 // A joiner the 0x0F admits with no self row (a spectator's release: the 0x0F clears the
 // deploy hold whatever the role) pings from its first game-loop boundary: the 0x2C's gate
 // reads the session, the role, the deploy hold and the round-over gate, never a body. Its
-// 0x0C, whose build reads the body, stays unsent.
+// 0x0C, whose build reads the body, stays unsent. The 0x0F's own pass is the final wait's,
+// which sends its burst alone (D-NET-NEW-L2-48).
 // [orig: Client_ProcessNetworkFrame @0x42c3ee..0x42c410 (the 0x2C's gate) and
 //  @0x42c44f..0x42c46d -> Player_BuildTag0CInputBody @0x42A550; NapiNPClientMsg_0x00F
-//  @0x42e391 (the hold's clear)]
+//  @0x42e391 (the hold's clear); Game_StartMission @0x524360 - the final wait's send
+//  @0x5262DA ahead of its exit test @0x5262DF]
 bool run_a_bodyless_joiner_pings() {
 	Harness h;
 	h.uplink = true;
@@ -783,8 +814,8 @@ bool run_a_bodyless_joiner_pings() {
 	std::vector<uint8_t> world_state(23, 0);
 	std::vector<std::vector<uint8_t>> sent = h.frame({make_protocol_message(0x0F, world_state)});
 	if (!expect(!h.client.has_self_handle() &&
-	                    h.packets(sent, {{0x28, 0x29, 0x2D, 0x32, 0x22, 0x23, 0x2C}}),
-			"bodyless: the 0x0F's burst, then the frame's 0x2C and no 0x0C"))
+	                    h.packets(sent, {{0x28, 0x29, 0x2D, 0x32, 0x22, 0x23}}),
+			"bodyless: the 0x0F's pass (the wait's) sends its burst alone"))
 		return false;
 	for (int i = 0; i < 3; ++i) {
 		if (!expect(h.packets(h.frame(), {{0x2C}}),
@@ -908,15 +939,17 @@ struct RoleHarness {
 // D-NET-526: the joiner's own body is born where retail's handlers write it, in the
 // receive. The release (a 0x5A) and the S2C 0x0F reach a joiner whose self record is
 // bound in one packet: the role's after-receive leg spawns L, folds its record and lands
-// the 0x0F's pose ahead of the send block, so that frame's one datagram carries the 0x0F's
-// completion burst, then the 0x2C ping and the first 0x0C, built from the 0x0F's position
-// (RR's 01tr / cp04 / ash joiners: [28 29 2D 32 22 23 2C 2C 0C], the extra 0x2C a 0x57's
-// pong). Before, L was born after the net frame and the first 0x0C left a boundary later.
+// the 0x0F's pose. That pass is the final wait's (D-NET-NEW-L2-48): under no holdoff its
+// send ships the 0x0F's completion burst alone (the early form: RR's kick / aikill / 03tr-dm
+// joiners), and it runs no entity update or World tick, so the game loop's first frame
+// builds the 0x2C ping and the first 0x0C from L as the 0x0F left it, at the 0x0F's position.
 // [orig: Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead of the send
 //  block @0x42C3DD, the 0x0C's build from g_LocalPlayerEntity @0x42C46F..0x42C482;
 //  NapiNPClientMsg_0x00F @0x42E200 - the pose stores @0x42E3B9..0x42E3CE;
-//  Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC]
-bool run_the_release_frame_bears_l_and_ships_its_uplink() {
+//  Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC, the final wait's send @0x5262DA
+//  ahead of its exit test @0x5262DF; Game_ProcessMainFrame @0x5263F0 - Client_ProcessNetworkFrame
+//  @0x526692 ahead of Entity_UpdateAllEntities @0x52674B]
+bool run_the_release_pass_bears_l_and_the_first_frame_ships_its_uplink() {
 	RoleHarness h;
 	// The self record rides the world stream, ahead of the mission start.
 	if (!expect(drive_to_the_final_wait(h, 0, {self_spawn_record()}),
@@ -935,13 +968,16 @@ bool run_the_release_frame_bears_l_and_ships_its_uplink() {
 	put_i32(4, 100 << 16);
 	put_i32(8, 200 << 16);
 	put_i32(12, 42 << 16);
-	const std::vector<std::vector<uint8_t>> sent =
-			h.frame({first_grant(), make_protocol_message(0x0F, world_state)});
-	if (!expect(h.client.in_match() && h.role.local_spawned(),
-			"release frame: L is born in the frame whose receive released it"))
+	if (!expect(h.packets(h.frame({first_grant(), make_protocol_message(0x0F, world_state)}),
+	                    {{0x28, 0x29, 0x2D, 0x32, 0x22, 0x23}}),
+			"release frame: the 0x0F's pass (the wait's) sends its burst alone"))
 		return false;
-	if (!expect(h.packets(sent, {{0x28, 0x29, 0x2D, 0x32, 0x22, 0x23, 0x2C, 0x0C}}),
-			"release frame: the burst, the 0x2C and the first 0x0C in one datagram"))
+	if (!expect(h.client.in_match() && h.role.local_spawned(),
+			"release frame: L is born in the pass whose receive released it"))
+		return false;
+	const std::vector<std::vector<uint8_t>> sent = h.frame();
+	if (!expect(h.packets(sent, {{0x2C, 0x0C}}),
+			"release frame: the game loop's first frame sends the 0x2C and the first 0x0C"))
 		return false;
 	ProtocolPacketHeader header;
 	std::vector<ProtocolMessage> messages;
@@ -1760,7 +1796,7 @@ int main() {
 	ok = run_a_self_team_assign_waits_for_the_mission_starts_player_init() && ok;
 	ok = run_a_reset_before_the_mission_start_is_cleared() && ok;
 	ok = run_a_bodyless_joiner_pings() && ok;
-	ok = run_the_release_frame_bears_l_and_ships_its_uplink() && ok;
+	ok = run_the_release_pass_bears_l_and_the_first_frame_ships_its_uplink() && ok;
 	ok = run_the_final_wait_end_ends_the_mode_init() && ok;
 	ok = run_the_quality_fold_starts_with_the_game_loop() && ok;
 	ok = run_the_link_indicators_step_in_the_main_frame_alone() && ok;

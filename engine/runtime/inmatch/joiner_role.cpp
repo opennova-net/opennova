@@ -974,8 +974,19 @@ void JoinerRole::pump() {
 	// [orig: Client_ProcessNetworkFrame @0x42C180 — the send-holdoff gate
 	//  @0x42C3DD, Player_PackInputStateToEntity @0x42C3E9, then
 	//  Player_BuildTag0CInputBody @0x42C46F..0x42C4A3]
+	// A pass of the mission start's final wait for the S2C 0x0F (judged here, ahead of its
+	// receive: the pass whose receive takes the 0x0F is the wait's too) runs the receive and the
+	// send alone: no input pass, no main frame. Its receive's writes on the world land (the
+	// handlers' writes: L's birth, its record, the 0x0F's pose, the mirrors below); the entity
+	// update, the World's tick and the frame's later legs wait for the game loop's first frame,
+	// whose net frame builds the first 0x0C from L as the 0x0F left it (D-NET-NEW-L2-48).
+	// [orig: Game_StartMission @0x524360 - the final wait @0x526295..0x5262E5: Input_ResetKeyQueue
+	//  @0x526288 ahead of it, the ESC read @0x5262A2..0x5262AD, CNapiNetwork_PumpManagerReceive
+	//  @0x5262B4, CNapiNetwork_PumpClientProtocolRecv @0x5262BE, CNapiNetwork_PumpClientProtocolSend
+	//  @0x5262DA, the exit test @0x5262DF; no Game_ProcessMainFrame]
+	const bool final_wait_pass = rt.in_final_wait();
 	lap.restart();
-	lp.apply_player_input_pre_tick(rt.send_block_opens_this_frame());
+	if (!final_wait_pass) lp.apply_player_input_pre_tick(rt.send_block_opens_this_frame());
 	lap.mark(devtools::Slot::SIM_CLIENT_PLAYER);
 	// L's spawn edge runs inside the net frame (its after-receive leg), so whether L
 	// existed is read ahead of it.
@@ -1022,6 +1033,11 @@ void JoinerRole::pump() {
 	//  call @0x5260C1].
 	if (!had_local && local_spawned_) lp.latch_attack_defend_role(rt.game_type());
 	lap.mark(devtools::Slot::SIM_CLIENT_MIRROR);
+	// The final wait's pass ends with its send (final_wait_pass above).
+	if (final_wait_pass) {
+		++now_tick_;
+		return;
+	}
 	// The vehicle screen's poll, after the client net frame and ahead of the
 	// entity update, its 0x42 left for the next send boundary (vehicle_menu.h).
 	// [orig: Game_ProcessMainFrame -- Client_ProcessNetworkFrame @0x526692,
@@ -1735,9 +1751,10 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	// revision-gated), in the handlers' order: the availability, the 0x5A's kit and row,
 	// the side's kit buffer, the 0x50's team and local arm, the release latch; then L's
 	// birth on the in-match edge (retail's L exists from the mission start, so its handlers
-	// write it inside the receive), its own record and the 0x0F's pose. So the release
-	// frame's 0x0C leaves with the 0x0F's completion burst, built from L as the receive
-	// left it (D-NET-526).
+	// write it inside the receive), its own record and the 0x0F's pose. So a release's 0x0C
+	// is built from L as the receive left it (D-NET-526): a game-loop frame's in that frame;
+	// the final wait's 0x0F pass sends the completion burst alone and the game loop's first
+	// frame builds the first 0x0C (D-NET-NEW-L2-48).
 	// [orig: Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead of the send
 	//  block @0x42C3DD, the build from g_LocalPlayerEntity @0x42C46F..0x42C482;
 	//  Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC;

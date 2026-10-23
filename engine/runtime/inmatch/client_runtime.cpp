@@ -1253,12 +1253,18 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// The pass belongs to the loop its head runs in, judged here, ahead of the receive: a wait's
 	// pass whose receive ends the wait (the final wait's S2C 0x0F) is still that wait's, which
 	// runs the receive and the send alone, so the main frame's legs after the receive (the 0x4C
-	// report's timer below) take this judgement too, never the state the receive left.
+	// report's timer, the entity update and its frame tick, the end-round linger, the 0x2C and
+	// 0x0C builds) take this judgement too, never the state the receive left. That pass's send
+	// ships what is queued (the 0x0F's completion burst) when its countdown allows; else the
+	// burst rides the game loop's first open boundary with that frame's 0x2C and 0x0C.
 	// [orig: Game_StartMission @0x524360 - the final wait @0x526295..0x5262E5:
 	//  CNapiNetwork_PumpManagerReceive @0x5262B4, CNapiNetwork_PumpClientProtocolRecv @0x5262BE,
 	//  CNapiNetwork_PumpClientProtocolSend @0x5262DA, the g_ClientWorldStateLoaded exit test
 	//  @0x5262DF; no Client_ProcessNetworkFrame in it]
 	const bool main_frame_legs = role_ != Role::Joiner || in_main_frame();
+	// The loop the pass ran in, for the joiner net readout (an instrument).
+	const JoinerConnection::SendPumpLoop head_loop = joiner_ != nullptr
+			? joiner_->send_pump_loop() : JoinerConnection::SendPumpLoop::NetworkFrame;
 	if (role_ == Role::Joiner && main_frame_legs) update_net_quality();
 	// Then the connection indicators step once, in a session, still ahead of
 	// the client net frame whose callbacks raise their flags [orig:
@@ -1731,12 +1737,15 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	const bool session_word = role_ == Role::Joiner ? joiner_ != nullptr && joiner_->in_session()
 	                                                : view_.mp_session();
 	// A joiner's wait loops are not main frames: they run inside Game_StartMission and
-	// pump the receive and the send alone (no tick step, no entity update).
-	// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 (the site @0x42CBB5);
-	//  NapiClient_WaitForGameStart @0x42CC10 (the site @0x42CC92); Game_StartMission's final
-	//  wait @0x52628d..0x5262df]
+	// pump the receive and the send alone (no tick step, no entity update), the pass whose
+	// receive ends the wait included (main_frame_legs, judged at the pass's head; D-NET-NEW-L2-48):
+	// the first game-loop frame's g_CurrentTick is 1.
+	// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 (the site @0x42CBB5, the
+	//  round-over return @0x42CBC5); NapiClient_WaitForGameStart @0x42CC10 (the site @0x42CC92);
+	//  Game_StartMission's final wait @0x526295..0x5262E5 (the exit test @0x5262DF)]
 	const bool main_frame = role_ != Role::Joiner || joiner_ == nullptr ||
-			joiner_->send_pump_loop() == JoinerConnection::SendPumpLoop::NetworkFrame;
+			(main_frame_legs &&
+			 joiner_->send_pump_loop() == JoinerConnection::SendPumpLoop::NetworkFrame);
 	const bool entity_update_skipped = !main_frame ||
 			view_.state().preround_delay_seconds != 0 ||
 			(session_word && view_.state().spawn_success_gate);
@@ -1788,12 +1797,15 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// join waits that run after the mission start cleared it; either wait
 	// returns on it into the game loop, whose frame then runs this countdown.
 	// The earlier join stages never read it (the mission start clears what
-	// they let through: JoinerConnection's mission_started).
+	// they let through: JoinerConnection's mission_started). The game loop's frame is the
+	// pass's head's (main_frame_legs): the wait's pass whose receive raised the gate (the
+	// abandoned start) or took the S2C 0x0F (the final wait's) runs no countdown; the game
+	// loop's first frame does (D-NET-NEW-L2-48).
 	// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 (@0x42cbc5) -> "Mission loading
 	//  aborted 1" @0x524db0..0x524dd1; NapiClient_WaitForGameStart @0x42CC10 (@0x42cca1)
 	//  -> "aborted 3" @0x524e2e..0x524e4f; both push g_GameModeGameLoop]
 	const bool gate_read = joiner_ != nullptr &&
-			(joiner_->in_game_loop() || joiner_->mission_start_aborted() ||
+			(main_frame_legs ||
 			 joiner_->send_pump_loop() == JoinerConnection::SendPumpLoop::SyncTailWait ||
 			 joiner_->send_pump_loop() == JoinerConnection::SendPumpLoop::WorldStreamWait);
 	if (role_ == Role::Joiner && joiner_ != nullptr && joiner_->in_session() && gate_read &&
@@ -1895,7 +1907,10 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		//  g_ClientDeployHold is set by the game-start wait's entry (NapiClient_WaitForGameStart
 		//  @0x42cc14) and the deploy pick (Input_HandleActionBinding @0x49b067), and cleared
 		//  by Game_InitNewRound @0x4227ce, the 0x5A @0x429713 and the 0x0F @0x42e391]
-		const bool send_gate = joiner_->in_game_loop() && deployed_ &&
+		// Both are the game loop's frame's (main_frame_legs): the final wait's pass that took
+		// the 0x0F sends its burst alone (D-NET-NEW-L2-48) [orig: Game_StartMission @0x524360 -
+		// the send @0x5262DA ahead of the exit test @0x5262DF].
+		const bool send_gate = main_frame_legs && joiner_->in_game_loop() && deployed_ &&
 				!view_.state().spawn_success_gate;
 		// The uplink's build refuses a body with no health or the dead flag: the
 		// authoritative spawn latch the death edge closes stands for it here, and the
@@ -1960,7 +1975,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	frame_trace_.frame_tick = view_.frame_tick();
 	frame_trace_.client_tick = current_tick_;
 	frame_trace_.wall_ms = joiner_->monotonic_milliseconds32();
-	frame_trace_.pump_loop = joiner_->send_pump_loop();
+	frame_trace_.pump_loop = head_loop; // the loop the pass ran in, the 0x0F's pass the final wait's
 	frame_trace_.holdoff_ticks = send_holdoff_ticks_;
 	frame_trace_.frames_applied = view_.state().frames_applied;
 	net_trace_.append(frame_trace_);

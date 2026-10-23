@@ -44,6 +44,7 @@ struct JoinerNetTraceRecord {
 	uint32_t frame_tick = 0;  // ClientReplicaPipeline::frame_tick after the frame
 	uint32_t client_tick = 0; // the 0x61-seeded network tick (0 unseeded)
 	uint32_t wall_ms = 0;     // JoinerConnection::monotonic_milliseconds32 at the frame's end
+	// the loop the pass ran in, judged at its head (the S2C 0x0F's pass is the final wait's)
 	JoinerConnection::SendPumpLoop pump_loop = JoinerConnection::SendPumpLoop::NetworkFrame;
 	uint32_t countdown_before = 0; // the send holdoff countdown ahead of the frame's step
 	uint32_t holdoff_ticks = 0;    // the dictated period it reloads from
