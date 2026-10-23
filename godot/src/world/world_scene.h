@@ -119,6 +119,9 @@ public:
 	// texture, the cube captures again. The environment row is required.
 	WorldEnvironmentLoad load_environment(const Ref<ResourceRoot> &p_root, const String &p_trn_path,
 			const String &p_env_path) const;
+	// The loaded environment's sky maps at the mission textures stage: the full arm's, none on a
+	// dedicated host's reduced arm (EnvFile::load_mission_sky_maps, D-NET-NEW-L3-34).
+	void load_sky_maps(bool p_dedicated_host) const;
 	// The mission header's attrib-gated overrides over the loaded environment
 	// (null clears them) and the water's own rung for the header's height.
 	void apply_mission_overrides(const Ref<MissionEnvironmentOverrides> &p_overrides) const;

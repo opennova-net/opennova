@@ -283,6 +283,16 @@ void WorldScene::wire_() const {
 
 // --- the load --------------------------------------------------------------------
 
+void WorldScene::load_sky_maps(bool p_dedicated_host) const {
+	if (nodes_.environment == nullptr) {
+		return;
+	}
+	const Ref<EnvFile> env = nodes_.environment->get_environment_data();
+	if (env.is_valid()) {
+		env->load_mission_sky_maps(p_dedicated_host);
+	}
+}
+
 WorldEnvironmentLoad WorldScene::load_environment(
 		const Ref<ResourceRoot> &p_root, const String &p_trn_path, const String &p_env_path) const {
 	WorldEnvironmentLoad report;

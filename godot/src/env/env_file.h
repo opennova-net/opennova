@@ -158,9 +158,15 @@ public:
 	// with no time-of-day keyframe (never the authoring template reset_to_default
 	// writes). `p_overcast`, where valid, takes the overcast table the load makes
 	// (the .trn's keyframes and overcast.def's). Always leaves the document
-	// loaded; false when the .env was skipped.
+	// loaded; false when the .env was skipped. Its sky maps wait for the mission textures stage
+	// (load_mission_sky_maps): this load leaves none.
 	bool load_mission_environment(const Ref<ResourceRoot> &p_resource_root, const String &p_terrain,
 			const String &p_name, const Ref<EnvFile> &p_overcast);
+	// The mission textures stage's sky maps: the two cloud layers on the full arm for an
+	// environment with advanced clouds, none on a dedicated host's reduced arm or for a flat dome
+	// (engine environment/sky_frame.h loads_mission_sky_maps carries the witness,
+	// D-NET-NEW-L3-34).
+	void load_mission_sky_maps(bool p_dedicated_host = false);
 	Error save_to_path(const String &p_path);
 	void reset_to_default();
 	bool is_loaded() const;

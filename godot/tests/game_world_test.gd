@@ -1879,6 +1879,12 @@ func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 			var freeze := names.find("model_materials")
 			assert_true(terrain_textures >= 0 and freeze > terrain_textures,
 					"the terrain's textures open the stage, then the freeze: %s" % [names])
+			# The sky maps' leg sits between them on both arms; it loads the cloud layers on the
+			# full arm alone (D-NET-NEW-L3-34; engine environment/sky_frame.h
+			# loads_mission_sky_maps carries the witness).
+			var sky_maps := names.find("sky_maps")
+			assert_true(sky_maps > terrain_textures and freeze > sky_maps,
+					"the sky maps load past the terrain's textures, ahead of the freeze: %s" % [names])
 			assert_false(names.has("model_warm"), "no arm builds a listed model: %s" % [names])
 			if serve_and_play:
 				for leg in ["effects_warm", "effect_spawn"]:

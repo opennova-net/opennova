@@ -84,6 +84,12 @@ int main() {
 
 	bool ok = true;
 
+	// --- the sky maps load at the mission textures stage's full arm, with advanced clouds ------
+	// (D-NET-NEW-L3-34; sky_frame.h loads_mission_sky_maps carries the witness)
+	ok &= expect(opennova::env::loads_mission_sky_maps(false, 1), "the full arm loads the cloud layers");
+	ok &= expect(!opennova::env::loads_mission_sky_maps(true, 1), "a dedicated host's reduced arm loads none");
+	ok &= expect(!opennova::env::loads_mission_sky_maps(false, 0), "the flat dome's environment loads none");
+
 	// --- HHMM / minute / fixed24 clock views --------------------------------
 	ok &= expect(near(EnvironmentState::hhmm_to_minute_of_day(1230.0f), 750.0f),
 			"12:30 is minute 750");

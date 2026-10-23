@@ -882,11 +882,15 @@ private:
 	// The mission textures stage's terrain, every arm's (D-NET-NEW-L2-46): the texture slots and
 	// the tile set's atlas the connect leg held and the terrain node's build over them, then the
 	// foliage's. A dedicated host's start (`p_dedicated_host`), which jumps over the render
-	// subsystems' terrain leg, builds no LOD cache (the node's tile meshes and patch pool) and
-	// configures no foliage (engine terrain/terrain_load_legs.h builds_lod_cache and
-	// loads_foliage_definitions, D-NET-NEW-L3-32, D-NET-NEW-LF-3). `p_timeline` takes it as one
-	// span. Nothing when no connect leg is pending.
+	// subsystems, builds no LOD cache (the node's tile meshes and patch pool), no tile cache page
+	// array, and configures no foliage (engine terrain/terrain_load_legs.h builds_lod_cache,
+	// builds_tile_cache_targets and loads_foliage_definitions, D-NET-NEW-L3-32, D-NET-NEW-L3-33,
+	// D-NET-NEW-LF-3). `p_timeline` takes it as one span. Nothing when no connect leg is pending.
 	void load_terrain_textures(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host);
+	// The same stage's sky maps past the terrain's: the full arm loads the environment's cloud
+	// layers (WorldScene::load_sky_maps), a dedicated host's reduced arm none (D-NET-NEW-L3-34).
+	// `p_timeline` takes it as the span sky_maps on either arm.
+	void load_sky_maps(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host);
 	void configure_foliage();
 	int start_runtime(const Ref<MissionData> &p_mission, const String &p_bms_name);
 	void run_mission_start();

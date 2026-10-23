@@ -394,6 +394,8 @@ void PreviewSceneLayers::run_environment_() {
 	// FrameFX's mission texture, the cube captured again. What the load lacks is a note, as the
 	// game's load reports it.
 	const WorldEnvironmentLoad load = scene_.load_environment(root_files_, trn, environment);
+	// The device draws, as the game's full arm does: the environment's sky maps load with it.
+	scene_.load_sky_maps(/*p_dedicated_host=*/false);
 	if (load.environment_missing)
 		note_missing(kEnvironment, source_.environment);
 	if (load.overcast_missing)

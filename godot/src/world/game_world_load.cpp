@@ -144,6 +144,7 @@ int GameWorld::load_world(const String &p_dir) {
 	Ref<LoadTimeline> timeline = LoadTimeline::begin(vformat("World load %s", terrain_file_));
 	last_load_timeline_ = timeline;
 	load_terrain_textures(timeline, /*p_dedicated_host=*/false);
+	load_sky_maps(timeline, /*p_dedicated_host=*/false);
 	timeline->finish();
 
 	world_ready_ = true;
@@ -425,6 +426,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	const bool dedicated_host = challenge_sim.is_valid() &&
 			challenge_sim->session_role() == Simulation::ROLE_DEDICATED_HOST;
 	load_terrain_textures(timeline, dedicated_host);
+	load_sky_maps(timeline, dedicated_host);
 	// Then the freeze, on every arm: the listed models' materials resolve and no model builds, a
 	// wire-header joiner's list too (it froze above, its world stream landed). The full arm's
 	// freeze is the reduced arm's, with the render arm's device inits after it (engine
@@ -1211,6 +1213,15 @@ void GameWorld::load_terrain_textures(const Ref<LoadTimeline> &p_timeline, bool 
 	terrain_->build(opennova::terrain::builds_lod_cache(p_dedicated_host),
 			opennova::terrain::builds_tile_cache_targets(p_dedicated_host));
 	if (opennova::terrain::loads_foliage_definitions(p_dedicated_host)) configure_foliage();
+	p_timeline->end_span();
+}
+
+// The mission textures stage's sky maps, past the terrain's textures and ahead of the freeze: the
+// full arm's, none on a dedicated host's reduced arm (engine environment/sky_frame.h
+// loads_mission_sky_maps carries the witness, D-NET-NEW-L3-34).
+void GameWorld::load_sky_maps(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host) {
+	p_timeline->span("sky_maps");
+	scene_.load_sky_maps(p_dedicated_host);
 	p_timeline->end_span();
 }
 
