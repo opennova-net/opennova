@@ -36,7 +36,12 @@ func _make_water_fixture(height: float = 7.0) -> Dictionary:
 	return {"water": water, "camera": cam, "viewport": strip_vp}
 
 
-func test_zero_height_disables_surface_mirror_and_world_split() -> void:
+# A zero height is the no-water sentinel of the water's own draws alone (the
+# surface, the mirror, the glint): the transparent split still stands, about
+# 0.0, the camera's side taken against it (engine environment/water_frame.h
+# water_draws_at_height; renderer/render_order.h transparent_queue_for)
+# [orig: Terrain_RenderWorldScene @ 0x5c93e2..0x5c93ef].
+func test_zero_height_disables_surface_and_mirror_but_keeps_the_split() -> void:
 	var cache := ObjectShaderCache.get_singleton()
 	cache.clear_water_plane()
 	var fixture := _make_water_fixture(0.0)
@@ -48,7 +53,10 @@ func test_zero_height_disables_surface_mirror_and_world_split() -> void:
 	assert_eq(water.get_reflection_viewport().render_target_update_mode,
 			SubViewport.UPDATE_DISABLED)
 	assert_false(bool(water.get_water_material().get_shader_parameter("u_has_reflection")))
-	assert_false(cache.has_water_plane())
+	assert_true(cache.has_water_plane(), "the split stands at a zero height")
+	# The eye at y 27 sits above 0.0: a strip centred below 0 takes the far-side rung.
+	assert_eq(cache.alpha_rung_for_height(-1.0), ObjectShaderCache.RENDER_RUNG_ALPHA_FAR_SIDE)
+	assert_eq(cache.alpha_rung_for_height(1.0), ObjectShaderCache.RENDER_RUNG_ALPHA_CAMERA_SIDE)
 
 	water.water_height = -2.0
 	water.advance_frame(TICK)
@@ -76,7 +84,8 @@ func test_zero_height_disables_surface_mirror_and_world_split() -> void:
 	assert_false(water.is_water_active())
 	assert_eq(water.get_reflection_viewport().render_target_update_mode,
 			SubViewport.UPDATE_DISABLED)
-	assert_false(cache.has_water_plane())
+	assert_true(cache.has_water_plane(), "a rendering world splits about 0.0")
+	assert_eq(cache.alpha_rung_for_height(-1.0), ObjectShaderCache.RENDER_RUNG_ALPHA_FAR_SIDE)
 
 
 func test_water_pass_follows_the_visible_terrain_height_range() -> void:
@@ -242,11 +251,17 @@ func test_the_split_and_the_mirror_clip_follow_the_height_alone() -> void:
 	water.advance_inset_frame(inset, block)
 	assert_true(water.is_inset_mirror_rendered())
 	assert_true(cache.has_water_plane(), "the Inset's mirror renders clipped")
-	# A zero height is no water: no split, no mirror.
+	# A zero height draws no water and renders no mirror, but still splits,
+	# about 0.0.
 	water.water_height = 0.0
 	water.advance_frame(TICK)
-	assert_false(cache.has_water_plane())
+	water.advance_inset_frame(inset, block)
+	assert_false(water.is_inset_mirror_rendered())
+	assert_true(cache.has_water_plane())
+	assert_eq(cache.alpha_rung_for_height(2.0), ObjectShaderCache.RENDER_RUNG_ALPHA_CAMERA_SIDE)
+	assert_eq(cache.alpha_rung_for_height(-2.0), ObjectShaderCache.RENDER_RUNG_ALPHA_FAR_SIDE)
 	water.release_runtime_renderer_resources()
+	assert_false(cache.has_water_plane(), "the released water takes its split with it")
 
 
 func test_process_exit_releases_the_reflection_decode_before_its_viewport() -> void:

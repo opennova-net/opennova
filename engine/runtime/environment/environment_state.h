@@ -531,7 +531,14 @@ public:
 	// Environment_ApplyFogAndAmbient selector feed @ 0x57E44C], while the
 	// murk scissor's cmp/jg gate INCLUDES exact equality [orig: the scissor
 	// draw gate @ 0x5C96C5..0x5C96FA — jg skips only strictly-above]. Both
-	// decisions must come from one sampled eye height.
+	// decisions must come from one sampled eye height. `water_active` is the
+	// world's render lifecycle, never the height: a zero height is a waterline
+	// like any other, and no eye-side test reads the no-water sentinel (the
+	// water's own draws do, env::water_draws_at_height): the sky bracket
+	// [orig: Render_ProcessMainSceneFrame @ 0x5ca1af..0x5ca1bd], the clear
+	// @ 0x5ca77f..0x5ca792, the pass fog @ 0x5ca82e..0x5ca841, the scene core's
+	// [orig: Terrain_RenderWorldScene @ 0x5c948e..0x5c949f], the murk above and
+	// the weapon Inset's fog [orig: Render_WeaponInsetScene @ 0x5c9d3b..0x5c9d4f].
 	struct RenderEyeClassification {
 		bool underwater_view = false;
 		bool underwater_overlay_view = false;

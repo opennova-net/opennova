@@ -113,14 +113,25 @@ public:
 	// deinitialization.
 	void release_runtime_renderer_resources();
 
-	// g_EnvWaterHeightFixed == 0 is retail's no-water sentinel. Signed
-	// nonzero heights remain valid for terrain below the world origin.
-	bool is_water_active() const { return water_height_ != 0.0f; }
+	// g_EnvWaterHeightFixed == 0 is retail's no-water sentinel for the water's
+	// own draws alone: the surface, the mirror (its clip arm with it) and the
+	// glint (engine environment/water_frame.h water_draws_at_height carries the
+	// witness). Signed nonzero heights remain valid for terrain below the world
+	// origin.
+	bool is_water_active() const {
+		return opennova::env::water_draws_at_height(water_height_);
+	}
 	// The authored height can remain valid while the world retains this node
 	// between loads; render-frame participation must use this predicate.
 	bool is_water_render_active() const {
 		return world_rendering_enabled_ && is_water_active();
 	}
+	// The waterline the scene compares against stands at every height, zero
+	// included: the transparent split (renderer/render_order.h) and the eye's
+	// side of it (the pass fog, the clear, the sky bracket, the murk;
+	// EnvironmentState::classify_render_eye) read no sentinel. Render-frame
+	// participation still follows the owner's lifecycle.
+	bool is_waterline_active() const { return world_rendering_enabled_; }
 	// The frame's tracked visible-terrain bounds and the water pass latch
 	// feed the engine's g_WaterActive predicate
 	// (terrain::water_pass_active, engine/runtime/terrain/quadtree.h).

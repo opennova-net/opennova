@@ -1469,6 +1469,26 @@ int main() {
 				"with no source the current plane stands");
 	}
 
+	// The no-water sentinel is the water's own draws' alone (the surface, the mirror, the glint):
+	// the eye's side compares against a zero waterline like any other, the fog strictly, the
+	// murk and the clear inclusively [orig: Render_WaterSurface @ 0x5c32e0..0x5c32e7;
+	// Render_MainScene @ 0x5c125e..0x5c1268; Render_ProcessMainSceneFrame @ 0x5ca82e..0x5ca841
+	// and @ 0x5ca77f..0x5ca792].
+	{
+		ok &= expect(!opennova::env::water_draws_at_height(0.0f) &&
+						opennova::env::water_draws_at_height(-2.0f) &&
+						opennova::env::water_draws_at_height(7.0f),
+				"a zero height alone is the water's no-draw sentinel; signed nonzero heights draw");
+		const EnvironmentState::RenderEyeClassification under =
+				EnvironmentState::classify_render_eye(-0.75f, 0.0f, true);
+		ok &= expect(under.underwater_view && under.underwater_overlay_view,
+				"an eye under a zero waterline fogs underwater and takes the murk");
+		const EnvironmentState::RenderEyeClassification on =
+				EnvironmentState::classify_render_eye(0.0f, 0.0f, true);
+		ok &= expect(!on.underwater_view && on.underwater_overlay_view,
+				"an eye on a zero waterline: the fog dry, the murk and the clear wet");
+	}
+
 	// A mission's plane as its load leaves it (mission_water_rung): with the .env not there, the
 	// earlier passes' line stands as the environment's, overcast.def's over the .trn's [orig:
 	// Environment_LoadTimeOfDayConfig @ 0x57dca3; TimeOfDay_ParseProperty @ 0x57cb45..0x57cb6a].

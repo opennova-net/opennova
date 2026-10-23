@@ -1063,7 +1063,9 @@ void GameWorld::render_scene_overlay_frame() {
 		if (light_director_.is_valid()) {
 			light_director_->append_overlay(*submission);
 		}
-		if (env_ != nullptr && is_water_render_active()) {
+		// The murk compares the eye against the waterline, a zero height
+		// included (EnvironmentState::classify_render_eye).
+		if (env_ != nullptr && is_waterline_active()) {
 			append_underwater_murk_overlay(*env_, *water_, *submission);
 		}
 		append_celestial_overlays(*submission);
@@ -1122,7 +1124,7 @@ void GameWorld::append_nvg_laser_overlays(SceneOverlaySubmission &r_submission) 
 	walk(camera, env_->state().build_scene_fog(env_->is_underwater_view()), false);
 	if (Camera3D *inset = inset_pass_camera()) {
 		const float eye_y = static_cast<float>(inset->get_camera_transform().origin.y);
-		const bool water_active = is_water_render_active() && water_ != nullptr;
+		const bool water_active = is_waterline_active();
 		walk(inset,
 				inset_scene_fog(*env_, eye_y, water_active ? water_->get_water_height() : 0.0f,
 						water_active),
@@ -1321,8 +1323,10 @@ void GameWorld::apply_scene_environment_frame() {
 		env_->apply_scene_pass_planes(*cam);
 	}
 	// The device leg only samples: the strict-vs-inclusive waterline
-	// comparison semantics live in the engine behind apply_render_eye.
-	bool water_active = is_water_render_active() && is_inside_tree();
+	// comparison semantics live in the engine behind apply_render_eye. The
+	// waterline stands at a zero height too; only the water's own draws read
+	// the no-water sentinel (EnvironmentState::classify_render_eye).
+	bool water_active = is_waterline_active() && is_inside_tree();
 	float eye_y = 0.0f;
 	if (water_active) {
 		Camera3D *cam = get_viewport()->get_camera_3d();
@@ -1346,6 +1350,7 @@ void GameWorld::apply_scene_environment_frame() {
 	// Publish the same adjusted render eye to the per-strip Q1/Q2 classifier.
 	// This frame leg runs after camera placement and before ObjectModel's
 	// retained material walk, so water crossings flip the ladder immediately.
+	// A zero height splits about 0.0 (renderer/render_order.h).
 	ObjectShaderCache *shader_cache = ObjectShaderCache::get_singleton();
 	if (water_active) {
 		const float water_height = water_->get_water_height();

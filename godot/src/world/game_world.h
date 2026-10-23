@@ -476,6 +476,9 @@ public:
 	// height cannot leak into frame clear/occlusion while a load is absent or
 	// in progress.
 	bool is_water_render_active() const;
+	// The waterline the scene's eye side and transparent split compare against,
+	// a zero height included (Water::is_waterline_active).
+	bool is_waterline_active() const;
 	Ref<TerrainData> get_terrain_data() const { return terrain_data_; }
 	Ref<ResourceRoot> get_resource_root() const { return resource_root_; }
 	// The world's FrameFX node (the shell's SIGHTS card feeds the NVG Sighted

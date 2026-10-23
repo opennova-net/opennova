@@ -18,6 +18,7 @@
 #include <runtime/renderer/material_classify.h>
 #include <runtime/renderer/object_shader_template.h>
 #include <runtime/renderer/render_order.h>
+#include <runtime/environment/water_frame.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <runtime/world/model_geometry.h>
 #include <base/io/fixed.h>
@@ -61,8 +62,9 @@ void ObjectModel::set_water_mirror_clip_wave(opennova::env::MirrorClipWave p_wav
 // the graphic's bound-block floor, the first entity wave the entity+0 bound
 // radius; runtime/environment/water_mirror.h carries the witnesses). The
 // plane follows the water's height, so it stands for every mirror that renders
-// (the Inset's included); no plane means no water and no mirror pass, so
-// nothing is armed.
+// (the Inset's included); no plane means no world and no mirror pass, and a
+// zero height's plane is a split alone: no mirror renders at it
+// (environment/water_frame.h water_draws_at_height), so nothing is armed.
 void ObjectModel::refresh_water_mirror_clip() {
 	if (water_mirror_clip_inherited_) {
 		return;
@@ -74,6 +76,7 @@ void ObjectModel::refresh_water_mirror_clip() {
 	bool armed = false;
 	const ObjectShaderCache *cache = ObjectShaderCache::get_singleton();
 	if (tracks_water_mirror_clip() && cache != nullptr && cache->has_water_plane() &&
+			opennova::env::water_draws_at_height(cache->get_water_plane_height()) &&
 			is_inside_tree()) {
 		if (water_mirror_clip_wave_ == opennova::env::MirrorClipWave::kSectorModel &&
 				object_data_.is_valid() && object_data_->has_document()) {

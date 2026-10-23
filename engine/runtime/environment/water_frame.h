@@ -104,6 +104,21 @@ WaterFrameInputs build_water_frame_inputs(const EnvironmentState *env,
 // Render_DrawViewportColorQuad @ 0x5c38e0]
 uint8_t underwater_murk_overlay_alpha_byte(float murk);
 
+// The no-water sentinel belongs to the water's own draws alone: a zero
+// g_EnvWaterHeightFixed skips the surface [orig: Render_WaterSurface
+// @ 0x5c32e0..0x5c32e7], the mirror render and with it the mirror's clip arm
+// (the main scene's and the weapon Inset's prerender alike) [orig:
+// Render_MainScene @ 0x5c125e..0x5c1268, the return @ 0x5c19a5] and the glint
+// [orig: Terrain_RenderWorldScene @ 0x5c96b5..0x5c96be, ahead of
+// Environment_UpdateSunGlare's call @ 0x5c96c0]. The waterline itself stands
+// at zero: the transparent split is stored from the height with no test
+// (renderer/render_order.h transparent_queue_for), and every eye-side test
+// compares the eye against the height the same way
+// (EnvironmentState::classify_render_eye).
+constexpr bool water_draws_at_height(float water_height) {
+	return water_height != 0.0f;
+}
+
 // The camera-side gate of Render_WaterSurface's two calls
 // [orig: Render_WaterSurface @ 0x5c32ed..0x5c330a]: the view-0 (above)
 // call draws only while the camera is strictly above the plane

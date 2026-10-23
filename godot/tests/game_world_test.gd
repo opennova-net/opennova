@@ -1397,6 +1397,26 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 	assert_true(object_values.get_fog_color().is_equal_approx(underwater_color),
 			"showing the underwater world restores the pass payload before drawing")
 	world.tick(camera.global_position, camera.get_global_transform())
+	# A zero height is the no-water sentinel of the water's own draws alone: the
+	# eye's side still compares against 0.0, so an eye under it fogs underwater,
+	# keeps the lit clear and the murk, and the transparents split about it
+	# (engine environment_state.h classify_render_eye) [orig:
+	# Render_ProcessMainSceneFrame @ 0x5ca1af..0x5ca1bd, @ 0x5ca77f..0x5ca792,
+	# @ 0x5ca82e..0x5ca841; Terrain_RenderWorldScene @ 0x5c93e2..0x5c93ef].
+	water.set_mission_water_height_override(0.0)
+	camera.position.y = 0.25
+	camera.v_offset = -1.0
+	world.tick(camera.global_position, camera.get_global_transform())
+	assert_false(water.is_water_render_active(), "a zero height draws no water")
+	assert_true(env.is_underwater_view(), "an eye under a zero waterline fogs underwater")
+	assert_true(env.is_underwater_overlay_view())
+	assert_eq(world.get_current_frame_clear_color(), lit.linear_to_srgb(),
+			"and clears to the lit water colour")
+	var shader_cache := ObjectShaderCache.get_singleton()
+	assert_true(shader_cache.has_water_plane(), "the split stands at 0.0")
+	assert_eq(shader_cache.alpha_rung_for_height(1.0),
+			ObjectShaderCache.RENDER_RUNG_ALPHA_FAR_SIDE,
+			"the eye below 0.0 ranks a strip above it on the far side")
 	camera.v_offset = 0.0
 	camera.position.y = 71.0
 	water.set_mission_water_height_override(NAN)

@@ -674,6 +674,10 @@ bool GameWorld::is_water_render_active() const {
 	return water_ != nullptr && water_->is_water_render_active();
 }
 
+bool GameWorld::is_waterline_active() const {
+	return water_ != nullptr && water_->is_waterline_active();
+}
+
 Ref<WorldView> GameWorld::world_view() {
 	Ref<LiveWorldView> view;
 	view.instantiate();

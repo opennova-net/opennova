@@ -311,7 +311,9 @@ void Water::_release_mirror_rig(MirrorRig &r_rig) {
 // follow the height, never g_WaterActive: the split is written every frame
 // (renderer/render_order.h transparent_queue_for) and every mirror that
 // renders, the Inset's included, renders clipped (environment/water_mirror.h,
-// the CLIP note).
+// the CLIP note). A zero height still splits, about 0.0 (is_waterline_active);
+// no mirror renders at it, so the clip arms nothing
+// (ObjectModel::refresh_water_mirror_clip; env::water_draws_at_height).
 void Water::_push_water_split_height() {
 	if (!built_ || !is_inside_tree() || globals_held_) {
 		return;
@@ -320,7 +322,7 @@ void Water::_push_water_split_height() {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	_write_global(rs, "opennova_water_active", active);
 	_write_global(rs, "opennova_water_height", water_height_);
-	if (active) {
+	if (is_waterline_active() && is_visible_in_tree()) {
 		Camera3D *cam = Object::cast_to<Camera3D>(
 				ObjectDB::get_instance(cached_cam_id_));
 		const bool camera_above = cam == nullptr ||
