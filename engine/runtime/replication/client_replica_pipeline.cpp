@@ -444,6 +444,11 @@ bool ClientReplicaPipeline::follows_carrier_seat(const ClientEntityState &child)
 			child.net_world_mover &&
 			child.carrier_handle != wire_handle::kInvalid &&
 			(!dead_pose || world::EntityHandle{child.carrier_handle}.pool() != 1);
+	// A dead org1 body in a seat its record still names takes the free-standing branch, which
+	// poses no seat: the seat pose is the in-vehicle branch's alone (visit_remote_row).
+	// [orig: Entity_UpdateInfantryAI @0x4B9910 - the seat test @0x4B9960..0x4B9985, the seat
+	//  pose @0x4BEBEC..0x4BEDDA]
+	if (child.cls == EntityClass::Infantry && child.net_health_zero) return false;
 	return child.net_seat_valid && child.carrier_handle != wire_handle::kInvalid &&
 			!world_predicted;
 }
@@ -468,13 +473,12 @@ void ClientReplicaPipeline::follow_carrier_seat(ClientEntityState &child,
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the angle apply @0x4B43E6..0x4B440A,
 	//  the seat carry @0x4B654E..0x4B6575]
 	if (child.cls == EntityClass::Player) return;
-	// So is a live seated org1 body's: its seat branch's look half (tick_org1_looks); the bone
-	// pose writes the body heading, Roll and savedLivePitch.
+	// So is a seated org1 body's (every one followed is alive, follows_carrier_seat): its seat
+	// branch's look half (tick_org1_looks); the bone pose writes the body heading, Roll and
+	// savedLivePitch.
 	// [orig: Entity_UpdateInfantryAI @0x4B9910 - the bone pose @0x4BED96..0x4BEDDA, the look
 	//  @0x4BEF57..0x4BEF97]
-	if (child.cls == EntityClass::Infantry && child.mount_bone != 0 &&
-			(child.state_flags & world::kEntityFlagDead) == 0u)
-		return;
+	if (child.cls == EntityClass::Infantry) return;
 	child.heading_bam = io::bam_add(carrier->heading_bam, child.net_seat_local_heading_bam);
 	child.yaw_byte = yaw_byte_from_bam(child.heading_bam);
 }
@@ -1582,6 +1586,14 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		if (child->cls == EntityClass::Player) {
 			land_compact_pose(*child, w.x, w.y, w.z, true, heading, pending.force_live_snap);
 		} else if (child->cls == EntityClass::Infantry) {
+			// On a client a seated infantry record stages its composed sample and promotes the
+			// previous stage into the target (+0x1A8), as a free-standing one does: the
+			// in-vehicle branch's chase restages it, and a dead seated body's free-standing
+			// branch chases it (D-NET-NEW-L5-34).
+			// [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 - the promote
+			//  @0x4C0646..0x4C0653, the stage @0x4C0689..0x4C06AA]
+			if (remote_motion_mode_)
+				land_compact_pose(*child, w.x, w.y, w.z, true, heading, pending.force_live_snap);
 			child->net_interp_progress = 0;
 			// An infantry record writes the live Yaw on its respawn edge alone; a live seated
 			// body's is its look's (tick_org1_looks).

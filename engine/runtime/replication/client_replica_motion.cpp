@@ -1203,6 +1203,44 @@ static void row_org2_chase_restage_and_angles(ClientEntityState &es, bool is_sel
 	}
 }
 
+// The org1 chase's restage: at progress 0 the staged sample against the live pose picks the
+// position snap (beyond 0x20000), the deadband (under 0x2000) or the bucket, whose per-step
+// vector replaces the staged sample. A live seated body runs it too (the isInVehicle test gates
+// no part of the chase), its position words the seat pose's to overwrite (`seated`: the snap
+// moves no position).
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the chase @0x4B9A8C..0x4B9B40, ahead of the seat
+//  test's branch @0x4BE8F7]
+static void row_org1_chase_restage(ClientEntityState &es, bool seated) {
+	if (es.net_interp_progress != 0) return;
+	const int64_t dx = int64_t(es.net_smooth_target[0]) - es.x;
+	const int64_t dy = int64_t(es.net_smooth_target[1]) - es.y;
+	const int64_t dz = int64_t(es.net_smooth_target[2]) - es.z;
+	const int32_t dist = dist_16_16(dx, dy, dz);
+	if (dist > 0x20000) {
+		// Snap is position-only for org1.
+		if (!seated) {
+			es.x = es.net_smooth_target[0];
+			es.y = es.net_smooth_target[1];
+			es.z = es.net_smooth_target[2];
+		}
+		es.net_smooth_target[0] = 0;
+		es.net_smooth_target[1] = 0;
+		es.net_smooth_target[2] = 0;
+		es.net_interp_steps = 0;
+	} else if (dist < 0x2000) {
+		es.net_smooth_target[0] = 0;
+		es.net_smooth_target[1] = 0;
+		es.net_smooth_target[2] = 0;
+		es.net_interp_steps = 0;
+	} else {
+		const int32_t n = org1_bucket(dist);
+		es.net_interp_steps = static_cast<int16_t>(n);
+		es.net_smooth_target[0] = chase_step(int32_t(dx), n);
+		es.net_smooth_target[1] = chase_step(int32_t(dy), n);
+		es.net_smooth_target[2] = chase_step(int32_t(dz), n);
+	}
+}
+
 // The organic death edge's mover-side halves (client_replica_body_arbitration
 // .cpp replica_death_edge): the gate and latch run at the witnessed point after
 // the chase, ahead of this tick's integrate and resolve, which read the latch
@@ -1375,16 +1413,24 @@ void ClientReplicaPipeline::tick_org1_looks() {
 	for (ClientEntityState &es : state_.entities) {
 		if (!es.rm_look_due) continue;
 		es.rm_look_due = false;
-		if (!es.rm_look_seated) {
-			world::infantry_on_foot_look(es.rm_aim_heading_word, es.rm_aim_word,
-					/*aim_flag=*/false, es.rm_body_heading, es.heading_bam, es.pitch_bam);
-			continue;
-		}
 		const ClientEntityState *carrier = state_.find(es.carrier_handle);
 		ReplicaSeatFrame seat;
-		if (carrier != nullptr && replica_seat_frame_resolver_ &&
-				replica_seat_frame_resolver_(carrier->handle, carrier->type_id, es.mount_bone, seat))
-			es.rm_body_heading = seat.heading;
+		const bool seat_resolved = carrier != nullptr && replica_seat_frame_resolver_ &&
+				replica_seat_frame_resolver_(carrier->handle, carrier->type_id, es.mount_bone, seat);
+		if (!es.rm_look_seated) {
+			// A dead body whose record still names its seat (D-NET-NEW-L5-34) keeps its
+			// parent, whose config gates the clamp as the seated form's does; the seat frame
+			// resolver serves the parent's config whether or not the bone resolves.
+			// [orig: Entity_UpdateInfantryAI @0x4B9910 - the parent's config gate
+			//  @0x4BEF9A..0x4BEFC3, the clamp @0x4BEFC5..0x4BEFED]
+			const int32_t cfg = seat.mount_config;
+			const bool hold = carrier == nullptr ||
+					!(seat.mount_config_valid && (cfg == 3 || cfg == 4 || cfg == 5 || cfg == 7));
+			world::infantry_on_foot_look(es.rm_aim_heading_word, es.rm_aim_word,
+					/*aim_flag=*/false, es.rm_body_heading, hold, es.heading_bam, es.pitch_bam);
+			continue;
+		}
+		if (seat_resolved) es.rm_body_heading = seat.heading;
 		const int32_t aim_heading = es.rm_aim_heading_word;
 		const int32_t aim_pitch = es.rm_aim_word;
 		int32_t yaw_step = io::bam_sar(io::bam_add(io::bam_sub(aim_heading, es.heading_bam), 2), 2);
@@ -1497,6 +1543,12 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 		es.rm_starved = es.net_interp_progress >= 512;
 		if (body_update_exits_ahead_of_channel(es)) return;
 	}
+	// An org1 body with a parent takes it as its ground entity ahead of its chase, so a deck
+	// ride (a dead seated body's, below) rides the parent itself.
+	// [orig: Entity_UpdateInfantryAI @0x4B9910 - `if (parentEntity) groundEntity = parentEntity`
+	//  @0x4B9A0F..0x4B9A11, after the bit-0 exit @0x4B9A07]
+	if (es.cls == EntityClass::Infantry && es.carrier_handle != wire_handle::kInvalid)
+		es.resolved_ground = es.carrier_handle;
 	advance_row_weapon_channel(es, self_handle);
 	if (!es.net_has_compact) return;
 	const bool chased_class = es.cls == EntityClass::Player ||
@@ -1516,7 +1568,20 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 	// reused; carrier_handle still records that the row is blocked on an
 	// attachment. Hold its last world pose until a resolvable carried sample
 	// (or an explicit free-standing sample) arrives.
-	if (es.carrier_handle != wire_handle::kInvalid) {
+	// An org1 body is in its vehicle only while its Health is above 0: a dead body whose record
+	// still names its seat (the client's 0x13 zeroed its Health ahead of the record that detaches
+	// it; a dead record names no seat, the host's death edge detaching the body first) takes the
+	// free-standing branch below, its parent kept: no seat pose, its ground the parent.
+	// [orig: Entity_UpdateInfantryAI @0x4B9910 - the seat test `parentEntity && Health > 0`
+	//  @0x4B9960..0x4B9985, the branch @0x4BE8F7, the edge's detach @0x4B9C57..0x4B9C60 (a client's
+	//  Entity_DetachFromVehicleIfServer @0x4359D0 detaches nothing); Entity_DetachFromVehicle
+	//  @0x4355F0 - Flags &= ~0x40 @0x435910, the parent's clear @0x435915;
+	//  NetPacket_SerializeInfantryEntityState @0x4C0320 - the seat byte 0 with no parent
+	//  @0x4C071F..0x4C072E, the dead bit's Health store @0x4C04FC; Entity_KillBySlotId
+	//  @0x42BCE0 - Health = 0 @0x42BD33]
+	const bool in_vehicle = es.carrier_handle != wire_handle::kInvalid &&
+			!(es.cls == EntityClass::Infantry && es.net_health_zero);
+	if (in_vehicle) {
 		// A seated body runs the chase apply too (no exit ahead of it tests the seat): the
 		// seated record resets its count, and with no record for 512 ticks it starves and
 		// returns ahead of its ride link and its mounted site. Its position step is the
@@ -1532,17 +1597,15 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 		if (organic) {
 			if (es.cls == EntityClass::Player)
 				row_org2_chase_restage_and_angles(es, es.handle == self_handle, /*seated=*/true);
+			if (es.cls == EntityClass::Infantry) row_org1_chase_restage(es, /*seated=*/true);
 			row_chase_count(es, es.net_interp_progress);
 			if (es.rm_starved) return;
 		}
-		// A seated org1 body with Health reaches its seat branch, whose look half runs after
-		// the tick's gun channels (tick_org1_looks). A dead one's record zeroed its Health,
-		// so it takes the on-foot branch.
+		// A live seated org1 body reaches its seat branch, whose look half runs after the tick's
+		// gun channels (tick_org1_looks).
 		// [orig: Entity_UpdateInfantryAI @0x4B9910 - the seat test @0x4B9960..0x4B9985, the
-		//  branch @0x4BE8F7; NetPacket_SerializeInfantryEntityState @0x4C0320 - the dead bit's
-		//  Health store @0x4C04FC]
-		if (es.cls == EntityClass::Infantry && es.mount_bone != 0 &&
-				(es.state_flags & world::kEntityFlagDead) == 0u) {
+		//  branch @0x4BE8F7]
+		if (es.cls == EntityClass::Infantry) {
 			es.rm_look_due = true;
 			es.rm_look_seated = true;
 		}
@@ -1624,30 +1687,7 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 	}
 	case EntityClass::Infantry: {
 		// The org1 motor fall-through [orig: @0x4b9a8c].
-		if (es.net_interp_progress == 0) {
-			const int32_t dist = dist_16_16(dx, dy, dz);
-			if (dist > 0x20000) {
-				// Snap is position-only for org1.
-				es.x = es.net_smooth_target[0];
-				es.y = es.net_smooth_target[1];
-				es.z = es.net_smooth_target[2];
-				es.net_smooth_target[0] = 0;
-				es.net_smooth_target[1] = 0;
-				es.net_smooth_target[2] = 0;
-				es.net_interp_steps = 0;
-			} else if (dist < 0x2000) {
-				es.net_smooth_target[0] = 0;
-				es.net_smooth_target[1] = 0;
-				es.net_smooth_target[2] = 0;
-				es.net_interp_steps = 0;
-			} else {
-				const int32_t n = org1_bucket(dist);
-				es.net_interp_steps = static_cast<int16_t>(n);
-				es.net_smooth_target[0] = chase_step(int32_t(dx), n);
-				es.net_smooth_target[1] = chase_step(int32_t(dy), n);
-				es.net_smooth_target[2] = chase_step(int32_t(dz), n);
-			}
-		}
+		row_org1_chase_restage(es, /*seated=*/false);
 		const int16_t progress = es.net_interp_progress;
 		// The org1 position step + cap + starved idle force — the same
 		// +0x2BC read/write [orig: §5.38a cap 512 -> idle 43;

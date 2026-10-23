@@ -25,6 +25,7 @@
 #include <net/npwire/entity_class.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
+#include <net/npwire/ingame_message_id.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/infantry.h>
 
@@ -424,11 +425,10 @@ std::unique_ptr<ns::ClientReplicaPipeline> seated_infantry_view(BodySource &src,
 // D-NET-NEW-L5-29: a live seated org1 row's record stages its aim words and writes neither the
 // live Yaw nor the Pitch; each tick its seat branch steps the Yaw a quarter of the way to the
 // aim heading, the step clamped to +-0x2000000, and the Pitch an eighth of the way to the aim
-// pitch. The hull's turn is not carried into the Yaw. A dead record zeroed the body's Health,
-// so the row takes no look (the seat follow keeps its yaw).
-// [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 - the stores @0x4C066C / @0x4C0672,
-//  the dead arm's Health store @0x4C04FC; Entity_UpdateInfantryAI @0x4B9910 - the seat test
-//  @0x4B9960..0x4B9985, the look @0x4BEF57..0x4BEF97]
+// pitch. The hull's turn is not carried into the Yaw.
+// [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 - the stores @0x4C066C / @0x4C0672;
+//  Entity_UpdateInfantryAI @0x4B9910 - the seat test @0x4B9960..0x4B9985, the look
+//  @0x4BEF57..0x4BEF97]
 void test_seated_infantry_look_chases_its_aim_words() {
 	BodySource src;
 	auto view = seated_infantry_view(src, false, 0x20, 0xF0);
@@ -446,15 +446,60 @@ void test_seated_infantry_look_chases_its_aim_words() {
 	// (-0x0E000000 + 4) >> 3 = -0x01C00000.
 	expect(rider.heading_bam == 0x04000000 && rider.pitch_bam == -0x03C00000,
 			"the second tick steps from the live words; the hull's turn is not carried");
+}
 
-	auto dead = seated_infantry_view(src, false, 0x20, 0xF0,
-			static_cast<uint8_t>(nw::world::kEntityFlagDead));
-	ns::ClientEntityState &corpse = *dead->state().find(kSeatedInfantry);
-	tick(*dead);
-	const ns::ClientEntityState &hull = *dead->state().find(kHull);
-	expect(corpse.pitch_bam == 0 && corpse.heading_bam == static_cast<int32_t>(
-					static_cast<uint32_t>(hull.heading_bam) + 0x10000000u),
-			"a dead seated row takes no look: the seat follow's carrier + local yaw");
+// D-NET-NEW-L5-34: an org1 body is in its vehicle only while its Health is above 0. The 0x13
+// zeroes a seated body's Health ahead of the record that detaches it (a dead record names no
+// seat: the host's death edge detaches the body first), so for those ticks the body takes the
+// free-standing branch with its parent kept: no seat pose (the hull's 2 u move leaves it), its
+// parent as its ground (the ride's 1 u), the death edge, and the on-foot look: an eighth of the
+// way to the aim heading, not the seat's clamped quarter, held within 90 degrees of the body
+// heading unless the parent's config is 3, 4, 5 or 7.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the seat test @0x4B9960..0x4B9985, the ground store
+//  @0x4B9A0F..0x4B9A11, the death edge @0x4B9C51, the eighth @0x4BEB8C..0x4BEBE7, the parent's
+//  config gate @0x4BEF9A..0x4BEFC3, the clamp @0x4BEFC5..0x4BEFED; Entity_KillBySlotId
+//  @0x42BCE0 - Health = 0 @0x42BD33]
+void test_dead_seated_infantry_takes_the_free_standing_branch() {
+	for (const bool wide : {false, true}) {
+		BodySource src;
+		auto view = seated_infantry_view(src, wide, 0x20, 0xF0);
+		view->set_carrier_pose_provider(
+				[](uint16_t handle, ns::ClientReplicaPipeline::CarrierPose &out) {
+					if (handle != kHull) return false;
+					out = ns::ClientReplicaPipeline::CarrierPose{};
+					out.pos[0] = 1 << 16; // the parent moved 1 u this tick
+					out.bound_radius = 0x7FFFFFFF;
+					return true;
+				});
+		ns::ClientEntityState &rider = *view->state().find(kSeatedInfantry);
+		tick(*view); // alive: the seat's clamped quarter and eighth
+		expect(rider.heading_bam == 0x02000000 && rider.pitch_bam == -0x02000000 &&
+						rider.x == fixed_of(51.0),
+				"(the live seated tick looks from its seat at the hull's x + 1)");
+		const int16_t death = as::kDeathBulletBase + 6;
+		view->apply(nw::s2c::ENTITY_DEATH,
+				{static_cast<uint8_t>(kSeatedInfantry & 0xFF),
+				 static_cast<uint8_t>(kSeatedInfantry >> 8), static_cast<uint8_t>(death & 0xFF),
+				 static_cast<uint8_t>(death >> 8)});
+		view->state().find(kHull)->x += fixed_of(2.0);
+		tick(*view);
+		expect(rider.carrier_handle == kHull && rider.resolved_ground == kHull &&
+						(rider.rm_entity_flags & nw::world::kEntityFlagDead) != 0,
+				"the dead seated body keeps its parent as its ground and takes its death edge");
+		expect(rider.x == fixed_of(52.0),
+				"no seat pose: the body rides its parent's 1 u, not the hull's 2 u seat move");
+		// (0x1E000000 + 4) >> 3 = 0x3C00000; (-0xE000000 + 4) >> 3 clamps to -0xC00000.
+		expect(rider.heading_bam == 0x05C00000 && rider.pitch_bam == -0x02C00000,
+				"the on-foot look steps an eighth of the way to the aim words");
+		// Half a turn off the body heading: the eighth (0x40800000 + 4) >> 3 = 0x8100000 takes
+		// the Yaw past 90 degrees, held there unless the parent's config is wide.
+		rider.heading_bam = 0x3F800000;
+		rider.rm_aim_heading_word = static_cast<int32_t>(0x80000000u);
+		tick(*view);
+		expect(rider.heading_bam == (wide ? 0x47900000 : 0x40000000),
+				wide ? "a wide parent config lets the dead body's Yaw past 90 degrees"
+				     : "the Yaw holds 90 degrees off the body heading");
+	}
 }
 
 // D-NET-NEW-L5-30 (found on the way): a seated org1 gunner's look reads its aim heading WORD,
@@ -716,6 +761,7 @@ int main() {
 	test_seated_rider_yaw_chases_its_record();
 	test_seated_infantry_look_chases_its_aim_words();
 	test_seated_infantry_look_holds_within_ninety_degrees();
+	test_dead_seated_infantry_takes_the_free_standing_branch();
 	test_gun_channel_leaves_the_gunner_aim_heading();
 	test_free_standing_infantry_body_and_look_split();
 	test_free_standing_infantry_look_holds_within_ninety_degrees();
