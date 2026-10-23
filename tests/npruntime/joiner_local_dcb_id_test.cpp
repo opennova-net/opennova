@@ -111,11 +111,38 @@ void check_the_local_body_takes_the_records_slot(uint8_t tag) {
 	CHECK(w::entity_dcb_id(h->kernel->world, *local) == 10000 + kRosterSlot);
 }
 
+// D-NET-892 A2 (L5-s21): a 0x18 naming the own handle once L exists rebuilds L in place: the
+// record's slot byte lands on the same body, whose class init runs again (its DcbId 10000 + the
+// new byte). A 0x18 that built the self row ahead of L's spawn (the Harness's own
+// case above) is not a rebuild.
+// [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - Position @0x433B77, +0x154 @0x433BBB, the
+//  class init @0x433E82]
+void check_a_later_0x18_rebuilds_the_local_body() {
+	auto h = std::make_unique<Harness>(s2c::ENTITY_SPAWN_BATCH);
+	const w::EntityHandle body = h->kernel->world.cached.local_player;
+	CHECK(body.valid());
+	FullEntitySpawnRecord rec;
+	rec.slot_id = kSelf;
+	rec.item_type_id = w::kPlayerInfantryTypeId;
+	rec.item_type = 3;
+	rec.team = 1;
+	rec.minimap_flags = static_cast<uint16_t>(w::kEntityFlagPlayer);
+	rec.player_slot_id = 4;
+	h->role.runtime->view().apply(s2c::FULL_ENTITY_SPAWN, encode_full_entity_spawn(rec));
+	h->role.run_tick(h->input);
+	const w::Entity *local = h->kernel->local.player();
+	CHECK(local != nullptr && h->kernel->world.cached.local_player == body);
+	if (local == nullptr) return;
+	CHECK(local->player_slot_id == 4);
+	CHECK(w::entity_dcb_id(h->kernel->world, *local) == 10000 + 4);
+}
+
 } // namespace
 
 int main() {
 	check_the_local_body_takes_the_records_slot(s2c::ENTITY_SPAWN_BATCH);
 	check_the_local_body_takes_the_records_slot(s2c::FULL_ENTITY_SPAWN);
+	check_a_later_0x18_rebuilds_the_local_body();
 	if (failures != 0) {
 		std::printf("%d check(s) failed\n", failures);
 		return 1;
