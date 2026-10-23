@@ -355,6 +355,11 @@ struct SessionReplyState {
 	// last send stamp); the pump stages the nag, tick_connections frames it.
 	// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8F7A..0x4C8FD1]
 	bool admission_hold_nag_pending = false;
+	// The staged 0x03's body, written when the pump stages it: a held (listed) node's place
+	// and the list's count, a failed add's (unlinked) [0] (spawn_queue_record, D-NET-NEW-L1-38).
+	// [orig: NetPacket_WriteWeaponRestrictionFlag called @0x4C8FAA (the hold) / @0x4C9016 (the
+	//  unlink's, ahead of the add)]
+	std::vector<uint8_t> admission_hold_nag_body;
 	uint32_t admission_hold_nag_host_ms = 0;
 	bool admission_hold_nag_host_ms_valid = false;
 	uint32_t admission_completed_tick = 0;
@@ -783,6 +788,12 @@ struct NapiNPConnection {
 	//  @0x4C8E68..0x4C8E6C, NapiNode_UnlinkFromList @0x4C8FF6 (cleared @0x4C6054);
 	//  NapiNPPlayer_MoveNodeToEntityList @0x4C7E60 (lists while unlisted @0x4C7E65)]
 	bool spawn_queue_unlinked = false;
+	// The node's place on that list: each listing appends it at the tail, so its key is one
+	// past the largest a listed node holds; its 0x03 counts the listed nodes with a smaller key
+	// ahead of it (list_on_spawn_queue, spawn_queue_record; D-NET-NEW-L1-38).
+	// [orig: NapiNPPlayer_MoveNodeToEntityList @0x4C7E60 (the tail append @0x4C7EB6..0x4C7EE2);
+	//  NapiLinkedList_CountNodes @0x4C5FE0]
+	uint32_t spawn_queue_order = 0;
 	bool world_stream_announced = false;   // F3 edge-latch (PeerEnteredWorldStreaming fires once)
 	bool spawned_announced = false;        // edge-latch (PeerSpawned fires once)
 

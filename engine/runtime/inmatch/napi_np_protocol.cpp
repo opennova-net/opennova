@@ -1937,14 +1937,17 @@ std::vector<TickOut> tick_connections(
 		to.peer = conn.peer;
 		if (send_boundary_closed) continue;
 
-		// A held pending player (capacity / balance-join) is re-sent the one-byte
-		// S2C 0x03 restriction flag the spawn pump staged, at most once a second.
+		// A held pending player (capacity / balance-join) is re-sent the S2C 0x03 the
+		// spawn pump staged, at most once a second: its place on the pending list and
+		// the list's count; a failed add's unlinked node its one byte (D-NET-NEW-L1-38).
 		// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8F9A..0x4C8FD1]
 		if (conn.type == NapiNPConnection::kTypeServerSide &&
 				conn.phase < ConnectionPhase::PlayerAdded &&
 				conn.reply.admission_hold_nag_pending) {
 			conn.reply.admission_hold_nag_pending = false;
-			std::vector<ProtocolMessage> nag_messages{make_protocol_message(s2c::SYNC_TICK, {0x00})};
+			std::vector<ProtocolMessage> nag_messages{make_protocol_message(
+					s2c::SYNC_TICK, std::move(conn.reply.admission_hold_nag_body))};
+			conn.reply.admission_hold_nag_body.clear();
 			if (conn.link.transport != nullptr) {
 				queue_session_messages(conn, nag_messages); // the connection's queue (D-NET-525)
 			} else {

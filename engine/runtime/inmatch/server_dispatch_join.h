@@ -41,8 +41,8 @@ ProtocolMessage admission_padding_probe(NapiNPConnection &conn, NapiNPServerCtx 
 
 // The case bodies of the in-match switch.
 void dispatch_join_padding_echo(const GameConfig &config, NapiNPConnection &conn,
-		uint32_t now_tick, const ServerDispatchInputs &inputs,
-		std::vector<ProtocolMessage> &replies);                            // C2S 0x02
+		uint32_t now_tick, std::vector<NapiNPConnection> &roster,
+		const ServerDispatchInputs &inputs, std::vector<ProtocolMessage> &replies); // C2S 0x02
 void dispatch_file_chunk_request(const GameConfig &config, const ProtocolMessage &msg,
 		const ServerDispatchInputs &inputs, std::vector<ProtocolMessage> &replies); // C2S 0x33
 void dispatch_mission_chunk_request(const GameConfig &config, const ProtocolMessage &msg,

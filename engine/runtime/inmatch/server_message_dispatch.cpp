@@ -699,7 +699,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				//  @0x512AA0 (the call @0x512E7D)]
 				break;
 			case c2s::JOIN_PADDING_ECHO: // the 0x02 again: its handler has no gate
-				dispatch_join_padding_echo(config, conn, now_tick, inputs, replies);
+				dispatch_join_padding_echo(config, conn, now_tick, roster, inputs, replies);
 				break;
 			case c2s::PLAYER_SYNC_REQUEST: { // player-sync request [u8 slot][u16 fieldFlags] -> S2C 0x46 player-sync.
 				// [orig: NapiNPServerMsg_0x022 @0x514C90; §5.33] The client requests a SPECIFIC slot

@@ -317,8 +317,9 @@ std::vector<uint8_t> build_tag04_slot_assignment(uint8_t difficulty, uint8_t pla
 //   0x00 (settings flag 0xA0) = CS-config update [orig: CNapiNPConnection_SendConfigUpdate @0x6286e0:
 //        [u8 direction==0][u32 bit mask][u32 value per set bit]] — ours sets field idx 3 = 12 for both
 //        directions, matching the golden.
-//   0x03 = NetPacket_WriteWeaponRestrictionFlag @0x502ac0: [u8 1][u16 list-node count][u16 weapon mask
-//        (netPlayer inner+76)] when restriction data exists, else [u8 0].
+//   0x03 = NetPacket_WriteWeaponRestrictionFlag @0x502ac0 (spawn_queue_record): [u8 1][u16 the
+//        node's place on the spawn pump's pending list][u16 the list's count] while it is listed,
+//        else [u8 0] (D-NET-NEW-L1-38).
 //   0x05 = NetPacket_WriteBoolTrue @0x502c00: exactly {0x01}.
 //   0x04 = NetPacket_WriteSlotAssignment @0x502b30 (build_tag04_slot_assignment above).]
 // The 0x04 carries THIS connection's live slot + the host's slot capacity + the assigned team —
@@ -367,8 +368,7 @@ void emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
 			s2c::FULL_PLAYER_INFO,
 			build_tag7b_session_summary(cfg, context_mission_text_title(ctx),
 					context_session_title(ctx, cfg), conn)));
-	// [u8 1][u16 count=1][u16 mask=1] — the golden's live restriction record shape.
-	out.push_back(make_protocol_message(s2c::SYNC_TICK, {0x01, 0x01, 0x00, 0x01, 0x00}));
+	// The 0x03 follows the listing (complete_admission).
 }
 
 // The C2S 0x00 JOIN body's CD identity blob: the flat-TLV run is walked for
@@ -474,8 +474,9 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 	}
 
 	// Exact CNapiServer_ProcessPendingPlayerSpawns ordering from the retail LAN
-	// witness. 0x03 is the one-byte reset variant, distinct from the five-byte
-	// restriction record returned by the C2S 0x02 handler.
+	// witness. 0x03 is the unlinked node's one byte (the pump unlinks it ahead of
+	// this 0x03), distinct from the five-byte queue record of the C2S 0x02
+	// handler and the hold (spawn_queue_record).
 	messages.push_back(make_protocol_message(s2c::SYNC_TICK, {0x00}));
 	append_connection_settings(config, messages);
 	// A squad's first slot hears its own registry add after the add's send-state
@@ -528,8 +529,8 @@ ProtocolMessage admission_padding_probe(NapiNPConnection &conn, NapiNPServerCtx 
 //  CNetPlayer_SetGameState(7) (called @0x51319C; leaving 10 zeroes the round watermark @0x4C4135), the
 //  0x03 @0x5131D5] (D-NET-NEW-L1-24)
 static void complete_admission(const GameConfig &config, NapiNPConnection &conn,
-		uint32_t now_tick, const ServerDispatchInputs &inputs,
-		std::vector<ProtocolMessage> &replies) {
+		uint32_t now_tick, std::vector<NapiNPConnection> &roster,
+		const ServerDispatchInputs &inputs, std::vector<ProtocolMessage> &replies) {
 	SessionReplyState &st = conn.reply;
 	emit_admission_metadata(config, conn, inputs.server_ctx, replies);
 	if (!st.admission_metadata_pushed) {
@@ -554,10 +555,13 @@ static void complete_admission(const GameConfig &config, NapiNPConnection &conn,
 	conn.player_enter_requested = false;
 	conn.burst.game_state = 7;
 	conn.admission_stage = GameAdmissionStage::Complete;
-	// On the pending list: listed while unlisted, so again after the pump's unlink.
+	// On the pending list: listed while unlisted (at its tail), so again after the pump's unlink.
 	// [orig: NapiNPPlayer_MoveNodeToEntityList @0x4C7E60 - the list test @0x4C7E65]
-	conn.self_id_seen = true;
-	conn.spawn_queue_unlinked = false;
+	list_on_spawn_queue(roster, conn);
+	// The 0x03 follows the listing, so it carries the node's place on the list and the list's
+	// count, [1][1][1] for a lone joiner (D-NET-NEW-L1-38).
+	// [orig: NetPacket_WriteWeaponRestrictionFlag called @0x5131B8, the 0x03 @0x5131D5]
+	replies.push_back(make_protocol_message(s2c::SYNC_TICK, spawn_queue_record(roster, conn)));
 }
 
 // See header. Each admission record of the datagram reaches its handler in order, as retail's
@@ -663,7 +667,7 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 			case 0x02:
 				// No game-state gate and no echo test: any 0x02 completes the admission, from
 				// game state 1 too (ahead of the JOIN and its validator), as retail's does.
-				complete_admission(config, conn, now_tick, inputs, replies);
+				complete_admission(config, conn, now_tick, roster, inputs, replies);
 				break;
 
 			default:
@@ -689,9 +693,9 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 // See header. A 0x02 at a completed admission runs the handler again: the records re-sent and
 // game state 7 (D-NET-NEW-L1-24) [orig: NapiNPServerMsg_0x002 @0x512FD0].
 void dispatch_join_padding_echo(const GameConfig &config, NapiNPConnection &conn,
-		uint32_t now_tick, const ServerDispatchInputs &inputs,
-		std::vector<ProtocolMessage> &replies) {
-	complete_admission(config, conn, now_tick, inputs, replies);
+		uint32_t now_tick, std::vector<NapiNPConnection> &roster,
+		const ServerDispatchInputs &inputs, std::vector<ProtocolMessage> &replies) {
+	complete_admission(config, conn, now_tick, roster, inputs, replies);
 }
 
 // See header. [orig: NapiNPServerMsg_HandleReplayRequest (0x33) @0x515230]

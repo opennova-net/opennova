@@ -900,7 +900,8 @@ bool run_a_held_joiner_has_no_team() {
 	inmatch::ServerDispatchInputs inputs;
 	inputs.server_ctx = f.ctx.get();
 	std::vector<opennova::ProtocolMessage> replies;
-	inmatch::dispatch_join_padding_echo(f.ctx->config, held, /*now_tick=*/3, inputs, replies);
+	inmatch::dispatch_join_padding_echo(f.ctx->config, held, /*now_tick=*/3,
+			f.ctx->np_protocol.connection_list, inputs, replies);
 	if (!expect(!replies.empty() && held.reply.admission_metadata_pushed &&
 	                    !held.assigned_team_valid && !held.reply.player_slot_reserved,
 	            "the 0x02 sends its records and picks no row and no team")) return false;
@@ -1600,7 +1601,8 @@ bool run_a_repeated_echo_keeps_the_held_nag_stamp() {
 	inmatch::ServerDispatchInputs inputs;
 	inputs.server_ctx = f.ctx.get();
 	std::vector<opennova::ProtocolMessage> replies;
-	inmatch::dispatch_join_padding_echo(f.ctx->config, held, /*now_tick=*/3, inputs, replies);
+	inmatch::dispatch_join_padding_echo(f.ctx->config, held, /*now_tick=*/3,
+			f.ctx->np_protocol.connection_list, inputs, replies);
 	if (!expect(held.burst.game_state == 7 && held.reply.admission_hold_nag_host_ms_valid &&
 	                    held.reply.admission_hold_nag_host_ms == 5000,
 	            "a repeated 0x02 in game state 7 keeps the stamp")) return false;
@@ -1613,7 +1615,8 @@ bool run_a_repeated_echo_keeps_the_held_nag_stamp() {
 	if (!expect(held.reply.admission_hold_nag_pending && held.reply.admission_hold_nag_host_ms == 6001,
 	            "the next 0x03 past 1000 ms")) return false;
 	held.burst.game_state = 8;
-	inmatch::dispatch_join_padding_echo(f.ctx->config, held, /*now_tick=*/4, inputs, replies);
+	inmatch::dispatch_join_padding_echo(f.ctx->config, held, /*now_tick=*/4,
+			f.ctx->np_protocol.connection_list, inputs, replies);
 	return expect(!held.reply.admission_hold_nag_host_ms_valid,
 	              "a 0x02 from another state (8 -> 7) clears the stamp");
 }

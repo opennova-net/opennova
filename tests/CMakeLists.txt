@@ -5085,6 +5085,12 @@ add_test(NAME npruntime_join_warmup_pose COMMAND npruntime_join_warmup_pose_test
 add_executable(npruntime_host_client_ack_test npruntime/host_client_ack_test.cpp)
 target_link_libraries(npruntime_host_client_ack_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_host_client_ack COMMAND npruntime_host_client_ack_test)
+# D-NET-167's host half (D-NET-NEW-L1-38): the side-password balance hold, the JSP's side pick
+# (an empty JSP the unset side's), the 0x03's place on the pending list and its count.
+add_executable(npruntime_side_password_hold_test npruntime/side_password_hold_test.cpp)
+target_link_libraries(npruntime_side_password_hold_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_side_password_hold_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_side_password_hold COMMAND npruntime_side_password_hold_test)
 
 # --- parity lane L2 (joiner) ---
 # The joiner's mission-start submissions (D-NET-531, D-NET-NEW-R3-4): the computed C2S 0x0B

@@ -986,20 +986,27 @@ int32_t count_players_on_team(const NapiNPServerCtx &ctx, uint8_t index) {
 // password) is refused while adding it would leave the larger team more than
 // max(1, ceil(min(team0, team1) * balance_join_percent)) ahead. An automatic
 // request (-1) is never held.
-// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8E89 (BuildFlags & 0xF0),
-//  side-password override @0x4C8ED1/@0x4C8EEC, gate @0x4C8F0A, counts
-//  @0x4C8F19/@0x4C8F1B, ceil @0x4C8F41..0x4C8F53, compare @0x4C8F74]
+// The nibble is the live BuildFlags word, a side password in a team game (0x20
+// side A, 0x10 side B), not the word the create advertised (D-NET-NEW-L1-38).
+// The JSP is compared with side A's password, then side B's, whatever their
+// lengths: the guard ahead of the compares tests side A's length twice, so it
+// never skips them, and an empty JSP selects the side whose password is unset
+// (side A when both are; the nibble needs one set) (D-NET-NEW-L1-38).
+// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8E89 (the
+//  CNapiServerConfig_BuildFlags call @0x4C8E82, & 0xF0 @0x4C8E87), TR @0x4C8E8F,
+//  the side A length twice @0x4C8EB0..0x4C8ECD, _stricmp(JSP, A) @0x4C8ED1 -> 0
+//  @0x4C8EDD, _stricmp(JSP, B) @0x4C8EEC -> 1 @0x4C8EF8, gate @0x4C8F0A, counts
+//  @0x4C8F19/@0x4C8F1B, ceil @0x4C8F41..0x4C8F53, compare @0x4C8F74;
+//  CNapiServerConfig_BuildFlags @0x4C4DC0 - 0x20 @0x4C4E5F, 0x10 @0x4C4E7F]
 bool balance_join_admits(const NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
-	if ((ctx.np_protocol.build_flags & 0xF0u) == 0) return true;
+	if ((build_server_config_flags(ctx) & 0xF0u) == 0) return true;
 	int team_id = conn.char_vars.team_request == 0 ? 0
 			: conn.char_vars.team_request == 1 ? 1 : -1;
-	if (!ctx.config.side_a_password.empty() &&
-			opennova::strutil::iequals(conn.join_password.c_str(),
-					ctx.config.side_a_password.c_str())) {
+	if (opennova::strutil::iequals(conn.join_password.c_str(),
+				ctx.config.side_a_password.c_str())) {
 		team_id = 0;
-	} else if (!ctx.config.side_b_password.empty() &&
-			opennova::strutil::iequals(conn.join_password.c_str(),
-					ctx.config.side_b_password.c_str())) {
+	} else if (opennova::strutil::iequals(conn.join_password.c_str(),
+				ctx.config.side_b_password.c_str())) {
 		team_id = 1;
 	}
 	if (!ctx.config.balance_join || team_id == -1) return true;
@@ -1085,6 +1092,41 @@ static void orphan_player_row(NapiNPServerCtx &ctx, NapiNPConnection &conn) {
 	conn.kept_play_ticks = 0;
 }
 
+// See header. A node's place is its order key's rank among the listed nodes: the listing
+// appends it at the tail, so its key is one past the largest a listed node holds.
+// [orig: NapiNPPlayer_MoveNodeToEntityList @0x4C7E60 - the list test @0x4C7E65, the tail
+//  append @0x4C7EB6..0x4C7EE2]
+void list_on_spawn_queue(std::vector<NapiNPConnection> &connections, NapiNPConnection &conn) {
+	if (conn.self_id_seen && !conn.spawn_queue_unlinked) return; // listed: it keeps its place
+	uint32_t tail = 0;
+	for (const NapiNPConnection &c : connections)
+		if (&c != &conn && c.self_id_seen && !c.spawn_queue_unlinked)
+			tail = std::max(tail, c.spawn_queue_order);
+	conn.spawn_queue_order = tail + 1;
+	conn.self_id_seen = true;
+	conn.spawn_queue_unlinked = false;
+}
+
+// See header. [orig: NetPacket_WriteWeaponRestrictionFlag @0x502AC0 - the list test @0x502AC4,
+//  [0] @0x502AE7, 1 @0x502AFA, the place NapiLinkedList_CountNodes @0x4C5FE0 (the call @0x502AFD:
+//  1 @0x4C5FE9 plus one per node ahead @0x4C5FF0..0x4C5FFD), the count `movzx edx, word ptr
+//  [ebp+4Ch]` @0x502B13 over the net player's session (+0, NapiNPPlayer_Create @0x4C7923), whose
+//  list sits at +0x40 (NapiNPPlayer_MoveNodeToEntityList @0x4C7E6A, the count +0x4C
+//  @0x4C7ED8 / @0x4C7EDE; NapiNode_UnlinkFromList @0x4C6042)]
+std::vector<uint8_t> spawn_queue_record(const std::vector<NapiNPConnection> &connections,
+		const NapiNPConnection &conn) {
+	if (!conn.self_id_seen || conn.spawn_queue_unlinked) return {0x00};
+	uint16_t place = 1;
+	uint16_t count = 0;
+	for (const NapiNPConnection &c : connections) {
+		if (!c.self_id_seen || c.spawn_queue_unlinked) continue;
+		++count;
+		if (&c != &conn && c.spawn_queue_order < conn.spawn_queue_order) ++place;
+	}
+	return {0x01, static_cast<uint8_t>(place), static_cast<uint8_t>(place >> 8),
+			static_cast<uint8_t>(count), static_cast<uint8_t>(count >> 8)};
+}
+
 // [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0] — gated is_authority && !g_NetSpawnSuspended
 // && !g_RoundOver. The round-over gate is world::Match's sole outcome latch. g_NetSpawnSuspended
 // (NapiNPServerCtx::net_spawn_suspended) is held for the length of a mission load, and this pump
@@ -1156,9 +1198,12 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 				(void)Server_BuildPlayerInfoAndAdd(ctx, conn, world, /*round_init=*/false);
 				if (conn.phase < ConnectionPhase::PlayerAdded) {
 					// The unlink's 0x03 is all it gets (framed by tick_connections, the
-					// held-joiner 0x03's writer).
-					if (conn.type == NapiNPConnection::kTypeServerSide)
+					// held-joiner 0x03's writer): the unlinked node's [0].
+					if (conn.type == NapiNPConnection::kTypeServerSide) {
 						conn.reply.admission_hold_nag_pending = true;
+						conn.reply.admission_hold_nag_body =
+								spawn_queue_record(ctx.np_protocol.connection_list, conn);
+					}
 					restart = true;
 					break;
 				}
@@ -1214,7 +1259,12 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 			if (conn.type != NapiNPConnection::kTypeServerSide) continue;
 			if (!conn.reply.admission_hold_nag_host_ms_valid ||
 					host_ms - conn.reply.admission_hold_nag_host_ms > 1000u) {
+				// The held node is still listed: its place and the list's count
+				// (D-NET-NEW-L1-38) [orig: NetPacket_WriteWeaponRestrictionFlag
+				//  called @0x4C8FAA, the 0x03 @0x4C8FC8].
 				conn.reply.admission_hold_nag_pending = true;
+				conn.reply.admission_hold_nag_body =
+						spawn_queue_record(ctx.np_protocol.connection_list, conn);
 				conn.reply.admission_hold_nag_host_ms = host_ms;
 				conn.reply.admission_hold_nag_host_ms_valid = true;
 			}

@@ -164,6 +164,23 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx);
 // host's own type-2 loopback is just another entry in this list. Returns the number spawned this pass.
 int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world);
 
+// The spawn pump's pending list is one list, in listing order, of the session's net players
+// (`connections`): a node is on it while self_id_seen and not spawn_queue_unlinked, its place
+// kept by NapiNPConnection::spawn_queue_order. This lists `conn` at the list's tail when it is
+// unlisted (the C2S 0x02's listing); a listed node keeps its place.
+// [orig: NapiNPPlayer_MoveNodeToEntityList @0x4C7E60 (lists while unlisted @0x4C7E65, at the
+//  tail @0x4C7EB6..0x4C7EE2)]
+void list_on_spawn_queue(std::vector<NapiNPConnection> &connections, NapiNPConnection &conn);
+
+// The S2C 0x03 body of a net player (the IDB's "weapon restriction flag" is the pump's queue
+// record): [1][u16 its place on the pending list, 1-based][u16 the list's count] while `conn`
+// is listed, else [0]. The C2S 0x02's 0x03 (the node listed just before it) and the held
+// node's re-sent 0x03 carry the five bytes, the pump's add (the node unlinked first) the one
+// (D-NET-NEW-L1-38).
+// [orig: NetPacket_WriteWeaponRestrictionFlag @0x502AC0; NapiLinkedList_CountNodes @0x4C5FE0]
+std::vector<uint8_t> spawn_queue_record(const std::vector<NapiNPConnection> &connections,
+		const NapiNPConnection &conn);
+
 // The C2S 0x0B mission-file report, the join's one player-path trigger: from an added slot
 // whose net player is not yet in game state 10 and whose entity exists it runs the join
 // (Server_OnPlayerJoin) with the body's two map checksums, whose game-start messages go out
