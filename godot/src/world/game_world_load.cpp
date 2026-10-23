@@ -1424,9 +1424,10 @@ void GameWorld::load_join_effect_system(const Ref<ResourceRoot> &p_resource_root
 	// The catalog warms in front of the load camera as the load's warm does; no mission
 	// root lives yet, so no presenter pipeline warms here (the S2C 0x1A's load draws those).
 	timeline->span("effects_warm");
+	const ObjectID live_effect_world = effect_world_id_;
 	effect_world_id_ = ObjectID(effect_world->get_instance_id());
 	warm_effect_world_catalog(PackedStringArray());
-	effect_world_id_ = ObjectID();
+	effect_world_id_ = live_effect_world;
 	timeline->end_span();
 	join_effect_world_id_ = ObjectID(effect_world->get_instance_id());
 	timeline->finish();
