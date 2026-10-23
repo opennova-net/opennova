@@ -183,12 +183,12 @@ void VehicleSystem::suspension_client_crash_window(Entity &veh, SuspensionFamily
 	}
 }
 
-void vehicle_suspension_bike_crash_test(Entity &veh, bool front_contact,
-                                        bool rear_contact, bool any_spine_contact) {
-	// [orig: Entity_ProcessLightVehiclePhysics @0x47b32d..0x47b375]
+void vehicle_suspension_bike_crash_test(Entity &veh, const int32_t copy[6]) {
+	// [orig: Entity_ProcessLightVehiclePhysics @0x47B32D..0x47B375]
 	Entity::VehicleMotorState &m = veh.veh;
-	if (m.crashed != 0) return;
-	if (!front_contact && !rear_contact && m.wheelie_active != 0 && any_spine_contact)
+	if (copy[0] != 0 || copy[1] != 0 || m.wheelie_active == 0)
+		return;
+	if ((copy[2] != 0 || copy[3] != 0 || copy[5] != 0) && m.crashed == 0)
 		m.crash_request = 1;
 }
 

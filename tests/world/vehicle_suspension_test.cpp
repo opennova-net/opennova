@@ -341,14 +341,26 @@ void test_bike_crash_test_and_eject() {
 	Entity &veh = *w.registry.get(bh);
 	CHECK(veh.primary_occupant == dh, "the rider claims the bike");
 
-	vehicle_suspension_bike_crash_test(veh, false, false, true);
+	// The test reads the contact copy's slots 2, 3 and 5; slot 4 is not read
+	// [orig: @0x47B351..0x47B363] (D-NET-NEW-L6-24).
+	const int32_t spine2[6] = { 0, 0, 9, 0, 0, 0 };
+	const int32_t front_and_spine[6] = { 9, 0, 9, 0, 0, 0 };
+	const int32_t none[6] = { 0, 0, 0, 0, 0, 0 };
+	const int32_t slot4[6] = { 0, 0, 0, 0, 9, 0 };
+	const int32_t slot5[6] = { 0, 0, 0, 0, 0, 9 };
+	vehicle_suspension_bike_crash_test(veh, spine2);
 	CHECK(veh.veh.crash_request == 0, "a never-driven bike does not request");
 	veh.veh.wheelie_active = 1;
-	vehicle_suspension_bike_crash_test(veh, true, false, true);
+	vehicle_suspension_bike_crash_test(veh, front_and_spine);
 	CHECK(veh.veh.crash_request == 0, "a wheel on the ground: no request");
-	vehicle_suspension_bike_crash_test(veh, false, false, false);
+	vehicle_suspension_bike_crash_test(veh, none);
 	CHECK(veh.veh.crash_request == 0, "no spine contact: no request");
-	vehicle_suspension_bike_crash_test(veh, false, false, true);
+	vehicle_suspension_bike_crash_test(veh, slot4);
+	CHECK(veh.veh.crash_request == 0, "copy slot 4 alone: no request (retail never reads it)");
+	vehicle_suspension_bike_crash_test(veh, slot5);
+	CHECK(veh.veh.crash_request == 1, "copy slot 5 alone: request");
+	veh.veh.crash_request = 0;
+	vehicle_suspension_bike_crash_test(veh, spine2);
 	CHECK(veh.veh.crash_request == 1,
 			"both wheels off, driven, a spine probe touching: request");
 	CHECK(w.vehicles.suspension_arm(veh, /*eject_occupants=*/true), "the bike seed arms");

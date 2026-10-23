@@ -128,11 +128,13 @@ int32_t vehicle_flip_threshold_q16(const VehicleTraits &traits);
 // --- the tick ------------------------------------------------------------
 
 
-// 1b. The bike's live crash test [orig: @0x47b32d..0x47b375]: both wheels off
-//  the ground, the bike has been driven, and any of the three spine probes
-//  touches → request.
-void vehicle_suspension_bike_crash_test(Entity &veh, bool front_contact,
-                                        bool rear_contact, bool any_spine_contact);
+// 1b. The bike's live crash test over the light solve's contact copy (six depths): both wheels
+//  off the ground (copies 0 and 1), the bike driven (+0x3DE), and copy 2, 3 or 5 touching (copy 4
+//  is not read) → request, unless already crashed.
+//  [orig: Entity_ProcessLightVehiclePhysics @0x479600 - the wheel test @0x47B32D..0x47B340
+//  (var_250 / var_24C), +0x3DE @0x47B346, var_248 / var_244 / var_23C @0x47B351..0x47B363,
+//  +0x2EC @0x47B36C, +0x2ED = 1 @0x47B375; the copy's slots @0x479CCB..0x479D19]
+void vehicle_suspension_bike_crash_test(Entity &veh, const int32_t copy[6]);
 
 // 2. Sink growth [orig: tracked extend loop @0x47db70..0x47dbd1 with the
 //  pre-gate @0x47db76..0x47dba8 (skipped when !grounded && all sinks == 0

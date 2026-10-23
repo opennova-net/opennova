@@ -1717,13 +1717,12 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
         } else vehicle_clear_chassis(m);
     }
 	// ---- the suspension spring leg's bike legs (vehicle_suspension.h): the
-    // live crash test over the spine probes [orig: @0x47B32D..0x47B375] and
+    // live crash test over the contact copy's slots 2, 3 and 5 [orig: @0x47B32D..0x47B375] and
     // the +100 front/rear sink growth with no latch terms [orig: @0x47AB36..
     //  0x47ABDC].
     const bool wheel_contact[4] = {d[0] != 0, d[1] != 0, true, true};
 	vehicle_landing_damage(world, veh, traits, d, 5, up_z16);
-	vehicle_suspension_bike_crash_test(
-			veh, d[0] != 0, d[1] != 0, d[2] != 0 || d[3] != 0 || d[4] != 0);
+	vehicle_suspension_bike_crash_test(veh, d);
 	vehicle_suspension_grow_sinks(veh, wheel_contact, 2, kSinkGrowthBike,
                                   /*latch_gated=*/false, /*pre_gate_skip=*/false);
 	vehicle_crush_damage(world, veh, traits, d + 2, up_z16);
