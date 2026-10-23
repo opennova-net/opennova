@@ -107,9 +107,13 @@ void input_action_exit(const RemoteAdminBinding &binding, ExitSite site) {
 		binding.host->mission_exit_reason = kMissionExitQuit;
 		// [orig: CNapiNetwork_DisconnectActiveConnection(&g_NapiNPCtx, "I.C:CIDEMIS") @0x49AF42
 		//  on ctx+0xE60, the own client a listen host's create made (@0x4C9B9C)]
+		// The queued action dispatches where a main input pass drains the queue after the exit:
+		// the input pass's own, or the next frame's after the admin's with no menu screen up
+		// (ExitSite carries the witness).
+		const bool admin = site == ExitSite::Admin || site == ExitSite::AdminOverMenuScreen;
 		request_own_client_disconnect(*binding.host,
-				site == ExitSite::Admin ? OwnGoodbye::NextReceivePump : OwnGoodbye::TeardownPump,
-				/*queued_action_dispatches=*/site != ExitSite::MenuScreen);
+				admin ? OwnGoodbye::NextReceivePump : OwnGoodbye::TeardownPump,
+				/*queued_action_dispatches=*/site == ExitSite::Admin || site == ExitSite::Input);
 	} else if (binding.joiner != nullptr)
 		binding.joiner->quit_to_menu();
 	else if (binding.world != nullptr)
@@ -163,10 +167,18 @@ void RemoteAdminConsoles::bind(const RemoteAdminBinding &binding, AdminConsole::
 	seams.host_client = binding.client;
 	seams.joiner_world =
 			binding.host == nullptr && binding.client != nullptr ? binding.world : nullptr;
-	// Input action 3 (input_action_exit) [orig: Input_HandleActionBinding case 3 @0x49AF26,
+	// Input action 3 (input_action_exit) after the in-game screens' close, whose request a menu
+	// screen up at the GOTO takes at the next frame's screen pass (ExitSite::AdminOverMenuScreen)
+	// [orig: CAdminServer_HandleGotoCommand @0x404A20 - Game_CloseInGameScreens @0x404A4E,
+	//  Input_HandleActionBinding(3) @0x404A5D; Input_HandleActionBinding case 3 @0x49AF26,
 	//  @0x49AF38..0x49AF42].
-	if (binding.host != nullptr || binding.joiner != nullptr || binding.world != nullptr)
-		seams.quit_to_menu = [binding] { input_action_exit(binding, ExitSite::Admin); };
+	if (binding.host != nullptr || binding.joiner != nullptr || binding.world != nullptr) {
+		std::function<bool()> menu_screen_open = seams.menu_screen_open;
+		seams.quit_to_menu = [binding, menu_screen_open] {
+			input_action_exit(binding, menu_screen_open && menu_screen_open()
+					? ExitSite::AdminOverMenuScreen : ExitSite::Admin);
+		};
+	}
 	seams.process_mission = &process_mission_;
 	console_ = std::make_unique<AdminConsole>(ctx != nullptr ? *ctx : session_less_, std::move(seams));
 }

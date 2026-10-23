@@ -38,6 +38,9 @@
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/serverlog_decode.h>
+#include <formats/gamecfg/game_cfg.h>
+#include <net/admin/admin_server.h> // AdminSession
+#include <runtime/inmatch/admin_console.h>
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/napi_np_protocol.h>
@@ -423,8 +426,11 @@ StaleExit exit_over_stale_record(uint32_t dpc, inmatch::ExitSite site) {
 
 void test_a_stale_records_queued_action_runs_where_the_pass_drains() {
 	using inmatch::ExitSite;
-	for (const ExitSite site : {ExitSite::Input, ExitSite::Admin, ExitSite::MenuScreen}) {
-		const bool drains = site != ExitSite::MenuScreen;
+	for (const ExitSite site : {ExitSite::Input, ExitSite::Admin, ExitSite::AdminOverMenuScreen,
+				 ExitSite::MenuScreen}) {
+		// The admin's GOTO over a menu screen closes it first: the next frame's screen pass
+		// resets the queue (D-NET-NEW-L1-48).
+		const bool drains = site == ExitSite::Input || site == ExitSite::Admin;
 		// DPC 34 queues action 36: exit reason 5 where it runs, the leave's 1 where it is dropped.
 		StaleExit out = exit_over_stale_record(34, site);
 		CHECK(out.reason == (drains ? inmatch::kMissionExitCdTrouble : inmatch::kMissionExitQuit));
@@ -441,6 +447,52 @@ void test_a_stale_records_queued_action_runs_where_the_pass_drains() {
 	}
 }
 
+// D-NET-NEW-L1-48 (L1-s32 FOUND): the admin's GOTO MENUSTATE closes the in-game screens ahead of
+// its input action 3. With a menu screen up (the embedder's seam) the next frame runs that screen's
+// pass, whose close resets the input queue ahead of its pass-through drain, and no main pass: the
+// action a stale record's callback queued is dropped and the leave's reason 1 stands. With none up
+// the close request finds no screen and the next frame's main pass runs it (DPC 34: action 36,
+// reason 5). Either way the own goodbye waits for the next receive pump, the admin pump's.
+// [orig: CAdminServer_HandleGotoCommand @0x404A20 - Game_CloseInGameScreens @0x404A4E,
+//  Input_HandleActionBinding(3) @0x404A5D; Game_CloseInGameScreens @0x54B940 -
+//  g_MenuScreenCloseRequest = 1 @0x54B94A; UI_ProcessMenuScreenFrame @0x54E650 - UI_CloseMenuScreen
+//  @0x54E659 -> Input_ResetAllState @0x54E63F, the pass-through drain @0x54E686..0x54E695;
+//  Game_ProcessMainFrame @0x5263F0 - UI_IsMenuScreenOpen @0x52660D, Input_ProcessFrame
+//  @0x52661D; CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - Input_QueueEvent(36) @0x4C6596;
+//  Input_HandleActionBinding case 36: reason 5 @0x49B780]
+void test_admin_goto_over_a_menu_screen_drops_the_queued_action() {
+	for (const bool screen_up : {false, true}) {
+		auto host = std::make_unique<ListenHost>(true);
+		inmatch::ProcessDisconnectLatch latch;
+		latch.latch(make_disconnect_event(1, 2, 0, 0, "", 34, "")); // a received kick, DPC 34
+		host->ctx.client_disconnect_latch = &latch;
+		// No world under the console: the GOTO's cycle tail runs no round end here.
+		host->ctx.world = nullptr;
+		gamecfg::GameCfg block = gamecfg::defaults();
+		inmatch::AdminConsole::Seams seams;
+		seams.config_block = &block;
+		seams.menu_screen_open = [screen_up] { return screen_up; };
+		inmatch::RemoteAdminBinding binding;
+		binding.host = &host->ctx;
+		binding.session = 1;
+		inmatch::RemoteAdminConsoles consoles;
+		consoles.bind(binding, seams);
+		consoles.console()->set_scene(inmatch::AdminScene::GameLoop);
+		AdminSession admin;
+		admin.user = "boss";
+		admin.rights = 0x7F;
+		std::vector<std::string> replies;
+		CHECK(consoles.dispatch(admin, "GOTO MENUSTATE", replies));
+		CHECK(host->ctx.mission_exit_reason ==
+				(screen_up ? inmatch::kMissionExitQuit : inmatch::kMissionExitCdTrouble));
+		const inmatch::NapiNPConnection *own = host->own();
+		CHECK(own != nullptr && own->own_goodbye == inmatch::OwnGoodbye::NextReceivePump);
+		CHECK(latch.valid && latch.event.dpc == 34); // the first record wins
+		host->ctx.client_disconnect_latch = nullptr;
+		host->ctx.world = &host->world;
+	}
+}
+
 } // namespace
 
 int main() {
@@ -452,6 +504,7 @@ int main() {
 	test_single_player_admin_exit_is_path_a();
 	test_single_player_input_exit_leaves_the_record_only();
 	test_a_stale_records_queued_action_runs_where_the_pass_drains();
+	test_admin_goto_over_a_menu_screen_drops_the_queued_action();
 	if (failures != 0) {
 		std::printf("own_client_exit: %d failure(s)\n", failures);
 		return 1;

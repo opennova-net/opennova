@@ -118,6 +118,12 @@ public:
 		//  @0x404A5D (Input_HandleActionBinding(3)); PostMenu_RouteMissionExit @0x5684AB ->
 		//  CNapiGameSession_FullDestroy @0x4C96A0 (the call @0x568683)]
 		std::function<void()> quit_to_menu;
+		// Whether an in-game menu screen is up (UI_IsMenuScreenOpen; the embedder's shell reads
+		// its own screens): GOTO MENUSTATE's close then takes the screen down at the next
+		// frame's screen pass, whose input reset drops what the quit's disconnect queued
+		// (remote_admin.h ExitSite::AdminOverMenuScreen). RemoteAdminConsoles::bind reads it
+		// into quit_to_menu. Unset: none up (a host with no screens).
+		std::function<bool()> menu_screen_open;
 		// The map rotation and its catalog (ADR 0051 PR3; HostRotationAdmin over the host's
 		// own); null reads as no rotation and an empty catalog.
 		RotationAdmin *rotation = nullptr;

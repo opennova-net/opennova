@@ -346,6 +346,9 @@ func _ready() -> void:
 	_player_presenter.set_record_leg(_run_record_leg)
 	# The console's SAVEKEYS dumps the live binding table (GameWorld.set_controls_model).
 	_world.set_controls_model(ControlsBindings.model())
+	# The remote admin's GOTO MENUSTATE reads whether an in-game menu screen is up
+	# (GameWorld.set_menu_screen_probe).
+	_world.set_menu_screen_probe(_menu_screen_open)
 	# The in-world armory + HUD ride their shared engine presenters. Created here,
 	# not in _wire_shell, so menu-less entries (the env launch hooks)
 	# still get them; the HUD presenter's
@@ -1772,6 +1775,16 @@ func _input_frame_menu_open() -> bool:
 	return (_state == State.PAUSED or _state == State.ARMORY or _state == State.COMMAND_MAP
 			or _state == State.VEHICLE or (_state == State.DEPLOY
 					and not _deploy_presenter.is_input_pass_through()))
+
+
+## An in-game menu screen is up, any of them: INGAME (the pause), WEAPON, the
+## deploy screen (DEATH), STAT, CMAP or VEHICLE. A remote admin's GOTO MENUSTATE
+## closes it ahead of its exit, so the close's input reset drops what the exit's
+## disconnect queued (engine inmatch/remote_admin.h ExitSite::AdminOverMenuScreen
+## carries the witness).
+func _menu_screen_open() -> bool:
+	return _state in [State.PAUSED, State.ARMORY, State.DEPLOY, State.END_ROUND,
+			State.COMMAND_MAP, State.VEHICLE]
 
 
 ## An open chat line takes the queue's key (the keyboard pass's capture branch);

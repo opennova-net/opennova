@@ -485,6 +485,10 @@ public:
 	// The shell's live binding table (ControlsBindings' model): every session's
 	// Simulation takes it for the console's SAVEKEYS (Simulation::set_controls_model).
 	void set_controls_model(const Ref<ControlsModel> &p_model) { controls_model_ = p_model; }
+	// The shell's in-game menu screen state (true while one is up), read live by the remote
+	// admin's GOTO MENUSTATE (AdminConsole::Seams::menu_screen_open; engine inmatch/remote_admin.h
+	// ExitSite::AdminOverMenuScreen carries the witness). Unset: none up.
+	void set_menu_screen_probe(const Callable &p_probe) { menu_screen_probe_ = p_probe; }
 	// The next load is the single player's restart (Game_RestartRoundSP's Game_StartMission(1)):
 	// its sim boots with the engine's restart flag (KernelBootOptions::restart). The load
 	// consumes it.
@@ -1048,6 +1052,7 @@ private:
 	Ref<PlayerProfiles> player_profiles_;
 	Ref<GameConfigBlock> game_config_;
 	Ref<ControlsModel> controls_model_; // set_controls_model
+	Callable menu_screen_probe_;        // set_menu_screen_probe
 	bool restart_boot_ = false;          // set_restart_boot, consumed by the next load
 	// The process's map-rotation words, one for the world's whole run: retail's are
 	// process globals no session start resets, so a session that ended mid-map

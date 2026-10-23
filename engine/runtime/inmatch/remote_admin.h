@@ -161,20 +161,32 @@ struct RemoteAdminBinding {
 // The input action the own client's disconnected callback queues (a stale description record
 // in the process latch) runs in the input pass that drains the queue after the exit: the same
 // pass for the key scan's quit dialog and a console-queued code 3 (the drain re-reads the count),
-// the next frame's for the admin's; a menu screen's confirmation closes its screen first
+// the next frame's main pass for the admin's; a menu screen's confirmation closes its screen first
 // (Game_CloseInGameScreens), and the screen pass's close resets the queue ahead of any drain, its
 // main input pass skipped while the screen is up (L1-s32 row 1).
+// The admin's GOTO MENUSTATE closes the in-game screens ahead of its action too, so with a menu
+// screen up (any: the pass-through DEATH and STAT among them) the next frame runs the screen pass,
+// whose close resets the queue ahead of its pass-through drain, and no main pass: the action is
+// dropped (AdminOverMenuScreen). With no screen up the close request finds none and the next
+// frame's main pass drains it (Admin). While the options screen holds a modal state (a control
+// remap armed, a video mode change or its keep query) the close is not requested, and that
+// screen passes no input, so nothing drains before the exit either (D-NET-NEW-L1-48).
 // [orig: Input_ProcessFrame @0x49D520 - Input_ProcessPlayerFrame @0x49D58B (the key scan ->
 //  Input_HandleSpecialKeys @0x49C5C0, its quit dialog's yes Input_HandleActionBinding(3)
 //  @0x49C5FA), the drain @0x49D599..0x49D5E7; Input_DequeueEvent @0x497F30;
 //  UI_IngameConfirmExitCommand @0x555460 - Game_CloseInGameScreens @0x55546A, the action
 //  @0x555479; DeathScreen_OnConfirmYes @0x553530 - @0x55353A, @0x553549; Game_CloseInGameScreens
-//  @0x54B940 - dword_2551110 = 1 @0x54B94A; UI_ProcessMenuScreenFrame @0x54E650 -
-//  UI_CloseMenuScreen @0x54E659 -> Input_ResetAllState @0x54E63F (the queue's memset @0x497EE6),
-//  the pass-through test @0x54E686; Game_ProcessMainFrame - UI_IsMenuScreenOpen @0x52660D skips
-//  Input_ProcessFrame @0x52661D for the screen pass @0x52667B]
+//  @0x54B940 - the g_OptionsModalState test @0x54B942..0x54B948, g_MenuScreenCloseRequest = 1
+//  @0x54B94A; UI_ProcessMenuScreenFrame @0x54E650 - UI_CloseMenuScreen @0x54E659 ->
+//  Input_ResetAllState @0x54E63F (the queue's memset @0x497EE6), the pass-through drain
+//  @0x54E686..0x54E695; Game_ProcessMainFrame - UI_IsMenuScreenOpen @0x52660D skips
+//  Input_ProcessFrame @0x52661D for the screen pass @0x52667B; CAdminServer_HandleGotoCommand
+//  @0x404A20 - Game_CloseInGameScreens @0x404A4E ahead of Input_HandleActionBinding(3) @0x404A5D;
+//  g_OptionsModalState's writers UI_ControlsRemapArmHandler @0x55D5A0 (1),
+//  UI_ApplyVideoModeChange @0x55A5EF (2) / @0x55A620 (3), Options_UpdatePendingState @0x55C62F (0)]
 enum class ExitSite : uint8_t {
 	Admin,
+	AdminOverMenuScreen,
 	Input,
 	MenuScreen,
 };
@@ -201,7 +213,9 @@ void input_action_exit(const RemoteAdminBinding &binding, ExitSite site);
 // (`host_client`) and GOTO MENUSTATE's input action 3 (`quit_to_menu`): exit reason 1 stored
 // where the running role reads it, so the next frame's mission exit takes the router's reason-1
 // arm (a host's teardown; a joiner's leave, whose CIDEMIS goodbye the action itself sends,
-// JoinerRole::quit_to_menu). Rebinding drops the previous console.
+// JoinerRole::quit_to_menu), at ExitSite::AdminOverMenuScreen when the embedder's
+// `menu_screen_open` seam reads an in-game menu screen up, else at ExitSite::Admin. Rebinding
+// drops the previous console.
 // [orig: CAdminServer_DispatchCommand @0x406720 (no session test of its own);
 //  CAdminServer_HandleStatus @0x402E30; CAdminServer_HandleGotoCommand @0x404A5D
 //  (Input_HandleActionBinding(3)); Input_HandleActionBinding case 3 @0x49AF26
