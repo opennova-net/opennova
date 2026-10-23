@@ -67,6 +67,11 @@ void ClientReplicaPipeline::apply_full_entity_spawn(const std::vector<uint8_t> &
     // [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - the Yaw @0x433B8C, the
     //  Entity_InitFromModel call @0x433E6C; Entity_InitFromModel @0x40DC30 - +0x8C @0x40E172]
     row.rm_body_heading = row.heading_bam;
+    // Then the class init: an org1 row's stamps its aim heading and its four leg words with the
+    // Yaw and zeroes its Pitch (D-NET-NEW-L5-35).
+    // [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - the init callback @0x433E74..0x433E82;
+    //  Entity_InitOrganicAI @0x4BFCC0]
+    if (row.cls == EntityClass::Infantry) seed_org1_init_words(row, row.heading_bam);
     row.net_smooth_target[0] = row.x;
     row.net_smooth_target[1] = row.y;
     row.net_smooth_target[2] = row.z;

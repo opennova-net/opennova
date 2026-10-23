@@ -239,6 +239,12 @@ void row_deck_ride(ClientEntityState &es,
 			es.pitch_bam = io::bam_add(es.pitch_bam, pitch_d);
 			es.rm_aim_heading_word = io::bam_add(es.rm_aim_heading_word, dyaw);
 			es.rm_aim_word = io::bam_add(es.rm_aim_word, pitch_d);
+			// org1's four leg words take the yaw delta too [orig: Entity_UpdateInfantryAI
+			// @0x4B9910 - +0x2D4 @0x4BA86D, +0x2D8 @0x4BA873, +0x2E4 @0x4BA879, +0x2E8 @0x4BA87F].
+			es.rm_leg_yaw[0] = io::bam_add(es.rm_leg_yaw[0], dyaw);
+			es.rm_leg_yaw[1] = io::bam_add(es.rm_leg_yaw[1], dyaw);
+			es.rm_leg_target[0] = io::bam_add(es.rm_leg_target[0], dyaw);
+			es.rm_leg_target[1] = io::bam_add(es.rm_leg_target[1], dyaw);
 		}
 	}
 }
@@ -325,6 +331,69 @@ void row_leg_chase(ClientEntityState &es, uint32_t key) {
 	es.rm_body_heading = io::bam_add(
 			es.rm_leg_yaw[1],
 			io::bam_sar(io::bam_sub(es.rm_leg_yaw[0], es.rm_leg_yaw[1]), 1));
+}
+
+// The org1 leg chase on a free-standing row, after its body chase: rm_leg_yaw[0] / [1] are the
+// right / left leg yaws (+0x2D4 / +0x2D8), rm_leg_target[0] / [1] their re-plant targets
+// (+0x2E4 / +0x2E8). A walking body (a movement state, or the def's attrib 0x200) half-snaps the
+// right leg to the target heading (+0x1A8), pulls the left a quarter of what the right leaves,
+// and re-plants both on the target; an idle one re-plants a leg on the midpoint of the target and
+// the body heading (+0x8C) when it drifts past 0x38E38E0 and either past 0x15555540 or on the
+// leg's 64-tick window (the left's 32 ticks behind the right's). Each leg then chases its target
+// a quarter (a sixteenth with attrib 0x200), the step clamped to +-0x5000000, and is held within
+// 0x20000000 of the body heading. The carried test ahead of them (Flags 0x40 snaps both legs to
+// +0x8C) never holds here: a free-standing record's carried bit is clear (the host's detach
+// clears it), and a dead seated body's death edge clears it every tick. `key` is the update's
+// stagger key, the tick plus 36 times the DcbId (+0x7C), which a client's replica holds at 0:
+// the spawns clear it (0x0C memset 0x388, 0x18 memset 0x2B4) and no client path stores it.
+// world::infantry_org1_heading_chase is the authority's twin.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the key @0x4B9948..0x4B9959, the carried test
+//  @0x4BE934..0x4BE93E -> @0x4BEB0C, the selector @0x4BE944..0x4BE967, the idle re-plant
+//  @0x4BE969..0x4BE9CC (L @0x4BE977..0x4BE9A7, R @0x4BE9AD..0x4BE9CC), the walk path
+//  @0x4BE9D4..0x4BEA0B, R's chase @0x4BEA11..0x4BEA87, L's @0x4BEA8D..0x4BEB04; the death edge's
+//  Flags &= ~0xC0 @0x4B9D35, the dead legs' Flags &= ~0x40 @0x4B9D63; Entity_DetachFromVehicle
+//  @0x4355F0 - @0x435910; NapiNPClientMsg_0x00C @0x42E730 - the memset @0x42E7E9..0x42E7F1;
+//  NapiNPClientMsg_FullEntitySpawn @0x433780 - the memset @0x433821; Entity_InitOrganicAI
+//  @0x4BFCC0, Entity_InitFromItemDef @0x49E550, Entity_InitFromModel @0x40DC30,
+//  Entity_AllocateAISlot @0x40D2C0, NetPacket_SerializeInfantryEntityState @0x4C0320 and
+//  Entity_ResetToSpawnState @0x4B9610 store no +0x7C; Entity_WarmUpOrganicAnimation @0x4B8B20
+//  reads it @0x4B8B3F / @0x4B8B81]
+constexpr int32_t kRowOrg1LegChaseClamp = 0x5000000;
+constexpr int32_t kRowOrg1LegTwistLimit = 0x20000000;
+
+void row_org1_legs(ClientEntityState &es, uint32_t key, uint32_t def_attrib, int current_state) {
+	const bool landable = (def_attrib & world::kItemAttribLandable) != 0u;
+	const int32_t target = es.net_target_heading_bam;
+	const int32_t body = es.rm_body_heading;
+	if (landable || (world::infantry_anim_flags(current_state) & 0x1u) != 0u) {
+		es.rm_leg_yaw[0] = io::bam_add(es.rm_leg_yaw[0],
+				io::bam_sar(io::bam_sub(target, es.rm_leg_yaw[0]), 1));
+		es.rm_leg_yaw[1] = io::bam_add(es.rm_leg_yaw[1],
+				io::bam_sar(io::bam_sub(target, es.rm_leg_yaw[0]), 2));
+		es.rm_leg_target[0] = target;
+		es.rm_leg_target[1] = target;
+	} else {
+		const int32_t mid = io::bam_add(target, io::bam_sar(io::bam_sub(body, target), 1));
+		const int32_t dl = row_abs_bam(io::bam_sub(mid, es.rm_leg_target[1]));
+		if ((dl > kRowLegReplantSnap || ((key - 32u) & 0x3Fu) == 0u) && dl > kRowLegReplantMin)
+			es.rm_leg_target[1] = mid;
+		const int32_t dr = row_abs_bam(io::bam_sub(mid, es.rm_leg_target[0]));
+		if ((dr > kRowLegReplantSnap || (key & 0x3Fu) == 0u) && dr > kRowLegReplantMin)
+			es.rm_leg_target[0] = mid;
+	}
+	for (int leg = 0; leg < 2; ++leg) {
+		const int32_t d = io::bam_sub(es.rm_leg_target[leg], es.rm_leg_yaw[leg]);
+		int32_t step = landable ? io::bam_sar(io::bam_add(d, 8), 4)
+		                        : io::bam_sar(io::bam_add(d, 2), 2);
+		if (step > kRowOrg1LegChaseClamp) step = kRowOrg1LegChaseClamp;
+		if (step < -kRowOrg1LegChaseClamp) step = -kRowOrg1LegChaseClamp;
+		es.rm_leg_yaw[leg] = io::bam_add(es.rm_leg_yaw[leg], step);
+		const int32_t twist = io::bam_sub(es.rm_leg_yaw[leg], body);
+		if (twist > kRowOrg1LegTwistLimit)
+			es.rm_leg_yaw[leg] = io::bam_add(body, kRowOrg1LegTwistLimit);
+		else if (twist < -kRowOrg1LegTwistLimit)
+			es.rm_leg_yaw[leg] = io::bam_sub(body, kRowOrg1LegTwistLimit);
+	}
 }
 
 // The row's AnimMap primary channel + root integration — retail's remote body
@@ -1431,6 +1500,10 @@ void ClientReplicaPipeline::tick_org1_looks() {
 			continue;
 		}
 		if (seat_resolved) es.rm_body_heading = seat.heading;
+		// The seat branch then stamps the four leg words with the body heading.
+		// [orig: Entity_UpdateInfantryAI @0x4B9910 - @0x4BEF36..0x4BEF51]
+		es.rm_leg_yaw[0] = es.rm_leg_yaw[1] = es.rm_body_heading;
+		es.rm_leg_target[0] = es.rm_leg_target[1] = es.rm_body_heading;
 		const int32_t aim_heading = es.rm_aim_heading_word;
 		const int32_t aim_pitch = es.rm_aim_word;
 		int32_t yaw_step = io::bam_sar(io::bam_add(io::bam_sub(aim_heading, es.heading_bam), 2), 2);
@@ -1700,16 +1773,28 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 			organic_chase_tail(es, is_self, /*starved=*/true);
 			break;
 		}
+		const int16_t death_state = row_death_edge(es);
+		if (death_state >= 0 && !is_self) death_edges_.push_back(es.handle);
+		corpse_leg(es, death_state >= 0, /*org1=*/true);
+		// The update's current state (+0x2BC) past the death edge, which writes it directly.
+		// [orig: Entity_UpdateInfantryAI @0x4B9910 - the edge's +0x2BC stores
+		//  @0x4B9CFE..0x4B9D06]
+		const int current_state = death_state >= 0 ? static_cast<int>(death_state)
+				: es.net_anim_current >= 0 ? static_cast<int>(es.net_anim_current)
+				                          : static_cast<int>(es.anim_state_id);
 		// The body chase: the body heading (+0x8C) steps a quarter of the way to the
 		// promoted target (+0x1A8, one record behind the wire, §5.38e §1), the step
 		// clamped to +-69273360, and the Yaw (+0x10) takes the same step, keeping the
-		// look's offset from the body. The look (Yaw toward +0x2EC, Pitch toward +0x2D0,
-		// the 90-degree clamp about the body) runs after the tick's recoil
-		// (tick_org1_looks); the root turns by the body heading (row_root_motion_tick).
+		// look's offset from the body; the legs follow (row_org1_legs). The look (Yaw toward
+		// +0x2EC, Pitch toward +0x2D0, the 90-degree clamp about the body) runs after the
+		// tick's recoil (tick_org1_looks); the root turns by the body heading
+		// (row_root_motion_tick). Retail's deck ride comes first: it adds the carrier's yaw
+		// delta to +0x8C, +0x1A8, the Yaw and the four leg words alike, which the chase and the
+		// legs read only as differences, so riding after them leaves the same words.
 		// The sibling world-side port is infantry_org1_heading_chase.
-		// [orig: Entity_UpdateInfantryAI @0x4B9910 - the body chase @0x4BE8FD..0x4BE931,
-		//  the look @0x4BEB18..0x4BEBE7, the clamp @0x4BEFC5..0x4BEFED, the rotation
-		//  @0x4BF001]
+		// [orig: Entity_UpdateInfantryAI @0x4B9910 - the ride's adds @0x4BA849..0x4BA87F, the
+		//  body chase @0x4BE8FD..0x4BE931, the legs @0x4BE934..0x4BEB12, the look
+		//  @0x4BEB18..0x4BEBE7, the clamp @0x4BEFC5..0x4BEFED, the rotation @0x4BF001]
 		{
 			int32_t step = io::bam_sar(
 					io::bam_add(io::bam_sub(es.net_target_heading_bam,
@@ -1720,12 +1805,12 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 			if (step < -69273360) step = -69273360;
 			es.rm_body_heading = io::bam_add(es.rm_body_heading, step);
 			es.heading_bam = io::bam_add(es.heading_bam, step);
+			const uint32_t def_attrib = replica_def_attrib_resolver_
+					? replica_def_attrib_resolver_(es.type_id) : 0u;
+			row_org1_legs(es, rm_key, def_attrib, current_state);
 			es.rm_look_due = true;
 			es.rm_look_seated = false;
 		}
-		const int16_t death_state = row_death_edge(es);
-		if (death_state >= 0 && !is_self) death_edges_.push_back(es.handle);
-		corpse_leg(es, death_state >= 0, /*org1=*/true);
 		organic_chase_tail(es, is_self);
 		commit_death_state(es, death_state);
 		break;

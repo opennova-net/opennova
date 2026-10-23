@@ -671,6 +671,102 @@ void test_deck_ride_turns_the_aim_words() {
 					es.rm_body_heading == 0x01000000 &&
 					es.net_target_heading_bam == 0x01000000,
 			"the deck's yaw delta turns the aim heading word with the body and the target");
+	// D-NET-NEW-L5-35: and the four leg words [orig: @0x4BA86D..0x4BA87F].
+	expect(es.rm_leg_yaw[0] == 0x01000000 && es.rm_leg_yaw[1] == 0x01000000 &&
+					es.rm_leg_target[0] == 0x01000000 && es.rm_leg_target[1] == 0x01000000,
+			"the deck's yaw delta turns the four leg words");
+}
+
+// D-NET-NEW-L5-35: a free-standing org1 row's legs. rm_leg_yaw[0] / [1] are the right / left leg
+// yaws (+0x2D4 / +0x2D8), rm_leg_target[0] / [1] their re-plant targets (+0x2E4 / +0x2E8). An
+// idle leg re-plants on the midpoint of the target and the body heading when it drifts past
+// 0x38E38E0 and past 0x15555540 or on its 64-tick window, the left's at key 32, the right's at
+// key 64 (a client's stagger key is the bare tick: its DcbId is 0); each leg chases a quarter,
+// clamped to +-0x5000000, held within 0x20000000 of the body heading. A walking body (the def's
+// attrib 0x200 here) half-snaps the right leg to the target, pulls the left a quarter of the
+// rest, re-plants both on the target and chases a sixteenth.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the key @0x4B9948..0x4B9959, the selector
+//  @0x4BE944..0x4BE967, the idle re-plant @0x4BE969..0x4BE9CC, the walk path
+//  @0x4BE9D4..0x4BEA0B, the chases @0x4BEA11..0x4BEB04]
+void test_free_standing_infantry_legs() {
+	{
+		BodySource src;
+		auto view = free_infantry_view(src, 0x00, 0x00);
+		ns::ClientEntityState &es = *view->state().find(kFreeInfantry);
+		es.rm_body_heading = es.net_target_heading_bam = 0x10000000;
+		for (int key = 1; key <= 31; ++key) tick(*view);
+		expect(es.rm_leg_yaw[0] == 0 && es.rm_leg_yaw[1] == 0 && es.rm_leg_target[0] == 0 &&
+						es.rm_leg_target[1] == 0,
+				"an idle leg 0x10000000 off its re-plant point waits for its window");
+		tick(*view); // key 32
+		expect(es.rm_leg_target[1] == 0x10000000 && es.rm_leg_yaw[1] == 0x04000000 &&
+						es.rm_leg_target[0] == 0 && es.rm_leg_yaw[0] == 0,
+				"the left leg re-plants at key 32 and chases a quarter");
+		for (int key = 33; key <= 64; ++key) tick(*view);
+		expect(es.rm_leg_target[0] == 0x10000000 && es.rm_leg_yaw[0] == 0x04000000,
+				"the right leg re-plants 32 ticks later, at key 64");
+	}
+	{
+		BodySource src;
+		auto view = free_infantry_view(src, 0x00, 0x00);
+		view->set_replica_def_attrib_resolver([](uint16_t) { return 0x200u; });
+		ns::ClientEntityState &es = *view->state().find(kFreeInfantry);
+		es.rm_body_heading = 0;
+		es.net_target_heading_bam = 0x08000000;
+		tick(*view);
+		// The body steps 0x2000000; the right leg half-snaps to 0x4000000, the left pulls
+		// (0x8000000 - 0x4000000) >> 2; then sixteenths: (0x4000000 + 8) >> 4 = 0x400000 and
+		// (0x7000000 + 8) >> 4 = 0x700000.
+		expect(es.rm_body_heading == 0x02000000 && es.rm_leg_target[0] == 0x08000000 &&
+						es.rm_leg_target[1] == 0x08000000 && es.rm_leg_yaw[0] == 0x04400000 &&
+						es.rm_leg_yaw[1] == 0x01700000,
+				"a walking body's legs shuffle toward the target");
+	}
+	{
+		BodySource src;
+		auto view = free_infantry_view(src, 0x00, 0x00);
+		ns::ClientEntityState &es = *view->state().find(kFreeInfantry);
+		es.rm_body_heading = es.net_target_heading_bam = 0x30000000;
+		tick(*view);
+		// Past 0x15555540 both re-plant at once; the quarter 0xC000000 clamps to 0x5000000, and
+		// 0x5000000 is held 0x20000000 off the body heading.
+		expect(es.rm_leg_target[0] == 0x30000000 && es.rm_leg_target[1] == 0x30000000 &&
+						es.rm_leg_yaw[0] == 0x10000000 && es.rm_leg_yaw[1] == 0x10000000,
+				"a far leg re-plants at once and is held within 0x20000000 of the body");
+	}
+}
+
+// D-NET-NEW-L5-35: the class init stamps a spawned org1 row's aim heading and its four leg words
+// with the Yaw (Entity_InitAllFromModels after the 0x0C stream), and the respawn record's reset
+// stamps the legs again.
+// [orig: Entity_InitOrganicAI @0x4BFCC0 - @0x4BFD53..0x4BFDA5; Entity_ResetToSpawnState
+//  @0x4B9610 - @0x4B969E..0x4B96B0]
+void test_org1_init_and_reset_stamp_the_legs() {
+	BodySource src;
+	auto view = make_view(src);
+	nw::OrganicSpawnRecord rec;
+	rec.slot_id = kFreeInfantry;
+	rec.def_type = 3;
+	rec.item_type_id = kInfantryType;
+	rec.orientation = 0x12345678;
+	nw::OrganicSpawnBatch batch;
+	batch.records.push_back(rec);
+	batch.entity_count = 1;
+	view->apply(nw::s2c::ENTITY_SPAWN_BATCH, nw::encode_organic_spawn_batch(batch));
+	ns::ClientEntityState &es = *view->state().find(kFreeInfantry);
+	expect(es.rm_aim_heading_word == 0x12345678 && es.rm_leg_yaw[0] == 0x12345678 &&
+					es.rm_leg_yaw[1] == 0x12345678 && es.rm_leg_target[0] == 0x12345678 &&
+					es.rm_leg_target[1] == 0x12345678 && es.rm_body_heading == 0x12345678 &&
+					es.pitch_bam == 0,
+			"the 0x0C row's class init stamps the aim heading and the legs with the Yaw");
+	view->apply(0x0A, free_infantry_frame(0x20, 0x00));
+	view->apply(0x0A, free_infantry_frame(0x20, 0x00,
+			static_cast<uint8_t>(nw::world::kEntityFlagDead)));
+	view->apply(0x0A, free_infantry_frame(0x20, 0x00, 0, 0x30));
+	expect(es.heading_bam == 0x30000000 && es.rm_leg_yaw[0] == 0x30000000 &&
+					es.rm_leg_yaw[1] == 0x30000000 && es.rm_leg_target[0] == 0x30000000 &&
+					es.rm_leg_target[1] == 0x30000000 && es.rm_aim_heading_word == 0x20000000,
+			"the respawn reset stamps the legs; the record's aim heading lands over its +0x2EC");
 }
 
 // D-NET-NEW-L5-32: an org1 body's deck ride tests no radius: 223 u off a carrier whose bound
@@ -731,10 +827,14 @@ void test_overlay_pitch_is_the_live_pitch_word() {
 	npc.mount_bone = 0;
 	npc.heading_bam = 0x12000000;
 	npc.rm_body_heading = 0x10000000;
+	npc.rm_leg_yaw[0] = 0x0E000000;
+	npc.rm_leg_yaw[1] = 0x0F000000;
 	expect(opennova::inmatch::aim_overlay_inputs_for_client(npc, state, {}, in) &&
 					in.aim_pitch == 0x00765432 && in.aim_yaw == 0x12000000 &&
-					in.body_yaw == 0x10000000,
-			"a free-standing org1 row presents its live Pitch, its look Yaw and its body heading");
+					in.body_yaw == 0x10000000 && in.leg_yaw_r == 0x0E000000 &&
+					in.leg_yaw_l == 0x0F000000,
+			"a free-standing org1 row presents its live Pitch, its look Yaw, its body heading and "
+			"its leg words");
 }
 
 // The authority's view runs no chase, so its rows count nothing and never starve: with no
@@ -767,6 +867,8 @@ int main() {
 	test_free_standing_infantry_look_holds_within_ninety_degrees();
 	test_deck_ride_turns_the_aim_words();
 	test_org1_deck_ride_has_no_radius_drop();
+	test_free_standing_infantry_legs();
+	test_org1_init_and_reset_stamp_the_legs();
 	test_overlay_pitch_is_the_live_pitch_word();
 	test_authority_rows_never_starve();
 	if (failures != 0) {

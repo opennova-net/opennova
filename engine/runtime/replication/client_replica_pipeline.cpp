@@ -165,6 +165,14 @@ void ClientReplicaPipeline::apply_organic_spawn(const std::vector<uint8_t> &body
 		// [orig: Entity_InitAllFromModels -> Entity_InitFromModel @0x40DC30 - +0x8C @0x40E172,
 		//  the stage +0x240 @0x40E1A7]
 		es.rm_body_heading = rec.orientation;
+		// Then an org1 row's class init stamps its aim heading (+0x2EC) and its four leg
+		// words with the Yaw, the Pitch and Roll staying 0 (D-NET-NEW-L5-35).
+		// [orig: Entity_InitAllFromModels @0x40E460 - the pool-0 init callbacks
+		//  @0x40E5DA..0x40E60B (Game_StartMission's call @0x52567F); Entity_InitOrganicAI
+		//  @0x4BFCC0 - +0x2EC @0x4BFD59, +0x2E4 / +0x2E8 @0x4BFD5F / @0x4BFD65, +0x2D4 / +0x2D8
+		//  @0x4BFD6B / @0x4BFD71, Roll @0x4BFD99, Pitch @0x4BFDA2 (the org1 class row's init
+		//  @0x81303C)]
+		if (es.cls == EntityClass::Infantry) seed_org1_init_words(es, rec.orientation);
 		es.heading_known = true;
 		es.pitch_bam = 0; // organic spawn carries no entity+20/+24 Euler fields
 		es.roll_bam = 0;
@@ -248,7 +256,17 @@ void ClientReplicaPipeline::land_compact_pose(ClientEntityState &es, int32_t wx,
 			es.spawn_backup[1] = es.y;
 			es.spawn_backup[2] = es.z;
 			es.reset_yaw = es.heading_bam;
-			if (es.cls == EntityClass::Infantry) es.rm_body_heading = es.heading_bam;
+			// An org1 body's reset also stamps its four leg words; its +0x2EC stamp is the
+			// record's own aim heading store's to overwrite later in the same read.
+			// [orig: Entity_ResetToSpawnState @0x4B9610 - +0x2E4 / +0x2E8 @0x4B969E / @0x4B96A4,
+			//  +0x2D4 / +0x2D8 @0x4B96AA / @0x4B96B0, +0x2EC @0x4B9698;
+			//  NetPacket_SerializeInfantryEntityState @0x4C0320 - the reset @0x4C05EC, the +0x2EC
+			//  store @0x4C066C]
+			if (es.cls == EntityClass::Infantry) {
+				es.rm_body_heading = es.heading_bam;
+				es.rm_leg_yaw[0] = es.rm_leg_yaw[1] = es.heading_bam;
+				es.rm_leg_target[0] = es.rm_leg_target[1] = es.heading_bam;
+			}
 		}
 		if (force_live_snap && remote_motion_mode_) {
 			// Retail stages the target BEFORE the respawn branch snaps the live

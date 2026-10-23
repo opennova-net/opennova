@@ -817,7 +817,9 @@ struct ClientEntityState {
 	// view yaw [orig: @0x4b4945..0x4b4ac1; midpoint @0x4b4ab5]. An org1 row's
 	// body heading (+0x8C) is its own: the body chase steps it and the Yaw
 	// together, and the root delta rotates by it [orig: Entity_UpdateInfantryAI
-	// @0x4B9910 - the chase @0x4BE8FD..0x4BE931, the rotation @0x4BF001].
+	// @0x4B9910 - the chase @0x4BE8FD..0x4BE931, the rotation @0x4BF001]. Its legs are its
+	// leg chase's (row_org1_legs): rm_leg_yaw[0] / [1] are +0x2D4 / +0x2D8, rm_leg_target[0] /
+	// [1] their re-plant targets +0x2E4 / +0x2E8 [orig: @0x4BE934..0x4BEB12].
 	// The witnessed vertical: dz is REPLACED by the capsule-bottom history
 	// delta while the prev-bottom slot is live; climbs 32..35 and grenade
 	// deaths 176..179 reset the slot every update [orig: AnimMap_UpdateEntity
@@ -888,6 +890,22 @@ struct ClientEntityState {
 	int32_t net_seat_local_heading_bam = 0;
 	bool net_seat_valid = false;
 };
+
+// An org1 row's class init over its Yaw, which runs after the spawn's Yaw store: the aim heading
+// (+0x2EC), the four leg words (+0x2D4 / +0x2D8 and their re-plant targets +0x2E4 / +0x2E8) take
+// the Yaw; the Pitch, Roll and savedLivePitch (+0x90) are 0. The callers stamp the body heading
+// (+0x8C) and the target (+0x1A8), which the init stamps with the Yaw too.
+// [orig: Entity_InitOrganicAI @0x4BFCC0 (the org1 class row's init @0x81303C) - +0x1A8 @0x4BFD53,
+//  +0x2EC @0x4BFD59, +0x2E4 / +0x2E8 @0x4BFD5F / @0x4BFD65, +0x2D4 / +0x2D8 @0x4BFD6B / @0x4BFD71,
+//  +0x8C @0x4BFD77, Roll @0x4BFD99, Pitch @0x4BFDA2, +0x90 @0x4BFDA5]
+inline void seed_org1_init_words(ClientEntityState &row, int32_t yaw) {
+	row.rm_aim_heading_word = yaw;
+	row.rm_leg_yaw[0] = row.rm_leg_yaw[1] = yaw;
+	row.rm_leg_target[0] = row.rm_leg_target[1] = yaw;
+	row.pitch_bam = 0;
+	row.roll_bam = 0;
+	row.rm_body_pitch = 0;
+}
 
 // The Health a client keeps for a remote player from its compact's
 // health/class byte: the tier midpoint of two rounded products of the def hp
