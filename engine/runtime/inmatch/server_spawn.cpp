@@ -1107,8 +1107,8 @@ void list_on_spawn_queue(std::vector<NapiNPConnection> &connections, NapiNPConne
 	conn.spawn_queue_unlinked = false;
 }
 
-// See header. [orig: NetPacket_WriteWeaponRestrictionFlag @0x502AC0 - the list test @0x502AC4,
-//  [0] @0x502AE7, 1 @0x502AFA, the place NapiLinkedList_CountNodes @0x4C5FE0 (the call @0x502AFD:
+// See header. [orig: NetPacket_WriteSpawnQueueRecord @0x502AC0 - the list test @0x502AC4,
+//  [0] @0x502AE7, 1 @0x502AFA, the place NapiNode_CountToHead @0x4C5FE0 (the call @0x502AFD:
 //  1 @0x4C5FE9 plus one per node ahead @0x4C5FF0..0x4C5FFD), the count `movzx edx, word ptr
 //  [ebp+4Ch]` @0x502B13 over the net player's session (+0, NapiNPPlayer_Create @0x4C7923), whose
 //  list sits at +0x40 (NapiNPPlayer_MoveNodeToEntityList @0x4C7E6A, the count +0x4C
@@ -1260,7 +1260,7 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 			if (!conn.reply.admission_hold_nag_host_ms_valid ||
 					host_ms - conn.reply.admission_hold_nag_host_ms > 1000u) {
 				// The held node is still listed: its place and the list's count
-				// (D-NET-NEW-L1-38) [orig: NetPacket_WriteWeaponRestrictionFlag
+				// (D-NET-NEW-L1-38) [orig: NetPacket_WriteSpawnQueueRecord
 				//  called @0x4C8FAA, the 0x03 @0x4C8FC8].
 				conn.reply.admission_hold_nag_pending = true;
 				conn.reply.admission_hold_nag_body =

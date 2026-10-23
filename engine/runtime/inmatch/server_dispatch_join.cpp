@@ -317,7 +317,7 @@ std::vector<uint8_t> build_tag04_slot_assignment(uint8_t difficulty, uint8_t pla
 //   0x00 (settings flag 0xA0) = CS-config update [orig: CNapiNPConnection_SendConfigUpdate @0x6286e0:
 //        [u8 direction==0][u32 bit mask][u32 value per set bit]] — ours sets field idx 3 = 12 for both
 //        directions, matching the golden.
-//   0x03 = NetPacket_WriteWeaponRestrictionFlag @0x502ac0 (spawn_queue_record): [u8 1][u16 the
+//   0x03 = NetPacket_WriteSpawnQueueRecord @0x502ac0 (spawn_queue_record): [u8 1][u16 the
 //        node's place on the spawn pump's pending list][u16 the list's count] while it is listed,
 //        else [u8 0] (D-NET-NEW-L1-38).
 //   0x05 = NetPacket_WriteBoolTrue @0x502c00: exactly {0x01}.
@@ -560,7 +560,7 @@ static void complete_admission(const GameConfig &config, NapiNPConnection &conn,
 	list_on_spawn_queue(roster, conn);
 	// The 0x03 follows the listing, so it carries the node's place on the list and the list's
 	// count, [1][1][1] for a lone joiner (D-NET-NEW-L1-38).
-	// [orig: NetPacket_WriteWeaponRestrictionFlag called @0x5131B8, the 0x03 @0x5131D5]
+	// [orig: NetPacket_WriteSpawnQueueRecord called @0x5131B8, the 0x03 @0x5131D5]
 	replies.push_back(make_protocol_message(s2c::SYNC_TICK, spawn_queue_record(roster, conn)));
 }
 

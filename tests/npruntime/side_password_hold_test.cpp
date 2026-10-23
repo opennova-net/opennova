@@ -20,7 +20,7 @@
 //  @0x4C8E82 / & 0xF0 @0x4C8E87, TR @0x4C8E8F, side A's length twice @0x4C8EB0..0x4C8ECD,
 //  _stricmp(JSP, A) @0x4C8ED1 / (JSP, B) @0x4C8EEC, the gate @0x4C8F0A, the counts @0x4C8F10 /
 //  @0x4C8F17, ceil @0x4C8F41..0x4C8F53, the compare @0x4C8F74, the hold's 0x03 @0x4C8F7A..0x4C8FD1;
-//  NetPacket_WriteWeaponRestrictionFlag @0x502AC0; NapiLinkedList_CountNodes @0x4C5FE0;
+//  NetPacket_WriteSpawnQueueRecord @0x502AC0; NapiNode_CountToHead @0x4C5FE0;
 //  NapiNPPlayer_MoveNodeToEntityList @0x4C7E60; NapiNPServerMsg_0x002 @0x512FD0 (the listing
 //  @0x513193, the 0x03 @0x5131D5); the pump's periodic second Server_TickUpdate @0x51DB6D..0x51DB93
 //  (62 ticks), the call @0x51DBFD]
@@ -242,7 +242,7 @@ bool run_an_empty_jsp_picks_the_side_without_a_password() {
 
 // Two joiners held on side A: the pending list is in listing order. The second's 0x02 lists it
 // at the tail and answers [1][2][2]; the pump's nags carry [1][1][2] and [1][2][2]
-// [orig: NapiLinkedList_CountNodes @0x4C5FE0 (1 plus the nodes ahead), the count word
+// [orig: NapiNode_CountToHead @0x4C5FE0 (1 plus the nodes ahead), the count word
 //  @0x502B13; NapiNPPlayer_MoveNodeToEntityList's tail append @0x4C7EB6..0x4C7EE2].
 bool run_held_joiners_carry_their_places() {
 	HoldFixture f;

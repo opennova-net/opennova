@@ -177,7 +177,7 @@ void list_on_spawn_queue(std::vector<NapiNPConnection> &connections, NapiNPConne
 // is listed, else [0]. The C2S 0x02's 0x03 (the node listed just before it) and the held
 // node's re-sent 0x03 carry the five bytes, the pump's add (the node unlinked first) the one
 // (D-NET-NEW-L1-38).
-// [orig: NetPacket_WriteWeaponRestrictionFlag @0x502AC0; NapiLinkedList_CountNodes @0x4C5FE0]
+// [orig: NetPacket_WriteSpawnQueueRecord @0x502AC0; NapiNode_CountToHead @0x4C5FE0]
 std::vector<uint8_t> spawn_queue_record(const std::vector<NapiNPConnection> &connections,
 		const NapiNPConnection &conn);
 
