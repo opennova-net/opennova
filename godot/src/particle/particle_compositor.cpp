@@ -475,15 +475,18 @@ public:
 	bool ensure_scene_snapshot_shader();
 	bool ensure_scene_color_target(ViewTarget &target, std::uint32_t view);
 	RID scene_snapshot_pipeline_for(int64_t framebuffer_format);
-	bool snapshot_scene_color(ViewTarget &target, std::uint32_t view);
+	bool snapshot_scene_color(ViewTarget &target, std::uint32_t view, bool clip_to_texel = false);
 	RID pipeline_for(const opennova::renderer::ParticleDrawCommand &command,
 			int64_t framebuffer_format,
 			opennova::renderer::ParticleThermalMaterial thermal =
 					opennova::renderer::ParticleThermalMaterial::Primary);
 	bool warm_pipelines(RenderData *render_data);
 	bool validate_submission(const ParticleWorldSubmission &submission) const;
+	// `clip_to_texel` draws the submission into its target's first texel alone: the load's
+	// pipeline-warm frame (the frame servicing a warm request) records every draw, so each
+	// pipeline, uniform set and buffer it binds is made, and fills nothing.
 	bool draw(const ParticleWorldSubmission &submission,
-			RenderData *render_data);
+			RenderData *render_data, bool clip_to_texel = false);
 	bool draw_distortion(const ParticleWorldSubmission &submission,
 			const FrameFxDistortionTarget &target, std::size_t &r_draws);
 	void release_distortion_target();
@@ -982,7 +985,7 @@ RID ParticleCompositorEffect::Impl::scene_snapshot_pipeline_for(
 }
 
 bool ParticleCompositorEffect::Impl::snapshot_scene_color(
-		ViewTarget &target, std::uint32_t view) {
+		ViewTarget &target, std::uint32_t view, bool clip_to_texel) {
 	if (!target.source_uniform_set.is_valid() ||
 			!rd->uniform_set_is_valid(target.source_uniform_set) ||
 			!target.scratch_uniform_set.is_valid() ||
@@ -1000,10 +1003,13 @@ bool ParticleCompositorEffect::Impl::snapshot_scene_color(
 	if (!pipeline.is_valid())
 		return false;
 
+	// The warm frame's copy covers one texel, as its draws do (draw's clip_to_texel).
 	const int64_t draw_list = rd->draw_list_begin(
 			target.scratch_framebuffer,
 			BitField<RenderingDevice::DrawFlags>(
-					RenderingDevice::DRAW_IGNORE_COLOR_ALL));
+					RenderingDevice::DRAW_IGNORE_COLOR_ALL),
+			PackedColorArray(), 1.0f, 0,
+			clip_to_texel ? Rect2(0, 0, 1, 1) : Rect2(0, 0, 0, 0));
 	if (draw_list == RenderingDevice::INVALID_ID) {
 		set_failure("RenderingDevice could not begin the scene-color snapshot "
 				"draw list for view " + std::to_string(view),
@@ -1251,7 +1257,8 @@ bool ParticleCompositorEffect::Impl::validate_submission(
 }
 
 bool ParticleCompositorEffect::Impl::draw(
-		const ParticleWorldSubmission &submission, RenderData *render_data) {
+		const ParticleWorldSubmission &submission, RenderData *render_data,
+		bool clip_to_texel) {
 	if (!initialize_rd() || !validate_submission(submission) ||
 			!ensure_atlas(submission.atlas) ||
 			!ensure_vertex_buffer(submission.triangle_vertices))
@@ -1323,7 +1330,7 @@ bool ParticleCompositorEffect::Impl::draw(
 					draw_list = RenderingDevice::INVALID_ID;
 				}
 				scene_color_available = scene_target_available &&
-						snapshot_scene_color(target, view);
+						snapshot_scene_color(target, view, clip_to_texel);
 				if (scene_color_available)
 					++scene_color_copies;
 			}
@@ -1333,7 +1340,13 @@ bool ParticleCompositorEffect::Impl::draw(
 				continue;
 			}
 			if (draw_list == RenderingDevice::INVALID_ID) {
-				draw_list = rd->draw_list_begin(target.framebuffer);
+				// The render area is the draw list's region, never part of a pipeline, so
+				// the clipped warm frame makes the same pipelines the live frames bind.
+				draw_list = clip_to_texel ?
+						rd->draw_list_begin(target.framebuffer,
+								BitField<RenderingDevice::DrawFlags>(0), PackedColorArray(),
+								1.0f, 0, Rect2(0, 0, 1, 1)) :
+						rd->draw_list_begin(target.framebuffer);
 				if (draw_list == RenderingDevice::INVALID_ID) {
 					set_failure("RenderingDevice could not begin the particle draw list",
 							"draw_list_failed");
@@ -1792,6 +1805,12 @@ void ParticleCompositorEffect::_render_callback(
 		return;
 	std::uint64_t requested =
 			impl_->pipeline_warm_state.load(std::memory_order_acquire);
+	// The frame that services a warm request is the load's forced warm frame: it draws the
+	// warmed catalog into one texel. Retail's load draws no world frame (engine
+	// runtime/hud/loading_screen.h carries the witness), so the warm compiles and fills
+	// nothing; at full size the catalog spawned in front of the camera held the next
+	// present for 426 ms of GPU at 2560x1536 (D-NET-NEW-L3-63).
+	bool warm_frame = false;
 	while ((requested & kPipelineWarmRequestedBit) != 0) {
 		const std::uint64_t claimed =
 				requested & ~kPipelineWarmRequestedBit;
@@ -1810,6 +1829,7 @@ void ParticleCompositorEffect::_render_callback(
 					std::memory_order_relaxed);
 			return;
 		}
+		warm_frame = true;
 		break;
 	}
 	const std::shared_ptr<const ParticleWorldSubmission> submission =
@@ -1826,5 +1846,5 @@ void ParticleCompositorEffect::_render_callback(
 		impl_->set_failure(std::string(), "idle");
 		return;
 	}
-	impl_->draw(*submission, p_render_data);
+	impl_->draw(*submission, p_render_data, warm_frame);
 }
