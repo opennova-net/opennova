@@ -69,6 +69,15 @@ std::vector<uint8_t> masked_session_block(const std::string &raw) {
 std::string stable_body_key(char dir, uint16_t identity, const std::string &raw) {
 	if (dir == 'S' && identity == 0x064)
 		return hex_of(masked_session_block(raw));
+	// S2C 0x61's armed tick seed is ((rand() & 0xFE) + 1) << 16 [orig:
+	// Server_SendRandomSeedToPlayer @0x5101A0 (the rand call @0x5101BF, and 0xFE @0x5101CB,
+	// add 1 @0x5101D1, shl 16 @0x5101D4)]: 00 00 XX 00 with XX odd compares as that form,
+	// the drawn byte masked; the zero disarm and any other body stay exact
+	// (body.S.0x61.tick_seed).
+	static_assert(has_normalization("body.S.0x61.tick_seed"));
+	if (dir == 'S' && identity == 0x061 && raw.size() == 4 && raw[0] == 0 && raw[1] == 0 &&
+			raw[3] == 0 && (uint8_t(raw[2]) & 1u) != 0)
+		return "0000**00";
 	const std::string hex = hex_of(std::vector<uint8_t>(raw.begin(), raw.end()));
 	const uint32_t prefix = stable_body_prefix(dir, identity);
 	if (prefix == 0)

@@ -2327,6 +2327,38 @@ void add_initial(wire::ParityTrace &trace, char dir, uint16_t host, uint16_t ide
 	}
 }
 
+// S2C 0x61's tick seed is ((rand() & 0xFE) + 1) << 16, a draw of the host process's rand()
+// (body.S.0x61.tick_seed): the final's 01tr-coop RR read 00 00 eb 00 and its subjects cf, f9
+// and 47, an A/A-widened initial body in every 01TR case. An armed body compares as its form.
+void test_tick_seed_form() {
+	auto seeded = [](uint32_t seed, std::vector<uint8_t> body) {
+		wire::ParityTrace trace = scripted(seed);
+		add_initial(trace, 'S', 0x07B, 0x061, body);
+		return trace;
+	};
+	auto run = [&seeded](std::vector<uint8_t> subject) {
+		// RR and RR-aa drew alike, so no A/A floor opens.
+		return judge_case(seeded(1, bytes({ 0, 0, 0xEB, 0 })), seeded(2, bytes({ 0, 0, 0xEB, 0 })),
+				seeded(3, std::move(subject)));
+	};
+	// Another odd draw is the same form (byte for byte it differs: the final's red without
+	// the widening).
+	expect_row(run(bytes({ 0, 0, 0x47, 0 })), 'S', "initial_body", "0x61:0", "pass");
+	// An even byte, a nonzero byte 0 or 3, or the zero disarm is no armed seed's form.
+	expect_row(run(bytes({ 0, 0, 0x46, 0 })), 'S', "initial_body", "0x61:0", "fail",
+			"INITIAL_BODY_MISMATCH");
+	expect_row(run(bytes({ 1, 0, 0x47, 0 })), 'S', "initial_body", "0x61:0", "fail",
+			"INITIAL_BODY_MISMATCH");
+	expect_row(run(bytes({ 0, 0, 0x47, 1 })), 'S', "initial_body", "0x61:0", "fail",
+			"INITIAL_BODY_MISMATCH");
+	expect_row(run(bytes({ 0, 0, 0, 0 })), 'S', "initial_body", "0x61:0", "fail",
+			"INITIAL_BODY_MISMATCH");
+	// The zero disarm against the zero disarm stays exact.
+	expect_row(judge_case(seeded(1, bytes({ 0, 0, 0, 0 })), seeded(2, bytes({ 0, 0, 0, 0 })),
+					   seeded(3, bytes({ 0, 0, 0, 0 }))),
+			'S', "initial_body", "0x61:0", "pass");
+}
+
 // The host's admission reply and the spawn pump's add (S2C 0x03, the add's settings
 // records, 0x05, 0x04, 0x7B), a periodic-second phase draw apart: RR's two packets and
 // a run that carries both in one group alike (initial.S.spawn_pump_boundary); a
@@ -4061,6 +4093,7 @@ int main() {
 	test_entity_carrier();
 	test_entity_sparse_sequence();
 	test_entity_capture_singleton();
+	test_tick_seed_form();
 	test_round_target();
 	if (g_failures) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);

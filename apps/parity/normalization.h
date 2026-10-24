@@ -191,6 +191,17 @@ inline constexpr Normalization kNormalizations[] = {
 			"(u16)(GetTickCount x GetTickCount) (@0x51e93f), 148..179 a second GetTickCount x "
 			"rand() token (@0x51e9a2); those bytes are zeroed, the header, the rules word and "
 			"the three names compare" },
+	{ "body.S.0x61.tick_seed", MaskKind::Field, 'S', 0x061, "tick seed draw", 0,
+			"S2C 0x61 carries the per-player tick seed the host rolls as ((rand() & 0xFE) + 1) "
+			"<< 16 (Server_SendRandomSeedToPlayer @0x5101A0: the rand call @0x5101BF, and 0xFE "
+			"@0x5101CB, add 1 @0x5101D1, shl 16 @0x5101D4, the payload store @0x5101FF), a draw "
+			"of the host process's own rand(), and disarms with four zero bytes (the store "
+			"@0x510259). So an armed body is 00 00 XX 00 with XX odd: it compares as that form, "
+			"the drawn byte masked, and any other body, the zero disarm included, byte for byte. "
+			"Over the stored suites the initial body widened (aa 1) in every 01TR case "
+			"(01tr-coop, -aikill, -drive, -selfnade, -revive and the final's -serve), its 43 "
+			"bodies all of that form on both hosts (the final's 01tr-coop: RR eb, RO cf, OR f9, "
+			"OO 47)" },
 	{ "initial.S.0x16", MaskKind::InitialSet, 'S', 0x016, "PLAYER_LIST", 0,
 			"the scoreboard rides the 311-tick integrity boundary (Server_TickUpdate "
 			"@0x51D90D), whose phase against the join varies per run: how many one-row lists "
