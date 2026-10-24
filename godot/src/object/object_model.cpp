@@ -229,6 +229,7 @@ void ObjectModel::add_presentation_link(ObjectModel *p_model,
 	presentation_links_.push_back(link);
 	p_model->set_match_terrain_enabled(match_terrain_enabled_);
 	p_model->set_thermal_entity_wave(thermal_entity_wave_);
+	p_model->set_presentation_layer(presentation_layer_);
 	// A linked part draws inside its owner's submission: its CLIP arming is
 	// the owner's.
 	p_model->water_mirror_clip_inherited_ = true;
@@ -378,12 +379,23 @@ void ObjectModel::set_shadow_caster_layer_enabled(uint32_t p_layer, bool p_enabl
 	apply_presentation_layer_below(this);
 }
 
+// The composed avatar is ONE retail entity submission, and the first-person
+// skip is a verdict on the entity that decides every part's submit, so in
+// first person no part reaches the camera while every part stays a slot
+// caster (the witness is engine world/player_present.cpp's
+// presents_third_person). Every linked part takes the owner's layer: a part
+// left on its own world layer drew again whenever one of its own writes (a
+// water mirror's verdict edge, a level rebuild) re-applied that layer, which
+// stranded the local avatar's head on the camera after a third-person frame.
 void ObjectModel::set_presentation_layer(PresentationLayer p_layer) {
 	if (presentation_layer_ == p_layer) {
 		return;
 	}
 	presentation_layer_ = p_layer;
 	apply_presentation_layer_below(this);
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->set_presentation_layer(p_layer);
+	}
 	relist_view_walks();
 }
 

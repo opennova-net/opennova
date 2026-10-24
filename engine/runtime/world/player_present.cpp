@@ -7,6 +7,16 @@ namespace opennova::world {
 // [orig: the FP viewmodel gate g_CameraMode == 0 in
 //  Entity_ComputeActionTransform @0x40133e -- the death lerp camera (4)
 //  presents like the chase (1)]
+// The verdict is the local entity's, for every part of a composed avatar: the
+// person callback runs for the head submit and for the body submit alike, and
+// its camera-tracked gate decides each part's submit, so in first person no
+// part reaches the camera (the binding's linked parts take the body's layer,
+// ObjectModel::set_presentation_layer).
+// [orig: Terrain_RenderSectorEntitiesBySide @0x5c7d50 - the head submit call
+//  @0x5c7ffc, the body submit's call @0x5c8039; Render_SectorEntity @0x5c4190 -
+//  the def callback's call @0x5c4335; BoneCallback_org0_World @0x4e3940 - the
+//  camera-tracked gate @0x4e3ab3..0x4e3aca ahead of the part's submit call
+//  @0x4e3b3b]
 bool presents_third_person(bool third_person, int camera_mode) {
     return third_person || camera_mode == 4;
 }

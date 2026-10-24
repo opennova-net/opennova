@@ -1434,6 +1434,70 @@ func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_mode
 			"teardown() restores the player camera's cull mask exactly")
 
 
+# Retail's composed avatar is one entity submission: the person callback runs for
+# the head submit and the body submit alike, and its camera-tracked gate keeps
+# every part off the camera in first person [orig: Terrain_RenderSectorEntitiesBySide
+# @0x5c7d50 - the head submit call @0x5c7ffc, the body submit's call @0x5c8039;
+# BoneCallback_org0_World @0x4e3940 - the gate @0x4e3ab3..0x4e3aca]. So every part
+# takes the body's first-person layer on each third -> first person edge, and a
+# part's own later layer write (a water mirror's verdict edge, a level rebuild;
+# here its caster flag's write) keeps it there: the head part, left on its own
+# world layer, drew its hat across the first-person view after the buggy's
+# chase view (L5-s42).
+func test_every_avatar_part_takes_the_first_person_layer_on_the_tp_fp_edge() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	_frame(world, presenter, camera, 2)
+	var avatar := _local_avatar(world)
+	assert_not_null(avatar, "the shared presenter built the real 3P avatar")
+	if avatar == null:
+		return
+	var parts: Array = [avatar]
+	parts.append_array(avatar.find_children("*", "ObjectModel", true, false))
+	assert_gt(parts.size(), 1, "the staged combo composes a head part under the body")
+
+	_rewrite_own_layers(parts)
+	_assert_avatar_layer(parts, Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY, "first person")
+	presenter.set_debug_third_person(true)
+	_frame(world, presenter, camera, 1)
+	_rewrite_own_layers(parts)
+	_assert_avatar_layer(parts, Water.VISUAL_LAYER_WORLD, "third person")
+	presenter.set_debug_third_person(false)
+	_frame(world, presenter, camera, 1)
+	_rewrite_own_layers(parts)
+	_assert_avatar_layer(parts, Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY, "back in first person")
+	for part in parts:
+		for vi in _visual_instances(part):
+			if vi is GeometryInstance3D:
+				assert_eq((vi as GeometryInstance3D).cast_shadow,
+						GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
+						"back in first person every part stays a slot caster (hidden by layer)")
+	presenter.teardown()
+
+
+# Each part's own layer write, the body's first so a part's own write lands last
+# (the body's walk reaches its parts' nodes too): the caster flag's write
+# re-applies the part's own presentation layer, as its mirror verdict edges and
+# level rebuilds do in a live frame.
+func _rewrite_own_layers(parts: Array) -> void:
+	for part in parts:
+		var model := part as ObjectModel
+		var caster := model.is_shadow_caster_enabled()
+		model.set_shadow_caster_enabled(not caster)
+		model.set_shadow_caster_enabled(caster)
+
+
+func _assert_avatar_layer(parts: Array, expected: int, label: String) -> void:
+	for part in parts:
+		var model := part as ObjectModel
+		for vi in _visual_instances(model):
+			assert_eq((vi as VisualInstance3D).layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
+					expected, "%s: %s's %s" % [label, model.name, (vi as Node).name])
+
+
 # The game shell calls setup() from its own _ready — while the player camera's
 # viewport is still making its children ready, so it rejects add_child ("parent
 # busy": _propagate_ready blocks the parent for the whole walk). A direct FP-pass
