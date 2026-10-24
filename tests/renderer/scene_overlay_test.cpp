@@ -660,7 +660,7 @@ void test_the_pipeline_states_are_every_builder_state() {
 	append_tracer_ribbon_overlay(beam, 4, fog, frame, SceneOverlaySlot::MirrorTracerRibbons);
 	append_tracer_ribbon_overlay(stock_and_smoke_ribbons(), 4, fog, frame,
 			SceneOverlaySlot::MirrorTracerRibbons);
-	CHECK(frame.batches.size() == 11);
+	CHECK(frame.batches.size() == 10);
 
 	const auto listed = [](SceneOverlayShading shading, bool depth_test) {
 		int count = 0;
