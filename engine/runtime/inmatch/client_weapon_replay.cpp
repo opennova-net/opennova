@@ -134,7 +134,11 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
         if (row.type_id && row.weapon_slot_handle != 0xFFFF) borrowers.push_back(row.handle);
     std::sort(borrowers.begin(), borrowers.end());
     std::vector<uint16_t> pumped;
-    const auto pump = [&](world::Entity &entity) {
+    // walked_z is the Z of the entity the walk hands the frame: the borrowing body for a
+    // borrowed slot, the gun itself for an unoccupied one.
+    // [orig: WeaponAction_ProcessAllEntities @0x542690 - the pool-0 push @0x5426BF, the
+    //  pool-1 push @0x542714]
+    const auto pump = [&](world::Entity &entity, int32_t walked_z) {
         auto *mount = &entity;
         if (local_slot(world, *mount)) return;
         const auto *def = world.tables.weapons.by_index(mount->primary_weapon_slot_adm);
@@ -158,10 +162,11 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
         // @0x24D2118; WeaponAction_Idle @0x5429a6 tests no owner].
         input.auto_reload = world.rules.auto_reload;
         input.current_tick = static_cast<int32_t>(world.logic_tick);
-        // The heat window's water gate compares the body Z with the plane raw (no
-        // dry sentinel) [orig: WeaponAction_ProcessFrame @0x540E60 - `cmp eax,
-        // g_EnvWaterHeightFixed; jg` @0x541007..0x54100D].
-        input.submerged = owner.position.z.q16 <= world.env.water_z;
+        // The heat window's water gate compares the walked entity's Z with the plane raw
+        // (no dry sentinel), never the slot owner's [orig: WeaponAction_ProcessFrame
+        // @0x540E60 - the walked entity's Z @0x541004, `cmp eax, g_EnvWaterHeightFixed;
+        // jg` @0x541007..0x54100D].
+        input.submerged = walked_z <= world.env.water_z;
         input.last_tick_of_batch = world.rules.last_tick_of_batch;
         world::WeaponFsmEvents events;
         world::weapon_fsm_tick(def->action_fsm, slot, input, events);
@@ -173,14 +178,14 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
         if (!mount || std::find(pumped.begin(), pumped.end(), mount->handle.packed) != pumped.end())
             continue;
         pumped.push_back(mount->handle.packed);
-        pump(*mount);
+        pump(*mount, row->z);
     }
     for (size_t i = 0; i < world.registry.pool_capacity(1); ++i) {
         auto *mount = world.registry.get(world::EntityHandle::make(1, static_cast<int>(i)));
         if (!mount || !mount->has_item_def || !(mount->item_attrib & world::kItemAttribEweap) ||
                 mount->primary_occupant.valid() || mount->primary_weapon_slot.heat_window_end_tick == 0 ||
                 std::find(pumped.begin(), pumped.end(), mount->handle.packed) != pumped.end()) continue;
-        pump(*mount);
+        pump(*mount, mount->position.z.q16);
     }
 }
 
