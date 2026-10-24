@@ -324,26 +324,44 @@ struct LadderRig {
 
 // The reset resolves through the tick's one resolver, its ladder entry included. A player body
 // takes the fresh entry from above (no facing test; the level look agrees with the anchor below
-// savedLivePose.Z): it is snapped onto the anchor column, (8, 8) (the box's mid pulled back 0.375
-// along the ladder's Yaw, its first plane's -90 degrees), at the anchor less 0x1000 (the box's
-// top less one unit, 0.5, so 0x7000), and latched. The resolve takes no lift (no ground under
-// it). A resolve without the climb channels latches on any CL touch but never snaps.
+// savedLivePose.Z): it is snapped onto the anchor column at the anchor less 0x1000 (the box's top
+// less one unit, 0.5, so 0x7000), latched, and the same contact's alignment then moves it.
+//   - The ladder's Yaw is its first plane's, -90 degrees: 0 - 0x40000000. Its trig runs through
+//     the image's radians-per-BAM double (dbl_7C3608, about 30.5 ppm above 2*pi/2^32), so the
+//     2^22-scaled sine is -4194303 (-4194304 at the 24-bit precision) and the cosine -201.
+//   - The anchor is the box's mid (0, -0.375) on the ladder's (8, 8), pulled back 0x6000 along
+//     the Yaw, each axis floored by the shrd: (8 + 2/65536, 8).
+//   - The snap puts the body there; the facing press then moves it 0x1000 along the Yaw
+//     ((cos22 * 0x1000) >> 22 = -1, (sin22 * 0x1000) >> 22 = -4096) and the sixty-fourth
+//     chase back toward the anchor ((anchor - pos + 32) >> 6 = 0, 64): (8*65536 + 1,
+//     8*65536 - 4032), whichever precision the trig ran at.
+// The resolve takes no lift (no ground under it). A resolve without the climb channels latches
+// on any CL touch but never snaps.
 // [orig: Entity_ResetToSpawnState @0x4B9610 - the pushes @0x4B9752..0x4B9754, the call
 //  @0x4B9755, the lift test @0x4B975D..0x4B9761; Entity_MovementCollisionResolver @0x4B2BD0 -
 //  `sub edi, [esi+88h]` @0x4B327D, the player gate @0x4B329F..0x4B32D7 (its Pitch read
 //  @0x4B32C8), the latch `or ecx, 100000h` @0x4B32DD stored @0x4B32E5, the column @0x4B32F2..
-//  0x4B3308, the snap from above @0x4B330D..0x4B3319; Entity_ComputeBoneCollisionForce
-//  @0x4AE150 - the CL anchor @0x4AE894..0x4AEA30]
+//  0x4B3308, the snap from above @0x4B330D..0x4B3319, the latched test @0x4B339C..0x4B33A4,
+//  the press @0x4B340F..0x4B3469, the chase @0x4B346C..0x4B3495; Entity_ComputeBoneCollisionForce
+//  @0x4AE150 - the CL anchor @0x4AE894..0x4AEA30 (the mid @0x4AE8A8..0x4AE8C6, the Yaw
+//  @0x4AE97D..0x4AE993, the pull-back @0x4AE9C8..0x4AEA30); dbl_7C3608 @0x7C3608]
 bool run_the_reset_resolve_enters_a_ladder() {
 	LadderRig r(/*player=*/true);
 	if (!expect(r.collision->candidate_count(r.body) >= 1, "ladder: the body's slice holds the ladder"))
 		return false;
 	w::entity_reset_to_spawn_state(*r.world, r.world->ai, r.entity());
 	const w::Entity &e = r.entity();
-	if (!expect(e.position.x.q16 == 8 * kOne && e.position.y.q16 == 8 * kOne,
-	            "ladder: the entry snaps the body onto the anchor column")) return false;
-	if (!expect(e.position.z.q16 == kOne / 2 - 0x1000,
-	            "ladder: from above, the body sits at the anchor less 0x1000")) return false;
+	const w::LadderContact &frame = r.collision->last_ladder_frame;
+	const bool column = e.position.x.q16 == 8 * kOne + 1 && e.position.y.q16 == 8 * kOne - 4032;
+	const bool from_above = e.position.z.q16 == kOne / 2 - 0x1000;
+	if (!column || !from_above)
+		std::fprintf(stderr, "ladder: pose (%d, %d, %d), anchor (%d, %d, %d) yaw %d valid %d, flags 0x%x\n",
+		             e.position.x.q16, e.position.y.q16, e.position.z.q16, frame.anchor[0],
+		             frame.anchor[1], frame.anchor[2], frame.yaw, int(frame.valid),
+		             static_cast<unsigned>(e.flags));
+	if (!expect(column, "ladder: the entry snaps the body onto the anchor column, then the press and the chase"))
+		return false;
+	if (!expect(from_above, "ladder: from above, the body sits at the anchor less 0x1000")) return false;
 	return expect((e.flags & w::kEntityFlagLadderContact) != 0,
 	              "ladder: the entry latches the ladder");
 }
