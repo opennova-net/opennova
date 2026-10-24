@@ -50,7 +50,7 @@ inline constexpr Slot k_runtime_overhead[] = {Slot::SIM_STEP, Slot::SIM_SINK, Sl
 inline constexpr Slot k_occl[] = {Slot::OCCL_BUILD, Slot::OCCL_PROBE, Slot::OCCL_APPLY, Slot::OCCL_GLUE};
 inline constexpr Slot k_occl_apply_remainder[] = {Slot::OCCL_BUILDING_QUERY, Slot::OCCL_BUILDING_APPLY, Slot::OCCL_CULL_QUERY, Slot::OCCL_CULL_APPLY, Slot::OCCL_LIGHT_QUERY, Slot::OCCL_LIGHT_APPLY, Slot::OCCL_WATER_APPLY};
 inline constexpr Slot k_env[] = {Slot::WORLD_WEATHER, Slot::WORLD_BLINK, Slot::WORLD_IRIS};
-inline constexpr Slot k_model_runtime_remainder[] = {Slot::MODEL_CLOCK_ANIMATION, Slot::MODEL_PANM, Slot::MODEL_MATERIAL, Slot::MODEL_ORDER_BOUNDS};
+inline constexpr Slot k_model_runtime_remainder[] = {Slot::MODEL_CLOCK_ANIMATION, Slot::MODEL_PANM, Slot::MODEL_MATERIAL, Slot::MODEL_ORDER_BOUNDS, Slot::MODEL_VIEW_WALK};
 inline constexpr Slot k_world_remainder[] = {Slot::WORLD_RUNTIME, Slot::WORLD_LOCAL_VIEW, Slot::WORLD_FRAMEFX, Slot::WORLD_SCENE_ENV, Slot::WORLD_ENV_NODES, Slot::WORLD_WATER, Slot::WORLD_TERRAIN, Slot::WORLD_FOLIAGE, Slot::WORLD_NETWORK_FRAME, Slot::WORLD_WEATHER, Slot::WORLD_BLINK, Slot::OCCL_BUILD, Slot::OCCL_PROBE, Slot::OCCL_APPLY, Slot::OCCL_GLUE, Slot::WORLD_IRIS, Slot::WORLD_SUN_VEIL, Slot::WORLD_LIGHT, Slot::WORLD_RAGDOLL, Slot::WORLD_MATERIAL, Slot::WORLD_SLOT_SHADOW, Slot::WORLD_PARTICLES, Slot::WORLD_AUDIO, Slot::WORLD_CLEAR, Slot::WORLD_ENV_CUBE};
 inline constexpr Slot k_other_process[] = {Slot::FRAME_PLAYER_BEFORE, Slot::FRAME_WORLD, Slot::FRAME_PLAYER_AFTER, Slot::FRAME_HUD, Slot::FRAME_STATS_SAMPLE, Slot::FRAME_SHELL_CONTROL, Slot::FRAME_ROUND_FLOW, Slot::FRAME_MENU_SHELL, Slot::FRAME_MENU_VIDEO, Slot::FRAME_DEBUG_REFRESH};
 inline constexpr Slot k_engine_frame[] = {Slot::FRAME_PROCESS_CALLBACKS, Slot::FRAME_PHYSICS_CALLBACKS, Slot::FRAME_DEFERRED_FLUSH, Slot::FRAME_DRAW, Slot::FRAME_PACING_INPUT};
@@ -212,7 +212,8 @@ inline constexpr StatsRow kRows[] = {
 	{"model_panm", "PANM transforms", 3, RowKind::SPAN, Slot::MODEL_PANM, nullptr, 0},
 	{"model_material", "Material generators/textures", 3, RowKind::SPAN, Slot::MODEL_MATERIAL, nullptr, 0},
 	{"model_order_bounds", "Render order + bounds", 3, RowKind::SPAN, Slot::MODEL_ORDER_BOUNDS, nullptr, 0},
-	{"model_runtime_remainder", "Awake-set/gating remainder", 3, RowKind::RESIDUAL, Slot::WORLD_MATERIAL, k_model_runtime_remainder, 4},
+	{"model_view_walk", "View walk + Inset/mirror splits", 3, RowKind::SPAN, Slot::MODEL_VIEW_WALK, nullptr, 0},
+	{"model_runtime_remainder", "Awake-set/gating remainder", 3, RowKind::RESIDUAL, Slot::WORLD_MATERIAL, k_model_runtime_remainder, 5},
 	{"slot_shadow", "Slot-shadow planning/publication", 2, RowKind::SPAN, Slot::WORLD_SLOT_SHADOW, nullptr, 0},
 	{"particles", "Particle-frame publication", 2, RowKind::SPAN, Slot::WORLD_PARTICLES, nullptr, 0},
 	{"audio", "Audio", 2, RowKind::SPAN, Slot::WORLD_AUDIO, nullptr, 0},

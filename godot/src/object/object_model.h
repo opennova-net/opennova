@@ -1114,6 +1114,11 @@ public:
 	// held_weapon_projection_culled), not the collect's eye views 2 and 3 carry.
 	static int update_authored_lod_views(const ObjectLodFrame *p_frames, int p_frame_count,
 			const ObjectLodFrame *p_mirror_gate_frames = nullptr);
+	// The models the alternate views (the weapon Inset, the water mirrors)
+	// reconcile each walk: their marked sets (a FrameStats VALUE).
+	static int64_t get_view_marked_count() {
+		return static_cast<int64_t>(inset_view_models_.size() + mirror_view_models_.size());
+	}
 	// The two-camera form (view 1 null = no Inset view), for tools and tests.
 	static int update_authored_lods_for_views(Camera3D *p_main, float p_main_width,
 			Camera3D *p_inset, float p_inset_width,

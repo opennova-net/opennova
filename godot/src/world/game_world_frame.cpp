@@ -1707,7 +1707,12 @@ void GameWorld::render_material_frame() {
 		}
 	}
 	if (frames[0].valid || frame_count == 2) {
+		const int64_t view_walk_start = frame_stats_on_ ? now_us() : 0;
 		ObjectModel::update_authored_lod_views(frames, 4, mirror_gates);
+		if (frame_stats_on_) {
+			frame_stats_->add(FrameStats::MODEL_VIEW_WALK, now_us() - view_walk_start);
+			frame_stats_->add(FrameStats::MODEL_VIEW_MARKED, ObjectModel::get_view_marked_count());
+		}
 		// The retained static instances select their RLOD per entity from the
 		// same views (the placer rewrites only the slots that crossed).
 		if (placer_.is_valid()) {
