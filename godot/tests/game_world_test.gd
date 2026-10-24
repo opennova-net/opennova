@@ -3508,6 +3508,24 @@ func test_hide_foliage_toggles_dispatcher_visibility() -> void:
 	assert_true(disp.visible, "showing foliage restores the dispatcher")
 
 
+# The three drawn frames past a mission start present black: retail's scene frame clears its
+# target past every pass it drew, presents that, then counts the start down (engine
+# inmatch::FrameOutcome::start_blank carries the witness). The fourth presents its scene, and an
+# unload leaves no cover up.
+func test_the_three_frames_past_a_mission_start_present_black() -> void:
+	var world := WorldFixture.boot_minimal(self)
+	var frames: Array = []
+	for _frame in 4:
+		world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
+		var cover := world.get_node_or_null("StartBlankCover") as CanvasLayer
+		frames.append([world.get_last_frame_start_blank(), cover != null and cover.visible])
+	assert_eq(frames, [[true, true], [true, true], [true, true], [false, false]],
+			"three black frames, then the scene")
+	world.unload()
+	var after := world.get_node_or_null("StartBlankCover") as CanvasLayer
+	assert_true(after == null or not after.visible, "no cover past the unload")
+
+
 func test_tick_feeds_dispatcher_silhouette_anchors_from_the_sim() -> void:
 	# The hide-in-grass anchor feed: every host tick routes the sim's
 	# crouched/prone infantry positions into the foliage dispatcher's silhouette

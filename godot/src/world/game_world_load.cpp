@@ -819,6 +819,8 @@ void GameWorld::unload() {
 	staged_runtime_options_.unref();
 	// A post-load timeline still timing its frames prints what it has (an instrument).
 	end_post_load_frames();
+	// No frame of this mission draws again: a start frame's black cover goes with it.
+	present_start_blank(false);
 	ragdolls_.clear();
 	scene_overlay_bodies_.clear();
 	minimap_water_mask_.unref();

@@ -1210,6 +1210,8 @@ void GameWorld::_bind_methods() {
 			&GameWorld::get_last_frame_world_drawn);
 	ClassDB::bind_method(D_METHOD("get_last_frame_hud_pass_called"),
 			&GameWorld::get_last_frame_hud_pass_called);
+	ClassDB::bind_method(D_METHOD("get_last_frame_start_blank"),
+			&GameWorld::get_last_frame_start_blank);
 	ClassDB::bind_method(D_METHOD("debug_refresh_render_pose", "camera"),
 			&GameWorld::debug_refresh_render_pose);
 	ClassDB::bind_method(D_METHOD("get_runtime_perf_counters"), &GameWorld::get_runtime_perf_counters);

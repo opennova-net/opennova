@@ -234,13 +234,21 @@ int main() {
 		slow.delta_seconds = TickAccumulator::kTickDt * 10.0;
 		slow.since_render_seconds = 0.0;
 		for (int frame = 0; frame < 4; ++frame) {
-			if (!expect(session.advance(slow).ticks_run() == 0,
+			const FrameOutcome out = session.advance(slow);
+			if (!expect(out.ticks_run() == 0,
 					"a re-based frame banks only the time since the last render")) return 1;
+			// The three frames that count the start down present black, the scene frame's
+			// clear ahead of its present; the fourth presents its scene
+			// [orig: Render_ProcessMainSceneFrame @0x5CAE62..0x5CAE94, ahead of the present
+			//  @0x5CAEA8 and the count-down @0x5CAF08].
+			if (!expect(out.start_blank == (frame < 3),
+					"the first three drawn frames past the start present black")) return 1;
 		}
 		// The full 160 ms banks again, smoothed against the start frames'
 		// seed-only history: (7 * 16 + 2576 + 4) >> 3 = 336 units, 5 quanta,
 		// 2 ticks.
-		if (!expect(session.advance(slow).ticks_run() == 2,
+		const FrameOutcome after_start = session.advance(slow);
+		if (!expect(after_start.ticks_run() == 2 && !after_start.start_blank,
 				"after the start frames the full frame time banks again")) return 1;
 
 		// An unsampled render clock falls back to the frame delta. The restart is no
@@ -322,7 +330,8 @@ int main() {
 		wait.delta_seconds = TickAccumulator::kTickDt * 10.0;
 		wait.since_render_seconds = 0.0;
 		const FrameOutcome first = session.advance(wait);
-		if (!expect(first.status == FrameStatus::Ok && !first.rendered && !first.scene_drawn,
+		if (!expect(first.status == FrameStatus::Ok && !first.rendered && !first.scene_drawn &&
+					!first.start_blank,
 				"render gate: a wait frame runs no render callback")) return 1;
 		// The load's re-base is the first frame's alone: that frame rendered nothing, so the next
 		// banks its full 160 ms over the seed-only history, its updates the wait's passes
@@ -335,6 +344,9 @@ int main() {
 		if (!expect(taken.ticks_run() == 1 && taken.rendered && taken.scene_drawn &&
 					session.renders(),
 				"render gate: the frame whose drain takes the 0x0F renders")) return 1;
+		// Its render is the first of the three past the start the wait's end armed: black.
+		if (!expect(taken.start_blank,
+				"render gate: the 0x0F frame's render presents black, the first of three")) return 1;
 	}
 	{
 		opennova::hud::HudToggleState view_up;

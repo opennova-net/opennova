@@ -14,6 +14,8 @@
 #include <runtime/inmatch/joiner_net_trace.h> // the post-load frames' net-pass marks
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the frame clock)
 
+#include <godot_cpp/classes/canvas_layer.hpp>
+#include <godot_cpp/classes/color_rect.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/os.hpp>
@@ -687,6 +689,7 @@ GameWorld::LegResult GameWorld::leg_scene_gate(FrameContext &r_ctx) {
 	if (sim.is_null()) {
 		r_ctx.rendered = true;
 		r_ctx.scene_drawn = last_frame_scene_drawn_ = true;
+		present_start_blank(false);
 		return kLegSkipped;
 	}
 	if (r_ctx.outcome.is_valid()) {
@@ -706,7 +709,34 @@ GameWorld::LegResult GameWorld::leg_scene_gate(FrameContext &r_ctx) {
 	// inmatch::FrameOutcome::hud_pass_called carries the witness): the HUD presenter's overlay
 	// pass follows it. A frame the session did not advance leaves the HUD's own gates.
 	if (r_ctx.outcome.is_valid()) last_frame_hud_pass_called_ = r_ctx.outcome->is_hud_pass_called();
+	// One of the three drawn frames past a mission start presents black (engine
+	// inmatch::FrameOutcome::start_blank carries the witness).
+	present_start_blank(r_ctx.outcome.is_valid() && r_ctx.outcome->is_start_blank());
 	return kLegRan;
+}
+
+// The three drawn frames past a mission start present black: retail's scene frame clears its
+// target past every pass it drew and presents that (engine inmatch::FrameOutcome::start_blank
+// carries the witness). The device's form is a black layer over every layer the frame draws (the
+// world, the HUD, the menus), shown for those frames alone; it is made at the first of them, and
+// the frame's idle flush submits its quad ahead of the frame's draw.
+void GameWorld::present_start_blank(bool p_blank) {
+	last_frame_start_blank_ = p_blank;
+	CanvasLayer *cover = Object::cast_to<CanvasLayer>(ObjectDB::get_instance(start_blank_cover_id_));
+	if (cover == nullptr) {
+		if (!p_blank || !is_inside_tree()) return;
+		cover = memnew(CanvasLayer);
+		cover->set_name("StartBlankCover");
+		cover->set_layer(RenderingServer::CANVAS_LAYER_MAX);
+		add_child(cover);
+		ColorRect *quad = memnew(ColorRect);
+		quad->set_color(Color(0, 0, 0, 1));
+		quad->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+		cover->add_child(quad);
+		quad->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
+		start_blank_cover_id_ = ObjectID(cover->get_instance_id());
+	}
+	cover->set_visible(p_blank);
 }
 
 GameWorld::LegResult GameWorld::leg_script_voice(FrameContext &r_ctx) {

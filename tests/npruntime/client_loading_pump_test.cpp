@@ -1029,8 +1029,8 @@ bool run_the_mission_start_bears_l_and_the_first_frame_ships_its_uplink() {
 // D-NET-NEW-L2-36: the final wait for the S2C 0x0F is the mission start's last loop, inside
 // the Game Loop mode's initialize; the role's tick that leaves it reports the initialize's end
 // once (Role::take_final_wait_end), so the session's bank and re-based frames start there.
-// [orig: Game_StartMission @0x524360 - dword_24C1174 = 3 @0x525E1F, the final wait
-//  @0x526295..0x5262E5; GameLoop_Init @0x526370 (the call @0x526377); Game_MainLoop
+// [orig: Game_StartMission @0x524360 - g_MissionStartBlankFrameCount = 3 @0x525E1F, the final
+//  wait @0x526295..0x5262E5; GameLoop_Init @0x526370 (the call @0x526377); Game_MainLoop
 //  @0x52B70F..0x52B757, @0x52B766]
 bool run_the_final_wait_end_ends_the_mode_init() {
 	RoleHarness h;

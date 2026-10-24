@@ -588,6 +588,10 @@ public:
 	// (HudOverlay::set_overlay_pass_called). A frame the session did not advance leaves the
 	// HUD's own gates (true).
 	bool get_last_frame_hud_pass_called() const { return last_frame_hud_pass_called_; }
+	// The last frame was one of the three drawn past a mission start, which present black
+	// (engine inmatch::FrameOutcome::start_blank): the StartBlankCover layer showed over the
+	// frame's every layer.
+	bool get_last_frame_start_blank() const { return last_frame_start_blank_; }
 	// Re-evaluates only camera-dependent production render state for an
 	// exact-pose visual capture (the settle contract and the frozen-pose leg
 	// order live with the replay table in game_world_frame.cpp).
@@ -1247,6 +1251,11 @@ private:
 	bool last_frame_scene_drawn_ = true;
 	bool last_frame_world_skipped_ = false;
 	bool last_frame_hud_pass_called_ = true;
+	bool last_frame_start_blank_ = false;
+	// The black cover the three drawn frames past a mission start present (present_start_blank),
+	// made at the first of them.
+	ObjectID start_blank_cover_id_;
+	void present_start_blank(bool p_blank);
 	// Identity latch for measured render time on the water reflection RTT.
 	ObjectID stats_water_vp_id_;
 	// Edge latch for the compositor passes' RD GPU timestamps (F3 capture

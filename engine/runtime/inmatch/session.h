@@ -370,6 +370,16 @@ struct FrameOutcome {
 	// pass on it (hud::HudFrameState::overlay_pass_called) as the session runs its radar step
 	// [orig: Render_ProcessMainSceneFrame @0x5CAB2B..0x5CAD04, the calls @0x5CACE3 / @0x5CAD04].
 	bool hud_pass_called = false;
+	// The drawn scene frame is one of the three past a mission start: retail's scene frame
+	// clears its target to black past every pass it drew (the world, the HUD, the menu and the
+	// connection icons) and presents that, so those frames show black; its count-down follows the
+	// present. The embedder presents the frame black.
+	// [orig: Render_ProcessMainSceneFrame @0x5CA0F0 - `cmp g_MissionStartBlankFrameCount, 0`
+	//  @0x5CAE62, CGfxDevice_SetClearColor(0) called @0x5CAE73, CGfxDevice_Clear(flags 1, the
+	//  target) called @0x5CAE94, ahead of CD3DDevice_EndScene called @0x5CAE9E and
+	//  CD3DDevice_Present called @0x5CAEA8; the count-down @0x5CAF08; Game_StartMission @0x524360 -
+	//  `mov g_MissionStartBlankFrameCount, 3` @0x525E1F, on every role]
+	bool start_blank = false;
 
 	int32_t ticks_run() const { return static_cast<int32_t>(ticks.size()); }
 	bool terminal() const {
@@ -850,8 +860,8 @@ private:
 	// The frame's bank with its lock when the input asks for one (live frames only): the
 	// ticks due; `lock_stamp_ms` the lock's last read when it slept, else 0.
 	int32_t bank_frame(double elapsed, const FrameInput &input, uint32_t &lock_stamp_ms);
-	// The mission-start frames still to draw (dword_24C1174) and whether the
-	// last one re-based the clock after its render (dword_24E1F30).
+	// The mission-start frames still to draw (g_MissionStartBlankFrameCount) and whether the
+	// last one re-based the clock after its render (g_MainLoopRebaseClockAfterRender).
 	static constexpr int32_t kStartRebaseFrames = 3;
 	int32_t start_rebase_frames_ = 0;
 	bool rebase_clock_ = false;

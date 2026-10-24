@@ -1480,8 +1480,8 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	// of what follows. The frame whose drain took the 0x0F renders the main loop's first
 	// frame past that reset, so the three arm ahead of its count-down below and its render
 	// takes the first: the next three frames bank only the time since a render.
-	// [orig: Game_StartMission @0x524360 - dword_24C1174 = 3 @0x525E1F, the final wait
-	//  @0x526295..0x5262E5 (no render); Render_ProcessMainSceneFrame @0x5CAEFF..0x5CAF0E
+	// [orig: Game_StartMission @0x524360 - g_MissionStartBlankFrameCount = 3 @0x525E1F, the
+	//  final wait @0x526295..0x5262E5 (no render); Render_ProcessMainSceneFrame @0x5CAEFF..0x5CAF0E
 	//  (the count-down @0x5CAF08); Game_MainLoop @0x52B630 - the mode-init reset
 	//  @0x52B70F..0x52B757 (the smoothing @0x52B71B), the clock read @0x52B766]
 	if (final_wait_ended_) {
@@ -1495,6 +1495,9 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	// stands in for counts none down [orig: Render_ProcessMainSceneFrame
 	// @0x5caeff..0x5caf0e, the scene arm @0x521CE8 alone].
 	if (out.scene_drawn && start_rebase_frames_ > 0) {
+		// The frame presents black: its clear reads the count ahead of the count-down
+		// (FrameOutcome::start_blank carries the witness).
+		out.start_blank = true;
 		--start_rebase_frames_;
 		rebase_clock_ = true;
 	}

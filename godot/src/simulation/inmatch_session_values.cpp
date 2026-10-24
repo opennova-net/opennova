@@ -195,6 +195,7 @@ void MissionFrameOutcome::assign(const opennova::inmatch::FrameOutcome &p_value)
 	scene_drawn_ = p_value.scene_drawn;
 	world_skipped_ = p_value.world_skipped;
 	hud_pass_called_ = p_value.hud_pass_called;
+	start_blank_ = p_value.start_blank;
 }
 
 } // namespace godot
