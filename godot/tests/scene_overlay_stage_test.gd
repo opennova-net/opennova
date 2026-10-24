@@ -20,6 +20,8 @@ const SLOT_MIRROR_SUN_GLOW := 8
 const SLOT_INSET_LIGHT_CORONAS := 9
 const SLOT_WATER_GLINT := 3
 const SLOT_INSET_WATER_GLINT := 12
+const SLOT_INSET_MIRROR_CELESTIAL_BODIES := 15
+const SLOT_INSET_MIRROR_SUN_GLOW := 16
 # A stock-style sky body: an FF_ST_AD_LUM surface whose RGB generator style
 # 113 reads CTRL UPL_INTENSITY (the mglare authoring), staged under the name
 # the fixture environment's glare_3di line carries.
@@ -197,6 +199,86 @@ func test_the_mirror_closes_with_the_dim_and_the_sky_redraw() -> void:
 	assert_true(drawn.has(SLOT_MIRROR_SUN_GLOW), "and the far-band glow")
 	assert_true(drawn.find(SLOT_MIRROR_DIM) < drawn.find(SLOT_MIRROR_SUN_GLOW),
 			"the glow follows the dim")
+
+
+func _inset_mirror_overlay_report(world: GameWorld) -> Dictionary:
+	var renderer := world.get_effect_world().get_node("ParticleRenderer") as ParticleRenderer
+	return renderer.get_debug_draw_list_report().get(
+			"inset_mirror_overlay_backend", {}) as Dictionary
+
+
+# The weapon Inset's water mirror closes its own target the same way, at its own eye: the Inset
+# pass's view words reach Render_MainScene through the prerender and the discs sit at that pass's
+# camera [orig: Render_WeaponInsetScene @ 0x5c9740 - the Camera_ComputeThirdPersonView call
+# @ 0x5c9841, the Render_TerrainScene call @ 0x5c99b7; Water_ReflectionPrerender @ 0x5c2780 - the
+# Render_MainScene call @ 0x5c27c6; Render_CelestialBodies @ 0x5acaa0 - the call @ 0x5acae5]. Its
+# redraw rides its own slots while its mirror renders; the main mirror's pass never draws it.
+func test_the_inset_mirror_redraws_its_own_sky() -> void:
+	var root_dir := WorldFixture.stage_minimal_root("scene_overlay_inset_mirror", true)
+	_staged_dirs.append(root_dir)
+	for body in ["mglare.3di", "msun.3di"]:
+		assert_eq(DirAccess.copy_absolute(ProjectSettings.globalize_path(GLARE_FIXTURE),
+				root_dir.path_join(body)), OK)
+	var world := WorldFixture.make_world(self)
+	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
+			func(mission: MissionData) -> void:
+				assert_true(mission.set_header_string("terrain", "Tmap"))), OK)
+	var camera := Camera3D.new()
+	camera.position = Vector3(16, 300, -16)
+	world.add_child(camera)
+	camera.make_current()
+	# A water plane above the fixture's relief (12..240): the Inset's water pass runs whatever
+	# its own collect's bounds.
+	var water := world.get_node("Water") as Water
+	water.set_mission_water_height_override(250.0)
+	var inset_view := SubViewport.new()
+	inset_view.size = Vector2i(256, 256)
+	inset_view.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	inset_view.world_3d = camera.get_world_3d()
+	add_child_autofree(inset_view)
+	var inset_camera := Camera3D.new()
+	inset_camera.current = true
+	inset_view.add_child(inset_camera)
+	inset_camera.global_transform = camera.global_transform
+	# The scope the Inset's mirror reads its view block from, off the tree so no local view
+	# re-composes it.
+	var scope: HudInsetScope = autofree(HudInsetScope.new())
+	await get_tree().process_frame
+	world.set_inset_scope(scope)
+	world.get_effect_world().set_second_scene_camera(inset_camera)
+	world.tick(camera.global_position, camera.get_global_transform(), 0.02)
+	assert_true(water.is_inset_mirror_rendered(), "the Inset pass renders its own mirror")
+	var submitted: Array = _mirror_overlay_report(world).get("submitted_slots", []) as Array
+	assert_true(submitted.has(SLOT_MIRROR_CELESTIAL_BODIES), "the main mirror's disc redraw")
+	assert_true(submitted.has(SLOT_INSET_MIRROR_CELESTIAL_BODIES),
+			"and the Inset mirror's own, in its own slot")
+	assert_eq(String(_inset_mirror_overlay_report(world).get("view_kind", "")), "inset_mirror")
+	# The Inset pass stops: its mirror's redraw goes with it.
+	world.get_effect_world().set_second_scene_camera(null)
+	world.tick(camera.global_position, camera.get_global_transform(), 0.02)
+	assert_false(water.is_inset_mirror_rendered())
+	submitted = _mirror_overlay_report(world).get("submitted_slots", []) as Array
+	assert_true(submitted.has(SLOT_MIRROR_CELESTIAL_BODIES))
+	assert_false(submitted.has(SLOT_INSET_MIRROR_CELESTIAL_BODIES),
+			"no Inset mirror, no Inset mirror redraw")
+	assert_false(submitted.has(SLOT_INSET_MIRROR_SUN_GLOW))
+	if RenderingServer.get_rendering_device() == null:
+		world.set_inset_scope(null)
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	world.get_effect_world().set_second_scene_camera(inset_camera)
+	world.tick(camera.global_position, camera.get_global_transform(), 0.02)
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	var inset_drawn: Array = _inset_mirror_overlay_report(world).get("drawn_slots", []) as Array
+	assert_true(inset_drawn.has(SLOT_INSET_MIRROR_CELESTIAL_BODIES),
+			"the Inset mirror draws its own redraw")
+	assert_false(inset_drawn.has(SLOT_MIRROR_CELESTIAL_BODIES), "and never the main mirror's")
+	var main_drawn: Array = _mirror_overlay_report(world).get("drawn_slots", []) as Array
+	assert_false(main_drawn.has(SLOT_INSET_MIRROR_CELESTIAL_BODIES),
+			"the main mirror never draws the Inset mirror's")
+	world.get_effect_world().set_second_scene_camera(null)
+	world.set_inset_scope(null)
 
 
 func test_a_live_light_corona_draws_in_the_overlay_pass() -> void:

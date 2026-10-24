@@ -49,6 +49,10 @@ enum class SceneOverlaySlot : uint8_t {
 	// (kMirrorOverlayOrder, kInsetMirrorOverlayOrder).
 	MirrorTracerRibbons = 13,
 	InsetMirrorTracerRibbons = 14,
+	// The weapon Inset's water mirror's own sky redraw, at its own eye
+	// (kInsetMirrorOverlayOrder).
+	InsetMirrorCelestialBodies = 15,
+	InsetMirrorSunGlow = 16,
 };
 
 // The main scene's tail, in draw order. The scope's aperture view runs the
@@ -128,18 +132,25 @@ inline constexpr std::array<SceneOverlaySlot, 5> kMirrorOverlayOrder = {
 	SceneOverlaySlot::MirrorSunGlow,
 };
 
-// The weapon Inset's mirror runs the same reflected subscene under its own
-// mirrored view [orig: Render_WeaponInsetScene @ 0x5c9740 - the Render_TerrainScene
-// call @ 0x5c99b7; Render_TerrainScene @ 0x610c80 - the Water_ReflectionPrerender
-// call @ 0x610ce0; Water_ReflectionPrerender @ 0x5c2780 - the Render_MainScene call
-// @ 0x5c27c6], so its pass leads with its own ribbons, built against its own
-// camera; the rest of its tail is the main mirror's.
+// The weapon Inset's mirror runs the same reflected subscene and the same
+// closing under its own mirrored view: the Inset pass composes its camera into
+// the view words [orig: Render_WeaponInsetScene @ 0x5c9740 -
+// Camera_ComputeThirdPersonView the call @ 0x5c9841, the Render_TerrainScene call
+// @ 0x5c99b7; Render_TerrainScene @ 0x610c80 - the Water_ReflectionPrerender call
+// @ 0x610ce0], and the prerender hands those words to Render_MainScene
+// [orig: Water_ReflectionPrerender @ 0x5c2780 - g_ViewPos* / g_ViewRot* read
+// @ 0x5c2783..0x5c27b6, the Render_MainScene call @ 0x5c27c6], whose discs sit at
+// that pass's camera [orig: Render_CelestialBodies @ 0x5acaa0 - the camera word
+// read by the Math_FixedPointToFloat3_YNegated call @ 0x5acae5]. So its pass
+// leads with its own ribbons, built against its own camera, and closes with
+// its own sky redraw at its own eye; the coronas and the full-target dim are
+// the main mirror's batches.
 inline constexpr std::array<SceneOverlaySlot, 5> kInsetMirrorOverlayOrder = {
 	SceneOverlaySlot::InsetMirrorTracerRibbons,
 	SceneOverlaySlot::LightCoronas,
 	SceneOverlaySlot::MirrorDim,
-	SceneOverlaySlot::MirrorCelestialBodies,
-	SceneOverlaySlot::MirrorSunGlow,
+	SceneOverlaySlot::InsetMirrorCelestialBodies,
+	SceneOverlaySlot::InsetMirrorSunGlow,
 };
 
 // The fixed-function combine a batch draws with.

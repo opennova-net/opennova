@@ -37,8 +37,9 @@ void test_the_main_scene_order_and_the_mirror_subset() {
 	// The mirror draws its tracer ribbons (@ 0x5c85f6) after its two particle
 	// passes, then the coronas (@ 0x5c85fd), then Render_MainScene's dim
 	// (@ 0x5c186c) and the far-band sun/moon and glow redraw (@ 0x5c18fb,
-	// @ 0x5c1904). The Inset's mirror runs the same subscene with its own
-	// ribbons.
+	// @ 0x5c1904). The Inset's mirror runs the same subscene and closing with
+	// its own ribbons and its own sky redraw; the coronas and the dim are the
+	// main mirror's batches.
 	CHECK(kMirrorOverlayOrder.size() == 5);
 	CHECK(kMirrorOverlayOrder[0] == SceneOverlaySlot::MirrorTracerRibbons);
 	CHECK(kMirrorOverlayOrder[1] == SceneOverlaySlot::LightCoronas);
@@ -47,8 +48,10 @@ void test_the_main_scene_order_and_the_mirror_subset() {
 	CHECK(kMirrorOverlayOrder[4] == SceneOverlaySlot::MirrorSunGlow);
 	CHECK(kInsetMirrorOverlayOrder.size() == 5);
 	CHECK(kInsetMirrorOverlayOrder[0] == SceneOverlaySlot::InsetMirrorTracerRibbons);
-	for (std::size_t i = 1; i < kMirrorOverlayOrder.size(); ++i)
-		CHECK(kInsetMirrorOverlayOrder[i] == kMirrorOverlayOrder[i]);
+	CHECK(kInsetMirrorOverlayOrder[1] == SceneOverlaySlot::LightCoronas);
+	CHECK(kInsetMirrorOverlayOrder[2] == SceneOverlaySlot::MirrorDim);
+	CHECK(kInsetMirrorOverlayOrder[3] == SceneOverlaySlot::InsetMirrorCelestialBodies);
+	CHECK(kInsetMirrorOverlayOrder[4] == SceneOverlaySlot::InsetMirrorSunGlow);
 
 	// Submitted out of order, compiled in the witnessed order; within a slot
 	// the submission order holds.
@@ -298,6 +301,53 @@ void test_the_mirror_closes_with_the_dim_and_the_far_band_redraw() {
 	// The main scene never draws the mirror's closing slots.
 	compile_scene_overlay(frame, kSceneOverlayOrder.data(), kSceneOverlayOrder.size(), list);
 	CHECK(list.size() == 1);
+}
+
+// The weapon Inset's mirror closes its own target with its own sky redraw: the
+// Inset pass's view words reach Render_MainScene through the prerender, and the
+// discs sit at that pass's camera [orig: Render_WeaponInsetScene @ 0x5c9740 -
+// the Camera_ComputeThirdPersonView call @ 0x5c9841, the Render_TerrainScene call
+// @ 0x5c99b7; Water_ReflectionPrerender @ 0x5c2780 - @ 0x5c2783..0x5c27b6, the
+// Render_MainScene call @ 0x5c27c6; Render_CelestialBodies @ 0x5acaa0 - the call
+// @ 0x5acae5]. Each mirror pass draws its own redraw after the shared dim, and
+// never the other mirror's.
+void test_each_mirror_redraws_its_own_sky() {
+	SceneOverlayFrame frame;
+	const float tri[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+	const float uv[6] = {0, 0, 1, 0, 0, 1};
+	const float rgb[3] = {0.5f, 0.5f, 0.5f};
+	const float unit[3] = {1.0f, 1.0f, 1.0f};
+	append_mirror_dim_overlay(64.0f / 255.0f, frame);
+	append_self_lum_overlay(SceneOverlaySlot::MirrorCelestialBodies, tri, uv, 3, rgb, unit, 1.0f,
+			1, frame, SceneOverlayDepth::FarBand);
+	append_self_lum_overlay(SceneOverlaySlot::MirrorSunGlow, tri, uv, 3, rgb, unit, 1.0f, 2, frame,
+			SceneOverlayDepth::FarBand);
+	append_self_lum_overlay(SceneOverlaySlot::InsetMirrorCelestialBodies, tri, uv, 3, rgb, unit,
+			1.0f, 3, frame, SceneOverlayDepth::FarBand);
+	append_self_lum_overlay(SceneOverlaySlot::InsetMirrorSunGlow, tri, uv, 3, rgb, unit, 1.0f, 4,
+			frame, SceneOverlayDepth::FarBand);
+	std::vector<SceneOverlayBatch> list;
+	compile_scene_overlay(frame, kMirrorOverlayOrder.data(), kMirrorOverlayOrder.size(), list);
+	CHECK(list.size() == 3);
+	if (list.size() == 3) {
+		CHECK(list[0].slot == SceneOverlaySlot::MirrorDim);
+		CHECK(list[1].slot == SceneOverlaySlot::MirrorCelestialBodies && list[1].texture == 1);
+		CHECK(list[2].slot == SceneOverlaySlot::MirrorSunGlow && list[2].texture == 2);
+	}
+	compile_scene_overlay(frame, kInsetMirrorOverlayOrder.data(), kInsetMirrorOverlayOrder.size(),
+			list);
+	CHECK(list.size() == 3);
+	if (list.size() == 3) {
+		CHECK(list[0].slot == SceneOverlaySlot::MirrorDim);
+		CHECK(list[1].slot == SceneOverlaySlot::InsetMirrorCelestialBodies && list[1].texture == 3);
+		CHECK(list[1].depth == SceneOverlayDepth::FarBand);
+		CHECK(list[2].slot == SceneOverlaySlot::InsetMirrorSunGlow && list[2].texture == 4);
+	}
+	// Neither scene view draws a mirror's redraw.
+	compile_scene_overlay(frame, kSceneOverlayOrder.data(), kSceneOverlayOrder.size(), list);
+	CHECK(list.empty());
+	compile_scene_overlay(frame, kInsetOverlayOrder.data(), kInsetOverlayOrder.size(), list);
+	CHECK(list.empty());
 }
 
 // The NVG laser beams: the ribbon build's draw as the NvgLaserBeams slot's
@@ -581,6 +631,7 @@ void test_the_combines_blend_words() {
 int main() {
 	test_the_main_scene_order_and_the_mirror_subset();
 	test_the_mirror_closes_with_the_dim_and_the_far_band_redraw();
+	test_each_mirror_redraws_its_own_sky();
 	test_the_inset_tail_draws_its_own_walks_and_no_glare();
 	test_the_murk_gate_includes_the_waterline();
 	test_the_builders_carry_the_pass_states();
