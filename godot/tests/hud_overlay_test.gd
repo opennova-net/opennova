@@ -979,6 +979,12 @@ func test_player_view_effects_draw_retail_asset_stack() -> void:
 			+ "Render_ProcessMainSceneFrame @ 0x5cac4b, after the scene composites].")
 	assert_not_null(veil.material as ShaderMaterial,
 			"The veil rect samples the opennova_sun_veil_alpha global via its shader.")
+	# Retail skips the quad when the glare is 2 or less [orig:
+	# Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8b0 (cmp @ 0x5ad925, jle @ 0x5ad928)]:
+	# a gated frame (a zero alpha) blends nothing over the surface.
+	var veil_shader := (veil.material as ShaderMaterial).shader if veil.material is ShaderMaterial else null
+	assert_true(veil_shader != null and veil_shader.code.contains("discard;"),
+			"A gated frame's veil fragments discard: no full-surface zero-alpha blend.")
 	assert_true(effects.is_nvg_mask_visible(),
 			"First-person-visible NVG draws the NVG.tga mask and gain scale "
 			+ "[orig: NVG_DrawMaskAndGain @0x5cffab..0x5d0055].")
