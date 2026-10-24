@@ -894,6 +894,10 @@ private:
 	// placer's per-model pulse at the object stage's constant value (the load plan's per-model
 	// pulse witness) and the freeze's per-file present, each at its stored checkpoint.
 	void pulse_load_progress(int p_percent);
+	// One loading-screen present at the checkpoint it stored last (its due rule gates it),
+	// from inside a loader: the effect system's load and its atlas build (engine
+	// hud/loading_screen.h carries the witness).
+	void present_stored_load_progress();
 	// A loading step of a join's declared loads (the S2C 0x11's terrain, the final 0x64's
 	// effects, the 0x1A's stage emits): the NovaWorld session's periodic update on the join's
 	// simulation, the drive's until the runtime adopts it (engine

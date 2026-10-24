@@ -92,6 +92,48 @@ func test_above_the_water_the_mirrors_draw_the_flagged_model_alone() -> void:
 				"mirror %d: and the flagged model stays on it" % m)
 
 
+# A person's model in every presentation state: the world entity (a remote
+# person, an AI soldier, a corpse), the drawn local person (the third-person
+# body, its head and gun, its overlays, the first-person canopy, whose submit
+# comes ahead of the camera-tracked gate), the hidden first-person body and the
+# view model. Above the water none is on either mirror camera (no person carries
+# the Reflective bit); below the water the collect runs unfiltered, so the two
+# drawn states are on both and the two the camera never draws are on neither.
+# [orig: Terrain_CollectVisibleEntitiesForReflection @0x5c90a0 - the filter word
+# @0x5c9109..0x5c911f; BoneCallback_org0_World @0x4e3940 - the canopy submit
+# @0x4e3aa5, the camera-tracked gate @0x4e3ab3..0x4e3aca]
+func test_a_person_in_every_presentation_state_is_off_the_mirrors_above_the_water() -> void:
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var person := _fixture_model(container)
+	assert_not_null(person)
+	if person == null:
+		return
+	var mirrors: Array[int] = [Water.REFLECTION_CULL_MASK | MIRROR_VIEW,
+			Water.REFLECTION_CULL_MASK | INSET_MIRROR_VIEW]
+	var states := {
+		ObjectModel.PRESENTATION_LAYER_WORLD: true,
+		ObjectModel.PRESENTATION_LAYER_LOCAL_BODY: true,
+		ObjectModel.PRESENTATION_LAYER_LOCAL_BODY_HIDDEN: false,
+		ObjectModel.PRESENTATION_LAYER_VIEWMODEL: false,
+	}
+	for state in states.keys():
+		person.set_presentation_layer(state)
+		var layers := _all_layers(person)
+		assert_ne(layers, 0, "state %d: the model carries visual instances" % state)
+		for m in mirrors.size():
+			var above := mirrors[m]
+			var below := above | WORLD_NO_MIRROR | MAIN_VIEW_NO_MIRROR
+			assert_eq(layers & above, 0,
+					"state %d: mirror %d leaves the person above the water" % [state, m])
+			if bool(states[state]):
+				assert_ne(layers & below, 0,
+						"state %d: mirror %d draws the drawn person below the water" % [state, m])
+			else:
+				assert_eq(layers & below, 0,
+						"state %d: mirror %d never draws a person the camera does not" % [state, m])
+
+
 func test_a_node_the_main_view_hides_draws_in_the_mirror_on_a_twin() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)

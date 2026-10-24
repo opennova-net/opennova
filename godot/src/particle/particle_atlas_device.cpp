@@ -117,7 +117,14 @@ bool ParticleAtlasDevice::needs_rebuild(const Definitions &p_definitions,
 
 void ParticleAtlasDevice::rebuild(const Definitions &p_definitions,
 		const Callable &p_provider, const String &p_texture_dir,
-		bool p_procedural_fallback, std::uint32_t p_page_flags) {
+		bool p_procedural_fallback, std::uint32_t p_page_flags, const Callable &p_present) {
+	// The loading screen at its stored checkpoint, where the game's build presents it (engine
+	// hud/loading_screen.h carries the witness).
+	const auto present = [&p_present]() {
+		if (p_present.is_valid())
+			p_present.call();
+	};
+	present();
 	definitions_ = p_definitions;
 	page_flags_ = p_page_flags;
 	definition_visuals_.clear();
@@ -187,6 +194,8 @@ void ParticleAtlasDevice::rebuild(const Definitions &p_definitions,
 		entry_lookup.emplace(key, index);
 		if (name.empty() || used_fallback)
 			fallback_entries.emplace(static_cast<int>(type), index);
+		// Each frame the build decodes and lays out presents once.
+		present();
 		return index;
 	};
 
@@ -223,6 +232,8 @@ void ParticleAtlasDevice::rebuild(const Definitions &p_definitions,
 		}
 	}
 
+	// Past the walk that found every frame.
+	present();
 	opennova::renderer::ParticleAtlasBuild build = builder.build();
 	entries_ = std::move(build.entries);
 	rejected_entries_ = build.rejected_entries;

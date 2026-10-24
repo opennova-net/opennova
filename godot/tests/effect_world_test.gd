@@ -121,6 +121,34 @@ func test_the_atlas_builds_once_from_decoded_frames() -> void:
 			"the first draw builds no atlas again")
 
 
+# The game's effect loaders present the loading screen at its stored checkpoint as they go,
+# so a long load keeps the screen live through the screen's 100 ms rule: the effect system's
+# load past each loose file it parses and once past the archive walk, the atlas build at its
+# start, past each frame it decodes and past its walk (engine runtime/hud/loading_screen.h
+# carries the witness).
+# [orig: CEffectSystem_Init @0x5f6070 - LoadingScreen_PresentStoredProgress called @0x5f630b
+#  (each loose .ptl), @0x5f6582 (past the archive walk); CParticleManager_BuildTextureAtlases
+#  @0x5e8db0 - the calls @0x5e8dfb, @0x5e8e0c, @0x5e8ef5]
+func test_the_effect_loaders_present_the_stored_checkpoint_as_they_go() -> void:
+	# synth_minimal_effect's graphic1 is spark.tga.
+	TestFs.write_bytes(self, _root_dir.path_join("spark.tga"), TestFs.tga_bytes(Vector2i(8, 8)))
+	var world := _make_world()
+	var load_presents := [0]
+	world.load_from_resource_root(_make_root(), func() -> void: load_presents[0] += 1)
+	assert_eq(world.file_count(), 4, "the fixture root's four loose effect files parse")
+	assert_eq(load_presents[0], 5, "one present past each loose file and one past the walk")
+	var atlas_presents := [0]
+	world.build_texture_atlases(func() -> void: atlas_presents[0] += 1)
+	var entries := int(world.get_debug_draw_list_report().get("atlas_entry_count", 0))
+	assert_gt(entries, 0, "spark.tga decodes into the build")
+	assert_eq(atlas_presents[0], entries + 2,
+			"one present at the start, one past each decoded frame and one past the walk")
+	# Without a present, the loaders present nothing and load the same.
+	var quiet := _make_world()
+	quiet.load_from_resource_root(_make_root())
+	assert_eq(quiet.file_count(), 4)
+
+
 # Retail's effect loader walks every mounted archive's directory and skips an
 # entry whose +12 stamp is 0, so an archived `.ptl` packed unstamped (a
 # third-party packer's) never parses; every retail entry, and every entry our

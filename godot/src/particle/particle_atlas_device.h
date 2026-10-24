@@ -69,9 +69,13 @@ public:
 	// retail frame names) and builds the pages. `p_provider` answers a frame's
 	// name with its decoded Image. A frame no provider or texture
 	// directory resolves is unresolved; with the procedural fallback on it
-	// draws a soft white disc per type, else nothing.
+	// draws a soft white disc per type, else nothing. A valid `p_present` presents the
+	// loading screen at its stored checkpoint where the game's atlas build does: at the
+	// build's start, past each frame it decodes and past the walk (engine
+	// hud/loading_screen.h carries the witness).
 	void rebuild(const Definitions &p_definitions, const Callable &p_provider,
-			const String &p_texture_dir, bool p_procedural_fallback, std::uint32_t p_page_flags);
+			const String &p_texture_dir, bool p_procedural_fallback, std::uint32_t p_page_flags,
+			const Callable &p_present = Callable());
 
 	const std::vector<DefinitionVisual> &definition_visuals() const { return definition_visuals_; }
 	const std::vector<opennova::renderer::ParticleAtlasEntry> &entries() const { return entries_; }

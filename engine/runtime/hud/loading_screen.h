@@ -144,6 +144,26 @@ inline bool loading_present_due(int elapsed_ms, bool reported_changed) {
 //  NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42cb20 - the call @0x42cb79;
 //  NapiNPClientMsg_0x00D @0x432c40 - the call @0x433236; NapiNPClientMsg_0x010 @0x433400 -
 //  the call @0x43342b; NapiClient_WaitForGameStart @0x42cc10 - the pass @0x42cc67..0x42ccbf]
+//
+// The loaders inside a mission start present the screen at its stored checkpoint as they go,
+// each call gated by the 100 ms rule above, so a long loader keeps the screen live: the effect
+// system's load past each loose `ptl\*.ptl` it parses, past each loose gore-set file, and once
+// past the archive walk; its atlas build at its start, past the size probe of every frame and
+// at the top of each frame's place-and-decode (the shell's effect world presents past each
+// loose file it parses and once past its walk, and its atlas device at its start, past each
+// frame it decodes into the build and past its walk, GameWorld::present_stored_load_progress).
+// [orig: CEffectSystem_Init @0x5f6070 - LoadingScreen_PresentStoredProgress @0x586d70 called
+//  @0x5f630b (the loose .ptl leg), @0x5f6451 (the loose gore leg), @0x5f6582 (past the
+//  archive walk); CParticleManager_BuildTextureAtlases @0x5e8db0 - the calls @0x5e8dfb (its
+//  start), @0x5e8e0c (past the size probes, sub_5E32E0 called @0x5e8e02) and @0x5e8ef5 (each
+//  frame's iteration, ahead of its CTextureData_LoadTGA call @0x5e9087);
+//  CEffectSystem_BuildTextureAtlases @0x5f65b0 <- Game_StartMission @0x524360 (the call
+//  @0x5249b9). The terrain's loaders present the same way between their steps
+//  (Terrain_Init @0x60fbe0 - @0x60fcd2 / @0x60fd23 / @0x60fd3a; PolyTrn_LoadTerrainConfig
+//  @0x60e3d0 - @0x60e5d9 / @0x60e648 / @0x60e663 / @0x60e677 / @0x60e6b8) and the model
+//  reload between its pools (Game_ReloadEntityModelsAndCallbacks @0x522830 - @0x522943 /
+//  @0x522956 / @0x522abb / @0x522c01); the shell presents there at its stage steps and per
+//  model (mission/mission_load_plan.h).]
 
 // The composited resources: the stock background when the mission has no
 // sidecar image [orig: "loadscrn.pcx" @ 0x521e20], the two text fonts

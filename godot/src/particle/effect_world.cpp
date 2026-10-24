@@ -10,6 +10,8 @@
 #include "util/string_convert.h"
 
 #include <base/io/fixed.h>
+#include <base/resource_index/resource_index.h>
+#include <base/vfs/vfs.h>
 #include <formats/particle/parser.h>
 
 #include <array>
@@ -181,11 +183,29 @@ void EffectWorld::set_main_view_nvg_scene(bool p_nvg_scene) {
 	_ensure_renderer()->set_main_view_nvg_scene(p_nvg_scene);
 }
 
-int EffectWorld::load_from_resource_root(const Ref<ResourceRoot> &p_root) {
+int EffectWorld::load_from_resource_root(const Ref<ResourceRoot> &p_root,
+		const Callable &p_present) {
 	clear_world();
 	if (p_root.is_null()) {
 		return 0;
 	}
+	// The loading screen at its stored checkpoint, where the game's effect load presents it:
+	// past each loose file's parse and once past the archive walk (engine hud/loading_screen.h
+	// carries the witness). A loose file is one no archive slot carries: the walk lists those
+	// ahead of the archives' (ResourceIndex::effect_files).
+	const auto present = [&p_present]() {
+		if (p_present.is_valid())
+			p_present.call();
+	};
+	const opennova::ResourceIndex &index = p_root->engine_index();
+	const auto loose = [&index](const String &p_name) {
+		const std::string name = p_name.utf8().get_data();
+		for (int slot = 0; slot < opennova::kArchiveSlotCount; ++slot) {
+			if (index.archive_slot_has_file(slot, name))
+				return false;
+		}
+		return true;
+	};
 	root_ = p_root;
 	// A particle graphic loads through the particle manager's reader: the loose
 	// tga folder first, then the mounted name (renderer::TextureLoader::Particle),
@@ -209,12 +229,17 @@ int EffectWorld::load_from_resource_root(const Ref<ResourceRoot> &p_root) {
 		}
 		Ref<ParticleFile> file;
 		file.instantiate();
-		if (file->load_from_buffer_after(bytes, logical_name, read_state) != OK) {
+		const bool parsed = file->load_from_buffer_after(bytes, logical_name, read_state) == OK;
+		if (p_present.is_valid() && loose(logical_name)) {
+			present();
+		}
+		if (!parsed) {
 			UtilityFunctions::push_warning(vformat("effect world: failed to parse %s", logical_name));
 			continue;
 		}
 		files_.push_back(file);
 	}
+	present();
 	_open_files();
 	return effect_count();
 }
@@ -488,9 +513,9 @@ int EffectWorld::warm_all_effects(const Vector3 &p_position) {
 	return spawned;
 }
 
-void EffectWorld::build_texture_atlases() {
+void EffectWorld::build_texture_atlases(const Callable &p_present) {
 	ParticleRenderer *renderer = _ensure_renderer();
-	renderer->build_catalog();
+	renderer->build_catalog(p_present);
 	renderer->create_particle_devices();
 }
 
@@ -872,8 +897,8 @@ void EffectWorld::_bind_methods() {
 			&EffectWorld::set_session_render_settings);
 	ClassDB::bind_method(D_METHOD("set_main_view_nvg_scene", "nvg_scene"),
 			&EffectWorld::set_main_view_nvg_scene);
-	ClassDB::bind_method(D_METHOD("load_from_resource_root", "root"),
-			&EffectWorld::load_from_resource_root);
+	ClassDB::bind_method(D_METHOD("load_from_resource_root", "root", "present"),
+			&EffectWorld::load_from_resource_root, DEFVAL(Callable()));
 	ClassDB::bind_method(D_METHOD("load_particle_file", "file"), &EffectWorld::load_particle_file);
 	ClassDB::bind_method(D_METHOD("clear_world"), &EffectWorld::clear_world);
 	ClassDB::bind_method(D_METHOD("reset_runtime_state"), &EffectWorld::reset_runtime_state);
@@ -888,7 +913,8 @@ void EffectWorld::_bind_methods() {
 			&EffectWorld::spawn_effect_request, DEFVAL(Variant()));
 	ClassDB::bind_method(D_METHOD("warm_all_effects", "position"), &EffectWorld::warm_all_effects);
 	ClassDB::bind_method(D_METHOD("render_now", "time_ms"), &EffectWorld::render_now);
-	ClassDB::bind_method(D_METHOD("build_texture_atlases"), &EffectWorld::build_texture_atlases);
+	ClassDB::bind_method(D_METHOD("build_texture_atlases", "present"),
+			&EffectWorld::build_texture_atlases, DEFVAL(Callable()));
 	ClassDB::bind_method(D_METHOD("attach_distortion_row", "frame_fx"),
 			&EffectWorld::attach_distortion_row);
 	ClassDB::bind_method(D_METHOD("get_debug_draw_list_report"),

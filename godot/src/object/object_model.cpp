@@ -2124,6 +2124,8 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_mirror_reflected);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "mirror_reflected"),
 			"set_mirror_reflected", "get_mirror_reflected");
+	ClassDB::bind_method(D_METHOD("set_presentation_layer", "layer"),
+			&ObjectModel::set_presentation_layer);
 	ClassDB::bind_method(D_METHOD("set_avatar_part", "part"), &ObjectModel::set_avatar_part);
 	ClassDB::bind_method(D_METHOD("get_avatar_part"), &ObjectModel::get_avatar_part);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "avatar_part", PROPERTY_HINT_ENUM,
@@ -2384,6 +2386,7 @@ void ObjectModel::_bind_methods() {
 	BIND_ENUM_CONSTANT(BUILD_PROFILE_ALPHA_COPIES_US);
 	BIND_ENUM_CONSTANT(BUILD_PROFILE_MATERIAL_SHADERS_US);
 	BIND_ENUM_CONSTANT(BUILD_PROFILE_SLOT_COUNT);
+	BIND_ENUM_CONSTANT(PRESENTATION_LAYER_WORLD);
 	BIND_ENUM_CONSTANT(PRESENTATION_LAYER_LOCAL_BODY);
 	BIND_ENUM_CONSTANT(PRESENTATION_LAYER_LOCAL_BODY_HIDDEN);
 	BIND_ENUM_CONSTANT(PRESENTATION_LAYER_VIEWMODEL);

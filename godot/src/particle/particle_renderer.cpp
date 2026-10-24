@@ -787,9 +787,10 @@ public:
 	void rebuild_catalog(
 			const ParticleAtlasDevice::Definitions &definitions,
 			const Callable &provider, const String &texture_dir,
-			bool procedural_fallback, std::uint32_t page_flags) {
+			bool procedural_fallback, std::uint32_t page_flags, const Callable &present) {
 		materials.clear_materials();
-		atlas.rebuild(definitions, provider, texture_dir, procedural_fallback, page_flags);
+		atlas.rebuild(definitions, provider, texture_dir, procedural_fallback, page_flags,
+				present);
 	}
 
 	// The distortion commands of a far-side list, for the compositor far
@@ -1094,8 +1095,8 @@ void ParticleRenderer::_bind_methods() {
 			&ParticleRenderer::get_procedural_fallback_enabled);
 	ClassDB::bind_method(D_METHOD("render_now", "time_ms"),
 			&ParticleRenderer::render_now);
-	ClassDB::bind_method(D_METHOD("build_catalog"),
-			&ParticleRenderer::build_catalog);
+	ClassDB::bind_method(D_METHOD("build_catalog", "present"),
+			&ParticleRenderer::build_catalog, DEFVAL(Callable()));
 	ClassDB::bind_method(D_METHOD("shutdown"), &ParticleRenderer::shutdown);
 	ClassDB::bind_method(D_METHOD("attach_distortion_row", "frame_fx"),
 			&ParticleRenderer::attach_distortion_row);
@@ -1400,7 +1401,7 @@ bool ParticleRenderer::get_procedural_fallback_enabled() const {
 	return procedural_fallback_enabled_;
 }
 
-void ParticleRenderer::build_catalog() {
+void ParticleRenderer::build_catalog(const Callable &p_present) {
 	if (shutdown_ || !impl_ || scene_.is_null())
 		return;
 	const opennova::particle::ParticleFrameSnapshot &frame =
@@ -1409,7 +1410,7 @@ void ParticleRenderer::build_catalog() {
 			session_texcompression_level_, session_particle_density_);
 	if (impl_->atlas.needs_rebuild(frame.definitions, page_flags)) {
 		impl_->rebuild_catalog(frame.definitions, image_provider_, texture_dir_,
-				procedural_fallback_enabled_, page_flags);
+				procedural_fallback_enabled_, page_flags, p_present);
 	}
 }
 

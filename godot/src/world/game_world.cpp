@@ -41,6 +41,7 @@ constexpr const char *kSignalJoinAdmissionReady = "join_admission_ready";
 constexpr const char *kSignalJoinDeployPickRequired = "join_deploy_pick_required";
 constexpr const char *kSignalSessionLost = "session_lost";
 constexpr const char *kSignalLoadProgress = "load_progress";
+constexpr const char *kSignalLoadPresentStored = "load_present_stored";
 constexpr const char *kSignalMissionEffects = "mission_effects";
 constexpr const char *kSignalMinimapWaterChanged = "minimap_water_changed";
 constexpr const char *kSignalMusicContextOpened = "music_context_opened";
@@ -977,6 +978,9 @@ void GameWorld::_bind_methods() {
 	// witnessed per-stage anchors, engine/runtime/mission/mission_load_plan.h)
 	// and pulsed at the object stage's value from inside the placement loop.
 	ADD_SIGNAL(MethodInfo(kSignalLoadProgress, PropertyInfo(Variant::INT, "percent")));
+	// A present at the loading screen's stored checkpoint from inside a loader (the effect
+	// system's load and its atlas build; GameWorld::present_stored_load_progress).
+	ADD_SIGNAL(MethodInfo(kSignalLoadPresentStored));
 	// The two HUD legs of every mission start's load, a dedicated host's included: the
 	// overlay system's init past the rows' init and ahead of a joiner's first 0x2F
 	// (`mission_file` names the mission whose text the HUD's tables resolve), then the

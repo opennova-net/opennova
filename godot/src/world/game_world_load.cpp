@@ -57,6 +57,7 @@ constexpr const char *kSignalWorldLoaded = "world_loaded";
 constexpr const char *kSignalLoadFailed = "load_failed";
 constexpr const char *kSignalProcessExitRequested = "process_exit_requested";
 constexpr const char *kSignalLoadProgress = "load_progress";
+constexpr const char *kSignalLoadPresentStored = "load_present_stored";
 constexpr const char *kSignalMinimapWaterChanged = "minimap_water_changed";
 constexpr const char *kSignalMusicContextOpened = "music_context_opened";
 constexpr const char *kSignalMusicContextClosed = "music_context_closed";
@@ -740,6 +741,10 @@ void GameWorld::start_mission_root() {
 
 void GameWorld::pulse_load_progress(int p_percent) {
 	emit_signal(kSignalLoadProgress, p_percent);
+}
+
+void GameWorld::present_stored_load_progress() {
+	emit_signal(kSignalLoadPresentStored);
 }
 
 // Each loading step's present is followed by the session's periodic update, which a join's
@@ -1940,12 +1945,15 @@ EffectWorld *GameWorld::create_effect_world(const Ref<ResourceRoot> &p_resource_
 	// The session's words, before the pages are built (CParticleTexture_InitTextureAndChannels
 	// runs inside the effect load, after the mission start's copy).
 	effect_world->set_session_render_settings(session_texcompression_level_, session_particle_density_);
-	const int count = effect_world->load_from_resource_root(p_resource_root);
+	// Both loaders present the loading screen at its stored checkpoint as they go, as the game's
+	// do (engine hud/loading_screen.h carries the witness).
+	const Callable present = callable_mp(this, &GameWorld::present_stored_load_progress);
+	const int count = effect_world->load_from_resource_root(p_resource_root, present);
 	// Then its texture atlases, each frame's file decoded into its page, as the effect system's
 	// init builds them; the warm's first draw then builds none (engine renderer/particle_atlas.h
 	// carries the witness, D-NET-NEW-L3-26).
 	if (p_timeline.is_valid()) p_timeline->span("texture_atlases");
-	effect_world->build_texture_atlases();
+	effect_world->build_texture_atlases(present);
 	if (p_timeline.is_valid()) p_timeline->end_span();
 	UtilityFunctions::print_verbose(vformat("GameWorld: effect world: %d effect(s) across %d .ptl file(s)",
 			count, effect_world->file_count()));

@@ -156,8 +156,10 @@ public:
 	// session's page flags, when it is not already built for them: the effect
 	// system's init builds it once at the mission start, so the first draw
 	// builds none (engine renderer/particle_atlas.h carries the witness,
-	// D-NET-NEW-L3-26). render_now builds it the same way when it is stale.
-	void build_catalog();
+	// D-NET-NEW-L3-26). render_now builds it the same way when it is stale. The
+	// load's build presents the loading screen through `p_present` as it goes
+	// (ParticleAtlasDevice::rebuild).
+	void build_catalog(const Callable &p_present = Callable());
 
 	// The post-particle overlay tail (runtime/renderer/scene_overlay.h): every
 	// view this renderer composes carries one overlay pass right after its

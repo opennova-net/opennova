@@ -138,7 +138,11 @@ public:
 	// before it resolves ANY effectdef, so cross-file pdefs resolve
 	// regardless of file order; order only picks which duplicate id wins
 	// (first registration), so the walk's order is retail's (D-PTL-24).
-	int load_from_resource_root(const Ref<ResourceRoot> &p_root);
+	// A valid `p_present` presents the loading screen at its stored checkpoint
+	// past each loose file the walk parses and once past the archive walk
+	// (engine hud/loading_screen.h carries the witness).
+	int load_from_resource_root(const Ref<ResourceRoot> &p_root,
+			const Callable &p_present = Callable());
 	// The in-memory entry (the GUT fixtures author documents directly).
 	void load_particle_file(const Ref<ParticleFile> &p_file);
 	void clear_world();
@@ -187,7 +191,9 @@ public:
 	// the witness, D-NET-NEW-L3-26). The particle materials create as the pages build, so
 	// every particle pass's device shaders create with them (ParticleRenderer::
 	// create_particle_devices; the same header carries the witness, D-NET-NEW-LF-13).
-	void build_texture_atlases();
+	// The build presents the loading screen through `p_present` as the game's does
+	// (ParticleAtlasDevice::rebuild).
+	void build_texture_atlases(const Callable &p_present = Callable());
 	// The tracer pool's materials at the mission textures stage: the distortion ribbons' and
 	// the overlay stages' device objects (ParticleRenderer::create_tracer_pool_devices;
 	// engine renderer/tracer_frame.h creates_tracer_pool_shaders carries the witness,

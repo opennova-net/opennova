@@ -114,6 +114,8 @@ func dismiss() -> void:
 	if _world != null:
 		if _world.load_progress.is_connected(_on_load_progress):
 			_world.load_progress.disconnect(_on_load_progress)
+		if _world.load_present_stored.is_connected(_on_load_present_stored):
+			_world.load_present_stored.disconnect(_on_load_present_stored)
 		if _world.join_session_identified.is_connected(_on_join_session_identified):
 			_world.join_session_identified.disconnect(_on_join_session_identified)
 	if _screen != null:
@@ -277,6 +279,8 @@ func _show_screen(load_info: LoadingScreenInfo) -> void:
 	_screen.setup(_root, load_info)
 	if not _world.load_progress.is_connected(_on_load_progress):
 		_world.load_progress.connect(_on_load_progress)
+	if not _world.load_present_stored.is_connected(_on_load_present_stored):
+		_world.load_present_stored.connect(_on_load_present_stored)
 	if not _world.join_session_identified.is_connected(_on_join_session_identified):
 		_world.join_session_identified.connect(_on_join_session_identified)
 
@@ -292,4 +296,11 @@ func _on_join_session_identified(info: LoadingScreenInfo) -> void:
 func _on_load_progress(percent: int) -> void:
 	if _screen != null:
 		_screen.set_progress(percent)
+		_screen.present()
+
+
+# A loader's present at the checkpoint the screen stored last: its due rule decides whether it
+# draws (engine runtime/hud/loading_screen.h carries the witness).
+func _on_load_present_stored() -> void:
+	if _screen != null:
 		_screen.present()
