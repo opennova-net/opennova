@@ -101,10 +101,9 @@ std::string lookup_with_override(const File *override_table, const File *table,
 
 std::string File::get(const std::string &key) const {
   if (!lookup_built_) {
-    // Fallback linear search if lookup not built.
-    std::string upper_key = strutil::to_upper(key);
+    // Fallback linear search if lookup not built (keys compared in place).
     for (const auto &entry : entries) {
-      if (strutil::to_upper(entry.key) == upper_key) {
+      if (strutil::iequals(entry.key, key)) {
         return entry.text;
       }
     }
@@ -119,9 +118,8 @@ std::string File::get(const std::string &key) const {
 
 bool File::has(const std::string &key) const {
   if (!lookup_built_) {
-    std::string upper_key = strutil::to_upper(key);
     for (const auto &entry : entries) {
-      if (strutil::to_upper(entry.key) == upper_key) {
+      if (strutil::iequals(entry.key, key)) {
         return true;
       }
     }
@@ -148,12 +146,15 @@ const Entry *File::find_in_section(const std::string &section_name,
   size_t start_index = 0;
   for (size_t s = 0; s < found; ++s) start_index += sections[s].string_count;
   // [orig: TextResource_FindKeyInSection @ 0x75D1E0] — bounded key walk,
-  // first match wins, index validated against the header entry count.
-  const std::string upper_key = strutil::to_upper(key);
+  // first match wins, index validated against the header entry count. Each
+  // key compares in place, case-insensitively, as the walk's _stricmp does
+  // (the call @ 0x75D1FB): no copy of either string per entry (an uppercased
+  // copy of every key walked was the HUD's per-frame lookups' allocation
+  // churn, D-NET-NEW-LF-22 LF-s18).
   for (uint32_t i = 0; i < sections[found].string_count; ++i) {
     const size_t index = start_index + i;
     if (index >= entries.size()) return nullptr;
-    if (strutil::to_upper(entries[index].key) == upper_key) return &entries[index];
+    if (strutil::iequals(entries[index].key, key)) return &entries[index];
   }
   return nullptr;
 }
