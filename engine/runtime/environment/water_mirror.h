@@ -49,6 +49,7 @@
 
 #include <formats/env/env.h>
 #include <runtime/renderer/d3d9_raster.h>
+#include <runtime/renderer/object_lod.h> // object_lod_focal_pixels
 
 #include <cstdint>
 
@@ -84,6 +85,24 @@ namespace opennova::env {
 // this square; a shell whose camera couples its two fovs through the
 // target's own ratio must supply that projection explicitly.
 inline constexpr int kReflectionRttSize = 512;
+
+// A water mirror's RLOD walk selects each listed entity's level with the
+// projected radius its collect stored for it, not one of its own: the collect
+// projects over the live eye with the viewport at the square target, so the
+// focal is the target side's over the scene view's horizontal half-angle,
+// while its frame scale is the screen width's (g_OverlayCtx).
+// [orig: Terrain_RenderSectorEntities hands Render_SectorEntity the list entry's
+//  stored radius (@0x5C7C99 / @0x5C7D13), which the sub-pixel floor
+//  (@0x5C42D8) and Model_SelectRlodLevel (@0x5C42EB) read; the collectors store
+//  dword_A784F0 per entry (@0x5C71C5..0x5C71D8, @0x5C903B..0x5C904E);
+//  Render_MainScene sets the viewport to the target (Render_SetViewport
+//  @0x5C1614) ahead of the collect's Viewport_BuildProjectionMatrix @0x5C16E8 over
+//  the live block; Terrain_CollectVisibleEntitiesForReflection @0x5C90A0 writes
+//  g_RlodFrameScale over g_OverlayCtx @0x5C90E5..0x5C90F1]
+inline int32_t mirror_collect_focal_pixels(double tan_half_horizontal) {
+	return renderer::object_lod_focal_pixels(static_cast<float>(kReflectionRttSize),
+			tan_half_horizontal);
+}
 
 // The witnessed reflected-scene dim (env #37's mechanism): after the mirrored
 // sky/terrain/world render into the RTT, detail >= 2 multiplies the WHOLE

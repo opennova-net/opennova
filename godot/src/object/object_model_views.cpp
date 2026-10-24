@@ -39,7 +39,9 @@ namespace {
 
 constexpr int kMainView = 0;
 constexpr int kInsetView = 1;
-constexpr int kViewCount = 2;
+// The water mirrors' reflected subscenes: the main scene's, the Inset's.
+constexpr int kMirrorView = 2;
+constexpr int kViewCount = 4;
 
 // The instance uniforms the object shader family declares
 // (shaders/object/shared.gdshaderinc, foliage_mask.gdshaderinc,
@@ -249,6 +251,18 @@ int ObjectModel::update_authored_lod_views(const ObjectLodFrame *p_frames,
 				}
 				continue;
 			}
+			if (v >= kMirrorView) {
+				// A water mirror's own walk: its level and sub-pixel verdict.
+				const int m = v - kMirrorView;
+				if (!mirror_view_open_[m]) {
+					continue;
+				}
+				const int mirror_level = lod_index >= 0 ? lod_index
+						: (model->mirror_[m].own & kInsetOwnLod) != 0 ? model->mirror_[m].lod
+																		: model->active_lod_;
+				model->set_mirror_view_subpixel(m, mirror_level, !above_floor);
+				continue;
+			}
 			if (lod_index >= 0) {
 				model->inset_lod_ = lod_index;
 			} else if ((model->inset_own_ & kInsetOwnLod) == 0) {
@@ -295,6 +309,20 @@ int ObjectModel::update_authored_lod_views(const ObjectLodFrame *p_frames,
 		if (level >= 0 && level != attachment->active_lod_) {
 			attachment->set_active_lod(level);
 			++applied;
+		}
+		// The owner's mirror levels, as its main one above.
+		for (int m = 0; m < 2; ++m) {
+			if (owner == nullptr || (owner->mirror_[m].own & kInsetOwnLod) == 0 ||
+					!mirror_view_open_[m]) {
+				continue;
+			}
+			const int mirror_level = attachment->exact_owner_lod_
+					? owner->mirror_[m].lod
+					: opennova::renderer::attachment_lod_index(owner->mirror_[m].lod,
+							  threshold_count);
+			attachment->set_mirror_view_subpixel(m,
+					mirror_level >= 0 ? mirror_level : attachment->active_lod_,
+					owner->mirror_[m].subpixel_hidden);
 		}
 		if (!inset) {
 			continue;
@@ -539,7 +567,10 @@ bool ObjectModel::mirror_view_draws(int p_view) const {
 	const bool external_hidden = !is_visible() && main_verdicts;
 	const bool own = (mirror_[p_view].own & kInsetOwnOcclusion) != 0;
 	const bool hidden = own ? mirror_[p_view].occlusion_hidden : occlusion_hidden_;
-	return ancestors && !external_hidden && present_visible_ && !hidden && !subpixel_hidden_ &&
+	const bool subpixel = (mirror_[p_view].own & kInsetOwnLod) != 0
+			? mirror_[p_view].subpixel_hidden
+			: subpixel_hidden_;
+	return ancestors && !external_hidden && present_visible_ && !hidden && !subpixel &&
 			!camera_pixel_culled_ && (own || mirror_admits_base(p_view));
 }
 
@@ -607,6 +638,22 @@ void ObjectModel::set_mirror_view_lod(int p_view, int p_lod_index) {
 		return;
 	}
 	mirror_[p_view].lod = level;
+	mirror_[p_view].subpixel_hidden = false;
+	mirror_[p_view].own |= kInsetOwnLod;
+	mark_mirror_view(p_view);
+}
+
+void ObjectModel::set_mirror_view_subpixel(int p_view, int p_lod_index, bool p_subpixel_hidden) {
+	if (p_view < 0 || p_view > 1) {
+		return;
+	}
+	const int level = exact_owner_lod_ ? p_lod_index : clamp_lod_index(p_lod_index);
+	if ((mirror_[p_view].own & kInsetOwnLod) != 0 && mirror_[p_view].lod == level &&
+			mirror_[p_view].subpixel_hidden == p_subpixel_hidden && mirror_view_models_.has(this)) {
+		return;
+	}
+	mirror_[p_view].lod = level;
+	mirror_[p_view].subpixel_hidden = p_subpixel_hidden;
 	mirror_[p_view].own |= kInsetOwnLod;
 	mark_mirror_view(p_view);
 }
@@ -619,6 +666,7 @@ void ObjectModel::clear_mirror_occlusion(int p_view) {
 	mirror_[p_view].occlusion_hidden = false;
 	mirror_[p_view].section_mask = -1;
 	mirror_[p_view].lod = 0;
+	mirror_[p_view].subpixel_hidden = false;
 	if (mirror_view_models_.has(this)) {
 		refresh_view_split();
 	}
@@ -647,6 +695,7 @@ void ObjectModel::set_mirror_view_state(int p_view, bool p_open, bool p_below_wa
 			model->mirror_[p_view].occlusion_hidden = false;
 			model->mirror_[p_view].section_mask = -1;
 			model->mirror_[p_view].lod = 0;
+			model->mirror_[p_view].subpixel_hidden = false;
 		}
 		model->refresh_view_split();
 		// The water side decides which mirror bits a split node keeps.

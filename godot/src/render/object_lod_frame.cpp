@@ -6,6 +6,7 @@
 #include <base/io/fixed.h>
 
 #include <runtime/renderer/object_lod.h>
+#include <runtime/environment/water_mirror.h> // mirror_collect_focal_pixels
 
 #include <algorithm>
 #include <cmath>
@@ -63,6 +64,19 @@ ObjectLodFrame ObjectLodFrame::from_tangents(const Transform3D &p_camera_transfo
 	frame.right = p_camera_transform.basis.get_column(0).normalized();
 	frame.up = p_camera_transform.basis.get_column(1).normalized();
 	frame.valid = frame.focal_pixels > 0 && frame.projection_scale > 0.0f;
+	return frame;
+}
+
+ObjectLodFrame ObjectLodFrame::mirror_collect(const Transform3D &p_eye,
+		float p_tan_half_horizontal, float p_screen_width, int p_object_detail) {
+	ObjectLodFrame frame = from_tangents(p_eye, p_tan_half_horizontal, p_tan_half_horizontal,
+			p_screen_width, p_object_detail);
+	if (!frame.valid) {
+		return frame;
+	}
+	frame.focal_pixels =
+			opennova::env::mirror_collect_focal_pixels(static_cast<double>(p_tan_half_horizontal));
+	frame.valid = frame.focal_pixels > 0;
 	return frame;
 }
 

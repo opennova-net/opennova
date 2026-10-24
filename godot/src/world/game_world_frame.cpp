@@ -1575,9 +1575,16 @@ void GameWorld::render_material_frame() {
 	// evaluates and none draws its render-stream noise (engine inmatch::FrameOutcome::
 	// world_skipped); the models' clocks and anims still advance.
 	ObjectModel::set_world_skipped(last_frame_world_skipped_);
-	ObjectLodFrame frames[2];
+	// Views 2 and 3: each water mirror's reflected subscene, which selects its
+	// levels with its own collect's projection (ObjectLodFrame::mirror_collect),
+	// while that mirror renders.
+	ObjectLodFrame frames[4];
 	if (Camera3D *image = image_camera()) {
 		frames[0] = ObjectLodFrame::from_camera(image, surface_width(), object_detail_);
+		if (water_ != nullptr && water_->is_water_pass_active() && frames[0].valid) {
+			frames[2] = ObjectLodFrame::mirror_collect(image->get_global_transform(),
+					frames[0].tan_half_horizontal, surface_width(), object_detail_);
+		}
 	}
 	// The Inset camera carries this frame's pose: the local-view leg handed it
 	// over (present_local_view_frame).
@@ -1614,6 +1621,17 @@ void GameWorld::render_material_frame() {
 			occlusion_->apply_inset_frame(inset, inset_width, mission_forces_indoors(),
 					object_detail_,
 					scope != nullptr && terrain_ != nullptr ? &mirror_block : nullptr);
+			// The Inset's mirror (its water pass as the Inset's collect just
+			// latched it): its collect over the view block it reflects, the
+			// Inset's horizontal field.
+			float tan_h = 0.0f;
+			float tan_v = 0.0f;
+			if (scope != nullptr && terrain_ != nullptr && water_ != nullptr &&
+					water_->is_inset_water_pass_active() &&
+					ObjectLodFrame::camera_tangents(inset, tan_h, tan_v)) {
+				frames[3] = ObjectLodFrame::mirror_collect(mirror_block, tan_h, surface_width(),
+						object_detail_);
+			}
 			if (dispatcher_ != nullptr) {
 				dispatcher_->render_inset_frame(inset,
 						occlusion_->get_inset_foliage_mask_anchors(), get_frame_clock_ms());
@@ -1630,7 +1648,7 @@ void GameWorld::render_material_frame() {
 		}
 	}
 	if (frames[0].valid || frame_count == 2) {
-		ObjectModel::update_authored_lod_views(frames, frame_count);
+		ObjectModel::update_authored_lod_views(frames, 4);
 		// The retained static instances select their RLOD per entity from the
 		// same views (the placer rewrites only the slots that crossed).
 		if (placer_.is_valid()) {

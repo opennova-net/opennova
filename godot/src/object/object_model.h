@@ -436,8 +436,8 @@ private:
 	// The frame's views a projection is kept for: the frame's image (view 0)
 	// and the weapon Inset pass (view 1; update_authored_lod_views).
 	uint64_t lod_projection_frame_ = 0;
-	int32_t lod_projected_radius_q16_[2] = {};
-	bool lod_projection_visible_[2] = {};
+	int32_t lod_projected_radius_q16_[4] = {};
+	bool lod_projection_visible_[4] = {};
 	// --- the weapon Inset view (object_model_views.cpp) ---
 	// The Inset view's own verdicts where it gave one (a clear bit follows the
 	// main view's): the Inset collect's hide and raw section mask, the Inset
@@ -515,6 +515,7 @@ private:
 		bool occlusion_hidden = false;
 		int64_t section_mask = -1;
 		int lod = 0;
+		bool subpixel_hidden = false;
 		bool split = false;
 	};
 	MirrorState mirror_[2];
@@ -1087,7 +1088,10 @@ public:
 			float p_viewport_width,
 			float p_viewport_height,
 			int p_object_detail = opennova::renderer::kObjectLodDetailLevelMax);
-	// The same walk per view drawing the world this frame: view 0 the frame's
+	// The same walk per view drawing the world this frame (up to four frames:
+	// views 2 and 3 the main scene's and the Inset's water mirrors, each its
+	// collect's projection, ObjectLodFrame::mirror_collect, valid while that
+	// mirror renders): view 0 the frame's
 	// image, view 1 (present while it renders) the weapon Inset pass, which
 	// retail runs as its own scene pass with its own frame scale, sub-pixel
 	// floor and RLOD walk. The node takes view 0's level and verdict; view 1's
@@ -1118,6 +1122,9 @@ public:
 	// A presenter-driven model's level in a mirror (the death pieces' own level
 	// walk, run per collect): the set_active_lod of that mirror's view.
 	void set_mirror_view_lod(int p_view, int p_lod_index);
+	// A mirror's own RLOD walk (update_authored_lod_views views 2 and 3): its
+	// level and sub-pixel verdict for the model.
+	void set_mirror_view_subpixel(int p_view, int p_lod_index, bool p_subpixel_hidden);
 	// Whether mirror view `p_view` renders this frame and its eye is below the
 	// water; a closing view releases every verdict and converges every model.
 	static void set_mirror_view_state(int p_view, bool p_open, bool p_below_water);
