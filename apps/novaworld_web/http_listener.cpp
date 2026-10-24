@@ -626,10 +626,13 @@ std::optional<UserRecord> HttpListener::retail_login_user(
 	return std::nullopt;
 }
 
+std::string HttpListener::web_root_for(const std::string &web_host, uint16_t port) {
+	return "http://" + web_host + (port == 80 ? std::string() : ":" + std::to_string(port));
+}
+
 std::string HttpListener::host_url_for(const std::string &web_host, uint16_t port,
                                        const std::string &host_page) {
-	return "http://" + web_host + (port == 80 ? std::string() : ":" + std::to_string(port)) + "/" +
-	       host_page;
+	return web_root_for(web_host, port) + "/" + host_page;
 }
 
 std::string HttpListener::host_url(const catalog::GameRow &game) const {
@@ -2419,12 +2422,24 @@ void HttpListener::register_static_routes(const std::filesystem::path &web_dist,
 		}
 
 		// *.htm / *.mnx / *.joi — game-client templates from
-		// apps/novaworld_web/templates/. No {{VAR}} substitution since
-		// these are loaded via direct GET (e.g. retail's GET /jop_2_main.mnx
-		// after the relay refresh).
+		// apps/novaworld_web/templates/, loaded by direct GET (e.g. retail's GET
+		// /jop_2_main.mnx after the relay refresh), served as stored but for the one value a
+		// directly fetched page names, {{WEB_ROOT}} (web_root_for: JO's sign-in template's image
+		// lines; D-NET-NEW-L9-52); any other {{X}} stays as it is.
 		const auto ext = std::filesystem::path(subpath).extension().string();
 		if (ext == ".htm" || ext == ".mnx" || ext == ".joi") {
 			if (const auto path = template_file(templates_dir, subpath)) {
+				serve_file(res, *path, content_type_for(*path));
+				res.body = render_template(
+						res.body, {{"WEB_ROOT", web_root_for(web_host_, impl_->app.port())}});
+				return res;
+			}
+		}
+
+		// A client image at the service's root, as the live service serves the sign-in template's
+		// /nonbhdx2.tga, from apps/novaworld_web/static/ (D-NET-NEW-L9-52).
+		if (ext == ".tga" && subpath.find('/') == std::string::npos) {
+			if (const auto path = file_under_root(static_dir, subpath)) {
 				serve_file(res, *path, content_type_for(*path));
 				return res;
 			}

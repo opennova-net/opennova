@@ -4127,12 +4127,13 @@ int test_name_and_value_rules(Harness &h) {
 	TEST_EXPECT(!nws::template_file(templates_root, "leak.htm").has_value());
 	TEST_EXPECT(!nws::template_file(templates_root, "jop_2/../jop_2_msg.htm").has_value());
 	const auto static_root = h.retail_root / "static";
-	TEST_EXPECT(nws::file_under_root(static_root, "jop_2/nonbhdx2.tga").has_value());
-	TEST_EXPECT(!nws::file_under_root(static_root, "jop_2//nonbhdx2.tga").has_value());
+	TEST_EXPECT(nws::file_under_root(static_root, "dfx2_0/nonbhdx2.tga").has_value());
+	TEST_EXPECT(nws::file_under_root(static_root, "nonbhdx2.tga").has_value());
+	TEST_EXPECT(!nws::file_under_root(static_root, "dfx2_0//nonbhdx2.tga").has_value());
 	TEST_EXPECT(!nws::file_under_root(static_root, "/etc/hostname").has_value());
-	TEST_EXPECT(!nws::file_under_root(static_root, "jop_2/../../secret.txt").has_value());
+	TEST_EXPECT(!nws::file_under_root(static_root, "dfx2_0/../../secret.txt").has_value());
 	TEST_EXPECT(!nws::file_under_root(static_root, "leak.tga").has_value());
-	TEST_EXPECT(!nws::file_under_root(static_root, "jop_2").has_value()); // a directory
+	TEST_EXPECT(!nws::file_under_root(static_root, "dfx2_0").has_value()); // a directory
 
 	for (const char *value : { "3", "2345", "jop:cus2", "us", "127.0.0.1", "::ffff:10.0.0.7",
 				 "65537:3233:ABCDEFGHIJKLMNOP", "NWServer:NWLogin.dll:SESSIONTAG:123:0a1b2c3d",
@@ -4275,13 +4276,21 @@ int test_retail_templates_render(Harness &h) {
 		}
 		TEST_EXPECT(rendered.transport_ok && rendered.code == 200);
 		TEST_EXPECT(body_text(rendered) == nws::render_template(text, vars));
+		// A direct GET serves the page as stored but for {{WEB_ROOT}}, the service's own root
+		// (D-NET-NEW-L9-52).
 		const auto served = h.send_to(h.secure_port, "GET", "/" + name);
-		TEST_EXPECT(served.transport_ok && served.code == 200 && body_text(served) == text);
+		TEST_EXPECT(served.transport_ok && served.code == 200 &&
+				body_text(served) == nws::render_template(text, { { "WEB_ROOT", base } }));
 	}
-	const auto tga = h.send_to(h.secure_port, "GET", "/static/jop_2/nonbhdx2.tga");
+	const auto tga = h.send_to(h.secure_port, "GET", "/static/dfx2_0/nonbhdx2.tga");
 	TEST_EXPECT(tga.transport_ok && tga.code == 200);
 	TEST_EXPECT(tga.body ==
-			test_io::read_file((h.retail_root / "static" / "jop_2" / "nonbhdx2.tga").string()));
+			test_io::read_file((h.retail_root / "static" / "dfx2_0" / "nonbhdx2.tga").string()));
+	// The sign-in template's image at the service's root, as the live service serves it.
+	const auto root_tga = h.send_to(h.secure_port, "GET", "/nonbhdx2.tga");
+	TEST_EXPECT(root_tga.transport_ok && root_tga.code == 200);
+	TEST_EXPECT(root_tga.body ==
+			test_io::read_file((h.retail_root / "static" / "nonbhdx2.tga").string()));
 	const auto asset = h.send_to(h.secure_port, "GET", "/assets/app.js");
 	TEST_EXPECT(asset.transport_ok && asset.code == 200 && body_text(asset) == "console.log(1);");
 
@@ -4319,10 +4328,10 @@ int test_catch_all_stays_in_root(Harness &h) {
 					 std::string("/%2e%2e%2fsecret.txt"), std::string("/static/..%2fsecret.txt"),
 					 std::string("/static/%2e%2e%2f%2e%2e%2fsecret.txt"),
 					 std::string("/..%5csecret.txt"),
-					 std::string("/static/jop_2/..%5c..%5c..%5csecret.txt"),
+					 std::string("/static/dfx2_0/..%5c..%5c..%5csecret.txt"),
 					 std::string("/.hidden.htm"), std::string("/leak.htm"),
-					 std::string("/static/leak.tga"), std::string("/webleak.txt"),
-					 std::string("/static/jop_2/../../secret.txt") }) {
+					 std::string("/static/leak.tga"), std::string("/leak.tga"),
+					 std::string("/webleak.txt"), std::string("/static/dfx2_0/../../secret.txt") }) {
 			const auto reply = h.send_to(port, "GET", path);
 			const bool ok = reply.transport_ok && reply.code != 200 && !carries_secret(reply);
 			if (!ok) {
@@ -4904,7 +4913,7 @@ int test_api_proxy_only(Harness &h) {
 		TEST_EXPECT(body_text(reply) == "{\"error\":\"proxy_required\"}");
 	}
 	for (const char *path : { "/nwprepare.dll?url=jop_2_start.htm", "/NWStart.dll", "/NWLogout.dll",
-				 "/NWAccount.dll", "/jop_2.gsb", "/jop_2_main.htm", "/static/jop_2/nonbhdx2.tga",
+				 "/NWAccount.dll", "/jop_2.gsb", "/jop_2_main.htm", "/nonbhdx2.tga",
 				 "/assets/app.js" }) {
 		const auto reply = h.send_to(h.fresh_port, "GET", path);
 		if (reply.code != 200)
@@ -4969,6 +4978,86 @@ int test_retail_proxy_names_client(Harness &) {
 // tags, page names, numbers, addresses, URLs, names with spaces) goes out byte
 // for byte, so the pages a stock client gets are the template with the value
 // in it, unchanged.
+// D-NET-NEW-L9-52: JO's served pages are the live ones byte for byte (LN-s6's S3 record): every
+// line CRLF, jop_2_relay.mnx and jop_2_main.mnx with no final line ending, main.mnx's two icon
+// tables each carrying their two SUBST blocks, host2.htm's HOSTKEY title line unindented, and
+// login.mnx's two image lines naming the service's own root. The pages with no value are the live
+// sizes exactly: the start page 462 B, relay.mnx 1183 B, main.mnx 67809 B, host1 418 B, host3
+// 369 B, jend 400 B; login.mnx is the live 12802 B less its 15-character web IP twice, plus this
+// service's root twice; host2.htm 317 B less its 48-character HOSTKEY.
+int test_served_pages_live_bytes(Harness &h) {
+	const std::string base = "http://127.0.0.1:" + std::to_string(h.secure_port);
+	const auto crlf_only = [](const std::string &page) {
+		for (std::size_t i = 0; i < page.size(); ++i) {
+			if (page[i] == '
+' && (i == 0 || page[i - 1] != '
+')) return false;
+			if (page[i] == '
+' && (i + 1 == page.size() || page[i + 1] != '
+')) return false;
+		}
+		return true;
+	};
+	const auto ends_crlf = [](const std::string &page) {
+		return page.size() >= 2 && page.compare(page.size() - 2, 2, "
+") == 0;
+	};
+	// A failed GET reads empty, which no size below matches.
+	const auto get = [&h](const std::string &path) {
+		const auto reply = h.send_to(h.secure_port, "GET", path);
+		if (!reply.transport_ok || reply.code != 200) {
+			std::fprintf(stderr, "  GET %s: %s
+", path.c_str(), describe(reply).c_str());
+			return std::string();
+		}
+		return body_text(reply);
+	};
+	const std::string start = get("/nwprepare.dll?url=jop_2_start.htm");
+	TEST_EXPECT(start.size() == 462 && crlf_only(start) && ends_crlf(start));
+	for (const auto &[path, size] : { std::pair<std::string, std::size_t>{ "/jop_2_host1.htm", 418 },
+				 { "/jop_2_host3.htm", 369 }, { "/jop_2_jend.htm", 400 } }) {
+		const std::string page = get(path);
+		if (page.size() != size)
+			std::fprintf(stderr, "  %s: %zu B, live %zu B
+", path.c_str(), page.size(), size);
+		TEST_EXPECT(page.size() == size && crlf_only(page) && ends_crlf(page));
+	}
+	const std::string relay_mnx = get("/jop_2_relay.mnx");
+	TEST_EXPECT(relay_mnx.size() == 1183 && crlf_only(relay_mnx) && !ends_crlf(relay_mnx));
+	const std::string main_mnx = get("/jop_2_main.mnx");
+	TEST_EXPECT(main_mnx.size() == 67809 && crlf_only(main_mnx) && !ends_crlf(main_mnx));
+	std::size_t stat_rows = 0;
+	for (std::size_t at = main_mnx.find("URL>@ICON_STAT@</SUBST>"); at != std::string::npos;
+			at = main_mnx.find("URL>@ICON_STAT@</SUBST>", at + 1))
+		++stat_rows;
+	TEST_EXPECT(stat_rows == 2 &&
+			main_mnx.find("<SUBST column=\"6\" URL>@PROD_ICON_JOX0@</SUBST>") != std::string::npos);
+	const std::string login_mnx = get("/jop_2_login.mnx");
+	const std::string image = "URL>" + base + "/nonbhdx2.tga</SUBST>
+";
+	TEST_EXPECT(login_mnx.size() == 12802 - 2 * 15 + 2 * base.substr(7).size() &&
+			crlf_only(login_mnx) && ends_crlf(login_mnx));
+	const std::size_t first_image = login_mnx.find(image);
+	TEST_EXPECT(first_image != std::string::npos &&
+			login_mnx.find(image, first_image + 1) != std::string::npos);
+	// The pages a DLL leg fills: their stored bytes (each value line's fill is that leg's test's).
+	for (const auto &[name, size] : { std::pair<std::string, std::size_t>{ "jop_2_relay.htm", 791 },
+				 { "jop_2_main.htm", 10993 }, { "jop_2_join.joi", 894 },
+				 { "jop_2_host2.htm", 317 - 48 + 11 } }) {
+		const std::string page =
+				test_io::read_file_text((h.retail_root / "templates" / name).string());
+		if (page.size() != size)
+			std::fprintf(stderr, "  %s: %zu B, want %zu B
+", name.c_str(), page.size(), size);
+		TEST_EXPECT(page.size() == size && crlf_only(page) && ends_crlf(page));
+	}
+	TEST_EXPECT(test_io::read_file_text((h.retail_root / "templates" / "jop_2_host2.htm").string())
+					.find("<TITLE>
+[HOSTKEY={{HOSTKEY}}&]
+</TITLE>") != std::string::npos);
+	return 0;
+}
+
 int test_template_values_escaped(Harness &h) {
 	for (const std::string &plain : { std::string("ABCDEFGHIJKLMNOPABCDEFGHIJKLMNOP"),
 				 std::string("NWServer:NWLogin.dll:SESSIONTAG:123:0a1b2c3d"),
@@ -8859,6 +8948,7 @@ int run(Harness &h, const char *part) {
 		{ "retail_pages", "api_proxy_only", test_api_proxy_only },
 		{ "retail_pages", "retail_proxy_names_client", test_retail_proxy_names_client },
 		{ "retail_pages", "template_values_escaped", test_template_values_escaped },
+		{ "retail_pages", "served_pages_live_bytes", test_served_pages_live_bytes },
 		{ "retail_pages", "register_handle_rule", test_register_handle_rule },
 		{ "retail_pages", "login_row_kept_alive", test_login_row_kept_alive },
 		{ "retail_pages", "host_tag_serves_once", test_host_tag_serves_once },
