@@ -497,6 +497,11 @@ public:
 	void set_draw_timing_enabled(bool p_enabled);
 	// [compile_us, emit_us] accumulated since the last consume; zeroes after.
 	PackedInt64Array consume_draw_timing_us();
+	// The draw of the overlay's current state submitted at once, as the next idle frame's redraw
+	// would submit it: the mission load's one forced frame runs while the SceneTree is blocked, so
+	// a queued redraw would reach it with nothing (GameWorld's hud_pipeline_warm signal). Nothing
+	// off the tree.
+	void submit_draw_now();
 
 	void _draw() override;
 

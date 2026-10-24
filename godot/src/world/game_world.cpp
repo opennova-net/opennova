@@ -50,6 +50,7 @@ constexpr const char *kSignalCaptureChanged = "capture_changed";
 constexpr const char *kSignalProcessExitRequested = "process_exit_requested";
 constexpr const char *kSignalHudOverlayInit = "hud_overlay_init";
 constexpr const char *kSignalHudTexturesLoad = "hud_textures_load";
+constexpr const char *kSignalHudPipelineWarm = "hud_pipeline_warm";
 
 } // namespace
 
@@ -985,6 +986,12 @@ void GameWorld::_bind_methods() {
 	// (game_world_load.cpp carries the witness).
 	ADD_SIGNAL(MethodInfo(kSignalHudOverlayInit, PropertyInfo(Variant::STRING, "mission_file")));
 	ADD_SIGNAL(MethodInfo(kSignalHudTexturesLoad, PropertyInfo(Variant::BOOL, "full_arm")));
+	// The load's one forced frame, around its draw (`drawing` true ahead of it, false once it
+	// drained): the shell's HUD, built and loaded by the two legs above, draws in that frame
+	// and nowhere else ahead of its first live frame, so its canvas pipelines compile behind
+	// the loading screen, not in the first revealed frame (game_world_load.cpp
+	// warm_effect_world_catalog carries the ruling, D-NET-NEW-LF-16).
+	ADD_SIGNAL(MethodInfo(kSignalHudPipelineWarm, PropertyInfo(Variant::BOOL, "drawing")));
 	// Presentation side effects drained from the mission runtime's EffectLog
 	// each tick (kind: "text"/"debug_text"/"win"/"subgoal_*"/"show_waypoints"/
 	// "set_light"/"dialog"). Player text is consumed by the HUD; debug_text

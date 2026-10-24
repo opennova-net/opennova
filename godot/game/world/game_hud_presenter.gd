@@ -65,6 +65,9 @@ const SCRIPT_CHAT_ARGB := -1
 # mission has a local player (ensure_game_hud(); the GUT files build the real one
 # over a staged root).
 var _game_hud: HudOverlay = null
+# Whether the load's forced frame mounted the overlay (_on_hud_pipeline_warm), which the
+# frame's end takes off the tree again.
+var _hud_warm_mounted := false
 # The HUD's process words across the per-mission overlay rebuild (the item flash timers, the
 # stance and ammo keys, the waypoint altitude colour, the silhouette keys): retail's are process
 # words no mission start resets, so each keeps its value into the next mission (engine
@@ -207,6 +210,8 @@ func setup(world: GameWorld, player_presenter_in: LocalPlayerPresenter, ui_paren
 		_world.hud_overlay_init.connect(_on_hud_overlay_init)
 	if _world != null and not _world.hud_textures_load.is_connected(_on_hud_textures_load):
 		_world.hud_textures_load.connect(_on_hud_textures_load)
+	if _world != null and not _world.hud_pipeline_warm.is_connected(_on_hud_pipeline_warm):
+		_world.hud_pipeline_warm.connect(_on_hud_pipeline_warm)
 
 
 ## Undo everything a mission built: the HUD node (its card/effects children go
@@ -227,6 +232,7 @@ func teardown(restart := false) -> void:
 		_process_words = _game_hud.get_process_words()
 		_game_hud.queue_free()
 		_game_hud = null
+	_hud_warm_mounted = false
 	if _world != null:
 		_world.set_inset_scope(null)
 	_inset_scope = null
@@ -401,6 +407,31 @@ func _on_hud_overlay_init(mission_file: String) -> void:
 func _on_hud_textures_load(full_arm: bool) -> void:
 	if _game_hud != null and not _game_hud.is_configured():
 		_load_hud_textures(full_arm)
+
+
+## The load's one forced frame (GameWorld.hud_pipeline_warm, `drawing` true ahead of its
+## draw, false once it drained): the overlay the two legs above built and loaded mounts for
+## that frame alone and submits its draw at once (the SceneTree is blocked, so a queued
+## redraw would reach the frame empty), so its canvas pipelines compile behind the loading
+## screen, not in the first revealed frame (D-NET-NEW-LF-16). It leaves the tree again: the
+## first frame with a local player mounts it as before (ensure_game_hud).
+func _on_hud_pipeline_warm(drawing: bool) -> void:
+	if drawing:
+		if _game_hud == null or not _game_hud.is_configured() or _game_hud.is_inside_tree():
+			return
+		_hud_warm_mounted = true
+		var mount: Node = _ui_parent if _ui_parent != null else self
+		mount.add_child(_game_hud)
+		_game_hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_view_effects.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_game_hud.submit_draw_now()
+		_view_effects.submit_draw_now()
+		return
+	if not _hud_warm_mounted:
+		return
+	_hud_warm_mounted = false
+	if _game_hud != null and _game_hud.is_inside_tree():
+		_game_hud.get_parent().remove_child(_game_hud)
 
 
 # The overlay system's init: the overlay and its child controls, the hudpos.def

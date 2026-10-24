@@ -61,7 +61,10 @@
 //    of them. Both arms load the connection icons ahead of the split, and after
 //    it the HUD's fonts and the stdbox frame (its border, its camo tile and its
 //    material) the status page draws (GameWorld's hud_textures_load leg and its
-//    arm, D-NET-NEW-L8-40)
+//    arm, D-NET-NEW-L8-40). Its device materials are made there, so the first
+//    frame that draws the HUD makes none: the shell's HUD draws in the load's one
+//    forced frame, off its mount, so its canvas pipelines compile in the load
+//    (GameWorld's hud_pipelines leg, D-NET-NEW-LF-16)
 //    [orig: Game_StartMission @0x524360 - the reduced flag @0x524958..0x52495C
 //    (is_in_session, is_authority, !is_mp_session_peer), the call @0x525A6E,
 //    HUD_InitAllFonts @0x525A9A, BoxTexture_LoadAndSetupUVRegions ("stdbox")
@@ -77,7 +80,9 @@
 //    skinned models its first revealed frame would otherwise build (the local
 //    body, its view model, one model per identity the wire walk cold-spawns),
 //    freed past it, so their meshes, rigs and pipelines are made in the load
-//    (GameWorld's person_pipelines leg, D-NET-NEW-LF-15)
+//    (GameWorld's person_pipelines leg, D-NET-NEW-LF-15); a joiner's L is born at
+//    the push past the load, so its body and view model are its learned self
+//    record's there
 //    [orig: Game_StartMission @0x524360 - Game_ReloadEntityModelsAndCallbacks
 //    called @0x52550E, Entity_InitAllFromModels called @0x52567F, the 0x0B's
 //    queue called @0x52624B].

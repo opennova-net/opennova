@@ -357,7 +357,7 @@ int Simulation::get_local_player_character_id() const {
 	// deploy-screen hold, the challenge prewarm) reads the word its 0x0C fold
 	// stored on the self row (restamped when the joiner's avatar table lacks the
 	// wire id, D-NET-NEW-L2-27), else the record itself.
-	if (is_joiner() && runtime_ && runtime_->has_self_handle()) {
+	if (has_learned_self_record()) {
 		const opennova::replication::ClientEntityState *self =
 				runtime_->state().find(runtime_->self_handle());
 		if (self != nullptr && self->cls == opennova::EntityClass::Player)
@@ -374,10 +374,20 @@ int Simulation::get_local_player_type_id() const {
 		const opennova::world::Entity *e = kernel_->world.registry.get(kernel_->world.cached.local_player);
 		if (e) return static_cast<int>(e->item_id);
 	}
-	if (is_joiner() && runtime_ && runtime_->has_self_handle()) {
+	// A joiner ahead of L's birth: the type L's birth binds, its self row's (the mission start's
+	// reload stored the class's camouflage item there, D-NET-NEW-L2-57), else its record's (engine
+	// inmatch::JoinerRole::init_local_player_at_mission_start carries the witness).
+	if (has_learned_self_record()) {
+		const opennova::replication::ClientEntityState *self =
+				runtime_->state().find(runtime_->self_handle());
+		if (self != nullptr && self->type_id != 0) return static_cast<int>(self->type_id);
 		return static_cast<int>(runtime_->spawn_pose().item_type_id);
 	}
 	return static_cast<int>(opennova::world::kPlayerInfantryTypeId);
+}
+
+bool Simulation::has_learned_self_record() const {
+	return is_joiner() && runtime_ && runtime_->has_self_handle();
 }
 
 int Simulation::get_local_player_class() const {

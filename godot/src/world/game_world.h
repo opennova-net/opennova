@@ -964,7 +964,9 @@ private:
 	// local body and its first-person view model (when the local player's type is known), and one
 	// model per visual identity the wire walk would cold-spawn, under a container at `p_position`.
 	// The caller draws the frame and frees the container (null when nothing was built).
-	Node3D *build_person_pipeline_warm(const Vector3 &p_position);
+	// `p_timeline` (may be null) takes the builds as nested spans and their count as the
+	// zero-length span person_models_<n> (an instrument).
+	Node3D *build_person_pipeline_warm(const Vector3 &p_position, const Ref<LoadTimeline> &p_timeline);
 	// A new effect world under this world with every mounted .ptl of `p_resource_root` parsed
 	// at the session's words and its texture atlases built (the mission start's head's,
 	// load_join_effect_system's and start_effect_world's for a load that built none; a

@@ -192,6 +192,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("spawn_local_player", "position", "yaw_deg", "team"), &Simulation::spawn_local_player);
 	ClassDB::bind_method(D_METHOD("spawn_local_player_at_start"), &Simulation::spawn_local_player_at_start);
 	ClassDB::bind_method(D_METHOD("has_local_player"), &Simulation::has_local_player);
+	ClassDB::bind_method(D_METHOD("has_learned_self_record"), &Simulation::has_learned_self_record);
 	ClassDB::bind_method(D_METHOD("get_local_player_wire_handle"), &Simulation::get_local_player_wire_handle);
 	ClassDB::bind_method(D_METHOD("set_player_input", "forward", "back", "left", "right", "lean_left", "lean_right", "jump"), &Simulation::set_player_input);
 	ClassDB::bind_method(D_METHOD("add_local_player_look", "dx_px", "dy_px"), &Simulation::add_local_player_look);

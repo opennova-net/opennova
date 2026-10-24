@@ -59,6 +59,7 @@ constexpr const char *kSignalMusicContextOpened = "music_context_opened";
 constexpr const char *kSignalMusicContextClosed = "music_context_closed";
 constexpr const char *kSignalHudOverlayInit = "hud_overlay_init";
 constexpr const char *kSignalHudTexturesLoad = "hud_textures_load";
+constexpr const char *kSignalHudPipelineWarm = "hud_pipeline_warm";
 
 } // namespace
 
@@ -1646,7 +1647,8 @@ void GameWorld::build_minimap_water_mask() {
 // start's listed models build nothing here: the freeze ahead of it resolved their
 // materials alone (load_mission_internal, D-NET-NEW-L3-31); the frame draws, and
 // then frees, the skinned models the first revealed frame would build
-// (build_person_pipeline_warm, D-NET-NEW-LF-15). Retail's load draws
+// (build_person_pipeline_warm, D-NET-NEW-LF-15), and the shell's HUD this load built
+// draws in it off its mount (the hud_pipeline_warm signal, D-NET-NEW-LF-16). Retail's load draws
 // no world frame at all, its presents the loading screen alone (engine
 // hud/loading_screen.h carries the witness): the one forced frame is the
 // device's pipeline warm, and a second compiled nothing in either load LP
@@ -1724,7 +1726,13 @@ int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTim
 		// their pipelines compile here, behind the loading screen, not in that frame's draw
 		// (D-NET-NEW-LF-15; the one forced frame stays one, D-NET-NEW-L3-47).
 		leg("person_pipelines");
-		person_warm = build_person_pipeline_warm(warm_pos);
+		person_warm = build_person_pipeline_warm(warm_pos, p_timeline);
+		leg_end();
+		// The shell's HUD, which this load's HUD legs built and loaded, draws in the same frame:
+		// its canvas items submit at once, so their pipelines compile here and not in the first
+		// revealed frame (D-NET-NEW-LF-16).
+		leg("hud_pipelines");
+		emit_signal(kSignalHudPipelineWarm, true);
 		leg_end();
 		RenderingServer *rs = RenderingServer::get_singleton();
 		leg("forced_draw_1");
@@ -1735,6 +1743,7 @@ int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTim
 		leg("force_sync");
 		rs->force_sync();
 		leg_end();
+		emit_signal(kSignalHudPipelineWarm, false);
 		set_visible(was_visible);
 	}
 	leg("warm_reset");
@@ -1770,12 +1779,20 @@ int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTim
 // those models are made once, drawn by the load's one forced frame and freed; the later builds of
 // the same identities find their meshes, materials and rigs made (ObjectData's submesh memo, the
 // placer's data and rig caches) and their pipelines compiled.
-Node3D *GameWorld::build_person_pipeline_warm(const Vector3 &p_position) {
+Node3D *GameWorld::build_person_pipeline_warm(const Vector3 &p_position,
+		const Ref<LoadTimeline> &p_timeline) {
 	const Ref<Simulation> sim = get_sim();
 	MissionRoot *runtime = get_runtime();
 	if (sim.is_null() || runtime == nullptr || placer_.is_null()) {
 		return nullptr;
 	}
+	// The builds as nested spans of the load's timeline (an instrument).
+	const auto leg = [&p_timeline](const String &p_name) {
+		if (p_timeline.is_valid()) p_timeline->span(p_name);
+	};
+	const auto leg_end = [&p_timeline]() {
+		if (p_timeline.is_valid()) p_timeline->end_span();
+	};
 	Node3D *warm = memnew(Node3D);
 	warm->set_name("PersonPipelineWarm");
 	add_child(warm);
@@ -1788,21 +1805,31 @@ Node3D *GameWorld::build_person_pipeline_warm(const Vector3 &p_position) {
 		(void)placer_->take_load_profile();
 	}
 	PackedStringArray graphics;
-	// The local body and its view model, once the local player is known: a joiner's type word
-	// and character id are its learned record's ahead of L's birth
-	// (Simulation::get_local_player_type_id).
+	// The local body and its view model, once the local player is known: a joiner's L is born
+	// at the mission start's push, past this load, so its type word, character id and kit are
+	// its learned record's here (Simulation::has_learned_self_record), the ones L's birth binds
+	// and the first frame past the load builds (D-NET-NEW-LF-15).
 	int viewmodel_parts = 0;
-	if (sim->has_local_player() || (sim->is_joiner() && sim->get_joiner_self_handle() > 0)) {
+	if (sim->has_local_player() || sim->has_learned_self_record()) {
+		leg("local_body");
 		if (ObjectModel *body = placer_->build_player_animated_model(
 					sim->get_local_player_type_id(), warm, sim->get_local_player_character_id())) {
 			graphics.push_back(body->get_graphic_name());
 		}
+		leg_end();
 		if (player_visuals_.is_valid()) {
+			leg("view_model");
 			viewmodel_parts = player_visuals_->build_viewmodel_pipeline_warm(warm);
+			leg_end();
 		}
 	}
+	leg("wire_identities");
 	const int wire_models = runtime->warm_wire_spawn_pipelines(
 			sim->get_present_snapshot(), sim->get_present_stride(), warm, graphics);
+	leg_end();
+	// The models built, as a span of no length named by their count.
+	leg(vformat("person_models_%d", warm->get_child_count()));
+	leg_end();
 	if (profile) {
 		const MissionObjectPlacer::LoadProfile loads = placer_->take_load_profile();
 		UtilityFunctions::print_verbose(vformat(

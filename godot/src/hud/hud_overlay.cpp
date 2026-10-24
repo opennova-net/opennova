@@ -324,6 +324,7 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_draw_timing_enabled);
 	ClassDB::bind_method(D_METHOD("consume_draw_timing_us"),
 			&HudOverlay::consume_draw_timing_us);
+	ClassDB::bind_method(D_METHOD("submit_draw_now"), &HudOverlay::submit_draw_now);
 
 	BIND_CONSTANT(MIN_CROSSHAIR_STYLE);
 	BIND_CONSTANT(MAX_CROSSHAIR_STYLE);
@@ -2165,6 +2166,15 @@ PackedInt64Array HudOverlay::consume_draw_timing_us() {
 	draw_compile_us_ = 0;
 	draw_emit_us_ = 0;
 	return out;
+}
+
+void HudOverlay::submit_draw_now() {
+	if (!is_inside_tree()) {
+		return;
+	}
+	// What the redraw does: the item cleared, then the draw.
+	RenderingServer::get_singleton()->canvas_item_clear(get_canvas_item());
+	_draw();
 }
 
 void HudOverlay::render_list_(const HudDrawList &p_list) {

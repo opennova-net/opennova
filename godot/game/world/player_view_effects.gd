@@ -214,6 +214,19 @@ func _notification(what: int) -> void:
 		queue_redraw()
 
 
+## The draw that shows from the first live frame, the sun veil's quad, submitted at once
+## onto the veil's own item as its next redraw would submit it: the mission load's one
+## forced frame runs while the SceneTree is blocked, so a queued redraw would reach it empty
+## (GameHudPresenter's hud_pipeline_warm handler, D-NET-NEW-LF-16).
+func submit_draw_now() -> void:
+	if _sun_veil == null or not _sun_veil.is_inside_tree():
+		return
+	var item := _sun_veil.get_canvas_item()
+	RenderingServer.canvas_item_clear(item)
+	RenderingServer.canvas_item_add_rect(item, Rect2(Vector2.ZERO, get_viewport_rect().size),
+			_sun_veil.color)
+
+
 func _draw() -> void:
 	# The view effects are the original's window coordinates, D3D9 pixel
 	# centres on the integers (HudPos.d3d9_screen_offset).
