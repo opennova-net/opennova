@@ -68,6 +68,11 @@ public:
 	void set_label(const String &p_label) { label_ = p_label; }
 
 	void span(const String &p_name);
+	// Under --verbose, each span() also captures a RenderingDevice timestamp named
+	// "load <span>" (an instrument): a forced draw reads back the frame drawn before it, so
+	// its timestamps split that frame's GPU work by the load span that recorded it (the
+	// LoadingScreen's slow-present line prints them). Off unless the owner asks.
+	void set_gpu_marks(bool p_enabled) { gpu_marks_ = p_enabled; }
 	// Ends the innermost open span (no-op when none is open).
 	void end_span();
 	// A closed span the owner measured outside its own brackets (a deferred flush's share), at
@@ -112,6 +117,7 @@ private:
 	Vector<int> open_; // stack of indices into spans_
 	int64_t start_us_ = 0;
 	int64_t end_us_ = 0;
+	bool gpu_marks_ = false;
 };
 
 } // namespace godot

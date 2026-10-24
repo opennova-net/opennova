@@ -236,6 +236,12 @@ func _present_now(now: int) -> void:
 		RenderingServer.force_draw(true, 0.0)
 		_note_slow_present(Time.get_ticks_usec() - draw_start, now, viewport, held,
 				texture_bytes, buffer_bytes, compiles_before)
+		if OS.is_stdout_verbose():
+			# The next frame's recording opens with this mark, so the slow-present line's
+			# GPU marks of that frame start at its first recorded command.
+			var device := RenderingServer.get_rendering_device()
+			if device != null:
+				device.capture_timestamp("LoadingScreen past a present")
 		_present_texture_bytes = texture_bytes
 		_present_buffer_bytes = buffer_bytes
 		release_offscreen_targets(held)
@@ -306,6 +312,15 @@ func _note_slow_present(draw_usec: int, present_start_ms: int, screen_viewport: 
 		print_verbose("LoadingScreen: since the previous present: textures %+d MB, buffers %+d MB" % [
 				(texture_bytes - _present_texture_bytes) >> 20,
 				(buffer_bytes - _present_buffer_bytes) >> 20])
+	if texture_bytes >= 0:
+		# The device frees a frame's released objects once that frame's fence is waited
+		# (rendering_device.cpp _begin_frame -> _free_pending_resources), inside the forced
+		# draw: a drop here is the objects the frame drawn before it released.
+		print_verbose("LoadingScreen: across the forced draw: textures %+.1f MB, buffers %+.1f MB" % [
+				(RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TEXTURE_MEM_USED)
+						- texture_bytes) / 1048576.0,
+				(RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_BUFFER_MEM_USED)
+						- buffer_bytes) / 1048576.0])
 	var layers := {}
 	for node in screen_viewport.find_children("*", "CanvasItem", true, false):
 		var item := node as CanvasItem
@@ -332,6 +347,34 @@ func _note_slow_present(draw_usec: int, present_start_ms: int, screen_viewport: 
 					RenderingServer.VIEWPORT_RENDER_INFO_TYPE_CANVAS,
 					RenderingServer.VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME),
 			", ".join(layer_rows), ", ".join(compiled)])
+	_note_frame_marks()
+
+
+## The slow-present instrument's GPU split of the frame drawn before the present: every
+## RenderingDevice timestamp that frame recorded (the previous present's closing mark, the
+## mission load's "load <span>" marks, LoadTimeline.set_gpu_marks, and the measured
+## viewports' vp_ pairs), each as its GPU and CPU offset from the first, then the GPU
+## span: a span near the force_draw's wall is that frame's GPU work, and the gap ahead of
+## a mark is the work recorded since the mark before it.
+func _note_frame_marks() -> void:
+	var device := RenderingServer.get_rendering_device()
+	if device == null:
+		return
+	var count := device.get_captured_timestamps_count()
+	if count == 0:
+		return
+	var gpu_base := device.get_captured_timestamp_gpu_time(0)
+	var cpu_base := device.get_captured_timestamp_cpu_time(0)
+	var marks := PackedStringArray()
+	for i in count:
+		# GPU times are nanoseconds, CPU times microseconds.
+		marks.append("%s +%.1f (cpu +%.1f)" % [device.get_captured_timestamp_name(i),
+				(device.get_captured_timestamp_gpu_time(i) - gpu_base) / 1000000.0,
+				(device.get_captured_timestamp_cpu_time(i) - cpu_base) / 1000.0])
+	print_verbose("LoadingScreen: the frame drawn before it (frame %d), its GPU marks (ms from the first): GPU span %.1f ms over %d mark(s): [%s]" % [
+			device.get_captured_timestamps_frame(),
+			(device.get_captured_timestamp_gpu_time(count - 1) - gpu_base) / 1000000.0, count,
+			", ".join(marks)])
 
 
 ## The process's pipeline compilations so far, by kind (canvas, mesh, surface, draw,

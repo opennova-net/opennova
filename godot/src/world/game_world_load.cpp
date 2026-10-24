@@ -177,6 +177,7 @@ int GameWorld::load_mission(const String &p_bms_name, const String &p_dir) {
 	// The load's timeline from its entry: the root's mount and the document's parse lead its
 	// spans (an instrument).
 	Ref<LoadTimeline> timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
+	timeline->set_gpu_marks(true);
 	last_load_timeline_ = timeline;
 	timeline->span("mount");
 	Ref<ResourceRoot> resource_root = resolve_root(p_dir);
@@ -195,6 +196,7 @@ int GameWorld::load_mission_on_root(const String &p_bms_name, const Ref<Resource
 		emit_signal(kSignalLoadProgress,
 				MissionData::load_progress_percent(MissionData::LOAD_STAGE_MISSION_SETUP));
 		timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
+		timeline->set_gpu_marks(true);
 		last_load_timeline_ = timeline;
 	}
 	// The runtime BMS path bypasses loose overrides even under /d.

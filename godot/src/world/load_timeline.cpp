@@ -1,6 +1,7 @@
 #include "world/load_timeline.h"
 
 #include <godot_cpp/classes/os.hpp>
+#include <godot_cpp/classes/rendering_device.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/math.hpp>
@@ -38,6 +39,13 @@ void LoadTimeline::span(const String &p_name) {
 	entry->set_start_us(Time::get_singleton()->get_ticks_usec());
 	entry->set_start_compiles(pipeline_compiles());
 	spans_.push_back(entry);
+	if (gpu_marks_ && OS::get_singleton()->is_stdout_verbose()) {
+		RenderingServer *rs = RenderingServer::get_singleton();
+		RenderingDevice *rd = rs != nullptr ? rs->get_rendering_device() : nullptr;
+		if (rd != nullptr) {
+			rd->capture_timestamp(String("load ") + p_name);
+		}
+	}
 }
 
 void LoadTimeline::end_span() {
