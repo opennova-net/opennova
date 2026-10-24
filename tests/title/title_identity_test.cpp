@@ -169,9 +169,8 @@ void dfx2_row() {
 	CHECK(resolve_title_identity("dfx2", error) == dfx2);
 	CHECK(title_identity_complete(*dfx2, TitleIdentityPart::WebFlow));
 	CHECK(dfx2->pages.has_value() && std::string(dfx2->pages->server_list) == "dfx2_0.gsb" &&
-			std::string(dfx2->pages->glsvss_request) == "[dfx]kills" &&
 			std::string(dfx2->pages->join_lan) == "0");
-	CHECK(jo.pages->glsvss_request == nullptr && jo.pages->join_lan == nullptr);
+	CHECK(jo.pages->join_lan == nullptr);
 	// The demo's web flow is not witnessed: refused by name.
 	CHECK(title_identity_refusal(*title_identity(GAME_JO_DEMO), TitleIdentityPart::WebFlow) ==
 			"the jodemo title's web flow identity is not witnessed yet: pfid, web pages");

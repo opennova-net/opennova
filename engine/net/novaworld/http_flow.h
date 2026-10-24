@@ -24,10 +24,11 @@
 //
 // Faithful port of novaworld_client.cpp's login()/send_login_post()/on_login_request_completed(),
 // gsb_url()/request_server_list()/on_gsb_request_completed(), join()/on_join_request_completed(), and
-// http_base()/request_headers()/merge_response_cookies(). The URL/.dll/form-field shapes are
-// byte-preserved, their page names, pfid, version pair and product code the title's
-// (TitleIdentity::pages / pfid / ver1 / ver2 / product_code) [orig: the retail jop_2_* template +
-// NWLogin/NWJoin query strings; NWStart's is the start page's refresh, followed as it stands].
+// http_base()/request_headers()/merge_response_cookies(). The URL/.dll shapes are byte-preserved,
+// their page names, pfid, version pair and product code the title's (TitleIdentity::pages / pfid /
+// ver1 / ver2 / product_code) [orig: the retail jop_2_* template + NWJoin query strings; NWStart's
+// is the start page's refresh, followed as it stands, and the NWLogin form the sign-in page's own,
+// posted as it stands (ib3_form_inputs)].
 namespace opennova {
 
 struct TitleIdentity; // net/title/title_identity.h
@@ -75,12 +76,27 @@ std::string meta_refresh_url(const std::string &page);
 // attribute parser reads it (an empty one included). The browser fetches it, combined with the
 // page's URL, through its cache (browser_cache.h) once the page is processed.
 // [orig: the IB3_TEMPLATE handler @0x6558C0 (the table row @0x84C148 + 3 * 12) - a closing tag
-//  passed over @0x6558C0..0x6558C5, the FILE lookup (sub_6555C0 called @0x6558DD), the old copy
-//  freed @0x6558E6..0x6558F6 and the value's copy to the parser's +8 @0x655902..0x65592C;
+//  passed over @0x6558C0..0x6558C5, the FILE lookup (XML_FindAttributeValue called @0x6558DD), the
+//  old copy freed @0x6558E6..0x6558F6 and the value's copy to the parser's +8 @0x655902..0x65592C;
 //  CUIHTMLParser_BuildContentNodeFromHTML @0x656080 - the copy to the node's +0xC @0x6563F1;
 //  UI_ProcessWebResponseContent @0x63D450 - the test @0x63D63C, CUIBrowser_AsyncFetchURLContent
 //  called @0x63D6D1 over the page's URL (the scene's +0x34, set @0x63D599)]
 std::optional<std::string> page_template_file(const std::string &page);
+
+// The inputs of a page's IB3_FORM `form` as the menu browser's form post sends them (name, value),
+// in its order (D-NET-NEW-L9-45): each INPUT the element table takes inside an IB3_FORM whose VALUE
+// reads (atol) as `form` is linked at the head of the form's list, so the page's LAST input comes
+// first. An IB3_FORM with no VALUE keeps the form in force, a closing IB3_FORM ends it while one is
+// open, and an INPUT outside one reads nothing (a comment's "<!--" is the META element, which the
+// skip to its first '>' ends, so a commented INPUT is none). A missing NAME or VALUE reads
+// "(null)", as the script pass's sprintf writes it. The page's template places the form's controls
+// (its @IB3_FORM_<n>@) after its own edits of that form, which post first.
+// [orig: CUIHTMLParser_ParseTag @0x655E20; CUIHTMLParser_HandleIb3FormTag @0x655960 (the IB3_FORM
+//  handler); XML_PropertyNodeAdd @0x655C60 (the INPUT handler); UI_ProcessScriptBuffer @0x63CBE0;
+//  CWnd_BuildFormFieldQueryString @0x657760 - the control's form test @0x6577AE..0x6577BE, the
+//  value's EPASK_EncryptField called @0x657980, the children walked in order @0x657A80..0x657A97]
+std::vector<std::pair<std::string, std::string>> ib3_form_inputs(const std::string &page,
+		int32_t form);
 
 // The lobby context the HTTP machines read — filled by the owner from the gate response + the NWU
 // session leg (the UDP side stays in the binding/ClientSession; here we only consume its outputs).
@@ -337,7 +353,9 @@ private:
 	// The jar's identity seed in retail's order (the gate reply's fields, then the connection-up's),
 	// the live nwuid for the empty NWUID entry.
 	std::vector<std::pair<std::string, std::string>> identity_seed() const;
-	LoginResult login_post();                 // the /NWLogin.dll POST (the 13-field form), or Failed
+	// The /NWLogin.dll POST of the sign-in page's form, its IB3_FORM 1 inputs `form`
+	// (ib3_form_inputs), or Failed.
+	LoginResult login_post(const std::vector<std::pair<std::string, std::string>> &form);
 	// The jar's EPASK bundle read into epask_, as the sign-in page's submit encrypts under it; the
 	// failure's reason when the jar holds none or the modexp gate rejects it.
 	std::string take_epask(const std::vector<uint8_t> &page);
@@ -360,8 +378,10 @@ private:
 	HostStep host_step_ = HostStep::Idle;
 	int host_hops_ = 0;
 	EnterStep enter_step_ = EnterStep::Idle;
-	// The sign-in page is the one shown (an entry landed on it): Login posts its form.
+	// The sign-in page is the one shown (an entry landed on it): Login posts its form, the page's
+	// IB3_FORM 1 inputs kept with it.
 	bool sign_in_page_shown_ = false;
+	std::vector<std::pair<std::string, std::string>> sign_in_form_;
 	// The connect's identity set is in the jar (seed_identity_cookies: once per session).
 	bool identity_seeded_ = false;
 	// Each leg's last request's URL: the page its answer is, whose template it names.

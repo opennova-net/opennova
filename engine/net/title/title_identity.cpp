@@ -114,11 +114,8 @@ TitleIdentity jo_row() {
 	TitlePages pages;
 	pages.msgbase = "jop_2_msg.htm";
 	pages.main = "jop_2_main.htm";
-	pages.login = "jop_2_login.htm";
-	pages.need_to_agree = "jop_2_needtoagree.htm";
 	pages.no_db = "jop_2_nodb.htm";
 	pages.relay = "jop_2_relay.htm";
-	pages.enter_key = "jop_2_key.htm";
 	pages.key_error = "jop_2_key2err.htm";
 	pages.join = "jop_2_join.joi";
 	pages.server_list = "jop_2.gsb";
@@ -241,19 +238,16 @@ TitleIdentity dfx2_row() {
 	// The live DFX2 gate's startupurl carries &pfid=38 (docs/titles/dfx2-vs-jo-re.md §6.5).
 	t.pfid = 38;
 	// The dfx2_0 pages the live gate's startupurl leads to (url=dfx2_0_start.htm, dfx2-vs-jo-re
-	// §6.5), as the service serves them (apps/novaworld_web/templates): the login form's fields
-	// (dfx2_0_login.htm: its enterkey and its charglsvssrequest), the join link with its leading
-	// lan=0 (dfx2_0_main.mnx) and the dfx2_0.gsb feed. The start page's NWStart link with its ACT
-	// page (dfx2_0_start.htm) is the page's refresh, which the flow follows as it stands.
+	// §6.5), as the service serves them (apps/novaworld_web/templates): the join link with its
+	// leading lan=0 (dfx2_0_main.mnx) and the dfx2_0.gsb feed. The start page's NWStart link with
+	// its ACT page (dfx2_0_start.htm) is the page's refresh, which the flow follows as it stands,
+	// and the login form (dfx2_0_login.htm, its charglsvssrequest included) is the page's, posted
+	// as it stands.
 	TitlePages pages;
 	pages.msgbase = "dfx2_0_msg.htm";
 	pages.main = "dfx2_0_main.htm";
-	pages.login = "dfx2_0_login.htm";
-	pages.need_to_agree = "dfx2_0_needtoagree.htm";
 	pages.no_db = "dfx2_0_nodb.htm";
 	pages.relay = "dfx2_0_relay.htm";
-	pages.enter_key = "dfx2_0_term.htm";
-	pages.glsvss_request = "[dfx]kills";
 	pages.join_lan = "0";
 	pages.key_error = "dfx2_0_key2err.htm";
 	pages.join = "dfx2_0_join.joi";

@@ -37,21 +37,16 @@ struct TitleBuild {
 };
 
 // The NovaWorld web flow's page names. Retail's client renders the pages the gate's start page
-// leads to (the login form's hidden fields, the NWJoin link, the server-list feed; the NWStart
-// query is the start page's own refresh, which the flow follows); LobbyHttpFlow requests them by
-// these names (docs/net/novaworld-net-re.md D-NET-31: the names are the pages' markup, not C
-// literals). A null name is one the title's pages do not carry: the request leaves its field out.
+// leads to (the NWJoin link, the server-list feed; the NWStart query is the start page's own
+// refresh, which the flow follows, and the login form's hidden fields are the sign-in page's own,
+// which the flow posts as the page carries them); LobbyHttpFlow requests them by these names
+// (docs/net/novaworld-net-re.md D-NET-31: the names are the pages' markup, not C literals). A null
+// name is one the title's pages do not carry: the request leaves its field out.
 struct TitlePages {
-	const char *msgbase = nullptr;           // msgbase
-	const char *main = nullptr;              // the login's success, NWJoin's failure
-	const char *login = nullptr;             // the login's failure
-	const char *need_to_agree = nullptr;     // needtoagree
-	const char *no_db = nullptr;             // nodb
-	const char *relay = nullptr;             // relay
-	const char *enter_key = nullptr;         // enterkey
-	// The login form's charglsvssrequest, the first of its hidden fields as the client posts
-	// them (the reverse of the page's order, as JO's captured post shows its own).
-	const char *glsvss_request = nullptr;
+	const char *msgbase = nullptr;           // NWJoin's msgbase
+	const char *main = nullptr;              // NWJoin's failure
+	const char *no_db = nullptr;             // NWJoin's nodb
+	const char *relay = nullptr;             // NWJoin's relay
 	const char *join_lan = nullptr;          // NWJoin's leading lan
 	const char *key_error = nullptr;         // NWJoin's needexpkey
 	const char *join = nullptr;              // NWJoin's success, the .joi

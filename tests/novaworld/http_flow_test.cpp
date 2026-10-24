@@ -71,6 +71,82 @@ static std::string make_epask_cookie() {
 	return nw::epask_to_string(params);
 }
 
+// The live sign-in page's form (NWStart's OUT answer, the LN S2 record: the 13 captured pages
+// byte-identical, the service's jop_2_login.htm the same), with its credentials' inputs outside the
+// IB3_FORM: the IB3_FORM 1 block verbatim, its inputs tab-separated as the page has them, `remember`
+// its rememberlogin VALUE (the live page's "1").
+static std::string jo_sign_in_page(const std::string &remember) {
+	return "<HTML>\r\n<BODY>\r\n<FORM ACTION=\"NWLogin.dll\" METHOD=\"POST\">\r\n"
+	       "<TD width=260><INPUT TYPE=\"text\" MAXLENGTH=16 NAME=\"Name\" VALUE=\"\"></TD>\r\n"
+	       "<TD><INPUT TYPE=\"password\" MAXLENGTH=16 NAME=\"Password\"></TD>\r\n"
+	       "<IB3_FORM value=\"1\">\r\n"
+	       "<INPUT TYPE=\"hidden\" name=\"success\" \tVALUE=\"jop_2_main.htm\">\r\n"
+	       "<INPUT TYPE=\"hidden\" name=\"failure\" \tVALUE=\"jop_2_login.htm\">\r\n"
+	       "<INPUT TYPE=\"hidden\" name=\"enterkey\" \tVALUE=\"jop_2_key.htm\">\r\n"
+	       "<INPUT TYPE=\"hidden\" name=\"msgbase\" \tVALUE=\"jop_2_msg.htm\">\r\n"
+	       "<INPUT TYPE=\"hidden\" name=\"relay\" \tVALUE=\"jop_2_relay.htm\">\r\n"
+	       "<INPUT TYPE=\"hidden\" name=\"nodb\"\tVALUE=\"jop_2_nodb.htm\">\r\n"
+	       "<INPUT TYPE=\"hidden\" name=\"needtoagree\"\tVALUE=\"jop_2_needtoagree.htm\">\r\n"
+	       "<INPUT TYPE=\"hidden\" name=\"pfid\" \tVALUE=\"28\">\r\n"
+	       "<INPUT TYPE=\"hidden\" name=\"rememberlogin\" VALUE=\"" +
+	       remember +
+	       "\">\r\n"
+	       "</IB3_FORM>\r\n</FORM>\r\n</BODY>\r\n</HTML>\r\n";
+}
+// The service's dfx2_0_login.htm form: rememberlogindata's input commented out, charglsvssrequest
+// its last.
+static const std::string kDfx2SignInPage =
+		"<HTML><BODY><FORM ACTION=\"NWLogin.dll\" METHOD=\"POST\">\r\n"
+		"<IB3_FORM value=\"1\">\r\n"
+		"<INPUT TYPE=\"hidden\" name=\"success\" \tVALUE=\"dfx2_0_main.htm\">\r\n"
+		"<INPUT TYPE=\"hidden\" name=\"failure\" \tVALUE=\"dfx2_0_login.htm\">\r\n"
+		"<INPUT TYPE=\"hidden\" name=\"enterkey\" \tVALUE=\"dfx2_0_term.htm\">\r\n"
+		"<INPUT TYPE=\"hidden\" name=\"msgbase\" \tVALUE=\"dfx2_0_msg.htm\">\r\n"
+		"<INPUT TYPE=\"hidden\" name=\"relay\" \tVALUE=\"dfx2_0_relay.htm\">\r\n"
+		"<INPUT TYPE=\"hidden\" name=\"nodb\"\tVALUE=\"dfx2_0_nodb.htm\">\r\n"
+		"<INPUT TYPE=\"hidden\" name=\"needtoagree\"\tVALUE=\"dfx2_0_needtoagree.htm\">\r\n"
+		"<INPUT TYPE=\"hidden\" name=\"pfid\" \tVALUE=\"38\">\r\n"
+		"<INPUT TYPE=\"hidden\" name=\"rememberlogin\" VALUE=\"1\">\r\n"
+		"<!--<INPUT TYPE=\"hidden\" name=\"rememberlogindata\" VALUE=\"\">-->\r\n"
+		"<INPUT TYPE=\"hidden\" name=\"charglsvssrequest\" VALUE=\"[dfx]kills\">\r\n"
+		"</IB3_FORM>\r\n</FORM></BODY></HTML>\r\n";
+
+// A form body's fields, in its order.
+static std::vector<std::pair<std::string, std::string>> form_fields(const std::string &body) {
+	std::vector<std::pair<std::string, std::string>> fields;
+	std::size_t at = 0;
+	for (;;) {
+		const std::size_t amp = body.find('&', at);
+		const std::string pair =
+				body.substr(at, amp == std::string::npos ? std::string::npos : amp - at);
+		const std::size_t eq = pair.find('=');
+		fields.emplace_back(pair.substr(0, eq),
+				eq == std::string::npos ? std::string() : pair.substr(eq + 1));
+		if (amp == std::string::npos) return fields;
+		at = amp + 1;
+	}
+}
+static std::vector<std::string> field_names(
+		const std::vector<std::pair<std::string, std::string>> &fields) {
+	std::vector<std::string> names;
+	for (const auto &field : fields) names.push_back(field.first);
+	return names;
+}
+// A posted field's plaintext under the body's own EPASK bundle ("<undecryptable>" when it fails).
+static std::string posted_plaintext(const std::vector<std::pair<std::string, std::string>> &fields,
+		const std::string &name) {
+	nw::EpaskParams params;
+	std::string plain;
+	if (fields.empty() || fields[0].first != "EPASK" ||
+			!nw::epask_from_string(fields[0].second, params))
+		return "<undecryptable>";
+	for (const auto &field : fields) {
+		if (field.first != name) continue;
+		return nw::epask_decrypt(field.second, params, plain) ? plain : "<undecryptable>";
+	}
+	return "<absent>";
+}
+
 // Concrete (OpenNova) context: a non-templated startup_url -> login skips NWSTART, base derived from it.
 static nw::LobbyHttpContext concrete_ctx() {
 	nw::LobbyHttpContext c;
@@ -170,9 +246,10 @@ static bool test_login_success_concrete() {
 	                       "Cookie: NWUID=ABCDEF0123456789;", "Cookie: CountryName=us;"},
 	       "the prepare GET carries the identity cookies, in their order");
 
-	// PREPARE response: the server issues the EPASK bundle as a cookie. Concrete url -> straight to POST.
+	// PREPARE response: the server issues the EPASK bundle as a cookie. A page that names no refresh is
+	// the page shown: its form posts at once.
 	const std::string epask_cookie = make_epask_cookie();
-	r = f.on_login_response(true, 200, set_cookie("EPASK=" + epask_cookie), {});
+	r = f.on_login_response(true, 200, set_cookie("EPASK=" + epask_cookie), bytes(jo_sign_in_page("1")));
 	{
 		const std::vector<std::pair<std::string, std::string>> vars = f.session_cookie_vars();
 		std::vector<std::string> names;
@@ -184,14 +261,25 @@ static bool test_login_success_concrete() {
 		return false;
 	expect(r.request.method == nw::HttpMethod::Post, "login leg is a POST");
 	expect(r.request.url == "http://gs.opennova.test:8080/NWLogin.dll", "POST hits /NWLogin.dll");
-	// The 13-field form body: EPASK present (plaintext bundle), NAME/PASSWORD encrypted, the jop_2_* templates.
-	// The field NAMES are plaintext; the encrypt=true values (NAME/PASSWORD/pfid/the jop_2_* templates)
-	// are ciphertext in the body (only the EPASK bundle is sent plaintext) — encryption is covered by
-	// the epask / http_login tests, so here we just confirm the 13-field set is assembled.
-	expect(contains(r.request.body, "EPASK="), "form carries the EPASK field");
-	expect(contains(r.request.body, "NAME=") && contains(r.request.body, "PASSWORD="), "form carries NAME + PASSWORD");
-	expect(contains(r.request.body, "success=") && contains(r.request.body, "failure="), "form carries the success/failure fields");
-	expect(contains(r.request.body, "pfid="), "form carries the pfid field");
+	// The form body: the EPASK bundle (plaintext), the template's NAME / PASSWORD / rememberlogindata
+	// edits, then the page's IB3_FORM 1 inputs from its last to its first, each value encrypted (the
+	// June .204 capture's field order).
+	{
+		const auto fields = form_fields(r.request.body);
+		expect(field_names(fields) ==
+		               std::vector<std::string>{"EPASK", "NAME", "PASSWORD", "rememberlogindata",
+		                       "rememberlogin", "pfid", "needtoagree", "nodb", "relay", "msgbase",
+		                       "enterkey", "failure", "success"},
+		       "the post's fields: the template's edits, then the page's inputs last to first");
+		expect(fields[0].second == epask_cookie, "the EPASK bundle is echoed plaintext");
+		expect(posted_plaintext(fields, "NAME") == "player" &&
+		               posted_plaintext(fields, "PASSWORD") == "secret",
+		       "NAME and PASSWORD decrypt");
+		expect(posted_plaintext(fields, "pfid") == "28" &&
+		               posted_plaintext(fields, "success") == "jop_2_main.htm" &&
+		               posted_plaintext(fields, "failure") == "jop_2_login.htm",
+		       "the hidden values are the page's, encrypted");
+	}
 	// The form post's headers in the menu browser's order, past its request line and Host
 	// (D-NET-NEW-L9-31). [orig: GopherWebWidget_SendHttpPost @0x658B30 - @0x658BBE, @0x658BCE,
 	//  @0x658BDE, @0x658BEF, @0x658BFF, the Cookie lines from @0x658C67]
@@ -767,7 +855,8 @@ static bool test_joi_page_refresh() {
 // URL is sought from the CONTENT's first ';' as "URL=", one quote skipped, and copied to a quote or
 // the end, spaces included; no ';' or no "URL=" names none; the page's last refresh wins.
 // [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620 - @0x655676, @0x6556B0..0x6556BC, @0x6556CD,
-//  @0x6556EE..0x6556F6, @0x655701..0x655717; XML_ParseAttributes @0x655410; sub_6555C0 @0x6555C0;
+//  @0x6556EE..0x6556F6, @0x655701..0x655717; XML_ParseAttributes @0x655410;
+//  XML_FindAttributeValue @0x6555C0;
 //  CUIHTMLParser_ParseTag @0x655E20 - @0x655EC4]
 static bool test_meta_refresh_walk() {
 	const auto url_of = [](const std::string &tag) {
@@ -1125,6 +1214,95 @@ static bool test_enter_seeds_identity_once() {
 	return g_fail == 0;
 }
 
+// D-NET-NEW-L9-45: a page's IB3_FORM inputs as the menu browser's form post sends them. Each INPUT
+// inside an IB3_FORM of the form is linked at the head of the form's list (the page's last input
+// first); an INPUT outside one, or after its closing tag, is none; a commented INPUT is the META
+// element's tag, which ends at the INPUT's '>'; an IB3_FORM with no VALUE keeps the form in force.
+// [orig: CUIHTMLParser_ParseTag @0x655E20 - @0x655E83..0x655E9B, @0x655EC4, @0x656049, @0x65605C;
+//  CUIHTMLParser_HandleIb3FormTag @0x655960 - @0x65596B, @0x6559A1; XML_PropertyNodeAdd @0x655C60 -
+//  @0x655C77, @0x655DE5 / @0x655DE9; UI_ProcessScriptBuffer @0x63CBE0 - sprintf called @0x63CE1D]
+static bool test_ib3_form_inputs() {
+	using Inputs = std::vector<std::pair<std::string, std::string>>;
+	const Inputs live = nw::ib3_form_inputs(jo_sign_in_page("1"), 1);
+	expect(live == Inputs{{"rememberlogin", "1"}, {"pfid", "28"},
+	                       {"needtoagree", "jop_2_needtoagree.htm"},
+	                       {"nodb", "jop_2_nodb.htm"}, {"relay", "jop_2_relay.htm"},
+	                       {"msgbase", "jop_2_msg.htm"}, {"enterkey", "jop_2_key.htm"},
+	                       {"failure", "jop_2_login.htm"}, {"success", "jop_2_main.htm"}},
+	       "the live page's form: its inputs last to first, the credentials outside it none");
+	expect(nw::ib3_form_inputs(jo_sign_in_page("1"), 2).empty(), "the page has no form 2");
+	expect(nw::ib3_form_inputs(kDfx2SignInPage, 1).front() ==
+	               std::pair<std::string, std::string>("charglsvssrequest", "[dfx]kills") &&
+	               nw::ib3_form_inputs(kDfx2SignInPage, 1).size() == 10,
+	       "DFX2's form: its commented rememberlogindata is none, charglsvssrequest first");
+	expect(nw::ib3_form_inputs("<IB3_FORM value=\"1\"><INPUT name=a VALUE=1></IB3_FORM>"
+	                           "<INPUT name=b VALUE=2><ib3_form VALUE=1><input NAME=c value=3>", 1) ==
+	               Inputs{{"c", "3"}, {"a", "1"}},
+	       "a closing IB3_FORM ends the form; a later one of the same form heads the list");
+	expect(nw::ib3_form_inputs("<IB3_FORM value=\"2\"><INPUT name=a VALUE=1><IB3_FORM>"
+	                           "<INPUT name=b VALUE=2><IB3_FORM value=1><INPUT name=c VALUE=3>", 2) ==
+	               Inputs{{"b", "2"}, {"a", "1"}},
+	       "an IB3_FORM with no VALUE keeps the form in force");
+	expect(nw::ib3_form_inputs("<IB3_FORM value=\"1\"><INPUT name=a><INPUT VALUE=v>", 1) ==
+	               Inputs{{"(null)", "v"}, {"a", "(null)"}},
+	       "an attribute the input lacks reads as sprintf writes a null string");
+	return g_fail == 0;
+}
+
+// D-NET-NEW-L9-45: the sign-in POST's hidden values are the page's, never a constant: the live
+// page's rememberlogin "1" posts "1" (as retail's 9 of 9 LN POSTs do), a page's "0" posts "0", and
+// DFX2's form posts its charglsvssrequest right after the template's edits.
+// [orig: CWnd_BuildFormFieldQueryString @0x657760 - @0x6577AE..0x6577BE, EPASK_EncryptField called
+//  @0x657980, @0x657A80..0x657A97]
+static bool test_sign_in_post_is_the_pages_form() {
+	nw::process_browser_cache().clear();
+	// The entry lands on the sign-in page: its Login posts the page's form.
+	nw::LobbyHttpFlow f;
+	f.set_context(templated_ctx());
+	f.enter();
+	f.on_enter_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), bytes(kStartPage));
+	nw::EnterResult entered = f.on_enter_response(true, 200, {}, bytes(jo_sign_in_page("1")));
+	if (!expect(entered.kind == nw::EnterResult::Kind::SignIn, "the entry lands on the sign-in page"))
+		return false;
+	nw::LoginResult r = f.login("p", "s");
+	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest && r.request.method == nw::HttpMethod::Post,
+	            "Login posts the page's form"))
+		return false;
+	expect(posted_plaintext(form_fields(r.request.body), "rememberlogin") == "1",
+	       "the live page's rememberlogin posts \"1\"");
+
+	// The login's own NWStart leg: the page it answers is the form posted.
+	nw::LobbyHttpFlow g;
+	g.set_context(templated_ctx());
+	g.login("p", "s");
+	g.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), bytes(kStartPage));
+	r = g.on_login_response(true, 200, {}, bytes(jo_sign_in_page("0")));
+	expect(r.kind == nw::LoginResult::Kind::NeedRequest &&
+	               posted_plaintext(form_fields(r.request.body), "rememberlogin") == "0",
+	       "a page whose rememberlogin is \"0\" posts \"0\"");
+
+	// DFX2: the page's charglsvssrequest follows the template's edits.
+	nw::LobbyHttpContext c = concrete_ctx();
+	c.title = nw::title_identity(nw::gameprofile::GAME_DFX2);
+	c.gate_tag = c.title->gate_tag;
+	nw::LobbyHttpFlow d;
+	d.set_context(c);
+	d.login("p", "s");
+	r = d.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), bytes(kDfx2SignInPage));
+	const auto fields = form_fields(r.request.body);
+	expect(field_names(fields) ==
+	               std::vector<std::string>{"EPASK", "NAME", "PASSWORD", "rememberlogindata",
+	                       "charglsvssrequest", "rememberlogin", "pfid", "needtoagree", "nodb", "relay",
+	                       "msgbase", "enterkey", "failure", "success"},
+	       "DFX2's post: the template's edits, then its form's inputs last to first");
+	expect(posted_plaintext(fields, "charglsvssrequest") == "[dfx]kills" &&
+	               posted_plaintext(fields, "pfid") == "38" &&
+	               posted_plaintext(fields, "enterkey") == "dfx2_0_term.htm",
+	       "DFX2's hidden values are its page's");
+	nw::process_browser_cache().clear();
+	return g_fail == 0;
+}
+
 int main() {
 	test_gate_reply_jar_fields();
 	test_meta_refresh_walk();
@@ -1143,6 +1321,8 @@ int main() {
 	test_host_leg_origin();
 	test_enter_reentry();
 	test_enter_seeds_identity_once();
+	test_ib3_form_inputs();
+	test_sign_in_post_is_the_pages_form();
 	std::fprintf(stderr, g_fail == 0 ? "OK\n" : "FAILED (%d)\n", g_fail);
 	return g_fail == 0 ? 0 : 1;
 }

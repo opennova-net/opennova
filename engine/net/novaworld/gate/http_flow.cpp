@@ -1,8 +1,10 @@
 #include <net/novaworld/http_flow.h>
 
+#include <array>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <iterator>
 #include <optional>
 #include <string_view>
 #include <utility>
@@ -210,7 +212,7 @@ std::vector<std::pair<std::string, std::string>> html_tag_attributes(const std::
 
 // An attribute's value by its name, case-insensitively: the list is built head first, so the
 // lookup's first match is the tag's LAST attribute of that name. Null when the tag has none.
-// [orig: sub_6555C0 @0x6555C0 - the stricmp walk @0x6555EE]
+// [orig: XML_FindAttributeValue @0x6555C0 - the stricmp walk @0x6555EE]
 const std::string *html_attribute(
 		const std::vector<std::pair<std::string, std::string>> &attributes, const char *name) {
 	for (auto it = attributes.rbegin(); it != attributes.rend(); ++it)
@@ -228,17 +230,23 @@ constexpr const char *kHtmlElements[] = {"meta", "TITLE", "FORM", "IB3_TEMPLATE"
 namespace {
 
 // The browser's tag walk over a page: each tag the element table takes, `on_tag` given the
-// element's table name and, for an opening tag, its attributes (a closing tag's handler does
-// nothing). The page is read as a C string: nothing past a NUL.
+// element's table name and, for an opening tag, its attributes. A closing tag reaches `on_close`
+// only while an opening tag of its element is still open (the latest is then closed); only the
+// IB3_FORM handler acts on one. The page is read as a C string: nothing past a NUL.
 // [orig: CUIHTMLParser_ParseTag @0x655E20 - the white space past '<' @0x655E40..0x655E50,
 //  '/' @0x655E5C, the name's end at '>', '!' or white space @0x655E83..0x655E9B, the table
 //  compare (String_CompareNoCaseN called @0x655EC4: strnicmp over the name's length, so a
 //  name that prefixes an element's, the empty one included, is that element),
-//  XML_ParseAttributes called @0x655EFC, the handler called @0x655F8B, the skip to the next
-//  '>' @0x655FFC..0x65600F and past it @0x65601B]
-template <typename OnTag>
-void walk_page_tags(const std::string &page, OnTag &&on_tag) {
+//  XML_ParseAttributes called @0x655EFC, the handler called @0x655F8B, the node appended to the
+//  parser's list @0x655FA0..0x65603D, a closing tag's node search (CUIHTMLParser_CloseLastOpenNode
+//  called @0x656049) and its handler called with the closing flag (`push edx` @0x656057, the flag
+//  read @0x655EDE) @0x65605C, the skip to the next '>' @0x655FFC..0x65600F and past it @0x65601B;
+//  CUIHTMLParser_CloseLastOpenNode @0x6553D0 - the walk back from the list's tail @0x6553D7..
+//  0x6553FE for an unclosed node of the element, marked closed @0x655405]
+template <typename OnTag, typename OnClose>
+void walk_page_tags(const std::string &page, OnTag &&on_tag, OnClose &&on_close) {
 	const std::string html = page.substr(0, page.find('\0'));
+	std::array<int, std::size(kHtmlElements)> open{};
 	std::size_t cur = 0;
 	while (cur < html.size()) {
 		if (html[cur] != '<') {
@@ -257,21 +265,31 @@ void walk_page_tags(const std::string &page, OnTag &&on_tag) {
 		       !html_space(html[name_end]))
 			++name_end;
 		const std::string_view name(html.data() + cur, name_end - cur);
-		const char *element = nullptr;
-		for (const char *candidate : kHtmlElements) {
-			const std::string_view full(candidate);
+		std::size_t element = std::size(kHtmlElements);
+		for (std::size_t e = 0; e < std::size(kHtmlElements); ++e) {
+			const std::string_view full(kHtmlElements[e]);
 			if (name.size() <= full.size() && strutil::iequals(name, full.substr(0, name.size()))) {
-				element = candidate;
+				element = e;
 				break;
 			}
 		}
-		if (element != nullptr) {
+		if (element < std::size(kHtmlElements)) {
 			cur = name_end;
-			if (!closing) on_tag(element, html_tag_attributes(html, cur));
+			if (!closing) {
+				on_tag(kHtmlElements[element], html_tag_attributes(html, cur));
+				++open[element];
+			} else if (open[element] > 0) {
+				--open[element];
+				on_close(kHtmlElements[element]);
+			}
 		}
 		while (cur < html.size() && html[cur] != '>') ++cur;
 		if (cur < html.size()) ++cur;
 	}
+}
+template <typename OnTag>
+void walk_page_tags(const std::string &page, OnTag &&on_tag) {
+	walk_page_tags(page, std::forward<OnTag>(on_tag), [](const char *) {});
 }
 
 // The element table's rows by name.
@@ -279,6 +297,8 @@ const char *const kMetaElement = kHtmlElements[0];
 const char *const kFormElement = kHtmlElements[2];
 const char *const kTemplateElement = kHtmlElements[3];
 const char *const kSubstElement = kHtmlElements[4];
+const char *const kIb3FormElement = kHtmlElements[5];
+const char *const kInputElement = kHtmlElements[9];
 
 } // namespace
 
@@ -330,6 +350,43 @@ std::optional<std::string> page_template_file(const std::string &page) {
 	return file;
 }
 
+// See http_flow.h. IB3_FORM's handler: an opening tag's VALUE (atol) is the form in force, none
+// keeps it; a closing one ends it. INPUT's handler, inside a form: its NAME and VALUE linked at the
+// head of its form's list. The script pass writes each as a hidden static of the form in the list's
+// order (sprintf's "(null)" for an attribute the tag lacks), and the form post walks those controls
+// in that order: the page's last input posts first.
+// [orig: CUIHTMLParser_Construct @0x6552D0 - the parser's +0x14 set to -1 @0x6552E1;
+//  CUIHTMLParser_HandleIb3FormTag @0x655960 - the closing flag @0x655960, -1 @0x65596B, the VALUE
+//  lookup (XML_FindAttributeValue called @0x65598B), atol called @0x655999, the parser's +0x14
+//  written @0x6559A1; XML_PropertyNodeAdd @0x655C60 - the form test @0x655C73..0x655C77, the NAME
+//  and VALUE lookups (XML_FindAttributeValue called @0x655CA2 / @0x655CB4), the form's list found
+//  @0x655DA6..0x655DAF (else a new one @0x655DB1..0x655DD7), the node at its head @0x655DE5 /
+//  @0x655DE9; UI_ProcessScriptBuffer @0x63CBE0 - "@IB3_FORM_%1d@" (sprintf called @0x63CD9F), the
+//  WINDOW per node (sprintf called @0x63CE1D), the list's next @0x63CF1A..0x63CF2C]
+std::vector<std::pair<std::string, std::string>> ib3_form_inputs(const std::string &page,
+		int32_t form) {
+	using Attributes = std::vector<std::pair<std::string, std::string>>;
+	int32_t current = -1;
+	Attributes inputs;
+	const auto on_tag = [&](const char *element, const Attributes &attributes) {
+		if (element == kIb3FormElement) {
+			if (const std::string *value = html_attribute(attributes, "VALUE"))
+				current = io::retail_atol(value->c_str());
+			return;
+		}
+		if (element != kInputElement || current < 0 || current != form) return;
+		const std::string *name = html_attribute(attributes, "NAME");
+		const std::string *value = html_attribute(attributes, "VALUE");
+		inputs.insert(inputs.begin(), {name != nullptr ? *name : std::string("(null)"),
+				value != nullptr ? *value : std::string("(null)")});
+	};
+	const auto on_close = [&](const char *element) {
+		if (element == kIb3FormElement) current = -1;
+	};
+	walk_page_tags(page, on_tag, on_close);
+	return inputs;
+}
+
 namespace {
 
 // The page NWStart answered as OpenNova's panel shows it (D-NET-NEW-L9-18's page model): the lobby
@@ -356,6 +413,10 @@ StartPageKind start_page_kind(const std::string &page) {
 	});
 	return lobby ? StartPageKind::Lobby : sign_in ? StartPageKind::SignIn : StartPageKind::Other;
 }
+
+// The form the sign-in template's ACCEPT button posts (its FORM_POST target_form="1": the
+// service's jop_2_login.mnx and dfx2_0_login.mnx), whose IB3_FORM inputs the sign-in page carries.
+constexpr int32_t kSignInForm = 1;
 
 EnterResult enter_fail(std::string reason) {
 	EnterResult r;
@@ -433,6 +494,7 @@ void LobbyHttpFlow::reset() {
 	join_step_ = JoinStep::Idle;
 	enter_step_ = EnterStep::Idle;
 	sign_in_page_shown_ = false;
+	sign_in_form_.clear();
 	identity_seeded_ = false;
 	login_page_url_.clear();
 	join_page_url_.clear();
@@ -726,6 +788,7 @@ EnterResult LobbyHttpFlow::on_enter_response(bool transport_ok, int code,
 			}
 			case StartPageKind::SignIn: {
 				sign_in_page_shown_ = true;
+				sign_in_form_ = ib3_form_inputs(to_string_body(body), kSignInForm);
 				EnterResult r;
 				r.kind = EnterResult::Kind::SignIn;
 				return r;
@@ -766,7 +829,7 @@ LoginResult LobbyHttpFlow::login(const std::string &username, const std::string 
 		sign_in_page_shown_ = false;
 		const std::string epask_refusal = take_epask({});
 		if (!epask_refusal.empty()) return login_fail(epask_refusal);
-		return login_post();
+		return login_post(sign_in_form_);
 	}
 	const std::string prepare_url = resolve_startup_url();
 	if (prepare_url.empty()) return login_fail("no gate startup_url yet — connect first");
@@ -797,33 +860,31 @@ std::string LobbyHttpFlow::take_epask(const std::vector<uint8_t> &page) {
 	return std::string();
 }
 
-// [orig: send_login_post()] — the 13-field LoginFormField list, byte-preserved. A body
-// that does not build (params the modexp gate rejects, which the Prepare leg already
+// The sign-in page's form post: the echoed EPASK bundle (plaintext), then the controls of the
+// template's form 1 in its order, each value EPASK-encrypted: the template's NAME, PASSWORD and
+// rememberlogindata edits (the last empty: no remembered login fills it), then, at its
+// @IB3_FORM_1@, the page's own IB3_FORM 1 inputs as the browser posts them (ib3_form_inputs). So
+// each hidden value is the page's, the live page's rememberlogin "1" included, never a constant
+// (D-NET-NEW-L9-45): no code writes that control (the REMEMBER_LOGIN checkbox stores game.cfg's
+// rememberlogin and gates the remembered login's fill; "rememberlogin" is read only as the cfg
+// key). A body that does not build (params the modexp gate rejects, which the Prepare leg already
 // refuses) fails the login instead of posting.
-LoginResult LobbyHttpFlow::login_post() {
-	const TitlePages &pages = *ctx_.title->pages;
+// [orig: CWnd_BuildFormFieldQueryString @0x657760 - the control's form test @0x6577AE..0x6577BE,
+//  its value EPASK-encrypted (EPASK_EncryptField called @0x657980), the children walked in order
+//  @0x657A80..0x657A97; UI_ProcessScriptBuffer @0x63CBE0 - the form's controls written for
+//  "@IB3_FORM_%1d@" (sprintf called @0x63CD9F / @0x63CE1D); UI_StoreRememberLoginCheckbox
+//  @0x5574F0 - the checked state to rememberLogin_4D4 @0x55750D; UI_LoadPersistentLoginCredentials
+//  @0x557330 - the fill's gate @0x557344..0x55734B; Config_ParseSettingsLine @0x54F740 -
+//  "rememberlogin"'s one xref @0x550EDD]
+LoginResult LobbyHttpFlow::login_post(
+		const std::vector<std::pair<std::string, std::string>> &form) {
 	std::vector<LoginFormField> fields = {
 		{"EPASK", epask_to_string(epask_), false}, // echoed bundle, PLAINTEXT
 		{"NAME", login_user_, true},
 		{"PASSWORD", login_pass_, true},
-	};
-	// The hidden fields as the client posts them, the reverse of the page's order (JO's captured
-	// post): a page whose form ends with charglsvssrequest (DFX2's) posts it first.
-	if (pages.glsvss_request != nullptr)
-		fields.push_back({"charglsvssrequest", pages.glsvss_request, true});
-	const std::vector<LoginFormField> hidden = {
 		{"rememberlogindata", "", false},
-		{"rememberlogin", "0", true},
-		{"pfid", std::to_string(*ctx_.title->pfid), true},
-		{"needtoagree", pages.need_to_agree, true},
-		{"nodb", pages.no_db, true},
-		{"relay", pages.relay, true},
-		{"msgbase", pages.msgbase, true},
-		{"enterkey", pages.enter_key, true},
-		{"failure", pages.login, true},
-		{"success", pages.main, true},
 	};
-	fields.insert(fields.end(), hidden.begin(), hidden.end());
+	for (const auto &input : form) fields.push_back({input.first, input.second, true});
 	std::string body;
 	if (!build_login_post_body(epask_, fields, body)) {
 		login_step_ = LoginStep::Idle;
@@ -886,7 +947,8 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 				//  @0x63D507; CUIScene_EndFrame @0x63E600 - `cmp eax, [esi+40h]` against
 				//  GetTickCount @0x63E626, UIScene_OpenUrl called @0x63E635]
 				const std::string refresh = relay_refresh_url(body);
-				if (refresh.empty()) return login_post();
+				if (refresh.empty())
+					return login_post(ib3_form_inputs(to_string_body(body), kSignInForm));
 				login_step_ = LoginStep::NwStart;
 				HttpRequestSpec req;
 				req.valid = true;
@@ -901,7 +963,7 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 					login_step_ = LoginStep::Idle;
 					return login_fail(message);
 				}
-				return login_post();
+				return login_post(ib3_form_inputs(to_string_body(body), kSignInForm));
 			}
 			case LoginStep::Post: {
 				const std::string *tag = jar_.find("LOGINSESSIONTAG");
