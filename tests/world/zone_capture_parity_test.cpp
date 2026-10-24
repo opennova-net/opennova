@@ -156,6 +156,32 @@ void test_secure_pass_counts_every_enemy() {
     (void)far;
 }
 
+// The census's radius test reads the position words: the X/Y root is
+// truncated against the radius word (20 << 16), so an enemy 1145 words off the
+// axis at X = 20 << 16 stands inside (its root is 0x140000 plus half a word,
+// truncated in every FPU precision); |dz| meets half the word exactly.
+// [orig: CaptureZone_CalculateControlDelta @0x5011AF..0x50120B]
+void test_census_radius_reads_the_position_words() {
+    const auto enemies_at = [](int32_t x, int32_t y, int32_t z) {
+        auto world = make_world(gt::kAdvanceAndSecure);
+        const EntityHandle base = zone(*world, 1, 1, {0.0f, 0.0f, 0.0f});
+        world->zones.build_chain_from_mission();
+        Entity *soldier = world->registry.get(player(*world, 0, 2, {0.0f, 0.0f, 0.0f}));
+        soldier->position.x.q16 = x;
+        soldier->position.y.q16 = y;
+        soldier->position.z.q16 = z;
+        ZoneCaptureEvents events;
+        world->zones.capture_second_tick(events);
+        const auto controls = events_of<ZoneCaptureEvents::Control>(events);
+        const ZoneCaptureEvents::Control *control = control_of(controls, base);
+        return control != nullptr ? int(control->enemies) : -1;
+    };
+    CHECK(enemies_at(20 << 16, 1145, 0) == 1);
+    CHECK(enemies_at(0, 0, 10 << 16) == 1);
+    CHECK(enemies_at(0, 0, (10 << 16) + 1) == 0);
+    CHECK(enemies_at(0, 0, -(10 << 16)) == 1);
+}
+
 // An empty sizing side on a full server divides by zero: the delta is the x87
 // integer indefinite, control clamps at zero, and the 0x6F word is its low half.
 // [orig: _ftol2_sse @0x50145C; the clamp @0x5014A5..0x5014AE; `movzx ebx, ax`
@@ -537,6 +563,7 @@ void test_objective_auto_deploy_walks_the_sorted_list() {
 int main() {
     test_secure_pass_latches_before_reading_control();
     test_secure_pass_counts_every_enemy();
+    test_census_radius_reads_the_position_words();
     test_secure_pass_empty_side_divides_by_zero();
     test_control_delta_sizes_teams_by_slot_team();
     test_control_census_is_empty_past_the_round_end();

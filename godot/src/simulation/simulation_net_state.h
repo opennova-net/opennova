@@ -14,7 +14,11 @@
 #include <runtime/inmatch/charattr_table.h>  // CharAttrTable
 #include <runtime/inmatch/game_config.h>          // GameConfig
 #include <runtime/inmatch/joiner_connection.h>    // JoinerConnection::DiscoveredSession
+#include <runtime/inmatch/loaded_model_list.h>    // LoadedModelListEntry (the model-list readout)
 #include <runtime/inmatch/mission_rotation.h>     // HostRotation (D-NET-331)
+#include <runtime/inmatch/client_runtime.h>       // ClientProcessState (the process's client words)
+#include <runtime/inmatch/rotation_admin.h>      // HostRotationAdmin (the remote admin)
+#include <runtime/inmatch/server_log_devices.h>   // ServerLogDevices (the server log switches)
 #include <runtime/inmatch/napi_np_connection.h>   // CharacterJoinVars
 #include <runtime/inmatch/napi_np_server_ctx.h>   // NetworkType
 #include <runtime/mission/mission_text.h>          // MissionText
@@ -83,14 +87,32 @@ struct SimulationNetState {
 	// screen's rows and Switch cells (configure_host_session), the mounted
 	// catalog the first host boot seeds the list over, the session-level
 	// words the map change reads, and the latch that makes the next boot the
-	// map change's (begin_host_map_change -> boot_mission). The words live
-	// with this session's simulation: a new session's start fresh, where
-	// retail's process globals carry the half toggle and the SETNEXT latch
-	// into the next session (D-NET-353).
+	// map change's (begin_host_map_change -> boot_mission). The words are
+	// process globals in retail that no session start resets (the half
+	// toggle, the SETNEXT latch, the side-to-team map), so a session that
+	// ended mid-map hands them to the next: the game world owns the one
+	// HostRotation for its whole run (use_host_rotation) and the session
+	// words reset at their own points (the seed, the round init, the host
+	// start). A simulation with no owner (a tool, a test) keeps its own. The
+	// witness is HostRotation's (inmatch/mission_rotation.h).
 	std::vector<std::string> rotation_missions;
 	std::vector<int32_t> rotation_launch_options;
 	std::vector<opennova::mission_catalog::Row> rotation_catalog;
-	opennova::inmatch::HostRotation rotation;
+	opennova::inmatch::HostRotation own_rotation;
+	opennova::inmatch::HostRotation *process_rotation = nullptr;
+	// The process's server log devices (inmatch/server_log_devices.h): the game world's one
+	// set, armed from the command line's switches, which every hosted session's context
+	// writes (host_session_cfg). Null = none (a tool, a test): no logs.
+	opennova::inmatch::ServerLogDevices *log_devices = nullptr;
+	// The remote admin's rotation seam over process_rotation and rotation_catalog
+	// (Simulation::remote_admin_seams), made at the first bind.
+	std::unique_ptr<opennova::inmatch::HostRotationAdmin> rotation_admin;
+	// The process's client words (inmatch/client_runtime.h ClientProcessState): the game
+	// world's, which every hosted session's own client runtime steps on. Null = the role's own.
+	opennova::inmatch::ClientProcessState *client_process = nullptr;
+	opennova::inmatch::HostRotation &rotation() {
+		return process_rotation != nullptr ? *process_rotation : own_rotation;
+	}
 	bool map_change_pending = false;
 	// The mounted <mission>.bin (or the medmssn.bin fallback) RTXT the shell
 	// handed over before load, harvested engine-side
@@ -120,15 +142,36 @@ struct SimulationNetState {
 	// The game-session APPID join token (decoded .joi CK) a NovaWorld host
 	// validates (reject code 9). "0" is the LAN default. Retained across rebuilds.
 	std::string app_id = "0";
+	// The joiner's S2C 0x11 load seam (JoinerConnection::set_sync_tail_loading): the shell's
+	// terrain load runs at the 0x11, ahead of the 0x0A. Retained across rebuilds.
+	bool join_sync_tail_loading = false;
+	// The joiner's final S2C 0x64 load seam (JoinerConnection::set_mission_data_loading): the
+	// shell's effect system load runs there, ahead of the 0x09. Retained across rebuilds.
+	bool join_mission_data_loading = false;
+	// The count of the loaded-model list frozen at this mission's load
+	// (finalize_loaded_model_challenge_snapshot): a host's S2C 0x68 cursor wrap.
+	uint32_t loaded_model_list_count = 0;
+	// The same list's model files in load order (LoadedModelList::model_files): what the
+	// shell's freeze resolves before the first frame, a death's husk family among them (FX-5).
+	std::vector<std::string> mission_start_model_files;
+	// The same list's nodes head first, foliage included (inmatch::loaded_model_list_entries):
+	// the model-list readout's (an instrument).
+	std::vector<opennova::inmatch::LoadedModelListEntry> mission_start_model_entries;
 	// The joiner's network type (JoinTarget::network_type; retail's
-	// g_NapiNPCtx.transport_mode on the client). Retained across rebuilds.
+	// g_NapiNPCtx.network_type on the client). Retained across rebuilds.
 	opennova::inmatch::NetworkType join_network_type = opennova::inmatch::NetworkType::Lan;
 	// The CD identity cookie (packed PUB* blob) for the 0x00 JOIN (codes 23/24/25).
 	// Empty for LAN. Retained across direct-load runtime rebuilds.
 	std::vector<uint8_t> join_cd_cookie;
+	// The gate's GLSVSSREQUEST for a NovaWorld 0x00 JOIN (D-NET-723). Empty for LAN. Retained
+	// across direct-load runtime rebuilds.
+	std::string join_glsvss_request;
 	// The browse row's 0x81 record a join from it connects with (no 0x41).
 	// Retained across direct-load runtime rebuilds.
 	opennova::inmatch::JoinerConnection::DiscoveredSession join_discovered_session;
+	// The transport the join goes on with (JoinTarget.transport, D-NET-NEW-R3-3); null
+	// = enable_join binds its own over the client port range.
+	Ref<UdpPump> join_transport;
 	// Retail loads this process-scoped table from charattr.def before joining
 	// (a host's is its boot's, kept with its restriction latches). It stays
 	// outside ClientRuntime so a direct mission load can reinstall it when a

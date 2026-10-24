@@ -54,8 +54,8 @@ static_assert(NetProtocol::MAX_PLAYERS_CAP == opennova::inmatch::kMaxPlayersCap,
 static_assert(NetProtocol::MAX_CALLSIGN_LENGTH == opennova::game_rules::kMaxCallsignLength,
 		"MAX_CALLSIGN_LENGTH drifted from base/gameprofile game_type.h");
 
-static_assert(NetProtocol::DEFAULT_RESPAWN_TIME == opennova::game_rules::kDefaultRespawnTime,
-		"DEFAULT_RESPAWN_TIME drifted from base/gameprofile game_type.h");
+static_assert(NetProtocol::DEFAULT_ROUND_TIME_LIMIT_MINUTES == opennova::game_rules::kDefaultRoundTimeLimitMinutes,
+		"DEFAULT_ROUND_TIME_LIMIT_MINUTES drifted from base/gameprofile game_type.h");
 static_assert(NetProtocol::DEFAULT_TIME_LIMIT_MINUTES == opennova::game_rules::kDefaultTimeLimitMinutes,
 		"DEFAULT_TIME_LIMIT_MINUTES drifted from base/gameprofile game_type.h");
 static_assert(NetProtocol::DEFAULT_REPLAY_ENABLED == opennova::game_rules::kDefaultReplayEnabled,
@@ -138,7 +138,7 @@ void NetProtocol::_bind_methods() {
 	BIND_CONSTANT(DEFAULT_LAN_PORT);
 	BIND_CONSTANT(DEFAULT_GATE_PORT);
 	BIND_CONSTANT(MAX_CALLSIGN_LENGTH);
-	BIND_CONSTANT(DEFAULT_RESPAWN_TIME);
+	BIND_CONSTANT(DEFAULT_ROUND_TIME_LIMIT_MINUTES);
 	BIND_CONSTANT(DEFAULT_TIME_LIMIT_MINUTES);
 	BIND_CONSTANT(DEFAULT_REPLAY_ENABLED);
 	BIND_CONSTANT(DEFAULT_MAX_TEAM_LIVES);

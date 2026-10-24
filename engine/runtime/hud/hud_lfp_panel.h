@@ -38,10 +38,10 @@ inline std::string lfp_ready_text(const GameTextLookup &gametext) {
 //        panel   HUD_DrawZoneStatusPanel @0x5A2480;
 //        marker  HUD_DrawZoneMarker @0x5986F0 (x, y, zoneEntity, letterIndex)]
 //
-// The panel models the AAS (grouped-by-team) branch. Conquest mode
-// (g_GameType == 0x50010 @0x5a24a1) takes the other arm: every marker is its
-// own row (Y += 86 per marker @0x5a2781) with the status text drawn per
-// marker — not modelled here.
+// The AAS arm groups the markers by zone number, one row per group. Conquest
+// mode (g_GameType == 0x50010 @0x5a24a1) takes the other arm: every marker is
+// its own row (Y += 86 per marker @0x5a2781) with the status text drawn per
+// marker (the element draws both, D-HUD-61).
 
 // Team colours, ARGB — the three g_HUDColors entries the marker reads
 // [orig: team 1 g_HUDColors.palette[3] @0x24C1844 = table[3], team 2
@@ -78,13 +78,15 @@ inline constexpr int kLfpBarX2 = 0x4C;
 inline constexpr int kLfpBarY2 = 0x52;
 
 // STEPPING [orig: HUD_DrawZoneStatusPanel @0x5A2480]. Markers step ACROSS
-// within a team group (`x += 0x62` after each marker @0x5a27a3) and each new
-// team group steps DOWN (`y += 0x56` @0x5a2667 / @0x5a2781). The two pitches
+// within a zone-number group (`x += 0x62` after each marker @0x5a27a3) and each
+// new group steps DOWN (`y += 0x56` @0x5a2667 / @0x5a2781). A group is the
+// zones whose zone byte (+0x21A) shares its low five bits, never a team
+// (`mov al, [eax+21Ah]; and ecx, 1Fh` @0x5a24cd..0x5a24d9). The two pitches
 // differ, so one shared step would drift.
 //
 // A group is RIGHT-ANCHORED to the panel X: its first marker sits at
 // `g_HUDZonePanelX - 98 * zonesInGroup` (`esi = g_HUDZonePanelX - 0x62*count`
-// @0x5a2589..0x5a259d, where count is that team's zone count from the first
+// @0x5a2589..0x5a259d, where count is that group's zone count from the first
 // pass @0x5a24c5..0x5a24ea), so the group ends one pitch short of the anchor.
 // The panel anchor is the hudpos-authored pair g_HUDZonePanelX/Y
 // [orig: the hudpos writes @0x5a0563 / @0x5a057b].

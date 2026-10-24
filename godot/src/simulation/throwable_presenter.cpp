@@ -97,7 +97,7 @@ void ThrowablePresenter::present_visuals(
 				free_model(*rec);
 			}
 			ModelSlot built;
-			if (!build_model(item_id, built)) {
+			if (!build_model(item_id, entry.mirror_collected, built)) {
 				// unresolved graphic: remember the miss so we do not re-try
 				// the build every frame
 				ModelSlot miss;
@@ -253,7 +253,7 @@ void ThrowablePresenter::retire_move_effect(int64_t p_key) {
 	fx_world->release_effect_binding(owner_key);
 }
 
-bool ThrowablePresenter::build_model(int p_item_id, ModelSlot &r_slot) {
+bool ThrowablePresenter::build_model(int p_item_id, bool p_mirror_collected, ModelSlot &r_slot) {
 	if (placer_.is_null() || item_db_.is_null()) {
 		return false;
 	}
@@ -269,6 +269,11 @@ bool ThrowablePresenter::build_model(int p_item_id, ModelSlot &r_slot) {
 		return false;
 	}
 	model->set_name(vformat("Throwable_%d", p_item_id));
+	// A flying round's model leaves both water mirrors on either side of the
+	// water (its row's population is the RoundPool, which no reflected collect
+	// walks: world::ThrowableVisualRow::mirror_collected); a placed device keeps
+	// the pool-1 entity's mirror rule.
+	model->set_mirror_collected(p_mirror_collected);
 	r_slot.node = model->get_instance_id();
 	r_slot.item_id = p_item_id;
 	return true;

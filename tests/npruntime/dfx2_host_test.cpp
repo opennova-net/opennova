@@ -90,17 +90,14 @@ void join_own_player(JoinedHost &host, const TitleIdentity *title) {
 	host.ctx.world = &host.world;
 	inmatch::Server_InitNewRoundState(host.ctx);
 	inmatch::Server_ProcessPendingPlayerSpawns(host.ctx, host.world);
+	inmatch::test::round_init_own_body(host.ctx); // the mission start's round init (D-NET-NEW-L7-39)
 	inmatch::NapiNPConnection &conn = host.ctx.np_protocol.connection_list[0];
 	std::vector<uint8_t> body;
-	bool reached = false;
-	for (int i = 0; i < 64 && !reached; ++i) {
-		inmatch::InitialStateStep step =
-				inmatch::Server_SendInitialGameStateToPlayer(host.ctx, conn, /*now_tick=*/1);
-		if (!step.advanced) break;
-		for (const inmatch::InitialStateMessage &m : step.messages)
-			if (m.tag == 0x0F) body = m.body;
-		reached = step.reached_in_game;
-	}
+	std::vector<inmatch::InitialStateMessage> emitted;
+	const bool reached = inmatch::test::drive_host_own_burst_and_join(
+			host.ctx, conn, /*now_tick=*/1, emitted);
+	for (const inmatch::InitialStateMessage &m : emitted)
+		if (m.tag == 0x0F) body = m.body;
 	host.decoded = reached && !body.empty() &&
 			decode_world_state_load(body.data(), body.size(), host.state);
 }
@@ -200,7 +197,10 @@ void lan_cd_key_check() {
 	expect(join_code(ctx, key, {cdkey::WireKeys{other_key, ""}, cdkey::WireKeys{key, ""}}) == 13,
 	       "DFX2-13: another player's CDKIID is refused 13");
 	ctx.transport_mode = inmatch::NetworkType::NovaWorld;
-	expect(join_code(ctx, "") == 0, "a DFX2 NovaWorld session runs no CD-key leg");
+	// No CD-key leg there; the NovaWorld cookie legs instead, and this JOIN carries no CD
+	// cookie (D-NET-702) [orig: Server_ValidatePlayerJoinRequest @0x50F8A8..0x50F8BB -> 23
+	// @0x50FC06 (dfx2.exe)].
+	expect(join_code(ctx, "") == 23, "a DFX2 NovaWorld session runs no CD-key leg");
 	ctx.transport_mode = inmatch::NetworkType::Lan;
 	ctx.np_protocol.identity = jo();
 	expect(join_code(ctx, "") == 0, "a JO LAN host has no CD-key leg");
@@ -229,7 +229,8 @@ void rules_word() {
 	config.mp_attributes = 0x3A06u;
 	const auto word = [&config](const TitleIdentity *title) {
 		const inmatch::MissionMetadataBlob blob =
-				inmatch::build_mission_metadata_blob(config, /*mp_session_peer=*/true, title);
+				inmatch::build_mission_metadata_blob(config, /*mp_session_peer=*/true, title,
+						config.mission_file);
 		return static_cast<uint32_t>(blob[44]) | (static_cast<uint32_t>(blob[45]) << 8) |
 				(static_cast<uint32_t>(blob[46]) << 16) | (static_cast<uint32_t>(blob[47]) << 24);
 	};

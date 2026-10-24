@@ -76,7 +76,6 @@ HudEntityInfo local_player_entity_info(int32_t health, int32_t max_health,
 		out.flash_red = view->screen_flash_red_alpha;
 		out.flash_revive = view->screen_flash_revive;
 		out.flash_revive_channel = view->screen_flash_revive_channel;
-		out.overlays_suppressed = view->hud_overlays_suppressed;
 	}
 	// The SIGHTS card over the frame: the card switch, under the binocular
 	// arm the fork tests first, and not over the NVG composite, whose Sighted

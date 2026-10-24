@@ -108,9 +108,12 @@ bool test_only_persons_dip() {
 	                    view.state().find(0x1003)->pitch_kick_accum == 0,
 	            "a vehicle row is skipped entirely by the dip integrator"))
 		return false;
-	return expect(view.state().find(0x0002)->arms_dip_ticks == 70 &&
-	                      view.state().find(0x0002)->pitch_kick_accum < 0,
-	              "an infantry row dips like a player row");
+	// An Infantry row's update is org1's, which never reads the window: the stamp stays and
+	// the term only eases, so from level it stays level [orig: Entity_UpdateInfantryAI
+	// @0x4B9910 - the ease @0x4BE883..0x4BE891; the window is read only @0x4B5CAB / @0x4B5CDB].
+	return expect(view.state().find(0x0002)->arms_dip_ticks == 80 &&
+	                      view.state().find(0x0002)->pitch_kick_accum == 0,
+	              "an infantry row's org1 block has no dip window");
 }
 
 
@@ -127,8 +130,62 @@ bool test_unstamped_rows_stay_level() {
 } // namespace
 
 
+// D-NET-330: a remote player's torso roll (+0x2DC), the player-body rule in the same
+// block: it chases the Roll word a sixteenth ((roll - torso + 8) >> 4), the lag clamped
+// to +-20 degrees (0x0E38E380); prone idle decays it a sixteenth toward level, the prone
+// rolls step it 0x4000000. An Infantry row takes org1's own rule: the same chase and clamps,
+// prone idle a thirty-second step, no roll states.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - prone idle @0x4b5d05, the chase and
+//  clamps @0x4b5d4e / @0x4b5d61, the rolls @0x4b700e / @0x4b701d; Entity_UpdateInfantryAI
+//  @0x4B9910 - prone idle @0x4BE897..0x4BE8AC, the chase @0x4BE8B0..0x4BE8BD, the clamps
+//  @0x4BE8C8..0x4BE8EA]
+bool test_torso_roll_chases_the_roll_word() {
+	ns::ClientReplicaPipeline view = make_view();
+	ns::ClientEntityState &player = *view.state().find(0x0001);
+	ns::ClientEntityState &infantry = *view.state().find(0x0002);
+	player.roll_bam = 0x08000000;
+	infantry.roll_bam = 0x08000000;
+	view.tick_arms_dip();
+	bool ok = expect(player.torso_roll == 0x00800000, "torso roll: a sixteenth of the lag");
+	ok = expect(infantry.torso_roll == 0x00800000, "torso roll: an Infantry row chases a sixteenth too") && ok;
+	// A roll the sixteenth leaves more than 20 degrees behind: the lag clamps.
+	player.torso_roll = 0;
+	player.roll_bam = 0x10000000;
+	view.tick_arms_dip();
+	ok = expect(player.torso_roll == 0x10000000 - 0x0E38E380, "torso roll: the lag clamps at -20 degrees") && ok;
+	player.roll_bam = 0;
+	player.torso_roll = 0x20000000;
+	view.tick_arms_dip();
+	ok = expect(player.torso_roll == 0x0E38E380, "torso roll: the lag clamps at +20 degrees") && ok;
+	player.rm_state = 48; // idle prone
+	view.tick_arms_dip();
+	ok = expect(player.torso_roll == 0x0E38E380 - ((0x0E38E380 + 8) >> 4),
+			"torso roll: prone idle decays it a sixteenth") && ok;
+	player.rm_state = 41; // the left roll
+	player.torso_roll = 0;
+	view.tick_arms_dip();
+	ok = expect(player.torso_roll == -0x4000000, "torso roll: the left roll steps it") && ok;
+	// The Infantry row: its lag clamps the same, prone idle decays a thirty-second, and the
+	// left roll state is no case of its block (it chases).
+	infantry.roll_bam = 0;
+	infantry.torso_roll = 0x20000000;
+	view.tick_arms_dip();
+	ok = expect(infantry.torso_roll == 0x0E38E380, "torso roll: an Infantry row's lag clamps") && ok;
+	infantry.rm_state = 48; // idle prone
+	view.tick_arms_dip();
+	ok = expect(infantry.torso_roll == 0x0E38E380 - ((0x0E38E380 + 16) >> 5),
+			"torso roll: an Infantry row's prone idle decays a thirty-second") && ok;
+	infantry.rm_state = 41;
+	infantry.torso_roll = 0;
+	infantry.roll_bam = 0x08000000;
+	view.tick_arms_dip();
+	ok = expect(infantry.torso_roll == 0x00800000, "torso roll: an Infantry row has no roll steps") && ok;
+	return ok;
+}
+
 int main() {
 	bool ok = true;
+	ok = test_torso_roll_chases_the_roll_word() && ok;
 	ok = test_window_lasts_forty_ticks() && ok;
 	ok = test_decay_dips_then_recovers() && ok;
 	ok = test_only_persons_dip() && ok;

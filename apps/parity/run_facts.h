@@ -21,7 +21,10 @@ namespace opennova::parity {
 // Which capture of a run is its evidence: the summary's own evidence_capture
 // (the retail endpoint's capture for RR/RO/OR, the external one for OO), or the
 // external.pcapng every cell records.
-enum class EvidenceSource { Summary, External };
+// Summary: the summary's evidence capture. External: every run's external.pcapng.
+// Late: E3's late joiner, the summary's late_joiner capture bound to its client
+// port, its steady window from its readiness to the cell's steady end.
+enum class EvidenceSource { Summary, External, Late };
 
 struct RunInfo {
 	std::string label; // "rr", "rr_aa", "ro", "or", "oo"
@@ -39,6 +42,12 @@ struct RunInfo {
 	uint64_t steady_start_ns = 0;
 	uint64_t steady_end_ns = 0; // start + steady_seconds: the slice end
 	uint64_t steady_completed_ns = 0; // when the runner closed the window
+	int session = 0; // a fixed gameplay session (the late joiner's client port); 0 = bind
+	bool rotation = false; // E2: the host plays a next mission inside the steady window
+	// E4's kick: the run's scenario ends the joiner's session (its scenario.json's
+	// ends_joiner_session), so its gameplay coverage ends at the disconnect
+	// (window.session_end).
+	bool ends_session = false;
 };
 
 // Strict ISO-8601 UTC ("2026-10-11T12:34:56.1234567Z", 0..9 fraction digits)
@@ -82,6 +91,11 @@ struct RunFacts {
 		return ts_ns >= info.steady_start_ns && ts_ns <= info.steady_end_ns;
 	}
 };
+
+// The end of a run's gameplay coverage: the steady end, or, for a run whose scenario
+// ends the joiner's session, the first S2C 0x103 in the steady window
+// (window.session_end).
+uint64_t coverage_end(const RunFacts &facts);
 
 // Bind `trace` to its one gameplay session, measure the comparison interval and
 // check the evidence (the steady window's gameplay coverage, the datagram

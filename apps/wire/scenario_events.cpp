@@ -2,6 +2,8 @@
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h>
 
 #include <cstdarg>
 #include <cstdio>
@@ -24,6 +26,17 @@ uint16_t read_u16(const std::vector<uint8_t> &body, size_t at) {
 	return static_cast<uint16_t>(body[at] | (body[at + 1] << 8));
 }
 
+// A console line's NUL-terminated text, as hex so a line with spaces stays one
+// field; decoded when the terminator is inside the body.
+std::string console_text(const std::vector<uint8_t> &body, bool &decoded) {
+	size_t length = 0;
+	while (length < body.size() && body[length] != 0) ++length;
+	decoded = length < body.size();
+	std::string hex;
+	for (size_t i = 0; i < length; ++i) hex += format("%02x", unsigned(body[i]));
+	return hex;
+}
+
 // The decoded fields for one S2C message; empty when the tag is not one a
 // scenario asserts on.
 std::string server_fields(const InGameMessage &m, bool &decoded) {
@@ -31,6 +44,12 @@ std::string server_fields(const InGameMessage &m, bool &decoded) {
 	const size_t len = m.payload.size();
 	size_t consumed = 0;
 	switch (static_cast<uint8_t>(m.tag & 0xFFu)) {
+		case s2c::CLIENT_CONSOLE_COMMAND:
+			// The authority's echo of a console line it did not take, sent to
+			// that line's sender alone, which runs it as its own command
+			// [orig: NapiNPServerMsg_HandleConsoleLine @0x5199D0 -- the
+			//  NETLOG handler @0x519A7B, the echo @0x519AB0..0x519AC5].
+			return "kind=console_echo text_hex=" + console_text(m.payload, decoded);
 		case s2c::ENTITY_DEATH: {
 			EntityDeathRecord v;
 			decoded = decode_entity_death(body, len, v, consumed);
@@ -110,6 +129,12 @@ std::string client_fields(const InGameMessage &m, ScenarioEventTracker &tracker,
 	const size_t len = m.payload.size();
 	size_t consumed = 0;
 	switch (static_cast<uint8_t>(m.tag & 0xFFu)) {
+		case c2s::ADMIN_NETLOG_COMMAND:
+			// A session peer's console line (the command prompt's
+			// callback), reliable [cstr line]
+			// [orig: Client_ProcessConsoleCommand @0x520E80 -- the peer's
+			//  QueueReliableMessage(4) @0x520F29].
+			return "kind=console_line text_hex=" + console_text(m.payload, decoded);
 		case c2s::FIRED_ROUND: {
 			ClientFiredRound v;
 			decoded = decode_client_fired_round(body, len, v, consumed);
@@ -163,12 +188,37 @@ std::string client_fields(const InGameMessage &m, ScenarioEventTracker &tracker,
 	}
 }
 
+// A string field as hex (a reason with spaces stays one field).
+std::string text_hex(const std::string &text) {
+	std::string hex;
+	for (const unsigned char c : text) hex += format("%02x", unsigned(c));
+	return hex;
+}
+
 } // namespace
 
 std::string format_scenario_event(const InGameMessage &message, uint64_t ts_nanos,
 		ScenarioEventTracker &tracker) {
-	// Settings-update records share the low dispatch byte but are not these
-	// gameplay messages.
+	// The session-level disconnect: the connection-description record (inner
+	// H:0x03, full tag 0x103), which a host sends the player it kicks
+	// (Server_BanPlayerSlot -> CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0
+	// latches the event, reason code at +0x94; CNapiNPConnection_SendDescriptionOnce
+	// @0x629750 -> NapiNPDataTransfer_SendDescription @0x628c80). The reason code
+	// is DPC, which the client's exit-reason switch reads (@0x4c6569).
+	if (message.tag == PROTOCOL_TAG_CONNECTION_DESCRIPTION) {
+		DisconnectEvent event;
+		const bool decoded = parse_disconnect_event(
+				message.payload.data(), message.payload.size(), event);
+		return format("SCENARIO_EVENT frame=%d ts_ns=%llu dir=%c session=%d tag=0x103 ",
+		              message.frame_index, static_cast<unsigned long long>(ts_nanos),
+		              message.dir, message.session) +
+		       format("kind=disconnect class=%u reason=%u tag_hex=", unsigned(event.dc),
+		              unsigned(event.dpc)) +
+		       text_hex(event.ddstr) + " text_hex=" + text_hex(event.dstr) +
+		       (decoded ? " decode=1" : " decode=0");
+	}
+	// Other settings-update records share the low dispatch byte but are not
+	// these gameplay messages.
 	if (message.settings_update) return {};
 	bool decoded = false;
 	const std::string fields = message.dir == 'S'

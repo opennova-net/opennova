@@ -35,11 +35,11 @@ class MissionScene;
 //   (docs/world/world-wac-ai-re.md section 12), unless its definition's move_function names a class whose
 //   update moves it every tick [orig: EntityDef_LookupPhysicsCallback @0x4a9240, a whole-name stricmp
 //   over g_EntityClassPhysicsTable @0x82abc8; a name it lacks takes row 0, null]. Eight rows keep the
-//   height: null (nullsub_2), envs (Entity_UpdateEnvSoundEmitter @0x4a8080), ewep
+//   height: null (Entity_UpdateNullClass), envs (Entity_UpdateEnvSoundEmitter @0x4a8080), ewep
 //   (Entity_UpdateTransformAndTurret @0x440ca0, which writes its turret's transform, not its own), door
 //   (Entity_SetDefaultBoneCallbacks @0x4a91d0), genx (Entity_UpdateParentTransform @0x4a88b0: it moves only
 //   with the entity it stands on), upfx (Entity_UpdateWaterPhysicsAndEffects @0x4a92e0), org0 (Entity_UpdateOrg0Movement)
-//   and chld (nullsub_82). Every other row moves it (the vehicles' and aircraft's movers, the rounds', an
+//   and chld (Entity_UpdateChldClass). Every other row moves it (the vehicles' and aircraft's movers, the rounds', an
 //   elevator's fall and land, a toppling tower): the game places those itself, the player-controlled ones
 //   set down on the ground under them at the mission's start [orig: Game_StartMission @0x525F97..0x525FED:
 //   the ground probe from one unit up, plus the brain's floor, at least the water plane], the aircraft

@@ -37,30 +37,24 @@ struct TitleBuild {
 };
 
 // The NovaWorld web flow's page names. Retail's client renders the pages the gate's start page
-// leads to (the NWStart query, the login form's hidden fields, the NWJoin link, the server-list
-// feed); LobbyHttpFlow requests them by these names (docs/net/novaworld-net-re.md D-NET-31: the
-// names are the pages' markup, not C literals). A null name is one the title's pages do not
-// carry: the request leaves its field out.
+// leads to (the NWJoin link, the server-list feed; the NWStart query is the start page's own
+// refresh, which the flow follows, and the login form's hidden fields are the sign-in page's own,
+// which the flow posts as the page carries them); LobbyHttpFlow requests them by these names
+// (docs/net/novaworld-net-re.md D-NET-31: the names are the pages' markup, not C literals). A null
+// name is one the title's pages do not carry: the request leaves its field out.
 struct TitlePages {
-	const char *msgbase = nullptr;           // MSGBASE / msgbase
-	const char *main = nullptr;              // IN, the login's success, NWJoin's failure
-	const char *login = nullptr;             // OUT, the login's failure
-	const char *version_file = nullptr;      // verfile
-	const char *new_update = nullptr;        // newupdateavailable
-	const char *new_update_bypass = nullptr; // newupdateavailablewithbypass
-	const char *junction = nullptr;          // junction
-	const char *activate = nullptr;          // ACT, between OUT and verfile
-	const char *need_to_agree = nullptr;     // needtoagree
-	const char *no_db = nullptr;             // nodb
-	const char *relay = nullptr;             // relay
-	const char *enter_key = nullptr;         // enterkey
-	// The login form's charglsvssrequest, the first of its hidden fields as the client posts
-	// them (the reverse of the page's order, as JO's captured post shows its own).
-	const char *glsvss_request = nullptr;
+	const char *msgbase = nullptr;           // NWJoin's msgbase
+	const char *main = nullptr;              // NWJoin's failure
+	const char *no_db = nullptr;             // NWJoin's nodb
+	const char *relay = nullptr;             // NWJoin's relay
 	const char *join_lan = nullptr;          // NWJoin's leading lan
 	const char *key_error = nullptr;         // NWJoin's needexpkey
 	const char *join = nullptr;              // NWJoin's success, the .joi
 	const char *server_list = nullptr;       // the GSB feed ("<name>?a=1")
+	// The sign-in page's submit control (its template's form-post button): the one the executable's
+	// LOGIN callbacks and its login validation name when it is "LOGIN" (LobbyHttpFlow::
+	// sign_in_submit_enabled, D-NET-NEW-L9-55).
+	const char *sign_in_submit = nullptr;
 };
 
 // The in-match code's per-title branches: the host and joiner code the JO-family executables share,
@@ -108,7 +102,8 @@ struct TitleIdentity {
 	// PG and PV1 on both; PV2 on the 0x42).
 	const char *nvs = nullptr;
 	const char *co = nullptr;
-	const char *ap = nullptr;
+	// No AP: the protocol's is the running executable's file name, whatever the title
+	// (make_title_client_hello, D-NET-NEW-L9-2).
 	const char *bdat = nullptr;
 	const char *pn = nullptr;
 	std::optional<std::array<uint8_t, 16>> guid; // PG, the protocol GUID's 16 bytes
@@ -130,6 +125,8 @@ struct TitleIdentity {
 	// login's pfid and the web flow's pages.
 	const char *ver1 = nullptr;
 	const char *ver2 = nullptr;
+	// The title the _connectlog.txt header names (its TITLE line).
+	const char *connect_log_title = nullptr;
 	const char *product_code = nullptr;
 	const char *gate_tag = nullptr;
 	const char *gate_tag_keys = nullptr;
@@ -137,6 +134,13 @@ struct TitleIdentity {
 	// witnessed difference rather than an unwitnessed value: absent from JO's lists, present in
 	// DFX2's (docs/titles/dfx2-vs-jo-re.md DFX2-7).
 	bool host_category_var = false;
+	// Whether NovaLogic's own gate's reply to the title's tag is witnessed, which the service's gate
+	// then answers in that shape: no POSTIPADDRESS / POSTIPPORT (the udpnovaworld line skips the
+	// client's POST tests), a startupurl on http://[domainname]/ (the client fills it from the
+	// lobby's 0x82), and a TimeOnGateServer line after the reflected pair: DFX2's (2026-10-14:
+	// docs/titles/dfx2-vs-jo-re.md §6.5, D-NET-721) and JO's (the LN S1 retail host record,
+	// 2026-10-23). The JO demo's is unrecorded, so its tag keeps the reply the service always sent.
+	bool gate_reply_witnessed = false;
 	std::optional<int> pfid;
 	std::optional<TitlePages> pages;
 };

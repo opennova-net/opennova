@@ -37,17 +37,8 @@ String NetSessionPolicy::describe_installed(const PackedStringArray &p_installed
 	return opennova::to_gd(opennova::inmatch::describe_installed_expansions(installed));
 }
 
-void NetSessionPolicy::arm_preload(int64_t p_now_ms) {
-	policy_.arm_preload(static_cast<uint64_t>(p_now_ms));
-}
-
-void NetSessionPolicy::disarm_preload() {
-	policy_.disarm_preload();
-}
-
-int NetSessionPolicy::preload_step(const String &p_join_error, int64_t p_now_ms) {
-	return static_cast<int>(policy_.preload_step(
-			opennova::to_std(p_join_error), static_cast<uint64_t>(p_now_ms)));
+int NetSessionPolicy::preload_step(const String &p_join_error) {
+	return static_cast<int>(policy_.preload_step(opennova::to_std(p_join_error)));
 }
 
 bool NetSessionPolicy::validate_promote_mission_file(const String &p_mission_file) {
@@ -63,8 +54,8 @@ bool NetSessionPolicy::validate_promote_header(int64_t p_header_size) {
 			p_header_size < 0 ? 0u : static_cast<std::size_t>(p_header_size));
 }
 
-void NetSessionPolicy::arm_admission_watch(int64_t p_now_ms) {
-	policy_.arm_admission_watch(static_cast<uint64_t>(p_now_ms));
+void NetSessionPolicy::arm_admission_watch() {
+	policy_.arm_admission_watch();
 }
 
 void NetSessionPolicy::disarm_admission_watch() {
@@ -75,18 +66,12 @@ bool NetSessionPolicy::is_admission_watch_active() const {
 	return policy_.admission_watch_active();
 }
 
-bool NetSessionPolicy::request_admission_abort() {
-	return policy_.request_admission_abort();
-}
-
 int NetSessionPolicy::begin_admission_frame(const String &p_session_loss_reason,
 		bool p_deploy_pending, bool p_initial_admission_complete,
-		const String &p_join_error, const String &p_admission_stage,
-		int64_t p_now_ms) {
+		const String &p_join_error) {
 	return static_cast<int>(policy_.begin_admission_frame(
 			opennova::to_std(p_session_loss_reason), p_deploy_pending,
-			p_initial_admission_complete, opennova::to_std(p_join_error),
-			opennova::to_std(p_admission_stage), static_cast<uint64_t>(p_now_ms)));
+			p_initial_admission_complete, opennova::to_std(p_join_error)));
 }
 
 int NetSessionPolicy::finish_admission_frame(bool p_settle_ok,
@@ -119,8 +104,7 @@ void NetSessionPolicy::_bind_methods() {
 	ClassDB::bind_static_method("NetSessionPolicy",
 			D_METHOD("describe_installed", "installed"),
 			&NetSessionPolicy::describe_installed);
-	ClassDB::bind_method(D_METHOD("arm_preload", "now_ms"), &NetSessionPolicy::arm_preload);
-	ClassDB::bind_method(D_METHOD("preload_step", "join_error", "now_ms"),
+	ClassDB::bind_method(D_METHOD("preload_step", "join_error"),
 			&NetSessionPolicy::preload_step);
 	ClassDB::bind_method(D_METHOD("validate_promote_mission_file", "mission_file"),
 			&NetSessionPolicy::validate_promote_mission_file);
@@ -128,13 +112,13 @@ void NetSessionPolicy::_bind_methods() {
 			&NetSessionPolicy::promoted_mission_file);
 	ClassDB::bind_method(D_METHOD("validate_promote_header", "header_size"),
 			&NetSessionPolicy::validate_promote_header);
-	ClassDB::bind_method(D_METHOD("arm_admission_watch", "now_ms"),
+	ClassDB::bind_method(D_METHOD("arm_admission_watch"),
 			&NetSessionPolicy::arm_admission_watch);
 	ClassDB::bind_method(D_METHOD("is_admission_watch_active"),
 			&NetSessionPolicy::is_admission_watch_active);
 	ClassDB::bind_method(D_METHOD("begin_admission_frame", "session_loss_reason",
 								 "deploy_pending", "initial_admission_complete",
-								 "join_error", "admission_stage", "now_ms"),
+								 "join_error"),
 			&NetSessionPolicy::begin_admission_frame);
 	ClassDB::bind_method(D_METHOD("finish_admission_frame", "settle_ok", "wire_present_drained"),
 			&NetSessionPolicy::finish_admission_frame);

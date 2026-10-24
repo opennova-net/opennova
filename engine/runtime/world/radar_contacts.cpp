@@ -42,14 +42,14 @@ uint32_t entity_source_id(const Entity &entity) {
 // float mirror.
 void entity_position_q16(const World &world, const Entity &entity, int32_t out[3]) {
 	if (const AiEntity *body = world.ai.for_handle(entity.handle)) {
-		out[0] = body->pos[0];
-		out[1] = body->pos[1];
-		out[2] = body->pos[2];
+		out[0] = body->self->position.x.q16;
+		out[1] = body->self->position.y.q16;
+		out[2] = body->self->position.z.q16;
 		return;
 	}
-	out[0] = to_fixed(entity.position.x);
-	out[1] = to_fixed(entity.position.y);
-	out[2] = to_fixed(entity.position.z);
+	out[0] = entity.position.x.q16;
+	out[1] = entity.position.y.q16;
+	out[2] = entity.position.z.q16;
 }
 
 } // namespace
@@ -196,7 +196,7 @@ void radar_add_blip(World &world, uint32_t source, const int32_t pos[3], int32_t
 	if (local == nullptr) return;
 	const AiEntity *body = world.ai.for_handle(world.cached.local_player);
 	if (body == nullptr) return;
-	radar_add_blip(local->radar, world.rules.mpattrib, body->pos,
+	radar_add_blip(local->radar, world.rules.mpattrib, body->self->position.words().data(),
 			static_cast<uint32_t>(body->heading), source, pos, kind);
 }
 
@@ -332,6 +332,17 @@ void radar_note_guided_missile(World &world, const LiveRound &round, uint32_t sl
 	if (local == nullptr || !world.cached.local_player.valid()) return;
 	const EntityHandle self = world.cached.local_player;
 	const uint32_t source = kRadarSourceRound | (slot & kRadarSourceIndexMask);
+	// A round target (a flare the missile took): its +368 is its source, and a round is
+	// never the local player [orig: Entity_UpdateGuidedMissile_0 @0x446060 (@0x4465DB..0x446602,
+	//  @0x44660A..0x446615)].
+	if (round.guided.target_round >= 0) {
+		const LiveRound &held = world.round_sim.rounds[static_cast<size_t>(round.guided.target_round)];
+		if (held.owner.valid() && held.owner == self) {
+			local->radar.lock_tone = kRadarLockToneTicks;
+			radar_note_missile(local->radar, source, round.guided.pos);
+		}
+		return;
+	}
 	const uint16_t target_handle = static_cast<uint16_t>(round.guided.target);
 	// A joiner's pool-0 target is a wire proxy: its registry holds only its
 	// own body there, so the wire handle resolves through the replica rows,
@@ -344,15 +355,19 @@ void radar_note_guided_missile(World &world, const LiveRound &round, uint32_t sl
 	// The target's first occupant, then the target itself; each arm stores
 	// the lock tone before the list note [orig: @0x4465db..0x446602 (the
 	// store @0x4465f8); @0x44660a..0x446622 (the store @0x446618)].
-	if (target != nullptr && target->primary_occupant.valid() && target->primary_occupant == self) {
+	// A wire target's +0x170 is its decoded row's ride link (D-NET-196).
+	RoundSim::WireActor actor;
+	const bool wire_actor = wire_target && world.round_sim.wire_actor_provider(target_handle, actor);
+	const bool occupant_is_local = wire_target
+			? wire_actor && actor.ride_link_is_local
+			: target != nullptr && target->primary_occupant.valid() &&
+					target->primary_occupant == self;
+	if (occupant_is_local) {
 		local->radar.lock_tone = kRadarLockToneTicks;
 		radar_note_missile(local->radar, source, round.guided.pos);
 	}
 	bool target_is_local = target != nullptr && target->handle == self;
-	if (wire_target) {
-		RoundSim::WireActor actor;
-		target_is_local = world.round_sim.wire_actor_provider(target_handle, actor) && actor.is_local;
-	}
+	if (wire_target) target_is_local = wire_actor && actor.is_local;
 	if (target_is_local) {
 		local->radar.lock_tone = kRadarLockToneTicks;
 		radar_note_missile(local->radar, source, round.guided.pos);
@@ -376,7 +391,7 @@ int32_t radar_hud_frame(World &world, uint32_t tick, bool pass_runs, bool map_si
 	int32_t aged = 0;
 	if (runs && !local->view.death_screen_active) {
 		// [orig: @0x5a8164..0x5a817d]
-		aged = radar_update_contacts(state, tick, body->pos, static_cast<uint32_t>(body->heading));
+		aged = radar_update_contacts(state, tick, body->self->position.words().data(), static_cast<uint32_t>(body->heading));
 		// The incoming-lock loop: re-registered every pass frame while the
 		// tone word is live, outside the in-game menu pause, on the local
 		// player's own lane at its Position [orig: @0x5a8185..0x5a81bf].
@@ -398,15 +413,15 @@ int32_t radar_hud_frame(World &world, uint32_t tick, bool pass_runs, bool map_si
 		// The death screen skips the pass's own call; the corner map's site
 		// then stands in, a no-op within a tick otherwise
 		// [orig: HUD_DrawMapOverlay @0x5a790a..0x5a791c].
-		aged = radar_update_contacts(state, tick, body->pos, static_cast<uint32_t>(body->heading));
+		aged = radar_update_contacts(state, tick, body->self->position.words().data(), static_cast<uint32_t>(body->heading));
 	}
 	out.red12 = state.red12;
 	out.olive12 = state.olive12;
 	out.red24 = state.red24;
 	out.olive24 = state.olive24;
 	out.rules_no_tracers = (world.rules.mpattrib & kRadarRulesNoTracers) != 0;
-	out.local_x = body->pos[0];
-	out.local_y = body->pos[1];
+	out.local_x = body->self->position.x.q16;
+	out.local_y = body->self->position.y.q16;
 	// The ring reads each listed missile's LIVE position through the stored
 	// pointer [orig: HUD_DrawDirectionalIndicatorRing @0x598279..0x598294].
 	for (int32_t i = 0; i < state.missile_count; ++i) {
@@ -416,8 +431,8 @@ int32_t radar_hud_frame(World &world, uint32_t tick, bool pass_runs, bool map_si
 		if ((row.source & kRadarSourceRound) != 0) {
 			const size_t slot = row.source & kRadarSourceIndexMask;
 			if (slot < world.round_sim.rounds.size()) {
-				threat.x = to_fixed(world.round_sim.rounds[slot].pos.x);
-				threat.y = to_fixed(world.round_sim.rounds[slot].pos.y);
+				threat.x = world.round_sim.rounds[slot].pos.x.q16;
+				threat.y = world.round_sim.rounds[slot].pos.y.q16;
 			}
 		}
 		out.threats.push_back(threat);

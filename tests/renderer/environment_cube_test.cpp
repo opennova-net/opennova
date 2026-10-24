@@ -69,6 +69,15 @@ void check_dim_byte() {
 	}
 }
 
+// The render subsystems' init creates the cube, and a dedicated host's start jumps over it
+// (D-NET-NEW-LF-13) [orig: Game_StartMission @0x524360 - the dedicated test @0x5259B4 skipping
+// the call @0x5259D1; Render_InitRenderingSubsystems @0x586EE0 - Render_InitTextures, the call
+// @0x586EFC].
+void check_cube_creates_on_the_full_arm_alone() {
+	CHECK(creates_environment_cube(/*dedicated_host=*/false));
+	CHECK(!creates_environment_cube(/*dedicated_host=*/true));
+}
+
 } // namespace
 
 int main() {
@@ -76,6 +85,7 @@ int main() {
 	check_refresh_cadence();
 	check_eye_height();
 	check_dim_byte();
+	check_cube_creates_on_the_full_arm_alone();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

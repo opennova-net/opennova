@@ -11,6 +11,18 @@ namespace opennova::inmatch {
 
 namespace {
 constexpr double kFixed16 = io::kFp16OneD;
+
+// Whether this tick's primary pose samples the armed park: the unblended
+// channel holding a deferred state sits on the boundary its arm parked it on,
+// where the clip reads its last frame, not the wrapped start (the row's twin of
+// InfantryState::body_phase_parked).
+// [orig: AnimChannel_AdvancePlayback @0x40B140 (the armed wrap @0x40B19E..0x40B1B1)]
+bool row_primary_parked(const replication::ClientEntityState &entity) {
+	return entity.rm_blend_weight >= 1.0f && entity.net_anim_pending != 0 &&
+			entity.net_anim_pending_boundary >= 0 &&
+			entity.net_anim_pending_boundary != world::kEndNotifyNeverLatches &&
+			entity.rm_phase == entity.net_anim_pending_boundary;
+}
 } // namespace
 
 void initialize_client_replica_present_row(float *row) {
@@ -76,12 +88,18 @@ void project_client_replica_present_row(
 	row[world::PF_POS_X] = static_cast<float>(entity.x / kFixed16);
 	row[world::PF_POS_Y] = static_cast<float>(entity.z / kFixed16);
 	row[world::PF_POS_Z] = static_cast<float>(-entity.y / kFixed16);
-	// Vehicle euler X/Y live in the same BAM32 entity fields as the
-	// authoritative pose. Spawn/dead-pose records seed them; the joiner
-	// prediction mirror advances air/water attitude between records. Role
-	// bindings override afterwards where a better source exists (the host's
-	// authoritative registry attitude, attachment poses).
-	if (entity.cls == EntityClass::Vehicle) {
+	// Euler X/Y live in the same BAM32 entity fields as the authoritative
+	// pose. Spawn/dead-pose records seed them; the joiner prediction mirror
+	// advances air/water attitude between records. Role bindings override
+	// afterwards where a better source exists (the host's authoritative
+	// registry attitude, attachment poses). Every non-person row draws from its
+	// full euler, a pitched or rolled building or object included; a person's
+	// pitch is its look, which the body's channels take, not the root.
+	// [orig: BoneCallback_bldg_World @0x4E21A0 - the matrix rebuilt from
+	//  Position and the eulers @0x4E21BA..0x4E220C: Math_BuildFixedPointMatrixFromEulerAngles
+	//  @0x613F40 (the call @0x4E220C), the scaled builder
+	//  Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale @0x614210]
+	if (entity.cls != EntityClass::Player && entity.cls != EntityClass::Infantry) {
 		row[world::PF_PITCH_DEG] = static_cast<float>(
 				double(entity.pitch_bam) * world::kDegreesPerBam);
 		row[world::PF_ROLL_DEG] = static_cast<float>(
@@ -143,18 +161,27 @@ void project_client_replica_present_row(
 		write_present_emplaced_controls(row, emplaced);
 
 	anim::AimOverlayInputs inputs;
-	bool collapse_right_hand = false;
+	bool blocking_seat = false;
 	if (!aim_overlay_inputs_for_client(
-				entity, state, seat_specs, inputs, &collapse_right_hand))
+				entity, state, seat_specs, inputs, &blocking_seat))
 		return;
+	// The collapsed right-hand row: a blocking seat without the Player bit.
+	// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - the special row @0x4B1F84..0x4B1F92]
+	const bool collapse_right_hand = entity.cls == EntityClass::Infantry && blocking_seat;
 
 	// An armed row presents the same simulation-owned primary channel whose
 	// root delta moves the replica, a corpse's death clip included (the mover's
-	// death edge commits it). Frozen (bit0/seated) or unresolved rows are
-	// disarmed by the fold and fall back to the latest wire state (the seat
-	// clips).
-	const bool root_motion_armed =
-			entity.rm_adm_id >= 0 && entity.rm_state >= 0;
+	// death edge commits it). Frozen (bit0) or unresolved rows, and every carried
+	// row but a seated player's, are disarmed by the fold and fall back to the
+	// latest wire state. A seated player row presents the channel its pass runs
+	// (tick_seated_body, D-NET-330), as an authoritative body presents its own
+	// (present_rows.cpp write_present_body): the bone build samples the body's
+	// primary channel, seated or not.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the dual update @0x4B41DF
+	//  ahead of the mounted site @0x4B637C..0x4B638F; Entity_BuildBoneTransformMatrices
+	//  @0x4B1290 - the primary channel @0x4B1355, AnimChannel_ComputeBoneMatrices
+	//  called @0x4B1388]
+	const bool root_motion_armed = entity.rm_adm_id >= 0 && entity.rm_state >= 0;
 	if (root_motion_armed) {
 		// The channel already ran the per-record receive arbitration + the
 		// deferred promotion in the fold/tick (D-NET-209), so it presents
@@ -163,12 +190,19 @@ void project_client_replica_present_row(
 		row[world::PF_ANIM_STATE] = static_cast<float>(entity.rm_state);
 		row[world::PF_ANIM_REMOTE_REQUEST] = 0.0f;
 		row[world::PF_ANIM_PHASE_TICKS] = static_cast<float>(entity.rm_phase);
+		// The served ring entry each half plays (D-NET-196), and the armed park,
+		// as an authoritative body presents them (present_rows.cpp
+		// write_present_body).
+		row[world::PF_ANIM_VARIANT] = static_cast<float>(entity.rm_variant);
+		row[world::PF_ANIM_PHASE_PARKED] = row_primary_parked(entity) ? 1.0f : 0.0f;
 		if (entity.rm_blend_weight < 1.0f && entity.rm_prev_state >= 0) {
 			row[world::PF_ANIM_SOURCE_STATE] =
 					static_cast<float>(entity.rm_prev_state);
 			row[world::PF_ANIM_SOURCE_PHASE_TICKS] =
 					static_cast<float>(entity.rm_prev_phase);
 			row[world::PF_ANIM_BLEND_WEIGHT] = entity.rm_blend_weight;
+			row[world::PF_ANIM_SOURCE_VARIANT] =
+					static_cast<float>(entity.rm_prev_variant);
 		}
 	} else {
 		row[world::PF_ANIM_STATE] = static_cast<float>(
@@ -213,7 +247,10 @@ void project_client_replica_present_row(
 		// An armed row's channel holds the +0x2C8 target the hand-frame
 		// selector reads (write_present_held_weapon).
 		if (entity.wpn_playing >= 0) weapon_hold_state = entity.wpn_state;
-		if (!collapse_right_hand &&
+		// The splice: the Player bit, no blocking seat, flag 0x40 on the requested state
+		// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - @0x4B14A7 / @0x4B14B9 /
+		//  @0x4B14C9].
+		if (!blocking_seat &&
 				(world::infantry_anim_flags(entity.anim_state_id) &
 				 0x40u) != 0) {
 			if (entity.wpn_playing >= 0) {
@@ -222,6 +259,7 @@ void project_client_replica_present_row(
 				// authority presents a body's (present_rows.cpp).
 				row[world::PF_WPN_ANIM_STATE] = static_cast<float>(entity.wpn_playing);
 				row[world::PF_WPN_PHASE_TICKS] = static_cast<float>(entity.wpn_phase);
+				row[world::PF_WPN_VARIANT] = static_cast<float>(entity.wpn_variant);
 				row[world::PF_WPN_PHASE_PARKED] =
 						entity.wpn_blend_weight >= 1.0f && entity.wpn_deferred != 0 &&
 								entity.wpn_deferred_boundary >= 0 &&
@@ -233,6 +271,8 @@ void project_client_replica_present_row(
 					row[world::PF_WPN_SOURCE_PHASE_TICKS] =
 							static_cast<float>(entity.wpn_prev_phase);
 					row[world::PF_WPN_BLEND_WEIGHT] = entity.wpn_blend_weight;
+					row[world::PF_WPN_SOURCE_VARIANT] =
+							static_cast<float>(entity.wpn_prev_variant);
 				}
 			} else {
 				// Unarmed (no root-motion source): the ladder's pose at frame 0.
@@ -276,30 +316,38 @@ bool skeletal_pose_inputs_for_client(
 	static const std::vector<mission::ItemSeatSpec> kNoSeatSpecs;
 	const auto &seat_specs = context.item_seat_specs != nullptr
 			? *context.item_seat_specs : kNoSeatSpecs;
-	bool collapse_right_hand = false;
+	bool blocking_seat = false;
 	if (!aim_overlay_inputs_for_client(
-				entity, state, seat_specs, out.overlay, &collapse_right_hand))
+				entity, state, seat_specs, out.overlay, &blocking_seat))
 		return false;
-	out.collapse_right_hand = collapse_right_hand;
+	out.collapse_right_hand = entity.cls == EntityClass::Infantry && blocking_seat;
 	// The projection's armed branch: the row's own primary channel, current,
-	// playhead and the blending source pair (variant 0, never parked).
-	if (entity.rm_adm_id < 0 || entity.rm_state < 0) return false;
+	// playhead, served ring entry, armed park and the blending source pair; a
+	// seated player row's included (D-NET-330).
+	if (entity.rm_adm_id < 0 || entity.rm_state < 0)
+		return false;
 	out.primary_state = entity.rm_state;
 	out.primary_phase = entity.rm_phase;
+	out.primary_variant = entity.rm_variant;
+	out.primary_parked = row_primary_parked(entity);
 	if (entity.rm_blend_weight < 1.0f && entity.rm_prev_state >= 0) {
 		out.blend = true;
 		out.source_state = entity.rm_prev_state;
 		out.source_phase = entity.rm_prev_phase;
+		out.source_variant = entity.rm_prev_variant;
 		out.blend_weight = entity.rm_blend_weight;
 	}
-	// A player row's secondary channel, where the projection presents one.
-	if (entity.cls != EntityClass::Player || collapse_right_hand ||
+	// A player row's secondary channel, where the projection presents one: the Player
+	// bit, no blocking seat, flag 0x40 on the requested state [orig:
+	// Entity_BuildBoneTransformMatrices @0x4B1290 - @0x4B14A7 / @0x4B14B9 / @0x4B14C9].
+	if (entity.cls != EntityClass::Player || blocking_seat ||
 			(world::infantry_anim_flags(entity.anim_state_id) & 0x40u) == 0)
 		return true;
 	out.weapon = true;
 	if (entity.wpn_playing >= 0) {
 		out.weapon_state = entity.wpn_playing;
 		out.weapon_phase = entity.wpn_phase;
+		out.weapon_variant = entity.wpn_variant;
 		out.weapon_parked = entity.wpn_blend_weight >= 1.0f && entity.wpn_deferred != 0 &&
 				entity.wpn_deferred_boundary >= 0 &&
 				entity.wpn_deferred_boundary != world::kEndNotifyNeverLatches &&
@@ -308,6 +356,7 @@ bool skeletal_pose_inputs_for_client(
 			out.weapon_blend = true;
 			out.weapon_prev_state = entity.wpn_prev;
 			out.weapon_prev_phase = entity.wpn_prev_phase;
+			out.weapon_prev_variant = entity.wpn_prev_variant;
 			out.weapon_blend_weight = entity.wpn_blend_weight;
 		}
 		return true;

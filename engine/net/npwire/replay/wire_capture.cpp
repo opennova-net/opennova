@@ -9,6 +9,7 @@
 
 #include <net/napi/envelope.h>
 #include <net/novacrypto/nwu.h>
+#include <net/npwire/flat_tlv.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
@@ -177,6 +178,28 @@ bool process(const std::vector<uint8_t> &body, const std::optional<std::string> 
 	return true;
 }
 
+// A goodbye body as a stock peer writes it: the receiver's key dword, then the
+// latched disconnect record's seven fields in the writer's order, each value
+// inside the body. The receiver's own walk is lenient (any name order, a short
+// record keeps its zero defaults: parse_disconnect_event), so it cannot tell a
+// goodbye from other bytes; the writer's fixed shape can.
+// [orig: CNapiNPConnection_SendDisconnectPacket @0x61F2A0 (the key dword
+//  @0x61F3AF, DS / DC / DP1 / DP2 / DSTR / DPC / DDSTR @0x61F3D0..0x61F4AA);
+//  Nwu_HandleDisconnect @0x623CE0]
+bool goodbye_record(const std::vector<uint8_t> &body) {
+	if (body.size() < 4) return false;
+	static constexpr std::string_view kFields[] = {"DS", "DC", "DP1", "DP2", "DSTR", "DPC", "DDSTR"};
+	size_t pos = 4;
+	for (const std::string_view name : kFields) {
+		FlatTlvField field;
+		const size_t next = read_flat_tlv(body.data(), body.size(), pos, field);
+		if (next == kFlatTlvEnd || field.name != name || field.present != field.size)
+			return false;
+		pos = next;
+	}
+	return true;
+}
+
 CaptureDatagramClass classify_opcode(uint8_t opcode) {
 	switch (opcode) {
 	case SESSION_OPCODE_CLIENT_HELLO:
@@ -191,6 +214,10 @@ CaptureDatagramClass classify_opcode(uint8_t opcode) {
 		return CaptureDatagramClass::ServerAuth;
 	case SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE:
 		return CaptureDatagramClass::ServerProtocol;
+	case SESSION_OPCODE_CLIENT_GOODBYE:
+		return CaptureDatagramClass::ClientGoodBye;
+	case SESSION_OPCODE_SERVER_GOODBYE:
+		return CaptureDatagramClass::ServerGoodBye;
 	default:
 		return CaptureDatagramClass::Unknown;
 	}
@@ -309,6 +336,11 @@ void process_datagram(const CaptureDatagram &d, SessionTable &sessions,
 		                         d.frame_index, session_key, s.participant, out);
 		break;
 	}
+	case SESSION_OPCODE_CLIENT_GOODBYE:
+	case SESSION_OPCODE_SERVER_GOODBYE:
+		result.decoded = goodbye_record(body);
+		if (!result.decoded) result.datagram_class = CaptureDatagramClass::Unknown;
+		break;
 	default:
 		break;
 	}

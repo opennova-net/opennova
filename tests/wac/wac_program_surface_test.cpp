@@ -235,7 +235,36 @@ static void test_direct_system_tick_uses_mutable_clock_and_restore_publishes_it(
     CHECK(w.cached.wac_ticks == 0 && w.script_may_advance());
 }
 
+// The console's WAC overlay toggle (D-NET-371): a CHEAT declaration is mission variable
+// 256 + its declaration index; a console line equal to its name, case-insensitively and
+// whole, flips it on the authority (0 to 1, nonzero to 0); a VAR of that name, a partial
+// name, or a non-authority takes nothing.
+// [orig: Script_Compile @0x4F3927..0x4F3956 (the type 0x19 for CHEAT, the address
+//  0xC6B640 + 4 * i); WacScript_ToggleCheatByName @0x4EE750 - @0x4EE757, the walk
+//  @0x4EE76D..0x4EE792, the flip @0x4EE7AE]
+static void test_console_toggles_a_cheat_by_name() {
+    CompileEnv env;
+    WacSystem wac;
+    wac.set_program(compile_source(
+            "var plain\ncheat godmode\nif never() then set(plain,1) endif\n", env));
+    CHECK(wac.program().declarations.size() == 2);
+    // The tokenizer upper-cases the declared name; the toggle's stricmp ignores it.
+    CHECK(wac.program().declarations[1].name == "GODMODE" && wac.program().declarations[1].type == 0x19);
+    ScriptedWorld w;
+    CHECK(!wac.toggle_cheat("GodMode", /*authority=*/false, w));
+    CHECK(w.script.vars.get_mission(257) == 0);
+    CHECK(wac.toggle_cheat("GodMode", /*authority=*/true, w));
+    CHECK(w.script.vars.get_mission(257) == 1);
+    w.script.vars.set_mission(257, 7);
+    CHECK(wac.toggle_cheat("godmode", true, w));
+    CHECK(w.script.vars.get_mission(257) == 0);
+    CHECK(!wac.toggle_cheat("plain", true, w));
+    CHECK(!wac.toggle_cheat("godmode ", true, w));
+    CHECK(w.script.vars.get_mission(256) == 0);
+}
+
 int main() {
+    test_console_toggles_a_cheat_by_name();
     test_direct_system_tick_uses_mutable_clock_and_restore_publishes_it();
     test_compile_good_source();
     test_lenient_compile_surfaces_warnings();

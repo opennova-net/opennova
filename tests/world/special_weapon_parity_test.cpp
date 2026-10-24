@@ -39,7 +39,7 @@ struct Rig {
         world.ai.attach(shooter);
         auto &b = *world.ai.for_handle(shooter);
         b.inf.active = true; b.inf.is_local_player = true;
-        b.pos[0] = 10*65536; b.pos[1] = 20*65536; b.pos[2] = 3*65536;
+        b.self->position.x.q16 = 10*65536; b.self->position.y.q16 = 20*65536; b.self->position.z.q16 = 3*65536;
         world.tables.weapons.entries.resize(2);
         auto &weapon = world.tables.weapons.entries[1];
         weapon.valid = true; weapon.name = "WPN_SPECIAL"; weapon.ammo_index = 1;
@@ -355,7 +355,7 @@ void pose_provider_turns_the_euler_by_the_point_direction() {
     World &world = *storage;
     world.registry.configure_pool(1, 2);
     Entity seed;
-    seed.kind = EntityKind::Item; seed.position = {10,20,3}; seed.yaw = 0;
+    seed.kind = EntityKind::Item; seed.position = {10,20,3}; seed.heading = placed_heading_bam(0);
     const auto handle = world.registry.spawn(1, seed);
     opennova::threedi::ThreediUserPoint point{};
     point.x = 65536; point.rot_y = 65536; point.subobject_index = -1;
@@ -390,7 +390,7 @@ void pose_provider_maps_the_userpoint_part_as_retail() {
     World &world = *storage;
     world.registry.configure_pool(1, 2);
     Entity seed;
-    seed.kind = EntityKind::Item; seed.position = {10,20,3}; seed.yaw = 0;
+    seed.kind = EntityKind::Item; seed.position = {10,20,3}; seed.heading = placed_heading_bam(0);
     const auto handle = world.registry.spawn(1, seed);
     // One point per part index: the root (0), -1, the count (1), past it (2), -2.
     opennova::threedi::ThreediUserPoint points[5] = {};
@@ -510,8 +510,22 @@ void authority_local_fire_scores_one_shot() {
     }
 }
 
+// A heat lock on a round (a flare the ring leg returned) rides the fire: the shooter's
+// claimed target is the round, and the C2S 0x06 word pool-walks the +0xC pointer, which a
+// round lies outside, so it writes 0xFFFF. (D-NET-64)
+// [orig: WeaponAction_Fire @0x542B10 (the target read @0x542C00..0x542C15);
+//  NetPacket_WriteEntityPositionUpdate @0x42A610 (the walk @0x42A713..0x42A745)]
+void a_round_lock_fires_as_0xffff() {
+    Rig r;
+    r.world.ai.for_handle(r.shooter)->slot.f[3] = AiSlot::target_word(TargetRef::of_round(2));
+    const LocalWeaponPumpIO io = r.fire();
+    CHECK(io.fired.target_handle == 0xFFFF);
+    CHECK(r.world.registry.get(r.shooter)->last_fire_target == TargetRef::of_round(2));
+}
+
 int main() {
     authority_local_fire_scores_one_shot();
+    a_round_lock_fires_as_0xffff();
     mortar_elevation_is_independent_of_view_pitch();
     mortar_elevation_survives_rebake_and_ignores_look_keys();
     designator_fire_uses_the_measured_position();

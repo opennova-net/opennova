@@ -606,7 +606,7 @@ struct Window {
   WindowPart search_button;
 
   // GLB_TABLE [orig: CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dac0; the embedded
-  // widgets of CLanWnd_Construct @ 0x65ec30]: PLAYERLIST (1) or SERVERLIST (0) on the WINDOW,
+  // widgets of CGLBTableWnd_Construct @ 0x65ec30]: PLAYERLIST (1) or SERVERLIST (0) on the WINDOW,
   // the last authored; GLB_TABLE and GLB_INFO_PLAYER_DETAILS each parsed by an embedded
   // table (their HEADERs' FIELD the browser's filter field, TableHeader::field),
   // GLB_INFO_BUTTON by a button, GLB_INFO_SERVER_DETAILS by a multiline edit (its first

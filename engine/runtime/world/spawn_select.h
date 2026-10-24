@@ -22,10 +22,10 @@ class World;
 
 struct SpawnPointResult {
     bool found = false; // a start marker of some family type existed
-    Vec3 position{};    // mission space (Z-up), copied from the chosen marker
-    int16_t yaw = 0;    // the whole-degree mission yaw mirror (Entity::yaw)
-    int16_t pitch = 0;
-    int16_t roll = 0;
+    EntityPosition position; // mission space (Z-up): the chosen marker's words, copied raw
+    // The chosen row's Pitch / Roll words, copied (D-NET-NEW-L6-3).
+    int32_t pitch_bam = 0;
+    int32_t roll_bam = 0;
     // The heading word (+0x10) the placement copies onto the player verbatim:
     // the chosen entity's own Yaw (a start marker's placement angle, low 16
     // bits zero; a vehicle's live motor heading), plus its parent's Yaw for a
@@ -45,6 +45,12 @@ struct SpawnPointResult {
     // carry neither). [orig: Server_PositionPlayerForSpawn @0x50D424..0x50D45A]
     uint32_t flags_or = 0;
     EntityHandle carrier;
+    // The scored-marker arm (every no-pick arm but Co-op's) warms the body up
+    // after its pick, a pick that found no marker included, which leaves the
+    // body where it stands (world::warm_up_player_body).
+    // [orig: Server_PositionPlayerForSpawn - Entity_FindBestSpawnPoint
+    //  @0x50D56C, Entity_WarmUpOrganicAnimation @0x50D572]
+    bool warm_up = false;
 };
 
 // The player-slot bytes the no-pick arm reads beside the assigned team: the

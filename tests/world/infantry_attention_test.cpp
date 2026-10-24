@@ -6,6 +6,7 @@
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/world.h>
 #include <runtime/terrain_query/height_field.h>
+#include <runtime/world/angle.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -54,7 +55,7 @@ struct Fixture {
         e.health = 100;
         e.net_id = 8;
         e.team = 1;
-        e.pos[2] = fixed(2);
+        e.self->position.z.q16 = fixed(2);
         e.slot.f[17] = fixed(20);
         e.slot.f[1] = 1; // Disable the separate combat query.
     }
@@ -69,7 +70,7 @@ struct Fixture {
         entity.group_id = group;
         entity.team = static_cast<uint8_t>(team);
         entity.position = position;
-        entity.yaw = 90; // +X in mission coordinates.
+        entity.heading = placed_heading_bam(90); // +X in mission coordinates.
         entity.health = entity.health_max = 100;
         return world.registry.spawn(0, entity);
     }
@@ -187,7 +188,7 @@ static void test_candidate_look_back_uses_the_placement_heading() {
     Fixture f;
     f.body().slot.f[17] = fixed(14);
     const auto target = f.person({1.5f, -5156.0f / 65536.0f, 2}, 10, 3, 0);
-    f.world.registry.get(target)->yaw = -112;
+    f.world.registry.get(target)->heading = placed_heading_bam(-112);
     f.tick(512);
     CHECK(f.body().inf.head_look_target == target);
 }
@@ -244,9 +245,9 @@ static void test_eye_tracking_clip_availability_and_cleanup() {
     const auto reset = cleanup.person({3, 1, 2});
     const int index = cleanup.world.ai.attach(reset);
     cleanup.world.ai.at(index)->inf.active = true;
-    cleanup.world.ai.at(index)->pos[0] = fixed(3);
-    cleanup.world.ai.at(index)->pos[1] = fixed(1);
-    cleanup.world.ai.at(index)->pos[2] = fixed(2);
+    cleanup.world.ai.at(index)->self->position.x.q16 = fixed(3);
+    cleanup.world.ai.at(index)->self->position.y.q16 = fixed(1);
+    cleanup.world.ai.at(index)->self->position.z.q16 = fixed(2);
     cleanup.tick(512);
     CHECK(cleanup.body().inf.head_look_target == reset);
     entity_reset_to_spawn_state(cleanup.world, *cleanup.world.registry.get(reset));
@@ -304,7 +305,7 @@ static void test_items_occlude_spotting() {
     Entity crate;
     crate.kind = EntityKind::Item;
     crate.alive = true;
-    crate.yaw = 90;
+    crate.heading = placed_heading_bam(90);
     crate.position = {1.5f, 0.5f, 0.0f};
     const EntityHandle crate_h = f.world.registry.spawn(1, crate);
     auto collision = std::make_unique<CollisionWorld>();
@@ -327,7 +328,7 @@ static void test_look_does_not_steer_root_motion() {
     body.heading = body.inf.aim_heading = 0x20000000; // Looking 45 degrees right.
     f.tick(513); // No new think overwrites the desired gaze.
     CHECK(body.inf.body_heading == 0 && body.heading == 0x20000000);
-    CHECK(body.pos[0] == 0x4000 && body.pos[1] == 0);
+    CHECK(body.self->position.x.q16 == 0x4000 && body.self->position.y.q16 == 0);
     body.inf.target_heading = 0x20000000;
     body.heading = 0x10000000;
     body.inf.aim_heading = 337708816; // Existing look offset plus the body turn.
@@ -390,7 +391,7 @@ static void test_mounted_attention_respects_vehicle_motion() {
             vehicle.item_attrib = kItemAttribPlayerControl;
             vehicle.health = 100;
             vehicle.position = {0, 0, 2};
-            vehicle.yaw = 90;
+            vehicle.heading = placed_heading_bam(90);
             Seat seat;
             seat.type = type;
             seat.bone_index = 1;
@@ -416,7 +417,98 @@ static void test_mounted_attention_respects_vehicle_motion() {
     }
 }
 
+// The scan's & 7 term reads both bodies' DcbId (+0x7C): a player candidate's is its class
+// init's word, 10000 + its slot (body_dcb_id), not the net id ours keeps on its Entity and
+// AiEntity. Here the base is (20 u - 6.5 u) >> 16 = 13 less 12; the observer's 8
+// plus 512 >> 8 less 10007 is 3 mod 8, so the joiner at slot 7 scores 4 and is looked at,
+// where its net id 0xFFF0 in its place would leave 2 and a score of 3.
+// [orig: Entity_UpdateInfantryAI @0x4BE38C..0x4BE39F; PlayerClass_InitEntity
+//  @0x4B1149..0x4B1173]
+static void test_a_player_candidates_term_reads_its_dcb_id() {
+    Fixture f;
+    const auto joiner = f.person({6.5f, 0, 2}, 0xFFF0); // ours: a player body's net id
+    Entity &row = *f.world.registry.get(joiner);
+    row.engine_flags |= kEntityFlagPlayer;
+    row.player_slot_id = 7;
+    AiEntity &body = *f.world.ai.at(f.world.ai.attach(joiner));
+    body.net_id = 0xFFF0;    // the same net id on its AiEntity, which the term never reads
+    body.inf.active = false; // its own update stays out of the tick
+    f.tick(512);
+    CHECK(f.body().inf.head_look_target == joiner);
+}
+
+// The sees relations after the pick key both singles on the DcbId (+0x7C, entity_dcb_id): a
+// player's 10000 + slot fails every setter's < 0x80 guard, so a joiner looked at sets the group
+// rows and the observer's single-group row and no single row of its own, where its net id
+// (0 on our host) would set row 0. The pick itself reads 10007 as the test above does.
+// [orig: Entity_UpdateInfantryAI - self @0x4BE42C / @0x4BE456, target @0x4BE43C / @0x4BE453;
+//  SeesMatrix_SetSingleGroupBit @0x452AD0 - `cmp eax, 80h` @0x452AD4; SeesMatrix_SetSingleSingleBit @0x452BF0 -
+//  @0x452BF4 / @0x452BFF]
+static void test_a_player_targets_sees_relations_read_its_dcb_id() {
+    Fixture f;
+    const auto joiner = f.person({6.5f, 0, 2}, 0); // the host gives a joiner's body net id 0
+    Entity &row = *f.world.registry.get(joiner);
+    row.engine_flags |= kEntityFlagPlayer;
+    row.player_slot_id = 7;
+    AiEntity &body = *f.world.ai.at(f.world.ai.attach(joiner));
+    body.inf.active = false; // its own update stays out of the tick
+    f.tick(512);
+    CHECK(f.body().inf.head_look_target == joiner);
+    const auto &r = f.world.script.relations;
+    CHECK(r.group_group(TriggerRelations::kSees, 2, 3));
+    CHECK(r.single_group(TriggerRelations::kSees, 8, 3));
+    CHECK(!r.group_single(TriggerRelations::kSees, 2, 0));
+    CHECK(!f.sees(0));
+}
+
+// The local player's live body scans for the nearest threat on its slow pass (raw tick & 0xF ==
+// 0) at the current fog distance, and on the authority the hit sets the sees and targeted quads
+// with the player as self: the group rows and the group-single rows of a target whose SSN fits,
+// and no single row of its own (its DcbId, 10000 + slot, fails every setter's < 0x80 guard). Off
+// the slow pass, for any other body, for a dead body, or off the authority it sets nothing.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the slow-pass gate @0x4B5D6D..0x4B5D71, the
+//  live test @0x4B5F33, the local test @0x4B6234, g_EnvFogDistCurrent @0x4B6246, the call
+//  @0x4B624D; Entity_FindNearestThreat @0x4B0990 - the is_authority test @0x4B0A59, the quads
+//  @0x4B0A6F..0x4B0AE2]
+static void test_the_local_players_slow_pass_scans_for_the_nearest_threat() {
+    struct Case {
+        uint32_t tick;
+        bool local;
+        int16_t health;
+        bool authority;
+        bool sets;
+    };
+    for (const Case c : {Case{16, true, 100, true, true}, Case{17, true, 100, true, false},
+                Case{16, false, 100, true, false}, Case{16, true, 0, true, false},
+                Case{16, true, 100, false, false}}) {
+        Fixture f;
+        f.world.ai.is_authority = c.authority;
+        f.world.weather.core.scalar_channels.fog_dist_fp = fixed(100);
+        // The player (group 1, team 1, slot 0) faces +X at the origin; the enemy (group 5,
+        // team 2, SSN 0x21) stands 10 u ahead; the fixture's observer is the player's teammate.
+        const auto player = f.person({0, 0, 2}, 0, 1, 1);
+        Entity &row = *f.world.registry.get(player);
+        row.engine_flags |= kEntityFlagPlayer;
+        row.health = c.health;
+        AiEntity &body = *f.world.ai.at(f.world.ai.attach(player));
+        body.heading = row.heading;
+        body.team = 1;
+        body.inf.active = false; // the fixture tick stays out; the slow pass is called alone
+        f.person({10, 0, 2}, 0x21, 5, 2);
+        if (c.local) f.world.cached.local_player = player;
+        f.world.ai.infantry_weapon_channel(body, f.world, c.tick);
+        const auto &r = f.world.script.relations;
+        for (const auto rel : {TriggerRelations::kSees, TriggerRelations::kTargeted}) {
+            CHECK(r.group_group(rel, 1, 5) == c.sets);
+            CHECK(r.group_single(rel, 1, 0x21) == c.sets);
+            CHECK(!r.single_group(rel, 0, 5)); // the player's DcbId is 10000, not 0
+            CHECK(!r.single_single(rel, 0, 0x21));
+        }
+    }
+}
+
 int main() {
+    test_the_local_players_slow_pass_scans_for_the_nearest_threat();
     test_idle_scan_relations_and_history();
     test_speaker_identity_and_authority();
     test_candidate_filters_and_unsigned_diagonal_score();
@@ -428,6 +520,8 @@ int main() {
     test_look_does_not_steer_root_motion();
     test_look_chase_instruction_boundaries();
     test_mounted_attention_respects_vehicle_motion();
+    test_a_player_candidates_term_reads_its_dcb_id();
+    test_a_player_targets_sees_relations_read_its_dcb_id();
     std::printf("infantry attention: %s (%d failures)\n", failures ? "FAILED" : "OK", failures);
     return failures ? 1 : 0;
 }

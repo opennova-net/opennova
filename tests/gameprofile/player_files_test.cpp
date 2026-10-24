@@ -44,10 +44,38 @@ static int test_names() {
 	return 0;
 }
 
+// The Screen Shot action's file: the first SS%0.5d of 0..99998 the directory lacks, .jpg (the
+// device's JPEG), .tga under /sstga; none once every index is taken.
+// [orig: Screenshot_CaptureToFile @0x5221A0 - "jpg" @0x7D0224, sprintf("SS%0.5d.%s") @0x5222B2,
+//  File_CheckExists @0x5222BC, the stop at 99999 @0x5222D1]
+static int test_screenshot_file_name() {
+	std::vector<std::string> asked;
+	const auto none = [&](const std::string &name) {
+		asked.push_back(name);
+		return false;
+	};
+	TEST_EXPECT(screenshot_file_name(none, false) == "SS00000.jpg" && asked.size() == 1);
+	TEST_EXPECT(screenshot_file_name(none, true) == "SS00000.tga");
+	const auto first_three = [](const std::string &name) {
+		return name == "SS00000.jpg" || name == "SS00001.jpg" || name == "SS00002.jpg";
+	};
+	TEST_EXPECT(screenshot_file_name(first_three, false) == "SS00003.jpg");
+	// A gap is filled first: the search starts at 0 every time.
+	const auto all_but_one = [](const std::string &name) { return name != "SS00001.jpg"; };
+	TEST_EXPECT(screenshot_file_name(all_but_one, false) == "SS00001.jpg");
+	const auto all = [](const std::string &) { return true; };
+	TEST_EXPECT(screenshot_file_name(all, false).empty());
+	const auto up_to_last = [](const std::string &name) { return name != "SS99998.jpg"; };
+	TEST_EXPECT(screenshot_file_name(up_to_last, false) == "SS99998.jpg");
+	TEST_EXPECT(is_player_file(screenshot_file_name(none, false)));
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_table();
 	failures += test_names();
+	failures += test_screenshot_file_name();
 	if (failures == 0) std::printf("player_files: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

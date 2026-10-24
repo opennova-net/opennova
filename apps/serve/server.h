@@ -36,7 +36,9 @@
 #include <net/admin/admin_server.h>
 #include <runtime/assets/asset_store.h>
 #include <runtime/inmatch/admin_console.h>
+#include <runtime/inmatch/remote_admin.h>
 #include <runtime/inmatch/character_registry.h>
+#include <runtime/inmatch/client_runtime.h> // ClientProcessState (the process's NovaWorld legs)
 #include <runtime/inmatch/game_config_block.h>
 #include <runtime/inmatch/host_boot.h>
 #include <runtime/inmatch/host_file.h>
@@ -49,12 +51,12 @@
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/lobby_vars.h>
 #include <net/npwire/datagram_demux.h>
+#include <runtime/inmatch/server_log_devices.h> // the log devices the switches arm
 
 #include "admin_tcp_server.h"
 #include "credentials.h"
 #include "net_datagram_socket.h"
 #include "net_sockets.h"
-#include "server_logs.h"
 
 #include <atomic>
 #include <cstdint>
@@ -74,6 +76,9 @@ class Lister;
 // does, where a width of 0 would pick Arial12b, whose narrow glyphs split chat lines retail's
 // do not. A platform equivalent, not a witnessed value (D-NET-720, platform class).
 inline constexpr int32_t kHeadlessDesktopWidth = 1024;
+// Its height, the 4:3 desktop that width names (the defaults' display height and NWHWI's desktop
+// field); the same platform class (D-NET-720).
+inline constexpr int32_t kHeadlessDesktopHeight = 768;
 
 struct ServeOptions {
 	std::string resource_dir; // --resource-dir
@@ -82,6 +87,7 @@ struct ServeOptions {
 	std::string game;         // /game <code>
 	bool loose_root = false;  // --loose-root: a directory with no archives mounts loose
 	std::string host_file;    // /HOST <file>
+	int32_t max_player_arg = 0; // /maxplayers N: the host file's MaxPlayers yields to it (0: none)
 	bool lan_switch = false;  // /LAN: every game.cfg read forces mpnovaworldhostlanonly
 	// The first port of the bind scan (--lan-port; 0 binds the OS's pick; unset, the cfg
 	// range's head: game.cfg mplanserverportmin, or mpnovaworldportmin on the NovaWorld
@@ -97,7 +103,7 @@ struct ServeOptions {
 	bool allow_public = false;                     // --allow-public
 	std::string credentials_path;                  // --credentials FILE
 	Credentials credentials; // main() loads it and masks every value
-	LogSwitches log_switches; // /PROFILE <path>, /PUNT.TXT, /PUNTLOG, /CHEATLOG (server_logs.h)
+	LogSwitches log_switches; // /PROFILE <path>, /PUNT.TXT, /PUNTLOG, /CHEATLOG, /NETLOG, /INOUT
 	// What a supervisor reads of the run (run_reports.h), none of it retail's: whether the
 	// status page prints and stdin is its chat input (--status-page on|off; on, as a retail
 	// dedicated host draws its page), the tick health rewritten once a minute (--stats-file)
@@ -105,11 +111,13 @@ struct ServeOptions {
 	bool status_page = true;
 	std::string stats_file;
 	std::string exit_file;
-	// The primary desktop's width, the display width game.cfg's defaults take ahead of its
-	// video_res line [orig: Config_SetDefaults @0x54D0F3..0x54D0F6 (GetSystemMetrics
-	// (SM_CXSCREEN) into outWidth)]. main() samples it on Windows; a platform that reports
-	// none keeps kHeadlessDesktopWidth.
+	// The primary desktop's width and height, the display size game.cfg's defaults take ahead of
+	// its video_res line and the renderer's desktop NWHWI prints [orig: Config_SetDefaults
+	// @0x54D030 - GetSystemMetrics(SM_CXSCREEN) called @0x54D0F3 into outWidth @0x54D0F6;
+	// Renderer_Init @0x586350 - @0x58635C / @0x586363]. main() samples them on Windows
+	// (read_primary_screen_size); a platform that reports none keeps the headless pair.
 	int32_t desktop_width = kHeadlessDesktopWidth;
+	int32_t desktop_height = kHeadlessDesktopHeight;
 };
 
 // Parses the command line (argv[1..]). Returns 0 when the options parsed, 1 on
@@ -150,8 +158,8 @@ public:
 	// quit() when the remote admin quit it), and
 	// stop() has run.
 	bool frame(double delta_seconds);
-	// The host's exit: the round reset to every joiner, the STOP description,
-	// the final flush; the NovaWorld deregistration (ClientStopHosting and the
+	// The host's exit: the round reset queued to every joiner (never sent), the
+	// STOP burst; the NovaWorld deregistration (ClientStopHosting and the
 	// goodbye); then game.cfg saved, the socket closed and the lock deleted, as
 	// Game_Run's exit. Idempotent.
 	void stop();
@@ -198,9 +206,9 @@ public:
 	bool novaworld() const { return novaworld_; }
 	// The NovaWorld listing's lister (null when not listing).
 	Lister *lister() { return lister_.get(); }
-	// The exit code the lister had finished with when stop() tore it down, -1 when it had not
-	// finished (or there was none): a lister that finishes in the frame whose mission exit stops
-	// the server is gone before the caller can read it.
+	// The exit code the lister finished with when stop() tore it down (stop()'s own finish
+	// included: a ServerStopHosting keeps the lister up until the match's NovaWorld exit stops
+	// the server), -1 when there was none: the lister is gone before the caller can read it.
 	int last_lister_exit() const { return last_lister_exit_; }
 	// The remote-admin listener's bound port: game.cfg's remote_admin_port once it listens,
 	// 0 when the port is 0 (off) or the listen failed.
@@ -211,15 +219,6 @@ public:
 	uint32_t main_frame() const { return main_frame_; }
 
 private:
-	// The admin server's command half until the session's console stands: retail's console
-	// reads the live globals from the first frame, the port's needs the host context, which
-	// the first boot creates. The pump runs only in game frames, so nothing reaches it before.
-	struct AdminForward final : AdminCommandHandler {
-		inmatch::AdminConsole *console = nullptr;
-		bool dispatch(const AdminSession &session, std::string_view line,
-				std::vector<std::string> &replies) override;
-		std::string status_report() override;
-	};
 	// admin.cfg and the listener, once the subsystems are up [orig: Game_InitSubsystems
 	// @0x4A72B8..0x4A72D9].
 	void open_admin();
@@ -245,6 +244,11 @@ private:
 	bool route_mission_exit(int32_t reason);
 	bool open_socket(std::string &error);
 	bool host_on_novaworld(std::string &error, const std::atomic<bool> *cancel);
+	// The mission start's server-info update inside the host boot (HostBootRequest::
+	// mission_start_update), ahead of the load: the starting map's or the next one's columns as
+	// the update reads them there (`header_name` and `climate`, the mission's BMS header's), the
+	// publish, then the NovaWorld session's periodic update, which sends it.
+	void run_mission_start_update(const std::string &header_name, int32_t climate);
 	// The listing over the mission that just started (the first, or a map change's next).
 	void bind_listing();
 	HostRegistration listing_columns() const;
@@ -253,6 +257,10 @@ private:
 	void select_chat_font();
 
 	ServeOptions options_;
+	// The device facts NWHWI prints, sampled once at the boot where retail's renderer reads them
+	// (begin: after the subsystems' game.cfg read); the listing only formats them with game.cfg's
+	// display mode.
+	HardwareIdentity device_identity_;
 	// The title the server speaks (/game's, JO's without one: mount) and its gate tag, the
 	// title's or the mount's gt.ssc's (title_gate_tag).
 	const TitleIdentity *title_ = nullptr;
@@ -261,6 +269,10 @@ private:
 	// The mount's expansion text-override table, read once at the boot's
 	// mount (vfs_expansion_override_table); empty = none.
 	std::vector<uint8_t> text_override_table_;
+	// The same table parsed, for the lookups that search it first (the
+	// catalog's titles, the cfg defaults' texts; D-NET-675).
+	rtxt::File text_override_;
+	bool have_text_override_ = false;
 	std::unique_ptr<assets::AssetStore> assets_;
 	std::vector<mission_catalog::Row> catalog_;
 	// The process's cfg block: game.cfg in the working directory and the
@@ -274,9 +286,15 @@ private:
 	std::string chat_font_name_;
 	fnt::fnt_font_t chat_font_{};
 	bool chat_font_valid_ = false;
+	// The process's client words the role steps, whose NovaWorld teardown leg a listed server's
+	// lister takes (host_on_novaworld); it outlives the role.
+	inmatch::ClientProcessState client_process_;
 	std::unique_ptr<inmatch::HostRole> role_;
 	std::unique_ptr<inmatch::Session> session_;
 	inmatch::HostBoot boot_;
+	// The mission start's frozen model-def list's count: the S2C 0x68 cursor's
+	// wrap (inmatch/loaded_model_list.h; FrameInput::loaded_model_list_count).
+	uint32_t loaded_model_list_count_ = 0;
 	rtxt::File gametext_;
 	bool have_gametext_ = false;
 	bool novaworld_ = false;
@@ -298,17 +316,20 @@ private:
 	bool exit_save_owed_ = false;
 	bool reset_exit_ = false;
 	std::string end_message_;
-	ServerLogDevices log_devices_; // the logs the switches armed (server_logs.h)
-	// The working directory as the admin log's device (server_logs.h).
-	WorkingDirectoryFiles files_;
+	inmatch::ServerLogDevices log_devices_; // the logs the switches armed (server_log_devices.h)
+	inmatch::ServerLogs server_logs_;       // their view the lister's _inout.txt line reads
+	// The working directory as the admin log's device (server_log_devices.h).
+	inmatch::WorkingDirectoryFiles files_;
 	uint32_t main_frame_ = 0;
 	// The avatar registry PETERRABBIT SEXCHANGE picks from (the mounted Avatars.def).
 	inmatch::CharacterRegistry characters_;
 	// The remote-admin server: the rotation seam, the console, the wire server, its sockets
 	// and the CRT stream its challenge draws from (the world's, synced around each pump).
 	std::unique_ptr<inmatch::HostRotationAdmin> rotation_admin_;
-	std::unique_ptr<inmatch::AdminConsole> admin_console_;
-	AdminForward admin_forward_;
+	// The admin server's command half (inmatch/remote_admin.h): the console over the session's
+	// context once the first boot binds it; the pump runs only in game frames, so nothing
+	// reaches the session-less one first.
+	inmatch::RemoteAdminConsoles admin_consoles_;
 	io::CrtRand admin_rand_;
 	std::unique_ptr<AdminServer> admin_server_;
 	std::unique_ptr<net::AdminTcpServer> admin_tcp_;

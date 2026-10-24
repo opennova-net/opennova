@@ -15,12 +15,21 @@ namespace opennova::world {
 // infantry.cpp, shared with infantry_combat.cpp and infantry_board.cpp.
 // The motor-head channel update in infantry_animation.cpp owns gait inserts.
 int32_t bearing_to(int32_t dx, int32_t dy);
+// Whether the player-body (org2) update runs this body: its bound row's move function is
+// org2 (body_move_row, ai.h); a body the walks run is otherwise on org1.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 vs Entity_UpdateInfantryAI @0x4B9910]
+bool infantry_org2_body(const World &world, const AiEntity &e, const Entity *ent);
 void commit_body_state(InfantryState &inf, int resolved);
 void commit_player_body_state(InfantryState &inf, int resolved,
                               const IRootMotionSource *root_motion, bool wash);
 // Standing org1/org2 carrier delta, after the animation capsule sample.
 // Returns whether carrier transport changed the position.
 bool infantry_follow_carrier(AiEntity &, World &, int32_t capsule_bottom, bool player_body);
+// The player body's dead tail, every tick its dead bit is latched, after its death edge and
+// ahead of its deck ride: the aim pitch (+0x2D0) takes savedLivePitch (+0x90), the Yaw and the
+// local look take the body heading (+0x8C), and Flags drops 0x60 (the canopy and seat bits).
+// A client's decoded rows run the replica twin (replication row_root_motion_tick).
+void player_body_dead_tail(AiEntity &e, Entity &ent);
 // Select/cache an obstacle detour and publish target_heading before gait selection.
 // [orig: AI_FindCoverPosition @0x4AFAB0]
 void infantry_detour(AiSystem &ai, AiEntity &e, World &world);
@@ -39,6 +48,15 @@ bool infantry_drag_corpse(AiEntity &, World &);
 // (scan every 256 ticks, or every 32 while the entity is the scripted voice
 // speaker). [orig: Entity_UpdateInfantryAI @0x4BD87E..0x4BE7FD]
 void infantry_attention_think(AiSystem &ai, AiEntity &e, World &world, uint32_t key);
+// Entity_FindNearestThreat over `e`: the context-7/8/9 target walk at `range` (16.16) as the
+// scanner's Team byte `team` reads it, then on the authority the hit's sees and targeted quads
+// with the scanner as self. The org1 think's perception and the local player's slow pass call
+// it. Defined in infantry_combat.cpp.
+// [orig: Entity_FindNearestThreat @0x4B0990 - the walk Entity_FindTargets @0x4B0A40, the quads
+//  @0x4B0A6F..0x4B0AE2; the calls Entity_UpdateInfantryAI @0x4BBECC,
+//  Entity_UpdateInfantryPlayerBody @0x4B624D]
+EntityHandle infantry_find_nearest_threat(AiSystem &ai, World &world, AiEntity &e, uint8_t team,
+                                          int32_t range);
 // The org1 heading chase every tick of a body not mounted at its head: the body
 // heading a quarter of the way to the target (clamped), the legs re-planted and
 // chased, the look toward the aim. Defined in infantry.cpp; the still body's tick
@@ -57,15 +75,21 @@ InfantryAttachmentPose infantry_attachment_pose(AiEntity &, World &);
 void infantry_attachment_select(AiEntity &, World &, const InfantryAttachmentPose &);
 bool infantry_attachment_move(AiEntity &, World &, const InfantryAttachmentPose &);
 
-bool player_jump_world_state_blocked(const InfantryState &inf, const Entity *ent);
 // The once-per-life death edge (infantry_death.cpp). `org1` selects the NPC
 // legs: the drowning clip, the unstaged-hit alert, the death tick, the 0xC0 clear
 // and, on the authority, the edge's own death transaction.
 // [orig: Entity_UpdateInfantryAI @0x4B9C40..0x4B9D55]
 void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, bool org1,
                          uint32_t logic_tick);
-// The death edge's scream leg, shared by the motor's edge and the authority's
-// remote-peer edge: a player body (org2) composes "<prefix>_DEATH" /
+// The player-body (org2) edge's gate at Health <= 0, for every player body (the
+// local one and, on the authority, the remote ones): the head's hidden-bit
+// return, then the dead bit. [orig: Entity_UpdateInfantryPlayerBody @0x4B411E..0x4B4127,
+// @0x4B4BFE]
+bool player_body_death_edge_open(const AiSystem &ai, const AiEntity &e, const Entity *ent);
+// The player-body edge's tail after its latch: on the authority, the death
+// transaction the host session armed. [orig: @0x4B4CE1..0x4B4CEA]
+void raise_player_body_death(const AiSystem &ai, World &world, Entity &ent);
+// The death edge's scream leg: a player body (org2) composes "<prefix>_DEATH" /
 // "_DEATH_K" from its anim slot, any other body plays its profile slot 7 / 8;
 // the section-bit-0 silent cleanup and a dismemberment piece play nothing.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4b4c19, @0x4b4c4a..0x4b4c6a;
@@ -106,5 +130,8 @@ bool infantry_dual_update(InfantryState &inf, IRootMotionSource *source, AnimVar
 void begin_body_transition_with_insert(InfantryState &inf, int resolved,
                                        const IRootMotionSource *root_motion,
                                        AnimVariantRings *rings);
+// The 0x0A player record's anim ratio byte over the body's primary channel, after this
+// tick's advance. Defined in infantry_wire.cpp.
+uint8_t wire_anim_ratio(const InfantryState &inf, const IRootMotionSource *source);
 
 } // namespace opennova::world

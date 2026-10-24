@@ -23,11 +23,13 @@ static int failures = 0;
 
 namespace {
 
-Seat make_seat(SeatType type, uint8_t retail_slot, const char *name) {
+// Each row its own bone, as a model's userpoints are: the attach types the bone by the
+// name of the row holding it (D-NET-445) [orig: Entity_GetBoneSlotType @0x434ED0].
+Seat make_seat(SeatType type, uint8_t retail_slot, const char *name, uint8_t bone) {
     Seat s;
     s.type = type;
     s.retail_slot = retail_slot;
-    s.bone_index = 1;
+    s.bone_index = bone;
     s.source_name = name;
     return s;
 }
@@ -48,9 +50,9 @@ struct Rig {
         v.alive = true;
         v.health = 3000;
         v.health_max = 3000;
-        v.seats.push_back(make_seat(SeatType::Passenger, 0, "sitex00"));
-        v.seats.push_back(make_seat(SeatType::Controller, 8, "ctrlx00"));
-        v.seats.push_back(make_seat(SeatType::Passenger, 3, "sitex03"));
+        v.seats.push_back(make_seat(SeatType::Passenger, 0, "sitex00", 1));
+        v.seats.push_back(make_seat(SeatType::Controller, 8, "ctrlx00", 2));
+        v.seats.push_back(make_seat(SeatType::Passenger, 3, "sitex03", 3));
         veh = w.registry.spawn(1, v);
 
         // An attached gun child on gun slot 1 with a UseGun seat.
@@ -62,7 +64,7 @@ struct Rig {
         g.alive = true;
         g.emplacement_parent = veh;
         g.emplacement_slot = 1;
-        g.seats.push_back(make_seat(SeatType::Gunner, 9, "UseGun"));
+        g.seats.push_back(make_seat(SeatType::Gunner, 9, "UseGun", 1));
         gun = w.registry.spawn(1, g);
 
         auto organic = [&](int hp) {

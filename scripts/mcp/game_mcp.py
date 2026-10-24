@@ -820,6 +820,10 @@ PROBE_EXIT = {"passed": EXIT_OK, "failed": EXIT_USAGE, "cancelled": EXIT_PROBE_C
 
 def print_probe_lines(status: dict) -> None:
     for line in status.get("lines", []):
+        # The runner's log cap leaves a bare string (its truncation marker) among the line records.
+        if not isinstance(line, dict):
+            print(str(line))
+            continue
         print(f"[{line.get('t_ms', 0) / 1000.0:8.3f}] {line.get('text', '')}")
 
 

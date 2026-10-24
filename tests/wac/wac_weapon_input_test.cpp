@@ -36,6 +36,10 @@ struct Fixture {
         def.valid = true;
         def.category = static_cast<uint8_t>(category);
         def.weapon_class_slot = 8; // not the WAC category
+        // The EquippedSlot holds this def: the binding gate reads the slot's def
+        // [orig: Input_HandleActionBinding_0 @0x4E08E2 / @0x4E08F2 / @0x4E0961].
+        def.name = "WPN_WACTEST";
+        weapon.def_name = def.name;
         weapon.active = true;
         weapon_fsm_bake(nullptr, 0, nullptr, nullptr, nullptr, weapon.def);
         weapon.def.clip_capacity = 30;
@@ -52,13 +56,20 @@ struct Fixture {
         vm.execute(world);
     }
 
+    // The deferred fire record the last pump queued (LocalWeaponPumpIO::fire_deferred).
+    bool deferred = false;
+
+    // One update: the binding's state and a sourceless press, the deferred fire record's
+    // press leg while the binding holds (case 0x95 at its record), then the pump.
     void pump(bool held, bool pressed = false) {
         ++world.logic_tick;
         weapon.fire_held = held;
         weapon.fire_pressed = pressed;
+        if (deferred && held) (void)local_weapon_press_fire(world, weapon, view);
         LocalWeaponPumpIO io;
         io.view = &view;
         local_weapon_pump_tick(world, weapon, io);
+        deferred = io.fire_deferred;
     }
 };
 
@@ -91,9 +102,9 @@ static void test_auto_refire_passes_through_the_same_gate() {
     f.weapon.def.auto_fire = true;
     f.pump(true, true);
     CHECK(f.weapon.slot.clip == 29);
-    for (int tick = 0; tick < 20 && !f.weapon.slot.refire_queued; ++tick)
+    for (int tick = 0; tick < 20 && !f.deferred; ++tick)
         f.pump(true);
-    CHECK(f.weapon.slot.refire_queued); // queued by the actual recoil handler
+    CHECK(f.deferred); // queued by the actual recoil handler, a deferred fire record
     f.script("blockfire(3,1)\n");
     CHECK(!f.world.script.weapon_input.fire_requested(3));
     f.pump(true);
@@ -117,14 +128,19 @@ static void test_block_does_not_revoke_an_accepted_delayed_shot() {
     CHECK(!f.world.script.weapon_input.fire_requested(3));
 }
 
+// The PowerThrow's press leg (a key's) and its release leg at their records take no WAC
+// latch or BlockFire gate [orig: Input_HandleActionBinding_0 case 0x95 - the PowerThrow
+// branch @0x4E08FD..0x4E095C ahead of the latch @0x4E0961, the release leg @0x4E07E9].
 static void test_power_throw_bypasses_the_ordinary_binding_latches() {
     Fixture f(5);
     f.weapon.def.flags = weapon_flag::kPowerThrow;
     f.script("blockfire(5,1)\n");
-    f.pump(true, true);
+    CHECK(local_weapon_power_throw_press(f.world, f.weapon));
+    f.pump(true);
     CHECK(f.weapon.power_throw_start_tick != 0);
     CHECK(f.weapon.slot.clip == 30);
     CHECK(!f.world.script.weapon_input.fire_requested(5));
+    CHECK(local_weapon_release_fire(f.world, f.weapon));
     f.pump(false);
     CHECK(f.weapon.fired_serial == 1);
     CHECK(f.weapon.slot.clip == 29);

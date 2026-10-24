@@ -15,18 +15,22 @@ namespace opennova::inmatch {
 
 // A connection's weapon tables as one inventory: retail's player-slot block
 // (the 780-slot table at +0x1D0, the class pools at +0x15A58, the shared clips
-// at +0x15C58) as this host keeps it -- the seeded slot rows plus the 0x0F
-// reply's pools. `store` writes an inventory back: every held slot's row (new
-// rows included) and the pools. [orig: Entity_ValidatePtr @0x500910 and the
-// block offsets every authority arm reads]
+// at +0x15C58) as this host keeps it -- the player entity's seeded slot rows
+// (world::Entity::weapon_slots; none for a null entity) plus the 0x0F reply's
+// pools. `store` writes an inventory back: every held slot's row (new rows
+// included) and the pools. [orig: Entity_ValidatePtr @0x500910 and the block
+// offsets every authority arm reads]
 world::WeaponInventory conn_weapon_inventory(const NapiNPConnection &conn,
-		const world::WeaponTable &table);
-void store_conn_weapon_inventory(NapiNPConnection &conn, const world::WeaponInventory &inventory);
+		const world::Entity *player, const world::WeaponTable &table);
+void store_conn_weapon_inventory(NapiNPConnection &conn, world::Entity *player,
+		const world::WeaponInventory &inventory);
 
 // The roster's tables behind the World's remote-player seam: the session
 // installs one around its entity pass, where the pickup's refusal walks read
-// a remote picker's tables. The listen host's own player is the local one and
-// has none here (world/powerup.cpp reads its live inventory).
+// a remote picker's tables, and the host role around its weapon walk, where a
+// remote player's own slot reads its pools (D-NET-336). The listen host's own
+// player is the local one and has none here (world/powerup.cpp reads its live
+// inventory).
 // [orig: WeaponSlot_RecalculateScore @0x542450 -> Entity_ValidatePtr @0x542464]
 class ServerRemoteWeaponTables final : public world::IRemoteWeaponTables {
 public:
@@ -34,6 +38,8 @@ public:
 			: roster_(roster) {}
 	bool remote_weapon_tables(const world::World &world, world::EntityHandle player,
 			world::WeaponInventory &out) const override;
+	bool remote_ammo(const world::World &world, world::EntityHandle player,
+			int32_t ammo_class, int32_t bucket, int32_t &pool, int32_t &loaded) const override;
 
 private:
 	std::vector<NapiNPConnection> &roster_;

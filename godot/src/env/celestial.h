@@ -35,9 +35,9 @@ class ObjectModel;
 // per-frame body selection (environment/celestial_frame.h) and the witnessed
 // fixed-point math already in engine/formats/env (env_celestial.h, the glare
 // occlusion state runtime/environment/glare_occlusion.h advances). Renders the sun/moon/glare 3DI bodies named
-// in the mission .env, attached to the sky at camera + direction * 64; retail
-// loads the star 3DI but never draws it (env_celestial.h carries the
-// witness). This node keeps only device work: the ObjectModel children with
+// in the mission .env, attached to the sky at camera + direction * 64; the star
+// 3DI and upl.3di load as data and are never drawn, as in retail
+// (celestial_frame.h and env_celestial.h carry the witness). This node keeps only device work: the ObjectModel children with
 // per-surface material installs, per-frame shader-parameter pushes, and the
 // two terrain line-of-sight rays the glare occlusion window consumes. Each
 // body renders its authored SELFLUM material at its own UPL_INTENSITY
@@ -63,6 +63,16 @@ public:
 	void set_entities_clear(EntitiesClear p_clear) { entities_clear_ = std::move(p_clear); }
 	Ref<TerrainData> get_terrain_data() const { return terrain_data_; }
 	void set_resource_root(const Ref<ResourceRoot> &p_root);
+	// The departing mission's bodies and model defs go ahead of the next start's loads, as
+	// retail destroys the model defs at that start ahead of loading them again (engine
+	// environment/celestial_frame.h kCelestialUplModel carries the witness): the world's
+	// unload, so none waits through the load to be freed in the next mission's first frames.
+	void release_bodies();
+	// Whether the bodies build their draw objects (C++ only; true unless told): false loads each
+	// named model's data and builds no node, a dedicated host's mission start (engine
+	// environment/celestial_frame.h builds_celestial_draws carries the witness). Takes effect at the
+	// next set_resource_root.
+	void set_draws_bodies(bool p_draws) { draws_bodies_ = p_draws; }
 	void set_environment_capture_layer_mask(uint32_t p_mask);
 	uint32_t get_environment_capture_layer_mask() const {
 		return environment_capture_layer_mask_;
@@ -89,6 +99,9 @@ public:
 		OverlayBody glint;
 	};
 	OverlayBodies get_overlay_bodies() const;
+	// The bodies this world built (the sun, the moon, the glare and the glint a model names), for
+	// the load's read of their overlay surfaces (GameWorld's celestial leg, D-NET-NEW-LF-20).
+	Vector<ObjectModel *> get_body_models() const;
 	// The script read of the same seam: the node for "glare" or "glint"
 	// (null when the mission names no such model).
 	Node3D *get_overlay_body_node(const String &p_body) const;
@@ -269,8 +282,13 @@ private:
 	// glare_occlusion.h; env #14, docs/env/env-tod-re.md "Celestial bodies").
 	opennova::env::GlareOcclusionState glare_occlusion_{};
 	HashMap<String, Body> bodies_;
+	// The leg's two models no frame draws, held as loaded (null when the mount has no such file, or
+	// for the star when the environment names none): the star model and upl.3di.
+	Ref<ObjectData> star_data_;
+	Ref<ObjectData> upl_data_;
 	// name-signature change detection (undo/scrub safe rebuilds).
 	HashMap<String, String> loaded_names_;
+	bool draws_bodies_ = true;
 	ObjectID env_node_id_;
 	ObjectID cached_cam_id_;
 	uint32_t environment_capture_layer_mask_ = 0;

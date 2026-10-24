@@ -19,11 +19,14 @@
 
 #include <formats/def/def.h>
 
+#include "../common/hull_brain.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -111,7 +114,11 @@ CollisionModel vehicle_sound_test_wall() {
 struct Rig {
     World w;
     EntityHandle veh_h, drv_h;
-    Rig() {
+    // `settled`: the buggy as its contact solve has left it standing (the contact
+    // byte +0x2F2 set); false is the spawn's 0, a fresh vehicle ahead of its first
+    // solve [orig: Entity_UpdateVehiclePhysics @0x48AF00 (the read @0x48C195, the
+    // solve @0x48D0B1)].
+    explicit Rig(bool settled = true) {
         w.registry.configure_pool(0, 16); // organics (the driver)
         w.registry.configure_pool(1, 16); // items (the buggy)
 
@@ -127,16 +134,20 @@ struct Rig {
         // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
         veh.item_attrib = kItemAttribPlayerControl;
         veh.position = {100.0f, 200.0f, 10.0f};
-        veh.yaw = 0;
+        veh.heading = placed_heading_bam(0);
         veh.health = 3000;
         veh.health_max = 3000;
         veh.alive = true;
+        veh.veh.grounded = settled;
         Seat ctrl;
         ctrl.type = SeatType::Controller;
         ctrl.bone_index = 1;
         ctrl.source_name = "ctrlx00";
         veh.seats.push_back(ctrl);
         veh_h = w.registry.spawn(1, veh);
+        // The buggy row's class init (AIData, ai_function cveh) gives the hull its
+        // brain; without one every mover stops at its head.
+        test_common::brain_hull(w, veh_h);
 
         Entity drv;
         drv.kind = EntityKind::Organic;
@@ -151,6 +162,7 @@ struct Rig {
     }
     Entity &veh() { return *w.registry.get(veh_h); }
     Entity &drv() { return *w.registry.get(drv_h); }
+    AiEntity &brain() { return *w.ai.for_handle(veh_h); }
     void mount() { CHECK(w.vehicles.process_attach(drv_h, veh_h, 1)); }
     void tick(int n, const VehicleTraits &t) {
         for (int i = 0; i < n; ++i) w.vehicles.tick_motor(veh(), t);
@@ -294,7 +306,7 @@ void test_drive_forward() {
     const VehicleTraits t = buggy_traits();
     r.mount();
     r.drv().net_move_input = 0x08; // moving, dir 0 (forward)
-    r.drv().yaw = 0;               // steer target = vehicle heading
+    r.drv().heading = placed_heading_bam(0);               // steer target = vehicle heading
 
     const Vec3 start = r.veh().position;
     r.tick(1, t);
@@ -312,8 +324,46 @@ void test_drive_forward() {
     const float dy = r.veh().position.y - start.y;
     const float dist = std::sqrt(dx * dx + dy * dy);
     CHECK(dist > 1.0f);   // it MOVED
-    CHECK(r.veh().yaw == 0); // straight line: heading holds
+    CHECK(r.veh().heading == placed_heading_bam(0)); // straight line: heading holds
     CHECK(std::fabs(r.veh().position.z - start.z) < 0.01f); // flat-plane ground hold
+}
+
+// A fresh vehicle's contact byte is the spawn's 0 and the speed pipeline reads it
+// before the first contact solve writes it: with Flags 0x2000 clear and the current
+// speed (0) agreeing in sign with the forward command, the command is negated (the
+// airborne coast brake), and the zero byte routes the chase step to the off-ground
+// clamp, +-(deceleration >> 1), so the standstill steps backward by that much; the
+// byte is then set (the unit rig's terrain-less stand-in in place of a solve), and the
+// second tick drives. A settled vehicle (test_drive_forward) takes the command as given.
+// [orig: Entity_UpdateVehiclePhysics @0x48AF00 (the +0x2F2 read @0x48C195, the Flags
+//  test @0x48C1A8, the sign tests and the negation @0x48C1AD..0x48C1C2, the step
+//  @0x48C1FC..0x48C20B, the byte test @0x48C20E..0x48C21B to the clamp
+//  @0x48C471..0x48C492 (+0x8E4 >> 1 @0x48C474..0x48C47A, its negation @0x48C486..0x48C48E,
+//  @0x48C45A..0x48C466), the tracked solve @0x48D0B1); the spawn's 0:
+//  Mission_ResetBmsState @0x40DB80 (the Pool_Clear
+//  @0x442060 call @0x40DBC7), Entity_SpawnFromBMSRecord @0x40E9F0 (@0x40EA27),
+//  Entity_RespawnVehicle @0x45FF40 (@0x45FFFD)]
+void test_a_fresh_vehicle_coasts_its_first_tick() {
+    Rig fresh(false);
+    Rig settled;
+    const VehicleTraits t = buggy_traits();
+    for (Rig *r : {&fresh, &settled}) {
+        r->mount();
+        r->drv().net_move_input = 0x08; // moving, dir 0 (forward)
+        r->drv().heading = placed_heading_bam(0);
+    }
+    CHECK(!fresh.veh().veh.grounded);
+    fresh.tick(1, t);
+    settled.tick(1, t);
+    // The negated command's step, (-27542 - 0 + 16) >> 5 = -861, clamped to
+    // -(280 >> 1) = -140 off the ground.
+    CHECK(fresh.veh().veh.speed == -(t.deceleration >> 1));
+    CHECK(fresh.veh().veh.speed == -140);
+    CHECK(settled.veh().veh.speed == 861);
+    CHECK(fresh.veh().veh.grounded);
+    const int32_t after_brake = fresh.veh().veh.speed;
+    fresh.tick(1, t);
+    CHECK(fresh.veh().veh.speed > after_brake);
 }
 
 // Reverse: dir 4 commands -player_speed/2 -> speed goes negative.
@@ -322,7 +372,7 @@ void test_reverse() {
     const VehicleTraits t = buggy_traits();
     r.mount();
     r.drv().net_move_input = 0x08 | 4; // moving, dir 4 (back)
-    r.drv().yaw = 0;
+    r.drv().heading = placed_heading_bam(0);
     r.tick(40, t);
     CHECK(r.veh().veh.speed < 0);
     CHECK(r.veh().veh.speed >= -(t.player_speed / 2) - 64);
@@ -336,10 +386,10 @@ void test_turn_in_place_holds() {
     const VehicleTraits t = buggy_traits();
     r.mount();
     r.drv().net_move_input = 0x08 | 2;
-    r.drv().yaw = 0;
+    r.drv().heading = placed_heading_bam(0);
     r.tick(60, t);
     CHECK(r.veh().veh.speed == 0);
-    CHECK(r.veh().yaw == 0);
+    CHECK(r.veh().heading == placed_heading_bam(0));
 }
 
 // Mouse steer: the steer target is the DRIVER's replicated yaw; while driving the
@@ -349,9 +399,9 @@ void test_steer_toward_driver_yaw() {
     const VehicleTraits t = buggy_traits();
     r.mount();
     r.drv().net_move_input = 0x08; // forward
-    r.drv().yaw = 40;              // want: vehicle turns toward mission yaw 40
+    r.drv().heading = placed_heading_bam(40);              // want: vehicle turns toward mission yaw 40
     r.tick(220, t);
-    const int yaw = r.veh().yaw;
+    const int yaw = mission_yaw_whole_deg(r.veh().heading);
     CHECK(yaw > 15);  // turned substantially toward the target...
     CHECK(yaw < 70);  // ...on the correct side (no runaway/oscillation)
 }
@@ -413,7 +463,7 @@ void test_no_driver_coasts() {
     const VehicleTraits t = buggy_traits();
     r.mount();
     r.drv().net_move_input = 0x08;
-    r.drv().yaw = 0;
+    r.drv().heading = placed_heading_bam(0);
     r.tick(30, t);
     CHECK(r.veh().veh.speed > 0);
     r.w.vehicles.detach(r.drv_h);
@@ -543,7 +593,7 @@ void test_dead_vehicle_holds() {
     const VehicleTraits t = buggy_traits();
     r.mount();
     r.drv().net_move_input = 0x08;
-    r.drv().yaw = 0;
+    r.drv().heading = placed_heading_bam(0);
     r.veh().health = 0;
     r.veh().flags |= 2u;
     r.tick(40, t);
@@ -564,8 +614,8 @@ void test_physics_selector_gate() {
 }
 
 // Numeric witnesses for the separate selector-zero callbacks and suspension.
-// [orig: Entity_ProcessInfantryPhysics @0x46E100;
-// Entity_ProcessAirVehiclePhysics @0x46FA00; Entity_ProcessVehicleSuspension @0x463C60]
+// [orig: Vehicle_ProcessSelectorZeroGround @0x46E100;
+// Vehicle_ProcessSelectorZeroBoat @0x46FA00; Entity_ProcessVehicleSuspension @0x463C60]
 // A zero playerSpeed pins the steering blend fraction at 0 in every ground
 // family, so the effective rate is minRate, not turnRate [orig:
 // Entity_UpdateVehiclePhysics @0x48AF00 (site @0x48C0A9..0x48C0D8 `cmp eax, edx;
@@ -577,20 +627,24 @@ void test_physics_selector_gate() {
 // (the retracted full-rate default gave eff = 12507690, steer = -50030760).
 void test_zero_player_speed_turns_at_min_rate() {
 	for (const VehicleFamily family : { VehicleFamily::Ground, VehicleFamily::Bike }) {
-		World world;
+		auto world = std::make_unique<World>();
+		world->registry.configure_pool(1, 4);
 		VehicleTraits t;
 		t.physics = 1;
 		t.family = family;
 		t.player_speed = 0;
 		t.turn_rate = 65 * 192426;
 		t.turn_rate2 = 41 * 192426;
-		Entity e;
-		e.health = e.health_max = 10000;
-		e.veh.yaw_seeded = true;
-		e.veh.yaw_bam = 0;
-		e.veh.steer_target_bam = 0x40000000;
-		e.position.z = 10.0f;
-		world.vehicles.tick_motor(e, t);
+		Entity row;
+		row.health = row.health_max = 10000;
+		row.veh.yaw_seeded = true;
+		row.veh.yaw_bam = 0;
+		row.veh.steer_target_bam = 0x40000000;
+		row.position.z = 10.0f;
+		const EntityHandle h = world->registry.spawn(1, row);
+		test_common::brain_hull(*world, h, family);
+		Entity &e = *world->registry.get(h);
+		world->vehicles.tick_motor(e, t);
 		CHECK(e.veh.steer_state == -31557864);
 	}
 }
@@ -665,38 +719,52 @@ void test_plat_terrain_probe_grazing_uses_wrapped_product() {
 
 void test_simple_motors_and_contact() {
 	World world;
+	world.registry.configure_pool(1, 8);
+	// Each hull carries the class init's brain: a brainless selector-zero hull's
+	// mover stops at its head (D-NET-433).
+	const auto hull = [&](const Entity &seed) -> Entity & {
+		const EntityHandle h = world.registry.spawn(1, seed);
+		test_common::brain_hull(world, h);
+		return *world.registry.get(h);
+	};
 	VehicleTraits t;
 	t.acceleration = 1;
 	t.deceleration = 1;
 	t.player_speed = 32000;
-	Entity e;
-	e.health = e.health_max = 10000;
-	e.veh.yaw_seeded = true;
-	e.veh.speed = 16000;
-	e.veh.cmd_speed = -16000;
-	e.position.z = 10.0f;
-	world.vehicles.tick_motor(e, t);
-	CHECK(e.veh.speed_accel == -1000);
-	CHECK(e.veh.speed == 15000);
-	CHECK(e.veh.slide_z == -167);
-	CHECK(to_fixed(e.position.z) == 655360 - 167);
-	CHECK(e.veh.wheel_phase == 15000 * 8192);
+	{
+		Entity seed;
+		seed.health = seed.health_max = 10000;
+		seed.veh.yaw_seeded = true;
+		seed.veh.speed = 16000;
+		seed.veh.cmd_speed = -16000;
+		seed.position.z = 10.0f;
+		Entity &e = hull(seed);
+		world.vehicles.tick_motor(e, t);
+		CHECK(e.veh.speed_accel == -1000);
+		CHECK(e.veh.speed == 15000);
+		CHECK(e.veh.slide_z == -167);
+		CHECK(to_fixed(e.position.z) == 655360 - 167);
+		CHECK(e.veh.wheel_phase == 15000 * 8192);
+	}
 
 	// A lateral Y mismatch alone does not trip the retail duplicated-X test.
-	e = Entity{};
-	e.health = e.health_max = 10000;
-	e.veh.yaw_seeded = true;
-	e.veh.cmd_speed = e.veh.speed = 1024;
-	e.veh.vel_x = 1024;
-	e.veh.vel_y = 100000;
-	t.slip_speed = 100;
-	world.vehicles.tick_motor(e, t);
-	CHECK(!e.veh.skid_sound_latched);
-	CHECK(e.veh.vel_y == 0);
-	e.veh.vel_x = 5000;
-	world.vehicles.tick_motor(e, t);
-	CHECK(e.veh.skid_sound_latched);
-	CHECK(e.veh.vel_x > 1024);
+	{
+		Entity seed;
+		seed.health = seed.health_max = 10000;
+		seed.veh.yaw_seeded = true;
+		seed.veh.cmd_speed = seed.veh.speed = 1024;
+		seed.veh.vel_x = 1024;
+		seed.veh.vel_y = 100000;
+		Entity &e = hull(seed);
+		t.slip_speed = 100;
+		world.vehicles.tick_motor(e, t);
+		CHECK(!e.veh.skid_sound_latched);
+		CHECK(e.veh.vel_y == 0);
+		e.veh.vel_x = 5000;
+		world.vehicles.tick_motor(e, t);
+		CHECK(e.veh.skid_sound_latched);
+		CHECK(e.veh.vel_x > 1024);
+	}
 
 	// On water, selector zero has its own heave wave and no vertical thrust.
 	t = VehicleTraits{};
@@ -704,30 +772,33 @@ void test_simple_motors_and_contact() {
 	t.acceleration = 64;
 	t.water_speed = 16384;
 	world.env.water_z = 100 * 65536;
-	e = Entity{};
-	e.health = e.health_max = 10000;
-	e.veh.yaw_seeded = true;
-	e.flags = 0x8000;
-	e.position.z = 100.0f;
-	e.veh.cmd_speed = 16384;
-	Entity remote = e;
-	remote.veh.net_predicted = true;
-	remote.veh.net_interp_progress = 20;
-	remote.veh.net_recv_speed = 16384;
-	world.vehicles.tick_watercraft_motor(e, t);
-	world.ai.is_authority = false;
-	world.vehicles.watercraft_client_tick(remote, t);
-	CHECK(e.veh.vel_x == 252);
-	CHECK(e.veh.slide_z == -512);
-	CHECK(e.veh.air_pitch_bam == 983040);
-	CHECK(e.veh.air_roll_bam == 0);
-	CHECK(e.veh.wheel_phase == 16384 * 8192);
-	CHECK(remote.veh.vel_x == e.veh.vel_x);
-	CHECK(remote.veh.slide_z == e.veh.slide_z);
-	CHECK(remote.veh.air_pitch_bam == e.veh.air_pitch_bam);
-	CHECK(remote.position.x == e.position.x && remote.position.z == e.position.z);
+	{
+		Entity seed;
+		seed.health = seed.health_max = 10000;
+		seed.veh.yaw_seeded = true;
+		seed.flags = 0x8000;
+		seed.position.z = 100.0f;
+		seed.veh.cmd_speed = 16384;
+		Entity &e = hull(seed);
+		seed.veh.net_predicted = true;
+		seed.veh.net_interp_progress = 20;
+		seed.veh.net_recv_speed = 16384;
+		Entity &remote = hull(seed);
+		world.vehicles.tick_watercraft_motor(e, t);
+		world.ai.is_authority = false;
+		world.vehicles.watercraft_client_tick(remote, t);
+		CHECK(e.veh.vel_x == 252);
+		CHECK(e.veh.slide_z == -512);
+		CHECK(e.veh.air_pitch_bam == 983040);
+		CHECK(e.veh.air_roll_bam == 0);
+		CHECK(e.veh.wheel_phase == 16384 * 8192);
+		CHECK(remote.veh.vel_x == e.veh.vel_x);
+		CHECK(remote.veh.slide_z == e.veh.slide_z);
+		CHECK(remote.veh.air_pitch_bam == e.veh.air_pitch_bam);
+		CHECK(remote.position.x == e.position.x && remote.position.z == e.position.z);
+	}
 
-	// Nonzero phases pin the wave's x87 formula [orig: Entity_ProcessAirVehiclePhysics
+	// Nonzero phases pin the wave's x87 formula [orig: Vehicle_ProcessSelectorZeroBoat
 	// @0x46FA00 (site @0x47115D..0x4711D9)]: P = (((x+y)>>10) + tick*4) * (1/256).
 	// Case A: x = 2.0 u (131072 >> 10 = 128), tick 0 -> P = 0.5:
 	//   pitch  = ftol(cos(0.7)*327680 + cos(0.5)*655360)
@@ -744,22 +815,20 @@ void test_simple_motors_and_contact() {
 	//   height = -1024 - ftol(-578.1939) = -446 -> slide_z = -223.
 	// Every truncated value sits >= 0.004 from an integer, beyond any libm ulp.
 	{
-		Entity wave;
-		wave.health = wave.health_max = 10000;
-		wave.veh.yaw_seeded = true;
-		wave.flags = 0x8000;
-		wave.position = { 2.0f, 0.0f, 100.0f };
+		Entity wave_seed;
+		wave_seed.health = wave_seed.health_max = 10000;
+		wave_seed.veh.yaw_seeded = true;
+		wave_seed.flags = 0x8000;
+		wave_seed.position = { 2.0f, 0.0f, 100.0f };
+		Entity &wave = hull(wave_seed);
 		world.logic_tick = 0;
 		world.vehicles.tick_watercraft_motor(wave, t);
 		CHECK(wave.veh.air_pitch_bam == 825755);
 		CHECK(wave.veh.air_roll_bam == 574211);
 		CHECK(wave.veh.slide_z == -145);
 
-		Entity wave_b;
-		wave_b.health = wave_b.health_max = 10000;
-		wave_b.veh.yaw_seeded = true;
-		wave_b.flags = 0x8000;
-		wave_b.position = { 0.0f, 0.0f, 100.0f };
+		wave_seed.position = { 0.0f, 0.0f, 100.0f };
+		Entity &wave_b = hull(wave_seed);
 		world.logic_tick = 24;
 		world.vehicles.tick_watercraft_motor(wave_b, t);
 		CHECK(wave_b.veh.air_pitch_bam == 893366);
@@ -771,12 +840,13 @@ void test_simple_motors_and_contact() {
 	// catv selects that boat path before its input/health/sound families.
 	t.family = VehicleFamily::Ground;
 	t.amphibian = true;
-	Entity amphibian;
-	amphibian.health = amphibian.health_max = 10000;
-	amphibian.flags = 0x8000;
-	amphibian.position.z = 100.0f;
-	amphibian.veh.yaw_seeded = true;
-	amphibian.veh.cmd_speed = 16384;
+	Entity amphibian_seed;
+	amphibian_seed.health = amphibian_seed.health_max = 10000;
+	amphibian_seed.flags = 0x8000;
+	amphibian_seed.position.z = 100.0f;
+	amphibian_seed.veh.yaw_seeded = true;
+	amphibian_seed.veh.cmd_speed = 16384;
+	Entity &amphibian = hull(amphibian_seed);
 	world.ai.is_authority = true;
 	world.vehicles.tick_motor(amphibian, t);
 	CHECK(amphibian.health == 10000);
@@ -792,7 +862,7 @@ void test_simple_motors_and_contact() {
 	t.foot_y_hi = 65536;
 	t.box_z_lo = -32768;
 	t.box_z_hi = 65536;
-	e = Entity{};
+	Entity e;
 	e.veh.slide_z = -167;
 	e.veh.spring_energy = 9000;
 	int32_t x = 0, y = 0, z = 655360 - 167;
@@ -842,11 +912,7 @@ void test_npc_claimant_registers_stationary_idle_sound() {
     r.mount();
     r.w.out.sound_emitters.clear(); // ignore mount-edge effects; inspect the motor tick
 
-    VehicleDriveCmd parked;
-    parked.ai_drive = true;
-    parked.steer_target_bam = 0;
-    parked.cmd_speed = 0;
-    r.w.vehicles.tick_motor(r.veh(), t, &parked);
+    r.w.vehicles.tick_motor(r.veh(), t); // the fresh brain's AI leg commands 0
 
     CHECK(r.w.out.sound_emitters.size() == 1);
     if (r.w.out.sound_emitters.size() == 1) {
@@ -900,9 +966,7 @@ void test_item_soundloop_override_wins_over_profile() {
     r.mount();
     r.w.out.sound_emitters.clear();
 
-    VehicleDriveCmd parked;
-    parked.ai_drive = true;
-    r.w.vehicles.tick_motor(r.veh(), t, &parked);
+    r.w.vehicles.tick_motor(r.veh(), t);
 
     CHECK(r.w.out.sound_emitters.size() == 1);
     if (r.w.out.sound_emitters.size() == 1) {
@@ -1235,13 +1299,18 @@ void test_vehicle_impact_role_and_momentum_edge() {
 		other.has_item_def = true;
 		other.has_graphic_model = true;
 		other.item_attrib = 0x40;
+		// The def's own +0x908 word, which the traits sweep stamps for every def:
+		// the contact wake compares it, not the traits table, so an equal hull is
+		// pushed rather than woken. [orig: Entity_CheckCollisionState
+		// @0x462E94..0x462EA4, the radius leg @0x462ED6..0x462EE3]
+		other.def_mass = t.mass;
 		other.position = { 150.0f, 200.0f, 10.0f };
-		other.yaw = 90;
+		other.heading = placed_heading_bam(90);
 		other.bound_radius = 3.0f;
 		const EntityHandle target = r.w.registry.spawn(1, other);
 		collision.assign_entity(target, collision.add_model(vehicle_sound_test_wall()));
 		r.veh().position = { 146.0f, 200.0f, 10.0f };
-		r.veh().yaw = 90;
+		r.veh().heading = placed_heading_bam(90);
 		r.veh().bound_radius = 3.0f;
 		r.veh().health = 1000;
 		r.veh().veh.speed = r.veh().veh.cmd_speed = 30000;
@@ -1374,7 +1443,7 @@ void test_vehicle_sound_extreme_ints_are_saturating() {
 // heading pinned to its own, both command words zeroed, powered bit dropped.
 // The rotor is gated on the OCCUPANT rather than on power, so the blades keep
 // turning through the wait -- engine running, going nowhere.
-// [orig: the wait-for-boarders block of Entity_ProcessAirVehiclePhysics,
+// [orig: the wait-for-boarders block of Vehicle_ProcessSelectorZeroBoat,
 //  kong line 94590]
 static void test_helo_waits_for_its_boarders() {
     World w;
@@ -1389,6 +1458,7 @@ static void test_helo_waits_for_its_boarders() {
     helo.health = 100;
     helo.has_item_def = true;
     helo.has_graphic_model = true;
+    helo.graphic_model_userpoints = 2; // its model's userpoints: the two seat bones
     Seat ctrl; ctrl.type = SeatType::Controller;
     Seat pax;  pax.type  = SeatType::Passenger;
     helo.seats.push_back(ctrl);
@@ -1471,6 +1541,7 @@ void test_every_mover_tail_sets_the_matrix_bit() {
 				VehicleTraits t = buggy_traits();
 				t.family = family;
 				t.physics = physics;
+				r.brain().profile.type = test_common::hull_profile_type(family);
 				r.veh().engine_flags = 0;
 				r.veh().flags = dead ? kEntityFlagDead : 0u;
 				if (vehicle_family_uses_direct_air_mover(family)) {
@@ -1491,6 +1562,7 @@ void test_every_mover_tail_sets_the_matrix_bit() {
 	Rig parked;
 	VehicleTraits air = buggy_traits();
 	air.family = VehicleFamily::Helicopter;
+	parked.brain().profile.type = test_common::hull_profile_type(air.family);
 	parked.veh().engine_flags = 0;
 	parked.w.vehicles.aircraft_client_tick(parked.veh(), air);
 	CHECK((parked.veh().engine_flags & kEntityFlagMatrixBuilt) != 0);
@@ -1507,6 +1579,7 @@ void test_family_health_cadence_and_submersion() {
 		t.critical_drain = 7;
 		t.non_critical_regen = 10;
 		t.climb_speed = 1000;
+		r.brain().profile.type = test_common::hull_profile_type(family);
 		r.veh().net_id = 1;
 		r.veh().health_max = 500;
 		const auto tick = [&] {
@@ -1678,6 +1751,7 @@ void test_engine_and_light_sound_edges() {
 
 	r.mount();
 	t.family = VehicleFamily::Helicopter;
+	r.brain().profile.type = test_common::hull_profile_type(t.family);
 	r.veh().veh.part_spin = {};
 	r.w.vehicles.part_anim_tick(r.veh(), t);
 	CHECK(r.w.out.slot_sounds.size() == 1);
@@ -1700,11 +1774,11 @@ void test_engine_and_light_sound_edges() {
 	boat.w.vehicles.traits.set(boat.veh().item_id, t);
 	boat.mount();
 	boat.veh().flags |= 0x80u;
-	boat.w.vehicles.tick_watercraft_motor(boat.veh(), t, nullptr);
+	boat.w.vehicles.tick_watercraft_motor(boat.veh(), t);
 	CHECK(boat.w.out.slot_sounds.size() == 1);
 	CHECK(boat.w.out.slot_sounds[0].slot == opennova::audio::kSlotEngineStart);
 	boat.w.out.slot_sounds.clear();
-	boat.w.vehicles.tick_watercraft_motor(boat.veh(), t, nullptr);
+	boat.w.vehicles.tick_watercraft_motor(boat.veh(), t);
 	CHECK(boat.w.out.slot_sounds.empty());
 }
 
@@ -1712,9 +1786,9 @@ void test_engine_and_light_sound_edges() {
 // and claimant edges (slot 24, then slot 30 while the occupant eye is above
 // water, once), the boat twin has only its lights leg beside the movement fold
 // and never latches the engine.
-// [IDB: Entity_ProcessInfantryPhysics @0x46E100 (the selector-zero ground
+// [IDB: Vehicle_ProcessSelectorZeroGround @0x46E100 (the selector-zero ground
 // mover) lights @0x46F8C3..0x46F8FC, claimant edge @0x46F8FC..0x46F99C;
-// Entity_ProcessAirVehiclePhysics @0x46FA00 (the selector-zero boat mover)
+// Vehicle_ProcessSelectorZeroBoat @0x46FA00 (the selector-zero boat mover)
 // lights @0x4714EA..0x471523, fold @0x471523..0x4715D7, tail @0x47166F]
 void test_selector_zero_sound_tails() {
 	static constexpr char profile[] =
@@ -1749,7 +1823,7 @@ void test_selector_zero_sound_tails() {
 	// first tick with a fresh claimant and the lights order emits the engine
 	// start BEFORE the lights one-shot; the claimant's departure fires the stop
 	// one-shot on the hull +0x18000 above the water plane.
-	// [orig: Entity_ProcessAirVehiclePhysics @0x46FA00 claimant edge
+	// [orig: Vehicle_ProcessSelectorZeroBoat @0x46FA00 claimant edge
 	//  @0x470055..0x4700EB, lights @0x4714EA..0x471523]
 	Rig boat;
 	CHECK(boat.w.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
@@ -1804,6 +1878,7 @@ void test_warning_cadence_by_family() {
 		t.critical_drain = 0;
 		t.climb_speed = 1000;
 		t.sound_profile = "SP_Warn";
+		r.brain().profile.type = test_common::hull_profile_type(family);
 		r.veh().net_id = 1;
 		r.veh().health_max = 500;
 		r.veh().health = 100;
@@ -1843,12 +1918,13 @@ void test_handbrake_skid_and_grip_recovery() {
 		t.hand_brake = 1;
 		t.tire_slip = 5;
 		r.mount();
-		r.drv().player_class = 0; // NPC command registers are retained.
+		r.drv().player_class = 0; // an NPC: the AI leg commands the brain's out-speed
 		auto &v = r.veh();
 		auto &m = v.veh;
 		m.yaw_seeded = true;
 		m.yaw_bam = m.steer_target_bam = 0;
 		m.speed = m.cmd_speed = 20000;
+		r.brain().brain.f[AiBrain::kOutSpeed] = 20000;
 		m.bike_ground_contact_ticks = 10;
 		m.contact_direction[1] = 65536;
 		v.flags |= 8;
@@ -1891,7 +1967,7 @@ void test_handbrake_skid_and_grip_recovery() {
 		CHECK(m.contact_direction[0] == 0 && m.contact_direction[1] == 0);
 		CHECK(m.slip_started_tick == 0);
 		CHECK(m.vel_y == 0 && m.vel_x > 0);
-		m.cmd_speed = 0;
+		r.brain().brain.f[AiBrain::kOutSpeed] = 0;
 		r.w.logic_tick = 129;
 		r.tick(1, t);
 		CHECK(m.wheel_slip_phase == 0);
@@ -2127,7 +2203,7 @@ void test_slope_factor_samples_quantized_table() {
 		t.player_control = false;
 		auto &m = r.veh().veh;
 		m.yaw_seeded = true;
-		r.veh().pitch = pitch;
+		r.veh().pitch_bam = spawn_angle_bam(pitch);
 		m.speed = 20000;
 		m.cmd_speed = 20000;
 		const int32_t pitch_bam = spawn_angle_bam(pitch);
@@ -2313,9 +2389,9 @@ void test_mover_prologue_stamps_saved_live_pose() {
 	{
 		Rig r;
 		r.w.vehicles.traits.set(r.veh().item_id, t);
-		r.veh().yaw = 1;
-		r.veh().pitch = 5;
-		r.veh().roll = -3;
+		r.veh().heading = placed_heading_bam(1);
+		r.veh().pitch_bam = spawn_angle_bam(5);
+		r.veh().roll_bam = spawn_angle_bam(-3);
 		const int32_t entry[3] = { to_fixed(r.veh().position.x), to_fixed(r.veh().position.y),
 			to_fixed(r.veh().position.z) };
 		CHECK(!r.veh().saved_live_valid);
@@ -2510,9 +2586,10 @@ void test_skid_effects_and_sound_edges() {
 	auto &m = v.veh;
 	m.yaw_seeded = true;
 	m.yaw_bam = m.steer_target_bam = 0;
-	v.yaw = 90;
+	v.heading = placed_heading_bam(90);
 	v.uniform_scale_q16 = 2 << 16;
 	m.speed = m.cmd_speed = 20000;
+	r.brain().brain.f[AiBrain::kOutSpeed] = 20000; // the NPC's AI leg command
 	m.contact_direction[1] = 65536;
 	r.w.logic_tick = 100;
 	r.w.out.fire_sounds.set_listener(v.position);
@@ -2589,7 +2666,7 @@ void test_vehicle_carrier_follow_and_refresh() {
 	deck.position = { 100.0f, 200.0f, 5.0f };
 	deck.bound_radius = 30.0f;
 	deck.alive = true;
-	deck.yaw = 90;
+	deck.heading = placed_heading_bam(90);
 	deck.veh.yaw_seeded = true;
 	deck.veh.yaw_bam = 0;
 	const EntityHandle parent_h = r.w.registry.spawn(1, deck);
@@ -2651,8 +2728,7 @@ void test_state0_brain_with_ai_driver_holds() {
 	const VehicleTraits t = buggy_traits();
 	r.w.vehicles.traits.set(r.veh().item_id, t);
 	r.w.ai.is_authority = true;
-	const int idx = r.w.ai.attach(r.veh_h);
-	AiEntity &ae = *r.w.ai.at(idx);
+	AiEntity &ae = r.brain();
 	ae.brain.f[AiBrain::kCurState] = 0;
 	ae.brain.f[AiBrain::kPendState] = 0;
 	ae.brain.f[AiBrain::kFallback] = 0;
@@ -2700,9 +2776,11 @@ static void test_rider_below_its_carrier_follows_the_same_pass() {
     // The carrier moves up to slot 5; the rider takes slot 0 below it, on the
     // carrier's origin (so a carrier yaw cannot move it sideways).
     Entity carrier = r.veh();
+    r.w.ai.release(r.veh_h);
     r.w.registry.despawn(r.veh_h);
     r.veh_h = r.w.registry.spawn_at(EntityHandle::make(1, 5), carrier);
     CHECK(r.veh_h.valid());
+    test_common::brain_hull(r.w, r.veh_h);
     Entity rider = carrier;
     rider.net_id = 201;
     rider.item_id = 1292;
@@ -2711,6 +2789,7 @@ static void test_rider_below_its_carrier_follows_the_same_pass() {
     rider.ground_target = r.veh_h;
     const EntityHandle rider_h = r.w.registry.spawn(1, rider);
     CHECK(rider_h.slot() == 0);
+    test_common::brain_hull(r.w, rider_h);
     r.w.vehicles.traits.set(carrier.item_id, traits);
     r.w.vehicles.traits.set(rider.item_id, traits);
     auto &body = *r.w.ai.at(r.w.ai.attach(r.drv_h));
@@ -2837,7 +2916,553 @@ void test_bike_lean_at_speed_both_ways() {
 	}
 }
 
+// The boat's entry split reads the seat and the hull's dead bit alone, never the
+// occupant: an AI command drives a hull whose seated controller has died (its death
+// edge, which detaches it, is the pool-0 walk's, ahead of this update), and an
+// occupied live hull rests its stuck count whatever the leg.
+// [orig: Entity_UpdateWatercraftPhysics @0x48D480 (the seat and dead-bit tests
+//  @0x48DFA8..0x48DFBA, `mov [esi+148h], ebx` @0x48DFC0, the parked arm
+//  @0x48E7EE..0x48E81E)]
+void test_watercraft_entry_reads_the_hull() {
+    Rig r;
+    VehicleTraits t = buggy_traits();
+    t.family = VehicleFamily::Watercraft;
+    t.water_speed = 40 * 293;
+    r.w.registry.get(r.drv_h)->player_class = 0; // an NPC controller: the AI leg
+    CHECK(r.w.vehicles.process_attach(r.drv_h, r.veh_h, 1));
+    CHECK(r.w.vehicles.resolve_controller(r.veh()) != nullptr);
+    // The hull's brain: the leg's command is its out-speed (no waypoint, no turn).
+    AiBrain &brain = r.brain().brain;
+    brain.f[AiBrain::kCurState] = 16;
+    brain.f[AiBrain::kOutSpeed] = 20 * 293;
+    // A seated controller at zero health still takes the AI leg.
+    r.w.registry.get(r.drv_h)->health = 0;
+    r.w.registry.get(r.drv_h)->alive = false;
+    r.veh().veh.stuck_ticks = 9;
+    r.w.vehicles.tick_watercraft_motor(r.veh(), t);
+    CHECK(r.veh().veh.cmd_speed == 20 * 293);
+    CHECK(r.veh().veh.stuck_ticks == 0);
+    // (A dead hull never reaches the split: the mover bails to its tail first,
+    // @0x48DDFA..0x48DDFE, so the split's own dead-bit test only matters within
+    // one pass.)
+}
+
+// A dead hull whose live mover still runs (no husk, or a husk whose model did not load;
+// the item death raises the dead bit on engine_flags) bails to its matrix tail ahead of
+// its input block: the staging runs no AI leg (no parked-arm state stamp, no stuck
+// count), the mover no physics, and the tail sets the matrix bit.
+// [orig: Entity_UpdateVehiclePhysics @0x48AF00 (`test byte ptr [esi+24h], 2; jnz`
+//  @0x48B810..0x48B814 -> @0x48D43C..0x48D451); the tank @0x4893E9; the bike @0x484936]
+void test_a_dead_hull_bails_to_its_tail() {
+    for (const bool dead : {true, false}) {
+        Rig r;
+        const VehicleTraits t = buggy_traits();
+        r.w.vehicles.traits.set(r.veh().item_id, t);
+        AiEntity *brain = r.w.ai.for_handle(r.veh_h);
+        CHECK(brain != nullptr);
+        if (brain == nullptr) return;
+        brain->brain.f[AiBrain::kCurState] = 16;
+        if (dead) r.veh().engine_flags |= kEntityFlagDead;
+        r.veh().engine_flags &= ~kEntityFlagMatrixBuilt;
+        r.veh().veh.vel_x = 5000;
+        r.veh().veh.stuck_ticks = 9;
+        const int32_t x0 = r.veh().position.x.q16;
+        r.w.vehicles.update_motor(r.veh(), /*is_authority=*/true);
+        CHECK((r.veh().engine_flags & kEntityFlagMatrixBuilt) != 0);
+        if (dead) {
+            CHECK(r.veh().position.x.q16 == x0);
+            CHECK(brain->brain.f[AiBrain::kCurState] == 16);
+            CHECK(r.veh().veh.stuck_ticks == 9);
+        } else {
+            // The live hull with no controller takes the parked arm's state stamp.
+            CHECK(brain->brain.f[AiBrain::kCurState] == 22);
+        }
+    }
+}
+
+// A hull with no brain (+0x64) jumps from its mover-entry stamp to the matrix-build
+// tail on both roles: the stamp lands and the matrix bit rises, and nothing between
+// them runs: no health cadence, no occupant block (its stuck reset), no input, no
+// motion, on a predicting client no chase, on a client row the chase does not run no
+// movement-sound fold. Its brained twin runs the same tick in full. Each role enters
+// through the pool-1 pass's own leg (VehicleSystem::update_motor).
+// [orig: cveh `mov edi, [esi+64h]` @0x48AF1A, `jz` @0x48AFA6 -> the tail
+//  @0x48D43E..0x48D451; ctan @0x488ACA, @0x488B56 -> @0x48AEB6; cbik @0x483FFA,
+//  @0x484086 -> @0x486A04; cbot @0x48D499, @0x48D4EF -> @0x48EF50..0x48EF63; the
+//  selector-zero ground @0x46E119, @0x46E165 -> @0x46F9B2..0x46F9C5 and boat @0x46FA19,
+//  @0x46FA64 -> @0x471670..0x471683]
+void test_a_brainless_hull_bails_at_its_head() {
+	for (const int physics : { 1, 0 })
+	for (const VehicleFamily family : { VehicleFamily::Ground, VehicleFamily::Tank,
+				 VehicleFamily::Bike, VehicleFamily::Watercraft }) {
+		for (const bool brained : { false, true }) {
+			// The authority: a seated driver's forward order on a hull with way on.
+			{
+				auto r = std::make_unique<Rig>();
+				VehicleTraits t = buggy_traits();
+				t.family = family;
+				t.physics = physics;
+				t.critical_hp = 100;
+				t.non_critical_regen = 10;
+				r->w.vehicles.traits.set(r->veh().item_id, t);
+				if (!brained) r->w.ai.release(r->veh_h);
+				r->mount();
+				r->drv().net_move_input = 0x08;
+				Entity &veh = r->veh();
+				veh.net_id = 1;
+				veh.health = 2000;
+				veh.veh.speed = 8000;
+				veh.veh.stuck_ticks = 9;
+				veh.engine_flags &= ~kEntityFlagMatrixBuilt;
+				const int32_t entry[3] = { veh.position.x.q16, veh.position.y.q16,
+					veh.position.z.q16 };
+				r->w.logic_tick = 28; // (28 + 36 * 1) & 63 == 0: the cadence's tick
+				r->w.vehicles.update_motor(veh, /*is_authority=*/true);
+				CHECK(veh.saved_live_valid);
+				for (int axis = 0; axis < 3; ++axis)
+					CHECK(veh.saved_live_pos[axis] == entry[axis]);
+				CHECK((veh.engine_flags & kEntityFlagMatrixBuilt) != 0);
+				CHECK(veh.health == (brained ? 2010 : 2000));
+				CHECK(veh.veh.stuck_ticks == (brained ? 0 : 9));
+				if (!brained) {
+					CHECK(veh.veh.speed == 8000);
+					CHECK(veh.veh.cmd_speed == 0);
+					CHECK(veh.position.x.q16 == entry[0] && veh.position.y.q16 == entry[1] &&
+							veh.position.z.q16 == entry[2]);
+				}
+			}
+			// A predicting client: a record 8 u ahead, past the snap radius.
+			{
+				auto r = std::make_unique<Rig>();
+				VehicleTraits t = buggy_traits();
+				t.family = family;
+				t.physics = physics;
+				r->w.vehicles.traits.set(r->veh().item_id, t);
+				if (!brained) r->w.ai.release(r->veh_h);
+				r->w.ai.is_authority = false;
+				Entity &veh = r->veh();
+				auto &m = veh.veh;
+				m.net_predicted = true;
+				m.yaw_seeded = true;
+				const int32_t entry[3] = { veh.position.x.q16, veh.position.y.q16,
+					veh.position.z.q16 };
+				m.net_smooth_target[0] = entry[0] + (8 << 16);
+				m.net_smooth_target[1] = entry[1];
+				m.net_smooth_target[2] = entry[2];
+				veh.engine_flags &= ~kEntityFlagMatrixBuilt;
+				r->w.vehicles.update_motor(veh, /*is_authority=*/false);
+				CHECK(veh.saved_live_valid);
+				for (int axis = 0; axis < 3; ++axis)
+					CHECK(veh.saved_live_pos[axis] == entry[axis]);
+				CHECK((veh.engine_flags & kEntityFlagMatrixBuilt) != 0);
+				CHECK((veh.position.x.q16 != entry[0]) == brained); // the chase's snap
+				CHECK((m.net_smooth_target[0] == entry[0] + (8 << 16)) == !brained);
+			}
+			// A client row the chase does not run (not predicted): the claimant's
+			// idle lane folds only on a brained hull.
+			{
+				auto r = std::make_unique<Rig>();
+				VehicleTraits t = buggy_traits();
+				t.family = family;
+				t.physics = physics;
+				t.sound_profile = "SP_Transport";
+				load_transport_sound_profile(r->w);
+				r->w.vehicles.traits.set(r->veh().item_id, t);
+				if (!brained) r->w.ai.release(r->veh_h);
+				r->mount();
+				r->w.ai.is_authority = false;
+				r->veh().engine_flags &= ~kEntityFlagMatrixBuilt;
+				r->w.out.sound_emitters.clear();
+				r->w.vehicles.update_motor(r->veh(), /*is_authority=*/false);
+				CHECK(r->veh().saved_live_valid);
+				if (!brained)
+					CHECK(r->w.out.sound_emitters.empty());
+				else if (physics != 0)
+					CHECK(!r->w.out.sound_emitters.empty());
+				// Brained or not, the visit ends at the mover's one exit, its tail.
+				CHECK((r->veh().engine_flags & kEntityFlagMatrixBuilt) != 0);
+			}
+		}
+	}
+}
+
+// A client visit of a brained hull the chase does not run ends at the mover's
+// matrix-build tail, its one exit, as every visit does: a live ground, tank, bike
+// or boat hull folds its movement sound and takes Flags 0x20000; a dead one bails
+// to the tail at its dead test, ahead of the fold, so it registers no lane; an
+// aircraft (whose mover has no fold) takes the bit alone, dead or alive.
+// [orig: the tails and their one retn: cveh @0x48D43E..0x48D451 / @0x48D462, ctan
+//  @0x48AEB6..0x48AEC9 / @0x48AEDA, cbik @0x486A04..0x486A17 / @0x486A28, cbot
+//  @0x48EF50..0x48EF63 / @0x48EF73, selector-zero ground @0x46F9B2..0x46F9C5 /
+//  @0x46F9D5, boat @0x471670..0x471683 / @0x471693, aircraft @0x492753..0x492766 /
+//  @0x492776; the client legs into the dead tests: cveh @0x48B53F..0x48B54C ->
+//  @0x48B810..0x48B814, ctan @0x489108..0x489114 -> @0x4893E9..0x4893ED, cbik
+//  @0x484642..0x484648 -> @0x484936..0x48493A, cbot @0x48DB6B..0x48DB78 ->
+//  @0x48DDFA..0x48DDFE, selector-zero ground @0x46E60E..0x46E61B ->
+//  @0x46E89D..0x46E8A1]
+void test_a_client_visit_the_chase_skips_ends_at_its_tail() {
+	for (const int physics : { 1, 0 })
+	for (const VehicleFamily family : { VehicleFamily::Ground, VehicleFamily::Tank,
+				 VehicleFamily::Bike, VehicleFamily::Watercraft,
+				 VehicleFamily::Helicopter }) {
+		for (const bool dead : { false, true }) {
+			auto r = std::make_unique<Rig>();
+			VehicleTraits t = buggy_traits();
+			t.family = family;
+			t.physics = physics;
+			t.sound_profile = "SP_Transport";
+			load_transport_sound_profile(r->w);
+			r->w.vehicles.traits.set(r->veh().item_id, t);
+			r->mount();
+			r->w.ai.is_authority = false;
+			Entity &veh = r->veh();
+			CHECK(!veh.veh.net_predicted);
+			if (dead) {
+				veh.engine_flags |= kEntityFlagDead;
+				veh.health = 0;
+			}
+			veh.engine_flags &= ~kEntityFlagMatrixBuilt;
+			r->w.out.sound_emitters.clear();
+			r->w.vehicles.update_motor(veh, /*is_authority=*/false);
+			CHECK((veh.engine_flags & kEntityFlagMatrixBuilt) != 0);
+			const bool folds = !dead && family != VehicleFamily::Helicopter;
+			if (!folds)
+				CHECK(r->w.out.sound_emitters.empty());
+			else if (physics != 0)
+				CHECK(!r->w.out.sound_emitters.empty());
+		}
+	}
+}
+
+// A dead aircraft hull runs the shared aircraft mover's head and bails to its
+// matrix tail at the dead bit, ahead of the occupant and AI block: the parked
+// arm (its PRETTY stamp and stuck count) never runs, so the dead state's word
+// stands for the dead tick's aircraft count. A live uncrewed hull takes the
+// parked arm.
+// [orig: Entity_UpdateAircraftPhysics @0x490310 (`test byte ptr [esi+24h], 2;
+//  jnz` @0x490CD0..0x490CD4 -> @0x49274C..0x492766; the parked arm
+//  @0x491C09..0x491C6D, AI_CheckVehicleStuckState @0x491C5E, PRETTY @0x491C66)]
+void test_a_dead_aircraft_bails_ahead_of_its_ai_block() {
+    for (const bool dead : {true, false}) {
+        auto r = std::make_unique<Rig>();
+        VehicleTraits t = buggy_traits();
+        t.family = VehicleFamily::Helicopter;
+        r->w.vehicles.traits.set(r->veh().item_id, t);
+        AiEntity *brain = r->w.ai.for_handle(r->veh_h);
+        CHECK(brain != nullptr);
+        if (brain == nullptr) return;
+        brain->brain.f[AiBrain::kCurState] = 15;
+        if (dead) r->veh().engine_flags |= kEntityFlagDead;
+        r->veh().engine_flags &= ~kEntityFlagMatrixBuilt;
+        r->veh().veh.stuck_ticks = 9;
+        const int32_t x0 = r->veh().position.x.q16;
+        r->w.vehicles.update_motor(r->veh(), /*is_authority=*/true);
+        CHECK((r->veh().engine_flags & kEntityFlagMatrixBuilt) != 0);
+        if (dead) {
+            CHECK(r->veh().position.x.q16 == x0);
+            CHECK(brain->brain.f[AiBrain::kCurState] == 15);
+            CHECK(r->veh().veh.stuck_ticks == 9);
+        } else {
+            CHECK(brain->brain.f[AiBrain::kCurState] == 14);
+            CHECK(r->veh().veh.stuck_ticks == 10);
+        }
+    }
+}
+
+// The selector-zero ground mover parks on `occupant == 0 || Flags & 0x10000002`
+// ahead of its player test: a script-disabled hull with a player seated takes no
+// input. Neither twin reads the occupant's life: a seated player at zero health
+// still drives (its death edge, not the mover, takes it out of the seat).
+// [orig: Vehicle_ProcessSelectorZeroGround @0x46E9FC..0x46EA11 -> the parked arm
+//  @0x46F09E..0x46F0C7; the player test @0x46EA21..0x46EA28]
+void test_selector_zero_park_reads_the_hull_not_the_occupant() {
+    for (const int arm : {0, 1, 2}) {
+        auto r = std::make_unique<Rig>();
+        VehicleTraits t = buggy_traits();
+        t.physics = 0;
+        r->mount();
+        r->drv().net_move_input = 0x08;
+        if (arm == 1) r->veh().flags |= kEntityFlagScriptDisabled;
+        if (arm == 2) {
+            r->drv().health = 0;
+            r->drv().alive = false;
+        }
+        r->tick(20, t);
+        if (arm == 1) {
+            CHECK(r->veh().veh.speed == 0);
+            CHECK(r->veh().veh.cmd_speed == 0);
+        } else {
+            CHECK(r->veh().veh.speed > 0);
+        }
+    }
+}
+
+// The selector-zero ground mover runs its AI leg in place, after its head: the
+// health cadence regenerates the hull first, then the leg's crew cap bleeds the
+// undercrewed hull to criticalHp (a cap staged ahead of the head would have put
+// the hull in the critical band, whose cadence drains it the same pass: 285). The
+// leg hands state 22 back to 16, seeds +0x21C from the target word and the speed
+// from the out-speed capped at playerSpeed, refreshes the spent turn budget
+// ((|Yaw - bearing| / ((+0x8C >> 15) + 32)) << 5), clamps the bearing delta to it,
+// damps the speed 0.75x per threshold the delta crosses and steers to
+// Yaw + delta + (delta sar 3). A driverless hull takes the parked arm: the stuck count,
+// state 22, the heading held and a zero command.
+// [orig: Vehicle_ProcessSelectorZeroGround @0x46E100: the health cadence
+//  @0x46E1C4..0x46E201 ahead of the AI leg @0x46ECB1..0x46F0D0 (the seeds
+//  @0x46ECBE..0x46ECE3, the cap @0x46ED18..0x46ED28, the refresh @0x46ED35..0x46ED76,
+//  the clamp @0x46ED7C..0x46ED96, the damp @0x46ED98..0x46EE10, the steer
+//  @0x46EE16..0x46EE20); the parked arm @0x46F09E..0x46F0C7; AIWaypoint_UpdateTarget
+//  @0x457380 (the type-3 bearing @0x45743A)]
+void test_selector_zero_ground_ai_leg_runs_in_the_mover() {
+	for (const bool driven : {true, false}) {
+		auto r = std::make_unique<Rig>();
+		if (driven) {
+			r->mount();
+			r->drv().player_class = 0; // an NPC driver: the AI leg
+		}
+		VehicleTraits t = buggy_traits();
+		t.physics = 0;
+		t.min_ai = 2; // the driver has no def: no counted crew, so the cap bleeds the hull
+		t.critical_hp = 300;
+		t.critical_drain = 15;
+		t.non_critical_regen = 10;
+		r->w.vehicles.traits.set(r->veh().item_id, t);
+		r->w.ai.is_authority = true;
+		AiBrain &b = r->brain().brain;
+		b.f[AiBrain::kCurState] = 22;
+		b.f[AiBrain::kTargetRef] = 0x1234;
+		b.f[AiBrain::kOutSpeed] = t.player_speed + 1000;
+		b.f[AiBrain::kAnimFlag] = 0; // a spent turn budget: the leg refreshes it
+		b.f[AiBrain::kStoredKeyTime] = 0; // divisor (0 >> 15) + 32 = 32
+		b.f[AiBrain::kWpType] = 3; // a literal target 100 u along +X: bearing 0
+		b.f[AiBrain::kWpCoordX] = 200 << 16;
+		b.f[AiBrain::kWpCoordY] = 200 << 16;
+		b.f[AiBrain::kWpCoordZ] = 10 << 16;
+		Entity &veh = r->veh();
+		CHECK(veh.heading == 0x40000000); // the placed yaw 0: BAM 90 degrees
+		veh.veh.spawn_pose_valid = true; // spawned at the origin, far from its anchor
+		veh.health = 2000;
+		r->w.logic_tick = 32; // (32 + 36 * 200) & 63 == 0: the health cadence's tick
+		r->w.vehicles.update_motor(veh, true);
+		if (!driven) {
+			CHECK(b.f[AiBrain::kCurState] == 22);
+			CHECK(veh.veh.stuck_ticks == 1);
+			CHECK(veh.veh.steer_target_bam == 0x40000000);
+			CHECK(veh.veh.cmd_speed == 0);
+			CHECK(veh.health == 2010); // the cadence's regen; no crew cap while parked
+			continue;
+		}
+		CHECK(veh.health == 300);
+		CHECK(b.f[AiBrain::kCurState] == 16);
+		CHECK(b.f[135] == 0x1234);
+		// (0x40000000 / 32) << 5: the budget is the whole quarter turn, so the delta
+		// 0 - 0x40000000 stands unclamped.
+		CHECK(b.f[AiBrain::kAnimFlag] == 0x40000000);
+		// 41 * 192426 << 6 = 504925824 sits below the budget, and |delta| crosses
+		// both 0x15555540 and 0x2AAAAA80: 27542 -> (27542 * 0xC000 + 0x8000) >> 16 =
+		// 20657 -> (20657 * 0xC000 + 0x8000) >> 16 = 15493.
+		CHECK(veh.veh.cmd_speed == 15493);
+		CHECK(b.f[136] == 15493);
+		// 0x40000000 - 0x40000000 + (-0x40000000 >> 3)
+		CHECK(veh.veh.steer_target_bam == -0x08000000);
+		CHECK(b.f[AiBrain::kWorkHeading] == -0x08000000);
+		CHECK(veh.veh.stuck_ticks == 0);
+	}
+}
+
+// Every family mover runs its occupant block in place, after its head: the health
+// cadence regenerates the hull first (2000 -> 2010), then the AI leg's crew cap
+// bleeds the undercrewed hull to criticalHp (a cap staged ahead of the head put the
+// hull in the critical band, whose cadence drained it the same pass: 285). The leg
+// hands state 22 back to 16; the boat leg seeds +0x21C from the target word. A
+// driverless hull takes the parked arm after the cadence: the regen stands, the
+// stuck count steps, state 22, a zero command.
+// [orig: the health cadence (cveh @0x48AFFD, ctan @0x488BAD, cbik @0x4840DD, cbot
+//  @0x48D561) ahead of the occupant blocks: cveh's AI leg @0x48BC12 (the crew cap
+//  @0x48BC4E..0x48BC94), parked arm @0x48C002; ctan @0x4897DB / @0x489BCE; cbik
+//  @0x484DB8 / @0x4851AE; cbot @0x48E247 (the seed @0x48E254, the cap
+//  @0x48E27F..0x48E2C7) / @0x48E7EE; Vehicle_ProcessSelectorZeroBoat @0x46FA00 (the
+//  leg @0x470795, the cap @0x4707CD..0x470810, the parked arm @0x470D4E..0x470D79)]
+void test_family_occupant_blocks_run_after_the_head() {
+	struct Case {
+		VehicleFamily family;
+		int32_t physics;
+	};
+	const Case cases[] = {{VehicleFamily::Ground, 1}, {VehicleFamily::Tank, 1},
+			{VehicleFamily::Bike, 1}, {VehicleFamily::Watercraft, 1},
+			{VehicleFamily::Watercraft, 0}};
+	for (const Case &c : cases) {
+		for (const bool driven : {true, false}) {
+			auto r = std::make_unique<Rig>();
+			if (driven) {
+				r->mount();
+				r->drv().player_class = 0; // an NPC driver: the AI leg
+			}
+			VehicleTraits t = buggy_traits();
+			t.family = c.family;
+			t.physics = c.physics;
+			t.water_speed = 40 * 293;
+			t.min_ai = 2; // the driver has no def: no counted crew, so the cap bleeds
+			t.critical_hp = 300;
+			t.critical_drain = 15;
+			t.non_critical_regen = 10;
+			r->w.vehicles.traits.set(r->veh().item_id, t);
+			r->w.ai.is_authority = true;
+			AiBrain &b = r->brain().brain;
+			b.f[AiBrain::kCurState] = 22;
+			b.f[AiBrain::kTargetRef] = 0x1234;
+			b.f[AiBrain::kOutSpeed] = t.player_speed + 1000;
+			Entity &veh = r->veh();
+			veh.veh.spawn_pose_valid = true; // spawned at the origin, far from its anchor
+			veh.health = 2000;
+			r->w.logic_tick = 32; // (32 + 36 * 200) & 63 == 0: the health cadence's tick
+			r->w.vehicles.update_motor(veh, true);
+			if (!driven) {
+				CHECK(veh.health == 2010); // the cadence's regen; no crew cap while parked
+				CHECK(b.f[AiBrain::kCurState] == 22);
+				CHECK(veh.veh.stuck_ticks == 1);
+				CHECK(veh.veh.cmd_speed == 0);
+				continue;
+			}
+			CHECK(veh.health == 300);
+			CHECK(b.f[AiBrain::kCurState] == 16);
+			CHECK(veh.veh.stuck_ticks == 0);
+			if (c.family == VehicleFamily::Watercraft)
+				CHECK(b.f[135] == 0x1234);
+		}
+	}
+}
+
+// A client runs the selector-zero ground mover's occupant block for the hull its
+// local player drives, as the authority does for every hull. The three cases:
+// - a parked hull (Flags 0x10000000) takes the parked arm: a zero command and
+//   Flags & ~0x80;
+// - a driver whose eye sits at or below the water plane takes the AI leg over
+//   the client's brain words, which are zero: a zero speed seed, a zero turn
+//   budget, so the command is 0 and the steer holds the leg's Yaw;
+// - a driver above water takes the player arm, its client tail averaging the
+//   staged speed with the record's.
+// The stuck count rests on both unparked arms. The record's words do not reach
+// the local driver's hull.
+// [orig: Vehicle_ProcessSelectorZeroGround @0x46E100 - the local-occupant gate
+//  @0x46E9EA..0x46E9F6, the parked test @0x46E9FC..0x46EA11, the parked arm
+//  @0x46F09E..0x46F0C7, the stuck reset @0x46EA17, the eye test @0x46EA2E..0x46EA3A,
+//  the AI leg's seeds @0x46ECBE..0x46ECD0, the client tail @0x46EC79..0x46ECA6]
+void test_client_local_driver_runs_the_occupant_block() {
+	enum class Case { Parked, Submerged, Player };
+	for (const Case c : {Case::Parked, Case::Submerged, Case::Player}) {
+		auto r = std::make_unique<Rig>();
+		VehicleTraits t = buggy_traits();
+		t.physics = 0;
+		r->w.vehicles.traits.set(r->veh().item_id, t);
+		r->mount();
+		r->w.ai.is_authority = false;
+		r->w.cached.local_player = r->drv_h;
+		Entity &veh = r->veh();
+		auto &m = veh.veh;
+		m.net_predicted = true;
+		m.yaw_seeded = true;
+		m.yaw_bam = veh.heading;
+		m.net_recv_speed = 20000;
+		m.net_recv_steer_bam = 0x12345678;
+		m.stuck_ticks = 5;
+		veh.flags |= 0x80u;
+		if (c == Case::Parked)
+			veh.flags |= 0x10000000u;
+		// The driver's eye is its Z plus CameraOffset.z (0 here), about 10 u.
+		r->w.env.water_z = c == Case::Submerged ? (100 << 16) : -(1 << 16);
+		r->w.vehicles.ground_client_tick(veh, t);
+		switch (c) {
+		case Case::Parked:
+			CHECK(m.cmd_speed == 0);
+			CHECK(m.steer_ramp_bam == 0);
+			CHECK((veh.flags & 0x80u) == 0);
+			// The stuck check runs on the client too and steps the count alone
+			// (AI_CheckVehicleStuckState @0x4652A9, its authority return
+			// @0x4652AF..0x4652BC).
+			CHECK(m.stuck_ticks == 6);
+			break;
+		case Case::Submerged:
+			// The leg's seeds are the zero words; the zero budget clamps the
+			// bearing delta to 0. The leg writes no Flags 0x80 (only the
+			// boarders' hold clears it).
+			CHECK(m.cmd_speed == 0);
+			CHECK(m.steer_target_bam != m.net_recv_steer_bam);
+			CHECK(m.stuck_ticks == 0);
+			CHECK((veh.flags & 0x80u) != 0);
+			break;
+		case Case::Player:
+			// No keys and no analog axis: the staged command is 0, the client
+			// tail averages it with the record's 20000, and the sprint bit's
+			// absence clears Flags 0x80.
+			CHECK(m.cmd_speed == 10000);
+			CHECK(m.stuck_ticks == 0);
+			CHECK((veh.flags & 0x80u) == 0);
+			CHECK(m.steer_target_bam != m.net_recv_steer_bam);
+			break;
+		}
+	}
+}
+
+// The selector-zero boat's client block for the hull its local player drives: the
+// stuck count rests; a driver whose eye sits at or below the water plane takes the
+// boat leg over the client's brain words, which are zero (a zero target word, a
+// zero out-speed, no waypoint type, so the command is 0 and the steer holds the
+// Yaw); a driver above water takes the player arm, its client tail averaging the
+// staged speed with the record's. The record's words do not reach the local
+// driver's hull.
+// [orig: Vehicle_ProcessSelectorZeroBoat @0x46FA00 - the local-occupant gate
+//  @0x4704D6..0x4704EA, the parked test @0x4704F0..0x470502, the stuck reset @0x470508,
+//  the player bit @0x47050E, the eye test @0x47051B..0x470527 -> the leg @0x470795]
+void test_client_local_boat_driver_runs_its_block() {
+	for (const bool submerged : {true, false}) {
+		auto r = std::make_unique<Rig>();
+		VehicleTraits t = buggy_traits();
+		t.family = VehicleFamily::Watercraft;
+		t.physics = 0;
+		t.water_speed = 40 * 293;
+		r->w.vehicles.traits.set(r->veh().item_id, t);
+		r->mount();
+		r->w.ai.is_authority = false;
+		r->w.cached.local_player = r->drv_h;
+		Entity &veh = r->veh();
+		auto &m = veh.veh;
+		m.net_predicted = true;
+		m.yaw_seeded = true;
+		m.yaw_bam = veh.heading;
+		m.net_recv_speed = 20000;
+		m.net_recv_steer_bam = 0x12345678;
+		m.stuck_ticks = 5;
+		veh.flags |= 0x80u;
+		r->w.env.water_z = submerged ? (100 << 16) : -(1 << 16);
+		r->w.vehicles.watercraft_client_tick(veh, t);
+		CHECK(m.stuck_ticks == 0);
+		CHECK(m.steer_target_bam != m.net_recv_steer_bam);
+		if (submerged) {
+			// The leg writes no Flags 0x80 (only the boarders' hold clears it).
+			CHECK(m.cmd_speed == 0);
+			CHECK((veh.flags & 0x80u) != 0);
+		} else {
+			// No keys and no analog axis: the staged command is 0, the tail
+			// averages it with the record's 20000, and the sprint bit's absence
+			// clears Flags 0x80.
+			CHECK(m.cmd_speed == 10000);
+			CHECK((veh.flags & 0x80u) == 0);
+		}
+	}
+}
+
 int main() {
+    test_watercraft_entry_reads_the_hull();
+    test_a_dead_hull_bails_to_its_tail();
+    test_a_brainless_hull_bails_at_its_head();
+    test_a_client_visit_the_chase_skips_ends_at_its_tail();
+    test_a_dead_aircraft_bails_ahead_of_its_ai_block();
+    test_selector_zero_park_reads_the_hull_not_the_occupant();
+    test_selector_zero_ground_ai_leg_runs_in_the_mover();
+    test_family_occupant_blocks_run_after_the_head();
+    test_client_local_driver_runs_the_occupant_block();
+    test_client_local_boat_driver_runs_its_block();
     test_bike_lean_at_speed_both_ways();
     test_local_controls_reach_first_carrier_tick();
     test_mount_and_dismount_clear_the_local_stance_latches();
@@ -2875,6 +3500,7 @@ int main() {
 	test_ctrl_register_projection();
     test_boarding_clears_the_scar_ring();
     test_drive_forward();
+    test_a_fresh_vehicle_coasts_its_first_tick();
     test_reverse();
     test_turn_in_place_holds();
     test_steer_toward_driver_yaw();

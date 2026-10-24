@@ -189,8 +189,13 @@ func reload() -> void:
 	changed.emit(current())
 
 
-## Apply device-global audio and, when present, the live local-player view
-## settings. A newly constructed Simulation is passed here at world-load time.
+## Apply device-global audio and, when given, the mission start's view
+## settings. The shell passes the Simulation at each mission start (the world
+## loaded) and nowhere else: the aspect mode it hands it is the session's, which
+## the view projects at until the next mission start (engine
+## renderer/aspect_ratio.h aspect_viewport_scale_y carries the witness: the
+## options write only the cfg word, each mission start applies the session's
+## copy, and nothing else moves the frame's aspect globals).
 ## The mouse words are the player profile's, which the mission start's session
 ## copy hands the Simulation itself (Simulation.use_player_profile).
 func apply(simulation: Simulation = null) -> void:
@@ -198,12 +203,6 @@ func apply(simulation: Simulation = null) -> void:
 		_set_bus_volume(bus_name, _state.sound_fx_volume)
 	_set_bus_volume(DIALOG_BUS, _state.dialog_volume)
 	_set_bus_volume(MUSIC_BUS, _state.music_volume)
-	apply_view(simulation)
-
-
-## The live local-player view settings alone — what a `changed` listener
-## with a running Simulation pushes (update() already applied the audio).
-func apply_view(simulation: Simulation) -> void:
 	if simulation != null:
 		simulation.set_local_player_aspect_mode(_state.aspect_mode)
 
@@ -217,9 +216,11 @@ static func fresh_profile_aspect_mode(desktop: Vector2i) -> int:
 	return Simulation.fresh_profile_aspect_mode(desktop.x, desktop.y)
 
 
-## The primary desktop's size: retail's SM_CXSCREEN / SM_CYSCREEN sample.
+## The primary desktop's size: retail's SM_CXSCREEN / SM_CYSCREEN sample, read as its DPI-unaware
+## process reads it (the logical size of a scaled desktop) on Windows; the display server's primary
+## screen elsewhere (GameConfigBlock.primary_desktop_size).
 static func desktop_size() -> Vector2i:
-	return DisplayServer.screen_get_size(DisplayServer.SCREEN_PRIMARY)
+	return GameConfigBlock.primary_desktop_size()
 
 
 func _load_state() -> State:

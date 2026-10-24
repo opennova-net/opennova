@@ -3,6 +3,7 @@
 // the binding format rules, and the per-device row build against the canonical JO
 // defaults. [orig: aAbsoluteTurnLe @ 0x8159cb; KeyBinding_* @ 0x494c60/0x559a10;
 // UI_PopulateControlMappingList @ 0x55c0c0]
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <set>
@@ -160,6 +161,24 @@ bool test_key_strings_table() {
   CHECK(key_string("OR", " XXor ") == " or ", "the shipped separator");
   CHECK(key_string("KEY", "KEY") == "Key", "the shipped unknown-key label");
   CHECK(key_string("NOSUCHKEY", "XXFallback") == "Fallback", "a miss still falls back");
+  // The process's override table is searched first: its entry wins, a key it
+  // lacks still reads the Keys table, and forgetting it restores the table's
+  // [orig: KeyHelp_GetStringWithFallback @0x51ED40, the call @0x51ED6C ->
+  // TextResource_FindEntryBySectionAndKey @0x75D250, the override @0x75D27B].
+  {
+    auto override_table = std::make_shared<opennova::rtxt::File>();
+    override_table->sections.push_back(opennova::rtxt::Section{"Keys", 1});
+    opennova::rtxt::Entry entry;
+    entry.key = "Ctrl-";
+    entry.text = "Strg-";
+    override_table->entries.push_back(entry);
+    set_key_strings_override(override_table);
+    CHECK(key_string("Ctrl-", "XXCtrl - ") == "Strg-", "the override's entry wins");
+    CHECK(key_help_string_raw("Keys", "Ctrl-", "!x") == "Strg-", "the raw lookup too");
+    CHECK(key_string("OR", " XXor ") == " or ", "a key the override lacks reads the Keys table");
+    set_key_strings_override(nullptr);
+    CHECK(key_string("Ctrl-", "XXCtrl - ") == "Ctrl-", "no override: the Keys table");
+  }
   return true;
 }
 
@@ -289,6 +308,39 @@ bool test_mouse_dispatch() {
   CHECK(set.mouse_event_action(kMouseLeft, held, true) == token("IncSpectatorTarget"), "death mode skips fire");
   CHECK(set.record(token("look_up"))->joy_button == 0x81, "static joystick axis copied");
   CHECK(set.record(token("attack_1"))->joy_button == 1, "static joystick fire button copied");
+  return true;
+}
+
+// D-CTRL-6 (LI-s15): a mouse button message's event takes its row by the dispatch's two
+// switches over the walk: a button-down or double click its button's row (a held row,
+// flag 4, skipped), a button-up only a row carrying 0x400000, middle-up none.
+// [orig: Input_DispatchMouseEvent @0x761470 (0x201..0x209 -> 2 / 4 / 1024, 8 / 0x10 /
+//  2048, 32 / 64 / 4096); Input_TryDispatchBindingByWeaponType @0x499180 (the flag-4 test
+//  @0x4991A9..0x4991E1, the switches @0x4991F7..0x499327)]
+bool test_mouse_click_dispatch() {
+  BindingSet set;
+  auto held = [](int) { return false; };
+  auto token = [&set](const char *name) { return set.index_of_token(name); };
+  CHECK(set.mouse_click_action(2, held) == token("attack_1"), "left down: attack_1");
+  CHECK(set.mouse_click_action(1024, held) == token("attack_1"), "a left double click is its button");
+  CHECK(set.mouse_click_action(4, held) == token("attack_1"), "left up: attack_1's release, 0x400000");
+  CHECK(set.mouse_click_action(8, held) == token("scope"), "right down: scope, FreeLook a held row");
+  CHECK(set.mouse_click_action(2048, held) == token("scope"), "a right double click is its button");
+  CHECK(set.mouse_click_action(0x10, held) == -1, "right up: no right-button row carries 0x400000");
+  CHECK(set.mouse_click_action(32, held) == token("Prone"), "middle down: prone");
+  CHECK(set.mouse_click_action(4096, held) == token("Prone"), "a middle double click is its button");
+  CHECK(set.mouse_click_action(64, held) == -1, "middle up takes none");
+  CHECK(set.mouse_click_action(1, held) == -1, "a move takes none");
+  CHECK(set.mouse_click_action(0x100, held) == token("cycleweaponP"), "the wheel's event");
+  CHECK(set.mouse_click_action(0x200, held) == token("cycleweaponN"), "the wheel's down event");
+  // The second switch takes a held row's wheel word too (no flag-4 test there): a held row
+  // bound to the wheel takes the notch ahead of the later rows in the walk.
+  set.assign_mouse(token("move_forward"), kMouseWheelUp);
+  CHECK(set.mouse_click_action(0x100, held) == token("move_forward"),
+      "a held row on the wheel takes its notch [orig: @0x4992C3..0x49930A]");
+  set.assign_mouse(token("move_forward"), 0);
+  CHECK(set.mouse_click_action(2, held, true) == token("IncSpectatorTarget"),
+      "the death screen's mode skips the fire row");
   return true;
 }
 
@@ -845,6 +897,49 @@ bool test_binding_revision() {
   return true;
 }
 
+// SAVEKEYS' keylist.key (D-NET-710): the version line with the filtered count, the header,
+// then one CR LF line per binding whose static flags carry 0x4000000, by action code: the
+// live record's words, the SEQ and filter stars, the help name right-justified in 27, the
+// display string. move_forward (code 152, flags 0x0C002C05: SEQ 0x800 and the filter bit,
+// no key-up 0x800000) keeps its defaults W / Up.
+// [orig: KeyBinding_DumpAllToFile @0x54C0A0 - the version line @0x54c0f9, the header
+//  @0x54c127, the row format @0x54c252; KeyBinding_BuildFilteredTable @0x54C2B0]
+bool test_keylist_text() {
+  BindingSet set;
+  const std::string text = keylist_text(set);
+  int filtered = 0;
+  int forward_index = -1;
+  for (int code = 0; code < 768; ++code) {
+    const ActionDef *def = action_for_code(code);
+    if (def == nullptr || (def->flags & 0x4000000u) == 0u) continue;
+    if (code == 152) forward_index = filtered;
+    ++filtered;
+  }
+  CHECK(forward_index >= 0, "move_forward (code 152) is in the filtered table");
+  const std::string version = "v-0x31313230  " + std::to_string(filtered) +
+      " If the Version is out of sync, the CommandCodes may not work sync\r\n";
+  CHECK(text.compare(0, version.size(), version) == 0, "the version line and its count");
+  const std::string header =
+      "//Index    SEQ           Base: Key1    Key2   Mod: Key1    Key2,  Mouse , MMouse,  "
+      "Joy, MJoy,                       Description\r\n";
+  CHECK(text.compare(version.size(), header.size(), header) == 0, "the column header");
+  const BindingRecord *rec = set.record(set.index_of_token("move_forward"));
+  CHECK(rec != nullptr, "move_forward's record");
+  char index[8];
+  std::snprintf(index, sizeof(index), "%4d", forward_index);
+  const std::string row = std::string(index) +
+      ",            0x0098,     0x0057, 0x0026,     0x0000, 0x0000,  0x0000, 0x0000, "
+      "0x00, 0x00,  152, **,                     Forward    ," +
+      format_display_string(*rec, false) + "    \r\n";
+  CHECK(text.find(row) != std::string::npos, "move_forward's line");
+  std::size_t lines = 0;
+  for (std::size_t at = text.find("\r\n"); at != std::string::npos;
+       at = text.find("\r\n", at + 2))
+    ++lines;
+  CHECK(lines == static_cast<std::size_t>(filtered) + 2, "one line per filtered binding");
+  return true;
+}
+
 int main() {
   int failed = 0;
 
@@ -870,6 +965,7 @@ int main() {
   RUN_TEST(test_build_rows_keyboard);
   RUN_TEST(test_build_rows_other_devices);
   RUN_TEST(test_mouse_dispatch);
+  RUN_TEST(test_mouse_click_dispatch);
   RUN_TEST(test_keyboard_capture_leaves_the_mouse_rows);
   RUN_TEST(test_joystick_pov_dispatch);
   RUN_TEST(test_binding_set_assignment);
@@ -881,6 +977,7 @@ int main() {
   RUN_TEST(test_action_codes);
   RUN_TEST(test_head_gate_by_code);
   RUN_TEST(test_binding_revision);
+  RUN_TEST(test_keylist_text);
 
   if (failed > 0) {
     std::cerr << "\n" << failed << " test(s) FAILED\n";

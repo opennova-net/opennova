@@ -66,7 +66,7 @@ int main() {
 		}
 		if (e)
 			std::printf("idle ssn=%u pos=(%.4f,%.4f,%.4f) flags=%08x slide=%d\n", ssns[i],
-					e->position.x, e->position.y, e->position.z, e->flags, e->veh.slide_z);
+					float(e->position.x), float(e->position.y), float(e->position.z), e->flags, e->veh.slide_z);
 	}
 	return failures ? 1 : 0;
 }

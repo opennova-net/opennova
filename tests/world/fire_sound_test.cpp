@@ -4,6 +4,7 @@
 // RoundSim::spawn and the World drain, the public seam.
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 #include <runtime/world/fire_sound.h>
@@ -213,7 +214,8 @@ void test_entityless_adm_arm_uses_the_supplied_shooter_pos() {
                   RoundConsequenceMode::VisualOnly) >= 0);
     out = r.drain();
     CHECK(out.size() == 3);
-    if (!out.empty()) CHECK(out[0].pos.z == 1.7f);
+    // The origin's word: 1.7 truncated to 0x1B333, read back.
+    if (!out.empty()) CHECK(out[0].pos.z == 0x1B333 / 65536.0f);
 }
 
 // A full 128-slot pool drops further delayed sounds, exactly like the retail
@@ -267,6 +269,9 @@ void test_replica_borrows_the_carrier_slot_for_received_actions() {
     Seat seat; seat.type = SeatType::Gunner; seat.bone_index = 7; gun.seats.push_back(seat);
     gun.weapon_userpoint_bytes[2][1] = 1; // only the third magazine-selected muzzle
     const auto handle = r.world.registry.spawn(1, gun);
+    // The gun's class init binds its slot at the spawn; the replica sync binds none
+    // [orig: WeaponSlot_InitFromEntityDef @0x5466C0].
+    CHECK(r.world.vehicles.init_weapon_slot_from_entity_def(*r.world.registry.get(handle)));
     rp::ClientState state;
     rp::ClientEntityState peer;
     peer.handle = 3; peer.type_id = 11; peer.cls = opennova::EntityClass::Player;
@@ -321,6 +326,7 @@ void test_replica_borrows_the_carrier_slot_for_received_actions() {
     hull.item_attrib |= 0x40u;
     const auto parent_handle = r.world.registry.spawn(1, hull);
     auto *parent = r.world.registry.get(parent_handle);
+    CHECK(r.world.vehicles.init_weapon_slot_from_entity_def(*parent));
     mount->emplacement_attachment_flags = 2;
     mount->ground_target = mount->emplacement_parent = parent_handle;
     mount->emplacement_parent_spawn_id = parent->registry_spawn_id;
@@ -340,6 +346,21 @@ void test_replica_borrows_the_carrier_slot_for_received_actions() {
     CHECK(ready.size() == 1 && ready[0].set_name == "MOUNT_TAIL");
     CHECK(parent->primary_weapon_slot.counter == 6);
 
+    // The record's route legs read no addeweap identity: with the metadata cleared, byte 1
+    // then byte 2 still move the gun's bit onto the type-1 EWeap groundEntity
+    // (D-NET-NEW-L2-34) [orig: NetPacket_SerializePlayerState @0x4C09C0 - @0x4C1390,
+    // @0x4C13C1..0x4C13E5, @0x4C13EB].
+    mount->emplacement_parent = EntityHandle{};
+    mount->emplacement_parent_spawn_id = 0;
+    state.entities[0].seat_type = 1;
+    im::sync_replica_weapon_slots(state, r.world, 0xFFFF);
+    CHECK(!mount->primary_weapon_slot.redirect_to_parent_slot);
+    state.entities[0].seat_type = 2;
+    im::sync_replica_weapon_slots(state, r.world, 0xFFFF);
+    CHECK(mount->primary_weapon_slot.redirect_to_parent_slot);
+    mount->emplacement_parent = parent_handle;
+    mount->emplacement_parent_spawn_id = parent->registry_spawn_id;
+
     // Dismount restores a null remote slot. Each on-foot event starts a
     // temporary context, so it plays the wire definition's head every time.
     state.entities[0].mount_bone = 0;
@@ -353,6 +374,58 @@ void test_replica_borrows_the_carrier_slot_for_received_actions() {
         ready = r.drain();
         CHECK(ready.size() == 4 && ready[2].set_name == "WIRE_HEAD");
     }
+}
+
+// A joiner's unoccupied gun walks its own slot, and the heat window's water gate reads the
+// walked gun's Z, never its stale owner's: a gun on dry land keeps its window wherever its
+// last gunner stands, and a gun under the water drops it however high that gunner is.
+// [orig: WeaponAction_ProcessAllEntities @0x542690 - the pool-1 push @0x542714;
+//  WeaponAction_ProcessFrame @0x540E60 - the walked entity's Z @0x541004, the compare
+//  @0x541007..0x54100D, the window clear @0x54125F]
+void test_replica_unoccupied_gun_water_gate_reads_the_gun() {
+    namespace im = opennova::inmatch;
+    namespace rp = opennova::replication;
+    auto rig = std::make_unique<Rig>();
+    Rig &r = *rig;
+    r.world.logic_tick = 100;
+    r.world.rules.mp_session = true;
+    r.world.rules.projectile_authority = false;
+    r.world.env.water_z = 10 * 65536;
+    r.world.tables.weapons.entries.resize(3);
+    auto &weapon = r.world.tables.weapons.entries[2];
+    weapon.valid = true; weapon.name = "MOUNT";
+    weapon.clipsize = -1;
+    weapon.action_fsm.clip_capacity = -1;
+    r.world.registry.configure_pool(1, 2);
+    Entity gun;
+    gun.has_item_def = true; gun.item_id = 80; gun.item_type = 2;
+    gun.item_attrib = kItemAttribEweap; gun.primary_weapon = "MOUNT";
+    gun.position = {0.0f, 0.0f, 20.0f};
+    const auto handle = r.world.registry.spawn(1, gun);
+    auto *mount = r.world.registry.get(handle);
+    CHECK(r.world.vehicles.init_weapon_slot_from_entity_def(*mount));
+    // The last gunner, dismounted (no borrowed slot), stands under the water plane.
+    rp::ClientState state;
+    rp::ClientEntityState gunner;
+    gunner.handle = 3; gunner.type_id = 11; gunner.cls = opennova::EntityClass::Player;
+    gunner.weapon_slot_handle = 0xFFFF;
+    gunner.z = 2 * 65536;
+    state.entities.push_back(gunner);
+    mount->primary_weapon_owner = EntityHandle{3};
+    mount->primary_weapon_slot.heat_window_end_tick = 200;
+    im::tick_replica_weapon_slots(state, r.world);
+    CHECK(mount->primary_weapon_slot.heat_window_end_tick == 200);
+    // The gun under the water, its gunner high and dry: the window clears.
+    mount->position.z.q16 = 5 * 65536;
+    state.entities[0].z = 40 * 65536;
+    im::tick_replica_weapon_slots(state, r.world);
+    CHECK(mount->primary_weapon_slot.heat_window_end_tick == 0);
+    // An ownerless gun on dry land keeps its window too.
+    mount->position.z.q16 = 20 * 65536;
+    mount->primary_weapon_owner = EntityHandle{};
+    mount->primary_weapon_slot.heat_window_end_tick = 200;
+    im::tick_replica_weapon_slots(state, r.world);
+    CHECK(mount->primary_weapon_slot.heat_window_end_tick == 200);
 }
 
 void test_weapon_level_sound_publication() {
@@ -524,6 +597,7 @@ int main() {
     test_no_listener_no_sounds();
     test_weapon_level_sound_publication();
     test_replica_borrows_the_carrier_slot_for_received_actions();
+    test_replica_unoccupied_gun_water_gate_reads_the_gun();
     test_near_fire_plays_immediately();
     test_far_fire_counts_down_on_the_logic_clock();
     test_distance_gate_truncates_to_units();

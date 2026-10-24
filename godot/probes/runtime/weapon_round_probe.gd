@@ -124,7 +124,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 
 	# Third person: the crosshair anchors at the PROJECTED aim point, not the
 	# screen center (D-HUD-10); pitch down a touch so the offset is visible.
-	ProbeInput.look(Vector2(0, 140))
+	ProbeInput.look(Vector2(0, 17.5))
 	await ctx.wait_frames(12)
 	# On-foot third person is the debug override (no gameplay key resolves it).
 	var presenter := ctx.presenter()

@@ -240,13 +240,16 @@ RootMotionFrame AiSystem::tick_still_body(AiEntity &e, World &world, uint32_t lo
     // airborne without the climb order, the still body's selection and the attention tail after
     // it. [orig: the gate @0x4BA970; the seed @0x4BAA4B..0x4BAA59 ahead of the airborne exit
     // @0x4BAA61..0x4BAA66; @0x4BD87E..0x4BE7FD]
-    const uint32_t key = infantry_org1_key(logic_tick, e.net_id);
+    // The key and the seed read the DcbId (+0x7C, body_dcb_id) [orig: @0x4B9948..0x4B9953;
+    //  @0x4BAA4B..0x4BAA59].
+    const int32_t dcb_id = body_dcb_id(world, e, self);
+    const uint32_t key = infantry_org1_key(logic_tick, dcb_id);
     const bool guarding = (flags & kEntityFlagMounted) != 0;
     const bool airborne = (flags & kEntityFlagAiClimb) == 0 && (flags & kEntityFlagInAir) != 0;
     const bool thinks = is_authority && (key & 15u) == 0;
-    if (thinks) inf.aim_pitch = io::bam_sar(static_cast<int32_t>(static_cast<uint32_t>(e.net_id) << 27), 4);
+    if (thinks) inf.aim_pitch = io::bam_sar(static_cast<int32_t>(static_cast<uint32_t>(dcb_id) << 27), 4);
     if (thinks && !airborne &&
-            infantry_org1_still_think(inf, root_motion, logic_tick, e.net_id, guarding,
+            infantry_org1_still_think(inf, root_motion, logic_tick, dcb_id, guarding,
                                       e.slot.bytes()[AiSlot::kAlertByte])) {
         // The guard leg drops the flag of a guarding body whose .adm authors no guard.
         // [orig: @0x4BD19B..0x4BD1BB, the store @0x4BD1B8]
@@ -259,8 +262,9 @@ RootMotionFrame AiSystem::tick_still_body(AiEntity &e, World &world, uint32_t lo
     }
     // [orig: @0x4BE8FD..0x4BEBE7, @0x4BEF97, @0x4BEFC5..0x4BEFED]
     infantry_org1_heading_chase(e, self, key);
-    // Unconditional for a body with its channel [orig: @0x4B9A48, @0x4BF078..0x4BF094].
-    infantry_restamp_eye(e, world, frame);
+    // Unconditional for a body with its channel [orig: @0x4B9A48, @0x4BF078..0x4BF094]; the
+    // still body is on foot by its contract above.
+    infantry_restamp_eye(e, world, frame, false);
     finish_infantry_tick(e, world);
     return frame;
 }

@@ -25,6 +25,7 @@ func test_runtime_flags_read_through_the_override() -> void:
 	assert_eq(LaunchFlags.lan_host(), "ASH_I5A.BMS")
 	assert_eq(LaunchFlags.lan_join_ip(), "192.168.10.120")
 	assert_eq(LaunchFlags.lan_join_port(32768), 32770)
+	assert_false(LaunchFlags.lan_join_browse())
 	assert_eq(LaunchFlags.lan_port(1), 32768)
 	assert_eq(LaunchFlags.lan_gametype(), 0x10020)
 	assert_eq(LaunchFlags.lan_mode(1), 3)
@@ -47,6 +48,7 @@ func test_absent_flags_fall_back() -> void:
 	assert_eq(LaunchFlags.lan_host(), "")
 	assert_eq(LaunchFlags.lan_join_ip(), "")
 	assert_eq(LaunchFlags.lan_join_port(32768), 32768)
+	assert_false(LaunchFlags.lan_join_browse())
 	assert_eq(LaunchFlags.lan_port(32768), 32768)
 	assert_eq(LaunchFlags.lan_gametype(), -1)
 	assert_eq(LaunchFlags.lan_mode(1), 1)
@@ -59,6 +61,19 @@ func test_absent_flags_fall_back() -> void:
 	assert_eq(LaunchFlags.resource_dir(), "")
 	assert_false(LaunchFlags.resource_dir_given())
 	assert_false(LaunchFlags.loose_override_enabled())
+
+
+# `--lan-join browse[:<port>]` names no address: the joiner searches and joins
+# the row on the port (any row without one), so no dial address reads.
+func test_lan_join_browse_names_no_address() -> void:
+	LaunchFlags.set_args_override(PackedStringArray(["--lan-join", "browse:32786"]))
+	assert_true(LaunchFlags.lan_join_browse())
+	assert_eq(LaunchFlags.lan_join_ip(), "")
+	assert_eq(LaunchFlags.lan_join_port(0), 32786)
+	LaunchFlags.set_args_override(PackedStringArray(["--lan-join", "BROWSE"]))
+	assert_true(LaunchFlags.lan_join_browse())
+	assert_eq(LaunchFlags.lan_join_ip(), "")
+	assert_eq(LaunchFlags.lan_join_port(0), 0)
 
 
 func test_resource_dir_without_a_value_is_given_but_empty() -> void:
@@ -108,3 +123,23 @@ func test_working_dir_is_the_flag_else_the_process_working_directory() -> void:
 	assert_eq(own.trim_suffix("/").to_lower(),
 			ProjectSettings.globalize_path("res://").trim_suffix("/").to_lower(),
 			"Godot's --path makes the project the process's working directory")
+
+
+# /sstga (boot_policy.h screenshot_tga): the Screen Shot action's file takes .tga and the frame
+# goes through the engine's run-length TGA writer (formats/tga/tga.h tga_write_screenshot, whose
+# ctest screenshot_tga pins the packets); without it the file is the first free SS%0.5d.jpg.
+func test_sstga_names_the_tga_and_writes_the_run_length_file() -> void:
+	var dir := ProjectSettings.globalize_path("user://").path_join("no_screen_shots_here")
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", dir]))
+	assert_false(LaunchFlags.screen_shot_tga())
+	assert_eq(LaunchFlags.screen_shot_path(), dir.path_join("SS00000.jpg"))
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", dir, "/SSTGA"]))
+	assert_true(LaunchFlags.screen_shot_tga())
+	assert_eq(LaunchFlags.screen_shot_path(), dir.path_join("SS00000.tga"))
+	# A 2 x 1 frame of one colour (R 0x11, G 0x22, B 0x33; the alpha unread): the header, then
+	# one run of two.
+	var frame := PackedByteArray([0x11, 0x22, 0x33, 255, 0x11, 0x22, 0x33, 0])
+	assert_eq(LaunchFlags.screen_shot_tga_file(frame, 2, 1), PackedByteArray([
+		0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 1, 0, 24, 0, 0x81, 0x33, 0x22, 0x11,
+	]))
+	assert_eq(LaunchFlags.screen_shot_tga_file(PackedByteArray([1, 2, 3]), 1, 1).size(), 0)

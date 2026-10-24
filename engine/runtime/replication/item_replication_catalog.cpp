@@ -66,11 +66,14 @@ ItemReplicationProfile profile_from(const ItemReplicationDefinition &definition)
 	profile.callbacks.move_function = definition.move_function;
 	profile.callbacks.render_function = definition.render_function;
 	profile.callbacks.disk_function = definition.disk_function;
-	// Network dispatch resolves ai_function first and uses move_function only
-	// when it is absent. [orig: admission @0x50E6D3 / dispatch @0x50F2E2]
-	profile.callbacks.effective_network_callback = !definition.ai_function.empty()
-			? definition.ai_function
-			: definition.move_function;
+	// The network callback is def+0x164, which only the ai_function class row's lookup
+	// fills (an empty tag looks up "Null", whose word is 0); the move_function lookup
+	// writes +0x158 and never reaches it. [orig: EntityDef_InitAllCallbacks @0x4A5A70 -
+	//  the ai_function / "Null" lookups @0x4A5AA7 / @0x4A5AAE; EntityDef_LookupClassCallbacks
+	//  @0x407DC0 - def[89] = the row's +0x14 @0x407E4A, the null row's @0x407E1E;
+	//  EntityDef_LookupPhysicsCallback @0x4A9240 (+0x158 @0x4A927E / @0x4A9296); the
+	//  admission's read @0x50E6DA, the dispatch's @0x50F2DB..0x50F2E2]
+	profile.callbacks.effective_network_callback = definition.ai_function;
 
 	// Physical movement dispatch is a separate ItemDef callback lookup.
 	// [orig: EntityDef_LookupPhysicsCallback @0x4A9240]

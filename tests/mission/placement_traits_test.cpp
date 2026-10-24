@@ -74,20 +74,30 @@ static void test_individual_node_admission() {
     CHECK(!needs_individual_node(kItemTypeBuilding, kItemAttrib2StaticShadow, false, false));
 }
 
+// A body's def is the row its type word names, the player's 0x14B9 included:
+// "Player #1, Multiplayer" (105305), never the single player's row (105310),
+// which only a 5310 body binds.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the call @0x4C129D, the def /
+//  model stores @0x4C12B8..0x4C12D6; Entity_SpawnFromAnimSlotProperty @0x43C390 -
+//  the call @0x43C3CA]
 static void test_visual_item_resolution() {
-    // The catalog carries the authored visual item and two authored ids.
+    CHECK(visual_item_id_for_runtime_type(0x14B9) == 105305);
+    CHECK(visual_item_id_for_runtime_type(5310) == 105310);
+    CHECK(visual_item_id_for_runtime_type(166) == 100166);
+    // The catalog carries both player rows and two authored ids.
     const auto catalog = [](int id) {
-        return id == kPlayerVisualItemId || id == 100166 || id == 100200;
+        return id == 105305 || id == 105310 || id == 100166 || id == 100200;
     };
-    CHECK(resolve_visual_item_id(kPlayerRuntimeTypeId, catalog) == kPlayerVisualItemId);
+    CHECK(resolve_visual_item_id(0x14B9, catalog) == 105305);
+    CHECK(resolve_visual_item_id(5310, catalog) == 105310);
     CHECK(resolve_visual_item_id(100166, catalog) == 100166);
     CHECK(resolve_visual_item_id(166, catalog) == 100166);
     CHECK(resolve_visual_item_id(200, catalog) == 100200);
     CHECK(resolve_visual_item_id(300, catalog) == 300);
     CHECK(resolve_visual_item_id(0, catalog) == 0);
-    // Without the visual item in the catalog the player type falls through.
+    // A catalog without the type's row: the type falls through unchanged.
     const auto bare = [](int) { return false; };
-    CHECK(resolve_visual_item_id(kPlayerRuntimeTypeId, bare) == kPlayerRuntimeTypeId);
+    CHECK(resolve_visual_item_id(0x14B9, bare) == 0x14B9);
 }
 
 // A placed record is a building to the renderer and the light spawner only by
@@ -131,7 +141,7 @@ static void test_bone_row_predicates() {
 // palm and towr event rows and the move_function's psec physics row (whole
 // name, case ignored). A name on another field binds no section row.
 // [orig: rows 'psec' @ 0x82d010 / 'cesp' @ 0x82d020 -> BoneCallback_psec_World
-//  @ 0x53c130; Entity_LookupRenderCallbacks stricmp @ 0x407dd8, rows 'palm'
+//  @ 0x53c130; EntityDef_LookupClassCallbacks stricmp @ 0x407dd8, rows 'palm'
 //  @ 0x813270 / 'towr' @ 0x813240; EntityDef_LookupPhysicsCallback stricmp
 //  @ 0x4a9258, row 'psec' @ 0x82ad54]
 static void test_section_renderer_rows() {
@@ -154,7 +164,17 @@ static void test_section_renderer_rows() {
     CHECK(!uses_section_renderer("gnrc", "genx", "gnrc"));
 }
 
+// A dedicated host's load builds no placed entity's draw object; every other role's does
+// (D-NET-NEW-L3-30). [orig: GameLoop_RenderFrame @0x521310 - jz @0x521355 past
+// Render_ProcessMainSceneFrame @0x521CE8; Game_StartMission @0x524360 - its test @0x5259B4]
+static void test_placement_draws_follow_the_dedicated_word() {
+    CHECK(builds_placement_draws(false));
+    CHECK(!builds_placement_draws(true));
+    static_assert(!builds_placement_draws(true), "a constant expression");
+}
+
 int main() {
+    test_placement_draws_follow_the_dedicated_word();
     test_dynamic_shadow_admission();
     test_static_shadow_admission();
     test_mirror_admission();

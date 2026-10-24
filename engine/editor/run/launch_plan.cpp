@@ -127,8 +127,10 @@ void add_staged(std::vector<std::string> *staged, const fs::path &relative) {
 // the NovaWorld cookie jar over the install's own file [orig: CUIScene_SaveCookieJarFile @ 0x63ba9a "wb", from
 // Menu_TeardownShellAndCloseBinkVideos @ 0x54e4aa with "nw_cdata.coo"], `score.ini` when it has none
 // [orig: GameType_CreateDefaultSettings @ 0x52f528 -> ScoreConfig_SaveFile @ 0x52cdd0], and its logs
-// and lists [orig: ErrorLog_WriteTimestamped @ 0x53c6e7 "_errlog.txt" "a"; BanList_SaveToFile
-// @ 0x4fdda3; HighScore_SaveToFile @ 0x56310b; CAdminServer_Construct @ 0x402c84 "admin_log.txt"].
+// and lists [orig: BanList_SaveToFile @ 0x4fdda3; HighScore_SaveToFile @ 0x56310b;
+// CAdminServer_Construct @ 0x402c84 "admin_log.txt"]; the error log's writer opens
+// "_errlog.txt" "a" [orig: ErrorLog_WriteTimestamped @ 0x53c6e7] behind a gate a stock run never
+// sets, so it writes nothing (D-NET-357).
 bool game_only_reads(const std::string &name) {
 	for (const char *extension : {".pff", ".bik", ".sbf", ".lwf", ".mnx"})
 		if (strutil::ends_with_icase(name, extension)) return true;

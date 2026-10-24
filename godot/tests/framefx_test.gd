@@ -15,7 +15,7 @@ render_mode unshaded, depth_draw_opaque, cull_disabled;
 uniform vec3 u_beauty;
 
 void fragment() {
-	if (CAMERA_VISIBLE_LAYERS == 14126081u) {
+	if (CAMERA_VISIBLE_LAYERS == 215452673u) {
 		ALBEDO = u_beauty;
 	} else {
 		discard;
@@ -116,7 +116,7 @@ func _q3_lum_view(use_q3: bool) -> Dictionary:
 
 	var camera := Camera3D.new()
 	camera.current = true
-	camera.cull_mask = 14126081
+	camera.cull_mask = 215452673
 	camera.position = Vector3(0.0, 0.0, 10.0)
 	viewport.add_child(camera)
 	camera.look_at(Vector3.ZERO, Vector3.UP)
@@ -233,7 +233,7 @@ func test_world_frame_module_owns_beauty_depth_q3_and_the_terminal_effect() -> v
 		await get_tree().process_frame
 
 	var report := renderer.get_backend_report()
-	assert_eq(int(report.get("beauty_camera_mask", -1)), 14126081,
+	assert_eq(int(report.get("beauty_camera_mask", -1)), 0x0CD78C01,
 			"the beauty signature admits the first-person viewmodel layer")
 	assert_false(bool(report.get("q3_auxiliary_view", true)))
 	assert_false(bool(report.get("q3_camera_mask", true)))
@@ -256,7 +256,35 @@ func test_world_frame_module_owns_beauty_depth_q3_and_the_terminal_effect() -> v
 	assert_eq(int(report.get("q3_submitted_commands", -1)), 0,
 			"unregistered beauty geometry is not a Q3 producer")
 	assert_true(bool(report.get("terminal_compositor_installed", false)))
-	assert_eq(camera.cull_mask, 14126081,
+	# The world environment's tonemap takes the terminal display decode: the adjustments at
+	# unity with the decode table as their colour correction, applied after Godot's sRGB
+	# encode, so the 8-bit target gets the gamma-domain number itself.
+	assert_true(environment_resource.adjustment_enabled,
+			"the world environment carries the display decode table")
+	assert_eq(environment_resource.adjustment_brightness, 1.0)
+	assert_eq(environment_resource.adjustment_contrast, 1.0)
+	assert_eq(environment_resource.adjustment_saturation, 1.0)
+	var table := environment_resource.adjustment_color_correction as Texture2D
+	assert_not_null(table, "a 1D table (a Texture2D) is Godot's per-channel correction")
+	if table != null:
+		assert_eq(table.get_width(), 4096)
+		assert_eq(table.get_height(), 1)
+		var image := table.get_image()
+		if image != null:
+			assert_eq(image.get_format(), Image.FORMAT_RGBA16,
+					"16-bit unsigned-normalised texels: every source byte comes back to itself")
+			# Texel i holds the sRGB decode of its centre (i + 0.5) / 4096, the u at which
+			# the tonemap's linear clamped sampler reads it, rounded to the 16-bit step.
+			for texel in [0, 165, 166, 2047, 4095]:
+				var encoded := (float(texel) + 0.5) / 4096.0
+				var decoded := encoded / 12.92 if encoded < 0.04045 \
+						else pow((encoded + 0.055) / 1.055, 2.4)
+				var stored := floorf(decoded * 65535.0 + 0.5) / 65535.0
+				var pixel := image.get_pixel(texel, 0)
+				assert_almost_eq(pixel.r, stored, 0.000001)
+				assert_almost_eq(pixel.g, stored, 0.000001)
+				assert_almost_eq(pixel.b, stored, 0.000001)
+	assert_eq(camera.cull_mask, 215452673,
 			"the module selects the one supported beauty camera signature")
 	assert_false(report.has("far_alpha_stage"),
 			"no auxiliary far-alpha view exists: pass A rides PRE_TRANSPARENT")
@@ -277,6 +305,10 @@ func test_world_frame_module_owns_beauty_depth_q3_and_the_terminal_effect() -> v
 		assert_eq(String(report.get("status", "")), "drawn_without_q3",
 				String(report.get("failure", "FrameFX terminal failed")))
 		assert_false(bool(report.get("q3_sampled", true)))
+		# The view draws with the world environment, whose tonemap decodes it through the
+		# table: no decode pass of the terminal's own (L3-s32; before, one compute pass).
+		assert_eq(String(report.get("terminal_decode", "")), "tonemap_table")
+		assert_false(bool(report.get("terminal_decode_compute_failed", true)))
 		var center := viewport.get_texture().get_image().get_pixel(32, 16)
 		assert_gt(center.g, 0.65,
 				"beauty green survives the terminal decode and display encode")
@@ -292,6 +324,10 @@ func test_world_frame_module_owns_beauty_depth_q3_and_the_terminal_effect() -> v
 			"teardown restores the caller's camera mask")
 	assert_null(environment.compositor,
 			"teardown restores the inherited compositor")
+	assert_false(environment_resource.adjustment_enabled,
+			"teardown restores the environment's own adjustments")
+	assert_null(environment_resource.adjustment_color_correction,
+			"and its own (absent) colour correction")
 
 
 func test_explicit_shutdown_detaches_terminal_effect_and_is_idempotent() -> void:
@@ -312,7 +348,7 @@ func test_explicit_shutdown_detaches_terminal_effect_and_is_idempotent() -> void
 	var renderer := FrameFx.new()
 	viewport.add_child(renderer)
 	assert_not_null(environment.compositor)
-	assert_eq(camera.cull_mask, 14126081)
+	assert_eq(camera.cull_mask, 215452673)
 
 	renderer.shutdown()
 	var report := renderer.get_backend_report()
@@ -466,7 +502,7 @@ func test_framefx_reentry_recreates_released_terminal_effect() -> void:
 			as FrameFxCompositorEffect
 	assert_not_null(first_effect)
 	assert_true(first_effect.enabled)
-	assert_eq(camera.cull_mask, 14126081)
+	assert_eq(camera.cull_mask, 215452673)
 
 	viewport.remove_child(renderer)
 	assert_null(environment.compositor,
@@ -489,7 +525,7 @@ func test_framefx_reentry_recreates_released_terminal_effect() -> void:
 			"re-entry uses a fresh effect after the prior device owner shut down")
 	assert_false(bool(renderer.get_backend_report().get("shutdown", true)),
 			"re-entry clears the shutdown latch")
-	assert_eq(camera.cull_mask, 14126081,
+	assert_eq(camera.cull_mask, 215452673,
 			"re-entry re-applies the beauty camera signature")
 
 	viewport.remove_child(renderer)
@@ -597,6 +633,8 @@ func test_production_object_q3_contributes_pixels_and_obeys_beauty_depth() -> vo
 	if q3_image == null:
 		return
 	assert_eq(q3_image.get_size(), beauty_image.get_size())
+	# Retail's altbuffer is backbuffer-sized and 8-bit (A8R8G8B8 under an X8R8G8B8 display).
+	assert_eq(q3_image.get_format(), Image.FORMAT_RGBA8, "the Q3 target is the 8-bit altbuffer")
 	var footprint := _q3_footprint_presence(beauty_image, q3_image)
 	assert_gt(int(footprint.footprint), 50,
 			"the bulb covers a measurable beauty footprint")
@@ -1395,7 +1433,9 @@ func test_water_nv_redraw_keeps_additive_lum_copies_weighted_by_its_alpha() -> v
 	water.water_height = 7.0
 	viewport.add_child(water)
 	water.advance_frame(1.0 / 62.0)
-	var water_material := water.get_water_material()
+	# The bloom's redraw draws through its own material, over the mirror the
+	# frame rendered last (environment/water_mirror.h bloom_water_mirror_image).
+	var water_material := water.get_night_vision_material()
 	water_material.set_shader_parameter("u_water_color", Vector3.ZERO)
 	water_material.set_shader_parameter("u_has_reflection", false)
 	water_material.set_shader_parameter("u_noise_normal",

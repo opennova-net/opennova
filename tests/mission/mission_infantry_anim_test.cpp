@@ -73,14 +73,18 @@ struct Harness {
 	Assets &assets;
 
 	explicit Harness(Assets &source) : assets(source) {
-		rows[0].id = mission::kPlayerVisualItemId;
+		// The row the player's type word names (0x14B9 + the item id offset).
+		rows[0].id = static_cast<int>(w::kPlayerInfantryTypeId) + mission::kItemIdOffset;
 		for (size_t i = 1; i < rows.size(); ++i)
 			rows[i].id = mission::kItemIdOffset + 41 + static_cast<int>(i);
 		for (auto &row : rows) {
 			row.type = mission::kItemTypePerson;
 			row.hp = 100;
 			std::strcpy(row.ai_function, "org1");
+			std::strcpy(row.move_function, "org1"); // retail's org1 person rows move on org1
 		}
+		// The player's row moves on org2, as retail's 105305 does (D-NET-NEW-L4-14).
+		std::strcpy(rows[0].move_function, "org2");
 		map(0, "soldier"); // exercise the implicit .adm extension
 		map(1, "US01.ADM"); // case-insensitive registration
 		map(3, "missing.adm");
@@ -111,6 +115,7 @@ struct Harness {
 			document.organics[0].spawns = 2;
 			rows[5].type = 1;
 			rows[5].attrib = w::kItemAttribSpawnPoint;
+			rows[5].move_function[0] = '\0'; // a spawn-point item names no mover
 			bms::Entity zone{};
 			zone.type = bms::ItemType::Item; zone.type_id = 46; zone.id = 20;
 			zone.group_id = 7; zone.team = 2;
@@ -162,8 +167,8 @@ struct Harness {
 		const w::Vec3 after = kernel->local.player_position();
 		CHECK(std::hypot(after.x - before.x, after.y - before.y) > 0.01f);
 		const w::AiEntity *body = kernel->local.player_ai();
-		CHECK(std::fabs(after.x - body->pos[0] / 65536.0f) < 0.01f);
-		CHECK(std::fabs(after.y - body->pos[1] / 65536.0f) < 0.01f);
+		CHECK(std::fabs(after.x - body->self->position.x.q16 / 65536.0f) < 0.01f);
+		CHECK(std::fabs(after.y - body->self->position.y.q16 / 65536.0f) < 0.01f);
 	}
 };
 
@@ -228,7 +233,7 @@ void initialized_before_premission_and_retry(Assets &assets) {
         CHECK(h.kernel->restore_baseline());
         verify();
         CHECK(world.ai.for_handle(handle)->inf.clip_phase == initial.inf.clip_phase);
-        CHECK(world.ai.for_handle(handle)->pos[2] == initial.pos[2]);
+        CHECK(world.ai.for_handle(handle)->self->position.z.q16 == initial.self->position.z.q16);
         CHECK(world.registry.get(handle)->spawn_position.z == spawn.z);
     }
 }
@@ -361,6 +366,24 @@ void missing_map_loads_default_adm() {
 	CHECK(h.kernel->adm_id_for_runtime_type(46) == -1); // no map: none
 }
 
+// The boot's own spawn reads its bound row: the load step's traits sweep fills the row
+// table (world.tables.player, item_rows) ahead of the spawn step, as retail resolves every
+// def's rows once at Game_InitSubsystems, ahead of the mission start's round init. The
+// authored Player row's hp 120 is the spawn's ceiling (the seed's fallback is 100, and the
+// later sweep lifts no player body) and its org1 tag the row's class (D-NET-NEW-L4-14 (c)).
+// [orig: EntityDef_InitAllCallbacks @0x4A5A70, called @0x4A71D7; Game_StartMission
+//  @0x524360 - the Server_InitAllPlayerEntitiesForRound call @0x525BAF;
+//  Entity_SpawnFromAnimSlotProperty @0x43C390 - the class init called @0x43C4FE, the raise
+//  @0x43C557..0x43C56B]
+void boot_spawn_reads_its_bound_row(Assets &assets) {
+	Harness h(assets);
+	h.rows[0].hp = 120;
+	h.boot();
+	CHECK(h.kernel->world.tables.player.body_class == w::PlayerBodyClass::kOrganic);
+	CHECK(h.kernel->local.player() != nullptr);
+	CHECK(h.kernel->local.player()->health == 120);
+}
+
 } // namespace
 
 int main() {
@@ -373,6 +396,7 @@ int main() {
 		late_spawn_and_type_resolution(assets);
 		joiner_resolves_empty_registry(assets);
 		missing_map_loads_default_adm();
+		boot_spawn_reads_its_bound_row(assets);
 	} catch (const std::exception &error) {
 		std::fprintf(stderr, "FAIL: %s\n", error.what());
 		return 1;

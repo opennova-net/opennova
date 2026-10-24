@@ -202,7 +202,7 @@ struct Rig {
         b.kind = EntityKind::Building;
         b.net_id = 100;
         b.position = {static_cast<float>(bx), static_cast<float>(by), 0.0f};
-        b.yaw = 90; // mission yaw 90 -> engine heading 0 (identity rotation)
+        b.heading = placed_heading_bam(90); // mission yaw 90 -> engine heading 0 (identity rotation)
         b.alive = true;
         building = world.registry.spawn(2, b);
 
@@ -259,12 +259,12 @@ void test_infantry_detour_cache_and_arrival() {
     inf.move_target[1] = fx(30);
     rig.world.ai.infantry_select(brain, rig.world);
     CHECK(inf.detour_target[0] == cached[0] && inf.detour_target[1] == cached[1]);
-    brain.pos[0] = cached[0] - fx(1);
-    brain.pos[1] = cached[1];
-    brain.pos[2] = fx(100); // arrival deliberately ignores height
+    brain.self->position.x.q16 = cached[0] - fx(1);
+    brain.self->position.y.q16 = cached[1];
+    brain.self->position.z.q16 = fx(100); // arrival deliberately ignores height
     rig.world.ai.infantry_select(brain, rig.world);
     CHECK(inf.path_state == 2);
-    brain.pos[0] += fx(0.5);
+    brain.self->position.x.q16 += fx(0.5);
     rig.world.ai.infantry_select(brain, rig.world);
     CHECK(inf.path_state == 0);
     inf.path_state = 2;
@@ -285,7 +285,7 @@ void test_infantry_detour_rays_see_items() {
     Entity crate;
     crate.kind = EntityKind::Item;
     crate.position = {6.0f, -0.85f, 0.0f};
-    crate.yaw = 90;
+    crate.heading = placed_heading_bam(90);
     crate.alive = true;
     const EntityHandle crate_h = rig.world.registry.spawn(1, crate);
     rig.cw.assign_entity(crate_h, rig.cw.add_model(box_model(1, 0, 0.3, 0.3, 3.0)));
@@ -364,8 +364,8 @@ void test_infantry_route_walks_around_wall() {
     ai.root_motion = &source;
     auto &body = *ai.at(ai.attach(rig.soldier));
     body.inf.active = true;
-    body.pos[0] = fx(14);
-    body.pos[1] = fx(10);
+    body.self->position.x.q16 = fx(14);
+    body.self->position.y.q16 = fx(10);
     body.heading = body.inf.body_heading = body.inf.target_heading = INT32_MIN;
     ai.nav.channels.resize(2);
     auto &channel = ai.nav.channels[1];
@@ -394,7 +394,7 @@ void test_infantry_route_walks_around_wall() {
         const Entity *walker = rig.world.registry.get(rig.soldier);
         grounded &= walker != nullptr &&
                 ((walker->flags | walker->engine_flags) & kEntityFlagInAir) == 0;
-        if (std::hypot(double(body.pos[0] - fx(6)), double(body.pos[1] - fx(10))) < fx(0.75)) {
+        if (std::hypot(double(body.self->position.x.q16 - fx(6)), double(body.self->position.y.q16 - fx(10))) < fx(0.75)) {
             arrived = true;
             break;
         }
@@ -402,6 +402,54 @@ void test_infantry_route_walks_around_wall() {
     CHECK(grounded);
     CHECK(saw_blockage && saw_detour);
     CHECK(arrived);
+}
+
+// D-NET-133: every bone-collision query that passes a building's broad phase
+// starts its door-touch mask (+0x2B4) at 0 and ORs the door sections it touches;
+// a query the broad phase drops leaves it, and a target that is no building ORs
+// with no reset. [orig: Entity_ComputeBoneCollisionForce @0x4AE150 - the reset
+//  @0x4AE281, the OR @0x4AEB22; DoorClass_HandleEvent @0x43F370 reads it @0x43F3D9]
+void test_door_mask_resets_per_query() {
+    CollisionModel model = box_model(bvol_type::kDoorCD, 0, 2.0, 2.0, 3.0);
+    const CollisionSection door_section = model.sections[0];
+    model.sections.assign(4, CollisionSection{});
+    model.sections[2] = door_section;
+    model.sections[3] = door_section;
+    model.finalize_sections();
+    const int32_t origin[3]{};
+    std::vector<CollisionMatrix> matrices(4, collision_matrix_from_heading(0, origin));
+    CollisionTargetView target;
+    target.model = &model;
+    target.matrices = matrices.data();
+    target.bound_radius = fx(8);
+    target.door_first_bone = 2;
+    target.is_building = true;
+    CollisionPoint point{0, 0, fx(1), 0};
+    int32_t radius = 0;
+    ContactQuery query;
+    query.points = &point;
+    query.radii = &radius;
+    query.num_points = 1;
+    query.source_bound_radius = fx(1);
+    BlinkAccum blink;
+    LadderContact ladder;
+    ContactResult result;
+    // Two door sections touched by one query OR their bits.
+    collision_contact_force(target, query, blink, ladder, result);
+    CHECK(result.door_mask_reset && result.door_sections == 3u);
+    // A query past the broad phase that touches no door: the mask restarts at 0.
+    point = CollisionPoint{fx(5), 0, fx(1), 0};
+    collision_contact_force(target, query, blink, ladder, result);
+    CHECK(result.door_mask_reset && result.door_sections == 0u);
+    // The broad phase drops a far point: no reset.
+    point = CollisionPoint{fx(20), 0, fx(1), 0};
+    collision_contact_force(target, query, blink, ladder, result);
+    CHECK(!result.door_mask_reset && result.door_sections == 0u);
+    // A target that is no building ORs its touches with no reset.
+    target.is_building = false;
+    point = CollisionPoint{0, 0, fx(1), 0};
+    collision_contact_force(target, query, blink, ladder, result);
+    CHECK(!result.door_mask_reset && result.door_sections == 3u);
 }
 
 // ---------------------------------------------------------------------------
@@ -809,7 +857,7 @@ void test_candidate_sun_segment_includes_pool1_dynamics() {
     Entity blocker_seed;
     blocker_seed.kind = EntityKind::Item;
     blocker_seed.position = {5.0f, 0.0f, 0.0f};
-    blocker_seed.yaw = 90;
+    blocker_seed.heading = placed_heading_bam(90);
     blocker_seed.alive = true;
     const EntityHandle blocker = world.registry.spawn(1, blocker_seed);
     const int32_t model =
@@ -1344,7 +1392,7 @@ void test_mounted_resolver_keeps_touch_without_parent_pushout() {
     gun.alive = true;
     gun.net_id = 0x20;
     gun.position = Vec3{10.0f, 10.0f, 0.0f};
-    gun.yaw = 90;
+    gun.heading = placed_heading_bam(90);
     Seat seat{};
     seat.type = SeatType::Gunner;
     gun.seats.push_back(seat);
@@ -1876,7 +1924,7 @@ void test_slice_cadence_and_invuln() {
     b.kind = EntityKind::Building;
     b.net_id = 100;
     b.position = {10.0f, 10.0f, 0.0f};
-    b.yaw = 90;
+    b.heading = placed_heading_bam(90);
     b.alive = true;
     const EntityHandle building = world.registry.spawn(2, b);
     Entity s;
@@ -1906,8 +1954,16 @@ void test_slice_cadence_and_invuln() {
     CHECK(cw.candidate_count(soldier) == 1);
 
     // Spawn/restore can invalidate an already-authoritative mission-init pool
-    // snapshot before the first candidate epoch. Refresh must publish the new
-    // pool membership immediately without spending one of those 16 logic ticks.
+    // snapshot before the first candidate epoch. A spawn's refresh publishes the
+    // pool-0 / pool-1 tables and the slices at once, the statics standing as the
+    // last Pool2 call left them; the restore's reload is a Pool2 call, so it
+    // lists a static placed since and builds every slice over it, without
+    // spending one of those 16 logic ticks.
+    // [orig: Entity_BuildProximityLists_Pool2 @0x4B9430, called from
+    //  Entity_BuildAllProximityLists @0x4C20F0 (Entity_InitAllFromModels @0x40E5A1,
+    //  Game_StartMission @0x525C90) and the three teleports alone;
+    //  Entity_BuildAllProximityLists - Pool2, Pool01, then
+    //  Entity_BuildProximityListsFromPools]
     {
         World refresh_world;
         CollisionWorld refresh_cw;
@@ -1925,30 +1981,40 @@ void test_slice_cadence_and_invuln() {
         Entity blocker_seed;
         blocker_seed.kind = EntityKind::Building;
         blocker_seed.position = {5.0f, 0.0f, 0.0f};
-        blocker_seed.yaw = 90;
+        blocker_seed.heading = placed_heading_bam(90);
         blocker_seed.alive = true;
         const EntityHandle blocker = refresh_world.registry.spawn(2, blocker_seed);
         const int32_t blocker_model =
                 refresh_cw.add_model(box_model(1, 0, 1.0, 1.0, 2.0));
         refresh_cw.assign_entity(blocker, blocker_model);
+        // A spawn's refresh is no Pool2 call: the late static is in no table, so
+        // the slices it builds at once hold none of it.
         refresh_cw.refresh_after_registry_change(refresh_world);
+        CHECK(refresh_cw.static_count() == 0);
+        CHECK(refresh_cw.candidate_count(source) == 0);
+        // The restore's reload lists it and builds the source's slice over it.
+        refresh_cw.build_all_tables(refresh_world);
         CHECK(refresh_cw.static_count() == 1);
+        CHECK(refresh_cw.candidate_count(source) == 1);
 
         const int32_t ray_a[3] = {0, 0, fx(1.0)};
         const int32_t ray_b[3] = {fx(10.0), 0, fx(1.0)};
         CHECK(!refresh_cw.raycast_clear(refresh_world, ray_a, ray_b,
                                         EntityHandle{}, EntityHandle{}));
-        // The spawn/restore refresh forces the cadence gate: the NEXT logic
-        // tick publishes the new slices (retail's spawn/teleport paths call
-        // the @0x4b8eb0 builder; our refresh arms the rebuild for the tick).
+        // The next logic tick is a cadence skip: it keeps the slice the reload built.
         refresh_cw.build_tick_tables(refresh_world);
         CHECK(refresh_cw.candidate_count(source) == 1);
     }
 
-    // The statics table is NOT a per-tick product: retail builds it at mission
-    // start and on teleport (Entity_BuildAllProximityLists @0x4c20f0), so a
-    // pool-2 row that moves between ticks keeps its start-of-mission slot
-    // until a registry/instance edge republishes the table.
+    // The statics table is NOT a per-tick product: retail builds it at the
+    // mission start's two calls and the three teleports alone, so a pool-2 row
+    // that moves keeps its slot through every tick build, every spawn's refresh
+    // and a late collision instance, until the next Pool2 call republishes it.
+    // [orig: Entity_BuildProximityLists_Pool2 @0x4B9430 - its callers
+    //  Entity_BuildAllProximityLists @0x4C20F0 (from Entity_InitAllFromModels
+    //  @0x40E5A1 and Game_StartMission @0x525C90), Entity_TeleportTeamToSpawn
+    //  @0x43D4F8, EventAction_TeleportEntityToSpawn @0x43E1F2, WacCmd_TeleSsn
+    //  @0x4F7F3E; the tick's Entity_BuildProximityLists_Pool01 @0x4C240A alone]
     {
         World static_world;
         CollisionWorld static_cw;
@@ -1966,12 +2032,18 @@ void test_slice_cadence_and_invuln() {
         for (int i = 0; i < 17; ++i) static_cw.build_tick_tables(static_world);
         CHECK(static_slot_coord_units(static_cw.static_slot(0).x) == 20);
         static_cw.refresh_after_registry_change(static_world);
+        CHECK(static_slot_coord_units(static_cw.static_slot(0).x) == 20);
+        // A teleport's Pool2 call republishes it.
+        static_cw.rebuild_statics(static_world);
         CHECK(static_slot_coord_units(static_cw.static_slot(0).x) == 40);
-        // A late collision instance on a pool-2 row is an edge too.
+        // A late collision instance on a pool-2 row is no Pool2 call either; the
+        // mission start's is.
         const int32_t crate_model = static_cw.add_model(box_model(1, 0, 1.0, 1.0, 1.0));
         static_world.registry.get(crate)->position.x = 60.0f;
         static_cw.assign_entity(crate, crate_model);
         static_cw.build_tick_tables(static_world);
+        CHECK(static_slot_coord_units(static_cw.static_slot(0).x) == 40);
+        static_cw.build_all_tables(static_world);
         CHECK(static_slot_coord_units(static_cw.static_slot(0).x) == 60);
     }
 
@@ -2071,6 +2143,11 @@ void test_proximity_tables_use_host_bound_radius() {
     world.vehicles.traits.set(vehicle_seed.item_id, vehicle_traits);
     cw.assign_entity(vehicle, tiny_model);
     cw.assign_entity(near_static, tiny_model);
+    // The static placed after the first build reaches the statics at the next
+    // Pool2 call, the mission start's, as a placed row reaches them at its load.
+    // [orig: Entity_BuildAllProximityLists @0x4C20F0 - Entity_BuildProximityLists_Pool2
+    //  @0x4B9430; Game_StartMission @0x525C90]
+    cw.build_all_tables(world);
     for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
 
     CHECK(cw.candidate_count(vehicle) == 1);
@@ -2822,6 +2899,46 @@ void test_replica_resolve_candidates_ground_and_peers() {
         }
         CHECK(ever_skipped);
     }
+
+    // (g) The row's savedLivePose stamp is the skip test's previous pose (V-ROLL-Z on
+    // D-NET-503): retail's remote row is a pool entity its mover stamps at entry, and
+    // the resolver's skip test reads that stamp, not where the last resolve ended.
+    // Two idle rows walk into the skip band together; at the twelfth resolve one
+    // row's stamp sits 300 units along X from its pose (a fold or snap between its
+    // last resolve and this mover entry), past the 200-unit leg, so it takes the full
+    // update where the other skips. [orig: Entity_UpdateInfantryPlayerBody
+    // @0x4B4190..0x4B419C, the call @0x4B7CF4; Entity_MovementCollisionResolver
+    // @0x4B2BD0 - the skip test's X leg @0x4B2C72..0x4B2C82]
+    {
+        CollisionWorld::ResolveState state_a, state_b;
+        int32_t pos_a[3] = {fx(48.0), fx(48.0), fx(1.0)};
+        int32_t pos_b[3] = {fx(52.0), fx(48.0), fx(1.0)};
+        int32_t vel[2] = {0, 0};
+        EntityHandle ground;
+        uint32_t flags_a = 0, flags_b = 0;
+        int32_t last_vel_z_a = -1, last_vel_z_b = -1;
+        for (int i = 0; i < 12; ++i) {
+            rig.world.entity_update_counter = static_cast<uint32_t>(i + 1);
+            const uint32_t tick = static_cast<uint32_t>(i + 1);
+            // The mover's entry stamp: the pose the row stands at as its visit starts.
+            const int32_t stamp_a[3] = {pos_a[0], pos_a[1], pos_a[2]};
+            int32_t stamp_b[3] = {pos_b[0], pos_b[1], pos_b[2]};
+            if (i == 11) stamp_b[0] -= 300;
+            int32_t vel_z_a = -100, vel_z_b = -100;
+            rig.cw.resolve_replica(rig.world, state_a, pos_a, vel, vel_z_a, fx(0.4),
+                                   fx(1.8), fx(1.0), true, tick, 43, 0u, nullptr, 0, 0xFFFF,
+                                   &flags_a, &ground, stamp_a);
+            rig.cw.resolve_replica(rig.world, state_b, pos_b, vel, vel_z_b, fx(0.4),
+                                   fx(1.8), fx(1.0), true, tick, 43, 0u, nullptr, 0, 0xFFFF,
+                                   &flags_b, &ground, stamp_b);
+            last_vel_z_a = vel_z_a;
+            last_vel_z_b = vel_z_b;
+            if (i < 11) CHECK(vel_z_a == -100 && vel_z_b == -100); // counters 1..11
+        }
+        CHECK(last_vel_z_a == 0);    // the skip band reverts and zeroes
+        CHECK(last_vel_z_b == -100); // the stamp's X leg forced the full update
+        CHECK(state_b.skip_counter == 0 && state_a.skip_counter == 12);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2909,7 +3026,7 @@ void test_raycast_clear_table_readiness() {
         Entity seed;
         seed.kind = kind;
         seed.position = {5.0f, 0.0f, 0.0f};
-        seed.yaw = 90;
+        seed.heading = placed_heading_bam(90);
         seed.alive = true;
         const EntityHandle h = world.registry.spawn(pool, seed);
         cw.assign_entity(h, cw.add_model(box_model(1, 0, 1.0, 1.0, 2.0)));
@@ -2955,7 +3072,7 @@ void test_cached_raycast_spatial_candidates() {
         Entity seed;
         seed.kind = EntityKind::Building;
         seed.position = {static_cast<float>(i), 200.0f + i, 0.0f};
-        seed.yaw = 90;
+        seed.heading = placed_heading_bam(90);
         seed.alive = true;
         const EntityHandle h = world.registry.spawn(2, seed);
         CHECK(h.valid());
@@ -2964,7 +3081,7 @@ void test_cached_raycast_spatial_candidates() {
     Entity blocker_seed;
     blocker_seed.kind = EntityKind::Building;
     blocker_seed.position = {50.0f, 0.0f, 0.0f};
-    blocker_seed.yaw = 90;
+    blocker_seed.heading = placed_heading_bam(90);
     blocker_seed.alive = true;
     const EntityHandle blocker = world.registry.spawn(2, blocker_seed);
     CHECK(blocker.valid());
@@ -2996,7 +3113,7 @@ void test_cached_raycast_sparse_extent_uses_exact_hash_fallback() {
     Entity near_seed;
     near_seed.kind = EntityKind::Building;
     near_seed.position = {-50.0f, 0.0f, 0.0f};
-    near_seed.yaw = 90;
+    near_seed.heading = placed_heading_bam(90);
     near_seed.alive = true;
     const EntityHandle near_blocker = world.registry.spawn(2, near_seed);
     CHECK(near_blocker.valid());
@@ -3027,7 +3144,7 @@ void test_raycast_uses_stamped_bound_for_live_section_pose() {
     Entity seed;
     seed.kind = EntityKind::Building;
     seed.position = {5.0f, 0.0f, 0.0f};
-    seed.yaw = 90;
+    seed.heading = placed_heading_bam(90);
     seed.alive = true;
     const EntityHandle target = world.registry.spawn(2, seed);
     const int32_t model_id = cw.add_model(box_model(1, 0, 0.5, 0.5, 2.0));
@@ -3053,7 +3170,7 @@ void test_raycast_uses_stamped_bound_for_live_section_pose() {
     scaled_world.registry.configure_pool(2, 4);
     Entity scaled_seed;
     scaled_seed.kind = EntityKind::Building;
-    scaled_seed.yaw = 90;
+    scaled_seed.heading = placed_heading_bam(90);
     scaled_seed.uniform_scale_q16 = fx(2.0);
     scaled_seed.alive = true;
     const EntityHandle scaled = scaled_world.registry.spawn(2, scaled_seed);
@@ -3238,15 +3355,19 @@ void test_ground_and_resolver_prefilter_stale_candidates_before_section_matrices
     // Build a second, initially-near static into the source's 17-tick candidate
     // slice, then move it without refreshing that slice. Both queries must use
     // its live bound to reject it before asking the host for section matrices.
+    // A static placed after the first build is listed by the next Pool2 call (the
+    // mission start's), which builds the slices over it at once.
+    // [orig: Entity_BuildAllProximityLists @0x4C20F0 - Entity_BuildProximityLists_Pool2
+    //  @0x4B9430, then Entity_BuildProximityListsFromPools; Game_StartMission @0x525C90]
     Entity stale_seed;
     stale_seed.kind = EntityKind::Building;
     stale_seed.position = {10.0f, 10.0f, 0.0f};
-    stale_seed.yaw = 90;
+    stale_seed.heading = placed_heading_bam(90);
     stale_seed.alive = true;
     const EntityHandle stale = rig.world.registry.spawn(2, stale_seed);
     CHECK(stale.valid());
     rig.cw.assign_entity(stale, 0);
-    rig.rebuild();
+    rig.cw.build_all_tables(rig.world);
     CHECK(rig.cw.candidate_count(rig.soldier) == 2);
     Entity *stale_live = rig.world.registry.get(stale);
     CHECK(stale_live != nullptr);
@@ -3300,6 +3421,94 @@ int32_t resolve_test_vehicle_probe(CollisionWorld &collision, World &world, Enti
 	return severity;
 }
 
+// D-NET-133: both callers of the bone-collision query store its door-touch mask onto
+// the target: a query past a building's broad phase starts the building's mask at 0,
+// so a bit an earlier query left is gone and only this query's door bits stand, on
+// the movement resolver's pass and on the vehicle pass alike.
+// [orig: Entity_ComputeBoneCollisionForce @0x4AE150 - the reset @0x4AE281, the OR
+//  @0x4AEB22; its callers Entity_MovementCollisionResolver @0x4B2BD0 (@0x4B2F9B,
+//  @0x4B35D1) and Entity_CheckCollisionState @0x462A30 (@0x462F63)]
+void test_door_mask_store_clears_a_stale_mask() {
+	auto rig = std::make_unique<Rig>(box_model(bvol_type::kDoorCD, 0, 2.0, 2.0, 3.0));
+	Entity &door = *rig->world.registry.get(rig->building);
+	door.item_type = 5;
+	door.door_count = 1;
+	door.door_event = door.door_motion = true;
+	rig->world.doors.initialize(door, 528, 0);
+	rig->move_soldier(10, 10, 0);
+	door.door_touch_mask = 0x6u; // bits no query of this pass touches
+	int32_t pos[3] = {fx(10), fx(10), 0};
+	int32_t velocity[3]{};
+	int16_t health = 100;
+	CollisionWorld::ResolveState state;
+	rig->cw.resolve_entity(rig->world, rig->soldier, state, pos, velocity, velocity[2],
+			0, fx(1.8), 0, 0, false, false, 0, 43, 0u, health);
+	CHECK(door.door_touch_mask == 1u);
+
+	auto world = std::make_unique<World>();
+	world->registry.configure_pool(1, 4);
+	world->registry.configure_pool(2, 4);
+	auto collision = std::make_unique<CollisionWorld>();
+	Entity vehicle_seed;
+	vehicle_seed.kind = EntityKind::Item;
+	vehicle_seed.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
+	vehicle_seed.item_id = 900;
+	vehicle_seed.has_item_def = true;
+	vehicle_seed.has_graphic_model = true;
+	vehicle_seed.item_type = 1;
+	vehicle_seed.position = {10.0f, 10.0f, 0.0f};
+	vehicle_seed.bound_radius = 1.0f;
+	vehicle_seed.alive = true;
+	const EntityHandle vehicle = world->registry.spawn(1, vehicle_seed);
+	VehicleTraits traits;
+	traits.physics = 1;
+	world->vehicles.traits.set(vehicle_seed.item_id, traits);
+	Entity building_seed;
+	building_seed.kind = EntityKind::Building;
+	building_seed.position = {10.0f, 10.0f, 0.0f};
+	building_seed.heading = placed_heading_bam(90);
+	building_seed.alive = true;
+	const EntityHandle building = world->registry.spawn(2, building_seed);
+	collision->assign_entity(building, collision->add_model(box_model(bvol_type::kDoorCD, 0, 2.0, 2.0, 3.0)));
+	for (int i = 0; i < 17; ++i) collision->build_tick_tables(*world);
+	CHECK(collision->candidate_count(vehicle) == 1);
+	Entity *walled = world->registry.get(building);
+	CHECK(walled != nullptr);
+	if (walled == nullptr) return;
+	walled->door_touch_mask = 0x6u;
+	CountingMatrixProvider provider;
+	collision->set_pose_provider(&provider);
+	const int32_t at[3] = {fx(10.0), fx(10.0), 0};
+	int32_t push[2] = {};
+	// The hull's probe stands in the door volume: the stale bits go, its door bit stands.
+	(void)resolve_test_vehicle_probe(*collision, *world, vehicle, at, at, push);
+	CHECK(provider.calls_for(building) == 1);
+	CHECK(walled->door_touch_mask == 1u);
+}
+
+// D-NET-NEW-L6-12: the bone-collision query's building gate is the target's own items.def type, not
+// its record family: a pool-2 row placed with family Building whose def is a decoration (type 2)
+// keeps its door-touch mask past the query (only the door volume's OR lands), where a type-5 def
+// starts it at 0. [orig: Entity_ComputeBoneCollisionForce @0x4AE150 - `cmp [ecx+5Ch], 5`
+//  @0x4AE275, the reset @0x4AE281, the CD OR @0x4AEB22]
+void test_door_mask_reset_reads_the_def_type() {
+	for (const int def_type : {2, 5}) {
+		auto rig = std::make_unique<Rig>(box_model(bvol_type::kDoorCD, 0, 2.0, 2.0, 3.0));
+		Entity &row = *rig->world.registry.get(rig->building);
+		row.has_item_def = true;
+		row.item_type = static_cast<uint8_t>(def_type);
+		rig->move_soldier(10, 10, 0);
+		row.door_touch_mask = 0x6u;
+		int32_t pos[3] = {fx(10), fx(10), 0};
+		int32_t velocity[3]{};
+		int16_t health = 100;
+		CollisionWorld::ResolveState state;
+		rig->cw.resolve_entity(rig->world, rig->soldier, state, pos, velocity, velocity[2],
+				0, fx(1.8), 0, 0, false, false, 0, 43, 0u, health);
+		CHECK(row.door_touch_mask == (def_type == 5 ? 1u : 7u));
+	}
+}
+
 void test_vehicle_hull_prefilters_stale_candidates_before_section_matrices() {
     World world;
     world.registry.configure_pool(1, 4);
@@ -3326,7 +3535,7 @@ void test_vehicle_hull_prefilters_stale_candidates_before_section_matrices() {
         Entity seed;
         seed.kind = EntityKind::Building;
         seed.position = {10.0f, y, 0.0f};
-        seed.yaw = 90;
+        seed.heading = placed_heading_bam(90);
         seed.alive = true;
         return world.registry.spawn(2, seed);
     };
@@ -3381,7 +3590,7 @@ void test_vehicle_probes_support_model_decks_and_grade_slopes() {
 	Entity deck;
 	deck.kind = EntityKind::Building;
 	deck.position = { 10.0f, 10.0f, 0.0f };
-	deck.yaw = 90;
+	deck.heading = placed_heading_bam(90);
 	EntityHandle platform = world.registry.spawn(2, deck);
 	collision.assign_entity(platform, collision.add_model(box_model(1, 0, 4.0, 4.0, 1.0)));
 	for (int i = 0; i < 17; ++i)
@@ -3391,7 +3600,7 @@ void test_vehicle_probes_support_model_decks_and_grade_slopes() {
 	const int slopes[4] = { 0, 40, 45, 60 };
 	const int expected[4] = { 0, 1, 2, 3 };
 	for (int test = 0; test < 4; ++test) {
-		world.registry.get(platform)->pitch = int16_t(slopes[test]);
+		world.registry.get(platform)->pitch_bam = spawn_angle_bam(slopes[test]);
 		const double radians = slopes[test] * 3.14159265358979323846 / 180.0;
 		const int32_t probes[1][3] = { { fx(10.0 - 1.25 * std::sin(radians)), fx(10.0),
 				fx(1.25 * std::cos(radians)) } };
@@ -3435,7 +3644,7 @@ void test_vehicle_hull_skips_mounted_child_ground_chain() {
         seed.has_graphic_model = true;
         seed.item_type = 1;
         seed.position = {x, y, z};
-        seed.yaw = 90; // mission 90 = engine heading BAM 0, like the wall template
+        seed.heading = placed_heading_bam(90); // mission 90 = engine heading BAM 0, like the wall template
         seed.bound_radius = bound_radius;
         seed.alive = true;
         return world.registry.spawn(1, seed);
@@ -3593,7 +3802,7 @@ void test_person_effective_radius() {
 void test_person_section_raycast_uses_posed_bone_matrix() {
     Rig rig(person_section_model());
     rig.cw.assign_entity(rig.soldier, 0);
-    rig.world.registry.get(rig.soldier)->yaw = 90;
+    rig.world.registry.get(rig.soldier)->heading = placed_heading_bam(90);
     PosedHeadMatrixProvider provider;
     rig.cw.set_pose_provider(&provider);
 
@@ -3625,7 +3834,7 @@ void test_f3_debug_prefilters_before_building_section_matrices() {
         seed.kind = kind;
         seed.alive = true;
         seed.position = Vec3{static_cast<float>(x), 0.0f, 0.0f};
-        seed.yaw = 90; // engine heading 0: section center stays axis-aligned
+        seed.heading = placed_heading_bam(90); // engine heading 0: section center stays axis-aligned
         return world.registry.spawn(pool, seed);
     };
     const EntityHandle near_person = spawn(0, EntityKind::Organic, 1.0);
@@ -3697,7 +3906,7 @@ void test_iris_static_rays_prefilter_before_section_matrices() {
         Entity seed;
         seed.kind = EntityKind::Building;
         seed.position = Vec3{100.0f + static_cast<float>(i), 0.0f, 0.0f};
-        seed.yaw = 90;
+        seed.heading = placed_heading_bam(90);
         seed.alive = true;
         const EntityHandle h = world.registry.spawn(2, seed);
         CHECK(h.valid());
@@ -3707,7 +3916,7 @@ void test_iris_static_rays_prefilter_before_section_matrices() {
     Entity near_seed;
     near_seed.kind = EntityKind::Building;
     near_seed.position = Vec3{5.0f, 0.0f, 0.0f};
-    near_seed.yaw = 90;
+    near_seed.heading = placed_heading_bam(90);
     near_seed.alive = true;
     const EntityHandle near_static = world.registry.spawn(2, near_seed);
     CHECK(near_static.valid());
@@ -3753,7 +3962,7 @@ void test_sound_los_prefilters_candidates_before_section_matrices() {
         Entity dynamic_seed;
         dynamic_seed.kind = EntityKind::Item;
         dynamic_seed.position = Vec3{1.0f, static_cast<float>(i) * 0.25f, 0.0f};
-        dynamic_seed.yaw = 90;
+        dynamic_seed.heading = placed_heading_bam(90);
         dynamic_seed.alive = true;
         const EntityHandle h = world.registry.spawn(1, dynamic_seed);
         collision.assign_entity(h, model_id);
@@ -3763,7 +3972,7 @@ void test_sound_los_prefilters_candidates_before_section_matrices() {
         Entity far_seed;
         far_seed.kind = EntityKind::Building;
         far_seed.position = Vec3{3.0f, static_cast<float>(i) * 0.1f, 0.0f};
-        far_seed.yaw = 90;
+        far_seed.heading = placed_heading_bam(90);
         far_seed.alive = true;
         const EntityHandle h = world.registry.spawn(2, far_seed);
         collision.assign_entity(h, model_id);
@@ -3772,7 +3981,7 @@ void test_sound_los_prefilters_candidates_before_section_matrices() {
     Entity blocker_seed;
     blocker_seed.kind = EntityKind::Building;
     blocker_seed.position = Vec3{0.0f, 5.0f, 0.0f};
-    blocker_seed.yaw = 90;
+    blocker_seed.heading = placed_heading_bam(90);
     blocker_seed.alive = true;
     const EntityHandle blocker = world.registry.spawn(2, blocker_seed);
     collision.assign_entity(blocker, model_id);
@@ -4515,7 +4724,7 @@ void test_face_raycast_rolled_entity() {
           CollisionWorld::FaceRaycast::kHit);
 
     // Roll the entity 90 deg: the quad plane stands up at world y = 9 facing -y.
-    b->roll = 90;
+    b->roll_bam = spawn_angle_bam(90);
     CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
           CollisionWorld::FaceRaycast::kMiss); // the old plane position is empty air now
     const int32_t s_fw[3] = {fx(10.0), fx(7.0), fx(0.0)};
@@ -4525,7 +4734,7 @@ void test_face_raycast_rolled_entity() {
     CHECK(fh.material == 14);
     // dist = 2.0 of the 4.0 u segment (plane at world y = 9).
     CHECK(fh.dist > fx(1.9) && fh.dist < fx(2.1));
-    b->roll = 0;
+    b->roll_bam = 0;
 }
 
 void test_face_raycast_pitched_entity() {
@@ -4542,7 +4751,7 @@ void test_face_raycast_pitched_entity() {
     CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
           CollisionWorld::FaceRaycast::kHit);
 
-    b->pitch = 90;
+    b->pitch_bam = spawn_angle_bam(90);
     CHECK(rig.cw.raycast_entity_faces(rig.world, rig.building, s_dn, e_dn, 0, fh) ==
           CollisionWorld::FaceRaycast::kMiss);
     const int32_t s_across[3] = {fx(8.0), fx(10.0), fx(0.0)};
@@ -4552,7 +4761,7 @@ void test_face_raycast_pitched_entity() {
           CollisionWorld::FaceRaycast::kHit);
     CHECK(fh.material == 14);
     CHECK(fh.dist > fx(0.95) && fh.dist < fx(1.05));
-    b->pitch = 0;
+    b->pitch_bam = 0;
 }
 
 void test_round_inside_bound_sphere_hits_wall() {
@@ -4636,7 +4845,7 @@ void test_projectile_trace_profile_is_opt_in_and_parity_neutral() {
     Entity dynamic_seed;
     dynamic_seed.kind = EntityKind::Item;
     dynamic_seed.position = Vec3{7.0f, 0.0f, 0.0f};
-    dynamic_seed.yaw = 90;
+    dynamic_seed.heading = placed_heading_bam(90);
     dynamic_seed.alive = true;
     const EntityHandle dynamic = world.registry.spawn(1, dynamic_seed);
     Entity static_seed = dynamic_seed;
@@ -4703,8 +4912,11 @@ void test_projectile_trace_profile_is_opt_in_and_parity_neutral() {
     // Repeating a state is not an edge and preserves this tick's snapshot.
     collision.set_trace_profile_enabled(true);
     CHECK(collision.trace_profile().calls == 1);
-    // Tick boundaries reset an active capture.
+    // A table build is no reset: the consumer clears what it read, so a tick
+    // that builds no tables never re-reads a running sum.
     collision.build_tick_tables(world);
+    CHECK(collision.trace_profile().calls == 1);
+    collision.clear_trace_profile();
     CHECK(profile_is_empty(collision.trace_profile()));
     CHECK(hits_match(unprofiled, collision.trace_projectile(world, trace)));
     CHECK(collision.trace_profile().calls == 1);
@@ -4731,7 +4943,7 @@ void test_ray_debug_capture_is_opt_in_with_scoped_categories() {
     Entity static_seed;
     static_seed.kind = EntityKind::Building;
     static_seed.position = Vec3{5.0f, 0.0f, 0.0f};
-    static_seed.yaw = 90;
+    static_seed.heading = placed_heading_bam(90);
     static_seed.alive = true;
     const EntityHandle statik = world.registry.spawn(2, static_seed);
     // A type-1 solid on its own lane for the boolean LOS leg (the CFAC wall
@@ -4869,7 +5081,7 @@ void test_contact_debug_capture_is_opt_in() {
     Entity static_seed;
     static_seed.kind = EntityKind::Building;
     static_seed.position = Vec3{5.0f, 0.0f, 0.0f};
-    static_seed.yaw = 90;
+    static_seed.heading = placed_heading_bam(90);
     static_seed.alive = true;
     const EntityHandle statik = world.registry.spawn(2, static_seed);
     CHECK(owner.valid() && statik.valid());
@@ -4962,7 +5174,7 @@ void test_projectile_dynamic_fallback_encloses_scaled_diagonal() {
     Entity dynamic;
     dynamic.kind = EntityKind::Item;
     dynamic.position = {5.0f, 0.0f, 0.0f};
-    dynamic.yaw = 90; // identity collision placement
+    dynamic.heading = placed_heading_bam(90); // identity collision placement
     dynamic.uniform_scale_q16 = fx(2.0);
     dynamic.alive = true;
     const EntityHandle target = world.registry.spawn(1, dynamic);
@@ -4990,7 +5202,7 @@ void test_round_equal_distance_uses_retail_pool_order() {
     seed.kind = EntityKind::Item;
     seed.health = 100;
     seed.position = Vec3{5.0f, 0.0f, 0.9f};
-    seed.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+    seed.heading = placed_heading_bam(90); // identity model placement [orig: entity matrix @0x613F40]
     seed.bound_radius = kOrganicStandInRadius;
     const EntityHandle dynamic = world.registry.spawn(1, seed);
     const EntityHandle statik = world.registry.spawn(2, seed);
@@ -5046,7 +5258,7 @@ void test_round_item_skip_mask() {
 
     Entity hit_seed = skipped_seed;
     hit_seed.position = Vec3{8.0f, 0.0f, 0.0f};
-    hit_seed.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+    hit_seed.heading = placed_heading_bam(90); // identity model placement [orig: entity matrix @0x613F40]
     hit_seed.engine_flags = 0;
     const EntityHandle eligible = world.registry.spawn(1, hit_seed);
     CHECK(skipped.valid() && eligible.valid());
@@ -5119,7 +5331,7 @@ void test_refnum_group_immunity() {
     Entity plate_seed;
     plate_seed.kind = EntityKind::Item;
     plate_seed.position = Vec3{4.0f, 0.0f, 0.9f};
-    plate_seed.yaw = 90;
+    plate_seed.heading = placed_heading_bam(90);
     plate_seed.bound_radius = 1.0f;
     plate_seed.ref_num = 9;
     const EntityHandle plate = world.registry.spawn(1, plate_seed);
@@ -5204,7 +5416,7 @@ void test_round_person_sections_drive_hit_and_death_animation() {
     victim_seed.health = 775;
     victim_seed.alive = true;
     victim_seed.position = Vec3{5.0f, 0.0f, 0.0f};
-    victim_seed.yaw = 90; // engine heading 0: +X round is the back quadrant
+    victim_seed.heading = placed_heading_bam(90); // engine heading 0: +X round is the back quadrant
     const EntityHandle victim = world.registry.spawn(0, victim_seed);
     CHECK(victim.valid());
 
@@ -5443,7 +5655,7 @@ void test_late_pool1_item_resolves_cfac_or_raises() {
     placed.has_graphic_model = true;
     placed.item_id = 7001;
     placed.position = {5.0f, 0.0f, 0.0f};
-    placed.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+    placed.heading = placed_heading_bam(90); // identity model placement [orig: entity matrix @0x613F40]
     placed.bound_radius = 0.5f; // ThrowableSim::place_from_round stand-in
     placed.uniform_scale_q16 = fx(0.1); // face is narrower than the fallback sphere
     const EntityHandle first = world.registry.spawn(1, placed);
@@ -5756,7 +5968,7 @@ void test_projectile_trace_world_ordering() {
     Entity dynamic;
     dynamic.kind = EntityKind::Item;
     dynamic.position = {5.0f, 0.0f, 0.0f};
-    dynamic.yaw = 90;
+    dynamic.heading = placed_heading_bam(90);
     dynamic.alive = true;
     const EntityHandle dynamic_h = rig.world.registry.spawn(1, dynamic);
     const int32_t dynamic_model = rig.cw.add_model(wall_triangle_model());
@@ -5790,7 +6002,9 @@ void test_projectile_trace_world_ordering() {
     CHECK(hit.hit_class == ProjectileHitClass::Terrain);
     CHECK(!hit.geometry_entity.valid());
     CHECK(std::abs(hit.position_q16.z) < fx(0.02));
-    CHECK(hit.normal_q16.z > fx(0.99));
+    // The terrain leg computes no normal [orig: Projectile_UpdatePhysics
+    // @0x4E9D70 (@0x4EA3A9..0x4EA4B3)]: a terrain hit carries a zero one (D-NET-507).
+    CHECK(hit.normal_q16.x == 0 && hit.normal_q16.y == 0 && hit.normal_q16.z == 0);
 
     down.ammo_flags = 0x80u;
     CHECK(!cw.trace_projectile(world, down).hit());
@@ -5863,7 +6077,7 @@ void test_projectile_trace_domain_switches_preserve_farther_pool_hit() {
     Entity item;
     item.kind = EntityKind::Item;
     item.position = {8.0f, 0.0f, -4.0f};
-    item.yaw = 90;
+    item.heading = placed_heading_bam(90);
     item.bound_radius = 0.4f;
     const EntityHandle item_h = world.registry.spawn(1, item);
 
@@ -6079,7 +6293,7 @@ void test_cached_los_excludes_the_endpoint_carrier() {
     hull.alive = true;
     hull.net_id = 0x20;
     hull.position = Vec3{10.0f, 10.0f, 0.0f};
-    hull.yaw = 90;
+    hull.heading = placed_heading_bam(90);
     Seat seat{};
     seat.type = SeatType::Gunner;
     hull.seats.push_back(seat);
@@ -6112,6 +6326,7 @@ void test_cached_los_excludes_the_endpoint_carrier() {
     CHECK(mounted != nullptr && mounted->mounted && mounted->mount_target == hull_h);
 
     AiSystem sys;
+    sys.bind_registry(&world.registry);
     sys.terrain = &flat.field;
     sys.collision = &collision;
 
@@ -6138,7 +6353,7 @@ void test_cached_los_excludes_the_endpoint_carrier() {
 // m[4], m[6], m[8], m[10] (the side column and translation are inert). With
 // ftol = truncation and every product an `imul; shrd 22` (int64 >> 22):
 //   negy = -m[4] = -1970678; negupy = -m[6] = -1785386
-//   yaw   = ftol(atan2(-1970678, 3413315) * dbl_7C57B8 (-683565275.5764316))
+//   yaw   = ftol(atan2(-1970678, 3413315) * g_NegBamPerRadian (-683565275.5764316))
 //         = ftol(357913891.155) = 357913891
 //   sy = ftol(sin(yaw * dbl_7C3608) * 4194304) = ftol(2097209.775) = 2097209
 //   cy = ftol(cos(yaw * dbl_7C3608) * 4194304) = ftol(3632340.458) = 3632340
@@ -6231,7 +6446,7 @@ struct RunOverRig {
 		v.item_type = 1;
 		v.health = 500;
 		v.position = {10.0f, 10.0f, 0.0f};
-		v.yaw = 90; // mission 90 = engine heading 0: the box stays axis-aligned
+		v.heading = placed_heading_bam(90); // mission 90 = engine heading 0: the box stays axis-aligned
 		v.team = 1;
 		v.alive = true;
 		v.primary_occupant = driver;
@@ -6245,7 +6460,7 @@ struct RunOverRig {
 		s.health = 100;
 		s.position = {12.8f, 10.0f, 0.0f};
 		s.bound_radius = 1.0f;
-		s.yaw = 90; // facing +x, away from the hull
+		s.heading = placed_heading_bam(90); // facing +x, away from the hull
 		s.team = 2;
 		s.alive = true;
 		victim = world.registry.spawn(0, s);
@@ -6286,11 +6501,20 @@ struct RunOverRig {
 
 // The kill: the death anim's quadrant reads the victim's displacement minus
 // the hull's, which points back at the hull behind the victim (quadrant 2);
-// the driver takes the credit; the bump plays at the victim and its set is
-// then held. [orig: @0x4B395D..0x4B39A7 (quadrant), @0x4B39C1..0x4B39E2
-// (credit), @0x4B39FD..0x4B3A4E (the sound, Server_TrackEntityInTable 0x1F)]
+// the driver takes the credit, and the kill scores at the resolver, at once
+// (a scored team-2 victim, a driver that is not the local player, out of a
+// session: the by-others enemy count), ahead of any death routing; the bump
+// plays at the victim and its set is then held. [orig: @0x4B395D..0x4B39A7
+// (quadrant), @0x4B39C1..0x4B39E2 (credit and the Score_ProcessKillEvent call
+// @0x4B39E2), @0x4B39FD..0x4B3A4E (the sound, Server_TrackEntityInTable 0x1F);
+// Score_ProcessKillEvent @0x4FD400 - the score word @0x4FD422,
+// Score_TallyKillByOthers @0x4FD300]
 void test_run_over_kills_an_enemy_and_plays_the_bump() {
 	RunOverRig rig;
+	Entity &scored = *rig.world.registry.get(rig.victim);
+	scored.has_item_def = true;
+	scored.item_score = 10;
+	CHECK(!rig.world.rules.mp_session && rig.world.cached.local_player != rig.driver);
 	rig.run_over();
 	CHECK(rig.pos[0] > fx(11.6)); // the hull pushed the victim out
 	CHECK(rig.health == 0);
@@ -6299,14 +6523,11 @@ void test_run_over_kills_an_enemy_and_plays_the_bump() {
 	CHECK(behind != compute_death_anim_state(kRunOverDeathBone, 0, kRunOverDeathCause));
 	CHECK(v != nullptr && v->death_anim_state == behind);
 	CHECK(v != nullptr && v->last_attacker == rig.driver);
-	// The run-over edge runs the kill accounting [orig:
-	// Entity_MovementCollisionResolver @0x4B2BD0 (the Score_ProcessKillEvent
-	// call @0x4B39E2)].
-	bool credited = false;
-	for (const RoundDeath &death : rig.world.round_sim.deaths)
-		if (death.victim == rig.victim && death.killer == rig.driver && death.kill_event)
-			credited = true;
-	CHECK(credited);
+	CHECK(rig.world.kill_stats.enemy_kills_by_others == 1);
+	CHECK(rig.world.round_sim.deaths.size() == 1);
+	if (rig.world.round_sim.deaths.size() == 1)
+		CHECK(rig.world.round_sim.deaths[0].victim == rig.victim &&
+				rig.world.round_sim.deaths[0].killer == rig.driver);
 	const std::vector<ReadyFireSound> sounds = rig.world.out.fire_sounds.drain();
 	CHECK(sounds.size() == 1 && sounds[0].set_name == "V_HULL_BUMP");
 	CHECK(!rig.world.out.fire_sounds.track_trigger("V_HULL_BUMP", 1));
@@ -6357,7 +6578,7 @@ void test_palm_sector_collision_is_the_fragments() {
     fragment.kind = EntityKind::Building;
     fragment.item_id = 900;
     fragment.position = {8.0f, 16.0f, 7.0f};
-    fragment.yaw = 90;
+    fragment.heading = placed_heading_bam(90);
     fragment.item_section_piece = true;
     fragment.palm_fragment = true; // item 900's own render tag names no section row
     fragment.palm_state = 17;
@@ -6368,7 +6589,7 @@ void test_palm_sector_collision_is_the_fragments() {
     palm.kind = EntityKind::Building;
     palm.item_id = 21;
     palm.position = {20.0f, 16.0f, 0.0f};
-    palm.yaw = 90;
+    palm.heading = placed_heading_bam(90);
     palm.alive = true;
     palm.palm_sections = true; // the render tag's psec row
     palm.palm_state = 0;
@@ -6392,6 +6613,9 @@ int main() {
 	test_fixed_matrix_euler_witnessed_vector();
 	test_fixed_matrix_euler_round_trip();
 	test_door_contact_and_player_collision_split();
+	test_door_mask_store_clears_a_stale_mask();
+	test_door_mask_reset_reads_the_def_type();
+	test_door_mask_resets_per_query();
 	test_matrix_roundtrip();
 	test_retail_render_pose_matrix_roundtrip_and_order();
     test_blink_query_and_refresh();

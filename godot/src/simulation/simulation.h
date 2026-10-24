@@ -47,6 +47,8 @@
 #include <runtime/world/sound_emitter_mailbox.h> // SoundEmitterEvent (the emitter drain)
 #include <runtime/world/fire_sound.h> // ReadyFireSound (the fire-sound drain)
 #include <formats/playersav/weapon_sav.h> // weapon.sav: the per-side profile class + kit pages
+#include <runtime/inmatch/admin_console.h> // AdminConsole::Seams (remote_admin_seams)
+#include <runtime/inmatch/remote_admin.h> // RemoteAdminBinding (remote_admin_binding)
 #include <runtime/inmatch/role_feeds.h> // RoleView: what the role feeds read of this session
 #include <runtime/terrain_query/terrain_field_store.h>
 #include <runtime/wac/wac_system.h>
@@ -67,6 +69,7 @@ struct ScriptDebugReport;
 } // namespace opennova::mission
 namespace opennova::inmatch {
 struct NetDebugReport;
+class JoinerNetTrace;
 } // namespace opennova::inmatch
 
 namespace godot {
@@ -88,6 +91,10 @@ class PlayerWeaponView;     // the local weapon FSM view (simulation/player_weap
 class PlayerWeaponEvent;    // one ordered weapon presentation event (simulation/player_weapon_event.h)
 class ScarDrawList;         // one frame's impact-scar draw list (world/scar_draw_list.h)
 class WeaponKitEntry;       // one loadout tuple (simulation/weapon_kit_entry.h)
+class UsePressRow;          // one USE readout record (simulation/use_press_row.h)
+class BodyTraceRow;         // one body readout record (simulation/body_trace_row.h)
+class JoinerNetTraceRow;    // one joiner net readout record (simulation/joiner_net_trace_row.h)
+class ModelListNodeRow;     // one frozen model-list node (simulation/model_list_node_row.h)
 class PlayerProfiles; // the player profile's records (player/player_profiles.h)
 class EnvironmentSnapshot;  // the F3 Environment record as a typed read (simulation/environment_snapshot.h)
 class PlayerInventory;      // the local inventory snapshot (simulation/player_inventory.h)
@@ -165,6 +172,7 @@ class DebugPickCard;     // the entity picker's card (simulation/debug_pick_card
 #include "simulation/inmatch_session_values.h"
 #include "simulation/simulation_asset_state.h"   // the retained asset sources (assets_)
 #include "simulation/simulation_net_state.h"     // the net-session shell inputs + sockets (net_)
+#include "mnu/controls_model.h" // SAVEKEYS' binding table (install_console_seams)
 #include "simulation/simulation_constants.h" // the bound constant surface Simulation inherits
 #include "simulation/simulation_player_state.h"  // the local-player profile state (player_)
 #include "simulation/simulation_present_state.h" // the present/occlusion caches (present_)
@@ -224,6 +232,8 @@ private:
 	// the local-player profile state. The session, its role, the kernel and
 	// the live runtime pointer stay here, on the class that is the embedder.
 	SimulationNetState net_;
+	// The shell's live binding table, which SAVEKEYS dumps (set_controls_model).
+	Ref<ControlsModel> controls_model_;
 	// The install root the hosted session's loose _NSTMOUT.TXT reap/pool
 	// override is read from at bring-up (HostConfig::game_root, engine
 	// session_timeout_config.h): the HostSessionOptions game_root the mission
@@ -231,6 +241,8 @@ private:
 	std::string host_game_root_;
 	SimulationAssetState assets_;
 	opennova::inmatch::HostBoot host_boot_; // the load's two-phase boot (boot_mission -> start_mission)
+	bool restart_boot_ = false; // set_restart_boot: the single player's restart (boot_mission)
+	bool render_arm_deferred_ = false; // set_render_arm_deferred: the world's device stages
 	opennova::world::ScriptVoiceChannel::SetResolver voice_set_resolver_;
 	SimulationPresentState present_;
 	SimulationPlayerState player_;
@@ -267,6 +279,11 @@ private:
 	void fold_frame_stats(const opennova::inmatch::FrameOutcome &p_outcome);
 	opennova::inmatch::FrameInput begin_session_frame(
 			const Ref<MissionFrameInput> &p_input);
+	// A joiner sim with no load left to run (one that dialed after its own mission loaded)
+	// ends the mission start the S2C 0x1A released at the next session frame's head: the
+	// push and the final wait's first pass, poll_join_mission_start with its load done
+	// (engine: inmatch::JoinerRole::push_mission_start_end). The released frame holds until it.
+	void end_loaded_join_mission_start();
 	opennova::inmatch::Role &active_role();
 	// Install a freshly constructed role as the session's (the session's role
 	// switch is the gate: false while it is loaded/running, the role stays and
@@ -296,9 +313,6 @@ private:
 	// gate after every tick, then the Godot pipeline's tick sink.
 	void after_tick() override;
 	bool accept_tick(const opennova::inmatch::TickOutcome &p_tick) override;
-	// The renderer viewport height a listen host wraps its S2C 0x68 cursor
-	// against (0 = headless / no drawable viewport, D-NET-206).
-	int32_t renderer_viewport_height() const;
 	// The pool-2 building a packed blink hit names, as a bms_id (0 = none).
 	int blink_hit_owner_bms_id(uint32_t p_hit) const;
 	// Resource-install invariant only. Public lifecycle is
@@ -323,6 +337,8 @@ private:
 	// One opt-in gate for every native runtime timer/counter. Retail play keeps
 	// this false; F3 Stats and the manual probe share the public ownership seam.
 	bool runtime_profiling_enabled_ = false;
+	// The last tick's projectile traces (take_projectile_trace_profile).
+	opennova::world::CollisionWorld::TraceProfile last_trace_profile_;
 	// The FollowOwner effect-pose index (inmatch/effect_pose_index.h, held in
 	// present_; simulation_present.cpp maps its poses to Godot space).
 	void invalidate_present_effect_pose_cache() const;
@@ -386,7 +402,8 @@ private:
 	}
 	bool local_usegun_switch_is_instant() const {
 		return opennova::world::local_usegun_switch_is_instant(
-				kernel_->world, kernel_->local.weapon);
+				kernel_->world, kernel_->local.weapon,
+				kernel_->local.inventory_valid ? &kernel_->local.inventory : nullptr);
 	}
 	void commit_local_usegun_weapon_switch() {
 		opennova::world::commit_local_usegun_weapon_switch(
@@ -415,7 +432,8 @@ private:
 	void commit_pending_weapon_switch() {
 		opennova::world::commit_pending_weapon_switch(
 				kernel_->world, kernel_->local.weapon,
-				kernel_->local.inventory_valid ? &kernel_->local.inventory : nullptr);
+				kernel_->local.inventory_valid ? &kernel_->local.inventory : nullptr,
+				opennova::world::PendingCommit::kSwitch);
 	}
 	void handle_weapon_switch_outcome(
 			const opennova::world::WeaponSwitchOutcome &p_out) {
@@ -431,9 +449,10 @@ private:
 	// Player_InitPlayer's weapon leg (engine: runtime/inmatch/host_session.h); shared by table load,
 	// respawn, and the ACCEPT apply (which passes the freshly stored kit).
 	void rebuild_local_player_loadout(bool p_select_spawn_default);
-	// Copies the assigned side's profile page into the resident kit buffer
-	// (kernel_->local.loadout.spawn_kit) in a live session — retail's single restrictionData (engine: runtime/inmatch/loadout_submit.h). False when
-	// not in a session, before the catalog exists, or when the page resolves empty.
+	// Copies the assigned side's profile page into the spawn buffer
+	// (kernel_->local.loadout.spawn_kit(), the process's) in a live session — retail's single restrictionData (engine: runtime/inmatch/loadout_submit.h);
+	// out of one the profile's single-player page, else the static page, unless the mission's
+	// kit promoted. False when it copied nothing.
 	bool seed_session_kit_from_profile();
 	// Re-copies the page when the SIDE the team selector names stops matching the side
 	// the resident buffer came from — the S2C 0x04 latch arriving after the catalog, or
@@ -468,9 +487,6 @@ private:
 	// cat-7 player-trigger evaluator's LIVE word) as the view-action producers
 	// have written it; 0 without a kernel. A test seam over the engine state.
 	int debug_input_action_bits() const;
-	// The dead-player map-mode clear, run once per advanced tick (witness at
-	// hud::HudMapControl::on_local_player_dead).
-	void tick_hud_map_death_gate();
 	// The loadout profile seams the joiner role keeps shell-side (the role is
 	// constructed with them).
 	opennova::inmatch::JoinerRole::KitSeams joiner_kit_seams();
@@ -500,6 +516,12 @@ private:
 	// it). A host role is constructed with the same catalog. Called from
 	// resolve_item_traits, the boot's role hook, and enable_join.
 	void install_item_catalog();
+	// Install the retained Avatars.def registry (assets_.character_registry) on
+	// runtime_'s view: a player row's NetId the table lacks takes its side's first
+	// combo (engine ClientReplicaPipeline::set_character_registry, D-NET-NEW-L2-27);
+	// a mounted empty table installs too (it packs 0), none with no table mounted.
+	// Called from set_character_avatar_database, the boot's role hook, and enable_join.
+	void install_character_registry();
 	// Install the retained boot charattr table on the current Joiner runtime.
 	void install_charattr_table();
 	// Copy the per-class ATTRIBUTES words (and the latches S2C 0x42 carries)
@@ -520,10 +542,20 @@ private:
 	void install_app_id();
 	// Install the retained CD identity cookie (packed PUB* blob) on the runtime.
 	void install_join_cd_cookie();
+	// Install the retained gate GLSVSSREQUEST (the NovaWorld JOIN's last TLV) on the runtime.
+	void install_join_glsvss_request();
+	// Install the retained mission-start seam (the load flag, the side password).
+	void install_join_mission_start();
 	// The host's session record for a mission of `p_game_type` (the UI host config or the SP
-	// listen server's); host_bringup() adds the retained .til, text and Server strings for the
+	// listen server's, whose mission file is `p_sp_mission_file`: ShellHostSource::
+	// sp_mission_file); host_bringup() adds the retained .til, text and Server strings for the
 	// in-memory loads, which stage it themselves (the file boot's engine phase A stages its own).
-	opennova::inmatch::HostConfig host_session_cfg(uint32_t p_game_type);
+	opennova::inmatch::HostConfig host_session_cfg(uint32_t p_game_type,
+			const std::string &p_sp_mission_file = std::string());
+	// The latched map change's session record for its next map (simulation_rotation.cpp):
+	// the rotation's file and mode, the document's name; the load's head and its boot both
+	// take it.
+	void stage_next_mission_session_config(const opennova::bms::File &p_document);
 	opennova::inmatch::HostBringup host_bringup();
 	// The per-frame host owner loop: the ONE inmatch::HostRole::run_tick over the kernel
 	// (drain -> pre-tick -> host_session_pump -> local pumps -> adm ground), with the
@@ -568,6 +600,17 @@ public:
 			opennova::env::EnvironmentState *p_environment, const std::function<void()> &p_bind);
 	// An isolated mission root's start (no world load): the load ends, the mission start pending.
 	void finish_load_without_environment() { complete_session_load(); }
+	// The world's load runs its device stages after phase A (engine inmatch/host_boot.h
+	// HostBootRequest::render_arm_deferred): set ahead of boot_mission. The host's load window
+	// then leaves its render arm's pumps to those stages, and phase B its load end: the pumps
+	// ahead of the mission's textures, then the load end after them (HostRole::render_arm_pumps
+	// carries the witness). No-ops on a joiner or a load that owes neither.
+	void set_render_arm_deferred(bool p_deferred) { render_arm_deferred_ = p_deferred; }
+	void pump_host_render_arm_ahead_of_textures();
+	// Phase A left the host's mission-start head to phase B (engine inmatch/host_boot.h
+	// HostBoot::mission_start_head_owed): the world runs phase B past its device stages.
+	bool host_mission_start_deferred() const { return host_boot_.mission_start_head_owed; }
+	void end_host_mission_load();
 	// The precipitation drop pool's per-render update + compile for a camera
 	// (renderer/precipitation_frame.h carries the cites): the compiled frame the
 	// Precipitation node streams (drops, five floats per vertex, color, snow);
@@ -579,6 +622,12 @@ public:
 	// NOT ClassDB-bound: MissionAudio plays the engine rows.
 	void drain_weather_sounds(std::vector<opennova::world::WeatherSoundEvent> &r_events);
 	void drain_script_sounds(std::vector<opennova::world::ScriptSoundEvent> &r_events);
+	// The audio stops owed since the last take, cleared by the take: the dialog
+	// channel's playing line and the full channel shutdown (engine WorldOutbox::
+	// dialog_line_stop / audio_channels_shutdown carry the witnesses). True when
+	// either is owed. NOT ClassDB-bound: the frame's audio leg runs them on
+	// MissionAudio.
+	bool take_audio_stops(bool &r_dialog_line, bool &r_channels);
 	// The F3 Environment record (devtools/environment_snapshot.h) as a typed
 	// read for the GUT/probe side; null without a world.
 	Ref<EnvironmentSnapshot> get_environment_snapshot() const;
@@ -647,8 +696,16 @@ public:
 			const Ref<ItemDatabase> &p_item_db,
 			const Ref<TerrainData> &p_terrain,
 			const PackedByteArray &p_terrain_til, const String &p_wac_basename,
-			const String &p_infantry_adm, const String &p_mission_file_basename,
+			const String &p_infantry_adm, const String &p_mission_file,
 			bool p_playable);
+	// A fresh host's or single player's session create at the world load's start, ahead of its
+	// own loads (the head's terrain, the objects) and of boot_mission, whose phase A then creates
+	// none: the rotation seeded from the mount (a listening host's), then the engine's
+	// inmatch::create_host_session over the session record. OK when created or when there is
+	// nothing to create (no host role, a map change); ERR_CANT_CREATE when the `mpreset` word
+	// ended the process (session_create_ended_process).
+	int64_t create_host_session(const Ref<MissionData> &p_mission,
+			const Ref<ResourceRoot> &p_resource_root, const String &p_mission_file);
 	// Build + promote a small synthetic patrol mission (no file) for the headless unit test.
 	void build_demo_mission();
 	bool is_loaded() const;
@@ -656,6 +713,11 @@ public:
 	// Transport.
 	bool is_playing() const {
 		return session_.state() == opennova::inmatch::State::Running;
+	}
+	// A single-player session the pause holds: its frames still take Session::advance's
+	// paused branch (engine inmatch::Session::run_paused_update_legs).
+	bool is_session_paused() const {
+		return session_.state() == opennova::inmatch::State::Paused;
 	}
 	// Advance exactly ONE 62 Hz logic tick — the original's engine tick. The per-system
 	// dividers gate INSIDE the systems (the WAC VM self-gates to every 62nd tick, the BMS
@@ -690,10 +752,9 @@ public:
 	bool is_host_listening() const;
 	int get_host_listen_port() const;  // the bound UDP port (0 when not listening)
 	int get_host_peer_count() const;   // joiners in handshake or admitted
-	// The gate registration's GSID (0x81 SUS1), AppId (the status page's key), cookie-key table (the
-	// joiners' CD cookie decrypt) and login PCID (the host's own player's); LAN: empty / 0.
-	void set_novaworld_registration(const String &p_gsid, int p_app_id,
-			const opennova::SessionIdRing &p_cookie_keys, const String &p_login_pcid);
+	// The gate registration's GSID (0x81 SUS1), AppId (the status page's key) and login PCID (the
+	// host's own player's); LAN: empty / 0. The joiners' cookie keys are the host context's own.
+	void set_novaworld_registration(const String &p_gsid, int p_app_id, const String &p_login_pcid);
 	// The NovaWorld UDP session the shell keeps through the match (in use, flags, hosting/playing
 	// word, its own exit store): the N icon's inputs and the 62-frame NovaWorld exit's (D-NET-220).
 	void set_nwu_session(bool p_in_use, uint32_t p_flags, int32_t p_role, int32_t p_exit_reason);
@@ -727,6 +788,10 @@ public:
 	void configure_host_session(const Ref<HostSessionOptions> &p_options);
 	// A snapshot of the live host session as the same record.
 	Ref<HostSessionOptions> get_host_session_config() const;
+	// The last round's clock, which a mission start's server-info update reads ahead of its loads:
+	// the process's (inmatch::ClientProcessState::round_time_remaining_ticks), as the previous
+	// mission left it, a map change's or an earlier session's, 0 in a fresh process.
+	int32_t previous_round_time_remaining_ticks() const;
 	// The BMS header the tag=0x0B join reply carries: 0 until a mission loaded.
 	int get_mission_header_size() const;
 	// Debug/test hook: directly admit a synthetic remote peer at a Godot-space
@@ -748,11 +813,6 @@ public:
 			const String &p_server_password = String(),
 			const String &p_join_password = String());
 	bool is_joiner() const { return session_.kind() == opennova::inmatch::RoleKind::Joiner; }
-	// The proxy-assisted NovaWorld join (JoinTarget's typed ProxyRendezvousConfig):
-	// installs the joiner role's rendezvous config. Call after enable_join and
-	// before the first poll; a missing field sends nothing (the role's all-six
-	// gate), and a sim that is not a joiner installs nothing.
-	void set_join_proxy(const opennova::ProxyRendezvousConfig &p_proxy);
 	// Placed identities retired since the last take (the slot vanished or was
 	// re-typed): the mission root hides their placed representation.
 	PackedInt32Array take_retired_placement_ids();
@@ -779,6 +839,16 @@ public:
 		ROLE_DEDICATED_HOST = static_cast<int>(opennova::inmatch::RoleKind::DedicatedHost),
 	};
 	int session_role() const { return static_cast<int>(session_.kind()); }
+	// The scene gate (engine inmatch::Session::draws_scene): the role's verdict on
+	// `p_toggles`' status view, for a frame the session did not advance (an advanced frame's
+	// own verdict, taken after its drain, rides MissionFrameOutcome::is_scene_drawn).
+	bool session_draws_scene(const Ref<HudToggles> &p_toggles) const;
+	// The render gate (engine inmatch::Session::renders) for a frame the session did not
+	// advance: false inside a joiner's final wait (MissionFrameOutcome::is_rendered otherwise).
+	bool session_renders() const { return session_.renders(); }
+	// Whether the session's entities are presented at all (engine
+	// inmatch::Session::presents_entities): never on a dedicated host.
+	bool session_presents_entities() const { return session_.presents_entities(); }
 	int session_state() const { return static_cast<int>(session_.state()); }
 	// The fixed logic-tick quantum (1/62.5 s) — the ONE cadence constant,
 	// re-exported from the engine accumulator for GDScript composition.
@@ -825,12 +895,15 @@ public:
 	// CK; a NovaWorld host validates it (reject code 9). Empty/"0" is the LAN
 	// default. Retained across runtime rebuilds like the character data.
 	void set_app_id(const String &p_token);
-	// The joiner's network type (JoinTarget::NetworkType; retail's g_NapiNPCtx.transport_mode).
+	// The joiner's network type (JoinTarget::NetworkType; retail's g_NapiNPCtx.network_type).
 	void set_join_network_type(int p_type);
 	// The CD identity cookie (packed PUB* blob) for the C2S 0x00 JOIN — the
 	// NovaWorld-issued NAMEINFO/PCID/SQUADINFO/JOINTICKET the host validates
 	// (codes 23/24/25/28). Empty for LAN. Retained across runtime rebuilds.
 	void set_join_cd_cookie(const PackedByteArray &p_cookie);
+	// The NovaWorld gate's GLSVSSREQUEST (wire bytes) the C2S 0x00 JOIN of a NovaWorld join
+	// carries last (D-NET-723). Empty for LAN. Retained across runtime rebuilds.
+	void set_join_glsvss_request(const PackedByteArray &p_request);
 	// The browse row's 0x81 record the join connects with (HK, SF, expansion and the
 	// browse's CI), built from the join target; a null target clears it.
 	void set_join_discovered_session(const Ref<JoinTarget> &p_target);
@@ -845,17 +918,78 @@ public:
 	// matching Game_Run's continue-after-error behavior.
 	bool load_charattr(
 			const Ref<class ResourceRoot> &p_resource_root);
-	// Retail connects before constructing the wire-header world: drive only the socket/session
-	// legs until the terminal pre-world sync marker has been received and ACKed
-	// (S2C 0x7B identifies the mission earlier), then resume the same connection
-	// after the caller has constructed it. No World tick or gameplay uplink runs here.
-	void set_join_world_ready(bool p_ready);
 	// Freeze the renderer's unique loaded, non-foliage .3DI definition count
 	// into the joiner's C2S 0x3D paging seam. GameWorld calls this once after
 	// mission/render model setup and before revealing the loaded world; later
 	// S2C entity spawns and presentation loads deliberately cannot mutate it.
 	void finalize_loaded_model_challenge_snapshot();
+	// The model files that list's loads created, in load order, its foliage left out
+	// (engine: LoadedModelList::model_files): the shell's freeze resolves each one's materials
+	// before the first frame, as retail's loads fill every listed row's husk family at the
+	// mission start and its freeze resolves their materials (FX-5, D-NET-NEW-L3-31). Empty until
+	// the snapshot is finalized.
+	PackedStringArray get_mission_start_model_files() const;
+	// The model-list readout (a debug instrument; engine inmatch/loaded_model_list.h
+	// loaded_model_list_entries, the model_list_dump probe): the list this mission's load froze,
+	// head first, foliage nodes included (empty until the snapshot is finalized); and the
+	// frozen page's count (the C2S 0x3D page a joiner answers, a host's S2C 0x68 wrap).
+	TypedArray<ModelListNodeRow> debug_mission_start_model_nodes() const;
+	int64_t debug_loaded_model_list_count() const;
+	// The joiner net readout (a debug instrument; engine inmatch/joiner_net_trace.h, the
+	// joiner_net_trace probe): the role's client runtime's per-frame records with seq >=
+	// p_from_seq, oldest first (none without a runtime, and none on a host's own client), and
+	// the seq the next record takes.
+	TypedArray<JoinerNetTraceRow> debug_joiner_net_trace(int64_t p_from_seq) const;
+	int64_t debug_joiner_net_trace_next_seq() const;
+	// The same readout for a C++ embedder (the post-load frame timeline's net-pass marks, an
+	// instrument): null without a runtime.
+	const opennova::inmatch::JoinerNetTrace *joiner_net_trace() const;
+	// The joiner's load at the S2C 0x11 (engine: inmatch/joiner_connection.h
+	// set_sync_tail_loading): the shell declares it while the 0x11 is awaited and clears it
+	// once the load has ended; the 0x0A follows.
+	void set_join_sync_tail_loading(bool p_loading);
+	// The joiner's effect system load between the final S2C 0x64 and the 0x09 (engine:
+	// inmatch/joiner_connection.h set_mission_data_loading): the shell declares it once for
+	// every mission start and ends each load; the 0x09 follows.
+	void set_join_mission_data_loading(bool p_loading);
+	bool is_join_mission_data_load_running() const;
+	void end_join_mission_data_load();
+	bool is_join_mission_start_released() const;
+	// The load's first leg once its definition and model loads are in (engine:
+	// ClientRuntime::push_mission_start_first_loadout): the first 0x2F; nothing before the
+	// release or after the leg ran.
+	void push_join_mission_start_first_loadout();
+	// The join's role a loading step runs its periodic update on (engine: inmatch::run_loading_step,
+	// D-NET-NEW-L2-54, D-NET-NEW-L9-25), null on any other session.
+	opennova::inmatch::JoinerRole *loading_step_joiner() const { return joiner_role_; }
+	// The streamed pools into the World ahead of the settle's placement (engine:
+	// inmatch::JoinerRole::materialize_world_stream, D-NET-NEW-L2-38).
+	void materialize_join_world_stream();
+	// The header-only load's slot leg, past its seat table and traits (engine:
+	// inmatch::JoinerRole::run_streamed_weapon_slot_class_inits, D-NET-NEW-L4-29).
+	void run_join_streamed_weapon_slot_class_inits();
+	// The mission start's model reload's pool-0 animation maps, at the reload's place in the
+	// load (engine: inmatch::JoinerRole::reload_pool0_row_channels, D-NET-NEW-L2-56).
+	void reload_join_pool0_row_channels();
+	// The game-start wait's pass and, when it takes the S2C 0x1A, the mission start's call in
+	// the same call: the shell's load, its settle, then the push and the final wait's first
+	// pass (engine: inmatch::JoinerRole::poll_mission_start, D-NET-NEW-L2-35). Stopped
+	// without a joiner.
+	opennova::inmatch::JoinerRole::MissionStartPass poll_join_mission_start(
+			const opennova::inmatch::JoinerRole::MissionStartLegs &p_legs);
 	bool poll_join_preload();
+	// The shell's cancel of a join: ahead of the mission start the join screen's ABORT
+	// (engine inmatch::JoinerRole::cancel_join carries the witness); inside it the
+	// teardown routes the wait's abort.
+	void cancel_join();
+	// The final wait's ESC: it leaves the wait for the game loop and nothing else (engine
+	// inmatch::JoinerConnection::cancel_final_wait carries the witness); false outside it.
+	bool cancel_join_final_wait();
+	// The game loop runs: from the S2C 0x0F, or from an ESC that left the final wait.
+	bool is_join_game_loop() const;
+	// A mission start the round-over gate abandoned: its game loop lingers to exit 4, which
+	// restarts it (engine inmatch::JoinerConnection::mission_start_aborted).
+	bool is_join_mission_start_aborted() const;
 	bool is_join_preload_ready() const;
 	// The joiner's admission-FSM stage name (diagnostics: the shell's post-load join
 	// watchdog names the stage a stalled join is parked in). Empty when not joining.
@@ -900,18 +1034,49 @@ public:
 	// map change (the next map's file; empty when the rotation ended) and the joiner's reload.
 	String begin_host_map_change();
 	bool begin_joiner_reload();
+	// A host's mission load ahead of the world's effect system: the latched map change's
+	// world-free head over the next map's document (engine inmatch/host_boot.h
+	// begin_next_host_mission_load), else a fresh session's head past its create
+	// (create_host_session; HostRole::begin_mission_load); then the head's window past that
+	// effect system (HostRole::open_mission_load_window), and one of the stage pumps the world
+	// runs at its terrain and ahead of its objects. All three are no-ops on any other load.
+	void begin_host_mission_load(const Ref<MissionData> &p_mission,
+			const Ref<ResourceRoot> &p_resource_root, const String &p_mission_file);
+	void open_host_load_window();
+	void pump_host_load_stage();
 	// The round-over leg of the special-key chain (inmatch::round_over_key): the
-	// hud_round_over bits for a Windows VK and the RESTART key.
+	// hud_round_over bits for a Windows VK and the RESTART key (kArm once the
+	// round-over gate holds; a co-op session's RESTART / ESC store the role's exit).
 	int round_over_key(int p_vk, int p_restart_vk);
 	// The in-game menu's RESTART (World::ingame_restart_command): false in a session.
 	bool ingame_restart();
 	// True once the joiner has name-matched its organic-spawn record and received the
 	// applicable deployment release (self handle H known and gameplay uplink enabled).
 	bool is_joined_in_match() const;
-	// A joiner's mission-start input reset is due (engine
-	// inmatch::ClientRuntime::take_input_reset); reading clears it. False
-	// for any other role, whose mission start resets at its load.
+	// An input reset is due: a joiner's mission start's (engine
+	// inmatch::ClientRuntime::take_input_reset; any other role's mission start
+	// resets at its load) or a role action's (inmatch::Role::take_input_reset, the
+	// deploy action's head); reading clears both.
 	bool take_input_reset();
+	// The armory screen's ACCEPT and CANCEL head: Input_ResetAllState over the running
+	// role (engine inmatch/session.h Role::reset_all_input_state carries the witness).
+	void reset_all_input_state();
+	// The Escape key over live play runs Player_ResetLocalInput ahead of its own chain
+	// (engine inmatch::Role::reset_local_input; D-NET-560); its device legs reach the
+	// shell through take_input_reset. True when it ran past its local-entity test: the
+	// shell's device then owes the Scroll Lock turn-off (D-NET-563).
+	bool escape_input_reset();
+	// Input action 3, the exit: the quit dialog's yes and a menu screen's confirmation (the
+	// in-game CONFIRM_YES, the death screen's yes: `p_menu_screen`) run it inline and a
+	// code 3 record at its input frame (engine inmatch/remote_admin.h input_action_exit
+	// and ExitSite carry the witness): a joiner's CIDEMIS goodbye leaves inside it.
+	void input_action_exit(bool p_menu_screen = false);
+	// The arms of the drained records the sim owns, reached through the player input router's
+	// dispatch (a key's record and a console line's alike; engine inmatch::TickInputSource::
+	// dispatch_record carries the witness): code 3 the exit with its Exit Mission tone, code 34
+	// the punt of the slot `p_param` names (the authority's alone), code 48 the PuntLog row's
+	// punt.log. False for any other code.
+	bool dispatch_action_record(int32_t p_code, int32_t p_param);
 	// Monotonic initial-admission boundary: the host's S2C 0x0F has landed in the
 	// deploy wait, for any role (D-NET-678). Deploy-pick state is intentionally
 	// exposed separately.
@@ -976,7 +1141,6 @@ public:
 	int local_medic_request_serial() const;
 	bool send_team_change_request(); // DEATH's SWAP_TEAMS (ClientRuntime::queue_team_change_request)
 	bool local_player_dead() const; // the one role-agnostic read of the local player's dead bit
-	void broadcast_dialog_line(const std::string &p_dialog, int p_line); // Server_BroadcastDialogLine
 	// The end-of-round presentation feed (net-re §5.68; simulation_end_round.cpp):
 	// the 0x1D header edge + the 0x56 board through the ONE ClientEndRoundStats
 	// every role's view folds; the overlay text ladder (hud/end_round_overlay.h)
@@ -1060,8 +1224,10 @@ public:
 	// selection (engine: formats/def/def.h).
 	void set_player_input(bool p_forward, bool p_back, bool p_left, bool p_right,
 	                      bool p_lean_left, bool p_lean_right, bool p_jump);
-	// One frame of mouse pixels (screen sense: +x right, +y down) applied to the local
-	// player's look through the witnessed integer pipeline: sens = setting << 11,
+	// Axis input (screen sense: +x right, +y down) applied to the local player's look
+	// at once, past the session's mouse pump: the direct feed of the probes, the
+	// tests and the debug look, in the axis units onHook's look_px is (one cursor
+	// pixel is eight of them through the pump). The witnessed integer pipeline: sens = setting << 11,
 	// scoped zoom reduction, (px*sens+0x8000)>>16 per axis; yaw wraps; pitch clamps
 	// +-80 deg with the up-limit +40 deg while prone. (engine: runtime/mission/mission_kernel.cpp)
 	void add_local_player_look(float p_dx_px, float p_dy_px);
@@ -1122,6 +1288,15 @@ public:
 	// stamped on the local player — entity+0x15C on the host's own spawn, the
 	// named 0x0C record's id on a joiner (also before L exists); 0 = none yet.
 	int get_local_player_character_id() const;
+	// The local body's runtime type word, the one its def (and so its avatar's
+	// item model) binds by: L's own, else the type a joiner's L will bind from its
+	// learned self record (the deploy-screen hold, the challenge prewarm, the load's
+	// person warm), else the player template's.
+	int get_local_player_type_id() const;
+	// A joiner that has learned its own record (the host's 0x0C named it), L born or not:
+	// its type word and character id stand for L's ahead of L's birth at the mission
+	// start's push (engine inmatch::JoinerRole::init_local_player_at_mission_start).
+	bool has_learned_self_record() const;
 	// Authoritative armory on-show state from the spawned entity. The class is
 	// playerClass +0x294; the name resolves equipped AdmDef index +0x2B0.
 	// (engine: runtime/world/player_loadout.cpp)
@@ -1185,6 +1360,9 @@ public:
 	// synthetic-def seam and retires with S7a.
 	bool install_local_player_weapon_by_name(const String &p_weapon_name,
 	                                         bool p_preserve_slot_state = false);
+	// The spawn sync's by-name install: a fresh slot with none of the mount's view words
+	// (engine: MissionKernel::install_spawn_weapon).
+	bool install_local_player_spawn_weapon_by_name(const String &p_weapon_name);
 	// Render-side late binding of .adm clip lengths for the already-mounted def.
 	// This is the only path allowed to preserve a same-name live action slot and
 	// queued presentation (engine: runtime/inmatch/joiner_role.cpp).
@@ -1200,6 +1378,14 @@ public:
 	// gate runs sim-side) (engine: runtime/world/local_player_view.cpp).
 	void set_local_player_weapon_input(bool p_fire_held, bool p_fire_pressed,
 	                                   bool p_reload_pressed);
+	// The left mouse button's down at an update's message pump: the PowerThrow windup's
+	// restart or clear (engine world::local_weapon_left_button_down carries the witness).
+	// C++ only: the player input router's.
+	void local_player_left_button_down();
+	// The dispatcher's head for a binding row's event by its dispatch code (engine:
+	// inmatch::Role::action_head_admits); with no bound role it admits, and the
+	// seam's own gates decide.
+	bool action_head_admits(int p_code);
 	// The ADS toggle request: gated by the dispatcher rules (no toggle during
 	// RELOAD/SWITCHFROM, def Flags & 3 required), flips the sim-owned engaged bit
 	// and queues the scopeup/scopedown FSM states. Returns whether it toggled.
@@ -1342,8 +1528,11 @@ public:
 	bool fill_vehicle_panel(const opennova::def::DefVehicleHudBlock &p_block,
 			opennova::hud::HudVehiclePanelState &r_state) const;
 	// NOT ClassDB-bound: the AAS zone panel feed (world/lfp_feed.h), one HudLfpZone per
-	// spawn-zone entry joined with its zone-timer entry and transient minimap slot flags.
+	// spawn-zone entry joined with its zone-timer entry and its regular map slot's capture bits.
 	bool fill_lfp_zones(int p_local_team, std::vector<opennova::hud::HudLfpZone> &r_zones);
+	// NOT ClassDB-bound: the takeover dialog's nearest zone-timer entry
+	// (inmatch/takeover_status_feed.h); false when none qualifies.
+	bool fill_takeover_facts(opennova::hud::HudTakeoverFacts &r_facts);
 	// The in-match game type for every role (joiner header / HostClient view).
 	int64_t get_session_game_type() const;
 	String get_command_map_rules_text(const Ref<RtxtStringFile> &p_gametext) const; // RULELIST (inmatch::command_map_rules_text); "" = keep
@@ -1375,11 +1564,11 @@ public:
 	// rows {name, ammo_primary, ammo_secondary, flags} (values default -1). When
 	// p_filter_by_availability, the kit is filtered through the availability table
 	// with the knife fallback — the SP .bms promote leg (engine: runtime/world/player_loadout.cpp); the armory/profile legs store unfiltered (the server validates).
-	// An empty kit resets to the engine default {WPN_M4AUTO} (engine: runtime/mission/mission_kernel.cpp).
+	// An empty kit empties the buffer (engine: runtime/world/player_loadout.h).
 	void set_spawn_loadout(const TypedArray<WeaponKitEntry> &p_kit, bool p_filter_by_availability);
-	// True only after a mission/profile explicitly supplied a spawn kit; the
-	// WPN_M4AUTO engine fallback created by load_weapon_table leaves this false.
-	bool has_explicit_spawn_loadout() const { return kernel_->local.loadout.spawn_kit_set; }
+	// True only after this load's mission kit wrote the spawn buffer; the single player's
+	// static page and profile page leave this false (engine: LocalPlayerLoadout::mission_kit_promoted).
+	bool has_explicit_spawn_loadout() const { return kernel_->local.loadout.mission_kit_promoted; }
 	// Availability by weapon name: 0 banned / 1 allowed / 2 armory-zone-only /
 	// 3 mission-allowed; unknown names read 1. The armory UI filter term
 	// (engine: runtime/world/weapon_inventory.h).
@@ -1401,6 +1590,43 @@ public:
 	// The process's cfg block (player/game_config_block.h): every session create reads its
 	// mpreset word, and a ServerCommand's config change writes it (execute_server_command).
 	void use_game_config(const Ref<GameConfigBlock> &p_block) { net_.game_config = p_block; }
+	// The process's map-rotation words (simulation_net_state.h): the game world's one
+	// HostRotation, which every session's host reads and writes. Null = this sim's own.
+	void use_host_rotation(opennova::inmatch::HostRotation *p_rotation) { net_.process_rotation = p_rotation; }
+	// The process's server log devices (simulation_net_state.h), which every hosted
+	// session's context writes. Null = none.
+	void use_log_devices(opennova::inmatch::ServerLogDevices *p_devices) { net_.log_devices = p_devices; }
+	// The shell's live binding table (ControlsBindings' model), which the console's
+	// SAVEKEYS dumps into keylist.key. Null: SAVEKEYS is taken and writes nothing.
+	void set_controls_model(const Ref<ControlsModel> &p_model) { controls_model_ = p_model; }
+	// The console command's seams on the role's client runtime (engine
+	// inmatch/client_runtime.h set_local_command_seams): SAVEKEYS' keylist.key over
+	// the controls model, SAVENFO's debug.nfo over the world and its items.def rows,
+	// VERSION's version and title words, both files in the process's working
+	// directory (the log devices'). A host's own client is a session peer, single
+	// player's too (D-NET-NEW-LI-27): its server's handler takes the authority's arms.
+	// Run whenever the role hands a fresh runtime.
+	void install_console_seams();
+	// The remote-admin console's seams over this session (C++ only; the game world's admin
+	// pump binds them, engine inmatch/remote_admin.h): the process block and its save, the
+	// host's rotation and catalog, the avatars, the mission's items.def rows, the mounted
+	// gametext (GameText_GetString, the override table first) and the title's version and name
+	// texts.
+	opennova::inmatch::AdminConsole::Seams remote_admin_seams(opennova::gamecfg::GameCfg *p_block,
+			std::function<void()> p_save_config);
+	// What the console binds over (engine inmatch/remote_admin.h RemoteAdminBinding): the host
+	// context, the process's own client (the listen host's or the joiner's), the world, and this
+	// session's identity.
+	opennova::inmatch::RemoteAdminBinding remote_admin_binding();
+	// The process's CRT stream the challenge draws from while a mission runs (World::crt_rand);
+	// null with no kernel.
+	opennova::io::CrtRand *process_crt_rand();
+	// The listen host's own client runtime (null: none), which a map change remakes; the admin
+	// pump rebinds its console when it changes.
+	opennova::inmatch::ClientRuntime *host_client_runtime();
+	void use_client_process(opennova::inmatch::ClientProcessState *p_state) { net_.client_process = p_state; }
+	// The next boot is the single player's restart (KernelBootOptions::restart).
+	void set_restart_boot(bool p_restart) { restart_boot_ = p_restart; }
 	// The last load's session create ended the process on a nonzero mpreset (inmatch
 	// CreateSessionResult::ProcessExit): the embedder exits with code 0, saving nothing.
 	bool session_create_ended_process() const;
@@ -1438,10 +1664,10 @@ public:
 	}
 	static Ref<FpViewmodelSpec> fp_viewmodel_spec(bool p_has_def, const String &p_gfx1,
 			const String &p_character_arms, const String &p_animadm, int p_flags);
-	// Rebuild the local player's slot pool from the spawn kit and select the spawn
-	// default — the Player_InitPlayer weapon leg (engine: runtime/inmatch/host_session.h). Runs automatically after load_weapon_table; call
-	// again on respawn.
-	void respawn_local_player_loadout();
+	// Player_InitPlayer(1)'s re-run on the local player, as a self S2C 0x50's handler runs it
+	// (engine: LocalPlayer::respawn_init(true): the view resets, the weapon leg from the spawn
+	// kit with its select and walk, the map defaults), then the 0x2F seam re-armed.
+	void reinit_local_player();
 	// The category keys (engine: runtime/controls/controls.h). Category 1..9 =
 	// the retail Knife/Sidearm/Primary/Flashbang/Frag/Smoke/Accessory/Detonator/
 	// Medpack keys ('1'..'9').
@@ -1472,17 +1698,24 @@ public:
 	bool is_runtime_profiling_enabled() const {
 		return runtime_profiling_enabled_;
 	}
-	// Allocation-free last-tick trace sampling for the F3 hot path. Vector
-	// lanes are times=(terrain, static, dynamic, person),
+	// Allocation-free trace sampling for the F3 hot path: the last tick's traces, as
+	// the tick's sink took them (take_projectile_trace_profile: the profile since the
+	// previous take, the collision world's own then cleared, engine
+	// CollisionWorld::clear_trace_profile). Vector lanes are
+	// times=(terrain, static, dynamic, person),
 	// counts=(calls, static survivors, dynamic survivors, person survivors),
 	// and faces=(static, dynamic).
 	Vector4i get_last_projectile_trace_times_us() const;
 	Vector4i get_last_projectile_trace_counts() const;
 	Vector2i get_last_projectile_trace_faces() const;
+	void take_projectile_trace_profile();
 	// Allocation-free int forms of the same last-frame counters, for per-frame
 	// sampling by the F3 frame-stats board (a Dictionary per frame would churn).
 	int64_t get_last_present_snapshot_us() const {
 		return static_cast<int64_t>(present_.last_snapshot_us);
+	}
+	int64_t get_last_present_snapshot_body_us() const {
+		return static_cast<int64_t>(present_.last_snapshot_body_us);
 	}
 	int64_t get_last_occlusion_build_us() const {
 		return static_cast<int64_t>(present_.last_occlusion_build_us);
@@ -1561,12 +1794,23 @@ public:
 	// fire pass's; the bound form wraps the same rows for the tests.
 	void drain_sound_emitter_events(std::vector<opennova::world::SoundEmitterEvent> &r_events);
 	// Typed audio presentation/acknowledgement seam; WAC owns the channel state.
+	// script_voice_frame is the scene frame's update (a joiner's decoded-row anchor first, then
+	// the anchor reset and the gain: engine ScriptVoiceChannel::frame); script_voice_state the
+	// channel as it stands, with no reset (ScriptVoiceChannel::sample).
 	opennova::world::ScriptVoiceChannel::Frame script_voice_frame(const Vector3 &p_listener);
+	opennova::world::ScriptVoiceChannel::Frame script_voice_state(const Vector3 &p_listener) const;
 	void finish_script_voice(uint64_t p_serial, const opennova::lwf::WavPcm *p_clip);
 	void set_script_voice_resolver(opennova::world::ScriptVoiceChannel::SetResolver p_resolver);
 	bool play_script_wave(const String &p_filename);
 	// The world's one dialog table, which mission audio plays (runtime/audio/dialog_queue.h).
 	opennova::audio::DialogQueue *dialog_queue();
+	// One dialog tick over the world's table: the device loads and plays each line, then the
+	// authority's leg runs at the load (engine inmatch::authority_dialog_line_loaded: the chat
+	// legs on the host's own client, then the S2C 0x28). Nothing without a kernel.
+	void tick_dialog_queue(bool p_frame_rendered, const opennova::audio::DialogQueue::LoadLine &p_load,
+			const opennova::audio::DialogQueue::VoicePlaying &p_playing);
+	// The co-op dialog lines a non-authority plays (world::WorldOutbox::dialog_lines).
+	void drain_dialog_lines(std::vector<opennova::world::DialogLineOrder> &r_lines);
 	bool play_dialog(int p_dialog_index); // the PlayWavList play by number (probes, tools)
 	TypedArray<SoundEmitterRow> drain_sound_emitters();
 
@@ -1593,6 +1837,10 @@ public:
 	// events; the tests author a DestructionDrain through its data leg.
 	void drain_vehicle_effects(std::vector<opennova::world::VehicleEffectEvent> &r_events);
 	void drain_destruction_events(opennova::world::DestructionEvents &r_events);
+	// Every queue the entity presenter's passes drain, dropped undrawn: a session that
+	// presents no entity (a dedicated host) empties them each ticked frame (engine
+	// world::discard_entity_presentation). NOT ClassDB-bound: MissionRoot's session step.
+	void discard_entity_presentation();
 	// NOT ClassDB-bound: the piece pool + frame draws; the NVG laser persons + ray clip.
 	void fill_death_pieces(std::vector<opennova::world::DeathPieceRow> &r_pieces) const;
 	const std::vector<opennova::world::DeathPieceDraw> &death_piece_draws() const;
@@ -1728,10 +1976,17 @@ public:
 
 	Error debug_teleport_local_player(const Vector3 &p_mission_pos, float p_yaw_deg,
 			float p_pitch_deg);
-	// The joiner's setup pose (devtools; engine LocalPlayer::apply_pose, double-precise words):
-	// ERR_UNAVAILABLE unless a joiner with L; ERR_INVALID_PARAMETER for an unencodable pose.
+	// The scenario setup pose on any role (devtools; engine LocalPlayer::apply_pose, the
+	// bridge's ApplyPose write, double-precise words): ERR_UNAVAILABLE without L;
+	// ERR_INVALID_PARAMETER for an unencodable pose.
 	Error debug_apply_local_pose(double p_x, double p_y, double p_z, double p_yaw_deg,
 			double p_pitch_deg);
+	// The parity runner's slot staging (engine: runtime/inmatch/slot_staging.h): the host's
+	// Position write for the body player slot `p_slot` holds, at the BMS position in units.
+	// ERR_UNAVAILABLE without a host session; ERR_DOES_NOT_EXIST for a slot holding no
+	// player; ERR_UNCONFIGURED for a player holding no body; ERR_INVALID_PARAMETER for a
+	// position outside the 16.16 range.
+	Error debug_stage_slot(int p_slot, double p_x, double p_y, double p_z);
 	// Round-outcome card: {ended, winner_team, bluekills, greenkills, enemy_kills,
 	// team_kills_by_others, friendly_kills_by_others, enemy_kills_by_others, humans}.
 	// The sim-side end-of-round state + the SP kill-stat buckets the epilog score
@@ -1850,7 +2105,8 @@ public:
 	void resolve_item_traits(const Ref<class ItemDatabase> &p_item_db);
 
 	// Install the packed Avatars.def character-sex registry used by the
-	// portable sound-profile selector. Retained across reset_world; returns the
+	// portable sound-profile selector, and its combos on a joiner's decode view
+	// (install_character_registry). Retained across reset_world; returns the
 	// number of unique packed character ids installed.
 	int set_character_avatar_database(
 			const Ref<class AvatarDatabase> &p_avatar_db);
@@ -1892,6 +2148,22 @@ public:
 	                         int p_object_detail = opennova::renderer::kObjectLodDetailLevelMax);
 	// The weapon Inset pass's own collect, after the main one (simulation_present_state.h).
 	const InsetOcclusionView &run_inset_occlusion(const InsetOcclusionRequest &p_request);
+	// A water mirror's collect ahead of its scene's: the view block's eye
+	// unmirrored (p_collect_eye, the compose without the scene's optics offsets:
+	// engine world/local_player_view.h LocalPlayerViewFrame::view_block) over a
+	// square view of p_fov_deg; its reflected subscene's death pieces test against
+	// the mirror of p_reflected_eye, the view that subscene draws from. Returns the
+	// word its mask build leaves, the one its scene's water letter label reads
+	// (engine world/occlusion.h OcclusionWorld::mirror_water_visible). Its lists
+	// land in mirror_occlusion(p_mirror).
+	enum MirrorView { MIRROR_MAIN = 0, MIRROR_INSET = 1 };
+	bool run_mirror_occlusion(MirrorView p_mirror, const Transform3D &p_collect_eye,
+			const Transform3D &p_reflected_eye, double p_fov_deg, double p_viewport_width,
+			double p_fog_dist_units, double p_water_z_units, bool p_force_indoors,
+			int p_object_detail);
+	const MirrorOcclusionView &mirror_occlusion(MirrorView p_mirror) const;
+	// The mirror stopped rendering: its view and baselines reset.
+	void release_mirror_occlusion(MirrorView p_mirror);
 	void release_inset_occlusion();
 
 	// Frame results: [bms_id, packed, forced] triples for the buildings the
@@ -1982,13 +2254,15 @@ public:
 	void set_contact_debug_kind_mask(int64_t p_mask);
 	void clear_contact_debug();
 	bool native_physics_snapshot(opennova::devtools::PhysicsSnapshot &out) const;
+	// The scene frame's facial passes over the view the frame just composed (the frame-leg
+	// table's facial row; engine world::FacialSystem::render_scene_passes).
+	void advance_facial_presentation(const opennova::world::LocalPlayerViewFrame &p_view);
+	void fill_minefield_draw_rows(std::vector<opennova::world::MinefieldDraw> &r_rows) const;
 	// Per-frame visual snapshot of item-modeled throwables: tracer-cadence flying
 	// rounds with a TrcrID model plus placed devices; the enemy-team item swap
 	// follows the viewer team (engine: runtime/world/round_sim.h).
 	// The native form is the throwable pass's; the bound form wraps the same
 	// rows for the tests.
-	void advance_facial_presentation(const Vector3 &p_camera);
-	void fill_minefield_draw_rows(std::vector<opennova::world::MinefieldDraw> &r_rows) const;
 	void fill_throwable_visual_rows(std::vector<opennova::world::ThrowableVisualRow> &r_rows) const;
 	TypedArray<ThrowableVisualRow> get_throwable_visuals() const;
 	// Even-tick, simulation-owned watercraft W3/W4 wake samples. The native
@@ -2040,12 +2314,13 @@ public:
 			const Vector3 &p_dir_godot, float p_max_range_units);
 	// Diagnostic round injector: spawns one live round through the REAL
 	// RoundSim::spawn (production velocity/tracer/trail path; owner = the
-	// local player) from a Godot-space origin along a Godot-space direction,
-	// firing the named ammo ("AMMO_556", ...). The world tick flies it and the
-	// F3 Rounds ring records the outcome — the pose-replay probe's seam.
-	// Returns the round slot, -1 on bad ammo/full pool.
+	// local player, or the entity p_shooter_wire_handle names when it is >= 0)
+	// from a Godot-space origin along a Godot-space direction, firing the named
+	// ammo ("AMMO_556", ...). The world tick flies it and the F3 Rounds ring
+	// records the outcome — the pose-replay probe's seam. Returns the round
+	// slot, -1 on bad ammo/full pool or a shooter handle naming no entity.
 	int debug_spawn_round(const Vector3 &p_from_godot, const Vector3 &p_dir_godot,
-	                      const String &p_ammo_name);
+	                      const String &p_ammo_name, int p_shooter_wire_handle = -1);
 
 	// Local-player blink state (engine: runtime/world/collision.h). The render/audio hosts gate interior behavior on these.
 	bool local_player_indoors() const;
@@ -2109,6 +2384,27 @@ public:
 	// arm through the armory press latch, which an armory press sets and a
 	// latched one leaves refused; the mount chain without a kernel.
 	UseItemArm take_use_item_press();
+	// The USE readout (a debug instrument; engine world/use_press_trace.h, the use_press_trace
+	// probe): the held press, toggle-gate and seat-scan records with seq >= p_from_seq, oldest
+	// first (none without a kernel); the seq the next record takes; and the role's client
+	// runtime's framed C2S 0x26 count (0 without one).
+	TypedArray<UsePressRow> debug_use_press_trace(int64_t p_from_seq) const;
+	int64_t debug_use_press_next_seq() const;
+	int64_t debug_attach_requests_sent() const;
+	// The readout's watched registry handle (-1 clears): every record then carries that
+	// entity's scan inputs (its Flags, its pool-1 table row and radius, the local body's
+	// slice membership). Instrument state only.
+	void debug_set_use_press_watch(int64_t p_handle);
+	// The body readout (a debug instrument; engine world/body_trace.h, the body_trace probe):
+	// the held per-tick, ground-probe, force and blast records with seq >= p_from_seq, oldest
+	// first (none without a kernel); the seq the next record takes; and the watched registry
+	// handles (up to BodyTrace::kWatchSlots; an empty array clears). Instrument state only.
+	// debug_local_body_handle is the local body's own registry handle (a joiner's L, not the
+	// wire handle H), -1 without one: the handle a joiner's readout watches its body by.
+	TypedArray<BodyTraceRow> debug_body_trace(int64_t p_from_seq) const;
+	int64_t debug_body_trace_next_seq() const;
+	void debug_set_body_trace_watch(const PackedInt32Array &p_handles);
+	int64_t debug_local_body_handle() const;
 	// A useitem key's release clears the press latch (engine
 	// LocalPlayer::release_use_item_key).
 	void release_use_item_key(bool p_system_key_up);
@@ -2124,6 +2420,16 @@ public:
 	// reads team 0 = open). False without a kernel.
 	bool local_player_in_vehicle_loadout_zone() const;
 	bool local_player_vehicle_zone_team_matches() const;
+	// THE VEHICLE SCREEN (engine: runtime/inmatch/vehicle_menu.h, D-NET-NEW-L5-5):
+	// the open (its first asks the host, C2S 0x42), the ITEM_LIST rows and the
+	// selected row as the engine's poll left them, a row pick, and the ACCEPT /
+	// CANCEL click (true when ACCEPT queued its C2S 0x40). False / empty without
+	// a client runtime.
+	bool open_vehicle_menu();
+	PackedStringArray get_vehicle_menu_rows() const;
+	int get_vehicle_menu_selected_row() const;
+	void select_vehicle_menu_row(int p_row);
+	bool click_vehicle_menu(bool p_cancel);
 
 	// The USE-ITEM mount toggle: weapon-busy gate + the witnessed toggle
 	// (deck best-seat / nearest-seat scan / seat-swap-or-detach). Returns true when a

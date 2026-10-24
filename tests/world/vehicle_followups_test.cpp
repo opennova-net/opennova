@@ -12,6 +12,9 @@
 #include <runtime/world/destruction.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/terrain_query/height_field.h>
+
+#include "../common/hull_brain.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -44,11 +47,15 @@ struct Rig {
         // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
         v.item_attrib = kItemAttribPlayerControl;
         v.item_id = 1291;
+        v.has_graphic_model = true; // the solves run for a modeled hull alone
         v.health = v.health_max = 3000;
         v.alive = true;
         v.position = {10, -10, 0.25f};
         v.veh.yaw_seeded = true;
         v.veh.speed = v.veh.cmd_speed = 6000;
+        // A mid-life hull: its last contact solve left the contact byte set (a spawn
+        // holds 0 until a solve writes it, D-NET-433).
+        v.veh.grounded = true;
         Seat seat;
         seat.type = SeatType::Controller;
         seat.bone_index = 1;
@@ -63,6 +70,13 @@ struct Rig {
         CHECK(world.vehicles.process_attach(driver, handle, 1));
     }
     Entity &entity() { return *world.registry.get(handle); }
+    // The class init's brain, for a rig that runs the mover (a brainless hull stops
+    // at its head). The seated NPC's AI leg then commands the brain's out-speed: the
+    // rig's preset command.
+    void brain() {
+        test_common::brain_hull(world, handle).brain.f[AiBrain::kOutSpeed] =
+                entity().veh.cmd_speed;
+    }
     VehicleTraits traits(VehicleFamily family, bool boxed = false) {
         VehicleTraits t;
         t.family = family;
@@ -102,6 +116,7 @@ struct Rig {
 
 void wheelie_request_and_acceleration() {
     Rig r;
+    r.brain();
     auto t = r.traits(VehicleFamily::Bike);
     auto &v = r.entity();
     auto &m = v.veh;
@@ -121,6 +136,7 @@ void wheelie_request_and_acceleration() {
     // The brake requires retained contact, even if the def has no handbrake.
     for (int active : {0, 1}) {
         Rig brake;
+        brake.brain();
         auto bt = brake.traits(VehicleFamily::Bike);
         auto &b = brake.entity();
         b.flags |= 8;
@@ -131,6 +147,7 @@ void wheelie_request_and_acceleration() {
         CHECK(b.veh.handbrake_latched == (active ? 0 : 1));
     }
     Rig fresh;
+    fresh.brain();
     auto ft = fresh.traits(VehicleFamily::Bike);
     ft.hand_brake = 1;
     fresh.entity().flags |= 8;
@@ -174,6 +191,7 @@ void wheelie_launch_velocity_and_input() {
 void wheelie_vertical_cap_and_catchup() {
     for (int active : {0, 1}) for (int airborne : {0, 1}) {
         Rig r;
+        r.brain();
         auto t = r.traits(VehicleFamily::Bike);
         auto &v = r.entity();
         v.veh.wheelie_active = uint8_t(active);
@@ -341,6 +359,377 @@ void crashed_upright_depth_precedes_springs() {
         CHECK(z == 65536);
     }
 }
+// A parked hull (the replicated 0x10 bit with the crash latch clear) on its wheels runs the
+// parked arm: the square quad folds into the retained chassis matrix and the latch closes. The
+// bike had no parked arm and stayed unlatched. Level on flat ground with both wheels down, the
+// bike's crash test (no wheel contact) and the arming (no request) stay off. A client: the
+// authority's crash state would clear the aircraft's bit of an unlatched hull.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600, the arm @0x47BD7E..0x47BEB7;
+//  Entity_ProcessAircraftContactPhysics @0x47EF10, the arm @0x48154B..0x48168D]
+void parked_hull_latches_through_the_square_quad() {
+    for (auto family : {VehicleFamily::Bike, VehicleFamily::Helicopter}) {
+        Rig r;
+        r.world.rules.logic_authority = false;
+        r.world.ai.is_authority = false;
+        auto t = r.traits(family, true);
+        auto &v = r.entity();
+        v.flags |= kEntityFlagSuspensionCrashed;
+        int32_t z = to_fixed(v.position.z);
+        r.contact(t, z);
+        CHECK(v.veh.crashed == 1);
+        CHECK(v.veh.chassis_active);
+        for (const auto &force : v.veh.chassis_forces)
+            CHECK(force.rate == 0);
+    }
+}
+
+// D-NET-NEW-L6-25: a wreck at rest (+0x2F0) on its wheels leaves the bike's wheel arm before the
+// spring loop: the records lift it and the chassis call refits it, and only the tail follows, so
+// the wheel pair's fall absorption never runs. The same crashed bike not at rest halves its fall.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - @0x47B851..0x47B8C9, the vz halving
+//  @0x47BD68..0x47BD78 it skips]
+void bike_wreck_at_rest_leaves_the_wheel_arm() {
+    for (const bool at_rest : {true, false}) {
+        Rig r;
+        auto t = r.traits(VehicleFamily::Bike, true);
+        auto &v = r.entity();
+        auto &m = v.veh;
+        m.crashed = 1;
+        m.byte_2ef = 1;
+        m.settle_2f0 = at_rest ? 1 : 0;
+        m.slide_z = -0x800;
+        int32_t z = to_fixed(v.position.z);
+        const int32_t z0 = z;
+        r.contact(t, z);
+        CHECK((v.flags & kEntityFlagInAir) == 0);
+        CHECK(z > z0); // the crash depth lifts it either way
+        CHECK(m.slide_z == (at_rest ? -0x800 : -0x400));
+    }
+}
+
+// D-NET-NEW-L6-26: the bike's tail. The authority parks a crashed bike (Flags 0x10) and unparks
+// one neither crashed nor at rest, in either arm; a client leaves the bit alone. An inverted,
+// unparked bike whose records touch is rebuilt upright from its axes, the crash pair cleared.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - the park @0x47C041..0x47C061, the rebuild
+//  @0x47C065..0x47C082]
+void bike_tail_parks_and_rebuilds() {
+    for (const bool authority : {true, false}) {
+        Rig r;
+        r.world.ai.is_authority = authority;
+        auto t = r.traits(VehicleFamily::Bike, true);
+        auto &v = r.entity();
+        v.veh.crashed = 1;
+        int32_t z = to_fixed(v.position.z);
+        r.contact(t, z);
+        CHECK(v.veh.crashed == 1);
+        CHECK((((v.flags | v.engine_flags) & 0x10u) != 0) == authority);
+    }
+    {
+        Rig r; // high in the air: the both-off arm
+        auto t = r.traits(VehicleFamily::Bike, true);
+        auto &v = r.entity();
+        v.flags |= kEntityFlagSuspensionCrashed;
+        int32_t z = 10 * 65536;
+        r.contact(t, z);
+        CHECK((v.flags & kEntityFlagInAir) != 0);
+        CHECK(((v.flags | v.engine_flags) & 0x10u) == 0);
+    }
+    {
+        Rig r; // a client's bike on its back
+        r.world.ai.is_authority = false;
+        auto t = r.traits(VehicleFamily::Bike, true);
+        auto &v = r.entity();
+        v.veh.air_roll_bam = int32_t(0x80000000u);
+        int32_t z = to_fixed(v.position.z);
+        r.contact(t, z);
+        const int32_t up =
+                detail::vehicle_euler_basis(v.veh.yaw_bam, v.veh.air_pitch_bam, v.veh.air_roll_bam)
+                        .q22.m[10] >> 6;
+        CHECK(up > 0);
+        CHECK(v.veh.crashed == 0);
+    }
+}
+
+// D-NET-NEW-L6-28: the bike's pair clear has no up or crash gate and leaves +0x2EF. A crashed bike
+// on both wheels clears its wheel sinks and landing marker and halves a fall, keeping +0x2EF.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - @0x47BD0E..0x47BD78]
+void bike_pair_clear_is_ungated() {
+    Rig r;
+    auto t = r.traits(VehicleFamily::Bike, true);
+    auto &v = r.entity();
+    auto &m = v.veh;
+    m.crashed = 1;
+    m.byte_2ef = 1;
+    m.landing_2ee = 1;
+    m.plat_acc[0] = m.plat_acc[1] = 1000;
+    m.slide_z = -0x800;
+    int32_t z = to_fixed(v.position.z);
+    r.contact(t, z);
+    CHECK(m.crashed == 1 && m.byte_2ef == 1);
+    CHECK(m.landing_2ee == 0);
+    CHECK(m.plat_acc[0] == 0 && m.plat_acc[1] == 0);
+    CHECK(m.slide_z == -0x400);
+}
+
+// D-NET-NEW-L6-33 (row I): the light solve's probes ride its head matrix, the hull's effective
+// scale included. A level bike whose wheel probes (model Z -0x4000) sit 0x2000 clear of the flat
+// field unscaled sits 0x2000 into it at twice the scale (model Z -0x8000): the unscaled bike takes
+// the both-off arm (in the air), the scaled one its wheels.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - the head @0x47985D..0x4798B4, the probe
+//  transforms @0x4799B2..0x479BFF; Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale
+//  @0x614210]
+void bike_probes_ride_the_scaled_matrix() {
+    for (const bool scaled : {false, true}) {
+        Rig r;
+        auto t = r.traits(VehicleFamily::Bike, true);
+        auto &v = r.entity();
+        v.uniform_scale_q16 = scaled ? 2 * 65536 : 0;
+        int32_t z = 0x12000;
+        r.contact(t, z);
+        CHECK(((v.flags & kEntityFlagInAir) != 0) == !scaled);
+    }
+}
+
+// The occupant matrix (row I): each rotation word round-trips `sar 6` / `shl 6`, so it loses its
+// low six bits, a negative word toward minus infinity: the light solve's up word for a row 2 z of
+// -100 is -2 (the truncating form it replaced gave -1). The other seven words are the head's.
+// [orig: Math_ExtractRow2FromFixedPoint22 @0x6137A0, Math_SetRow2FromVec3Scaled @0x613850]
+void occupant_rows_floor_each_word() {
+    CollisionMatrix head;
+    for (int i = 0; i < 16; ++i)
+        head.m[i] = 1000 + i;
+    head.m[10] = -100;
+    head.m[9] = 127;
+    const CollisionMatrix rows = detail::vehicle_matrix_rows(head);
+    CHECK(rows.m[10] == -128 && (rows.m[10] >> 6) == -2);
+    CHECK(rows.m[9] == 64);
+    CHECK(rows.m[0] == 960 && rows.m[6] == 960);
+    CHECK(rows.m[3] == 1003 && rows.m[7] == 1007 && rows.m[11] == 1011 && rows.m[15] == 1015);
+    const int32_t origin[3] = {};
+    Entity e;
+    e.uniform_scale_q16 = 2 * 65536;
+    const CollisionMatrix twice = detail::vehicle_solve_matrix(e);
+    CHECK(twice.m[0] == 2 * 4194304 && twice.m[5] == 2 * 4194304 && twice.m[10] == 2 * 4194304);
+    e.uniform_scale_q16 = 0;
+    const CollisionMatrix plain = detail::vehicle_solve_matrix(e);
+    const CollisionMatrix euler = collision_matrix_from_euler(0, 0, 0, origin);
+    for (int i = 0; i < 16; ++i)
+        CHECK(plain.m[i] == euler.m[i]);
+}
+
+// D-NET-NEW-L6-34 (row J) and D-NET-NEW-L6-35 (row N): the tracked, wheeled and aircraft solves'
+// occupant matrix is the head's rows, each extracted (`sar 6`), normalized and set back (`shl 6`);
+// the crash tests read its row 2's z. A twice-scaled level hull's rows read 65536 (the raw extracts
+// 131072). A row 0 of (3000, 4000, 0) reads (39321, 52428, 0); a zero row 1 stays 0; a row 2 of
+// (30000, 0, 58000) reads (30108, 0, 58210) and one of (-1235, 40000, 51000), its x extracted from
+// -1234 * 64 - 5 (the floor), (-1248, 40437, 51557). The other seven words are the head's. Each
+// word sits clear of an integer edge at 24, 53 and 64 bits in either division order.
+// [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - @0x47C5E5..0x47C7C8, the dot
+//  @0x47D6BF..0x47D722; Entity_ProcessWheeledVehiclePhysics @0x475DE0 - @0x476253..0x4763FF, the
+//  dot @0x4776DB..0x47773D; Entity_ProcessAircraftContactPhysics @0x47EF10 - @0x47F2E8..0x47F4CB]
+void occupant_rows_are_normalized() {
+    Entity e;
+    e.uniform_scale_q16 = 2 * 65536;
+    const CollisionMatrix level = detail::vehicle_occupant_matrix(detail::vehicle_solve_matrix(e));
+    CHECK(level.m[0] == 4194304 && level.m[5] == 4194304 && level.m[10] == 4194304);
+    CHECK(level.m[1] == 0 && level.m[2] == 0 && level.m[4] == 0 && level.m[6] == 0);
+    CHECK(level.m[8] == 0 && level.m[9] == 0);
+    CollisionMatrix head;
+    for (int i = 0; i < 16; ++i)
+        head.m[i] = 1000 + i;
+    head.m[0] = 3000 * 64;
+    head.m[4] = 4000 * 64;
+    head.m[8] = 0;
+    head.m[1] = head.m[5] = head.m[9] = 0;
+    head.m[2] = 30000 * 64;
+    head.m[6] = 0;
+    head.m[10] = 58000 * 64;
+    CollisionMatrix rows = detail::vehicle_occupant_matrix(head);
+    CHECK((rows.m[0] >> 6) == 39321 && (rows.m[4] >> 6) == 52428 && rows.m[8] == 0);
+    CHECK(rows.m[1] == 0 && rows.m[5] == 0 && rows.m[9] == 0);
+    CHECK((rows.m[2] >> 6) == 30108 && rows.m[6] == 0 && (rows.m[10] >> 6) == 58210);
+    CHECK(rows.m[3] == 1003 && rows.m[7] == 1007 && rows.m[11] == 1011);
+    CHECK(rows.m[12] == 1012 && rows.m[15] == 1015);
+    head.m[2] = -1234 * 64 - 5;
+    head.m[6] = 40000 * 64;
+    head.m[10] = 51000 * 64;
+    rows = detail::vehicle_occupant_matrix(head);
+    CHECK((rows.m[2] >> 6) == -1248 && (rows.m[6] >> 6) == 40437 && (rows.m[10] >> 6) == 51557);
+    CHECK((rows.m[2] & 63) == 0 && (rows.m[6] & 63) == 0 && (rows.m[10] & 63) == 0);
+    rows = detail::vehicle_occupant_matrix(CollisionMatrix{});
+    for (int i = 0; i < 16; ++i)
+        CHECK(rows.m[i] == 0);
+}
+
+// D-NET-NEW-L6-35 (row N): the suspension fit runs on the matrix the solve hands it, not on one it
+// builds from the hull's euler words. A tracked wreck (+0x2FC) is not fitted, so the matrix leaves
+// the call as it entered and the euler words come from it: the occupant of a hull yawed a quarter
+// turn and pitched 0x08000000, while the hull's own euler words are all 0.
+// [orig: Entity_ProcessWheeledVehicleSuspension @0x46B140 (the wreck arm @0x46B419..0x46B434); its
+//  callers' occupant @0x47E5E6 / @0x47EC4D and the extraction Math_FixedPointMatrixToEulerAngles
+//  @0x47E5FE / @0x47EC62]
+void the_fit_runs_on_the_occupant() {
+    Rig r;
+    auto &v = r.entity();
+    v.veh.yaw_bam = v.veh.air_pitch_bam = v.veh.air_roll_bam = 0;
+    v.veh.crash_request = 0;
+    v.veh.wreck_2fc = 1;
+    const int32_t origin[3] = {};
+    const CollisionMatrix occupant = detail::vehicle_occupant_matrix(
+            collision_matrix_from_euler(0x40000000, 0x08000000, 0, origin));
+    int32_t corners[4][3] = {};
+    detail::PlatFit fit;
+    CHECK(!detail::vehicle_suspension_fit(r.world, v, occupant, corners, nullptr, fit, 0, 0, 0));
+    for (int i = 0; i < 16; ++i)
+        CHECK(fit.matrix.m[i] == occupant.m[i]);
+    int32_t euler[3];
+    collision_matrix_to_euler(occupant, euler);
+    CHECK(fit.yaw_bam == euler[0] && fit.pitch_bam == euler[1] && fit.roll_bam == euler[2]);
+    CHECK(std::abs(fit.yaw_bam - 0x40000000) < 0x100000);
+}
+
+// D-NET-NEW-L6-36 (row 1): the platform solve's lever corners are the position plus two products,
+// each rounded half up on its own, of a halved extent (truncated) and a row's extract word (`sar
+// 6`): row 1 with the beam's half, row 0 with the length's. Words with low bits set, an odd beam
+// (200001) and an odd length (500003) separate it from one rounding over the Q22 words (which
+// gives c0 (1208619, -2169875, 322654)).
+// [orig: Entity_ProcessPlatformPhysics @0x481870 - the halves @0x482E3D / @0x482EF6, c0
+//  @0x482E57..0x482FE0, c1 @0x482FF7..0x48316B, c2 @0x483176..0x4832F1, c3 @0x4832FC..0x48346D]
+void platform_corners_round_each_product() {
+    CollisionMatrix raw;
+    raw.m[0] = 4000037;
+    raw.m[4] = -1250005;
+    raw.m[8] = 300063;
+    raw.m[1] = 1250003;
+    raw.m[5] = 4000041;
+    raw.m[9] = -200017;
+    raw.m[10] = 4194304;
+    int32_t c[4][3];
+    detail::vehicle_platform_corners(raw, 200001, 500003, 1000000, -2000000, 300000, c);
+    const int32_t want[4][3] = { { 1208618, -2169876, 322653 }, { 1268222, -1979142, 313113 },
+        { 731778, -2020858, 286887 }, { 791382, -1830124, 277347 } };
+    for (int k = 0; k < 4; ++k)
+        for (int i = 0; i < 3; ++i)
+            CHECK(c[k][i] == want[k][i]);
+}
+
+// D-NET-NEW-L6-36 (row 1): the boat's fit runs on the platform solve's occupant matrix, not on one
+// it builds from the hull's euler words: a crashed, unfrozen hull in the air takes the arm that
+// fits nothing, so the matrix leaves the call as it entered.
+// [orig: Entity_ComputeSuspensionOrientation @0x46C8E0, the calls @0x483D00 / @0x483F2B with
+//  isUnderwater, the extraction Math_FixedPointMatrixToEulerAngles @0x483D1C / @0x483F3D]
+void the_boat_fit_runs_on_the_occupant() {
+    Rig r;
+    const VehicleTraits t = r.traits(VehicleFamily::Watercraft, true);
+    auto &v = r.entity();
+    v.veh.yaw_bam = v.veh.air_pitch_bam = v.veh.air_roll_bam = 0;
+    v.veh.crashed = 1;
+    v.veh.byte_2ef = 0;
+    v.flags |= kEntityFlagInAir;
+    const int32_t origin[3] = {};
+    const CollisionMatrix occupant = detail::vehicle_matrix_rows(
+            collision_matrix_from_euler(0x40000000, 0x08000000, 0, origin));
+    int32_t corners[4][3] = {};
+    detail::PlatFit fit;
+    detail::vehicle_boat_suspension_fit(r.world, v, t, occupant, corners, fit, 0, 0, 0);
+    for (int i = 0; i < 16; ++i)
+        CHECK(fit.matrix.m[i] == occupant.m[i]);
+    int32_t euler[3];
+    collision_matrix_to_euler(occupant, euler);
+    CHECK(fit.yaw_bam == euler[0] && fit.pitch_bam == euler[1] && fit.roll_bam == euler[2]);
+    CHECK(std::abs(fit.yaw_bam - 0x40000000) < 0x100000);
+}
+
+// D-NET-NEW-L6-32 (row L): a bike the last tick left in the air landing on its wheels with no
+// wheelie request drops its retained chassis state at the wheel arm's entry; a request keeps it.
+// A crashed, fallen bike (+0x2EF, +0x2FC: the fall-over arm only spins its matrix) isolates the
+// clear.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - @0x47B58D..0x47B5F5]
+void bike_landing_clears_the_chassis_state() {
+    for (const bool request : {false, true}) {
+        Rig r;
+        auto t = r.traits(VehicleFamily::Bike, true);
+        auto &v = r.entity();
+        auto &m = v.veh;
+        m.crashed = 1;
+        m.byte_2ef = 1;
+        m.wreck_2fc = 1;
+        m.wheelie_request = request ? 1 : 0;
+        v.flags |= kEntityFlagInAir;
+        m.chassis_active = true;
+        m.chassis_contact_active = true;
+        m.chassis_blend_tick = r.world.logic_tick;
+        m.chassis_blend_ticks = 1000;
+        m.chassis_quaternion[3] = 1.0f;
+        int32_t z = to_fixed(v.position.z);
+        r.contact(t, z);
+        CHECK((v.flags & kEntityFlagInAir) == 0); // the wheel arm ran
+        CHECK(m.chassis_active == request);
+        CHECK(m.chassis_contact_active == request);
+        CHECK(m.chassis_blend_ticks == (request ? 1000 : 0));
+        CHECK(m.chassis_quaternion[3] == (request ? 1.0f : 0.0f));
+    }
+}
+
+// D-NET-NEW-L6-30: a slow, level bike on its wheels is not leaning (the lean leaves +0x2EF clear),
+// so the solve drops both lean rates; a fast one leans (+0x2EF set) and keeps its pitch rate.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - the lean @0x47A78B..0x47A7D8, the clear
+//  @0x47A8BD..0x47A8E8]
+void bike_unleaned_drops_lean_rates() {
+    for (const bool fast : {false, true}) {
+        Rig r;
+        auto t = r.traits(VehicleFamily::Bike, true);
+        auto &v = r.entity();
+        auto &m = v.veh;
+        m.speed = fast ? 6000 : 1000;
+        m.air_pitch_rate = 0x1000;
+        int32_t z = to_fixed(v.position.z);
+        r.contact(t, z);
+        CHECK(m.byte_2ef == (fast ? 1 : 0));
+        CHECK(m.air_pitch_rate == (fast ? 0x1000 : 0));
+    }
+}
+
+// D-NET-NEW-L6-31: an airborne bike under the water word flushes its sinks after this tick's growth
+// (the tracked flush's water leg, with no up gate on the wreck leg); over the water it keeps them.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - @0x47B157..0x47B186]
+void bike_sinks_flush_under_water() {
+    for (const bool under : {true, false}) {
+        Rig r;
+        auto t = r.traits(VehicleFamily::Bike, true);
+        auto &v = r.entity();
+        auto &m = v.veh;
+        v.flags |= kEntityFlagInAir;
+        m.plat_acc[0] = 3000;
+        m.plat_acc[1] = 1000;
+        int32_t z = 10 * 65536;
+        r.world.env.water_z = under ? 20 * 65536 : 0;
+        r.contact(t, z);
+        CHECK((v.flags & kEntityFlagInAir) != 0);
+        CHECK(m.plat_acc[0] == (under ? 0 : 3100));
+    }
+}
+
+// D-NET-NEW-L6-29: the bike's grounded spring loop has no crash gate: a crashed bike landing hard
+// on its front wheel takes the impulse and compresses that wheel's spring.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 - the loop @0x47B8CE..0x47BB7D, the impulse
+//  @0x47B9A7..0x47BA14]
+void bike_crashed_wheel_takes_the_landing_impulse() {
+    Rig r;
+    auto t = r.traits(VehicleFamily::Bike, true);
+    t.spring = 8;
+    t.spring_comp = 20;
+    t.shock = 4;
+    auto &v = r.entity();
+    auto &m = v.veh;
+    m.crashed = 1;
+    m.plat_acc[0] = 6000; // past the 5000 threshold (spring_comp > 10)
+    int32_t z = to_fixed(v.position.z);
+    r.contact(t, z);
+    CHECK((v.flags & kEntityFlagInAir) == 0);
+    CHECK(m.wheel_comp[0] != 0);
+}
+
 // A climbing track can be supported by its inboard belly station while its
 // outer wheel is clear. Retail uses max(wheel, belly) for sink growth, spring
 // catch-up and the retained-contact tail. [orig: @ 0x4784CC..0x47853A,
@@ -792,6 +1181,26 @@ void tank_sleep_gate_compares_attitude() {
         CHECK(v.veh.contact_solved_once == turned);
     }
 }
+// The contact solves' in-water flag compares the pads' average with the water word
+// raw: a map with no water authored keeps it 0, so pads averaging below Z 0 are in
+// water and above it dry, no dry sentinel [orig: Entity_ProcessTrackedVehiclePhysics
+// @0x47C1C0 (@0x47D516..0x47D53A); Environment_InitDefaults @0x57C010
+// (@0x57C011..0x57C01E)].
+void water_flag_reads_the_zero_word_raw() {
+    auto w = std::make_unique<World>();
+    Entity hull;
+    hull.flags = 0;
+    VehicleTraits t;
+    const int32_t below[4][3] = {{0, 0, -0x20000}, {0, 0, -0x20000}, {0, 0, -0x20000},
+                                 {0, 0, -0x20000}};
+    detail::plat_water_flag(*w, hull, t, below, 0x8000, 0, 0);
+    CHECK((hull.flags & 0x8000u) != 0);
+    const int32_t above[4][3] = {{0, 0, 0x20000}, {0, 0, 0x20000}, {0, 0, 0x20000},
+                                 {0, 0, 0x20000}};
+    detail::plat_water_flag(*w, hull, t, above, 0x8000, 0, 0);
+    CHECK((hull.flags & 0x8000u) == 0);
+}
+
 } // namespace
 
 // A severity-3 hit costs hull health unless the whole Flags word carries
@@ -850,6 +1259,7 @@ void indestructible_hull_skips_landing_damage() {
 }
 
 int main() {
+    water_flag_reads_the_zero_word_raw();
     physics_boat_hard_strike_costs_a_hundred();
     indestructible_hull_skips_landing_damage();
     tank_belly_support_keeps_corners_grounded();
@@ -874,6 +1284,20 @@ int main() {
     wheelie_vertical_cap_and_catchup();
     bike_axle_and_release();
     crashed_upright_depth_precedes_springs();
+    parked_hull_latches_through_the_square_quad();
+    bike_wreck_at_rest_leaves_the_wheel_arm();
+    bike_tail_parks_and_rebuilds();
+    bike_pair_clear_is_ungated();
+    bike_probes_ride_the_scaled_matrix();
+    occupant_rows_floor_each_word();
+    occupant_rows_are_normalized();
+    the_fit_runs_on_the_occupant();
+    platform_corners_round_each_product();
+    the_boat_fit_runs_on_the_occupant();
+    bike_landing_clears_the_chassis_state();
+    bike_unleaned_drops_lean_rates();
+    bike_sinks_flush_under_water();
+    bike_crashed_wheel_takes_the_landing_impulse();
     bike_off_contact_planar_forward();
     vehicle_respawn_reseeds_destroy_timer();
     bike_indestructible_hull_skips_impact_damage();

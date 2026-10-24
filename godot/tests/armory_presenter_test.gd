@@ -25,7 +25,7 @@ class FakeArmoryView:
 	var root: ResourceRoot
 	var weapons: WeaponDatabase
 	var sim_value: Simulation
-	var set_weapon_calls: Array[String] = []
+	var present_weapon_calls: Array[String] = []
 	var clear_calls := 0
 
 	func _sim() -> Simulation:
@@ -37,9 +37,8 @@ class FakeArmoryView:
 	func _weapon_database() -> WeaponDatabase:
 		return weapons
 
-	func _set_local_player_weapon_by_name(weapon_name: String,
-			_preserve_slot_state: bool) -> bool:
-		set_weapon_calls.append(weapon_name)
+	func _present_local_player_weapon(weapon_name: String) -> bool:
+		present_weapon_calls.append(weapon_name)
 		return true
 
 	func _clear_local_player_weapon() -> void:
@@ -296,7 +295,7 @@ func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
 	assert_has(_loadout_names(sim), equipped,
 		"unchanged ACCEPT preserves the entity's equipped weapon")
-	assert_eq(world.set_weapon_calls, [equipped] as Array[String])
+	assert_eq(world.present_weapon_calls, [equipped] as Array[String])
 
 	assert_true(presenter.open(), "the same armory can reopen after ACCEPT")
 	driver.select_row(primary, 0, false)  # the authored NONE row, silently
@@ -461,7 +460,10 @@ func test_multiplayer_open_uses_retail_server_class_allow_mask() -> void:
 			"the staged player carries the disallowed rifleman class")
 	var host_options := HostSessionOptions.new()
 	host_options.game_type = 0x30020
-	host_options.class_allow_mask = 1 << 9  # rifleman disallowed; engineer is next allowed
+	# The host dialog's class words: only class 9 ALWAYS, so the mask is 1 << 9 (rifleman
+	# disallowed; engineer is next allowed). [orig: HostDialog_OnClassAvailabilityListClick
+	#  @0x55781A..0x557839]
+	host_options.class_availability = PackedInt32Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
 	sim.configure_host_session(host_options)
 	assert_true(sim.enable_host_listen(0), "the session class policy rides a real host")
 	var world := _make_world(sim, _make_weapons())

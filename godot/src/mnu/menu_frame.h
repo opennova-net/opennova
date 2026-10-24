@@ -7,6 +7,7 @@
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
@@ -58,6 +59,24 @@ public:
 
 private:
 	std::map<std::string, Entry> entries_;
+};
+
+// A menu image's texels as Image::get_pixel reads them, read once (menu_frame.cpp
+// read_texels): what MenuFrame composes a phased fill tile from.
+struct MenuImageTexels {
+	int width = 0;
+	int height = 0;
+	// A compressed image: get_pixel refuses every read with Color().
+	bool refused = false;
+	std::vector<float> rgba; // width x height x RGBA
+	Color at(int p_x, int p_y) const {
+		if (refused) {
+			return Color();
+		}
+		const float *texel = rgba.data() +
+				(static_cast<size_t>(p_y) * static_cast<size_t>(width) + static_cast<size_t>(p_x)) * 4;
+		return Color(texel[0], texel[1], texel[2], texel[3]);
+	}
 };
 
 // The compiled-menu device leg (ADR 0033 R2) over the engine's
@@ -257,6 +276,8 @@ public:
 	std::string widget_mnemonic(int p_index) const;
 	// The text the widget's string table gives a key (MenuFrameCompiler::widget_string).
 	std::string widget_string(int p_index, const std::string &p_key) const;
+	// The text the named string table gives a key (MenuFrameCompiler::table_string).
+	std::string table_string(const std::string &p_table, const std::string &p_key) const;
 	// The open popup (a shown MODAL window's index, -1 none): the pump serves
 	// its subtree alone (MenuFrameState::popup_root).
 	void set_open_popup(int p_index);
@@ -336,7 +357,14 @@ public:
 	// glyph run), and the test seam's copy of each glyph run as submitted:
 	// [{page, uvs, colors}].
 	static String glyph_shader_code();
+	// The shader the frame's items draw through: the one process-wide glyph program
+	// (hud/font_page_glyphs glyph_canvas_shader), null before its first draw.
+	Ref<Shader> get_glyph_shader() const;
 	Array get_glyph_submissions();
+	// The test seam's copy of each frame piece as submitted: [{rect, uv, color, stencil,
+	// brush, material}] (the piece's window rect, its stencil UV rect, its diffuse, its two
+	// textures and its two-stage material's server canvas texture).
+	Array get_frame_piece_submissions();
 
 	void _draw() override;
 
@@ -362,8 +390,10 @@ protected:
 private:
 	opennova::menu::MenuWidgetState &widget_(int p_index);
 	Ref<Texture2D> texture_for_quad_(const opennova::menu::MenuQuad &p_quad);
-	Ref<Texture2D> frame_piece_texture_(const opennova::menu::MenuQuad &p_quad,
-			const Ref<Image> &p_stencil, const Ref<Image> &p_brush);
+	// A frame piece's two-stage material (a server canvas texture), made once per pair.
+	RID frame_piece_material_(const opennova::menu::MenuQuad &p_quad);
+	// A texture slot's texels for this draw's compositions, read on the first ask.
+	const MenuImageTexels &slot_texels_(int32_t p_slot);
 	// A composed frame texture by key, kept across configures while drawn (the
 	// cache lets go of what two configures in a row did not draw).
 	Ref<Texture2D> cached_frame_texture_(const std::string &p_key) const;
@@ -402,6 +432,19 @@ private:
 		uint64_t used = 0; // the configure that last drew it
 	};
 	mutable std::map<std::string, FrameTexture> frame_texture_cache_;
+	// The frame pieces' two-stage materials by the stencil's and the brush's keys: the
+	// server canvas texture and the two textures it binds (kept with it), freed with this.
+	struct PieceMaterial {
+		RID canvas;
+		Ref<Texture2D> stencil;
+		Ref<Texture2D> brush;
+	};
+	std::map<std::string, PieceMaterial> piece_materials_;
+	// The slots the draw composed fill tiles from, each image's texels read once (let go as
+	// the draw ends), and the draw's composition counts (its --verbose line).
+	std::map<int32_t, MenuImageTexels> draw_texels_;
+	int32_t composed_tiles_ = 0;
+	int64_t composed_tile_pixels_ = 0;
 	uint64_t configure_count_ = 0;
 	// Each kept font's pages, uploaded on first draw, by the load's serial.
 	std::map<uint64_t, std::vector<Ref<Texture2D>>> font_pages_by_serial_;
@@ -420,11 +463,14 @@ private:
 	RID overlay_upper_canvas_item_;
 	bool custom_slot_drawn_ = false;
 	// The material this Control's item and both overlay items draw under: a
-	// glyph run's font page runs its MODULATE2X stage (glyph_shader_code).
-	Ref<Shader> glyph_shader_;
+	// glyph run's font page runs its MODULATE2X stage (glyph_shader_code),
+	// through the one process-wide glyph program (hud/font_page_glyphs
+	// glyph_canvas_shader).
 	Ref<ShaderMaterial> glyph_material_;
 	// Set while get_glyph_submissions records the glyph runs _draw submits.
 	Array *glyph_record_ = nullptr;
+	// Set while get_frame_piece_submissions records the frame pieces _draw submits.
+	Array *piece_record_ = nullptr;
 };
 
 } // namespace godot

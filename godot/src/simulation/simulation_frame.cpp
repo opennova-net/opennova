@@ -5,6 +5,8 @@
 #include "simulation/simulation_internal.h"
 #include "simulation/tick_sink.h"
 
+#include <formats/gamecfg/game_cfg.h>
+
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/scene_tree.hpp>
@@ -32,6 +34,11 @@ opennova::inmatch::Role &Simulation::active_role() {
 	return *role_;
 }
 
+bool Simulation::action_head_admits(int p_code) {
+	if (role_ == nullptr || role_->kernel() == nullptr) return true;
+	return role_->action_head_admits(p_code);
+}
+
 opennova::inmatch::ListenHostState *Simulation::host_state() {
 	return host_role_ != nullptr ? &host_role_->state : nullptr;
 }
@@ -50,7 +57,8 @@ const opennova::inmatch::NapiNPServerCtx *Simulation::host_ctx() const {
 
 // What the role feeds (inmatch/role_feeds.h) read of the running role: the
 // kernel, the role's replica runtime, the authority's session context, the
-// joiner bit, the joiner's materializer and the staged host option word.
+// joiner bit, the joiner's materializer, the staged host option word and the
+// session's frame-rate window.
 opennova::inmatch::RoleView Simulation::role_view() const {
 	opennova::inmatch::RoleView view;
 	view.kernel = kernel_.get();
@@ -59,6 +67,7 @@ opennova::inmatch::RoleView Simulation::role_view() const {
 	view.joiner = is_joiner();
 	view.materializer = joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr;
 	view.staged_mp_attributes = net_.host_session_config.mp_attributes;
+	view.frame_rate = session_.frame_rate_stats();
 	return view;
 }
 
@@ -216,32 +225,7 @@ void Simulation::close_session() {
 	(void)session_.close();
 }
 
-// Server_SendRandomSeedSync's non-dedicated S2C 0x68 cursor advances by 50
-// and wraps against the current renderer viewport height [orig:
-// Server_SendRandomSeedSync @ 0x511360 -- CEffectWorld_GetViewportDimensions
-// @ 0x5b1560 (call @ 0x511375), wrap @ 0x511391]. Resolve the render window
-// the way retail's CEffectWorld query does: the live window (the scene
-// tree's root; the simulation is a RefCounted the runtime owns, not a node
-// in that tree). A headless DisplayServer has no
-// renderer (the dedicated-host analogue); a missing/non-drawable viewport
-// hands the host role 0 and inmatch suppresses 0x68 instead of inventing
-// a screen size (D-NET-206).
-int32_t Simulation::renderer_viewport_height() const {
-	Viewport *viewport = nullptr;
-	DisplayServer *display = DisplayServer::get_singleton();
-	if (display != nullptr && display->get_name() != "headless") {
-		SceneTree *tree = Object::cast_to<SceneTree>(
-				Engine::get_singleton()->get_main_loop());
-		if (tree != nullptr)
-			viewport = tree->get_root();
-	}
-	return viewport != nullptr ? static_cast<int32_t>(viewport->get_visible_rect().size.y) : 0;
-}
-
 void Simulation::after_tick() {
-	// The dead-player map-mode clear rides every advanced tick -- retail's
-	// render-frame gate, observed before the presenters read the mode.
-	tick_hud_map_death_gate();
 	// The joiner's ~1 Hz frozen-session tripwire sampled this tick: the
 	// env-gated print is the shell's channel.
 	if (joiner_role_ != nullptr && joiner_role_->take_diagnostic_sample())
@@ -261,21 +245,49 @@ bool Simulation::accept_tick(const opennova::inmatch::TickOutcome &p_tick) {
 	return accepted;
 }
 
-// The shared head of a session frame: reset the frame's profile spans, take the
+// The shared head of a session frame: a loaded joiner's released mission start ends
+// (end_loaded_join_mission_start), then reset the frame's profile spans, take the
 // typed input, place the sound listener and stamp the viewport height.
 opennova::inmatch::FrameInput Simulation::begin_session_frame(
 		const Ref<MissionFrameInput> &p_input) {
+	end_loaded_join_mission_start();
 	frame_sim_us_ = 0;
 	frame_sink_us_ = 0;
 	if (kernel_ != nullptr) kernel_->profile.reset();
 	opennova::inmatch::FrameInput input;
-	if (p_input.is_valid()) input = p_input->native_value();
+	if (p_input.is_valid()) {
+		input = p_input->native_value();
+		// The frame's updates, the first included, pull their own input frames
+		// from the shell's device router (engine inmatch::TickInputSource).
+		input.tick_source = p_input->tick_source();
+		// The shell's HUD toggles, whose view word the session reads after its drain (engine
+		// inmatch::Session::draws_scene); the frame input holds them through the advance.
+		const Ref<HudToggles> toggles = p_input->get_hud_toggles();
+		if (toggles.is_valid()) input.hud_toggles = &toggles->state();
+	}
 	if (input.camera.listener_valid) {
 		set_sound_listener(Vector3(input.camera.position[0],
 				input.camera.position[1], input.camera.position[2]));
 	}
-	input.viewport_height = renderer_viewport_height();
+	input.loaded_model_list_count = net_.loaded_model_list_count;
+	// The main loop's frame lock: the process block's lock_framerate, read every frame as
+	// retail's loop reads the word (engine world::TickAccumulator::bank carries the witness);
+	// a simulation with no process block (a test's, a tool's) runs no lock.
+	input.frame_lock = net_.game_config.is_valid() &&
+			net_.game_config->native().cfg().lock_framerate != 0;
+	// g_DialogueVolume, the client's dialog-line gate: the process block's DialogueLevel,
+	// which the options write with the word (engine: ClientRuntime::set_dialogue_volume).
+	if (runtime_ != nullptr) {
+		static const int32_t kDefaultDialogueLevel = opennova::gamecfg::defaults().dialogue_level;
+		runtime_->set_dialogue_volume(net_.game_config.is_valid()
+						? net_.game_config->native().cfg().dialogue_level
+						: kDefaultDialogueLevel);
+	}
 	return input;
+}
+
+bool Simulation::session_draws_scene(const Ref<HudToggles> &p_toggles) const {
+	return session_.draws_scene(p_toggles.is_valid() ? &p_toggles->state() : nullptr);
 }
 
 Ref<MissionFrameOutcome> Simulation::advance_session_frame(
@@ -301,6 +313,7 @@ bool Simulation::step() {
 	// frame value inmatch::Session consumes. Direct look input has already updated
 	// kernel_->local.input's composed heading/pitch, so it must not be replayed as a
 	// second pixel delta here.
+	end_loaded_join_mission_start();
 	opennova::inmatch::FrameInput input;
 	input.player.movement = kernel_->local.input;
 	input.player.held_action_bits = kernel_->local.weapon.fire_held
@@ -308,7 +321,7 @@ bool Simulation::step() {
 	input.player.pressed_action_bits =
 			(kernel_->local.weapon.fire_pressed ? opennova::inmatch::PRESSED_FIRE : 0u) |
 			(kernel_->local.weapon.reload_pressed ? opennova::inmatch::PRESSED_RELOAD : 0u);
-	input.viewport_height = renderer_viewport_height();
+	input.loaded_model_list_count = net_.loaded_model_list_count;
 	return session_.drive_one(input).ticks_run() == 1;
 }
 

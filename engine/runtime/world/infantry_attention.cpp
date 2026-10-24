@@ -22,11 +22,11 @@ namespace {
 // Preserve the AI position's low bits instead of round-tripping through floats.
 void position_of(const AiSystem &ai, const Entity &entity, int32_t out[3]) {
     if (const AiEntity *body = ai.for_handle(entity.handle)) {
-        std::copy_n(body->pos, 3, out);
+        std::copy_n(body->self->position.words().data(), 3, out);
     } else {
-        out[0] = static_cast<int32_t>(entity.position.x * 65536.0f);
-        out[1] = static_cast<int32_t>(entity.position.y * 65536.0f);
-        out[2] = static_cast<int32_t>(entity.position.z * 65536.0f);
+        out[0] = entity.position.x.q16;
+        out[1] = entity.position.y.q16;
+        out[2] = entity.position.z.q16;
     }
 }
 
@@ -183,7 +183,7 @@ void infantry_attention_think(AiSystem &ai, AiEntity &e, World &world, uint32_t 
             const int32_t bearing = bearing_to(dx, dy);
             const AiEntity *candidate_body = ai.for_handle(candidate.handle);
             const int32_t candidate_yaw = candidate_body ? candidate_body->heading
-                    : spawn_angle_bam(90 - candidate.yaw);
+                    : candidate.heading;
             if (distance < 2 * 65536 &&
                     io::bam_abs(io::bam_add(io::bam_sub(bearing, candidate_yaw),
                                            INT32_MIN)) < 298261600)
@@ -209,7 +209,15 @@ void infantry_attention_think(AiSystem &ai, AiEntity &e, World &world, uint32_t 
                 }
                 score += 4;
             }
-            score += static_cast<int32_t>((uint32_t(e.net_id) + (key >> 8) - uint32_t(candidate.net_id)) & 7u);
+            // Both DcbIds (+0x7C): a player body's is its class-init word (body_dcb_id),
+            // 10000 + its slot on a plyr row, where ours' Entity::net_id holds its net id.
+            // [orig: `sar eax, 8; sub eax, [edi+7Ch]; add eax, [esi+7Ch]; and eax, 7`
+            //  @0x4BE38C..0x4BE39F]
+            const int32_t candidate_dcb_id = candidate_body != nullptr
+                    ? body_dcb_id(world, *candidate_body, &candidate)
+                    : entity_dcb_id(world, candidate);
+            score += static_cast<int32_t>((uint32_t(body_dcb_id(world, e, body)) + (key >> 8) -
+                    uint32_t(candidate_dcb_id)) & 7u);
             if (score > best_score && score >= 4 &&
                     io::bam_abs(io::bam_sub(bearing, inf.body_heading)) <= 835132480) {
                 best_score = score;
@@ -219,11 +227,18 @@ void infantry_attention_think(AiSystem &ai, AiEntity &e, World &world, uint32_t 
         inf.previous_look_target = inf.last_look_target;
         inf.last_look_target = inf.head_look_target;
         if (const Entity *target = world.registry.get(inf.head_look_target)) {
+            // The singles are both DcbIds (+0x7C, entity_dcb_id): a player's 10000 + slot
+            // fails the setters' < 0x80 guard. [orig: Entity_UpdateInfantryAI @0x4B9910 -
+            //  self @0x4BE42C / @0x4BE456, target @0x4BE43C / @0x4BE453; the setters
+            //  SeesMatrix_SetGroupGroupBit @0x452A40, SeesMatrix_SetSingleGroupBit @0x452AD0,
+            //  SeesMatrix_SetGroupSingleBit @0x452B60, SeesMatrix_SetSingleSingleBit @0x452BF0]
+            const int32_t self_dcb_id = entity_dcb_id(world, *self);
+            const int32_t target_dcb_id = entity_dcb_id(world, *target);
             auto &relations = world.script.relations;
             relations.set_group_group(TriggerRelations::kSees, self->group_id, target->group_id);
-            relations.set_single_group(TriggerRelations::kSees, self->net_id, target->group_id);
-            relations.set_group_single(TriggerRelations::kSees, self->group_id, target->net_id);
-            relations.set_single_single(TriggerRelations::kSees, self->net_id, target->net_id);
+            relations.set_single_group(TriggerRelations::kSees, self_dcb_id, target->group_id);
+            relations.set_group_single(TriggerRelations::kSees, self->group_id, target_dcb_id);
+            relations.set_single_single(TriggerRelations::kSees, self_dcb_id, target_dcb_id);
         }
     }
 
@@ -267,7 +282,7 @@ void infantry_attention_think(AiSystem &ai, AiEntity &e, World &world, uint32_t 
     // [orig: Entity_UpdateInfantryAI @0x4BE6AE..0x4BE729]
     const AiEntity *target_body = ai.for_handle(target->handle);
     const int32_t target_heading = target_body ? target_body->heading :
-            spawn_angle_bam(90 - target->yaw);
+            target->heading;
     if (distance_of(dx, dy, dz) < 2 * 65536 &&
             io::bam_abs(io::bam_sub(io::bam_sub(bearing, target_heading), INT32_MIN)) < 298261600) {
         const uint32_t phase = key & 0x180u;
@@ -293,16 +308,31 @@ void infantry_look_tick(const InfantryState &inf, int32_t &heading, int32_t &pit
         pitch = io::bam_add(pitch, io::bam_sar(io::bam_add(pitch_error, 4), 3));
         return; // The parent configuration selects the mounted arc clamp.
     }
-    if (inf.aim_valid) {
+    // An authority's body on foot has no parent: the death edge detaches a seated one first
+    // [orig: Entity_UpdateInfantryAI @0x4B9910 - the edge's detach @0x4B9C57..0x4B9C60;
+    //  Entity_DetachFromVehicle @0x4355F0 - the parent's clear @0x435915].
+    infantry_on_foot_look(inf.aim_heading, inf.aim_pitch, inf.aim_valid, inf.body_heading,
+                          /*hold=*/true, heading, pitch);
+}
+
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the aim flag test @0x4BEB23, the quarter
+//  @0x4BEB2C..0x4BEB87, the eighth @0x4BEB8C..0x4BEBE7, the parent's config gate
+//  @0x4BEF9A..0x4BEFC3, the clamp @0x4BEFC5..0x4BEFED]
+void infantry_on_foot_look(int32_t aim_heading, int32_t aim_pitch, bool aim_flag,
+                           int32_t body_heading, bool hold, int32_t &heading, int32_t &pitch) {
+    const int32_t yaw_error = io::bam_sub(aim_heading, heading);
+    const int32_t pitch_error = io::bam_sub(aim_pitch, pitch);
+    if (aim_flag) {
         heading = io::bam_add(heading, look_step(yaw_error, 2, 0x1E000000, 0x1E00000));
         pitch = io::bam_add(pitch, look_step(pitch_error, 2, 0x1E000000, 0x1E00000));
     } else {
         heading = io::bam_add(heading, look_step(yaw_error, 3, 0xE000000, 0xE00000));
         pitch = io::bam_add(pitch, look_step(pitch_error, 3, 0xC000000, 0xC00000));
     }
-    const int32_t twist = io::bam_sub(heading, inf.body_heading);
-    if (twist > 0x40000000) heading = io::bam_add(inf.body_heading, 0x40000000);
-    if (twist < -0x40000000) heading = io::bam_sub(inf.body_heading, 0x40000000);
+    if (!hold) return;
+    const int32_t twist = io::bam_sub(heading, body_heading);
+    if (twist > 0x40000000) heading = io::bam_add(body_heading, 0x40000000);
+    if (twist < -0x40000000) heading = io::bam_sub(body_heading, 0x40000000);
 }
 
 } // namespace opennova::world

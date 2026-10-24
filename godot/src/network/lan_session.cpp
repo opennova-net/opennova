@@ -5,11 +5,16 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 
+#include "network/novaworld_client.h"
+#include "resource_index/launch_flags.h"
 #include "util/data_format.h"
 #include "util/string_convert.h"
 
 #include <net/novaworld/lobby_vars.h> // resolve_address_without_dns
-#include <net/npwire/nw_session_framing.h> // next_connection_index
+#include <runtime/inmatch/host_config.h> // transport_bind_ports / transport_bind_address
+#include <runtime/inmatch/host_session.h> // host_monotonic_milliseconds (the held server's clock)
+#include <runtime/inmatch/napi_np_protocol.h> // receive_unstopped_server / pump_unstopped_server
+#include <runtime/inmatch/punt_log.h> // ConnectLog
 #include <net/npwire/peer_addr.h>
 
 #include <array>
@@ -22,6 +27,13 @@ namespace godot {
 namespace {
 
 constexpr const char *DEFAULT_BROADCAST = "255.255.255.255";
+
+// The process's held server and its log devices (LanSession::set_process_held_server).
+opennova::inmatch::UnstoppedServer *g_held_server = nullptr;
+opennova::inmatch::ProcessDisconnectLatch *g_held_server_latch = nullptr;
+opennova::inmatch::ServerLogs g_held_server_logs;
+// The browse standing for the process's one enumerator (LanSession::set_process_enumerator).
+LanSession *g_process_enumerator = nullptr;
 
 Ref<LanServerRow> row_record(const opennova::LanDiscoveryRow &row, uint32_t client_index) {
 	// Retail hosts advertise the typed server name in the host's single-byte
@@ -66,12 +78,59 @@ uint32_t enumerate_address(const String &p_target) {
 
 } // namespace
 
+void LanSession::set_process_held_server(opennova::inmatch::UnstoppedServer *p_server,
+		opennova::inmatch::ProcessDisconnectLatch *p_latch,
+		const opennova::inmatch::ServerLogs *p_logs) {
+	g_held_server = p_server;
+	g_held_server_latch = p_latch;
+	g_held_server_logs = p_logs != nullptr ? *p_logs : opennova::inmatch::ServerLogs{};
+}
+
 LanSession::LanSession() {
 	set_process(false);
+	// The enumerator's session-record lines write the process's _connectlog.txt (the game
+	// world's log device, on under `/CONNECTLOG`; engine: LanDiscoveryBrowser).
+	browser_.set_connect_log([](const std::string &text) {
+		if (opennova::inmatch::ConnectLog *log = NovaWorldClient::process_connect_log())
+			log->line(text);
+	});
 }
 
 LanSession::~LanSession() {
+	if (g_process_enumerator == this) g_process_enumerator = nullptr;
 	stop();
+}
+
+void LanSession::set_process_enumerator(bool p_enabled) {
+	if (p_enabled)
+		g_process_enumerator = this;
+	else if (g_process_enumerator == this)
+		g_process_enumerator = nullptr;
+}
+
+void LanSession::drain_process_enumerator() {
+	if (g_process_enumerator != nullptr) g_process_enumerator->drain_records();
+}
+
+void LanSession::adopt_records(LanSession *p_from) {
+	if (p_from != nullptr && p_from != this) browser_.adopt_records(p_from->browser_);
+}
+
+void LanSession::destroy_pre_dial_session(bool p_novaworld) {
+	UdpPump *transport = UdpPump::process_transport();
+	// The session reset's StopServer over the process's socket, still open (engine:
+	// inmatch::stop_unstopped_server; nothing when no server is held).
+	if (g_held_server != nullptr) {
+		UdpPumpDatagramSocket socket(transport);
+		const opennova::PeerAddr address =
+				transport != nullptr ? transport->local_address() : opennova::PeerAddr{};
+		opennova::inmatch::stop_unstopped_server(*g_held_server, g_held_server_logs,
+				transport != nullptr ? &socket : nullptr, transport != nullptr ? &address : nullptr);
+	}
+	// The transport's teardown off NovaWorld: its line, then the socket's close.
+	if (opennova::inmatch::tear_down_session_transport(p_novaworld, transport != nullptr,
+				NovaWorldClient::process_connect_log()))
+		transport->close();
 }
 
 void LanSession::_bind_methods() {
@@ -80,15 +139,33 @@ void LanSession::_bind_methods() {
 			&LanSession::start_browsing,
 			DEFVAL(String(DEFAULT_BROADCAST)), DEFVAL(int(opennova::kRetailLanPortMin)), DEFVAL(int(opennova::kRetailLanPortMax)),
 			DEFVAL(int(opennova::kLanConnectTypeLan)));
+	ClassDB::bind_method(D_METHOD("set_proxy_from_target", "target"), &LanSession::set_proxy_from_target);
+	ClassDB::bind_method(D_METHOD("set_windowed", "windowed"), &LanSession::set_windowed);
+	ClassDB::bind_method(D_METHOD("is_windowed"), &LanSession::is_windowed);
+	ClassDB::bind_method(D_METHOD("set_transport", "pump"), &LanSession::set_transport);
+	ClassDB::bind_method(D_METHOD("take_transport"), &LanSession::take_transport);
 	ClassDB::bind_method(D_METHOD("set_resource_root", "root"), &LanSession::set_resource_root);
 	ClassDB::bind_method(D_METHOD("get_resource_root"), &LanSession::get_resource_root);
 	ClassDB::bind_method(D_METHOD("stop"), &LanSession::stop);
+	ClassDB::bind_method(D_METHOD("tear_down_transport"), &LanSession::tear_down_transport);
+	ClassDB::bind_method(D_METHOD("stop_enumerator"), &LanSession::stop_enumerator);
+	ClassDB::bind_static_method("LanSession", D_METHOD("destroy_pre_dial_session", "novaworld"),
+			&LanSession::destroy_pre_dial_session);
+	ClassDB::bind_method(D_METHOD("drain_records"), &LanSession::drain_records);
+	ClassDB::bind_method(D_METHOD("set_process_enumerator", "enabled"), &LanSession::set_process_enumerator);
+	ClassDB::bind_method(D_METHOD("adopt_records", "from"), &LanSession::adopt_records);
 	ClassDB::bind_method(D_METHOD("get_servers"), &LanSession::get_servers);
+	ClassDB::bind_method(D_METHOD("get_join_row", "index"), &LanSession::get_join_row);
 	ClassDB::bind_method(D_METHOD("is_browsing"), &LanSession::is_browsing);
 	ClassDB::bind_method(D_METHOD("get_client_index"), &LanSession::get_client_index);
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "resource_root", PROPERTY_HINT_RESOURCE_TYPE, "ResourceRoot"),
 	             "set_resource_root", "get_resource_root");
+	ClassDB::bind_method(D_METHOD("set_game_config", "block"), &LanSession::set_game_config);
+	ClassDB::bind_method(D_METHOD("get_game_config"), &LanSession::get_game_config);
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "game_config", PROPERTY_HINT_RESOURCE_TYPE,
+	                     "GameConfigBlock"),
+	             "set_game_config", "get_game_config");
 
 	ADD_SIGNAL(MethodInfo("servers_changed", PropertyInfo(Variant::ARRAY, "servers")));
 	// The browse window expired (the 30 s gate): the LAN screen re-enables its
@@ -103,7 +180,7 @@ void LanSession::_ready() {
 
 int LanSession::start_browsing(const String &destination, int port_min, int port_max,
 		int connect_type) {
-	stop();
+	stop_enumerator();
 	servers_.clear();
 	emit_signal("servers_changed", get_servers());
 
@@ -114,31 +191,72 @@ int LanSession::start_browsing(const String &destination, int port_min, int port
 		return static_cast<int>(ERR_UNCONFIGURED);
 	}
 	const String target = destination.strip_edges();
+	// The enumerator's connection: created twice, as every enumerate's is, so its
+	// CI is the counter's second step (next_browse_connection_index).
 	if (target.is_empty() ||
-			!browser_.begin(*title, opennova::next_connection_index(), enumerate_address(target),
-					port_min, port_max, connect_type)) {
+			!browser_.begin(*title, opennova::next_browse_connection_index(),
+					enumerate_address(target), port_min, port_max, connect_type)) {
 		emit_error("LAN browse destination or port range is invalid");
 		return static_cast<int>(ERR_INVALID_PARAMETER);
 	}
 
-	socket_.instantiate();
-	// The browse socket is the client arm's: the authored client port range,
-	// scanned from its min (net_ports.h lan_client_bind_ports, D-NET-294).
-	Error bind_error = ERR_CANT_OPEN;
-	for (const uint16_t candidate : opennova::lan_client_bind_ports()) {
-		bind_error = socket_->bind(candidate, "0.0.0.0");
-		if (bind_error == OK) break;
+	// The transport: the installed one (the NovaWorld session's), else the browse's
+	// own, bound once over the client arm's port range and kept across browses
+	// (net_ports.h lan_client_bind_ports, D-NET-294).
+	if (pump_.is_null() || !pump_->is_open()) {
+		if (pump_installed_) {
+			browser_.stop();
+			emit_error("LAN browse transport is closed");
+			return static_cast<int>(ERR_UNCONFIGURED);
+		}
+		pump_.instantiate();
+		// `--capture-pcap <path>` (LaunchFlags) records the browse and the join it
+		// hands its socket to.
+		pump_->set_capture_path(LaunchFlags::capture_pcap());
+		// The client arm's quad and address from the block (engine:
+		// inmatch::transport_bind_ports, D-NET-NEW-L8-10).
+		if (game_config_.is_valid())
+			pump_->set_client_bind_scan(
+					opennova::inmatch::transport_bind_ports(game_config_->native().cfg(),
+							opennova::inmatch::NetworkType::Lan, /*authority=*/false),
+					opennova::inmatch::transport_bind_address(game_config_->native().cfg()));
+		const int bind_error = pump_->bind_client();
+		// The socket open's connect-log lines (engine: inmatch::write_transport_socket_open_lines).
+		if (opennova::inmatch::ConnectLog *log = NovaWorldClient::process_connect_log()) {
+			const opennova::PeerAddr local = pump_->local_address();
+			const opennova::gamecfg::GameCfg &block = game_config_.is_valid()
+					? game_config_->native().cfg()
+					: opennova::gamecfg::defaults();
+			opennova::inmatch::write_transport_socket_open_lines(*log,
+					bind_error == static_cast<int>(OK) ? &local : nullptr,
+					opennova::inmatch::transport_bind_address(block),
+					opennova::inmatch::transport_port_quad(block,
+							opennova::inmatch::NetworkType::Lan, /*authority=*/false));
+		}
+		if (bind_error != static_cast<int>(OK)) {
+			pump_.unref();
+			browser_.stop();
+			emit_error(String("LAN browse socket bind failed (error ") +
+					String::num_int64(static_cast<int64_t>(bind_error)) + ")");
+			return bind_error;
+		}
+		pump_->set_broadcast_enabled(true);
 	}
-	if (bind_error != OK) {
-		socket_.unref();
-		browser_.stop();
-		emit_error(String("LAN browse socket bind failed (error ") +
-				String::num_int64(static_cast<int64_t>(bind_error)) + ")");
-		return static_cast<int>(bind_error);
-	}
-	socket_->set_broadcast_enabled(true);
-
-	browse_target_ = target;
+	// The game protocol reads the socket while the enumerator runs (a NovaWorld
+	// session's datagrams stay its own: the pump's demux).
+	game_ = std::make_unique<UdpPumpGameSocket>(pump_);
+	// The start's connection create releases a held own client first, its twin then going at the
+	// pump below (engine: inmatch::release_unstopped_own_client, D-NET-NEW-L1-26).
+	if (g_held_server != nullptr)
+		opennova::inmatch::release_unstopped_own_client(*g_held_server, g_held_server_logs,
+				g_held_server_latch);
+	// The start's protocol pump, ahead of the enumerator's first burst: its receive, then the
+	// held server's nodes, which the protocol's list holds ahead of the browse's connection
+	// (engine: inmatch::pump_unstopped_server, D-NET-NEW-L1-26). The pump's queue pass reads the
+	// receive's queued replies ahead of the nodes' legs (engine: LanDiscoveryBrowser::pump_queue).
+	poll_replies();
+	browser_.pump_queue();
+	pump_held_server();
 
 	Error first_send_error = OK;
 	const int sent = send_probe_burst(first_send_error);
@@ -155,73 +273,140 @@ int LanSession::start_browsing(const String &destination, int port_min, int port
 	return static_cast<int>(OK);
 }
 
+void LanSession::set_proxy_from_target(const Ref<JoinTarget> &target) {
+	browser_.set_proxy(target.is_valid() ? target->get_join_proxy() : opennova::ProxyRendezvousConfig{});
+}
+
+void LanSession::set_transport(const Ref<UdpPump> &p_pump) {
+	stop();
+	pump_ = p_pump;
+	pump_installed_ = p_pump.is_valid();
+}
+
+Ref<UdpPump> LanSession::take_transport() {
+	stop_enumerator();
+	Ref<UdpPump> out = pump_;
+	pump_.unref();
+	pump_installed_ = false;
+	return out;
+}
+
 int LanSession::send_probe_burst(Error &first_send_error) {
 	int sent = 0;
-	if (!socket_.is_valid()) {
+	if (pump_.is_null() || !pump_->is_open()) {
 		return sent;
 	}
-	// One announce per port, each naming its own destination as EIP / EPN
-	// (LanDiscoveryBrowser::probe).
-	for (int port = browser_.port_min(); port <= browser_.port_max(); ++port) {
-		const Error destination_error = socket_->set_dest_address(browse_target_, port);
-		if (destination_error != OK) {
-			if (first_send_error == OK) first_send_error = destination_error;
+	// The enumerator's burst in its order (LanDiscoveryBrowser::burst): the proxy
+	// rendezvous to the game node when installed, then one announce per port to the
+	// enumerate address, each naming its own destination as EIP / EPN. `sent`
+	// counts the announces; an unresolved target (address 0) takes none.
+	for (const opennova::LanBurstDatagram &datagram : browser_.burst()) {
+		const opennova::PeerAddr to = datagram.rendezvous
+				? datagram.node
+				: opennova::PeerAddr{browser_.enumerate_ip(), static_cast<uint16_t>(datagram.port)};
+		if (to.ip == 0) {
+			if (first_send_error == OK) first_send_error = ERR_CANT_RESOLVE;
 			continue;
 		}
-		const Error send_error = socket_->put_packet(to_packed_bytes(browser_.probe(port)));
-		if (send_error == OK) {
-			++sent;
+		const int send_error = pump_->send_to(
+				opennova::to_gd(opennova::peer_addr_ip_to_string(to)), to.port,
+				to_packed_bytes(datagram.bytes));
+		if (send_error == static_cast<int>(OK)) {
+			if (!datagram.rendezvous) ++sent;
 		} else if (first_send_error == OK) {
-			first_send_error = send_error;
+			first_send_error = static_cast<Error>(send_error);
 		}
 	}
 	return sent;
 }
 
-void LanSession::stop() {
-	if (socket_.is_valid()) {
-		socket_->close();
-	}
-	socket_.unref();
+void LanSession::stop_enumerator() {
+	game_.reset();
 	browser_.stop();
 	set_process(false);
+}
+
+void LanSession::stop() {
+	stop_enumerator();
+	tear_down_transport();
+	pump_.unref();
+	pump_installed_ = false;
+}
+
+void LanSession::tear_down_transport() {
+	if (pump_.is_null() || pump_installed_ || !pump_->is_open()) return;
+	opennova::inmatch::write_transport_socket_teardown_line(
+			NovaWorldClient::process_connect_log(), /*socket_open=*/true);
+	pump_->close();
 }
 
 TypedArray<LanServerRow> LanSession::get_servers() const {
 	return servers_.duplicate();
 }
 
+Ref<LanServerRow> LanSession::get_join_row(int index) const {
+	opennova::LanDiscoveryRow row;
+	if (index < 0 || !browser_.join_session(static_cast<size_t>(index), row))
+		return Ref<LanServerRow>();
+	return row_record(row, browser_.client_index());
+}
+
 void LanSession::_process(double delta) {
-	if (!browser_.browsing() || !socket_.is_valid()) {
+	if (!browser_.browsing() || game_ == nullptr) {
 		return;
 	}
 
-	poll_replies();
-	bool announce_due = false;
-	if (!browser_.advance(delta, announce_due)) {
-		stop();
-		emit_signal("browse_finished");
-		return;
-	}
-	// Transient send errors during a re-announce are dropped like retail's
-	// fire-and-forget pump.
-	if (announce_due) {
+	// The frame in retail's order (engine: LanDiscoveryBrowser::frame carries the witness):
+	// the LAN screen's search pumps the browse connection's legs (a due re-announce's burst,
+	// then the record expiry) at the frame's top, the enumerate-and-join after the held
+	// server's walk. Between them, the receive, its queue pass (the replies it queued: NET GOT
+	// and their records) and the held server's nodes. Then the window's gate and the list's
+	// walk; a re-announce due on the window's last frame still goes out.
+	const size_t listed = browser_.servers().size();
+	opennova::LanDiscoveryBrowser::FrameLegs legs;
+	// Transient send errors during a re-announce are dropped like retail's fire-and-forget
+	// pump.
+	legs.send_burst = [this] {
 		Error ignored_error = OK;
 		send_probe_burst(ignored_error);
+	};
+	legs.receive = [this] { poll_replies(); };
+	legs.held_walk = [this] { pump_held_server(); };
+	const bool open = browser_.frame(delta, legs);
+	if (browser_.servers().size() != listed) rebuild_rows();
+	// The window's end stops the enumerator alone: the transport stays open until the
+	// mode changes, and a join from a row goes on with it (engine: LanDiscoveryBrowser::stop
+	// and the class comment carry the witness, D-NET-NEW-R3-3).
+	if (!open) {
+		stop_enumerator();
+		emit_signal("browse_finished");
 	}
 }
 
 void LanSession::poll_replies() {
-	bool changed = false;
-	while (socket_.is_valid() && socket_->get_available_packet_count() > 0) {
-		const PackedByteArray packet = socket_->get_packet();
-		const std::string source_ip = opennova::to_std(socket_->get_packet_ip());
-		const int source_port = static_cast<int>(socket_->get_packet_port());
-		if (browser_.accept_reply(packet.ptr(), static_cast<size_t>(packet.size()),
-					source_ip, source_port) != opennova::LanRowChange::kNone)
-			changed = true;
+	uint8_t buf[4096];
+	while (game_ != nullptr) {
+		opennova::PeerAddr from{};
+		const int n = game_->recv_from(buf, sizeof(buf), from);
+		if (n <= 0) break;
+		// A held node's joiner's datagram reaches its node's socket leg (the manager's dispatch
+		// by the source; engine: inmatch::receive_unstopped_server); the rest are the
+		// enumerator's.
+		if (g_held_server != nullptr &&
+				opennova::inmatch::receive_unstopped_server(*g_held_server, g_held_server_logs,
+						*game_, from, buf, static_cast<std::size_t>(n),
+						opennova::inmatch::host_monotonic_milliseconds())
+						.taken)
+			continue;
+		browser_.accept_reply(buf, static_cast<size_t>(n), from);
 	}
-	if (changed) rebuild_rows();
+}
+
+void LanSession::pump_held_server() {
+	if (g_held_server == nullptr || game_ == nullptr) return;
+	// Its 0x84's incoming link flag has no indicator to reach outside a match.
+	(void)opennova::inmatch::pump_unstopped_server(*g_held_server, g_held_server_logs, *game_,
+			opennova::inmatch::host_monotonic_milliseconds());
 }
 
 void LanSession::rebuild_rows() {

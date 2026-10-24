@@ -191,6 +191,10 @@ public:
 		LAYER_MAIN_VIEW = 1 << 20,
 		LAYER_INSET_VIEW = 1 << 21,
 		LAYER_MAIN_VIEW_NO_MIRROR = 1 << 22,
+		LAYER_MIRROR_VIEW = 1 << 24,
+		LAYER_INSET_MIRROR_VIEW = 1 << 25,
+		LAYER_SCENE_VIEW_NO_REFLECTION = 1 << 26,
+		LAYER_MAIN_VIEW_NO_REFLECTION = 1 << 27,
 		LAYER_SHADOW_CASTER_MASK =
 				LAYER_STATIC_SHADOW_CASTER | LAYER_DYNAMIC_SHADOW_CASTER,
 	};
@@ -218,8 +222,9 @@ public:
 		// shadow-caster markers; casts when it carries a marker.
 		PRESENTATION_LAYER_WORLD = 0,
 		// The local player's body/held gun as a drawn entity (third person,
-		// the debug body): the world layer, markers kept, always casting so
-		// the render-slot capture cameras photograph it.
+		// the debug body): the same mirror-policy world layer as any person,
+		// markers kept, always casting so the render-slot capture cameras
+		// photograph it.
 		PRESENTATION_LAYER_LOCAL_BODY = 1,
 		// The same models while first person hides them from every camera by
 		// LAYER (the hidden FP layer), still casting for the slot capture.
@@ -241,6 +246,30 @@ public:
 		AWAKE_PROFILE_RENDERABLE_MODELS,
 		AWAKE_PROFILE_SLOT_COUNT,
 	};
+	// Fixed layout returned by take_build_profile(): the scene builds since the last take and their
+	// cost split by rebuild_scene's phases, in microseconds (an instrument).
+	enum BuildProfileSlot {
+		BUILD_PROFILE_BUILDS = 0,
+		BUILD_PROFILE_SKELETON_US, // the head: level thresholds, PANM, the Skeleton3D and Skin
+		BUILD_PROFILE_MESHES_US, // ObjectData::build_lod_submeshes per retained level
+		BUILD_PROFILE_MATERIALS_US, // the per-surface rows past their materials: part nodes, anim frames
+		BUILD_PROFILE_NODES_US, // the surface slots' MeshInstance3D nodes
+		BUILD_PROFILE_LEVELS_US, // the active level applied, the skin palette, the rest transforms
+		BUILD_PROFILE_OCCLUDERS_US, // the authored occluders
+		BUILD_PROFILE_TAIL_US, // the runtime state, the stamps and the render order
+		// The surface materials, apart from the rows (the materials phase is the four together):
+		BUILD_PROFILE_MATERIAL_TEXTURES_US, // a new material's stage textures (a first load decodes)
+		BUILD_PROFILE_MATERIAL_CREATES_US, // a new material past its textures: shader, parameters
+		BUILD_PROFILE_ALPHA_COPIES_US, // an alpha strip's own copy of its material
+		// Inside the creates, counted apart: a new material's shader bind (a key's first use loads
+		// its shader resource).
+		BUILD_PROFILE_MATERIAL_SHADERS_US,
+		BUILD_PROFILE_SLOT_COUNT,
+	};
+	// The process's scene builds since the last take, then zeroed: the mission load's placement
+	// prints it under --verbose (format_build_profile).
+	static PackedInt64Array take_build_profile();
+	static String format_build_profile(const PackedInt64Array &p_profile);
 
 private:
 	struct AwakeFrameProfile {
@@ -408,8 +437,8 @@ private:
 	// The frame's views a projection is kept for: the frame's image (view 0)
 	// and the weapon Inset pass (view 1; update_authored_lod_views).
 	uint64_t lod_projection_frame_ = 0;
-	int32_t lod_projected_radius_q16_[2] = {};
-	bool lod_projection_visible_[2] = {};
+	int32_t lod_projected_radius_q16_[4] = {};
+	bool lod_projection_visible_[4] = {};
 	// --- the weapon Inset view (object_model_views.cpp) ---
 	// The Inset view's own verdicts where it gave one (a clear bit follows the
 	// main view's): the Inset collect's hide and raw section mask, the Inset
@@ -441,16 +470,6 @@ private:
 		uint64_t lights_hash = 0;
 	};
 	bool view_split_ = false;
-	std::vector<ViewTwin> view_twins_;
-	int view_twin_lod_ = -1;
-	int64_t view_twin_mask_ = -1;
-	uint32_t view_twin_destroyed_ = 0;
-	uint32_t view_twin_serial_ = 0;
-	// The part poses of a twin level the node does not show (Node3D objects
-	// outside the tree, written through the per-graphic PANM cache).
-	Array view_twin_pose_nodes_;
-	int64_t view_twin_pose_revision_ = 0;
-	Ref<SkinReference> view_twin_skin_;
 	// Section-bound instances another owner minted for the Inset view (the
 	// scar presenter's section-local scar twins): posed like this model's
 	// twins, shown only while a twin draws their section.
@@ -460,24 +479,90 @@ private:
 	};
 	std::vector<InsetSectionTwin> inset_section_twins_;
 	void sync_inset_section_twins(bool p_drawn);
+	// Every model the Inset gave a verdict (its node edges reconcile it), and
+	// the walk: the marked models the Inset's lists still hold, as the
+	// mirrors' below (a model the Inset's own collect dropped draws nothing
+	// there whatever its node does).
 	static HashSet<ObjectModel *> inset_view_models_;
+	static HashSet<ObjectModel *> inset_view_walk_models_;
 	static bool inset_view_open_;
 	void mark_inset_view();
+	bool inset_view_dropped() const;
 	static void set_inset_view_open(bool p_open);
 	static void refresh_inset_views();
 	void refresh_view_split();
 	// The Inset pass's draw verdict for the node (its own verdicts, else the
 	// main view's), under ancestors that draw there.
 	bool inset_view_draws() const;
+	// The model this one draws inside: the nearest model above it in its
+	// visibility chain (null at a chain without one). `r_chain_visible` is
+	// whether every node between them shows its own flag.
+	const ObjectModel *view_owner(bool &r_chain_visible) const;
+	mutable ObjectID view_owner_id_;
+	mutable bool view_owner_cached_ = false;
 	void apply_view_split_layers();
 	bool inset_section_part_visible(int64_t p_mask, int p_section) const;
 	// Write one Inset selection to the twins it covers: every twin
 	// (p_all), else the twins of ROBJ p_robj_index (-1: the skinned ones).
 	void write_twin_point_lights(bool p_all, int p_robj_index, int p_count,
 			const Vector4 *p_posr, const Vector4 *p_color);
-	void build_view_twins(int p_level, int64_t p_mask);
-	void free_view_twins();
-	void sync_view_twin();
+	// One alternate view's twin set (twin_sets_): the Inset's, the main scene
+	// water mirror's, the Inset's water mirror's.
+	struct TwinSet;
+	void build_view_twins(TwinSet &r_set, int p_level, int64_t p_mask, uint32_t p_layer);
+	void free_view_twins(TwinSet &r_set);
+	void free_all_view_twins();
+	void sync_view_twin(TwinSet &r_set);
+	bool has_view_twins() const;
+	// --- the water mirrors' views (object_model_views.cpp) ---
+	// A water mirror's reflected subscene draws its own collect's lists (engine
+	// inmatch/occlusion_collect.h MirrorViewLists): where a mirror's own verdict
+	// for the node differs from what the node draws there by its layers, the
+	// node leaves that mirror (its world bits swap for the scene-view bits no
+	// mirror admits, plus the private bit of every mirror that agrees) and a
+	// twin set draws the mirror's on that mirror's private bit. A model with no
+	// verdict of its own takes its owner's, as retail draws a part inside its
+	// owner's submit; one no mirror view marked follows its node.
+	struct MirrorState {
+		uint8_t own = 0; // kInsetOwnOcclusion / kInsetOwnSections / kInsetOwnLod / kInsetOwnPixel
+		bool occlusion_hidden = false;
+		int64_t section_mask = -1;
+		int lod = 0;
+		bool subpixel_hidden = false;
+		// The held weapon's 2 px gate through the mirror's drawn view.
+		bool pixel_culled = false;
+		bool split = false;
+	};
+	MirrorState mirror_[2];
+	// Every model a mirror view gave a verdict (its node edges reconcile it),
+	// and the walk: the marked models the mirrors' lists still hold, which
+	// each walk reconciles. Retail's reflected subscene walks only its
+	// collect's lists, emptied at every collect; a model every open mirror's
+	// own collect dropped draws in no mirror whatever its node does, so it
+	// leaves the walk and its node's edges relist it (relist_view_walks).
+	static HashSet<ObjectModel *> mirror_view_models_;
+	static HashSet<ObjectModel *> mirror_view_walk_models_;
+	static bool mirror_view_open_[2];
+	static bool mirror_view_below_[2];
+	void mark_mirror_view(int p_view);
+	// A node edge the reconcile reads (the pixel gate, the layer, the tree):
+	// a model a view marked and its walk left is reconciled by the next walk.
+	void relist_view_walks();
+	bool mirror_view_dropped(int p_view) const;
+	static void refresh_mirror_views();
+	// Whether the mirror camera of view `p_view` admits the node's own layer
+	// by its water side (WORLD always, WORLD_NO_MIRROR below the water): the
+	// node's presentation layer (mirror_admits_layer), unless the main view's
+	// pixel gate moved the node off every camera.
+	bool mirror_admits_base(int p_view) const;
+	bool mirror_admits_layer(int p_view) const;
+	uint32_t mirror_policy_world_layer() const;
+	// The held weapon's 2 px gate through mirror `p_view`'s drawn view
+	// (update_authored_lod_views), marking the model.
+	void set_mirror_pixel_culled(int p_view, bool p_culled);
+	// The mirror's draw verdict for the model (its own, else its owner's while
+	// the main view hides the owner, else the main view's by the water side).
+	bool mirror_view_draws(int p_view) const;
 	bool authored_occluders_enabled_ = false;
 	std::vector<int32_t> authored_lod_thresholds_q16_;
 	std::vector<bool> authored_lod_available_;
@@ -517,6 +602,7 @@ private:
 	ObjectID slot_shadow_capture_with_;
 	ObjectID entity_light_owner_;
 	bool mirror_reflected_ = false;
+	bool mirror_collected_ = true;
 	AvatarPart avatar_part_ = AVATAR_PART_NONE;
 	int character_id_ = 0; // the composed avatar's character id (0xffff-masked)
 	Vector3i avatar_camo_; // the arms' raw camo triplet for the per-submit FP writer
@@ -559,6 +645,8 @@ private:
 	// themselves on wake and drop out on park. Replaces the per-node _process
 	// clock so nothing self-clocks outside that one driver.
 	static HashSet<ObjectModel *> awake_models_;
+	// The frame skips its world (set_world_skipped): no model submits.
+	static bool world_skipped_;
 	// Monotonic invalidation stamp for native row plans that retain typed model
 	// pointers. Godot destroys Nodes on the main thread; PREDELETE advances this
 	// before any cached pointer can be observed by a later presentation walk.
@@ -602,6 +690,8 @@ private:
 	// GameWorld.get_runtime_perf_counters reads it for the F3/perf path.
 	int geometry_instance_count_ = 0;
 	static int64_t live_geometry_instance_count_;
+	// take_build_profile's accumulators (BuildProfileSlot).
+	static int64_t build_profile_[BUILD_PROFILE_SLOT_COUNT];
 	void retire_geometry_instances();
 
 	// Main-body skeletal animation (.bad/.adm via SkeletalAnim).
@@ -681,7 +771,29 @@ private:
 		bool needs_eval = false;
 		MaterialRuntimeStamp stamp;
 	};
-	std::vector<TwinDynamicMaterial> view_twin_dynamic_;
+	// One alternate view's twin set: an instance per drawn surface of its
+	// level, the part poses of a level the node does not show (plain part
+	// transforms in the model's frame, written through the per-graphic PANM
+	// cache: retail poses the drawn level's parts into one shared scratch per
+	// draw, so no object stands for them; engine renderer/model_panm_cache.h
+	// carries the witness), the twin skeleton skin and the level's own
+	// dynamic materials.
+	struct TwinSet {
+		std::vector<ViewTwin> twins;
+		int lod = -1;
+		int64_t mask = -1;
+		uint32_t destroyed = 0;
+		uint32_t serial = 0;
+		std::vector<Transform3D> pose_parts;
+		int64_t pose_revision = 0;
+		Ref<SkinReference> skin;
+		std::vector<TwinDynamicMaterial> dynamic;
+	};
+	// [0] the weapon Inset's, [1] the main scene's water mirror's, [2] the
+	// Inset's water mirror's.
+	static constexpr int kTwinInset = 0;
+	static constexpr int kTwinMirror = 1;
+	TwinSet twin_sets_[3];
 	// Set by an EntityPresenter row plan that retains this model by pointer and
 	// cleared when that plan drops the row; only planned models advance
 	// lifetime_generation_ when they die.
@@ -771,7 +883,6 @@ private:
 	bool material_runs_skin_program(int p_material_index) const;
 	HashMap<int64_t, bool> material_skin_programs_;
 	void collect_anim_frames(int p_material_index);
-	static Ref<ImageTexture> solid_colour_texture(const Color &p_color);
 	// One shader parameter written to a material and, when the material
 	// carries the postmultiply pass, to its proxy as well.
 	static void set_material_and_auxiliary_parameter(
@@ -837,6 +948,11 @@ public:
 	// work; there is no per-node _process.
 	static void advance_awake_frame(double p_delta);
 	static PackedInt64Array profile_awake_frame(double p_delta);
+	// The game frame's world-skip word (engine inmatch::FrameOutcome::world_skipped): a frame
+	// that skips its world submits no model, so the awake set's next advance treats every
+	// model as not renderable (its clocks and anims advance; its PANM and material
+	// generators, and their render-stream noise draws, wait for a drawn frame).
+	static void set_world_skipped(bool p_skipped) { world_skipped_ = p_skipped; }
 	static uint64_t lifetime_generation() { return lifetime_generation_; }
 	void set_present_planned(bool p_planned) { present_planned_ = p_planned; }
 	bool is_present_planned() const { return present_planned_; }
@@ -853,6 +969,15 @@ public:
 			const PackedStringArray &p_part_local_registers = PackedStringArray());
 	void set_mirror_reflected(bool p_reflected) { mirror_reflected_ = p_reflected; }
 	bool get_mirror_reflected() const { return mirror_reflected_; }
+	// Whether a water mirror's reflected collect walks this model's population
+	// at all (true for the entity pools and the statics, which it walks under
+	// the Flags match mirror_reflected stands for). A model it never walks (a
+	// flying round's: the RoundPool is a scene collect's alone) is on no
+	// mirror camera above or below the water and stays on the scene views
+	// (render/visual_layers.h SCENE_VIEW_NO_REFLECTION;
+	// world::ThrowableVisualRow::mirror_collected carries the witness).
+	void set_mirror_collected(bool p_collected);
+	bool get_mirror_collected() const { return mirror_collected_; }
 	void set_avatar_part(AvatarPart p_part) { avatar_part_ = p_part; }
 	AvatarPart get_avatar_part() const { return avatar_part_; }
 	void set_character_id(int p_id) { character_id_ = p_id; }
@@ -1009,17 +1134,39 @@ public:
 			float p_viewport_width,
 			float p_viewport_height,
 			int p_object_detail = opennova::renderer::kObjectLodDetailLevelMax);
-	// The same walk per view drawing the world this frame: view 0 the frame's
+	// The same walk per view drawing the world this frame (up to four frames:
+	// views 2 and 3 the main scene's and the Inset's water mirrors, each its
+	// collect's projection, ObjectLodFrame::mirror_collect, valid while that
+	// mirror renders): view 0 the frame's
 	// image, view 1 (present while it renders) the weapon Inset pass, which
 	// retail runs as its own scene pass with its own frame scale, sub-pixel
 	// floor and RLOD walk. The node takes view 0's level and verdict; view 1's
 	// are the model's Inset state, drawn by a twin where they differ
 	// (object_model_views.cpp). A frame set without view 1 closes the Inset
 	// view and converges every split model.
-	static int update_authored_lod_views(const ObjectLodFrame *p_frames, int p_frame_count);
+	// `p_mirror_gate_frames` (two frames, or null) are the water mirrors' DRAWN
+	// views, the reflected eye over its collect's projection: the held
+	// weapon's 2 px gate runs in every subscene through that subscene's own
+	// projection, which in a mirror is the second one over the mirrored block
+	// (BoneCallback_org0_World's gate; engine renderer/object_lod.h
+	// held_weapon_projection_culled), not the collect's eye views 2 and 3 carry.
+	static int update_authored_lod_views(const ObjectLodFrame *p_frames, int p_frame_count,
+			const ObjectLodFrame *p_mirror_gate_frames = nullptr);
+	// The models the alternate views (the weapon Inset, the water mirrors)
+	// reconcile each walk: the models their lists hold (a FrameStats VALUE).
+	static int64_t get_view_marked_count() {
+		return static_cast<int64_t>(
+				inset_view_walk_models_.size() + mirror_view_walk_models_.size());
+	}
 	// The two-camera form (view 1 null = no Inset view), for tools and tests.
 	static int update_authored_lods_for_views(Camera3D *p_main, float p_main_width,
 			Camera3D *p_inset, float p_inset_width,
+			int p_object_detail = opennova::renderer::kObjectLodDetailLevelMax);
+	// The main view plus the main scene's water mirror, for tests: the mirror's
+	// collect over the main camera's eye (view 2) and its drawn view from
+	// `mirror_eye` (the gate frame), both over the mirror target's projection.
+	static int update_authored_lods_for_mirror_view(Camera3D *p_main, float p_main_width,
+			const Transform3D &p_mirror_eye,
 			int p_object_detail = opennova::renderer::kObjectLodDetailLevelMax);
 	// The frame driver's leg after the awake advance: every twin follows its
 	// model's final transform, part pose, instance uniforms and strip rung.
@@ -1030,6 +1177,24 @@ public:
 	void set_inset_occlusion_hidden(bool p_hidden);
 	void set_inset_occlusion_section_mask(int64_t p_raw_mask, int64_t p_forced_mask);
 	void clear_inset_occlusion();
+	// A water mirror's collect verdicts (OcclusionFrame; view 0 the main
+	// scene's mirror, 1 the weapon Inset's): its hide and its raw section mask
+	// (the def's forced sections are shared), marking the model and its model
+	// descendants; clear releases both onto the node's.
+	void set_mirror_occlusion_hidden(int p_view, bool p_hidden);
+	void set_mirror_occlusion_section_mask(int p_view, int64_t p_raw_mask, int64_t p_forced_mask);
+	void clear_mirror_occlusion(int p_view);
+	// A presenter-driven model's level in a mirror (the death pieces' own level
+	// walk, run per collect): the set_active_lod of that mirror's view.
+	void set_mirror_view_lod(int p_view, int p_lod_index);
+	// A mirror's own RLOD walk (update_authored_lod_views views 2 and 3): its
+	// level and sub-pixel verdict for the model.
+	void set_mirror_view_subpixel(int p_view, int p_lod_index, bool p_subpixel_hidden);
+	// Whether mirror view `p_view` renders this frame and its eye is below the
+	// water; a closing view releases every verdict and converges every model.
+	static void set_mirror_view_state(int p_view, bool p_open, bool p_below_water);
+	bool is_mirror_view_split(int p_view) const;
+	int get_mirror_view_twin_count(int p_view) const;
 	// A presenter-driven model's Inset level (the death pieces' own level
 	// walk, run per collect): the set_active_lod of the Inset view.
 	void set_inset_view_lod(int p_lod_index);
@@ -1044,7 +1209,7 @@ public:
 	int get_inset_view_lod() const;
 	bool is_inset_view_subpixel_hidden() const;
 	bool is_view_split() const { return view_split_; }
-	int get_view_twin_count() const { return static_cast<int>(view_twins_.size()); }
+	int get_view_twin_count() const { return static_cast<int>(twin_sets_[kTwinInset].twins.size()); }
 	// One twin's instance uniform as the RenderingServer holds it (the typed
 	// read-back of what the Inset draws with; nil past the count).
 	Variant get_view_twin_shader_parameter(int p_index, const StringName &p_name) const;
@@ -1114,6 +1279,11 @@ public:
 	// keeps its render-slot capture, which retail's slot pass draws untested.
 	void set_attachment_pixel_cull(bool p_enabled);
 	bool is_camera_pixel_culled() const { return camera_pixel_culled_; }
+	// Mirror `p_view`'s own gate verdict (false while it gave none).
+	bool is_mirror_pixel_culled(int p_view) const {
+		return p_view >= 0 && p_view <= 1 && (mirror_[p_view].own & kInsetOwnPixel) != 0 &&
+				mirror_[p_view].pixel_culled;
+	}
     void set_geometry_visible(bool p_visible);
     void set_rigid_parts(bool p_rigid);
 	ObjectModel *get_authored_lod_owner() const;
@@ -1329,5 +1499,6 @@ public:
 
 } // namespace godot
 VARIANT_ENUM_CAST(godot::ObjectModel::AwakeFrameProfileSlot);
+VARIANT_ENUM_CAST(godot::ObjectModel::BuildProfileSlot);
 VARIANT_ENUM_CAST(godot::ObjectModel::AvatarPart);
 VARIANT_ENUM_CAST(godot::ObjectModel::PresentationLayer);

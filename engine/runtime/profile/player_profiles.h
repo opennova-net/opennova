@@ -40,7 +40,7 @@ struct ProfileDefaults {
 	uint32_t joystick_caps = 0;
 	// Per side, the character the character table's first entry of that side
 	// packs: its nationality and division ids and its packed id
-	// [orig: EntitySlot_LookupAndPackEntry @0x57ad40, called @0x54bbea /
+	// [orig: CAvatarDefs_PackFirstComboOfAlignment @0x57ad40, called @0x54bbea /
 	// @0x54bc0f].
 	struct Avatar {
 		uint8_t nationality = 0;
@@ -139,7 +139,10 @@ public:
 
 	// The current record. The original keeps the index in game.cfg's
 	// player_index and clamps it when the load ends [orig: @0x54f65d..0x54f66b,
-	// `>= 6` -> 0]; here an index outside the five records is 0.
+	// `>= 6` -> 0]; here an index outside the five records is 0. An index of 5 is
+	// a deliberate fix of a retail bug (PERMANENT, D-NET-352, Q7-18): retail keeps
+	// it and reads a sixth record past the table [orig: PlayerProfile_LoadAllFromDisk
+	// @0x54F4D0 - `cmp ebp, 5; jle` @0x54F664..0x54F667, the record @0x54F670..0x54F682].
 	int current_slot() const { return slot_; }
 	void select_slot(int slot);
 	playersav::ProfileRecord &current() { return player_.slots[static_cast<size_t>(slot_)]; }

@@ -18,7 +18,11 @@ class World;
 // [orig: UseGun Entity_AttachToBoneAndUpdateTransform @0x5463d0; ordinary
 // seats Entity_GetBoneTransformAndOrientation @0x4b0c50]
 struct MountedPose {
-    Vec3 position;
+    // The seat point's 16.16 words (D-NET-507): the bone point through the
+    // carrier's matrix onto its Position words.
+    // [orig: Entity_GetBoneTransformAndOrientation @0x4b0c50 - outPos = Position
+    //  @0x4b0cf1, the bone point through the bone matrix @0x4b0d29..0x4b0d42]
+    EntityPosition position;
     // Live orientation is BAM32, never the whole-degree mission mirrors.
     // [orig: Entity_GetBoneTransformAndOrientation @0x4b0d81/@0x4b0db1/@0x4b0dbb]
     int32_t heading = 0;
@@ -81,6 +85,28 @@ inline bool mount_hides_fp_viewmodel(const Entity &occupant,
     return true;
 }
 
+// The designated-G route legs' gates, each read off the entity's parent (L's own after a
+// record's attach, a remote record's, action 6's, the authority's 0x16 sender's): the parent
+// is a mountable gun (an ItemDef not of type 1 carrying the EWeap attrib) with the G
+// capability. Nothing else is read: no MountSlot state, no addeweap parent identity.
+// [orig: Entity_IsMountableGun @0x434240 (def +0x5C != 1, def +0x54 & 0x20);
+//  NetPacket_SerializePlayerState @0x4C09C0 - the parent @0x4C1346, the null test @0x4C1367,
+//  Entity_IsMountableGun @0x4C1371, +0x326 & 2 @0x4C137E]
+inline bool mount_is_designated_g_gun(const Entity &mount) {
+    return mount.has_item_def && mount.item_type != 1u &&
+            (mount.item_attrib & kItemAttribEweap) != 0u &&
+            (mount.emplacement_attachment_flags & 0x02u) != 0u;
+}
+
+// The parent-slot route's carrier, the gun's groundEntity: present, with an ItemDef of
+// type 1 carrying the EWeap attrib.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - groundEntity @0x4C13C1, its def
+//  @0x4C13CC, type 1 @0x4C13D7, attrib 0x20 @0x4C13E1]
+inline bool designated_g_route_carrier(const Entity *ground) {
+    return ground != nullptr && ground->has_item_def && ground->item_type == 1u &&
+            (ground->item_attrib & kItemAttribEweap) != 0u;
+}
+
 inline bool mount_collapses_right_hand_row(const Entity &entity) {
     // This terminal skeletal row is stricter than the secondary-channel gate:
     // retail requires a controller/gunner/driver parent slot AND no Flags 0x100.
@@ -91,12 +117,13 @@ inline bool mount_collapses_right_hand_row(const Entity &entity) {
             (entity.engine_flags & kEntityFlagPlayer) == 0;
 }
 
-// Clear parent ownership; restore a player's personal EquippedSlot after a
-// UseGun ride and clear any NPC's, whatever its seat, matching the
-// post-restore retail player-classifier branch.
+// Point a non-local entity's EquippedSlot at its +0x308 on a seat-2/3 detach
+// (borrowed or not) and clear any NPC's, whatever its seat, matching the
+// post-restore retail player-classifier branch. The vehicle's MountSlot keeps
+// its owner.
 // [orig: Entity_DetachFromVehicle restore @0x435671-0x435687,
 //  NPC clear @0x435694-0x4356aa]
-void vehicle_release_equipped_slot(Entity &occupant, Entity *vehicle);
+void vehicle_release_equipped_slot(Entity &occupant, bool is_local);
 
 
 
@@ -106,7 +133,7 @@ void vehicle_release_equipped_slot(Entity &occupant, Entity *vehicle);
 // shell agree on one frame. Retail has exactly one entity orientation matrix
 // serving both. [orig: Entity_GetBoneTransformAndOrientation @0x4b0c50 over the
 // entity matrix built by Math_BuildFixedPointMatrixFromEulerAngles @0x613f40]
-Vec3 entity_local_point_world(const Entity &vehicle, const Vec3 &local);
+EntityPosition entity_local_point_world(const Entity &vehicle, const Vec3 &local);
 
 enum class SeatSelectionMode : uint8_t {
     Any = 0,

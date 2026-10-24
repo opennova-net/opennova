@@ -26,6 +26,7 @@ var _artifacts: Array[Dictionary] = []
 var _restores: Array[Callable] = []
 var _progress: Dictionary = {}
 var _finished := false
+var _frame_stats_held := false
 
 
 # --- live suppliers (the GameShell surface) -----------------------------------------------------------------
@@ -67,12 +68,29 @@ func deploy_presenter() -> DeployScreenPresenter:
 	return _live(shell.get_deploy_presenter() if shell != null else null) as DeployScreenPresenter
 
 
+## The join screen (pre.mnu PRE_GAME_MENU), open or closed.
+func join_screen() -> PreGameMenuPresenter:
+	return _live(shell.get_join_screen() if shell != null else null) as PreGameMenuPresenter
+
+
 func dev_tools() -> DevTools:
 	return _live(shell.get_dev_tools() if shell != null else null) as DevTools
 
 
+## The shell's FrameStats board. A probe that reads it drains it itself, so the
+## first call holds the board for the run (GameShell.hold_frame_stats: the
+## shell's every-frame drain, the --verbose slow-frame readout, leaves it to the
+## probe) and finish() lets it go.
 func frame_stats() -> FrameStats:
-	return _live(shell.get_frame_stats() if shell != null else null) as FrameStats
+	var board := _live(shell.get_frame_stats() if shell != null else null) as FrameStats
+	if board != null and not _frame_stats_held:
+		_frame_stats_held = true
+		var held_shell := shell
+		held_shell.hold_frame_stats(true)
+		defer_restore(func() -> void:
+			if is_instance_valid(held_shell):
+				held_shell.hold_frame_stats(false))
+	return board
 
 
 func viewport() -> Viewport:

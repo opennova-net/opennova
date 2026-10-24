@@ -42,7 +42,7 @@ struct ServerStatusSlot {
 	bool entity_dead = false; // the slot's entity (+0) with health (+286) <= 0
 	uint8_t team = 0;         // +0x1A0
 	// +0x1C0: the status word the roster's rights colours test. Its only
-	// writers store 0 [orig: CServerTick_SetPhase @0x5100ca, Server_OnPlayerJoin
+	// writers store 0 [orig: PlayerSlot_SetState @0x5100ca, Server_OnPlayerJoin
 	// @0x51a764], so the rights arm never colours a row.
 	uint32_t status_word = 0;
 	int32_t class_word = 0;   // +0x15EDC (89820), the soldier class
@@ -131,13 +131,27 @@ struct ServerStatusPageState {
 // GateTypeAbbrev text (the Co-op family's "COOP") [orig: the
 // GameText_GetString("Server", ..) calls of Server_DrawStatusScreen and
 // HUD_DrawPlayerScoreList; GameType_GetAbbreviation(g_GameType, 1) @0x520fd0,
-// whose dword_24C1930 & 0x10000 arm has no writer].
+// whose g_DebugCheatFlags & 0x10000 arm has no writer].
 ServerStatusText server_status_text(const GameTextLookup &gametext, uint32_t game_type);
 
 // The quit dialog's Overlays key: STROVER_QUITSERVER on an authority in a
 // session, STROVER_QUITCLIENT for a joiner, STROVER5 out of a session
-// [orig: UI_DrawDisconnectReasonDialog @0x5b8edc..0x5b8eff].
+// [orig: UI_DrawQuitConfirmDialog @0x5b8edc..0x5b8eff].
 const char *quit_dialog_text_key(bool in_session, bool authority);
+
+// Whether a main frame draws the scene (the world, the viewmodel, the screen effects and the HUD)
+// or the status page stands in for it. A frame with no session peer (a dedicated host) always
+// draws the page; a peer's frame draws it while the status view is up on the authority; every
+// other frame draws the scene. The frame's audio legs run ahead of the choice either way.
+// [orig: GameLoop_RenderFrame @0x521310 - Audio_UpdateListenerFromView @0x52131E,
+//  SharedMem_UpdateEngineSoundState @0x521329, SoundEmitter_UpdateAndMixTop8 @0x521341; `cmp
+//  g_NapiNPCtx.is_mp_session_peer, 0` @0x52134E, `jz` to the page @0x521355; the view word
+//  @0x521CD6, is_authority @0x521CDF..0x521CE6; Render_ProcessMainSceneFrame @0x521CE8,
+//  Server_DrawStatusScreen @0x521CEF]
+constexpr bool main_frame_draws_scene(bool mp_session_peer, bool authority,
+		bool server_status_view) noexcept {
+	return mp_session_peer && !(server_status_view && authority);
+}
 
 // The page's throttle: a draw is due once 200 ms passed since the last one,
 // or, while the window is inactive, once 10 s passed; the first draw seeds

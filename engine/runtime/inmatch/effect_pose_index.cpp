@@ -84,9 +84,9 @@ bool EffectPoseIndex::cache_(const RoleView &view, const replication::ClientEnti
 	pose.x = static_cast<float>(state.x / io::kFp16OneD);
 	pose.y = static_cast<float>(state.y / io::kFp16OneD);
 	pose.z = static_cast<float>(state.z / io::kFp16OneD);
-	pose.pitch_deg = entity != nullptr ? static_cast<float>(entity->pitch) : 0.0f;
+	pose.pitch_deg = entity != nullptr ? static_cast<float>(world::degrees_from_angle_bam(entity->pitch_bam)) : 0.0f;
 	pose.yaw_deg = static_cast<float>(world::mission_yaw_deg_from_bam_heading(state.heading_bam));
-	pose.roll_deg = entity != nullptr ? static_cast<float>(entity->roll) : 0.0f;
+	pose.roll_deg = entity != nullptr ? static_cast<float>(world::degrees_from_angle_bam(entity->roll_bam)) : 0.0f;
 	poses_by_handle_[state.handle] = pose;
 	missing_handles_.erase(state.handle);
 	// A joiner's decoded handles belong to the host, so only wire identity is

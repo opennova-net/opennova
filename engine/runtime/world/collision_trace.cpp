@@ -23,7 +23,8 @@ using namespace detail; // the shared fixed-point helpers, unqualified as before
 
 const CollisionTargetView *CollisionWorld::target_view(const World &world, EntityHandle h,
                                                        CollisionTargetView &scratch,
-                                                       std::vector<CollisionMatrix> &mats) const {
+                                                       std::vector<CollisionMatrix> &mats,
+                                                       bool husk_swap) const {
     const Instance *instance = live_instance(world, h);
     if (instance == nullptr) return nullptr;
     const Entity *e = world.registry.get(h);
@@ -33,7 +34,7 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     // serving, the witnessed fallback [orig: Flags & 4 && huskModel picks
     // entity+52 in Entity_RaycastCollisionModel @ 0x413086 and the pool walk
     // @ 0x538720; the contact pick @ 0x4ae233].
-    const bool using_husk =
+    const bool using_husk = husk_swap &&
             (e->engine_flags & kEntityFlagHusk) != 0 && instance->husk_model_id >= 0;
     int32_t model_id =
             using_husk ? instance->husk_model_id : instance->model_id;
@@ -42,17 +43,15 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
 
     int32_t p[3];
     entity_pos_fixed(*e, p);
-    const int32_t heading = bam_heading_from_mission_yaw_deg(static_cast<double>(e->yaw));
-    // Statics authored with pitch/roll (rocks seated on slopes) take the full
-    // euler matrix so the shell leans with the visual [orig: the entity
-    // orientation matrix @ 0x613f40 serves every collision query]; pure-yaw
-    // placements keep the quantized-table heading path bit-for-bit. Entity/item
-    // scale is already present in retail's placement/pose matrices; preserve it
-    // before either publication path so the matching scaled inverse can be
-    // selected by the polygon walker.
+    const int32_t heading = e->heading;
+    // Every placement, pure yaw included, takes the full euler matrix, so a
+    // static authored with pitch/roll (a rock seated on a slope) leans with its
+    // visual [orig: the entity orientation matrix @ 0x613f40 serves every
+    // collision query]. Entity/item scale is already present in retail's
+    // placement/pose matrices; preserve it before either publication path so
+    // the matching scaled inverse can be selected by the polygon walker.
     CollisionMatrix world_mat = collision_matrix_from_placement(
-            static_cast<double>(e->yaw), static_cast<double>(e->pitch),
-            static_cast<double>(e->roll), p, e->uniform_scale_q16);
+            heading, e->pitch_bam, e->roll_bam, p, e->uniform_scale_q16);
 
     // Explicitly published matrices and the host callback both own the FINAL
     // world-space slot array for animated models. Slots pair with COBJ sections
@@ -92,7 +91,7 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
         const int32_t pos[3] = {int32_t(sector_pos.x * 65536),
                 int32_t(sector_pos.y * 65536), int32_t(sector_pos.z * 65536)};
         world_mat = collision_matrix_from_euler(heading,
-                bam_from_degrees_wrapped(e->pitch), bam_from_degrees_wrapped(e->roll), pos);
+                e->pitch_bam, e->roll_bam, pos);
     }
     bool live_pose = !sector_callback && !e->item_section_piece &&
             instance->section_matrices.size() == m->sections.size();
@@ -127,10 +126,15 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     // though the authored angle is also baked into the section matrix.
     // [orig: targetEntity+20 Pitch read @ 0x4ae9a7]
     scratch.pitch_bam =
-            bam_from_degrees_wrapped(static_cast<double>(e->pitch));
+            e->pitch_bam;
     scratch.entity_flags = e->flags;
     scratch.bound_radius = entity_proximity_radius(*this, *e, m);
-    scratch.is_building = (e->kind == EntityKind::Building);
+    // The building gates read the target's own items.def type, not its record family: a pool-2
+    // decoration placed with family Building is no building here.
+    // [orig: Entity_ComputeBoneCollisionForce @0x4AE150 - `cmp [ecx+5Ch], 5` @0x4AE275 (the door
+    //  reset), `cmp dword ptr [edx+5Ch], 5` @0x4AEA82 (the blink box); Entity_TestCollisionSections
+    //  @0x4AEF90 - `cmp dword ptr [eax+5Ch], 5` @0x4AEFAE]
+    scratch.is_building = building_def_row(*e);
     scratch.pool_index = h.slot();
     scratch.is_ground_of_source = false;
     scratch.uniform_scale_q16 = e->uniform_scale_q16;
@@ -153,7 +157,7 @@ bool CollisionWorld::entity_section_matrix(const World &world, EntityHandle h, i
 }
 
 std::vector<SectionDebrisSample> CollisionWorld::sample_section_debris(
-        const World &world, EntityHandle h, const Vec3 &blast_center) const {
+        const World &world, EntityHandle h, const int32_t blast_center[3]) const {
     std::vector<SectionDebrisSample> out;
     CollisionTargetView scratch;
     std::vector<CollisionMatrix> matrices;
@@ -170,9 +174,7 @@ std::vector<SectionDebrisSample> CollisionWorld::sample_section_debris(
     const int64_t stride = (total_faces * 256) / 150;
     if (stride <= 0) return out;
 
-    const int32_t blast_fixed[3] = {
-            to_fixed(blast_center.x), to_fixed(blast_center.y),
-            to_fixed(blast_center.z)};
+    const int32_t blast_fixed[3] = {blast_center[0], blast_center[1], blast_center[2]};
     const bool has_blast_center =
             blast_fixed[0] != 0 || blast_fixed[1] != 0 || blast_fixed[2] != 0;
     constexpr int32_t kRadialFallbackPitchBam = 754974675;
@@ -495,8 +497,8 @@ int32_t CollisionWorld::minefield_ground(const World &world, EntityHandle source
     const bool object_ground = hit.hit() && hit.distance_q16 < position.z;
     int32_t height = object_ground ? position.z - hit.distance_q16 : position.z;
     if (!indoors) {
-        const int32_t floor = terrain ? to_fixed(terrain::height_field_height_mission_bilinear(
-                *terrain, position.x * io::kInvFp16One, position.y * io::kInvFp16One)) : 0;
+        const int32_t floor = terrain
+                ? terrain::height_field_height_bilinear_fixed(*terrain, position.x, position.y) : 0;
         if (!object_ground || height < floor) height = floor;
     }
     // A client's pool-1 movers trace as wire proxies: the hit names the
@@ -594,24 +596,11 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             th.hit_class = ProjectileHitClass::Terrain;
             th.t_q16 = t_for_distance(distance);
             th.position_q16 = FixedVec3{hit[0], hit[1], hit[2]};
-
-            // Local bilinear gradient in engine axes. This is presentation
-            // metadata; the fixed refined hit point remains authoritative.
-            const float wx = static_cast<float>(hit[0]) / io::kFp16One;
-            const float wy = static_cast<float>(hit[1]) / io::kFp16One;
-            const float hx0 = terrain::height_field_height_mission_bilinear(*terrain, wx - 1.0f, wy);
-            const float hx1 = terrain::height_field_height_mission_bilinear(*terrain, wx + 1.0f, wy);
-            const float hy0 = terrain::height_field_height_mission_bilinear(*terrain, wx, wy - 1.0f);
-            const float hy1 = terrain::height_field_height_mission_bilinear(*terrain, wx, wy + 1.0f);
-            double nx = -0.5 * static_cast<double>(hx1 - hx0);
-            double ny = -0.5 * static_cast<double>(hy1 - hy0);
-            double nz = 1.0;
-            const double nl = std::sqrt(nx * nx + ny * ny + nz * nz);
-            th.normal_q16 = FixedVec3{
-                static_cast<int32_t>(nx * io::kFp16OneD / nl),
-                static_cast<int32_t>(ny * io::kFp16OneD / nl),
-                static_cast<int32_t>(nz * io::kFp16OneD / nl),
-            };
+            // The terrain leg keeps the hit's distance and class 0 and
+            // computes no normal, so a terrain hit carries none (zero): the
+            // terrain impact reads the point and the charmap alone (D-NET-507).
+            // [orig: Projectile_UpdatePhysics @0x4E9D70 - the raycast
+            //  @0x4EA3A9, the distance @0x4EA3BA..0x4EA4AF, class 0 @0x4EA4B3]
             consider(th, distance);
         }
     }
@@ -623,7 +612,11 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
     }
 
     // Water is pass two regardless of a ClipWater-style ammo flag. Retail
-    // requires a strict straddle, so an endpoint on the plane is not a hit.
+    // requires a strict straddle, so an endpoint on the plane is not a hit, and
+    // skips the pass on a water word of 0, its own test (unlike the float's and
+    // the drivers', which compare the raw word). [orig: Projectile_UpdatePhysics
+    //  `cmp g_EnvWaterHeightFixed, 0; jz` @0x4EA4BB..0x4EA4C2 ahead of the
+    //  Projectile_CheckWaterIntersection call @0x4EA4C9]
     const int32_t water_z = world.env.water_z;
     if (trace.walk_water && water_z != 0 &&
         ((trace.start.z > water_z && trace.end.z < water_z) ||
@@ -973,6 +966,11 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                 continue;
             const bool only_this = trace.only_entity.valid();
             if (only_this && proxy.registry_twin != trace.only_entity) continue;
+            // The slot gate reads the table's copy of the mover's Position; the
+            // bound-sphere gate and the posed faces below read the live mover.
+            // [orig: Projectile_RaycastProximitySlots @0x4E5340 (the gate on
+            //  g_DynProxY/X/Z @0x4E55E6..0x4E575A, then g_DynProxEntity @0x4E5760
+            //  into Physics_RaycastAgainstBoneCollision, the call @0x4E578D)]
             const float sc[3] = {
                 static_cast<float>(proxy.position_q16.x) / io::kFp16One,
                 static_cast<float>(proxy.position_q16.y) / io::kFp16One,
@@ -993,6 +991,9 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                                           static_cast<float>(broad_radius) / io::kFp16One)) {
                 continue;
             }
+            // Past the slot gate, the live Flags: a carried or minefield row is passed
+            // over [orig: Projectile_RaycastProximitySlots @0x4E5340 - the test @0x4E5767].
+            if ((proxy.live_flags & 0x02000001u) != 0) continue;
             if (profile_trace) trace_profile_.dynamic_survivors++;
             CollisionPolygonHit model_hit;
             const CollisionModel *proxy_model = model(proxy.model_id);
@@ -1000,19 +1001,17 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                 if (profile_trace)
                     trace_profile_.dynamic_faces +=
                         static_cast<int64_t>(proxy_model->faces.size());
-                const int32_t pos[3] = {proxy.position_q16.x, proxy.position_q16.y,
-                                        proxy.position_q16.z};
+                const int32_t pos[3] = {proxy.live_position_q16.x,
+                                        proxy.live_position_q16.y,
+                                        proxy.live_position_q16.z};
                 // The decoded pose mirrors the retail client entity fields the
                 // placement matrix reads: live coarse heading (entity+16 high
                 // byte) plus the retained spawn/dead pitch/roll samples
-                // (entity+20/+24) [orig: the placement matrix @ 0x613f40].
-                CollisionMatrix world_mat =
-                    (proxy.pitch_bam != 0 || proxy.roll_bam != 0)
-                        ? collision_matrix_from_euler(proxy.heading_bam,
-                                                      proxy.pitch_bam,
-                                                      proxy.roll_bam, pos)
-                        : collision_matrix_from_heading(proxy.heading_bam, pos);
-                collision_matrix_scale_rotation(world_mat, proxy.uniform_scale_q16);
+                // (entity+20/+24), pure yaw included (D-NET-NEW-L6-10)
+                // [orig: the placement matrix @ 0x613f40].
+                const CollisionMatrix world_mat = collision_matrix_from_placement(
+                        proxy.heading_bam, proxy.pitch_bam, proxy.roll_bam, pos,
+                        proxy.uniform_scale_q16);
                 std::vector<CollisionMatrix> proxy_matrices(
                     proxy_model->sections.size(), world_mat);
                 CollisionTargetView view;
@@ -1299,6 +1298,12 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             if ((trace.ammo_flags & 4u) == 0 &&
                 proxy.wire_handle == trace.shooter_wire_handle)
                 continue;
+            // The broad phase reads the table's copy of the person's
+            // Position; the bone walk below reads the live person.
+            // [orig: Physics_RaycastAgainstProximityList @0x4E4A30 (the coarse
+            //  gate on g_PersonProxY/X/Z @0x4E4AB4..0x4E4C26, then
+            //  g_PersonProxEntity @0x4E4C2C into Physics_RaycastAgainstBoneSections,
+            //  the call @0x4E4C59)]
             {
                 const float sc[3] = {
                     static_cast<float>(proxy.position_q16.x) / io::kFp16One,
@@ -1310,6 +1315,10 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                                 io::kFp16One;
                 if (!round_broad_phase(p0f, p1f, sc, r)) continue;
             }
+            // Past the coarse gate, the live Flags: a carried or minefield row is passed
+            // over [orig: Physics_RaycastAgainstProximityList @0x4E4A30 - the test
+            //  @0x4E4C33].
+            if ((proxy.live_flags & 0x02000001u) != 0) continue;
             if (profile_trace) trace_profile_.person_survivors++;
             ProjectileHit eh;
             int32_t hit_distance = 0;
@@ -1332,9 +1341,9 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                 proxy.model_id >= 0 ? model(proxy.model_id) : nullptr;
             if (person_model != nullptr && person_model->valid() &&
                 pose_provider_ != nullptr) {
-                const int32_t proxy_pos[3] = {proxy.position_q16.x,
-                                              proxy.position_q16.y,
-                                              proxy.position_q16.z};
+                const int32_t proxy_pos[3] = {proxy.live_position_q16.x,
+                                              proxy.live_position_q16.y,
+                                              proxy.live_position_q16.z};
                 const CollisionMatrix proxy_world =
                     collision_matrix_from_euler(0, 0, 0, proxy_pos);
                 std::vector<CollisionMatrix> mats;
@@ -1351,7 +1360,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                     continue;
             }
             if (!live_pose &&
-                !trace_torso_fallback(proxy.position_q16,
+                !trace_torso_fallback(proxy.live_position_q16,
                                       proxy.uniform_scale_q16, eh, hit_distance))
                 continue;
             eh.victim_bound_radius_q16 = person_park_radius(proxy.bound_radius_q16);
@@ -1423,14 +1432,14 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         if (!live_pose_available && aim) continue;
         if (!live_pose_available &&
             !trace_torso_fallback(
-                FixedVec3{to_fixed(e->position.x), to_fixed(e->position.y),
-                          to_fixed(e->position.z)},
+                FixedVec3{e->position.x.q16, e->position.y.q16,
+                          e->position.z.q16},
                 e->uniform_scale_q16,
                 eh, hit_distance))
             continue;
 
         eh.geometry_entity = e->handle;
-        eh.victim_bound_radius_q16 = person_park_radius(to_fixed(e->bound_radius));
+        eh.victim_bound_radius_q16 = person_park_radius(e->bound_radius.q16);
         finish_person_hit(eh, hit_distance);
         break;
     }
@@ -1447,9 +1456,9 @@ void CollisionWorld::refresh_blink(World &world, Entity &ent) {
     if (is_local) local_player_blink_flags = 0;
 
     CollisionPoint pt;
-    pt.x = to_fixed(ent.position.x);
-    pt.y = to_fixed(ent.position.y);
-    pt.z = to_fixed(ent.position.z);
+    pt.x = ent.position.x.q16;
+    pt.y = ent.position.y.q16;
+    pt.z = ent.position.z.q16;
     const int32_t radius = 0x8000; // [orig: searchRadius_fp = 0x8000]
 
     // The def's type picks the walk: a vehicle or a person (1 / 3) its own

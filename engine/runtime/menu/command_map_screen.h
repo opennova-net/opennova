@@ -110,8 +110,8 @@ void command_map_team_list_timers(MenuRuntime &menu, int table, uint32_t now_ms)
 // three columns then undo the table's own selection write; the others keep it.
 // [orig: CMap_EntityWidgetHandler @0x548380 — @0x548588..0x5486a4]
 struct CommandMapTeamClick {
-	bool send_recruit = false;  // NetPacket_SendTeamChange(local, slot) — C2S 0x46
-	bool send_join = false;     // NetPacket_SendWeaponSlotSwitch(slot) — C2S 0x43
+	bool send_recruit = false;  // NetPacket_SendSquadRecruit(local, slot) — C2S 0x46
+	bool send_join = false;     // NetPacket_SendSquadJoin(slot) — C2S 0x43
 	bool set_squad_color = false;
 	uint8_t slot = 0;
 	uint8_t squad_color = 0;
@@ -162,7 +162,7 @@ void command_map_player_list_paint(const MenuTableCellEvent &event, MenuTableCel
 // ADDTO_NO_FIRETEAM / A / B / C: the selected TEAMLIST rows whose slot names
 // the local slot its leader, for C2S 0x45 — none selected, no send
 // [orig: @0x548d4d..0x548d53].
-// [orig: CCommandMap_SendWeaponActionToTeammates @0x548cb0]
+// [orig: CMap_SendFireteamAssign @0x548cb0]
 std::vector<uint8_t> command_map_fireteam_members(const MenuRuntime &menu, int table,
 		const CommandMapRoster &roster);
 

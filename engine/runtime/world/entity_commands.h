@@ -45,11 +45,11 @@ class EntityCommands {
 public:
     explicit EntityCommands(World &world) : world_(world) {}
 
-    // Script SSN -> entity handle (the WAC SSN*/BMS Single resolve), including
-    // the retail player mapping: SSN 10000 (mission::kPlayerSsn, the
-    // script-facing local-player SSN) = the local player. Our player
-    // entities carry net_id 0 (the wire is handle-based), so the mapping lives
-    // here at the script seam. [orig: EntityPool_FindByNetId @0x4f0a20]
+    // Script SSN -> entity handle (the WAC SSN*/BMS Single resolve): the first
+    // row over pools 0..3 whose DcbId's low 16 bits are the SSN. A player
+    // body's DcbId is its class init's 10000 + its slot (world::entity_dcb_id),
+    // so a script names every player, slot n as 10000 + n.
+    // [orig: EntityPool_FindByNetId @0x4f0a20]
     EntityHandle resolve_ssn(uint16_t ssn) const;
     EntityHandle resolve_target(EntityTarget target) const;
 
@@ -86,7 +86,7 @@ public:
     // run it. [orig: Entity_RemovePlacedDevicesByOwner @0x546E00]
     void remove_placed_devices_by_owner(EntityHandle owner);
     // BMS VaporizeSingle: the first pool 0..3 row carrying the SSN is removed
-    // with the notification. [orig: Entity_FindByParentAndDispatch @0x43e210]
+    // with the notification. [orig: Entity_RemoveByDcbId @0x43e210]
     bool remove_bms_ref(int32_t ssn);
     // WAC SSNHP: the health word, the attacker cleared; no gate.
     // [orig: WacCmd_SsnHp @0x4F2100]
@@ -151,9 +151,11 @@ public:
     bool set_entity_position(EntityHandle h, const Vec3 &mission_pos);
     // Kill a PLAYER entity outright as `killer`'s victim: the health write the
     // real damage path would have made (so the recipient's 0x0A tail health --
-    // the joiner's death channel -- reads the death too) plus the RoundDeath
-    // record the round-end and kill-feed consumers key on. False when the
-    // handle resolves no player row.
+    // the joiner's death channel -- reads the death too), the shooter and death
+    // selection its hit stamps (which the body's death edge hands to the
+    // transaction), plus the damage-time RoundDeath record (the tally). No
+    // killer is a bare Health store. False when the handle resolves no player
+    // row.
     bool kill_player(EntityHandle victim, EntityHandle killer);
     // Write the primary weapon slot's clip/reserve counts (retail's signed
     // i16 words). False when the handle resolves no registry row.

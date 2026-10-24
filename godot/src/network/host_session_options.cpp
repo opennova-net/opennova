@@ -1,7 +1,9 @@
 #include "network/host_session_options.h"
 
+#include "player/game_config_block.h"
 #include "util/string_convert.h"
 
+#include <runtime/inmatch/host_config.h>
 #include <runtime/inmatch/host_settings.h>
 
 using namespace godot;
@@ -103,8 +105,8 @@ Dictionary HostSessionOptions::to_json_value() const {
 	out["spectator_password"] = get_spectator_password();
 	out["game_type"] = get_game_type();
 	out["mp_attributes"] = get_mp_attributes();
-	out["class_allow_mask"] = get_class_allow_mask();
-	out["respawn_time"] = get_respawn_time();
+	out["class_availability"] = get_class_availability();
+	out["round_time_limit_minutes"] = get_round_time_limit_minutes();
 	out["time_limit_minutes"] = get_time_limit_minutes();
 	out["replay_enabled"] = get_replay_enabled();
 	out["max_team_lives"] = get_max_team_lives();
@@ -146,21 +148,15 @@ int HostSessionOptions::get_player_slot_limit() const {
 			max_players_, serve_and_play_, config_.title));
 }
 
-PackedStringArray HostSessionOptions::dialog_controls() {
-	PackedStringArray result;
-	for (const auto name : opennova::inmatch::host_dialog_controls())
-		result.push_back(String::utf8(name.data(), static_cast<int64_t>(name.size())));
-	return result;
-}
-
-bool HostSessionOptions::apply_dialog_control(const String &p_control, const String &p_value) {
-	return opennova::inmatch::apply_host_dialog_control(config_, max_players_,
-			serve_and_play_, to_std(p_control), to_std(p_value));
-}
-
-String HostSessionOptions::dialog_value(const String &p_control) const {
-	return to_gd(opennova::inmatch::host_dialog_value(config_, max_players_,
-			serve_and_play_, to_std(p_control)));
+void HostSessionOptions::seed_from_block(const Ref<GameConfigBlock> &p_block) {
+	if (p_block.is_null()) return;
+	const opennova::gamecfg::GameCfg &cfg = p_block->native().cfg();
+	const opennova::inmatch::HostScreenState host = opennova::inmatch::host_screen_from_block(cfg);
+	config_ = host.config;
+	max_players_ = host.player_limit;
+	serve_and_play_ = host.serve_and_play;
+	// The LAN authority arm's first port (engine host_config.h transport_bind_ports).
+	bind_port_ = cfg.mp_lan_server_port_min;
 }
 
 Ref<HostSessionOptions> HostSessionOptions::duplicate_options() const {
@@ -205,8 +201,8 @@ void HostSessionOptions::_bind_methods() {
 	HOST_SESSION_PROPERTY(Variant::INT, spectator_slots)
 	HOST_SESSION_PROPERTY(Variant::INT, game_type)
 	HOST_SESSION_PROPERTY(Variant::INT, mp_attributes)
-	HOST_SESSION_PROPERTY(Variant::INT, class_allow_mask)
-	HOST_SESSION_PROPERTY(Variant::INT, respawn_time)
+	HOST_SESSION_PROPERTY(Variant::PACKED_INT32_ARRAY, class_availability)
+	HOST_SESSION_PROPERTY(Variant::INT, round_time_limit_minutes)
 	HOST_SESSION_PROPERTY(Variant::INT, time_limit_minutes)
 	HOST_SESSION_PROPERTY(Variant::INT, replay_enabled)
 	HOST_SESSION_PROPERTY(Variant::INT, max_team_lives)
@@ -248,9 +244,7 @@ void HostSessionOptions::_bind_methods() {
 	HOST_SESSION_PROPERTY(Variant::PACKED_INT32_ARRAY, rotation_launch_options)
 #undef HOST_SESSION_PROPERTY
 	ClassDB::bind_method(D_METHOD("to_json_value"), &HostSessionOptions::to_json_value);
-	ClassDB::bind_static_method("HostSessionOptions", D_METHOD("dialog_controls"), &HostSessionOptions::dialog_controls);
-	ClassDB::bind_method(D_METHOD("apply_dialog_control", "control", "value"), &HostSessionOptions::apply_dialog_control);
-	ClassDB::bind_method(D_METHOD("dialog_value", "control"), &HostSessionOptions::dialog_value);
+	ClassDB::bind_method(D_METHOD("seed_from_block", "block"), &HostSessionOptions::seed_from_block);
 	ClassDB::bind_method(D_METHOD("duplicate_options"), &HostSessionOptions::duplicate_options);
 	ClassDB::bind_method(D_METHOD("get_player_slot_limit"), &HostSessionOptions::get_player_slot_limit);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "player_slot_limit"), "", "get_player_slot_limit");

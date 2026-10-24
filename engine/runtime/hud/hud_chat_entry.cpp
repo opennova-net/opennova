@@ -62,7 +62,7 @@ uint32_t chat_input_line_color(int dispatch, bool mp_session_peer) {
 
 namespace {
 
-// [orig: the catalog rows 57..62 @0x8159cb — config tokens and dispatch codes]
+// [orig: the catalog rows 57..62, 71, 72, 90, 91 @0x8159cb — config tokens and dispatch codes]
 struct TalkRowSpec {
 	const char *token;
 	int dispatch;
@@ -74,6 +74,10 @@ constexpr TalkRowSpec kTalkRows[kChatTalkRowCount] = {
 	{ "stalk", kChatDispatchTeam },
 	{ "sqtalk", kChatDispatchSquad },
 	{ "ctalk", kChatDispatchCrew },
+	{ "command", kChatDispatchCommand },
+	{ "command2", kChatDispatchConsole },
+	{ "talkred", kChatDispatchRed },
+	{ "talkblue", kChatDispatchBlue },
 };
 
 } // namespace
@@ -97,6 +101,17 @@ uint32_t ChatEntry::poll_rows(uint32_t rows_down, bool active,
 		// capture, the later rows' keys belong to the editor.
 		if (rows_[static_cast<size_t>(row)].step(down, open) && !capturing())
 			events |= dispatch(kTalkRows[row].dispatch, facts, gametext);
+	}
+	return events;
+}
+
+uint32_t ChatEntry::dispatch_rows(uint32_t rows_fired, bool active,
+		const ChatEntryFacts &facts, const GameTextLookup &gametext) {
+	key_consumed_ = false;
+	uint32_t events = 0;
+	for (int row = 0; row < kChatTalkRowCount; ++row) {
+		if ((rows_fired & (1u << row)) == 0u || !active || capturing()) continue;
+		events |= dispatch(kTalkRows[row].dispatch, facts, gametext);
 	}
 	return events;
 }
@@ -176,13 +191,24 @@ uint32_t ChatEntry::dispatch(int action, const ChatEntryFacts &f, const GameText
 				if (f.death_screen) return 0;
 				if (!f.has_local_player || !f.in_vehicle) return kDeniedSound;
 			}
+			// Past its arm's gates the row releases Caps Lock, ahead of the debounce
+			// (kCapsLockRelease carries the witness).
 			// The talk debounce: more than 8 main frames since the last send
 			// [orig: `dword_A8705C - dword_B3BBCC > 8` unsigned @0x49b9d6..0x49b9e8].
-			if (static_cast<uint32_t>(f.frame - last_send_frame_) <= 8u) return 0;
+			if (static_cast<uint32_t>(f.frame - last_send_frame_) <= 8u) return kCapsLockRelease;
 			action_id_ = action; // [orig: `mov g_InputActionId, edi` @0x49b9f4]
-			return begin(game_text(gametext, "Misc", chat_dispatch_prompt_key(action), ""), 60,
-					action);
+			return kCapsLockRelease |
+					begin(game_text(gametext, "Misc", chat_dispatch_prompt_key(action), ""), 60,
+							action);
 		}
+		case kChatDispatchCommand:
+		case kChatDispatchConsole:
+			// The command entry: no gate, no debounce, no remembered action; it releases
+			// Caps Lock ahead of the begin (kCapsLockRelease carries the witness).
+			// [orig: @0x49AEF7..0x49AF10, the shared tail @0x49bb08..0x49bb16:
+			//  GameText_GetString("Misc", "STRMISC_ENTERCMD"), cap 0x3C, the action]
+			return kCapsLockRelease |
+					begin(game_text(gametext, "Misc", "STRMISC_ENTERCMD", ""), 0x3C, action);
 		case kChatDispatchRed:
 		case kChatDispatchBlue:
 			// The host-only pair: no debounce, no reset hold, no remembered

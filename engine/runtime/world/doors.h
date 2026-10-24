@@ -50,7 +50,10 @@ public:
     // target event's raw base+section read; unallocated global slots are zero.
     bool target_section_closed(const Entity &, int section) const;
     void tick(World &);
-    void command(World &, Entity &, int event, uint32_t touch_mask = 0);
+    // Event 6 reads the door-touch mask (+0x2B4) the caller left on the entity:
+    // the collision query's, or the target class's store [orig: DoorClass_HandleEvent
+    //  @0x43F370, the read @0x43F3D9].
+    void command(World &, Entity &, int event);
     bool group_open(const World &, int32_t group) const;
     void command_group(World &, int32_t group, bool opening, bool include_pool1);
     // The non-player contact query ignores opening/open building sections.

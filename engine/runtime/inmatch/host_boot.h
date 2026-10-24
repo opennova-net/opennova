@@ -9,26 +9,38 @@
 //
 // The phases bracket the embedder's device stages: the game places the
 // mission objects and builds its render terrain before phase A, and binds its
-// occlusion, audio and effects between the two; a headless host runs them
-// back to back. Everything an embedder still owns is the config (the host
-// screen or the host file), the mount, the socket, the clock and its devices.
+// occlusion, audio and effects and warms its effect catalog between the two; a
+// headless host runs them back to back. Everything an embedder still owns is
+// the config (the host screen or the host file), the mount, the socket, the
+// clock and its devices.
 //
 //   boot_host_mission (A): the loose score.ini into the session config, the
-//     mission .til, the mission text, the gametext "Server" strings,
-//     Session::begin_load, the fresh kernel and its open, the terrain field
-//     with the placed tiles and the .TSD table, the environment and the water
-//     plane (both before the PreMission pass), the HostRole's staged
+//     mission .til, the mission text, the gametext "Server" strings, a fresh
+//     session's create (HostRole::create_session: its round-state init's CRT
+//     seed and key draws, ahead of every World and of the mission start),
+//     unless the embedder ran it ahead of its own loads (create_host_session),
+//     the load's head and window (HostRole::begin_mission_load, its pump at
+//     the load's head, the mission-start update, open_mission_load_window),
+//     unless the embedder ran them, Session::begin_load, the fresh kernel and
+//     its open, the terrain field with the placed tiles and the .TSD table,
+//     the environment and the water plane (both before the PreMission pass),
+//     the load's stage pumps (a head the boot ran), the HostRole's staged
 //     bring-up, MissionKernel::boot with the bringup_net_session hook, the
-//     item catalog and traits, charattr.def, and a map change's round init.
-//   start_host_mission (B): the water plane, the mission-start environment
+//     item catalog and traits, charattr.def, then the mission start's head
+//     (the PreMission pass, the restrictions, a map change's round init,
+//     Player_InitPlayer), which a deferred authority boot leaves to phase B.
+//   start_host_mission (B): the head a deferred boot left, after the render
+//     arm's last pump; the water plane, the mission-start environment
 //     boundary (the weather seed, the embedder's render bind, the kernel's
 //     complete_mission_start: the eager WAC, the 255-tick settle, the
-//     vehicles, the baseline), the authority's load end (the S2C 0x7B to
-//     every slot), then Session::complete_load.
+//     vehicles, the baseline), the load end (the authority's S2C 0x7B to
+//     every slot, the load's spawn gate cleared), then Session::complete_load.
 //
 // A map change (inmatch/map_change.h) boots the next map through the same
 // two phases with HostBootRequest::next_mission: the role's bring-up
-// continues the kept session instead of starting one.
+// continues the kept session instead of starting one, its load's head and
+// stage pumps run ahead of it (begin_next_host_mission_load), as a fresh
+// session's run past its create.
 //
 // Retail's whole sequence is Game_StartMission @0x524360 inside the Game Loop
 // mode's initialize, which the loop's clock never banks (session.cpp carries
@@ -95,9 +107,14 @@ struct HostBootRequest {
 	// start_host_session copies the score table into world.match).
 	bool session_score_ini = false;
 	// The map change's boot (inmatch/map_change.h): the host continues its
-	// kept session on the new kernel instead of starting one, and phase B's
-	// load end pumps the socket for the reloading joiners.
+	// kept session on the new kernel instead of starting one.
 	bool next_mission = false;
+	// The embedder runs its render device's mission inits between the phases (the game's
+	// effect world and warm): the host's load window leaves its render arm's pumps owed for
+	// the embedder's device stages (HostRole::render_arm_pumps), phase A leaves the mission
+	// start's head to phase B, which runs it past the arm's last pump, and phase B leaves the
+	// load end, which end_host_mission_load runs. A headless host runs all of it itself.
+	bool render_arm_deferred = false;
 	// The .til bytes when the embedder has them (a joiner's S2C 0x45 stream,
 	// which must never fall back to a same-named local file); unset = the
 	// boot reads <basename>.til loose-first.
@@ -128,6 +145,19 @@ struct HostBootRequest {
 	std::function<mission::MissionKernel &()> fresh_kernel;
 	std::function<void(mission::MissionKernel &)> before_terrain;
 	std::function<void(bool fresh_runtime)> after_bringup;
+	// The mission start's server-info update, an authority's: a NovaWorld embedder publishes
+	// its listing's both lists whole (the first mission's ID report after them), then runs its
+	// NovaWorld session's periodic update, which sends them. The boot runs it past the mission
+	// text and a map change's head (the session settings, the per-slot reset), ahead of the load
+	// window and every load, so the update leaves the load's length ahead of the round's first
+	// refresh. An embedder that runs a map change's head itself runs it there. Optional.
+	// [orig: Game_StartMission @0x524360 - TextResource_LoadMissionTextBin @0x5247CE,
+	//  Server_ResetAllPlayerSlotFrameState @0x5248BC, the gates @0x5248C6..0x5248DC,
+	//  Lobby_UpdateServerInfo called @0x5248F5, CPlayerManager_RebuildLists(1) called @0x524903,
+	//  Server_SendMetricsToGate called @0x524928, CNapiGameSession_ProcessPeriodicUpdate called
+	//  @0x52493D; ahead of Server_PumpNetworkTransport @0x524A63 and the terrain's
+	//  Game_LoadTerrainDuringConnect @0x524B26..0x5251CD]
+	std::function<void()> mission_start_update;
 };
 
 // What phase A leaves for phase B and for the embedder to retain. Not
@@ -143,13 +173,21 @@ struct HostBoot {
 	// The authority role the boot ran (null for a joiner): phase B ends its
 	// load (HostRole::finish_mission_load).
 	HostRole *host = nullptr;
-	// The bring-up's session create (server_session.h). ProcessExit: the
-	// session config's `mpreset` word was set, so the create refused and
-	// phase A returned false; the embedder ends its process with exit code 0,
-	// as retail's create does, and runs no phase B. A joiner's boot and a map
-	// change's create no session and keep Created.
+	// The fresh session's create (server_session.h), at phase A's head. ProcessExit:
+	// the session config's `mpreset` word was set, so the create refused and
+	// phase A returned false ahead of the session's load; the embedder ends its
+	// process with exit code 0, as retail's create does, and runs no phase B. A
+	// joiner's boot and a map change's create no session and keep Created.
 	// [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0 -> crt_exit(0)]
 	CreateSessionResult session_create = CreateSessionResult::Created;
+	// The request's render_arm_deferred on an authority boot, and the load end phase B left
+	// for end_host_mission_load (set where phase B would have run it).
+	bool load_end_deferred = false;
+	bool load_end_owed = false;
+	// The mission start's head a deferred authority boot leaves to phase B, which the
+	// embedder runs after its device stages: the render arm's last pump, the PreMission
+	// pass, the restrictions, the round init and Player_InitPlayer.
+	bool mission_start_head_owed = false;
 	// The tables the boot read, for the embedder to retain.
 	mission::MissionText mission_text;
 	std::vector<uint8_t> terrain_til;
@@ -177,7 +215,10 @@ struct HostBoot {
 // "" miss, which the handler sends nothing for [orig: Game_InitSubsystems
 // @0x4A6CD0 loads gametext.bin]. Phase A reads them; an embedder staging its
 // own bring-up (the game's in-memory loads) reads them here.
-ServerTextTable read_host_server_text(const mission::BootFileSource &files);
+// `text_override` is the mount's override table (null for none), searched
+// first by every lookup as GameText_GetString's is (D-NET-675).
+ServerTextTable read_host_server_text(const mission::BootFileSource &files,
+		const rtxt::File *text_override);
 
 // The mission text a host's boot reads for `mission_basename` (the mission's
 // name cut at its first '.'): resolve_mission_text's <mission>.bin else
@@ -201,6 +242,39 @@ HostLoadingBand host_loading_band(const mission::BootFileSource &files,
 		const std::string &mission_file, uint32_t game_type, bool game_type_auto,
 		const std::vector<uint8_t> &text_override_table);
 
+// A map change's load head (HostRole::begin_next_mission_load) for an embedder that
+// loads its terrain and objects ahead of phase A (the game's world load): the session
+// config with the loose score.ini when `session_score_ini` (as phase A reads it), the
+// mission text and the "Server" strings, read as phase A reads them. The embedder then
+// loads its effect system (a host with its own client), opens the head's window
+// (HostRole::open_mission_load_window) and runs the load's three stage pumps
+// (HostRole::pump_load_stage) at its own terrain and ahead of its objects; phase A runs
+// none of them again. A headless host leaves them to phase A, which runs the head and its
+// window after its text reads and the stages after its terrain and environment.
+void begin_next_host_mission_load(HostRole &host, const mission::BootFileSource &files,
+		const std::string &mission_basename, const std::vector<uint8_t> &text_override_table,
+		HostConfig host_cfg, bool session_score_ini);
+
+// A fresh session's create for an embedder that loads ahead of phase A (the game's world load:
+// its terrain and objects before the runtime): the config with the process's own reads (the
+// loose score.ini when `session_score_ini`, Avatars.def, the own slot's character selection),
+// the mission text and the "Server" strings as phase A reads them, then HostRole::create_session,
+// at the load's start, ahead of the mission start and of every one of its stages. Phase A then
+// runs none (HostRole::create_ran). The embedder runs the mission start's head next
+// (HostRole::begin_mission_load), then its effect system, the head's window and the stage pumps
+// as a map change's (begin_next_host_mission_load); phase A runs none of them again.
+// ProcessExit: the `mpreset` word refused it; the embedder ends its process with code 0 and
+// boots nothing.
+// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 (Server_InitNewRoundState called
+//  @0x5695B3, CNapiGameSession_CreateSession called @0x56997D), from the PreMenu's
+//  MultiPlayer_JoinSessionStateMachine @0x56A320 (state 2's call @0x56A46A) after the host
+//  screen's START opened the socket (UI_HandleHostSessionStart's SetTransportMode(3) @0x556EA6);
+//  SinglePlayer_StartMission @0x561AF0 (@0x561C23, @0x561E65); then GameLoop_Init's
+//  Game_StartMission call @0x526377]
+CreateSessionResult create_host_session(HostRole &host, const mission::BootFileSource &files,
+		const std::string &mission_basename, const std::vector<uint8_t> &text_override_table,
+		HostConfig host_cfg, bool session_score_ini);
+
 // Phase A. False with `error` when the session cannot enter its load, the
 // kernel boot fails, or the host's session create asks for the process exit
 // (`boot.session_create`); the session is left Loading for the embedder to
@@ -217,7 +291,14 @@ struct HostStartDevice {
 	std::function<void()> bind_render;
 };
 
-// Phase B. False with `error` when the session cannot leave its load.
+// Phase B. False with `error` when the session cannot leave its load. After a deferred
+// authority boot (HostBootRequest::render_arm_deferred) the embedder runs it past its device
+// stages: it opens with the render arm's pumps still owed and the mission start's head.
 bool start_host_mission(HostBoot &boot, const HostStartDevice &device, std::string &error);
+
+// The load end phase B left (HostBootRequest::render_arm_deferred): the render arm's pumps
+// still owed, then the S2C 0x7B to every slot and the spawn gate's clear
+// (HostRole::finish_mission_load). A no-op when nothing is owed.
+void end_host_mission_load(HostBoot &boot);
 
 } // namespace opennova::inmatch

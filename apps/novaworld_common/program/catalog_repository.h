@@ -34,6 +34,10 @@ struct GameRow {
 	std::string start_page; // the gate's startupurl `url=` page
 	std::string host_page;
 	std::string gsb_path; // e.g. "jop_2.gsb?a=1"
+	// The main page's @JOINLAN_URL@ global: the NWJoin link a LAN-list join opens
+	// with the discovered server's GSID in place of @GSID@ (DFX2's); empty when NULL
+	// (no page of the row's sets the global).
+	std::string join_lan_url;
 	std::string ver1;
 	std::string ver2;
 	// The expansion bits a listing that reports none requires, and that an

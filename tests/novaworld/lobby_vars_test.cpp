@@ -5,6 +5,7 @@
 // [orig: CNapiGameSession_BuildHostVarLists @0x4d0b50; Lobby_UpdateServerInfo @0x4fe8c0;
 //  Server_PlayerAdd @0x51d421; CNapiGameSession_SendHostRequest @0x4d3700]
 
+#include <net/novaworld/lobby_identity.h> // fallback_machine_inputs / fallback_machine_tokens
 #include <net/novaworld/lobby_vars.h>
 
 #include <net/napi/session.h>
@@ -269,11 +270,9 @@ int main() {
 		       "the request's PlayerList is empty");
 	}
 
-	// 6. The NW-S5 identity set: names + order + the three empties + the fingerprint seed math.
+	// 6. The NW-S5 identity set: names + order + the three empties + the embedder's tokens.
 	{
 		nw::LobbyIdentityParams p;
-		p.client_index = 0x11112222u;
-		p.client_key = 0x33334444u;
 		p.tz_bias = "-480";
 		p.country = "Canada";
 		p.language = "French";
@@ -300,18 +299,46 @@ int main() {
 		expect(vars[7].second == p.nwpssk, "NWPSSK passes through from the client environment");
 		expect(vars[8].second == p.nwusid, "NWUSID passes through from the client environment");
 		expect(vars[9].second == p.nwhwi, "NWHWI passes through");
+	}
 
-		// Non-binding callers retain the deterministic fallback when stable machine tokens are absent.
-		p.nwpssk.clear();
-		p.nwusid.clear();
-		const auto fallback = nw::make_lobby_identity_vars(p);
-		expect(fallback[7].second == nw::az_fingerprint(p.client_index ^ 0x5053534Bu, 23),
-		       "NWPSSK fallback remains deterministic");
-		expect(fallback[8].second == nw::az_fingerprint(p.client_key ^ 0x55534944u, 16),
-		       "NWUSID fallback remains deterministic");
-		// az_fingerprint is deterministic and length-exact.
-		expect(nw::az_fingerprint(123, 23).size() == 23, "az_fingerprint length 23");
-		expect(nw::az_fingerprint(123, 16) == nw::az_fingerprint(123, 16), "az_fingerprint deterministic");
+	// 6b. D-NET-NEW-L9-8: the off-Windows fallback runs retail's two encoders over the words the
+	// stable id's hash supplies by position, so its tokens are the Windows encoder's over the same
+	// words: NWPSSK's 23 letters banded A..P / C..R / E..T in turn, NWUSID's pair i both in
+	// 'A'+i..'A'+i+15. [orig: CDKey_GenerateHardwareFingerprint @0x4A4A00 - 'A' + nibble @0x4A4BBA,
+	//  'C' + nibble @0x4A4BE3, 'E' + the xor's high nibble @0x4A4BCD;
+	//  CDKey_GenerateHardwareFingerprint_0 @0x4A4D00 - 'A' + i + nibble @0x4A4E46..0x4A4E4B]
+	{
+		for (const char *id : {"", "machine-a", "machine-b|Fixture GPU", "\x01\x02"}) {
+			const nw::RetailMachineInputs in = nw::fallback_machine_inputs(id);
+			const nw::LobbyMachineTokens fallback = nw::fallback_machine_tokens(id);
+			const nw::LobbyMachineTokens windows = nw::make_retail_machine_tokens(in);
+			expect(fallback.nwpssk == windows.nwpssk && fallback.nwusid == windows.nwusid,
+			       "the fallback is the Windows encoders over the hash's words");
+			expect(in.has_ethernet_address && in.volume_name.empty() && in.filesystem_name.empty(),
+			       "the fallback supplies an adapter and no names");
+			expect(fallback.nwpssk.size() == 23 && fallback.nwusid.size() == 16,
+			       "the fallback's lengths are retail's (23 / 16)");
+			bool banded = fallback.nwpssk.size() == 23;
+			for (std::size_t k = 0; banded && k < fallback.nwpssk.size(); ++k) {
+				const char base = "ACEACE"[k % 6];
+				banded = fallback.nwpssk[k] >= base && fallback.nwpssk[k] <= base + 15;
+			}
+			expect(banded, "NWPSSK's letters are position-banded A..P / C..R / E..T");
+			bool paired = fallback.nwusid.size() == 16;
+			for (std::size_t k = 0; paired && k < fallback.nwusid.size(); ++k) {
+				const char base = static_cast<char>('A' + k / 2);
+				paired = fallback.nwusid[k] >= base && fallback.nwusid[k] <= base + 15;
+			}
+			expect(paired, "NWUSID's pair i is in 'A'+i..'A'+i+15");
+			// The hashed adapter makes NWUSID's lead pair the Ethernet tag 77 (0x4D: 'A'+13,
+			// 'A'+4).
+			expect(fallback.nwusid.substr(0, 2) == "NE", "NWUSID leads with the adapter tag");
+			expect(nw::fallback_machine_tokens(id).nwpssk == fallback.nwpssk,
+			       "the fallback is deterministic");
+		}
+		expect(nw::fallback_machine_tokens("machine-a").nwpssk !=
+		               nw::fallback_machine_tokens("machine-b").nwpssk,
+		       "different ids give different tokens");
 	}
 
 	// 7. Retail's stable volume/MAC identity transforms, pinned independently
@@ -374,6 +401,64 @@ int main() {
 		port = 7;
 		expect(!nw::parse_host_and_port(std::string(512, 'a'), host, port) && host == "kept" && port == 7,
 		       "parse_host_and_port fails past 511 bytes, writing nothing");
+	}
+
+	// 9. D-NET-NEW-L9-54: NWHWI is "%s$%ld$%ld$%ldx%ld$%ldx%ld" over adapter 0's description (the
+	// CRT's "(null)" with none), the display memory field (the MB count shifted into bytes in 32
+	// bits, kept only when not negative, shifted back), the physical memory field
+	// ((min(total, 0x7FFFFFFF) + 0xC0000) >> 20 in 32 bits), game.cfg's display mode and the
+	// renderer's desktop. Values derived from the cited arithmetic.
+	// [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1570 - sprintf called @0x4D178F, `shr`
+	//  @0x4D1771; CGfxDevice_QueryDxDiagDisplayMemory @0x67C820 - `shl` @0x67CA5C;
+	//  CGfxDevice_CreateDevice @0x67E5D0 - @0x67EBFB..0x67EC25; Game_ParseCommandLineAndInit
+	//  @0x4A7310 - @0x4A7DF2..0x4A7E15]
+	{
+		expect(nw::nwhwi_display_memory_mb(0) == 0, "display memory 0 prints 0");
+		expect(nw::nwhwi_display_memory_mb(512) == 512, "display memory 512 MB prints 512");
+		expect(nw::nwhwi_display_memory_mb(2047) == 2047, "2047 MB stays positive in 32 bits");
+		expect(nw::nwhwi_display_memory_mb(2048) == 0,
+		       "2048 MB is negative in 32 bits: the device keeps 0");
+		expect(nw::nwhwi_display_memory_mb(4096) == 0, "4096 MB shifts out to 0");
+		expect(nw::nwhwi_display_memory_mb(4608) == 512, "4608 MB keeps its low 11 bits, 512");
+		expect(nw::nwhwi_display_memory_mb(8704) == 512, "8704 MB keeps its low 11 bits, 512");
+		expect(nw::nwhwi_display_memory_mb(16271) == 0, "16271 MB has bit 11 set: 0");
+		expect(nw::nwhwi_display_memory_mb(-1) == 0, "a failed query's -1 is negative: 0");
+
+		// D-NET-NEW-L9-60: retail's 32-bit view of the count, the 64-bit count's minimum with
+		// 0xFFFF0000 >> 20 (the 32-bit DXGI clamps the segment sizes' sum to 0xFFFF0000; the
+		// witness is the platform's, lobby_vars.h), so any adapter past 4 GiB prints 0.
+		expect(nw::kWow64DisplayMemoryCapMb == (0xFFFF0000ll >> 20), "the cap is the clamp's MB");
+		expect(nw::wow64_display_memory_mb(0) == 0 && nw::wow64_display_memory_mb(1536) == 1536 &&
+		               nw::wow64_display_memory_mb(4095) == 4095,
+		       "a count at or under the clamp is the 64-bit count");
+		expect(nw::wow64_display_memory_mb(4096) == 4095 && nw::wow64_display_memory_mb(16384) == 4095,
+		       "a count past the clamp reads 4095 in 32 bits");
+		expect(nw::nwhwi_display_memory_mb(nw::wow64_display_memory_mb(16384)) == 0 &&
+		               nw::nwhwi_display_memory_mb(nw::wow64_display_memory_mb(3000)) == 0 &&
+		               nw::nwhwi_display_memory_mb(nw::wow64_display_memory_mb(2047)) == 2047,
+		       "NWHWI prints 0 for any 32-bit count with bit 11 set, 4095 included");
+
+		expect(nw::nwhwi_physical_memory_mb(0) == 0, "no memory prints 0");
+		expect(nw::nwhwi_physical_memory_mb(0x20000000u) == 512, "512 MiB prints 512");
+		expect(nw::nwhwi_physical_memory_mb(0x3FF3FFFFu) == 1023, "under 1023.25 MiB rounds down");
+		expect(nw::nwhwi_physical_memory_mb(0x3FF40000u) == 1024, "from 1023.25 MiB rounds up");
+		expect(nw::nwhwi_physical_memory_mb(0x7FFFFFFFu) == 2048, "2 GiB less a byte prints 2048");
+		expect(nw::nwhwi_physical_memory_mb(0x400000000ull) == 2048,
+		       "16 GiB is capped at 0x7FFFFFFF for the non-LAA image: 2048");
+
+		nw::HardwareIdentity hw;
+		hw.has_adapter = true;
+		hw.adapter_description = "Fixture $Adapter";
+		hw.display_memory_mb = 256;
+		hw.total_phys_bytes = 0x10000000u;
+		hw.display_width = 1024;
+		hw.display_height = 768;
+		hw.desktop_width = 1920;
+		hw.desktop_height = 1080;
+		expect(nw::make_nwhwi(hw) == "Fixture $Adapter$256$256$1024x768$1920x1080",
+		       "NWHWI prints the five fields in order, the description as it is");
+		nw::HardwareIdentity none;
+		expect(nw::make_nwhwi(none) == "(null)$0$0$0x0$0x0", "no adapter prints the CRT's (null)");
 	}
 
 	if (g_fail == 0) {

@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <map>
+#include <set>
 #include <string>
 #include <utility>
 
@@ -43,7 +44,31 @@ uint16_t gameplay_identity(char dir) {
 	return dir == 'C' ? 0x00C : 0x00A;
 }
 
+namespace {
+
+// S2C 0x64's chunk of the 180-byte session block, its per-session random bytes zeroed:
+// [u32 transfer id][u32 180][u32 offset] then the block from `offset`.
+std::vector<uint8_t> masked_session_block(const std::string &raw) {
+	static_assert(has_normalization("body.S.0x64.session_block"));
+	std::vector<uint8_t> bytes(raw.begin(), raw.end());
+	constexpr size_t kHeader = 12;
+	if (bytes.size() < kHeader)
+		return bytes;
+	const uint32_t offset = uint32_t(bytes[8]) | uint32_t(bytes[9]) << 8 |
+			uint32_t(bytes[10]) << 16 | uint32_t(bytes[11]) << 24;
+	for (size_t i = kHeader; i < bytes.size(); ++i) {
+		const size_t at = size_t(offset) + (i - kHeader); // the byte's place in the block
+		if (at < 36 || (at >= 148 && at < 180))
+			bytes[i] = 0;
+	}
+	return bytes;
+}
+
+} // namespace
+
 std::string stable_body_key(char dir, uint16_t identity, const std::string &raw) {
+	if (dir == 'S' && identity == 0x064)
+		return hex_of(masked_session_block(raw));
 	const std::string hex = hex_of(std::vector<uint8_t>(raw.begin(), raw.end()));
 	const uint32_t prefix = stable_body_prefix(dir, identity);
 	if (prefix == 0)
@@ -56,9 +81,15 @@ std::string stable_body_key(char dir, uint16_t identity, const std::string &raw)
 std::string wire_key(char dir, const wire::ParityWireRecord &record) {
 	static_assert(has_normalization("group.S.0x0a.length"));
 	static_assert(has_normalization("group.fragment_length"));
+	static_assert(has_normalization("group.length_exempt"));
 	constexpr uint8_t kFragment = 0x04 | 0x02; // FRAG_CONT | FRAG_END (protocol_message.h)
+	constexpr uint8_t kLengthField = 0x40 | 0x20; // LEN16 | LEN8 (protocol_message.h)
+	const bool exempt = length_set_exempt(dir, record.full_tag);
 	char buf[64];
-	if (group_length_masked(dir, record.full_tag))
+	if (exempt)
+		std::snprintf(buf, sizeof(buf), "|raw=%02x|len=*|skip=",
+				unsigned(record.raw_flags & ~kLengthField & 0xFFu));
+	else if (group_length_masked(dir, record.full_tag))
 		std::snprintf(buf, sizeof(buf), "|raw=%02x|len=*|skip=", unsigned(record.raw_flags));
 	else if (record.raw_flags & kFragment)
 		std::snprintf(buf, sizeof(buf), "|raw=%02x|len=frag|skip=", unsigned(record.raw_flags));
@@ -96,6 +127,18 @@ bool carries_identity(const wire::ParityPacket &packet, uint16_t identity) {
 		if (tag == identity)
 			return true;
 	return false;
+}
+
+// The joiner re-requests an unbound S2C 0x16 row with C2S 0x22
+// [orig: NapiNPClientMsg_PlayerList @0x42FAE0 (the queue call @0x42FC35)]; only a
+// 0x16 riding the 0x11's own packet fixes the 0x22's place against the 0x0A
+// answering it.
+bool sync_request_phase_bound(const RunFacts &run) {
+	static_assert(has_normalization("order.C.0x22.phase"));
+	for (const wire::ParityPacket &packet : run.trace.packets)
+		if (packet.dir == 'S' && carries_identity(packet, 0x011))
+			return !carries_identity(packet, 0x016);
+	return true;
 }
 
 double p90(std::vector<double> values) {
@@ -229,6 +272,41 @@ void count_metric(
 	value.subject = render_number(other_count);
 	value.reference = render_number(rr_count);
 	value.detail = "RR rate-normalized " + render_number(std::round(expected * 100.0) / 100.0);
+}
+
+double periodic_cadence_ms(std::vector<uint64_t> times_ns, uint64_t end_ns) {
+	if (times_ns.size() < 3)
+		return 0.0;
+	std::sort(times_ns.begin(), times_ns.end());
+	if (times_ns.back() > end_ns)
+		return 0.0;
+	std::vector<double> gaps;
+	for (size_t i = 1; i < times_ns.size(); ++i)
+		gaps.push_back(double(times_ns[i] - times_ns[i - 1]) / 1e6);
+	std::vector<double> sorted = gaps;
+	std::sort(sorted.begin(), sorted.end());
+	const double median = (sorted[(sorted.size() - 1) / 2] + sorted[sorted.size() / 2]) / 2.0;
+	if (median <= 0.0)
+		return 0.0;
+	for (const double gap : gaps)
+		if (std::fabs(gap - median) > 0.25 * median)
+			return 0.0;
+	// A stream still running at the interval's end, not a burst that stopped.
+	if (double(end_ns - times_ns.back()) / 1e6 > 1.25 * median)
+		return 0.0;
+	return median;
+}
+
+void cadence_count_metric(MetricValue &value, double rr_count, double cadence_ms,
+		double other_count, double other_span_ms) {
+	const double expected = 0.5 + std::max(0.0, other_span_ms) / cadence_ms;
+	value.distance = std::fabs(other_count - expected);
+	value.floor = std::max(1.0, std::ceil(expected * 0.20));
+	value.subject = render_number(other_count);
+	value.reference = render_number(rr_count);
+	value.detail = "RR cadence " + render_number(std::round(cadence_ms) / 1000.0) + " s over " +
+			render_number(std::round(other_span_ms / 100.0) / 10.0) + " s from the first: " +
+			render_number(std::round(expected * 100.0) / 100.0);
 }
 
 } // namespace opennova::parity

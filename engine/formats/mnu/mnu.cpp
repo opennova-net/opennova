@@ -1249,7 +1249,7 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
       read_part(child, w.search_button, WindowType::Button, w.type, frame);
     } else if (tag_is(child, "GLB_TABLE") || tag_is(child, "GLB_INFO_PLAYER_DETAILS")) {
       // An embedded table parses the element's children; the browser then reads its HEADERs'
-      // FIELDs [orig: @ 0x65dac0; CTableWnd at +184 / +1422 of CLanWnd_Construct @ 0x65ec30].
+      // FIELDs [orig: @ 0x65dac0; CTableWnd at +184 / +1422 of CGLBTableWnd_Construct @ 0x65ec30].
       const bool saved = glb_header_fields_;
       glb_header_fields_ = true;
       read_part(child, tag_is(child, "GLB_TABLE") ? w.glb_table : w.glb_info_player_details, WindowType::Table,

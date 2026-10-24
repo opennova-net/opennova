@@ -82,7 +82,7 @@ void test_promotion_gate_skips_in_session() {
     r.world.rules.mp_session = true;
     CHECK(!local_loadout_promote_mission_rules(r.world, r.loadout,
             {{"WPN_AK47AUTO", 0}}, kit_of("WPN_M4AUTO", 3)));
-    CHECK(!r.loadout.spawn_kit_set);
+    CHECK(!r.loadout.mission_kit_promoted && r.loadout.spawn_kit().empty());
     CHECK(r.loadout.availability.value_for(3) ==
             weapon_availability_value::kAllowed);
 }
@@ -93,10 +93,10 @@ void test_promotion_applies_availability_then_filters_kit() {
     Rig r;
     CHECK(local_loadout_promote_mission_rules(r.world, r.loadout,
             {{"WPN_M4AUTO", 0}}, kit_of("WPN_M4AUTO", 3)));
-    CHECK(r.loadout.spawn_kit_set);
-    CHECK(r.loadout.spawn_kit.size() == 1);
-    if (r.loadout.spawn_kit.size() == 1)
-        CHECK(r.loadout.spawn_kit[0].name == "WPN_KNIFE");
+    CHECK(r.loadout.mission_kit_promoted);
+    CHECK(r.loadout.spawn_kit().size() == 1);
+    if (r.loadout.spawn_kit().size() == 1)
+        CHECK(r.loadout.spawn_kit()[0].name == "WPN_KNIFE");
 }
 
 // The ACCEPT overlay: requested clips expand to min(req, maxclips) * clipsize;
@@ -119,23 +119,20 @@ void test_accept_requested_ammo_and_banned_validation() {
     CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
             r.inventory_valid, kit_of("WPN_M4AUTO", 3), 8,
             /*validate_banned=*/true));
-    CHECK(r.loadout.spawn_kit.empty());
+    CHECK(r.loadout.spawn_kit().empty());
     // The S2C 0x5A grant apply skips the validation and keeps it.
     CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
             r.inventory_valid, kit_of("WPN_M4AUTO", 3), 8,
             /*validate_banned=*/false));
-    CHECK(r.loadout.spawn_kit.size() == 1);
+    CHECK(r.loadout.spawn_kit().size() == 1);
 }
 
-// The pre-spawn class latch survives resets and seeds the rebuild's pools
-// until L exists [orig: the clamp default 8 @ 0x51d102].
+// The pre-spawn class latch seeds the rebuild's pools until L exists, over an empty
+// spawn buffer too [orig: the clamp default 8 @ 0x51d102].
 void test_class_latch_survives_kit_reset() {
     Rig r;
     r.loadout.pending_player_class = 6;
-    r.loadout.spawn_kit = kit_of("WPN_M4AUTO");
-    r.loadout.spawn_kit_set = true;
-    r.loadout.reset();
-    CHECK(!r.loadout.spawn_kit_set);
+    CHECK(r.loadout.spawn_kit().empty());
     CHECK(r.loadout.pending_player_class == 6);
     local_loadout_rebuild(r.world, r.loadout, r.weapon, r.inventory,
             r.inventory_valid, /*select_spawn_default=*/true);
@@ -158,8 +155,7 @@ void test_rebuild_and_mount_carry_the_slot_zoom() {
     r.world.cached.local_player = r.world.registry.spawn(0, Entity{});
     Entity *player = r.world.registry.get(r.world.cached.local_player);
     player->player_class = 8;
-    r.loadout.spawn_kit = kit_of("WPN_M4AUTO");
-    r.loadout.spawn_kit_set = true;
+    r.loadout.spawn_kit() = kit_of("WPN_M4AUTO");
     local_loadout_rebuild(r.world, r.loadout, r.weapon, r.inventory,
             r.inventory_valid, /*select_spawn_default=*/true);
     CHECK(r.inventory.equipped_combo == 3 * 65);
@@ -208,6 +204,27 @@ void test_armor_carry_bit_follows_accepted_loadout() {
     CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
             r.inventory_valid, kit_of("WPN_KNIFE"), 8, false));
     CHECK((player->carry_flags & 8) == 0);
+}
+
+// A running PowerThrow windup survives both loadout applies, which end on the select and the
+// mount with no walk; the spawn rebuild's walk (Player_InitPlayer's) clears it (D-NET-NEW-LI-22,
+// V-ROLL-AJ). [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x566285, @0x566297);
+//  NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (@0x4296E3, @0x4296F4); Player_InitPlayer
+//  @0x4E15F0 - Player_SwitchToWeaponByHandle @0x4E19A1 (-> @0x4E019B)]
+void test_a_windup_survives_the_applies_and_the_spawn_walk_clears_it() {
+    Rig r;
+    r.world.registry.configure_pool(0, 1);
+    r.world.cached.local_player = r.world.registry.spawn(0, Entity{});
+    r.weapon.power_throw_start_tick = 7;
+    CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
+            r.inventory_valid, kit_of("WPN_M4AUTO"), 8, /*validate_banned=*/true));
+    CHECK(r.weapon.power_throw_start_tick == 7); // the armory ACCEPT runs no walk
+    CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
+            r.inventory_valid, kit_of("WPN_M4AUTO"), 8, /*validate_banned=*/false));
+    CHECK(r.weapon.power_throw_start_tick == 7); // nor the S2C 0x5A apply
+    local_loadout_rebuild(r.world, r.loadout, r.weapon, r.inventory,
+            r.inventory_valid, /*select_spawn_default=*/true);
+    CHECK(r.weapon.power_throw_start_tick == 0); // Player_InitPlayer's walk clears it
 }
 
 } // namespace
@@ -308,6 +325,7 @@ int main() {
     test_class_latch_survives_kit_reset();
     test_armor_carry_bit_follows_accepted_loadout();
     test_rebuild_and_mount_carry_the_slot_zoom();
+    test_a_windup_survives_the_applies_and_the_spawn_walk_clears_it();
     test_armory_class_policy();
     test_player_info_menu_policy();
     if (failures == 0) std::printf("player_loadout_test: all passed\n");

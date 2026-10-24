@@ -392,6 +392,12 @@ std::optional<HostRow> find_host_by_key(opennova::db::Database &db,
 	return rows.front();
 }
 
+std::optional<HostRow> find_host_by_gsid(opennova::db::Database &db, const std::string &gsid) {
+	auto rows = query_hosts(db, "WHERE gsid=$1 LIMIT 1;", {str(gsid)});
+	if (rows.empty()) return std::nullopt;
+	return rows.front();
+}
+
 std::vector<PlayerRow> list_players(opennova::db::Database &db, uint32_t host_rid) {
 	auto rows = db.query(
 		"SELECT host_rid, user_id, nwhandle, peer_ip "

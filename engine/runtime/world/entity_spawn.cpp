@@ -27,8 +27,14 @@ void entity_reset_to_spawn_state(Entity &e, int32_t health_ceiling) {
     // [orig: Entity_ResetToSpawnState @0x4B9610] Save the current pose and
     // flags before clearing death state.
     e.spawn_position = e.position;
-    e.spawn_heading = bam_heading_from_mission_yaw_deg(e.yaw);
+    e.spawn_heading = e.heading;
     e.spawn_flags = (e.flags | e.engine_flags) & ~kEntityFlagDead;
+    // The body attitude's first two words: +0x8C takes the Yaw word and +0x90
+    // zero, over whatever a teleport's stamp left there; +0x80..+0x88 and +0x94
+    // stay (D-NET-507). [orig: Entity_ResetToSpawnState @0x4B9610 - the Yaw read
+    //  @0x4B964A, +0x8C @0x4B968C, +0x90 @0x4B97DD]
+    e.saved_live_yaw = e.heading;
+    e.saved_live_pitch = 0;
     // Both portable flag views represent the same retail dword.
     e.flags &= ~2u;
     e.engine_flags &= ~2u;
@@ -42,18 +48,28 @@ void entity_reset_to_spawn_state(Entity &e, int32_t health_ceiling) {
     e.alive = e.health > 0;
     e.mana = e.mana_max;
     e.section_mask = 0;
-    e.last_attacker = {};
+    // No kill-credit attacker store (+0x178): the respawned body keeps its killer, whom the
+    // death edge's unstaged leg clears and a staged hit's stamp replaces; a blast fills only an
+    // empty word. [orig: Entity_ResetToSpawnState @0x4B9610..0x4B9900 (no +0x178 store);
+    //  Entity_UpdateInfantryAI @0x4B9CEB, its player-body twin @0x4B4C72..0x4B4C8D;
+    //  Projectile_ProcessExplosionQueue @0x4EB319]
     e.dragger = {};
     e.dragger_spawn_id = 0;
-    e.medic_reviving = false; // [orig: the +0x1E0 clear at Game_InitNewRound @0x422740]
-    e.roll = 0;
+    e.roll_bam = 0;
     // The World overload selects 153 when the class has that clip and advances
     // both channels. A fresh row without a motor seeds the fallback state.
     // [orig: Entity_ResetToSpawnState anim reseed @0x4B9714]
     e.net_anim_state = 44;
     e.net_anim_pending = 0;
     e.net_anim_phase = 0;
-    e.net_stance_bits = 0; // stance latches reset with the body [orig: the @0x4b9610 reseed]
+    // No MoveOrder store: the stance bits (net_stance_bits) stay. Only the player deploy
+    // clears them, ahead of its call (Server_ReleasePlayerDeployment); a teleport, an NPC
+    // respawn and the joiner's respawn arm leave them as they are.
+    // [orig: Entity_ResetToSpawnState @0x4B9610..0x4B9900 (no +0x12C store);
+    //  Server_DeployPlayer @0x517740 - @0x517880 / @0x51788C ahead of the call @0x517899;
+    //  Entity_TeleportTeamToSpawn @0x43D426, EventAction_TeleportEntityToSpawn @0x43E0AF,
+    //  Entity_UpdateInfantryAI @0x4BA044, WacCmd_TeleSsn @0x4F7F07,
+    //  NetPacket_SerializePlayerState @0x4C113C (no +0x12C store ahead of the call)]
 }
 
 } // namespace opennova::world

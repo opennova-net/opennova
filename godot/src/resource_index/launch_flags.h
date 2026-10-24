@@ -4,6 +4,7 @@
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
@@ -39,8 +40,12 @@ public:
 	// sentinel when the flag is absent or malformed.
 	static String mission();
 	static String lan_host();
+	// `--lan-rotation`: the --lan-host rotation's missions after its first.
+	static PackedStringArray lan_rotation();
 	static String lan_join_ip();
 	static int lan_join_port(int fallback);
+	// `--lan-join browse[:port]`: search, then join the row on the port.
+	static bool lan_join_browse();
 	static int lan_port(int fallback);
 	// -1 = auto (derive the game type from the mission).
 	static int lan_gametype();
@@ -68,6 +73,16 @@ public:
 	// `--working-dir <path>`, which a source run passes since Godot's `--path` moved the process
 	// to the project, else the process's working directory (a packaged runtime's own).
 	static String working_dir();
+	// `/sstga`: the Screen Shot action writes a run-length TGA instead of the JPEG (boot_policy.h
+	// screenshot_tga).
+	static bool screen_shot_tga();
+	// The file the Screen Shot action writes: the first SS%0.5d.jpg (.tga under /sstga) the
+	// working directory does not hold, under it; "" when every index is taken (engine
+	// gameprofile/player_files.h screenshot_file_name carries the witness).
+	static String screen_shot_path();
+	// The /sstga arm's file: the frame (`rgba`, width x height RGBA8, the top row first) as the
+	// run-length TGA (engine formats/tga/tga.h tga_write_screenshot carries the witness).
+	static PackedByteArray screen_shot_tga_file(const PackedByteArray &rgba, int width, int height);
 
 	// The whole parsed set, for a C++ consumer that reads several switches at once (the
 	// NovaWorld connect's command line, NovaWorldClient::start).

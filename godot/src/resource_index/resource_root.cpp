@@ -132,6 +132,9 @@ void ResourceRoot::_bind_methods() {
 			&ResourceRoot::load_texture_created);
 	ClassDB::bind_method(D_METHOD("load_texture", "name", "loader", "policy"), &ResourceRoot::load_texture,
 			DEFVAL(LOOKUP_SESSION_DEFAULT));
+	ClassDB::bind_method(D_METHOD("load_image", "name", "loader", "policy"), &ResourceRoot::load_image,
+			DEFVAL(LOOKUP_SESSION_DEFAULT));
+	ClassDB::bind_method(D_METHOD("get_decoded_texture_count"), &ResourceRoot::get_decoded_texture_count);
 	ClassDB::bind_method(D_METHOD("load_material_texture", "name", "type"), &ResourceRoot::load_material_texture);
 	ClassDB::bind_method(D_METHOD("load_font", "name"), &ResourceRoot::load_font);
 	ClassDB::bind_method(D_METHOD("list_missing_boot_resources"), &ResourceRoot::list_missing_boot_resources);
@@ -727,6 +730,34 @@ Ref<Image> ResourceRoot::load_texture_image(const String &name, TextureLoader lo
 	return image;
 }
 
+Ref<Image> ResourceRoot::load_image(const String &name, TextureLoader loader, LookupPolicy policy) const {
+	return load_texture_image(name, loader, policy);
+}
+
+Ref<Image> ResourceRoot::load_image_with_mipmaps(const String &name, TextureLoader loader,
+		opennova::renderer::TextureReader *r_reader) const {
+	if (r_reader != nullptr) {
+		*r_reader = opennova::renderer::TextureReader::None;
+	}
+	if (root_dir_.is_empty() || name.strip_edges().is_empty()) {
+		return Ref<Image>();
+	}
+	return opennova::load_image_with_mipmaps(texture_attempts_(name, loader, LOOKUP_SESSION_DEFAULT),
+			[this](const opennova::renderer::TextureLoad &load) {
+				return read_texture_attempt_(load, LOOKUP_SESSION_DEFAULT);
+			},
+			r_reader);
+}
+
+void ResourceRoot::release_decoded_textures() {
+	texture_cache_.clear();
+	texture_registry_.clear();
+}
+
+int64_t ResourceRoot::get_decoded_texture_count() const {
+	return static_cast<int64_t>(texture_cache_.size());
+}
+
 void ResourceRoot::sync_texture_caches_() const {
 	const uint64_t epoch = opennova::cache_epoch();
 	if (texture_cache_epoch_ != epoch) {
@@ -841,19 +872,8 @@ Ref<Texture> ResourceRoot::material_row_texture_(const String &name, uint8_t typ
 		return opennova::prepare_material_chunk(read_file(opennova::to_gd(source.file)), type);
 	}
 	const opennova::renderer::TextureLoad load = opennova::renderer::material_texture_load(source, type);
-	Ref<Texture2D> image;
-	if (load.reader != opennova::renderer::TextureReader::None) {
-		const std::string key = "material-image:" + std::to_string(static_cast<int>(load.reader)) + ":" +
-				std::to_string(static_cast<int>(load.transform)) + ":" +
-				opennova::to_std(opennova::to_gd(load.file).to_lower());
-		auto cached = texture_cache_.find(key);
-		if (cached == texture_cache_.end()) {
-			cached = texture_cache_.emplace(key, opennova::load_material_image_from_bytes(
-					load, read_file(opennova::to_gd(load.file)))).first;
-		}
-		image = cached->second;
-	}
-	return opennova::prepare_material_texture(image, name, type);
+	return opennova::make_material_texture(load, [this, &load] { return read_file(opennova::to_gd(load.file)); },
+			name, type);
 }
 
 bool ResourceRoot::material_texture_missing(const String &name, uint8_t type) const {

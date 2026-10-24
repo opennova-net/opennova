@@ -1,11 +1,14 @@
 #include <runtime/renderer/material_texture.h>
 #include <runtime/renderer/texture_load_rules.h>
 
+#include <formats/threedi/threedi_3di3.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <optional>
 #include <vector>
@@ -267,6 +270,42 @@ int main() {
 		const bool dropped = authored == 3 || (authored >= 9 && authored <= 15) || authored > 18;
 		const uint8_t runtime = material_texture_runtime_type(static_cast<uint8_t>(authored));
 		expect(runtime == (dropped ? 0 : authored), "loader texture-type remap");
+	}
+	// The slot switch's stores, case by case: 1 -> 1, 2 -> 2, 3 -> 8, 4 -> 9, 5 -> 10, 6 -> 11,
+	// 7 -> 12; 0 and anything past 7 keep the memset zero, a row the freeze's material resolve
+	// skips. [orig: Material_ConvertDefinition @0x5B042F, @0x5B0435, @0x5B043B, @0x5B0441,
+	// @0x5B0447, @0x5B044D, @0x5B0453; Material_ResolveEffectSubobjectsAndShader @0x5B1890]
+	{
+		const uint8_t slot_codes[8] = {0, 1, 2, 8, 9, 10, 11, 12};
+		for (unsigned authored = 0; authored < 256; ++authored) {
+			const uint8_t expected = authored < 8 ? slot_codes[authored] : 0;
+			expect(material_texture_runtime_slot(static_cast<uint8_t>(authored)) == expected,
+					"loader texture-slot remap");
+		}
+	}
+	// The freeze's material resolve, material by material and row by row up to the material's
+	// count: a row loads only with its slot code set. [orig: CEffectDef_ResolveSubobjectMaterials
+	// @0x5B25DC; Material_ResolveEffectSubobjectsAndShader @0x5B1884..0x5B18BD, the test @0x5B1890]
+	{
+		auto materials = std::make_unique<opennova::threedi::ThreediMaterial[]>(2);
+		materials[0].texture_count = 4;
+		materials[0].textures[0].slot = 1;
+		materials[0].textures[1].slot = 0; // no slot code: skipped
+		materials[0].textures[2].slot = 3;
+		materials[0].textures[3].slot = 8; // past 7: no slot code, skipped
+		materials[1].texture_count = 2;
+		materials[1].textures[0].slot = 7;
+		materials[1].textures[1].slot = 2;
+		materials[1].textures[2].slot = 1; // past the material's count: never read
+		auto model = std::make_unique<opennova::threedi::Threedi3di3>();
+		model->material_count = 2;
+		model->materials = materials.get();
+		const std::vector<MaterialResolveRow> rows = material_resolve_rows(*model);
+		const uint32_t expected[4][2] = {{0, 0}, {0, 2}, {1, 0}, {1, 1}};
+		expect(rows.size() == 4, "the resolve's row count");
+		for (size_t i = 0; i < rows.size() && i < 4; ++i)
+			expect(rows[i].material == expected[i][0] && rows[i].row == expected[i][1],
+					"the resolve's rows in its order");
 	}
 	expect(material_texture_transform(material_texture_runtime_type(3), "Body.tga", true) ==
 					MaterialTextureTransform::Unchanged &&

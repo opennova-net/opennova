@@ -3,15 +3,19 @@
 // LoginStep/JoinStep machines, and the cookie glue against synthetic server responses.
 
 #include <net/novaworld/http_flow.h>
+#include <net/novaworld/browser_cache.h>
 #include <net/title/title_identity.h>
 #include <base/gameprofile/gameprofile.h>
 
 #include <net/novaworld/gsb.h>
 #include <net/novacrypto/epask.h>
+#include <net/novacrypto/pubcrypto.h> // encode_key_chain / decode_key_value
 #include <net/novacrypto/url_cipher.h>
+#include <net/novaworld/lobby_vars.h> // make_lobby_identity_vars
 
 #include <cstdio>
 #include <string>
+#include <utility>
 #include <vector>
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
@@ -31,18 +35,117 @@ static bool expect(bool cond, const char *msg) {
 static std::vector<uint8_t> bytes(const std::string &s) {
 	return std::vector<uint8_t>(s.begin(), s.end());
 }
+// The service's relay pages (apps/novaworld_web/templates/jop_2_relay.htm): a META refresh to the
+// bare .dll, whose session tag rides the jar's cookie.
+static std::vector<uint8_t> relay_to(const std::string &dll) {
+	const std::string page = "<HTML><HEAD><TITLE></TITLE><META http-equiv=\"refresh\" CONTENT=0;URL=\"" +
+			dll + "\"></HEAD></HTML>";
+	return std::vector<uint8_t>(page.begin(), page.end());
+}
 static std::vector<std::string> set_cookie(const std::string &nv) {
 	return {"Set-Cookie: " + nv};
 }
 static bool contains(const std::string &h, const std::string &needle) {
 	return h.find(needle) != std::string::npos;
 }
+// The service's start pages (apps/novaworld_web/templates/jop_2_start.htm, dfx2_0_start.htm): a
+// META refresh to NWStart whose query keys run in the LN S1 retail login's NWStart GET order
+// (MSGBASE, IN, OUT, verfile, newupdateavailable, newupdateavailablewithbypass, junction).
+static std::string start_page(const std::string &nwstart_query) {
+	return "<HTML>\r\n<HEAD>\r\n<META NAME=\"Author\" CONTENT=\"Eric Milota\">\r\n<TITLE></TITLE>\r\n"
+	       "<META HTTP-EQUIV=\"refresh\" CONTENT=\"0;URL=NWStart.dll?" +
+	       nwstart_query + "\">\r\n</HEAD>\r\n<BODY></BODY>\r\n</HTML>\r\n";
+}
+static const std::string kJoNwStartQuery =
+		"MSGBASE=jop_2_msg.htm&IN=jop_2_main.htm&OUT=jop_2_login.htm&verfile=jop_2.ver"
+		"&newupdateavailable=jop_2_newupdateavailable.htm"
+		"&newupdateavailablewithbypass=jop_2_newupdateavailable2.htm&junction=jop_2_junction.htm";
+static const std::string kDfx2NwStartQuery =
+		"MSGBASE=dfx2_0_msg.htm&IN=dfx2_0_main.htm&OUT=dfx2_0_login.htm&ACT=dfx2_0_actlogin.htm"
+		"&verfile=dfx2_0.ver&newupdateavailable=dfx2_0_newupdateavailable.htm"
+		"&newupdateavailablewithbypass=dfx2_0_newupdateavailable2.htm&junction=dfx2_0_junction.htm";
 
 // A valid EPASK bundle the server "issues" in the prepare Set-Cookie.
 static std::string make_epask_cookie() {
 	nw::EpaskParams params;
 	expect(nw::generate_epask(params), "generate_epask converges");
 	return nw::epask_to_string(params);
+}
+
+// The live sign-in page's form (NWStart's OUT answer, the LN S2 record: the 13 captured pages
+// byte-identical, the service's jop_2_login.htm the same), with its credentials' inputs outside the
+// IB3_FORM: the IB3_FORM 1 block verbatim, its inputs tab-separated as the page has them, `remember`
+// its rememberlogin VALUE (the live page's "1").
+static std::string jo_sign_in_page(const std::string &remember) {
+	return "<HTML>\r\n<BODY>\r\n<FORM ACTION=\"NWLogin.dll\" METHOD=\"POST\">\r\n"
+	       "<TD width=260><INPUT TYPE=\"text\" MAXLENGTH=16 NAME=\"Name\" VALUE=\"\"></TD>\r\n"
+	       "<TD><INPUT TYPE=\"password\" MAXLENGTH=16 NAME=\"Password\"></TD>\r\n"
+	       "<IB3_FORM value=\"1\">\r\n"
+	       "<INPUT TYPE=\"hidden\" name=\"success\" \tVALUE=\"jop_2_main.htm\">\r\n"
+	       "<INPUT TYPE=\"hidden\" name=\"failure\" \tVALUE=\"jop_2_login.htm\">\r\n"
+	       "<INPUT TYPE=\"hidden\" name=\"enterkey\" \tVALUE=\"jop_2_key.htm\">\r\n"
+	       "<INPUT TYPE=\"hidden\" name=\"msgbase\" \tVALUE=\"jop_2_msg.htm\">\r\n"
+	       "<INPUT TYPE=\"hidden\" name=\"relay\" \tVALUE=\"jop_2_relay.htm\">\r\n"
+	       "<INPUT TYPE=\"hidden\" name=\"nodb\"\tVALUE=\"jop_2_nodb.htm\">\r\n"
+	       "<INPUT TYPE=\"hidden\" name=\"needtoagree\"\tVALUE=\"jop_2_needtoagree.htm\">\r\n"
+	       "<INPUT TYPE=\"hidden\" name=\"pfid\" \tVALUE=\"28\">\r\n"
+	       "<INPUT TYPE=\"hidden\" name=\"rememberlogin\" VALUE=\"" +
+	       remember +
+	       "\">\r\n"
+	       "</IB3_FORM>\r\n</FORM>\r\n</BODY>\r\n</HTML>\r\n";
+}
+// The service's dfx2_0_login.htm form: rememberlogindata's input commented out, charglsvssrequest
+// its last.
+static const std::string kDfx2SignInPage =
+		"<HTML><BODY><FORM ACTION=\"NWLogin.dll\" METHOD=\"POST\">\r\n"
+		"<IB3_FORM value=\"1\">\r\n"
+		"<INPUT TYPE=\"hidden\" name=\"success\" \tVALUE=\"dfx2_0_main.htm\">\r\n"
+		"<INPUT TYPE=\"hidden\" name=\"failure\" \tVALUE=\"dfx2_0_login.htm\">\r\n"
+		"<INPUT TYPE=\"hidden\" name=\"enterkey\" \tVALUE=\"dfx2_0_term.htm\">\r\n"
+		"<INPUT TYPE=\"hidden\" name=\"msgbase\" \tVALUE=\"dfx2_0_msg.htm\">\r\n"
+		"<INPUT TYPE=\"hidden\" name=\"relay\" \tVALUE=\"dfx2_0_relay.htm\">\r\n"
+		"<INPUT TYPE=\"hidden\" name=\"nodb\"\tVALUE=\"dfx2_0_nodb.htm\">\r\n"
+		"<INPUT TYPE=\"hidden\" name=\"needtoagree\"\tVALUE=\"dfx2_0_needtoagree.htm\">\r\n"
+		"<INPUT TYPE=\"hidden\" name=\"pfid\" \tVALUE=\"38\">\r\n"
+		"<INPUT TYPE=\"hidden\" name=\"rememberlogin\" VALUE=\"1\">\r\n"
+		"<!--<INPUT TYPE=\"hidden\" name=\"rememberlogindata\" VALUE=\"\">-->\r\n"
+		"<INPUT TYPE=\"hidden\" name=\"charglsvssrequest\" VALUE=\"[dfx]kills\">\r\n"
+		"</IB3_FORM>\r\n</FORM></BODY></HTML>\r\n";
+
+// A form body's fields, in its order.
+static std::vector<std::pair<std::string, std::string>> form_fields(const std::string &body) {
+	std::vector<std::pair<std::string, std::string>> fields;
+	std::size_t at = 0;
+	for (;;) {
+		const std::size_t amp = body.find('&', at);
+		const std::string pair =
+				body.substr(at, amp == std::string::npos ? std::string::npos : amp - at);
+		const std::size_t eq = pair.find('=');
+		fields.emplace_back(pair.substr(0, eq),
+				eq == std::string::npos ? std::string() : pair.substr(eq + 1));
+		if (amp == std::string::npos) return fields;
+		at = amp + 1;
+	}
+}
+static std::vector<std::string> field_names(
+		const std::vector<std::pair<std::string, std::string>> &fields) {
+	std::vector<std::string> names;
+	for (const auto &field : fields) names.push_back(field.first);
+	return names;
+}
+// A posted field's plaintext under the body's own EPASK bundle ("<undecryptable>" when it fails).
+static std::string posted_plaintext(const std::vector<std::pair<std::string, std::string>> &fields,
+		const std::string &name) {
+	nw::EpaskParams params;
+	std::string plain;
+	if (fields.empty() || fields[0].first != "EPASK" ||
+			!nw::epask_from_string(fields[0].second, params))
+		return "<undecryptable>";
+	for (const auto &field : fields) {
+		if (field.first != name) continue;
+		return nw::epask_decrypt(field.second, params, plain) ? plain : "<undecryptable>";
+	}
+	return "<absent>";
 }
 
 // Concrete (OpenNova) context: a non-templated startup_url -> login skips NWSTART, base derived from it.
@@ -131,30 +234,94 @@ static bool test_login_success_concrete() {
 	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest, "login() -> prepare request")) return false;
 	expect(r.request.method == nw::HttpMethod::Get && r.request.valid, "prepare is a GET");
 	expect(r.request.url == "http://gs.opennova.test:8080/NWStart.dll?prepare=1", "prepare hits startup_url");
+	// D-NET-NEW-L9-26: the identity set is in the jar before the web lobby's first request, which
+	// carries it in its order (the live nwuid for the empty NWUID), and every cookie a page sets
+	// follows it in the later Cookie lists, the UDP statements' var-list included.
+	// [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1570 - CUIBrowser_SetCookie @0x4D16A9..
+	//  @0x4D17AA; CNapiSession_ReadLocaleInfo @0x4CE390 - the jar's walk @0x4CE3E5]
+	// The cookie lines follow the menu browser's four GET headers (D-NET-NEW-L9-31).
+	// [orig: CUIBrowser_SendHTTPRequest @0x658840 - @0x658969, @0x658979, @0x658989, @0x6589D5]
+	expect(r.request.headers ==
+	               std::vector<std::string>{"Accept: image/jpeg, image/x-pcx, image/pcx, image/png, text/html",
+	                       "Accept-Language: en", "User-Agent: NovaLogic IBrowse 2.0", "Pragma: no-cache",
+	                       "Cookie: NWUID=ABCDEF0123456789;", "Cookie: CountryName=us;"},
+	       "the prepare GET carries the identity cookies, in their order");
 
-	// PREPARE response: the server issues the EPASK bundle as a cookie. Concrete url -> straight to POST.
-	r = f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
+	// PREPARE response: the server issues the EPASK bundle as a cookie. A page that names no refresh is
+	// the page shown: its form posts at once.
+	const std::string epask_cookie = make_epask_cookie();
+	r = f.on_login_response(true, 200, set_cookie("EPASK=" + epask_cookie), bytes(jo_sign_in_page("1")));
+	{
+		const std::vector<std::pair<std::string, std::string>> vars = f.session_cookie_vars();
+		std::vector<std::string> names;
+		for (const auto &kv : vars) names.push_back(kv.first);
+		expect(names == std::vector<std::string>{"NWUID", "CountryName", "EPASK"},
+		       "the Cookie var-list leads with the identity set, the page's cookies after it");
+	}
 	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest, "prepare -> POST (concrete skips NWSTART)"))
 		return false;
 	expect(r.request.method == nw::HttpMethod::Post, "login leg is a POST");
 	expect(r.request.url == "http://gs.opennova.test:8080/NWLogin.dll", "POST hits /NWLogin.dll");
-	// The 13-field form body: EPASK present (plaintext bundle), NAME/PASSWORD encrypted, the jop_2_* templates.
-	// The field NAMES are plaintext; the encrypt=true values (NAME/PASSWORD/pfid/the jop_2_* templates)
-	// are ciphertext in the body (only the EPASK bundle is sent plaintext) — encryption is covered by
-	// the epask / http_login tests, so here we just confirm the 13-field set is assembled.
-	expect(contains(r.request.body, "EPASK="), "form carries the EPASK field");
-	expect(contains(r.request.body, "NAME=") && contains(r.request.body, "PASSWORD="), "form carries NAME + PASSWORD");
-	expect(contains(r.request.body, "success=") && contains(r.request.body, "failure="), "form carries the success/failure fields");
-	expect(contains(r.request.body, "pfid="), "form carries the pfid field");
-	bool form_ct = false;
-	for (const std::string &h : r.request.headers)
-		if (contains(h, "Content-Type: application/x-www-form-urlencoded")) form_ct = true;
-	expect(form_ct, "POST sets the form Content-Type");
+	// The form body: the EPASK bundle (plaintext), the template's NAME / PASSWORD / rememberlogindata
+	// edits, then the page's IB3_FORM 1 inputs from its last to its first, each value encrypted (the
+	// June .204 capture's field order).
+	{
+		const auto fields = form_fields(r.request.body);
+		expect(field_names(fields) ==
+		               std::vector<std::string>{"EPASK", "NAME", "PASSWORD", "rememberlogindata",
+		                       "rememberlogin", "pfid", "needtoagree", "nodb", "relay", "msgbase",
+		                       "enterkey", "failure", "success"},
+		       "the post's fields: the template's edits, then the page's inputs last to first");
+		expect(fields[0].second == epask_cookie, "the EPASK bundle is echoed plaintext");
+		expect(posted_plaintext(fields, "NAME") == "player" &&
+		               posted_plaintext(fields, "PASSWORD") == "secret",
+		       "NAME and PASSWORD decrypt");
+		expect(posted_plaintext(fields, "pfid") == "28" &&
+		               posted_plaintext(fields, "success") == "jop_2_main.htm" &&
+		               posted_plaintext(fields, "failure") == "jop_2_login.htm",
+		       "the hidden values are the page's, encrypted");
+	}
+	// The form post's headers in the menu browser's order, past its request line and Host
+	// (D-NET-NEW-L9-31). [orig: GopherWebWidget_SendHttpPost @0x658B30 - @0x658BBE, @0x658BCE,
+	//  @0x658BDE, @0x658BEF, @0x658BFF, the Cookie lines from @0x658C67]
+	expect(r.request.headers.size() >= 5 && r.request.headers[0] == "Accept: text/html" &&
+	               r.request.headers[1] == "Accept-Language: en" &&
+	               r.request.headers[2] == "User-Agent: NovaLogic IBrowse 2.0" &&
+	               r.request.headers[3] == "Content-Length: " + std::to_string(r.request.body.size()) &&
+	               r.request.headers[4] == "Content-type: application/x-www-form-urlencoded",
+	       "POST carries the browser's headers in its order, the lower-case-t Content-type");
+	for (std::size_t i = 5; i < r.request.headers.size(); ++i)
+		expect(contains(r.request.headers[i], "Cookie: "), "the POST's cookie lines follow its form headers");
 
-	// POST response: LOGINSESSIONTAG -> the poll GET (carries ?tag=).
-	r = f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=tag123"), {});
+	// POST response: LOGINSESSIONTAG and the relay page -> the poll GET its META refresh names, the
+	// bare NWLogin.dll (the tag rides the jar's cookie), with the browser's GET headers.
+	// [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620; CUIBrowser_SendHTTPRequest @0x658840 -
+	//  @0x658969, @0x658979, @0x658989, @0x6589D5]
+	r = f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=tag123"), relay_to("NWLogin.dll"));
 	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest, "POST -> poll")) return false;
-	expect(contains(r.request.url, "/NWLogin.dll?tag=tag123"), "poll carries the session tag");
+	expect(r.request.url == "http://gs.opennova.test:8080/NWLogin.dll",
+	       "poll follows the relay page's refresh to the bare NWLogin.dll");
+	expect(r.request.headers.size() >= 4 &&
+	               r.request.headers[0] == "Accept: image/jpeg, image/x-pcx, image/pcx, image/png, text/html" &&
+	               r.request.headers[1] == "Accept-Language: en" &&
+	               r.request.headers[2] == "User-Agent: NovaLogic IBrowse 2.0" &&
+	               r.request.headers[3] == "Pragma: no-cache",
+	       "a GET carries the browser's headers in its order");
+	{
+		bool tag_cookie = false;
+		for (const std::string &h : r.request.headers)
+			if (h == "Cookie: LOGINSESSIONTAG=tag123;") tag_cookie = true;
+		expect(tag_cookie, "the poll's session tag rides its cookie line");
+	}
+	// A POST answer that is no relay page leaves the login there.
+	{
+		nw::LobbyHttpFlow g;
+		g.set_context(concrete_ctx());
+		g.login("p", "s");
+		g.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
+		const nw::LoginResult stuck = g.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t"), {});
+		expect(stuck.kind == nw::LoginResult::Kind::Failed, "a POST answer with no refresh fails the login");
+	}
 
 	// POLL response: NWHANDLE + PCID -> success.
 	r = f.on_login_response(true, 200, {"Set-Cookie: NWHANDLE=PlayerOne", "Set-Cookie: PCID=42"}, {});
@@ -181,11 +348,16 @@ static bool test_login_templated_nwstart() {
 
 	nw::LoginResult r = f.login("p", "s");
 	expect(r.kind == nw::LoginResult::Kind::NeedRequest, "templated login() -> prepare");
-	r = f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
+	// The start page's refresh is the NWStart GET, as it stands, the browser's nocachefix pair added
+	// on the way out. [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620; UI_ProcessWebResponseContent
+	//  @0x63D450 - @0x63D501; CUIScene_EndFrame @0x63E600 - UIScene_OpenUrl called @0x63E635]
+	r = f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()),
+			bytes(start_page(kJoNwStartQuery)));
 	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest, "templated prepare -> NWSTART")) return false;
-	expect(r.request.method == nw::HttpMethod::Get, "NWSTART is a GET");
-	expect(contains(r.request.url, "/NWStart.dll?MSGBASE=jop_2_msg.htm"), "NWSTART hits the dll with the literal query");
-	expect(contains(r.request.url, "junction=jop_2_junction.htm"), "NWSTART query is byte-preserved");
+	expect(r.request.method == nw::HttpMethod::Get && r.request.cache_bust, "NWSTART is a GET");
+	if (!expect(r.request.url == "http://gs.novaworld.net/NWStart.dll?" + kJoNwStartQuery,
+	            "NWSTART follows the start page's refresh, its query byte for byte"))
+		std::fprintf(stderr, "  got: %s\n", r.request.url.c_str());
 	// NWSTART response -> POST.
 	r = f.on_login_response(true, 200, {}, {});
 	expect(r.kind == nw::LoginResult::Kind::NeedRequest && r.request.method == nw::HttpMethod::Post,
@@ -193,7 +365,8 @@ static bool test_login_templated_nwstart() {
 	// Captured live .204 success needs two poll GETs. The first response is
 	// still the relay page, where @MESSAGE@ is progress rather than failure.
 	const std::string relay_page =
-			"<HTML><IB3_SUBST name=\"@MESSAGE@\">Contacting login databases..."
+			"<HTML><HEAD><META http-equiv=\"refresh\" CONTENT=0;URL=\"NWLogin.dll\"></HEAD>"
+			"<IB3_SUBST name=\"@MESSAGE@\">Contacting login databases..."
 			"<BR></IB3_SUBST></HTML>";
 	r = f.on_login_response(true, 200,
 			{"Set-Cookie: LOGINSESSIONTAG=live-tag", "Set-Cookie: NWHANDLE=",
@@ -204,14 +377,32 @@ static bool test_login_templated_nwstart() {
 	r = f.on_login_response(true, 200, {}, bytes(relay_page));
 	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest,
 	            "pending relay message keeps polling")) return false;
-	expect(contains(r.request.url, "/NWLogin.dll?tag=live-tag"),
-	       "second poll retains the login session tag");
+	expect(contains(r.request.url, "/NWLogin.dll") && !contains(r.request.url, "tag="),
+	       "second poll follows the relay page's refresh, its tag in the jar");
 	r = f.on_login_response(true, 200,
 			{"Set-Cookie: NWHANDLE=ljim", "Set-Cookie: PCID=A-A02-085D18"}, {});
 	if (!expect(r.kind == nw::LoginResult::Kind::Succeeded,
 	            "second live-shaped poll completes login")) return false;
 	expect(r.nwhandle == "ljim" && r.pcid == "A-A02-085D18",
 	       "live-shaped poll captures account identity");
+
+	// DFX2's start page names its ACT page between OUT and verfile: the refresh carries it as the
+	// page has it.
+	{
+		nw::LobbyHttpFlow d;
+		nw::LobbyHttpContext dc;
+		dc.title = nw::title_identity(nw::gameprofile::GAME_DFX2);
+		dc.gate_tag = dc.title->gate_tag;
+		dc.startup_url = "http://[domainname]/nwprepare.dll?gt=[GT]&url=dfx2_0_start.htm";
+		dc.web_domain = "gs.novaworld.net";
+		d.set_context(dc);
+		d.login("p", "s");
+		const nw::LoginResult dr = d.on_login_response(true, 200,
+				set_cookie("EPASK=" + make_epask_cookie()), bytes(start_page(kDfx2NwStartQuery)));
+		expect(dr.kind == nw::LoginResult::Kind::NeedRequest &&
+		               dr.request.url == "http://gs.novaworld.net/NWStart.dll?" + kDfx2NwStartQuery,
+		       "DFX2's NWSTART is its start page's refresh, ACT included");
+	}
 	return g_fail == 0;
 }
 
@@ -239,7 +430,8 @@ static bool test_login_failures() {
 		c.web_domain = "gs.novaworld.net";
 		f.set_context(c);
 		f.login("p", "s");
-		f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
+		f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()),
+				bytes(start_page(kJoNwStartQuery)));
 		const std::string page =
 				"<IB3_SUBST name=\"@GENERIC@\">Matchmaking is under maintenance.</IB3_SUBST>";
 		nw::LoginResult r = f.on_login_response(true, 200, {}, bytes(page));
@@ -299,7 +491,7 @@ static bool test_login_failures() {
 		f.set_context(concrete_ctx());
 		f.login("p", "s");
 		f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
-		f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t"), {});
+		f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t"), relay_to("NWLogin.dll"));
 		const std::string page =
 				"<IB3_SUBST name=\"@GENERIC@\">This account cannot sign in.</IB3_SUBST>";
 		nw::LoginResult r = f.on_login_response(true, 200, {}, bytes(page));
@@ -313,11 +505,11 @@ static bool test_login_failures() {
 		f.set_context(concrete_ctx());
 		f.login("p", "s");
 		f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
-		f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t"), {});
+		f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t"), relay_to("NWLogin.dll"));
 		nw::LoginResult r;
 		bool failed = false;
 		for (int i = 0; i < 12; ++i) {
-			r = f.on_login_response(true, 200, {}, {});
+			r = f.on_login_response(true, 200, {}, relay_to("NWLogin.dll"));
 			if (r.kind == nw::LoginResult::Kind::Failed) { failed = true; break; }
 		}
 		expect(failed, "poll exhausts after kMaxLoginPolls without NWHANDLE");
@@ -361,10 +553,12 @@ static bool test_join_resolves() {
 	expect(contains(r.request.url, "/NWJoin.dll?needexpkey=jop_2_key2err.htm"), "NWJoin first leg literal");
 	expect(contains(r.request.url, "mode=Login&rid=777"), "NWJoin first leg carries the rid");
 
-	// FIRST response: NWJOINSESSIONTAG -> the second leg (?rid=&tag=).
-	r = f.on_join_response(true, 200, set_cookie("NWJOINSESSIONTAG=jtag"), {});
+	// FIRST response: NWJOINSESSIONTAG and the relay page -> the second leg its META refresh names,
+	// the bare NWJoin.dll, the tag in the jar (the LN S1b retail joiner's second GET; D-NET-NEW-L9-31).
+	r = f.on_join_response(true, 200, set_cookie("NWJOINSESSIONTAG=jtag"), relay_to("NWJoin.dll"));
 	if (!expect(r.kind == nw::JoinResult::Kind::NeedRequest, "NWJoin FIRST -> SECOND")) return false;
-	expect(contains(r.request.url, "/NWJoin.dll?rid=777&tag=jtag"), "NWJoin second leg carries rid + tag");
+	expect(r.request.url == "http://gs.opennova.test:8080/NWJoin.dll",
+	       "NWJoin second leg follows the relay page's refresh");
 
 	// SECOND response: the .joi body resolves host:port from the decoded NK (the
 	// only dial authority) and carries the proxy triple + lobby number verbatim
@@ -404,7 +598,7 @@ static bool test_join_resolves() {
 	nw::LobbyHttpFlow f2;
 	f2.set_context(concrete_ctx());
 	f2.join(1);
-	f2.on_join_response(true, 200, {}, {});
+	f2.on_join_response(true, 200, {}, relay_to("NWJoin.dll"));
 	nw::JoinResult bad = f2.on_join_response(true, 200, {}, bytes("no brackets here"));
 	expect(bad.kind == nw::JoinResult::Kind::Failed, "join with no .joi connection -> Failed");
 	expect(bad.reason == "join: no connection string in .joi", "malformed .joi keeps its fallback reason");
@@ -413,7 +607,7 @@ static bool test_join_resolves() {
 	nw::LobbyHttpFlow f3;
 	f3.set_context(concrete_ctx());
 	f3.join(2);
-	f3.on_join_response(true, 200, {}, {});
+	f3.on_join_response(true, 200, {}, relay_to("NWJoin.dll"));
 	const std::string rejection =
 			"<IB3_SUBST name=\"@GENERIC@\">This game requires the Team Sabre expansion."
 			"<BR><I>Choose another game.</I></IB3_SUBST>";
@@ -431,7 +625,7 @@ static bool test_join_resolves() {
 static bool test_host_resolves() {
 	nw::LobbyHttpFlow none;
 	none.set_context(concrete_ctx());
-	nw::HostKeyResult early = none.host();
+	nw::HostKeyResult early = none.host("");
 	expect(early.kind == nw::HostKeyResult::Kind::Failed && !none.host_active(),
 	       "host() before any main page set @HOST_URL@ fails (log in first)");
 
@@ -439,7 +633,7 @@ static bool test_host_resolves() {
 	f.set_context(concrete_ctx());
 	f.login("player", "secret");
 	f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
-	f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=tag123"), {});
+	f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=tag123"), relay_to("NWLogin.dll"));
 	const std::string main_page =
 			"<HTML><BODY><A HREF=\"jop_2_host1.htm\">Host</A>"
 			"<IB3_GLOBAL name=\"@HOST_URL@\">http://gs.opennova.test:8080/nwhost.dll</IB3_GLOBAL>"
@@ -452,7 +646,7 @@ static bool test_host_resolves() {
 	expect(global != nullptr && *global == "http://gs.opennova.test:8080/nwhost.dll",
 	       "the main page's @HOST_URL@ global is kept (name case-insensitive)");
 
-	nw::HostKeyResult r = f.host();
+	nw::HostKeyResult r = f.host("");
 	if (!expect(r.kind == nw::HostKeyResult::Kind::NeedRequest, "host() -> the @HOST_URL@ GET")) return false;
 	expect(r.request.method == nw::HttpMethod::Get &&
 	               r.request.url == "http://gs.opennova.test:8080/nwhost.dll",
@@ -473,15 +667,40 @@ static bool test_host_resolves() {
 	r = f.on_host_response(true, 200, {}, bytes(host2));
 	if (!expect(r.kind == nw::HostKeyResult::Kind::Resolved, "the HOSTKEY title resolves")) return false;
 	expect(r.host_key == "ABCDEFGHIJKLMNOP", "the key is trimmed at '&' then ']'");
-	expect(!f.host_active(), "the host leg is idle once resolved");
+	// The HOSTKEY page's refresh, which the owner ships once the host request's wait ends: the LN
+	// S1 / S1b / S1c / S1d retail hosts GET jop_2_host3.htm after it whatever its "10;" delay.
+	// [orig: CUIScene_EndFrame @0x63E600 - @0x63E626, UIScene_OpenUrl called @0x63E635;
+	//  UI_DispatchScreenEvent @0x54E6A0 - ConnectOrHost called @0x54F33B]
+	expect(r.request.valid && r.request.method == nw::HttpMethod::Get && r.request.cache_bust &&
+	               r.request.url == "http://gs.opennova.test:8080/jop_2_host3.htm",
+	       "the resolve carries the HOSTKEY page's refresh GET");
+	expect(f.host_active(), "the leg waits for the refresh's answer");
+	r = f.on_host_response(true, 200, set_cookie("YOURIP=10.0.0.9"), bytes("<HTML>host3</HTML>"));
+	expect(r.kind == nw::HostKeyResult::Kind::Settled && !f.host_active(),
+	       "the refresh's answer settles the leg");
+	expect(f.cookies().find("YOURIP") != nullptr, "and its cookies merge");
+	{
+		// A HOSTKEY page with no refresh resolves with no request and an idle leg.
+		nw::LobbyHttpFlow g;
+		g.set_context(concrete_ctx());
+		g.login("player", "secret");
+		g.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
+		g.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t"), relay_to("NWLogin.dll"));
+		g.on_login_response(true, 200, {"Set-Cookie: NWHANDLE=P"}, bytes(main_page));
+		g.host("");
+		const nw::HostKeyResult bare = g.on_host_response(true, 200, {},
+				bytes("<HTML><HEAD><TITLE>[HOSTKEY=QRSTUVWXYZ&]</TITLE></HEAD></HTML>"));
+		expect(bare.kind == nw::HostKeyResult::Kind::Resolved && !bare.request.valid && !g.host_active(),
+		       "a HOSTKEY page with no refresh leaves nothing to fetch");
+	}
 
 	// A message page fails with its rendered text; a refresh loop gives up.
-	r = f.host();
+	r = f.host("");
 	r = f.on_host_response(true, 200, {},
 			bytes("<IB3_SUBST name=\"@GENERIC@\">You must agree first.</IB3_SUBST>"));
 	expect(r.kind == nw::HostKeyResult::Kind::Failed && r.reason == "You must agree first.",
 	       "a message page fails the host leg with its text");
-	r = f.host();
+	r = f.host("");
 	for (int hop = 0; hop < nw::LobbyHttpFlow::kMaxHostHops && r.kind == nw::HostKeyResult::Kind::NeedRequest;
 	     ++hop) {
 		r = f.on_host_response(true, 200, {}, bytes(relay));
@@ -490,7 +709,957 @@ static bool test_host_resolves() {
 	return g_fail == 0;
 }
 
+// D-NET-NEW-L9-46: the host leg's pages combine their refreshes with their own URLs, so a leg the
+// main page's @HOST_URL@ opens under its own origin stays under it. The live service names that
+// URL with no port ("http://<web-ip>/jop_2_host1.htm") where its 0x82's web domain, the login's
+// base, writes ":80", so the host leg's relay template keys apart from the login's and is fetched
+// again: every LN S1 / S2 retail host leg refetches jop_2_relay.mnx.
+// [orig: UIScene_OpenUrl @0x63E2F0 - the scene's +0x34 pushed @0x63E3A7,
+//  CUIBrowser_AsyncFetchURLContent called @0x63E3AF; CUIBrowser_AsyncFetchURLContent @0x64DE80 -
+//  URL_CombineComponents called @0x64DE9B]
+static bool test_host_leg_origin() {
+	nw::process_browser_cache().clear();
+	// The login's relay template, held under the login's origin (its base, here with its port).
+	const std::string login_relay = "http://gs.opennova.test:8080/jop_2_relay.mnx";
+	nw::process_browser_cache().fetch(login_relay);
+	nw::process_browser_cache().complete(login_relay, true);
+
+	nw::LobbyHttpFlow f;
+	f.set_context(concrete_ctx());
+	f.login("player", "secret");
+	f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
+	f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t"), relay_to("NWLogin.dll"));
+	const std::string main_page =
+			"<HTML><IB3_GLOBAL name=\"@HOST_URL@\">http://gs.opennova.test/jop_2_host1.htm"
+			"</IB3_GLOBAL></HTML>";
+	const nw::LoginResult login = f.on_login_response(true, 200, {"Set-Cookie: NWHANDLE=P"},
+			bytes(main_page));
+	if (!expect(login.kind == nw::LoginResult::Kind::Succeeded, "origin: the login lands"))
+		return false;
+
+	nw::HostKeyResult r = f.host("");
+	expect(r.kind == nw::HostKeyResult::Kind::NeedRequest &&
+	               r.request.url == "http://gs.opennova.test/jop_2_host1.htm",
+	       "the host leg opens @HOST_URL@ as the page names it");
+	// The service's jop_2_host1.htm: its refresh opens NWHost.dll with the page link's query.
+	const std::string host1 =
+			"<HTML><HEAD><META HTTP-EQUIV=\"refresh\" CONTENT=\"0;URL=NWHost.dll?needexpkey="
+			"jop_2_key2err.htm&success=jop_2_host2.htm&pfid=28\"></HEAD></HTML>";
+	r = f.on_host_response(true, 200, {}, bytes(host1));
+	expect(r.kind == nw::HostKeyResult::Kind::NeedRequest &&
+	               r.request.url == "http://gs.opennova.test/NWHost.dll?needexpkey=jop_2_key2err.htm"
+	                                "&success=jop_2_host2.htm&pfid=28",
+	       "the page's refresh combines with the page's URL: no port, as the page's");
+	const std::string relay =
+			"<HTML><HEAD><META http-equiv=\"refresh\" CONTENT=0;URL=\"NWHost.dll\"></HEAD>"
+			"<IB3_TEMPLATE file=\"jop_2_relay.mnx\"></HTML>";
+	r = f.on_host_response(true, 200, set_cookie("NWJOINSESSIONTAG=h"), bytes(relay));
+	expect(nw::browser_cache_key("http://gs.opennova.test/jop_2_relay.mnx") !=
+	               nw::browser_cache_key(login_relay),
+	       "the two origins key the relay template apart");
+	expect(r.kind == nw::HostKeyResult::Kind::NeedRequest &&
+	               r.request.url == "http://gs.opennova.test/jop_2_relay.mnx" && r.request.cache_bust,
+	       "so the host leg's relay template is fetched again, ahead of the refresh");
+	r = f.on_host_response(true, 200, {}, bytes("<IB3 relay mnx>"));
+	expect(r.kind == nw::HostKeyResult::Kind::NeedRequest &&
+	               r.request.url == "http://gs.opennova.test/NWHost.dll",
+	       "then the relay's refresh, under the host leg's origin");
+	const std::string host2 =
+			"<HTML><HEAD><TITLE>[HOSTKEY=ABCDEFGHIJKLMNOP&]</TITLE>"
+			"<META HTTP-EQUIV=\"refresh\" CONTENT=\"10;URL=jop_2_host3.htm\"></HEAD></HTML>";
+	r = f.on_host_response(true, 200, {}, bytes(host2));
+	expect(r.kind == nw::HostKeyResult::Kind::Resolved &&
+	               r.request.url == "http://gs.opennova.test/jop_2_host3.htm",
+	       "and the HOSTKEY page's refresh");
+
+	// A second host leg in the process finds the host origin's template held: no fetch.
+	f.on_host_response(true, 200, {}, bytes("<HTML>host3</HTML>"));
+	r = f.host("");
+	r = f.on_host_response(true, 200, {}, bytes(host1));
+	r = f.on_host_response(true, 200, set_cookie("NWJOINSESSIONTAG=h2"), bytes(relay));
+	expect(r.kind == nw::HostKeyResult::Kind::NeedRequest &&
+	               r.request.url == "http://gs.opennova.test/NWHost.dll",
+	       "a later host leg's relay template is the cache's");
+	nw::process_browser_cache().clear();
+	return g_fail == 0;
+}
+
+// D-NET-NEW-L9-49: a menu-browser request's Host line is the URL's host as the browser's URL parse
+// cuts it, past "//" to the first '/' or ':', so the port never rides it: LN-s6's S3 record shows
+// the retail client's login legs, whose URLs carry SessionInit's "<ip>:80", with "Host: <ip>".
+// [orig: CUIBrowser_SendHTTPRequest @0x658840 - +0xC read @0x658952, "Host: %s" @0x658959;
+//  GopherWebWidget_SendHttpPost @0x658B30 - @0x658BA5, @0x658BAE; URL_ParseComponents @0x650140 -
+//  @0x6501A7, @0x650332 / @0x650336, @0x650358, @0x6503B6]
+static bool test_browser_request_host() {
+	expect(nw::browser_request_host("http://198.51.100.7:80/NWLogin.dll") == "198.51.100.7",
+	       "a login leg's :80 never rides the Host line");
+	expect(nw::browser_request_host("http://198.51.100.7/jop_2_host1.htm") == "198.51.100.7",
+	       "a port-less URL's host is the whole authority");
+	expect(nw::browser_request_host("http://gs.opennova.test:8080/jop_2.gsb?a=1") ==
+	               "gs.opennova.test",
+	       "nor does any other port");
+	expect(nw::browser_request_host("http://gs.opennova.test") == "gs.opennova.test",
+	       "a URL with no path names its host");
+	expect(nw::browser_request_host("http://gs.opennova.test#frag") == "gs.opennova.test",
+	       "the fragment is cut ahead of the host's scan");
+	return g_fail == 0;
+}
+
+// D-NET-NEW-L9-48: the Host's open sets PLoad "" and EXP (the expansion's name) in the jar ahead
+// of its @HOST_URL@ lookup, appended after the login's cookies, so the host leg's requests and the
+// host request's Cookie var-list carry them right after the login's PERSISTENTREMEMBERLOGINDATA,
+// ahead of the cookies the host leg's responses set: the LN S1 / S1d retail host legs' 32 cookies
+// end "PERSISTENTREMEMBERLOGINDATA, PLoad, EXP", their ClientHostRequest Cookie lists carry
+// PERSISTENTREMEMBERLOGINDATA, PLoad "" and EXP "" at vars 30..32 and then the host leg's 15, and
+// no response sets either. A second host leg updates both in place.
+// [orig: UI_HandleHostSessionStart @0x556D00 - CUIBrowser_SetCookie called @0x556F21 /
+//  @0x556F36, ahead of CUIScene_FindNamedValue called @0x556F46; CookieJar_UpdateFromURL
+//  @0x64E630 - the in-place value @0x64E7FF, the append @0x64E8F7..0x64E91C]
+static bool test_host_leg_cookies() {
+	nw::LobbyHttpFlow f;
+	f.set_context(concrete_ctx());
+	f.login("player", "secret");
+	f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
+	f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t"), relay_to("NWLogin.dll"));
+	const std::string main_page =
+			"<HTML><IB3_GLOBAL name=\"@HOST_URL@\">http://gs.opennova.test/jop_2_host1.htm"
+			"</IB3_GLOBAL></HTML>";
+	const nw::LoginResult login = f.on_login_response(true, 200,
+			{"Set-Cookie: NWHANDLE=P", "Set-Cookie: PERSISTENTREMEMBERLOGINDATA=R"}, bytes(main_page));
+	if (!expect(login.kind == nw::LoginResult::Kind::Succeeded, "cookies: the login lands"))
+		return false;
+	expect(f.cookies().find("PLoad") == nullptr && f.cookies().find("EXP") == nullptr,
+	       "no page sets PLoad or EXP");
+
+	nw::HostKeyResult r = f.host("");
+	if (!expect(r.kind == nw::HostKeyResult::Kind::NeedRequest, "cookies: the host leg opens"))
+		return false;
+	const std::vector<std::string> &headers = r.request.headers;
+	expect(headers.size() >= 3 && headers[headers.size() - 3] == "Cookie: PERSISTENTREMEMBERLOGINDATA=R;" &&
+	               headers[headers.size() - 2] == "Cookie: PLoad=;" &&
+	               headers[headers.size() - 1] == "Cookie: EXP=;",
+	       "the host leg's first GET ends its Cookie lines with PLoad and EXP, after the login's");
+	std::vector<std::pair<std::string, std::string>> vars = f.session_cookie_vars();
+	expect(vars.size() >= 3 && vars[vars.size() - 3].first == "PERSISTENTREMEMBERLOGINDATA" &&
+	               vars[vars.size() - 2] == std::make_pair(std::string("PLoad"), std::string()) &&
+	               vars[vars.size() - 1] == std::make_pair(std::string("EXP"), std::string()),
+	       "and so does the host request's Cookie var-list");
+	r = f.on_host_response(true, 200, {},
+			bytes("<HTML><HEAD><TITLE>[HOSTKEY=ABCDEFGHIJKLMNOP&]</TITLE></HEAD></HTML>"));
+	expect(r.kind == nw::HostKeyResult::Kind::Resolved && !f.host_active(), "cookies: the key resolves");
+
+	const std::size_t names = f.cookies().entries().size();
+	r = f.host("EXPNAME");
+	expect(f.cookies().entries().size() == names && f.cookies().entries().back().name == "EXP" &&
+	               *f.cookies().find("EXP") == "EXPNAME" &&
+	               r.request.headers.back() == "Cookie: EXP=EXPNAME;",
+	       "a second host leg updates both entries in place, EXP carrying the expansion's name");
+	return g_fail == 0;
+}
+
+// D-NET-NEW-L9-31: a menu-browser GET's nocachefix pair, "%d%d" of the tick and the resolved
+// server's IPv4 address read as one little-endian int ('?' or '&' by the URL's query; none with no
+// path), and which requests carry it: every GET, no form post. The LN S1 / S1b records' pairs have
+// this form (a nine-digit tick, then the web server's address, negative above 127.x.x.x).
+// [orig: CUIBrowser_SendHTTPRequest @0x658840 - @0x65889F, @0x6588A3, @0x6588B5, @0x658901,
+//  @0x658942; CNapiWinsock_InitFromUrl @0x658DA0 - CNapiWinsock_ResolveHostAsync called @0x658E4B]
+static bool test_browser_cache_bust() {
+	expect(nw::browser_cache_bust_url("http://nw.example.test/jop_2_login.mnx", 676778718u,
+	               {198, 51, 100, 7}) ==
+	               "http://nw.example.test/jop_2_login.mnx?nocachefix=676778718124007366",
+	       "a GET with no query takes ?nocachefix= and the address's int");
+	expect(nw::browser_cache_bust_url("http://nw.example.test/jop_2.gsb?a=1", 676811359u,
+	               {203, 0, 113, 250}) ==
+	               "http://nw.example.test/jop_2.gsb?a=1&nocachefix=676811359-93257525",
+	       "behind a query it is &nocachefix=, a high octet printing negative");
+	expect(nw::browser_cache_bust_url("http://nw.example.test", 5u, {198, 51, 100, 7}) ==
+	               "http://nw.example.test",
+	       "a URL with no path goes out as it is");
+	expect(nw::browser_cache_bust_url("http://nw.example.test/a", 0x80000000u, {0, 0, 0, 0}) ==
+	               "http://nw.example.test/a?nocachefix=-21474836480",
+	       "the tick prints signed");
+
+	nw::LobbyHttpFlow f;
+	f.set_context(concrete_ctx());
+	nw::LoginResult r = f.login("p", "s");
+	expect(r.request.cache_bust, "the prepare GET is cache-busted");
+	r = f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
+	expect(r.request.method == nw::HttpMethod::Post && !r.request.cache_bust,
+	       "the form post takes no pair");
+	r = f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t"), relay_to("NWLogin.dll"));
+	expect(r.request.cache_bust, "the poll GET is cache-busted");
+	nw::JoinResult j = f.join(9);
+	expect(j.request.cache_bust, "the NWJoin GET is cache-busted");
+	return g_fail == 0;
+}
+
+// D-NET-NEW-L9-31: the .joi page's refresh. The menu browser follows every META refresh at its
+// next frame whatever the delay (the delay's seconds stand where its test reads a GetTickCount
+// deadline), so the JO .joi's "10;URL=jop_2_jend.htm" is fetched right behind the join (the LN S1b
+// retail joiner: 0.25 s after the .joi). Its answer settles the flow; a failed fetch leaves the
+// join standing.
+// [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620 - @0x655783; CUIScene_EndFrame @0x63E600 -
+//  @0x63E626, UIScene_OpenUrl called @0x63E635]
+static bool test_joi_page_refresh() {
+	const std::string nk = nw::url_cipher_encode("10.1.2.3:3001", nw::URL_CIPHER_KEY_NK);
+	const std::string joi = "<HTML><HEAD><META http-equiv=\"refresh\" CONTENT=\"10;URL=jop_2_jend.htm\">"
+			"<TITLE>[NK=" + nk + "&GS=x]</TITLE></HEAD></HTML>";
+	for (const bool fetched : {true, false}) {
+		nw::LobbyHttpFlow f;
+		f.set_context(concrete_ctx());
+		f.join(5);
+		f.on_join_response(true, 200, set_cookie("NWJOINSESSIONTAG=j"), relay_to("NWJoin.dll"));
+		const nw::JoinResult r = f.on_join_response(true, 200, {}, bytes(joi));
+		if (!expect(r.kind == nw::JoinResult::Kind::Resolved, ".joi with a refresh -> resolved")) return false;
+		expect(r.request.valid && r.request.method == nw::HttpMethod::Get &&
+		               r.request.url == "http://gs.opennova.test:8080/jop_2_jend.htm" &&
+		               r.request.cache_bust,
+		       "the resolve carries the .joi page's refresh GET");
+		expect(f.join_active(), "the flow waits for the page's answer");
+		const nw::JoinResult settled = fetched ? f.on_join_response(true, 200, {}, bytes("<HTML></HTML>"))
+		                                       : f.on_join_response(false, 0, {}, {});
+		expect(settled.kind == nw::JoinResult::Kind::Settled && !f.join_active(),
+		       "the page's answer, or its failure, settles the flow");
+	}
+	return g_fail == 0;
+}
+
+// D-NET-NEW-L9-34: the META refresh's URL as the menu browser's parser reads it. The tag's
+// attributes are split as its attribute parser splits them; HTTP-EQUIV must be REFRESH whole; the
+// URL is sought from the CONTENT's first ';' as "URL=", one quote skipped, and copied to a quote or
+// the end, spaces included; no ';' or no "URL=" names none; the page's last refresh wins.
+// [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620 - @0x655676, @0x6556B0..0x6556BC, @0x6556CD,
+//  @0x6556EE..0x6556F6, @0x655701..0x655717; XML_ParseAttributes @0x655410;
+//  XML_FindAttributeValue @0x6555C0;
+//  CUIHTMLParser_ParseTag @0x655E20 - @0x655EC4]
+static bool test_meta_refresh_walk() {
+	const auto url_of = [](const std::string &tag) {
+		return nw::meta_refresh_url("<HTML><HEAD>" + tag + "</HEAD></HTML>");
+	};
+	expect(url_of("<META http-equiv=\"refresh\" CONTENT=0;URL=\"NWLogin.dll\">") == "NWLogin.dll",
+	       "the service's relay form: an unquoted CONTENT, the URL's one quote skipped");
+	expect(url_of("<META HTTP-EQUIV=\"Refresh\" CONTENT=\"5; URL=my page.htm\">") == "my page.htm",
+	       "a spaced URL is copied whole, to the end");
+	expect(url_of("<META HTTP-EQUIV=\"Refresh\" CONTENT=\"0;URL= a.htm\">") == " a.htm",
+	       "no white space is skipped after URL=");
+	expect(url_of("<META HTTP-EQUIV=\"Refresh\" CONTENT=\"0;URL='a.htm' b\">") == "a.htm",
+	       "the copy ends at a quote");
+	expect(url_of("<META HTTP-EQUIV=\"Refresh\" CONTENT=\"0; URL = x.htm\">").empty(),
+	       "\"URL = x\" names none");
+	expect(url_of("<META HTTP-EQUIV=\"Refresh\" CONTENT=\"URL=x.htm\">").empty(), "no ';' names none");
+	expect(url_of("<META HTTP-EQUIV=\"refresh-now\" CONTENT=\"0;URL=x.htm\">").empty(),
+	       "HTTP-EQUIV must be REFRESH whole");
+	expect(url_of("<meta content=\"0;url=x.htm\" http-equiv=refresh>") == "x.htm",
+	       "attribute names and URL= match case-insensitively, in any order");
+	expect(url_of("<META HTTP-EQUIV=\"Refresh\" CONTENT=\"0;URL=a.htm\" CONTENT=\"0;URL=b.htm\">") ==
+	               "b.htm",
+	       "a tag's last CONTENT is the one read");
+	expect(url_of("<META HTTP-EQUIV=\"Refresh\" CONTENT=\"0;URL=a.htm\"><META HTTP-EQUIV=\"Refresh\" "
+	              "CONTENT=\"0;URL=b.htm\">") == "b.htm",
+	       "the page's last refresh wins");
+	expect(url_of("<METAX HTTP-EQUIV=\"Refresh\" CONTENT=\"0;URL=a.htm\">").empty(),
+	       "a longer tag name is no META");
+	return g_fail == 0;
+}
+
+// D-NET-NEW-L9-32: the gate reply's jar fields ahead of the connection-up's six. A set junction
+// word leads with USEJUNCTION "1" and an empty JUNCTIONCODE; a clear mpextractextendedmetricinformation
+// leaves CountryName / Language / TimeZoneBias out of the jar and the Cookie var-lists, and
+// MyInstalledExpBits stays.
+// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - @0x4CF71B, @0x4CF74E, @0x4CF76E, @0x4CF773,
+//  @0x4CF796, @0x4CF7AB, @0x4CF7DE, @0x4CF811; CNapiSession_ReadLocaleInfo @0x4CE390 - @0x4CE44E]
+static bool test_gate_reply_jar_fields() {
+	const auto identity = nw::make_lobby_identity_vars(nw::LobbyIdentityParams{});
+	auto names_of = [](const std::vector<std::pair<std::string, std::string>> &vars) {
+		std::vector<std::string> out;
+		for (const auto &kv : vars) out.push_back(kv.first);
+		return out;
+	};
+	{
+		nw::LobbyHttpContext c = concrete_ctx();
+		c.identity_vars = identity;
+		c.use_junction = 1;
+		nw::LobbyHttpFlow f;
+		f.set_context(c);
+		const auto vars = f.session_cookie_vars();
+		const std::vector<std::string> want = {"USEJUNCTION", "JUNCTIONCODE", "CountryName", "Language",
+				"TimeZoneBias", "MyInstalledExpBits", "NWUID", "NWCDKIID", "NWCDKIIDEXP1", "NWPSSK",
+				"NWUSID", "NWHWI"};
+		expect(names_of(vars) == want, "a set junction word leads the Cookie list with its pair");
+		expect(vars.size() >= 2 && vars[0].second == "1" && vars[1].second.empty(),
+		       "USEJUNCTION is \"1\" and JUNCTIONCODE empty");
+		const nw::LoginResult r = f.login("p", "s");
+		expect(r.request.headers.size() >= 6 && r.request.headers[4] == "Cookie: USEJUNCTION=1;" &&
+		               r.request.headers[5] == "Cookie: JUNCTIONCODE=;",
+		       "the first request's cookie lines lead with the junction pair");
+	}
+	{
+		nw::LobbyHttpContext c = concrete_ctx();
+		c.identity_vars = identity;
+		c.extended_metrics = false;
+		nw::LobbyHttpFlow f;
+		f.set_context(c);
+		const std::vector<std::string> want = {"MyInstalledExpBits", "NWUID", "NWCDKIID", "NWCDKIIDEXP1",
+				"NWPSSK", "NWUSID", "NWHWI"};
+		expect(names_of(f.session_cookie_vars()) == want,
+		       "a clear extended-metrics switch drops the locale three from the Cookie list");
+		f.login("p", "s");
+		f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
+		expect(f.cookies().find("CountryName") == nullptr && f.cookies().find("MyInstalledExpBits") != nullptr,
+		       "the jar seeds no locale three, MyInstalledExpBits stays");
+	}
+	return g_fail == 0;
+}
+
+// The menu browser's content cache (browser_cache.h): a page's relative reference combined with the
+// page's URL as URL_CombineComponents combines them, the cache key AsyncFetchURLContent files a
+// download under, and the process's list: a key requested once, joined while in flight, served
+// once stored, requested again after an end with nothing stored.
+// [orig: URL_CombineComponents @0x650BC0; URL_ParseComponents @0x650140;
+//  CUIBrowser_AsyncFetchURLContent @0x64DE80; HTTP_DownloadCompletionCallback @0x64DB20]
+static bool test_browser_cache_rule() {
+	// A relative path replaces the base's whole path and query; the base's host and port stay.
+	expect(nw::browser_combine_url("http://gs.novaworld.net/NWLogin.dll", "jop_2_relay.mnx") ==
+	               "http://gs.novaworld.net/jop_2_relay.mnx",
+	       "a template joins the page's host");
+	expect(nw::browser_combine_url("http://gs.opennova.test:8080/NWStart.dll?MSGBASE=jop_2_msg.htm",
+	               "jop_2_login.mnx") == "http://gs.opennova.test:8080/jop_2_login.mnx",
+	       "the base's port stays, its query goes");
+	expect(nw::browser_combine_url("http://h/dir/page.htm", "t.mnx") == "http://h/t.mnx",
+	       "no directory of the base's is kept");
+	expect(nw::browser_combine_url("http://h/page.htm", "t.mnx?v=2") == "http://h/t.mnx?v=2",
+	       "the reference's query rides along");
+	expect(nw::browser_combine_url("http://h/page.htm", "HTTP://other:81/t.mnx") ==
+	               "HTTP://other:81/t.mnx",
+	       "a reference with a scheme is taken whole");
+	// An absolute path is no relative one: the base's path and query come back (the combine's
+	// last branch), as retail combines it.
+	expect(nw::browser_combine_url("http://h/a.htm?q=1", "/t.mnx") == "http://h/a.htm?q=1",
+	       "an absolute path keeps the base's path and query");
+
+	// The key: "cache\" and the URL to its '?', every byte but an alphanumeric or '.' as '_'.
+	expect(nw::browser_cache_key("http://gs.opennova.test:8080/jop_2_relay.mnx?nocachefix=1") ==
+	               "cache\\http___gs.opennova.test_8080_jop_2_relay.mnx",
+	       "the cache key");
+	expect(nw::browser_cache_key("http://h:80/x.mnx") != nw::browser_cache_key("http://h/x.mnx"),
+	       "a port spelled out is another key");
+
+	nw::BrowserCache cache;
+	const std::string url = "http://gs.novaworld.net/jop_2_main.mnx";
+	expect(cache.fetch(url), "a key's first fetch is requested");
+	expect(!cache.fetch(url), "a fetch of a key in flight joins it");
+	cache.complete(url, true);
+	expect(cache.holds(url), "a stored download is held");
+	expect(!cache.fetch("HTTP://GS.NOVAWORLD.NET/JOP_2_MAIN.MNX?a=1"),
+	       "a held key serves any URL of that key, its case and query apart");
+	const std::string relay = "http://gs.novaworld.net/jop_2_relay.mnx";
+	expect(cache.fetch(relay), "another key is requested");
+	cache.complete(relay, false);
+	expect(!cache.holds(relay) && cache.fetch(relay), "an end with nothing stored is requested again");
+	cache.clear();
+	expect(cache.fetch(url), "the list's free forgets every key");
+	return g_fail == 0;
+}
+
+// A page's IB3_TEMPLATE as the menu browser's parser reads it.
+// [orig: the IB3_TEMPLATE handler @0x6558C0; CUIHTMLParser_ParseTag @0x655E20]
+static bool test_page_template_file() {
+	expect(!nw::page_template_file("<HTML><HEAD></HEAD></HTML>").has_value(), "no template");
+	expect(nw::page_template_file("<IB3_TEMPLATE file=\"jop_2_login.mnx\">").value_or("") ==
+	               "jop_2_login.mnx",
+	       "the FILE attribute, case-insensitively");
+	expect(nw::page_template_file("<IB3_TEMPLATE FILE=a.mnx><IB3_TEMPLATE><ib3_template file='b.mnx'>")
+	                       .value_or("") == "b.mnx",
+	       "the last template with a FILE wins; one without leaves it");
+	expect(nw::page_template_file("<IB3_TEMPLATE file=\"a.mnx\"></IB3_TEMPLATE>").value_or("") ==
+	               "a.mnx",
+	       "a closing tag changes nothing");
+	expect(nw::page_template_file("<IB3_TEMPLATE file>").value_or("x").empty(),
+	       "a FILE with no value names the empty reference");
+	return g_fail == 0;
+}
+
+static nw::LobbyHttpContext templated_ctx() {
+	nw::LobbyHttpContext c;
+	c.title = &kJo;
+	c.gate_tag = c.title->gate_tag;
+	c.startup_url = "http://[domainname]/nwprepare.dll?ver1=[VER1]&gt=[GT]&url=jop_2_start.htm";
+	c.web_domain = "gs.novaworld.net";
+	c.locale = "en_US";
+	return c;
+}
+
+// The service's pages (apps/novaworld_web/templates): the start page's refresh to NWStart, the
+// login page's form and template, the relay page's, the main page's @GSB_SERVER@ and template.
+static const std::string kStartPage =
+		"<HTML><HEAD><META HTTP-EQUIV=\"refresh\" CONTENT=\"0;URL=NWStart.dll?MSGBASE=jop_2_msg.htm"
+		"&IN=jop_2_main.htm&OUT=jop_2_login.htm\"></HEAD></HTML>";
+static const std::string kLoginPage =
+		"<HTML><BODY><FORM ACTION=\"NWLogin.dll\" METHOD=\"POST\"></FORM>"
+		"<IB3_TEMPLATE file=\"jop_2_login.mnx\"></BODY></HTML>";
+static const std::string kRelayPage =
+		"<HTML><HEAD><META http-equiv=\"refresh\" CONTENT=0;URL=\"NWLogin.dll\"></HEAD>"
+		"<IB3_TEMPLATE file=\"jop_2_relay.mnx\"></HTML>";
+static const std::string kMainPage =
+		"<HTML><IB3_GLOBAL name=\"@HOST_URL@\">http://gs.novaworld.net/nwhost.dll</IB3_GLOBAL>"
+		"<IB3_SUBST name=\"@GSB_SERVER@\">http://gs.novaworld.net/jop_2.gsb</IB3_SUBST>"
+		"<IB3_TEMPLATE file=\"jop_2_main.mnx\"></HTML>";
+
+// The login's template legs, per process: each page's template is requested ahead of the leg's
+// next request, and only the first time the process meets it (the LN S1 / S1b / S1c / S1d retail
+// logins: login.mnx after NWStart's answer, relay.mnx after the POST's and ahead of the first poll,
+// none after the second relay page, main.mnx after the last poll's and ahead of the GSB).
+static bool test_login_template_legs() {
+	nw::process_browser_cache().clear();
+	nw::LobbyHttpFlow f;
+	f.set_context(templated_ctx());
+	nw::LoginResult r = f.login("p", "s");
+	r = f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), bytes(kStartPage));
+	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest && contains(r.request.url, "/NWStart.dll?"),
+	            "prepare -> NWStart"))
+		return false;
+	r = f.on_login_response(true, 200, set_cookie("USEJUNCTION=0"), bytes(kLoginPage));
+	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest &&
+	                    r.request.method == nw::HttpMethod::Get &&
+	                    r.request.url == "http://gs.novaworld.net/jop_2_login.mnx" && r.request.cache_bust,
+	            "the login page's template goes ahead of the post, with its nocachefix pair"))
+		return false;
+	r = f.on_login_response(true, 200, set_cookie("YOURIP=10.0.0.9"), bytes("<IB3 mnx>"));
+	expect(f.cookies().find("YOURIP") != nullptr, "the template's answer sets its cookies");
+	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest && r.request.method == nw::HttpMethod::Post,
+	            "the template's answer releases the post"))
+		return false;
+	r = f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t1"), bytes(kRelayPage));
+	expect(r.kind == nw::LoginResult::Kind::NeedRequest &&
+	               r.request.url == "http://gs.novaworld.net/jop_2_relay.mnx",
+	       "the relay page's template goes ahead of its refresh");
+	r = f.on_login_response(true, 200, {}, bytes("<IB3 relay mnx>"));
+	expect(r.kind == nw::LoginResult::Kind::NeedRequest &&
+	               r.request.url == "http://gs.novaworld.net/NWLogin.dll",
+	       "then the refresh");
+	r = f.on_login_response(true, 200, {}, bytes(kRelayPage));
+	expect(r.kind == nw::LoginResult::Kind::NeedRequest &&
+	               r.request.url == "http://gs.novaworld.net/NWLogin.dll",
+	       "the second relay page's template is the cache's: the refresh goes at once");
+	r = f.on_login_response(true, 200, {"Set-Cookie: NWHANDLE=ljim", "Set-Cookie: PCID=42"},
+			bytes(kMainPage));
+	expect(r.kind == nw::LoginResult::Kind::NeedRequest &&
+	               r.request.url == "http://gs.novaworld.net/jop_2_main.mnx" && f.login_active(),
+	       "the main page's template goes ahead of the login's success");
+	r = f.on_login_response(true, 200, {}, bytes("<IB3 main mnx>"));
+	if (!expect(r.kind == nw::LoginResult::Kind::Succeeded && r.nwhandle == "ljim" && !f.login_active(),
+	            "the template's answer releases the success"))
+		return false;
+
+	// A later login in the process: every template is the cache's.
+	nw::LobbyHttpFlow g;
+	g.set_context(templated_ctx());
+	g.login("p", "s");
+	g.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), bytes(kStartPage));
+	r = g.on_login_response(true, 200, {}, bytes(kLoginPage));
+	expect(r.kind == nw::LoginResult::Kind::NeedRequest && r.request.method == nw::HttpMethod::Post,
+	       "a stored login template: NWStart's answer -> the post at once");
+
+	// A template whose answer stored nothing is requested again by the next page naming it.
+	nw::process_browser_cache().clear();
+	nw::LobbyHttpFlow k;
+	k.set_context(templated_ctx());
+	k.login("p", "s");
+	k.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), bytes(kStartPage));
+	k.on_login_response(true, 200, {}, bytes(kLoginPage));
+	r = k.on_login_response(true, 404, {}, {});
+	expect(r.kind == nw::LoginResult::Kind::NeedRequest && r.request.method == nw::HttpMethod::Post,
+	       "a failed template answer still releases the post");
+	expect(!nw::process_browser_cache().holds("http://gs.novaworld.net/jop_2_login.mnx"),
+	       "and leaves nothing held");
+	nw::process_browser_cache().clear();
+	return g_fail == 0;
+}
+
+// The NovaWorld menu's re-entry (LobbyHttpFlow::enter): the startup URL, the start page's refresh to
+// NWStart, whose page is the lobby (a remembered login; its template the process holds, so no
+// request) or the sign-in page, whose Login then posts its form at once. The LN S1 / S1b / S1d
+// retail re-entries: nwprepare, NWStart answering the main page, no main.mnx, the GSB.
+// [orig: UI_EnterNovaWorldMenu @0x5588F0; UI_ProcessLANSessionStateMachine @0x558DE0 - state 9,
+//  UIScene_OpenUrl called @0x5592ED]
+static bool test_enter_reentry() {
+	nw::process_browser_cache().clear();
+	nw::process_browser_cache().fetch("http://gs.novaworld.net/jop_2_main.mnx");
+	nw::process_browser_cache().complete("http://gs.novaworld.net/jop_2_main.mnx", true);
+	nw::LobbyHttpFlow f;
+	f.set_context(templated_ctx());
+	nw::EnterResult r = f.enter();
+	if (!expect(r.kind == nw::EnterResult::Kind::NeedRequest && r.request.cache_bust &&
+	                    r.request.url ==
+	                            "http://gs.novaworld.net/nwprepare.dll?ver1=3&gt=jop:cus2&url=jop_2_start.htm",
+	            "enter() opens the resolved startup URL"))
+		return false;
+	expect(f.enter().kind == nw::EnterResult::Kind::Failed, "one entry at a time");
+	r = f.on_enter_response(true, 200,
+			{"Set-Cookie: EPASK=" + make_epask_cookie(), "Set-Cookie: NWHANDLE=ljim"}, bytes(kStartPage));
+	if (!expect(r.kind == nw::EnterResult::Kind::NeedRequest &&
+	                    r.request.url == "http://gs.novaworld.net/NWStart.dll?MSGBASE=jop_2_msg.htm"
+	                                     "&IN=jop_2_main.htm&OUT=jop_2_login.htm",
+	            "the start page's refresh to NWStart"))
+		return false;
+	r = f.on_enter_response(true, 200, set_cookie("USEJUNCTION=0"), bytes(kMainPage));
+	expect(r.kind == nw::EnterResult::Kind::Lobby && r.nwhandle == "ljim" && !f.enter_active(),
+	       "NWStart's lobby page, its template the process's: the lobby at once");
+	expect(f.browser_global("@HOST_URL@") != nullptr, "the lobby page's globals are kept");
+
+	// The service remembers no login: the sign-in page, its template requested first.
+	r = f.enter();
+	r = f.on_enter_response(true, 200, {}, bytes(kStartPage));
+	r = f.on_enter_response(true, 200, {}, bytes(kLoginPage));
+	expect(r.kind == nw::EnterResult::Kind::NeedRequest &&
+	               r.request.url == "http://gs.novaworld.net/jop_2_login.mnx",
+	       "the sign-in page's template goes first");
+	r = f.on_enter_response(true, 200, {}, bytes("<IB3 login mnx>"));
+	if (!expect(r.kind == nw::EnterResult::Kind::SignIn, "then the sign-in page")) return false;
+	const nw::LoginResult post = f.login("p", "s");
+	expect(post.kind == nw::LoginResult::Kind::NeedRequest && post.request.method == nw::HttpMethod::Post &&
+	               post.request.url == "http://gs.novaworld.net/NWLogin.dll",
+	       "the sign-in page's Login posts its form, with no second open");
+
+	// A page that is neither fails with its message.
+	r = f.enter();
+	r = f.on_enter_response(true, 200, {}, bytes(kStartPage));
+	r = f.on_enter_response(true, 200, {},
+			bytes("<IB3_SUBST name=\"@GENERIC@\">NovaWorld is down for maintenance.</IB3_SUBST>"));
+	expect(r.kind == nw::EnterResult::Kind::Failed && r.reason == "NovaWorld is down for maintenance.",
+	       "a message page fails the entry with its text");
+	nw::process_browser_cache().clear();
+	return g_fail == 0;
+}
+
+// The connect's identity set rides the session's first request, whichever leg sends it (the
+// entry's at the validated connect, D-NET-NEW-L9-38), and is seeded once: a later entry or login
+// finds the jar as the pages left it (D-NET-NEW-L9-26).
+// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - USEJUNCTION @0x4CF74E;
+//  CNapiGameSession_OnNovaWorldConnected @0x4D1570 - NWUID (the call @0x4D16A9)]
+static bool test_enter_seeds_identity_once() {
+	nw::process_browser_cache().clear();
+	nw::LobbyHttpContext c = templated_ctx();
+	c.use_junction = 1;
+	c.identity_vars = {{"NWUID", ""}, {"MyInstalledExpBits", "3"}};
+	c.server_nwuid = "ABCDEF0123456789";
+	nw::LobbyHttpFlow f;
+	f.set_context(c);
+	nw::EnterResult r = f.enter();
+	const std::vector<std::string> want = {"Cookie: USEJUNCTION=1;", "Cookie: JUNCTIONCODE=;",
+			"Cookie: NWUID=ABCDEF0123456789;", "Cookie: MyInstalledExpBits=3;"};
+	expect(r.request.headers.size() == 8 &&
+	               std::vector<std::string>(r.request.headers.begin() + 4, r.request.headers.end()) == want,
+	       "the first entry's request carries the identity set, in its order");
+	r = f.on_enter_response(true, 200, set_cookie("USEJUNCTION=0"), bytes(kStartPage));
+	r = f.on_enter_response(true, 200, {}, bytes(kLoginPage));
+	r = f.on_enter_response(true, 200, {}, bytes("<IB3 login mnx>"));
+	expect(r.kind == nw::EnterResult::Kind::SignIn, "the sign-in page");
+	r = f.enter();
+	const std::string *junction = f.cookies().find("USEJUNCTION");
+	expect(junction != nullptr && *junction == "0", "a later entry keeps the page's USEJUNCTION");
+
+	// The LN S1b retail joiner's gate form (the junction word 0, the extended metrics on): its first
+	// request, the first entry's nwprepare, carries the locale three, MyInstalledExpBits and the
+	// connect's six, in that order, with no junction pair.
+	// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the junction word's test @0x4CF71B, the
+	//  +0x33C test @0x4CF773, CountryName @0x4CF796, MyInstalledExpBits @0x4CF811]
+	{
+		nw::LobbyHttpContext s = templated_ctx();
+		s.use_junction = 0;
+		s.extended_metrics = true;
+		s.identity_vars = nw::make_lobby_identity_vars(nw::LobbyIdentityParams{});
+		s.server_nwuid = "ABCDEF0123456789";
+		nw::LobbyHttpFlow g;
+		g.set_context(s);
+		const nw::EnterResult first = g.enter();
+		std::vector<std::string> names;
+		for (std::size_t i = 4; i < first.request.headers.size(); ++i) {
+			const std::string &line = first.request.headers[i];
+			const std::size_t eq = line.find('=');
+			names.push_back(line.substr(8, eq == std::string::npos ? std::string::npos : eq - 8));
+		}
+		expect(names == std::vector<std::string>{"CountryName", "Language", "TimeZoneBias",
+		                        "MyInstalledExpBits", "NWUID", "NWCDKIID", "NWCDKIIDEXP1", "NWPSSK",
+		                        "NWUSID", "NWHWI"},
+		       "S1b's form: the locale three first, no junction pair");
+	}
+	nw::process_browser_cache().clear();
+	return g_fail == 0;
+}
+
+// D-NET-NEW-L9-45: a page's IB3_FORM inputs as the menu browser's form post sends them. Each INPUT
+// inside an IB3_FORM of the form is linked at the head of the form's list (the page's last input
+// first); an INPUT outside one, or after its closing tag, is none; a commented INPUT is the META
+// element's tag, which ends at the INPUT's '>'; an IB3_FORM with no VALUE keeps the form in force.
+// [orig: CUIHTMLParser_ParseTag @0x655E20 - @0x655E83..0x655E9B, @0x655EC4, @0x656049, @0x65605C;
+//  CUIHTMLParser_HandleIb3FormTag @0x655960 - @0x65596B, @0x6559A1; XML_PropertyNodeAdd @0x655C60 -
+//  @0x655C77, @0x655DE5 / @0x655DE9; UI_ProcessScriptBuffer @0x63CBE0 - sprintf called @0x63CE1D]
+static bool test_ib3_form_inputs() {
+	using Inputs = std::vector<std::pair<std::string, std::string>>;
+	const Inputs live = nw::ib3_form_inputs(jo_sign_in_page("1"), 1);
+	expect(live == Inputs{{"rememberlogin", "1"}, {"pfid", "28"},
+	                       {"needtoagree", "jop_2_needtoagree.htm"},
+	                       {"nodb", "jop_2_nodb.htm"}, {"relay", "jop_2_relay.htm"},
+	                       {"msgbase", "jop_2_msg.htm"}, {"enterkey", "jop_2_key.htm"},
+	                       {"failure", "jop_2_login.htm"}, {"success", "jop_2_main.htm"}},
+	       "the live page's form: its inputs last to first, the credentials outside it none");
+	expect(nw::ib3_form_inputs(jo_sign_in_page("1"), 2).empty(), "the page has no form 2");
+	expect(nw::ib3_form_inputs(kDfx2SignInPage, 1).front() ==
+	               std::pair<std::string, std::string>("charglsvssrequest", "[dfx]kills") &&
+	               nw::ib3_form_inputs(kDfx2SignInPage, 1).size() == 10,
+	       "DFX2's form: its commented rememberlogindata is none, charglsvssrequest first");
+	expect(nw::ib3_form_inputs("<IB3_FORM value=\"1\"><INPUT name=a VALUE=1></IB3_FORM>"
+	                           "<INPUT name=b VALUE=2><ib3_form VALUE=1><input NAME=c value=3>", 1) ==
+	               Inputs{{"c", "3"}, {"a", "1"}},
+	       "a closing IB3_FORM ends the form; a later one of the same form heads the list");
+	expect(nw::ib3_form_inputs("<IB3_FORM value=\"2\"><INPUT name=a VALUE=1><IB3_FORM>"
+	                           "<INPUT name=b VALUE=2><IB3_FORM value=1><INPUT name=c VALUE=3>", 2) ==
+	               Inputs{{"b", "2"}, {"a", "1"}},
+	       "an IB3_FORM with no VALUE keeps the form in force");
+	expect(nw::ib3_form_inputs("<IB3_FORM value=\"1\"><INPUT name=a><INPUT VALUE=v>", 1) ==
+	               Inputs{{"(null)", "v"}, {"a", "(null)"}},
+	       "an attribute the input lacks reads as sprintf writes a null string");
+	return g_fail == 0;
+}
+
+// D-NET-NEW-L9-45: the sign-in POST's hidden values are the page's, never a constant: the live
+// page's rememberlogin "1" posts "1" (as retail's 9 of 9 LN POSTs do), a page's "0" posts "0", and
+// DFX2's form posts its charglsvssrequest right after the template's edits.
+// [orig: CWnd_BuildFormFieldQueryString @0x657760 - @0x6577AE..0x6577BE, EPASK_EncryptField called
+//  @0x657980, @0x657A80..0x657A97]
+static bool test_sign_in_post_is_the_pages_form() {
+	nw::process_browser_cache().clear();
+	// The entry lands on the sign-in page: its Login posts the page's form.
+	nw::LobbyHttpFlow f;
+	f.set_context(templated_ctx());
+	f.enter();
+	f.on_enter_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), bytes(kStartPage));
+	nw::EnterResult entered = f.on_enter_response(true, 200, {}, bytes(jo_sign_in_page("1")));
+	if (!expect(entered.kind == nw::EnterResult::Kind::SignIn, "the entry lands on the sign-in page"))
+		return false;
+	nw::LoginResult r = f.login("p", "s");
+	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest && r.request.method == nw::HttpMethod::Post,
+	            "Login posts the page's form"))
+		return false;
+	expect(posted_plaintext(form_fields(r.request.body), "rememberlogin") == "1",
+	       "the live page's rememberlogin posts \"1\"");
+
+	// The login's own NWStart leg: the page it answers is the form posted.
+	nw::LobbyHttpFlow g;
+	g.set_context(templated_ctx());
+	g.login("p", "s");
+	g.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), bytes(kStartPage));
+	r = g.on_login_response(true, 200, {}, bytes(jo_sign_in_page("0")));
+	expect(r.kind == nw::LoginResult::Kind::NeedRequest &&
+	               posted_plaintext(form_fields(r.request.body), "rememberlogin") == "0",
+	       "a page whose rememberlogin is \"0\" posts \"0\"");
+
+	// DFX2: the page's charglsvssrequest follows the template's edits.
+	nw::LobbyHttpContext c = concrete_ctx();
+	c.title = nw::title_identity(nw::gameprofile::GAME_DFX2);
+	c.gate_tag = c.title->gate_tag;
+	nw::LobbyHttpFlow d;
+	d.set_context(c);
+	d.login("p", "s");
+	r = d.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), bytes(kDfx2SignInPage));
+	const auto fields = form_fields(r.request.body);
+	expect(field_names(fields) ==
+	               std::vector<std::string>{"EPASK", "NAME", "PASSWORD", "rememberlogindata",
+	                       "charglsvssrequest", "rememberlogin", "pfid", "needtoagree", "nodb", "relay",
+	                       "msgbase", "enterkey", "failure", "success"},
+	       "DFX2's post: the template's edits, then its form's inputs last to first");
+	expect(posted_plaintext(fields, "charglsvssrequest") == "[dfx]kills" &&
+	               posted_plaintext(fields, "pfid") == "38" &&
+	               posted_plaintext(fields, "enterkey") == "dfx2_0_term.htm",
+	       "DFX2's hidden values are its page's");
+	nw::process_browser_cache().clear();
+	return g_fail == 0;
+}
+
+// D-NET-NEW-L9-51: the remembered login. With game.cfg's rememberlogin set, the sign-in page's
+// activation decodes the jar's PERSISTENTREMEMBERLOGINDATA under the client's key chain into the
+// account name and a second string, fills NAME with the name and the hidden rememberlogindata edit
+// with the cookie as it stands; an untouched Login posts NAME, an empty PASSWORD and
+// rememberlogindata, each EPASK-encrypted (LN-s6's S3 re-login: PASSWORD 0 characters,
+// rememberlogindata 1152 A-P characters decrypting to the cookie's 144). A touched field clears
+// the fill, so typed credentials post an empty rememberlogindata.
+// [orig: UI_LoadPersistentLoginCredentials @0x557330 - @0x557344, @0x557366, @0x55738F,
+//  @0x5573C5, @0x557413; UI_ClearRememberedLoginFill @0x557480 - @0x5574CC;
+//  NapiNP_DecodeEncryptedKeyValue @0x619470; CWnd_BuildFormFieldQueryString @0x657760 - the
+//  value's EPASK_EncryptField called @0x657980]
+static bool test_remembered_login() {
+	nw::process_browser_cache().clear();
+	const std::string account = "ACCT";
+	std::vector<uint8_t> plain(account.begin(), account.end());
+	plain.push_back(0);
+	for (char c : std::string("second-string")) plain.push_back(static_cast<uint8_t>(c));
+	plain.push_back(0);
+	const std::string cookie = nw::encode_key_chain(plain, nw::kRememberedLoginKeyChain);
+
+	const auto signed_in_page = [&](nw::LobbyHttpFlow &f, const std::string &remembered) {
+		f.enter();
+		std::vector<std::string> set = {"Set-Cookie: EPASK=" + make_epask_cookie()};
+		if (!remembered.empty()) set.push_back("Set-Cookie: persistentrememberlogindata=" + remembered);
+		f.on_enter_response(true, 200, set, bytes(kStartPage));
+		return f.on_enter_response(true, 200, {}, bytes(jo_sign_in_page("1"))).kind ==
+				nw::EnterResult::Kind::SignIn;
+	};
+	nw::LobbyHttpContext ctx = templated_ctx();
+	ctx.remember_login = true;
+
+	// The fill, then an untouched Login.
+	nw::LobbyHttpFlow f;
+	f.set_context(ctx);
+	if (!expect(signed_in_page(f, cookie), "remembered: the entry lands on the sign-in page")) return false;
+	expect(f.remembered_login_name() == account && f.has_remembered_login(),
+	       "the activation decodes the cookie (found case-insensitively): the NAME edit's name, the fill");
+	nw::LoginResult r = f.login_remembered();
+	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest && r.request.method == nw::HttpMethod::Post,
+	            "the untouched Login posts the form"))
+		return false;
+	const auto fields = form_fields(r.request.body);
+	expect(field_names(fields) ==
+	               std::vector<std::string>{"EPASK", "NAME", "PASSWORD", "rememberlogindata",
+	                       "rememberlogin", "pfid", "needtoagree", "nodb", "relay", "msgbase",
+	                       "enterkey", "failure", "success"},
+	       "the remembered post keeps the form's field order");
+	std::string password_cipher;
+	for (const auto &field : fields)
+		if (field.first == "PASSWORD") password_cipher = field.second;
+	expect(posted_plaintext(fields, "NAME") == account && password_cipher.empty(),
+	       "NAME is the remembered name and PASSWORD is empty (0 characters)");
+	expect(posted_plaintext(fields, "rememberlogindata") == cookie,
+	       "rememberlogindata is the cookie, EPASK-encrypted (8 A-P characters a byte)");
+	for (const auto &field : fields)
+		if (field.first == "rememberlogindata")
+			expect(field.second.size() == 8 * cookie.size(), "8 A-P characters per cookie byte");
+
+	// A touched field clears the fill: typed credentials post an empty rememberlogindata.
+	nw::LobbyHttpFlow t;
+	t.set_context(ctx);
+	signed_in_page(t, cookie);
+	t.clear_remembered_login();
+	expect(!t.has_remembered_login() && t.remembered_login_name() == account,
+	       "the touch clears the rememberlogindata edit, the NAME edit keeps its name");
+	expect(t.login_remembered().kind == nw::LoginResult::Kind::Failed,
+	       "with the fill cleared there is no remembered Login");
+	nw::LobbyHttpFlow typed;
+	typed.set_context(ctx);
+	signed_in_page(typed, cookie);
+	r = typed.login("ACCT", "pw");
+	std::string typed_fill = "<absent>";
+	for (const auto &field : form_fields(r.request.body))
+		if (field.first == "rememberlogindata") typed_fill = field.second;
+	expect(r.kind == nw::LoginResult::Kind::NeedRequest && typed_fill.empty() &&
+	               posted_plaintext(form_fields(r.request.body), "PASSWORD") == "pw",
+	       "typed credentials touched the fields: rememberlogindata posts empty");
+
+	// No fill: rememberlogin clear, a cookie that does not decode, no cookie.
+	nw::LobbyHttpContext off = templated_ctx();
+	nw::LobbyHttpFlow n1;
+	n1.set_context(off);
+	signed_in_page(n1, cookie);
+	expect(!n1.has_remembered_login() && n1.remembered_login_name().empty(),
+	       "rememberlogin clear: no fill");
+	nw::LobbyHttpFlow n2;
+	n2.set_context(ctx);
+	signed_in_page(n2, nw::encode_key_chain(plain, "OTHER:KEYS"));
+	expect(!n2.has_remembered_login(), "a cookie that does not decode under the chain: no fill");
+	nw::LobbyHttpFlow n3;
+	n3.set_context(ctx);
+	signed_in_page(n3, "");
+	expect(!n3.has_remembered_login() &&
+	               n3.login_remembered().kind == nw::LoginResult::Kind::Failed,
+	       "no cookie: no fill, no remembered Login");
+	nw::process_browser_cache().clear();
+	return g_fail == 0;
+}
+
+// D-NET-NEW-L9-55: the sign-in page around the remembered login.
+// - The page shown again after a failed login re-runs the fill (the template's ACTIVATE), and its
+//   unclicked Login posts the fill through the start page when no page is shown.
+// - A page whose submit is LOGIN (DFX2's) has it enabled only with a NAME and a PASSWORD or the
+//   fill's placeholder; JO's ACCEPT is never gated.
+// - A LOGIN press marks the flag until the home page shows: a fill before it (the page shown again
+//   after a failed login) fills the name alone and blanks the jar's cookie (so later Cookie
+//   var-lists carry it empty); the main page a login's success lands on, or an entry's lobby
+//   page, clears it, so the sign-in page shown after it fills in full. JO's ACCEPT marks nothing.
+// [orig: UI_ProcessScriptBuffer @0x63CBE0 - the ACTIVATE event called @0x63D3B9;
+//  UI_LoadPersistentLoginCredentials @0x557330 - @0x5573C7, AddFormField called @0x557421;
+//  UI_ValidateLoginFields @0x557230 - @0x5572EC, @0x557300, @0x557304;
+//  UI_MarkLoginButtonPressed @0x557520; UI_SaveCookieJarOnHomeTabs @0x557530 (ENABLE_HOME_TABS,
+//  registered @0x559873) - g_LoginButtonPressed = 0 @0x557540]
+static bool test_sign_in_refill_gate_login_flag() {
+	nw::process_browser_cache().clear();
+	const std::string account = "ACCT";
+	std::vector<uint8_t> plain(account.begin(), account.end());
+	plain.push_back(0);
+	plain.push_back(static_cast<uint8_t>('x'));
+	plain.push_back(0);
+	const std::string cookie = nw::encode_key_chain(plain, nw::kRememberedLoginKeyChain);
+	const auto enter_sign_in = [&](nw::LobbyHttpFlow &f, const std::string &page) {
+		f.enter();
+		f.on_enter_response(true, 200,
+				{"Set-Cookie: EPASK=" + make_epask_cookie(),
+				 "Set-Cookie: PERSISTENTREMEMBERLOGINDATA=" + cookie},
+				bytes(kStartPage));
+		const nw::EnterResult entered = f.on_enter_response(true, 200, {}, bytes(page));
+		return entered.kind == nw::EnterResult::Kind::SignIn;
+	};
+	const auto jar_value = [](const nw::LobbyHttpFlow &f, const std::string &name) {
+		for (const auto &var : f.session_cookie_vars())
+			if (var.first == name) return var.second;
+		return std::string("<absent>");
+	};
+	nw::LobbyHttpContext jo = templated_ctx();
+	jo.remember_login = true;
+	nw::LobbyHttpContext dfx2 = jo;
+	dfx2.title = nw::title_identity(nw::gameprofile::GAME_DFX2);
+	dfx2.gate_tag = dfx2.title->gate_tag;
+	dfx2.startup_url = "http://[domainname]/nwprepare.dll?gt=[GT]&url=dfx2_0_start.htm";
+
+	// JO: the gate never closes; a failed typed login, the page shown again, the fill re-run.
+	nw::LobbyHttpFlow f;
+	f.set_context(jo);
+	if (!expect(enter_sign_in(f, jo_sign_in_page("1")), "refill: the entry lands on sign-in"))
+		return false;
+	expect(f.sign_in_submit_enabled("", ""), "JO's ACCEPT is not gated, empty fields included");
+	nw::LoginResult r = f.login("ACCT", "wrong");
+	expect(r.kind == nw::LoginResult::Kind::NeedRequest && !f.has_remembered_login(),
+	       "the typed login posts with the fill cleared");
+	r = f.on_login_response(true, 200, {},
+			bytes("<IB3_SUBST name=\"@GENERIC@\">The password is incorrect.</IB3_SUBST>"));
+	expect(r.kind == nw::LoginResult::Kind::Failed, "the post without a session tag fails");
+	f.reshow_sign_in();
+	expect(f.has_remembered_login() && f.remembered_login_name() == account,
+	       "the page shown again re-runs the fill from the jar's cookie");
+	r = f.login_remembered();
+	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest &&
+	                    r.request.method == nw::HttpMethod::Get,
+	            "with no page shown the unclicked Login opens the start page first"))
+		return false;
+	r = f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()),
+			bytes(kStartPage));
+	r = f.on_login_response(true, 200, {}, bytes(jo_sign_in_page("1")));
+	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest &&
+	                    r.request.method == nw::HttpMethod::Post,
+	            "then posts the sign-in page's form"))
+		return false;
+	expect(posted_plaintext(form_fields(r.request.body), "NAME") == account &&
+	               posted_plaintext(form_fields(r.request.body), "rememberlogindata") == cookie,
+	       "the post carries the remembered name and the cookie");
+	expect(jar_value(f, "PERSISTENTREMEMBERLOGINDATA") == cookie,
+	       "JO's ACCEPT marks no LOGIN press: the cookie stays in the jar");
+	f.reshow_sign_in();
+	expect(f.has_remembered_login(), "and a later fill is the full fill");
+
+	// DFX2: the LOGIN gate over the fields and the fill's placeholder.
+	nw::LobbyHttpFlow d;
+	d.set_context(dfx2);
+	if (!expect(enter_sign_in(d, kDfx2SignInPage), "DFX2: the entry lands on the sign-in page"))
+		return false;
+	expect(d.has_remembered_login(), "DFX2's page fills the remembered login");
+	expect(d.sign_in_submit_enabled("ACCT", ""), "a NAME with the placeholder shown enables LOGIN");
+	expect(!d.sign_in_submit_enabled("", ""), "no NAME: LOGIN disabled");
+	d.clear_remembered_login();
+	expect(!d.sign_in_submit_enabled("ACCT", ""),
+	       "the click hid the placeholder: a NAME alone leaves LOGIN disabled");
+	expect(d.sign_in_submit_enabled("ACCT", "pw") && !d.sign_in_submit_enabled("", "pw"),
+	       "a NAME and a PASSWORD enable it");
+
+	// DFX2: a LOGIN press marks the flag; the next fill fills the name and blanks the jar's cookie.
+	r = d.login("ACCT", "wrong");
+	expect(r.kind == nw::LoginResult::Kind::NeedRequest, "the LOGIN press posts");
+	expect(jar_value(d, "PERSISTENTREMEMBERLOGINDATA") == cookie,
+	       "the press itself leaves the jar alone (the flag acts at the next fill)");
+	d.on_login_response(true, 200, {},
+			bytes("<IB3_SUBST name=\"@GENERIC@\">The password is incorrect.</IB3_SUBST>"));
+	d.reshow_sign_in();
+	expect(d.remembered_login_name() == account && !d.has_remembered_login(),
+	       "after a LOGIN press the fill sets the name only: no placeholder, no rememberlogindata");
+	expect(jar_value(d, "PERSISTENTREMEMBERLOGINDATA").empty(),
+	       "and blanks the jar's PERSISTENTREMEMBERLOGINDATA: later Cookie lists carry it empty");
+	expect(!d.sign_in_submit_enabled("ACCT", ""),
+	       "with no placeholder a NAME alone keeps LOGIN disabled");
+	d.reshow_sign_in();
+	expect(d.remembered_login_name().empty() && !d.has_remembered_login(),
+	       "the blanked cookie decodes to nothing at the fill after");
+
+	// DFX2: a LOGIN press whose login succeeds lands on the main page, whose ENABLE_HOME_TABS
+	// clears the mark: a later entry's sign-in page fills in full and the jar keeps the cookie.
+	nw::LobbyHttpFlow s;
+	s.set_context(dfx2);
+	if (!expect(enter_sign_in(s, kDfx2SignInPage), "home: the entry lands on the sign-in page"))
+		return false;
+	r = s.login("ACCT", "pw");
+	r = s.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t1"), relay_to("NWLogin.dll"));
+	r = s.on_login_response(true, 200, {"Set-Cookie: NWHANDLE=ACCT", "Set-Cookie: PCID=42"},
+			bytes("<HTML></HTML>"));
+	if (!expect(r.kind == nw::LoginResult::Kind::Succeeded, "the LOGIN press's login succeeds"))
+		return false;
+	if (!expect(enter_sign_in(s, kDfx2SignInPage), "a later entry lands on the sign-in page"))
+		return false;
+	expect(s.has_remembered_login() && s.remembered_login_name() == account,
+	       "the success's main page cleared the mark: the fill is the full fill");
+	expect(jar_value(s, "PERSISTENTREMEMBERLOGINDATA") == cookie, "and the jar keeps the cookie");
+	expect(s.sign_in_submit_enabled("ACCT", ""), "the placeholder shows: a NAME enables LOGIN");
+
+	// DFX2: a failed LOGIN press, then an entry the service answers with its lobby page: the lobby
+	// clears the mark too.
+	const std::string lobby_page =
+			"<HTML><IB3_SUBST name=\"@GSB_SERVER@\">http://gs.novaworld.net/dfx2_0.gsb</IB3_SUBST></HTML>";
+	nw::LobbyHttpFlow l;
+	l.set_context(dfx2);
+	if (!expect(enter_sign_in(l, kDfx2SignInPage), "lobby: the entry lands on the sign-in page"))
+		return false;
+	l.login("ACCT", "wrong");
+	l.on_login_response(true, 200, {},
+			bytes("<IB3_SUBST name=\"@GENERIC@\">The password is incorrect.</IB3_SUBST>"));
+	l.enter();
+	l.on_enter_response(true, 200, set_cookie("NWHANDLE=ACCT"), bytes(kStartPage));
+	if (!expect(l.on_enter_response(true, 200, {}, bytes(lobby_page)).kind ==
+	                    nw::EnterResult::Kind::Lobby,
+	            "the next entry lands on the lobby"))
+		return false;
+	enter_sign_in(l, kDfx2SignInPage);
+	expect(l.has_remembered_login() && jar_value(l, "PERSISTENTREMEMBERLOGINDATA") == cookie,
+	       "the lobby page cleared the mark: the sign-in page after it fills in full");
+	nw::process_browser_cache().clear();
+	return g_fail == 0;
+}
+
+// NapiNP_DecodeEncryptedKeyValue: the key to the first NUL, the value past it; -1 for no value or
+// a string over its room. [orig: NapiNP_DecodeEncryptedKeyValue @0x619470 - @0x619552..0x619556,
+//  @0x61956E..0x619570, @0x619598..0x61959C]
+static bool test_decode_key_value() {
+	const std::string chain = nw::kRememberedLoginKeyChain;
+	const auto encoded = [&](const std::string &text) {
+		return nw::encode_key_chain(std::vector<uint8_t>(text.begin(), text.end()), chain);
+	};
+	std::string key, value;
+	expect(nw::decode_key_value(encoded(std::string("name\0value\0", 11)), chain, key, value, 512, 512) &&
+	               key == "name" && value == "value",
+	       "the key to its NUL, the value past it");
+	expect(!nw::decode_key_value(encoded(std::string("name\0", 5)), chain, key, value, 512, 512) &&
+	               key.empty() && value.empty(),
+	       "the key's NUL the payload's last byte: no value, -1");
+	expect(nw::decode_key_value(encoded(std::string("name\0value", 10)), chain, key, value, 512, 512) &&
+	               value == "value",
+	       "a value running to the payload's end reads to it");
+	expect(!nw::decode_key_value(encoded(std::string("name\0value\0", 11)), chain, key, value, 4, 512),
+	       "a key over its room (NUL included): -1");
+	expect(!nw::decode_key_value(encoded(std::string("name\0value\0", 11)), chain, key, value, 512, 5),
+	       "a value over its room: -1");
+	expect(!nw::decode_key_value("ABCQ", chain, key, value, 512, 512), "a decode failure: -1");
+	return g_fail == 0;
+}
+
 int main() {
+	test_gate_reply_jar_fields();
+	test_meta_refresh_walk();
+	test_joi_page_refresh();
+	test_browser_cache_bust();
 	test_host_resolves();
 	test_url_builders();
 	test_login_success_concrete();
@@ -498,6 +1667,19 @@ int main() {
 	test_login_failures();
 	test_gsb_request_and_parse();
 	test_join_resolves();
+	test_browser_cache_rule();
+	test_page_template_file();
+	test_login_template_legs();
+	test_host_leg_origin();
+	test_host_leg_cookies();
+	test_browser_request_host();
+	test_enter_reentry();
+	test_enter_seeds_identity_once();
+	test_ib3_form_inputs();
+	test_sign_in_post_is_the_pages_form();
+	test_remembered_login();
+	test_sign_in_refill_gate_login_flag();
+	test_decode_key_value();
 	std::fprintf(stderr, g_fail == 0 ? "OK\n" : "FAILED (%d)\n", g_fail);
 	return g_fail == 0 ? 0 : 1;
 }

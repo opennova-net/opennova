@@ -10,7 +10,7 @@
 // 119 characters into the newest of 40 raw slots. The status page shows its
 // four newest slots [orig: NapiNPServer_HandleChatMessage — the
 // `!is_mp_session_peer` posts @0x514147..0x51415b and their siblings in each
-// channel arm; Chat_SendTeamMessage @0x49aa2a; Chat_DispatchToChannel
+// channel arm; Chat_SendGlobalMessage @0x49aa2a; Chat_DispatchToChannel
 // @0x42b910 -> Chat_AddMessageChannel1 @0x4985d0, the raw shift
 // @0x4985d7..0x4985f4 and the 119-byte copy @0x49861e..0x498654;
 // HUD_DrawServerConsoleLines @0x5ba0bd reads the CHAT raw slots 3..0 on a
@@ -22,7 +22,7 @@
 // to every in-match slot and posts the line to the host's own CHAT ring in
 // white. Every other talk row queues a C2S 0x0D on the local client
 // connection, which such a host never creates, so it sends nothing
-// [orig: Chat_SendTeamMessage (IDB misnomer — the GLOBAL sender) @0x49a900 —
+// [orig: Chat_SendGlobalMessage @0x49a900 —
 // `is_mp_session_peer` @0x49a980, the authority arm @0x49a9da..0x49aa2a;
 // CNapiNetwork_QueueReliableMessage @0x4c4fa0 no-ops without ctx+0xE60, which
 // CNapiGameSession_CreateSession @0x4c9b6a..0x4c9b9c creates only for an
@@ -30,17 +30,24 @@
 //
 // The /INOUT lines: the protocol's HOST STARTED / HOST STOPPED and its
 // per-connection PLAYER ADDED / PLAYER REMOVED, which retail writes to the
-// protocol's `_inout.txt` log when `/INOUT` armed it; the port emits them on
-// the diagnostic channel (io::logf, kInfo) at the same points (D-NET-356)
+// protocol's `_inout.txt` log only while that log is on, and the log is on only
+// under `/INOUT`, whose switch the socket open hands it (the log's start line
+// then). The log is a NapiLog like the net log: buffered, stamped, flushed
+// from the protocol's pump every 5000 ms, its first flush truncating the file;
+// the protocol's shutdown stops and flushes it (write_inout_line, below; the
+// port keeps each line on the diagnostic channel too).
 // [orig: CNapiNPConnection_LogHostStarted @0x61e6a0 (StartServer @0x62b629),
 // CNapiNPConnection_LogHostStopped @0x61e780 (StopServer @0x62a97b),
 // CNapiNPConnection_LogPlayerAdded @0x61e860 (OnStateChange @0x626204),
 // CNapiNPConnection_LogPlayerRemoved @0x61e940 (TeardownActiveConnection
-// @0x6253d2); the log CNapiLog_Init(protocol + 0xF80, "_inout.txt")
-// @0x625afb, enabled by NapiLog_SetEnabled(dword_B4C688) @0x4c6d15 after
-// the socket opens; `/INOUT` @0x4a743d..0x4a744f].
+// @0x6253d2), each testing the log's on byte (protocol + 0xF8B); the log
+// CNapiLog_Init(protocol + 0xF80, "_inout.txt", 3, 6, 5000) @0x625ae5..0x625b07 (the
+// "_inout.txt" push @0x625afb),
+// enabled by NapiLog_SetEnabled(g_InoutLogEnabled) @0x4c6d02..0x4c6d15 in
+// CNapiNetwork_OpenTransportSocket; `/INOUT` @0x4a743d..0x4a744f].
 
 #include <formats/fnt/fnt.h>
+#include <net/npwire/peer_addr.h> // PeerAddr (the HOST STOPPED line's socket address)
 #include <net/npwire/protocol_message.h>
 #include <runtime/hud/game_text_lookup.h>
 #include <runtime/inmatch/server_files.h>
@@ -167,10 +174,11 @@ void server_console_add(NapiNPServerCtx &ctx, const std::string &text, uint32_t 
 
 // Chat_ClearAllChannels on a host with no client: the raw CHAT ring and its
 // display buffer emptied, which every mission start does once its BMS has
-// loaded (the boot calls it; the other rings it zeroes are a client's).
+// loaded (the boot calls it; the other rings it zeroes are a client's), and a
+// first load again past its sixth server pump (a map change's bring-up calls it).
 // [orig: Chat_ClearAllChannels @0x497D30 (the raw ring 0xB3EA38 and the display
 //  buffer 0xB3FE3C, 0x1400 bytes each, @0x497D3E / @0x497D54), from
-//  Game_StartMission @0x524A10]
+//  Game_StartMission @0x524A10 and @0x52546D]
 void server_console_clear(NapiNPServerCtx &ctx);
 
 // Chat_DispatchToChannel on a host with no client: the channel picks the sink
@@ -194,7 +202,7 @@ std::vector<ServerConsoleLine> server_console_rows(const std::vector<ServerConso
 // in-match slot (send mask 0x80), then the unstripped line to the host's CHAT
 // ring in white — and returns Broadcast. Every other dispatch is Refused (its
 // sender's queue has no connection). `frame` is the per-main-frame counter.
-// [orig: Chat_SendTeamMessage @0x49a900 — the gates @0x49a931, flood
+// [orig: Chat_SendGlobalMessage @0x49a900 — the gates @0x49a931, flood
 //  @0x49a93b, strip @0x49a971, mask 128 @0x49a9f2, NetPacket_WriteTwoBytesAndCString
 //  (.., 255, 10, ..) @0x49aa18, SendFiltered(0x14, 1, 310) @0x49aa1d,
 //  Chat_DispatchToChannel(0xFF, 10, message) @0x49aa2a]
@@ -222,41 +230,52 @@ uint32_t server_console_submit(NapiNPServerCtx &ctx, hud::ChatEntry &entry,
 // The /INOUT lines, with Napi_FormatAddress's "a.b.c.d:port" (retail's
 // "???.???.???.???:?????" when the host has no socket).
 std::string inout_host_line(const NapiNPServerCtx &ctx, bool started);
+// The same over the protocol's socket address then (null: none open) and its session name.
+std::string inout_host_line(const PeerAddr *local_address, const std::string &session_name,
+		bool started);
 std::string inout_player_added_line(const NapiNPConnection &conn);
 std::string inout_player_removed_line(const NapiNPConnection &conn);
+// The same for one half of the listen host's own pair, which our one own node stands for: its
+// client connection (type 2) or the server-side node its own 0x42 created (type 1).
+std::string inout_player_removed_line(const NapiNPConnection &conn, int type);
 
-// THE NET LOG: the protocol manager's NapiLog, which the process creates with
-// its network (buffered, mode 3; a line stamp; a 5000 ms flush interval) and
+// THE NAPI LOG: the buffered text log the network keeps, here two of them: the
+// protocol manager's net log, which the process creates with its network and
 // which only NETLOG, the `/NETLOG` switch and a `_DONETLOG.TXT` in the working
-// directory turn on, naming its file `_NETLOG.TXT`. Nothing in the image writes
-// a line into it but its own start and stop lines: an enable appends
-// "NapiLog Started!", a disable "NapiLog Stopped!", each behind the stamp
-// "yyyy-mm-dd hh:mm:ss: " and followed by CR LF, into the log's buffer. The
-// manager's pump flushes the buffer once 5000 ms have passed since the last
-// flush; the log's first open of the file truncates it, every later one
-// appends, and each flush closes it again; the shutdown stops the log (its
-// stop line when it is on) and flushes.
-// [orig: CNapiNetwork_SetNetLogFile @0x4C69A0 (NapiLog_SetFilename "_NETLOG.TXT",
-//  NapiLog_SetEnabled); NapiNPManager_Init @0x62C4BB..0x62C4D0 (CNapiLog_Init
-//  "netlog.txt", mode 3, flags 6: the stamp 4 and the append-once 2, 5000);
-//  NapiLog_SetEnabled @0x62F2B0; NapiLog_WriteEntry @0x62EE30 (the stamp
-//  "%4.4ld-%2.2ld-%2.2ld %2.2ld:%2.2ld:%2.2ld: " of Napi_GetLocalTime @0x61D160,
-//  NapiBuffer_AppendLine @0x634BB0 and its "\r\n" @0x7C1310);
-//  NapiLog_FlushIfExpired @0x62F2F0 from NapiNPManager_Pump @0x62AC98;
-//  NapiLog_Flush @0x62F1A0; NapiLog_EnsureOpen @0x62EDC0 (NapiFile_Open 0x6A, its
-//  0x20 the truncate, the first time, else 0x4A); NapiLog_Shutdown @0x62F310 from
-//  NapiNPManager_Shutdown @0x62B739; the switch @0x4A7A11..0x4A7A29 and
-//  _DONETLOG.TXT @0x4A7CBC..0x4A7CD3 in Game_ParseCommandLineAndInit]
+// directory turn on, naming its file `_NETLOG.TXT`, and the protocol's
+// `_inout.txt`, which `/INOUT` turns on. Each is mode 3 (buffered) with the
+// line stamp and the truncate-once flags and a 5000 ms flush interval. An
+// enable appends "NapiLog Started!", a disable "NapiLog Stopped!", and a line
+// writer its entry, each behind the stamp "yyyy-mm-dd hh:mm:ss: " and followed
+// by CR LF, into the log's buffer. The pump flushes the buffer once 5000 ms
+// have passed since the last flush; the log's first open of the file truncates
+// it, every later one appends, and each flush closes it again; the shutdown
+// stops the log (its stop line when it is on) and flushes.
+// [orig: CNapiLog_Init @0x62F380 (the mode @0x62F3BA, the stamp flag 4 @0x62F3D5,
+//  the interval @0x62F3DF, the truncate-once flag 2 @0x62F3E7, the first-open
+//  latch @0x62F402); CNapiNetwork_SetNetLogFile @0x4C69A0 (NapiLog_SetFilename
+//  "_NETLOG.TXT", NapiLog_SetEnabled); NapiNPManager_Init @0x62C4BB..0x62C4D0
+//  (CNapiLog_Init "netlog.txt", 3, 6, 5000); NapiNPProtocol_Create
+//  @0x625AE5..0x625B07 ("_inout.txt", 3, 6, 5000); NapiLog_SetEnabled @0x62F2B0;
+//  NapiLog_WriteEntry @0x62EE30 (the stamp "%4.4ld-%2.2ld-%2.2ld %2.2ld:%2.2ld:%2.2ld: "
+//  of Napi_GetLocalTime @0x61D160, NapiBuffer_AppendLine @0x634BB0 and its "\r\n"
+//  @0x7C1310); NapiLog_FlushIfExpired @0x62F2F0 from NapiNPManager_Pump @0x62AC98
+//  and NapiNPProtocol_Pump @0x62A7EA; NapiLog_Flush @0x62F1A0; NapiLog_EnsureOpen
+//  @0x62EDC0 (NapiFile_Open 0x6A, its 0x20 the truncate, the first time, else
+//  0x4A); NapiLog_Shutdown @0x62F310 from NapiNPManager_Shutdown @0x62B739; the
+//  switch @0x4A7A11..0x4A7A29 and _DONETLOG.TXT @0x4A7CBC..0x4A7CD3 in
+//  Game_ParseCommandLineAndInit]
 inline constexpr const char *kNetLogFileName = "_NETLOG.TXT";
 inline constexpr const char *kNetLogArmFileName = "_DONETLOG.TXT";
-inline constexpr uint32_t kNetLogFlushIntervalMs = 5000;
+inline constexpr const char *kInoutLogFileName = "_inout.txt";
+inline constexpr uint32_t kNapiLogFlushIntervalMs = 5000;
 
 // NapiLog_WriteEntry's stamp over local time `t`: "yyyy-mm-dd hh:mm:ss: ".
 std::string napi_log_stamp(std::time_t t);
 
-class NetLog {
+class NapiLog {
 public:
-	explicit NetLog(ServerFileSink &files);
+	NapiLog(ServerFileSink &files, std::string file_name);
 
 	// The stamp text the entries take (napi_log_stamp over the current time by
 	// default); a test pins it.
@@ -265,7 +284,9 @@ public:
 	bool enabled() const { return enabled_; }
 	// NapiLog_SetEnabled: a change of state writes its line; the same state none.
 	void set_enabled(bool on);
-	// NapiLog_FlushIfExpired at the manager's pump, `now_ms` the process clock.
+	// NapiLog_Write: one entry into the buffer (the line writers test enabled()).
+	void write(const std::string &text) { write_entry(text.c_str()); }
+	// NapiLog_FlushIfExpired at the pump, `now_ms` the process clock.
 	void flush_if_expired(uint32_t now_ms);
 	// NapiLog_Flush: the buffer to the file, when it holds anything.
 	void flush(uint32_t now_ms);
@@ -278,12 +299,26 @@ private:
 	void write_entry(const char *text);
 
 	ServerFileSink &files_;
+	std::string file_name_;
 	std::function<std::string()> stamp_;
 	bool enabled_ = false;
 	bool first_open_ = true; // the log's +16: the first open truncates
 	std::string buffer_;
 	uint32_t last_flush_ms_ = 0;
 };
+
+// One /INOUT line: into the protocol's `_inout.txt` log while it is on (the
+// writers' on-byte test), and on the diagnostic channel.
+// [orig: CNapiNPConnection_LogHostStarted @0x61e6a0 — the on byte (this + 0xF8B),
+//  NapiLog_Write(this + 0xF80) @0x61e757; its three siblings alike]
+void write_inout_line(const NapiNPServerCtx &ctx, const std::string &line);
+void write_inout_line(const ServerLogs &logs, const std::string &line);
+
+// The socket open's leg: the protocol's `_inout.txt` log on or off by the
+// /INOUT switch (a change writes its start or stop line).
+// [orig: CNapiNetwork_OpenTransportSocket @0x4C6D02..0x4C6D15 —
+//  NapiLog_SetEnabled(protocol + 0xF80, g_InoutLogEnabled)]
+void open_inout_log(const NapiNPServerCtx &ctx);
 
 // Server_HandleAdminNetlogCommand over one console line: a line of no token is
 // not taken; a line beginning `STAT` is taken whole; a first token NETLOG from
@@ -311,7 +346,7 @@ bool Server_HandleAdminNetlogCommand(NapiNPServerCtx &ctx, const std::string &li
 //  +100360 stamp @0x519A1E..0x519A3C, the copy @0x519A4D..0x519A72,
 //  Server_HandleAdminNetlogCommand @0x519A7B, NetBuffer_WriteString and
 //  SendFiltered(6, 0, 1) to the sender @0x519AB0..0x519AC5;
-//  NapiNPClientMsg_HandleChatCommand @0x432BC0]
+//  NapiNPClientMsg_HandleConsoleEcho @0x432BC0]
 void Server_HandleConsoleCommandMessage(NapiNPServerCtx &ctx, NapiNPConnection &sender,
 		const std::vector<uint8_t> &payload, uint32_t now_ms, std::vector<ProtocolMessage> &replies);
 

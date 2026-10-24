@@ -9,6 +9,7 @@ struct WeatherOscillator;
 }
 
 #include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -140,22 +141,11 @@ public:
 	}
 
 	Error open_file(const String &p_path);
-	// Mounted .3DI loads also feed the retail-compatible network challenge registry.
-	// Foliage definitions pass false: retail marks their shared model-def node and
-	// excludes it from the snapshot built for C2S 0x3D.
-	Error open_from_resource_root(const Ref<ResourceRoot> &p_resource_root,
-			const String &p_name, bool p_include_in_network_challenge = true);
-	// A renderer mesh-cache hit is still a logical model-definition load in the
-	// new mission generation. Recreate retail's sticky foliage mark without
-	// reparsing/rebuilding the cached .3DI.
+	Error open_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name);
 	// A parsed model an embedder holds (the editor's preview of a document as it would
-	// save), its textures read through `p_textures`. Not a mounted load: it registers no
-	// network-challenge model.
+	// save), its textures read through `p_textures`.
 	void open_from_model(const opennova::assets::Model &p_model, const String &p_name,
 			std::shared_ptr<const opennova::TextureFiles> p_textures);
-	static void mark_cached_network_challenge_foliage_model(const String &p_name);
-	static void reset_network_challenge_model_registry();
-	static int64_t network_challenge_model_count();
 
 	bool has_document() const;
 	String get_source_path() const;
@@ -193,7 +183,14 @@ public:
 	static void clear_static_caches();
 	Array get_control_registers() const;
 	Ref<Texture> load_material_texture(int p_material_index, int p_texture_index) const;
-	Ref<Texture2D> load_texture_name(const String &p_texture_name) const;
+	// The freeze's material resolve of this model: every material's rows in order, each whose
+	// loader slot code is set (renderer::material_texture_runtime_slot) through its loader
+	// (load_material_texture). Returns the rows resolved. C++ siblings only.
+	int resolve_materials() const;
+	// A model texture by name as its stage loader makes it, as the pixels its texture holds (the
+	// levels: a DDS's own chain, else generated), made on the CPU: no device texture made or read
+	// back (the terrain's static-shadow casters' alpha). C++ siblings only.
+	Ref<Image> load_texture_image_name(const String &p_texture_name) const;
 	int get_light_count() const;
 	// One LGHT record (object/model_light.h); null out of range.
 	Ref<ModelLight> get_light_info(int p_index) const;
@@ -287,6 +284,12 @@ public:
 	int64_t apply_panm_to_nodes_table(int p_lod_index, int64_t p_time_ms,
 			const opennova::renderer::ControlRegisterValues &p_ctrl_table,
 			const Array &p_nodes, int64_t p_applied_revision) const;
+	// The same apply onto plain part transforms (index = part index; the
+	// vector's size bounds the write): a pose no node draws (an alternate
+	// view's twin level) needs no object to hold it.
+	int64_t apply_panm_to_transforms(int p_lod_index, int64_t p_time_ms,
+			const opennova::renderer::ControlRegisterValues &p_ctrl_table,
+			std::vector<Transform3D> &r_parts, int64_t p_applied_revision) const;
 	static void weather_ctrl_registers(int32_t &r_flicker, int32_t &r_swing);
 	// A PANM matrix (native row-vector frame) as a Godot transform and back:
 	// the mesh carries the (-x, y, z) conversion, so both flip X.

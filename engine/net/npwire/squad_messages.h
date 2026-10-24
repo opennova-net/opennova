@@ -20,7 +20,7 @@ namespace opennova {
 // subordinate of the sender) and the waypoint entity's name (+244) and
 // position (+4/+8/+12).
 // [orig: NetPacket_WriteTypeNameAndPosition @0x42b160 (writer, from
-//  NetPacket_SendChatMessage @0x42ddc0 — the IDB name is a misnomer);
+//  NetPacket_SendUserWaypointCreate @0x42ddc0 — the IDB name is a misnomer);
 //  NapiNPServerMsg_HandleChatOrWhisper @0x514850 (reader)]
 struct WaypointShare {
 	uint8_t target = 0xFF;
@@ -49,13 +49,13 @@ WaypointCreate decode_waypoint_create(const uint8_t *body, size_t len);
 
 // C2S 0x4F (a user waypoint deleted) and S2C 0x7C (the relay): one packed
 // pool handle, 0xFFFF for an address outside every pool.
-// [orig: NetPacket_WriteEntityIndex16 @0x42b230 (from NetPacket_SendEntityUpdate
+// [orig: NetPacket_WriteEntityIndex16 @0x42b230 (from NetPacket_SendUserWaypointRemove
 //  @0x42de00); NapiNPServerMsg_0x04F @0x514a40; NapiNPClientMsg_0x07C @0x426020]
 std::vector<uint8_t> encode_entity_handle16(uint16_t handle);
 uint16_t decode_entity_handle16(const uint8_t *body, size_t len);
 
 // C2S 0x43 — join a squad leader (the member's own slot id = leave).
-// [orig: NetPacket_SendWeaponSlotSwitch @0x42dc10 (a misnomer: SendSquadJoin);
+// [orig: NetPacket_SendSquadJoin @0x42dc10;
 //  Server_HandleEntitySync @0x510990 (a misnomer: HandleSquadJoin)]
 std::vector<uint8_t> encode_squad_join_request(uint8_t leader);
 uint8_t decode_squad_join_request(const uint8_t *body, size_t len);
@@ -95,7 +95,7 @@ std::vector<uint8_t> encode_squad_order(const SquadOrder &order);
 SquadOrder decode_squad_order(const uint8_t *body, size_t len);
 
 // C2S 0x45 — assign the listed members to a fireteam (0 none, 1..3 A..C).
-// [orig: NetPacket_WriteTypeCountAndArray @0x42b6c0 (from NetPacket_SendWeaponAction
+// [orig: NetPacket_WriteTypeCountAndArray @0x42b6c0 (from NetPacket_SendFireteamAssign
 //  @0x42dcc0); NapiNPServerMsg_0x045_HandleTeamAssignment @0x510c00]
 struct FireteamAssign {
 	uint8_t fireteam = 0;
@@ -114,7 +114,7 @@ std::vector<uint8_t> encode_fireteam_set(const FireteamSet &set);
 FireteamSet decode_fireteam_set(const uint8_t *body, size_t len);
 
 // C2S 0x46 — recruit a player (the recruiter's own slot id, the target's).
-// [orig: NetPacket_SendTeamChange @0x42dd00 (a misnomer: SendRecruit);
+// [orig: NetPacket_SendSquadRecruit @0x42dd00;
 //  NapiNPServerMsg_HandleVoteKick @0x510d20 (a misnomer: the recruit relay)]
 struct SquadRecruit {
 	uint8_t recruiter = 0;
@@ -129,7 +129,7 @@ std::vector<uint8_t> encode_squad_recruited(uint8_t recruiter);
 uint8_t decode_squad_recruited(const uint8_t *body, size_t len);
 
 // C2S 0x4B and S2C 0x78 — a go code (0..5 UNIFORM..ZULU) from a leader.
-// [orig: NetPacket_SendVoteKick @0x42dd50 (a misnomer: SendGoCode);
+// [orig: NetPacket_SendGoCode @0x42dd50;
 //  NapiNPServer_BroadcastPlayerProfileUpdate @0x510dc0 (a misnomer: the relay);
 //  NetPacket_WriteTwoBytes; NapiNPClientMsg_0x078 @0x425970]
 struct GoCode {

@@ -28,13 +28,43 @@ void ServeListing::bind(inmatch::HostRole &role, mission::MissionKernel &kernel,
 		lister_->host_role().request_player_enter(request.connection_id, request.peer.ip, request.peer.port,
 		                                          request.join_ticket);
 	};
+	// The match's server-info update (its 0x744 refresh, the join lock's toggle) runs the hosting
+	// session's (inmatch::run_server_info_refresh, Server_ToggleJoinLock).
+	// [orig: Server_TickUpdate @0x51D7E0 (the Lobby_UpdateServerInfo call @0x51D943)]
+	ctx.on_update_server_info = [this]() {
+		if (lister_ != nullptr) lister_->host_role().update_server_info();
+	};
+	// The update reads the match's columns as it runs, as the game's does (SessionDrive::
+	// bind_nw_host): the tick's refresh right after its cookie-key ring's advance, the round clock
+	// and the net-quality window as that tick left them, where the lister's per-pass columns stand
+	// a pass behind the tick (D-NET-NEW-L9-53).
+	// [orig: Server_TickUpdate @0x51D7E0 - CSessionIdRing_AdvanceAndGenerate called @0x51D93D,
+	//  Lobby_UpdateServerInfo called @0x51D943; Lobby_UpdateServerInfo @0x4FE8C0 - the ring's
+	//  current key @0x4FF191..0x4FF196]
+	lister.host_role().set_column_source([this](HostRegistration &r) {
+		if (role_ == nullptr) return false;
+		inmatch::read_session_listing_columns(r, role_->state.host_owner.ctx, seams_.gametext);
+		return true;
+	});
+	// The match's METPROTOCOL gate reports go out on the hosting session, its strings the
+	// registration's and the gate reply's (inmatch/gate_metrics_reports.h, D-NET-NEW-L9-22).
+	ctx.gate_metrics.host = [this]() {
+		return lister_ != nullptr ? lister_->host_role().metrics_host() : GateMetricsHost{};
+	};
+	ctx.gate_metrics.game_text = seams_.gametext;
+	ctx.gate_metrics.send = [this](const std::string &text) {
+		if (lister_ != nullptr) lister_->host_role().send_gate_metrics(text);
+	};
 	sync_session();
 }
 
 void ServeListing::unbind() {
+	if (lister_ != nullptr) lister_->host_role().set_column_source(nullptr);
 	if (role_ != nullptr) {
 		inmatch::NapiNPServerCtx &ctx = role_->state.host_owner.ctx;
 		ctx.on_player_enter_request = nullptr;
+		ctx.on_update_server_info = nullptr;
+		ctx.gate_metrics = inmatch::GateMetricsSink{};
 		ctx.novaworld_join_tickets_armed = false;
 		ctx.novaworld_gsid.clear();
 		ctx.novaworld_app_id = 0;
@@ -45,10 +75,10 @@ void ServeListing::unbind() {
 }
 
 // The hosting session meets its match: the GSID the 0x81 advertises (cleared while the
-// connection is down, re-supplied by a re-host), the AppId, the cookie-key ring the CD cookies
-// decrypt under (it advances every refresh), the join-ticket arm, and the session's word, flags
-// and exit store for the authority's NovaWorld exit. A dedicated server has no loopback, so no
-// login PCID of its own.
+// connection is down, re-supplied by a re-host), the AppId, the join-ticket arm, and the session's
+// word, flags and exit store for the authority's NovaWorld exit (the cookie-key ring the CD
+// cookies decrypt under is the match's own). A dedicated server has no loopback, so no login PCID
+// of its own.
 // [orig: CNapiGameSession_HandleHostVerifyResponse @0x4D59D0 — the GSID @0x4D5BD6..0x4D5C0F;
 //  Game_ProcessMainFrame's NovaWorld exit @0x52654f..0x52657c (dword_B5FD2C, dword_B60108)]
 void ServeListing::sync_session() {
@@ -57,7 +87,7 @@ void ServeListing::sync_session() {
 	NwuHostRole &host = lister_->host_role();
 	ctx.novaworld_gsid = host.gsid();
 	ctx.novaworld_app_id = static_cast<uint32_t>(host.app_id());
-	inmatch::set_novaworld_account_facts(ctx, host.cookie_keys(), std::string());
+	inmatch::set_novaworld_account_facts(ctx, std::string());
 	ctx.novaworld_join_tickets_armed = host.requires_join_ticket();
 	const NwuLobbySession::MatchFacts facts = lister_->lobby().match_facts();
 	ctx.nwu_in_use = facts.in_use;
@@ -71,8 +101,9 @@ bool ServeListing::start(int &exit_code) {
 }
 
 // The live match changes every frame (the round clock, the joiners): once bound, every pass hands
-// the host role the columns (they ride its 1860-tick refresh as its changed vars) and syncs the
-// roster (ClientHostPlayerAdded / Removed go out at once, as Server_PlayerAdd sends them).
+// the host role the columns (they ride the match's next 1860-tick refresh as its changed vars) and
+// syncs the roster (ClientHostPlayerAdded / Removed go out at once, as Server_PlayerAdd sends
+// them).
 bool ServeListing::refresh(uint32_t now_ms, bool force) {
 	(void)now_ms;
 	return force || role_ != nullptr;
@@ -154,7 +185,8 @@ void ServeListing::on_command(const ServerCommand &command) {
 void ServeListing::on_player_enter_result(const ClientSession::PlayerEnterResult &result) {
 	if (role_ == nullptr) return;
 	if (!inmatch::Server_ApplyPlayerEnterResult(role_->state.host_owner.ctx, result.connection_id,
-	                                            result.success != 0, result.msg_code)) {
+	                                            result.success != 0, result.msg_code,
+	                                            role_->state.host_owner.now_tick)) {
 		io::logf(LogLevel::kDebug, "[host] ServerPlayerEnterResult for connection %u matched no held joiner",
 		         result.connection_id);
 	}

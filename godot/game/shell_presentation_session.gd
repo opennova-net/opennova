@@ -25,9 +25,11 @@ var _hud_hidden_capture_active := false
 
 ## Hide the world and mounted HUD items before the menu is raised. This keeps
 ## the pre-existing menu/load lifecycle policy separate from the reversible
-## layer-level transaction used by world-only captures below.
+## layer-level transaction used by world-only captures below. The menu holds
+## no world draw of its own: a hidden world has none to hold.
 func enter_menu(world: GameWorld, hud: CanvasLayer) -> void:
 	world.visible = false
+	world.set_presentation_held(false)
 	_set_layer_children_visible(hud, false)
 
 
@@ -44,20 +46,30 @@ func begin_world_load(
 		on_load_failed: Callable) -> void:
 	menu_shell.hide_menu()
 	enter_menu(world, hud)
+	# The loading presentation holds the world's draw from here to its reveal: the load's forced
+	# frame shows the world and leaves it shown, and every later frame under the screen draws the
+	# screen alone (GameWorld.set_presentation_held, D-NET-NEW-LF-29).
+	world.set_presentation_held(true)
 	if not world.world_loaded.is_connected(on_world_loaded):
 		world.world_loaded.connect(on_world_loaded)
 	if not world.load_failed.is_connected(on_load_failed):
 		world.load_failed.connect(on_load_failed)
 
 
-## Complete the loading presentation and reveal the world and HUD together.
+## Complete the loading presentation and reveal the world and HUD together: the
+## world is shown (the load's forced frame left it so, unless the load drew none)
+## and its draw's hold dropped, which re-pairs no instance.
 func finish_world_load(
 		world_load: WorldLoadCoordinator,
 		world: GameWorld,
 		hud: CanvasLayer) -> void:
 	world_load.finish_presentation()
 	world.visible = true
+	world.set_presentation_held(false)
 	_set_layer_children_visible(hud, true)
+	# The reveal's process frame, beside the PostLoadFrame and SlowFrame lines (an instrument).
+	print_verbose("ShellPresentation: the world revealed at frame=%d unix_ms=%d" % [
+			Engine.get_process_frames(), int(Time.get_unix_time_from_system() * 1000.0)])
 
 
 ## The frozen-shell capture seam: after a fixture moves the beauty camera with

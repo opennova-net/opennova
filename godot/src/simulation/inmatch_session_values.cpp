@@ -1,6 +1,8 @@
 #include "simulation/inmatch_session_values.h"
 #include "util/string_convert.h"
 
+#include <godot_cpp/core/object.hpp>
+
 #include <algorithm>
 
 namespace godot {
@@ -14,25 +16,46 @@ void MissionFrameInput::_bind_methods() {
 			&MissionFrameInput::set_since_render_seconds);
 	ClassDB::bind_method(D_METHOD("get_since_render_seconds"),
 			&MissionFrameInput::get_since_render_seconds);
+	ClassDB::bind_method(D_METHOD("set_command_map_open", "open"),
+			&MissionFrameInput::set_command_map_open);
+	ClassDB::bind_method(D_METHOD("is_command_map_open"),
+			&MissionFrameInput::is_command_map_open);
 	ClassDB::bind_method(D_METHOD("get_camera_position"),
 			&MissionFrameInput::get_camera_position);
 	ClassDB::bind_method(D_METHOD("set_movement", "forward", "back", "left",
 			"right", "lean_left", "lean_right", "jump"),
 			&MissionFrameInput::set_movement);
 	ClassDB::bind_method(D_METHOD("set_weapon_input", "fire_held", "fire_pressed",
-			"reload_pressed", "medic_pressed"), &MissionFrameInput::set_weapon_input,
-			DEFVAL(false));
+			"reload_pressed"), &MissionFrameInput::set_weapon_input);
 	ClassDB::bind_method(D_METHOD("set_sequence", "sequence"),
 			&MissionFrameInput::set_sequence);
 	ClassDB::bind_method(D_METHOD("get_sequence"),
 			&MissionFrameInput::get_sequence);
+	ClassDB::bind_method(D_METHOD("set_hud_toggles", "toggles"),
+			&MissionFrameInput::set_hud_toggles);
+	ClassDB::bind_method(D_METHOD("get_hud_toggles"),
+			&MissionFrameInput::get_hud_toggles);
 
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "delta_seconds"),
 			"set_delta_seconds", "get_delta_seconds");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "since_render_seconds"),
 			"set_since_render_seconds", "get_since_render_seconds");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "command_map_open"),
+			"set_command_map_open", "is_command_map_open");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "sequence"),
 			"set_sequence", "get_sequence");
+}
+
+void MissionFrameInput::set_tick_source(opennova::inmatch::TickInputSource *p_source,
+		ObjectID p_owner) {
+	tick_source_ = p_source;
+	tick_source_owner_ = p_owner;
+}
+
+opennova::inmatch::TickInputSource *MissionFrameInput::tick_source() const {
+	if (tick_source_ == nullptr || ObjectDB::get_instance(tick_source_owner_) == nullptr)
+		return nullptr;
+	return tick_source_;
 }
 
 void MissionFrameInput::set_delta_seconds(double p_delta) {
@@ -93,37 +116,37 @@ void MissionFrameInput::set_view_keys(bool p_free_look, bool p_up, bool p_down,
     movement.turn_right = p_right;
 }
 
+void MissionFrameInput::set_cursor_delta(const Vector2i &p_delta) {
+	value_.player.cursor_dx = p_delta.x;
+	value_.player.cursor_dy = p_delta.y;
+}
+
 void MissionFrameInput::set_look_delta(const Vector2 &p_delta) {
 	value_.player.look_delta_x = p_delta.x;
 	value_.player.look_delta_y = p_delta.y;
 }
 
 void MissionFrameInput::set_weapon_input(bool p_fire_held,
-		bool p_fire_pressed, bool p_reload_pressed, bool p_medic_pressed) {
+		bool p_fire_pressed, bool p_reload_pressed) {
 	value_.player.held_action_bits = p_fire_held ? HELD_FIRE : 0u;
 	value_.player.pressed_action_bits =
 			(p_fire_pressed ? PRESSED_FIRE : 0u) |
-			(p_reload_pressed ? PRESSED_RELOAD : 0u) |
-			(p_medic_pressed ? PRESSED_MEDIC_REQUEST : 0u);
+			(p_reload_pressed ? PRESSED_RELOAD : 0u);
 }
 
-void MissionFrameInput::set_to_special_input(bool p_held, bool p_dispatched) {
+void MissionFrameInput::set_to_special_held(bool p_held) {
 	value_.player.held_action_bits = (value_.player.held_action_bits & ~HELD_TO_SPECIAL) |
 			(p_held ? HELD_TO_SPECIAL : 0u);
-	value_.player.pressed_action_bits =
-			(value_.player.pressed_action_bits & ~PRESSED_TO_SPECIAL) |
-			(p_dispatched ? PRESSED_TO_SPECIAL : 0u);
+}
+
+void MissionFrameInput::set_fire_keys_held(bool p_held) {
+	value_.player.held_action_bits = (value_.player.held_action_bits & ~HELD_FIRE_KEYS) |
+			(p_held ? HELD_FIRE_KEYS : 0u);
 }
 
 void MissionFrameInput::set_menu_open(bool p_open) {
 	value_.player.held_action_bits = (value_.player.held_action_bits & ~HELD_MENU_OPEN) |
 			(p_open ? HELD_MENU_OPEN : 0u);
-}
-
-void MissionFrameInput::set_respawn_input(bool p_dispatched) {
-	value_.player.pressed_action_bits =
-			(value_.player.pressed_action_bits & ~PRESSED_RESPAWN) |
-			(p_dispatched ? PRESSED_RESPAWN : 0u);
 }
 
 void MissionFrameInput::set_sequence(int64_t p_sequence) {
@@ -167,6 +190,12 @@ void MissionFrameOutcome::assign(const opennova::inmatch::FrameOutcome &p_value)
 	ticks_run_ = static_cast<int32_t>(p_value.ticks.size());
 	tick_us_ = p_value.perf.tick_us;
 	error_ = opennova::to_gd(p_value.error.message);
+	frame_stamp_ms_ = p_value.frame_stamp_ms;
+	rendered_ = p_value.rendered;
+	scene_drawn_ = p_value.scene_drawn;
+	world_skipped_ = p_value.world_skipped;
+	hud_pass_called_ = p_value.hud_pass_called;
+	start_blank_ = p_value.start_blank;
 }
 
 } // namespace godot

@@ -42,7 +42,7 @@ void HudFrameCompiler::emit_net_quality_indicators(const HudNetQualityState &net
 		uint32_t overlay_master, bool force_default_pos, float w, float h) {
 	// In a session, and not under /NOHUD [orig: `cmp is_in_session, 0`
 	// @0x4c3210, `cmp dword_840B18, 0` @0x4c3224]. The debug-visible arm
-	// (dword_24C1930 & 0x8000000 @0x4c320a) is dead: nothing sets that bit.
+	// (g_DebugCheatFlags & 0x8000000 @0x4c320a) is dead: nothing sets that bit.
 	if (!net.in_session || overlay_master == 0u) return;
 	const NetQualityIndicators &q = net.indicators;
 	const size_t quads_before = draw_list_.quads.size();

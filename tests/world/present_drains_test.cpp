@@ -90,6 +90,10 @@ void test_throwable_rows() {
 	r5.active = true;
 	r5.tracer = true;
 	r5.item_type_id = 42;
+	// A TrcrID item's round carries its def; only a def'd item shows
+	// [orig: RoundData_SpawnRound @0x4EC0D0 - the no-TrcrID leg's def-less item 1
+	//  @0x4EC7C1].
+	r5.has_item_def = true;
 	r5.presentation_generation = 7;
 	r5.ammo_index = 1;
 	r5.pos = {1.0f, 2.0f, 3.0f};
@@ -136,6 +140,14 @@ void test_throwable_rows() {
 	CHECK(near_f(rows[0].roll_deg, -45.0f));
 	CHECK(rows[0].move_effect == "smoke_trail");
 	CHECK(rows[0].move_effect_live);
+	// A flying round lies in the RoundPool, which no water mirror's reflected
+	// collect walks; a placed device is a pool-1 entity, which it does
+	// [orig: Terrain_CollectVisibleEntitiesForReflection @0x5C90A0 - the calls
+	//  @0x5C913D, @0x5C9145, @0x5C914E; Terrain_CollectVisibleEntities @0x5C9160 -
+	//  the RoundPool_GetBase call @0x5C91C1].
+	CHECK(!rows[0].mirror_collected);
+	CHECK(!rows[1].mirror_collected);
+	CHECK(rows[2].mirror_collected);
 	CHECK(rows[1].key == ((int64_t(1) << 10) | 7));
 	CHECK(rows[1].item_id == 0);
 	CHECK(rows[1].move_effect == "smoke_trail");
@@ -350,8 +362,8 @@ void test_death_pieces() {
 	p.type_index = 4;
 	p.render_scale = 0.5f;
 	p.pos = {7.0f, 8.0f, 9.0f};
-	p.heading = 30.0f;
-	p.pitch = 10.0f;
+	p.heading = 0x15555555; // 30 deg, the presentation view of the word
+	p.pitch = 0x071C71C7;   // 10 deg
 	p.settled = true;
 	DeathPiece &idle = w.death_pieces.pieces[4];
 	idle.item_id = 13; // never allocated: skipped

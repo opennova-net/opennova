@@ -81,21 +81,21 @@ bool ClientRuntime::place_user_waypoint(world::World &world, int32_t x, int32_t 
 	const world::EntityHandle handle = world::place_user_waypoint(world, x, y, name);
 	const world::Entity *wp = world.registry.get(handle);
 	if (wp == nullptr) return false;
-	// NetPacket_SendChatMessage(255, waypoint): the row's name and position
+	// NetPacket_SendUserWaypointCreate(255, waypoint): the row's name and position
 	// [orig: @0x54a1be — NetPacket_WriteTypeNameAndPosition @0x42b160].
 	WaypointShare share;
 	share.target = 0xFF;
 	share.name = wp->display_name;
 	share.x = x;
 	share.y = y;
-	share.z = world::to_fixed(wp->position.z);
+	share.z = wp->position.z.q16;
 	queue_squad_message(c2s::WAYPOINT_SHARE, encode_waypoint_share(share));
 	return true;
 }
 
 bool ClientRuntime::delete_hovered_user_waypoint(world::World &world) {
 	// The 0x4F precedes the destroy in retail; the handle is the same word
-	// [orig: NetPacket_SendEntityUpdate @0x5479e6, j_Entity_Destroy @0x5479ee].
+	// [orig: NetPacket_SendUserWaypointRemove @0x5479e6, j_Entity_Destroy @0x5479ee].
 	const world::EntityHandle handle = world::delete_hovered_user_waypoint(world);
 	if (!handle.valid()) return false;
 	queue_squad_message(c2s::WAYPOINT_DELETE, encode_entity_handle16(handle.packed));
@@ -111,10 +111,10 @@ void ClientRuntime::clear_user_waypoints(world::World &world) {
 }
 
 void ClientRuntime::send_go_code(world::World &world, uint8_t code) {
-	// NetPacket_SendVoteKick (a misnomer) with entity+0x154, then
+	// NetPacket_SendGoCode with entity+0x154, then
 	// Server_PlayGoCodeSoundAndChat(local, code, 0) [orig: @0x5482ad, @0x5482bc].
 	GoCode go;
-	go.leader = static_cast<uint8_t>(local_roster_slot());
+	go.leader = static_cast<uint8_t>(local_body_slot());
 	go.code = code;
 	queue_squad_message(c2s::GO_CODE, encode_go_code(go));
 	replication::ClientSquadEvent event;
@@ -129,22 +129,32 @@ void ClientRuntime::send_go_code(world::World &world, uint8_t code) {
 }
 
 void ClientRuntime::send_squad_recruit(uint8_t target) {
-	// NetPacket_SendTeamChange(local entity+0x154, the row's slot) (a
-	// misnomer: the recruit) [orig: @0x54864e..0x54865c].
-	const int slot = local_roster_slot();
+	// NetPacket_SendSquadRecruit(local entity+0x154, the row's slot)
+	// [orig: @0x54864e..0x54865c].
+	const int slot = local_body_slot();
 	SquadRecruit recruit;
 	recruit.recruiter = static_cast<uint8_t>(slot < 0 ? 0xFF : slot);
 	recruit.target = target;
 	queue_squad_message(c2s::SQUAD_RECRUIT, encode_squad_recruit(recruit));
 }
 
-void ClientRuntime::send_squad_join(uint8_t leader) {
-	// [orig: NetPacket_SendWeaponSlotSwitch(slot) @0x548616 (a misnomer: the join)]
+void ClientRuntime::send_squad_join(world::World &world, uint8_t leader) {
+	// [orig: NetPacket_SendSquadJoin(slot) @0x548616]
 	queue_squad_message(c2s::SQUAD_JOIN_REQUEST, encode_squad_join_request(leader));
+	// After the queue, a leader other than the local body's own slot byte plays the body's
+	// RECRUIT_ACCEPT set through the interface; the body's sound prefix (+0x374) lies past the
+	// destroy's memset, so a body destroyed in place (slot byte 0xFF) plays it too.
+	// [orig: NetPacket_SendSquadJoin @0x42DC10 - the queue @0x42DC37, the
+	//  g_LocalPlayerEntity test @0x42DC3C..0x42DC43, `cmp [eax+154h], bl` @0x42DC45..0x42DC4B,
+	//  SoundProfile_FindByEntityAndType(L, 6) @0x42DC50, Sound_PlayInterfaceTriggerSet
+	//  @0x42DC5D]
+	if (world.cached.local_player.valid() && local_body_slot() != leader)
+		play_interface(world, entity_sound(world,
+				static_cast<int16_t>(world.cached.local_player.slot()), kSoundRecruitAccept));
 }
 
 void ClientRuntime::send_fireteam_assign(uint8_t fireteam, const std::vector<uint8_t> &members) {
-	// [orig: NetPacket_SendWeaponAction(fireteam, count, slots) @0x548d67]
+	// [orig: NetPacket_SendFireteamAssign(fireteam, count, slots) @0x548d67]
 	FireteamAssign assign;
 	assign.fireteam = fireteam;
 	assign.members = members;
@@ -182,8 +192,8 @@ void ClientRuntime::apply_squad_event(world::World &world,
 		// Every placed waypoint goes to the new member: one C2S 0x17 per
 		// non-null table entry, the member's own slot the target, the row's
 		// name and its exact x / y / z dwords (a wiped row's zeros).
-		// [orig: Server_BroadcastChatToAllPlayers @0x549200 (a misnomer: the
-		//  push) — NetPacket_SendChatMessage(joiner+0x154, entry) per non-null
+		// [orig: CMap_SendUserWaypoints @0x549200 (a misnomer: the
+		//  push) — NetPacket_SendUserWaypointCreate(joiner+0x154, entry) per non-null
 		//  entry @0x549210..0x54921f]
 		for (const world::UserWaypointTable::Entry &entry : world.user_waypoints.entries) {
 			if (!entry.handle.valid()) continue;

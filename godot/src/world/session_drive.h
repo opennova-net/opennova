@@ -36,13 +36,13 @@ class NovaWorldClient;
 // 0043 slice G10), a plain member of the C++ GameWorld: request staging
 // (HostSessionOptions / JoinTarget, ADR 0017), the authenticated-before-load
 // joiner preload sim, the S2C 0x7B promote, the expansion reconcile
-// (D-NET-178), the post-load admission watchdog + per-frame
+// (D-NET-178), the post-load admission watch + per-frame
 // admission/deploy/loss observer, the session-loss latch, the ESC aborts, and
 // NovaWorld gate registration for a browsable listen host.
 //
-// The POLICY of all of that -- the two ConnectOrHost windows (0xEA60), the
-// promote validation, the admission/deploy/loss edge machine with its latches,
-// and the expansion reconcile DECISION -- is native
+// The POLICY of all of that -- the preload's failure edge (no join wait has a
+// deadline, D-NET-NEW-L2-44), the promote validation, the admission/deploy/loss
+// edge machine with its latches, and the expansion reconcile DECISION -- is native
 // (engine/runtime/inmatch/join_session_policy.cpp, bound as
 // NetSessionPolicy). This drive keeps the lifetime: it reads simulation state,
 // forwards it to the policy each frame, and executes exactly what the returned
@@ -76,8 +76,8 @@ public:
 	int load_as_joiner(const Ref<JoinTarget> &p_target);
 	// Drive one frame of the witnessed pre-world connect/session exchange
 	// while the loading screen is visible (the world's _process while a
-	// preload is pending). The deadline is the retail ConnectOrHost window
-	// (0xEA60; the policy owns it). Synchronous on purpose.
+	// preload is pending), with no deadline: a join error or the session's loss
+	// ends it (the policy owns the edge). Synchronous on purpose.
 	void step_preload();
 	bool is_preload_pending() const { return join_preload_sim_.is_valid(); }
 	// ESC/abort for the only interruptible load leg: the joiner's pre-load
@@ -86,16 +86,12 @@ public:
 	// aborted; the ordinary load-failure leg reports it to the shell (engine: runtime/inmatch/join_session_policy.cpp)
 	// (docs/interface/loading-screen-re.md D-LOADSCR-7).
 	bool cancel_preload();
-	// ESC/abort for the SECOND interruptible joiner wait: the post-load
-	// admission tail, where the map is loaded but the world stays hidden until
-	// the host drives the join to its deploy pick or in-match edge.
-	// D-LOADSCR-7's "single synchronous operation.call()" reasoning covers the
-	// host/SP map load, NOT this one -- the admission state machine is polled
-	// once per world tick, so the ESC window is as reachable here as it is in
-	// the pre-load connect wait. Without this a player who joins a host that
-	// stalls after the wire-header world load has no way out for the full
-	// ConnectOrHost window. Returns true when a live admission wait was told
-	// to abort; the watchdog reports it through the ordinary load-failure leg.
+	// ESC in the mission start's final wait for the S2C 0x0F: it leaves the
+	// wait for the game loop and aborts nothing (engine
+	// inmatch::JoinerConnection::cancel_final_wait). Returns true when the
+	// final wait took it; false anywhere else, the shell's cold-spawn hold
+	// after the 0x0F included, where the game loop already runs
+	// (D-NET-NEW-L2-39).
 	bool cancel_admission_wait();
 	// True while the staged host request is a DEDICATED serve (no local-player
 	// spawn, ADR 0015 serve mode); read by the world's playable gate before
@@ -116,7 +112,7 @@ public:
 	void stage_runtime_options(const Ref<MissionSetupOptions> &p_opts);
 	// Post-runtime-start hook, called by the world once its runtime is live:
 	// a hosting NovaWorld session meets its match (bind_nw_host). (The
-	// joiner's admission watchdog arms inside this drive's own load entries,
+	// joiner's admission watch arms inside this drive's own load entries,
 	// not here.)
 	void on_runtime_started(const Ref<MissionSetupOptions> &p_opts, const String &p_bms_name);
 	// Per-frame observer, called from the world's tick after the runtime
@@ -137,7 +133,26 @@ public:
 	// legs have no deadline (net-re §5.70.7).
 	bool keep_session(MissionRoot *p_runtime);
 	bool has_kept_session() const { return kept_sim_.is_valid(); }
+	// The kept session's simulation, a map change's, until the runtime adopts it.
+	Ref<Simulation> kept_simulation() const { return kept_sim_; }
+	// A NovaWorld listen host's mission-start server-info update at the load's head, past its
+	// session's create (a fresh one's) or the map change's head, ahead of the effect system and
+	// every load: the hosting session's columns read off `p_sim`'s session with the mission
+	// start's own (the mission text's title else the header's name, its climate, TimeOfDay 0,
+	// the last round's clock), its own player's slot, then both lists whole (and the session's
+	// first mission's METPROTOCOL ID report). Nothing when no NovaWorld session hosts.
+	void publish_host_mission_start(const Ref<Simulation> &p_sim, const Ref<MissionData> &p_mission,
+			const Ref<ResourceRoot> &p_resource_root, const String &p_bms_name);
+	// True while the load is a fresh host's or single player's: no join staged or preloaded and
+	// no kept session, so the world's load creates its session at its start
+	// (GameWorld::create_fresh_session).
+	bool fresh_authority_load() const {
+		return pending_join_.is_null() && join_preload_sim_.is_null() && kept_sim_.is_null();
+	}
 	int load_next_host_mission(const String &p_bms_name);
+	// The join's simulation ahead of the runtime's adoption (stage_runtime_options), null
+	// otherwise: a join's load steps pump its session there (GameWorld::pump_join_load_step).
+	Ref<Simulation> join_preload_simulation() const { return join_preload_sim_; }
 	int reload_as_joiner();
 	// The NovaWorld session (a NovaWorldClient), handed over by the shell with a
 	// joiner or host load: retail keeps the NWU session playing or hosting
@@ -162,6 +177,13 @@ public:
 	// leg (GameWorld::mount_join_expansion) share it. Returns the failure text,
 	// empty on success.
 	String switch_join_expansion(const Ref<ResourceRoot> &p_root, const String &p_host_expansion);
+	// The return to the main menu, ahead of the menu's entry: when a join's switch left an
+	// expansion, `p_root` mounts it again and the cfg block takes its weapon table, reading
+	// and saving nothing, so the menu entry's game.cfg read and profile load run over the
+	// menu's own expansion (D-NET-622). A host or single-player start switches nothing, so
+	// its return restores nothing (engine inmatch/game_config_block.h switch_expansion
+	// carries the witness).
+	void restore_kept_expansion(const Ref<ResourceRoot> &p_root);
 
 	// The bound signal targets of the hosting session (the world forwards).
 	// A ServerCommand from the NovaWorld service: run it on the in-match host,
@@ -179,13 +201,32 @@ private:
 	// One reset for the typed request staging, used by every session
 	// load-failure leg and reset().
 	void clear_pending_session();
+	// The host request a fresh load staged with its created session at the load's start
+	// (GameWorld::create_fresh_session -> stage_runtime_options), null on any other load: the
+	// load's later legs read it until the runtime starts (pending_dedicated, pending_session).
+	Ref<HostSessionOptions> staged_host_request() const;
+	// r_avatar_db, when given, takes the Avatars.def the profile was built over (null
+	// when none loaded).
 	Ref<CharacterJoinProfile> build_join_character_profile(
-			const Ref<ResourceRoot> &p_resource_root, const Ref<PlayerSpawnLoadout> &p_loadout);
+			const Ref<ResourceRoot> &p_resource_root, const Ref<PlayerSpawnLoadout> &p_loadout,
+			Ref<class AvatarDatabase> *r_avatar_db = nullptr);
 	// Point the joiner's resource root at the HOST's expansion (S2C 0x7B
 	// field 7, net-re 5.32) before any of the host's data is resolved through
 	// it. Returns false when the join has been failed and the driver must
 	// stop.
 	bool reconcile_join_expansion();
+	// The S2C 0x11's identification of the joined session, before the world stream: the
+	// expansion reconcile, the promoted map name and header checks, the stream's item
+	// catalog, the identified signal. False when the join has been failed and the driver
+	// must stop.
+	bool identify_join_session();
+	// The S2C 0x11's load after the identification: the mission start's head and terrain
+	// off the 0x0B header, the declared load's end (the 0x0A follows), the stream wait's
+	// window. False when the join has been failed and the driver must stop.
+	bool load_join_terrain();
+	// The host's S2C 0x0B header as the join's mission document; null after the join's
+	// failure.
+	Ref<MissionData> open_join_mission_header(const String &p_bms);
 	// The per-frame admission/deploy/loss observer.
 	void update_joiner_admission_signals();
 	void fail_join_preload(const String &p_reason);
@@ -196,6 +237,9 @@ private:
 	// GSID, the join-ticket hook, the roster mirror).
 	void bind_nw_host(const Ref<MissionSetupOptions> &p_opts);
 	void unbind_nw_host();
+	// The hosting session's own player slot, the match's own add's PlayerList entry (its name,
+	// the login PCID, the own row's PlayerTeam / PlayerType), on a serve-and-play host.
+	void set_nw_self_slot(const Ref<Simulation> &p_sim, const String &p_player_name);
 	// Mirror the admitted joiners onto the hosting session's per-slot roster
 	// (the PlayerList + ClientHostPlayerAdded/Removed).
 	void sync_nw_host_roster(opennova::NwuHostRole &p_host, const Ref<Simulation> &p_sim);
@@ -222,6 +266,9 @@ private:
 	// the roster sync keeps its identity and follows its PlayerTeam / PlayerType.
 	opennova::HostPlayerSlot nw_self_slot_;
 	bool nw_self_slot_set_ = false;
+	// The mission start's update went out at the load's head (publish_host_mission_start); the
+	// runtime's bind publishes none again.
+	bool nw_mission_start_published_ = false;
 	// The typed session request at the shell seam (ADR 0017): exactly one is
 	// non-null during a net load -- the host screen's HostSessionOptions or
 	// the joiner's dial JoinTarget -- stamped onto MissionSetupOptions as
@@ -234,11 +281,17 @@ private:
 	// is never restarted.
 	Ref<Simulation> join_preload_sim_;
 	Ref<ResourceRoot> join_preload_root_;
+	// The S2C 0x11's identification and load ran (identify_join_session,
+	// load_join_terrain): the world stream runs until the S2C 0x1A's load.
+	bool join_identified_ = false;
 	// The map change's kept session and the join it came from.
 	Ref<Simulation> kept_sim_;
 	Ref<JoinTarget> last_join_target_;
 	bool reloading_join_ = false;
 	Ref<ConnectionError> last_connection_error_;
+	// The expansion the first switch of a join left (byte_24D22A8), kept for the return.
+	bool expansion_kept_ = false;
+	String kept_expansion_;
 };
 
 } // namespace godot

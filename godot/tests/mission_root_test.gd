@@ -352,10 +352,15 @@ func test_session_frame_ignored_when_not_playing() -> void:
 	var rt := MissionRoot.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
-	# Not played -> paused -> banks nothing regardless of elapsed wall-clock (no burst on Play).
-	assert_eq(_advance_ticks(rt, 1.0), 0, "a paused runtime banks nothing")
+	# Not played -> paused -> runs no tick, whatever the elapsed wall-clock.
+	assert_eq(_advance_ticks(rt, 1.0), 0, "a paused runtime runs no tick")
+	# The bank runs on through the pause, as retail's main loop's does (no pause
+	# writes its phase or its smoothed bank; D-NET-NEW-LI-8): the paused 1 s frame
+	# clamped to 500 ms (8000 units) and drained 125 quanta in paused updates to
+	# phase 125, so a zero frame after play() smooths against that history,
+	# (7 * 8000 + 0 + 4) >> 3 = 7000 units, 109 quanta from phase 125: 27 ticks.
 	rt.play()
-	assert_eq(_advance_ticks(rt, 0.0), 0, "play() reset the accumulator; zero delta fires nothing")
+	assert_eq(_advance_ticks(rt, 0.0), 27, "the zero frame catches up the paused stall's history")
 
 
 func test_session_frame_still_presents_a_zero_tick_render_frame() -> void:
@@ -364,7 +369,7 @@ func test_session_frame_still_presents_a_zero_tick_render_frame() -> void:
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	assert_true(rt.step_once(), "seed one decoded presentation snapshot")
-	# play() resets the bank, so a zero-length frame drains nothing.
+	# The load's fresh bank (a step banks nothing), so a zero-length frame drains nothing.
 	rt.play()
 	(w.model as Node3D).visible = false
 	assert_eq(_advance_ticks(rt, 0.0), 0, "no fixed simulation tick advances")
@@ -488,7 +493,7 @@ func test_native_present_snapshot_survives_a_nested_script_snapshot_read() -> vo
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
 	assert_true(rt.step_once())
-	# play() resets the bank: the zero-length frames below drain nothing.
+	# The load's fresh bank (a step banks nothing): the zero-length frames below drain nothing.
 	rt.play()
 	var sim := rt.get_sim()
 	var expected := second.position
@@ -786,15 +791,18 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 				"catch-up does not emit repeatedly from the frame-start pose")
 
 	# max_age 4 parses to 248 fixed ticks. Step to age 240, then expire eight
-	# ticks into a twelve-tick catch-up batch: advances 248..252 must observe no
-	# live group, rather than emitting five stale ticks until final presentation.
+	# ticks into a thirty-two-tick catch-up batch: advances 248..272 must observe
+	# no live group, rather than emitting stale ticks until final presentation.
 	for _step in range(237):
 		assert_true(rt.step_once())
 	assert_eq(int(probe["advances"]), 240)
-	# play() resets the bank: one 192 ms frame drains 48 quanta = 12 ticks.
+	# The bank runs on through the transport's pause (no pause writes the main
+	# loop's phase or smoothed bank; D-NET-NEW-LI-8): the 50 ms frame left 48
+	# units at phase 12. A 1 s frame clamps to 500 ms (8000 units, no smoothing)
+	# and drains 125 quanta from phase 12: 32 ticks.
 	rt.play()
-	assert_eq(_advance_ticks(rt, 12.0 * Simulation.tick_dt()), 12)
-	assert_eq(int(probe["advances"]), 252)
+	assert_eq(_advance_ticks(rt, 1.0), 32)
+	assert_eq(int(probe["advances"]), 272)
 	var active_tick_numbers: Array = probe["active_tick_numbers"]
 	assert_eq(active_tick_numbers.size(), 247,
 			"the group advances exactly while the round is alive")

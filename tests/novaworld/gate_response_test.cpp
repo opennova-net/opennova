@@ -55,7 +55,9 @@ bool check_all_known_keys() {
 			"VAR PVT private-flag\n";
 	opennova::GateResponse r;
 	if (!expect(opennova::gate_response_parse(body, r), "full response parses")) return false;
-	if (!expect(r.var_count == 21, "21 VARs absorbed")) return false;
+	// D-NET-708: the nineteen keys of the parse's ladder count; CUS and PVT are no keys of it.
+	// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - @0x4CF4A7, @0x4CF4BB]
+	if (!expect(r.var_count == 19, "19 VARs absorbed")) return false;
 	if (!expect(r.lobby_name == "jop_2_consumer", "LOBBYNAME")) return false;
 	if (!expect(r.use_junction == 1, "USEJUNCTION")) return false;
 	if (!expect(r.clear_junction == 0, "CLEARJUNCTION")) return false;
@@ -103,7 +105,7 @@ bool check_ignores_unknown_and_malformed() {
 // The REAL gate (and our server's gate_listener.cpp) quote every key and
 // value: `VAR "POSTIPADDRESS" "127.0.0.1"`. Retail's tokenizer
 // (String_TokenizeQuotedToArray @ 0x616d60) strips the quotes; ours must too,
-// or the parse rejects the reply and the client logs "bad gate response".
+// or the parse counts no field and the client fails the gate (NWEC25).
 bool check_quoted_response() {
 	const std::string body =
 			"GATEPROTOCOL \"1.0\"\r\n"                        // non-VAR line, skipped
@@ -112,7 +114,7 @@ bool check_quoted_response() {
 			"VAR \"UDPNOVAWORLD\" \"127.0.0.1:64206\"\r\n"
 			"VAR \"STARTUPURL\" \"http://127.0.0.1:8080\"\r\n"
 			"VAR \"LOBBYNAME\" \"jop 2 consumer\"\r\n"        // value with internal space
-			"VAR \"CUS\" \"\"\r\n";                            // empty quoted value
+			"VAR \"UDPCODE2\" \"\"\r\n";                       // empty quoted value
 	opennova::GateResponse r;
 	if (!expect(opennova::gate_response_parse(body, r), "quoted gate response parses")) return false;
 	if (!expect(r.var_count == 6, "6 quoted VARs absorbed (GATEPROTOCOL skipped)")) return false;
@@ -123,6 +125,7 @@ bool check_quoted_response() {
 			"quoted UDPNOVAWORLD stripped")) return false;
 	if (!expect(r.startup_url == "http://127.0.0.1:8080", "quoted STARTUPURL stripped")) return false;
 	if (!expect(r.lobby_name == "jop 2 consumer", "quoted value keeps its internal space")) return false;
+	if (!expect(r.udp_code2.empty(), "an empty quoted value")) return false;
 	return true;
 }
 
@@ -324,11 +327,75 @@ bool check_every_udpnovaworld_line_is_kept() {
 	return true;
 }
 
+// Each string field is a Napi_CopyString into its mission-info buffer: 31 characters kept of the
+// lobby name, the MET address and label and the two UDP codes, 511 of the startup URL and
+// GLSVSSREQUEST. [orig: CAITask_SetName @0x402BD0, CMissionInfo_SetSceneName @0x4CD930,
+// CMissionInfo_SetTargetName @0x4CD950, CMissionInfo_SetGateTag @0x4CD990,
+// CMissionInfo_SetMetTag @0x4CD9B0 (0x20 each); CMissionInfo_SetDescription @0x4CD970,
+// CMissionInfo_SetBriefingOutput @0x4CDA40 - @0x4CDA51 (0x200 each)]
+bool check_string_fields_are_cut() {
+	const std::string name(40, 'n');
+	const std::string text(600, 't');
+	const std::string body = "VAR LOBBYNAME " + name + "\r\nVAR METIPADDRESS " + name +
+	                         "\r\nVAR METLABEL " + name + "\r\nVAR UDPCODE1 " + name +
+	                         "\r\nVAR UDPCODE2 " + name + "\r\nVAR STARTUPURL " + text +
+	                         "\r\nVAR GLSVSSREQUEST " + text + "\r\n";
+	opennova::GateResponse r;
+	if (!expect(opennova::gate_response_parse(body, r) && r.var_count == 7, "seven long fields parse"))
+		return false;
+	const std::string kept_name(31, 'n');
+	if (!expect(r.lobby_name == kept_name && r.met_ip == kept_name && r.met_label == kept_name &&
+	                    r.udp_code1 == kept_name && r.udp_code2 == kept_name,
+			"the 32-byte fields keep 31 characters")) return false;
+	const std::string kept_text(511, 't');
+	if (!expect(r.startup_url == kept_text && r.glsvss_request == kept_text,
+			"STARTUPURL and GLSVSSREQUEST keep 511 characters")) return false;
+	opennova::GateResponse fits;
+	if (!expect(opennova::gate_response_parse("VAR GLSVSSREQUEST " + kept_text + "\r\nVAR UDPCODE1 " +
+	                                                  kept_name + "\r\n", fits) &&
+	                    fits.glsvss_request == kept_text && fits.udp_code1 == kept_name,
+			"a value that fits is kept whole")) return false;
+	return true;
+}
+
 bool check_empty_returns_false() {
 	opennova::GateResponse r;
 	if (!expect(!opennova::gate_response_parse("", r), "empty response returns false")) return false;
 	if (!expect(!opennova::gate_response_parse("junk without VAR\n", r),
 			"no VAR lines returns false")) return false;
+	// D-NET-708: VAR lines of no key the parse knows count nothing either.
+	if (!expect(!opennova::gate_response_parse("VAR CUS x\nVAR PVT y\nVAR TimeOnGateServer z\n", r),
+			"unknown keys alone return false")) return false;
+	return true;
+}
+
+// The live gate's reply is its CRLF lines and one NUL (LN S1b, 2026-10-23). The parse ends at the
+// first NUL: a trailing one changes nothing, and no byte past one is read, a line it cuts read up
+// to it (D-NET-NEW-L9-33).
+// [orig: Napi_ReadLineFromBuffer @0x616CC0 - @0x616CEE / @0x616D01, @0x616D17, @0x616D49..0x616D52;
+//  CNapiFileReader_ReadAndTokenizeLine @0x6336E0 - @0x633737; CNapiGateManager_ProcessResponse
+//  @0x4CED20 - @0x4CF4E7]
+bool check_parse_ends_at_nul() {
+	const std::string text = "GATEPROTOCOL \"1.0\"\r\n"
+			"VAR \"LobbyName\" \"jop_2_consumer\"\r\n"
+			"VAR \"udpnovaworld\" \"198.51.100.7:64206\"\r\n"
+			"VAR \"TimeOnGateServer\" \"Fri Oct 23 21:02:43 2026\"\r\n";
+	std::string live = text;
+	live.push_back('\0');
+	opennova::GateResponse bare;
+	opennova::GateResponse ended;
+	if (!expect(opennova::gate_response_parse(text, bare) && opennova::gate_response_parse(live, ended),
+			"a reply parses with its trailing NUL and without")) return false;
+	if (!expect(ended.var_count == 2 && bare.var_count == 2 && ended.lobby_name == "jop_2_consumer" &&
+			ended.udp_novaworld == std::vector<std::string>{"198.51.100.7:64206"},
+			"the trailing NUL adds nothing")) return false;
+	std::string cut = "VAR \"LobbyName\" \"jop_2_consumer\"\r\nVAR \"UDPCODE1\" ab";
+	cut.push_back('\0');
+	cut += "c\r\nVAR \"udpnovaworld\" \"198.51.100.7:64206\"\r\n";
+	opennova::GateResponse r;
+	if (!expect(opennova::gate_response_parse(cut, r) && r.var_count == 2 && r.udp_code1 == "ab" &&
+			r.udp_novaworld.empty(),
+			"the parse ends at a NUL, the line it cuts read up to it")) return false;
 	return true;
 }
 
@@ -346,7 +413,9 @@ int main() {
 	if (!check_numeric_keys_skip_the_nbsp()) return 1;
 	if (!check_ignores_unknown_and_malformed()) return 1;
 	if (!check_every_udpnovaworld_line_is_kept()) return 1;
+	if (!check_string_fields_are_cut()) return 1;
 	if (!check_empty_returns_false()) return 1;
+	if (!check_parse_ends_at_nul()) return 1;
 	std::printf("OK: gate response KV parser (quoted + unquoted; 19 retail VARs + CUS/PVT)\n");
 	return 0;
 }

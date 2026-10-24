@@ -67,15 +67,15 @@ func _key_event(keycode: Key, pressed: bool, shift_pressed := false) -> InputEve
 
 
 # One press-and-release of `keycode` through Input: the same device edge feeds
-# MainGame._unhandled_key_input (the event) and the presenters' polled binding
-# rows (Input's physical key state, sampled in the next shell frames).
+# MainGame's key queue (the event) and the presenters' polled binding rows
+# (Input's physical key state). The keyboard pass runs in an update's input frame
+# (engine inmatch::TickInputSource carries the witness), so each edge waits for
+# the next update.
 func _tap(keycode: Key) -> void:
 	Input.parse_input_event(_key_event(keycode, true))
-	await get_tree().process_frame
-	await get_tree().process_frame
+	await _next_update()
 	Input.parse_input_event(_key_event(keycode, false))
-	await get_tree().process_frame
-	await get_tree().process_frame
+	await _next_update()
 
 
 # The Shift chord as a real keyboard produces it: Shift down, the key down
@@ -84,12 +84,25 @@ func _tap_with_shift(keycode: Key) -> void:
 	Input.parse_input_event(_key_event(KEY_SHIFT, true, true))
 	await get_tree().process_frame
 	Input.parse_input_event(_key_event(keycode, true, true))
-	await get_tree().process_frame
-	await get_tree().process_frame
+	await _next_update()
 	Input.parse_input_event(_key_event(keycode, false, true))
 	await get_tree().process_frame
 	Input.parse_input_event(_key_event(KEY_SHIFT, false, false))
+	await _next_update()
+
+
+# Frames until the session ran an update, whose input frame passed the keys the
+# frames before it queued: a headless frame can bank under one 16 ms quantum, so a
+# key may wait a few frames (D-NET-NEW-LI-8). Every update steps the main-frame
+# counter, a paused one too. Bounded by wall time, not frames.
+func _next_update() -> void:
+	var sim: Simulation = _shell.get_world().get_sim() if _shell != null else null
+	var before := int(sim.get_main_frame_counter()) if sim != null else 0
+	var deadline := Time.get_ticks_msec() + 2000
 	await get_tree().process_frame
+	while sim != null and int(sim.get_main_frame_counter()) == before \
+			and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
 	await get_tree().process_frame
 
 
@@ -179,6 +192,7 @@ func test_h_is_the_sp_pause_key_and_no_hud_key() -> void:
 	var nvg_before: bool = world.local_player_view().nvg_active
 
 	await _tap(KEY_H)
+	await _await_pause_word(hud, true)
 	assert_true(hud.toggles().is_paused(), "H flips the SP pause word")
 	assert_eq(hud.friendly_tag_mode(), tags_before, "H drives no other HUD presenter action")
 	assert_eq(hud.hud_detail_level(), detail_before, "H is not a declutter key")
@@ -188,8 +202,134 @@ func test_h_is_the_sp_pause_key_and_no_hud_key() -> void:
 	assert_eq(world.local_player_view().nvg_active, nvg_before,
 			"the router's NVG leg is N, not H")
 	await _tap(KEY_H)
+	await _await_pause_word(hud, false)
 	assert_false(hud.toggles().is_paused(), "a second H clears the pause word")
 	assert_true(shell.is_gameplay_input_active(), "play continues after the unpause")
+
+
+# Frames until `predicate` holds, bounded by wall time: a single-player console line rides
+# the loopback (the client frame sends its C2S 0x04, the next frame's server receive
+# echoes it as S2C 0x06 and its client receive walks it), and the record the walk queues
+# dispatches at the update after.
+func _await_true(predicate: Callable) -> bool:
+	var deadline := Time.get_ticks_msec() + 3000
+	while not bool(predicate.call()) and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	return bool(predicate.call())
+
+
+# One console line through the real key path: the backquote fires the command row
+# (catalog row 71, VK 0xC0), whose record opens the command line (input action 1, no
+# session gate); each character is a key-down the open line takes by its character,
+# and Enter sends the line through the console command (engine hud_chat_entry.h
+# ChatEntry::key and inmatch/client_runtime.h console_command carry the witness).
+# True when the line opened and the Enter closed it.
+func _type_console_line(text: String) -> bool:
+	var hud: GameHudPresenter = _shell.get_hud_presenter()
+	await _tap(KEY_QUOTELEFT)
+	var capturing := func() -> bool: return hud.is_chat_capturing()
+	if not await _await_true(capturing):
+		return false
+	for ch in text:
+		var keycode := ch.to_upper().unicode_at(0) as Key
+		var down := _key_event(keycode, true)
+		down.unicode = ch.unicode_at(0)
+		Input.parse_input_event(down)
+		await _next_update()
+		Input.parse_input_event(_key_event(keycode, false))
+	await _tap(KEY_ENTER)
+	return not hud.is_chat_capturing()
+
+
+# A typed console token of a row whose arm is the embedder's reaches that arm
+# (D-NET-NEW-LI-30): "help" (catalog row 106, code 8) rides the loopback, the echo's
+# walk queues its record, and the drain hands it to the HUD's toggle as F1's record
+# (engine inmatch::Role::dispatch_record carries the witness).
+func test_a_typed_console_token_reaches_the_hud_row() -> void:
+	var shell := await _booted_in_world()
+	if shell == null:
+		return
+	var toggles: HudToggles = shell.get_hud_presenter().toggles()
+	assert_false(toggles.is_help_open(), "the key-binding help starts closed")
+	assert_true(await _type_console_line("help"), "the command line takes the line")
+	var opened := func() -> bool: return toggles.is_help_open()
+	assert_true(await _await_true(opened), "the typed help opens the key-binding help, as F1 does")
+
+
+# The cheat row 117's code 40 (D-NET-NEW-LI-31): a console line whose CRC is the row's
+# token queues its record out of a session, and past the engine's gates (out of a
+# session, a local player) the shell's toggle opens weapon.mnu's WEAPON screen over live
+# play with no armory zone (engine inmatch::Role::dispatch_record carries the witness).
+func test_the_weapon_screen_cheat_line_opens_the_armory() -> void:
+	var shell := await _booted_in_world()
+	if shell == null:
+		return
+	assert_eq(shell.shell_state_name(), "world", "live play")
+	# A line whose CRC-32/MPEG-2 is row 117's token dword 0xCE42F6BD (letters chosen for it).
+	assert_true(await _type_console_line("LI-s26 HbbkHNAA"), "the command line takes the line")
+	var opened := func() -> bool: return shell.shell_state_name() == "armory"
+	assert_true(await _await_true(opened), "the toggle opens the WEAPON screen")
+	shell.resume()
+	assert_eq(shell.shell_state_name(), "world", "the screen's close hands play back")
+
+
+# The Debug row 118's "fps" (code 74): the typed token's record flips the cheat word's
+# 0x400 bit, under which the HUD draws the frame-rate line over the main loop's window
+# in the original's format; a second "fps" takes it down (engine hud/hud_frame.h
+# HudFrameRateOverlay and world::TickAccumulator::frame_rate_stats carry the witness).
+func test_fps_raises_the_frame_rate_overlay() -> void:
+	var shell := await _booted_in_world()
+	if shell == null:
+		return
+	var hud: HudOverlay = shell.get_hud_presenter().get_game_hud()
+	assert_not_null(hud, "the HUD overlay is built")
+	if hud == null:
+		return
+	assert_eq(hud.get_frame_rate_overlay_text(), "", "the overlay starts down")
+	assert_true(await _type_console_line("fps"), "the command line takes the line")
+	var raised := func() -> bool: return hud.get_frame_rate_overlay_text().begins_with("FR ")
+	assert_true(await _await_true(raised), "the typed fps raises the overlay")
+	var line := hud.get_frame_rate_overlay_text()
+	var shape := RegEx.create_from_string("^FR [ 0-9]{2,}  MN [ 0-9]{2,} MX [ 0-9]{2,} CPU [0-9]+$")
+	assert_not_null(shape.search(line), "the line keeps the original's format: '%s'" % line)
+	# The authority takes one console line a second from a slot (the word the chat throttle
+	# shares), so a second line its receive meets inside that second is dropped: wait out a
+	# second past the first line's echo on both clocks the host may read, the process clock
+	# (GetTickCount's, 1.1 s of it) and the logic ticks (62), so a tick bank catching up
+	# cannot land the line inside it (engine inmatch/server_console.h
+	# Server_HandleConsoleCommandMessage carries the witness).
+	var sim: Simulation = shell.get_world().get_sim()
+	var echoed := int(sim.get_logic_tick())
+	var echoed_ms := Time.get_ticks_msec()
+	var a_second_on := func() -> bool: return int(sim.get_logic_tick()) >= echoed + 62 and Time.get_ticks_msec() >= echoed_ms + 1100
+	assert_true(await _await_true(a_second_on), "a second of the session's clock passes")
+	assert_true(await _type_console_line("fps"), "the command line takes the second line")
+	var lowered := func() -> bool: return hud.get_frame_rate_overlay_text() == ""
+	assert_true(await _await_true(lowered), "a second fps takes the overlay down")
+
+
+# A typed HUD-toggle row's argument reaches its case (D-NET-NEW-LI-38): "mousescale 200"
+# rides the loopback, the echo's walk queues the row's record with atol(200) as its first
+# argument, and the step takes it as the word outright (engine hud/hud_toggles.h
+# kMouseScaleParamShift carries the witness).
+func test_a_typed_mousescale_sets_the_word() -> void:
+	var shell := await _booted_in_world()
+	if shell == null:
+		return
+	var sim: Simulation = shell.get_world().get_sim()
+	assert_ne(int(sim.get_session_mouse_sensitivity()), 200, "the word starts elsewhere")
+	assert_true(await _type_console_line("mousescale 200"), "the command line takes the line")
+	var set_word := func() -> bool: return int(sim.get_session_mouse_sensitivity()) == 200
+	assert_true(await _await_true(set_word), "the typed argument sets the sensitivity to 200")
+
+
+# A key event dispatches at the next update's drain (D-NET-NEW-LI-8): a headless
+# frame can bank under one 16 ms quantum, so the H press may wait a few frames for
+# the update that reads it. Bounded by wall time, not frames.
+func _await_pause_word(hud: GameHudPresenter, paused: bool) -> void:
+	var deadline := Time.get_ticks_msec() + 2000
+	while hud.toggles().is_paused() != paused and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
 
 
 # F9 / F10 open the emotes and radio menus (keep-one with each other); Esc

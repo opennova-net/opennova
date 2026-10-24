@@ -10,11 +10,13 @@
 
 #include "normalization.h"
 
+#include <base/io/tick_rate.h>
 #include <net/npwire/flat_tlv.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <iterator>
 #include <map>
@@ -39,6 +41,69 @@ bool stable_identity(char dir, uint16_t identity) {
 	return std::find(std::begin(kStableS), std::end(kStableS), identity) != std::end(kStableS);
 }
 
+// The reload round trip: the joiner's C2S 0x25 request and the host's S2C 0x49 echo
+// (count.reload_echo).
+bool reload_echo_identity(char dir, uint16_t identity) {
+	return (dir == 'C' && identity == 0x025) || (dir == 'S' && identity == 0x049);
+}
+
+// A run's reload round trip on the wire (count.reload_echo): its first C2S 0x25's
+// datagram, the first S2C 0x49 at or after it, and the longest entry spacing the
+// auto-reload loop can have had: a request datagram that follows another with no C
+// datagram between them carries the n requests the loop entered between the two
+// sends, so n - 1 spacings fit in the gap. Wire time: the external capture, else the
+// evidence capture through `end_ns` (trace.read_time). 0 where the run shows none.
+struct ReloadTrip {
+	uint64_t first_request_ns = 0;
+	uint64_t first_echo_ns = 0;
+	uint64_t loop_bound_ns = 0;
+};
+
+ReloadTrip reload_trip(const RunFacts &run, uint64_t end_ns) {
+	static_assert(has_normalization("trace.read_time"));
+	struct Mark {
+		uint64_t ts_ns;
+		char dir;
+		uint16_t identity;
+	};
+	std::vector<Mark> marks;
+	if (run.external_loaded) {
+		for (const WireTimedEvent &event : run.external_events)
+			marks.push_back({ event.ts_ns, event.dir, event.identity });
+	} else {
+		for (const wire::ParityEvent &event : run.trace.events)
+			if (event.ts_ns <= end_ns)
+				marks.push_back({ event.ts_ns, event.dir, event_identity(event) });
+	}
+	std::stable_sort(marks.begin(), marks.end(),
+			[](const Mark &a, const Mark &b) { return a.ts_ns < b.ts_ns; });
+	// The C datagrams (one capture time each) and the requests each carries.
+	std::vector<std::pair<uint64_t, size_t>> sends;
+	ReloadTrip trip;
+	for (const Mark &mark : marks) {
+		if (mark.dir == 'S') {
+			if (mark.identity == 0x049 && trip.first_request_ns != 0 && trip.first_echo_ns == 0)
+				trip.first_echo_ns = mark.ts_ns;
+			continue;
+		}
+		if (sends.empty() || sends.back().first != mark.ts_ns)
+			sends.push_back({ mark.ts_ns, 0 });
+		if (mark.identity != 0x025)
+			continue;
+		++sends.back().second;
+		if (trip.first_request_ns == 0)
+			trip.first_request_ns = mark.ts_ns;
+	}
+	for (size_t i = 1; i < sends.size(); ++i) {
+		if (sends[i - 1].second == 0 || sends[i].second < 2)
+			continue;
+		const uint64_t bound = (sends[i].first - sends[i - 1].first) / (sends[i].second - 1);
+		if (trip.loop_bound_ns == 0 || bound < trip.loop_bound_ns)
+			trip.loop_bound_ns = bound;
+	}
+	return trip;
+}
+
 MetricValue metric(char dir, const char *name, std::string key, const char *code) {
 	MetricValue value;
 	value.direction = dir;
@@ -49,10 +114,13 @@ MetricValue metric(char dir, const char *name, std::string key, const char *code
 }
 
 // ---------------------------------------------------------------------------
-// The tag histogram over the comparison interval
+// The tag histogram over the pair's common tag window: each run's first packet
+// plus the shorter of the two comparison intervals (window.tag_common_length),
+// with a presence grace past it (window.tag_presence_grace).
 
 struct TagStats {
 	size_t count = 0;
+	std::vector<uint64_t> times; // each occurrence's capture time
 	std::set<size_t> lengths;
 	std::set<std::string> bodies; // raw bytes; material events only
 	bool material = true;
@@ -64,10 +132,15 @@ struct TagProfile {
 	std::vector<uint16_t> first_order;
 };
 
-TagProfile tag_profile(const RunFacts &run, char dir) {
+// The end of a run's tag window: its first packet plus the pair's common length.
+uint64_t tag_window_end(const RunFacts &run, double common_ms) {
+	return run.first_packet_ns + static_cast<uint64_t>(common_ms * 1e6);
+}
+
+TagProfile tag_profile(const RunFacts &run, char dir, uint64_t end_ns) {
 	TagProfile profile;
 	for (const wire::ParityEvent &event : run.trace.events) {
-		if (event.dir != dir || !run.in_comparison(event.ts_ns))
+		if (event.dir != dir || event.ts_ns > end_ns)
 			continue;
 		const uint16_t identity = event_identity(event);
 		auto inserted = profile.tags.try_emplace(identity);
@@ -75,6 +148,7 @@ TagProfile tag_profile(const RunFacts &run, char dir) {
 			profile.first_order.push_back(identity);
 		TagStats &stats = inserted.first->second;
 		++stats.count;
+		stats.times.push_back(event.ts_ns);
 		stats.lengths.insert(event.length);
 		if (!event.material) {
 			stats.material = false;
@@ -94,11 +168,159 @@ std::set<std::string> length_keys(const std::set<size_t> &lengths) {
 	return out;
 }
 
+// Whether `identity` occurs in `run` after `from_ns`, up to `to_ns`.
+bool seen_between(const RunFacts &run, char dir, uint16_t identity, uint64_t from_ns, uint64_t to_ns) {
+	for (const wire::ParityEvent &event : run.trace.events)
+		if (event.dir == dir && event.ts_ns > from_ns && event.ts_ns <= to_ns &&
+				event_identity(event) == identity)
+			return true;
+	return false;
+}
+
+// A stream's join: the run's C2S 0x0B, which the host runs through Server_OnPlayerJoin
+// [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10 (the call @0x51ABA1)], setting the
+// slot's state 6 [orig: Server_OnPlayerJoin @0x51A680 (the store @0x51A712)]: the last
+// one at or before the stream's first send `stream_first` (a rotation's joiner joins
+// each mission), else its first; else the first S2C 0x0F; 0 when neither
+// (window.tag_stream_anchor).
+uint64_t join_anchor(const RunFacts &run, uint64_t stream_first) {
+	uint64_t first_join = 0, stream_join = 0, load = 0;
+	for (const wire::ParityEvent &event : run.trace.events) {
+		const uint16_t identity = event_identity(event);
+		if (event.dir == 'C' && identity == 0x00B) {
+			if (first_join == 0 || event.ts_ns < first_join)
+				first_join = event.ts_ns;
+			if (event.ts_ns <= stream_first && event.ts_ns > stream_join)
+				stream_join = event.ts_ns;
+		}
+		if (event.dir == 'S' && identity == 0x00F && (load == 0 || event.ts_ns < load))
+			load = event.ts_ns;
+	}
+	return stream_join != 0 ? stream_join : first_join != 0 ? first_join : load;
+}
+
+// The overlay buffer: 16 six-byte entries behind a count byte, flushed first when full
+// [orig: Server_QueueOverlayStateEntry @0x50FEA0 (the full test @0x50FEA0..0x50FEAE, the
+// entry store @0x50FECA..0x50FEFF)].
+constexpr size_t kOverlayEntry = 6;
+constexpr size_t kOverlayFull = 1 + 16 * kOverlayEntry;
+
+// A run's S2C 0x40 lengths by kind (length.S.0x40.burst_tail): `drawn` holds the last
+// 0x40 after a full one in the same datagram (one visit's burst) of every visit but
+// the session's first (the join's, no draw); `fixed` every other short 0x40 (the join
+// burst's tail, a lone visit's 0x40).
+struct BurstTails {
+	std::set<size_t> drawn, fixed;
+};
+
+BurstTails burst_tails(const RunFacts &run, uint64_t end_ns) {
+	std::vector<const wire::ParityEvent *> overlay;
+	for (const wire::ParityEvent &event : run.trace.events)
+		if (event.dir == 'S' && event_identity(event) == 0x040 && event.ts_ns <= end_ns)
+			overlay.push_back(&event);
+	BurstTails out;
+	for (size_t i = 0; i < overlay.size(); ++i) {
+		const wire::ParityEvent &event = *overlay[i];
+		if (event.length == kOverlayFull)
+			continue;
+		const bool last_of_visit = i + 1 == overlay.size() || overlay[i + 1]->frame != event.frame;
+		const bool after_full = i > 0 && overlay[i - 1]->frame == event.frame &&
+				overlay[i - 1]->length == kOverlayFull;
+		const bool join_visit = overlay[0]->frame == event.frame;
+		if (last_of_visit && after_full && !join_visit)
+			out.drawn.insert(event.length);
+		else
+			out.fixed.insert(event.length);
+	}
+	return out;
+}
+
+// order.S.clock: a S2C stream runs on two clocks, the joiner's admission (its first
+// S2C 0x0F) and the host's mission clock. The 0x0A timer block carries the latter as
+// g_RoundTimeRemaining / 62 [orig: NetPacket_WritePlayerState @0x4FF6B0 (the read
+// @0x4FFA8D, the divide @0x4FFA97..0x4FFAA8; -1 under the pre-round delay or with no
+// time left, @0x4FFA81..0x4FFA95)], which the main frame steps down by g_CurrentTick's
+// own step [orig: Game_ProcessMainFrame @0x5263F0 (`add g_CurrentTick, ebx` @0x5265B4,
+// `sub g_RoundTimeRemaining, ebx` @0x526602)], one tick per 16 ms (io::kTickMs). The
+// wall time a run's round clock reaches zero is a frame's capture time plus
+// (62 x seconds + 31) ticks, to within half a 62-tick step.
+constexpr int64_t kClockToleranceNs = 500ll * 1000000ll;
+constexpr int64_t kClockSpreadNs = 2000ll * 1000000ll;
+
+struct RunClocks {
+	bool valid = false;
+	int64_t join_ns = 0; // the first S2C 0x0F
+	int64_t zero_ns = 0; // the round clock's zero, the median over the timer blocks
+};
+
+RunClocks run_clocks(const RunFacts &run) {
+	RunClocks clocks;
+	for (const wire::ParityEvent &event : run.trace.events)
+		if (event.dir == 'S' && event_identity(event) == 0x00F) {
+			clocks.join_ns = int64_t(event.ts_ns);
+			break;
+		}
+	std::vector<int64_t> zeros;
+	constexpr int64_t kTickNs = int64_t(io::kTickMs) * 1000000ll;
+	for (const wire::ParityFrameState &frame : run.trace.frames)
+		if (frame.timer_present && frame.timer_seconds >= 0)
+			zeros.push_back(int64_t(frame.ts_ns) +
+					(int64_t(io::kTicksPerSecondInt) * frame.timer_seconds +
+							io::kTicksPerSecondInt / 2) *
+							kTickNs);
+	if (clocks.join_ns == 0 || zeros.empty())
+		return clocks;
+	const auto spread = std::minmax_element(zeros.begin(), zeros.end());
+	// A restarted round (the timer jumps) or a run without one leaves no single clock.
+	if (*spread.second - *spread.first > kClockSpreadNs)
+		return clocks;
+	std::nth_element(zeros.begin(), zeros.begin() + zeros.size() / 2, zeros.end());
+	clocks.zero_ns = zeros[zeros.size() / 2];
+	clocks.valid = true;
+	return clocks;
+}
+
+// Each identity both orders hold, on the clock its first occurrences agree on within the
+// tolerance in the two runs ('M' the mission clock, 'J' the admission), when the runs'
+// admissions lie more than twice the tolerance apart on the mission clock; an identity
+// on neither clock has no entry. `offset_ns` is the subject's admission on the mission
+// clock less RR's.
+std::map<uint16_t, char> order_clocks(const RunFacts &rr, const TagProfile &a,
+		const RunFacts &other, const TagProfile &b, const std::vector<uint16_t> &identities,
+		int64_t &offset_ns) {
+	std::map<uint16_t, char> out;
+	offset_ns = 0;
+	const RunClocks ca = run_clocks(rr), cb = run_clocks(other);
+	if (!ca.valid || !cb.valid)
+		return out;
+	offset_ns = (cb.join_ns - cb.zero_ns) - (ca.join_ns - ca.zero_ns);
+	if (std::llabs(offset_ns) <= 2 * kClockToleranceNs)
+		return out;
+	for (const uint16_t identity : identities) {
+		const std::vector<uint64_t> &ta = a.tags.at(identity).times,
+									&tb = b.tags.at(identity).times;
+		const int64_t first_a = int64_t(*std::min_element(ta.begin(), ta.end()));
+		const int64_t first_b = int64_t(*std::min_element(tb.begin(), tb.end()));
+		const int64_t on_join = (first_b - cb.join_ns) - (first_a - ca.join_ns);
+		const int64_t on_mission = (first_b - cb.zero_ns) - (first_a - ca.zero_ns);
+		if (std::llabs(on_mission) <= kClockToleranceNs)
+			out[identity] = 'M';
+		else if (std::llabs(on_join) <= kClockToleranceNs)
+			out[identity] = 'J';
+	}
+	return out;
+}
+
 void compare_tags(
 		const RunFacts &rr, const RunFacts &other, char dir, std::vector<MetricValue> &out) {
 	static_assert(has_normalization("event.gameplay_body"));
-	const TagProfile a = tag_profile(rr, dir);
-	const TagProfile b = tag_profile(other, dir);
+	static_assert(has_normalization("window.tag_common_length"));
+	static_assert(has_normalization("window.tag_presence_grace"));
+	constexpr uint64_t kPresenceGraceNs = 10ull * 1000000000ull;
+	const double common_ms = std::min(rr.comparison_ms, other.comparison_ms);
+	const uint64_t end_a = tag_window_end(rr, common_ms), end_b = tag_window_end(other, common_ms);
+	const TagProfile a = tag_profile(rr, dir, end_a);
+	const TagProfile b = tag_profile(other, dir, end_b);
 	std::set<uint16_t> identities;
 	for (const auto &entry : a.tags)
 		identities.insert(entry.first);
@@ -109,11 +331,18 @@ void compare_tags(
 		const auto in_b = b.tags.find(identity);
 		const bool has_a = in_a != a.tags.end(), has_b = in_b != b.tags.end();
 		const std::string key = identity_key(identity);
+		// An identity one side carries is not missing on the other when it lands
+		// just past that side's window end: the cut, not the wire.
+		const bool graced = has_a != has_b &&
+				(has_a ? seen_between(other, dir, identity, end_b, end_b + kPresenceGraceNs)
+					   : seen_between(rr, dir, identity, end_a, end_a + kPresenceGraceNs));
 		MetricValue presence = metric(dir, "tag_presence", key,
 				has_a && !has_b			  ? "MISSING_TAG"
 						: !has_a && has_b ? "UNEXPECTED_TAG"
 										  : "TAG_PRESENCE");
-		presence.distance = has_a == has_b ? 0.0 : 1.0;
+		presence.distance = has_a == has_b || graced ? 0.0 : 1.0;
+		if (graced)
+			presence.detail = "past the window end, inside the 10 s presence grace";
 		presence.subject = has_b ? "present" : "absent";
 		presence.reference = has_a ? "present" : "absent";
 		out.push_back(presence);
@@ -122,8 +351,84 @@ void compare_tags(
 		const TagStats &sa = in_a->second, &sb = in_b->second;
 
 		MetricValue count = metric(dir, "tag_count", key, "COUNT_MISMATCH");
-		count_metric(
-				count, double(sa.count), rr.comparison_ms, double(sb.count), other.comparison_ms);
+		const double cadence = sa.count < 20 ? periodic_cadence_ms(sa.times, end_a) : 0.0;
+		if (reload_echo_identity(dir, identity)) {
+			// The auto-reload loop re-sends until the first echo lands: past the first
+			// request the count is the echo's latency against the loop's period
+			// (count.reload_echo).
+			static_assert(has_normalization("count.reload_echo"));
+			const size_t a_class = std::min<size_t>(sa.count, 2);
+			const size_t b_class = std::min<size_t>(sb.count, 2);
+			count.distance = a_class == b_class ? 0.0 : 1.0;
+			count.floor = 0.0;
+			count.subject = std::to_string(sb.count);
+			count.reference = std::to_string(sa.count);
+			count.detail = "a lone request against a looped one (1 against 2 or more)";
+			if (b_class == 1 && a_class == 2) {
+				// A lone request is retail's own outcome when its echo landed before the
+				// loop's next entry: inside the longest spacing the reference's own
+				// requests allow.
+				const ReloadTrip lone = reload_trip(other, end_b);
+				const ReloadTrip looped = reload_trip(rr, end_a);
+				if (lone.first_echo_ns != 0 && looped.loop_bound_ns != 0) {
+					const uint64_t latency = lone.first_echo_ns - lone.first_request_ns;
+					const bool inside = latency < looped.loop_bound_ns;
+					count.distance = inside ? 0.0 : 1.0;
+					count.detail = "a lone request whose echo landed " +
+							std::to_string(latency / 1000000) + " ms after it, " +
+							(inside ? "inside" : "past") +
+							" the reference loop's longest entry spacing (" +
+							std::to_string(looped.loop_bound_ns / 1000000) + " ms)";
+				}
+			}
+		} else if (cadence > 0.0) {
+			const uint64_t first = *std::min_element(sb.times.begin(), sb.times.end());
+			const double span_ms = end_b > first ? double(end_b - first) / 1e6 : 0.0;
+			cadence_count_metric(count, double(sa.count), cadence, double(sb.count), span_ms);
+		} else if (sa.count >= 20) {
+			// A stream counts from each run's join (on a rotation, the join of the mission
+			// the stream starts in) over the pair's shorter span from it, a timer-phase one
+			// too (its first send's phase costs one occurrence); a stream that reaches the
+			// joiner before its join keeps its own first (window.tag_stream_anchor).
+			static_assert(has_normalization("window.tag_stream_anchor"));
+			const uint64_t own_a = *std::min_element(sa.times.begin(), sa.times.end());
+			const uint64_t own_b = *std::min_element(sb.times.begin(), sb.times.end());
+			const uint64_t join_a = join_anchor(rr, own_a), join_b = join_anchor(other, own_b);
+			const bool joined = join_a != 0 && join_b != 0;
+			const uint64_t first_a = joined ? std::min(join_a, own_a) : own_a;
+			const uint64_t first_b = joined ? std::min(join_b, own_b) : own_b;
+			auto within = [](const std::vector<uint64_t> &times, uint64_t first, uint64_t span) {
+				return double(std::count_if(times.begin(), times.end(),
+						[&](uint64_t t) { return t >= first && t - first <= span; }));
+			};
+			const bool from_join = joined && own_a >= join_a && own_b >= join_b;
+			if ((rr.info.ends_session || other.info.ends_session) && from_join) {
+				// A scenario that ends the joiner's session stops a stream of the slot
+				// at the disconnect, a readiness wait after the join: each run counts
+				// from its join to its own coverage end, over that span; a load-phase
+				// stream (one before the join) keeps the common span
+				// (window.session_end).
+				static_assert(has_normalization("window.session_end"));
+				auto covered = [](const RunFacts &run, uint64_t end, uint64_t first) {
+					const uint64_t until = std::min(end, coverage_end(run));
+					return until > first ? until - first : 0;
+				};
+				const uint64_t span_a = covered(rr, end_a, first_a);
+				const uint64_t span_b = covered(other, end_b, first_b);
+				count_metric(count, within(sa.times, first_a, span_a), double(span_a) / 1e6,
+						within(sb.times, first_b, span_b), double(span_b) / 1e6);
+				count.detail += " over each run's covered play from its join";
+			} else {
+				const uint64_t span = std::min(end_a - first_a, end_b - first_b);
+				const double span_ms = double(span) / 1e6;
+				count_metric(count, within(sa.times, first_a, span), span_ms,
+						within(sb.times, first_b, span), span_ms);
+				count.detail += " over " + std::to_string(int64_t(span_ms / 1000.0)) +
+						(joined ? " s from each run's join" : " s from each run's first");
+			}
+		} else {
+			count_metric(count, double(sa.count), common_ms, double(sb.count), common_ms);
+		}
 		out.push_back(count);
 
 		const bool gameplay = identity == gameplay_identity(dir);
@@ -144,7 +449,30 @@ void compare_tags(
 			out.push_back(constant);
 		} else if (!length_set_exempt(dir, identity)) {
 			MetricValue lengths = metric(dir, "length_set", key, "LENGTH_SET_MISMATCH");
-			const std::set<std::string> la = length_keys(sa.lengths), lb = length_keys(sb.lengths);
+			std::set<size_t> na = sa.lengths, nb = sb.lengths;
+			if (dir == 'S' && identity == 0x040) {
+				// A drawn burst tail one entry from a drawn tail of the other run is
+				// that draw (length.S.0x40.burst_tail).
+				static_assert(has_normalization("length.S.0x40.burst_tail"));
+				const BurstTails ta = burst_tails(rr, end_a), tb = burst_tails(other, end_b);
+				auto drawn = [](size_t length, const BurstTails &own,
+									 const std::set<size_t> &other_lengths, const BurstTails &other) {
+					return own.drawn.count(length) && !own.fixed.count(length) &&
+							!other_lengths.count(length) &&
+							(other.drawn.count(length + kOverlayEntry) ||
+									other.drawn.count(length - kOverlayEntry));
+				};
+				std::set<size_t> fa, fb;
+				for (const size_t length : na)
+					if (!drawn(length, ta, nb, tb))
+						fa.insert(length);
+				for (const size_t length : nb)
+					if (!drawn(length, tb, na, ta))
+						fb.insert(length);
+				na = std::move(fa);
+				nb = std::move(fb);
+			}
+			const std::set<std::string> la = length_keys(na), lb = length_keys(nb);
 			lengths.distance = jaccard_distance(la, lb);
 			lengths.subject = render_set(lb);
 			lengths.reference = render_set(la);
@@ -180,19 +508,57 @@ void compare_tags(
 		}
 	}
 
-	// First-occurrence order of the tags both carry.
-	std::vector<std::string> order_a, order_b;
+	// First-occurrence order of the tags both carry. A C2S 0x22 re-request rides the
+	// S2C 0x16's phase unless both runs' 0x16 rode the 0x11 (order.C.0x22.phase).
+	const bool sync_phase = dir == 'C' &&
+			(sync_request_phase_bound(rr) || sync_request_phase_bound(other));
+	auto ordered = [dir, sync_phase](uint16_t identity) {
+		return !first_order_excluded(dir, identity) && !(sync_phase && identity == 0x022);
+	};
+	std::vector<uint16_t> ids_a, ids_b;
 	for (const uint16_t identity : a.first_order)
-		if (b.tags.count(identity) && !first_order_excluded(dir, identity))
-			order_a.push_back(identity_key(identity));
+		if (b.tags.count(identity) && ordered(identity))
+			ids_a.push_back(identity);
 	for (const uint16_t identity : b.first_order)
-		if (a.tags.count(identity) && !first_order_excluded(dir, identity))
-			order_b.push_back(identity_key(identity));
+		if (a.tags.count(identity) && ordered(identity))
+			ids_b.push_back(identity);
+	// S2C pairs across the two clocks are left out (order.S.clock): their order is the
+	// host tick the joiner was admitted on, which the case does not fix.
+	static_assert(has_normalization("order.S.clock"));
+	int64_t offset_ns = 0;
+	const std::map<uint16_t, char> clock = dir == 'S'
+			? order_clocks(rr, a, other, b, ids_a, offset_ns)
+			: std::map<uint16_t, char>{};
+	auto across = [&clock](uint16_t x, uint16_t y) {
+		const auto cx = clock.find(x), cy = clock.find(y);
+		return cx != clock.end() && cy != clock.end() && cx->second != cy->second;
+	};
+	std::map<uint16_t, size_t> position;
+	for (size_t i = 0; i < ids_b.size(); ++i)
+		position.emplace(ids_b[i], i);
+	size_t inversions = 0, left_out = 0;
+	for (size_t i = 0; i < ids_a.size(); ++i)
+		for (size_t j = i + 1; j < ids_a.size(); ++j)
+			if (position.at(ids_a[i]) > position.at(ids_a[j]))
+				++(across(ids_a[i], ids_a[j]) ? left_out : inversions);
+	std::vector<std::string> order_a, order_b;
+	for (const uint16_t identity : ids_a)
+		order_a.push_back(identity_key(identity));
+	for (const uint16_t identity : ids_b)
+		order_b.push_back(identity_key(identity));
 	MetricValue order = metric(dir, "first_order", "", "FIRST_ORDER_MISMATCH");
-	order.distance = double(order_inversions(order_a, order_b));
+	order.distance = double(inversions);
 	order.subject = render_list(order_b);
 	order.reference = render_list(order_a);
 	order.detail = "pairwise inversions between the first-occurrence orders";
+	if (left_out != 0) {
+		char text[160];
+		std::snprintf(text, sizeof text,
+				"; %zu across the admission and mission clocks left out (admitted %+.2f s "
+				"apart on the mission clock)",
+				left_out, double(offset_ns) / 1e9);
+		order.detail += text;
+	}
 	out.push_back(order);
 }
 
@@ -293,11 +659,15 @@ void tally(Distribution &d, const std::string &key) {
 	++d.total;
 }
 
-constexpr size_t kDistributionMinSamples = 8;
+// One sample moves a key's share by 1 / n against the max(0.08, RR / 2) unit, so
+// under 13 samples one sample's phase alone crosses a unit, on either side
+// (steady.distribution_floor).
+constexpr size_t kDistributionMinSamples = 13;
 
 // Share delta in tolerance units: max(0.08, RR share / 2) is one unit.
 MetricValue distribution_metric(char dir, const char *name, const char *code, const Distribution &a,
 		const Distribution &b) {
+	static_assert(has_normalization("steady.distribution_floor"));
 	MetricValue value = metric(dir, name, "", code);
 	value.floor = 1.0;
 	value.subject =
@@ -305,10 +675,11 @@ MetricValue distribution_metric(char dir, const char *name, const char *code, co
 	value.reference =
 			std::to_string(a.total) + " samples, " + std::to_string(a.counts.size()) + " keys";
 	if (a.total < kDistributionMinSamples || b.total < kDistributionMinSamples) {
+		// Either side short is the window's phase, never a finding: the row skips.
 		value.comparable = false;
-		value.reference_short = a.total < kDistributionMinSamples;
+		value.reference_short = true;
 		value.code = "GAMEPLAY_DISTRIBUTION_UNEXERCISED";
-		value.detail = "fewer than 8 samples after the first gameplay packet";
+		value.detail = "fewer than 13 samples after the first gameplay packet on a side";
 		return value;
 	}
 	std::set<std::string> keys;
@@ -371,12 +742,17 @@ void steady_profile(const RunFacts &run, char dir, Distribution &groups, Distrib
 				boundary = i;
 				break;
 			}
+		// The order runs over the producers' records: where a receive-pump reply lands
+		// among them is its request's arrival phase (group.S.0x57.order).
+		static_assert(has_normalization("group.S.0x57.order"));
 		std::string previous;
 		for (size_t i = boundary + 1; i < origin.size(); ++i) {
 			if (origin[i]->records.empty())
 				continue;
 			tally(groups, steady_group_key(*origin[i]));
 			for (const wire::ParityWireRecord &record : origin[i]->records) {
+				if (group_reply(dir, record.full_tag))
+					continue;
 				const std::string identity = identity_key(record.full_tag);
 				if (!previous.empty())
 					tally(orders, previous + ">" + identity);
@@ -492,9 +868,11 @@ std::string handshake_field_key(uint8_t opcode, const FlatTlvField &field) {
 	const uint32_t size_class = handshake_length_class(opcode, name);
 	const bool in_class = size_class != 0 &&
 			(field.size == size_class || field.size == size_class + 1);
+	static_assert(has_normalization("handshake.0x41.AP"));
 	std::string key = name + "|" +
-			(in_class ? std::to_string(size_class) + "-" + std::to_string(size_class + 1)
-					  : std::to_string(field.size));
+			(handshake_field_size_masked(opcode, name) ? std::string("*")
+					: in_class ? std::to_string(size_class) + "-" + std::to_string(size_class + 1)
+							   : std::to_string(field.size));
 	if (name == "CU" && value.size() >= 5) {
 		// [u8 type][name\0][u16 len][value]
 		const uint8_t type = value[0];
@@ -690,9 +1068,88 @@ void compare_handshakes(
 
 struct Transaction {
 	bool valid = false;
+	bool join_adm = false; // ammo, before the host applied the first uplink (integrity.join_adm)
+	uint32_t adm = UINT32_MAX; // ammo: the ADM the latest C2S 0x0C before it named
 	uint32_t row = 0;
 	uint32_t base_crc = 0; // the reply CRC with the challenge key XORed out
 };
+
+// The spans, as [first, last) indices of the trace's events in capture order, from each
+// C2S 0x0B (a join) to the host's apply of the first C2S 0x0C after it, in which the host
+// still holds the body's class-init ADM (integrity.join_adm). The host's tick runs its
+// receive pump before the scoreboard boundary [orig: Server_TickUpdate @0x51D7E0 (the
+// CNapiNetwork_PumpServerProtocolRecv call @0x51D895, the challenge call @0x51D912)]. The
+// joiner queues its per-frame ping [ts][1] ahead of its 0x0C [orig: Client_ProcessNetworkFrame
+// @0x42C180 (the ping @0x42C44A, the 0x0C @0x42C4A3)], so the pump answers that datagram's
+// ping with an S2C 0x57 [ts][0] [orig: NapiNPServerMsg_HandlePingResponse @0x515070 (the send
+// @0x51510C)] before the 0x0C stores the ADM (@0x4C20A3), and a slot's messages leave in
+// queue order [orig: CNapiNPConnection_BuildOutgoingPackets @0x628430 (the walk from the
+// queue's head @0x6284A7)]: a challenge ahead of that 0x57 was computed before the apply.
+// Without the 0x57 on the wire the span ends at the 0x0C.
+std::vector<std::pair<size_t, size_t>> join_adm_windows(const RunFacts &run) {
+	const std::vector<wire::ParityEvent> &events = run.trace.events;
+	std::vector<std::pair<size_t, size_t>> out;
+	bool open = false;
+	for (size_t i = 0; i < events.size(); ++i) {
+		const wire::ParityEvent &event = events[i];
+		if (event.dir != 'C')
+			continue;
+		const uint16_t identity = event_identity(event);
+		if (identity == 0x00B && !open) {
+			out.emplace_back(i, events.size());
+			open = true;
+			continue;
+		}
+		if (identity != 0x00C || !open)
+			continue;
+		out.back().second = i;
+		open = false;
+		const wire::ParityEvent *ping = nullptr;
+		for (const wire::ParityEvent &other : events)
+			if (other.dir == 'C' && other.frame == event.frame && event_identity(other) == 0x02C &&
+					other.body.size() >= 5 && other.body[4] != 0) {
+				ping = &other;
+				break;
+			}
+		for (size_t k = i + 1; ping && k < events.size(); ++k) {
+			const wire::ParityEvent &pong = events[k];
+			if (pong.dir == 'S' && event_identity(pong) == 0x057 && pong.body.size() >= 5 &&
+					pong.body[4] == 0 &&
+					std::equal(pong.body.begin(), pong.body.begin() + 4, ping->body.begin())) {
+				out.back().second = k;
+				break;
+			}
+		}
+	}
+	return out;
+}
+
+// Each ADM's longest stay in the joiner's uplinks: consecutive C2S 0x0C naming it, from
+// the first to the last (integrity.held_adm).
+std::map<uint32_t, uint64_t> adm_stays(const RunFacts &run) {
+	std::map<uint32_t, uint64_t> out;
+	bool open = false;
+	uint32_t adm = 0;
+	uint64_t first = 0, last = 0;
+	auto finish = [&]() {
+		if (open)
+			out[adm] = std::max(out[adm], last - first);
+	};
+	for (const wire::ParityUplinkState &u : run.trace.uplinks) {
+		if (!u.decoded || !run.in_comparison(u.ts_ns))
+			continue;
+		if (open && u.adm == adm) {
+			last = u.ts_ns;
+			continue;
+		}
+		finish();
+		open = true;
+		adm = u.adm;
+		first = last = u.ts_ns;
+	}
+	finish();
+	return out;
+}
 
 uint32_t u16_at(const std::vector<uint8_t> &b, size_t at) {
 	return b[at] | (uint32_t(b[at + 1]) << 8);
@@ -705,12 +1162,27 @@ std::vector<Transaction> transactions(const RunFacts &run, bool ammo) {
 	const uint16_t challenge_id = ammo ? 0x031 : 0x030, reply_id = ammo ? 0x021 : 0x020;
 	const size_t reply_size = ammo ? 9 : 5;
 	const std::vector<wire::ParityEvent> &events = run.trace.events;
+	// The 0x31 sends the ammo row of the body's equipped ADM, entity+0x2B0
+	// [orig: Server_BroadcastWeaponSlotStateToPlayers @0x508540 (the lookup called @0x508605, the
+	// row @0x50863E)], which the plyr class init writes [orig: PlayerClass_InitEntity
+	// @0x4B1116] until the joiner's uplink does [orig: NetPacket_SerializePlayerState
+	// @0x4C20A3] (or a fired round [orig: Server_ClientFiredRound @0x50BD56]).
+	static_assert(has_normalization("integrity.join_adm"));
+	const std::vector<std::pair<size_t, size_t>> windows =
+			ammo ? join_adm_windows(run) : std::vector<std::pair<size_t, size_t>>{};
 	std::vector<Transaction> out;
+	size_t uplink = 0;
+	uint32_t latest_adm = UINT32_MAX;
 	for (size_t i = 0; i < events.size(); ++i) {
 		const wire::ParityEvent &challenge = events[i];
 		if (challenge.dir != 'S' || event_identity(challenge) != challenge_id ||
 				!run.in_comparison(challenge.ts_ns))
 			continue;
+		for (; uplink < run.trace.uplinks.size() &&
+				run.trace.uplinks[uplink].ts_ns <= challenge.ts_ns;
+				++uplink)
+			if (run.trace.uplinks[uplink].decoded)
+				latest_adm = run.trace.uplinks[uplink].adm;
 		const wire::ParityEvent *reply = nullptr;
 		for (size_t j = i + 1; j < events.size(); ++j) {
 			const uint16_t identity = event_identity(events[j]);
@@ -722,6 +1194,9 @@ std::vector<Transaction> transactions(const RunFacts &run, bool ammo) {
 			}
 		}
 		Transaction t;
+		t.adm = ammo ? latest_adm : UINT32_MAX;
+		for (const auto &window : windows)
+			t.join_adm = t.join_adm || (i >= window.first && i < window.second);
 		if (challenge.body.size() == 3 && reply && reply->body.size() == reply_size) {
 			t.row = challenge.body[0];
 			const uint32_t key = u16_at(challenge.body, 1);
@@ -733,6 +1208,12 @@ std::vector<Transaction> transactions(const RunFacts &run, bool ammo) {
 	}
 	return out;
 }
+
+// The scoreboard boundary that sends the integrity challenges: g_ScoreboardBroadcastTimer
+// counts from 0 and fires past 0x136 [orig: Server_TickUpdate @0x51D7E0 (the reset
+// register @0x51D807, the compare @0x51D901, the challenge call @0x51D912, the reset
+// @0x51D917)], every 311 ticks of 16 ms.
+constexpr uint64_t kIntegrityBoundaryNs = 311ull * uint64_t(io::kTickMs) * 1000000ull;
 
 // A PUNT for a failed CRC: the reliable H:0x03 (identity 0x103) description.
 size_t integrity_punts(const RunFacts &run) {
@@ -760,14 +1241,41 @@ void compare_integrity(const RunFacts &rr, const RunFacts &other, const CompareO
 		const std::vector<Transaction> ta = transactions(rr, ammo), tb = transactions(other, ammo);
 		std::map<uint32_t, std::set<uint32_t>> oracle;
 		std::set<std::string> rows_a, rows_b;
+		// A 0x31 carries the row of the ADM the body holds at the boundary [orig:
+		// Server_BroadcastWeaponSlotStateToPlayers @0x508540 (+0x2B0 @0x5085F6, the row
+		// @0x50863E)], the ADM the joiner's uplink writes (@0x4C20A3), and the family flips
+		// at every boundary (the read @0x50859E, the flip @0x50868E), so an ammo challenge
+		// falls every second boundary: an ADM held under two boundaries in either run is
+		// challenged or not by the stay's phase against them. Such a challenge leaves the row
+		// sets and the unwitnessed rows; RR's CRC still joins the oracle and the run's still
+		// checks against it (integrity.held_adm).
+		static_assert(has_normalization("integrity.held_adm"));
+		const std::map<uint32_t, uint64_t> stays_a = ammo ? adm_stays(rr)
+														  : std::map<uint32_t, uint64_t>{},
+										   stays_b = ammo ? adm_stays(other)
+														  : std::map<uint32_t, uint64_t>{};
+		auto stay_phase = [&stays_a, &stays_b](const Transaction &t) {
+			if (t.adm == UINT32_MAX)
+				return false;
+			auto held = [&t](const std::map<uint32_t, uint64_t> &stays) {
+				const auto found = stays.find(t.adm);
+				return found != stays.end() && found->second >= 2 * kIntegrityBoundaryNs;
+			};
+			return !held(stays_a) || !held(stays_b);
+		};
+		// A challenge the host computed before it applied the joiner's first uplink
+		// carries the class-init ADM's row, there by the join's phase against the
+		// boundary: it leaves the rows, the oracle and the CRC checks, its reply's shape
+		// still counts (integrity.join_adm).
 		for (const Transaction &t : ta)
-			if (t.valid) {
+			if (t.valid && !t.join_adm) {
 				oracle[t.row].insert(t.base_crc);
-				rows_a.insert(std::to_string(t.row));
+				if (!stay_phase(t))
+					rows_a.insert(std::to_string(t.row));
 			}
 		if (options.oracle_pool)
 			for (const Transaction &t : transactions(*options.oracle_pool, ammo))
-				if (t.valid)
+				if (t.valid && !t.join_adm)
 					oracle[t.row].insert(t.base_crc);
 		size_t invalid_a = 0, invalid_b = 0, crc_mismatch = 0, unwitnessed = 0;
 		for (const Transaction &t : ta)
@@ -777,10 +1285,14 @@ void compare_integrity(const RunFacts &rr, const RunFacts &other, const CompareO
 				++invalid_b;
 				continue;
 			}
-			rows_b.insert(std::to_string(t.row));
+			if (t.join_adm)
+				continue;
+			const bool phase = stay_phase(t);
+			if (!phase)
+				rows_b.insert(std::to_string(t.row));
 			const auto found = oracle.find(t.row);
 			if (found == oracle.end())
-				unwitnessed += retail_oracle ? 0 : 1;
+				unwitnessed += retail_oracle || phase ? 0 : 1;
 			else if (!found->second.count(t.base_crc))
 				++crc_mismatch;
 		}
@@ -818,8 +1330,14 @@ void compare_integrity(const RunFacts &rr, const RunFacts &other, const CompareO
 		}
 	}
 
-	// The two families alternate on one phase, each challenge immediately after a
-	// transient S2C 0x16 in the same packet.
+	// The two families are one process-global toggle flipped at every scoreboard
+	// boundary, each challenge immediately after a transient S2C 0x16 in the same
+	// packet [orig: Server_BroadcastWeaponSlotStateToPlayers @0x508540 (the toggle read
+	// @0x50859E, the flip @0x50868E)], sent only to a slot in state 6 whose body's +0x24
+	// bit 1 (mask 0x02) is clear (@0x508584, @0x508594..0x508598): within one mission a challenge's
+	// family is its predecessor's flipped once per boundary between them; an S2C 0x25
+	// ends the mission and the count with it (integrity.family_toggle).
+	static_assert(has_normalization("integrity.family_toggle"));
 	auto stream_faults = [](const RunFacts &run, size_t &repeats, size_t &ungrouped,
 								 size_t &challenges) {
 		repeats = ungrouped = challenges = 0;
@@ -828,15 +1346,24 @@ void compare_integrity(const RunFacts &rr, const RunFacts &other, const CompareO
 			if (packet.dir == 'S')
 				server_packets.emplace(packet.frame, &packet);
 		uint16_t previous = 0;
+		uint64_t previous_ns = 0;
 		for (const wire::ParityEvent &event : run.trace.events) {
 			const uint16_t identity = event_identity(event);
+			if (event.dir == 'S' && identity == 0x025 && run.in_comparison(event.ts_ns))
+				previous = 0;
 			if (event.dir != 'S' || (identity != 0x030 && identity != 0x031) ||
 					!run.in_comparison(event.ts_ns))
 				continue;
 			++challenges;
-			if (previous == identity)
-				++repeats;
+			if (previous != 0) {
+				const double boundaries =
+						double(event.ts_ns - previous_ns) / double(kIntegrityBoundaryNs);
+				const bool flipped = std::llround(boundaries) % 2 != 0;
+				if ((previous != identity) != flipped)
+					++repeats;
+			}
 			previous = identity;
+			previous_ns = event.ts_ns;
 			const auto owner = server_packets.find(event.frame);
 			bool grouped = false;
 			if (owner != server_packets.end()) {
@@ -853,8 +1380,9 @@ void compare_integrity(const RunFacts &rr, const RunFacts &other, const CompareO
 	stream_faults(other, rb, ub, cb);
 	MetricValue alternation = metric('B', "integrity_alternation", "", "INTEGRITY_NOT_ALTERNATING");
 	alternation.distance = double(rb);
-	alternation.subject = std::to_string(rb) + "/" + std::to_string(cb) + " repeats";
-	alternation.reference = std::to_string(ra) + "/" + std::to_string(ca) + " repeats";
+	alternation.subject = std::to_string(rb) + "/" + std::to_string(cb) + " off the toggle";
+	alternation.reference = std::to_string(ra) + "/" + std::to_string(ca) + " off the toggle";
+	alternation.detail = "challenges whose family is not the boundary toggle's, within one mission";
 	out.push_back(alternation);
 	MetricValue scoreboard = metric('B', "integrity_scoreboard", "", "INTEGRITY_SCOREBOARD_ORDER");
 	scoreboard.distance = double(ub);
@@ -884,8 +1412,8 @@ std::vector<std::string> milestones(const RunFacts &run) {
 	// S2C 0x46 is no milestone: a joiner's first one answers the C2S 0x22 its first
 	// 0x16 provokes, so it rides the scoreboard's phase (order.S.0x46). The player-sync
 	// track's C2S 0x09 -> S2C 0x2C is one: the host runs the track only in slot state
-	// 2, which the 0x09 sets (NapiNPServerMsg_0x009 @0x513200, @0x513249;
-	// Server_SendInitialGameStateToPlayer @0x51BBB4..0x51BBBB, its 0x2C @0x51BF5D).
+	// 2, which the 0x09 sets (NapiNPServerMsg_HandlePlayerSyncRequest @0x513200, @0x513249;
+	// Server_SendPlayerSlotStateFrame @0x51BBB4..0x51BBBB, its 0x2C @0x51BF5D).
 	static_assert(has_normalization("order.S.0x46"));
 	static const Milestone kMilestones[] = {
 		{ "C:0x41", 'C', 0x41, true },
@@ -903,6 +1431,7 @@ std::vector<std::string> milestones(const RunFacts &run) {
 		{ "S:0x0a", 'S', 0x00A, false },
 	};
 	std::vector<std::pair<int, size_t>> found; // (first frame, definition order)
+	std::vector<std::string> names;
 	for (size_t m = 0; m < std::size(kMilestones); ++m) {
 		const Milestone &milestone = kMilestones[m];
 		int first = -1;
@@ -921,13 +1450,101 @@ std::vector<std::string> milestones(const RunFacts &run) {
 		if (first >= 0)
 			found.emplace_back(first, m);
 	}
+	// E2's round end and rotation (a run whose host plays a next mission in the
+	// window), in retail's order (window.rotation_load_gap):
+	// - the round end sends each playing slot the zero tick seed, then the end-round
+	//   board header [orig: Server_ProcessRoundEnd @0x5164F0 (the 0x61 @0x516790)]
+	//   [orig: Server_ProcessRoundEnd @0x5164F0 (the 0x1D @0x516839)];
+	// - the joiner's 0x1D pulls the stat board with C2S 0x2B
+	//   [orig: NapiNPClientMsg_0x01D @0x430840 (the queue @0x430B03)], answered with
+	//   S2C 0x56 [orig: NapiNPServerMsg_HandleReplayDataRequest @0x514FE0 (the send @0x51505A)];
+	// - the 2790-tick linger [orig: Server_ProcessRoundEnd @0x5164F0 (the arm @0x5166C4)]
+	//   ends in the teardown, which QUEUES every slot S2C 0x25
+	//   [orig: Server_DisconnectAndResetAllPlayerSlots @0x516160 (the state-7 queue @0x516385)]
+	//   [orig: Game_TeardownMission @0x522350 (the call @0x52269B)]; the 0x25s leave at the
+	//   first load pump whose send countdown is 0: the load's head pump
+	//   [orig: Game_StartMission @0x524360 (the pump @0x5245E8)] or another ahead of the
+	//   terrain load (@0x524F76, before @0x524F7C) for a residual of 1 to 3, a later pump
+	//   for a later residual, or the first tick beside the 0x7B under holdoff 12 (the
+	//   suite's LAN mode 1);
+	// - the joiner answers the 0x25 with its reload's C2S 0x48, the host's load end
+	//   sends S2C 0x7B
+	//   [orig: Game_StartMission @0x524360 (the Server_BroadcastPlayerInfoToAll call @0x526267)],
+	//   and the joiner's reload takes the next mission's 0x0B in its player-sync track,
+	//   then its first 0x0A.
+	// A first-join 0x7B or 0x0B is never "next": both key after the 0x25. No 0x5D belongs
+	// to the round end: it answers the C2S 0x32 of a 0x0F burst, a join leg. These legs
+	// count through the steady end only: a capture's tail past it is the runner's.
+	if (run.info.rotation) {
+		const uint64_t until = run.info.steady_end_ns;
+		// The S2C messages in capture order (a message's first fragment's frame).
+		std::vector<const wire::ParityEvent *> s2c;
+		for (const wire::ParityEvent &event : run.trace.events)
+			if (event.dir == 'S' && event.ts_ns <= until)
+				s2c.push_back(&event);
+		std::stable_sort(s2c.begin(), s2c.end(),
+				[](const wire::ParityEvent *a, const wire::ParityEvent *b) {
+					return a->frame < b->frame;
+				});
+		const size_t none = s2c.size();
+		auto first_from = [&](uint16_t identity, size_t from) {
+			for (size_t i = from; i < s2c.size(); ++i)
+				if (event_identity(*s2c[i]) == identity)
+					return i;
+			return none;
+		};
+		const size_t board = first_from(0x01D, 0);
+		// The round end's seed is the 0x61 queued just ahead of its board, in the
+		// zero form [orig: Server_ProcessRoundEnd @0x5164F0 (the body @0x516774)].
+		size_t seed = none;
+		for (size_t i = board; board != none && i-- > 0;)
+			if (event_identity(*s2c[i]) == 0x061) {
+				const std::vector<uint8_t> &body = s2c[i]->body;
+				if (std::all_of(body.begin(), body.end(), [](uint8_t b) { return b == 0; }))
+					seed = i;
+				break;
+			}
+		const size_t pull = board != none ? first_from(0x056, board + 1) : none;
+		const size_t reset = board != none ? first_from(0x025, board + 1) : none;
+		const size_t announce = reset != none ? first_from(0x07B, reset + 1) : none;
+		const size_t header = reset != none ? first_from(0x00B, reset + 1) : none;
+		const size_t frame = header != none ? first_from(0x00A, header + 1) : none;
+		auto frame_of = [&](size_t i) { return i != none ? s2c[i]->frame : -1; };
+		// The joiner's reload opens with C2S 0x48
+		// [orig: Game_StartMission @0x524360 (the 0x48 queue @0x524470)], answering the 0x25:
+		// a 0x25 that leaves at a load pump puts the 0x48 ahead of the host's load-end 0x7B,
+		// one that rides the first tick beside the 0x7B puts it after (a retail draw under
+		// holdoff 12, which milestone_order's own A/A carries).
+		int reload = -1;
+		if (reset != none)
+			for (const wire::ParityEvent &event : run.trace.events)
+				if (event.dir == 'C' && event_identity(event) == 0x048 && event.ts_ns <= until &&
+						event.frame > s2c[reset]->frame && (reload < 0 || event.frame < reload))
+					reload = event.frame;
+		const std::pair<int, const char *> extra[] = { { frame_of(seed), "S:0x61 round" },
+			{ frame_of(board), "S:0x1d round" }, { frame_of(pull), "S:0x56 round" },
+			{ frame_of(reset), "S:0x25 reset" }, { reload, "C:0x48 next" },
+			{ frame_of(announce), "S:0x7b next" }, { frame_of(header), "S:0x0b next" },
+			{ frame_of(frame), "S:0x0a next" } };
+		for (size_t i = 0; i < std::size(extra); ++i)
+			if (extra[i].first >= 0)
+				found.emplace_back(extra[i].first, std::size(kMilestones) + i);
+		std::sort(found.begin(), found.end());
+		for (const auto &entry : found)
+			names.push_back(entry.second < std::size(kMilestones)
+							? std::string(kMilestones[entry.second].name)
+							: std::string(extra[entry.second - std::size(kMilestones)].second));
+		return names;
+	}
 	std::sort(found.begin(), found.end());
-	std::vector<std::string> out;
 	for (const auto &entry : found)
-		out.push_back(kMilestones[entry.second].name);
-	return out;
+		names.push_back(kMilestones[entry.second].name);
+	return names;
 }
 
+// Presence and order are two rows, each judged against its own A/A: a window that
+// cuts one retail run between legs widens the presence threshold only, so an
+// inversion of ours still fails while the A/A order distance is 0.
 void compare_milestones(const RunFacts &rr, const RunFacts &other, std::vector<MetricValue> &out) {
 	const std::vector<std::string> a = milestones(rr), b = milestones(other);
 	const std::set<std::string> sa(a.begin(), a.end()), sb(b.begin(), b.end());
@@ -937,32 +1554,128 @@ void compare_milestones(const RunFacts &rr, const RunFacts &other, std::vector<M
 	for (const std::string &name : sb)
 		presence += sa.count(name) ? 0 : 1;
 	MetricValue value = metric('B', "milestones", "", "MILESTONE_MISMATCH");
-	value.distance = double(presence + order_inversions(a, b));
+	value.distance = double(presence);
 	value.subject = render_list(b);
 	value.reference = render_list(a);
-	value.detail = "milestones present on one side plus order inversions";
+	value.detail = "milestones present on one side";
 	out.push_back(value);
+	MetricValue order = metric('B', "milestone_order", "", "MILESTONE_ORDER");
+	order.distance = double(order_inversions(a, b));
+	order.subject = value.subject;
+	order.reference = value.reference;
+	order.detail = "order inversions over the milestones both carry";
+	out.push_back(order);
+}
+
+// The joiner's own C2S 0x0C send rate through `end` (window.alive_span). Each S2C 0x13
+// naming its body (the modal uplink handle) zeroes the body's Health [orig:
+// NapiNPClientMsg_EntityDeath @0x42EB50 (the store @0x42EBD6)] and the uplink builder
+// refuses a Health of 0 [orig: Player_BuildTag0CInputBody @0x42A550 (@0x42A58F)] until
+// the respawn's body sends, so each such 0x13 ends a stretch of sends. The rate is the
+// intervals between consecutive sends inside the stretches over their spans; where the
+// window opens ahead of the first send, or a stretch ends (its 0x13, else `end`) past
+// its last, a gap longer than one send period is a stall and joins the span, and one
+// period or less is the edge's phase against the send clock. Fewer than two sends in
+// every stretch leaves the count over the window. Returns -1 with no send at all.
+double alive_send_rate(const RunFacts &run, uint64_t end, double seconds) {
+	static_assert(has_normalization("window.alive_span"));
+	std::map<uint32_t, size_t> handles;
+	std::vector<uint64_t> sends;
+	for (const wire::ParityUplinkState &state : run.trace.uplinks) {
+		if (!state.decoded || !run.in_steady(state.ts_ns) || state.ts_ns > end)
+			continue;
+		++handles[state.handle & 0xFFFFu];
+		sends.push_back(state.ts_ns);
+	}
+	if (handles.empty())
+		return -1.0;
+	uint32_t own = 0;
+	size_t most = 0;
+	for (const auto &entry : handles)
+		if (entry.second > most) {
+			own = entry.first;
+			most = entry.second;
+		}
+	std::sort(sends.begin(), sends.end());
+	std::vector<uint64_t> deaths;
+	for (const wire::ParityEvent &event : run.trace.events) {
+		if (event.dir != 'S' || event_identity(event) != 0x013 || event.body.size() < 2 ||
+				!run.in_steady(event.ts_ns) || event.ts_ns > end)
+			continue;
+		if (uint32_t(event.body[0] | (event.body[1] << 8)) == own)
+			deaths.push_back(event.ts_ns);
+	}
+	std::sort(deaths.begin(), deaths.end());
+	// Each stretch: its first and last send and where it stops.
+	struct Stretch {
+		size_t first, last;
+		uint64_t stop;
+	};
+	std::vector<Stretch> stretches;
+	size_t begin = 0;
+	for (size_t i = 1; i <= sends.size(); ++i) {
+		const auto death = std::upper_bound(deaths.begin(), deaths.end(), sends[i - 1]);
+		const bool cut = death != deaths.end() && (i == sends.size() || *death < sends[i]);
+		if (i < sends.size() && !cut)
+			continue;
+		stretches.push_back({ begin, i - 1, cut ? *death : end });
+		begin = i;
+	}
+	size_t intervals = 0;
+	double span = 0.0;
+	for (const Stretch &s : stretches) {
+		intervals += s.last - s.first;
+		span += double(sends[s.last] - sends[s.first]) / 1e9;
+	}
+	if (intervals == 0 || span <= 0.0)
+		return double(sends.size()) / seconds;
+	const double period = span / double(intervals);
+	auto stall = [period](uint64_t from, uint64_t to) {
+		return to > from ? std::max(0.0, double(to - from) / 1e9 - period) : 0.0;
+	};
+	const uint64_t lead_end =
+			deaths.empty() ? sends.front() : std::min(sends.front(), deaths.front());
+	span += stall(run.info.steady_start_ns, lead_end);
+	for (const Stretch &s : stretches)
+		span += stall(sends[s.last], std::min(s.stop, end));
+	return double(intervals) / span;
 }
 
 void compare_rates(
 		const RunFacts &rr, const RunFacts &other, char dir, std::vector<MetricValue> &out) {
-	auto bytes_per_second = [dir](const RunFacts &run) {
+	// A run whose scenario ends the joiner's session counts its covered play over
+	// that play's length: the steady window's rate would be the punt's timing
+	// (window.session_end).
+	static_assert(has_normalization("window.session_end"));
+	auto seconds = [](const RunFacts &run, uint64_t end) {
+		if (end <= run.info.steady_start_ns || end >= run.info.steady_end_ns)
+			return run.info.steady_seconds;
+		return double(end - run.info.steady_start_ns) / 1e9;
+	};
+	auto bytes_per_second = [dir, &seconds](const RunFacts &run) {
+		const uint64_t end = coverage_end(run);
 		double bytes = 0.0;
 		for (const wire::ParityDatagram &datagram : run.trace.datagrams)
-			if (run.in_steady(datagram.ts_ns) && datagram_direction(datagram, run.session) == dir)
+			if (run.in_steady(datagram.ts_ns) && datagram.ts_ns <= end &&
+					datagram_direction(datagram, run.session) == dir)
 				bytes += double(datagram.length);
-		return bytes / run.info.steady_seconds;
+		return bytes / seconds(run, end);
 	};
-	auto gameplay_per_second = [dir](const RunFacts &run) {
+	auto gameplay_per_second = [dir, &seconds](const RunFacts &run) {
+		const uint64_t end = coverage_end(run);
 		double samples = 0.0;
 		if (dir == 'C') {
-			for (const wire::ParityUplinkState &state : run.trace.uplinks)
-				samples += state.decoded && run.in_steady(state.ts_ns) ? 1.0 : 0.0;
+			// The joiner's own send rate while it lived (window.alive_span).
+			const double rate = alive_send_rate(run, end, seconds(run, end));
+			if (rate >= 0.0)
+				return rate;
 		} else {
 			for (const wire::ParityFrameState &state : run.trace.frames)
-				samples += state.decoded && run.in_steady(state.ts_ns) ? 1.0 : 0.0;
+				samples += state.decoded && run.in_steady(state.ts_ns) && state.ts_ns <= end
+						? 1.0
+						: 0.0;
 		}
-		return samples / run.info.steady_seconds;
+		return samples / seconds(run, end);
 	};
 	const double ba = bytes_per_second(rr), bb = bytes_per_second(other);
 	MetricValue bandwidth = metric(dir, "bandwidth", "", "BANDWIDTH_MISMATCH");
@@ -978,7 +1691,7 @@ void compare_rates(
 	cadence.floor = 0.20;
 	cadence.subject = render_number(std::round(gb * 10) / 10) + "/s";
 	cadence.reference = render_number(std::round(ga * 10) / 10) + "/s";
-	cadence.detail = dir == 'C' ? "decoded C2S 0x0C uplinks per steady second"
+	cadence.detail = dir == 'C' ? "the joiner's C2S 0x0C send rate while it lived"
 								: "decoded S2C 0x0A frames per steady second";
 	out.push_back(cadence);
 }

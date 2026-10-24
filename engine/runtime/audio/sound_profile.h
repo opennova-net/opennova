@@ -124,6 +124,7 @@ enum EntitySoundType {
     kEntitySoundSurfaceGasp = 3,   // surfacing after a long dive [orig: @ 0x50d8b9]
     kEntitySoundWaterGag = 4,      // the three pre-drown warnings [orig: @ 0x50d86f]
     kEntitySoundDeathNight = 5, // the "_K" night composite
+    kEntitySoundTankCommand = 8, // a gun occupant's call to the gunner [orig: @ 0x44131E]
     kEntitySoundTypeCount = 9,
 };
 

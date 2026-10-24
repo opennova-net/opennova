@@ -195,6 +195,12 @@ public:
 		(void)index;
 		return key;
 	}
+	// The text the string table `table` names gives a key, the key itself on a miss
+	// (MenuFrameCompiler::table_string); a frame that loads no table answers the key.
+	virtual std::string table_string(const std::string &table, const std::string &key) const {
+		(void)table;
+		return key;
+	}
 	// The open popup (a shown MODAL window) as a pre-order index, -1 none: the
 	// frame's pump then serves its subtree alone.
 	virtual void set_open_popup(int index) = 0;
@@ -454,6 +460,9 @@ public:
 	// The text the widget's string table gives a key the game's code names, the key itself on
 	// a miss or off-screen (MenuFrameSeam::widget_string).
 	std::string widget_string(int id, const std::string &key) const;
+	// The text the string table `table` names gives a key the game's code names, the key
+	// itself on a miss (MenuFrameSeam::table_string).
+	std::string table_string(const std::string &table, const std::string &key) const;
 	// The authored item `value=` attribute of a row.
 	std::string item_value(int id, int row) const;
 	// Retail's select-by-value seed [orig: SpinList_SelectItemByValue
@@ -582,7 +591,7 @@ public:
 	// UI_DispatchMouseEvent @ 0x63ab00], and the pump (hover, the click, the window sounds) runs once
 	// a frame after them over the last message's point and button (pump_mouse) [orig:
 	// Menu_UpdateFrame @ 0x5528a0, Game_PumpWindowMessages @ 0x5528d3 then CUIScene_EndFrame
-	// @ 0x5528de; in a match Game_ProcessMainFrame @ 0x526608 then UI_TeardownScene @ 0x54e668; the
+	// @ 0x5528de; in a match Game_ProcessMainFrame @ 0x526608 then UI_ProcessMenuScreenFrame @ 0x54e668; the
 	// join screen's MultiPlayer_JoinSessionStateMachine @ 0x56a342].
 	//
 	// A move: the point and the left button the pump reads [orig: g_MouseState, and input_mask, the

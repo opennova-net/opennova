@@ -18,6 +18,15 @@ $script:GameMcpHostPort = 8975
 $script:GameMcpJoinerPort = 8976
 $script:GameMcpSessions = @{}
 $script:GameMcpRequestId = 0
+# The endpoint's own stamps of the last message Send-GameMcpMessage sent: the
+# Unix ms at which the game parsed it and wrote its response (X-Mcp-Received /
+# X-Mcp-Responded, docs/mcp.md) and the longest frame its main thread ran while
+# the request was in (X-Mcp-Frame-Gap); $null when the response carried none.
+$script:GameMcpLastServerTiming = $null
+# The endpoint never answers "Expect: 100-continue", which Windows PowerShell's
+# .NET sends with every POST: the first request of each connection pool would
+# hold its body 350 ms (the continue timeout) before sending it.
+[System.Net.ServicePointManager]::Expect100Continue = $false
 
 # The launch behind every other window (game_mcp.py's BehindLaunch says why and
 # how). Here the start runs on a background thread while the caller proves the
@@ -334,16 +343,32 @@ function Send-GameMcpMessage {
         [Parameter(Mandatory = $true)] [hashtable] $Message,
         [int] $TimeoutSeconds = 120
     )
+    # No progress records: Windows PowerShell's Invoke-WebRequest writes one to
+    # the console host for each chunk of the response it reads (a cross-process
+    # call per chunk, outside -TimeoutSec), most of a call's client time. The
+    # local preference leaves the caller's as it is.
+    $ProgressPreference = "SilentlyContinue"
     $json = $Message | ConvertTo-Json -Depth 32 -Compress
     $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($json)
     $headers = @{ Accept = "application/json" }
     if ($script:GameMcpSessions.ContainsKey($Port)) {
         $headers["Mcp-Session-Id"] = $script:GameMcpSessions[$Port]
     }
+    $script:GameMcpLastServerTiming = $null
     $response = Invoke-WebRequest -UseBasicParsing -Method Post -Uri (Get-GameMcpUrl -Port $Port) `
         -ContentType "application/json" -Headers $headers -Body $bytes -TimeoutSec $TimeoutSeconds
     $session = $response.Headers["Mcp-Session-Id"]
     if ($session) { $script:GameMcpSessions[$Port] = [string] $session }
+    $received = $response.Headers["X-Mcp-Received"]
+    $responded = $response.Headers["X-Mcp-Responded"]
+    $frameGap = $response.Headers["X-Mcp-Frame-Gap"]
+    if ($received -and $responded) {
+        $script:GameMcpLastServerTiming = [pscustomobject]@{
+            received_unix_ms = [long] $received
+            responded_unix_ms = [long] $responded
+            frame_gap_ms = if ($frameGap) { [long] $frameGap } else { $null }
+        }
+    }
     if (-not $response.RawContentStream -or $response.RawContentStream.Length -eq 0) { return $null }
     $text = [System.Text.Encoding]::UTF8.GetString($response.RawContentStream.ToArray())
     if ([string]::IsNullOrWhiteSpace($text)) { return $null }

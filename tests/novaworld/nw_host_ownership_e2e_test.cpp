@@ -44,9 +44,11 @@
 
 #include "common/temp_dir.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -86,9 +88,15 @@ void expect(bool cond, const char *what) {
 
 constexpr const char *kNeedToLogin = "NWUSERVERMSGCODE_NEEDTOLOGIN";
 
+// The service's ClientStopHosting receipts: its lobby session logs each hosting it ends with the
+// statement that ended it (LobbySession::end_hosting).
+std::atomic<int> g_client_stop_hosting_logs{ 0 };
+
 // The engine's diagnostics (the lobby, the lister) beside the listeners' own
 // printf lines, so a failure reads in order.
 void log_sink(opennova::io::LogLevel level, const char *message) {
+	if (std::strstr(message, "reason=ClientStopHosting") != nullptr)
+		++g_client_stop_hosting_logs;
 	if (level == opennova::io::LogLevel::kDebug) return;
 	std::printf("%s\n", message);
 }
@@ -120,8 +128,8 @@ private:
 
 // A Lister on a synthetic clock, 10 ms a pass. Once it hosts, the game server
 // behind it starts its mission: the mission start's update publishes the whole
-// Host list, the HostKey with it, as opennova-serve's Server::bind_listing runs
-// it (the host result publishes nothing, D-NET-465).
+// Host list, the HostKey with it, as opennova-serve's Server::run_mission_start_update
+// runs it (the host result publishes nothing, D-NET-465).
 struct ListerRun {
 	opennova::serve::Lister &lister;
 	uint32_t now = 0;
@@ -135,7 +143,7 @@ struct ListerRun {
 			const bool running = lister.tick(now);
 			if (running && !mission_started && lister.hosting()) {
 				mission_started = true;
-				lister.publish_server_info();
+				lister.publish_server_info(/*session_round_count=*/0);
 			}
 			if (each) each();
 			if (!running) break;
@@ -185,7 +193,7 @@ std::string fetch_host_key(const Service &service) {
 		std::fprintf(stderr, "  login: %s\n", login.reason.c_str());
 		return {};
 	}
-	auto host = flow.host();
+	auto host = flow.host("");
 	for (int i = 0; i < 16 && host.kind == opennova::HostKeyResult::Kind::NeedRequest; ++i) {
 		const auto reply = exchange(host.request);
 		host = flow.on_host_response(reply.transport_ok, reply.code, reply.headers, reply.body);
@@ -206,12 +214,14 @@ public:
 		: session_([ci, ck] {
 			  ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 			  cfg.client_index = ci;
-			  cfg.client_key = ck;
 			  cfg.na = "ownership:host";
 			  cfg.cookie_vars = [] {
 				  return std::vector<std::pair<std::string, std::string>>{{"NWUID", ""}};
 			  };
-			  cfg.next_client_key = [next = ck]() mutable { return ++next; };
+			  // The 0x81s' draws (D-NET-704): the connect's CK, then each re-join's the next.
+			  cfg.connection_keys = [next = ck]() mutable {
+				  return opennova::ConnectionKeys{ next++, opennova::make_dev_scrk() };
+			  };
 			  return cfg;
 		  }()) {
 		socket_ = net::ScopedSocket(net::udp_bind(0));
@@ -296,9 +306,11 @@ private:
 			net::udp_send_to(socket_.get(), service_, dg.data(), dg.size());
 	}
 
-	// Receive, dispatch and answer until `done` holds (the session clock stays put).
+	// Receive, dispatch and answer until `done` holds, the session clock one millisecond on each
+	// round (a 0x81's 0x42 goes at the first pump past it).
 	bool drive(const std::function<bool()> &done, int rounds) {
 		for (int i = 0; i < rounds && !done(); ++i) {
+			session_.set_clock_ms(++clock_ms_);
 			uint8_t buf[4096];
 			net::Endpoint from;
 			const int n = socket_.is_valid()
@@ -372,21 +384,48 @@ void anonymous_lister_listed(Service &service) {
 }
 
 // The Lister with no account against ONNET_REQUIRE_HOST_KEY: answered, never
-// listed, and ended with ServerStopHosting once its update's HostKey names
-// nobody.
+// listed, and its hosting ended with ServerStopHosting once its update's HostKey
+// names nobody. The statement drops the session to verified and sends nothing, so
+// the session stays up, and the service keeps it, until the embedder's stop at its
+// match's NovaWorld exit (12), whose router resets the session with the goodbye
+// burst alone (no ClientStopHosting); the lister finishes then, on the service's
+// word.
+// [orig: CNapiGameSession_HandleServerMessage @0x4D1C50 - SetState(4) @0x4D1D29, the
+//  word 1 @0x4D1D4F; PostMenu_RouteMissionExit @0x568460 - `cmp eax, 0Ch` @0x56854F /
+//  jz @0x568552 -> loc_5686CB, SetNetworkType(0) (the call @0x5686E1);
+//  CNapiNetwork_SetNetworkType @0x4C4A50 - CNapiGameSession_ResetToDisconnected @0x4D0890
+//  (the call @0x4C4A7D)]
 void anonymous_lister_stopped(Service &strict) {
 	FixedSource source("Refused Lister");
 	opennova::serve::Lister lister(lister_options(strict, false), source, nullptr);
 	expect(lister.start(), "strict lister: starts");
 	bool ever_listed = false;
-	ListerRun run{lister};
-	run.until([&] { return lister.finished(); },
-	          [&] { ever_listed = ever_listed || !hostdb::list_hosts(*strict.pool.acquire()).empty(); });
-	expect(lister.finished(), "strict lister: finishes");
-	expect(lister.exit_code() == opennova::serve::kExitStoppedByService,
-			"strict lister: the service stopped its hosting");
+	const auto watch = [&] {
+		ever_listed = ever_listed || !hostdb::list_hosts(*strict.pool.acquire()).empty();
+	};
+	ListerRun run{ lister };
+	expect(run.until([&] { return !source.failure.empty(); }, watch),
+			"strict lister: the service stops its hosting");
 	expect(!source.hosting && source.failure == kNeedToLogin,
-	       "strict lister: with NWUSERVERMSGCODE_NEEDTOLOGIN");
+			"strict lister: with NWUSERVERMSGCODE_NEEDTOLOGIN");
+	// Half a second of passes on, the session holds, verified, and the service keeps it.
+	run.until([] { return false; }, watch, 50);
+	const ClientSession *session = lister.lobby().session();
+	expect(!lister.finished() && !lister.hosting(),
+			"strict lister: up and not hosting after the service's stop");
+	expect(session != nullptr && session->lobby_state() == 4 &&
+					session->session_role() == ClientSession::kSessionRoleVerified,
+			"strict lister: its session dropped to verified (state 4, the word 1)");
+	expect(strict.manager.registry().size() == 1,
+			"strict lister: no goodbye before the embedder's stop");
+	const int stop_hosting_logs = g_client_stop_hosting_logs.load();
+	lister.stop();
+	expect(lister.finished() && lister.exit_code() == opennova::serve::kExitStoppedByService,
+			"strict lister: the stop finishes it on the service's word");
+	expect(wait_for([&] { return strict.manager.registry().size() == 0; }),
+			"strict lister: the goodbye burst then ends its session on the service");
+	expect(g_client_stop_hosting_logs.load() == stop_hosting_logs,
+			"strict lister: the service read no ClientStopHosting, the goodbye went alone");
 	expect(!ever_listed, "strict lister: never in the browser");
 }
 

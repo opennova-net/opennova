@@ -81,7 +81,7 @@ WorldPose network_transform_local_to_world(int32_t lx, int32_t ly, int32_t lz,
 WorldPose network_transform_world_to_local(int32_t wx, int32_t wy, int32_t wz,
                                            int32_t px, int32_t py, int32_t pz,
                                            uint32_t yaw_bam, uint32_t pitch_bam,
-                                           uint32_t roll_bam) {
+                                           uint32_t roll_bam, int32_t *exit_ecx) {
 	const auto [sr, cr, sp, cp, sy, cy] = euler_q22(yaw_bam, pitch_bam, roll_bam);
 	const int32_t nsr = -sr, nsp = -sp, nsy = -sy; // ftol(sin * -2^22) @0x43BBE0..0x43BC0D
 	const auto m = mul_q22;
@@ -95,6 +95,8 @@ WorldPose network_transform_world_to_local(int32_t wx, int32_t wy, int32_t wz,
 	const int32_t tz = m(dz, cp) + m(tx, nsp);  //                  (@0x43bc90-0x43bcaa)
 	l.y = m(ty, cr) - m(tz, nsr);               // roll^-1 about X (@0x43bcb4-0x43bcce)
 	l.z = m(tz, cr) + m(ty, nsr);               //                 (@0x43bcd3-0x43bcee)
+	// ECX at the return: z's roll term, `mov ecx, eax` @0x43BCDF.
+	if (exit_ecx != nullptr) *exit_ecx = m(ty, nsr);
 	return l;
 }
 
@@ -262,7 +264,10 @@ bool decode_pool3_sync_batch(const uint8_t *body, size_t len,
 		rec.net_handle = c.u16();
 		if (rec.flags_byte & kPool3SyncHasTeamByte) rec.team_byte = c.u8();
 		if (rec.flags_byte & kPool3SyncHasWeaponType) rec.weapon_type = c.u16();
-		if (rec.flags_byte & kPool3SyncHasScoreByte) rec.score_byte = c.u8();
+		if (rec.flags_byte & kPool3SyncHasScoreByte) {
+			rec.score_present = true;
+			rec.score_byte = c.u8();
+		}
 
 		const bool record_ok = c.ok;
 		if (!record_ok) out.last_record_partial = true;
@@ -628,8 +633,8 @@ bool decode_infantry_compact_record(const uint8_t *body, size_t len,
 	out.pos_z_compressed    = c.u16();
 	out.yaw_byte            = c.u8();
 	out.flags_byte          = c.u8();
-	out.pitch_byte          = c.u8();
-	out.aim_yaw_byte        = c.u8();
+	out.aim_heading_byte    = c.u8();
+	out.aim_pitch_byte      = c.u8();
 	out.anim_byte           = c.u8();
 	if (!c.ok) return false;
 	consumed = size_t(c.p - body);
@@ -795,7 +800,8 @@ bool decode_guided_field_group(GuidedMode mode, GuidedFieldGroup group,
 		break;                            // 0 payload bytes
 	case GuidedFieldGroup::TargetPos:     // [orig: 0x447e93 (full) / 0x448052 (apply)]
 		out.target_slot = c.u16();        // entity+724
-		out.target_bound = true;
+		out.target_read = true;
+		out.target_bound = true;          // [orig: LABEL_80 @0x448092 / @0x44809B]
 		if (full) {                       // full reads pos; apply reads target only
 			out.pos_x = int32_t(c.u32()); // entity+700
 			out.pos_y = int32_t(c.u32()); // entity+704
@@ -803,12 +809,17 @@ bool decode_guided_field_group(GuidedMode mode, GuidedFieldGroup group,
 		}
 		break;
 	case GuidedFieldGroup::TargetTypePos: // [orig: 0x447f39 (full) / 0x4480ab (apply)]
-		if (full) out.target_slot = c.u16();    // entity+724 (full only)
+		if (full) {                              // entity+724 (full only, @0x447F74)
+			out.target_slot = c.u16();
+			out.target_read = true;
+		}
 		out.weapon_type = uint16_t(c.u32());     // entity+698 (low u16 of a 4-B field)
 		out.pos_x = int32_t(c.u32());
 		out.pos_y = int32_t(c.u32());
 		out.pos_z = int32_t(c.u32());
-		out.target_bound = true;
+		// No flag or timer store: the group returns after the third coordinate
+		// [orig: Entity_SerializeGuidedMissileState @0x447C50 - the type @0x4480C7,
+		//  the point @0x4480E5..0x448129, the return @0x448122].
 		break;
 	case GuidedFieldGroup::Pos:           // [orig: 0x448135] read pos, clear target
 		out.pos_x = int32_t(c.u32());
@@ -845,7 +856,7 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 		return complete;
 	};
 
-	// 12-byte reference header -> the position anchor (dword_A822E4/E8/EC).
+	// 12-byte reference header -> the position anchor (g_FrameAnchorX/Y/Z).
 	out.anchor_x = c.i32();
 	out.anchor_y = c.i32();
 	out.anchor_z = c.i32();
@@ -989,10 +1000,19 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 				ok = true;
 				consumed = 0;
 				break;
+			case EntityClass::Guided:
+				// A guided class's serializer is called with mode 2 and format 11, has no
+				// case for it and reads nothing; the loop goes on behind the header
+				// (D-NET-NEW-L1-28).
+				// [orig: NapiNPClientMsg_0x00A @0x42FEC0 - mode 2 @0x430804, format 11
+				//  @0x43080C, the call @0x430828, the loop @0x43082D;
+				//  Entity_SerializeGuidedMissileState @0x447C50 - the mode-2 group switch
+				//  @0x447E6C, no case 11]
+				ok = true;
+				consumed = 0;
+				break;
 			default:
-				// Guided (§5.15) or unresolved Unknown: not a fixed §5.10b compact.
-				// Guided treats the subtype as a field-group selector and rejects
-				// the 0x0A compact subtype 11; Unknown has no safe width.
+				// Unresolved Unknown: not a fixed §5.10b compact, no safe width.
 				return finish(false);
 			}
 			if (!ok) return finish(false);
@@ -1009,7 +1029,7 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 // S2C 0x61 tick seed. The retail handler reads the dword only when four bytes are
 // present and otherwise seeds ZERO, then stores it unconditionally — a short body is a
 // seed of 0, not an error, and 0 is itself the witnessed round-end disarm value.
-// [orig: NapiNPClientMsg_HandleSessionKey @0x4297c0 — the `keyData+4 <= keyData+dataLen`
+// [orig: NapiNPClientMsg_HandleTickSeed @0x4297c0 — the `keyData+4 <= keyData+dataLen`
 //  guard @0x4297eb, the stores @0x4297f8 / @0x4297fd]
 bool decode_tick_seed(const uint8_t *body, size_t len, uint32_t &out) {
 	out = 0;
@@ -1230,8 +1250,13 @@ bool decode_world_state_load(const uint8_t *body, size_t len, WorldStateLoad &ou
 		out.ammo_pools[i] = int32_t(c.u32());
 	out.waypoint_count = c.u16();
 	if (!c.ok) return false;
-	// Waypoint records ride the wire ONLY for a waypoint gametype — an off-wire
-	// host gate, so the caller supplies the hint (default false).
+	// The reader takes the records only in a waypoint game type, its own (the
+	// caller's hint); the host writes them for a team-1 recipient in any, so
+	// elsewhere the cursor stays on them and the next word, the first record's
+	// pool-3 index, is read as the location-name count (D-NET-NEW-LP-3).
+	// [orig: NapiNPClientMsg_0x00F - the count @0x42E359, the gate
+	//  `(g_GameType & 0xFFFDFFFF) == 0x10020` @0x42E459, else
+	//  Entity_BuildMapPoiLists @0x42E4FD]
 	if (is_waypoint_gametype) {
 		out.waypoints.reserve(out.waypoint_count);
 		for (unsigned i = 0; i < out.waypoint_count; ++i) {
@@ -1245,12 +1270,26 @@ bool decode_world_state_load(const uint8_t *body, size_t len, WorldStateLoad &ou
 	}
 	out.team_name_count = c.u16();
 	if (!c.ok) return false;
-	out.team_names.reserve(out.team_name_count);
-	for (unsigned i = 0; i < out.team_name_count; ++i) {
-		out.team_names.push_back(c.cstr());
-		if (!c.ok) return false;
+	// Each name is read as retail's reader reads it: its bytes up to the NUL
+	// or the body's end, then the cursor steps past the NUL and is held at the
+	// end, so a count past the body's names reads empty names; whatever
+	// follows the last name stays unread.
+	// [orig: NapiNPClientMsg_0x00F - the count @0x42E50B..0x42E51B, the copy's
+	//  NUL / end tests @0x42E548 / @0x42E557 / @0x42E567, the step
+	//  `strlen + 1` @0x42E59B, the hold at the end @0x42E5A1..0x42E5A3]
+	// The count is signed: a word of 0x8000 or more reads no names
+	// [orig: `movsx eax, cx` @0x42E516, `jle` @0x42E520].
+	const int name_count = static_cast<int16_t>(out.team_name_count);
+	if (name_count > 0) out.team_names.reserve(static_cast<size_t>(name_count));
+	for (int i = 0; i < name_count; ++i) {
+		const uint8_t *name_end = c.p;
+		while (name_end < c.end && *name_end != 0) ++name_end;
+		out.team_names.emplace_back(reinterpret_cast<const char *>(c.p),
+				static_cast<size_t>(name_end - c.p));
+		c.p = name_end < c.end ? name_end + 1 : c.end;
 	}
-	return (c.p == c.end);
+	out.unread_bytes = static_cast<size_t>(c.end - c.p);
+	return true;
 }
 
 // S2C 0x3A medic-reviving. The handler takes no arguments and reads no
@@ -1723,7 +1762,7 @@ bool decode_entity_routed_packet(const uint8_t *body, size_t len,
 }
 
 // S2C 0x45 terrain-tile load batch — §5.37. Paged stream the host sends during a
-// client's initial-state load (phase 5 of Server_SendInitialGameStateToPlayer).
+// client's initial-state load (phase 5 of Server_SendPlayerSlotStateFrame).
 // Witnessed byte-exact against the writer + reader (52-tile header chunk = 644 B,
 // 53-tile chunk = 640 B in operation_whitenoise). The 12-B tile entries are
 // opaque copies the network layer never interprets (D-NET-83).
@@ -2184,7 +2223,7 @@ bool decode_clan_roster_update(const uint8_t *body, size_t len, ClanRosterUpdate
 	return c.ok && c.p == c.end;
 }
 
-// C2S 0x4E clan-roster walk request. [orig: NapiNPServerMsg_HandleMinimapSlotRequest
+// C2S 0x4E clan-roster walk request. [orig: NapiNPServerMsg_HandleSquadRegistryWalk
 // @0x511210 — the u32 read @0x51124b, 0 when short @0x511247]
 bool decode_clan_roster_walk_request(const uint8_t *body, size_t len,
                                      ClanRosterWalkRequest &out, size_t &consumed) {
@@ -2196,7 +2235,7 @@ bool decode_clan_roster_walk_request(const uint8_t *body, size_t len,
 	return consumed == 4;
 }
 
-// S2C 0x70 vehicle-spawn availability list. [orig: NapiNPClientMsg_HandleWeaponLoadoutList
+// S2C 0x70 vehicle-spawn availability list. [orig: NapiNPClientMsg_HandleVehicleSpawnAvailability
 // @0x429a30 — leading byte @0x429a53 (0 when empty @0x429a4f), the row loop ends when
 // fewer than two bytes remain @0x429a6a or on the 0 word @0x429a74, and each missing
 // row byte reads 0 @0x429a7d / @0x429a8c]

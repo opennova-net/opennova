@@ -21,7 +21,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		return ProbeVerdict.failed("no local player (mission load stalled or cancelled)")
 	var weapon := String(ctx.args.get("weapon", ""))
 	var walk_frames := int(ctx.args.get("walk_frames", 120))
-	var look_px := float(ctx.args.get("look_px", 300.0))
+	var look_px := float(ctx.args.get("look_px", 37.5))
 	var burst_frames := int(ctx.args.get("burst_frames", 20))
 	var out_dir := ProbeOutput.resolve(ctx, String(ctx.args.get("output_dir", "")))
 	ctx.defer_restore(func() -> void:

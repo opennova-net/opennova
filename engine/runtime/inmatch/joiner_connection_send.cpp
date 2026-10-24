@@ -5,6 +5,8 @@
 // out of joiner_connection.cpp; the class header is the shared declaration.
 #include <runtime/inmatch/joiner_connection.h>
 
+#include <net/npwire/lan_discovery.h> // kLanAnnounceIntervalSeconds
+
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
@@ -12,6 +14,10 @@
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_keys.h>
 #include <net/title/title_identity.h> // title_in_match (the 0x2F class byte, DFX2-12)
+#include <formats/playersav/weapon_sav.h> // make_defaults (the fresh profile's kit)
+#include <runtime/world/weapon_table.h>   // index_of (the fresh kit's ADM lookups)
+#include <base/gameprofile/gameprofile.h>  // the title's version text (the 0x0B dword)
+#include <base/io/le.h>                   // append_u32_le (the 0x0B body)
 #include <formats/mission/bms.h>      // bms::Header (the mission type byte)
 
 #include <algorithm>
@@ -25,26 +31,16 @@ namespace opennova::inmatch {
 
 namespace {
 
-// The 0x41 ClientHello leg's retransmit cadence. A retail game join sends no 0x41 at all: it
-// joins from the browse row, whose session record already holds the 0x81, and goes straight to
-// the connect state below. Our joiner has no browse row, so its Hello leg stands in for the
-// browse probe of that one host; this stays a capture-pinned policy value (about one second).
-constexpr uint64_t kClientHelloRetryMilliseconds = 1000;
+// The enumerate-and-join's announce cadence on a connection with no row: the enumerator
+// re-announces once MORE than 3000 ms passed since its last send (the first send leaves at
+// once, start()), the browse's own interval (LanDiscoveryBrowser, kLanAnnounceIntervalSeconds).
+// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 - the interval select @0x6290ed
+//  (the session's +0x14 interval, which the client browse sets to 3000:
+//  CNapiGameSession_InitTransportConnection @0x4c9f9d), `tick - last_send > interval`
+//  @0x629119]
+constexpr uint64_t kEnumerateAnnounceMilliseconds =
+		static_cast<uint64_t>(kLanAnnounceIntervalSeconds * 1000.0);
 
-// The connect state (retail state 3) of a JO game join: the 0x42 ClientJoin is re-sent once
-// MORE than 2000 ms passed since the last send, and the join fails once MORE than 30000 ms passed
-// since the state was entered, latching connect error 2, whose text is gameerr
-// "MPNetConnectCodes" NCC002. A ServerAuth (state 5) ends both.
-// [orig: CNapiNetwork_StartClientConnection @0x4ca160 stores conn+0x5B0 = 2000 @0x4ca2ab and
-//  +0x5B4 = 30000 @0x4ca2bb (CNapiGameSession_CreateSession @0x4c9c27 stores the same pair);
-//  CNapiNPConnection_InitFromSession @0x626320 enters state 3, stamping the start +0x5E0
-//  @0x62648a and the last send +0x5E4 = now - 2000 @0x626499; CNapiNPConnection_PumpStateMachine
-//  case 3: `now - start > +0x5B4` @0x62951c -> +0x5F0 = 2 @0x629525, state 4 @0x629564; else
-//  `now - last > +0x5B0` @0x629588 -> last = now @0x62958f, SendClientJoin @0x629595;
-//  {2, "NCC002"} in g_MPNetConnectCodes @0x82ba58, its row @0x82ba60, read by
-//  CNapiNetwork_GetDisconnectReasonString @0x4c703d]
-constexpr uint64_t kClientJoinRetryMilliseconds = 2000;
-constexpr uint64_t kClientJoinTimeoutMilliseconds = 30000;
 constexpr uint32_t kConnectErrorJoinTimeout = 2; // NCC002
 
 // The established session's two send-interval legs read this connection's cs_dir0 (CS fields 5
@@ -61,28 +57,54 @@ constexpr uint32_t kConnectErrorJoinTimeout = 2; // NCC002
 //  @0x4ca4a0 stores 10000 @0x4caac5/@0x4cab98 and 30000 @0x4caab5/@0x4cab88; the reaping
 //  timeout_ms = 120000 is stored @0x4caa81/@0x4cab54]
 
-// The golden joiner's profile kit (retail-lan-host-join-session): the capture default every
-// headless caller keeps submitting. Rows carry the profile's "-1" ammo/flags strings (atol
-// low byte -> 0xFF) [orig: the kit tuple buffer NetPacket_SendLoadoutSubmit @0x42cdc0 walks].
-LoadoutSubmit build_retail_default_loadout_submit(uint8_t team, bool alternate) {
+} // namespace
+
+LoadoutSubmit fresh_profile_loadout_submit(const world::WeaponTable *weapons, uint8_t team) {
+	static const playersav::Record fresh = playersav::make_defaults().slots[0];
+	const playersav::Side &side = fresh.side(playersav::side_for_team(team));
+	uint8_t player_class = side.player_class;
+	if (player_class < 5 || player_class > 9) player_class = 8;
 	LoadoutSubmit submit;
 	submit.team = team;
-	submit.player_class = 0x08;
-	// First submission: the fixed Primary-key slot 195 (pre-Player_InitPlayer the slot table is
-	// empty, so the builder's side-mask resolution returns the argument raw). Second: the live
-	// g_CurrentWeaponSlot after the spawn fill — the golden kit's primary landed at category 3
-	// rank 17 = 212. [orig: Game_StartMission @0x525836 (195) / @0x525c2e (g_CurrentWeaponSlot)]
-	submit.weapon_slot_index = alternate ? 212u : 195u;
-	for (uint8_t adm : {
-			uint8_t{0x18}, uint8_t{0x03}, uint8_t{0x2C}, uint8_t{0x28},
-			uint8_t{0x29}, uint8_t{0x2A}, uint8_t{0x02},
-	}) {
-		submit.entries.push_back(LoadoutSubmitEntry{adm, 0xFF, 0xFF, 0xFF});
+	submit.player_class = player_class;
+	submit.weapon_slot_index = 195u;
+	const playersav::KitPage *page = side.page_for_class(player_class);
+	if (page != nullptr && weapons != nullptr) {
+		for (const playersav::KitEntry &entry : page->entries) {
+			const int adm = weapons->index_of(entry.name.c_str());
+			if (adm < 0) continue;
+			submit.entries.push_back(LoadoutSubmitEntry{static_cast<uint8_t>(adm),
+					static_cast<uint8_t>(entry.ammo_primary),
+					static_cast<uint8_t>(entry.ammo_secondary),
+					static_cast<uint8_t>(entry.flags)});
+		}
 	}
 	return submit;
 }
 
-} // namespace
+std::vector<uint8_t> build_mission_status(std::string_view side_password, uint32_t version_packed) {
+	std::vector<uint8_t> body(side_password.begin(), side_password.end());
+	body.push_back(0);
+	io::append_u32_le(body, 0);
+	io::append_u32_le(body, 0);
+	io::append_u32_le(body, version_packed);
+	return body;
+}
+
+uint32_t packed_game_version(const char *version_text) {
+	if (version_text == nullptr || (version_text[0] != 'V' && version_text[0] != 'v')) return 0;
+	uint32_t packed = 0;
+	const char *p = version_text + 1;
+	for (int i = 0; i < 4; ++i) {
+		if (*p < '0' || *p > '9') return 0;
+		uint32_t value = 0;
+		while (*p >= '0' && *p <= '9') value = value * 10u + static_cast<uint32_t>(*p++ - '0');
+		if (value > 0xFFu) return 0;
+		packed = (packed << 8) | value;
+		if (i < 3 && *p++ != '.') return 0;
+	}
+	return *p == '\0' ? packed : 0;
+}
 
 std::vector<uint8_t> JoinerConnection::frame_session(const std::vector<ProtocolMessage> &messages) {
 	if (session_lost() || phase_ == Phase::Error) return {};
@@ -183,6 +205,28 @@ std::vector<uint8_t> JoinerConnection::frame_retained_session(uint32_t sequence)
 //  NapiNPServer_HandleNewConnection @0x4c81bd (mask 0x2000)]
 std::vector<uint8_t> JoinerConnection::finish_receive_pump() {
 	if (session_lost() || phase_ == Phase::Error) return {};
+	// The mission-start waits' round-over test, after the pass's receive: a gate the pass
+	// raised abandons the wait in hand, a 0x1A the same pass carried included (the gate test
+	// precedes the flag's) (mission_start_aborted carries the witness).
+	if (round_over_gate_ && !mission_start_aborted_ &&
+			(post_auth_stage_ == PostAuthStage::AwaitInitialSyncTail ||
+			 post_auth_stage_ == PostAuthStage::AwaitWorldStreamEnd ||
+			 (post_auth_stage_ == PostAuthStage::AwaitMissionStart &&
+			  mission_start_released_this_pass_))) {
+		mission_start_aborted_ = true;
+		if (post_auth_stage_ == PostAuthStage::AwaitMissionStart)
+			post_auth_stage_ = PostAuthStage::AwaitWorldStreamEnd;
+		// A 0x11 this same pass ended the sync-tail wait's receive: that wait tests the
+		// gate first and returns 1, so no 0x0A is queued and nothing is preloaded.
+		// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 - @0x42CBC5 ahead of
+		//  @0x42CBE7; Game_StartMission @0x524360 - "aborted 1" @0x524DB0..0x524DD1]
+		if (sync_tail_this_pass_) {
+			pending_spawn_menu_request_ = false;
+			preload_ready_ = false;
+		}
+	}
+	mission_start_released_this_pass_ = false;
+	sync_tail_this_pass_ = false;
 	if (!conn_.seq.missing_request_pending) return {};
 	conn_.seq.missing_request_pending = false;
 	if (conn_.seq.queued_inbound.empty()) return {};
@@ -205,7 +249,7 @@ std::vector<uint8_t> JoinerConnection::finish_receive_pump() {
 //   - the game-start flag leads through Game_StartMission into SaveFile_SendAndWaitForServerAck,
 //     which waits for the server-info transfer and sends only after MORE than 50 ms;
 //   - the transfer's end leads into InitRandomSeedOrRequest's spin over the mission data;
-//   - after the mission load, NapiClient_WaitForDisconnect queues the 0x09 and sends only after
+//   - after the mission load, NapiClient_SendPlayerSyncAndWaitForSyncTail queues the 0x09 and sends only after
 //     MORE than 100 ms, until S2C 0x11 sets dword_A82358;
 //   - NapiClient_WaitForGameStart queues the 0x0A and spins until S2C 0x1A sets dword_A82364;
 //   - Game_StartMission's last loop spins until S2C 0x0F sets g_ClientWorldStateLoaded, and
@@ -217,28 +261,37 @@ std::vector<uint8_t> JoinerConnection::finish_receive_pump() {
 //  (receive @0x42475d, send @0x424767) beside CUIScene_EndFrame/PreMenu_RenderFrame @0x56a66f..0x56a674;
 //  Game_StartMission @0x524360 -> SaveFile_SendAndWaitForServerAck (the call @0x524801;
 //  `GetTickCount() - last > 50` before its pump), CNapiGameSession_InitRandomSeedOrRequest
-//  (@0x5248a7; ungated pump every pass), NapiClient_WaitForDisconnect (@0x524dab; `> 100`
+//  (@0x5248a7; ungated pump every pass), NapiClient_SendPlayerSyncAndWaitForSyncTail (@0x524dab; `> 100`
 //  @0x42cbb5, returns on dword_A82358 @0x42cbe7, set by NapiNPClientMsg_0x011 @0x4226e0),
 //  NapiClient_WaitForGameStart (@0x524e29; pump @0x42cc92, returns on dword_A82364 @0x42ccbf,
 //  set by NapiNPClientMsg_0x01A @0x425ecb), the final loop @0x52628d..0x5262df (send @0x5262da,
 //  exits on g_ClientWorldStateLoaded, set by NapiNPClientMsg_0x00F @0x42e2cd)]
 JoinerConnection::SendPumpLoop JoinerConnection::send_pump_loop() const {
-	// A joiner the host already released into the match runs our in-match frame (its
-	// uplink and input pack ride that frame's gate), whatever admission stage remains: an
-	// OpenNova host's first 0x5A can precede the 0x0F that ends the final wait.
-	if (phase_ == Phase::InMatch) return SendPumpLoop::NetworkFrame;
+	// A joiner the host released into the match runs our in-match frame, once the final
+	// wait is over: a first 0x5A inside that wait (any host answers the load's first 0x2F
+	// with one) leaves the joiner spinning in it until the 0x0F, as retail's loop has no
+	// other exit [orig: Game_StartMission @0x5262df].
+	if (phase_ == Phase::InMatch && post_auth_stage_ != PostAuthStage::AwaitDeployment)
+		return SendPumpLoop::NetworkFrame;
+	// An abandoned mission start runs the game loop's frames, as does one whose final
+	// wait an ESC left (cancel_final_wait) [orig: Game_StartMission @0x5262E9 -> @0x5262F3].
+	if (mission_start_aborted_ || loading_cancel_) return SendPumpLoop::NetworkFrame;
 	switch (post_auth_stage_) {
 	case PostAuthStage::AwaitServerInfo:
 		return SendPumpLoop::ServerInfoWait;
 	case PostAuthStage::AwaitMissionData:
 		return SendPumpLoop::MissionDataWait;
-	case PostAuthStage::AwaitPlayerList:
-		return SendPumpLoop::SyncTailWait;
 	case PostAuthStage::AwaitInitialSyncTail:
-		return pending_spawn_menu_request_ ? SendPumpLoop::WorldStreamWait
-		                                   : SendPumpLoop::SyncTailWait;
+		return pending_spawn_menu_request_ && !sync_tail_loading_ ? SendPumpLoop::WorldStreamWait
+		                                                          : SendPumpLoop::SyncTailWait;
 	case PostAuthStage::AwaitWorldStreamEnd:
-		return SendPumpLoop::WorldStreamWait;
+		// The 0x11's own pass under a declared load is the sync-tail wait's last: its paced
+		// send (set_sync_tail_loading) [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail
+		// @0x42CB20 - @0x42CBB5..0x42CBC0 ahead of @0x42CBE7].
+		return sync_tail_load_running() ? SendPumpLoop::SyncTailWait
+		                                : SendPumpLoop::WorldStreamWait;
+	case PostAuthStage::AwaitMissionStart:
+		return SendPumpLoop::MissionStart;
 	case PostAuthStage::AwaitDeployment:
 		return SendPumpLoop::WorldStateWait;
 	default:
@@ -247,7 +300,7 @@ JoinerConnection::SendPumpLoop JoinerConnection::send_pump_loop() const {
 }
 
 // [orig: SaveFile_SendAndWaitForServerAck @0x5204b0 — `(int)(GetTickCount() - last) > 50`;
-//  NapiClient_WaitForDisconnect @0x42cbb5 — `> 100`]
+//  NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42cbb5 — `> 100`]
 int32_t JoinerConnection::send_pump_loop_pace_ms(SendPumpLoop loop) {
 	switch (loop) {
 	case SendPumpLoop::ServerInfoWait: return 50;
@@ -259,10 +312,30 @@ int32_t JoinerConnection::send_pump_loop_pace_ms(SendPumpLoop loop) {
 std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) {
 	std::vector<std::vector<uint8_t>> out;
 	if (session_lost() || phase_ == Phase::Error) return out;
-	// [orig: g_ClientNetFrameCounter @0xA822A4; retail steps it only in
-	//  MultiPlayer_PumpJoinVerificationFrame @0x424740 (@0x424776), a ledgered residual]
-	++net_frame_counter_;
 	if (phase_ == Phase::Hello || phase_ == Phase::Auth) {
+		// The enumerate's recorded session: the pass whose receive recorded it sends no 0x42,
+		// but the same protocol pump still runs the enumerator's announce test after the
+		// record, its timer stopped only by the next pass's connect start, so that pass sends
+		// the 0x41 when more than 3000 ms have passed since the last one. The join state
+		// machine's next pass starts the connect state and pumps it at once, so the first 0x42
+		// leaves at the first pump whose clock reads past that start (D-NET-NEW-L2-25).
+		// [orig: CNapiNetwork_PumpTransportAndProtocol @0x4C6E00 - NapiNPProtocol_Pump(-1) (the
+		//  call @0x4C6E3D) @0x62A650: PumpRecvQueues (flag 8, the call @0x62A6AC) records the
+		//  0x81, then CNapiNPConnection_PumpFlags (the call @0x62A6F8) flag 0x20 (the call
+		//  @0x6297B7) -> CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 (the enumerator's +0x2C
+		//  @0x6290E3, `tick - last > interval` @0x629113..0x629119); UI_EnumerateAndJoinSession
+		//  @0x569F50 - the loop's exit @0x56A0C1 -> g_PreMenuState = 4 @0x56A2D9;
+		//  MultiPlayer_JoinSessionStateMachine @0x56A320 - state 4 @0x56A4B3 ->
+		//  UI_JoinSelectedSession @0x5699D0 (the call @0x56A4C9) -
+		//  CNapiNetwork_StartClientConnection (the call @0x569DE6; NapiTimer_Stop of the
+		//  enumerator @0x4CA1D8), CNapiNetwork_PumpAndCheckState (the call @0x569E60) ->
+		//  CNapiNPConnection_PumpStateMachine case 3 @0x629508]
+		if (phase_ == Phase::Hello && enumerated_session_recorded_) {
+			if (enumerate_pass_ended_)
+				enter_session_connect_state();
+			else
+				enumerate_pass_ended_ = true;
+		}
 		if (handshake_retry_datagram_.empty()) return out;
 		const uint64_t now_ms = monotonic_milliseconds_();
 		// Each initial send records its wall-clock timestamp. Keep a defensive lazy-anchor for a future
@@ -285,15 +358,18 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 				fail("The host did not answer the join request (NCC002)");
 				return out;
 			}
-			if (now_ms >= handshake_last_send_ms_ &&
-			    now_ms - handshake_last_send_ms_ > kClientJoinRetryMilliseconds) {
+			// The elapsed time is an unsigned difference: a join from a discovered
+			// session stamps its last send one interval before its start (start()), so
+			// its first 0x42 leaves once the clock reads past the start.
+			// [orig: @0x629580..0x629588, `sub edx, [ebp+5E4h]; cmp edx, eax; jbe`]
+			if (now_ms - handshake_last_send_ms_ > kClientJoinRetryMilliseconds) {
 				handshake_last_send_ms_ = now_ms;
 				out.push_back(handshake_retry_datagram_);
 			}
 			return out;
 		}
 		if (now_ms >= handshake_last_send_ms_ &&
-		    now_ms - handshake_last_send_ms_ >= kClientHelloRetryMilliseconds) {
+		    now_ms - handshake_last_send_ms_ > kEnumerateAnnounceMilliseconds) {
 			handshake_last_send_ms_ = now_ms;
 			out.push_back(handshake_retry_datagram_);
 		}
@@ -340,20 +416,39 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 		return out;
 	}
 
-	// The admission FSM is entirely server-driven. When S2C 0x11 arrived during a synchronous
-	// load hold, release its empty C2S 0x0A world-stream request as soon as the binding reports that
-	// the advertised mission has been installed.
-	if (pending_spawn_menu_request_ && world_ready_) {
-		// Remains inside ClientRuntime's surrounding logical send boundary.
-		out.push_back(frame_session({make_protocol_message(0x0A, {})}));
-		pending_spawn_menu_request_ = false;
-		post_auth_stage_ = PostAuthStage::AwaitWorldStreamEnd;
-	}
+	// The admission FSM is entirely server-driven. The 0x11's C2S 0x0A is no datagram of its
+	// own: the client runtime queues it behind its queue (take_world_stream_request).
 
 	// Carry a pending cumulative ACK only when no substantive C2S producer above already did so.
 	// All semantic join messages are emitted at their captured S2C trigger in on_server_session.
 	if (session_ack_pending_) out.push_back(frame_session({}));
 	return out;
+}
+
+// The sync-tail wait's head: the final S2C 0x64's empty reliable 0x09, once a declared
+// mission-data load has ended (set_mission_data_loading carries the witness).
+// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 - the 0x09 queued @0x42CB43]
+std::optional<ProtocolMessage> JoinerConnection::take_sync_request() {
+	if (!sync_request_owed_ || mission_data_load_running_ || phase_ != Phase::Driving ||
+			session_lost())
+		return std::nullopt;
+	sync_request_owed_ = false;
+	return make_protocol_message(c2s::CHECKSUM_RESPONSE, {});
+}
+
+// The game-start wait's head: the 0x11's empty reliable 0x0A, once the sync-tail pass ended
+// and any declared load has run (set_sync_tail_loading carries the witness). A latched early
+// 0x11 (applied when the final S2C 0x64 entered the sync-tail stage) owes it the same way.
+// [orig: NapiClient_WaitForGameStart @0x42CC10 - CNapiNetwork_QueueReliableMessage(0x0A)
+//  @0x42CC3F]
+std::optional<ProtocolMessage> JoinerConnection::take_world_stream_request() {
+	if (!pending_spawn_menu_request_ || sync_tail_loading_ || phase_ != Phase::Driving ||
+			session_lost())
+		return std::nullopt;
+	pending_spawn_menu_request_ = false;
+	if (post_auth_stage_ == PostAuthStage::AwaitInitialSyncTail)
+		post_auth_stage_ = PostAuthStage::AwaitWorldStreamEnd;
+	return make_protocol_message(0x0A, {});
 }
 
 uint8_t JoinerConnection::loadout_wire_class(uint8_t profile_class) const {
@@ -374,66 +469,94 @@ LoadoutSubmit JoinerConnection::build_profile_loadout_submit(
 	// [orig: Game_StartMission @0x525767-0x525836 (join) and NapiNPClientMsg_TeamAssign
 	//  @0x431a35..0x431a9a (the S2C 0x50 reselect)]
 	if (!loadout_kit_set_) {
-		LoadoutSubmit submit = build_retail_default_loadout_submit(team, alternate);
+		LoadoutSubmit submit = fresh_profile_loadout_submit(weapons_, team);
 		submit.player_class = loadout_wire_class(submit.player_class);
 		return submit;
 	}
+	LoadoutSubmit submit = profile_loadout_submit(loadout_kit_, team, alternate);
+	submit.player_class = loadout_wire_class(submit.player_class);
+	return submit;
+}
+
+LoadoutSubmit profile_loadout_submit(const JoinerConnection::LoadoutKit &kit, uint8_t team,
+		bool alternate) {
 	LoadoutSubmit submit;
 	submit.team = team;
-	const LoadoutKit::SideKit &side = loadout_kit_.side_for_team(team);
+	const JoinerConnection::LoadoutKit::SideKit &side = kit.side_for_team(team);
 	if (side.set) {
 		submit.player_class = side.player_class;
 		submit.entries = side.rows;
 	} else {
 		// The binding supplied only the applied kit (the historical single-kit seam).
-		submit.player_class = loadout_kit_.player_class;
-		submit.entries = loadout_kit_.rows;
+		submit.player_class = kit.player_class;
+		submit.entries = kit.rows;
 	}
-	submit.player_class = loadout_wire_class(submit.player_class);
 	// [orig: @0x525836 passes 195, @0x525c2e passes g_CurrentWeaponSlot]
-	submit.weapon_slot_index = alternate && loadout_kit_.equipped_combo >= 0
-			? static_cast<uint32_t>(loadout_kit_.equipped_combo)
+	submit.weapon_slot_index = alternate && kit.equipped_combo >= 0
+			? static_cast<uint32_t>(kit.equipped_combo)
 			: 195u;
 	return submit;
 }
 
-std::vector<uint8_t> JoinerConnection::frame_loadout_resubmit() {
+bool JoinerConnection::take_mission_start_first_loadout(ProtocolMessage &out) {
+	if (!mission_start_first_loadout_owed()) return false;
+	// The SAME per-side profile kit twice, first with the fixed slot 195, then (at the end)
+	// with the spawn fill's equipped slot. "Per-side" is literal: the latched team byte picks
+	// the profile side block, and that block's class byte picks the page [orig: @0x525767].
+	// [orig: Game_StartMission @0x525836 -> NetPacket_SendLoadoutSubmit @0x42cdc0]
+	out = make_protocol_message(c2s::LOADOUT_SUBMIT,
+			encode_loadout_submit(build_profile_loadout_submit(assigned_team_, false)));
+	mission_start_first_loadout_taken_ = true;
+	return true;
+}
+
+bool JoinerConnection::take_mission_start_submissions(MissionStartSubmissions &out) {
+	if (post_auth_stage_ != PostAuthStage::AwaitMissionStart) return false;
+	// The first 0x2F unless the load's first leg took it; the second and the mission status
+	// are built at their queue points (mission_start_second_loadout, mission_start_status).
+	// [orig: Game_StartMission @0x525836 -> NetPacket_SendLoadoutSubmit @0x42cdc0]
+	out.first_loadout = ProtocolMessage{};
+	(void)take_mission_start_first_loadout(out.first_loadout);
+	// Player_InitPlayer between the two binds the local player entity to the joiner's
+	// own entity (the S2C 0x50's compares read it from here on) [orig: Game_StartMission
+	// @0x524360 - the call @0x525BBC; Player_InitPlayer @0x4E15F0 - the store @0x4E17EB].
+	if (has_self_handle_) *local_player_entity_ = self_handle_;
+	post_auth_stage_ = PostAuthStage::AwaitDeployment;
+	return true;
+}
+
+ProtocolMessage JoinerConnection::mission_start_second_loadout() const {
+	return make_protocol_message(c2s::LOADOUT_SUBMIT,
+			encode_loadout_submit(build_profile_loadout_submit(assigned_team_, true)));
+}
+
+ProtocolMessage JoinerConnection::mission_start_status() const {
+	const gameprofile::GameProfile *profile =
+			title_ != nullptr ? gameprofile::gameprofile_by_id(title_->game_id) : nullptr;
+	return make_protocol_message(0x0B, build_mission_status(mission_status_side_password(),
+			packed_game_version(profile != nullptr ? profile->version_text : nullptr)));
+}
+
+std::vector<uint8_t> JoinerConnection::frame_loadout_submit(const LoadoutSubmit &submit) {
 	ProtocolMessage message;
-	if (!prepare_loadout_resubmit(message)) return {};
+	if (!prepare_loadout_submit(submit, message)) return {};
 	std::vector<uint8_t> datagram = frame_session({std::move(message)});
 	if (!datagram.empty()) complete_session_send_flush(conn_.seq);
 	return datagram;
 }
 
-bool JoinerConnection::prepare_loadout_resubmit(
-		ProtocolMessage &message_out) const {
-	// The armory-ACCEPT re-send [orig: WeaponLoadout_ApplyFromBuffer @0x565d94 ->
-	// NetPacket_SendLoadoutSubmit]: one 0x2F, current team + class + kit, slot = the
-	// live equipped combo (retail passes g_CurrentWeaponSlot). Only meaningful once
-	// the initial submission has gone out — the armory opens in-world.
-	// This leg does NOT re-read the profile side blocks: retail hands the ARMORY's
-	// own edited buffer and the armory's class to the builder, so the applied kit
-	// (LoadoutKit::player_class/rows) stays the source here.
+bool JoinerConnection::prepare_loadout_submit(
+		const LoadoutSubmit &submit, ProtocolMessage &message_out) const {
+	// The armory ACCEPT's one 0x2F, queued as NetPacket_SendLoadoutSubmit queues it
+	// [orig: WeaponLoadout_ApplyFromBuffer @0x565D94]. Only once the initial submission
+	// has gone out: the armory opens in-world.
 	if (post_auth_stage_ != PostAuthStage::AwaitDeployment &&
 	    post_auth_stage_ != PostAuthStage::AwaitDeployPick &&
 	    post_auth_stage_ != PostAuthStage::AwaitDeployRelease &&
 	    post_auth_stage_ != PostAuthStage::Complete) {
-		return {};
+		return false;
 	}
-	LoadoutSubmit submit;
-	if (loadout_kit_set_) {
-		submit.team = assigned_team_;
-		submit.player_class = loadout_kit_.player_class;
-		submit.weapon_slot_index = loadout_kit_.equipped_combo >= 0
-				? static_cast<uint32_t>(loadout_kit_.equipped_combo)
-				: 195u;
-		submit.entries = loadout_kit_.rows;
-	} else {
-		submit = build_retail_default_loadout_submit(assigned_team_, true);
-	}
-	submit.player_class = loadout_wire_class(submit.player_class);
-	message_out = make_protocol_message(
-			0x2F, encode_loadout_submit(submit));
+	message_out = make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(submit));
 	return true;
 }
 

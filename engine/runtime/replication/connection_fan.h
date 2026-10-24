@@ -39,17 +39,19 @@ namespace opennova::replication {
 // with emit_connection_s2c). Only sub_op 0x0A (extended) this increment; 0x0B compact is deferred.
 // Only the host (authority) receives C2S — a joiner never drains one
 // [orig: NetPacket_DispatchEntityPacketCallback @0x4D6A80 gates on g_NapiNPCtx.is_authority].
-void drain_connection_c2s(world::World &world, Connection &conn);
+// `slot_in_game` is the sender's player slot in game (state 6), one of the read-apply's
+// pose gates (apply_player_intent).
+void drain_connection_c2s(world::World &world, Connection &conn, bool slot_in_game);
 
 // Read-apply ONE decoded C2S 0x0C body onto `conn`'s owned entity: the same
-// owner gate, pre-round hold and SNAP as the drain above, callable from the
+// owner gate and read-apply as the drain above, callable from the
 // host's session dispatch so an uplink lands in wire order with the other
 // gameplay messages of its datagram (retail applies it inside the dispatch
 // walk, not on a later tick). Returns false when nothing was applied.
 // [orig: NapiNPServerMsg_0x00C @0x501C30 -> NetPacket_DispatchEntityPacketCallback
 //  @0x4D6A80 mode-4 read-apply]
 bool apply_connection_uplink(world::World &world, Connection &conn,
-                             const std::vector<uint8_t> &body);
+                             const std::vector<uint8_t> &body, bool slot_in_game);
 
 // The per-frame 0x0A byte cap, header included [orig: g_EntitySendBudget
 // @0xC8FC50, default 600, runtime-set by the BANDWIDTH server command clamped
@@ -92,6 +94,17 @@ int view_distance_units(const world::World &world);
 std::vector<std::vector<uint8_t>> build_water_cross_messages(
         const world::World &world);
 
+// Resolve the one legal S2C 0x0A anchor: this connection's live player
+// allocation, or null. Retail's wrapper is state==6 gated and immediately reads
+// that player's eye/reference position; an unbound/freed slot never enters the
+// writer and therefore never emits a map-centre fallback frame.
+// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate and recipient
+// eye stores @0x517BF5..0x517C13]
+const world::Entity *owned_entity_for_emit(const world::World &w, const Connection &conn);
+// The body a slot reads once its entity is destroyed and before its entry is reused:
+// the zeroed entry (owned_entity_for_emit) (D-NET-449).
+const world::Entity &destroyed_entry_body();
+
 // The fan's phases lap onto the SIM_REPLICATION_* rows of the world's profile
 // (ADR 0043 d5); an inactive profile keeps selection and encoding free of
 // clock reads.
@@ -121,6 +134,10 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 // g_ServerCpuPct; NetPacket_WritePlayerState @0x4FFA76..0x4FFA7C].
 // `title` is the title the host speaks (null: JO's), whose 0x0A objective body
 // carries the co-op checkpoint after its four values (DFX2-1).
+// `despawned` (when given) receives the handles the priority list's tracked-slot
+// walk cleared, in order: the caller sends each to this recipient, once, as an
+// S2C 0x12 ahead of the frame (D-NET-349) [orig: Server_BuildEntityPriorityList
+// @0x50E7F3..0x50E835, pool 1 @0x50ECE0].
 bool build_connection_s2c(const world::World &w, Connection &conn,
                           const std::vector<GameEntitySnapshot> &ents,
                           std::vector<uint8_t> &frame_out,
@@ -128,7 +145,8 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
                           std::size_t max_frame_body_bytes = 0,
                           int32_t server_fps = 0,
                           int32_t server_cpu_percent = 0,
-                          const TitleIdentity *title = nullptr);
+                          const TitleIdentity *title = nullptr,
+                          std::vector<uint16_t> *despawned = nullptr);
 
 // The co-op checkpoint a DFX2 host's 0x0A objective body carries (DFX2-1): the
 // pool-3 slot of the newest player-route marker the authority marked done in a

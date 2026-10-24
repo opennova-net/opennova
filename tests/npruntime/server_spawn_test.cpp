@@ -1,7 +1,8 @@
 // P3 — the World-driven host-side player spawn pipeline (server_spawn.{h,cpp}). Proves the §5.2a
 // step 1-2 flow spawns the pool-0 player in World (ADR 0012), stamping entity+0x78 ownerConnectionId
-// from the connection dcb, for BOTH the host's own type-2 loopback (-> spawn_player, publishes
-// cached.local_player at the host dcb 2) and a remote type-1 joiner (-> spawn_remote_player at its
+// from the connection dcb, for BOTH the host's own type-2 loopback (its add binds no body; the
+// mission start's round init -> spawn_player, publishes cached.local_player at the host dcb 2,
+// D-NET-NEW-L7-39) and a remote type-1 joiner (-> spawn_remote_player at its
 // own dcb, host's local player untouched). End-to-end: build_pool0_organic_batch then carries the
 // real dcb at OrganicSpawnRecord::owner_connection_id (the §1 wiring), the F3 self-match field.
 
@@ -9,6 +10,7 @@
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_spawn.h>
 #include <runtime/inmatch/napi_np_protocol.h>
+#include <runtime/inmatch/mission_rotation.h>
 
 #include "host_test_setup.h"
 
@@ -46,17 +48,21 @@ bool expect(bool cond, const char *msg) {
 // A World with an AiSystem (spawn_player requires it), pools 0 (players) and 3 (markers) configured,
 // and one authored 6002 DM fallback marker so the retail resolver finds a real spawn pose.
 void make_world(w::World &world) {
+	// items.def's Player row: each body's ItemTypeIndex and def (the 0x0C needs them, D-NET-487).
+	world.tables.player.has_item_def = true;
+	world.tables.player.item_type_index = 1;
+	world.tables.player.item_type = 3;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(3, 16);
 	w::Entity start;
 	start.kind = w::EntityKind::Marker;
 	start.item_id = 6002; // non-team fallback player start
 	start.position = {123.0f, 456.0f, 7.0f};
-	start.yaw = 30;
+	start.heading = w::placed_heading_bam(30);
 	world.registry.spawn(3, start);
 }
 
-const w::Entity *pool0_player(const w::World &world, uint16_t want_dcb) {
+const w::Entity *pool0_player(const w::World &world, uint32_t want_dcb) {
 	const w::Entity *found = nullptr;
 	world.registry.for_each([&](const w::Entity &e) {
 		if (e.handle.pool() == 0 && e.owner_connection_id == want_dcb) found = &e;
@@ -72,6 +78,11 @@ int main() {
 	auto world_heap = std::make_unique<w::World>();
 	w::World &world = *world_heap;
 	w::AiSystem &ai = world.ai;
+	// items.def's Player row: each body's ItemTypeIndex and def, which the 0x0C needs
+	// (D-NET-487).
+	world.tables.player.has_item_def = true;
+	world.tables.player.item_type_index = 1;
+	world.tables.player.item_type = 3;
 	make_world(world);
 
 	// Stand up the listen host with its own loopback (P0->P1->P2), then wire the authoritative World.
@@ -82,18 +93,26 @@ int main() {
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 	                        /*host_key=*/0, &loopback, listen_settings);
 	ctx.world = &world;
+	// The own player's dcb is its self-join twin's index, the process counter's step after the
+	// own client's (2 in a fresh process); a joiner's node takes the counter's next (D-NET-713).
+	const uint32_t host_dcb = inmatch::test::own_dcb(ctx);
+	if (!expect(host_dcb != 0 && host_dcb == ctx.np_protocol.connection_list.front().client_ci + 1,
+	            "the host's own dcb is its twin's index, the step after its own client's")) return 1;
 
 	// --- §5.2a step 1-2: spawn the host's OWN player (the type-2 loopback). ---
 	inmatch::Server_InitNewRoundState(ctx);
 	const int n1 = inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
-	if (!expect(n1 == 1, "host's own player spawned exactly once")) return 1;
+	if (!expect(n1 == 1, "host's own player added exactly once")) return 1;
+	if (!expect(!world.cached.local_player.valid(), "the own add spawns no body")) return 1;
+	// The mission start's round init spawns it, hidden (D-NET-NEW-L7-39).
+	inmatch::test::round_init_own_body(ctx);
 
 	if (!expect(world.cached.local_player.valid(), "cached.local_player published for the host")) return 1;
 	const w::Entity *host = world.registry.get(world.cached.local_player);
 	if (!expect(host != nullptr, "host player entity resolvable")) return 1;
 	if (!expect(host->item_id == w::kPlayerInfantryTypeId, "host player is 0x14B9 infantry")) return 1;
-	if (!expect(host->owner_connection_id == inmatch::kHostPlayerDcb,
-	            "host player entity+0x78 == kHostPlayerDcb (2), NOT 0")) return 1;
+	if (!expect(host->owner_connection_id == host_dcb,
+	            "host player entity+0x78 == the host's own dcb, NOT 0")) return 1;
 	if (!expect(host->handle.slot() >= inmatch::kRetailPlayerMinEntitySlot,
 	            "host player lands at/after the retail player slot")) return 1;
 	if (!expect(host->position.x == 123.0f && host->position.y == 456.0f,
@@ -103,10 +122,11 @@ int main() {
 	            "re-running ProcessPendingPlayerSpawns is idempotent")) return 1;
 
 	// --- A remote joiner reaches the accepted phase: it spawns as a REMOTE peer, host untouched. ---
+	const uint32_t joiner_dcb = opennova::next_connection_index();
 	{
 		inmatch::NapiNPConnection joiner;
 		joiner.type = 1;                       // server-side view of a remote client
-		joiner.connection_id = inmatch::kFirstJoinerDcb; // 3, the host-assigned dcb
+		joiner.connection_id = joiner_dcb;     // the host-assigned dcb
 		joiner.self_id_seen = true;            // accepted (post-0x42 / 0x48)
 		joiner.phase = inmatch::ConnectionPhase::Joined;
 		ctx.np_protocol.connection_list.push_back(joiner);
@@ -117,9 +137,9 @@ int main() {
 	if (!expect(world.cached.local_player == host_handle_before,
 	            "the joiner did NOT republish cached.local_player (host keeps its own)")) return 1;
 
-	const w::Entity *joiner_ent = pool0_player(world, inmatch::kFirstJoinerDcb);
-	if (!expect(joiner_ent != nullptr && joiner_ent->owner_connection_id == inmatch::kFirstJoinerDcb,
-	            "joiner player entity+0x78 == its dcb (3)")) return 1;
+	const w::Entity *joiner_ent = pool0_player(world, joiner_dcb);
+	if (!expect(joiner_ent != nullptr && joiner_ent->owner_connection_id == joiner_dcb,
+	            "joiner player entity+0x78 == its dcb")) return 1;
 	if (!expect(joiner_ent->handle != world.cached.local_player,
 	            "joiner is a distinct pool-0 entity from the host")) return 1;
 	// The add mirrors the slot's reserved team byte (+416) onto its roster row
@@ -133,8 +153,8 @@ int main() {
 	}
 
 	// The same authority transition backs the F3 checkbox and host-side tooling:
-	// it mutates the real connection/entity/AI state, then respawns through the
-	// ordinary marker chain when play resumes.
+	// it mutates the real connection/entity/AI state. There is no leave (retail
+	// has none, D-NET-407): the request is refused and nothing changes.
 	inmatch::NapiNPConnection &joiner_conn =
 			ctx.np_protocol.connection_list.back();
 	const w::EntityHandle joiner_handle = joiner_ent->handle;
@@ -153,36 +173,19 @@ int main() {
 	}
 	spectator->position = {900.0f, 901.0f, 902.0f};
 	if (!expect(
-			inmatch::Server_SetPlayerSpectator(ctx, joiner_conn, world, false),
-			"authority returns a spectator to play")) return 1;
-	w::Entity *restored = world.registry.get(joiner_handle);
-	// Leaving spectator mode is a deploy: the reset never touches entity+292 and
-	// the deploy leg re-seeds the 620-tick spawn protection
-	// [orig: Server_DeployPlayer @0x517937].
-	if (!expect(
-			!joiner_conn.link.spectator && restored != nullptr &&
-			restored->team == 1 && (restored->flags & 1u) == 0 &&
-			restored->damage_state == 620 && restored->alive &&
-			restored->position.x == 123.0f &&
-			restored->position.y == 456.0f &&
-			spectator_ai->team == 1,
-			"leaving spectator mode restores team, body, AI, and spawn pose")) {
-		return 1;
-	}
+			!inmatch::Server_SetPlayerSpectator(ctx, joiner_conn, world, false) &&
+			joiner_conn.link.spectator && spectator->team == 0 &&
+			(spectator->flags & 1u) != 0 && spectator->position.x == 900.0f,
+			"a spectator leave is refused and changes nothing")) return 1;
 	// The roster row mirrors the slot's team byte (+416) wherever the host
-	// writes it: the add, the spectator convert's clear and its restore, and a
-	// team change; a script team write to the body stores the entity byte
-	// alone and leaves it (D-NET-650).
+	// writes it: the add, the spectator convert's clear, and a team change; a
+	// script team write to the body stores the entity byte alone and leaves it
+	// (D-NET-650).
 	// [orig: Server_ConvertPlayerToSpectator @0x519E6E; Server_ChangeEntityTeam
 	//  @0x518DEF; Entity_SetTeamByNetId @0x43C680]
 	{
-		const w::MatchPlayer *row = world.match.player(joiner_handle);
-		if (!expect(row != nullptr && joiner_conn.assigned_team == 1 && row->slot_team == 1,
-				"the roster row carries the restored slot team")) return 1;
-		inmatch::Server_SetPlayerSpectator(ctx, joiner_conn, world, true);
 		if (!expect(world.match.player(joiner_handle)->slot_team == 0,
 				"the spectator convert clears the mirrored slot team")) return 1;
-		inmatch::Server_SetPlayerSpectator(ctx, joiner_conn, world, false);
 		inmatch::Server_ChangeEntityTeam(ctx, world, joiner_handle, 2);
 		if (!expect(joiner_conn.assigned_team == 2 &&
 				world.match.player(joiner_handle)->slot_team == 2,
@@ -203,10 +206,11 @@ int main() {
 				world.match.player(joiner_handle)->slot_team == 1,
 				"a team change back stamps it again")) return 1;
 	}
+	const uint32_t spectator_dcb = opennova::next_connection_index();
 	{
 		inmatch::NapiNPConnection joining_spectator;
 		joining_spectator.type = 1;
-		joining_spectator.connection_id = inmatch::kFirstJoinerDcb + 1;
+		joining_spectator.connection_id = spectator_dcb;
 		joining_spectator.self_id_seen = true;
 		joining_spectator.phase = inmatch::ConnectionPhase::Joined;
 		joining_spectator.link.spectator = true;
@@ -216,7 +220,7 @@ int main() {
 			inmatch::Server_ProcessPendingPlayerSpawns(ctx, world) == 1,
 			"a newly admitted spectator receives its hidden player record")) return 1;
 	const w::Entity *joining_spectator =
-			pool0_player(world, inmatch::kFirstJoinerDcb + 1);
+			pool0_player(world, spectator_dcb);
 	if (!expect(
 			joining_spectator != nullptr && joining_spectator->team == 0 &&
 			(joining_spectator->flags & 1u) != 0 &&
@@ -229,11 +233,11 @@ int main() {
 	const opennova::OrganicSpawnBatch batch = ns::build_pool0_organic_batch(world);
 	bool saw_host = false, saw_joiner = false;
 	for (const opennova::OrganicSpawnRecord &r : batch.records) {
-		if (r.owner_connection_id == inmatch::kHostPlayerDcb) saw_host = true;
-		if (r.owner_connection_id == inmatch::kFirstJoinerDcb) saw_joiner = true;
+		if (r.owner_connection_id == host_dcb) saw_host = true;
+		if (r.owner_connection_id == joiner_dcb) saw_joiner = true;
 	}
 	if (!expect(saw_host && saw_joiner,
-	            "build_pool0_organic_batch stamps owner_connection_id from owner_connection_id (host 2 + joiner 3)")) return 1;
+	            "build_pool0_organic_batch stamps owner_connection_id from owner_connection_id (host + joiner)")) return 1;
 	// Each player's record carries its own roster slot id at entity+0x154,
 	// the byte a client's squad legs read as its own slot [orig:
 	// Server_PlayerAdd @0x51d087..0x51d08b; NetPacket_SerializeEntityStatesToBuffer
@@ -378,10 +382,6 @@ int main() {
 	// [orig: Server_AssignPlayerTeam @0x4FE398..0x4FE400,
 	// @0x4FE51A..0x4FE587]
 	{
-		auto team_world = std::make_unique<w::World>();
-		w::AiSystem &team_ai = team_world->ai;
-		make_world(*team_world);
-
 		auto reserve_sequence = [&](inmatch::GameConfig config,
 				std::initializer_list<uint8_t> requests,
 				const inmatch::HostSlotRow *host_slot = nullptr) {
@@ -391,8 +391,10 @@ int main() {
 			for (uint8_t request : requests) {
 				roster.emplace_back();
 				roster.back().char_vars.team_request = request;
+				// The row first, as the add takes it: the tally counts claimed rows.
+				(void)inmatch::Server_ReservePlayerSlot(roster, roster.back(), 8);
 				teams.push_back(inmatch::Server_ReservePlayerTeam(
-						config, true, roster, roster.back(), *team_world, nullptr, host_slot));
+						config, true, roster, roster.back(), nullptr, host_slot));
 			}
 			return teams;
 		};
@@ -432,11 +434,13 @@ int main() {
 						std::vector<uint8_t>({1, 2, 1}),
 					"an inactive host slot (a listen host) counts nothing")) return 1;
 		}
-		chosen.side_a_password = "side-a";
+		// The pick reads the mission start's pair, g_SidePasswordA / B (D-NET-NEW-L1-44's
+		// DIVERGENT) [orig: Server_AssignPlayerTeam @0x4FE41C, @0x4FE464].
+		chosen.mission_side_a_password = "side-a";
 		if (!expect(reserve_sequence(chosen, {0xFF}) ==
 					std::vector<uint8_t>({2}),
 				"an empty JSP selects the only unprotected side")) return 1;
-		chosen.side_b_password = "side-b";
+		chosen.mission_side_b_password = "side-b";
 		if (!expect(reserve_sequence(chosen, {0xFF}) ==
 					std::vector<uint8_t>({0}),
 				"an empty JSP cannot select either protected side")) return 1;
@@ -456,49 +460,100 @@ int main() {
 
 		std::vector<inmatch::NapiNPConnection> mixed(4);
 		for (std::size_t i = 0; i < 3; ++i) {
+			mixed[i].reply.player_slot = static_cast<uint8_t>(i);
+			mixed[i].reply.player_slot_reserved = true;
 			mixed[i].assigned_team_valid = true;
 			mixed[i].assigned_team = static_cast<uint8_t>(i == 2 ? 4 : i + 1);
 		}
 		mixed.back().char_vars.team_request = 0xFF;
 		if (!expect(inmatch::Server_ReservePlayerTeam(
-					four, true, mixed, mixed.back(), *team_world) == 2,
+					four, true, mixed, mixed.back()) == 2,
 				"four-team mixed-index lookup is reproduced exactly")) return 1;
 
-		four.side_a_password = "side-a";
-		four.side_b_password = "side-b";
+		four.mission_side_a_password = "side-a";
+		four.mission_side_b_password = "side-b";
 		if (!expect(reserve_sequence(four, {0xFF}) ==
 					std::vector<uint8_t>({3}),
 				"four-team password flags feed retail's mixed-index availability lookup")) return 1;
 
-		// A TDM (exactly 0x10000) host with ANY side password forces the add
-		// event's preference to automatic before the assignment runs, so a
-		// TR for the open side still balances. With two team-2 players
-		// present the sort walks [0,2,3,1] over the locked-A availability
-		// row and lands on team 3, not the requested side B.
-		// [orig: Server_PlayerAdd @0x51CC76..0x51CC91 -> @0x51CF24]
+		// A host whose cfg block's game type is TDM (exactly 0x10000) and whose block
+		// carries ANY side password forces the add event's preference to automatic before
+		// the assignment runs, so a TR for the open side still balances. With two team-2
+		// players present the sort walks [0,2,3,1] over the locked-A availability row and
+		// lands on team 3, not the requested side B. The test reads the block's own words
+		// (cfg_game_type, cfg_side_a_password), never the mission's type or the pick's pair
+		// (D-NET-NEW-L1-46).
+		// [orig: Server_PlayerAdd @0x51CC6C, @0x51CC76..0x51CC91 -> @0x51CF24]
 		{
 			inmatch::GameConfig tdm_locked;
 			tdm_locked.game_type = opennova::game_type::kTeamDeathmatch;
 			tdm_locked.num_teams = 4;
 			tdm_locked.mp_attributes = inmatch::GameConfig::kMpAttribTeamChoose;
-			tdm_locked.side_a_password = "side-a";
+			tdm_locked.cfg_game_type = static_cast<int32_t>(opennova::game_type::kTeamDeathmatch);
+			tdm_locked.cfg_side_a_password = "side-a";
+			tdm_locked.mission_side_a_password = "side-a";
 			std::vector<inmatch::NapiNPConnection> roster(3);
 			for (std::size_t i = 0; i < 2; ++i) {
+				roster[i].reply.player_slot = static_cast<uint8_t>(i);
+				roster[i].reply.player_slot_reserved = true;
 				roster[i].assigned_team_valid = true;
 				roster[i].assigned_team = 2;
 			}
 			roster.back().char_vars.team_request = 1; // side B, which is open
 			if (!expect(inmatch::Server_ReservePlayerTeam(
-						tdm_locked, true, roster, roster.back(), *team_world) == 3,
-					"TDM with a locked side forces TR to automatic (balance picks team 3)")) return 1;
-			// The force is keyed on the exact 0x10000 game type: TKOTH keeps
-			// honoring the open-side request under the same passwords.
-			inmatch::GameConfig tkoth_locked = tdm_locked;
-			tkoth_locked.game_type = opennova::game_type::kTeamKingOfTheHill;
+						tdm_locked, true, roster, roster.back()) == 3,
+					"a TDM block with a locked side forces TR to automatic (balance picks team 3)")) return 1;
+			// The force is keyed on the block's exact 0x10000: a TKOTH block keeps honoring
+			// the open-side request under the same passwords, on a TDM mission too.
+			inmatch::GameConfig tkoth_block = tdm_locked;
+			tkoth_block.cfg_game_type = static_cast<int32_t>(opennova::game_type::kTeamKingOfTheHill);
 			roster.back().assigned_team_valid = false;
 			if (!expect(inmatch::Server_ReservePlayerTeam(
-						tkoth_locked, true, roster, roster.back(), *team_world) == 2,
-					"non-TDM four-team hosts still honor the open-side TR")) return 1;
+						tkoth_block, true, roster, roster.back()) == 2,
+					"a non-TDM block honors the open-side TR on a TDM mission")) return 1;
+			// A TDM block forces it on a four-team TKOTH mission.
+			inmatch::GameConfig tkoth_mission = tdm_locked;
+			tkoth_mission.game_type = opennova::game_type::kTeamKingOfTheHill;
+			roster.back().assigned_team_valid = false;
+			if (!expect(inmatch::Server_ReservePlayerTeam(
+						tkoth_mission, true, roster, roster.back()) == 3,
+					"a TDM block forces TR on a TKOTH mission")) return 1;
+			// The block's side words, not the pick's pair: with the block's side A cleared (an
+			// admin SET mid-mission) the force is gone while the pick's pair still locks A.
+			inmatch::GameConfig unlocked_block = tdm_locked;
+			unlocked_block.cfg_side_a_password.clear();
+			roster.back().assigned_team_valid = false;
+			if (!expect(inmatch::Server_ReservePlayerTeam(
+						unlocked_block, true, roster, roster.back()) == 2,
+					"no block side password: the open-side TR is honored")) return 1;
+		}
+
+		// D-NET-NEW-L3-6: the balance tally reads the slot rows' team bytes, each active row
+		// but the joiner's, whatever its body or join state: two loading joiners' rows on
+		// team 2 send the next joiner to team 1, and a session spectator's row (team 0)
+		// counts nowhere.
+		// [orig: Server_AssignPlayerTeam @0x4FE5BD..0x4FE5DE, the 2-team pick @0x4FE619;
+		//  the spectator's team 0 @0x4FE368]
+		{
+			inmatch::GameConfig tdm;
+			tdm.game_type = opennova::game_type::kTeamDeathmatch;
+			std::vector<inmatch::NapiNPConnection> rows(4);
+			for (std::size_t i = 0; i < 3; ++i) {
+				rows[i].reply.player_slot = static_cast<uint8_t>(i + 1);
+				rows[i].reply.player_slot_reserved = true;
+				rows[i].assigned_team_valid = true;
+			}
+			rows[0].link.spectator = true; // a session spectator's row: team 0
+			rows[0].assigned_team = 0;
+			rows[1].assigned_team = 2;     // loading joiners: rows claimed, no body
+			rows[2].assigned_team = 2;
+			rows[3].char_vars.team_request = 0xFF;
+			if (!expect(inmatch::Server_ReservePlayerTeam(tdm, true, rows, rows[3]) == 1,
+					"two loading joiners' team-2 rows send the next joiner to team 1")) return 1;
+			rows[2].assigned_team = 1;
+			rows[3].assigned_team_valid = false;
+			if (!expect(inmatch::Server_ReservePlayerTeam(tdm, true, rows, rows[3]) == 1,
+					"one row per team and a spectator's team 0: a tie takes team 1")) return 1;
 		}
 
 		// The side compares see the add event's 16-character copy of the JSP
@@ -508,17 +563,17 @@ int main() {
 		{
 			inmatch::GameConfig prefix;
 			prefix.game_type = opennova::game_type::kAttackDefend;
-			prefix.side_a_password = "abcdefghijklmnop"; // 16 chars, the field's full width
+			prefix.mission_side_a_password = "abcdefghijklmnop"; // 16 chars and its NUL
 			std::vector<inmatch::NapiNPConnection> roster(1);
 			roster.back().char_vars.team_request = 0xFF;
 			roster.back().join_password = "abcdefghijklmnopQRS";
 			if (!expect(inmatch::Server_ReservePlayerTeam(
-						prefix, true, roster, roster.back(), *team_world) == 1,
+						prefix, true, roster, roster.back()) == 1,
 					"a JSP matching the 16-char truncation selects the locked side")) return 1;
 			roster.back().assigned_team_valid = false;
 			roster.back().join_password = "abcdefghijklmnoZ"; // differs inside the window
 			if (!expect(inmatch::Server_ReservePlayerTeam(
-						prefix, true, roster, roster.back(), *team_world) == 2,
+						prefix, true, roster, roster.back()) == 2,
 					"a JSP differing inside the 16-char window falls to the open side")) return 1;
 		}
 	}
@@ -544,6 +599,12 @@ int main() {
 		inmatch::test::bring_up_host(cctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 		                        /*host_key=*/0, &cloop, settings);
 		cctx.world = &cw;
+		// The host's Avatars.def combos (the golden ids, in file order: side A 0x0200 / 0x0400,
+		// side B 0x8207 / 0x8407); the add validates every side's id against them (D-NET-137).
+		cctx.characters.add_entry(0, 0, 0, 0, 0, 1, 0, 1, false); // 0x0200
+		cctx.characters.add_entry(0, 0, 1, 0, 0, 2, 0, 3, false); // 0x0400
+		cctx.characters.add_entry(1, 0, 0, 7, 0, 1, 1, 4, false); // 0x8207
+		cctx.characters.add_entry(1, 0, 1, 7, 0, 2, 1, 9, false); // 0x8407
 		// A non-default local profile is installed on the type-2 loopback before the
 		// spawn (start_host_session does it from HostConfig.local_character_vars); the
 		// host's own player is stamped from it by ASSIGNED side like a joiner's upload —
@@ -556,15 +617,23 @@ int main() {
 		host_conn.char_vars.avatar[0] = 3;
 		host_conn.char_vars.avatar[1] = 9;
 
-		// Host own player first (team 1 by autobalance).
+		// Host own player first (team 1 by autobalance). A later session in this process: its own
+		// dcb runs on from the earlier ones' (D-NET-713), and each joiner's node takes the next.
+		const uint32_t chost_dcb = inmatch::test::own_dcb(cctx);
+		const uint32_t cjoin_dcb = opennova::next_connection_index();
+		const uint32_t cbare_dcb = opennova::next_connection_index();
+		const uint32_t cspec_dcb = opennova::next_connection_index();
+		const uint32_t cnext_dcb = opennova::next_connection_index();
 		inmatch::Server_InitNewRoundState(cctx);
-		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1, "char-stamp: host spawned")) return 1;
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1, "char-stamp: host added")) return 1;
+		// The own add binds no body: the mission start's round init spawns it (D-NET-NEW-L7-39).
+		inmatch::test::round_init_own_body(cctx);
 
 		// The joiner: golden CU var set (side A 1/0x0200 class 8, side B 4/0x8207 class 5, TR auto).
 		{
 			inmatch::NapiNPConnection joiner;
 			joiner.type = 1;
-			joiner.connection_id = inmatch::kFirstJoinerDcb;
+			joiner.connection_id = cjoin_dcb;
 			joiner.self_id_seen = true;
 			joiner.phase = inmatch::ConnectionPhase::Joined;
 			joiner.char_vars.char_id[0] = 0x0200;
@@ -578,8 +647,8 @@ int main() {
 		}
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1, "char-stamp: joiner spawned")) return 1;
 
-		const w::Entity *chost = pool0_player(cw, inmatch::kHostPlayerDcb);
-		const w::Entity *cjoin = pool0_player(cw, inmatch::kFirstJoinerDcb);
+		const w::Entity *chost = pool0_player(cw, chost_dcb);
+		const w::Entity *cjoin = pool0_player(cw, cjoin_dcb);
 		if (!expect(chost != nullptr && cjoin != nullptr, "char-stamp: both players resolvable")) return 1;
 		if (!expect(chost->team == 1 && cjoin->team == 2, "char-stamp: host team 1, joiner team 2")) return 1;
 		if (!expect(chost->anim_slot == 3, "host animSlot = selected side-A avatar")) return 1;
@@ -595,35 +664,135 @@ int main() {
 		const opennova::OrganicSpawnBatch cbatch = ns::build_pool0_organic_batch(cw);
 		bool host_rec_ok = false, join_rec_ok = false;
 		for (const opennova::OrganicSpawnRecord &r : cbatch.records) {
-			if (r.owner_connection_id == inmatch::kHostPlayerDcb)
+			if (r.owner_connection_id == chost_dcb)
 				host_rec_ok = (r.anim_slot == 3 && r.net_id == 0x0400);
-			if (r.owner_connection_id == inmatch::kFirstJoinerDcb)
+			if (r.owner_connection_id == cjoin_dcb)
 				join_rec_ok = (r.anim_slot == 4 && r.net_id == 0x8207 && r.player_class == 5);
 		}
 		if (!expect(host_rec_ok, "0x0C host record echoes the selected local character")) return 1;
 		if (!expect(join_rec_ok, "0x0C joiner record: animSlot 4 + netId 0x8207 + class 5 (golden shape)")) return 1;
 
 		// A var-less joiner (no CU tags): animSlot stays the retail raw 0, class defaults to 8,
-		// and the netId falls back to the D-NET-137 encoding shim (nonzero).
+		// and its id 0 names no combo, so the add re-resolves each side to the side's first
+		// combo (D-NET-137) [orig: Server_PlayerAdd @0x51CF87..0x51CFD8].
 		{
 			inmatch::NapiNPConnection bare;
 			bare.type = 1;
-			bare.connection_id = inmatch::kFirstJoinerDcb + 1;
+			bare.connection_id = cbare_dcb;
 			bare.self_id_seen = true;
 			bare.phase = inmatch::ConnectionPhase::Joined;
 			cctx.np_protocol.connection_list.push_back(bare);
 		}
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1, "char-stamp: bare joiner spawned")) return 1;
-		const w::Entity *cbare = pool0_player(cw, inmatch::kFirstJoinerDcb + 1);
-		if (!expect(cbare != nullptr && cbare->anim_slot == 0 && cbare->minimap_net_id == 0,
-		            "var-less joiner: animSlot 0 (tag absent), no char id")) return 1;
+		const w::Entity *cbare = pool0_player(cw, cbare_dcb);
+		if (!expect(cbare != nullptr && cbare->anim_slot == 0,
+		            "var-less joiner: animSlot 0 (tag absent)")) return 1;
+		const uint16_t side_default = cbare->team == 2 ? 0x8207 : 0x0200;
+		if (!expect(cbare->minimap_net_id == side_default,
+		            "var-less joiner: the id re-resolves to its side's first combo")) return 1;
 		if (!expect(cbare->player_class == 8, "var-less joiner: playerClass defaults 8 in-session")) return 1;
 		const opennova::OrganicSpawnBatch bbatch = ns::build_pool0_organic_batch(cw);
 		for (const opennova::OrganicSpawnRecord &r : bbatch.records) {
-			if (r.owner_connection_id == inmatch::kFirstJoinerDcb + 1) {
-				if (!expect(r.net_id != 0, "var-less joiner netId falls back to the encoder shim")) return 1;
+			if (r.owner_connection_id == cbare_dcb) {
+				if (!expect(r.net_id == side_default, "var-less joiner streams its re-resolved id")) return 1;
 			}
 		}
+
+		// D-NET-NEW-L3-7: a session spectator's slot team is 0, so in a team game the side
+		// pick (slot team 1 or 3, or a non-team game, takes side A) gives it side B.
+		// [orig: Server_AssignPlayerTeam @0x4FE368; Server_PlayerAdd @0x51CFDF..0x51CFF7]
+		{
+			cctx.is_in_session = 1;
+			inmatch::NapiNPConnection spec;
+			spec.type = 1;
+			spec.connection_id = cspec_dcb;
+			spec.self_id_seen = true;
+			spec.phase = inmatch::ConnectionPhase::Joined;
+			spec.link.spectator = true;
+			spec.char_vars.char_id[0] = 0x0200;
+			spec.char_vars.char_id[1] = 0x8207;
+			spec.char_vars.char_class[0] = 8;
+			spec.char_vars.char_class[1] = 5;
+			spec.char_vars.avatar[0] = 1;
+			spec.char_vars.avatar[1] = 4;
+			cctx.np_protocol.connection_list.push_back(spec);
+		}
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1,
+		            "char-stamp: spectator spawned")) return 1;
+		const inmatch::NapiNPConnection &spec_conn = cctx.np_protocol.connection_list.back();
+		const w::Entity *cspec = pool0_player(cw, cspec_dcb);
+		if (!expect(spec_conn.assigned_team_valid && spec_conn.assigned_team == 0,
+		            "a session spectator's slot team is 0")) return 1;
+		if (!expect(cspec != nullptr && cspec->anim_slot == 4 && cspec->minimap_net_id == 0x8207,
+		            "the spectator's team 0 takes side B's avatar and character id")) return 1;
+
+		// D-NET-NEW-L3-6 through the pump: the tally reads the rows' team bytes, not the
+		// bodies. Rows: the host and the bare joiner on team 1, the joiner on team 2, the
+		// spectator on 0. A write to the host body's team (2) changes no row, so the next
+		// joiner balances to team 2; a body walk would have counted 1 against 2 and said 1.
+		// [orig: Server_AssignPlayerTeam @0x4FE5BD..0x4FE5DE, @0x4FE619]
+		if (!expect(chost != nullptr, "char-stamp: host body")) return 1;
+		const_cast<w::Entity *>(pool0_player(cw, chost_dcb))->team = 2;
+		{
+			inmatch::NapiNPConnection next;
+			next.type = 1;
+			next.connection_id = cnext_dcb;
+			next.self_id_seen = true;
+			next.phase = inmatch::ConnectionPhase::Joined;
+			next.char_vars.team_request = 0xFF;
+			cctx.np_protocol.connection_list.push_back(next);
+		}
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1,
+		            "char-stamp: next joiner spawned")) return 1;
+		if (!expect(cctx.np_protocol.connection_list.back().assigned_team == 2,
+		            "the tally counts the rows' teams (team 1: 2, team 2: 1), not the bodies'")) return 1;
+	}
+
+	// The host's own add validates nothing: the local connection's add record takes the
+	// empty arm and Server_PlayerAdd's local branch, so the own ids stay the profile's,
+	// which were validated when it was applied; a joiner's ids are validated. With a table
+	// that names neither (here an empty one), the own player keeps its profile's 0x0400
+	// and a joiner's 0x0200 becomes the empty table's 0 (D-NET-137).
+	// [orig: Server_BuildPlayerInfoAndAdd @0x51D560 - the empty arm @0x51D5ED, the ids 0
+	//  @0x51D61B / @0x51D623, the JSP checks @0x51D6A4 / @0x51D6DD; Server_PlayerAdd
+	//  @0x51CBC0 - the local branch @0x51CC24..0x51CC60, the checks @0x51CF87 / @0x51CFB9]
+	{
+		auto ew_heap = std::make_unique<w::World>();
+		w::World &ew = *ew_heap;
+		make_world(ew);
+		ns::LoopbackChannel eloop;
+		inmatch::NapiNPServerCtx ectx;
+		inmatch::GameConfig settings;
+		settings.max_players = 8;
+		settings.game_type = 0x10010;
+		inmatch::test::bring_up_host(ectx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
+		                        /*host_key=*/0, &eloop, settings);
+		ectx.world = &ew;
+		inmatch::NapiNPConnection &own = ectx.np_protocol.connection_list.front();
+		own.char_vars.char_id[0] = 0x0400;
+		own.char_vars.char_id[1] = 0x8407;
+		const uint32_t own_dcb = inmatch::test::own_dcb(ectx);
+		const uint32_t ejoin_dcb = opennova::next_connection_index();
+		inmatch::Server_InitNewRoundState(ectx);
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ectx, ew) == 1, "own-add: host added")) return 1;
+		inmatch::test::round_init_own_body(ectx);
+		{
+			inmatch::NapiNPConnection joiner;
+			joiner.type = 1;
+			joiner.connection_id = ejoin_dcb;
+			joiner.self_id_seen = true;
+			joiner.phase = inmatch::ConnectionPhase::Joined;
+			joiner.char_vars.char_id[0] = 0x0200;
+			joiner.char_vars.char_id[1] = 0x0200;
+			ectx.np_protocol.connection_list.push_back(joiner);
+		}
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ectx, ew) == 1, "own-add: joiner spawned")) return 1;
+		const w::Entity *own_body = pool0_player(ew, own_dcb);
+		const w::Entity *joiner_body = pool0_player(ew, ejoin_dcb);
+		if (!expect(own_body != nullptr && own_body->team == 1 && own_body->minimap_net_id == 0x0400,
+		            "the host's own add keeps its profile's id")) return 1;
+		if (!expect(joiner_body != nullptr && joiner_body->minimap_net_id == 0,
+		            "a joiner's id the table lacks becomes the empty table's 0")) return 1;
 	}
 
 	// The standalone SP host: a campaign mission authors ONLY the Co-op 6001 start (every
@@ -642,7 +811,7 @@ int main() {
 			start.kind = w::EntityKind::Marker;
 			start.item_id = 6001; // the Co-op fallback start, 00TRa's only player start
 			start.position = {297.81f, -409.12f, 27.14f};
-			start.yaw = 45;
+			start.heading = w::placed_heading_bam(45);
 			sp_world->registry.spawn(3, start);
 
 			ns::LoopbackChannel sp_loop;
@@ -656,6 +825,7 @@ int main() {
 			sp_ctx.world = sp_world.get();
 			inmatch::Server_InitNewRoundState(sp_ctx);
 			if (inmatch::Server_ProcessPendingPlayerSpawns(sp_ctx, *sp_world) != 1) return false;
+			inmatch::test::round_init_own_body(sp_ctx); // the mission start's round init
 			const w::Entity *sp_player = sp_world->registry.get(sp_world->cached.local_player);
 			if (sp_player == nullptr) return false;
 			out = sp_player->position;
@@ -686,7 +856,7 @@ int main() {
 		start.kind = w::EntityKind::Marker;
 		start.item_id = 6001;
 		start.position = {-534.9119f, -139.3639f, 25.5f};
-		start.yaw = -197;
+		start.heading = w::placed_heading_bam(-197);
 		cp01_world->registry.spawn(3, start);
 
 		ns::LoopbackChannel cp01_loop;
@@ -701,12 +871,13 @@ int main() {
 		cp01_ctx.world = cp01_world.get();
 		inmatch::Server_InitNewRoundState(cp01_ctx);
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cp01_ctx, *cp01_world) == 1,
-		            "the CP01 host player spawns")) return 1;
+		            "the CP01 host player is added")) return 1;
+		inmatch::test::round_init_own_body(cp01_ctx); // the mission start's round init
 		const w::AiEntity *motor = cp01_world->ai.for_handle(cp01_world->cached.local_player);
 		if (!expect(motor != nullptr && static_cast<uint32_t>(motor->heading) == 0xCC160000u,
 		            "the host player's motor heading is the marker's word 0xCC160000")) return 1;
 		const w::Entity *player = cp01_world->registry.get(cp01_world->cached.local_player);
-		if (!expect(player != nullptr && player->yaw == -197,
+		if (!expect(player != nullptr && player->heading == w::placed_heading_bam(-197),
 		            "the player's whole-degree mirror stays the record's")) return 1;
 
 		// D-NET-377: a medic revive's deploy restores ONLY the saved position. The
@@ -724,8 +895,8 @@ int main() {
 		            "the host's own connection owns the CP01 player")) return 1;
 		// The body died 30 units away facing elsewhere; the revive saved its spot.
 		body->position = {-504.9119f, -139.3639f, 26.0f};
-		body->yaw = 10;
-		body->pitch = 7;
+		body->heading = w::placed_heading_bam(10);
+		body->pitch_bam = w::spawn_angle_bam(7);
 		body_motor->heading = 0x12340000;
 		body->alive = false;
 		body->health = 0;
@@ -740,7 +911,7 @@ int main() {
 		                    body->position.x == -504.9119f && body->position.z == 26.25f,
 		            "the revive deploy lands on the saved spot raised 0x4000")) return 1;
 		if (!expect(static_cast<uint32_t>(body_motor->heading) == 0xCC160000u &&
-		                    body->yaw == -197 && body->pitch == 0,
+		                    body->heading == w::placed_heading_bam(-197) && body->pitch_bam == 0,
 		            "the revived player keeps the start marker's facing, not the body's")) return 1;
 	}
 
@@ -763,14 +934,20 @@ int main() {
 		bare_ctx.world = bare_world.get();
 		inmatch::Server_InitNewRoundState(bare_ctx);
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(bare_ctx, *bare_world) == 1,
-		            "the marker-less host player spawns")) return 1;
+		            "the marker-less host player is added")) return 1;
+		inmatch::test::round_init_own_body(bare_ctx); // the mission start's round init
 		inmatch::NapiNPConnection &own = bare_ctx.np_protocol.connection_list.front();
 		w::Entity *body = bare_world->registry.get(bare_world->cached.local_player);
 		w::AiEntity *body_motor = bare_world->ai.for_handle(bare_world->cached.local_player);
 		if (!expect(body != nullptr && body_motor != nullptr,
 		            "the marker-less player has a body and a motor")) return 1;
-		body_motor->heading = 0x12340000;
-		body->yaw = 10;
+		// Retail keeps ONE Yaw word (+0x10): the deploy's reset reads it and copies it into
+		// the motor's heading copies, storing nothing to it; the motor's word is our mirror of
+		// it, so the body's word and the mirror hold one value.
+		// [orig: Entity_ResetToSpawnState @0x4B9610 - the Yaw read @0x4B964A, its copies
+		//  @0x4B965C..0x4B96B0]
+		body->heading = 0x12340000;
+		body_motor->heading = body->heading;
 		body->alive = false;
 		body->health = 0;
 		body->flags |= w::kEntityFlagDead;
@@ -781,7 +958,8 @@ int main() {
 		inmatch::Server_ReleasePlayerDeployment(
 				bare_ctx.config, own, *bare_world, w::EntityHandle{}, 0xFFFF);
 		if (!expect(body->alive && body->position.x == 5.0f && body->position.z == 7.25f &&
-		                    static_cast<uint32_t>(body_motor->heading) == 0x12340000u,
+		                    static_cast<uint32_t>(body_motor->heading) == 0x12340000u &&
+		                    static_cast<uint32_t>(body->heading) == 0x12340000u,
 		            "with no placement the revived player keeps its body's heading word")) return 1;
 
 		// D-PWR-7: the deploy's health is two signed raises to the difficulty-aware
@@ -821,6 +999,61 @@ int main() {
 				bare_ctx.config, own, *bare_world, w::EntityHandle{}, 0xFFFF);
 		if (!expect(body->health == 1 && body->health_max == 100,
 		            "a row word of 0 deploys the hp-0 body at its 1")) return 1;
+
+		// D-NET-NEW-L5-55: the deploy's reset releases the corpse's +0x1CC emitter, the
+		// decay its corpse leg spawned (or a hit's), so the group does not outlive the
+		// corpse. [orig: Server_DeployPlayer - Entity_ResetToSpawnState @0x4B9610 called
+		//  @0x517899; the release @0x4B97CB..0x4B97F5]
+		body->alive = false;
+		body->health = 0;
+		body->flags |= w::kEntityFlagDead;
+		body->death_effect_active[0] = 1;
+		// D-NET-NEW-L5-59: no store on the deploy path writes the deck ride's pitch lag
+		// (+0x2E0), so its residual survives the respawn. [orig: Server_DeployPlayer
+		//  @0x517740, Entity_ResetToSpawnState @0x4B9610: no +0x2E0 store]
+		static constexpr int32_t kPitchLag = 0x00123400;
+		body_motor->inf.carrier_pitch_lag = kPitchLag;
+		// D-NET-NEW-L5-61: nor the torso roll (+0x2DC) or the lean (+0xB0), which the
+		// corpse's own words carry into the new life. [orig: Server_DeployPlayer @0x517740 and
+		//  its callees @0x50CF60 / @0x4B8B20 / @0x4B9610 / @0x422740: no +0x2DC, no +0xB0 store]
+		static constexpr int32_t kTorsoRoll = -0x05432100;
+		static constexpr int32_t kLean = 0x00654300;
+		body_motor->inf.torso_roll = kTorsoRoll;
+		body_motor->inf.lean_angle = kLean;
+		// D-NET-NEW-L5-63: nor the lean keys (MoveOrder 0x40 / 0x80): the deploy clears the
+		// stance bits alone. [orig: Server_DeployPlayer @0x517740 - @0x517880 (0x200),
+		//  @0x51788C (0x100), ahead of Entity_ResetToSpawnState called @0x517899]
+		body_motor->inf.lean_left = true;
+		body_motor->inf.lean_right = true;
+		// The body died prone: MoveOrder 0x100 and its motor mirror.
+		body->net_stance_bits = static_cast<uint8_t>(w::Entity::kMoveOrderProne >> 8);
+		body_motor->inf.stance = w::InfantryState::Stance::kProne;
+		bare_world->out.destruction.effects.clear();
+		inmatch::Server_ReleasePlayerDeployment(
+				bare_ctx.config, own, *bare_world, w::EntityHandle{}, 0xFFFF);
+		bool decay_released = false;
+		for (const w::DestructionEffectEvent &effect : bare_world->out.destruction.effects)
+			decay_released |= effect.release && effect.family == 1 &&
+					effect.attach_wire_handle == body->handle.packed;
+		if (!expect(decay_released && body->death_effect_active[0] == 0,
+		            "the deploy releases the corpse's decay emitter")) return 1;
+		if (!expect(body_motor->inf.carrier_pitch_lag == kPitchLag,
+		            "the deploy leaves the deck ride's pitch lag")) return 1;
+		if (!expect(body_motor->inf.torso_roll == kTorsoRoll && body_motor->inf.lean_angle == kLean,
+		            "the deploy leaves the torso roll and the lean")) return 1;
+		if (!expect(body_motor->inf.lean_left && body_motor->inf.lean_right &&
+		                    body_motor->inf.stance == w::InfantryState::Stance::kStand &&
+		                    body->net_stance_bits == 0,
+		            "the deploy leaves the lean keys and clears the stance")) return 1;
+		// The shared spawn / revive reset (the joiner's redeploy of L on its record's respawn
+		// arm) keeps them too: the arm stores no MoveOrder. [orig: NetPacket_SerializePlayerState
+		//  @0x4C09C0 - the arm @0x4C1109..0x4C114C]
+		w::InfantryState revived;
+		revived.lean_left = true;
+		revived.lean_right = true;
+		revived.reset_for_spawn(0x10000000);
+		if (!expect(revived.lean_left && revived.lean_right && revived.body_heading == 0x10000000,
+		            "the spawn / revive reset leaves the lean keys")) return 1;
 	}
 
 	// A join-time spectator is POSITIONED with the substitute team while its
@@ -896,7 +1129,7 @@ int main() {
 		start.has_item_def = true;
 		start.team = 2;
 		start.position = {1.0f, 0.0f, 2.0f};
-		start.yaw = 90;
+		start.heading = w::placed_heading_bam(90);
 		start.flags = w::kEntityFlagParachute;
 		start.ground_target = carrier_handle;
 		coop_world->registry.spawn(3, start);
@@ -989,12 +1222,68 @@ int main() {
 		            "balance: the released joiner spawns on its requested side")) return 1;
 	}
 
+	// The balance hold's team counts walk the player slots: an active slot with a
+	// net player counts on its slot team (+0x1A0), the rotation's side team of
+	// the index; no entity is read, and a pending reservation is no slot. Here
+	// side A plays team 2 (a swapped half): a bodyless added slot on team 2 holds
+	// a second side-A request (2 vs 0), where a team-1 reservation that was never
+	// added counts nowhere. [orig: Server_CountPlayersOnTeam @0x501630 - the
+	//  active byte @0x501650, the net player @0x501656, g_RotationSideTeam0[index]
+	//  @0x50165E, the slot team @0x501664; the calls `push 0` @0x4C8F10 /
+	//  `push 1` @0x4C8F17]
+	{
+		auto rot_world = std::make_unique<w::World>();
+		make_world(*rot_world);
+		for (const int32_t item_id : {6096, 6097}) {
+			w::Entity start;
+			start.kind = w::EntityKind::Marker;
+			start.item_id = item_id;
+			rot_world->registry.spawn(3, start);
+		}
+		inmatch::NapiNPServerCtx rot_ctx;
+		inmatch::GameConfig settings;
+		settings.max_players = 8;
+		settings.game_type = opennova::game_type::kTeamDeathmatch;
+		settings.side_b_password = "bravo";
+		settings.balance_join = true;
+		settings.balance_join_percent = 0.5f;
+		inmatch::test::bring_up_host(rot_ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
+		                        /*host_key=*/0, nullptr, settings);
+		rot_ctx.world = rot_world.get();
+		inmatch::HostRotation rotation;
+		rotation.side_team = {2, 1};
+		rot_ctx.rotation = &rotation;
+		inmatch::NapiNPConnection added;
+		added.type = 1;
+		added.connection_id = inmatch::kFirstJoinerDcb + 10;
+		added.self_id_seen = true;
+		added.phase = inmatch::ConnectionPhase::PlayerAdded;
+		added.assigned_team_valid = true;
+		added.assigned_team = 2;
+		rot_ctx.np_protocol.connection_list.push_back(added);
+		inmatch::NapiNPConnection reserved;
+		reserved.type = 1;
+		reserved.connection_id = inmatch::kFirstJoinerDcb + 11;
+		reserved.phase = inmatch::ConnectionPhase::Joined; // never admitted: no slot
+		reserved.assigned_team_valid = true;
+		reserved.assigned_team = 1;
+		rot_ctx.np_protocol.connection_list.push_back(reserved);
+		inmatch::NapiNPConnection joining;
+		joining.type = 1;
+		joining.connection_id = inmatch::kFirstJoinerDcb;
+		joining.self_id_seen = true;
+		joining.phase = inmatch::ConnectionPhase::Joined;
+		joining.char_vars.team_request = 0; // side A
+		rot_ctx.np_protocol.connection_list.push_back(joining);
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(rot_ctx, *rot_world) == 0,
+		            "balance: side A's added slot on the swapped team holds a second side-A request")) return 1;
+	}
+
 	// D-COL-21: a deploy's reset ends in the candidate-slice rebuild and the body's
 	// own list, so the deployed body walks a slice built at its placed pose at once
-	// and the 17-tick phase restarts there; both deploy legs, the release and the
-	// spectator leave. [orig: Server_DeployPlayer -> Entity_ResetToSpawnState
-	//  @0x517899 - the Entity_BuildProximityListsFromPools call @0x4B98EB, the
-	//  Entity_BuildProximityList call @0x4B98F1; the leave routine's deploy @0x51A00C]
+	// and the 17-tick phase restarts there. [orig: Server_DeployPlayer ->
+	//  Entity_ResetToSpawnState @0x517899 - the Entity_BuildProximityListsFromPools
+	//  call @0x4B98EB, the Entity_BuildProximityList call @0x4B98F1]
 	{
 		auto slice_world = std::make_unique<w::World>();
 		make_world(*slice_world); // the 6002 start at (123, 456, 7)
@@ -1021,7 +1310,8 @@ int main() {
 		slice_ctx.world = slice_world.get();
 		inmatch::Server_InitNewRoundState(slice_ctx);
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(slice_ctx, *slice_world) == 1,
-		            "slice: the host player spawns")) return 1;
+		            "slice: the host player is added")) return 1;
+		inmatch::test::round_init_own_body(slice_ctx); // the mission start's round init
 		inmatch::NapiNPConnection &own = slice_ctx.np_protocol.connection_list.front();
 		const w::EntityHandle body_h = slice_world->cached.local_player;
 		w::Entity *body = slice_world->registry.get(body_h);
@@ -1056,15 +1346,6 @@ int main() {
 		                    collision.candidate_count(body_h) == 1,
 		            "slice: the deploy rebuilds the slice at the start")) return 1;
 		if (!expect(phase_restarted(), "slice: the deploy restarts the 17-tick phase")) return 1;
-		// The spectator leave deploys the same way.
-		if (!expect(inmatch::Server_SetPlayerSpectator(slice_ctx, own, *slice_world, true),
-		            "slice: the player enters spectator mode")) return 1;
-		stand_far();
-		if (!expect(inmatch::Server_SetPlayerSpectator(slice_ctx, own, *slice_world, false) &&
-		                    body->position.x == 123.0f && collision.candidate_count(body_h) == 1,
-		            "slice: the spectator leave rebuilds the slice at the start")) return 1;
-		if (!expect(phase_restarted(),
-		            "slice: the spectator leave restarts the 17-tick phase")) return 1;
 		slice_world->collision = nullptr;
 		slice_world->ai.collision = nullptr;
 	}

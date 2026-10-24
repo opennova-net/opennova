@@ -395,13 +395,13 @@ void vehicle_emit_skid_effects(World &world, Entity &vehicle, const VehicleTrait
 			!world.out.fire_sounds.listener_valid())
 		return;
 	const Vec3 &camera = world.out.fire_sounds.listener();
-	const int64_t dx = int64_t(to_fixed(vehicle.position.x)) - to_fixed(camera.x);
-	const int64_t dy = int64_t(to_fixed(vehicle.position.y)) - to_fixed(camera.y);
+	const int64_t dx = int64_t(vehicle.position.x.q16) - to_fixed(camera.x);
+	const int64_t dy = int64_t(vehicle.position.y.q16) - to_fixed(camera.y);
 	const int32_t limit = ((world.logic_tick & 3u) == 0 ? 600 : 300) << 16;
 	if (std::sqrt(double(dx) * dx + double(dy) * dy) > limit)
 		return;
 	const bool snow = terrain::surface_type_at_fixed(world.tables.surface_map,
-							  to_fixed(vehicle.position.x), to_fixed(vehicle.position.y)) == 3;
+							  vehicle.position.x.q16, vehicle.position.y.q16) == 3;
 	const std::string &effect =
 			snow && !traits.skid_snow_effect.empty() ? traits.skid_snow_effect : traits.skid_effect;
 	const CollisionMatrix matrix = entity_placement_matrix(vehicle);

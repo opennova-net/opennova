@@ -45,7 +45,7 @@ struct HudKeyEdge {
 
 // The toggles' shared state — the retail globals.
 struct HudToggleState {
-	int hud_color_index = kHudColorIndexDefault;      // [orig: g_HUDColors.active's index]
+	int hud_color_index = kHudColorIndexDefault;      // [orig: g_HUDColorIndex @0x24D20B8]
 	int hud_detail_level = kHudDetailLevelDefault;    // the LIVE declutter level
 	uint32_t showhud_flags = kShowHudFlagsDefault;    // [orig: g_FpWeaponViewFlags]
 	FriendlyTagMode friendly_tag_mode = kFriendlyTagModeDefault; // [orig: g_FriendlyTagsMode]
@@ -53,7 +53,7 @@ struct HudToggleState {
 	bool scoreboard_open = false;     // [orig: g_ScoreboardPanelVisible]
 	bool message_log_open = false;    // [orig: g_ShowMessageLog @0x24C18C0]
 	bool end_round_stats_open = false; // [orig: dword_24C18AC]
-	bool help_open = false;           // the F1 key-binding help [orig: dword_24C18B0]
+	bool help_open = false;           // the F1 key-binding help [orig: g_HelpScreenOpen]
 	bool map_legend_open = false;     // the F12 map legend [orig: dword_24C18B4]
 	// The briefing window: 0 closed, 2 open (the draw tests nonzero, the
 	// escape chain and the page keys test bit 1) [orig: dword_24C18C8 —
@@ -178,10 +178,21 @@ struct HudKeyPoll {
 	bool authority = false;
 	bool mp_session_peer = false;
 	bool objective_game = false; // g_GameType & kObjectiveBit (0x20000)
-	// The local player is alive: the commander_menu, AudioEmote and
-	// RadioMacro rows carry the binding flag 0x1 the dispatcher tests against
-	// a dead player (Flags & 2).
+	// The local player is alive: the rows whose binding flags carry 0x1
+	// (dotsize, view1st, viewwithgun, commander_menu, ShowFriendly, AudioEmote,
+	// RadioMacro) are dropped by the dispatcher's head for a dead player
+	// (Flags & 2).
 	bool local_alive = true;
+	// The rows (a mask of 1 << HudToggleRow) whose queued event the dispatcher's
+	// head drops this input frame by the row's binding flags, as the embedder's
+	// role reads them (inmatch::Role::action_head_admits: bit 0 with the
+	// authority word or under the round-over gate, 0x40 without it, 0x400 while
+	// the pre-round timer runs, 0x8000000 under the deploy overlay, 0x10 in a
+	// session); the pause word's gate is this state's own. A dropped row's latch
+	// still steps on its key, so a press held through the drop never fires.
+	// [orig: Input_HandleActionBinding @0x49AD40 - the row's flags
+	//  dword_8159AC[code * 0x6C] @0x49AD8D, the gates @0x49AD95..0x49AE23]
+	uint32_t head_drops = 0;
 };
 
 // What a poll flipped, for the embedder's device side effects.
@@ -243,6 +254,13 @@ inline constexpr uint32_t kMouseFlipped = 0x10000000;
 // it, and posts mouse_scale_toast [orig: case 17 @0x49b185].
 inline constexpr uint32_t kMouseScaleStepped = 0x20000000;
 inline constexpr uint32_t kMouseScaleNegative = 0x40000000;
+// The embedder's event words are 64-bit: above the 32 event bits rides the mousescale record's
+// first argument (a typed `mousescale <n>`; 0 for a key's), which the step takes as its
+// param_value, so the typed value sets the word outright (D-NET-NEW-LI-38) [orig:
+// Input_HandleActionBinding @0x49AD40 - case 17 `test esi, esi` @0x49B185; the walk's
+// atol(token 2) as the record's first argument, NapiClientCmd_ParseAndExecute @0x4329C0 -
+// Input_QueueEvent called @0x432BA1].
+inline constexpr int kMouseScaleParamShift = 32;
 // The lockgame row fired on an authority in a session: the embedder runs the join
 // lock's toggle (inmatch::Server_ToggleJoinLock, which runs the server-info update)
 // and posts the Misc toast STRMISC_LOCKGAME_ON with the game now locked, else
@@ -290,12 +308,26 @@ enum HudToggleRow : int {
 };
 // The row's catalog config token.
 const char *hud_toggle_row_token(int row);
+// The row's static catalog row (controls::action_code reads the dispatch code
+// the head tests the row's flags by); -1 out of range.
+int hud_toggle_row_catalog_row(int row);
 // Sets the poll's key bits from a mask of (1 << HudToggleRow).
 void hud_key_poll_set_rows(HudKeyPoll &keys, uint32_t rows_down);
 
 // One frame's poll: advances every latch, applies the cycles and toggles to
 // the state, returns the hud_toggle_event bits that fired.
 uint32_t hud_toggles_poll(HudToggleState &state, const HudKeyPoll &keys);
+
+// One input frame's dispatched row events (D-CTRL-6): each row set in `fired` had one
+// queued event this frame, a key-down the keyboard pass scanned to it (an OS auto-repeat
+// is a key-down like a press, so a held key fires its row once per repeat) or a press of
+// its mouse or joystick arm. The cycles, toggles and gates are hud_toggles_poll's; no
+// edge latch stands between the event and its case (the latches are the held-state
+// poll's, which this leaves cleared).
+// [orig: Input_ProcessKeyboardEvents @0x49d1f0 - one fire per dequeued key event
+//  (@0x49d42f / @0x49d488); Input_ProcessFrame @0x49d520 - the drain's
+//  Input_HandleActionBinding call @0x49d5d8]
+uint32_t hud_toggles_dispatch(HudToggleState &state, const HudKeyPoll &fired);
 
 // The mission teardown clears the four overlay windows and their latches,
 // keeping the color, detail, showhud and friendly-tag globals; the tip and
@@ -333,7 +365,7 @@ void hud_toggles_death_screen(HudToggleState &state);
 //  server-view arm @0x49b377..0x49b38f and game.mnu INGAME @0x49b3b6]
 struct HudEscapeInput {
 	bool in_session = false;
-	bool spawn_gate = false; // [orig: g_SpawnSuccessGate]
+	bool spawn_gate = false; // [orig: g_RoundOver]
 	bool authority = false;  // [orig: g_NapiNPCtx.is_authority]
 };
 uint32_t hud_toggles_escape(HudToggleState &state, const HudEscapeInput &input);
@@ -382,22 +414,51 @@ inline constexpr uint32_t kRestartQueued = 0x8; // event 12, out of a session on
 uint32_t hud_toggles_quit_dialog_key(HudToggleState &state, const HudQuitDialogKeyInput &input);
 
 // The special-key handler's round-over leg, reached once the round-over gate
-// holds (the round end raised it) and no earlier leg took the chain: out of a
-// session, or in a co-op game type without bit 0x20000, EVERY key is taken
-// there — the RESTART key (gametext KeyPress/STRKEYPRESS_RESTART's first
+// holds (the round end raised it) and no earlier leg took the chain (the quit
+// dialog, the held-USE seat digits, the Emotes and Radio menus: an open one
+// skips this leg, and the Tab board's and the status page's legs with it).
+// Whenever the leg runs it holds the chain (kArm): the Tab board's and the
+// status page's legs never run under the gate.
+// Out of a session, or in a co-op game type without bit 0x20000, EVERY key is
+// taken there: the RESTART key (gametext KeyPress/STRKEYPRESS_RESTART's first
 // character, 'R' by default) restarts the round (the embedder re-runs the SP
-// splash over a custom loading background, then the world takes the
-// restart: the end screen down and exit reason 4), ESC leaves the mission
-// (exit reason 1), any other key does nothing. In a session the leg's page
-// and ADVANCED keys (the end-of-round board's) are not this leg's; it
-// returns 0 there.
-// [orig: Input_HandleSpecialKeys @0x49c5c0 — the g_SpawnSuccessGate arm
-//  @0x49c7cf; the session/co-op test @0x49c7d5..0x49c7fd; the RESTART key
-//  (dword_B3B744) @0x49c86b / @0x49c871: g_EpilogScreenActive = 0 @0x49c879,
-//  the splash re-run under g_LoadScreenHasCustomBg && !is_in_session
-//  @0x49c883..0x49c899, Input_QueueEvent(12) @0x49c8a3, g_MissionExitReason
-//  = 4 @0x49c8ad; every other key returns 1 @0x49c8d5, ESC (27) storing
-//  reason 1 @0x49c8e2]
+// splash over a custom loading background and queues input event 12, and the
+// restart's exit reason is 4), ESC leaves the mission (exit reason 1), any
+// other key does nothing.
+// In any other session the leg is the end-of-round board's: PgUp and PgDn
+// step the board's scroll and are taken; the ADVANCED key (gametext
+// KeyPress/STRKEYPRESS_ADVANCED's first character, 'A' by default) flips the
+// board's all-fields word and, like every other key, goes on to the chain's
+// tail (the deploy keys, the help and briefing pages) and the rows. Neither
+// word has a live reader: the scroll position's only accesses are its init,
+// the bounds the S2C 0x1D / 0x56 handlers set and the scroll itself, and the
+// all-fields word's one reader is the column layout, whose outputs only draw
+// functions with no caller read. So the scroll is its consumption alone and
+// ADVANCED changes nothing.
+// [orig: Input_HandleSpecialKeys @0x49c5c0, the g_RoundOver arm
+//  @0x49c7cf, after the quit dialog @0x49c5e6 and the seat / Emotes / Radio
+//  arms @0x49c6d8 / @0x49c737 / @0x49c783 (an else-if chain, each arm's
+//  non-digit falling to the tail @0x49c9c9); the session/co-op test
+//  @0x49c7d5..0x49c7fd; the RESTART key (dword_B3B744) @0x49c86b / @0x49c871:
+//  g_EpilogScreenActive = 0 @0x49c879, the splash re-run under
+//  g_LoadScreenHasCustomBg && !is_in_session @0x49c883..0x49c899,
+//  Input_QueueEvent(12) @0x49c8a3, g_MissionExitReason = 4 @0x49c8ad; every
+//  other key returns 1 @0x49c8d5, ESC (27) storing reason 1 @0x49c8e2. The
+//  session arm: VK_PRIOR @0x49c802 -> EndRoundBoard_Scroll(-1) @0x49c806,
+//  VK_NEXT @0x49c82c -> EndRoundBoard_Scroll(1) @0x49c830, each returning 1;
+//  the ADVANCED key (dword_B3B748: Input_InitBindingSystem's 'A' default
+//  @0x49a5ac, its STRKEYPRESS_ADVANCED read @0x49a636) @0x49c853 ->
+//  EndRoundBoard_ToggleAdvanced @0x49c85f, then the tail @0x49c864; any other
+//  key to the tail @0x49c859. EndRoundBoard_Scroll @0x5baf20 steps
+//  dword_28E4DE8 and wraps it between dword_28E4DEC and dword_28E4DF0, whose
+//  writers are Game_InitMissionRoundState @0x5b7283 and
+//  EndRoundBoard_CalcScrollBounds @0x5b7c65 (called from NapiNPClientMsg_0x01D
+//  @0x430ad0 and NapiNPClientMsg_0x056 @0x4321c4); EndRoundBoard_ToggleAdvanced
+//  @0x5baea0 flips dword_28E3D64, read only by
+//  Overlay_ComputeStatFieldColumnLayout @0x5b7ac1, whose dword_28E3AB0 /
+//  dword_28E3AB4 only HUD_DrawObjectiveTextWithScrollList @0x5bc8c0,
+//  HUD_DrawPlayerScoreRow @0x5bca20 and HUD_DrawTeamScoreRow @0x5bcc30 read,
+//  and none of the three has a caller]
 struct HudRoundOverKeyInput {
 	int vk = 0;
 	int restart_vk = 'R';
@@ -408,6 +469,7 @@ namespace hud_round_over {
 inline constexpr uint32_t kConsumed = 0x1; // the key never reaches the action rows
 inline constexpr uint32_t kRestart = 0x2;  // the RESTART arm
 inline constexpr uint32_t kExit = 0x4;     // ESC: exit reason 1
+inline constexpr uint32_t kArm = 0x8;      // the leg ran: the board and status legs do not
 } // namespace hud_round_over
 uint32_t hud_round_over_key(const HudRoundOverKeyInput &input);
 

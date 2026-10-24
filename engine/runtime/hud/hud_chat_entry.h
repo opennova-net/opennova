@@ -29,22 +29,25 @@ namespace opennova::hud {
 // [orig: the Input_HandleActionBinding jump-table cases].
 inline constexpr int kChatDispatchTeam = 100;   // row 60 Team (Y)
 inline constexpr int kChatDispatchGlobal = 101; // row 59 Global (Ctrl+T)
-inline constexpr int kChatDispatchRed = 104;    // host-only red talk (no stock row)
-inline constexpr int kChatDispatchBlue = 105;   // host-only blue talk (no stock row)
+inline constexpr int kChatDispatchRed = 104;    // row 90 talkred, the host's (no default key)
+inline constexpr int kChatDispatchBlue = 105;   // row 91 talkblue, the host's (no default key)
 inline constexpr int kChatDispatchCrew = 109;   // row 62 Crew (U)
 inline constexpr int kChatDispatchSquad = 110;  // row 61 Squad (Ctrl+Y)
 inline constexpr int kChatDispatchLocal = 111;  // row 58 Local (T)
 inline constexpr int kChatDispatchRepeat = 112; // row 57 Chat (Enter)
-// The console-mode dispatch: a begin with this id keeps the capture open
-// across Enter [orig: `dword_B3E318 = chatChannel == 20` @0x4981a0]. No
-// caller in the image passes it (the talk arms pass 100..111, the cine
-// editor 0), so the console window it gates is unreachable in stock play.
+// The command entry: input actions 1 (row 71 "command", the backquote) and 20
+// (row 72 "command2", Ctrl+backquote) open the capture with the STRMISC_ENTERCMD
+// prompt and the console command as its sender; action 20's begin passes its own
+// code, so its capture stays open across Enter (the console mode).
+// [orig: Input_HandleActionBinding cases 1, 20 @0x49AEF7..0x49AF10 ->
+//  Chat_BeginChatInput(prompt, NULL, j_Client_ProcessConsoleCommand, 0x3C, action)
+//  @0x49bb16; `dword_B3E318 = chatChannel == 20` @0x4981a0]
+inline constexpr int kChatDispatchCommand = 1;
 inline constexpr int kChatDispatchConsole = 20;
 
 // The C2S 0x0D channel byte each dispatch's sender writes, -1 for none
-// [orig: Chat_SendLocalMessage 13 @0x49a8d6; Chat_SendTeamMessage (IDB misnomer — the
-//  GLOBAL sender) 1 @0x49a9af; Chat_SendGlobalMessage (IDB misnomer — the
-//  TEAM sender) 2 @0x49a74f; Chat_SendSquadMessage 12 @0x49aaff;
+// [orig: Chat_SendLocalMessage 13 @0x49a8d6; Chat_SendGlobalMessage 1 @0x49a9af;
+//  Chat_SendTeamMessage 2 @0x49a74f; Chat_SendSquadMessage 12 @0x49aaff;
 //  Chat_SendAdminMessage (the CREW sender) 11 @0x49a816; Chat_SendAllMessage
 //  4 @0x49ad1c; Chat_SendBlueTeamMessage 5 @0x49ac4c].
 int chat_dispatch_channel(int dispatch);
@@ -77,13 +80,13 @@ inline constexpr size_t kChatPresetChars = 39;
 // What the dispatch arms read.
 struct ChatEntryFacts {
 	bool death_screen = false;       // [orig: g_DeathScreenActive]
-	bool spawn_gate = false;         // [orig: g_SpawnSuccessGate]
+	bool spawn_gate = false;         // [orig: g_RoundOver]
 	bool in_session = false;         // [orig: g_NapiNPCtx.is_in_session]
 	// Set by S2C 0x25 on a client, cleared by S2C 0x0F [orig: dword_24C195C
 	// — NapiNPClientMsg_GameReset @0x42284e, NapiNPClientMsg_0x00F @0x42e396].
 	bool reset_hold = false;
 	bool team_game = false;          // [orig: g_GameType & 0x10000]
-	// The NovaWorld network type [orig: g_NapiNPCtx.transport_mode == 1].
+	// The NovaWorld network type [orig: g_NapiNPCtx.network_type == 1].
 	bool novaworld = false;
 	bool authority = false;          // [orig: g_NapiNPCtx.is_authority]
 	bool mp_session_peer = false;    // [orig: g_NapiNPCtx.is_mp_session_peer]
@@ -100,13 +103,15 @@ struct ChatEntryFacts {
 // embedder to echo the (truncated) line to the CHAT ring in the dispatch's
 // flood color; `Refused` does nothing. `Broadcast` is the Global sender's
 // authority arm on a host with no client of its own: the line went out to
-// every player, and that arm stamps no debounce [orig: Chat_SendTeamMessage
-// (IDB misnomer — the GLOBAL sender) @0x49a9da..0x49aa2a; the stamp
+// every player, and that arm stamps no debounce [orig: Chat_SendGlobalMessage
+// @0x49a9da..0x49aa2a; the stamp
 // @0x49a9be is the peer arm's alone].
 enum class ChatSendResult : uint8_t { Refused, Sent, Flooded, Broadcast };
 // The begin's stored sender [orig: dword_B3E1D4]: the dispatch picks the
 // C2S channel (chat_dispatch_channel); `text` is in/out — the flood check
-// cuts it to 59 characters in place.
+// cuts it to 59 characters in place. The command entry's dispatches (1, 20)
+// store the console command instead (Client_ProcessConsoleCommand), which
+// stamps no debounce: its sender reports Refused.
 using ChatSender = std::function<ChatSendResult(int dispatch, std::string &text)>;
 
 // Events a dispatch or key reports.
@@ -119,13 +124,30 @@ inline constexpr uint32_t kSubmitted = 0x4;   // Enter ran the sender
 inline constexpr uint32_t kCancelled = 0x8;   // Esc closed the capture
 inline constexpr uint32_t kEdited = 0x10;     // the line text changed
 inline constexpr uint32_t kFloodEcho = 0x20;  // the sender flooded: echo the line
+// The row released Caps Lock: a talk row past its arm's gates (ahead of the debounce, so a
+// debounced press releases it too) and the command rows, never the host-only pair. The
+// embedder's keyboard device turns the toggle off when it is on (a VK_CAPITAL press and
+// release, the release KEYEVENTF_KEYUP with time 10, then the window's messages).
+// [orig: Input_HandleActionBinding @0x49AD40 - the talk arms' join @0x49B9CF (the team arm
+//  past its team-game test @0x49B9BF, the squad's past its NovaWorld test @0x49BA20, the
+//  crew's past its vehicle test @0x49BA42, the others' @0x49BA25), the call @0x49B9D1 ahead
+//  of the debounce @0x49B9D6; the command arm, cases 1 and 20, @0x49AEF7..0x49AEF9;
+//  Input_ReleaseCapsLockIfActive @0x7611A0 (the VK_CAPITAL byte compare @0x7611C6, SendInput
+//  @0x76121B, the pump @0x761224)]
+inline constexpr uint32_t kCapsLockRelease = 0x40;
 } // namespace chat_entry_event
 
 // The talk rows the embedder samples, in catalog order (the first-match key
 // scan fires the lowest row) [orig: the static catalog @0x8159cb rows 57
 // "talk" (Enter, dispatch 112), 58 "ltalk" (T, 111), 59 "gtalk" (Ctrl+T,
-// 101), 60 "stalk" (Y, 100), 61 "sqtalk" (Ctrl+Y, 110), 62 "ctalk" (U, 109);
-// the scan @0x49d42f].
+// 101), 60 "stalk" (Y, 100), 61 "sqtalk" (Ctrl+Y, 110), 62 "ctalk" (U, 109),
+// and the command entry's 71 "command" (backquote, 1) and 72 "command2"
+// (Ctrl+backquote, 20); the scan @0x49d42f]. Then the host's two side talks, rows 90
+// "talkred" (Indonesian Talk, dispatch 104) and 91 "talkblue" (Joint Ops Talk, 105), flags
+// 0x04000000 and no default key: a keylist binding or a typed token queues their records,
+// which open the side's line on a session's authority (ChatEntry::dispatch)
+// (D-NET-NEW-LI-36) [orig: the catalog rows 90 @0x817FC3 and 91 @0x81802F;
+// Input_HandleActionBinding @0x49AD40 - cases 104 / 105 @0x49BAB3..0x49BB12].
 enum ChatTalkRow : int {
 	kChatRowTalk,
 	kChatRowLocal,
@@ -133,6 +155,10 @@ enum ChatTalkRow : int {
 	kChatRowTeam,
 	kChatRowSquad,
 	kChatRowCrew,
+	kChatRowCommand,
+	kChatRowCommand2,
+	kChatRowRed,
+	kChatRowBlue,
 	kChatTalkRowCount,
 };
 const char *chat_talk_row_token(int row);
@@ -151,8 +177,37 @@ public:
 
 	// One chat action row's dispatch (100/101/104/105/109/110/111/112).
 	uint32_t dispatch(int action, const ChatEntryFacts &facts, const GameTextLookup &gametext);
-	// One frame's talk-row poll over the sampled rows (a mask of 1 <<
-	// ChatTalkRow): each row's press latch steps on the ungated key state; a
+	// One input frame's talk-row poll over the sampled rows (a mask of 1 <<
+	// ChatTalkRow). The talk rows are action bindings the input frame's key
+	// scan fires and its drain dispatches every tick, after the ring handed
+	// any typed keys to an open line, so the embedder polls in every input
+	// frame (each banked tick's) and a one-tick press opens its line on its
+	// tick; the command arm reads no local player (a non-peer authority's
+	// dispatch takes its authority word as 2 without one, and the command
+	// row's flags 0x5000800 carry none of the dispatch gates), so a Serve Only
+	// host opens the prompt too: the dispatch first offers each action to the
+	// hook at +0x170 of g_LocalPlayerEntity's def (+0x20), a nonzero return
+	// consuming it, and every role's mission start points that word at its own
+	// row body (fatal with none), whose def's hook is its input name's table
+	// entry: troop and tank take Input_HandleActionBinding_0, whose switch
+	// sends code 1 to its default return of 0, and the null entry's hook
+	// returns 0, so no hook takes the command row [orig: Game_StartMission
+	// @0x524360 (the Player_InitPlayer call @0x525BBC); Player_InitPlayer
+	// @0x4E15F0 (the Player_FindLocalPlayerEntity store @0x4E17EB, the fatal
+	// @0x4E17F2); EntityDef_InitAllCallbacks @0x4A5A70 (the def's +0x168 name,
+	// "Null" when empty, @0x4A5B50..0x4A5B67); EntityDef_LookupInputCallbacks
+	// @0x497910 (the table @0x829DA8, the +0x170 stores @0x497949 / @0x497965);
+	// Input_HandleActionBindingNull @0x497980; Input_HandleActionBinding_0
+	// @0x4E0420 (the range test @0x4E0475..0x4E047E, the default @0x4E13F9);
+	// Input_ProcessFrame @0x49D520
+	// (the drain's Input_HandleActionBinding call @0x49D5D8);
+	// Input_HandleActionBinding @0x49AD40 (the authority word
+	// @0x49AD52..0x49AD74; the row gates @0x49AD8A..0x49AE23: flag 0x1 with an
+	// authority word, with dword_A87050 or under g_RoundOver, 0x40 without an
+	// authority word, 0x400 with the pre-round timer, 0x8000000 with the
+	// deploy screen, 0x10 in a session; the def hook @0x49AE94..0x49AEBD; the
+	// command arm, cases 1 and 20, @0x49AEF7..0x49AF10); the command row's
+	// code 1 and flags @0x81779C / @0x8177A0]. Each row's press latch steps on the ungated key state; a
 	// press edge dispatches its row while gameplay input is active, no chat
 	// capture is open and the editor took no key this frame — a key the
 	// editor consumed (the Enter that submitted) never also re-dispatches,
@@ -160,6 +215,18 @@ public:
 	// [orig: Input_ProcessKeyboardEvents @0x49d2e3 — the capture branch
 	// @0x49d498 vs the special-keys/binding scan @0x49d2fb..0x49d488].
 	uint32_t poll_rows(uint32_t rows_down, bool active,
+			const ChatEntryFacts &facts, const GameTextLookup &gametext);
+	// One input frame's dispatched talk-row events (D-CTRL-6): each row set in
+	// `rows_fired` had one queued event this frame (a key-down the keyboard pass
+	// scanned to it, an OS repeat included, or a press of its mouse or joystick
+	// arm), dispatched in row order while gameplay input is active and no capture is
+	// open; once a row opened the capture the later rows' events find it open. A key
+	// the open line took never reached the scan (the capture branch), so no edge
+	// latch or editor-consumed test stands between.
+	// [orig: Input_ProcessKeyboardEvents @0x49d1f0 - the capture branch @0x49d2e3 ahead
+	//  of the scan's fires @0x49d42f / @0x49d488; Input_ProcessFrame @0x49d520 - the
+	//  drain's Input_HandleActionBinding call @0x49d5d8]
+	uint32_t dispatch_rows(uint32_t rows_fired, bool active,
 			const ChatEntryFacts &facts, const GameTextLookup &gametext);
 	// One key event while the capture is open: `key_char` the translated
 	// character (0 for none), `vk` the virtual key. Every key reaches here

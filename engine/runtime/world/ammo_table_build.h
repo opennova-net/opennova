@@ -14,8 +14,9 @@ namespace opennova::world {
 // Dense file-order table (index 0 = the file's own null first block, e.g. AT_NULL).
 world::AmmoTable build_ammo_table(const opennova::def::DefAmmoFile &ammo);
 
-// Bind every weapon entry's `round_type` name to its AmmoTable index (-1 when absent or
-// unresolvable — the original warns and leaves the pair null).
+// Bind every weapon entry's `round_type` name to its AmmoTable index (-1 when absent,
+// unresolvable or the first row, which the original's lookup answers as a miss: it
+// warns and leaves the pair null).
 void resolve_weapon_round_types(world::WeaponTable &weapons, const world::AmmoTable &ammo);
 
 } // namespace opennova::world

@@ -7,6 +7,7 @@
 #include <runtime/world/collision.h>
 #include <base/gameprofile/game_type.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 #include <algorithm>
 #include <array>
@@ -102,7 +103,7 @@ EntityHandle objective(World &world, int32_t item_id, uint8_t team, Vec3 positio
     entity.position = position;
     entity.spawn_position = position;
     entity.bound_radius = 2.0f;
-    entity.yaw = 90;
+    entity.heading = placed_heading_bam(90);
     entity.alive = true;
     return world.registry.spawn(1, entity);
 }
@@ -198,9 +199,15 @@ EntityHandle demolition_target(World &world, uint8_t team) {
     return world.registry.spawn(1, entity);
 }
 
+// A one-minute round's authority frames: the main frame's clock step, then the
+// server tick's match service (D-NET-NEW-L1-55).
+// [orig: Game_ProcessMainFrame - the step @0x526602 ahead of the
+//  Server_TickUpdate call @0x5266B6]
 void tick_to_zero(World &world) {
-    for (int i = 0; i < 60 * 62; ++i)
+    for (int i = 0; i < 60 * 62; ++i) {
+        world.match.step_round_clock(world);
         world.match.advance_tick(world);
+    }
 }
 
 void advance_initial_periodic_passes(World &world, int passes) {
@@ -213,13 +220,14 @@ void advance_initial_periodic_passes(World &world, int passes) {
     }
 }
 
-// One authority frame as the match sees it: the server tick's match service,
-// then the entity update, whose tail consumes the flag and bay touches its
-// movement resolves recorded.
-// [orig: Game_ProcessMainFrame -- the Server_TickUpdate call @0x5266B6
-//  precedes the Entity_UpdateAllEntities call @0x52674B; the resolver's
-//  Entity_ProcessWaypointInteraction call @0x4B2FF5]
+// One authority frame as the match sees it: the round clock's step, the server
+// tick's match service, then the entity update, whose tail consumes the flag
+// and bay touches its movement resolves recorded.
+// [orig: Game_ProcessMainFrame -- the clock step @0x526602 and the
+//  Server_TickUpdate call @0x5266B6 precede the Entity_UpdateAllEntities call
+//  @0x52674B; the resolver's Entity_ProcessWaypointInteraction call @0x4B2FF5]
 void run_match_frame(World &world) {
+    world.match.step_round_clock(world);
     world.match.advance_tick(world);
     world.match.process_movement_contacts(world);
 }
@@ -414,8 +422,7 @@ void test_tdm_limit_and_clock_decisions() {
     world->match.upsert_player({blue, 0, "Blue"});
     world->match.upsert_player({red, 1, "Red"});
     world->match.record_death(*world, red, blue);
-    for (int i = 0; i < 60 * 62; ++i)
-        world->match.advance_tick(*world);
+    tick_to_zero(*world);
     const auto clock_winner = world->match.winner_if_finished(*world);
     CHECK(clock_winner.has_value() && *clock_winner == 1);
 
@@ -424,16 +431,14 @@ void test_tdm_limit_and_clock_decisions() {
     world->match.upsert_player({red, 1, "Red"});
     world->match.record_death(*world, red, blue);
     world->match.record_death(*world, blue, red);
-    for (int i = 0; i < 60 * 62; ++i)
-        world->match.advance_tick(*world);
+    tick_to_zero(*world);
     const auto draw = world->match.winner_if_finished(*world);
     CHECK(draw.has_value() && *draw == 0);
 
     // Retail returns from the entire TDM arm when score_limit is zero, even at t=0.
     // [orig: Server_CheckWinConditions @0x51AE34..0x51AE3B]
     world->match.configure(rules(kTdm, 1, 0));
-    for (int i = 0; i < 60 * 62; ++i)
-        world->match.advance_tick(*world);
+    tick_to_zero(*world);
     CHECK(!world->match.winner_if_finished(*world).has_value());
 }
 
@@ -730,6 +735,55 @@ void test_proximity_bits_shift_as_bytes() {
     CHECK(pass(gt::kAdvanceAndSecure, 1, 2) == 0x04);
 }
 
+// D-NET-507: the proximity tests run on the position words. The 20-unit test takes
+// the absolute word deltas against 0x140000, squares each to a rounded 16.16 word,
+// sums them and shifts the x87 root up 8: dx 0x140000 with dy 0x4000 (a length of
+// 20.0016 units) is inside, dy 0xB500 outside. A capturable entity's |dz| is tested
+// against half its radius word, a signed halving: a radius of 3 holds |dz| 0x18000
+// and drops 0x18001.
+// [orig: Server_UpdateCaptureZoneProximity @0x5086A0 - the deltas and 0x140000
+//  @0x5088A9..0x5088D8, the rounded squares, fsqrt, fistp and `shl 8`
+//  @0x5088DE..0x508925; the capturable leg @0x508B57..0x508BDB]
+void test_proximity_tests_run_on_the_words() {
+    auto objective_mask = [](int32_t dy) {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 4);
+        world->registry.configure_pool(1, 8);
+        world->match.configure(rules(kTdm, 10, 99));
+        const EntityHandle body = player(*world, 0, 1, "Body");
+        world->registry.get(body)->position.set_q16({0x140000, dy, 0});
+        objective(*world, 4095, 0, {0.0f, 0.0f, 0.0f});
+        world->match.advance_tick(*world);
+        return world->match.player(body)->objective_proximity_mask;
+    };
+    CHECK(objective_mask(0x4000) == 0x01);
+    CHECK(objective_mask(0xB500) == 0x00);
+    auto zone_mask = [](int32_t dz) {
+        auto world = std::make_unique<World>();
+        world->registry.configure_pool(0, 4);
+        world->registry.configure_pool(1, 4);
+        MatchRules aas;
+        aas.game_type = gt::kAdvanceAndSecure;
+        world->match.configure(aas);
+        const EntityHandle body = player(*world, 0, 1, "Body");
+        world->registry.get(body)->position.set_q16({0, 0, dz});
+        Entity site;
+        site.kind = EntityKind::Item;
+        site.has_item_def = true;
+        site.team = 2;
+        site.alive = true;
+        site.item_attrib = kItemAttribSpawnPoint;
+        site.zone_number = 1;
+        site.zone_radius = 3;
+        world->registry.spawn(1, site);
+        advance_initial_periodic_passes(*world, 1);
+        return world->match.player(body)->objective_proximity_mask;
+    };
+    CHECK(zone_mask(0x18000) == 0x04);
+    CHECK(zone_mask(-0x18000) == 0x04);
+    CHECK(zone_mask(0x18001) == 0x00);
+}
+
 // D-NET-680: the kill bonuses' near-objective tests shift a dword by the
 // entity team byte, its count taken mod 32, and test the low byte against the
 // mask, so a team of 32 and up wraps onto the low bits and 8..31 tests none:
@@ -776,6 +830,15 @@ void test_kill_bonus_team_bits_shift_as_dwords() {
         CHECK(scorer->stats[MatchStats::kVictimNearOwnObjectiveKills] == 0);
         CHECK(scorer->stats[MatchStats::kAttackerNearVictimObjectiveKills] == 0);
         CHECK(scorer->stats[MatchStats::kPoints] == 10 + wraps * (4 + 3));
+        // D-NET-680: the team record is indexed by the team byte over 70 records, unchecked, so a
+        // team of 9 or 33 has its kill (and team 33 its bonus 24) credited to record 9 / 33
+        // [orig: GameEvent_ProcessScoring @0x52F65F..0x52F66C; Game_CountAlivePlayersPerTeam
+        //  @0x5001D5].
+        const MatchStats &team_record = world->match.team_stats(killer_team);
+        CHECK(team_record[MatchStats::kEnemyKills] == 1);
+        CHECK(team_record[MatchStats::kAttackerNearOwnObjectiveKills] == wraps);
+        // The board's five records are untouched by it.
+        CHECK(world->match.team_stats(1)[MatchStats::kEnemyKills] == 0);
     }
 }
 
@@ -1055,6 +1118,9 @@ void test_demolition_flag_and_flagball_gameplay() {
     const std::vector<MatchGameplayEvent> flag_events = world->match.drain_gameplay_events();
     CHECK(flag_events.size() == 2);
     CHECK(flag_events[0].kind == MatchGameplayEventKind::FlagPickup);
+    // The pickup feed's x/y are the flag's where it lay (the origin), not the carrier's
+    // 1.6 units off it. [orig: Server_BroadcastFlagPickupEvent @0x517481..0x517488]
+    CHECK(flag_events[0].position.x.q16 == 0 && flag_events[0].position.y.q16 == 0);
     CHECK(flag_events[1].kind == MatchGameplayEventKind::FlagCapture);
     CHECK(flag_events[1].objective == red_flag);
     CHECK(flag_events[1].remove_objective);
@@ -1278,8 +1344,7 @@ void test_aas_capture_scoring_and_outcomes() {
     CHECK(all_owned.has_value() && *all_owned == 1);
 
     world->registry.get(z2)->team = 2;
-    for (int i = 0; i < 60 * 62; ++i)
-        world->match.advance_tick(*world);
+    tick_to_zero(*world);
     const auto tied_zones = world->match.winner_if_finished(*world);
     CHECK(tied_zones.has_value() && *tied_zones == 0);
 
@@ -1602,7 +1667,9 @@ void test_alive_count_reads_the_slot_team() {
 // @0x5165A3..0x5165C3 and @0x5167E2..0x5167FD; GameEvent_ProcessScoring @0x52F6FA]
 void test_nonteam_board_order_draw_and_winner_marker() {
     // The non-team award runs after the board freeze, so it is read from the
-    // live roster; the frozen rows keep their field 35.
+    // live roster; the frozen rows keep their field 35. Every row starts with
+    // field 35 at 1 (the add's CPlayerStats_InitWeaponTracking, +0x8C = 1
+    // @0x52C047), so an unawarded row reads 1 and the winner 2.
     // [orig: Server_ProcessRoundEnd — the board @0x516590, the award
     //  @0x5167F6..0x5167FD]
     auto marker = [](const World &world, const char *name) {
@@ -1641,8 +1708,8 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         CHECK(!result.draw);
         CHECK(marker(*world, "Ace") == 2);
         CHECK(world->match.player(ace)->stats[MatchStats::kRoundMarker] == 2);
-        CHECK(result.players[0].stats[MatchStats::kRoundMarker] == 0);
-        CHECK(marker(*world, "Bee") == 0 && marker(*world, "Cid") == 0);
+        CHECK(result.players[0].stats[MatchStats::kRoundMarker] == 1);
+        CHECK(marker(*world, "Bee") == 1 && marker(*world, "Cid") == 1);
     }
 
     // (b) Every row tied at zero: a draw, no marker.
@@ -1655,7 +1722,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         world->process_round_end(0);
         const MatchResult &result = world->match.result();
         CHECK(result.draw);
-        CHECK(marker(*world, "Ace") == 0 && marker(*world, "Bee") == 0);
+        CHECK(marker(*world, "Ace") == 1 && marker(*world, "Bee") == 1);
     }
 
     // (c) A lone row: a draw at zero, a win with any positive score.
@@ -1666,7 +1733,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         player(*world, 3, 1, "Solo");
         world->process_round_end(0);
         CHECK(world->match.result().draw);
-        CHECK(marker(*world, "Solo") == 0);
+        CHECK(marker(*world, "Solo") == 1);
 
         world->match.configure(rules(gt::kDeathmatch, 10, 0));
         const EntityHandle solo = player(*world, 3, 1, "Solo");
@@ -1690,7 +1757,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         const MatchResult &result = world->match.result();
         CHECK(!result.draw);
         CHECK(result.players[0].identity.name == "Ace" && result.players[1].identity.name == "Bee");
-        CHECK(marker(*world, "Ace") == 0 && marker(*world, "Bee") == 0 && marker(*world, "Cid") == 0);
+        CHECK(marker(*world, "Ace") == 1 && marker(*world, "Bee") == 1 && marker(*world, "Cid") == 1);
     }
 
     // (e) KOTH orders by the hill ticks the primary selects, not points.
@@ -1711,7 +1778,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         const MatchResult &result = world->match.result();
         CHECK(result.players[0].identity.name == "Red" && result.players[0].primary_score == 9);
         CHECK(!result.draw);
-        CHECK(marker(*world, "Red") == 2 && marker(*world, "Solo") == 0);
+        CHECK(marker(*world, "Red") == 2 && marker(*world, "Solo") == 1);
     }
 
     // (f) A spectator-flagged top scorer receives no award.
@@ -1727,8 +1794,8 @@ void test_nonteam_board_order_draw_and_winner_marker() {
         const MatchResult &result = world->match.result();
         CHECK(!result.draw);
         CHECK(result.players[0].identity.name == "Ace");
-        CHECK(marker(*world, "Ace") == 0 && marker(*world, "Bee") == 0);
-        CHECK(world->match.player(ace)->stats[MatchStats::kRoundMarker] == 0);
+        CHECK(marker(*world, "Ace") == 1 && marker(*world, "Bee") == 1);
+        CHECK(world->match.player(ace)->stats[MatchStats::kRoundMarker] == 1);
     }
 }
 
@@ -1774,6 +1841,7 @@ int main() {
     test_retail_objective_proximity_scoring_events();
     test_zone_time_split_reads_the_slot_team();
     test_proximity_bits_shift_as_bytes();
+    test_proximity_tests_run_on_the_words();
     test_kill_bonus_team_bits_shift_as_dwords();
     test_retail_zone_and_tkoth_win_quirks();
     test_demolition_flag_and_flagball_gameplay();

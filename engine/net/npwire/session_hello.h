@@ -33,7 +33,7 @@ struct TitleIdentity; // net/title/title_identity.h
 struct ClientHello {
 	std::string nvs;  // NAPI version string (e.g. "NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic")
 	std::string co;   // Company (e.g. "NovaLogic Inc, Calabasas CA U.S.A.")
-	std::string ap;   // Application (e.g. "JOINTOPS.EXE")
+	std::string ap;   // Application: the sender's executable file name (e.g. "Jointops.exe")
 	std::string bdat; // Build date (e.g. "Jul 21 2009 18:54:41")
 	uint32_t de = 0;  // session_info[54], emitted only when nonzero
 	std::string pn;   // Protocol name (e.g. "NOVAWORLDUDP")
@@ -364,6 +364,14 @@ std::vector<uint8_t> client_goodbye_to_bytes(uint32_t remote_session_key);
 // the host-side latched record (SERTMOUT reap, STOP, MSGCRE, the echoed client goodbye, ...).
 std::vector<uint8_t> server_goodbye_to_bytes(uint32_t client_ck, const DisconnectEvent &event);
 
+// The NOVAWORLDUDP service's answer to each ClientGoodBye (0x46) a lobby session sends: S2C 0x86
+// whose body is the departing client's CK (the one its 0x42 carried) and one flat TLV, DS 2, with
+// no other field and no terminator: 13 B, 18 B of UDP payload with the opcode and the envelope.
+// The service answers every goodbye of the client's burst alike, those after the first one closed
+// the session included. The service is NovaLogic's, not in the client's IDB: the witness is the
+// live record (the LN S1 / S1b / S1d retail records, 2026-10-23, six sessions; D-NET-NEW-L9-35).
+std::vector<uint8_t> service_goodbye_answer_to_bytes(uint32_t client_ck);
+
 // Parse a connection-description body (the inner message payload, already SCRK-decrypted). Unknown
 // names are skipped by their length and field order is not assumed, matching the retail walk. The
 // walk stops at a malformed field or an empty name and KEEPS the fields gathered so far; it returns
@@ -413,8 +421,9 @@ bool is_title_protocol_name(const TitleIdentity &title, std::string_view protoco
 //  @0x4ca8bb..0x4ca8c2]
 std::string title_protocol_version3(const TitleIdentity &title);
 
-// The title's 0x41. Its EIP / EPN are the caller's: the announce writes its
-// own destination, each only when nonzero.
+// The title's 0x41: the title's identity block, AP the running executable's file name
+// (read_exe_basename). Its EIP / EPN are the caller's: the announce writes its own
+// destination, each only when nonzero.
 ClientHello make_title_client_hello(const TitleIdentity &title, uint32_t client_index);
 ClientAuth make_title_client_auth(const TitleIdentity &title, uint32_t client_index,
 		uint32_t client_key, uint32_t host_key, std::string_view player_name,

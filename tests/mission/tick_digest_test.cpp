@@ -99,7 +99,34 @@ namespace {
 // play those clips, which moves the chain from 0xa22209beb52b4e4f; with every
 // person naming its table the exit itself moves nothing (reverting it gives
 // the same value).
-constexpr uint64_t kSyntheticDigest = 0x517e7adde3a32d91ULL;
+// The registry row now carries the Yaw word (D-NET-NEW-L6-2) and the chain
+// digests it in place of the whole-degree mirror, which moves it from
+// 0x517e7adde3a32d91; digesting the word's rounded whole degrees gives that
+// value back, so no tick of this synthetic run moved.
+// The synthetic mission has no player-start marker, so its player keeps the
+// zeroed entity's heading word 0, as retail's mission-start spawn leaves it
+// (D-NET-NEW-L1-19), where the spawn had stored the placed default
+// 0x40000000; that moves the chain from 0xe722d011570202ed (restoring the
+// default gives that value back).
+// The registry row carries its Pitch / Roll words (D-NET-NEW-L6-3) and the
+// chain digests them in place of the whole-degree mirrors, which moves it from
+// 0xdcc41c0472d7226d; digesting the words' rounded whole degrees gives that
+// value back, so no tick of this synthetic run moved (it carries no section
+// piece and no body on a tilted placed row).
+// The player's body binds the row its type word names (D-NET-348: 0x14B9 is
+// "Player #1, Multiplayer", 105305; the presentation's 105310 stand-in is gone),
+// so the player's row is that one: its traits sweep now finds a def where it
+// found none and its table the same soldier rows. Together with the mission
+// start running at the zeroed frame tick (D-NET-515, f69c11f61: the start's end
+// stores the first frame's 1), this moves the chain from 0xa7c762a945b847fd to
+// 0xc5d0b62b98fd422f, the value CI printed on push 137 (run 39686345393). It is
+// this deterministic stream's own value (a self-consistency pin, not a retail
+// value).
+// A body's update is its bound row's move function (D-NET-NEW-L4-14: a row naming
+// none binds the null row, which no update runs), so the people's row names org1 and
+// the player's org2: the updates they ran by the Player bit before, and the chain
+// does not move.
+constexpr uint64_t kSyntheticDigest = 0xc5d0b62b98fd422fULL;
 constexpr int kSyntheticTicks = 240;
 
 struct Digest {
@@ -123,12 +150,13 @@ void hash_entity(Digest &d, const w::Entity &e) {
 	d.value(e.bms_id);
 	d.value(static_cast<int32_t>(e.kind));
 	d.value(e.item_id);
-	d.value(e.position.x);
-	d.value(e.position.y);
-	d.value(e.position.z);
-	d.value(e.yaw);
-	d.value(e.pitch);
-	d.value(e.roll);
+	// The float view of the 16.16 words (D-NET-507): the float the chain always hashed.
+	d.value(static_cast<float>(e.position.x));
+	d.value(static_cast<float>(e.position.y));
+	d.value(static_cast<float>(e.position.z));
+	d.value(e.heading);
+	d.value(e.pitch_bam);
+	d.value(e.roll_bam);
 	d.value(e.health);
 	d.value(e.alive);
 	d.value(e.team);
@@ -139,9 +167,9 @@ void hash_entity(Digest &d, const w::Entity &e) {
 }
 
 void hash_ai(Digest &d, const w::AiEntity &a) {
-	d.value(a.pos[0]);
-	d.value(a.pos[1]);
-	d.value(a.pos[2]);
+	d.value(a.self->position.x.q16);
+	d.value(a.self->position.y.q16);
+	d.value(a.self->position.z.q16);
 	d.value(a.heading);
 	d.value(a.pitch);
 	d.value(a.roll);
@@ -186,9 +214,10 @@ using test_mission::synthetic_mission;
 constexpr int kPeopleTypeId = 2001; // items.def 102001
 constexpr const char *kPeopleItems =
 		"begin \"Null\"\r\nid 100000\r\ntype marker\r\nend\r\n"
-		"begin \"Synthetic soldier\"\r\nid 102001\r\ntype person\r\nanim_def soldier\r\nend\r\n"
-		"begin \"Player #1, Single player\"\r\n"
-		"id 105310\r\ntype person\r\nanim_def soldier\r\nend\r\n";
+		"begin \"Synthetic soldier\"\r\nid 102001\r\ntype person\r\nanim_def soldier\r\n"
+		"move_function org1\r\nend\r\n"
+		"begin \"Player #1, Multiplayer\"\r\n"
+		"id 105305\r\ntype person\r\nanim_def soldier\r\nmove_function org2\r\nend\r\n";
 
 struct PeopleClips final : FileSource {
 	std::map<std::string, std::vector<uint8_t>> files; // by lower-case name

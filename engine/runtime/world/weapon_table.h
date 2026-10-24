@@ -6,7 +6,7 @@
 // docs/net/novaworld-net-re.md §5.57]
 #pragma once
 
-#include <cctype>
+#include <base/io/strutil.h>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -52,7 +52,7 @@ struct WeaponTableEntry {
     std::string sameas;
     std::string ammo_class;         // `ammoclass <name> <n>` [orig: @0x5441CB]
     int16_t ammo_class_count = 0;
-    int32_t ammo_bucket = 0;        // [orig: @0x544045]
+    int32_t ammo_bucket = 0;        // [orig: WeaponDefs_ParseLineCallback @0x543680 (@0x544045)]
     // The fired round: `round_type "AMMO_X"`, resolved to an AmmoTable index at load —
     // the original stores the resolved ammo index at adm+4
     // (adm+84 is statid) [orig: §5.60; resolve = AmmoDef_LookupByName]. -1 = unresolved.
@@ -66,6 +66,10 @@ struct WeaponTableEntry {
     std::string attach_text_id;
 	std::string hud_icon, crosshair, commanders_x, hud_loadout_select;
 	int32_t hud_splash_radius = 0; // engine units [orig: AdmDef+0x454 @0x4DEBBD]
+	// 'designation_time' x 62: a designator round's mark life in server ticks
+	// [orig: AdmDef+0x458, WeaponDefs_ParseLineCallback @0x544895; read by
+	//  RoundData_SpawnRound @0x4EC264].
+	int32_t designation_ticks = 0;
     std::string voice_macro_token; // [orig: WeaponDefs_ParseLineCallback @0x543C29]
     // The two FLAGS dwords [orig: AdmDef+8 / AdmDef+12; token table @0x830bf0].
     // The switch/select paths read: flags bit 0x8000000 = QuickSwitch, the ToSpecial
@@ -209,8 +213,8 @@ struct WeaponTable {
             const std::string &n = ammo_class_names[i];
             size_t j = 0;
             while (j < n.size() && name[j] != '\0' &&
-                   std::tolower(static_cast<unsigned char>(n[j])) ==
-                           std::tolower(static_cast<unsigned char>(name[j])))
+                   strutil::ascii_tolower(n[j]) ==
+                           strutil::ascii_tolower(name[j]))
                 ++j;
             if (j == n.size() && name[j] == '\0') return static_cast<int>(i);
         }
@@ -229,7 +233,7 @@ struct WeaponTable {
         static constexpr char kNull[] = "null";
         size_t k = 0;
         while (kNull[k] != '\0' &&
-               std::tolower(static_cast<unsigned char>(weapon_name[k])) == kNull[k])
+               strutil::ascii_tolower(weapon_name[k]) == kNull[k])
             ++k;
         if (kNull[k] == '\0' && weapon_name[k] == '\0') return -1;
         for (size_t i = 0; i < entries.size(); ++i) {
@@ -237,8 +241,8 @@ struct WeaponTable {
             const std::string &n = entries[i].name;
             size_t j = 0;
             while (j < n.size() && weapon_name[j] != '\0' &&
-                   std::tolower(static_cast<unsigned char>(n[j])) ==
-                           std::tolower(static_cast<unsigned char>(weapon_name[j])))
+                   strutil::ascii_tolower(n[j]) ==
+                           strutil::ascii_tolower(weapon_name[j]))
                 ++j;
             if (j == n.size() && weapon_name[j] == '\0') return static_cast<int>(i);
         }

@@ -3,11 +3,15 @@
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/core/object_id.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector2.hpp>
+#include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <runtime/inmatch/session.h>
+
+#include "hud/hud_toggles.h"
 
 namespace godot {
 
@@ -23,29 +27,40 @@ public:
 		HELD_TO_SPECIAL = opennova::inmatch::HELD_TO_SPECIAL,
 		// The menu-open bit the session reads (D-MNU-72).
 		HELD_MENU_OPEN = opennova::inmatch::HELD_MENU_OPEN,
+		HELD_FIRE_KEYS = opennova::inmatch::HELD_FIRE_KEYS,
 	};
 	enum PressedAction {
 		PRESSED_FIRE = opennova::inmatch::PRESSED_FIRE,
 		PRESSED_RELOAD = opennova::inmatch::PRESSED_RELOAD,
-		// The dead player's medic call edge (the MedicReq action row; retail
-		// Input_HandleActionBinding case 217 @0x49b4b4).
-		PRESSED_MEDIC_REQUEST = opennova::inmatch::PRESSED_MEDIC_REQUEST,
-		PRESSED_TO_SPECIAL = opennova::inmatch::PRESSED_TO_SPECIAL,
-		PRESSED_RESPAWN = opennova::inmatch::PRESSED_RESPAWN,
 	};
 
 private:
 	opennova::inmatch::FrameInput value_;
+	opennova::inmatch::TickInputSource *tick_source_ = nullptr;
+	ObjectID tick_source_owner_;
+	Ref<HudToggles> hud_toggles_;
 
 protected:
 	static void _bind_methods();
 
 public:
+	// The shell's input frame for this frame's updates (engine
+	// inmatch::TickInputSource carries the witness), which `p_owner` (the
+	// presenter whose input router samples the devices) owns: tick_source()
+	// hands it to the session only while that object lives.
+	void set_tick_source(opennova::inmatch::TickInputSource *p_source, ObjectID p_owner);
+	opennova::inmatch::TickInputSource *tick_source() const;
 	void set_delta_seconds(double p_delta);
 	double get_delta_seconds() const;
+	// The live frame's start stamp, the frame lock's (engine inmatch::FrameInput::
+	// frame_stamp_ms); C++ only, the world's session leg sets it.
+	void set_frame_stamp_ms(uint32_t p_stamp_ms) { value_.frame_stamp_ms = p_stamp_ms; }
 	// Seconds since the previous frame's render finished (negative: unsampled).
 	void set_since_render_seconds(double p_seconds);
 	double get_since_render_seconds() const;
+	// The command map is the open menu screen (engine inmatch::FrameInput::command_map_open).
+	void set_command_map_open(bool p_open) { value_.command_map_open = p_open; }
+	bool is_command_map_open() const { return value_.command_map_open; }
 	void set_camera_sample(const Vector3 &p_position,
 			const Vector3 &p_forward, bool p_listener_valid = true);
 	// The camera sample as stamped: the driver pushes it to the present
@@ -55,20 +70,28 @@ public:
 	void set_movement(bool p_forward, bool p_back, bool p_left, bool p_right,
 			bool p_lean_left, bool p_lean_right, bool p_jump);
 	void set_view_keys(bool p_free_look, bool p_up, bool p_down, bool p_left, bool p_right);
+	// The mouse cursor's offset in whole pixels since the previous sample
+	// (opennova::inmatch::InputPacket::cursor_dx / cursor_dy).
+	void set_cursor_delta(const Vector2i &p_delta);
+	// Axis input added at this input frame (the scripted device's look).
 	void set_look_delta(const Vector2 &p_delta);
-	void set_weapon_input(bool p_fire_held, bool p_fire_pressed,
-			bool p_reload_pressed, bool p_medic_pressed = false);
-	// The ToSpecial row after set_weapon_input: its keys' live state and a
-	// dispatch on this frame's press or release edge.
-	void set_to_special_input(bool p_held, bool p_dispatched);
+	void set_weapon_input(bool p_fire_held, bool p_fire_pressed, bool p_reload_pressed);
+	// The ToSpecial keys' live state after set_weapon_input, which its records' dispatch
+	// reads (opennova::inmatch::HELD_TO_SPECIAL).
+	void set_to_special_held(bool p_held);
+	// The fire row's key slots down after set_weapon_input (opennova::inmatch::HELD_FIRE_KEYS).
+	void set_fire_keys_held(bool p_held);
 	// A menu screen is up, under which no input frame runs
 	// (opennova::inmatch::HELD_MENU_OPEN).
 	void set_menu_open(bool p_open);
-	// The Respawn row's press edge, after set_weapon_input
-	// (opennova::inmatch::PRESSED_RESPAWN).
-	void set_respawn_input(bool p_dispatched);
 	void set_sequence(int64_t p_sequence);
 	int64_t get_sequence() const;
+
+	// The HUD toggles this frame's input rows drive (the shell's): the session reads their
+	// status view after its drain, where retail's render callback reads its word (engine
+	// inmatch::Session::draws_scene; FrameInput::hud_toggles). Null when the shell has none.
+	void set_hud_toggles(const Ref<HudToggles> &p_toggles) { hud_toggles_ = p_toggles; }
+	Ref<HudToggles> get_hud_toggles() const { return hud_toggles_; }
 
 	const opennova::inmatch::FrameInput &native_value() const { return value_; }
 };
@@ -103,6 +126,12 @@ private:
 	int32_t ticks_run_ = 0;
 	int64_t tick_us_ = 0;
 	String error_;
+	uint32_t frame_stamp_ms_ = 0;
+	bool rendered_ = true;
+	bool scene_drawn_ = true;
+	bool world_skipped_ = false;
+	bool hud_pass_called_ = false;
+	bool start_blank_ = false;
 
 protected:
 	static void _bind_methods();
@@ -115,6 +144,24 @@ public:
 	String get_error() const { return error_; }
 	bool is_terminal() const;
 	bool did_tick() const { return ticks_run_ > 0; }
+	// The frame lock's last clock read when it slept, else 0 (engine inmatch::FrameOutcome::
+	// frame_stamp_ms); C++ only.
+	uint32_t get_frame_stamp_ms() const { return frame_stamp_ms_; }
+	// The main frame's render callback ran: false inside a joiner's final wait for the S2C 0x0F
+	// (engine inmatch::Session::renders); C++ only, GameWorld's scene gate reads it.
+	bool is_rendered() const { return rendered_; }
+	// The render callback's choice after the drain: the scene frame, or the status page in its
+	// place (engine inmatch::Session::draws_scene); C++ only, GameWorld's scene gate reads it.
+	bool is_scene_drawn() const { return scene_drawn_; }
+	// The drawn scene frame skipped its world (engine inmatch::FrameOutcome::world_skipped);
+	// C++ only, GameWorld's scene gate reads it.
+	bool is_world_skipped() const { return world_skipped_; }
+	// The drawn scene frame called its HUD pass (engine inmatch::FrameOutcome::hud_pass_called);
+	// C++ only, GameWorld's scene gate reads it for the HUD's overlay pass.
+	bool is_hud_pass_called() const { return hud_pass_called_; }
+	// The drawn scene frame is one of the three past a mission start, which present black
+	// (engine inmatch::FrameOutcome::start_blank); C++ only, GameWorld's scene gate reads it.
+	bool is_start_blank() const { return start_blank_; }
 
 	void assign(const opennova::inmatch::FrameOutcome &p_value);
 };

@@ -112,14 +112,10 @@ func open() -> bool:
 	var sim: Simulation = _view.sim()
 	if sim == null:
 		return false
-	# MP is live: a joiner's ACCEPT re-submits C2S 0x2F from the applied kit (the
-	# sim queues it — apply_local_player_loadout's in-match leg), the listen host's
-	# apply is server-authoritative in-process. The client-side S2C 0x5A grant IS
-	# applied (D-NET-170 fixed): Simulation::apply_joiner_authoritative_loadout
-	# folds the server's availability/class-filtered slots into the local ones at the
-	# joiner's recv-before-actions boundary. What stays a tracked divergence is this
-	# screen's OPTIMISTIC local refill on ACCEPT, ahead of the grant — retail resets
-	# the slots and waits for the echo.
+	# MP is live: in a session the ACCEPT sends one C2S 0x2F and applies nothing
+	# locally, a joiner's and the listen host's own client's alike (the sim's
+	# apply_local_player_loadout session leg); the host's S2C 0x5A grant rebuilds
+	# the slots (D-NET-170).
 	# [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 is_in_session leg @0x565d94]
 	if not _ensure_menu():
 		return false
@@ -246,7 +242,16 @@ func _unhandled_key_input(event: InputEvent) -> void:
 # The screen's CANCEL: a close unless the press latch holds it open.
 func _on_cancel() -> void:
 	if can_dismiss():
+		_reset_all_input_state()
 		close()
+
+
+# The ACCEPT's and CANCEL's head past the press latch: the input reset (engine
+# inmatch/session.h Role::reset_all_input_state carries the witness).
+func _reset_all_input_state() -> void:
+	var sim: Simulation = _view.sim() if _view != null else null
+	if sim != null:
+		sim.reset_all_input_state()
 
 
 func teardown() -> void:
@@ -309,6 +314,7 @@ func _on_frame_gui_input(event: InputEvent) -> void:
 func _on_loadout_accepted(loadout: Dictionary) -> void:
 	if not can_dismiss():
 		return
+	_reset_all_input_state()
 	var primary := String(loadout.get("primary", ""))
 	_player_class = int(loadout.get("player_class", _player_class))
 	if _view != null:
@@ -336,6 +342,12 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 		if not applied:
 			close()
 			return
+		# In a session the apply sent its 0x2F and selects nothing: the screen
+		# closes (the apply's tail) and the host's grant mounts the kit (engine
+		# inmatch/loadout_submit.h armory_accept_in_session carries the witness).
+		if sim != null and sim.is_mp_session():
+			close()
+			return
 		if kit.is_empty():
 			# The all-NONE kit: no slots, nothing equipped [orig: an empty buffer
 			# leaves the table bare; the knife fallback is the MISSION loader's rule,
@@ -345,15 +357,18 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 				_player_presenter.refresh_viewmodel()
 			close()
 			return
-		# The sim re-selected + committed the equipped slot during the apply; install
-		# the viewmodel for it now (the commit event would also catch up next tick).
+		# The apply's select committed and mounted the equipped slot in the sim, and its
+		# mount request queued SWITCHRANK on that slot (engine world/player_loadout.cpp
+		# select_current_slot carries the witness): present the viewmodel for it now, with
+		# no second sim mount over that switch (the commit event would also catch up next
+		# tick).
 		var equipped := primary
 		if sim != null:
 			var equipped_name := sim.get_local_player_inventory().equipped_name
 			if not equipped_name.is_empty():
 				equipped = equipped_name
 		if not equipped.is_empty() \
-				and _view.set_local_player_weapon_by_name(equipped) \
+				and _view.present_local_player_weapon(equipped) \
 				and _player_presenter != null:
 			_player_presenter.refresh_viewmodel()
 	close()

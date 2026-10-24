@@ -137,7 +137,7 @@ int main() {
 			"lock_topright folds to quadrant 1's X lock");
 	check(!field.locks.locked_x(3) && field.locks.locked_z(3),
 			"lock_bottomright folds to quadrant 3's Z lock");
-	check(!field.has_water, "the water clamp stays deferred (has_water off)");
+	check(field.water_y == 0, "a fresh field's water plane word is 0 (retail's default, compared raw)");
 	check(field.heightmap != cpt.depth_buffer.data(),
 			"the heightmap view points at the store's own copy");
 
@@ -274,12 +274,12 @@ int main() {
 		// The occupant water clamp's plane rides beside the field in the same
 		// 16.16 units the ground solve compares [orig: worldY @0x26C6454]; a
 		// rebuild starts without one.
-		check(!bare.height_field().has_water, "a fresh build carries no water plane");
+		check(bare.height_field().water_y == 0, "a fresh build's water plane word is 0");
 		bare.set_water_plane(12 << 16);
-		check(bare.height_field().has_water && bare.height_field().water_y == (12 << 16),
+		check(bare.height_field().water_y == (12 << 16),
 				"set_water_plane feeds the clamp plane");
 		bare.set_water_plane(0);
-		check(!bare.height_field().has_water, "a zero plane is no authored water");
+		check(bare.height_field().water_y == 0, "a zero plane is the default word, no dry sentinel");
 		bare.build(hm.data(), hm.size(), grid.data(), 0, 0, 2, 3, false, true, locks);
 		check(terrain::coords_sector_id_at_cell(bare.height_field().layout, 2, 1) == 1,
 				"rebuild accepts the new last cell");

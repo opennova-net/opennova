@@ -118,7 +118,15 @@ void resolve_weapon_round_types(world::WeaponTable &weapons, const world::AmmoTa
 			e.ammo_index = -1;
 			continue;
 		}
-		e.ammo_index = static_cast<int16_t>(ammo.index_of(e.round_type.c_str()));
+		// The parse stores the lookup's answer only when it is nonzero: the lookup
+		// answers 0 for a miss and for the first row alike, so a round naming the
+		// file's first block (AT_NULL) is an unknown round, the def's -1 kept.
+		// [orig: WeaponDefs_ParseLineCallback - the round_type arm @0x543C57..0x543CA9,
+		//  the 0 test @0x543C75 (the "unknown round" warning @0x543C79..0x543C90), the
+		//  store @0x543CA9; AmmoDef_LookupByName @0x409870 (0 for a miss @0x4098AC);
+		//  AdmDef_InitEntryDefaults @0x53FEF0 (the -1 at adm+4 @0x53FF58)]
+		const int index = ammo.index_of(e.round_type.c_str());
+		e.ammo_index = static_cast<int16_t>(index > 0 ? index : -1);
         if (e.ammo_index >= 0 && ((e.flags & 1) != 0 ||
             ((e.flags & 3) != 0 && e.action_fsm.scope_zero.max_steps != 0)))
             weapon_scope_zero_bake(e.action_fsm.scope_zero, ammo.entries[e.ammo_index]);

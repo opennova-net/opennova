@@ -1,14 +1,20 @@
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/server_squad.h> // Server_DissolveSquadOf
 
+#include <runtime/inmatch/punt_log.h>                // ConnectLog (the first connection turns it off)
 #include <runtime/inmatch/server_initial_state.h>    // Server_SendInitialGameStateToPlayer (the §5.2a burst)
 #include <runtime/inmatch/server_chat.h>             // broadcast_player_joined/leaving_text (the 0x32 lines)
 #include <runtime/inmatch/server_message_dispatch.h> // dispatch_session_replies (the reactive §5.1 replies)
 #include <runtime/inmatch/server_spawn.h>            // Server_ProcessPendingPlayerSpawns (World-driven spawn)
+#include <runtime/inmatch/server_squad_registry.h>   // Server_ReleaseSquadRegistryNode (the disconnect's squad leg)
+#include <runtime/inmatch/server_tick.h>             // route_entity_pass_records (each handler's raised records)
 
+#include <net/napi/envelope.h>        // napi_envelope_encode (the magic packet's answer)
+#include <net/npwire/idatagram_socket.h> // IDatagramSocket (a held server's STOP burst)
 #include <net/npwire/ingame_encode.h>    // encode_player_sync_removal (the disconnect 0x46 removal)
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
+#include <net/npwire/outgoing_packets.h> // plan_outgoing_packets (a held node's build)
 #include <net/npwire/protocol_message.h> // make_protocol_message (frame the burst messages)
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
@@ -34,11 +40,13 @@
 #include <runtime/world/world.h>
 
 #include <algorithm>
+#include <optional>
 #include <cstdio>
 #include <cstdlib>
 #include <iterator>
 #include <limits>
 #include <utility>
+#include <variant>
 
 namespace opennova::inmatch {
 
@@ -132,6 +140,68 @@ NapiNPConnection *find_connection(NapiNPServerCtx &ctx, const PeerAddr &peer) {
 	return nullptr;
 }
 
+namespace {
+
+void connect_log_line(const NapiNPServerCtx &ctx, const std::string &text) {
+	if (ctx.logs.connect != nullptr) ctx.logs.connect->line(text);
+}
+
+// The magic packet's reflection: the manager's protocols in order, the first whose reflection
+// is set and whose key equals the packet's dword at +12 answers the address the packet names
+// (its dword at +4, the socket's address word, and its u16 at +8, the port the send swaps) with
+// the four bytes 72 10 04 00 (the dword 0x00041072), through the socket's envelope (SendTo's
+// last argument 1: NapiSocket_EncodePacket); no match answers nothing. A host's manager walks
+// the game protocol, the only one the session create arms (a NovaWorld host's gate-session
+// protocol never is).
+// [orig: NapiNP_HandleMagicPacket @0x622E70 - the walk @0x622E95..0x622EC5 (`cmp
+//  [eax+52Ch], 0` @0x622EA6, `mov esi, [eax+530h]` @0x622EAF, `cmp esi, [edx+0Ch]` @0x622EB8),
+//  the port @0x622ED9, the address @0x622EDD, the bytes @0x622EE1..0x622EF1,
+//  CNapiNPManager_SendTo(.., 4, 1) @0x622EF8; NapiSocket_SendTo @0x62CFA0 - the encode
+//  @0x62CFEA..0x62D009 (NapiSocket_EncodePacket @0x62C8F0), htons @0x62D040 (the port's store
+//  @0x62D050)]
+void reflect_magic_packet(const NapiNPServerCtx &ctx, const std::vector<uint8_t> &unpacked,
+		HandleResult &out) {
+	const NapiNPProtocol &p = ctx.np_protocol;
+	if (p.magic_reflect == 0 || p.magic_key != io::read_u32_le(unpacked.data() + 12)) return;
+	static constexpr uint8_t kAnswer[4] = {0x72, 0x10, 0x04, 0x00};
+	HandleResult::Addressed reply;
+	reply.to.ip = io::read_u32_le(unpacked.data() + 4);
+	reply.to.port = io::read_u16_le(unpacked.data() + 8);
+	reply.datagram.resize(sizeof(kAnswer) + 4);
+	std::size_t encoded = 0;
+	if (napi_envelope_encode(kAnswer, sizeof(kAnswer), reply.datagram.data(),
+				reply.datagram.size(), &encoded) != 0)
+		return;
+	reply.datagram.resize(encoded);
+	out.addressed_outbound.push_back(std::move(reply));
+}
+
+// A server-side connection for the peer: the first test of the session-level handlers
+// (0x43..0x47), each of which returns 0 without one [orig: NapiNPProtocol_HandleSessionPacket
+// @0x626AA8 / @0x626B01; NapiNP_HandleResendList @0x623899; Nwu_HandlePing @0x623B04;
+// Nwu_HandleDisconnect @0x623D8E; Nwu_HandleClientProbe @0x62428E].
+bool server_connection_exists(NapiNPServerCtx &ctx, const PeerAddr &peer) {
+	const NapiNPConnection *conn = find_connection(ctx, peer);
+	return conn != nullptr && conn->type == NapiNPConnection::kTypeServerSide;
+}
+
+// The manager's dispatch line for one unpacked packet, once: PROTOCOL with the protocol's
+// name (proto +0xDC, the identity's PN) when a handler took it, else TOSSED [4].
+// [orig: NapiNPManager_HandlePacket @0x622FB0..0x622FCD (Network_LogNapiProtocolRecv
+//  @0x4C6100) / @0x622FDC..0x622FF9 (Network_LogTossedPacket @0x4C4580)]
+void log_manager_dispatch(const NapiNPServerCtx &ctx, const PeerAddr &peer, int32_t unpacked_len,
+		HandleResult &out) {
+	if (out.dispatch_logged) return;
+	out.dispatch_logged = true;
+	const TitleIdentity *identity = ctx.np_protocol.identity;
+	connect_log_line(ctx, out.taken
+			? napi_got_protocol_text(unpacked_len, peer,
+					identity != nullptr && identity->pn != nullptr ? identity->pn : "")
+			: napi_tossed_text(unpacked_len, peer, NapiTossReason::NoProtocol));
+}
+
+} // namespace
+
 // Linear scan + create-on-miss over connection_list — faithful to the original intrusive-list walk
 // (NapiNPServer_SendFiltered @0x4C87E0 -> SendToConn per node). connection_list stays authoritative
 // (the single-owner table; there is no parallel connection table). A fresh node is a server-side connection (type 1).
@@ -148,19 +218,26 @@ NapiNPConnection &find_or_create_connection(NapiNPServerCtx &ctx, const PeerAddr
 	// countdown delayed them up to period-1 pumps versus the golden timing.
 	node.s2c_send_holdoff_ticks = clamp_send_holdoff_ticks(
 			ctx.config.effective_send_holdoff_ticks());
-	// The cs_dir template copy: the reap window and the outbound pool bound this node lives
-	// under (120000 / 1200 unless the host's `_NSTMOUT.TXT` changed them).
-	// [orig: CNapiNPConnection_Create @0x62acb0 copies proto+0xE44/+0xE80 (`rep movsd ecx=0Fh`
-	//  @0x62ae7b/@0x62aeb8); NapiNPMessage_Create reads msg_out_max off the node @0x628048]
-	node.timeouts = ctx.np_protocol.connection_template;
-	// Both template blocks carry the host's configured `mpmaxpacketsize` as field 13
-	// [orig: CNapiNetwork_Init @0x4caa53..0x4caa7b, stores @0x4cab3c/@0x4cac0c].
-	node.timeouts.max_packet_bytes = static_cast<int32_t>(
-			cs_max_packet_bytes(ctx.config.max_packet_size, kCsMaxPacketCeilingGame));
+	node.timeouts = server_node_template(ctx);
 	node.seq = make_jo_game_session_sequencing();
 	sync_session_sequencing_limits(node.seq, node.timeouts);
 	ctx.np_protocol.connection_list.push_back(std::move(node));
 	return ctx.np_protocol.connection_list.back();
+}
+
+} // namespace
+
+CsConfig server_node_template(const NapiNPServerCtx &ctx) {
+	// The cs_dir template copy: the reap window and the outbound pool bound this node lives
+	// under (120000 / 1200 unless the host's `_NSTMOUT.TXT` changed them).
+	// [orig: CNapiNPConnection_Create @0x62acb0 copies proto+0xE44/+0xE80 (`rep movsd ecx=0Fh`
+	//  @0x62ae7b/@0x62aeb8); NapiNPMessage_Create reads msg_out_max off the node @0x628048]
+	CsConfig timeouts = ctx.np_protocol.connection_template;
+	// Both template blocks carry the host's configured `mpmaxpacketsize` as field 13
+	// [orig: CNapiNetwork_Init @0x4caa53..0x4caa7b, stores @0x4cab3c/@0x4cac0c].
+	timeouts.max_packet_bytes = static_cast<int32_t>(
+			cs_max_packet_bytes(ctx.config.max_packet_size, kCsMaxPacketCeilingGame));
+	return timeouts;
 }
 
 // The S2C 0x86 SERVER_GOODBYE burst for `conn`: up to cs_dir0.recv_max_per_tick (4, clamped
@@ -174,7 +251,7 @@ NapiNPConnection &find_or_create_connection(NapiNPServerCtx &ctx, const PeerAddr
 //  send loop @0x625406..0x625424; CNapiNPConnection_SendDisconnectPacket @0x61F2A0 — conn_flag0
 //  gate @0x61f30b, `!is_server || host_running` @0x61f329, opcode 0x86 @0x61f367, the peer key
 //  (CK) @0x61f3af, the record TLVs @0x61f3d0..0x61f4aa; recv_max_per_tick = 4 @0x4cab60]
-std::vector<std::vector<uint8_t>> host_goodbye_burst(const NapiNPServerCtx &ctx,
+std::vector<std::vector<uint8_t>> host_goodbye_burst(bool host_running,
 		const NapiNPConnection &conn) {
 	// SendDisconnectPacket's gates: an ACTIVE server-side node (conn_flag0, i.e. the 0x42 was
 	// accepted) on a host that is still running; a client-side node would select 0x46 instead
@@ -182,7 +259,7 @@ std::vector<std::vector<uint8_t>> host_goodbye_burst(const NapiNPServerCtx &ctx,
 	// [orig: @0x61f30b conn_flag0; @0x61f329 `!is_server || host_running`; @0x61f367 opcode 0x86;
 	//  the remote key read @0x61f396 and written @0x61f3af]
 	if (conn.type != NapiNPConnection::kTypeServerSide || conn.phase < ConnectionPhase::Joined ||
-	    ctx.np_protocol.host_running == 0) {
+	    !host_running) {
 		return {};
 	}
 	const DisconnectEvent record =
@@ -195,12 +272,16 @@ std::vector<std::vector<uint8_t>> host_goodbye_burst(const NapiNPServerCtx &ctx,
 			disconnect_burst_count(conn.timeouts.recv_max_per_tick), std::move(datagram));
 }
 
+namespace {
+
+void remove_connection_player(NapiNPServerCtx &ctx, NapiNPConnection &leaving);
+
 // The one player/session teardown path shared by keyed goodbye, receive timeout, pending
 // disconnect, StopServer, owner eviction, and same-address replacement. The original's Destroy runs
 // TeardownActiveConnection: the disconnect-packet burst to the departing peer FIRST, then the
 // removal callback (Server_HandlePlayerDisconnect) before the node is cleared; a bare list erase
 // leaks the entity and roster identity. `goodbye_out` receives the burst (null = no wire output:
-// the owner's dead-endpoint eviction and the D-NET-171 silent admission legs).
+// the owner's dead-endpoint eviction and the silent admission legs, D-NET-NEW-L1-24).
 // [orig: CNapiNPConnection_Destroy @0x62A4B0 -> CNapiNPConnection_TeardownActiveConnection
 //  @0x6253C0 (the burst @0x6253ef..0x625424 precedes the callback @0x625426..0x625438) ->
 //  Server_HandlePlayerDisconnect @0x51B5C0]
@@ -218,31 +299,79 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 
 	// The /INOUT line heads the teardown, ahead of the burst
 	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253d2 ->
-	//  CNapiNPConnection_LogPlayerRemoved; D-NET-356]. The listen host's own
+	//  CNapiNPConnection_LogPlayerRemoved]. The listen host's own
 	// type-2 node is never torn down here.
 	if (it->type == NapiNPConnection::kTypeServerSide)
-		io::logf(io::LogLevel::kInfo, "%s", inout_player_removed_line(*it).c_str());
+		write_inout_line(ctx, inout_player_removed_line(*it));
 
 	if (goodbye_out != nullptr) {
-		std::vector<std::vector<uint8_t>> burst = host_goodbye_burst(ctx, *it);
+		std::vector<std::vector<uint8_t>> burst =
+				host_goodbye_burst(ctx.np_protocol.host_running != 0, *it);
 		goodbye_out->insert(goodbye_out->end(),
 				std::make_move_iterator(burst.begin()),
 				std::make_move_iterator(burst.end()));
 	}
 
-	const bool had_player = it->type == NapiNPConnection::kTypeServerSide &&
-			(it->link.owned_entity.valid() || it->phase >= ConnectionPhase::PlayerAdded);
-	const world::EntityHandle owned_entity = it->link.owned_entity;
-	const uint8_t player_slot = it->reply.player_slot;
+	if (it->type == NapiNPConnection::kTypeServerSide) remove_connection_player(ctx, *it);
+
+	list.erase(it);
+	return true;
+}
+
+// A Server_RemoveEntityAndNotify's S2C 0x12 [u16 packed handle] at its call: NapiNPServer_SendFiltered
+// under mask 0x90, the entity fan's recipients (an in-match remote slot, not the host's own),
+// the leaving node aside. [orig: Server_RemoveEntityAndNotify @0x50A270 - mask 0x90 @0x50A284,
+//  the send @0x50A2AC; Server_FanEntityEvents' recipient rule (server_entity_routes.cpp)]
+static void send_entity_remove_at_call(NapiNPServerCtx &ctx, const NapiNPConnection &leaving,
+		uint16_t handle) {
+	if (!ctx.is_in_session) return;
+	EntityRemove removal;
+	removal.entity_handle = handle;
+	const std::vector<uint8_t> body = encode_entity_remove(removal);
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (&conn == &leaving || !active_player_recipient(conn) ||
+				conn.link.mode == replication::TransportMode::Loopback)
+			continue;
+		conn.link.transport->host_send(s2c::ENTITY_REMOVE, body, /*reliable=*/true, 0);
+	}
+}
+
+// The removal callback's player teardown (Server_HandlePlayerDisconnect) for one node whose
+// player was added: the leave line, the squad leg, the match and spawn-wave removal, the /PROFILE
+// marker, the entity's removal and the 0x46 removal record to the others. A remote's node, or
+// the server-side twin of the listen host's own pair (teardown_own_connection).
+// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the callback @0x625426..0x625438
+//  -> Server_HandlePlayerDisconnect @0x51B5C0]
+void remove_connection_player(NapiNPServerCtx &ctx, NapiNPConnection &leaving) {
+	auto &list = ctx.np_protocol.connection_list;
+	const bool had_player =
+			leaving.link.owned_entity.valid() || leaving.phase >= ConnectionPhase::PlayerAdded;
+	const world::EntityHandle owned_entity = leaving.link.owned_entity;
+	const uint8_t player_slot = leaving.reply.player_slot;
 	if (had_player) {
+		// The NovaWorld game session's leg first, every added slot's on the authority, the listen
+		// host's own among them: ClientHostPlayerRemoved in state 6 and the slot's PlayerList vars
+		// dropped (ClientProcessState::nwu_player_removed), ahead of the spectator arm's return
+		// and of every later leg (D-NET-NEW-L9-29).
+		// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - the authority test @0x51B5D0, the
+		//  slot's active byte @0x51B5DC, the bot byte +0x178E3 @0x51B5E5 (never set in JO),
+		//  CNapiGameSession_SendPlayerRemovedIfHosting called @0x51B5F3,
+		//  NapiLinkedList_RemoveByUserData called @0x51B601, the +5 test @0x51B606]
+		if (ctx.nwu_player_removed != nullptr && *ctx.nwu_player_removed)
+			(*ctx.nwu_player_removed)(static_cast<int>(player_slot));
+		// A slot not the local one stops its report clock and sends the METPROTOCOL PLAYER report,
+		// ahead of the leave's sends (D-NET-NEW-L9-22).
+		// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - CServerTick_SetState(0) @0x51B690,
+		//  Server_SendPlayerMetricsToGate @0x51B696, ahead of the sends from @0x51B69B]
+		Server_ReportPlayerLeave(ctx, leaving);
 		// The leave line first, while the leaver's entity still stands
 		// [orig: Server_HandlePlayerDisconnect @0x51b6d3, before the teardown
 		// @0x51b809..0x51b82e].
-		broadcast_player_leaving_text(list, *it, ctx.world);
-		const bool freed_pool0_entity = ctx.world != nullptr && owned_entity.valid() &&
-				owned_entity.pool() == 0;
-		const uint16_t freed_pool0_slot =
-				freed_pool0_entity ? static_cast<uint16_t>(owned_entity.slot()) : uint16_t{0};
+		broadcast_player_leaving_text(list, leaving);
+		// The squad leg, with the leaver still counted: a squad's last slot
+		// sends its squadron line and the registry removal and frees the node
+		// [orig: Server_HandlePlayerDisconnect @0x51B6D8..0x51B7FD].
+		Server_ReleaseSquadRegistryNode(ctx, leaving);
 		if (ctx.world != nullptr && owned_entity.valid()) {
 			ctx.world->match.remove_player(*ctx.world, owned_entity);
 			// The leaver drops out of every spawn-wave row it was queued in, before the
@@ -261,51 +390,86 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 					ctx.logs.profile->write_disconnect(*leaver);
 			}
 			ctx.world->vehicles.detach(owned_entity);
-			// The leaver's row goes through Server_RemoveEntityAndNotify, whose
-			// Player arm removes the placed devices the leaver owns, each through
-			// the notifying removal, before the row itself.
+			// The leaver's row goes through Server_RemoveEntityAndNotify: its S2C 0x12 to
+			// every in-match slot (mask 0x90) at the call, then its Player arm's sweep of the
+			// placed devices the leaver owns, each through the same notifying removal, its
+			// own 0x12 at its call, then the row's destroy. So the others retire the
+			// leaver's body on its 0x12, ahead of the slot's 0x46 (D-NET-176).
 			// [orig: Server_HandlePlayerDisconnect @0x51B5C0 — the
 			//  Server_RemoveEntityAndNotify call @0x51B82E; Server_RemoveEntityAndNotify
-			//  @0x50A270 — the Player test @0x50A2B1, the sweep call @0x50A2BB]
+			//  @0x50A270 — mask 0x90 @0x50A284, the handle @0x50A28E, the 0x12's
+			//  NapiNPServer_SendFiltered call @0x50A2AC, the Player test @0x50A2B1, the
+			//  sweep call @0x50A2BB, Entity_Destroy @0x50A2C4]
+			send_entity_remove_at_call(ctx, leaving, owned_entity.packed);
+			const size_t first_event = ctx.world->out.entity_events.size();
 			if (const world::Entity *leaver = ctx.world->registry.get(owned_entity);
 					leaver != nullptr &&
 					((leaver->flags | leaver->engine_flags) & world::kEntityFlagPlayer) != 0)
 				ctx.world->commands.remove_placed_devices_by_owner(owned_entity);
+			// The sweep's removals queue their 0x12s for the entity fan; each leaves at
+			// its call here instead [orig: Entity_RemovePlacedDevicesByOwner @0x546E00 -
+			//  the Server_RemoveEntityAndNotify calls @0x546E71 / @0x546E94 / @0x546EBB].
+			auto &events = ctx.world->out.entity_events;
+			for (size_t i = first_event; i < events.size();) {
+				if (const auto *removal = std::get_if<world::EntityRemoveEvent>(&events[i])) {
+					send_entity_remove_at_call(ctx, leaving, removal->handle);
+					events.erase(events.begin() + static_cast<std::ptrdiff_t>(i));
+				} else {
+					++i;
+				}
+			}
+			// The body's destroy drops a carried flag (Match::remove_player above made the
+			// drop): its 0x2F state leaves here, after the removals and ahead of the 0x46
+			// [orig: Entity_Destroy @0x43E810 - the mounted child's test @0x43E8B1, the
+			//  Entity_DropCarriedObject call @0x43E8B8; Entity_DropCarriedObject @0x439DF0 -
+			//  the Server_SendDestructibleDeathPacket call @0x439F34].
+			route_match_objective_records(ctx, *ctx.world);
 			// The player's brain (player_spawn attaches one) is freed with the row so
 			// the next pool-0 spawn into this slot starts brainless.
 			ctx.world->ai.release(owned_entity);
+			ctx.world->vehicles.release_despawned_slot_owner(owned_entity);
 			ctx.world->registry.despawn(owned_entity);
 		}
 		// The leaver's squad breaks up after its entity is gone and before its
 		// removal record [orig: Server_SendPlayerStateAndSquad from
 		// Server_HandlePlayerDisconnect @0x51b837].
-		Server_DissolveSquadOf(ctx, *it);
-		// The witnessed leave broadcast is S2C 0x46 bit15, which clears the peer's
-		// ROSTER BOOKKEEPING ONLY — PlayerSlot_ClearAndUnlink @0x434730 never
-		// destroys the entity (@0x431411..0x43144c; the entity-field wipes @0x431437
-		// are dead code there because entitySlotPtr is null). Retail relies on the
-		// client asking for a sweep (C2S 0x32 -> S2C 0x5D) to retire the entity, so
-		// on retail a leaver's body lingers until the next sweep.
-		// NOT WITNESSED (D-NET-176 delta (a)): pushing a sweep at teardown instead of
-		// waiting to be asked. The probe3 capture shows 0x5D coinciding with
-		// disconnects, which is consistent with a sweep, but the only witnessed
-		// TRIGGER is the 0x32 request. The body is not the witnessed builder's
-		// either: it lists the leaver's slot alone, where Server_CollectEmptyPool0Slots
-		// (@0x5160f0) lists every empty pool-0 slot below the used count.
-		DestroyEntityList leave_sweep;
-		if (freed_pool0_entity) leave_sweep.pool0_indices.push_back(freed_pool0_slot);
+		Server_DissolveSquadOf(ctx, leaving);
+		// The slot's removal record: S2C 0x46 bit15, which clears the peer's roster
+		// bookkeeping only (PlayerSlot_ClearAndUnlink @0x434730 never destroys the
+		// entity: the leaver's 0x12 above retired it). No sweep follows: the 0x5D
+		// answers only a C2S 0x32 request (D-NET-176).
+		// [orig: Server_HandlePlayerDisconnect @0x51B8BC; NapiNPServerMsg_SendEmptySlots
+		//  @0x51A600]
 		for (NapiNPConnection &other : list) {
-			if (&other == &*it || !is_in_match(other) || other.link.transport == nullptr)
+			if (&other == &leaving || !is_in_match(other) || other.link.transport == nullptr)
 				continue;
 			other.link.transport->host_send(
 					0x46, encode_player_sync_removal(player_slot, /*with_ack=*/false));
-			if (freed_pool0_entity)
-				other.link.transport->host_send(
-						0x5D, encode_destroy_entity_list(leave_sweep));
 		}
-		++ctx.np_protocol.roster_generation;
 	}
+}
 
+// The listen host's own pair as a receive pump takes its own client's goodbye: the server-side
+// twin its own 0x42 created gets the goodbye's record (the client's, role 2, already on our one
+// own node; the pump's PDESTME only when nothing is), is set pending and is destroyed in the
+// same pump's connection walk: its /INOUT SERVER line, its 0x86 burst back to the own client over
+// the loopback (no wire face), then the host player's removal. Our one node stands for the pair
+// and leaves the list.
+// [orig: Nwu_HandleClientGoodbye @0x624250 -> Nwu_HandleDisconnect @0x623CE0 (the record latched
+//  if none @0x6240A8..0x6240BA, role 2 @0x624005; RequestDisconnect @0x6240C4 -> pending
+//  @0x61E107); NapiNPProtocol_Pump @0x62A650 - the pending walk @0x62A6FD..0x62A793;
+//  CNapiNPConnection_TeardownActiveConnection @0x6253C0 - CNapiNPConnection_LogPlayerRemoved
+//  @0x61E940 (the call @0x6253D2), the state-1 burst @0x6253EF..0x625424, the callback
+//  @0x625438] (D-NET-NEW-L8-21)
+bool teardown_own_connection(NapiNPServerCtx &ctx) {
+	auto &list = ctx.np_protocol.connection_list;
+	auto it = std::find_if(list.begin(), list.end(), [](const NapiNPConnection &c) {
+		return c.type == NapiNPConnection::kTypeClientSide;
+	});
+	if (it == list.end()) return false;
+	latch_disconnect_event(*it, make_disconnect_event(1, 8, 0, 0, "", 0, "NP.C:PMP:PDESTME"));
+	write_inout_line(ctx, inout_player_removed_line(*it, NapiNPConnection::kTypeServerSide));
+	remove_connection_player(ctx, *it);
 	list.erase(it);
 	return true;
 }
@@ -321,6 +485,28 @@ uint32_t occupied_player_count(const NapiNPServerCtx &ctx) {
 	return occupied;
 }
 
+// The protocol's server-side (type-1) connection count, the 0x81's NC: retail counts its
+// type-1 nodes as it links and unlinks them, so the word is the list's type-1 population. A
+// remote joiner's node is one; the listen host's own client is one node here, standing for
+// retail's pair, its type-2 connection and the type-1 node its own 0x42 creates on its server
+// (no constant: the host's 1 is that node's presence). (D-NET-523)
+// [orig: NapiNPProtocol_SendServerInfoPacket @0x6204B0 - NC from proto+0xED4 @0x620A4D,
+//  written iff nonzero @0x620A53..0x620A6C; CNapiNPConnection_Create @0x62ACB0 - the list link
+//  @0x62B17A..0x62B1AE, ++proto+0xED4 for type 1 @0x62B1BD..0x62B1CB; CNapiNPConnection_Destroy
+//  @0x62A4B0 - the unlink @0x62A5A8..0x62A5E5, the type-1 decrement @0x62A5FF; the listen host's
+//  self-join: CNapiGameSession_CreateSession @0x4C97C0 (the gate @0x4C9B6A..0x4C9B76, its type-2
+//  create @0x4C9B9C, CNapiGameSession_WaitForHostResponse @0x4C9C6F), its 0x42's type-1 create
+//  in NapiNPProtocol_HandleClientJoin @0x62BF06]
+uint32_t server_connection_count(const NapiNPServerCtx &ctx) {
+	uint32_t count = 0;
+	for (const NapiNPConnection &connection : ctx.np_protocol.connection_list) {
+		if (connection.type == NapiNPConnection::kTypeServerSide ||
+				connection.type == NapiNPConnection::kTypeClientSide)
+			++count;
+	}
+	return count;
+}
+
 // The witnessed 0x42-time rejection is a CR=0 0x82 carrying ONLY the identity
 // echo plus the JFC failure family, the JFP sub-reason, and an optional JFS
 // string — no MI/SK/CS/SCRK/NA. The validate-callback family is JFC=14 with
@@ -332,22 +518,28 @@ uint32_t occupied_player_count(const NapiNPServerCtx &ctx) {
 void reject_client_join(const ClientAuth &auth, const PeerAddr &peer,
 		uint32_t failure_family, uint32_t failure_reason, HandleResult &out) {
 	(void)peer;
+	out.outbound.push_back(join_rejection_datagram(auth, failure_family, failure_reason));
+}
+
+} // namespace
+
+std::vector<uint8_t> join_rejection_datagram(const ClientAuth &auth, uint32_t failure_family,
+		uint32_t failure_reason) {
 	ServerAuth rejection;
 	rejection.ci = auth.ci;
 	rejection.ck = auth.ck;
 	rejection.cr = 0;
 	rejection.jfc = failure_family;
 	rejection.jfp = failure_reason;
-	out.outbound.push_back(nw_encode_outbound(
-			SESSION_OPCODE_SERVER_AUTH,
-			server_auth_rejection_to_bytes(rejection)));
+	return nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH,
+			server_auth_rejection_to_bytes(rejection));
 }
 
 // Build + frame a 0x82 ServerAuth for `conn` from its CURRENT keys (server_sk / server_scrk /
 // connection_id). Used for a fresh join AND to re-send on a retransmitted 0x42 (the original
 // re-sends the cached packet via CNapiNPConnection_SendSessionInit @0x620ef0 rather than re-minting).
-std::vector<uint8_t> make_server_auth_datagram(const NapiNPServerCtx &ctx, const ClientAuth &auth,
-                                               const PeerAddr &peer, const NapiNPConnection &conn) {
+std::vector<uint8_t> make_server_auth_datagram(const ClientAuth &auth, const PeerAddr &peer,
+		const NapiNPConnection &conn) {
 	// A game host's 0x82 carries no CU on any network type: SendSessionInit writes only the
 	// connection's type-3 vars, the host keeps the 0x42's CUs under their own type 1/2, and only a
 	// client's 0x82 handler creates a type-3 var. The NovaworldName / web-domain / NWUID block is
@@ -375,7 +567,8 @@ std::vector<uint8_t> make_server_auth_datagram(const NapiNPServerCtx &ctx, const
 	// ceiling the new-connection callback already negotiated (D-NET-234). -1 rides as
 	// 0xFFFFFFFF. [orig: CNapiNPConnection_SendSessionInit @0x620ef0; CNapiNetwork_Init
 	//  stores @0x4caa81/@0x4cab20/@0x4cab54/@0x4cabf0; NapiNPServer_HandleNewConnection
-	//  stores @0x4c81ca/@0x4c81d0, run first by CNapiNPConnection_OnStateChange @0x6261cd]
+	//  stores @0x4c81ca/@0x4c81d0, run first by CNapiNPConnection_OnStateChange (the call
+	//  @0x6261C6)]
 	for (std::vector<CsField> *block : {&reply.client_cs, &reply.server_cs}) {
 		for (CsField &field : *block) {
 			if (field.field_index == 0)
@@ -388,6 +581,8 @@ std::vector<uint8_t> make_server_auth_datagram(const NapiNPServerCtx &ctx, const
 	}
 	return nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(reply));
 }
+
+namespace {
 
 HostJoinerPose pose_from_session(NapiNPServerCtx &ctx, const SessionReplyState &reply) {
 	// [orig: HostSessionAccept::pose_from_session]
@@ -414,6 +609,8 @@ HostJoinerPose pose_from_session(NapiNPServerCtx &ctx, const SessionReplyState &
 	return p;
 }
 
+} // namespace
+
 std::vector<uint8_t> frame_session_replies(NapiNPConnection &conn,
                                            const std::vector<ProtocolMessage> &replies) {
 	// [orig: SESSION reply build apps/novaworld_lobby/nw_udp_listener.cpp:606-627] Host S2C direction:
@@ -427,19 +624,18 @@ std::vector<uint8_t> frame_session_replies(NapiNPConnection &conn,
 	return nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body_out));
 }
 
-std::vector<uint8_t> frame_retained_session_reply(
-		NapiNPConnection &conn, uint32_t sequence) {
-	const auto retained = conn.seq.retained_outbound.find(sequence);
-	if (retained == conn.seq.retained_outbound.end() || retained->second.empty()) return {};
+namespace {
 
-	std::vector<uint8_t> body_out;
-	if (!frame_session_packet_for_sequence(
-			conn.seq, SessionCrypto{conn.server_scrk, {}, conn.client_ck},
-			sequence, body_out)) {
-		return {};
-	}
-	return nw_encode_outbound(
-			SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body_out));
+// Queue `messages` on the connection's transport, in order, behind whatever it already holds:
+// the owner's send boundary packs the connection's one queue (D-NET-525).
+// [orig: NapiNPServer_SendToConn @0x4C4F20 -> CNapiNPConnection_QueueMessage @0x628640;
+//  CNapiNPConnection_BuildOutgoingPackets @0x628430 packs the queue @0x62844E,
+//  @0x62860B..0x628619]
+void queue_session_messages(NapiNPConnection &conn, std::vector<ProtocolMessage> &messages) {
+	for (ProtocolMessage &m : messages)
+		conn.link.transport->host_send(m.tag, std::move(m.payload), m.reliable, m.flags.raw,
+				m.capacity_exempt, m.retention_flushes);
+	messages.clear();
 }
 
 // The new-connection callback's MTU negotiation: a joiner that uploaded a nonzero MPS CU tag gets
@@ -452,7 +648,7 @@ std::vector<uint8_t> frame_retained_session_reply(
 //  @0x4c8197, `> field 13 -> field 13` @0x4c81a9, `> 0x4000 -> 0x4000` @0x4c81b1, the stores
 //  @0x4c81ca/@0x4c81d0, SendConfigUpdateIfEnabled(conn, 1, 0x2000) @0x4c81d6 then (conn, 0)
 //  @0x4c81e4 (the wire direction byte is `direction == 0`, so 0 then 1); installed as cb_server_1
-//  @0x4c99c0 and run by CNapiNPConnection_OnStateChange @0x6261cd before SendSessionInit
+//  @0x4c99c0 and run by CNapiNPConnection_OnStateChange (the call @0x6261C6) before SendSessionInit
 //  @0x6261fc; the MPS tag NapiNetConfig_LoadFromConnTags @0x4c7260 ("MPS" @0x7ca070)]
 // [wire: host_and_join_lan frames 6-8; flags 0xA0 = settings update + u8 length]
 bool negotiate_max_packet_bytes(NapiNPConnection &conn, long mps) {
@@ -465,6 +661,8 @@ bool negotiate_max_packet_bytes(NapiNPConnection &conn, long mps) {
 	return true;
 }
 
+} // namespace
+
 std::vector<ProtocolMessage> make_game_session_initial_settings(int32_t max_packet_bytes) {
 	std::vector<ProtocolMessage> settings;
 	for (const uint8_t direction : {uint8_t{0}, uint8_t{1}}) {
@@ -476,6 +674,118 @@ std::vector<ProtocolMessage> make_game_session_initial_settings(int32_t max_pack
 	}
 	return settings;
 }
+
+// See header. Retail's order: the create's names and keys (HandleClientJoin), its CU chunks,
+// the reconnect counts, then the state change's stamps and the new-connection callback's MPS
+// negotiation (OnStateChange, HandleNewConnection), each a store into the one node here.
+bool fill_joined_node(NapiNPConnection &conn, const ClientAuth &auth, const PeerAddr &peer,
+		const TitleIdentity &identity, uint32_t connection_id, const ConnectionKeys &server_keys,
+		uint32_t receive_stamp_ms) {
+	// Retail stores the ClientAuth CU tags on the connection and only latches
+	// the live spectator flag at the game-layer join message; keep the same
+	// two-step shape so the roster/0x16/0x75 state cannot flip before the
+	// witnessed latch point. [orig: NapiNetConfig_LoadFromConnTags @0x4c7260;
+	// the entry+55 latch @0x512aa0]
+	conn.join_environment = parse_client_game_environment(auth);
+	// The ClientAuth strings the METPROTOCOL player reports print (D-NET-NEW-L9-22).
+	conn.gate_player = parse_client_gate_metrics_player(auth);
+	const ParsedClientJoinRequest join_role = parse_client_join_request(auth);
+	conn.join_spectator_request = join_role.spectator ? 1 : 0;
+	conn.join_spectator_password = join_role.spectator_password;
+	conn.join_password = join_role.join_password;
+	if (conn.session_id.empty()) conn.session_id = peer_session_id(peer);
+	// The joiner's display name: the GAME join's NA TLV is the player CALLSIGN — the retail
+	// client puts its company string in CO ("NovaLogic Inc, Calabasas CA U.S.A.") and the
+	// callsign in NA, and the golden host's 0x0C record name equals NA ("FooPlayer"). Only
+	// the witnessed NOVAWORLD-connect gate tags, which begin with the title's product code
+	// ("jop:cus2" retail / "jopd:cus4" demo under JO's "jop", "dfx2:0:cus:buffy" under DFX2's
+	// "dfx2") and carry a ':', fall back to CO / the Hello name: a callsign is free text and may
+	// itself contain ':' — treating any colon as a gate tag stalled that joiner's 0x0C
+	// name-match (the host would name it the company string, never equal to its NA).
+	// [wire: retail-ashi5a f=199140 / retail_join_v18 f=47676; net-re §5.0b]
+	const std::string_view product_code = identity.product_code;
+	const bool na_is_gate_tag = auth.na.size() > product_code.size() &&
+			strutil::iequals(std::string_view(auth.na).substr(0, product_code.size()),
+					product_code) &&
+			auth.na.find(':') != std::string::npos;
+	if (!auth.na.empty() && !na_is_gate_tag) {
+		conn.player_name = auth.na;
+	} else if (conn.player_name.empty() && !auth.co.empty()) {
+		conn.player_name = auth.co;
+	}
+	// auth.scrk decrypts inbound SESSION; our server_scrk encrypts outbound SESSION and is echoed
+	// in ServerAuth so the client can read our replies.
+	conn.client_scrk = auth.scrk;
+	conn.client_ck = auth.ck;
+	conn.client_ci = auth.ci;
+	// A re-join counts its reconnect: DCNT as sent, RCNT one past the client's when DCNT > 0.
+	// [orig: HandleClientJoin @0x62c28d..0x62c2a3 — `jle` signed]
+	conn.dcnt = auth.dcnt;
+	conn.rcnt = static_cast<int32_t>(auth.dcnt) > 0 ? auth.rcnt + 1u : auth.rcnt;
+	conn.receive_inactive_ms = 0;
+	// The accept's state change stamps the receive clock; a retransmitted 0x42 to a node already
+	// in state 1 runs no state change (ours returns before this) (D-NET-256).
+	// [orig: NapiNPProtocol_HandleClientJoin - the state-1 skip @0x62C2A9..0x62C2AC, the state set
+	//  @0x62C2D4, CNapiNPConnection_OnStateChange called @0x62C2D7; OnStateChange @0x626060 -
+	//  GetTickCount @0x6260E8, `mov [esi+5E8h], ebp` @0x62612F]
+	conn.receive_stamp_ms = receive_stamp_ms;
+	conn.c2s_reassembly = {};
+	// The 0x42's CU chunks carry the joiner's character/profile vars — the per-side character
+	// selection Server_PlayerAdd folds into the player record (CharacterJoinVars). Values are
+	// decimal strings converted with atol semantics: CI0/CI1 keep the low u16, TR clamps to
+	// {0, 1, 0xFF}, the rest keep the low u8. Only type-2 chunks are tag-list vars. [orig:
+	// NapiNPProtocol_HandleClientJoin @0x62b750 CU loop (type gate @node+20 == 2) ->
+	// NapiNetConfig_LoadFromConnTags @0x4c7260 (Napi_StrCaseEqual match, atol values); D-NET-146]
+	conn.char_vars = CharacterJoinVars{}; // a recreated node starts tag-absent (zero-init)
+	long mps = 0; // the MPS tag: the joiner's own packet ceiling (0 = absent)
+	for (const auto &blob : auth.cu) {
+		uint8_t cu_type = 0;
+		std::string cu_name, cu_value;
+		if (!parse_client_cu_chunk(blob.data(), blob.size(), cu_type, cu_name, cu_value)) continue;
+		if (cu_type != 2) continue;
+		const long v = io::retail_atol(cu_value.c_str()); // retail atol (D-NET-384)
+		if (strutil::iequals(cu_name, "CI0")) {
+			conn.char_vars.char_id[0] = static_cast<uint16_t>(v);
+		} else if (strutil::iequals(cu_name, "CI1")) {
+			conn.char_vars.char_id[1] = static_cast<uint16_t>(v);
+		} else if (strutil::iequals(cu_name, "TR")) {
+			// [@0x4c752f] tr != -1 && (u8)tr >= 2 -> -1: only 0 (side A) and 1 (side B) pass.
+			uint8_t tr = static_cast<uint8_t>(v);
+			if (tr != 0xFF && tr >= 2) tr = 0xFF;
+			conn.char_vars.team_request = tr;
+		} else if (strutil::iequals(cu_name, "CTA")) {
+			conn.char_vars.char_class[0] = static_cast<uint8_t>(v);
+		} else if (strutil::iequals(cu_name, "CTB")) {
+			conn.char_vars.char_class[1] = static_cast<uint8_t>(v);
+		} else if (strutil::iequals(cu_name, "VCA")) {
+			conn.char_vars.avatar[0] = static_cast<uint8_t>(v);
+		} else if (strutil::iequals(cu_name, "VCB")) {
+			conn.char_vars.avatar[1] = static_cast<uint8_t>(v);
+		} else if (strutil::iequals(cu_name, "MPS")) {
+			mps = v; // [orig: LoadFromConnTags "MPS" @0x7ca070 -> net_cfg.max_packet_bytes]
+		}
+		// The environment tags (DB included) were parsed and validated before allocation.
+		// Stored/display-only fields (VERSIONSTRING/COUNTRYCODE/TZB...) have no retained
+		// runtime consumer yet.
+	}
+	// The dcb the caller's create counted (the 0x82's MI).
+	conn.connection_id = connection_id;
+	conn.self_id_seen = false;
+	conn.admission_stage = GameAdmissionStage::AwaitJoinRequest;
+	conn.admission_padding_x = 0;
+	conn.admission_padding_y = 0;
+	// The keys the create drew (NapiNP_GenerateSessionKey's SK, GenerateTxKey's SCRK).
+	conn.server_sk = server_keys.key;
+	conn.server_scrk = server_keys.scrk;
+	conn.phase = ConnectionPhase::Joined;
+	// The new-connection callback negotiates the packet ceiling before the 0x82 goes out
+	// (D-NET-234) [orig: OnStateChange (the call @0x6261C6) -> HandleNewConnection
+	// @0x4c818d..0x4c81e4,
+	// then SendSessionInit @0x6261fc].
+	return negotiate_max_packet_bytes(conn, mps);
+}
+
+namespace {
 
 // ---------------------------------------------------------------------------
 // P3/P8 — the World-driven spawn-gate. conn.burst is the SINGLE authority for a connection's spawn
@@ -493,14 +803,14 @@ HostJoinerPose pose_for_conn(NapiNPServerCtx &ctx, const NapiNPConnection &conn)
 			HostJoinerPose p;
 			p.entity_handle = e->handle.packed;
 			p.item_type_id = static_cast<uint16_t>(e->item_id);
-			p.pos_x = world::to_fixed(e->position.x);
-			p.pos_y = world::to_fixed(e->position.y);
-			p.pos_z = world::to_fixed(e->position.z);
+			p.pos_x = e->position.x.q16;
+			p.pos_y = e->position.y.q16;
+			p.pos_z = e->position.z.q16;
 			// Match the wire heading convention the P2 pose / the 0x0C body use: the high 16 bits of
 			// the engine-frame BAM = (90 - mission_yaw) deg (D-NET-86), NOT raw mission degrees. The
 			// spawned player's heading is its start marker's placement angle, so the high half is the
 			// spawn angle's, the one the 0x0F world-state load sends (world::spawn_angle_bam).
-			p.heading = static_cast<int16_t>(world::spawn_angle_bam(90 - e->yaw) >> 16);
+			p.heading = static_cast<int16_t>(e->heading >> 16);
 			// The pose event mirrors the same signed BAM32 high word as the C2S 0x0C path. The
 			// authoritative look pitch lives on AiEntity, not world::Entity; retain the zero default
 			// when a non-AI entity is bound. [orig: pose_from_session gss.client_pitch;
@@ -561,7 +871,7 @@ void ship_burst_messages(NapiNPConnection &conn, std::vector<InitialStateMessage
 // NOTE (D-NET-114, host self-stream): the host's OWN type-2 loopback runs the §5.2a burst too — this
 // is FAITHFUL (the original's Server_OnPlayerJoin @0x51a680 runs for the host's own join, not just
 // remote joiners), so we do not suppress it here. But its PeerSpawned carries self_id == the host dcb
-// (kHostPlayerDcb): the event CONSUMER (the binding / ClientRuntime) must recognize self_id == its own
+// (its self-join twin's index, D-NET-713): the event CONSUMER (the binding / ClientRuntime) must recognize self_id == its own
 // connection id and NOT admit a duplicate "ghost" host avatar — the host's local player is already
 // World::cached.local_player. (Self-filter belongs at the consumer, where the local connection id is
 // known; surfacing it here keeps the libs layer a faithful, consumer-agnostic event source.)
@@ -619,60 +929,13 @@ void handle_client_hello(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	if (!ctx.is_authority || ctx.np_protocol.host_running == 0) {
 		return; // host not started — no ServerHello, no node created
 	}
-	// client_ip_net: the builders take the IP as the four payload octets in LE packing (so retail's
-	// positional TLV reader prints a.b.c.d) — pass peer.ip verbatim, matching nw_udp_listener.
-	// The hello's EIP / EPN / ET ride back as the reply's, each written when nonzero: a stock
-	// enumerator's 0x41 names its own destination there (the broadcast or the dialed address,
-	// and the port), and the 0x81 echoes it (build_server_hello).
-	// [orig: NapiNPProtocol_HandleClientHello @0x6213b0 - EIP @0x621756, EPN @0x621774, ET
-	//  @0x621792, passed to NapiNPProtocol_SendServerInfoPacket, which writes them
-	//  @0x620baa..0x620c0c]
-	ServerHello reply = build_server_hello(hello, peer.ip, peer.port);
-	// The host writes its OWN protocol identity, not the prober's: the title identity the
-	// network init installed, its PV3 build string included (D-NET-520), and UT, the
-	// uptime, whenever nonzero (D-NET-265). [orig: NapiNPProtocol_SendServerInfoPacket
-	//  @0x620583..0x62078a (CO/AP/BDAT/PN/PG/PV1/PV2/PV3 from the protocol, each gated, PV3
-	//  @0x620758..0x62078a); UT @0x62064f..0x620683; CNapiNetwork_Init @0x4ca4a0, PV3 into
-	//  proto+0x1AC @0x4ca8bb..0x4ca8c2]
-	{
-		const ClientHello self = make_title_client_hello(*identity, 0);
-		reply.co = self.co;
-		reply.ap = self.ap;
-		reply.bdat = self.bdat;
-		reply.pn = self.pn;
-		reply.pg = self.pg;
-		reply.pv1 = self.pv1;
-		reply.pv2 = self.pv2;
-		reply.pv3 = self.pv3;
-		reply.ut = ctx.np_protocol.host_run_duration_ms;
-	}
-	// A LAN 0x41 is a stateless enumerate/handshake probe. Populate the retail
-	// game-server fields from live host state without registering the source as
-	// a peer; only a validated 0x42 creates the connection node.
-	reply.sn = ctx.config.server_name;
-	// [orig: NapiNPProtocol_SendServerInfoPacket @0x6204b0, SF]
-	reply.sf = ctx.config.server_password.empty() ? 0u : 1u;
-	reply.p1 = ctx.config.game_type;
-	// Retail advertises the same session BuildFlags value here and in the
-	// trailing dword of S2C 0x08. create_session snapshots that live semantic
-	// value after installing GameConfig; never substitute a captured constant.
-	reply.p2 = ctx.np_protocol.build_flags;
-	reply.np = occupied_player_count(ctx);
-	reply.mp = ctx.np_protocol.max_players; // the session's cap [orig: protocol +0x524 @0x6209FF]
-	// SUS1 is the protocol's server_user_string1: the GSID a NovaWorld
-	// ServerHostResult handed this host, copied into the protocol block and
-	// written whenever non-empty. A pure LAN host never ran that leg, so fresh
-	// retail LAN captures omit the field; it is never session_seed_id.
-	// [orig: CNapiGameSession_HandleHostVerifyResponse @0x4D5C0F
-	//  -> server_user_string1; NapiNPProtocol_SendServerInfoPacket @0x6204B0
-	//  SUS1 write @0x620AF2 gated on the first byte]
-	reply.sus1 = ctx.novaworld_gsid;
-	reply.sus2 = ctx.config.expansion;
-	// R1: advertise our real host key (seed-injected via SessionStartup) rather than
-	// build_server_hello's placeholder default, when one is set. The retail 0x81 carries host_key.
-	reply.hk = ctx.np_protocol.host_key;
+	const ServerHello reply = host_server_hello(ctx, hello, peer);
 	out.outbound.push_back(
 			nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(reply)));
+	// The handler answers a PM-carrying announce too, but takes only a probe without PM
+	// [orig: NapiNPProtocol_HandleClientHello @0x6218FC, `return protocol_version == 0`
+	//  @0x62190B].
+	out.taken = hello.pm == 0;
 }
 
 // 0x42 ClientAuth -> 0x82 ServerAuth (per-session SCRK established).
@@ -687,21 +950,37 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750 - the length bound @0x62BBEB..0x62BBF1,
 	//  the count bound @0x62BBF7..0x62BBFA, the socket-pass return @0x62C32A..0x62C331, the
 	//  queued-pass rejections @0x62C344 / @0x62C359]
+	// The socket pass takes the 0x42 once its TLV walk ends on a CU bound or its identity
+	// holds, and the manager logs its dispatch line there, ahead of the queued pass whose
+	// new connection turns the log off (its line comes after the PROTOCOL line).
+	// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - the head gate @0x62B7E6 / @0x62B802
+	//  (return 0), the CU bounds' return 1 @0x62C331, the identity gate's return 0;
+	//  NapiNPManager_HandlePacket @0x622FCD]
+	const int32_t unpacked_len = static_cast<int32_t>(body.size() + 1);
+	const bool head_gate = ctx.is_authority != 0 && ctx.np_protocol.host_running != 0;
 	ClientAuth auth;
-	if (!parse_client_auth(body.data(), body.size(), auth)) return;
-	if (!ctx.is_authority || ctx.np_protocol.host_running == 0) return;
+	if (!parse_client_auth(body.data(), body.size(), auth)) {
+		out.taken = head_gate && !body.empty(); // the walk's CU bound
+		log_manager_dispatch(ctx, peer, unpacked_len, out);
+		return;
+	}
+	if (!head_gate) return;
 	const TitleIdentity *identity = ctx.np_protocol.identity;
 	if (identity == nullptr) return;
 	// Only the NVS/PN/PG/PV1 envelope is silent. The subsequent server-side
 	// gates answer a CR=0 ServerAuth, in this order, before retry/replacement.
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750, gates @0x62bdf2]
 	if (!matches_title_identity(*identity, auth)) return;
+	out.taken = true;
+	log_manager_dispatch(ctx, peer, unpacked_len, out);
 	// The PW and PV2 compares are case-insensitive C-string compares
 	// [orig: Napi_StrCaseEqual @0x616e70].
+	// The PW gate reads the protocol's copy (D-NET-NEW-L1-43) [orig: `cmp [ebp+300h], bl`
+	//  @0x62BE01, Napi_StrCaseEqual @0x62BE18].
 	uint32_t reject = 0;
 	if (auth.hk != ctx.np_protocol.host_key) reject = 3;
-	else if (!ctx.config.server_password.empty() &&
-	         !strutil::iequals(auth.pw, std::string_view(ctx.config.server_password.c_str()))) reject = 4;
+	else if (!ctx.np_protocol.server_password.empty() &&
+	         !strutil::iequals(auth.pw, std::string_view(ctx.np_protocol.server_password.c_str()))) reject = 4;
 	// PV2 against the installed one. [orig: HandleClientJoin @0x62b750 - `proto+364 != PV2`
 	//  @0x62be40]
 	else if (!strutil::iequals(auth.pv2, identity->pv2)) reject = 7;
@@ -711,9 +990,6 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		reject_client_join(auth, peer, reject, 0, out);
 		return;
 	}
-	const ClientGameEnvironment game_environment =
-			parse_client_game_environment(auth);
-	const ParsedClientJoinRequest join_role = parse_client_join_request(auth);
 
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750] The stateless 0x41 leaves
 	// no node, so a first 0x42 creates one. Only retransmit/address-reuse paths
@@ -723,20 +999,21 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		// Retransmitted 0x42 from the SAME client (matching CI + CK) on an already-joined connection:
 		// re-send the cached ServerAuth, do NOT re-mint. Re-minting would rotate the server SCRK/SK
 		// the joiner already latched from the first 0x82, so every later S2C 0x83 would fail to
-		// decrypt and the join would silently stall. [orig: conn_state == 1 &&
+		// decrypt and the join would silently stall. [orig: conn_state == 1 (@0x62BECA; a
+		// server-side node holds state 1 from its accept to its destroy) &&
 		// session_keys.client_id == CI && session_keys.remote_key == CK ->
 		// CNapiNPConnection_SendSessionInit @0x620ef0 (re-emits the same 0x82), return 1]
 		// The retransmit leg touches no receive clock: only an in-order session packet or
 		// a ping stamps conn+0x5E8 [orig: HandleClientJoin @0x62bee6..0x62bef1].
+		// SendSessionInit is the leg's one send, the 0x82 alone: a session packet the joiner
+		// missed (the CS updates' sequence 1) comes back through the session's own legs (the
+		// joiner's resend list, NapiNP_HandleResendList @0x623800), never through the join
+		// handler.
+		// [orig: NapiNPProtocol_HandleClientJoin - SendSessionInit called @0x62BEE9, then the
+		//  handler's return @0x62BEF1; CNapiNPConnection_SendSessionInit @0x620EF0 - its one
+		//  CNapiNPManager_SendTo called @0x621301, return @0x62131C]
 		if (existing->client_ci == auth.ci && existing->client_ck == auth.ck) {
-			out.outbound.push_back(make_server_auth_datagram(ctx, auth, peer, *existing));
-			// A retry normally means the original ServerAuth/settings pair was lost. Reconstruct the
-			// retained first session packet under sequence 1 rather than minting a new sequence.
-			if (existing->peer_acked_seq < 1) {
-				std::vector<uint8_t> settings =
-						frame_retained_session_reply(*existing, 1);
-				if (!settings.empty()) out.outbound.push_back(std::move(settings));
-			}
+			out.outbound.push_back(make_server_auth_datagram(auth, peer, *existing));
 			return;
 		}
 		// A different client (CI/CK) reusing an already-joined addr: destroy the stale node and
@@ -755,6 +1032,36 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		}
 	}
 
+	// Retail creates the server-side node here, past the protocol's own gates and the
+	// retransmit, ahead of the validate callback, and the create steps the process's
+	// connection counter into the node's index, so a 0x42 the lock, the ban or the capacity
+	// then refuses still steps it (the refused node is destroyed in the same handler). An
+	// accepted node's index is its dcb: the state change makes it connection_id, the 0x82's
+	// MI, the joiner's 0x48 echo and its player's entity+0x78. A process that browsed, joined
+	// or hosted before numbers its joiners from where those creates left the counter.
+	// (D-NET-713) The state change also keeps the first address-0 node's (a listen host's
+	// self-join twin's) connection_id in the protocol, first-wins, and its teardown clears and
+	// rescans it; nothing reads that word, so it is not modeled.
+	// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - the pre-create gates
+	//  @0x62BDAE..0x62BE8F, the lookup @0x62BEBA, the retransmit @0x62BEE6..0x62BEF1, the create
+	//  @0x62BF06 ahead of the validate callback (+0x2D0 loaded @0x62C06E, `call edi` @0x62C0AA);
+	//  CNapiNPConnection_Create - the step
+	//  @0x62B282..0x62B296; CNapiNPConnection_OnStateChange @0x626060 - connection_id
+	//  @0x626199..0x62619C, proto+0xED8 @0x6261A6..0x6261AE (net_flags = address 0 @0x626093);
+	//  CNapiNPConnection_TeardownActiveConnection @0x6253C0 - its clear @0x625450 and rescan
+	//  @0x625456..0x625491; NapiNPProtocol_Create @0x625730 - its zero @0x625A93; the
+	//  displacement in no other instruction]
+	const uint32_t connection_id = next_connection_index();
+	// The created node's keys come at the create too, ahead of the validate callback, so a
+	// refused 0x42 has drawn them from the manager's PRNG as well. R2: the server SK and then
+	// its SCRK from the manager's PRNG (D-NET-524), unless a deterministic source is forced
+	// (golden byte-parity).
+	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750 - NapiNP_GenerateSessionKey @0x62bf5e
+	//  (the SK, stored @0x62bf6b), then CNapiNPConnection_GenerateTxKey @0x62bf99, ahead of the
+	//  validate callback called @0x62C0AA]
+	const ConnectionKeys server_keys = ctx.server_key_mint.forced
+			? ConnectionKeys{ctx.server_key_mint.server_sk, ctx.server_key_mint.server_scrk}
+			: manager_connection_keys();
 	// [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0, registered as the join-validate callback by
 	// CNapiGameSession_CreateSession @0x4c97c0 and invoked at the 0x42 join]. Reject when the session
 	// is already full. The witnessed gate is ONE count, players and spectators alike: the host's
@@ -793,125 +1100,26 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	}
 
 	NapiNPConnection &conn = find_or_create_connection(ctx, peer);
-	// Retail stores the ClientAuth CU tags on the connection and only latches
-	// the live spectator flag at the game-layer join message; keep the same
-	// two-step shape so the roster/0x16/0x75 state cannot flip before the
-	// witnessed latch point. [orig: NapiNetConfig_LoadFromConnTags @0x4c7260;
-	// the entry+55 latch @0x512aa0]
-	conn.join_environment = game_environment;
-	conn.join_spectator_request = join_role.spectator ? 1 : 0;
-	conn.join_spectator_password = join_role.spectator_password;
-	conn.join_password = join_role.join_password;
-	if (conn.session_id.empty()) conn.session_id = peer_session_id(peer);
-	// The joiner's display name: the GAME join's NA TLV is the player CALLSIGN — the retail
-	// client puts its company string in CO ("NovaLogic Inc, Calabasas CA U.S.A.") and the
-	// callsign in NA, and the golden host's 0x0C record name equals NA ("FooPlayer"). Only
-	// the witnessed NOVAWORLD-connect gate tags, which begin with the title's product code
-	// ("jop:cus2" retail / "jopd:cus4" demo under JO's "jop", "dfx2:0:cus:buffy" under DFX2's
-	// "dfx2") and carry a ':', fall back to CO / the Hello name: a callsign is free text and may
-	// itself contain ':' — treating any colon as a gate tag stalled that joiner's 0x0C
-	// name-match (the host would name it the company string, never equal to its NA).
-	// [wire: retail-ashi5a f=199140 / retail_join_v18 f=47676; net-re §5.0b]
-	const std::string_view product_code = identity->product_code;
-	const bool na_is_gate_tag = auth.na.size() > product_code.size() &&
-			strutil::iequals(std::string_view(auth.na).substr(0, product_code.size()),
-					product_code) &&
-			auth.na.find(':') != std::string::npos;
-	if (!auth.na.empty() && !na_is_gate_tag) {
-		conn.player_name = auth.na;
-	} else if (conn.player_name.empty() && !auth.co.empty()) {
-		conn.player_name = auth.co;
-	}
-	// auth.scrk decrypts inbound SESSION; our server_scrk encrypts outbound SESSION and is echoed
-	// in ServerAuth so the client can read our replies.
-	conn.client_scrk = auth.scrk;
-	conn.client_ck = auth.ck;
-	conn.client_ci = auth.ci;
-	// A re-join counts its reconnect: DCNT as sent, RCNT one past the client's when DCNT > 0.
-	// [orig: HandleClientJoin @0x62c28d..0x62c2a3 — `jle` signed]
-	conn.dcnt = auth.dcnt;
-	conn.rcnt = static_cast<int32_t>(auth.dcnt) > 0 ? auth.rcnt + 1u : auth.rcnt;
-	conn.receive_inactive_ms = 0;
-	conn.c2s_reassembly = {};
-	// The 0x42's CU chunks carry the joiner's character/profile vars — the per-side character
-	// selection Server_PlayerAdd folds into the player record (CharacterJoinVars). Values are
-	// decimal strings converted with atol semantics: CI0/CI1 keep the low u16, TR clamps to
-	// {0, 1, 0xFF}, the rest keep the low u8. Only type-2 chunks are tag-list vars. [orig:
-	// NapiNPProtocol_HandleClientJoin @0x62b750 CU loop (type gate @node+20 == 2) ->
-	// NapiNetConfig_LoadFromConnTags @0x4c7260 (Napi_StrCaseEqual match, atol values); D-NET-146]
-	conn.char_vars = CharacterJoinVars{}; // a recreated node starts tag-absent (zero-init)
-	long mps = 0; // the MPS tag: the joiner's own packet ceiling (0 = absent)
-	for (const auto &blob : auth.cu) {
-		uint8_t cu_type = 0;
-		std::string cu_name, cu_value;
-		if (!parse_client_cu_chunk(blob.data(), blob.size(), cu_type, cu_name, cu_value)) continue;
-		if (cu_type != 2) continue;
-		const long v = io::retail_atol(cu_value.c_str()); // retail atol (D-NET-384)
-		if (strutil::iequals(cu_name, "CI0")) {
-			conn.char_vars.char_id[0] = static_cast<uint16_t>(v);
-		} else if (strutil::iequals(cu_name, "CI1")) {
-			conn.char_vars.char_id[1] = static_cast<uint16_t>(v);
-		} else if (strutil::iequals(cu_name, "TR")) {
-			// [@0x4c752f] tr != -1 && (u8)tr >= 2 -> -1: only 0 (side A) and 1 (side B) pass.
-			uint8_t tr = static_cast<uint8_t>(v);
-			if (tr != 0xFF && tr >= 2) tr = 0xFF;
-			conn.char_vars.team_request = tr;
-		} else if (strutil::iequals(cu_name, "CTA")) {
-			conn.char_vars.char_class[0] = static_cast<uint8_t>(v);
-		} else if (strutil::iequals(cu_name, "CTB")) {
-			conn.char_vars.char_class[1] = static_cast<uint8_t>(v);
-		} else if (strutil::iequals(cu_name, "VCA")) {
-			conn.char_vars.avatar[0] = static_cast<uint8_t>(v);
-		} else if (strutil::iequals(cu_name, "VCB")) {
-			conn.char_vars.avatar[1] = static_cast<uint8_t>(v);
-		} else if (strutil::iequals(cu_name, "MPS")) {
-			mps = v; // [orig: LoadFromConnTags "MPS" @0x7ca070 -> net_cfg.max_packet_bytes]
-		}
-		// The environment tags (DB included) were parsed and validated before allocation.
-		// Stored/display-only fields (VERSIONSTRING/COUNTRYCODE/TZB...) have no retained
-		// runtime consumer yet.
-	}
-	// [orig: CNapiNPConnection_Create @0x62acb0 — conn.connection_id (the dcb) = ++protocol[947],
-	// wrapping 0 -> 1]. On a LAN listen host the host ASSIGNS the dcb (it does not learn it from the
-	// client) and advertises it in ServerAuth.MI. It becomes spawn-eligible only after the final
-	// admission 0x02; the bundled client later echoes it in 0x48. On NovaWorld the gate-assigned id
-	// arrives via that 0x48 and overrides this host provisional value -- retail's Create assigns
-	// the provisional `++protocol[947]` on BOTH network types (no transport-mode gate @0x62acb0),
-	// so the provisional-then-override shape is the port, not a placeholder.
-	conn.connection_id = ctx.np_protocol.next_connection_id++;
-	if (ctx.np_protocol.next_connection_id == 0) ctx.np_protocol.next_connection_id = 1; // wrap 0 -> 1
-	conn.self_id_seen = false;
-	conn.admission_stage = GameAdmissionStage::AwaitJoinRequest;
-	conn.admission_padding_x = 0;
-	conn.admission_padding_y = 0;
-	// R2: the server SK and then its SCRK from the manager's PRNG (D-NET-524), unless a
-	// deterministic source is forced (golden byte-parity).
-	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750 - NapiNP_GenerateSessionKey @0x62bf5e
-	//  (the SK, stored @0x62bf6b), then CNapiNPConnection_GenerateTxKey @0x62bf99]
-	if (ctx.server_key_mint.forced) {
-		conn.server_scrk = ctx.server_key_mint.server_scrk;
-		conn.server_sk = ctx.server_key_mint.server_sk;
-	} else {
-		const ConnectionKeys keys = manager_connection_keys();
-		conn.server_sk = keys.key;
-		conn.server_scrk = keys.scrk;
-	}
-	conn.phase = ConnectionPhase::Joined;
-	// The connection is up: the new-connection callback counts a login
+	// The node takes the create's index as its dcb (above). On a LAN listen host the host ASSIGNS
+	// the dcb (it does not learn it from the client) and advertises it in ServerAuth.MI. It
+	// becomes spawn-eligible only after the final admission 0x02; the bundled client later echoes
+	// it in 0x48. On NovaWorld the gate-assigned id arrives via that 0x48 and overrides this host
+	// provisional value -- retail's Create assigns the provisional index on BOTH network types (no
+	// transport-mode gate @0x62acb0), so the provisional-then-override shape is the port, not a
+	// placeholder.
+	const bool negotiated = fill_joined_node(conn, auth, peer, *identity, connection_id,
+			server_keys, ctx.np_protocol.receive_clock_ms);
+	// The connection is up: the new-connection callback turns the _connectlog.txt debug log
+	// off for the process, in the queued pass after the whole drain has written its lines
+	// (finish_manager_receive), then counts a login
 	// [orig: CNapiNPConnection_OnStateChange @0x6261c6 ->
-	//  NapiNPServer_HandleNewConnection @0x4c8203].
+	//  NapiNPServer_HandleNewConnection @0x4c8054..0x4c80AF, @0x4c8203].
+	ctx.connect_log_disable_queued = true;
 	++ctx.total_logins;
-	// The validation-phase deadline base for CheckPlayerTimeouts (netPlayer+0xA4
-	// is stamped with GetTickCount when the node enters the validating state).
-	conn.join_validated_host_ms = ctx.np_protocol.host_run_duration_ms;
-	// The new-connection callback negotiates the packet ceiling before the 0x82 goes out
-	// (D-NET-234) [orig: OnStateChange @0x6261cd -> HandleNewConnection @0x4c818d..0x4c81e4,
-	// then SendSessionInit @0x6261fc].
-	const bool negotiated = negotiate_max_packet_bytes(conn, mps);
-	out.outbound.push_back(make_server_auth_datagram(ctx, auth, peer, conn));
+	out.outbound.push_back(make_server_auth_datagram(auth, peer, conn));
 	// The /INOUT line once the 0x82 is out [orig: CNapiNPConnection_OnStateChange
-	//  @0x626204 -> CNapiNPConnection_LogPlayerAdded; D-NET-356].
-	io::logf(io::LogLevel::kInfo, "%s", inout_player_added_line(conn).c_str());
+	//  @0x626204 -> CNapiNPConnection_LogPlayerAdded].
+	write_inout_line(ctx, inout_player_added_line(conn));
 	if (negotiated) {
 		std::vector<uint8_t> initial_settings = frame_session_replies(
 				conn, make_game_session_initial_settings(conn.timeouts.max_packet_bytes));
@@ -923,6 +1131,10 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	ev.peer = peer;
 	out.events.push_back(std::move(ev));
 }
+
+void parse_admitted_session(NapiNPServerCtx &ctx, NapiNPConnection &conn, const PeerAddr &peer,
+		const SessionDeframeAdmission &admission, uint32_t now_tick, HandleResult &out,
+		bool defer_in_match_replies);
 
 // 0x43 SESSION -> 0x83 SESSION (produces the reactive §5.1 replies; surfaces F3 + spawn + in-match
 // C2S off conn.burst). [orig: NapiNPProtocol_HandleSessionPacket @0x626A00]
@@ -943,14 +1155,31 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	NapiNPConnection &conn = *connp;
 
 	// Host recv: decrypt with the joiner's client_scrk; deframe latches conn.seq.last_inbound_seq.
+	// An in-order packet is parsed at once; the queued successors its arrival made contiguous
+	// wait for the receive pump's connection-list walk, after every datagram of this pump
+	// (replay_ready_session_packets; NEW-L1-9).
+	// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - the in-order test @0x626BEB,
+	//  CNapiNPConnection_ParseMessages @0x625BC0 (the call @0x626BF4);
+	//  NapiNPProtocol_PumpRecvQueues's walk @0x626910..0x6269E8 after its FIFO pass]
 	ProtocolPacketHeader hdr;
-	std::vector<ProtocolMessage> messages;
+	std::vector<ProtocolMessage> flat;
 	SessionDeframeAdmission admission;
 	if (!deframe_session_packet(
 			conn.seq, SessionCrypto{{}, conn.client_scrk, 0, conn.server_sk}, body.data(),
-	                            body.size(), hdr, messages, &admission)) {
+	                            body.size(), hdr, flat, &admission,
+	                            /*drain_queued_successors=*/false)) {
 		return;
 	}
+	parse_admitted_session(ctx, conn, peer, admission, now_tick, out, defer_in_match_replies);
+}
+
+// CNapiNPConnection_ParseMessages over what one call admitted: the activity stamp, the ACK, the
+// fragment fold and the per-message dispatch. A call that admitted nothing (a stale, duplicate
+// or future packet) still runs the tail. [orig: CNapiNPConnection_ParseMessages @0x625BC0]
+void parse_admitted_session(NapiNPServerCtx &ctx, NapiNPConnection &conn, const PeerAddr &peer,
+		const SessionDeframeAdmission &admission, uint32_t now_tick, HandleResult &out,
+		bool defer_in_match_replies) {
+	std::vector<ProtocolMessage> messages;
 	// The reap clock is stamped ONLY when the packet is delivered in order: retail's
 	// HandleSessionPacket reaches ParseMessages (which writes conn+0x5E8 before its message loop,
 	// so a zero-message keepalive counts) solely for seq == recv_ack_seq+1 or the in-order drain
@@ -959,7 +1188,10 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// [orig: HandleSessionPacket @0x626A00 — in-order leg @0x626beb..0x626bfc -> ParseMessages
 	//  @0x625BC0 stamp @0x625d54; seq 0 @0x626bcc / duplicate @0x626c03 / future @0x626c0c..0x626c3a
 	//  stamp nothing]
-	if (admission.admitted) conn.receive_inactive_ms = 0;
+	if (admission.admitted) {
+		conn.receive_inactive_ms = 0;
+		conn.receive_stamp_ms = ctx.np_protocol.receive_clock_ms;
+	}
 	// An admitted packet that carried any message record owes the peer an ACK: retail's
 	// ParseMessages raises has_pending_out (+0x650) once its record region is non-empty, and
 	// the next open send boundary builds a packet even with nothing queued — a header-only one
@@ -985,7 +1217,6 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// FIRST/MID/FINAL stream before every metadata and gameplay consumer below;
 	// a partial record is not itself a semantic C2S message.
 	std::vector<ProtocolMessage> semantic_messages;
-	semantic_messages.reserve(messages.size());
 	for (const SessionDeframeAdmission::Packet &packet : admission.packets) {
 		for (const ProtocolMessage &physical : packet.messages) {
 			std::vector<uint8_t> payload;
@@ -1018,31 +1249,12 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	}
 	messages = std::move(semantic_messages);
 
-	// Learn the joiner's own ConnectionId (NapiNPConnection.unk_18 = its dcb, our connection_id)
-	// from its in-match 0x48 client-ack (a 4-byte LE u32). This is the value the client's
-	// Player_FindLocalPlayerEntity @0x4e0090 compares entity+0x78 against, so the host MUST stamp it
-	// into the joiner's 0x0C entity_flags — a guessed sequential id does NOT match (witnessed:
-	// capture2.pcapng ack=0x113F vs our guessed 3 -> crash; the working retail join had
-	// ack==eFlags==3). The ack arrives during the early handshake, before world streaming, so it's
-	// known by the time we stream the 0x0C.
-	for (const ProtocolMessage &m : messages) {
-		if (conn.admission_stage == GameAdmissionStage::Complete &&
-		    m.tag == c2s::CLIENT_ACK && m.payload.size() >= 4) {
-			conn.connection_id = static_cast<uint32_t>(m.payload[0]) |
-					(static_cast<uint32_t>(m.payload[1]) << 8) |
-					(static_cast<uint32_t>(m.payload[2]) << 16) |
-					(static_cast<uint32_t>(m.payload[3]) << 24);
-			conn.self_id_seen = true;
-			// On LAN the ack echoes the host-assigned dcb (no-op); on NovaWorld it carries the
-			// gate-assigned id. If the player was already spawned (World path) with the prior id,
-			// re-stamp entity+0x78 so the joiner still self-matches. [orig: the dcb the client's
-			// Player_FindLocalPlayerEntity @0x4e0090 matches is whatever it adopted as its own]
-			if (ctx.world != nullptr && conn.link.owned_entity.valid()) {
-				if (world::Entity *e = ctx.world->registry.get(conn.link.owned_entity))
-					e->owner_connection_id = conn.connection_id;
-			}
-		}
-	}
+	// A joiner's C2S 0x48 (the MI it stored, 4 bytes) is read by nothing on the host: retail's
+	// server handler is a bare `retn`. The connection's id stays the create's index the 0x82's MI
+	// carried, the one the add copied into the player's entity+0x78 (D-NET-NEW-L1-36).
+	// [orig: the server opcode row @0x82B9B8 -> NapiNPServerMsg_0x048 @0x510F30;
+	//  Server_BuildPlayerInfoAndAdd @0x51D560 - conn->connection_id @0x51D5CB..0x51D5DB;
+	//  Server_PlayerAdd @0x51CBC0 - the entity's ownerConnectionId @0x51D068]
 
 	// Produce the reactive §5.1 replies (handshake / server-info / mission-metadata / loadout /
 	// spawn-confirm) for this datagram's gameplay messages, and cache the joiner's pre-spawn 0x0C pose
@@ -1050,29 +1262,52 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// Server_SendInitialGameStateToPlayer (tick_connections), NOT produced here. [orig: the 0x43 SESSION
 	// dispatch routes each gameplay message to its NapiNPServerMsg_0x0NN reply handler]
 	ServerDispatchInputs dispatch_inputs;
-	dispatch_inputs.session_uptime_ms = ctx.np_protocol.host_run_duration_ms;
+	// The status report's UP-TIME counts from the round-state init's stamp
+	// [orig: Server_BuildStatusReport @0x530B84..0x530B8C].
+	dispatch_inputs.session_uptime_ms = session_uptime_ms(ctx);
 	dispatch_inputs.mission_metadata_blob = &ctx.mission_metadata_blob;
 	dispatch_inputs.server_info_transfer_id = ctx.server_info_transfer_id;
 	dispatch_inputs.mission_metadata_transfer_id = ctx.mission_metadata_transfer_id;
 	dispatch_inputs.round_end_board_stream = &ctx.round_end_board_stream;
 	dispatch_inputs.medic_request_format = &ctx.server_text.medic_request_format;
 	dispatch_inputs.server_ctx = &ctx;
-	std::vector<ProtocolMessage> replies =
-			dispatch_session_replies(ctx.config, conn, messages, now_tick,
-			                         ctx.np_protocol.connection_list, ctx.world,
-			                         dispatch_inputs);
+	// With an owner's transport attached (from the 0x42 accept on), every reply joins the
+	// connection's one queue, which its send boundary packs: replies to datagrams that arrive
+	// between two boundaries share a packet, whether the connection has joined yet or not
+	// (D-NET-525). Each message is dispatched on its own so its handler's replies queue at its
+	// place among the sends the handlers make directly, as retail's handlers queue as they run.
+	// The records a handler raised in the world (a designator round's 0x1E notice, a death, a
+	// flag's 0x2F, ...) go out right behind it too: retail sends each at its call, inside the
+	// handler, so a later message's sends follow it (D-NET-NEW-V3-1).
+	// [orig: CNapiNPConnection_ParseMessages @0x625BC0 dispatches record by record;
+	//  NapiNPServer_SendToConn @0x4C4F20 -> CNapiNPConnection_QueueMessage @0x628640;
+	//  NapiNPServerMsg_0x006_ClientFiredRound @0x513310 -> RoundData_SpawnRound @0x4EC270 ->
+	//  EntityTracker_RegisterOrUpdate's SendFiltered(0x1E) @0x511645]
+	const bool queued = conn.link.transport != nullptr;
+	std::vector<ProtocolMessage> replies;
+	if (queued && conn.admission_stage == GameAdmissionStage::Complete) {
+		for (const ProtocolMessage &message : messages) {
+			std::vector<ProtocolMessage> own = dispatch_session_replies(ctx.config, conn,
+					std::vector<ProtocolMessage>{message}, now_tick,
+					ctx.np_protocol.connection_list, ctx.world, dispatch_inputs);
+			queue_session_messages(conn, own);
+			if (ctx.world != nullptr && ctx.is_authority != 0)
+				route_entity_pass_records(ctx, *ctx.world);
+		}
+	} else {
+		replies = dispatch_session_replies(ctx.config, conn, messages, now_tick,
+				ctx.np_protocol.connection_list, ctx.world, dispatch_inputs);
+	}
 	if (conn.admission_stage == GameAdmissionStage::Rejected) {
-		// A game-layer join-gate failure that STAGED retail's description punt
-		// (the spectator DPC 14/15/16 legs) must retain the node: the owner
-		// flushes the reliable record on its next boundary and the punted
-		// joiner answers with the CLIENT_GOODBYE burst that performs the real
-		// teardown. [orig: the @0x512aa0 failure return keeps the connection;
-		// teardown is the client's goodbye or the receive reap]
+		// A join-gate reject that staged retail's description keeps the node in its stage and
+		// never reaches here: the records behind it are parsed and reach no handler
+		// (D-NET-NEW-L1-27), and the punted joiner's CLIENT_GOODBYE burst (or the receive reap)
+		// performs the real teardown
+		// (reject_join_record, D-NET-NEW-L1-24). [orig: the @0x512aa0 failure return keeps the
+		// connection] Only a reject whose description could not be staged (a node with no
+		// remote transport) is Rejected, and releases the node at once. A game record ahead of
+		// the admission is no reject: its handler's slot gate answers nothing and keeps the node.
 		if (conn.host_disconnect_sent) return;
-		// The remaining silent legs are not modeled (D-NET-171). Release the
-		// pending node immediately: an out-of-order or malformed admission
-		// must not retain capacity or become an entity. No wire output: retail
-		// keeps this node and sends nothing on these legs.
 		if (teardown_connection(ctx, peer, nullptr)) {
 			HostAcceptEvent ev;
 			ev.kind = HostAcceptEvent::Kind::PeerGoodbye;
@@ -1082,7 +1317,9 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		return;
 	}
 	if (!replies.empty()) {
-		if (defer_in_match_replies && conn.burst.spawned) {
+		if (queued) {
+			queue_session_messages(conn, replies);
+		} else if (defer_in_match_replies && conn.burst.spawned) {
 			out.deferred_session_replies.insert(
 					out.deferred_session_replies.end(),
 					std::make_move_iterator(replies.begin()),
@@ -1102,8 +1339,10 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// dispatch_session_replies above (retail's NapiNPServerMsg_0x00C applies during the
 	// dispatch walk). Only the World-less unit path still surfaces the uplinks for the
 	// transport FIFO that Server_TickUpdate drains; surfacing them here as well with a
-	// World would apply each pose twice. Pre-spawn 0x0C only updates the cached pose.
-	if (conn.spawned_announced && ctx.world == nullptr) {
+	// World would apply each pose twice. Pre-spawn 0x0C only updates the cached pose. A
+	// described connection's 0x0C reaches no handler, so none surfaces (D-NET-NEW-L1-27) [orig:
+	// CNapiNPConnection_DispatchMessage @0x622570 - @0x622697 / @0x62269E].
+	if (conn.spawned_announced && ctx.world == nullptr && !conn.host_disconnect_sent) {
 		std::vector<ProtocolMessage> c2s;
 		for (const ProtocolMessage &m : messages) {
 			if (m.tag == c2s::ENTITY_UPLINK) c2s.push_back(m);
@@ -1118,6 +1357,8 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	}
 }
 
+} // namespace
+
 // 0x44 ClientResendList -> reconstructed 0x83 packets. The request body names this host
 // connection's local SK, followed by requested sequence dwords. Retail retains message records,
 // not encrypted datagrams, so each old sequence is reframed with the current inbound ACK. The
@@ -1125,16 +1366,14 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 // immediate_outbound), and neither moves the send boundary nor the send-interval clock.
 // [orig: NapiNP_HandleResendList @0x623800; SendSessionPacket @0x61EDD0, called @0x6239b6;
 //  SendSessionPacket stamps only conn->last_send_tick, not BuildOutgoingPackets' +0x638]
-void handle_client_resend_list(NapiNPServerCtx &ctx, const PeerAddr &peer,
-		const std::vector<uint8_t> &body, HandleResult &out) {
-	NapiNPConnection *conn = find_connection(ctx, peer);
-	if (conn == nullptr || conn->server_scrk.empty()) return;
-
+// NapiNP_HandleResendList past its connection gates, over one node: the key test, then each
+// requested packet reframed into `sends`. False when the key (or the body) refuses the list.
+// `named` reports a nonzero requested dword, which arms the server callback.
+bool resend_session_packets(NapiNPConnection &conn, const std::vector<uint8_t> &body,
+		bool &named, std::vector<std::vector<uint8_t>> &sends) {
 	std::vector<uint32_t> requested;
-	if (!decode_session_resend_list(
-			body.data(), body.size(), conn->server_sk, requested)) {
-		return;
-	}
+	if (!decode_session_resend_list(body.data(), body.size(), conn.server_sk, requested))
+		return false;
 	// A resend list is not receive activity: the handler reads GetTickCount and discards it,
 	// leaving the reap clock alone [orig: NapiNP_HandleResendList @0x623800 @0x62395f].
 	// The backoff callback (cb_server_6 = NapiNPServer_OnResendListCallback @0x4c62a0 -> slot+89876 = 1, the
@@ -1143,55 +1382,109 @@ void handle_client_resend_list(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// [orig: NapiNP_HandleResendList @0x6239aa sets the latch on the nonzero
 	//  path only; @0x6239ef gates the callback on it; @0x623974 returns before
 	//  the loop on a key-only body]
-	// The same callback raises the outgoing link error of the host's own
-	// connection indicators [orig: NapiNPServer_OnResendListCallback @0x4c62c0..0x4c62d5 — the
-	// g_NetQuality flag-1 store behind the cooldown test].
-	if (std::any_of(requested.begin(), requested.end(),
-			[](uint32_t sequence) { return sequence != 0; })) {
-		conn->link.nak_backoff_pending = true;
-		ctx.net_quality_link_errors |= kNetQualityLinkErrorOutgoing;
-	}
+	named = std::any_of(requested.begin(), requested.end(),
+			[](uint32_t sequence) { return sequence != 0; });
+	if (named) conn.link.nak_backoff_pending = true;
 	for (uint32_t requested_sequence : requested) {
 		const uint32_t sequence = requested_sequence == 0
-				? conn->seq.next_outbound_seq
+				? conn.seq.next_outbound_seq
 				: requested_sequence;
 		std::vector<uint8_t> session_body;
 		if (!frame_session_packet_for_sequence(
-				conn->seq,
-				SessionCrypto{conn->server_scrk, {}, conn->client_ck},
+				conn.seq,
+				SessionCrypto{conn.server_scrk, {}, conn.client_ck},
 				sequence, session_body)) {
 			continue;
 		}
-		out.immediate_outbound.push_back(nw_encode_outbound(
+		sends.push_back(nw_encode_outbound(
 				SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(session_body)));
 	}
+	return true;
 }
+
+namespace {
+
+void handle_client_resend_list(NapiNPServerCtx &ctx, const PeerAddr &peer,
+		const std::vector<uint8_t> &body, HandleResult &out) {
+	NapiNPConnection *conn = find_connection(ctx, peer);
+	if (conn == nullptr || conn->server_scrk.empty()) return;
+	bool named = false;
+	if (!resend_session_packets(*conn, body, named, out.immediate_outbound)) return;
+	// The same callback raises the outgoing link error of the host's own
+	// connection indicators [orig: NapiNPServer_OnResendListCallback @0x4c62c0..0x4c62d5 — the
+	// g_NetQuality flag-1 store behind the cooldown test].
+	if (named) ctx.net_quality_link_errors |= kNetQualityLinkErrorOutgoing;
+}
+
+} // namespace
+
+// Nwu_HandlePing past its connection gates, over one node: the key test, the receive stamp at
+// `stamp_ms`, then the 0x85 answer into `sends` (WR set) or the RTT against `clock_ms` (WR
+// clear). False when the key (or the body) refuses the ping.
+bool answer_session_ping(NapiNPConnection &conn, const std::vector<uint8_t> &body,
+		uint32_t stamp_ms, uint32_t clock_ms, std::vector<std::vector<uint8_t>> &sends) {
+	SessionPingBody ping;
+	if (!parse_session_ping_body(body.data(), body.size(), ping)) return false;
+	if (ping.receiver_local_key != conn.server_sk) return false;
+	conn.receive_inactive_ms = 0;
+	conn.receive_stamp_ms = stamp_ms;
+	if (ping.wants_reply) {
+		sends.push_back(nw_encode_outbound(SESSION_OPCODE_SERVER_PING,
+				build_session_ping_body(conn.client_ck, /*wants_reply=*/false,
+						ping.timestamp_ms)));
+	} else {
+		conn.session_ping_rtt_ms = clock_ms - ping.timestamp_ms;
+	}
+	return true;
+}
+
+namespace {
 
 // 0x45 ClientPing -> 0x85 ServerPing (WR set) or an RTT sample (WR clear). The
 // body is the receiver-local key dword then WR/MS TLVs (net/npwire/session_ping.h);
 // a mismatched key is dropped before anything else. The ping refreshes the reap
-// clock like an in-order session packet. [orig: Nwu_HandlePing @0x623A70 —
+// clock like an in-order session packet. The round trip is GetTickCount less the
+// echoed MS, the process clock (D-NET-NEW-L8-37). [orig: Nwu_HandlePing @0x623A70 —
 // active/drop gates @0x623B55, key compare @0x623BC2, WR @0x623BFF, MS @0x623C1A,
-// activity stamp @0x623C56, SendPing(conn, 0, MS) @0x623C6F, rtt store @0x623C9B]
+// activity stamp @0x623C56, SendPing(conn, 0, MS) @0x623C6F, GetTickCount less MS
+// into the rtt @0x623C9B]
 void handle_client_ping(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		const std::vector<uint8_t> &body, HandleResult &out) {
 	NapiNPConnection *conn = find_connection(ctx, peer);
 	if (conn == nullptr || conn->type != NapiNPConnection::kTypeServerSide ||
 			conn->phase < ConnectionPhase::Joined)
 		return;
-	SessionPingBody ping;
-	if (!parse_session_ping_body(body.data(), body.size(), ping)) return;
-	if (ping.receiver_local_key != conn->server_sk) return;
-	conn->receive_inactive_ms = 0;
-	if (ping.wants_reply) {
-		out.outbound.push_back(nw_encode_outbound(SESSION_OPCODE_SERVER_PING,
-				build_session_ping_body(conn->client_ck, /*wants_reply=*/false,
-						ping.timestamp_ms)));
-	} else {
-		conn->session_ping_rtt_ms =
-				ctx.np_protocol.host_run_duration_ms - ping.timestamp_ms;
-	}
+	(void)answer_session_ping(*conn, body, ctx.np_protocol.receive_clock_ms,
+			host_tick_count_ms(ctx), out.outbound);
 }
+
+} // namespace
+
+// Nwu_HandleDisconnect's queued leg over one node: the key test, then the client's record
+// (DC/DP1/DP2/DSTR/DPC/DDSTR; DS read and discarded) latched with the PEER's role 2 if nothing
+// is latched yet. An empty TLV run (ReadTLV fails first) still latches zeros. False when the
+// key refuses it.
+// [orig: Nwu_HandleDisconnect @0x623CE0 — TLV walk @0x623eb2..0x623fbd, the type-1 record
+//  {[1]=2 @0x624005, DC/DP1/DP2 @0x62400d..0x624015, DSTR->128 @0x624019, DPC @0x624090,
+//  DDSTR->32 @0x624097}, latch @0x6240a8..0x6240ba]
+bool latch_client_goodbye(NapiNPConnection &conn, const std::vector<uint8_t> &body) {
+	if (body.size() < 4) return false;
+	const uint32_t receiver_local_key =
+			static_cast<uint32_t>(body[0]) |
+			(static_cast<uint32_t>(body[1]) << 8) |
+			(static_cast<uint32_t>(body[2]) << 16) |
+			(static_cast<uint32_t>(body[3]) << 24);
+	// A delayed goodbye from the prior occupant of this endpoint must not destroy its replacement.
+	// [orig: CNapiNPConnection_SendDisconnectPacket @0x61F2A0 / Nwu_HandleClientGoodbye @0x624250]
+	if (receiver_local_key != conn.server_sk) return false;
+	DisconnectEvent received;
+	(void)parse_disconnect_event(body.data() + 4, body.size() - 4, received);
+	latch_disconnect_event(conn, make_disconnect_event(2, received.dc, received.dp1,
+			received.dp2, received.dstr, received.dpc, received.ddstr));
+	return true;
+}
+
+namespace {
 
 // 0x46 ClientGoodbye. [orig: Nwu_HandleClientGoodbye @0x624250]
 void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer,
@@ -1203,30 +1496,16 @@ void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// fieldFlags 0x1CF7 over the memset player slot -> the 0x8000 removal record
 	// @0x505ecb..0x505ee0; send_mask 128 @0x51b8bc; the client's apply is
 	// PlayerSlot_ClearAndUnlink @0x431420), led by the 0x32 leave line (@0x51b6d3, see
-	// teardown_connection). Deferred, tracked in D-NET-149: the 0x32 subtype-4 + 0x6A
-	// clan-registry pair (an opennova host keeps no NovaWorld registry) and the team
+	// teardown_connection), and the 0x32 subtype-4 + 0x6A squad-registry pair
+	// (Server_ReleaseSquadRegistryNode). Deferred, tracked in D-NET-149: the team
 	// spawn-token return (@0x51b661..0x51b67a). The 120-second receive-timeout sweep uses
 	// this same teardown path.
 	NapiNPConnection *conn = find_connection(ctx, peer);
-	if (conn == nullptr || conn->type != NapiNPConnection::kTypeServerSide || body.size() < 4) return;
-	const uint32_t receiver_local_key =
-			static_cast<uint32_t>(body[0]) |
-			(static_cast<uint32_t>(body[1]) << 8) |
-			(static_cast<uint32_t>(body[2]) << 16) |
-			(static_cast<uint32_t>(body[3]) << 24);
-	// A delayed goodbye from the prior occupant of this endpoint must not destroy its replacement.
-	// [orig: CNapiNPConnection_SendDisconnectPacket @0x61F2A0 / Nwu_HandleClientGoodbye @0x624250]
-	if (receiver_local_key != conn->server_sk) return;
-	// The client's record (DC/DP1/DP2/DSTR/DPC/DDSTR; DS read and discarded) is latched with the
-	// PEER's role 2 if nothing is latched yet, then RequestDisconnect -> the destroy echoes it
-	// back in the 0x86 burst. An empty TLV run (ReadTLV fails first) still latches zeros.
-	// [orig: Nwu_HandleDisconnect @0x623CE0 — TLV walk @0x623eb2..0x623fbd, the type-1 record
-	//  {[1]=2 @0x624005, DC/DP1/DP2 @0x62400d..0x624015, DSTR->128 @0x624019, DPC @0x624090,
-	//  DDSTR->32 @0x624097}, latch @0x6240a8..0x6240ba, RequestDisconnect @0x6240c4]
-	DisconnectEvent received;
-	(void)parse_disconnect_event(body.data() + 4, body.size() - 4, received);
-	latch_disconnect_event(*conn, make_disconnect_event(2, received.dc, received.dp1,
-			received.dp2, received.dstr, received.dpc, received.ddstr));
+	if (conn == nullptr || conn->type != NapiNPConnection::kTypeServerSide) return;
+	// The client's record latched (latch_client_goodbye), then RequestDisconnect -> the destroy
+	// echoes it back in the 0x86 burst [orig: Nwu_HandleDisconnect @0x623CE0 -
+	// RequestDisconnect @0x6240c4].
+	if (!latch_client_goodbye(*conn, body)) return;
 	if (!teardown_connection(ctx, peer, &out.outbound)) return;
 	HostAcceptEvent ev;
 	ev.kind = HostAcceptEvent::Kind::PeerGoodbye;
@@ -1236,28 +1515,229 @@ void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer,
 
 } // namespace
 
+// The own client's disconnected callback, which its teardown runs after the goodbye burst, inside
+// the exit action's disconnect: the process latch keeps the first record it is handed (one an
+// earlier session's callback left there, a kicked joiner's, else this leave's own), and the
+// switch over the latch either stores an exit reason (a stale kick's 35 -> 7, 36..45 -> 9..18,
+// 46 / 49 -> 19, over the leave's 1) or queues an input action (DPC 1 / 33 / unlisted: action 3;
+// 34: action 36) (D-NET-NEW-L1-26). The queued action runs where the exit's input pass goes on
+// to drain the queue (`queued_action_dispatches`): action 3 again (exit reason 1, a second Exit
+// Mission tone, a disconnect that finds the client gone), action 36 exit reason 5; a menu
+// screen's confirmation closes its screen first, whose input reset drops it (L1-s32 row 1).
+// [orig: CNapiNPConnection_RequestDisconnect @0x61E0F0 - SetState(6) @0x61E0FA;
+//  CNapiNPConnection_SetState @0x626250 - CNapiNPConnection_TeardownActiveConnection @0x62628F;
+//  CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the client callback called @0x6254E7;
+//  CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the latch @0x4C6535..0x4C6559, the switch
+//  from @0x4C655F (35 -> 7 @0x4C65A2, 36 -> 9 @0x4C65C9, on to 45 -> 18), Input_QueueEvent(36)
+//  @0x4C6596, Input_QueueEvent(3) @0x4C67A4; Input_ProcessFrame @0x49D520 - the drain
+//  @0x49D599..0x49D5E7; Input_HandleActionBinding @0x49AD40 - case 3: reason 1 @0x49AF26,
+//  Sound_PlayInterfaceTriggerSet @0x49AF30 (its peer gate @0x527BEB), the disconnect @0x49AF42;
+//  case 36: reason 5 @0x49B780]
+static void own_client_disconnected(NapiNPServerCtx &ctx, const DisconnectEvent &record,
+		bool queued_action_dispatches) {
+	if (ctx.client_disconnect_latch == nullptr) return;
+	ctx.client_disconnect_latch->latch(record);
+	const DisconnectExit exit = ctx.client_disconnect_latch->disconnect_exit();
+	if (exit.reason != kMissionExitNone) {
+		ctx.mission_exit_reason = exit.reason;
+		return;
+	}
+	if (exit.input_action == 0 || !queued_action_dispatches) return;
+	ctx.mission_exit_reason = mission_exit_reason_for_input_action(exit.input_action);
+	if (exit.input_action == kInputActionExit && ctx.is_mp_session_peer != 0 &&
+			ctx.world != nullptr) {
+		world::ScriptSoundEvent tone;
+		tone.kind = world::ScriptSoundEvent::Kind::Interface;
+		tone.name = kExitMissionSoundset;
+		ctx.world->out.script_sounds.push_back(std::move(tone));
+	}
+}
+
+// See header.
+bool drain_own_goodbye(NapiNPServerCtx &ctx, OwnGoodbye drain) {
+	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (conn.type != NapiNPConnection::kTypeClientSide || conn.own_goodbye != drain) continue;
+		// The record the callback is handed: the connection's (a null one reads as zeros).
+		// [orig: OnDisconnectedFromServer - the copy of conn+0x654 @0x4C6545, the memset
+		//  @0x4C6551]
+		const DisconnectEvent record =
+				conn.disconnect_event_valid ? conn.disconnect_event : DisconnectEvent{};
+		// The own type-2 stays in state 6 with that record until the session reset.
+		ctx.own_client_left = true;
+		ctx.own_client_left_record = record;
+		// The callback ran at the exit (request_own_client_disconnect).
+		return teardown_own_connection(ctx);
+	}
+	return false;
+}
+
+// See header. [orig: CNapiNetwork_DisconnectActiveConnection @0x4C9140 - the connected test
+//  @0x4C918F..0x4C919D, the record @0x4C91C3..0x4C921A (role 2 for the client side, DC 2, DP1 /
+//  DP2 0, DSTR the caller's, DPC 0, DDSTR ""), latched if none @0x4C922D..0x4C923E,
+//  CNapiNPConnection_RequestDisconnect @0x61E0F0 (the call @0x4C924A; state 5 -> SetState(6)
+//  @0x61E0FA); CNapiNPConnection_TeardownActiveConnection @0x6253C0 - LogPlayerRemoved
+//  @0x6253D2, the state-5 arm's goodbye burst @0x6254BF..0x6254D3 (to the own pair's address 0:
+//  the loopback FIFO, CNapiNPManager_SendTo @0x61EC20 (@0x61EC59, @0x61ECC6)), the client
+//  callback @0x6254E7; Input_HandleActionBinding case 3 (the string @0x49AF38, the call
+//  @0x49AF42)] (D-NET-NEW-L8-21)
+void request_own_client_disconnect(NapiNPServerCtx &ctx, OwnGoodbye drain,
+		bool queued_action_dispatches) {
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (conn.type != NapiNPConnection::kTypeClientSide) continue;
+		// Torn down already: its connected byte is clear, so a later exit does nothing.
+		if (conn.own_goodbye != OwnGoodbye::None) return;
+		latch_disconnect_event(conn, make_disconnect_event(2, 2, 0, 0, "I.C:CIDEMIS", 0, ""));
+		write_inout_line(ctx, inout_player_removed_line(conn, NapiNPConnection::kTypeClientSide));
+		conn.own_goodbye = drain;
+		// The client's teardown runs inside the disconnect, its callback with it: the record it
+		// is handed is the connection's (a null one reads as zeros); the goodbye it queued waits
+		// for `drain`. [orig: OnDisconnectedFromServer - the copy of conn+0x654 @0x4C6545, the
+		//  memset @0x4C6551]
+		own_client_disconnected(ctx,
+				conn.disconnect_event_valid ? conn.disconnect_event : DisconnectEvent{},
+				queued_action_dispatches);
+		return;
+	}
+}
+
+// See header. [orig: NapiNPProtocol_SendServerInfoPacket @0x6204B0]
+ServerHello host_server_hello(const NapiNPServerCtx &ctx, const ClientHello &hello,
+		const PeerAddr &peer) {
+	// client_ip_net: the builders take the IP as the four payload octets in LE packing (so retail's
+	// positional TLV reader prints a.b.c.d) — pass peer.ip verbatim, matching nw_udp_listener.
+	// The hello's EIP / EPN / ET ride back as the reply's, each written when nonzero: a stock
+	// enumerator's 0x41 names its own destination there (the broadcast or the dialed address,
+	// and the port), and the 0x81 echoes it (build_server_hello).
+	// [orig: NapiNPProtocol_HandleClientHello @0x6213b0 - EIP @0x621756, EPN @0x621774, ET
+	//  @0x621792, passed to NapiNPProtocol_SendServerInfoPacket, which writes them
+	//  @0x620baa..0x620c0c]
+	ServerHello reply = build_server_hello(hello, peer.ip, peer.port);
+	// The host writes its OWN protocol identity, not the prober's: the title identity the
+	// network init installed, its PV3 build string included (D-NET-520), and UT, the
+	// uptime, whenever nonzero (D-NET-265). [orig: NapiNPProtocol_SendServerInfoPacket
+	//  @0x620583..0x62078a (CO/AP/BDAT/PN/PG/PV1/PV2/PV3 from the protocol, each gated, PV3
+	//  @0x620758..0x62078a); UT @0x62064f..0x620683; CNapiNetwork_Init @0x4ca4a0, PV3 into
+	//  proto+0x1AC @0x4ca8bb..0x4ca8c2]
+	{
+		const ClientHello self = make_title_client_hello(*ctx.np_protocol.identity, 0);
+		reply.co = self.co;
+		reply.ap = self.ap;
+		reply.bdat = self.bdat;
+		reply.pn = self.pn;
+		reply.pg = self.pg;
+		reply.pv1 = self.pv1;
+		reply.pv2 = self.pv2;
+		reply.pv3 = self.pv3;
+		// UT: GetTickCount less the start's stamp while the host runs, else the stopped run's
+		// length (D-NET-NEW-L8-27). The else arm is unreachable in both: the hello handler, the
+		// 0x81's one sender, answers nothing on a stopped host, as ours' gate above.
+		// [orig: NapiNPProtocol_SendServerInfoPacket - `cmp [esi+538h]` @0x62064F,
+		//  GetTickCount @0x620657, `sub eax, [esi+53Ch]` @0x62065C, else `mov eax, [esi+544h]`
+		//  @0x620664; NapiNPProtocol_HandleClientHello - `cmp [ebp+538h], ebx` @0x621454, the
+		//  return @0x62145C]
+		reply.ut = ctx.np_protocol.host_running != 0
+				? host_tick_count_ms(ctx) - ctx.np_protocol.host_start_tick
+				: ctx.np_protocol.host_run_duration_ms;
+	}
+	// A LAN 0x41 is a stateless enumerate/handshake probe. Populate the retail
+	// game-server fields from live host state without registering the source as
+	// a peer; only a validated 0x42 creates the connection node.
+	// SN and SF are the protocol's copies, the create's or an admin SET's, not the session
+	// config's (D-NET-NEW-L1-43) [orig: NapiNPProtocol_SendServerInfoPacket @0x6204B0 - SN from
+	//  +0x288 @0x6207B2..0x6207DA, SF = (+0x300's first byte != 0) @0x620872..0x620898].
+	reply.sn = ctx.np_protocol.session_name;
+	reply.sf = ctx.np_protocol.server_password.empty() ? 0u : 1u;
+	// P1 and P2 are the protocol's two flag words, the create's game type and BuildFlags word
+	// (an admin password SET recomputes both), not the running mission's type or a live
+	// BuildFlags call (D-NET-NEW-L1-40) [orig: NapiNPProtocol_SendServerInfoPacket - +0x500
+	//  @0x6208A8 into P1 @0x6208BF, +0x504 @0x6208CF into P2 @0x6208E6].
+	reply.p1 = ctx.np_protocol.server_flags;
+	reply.p2 = ctx.np_protocol.build_flags;
+	reply.np = occupied_player_count(ctx);
+	reply.mp = ctx.np_protocol.max_players; // the session's cap [orig: protocol +0x524 @0x6209FF]
+	reply.nc = server_connection_count(ctx); // (D-NET-523)
+	// SUS1 is the protocol's server_user_string1: the GSID a NovaWorld
+	// ServerHostResult handed this host, copied into the protocol block and
+	// written whenever non-empty. A pure LAN host never ran that leg, so fresh
+	// retail LAN captures omit the field; it is never session_seed_id.
+	// [orig: CNapiGameSession_HandleHostVerifyResponse @0x4D5C0F
+	//  -> server_user_string1; NapiNPProtocol_SendServerInfoPacket @0x6204B0
+	//  SUS1 write @0x620AF2 gated on the first byte]
+	reply.sus1 = ctx.novaworld_gsid;
+	reply.sus2 = ctx.config.expansion;
+	// R1: advertise our real host key (seed-injected via SessionStartup) rather than
+	// build_server_hello's placeholder default, when one is set. The retail 0x81 carries host_key.
+	reply.hk = ctx.np_protocol.host_key;
+	return reply;
+}
+
+// See header.
+void finish_manager_receive(NapiNPServerCtx &ctx) {
+	if (!ctx.connect_log_disable_queued) return;
+	ctx.connect_log_disable_queued = false;
+	if (ctx.logs.connect != nullptr && ctx.logs.connect->enabled())
+		ctx.logs.connect->disable_at_server_connection();
+}
+
 HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
                                     const uint8_t *raw, std::size_t len, uint32_t now_tick,
                                     bool defer_in_match_replies) {
 	HandleResult out;
 
-	uint8_t opcode = 0;
-	std::vector<uint8_t> body;
-	if (!nw_decode_inbound(raw, len, opcode, body)) {
+	// The NAPI manager's receive, its packet lines with it (_connectlog.txt while the log
+	// is on): the datagram as the socket hands it over, then PunkBuster's aside, the unpack
+	// (its failure tossed with reason 3), the magic packet, and the dispatch, whose result
+	// the handlers below set (PROTOCOL with the protocol's name, else tossed with reason 4).
+	// The receive-rate tosses (1, 2) need a nonzero rate, which nothing here sets.
+	// [orig: NapiNPManager_PumpReceive @0x623010 - cb_on_raw @0x623121, the rate test
+	//  @0x623126..0x62317F, the PunkBuster arm @0x6231A7..0x6231D9, NapiNP_UnpackPacket
+	//  @0x623206, cb_on_error(3) @0x623229, cb_on_packet @0x623254, HandlePacket @0x623284;
+	//  NapiNPManager_HandlePacket @0x622F10 - cb_on_unpack @0x622F53 ahead of
+	//  NapiNP_HandleMagicPacket @0x622E70 (the call @0x622F62), cb_on_dispatch @0x622FCD,
+	//  cb_on_error(4) @0x622FF9;
+	//  NapiLib_SetManagerCallbacks @0x4C6F50]
+	connect_log_line(ctx, napi_got_raw_text(static_cast<int32_t>(len), peer));
+	if (napi_punkbuster_datagram(raw, len)) return out;
+	std::vector<uint8_t> unpacked;
+	if (!nw_unpack_inbound(raw, len, unpacked)) {
+		connect_log_line(ctx, napi_tossed_text(static_cast<int32_t>(len), peer,
+				NapiTossReason::Unpack));
 		return out; // bad envelope — drop quietly
 	}
-
-	// Once the host has staged its terminal connection-description record, the
-	// resident node exists only long enough to receive the matching teardown
-	// acknowledgement. Drop every other leg before it can refresh activity,
-	// mutate sequencing/reassembly, surface gameplay, enqueue a deferred reply,
-	// or replay retained packets. The 0x46 handler below still validates the
-	// receiver-local key, so a delayed goodbye for an older endpoint occupant
-	// cannot tear down this node.
-	if (opcode != SESSION_OPCODE_CLIENT_GOODBYE) {
-		const NapiNPConnection *conn = find_connection(ctx, peer);
-		if (conn != nullptr && conn->host_disconnect_sent) return out;
+	const int32_t unpacked_len = static_cast<int32_t>(unpacked.size());
+	connect_log_line(ctx, napi_got_cooked_text(unpacked_len, peer));
+	if (napi_baffle_packet(unpacked)) {
+		connect_log_line(ctx, napi_got_baffle_text(unpacked_len, peer));
+		// D-NET-NEW-L1-20 [orig: NapiNPManager_HandlePacket @0x622F10 (the call @0x622F62)]
+		reflect_magic_packet(ctx, unpacked, out);
+		return out;
 	}
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	if (!nw_split_unpacked(unpacked, opcode, body)) {
+		log_manager_dispatch(ctx, peer, unpacked_len, out); // no opcode: no handler takes it
+		return out;
+	}
+	// The session-level opcodes are taken by a server-side connection for the peer (their
+	// handlers' first test); a host's _connectlog.txt is off from its first connection on
+	// (NapiNPServer_HandleNewConnection @0x4C8040 (@0x4C8054..0x4C80AF)), so their later
+	// refusals never reach a line.
+	if (opcode >= SESSION_OPCODE_PROTOCOL_MESSAGE && opcode <= kClientProbeOpcode)
+		out.taken = server_connection_exists(ctx, peer);
+
+	// A connection whose description went (a punt, a kick, a join-gate reject) keeps taking
+	// every leg until its teardown: the session packet, the resend list and the ping test the
+	// connection's active byte (+0x28, set at its state-1 entry, cleared at its teardown) and
+	// its drop byte (+0x2D, which nothing sets), never the description's sent byte, so its
+	// in-flight packets stamp its receive, ack, sequence and fold; the per-record dispatch then
+	// runs no handler for them (dispatch_session_replies, D-NET-NEW-L1-27).
+	// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - processing disabled @0x626A76 /
+	//  @0x626A84, the active byte @0x626AE0, the drop byte @0x626AEA, the size @0x626AFB;
+	//  CNapiNPConnection_ParseMessages @0x625BC0 - the drop byte @0x625C3D, the stamp @0x625D54,
+	//  the record walk @0x625DF5..0x625F1B; NapiNP_HandleResendList @0x623800 - @0x6238C9 /
+	//  @0x6238D3; Nwu_HandlePing @0x623A70 - @0x623B34 / @0x623B3E; the drop byte's writers
+	//  store zero alone, CNapiNPConnection_Create @0x62ADFD and
+	//  CNapiGameSession_InitTransportConnection @0x4CA00B]
 
 	switch (opcode) {
 	case SESSION_OPCODE_CLIENT_HELLO:
@@ -1281,6 +1761,33 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	default:
 		break;
 	}
+	log_manager_dispatch(ctx, peer, unpacked_len, out);
+	return out;
+}
+
+std::vector<ReplayedSessionPacket> replay_ready_session_packets(
+		NapiNPServerCtx &ctx, uint32_t now_tick, bool defer_in_match_replies) {
+	std::vector<ReplayedSessionPacket> out;
+	// A handler may tear its connection down mid-walk: walk the list as it stands, by address.
+	std::vector<PeerAddr> walk;
+	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list)
+		if (conn.type == NapiNPConnection::kTypeServerSide) walk.push_back(conn.peer);
+	for (const PeerAddr &peer : walk) {
+		for (;;) {
+			NapiNPConnection *conn = find_connection(ctx, peer);
+			// A described node replays its queued successors as any other (D-NET-NEW-L1-27):
+			// ParseMessages tests the drop byte, not the description [orig:
+			// CNapiNPConnection_ParseMessages @0x625BC0 - @0x625C3D].
+			if (conn == nullptr) break;
+			SessionDeframeAdmission admission;
+			if (!take_ready_session_packet(conn->seq, admission)) break;
+			ReplayedSessionPacket replayed;
+			replayed.peer = peer;
+			parse_admitted_session(ctx, *conn, peer, admission, now_tick, replayed.result,
+					defer_in_match_replies);
+			out.push_back(std::move(replayed));
+		}
+	}
 	return out;
 }
 
@@ -1303,7 +1810,7 @@ std::vector<TickOut> flush_server_missing_requests(NapiNPServerCtx &ctx) {
 		out.push_back(std::move(item));
 		// A request that named a sequence fires the incoming link-error
 		// callback [orig: SendMissingSeqList has_missing_seqs @0x623690,
-		// cb_server_5 @0x623788..0x62379b = @0x4c4681, the g_NetQuality
+		// cb_server_5 @0x623788..0x62379b = @0x4C4680, the g_NetQuality
 		// flag-2 store behind the cooldown test].
 		if (std::any_of(missing.begin(), missing.end(),
 				[](uint32_t sequence) { return sequence != 0; }))
@@ -1312,9 +1819,59 @@ std::vector<TickOut> flush_server_missing_requests(NapiNPServerCtx &ctx) {
 	return out;
 }
 
+// See header.
+void step_initial_state_row(NapiNPServerCtx &ctx, NapiNPConnection &row,
+		NapiNPConnection *net_player, uint32_t now_tick, bool respect_s2c_send_boundary,
+		std::vector<std::vector<uint8_t>> &outbound) {
+	if (row.burst.spawned || net_player == nullptr) return;
+	if (respect_s2c_send_boundary && net_player->type == NapiNPConnection::kTypeServerSide &&
+			!net_player->s2c_send_boundary_open)
+		return;
+	if (net_player == &row) {
+		// The producer acts on the slot's state alone: the player-sync track waits for the
+		// joiner's C2S 0x09 (slot state 2), which a stock client sends once its mission load
+		// completes (D-NET-500), so the track never lands in that blocking load. The host's
+		// own loopback (type 2) sends its 0x09 in-process (Server_SendInitialGameStateToPlayer
+		// applies it). The bodies are built from the real World / bms state.
+		if (row.phase < ConnectionPhase::PlayerAdded) return;
+		InitialStateStep step = Server_SendInitialGameStateToPlayer(ctx, row, now_tick);
+		ship_burst_messages(row, step.messages, outbound);
+		return;
+	}
+	// An orphaned row in its player-sync or world-stream track (D-NET-NEW-L1-24, a re-add
+	// that came while the row's burst ran) runs on through the per-slot block, the row's own
+	// cursors and state word: each step's records go to its net player (send_mask 0x20 sends
+	// through the row's +0x1C) at that player's open boundary and under its backlog gate, the
+	// track's tail sets that net player's game state 9, and the row parks in state 3 or 5,
+	// where no request of the player's ever reaches it (the player's records go to its
+	// current row). Past the player's leave nothing runs (Q7-36 (a)). The block walks the rows
+	// in slot order, so when a net player's own row and its orphaned row step on one boundary
+	// the lower slot's records lead that player's queue.
+	// [orig: Server_SendPlayerSlotStateFrame @0x51BBA0 - the backlog gate on the row's net
+	//  player's connection @0x51BBFD..0x51BC04 / @0x51BF14..0x51BF1B, the sends to the row
+	//  (send_mask 0x20 @0x51BC40 .. @0x51C10E), CNetPlayer_SetGameState(9) on the row's +0x1C
+	//  called @0x51BED7 / @0x51C11C, the row's state 5 @0x51BEF3 / 3 @0x51C134]
+	if (net_player->link.transport == nullptr || net_player->host_disconnect_sent) return;
+	// The backlog gate, the game state and the report clocks its change moves are the net
+	// player's words: the state change reads its row from the net player's +0xC0, which the
+	// re-add rebound to the player's current row, so the tail's state 9 puts that row's two
+	// clocks in phase 1 and leaves the orphaned row's alone (D-NET-NEW-L9-22).
+	// [orig: CNetPlayer_SetGameState @0x4C4060 - the net player's state @0x4C4074, the row
+	//  +0xC0 @0x4C4084; Server_PlayerAdd @0x51CBC0 - the rebind @0x51CD51]
+	row.seq.retained_outbound_message_count = net_player->seq.retained_outbound_message_count;
+	row.burst.game_state = net_player->burst.game_state;
+	std::swap(row.gate_tick, net_player->gate_tick);
+	std::swap(row.gate_mission_tick, net_player->gate_mission_tick);
+	InitialStateStep step = Server_SendInitialGameStateToPlayer(ctx, row, now_tick);
+	std::swap(row.gate_tick, net_player->gate_tick);
+	std::swap(row.gate_mission_tick, net_player->gate_mission_tick);
+	net_player->burst.game_state = row.burst.game_state;
+	ship_burst_messages(*net_player, step.messages, outbound);
+}
+
 std::vector<TickOut> tick_connections(
 		NapiNPServerCtx &ctx, int elapsed_ms, uint32_t now_tick,
-		bool respect_s2c_send_boundary) {
+		bool respect_s2c_send_boundary, bool run_spawn_pump, bool run_initial_state_steps) {
 	std::vector<TickOut> out;
 	// Pump the JO receive timeout before any spawn/burst work. Collect keys first because the complete
 	// teardown erases vector nodes and may broadcast roster removal through surviving transports.
@@ -1325,8 +1882,16 @@ std::vector<TickOut> tick_connections(
 	//  @0x61e107; NapiNPProtocol_Pump @0x62A650 then destroys every pending node after its
 	//  per-connection pump @0x62a6fd..0x62a793, latching {1, 8, 0, 0, "", 0, "NP.C:PMP:PDESTME"}
 	//  only when nothing else was @0x62a72f..0x62a788]
-	std::vector<PeerAddr> destroy_pending;
+	// The walk is the protocol's connection list in order, so the listen host's own pair, made
+	// at the session create, comes ahead of every remote: its twin goes first when the own
+	// client's goodbye is due at this pump (OwnGoodbye::NextReceivePump; no peer: nullopt).
+	std::vector<std::optional<PeerAddr>> destroy_pending;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (conn.type == NapiNPConnection::kTypeClientSide &&
+				conn.own_goodbye == OwnGoodbye::NextReceivePump) {
+			destroy_pending.push_back(std::nullopt);
+			continue;
+		}
 		if (conn.type != NapiNPConnection::kTypeServerSide || conn.phase < ConnectionPhase::Joined) continue;
 		if (elapsed_ms > 0) {
 			const uint64_t total =
@@ -1350,7 +1915,20 @@ std::vector<TickOut> tick_connections(
 			destroy_pending.push_back(conn.peer);
 		}
 	}
-	for (const PeerAddr &peer : destroy_pending) {
+	for (const std::optional<PeerAddr> &pending : destroy_pending) {
+		if (!pending.has_value()) {
+			// The admin's GOTO MENUSTATE: the own client's goodbye, whose teardown ran its
+			// disconnected callback at the exit (request_own_client_disconnect); no wire face,
+			// no peer event (D-NET-NEW-L1-26).
+			// [orig: CAdminServer_HandleGotoCommand -> Input_HandleActionBinding (the call
+			//  @0x404A5D) case 3 -> CNapiNetwork_DisconnectActiveConnection (called @0x49AF42)
+			//  -> CNapiNPConnection_RequestDisconnect @0x61E0F0 -> SetState(6) @0x61E0FA ->
+			//  CNapiNPConnection_TeardownActiveConnection (called @0x62628F), the client
+			//  callback called @0x6254E7; CNapiNetwork_OnDisconnectedFromServer @0x4C63D0]
+			(void)drain_own_goodbye(ctx, OwnGoodbye::NextReceivePump);
+			continue;
+		}
+		const PeerAddr &peer = *pending;
 		TickOut destroyed;
 		destroyed.peer = peer;
 		if (!teardown_connection(ctx, peer, &destroyed.outbound)) continue;
@@ -1361,70 +1939,76 @@ std::vector<TickOut> tick_connections(
 		out.push_back(std::move(destroyed));
 	}
 
-	// P3 World-driven path: the pending-player spawn pump runs on the shared periodic
-	// second — the call sits inside Server_TickUpdate's g_PeriodicSecondTimer block,
-	// not on every tick — before walking the connections to advance their bursts. The
-	// bring-up call for the host's own player (host_session.cpp) is direct.
+	// The pending-player spawn pump runs on the shared periodic second, its call inside
+	// Server_TickUpdate's g_PeriodicSecondTimer block; the host's frame runs it there, after
+	// the scoreboard (run_spawn_pump false). A caller outside that frame (a fixture, a
+	// bring-up) runs it here, ahead of the connections' bursts. The bring-up call for the host's
+	// own player (host_session.cpp) is direct.
 	// [orig: Server_TickUpdate @0x51DBFD inside the reload-62 block @0x51DB93]
-	if (ctx.world != nullptr && ctx.world->match.periodic_second())
+	if (run_spawn_pump && ctx.world != nullptr && ctx.world->match.periodic_second())
 		Server_ProcessPendingPlayerSpawns(ctx, *ctx.world);
+
+	// The §5.2a steps (step_initial_state_row). The host's frame runs them in Server_TickUpdate's
+	// tail per-slot block (run_initial_state_steps false); a caller outside that frame (a fixture,
+	// a bring-up) steps them here, the rows in the block's slot order: a net player's orphaned
+	// rows on lower slots ahead of its own row (D-NET-NEW-L1-24), the rest after the walk.
+	std::vector<OrphanedPlayerRow *> orphans;
+	if (run_initial_state_steps && ctx.world != nullptr)
+		for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) orphans.push_back(&orphan);
+	std::stable_sort(orphans.begin(), orphans.end(),
+			[](const OrphanedPlayerRow *a, const OrphanedPlayerRow *b) {
+				return a->row.reply.player_slot < b->row.reply.player_slot;
+			});
+	std::vector<const OrphanedPlayerRow *> stepped;
+	auto step_orphan = [&](OrphanedPlayerRow &orphan) {
+		stepped.push_back(&orphan);
+		std::vector<std::vector<uint8_t>> unframed; // its net player has a transport
+		step_initial_state_row(ctx, orphan.row, orphan_net_player(ctx, orphan), now_tick,
+				respect_s2c_send_boundary, unframed);
+	};
+	auto orphan_stepped = [&](const OrphanedPlayerRow *orphan) {
+		return std::find(stepped.begin(), stepped.end(), orphan) != stepped.end();
+	};
 
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		const bool send_boundary_closed =
 				respect_s2c_send_boundary && conn.type == NapiNPConnection::kTypeServerSide &&
 				!conn.s2c_send_boundary_open;
-		if (conn.burst.spawned) {
-			// Spawned peers: Server_TickUpdate owns their per-frame 0x0A — but the roster
-			// version check must keep running here so EXISTING clients learn about LATER
-			// joins/leaves (D-NET-155). The first cut only evaluated it below this skip,
-			// i.e. once, on each connection's own burst-completion tick — the v30 wire
-			// showed the first joiner never received the grown 47-B 0x16 when the second
-			// spawned (its HUD count stayed at 2).
-			if (send_boundary_closed) continue;
-			TickOut to;
-			to.peer = conn.peer;
-			if (conn.type == NapiNPConnection::kTypeServerSide &&
-			    conn.reply.roster_seen_gen != ctx.np_protocol.roster_generation) {
-				std::vector<ProtocolMessage> roster_reply{build_player_list_message(
-						ctx.config, ctx.np_protocol.connection_list, ctx.world)};
-				std::vector<uint8_t> dg = frame_session_replies(conn, roster_reply);
-				if (!dg.empty()) to.outbound.push_back(std::move(dg));
-				conn.reply.roster_seen_gen = ctx.np_protocol.roster_generation;
-			}
-			if (!to.outbound.empty()) out.push_back(std::move(to));
-			continue;
-		}
+		// Joined peers: Server_TickUpdate owns their per-frame 0x0A, and the scoreboard
+		// clock their S2C 0x16 (a later join or leave reaches them at its next boundary,
+		// D-NET-504).
+		if (conn.burst.spawned) continue;
 
 		TickOut to;
 		to.peer = conn.peer;
 		if (send_boundary_closed) continue;
 
-		// A held pending player (capacity / balance-join) is re-sent the one-byte
-		// S2C 0x03 restriction flag the spawn pump staged, at most once a second.
+		// A held pending player (capacity / balance-join) is re-sent the S2C 0x03 the
+		// spawn pump staged, at most once a second: its place on the pending list and
+		// the list's count; a failed add's unlinked node its one byte (D-NET-NEW-L1-38).
 		// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8F9A..0x4C8FD1]
 		if (conn.type == NapiNPConnection::kTypeServerSide &&
 				conn.phase < ConnectionPhase::PlayerAdded &&
 				conn.reply.admission_hold_nag_pending) {
 			conn.reply.admission_hold_nag_pending = false;
-			std::vector<uint8_t> nag = frame_session_replies(
-					conn, {make_protocol_message(s2c::SYNC_TICK, {0x00})});
-			if (!nag.empty()) to.outbound.push_back(std::move(nag));
+			std::vector<ProtocolMessage> nag_messages{make_protocol_message(
+					s2c::SYNC_TICK, std::move(conn.reply.admission_hold_nag_body))};
+			conn.reply.admission_hold_nag_body.clear();
+			if (conn.link.transport != nullptr) {
+				queue_session_messages(conn, nag_messages); // the connection's queue (D-NET-525)
+			} else {
+				std::vector<uint8_t> nag = frame_session_replies(conn, nag_messages);
+				if (!nag.empty()) to.outbound.push_back(std::move(nag));
+			}
 		}
 
-		// Retail's C2S 0x02 handler, pending-player spawn pump, and first
-		// roster publish occupy distinct send boundaries. In particular 0x04
-		// must arrive after the client has processed one intervening frame;
-		// otherwise its join initialization resets the assigned team and it
-		// submits the opposite faction's 0x2F kit. The production host calls
-		// tick_connections in the same pump that handled C2S 0x02, so the
-		// captured admission tick is an explicit lower bound as well as the
-		// packet latches below. The pump itself runs on the periodic second
-		// at the head of this call, so the 0x03 / settings / 0x05 / 0x04 /
-		// 0x7B boundary ships in the same pump that added the player — the
-		// retail in-pump order [orig: CNapiServer_ProcessPendingPlayerSpawns
-		// @0x4C8FF6..0x4C9123]; the one residual is that retail writes its
-		// 0x03 before Server_BuildPlayerInfoAndAdd and these bodies are built
-		// after it, which the wire cannot distinguish.
+		// A connection with a transport has its 0x03 / settings / 0x05 / 0x04 /
+		// 0x7B queued by the spawn pump at the add (retail's in-pump order,
+		// D-NET-504) [orig: CNapiServer_ProcessPendingPlayerSpawns
+		// @0x4C8FF6..0x4C9123]. This leg frames them for a transport-less
+		// connection (a test seam) at its next boundary, not in the frame that
+		// handled its C2S 0x02 (the admission tick, a lower bound kept from the
+		// framed path's first capture).
 		const bool staged_join_ready =
 				conn.type == NapiNPConnection::kTypeServerSide &&
 				conn.admission_stage == GameAdmissionStage::Complete &&
@@ -1435,14 +2019,20 @@ std::vector<TickOut> tick_connections(
 		if (staged_join_ready && !conn.reply.spawn_metadata_pushed) {
 			std::vector<ProtocolMessage> spawn_metadata =
 					build_spawn_pump_metadata(
-							ctx.config, ctx.mission_text_title, conn,
+							ctx.config, ctx.mission_text_title, ctx.session_title, conn,
 							ctx.np_protocol.connection_list, ctx.world, ctx.rotation,
 							&ctx.host_slot);
-			std::vector<uint8_t> datagram =
-					frame_session_replies(conn, spawn_metadata);
-			if (!datagram.empty()) {
-				to.outbound.push_back(std::move(datagram));
+			if (conn.link.transport != nullptr) {
+				// The connection's queue, packed at its boundary (D-NET-525).
+				queue_session_messages(conn, spawn_metadata);
 				conn.reply.spawn_metadata_pushed = true;
+			} else {
+				std::vector<uint8_t> datagram =
+						frame_session_replies(conn, spawn_metadata);
+				if (!datagram.empty()) {
+					to.outbound.push_back(std::move(datagram));
+					conn.reply.spawn_metadata_pushed = true;
+				}
 			}
 			if (!to.outbound.empty()) out.push_back(std::move(to));
 			continue;
@@ -1453,54 +2043,17 @@ std::vector<TickOut> tick_connections(
 			if (!to.outbound.empty()) out.push_back(std::move(to));
 			continue;
 		}
-		// Advance this connection's §5.2a burst one step and frame/ship the bodies (built from real
-		// World/bms state). conn.burst is authoritative for the spawn-gate latches.
-		// Golden ordering: admission, spawn metadata, then the 0x16 player-list PRECEDE the
-		// §5.2a world-stream. Without this gate, the burst fires in the same pump as the C2S 0x42
-		// join — before the post-handshake round-trip (C2S 0x01→S2C 0x02→C2S 0x02→burst) has
-		// completed, so the retail client receives the world-stream before it has reached join-FSM
-		// state 6 verification. roster_pushed is set by the first C2S 0x37 reply; the host's own loopback
-		// (type 2) bypasses the gate. Remote peers have no timeout shortcut: the bundled client now
-		// drives this captured exchange, and bypassing it marks malformed/out-of-order joins as players.
-		const bool roster_ready =
-				conn.type != NapiNPConnection::kTypeServerSide ||
-				(conn.admission_stage == GameAdmissionStage::Complete &&
-				 conn.reply.roster_pushed &&
-				 now_tick != conn.reply.roster_completed_tick);
-		if (conn.phase >= ConnectionPhase::PlayerAdded && roster_ready) {
-			InitialStateStep step = Server_SendInitialGameStateToPlayer(ctx, conn, now_tick);
-			ship_burst_messages(conn, step.messages, to.outbound);
+		// Advance this connection's §5.2a burst at its send boundary (outside the host's frame).
+		if (run_initial_state_steps && conn.phase >= ConnectionPhase::PlayerAdded) {
+			// This player's orphaned rows on lower slots step first (the block's slot order).
+			for (OrphanedPlayerRow *orphan : orphans)
+				if (orphan->row.reply.player_slot < conn.reply.player_slot &&
+						!orphan_stepped(orphan) && orphan_net_player(ctx, *orphan) == &conn)
+					step_orphan(*orphan);
+			step_initial_state_row(ctx, conn, &conn, now_tick, respect_s2c_send_boundary,
+					to.outbound);
 		}
 
-		// Roster versioning (D-NET-155): the first time we observe ANY connection spawned,
-		// the roster grew — bump the generation so EVERY in-match client refreshes its 0x16
-		// player list (the HUD player count follows it). The old one-shot-per-connection
-		// re-push only reached the JOINING client, so existing clients' lists went stale
-		// when a later joiner arrived (v29: HUD stuck at 2 with 3 players in).
-		if (conn.burst.spawned && !conn.reply.roster_counted) {
-			conn.reply.roster_counted = true;
-			++ctx.np_protocol.roster_generation;
-			// The join-time 0x46 push (fieldFlags 0x1CF7) to every EXISTING in-match client,
-			// so its next 0x16's new row is ACCEPTED instead of dropped + 0x22-retried — the
-			// unknown-slot churn behind the stale HUD count (D-NET-158). The
-			// 0x32 join line leads it, as in the original [orig:
-			// Server_PlayerAdd @0x51d28a (0x32) then @0x51D296 (0x46)].
-			broadcast_player_joined_text(ctx.np_protocol.connection_list, conn, ctx.world);
-			broadcast_player_sync_on_join(ctx.config, ctx.np_protocol.connection_list, conn,
-			                              ctx.world);
-		}
-		// (Re)push the list to a spawned joiner whenever its seen generation is stale.
-		// Covers the joiner's OWN spawn — the client needs its own slot to bind its local
-		// player and deploy (golden: 0x16 31→39 just before the first C2S 0x0C) — and every
-		// later roster change (join/leave). One framed push per generation per connection.
-		if (conn.type == NapiNPConnection::kTypeServerSide && conn.burst.spawned &&
-		    conn.reply.roster_seen_gen != ctx.np_protocol.roster_generation) {
-			std::vector<ProtocolMessage> roster_reply{
-					build_player_list_message(ctx.config, ctx.np_protocol.connection_list, ctx.world)};
-			std::vector<uint8_t> dg = frame_session_replies(conn, roster_reply);
-			if (!dg.empty()) to.outbound.push_back(std::move(dg));
-			conn.reply.roster_seen_gen = ctx.np_protocol.roster_generation;
-		}
 
 		// Surface the F3 / PeerSpawned events from conn.burst (verbatim predicates). Same latch as the
 		// datagram-driven handle_client_session path — whichever observes the burst change first wins.
@@ -1509,6 +2062,10 @@ std::vector<TickOut> tick_connections(
 		if (to.outbound.empty() && to.events.empty()) continue;
 		out.push_back(std::move(to));
 	}
+
+	// The rest of the orphaned rows, in slot order.
+	for (OrphanedPlayerRow *orphan : orphans)
+		if (!orphan_stepped(orphan)) step_orphan(*orphan);
 	return out;
 }
 

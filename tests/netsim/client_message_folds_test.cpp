@@ -105,6 +105,22 @@ void test_team_assign_rebinds_player_identity() {
 	vehicle = view.state().find(0x1003);
 	CHECK(vehicle != nullptr && vehicle->team == 1 && vehicle->net_id == vehicle_net_id &&
 			vehicle->spawn_anim_slot == 0);
+
+	// The authority's own view stores no Team (D-NET-736); the identity pair
+	// and the refresh still land [orig: `cmp g_NapiNPCtx.is_authority` @0x4319E1,
+	// the store @0x4319EE].
+	ClientReplicaPipeline authority;
+	authority.set_authority_recipient(true);
+	authority.apply(s2c::ENTITY_SPAWN_BATCH, player_spawn(0x0005, 1, 0x0401, 2));
+	assign.entity_handle = 0x0005;
+	assign.team = 2;
+	assign.net_id = 0x8402;
+	assign.anim_slot = 7;
+	authority.apply(s2c::TEAM_ASSIGN, encode_team_assign(assign));
+	row = authority.state().find(0x0005);
+	CHECK(row != nullptr && row->team == 1 && row->net_id == 0x8402 &&
+			row->spawn_anim_slot == 7);
+	CHECK(authority.state().pending_visible_refreshes.size() == 1);
 }
 
 // S2C 0x50's gates and short bodies: a slot past its pool's table does nothing

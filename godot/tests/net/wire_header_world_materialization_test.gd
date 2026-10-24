@@ -127,6 +127,11 @@ func _designated_g_mission_fixture() -> Dictionary:
 
 # The designated-G parent is moved explicitly by the test. Its null mover
 # keeps it at the authored seat-scan position in this terrain-free wire fixture.
+# It is a chel EWeap row, as the shipped addeweapG carriers are (the Ka-52 and
+# the Apache): their class init binds the +0x474 slot the route reaches, which
+# a cveh's never does. [orig: Entity_InitHelicopterAIFromDef @0x4683C0 ->
+# Entity_InitInfantryBoneData @0x490160 (the attrib test @0x490169, the bind
+# @0x49017B)]
 # variant "" = the authoritative table; "refresh" swaps the vehicle graphic to
 # carrierswap (the dense-reorder refresh); "ambiguous" authors a second addeweap
 # row of the same child type on the parent (stored slot 2, missing anchor).
@@ -148,7 +153,7 @@ begin "Wire Header Designated-G Parent"
   sid wire_header_designated_g_parent
   hp 1000
   attrib: EWeap
-  ai_function cveh
+  ai_function chel
   render_function cveh
   move_function null
   primary_weapon WPN_EMPLCD50NA
@@ -210,10 +215,14 @@ func _present_position_for_type(sim: Simulation, type_id: int) -> Vector3:
 	return Vector3.INF
 
 
-func _player_index(sim: Simulation) -> int:
+# The player body with this wire handle: a Serve Only host's mission start also spawns
+# its own row's hidden body (D-NET-352, D-NET-NEW-L7-39) [orig: Game_StartMission @0x524360 -
+# the Server_InitAllPlayerEntitiesForRound call @0x525BAF], so the first 0x14B9 card is not H.
+func _player_index(sim: Simulation, wire_handle: int) -> int:
 	for index in range(sim.get_entity_count()):
 		var card: EntityCard = sim.entity_card_by_ai_index(index)
-		if card != null and card.get_item_id() == 0x14B9:
+		if card != null and card.get_item_id() == 0x14B9 \
+				and card.get_wire_handle() == wire_handle:
 			return index
 	return -1
 
@@ -255,7 +264,6 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "WireHeaderJoiner"))
-	joiner.set_join_world_ready(false)
 	var header := PackedByteArray()
 	for _tick in range(800):
 		joiner.poll_join_preload()
@@ -369,7 +377,6 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "DesignatedGHeaderJoiner"))
-	joiner.set_join_world_ready(false)
 	var header := PackedByteArray()
 	for _tick in range(800):
 		joiner.poll_join_preload()
@@ -469,14 +476,52 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	# root is wired (local_player_visuals.cpp): a row's graphic model is its
 	# load's result, which the rootless sweeps at the stream could not make.
 	joiner.resolve_item_traits(db)
+	# Then the rows' class init slot leg, as the shell's load runs it there: the
+	# B50 child's MountSlot binds from its def's weapon now that its weapon
+	# name and model are in (the stream's own leg ran ahead of both).
+	joiner.run_join_streamed_weapon_slot_class_inits()
 
 	# The zone pick is the DEATH flow now (the initial join deploys with no
 	# C2S 0x0E — retail sends none): kill on the authority, wait out the
 	# 3-second fresh-death pick penalty, then re-pick the streamed zone to
-	# land beside the carrier. The lone joiner on this dedicated host is
-	# pool-0 slot-0: wire handle 0 (get_joiner_self_handle's unbound sentinel
-	# is indistinguishable here).
-	assert_eq(host.debug_kill_player_entity(0), OK)
+	# land beside the carrier. The authority kills the joiner's own H by its
+	# wire handle: this dedicated host's mission start spawned its own row's
+	# hidden body first (D-NET-352), so H is not pool-0 slot 0.
+	# [orig: Game_StartMission @0x524360 - the Server_InitAllPlayerEntitiesForRound
+	#  call @0x525BAF; D-NET-NEW-L7-39]
+	# The fixture's team-owned spawn zone holds the joining slot at the deploy
+	# overlay (the join sets the slot's undeployed bit whenever the mission has
+	# spawn zones), and every 0x0A re-hides a held slot's body. A hidden body's
+	# tick returns ahead of its death edge, on the host and on the joiner alike,
+	# so a held joiner the authority kills reads alive (its zero tail beside an
+	# alive self record floors the local Health at 1) until its hold releases.
+	# Deploy out of the join hold first (the overlay's default pick): the death
+	# transaction then lands on an unhidden body, the host's death edge raises
+	# its dead bit and the dead self record runs the joiner's death edge.
+	# [orig: Server_OnPlayerJoin @0x51A680 - SpawnZoneList_GetCount @0x51A6E9,
+	#  the undeployed bit `or byte [esi+15F38h], 10h` @0x51A6F2;
+	#  NetPacket_WritePlayerState @0x4FF6B0 - the held slot's hide
+	#  @0x4FF7AA..0x4FF7B8; Entity_UpdateInfantryPlayerBody @0x4B40E0 - the
+	#  hidden return @0x4B411B..0x4B4127 ahead of the death edge
+	#  @0x4B4BF1..0x4B4C02; NetPacket_SerializePlayerState @0x4C09C0 - the floor
+	#  @0x4C11C4..0x4C11CE]
+	assert_true(joiner.is_deploy_overlay_active(),
+			"the spawn-zone mission holds the joiner at the deploy overlay")
+	var join_hold_released := false
+	for i in range(1200):
+		if i % 64 == 0:
+			joiner.send_deployment_pick(0)
+		host.step()
+		joiner.step()
+		if not joiner.is_deploy_overlay_active():
+			join_hold_released = true
+			break
+		OS.delay_msec(2)
+	assert_true(join_hold_released,
+			"the overlay's default pick releases the join hold")
+	var joiner_h := joiner.get_local_player_wire_handle()
+	assert_gt(joiner_h, 0, "the joiner's H is bound past the host row's body")
+	assert_eq(host.debug_kill_player_entity(joiner_h), OK)
 	var death_pick_pending := false
 	for _tick in range(240):
 		host.step()
@@ -548,7 +593,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 			"the single in-range candidate is the full-bright nearest label")
 	assert_true(joiner.local_player_toggle_mount(),
 			"the decoded child exposes its authored UseGun seat")
-	var host_player_index := _player_index(host)
+	var host_player_index := _player_index(host, joiner.get_local_player_wire_handle())
 	assert_gte(host_player_index, 0)
 	var mounted_echoed := false
 	for _tick in range(240):
@@ -566,11 +611,17 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	if not mounted_echoed:
 		return
 
+	# The mount's switch-out completes before the gun's slot is the EquippedSlot
+	# and its def the AdmDef byte the FP model resolves from: neither borrowing
+	# attach stamps the byte, the completion does (D-NET-NEW-L7-7) [orig:
+	# Entity_AttachToUseGunSlot @0x546B80 (no +0x2B0 store); WeaponAction_SwitchFrom
+	# @0x5433B0 (@0x543475, @0x543496)].
 	for _settle in range(100):
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		if joiner.get_local_player_weapon_state().current_action < 2:
+		var settled := joiner.get_local_player_weapon_state()
+		if settled.borrowed_usegun_slot and settled.current_action < 2:
 			break
 		OS.delay_msec(1)
 
@@ -604,12 +655,22 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 
 	assert_true(joiner.request_local_player_scope_toggle(),
 			"header-only child recovered designated-G action-6 capability")
-	# Let the authority consume action 6 and prepare the parent slot before
-	# stamping the non-default phase-8 witness; first-time preparation seeds the
-	# weapon.def defaults and would intentionally replace an earlier debug value.
-	joiner.step()
-	host.step()
-	NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
+	# The toggle binds and seeds nothing: the parent's slot keeps the words its
+	# class init seeded at the load: the CHel leg's split of the fixture 50cal's
+	# 210 startrounds, clip = its clipsize 100 capped at the total, the rest in
+	# reserve. The witness below arrives only once the authority has taken
+	# action 6's route.
+	# [orig: NapiNPServerMsg_HandleWeaponToggle @0x511A70 (the set @0x511B2C);
+	#  WeaponSlot_InitFromEntityDef @0x5466C0, called only by the ewep and the
+	#  CHel / cpln inits @0x441482 / @0x49017B; the CHel leg's split
+	#  WeaponSlot_SplitVehicleAmmoIntoClipAndReserve @0x546310, called @0x490192]
+	for _tick in range(120):
+		joiner.step()
+		host.step()
+		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
+		OS.delay_msec(1)
+	assert_eq(host.entity_card_by_net_id(parent_bms_id).get_primary_weapon_clip(), 100,
+			"the parent's slot keeps its class init's words through the toggle")
 	assert_eq(host.debug_set_world_entity_weapon_ammo(
 			parent_bms_id, 7, 19), OK)
 	var parent_ammo_applied := false

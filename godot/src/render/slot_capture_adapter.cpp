@@ -326,6 +326,80 @@ void write_matrix(PackedByteArray &r_bytes, int64_t p_offset,
 	std::memcpy(r_bytes.ptrw() + p_offset, values.data(), sizeof(values));
 }
 
+// One caster surface's PROJSHAD admission and its packed stream (the frame's
+// compile and the load's warm share it, so a stream the warm packed is the
+// one the first capture finds).
+enum class SurfaceAdmission { Unclassified, NoPass, NoStream, Admitted };
+
+struct AdmittedSurface {
+	Ref<ShaderMaterial> material;
+	ObjectMaterialClassification classification;
+	Ref<Texture2D> diffuse;
+	Ref<Texture2D> detail;
+	ObjectProjectedShadowPolicy policy = ObjectProjectedShadowPolicy::NoPass;
+	ObjectProjectedShadowCoverage coverage = ObjectProjectedShadowCoverage::NoPass;
+	std::shared_ptr<const Q3PackedStream> stream;
+};
+
+SurfaceAdmission admit_surface(Q3GeometryCache &r_cache, GeometryInstance3D *p_source,
+		const Ref<Mesh> &p_mesh, ArrayMesh *p_array_mesh, int p_surface, bool p_skinned,
+		AdmittedSurface &r_surface) {
+	const Ref<Material> material = active_material(p_source, p_mesh, p_surface);
+	r_surface.material = material;
+	if (r_surface.material.is_null() ||
+			!Q3SourceRegistry::object_material_classification(material,
+					r_surface.classification)) {
+		// An ArrayMesh surface whose material is not a registered
+		// object material (no ObjectMaterialClassification): retail
+		// submits no PROJSHAD pass for an effect without one, and no
+		// coverage source exists to invent one from. Counted as
+		// unclassified; a non-ArrayMesh instance (a PrimitiveMesh)
+		// never reaches this test and is not counted.
+		return SurfaceAdmission::Unclassified;
+	}
+	r_surface.diffuse = texture_parameter(r_surface.material, "u_diffuse");
+	r_surface.detail = texture_parameter(r_surface.material, "u_detail");
+	ObjectShaderKey key = build_object_shader_key(r_surface.classification);
+	if (r_surface.detail.is_null()) {
+		// The runtime's missing-detail downgrade: an unresolved
+		// secondary composes the no-detail technique
+		// (object_model_materials.cpp).
+		key &= ~OSCAP_DETAIL;
+	}
+	const ObjectShaderPipelineDescriptor pipeline = describe_object_shader_pipeline(key);
+	r_surface.policy = object_projected_shadow_policy(pipeline.technique);
+	r_surface.coverage = object_projected_shadow_coverage(pipeline.technique);
+	if (r_surface.policy == ObjectProjectedShadowPolicy::NoPass ||
+			r_surface.coverage == ObjectProjectedShadowCoverage::NoPass ||
+			(r_surface.policy == ObjectProjectedShadowPolicy::MaterialBlend &&
+					r_surface.classification.blend == ObjectBlendMode::Additive)) {
+		// No PROJSHAD declaration, or the _FFP material-blend pass
+		// of an additive material: black added to the RT is a no-op.
+		return SurfaceAdmission::NoPass;
+	}
+	// Keyed on the mesh as well as the node: an ObjectModel surface
+	// slot swaps a different ArrayMesh onto the same MeshInstance3D
+	// per authored RLOD level (apply_level_surfaces), and the slot
+	// pass follows no per-source geometry generation, so each
+	// level's arrays are their own retained entry and a crossing
+	// selects the level's packed stream instead of drawing the
+	// first-seen level's silhouette forever.
+	Q3GeometryCache::Request cache_request;
+	cache_request.key = {p_source->get_instance_id(), p_surface,
+		static_cast<std::uint64_t>(p_array_mesh->get_rid().get_id())};
+	cache_request.geometry_generation = 1;
+	cache_request.pack.source = Q3Source::Object;
+	cache_request.pack.uv_u = vector3_parameter(r_surface.material,
+			"u_uv_transform_u", Vector3(1, 0, 0));
+	cache_request.pack.uv_v = vector3_parameter(r_surface.material,
+			"u_uv_transform_v", Vector3(0, 1, 0));
+	cache_request.pack.skin_channels = p_skinned;
+	r_surface.stream = r_cache.acquire(cache_request, [&](bool &r_read_back) {
+		return surface_arrays(p_array_mesh, p_surface, r_read_back);
+	});
+	return r_surface.stream ? SurfaceAdmission::Admitted : SurfaceAdmission::NoStream;
+}
+
 } // namespace
 
 class SlotCaptureAdapter::Impl {
@@ -387,7 +461,13 @@ public:
 	TypedArray<RID> vertex_buffers;
 	PackedInt64Array vertex_offsets;
 	std::map<PipelineKey, RID> pipelines;
-	std::vector<RID> transient_uniforms;
+	// Each texture pair's uniform set, kept across frames by the two RD textures it binds:
+	// a draw binds its caster's textures as the game's device draw sets them, with no set
+	// made and freed per draw per frame (the device lets a set go with a texture it binds,
+	// so a kept set is checked before it is bound; D-NET-NEW-LF-22 LF-s18).
+	std::map<std::pair<std::uint64_t, std::uint64_t>, RID> texture_uniforms;
+	// The draws' push block, one buffer reused for every draw.
+	PackedByteArray push_bytes;
 	std::array<Target, kSlotCaptureCount> targets{};
 	PackedColorArray clear_white;
 
@@ -447,7 +527,8 @@ public:
 	}
 
 	void discard_device_state() {
-		transient_uniforms.clear();
+		texture_uniforms.clear();
+		push_bytes = PackedByteArray();
 		pipelines.clear();
 		device_geometry.clear();
 		for (Target &target : targets)
@@ -496,8 +577,8 @@ public:
 			return;
 		}
 		rd = p_rd;
-		for (RID &uniform : transient_uniforms)
-			release_uniform_rid(uniform);
+		for (auto &entry : texture_uniforms)
+			release_uniform_rid(entry.second);
 		release_uniform_rid(bone_uniform);
 		for (auto &entry : pipelines)
 			release_pipeline_rid(entry.second);
@@ -521,7 +602,7 @@ public:
 			bool p_blend_coverage);
 	bool upload_stream(const Q3PackedStream &p_stream);
 	bool upload_bones(const std::vector<Transform3D> &p_bones);
-	RID make_uniform(const DeviceCommand &p_command);
+	RID uniform_for(const DeviceCommand &p_command);
 	bool draw(const DeviceFrame &p_frame);
 	Dictionary report() const;
 };
@@ -705,7 +786,7 @@ RID SlotCaptureAdapter::Impl::pipeline_for(int64_t p_framebuffer_format,
 	TypedArray<Ref<RDPipelineColorBlendStateAttachment>> attachments;
 	attachments.push_back(attachment);
 	color_blend->set_attachments(attachments);
-	RID pipeline = rd->render_pipeline_create(shader, p_framebuffer_format,
+	RID pipeline = create_rd_render_pipeline(rd, shader, p_framebuffer_format,
 			vertex_format, RenderingDevice::RENDER_PRIMITIVE_TRIANGLES, raster,
 			multisample, depth, color_blend);
 	if (!pipeline.is_valid())
@@ -782,17 +863,23 @@ bool SlotCaptureAdapter::Impl::upload_bones(const std::vector<Transform3D> &p_bo
 	return true;
 }
 
-RID SlotCaptureAdapter::Impl::make_uniform(const DeviceCommand &p_command) {
+RID SlotCaptureAdapter::Impl::uniform_for(const DeviceCommand &p_command) {
 	RenderingServer *server = RenderingServer::get_singleton();
 	auto resolve = [&](const RID &p_server_rid) {
 		const RID result = server != nullptr && p_server_rid.is_valid() ?
 				server->texture_get_rd_texture(p_server_rid, false) : RID();
 		return result.is_valid() ? result : fallback_texture;
 	};
+	const RID diffuse = resolve(p_command.diffuse);
+	const RID detail = resolve(p_command.detail);
+	RID &kept = texture_uniforms[{diffuse.get_id(), detail.get_id()}];
+	if (kept.is_valid() && rd->uniform_set_is_valid(kept))
+		return kept;
 	TypedArray<Ref<RDUniform>> uniforms;
-	uniforms.push_back(sampled_texture_uniform(0, sampler, resolve(p_command.diffuse)));
-	uniforms.push_back(sampled_texture_uniform(1, sampler, resolve(p_command.detail)));
-	return rd->uniform_set_create(uniforms, shader, 0);
+	uniforms.push_back(sampled_texture_uniform(0, sampler, diffuse));
+	uniforms.push_back(sampled_texture_uniform(1, sampler, detail));
+	kept = rd->uniform_set_create(uniforms, shader, 0);
+	return kept;
 }
 
 bool SlotCaptureAdapter::Impl::draw(const DeviceFrame &p_frame) {
@@ -808,9 +895,8 @@ bool SlotCaptureAdapter::Impl::draw(const DeviceFrame &p_frame) {
 	publish_device_buffer_count();
 	if (!upload_bones(p_frame.bones))
 		return false;
-	for (RID &uniform : transient_uniforms)
-		release_uniform_rid(uniform);
-	transient_uniforms.clear();
+	if (push_bytes.size() != static_cast<int64_t>(kPushConstantBytes))
+		push_bytes.resize(kPushConstantBytes);
 	int captures_drawn = 0;
 	int draw_calls = 0;
 	// The effects' filter code the frame draws under (the device leg's).
@@ -838,13 +924,12 @@ bool SlotCaptureAdapter::Impl::draw(const DeviceFrame &p_frame) {
 			return false;
 		}
 		for (const DeviceCommand &command : capture.commands) {
-			RID uniform = make_uniform(command);
+			const RID uniform = uniform_for(command);
 			if (!uniform.is_valid()) {
 				rd->draw_list_end();
 				set_failure("RenderingDevice could not bind slot capture textures");
 				return false;
 			}
-			transient_uniforms.push_back(uniform);
 			const RID pipeline = pipeline_for(framebuffer_format, command.two_sided,
 					command.blend_coverage);
 			rd->draw_list_bind_render_pipeline(draw_list, pipeline);
@@ -869,8 +954,6 @@ bool SlotCaptureAdapter::Impl::draw(const DeviceFrame &p_frame) {
 						static_cast<float>(command.first_bone)};
 				push.max_lods = {command.diffuse_max_lod, command.detail_max_lod,
 						static_cast<float>(effect_filter_code), 0.0f};
-				PackedByteArray push_bytes;
-				push_bytes.resize(kPushConstantBytes);
 				std::memcpy(push_bytes.ptrw(), &push, sizeof(push));
 				rd->draw_list_set_push_constant(draw_list, push_bytes,
 						kPushConstantBytes);
@@ -995,68 +1078,27 @@ void SlotCaptureAdapter::compile_frame(
 			std::uint32_t first_bone = 0;
 			bool bones_appended = false;
 			for (int surface = 0; surface < array_mesh->get_surface_count(); ++surface) {
-				const Ref<Material> material = active_material(source, mesh, surface);
-				const Ref<ShaderMaterial> shader_material = material;
-				ObjectMaterialClassification classification;
-				if (shader_material.is_null() ||
-						!Q3SourceRegistry::object_material_classification(material,
-								classification)) {
-					// An ArrayMesh surface whose material is not a registered
-					// object material (no ObjectMaterialClassification): retail
-					// submits no PROJSHAD pass for an effect without one, and no
-					// coverage source exists to invent one from. Counted as
-					// unclassified; a non-ArrayMesh instance (a PrimitiveMesh)
-					// never reaches this test and is not counted.
-					++counters.unclassified_surfaces;
-					continue;
+				AdmittedSurface admitted;
+				switch (admit_surface(cache, source, mesh, array_mesh.ptr(), surface,
+						!palette.empty(), admitted)) {
+					case SurfaceAdmission::Unclassified:
+						++counters.unclassified_surfaces;
+						continue;
+					case SurfaceAdmission::NoPass:
+						++counters.no_pass_surfaces;
+						continue;
+					case SurfaceAdmission::NoStream:
+						continue;
+					case SurfaceAdmission::Admitted:
+						break;
 				}
-				const Ref<Texture2D> diffuse = texture_parameter(shader_material, "u_diffuse");
-				const Ref<Texture2D> detail = texture_parameter(shader_material, "u_detail");
-				ObjectShaderKey key = build_object_shader_key(classification);
-				if (detail.is_null()) {
-					// The runtime's missing-detail downgrade: an unresolved
-					// secondary composes the no-detail technique
-					// (object_model_materials.cpp).
-					key &= ~OSCAP_DETAIL;
-				}
-				const ObjectShaderPipelineDescriptor pipeline =
-						describe_object_shader_pipeline(key);
-				const ObjectProjectedShadowPolicy policy =
-						object_projected_shadow_policy(pipeline.technique);
-				const ObjectProjectedShadowCoverage coverage =
-						object_projected_shadow_coverage(pipeline.technique);
-				if (policy == ObjectProjectedShadowPolicy::NoPass ||
-						coverage == ObjectProjectedShadowCoverage::NoPass ||
-						(policy == ObjectProjectedShadowPolicy::MaterialBlend &&
-								classification.blend == ObjectBlendMode::Additive)) {
-					// No PROJSHAD declaration, or the _FFP material-blend pass
-					// of an additive material: black added to the RT is a no-op.
-					++counters.no_pass_surfaces;
-					continue;
-				}
-				// Keyed on the mesh as well as the node: an ObjectModel surface
-				// slot swaps a different ArrayMesh onto the same MeshInstance3D
-				// per authored RLOD level (apply_level_surfaces), and the slot
-				// pass follows no per-source geometry generation, so each
-				// level's arrays are their own retained entry and a crossing
-				// selects the level's packed stream instead of drawing the
-				// first-seen level's silhouette forever.
-				Q3GeometryCache::Request cache_request;
-				cache_request.key = {source_id, surface,
-					static_cast<std::uint64_t>(array_mesh->get_rid().get_id())};
-				cache_request.geometry_generation = 1;
-				cache_request.pack.source = Q3Source::Object;
-				cache_request.pack.uv_u = vector3_parameter(shader_material,
-						"u_uv_transform_u", Vector3(1, 0, 0));
-				cache_request.pack.uv_v = vector3_parameter(shader_material,
-						"u_uv_transform_v", Vector3(0, 1, 0));
-				cache_request.pack.skin_channels = !palette.empty();
-				std::shared_ptr<const Q3PackedStream> stream = cache.acquire(
-						cache_request, [&](bool &r_read_back) {
-							return surface_arrays(array_mesh.ptr(), surface, r_read_back);
-						});
-				if (!stream)
-					continue;
+				const Ref<ShaderMaterial> &shader_material = admitted.material;
+				const ObjectMaterialClassification &classification = admitted.classification;
+				const Ref<Texture2D> &diffuse = admitted.diffuse;
+				const Ref<Texture2D> &detail = admitted.detail;
+				const ObjectProjectedShadowPolicy policy = admitted.policy;
+				const ObjectProjectedShadowCoverage coverage = admitted.coverage;
+				const std::shared_ptr<const Q3PackedStream> &stream = admitted.stream;
 				DeviceCommand command;
 				command.stream = stream;
 				command.first_transform = static_cast<std::uint32_t>(frame->transforms.size());
@@ -1131,6 +1173,44 @@ void SlotCaptureAdapter::compile_frame(
 	impl_->cached_entries = cache.entry_count();
 }
 
+SlotCaptureWarmCounters SlotCaptureAdapter::warm_streams(
+		const std::vector<std::uint64_t> &p_casters) {
+	SlotCaptureWarmCounters warmed;
+	if (!impl_)
+		return warmed;
+	Q3GeometryCache &cache = impl_->geometry_cache;
+	const Q3GeometryCache::FrameCounters before = cache.frame_counters();
+	std::vector<GeometryInstance3D *> instances;
+	for (const std::uint64_t caster : p_casters)
+		collect_visible_geometry(Object::cast_to<Node>(ObjectDB::get_instance(caster)), instances);
+	for (GeometryInstance3D *source : instances) {
+		Ref<Mesh> mesh;
+		MeshInstance3D *mesh_instance = Object::cast_to<MeshInstance3D>(source);
+		if (mesh_instance != nullptr) {
+			mesh = mesh_instance->get_mesh();
+		} else if (MultiMeshInstance3D *multi_instance =
+				Object::cast_to<MultiMeshInstance3D>(source)) {
+			const Ref<MultiMesh> multimesh = multi_instance->get_multimesh();
+			if (multimesh.is_valid())
+				mesh = multimesh->get_mesh();
+		}
+		Ref<ArrayMesh> array_mesh = mesh;
+		if (array_mesh.is_null())
+			continue;
+		const bool skinned = !skin_palette(mesh_instance).empty();
+		for (int surface = 0; surface < array_mesh->get_surface_count(); ++surface) {
+			AdmittedSurface admitted;
+			if (admit_surface(cache, source, mesh, array_mesh.ptr(), surface, skinned, admitted) ==
+					SurfaceAdmission::Admitted)
+				++warmed.surfaces;
+		}
+	}
+	const Q3GeometryCache::FrameCounters &after = cache.frame_counters();
+	warmed.packed_vertices = static_cast<int>(after.packed_vertices - before.packed_vertices);
+	warmed.readbacks = static_cast<int>(after.readbacks - before.readbacks);
+	return warmed;
+}
+
 void SlotCaptureAdapter::clear_frame() {
 	if (!impl_)
 		return;
@@ -1160,6 +1240,10 @@ bool SlotCaptureAdapter::draw(RenderingDevice *p_rd) {
 	return impl_->draw(*frame);
 }
 
+bool SlotCaptureAdapter::create_device(RenderingDevice *p_rd) {
+	return impl_ && impl_->initialize(p_rd);
+}
+
 void SlotCaptureAdapter::release_device(RenderingDevice *p_rd) {
 	if (impl_)
 		impl_->release_device(p_rd);
@@ -1187,6 +1271,18 @@ SlotCaptureCompositorEffect::~SlotCaptureCompositorEffect() = default;
 void SlotCaptureCompositorEffect::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_backend_report"),
 			&SlotCaptureCompositorEffect::get_backend_report);
+}
+
+void SlotCaptureCompositorEffect::create_device() {
+	if (!is_shutdown())
+		call_device_create(callable_mp(this,
+				&SlotCaptureCompositorEffect::create_device_on_render_thread));
+}
+
+void SlotCaptureCompositorEffect::create_device_on_render_thread() {
+	RenderingServer *server = RenderingServer::get_singleton();
+	if (!is_shutdown() && server != nullptr)
+		adapter_->create_device(server->get_rendering_device());
 }
 
 void SlotCaptureCompositorEffect::release_device_resources() {

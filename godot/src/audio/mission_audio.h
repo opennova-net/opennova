@@ -138,6 +138,16 @@ public:
     void play_script_sounds(const std::vector<opennova::world::ScriptSoundEvent> &p_events,
             const Transform3D &p_camera_xform);
     void reset_oneshot_playback();
+	// The audio channel shutdown, as a device: every channel this node owns
+	// falls silent (the one-shot pool, the ambient pool with its candidate claims
+	// dropped, the dialog and WAC voices), so the ambient mix takes its channels
+	// anew on its next pass (engine WorldOutbox::audio_channels_shutdown carries
+	// the witness).
+	void shutdown_audio_channels();
+	// The round end's dialog line stop, as a device: the voice the dialog
+	// channel's last loaded line plays on falls silent (engine
+	// WorldOutbox::dialog_line_stop carries the witness).
+	void stop_dialog_line();
 	// PlayWavList / event-action seam: fire a one-shot sound set by name at a world
 	// position. The .bms action param -> set-name decode is left to the caller (the
 	// engine resolves a pre-loaded sound_id handle; the action path plays it at full
@@ -176,7 +186,7 @@ public:
 	// broadcast. A frame rendered since the previous dialog tick (tick() marks
 	// one) starts a fresh line's hold. Nothing without a simulation.
 	void advance_dialog_tick();
-	// A co-op dialog line the host sent (the "dialog_line" effect): the
+	// A co-op dialog line the host sent (world::DialogLineOrder): the
 	// engine's resolution (runtime/audio/dialog_queue resolve_dialog_line)
 	// picks the clip, which plays at once on a voice of its own, outside the
 	// queue. Returns true when a clip spawned.
@@ -189,7 +199,14 @@ public:
 	// uses the same interruption rule and tolerates a missing .wav extension.
 	// Returns true if the file resolved and played.
 	bool play_wac_wave(const String &p_filename);
-	void sync_script_voice();
+	// The scripted voice's device follows the channel as it stands (a start's clip at its
+	// start gain, a stop), with no anchor reset: after a command, and on every frame.
+	void follow_script_voice();
+	// The scene frame's voice update: the validation (a released channel completes), the
+	// anchor reset, then the stream's distance gain and position. GameWorld's script_voice
+	// row runs it on a frame that draws the scene alone; under the status page the busy word
+	// holds (engine world::ScriptVoiceChannel::frame carries the witness).
+	void update_script_voice();
 	// Pump for the mission clock; HHMM like MissionEnvironment.time_of_day.
 	void set_time_of_day_hhmm(double p_hhmm);
 	// World-driven eval clock: the world tick pushes the sim's logic tick after each
@@ -236,9 +253,11 @@ private:
 	void _attach_under(Node3D *p_container);
 	void _free_voice_nodes();
 	std::vector<opennova::audio::DialogLineRef> _resolve_dialog_lines(int p_wav_id) const;
-	// The device half of a line's load: its wave on a new voice of the dialog
-	// channel, what the wave loader records of it, and the co-op report.
-	opennova::audio::DialogClip _load_dialog_line(const opennova::audio::DialogLineRef &p_line);
+	// The device half of a line's load: what the wave loader records of it, and with
+	// `p_play` its wave on a new voice of the dialog channel (the engine's gate,
+	// audio::DialogQueue::LoadLine).
+	opennova::audio::DialogClip _load_dialog_line(const opennova::audio::DialogLineRef &p_line,
+			bool p_play);
 	// A dialog voice of the queue's still plays.
 	bool _dialog_voice_playing(uint64_t p_voice) const;
 	// A dialog line's wave on a voice of the dialog channel, at the wave's volume byte.
@@ -248,6 +267,7 @@ private:
 	void _on_script_voice_finished(int64_t p_serial, int64_t p_player_id);
 	void _install_voice_resolver();
 	void _stop_script_voice(bool p_report_finished);
+	void _follow_script_voice(const opennova::world::ScriptVoiceChannel::Frame &p_frame);
 	Ref<AudioStreamWAV> _resolve_wav(const String &p_filename);
 	Ref<AudioStreamWAV> _resolve_candidate_stream(const Ref<AmbientLayer> &p_descriptor);
 	Ref<AudioStreamWAV> _validate_candidate_stream(int p_candidate_id,
@@ -331,6 +351,9 @@ private:
 	ObjectID wac_voice_id_;
 	ObjectID script_voice_id_;
 	opennova::world::ScriptVoiceChannel::Frame script_voice_frame_;
+	// The device ran the voice's clip out (its `finished`): the physical channel's release,
+	// which the next scene frame's validation reads (update_script_voice).
+	bool script_voice_released_ = false;
 	HashMap<String, Ref<AudioStreamWAV>> wac_wav_cache_; // filename(lower) -> stream (or null)
 	int64_t perf_tick_us_ = 0;
 	int perf_markers_ = 0;

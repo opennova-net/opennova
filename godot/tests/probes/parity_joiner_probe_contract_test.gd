@@ -74,6 +74,21 @@ func test_readiness_rules_match_the_witnessed_split() -> void:
 	state.match_ready_auto = true
 	assert_true(ParityJoinerWitness.in_match_ready(state, "in_match", true))
 	assert_false(ParityJoinerWitness.in_match_ready(state, "deploy_hold", false))
+	# A deploy-zone mission's joiner held on the deploy screen past the
+	# admission: auto-deploy readiness waits for the hold to release.
+	state.hold_ready = true
+	assert_false(ParityJoinerWitness.in_match_ready(state, "in_match", true),
+			"an auto-deploy joiner held on the deploy screen is not ready")
+	assert_true(ParityJoinerWitness.in_match_ready(state, "in_match", false))
+
+	# The owed pick: the default on the post-auth pick, the screen's SPACE
+	# (0xFFFE's param) on the held deploy screen, none otherwise.
+	var owed := ParityJoinerWitness.empty_state()
+	assert_eq(ParityJoinerWitness.auto_deploy_pick(owed), -1)
+	owed.hold_ready = true
+	assert_eq(ParityJoinerWitness.auto_deploy_pick(owed), 65534)
+	owed.pick_pending = true
+	assert_eq(ParityJoinerWitness.auto_deploy_pick(owed), 0)
 
 	var hold := ParityJoinerWitness.empty_state()
 	hold.hold_ready = true

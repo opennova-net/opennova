@@ -96,6 +96,14 @@ public:
 	int setup(const Ref<MissionData> &p_mission, Node *p_container,
 			const Ref<MissionSetupOptions> &p_options = Ref<MissionSetupOptions>());
 	int get_setup_error() const { return setup_error_; }
+	// The session half of a setup, which the world's load runs at its start for a fresh host or
+	// single player (ahead of its own loads, so the session create can follow it there): `r_sim`
+	// (a fresh one when null) takes the options' process words and profiles, then its role, the
+	// joiner's dial, the host's session record and its bound socket, or the single player's
+	// socketless listen server. OK, ERR_UNCONFIGURED (no title identity to host with) or
+	// ERR_CANT_CREATE (a host that could not bind its socket); `r_sim` is cleared on a failure.
+	static int stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData> &p_mission,
+			const Ref<MissionSetupOptions> &p_options);
 	// The failed setup's session create ended the process on the cfg block's
 	// mpreset word (Simulation.session_create_ended_process): the embedder
 	// exits with code 0 instead of reporting a load failure.
@@ -139,14 +147,15 @@ public:
 	Ref<MissionPresentStats> get_mission_present_stats() const;
 
 	// Bind the present passes' typed collaborators (ADR 0043 d9), after
-	// setup(): `audio` (nullable) gates the fire/destruction sound legs — a
-	// dedicated serve presents no sounds while the effect legs still run;
-	// `fx` (nullable) the effect legs; `lights` (nullable) the MF_Light
+	// setup(): `audio` (nullable) gates the fire/destruction sound legs (no
+	// audio plays no sound while the effect legs still run); `fx` (nullable)
+	// the effect legs; `lights` (nullable) the MF_Light
 	// muzzle glow + the death flash; `environment` (nullable) the scar pass's
 	// fog distance + combined terrain light; `anchors` (nullable) the
 	// owner-anchor registry the wreck/piece/move effect groups anchor
 	// through. The load calls this once the audio and effect stages have run;
-	// isolated tests pass what they have.
+	// isolated tests pass what they have. A session that presents no entity (a
+	// dedicated host) binds nothing.
 	void setup_passes(MissionAudio *p_audio, EffectWorld *p_fx,
 			EffectLightDirector *p_lights, MissionEnvironment *p_environment,
 			ItemEffectDirector *p_anchors);
@@ -164,6 +173,10 @@ public:
 	// tracer ribbon materials) behind the loading screen; see GameWorld's
 	// effect warm.
 	void warm_present_pipelines(const Vector3 &p_at_position);
+	// The same frame's warm of the wire walk's cold spawns (EntityPresenter::
+	// warm_wire_spawn_pipelines): their models under `p_parent`, which the caller frees.
+	int warm_wire_spawn_pipelines(const PackedFloat32Array &p_snap, int p_stride, Node3D *p_parent,
+			PackedStringArray &r_graphics);
 	// Throwable-presentation counters (ThrowablePresentStats, typed per ADR
 	// 0017; built per call).
 	Ref<ThrowablePresentStats> get_throwable_present_stats() const;
@@ -199,6 +212,7 @@ public:
 
 	int entity_count() const;
 	bool is_playing() const;
+	bool is_session_paused() const;
 
 	// Advance EXACTLY ONE cadence step and present. Returns true when a logic
 	// tick fired (and effects were drained). The deterministic single-tick
@@ -287,6 +301,11 @@ private:
 	// each pass timed onto the stats board while the Stats tab captures. Owns
 	// the bundled perf_present_us_ the probe scripts read.
 	void present_frame(bool p_stats_on);
+	// A session frame's presentation: the whole present frame on a ticked frame,
+	// the rows alone on a zero-tick one; on a session that presents no entity (a
+	// dedicated host) nothing is built or applied and a ticked frame drops the
+	// passes' queues undrawn.
+	void present_session_frame(bool p_did_tick);
 	bool stats_capture_on() const;
 	// Pull the frame's tick accounting into the probe counters from the typed
 	// outcome. The session phase spans (SIM_STEP and the SIM_* attribution)

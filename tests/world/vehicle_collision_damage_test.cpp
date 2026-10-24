@@ -1,7 +1,7 @@
 // The contact-damage predicates: the kind-1 (knife) kill-zone callback's
 // target gate, attribution walking and kill-on-transition rule, and the
 // movement resolver's run-over kill and bump sound gates.
-// [orig: Entity_ApplyVehicleCollisionDamage @0x4E6620;
+// [orig: Entity_ApplyKnifeKillZoneDamage @0x4E6620;
 //  Entity_MovementCollisionResolver @0x4B37C2..0x4B3A5C]
 
 #include <runtime/world/vehicle_collision_damage.h>

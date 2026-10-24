@@ -325,7 +325,17 @@ int test_sessions_across_replicas() {
 	const auto joined = a.get_join(join.session_tag);
 	TEST_EXPECT(joined && joined->success == join.success && joined->failure == join.failure &&
 			joined->msgbase == join.msgbase && joined->needexpkey.empty() && joined->pfid == "28" &&
-			joined->rid == "4242");
+			joined->rid == "4242" && joined->gsid.empty() && joined->lan.empty());
+	// A LAN-list join's link: the GSID in place of the RID, lan=1.
+	nws::JoinSession lan_join = join;
+	lan_join.session_tag = nws::SessionStore::generate_tag("NWJoin.dll");
+	lan_join.rid = "";
+	lan_join.gsid = "GSID-10-00000014-20261021120000000-0123456789abcdef";
+	lan_join.lan = "1";
+	b.put_join(lan_join.session_tag, lan_join);
+	const auto lan_joined = a.get_join(lan_join.session_tag);
+	TEST_EXPECT(lan_joined && lan_joined->rid.empty() && lan_joined->gsid == lan_join.gsid &&
+			lan_joined->lan == "1" && lan_joined->success == join.success);
 	TEST_EXPECT(pttl(r.b.pool(), "join:" + join.session_tag) > kTtlMs - 10000);
 
 	// A value that does not read (another version's, a stray write) is no

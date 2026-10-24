@@ -17,7 +17,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
+#include <vector>
 #include <utility>
 #include <vector>
 
@@ -62,13 +64,10 @@ public:
 	bool valid() const { return field_.valid(); }
 	// The occupant water clamp's plane: the mission water height in the SAME
 	// 16.16 world units the ground solve compares (the retail global the
-	// clamp reads [orig: worldY @0x26C6454 -- g_EnvWaterHeightFixed]); 0 = no
-	// authored water. The kernel feeds it from World::env.water_z whenever
-	// the environment changes; build() resets it to none.
-	void set_water_plane(int32_t water_y_q16) {
-		field_.water_y = water_y_q16;
-		field_.has_water = water_y_q16 != 0;
-	}
+	// clamp reads [orig: worldY @0x26C6454 -- g_EnvWaterHeightFixed]), 0 with
+	// none authored and compared raw. The kernel feeds it from World::env.water_z
+	// whenever the environment changes; build() resets it to 0.
+	void set_water_plane(int32_t water_y_q16) { field_.water_y = water_y_q16; }
 
 	// Writes `rect` (atlas texels: x, z the column and row, w, h the size) of the heights the store holds
 	// from `src` (raw16, `stride` samples a row, stride >= w), in place: the height view keeps pointing at
@@ -140,5 +139,15 @@ private:
 	// [orig: PolyTrn_InitTextures @ 0x60c5c9].
 	std::array<uint8_t, 256> tile_surface_{};
 };
+
+// The terrain's foliage definitions' model names in slot order, as the terrain configuration's load
+// reads them (the mission's <terrain>.trn, overcast.def and its <environment>.env; `environment`
+// empty: none): the models Foliage_LoadDefAssets loads and marks, which the C2S 0x3D page leaves
+// out. Empty when the .trn is not there or the admission gate refuses it (the mission's load ends).
+// [orig: Foliage_LoadDefAssets @0x601260 - ThreediGp_LoadModel @0x6012cb,
+//  CEffectDef_MarkFoliage @0x6012de; Terrain_LoadEnvironmentConfig @0x610940]
+std::vector<std::string> terrain_foliage_graphics(
+		const std::function<bool(const std::string &name, std::vector<uint8_t> &out)> &read_file,
+		const std::string &terrain_name, const std::string &environment);
 
 } // namespace opennova::terrain

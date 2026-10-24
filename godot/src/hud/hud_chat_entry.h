@@ -31,8 +31,10 @@ public:
 		EVENT_CANCELLED = opennova::hud::chat_entry_event::kCancelled,
 		EVENT_EDITED = opennova::hud::chat_entry_event::kEdited,
 		EVENT_FLOOD_ECHO = opennova::hud::chat_entry_event::kFloodEcho,
+		EVENT_CAPS_LOCK_RELEASE = opennova::hud::chat_entry_event::kCapsLockRelease,
 	};
 	enum Row {
+		ROW_COMMAND = opennova::hud::kChatRowCommand, // the first command-entry row
 		ROW_COUNT = opennova::hud::kChatTalkRowCount,
 	};
 
@@ -40,6 +42,10 @@ public:
 	// pressed state); returns the Event bits. `frame` is the per-main-frame
 	// counter (the HUD tick).
 	int poll_rows(int p_rows_down, bool p_active, const Ref<Simulation> &p_sim,
+			const Ref<RtxtStringFile> &p_gametext, int64_t p_frame);
+	// One input frame's dispatched talk-row events (a mask of 1 << row, each one
+	// event; engine ChatEntry::dispatch_rows); returns the Event bits.
+	int dispatch_rows(int p_rows_fired, bool p_active, const Ref<Simulation> &p_sim,
 			const Ref<RtxtStringFile> &p_gametext, int64_t p_frame);
 	// One key event while the capture is open: true = the editor took it
 	// (every key does while capturing, releases included). Returns the Event
@@ -66,6 +72,9 @@ protected:
 private:
 	opennova::hud::ChatEntry entry_;
 	int last_events_ = 0;
+	// The device side effects the event bits name: the denied tone through the sim, the
+	// Caps Lock release through the keyboard-lock device.
+	void apply_device_events(Simulation *p_sim) const;
 };
 
 } // namespace godot

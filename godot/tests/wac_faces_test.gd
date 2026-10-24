@@ -21,6 +21,11 @@ func test_facial_commands_load_grm_and_reset_with_normal_retry() -> void:
 	var world := WorldFixture.make_world(self)
 	assert_eq(WorldFixture.load_mission(world, root_dir), OK)
 	var sim := world.get_sim()
+	# The facial counter steps in the scene frame's facial row, over the view the local view
+	# composes: a REAL presenter (no camera) binds itself as the world's local view presenter.
+	var presenter := LocalPlayerPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, null)
 	for attempt in 2:
 		var card: EntityCard = sim.entity_card(sim.get_local_player_wire_handle())
 		assert_not_null(card)
@@ -40,7 +45,8 @@ func test_facial_commands_load_grm_and_reset_with_normal_retry() -> void:
 		assert_eq(card.get_facial_target(), 4)
 		assert_gt(card.get_facial_override_timer(), 0)
 		assert_lt(card.get_facial_override_timer(), 80, "simulation ticks advance the override")
-		assert_gt(card.get_facial_display_frame(), baseline_frame, "normal presentation advances its own counter")
+		assert_gt(card.get_facial_display_frame(), baseline_frame, "the scene frame's facial passes advance their own counter")
 		assert_eq(card.get_facial_texture_priority(), -1, "the first-person local body is excluded")
 		world.get_runtime().stop()
+	presenter.teardown()
 	world.unload()

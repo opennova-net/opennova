@@ -1,6 +1,9 @@
 #include "resource_index/launch_flags.h"
 #include "util/string_convert.h"
+#include <base/gameprofile/player_files.h>
+#include <formats/tga/tga.h>
 
+#include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 
@@ -23,9 +26,12 @@ void LaunchFlags::_bind_methods() {
 			&LaunchFlags::loose_override_enabled);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("mission"), &LaunchFlags::mission);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("lan_host"), &LaunchFlags::lan_host);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("lan_rotation"), &LaunchFlags::lan_rotation);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("lan_join_ip"), &LaunchFlags::lan_join_ip);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("lan_join_port", "fallback"),
 			&LaunchFlags::lan_join_port);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("lan_join_browse"),
+			&LaunchFlags::lan_join_browse);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("lan_port", "fallback"),
 			&LaunchFlags::lan_port);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("lan_gametype"), &LaunchFlags::lan_gametype);
@@ -41,6 +47,10 @@ void LaunchFlags::_bind_methods() {
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("mcp_port"), &LaunchFlags::mcp_port);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("novaworld_host"), &LaunchFlags::novaworld_host);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("no_hud"), &LaunchFlags::no_hud);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("screen_shot_tga"), &LaunchFlags::screen_shot_tga);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("screen_shot_path"), &LaunchFlags::screen_shot_path);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("screen_shot_tga_file", "rgba", "width", "height"),
+			&LaunchFlags::screen_shot_tga_file);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("no_reload"), &LaunchFlags::no_reload);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("lan"), &LaunchFlags::lan);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("set_args_override", "args"),
@@ -118,12 +128,22 @@ String LaunchFlags::lan_host() {
 	return to_gd(parse().lan_host);
 }
 
+PackedStringArray LaunchFlags::lan_rotation() {
+	PackedStringArray out;
+	for (const std::string &name : parse().lan_rotation) out.push_back(to_gd(name));
+	return out;
+}
+
 String LaunchFlags::lan_join_ip() {
 	return to_gd(opennova::launch_lan_join_endpoint(parse(), 0).ip);
 }
 
 int LaunchFlags::lan_join_port(int fallback) {
 	return opennova::launch_lan_join_endpoint(parse(), fallback).port;
+}
+
+bool LaunchFlags::lan_join_browse() {
+	return opennova::launch_lan_join_endpoint(parse(), 0).browse;
 }
 
 int LaunchFlags::lan_port(int fallback) {
@@ -164,6 +184,29 @@ String LaunchFlags::novaworld_host() {
 
 int LaunchFlags::mcp_port() {
 	return parse().mcp_port;
+}
+
+bool LaunchFlags::screen_shot_tga() {
+	return parse().screenshot_tga;
+}
+
+String LaunchFlags::screen_shot_path() {
+	const String dir = working_dir();
+	const std::string name = opennova::gameprofile::screenshot_file_name(
+			[&dir](const std::string &p_name) { return FileAccess::file_exists(dir.path_join(to_gd(p_name))); },
+			screen_shot_tga());
+	return name.empty() ? String() : dir.path_join(to_gd(name));
+}
+
+PackedByteArray LaunchFlags::screen_shot_tga_file(const PackedByteArray &rgba, int width, int height) {
+	PackedByteArray out;
+	if (width <= 0 || height <= 0 || rgba.size() < int64_t(width) * height * 4) return out;
+	std::vector<uint8_t> file;
+	std::string error;
+	if (!opennova::tga::tga_write_screenshot(rgba.ptr(), uint32_t(width), uint32_t(height), file, error)) return out;
+	out.resize(int64_t(file.size()));
+	std::copy(file.begin(), file.end(), out.ptrw());
+	return out;
 }
 
 bool LaunchFlags::no_hud() {

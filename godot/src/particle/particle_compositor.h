@@ -71,6 +71,8 @@ private:
 	class Impl;
 	std::unique_ptr<Impl> impl_;
 
+	void create_device_on_render_thread();
+
 protected:
 	static void _bind_methods();
 
@@ -78,6 +80,12 @@ public:
 	ParticleCompositorEffect();
 	~ParticleCompositorEffect() override;
 
+	// The particle materials' device objects, created as the effect system's atlases build
+	// (ParticleRenderer::create_particle_devices): the particle shader with its sampler,
+	// fallback scene texture and vertex format, and the Distort channel's scene-colour snapshot
+	// shader, queued on the render thread (rd_glsl.h call_device_create). The callbacks' own
+	// creates then find them.
+	void create_device();
 	void publish(const std::shared_ptr<const ParticleWorldSubmission> &p_submission);
 	// Render thread, inside FrameFX's type-0 row: draws the latest submission
 	// (the effect world's distortion subset) over the frame with texture slot 2

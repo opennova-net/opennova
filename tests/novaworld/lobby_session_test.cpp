@@ -702,6 +702,40 @@ NapiMessage player_added(const std::string &number, const std::string &player) {
 	return added;
 }
 
+// A player's add and the update a stock host sends right after it (its changed PlayerList, the
+// Host list's Players as the last server-info update left it): the add's roster count holds until
+// an update carries Players. [orig: Server_PlayerAdd @0x51CBC0 - @0x51D4B5, then
+// CPlayerManager_RebuildLists(0) @0x51D4C6]
+int test_update_without_players_keeps_the_roster_count() {
+	LobbySession sess;
+	LobbyState state;
+	NapiMessage request = make_retail_host_request("880", {});
+	set_list_var(request, "Host", "Players", "0");
+	TEST_EXPECT(sess.dispatch(request, state, "10.0.0.1", 64500).label == "ClientHostRequest");
+	TEST_EXPECT(state.player_count == 0);
+	TEST_EXPECT(sess.dispatch(player_added("1", "bob"), state, "10.0.0.1", 64500).label ==
+			"ClientHostPlayerAdded");
+	TEST_EXPECT(state.player_count == 1);
+	NapiMessage players_only;
+	players_only.name = "ClientHostUpdate";
+	std::vector<test_novaworld::IndexedVar> slot;
+	for (const auto &v : player_slot_vars(1, "bob", "10.0.0.9:32768", "", "1", "0")) slot.push_back(v);
+	players_only.children.push_back(make_indexed_var_list("PlayerList", slot));
+	sess.dispatch(players_only, state, "10.0.0.1", 64500);
+	TEST_EXPECT(state.player_count == 1 && state.roster.size() == 1);
+	NapiMessage refresh;
+	refresh.name = "ClientHostUpdate";
+	refresh.children.push_back(make_client_var_list("Host", {{"Players", "1"}, {"TimeLeft", "9"}}));
+	sess.dispatch(refresh, state, "10.0.0.1", 64500);
+	TEST_EXPECT(state.player_count == 1);
+	NapiMessage other;
+	other.name = "ClientHostUpdate";
+	other.children.push_back(make_client_var_list("Host", {{"Players", "4"}}));
+	sess.dispatch(other, state, "10.0.0.1", 64500);
+	TEST_EXPECT(state.player_count == 4);
+	return 0;
+}
+
 // The roster's bounds (lobby_session.h; service policy): a PlayerNumber / VarFNum
 // outside 0..255 is not kept, a listing keeps at most MaxPlayers + 1 rows (a kept
 // slot still changes; a slot freed takes a new player), every slot while it
@@ -824,6 +858,7 @@ int main() {
 	if (test_update_vars_is_accepted_without_reply() != 0) return 1;
 	if (test_bad_numbers_are_results() != 0) return 1;
 	if (test_roster_bounds() != 0) return 1;
+	if (test_update_without_players_keeps_the_roster_count() != 0) return 1;
 	if (test_unknown_message_returns_no_reply_with_label() != 0) return 1;
 	std::printf("OK: LobbySession dispatch (lifecycle, retail Host/PlayerList lists, RID minting, GLSVSS)\n");
 	return 0;

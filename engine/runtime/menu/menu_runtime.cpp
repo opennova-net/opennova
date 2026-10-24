@@ -345,7 +345,8 @@ void MenuRuntime::on_screen_shown_() {
 	// [orig: UI_DispatchScreenEvent @0x54e6a0 case 5, stricmp(screen, "STARTUP")
 	//  @0x54eeff -> UI_OnStartupScreenActivate @0x5557f0: UI_FindScreenControl(
 	//  g_GameMenu, "STARTUP", "VERSION") @0x555840, then the control's vtable+76
-	//  (CButtonWnd_SetLabel @0x6572f0) with byte_B4C070 @0x555857]
+	//  (CButtonWnd_SetLabel @0x6572f0, the call @0x555857) with g_StartupVersionText (its push
+	//  @0x555852)]
 	if (strutil::iequals(current_screen_, "STARTUP")) {
 		const int version = find_screen_control("STARTUP", "VERSION");
 		const char *text = gameprofile::gameprofile_version_text_for_code(game_code_.c_str());
@@ -761,6 +762,10 @@ std::string MenuRuntime::item_display_text(int id, int row) const {
 std::string MenuRuntime::widget_string(int id, const std::string &key) const {
 	const int index = frame_index(id);
 	return index >= 0 && frame_ != nullptr ? frame_->widget_string(index, key) : key;
+}
+
+std::string MenuRuntime::table_string(const std::string &table, const std::string &key) const {
+	return frame_ != nullptr ? frame_->table_string(table, key) : key;
 }
 
 std::string MenuRuntime::item_value(int id, int row) const {

@@ -7,6 +7,7 @@
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/object_id.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
@@ -26,6 +27,7 @@
 
 namespace godot {
 
+class Camera3D;
 class EffectLightDirector;
 class EffectWorld;
 class EntityPresenter;
@@ -45,7 +47,7 @@ struct NvgLaserSource {
 };
 
 // The frame the beams draw for: the eye (Godot space), the projection's _11,
-// the millisecond clock, the scene fog the beams fold, and the local view's
+// the millisecond clock, the scene fog the beams draw under, and the local view's
 // g_NVGActive and g_CameraMode.
 struct NvgLaserView {
 	Transform3D eye;
@@ -103,7 +105,11 @@ struct NvgLaserView {
 // ctest); this pass compiles the trail rows through it against the render camera
 // and uploads one surface per run of same-material channel draws, in pool order,
 // on the ladder rung of the frame's tracer slot (tracer_rung: the far-side slot
-// while the eye is below the water). The three materials are the witnessed ones
+// while the eye is below the water); the weapon Inset's scene and each
+// rendering water mirror compile the rows again against their own cameras
+// (the effect world's second scene camera, set_mirror_cameras), a mirror's
+// drawn in its own overlay pass (append_mirror_ribbons). The three
+// materials are the witnessed ones
 // (godot/shaders/tracer_ribbon_{stock,smoke,nvg}.gdshader), each fogged per its
 // style's +0 word. The round's item graphic (frndlyTrcrID/foeTrcrID +
 // TRACER_SCALE/TRACER_WIDTH nodes) is D-AI-12d; the light_move glow (round+0x1B4)
@@ -135,6 +141,18 @@ public:
 			const Ref<ResourceRoot> &p_resource_root, MissionEnvironment *p_environment);
 	void teardown();
 
+	// The water mirrors' cameras (env/water.h get_reflection_camera, the weapon
+	// Inset's get_inset_reflection_camera; either null). Each mirror's reflected
+	// subscene runs the pool's main pass under its own view, after both of its
+	// particle passes and ahead of its coronas (engine renderer/tracer_frame.h
+	// TracerView and renderer/scene_overlay.h kMirrorOverlayOrder carry the
+	// witnesses), so while a mirror renders its ribbons are built against its own
+	// camera and drawn in that mirror's overlay pass (append_mirror_ribbons). The
+	// weapon Inset scene's are built against the effect world's second scene
+	// camera while that pass renders, on the bit only its camera admits; the main
+	// view's ribbons ride the bit the beauty camera alone admits.
+	void set_mirror_cameras(Camera3D *p_mirror, Camera3D *p_inset_mirror);
+
 	// Once per present (beside the other passes), after the sim advanced. The
 	// pending-sound countdown consumes logic ticks inside the sim now
 	// (world/fire_sound.h) — this pass only drains and plays. Each drain forwards
@@ -142,6 +160,11 @@ public:
 	// precedent): EntityPresenter's bound legs feed the same rows from tests
 	// without a live sim.
 	void present();
+	// Once per drawn scene frame, after the frame placed its views (GameWorld's
+	// particles leg): the sim's live trails built for every view that draws the
+	// pool, against this frame's cameras and clock (engine
+	// renderer/tracer_frame.h TracerView carries the witness).
+	void draw_frame_tracers();
 	void present_slot_sounds(const std::vector<opennova::world::SoundSlotEvent> &p_events);
 	void present_sound_emitters(const std::vector<opennova::world::SoundEmitterEvent> &p_events);
 	void present_fires(const std::vector<opennova::world::FirePresentationRow> &p_events);
@@ -158,6 +181,15 @@ public:
 	int append_nvg_laser_beams(const std::vector<NvgLaserSource> &p_sources,
 			const NvgLaserView &p_view, SceneOverlaySubmission &r_submission);
 
+	// Each mirror's ribbons of this drawn frame (built by draw_tracer_rows while
+	// it rendered) into its own overlay slot, MirrorTracerRibbons for the main
+	// scene's mirror and InsetMirrorTracerRibbons for the Inset's, on the pool's
+	// combines (renderer::append_tracer_ribbon_overlay) under `p_pass_fog`, the
+	// reflected scene's pass fog, from that mirror's own eye and look direction.
+	// Returns the batches appended.
+	int append_mirror_ribbons(const opennova::renderer::SceneOverlayFog &p_pass_fog,
+			SceneOverlaySubmission &r_submission);
+
 	// Load-time pipeline warm: emit one zero-area surface on each ribbon
 	// material at `position` (must be in frustum so the surfaces actually draw)
 	// so their pipelines compile behind the loading screen instead of as a
@@ -172,13 +204,35 @@ public:
 	// tracer surfaces (surface count, vertex layout, material) without private
 	// reach-ins.
 	Ref<ArrayMesh> ribbon_mesh() const { return mesh_; }
+	// The weapon Inset scene's ribbons, the same read seam.
+	Ref<ArrayMesh> inset_ribbon_mesh() const { return inset_mesh_; }
+	// Water mirror `p_mirror`'s ribbon vertices of this drawn frame (0 the main
+	// scene's mirror, 1 the Inset's; empty while it does not render), in the
+	// build's vertex order.
+	PackedVector3Array mirror_ribbon_vertices(int p_mirror) const;
 
 private:
+	// The two water mirrors: [0] the main scene's, [1] the weapon Inset's.
+	static constexpr size_t kMirrorCount = 2;
+	struct MirrorRibbons {
+		ObjectID camera_id;
+		// The view this drawn frame's ribbons were built against, and the
+		// ribbons (none while the mirror does not render).
+		opennova::renderer::TracerView view;
+		opennova::renderer::TracerRibbonFrame frame;
+	};
+
 	Simulation *sim() const;
 	MissionAudio *audio() const;
 	EffectWorld *fx() const;
 	EffectLightDirector *lights() const;
 	MissionEnvironment *environment() const;
+	// The weapon Inset scene's camera (the effect world's second scene camera)
+	// and mirror `p_mirror`'s, while that view renders, else null.
+	Camera3D *rendering_inset_camera() const;
+	Camera3D *rendering_mirror_camera(size_t p_mirror) const;
+	// The main view's ribbon instance's layer (the pipeline warm's own aside).
+	void set_main_ribbon_layer(uint32_t p_layer);
 	void free_mesh_instance();
 
 	EntityPresenter *owner_ = nullptr;
@@ -194,6 +248,10 @@ private:
 	opennova::renderer::TracerRibbonFrame frame_;
 	opennova::renderer::TracerRibbonFrame distortion_frame_;
 	opennova::renderer::TracerRibbonFrame laser_frame_; // one beam's ribbon, reused
+	opennova::renderer::TracerRibbonFrame inset_frame_; // the Inset scene's ribbons, reused
+	Ref<ArrayMesh> inset_mesh_;
+	ObjectID inset_mesh_instance_id_;
+	std::array<MirrorRibbons, kMirrorCount> mirrors_;
 	std::vector<opennova::renderer::TracerChannelInput> channels_;
 	int64_t stat_fires_ = 0;
 	int64_t stat_sounds_ = 0;

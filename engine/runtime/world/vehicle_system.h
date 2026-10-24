@@ -21,6 +21,8 @@
 namespace opennova::world {
 
 class World;
+struct AiBrain;
+struct UseScanWatch;
 struct WeaponTableEntry;
 
 class VehicleSystem {
@@ -41,6 +43,10 @@ public:
     // prediction and sound legs. A row without traits has no vehicle mover.
     void update_motor(Entity &row, bool is_authority);
 	void initialize_mission_vehicles();
+	// The mission start's deck pass over the player spawn markers, ahead of the
+	// vehicle settle (initialize_mission_vehicles calls it). [orig:
+	//  Game_StartMission @0x525E6D..0x525F58]
+	void localize_deck_spawn_markers();
 	void build_spawn_markers();
 	void tick_spawn_markers();
 	void capture_spawn_pose(Entity &vehicle);
@@ -60,8 +66,8 @@ public:
 	// requester's relation changed: it attached, or it left a seat before a refusal.
 	// Ported validation order [orig: Entity_ProcessVehicleAttach @0x435AA0]:
 	//   1. resolve both handles; reject a missing entity, a carrier with no item def, or
-	//      either side dead (Flags & 2 / health <= 0) [orig: @0x435b01, the item def
-	//      @0x435aed..0x435af1];
+	//      either side's dead bit (Flags & 2 alone, D-NET-557 / D-NET-586) [orig: @0x435b01,
+	//      the item def @0x435aed..0x435af1];
 	//   2. seat classification: the vehicle seat whose bone_index matches the wire bone
 	//      [orig: Entity_GetBoneSlotType @0x434ED0 classifies the MODEL USRP row name —
 	//      48-byte rows, name +32, 1-based index; sitex 1 / ctrlx 2 / drvrx 5 / UseGun 3].
@@ -69,8 +75,10 @@ public:
 	//   3. enemy-occupant gate: reject when a LIVE ENEMY already occupies the vehicle
 	//      [orig: Vehicle_HasEnemyOccupant @0x4359F0 — scans pool 0, skips dead/self/
 	//      same-team; same-team occupants never block multi-seat co-boarding];
-	//      (the weapon-busy gate on EquippedSlot->currentAction [orig: @0x435b29] is
-	//      unmodeled — no weapon action state server-side; tracked in D-NET-157)
+	//      after the authority's weapon-busy gate: the requester's EquippedSlot action
+	//      past EmptyIdle and not Overheated refuses [orig: @0x435B18..0x435B38]
+	//      (equipped_slot_busy; a remote player's own row is read as the walk runs
+	//      it, D-NET-336)
 	//   4. seat occupancy: an occupied matching seat / an already-taken wire bone rejects
 	//      [orig: @0x435ba9 mountHandles[idx] != 0xFFFF];
 	//   5. an already-mounted requester detaches first [orig: @0x435bce];
@@ -144,8 +152,9 @@ public:
     // carrying the queued Co-op mount latch (Flags 0x200) reports the best free
     // seat of its groundEntity carrier or nothing; otherwise the
     // nearest-free-seat scan above (seats mode). [orig: Entity_TryEnterNearestVehicle
-    // @0x4368CF..0x43691A]
-    bool find_mount_toggle_candidate(const Entity &player, VehicleSeatSelection &r_hit, const VehicleOccupancySource *source = nullptr);
+    // @0x4368CF..0x43691A]. A non-null `watch` (the USE readout, use_press_trace.h) takes the
+    // gate the scan stopped its entity at; it changes nothing the scan decides.
+    bool find_mount_toggle_candidate(const Entity &player, VehicleSeatSelection &r_hit, const VehicleOccupancySource *source = nullptr, UseScanWatch *watch = nullptr);
     // The floating seat/armory label list for the local player, a structural translation of
     // the selection half of [orig: HUD_DrawVehicleSeatAndArmoryLabels @0x5a3290]:
     //  - no nearest scan hit -> no labels at all [orig: the Entity_FindNearestSeatOrArmory
@@ -196,7 +205,8 @@ public:
     // Clears the claim and emits vehicle_control_stopped iff `occupant` IS the claimant —
     // a second control-seat occupant staying aboard does NOT keep the engine running.
     // [orig: Entity_DetachFromVehicle @0x4355f0 — `occupantEntity == entity` gate @0x4356e9,
-    // emitter release + engine-stop sound @0x435716..0x435759, +368 clear @0x43577c]
+    // emitter release + engine-stop sound @0x435716..0x435759, +368 clear @0x43577c; the
+    // local claimant's EquippedSlot phase = 64 @0x43578C..0x435794]
     bool release_primary_occupant(Entity &vehicle, EntityHandle occupant);
     // A joiner's decoded remote organics live outside the native pools; the joiner
     // binds itself here so the +368 readers still see a remote claimant. Null on the
@@ -210,21 +220,63 @@ public:
     const Entity *claimant(const Entity &vehicle, Entity &scratch) const;
     bool claimant_present(const Entity &vehicle) const;
     // Swap a UseGun occupant to the parent's embedded weapon slot, preserving the
-    // personal equipped AdmDef for detach. Returns true once the parent weapon resolves.
-    // [orig: Entity_AttachToUseGunSlot @0x546b80..0x546c73]
-    bool bind_use_gun_slot(Entity &occupant, Entity &vehicle);
-    // Resolve an entity's authored primary_weapon into its embedded MountSlot and
-    // seed clip/reserve when the weapon table becomes available. Entity promotion
-    // can precede armory loading, so callers use this at the first live slot edge.
-    bool prepare_weapon_slot(Entity &vehicle);
+    // personal equipped AdmDef for detach. The slot is the one the parent's class init
+    // bound: the attach stores its owner and touches nothing else in it.
+    // [orig: Entity_AttachToUseGunSlot @0x546b80..0x546c73 (the owner store @0x546c73)]
+    void bind_use_gun_slot(Entity &occupant, Entity &vehicle);
+    // A slot owner's entity leaving the world takes the owner word off every MountSlot that
+    // names it. Retail's word outlives the entity as a pointer into its destroyed pool slot
+    // (Entity_ClearAllReferences clears the AI words alone, then the entity's head is zeroed),
+    // so its pump reads whatever that slot holds next. An EntityHandle carries no generation
+    // either: a kept handle would resolve to the slot's next occupant. This clear is what
+    // keeps a pump from running its handlers for that occupant (a port-only clear).
+    // [orig: Entity_Destroy @0x43E810 - the Entity_ClearAllReferences call @0x43E921, the
+    //  memset @0x43EA70; Entity_ClearAllReferences @0x465670; WeaponAction_ProcessFrame
+    //  @0x540E60 - the slot->owner read @0x540E95]
+    void release_despawned_slot_owner(EntityHandle gone);
+    // The entity's embedded MountSlot cleared, then bound to the weapon its def's
+    // primary_weapon names and seeded from that weapon: the scope words, the clip word
+    // (the def's clipsize), the reserve word (raw startrounds when either word is 0xFFFF,
+    // else their 16-bit difference). An empty or unknown name leaves the slot clear and
+    // unbound (false). Retail runs it only from the class inits below.
+    // [orig: WeaponSlot_InitFromEntityDef @0x5466C0]
+    bool init_weapon_slot_from_entity_def(Entity &entity);
+    // The bound slot's clip and reserve split from `total` rounds: none when the slot's
+    // weapon is clipless or its startrounds is -1, else the total capped at startrounds,
+    // the clip the clipsize capped at that total, the reserve the rest.
+    // [orig: WeaponSlot_SplitAmmoIntoClipAndReserve @0x546370 (the +0x2B4 slot);
+    //  WeaponSlot_SplitVehicleAmmoIntoClipAndReserve @0x546310 (the +0x474 slot)]
+    void split_weapon_slot_ammo(Entity &entity, int32_t total);
+    // The slot leg of the entity's def+0x148 class init: an ewep row binds its slot and,
+    // with its model loaded and a weapon bound, splits its startrounds; a CHel / cpln row
+    // whose def carries EWeap does the same without the model test. Every other row's init
+    // touches no slot. The mission start, a deployable and its addeweap children, a
+    // joiner's arriving rows and a vehicle's respawn run it; no mount does.
+    // [orig: Entity_InitBoneReferences @0x441470 (the ewep row's init dword @0x81309C); the
+    //  CHel / cpln rows' Entity_InitHelicopterAIFromDef @0x4683C0 -> Entity_InitInfantryBoneData
+    //  @0x490160]
+    void run_weapon_slot_class_init(Entity &entity);
+    // The mission start's pass of that leg over pools 2, 3, 1 and 0, as the model init
+    // runs the class inits; ours runs it as the armory lands (MissionKernel::load_weapon_table).
+    // [orig: Entity_InitAllFromModels @0x40E460]
+    void run_weapon_slot_class_inits();
     const WeaponSlotState *resolve_mounted_ammo_slot(const Entity &mount) const;
     // Resolve the EWeap MountSlot selected by retail's live route bit. A type-1
     // vehicle uses its own embedded slot. An attached non-vehicle EWeap uses its
-    // own slot until redirect_to_parent_slot is set, then follows the exact
-    // groundEntity relationship to a live type-1 EWeap carrier. Invalid/stale
-    // routes return null rather than falling back to attachment metadata.
-    // [orig: shared helper @0x5460e0; NetPacket_WritePlayerState @0x4ffe18]
+    // own slot until redirect_to_parent_slot is set, then its groundEntity's slot,
+    // read with no check of that entity; no groundEntity resolves null.
+    // [orig: Entity_GetWeaponSlots @0x5460E0]
     WeaponSlotState *resolve_mounted_ammo_slot(Entity &mount);
+    // The phase-8 mount-ammo record's slot: its writer and its reader each inline
+    // the route and, with the route bit set, repeat the setter's four groundEntity
+    // checks (designated_g_route_carrier); a failed check resolves no slot (the
+    // writer's zero words, the reader's ignored words).
+    // [orig: NetPacket_WritePlayerState @0x4FF6B0 (the route @0x4FFE18, the ground
+    //  checks @0x4FFE27..0x4FFE3F, the zero words @0x4FFE7F); NapiNPClientMsg_0x00A
+    //  @0x42FEC0 (the route @0x4304FD, the ground checks @0x43050C..0x430524, the
+    //  stores @0x43053D / @0x430541)]
+    const WeaponSlotState *resolve_phase8_ammo_slot(const Entity &mount) const;
+    WeaponSlotState *resolve_phase8_ammo_slot(Entity &mount);
     // An EWeap entity's reload: the routed slot and its def with the entity's own
     // slot and def (weapon_mount_slot_reload). False when the slot resolves to
     // nothing. [orig: WeaponSlot_ReloadAmmo @0x541720 -> Entity_GetWeaponSlots
@@ -242,34 +294,42 @@ public:
     // and other seats at vehicle.yaw+yaw_offset. Shared by every attach path and the AI
     // tick's per-frame seat follow. [orig: the UseGun attach Entity_AttachToBoneAndUpdateTransform @0x5463d0; ordinary seats Entity_GetBoneTransformAndOrientation @0x4b0c50]
     MountedPose pose_mounted_occupant(Entity &occ, const Entity &vehicle, const Seat &seat);
+    // The seat a rider poses on: its slot row when that row holds the rider's bone,
+    // else the carrier's off-table row of that bone (an off-table sitex rider holds
+    // no slot; an off-table ctrlx / drvrx / UseGun rider holds slot 8 / 9 but sits on
+    // its own bone, which retail poses by +0x157), else its slot row. False when the
+    // rider names neither.
+    // [orig: Entity_AttachToVehicleSlot @0x4946D0 (the stores @0x494752..0x494775);
+    //  the per-tick pose by attachBoneId, Entity_GetBoneTransformAndOrientation @0x4B0C50]
+    bool rider_seat(const Entity &occ, const Entity &carrier, Seat &out) const;
     // The controlling occupant of a PlayerControl vehicle: the first live, internally
     // consistent Controller/Driver seat occupant, with the per-tick stale-slot sweep and the
     // +368 claimant validation. [orig: the occupant sweep @0x48b8a1-0x48b944 in
     // Entity_UpdateVehiclePhysics @0x48af00]
     Entity *resolve_controller(Entity &veh);
     // One tick of the ground-vehicle motor for `veh` (a pool-1 entity whose traits
-    // carry a non-zero `physics` selector, or any ctank/cbike row). Consumes the
-    // controlling occupant's replicated input (or the AI-driver command when the
-    // controller is an NPC), advances Entity::position / Entity::yaw and the
-    // persistent Entity::veh motor state. `prediction` skips only the role-gated
-    // input block: ground_client_tick has already staged the registers.
+    // carry a non-zero `physics` selector, or any ctank/cbike row). Its occupant
+    // block, after the head, takes the controlling occupant's replicated input or
+    // runs the AI-driver leg (AiSystem::vehicle_ai_drive) or the parked arm in
+    // place; it advances Entity::position / Entity::yaw and the persistent
+    // Entity::veh motor state. `prediction` skips only the role-gated input block:
+    // ground_client_tick has already staged the registers.
     // [orig: Entity_UpdateVehiclePhysics @0x48af00 — the drive core;
     // block-level cites inline]
-    void tick_motor(Entity &veh, const VehicleTraits &traits,
-            const VehicleDriveCmd *ai_cmd = nullptr, bool prediction = false);
+    void tick_motor(Entity &veh, const VehicleTraits &traits, bool prediction = false);
 	// Watercraft prediction runs the received-register chase, local-driver reconciliation and the
 	// full motor/platform solve. The shared state includes speed, steer, heave, pitch, roll,
 	// planing, water/air flags and wreck latches; authority-only damage remains gated.
 	// Witness sites: [orig: @0x48D480, @0x481870, @0x48ECE7, @0x45AEA0]
 	void watercraft_platform_solve(Entity &veh, const VehicleTraits &traits);
 	void watercraft_client_tick(Entity &veh, const VehicleTraits &traits);
-    // One AUTHORITY tick of the watercraft motor (the host-side cbot mover): the
-    // occupant/AI/parked input staging behind the witnessed gate, capsize damage,
-    // then the same steer/thrust/drag/contact/integration core the client subset
-    // runs. The AI command block comes from AiSystem::watercraft_ai_drive.
+    // One AUTHORITY tick of the watercraft motor (the host-side cbot mover): capsize
+    // damage, the occupant / AI / parked input block behind the witnessed gate (the
+    // AI leg AiSystem::watercraft_ai_drive run in place), then the same
+    // steer/thrust/drag/contact/integration core the client subset runs.
     // [orig: Entity_UpdateWatercraftPhysics @0x48D480 — the authority path behind
     // the @0x48DF8C..0x48DFA2 input gate; witnessed 2026-08-06]
-    void tick_watercraft_motor(Entity &veh, const VehicleTraits &traits, const VehicleDriveCmd *ai_cmd = nullptr);
+    void tick_watercraft_motor(Entity &veh, const VehicleTraits &traits);
     // The GROUND/Bike prediction leg: shared chase + local-driver input or mirrored
     // remote registers driving tick_vehicle_motor's core with the input block bypassed;
     // the Bike family selects its witnessed gravity/contact/yaw deltas in that core.
@@ -301,13 +361,28 @@ public:
     //  free decay; the resolved `depth −= Δ` lifts the corner. `depth` is
     //  in/out; `corner_adj` receives the catch-up term.
     void suspension_grounded_loop(Entity &veh, const VehicleTraits &traits, int wheels, int32_t depth[4], const bool contact[4], int32_t growth, int32_t corner_adj[4]);
+    // 3a'. The aircraft's GROUNDED spring loop [orig: Entity_ProcessAircraftContactPhysics
+    //  @0x47EF10, the loop @0x4811A2..0x481447]: the tracked loop's impulse, settle
+    //  term and compress/oscillate arms, but its catch-up runs for a pad off the
+    //  ground unless the hull is crashed and moving (speed >= 32), only past one
+    //  growth step, and a diagonal pair in contact clears the hard-landing marker.
+    void suspension_air_grounded_loop(Entity &veh, const VehicleTraits &traits,
+			int32_t depth[4], const bool contact[4], int32_t growth, int32_t corner_adj[4]);
+    // 3a''. The bike's GROUNDED spring loop [orig: Entity_ProcessLightVehiclePhysics @0x479600,
+    //  the loop @0x47B8CE..0x47BB7D]: two wheels and no crash gate; the catch-up only past one
+    //  growth step, with no hard-landing marker; the tracked loop's impulse, settle term and
+    //  compress arm; the free decay gated on the two wheel sinks.
+    void suspension_bike_grounded_loop(Entity &veh, const VehicleTraits &traits, int32_t depth[2],
+			const bool contact[2], int32_t corner_adj[2]);
     // 3b. The AIRBORNE spring loop [orig: @0x47E283..0x47E344], gated on
     //  settle_2f0 == 0: energy > 0 → compress by the full 4095 step, else amp != 0
-    //  → free decay; then the catch-up under !crashed && !crash_request.
+    //  → free decay; then the catch-up under !crashed && !crash_request. The
+    //  aircraft's twin (latch_gated false) has neither gate [orig:
+    //  Entity_ProcessAircraftContactPhysics @0x47EF10, the loop @0x480E06..0x480EA8].
 	void suspension_tank_loop(Entity &veh, const VehicleTraits &traits, bool on_ground,
 			int32_t depth[4], const bool contact[4], int32_t corner_adj[4]);
 	void suspension_airborne_loop(Entity &veh, const VehicleTraits &traits, int wheels,
-			int32_t growth, int32_t corner_adj[4]);
+			int32_t growth, int32_t corner_adj[4], bool latch_gated = true);
 	// 3c. The bike's own airborne loop [orig: @0x47B401..0x47B4E6]: no settled or
 	//  crash gate; the corner droop (sink − 100) × −1.5 runs while fwd.z > −0x1000
 	//  or the flight is under 16 ticks, and the rear sink clears inside 500 of a
@@ -342,7 +417,7 @@ public:
 	// sits above the water plane, the all-zero fold plus slot 31 (hull +0x18000)
 	// when the claimant leaves. The selector-zero boat runs it at its HEAD, inside
 	// the PlayerControl block before the authority split, with its lights edge
-	// at the tail [orig: Entity_ProcessAirVehiclePhysics @0x470055..0x4700EB].
+	// at the tail [orig: Vehicle_ProcessSelectorZeroBoat @0x470055..0x4700EB].
 	void update_claimant_engine_sound(Entity &vehicle, const VehicleTraits &traits);
 	void play_contact_sound(Entity &vehicle, const VehicleTraits &traits, int slot);
 	void update_rotor_sound(Entity &vehicle, const VehicleTraits &traits);
@@ -378,8 +453,13 @@ public:
 	// Shared mover-head health cadence [orig: cveh @0x48AFFD, cbik @0x4840DD,
 	// ctan @0x488BAD, cbot @0x48D561, CHel/cpln @0x4903F4].
 	void tick_health(Entity &veh, const VehicleTraits &traits);
-	void tick_simple_motor(
-			Entity &, const VehicleTraits &, const VehicleDriveCmd *, bool prediction);
+	void tick_simple_motor(Entity &, const VehicleTraits &, bool prediction);
+	// The selector-zero ground mover's AI leg, run in place in the mover over the
+	// brain's words (a client's are zero): it writes the command registers
+	// (steer_target_bam, cmd_speed; steer_ramp_bam only in the boarders' hold) and
+	// the brain's state, +0x21C and turn-budget words.
+	// [orig: Vehicle_ProcessSelectorZeroGround @0x46E100 (@0x46ECB1..0x46F0D0)]
+	void simple_ground_ai_leg(Entity &e, const VehicleTraits &traits, AiBrain &brain);
 	void slew_turret(Entity &veh, int32_t step);
 	// ActionDef+52 rocks the tank carrying an occupied emplacement, against
 	// the direction of the gun's point for the fired slot (`fired` def, its

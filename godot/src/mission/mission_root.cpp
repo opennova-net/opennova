@@ -1,7 +1,5 @@
 #include "mission/mission_root.h"
 
-#include <runtime/mission/mission_sidecars.h>
-
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
@@ -123,64 +121,46 @@ Node3D *MissionRoot::container() const {
 			: nullptr;
 }
 
-int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
+int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData> &p_mission,
 		const Ref<MissionSetupOptions> &p_options) {
-	Ref<MissionSetupOptions> options = p_options;
-	if (options.is_null()) {
-		options.instantiate();
-	}
-	clear_present_effect_poses();
-	setup_error_ = OK;
-	process_exit_ = false;
-	mission_ = p_mission;
-	// A remote join may already own the live socket + NP session while it waits
-	// for S2C 0x7B to identify the mission. Keep that exact connection across the
-	// wire-header world construction instead of reconnecting after discovery. Standalone host/SP and
-	// isolated test/tooling callers do not provide a simulation and retain the fresh-instance path.
-	sim_ = options->get_simulation();
-	if (sim_.is_null()) {
-		sim_.instantiate();
+	if (r_sim.is_null()) {
+		r_sim.instantiate();
 		// `--capture-pcap <path>` (LaunchFlags) records this process's datagrams.
-		sim_->set_capture_pcap_path(LaunchFlags::capture_pcap());
+		r_sim->set_capture_pcap_path(LaunchFlags::capture_pcap());
 	}
-	sim_->set_music_director(options->get_music_director());
-	sim_->set_frame_stats(frame_stats_);
-	has_trace_stats_sampling_ = sim_.is_valid();
-	sync_runtime_profiling();
-	mission_file_ = options->get_mission_file().replace("\\", "/").get_file();
-	mission_name_ = options->get_mission_name();
-	if (mission_name_.is_empty() && p_mission.is_valid()) {
-		mission_name_ = p_mission->get_mission_name().strip_edges();
-	}
-	if (mission_name_.is_empty() && !mission_file_.is_empty()) {
-		mission_name_ = mission_file_.get_file().get_basename();
-	}
-
 	// The listen host stamps its own type-2 connection during role bring-up, so
 	// its two per-side character selections must already be present here. The
 	// same profile is what a joiner uploads through ClientAuth.
 	// [orig: Game_ApplySessionSettingsToGlobals @0x551500;
 	//  Server_PlayerAdd @0x51CBC0 -> packed id @0x51D0B1]
-	if (options->get_local_character_profile().is_valid()) {
-		sim_->set_local_character_profile(options->get_local_character_profile());
+	if (p_options->get_local_character_profile().is_valid()) {
+		r_sim->set_local_character_profile(p_options->get_local_character_profile());
 	}
 	// The player profile's current records ahead of the boot: single player's
 	// session words are the record's (the session config the boot builds).
-	if (options->get_player_profiles().is_valid()) {
-		sim_->use_player_profile(options->get_player_profiles());
+	if (p_options->get_player_profiles().is_valid()) {
+		r_sim->use_player_profile(p_options->get_player_profiles());
 	}
 	// The process's cfg block, whose mpreset word every session create reads.
-	if (options->get_game_config().is_valid())
-		sim_->use_game_config(options->get_game_config());
+	if (p_options->get_game_config().is_valid())
+		r_sim->use_game_config(p_options->get_game_config());
+	// The process's map-rotation words, which a session hands the next (D-NET-353).
+	r_sim->use_host_rotation(p_options->get_host_rotation());
+	// The process's server log devices, which every hosted session writes.
+	r_sim->use_log_devices(p_options->get_log_devices());
+	r_sim->set_controls_model(p_options->get_controls_model());
+	// The process's client words, which every hosted session's own client steps on.
+	r_sim->use_client_process(p_options->get_client_process());
+	// The single player's restart boot (Game_RestartRoundSP's Game_StartMission(1)).
+	r_sim->set_restart_boot(p_options->get_restart_boot());
 	// P7 / ADR 0011: every authoritative live mission is an in-process listen server, stood up BEFORE
 	// load; the host player auto-spawns at bring-up (faithful §5.0 mode-3). MainGame/GameWorld is the
 	// sole live runtime owner (ADR 0025). Isolated tests may instantiate this same
 	// seam. A co-op LAN host additionally binds a real UDP
 	// socket; a joiner is the non-authority client.
-	const bool playable = options->get_playable();
-	const Ref<JoinTarget> join_target = options->get_join_target();
-	const Ref<HostSessionOptions> host_session = options->get_host_session();
-	const bool is_joiner = join_target.is_valid() || sim_->is_joiner();
+	const Ref<JoinTarget> join_target = p_options->get_join_target();
+	const Ref<HostSessionOptions> host_session = p_options->get_host_session();
+	const bool is_joiner = join_target.is_valid() || r_sim->is_joiner();
 	if (is_joiner) {
 		// Co-op LAN JOINER (a non-authority client): dial the host and run the witnessed
 		// in-match JOIN. The local player L is spawned on the name-match (inside the sim's
@@ -188,45 +168,46 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 		// A preconnected simulation already completed this socket leg while the loading
 		// screen was up; do not replace its connection, restart its handshake, or
 		// reload charattr after ordered S2C 0x41 mutations have already landed.
-		const bool needs_join_connection = !sim_->is_joiner();
-		if (needs_join_connection && options->get_resource_root().is_valid()) {
-			sim_->load_charattr(options->get_resource_root());
+		const bool needs_join_connection = !r_sim->is_joiner();
+		if (needs_join_connection && p_options->get_resource_root().is_valid()) {
+			r_sim->load_charattr(p_options->get_resource_root());
 		}
 		// The title the mounted game speaks, the joiner's identity; one whose identity is
 		// not witnessed has none to join with, so the joiner does not dial.
 		bool join_identity = true;
-		if (needs_join_connection && options->get_resource_root().is_valid()) {
+		if (needs_join_connection && p_options->get_resource_root().is_valid()) {
 			std::string title_error;
 			const opennova::TitleIdentity *title =
-					options->get_resource_root()->title_identity(title_error);
+					p_options->get_resource_root()->title_identity(title_error);
 			if (title == nullptr) {
 				UtilityFunctions::push_warning(vformat("MissionRoot: no identity to join with: %s",
 						opennova::to_gd(title_error)));
 				join_identity = false;
 			}
-			sim_->set_title(title);
+			r_sim->set_title(title);
 		}
-		if (needs_join_connection && options->get_join_character_profile().is_valid()) {
-			sim_->set_join_character_profile(options->get_join_character_profile());
+		if (needs_join_connection && p_options->get_join_character_profile().is_valid()) {
+			r_sim->set_join_character_profile(p_options->get_join_character_profile());
 		}
-		if (needs_join_connection && join_target.is_valid() && join_identity && !sim_->enable_join(
+		// The join's JSR and JSPP: the cfg block's join-screen words, as the session
+		// drive's dial sends them (GameConfigBlock::join_choice; D-NET-NEW-L2-12).
+		int join_role = JoinTarget::ROLE_PLAYER;
+		String spectator_password;
+		if (needs_join_connection && join_target.is_valid())
+			GameConfigBlock::join_choice(p_options->get_game_config(), join_target, join_role,
+					spectator_password);
+		if (needs_join_connection && join_target.is_valid() && join_identity && !r_sim->enable_join(
 				join_target->get_host_ip(), join_target->get_port(),
-				join_target->get_player_name(), join_target->get_join_role(),
-				join_target->get_spectator_password(), join_target->get_server_password())) {
+				join_target->get_player_name(), join_role,
+				spectator_password, join_target->get_server_password())) {
 			UtilityFunctions::push_warning(vformat(
-					"MissionRoot: could not dial co-op host %s:%d — joiner disabled.",
+					"MissionRoot: could not dial co-op host %s:%d: joiner disabled.",
 					join_target->get_host_ip(), join_target->get_port()));
-		}
-		// The proxy-assisted NovaWorld join rides the same target (the preloaded
-		// drive path installs it at its own dial).
-		if (needs_join_connection && join_target.is_valid() && join_target->has_join_proxy() &&
-				sim_->is_joiner()) {
-			sim_->set_join_proxy(join_target->get_join_proxy());
 		}
 		// The JOIN VERSIONCRCSTRING checksum reads the loose
 		// expansion/<name>/version.txt under the install root (D-NET-166).
-		if (needs_join_connection && options->get_resource_root().is_valid()) {
-			sim_->set_join_expansion_version_root(options->get_resource_root()->get_root_dir());
+		if (needs_join_connection && p_options->get_resource_root().is_valid()) {
+			r_sim->set_join_expansion_version_root(p_options->get_resource_root()->get_root_dir());
 		}
 	} else if (host_session.is_valid()) {
 		// Co-op LAN HOST: the typed session request already projected to the sim's
@@ -243,18 +224,18 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 			}
 			session_options->set_game_type(NetProtocol::game_type_for_mission_mode(mission_mode));
 		}
-		String mission_name = options->get_mission_name().strip_edges();
+		String mission_name = p_options->get_mission_name().strip_edges();
 		if (mission_name.is_empty() && p_mission.is_valid()) {
 			mission_name = p_mission->get_mission_name().strip_edges();
 		}
-		if (mission_name.is_empty() && !options->get_mission_file().is_empty()) {
-			mission_name = options->get_mission_file().get_basename();
+		if (mission_name.is_empty() && !p_options->get_mission_file().is_empty()) {
+			mission_name = p_options->get_mission_file().get_basename();
 		}
-		if (!options->get_mission_file().is_empty()) {
-			session_options->set_mission_file(options->get_mission_file());
+		if (!p_options->get_mission_file().is_empty()) {
+			session_options->set_mission_file(p_options->get_mission_file());
 		}
-		if (!options->get_spawn_names().is_empty()) {
-			session_options->set_spawn_names(options->get_spawn_names());
+		if (!p_options->get_spawn_names().is_empty()) {
+			session_options->set_spawn_names(p_options->get_spawn_names());
 		}
 		if (!mission_name.is_empty()) {
 			session_options->set_mission_name(mission_name);
@@ -268,48 +249,93 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 		// CRC'd from the loose expansion/<name>/version.txt under the install root;
 		// the join gate compares it against each joiner's VERSIONCRCSTRING while an
 		// expansion is active (D-NET-166).
-		if (options->get_resource_root().is_valid()) {
-			session_options->set_game_root(options->get_resource_root()->get_root_dir());
+		if (p_options->get_resource_root().is_valid()) {
+			session_options->set_game_root(p_options->get_resource_root()->get_root_dir());
 		}
 		// The title the mounted game speaks, the host's identity: a host without a
 		// witnessed one would answer no joiner, so it does not host.
-		if (options->get_resource_root().is_valid()) {
+		if (p_options->get_resource_root().is_valid()) {
 			std::string title_error;
 			const opennova::TitleIdentity *title =
-					options->get_resource_root()->title_identity(title_error);
+					p_options->get_resource_root()->title_identity(title_error);
 			if (title == nullptr) {
 				UtilityFunctions::push_warning(vformat("MissionRoot: no identity to host with: %s",
 						opennova::to_gd(title_error)));
-				setup_error_ = ERR_UNCONFIGURED;
-				sim_.unref();
-				has_trace_stats_sampling_ = false;
-				return 0;
+				r_sim.unref();
+				return ERR_UNCONFIGURED;
 			}
-			sim_->set_title(title);
+			r_sim->set_title(title);
 		}
 		// The loose score.ini overlays the session's score table inside the
 		// boot, ahead of the bring-up (inmatch/host_boot.h).
-		sim_->configure_host_session(session_options);
+		r_sim->configure_host_session(session_options);
 		// A NovaWorld host's match rides its NovaWorld session's socket (D-NET-346).
-		const Ref<UdpPump> host_pump = options->get_host_pump();
-		const bool listening = host_pump.is_valid() ? sim_->enable_host_listen_on(host_pump)
-		                                            : sim_->enable_host_listen(host_session->get_bind_port());
+		const Ref<UdpPump> host_pump = p_options->get_host_pump();
+		const bool listening = host_pump.is_valid() ? r_sim->enable_host_listen_on(host_pump)
+		                                            : r_sim->enable_host_listen(host_session->get_bind_port());
 		if (!listening) {
 			// A requested LAN host that cannot own its UDP endpoint is not a host.
 			// Never degrade into the visually-identical socketless SP/listen path:
 			// the caller must surface the bind failure and keep the menu active.
-			setup_error_ = ERR_CANT_CREATE;
-			sim_.unref();
+			r_sim.unref();
+			return ERR_CANT_CREATE;
+		}
+	} else if (!r_sim->is_host_listening()) {
+		// Standalone SP (or an isolated tooling/test preview): the in-process listen server. Live
+		// play reaches this branch only through GameWorld. The host player spawns at the mission
+		// start's round init.
+		// A host's map change brings its live session (its role, its bound socket and its
+		// connections) in the simulation the drive kept, and boots the next map inside it.
+		r_sim->enable_listen_server(true);
+	}
+	return OK;
+}
+
+int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
+		const Ref<MissionSetupOptions> &p_options) {
+	Ref<MissionSetupOptions> options = p_options;
+	if (options.is_null()) {
+		options.instantiate();
+	}
+	// The setup's split (an instrument, the verbose line at its end): the session's stage, the
+	// mission boot, the index and the presenter.
+	const int64_t setup_start = now_usec();
+	clear_present_effect_poses();
+	setup_error_ = OK;
+	process_exit_ = false;
+	mission_ = p_mission;
+	// A remote join may already own the live socket + NP session while it waits
+	// for S2C 0x7B to identify the mission. Keep that exact connection across the
+	// wire-header world construction instead of reconnecting after discovery. Standalone host/SP and
+	// isolated test/tooling callers do not provide a simulation and retain the fresh-instance path.
+	// The session half: the world's load staged it at its start for a fresh host or single
+	// player, its session created ahead of its own loads (stage_simulation; Simulation::
+	// create_host_session); every other caller stages it here.
+	sim_ = options->get_simulation();
+	if (!options->get_session_staged()) {
+		const int stage_error = stage_simulation(sim_, p_mission, options);
+		if (stage_error != OK) {
+			setup_error_ = stage_error;
 			has_trace_stats_sampling_ = false;
 			return 0;
 		}
-	} else if (!sim_->is_host_listening()) {
-		// Standalone SP (or an isolated tooling/test preview): the in-process listen server. Live
-		// play reaches this branch only through GameWorld. The host player auto-spawns at bring-up.
-		// A host's map change brings its live session (its role, its bound socket and its
-		// connections) in the simulation the drive kept, and boots the next map inside it.
-		sim_->enable_listen_server(true);
 	}
+	const int64_t stage_end = now_usec();
+	sim_->set_music_director(options->get_music_director());
+	sim_->set_frame_stats(frame_stats_);
+	has_trace_stats_sampling_ = sim_.is_valid();
+	sync_runtime_profiling();
+	mission_file_ = options->get_mission_file().replace("\\", "/").get_file();
+	mission_name_ = options->get_mission_name();
+	if (mission_name_.is_empty() && p_mission.is_valid()) {
+		mission_name_ = p_mission->get_mission_name().strip_edges();
+	}
+	if (mission_name_.is_empty() && !mission_file_.is_empty()) {
+		mission_name_ = mission_file_.get_file().get_basename();
+	}
+
+	const bool playable = options->get_playable();
+	const bool is_joiner = options->get_join_target().is_valid() || sim_->is_joiner();
 	// S9 (ADR 0028): the ordered mission boot. The sequence, its gates, and the
 	// file-resolution policy (mission-text fallback, .aip profile speeds, the
 	// adm default) live in engine/runtime/mission runtime_boot; boot_mission
@@ -318,6 +344,8 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 	// are gone). Role bring-up ran above; presentation composition follows.
 	// The infantry .adm name is the boot's own default (no composition ever
 	// named one; the record's dead field went with it).
+	// The world's load runs the render arm and the load end at its device stages.
+	sim_->set_render_arm_deferred(options->get_mission_start_deferred());
 	const int64_t boot_err = sim_->boot_mission(
 			p_mission,
 			options->get_resource_root(),
@@ -326,8 +354,8 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 			options->get_terrain_til(),
 			options->get_wac_basename(),
 			String(),
-			// The by-name readers' base: the name cut at its first '.'.
-			opennova::to_gd(opennova::mission::mission_base_name(opennova::to_std(mission_file_))),
+			// The mission file: the single player's g_MapFileName, the by-name readers' base.
+			mission_file_,
 			playable);
 	if (boot_err != OK) {
 		setup_error_ = ERR_CANT_OPEN;
@@ -339,6 +367,7 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 	// The world's load runs the boot's phase B after its device stages; an
 	// isolated root (tests, tools) ends the load here, the start pending.
 	if (!options->get_mission_start_deferred()) sim_->finish_load_without_environment();
+	const int64_t boot_end = now_usec();
 	// The shared render/PANM presentation DWORD — re-stamped after the boot
 	// because the load reset cleared it (an order-free scalar, not a boot step).
 	if (presentation_time_ms_ >= 0) {
@@ -414,6 +443,15 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 	// Capture the authored node transforms now (pre-tick) so Stop restores them whether the caller
 	// played or only stepped. Cheap; the game never Stops but holding the map costs nothing.
 	capture_transforms();
+	const int64_t setup_end = now_usec();
+	UtilityFunctions::print_verbose(vformat(
+			"MissionRoot: setup %d ms: stage %d ms, boot %d ms, index and presenter %d ms (%d placed "
+			"model(s), %d entities)",
+			static_cast<int>((setup_end - setup_start) / 1000),
+			static_cast<int>((stage_end - setup_start) / 1000),
+			static_cast<int>((boot_end - stage_end) / 1000),
+			static_cast<int>((setup_end - boot_end) / 1000), placed_models.size(),
+			sim_->get_entity_count()));
 	return sim_->get_entity_count();
 }
 
@@ -541,6 +579,12 @@ void MissionRoot::setup_passes(MissionAudio *p_audio, EffectWorld *p_fx,
 	if (presenter == nullptr) {
 		return;
 	}
+	// A session that presents no entity (a dedicated host) binds no pass: nothing they would
+	// build is ever drawn, the tracer ribbon's mesh included (engine
+	// inmatch::Session::presents_entities carries the witness).
+	if (sim_.is_valid() && !sim_->session_presents_entities()) {
+		return;
+	}
 	presenter->setup_passes(container(), item_db_, resource_root_, p_audio, p_fx, p_lights,
 			p_environment, p_anchors);
 }
@@ -581,6 +625,14 @@ void MissionRoot::warm_present_pipelines(const Vector3 &p_at_position) {
 	if (EntityPresenter *presenter = entities()) {
 		presenter->warm_fire_pipelines(p_at_position);
 	}
+}
+
+int MissionRoot::warm_wire_spawn_pipelines(const PackedFloat32Array &p_snap, int p_stride,
+		Node3D *p_parent, PackedStringArray &r_graphics) {
+	EntityPresenter *presenter = entities();
+	return presenter != nullptr
+			? presenter->warm_wire_spawn_pipelines(p_snap, p_stride, p_parent, r_graphics)
+			: 0;
 }
 
 Ref<ThrowablePresentStats> MissionRoot::get_throwable_present_stats() const {
@@ -648,6 +700,10 @@ bool MissionRoot::is_playing() const {
 	return sim_.is_valid() && sim_->is_playing();
 }
 
+bool MissionRoot::is_session_paused() const {
+	return sim_.is_valid() && sim_->is_session_paused();
+}
+
 void MissionRoot::present_entity_rows(bool p_stats_on) {
 	EntityPresenter *presenter = entities();
 	if (sim_.is_null() || presenter == nullptr) {
@@ -666,6 +722,8 @@ void MissionRoot::present_entity_rows(bool p_stats_on) {
 	if (p_stats_on) {
 		// The native buffer build the fetch above just paid for.
 		frame_stats_->add(FrameStats::PRESENT_SNAPSHOT, sim_->get_last_present_snapshot_us());
+		frame_stats_->add(FrameStats::PRESENT_SNAPSHOT_BODY,
+				sim_->get_last_present_snapshot_body_us());
 	}
 	const int64_t layout_revision = static_cast<int64_t>(snapshot->layout_revision);
 	const int64_t mission_start = p_stats_on ? now_usec() : 0;
@@ -696,11 +754,30 @@ void MissionRoot::present_entity_rows(bool p_stats_on) {
 		presenter->present_rows(rows, stride, layout_revision, door_phases.data(),
 				static_cast<int64_t>(door_phases.size()));
 	}
-	// The wire walk is a no-op until setup_wire ran (a placer-less preview).
-	const int64_t wire_start = p_stats_on ? now_usec() : 0;
-	presenter->present_wire_rows_view(rows, stride, layout_revision);
-	if (p_stats_on) {
+	// The wire walk is a no-op until setup_wire ran (a placer-less preview). Under capture its
+	// parts are timed too (EntityPresenter::profile_present_wire_rows_view, an instrument).
+	if (!p_stats_on) {
+		presenter->present_wire_rows_view(rows, stride, layout_revision);
+	} else {
+		const int64_t wire_start = now_usec();
+		const EntityPresenter::WireProfile wire =
+				presenter->profile_present_wire_rows_view(rows, stride, layout_revision);
 		frame_stats_->add(FrameStats::PRESENT_WIRE, now_usec() - wire_start);
+		static constexpr int kWireParts[EntityPresenter::WIRE_PROFILE_PART_COUNT] = {
+			FrameStats::PRESENT_WIRE_PLAN,
+			FrameStats::PRESENT_WIRE_POSE,
+			FrameStats::PRESENT_WIRE_CTRL,
+			FrameStats::PRESENT_WIRE_BODY,
+			FrameStats::PRESENT_WIRE_WEAPON,
+			FrameStats::PRESENT_WIRE_SOUNDS,
+			FrameStats::PRESENT_WIRE_HELD,
+			FrameStats::PRESENT_WIRE_VIEWS,
+			FrameStats::PRESENT_WIRE_CULLED,
+		};
+		for (int part = 0; part < EntityPresenter::WIRE_PROFILE_PART_COUNT; ++part)
+			frame_stats_->add(kWireParts[part], wire.ns[part] / 1000);
+		frame_stats_->add(FrameStats::PRESENT_WIRE_ROWS, wire.rows);
+		frame_stats_->add(FrameStats::PRESENT_WIRE_COLD_PLANS, wire.cold_plans);
 		const Ref<WirePresentStats> wire_stats = presenter->get_wire_stats_record();
 		frame_stats_->add(FrameStats::PRESENT_WIRE_LIVE, wire_stats->live);
 		frame_stats_->add(FrameStats::PRESENT_WIRE_PENDING, wire_stats->pending);
@@ -734,6 +811,22 @@ void MissionRoot::present_frame(bool p_stats_on) {
 	perf_present_us_ = now_usec() - present_start;
 }
 
+void MissionRoot::present_session_frame(bool p_did_tick) {
+	// A session that presents no entity (a dedicated host) builds and applies nothing: no row
+	// walk, no pass; a ticked frame drops what its updates raised for the passes, undrawn
+	// (engine inmatch::Session::presents_entities carries the witness).
+	if (!sim_->session_presents_entities()) {
+		perf_present_us_ = 0;
+		if (p_did_tick) sim_->discard_entity_presentation();
+		return;
+	}
+	if (p_did_tick) {
+		present_frame(stats_capture_on());
+	} else {
+		present_entity_rows(stats_capture_on());
+	}
+}
+
 bool MissionRoot::tick() {
 	perf_effects_us_ = 0;
 	if (sim_.is_null()) {
@@ -749,13 +842,16 @@ bool MissionRoot::tick() {
 	input.instantiate();
 	input->set_delta_seconds(Simulation::tick_dt());
 	Ref<MissionFrameOutcome> outcome;
+	const bool stats_on = stats_capture_on();
+	const int64_t advance_start = stats_on ? now_usec() : 0;
 	{
 		TickSinkScope sink(sim_.ptr(), this);
 		outcome = sim_->step_session_frame(input);
 	}
+	if (stats_on) frame_stats_->add(FrameStats::SIM_ADVANCE, now_usec() - advance_start);
 	read_frame_perf(outcome);
 	if (outcome.is_valid() && !outcome->is_terminal() && outcome->did_tick()) {
-		present_frame(stats_capture_on());
+		present_session_frame(true);
 	}
 	return outcome.is_valid() && outcome->did_tick();
 }
@@ -768,8 +864,10 @@ bool MissionRoot::on_session_tick(const opennova::inmatch::TickOutcome &p_tick) 
 	}
 	begin_present_effect_tick(p_tick.logic_tick);
 	// The throwable pass's fixed-tick half: the round-bound move groups
-	// reconcile BEFORE the effect world advances on this tick.
-	if (EntityPresenter *presenter = entities()) {
+	// reconcile BEFORE the effect world advances on this tick. A session that
+	// presents no entity runs none (its frame drops the vehicle effects).
+	EntityPresenter *presenter = entities();
+	if (presenter != nullptr && sim_->session_presents_entities()) {
 		presenter->sync_fixed_tick_effects();
 	}
 	const int64_t effects_start = now_usec();
@@ -820,29 +918,34 @@ int MissionRoot::stats_role_value() const {
 }
 
 void MissionRoot::feed_projectile_trace_stats() {
-	if (frame_stats_.is_null() || !frame_stats_->is_capture_active() ||
-			!has_trace_stats_sampling_) {
+	if (sim_.is_null()) {
 		return;
 	}
-	// Three value-type native reads preserve each logic tick's snapshot without
-	// allocating a Dictionary on the capture hot path. In a catch-up render
-	// frame the board folds each tick into one complete-frame peak.
-	const Vector4i counts = sim_->get_last_projectile_trace_counts();
-	if (counts.x <= 0) {
-		return;
+	// The sink takes the tick's traces (the profile since the previous take, then
+	// cleared), so every tick reads its own traces, never a running sum (a host
+	// alone builds no tick tables); the perf counters read the same take. Three
+	// value-type native reads bank them without allocating a Dictionary on the
+	// capture hot path. In a catch-up render frame the board folds each tick into
+	// one complete-frame peak.
+	sim_->take_projectile_trace_profile();
+	if (frame_stats_.is_valid() && frame_stats_->is_capture_active() &&
+			has_trace_stats_sampling_) {
+		const Vector4i counts = sim_->get_last_projectile_trace_counts();
+		if (counts.x > 0) {
+			const Vector4i times = sim_->get_last_projectile_trace_times_us();
+			const Vector2i faces = sim_->get_last_projectile_trace_faces();
+			frame_stats_->add(FrameStats::TRACE_TERRAIN, times.x);
+			frame_stats_->add(FrameStats::TRACE_STATIC, times.y);
+			frame_stats_->add(FrameStats::TRACE_DYNAMIC, times.z);
+			frame_stats_->add(FrameStats::TRACE_PERSON, times.w);
+			frame_stats_->add(FrameStats::TRACE_CALLS, counts.x);
+			frame_stats_->add(FrameStats::TRACE_STATIC_SURVIVORS, counts.y);
+			frame_stats_->add(FrameStats::TRACE_DYNAMIC_SURVIVORS, counts.z);
+			frame_stats_->add(FrameStats::TRACE_PERSON_SURVIVORS, counts.w);
+			frame_stats_->add(FrameStats::TRACE_STATIC_FACES, faces.x);
+			frame_stats_->add(FrameStats::TRACE_DYNAMIC_FACES, faces.y);
+		}
 	}
-	const Vector4i times = sim_->get_last_projectile_trace_times_us();
-	const Vector2i faces = sim_->get_last_projectile_trace_faces();
-	frame_stats_->add(FrameStats::TRACE_TERRAIN, times.x);
-	frame_stats_->add(FrameStats::TRACE_STATIC, times.y);
-	frame_stats_->add(FrameStats::TRACE_DYNAMIC, times.z);
-	frame_stats_->add(FrameStats::TRACE_PERSON, times.w);
-	frame_stats_->add(FrameStats::TRACE_CALLS, counts.x);
-	frame_stats_->add(FrameStats::TRACE_STATIC_SURVIVORS, counts.y);
-	frame_stats_->add(FrameStats::TRACE_DYNAMIC_SURVIVORS, counts.z);
-	frame_stats_->add(FrameStats::TRACE_PERSON_SURVIVORS, counts.w);
-	frame_stats_->add(FrameStats::TRACE_STATIC_FACES, faces.x);
-	frame_stats_->add(FrameStats::TRACE_DYNAMIC_FACES, faces.y);
 }
 
 Ref<MissionFrameOutcome> MissionRoot::advance_session_frame(
@@ -862,19 +965,21 @@ Ref<MissionFrameOutcome> MissionRoot::advance_session_frame(
 		presenter->set_listener_position(p_input->get_camera_position());
 	}
 	Ref<MissionFrameOutcome> outcome;
+	// The session frame's whole call, its ticks and their sinks inside (an instrument: the
+	// remainder past them is the bank, the updates' input frames, the render legs and the
+	// outcome's marshalling).
+	const bool stats_on = stats_capture_on();
+	const int64_t advance_start = stats_on ? now_usec() : 0;
 	{
 		TickSinkScope sink(sim_.ptr(), this);
 		outcome = sim_->advance_session_frame(p_input);
 	}
+	if (stats_on) frame_stats_->add(FrameStats::SIM_ADVANCE, now_usec() - advance_start);
 	read_frame_perf(outcome);
 	if (outcome.is_null() || outcome->is_terminal()) {
 		return outcome;
 	}
-	if (outcome->did_tick()) {
-		present_frame(stats_capture_on());
-	} else {
-		present_entity_rows(stats_capture_on());
-	}
+	present_session_frame(outcome->did_tick());
 	return outcome;
 }
 

@@ -42,6 +42,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -53,6 +54,13 @@ using namespace opennova;
 namespace inmatch = opennova::inmatch;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
+
+// The player entity's own weapon table (world::Entity::weapon_slots), the host's
+// per-player slot rows since D-NET-336's move.
+std::map<uint16_t, w::PersonalWeaponSlot> &slots_of(w::World &world,
+		const inmatch::NapiNPConnection &conn) {
+	return world.registry.get(conn.link.owned_entity)->weapon_slots;
+}
 using conn_fixture::make_seeded_conn;
 
 bool expect(bool cond, const char *msg) {
@@ -174,25 +182,72 @@ bool check_mounted_slot_select_fire_and_reload() {
 	child.primary_weapon = child_weapon.name;
 	const w::EntityHandle child_h = world.registry.spawn(1, child);
 	w::Entity *live_child = world.registry.get(child_h);
+	// Each class init binds its slot at the spawn; neither the toggle nor the fire binds
+	// one [orig: WeaponSlot_InitFromEntityDef @0x5466C0].
+	if (!expect(world.vehicles.init_weapon_slot_from_entity_def(*live_parent) &&
+			world.vehicles.init_weapon_slot_from_entity_def(*live_child),
+			"the spawn binds both slots"))
+		return false;
 	w::Entity *player = world.registry.get(shooter);
 	player->mounted = true;
 	player->mount_target = child_h;
 	player->mount_type = w::SeatType::Gunner;
 	player->use_gun_slot_swapped = true;
+	// The UseGun attach's borrow: the EquippedSlot names the gun's slot, which the
+	// toggle's first gate reads [orig: Entity_AttachToUseGunSlot @0x546C42..0x546C4E;
+	// NapiNPServerMsg_HandleWeaponToggle +0x118 @0x511ACE].
+	player->equipped_slot.kind = w::WeaponSlotRef::kMount;
+	player->equipped_slot.mount = child_h;
 	player->equipped_adm_index = 5;
 
 	std::vector<inmatch::NapiNPConnection> roster;
 	roster.push_back(make_seeded_conn(
 			2, 1, nullptr, ns::TransportMode::Client, shooter, true));
 
+	// A sender holding no EquippedSlot moves nothing (D-NET-NEW-L2-34).
+	{
+		const w::WeaponSlotRef held = player->equipped_slot;
+		player->equipped_slot = {};
+		MountedWeaponSlotSelection request;
+		request.use_parent_slot = true;
+		dispatch_gameplay(c2s::MOUNTED_WEAPON_SLOT_SELECT,
+				encode_mounted_weapon_slot_selection(request), roster[0], roster, world);
+		if (!expect(!live_child->primary_weapon_slot.redirect_to_parent_slot,
+				"C2S 0x16 from a sender with no EquippedSlot leaves the route"))
+			return false;
+		player->equipped_slot = held;
+	}
+	// The gun's addeweap parent identity is no gate of the toggle: a groundEntity that
+	// is a type-1 EWeap takes the route bit whatever the metadata names
+	// (D-NET-NEW-L2-34) [orig: @0x511B12..0x511B2A].
+	{
+		const w::EntityHandle metadata_parent = live_child->emplacement_parent;
+		const uint32_t metadata_spawn_id = live_child->emplacement_parent_spawn_id;
+		live_child->emplacement_parent = w::EntityHandle{};
+		live_child->emplacement_parent_spawn_id = 0;
+		MountedWeaponSlotSelection request;
+		request.use_parent_slot = true;
+		dispatch_gameplay(c2s::MOUNTED_WEAPON_SLOT_SELECT,
+				encode_mounted_weapon_slot_selection(request), roster[0], roster, world);
+		const bool routed = live_child->primary_weapon_slot.redirect_to_parent_slot;
+		live_child->emplacement_parent = metadata_parent;
+		live_child->emplacement_parent_spawn_id = metadata_spawn_id;
+		live_child->primary_weapon_slot.redirect_to_parent_slot = false;
+		if (!expect(routed, "C2S 0x16 nonzero routes onto a type-1 EWeap groundEntity "
+				"whatever the addeweap metadata names"))
+			return false;
+	}
+
 	MountedWeaponSlotSelection select_parent;
 	select_parent.use_parent_slot = true;
 	dispatch_gameplay(c2s::MOUNTED_WEAPON_SLOT_SELECT,
 			encode_mounted_weapon_slot_selection(select_parent),
 			roster[0], roster, world);
+	// The toggle moves the route bit (EquippedSlot) only, never the AdmDef byte
+	// [orig: NapiNPServerMsg_HandleWeaponToggle @0x511B2C / @0x511B38].
 	if (!expect(live_child->primary_weapon_slot.redirect_to_parent_slot &&
-			player->equipped_adm_index == 6,
-			"C2S 0x16 nonzero selects the validated groundEntity vehicle slot"))
+			player->equipped_adm_index == 5,
+			"C2S 0x16 nonzero selects the validated groundEntity vehicle slot, +0x2B0 kept"))
 		return false;
 
 	// The authoritative C2S 0x06 must spend the selected world MountSlot, not
@@ -202,7 +257,7 @@ bool check_mounted_slot_select_fire_and_reload() {
 					0xFFFF, 1, 0, 0));
 	if (!expect(live_parent->primary_weapon_slot.clip == 8 &&
 			live_child->primary_weapon_slot.clip == 4 &&
-			roster[0].weapon_slots.empty(),
+			slots_of(world, roster[0]).empty(),
 			"mounted parent-route fire spends only the parent world slot"))
 		return false;
 	// A request naming the child's weapon on the parent route fires the parent's: the
@@ -317,8 +372,8 @@ bool check_duplicate_c2s_session_does_not_refire() {
 	conn.server_sk = 0x55667788u;
 	ctx.np_protocol.connection_list.push_back(std::move(conn));
 	// The slot the loadout grant left.
-	ctx.np_protocol.connection_list[0].weapon_slots[uint16_t(3 * 65 + 2)] =
-			inmatch::WeaponSlotState{5, 30};
+	slots_of(world, ctx.np_protocol.connection_list[0])[uint16_t(3 * 65 + 2)] =
+			w::PersonalWeaponSlot{5, 30};
 
 	const std::vector<uint8_t> shot =
 			fire_body(shooter.packed, 0x22, 5, 0, 0, 0, 0, 0, 0xFFFF, 1, 12, 0);
@@ -335,14 +390,14 @@ bool check_duplicate_c2s_session_does_not_refire() {
 	if (!expect(world.out.rounds.count == 1, "first C2S 0x06 appends one authoritative round"))
 		return false;
 	const uint16_t combo = uint16_t(3 * 65 + 2);
-	if (!expect(ctx.np_protocol.connection_list[0].weapon_slots[combo].clip == 29,
+	if (!expect(slots_of(world, ctx.np_protocol.connection_list[0])[combo].clip == 29,
 	            "first C2S 0x06 spends one cartridge"))
 		return false;
 
 	inmatch::handle_server_datagram(ctx, peer, fire_datagram.data(), fire_datagram.size(), 101);
 	if (!expect(world.out.rounds.count == 1, "exact duplicate C2S 0x06 does not append a second round"))
 		return false;
-	if (!expect(ctx.np_protocol.connection_list[0].weapon_slots[combo].clip == 29,
+	if (!expect(slots_of(world, ctx.np_protocol.connection_list[0])[combo].clip == 29,
 	            "exact duplicate C2S 0x06 does not spend a second cartridge"))
 		return false;
 
@@ -394,7 +449,7 @@ bool check_retail_fire_admission() {
     weapon.action_fsm.actions[w::weapon_action::kFire].delay_end = 2;
     weapon.action_fsm.actions[w::weapon_action::kRecoil].delay_start = 3;
     weapon.action_fsm.actions[w::weapon_action::kRecoil].delay_end = 4;
-    conn.weapon_slots[uint16_t(3 * 65 + 2)] = inmatch::WeaponSlotState{5, 20}; // the grant's
+    slots_of(world, conn)[uint16_t(3 * 65 + 2)] = w::PersonalWeaponSlot{5, 20}; // the grant's
     const auto send = [&](uint32_t tick, uint8_t flags = 0, uint8_t adm = 5) {
         ClientFiredRound fire;
         fire.current_tick = tick;
@@ -406,7 +461,7 @@ bool check_retail_fire_admission() {
     };
     send(100);
     if (!expect(world.out.rounds.count == 0, "unseeded host player cannot fire")) return false;
-    (void)inmatch::Server_RerollPlayerTickSeed(conn);
+    (void)inmatch::Server_RerollPlayerTickSeed(conn, world.out.rounds.frame_clock);
     const uint32_t seed = conn.tick_seed;
     send(0);
     send(seed);
@@ -430,18 +485,26 @@ bool check_retail_fire_admission() {
     send(seed + 21, 1);    // alt fire advances by zero, not the primary cooldown
     send(seed + 22, 1);
     if (!expect(world.out.rounds.count == 4, "rejects preserve the clock and alt shots stamp only their tick")) return false;
-    if (!expect(conn.weapon_slots[uint16_t(3 * 65 + 2)].clip == 18,
+    if (!expect(slots_of(world, conn)[uint16_t(3 * 65 + 2)].clip == 18,
             "only the two accepted primary shots consume cartridges")) return false;
+    // The grace reads the server frame clock (g_ServerFrameClock), not the logic
+    // tick: the frame clock trails the logic tick by one here, so a logic-tick
+    // reader would refuse the second shot. [orig: PlayerSlot_IsActive
+    // `cmp g_ServerFrameClock, eax; jl` @0x4FC78E..0x4FC794; the disarm's stamp
+    // Server_SendRandomSeedToPlayer @0x51022A / @0x510237]
     (void)inmatch::Server_DisarmPlayerTickSeed(conn, 100);
-    world.logic_tick = 100;
+    world.out.rounds.frame_clock = 100;
+    world.logic_tick = 101;
     send(seed + 23, 1);
-    world.logic_tick = 102;
+    world.out.rounds.frame_clock = 102;
+    world.logic_tick = 103;
     send(seed + 23, 1); // the grace arm checks host time, not monotonic packet time
-    world.logic_tick = 103; // default SP send period 1, strict 3-period boundary
+    world.out.rounds.frame_clock = 103; // default SP send period 1, strict 3-period boundary
+    world.logic_tick = 104;
     send(seed + 23, 1);
     if (!expect(world.out.rounds.count == 6,
             "disarmed player accepts in-flight shots only before the three-period deadline")) return false;
-    (void)inmatch::Server_RerollPlayerTickSeed(conn);
+    (void)inmatch::Server_RerollPlayerTickSeed(conn, world.out.rounds.frame_clock);
     send(conn.tick_seed);
     return expect(world.out.rounds.count == 6,
             "re-deployment resets freshness to the newly advertised seed");
@@ -449,6 +512,41 @@ bool check_retail_fire_admission() {
 
 } // namespace
 
+
+// D-NET-507: the host decodes the C2S 0x06's claimed origin as words and the
+// round spawns on them: 21,000 units out with low bits set (a float view loses
+// them), the round event carries the claimed words exactly. [orig:
+// Server_ClientFiredRound @0x50BAA0 - the claimed origin's reach on the words
+// @0x50C33C..0x50C362; RoundData_SpawnRound @0x4EC0D0 - Position
+// @0x4EC62B..0x4EC63A]
+bool check_fire_origin_keeps_the_words() {
+    w::World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(1, 4);
+    const auto shooter = w::spawn_remote_player(world, player_spawn(1));
+    auto *player = world.registry.get(shooter);
+    const int32_t x = (21000 << 16) | 0x5F;
+    const int32_t y = -((300 << 16) | 0x1235);
+    const int32_t z = (12 << 16) | 0x0F0F;
+    player->position.set_q16({x, y, z});
+    world.tables.weapons.entries.resize(2);
+    auto &weapon = world.tables.weapons.entries[1];
+    weapon.valid = true;
+    weapon.clipsize = 4;
+    weapon.category = 1;
+    weapon.ammo_index = 1;
+    weapon.ammo_class_id = 1;
+    ns::UdpSessionTransport udp(ns::UdpSessionTransport::Role::Host);
+    std::vector<inmatch::NapiNPConnection> roster;
+    roster.push_back(make_seeded_conn(3, 1, &udp, ns::TransportMode::Client, shooter, true));
+    slots_of(world, roster[0])[uint16_t(65)] = w::PersonalWeaponSlot{1, 4};
+    dispatch_fire(roster[0], roster, world,
+            fire_body(shooter.packed, 2, 1, x, y, z, 0, 0, 0xFFFF, 1, 0, 0));
+    if (!expect(world.out.rounds.count == 1, "the claimed origin on the shooter fires")) return false;
+    const w::RoundEvent &ev = world.out.rounds.records[0];
+    return expect(ev.origin_x == x && ev.origin_y == y && ev.origin_z == z,
+            "the round event carries the claimed origin's words");
+}
 
 bool check_fire_owner_environment_and_origin() {
     w::World world;
@@ -466,7 +564,7 @@ bool check_fire_owner_environment_and_origin() {
     ns::UdpSessionTransport udp(ns::UdpSessionTransport::Role::Host);
     std::vector<inmatch::NapiNPConnection> roster;
     roster.push_back(make_seeded_conn(3, 1, &udp, ns::TransportMode::Client, shooter, true));
-    roster[0].weapon_slots[uint16_t(65)] = inmatch::WeaponSlotState{1, 4}; // the grant's
+    slots_of(world, roster[0])[uint16_t(65)] = w::PersonalWeaponSlot{1, 4}; // the grant's
     auto shoot_at = [&](int32_t px) {
         dispatch_fire(roster[0], roster, world,
                 fire_body(shooter.packed, 2, 1, px, 0, 0, 0, 0, 0xFFFF, 1, 0, 0));
@@ -568,7 +666,7 @@ bool check_refused_fire_mirrors_the_weapon() {
     std::vector<inmatch::NapiNPConnection> roster;
     roster.push_back(make_seeded_conn(3, 1, &udp, ns::TransportMode::Client, shooter, true));
     // adm 1 holds its slot with an empty clip.
-    roster[0].weapon_slots[uint16_t(65 + 1)] = inmatch::WeaponSlotState{1, 0};
+    slots_of(world, roster[0])[uint16_t(65 + 1)] = w::PersonalWeaponSlot{1, 0};
     auto shoot = [&](uint8_t adm) {
         dispatch_fire(roster[0], roster, world,
                 fire_body(shooter.packed, 2, adm, 0, 0, 0, 0, 0, 0xFFFF, 1, 0, 0));
@@ -624,13 +722,13 @@ bool check_ungranted_combo_is_refused() {
 	shoot(6);
 	if (!expect(world.out.rounds.count == 0, "an ungranted combo fires no round, clipless too"))
 		return false;
-	if (!expect(conn.weapon_slots.empty(), "an ungranted combo's refusal makes no slot"))
+	if (!expect(slots_of(world, conn).empty(), "an ungranted combo's refusal makes no slot"))
 		return false;
 	// The grant left three rounds in the clip: the fire spends one of them.
-	conn.weapon_slots[combo] = inmatch::WeaponSlotState{5, 3};
+	slots_of(world, conn)[combo] = w::PersonalWeaponSlot{5, 3};
 	shoot(5);
 	if (!expect(world.out.rounds.count == 1, "a granted combo fires")) return false;
-	return expect(conn.weapon_slots[combo].clip == 2,
+	return expect(slots_of(world, conn)[combo].clip == 2,
 	              "the fire spends the granted clip and never reseeds it");
 }
 
@@ -657,14 +755,14 @@ bool check_the_slot_weapon_fires() {
 		weapon.ammo_index = adm == 5 ? 1 : 2;
 	}
 	const uint16_t combo = uint16_t(3 * 65 + 2);
-	conn.weapon_slots[combo] = inmatch::WeaponSlotState{5, 1};
+	slots_of(world, conn)[combo] = w::PersonalWeaponSlot{5, 1};
 	const auto shoot = [&](uint8_t adm) {
 		dispatch_fire(conn, roster, world,
 				fire_body(shooter.packed, 0x22, adm, 0, 0, 0, 0, 0, 0xFFFF, 1, 12, 0));
 	};
 	shoot(6);
 	if (!expect(world.out.rounds.count == 1 && world.out.rounds.records[0].adm_index == 5 &&
-					conn.weapon_slots[combo].clip == 0,
+					slots_of(world, conn)[combo].clip == 0,
 			"the other weapon's request fires the held rifle from its clip"))
 		return false;
 	shoot(6);
@@ -703,9 +801,9 @@ bool check_controller_seat_reads_no_bucket() {
 	weapon(5, 2, 20, 1);  // a bucket rifle
 	weapon(6, 3, 20, 0);  // a clip rifle
 	weapon(7, 4, -1, 0);  // a clipless weapon, one unit a shot
-	conn.weapon_slots[uint16_t(3 * 65 + 2)] = inmatch::WeaponSlotState{5, 0};
-	conn.weapon_slots[uint16_t(3 * 65 + 3)] = inmatch::WeaponSlotState{6, 3};
-	conn.weapon_slots[uint16_t(3 * 65 + 4)] = inmatch::WeaponSlotState{7, 0};
+	slots_of(world, conn)[uint16_t(3 * 65 + 2)] = w::PersonalWeaponSlot{5, 0};
+	slots_of(world, conn)[uint16_t(3 * 65 + 3)] = w::PersonalWeaponSlot{6, 3};
+	slots_of(world, conn)[uint16_t(3 * 65 + 4)] = w::PersonalWeaponSlot{7, 0};
 	conn.reply.shared_clips[1] = 5;
 	conn.reply.ammo_pools[2] = 50;
 	w::Entity carrier;
@@ -724,7 +822,7 @@ bool check_controller_seat_reads_no_bucket() {
 			"a controller seat reads the bucket and the pool as 0: both refuse"))
 		return false;
 	shoot(6);
-	if (!expect(world.out.rounds.count == 1 && conn.weapon_slots[uint16_t(3 * 65 + 3)].clip == 2,
+	if (!expect(world.out.rounds.count == 1 && slots_of(world, conn)[uint16_t(3 * 65 + 3)].clip == 2,
 			"a clip weapon fires from its own slot word"))
 		return false;
 	player->mounted = false;
@@ -757,7 +855,7 @@ bool check_the_fire_action_rejudges_the_round() {
 		weapon.ammo_index = adm == 5 ? 0 : 1; // the zero-index round: Medic only
 	}
 	const uint16_t combo = uint16_t(3 * 65 + 2);
-	conn.weapon_slots[combo] = inmatch::WeaponSlotState{5, 3};
+	slots_of(world, conn)[combo] = w::PersonalWeaponSlot{5, 3};
 	w::Entity *player = world.registry.get(shooter);
 	const auto shoot = [&](uint8_t adm, int32_t px) {
 		dispatch_fire(conn, roster, world,
@@ -765,18 +863,18 @@ bool check_the_fire_action_rejudges_the_round() {
 	};
 	// The request's weapon passes the first pass; the slot's fails the second.
 	shoot(6, 0);
-	if (!expect(world.out.rounds.count == 0 && conn.weapon_slots[combo].clip == 2,
+	if (!expect(world.out.rounds.count == 0 && slots_of(world, conn)[combo].clip == 2,
 			"the slot weapon's -14 drops the round and still spends the clip"))
 		return false;
 	world.tables.weapons.entries[5].ammo_index = 1;
 	player->flags |= w::kEntityFlagPlayer;
 	shoot(6, 3 * 65536); // three metres off the shooter's position
-	if (!expect(world.out.rounds.count == 0 && conn.weapon_slots[combo].clip == 1,
+	if (!expect(world.out.rounds.count == 0 && slots_of(world, conn)[combo].clip == 1,
 			"a claimed origin beyond the reach drops the round and spends the clip"))
 		return false;
 	shoot(6, 0);
 	return expect(world.out.rounds.count == 1 && world.out.rounds.records[0].adm_index == 5 &&
-			conn.weapon_slots[combo].clip == 0,
+			slots_of(world, conn)[combo].clip == 0,
 			"a round within reach lands");
 }
 
@@ -801,7 +899,7 @@ bool check_the_ring_takes_the_fire_actions_words() {
 	weapon.category = 3;
 	weapon.rank = 2;
 	weapon.ammo_index = 1;
-	conn.weapon_slots[uint16_t(3 * 65 + 2)] = inmatch::WeaponSlotState{5, 7};
+	slots_of(world, conn)[uint16_t(3 * 65 + 2)] = w::PersonalWeaponSlot{5, 7};
 	const auto shoot = [&](uint8_t flags, uint16_t hit_part) {
 		dispatch_fire(conn, roster, world,
 				fire_body(shooter.packed, flags, 5, 0, 0, 0, 0, 0, 0xFFFF, hit_part, 12, 0));
@@ -850,14 +948,14 @@ bool check_an_alt_round_takes_its_ammo_byte() {
 	dispatch_fire(conn, roster, world,
 			fire_body(shooter.packed, 0x01, 2, 0, 0, 0, 0, 0, 0xFFFF, 1, 12, 0));
 	if (!expect(world.out.rounds.count == 1 && world.round_sim.active_count == 1 &&
-					world.round_sim.rounds[0].ammo_index == 2,
+					world.round_sim.rounds[1].ammo_index == 2,
 			"the alt round flies as ammo 2, its byte"))
 		return false;
 	// With no weapon the spawn takes the ammo's ERROR leg: a fire straight down +x
 	// leaves the axis. [orig: RoundData_SpawnRound @0x4EC38D..0x4EC4D2]
 	const w::RandomSpreadOffset spread =
 			w::weapon_calc_random_spread_offset(30 << 16, /*seed=*/1, 0, false);
-	const w::LiveRound &round = world.round_sim.rounds[0];
+	const w::LiveRound &round = world.round_sim.rounds[1];
 	if (!expect((spread.yaw_bam != 0 || spread.pitch_bam != 0) &&
 					(round.vel.y != 0.0f || round.vel.z != 0.0f),
 			"the weaponless alt round spreads by its ammo's ERROR"))
@@ -892,7 +990,7 @@ bool check_a_ffff_sequence_word_takes_a_fresh_id() {
 	world.tables.ammo.entries[1].velocity = 100;
 	world.tables.ammo.entries[1].max_age_ticks = 62;
 	world.tables.ammo.entries[1].valid = true;
-	conn.weapon_slots[uint16_t(3 * 65 + 2)] = inmatch::WeaponSlotState{5, 9};
+	slots_of(world, conn)[uint16_t(3 * 65 + 2)] = w::PersonalWeaponSlot{5, 9};
 	const auto shoot = [&](uint16_t hit_part) {
 		dispatch_fire(conn, roster, world,
 				fire_body(shooter.packed, 0x22, 5, 0, 0, 0, 0, 0, 0xFFFF, hit_part, 12, 0));
@@ -905,8 +1003,8 @@ bool check_a_ffff_sequence_word_takes_a_fresh_id() {
 		return false;
 	const auto &ring = world.out.rounds.records;
 	if (!expect(ring[0].shot_seq == 1 && ring[1].shot_seq == 2 && ring[2].shot_seq == 0x0123 &&
-					world.round_sim.rounds[0].shot_seq == 1 &&
-					world.round_sim.rounds[1].shot_seq == 2,
+					world.round_sim.rounds[1].shot_seq == 1 &&
+					world.round_sim.rounds[2].shot_seq == 2,
 			"a 0xFFFF word takes the pool's fresh id; another stays"))
 		return false;
 	// A three-pellet fan allocates ids 3, 4 and 5; its ring takes the last pellet's
@@ -960,11 +1058,15 @@ bool check_a_controller_seat_fires_from_the_userpoint() {
 	hull.item_attrib = w::kItemAttribEweap;
 	hull.primary_weapon = gun.name;
 	hull.position = {1.0f, 0.5f, 0.0f};
-	hull.weapon_userpoint_bytes[0][0] = 5; // the slot's barrel after one shot (clip 8)
+	// The slot's barrel after one shot (clip 8), read at the RECOIL column: the first
+	// shot's arm left RECOIL next and no walk runs between the requests (D-NET-336)
+	// [orig: Server_ClientFiredRound @0x50C2B0..0x50C30D; the column @0x545B09..0x545B31].
+	hull.weapon_userpoint_bytes[0][1] = 5;
 	hull.weapon_userpoint_bytes[2][0] = 4; // the request's barrel
 	const w::EntityHandle hull_h = world.registry.spawn(1, hull);
 	w::Entity *live_hull = world.registry.get(hull_h);
-	if (!expect(world.vehicles.prepare_weapon_slot(*live_hull), "the hull's slot binds"))
+	if (!expect(world.vehicles.init_weapon_slot_from_entity_def(*live_hull),
+			"the hull's slot binds"))
 		return false;
 	CarrierPoints points;
 	points.carrier = hull_h;
@@ -982,7 +1084,8 @@ bool check_a_controller_seat_fires_from_the_userpoint() {
 	// the carrier's raw pose.
 	dispatch_fire(roster[0], roster, world,
 			fire_body(shooter.packed, 0x22, 6, 0, 0, 0, 0x4000, 0, 0xFFFF, 1, 0, 0));
-	// Clip 8: the slot's barrel 0 names one, so barrel 2's record (point 4) is posed.
+	// Clip 8: the slot's barrel 0 names one at the RECOIL column, so barrel 2's record
+	// (point 4) is posed.
 	dispatch_fire(roster[0], roster, world,
 			fire_body(shooter.packed, 0x22, 6, 0, 0, 0, 0x4000, 0, 0xFFFF, 2, 0, 0));
 	// Barrel 3 names no point: the claim stands.
@@ -1011,6 +1114,7 @@ int main() {
 	if (!check_the_slot_weapon_fires()) return 1;
 	if (!check_refused_fire_mirrors_the_weapon()) return 1;
 	if (!check_fire_owner_environment_and_origin()) return 1;
+	if (!check_fire_origin_keeps_the_words()) return 1;
 	if (!check_retail_fire_admission()) return 1;
 	if (!check_mounted_slot_select_fire_and_reload()) return 1;
 	if (!check_duplicate_c2s_session_does_not_refire()) return 1;
@@ -1060,8 +1164,8 @@ int main() {
 	roster.push_back(make_seeded_conn(3, 1, &udp_b, ns::TransportMode::Client, hb, true));
 	roster.push_back(make_seeded_conn(4, 1, &udp_c, ns::TransportMode::Client, hc, true));
 	// The slots B's loadout grant left: the rifle with a full clip, the knife.
-	roster[1].weapon_slots[uint16_t(3 * 65 + 2)] = inmatch::WeaponSlotState{5, 30};
-	roster[1].weapon_slots[uint16_t(65)] = inmatch::WeaponSlotState{7, 0};
+	slots_of(world, roster[1])[uint16_t(3 * 65 + 2)] = w::PersonalWeaponSlot{5, 30};
+	slots_of(world, roster[1])[uint16_t(65)] = w::PersonalWeaponSlot{7, 0};
 
 	// --- 1. Valid primary fire: ring append + clip decrement + mirrors, no replies. ---
 	const std::vector<uint8_t> body =
@@ -1093,12 +1197,12 @@ int main() {
 	}
 	{
 		const uint16_t combo = 3 * 65 + 2;
-		auto it = roster[1].weapon_slots.find(combo);
-		if (!expect(it != roster[1].weapon_slots.end(), "the granted slot keeps its combo")) return 1;
+		auto it = slots_of(world, roster[1]).find(combo);
+		if (!expect(it != slots_of(world, roster[1]).end(), "the granted slot keeps its combo")) return 1;
 		if (!expect(it->second.clip == 29, "clip 30 -> 29 after one primary fire")) return 1;
 	}
 	{
-		const w::LiveRound &round = world.round_sim.rounds[0];
+		const w::LiveRound &round = world.round_sim.rounds[1];
 		const float speed =
 				std::sqrt(round.vel.x * round.vel.x + round.vel.y * round.vel.y +
 				          round.vel.z * round.vel.z);
@@ -1112,6 +1216,12 @@ int main() {
 		            "equipped adm mirrored [orig: entity+688]"))
 			return 1;
 		if (!expect(sh->last_fire_target == hc, "claimed target stamped on the shooter"))
+			return 1;
+		// The store lands in the shooter's AI slot word, the one the tag-2 serializer reads
+		// [orig: Server_ClientFiredRound @0x50C2A2..0x50C2AD].
+		const w::AiEntity *slot = world.ai.for_handle(hb);
+		if (!expect(slot != nullptr && slot->slot.f[3] == int32_t(hc.packed) + 1,
+		            "claimed target stored in the shooter's AI slot word"))
 			return 1;
 	}
 	{
@@ -1134,11 +1244,25 @@ int main() {
 
 	// --- 4. Alt fire appends WITHOUT touching the clip [orig: @0x50bb0d/@0x50be2b]. ---
 	dispatch_fire(roster[1], roster, world,
-	              fire_body(hb.packed, 0x23, 5, 0, 0, 0, 0, 0, 0xFFFF, 3, 12, 0));
+	              fire_body(hb.packed, 0x23, 5, 0, 0, 0, 0, 0, ha.packed, 3, 12, 0));
 	if (!expect(world.out.rounds.count == 2, "alt fire appended")) return 1;
-	if (!expect(roster[1].weapon_slots[uint16_t(3 * 65 + 2)].clip == 29,
+	if (!expect(slots_of(world, roster[1])[uint16_t(3 * 65 + 2)].clip == 29,
 	            "alt fire leaves the clip untouched"))
 		return 1;
+	{
+		// The alt leg returns through RoundData_AddRound without the slot word's store, so
+		// its claim (A) leaves the last primary claim (C) in place; the refused requests of
+		// steps 2 and 3 never reached it either.
+		// [orig: Server_ClientFiredRound - the alt return @0x50BE4B..0x50BE65, the store
+		//  @0x50C2AD on the primary leg @0x50C172]
+		const w::AiEntity *slot = world.ai.for_handle(hb);
+		if (!expect(slot != nullptr && slot->slot.f[3] == int32_t(hc.packed) + 1,
+		            "an alt round's claim leaves the slot word"))
+			return 1;
+		if (!expect(world.registry.get(hb)->last_fire_target == hc,
+		            "an alt round's claim leaves the mirror"))
+			return 1;
+	}
 
 	// --- 5. The host's own loopback 0x06 is a no-op [orig: @0x50c18d]. ---
 	dispatch_fire(roster[0], roster, world,
@@ -1146,7 +1270,7 @@ int main() {
 	if (!expect(world.out.rounds.count == 2, "loopback fire ignored on the net path")) return 1;
 
 	// --- 6. Clip exhaustion rejects; the 0x25 relay refills [orig: @0x541720]. ---
-	roster[1].weapon_slots[uint16_t(3 * 65 + 2)].clip = 1;
+	slots_of(world, roster[1])[uint16_t(3 * 65 + 2)].clip = 1;
 	dispatch_fire(roster[1], roster, world,
 	              fire_body(hb.packed, 0x22, 5, 0, 0, 0, 0, 0, 0xFFFF, 5, 12, 0));
 	if (!expect(world.out.rounds.count == 3, "last round fires")) return 1;
@@ -1168,7 +1292,7 @@ int main() {
 		while (udp_c.pop_outbound(raw)) {}
 		while (loop.client_recv(dg)) {}
 	}
-	if (!expect(roster[1].weapon_slots[uint16_t(3 * 65 + 2)].clip == 30,
+	if (!expect(slots_of(world, roster[1])[uint16_t(3 * 65 + 2)].clip == 30,
 	            "0x25 relay refilled the clip to capacity"))
 		return 1;
 	dispatch_fire(roster[1], roster, world,
@@ -1182,11 +1306,42 @@ int main() {
 		                        12, 0));
 	if (!expect(world.out.rounds.count == 7, "no-clip weapon fires freely")) return 1;
 
+	// --- 7b. The claimed target resolves by its handle's bounds alone: a row the destroy
+	// freed is still the target (its word, so the record's 0x40 and handle); a slot past
+	// the pool's capacity, or a pool past 4, is none.
+	// [orig: NapiNPServerMsg_0x006_ClientFiredRound - 0xFFFF @0x51359D, pool < 5
+	//  @0x5135B3, slot < capacity @0x5135CC..0x5135D2, else 0 @0x5135E5] ---
+	{
+		const w::EntityHandle hd = world.registry.spawn(0, w::Entity{});
+		if (!expect(hd.valid(), "a fourth row taken")) return 1;
+		world.registry.despawn(hd);
+		if (!expect(world.registry.get(hd) == nullptr, "the fourth row destroyed")) return 1;
+		dispatch_fire(roster[1], roster, world,
+		              fire_body(hb.packed, 0x22, 5, 0, 0, 0, 0, 0, hd.packed, 13, 12, 0));
+		if (!expect(world.out.rounds.count == 8, "the fire at a destroyed row lands")) return 1;
+		const w::AiEntity *slot = world.ai.for_handle(hb);
+		if (!expect(slot != nullptr && slot->slot.f[3] == int32_t(hd.packed) + 1,
+		            "a destroyed row's handle is the stored target"))
+			return 1;
+		const uint16_t past_capacity = uint16_t(world.registry.pool_capacity(0)); // pool 0
+		dispatch_fire(roster[1], roster, world,
+		              fire_body(hb.packed, 0x22, 5, 0, 0, 0, 0, 0, past_capacity, 14, 12, 0));
+		if (!expect(world.out.rounds.count == 9, "the fire past the capacity lands")) return 1;
+		if (!expect(slot->slot.f[3] == 0, "a slot past the capacity is no target")) return 1;
+		dispatch_fire(roster[1], roster, world,
+		              fire_body(hb.packed, 0x22, 5, 0, 0, 0, 0, 0, hd.packed, 15, 12, 0));
+		dispatch_fire(roster[1], roster, world,
+		              fire_body(hb.packed, 0x22, 5, 0, 0, 0, 0, 0, 0x5000, 16, 12, 0));
+		if (!expect(world.out.rounds.count == 11 && slot->slot.f[3] == 0,
+		            "a pool past 4 is no target"))
+			return 1;
+	}
+
 	// --- 8. Table-less host accepts without bookkeeping (the 0x5A echo fallback shape). ---
 	world.tables.weapons.entries.clear();
 	dispatch_fire(roster[1], roster, world,
 	              fire_body(hb.packed, 0x22, 9, 0, 0, 0, 0, 0, 0xFFFF, 20, 12, 0));
-	if (!expect(world.out.rounds.count == 8, "table-less host accepts the fire")) return 1;
+	if (!expect(world.out.rounds.count == 12, "table-less host accepts the fire")) return 1;
 
 	std::printf("OK\n");
 	return 0;

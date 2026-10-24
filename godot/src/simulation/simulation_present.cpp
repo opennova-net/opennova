@@ -40,13 +40,14 @@
 using namespace sim_internal;
 
 
-void Simulation::advance_facial_presentation(const Vector3 &p_camera) {
-    if (!kernel_ || !p_camera.is_finite()) return;
+void Simulation::advance_facial_presentation(const opennova::world::LocalPlayerViewFrame &p_view) {
+    // The scene frame's passes (the facial update's 64-frame look cadence steps once each):
+    // the main scene's, and the Inset scene's own on a frame that runs it (engine
+    // world::FacialSystem::render_scene_passes carries the witness). The table's scene row
+    // runs this, so a frame the status page stands in for steps nothing.
+    if (!kernel_) return;
     std::vector<opennova::world::FacialDraw> rows;
-    int32_t camera[3];
-    fixed3_from_godot(p_camera, camera);
-    kernel_->world.facials.compile_draws(kernel_->world, camera[0], camera[1],
-            kernel_->local.view.camera_mode == 0, rows);
+    kernel_->world.facials.render_scene_passes(kernel_->world, p_view, rows);
     // JO renders these targets then writes two unused globals. The complete
     // .text/.rdata/.data audit found no texture sink; model materials retain
     // their normal textures. Keep the frame counter/priority state live.
@@ -355,6 +356,12 @@ void Simulation::drain_fire_sounds(std::vector<opennova::world::ReadyFireSound> 
 	r_sounds = kernel_->world.out.fire_sounds.drain();
 }
 
+// A session that presents no entity drops the passes' queues undrawn
+// (world/present_drains.h discard_entity_presentation).
+void Simulation::discard_entity_presentation() {
+	if (world_installed_) opennova::world::discard_entity_presentation(kernel_->world);
+}
+
 // The destruction presentation drain (world/destruction.h; §24): one call per
 // present, handing the sim's events to the C++ pass whole (the counters ride
 // along: `crackles` is the wreck-fire crackle rolls fired, S12b). The events
@@ -378,7 +385,6 @@ void Simulation::drain_destruction_events(opennova::world::DestructionEvents &r_
 	r_events.items_destroyed = ev.items_destroyed;
 	r_events.crackles = ev.crackles;
 	r_events.debris_triangles = ev.debris_triangles;
-	r_events.glass_points = ev.glass_points;
 	ev.clear();
 }
 
@@ -572,7 +578,9 @@ Vector3 Simulation::get_entity_position(int p_index) const {
 	AiEntity *e = kernel_->world.ai.at(p_index);
 	if (!e) return Vector3();
 	// mission (x, y, z) 16.16 -> Godot (x, z, -y) world units. [orig render remap: (x, z, -y).]
-	return godot_from_fixed3(e->pos);
+	// A freed slot belongs to no entity (its words read zero).
+	if (e->self == nullptr) return Vector3();
+	return godot_from_fixed3(e->self->position.words());
 }
 
 float Simulation::get_entity_yaw_deg(int p_index) const {
@@ -615,9 +623,9 @@ PackedVector3Array Simulation::get_entity_effect_state_for_ssn(int p_ssn) const 
 	out.set(EFFECT_STATE_POSITION, Vector3(
 			entity->position.x, entity->position.z, -entity->position.y));
 	out.set(EFFECT_STATE_ROTATION_DEG, Vector3(
-			static_cast<float>(entity->pitch),
-			static_cast<float>(entity->yaw),
-			static_cast<float>(entity->roll)));
+			static_cast<float>(opennova::world::degrees_from_angle_bam(entity->pitch_bam)),
+			static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(entity->heading)),
+			static_cast<float>(opennova::world::degrees_from_angle_bam(entity->roll_bam))));
 	return out;
 }
 
@@ -730,11 +738,14 @@ std::shared_ptr<const SimulationPresentSnapshot> Simulation::build_present_snaps
 	if (!present_.snapshot || present_.snapshot.use_count() != 1)
 		present_.snapshot = std::make_shared<SimulationPresentSnapshot>();
 	auto &frame = *present_.snapshot;
-	frame.rows.clear();
+	// The builders size the kept row buffer themselves (each row is written whole), so it is
+	// not cleared and refilled here.
 	frame.door_phases.clear();
+	present_.last_snapshot_body_us = 0;
 	if (runtime_ && kernel_) {
 		const opennova::inmatch::PresentRowsContext context{*kernel_, runtime_, is_joiner(),
-				host_ctx(), joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr};
+				host_ctx(), joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr,
+				runtime_profiling_enabled_ ? &present_.last_snapshot_body_us : nullptr};
 		if (is_joiner()) {
 			opennova::inmatch::build_client_replica_present_rows(
 					context, present_.pool_lifecycle, frame.rows, frame.door_phases);
@@ -745,6 +756,8 @@ std::shared_ptr<const SimulationPresentSnapshot> Simulation::build_present_snaps
 			opennova::inmatch::build_world_present_rows(context, present_.pool_lifecycle,
 					frame.rows, frame.door_phases);
 		}
+	} else {
+		frame.rows.clear();
 	}
 	present_.last_entity_count = static_cast<int>(frame.rows.size() / PF_STRIDE);
 	// Reuse the identity storage and compare exact fields, never a hash.

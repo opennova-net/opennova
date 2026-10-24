@@ -189,8 +189,8 @@ static constexpr int32_t kAddrOffsetMask = (int32_t)0x0FFFFFFF;
 /* The running context's pointer [orig: dword_324494C, set by AudioVM_RunContext @ 0x672E56]:
    the word `push_me` pushes, and the word below the data stack's base, which starts right after
    it (off_84F218 = 0x3244950): the one instance's address, &g_AudioVmInstance, which both run
-   entries pass [orig: sub_672EE0 @ 0x672EE0; MusicCtx_SelectEndTrack @ 0x672FE2] (D-MUS-26). A
-   word in its 36 bytes is an address of the VM's instance (Region::Instance). */
+   entries pass [orig: AudioVM_RunInstance @ 0x672EE0; MusicCtx_SelectEndTrack @ 0x672FE2]
+   (D-MUS-26). A word in its 36 bytes is an address of the VM's instance (Region::Instance). */
 static constexpr int32_t kSelfWord = 0x03245AE8;
 
 /* The instance's dispatch word once ScriptInstance_Init has run, AudioVM_RunContext's address
@@ -607,7 +607,7 @@ static void op_push_local_addr(MusVM *vm) {
     vm_push(vm, (int32_t)((uint32_t)vm->locals_base + (uint32_t)byte_off));
 }
 
-/* Witnessed: Jointops.exe!VmOp_PushSelf @ 0x6728F0; Jointops.exe pushes the current
+/* [orig: AudioVM_Op_PushSelf @ 0x6728F0]: Jointops.exe pushes the current
    instance pointer (kSelfWord). */
 static void op_push_self(MusVM *vm) {
     vm_push(vm, kSelfWord);
@@ -1363,7 +1363,7 @@ static void run_step(MusVM *vm, int gate_on_running) {
     set_instance_word(vm, kInstIp, code_addr(vm->pc));
 }
 
-/* Tick: the per-update step [orig: sub_672EE0 -> AudioVM_RunContext @ 0x672E50 ->
+/* Tick: the per-update step [orig: AudioVM_RunInstance -> AudioVM_RunContext @ 0x672E50 ->
    AudioVM_DispatchLoop @ 0x672720]. */
 int mus_vm_tick(MusVM *vm, uint32_t dt_ms) {
     init_handlers();

@@ -1003,7 +1003,8 @@ void DebugControlTable::register_automation_actions() {
 		if (effects == nullptr) {
 			return outcome_error(ERR_UNAVAILABLE);
 		}
-		return outcome_result(effects->apply_weapon_switch(from_variant<String>(p_args[0]), false));
+		return outcome_result(
+				effects->apply_weapon_switch(from_variant<String>(p_args[0]), false, false));
 	};
 
 	Entry &clear_viewmodel = action(control_id::kClearViewmodelWeapon, "Player",
@@ -1053,15 +1054,17 @@ void DebugControlTable::register_automation_actions() {
 	look.row->requires_confirm_ = true;
 	bind_action(look, &DebugControlTable::sim, &Simulation::add_local_player_look);
 
-	// The joiner's setup pose (the scenario driver): its own client-owned L,
-	// so not host-only; a host or single player refuses it (theirs is
-	// teleport_local_player).
+	// The scenario driver's setup pose: the bridge's ApplyPose write on the
+	// session's own L, any role, so not host-only (teleport_local_player stays
+	// the authority's dev teleport).
 	const auto coordinate = [](const char *p_name) {
 		return DebugArgSpec::number(p_name)->between(Simulation::mission_coord_min(),
 				Simulation::mission_coord_max());
 	};
-	Entry &pose = action(control_id::kApplyLocalPose, "Player", "Apply joiner pose",
-			"Joiner only: write the local player's mission-space position, yaw and pitch and zero its velocity (the retail bridge's ApplyPose), which the next C2S 0x0C uplink carries. A host or single player moves its player through the authority's own row instead.",
+	Entry &pose = action(control_id::kApplyLocalPose, "Player", "Apply local pose",
+			"Any role: write the local player's mission-space position, yaw and pitch and zero its "
+			"velocity, nothing else (the retail bridge's ApplyPose; the resolver's idle-skip "
+			"counter carries over). A joiner's next C2S 0x0C uplink carries it.",
 			DebugControlRow::TARGET_SIM, DebugControlRow::OWNER_ENGINE,
 			args_of(coordinate("x"), coordinate("y"), coordinate("z"),
 					DebugArgSpec::number("yaw_deg")
@@ -1076,20 +1079,27 @@ void DebugControlTable::register_automation_actions() {
 
 void DebugControlTable::register_spectator_row() {
 	Entry &spectator = check(control_id::kLocalSpectator, "Player", "Spectator free camera",
-			"Detach the authority-owned local player from gameplay and unlock the free camera while the match continues ticking.",
+			"Detach the authority-owned local player from gameplay and unlock the free camera while the match continues ticking. One way: retail has no spectator leave.",
 			DebugControlRow::TARGET_SIM, DebugControlRow::OWNER_ENGINE);
 	spectator.read = [this]() -> Variant {
 		Simulation *value = sim();
 		return value != nullptr ? Variant(value->is_local_spectator()) : Variant();
 	};
-	// The engine's own refusal (no local authority player) reads as
-	// unauthorized: tooling cannot manufacture spectator authority.
+	// The engine's own refusal (no local authority player, or a leave: retail
+	// has none, D-NET-407) reads as unauthorized: tooling cannot manufacture
+	// spectator authority. A false write over a player that is not a
+	// spectator asks for nothing and changes nothing, as a true write over a
+	// spectator does in the engine.
 	spectator.write = [this](const Variant &p_value) -> Error {
 		Simulation *value = sim();
 		if (value == nullptr) {
 			return ERR_UNAVAILABLE;
 		}
-		return value->set_local_spectator(from_variant<bool>(p_value)) ? OK : ERR_UNAUTHORIZED;
+		const bool wanted = from_variant<bool>(p_value);
+		if (!wanted && !value->is_local_spectator()) {
+			return OK;
+		}
+		return value->set_local_spectator(wanted) ? OK : ERR_UNAUTHORIZED;
 	};
 	authoritative(spectator);
 }

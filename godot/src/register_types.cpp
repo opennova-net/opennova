@@ -95,6 +95,10 @@
 #include "simulation/debug_pick_card.h"
 #include "simulation/hitbox_debug_report.h"
 #include "simulation/hud_view_records.h"
+#include "simulation/use_press_row.h"
+#include "simulation/body_trace_row.h"
+#include "simulation/joiner_net_trace_row.h"
+#include "simulation/model_list_node_row.h"
 #include "simulation/epilog_cine_record.h"
 #include "simulation/deploy_rows.h"
 #include "simulation/player_weapon_view.h"
@@ -106,8 +110,10 @@
 #include "object/skeletal_anim.h"
 #include "hud/player_hud_weapon_def.h"
 #include "hud/hud_entity_info.h"
+#include "hud/font_page_glyphs.h"
 #include "hud/loading_background.h"
 #include "hud/hud_draw_list_stats.h"
+#include "hud/hud_process_words_carry.h"
 #include "hud/hud_overlay.h"
 #include "hud/map_view_state.h"
 #include "hud/map_view_window.h"
@@ -191,6 +197,7 @@
 #include "player/first_person_arms_witness.h"
 #include "player/game_config_block.h"
 #include "player/gameplay_camera.h"
+#include "player/key_event_queue.h"
 #include "player/local_player_presenter.h"
 #include "player/local_player_visuals.h"
 #include "player/player_move_intent.h"
@@ -292,6 +299,10 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EndRoundColumn);
 	GDREGISTER_CLASS(EndRoundRow);
 	GDREGISTER_CLASS(RoundOutcome);
+	GDREGISTER_CLASS(UsePressRow);
+	GDREGISTER_CLASS(BodyTraceRow);
+	GDREGISTER_CLASS(JoinerNetTraceRow);
+	GDREGISTER_CLASS(ModelListNodeRow);
 	GDREGISTER_CLASS(CineEventRecord);
 	GDREGISTER_CLASS(EpilogCineState);
 	GDREGISTER_CLASS(DeployStatus);
@@ -331,6 +342,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(HudPos);
 	GDREGISTER_CLASS(VehicleHudBlock);
 	GDREGISTER_CLASS(HudDrawListStats);
+	GDREGISTER_CLASS(HudProcessWordsCarry);
 	GDREGISTER_CLASS(HudOverlay);
 	GDREGISTER_CLASS(MapViewState);
 	GDREGISTER_CLASS(MapViewWindow);
@@ -470,6 +482,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PlayerViewmodelRig);
 	GDREGISTER_INTERNAL_CLASS(PlayerWeaponEffects);
 	GDREGISTER_CLASS(LocalPlayerVisuals);
+	// The device's key queue the input router owns (D-CTRL-6).
+	GDREGISTER_CLASS(KeyEventQueue);
 	GDREGISTER_CLASS(LocalPlayerPresenter);
 	GDREGISTER_CLASS(NovaWorldClient);
 	GDREGISTER_CLASS(HostSessionOptions);
@@ -519,6 +533,7 @@ void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
 	TargetProjectionXrInterface::cleanup_statics();
 	SlotShadow::cleanup_statics();
 	Q3SourceRegistry::cleanup_statics();
+	release_glyph_canvas_shader();
 	ObjectData::clear_static_caches();
 	opennova::clear_texture_resolver_caches();
 }

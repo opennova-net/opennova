@@ -83,17 +83,18 @@ struct FoliageViewInput {
 };
 
 // The detail tier's c24.x sway phase: the ms clock x 0.003 plus the weather
-// oscillator's ring slot 0 / 655360 (`fild` the GetTickCount word, `fmul`
-// flt_7DE9D4 = 0.003; `fild g_EnvWaveOscRing`, `fmul` flt_7DE9D0 =
-// 0x35CCCCCD = 1/655360; `faddp`), uploaded as c24 = (phase, 1, 0, -) with
+// oscillator's ring slot 0 / 655360 (`fild` the GetTickCount word, read signed,
+// `fmul` flt_7DE9D4 = 0x3B449BA6, the float 0.003; `fild g_EnvWaveOscRing`, `fmul`
+// flt_7DE9D0 = 0x35CCCCCD = 1/655360; `faddp`), uploaded as c24 = (phase, 1, 0, -) with
 // c25 = (0.03, ...) (flt_7C9B90) for g_FoliageWindSwayVS:
 // `mad r0.w, v0.x, c24.y, c24.x` (v0.x = the pre-wind vertex's render x,
 // the Godot Z relative to the patch's sector origin) -> polynomial sine ->
 // `mad r1.z, sin*bend, c25.x, v0.z` (render z = Godot X).
 // [orig: Foliage_SetupVertexShaderConstants @ 0x60074a..0x6007b4;
 // g_FoliageWindSwayVS literal @ 0x7de648]. The clock term folds modulo 2 pi
-// so a long session keeps the sine's float precision — the sine is
-// periodic, nothing observable moves.
+// (keeping its sign: past 2^31 ms of uptime the signed read is negative) so a
+// long session keeps the sine's float precision — the sine is periodic,
+// nothing observable moves.
 float foliage_detail_wind_phase(uint32_t time_ms, int32_t wind_osc_ring0);
 
 // The Godot-Z origin of a detail patch's D3D world translation: the 512-unit

@@ -18,6 +18,27 @@ const NAMES: Array[String] = ["WPN_JAVELIN", "WPN_STINGER", "WPN_MORTAR"]
 # The sight art the rows name, minted as opaque white TGAs.
 const SIGHT_TEXTURES := ["jav_pip.tga", "jav_dot.tga", "stg_pip.tga", "stg_dot.tga"]
 
+# The Tmap pack's items.def, which the staged root takes, carries no row for the
+# local body (105305, as the RuntimeFixture pack has it); the rig appends one so
+# the body's ItemTypeIndex is set, as every retail body's is: the weapon walk pumps
+# only such a pool-0 row, the local player's included (D-NET-NEW-L7-6)
+# [orig: WeaponAction_ProcessAllEntities @0x542690 (the ItemTypeIndex test
+# @0x5426B9)].
+const PLAYER_ROW := """
+begin "Player #1, Multiplayer"
+  id 105305
+  type person
+  graphic US01
+  graphicenemy Indo01
+  sid player1_mp
+  anim_def US01
+  hp 150
+  ai_function plyr
+  disk_function PLAYER
+  move_function org2
+end
+"""
+
 const WEAPONS := """
 weapon "WPN_JAVELIN"
  category 7
@@ -297,6 +318,8 @@ static func boot(test: GutTest) -> CombatHudRig:
 	var staged_ammo := FileAccess.get_file_as_string(rig.stage.path_join("ammo.def"))
 	WorldFixture.write_file(rig.stage.path_join("weapon.def"), staged_weapons + WEAPONS)
 	WorldFixture.write_file(rig.stage.path_join("ammo.def"), staged_ammo + AMMO)
+	var staged_items := FileAccess.get_file_as_string(rig.stage.path_join("items.def"))
+	WorldFixture.write_file(rig.stage.path_join("items.def"), staged_items + PLAYER_ROW)
 	var layout_file := FileAccess.open(rig.stage.path_join("hudpos.def"), FileAccess.WRITE)
 	layout_file.store_string(VehicleFixture.hudpos_text())
 	layout_file.close()

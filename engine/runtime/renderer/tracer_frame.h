@@ -46,6 +46,20 @@ enum class TracerShader : std::uint8_t {
 	Distortion = 3,
 };
 
+// Whether a mission start creates the tracer pool's three materials (the smoke pair's, the NVG
+// laser's and the distortion pass's): the mission textures stage's full arm does, past the view
+// effects' and ahead of FrameFX's; a dedicated host's reduced arm creates none. A device backend
+// creates the distortion ribbons' objects there, and the overlay stages that draw the NVG laser
+// theirs, ahead of the first frame that draws them (D-NET-NEW-LF-13).
+// [orig: Render_InitMissionTextures @0x587120 - the dedicated test @0x58713C, the full arm's call
+//  @0x587240 (ViewFx_InitShadersAndTextures @0x587217 ahead of it, CFrameFX_CreatePixelShaders
+//  @0x587261 past it), none on the reduced arm @0x58727A..0x58728C; CEffectEmitterPool_CreateShaders
+//  @0x5DC8F0 - pool+0x3008 (GfxShader_Create2TexDesc, the call @0x5DCA39, the store @0x5DCA43),
+//  pool+0x300C (CGfxShader_CreateFromChannelDesc, the call @0x5DCABA, the store @0x5DCAC4)]
+constexpr bool creates_tracer_pool_shaders(bool dedicated_host) noexcept {
+	return !dedicated_host;
+}
+
 // One style row [orig: the 0x830-B style block].
 struct TracerStyleView {
 	const std::uint32_t *colors = nullptr; // +0x18 ARGB ramp, count +0x10
@@ -84,6 +98,40 @@ struct TracerVec3 {
 // The camera terms of one ribbon build. Coordinates are any right-handed frame
 // that is a rotation of the mission frame (mission or Godot); see
 // compile_tracer_ribbons for the one handedness-dependent step.
+// The terms are the drawing pass's own view: the build reads the scene pass's
+// viewport block, its eye and its float view matrix [orig: CEffectChannel_RenderRibbon
+// @0x5DB8A0 - g_MainViewport+4 (byte_A78364, the push @0x5DC111), the view's third
+// column g_MainViewport+0xFC (g_ViewportViewMatrixFloat) @0x5DC120 / @0x5DC131 /
+// @0x5DC143; Viewport_BuildProjectionMatrix @0x410FB0 copies a block's eye to +4
+// (@0x41113B..0x411147) and builds the float view at +0xFC (@0x41134E..0x411391)].
+// A water mirror's reflected subscene runs the pool's main pass under the mirror's
+// own block: the main scene rebuilds that block from the mirrored camera (the live
+// one below the water) right ahead of the subscene, which then draws the pool
+// [orig: Render_MainScene @0x5C1240 - the mirror @0x5C1376..0x5C13A0, the live block
+// below the water @0x5C13F6..0x5C1414, Viewport_BuildProjectionMatrix(&g_MainViewport,
+// the mirrored block) the call @0x5C170B, Water_RenderReflectedWorldScene the call
+// @0x5C171F; Water_RenderReflectedWorldScene @0x5C8510 - CEffectEmitterPool_RenderMainPass
+// (1, 0) on g_TracerEmitterPool, the call @0x5C85F6]. The weapon Inset's mirror runs the
+// same subscene under its own mirrored block [orig: Render_WeaponInsetScene @0x5C9740 -
+// the Render_TerrainScene call @0x5C99B7; Render_TerrainScene @0x610C80 - the
+// Water_ReflectionPrerender call @0x610CE0; Water_ReflectionPrerender @0x5C2780 - the
+// Render_MainScene call @0x5C27C6]. The weapon Inset's scene runs the world scene, the
+// pool's two passes among it, under the Inset's own block and the projection of its own
+// field [orig: Render_WeaponInsetScene @0x5C9740 - Viewport_BuildProjectionMatrix
+// (&g_MainViewport, the Inset block) the call @0x5C99CB, past its mirror's prerender,
+// Render_SetViewProjectionWithDefaults at the block's fov the call @0x5C9DAE,
+// Terrain_RenderWorldScene the call @0x5C9DE9; Terrain_RenderWorldScene @0x5C93A0 - the
+// pool's calls @0x5C95AC / @0x5C9687]; the projection's _11 the minimum width reads is
+// that view's field's cotangent whatever its target [orig: Render_SetViewProjectionWithDefaults
+// @0x58F6B0 - the Render_SetViewAndProjectionMatrices call @0x58F6CF;
+// Render_SetViewAndProjectionMatrices @0x58D900 - the D3DXMatrixPerspectiveFovLH call
+// @0x58D9DE]. So each view that draws the pool builds its own frame against its own eye,
+// view and field: the main scene's, the weapon Inset's and each rendering mirror's.
+// The pool draws in every drawn frame's scene pass, built at that draw from the view block
+// the frame rebuilt just ahead of it [orig: Render_ProcessMainSceneFrame @0x5CA0F0 - the
+// Viewport_BuildProjectionMatrix call @0x5CA5D2, the Terrain_RenderWorldScene call
+// @0x5CA8EC] and the clock read at the draw (the GetTickCount call @0x5DC104): the frames
+// are built once per drawn frame after its views are placed, not once per update.
 struct TracerView {
 	TracerVec3 camera;                  // the eye [orig: byte_A78364]
 	// The view matrix's third column: the look direction, either sign
@@ -91,8 +139,10 @@ struct TracerView {
 	TracerVec3 forward{0.0f, 0.0f, 1.0f};
 	// The projection's _11 (cot(horizontal fov / 2)) [orig: `g_ProjectionMatrix` @ 0x2721980].
 	float projection_x_scale = 1.0f;
-	// The wall clock in milliseconds [orig: CEffectChannel_RenderRibbon @ 0x5DB8A0, the
-	// GetTickCount call @ 0x5DC104].
+	// The wall clock in milliseconds: GetTickCount's DWORD, the embedder's one clock
+	// (world::frame_tick_count_ms) [orig: CEffectChannel_RenderRibbon @ 0x5DB8A0, the
+	// GetTickCount call @ 0x5DC104; a beam run's own, Render_DrawTrailOrBeamSegments
+	// @0x5DCB80, the call @0x5DD41C].
 	std::uint32_t tick_ms = 0;
 };
 

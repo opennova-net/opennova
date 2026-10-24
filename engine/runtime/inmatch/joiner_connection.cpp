@@ -4,10 +4,12 @@
 #include <formats/mission/bms.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/flat_tlv.h>         // append_flat_tlv (the C2S 0x00 JOIN body)
+#include <net/npwire/lan_discovery.h>    // build_lan_discovery_probe, next_browse_connection_index, the record lines
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h> // decode_cs_config_update
 #include <net/npwire/session_hello.h>
+#include <runtime/inmatch/punt_log.h> // ConnectLog and the client callbacks' line texts
 #include <net/npwire/session_keys.h>
 #include <net/novacrypto/crc32.h>
 #include <base/gameprofile/gameprofile.h>
@@ -15,9 +17,11 @@
 #include <base/io/le.h>
 #include <base/io/log.h>
 #include <base/vfs/vfs.h>
+#include <runtime/inmatch/join_character_profile.h> // fresh_profile_character_vars
+#include <runtime/inmatch/mission_exit.h> // ProcessDisconnectLatch (the connect start's clear)
+#include <runtime/world/tick_count_clock.h> // frame_tick_count_ms64 (the connection's clock)
 
 #include <algorithm>
-#include <chrono>
 #include <limits>
 #include <string_view>
 #include <utility>
@@ -32,11 +36,12 @@ namespace opennova::inmatch {
 
 namespace {
 
-uint64_t steady_milliseconds() {
-	using namespace std::chrono;
-	return static_cast<uint64_t>(
-	        duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
-}
+// The connection's clock, the process's GetTickCount (the main loop's; engine
+// world/tick_count_clock.h carries its steps, D-NET-NEW-LF-2): the send-interval legs, the
+// receive reap, the pings' stamps and their round trips read it.
+// [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0 - GetTickCount @0x628FE3;
+//  NapiNPClientMsg_0x057_RTT @0x432210 - GetTickCount @0x432274, `sub eax, esi` @0x432280]
+uint64_t tick_count_milliseconds() { return world::frame_tick_count_ms64(); }
 
 // C2S 0x02 echo of the post-auth join probe. Retail writes THREE leading dwords — the probe's two
 // position values plus the client's net-frame counter — then random filler up to the requested
@@ -77,13 +82,14 @@ std::vector<uint8_t> build_join_padding_echo(
 // only the latter; expansion hosts require both. In a LAN session the CD-key
 // ids lead them, each only when set: the joiner's registry key decoded (a DFX2
 // LAN host checks them, DFX2-13; JO's sends them alike and its host ignores
-// them). The same code in both titles.
+// them). In a NovaWorld session the gate's GLSVSSREQUEST rides last when the gate gave one.
+// The same code in both titles.
 // [orig: NapiNP_WriteClientAuthPayload @0x42a1cb..0x42a235] [orig: @0x42c25b..0x42c2c5
 //  (dfx2.exe)]
 std::vector<uint8_t> build_join_request(
 		std::string_view expansion, int32_t expansion_version_checksum,
 		const std::vector<uint8_t> &cd_cookie, bool lan_session,
-		const cdkey::WireKeys &cd_key_ids) {
+		const cdkey::WireKeys &cd_key_ids, std::string_view glsvss_request) {
 	std::vector<uint8_t> body;
 	// One flat TLV: [name\0][LE16 size][size bytes]. A string value carries
 	// its NUL inside the size; a binary value is emitted as-is.
@@ -132,6 +138,13 @@ std::vector<uint8_t> build_join_request(
 			append_binary_tlv("CD", cd_cookie.data(), cd_cookie.size());
 		}
 	}
+	// The gate's GLSVSSREQUEST, a NUL-terminated string, in a NovaWorld session when the gate
+	// gave one (D-NET-723).
+	// [orig: NapiNP_WriteClientAuthPayload @0x42a180 - the NovaWorld transport test @0x42a2dd,
+	//  the buffer's test @0x42a2e6, the TLV @0x42a315]
+	// [orig: @0x42c36d, @0x42c376, the TLV @0x42c3a5 (dfx2.exe)]
+	if (!lan_session && !glsvss_request.empty())
+		append_string_tlv("GLSVSSREQUEST", glsvss_request);
 	return body;
 }
 
@@ -147,15 +160,6 @@ std::vector<uint8_t> le32_value(uint32_t value) {
 	std::vector<uint8_t> body;
 	body.reserve(4);
 	opennova::io::append_u32_le(body, value);
-	return body;
-}
-
-std::vector<uint8_t> build_retail_mission_status() {
-	std::vector<uint8_t> body(13, 0);
-	body[9] = 0x07;
-	body[10] = 0x05;
-	body[11] = 0x07;
-	body[12] = 0x01;
 	return body;
 }
 
@@ -187,17 +191,17 @@ bool has_initial_cs_config_pair(const std::vector<ProtocolMessage> &messages) {
 } // namespace
 
 JoinerConnection::JoinerConnection(std::string player_name)
-		: JoinerConnection(std::move(player_name), &steady_milliseconds) {}
+		: JoinerConnection(std::move(player_name), &tick_count_milliseconds) {}
 
 JoinerConnection::JoinerConnection(std::string player_name,
 		MonotonicMilliseconds monotonic_milliseconds)
 		: player_name_(std::move(player_name)),
 		  monotonic_milliseconds_(std::move(monotonic_milliseconds)) {
-	if (!monotonic_milliseconds_) monotonic_milliseconds_ = &steady_milliseconds;
-	// Stock-Avatars.def fresh-profile seed for socket-free/headless callers; the
-	// Godot binding replaces it from the mounted Avatars.def + weapon.sav before
-	// start(), so a user's real selection wins (retail_fresh_profile_character_vars).
-	character_join_vars_ = retail_fresh_profile_character_vars();
+	if (!monotonic_milliseconds_) monotonic_milliseconds_ = &tick_count_milliseconds;
+	// A fresh profile with no Avatars.def until the embedder installs the mounted
+	// selection: the Godot binding computes it from the mounted Avatars.def and the
+	// profile before start() (fresh_profile_character_vars).
+	character_join_vars_ = fresh_profile_character_vars(CharacterRegistry());
 	conn_.type = 2;                  // client-side connection (the joiner's view of the host)
 	conn_.player_name = player_name_;
 }
@@ -219,13 +223,13 @@ std::vector<uint8_t> JoinerConnection::start() {
 	client_key_ = keys.key;
 	conn_.client_scrk = keys.scrk;
 	// The CI: a join from a discovered session goes on with the browse's connection
-	// and its index; a dial without one creates its connection, which takes the
-	// process's next index (D-NET-521).
+	// and its index (D-NET-521); one with no row enumerates on its own connection,
+	// created as every enumerate's is, the counter's second step (D-NET-703).
 	// [orig: CNapiNetwork_StartClientConnection @0x4ca160 (the enumerator's connection
 	//  ctx+0xE60); CNapiNPConnection_Create @0x62b282..0x62b296]
 	client_index_ = discovered_.present && discovered_.client_index != 0
 			? discovered_.client_index
-			: next_connection_index();
+			: discovered_.present ? next_connection_index() : next_browse_connection_index();
 	server_hk_ = 0;
 	server_password_required_ = false;
 	conn_.server_sk = 0;
@@ -235,12 +239,19 @@ std::vector<uint8_t> JoinerConnection::start() {
 	handshake_retry_clock_armed_ = false;
 	handshake_last_send_ms_ = 0;
 	client_join_start_ms_ = 0;
+	enumerated_session_recorded_ = false;
+	enumerate_pass_ended_ = false;
+	enumerated_session_sn_.clear();
+	teardown_exit_reason_ = 0;
+	teardown_input_action_ = 0;
 	post_auth_stage_ = PostAuthStage::Inactive;
 	goodbye_sent_ = false;
 	session_last_send_ms_ = 0;
 	session_send_clock_armed_ = false;
 	session_ack_pending_ = false;
 	pending_spawn_menu_request_ = false;
+	sync_request_owed_ = false;
+	mission_data_load_running_ = false;
 	spawn_ack_timestamp_ = 0;
 	game_start_ack_timestamp_ = 0;
 	rtt_ring_.fill(0);
@@ -249,8 +260,12 @@ std::vector<uint8_t> JoinerConnection::start() {
 	session_rtt_ms_ = 0;
 	preload_ready_ = false;
 	sync_tail_seen_ = false;
-	player_list_seen_ = false;
+	round_over_gate_ = false;
+	mission_start_aborted_ = false;
+	mission_start_released_this_pass_ = false;
+	sync_tail_this_pass_ = false;
 	initial_admission_complete_ = false;
+	loading_cancel_ = false; // [orig: CNapiNetwork_OnConnectedToServer @0x4C63B7]
 	deployment_pick_sent_ = false;
 	deployment_pick_sequence_ = 0;
 	deployment_pick_sequence_unbound_ = false;
@@ -293,19 +308,28 @@ std::vector<uint8_t> JoinerConnection::start() {
 	receive_clock_armed_ = true;
 	if (discovered_.present) {
 		// A join from a discovered session: the record already holds the 0x81, so the
-		// connection starts in the connect state with its HK and SF and sends the 0x42
+		// connection starts in the connect state with its HK and SF. Nothing leaves here:
+		// the state's start is now and its last send one resend interval back, so the
+		// first 0x42 goes at the first pump whose clock reads past the start (pump()).
 		// [orig: CNapiNPConnection_InitFromSession @0x626320, state 3 @0x626496, its
-		//  window's start @0x62648a; PumpStateMachine case 3 @0x629508].
+		//  window's start @0x62648a, the last send now - conn+0x5B0 @0x626490..0x626499;
+		//  PumpStateMachine case 3 @0x629508, the resend test @0x629588 -> SendClientJoin
+		//  @0x629595, its one send site]
 		server_hk_ = discovered_.host_key;
 		server_password_required_ = discovered_.password_required;
 		advertised_expansion_ = discovered_.expansion;
-		phase_ = Phase::Auth;
-		handshake_retry_datagram_ = build_client_auth();
-		handshake_last_send_ms_ = monotonic_milliseconds_();
-		client_join_start_ms_ = handshake_last_send_ms_;
-		handshake_retry_clock_armed_ = true;
-		return handshake_retry_datagram_;
+		enter_session_connect_state();
+		return {};
 	}
+	// No row: retail's enumerate-and-join on one connection. The enumerator announces
+	// to the target at once and then every > 3000 ms, with no time limit, until a
+	// session answers; the join then goes on with this same connection, its CI and
+	// socket (D-NET-703).
+	// [orig: UI_EnumerateAndJoinSession @0x569f50 - InitTransportConnection @0x56a097,
+	//  the loop @0x56a0c1..0x56a0f9 (no time limit, no fallback dial);
+	//  CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 - the first pump sends
+	//  (no last send @0x629119); CNapiNetwork_StartClientConnection @0x4ca160 on the
+	//  same connection]
 	phase_ = Phase::Hello;
 	handshake_retry_datagram_ = build_client_hello();
 	handshake_last_send_ms_ = monotonic_milliseconds_();
@@ -313,17 +337,30 @@ std::vector<uint8_t> JoinerConnection::start() {
 	return handshake_retry_datagram_;
 }
 
+void JoinerConnection::enter_session_connect_state() {
+	// The connect start clears the process's disconnect latch, so the join never reads a record
+	// an earlier session left there (D-NET-NEW-L1-26).
+	// [orig: CNapiNetwork_StartClientConnection @0x4CA160 - the memset of ctx+0xD94
+	//  @0x4CA1A6..0x4CA1B4]
+	if (disconnect_latch_ != nullptr) disconnect_latch_->clear();
+	// [orig: CNapiNetwork_StartClientConnection @0x4ca160 -> CNapiNPConnection_InitFromSession
+	//  @0x626320 (the call @0x4ca41b) - state 3 @0x626496, the start @0x62648a, the last send
+	//  now - conn+0x5B0 @0x626490..0x626499]
+	phase_ = Phase::Auth;
+	handshake_retry_datagram_ = build_client_auth();
+	client_join_start_ms_ = monotonic_milliseconds_();
+	handshake_last_send_ms_ = client_join_start_ms_ - kClientJoinRetryMilliseconds;
+	handshake_retry_clock_armed_ = true;
+}
+
 std::vector<uint8_t> JoinerConnection::build_client_hello() {
-	// The browse and connect legs use the same title identity. The callsign
-	// belongs in ClientAuth.NA (not CO) and is later echoed into the organic-spawn
-	// named organic record by the host. A dial without a row announces to the dialed
-	// host, whose address and port the announce writes as its EIP / EPN.
+	// The enumerator's announce, the browse's own (build_lan_discovery_probe): the
+	// title identity, this connection's CI, and the target's address and port as its
+	// EIP / EPN. The callsign belongs in ClientAuth.NA (not CO) and is later echoed
+	// into the organic-spawn named organic record by the host.
 	// [orig: NapiNPSession_SendAnnouncePacket @0x61fa00 - @0x61fcf5..0x61fd47;
 	//  CNapiGameSession_InitTransportConnection @0x4c9ec3 (the resolved address)]
-	ClientHello hello = make_title_client_hello(*title_, client_index_);
-	hello.eip = host_address_.ip;
-	hello.epn = host_address_.port;
-	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
+	return build_lan_discovery_probe(*title_, client_index_, host_address_.ip, host_address_.port);
 }
 
 std::vector<uint8_t> JoinerConnection::build_client_auth() {
@@ -353,7 +390,7 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	// BT is the account ban state (1/2 reject, DC=6/7; 0 for LAN). The rest are stored/display
 	// only (@0x4c7260 SetVersionString/SetCountryCode/TZB). VERSIONSTRING is the binary's own
 	// sprintf("V%i.%i.%i.%i", ...), the title's profile's version text (JO's 1, 7, 5, 7)
-	// [orig: Game_ParseCommandLineAndInit @0x4a7d81 into byte_B4C0B0, copied @0x569b5c]; COUNTRYCODE
+	// [orig: Game_ParseCommandLineAndInit @0x4a7d81 into g_VersionText, copied @0x569b5c]; COUNTRYCODE
 	// is the install's CC.BIN, omitted when empty
 	// [orig: @0x569b70; the strlen gate @0x4c385a] (D-NET-296).
 	// [wire: retail-lan-host-join-session ClientAuth; orig: NapiNetConfig_LoadFromConnTags
@@ -425,16 +462,15 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 			character_join_vars_.avatar[0] != 0);
 	append_profile_value("VCB", static_cast<int8_t>(character_join_vars_.avatar[1]),
 			character_join_vars_.avatar[1] != 0);
-	// Spectator is opt-in. Keeping both fields absent for Player preserves the
-	// captured retail player-join bytes exactly.
-	// [orig: CNapiServerInfo_SerializeToSession @0x4c3650 writes JSR/JSPP]
-	if (join_role_ == JoinRole::Spectator) {
+	// JSR on a nonzero spectate word, then JSPP on a non-empty spectator password,
+	// each on its own test: the join's choice keeps a spectator password a later
+	// player commit left in place, and it rides JSPP with no JSR (D-NET-NEW-L2-12).
+	// [orig: CNapiServerInfo_SerializeToSession @0x4C3650 - JSR @0x4c3c54..0x4c3c94
+	//  (`jz` to the JSPP test), JSPP @0x4c3c9c..0x4c3cb2]
+	if (join_role_ == JoinRole::Spectator)
 		auth.cu.push_back(make_client_cu_chunk(2, "JSR", "1"));
-		if (!spectator_password_.empty()) {
-			auth.cu.push_back(make_client_cu_chunk(
-					2, "JSPP", spectator_password_));
-		}
-	}
+	if (!spectator_password_.empty())
+		auth.cu.push_back(make_client_cu_chunk(2, "JSPP", spectator_password_));
 	// TZB is the OS time-zone bias, omitted when 0; MPS the stock mpmaxpacketsize (no cfg loader).
 	// [orig: tzb @0x569dbd, its gate @0x4c3da4; max_packet_bytes = maxPacketSize_338 @0x569ca0,
 	//  cfg row @0x833380 default "1300"] (D-NET-296)
@@ -482,9 +518,97 @@ const char *joiner_phase_name(JoinerConnection::Phase phase) {
 }
 } // namespace
 
-JoinerConnection::PollResult JoinerConnection::handle_datagram(const uint8_t *raw, std::size_t len) {
+namespace {
+// The S2C probe, the last row of the manager's opcode table: taken while the protocol finds
+// the type-2 connection for the sender, nothing else [orig: g_NPOpcodeHandlers @0x849D90 row 13;
+// Nwu_HandleServerProbe @0x624340 - @0x62434E].
+constexpr uint8_t kServerProbeOpcode = 0x87;
+} // namespace
+
+JoinerConnection::ManagerPass JoinerConnection::manager_receive(const uint8_t *raw, std::size_t len) {
+	ManagerPass out;
+	if (raw == nullptr || len == 0 || session_lost() || phase_ == Phase::Error) return out;
+	connect_log_line(napi_got_raw_text(static_cast<int32_t>(len), host_address_));
+	if (napi_punkbuster_datagram(raw, len)) return out;
+	std::vector<uint8_t> unpacked;
+	if (!nw_unpack_inbound(raw, len, unpacked)) {
+		connect_log_line(napi_tossed_text(static_cast<int32_t>(len), host_address_,
+				NapiTossReason::Unpack));
+		return out; // bad envelope: dropped, the session goes on
+	}
+	const int32_t unpacked_len = static_cast<int32_t>(unpacked.size());
+	connect_log_line(napi_got_cooked_text(unpacked_len, host_address_));
+	// The magic packet goes to its reflection, which answers only for a protocol whose
+	// reflection the session create armed: a host's, never a joiner's. No dispatch line follows.
+	// [orig: NapiNPManager_HandlePacket @0x622F10 - @0x622F53, the call @0x622F62;
+	//  NapiNP_HandleMagicPacket @0x622E70 - the reflection test @0x622EA6]
+	if (napi_baffle_packet(unpacked)) {
+		connect_log_line(napi_got_baffle_text(unpacked_len, host_address_));
+		return out;
+	}
+	// The socket legs. The type-2 connection to the host exists from the join's start; it is
+	// active (conn_flag0) from the accepted 0x82. A 0x83 or a 0x86 is queued once its leading
+	// dword is this connection's key, active or not (the queued leg tests the active byte);
+	// the 0x84 and the 0x85 need the active connection and act here; a 0x81 and a 0x82 are
+	// queued past their own gates (server_hello_queues, server_auth_queues). The client
+	// opcodes' handlers find no server-side connection on a joiner.
+	// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - FindConnection(2) @0x626AC5, the
+	//  socket leg's gates @0x626B01 (conn_flag0 only when queued), the key @0x626B72, the
+	//  queue @0x626CB0 (pool_server; the type-1 twin @0x626C8C); Nwu_HandleDisconnect @0x623CE0 - the
+	//  gates @0x623DF2, the key @0x623E74, the queue @0x624149 (the type-1 twin @0x624125);
+	//  NapiNP_HandleResendList @0x623800 - @0x6238EA, the key @0x623959, return 1 @0x623974 /
+	//  @0x623A45; Nwu_HandlePing @0x623A70 - @0x623B55, the key @0x623BC2, return 1 @0x623CAA]
+	bool taken = false;
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	if (nw_split_unpacked(unpacked, opcode, body)) {
+		const bool connection = phase_ != Phase::Idle;
+		const bool active = phase_ == Phase::Driving || phase_ == Phase::InMatch;
+		const bool keyed = body.size() >= 4 && io::read_u32_le(body.data()) == client_key_;
+		bool queue = false;
+		switch (opcode) {
+		case SESSION_OPCODE_SERVER_HELLO:
+			queue = server_hello_queues(body);
+			break;
+		case SESSION_OPCODE_SERVER_AUTH:
+			queue = server_auth_queues(body);
+			break;
+		case SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE:
+		case SESSION_OPCODE_SERVER_GOODBYE:
+			queue = connection && keyed;
+			break;
+		case SESSION_OPCODE_SERVER_RESEND_LIST:
+			taken = active && on_server_resend_list(body, out.immediate_outbound);
+			break;
+		case SESSION_OPCODE_SERVER_PING:
+			taken = active && on_server_ping(body, out.immediate_outbound);
+			break;
+		case kServerProbeOpcode:
+			taken = connection;
+			break;
+		default:
+			break; // the client opcodes and every unknown one: no handler takes it
+		}
+		if (queue) {
+			client_queue_.push_back(QueuedPacket{opcode, std::move(body)});
+			taken = true;
+		}
+	}
+	// The sends the handler wrote from inside this receive write their NET SENDING lines
+	// there, ahead of the dispatch's line [orig: CNapiNPConnection_SendSessionPacket
+	//  @0x61EDD0 - NapiLog_OnSend (the call @0x61F00D); CNapiNPConnection_SendPing @0x61F080 -
+	//  @0x61F241; NapiNPManager_HandlePacket @0x622FCD after DispatchOpcode returned].
+	for (const std::vector<uint8_t> &sent : out.immediate_outbound) connect_log_send(sent);
+	connect_log_line(taken
+			? napi_got_protocol_text(unpacked_len, host_address_,
+					title_ != nullptr && title_->pn != nullptr ? title_->pn : "")
+			: napi_tossed_text(unpacked_len, host_address_, NapiTossReason::NoProtocol));
+	return out;
+}
+
+bool JoinerConnection::pump_client_queue(PollResult &out) {
 	// Diagnostic transition trace, emitted on every exit path: one kInfo line
-	// per phase/admission-stage change per datagram, plus the authoritative
+	// per phase/admission-stage change per packet, plus the authoritative
 	// 0x7B mission identity the moment it is learned. The sink is silent unless
 	// an embedder installed one (io/log.h), so live joins pay one branch here.
 	struct TransitionTrace {
@@ -507,54 +631,111 @@ JoinerConnection::PollResult JoinerConnection::handle_datagram(const uint8_t *ra
 		}
 	} transition_trace{*this, phase_, post_auth_stage_, mission_known_};
 
-	PollResult out;
-	if (session_lost() || phase_ == Phase::Error) return out;
-	uint8_t opcode = 0;
-	std::vector<uint8_t> body;
-	if (!nw_decode_inbound(raw, len, opcode, body)) {
-		return out; // bad envelope — drop quietly, don't kill the session
+	if (session_lost()) {
+		drain_client_queue_after_teardown();
+		return false;
 	}
-	// The reap clock is NOT a per-datagram stamp: only an in-order admitted 0x83 (inside
-	// on_server_session) refreshes it, exactly retail's ParseMessages-only write; a 0x84
-	// resend list, a stale/other-key 0x83 and every ignored opcode leave it alone.
-	// [orig: HandleSessionPacket @0x626A00 in-order leg -> ParseMessages @0x625d54;
-	//  NapiNP_HandleResendList @0x62395f discards its GetTickCount; 0x81/0x82 stamp nothing]
-	switch (opcode) {
+	if (client_queue_.empty()) {
+		// The connection walk: the queued successor whose gap this frame closed, one parse
+		// each (the walk's own head test, against the connection's ACK as it now stands).
+		// [orig: NapiNPProtocol_PumpRecvQueues @0x6266A0 - the walk @0x626910..0x6269E8, the
+		//  type mask @0x626939, the head test @0x626960, CNapiNPConnection_ParseMessages
+		//  @0x62696B]
+		if (phase_ != Phase::Driving && phase_ != Phase::InMatch) return false;
+		SessionDeframeAdmission admission;
+		if (!take_ready_session_packet(conn_.seq, admission)) return false;
+		const SessionDeframeAdmission::Packet &packet = admission.packets.front();
+		process_session_admission(packet.header, packet.messages, admission, out);
+		return true;
+	}
+	QueuedPacket packet = std::move(client_queue_.front());
+	client_queue_.pop_front();
+	// The client queue's receive callback for every packet the pump reads, then the handler's
+	// queued leg, which repeats its gates against the connection as it now stands (an earlier
+	// packet of this pump may have changed it).
+	// [orig: NapiNPProtocol_PumpRecvQueues @0x6266A0 - pre_handler_callback2 (proto +0x26C,
+	//  NapiLog_OnRecv @0x4C46B0) @0x6268AA, the handler with its last argument 1 @0x6268D0]
+	connect_log_line(net_got_text(static_cast<int32_t>(packet.body.size() + 1), host_address_,
+			packet.opcode));
+	if (phase_ == Phase::Error) return true;
+	switch (packet.opcode) {
 	case SESSION_OPCODE_SERVER_HELLO:
-		if (phase_ == Phase::Hello) on_server_hello(body, out);
+		// The enumerate reads 0x81s until the pass that records the session ends: a later one
+		// in that pass finds the record (on_server_hello); the next pass's connect start stops
+		// the enumerator first (D-NET-NEW-L2-25, D-NET-NEW-L8-8).
+		if (phase_ == Phase::Hello && !(enumerated_session_recorded_ && enumerate_pass_ended_))
+			on_server_hello(packet.body, out);
 		break;
 	case SESSION_OPCODE_SERVER_AUTH:
-		if (phase_ == Phase::Auth) on_server_auth(body, out);
+		if (phase_ == Phase::Auth) on_server_auth(packet.body, out);
 		break;
 	case SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE:
-		if (phase_ == Phase::Driving || phase_ == Phase::InMatch) on_server_session(body, out);
-		break;
-	case SESSION_OPCODE_SERVER_RESEND_LIST:
-		if (phase_ == Phase::Driving || phase_ == Phase::InMatch)
-			on_server_resend_list(body, out);
+		// The queued leg needs the active connection; a 0x83 queued ahead of the accepted 0x82
+		// returns here [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - `has_seq &&
+		//  !conn_flag0` @0x626B01].
+		if (phase_ == Phase::Driving || phase_ == Phase::InMatch) on_server_session(packet.body, out);
 		break;
 	case SESSION_OPCODE_SERVER_GOODBYE:
 		// Dispatched only for an ACTIVE connection (retail: `is_response && !conn_flag0` drops
 		// it; our Driving/InMatch phases are the accepted-0x82 state 5).
 		// [orig: g_NPOpcodeHandlers @0x849D90 entry 12 -> Nwu_HandleServerGoodbye @0x624310
 		//  -> Nwu_HandleDisconnect(type 2) @0x623CE0, the active gate @0x623df2]
-		if (phase_ == Phase::Driving || phase_ == Phase::InMatch) on_server_goodbye(body, out);
-		break;
-	case SESSION_OPCODE_SERVER_PING:
-		// The outer connection ping rides the same active-connection gate as
-		// the goodbye (retail resolves the type-2 connection and drops the
-		// datagram unless conn_flag0 is set) [orig: g_NPOpcodeHandlers
-		// @0x849D90 entry 11 -> Nwu_HandleServerPing @0x6242E0 ->
-		// Nwu_HandlePing @0x623A70, the FindConnection + conn_flag0 gate].
-		if (phase_ == Phase::Driving || phase_ == Phase::InMatch) on_server_ping(body, out);
+		if (phase_ == Phase::Driving || phase_ == Phase::InMatch) on_server_goodbye(packet.body, out);
 		break;
 	default:
-		break; // server-only / unexpected opcodes are non-fatal
+		break;
+	}
+	return true;
+}
+
+void JoinerConnection::drain_client_queue_after_teardown() {
+	while (!client_queue_.empty()) {
+		const QueuedPacket &packet = client_queue_.front();
+		connect_log_line(net_got_text(static_cast<int32_t>(packet.body.size() + 1),
+				host_address_, packet.opcode));
+		client_queue_.pop_front();
+	}
+}
+
+JoinerConnection::PollResult JoinerConnection::handle_datagram(const uint8_t *raw, std::size_t len) {
+	PollResult out;
+	ManagerPass manager = manager_receive(raw, len);
+	out.immediate_outbound = std::move(manager.immediate_outbound);
+	while (pump_client_queue(out)) {
 	}
 	return out;
 }
 
-void JoinerConnection::on_server_hello(const std::vector<uint8_t> &body, PollResult &out) {
+bool JoinerConnection::server_hello_queues(const std::vector<uint8_t> &body) const {
+	// The enumerator reads 0x81s while its timer runs: from the enumerate's start through the
+	// pass that records the session, until the next pass's connect start stops it
+	// (D-NET-NEW-L2-25). Any 0x81 is read (no field is required), then its CI must name this
+	// connection and the host's identity block must be the title's.
+	// [orig: Nwu_HandleServerHello @0x626D20 - the size bound @0x626DC9, the enumerator
+	//  @0x627547..0x62755C (its timer +0x2C); CNapiNetwork_StartClientConnection @0x4CA160 -
+	//  NapiTimer_Stop @0x4CA1D8; the CI lookup @0x627533, the identity compares @0x62758B /
+	//  @0x627624 / @0x627643, the queue @0x627F45, the return @0x627F4A..0x627F5A]
+	if (phase_ != Phase::Hello || (enumerated_session_recorded_ && enumerate_pass_ended_))
+		return false;
+	ServerHello sh;
+	if (!parse_server_hello(body.data(), body.size(), sh)) return false;
+	if (title_ == nullptr || sh.ci != client_index_) return false;
+	return server_hello_matches_identity(sh, make_title_client_hello(*title_, client_index_));
+}
+
+bool JoinerConnection::server_auth_queues(const std::vector<uint8_t> &body) const {
+	// The connecting connection (state 3) reads any 0x82 whose TLV walk stays inside its CU
+	// bounds, then queues it once CI and CK name this connection.
+	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - FindConnection(2) and state 3
+	//  @0x6298E0..0x629901, the CI / CK match @0x629CBF, the queue @0x629F01, return 1 @0x629F9D]
+	if (phase_ != Phase::Auth) return false;
+	ServerAuth sa;
+	if (!parse_server_auth(body.data(), body.size(), sa)) return false;
+	return sa.ci == client_index_ && sa.ck == client_key_;
+}
+
+void JoinerConnection::on_server_hello(
+		const std::vector<uint8_t> &body, PollResult & /*out*/) {
 	// Any 0x81 from the host is read; no field is required (parse_server_hello).
 	ServerHello sh;
 	if (!parse_server_hello(body.data(), body.size(), sh)) return;
@@ -565,6 +746,36 @@ void JoinerConnection::on_server_hello(const std::vector<uint8_t> &body, PollRes
 	//  @0x62758B / @0x627624 / @0x627643]
 	if (title_ == nullptr || sh.ci != client_index_) return;
 	if (!server_hello_matches_identity(sh, make_title_client_hello(*title_, client_index_))) return;
+	// The connect log's client callbacks (while it is on): after the client pump's NET GOT
+	// (pump_client_queue), the queued leg records the enumerated session, whose discovered
+	// callback (the enumerate's own, installed by InitTransportConnection) writes NET SESSION
+	// DISCOVERED with the record's SN.
+	// [orig: Nwu_HandleServerHello @0x626D20 - the CI lookup @0x627541, the identity compares
+	//  @0x62758B.., the queue @0x627F45; NapiNPProtocol_PumpRecvQueues @0x6266A0 - the client
+	//  queue's NapiLog_OnRecv (proto+0x26C) @0x6268AA; NapiLog_OnRecv @0x4C46B0; the record's
+	//  SN @0x627775, the callback test @0x6278D7; CNapiNetwork_OnSessionDiscovered @0x4C8470
+	//  (the line @0x4C8631); CNapiGameSession_InitTransportConnection @0x4C9E10 - the install
+	//  @0x4C9FCB]
+	// A later 0x81 of the record's pass finds the record by its address: the same HK and SN
+	// (the record's 63-character copy against the reply's) update it in place with no
+	// callback; any other replaces it: the old record's destroy runs the enumerator's removed
+	// callback (NET SESSION AT .. HAS BEEN REMOVED, its SN), then the new record's discovered
+	// callback writes its line again. The enumerate then joins the record as it stands.
+	// [orig: Nwu_HandleServerHello @0x626D20 - the HK TLV @0x627148, the SN copy @0x627172; the
+	//  record lookup NapiNPEnumerator_FindSessionByAddress (the call @0x627667), the HK test
+	//  @0x627917, the SN's String_ExactMatch @0x627928, the update @0x627BFA..0x627E34 (no
+	//  callback); the replace NapiNPTimer_Destroy (the call @0x627941) -> NapiNPSession_Create
+	//  (the call @0x627947), its callback @0x627BB6..0x627BCD; NapiNPTimer_Destroy @0x621E50 -
+	//  the enumerator's +0x20 callback
+	//  @0x621E63..0x621E6F; CNapiGameSession_InitTransportConnection - the install @0x4C9FE2;
+	//  CNapiNetwork_OnSessionRemoved @0x4C68C0 - the line @0x4C6926..0x4C6975]
+	const std::string sn = sh.sn.substr(0, 63);
+	const bool same_record =
+			enumerated_session_recorded_ && sh.hk == server_hk_ && sn == enumerated_session_sn_;
+	if (enumerated_session_recorded_ && !same_record)
+		connect_log_line(net_session_removed_text(host_address_, enumerated_session_sn_));
+	if (!same_record) connect_log_line(net_session_discovered_text(host_address_, sn));
+	enumerated_session_sn_ = sn;
 	// An absent HK reads 0, and the 0x42 then omits it. [orig: Nwu_HandleServerHello @0x626D20 -
 	//  HK @0x626E97; CNapiNPConnection_SendClientJoin @0x61FE20 - the HK gate @0x6200F2]
 	server_hk_ = sh.hk;          // echo this in ClientAuth.hk
@@ -574,16 +785,68 @@ void JoinerConnection::on_server_hello(const std::vector<uint8_t> &body, PollRes
 	// reconciles against before the world loads is the AUTHORITATIVE S2C 0x7B expansion
 	// (expansion_, surfaced by ClientRuntime::expansion()) (D-NET-178).
 	advertised_expansion_ = sh.sus2;
-	phase_ = Phase::Auth;
-	handshake_retry_datagram_ = build_client_auth();
-	handshake_last_send_ms_ = monotonic_milliseconds_();
-	// The connect state's start: its 30000 ms window runs from here [orig: @0x62648a].
-	client_join_start_ms_ = handshake_last_send_ms_;
-	handshake_retry_clock_armed_ = true;
-	out.outbound.push_back(handshake_retry_datagram_);
+	// The record ends the enumerate: its loop exits on the discovered session and the join
+	// state machine returns, so nothing leaves in this receive. The machine's next pass (state
+	// 4) joins the selected session: StartClientConnection -> InitFromSession enters the
+	// connect state, and the state's pump sends the 0x42 once the clock reads past its start
+	// (pump(), D-NET-NEW-L2-25; the browse row's join takes the same start, D-NET-NEW-L2-24).
+	// [orig: UI_EnumerateAndJoinSession @0x569F50 - the loop @0x56A0C1..0x56A0F9 (the count
+	//  test CNapiNetwork_GetDiscoveredSessionCount @0x56A0C1), g_PreMenuState = 4 @0x56A2D9;
+	//  MultiPlayer_JoinSessionStateMachine @0x56A320 - state 4 @0x56A4B3 -> UI_JoinSelectedSession
+	//  @0x5699D0 (the call @0x56A4C9) - CNapiNetwork_StartClientConnection (the call @0x569DE6),
+	//  then CNapiNetwork_PumpAndCheckState @0x4C6E80 (the call @0x569E60, the loop
+	//  @0x569E70..0x569E9E)]
+	enumerated_session_recorded_ = true;
+	enumerate_pass_ended_ = false;
+}
+
+void JoinerConnection::drain_enumerated_record() {
+	if (!enumerated_session_recorded_) return;
+	enumerated_session_recorded_ = false;
+	connect_log_line(net_session_removed_text(host_address_, enumerated_session_sn_));
+}
+
+namespace {
+// One per process, never reset [orig: g_ClientNetFrameCounter @0xA822A4].
+uint32_t g_client_net_frame_counter = 0;
+} // namespace
+
+uint32_t JoinerConnection::client_net_frame_counter() { return g_client_net_frame_counter; }
+
+void JoinerConnection::connect_log_line(const std::string &text) const {
+	if (connect_log_ != nullptr && connect_log_->enabled()) connect_log_->line(text);
+}
+
+void JoinerConnection::connect_log_send(const std::vector<uint8_t> &datagram) const {
+	if (connect_log_ == nullptr || !connect_log_->enabled()) return;
+	std::vector<uint8_t> unpacked;
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	if (!nw_unpack_inbound(datagram.data(), datagram.size(), unpacked) ||
+			!nw_split_unpacked(unpacked, opcode, body))
+		return;
+	int32_t packet = 0;
+	ProtocolPacketHeader header;
+	if (opcode == SESSION_OPCODE_PROTOCOL_MESSAGE &&
+			parse_protocol_packet_header(body.data(), body.size(), header))
+		packet = static_cast<int32_t>(header.seq_num);
+	connect_log_->line(net_sending_text(static_cast<int32_t>(unpacked.size()), host_address_,
+			opcode, packet));
+}
+
+void JoinerConnection::step_client_net_frame_counter() { ++g_client_net_frame_counter; }
+
+bool JoinerConnection::in_verification_wait() const {
+	return phase_ == Phase::Driving &&
+			(post_auth_stage_ == PostAuthStage::AwaitPaddingProbe ||
+			 post_auth_stage_ == PostAuthStage::AwaitGameStart) &&
+			verification_value_ == 0;
 }
 
 JoinScreenStage JoinerConnection::join_screen_stage() const {
+	// The enumerate-and-join's browse reads PRE_ENUMSESSION until a session answers
+	// [orig: UI_EnumerateAndJoinSession @0x569f50 - @0x56a0ac..0x56a0b4].
+	if (phase_ == Phase::Hello) return JoinScreenStage::Enumerating;
 	switch (post_auth_stage_) {
 	case PostAuthStage::Inactive:
 		return JoinScreenStage::Joining;
@@ -663,7 +926,9 @@ void JoinerConnection::on_server_auth(
 	conn_.connection_id = sa.mi;  // [orig: 0x82 MI TLV = the host-assigned dcb/ConnectionId; the
 	                              // client stores it on its own NapiNPConnection (+0x18,
 	                              // NapiNP_GetLocalConnectionId @0x4c6d40) and echoes it in the 0x48
-	                              // client-ack so the host stamps it into our 0x0C ownerConnectionId]
+	                              // client-ack, which the host never reads (its handler a bare retn,
+	                              // NapiNPServerMsg_0x048 @0x510F30): the host's add stamps our 0x0C
+	                              // ownerConnectionId from the same index]
 	// The host's CS block overlays this connection's cs_dir0 template: CLIENT-direction
 	// (byte 1) entries land in cs_dir0, the block this connection's pumps read — the reap
 	// (field 0), the teardown burst (1), the empty and active send intervals (4, 5), the
@@ -683,13 +948,19 @@ void JoinerConnection::on_server_auth(
 	//  conn+0x5E8 store @0x62612f; PumpStateMachine case 5 @0x6295a2..0x62961c]
 	last_receive_ms_ = monotonic_milliseconds_();
 	receive_clock_armed_ = true;
+	// The connected state's callback writes NET CONNECTED TO SERVER: the host, and as
+	// "yourip" the address the 0x82's RIP / RPN reported.
+	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - RIP / RPN onto the connection
+	//  @0x629D8F / @0x629D92, state 5 @0x629EAC -> CNapiNPConnection_OnStateChange @0x629EB1;
+	//  CNapiNetwork_OnConnectedToServer @0x4C62E0 - the line @0x4C6348..0x4C639B]
+	connect_log_line(net_connected_to_server_text(host_address_,
+			PeerAddr{sa.rip, static_cast<uint16_t>(sa.rpn)}));
 	handshake_retry_datagram_.clear();
 	handshake_retry_clock_armed_ = false;
 	session_ack_pending_ = false;
 	s2c_reassembly_ = {};
 	// Retail first sends a sequenced settings packet after 0x82. Its receipt drives the header-only
-	// ACK + C2S 0x00 JOIN pair in on_server_session; do not skip straight to 0x01. This remains active
-	// while the binding holds world_ready_ false so a joiner can discover what it must load.
+	// ACK + C2S 0x00 JOIN pair in on_server_session; do not skip straight to 0x01.
 	post_auth_stage_ = PostAuthStage::AwaitServerSettings;
 }
 
@@ -837,8 +1108,10 @@ void JoinerConnection::retain_mission_metadata_chunk(
 	};
 	if ((mission_metadata_fixed_byte_mask_ & kMaxPlayersMask) == kMaxPlayersMask)
 		session_max_players_ = window_dword(0);
-	if ((mission_metadata_fixed_byte_mask_ & kMpAttributesMask) == kMpAttributesMask)
+	if ((mission_metadata_fixed_byte_mask_ & kMpAttributesMask) == kMpAttributesMask) {
 		mp_attributes_ = window_dword(8);
+		++mp_attributes_revision_;
+	}
 }
 
 void JoinerConnection::retire_self_handle(uint16_t handle) {
@@ -875,15 +1148,35 @@ void JoinerConnection::apply_self_spawn(uint16_t handle, bool has_body, uint32_t
 }
 
 void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollResult &out) {
-	// Joiner recv: decrypt inbound 0x83 with the server's SCRK; deframe latches conn_.seq.last_inbound_seq.
+	// The 0x83's queued leg: decrypt with the server's SCRK; an in-order packet is parsed alone,
+	// a future one waits on the ordered queue for the client pump's connection walk, which
+	// parses each successor its gap closing made ready after every queued packet of the pump
+	// (pump_client_queue).
+	// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - the in-order parse @0x626BEB..
+	//  0x626BFC, the future's insert @0x626C32; NapiNPProtocol_PumpRecvQueues @0x6266A0 - the
+	//  walk @0x626910..0x6269E8]
 	ProtocolPacketHeader hdr;
 	std::vector<ProtocolMessage> messages;
 	SessionDeframeAdmission admission;
 	if (!deframe_session_packet(
 			conn_.seq, SessionCrypto{{}, conn_.server_scrk, 0, client_key_}, body.data(),
-	                            body.size(), hdr, messages, &admission)) {
+	                            body.size(), hdr, messages, &admission,
+	                            /*drain_queued_successors=*/false)) {
 		return; // lenient: an in-match streaming packet we can't parse is not fatal
 	}
+	process_session_admission(hdr, std::move(messages), admission, out);
+}
+
+void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr,
+		std::vector<ProtocolMessage> messages, const SessionDeframeAdmission &admission,
+		PollResult &out) {
+	// The connect log: every packet the parse takes writes NET PROCESSING with the parse's
+	// length plus its opcode byte.
+	// [orig: CNapiNPConnection_ParseMessages @0x625BC0 - NapiLog_OnProcess (proto+0x274,
+	//  len + 1) @0x625D3E; NapiLog_OnProcess @0x4C67D0]
+	for (const SessionDeframeAdmission::Packet &packet : admission.packets)
+		connect_log_line(net_processing_text(
+				static_cast<int32_t>(packet.body_bytes + 1), host_address_));
 	if (admission.admitted) {
 		acknowledge_session_packets(conn_.seq, admission.max_ack_count);
 		// The reap clock: stamped by ParseMessages, which only an in-order packet (or the
@@ -1026,7 +1319,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 	auto enter_initial_sync_tail = [&] {
 		post_auth_stage_ = PostAuthStage::AwaitInitialSyncTail;
 		// A latched early 0x11 (see the 0x11 handler) completes this stage immediately;
-		// the held C2S 0x0A then releases at the pump send boundary once world_ready.
+		// its C2S 0x0A is then owed to the next send boundary (take_world_stream_request).
 		if (sync_tail_seen_) {
 			preload_ready_ = true;
 			pending_spawn_menu_request_ = true;
@@ -1053,12 +1346,17 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		// binding-supplied install root and the latched SUS2 name reads the same
 		// loose file at the same point in the exchange [orig: Expansion_SwitchTo
 		// @0x5688c0 -> Expansion_LoadAssets @0x4a4885; the JOIN write @0x42a2b4].
+		// The join's connect succeeded: a NovaWorld join's PING goes ahead of this JOIN
+		// (take_join_connected, D-NET-NEW-L9-22) [orig: MultiPlayer_JoinSessionStateMachine
+		//  @0x56A320 - UI_JoinSelectedSession's success @0x56A4CE, PING @0x56A50B, the JOIN
+		//  @0x56A524].
+		join_connected_ = true;
 		out.outbound.push_back(frame_inner_pending(
 				0x00, build_join_request(advertised_expansion_,
 						vfs_expansion_version_checksum(
 								expansion_version_root_,
 								advertised_expansion_),
-						cd_cookie_, lan_session(), cd_key_ids_)));
+						cd_cookie_, lan_session(), cd_key_ids_, glsvss_request_)));
 		io::logf(io::LogLevel::kInfo,
 				"np joiner: 0x00 JOIN CD identity cookie = %zu bytes",
 				cd_cookie_.size());
@@ -1068,6 +1366,14 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 	bool world_state_load_seen = false; // this packet's S2C 0x0F (completes admission below)
 	for (const ProtocolMessage &m : messages) {
 		const uint32_t packet_ack = containing_packet_ack[message_index++];
+		// The round-over gate at its wire position: the 0x1D raises it ahead of its own
+		// parse, the 0x25 on a client; the mission start lowers it after the pass that
+		// ended the mission-data spin (below).
+		// [orig: NapiNPClientMsg_0x01D @0x430858; NapiNPClientMsg_GameReset @0x422849;
+		//  Game_StartMission @0x524a1f]
+		if (!m.flags.settings_update && m.full_tag < PROTOCOL_FULL_TAG_HIGH_BASE &&
+		    (m.tag == s2c::END_ROUND_HEADER || m.tag == s2c::GAME_RESET))
+			round_over_gate_ = true;
 		// The ONE settings-flagged record that is not connection control to skip: the
 		// connection-description block the host sends to close the session. Gated on its exact
 		// full tag and on the body actually decoding as a description, so every other
@@ -1123,6 +1429,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			if (decode_weapon_loadout(
 					m.payload.data(), m.payload.size(), loadout)) {
 				valid_weapon_loadout = true;
+				out.loadout_grant_entries.push_back(out.inbound_reducer.size());
 				// The handler's tail clears g_ClientDeployHold for every valid apply,
 				// including a loadout echo unrelated to deploy-UI completion.
 				out.gameplay_release_applied = true;
@@ -1152,7 +1459,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				// always ships and the stage always advances — a small or zero padding_len must not
 				// wedge the FSM here.
 				out.outbound.push_back(frame_inner_pending(
-						0x02, build_join_padding_echo(probe, net_frame_counter_)));
+						0x02, build_join_padding_echo(probe, client_net_frame_counter())));
 				post_auth_stage_ = PostAuthStage::AwaitGameStart;
 			}
 		} else if (m.tag == s2c::GAME_START_SIGNAL &&
@@ -1174,6 +1481,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 							le32_pair(server_info_transfer_id_, 0)),
 			}));
 			post_auth_stage_ = PostAuthStage::AwaitServerInfo;
+			out.mission_start_head = true;
 		} else if (m.tag == s2c::FILE_TRANSFER_CHUNK &&
 		           post_auth_stage_ == PostAuthStage::AwaitServerInfo) {
 			FileTransferChunk chunk;
@@ -1224,40 +1532,33 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 						server_name_ = block_string(52);
 						map_file_ = block_string(84);
 					}
-					post_auth_stage_ = PostAuthStage::AwaitPlayerList;
 					out.mission_started = true;
-					if (player_list_seen_) {
-						out.outbound.push_back(frame_session({
-								make_protocol_message(c2s::CHECKSUM_RESPONSE, {}),
-								make_protocol_message(
-										0x22, {0x00, 0xF7, 0x1C}),
-						}));
-						enter_initial_sync_tail();
-					}
+					// The mission start's joiner arm queues the empty reliable C2S 0x09 once
+					// the mission-data leg and its local load ran, whatever S2C 0x16 came, and
+					// waits for the 0x11 at its own send pace; a 0x16 queues only its per-row
+					// 0x22 re-requests (ClientRuntime's fold), which join the 0x09 when they
+					// land before that pace opens [orig: Game_StartMission @0x524360 (the
+					// call @0x524dab) -> NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 (the queue
+					// @0x42cb43, the send @0x42cb4d)]. A declared load (the effect system's,
+					// set_mission_data_loading) holds it until the load has ended.
+					if (mission_data_loading_) {
+						sync_request_owed_ = true;
+						mission_data_load_running_ = true;
+					} else
+						periodic_replies.push_back(
+								make_protocol_message(c2s::CHECKSUM_RESPONSE, {}));
+					enter_initial_sync_tail();
 				}
 			}
 		} else if (m.tag == s2c::PLAYER_LIST) {
 			PlayerList player_list;
 			if (decode_player_list(
 					m.payload.data(), m.payload.size(), player_list)) {
-				// Beyond the join-gate latch below, the body IS the Tab
-				// board's data (D-HUD-24): surface it on the canonical
-				// reducer stream so ClientReplicaPipeline::apply_player_list
-				// folds it — ClientRuntime applies inbound_reducer alone.
+				// The body IS the Tab board's data (D-HUD-24), folded from the
+				// canonical reducer stream by ClientReplicaPipeline::apply_player_list;
+				// it gates nothing in the join (D-NET-526).
 				// [orig: NapiNPClientMsg_PlayerList @0x42FAE0]
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				player_list_seen_ = true;
-				if (post_auth_stage_ == PostAuthStage::AwaitPlayerList) {
-					// Golden frame 23: transition marker and first player-sync request share
-					// one packet. OpenNova hosts may send 0x16 early, so the latch above lets
-					// the final 0x64 release the same wire packet without a compatibility fork.
-					out.outbound.push_back(frame_session({
-							make_protocol_message(c2s::CHECKSUM_RESPONSE, {}),
-							make_protocol_message(
-									0x22, {0x00, 0xF7, 0x1C}),
-					}));
-					enter_initial_sync_tail();
-				}
 			}
 		} else if (m.tag == s2c::END_ROUND_HEADER) {
 			EndRoundHeader header;
@@ -1304,6 +1605,15 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			SessionConfig config;
 			if (decode_session_config(m.payload.data(), m.payload.size(), config))
 				game_type_ = static_cast<uint32_t>(config.fields[3]);
+		} else if (m.tag == s2c::MISSION_MAP_NAMES) {
+			// The player-sync track's first record rewrites g_MapFileName with its second
+			// string, after the final 0x64 did: the value the C2S 0x0B's 17+-character side
+			// password runs on into (mission_status_side_password)
+			// [orig: NapiNPClientMsg_MissionMapNames @0x427e10 (an authority returns
+			//  @0x427e17), the copy into g_MapFileName @0x427e6c..0x427e7f].
+			MissionMapNames names;
+			if (decode_mission_map_names(m.payload.data(), m.payload.size(), names))
+				map_file_ = std::move(names.map_file_name);
 		} else if (m.tag == s2c::CLASS_ALLOW_MASK) {
 			// Retail's handler reads exactly one little-endian word and clears the
 			// global to zero when the packet is too short.
@@ -1411,7 +1721,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			//   (2) !is_authority -> entity->Team = team @0x4319ee (any pool 0..4);
 			//   (3) the player-slot team byte mirrors it @0x431a0b;
 			//   (4) player (Flags & 0x100) + self -> per-side profile reselect and ONE
-			//       C2S 0x2F re-submission @0x431a9e carrying the NEW team and slot 195
+			//       C2S 0x2F re-submission @0x431AAD carrying the NEW team and slot 195
 			//       RAW (the pre-Player_InitPlayer form, NOT g_CurrentWeaponSlot).
 			// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910]
 			TeamAssign assign;
@@ -1427,8 +1737,16 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				// pool's table [orig: @0x431984..0x4319b3].
 				out.entity_team_assigns.emplace_back(
 						assign.entity_handle, assign.team);
+				// Leg (1) and the local arm compare the 0x50's entity with the local
+				// player entity, which only the mission start's Player_InitPlayer binds:
+				// a self 0x50 ahead of the process's first mission start latches nothing
+				// and re-submits nothing (the mission start's submissions read the older
+				// g_LocalTeam), and one after a mission start, or a stale binding that
+				// names the same slot, runs both (D-NET-572).
+				// [orig: `cmp entity, g_LocalPlayerEntity` @0x4319CF, the latch @0x4319db]
+				const bool local_entity = assign.entity_handle == *local_player_entity_;
+				if (local_entity) assigned_team_ = assign.team;
 				if (has_self_handle_ && assign.entity_handle == self_handle_) {
-					assigned_team_ = assign.team; // [orig: @0x4319db]
 					// Leg (2) lands on the joiner's own dcb whether or not its
 					// mission start has made it the local entity yet, so L spawns
 					// on it: Player_InitPlayer reads that Team.
@@ -1436,33 +1754,27 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					spawn_.team = assign.team;
 					out.self_team_changed = true;
 					out.self_team = assign.team;
-					// The re-submission exists only after the 0x1A-released
-					// initial pair (the profile/armory state it rebuilds is
-					// in-world state). The per-side profile reselect
-					// (@0x431a35..0x431a9a) is PORTED: the NEW team byte picks the
-					// profile side block, that block's own class byte is the wire
-					// class, and the page that class indexes is the kit — so a
-					// joiner pushed across the line submits a kit the new side's
-					// class can legally hold. The C2S 0x22/0x23 pair that
-					// follows (@0x431acb..0x431b05) is the replica fold's
-					// (ClientReplicaPipeline, S2C 0x50), as is the identity
-					// pair @0x431b3a..0x431b91 on the replica row (D-NET-253);
-					// L's pair and the Player_InitPlayer(1) re-run @0x431b14
-					// are D-NET-570, and this leg's latch and re-submission
-					// ahead of the mission start's Player_InitPlayer, D-NET-572.
-					if (post_auth_stage_ == PostAuthStage::AwaitDeployment ||
-					    post_auth_stage_ == PostAuthStage::AwaitDeployPick ||
-					    post_auth_stage_ == PostAuthStage::AwaitDeployRelease ||
-					    post_auth_stage_ == PostAuthStage::Complete) {
-						// [orig: @0x431a9e passes slot 195 RAW — the
-						//  pre-Player_InitPlayer form, NOT the live
-						//  g_CurrentWeaponSlot]
-						const LoadoutSubmit resubmit =
-								build_profile_loadout_submit(
-										assigned_team_, false);
-						periodic_replies.push_back(make_protocol_message(
-								0x2F, encode_loadout_submit(resubmit)));
-					}
+				}
+				// The local arm (a player entity, Flags & 0x100, that is the local one):
+				// the per-side profile reselect, PORTED -- the latched team byte picks the
+				// profile side block, that block's class byte is the wire class, and the
+				// page that class indexes is the kit -- and ONE C2S 0x2F with slot 195 RAW
+				// (the pre-Player_InitPlayer form, NOT g_CurrentWeaponSlot). The C2S
+				// 0x22/0x23 pair that follows (@0x431acb..0x431b05) is the replica fold's
+				// (ClientReplicaPipeline, S2C 0x50), as is the identity pair
+				// @0x431b3a..0x431b91 on the replica row (D-NET-253); L's pair and the
+				// Player_InitPlayer(1) re-run @0x431b14 (same compare @0x431B0A) are
+				// D-NET-570.
+				// [orig: `test Flags, 100h` @0x431A15, `cmp entity, g_LocalPlayerEntity`
+				//  @0x431A1B, the reselect @0x431a35..0x431a9a, the submit @0x431AAD]
+				if (local_entity) {
+					const LoadoutSubmit resubmit =
+							build_profile_loadout_submit(assigned_team_, false);
+					periodic_replies.push_back(make_protocol_message(
+							0x2F, encode_loadout_submit(resubmit)));
+					out.local_resubmit = true;
+					out.local_resubmit_entries.push_back(out.inbound_reducer.size());
+					out.local_resubmit_teams.push_back(assigned_team_);
 				}
 			}
 		} else if (m.tag == s2c::EMPTY_SLOT_SWEEP) {
@@ -1568,32 +1880,25 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			if (post_auth_stage_ == PostAuthStage::AwaitDeployment)
 				release_deployment(/*deployment_complete=*/false);
 		} else if (m.tag == s2c::WAIT_FOR_GAME_START_ACK &&
-		           post_auth_stage_ == PostAuthStage::AwaitWorldStreamEnd) {
-			// The world-stream terminator releases retail's loadout/status submission: the SAME
-			// per-side profile kit twice — first with the fixed Primary-key slot 195, then with
-			// the live equipped slot — plus the witnessed nonzero mission-status tail. The kit
-			// content comes from the binding seam when set (the shell's applied loadout); the
-			// capture-default kit keeps headless callers byte-identical.
-			// [orig: Game_StartMission @0x525836/@0x525c2e -> NetPacket_SendLoadoutSubmit
-			//  @0x42cdc0; the 0x0B status tail rides the same flush]
-			// "Per-side" is literal: the latched team byte picks the profile side
-			// block, and that block's class byte picks the page [orig: @0x525767].
-			const LoadoutSubmit first =
-					build_profile_loadout_submit(assigned_team_, false);
-			const LoadoutSubmit second =
-					build_profile_loadout_submit(assigned_team_, true);
-			out.outbound.push_back(frame_session({
-					make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(first)),
-					make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(second)),
-					make_protocol_message(
-							0x0B, build_retail_mission_status()),
-			}));
-			post_auth_stage_ = PostAuthStage::AwaitDeployment;
+		           post_auth_stage_ == PostAuthStage::AwaitWorldStreamEnd &&
+		           !mission_start_aborted_ && (!round_over_gate_ || out.mission_started)) {
+			// The world-stream terminator ends the game-start wait and releases the mission
+			// start, whose end queues and pumps the loadout/status submissions
+			// (ClientRuntime::push_mission_start_end) when the embedder's load ends.
+			// [orig: NapiClient_WaitForGameStart @0x42cc10 (the exit test @0x42ccbf) from
+			//  Game_StartMission @0x524e29]
+			post_auth_stage_ = PostAuthStage::AwaitMissionStart;
+			mission_start_first_loadout_taken_ = false;
+			mission_start_released_this_pass_ = true;
 			out.game_start_acked = true;
 		} else if (m.tag == s2c::RTT_ECHO) {
+			// While the round-over gate is up the handler returns at once: no pong for
+			// the host's ping, no round trip measured for ours.
+			// [orig: NapiNPClientMsg_0x057_RTT @0x432210 - `cmp g_RoundOver, 0`
+			//  / `jnz locret` @0x432210..0x432217]
 			RttSample sample;
 			std::size_t consumed = 0;
-			if (decode_rtt_sample(
+			if (!round_over_gate_ && decode_rtt_sample(
 					m.payload.data(), m.payload.size(), sample, consumed) &&
 			    consumed == m.payload.size()) {
 				if (sample.echo_flag != 0) {
@@ -1789,8 +2094,8 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// (Retail reads GetTickCount here; that is an OS primitive, so the
 			// monotonic millisecond clock is the equivalent.)
 			// [orig: NapiNPClientMsg_0x043 @0x42FA90 — echo @0x42faa7, local stamp
-			//  @0x42fac4, QueueReliableMessage(tag 8, len 8) @0x42fad8; the host-side
-			//  validator NapiNPServerMsg_ValidateTimeSync @0x502210]
+			//  @0x42fac4, CNapiNetwork_QueueReliableMessage(tag 8, len 8) (the call
+			//  @0x42FAD3); the host-side validator NapiNPServerMsg_ValidateTimeSync @0x502210]
 			uint32_t server_stamp = 0;
 			std::size_t scalar_consumed = 0;
 			decode_u32_scalar(m.payload.data(), m.payload.size(), server_stamp,
@@ -1811,7 +2116,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// tick is zero or not past the seed it stamped into our slot — so an
 			// unseeded client's fire is silently discarded forever. Re-sent on join,
 			// death, revive and deploy release; the four-zero-byte form disarms.
-			// [orig: NapiNPClientMsg_HandleSessionKey @0x4297c0 (short body -> 0
+			// [orig: NapiNPClientMsg_HandleTickSeed @0x4297c0 (short body -> 0
 			//  @0x4297eb); the host stamp Server_SendRandomSeedToPlayer @0x5101a0;
 			//  the gate PlayerSlot_IsActive @0x4fc760 via
 			//  NapiNPServerMsg_0x006_ClientFiredRound @0x51358d]
@@ -1978,43 +2283,48 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					m.payload.data(), m.payload.size(), routed)) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 			}
-		} else if (m.tag == s2c::ZONE_TIMER_VALUE) {
-			ZoneTimerValue value;
-			std::size_t consumed = 0;
-			if (decode_zone_timer_value(
-					m.payload.data(), m.payload.size(), value, consumed) &&
-			    consumed == m.payload.size())
-				out.zone_timer_updates.emplace_back(value);
-		} else if (m.tag == s2c::ZONE_TIMER_WINDOW) {
-			ZoneTimerWindow window;
-			std::size_t consumed = 0;
-			if (decode_zone_timer_window(
-					m.payload.data(), m.payload.size(), window, consumed) &&
-			    consumed == m.payload.size())
-				out.zone_timer_updates.emplace_back(window);
-		} else if (m.tag == s2c::ZONE_PRESENCE_COUNT) {
-			ZonePresenceCount presence;
-			std::size_t consumed = 0;
-			if (decode_zone_presence_count(
-					m.payload.data(), m.payload.size(), presence, consumed) &&
-			    consumed == m.payload.size())
-				out.zone_timer_updates.emplace_back(presence);
 		} else if (m.tag == s2c::DISCONNECT_UNLOCK) {
-			// S2C 0x11 is the terminal pre-world admission marker. Its cumulative ACK is the safe
-			// point at which the binding may pause progress for synchronous mission loading. Hold
-			// retail's empty C2S 0x0A world-stream request until that local world is installed.
+			// S2C 0x11 is the terminal pre-world admission marker. It ends the mission start's
+			// sync-tail wait; the joiner arm loads the 0x0B header's terrain and environment
+			// and the avatar combo models (an embedder's declared load, set_sync_tail_loading),
+			// then NapiClient_WaitForGameStart queues the empty reliable C2S 0x0A at its head and
+			// pumps it; the rest of the load waits for the S2C 0x1A's mission start
+			// (push_mission_start_end at its end; D-NET-NEW-L2-19).
+			// [orig: NapiNPClientMsg_0x011 @0x4226E0; Game_StartMission @0x524360 - the joiner
+			//  arm's NapiClient_SendPlayerSyncAndWaitForSyncTail @0x524DAB, then
+			//  Game_LoadTerrainDuringConnect @0x524DF2, Avatars_LoadComboModels @0x524E24,
+			//  NapiClient_WaitForGameStart @0x524E29; NapiClient_WaitForGameStart @0x42CC10 - the
+			//  0x0A @0x42CC3F, the send pump @0x42CC92]
 			// The host emits this marker exactly ONCE, paced behind its C2S 0x02 reply regardless
 			// of our transfer progress (our host: ~13 ticks, §5.5 bundle pacing). Latch an early
 			// arrival — a joiner stalled past that window mid-0x60/0x64 would otherwise drop it
 			// forever and park both sides (never preload_ready here, sync state 3 host-side).
 			sync_tail_seen_ = true;
-			if (post_auth_stage_ == PostAuthStage::AwaitInitialSyncTail) {
+			// The sync-tail wait tests the round-over gate ahead of the 0x11's flag: a gate up
+			// already abandons the mission start, and no 0x0A answers (mission_start_aborted).
+			// A pass that carried the final 0x64 has the mission start's clear ahead of the wait.
+			// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 - @0x42CBC5 ahead of
+			//  @0x42CBE7; Game_StartMission @0x524360 - the clear @0x524A1F]
+			if (round_over_gate_ && !out.mission_started &&
+					post_auth_stage_ == PostAuthStage::AwaitInitialSyncTail)
+				mission_start_aborted_ = true;
+			// The 0x11 sets the wait's flag alone: the wait reads it after the whole pass and
+			// its send, behind the round-over test, and the game-start wait that follows
+			// queues the 0x0A at its head, so the 0x0A is owed to the send boundary
+			// (take_world_stream_request) and a gate a later message of this pass raises still
+			// withdraws it
+			// (finish_receive_pump). The world stream's stage starts now. (A 0x1A in this same
+			// pass cannot come from a stock host, which sends it only after the joiner's 0x0A;
+			// retail's game-start wait would clear its flag at its head.)
+			// [orig: NapiNPClientMsg_0x011 @0x4226E0 (the flag); NapiClient_SendPlayerSyncAnd
+			//  WaitForSyncTail @0x42CB20 - the receive, the paced send, @0x42CBC5 ahead of
+			//  @0x42CBE7; NapiClient_WaitForGameStart @0x42CC10 - the 0x0A @0x42CC3F, the 0x1A's
+			//  flag cleared @0x42CC51 (NapiNPClientMsg_0x01A @0x425EB0 - the store @0x425ECB)]
+			if (!mission_start_aborted_ &&
+					post_auth_stage_ == PostAuthStage::AwaitInitialSyncTail) {
 				preload_ready_ = true;
 				pending_spawn_menu_request_ = true;
-			}
-			if (pending_spawn_menu_request_ && world_ready_) {
-				out.outbound.push_back(frame_inner_pending(0x0A, {}));
-				pending_spawn_menu_request_ = false;
+				sync_tail_this_pass_ = true;
 				post_auth_stage_ = PostAuthStage::AwaitWorldStreamEnd;
 			}
 		}
@@ -2028,6 +2338,9 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		out.queued_send_after.push_back(reducer_entries);
 		out.queued_send_messages.push_back(std::move(periodic_replies[reply]));
 	}
+	// The mission start's globals reset follows the pass that ended the mission-data spin.
+	// [orig: Game_StartMission `mov g_RoundOver, ebx` @0x524a1f]
+	if (out.mission_started) round_over_gate_ = false;
 	if (admission.admitted && world_state_load_seen &&
 	    post_auth_stage_ == PostAuthStage::AwaitDeployment) {
 		initial_admission_complete_ = true;
@@ -2054,12 +2367,12 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		session_ack_pending_ = true;
 }
 
-void JoinerConnection::on_server_resend_list(
-		const std::vector<uint8_t> &body, PollResult &out) {
+bool JoinerConnection::on_server_resend_list(
+		const std::vector<uint8_t> &body, std::vector<std::vector<uint8_t>> &immediate_outbound) {
 	std::vector<uint32_t> requested;
 	if (!decode_session_resend_list(
 			body.data(), body.size(), client_key_, requested)) {
-		return;
+		return false;
 	}
 	// A list that named a sequence fires the outgoing link-error callback
 	// after the resends [orig: NapiNP_HandleResendList @0x6239aa latches it on
@@ -2073,14 +2386,15 @@ void JoinerConnection::on_server_resend_list(
 	// receive pump: retail's SendSessionPacket writes the packet straight to the socket, so a
 	// resend never waits for the send-holdoff gate and never touches the flush counter.
 	// [orig: NapiNP_HandleResendList @0x623980..0x6239da -> CNapiNPConnection_SendSessionPacket
-	//  @0x6239b6 -> CNapiNPManager_SendTo @0x61f039]
+	//  @0x6239b6 -> CNapiNPManager_SendTo @0x61F032]
 	for (uint32_t requested_sequence : requested) {
 		const uint32_t sequence = requested_sequence == 0
 				? conn_.seq.next_outbound_seq
 				: requested_sequence;
 		std::vector<uint8_t> datagram = frame_retained_session(sequence);
-		if (!datagram.empty()) out.immediate_outbound.push_back(std::move(datagram));
+		if (!datagram.empty()) immediate_outbound.push_back(std::move(datagram));
 	}
+	return true;
 }
 
 void JoinerConnection::seed_in_match(uint32_t session_id, uint32_t client_key,
@@ -2100,6 +2414,8 @@ void JoinerConnection::seed_in_match(uint32_t session_id, uint32_t client_key,
 	// frame_session stamps next_seq then post-increments; last_ack -> 0x43 ack_count
 	self_handle_ = self_handle;
 	has_self_handle_ = true;
+	// A seeded session is past its mission start's Player_InitPlayer.
+	*local_player_entity_ = self_handle;
 	spawn_.item_type_id = self_type;
 	spawn_.team = self_team;
 	game_type_ = game_type;
@@ -2145,13 +2461,19 @@ std::vector<uint8_t> JoinerConnection::begin_mission_reload() {
 	// it) and the session's identity stay.
 	preload_ready_ = false;
 	sync_tail_seen_ = false;
-	player_list_seen_ = false;
+	round_over_gate_ = true; // the round end's gate holds until the mission start
+	mission_start_aborted_ = false;
+	mission_start_released_this_pass_ = false;
+	sync_tail_this_pass_ = false;
 	initial_admission_complete_ = false;
+	loading_cancel_ = false; // the mission start's head [orig: Game_StartMission @0x524575]
 	deployment_pick_sent_ = false;
 	deployment_pick_sequence_ = 0;
 	deployment_pick_sequence_unbound_ = false;
 	deployment_reply_seen_ = false;
 	pending_spawn_menu_request_ = false;
+	sync_request_owed_ = false;
+	mission_data_load_running_ = false;
 	has_self_handle_ = false;
 	self_handle_ = 0;
 	spawn_ = SelfSpawn{};

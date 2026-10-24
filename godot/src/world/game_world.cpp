@@ -1,20 +1,33 @@
 #include "world/game_world.h"
 
+#include <formats/admincfg/admin_cfg.h>
+#include <optional>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/rendering_device.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
+#include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/callable_method_pointer.hpp>
 #include <godot_cpp/variant/node_path.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include "network/lan_session.h" // the browse's held-server pump
 #include "network/net_session_policy.h"
+#include "object/object_shader_cache.h" // load_effect_set (the renderer's start)
+#include "resource_index/launch_flags.h" // the server log switches
+#include "resource_index/resource_root.h" // session_title (the connect log header)
+#include "rtxt/rtxt_string_file.h" // installed_text_override (the admin's process gametext)
+#include <runtime/mission/runtime_boot.h> // boot_files_from_index (the admin's process gametext)
+#include "util/string_convert.h"
 #include "network/novaworld_client.h"
+#include "network/udp_pump_datagram_socket.h" // the process transport (the shutdown's STOP bursts)
 #include <runtime/inmatch/mission_exit.h>
+#include <runtime/inmatch/napi_np_protocol.h> // stop_unstopped_server (the shutdown's reset)
 #include "audio/music_director.h"
 #include "hud/hud_inset_scope.h"
+#include "hud/hud_overlay.h" // the remote admin: the CHAT window and the echo
 #include "render/texture_filter_device.h"
 
 using namespace godot;
@@ -28,6 +41,7 @@ constexpr const char *kSignalJoinAdmissionReady = "join_admission_ready";
 constexpr const char *kSignalJoinDeployPickRequired = "join_deploy_pick_required";
 constexpr const char *kSignalSessionLost = "session_lost";
 constexpr const char *kSignalLoadProgress = "load_progress";
+constexpr const char *kSignalLoadPresentStored = "load_present_stored";
 constexpr const char *kSignalMissionEffects = "mission_effects";
 constexpr const char *kSignalMinimapWaterChanged = "minimap_water_changed";
 constexpr const char *kSignalMusicContextOpened = "music_context_opened";
@@ -35,6 +49,9 @@ constexpr const char *kSignalMusicContextClosed = "music_context_closed";
 constexpr const char *kSignalMusicVarChanged = "music_var_changed";
 constexpr const char *kSignalCaptureChanged = "capture_changed";
 constexpr const char *kSignalProcessExitRequested = "process_exit_requested";
+constexpr const char *kSignalHudOverlayInit = "hud_overlay_init";
+constexpr const char *kSignalHudTexturesLoad = "hud_textures_load";
+constexpr const char *kSignalHudPipelineWarm = "hud_pipeline_warm";
 
 } // namespace
 
@@ -59,10 +76,41 @@ GameWorld::GameWorld() :
 }
 
 void GameWorld::_ready() {
+	// The server log devices the process's switches arm, in the working directory where
+	// retail opens every log by its bare name; the punt and cheat logs write their START
+	// lines now, as retail's switch parse does (the witness: base/resource_index
+	// boot_policy.h LogSwitches, inmatch/server_log_devices.h).
+	if (log_devices_ == nullptr) {
+		log_devices_ = std::make_unique<opennova::inmatch::ServerLogDevices>(
+				opennova::to_std(LaunchFlags::working_dir()));
+		// `/CONNECTLOG`'s header names the game the process was launched as.
+		std::string title_error;
+		log_devices_->arm(LaunchFlags::parsed().log_switches,
+				opennova::inmatch::connect_log_header(
+						ResourceRoot::session_title(Ref<ResourceRoot>(), title_error)));
+		// The NovaWorld menu's gate and connect lines write the same log (D-NET-NEW-L8-8).
+		NovaWorldClient::set_process_connect_log(&log_devices_->connect());
+		// The NovaWorld session's _inout.txt line under `/INOUT` (D-NET-NEW-L8-8).
+		const opennova::inmatch::ServerLogs logs = log_devices_->logs();
+		NovaWorldClient::set_process_server_logs(&logs);
+		// The LAN browse's protocol pump steps the server an error-arm exit left held
+		// (LanSession::set_process_held_server, D-NET-NEW-L1-26).
+		LanSession::set_process_held_server(&client_process_.unstopped_server,
+				&client_process_.disconnect_latch, &logs);
+	}
+	// The renderer's effect set loads as the renderer starts, ahead of any mission: a model
+	// material's first bind, a wire spawn's or a load's, finds its shader loaded (engine
+	// renderer/object_shader_template.h carries the witness, D-NET-NEW-L3-40).
+	if (!Engine::get_singleton()->is_editor_hint()) {
+		ObjectShaderCache::get_singleton()->load_effect_set();
+	}
 	// The world's own process step exists for exactly one thing: the joiner
 	// preload wait the session drive steps (switched on by load_as_joiner,
 	// off when the preload ends).
 	set_process(drive_.is_preload_pending());
+	// The internal process step pumps the remote admin on every frame no mission frame runs
+	// (pump_remote_admin).
+	set_process_internal(true);
 	RenderingServer *rs = RenderingServer::get_singleton();
 	const Callable post_draw = callable_mp(this, &GameWorld::on_frame_post_draw);
 	if (rs != nullptr && !rs->is_connected("frame_post_draw", post_draw)) {
@@ -85,6 +133,13 @@ void GameWorld::_ready() {
 	dispatcher_ = nodes.foliage;
 	sun_shadow_ = nodes.sun_shadow;
 	slot_shadow_ = nodes.slot_shadow;
+	// The effect set's GLOW and PROJSHAD passes load with it as the renderer starts: FrameFX's Q3
+	// glow source and the slot captures create their device shaders here, ahead of any mission
+	// (engine renderer/object_shader_template.h carries the witness, D-NET-NEW-LF-13).
+	if (!Engine::get_singleton()->is_editor_hint()) {
+		if (framefx_ != nullptr) framefx_->create_glow_source_device();
+		if (slot_shadow_ != nullptr) slot_shadow_->create_capture_device();
+	}
 	// The occlusion frame's retained render nodes exist from here on; its
 	// per-mission members arrive with each load.
 	occlusion_->setup(terrain_, dispatcher_, sky_dome_, celestial_, water_, env_);
@@ -120,8 +175,61 @@ void GameWorld::_process(double p_delta) {
 }
 
 void GameWorld::_notification(int p_what) {
+	if (p_what == NOTIFICATION_INTERNAL_PROCESS) {
+		// A frame outside the running mission's ticked frame (whose remote_admin leg pumps): the
+		// menus pump as MainMenu, a paused single player as the Game Loop, a joiner's connect,
+		// the NovaWorld menu's play or host wait, a load, a held start and a teardown not at all
+		// (engine inmatch/remote_admin.h remote_admin_idle_scene). The paused frame's exit router
+		// runs ahead of its pump: a stored exit reason leaves the mission as a tick's terminal
+		// outcome does (remote_admin_idle_frame_exits).
+		MissionRoot *runtime = get_runtime();
+		if (runtime != nullptr && runtime->is_playing()) return;
+		const Ref<Simulation> sim = runtime != nullptr ? runtime->get_sim() : Ref<Simulation>();
+		opennova::inmatch::RemoteAdminIdleFrame frame;
+		frame.mission = sim.is_valid();
+		frame.session_state = sim.is_valid()
+				? static_cast<opennova::inmatch::State>(sim->session_state())
+				: opennova::inmatch::State::Unloaded;
+		frame.join_pending = drive_.is_preload_pending();
+		frame.novaworld_wait = NovaWorldClient::process_connect_or_host_wait();
+		frame.mission_exit_reason = sim.is_valid() ? sim->get_mission_exit_reason() : 0;
+		if (opennova::inmatch::remote_admin_idle_frame_exits(frame)) {
+			session_frame_failed(String("mission exit ") + itos(frame.mission_exit_reason));
+			return;
+		}
+		if (const std::optional<opennova::inmatch::AdminScene> scene =
+						opennova::inmatch::remote_admin_idle_scene(frame))
+			pump_remote_admin(*scene);
+		return;
+	}
 	if (p_what == NOTIFICATION_EXIT_TREE) {
 		stop_water_render_stats();
+		// The admin server's sockets close with the process.
+		if (admin_pump_ != nullptr) admin_pump_->close();
+		// The process's network shut down: its session reset first stops a server an
+		// error-arm exit left unstopped (its /INOUT lines, and its STOP bursts over the
+		// process's transport socket when one is open: a LAN browse's, a join's or the
+		// NovaWorld session's; engine stop_unstopped_server carries the witness), then the
+		// _inout.txt log, then the net log, each stops and flushes (ServerLogDevices::close
+		// carries the witness). HOST STOPPED formats that socket's bind address and port, the
+		// placeholder with none open (engine: inmatch::inout_host_line, D-NET-NEW-L1-26).
+		if (log_devices_ != nullptr) {
+			// The session reset's connection destroy drains the process enumerator first, each
+			// record's REMOVED line (engine: ClientRuntime::drain_enumerator carries the witness;
+			// the shutdown's reset: NapiLib_Shutdown -> CNapiGameSession_ResetActiveSession).
+			LanSession::drain_process_enumerator();
+			UdpPump *open_transport = UdpPump::process_transport();
+			UdpPumpDatagramSocket transport(open_transport);
+			const opennova::PeerAddr transport_address =
+					open_transport != nullptr ? open_transport->local_address() : opennova::PeerAddr{};
+			opennova::inmatch::stop_unstopped_server(client_process_.unstopped_server,
+					log_devices_->logs(), open_transport != nullptr ? &transport : nullptr,
+					open_transport != nullptr ? &transport_address : nullptr);
+			log_devices_->close(0u);
+		}
+		NovaWorldClient::set_process_connect_log(nullptr);
+		NovaWorldClient::set_process_server_logs(nullptr);
+		LanSession::set_process_held_server(nullptr, nullptr, nullptr);
 		return;
 	}
 	if (p_what != NOTIFICATION_VISIBILITY_CHANGED || !is_node_ready()) {
@@ -269,6 +377,10 @@ String GameWorld::mount_join_expansion(const String &p_expansion) {
 			injected_root_.is_valid() ? injected_root_ : resource_root_, p_expansion);
 }
 
+void GameWorld::restore_join_expansion(const Ref<ResourceRoot> &p_root) {
+	drive_.restore_kept_expansion(p_root);
+}
+
 void GameWorld::adopt_novaworld_client(Node *p_client) {
 	drive_.adopt_nw_client(Object::cast_to<NovaWorldClient>(p_client));
 }
@@ -277,8 +389,25 @@ Node *GameWorld::release_novaworld_client() {
 	return drive_.release_nw_client();
 }
 
-Ref<PostMissionRoute> GameWorld::post_mission_route(int p_reason) const {
+Ref<PostMissionRoute> GameWorld::post_mission_route(int p_reason) {
+	admin_consoles_.route_mission_exit(p_reason);
 	return drive_.post_mission_route(p_reason);
+}
+
+int GameWorld::close_session_for_route(int p_requested_reason) {
+	const Ref<Simulation> sim = get_sim();
+	if (sim.is_null()) return p_requested_reason;
+	sim->close_session();
+	const int stored = sim->get_mission_exit_reason();
+	return stored != 0 ? stored : p_requested_reason;
+}
+
+void GameWorld::pre_game_cancelled() {
+	admin_consoles_.session_destroyed();
+}
+
+void GameWorld::player_preview_drawn() {
+	admin_consoles_.player_preview_drawn();
 }
 
 int GameWorld::main_frame_exit(int p_reason) const {
@@ -348,6 +477,10 @@ void GameWorld::set_shell_paused(bool p_paused) {
 	}
 }
 
+void GameWorld::shutdown_audio_channels() {
+	if (MissionAudio *audio = get_mission_audio()) audio->shutdown_audio_channels();
+}
+
 String GameWorld::missing_mission_asset_reason(const String &p_asset, const String &p_bms_name,
 		const Ref<ResourceRoot> &p_resource_root, bool p_wire_header_join) const {
 	if (!p_wire_header_join) {
@@ -404,6 +537,100 @@ MissionRoot *GameWorld::get_runtime() const {
 	return Object::cast_to<MissionRoot>(ObjectDB::get_instance(runtime_id_));
 }
 
+bool GameWorld::open_remote_admin() {
+	if (admin_opened_) return true;
+	if (game_config_.is_null() || log_devices_ == nullptr) return false;
+	admin_opened_ = true;
+	// The log truncates at the process start, admin.cfg loads from the working directory (a
+	// missing file is no users and no whitelist), and the listener opens on the block's 16-bit
+	// port when it is nonzero; a failed listen is ignored (engine inmatch/remote_admin.h).
+	opennova::inmatch::WorkingDirectoryFiles &files = log_devices_->files();
+	(void)files.write(opennova::inmatch::kAdminLogFileName, std::string_view(), /*append=*/false);
+	const std::string &dir = files.dir();
+	const std::string cfg_path = dir.empty() ? std::string(opennova::admincfg::kFileName)
+	                                         : dir + "/" + opennova::admincfg::kFileName;
+	opennova::admincfg::AdminConfig config;
+	(void)opennova::admincfg::load_file(cfg_path, config);
+	// The menus' round clock is the process's (engine RemoteAdminConsoles::use_process_state).
+	admin_consoles_.use_process_state(&client_process_);
+	admin_server_ = std::make_unique<opennova::AdminServer>(std::move(config), admin_consoles_,
+			admin_rand_, [&files](std::string_view p_line) {
+				(void)files.write(opennova::inmatch::kAdminLogFileName,
+						opennova::inmatch::admin_log_file_text(p_line), /*append=*/true);
+			});
+	admin_pump_ = std::make_unique<AdminTcpPump>(*admin_server_);
+	const uint16_t port = opennova::inmatch::remote_admin_listen_port(game_config_->native().cfg());
+	if (port != 0 && !admin_pump_->listen(port))
+		print_verbose(String("GameWorld: the remote admin did not listen on TCP ") + itos(port));
+	return true;
+}
+
+opennova::inmatch::AdminConsole::Seams GameWorld::remote_admin_seams(const Ref<Simulation> &p_sim,
+		const opennova::inmatch::RemoteAdminBinding &p_binding) {
+	Ref<GameConfigBlock> block = game_config_;
+	std::function<void()> save = [block]() { (void)block->save(); };
+	opennova::gamecfg::GameCfg *cfg = &game_config_->native().cfg();
+	opennova::inmatch::AdminConsole::Seams seams;
+	if (p_sim.is_valid()) {
+		seams = p_sim->remote_admin_seams(cfg, std::move(save));
+	} else {
+		seams.config_block = cfg;
+		seams.save_config = std::move(save);
+	}
+	// The process's gametext, the menus' console included: the shell's mount (else the last
+	// load's root) and its installed override table (engine inmatch/remote_admin.h
+	// process_game_text).
+	const Ref<ResourceRoot> root = injected_root_.is_valid() ? injected_root_ : resource_root_;
+	if (root.is_valid())
+		seams.game_text = opennova::inmatch::process_game_text(
+				opennova::mission::boot_files_from_index(root->native_index()),
+				RtxtStringFile::installed_text_override());
+	// GOTO MENUSTATE's close over the shell's in-game menu screen (engine inmatch/remote_admin.h
+	// ExitSite::AdminOverMenuScreen carries the witness).
+	seams.menu_screen_open = [this]() {
+		return menu_screen_probe_.is_valid() && bool(menu_screen_probe_.call());
+	};
+	// The process's own client's HUD (a listen host, a joiner): CHAT GET reads its CHAT
+	// window and a refused CHAT SEND echoes into it (the HUD device, by its group).
+	if (p_binding.client != nullptr) {
+		seams.chat_window = [this]() {
+			const HudOverlay *hud = admin_hud_overlay();
+			return hud != nullptr ? hud->chat_window_lines() : std::vector<std::string>();
+		};
+		seams.chat_echo = [this](const std::string &p_text) {
+			if (HudOverlay *hud = admin_hud_overlay()) hud->echo_admin_chat(p_text);
+		};
+	}
+	return seams;
+}
+
+void GameWorld::pump_remote_admin(opennova::inmatch::AdminScene p_scene) {
+	if (!open_remote_admin() || !admin_pump_->listening()) return;
+	const Ref<Simulation> sim = get_sim();
+	const opennova::inmatch::RemoteAdminBinding binding =
+			sim.is_valid() ? sim->remote_admin_binding() : opennova::inmatch::RemoteAdminBinding{};
+	if (!admin_consoles_.bound_to(binding)) admin_consoles_.bind(binding, remote_admin_seams(sim, binding));
+	// The process words follow the session every pumped frame, so the menus' report keeps the
+	// last session's whether or not a line ran in it.
+	admin_consoles_.refresh_process_mission();
+	opennova::inmatch::AdminConsole *console = admin_consoles_.console();
+	console->set_scene(p_scene);
+	// The challenge's rand() is the process's one CRT stream: the running mission's world
+	// keeps it, so the pump draws from it and hands it back (opennova-serve's pump does the same).
+	opennova::io::CrtRand *crt = sim.is_valid() ? sim->process_crt_rand() : nullptr;
+	if (crt != nullptr) {
+		console->set_main_frame(static_cast<uint32_t>(sim->get_main_frame_counter()));
+		admin_rand_ = *crt;
+	}
+	admin_pump_->pump();
+	if (crt != nullptr) *crt = admin_rand_;
+}
+
+HudOverlay *GameWorld::admin_hud_overlay() const {
+	if (!is_inside_tree()) return nullptr;
+	return Object::cast_to<HudOverlay>(get_tree()->get_first_node_in_group(HudOverlay::kAdminGroup));
+}
+
 Ref<Simulation> GameWorld::get_sim() const {
 	MissionRoot *runtime = get_runtime();
 	return runtime != nullptr ? runtime->get_sim() : Ref<Simulation>();
@@ -423,7 +650,7 @@ Ref<WeaponDatabase> GameWorld::get_weapon_database() {
 		// A missing or empty weapon.def loads an empty table (D-MNU-27).
 		if (weapon_db_->load_from_resource_root(resource_root_, "weapon.def") != OK) {
 			UtilityFunctions::push_warning(vformat(
-					"GameWorld: weapon.def unavailable (%s) — weapon presentation/loadout lookup disabled",
+					"GameWorld: weapon.def unavailable (%s): weapon presentation/loadout lookup disabled",
 					weapon_db_->get_last_error()));
 			return Ref<WeaponDatabase>();
 		}
@@ -449,6 +676,10 @@ void GameWorld::release_runtime_renderer_resources() {
 
 bool GameWorld::is_water_render_active() const {
 	return water_ != nullptr && water_->is_water_render_active();
+}
+
+bool GameWorld::is_waterline_active() const {
+	return water_ != nullptr && water_->is_waterline_active();
 }
 
 Ref<WorldView> GameWorld::world_view() {
@@ -550,6 +781,14 @@ Ref<EffectLightReport> GameWorld::get_effect_light_report() const {
 }
 
 void GameWorld::session_frame_failed(const String &p_reason) {
+	// The exit frame's process words, which no pump of this frame took, over the exiting
+	// session's console, bound now if no pump of the session bound it (engine
+	// RemoteAdminConsoles::session_exit_frame).
+	const Ref<Simulation> sim = get_sim();
+	if (sim.is_valid() && open_remote_admin() && admin_pump_->listening()) {
+		const opennova::inmatch::RemoteAdminBinding binding = sim->remote_admin_binding();
+		admin_consoles_.session_exit_frame(binding, remote_admin_seams(sim, binding));
+	}
 	const String message = !p_reason.is_empty() ? p_reason : String("mission session lost");
 	emit_signal(kSignalSessionLost, message);
 }
@@ -739,6 +978,24 @@ void GameWorld::_bind_methods() {
 	// witnessed per-stage anchors, engine/runtime/mission/mission_load_plan.h)
 	// and pulsed at the object stage's value from inside the placement loop.
 	ADD_SIGNAL(MethodInfo(kSignalLoadProgress, PropertyInfo(Variant::INT, "percent")));
+	// A present at the loading screen's stored checkpoint from inside a loader (the effect
+	// system's load and its atlas build; GameWorld::present_stored_load_progress).
+	ADD_SIGNAL(MethodInfo(kSignalLoadPresentStored));
+	// The two HUD legs of every mission start's load, a dedicated host's included: the
+	// overlay system's init past the rows' init and ahead of a joiner's first 0x2F
+	// (`mission_file` names the mission whose text the HUD's tables resolve), then the
+	// HUD's textures and fonts at the mission textures stage, past the model freeze, by its
+	// arm (`full_arm` false: a dedicated host's reduced arm, the fonts, the box styles and
+	// the connection icons alone). The shell's HUD builds in them, inside the load
+	// (game_world_load.cpp carries the witness).
+	ADD_SIGNAL(MethodInfo(kSignalHudOverlayInit, PropertyInfo(Variant::STRING, "mission_file")));
+	ADD_SIGNAL(MethodInfo(kSignalHudTexturesLoad, PropertyInfo(Variant::BOOL, "full_arm")));
+	// The load's one forced frame, around its draw (`drawing` true ahead of it, false once it
+	// drained): the shell's HUD, built and loaded by the two legs above, draws in that frame
+	// and nowhere else ahead of its first live frame, so its canvas pipelines compile behind
+	// the loading screen, not in the first revealed frame (game_world_load.cpp
+	// warm_effect_world_catalog carries the ruling, D-NET-NEW-LF-16).
+	ADD_SIGNAL(MethodInfo(kSignalHudPipelineWarm, PropertyInfo(Variant::BOOL, "drawing")));
 	// Presentation side effects drained from the mission runtime's EffectLog
 	// each tick (kind: "text"/"debug_text"/"win"/"subgoal_*"/"show_waypoints"/
 	// "set_light"/"dialog"). Player text is consumed by the HUD; debug_text
@@ -775,6 +1032,8 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_object_polydetail", "level"),
 			&GameWorld::set_object_polydetail);
 	ClassDB::bind_method(D_METHOD("get_object_polydetail"), &GameWorld::get_object_polydetail);
+	ClassDB::bind_method(D_METHOD("set_aspect_mode", "mode"), &GameWorld::set_aspect_mode);
+	ClassDB::bind_method(D_METHOD("get_aspect_mode"), &GameWorld::get_aspect_mode);
 	ClassDB::bind_method(D_METHOD("get_object_detail"), &GameWorld::get_object_detail);
 	ClassDB::bind_static_method("GameWorld", D_METHOD("object_detail_fresh_profile"),
 			&GameWorld::object_detail_fresh_profile);
@@ -828,8 +1087,13 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load_mission_as_joiner", "target"), &GameWorld::load_mission_as_joiner);
 	ClassDB::bind_method(D_METHOD("adopt_novaworld_client", "client"), &GameWorld::adopt_novaworld_client);
 	ClassDB::bind_method(D_METHOD("mount_join_expansion", "expansion"), &GameWorld::mount_join_expansion);
+	ClassDB::bind_method(D_METHOD("restore_join_expansion", "root"), &GameWorld::restore_join_expansion);
 	ClassDB::bind_method(D_METHOD("release_novaworld_client"), &GameWorld::release_novaworld_client);
 	ClassDB::bind_method(D_METHOD("post_mission_route", "reason"), &GameWorld::post_mission_route);
+	ClassDB::bind_method(D_METHOD("close_session_for_route", "requested_reason"),
+			&GameWorld::close_session_for_route);
+	ClassDB::bind_method(D_METHOD("pre_game_cancelled"), &GameWorld::pre_game_cancelled);
+	ClassDB::bind_method(D_METHOD("player_preview_drawn"), &GameWorld::player_preview_drawn);
 	ClassDB::bind_method(D_METHOD("begin_map_change"), &GameWorld::begin_map_change);
 	ClassDB::bind_method(D_METHOD("load_next_mission", "bms_name"), &GameWorld::load_next_mission);
 	ClassDB::bind_method(D_METHOD("begin_joiner_reload"), &GameWorld::begin_joiner_reload);
@@ -859,6 +1123,7 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("cancel_join_admission"), &GameWorld::cancel_join_admission);
 	ClassDB::bind_method(D_METHOD("is_net_session"), &GameWorld::is_net_session);
 	ClassDB::bind_method(D_METHOD("set_shell_paused", "paused"), &GameWorld::set_shell_paused);
+	ClassDB::bind_method(D_METHOD("shutdown_audio_channels"), &GameWorld::shutdown_audio_channels);
 	ClassDB::bind_method(D_METHOD("missing_mission_asset_reason", "asset", "bms_name",
 			"resource_root", "wire_header_join"), &GameWorld::missing_mission_asset_reason);
 	ClassDB::bind_method(D_METHOD("unload"), &GameWorld::unload);
@@ -878,6 +1143,11 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_sim"), &GameWorld::get_sim);
 	ClassDB::bind_method(D_METHOD("get_weapon_database"), &GameWorld::get_weapon_database);
 	ClassDB::bind_method(D_METHOD("last_load_timeline"), &GameWorld::last_load_timeline);
+	ClassDB::bind_method(D_METHOD("last_post_load_frames"), &GameWorld::last_post_load_frames);
+	ClassDB::bind_method(D_METHOD("is_post_load_frames_open"), &GameWorld::is_post_load_frames_open);
+	ClassDB::bind_static_method("GameWorld",
+			D_METHOD("post_load_frames_continue", "frames_timed", "awaits_uplink"),
+			&GameWorld::post_load_frames_continue);
 	ClassDB::bind_method(D_METHOD("get_runtime"), &GameWorld::get_runtime);
 	ClassDB::bind_method(D_METHOD("get_mission_stats"), &GameWorld::get_mission_stats);
 	ClassDB::bind_method(D_METHOD("get_static_live_population_count"),
@@ -891,12 +1161,17 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("world_view"), &GameWorld::world_view);
 	ClassDB::bind_method(D_METHOD("armory_view"), &GameWorld::armory_view);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &GameWorld::is_loaded);
+	ClassDB::bind_method(D_METHOD("set_presentation_held", "held"), &GameWorld::set_presentation_held);
+	ClassDB::bind_method(D_METHOD("is_presentation_held"), &GameWorld::is_presentation_held);
 	ClassDB::bind_method(D_METHOD("get_current_frame_clear_color"),
 			&GameWorld::get_current_frame_clear_color);
 
 	ClassDB::bind_method(D_METHOD("set_music_director", "director"), &GameWorld::set_music_director);
 	ClassDB::bind_method(D_METHOD("set_player_profiles", "profiles"), &GameWorld::set_player_profiles);
 	ClassDB::bind_method(D_METHOD("set_game_config", "block"), &GameWorld::set_game_config);
+	ClassDB::bind_method(D_METHOD("set_controls_model", "model"), &GameWorld::set_controls_model);
+	ClassDB::bind_method(D_METHOD("set_menu_screen_probe", "probe"), &GameWorld::set_menu_screen_probe);
+	ClassDB::bind_method(D_METHOD("set_restart_boot", "restart"), &GameWorld::set_restart_boot);
 	ClassDB::bind_method(D_METHOD("get_game_config"), &GameWorld::get_game_config);
 	ClassDB::bind_method(D_METHOD("on_nw_host_server_command", "verb", "target", "args"),
 			&GameWorld::on_nw_host_server_command);
@@ -918,10 +1193,13 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_effect_light_director"),
 			&GameWorld::get_effect_light_director);
 	ClassDB::bind_method(D_METHOD("get_seconds_since_render"), &GameWorld::get_seconds_since_render);
+	ClassDB::bind_method(D_METHOD("take_frame_elapsed_seconds"),
+			&GameWorld::take_frame_elapsed_seconds);
 	ClassDB::bind_method(D_METHOD("tick", "camera_pos", "camera_xform", "delta", "frame_input"),
 			&GameWorld::tick, DEFVAL(Transform3D()), DEFVAL(-1.0), DEFVAL(Variant()));
 	ClassDB::bind_static_method("GameWorld", D_METHOD("current_frame_clock_ms"),
 			&GameWorld::current_frame_clock_ms);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("tick_count_ms"), &GameWorld::tick_count_ms);
 	ClassDB::bind_method(D_METHOD("get_frame_clock_ms"), &GameWorld::get_frame_clock_ms);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "frame_clock_ms"), "", "get_frame_clock_ms");
 	ClassDB::bind_static_method("GameWorld", D_METHOD("frame_leg_names"), &GameWorld::frame_leg_names);
@@ -929,6 +1207,19 @@ void GameWorld::_bind_methods() {
 			&GameWorld::frozen_pose_leg_names);
 	ClassDB::bind_static_method("GameWorld", D_METHOD("frame_leg_stops_frame", "name"),
 			&GameWorld::frame_leg_stops_frame);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("frame_leg_draws_scene", "name"),
+			&GameWorld::frame_leg_draws_scene);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("frame_leg_in_world", "name"),
+			&GameWorld::frame_leg_in_world);
+	ClassDB::bind_method(D_METHOD("get_last_frame_legs"), &GameWorld::get_last_frame_legs);
+	ClassDB::bind_method(D_METHOD("get_last_frame_scene_drawn"),
+			&GameWorld::get_last_frame_scene_drawn);
+	ClassDB::bind_method(D_METHOD("get_last_frame_world_drawn"),
+			&GameWorld::get_last_frame_world_drawn);
+	ClassDB::bind_method(D_METHOD("get_last_frame_hud_pass_called"),
+			&GameWorld::get_last_frame_hud_pass_called);
+	ClassDB::bind_method(D_METHOD("get_last_frame_start_blank"),
+			&GameWorld::get_last_frame_start_blank);
 	ClassDB::bind_method(D_METHOD("debug_refresh_render_pose", "camera"),
 			&GameWorld::debug_refresh_render_pose);
 	ClassDB::bind_method(D_METHOD("get_runtime_perf_counters"), &GameWorld::get_runtime_perf_counters);
@@ -969,6 +1260,7 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_item_effect_director"), &GameWorld::get_item_effect_director);
 	ClassDB::bind_method(D_METHOD("get_terrain_node"), &GameWorld::get_terrain_node);
 	ClassDB::bind_method(D_METHOD("get_foliage_dispatcher"), &GameWorld::get_foliage_dispatcher);
+	ClassDB::bind_method(D_METHOD("get_scene_overlay_cached_meshes"), &GameWorld::get_scene_overlay_cached_meshes);
 	ClassDB::bind_method(D_METHOD("get_item_db"), &GameWorld::get_item_db);
 	ClassDB::bind_method(D_METHOD("get_environment_node"), &GameWorld::get_environment_node);
 	ClassDB::bind_method(D_METHOD("get_weather_node"), &GameWorld::get_weather_node);

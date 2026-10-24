@@ -1,6 +1,7 @@
 // BMS event parity: retail-witnessed trigger and action semantics driven through
 // the public BmsEventSystem / EntityCommands seams. Each block names the retail
 // function it pins; the synthetic worlds are the smallest that exercise the leg.
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -234,7 +235,7 @@ static void test_change_group_ai_fans_pools_2_0_1() {
 // shared destroy (a brain holding the row as its priority target lets go).
 // SSN 0, group 0 and a non-authority peer do nothing, and no live recount
 // follows the group removal.
-// [orig: Entity_FindByParentAndDispatch @0x43e210 — SSN 0 @0x43e214,
+// [orig: Entity_RemoveByDcbId @0x43e210 — SSN 0 @0x43e214,
 //  authority @0x43e21c; Entity_TeleportAllByNetId @0x43d5d0 — group 0
 //  @0x43d5d5, authority @0x43d5dd, pools 2,0,1,3 @0x43d615/@0x43d646/
 //  @0x43d677/@0x43d6a8; Server_RemoveEntityAndNotify @0x50a270 — the 0x12 send
@@ -365,6 +366,34 @@ static void test_area_ai_reads_the_resolved_record() {
           static_cast<int32_t>(static_cast<uint32_t>(300 * 65536 + 32768) << 16));
 }
 
+// The resolve copies the area record's own X / Y words, so a zone 21,000 units
+// out with low bits set reaches the command word for word; a float view of the
+// box drops those bits (D-NET-507).
+// [orig: EventTrigger_ResolveZoneActionRefs @0x453100 - +0xC x_min, +0x14 y_min,
+//  +0x18 x_max, +0x1C y_max @0x45318D..0x4531AB]
+static void test_area_ai_copies_the_record_words() {
+    World w;
+    w.cached.humans = 1;
+    configure_pools(w);
+    // The record's words in Area's order: x_min, x_max, y_min, y_max.
+    const std::array<int32_t, 4> words = {0x52081235, 0x52280001, 0x51F84321, 0x5218FFFF};
+    world::Aabb zone{};
+    zone.min = {21000.07f, 20984.26f, -16384.0f};
+    zone.max = {21032.0f, 21017.0f, 16384.0f};
+    w.registry.register_area(std::string(), zone, true, 12, {}, false, words);
+    bms::Event e{};
+    e.action_count = 1;
+    mission::BmsEventSystem sys;
+    sys.load({e}, {}, {action(bms::ActionType::AreaAiRed, 43, 12, 1, 7, 9)});
+    w.add_system(&sys);
+    w.load_systems();
+    const bms::Action &resolved = sys.events()[0].actions[0];
+    CHECK(resolved.param1 == words[0]);    // x_min
+    CHECK(resolved.param3 == words[2]);    // y_min
+    CHECK(resolved.param4 == words[1]);    // x_max
+    CHECK(resolved.reserved1 == words[3]); // y_max
+}
+
 // The group team/regroup writers return on group 0; ChangeSingleAI returns on
 // sub 0 or SSN 0 and walks pools 0, 1, 2 only (first match).
 // [orig: Entity_SetTeamByNetId @0x43c680 — group 0 @0x43c685;
@@ -487,6 +516,7 @@ int main() {
     test_change_group_ai_fans_pools_2_0_1();
     test_vaporize_notifies_and_destroys();
     test_area_ai_reads_the_resolved_record();
+    test_area_ai_copies_the_record_words();
     test_group_zero_and_single_ai_guards();
     test_misvar_wraps_and_subgoal_shift_masks();
     test_play_wav_list_gate();

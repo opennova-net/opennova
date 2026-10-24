@@ -29,23 +29,26 @@ void fan_entity_sound_in_match(NapiNPServerCtx &ctx, world::World &world,
 	char set_name[24] = {};
 	audio::compose_entity_sound_set(source.anim_slot, type, set_name, sizeof(set_name));
 	if (set_name[0] == 0) return;
-	if (world.tables.sound_sets == nullptr || !world.tables.sound_sets->has(set_name)) return;
+	if (world.tables.sound_sets == nullptr) return;
+	const audio::SetLocation set = world.tables.sound_sets->find(set_name);
+	if (!set.valid()) return;
 	PlaySoundCommand cmd;
 	cmd.flag = 1;
-	cmd.sound_name = set_name;
+	// The resolved set's own spelling [orig: NetPacket_WriteOverlayAction @0x505D99..0x505DAA].
+	cmd.sound_name = set.name;
 	cmd.has_pos = true;
-	cmd.pos_x = static_cast<int16_t>(world::to_fixed(source.position.x) >> 16);
-	cmd.pos_y = static_cast<int16_t>(world::to_fixed(source.position.y) >> 16);
-	cmd.pos_z = static_cast<int16_t>(world::to_fixed(source.position.z) >> 16);
+	cmd.pos_x = static_cast<int16_t>(source.position.x.q16 >> 16);
+	cmd.pos_y = static_cast<int16_t>(source.position.y.q16 >> 16);
+	cmd.pos_z = static_cast<int16_t>(source.position.z.q16 >> 16);
 	const std::vector<uint8_t> body = encode_play_sound(cmd);
 	for (NapiNPConnection &candidate : ctx.np_protocol.connection_list) {
 		if (!active_player_recipient(candidate)) continue;
 		if (candidate.link.mode == replication::TransportMode::Loopback) {
 			world::SoundSlotEvent local;
 			local.source_handle = source.handle.packed;
-			local.pos[0] = world::to_fixed(source.position.x);
-			local.pos[1] = world::to_fixed(source.position.y);
-			local.pos[2] = world::to_fixed(source.position.z);
+			local.pos[0] = source.position.x.q16;
+			local.pos[1] = source.position.y.q16;
+			local.pos[2] = source.position.z.q16;
 			local.slot = 0;
 			std::memcpy(local.set_name, set_name, sizeof(set_name));
 			world.out.slot_sounds.push_back(local);
@@ -75,10 +78,14 @@ void Server_UpdatePlayerBreathTimers(NapiNPServerCtx &ctx, world::World &world) 
 	const int32_t gasp_after = static_cast<int32_t>(
 			static_cast<uint32_t>(world.script.wac_values.breathtime) * 160u) / 100;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		// A live slot in state 6 [orig: slot+4 @0x50D7A2; `cmp [esi+20h],6;
-		// jnz` @0x50D7B7..0x50D7BB]; a spectator slot never samples
-		// [orig: !slot+100567 @0x50D7AB].
-		if (!is_in_match(conn) || !conn.link.owned_entity.valid()) continue;
+		// A live slot in state 6 exactly [orig: slot+4 @0x50D7A2; `cmp [esi+20h],6;
+		// jnz` @0x50D7B7..0x50D7BB]: a punted slot still is (slot_in_match,
+		// D-NET-652), the round end's state 7 is not (Match's outcome stands for the
+		// 6 -> 7 store [orig: Server_ProcessRoundEnd @0x51685E]); a spectator slot
+		// never samples [orig: !slot+100567 @0x50D7AB].
+		if (!slot_in_match(conn) || world.match.outcome().ended ||
+				!conn.link.owned_entity.valid())
+			continue;
 		if (conn.link.spectator) continue;
 		world::Entity *player = world.registry.get(conn.link.owned_entity);
 		if (player == nullptr) continue;
@@ -93,7 +100,7 @@ void Server_UpdatePlayerBreathTimers(NapiNPServerCtx &ctx, world::World &world) 
 		// signed; retail carries no authored-water test at this site.
 		// [orig: @0x50D7CD..0x50D7D9 `add eax,[ecx+0Ch]; cmp eax,
 		//  g_EnvWaterHeightFixed; jge`]
-		if (world::to_fixed(player->position.z) + player->eye_offset_z >= world.env.water_z) {
+		if (player->position.z.q16 + player->eye_offset_z >= world.env.water_z) {
 			// Surfacing after more than four samples plays the breath (a dive
 			// no longer than 160% of the breath value) or the gasp composite,
 			// for a body with an ItemDef (+0x20).
@@ -121,22 +128,20 @@ void Server_UpdatePlayerBreathTimers(NapiNPServerCtx &ctx, world::World &world) 
 			continue;
 		}
 		// The drowning: the attacker slot (+0x178) cleared, so the death reports
-		// no killer, the drown death selection, Health -1, then the body's own
-		// callback raises the ordinary death transaction.
+		// no killer, the drown death selection and Health -1, then the body's
+		// class callback with event 0 (its health tail requests the drown clip
+		// and takes a mounted body off its seat; the kill-cause bits clear and
+		// the think re-arms); the body's death edge in this frame's entity
+		// update raises the ordinary death transaction.
 		// [orig: `mov [ecx+178h],ebx` @0x50D800; Entity_ComputeAnimSlotIndex
 		//  call @0x50D80A; `mov word ptr [eax+11Eh],0FFFFh` @0x50D819; the
-		//  +0x1C8 call @0x50D838]
+		//  +0x1C8 call (body, 0, 0) @0x50D824..0x50D838;
+		//  Entity_UpdateInfantryPlayerBody @0x4B4CEA]
 		player->last_attacker = world::EntityHandle{};
 		player->death_anim_state = world::compute_death_anim_state(
 				0, 0, world::death_cause::kDrown);
 		player->health = -1;
-		world::RoundDeath death;
-		death.victim = player->handle;
-		death.victim_handle = player->handle.packed;
-		// The snapshot every RoundDeath producer stamps; the host classifier
-		// itself reads the live entity word (see classify_player_death).
-		death.event_flags = player->cause_flags & 0xF00u;
-		world.round_sim.deaths.push_back(death);
+		world::player_body_row_event(world, *player, 0);
 	}
 }
 

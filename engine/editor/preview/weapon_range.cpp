@@ -320,7 +320,6 @@ void WeaponRange::reset_() {
 		world.ai.attach(soldier_);
 		if (world::AiEntity *body = world.ai.for_handle(soldier_)) {
 			body->inf.active = true;
-			body->pos[2] = q16(kEyeHeight);
 		}
 	}
 	// The shooter: the local player, a person of the player class standing at the range's eye, its eye there (no
@@ -345,7 +344,6 @@ void WeaponRange::reset_() {
 		if (world::AiEntity *body = world.ai.for_handle(shooter)) {
 			body->inf.active = true;
 			body->inf.is_local_player = true;
-			body->pos[2] = q16(kEyeHeight);
 		}
 	}
 	// The target: a building standing `range` metres down the line of fire, its face the surface picked.
@@ -355,6 +353,12 @@ void WeaponRange::reset_() {
 		wall.kind = world::EntityKind::Building;
 		wall.item_type = 5;
 		wall.has_item_def = true;
+		// The range's stand-in for a placed building carries an item type ordinal (+0x1C) as every
+		// loaded def'd row does, so the static list holds it and the rounds and the aim ray meet it.
+		// The range's own row: it reads no items.def, and no reader takes a def from this ordinal.
+		// [orig: Entity_SpawnFromBMSRecord - +0x1C @0x40EBFC; Entity_BuildProximityLists_Pool2
+		//  @0x4B9430 - the +0x1C and def tests @0x4B945D / @0x4B9466]
+		wall.item_type_index = 1;
 		wall.alive = true;
 		wall.health = kTargetHealth;
 		wall.health_max = kTargetHealth;
@@ -454,20 +458,29 @@ void WeaponRange::fire_shot_(const WeaponRangeShot &shot) {
 void WeaponRange::apply_gestures_(int32_t tick) {
 	world::World &world = *world_;
 	world::LocalPlayerWeapon &weapon = local_->weapon;
-	bool pressed = false;
 	bool reload = false;
 	for (const WeaponGestureAt &at : gestures_) {
 		if (at.tick != tick) continue;
 		WeaponRangeEvent refused;
 		refused.tick = tick;
 		refused.kind = WeaponRangeEvent::Kind::Refused;
+		// The fire key's events are the fire row's records past the dispatcher's head: its
+		// press the press leg with the key held, its release the release leg (a PowerThrow's
+		// throw) [orig: Input_HandleActionBinding_0 case 0x95 @0x4E07B5..0x4E0A1E;
+		// world::LocalPlayer::fire_record].
 		switch (at.gesture) {
-		case WeaponGesture::Fire: pressed = true; break;
+		case WeaponGesture::Fire:
+			(void)local_->fire_record(true, true);
+			(void)local_->fire_record(false, true);
+			break;
 		case WeaponGesture::Hold:
-			pressed = !holding_;
+			if (!holding_) (void)local_->fire_record(true, true);
 			holding_ = true;
 			break;
-		case WeaponGesture::Release: holding_ = false; break;
+		case WeaponGesture::Release:
+			if (holding_) (void)local_->fire_record(false, true);
+			holding_ = false;
+			break;
 		case WeaponGesture::Reload: {
 			// The dispatcher's gate ahead of the request: a full magazine or an empty reserve refuses it [orig:
 			// input case 0xD3 @ 0x4E0420].
@@ -505,7 +518,16 @@ void WeaponRange::apply_gestures_(int32_t tick) {
 		}
 		}
 	}
-	local_->set_weapon_input(holding_, pressed, reload);
+	// The deferred fire records the last pump queued (an automatic weapon's re-queue),
+	// behind the tick's own gestures: each the fire key's record with the key's live state
+	// [orig: Input_FlushDeferredEvents @0x497AC0 from Input_ProcessFrame @0x49D591;
+	// world::LocalPlayer::deferred_events].
+	std::vector<world::LocalPlayer::DeferredInputEvent> deferred;
+	deferred.swap(local_->deferred_events);
+	for (const world::LocalPlayer::DeferredInputEvent &event : deferred)
+		if (event.code == world::LocalPlayer::kDeferredFireCode)
+			(void)local_->fire_record(holding_, true);
+	local_->set_weapon_input(holding_, false, reload);
 }
 
 void WeaponRange::step_() {

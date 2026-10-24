@@ -75,33 +75,44 @@ inline bool aim_overlay_inputs_for_client(
 		const replication::ClientState &state,
 		const std::vector<mission::ItemSeatSpec> &specs,
 		anim::AimOverlayInputs &out,
-		bool *r_collapse_right_hand = nullptr) {
-	if (r_collapse_right_hand != nullptr) *r_collapse_right_hand = false;
+		bool *r_blocking_seat = nullptr) {
+	if (r_blocking_seat != nullptr) *r_blocking_seat = false;
 	if (entity.cls != EntityClass::Player &&
 			entity.cls != EntityClass::Infantry)
 		return false;
 
 	out = anim::AimOverlayInputs{};
 	out.aim_yaw = entity.heading_bam;
-	// Free-standing players read the row's live pitch (the org2 body chase
-	// steps it toward the wire byte with divisor 12 on a joiner; snap folds
-	// mirror the byte — §5.38e §3). Mounted players and infantry keep the raw
-	// wire aim byte: their own mover is bit0-skipped and the seat pose owns the
-	// body [orig: the mounted read of entity+0x2D0-desired aim].
-	const bool free_standing_player =
-			entity.cls == EntityClass::Player &&
-			entity.carrier_handle == world::EntityHandle::kInvalid;
-	out.aim_pitch = free_standing_player
-			? entity.pitch_bam
-			: static_cast<int32_t>(
-					static_cast<uint32_t>(
-							entity.cls == EntityClass::Player
-									? entity.pitch_byte
-									: entity.aim_yaw_byte)
-					<< 24);
-	out.body_yaw = out.aim_yaw;
-	out.leg_yaw_r = out.body_yaw;
-	out.leg_yaw_l = out.body_yaw;
+	// The bone build's aim pitch is the body's live Pitch word (+0x14) for every row: a
+	// player row's chase steps it toward its record's pitch, seated too (divisor 12 on a
+	// joiner; snap folds mirror the byte, §5.38e §3), and an org1 row's look steps it toward
+	// the aim pitch (+0x2D0, tick_org1_looks). An org1 row's body chain turns by its body
+	// heading (+0x8C, its body chase's), not by the look Yaw.
+	// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - `mov edx, [ebp+14h]` @0x4B17AD;
+	//  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the angle apply @0x4B43E6..0x4B440A;
+	//  Entity_UpdateInfantryAI @0x4B9910 - the body chase @0x4BE8FD..0x4BE931, the
+	//  free-standing look @0x4BEB18..0x4BEBE7, the seated look @0x4BEF87..0x4BEF97]
+	out.aim_pitch = entity.pitch_bam;
+	// The body chain turns by +0x8C and the two leg chains by +0x2D4 / +0x2D8, whatever the
+	// row's class (D-NET-NEW-L5-42): an org1 row's body chase and leg chase (row_org1_legs) keep
+	// those words, a player row's view phase (row_org2_view_phase) its legs and their midpoint,
+	// and each class's spawn init and respawn reset stamp them with the Yaw. A host's view chases
+	// no row;
+	// its persons present the World's bodies, whose own updates keep the words (present_rows.cpp).
+	// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - `mov edx, [ebp+8Ch]` @0x4B1819 (the
+	//  body matrix @0x4B182E), `mov ecx, [ebp+2D4h]` @0x4B1833 (@0x4B1845), `mov eax, [ebp+2D8h]`
+	//  @0x4B184A (@0x4B185C), no class test between @0x4B17AA and @0x4B186E;
+	//  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the leg chase @0x4B4945..0x4B4ABB]
+	out.body_yaw = entity.rm_body_heading;
+	out.leg_yaw_r = entity.rm_leg_yaw[0];
+	out.leg_yaw_l = entity.rm_leg_yaw[1];
+	// The body and leg chains take the body's savedLivePitch and Roll, the slope
+	// conform's words every organic row runs (row_body_conform, row_org1_slope_pass); a
+	// mounted body's seat pose replaces them below [orig: Entity_BuildBoneTransformMatrices
+	// @0x4B1290 - +0x90 @0x4B1813, the body build @0x4B182E, the leg chains @0x4B1845 /
+	// @0x4B185C].
+	out.body_pitch = entity.rm_body_pitch;
+	out.roll = entity.roll_bam;
 	out.aim_state =
 			(world::infantry_anim_flags(entity.anim_state_id) & 0x40u) != 0;
 	out.rolling =
@@ -160,15 +171,14 @@ inline bool aim_overlay_inputs_for_client(
 		out.leg_yaw_l = out.body_yaw;
 		return true;
 	}
-	if (r_collapse_right_hand != nullptr) {
-		// The compact organic class is the decoded form of the relevant Flags
-		// distinction: Player rows carry 0x100; Infantry rows do not. Derive the
-		// presentation verdict from existing wire fields rather than adding a
-		// transport-only boolean.
-		*r_collapse_right_hand =
-				entity.cls == EntityClass::Infantry &&
-				world::seat_type_blocks_weapon_channel(seat->type);
-	}
+	// The bone build's seat local: a control / gunner / driver seat. Its two consumers
+	// split on the Flags 0x100 the compact class decodes (Player rows carry it, Infantry
+	// rows do not): the collapsed right-hand row takes the seat without the bit, the
+	// weapon-channel splice the bit without the seat (client_replica_present_projection.cpp).
+	// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - the seat local
+	//  @0x4B12A2..0x4B1347, the splice's test @0x4B14B9]
+	if (r_blocking_seat != nullptr)
+		*r_blocking_seat = world::seat_type_blocks_weapon_channel(seat->type);
 
 	out.mount_mode = world::mount_mode_for_seat_type(seat->type);
 	if (out.mount_mode == anim::MountMode::OnFoot) return true;

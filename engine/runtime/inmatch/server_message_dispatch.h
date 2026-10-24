@@ -21,6 +21,7 @@ struct EntityHandle;
 
 namespace opennova {
 struct TitleIdentity; // net/title/title_identity.h
+struct PlayerReplicationState; // net/npwire/replication_model.h
 }
 
 // P8 — the reactive in-match gameplay-message reply path.
@@ -31,7 +32,7 @@ struct TitleIdentity; // net/title/title_identity.h
 // expects.
 //
 // What it does NOT do: the world-stream / spawn-gate burst. The original emits that ONE-SHOT on
-// player-add [orig: Server_OnPlayerJoin @0x51a680 → Server_SendInitialGameStateToPlayer @0x51bba0];
+// player-add [orig: Server_OnPlayerJoin @0x51a680 → Server_SendPlayerSlotStateFrame @0x51bba0];
 // the inmatch equivalent is `Server_SendInitialGameStateToPlayer` over `conn.burst`. An empirical
 // per-tick phase machine (queue_mission_bootstrap / queue_state4_loading_gate / the
 // 0x10/0x0A/0x57 tick cadence) has no original-engine counterpart, so there is none here (net-re §5.45 / D-NET-127). The reply
@@ -42,6 +43,7 @@ struct HostRotation;
 struct HostSlotRow;
 
 struct NapiNPServerCtx;
+struct OrphanedPlayerRow;
 class ServerLogRecorder;
 
 using MissionMetadataBlob = std::array<uint8_t, 180>;
@@ -51,18 +53,23 @@ using MissionMetadataBlob = std::array<uint8_t, 180>;
 // returned block for every chunk request. `mp_session_peer` is the host's
 // connection mode (false for a dedicated host, whose own slot +36 drops);
 // `title` the title the session speaks, whose rules-word bits the +44 word
-// takes (DFX2-18; null: JO's).
+// takes (DFX2-18; null: JO's); `session_title` the mission start's session
+// title (NapiNPServerCtx::session_title), whose first 31 bytes +116 carries.
 // [orig: Client_BuildMissionDataRequestBlock (ex sub_51E880) @0x51E880 +
-// CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0]
+// CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0 (g_SessionTitle into +0x74
+// @0x51E983..0x51E989)]
 MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config, bool mp_session_peer,
-		const TitleIdentity *title);
+		const TitleIdentity *title, const std::string &session_title);
 
 // The recipient's S2C 0x7B session summary (its name and PCID, the server
 // name, the advertised mission, the map file, the game type, the expansion);
-// `mission_text_title` is the host context's (NapiNPServerCtx).
-// [orig: NapiNPMsg_0x7B_BuildPayload @0x507740]
+// `mission_text_title` and `session_title` are the host context's (NapiNPServerCtx):
+// the waypoint family advertises the session title.
+// [orig: NapiNPMsg_0x7B_BuildPayload @0x507740 - the waypoint test @0x507810..0x507822,
+//  g_SessionTitle @0x507824]
 std::vector<uint8_t> build_tag7b_session_summary(const GameConfig &cfg,
-		const std::string &mission_text_title, const NapiNPConnection &conn);
+		const std::string &mission_text_title, const std::string &session_title,
+		const NapiNPConnection &conn);
 
 // Build the second, pending-player-spawn boundary of a retail join. The C2S
 // 0x02 handler deliberately does not return these records: retail processes an
@@ -70,7 +77,8 @@ std::vector<uint8_t> build_tag7b_session_summary(const GameConfig &cfg,
 // 0x03(reset), settings x2, 0x05, 0x04 and the 0x7B replay. The host tick calls
 // this only after the player's live entity/team exists.
 std::vector<ProtocolMessage> build_spawn_pump_metadata(
-		const GameConfig &config, const std::string &mission_text_title, NapiNPConnection &conn,
+		const GameConfig &config, const std::string &mission_text_title,
+		const std::string &session_title, NapiNPConnection &conn,
 		const std::vector<NapiNPConnection> &roster, world::World *world,
 		const HostRotation *rotation, const HostSlotRow *host_slot = nullptr);
 
@@ -156,6 +164,12 @@ struct ServerDispatchInputs {
 bool is_medic_recipient(const NapiNPConnection &candidate,
 		const world::World &world, int32_t team_filter);
 
+// Build the per-reply PlayerReplicationState from the session config and the
+// connection's binding: the 0x46 serializers' input (the dispatch TUs and the
+// join's roster push share it).
+PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnection &conn,
+		const world::World *world);
+
 std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       NapiNPConnection &conn,
                                                       const std::vector<ProtocolMessage> &messages,
@@ -165,31 +179,35 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       const ServerDispatchInputs &inputs = {});
 
 // MISSIONNAME as the authority serializes it: the stock Co-op selector
-// (waypoint family, objective bit clear) advertises the map file (the coop
-// arm); every other mode the mission text's [info]/title (`mission_text_title`,
+// (waypoint family, objective bit clear) advertises the session title (the coop
+// arm, g_SessionTitle: the map file unless a [TITLE] override or a SetServerName
+// replaced it, inmatch::mission_session_title); every other mode the mission text's [info]/title (`mission_text_title`,
 // MissionText_GetString's, the override table searched first), or, when that
 // reads empty, the mission header's name (`header_name`, dword_A761D4: the
 // session config's mission_name).
 // [orig: Game_SerializeMissionInfoToDataStream @0x523620 -- the coop arm
-//  @0x523758, TextResource_FindEntryBySectionAndKey(g_TextMission, "info",
-//  "title") @0x5237df, the strlen test and dword_A761D4 @0x5237f8..0x52380d]
-std::string session_mission_name(uint32_t game_type, const std::string &mission_file,
+//  @0x523758 (g_SessionTitle @0x52375A), TextResource_FindEntryBySectionAndKey(g_TextMission,
+//  "info", "title") @0x5237df, the strlen test and dword_A761D4 @0x5237f8..0x52380d]
+std::string session_mission_name(uint32_t game_type, const std::string &session_title,
 		const std::string &mission_text_title, const std::string &header_name);
 
 // The authority's session variables, the S2C 0x60 server-info stream's content
 // (npwire/session_vars.h) and, re-parsed, a listen host's own g_SessionVar*
-// copies; `mission_text_title` is the host context's (NapiNPServerCtx).
+// copies; `mission_text_title` and `session_title` are the host context's (NapiNPServerCtx).
 // [orig: Game_SerializeMissionInfoToDataStream @0x523620]
-SessionVars host_session_vars(const GameConfig &cfg, const std::string &mission_text_title);
+SessionVars host_session_vars(const GameConfig &cfg, const std::string &mission_text_title,
+		const std::string &session_title);
 
 // Build the S2C 0x16 PLAYER-LIST for the current roster (every IN-MATCH connection: host loopback
 // slot 0 + joiners 1+; a still-loading joiner is excluded until its burst completes). Public so the
 // per-tick host loop can RE-PUSH it when a joiner spawns (the golden re-sends 0x16 with the grown
-// roster just before the joiner deploys). [orig: Server_BuildAndBroadcastScoreboard @0x50D960 /
+// roster just before the joiner deploys). The slot walk takes the orphaned rows too, when given
+// (D-NET-NEW-L1-24). [orig: Server_BuildAndBroadcastScoreboard @0x50D960 /
 // client NapiNPClientMsg_PlayerList @0x42FAE0]
 ProtocolMessage build_player_list_message(const GameConfig &config,
                                           const std::vector<NapiNPConnection> &roster,
-                                          world::World *world);
+                                          world::World *world,
+                                          const std::vector<OrphanedPlayerRow> *orphaned = nullptr);
 
 // Broadcast one just-spawned player's 0x46 slot-state (fieldFlags 0x1CF7) to every OTHER in-match
 // connection — the join-time roster push that lets existing clients ACCEPT the new player's 0x16

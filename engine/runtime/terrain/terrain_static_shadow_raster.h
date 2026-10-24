@@ -5,9 +5,9 @@
 // this module owns the witnessed temporary-RT semantics: the near-plane clip
 // (depth < 0, i.e. geometry lower than 0.1 u above the caster's ground plane,
 // never casts — buried skirts and foundations are cut away), 2x coverage,
-// z<=0.5 receiver admission, material alpha testing/blending, and a linear
-// resolve into the destination-resolution light-alpha carrier. It never
-// changes RGB.
+// LESSEQUAL admission against the temp's depth clear, material alpha
+// testing/blending, and a linear resolve into the destination-resolution
+// light-alpha carrier. It never changes RGB.
 // [orig: Terrain_CollectAndRenderTileModels @0x60D5BF..0x60DA4F;
 // the ortho depth row RenderSlot_SetupShadowCascadeMatrices_0 @0x58D5F8..0x58D60C;
 // PROJSHAD submits @0x60D960..0x60D97D; temp-blue composite
@@ -22,6 +22,28 @@
 #include <vector>
 
 namespace opennova::terrain {
+
+// The temp target is twice the page at every tier: config+0x1740 selects page
+// dword_31A00D4 = 0x100 with temp dword_31A00D0 = 0x200, otherwise 0x80 with 0x100
+// [orig: PolyTrn_LoadTerrainConfig @0x60E41D..0x60E446].
+inline constexpr uint32_t kTerrainStaticShadowTemporaryScale = 2;
+// The collector's clamp on the light's vertical component (its fixed twin 0x4000)
+// [orig: float clamp @ 0x60D33F..0x60D341, fixed twin @ 0x60d325..0x60d32c].
+inline constexpr float kTerrainStaticShadowMinimumVerticalLight = 0.25f;
+// Projected depth h*0.0005 - 0.00005 [orig: RenderSlot_SetupShadowCascadeMatrices_0
+// @ 0x58D4D3..0x58D618].
+inline constexpr float kTerrainStaticShadowDepthScale = 0.00050000002f;
+inline constexpr float kTerrainStaticShadowDepthBias = -0.000050000002f;
+// The temp target's depth clear, flt_7DA0B0 (0x3F7FFCB9), which the casters test against:
+// the DOT3 light quad drawn into the temp ahead of them neither tests nor writes depth (its
+// pass flags 0x1700000 set bits 20 and 21: ZWRITEENABLE false, ZFUNC ALWAYS), so a caster
+// fragment shadows up to depth 0.99995, h = 2000 u above its ground plane
+// [orig: Terrain_CollectAndRenderTileModels @0x60D250 - the clear's load @0x60D5A0 into
+//  GTexRT_SelectThunk (the call @0x60D5BF), the light pass's flags @0x60D784 into
+//  GfxShader_ApplyPassChecked (the call @0x60D794); CGfxShader_ApplyPass @0x683190 - the
+//  flags' bits 20 / 21 @0x683221..0x683249; CGfxDevice_ApplyRenderStates @0x67E230 -
+//  D3DRS_ZFUNC ALWAYS @0x67E28A..0x67E29E, D3DRS_ZWRITEENABLE @0x67E265].
+inline constexpr float kTerrainStaticShadowTempClearDepth = 0.99995f;
 
 struct TerrainStaticShadowRasterVertex {
 	// Normalized destination-page coordinates. (0,0) and (1,1) are the outer
@@ -112,15 +134,43 @@ struct TerrainStaticShadowRasterTriangle {
 	float alpha_scale = 1.0f;
 };
 
+// The work one raster did (diagnostics; the bytes never depend on them).
+// Every blend leaves a black temp pixel black (opaque and multiply write 0,
+// additive keeps the destination, alpha scales it), and the resolve reads the
+// temp alone, so the pixel loop skips black pixels: an 8x8 temp block whose
+// pixels are all black, and a black pixel inside a live block, cost no edge
+// test, depth test or texture fetch.
+struct TerrainStaticShadowRasterStats {
+	// Pixel centres a triangle admitted over a live (non-black) temp pixel:
+	// each reached the depth test.
+	uint64_t fragments = 0;
+	// 8x8 temp blocks of a triangle's bounds skipped as all black.
+	uint64_t absorbed_blocks = 0;
+	// Black temp pixels skipped inside a live block.
+	uint64_t absorbed_pixels = 0;
+	// Wall time of the raster's stages, microseconds (an instrument): the temp's fill, the
+	// triangles' setup on the lanes, the pixel loop on the lanes, and the resolve. The pixel
+	// loop also sums its lanes' own times and keeps the slowest lane's: their ratio is the
+	// parallelism the lane pool gave it.
+	uint64_t setup_us = 0;
+	uint64_t prepare_us = 0;
+	uint64_t pixel_us = 0;
+	uint64_t pixel_lane_sum_us = 0;
+	uint64_t pixel_lane_max_us = 0;
+	uint64_t resolve_us = 0;
+};
+
 struct TerrainStaticShadowRasterInput {
 	// Input order remains retail collector/ROBJ/strip order. Every triangle is
 	// already admitted for culling/material visibility by the binding.
 	std::vector<TerrainStaticShadowRasterTriangle> triangles;
 	std::vector<TerrainStaticShadowAlphaTextureView> alpha_textures;
-	float receiver_depth = 0.5f;
+	float clear_depth = kTerrainStaticShadowTempClearDepth;
 	// Threads the pixel loop may split its rows across (1 = the calling
 	// thread only). Every count produces the same bytes.
 	std::size_t threads = 1;
+	// Optional: receives this raster's work counts (added to).
+	TerrainStaticShadowRasterStats *stats = nullptr;
 };
 
 // Atomically mutates only page.alpha. Invalid page storage, non-finite input,

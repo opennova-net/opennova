@@ -30,6 +30,19 @@ inline constexpr float kEnvironmentCubeFaceFar = 1000.0f;
 // The vertex diffuse of the dim quad: 0xFF606060.
 inline constexpr std::uint8_t kEnvironmentCubeDimByte = 0x60;
 
+// Whether a mission start creates the environment cube: the render subsystems' init makes it,
+// ahead of the terrain tile cache's page targets, and a dedicated host's start jumps over that
+// init. A device backend creates the cube's objects there, ahead of the first capture
+// (D-NET-NEW-LF-13).
+// [orig: Game_StartMission @0x524360 - the dedicated test @0x5259B4 skipping
+//  Render_InitRenderingSubsystems (the call @0x5259D1); Render_InitRenderingSubsystems @0x586EE0 ->
+//  Render_InitTextures @0x58F6E0 (the call @0x586EFC, Terrain_CreateTileCacheTargets @0x586F01
+//  past it): the cube stored @0x58F750, its target made by GTexture_CreateRenderTarget (the call
+//  @0x58F756)]
+constexpr bool creates_environment_cube(bool dedicated_host) noexcept {
+	return !dedicated_host;
+}
+
 // Whether the six faces are re-rendered on this render frame: the first
 // frame, a forced refresh, and every 128th frame thereafter.
 inline constexpr bool environment_cube_refresh_due(std::int64_t render_frame,

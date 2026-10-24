@@ -15,13 +15,13 @@ EntityLifetime lifetime(const Entity *entity) {
 }
 std::array<int32_t, 3> position(const World &world, const Entity &entity) {
     if (const AiEntity *ai = world.ai.for_handle(entity.handle))
-        return {ai->pos[0], ai->pos[1], ai->pos[2]};
-    return {int32_t(entity.position.x * 65536.0f), int32_t(entity.position.y * 65536.0f),
-            int32_t(entity.position.z * 65536.0f)};
+        return {ai->self->position.x.q16, ai->self->position.y.q16, ai->self->position.z.q16};
+    return {entity.position.x.q16, entity.position.y.q16,
+            entity.position.z.q16};
 }
 int32_t heading(const World &world, const Entity &entity) {
     const AiEntity *ai = world.ai.for_handle(entity.handle);
-    return ai ? ai->heading : spawn_angle_bam(90 - entity.yaw);
+    return ai ? ai->heading : entity.heading;
 }
 // The lift code's Q22 sine/cosine: the heading scaled to radians by the
 // image's own constant dbl_7C3608 = 1.4629627251502471e-09 (a hair above
@@ -96,11 +96,17 @@ void diagnostic(World &world, const char *reason, int32_t subtype, int32_t patie
     world.diagnostics.record({RuntimeGapKind::BmsAction, 39, subtype, -1, -1, reason},
             world.logic_tick, {patient, 0, 0, 0});
 }
-void retire(World &world, EntityLifetime &owner) {
+// free_row: the departure's clone retirements clear the row's +0x219 after the
+// destroy, so the next includeInUse-0 clone takes it (the patient keeps it).
+// [orig: HeliLift_UpdateSlotState @0x451730 - @0x451B49 / @0x451B65 (no brain),
+//  @0x451BB8 / @0x451BD4 / @0x451BF0 (landed)]
+void retire(World &world, EntityLifetime &owner, bool free_row = false) {
     if (const Entity *entity = world.registry.get(owner)) {
         // Use the bound handle: several concurrent operations intentionally
         // share 11000/12000/12001 identities.
-        world.commands.remove_ssn(entity->handle);
+        const EntityHandle h = entity->handle;
+        world.commands.remove_ssn(h);
+        if (free_row) world.registry.clear_destroyed(h);
     }
     owner = {};
 }
@@ -151,8 +157,12 @@ bool TeammateOperations::start(World &world, int32_t subtype, int32_t patient_ss
     if (subtype != 1 && subtype != 2) return false;
     if (count_ == kCapacity) return false;
     EntityLifetime patient, marker;
+    // The first pool-0 row whose DcbId is the SSN, a player body's 10000 + its slot included
+    // (entity_dcb_id). [orig: EntityPool0_FindByDcbId @0x452020 - `cmp [eax+7Ch], edi`
+    //  @0x452049; its calls HeliLift_SpawnPickup @0x4525E8, HeliLift_SpawnFlyover @0x45273A]
     world.registry.for_each_in_pool(0, [&](const Entity &entity) {
-        if (!patient.valid() && entity.net_id == patient_ssn) patient = lifetime(&entity);
+        if (!patient.valid() && entity_dcb_id(world, entity) == patient_ssn)
+            patient = lifetime(&entity);
     });
     world.registry.for_each_in_pool(3, [&](const Entity &entity) {
         if (!marker.valid() && entity.has_item_def && entity.item_id == 6088 &&
@@ -326,10 +336,10 @@ void TeammateOperations::update(World &world, Slot &slot) {
     case State::Land:
         if (air && patient) {
             // The land heading: 0x42000000 minus the truncated atan2 bearing
-            // scaled by dbl_7C57B8 = -2^31/pi (a NEGATIVE scale, so the
+            // scaled by g_NegBamPerRadian = -2^31/pi (a NEGATIVE scale, so the
             // subtraction adds the bearing).
             // [orig: HeliLift_UpdateSlotState @0x451730 — fpatan @0x451954,
-            //  fmul dbl_7C57B8 @0x451956, ftol @0x45195c, sub from 42000000h
+            //  fmul g_NegBamPerRadian @0x451956, ftol @0x45195c, sub from 42000000h
             //  @0x451961..0x451966, the stores @0x451970/@0x451973]
             const auto p = position(world, *patient), h = position(world, *heli);
             const double bearing = std::atan2(double(io::bam_sub(p[1], h[1])),
@@ -348,7 +358,7 @@ void TeammateOperations::update(World &world, Slot &slot) {
         if (!air) { slot.state = State::Depart; break; }
         air->brain.f[AiBrain::kWpType] = 3;
         air->brain.f[20] = 1310720;
-        if (air->pos[2] < io::bam_add(slot.goal[2], 2293760)) {
+        if (air->self->position.z.q16 < io::bam_add(slot.goal[2], 2293760)) {
             air->brain.f[19] = io::bam_add(slot.goal[2], 3604480);
         } else {
             air->brain.f[17] = io::bam_add(slot.goal[0], 39321600);
@@ -361,8 +371,10 @@ void TeammateOperations::update(World &world, Slot &slot) {
     case State::Depart:
         if (!air || (air->brain.f[AiBrain::kWpDistance] != 0 &&
                 air->brain.f[AiBrain::kWpDistance] < 1966080)) {
-            retire(world, slot.patient); retire(world, slot.first); retire(world, slot.second);
-            if (air) retire(world, slot.helicopter); // retail preserves a brainless helicopter
+            retire(world, slot.patient);
+            retire(world, slot.first, true);
+            retire(world, slot.second, true);
+            if (air) retire(world, slot.helicopter, true); // retail preserves a brainless helicopter
             slot.state = State::Finished;
         }
         break;

@@ -9,16 +9,18 @@
 //  Game_ApplySessionSettingsToGlobals @0x551500 at @0x5695B8;
 //  Game_StartMission calls it at @0x524662]. opennova-serve runs the dead
 // /HOST path over it (ADR 0051 d2). The game shell keeps the block too
-// (game_config_block.h): its session creates take the mpreset word from it and
-// a ServerCommand's config change lands in it, but its hosts still seed their
-// session from the host screen, which neither reads nor writes the block
-// (D-NET-335's open half).
+// (game_config_block.h): its session creates take the mpreset word from it, a
+// ServerCommand's config change lands in it, and its host screen shows the
+// block and writes it back at START (host_settings.h), the host request seeded
+// from the block (host_screen_from_block).
 
 #include <formats/gamecfg/game_cfg.h>
+#include <net/npwire/peer_addr.h> // PeerAddr (a socket open's bound address)
 #include <runtime/inmatch/host_file.h>
 #include <runtime/inmatch/host_session.h> // HostConfig
 #include <runtime/inmatch/server_admin_command.h>
 
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -60,10 +62,14 @@ gamecfg::WeaponRoster game_cfg_weapon_roster(const ResourceIndex &index);
 
 // The defaults' two localized strings from the mounted gametext.bin: its
 // Menu/UNTITLED and Menu/USERMESSAGE entries, each falling back to the `!`
-// text when the table is not loaded or lacks the key.
+// text when the table is not loaded or lacks the key. With the table loaded
+// each lookup searches `text_override` (the mount's override table, null for
+// none) first, as every section lookup does.
 // [orig: Config_SetDefaults @0x54D1A1, @0x54D240 through
-//  GameText_GetStringWithFallback @0x51EB90]
-gamecfg::DefaultTexts game_cfg_default_texts(const rtxt::File *gametext);
+//  GameText_GetStringWithFallback @0x51EB90 (the null table @0x51EB97, the
+//  lookup @0x51EBB6 -> TextResource_FindEntryBySectionAndKey @0x75D250)]
+gamecfg::DefaultTexts game_cfg_default_texts(const rtxt::File *gametext,
+		const rtxt::File *text_override);
 
 // The session a host creates from the cfg block, in session as the authority:
 // CNapiGameSession_BuildAndCreateSession's in-session cap on mpmaxplayers
@@ -79,11 +85,169 @@ gamecfg::DefaultTexts game_cfg_default_texts(const rtxt::File *gametext);
 // [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0;
 //  Game_ApplySessionSettingsToGlobals @0x551500; per field in host_config.cpp]
 HostScreenState host_session_settings(gamecfg::GameCfg &cfg);
+// The session create's cap over the process block: `requested` clamped into the title's 1..65
+// (session_player_cap) and the clamp stored back into the block's mpmaxplayers, so the next
+// populate and the next game.cfg save read it (null `block`: none to store into). Both hosts
+// run it: host_session_settings over the block's own word and the game's host request.
+// [orig: CNapiGameSession_BuildAndCreateSession @0x569554 (in session), @0x56955F (below 1 -> 1
+//  into maxPlayers_3F4), @0x56956C (above 65 -> 65 into maxPlayers_3F4)]
+int32_t store_session_player_cap(gamecfg::GameCfg *block, int32_t requested, int title);
+// The same mapping over the block as it stands, its cap unclamped: the game
+// shell's host request, which the session create clamps when it runs
+// (session_player_cap), as retail's create reads the block its host screen
+// wrote [orig: UI_HandleHostSessionStart @0x556E36 / @0x556E72 ->
+// CNapiGameSession_BuildAndCreateSession @0x5694D0].
+HostScreenState host_screen_from_block(const gamecfg::GameCfg &cfg);
+// The block's session words onto `config` (host_screen_from_block's mapping without the title,
+// the cap and the server type): every first-load mission start applies the block again, so the
+// game shell's listen host takes the block as it stands at a map change, where what a remote
+// admin's SET wrote into it (the attribute word, the rules, the names and passwords) reaches
+// the next mission, as opennova-serve's boot_mission builds its next config from the block; the
+// words the block does not hold (the mission identity, the expansion, the channel, the host's
+// callsign, the tool-set rules) stay the session's (D-NET-NEW-L1-42's shell half).
+// [orig: Game_StartMission @0x524360 - the first-load flag @0x5243A4,
+//  Game_ApplySessionSettingsToGlobals @0x524662 under it @0x52465E; CAdminServer_HandleSetCommand
+//  @0x405A60 - the rules word into the block @0x406190]
+void apply_block_session_settings(GameConfig &config, const gamecfg::GameCfg &cfg);
+
+// The session socket's bind scan over the cfg block's port quads, as the
+// socket open picks them: a NovaWorld session, either side, the mpnovaworld
+// quad and its random word; a LAN authority the mplanserver quad with random
+// 0; a LAN non-authority the mplanclient quad and its random word. `first`, when
+// set, is the scan's first port in place of the quad's min (a launch
+// override). A set random word starts a scan of more than one port at
+// min + delta * the PRNG's draw in 0..attempts - 1 (net_ports.h
+// bind_scan_attempts / lan_host_bind_ports carry the scan's witness).
+// [orig: CNapiNetwork_OpenTransportSocket @0x4C6A40 - the network type
+//  @0x4C6A84..0x4C6A8D, the NovaWorld arm @0x4C6AF6..0x4C6B08, the LAN arm's
+//  authority test @0x4C6AD4..0x4C6AD7 -> the server quad @0x4C6AA2..0x4C6AB4
+//  (random 0), the client quad @0x4C6AD9..0x4C6AF0; NapiUdpSocket_CreateAndBind
+//  @0x62D2A0]
+std::vector<uint16_t> transport_bind_ports(const gamecfg::GameCfg &cfg, NetworkType type,
+		bool authority, std::optional<uint32_t> first = std::nullopt);
+// The port quad the socket open stores for the scan (min, max, delta, random), by the same arms
+// as transport_bind_ports, `first` in place of the min.
+// [orig: CNapiNetwork_OpenTransportSocket @0x4C6B2F..0x4C6B5A, the manager's +0x90..+0x9C]
+struct TransportPortQuad {
+	int32_t min = 0;
+	int32_t max = 0;
+	int32_t delta = 0;
+	int32_t random = 0;
+};
+TransportPortQuad transport_port_quad(const gamecfg::GameCfg &cfg, NetworkType type,
+		bool authority, std::optional<uint32_t> first = std::nullopt);
+// The gate worker's socket, bound by every fresh gate probe: on every interface (the context's
+// bind address 0) over the block's mpgateserverlocalport quad (min, max, delta, random), whatever
+// the network type, scanned as the session socket's (transport_bind_ports: the shipped 49152 /
+// 65536 / 1 / 0 clamp to 49152..65535 from 49152). The bound port is the probe's source port,
+// which the gate reflects as REFLECTEDPORTNUMBER and the connect log's "GATE GATE SERVICE
+// STARTED" line prints. The socket is the gate manager's own, never the process's transport
+// socket (the NP manager's, which the transport mode's teardown closes).
+// [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - the bind address 0
+// @0x4CE7D2, the quad g_GameConfigState +0x218..+0x224 into the context's +0x110..+0x11C
+// @0x4CE7DE..0x4CE810; CNapiGateManager_CreateAndBindSocket @0x633770 - the address and the quad
+// into the bind's parameters @0x6337D4..0x633824, NapiUdpSocket_CreateAndBind (the call
+// @0x633830), the socket into the gate manager's +0x30 @0x63383A; NapiUdpSocket_CreateAndBind
+// @0x62D2A0; CNapiNetwork_TearDownSocket @0x4C4C90 - NapiNPManager_CloseSocket of the NP
+// manager @0x4C4CF5]
+TransportPortQuad gate_port_quad(const gamecfg::GameCfg &cfg);
+std::vector<uint16_t> gate_bind_ports(const gamecfg::GameCfg &cfg);
+// The socket open's bind address: the block's mpipaddressstring through Napi_ResolveAddress with
+// DNS off ("255.255.255.255" the broadcast word, a text inet_addr does not read 0, i.e. every
+// interface), whatever the network type. [orig: CNapiNetwork_OpenTransportSocket @0x4C6B12
+// Napi_ResolveAddress(multiplayerIpAddress_1F8, 0) into the manager's +0x8C;
+// NapiUdpSocket_CreateAndBind @0x62D2D5 / @0x62D42C (the bind's sin_addr)]
+uint32_t transport_bind_address(const gamecfg::GameCfg &cfg);
+// The socket open's two result lines in _connectlog.txt, past their "<time> : " prefix: the
+// failure names the bind address and the stored quad, the success the bound socket's address
+// and port. [orig: CNapiNetwork_OpenTransportSocket - the failure @0x4C6BF2..0x4C6C6B
+// (Network_FormatIPAddressToString of +0x8C, then +0x90..+0x9C), the success
+// @0x4C6C7B..0x4C6CFA (Napi_FormatAddress of the socket's bindAddress and boundPort,
+// NapiUdpSocket_CreateAndBind @0x62D4C1 / @0x62D4C4)]
+std::string transport_socket_error_text(uint32_t address, const TransportPortQuad &quad);
+std::string transport_socket_setup_text(uint32_t address, uint32_t port);
+// One socket open's lines (SetTransportMode into mode 2, 3 or 4: the LAN browse, a listen host,
+// a join's own dial, opennova-serve), each through ConnectLog::line, so none once the log is off:
+// "NET SETTING UP SOCKET....", then the bound socket's setup line (`bound`: its bind address and
+// port), or, when the scan bound nothing (`bound` null), the failure's line over the bind
+// address and the stored quad and the teardown line of the SetTransportMode(0) the failure runs.
+// The callers write them right after their bind, which writes nothing in between.
+// [orig: CNapiNetwork_SetTransportMode @0x4C8750 - CNapiNetwork_OpenTransportSocket called
+//  @0x4C8796, the failure's SetTransportMode(0) called @0x4C87A3, whose TearDownSocket is called
+//  @0x4C877B; CNapiNetwork_OpenTransportSocket @0x4C6A40 - the lines' gate g_ConnectLogEnabled,
+//  "NET SETTING UP SOCKET...." appended @0x4C6BD7, the failure @0x4C6C6B, the setup @0x4C6CFA;
+//  CNapiNetwork_TearDownSocket @0x4C4C90 - the line appended @0x4C4CE7]
+class ConnectLog;
+void write_transport_socket_open_lines(ConnectLog &log, const PeerAddr *bound, uint32_t address,
+		const TransportPortQuad &quad);
+// The NovaWorld menu's entry opens the session socket: its state 1 sets the NovaWorld network
+// type, connection mode 0 and transport mode 4 ahead of the gate service's start, so this open's
+// lines (write_transport_socket_open_lines) come before the gate's. The socket binds the block's
+// mpnovaworld quad, a non-authority's NovaWorld arm, on its mpipaddressstring; `bound` is the
+// bound socket, null when every bind failed. The session's later legs open nothing: a NovaWorld
+// join's enumerate-and-join meets mode 4 already set, and the same mode returns at once.
+// A failed open goes on: the menu does not test the open's result, so the gate's start, its
+// exchange and the NovaWorld connect run as ever over a manager with no socket. The connect
+// tests the network type, not the transport mode, and its InitNPConnection only the manager;
+// the session's sends go nowhere (SendTo answers -1 with no socket, and the Hello's caller
+// does not test it) and nothing arrives, so the connect ends as an unanswered one does.
+// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - SetNetworkType(1) called @0x558E8C,
+//  SetConnectionMode(0) @0x558E97, SetTransportMode(4) @0x558EA3 (4 pushed @0x558E9C),
+//  CNapiGateManager_WaitForConnect @0x558EAD, ConnectToNovaWorld called @0x559156 (state 4);
+//  CNapiNetwork_SetTransportMode @0x4C8750 - the same mode's return @0x4C8766, the failure's
+//  SetTransportMode(0) @0x4C87A3; UI_EnumerateAndJoinSession @0x569F50 - 4 pushed @0x56A06A,
+//  SetTransportMode called @0x56A07C; CNapiGameSession_ConnectToNovaWorld @0x4D4640 - the
+//  network type test @0x4D46CB..0x4D46D2, InitNPConnection called @0x4D49B8, InitPlayerConnection
+//  @0x4D4B16; CNapiGameSession_InitNPConnection @0x4D3BE0 - the manager test @0x4D3C75;
+//  CNapiNPManager_SendTo @0x61EC20 - the socket test @0x61EC61; CNapiNPConnection_PumpStateMachine
+//  @0x6292E0 - the Hello called @0x629595, the jump past its result @0x62959D]
+void write_novaworld_socket_open_lines(ConnectLog &log, const gamecfg::GameCfg &cfg,
+		const PeerAddr *bound);
+// The session socket's close when the NovaWorld session goes: the main menu's activation off
+// the NovaWorld menu resets the session, then sets transport mode 0, and a post-mission error
+// exit sets mode 0 likewise; an open socket (modes 1..4) tears down with "NET TEARING DOWN
+// SOCKET" through ConnectLog::line (none once the log is off, none with no log). A failed open
+// already left mode 0, so a socket that is not open writes nothing.
+// A NovaWorld join abandoned before its dial (the enumerate's ABORT_CANCEL, the choice's BACK)
+// closes nothing and keeps the session: the join machine's state 9 destroys the game session,
+// which keeps the transport under the NovaWorld connect type, then pushes the main menu. The
+// NovaWorld page's connect URL left the main menu for the PreMenu on NW_MULTI_PLAYER, and the main
+// menu's exit set the return to the NovaWorld menu there, so the main menu's init re-enters the
+// NovaWorld menu (its STARTUP arm skips mode 0 on the same flag), whose state 1 leaves the
+// session's hosting and play and meets mode 4 already set: no line.
+// [orig: PreMenu_OnAbortCancel @0x568CA0 - PreMenu state 9 @0x568CB4;
+//  MultiPlayer_JoinSessionStateMachine @0x56A320 - state 9's CNapiGameSession_FullDestroy(-1)
+//  called @0x56A3E3, UI_NavHistoryPush(MainMenu) called @0x56A3F9;
+//  CNapiGameSession_FullDestroy @0x4C96A0 - the connect type 1 keep @0x4C9722;
+//  UI_DispatchScreenEvent @0x54E6A0 - CNapiGameSession_ConnectOrHost called @0x54F33B,
+//  UI_NavHistoryPush(PreMenu) called @0x54F371; Menu_TeardownShellAndCloseBinkVideos @0x54E430 -
+//  g_ReturnToNovaWorldMenu set on NW_MULTI_PLAYER @0x54E4E3..0x54E508;
+//  Menu_InitShellResources @0x552500 - the return arm @0x5526B3..0x5526C7, UI_EnterNovaWorldMenu
+//  called @0x5526C2; UI_EnterNovaWorldMenu @0x5588F0 - state 1 set @0x558949;
+//  UI_ProcessLANSessionStateMachine @0x558DE0 - CGameSession_StopHosting / StopPlaying called
+//  @0x558E76 / @0x558E80]
+// The LAN browse's socket (mode 2, the LAN screen's SEARCH) goes the same way: the main menu's
+// activation (the STARTUP screen, unless the post-mission return to the NovaWorld menu is set)
+// sets mode 0, and a LAN host's start sets mode 3, so the browse's open socket tears down with
+// the line ahead of the host's own open. The enumerator is not stopped there: the menu frame's
+// browse runs on over no socket until its window ends.
+// [orig: UI_DispatchScreenEvent @0x54E6A0 - the STARTUP compare @0x54EEFF,
+//  UI_OnStartupScreenActivate called @0x54EF0B; UI_OnStartupScreenActivate @0x5557F0 - the
+//  return test @0x5557F7, CNapiGameSession_ResetToDisconnected called @0x555807,
+//  SetTransportMode(0) called @0x55582B; UI_HandleHostSessionStart @0x556D00 - the LAN arm's
+//  SetNetworkType(2) @0x556E83, 3 pushed @0x556E9F, SetTransportMode called @0x556EA6;
+//  Menu_UpdateFrame @0x5528A0 - UI_ProcessLANSessionStateMachine called @0x5528ED each menu
+//  frame; PostMenu_RouteMissionExit @0x568460 - SetTransportMode(0) called @0x568493
+//  (reason 2), @0x5686F9 (the error arms); CNapiNetwork_SetTransportMode @0x4C8750 -
+//  TearDownSocket called @0x4C877B (modes 1..4); CNapiNetwork_TearDownSocket @0x4C4C90 - the
+//  line appended @0x4C4CE7]
+void write_transport_socket_teardown_line(ConnectLog *log, bool socket_open);
 
 // The cfg block's words every session create reads, single player's and a
 // host's alike: mpreset (a nonzero word ends the create, server_session.h),
 // the lineup queue the 0x42 gate admits past the cap and its size, and the
-// join validator's duplicate-PCID word. host_session_settings copies them with
+// join validator's duplicate-PCID word, and the host's own pre.mnu SPECTATE word
+// (GameConfig::join_spectate). host_session_settings copies them with
 // the rest of the block; the game shell's in-process hosts take them alone.
 // [orig: CNapiGameSession_BuildAndCreateSession -- game_settings.use_lineup_queue
 //  @0x569632, lineup_queue_size @0x569646; the mpreset exit @0x4C97E7;
@@ -100,6 +264,12 @@ struct ShellHostSource {
 	bool lan_serve_and_play = true;         // false = the dedicated server type
 	NetworkType lan_network_type = NetworkType::Lan;
 	uint32_t sp_game_type = 0; // the mission's (game_type::for_mission_attribs)
+	// The single player's mission file, the selected list entry's name, which its start copies
+	// into g_MapFileName (the session's mission file: the admin's CURRENT MAP, the session
+	// title's key, the /PROFILE log's name); empty for a load that names no file (the in-memory
+	// loads), which keeps the config's. [orig: SinglePlayer_StartMission @0x561AF0 (the copy
+	//  @0x561B69..0x561B80)]
+	std::string sp_mission_file;
 	const playersav::ProfileRecord *profile = nullptr;
 	const gamecfg::GameCfg *cfg_block = nullptr;
 };

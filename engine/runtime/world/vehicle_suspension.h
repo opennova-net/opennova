@@ -80,6 +80,10 @@ inline constexpr float kSuspensionDisableRateNonAuthority = 1.75f;
 // select (their growth is the literal 250 / 100).
 inline constexpr float kSuspensionDtNormal = 0.75f;
 inline constexpr float kSuspensionDtCrashed = 3.0f;
+// The aircraft solve selects on +0x2F0 instead: 0.25 for a wreck at rest, else
+// the 0.75 above [orig: Entity_ProcessAircraftContactPhysics @0x47EF10, `cmp
+//  [esi+2F0h], 0` @0x47EF20, flt_7C333C @0x47EF2A / flt_7C3DC8 @0x47EF32].
+inline constexpr float kSuspensionDtWreck = 0.25f;
 inline constexpr int32_t kSinkGrowthPerTick = 250; // flt_7C6F7C
 inline constexpr int32_t kSinkGrowthTank = 250;    // [orig: @0x478510..0x47852b]
 inline constexpr int32_t kSinkGrowthBike = 100;    // [orig: @0x47ab36..0x47abdc]
@@ -124,11 +128,13 @@ int32_t vehicle_flip_threshold_q16(const VehicleTraits &traits);
 // --- the tick ------------------------------------------------------------
 
 
-// 1b. The bike's live crash test [orig: @0x47b32d..0x47b375]: both wheels off
-//  the ground, the bike has been driven, and any of the three spine probes
-//  touches → request.
-void vehicle_suspension_bike_crash_test(Entity &veh, bool front_contact,
-                                        bool rear_contact, bool any_spine_contact);
+// 1b. The bike's live crash test over the light solve's contact copy (six depths): both wheels
+//  off the ground (copies 0 and 1), the bike driven (+0x3DE), and copy 2, 3 or 5 touching (copy 4
+//  is not read) → request, unless already crashed.
+//  [orig: Entity_ProcessLightVehiclePhysics @0x479600 - the wheel test @0x47B32D..0x47B340
+//  (var_250 / var_24C), +0x3DE @0x47B346, var_248 / var_244 / var_23C @0x47B351..0x47B363,
+//  +0x2EC @0x47B36C, +0x2ED = 1 @0x47B375; the copy's slots @0x479CCB..0x479D19]
+void vehicle_suspension_bike_crash_test(Entity &veh, const int32_t copy[6]);
 
 // 2. Sink growth [orig: tracked extend loop @0x47db70..0x47dbd1 with the
 //  pre-gate @0x47db76..0x47dba8 (skipped when !grounded && all sinks == 0
@@ -146,9 +152,9 @@ void vehicle_suspension_grow_sinks(Entity &veh, const bool contact[4], int wheel
 //  contact ((0 && 2) || (1 && 3) @0x47ed1d..0x47ed2b), the hull upright
 //  (up.z > 0 @0x47ed2d) and not crashed @0x47ed31 → landing_2ee = 0, all
 //  four sinks = 0, byte_2ef = 0 (@0x47ed3a..0x47ed59; the `crashed = 0`
-//  @0x47ed60 is redundant under the gate). A two-wheel row pairs 0 && 1.
-void vehicle_suspension_post_contact(Entity &veh, const bool contact[4], int wheels,
-                                     int32_t up_z16);
+//  @0x47ed60 is redundant under the gate). The bike has its own ungated pair
+//  clear (vehicle_contact_solve.cpp, D-NET-NEW-L6-28).
+void vehicle_suspension_post_contact(Entity &veh, const bool contact[4], int32_t up_z16);
 
 // 6. The family tail [orig: crash_request = 0 unconditionally @0x47eeee /
 //  @0x4795da / @0x47c0b6; the amplitude tail @0x48178a..0x4817c4: all four

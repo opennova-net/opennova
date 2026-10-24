@@ -11,21 +11,40 @@
 #include <runtime/renderer/scene_overlay.h>
 #include <runtime/renderer/scene_pass_gates.h>
 #include <runtime/environment/water_mirror.h>
+#include <runtime/inmatch/joiner_net_trace.h> // the post-load frames' net-pass marks
+#include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the frame clock)
 
+#include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/canvas_layer.hpp>
+#include <godot_cpp/classes/color_rect.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/environment.hpp>
+#include <godot_cpp/classes/material.hpp>
+#include <godot_cpp/classes/mesh.hpp>
+#include <godot_cpp/classes/mesh_instance3d.hpp>
+#include <godot_cpp/classes/os.hpp>
+#include <godot_cpp/classes/performance.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
+#include <godot_cpp/classes/scene_tree.hpp>
+#include <godot_cpp/classes/window.hpp>
+#include <godot_cpp/classes/rendering_device.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/visual_instance3d.hpp>
+#include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/core/object.hpp>
+#include <godot_cpp/variant/callable_method_pointer.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/templates/hash_map.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include "env/celestial_overlay.h"
 #include "hud/hud_inset_scope.h"
+#include "render/target_projection_xr_interface.h"
 #include "lights/light_scene.h"
 #include "object/object_shader_cache.h"
 #include "particle/effect_distortion_drawer.h"
@@ -40,6 +59,204 @@ namespace {
 
 int64_t now_us() {
 	return static_cast<int64_t>(Time::get_singleton()->get_ticks_usec());
+}
+
+// What a target's camera admits (an instrument, --verbose only; LF-s19 row 2a): every visual
+// instance of its world inside the camera's frustum whose layers its cull mask takes, counted by
+// node class, name, mesh and material, and the server-only instances (no node) beside them. Read
+// passively: the culling query changes nothing.
+String target_draw_census(SubViewport *p_target) {
+	Camera3D *camera = p_target->get_camera_3d();
+	const Ref<World3D> world = p_target->find_world_3d();
+	if (camera == nullptr || world.is_null()) return String();
+	const uint32_t mask = camera->get_cull_mask();
+	const PackedInt64Array ids =
+			RenderingServer::get_singleton()->instances_cull_convex(camera->get_frustum(), world->get_scenario());
+	HashMap<String, int64_t> rows;
+	int64_t serverside = 0;
+	for (int64_t i = 0; i < ids.size(); ++i) {
+		VisualInstance3D *visual = Object::cast_to<VisualInstance3D>(ObjectDB::get_instance(ObjectID(uint64_t(ids[i]))));
+		if (visual == nullptr) {
+			++serverside;
+			continue;
+		}
+		if ((visual->get_layer_mask() & mask) == 0 || !visual->is_visible_in_tree()) continue;
+		String key = vformat("%s %s", visual->get_class(), visual->get_name());
+		if (MeshInstance3D *mesh = Object::cast_to<MeshInstance3D>(visual)) {
+			const Ref<Mesh> resource = mesh->get_mesh();
+			const Ref<Material> material = mesh->get_material_override().is_valid()
+					? mesh->get_material_override()
+					: (resource.is_valid() && resource->get_surface_count() > 0 ? resource->surface_get_material(0) : Ref<Material>());
+			key += vformat(" mesh %s %d surf, %s", resource.is_valid() ? resource->get_class() : String("-"),
+					resource.is_valid() ? resource->get_surface_count() : 0,
+					material.is_valid() ? material->get_class() : String("-"));
+		}
+		rows[key] = (rows.has(key) ? rows[key] : 0) + 1;
+	}
+	PackedStringArray out;
+	for (const KeyValue<String, int64_t> &row : rows) {
+		out.push_back(vformat("%s x%d", row.key, row.value));
+	}
+	out.push_back(vformat("server-only x%d", serverside));
+	return String("; ").join(out);
+}
+
+// A target's draw by the renderer's own sections (an instrument, --verbose with --gpu-profile,
+// which turns the renderer's section timestamps on; LF-s19 row 2a): the device's captured
+// timestamps of the frame it last read back, from the target's "vp_begin_" mark to its "vp_end_",
+// each section with the CPU it took to the next mark. Empty when no section was captured.
+String target_draw_sections(SubViewport *p_target) {
+	RenderingDevice *rd = RenderingServer::get_singleton()->get_rendering_device();
+	if (rd == nullptr) return String();
+	const String id = String::num_uint64(p_target->get_viewport_rid().get_id());
+	const String begin = String("vp_begin_") + id;
+	const String end = String("vp_end_") + id;
+	const uint32_t count = rd->get_captured_timestamps_count();
+	PackedStringArray out;
+	bool inside = false;
+	for (uint32_t i = 0; i + 1 < count; ++i) {
+		const String name = rd->get_captured_timestamp_name(i);
+		if (!inside) {
+			inside = name == begin;
+			if (!inside) continue;
+		} else if (name == end) {
+			break;
+		}
+		const double cpu_ms = double(rd->get_captured_timestamp_cpu_time(i + 1) -
+									  rd->get_captured_timestamp_cpu_time(i)) / 1000.0;
+		if (cpu_ms >= 0.05) out.push_back(vformat("%s %.2f", name, cpu_ms));
+	}
+	if (out.is_empty()) return String();
+	return vformat("rd frame %d: %s", int64_t(rd->get_captured_timestamps_frame()), String("; ").join(out));
+}
+
+// The whole frame by the renderer's sections (the same instrument): every captured mark of the
+// frame the device last read back whose CPU to the next mark is at least 1 ms, in order, so a
+// first frame's draw shows which step outside the viewports' own passes took it.
+String frame_draw_sections() {
+	RenderingDevice *rd = RenderingServer::get_singleton()->get_rendering_device();
+	if (rd == nullptr) return String();
+	const uint32_t count = rd->get_captured_timestamps_count();
+	PackedStringArray out;
+	for (uint32_t i = 0; i + 1 < count; ++i) {
+		const double cpu_ms = double(rd->get_captured_timestamp_cpu_time(i + 1) -
+									  rd->get_captured_timestamp_cpu_time(i)) / 1000.0;
+		if (cpu_ms >= 1.0) out.push_back(vformat("%s %.1f", rd->get_captured_timestamp_name(i), cpu_ms));
+	}
+	if (count < 2) return String();
+	return vformat("rd frame %d, %d marks, %.1f ms: %s", int64_t(rd->get_captured_timestamps_frame()),
+			int64_t(count),
+			double(rd->get_captured_timestamp_cpu_time(count - 1) - rd->get_captured_timestamp_cpu_time(0)) / 1000.0,
+			String("; ").join(out));
+}
+
+// The process's object counts at the load's end and at each post-load frame's start (an
+// instrument, --verbose only): a flush that frees or builds in bulk between two frames shows as
+// the difference of two lines.
+void print_post_load_counts(Node *p_world, const ResourceRoot *p_root, const String &p_label) {
+	if (!OS::get_singleton()->is_stdout_verbose()) return;
+	Performance *perf = Performance::get_singleton();
+	RenderingServer *rs = RenderingServer::get_singleton();
+	UtilityFunctions::print_verbose(vformat(
+			"Post-load counts %s: nodes %d, objects %d, resources %d, orphan nodes %d, video memory %d MB, "
+			"textures %d MB, buffers %d MB; decoded textures %d, registered material textures %d",
+			p_label, static_cast<int64_t>(perf->get_monitor(Performance::OBJECT_NODE_COUNT)),
+			static_cast<int64_t>(perf->get_monitor(Performance::OBJECT_COUNT)),
+			static_cast<int64_t>(perf->get_monitor(Performance::OBJECT_RESOURCE_COUNT)),
+			static_cast<int64_t>(perf->get_monitor(Performance::OBJECT_ORPHAN_NODE_COUNT)),
+			static_cast<int64_t>(rs->get_rendering_info(RenderingServer::RENDERING_INFO_VIDEO_MEM_USED) >> 20),
+			static_cast<int64_t>(rs->get_rendering_info(RenderingServer::RENDERING_INFO_TEXTURE_MEM_USED) >> 20),
+			static_cast<int64_t>(rs->get_rendering_info(RenderingServer::RENDERING_INFO_BUFFER_MEM_USED) >> 20),
+			p_root != nullptr ? p_root->get_decoded_texture_count() : int64_t(-1),
+			p_root != nullptr ? p_root->get_registered_material_texture_count() : int64_t(-1)));
+	if (p_world == nullptr || !p_world->is_inside_tree()) return;
+	// The offscreen targets, each with its server-side update mode, its size, its last
+	// frame's 3D draw calls (a first 3D draw builds a target's render buffers) and its
+	// last measured GPU and CPU draw; each line turns on the timing of every target it
+	// lists, so a target made after the load's end reads its own draw from its next line
+	// on. The root's CPU and GPU draw lead the list: a first frame's server-side work
+	// lands on whichever viewport draws first, so the CPU of every viewport is read
+	// together (LF-s18).
+	const bool load_end = p_label == String("load_end");
+	PackedStringArray targets;
+	// Each served (XR-projected) target's last draw split at its FrameFX callback: the renderer's
+	// scene passes ahead of the callback, the callback, the rest of the draw (LF-s19, row 2a).
+	TargetProjectionXrInterface::set_draw_stamping(true);
+	{
+		const RID root_rid = p_world->get_tree()->get_root()->get_viewport_rid();
+		rs->viewport_set_measure_render_time(root_rid, true);
+		targets.push_back(vformat("root gpu %.1f ms cpu %.1f ms",
+				rs->viewport_get_measured_render_time_gpu(root_rid),
+				rs->viewport_get_measured_render_time_cpu(root_rid)));
+	}
+	TypedArray<Node> found =
+			p_world->get_tree()->get_root()->find_children("*", "SubViewport", true, false);
+	for (int64_t i = 0; i < found.size(); ++i) {
+		SubViewport *target = Object::cast_to<SubViewport>(found[i]);
+		if (target == nullptr) continue;
+		const RID rid = target->get_viewport_rid();
+		rs->viewport_set_measure_render_time(rid, true);
+		const int64_t mode = static_cast<int64_t>(rs->viewport_get_update_mode(rid));
+		const int64_t draws = rs->viewport_get_render_info(rid,
+				RenderingServer::VIEWPORT_RENDER_INFO_TYPE_VISIBLE,
+				RenderingServer::VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME);
+		if (mode == RenderingServer::VIEWPORT_UPDATE_DISABLED && draws == 0) continue;
+		targets.push_back(vformat("%s %dx%d mode %d draws %d gpu %.1f ms cpu %.1f ms",
+				target->get_name(), target->get_size().x, target->get_size().y, mode, draws,
+				rs->viewport_get_measured_render_time_gpu(rid),
+				rs->viewport_get_measured_render_time_cpu(rid)));
+		int64_t split[3] = { -1, -1, -1 };
+		if (TargetProjectionXrInterface::draw_split_us(target, split)) {
+			targets.push_back(vformat("%s split pre-fx %.1f fx %.1f fx-post %.1f ms", target->get_name(),
+					split[0] / 1000.0, split[1] / 1000.0, split[2] / 1000.0));
+		}
+	}
+	UtilityFunctions::print_verbose(vformat("Post-load targets %s: [%s]", p_label,
+			String(", ").join(targets)));
+	// The water mirror's admitted instances at the load's end (the forced frame's warm drew
+	// them) and over the first frames (each line the previous frame's): row 2a's census.
+	if (load_end || p_label == String("frame_1") || p_label == String("frame_2") ||
+			p_label == String("frame_3") || p_label == String("frame_4")) {
+		for (int64_t i = 0; i < found.size(); ++i) {
+			SubViewport *target = Object::cast_to<SubViewport>(found[i]);
+			if (target == nullptr || target->get_name() != StringName("WaterReflectionViewport")) continue;
+			UtilityFunctions::print_verbose(vformat("Post-load mirror census %s: [%s]", p_label,
+					target_draw_census(target)));
+		}
+	}
+	// The served targets' draws by the renderer's sections (--gpu-profile beside --verbose), after
+	// the whole frame's.
+	const String frame_sections = frame_draw_sections();
+	if (!frame_sections.is_empty()) {
+		UtilityFunctions::print_verbose(vformat("Post-load frame sections %s: [%s]", p_label, frame_sections));
+	}
+	for (int64_t i = 0; i < found.size(); ++i) {
+		SubViewport *target = Object::cast_to<SubViewport>(found[i]);
+		if (target == nullptr || !target->is_using_xr()) continue;
+		const String sections = target_draw_sections(target);
+		if (!sections.is_empty()) {
+			UtilityFunctions::print_verbose(vformat("Post-load sections %s %s: [%s]", p_label,
+					target->get_name(), sections));
+		}
+	}
+	// The orphan nodes by class and name: at the load's end (the next flush frees them,
+	// and the device objects they hold go with them two frames on) and on any later
+	// line that still has some.
+	const TypedArray<int> ids = Node::get_orphan_node_ids();
+	if (!load_end && ids.is_empty()) return;
+	HashMap<String, int64_t> orphans;
+	for (int64_t i = 0; i < ids.size(); ++i) {
+		const Node *orphan = Object::cast_to<Node>(ObjectDB::get_instance(ObjectID(uint64_t(int64_t(ids[i])))));
+		if (orphan == nullptr) continue;
+		const String key = vformat("%s %s", orphan->get_class(), orphan->get_name());
+		orphans[key] = (orphans.has(key) ? orphans[key] : 0) + 1;
+	}
+	PackedStringArray orphan_rows;
+	for (const KeyValue<String, int64_t> &row : orphans) {
+		orphan_rows.push_back(vformat("%s x%d", row.key, row.value));
+	}
+	UtilityFunctions::print_verbose(vformat("Post-load orphans %s: [%s]", p_label,
+			String(", ").join(orphan_rows)));
 }
 
 // ONE RAII leg timer: samples the clock only while a board is active, banks
@@ -96,23 +313,43 @@ const GameWorld::FrameLeg GameWorld::kFrameLegs[] = {
 	{ "begin", kNoSlot, &GameWorld::leg_begin, kLegNone },
 	// The one typed session call; a terminal outcome emits session_lost and
 	// STOPS the frame, so later device phases cannot run against a lost or
-	// failed session.
+	// failed session. The input leg rides it: the shell's sample carries the
+	// frame's head reads, and every update the session banks, the first
+	// included, runs its input frame through the input router the frame input
+	// names, the shell's keyboard pass at its head (engine
+	// inmatch::TickInputSource carries the per-update witness).
 	{ "session", FrameStats::WORLD_RUNTIME, &GameWorld::leg_session, kStopsFrame },
+	// The remote admin's pump ends the main frame, after the session's tick; a frame the session
+	// stopped never reaches it (engine inmatch/remote_admin.h). The menus' frames pump it from
+	// the internal process step instead.
+	{ "remote_admin", kNoSlot, &GameWorld::leg_remote_admin, kLegNone },
+	// The render callback's choice, read after the drain as retail's reads its view word: the
+	// scene's rows (kSceneLeg) run, or the status page stands in for them. The session's
+	// update, the net-session edges, the audio and the finish run either way.
+	{ "scene_gate", kNoSlot, &GameWorld::leg_scene_gate, kLegNone },
+	// The scene frame's scripted-voice update heads it, ahead of its camera compose: the
+	// validation that completes a released line, the anchor reset and the stream's gain. Under
+	// the status page it does not run, so the busy word WaveReady reads holds there.
+	{ "script_voice", kNoSlot, &GameWorld::leg_script_voice, kSceneLeg },
 	// Place the local-player camera/viewmodel from the state the session tick
 	// just produced, BEFORE every camera-driven render leg reads it (D-RORD-8).
 	// It also hands the entity presenter the frame's virtual-display verdict
 	// (the driven tank's cockpit), which copies the carrier hull's transform:
 	// that must stay AFTER the session row, whose entity walks stamp the hull.
-	{ "local_view", FrameStats::WORLD_LOCAL_VIEW, &GameWorld::leg_local_view, kLegNone },
+	{ "local_view", FrameStats::WORLD_LOCAL_VIEW, &GameWorld::leg_local_view, kSceneLeg },
+	// The scene frame's facial passes, once per drawn frame whether or not it ran an update:
+	// the main scene's after its camera compose, and the weapon Inset scene's own when the
+	// frame runs that pass, over the views local_view just composed.
+	{ "facial", kNoSlot, &GameWorld::leg_facial, kSceneLeg },
 	// Retail re-applies fog/ambient per scene pass. Classify the adjusted
 	// render eye after camera placement and publish that pass payload before
 	// terrain, foliage, objects, viewmodel, and particles consume it.
-	{ "scene_environment", FrameStats::WORLD_SCENE_ENV, &GameWorld::leg_scene_environment, kLegNone },
+	{ "scene_environment", FrameStats::WORLD_SCENE_ENV, &GameWorld::leg_scene_environment, kSceneLeg },
 	// The environment presenters (weather smoothing, sun direction, sky dome,
 	// celestial bodies): ex-self-clocked _process nodes, now ordered here so
 	// they take THIS frame's render eye and every later leg consumes what they
 	// published this frame, never last frame's.
-	{ "environment_nodes", FrameStats::WORLD_ENV_NODES, &GameWorld::leg_environment_nodes, kLegNone },
+	{ "environment_nodes", FrameStats::WORLD_ENV_NODES, &GameWorld::leg_environment_nodes, kSceneLeg },
 	// Terrain samples the viewport camera directly and tracks the visible
 	// terrain bounds the water leg's g_WaterActive test reads, so it runs
 	// first: in the original frame Terrain_SetupViewAndLighting precedes
@@ -120,63 +357,73 @@ const GameWorld::FrameLeg GameWorld::kFrameLegs[] = {
 	// pass (the witnessed order is cited at the engine's render frame,
 	// docs/render/render-order-re.md); the water noise the terrain binds is
 	// the previous frame's, exactly as the original water pass regenerates it
-	// after the terrain draw.
-	{ "terrain", FrameStats::WORLD_TERRAIN, &GameWorld::leg_terrain, kLegNone },
-	{ "water", FrameStats::WORLD_WATER, &GameWorld::leg_water, kLegNone },
+	// after the terrain draw. Terrain, water, the collect (occlusion), the foliage and the
+	// sun veil's stop-down target are the world block's state legs (kWorldLeg): a frame
+	// that skips its world (a cine, the command map over the menu) runs none of them.
+	{ "terrain", FrameStats::WORLD_TERRAIN, &GameWorld::leg_terrain, kSceneLeg | kWorldLeg },
+	{ "water", FrameStats::WORLD_WATER, &GameWorld::leg_water, kSceneLeg | kWorldLeg },
 	// Net-session edges; a failed streamed-asset leg STOPS the frame.
 	{ "network", FrameStats::WORLD_NETWORK_FRAME, &GameWorld::leg_network, kStopsFrame },
 	// Blink flags only change on sim ticks (the body gates on did_tick).
-	{ "blink", FrameStats::WORLD_BLINK, &GameWorld::leg_blink, kLegNone },
+	{ "blink", FrameStats::WORLD_BLINK, &GameWorld::leg_blink, kSceneLeg },
 	// The OCCL_* slots land inside OcclusionFrame.apply_frame itself.
-	{ "occlusion", kNoSlot, &GameWorld::leg_occlusion, kLegNone },
+	{ "occlusion", kNoSlot, &GameWorld::leg_occlusion, kSceneLeg | kWorldLeg },
 	// Foliage receives the same live render transform and consumes this
 	// frame's detail-cell handoff (after terrain) and the MODEL anchors the
 	// visible-entity walk just admitted (after occlusion: retail collects the
 	// visible entities before the BySide walks that update the model tiles;
 	// banked at finish).
-	{ "foliage", kNoSlot, &GameWorld::leg_foliage, kLegNone },
-	{ "iris", FrameStats::WORLD_IRIS, &GameWorld::leg_iris, kLegNone },
+	{ "foliage", kNoSlot, &GameWorld::leg_foliage, kSceneLeg | kWorldLeg },
+	{ "iris", FrameStats::WORLD_IRIS, &GameWorld::leg_iris, kSceneLeg },
 	// The sun-veil stop-down feed for the weather ticks banked above (the
 	// veil alpha itself rides the Celestial shader-global push).
-	{ "sun_veil", FrameStats::WORLD_SUN_VEIL, &GameWorld::leg_sun_veil, kLegNone },
+	{ "sun_veil", FrameStats::WORLD_SUN_VEIL, &GameWorld::leg_sun_veil, kSceneLeg | kWorldLeg },
 	// The EffectWorld point-light select for this camera (after iris
 	// publishes the frame's ambient scale, before the lit material draws
 	// consume the pushed globals).
-	{ "lights", FrameStats::WORLD_LIGHT, &GameWorld::leg_lights, kLegNone },
+	{ "lights", FrameStats::WORLD_LIGHT, &GameWorld::leg_lights, kSceneLeg },
 	// The opt-in ragdoll corpses (ADR 0060): after the session walks dispatched
 	// this frame's body clips and the local view posed the avatar, before the
 	// materials leg writes the awake models' bones.
-	{ "ragdolls", FrameStats::WORLD_RAGDOLL, &GameWorld::leg_ragdolls, kLegNone },
+	{ "ragdolls", FrameStats::WORLD_RAGDOLL, &GameWorld::leg_ragdolls, kSceneLeg },
 	// Per-model runtime advance (ex-self-clocked ObjectModel _process): after
 	// occlusion resolves visibility, before the particle composite over it.
-	{ "materials", FrameStats::WORLD_MATERIAL, &GameWorld::leg_materials, kLegNone },
+	{ "materials", FrameStats::WORLD_MATERIAL, &GameWorld::leg_materials, kSceneLeg },
+	// The weapon Inset pass's own water after the main scene's (the water row):
+	// its water-active test over its own terrain frame and the latch the main
+	// collect left (both settled by the materials row), its mirror and its strip
+	// (engine environment/water_mirror.h inset_mirror_source carries the order),
+	// ahead of the bloom's compile that samples the last mirror rendered and of
+	// the particle rows that compile its mirror's pair.
+	{ "inset_water", FrameStats::WORLD_WATER, &GameWorld::leg_inset_water, kSceneLeg | kWorldLeg },
 	// Compile focused Q3 only after this frame's celestial, water, occlusion,
 	// and object-material producers have published their final transforms
 	// and parameters. The typed snapshot is consumed by the terminal
 	// compositor; it is never self-clocked from a stale process callback.
-	{ "framefx", FrameStats::WORLD_FRAMEFX, &GameWorld::leg_framefx, kLegNone },
+	{ "framefx", FrameStats::WORLD_FRAMEFX, &GameWorld::leg_framefx, kSceneLeg },
 	// The render-slot ground shadows plan against the light select published
 	// above and stamp the model subtrees the material frame just rebuilt
 	// (ex-self-clocked SlotShadow _process, which ran after the whole frame).
-	{ "slot_shadows", FrameStats::WORLD_SLOT_SHADOW, &GameWorld::leg_slot_shadows, kLegNone },
-	{ "particles", FrameStats::WORLD_PARTICLES, &GameWorld::leg_particles, kLegNone },
+	{ "slot_shadows", FrameStats::WORLD_SLOT_SHADOW, &GameWorld::leg_slot_shadows, kSceneLeg },
+	{ "particles", FrameStats::WORLD_PARTICLES, &GameWorld::leg_particles, kSceneLeg },
 	// The precipitation streaks after the particle pass and the trails,
 	// before the murk overlay (retail Terrain_RenderWorldScene
 	// @ 0x5c96a6).
-	{ "precipitation", FrameStats::WORLD_WEATHER, &GameWorld::leg_precipitation, kLegNone },
+	{ "precipitation", FrameStats::WORLD_WEATHER, &GameWorld::leg_precipitation, kSceneLeg },
 	// The post-particle overlay tail (renderer/scene_overlay.h): every
 	// producer above has published this frame's streaks, coronas and murk
 	// state, so one immutable frame reaches each view's overlay pass.
-	{ "scene_overlay", kNoSlot, &GameWorld::leg_scene_overlay, kLegNone },
+	{ "scene_overlay", kNoSlot, &GameWorld::leg_scene_overlay, kSceneLeg },
 	// Plan the frame's FrameFX screen effects (retail's post-scene dispatch)
 	// once the particle and tracer producers have published this frame, so
 	// the distortion row's content gate reads it; the terminal compositor
 	// executes the plan after every transparent.
-	{ "screen_effects", kNoSlot, &GameWorld::leg_screen_effects, kLegNone },
-	// The audio leg (banked at finish).
+	{ "screen_effects", kNoSlot, &GameWorld::leg_screen_effects, kSceneLeg },
+	// The audio leg (banked at finish): the update's sound drains, then the render callback's
+	// listener and emitter mix, which a joiner's final wait stands down (mix_audio_frame).
 	{ "audio", kNoSlot, &GameWorld::leg_audio, kLegNone },
-	{ "clear", FrameStats::WORLD_CLEAR, &GameWorld::leg_clear, kLegNone },
-	{ "environment_cube", FrameStats::WORLD_ENV_CUBE, &GameWorld::leg_environment_cube, kLegNone },
+	{ "clear", FrameStats::WORLD_CLEAR, &GameWorld::leg_clear, kSceneLeg },
+	{ "environment_cube", FrameStats::WORLD_ENV_CUBE, &GameWorld::leg_environment_cube, kSceneLeg },
 	// Banks the foliage/audio counters + the RENDER_WATER_* / RENDER_Q3_* /
 	// RENDER_SLOT_* rows.
 	{ "finish", kNoSlot, &GameWorld::leg_finish, kLegNone },
@@ -260,9 +507,16 @@ int64_t GameWorld::current_frame_clock_ms() {
 	const int64_t frame = static_cast<int64_t>(Engine::get_singleton()->get_process_frames());
 	if (clock.frame != frame) {
 		clock.frame = frame;
-		clock.milliseconds = static_cast<int64_t>(Time::get_singleton()->get_ticks_msec());
+		// The readers are retail's GetTickCount readers (the PANM / material / light DWORD,
+		// the foliage sway, the particle Distort wave, the tracer ribbons, the menus' caret
+		// and timers), each cited at its engine port: the one clock, never Godot's.
+		clock.milliseconds = static_cast<int64_t>(opennova::world::frame_tick_count_ms());
 	}
 	return clock.milliseconds;
+}
+
+int64_t GameWorld::tick_count_ms() {
+	return static_cast<int64_t>(opennova::world::frame_tick_count_ms());
 }
 
 PackedStringArray GameWorld::frame_leg_names() {
@@ -281,6 +535,32 @@ PackedStringArray GameWorld::frozen_pose_leg_names() {
 	return names;
 }
 
+bool GameWorld::frame_leg_draws_scene(const String &p_name) {
+	for (int i = 0; i < kFrameLegCount; ++i) {
+		if (p_name == kFrameLegs[i].name) {
+			return (kFrameLegs[i].flags & kSceneLeg) != 0;
+		}
+	}
+	return false;
+}
+
+PackedStringArray GameWorld::get_last_frame_legs() const {
+	PackedStringArray names;
+	for (int i = 0; i < kFrameLegCount && i < 64; ++i) {
+		if ((last_frame_run_mask_ >> i) & 1u) names.append(kFrameLegs[i].name);
+	}
+	return names;
+}
+
+bool GameWorld::frame_leg_in_world(const String &p_name) {
+	for (int i = 0; i < kFrameLegCount; ++i) {
+		if (p_name == kFrameLegs[i].name) {
+			return (kFrameLegs[i].flags & kWorldLeg) != 0;
+		}
+	}
+	return false;
+}
+
 bool GameWorld::frame_leg_stops_frame(const String &p_name) {
 	for (int i = 0; i < kFrameLegCount; ++i) {
 		if (p_name == kFrameLegs[i].name) {
@@ -293,8 +573,23 @@ bool GameWorld::frame_leg_stops_frame(const String &p_name) {
 // --- the loop -------------------------------------------------------------------
 
 void GameWorld::run_leg_table(const FrameLeg *p_legs, int p_count, FrameContext &r_ctx, bool p_timed) {
+	const bool live_table = p_legs == kFrameLegs;
+	if (live_table) last_frame_run_mask_ = 0;
+	// A post-load frame's deferred flush by leg, under --verbose (an instrument).
+	const bool flush_marks = live_table && r_ctx.post_load_frame != nullptr &&
+			OS::get_singleton()->is_stdout_verbose();
+	if (flush_marks) queue_post_load_flush_mark(-1);
 	for (int i = 0; i < p_count; ++i) {
 		const FrameLeg &leg = p_legs[i];
+		// The status page stands in for the scene frame: its rows do not run.
+		if ((leg.flags & kSceneLeg) != 0 && !r_ctx.scene_drawn) continue;
+		// A frame that skips its world runs none of its world block's rows.
+		if ((leg.flags & kWorldLeg) != 0 && r_ctx.world_skipped) continue;
+		if (live_table && i < 64) last_frame_run_mask_ |= uint64_t{1} << i;
+		// One of the first frames past a load: the leg's span under the frame's (an instrument).
+		LoadTimeline *post_load = live_table ? r_ctx.post_load_frame : nullptr;
+		if (post_load != nullptr) post_load->span(leg.name);
+		post_load_leg_ = post_load;
 		LegResult result = kLegRan;
 		{
 			// The board is latched by the begin row (frame_stats_on_), so every
@@ -306,10 +601,49 @@ void GameWorld::run_leg_table(const FrameLeg *p_legs, int p_count, FrameContext 
 				scope.cancel();
 			}
 		}
+		post_load_leg_ = nullptr;
+		if (post_load != nullptr) {
+			post_load->end_span();
+			// The session's updates this frame, as a span of no length named by their count.
+			if (leg.run == &GameWorld::leg_session && r_ctx.outcome.is_valid()) {
+				post_load->span(vformat("updates_%d", r_ctx.outcome->get_ticks_run()));
+				post_load->end_span();
+			}
+			if (leg.run == &GameWorld::leg_session) mark_post_load_net_passes(*post_load);
+		}
+		if (flush_marks) queue_post_load_flush_mark(i);
 		if (result == kLegStop && (leg.flags & kStopsFrame) != 0) {
 			return;
 		}
 	}
+}
+
+// A part of the running leg as a nested span of its post-load frame (an instrument: the first
+// frames past a load name where their scene legs' first-frame costs go); nothing on any other
+// frame.
+void GameWorld::post_load_part(const char *p_name) {
+	if (post_load_leg_ != nullptr) post_load_leg_->span(p_name);
+}
+
+void GameWorld::post_load_part_end() {
+	if (post_load_leg_ != nullptr) post_load_leg_->end_span();
+}
+
+void GameWorld::queue_post_load_flush_mark(int p_leg) {
+	callable_mp(this, &GameWorld::post_load_flush_mark).bind(p_leg).call_deferred();
+}
+
+// Fires in the frame's deferred flush: the head marker (-1) sets the base, each leg's marker
+// closes what its leg queued (the timeline's last post-load frame finished ahead of its flush,
+// so that flush adds nothing).
+void GameWorld::post_load_flush_mark(int p_leg) {
+	const int64_t now = static_cast<int64_t>(Time::get_singleton()->get_ticks_usec());
+	if (p_leg >= 0 && p_leg < kFrameLegCount && post_load_flush_mark_us_ > 0 && post_load_open_ &&
+			post_load_frames_.is_valid() && now - post_load_flush_mark_us_ >= kPostLoadFlushSpanUs) {
+		post_load_frames_->add_span(vformat("flush_%s", kFrameLegs[p_leg].name),
+				post_load_flush_mark_us_, now);
+	}
+	post_load_flush_mark_us_ = now;
 }
 
 void GameWorld::tick(const Vector3 &p_camera_pos, const Transform3D &p_camera_xform, double p_delta,
@@ -334,17 +668,105 @@ Ref<MissionFrameOutcome> GameWorld::advance_frame(const Vector3 &p_camera_pos,
 	frame_delta_ = p_delta;
 	FrameContext ctx;
 	ctx.input = input;
+	// One of the first frames past a mission load: a span of the post-load timeline, its legs
+	// nested (an instrument). The load's end opened it (begin_post_load_frames).
+	const Ref<LoadTimeline> post_load = post_load_open_ ? post_load_frames_ : Ref<LoadTimeline>();
+	if (post_load.is_valid()) {
+		const String frame_label = vformat("frame_%d", post_load_frame_count_ + 1);
+		print_post_load_counts(this, resource_root_.ptr(), frame_label);
+		post_load->span(frame_label);
+		ctx.post_load_frame = post_load.ptr();
+	}
 	run_leg_table(kFrameLegs, kFrameLegCount, ctx, true);
+	// An unload inside the frame printed it already (end_post_load_frames).
+	if (post_load.is_valid() && post_load_open_) {
+		post_load->end_span();
+		++post_load_frame_count_;
+		// The first-send window runs on only under --verbose, the one reader of its frames (the
+		// PostLoadFrame lines); a plain joiner's timeline times the first frames alone.
+		const Ref<Simulation> sim = get_sim();
+		const bool awaits_uplink = OS::get_singleton()->is_stdout_verbose() && sim.is_valid() &&
+				sim->is_joiner() && !post_load_uplink_seen_;
+		if (!post_load_frames_continue(post_load_frame_count_, awaits_uplink)) {
+			post_load_open_ = false;
+			post_load->finish();
+		}
+	}
 	return ctx.outcome;
 }
 
+bool GameWorld::post_load_frames_continue(int p_frames_timed, bool p_awaits_uplink) {
+	if (p_frames_timed < kPostLoadFrames) return true;
+	return p_awaits_uplink && p_frames_timed < kPostLoadFramesMax;
+}
+
+void GameWorld::mark_post_load_net_passes(LoadTimeline &r_frames) {
+	// Each client net pass the frame's updates ran, in order: the loop it ran in (the S2C 0x0F's
+	// is the final wait's), the send countdown ahead of its step, whether its send block opened and
+	// whether a C2S 0x0C left in it (engine inmatch/joiner_net_trace.h carries the witness). The
+	// first 0x0C a game-loop pass sends ends a joiner's wait for its first uplink.
+	const Ref<Simulation> sim = get_sim();
+	const opennova::inmatch::JoinerNetTrace *trace = sim.is_valid() ? sim->joiner_net_trace() : nullptr;
+	if (trace == nullptr) return;
+	for (const opennova::inmatch::JoinerNetTraceRecord &record : trace->since(post_load_trace_seq_)) {
+		String name = vformat("%s_cd%d", opennova::inmatch::send_pump_loop_name(record.pump_loop),
+				static_cast<int>(record.countdown_before));
+		if (record.block_open) name += "_open";
+		if (record.uplink_sent) {
+			name += "_0c";
+			if (record.pump_loop == opennova::inmatch::JoinerConnection::SendPumpLoop::NetworkFrame)
+				post_load_uplink_seen_ = true;
+		}
+		r_frames.span(name);
+		r_frames.end_span();
+	}
+	post_load_trace_seq_ = trace->next_seq();
+}
+
+void GameWorld::begin_post_load_frames(const String &p_bms_name) {
+	end_post_load_frames();
+	post_load_frames_ = LoadTimeline::begin(vformat("Post-load frames %s", p_bms_name));
+	post_load_open_ = true;
+	post_load_frame_count_ = 0;
+	post_load_uplink_seen_ = false;
+	// The net passes the load ran are not the timeline's.
+	const Ref<Simulation> sim = get_sim();
+	const opennova::inmatch::JoinerNetTrace *trace = sim.is_valid() ? sim->joiner_net_trace() : nullptr;
+	post_load_trace_seq_ = trace != nullptr ? trace->next_seq() : 0;
+	print_post_load_counts(this, resource_root_.ptr(), "load_end");
+}
+
+void GameWorld::end_post_load_frames() {
+	// The timeline prints once, at its last frame or at an unload ahead of it.
+	if (post_load_open_ && post_load_frames_.is_valid()) post_load_frames_->finish();
+	post_load_open_ = false;
+}
+
 void GameWorld::on_frame_post_draw() {
-	last_post_draw_usec_ = Time::get_singleton()->get_ticks_usec();
+	// The main loop's clock read after the render, the stamp a mission-start frame's re-base
+	// takes (engine inmatch::Session::advance carries the witness, D-NET-NEW-LF-2).
+	last_post_draw_ms_ = opennova::world::frame_tick_count_ms();
 }
 
 double GameWorld::get_seconds_since_render() const {
-	if (last_post_draw_usec_ == 0) return -1.0;
-	return static_cast<double>(Time::get_singleton()->get_ticks_usec() - last_post_draw_usec_) / 1e6;
+	if (last_post_draw_ms_ == 0) return -1.0;
+	const uint32_t elapsed_ms = opennova::world::frame_tick_count_ms() - last_post_draw_ms_;
+	return static_cast<double>(elapsed_ms) / 1000.0;
+}
+
+double GameWorld::take_frame_elapsed_seconds() {
+	// The session banks the frame's own elapsed wall time as the main loop banks
+	// GetTickCount's difference from the previous frame's stamp, in the system
+	// timer's 15 and 16 ms steps (engine world::TickAccumulator::bank and
+	// world/tick_count_clock.h carry the witness, D-NET-NEW-LF-2; the bank clamps a
+	// frame past 500 ms). Godot's process step is capped at
+	// max_physics_steps_per_frame over the physics rate (8/60 s by default), so
+	// banking it dropped the time past 133 ms that retail's bank keeps
+	// (D-NET-NEW-LI-6).
+	const uint32_t now_ms = opennova::world::frame_tick_count_ms();
+	const uint32_t elapsed_ms = frame_clock_ms_ != 0 ? now_ms - frame_clock_ms_ : 0u;
+	frame_clock_ms_ = now_ms;
+	return static_cast<double>(elapsed_ms) / 1000.0;
 }
 
 Error GameWorld::debug_refresh_render_pose(Camera3D *p_camera) {
@@ -374,23 +796,141 @@ GameWorld::LegResult GameWorld::leg_begin(FrameContext &r_ctx) {
 
 GameWorld::LegResult GameWorld::leg_session(FrameContext &r_ctx) {
 	MissionRoot *presentation = get_runtime();
-	if (presentation == nullptr || !presentation->is_playing()) {
+	// A paused single-player session still takes its frame: Session::advance runs the paused
+	// frame's own legs (the main-frame counter, the weather tick ahead of the pause test, the
+	// cine and HUD-radar passes) and ticks nothing, as retail's main frame runs under the
+	// menu pause (engine inmatch::Session::run_paused_update_legs carries the witness).
+	if (presentation == nullptr ||
+			!(presentation->is_playing() || presentation->is_session_paused())) {
 		return kLegSkipped;
 	}
 	const int64_t runtime_start = frame_timing_ ? now_us() : 0;
+	// A live frame's start stamp for the session's frame lock, whose last read (when it
+	// slept) is the stamp the next frame measures from (engine world::TickAccumulator::bank
+	// carries the witness).
+	if (r_ctx.input.is_valid()) r_ctx.input->set_frame_stamp_ms(frame_clock_ms_);
 	r_ctx.outcome = presentation->advance_session_frame(r_ctx.input);
+	if (r_ctx.outcome.is_valid() && r_ctx.outcome->get_frame_stamp_ms() != 0)
+		frame_clock_ms_ = r_ctx.outcome->get_frame_stamp_ms();
 	if (frame_timing_) {
 		perf_runtime_us_ = now_us() - runtime_start;
 	}
 	if (r_ctx.outcome.is_valid() && r_ctx.outcome->is_terminal()) {
+		// The frame stops here, ahead of the audio leg: the sounds its ticks raised on the
+		// interface channel still play, as retail plays each at its call (input action 3's
+		// Exit Mission tone ahead of its disconnect; engine inmatch/mission_exit.h
+		// kExitMissionSoundset carries the witness).
+		const Ref<Simulation> sim = presentation->get_sim();
+		MissionAudio *audio = get_mission_audio();
+		if (sim.is_valid() && audio != nullptr) {
+			std::vector<opennova::world::ScriptSoundEvent> script_sounds;
+			sim->drain_script_sounds(script_sounds);
+			audio->play_script_sounds(script_sounds, frame_camera_xform_);
+		}
 		session_frame_failed(r_ctx.outcome->get_error());
 		return kLegStop;
 	}
 	return kLegRan;
 }
 
+GameWorld::LegResult GameWorld::leg_remote_admin(FrameContext &r_ctx) {
+	MissionRoot *presentation = get_runtime();
+	if (presentation == nullptr || !presentation->is_playing()) {
+		return kLegSkipped;
+	}
+	pump_remote_admin(opennova::inmatch::AdminScene::GameLoop);
+	return kLegRan;
+}
+
+GameWorld::LegResult GameWorld::leg_scene_gate(FrameContext &r_ctx) {
+	// The page stands in for the scene frame: a dedicated host's always (no session peer), a
+	// listen host's or a single player's while its status view is up; a joiner draws the
+	// scene. The session took the verdict after its drain, where retail's render callback
+	// reads its view word, and ran its own scene legs on it; a frame the session did not
+	// advance takes the role's verdict on the view word as it stands (engine
+	// inmatch::Session::draws_scene carries the witness). A frame inside a joiner's final wait
+	// renders nothing at all, neither arm (engine inmatch::Session::renders carries the witness).
+	const Ref<Simulation> sim = get_sim();
+	last_frame_world_skipped_ = false;
+	last_frame_hud_pass_called_ = true;
+	if (sim.is_null()) {
+		r_ctx.rendered = true;
+		r_ctx.scene_drawn = last_frame_scene_drawn_ = true;
+		present_start_blank(false);
+		return kLegSkipped;
+	}
+	if (r_ctx.outcome.is_valid()) {
+		r_ctx.rendered = r_ctx.outcome->is_rendered();
+		r_ctx.scene_drawn = r_ctx.outcome->is_scene_drawn();
+	} else {
+		r_ctx.rendered = sim->session_renders();
+		r_ctx.scene_drawn = sim->session_draws_scene(
+				r_ctx.input.is_valid() ? r_ctx.input->get_hud_toggles() : Ref<HudToggles>());
+	}
+	last_frame_scene_drawn_ = r_ctx.scene_drawn;
+	// The drawn frame's world-skip word (engine inmatch::FrameOutcome::world_skipped): the
+	// shell's world-block legs (the death.mnu latch's open and close) stand down on it.
+	last_frame_world_skipped_ = r_ctx.outcome.is_valid() && r_ctx.outcome->is_world_skipped();
+	r_ctx.world_skipped = last_frame_world_skipped_;
+	// Whether the drawn frame called its HUD pass, at the call site's gates (engine
+	// inmatch::FrameOutcome::hud_pass_called carries the witness): the HUD presenter's overlay
+	// pass follows it. A frame the session did not advance leaves the HUD's own gates.
+	if (r_ctx.outcome.is_valid()) last_frame_hud_pass_called_ = r_ctx.outcome->is_hud_pass_called();
+	// One of the three drawn frames past a mission start presents black (engine
+	// inmatch::FrameOutcome::start_blank carries the witness).
+	present_start_blank(r_ctx.outcome.is_valid() && r_ctx.outcome->is_start_blank());
+	return kLegRan;
+}
+
+// The three drawn frames past a mission start present black: retail's scene frame clears its
+// target past every pass it drew and presents that (engine inmatch::FrameOutcome::start_blank
+// carries the witness). The device's form is a black layer over every layer the frame draws (the
+// world, the HUD, the menus), shown for those frames alone; it is made at the first of them, and
+// the frame's idle flush submits its quad ahead of the frame's draw.
+void GameWorld::present_start_blank(bool p_blank) {
+	last_frame_start_blank_ = p_blank;
+	CanvasLayer *cover = Object::cast_to<CanvasLayer>(ObjectDB::get_instance(start_blank_cover_id_));
+	if (cover == nullptr) {
+		if (!p_blank || !is_inside_tree()) return;
+		cover = memnew(CanvasLayer);
+		cover->set_name("StartBlankCover");
+		cover->set_layer(RenderingServer::CANVAS_LAYER_MAX);
+		add_child(cover);
+		ColorRect *quad = memnew(ColorRect);
+		quad->set_color(Color(0, 0, 0, 1));
+		quad->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+		cover->add_child(quad);
+		quad->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
+		start_blank_cover_id_ = ObjectID(cover->get_instance_id());
+	}
+	cover->set_visible(p_blank);
+}
+
+GameWorld::LegResult GameWorld::leg_script_voice(FrameContext &r_ctx) {
+	// Retail's scene frame is the voice update's one caller, right ahead of its camera
+	// compose (engine world::ScriptVoiceChannel::frame carries the witness). The listener is
+	// the frame head's (leg_begin), as retail's is the render callback's first leg's.
+	MissionAudio *audio = get_mission_audio();
+	if (!world_ready_ || audio == nullptr) return kLegSkipped;
+	audio->update_script_voice();
+	return kLegRan;
+}
+
 GameWorld::LegResult GameWorld::leg_local_view(FrameContext &r_ctx) {
 	present_local_view_frame();
+	return kLegRan;
+}
+
+GameWorld::LegResult GameWorld::leg_facial(FrameContext &r_ctx) {
+	// The frame's composed view carries both passes' eyes and the Inset pass's verdict
+	// (engine world::FacialSystem::render_scene_passes carries the witness). No local player
+	// presents no view and draws no scene frame.
+	const Ref<Simulation> sim = get_sim();
+	LocalPlayerPresenter *presenter = local_view_presenter();
+	const Ref<PlayerLocalView> view =
+			presenter != nullptr ? presenter->presented_view() : Ref<PlayerLocalView>();
+	if (sim.is_null() || view.is_null()) return kLegSkipped;
+	sim->advance_facial_presentation(view->native_frame());
 	return kLegRan;
 }
 
@@ -483,6 +1023,11 @@ GameWorld::LegResult GameWorld::leg_materials(FrameContext &r_ctx) {
 	return kLegRan;
 }
 
+GameWorld::LegResult GameWorld::leg_inset_water(FrameContext &r_ctx) {
+	render_inset_water_frame();
+	return kLegRan;
+}
+
 GameWorld::LegResult GameWorld::leg_framefx(FrameContext &r_ctx) {
 	sync_framefx_frame();
 	return kLegRan;
@@ -514,7 +1059,7 @@ GameWorld::LegResult GameWorld::leg_scene_overlay(FrameContext &r_ctx) {
 }
 
 GameWorld::LegResult GameWorld::leg_audio(FrameContext &r_ctx) {
-	mix_audio_frame(r_ctx.outcome.is_valid() ? r_ctx.outcome->get_ticks_run() : 0);
+	mix_audio_frame(r_ctx.outcome.is_valid() ? r_ctx.outcome->get_ticks_run() : 0, r_ctx.rendered);
 	return kLegRan;
 }
 
@@ -669,9 +1214,33 @@ void GameWorld::render_foliage_frame() {
 		const float water_height = water_ != nullptr ? water_->get_water_height() : 0.0f;
 		dispatcher_->set_water_height(water_height);
 		const Transform3D camera_xform = render_camera_xform();
+		// The scene's water mirror prerenders first: its MODEL masks around the
+		// persons its own collect listed, over the view its subscene draws from
+		// (FoliageDispatcher::render_mirror_frame).
+		Camera3D *mirror_camera = water_ != nullptr && water_->is_water_pass_active()
+				? water_->get_reflection_camera()
+				: nullptr;
+		Ref<Simulation> mirror_sim = runtime != nullptr ? runtime->get_sim() : Ref<Simulation>();
+		post_load_part("foliage_mirror");
+		if (mirror_camera != nullptr && mirror_sim.is_valid()) {
+			dispatcher_->render_mirror_frame(Simulation::MIRROR_MAIN,
+					mirror_camera->get_global_transform(),
+					mirror_sim->mirror_occlusion(Simulation::MIRROR_MAIN).foliage_mask_anchors,
+					get_frame_clock_ms());
+		} else {
+			dispatcher_->release_mirror_frame(Simulation::MIRROR_MAIN);
+		}
+		post_load_part_end();
+		post_load_part("foliage_view");
+		// A post-load frame's parts nest under foliage_view (an instrument).
+		dispatcher_->set_part_timeline(post_load_leg_);
 		dispatcher_->render_frame(camera_xform, get_frame_clock_ms());
+		dispatcher_->set_part_timeline(nullptr);
+		post_load_part_end();
+		post_load_part("foliage_masks");
 		ObjectModel::refresh_foliage_mask_frame(
 				static_cast<float>(camera_xform.origin.y), water_height);
+		post_load_part_end();
 		perf_foliage_us_ = now_us() - foliage_start;
 	}
 }
@@ -771,27 +1340,44 @@ void GameWorld::render_scene_overlay_frame() {
 	std::shared_ptr<SceneOverlaySubmission> submission = std::make_shared<SceneOverlaySubmission>();
 	submission->frame_id = ++scene_overlay_frame_id_;
 	if (world_ready_) {
+		post_load_part("lasers");
 		append_nvg_laser_overlays(*submission);
+		post_load_part_end();
+		post_load_part("streaks");
 		if (precipitation_ != nullptr) {
 			precipitation_->append_overlay(*submission);
 		}
+		post_load_part_end();
+		post_load_part("coronas");
 		if (light_director_.is_valid()) {
 			light_director_->append_overlay(*submission);
 		}
-		if (env_ != nullptr && is_water_render_active()) {
+		post_load_part_end();
+		// The murk compares the eye against the waterline, a zero height
+		// included (EnvironmentState::classify_render_eye).
+		post_load_part("murk");
+		if (env_ != nullptr && is_waterline_active()) {
 			append_underwater_murk_overlay(*env_, *water_, *submission);
 		}
+		post_load_part_end();
+		post_load_part("celestial");
 		append_celestial_overlays(*submission);
+		post_load_part_end();
+		post_load_part("water_mirrors");
 		append_water_mirror_overlays(*submission);
+		append_mirror_tracer_overlays(*submission);
+		post_load_part_end();
 	}
+	post_load_part("publish");
 	effect_world->publish_scene_overlay(submission);
+	post_load_part_end();
 }
 
 // The NVG laser beams, the tail's first slot (engine: runtime/world/nvg_laser.h): the local view's
 // g_NVGActive and g_CameraMode gate
 // every beam (the defaults with no local player or for a spectator), the
-// frame's render camera builds the ribbons and the frame's scene fog folds
-// into them; the entity presenter's third-person guns carry the action
+// frame's render camera builds the ribbons and they fog per vertex under the
+// frame's scene fog; the entity presenter's third-person guns carry the action
 // points (FirePresenter::append_nvg_laser_beams). The weapon Inset pass walks
 // again: the persons its own collect drew, ribbons built at its camera under
 // its own pass fog (renderer/scene_overlay.h kInsetOverlayOrder).
@@ -837,7 +1423,7 @@ void GameWorld::append_nvg_laser_overlays(SceneOverlaySubmission &r_submission) 
 	walk(camera, env_->state().build_scene_fog(env_->is_underwater_view()), false);
 	if (Camera3D *inset = inset_pass_camera()) {
 		const float eye_y = static_cast<float>(inset->get_camera_transform().origin.y);
-		const bool water_active = is_water_render_active() && water_ != nullptr;
+		const bool water_active = is_waterline_active();
 		walk(inset,
 				inset_scene_fog(*env_, eye_y, water_active ? water_->get_water_height() : 0.0f,
 						water_active),
@@ -892,6 +1478,32 @@ void GameWorld::append_water_mirror_overlays(SceneOverlaySubmission &r_submissio
 	::godot::append_water_mirror_overlays(scene_overlay_bodies_, celestial_, env_, *water_, r_submission);
 }
 
+// The water mirrors' tracer ribbons, built this drawn frame against each rendering
+// mirror's camera (the particles leg's FirePresenter::draw_tracer_rows), into each
+// mirror's own overlay slot: its pass draws them after its particle pair and ahead of its
+// coronas (engine renderer/scene_overlay.h kMirrorOverlayOrder). They fog as the
+// reflected scene fogs, the dry pass whatever side the main eye is on
+// (EnvironmentState::build_water_mirror_fog), toward black or that fog's colour per the
+// style.
+void GameWorld::append_mirror_tracer_overlays(SceneOverlaySubmission &r_submission) {
+	MissionRoot *runtime = get_runtime();
+	EntityPresenter *entities = runtime != nullptr ? runtime->get_entity_presenter() : nullptr;
+	if (entities == nullptr || env_ == nullptr) {
+		return;
+	}
+	const Ref<EnvLightValues> light = frame_light_values();
+	const opennova::env::SceneFogValues mirror_fog = env_->state().build_water_mirror_fog();
+	opennova::renderer::SceneOverlayFog fog;
+	fog.start = mirror_fog.start;
+	fog.end = mirror_fog.end;
+	fog.type = mirror_fog.type;
+	fog.enabled = light.is_valid() && light->fog_enabled;
+	fog.color[0] = mirror_fog.color.r;
+	fog.color[1] = mirror_fog.color.g;
+	fog.color[2] = mirror_fog.color.b;
+	entities->append_mirror_tracer_ribbons(fog, r_submission);
+}
+
 void GameWorld::apply_blink_frame() {
 	if (world_ready_) {
 		const opennova::renderer::ScenePassGateEdges reopened =
@@ -902,18 +1514,16 @@ void GameWorld::apply_blink_frame() {
 			water_->set_mirror_scene_outdoors(!occlusion_->is_blink_indoors());
 		}
 		// The letters gate the frame they are read in (renderer::
-		// scene_pass_gate_edges), but this frame's terrain and water legs ran
-		// before this tick's letters reached the gates: a pass the new
-		// letters reopen re-runs here, so it draws this frame and not the
-		// next. The water leg needs no re-run for a terrain reopen: the hidden
-		// terrain leg already tracked this frame's visible bounds. The camera
-		// is already placed (local_view), and the foliage leg after this one
-		// takes the re-run terrain's detail cells.
+		// scene_pass_gate_edges), but this frame's terrain leg ran before this
+		// tick's letters reached the gates: a pass the new letters reopen
+		// re-runs here, so it draws this frame and not the next. The water leg
+		// takes no letter (its label lands on the strips with the occlusion
+		// row) and needs no re-run for a terrain reopen: the hidden terrain leg
+		// already tracked this frame's visible bounds. The camera is already
+		// placed (local_view), and the foliage leg after this one takes the
+		// re-run terrain's detail cells.
 		if (reopened.terrain_opened) {
 			render_terrain_frame();
-		}
-		if (reopened.water_opened) {
-			render_water_frame();
 		}
 	}
 }
@@ -990,8 +1600,9 @@ void GameWorld::render_environment_nodes_frame() {
 // The water strip march + mirror camera for this frame's render eye
 // (ex-self-clocked Water._process), under retail's per-frame water-active
 // test: the terrain leg just tracked the visible terrain bounds, and the
-// occlusion frame's Blink water verdict is last frame's, as retail reads it
-// (engine: runtime/terrain/quadtree.h).
+// water pass latch is what the last scene's water pass left, last frame's
+// main collect or the Inset's after it (OcclusionFrame stores it; engine:
+// runtime/terrain/quadtree.h, environment/water_frame.h).
 void GameWorld::render_water_frame() {
 	if (water_ == nullptr) {
 		return;
@@ -1001,9 +1612,28 @@ void GameWorld::render_water_frame() {
 				terrain_->get_visible_terrain_min_height(), terrain_->get_visible_terrain_max_height());
 	}
 	Ref<Simulation> sim = get_sim();
-	water_->set_blink_water_visible(sim.is_valid() && sim->occlusion_water_visible());
 	if (sim.is_valid()) water_->set_noise_frame_counter(sim->entity_update_counter());
 	water_->advance_frame(frame_delta_);
+}
+
+// The weapon Inset pass's water while that pass renders (Water::advance_inset_frame):
+// the Inset's own terrain frame's visible bounds, its camera, and the view block
+// its mirror reflects (HudInsetScope::get_view_block_transform). A frame without
+// the pass retires the Inset's water.
+void GameWorld::render_inset_water_frame() {
+	if (water_ == nullptr) {
+		return;
+	}
+	Camera3D *inset = inset_pass_camera();
+	HudInsetScope *scope = Object::cast_to<HudInsetScope>(ObjectDB::get_instance(inset_scope_id_));
+	if (inset == nullptr || scope == nullptr || terrain_ == nullptr) {
+		water_->advance_inset_frame(nullptr, Transform3D());
+		return;
+	}
+	water_->set_inset_visible_terrain_bounds(terrain_->has_inset_visible_terrain_bounds(),
+			terrain_->get_inset_visible_terrain_min_height(),
+			terrain_->get_inset_visible_terrain_max_height());
+	water_->advance_inset_frame(inset, scope->get_view_block_transform());
 }
 
 // Select the main scene's per-pass fog after the local player has placed the
@@ -1018,8 +1648,10 @@ void GameWorld::apply_scene_environment_frame() {
 		env_->apply_scene_pass_planes(*cam);
 	}
 	// The device leg only samples: the strict-vs-inclusive waterline
-	// comparison semantics live in the engine behind apply_render_eye.
-	bool water_active = is_water_render_active() && is_inside_tree();
+	// comparison semantics live in the engine behind apply_render_eye. The
+	// waterline stands at a zero height too; only the water's own draws read
+	// the no-water sentinel (EnvironmentState::classify_render_eye).
+	bool water_active = is_waterline_active() && is_inside_tree();
 	float eye_y = 0.0f;
 	if (water_active) {
 		Camera3D *cam = get_viewport()->get_camera_3d();
@@ -1043,6 +1675,7 @@ void GameWorld::apply_scene_environment_frame() {
 	// Publish the same adjusted render eye to the per-strip Q1/Q2 classifier.
 	// This frame leg runs after camera placement and before ObjectModel's
 	// retained material walk, so water crossings flip the ladder immediately.
+	// A zero height splits about 0.0 (renderer/render_order.h).
 	ObjectShaderCache *shader_cache = ObjectShaderCache::get_singleton();
 	if (water_active) {
 		const float water_height = water_->get_water_height();
@@ -1085,6 +1718,21 @@ Transform3D GameWorld::render_camera_xform() const {
 	return frame_camera_xform_;
 }
 
+// The main scene's water mirror collects from the raw view block, while the
+// scene's own view and the mirrored block it draws with take the optics
+// offsets (engine world/local_player_view.h LocalPlayerViewFrame::view_block
+// carries the witness).
+Transform3D GameWorld::main_mirror_collect_eye() const {
+	LocalPlayerPresenter *presenter = local_view_presenter();
+	Camera3D *camera = render_camera();
+	Transform3D block;
+	if (presenter != nullptr && camera != nullptr && presenter->camera() == camera &&
+			presenter->get_view_block_transform(block)) {
+		return block;
+	}
+	return render_camera_xform();
+}
+
 void GameWorld::apply_occlusion_frame() {
 	// The render-occlusion frame is camera-driven: it runs every render frame
 	// (retail collects visible entities per scene render, not per sim tick),
@@ -1093,7 +1741,7 @@ void GameWorld::apply_occlusion_frame() {
 	// (engine: runtime/world/occlusion.cpp)
 	if (world_ready_ && !frame_skip_occlusion_) {
 		occlusion_->apply_frame(image_camera(), surface_width(), render_camera_xform(),
-				mission_forces_indoors(), object_detail_);
+				mission_forces_indoors(), object_detail_, main_mirror_collect_eye());
 	}
 }
 
@@ -1127,7 +1775,10 @@ void GameWorld::render_sun_veil_frame() {
 // poses are camera-relative) (engine: runtime/renderer/render_slot_shadow.h).
 void GameWorld::render_slot_shadow_frame() {
 	if (slot_shadow_ != nullptr) {
+		// A post-load frame's parts nest under its slot_shadows span (an instrument).
+		slot_shadow_->set_part_timeline(post_load_leg_);
 		slot_shadow_->advance_frame();
+		slot_shadow_->set_part_timeline(nullptr);
 	}
 }
 
@@ -1139,6 +1790,14 @@ void GameWorld::render_environment_cube_frame() {
 	if (!world_ready_ || environment_cube_ == nullptr) {
 		return;
 	}
+	// A time set's cube reset refreshes all six faces at the next capture (engine
+	// world::WeatherState::reset_time_caches carries the witness).
+	const opennova::world::WeatherState *weather =
+			env_ != nullptr ? env_->state().weather() : nullptr;
+	if (weather != nullptr && weather->time_set_resets != cube_time_set_resets_) {
+		cube_time_set_resets_ = weather->time_set_resets;
+		environment_cube_->force_capture();
+	}
 	Vector3 capture_position = render_camera_xform().origin;
 	Ref<Simulation> capture_sim = get_sim();
 	if (capture_sim.is_valid()) {
@@ -1147,7 +1806,7 @@ void GameWorld::render_environment_cube_frame() {
 	environment_cube_->advance_frame(capture_position);
 }
 
-void GameWorld::mix_audio_frame(int p_ticks_run) {
+void GameWorld::mix_audio_frame(int p_ticks_run, bool p_rendered) {
 	const int64_t audio_start = now_us();
 	MissionAudio *audio = get_mission_audio();
 	if (world_ready_ && audio != nullptr) {
@@ -1163,6 +1822,7 @@ void GameWorld::mix_audio_frame(int p_ticks_run) {
 		// ticking runtime (editor idle) free-runs the eval clock off render
 		// delta instead.
 		MissionRoot *runtime = get_runtime();
+		post_load_part("audio_ticks");
 		if (p_ticks_run > 0 && runtime != nullptr) {
 			Ref<Simulation> audio_sim = runtime->get_sim();
 			if (audio_sim.is_valid()) {
@@ -1178,8 +1838,27 @@ void GameWorld::mix_audio_frame(int p_ticks_run) {
                 audio->play_script_sounds(script_sounds, frame_camera_xform_);
 			}
 		}
-		audio->tick(frame_camera_pos_, frame_delta_);
+		post_load_part_end();
+		// The audio stops run whether or not a tick ran: the pausing update runs
+		// none (engine WorldOutbox::dialog_line_stop / audio_channels_shutdown).
+		if (runtime != nullptr) {
+			const Ref<Simulation> stop_sim = runtime->get_sim();
+			bool dialog_line = false, channels = false;
+			if (stop_sim.is_valid() && stop_sim->take_audio_stops(dialog_line, channels)) {
+				if (dialog_line) audio->stop_dialog_line();
+				if (channels) audio->shutdown_audio_channels();
+			}
+		}
+		// The listener and emitter mix is the render callback's head: a frame inside a joiner's
+		// final wait runs no render callback, so it mixes nothing; the drains above are the
+		// update's, and a sound a wait pass raised plays at once, as retail's handler plays it
+		// inside the wait's receive (engine inmatch::Session::renders carries the witness).
+		post_load_part("audio_mix");
+		if (p_rendered) audio->tick(frame_camera_pos_, frame_delta_);
+		post_load_part_end();
+		post_load_part("music");
 		music_var_pump();
+		post_load_part_end();
 		perf_audio_us_ = now_us() - audio_start;
 	}
 }
@@ -1198,9 +1877,28 @@ void GameWorld::render_material_frame() {
 	// while it renders. The Inset pass collects its own verdicts first (after
 	// the main collect of the occlusion leg), then both views select levels.
 	// Both views draw at the session's object detail (object_detail_).
-	ObjectLodFrame frames[2];
+	// The render sector walk sits in the world block: a frame that skips its world (a cine,
+	// the command map over the menu) submits no model, so no PANM or material generator
+	// evaluates and none draws its render-stream noise (engine inmatch::FrameOutcome::
+	// world_skipped); the models' clocks and anims still advance.
+	ObjectModel::set_world_skipped(last_frame_world_skipped_);
+	// Views 2 and 3: each water mirror's reflected subscene, which selects its
+	// levels with its own collect's projection (ObjectLodFrame::mirror_collect),
+	// while that mirror renders.
+	// Each mirror's drawn view gates the held weapons there (the mirror gate
+	// frames): the reflected eye over the collect's projection
+	// (ObjectModel::update_authored_lod_views).
+	ObjectLodFrame frames[4];
+	ObjectLodFrame mirror_gates[2];
 	if (Camera3D *image = image_camera()) {
 		frames[0] = ObjectLodFrame::from_camera(image, surface_width(), object_detail_);
+		if (water_ != nullptr && water_->is_water_pass_active() && frames[0].valid) {
+			frames[2] = ObjectLodFrame::mirror_collect(main_mirror_collect_eye(),
+					frames[0].tan_half_horizontal, surface_width(), object_detail_);
+			mirror_gates[0] = ObjectLodFrame::mirror_collect(
+					water_->mirror_view_transform(image->get_global_transform()),
+					frames[0].tan_half_horizontal, surface_width(), object_detail_);
+		}
 	}
 	// The Inset camera carries this frame's pose: the local-view leg handed it
 	// over (present_local_view_frame).
@@ -1211,15 +1909,65 @@ void GameWorld::render_material_frame() {
 		frames[1] = ObjectLodFrame::from_camera(inset, inset_width, object_detail_);
 		frame_count = frames[1].valid ? 2 : 1;
 		if (frame_count == 2 && world_ready_ && !frame_skip_occlusion_) {
-			occlusion_->apply_inset_frame(inset, inset_width, mission_forces_indoors(),
-					object_detail_);
-			// The Inset pass's own terrain frame, then its foliage frame, after
-			// its own collect and after the main view's
+			// The Inset pass's own terrain frame first: its visible bounds feed
+			// the Inset's water-active test, which its water mirror's collect and
+			// its water letter label read ahead of its own collect (the Inset's
+			// terrain scene and its prerender run ahead of its scene core: engine
+			// environment/water_mirror.h inset_mirror_source; world/occlusion.h
+			// OcclusionWorld::mirror_water_visible). Then its collect, after the
+			// main view's, then its foliage frame over that collect's anchors
 			// (Terrain::render_inset_frame, FoliageDispatcher::render_inset_frame).
+			HudInsetScope *scope =
+					Object::cast_to<HudInsetScope>(ObjectDB::get_instance(inset_scope_id_));
 			if (terrain_ != nullptr) {
 				terrain_->render_inset_frame(inset);
+				if (water_ != nullptr) {
+					water_->set_inset_visible_terrain_bounds(
+							terrain_->has_inset_visible_terrain_bounds(),
+							terrain_->get_inset_visible_terrain_min_height(),
+							terrain_->get_inset_visible_terrain_max_height());
+				}
+			}
+			// The view block the Inset's mirror reflects, while that mirror can
+			// render (render_inset_water_frame's own conditions).
+			const Transform3D mirror_block =
+					scope != nullptr ? scope->get_view_block_transform() : Transform3D();
+			occlusion_->apply_inset_frame(inset, inset_width, mission_forces_indoors(),
+					object_detail_,
+					scope != nullptr && terrain_ != nullptr ? &mirror_block : nullptr);
+			// The Inset's mirror (its water pass as the Inset's collect just
+			// latched it): its collect over the view block it reflects, the
+			// Inset's horizontal field.
+			float tan_h = 0.0f;
+			float tan_v = 0.0f;
+			if (scope != nullptr && terrain_ != nullptr && water_ != nullptr &&
+					water_->is_inset_water_pass_active() &&
+					ObjectLodFrame::camera_tangents(inset, tan_h, tan_v)) {
+				frames[3] = ObjectLodFrame::mirror_collect(mirror_block, tan_h, surface_width(),
+						object_detail_);
+				mirror_gates[1] = ObjectLodFrame::mirror_collect(
+						water_->mirror_view_transform(mirror_block), tan_h, surface_width(),
+						object_detail_);
 			}
 			if (dispatcher_ != nullptr) {
+				// The Inset's water mirror prerenders ahead of the Inset's scene
+				// core: its MODEL masks first.
+				MissionRoot *inset_runtime = get_runtime();
+				Ref<Simulation> inset_sim =
+						inset_runtime != nullptr ? inset_runtime->get_sim() : Ref<Simulation>();
+				// Over the view the Inset's mirror draws from this frame: its camera
+				// is placed later in the frame (Water::advance_inset_frame).
+				Camera3D *inset_mirror = frames[3].valid && water_ != nullptr
+						? water_->get_inset_reflection_camera()
+						: nullptr;
+				if (inset_mirror != nullptr && inset_sim.is_valid()) {
+					dispatcher_->render_mirror_frame(Simulation::MIRROR_INSET,
+							water_->mirror_view_transform(mirror_block),
+							inset_sim->mirror_occlusion(Simulation::MIRROR_INSET).foliage_mask_anchors,
+							get_frame_clock_ms());
+				} else {
+					dispatcher_->release_mirror_frame(Simulation::MIRROR_INSET);
+				}
 				dispatcher_->render_inset_frame(inset,
 						occlusion_->get_inset_foliage_mask_anchors(), get_frame_clock_ms());
 			}
@@ -1232,14 +1980,20 @@ void GameWorld::render_material_frame() {
 		}
 		if (dispatcher_ != nullptr) {
 			dispatcher_->release_inset_frame();
+			dispatcher_->release_mirror_frame(Simulation::MIRROR_INSET);
 		}
 	}
 	if (frames[0].valid || frame_count == 2) {
-		ObjectModel::update_authored_lod_views(frames, frame_count);
+		const int64_t view_walk_start = frame_stats_on_ ? now_us() : 0;
+		ObjectModel::update_authored_lod_views(frames, 4, mirror_gates);
+		if (frame_stats_on_) {
+			frame_stats_->add(FrameStats::MODEL_VIEW_WALK, now_us() - view_walk_start);
+			frame_stats_->add(FrameStats::MODEL_VIEW_MARKED, ObjectModel::get_view_marked_count());
+		}
 		// The retained static instances select their RLOD per entity from the
 		// same views (the placer rewrites only the slots that crossed).
 		if (placer_.is_valid()) {
-			placer_->update_static_lod_views(frames, frame_count);
+			placer_->update_static_lod_views(frames, 4);
 		}
 	}
 	// The Inset pass's own light legs over the twins and verdicts just
@@ -1254,11 +2008,13 @@ void GameWorld::render_material_frame() {
 	}
 	if (!frame_stats_on_) {
 		ObjectModel::advance_awake_frame(frame_delta_);
+		ObjectModel::set_world_skipped(false);
 		// The Inset twins follow the poses the advance just wrote.
 		ObjectModel::sync_view_twins();
 		return;
 	}
 	const PackedInt64Array profile = ObjectModel::profile_awake_frame(frame_delta_);
+	ObjectModel::set_world_skipped(false);
 	ObjectModel::sync_view_twins();
 	if (profile.size() < ObjectModel::AWAKE_PROFILE_SLOT_COUNT) {
 		return;
@@ -1276,6 +2032,15 @@ void GameWorld::render_material_frame() {
 }
 
 void GameWorld::render_particle_frame() {
+	// The tracer pool's ribbons first, for this frame's placed views (the scene, the
+	// weapon Inset, the water mirrors): retail builds them at each scene pass's draw
+	// from that pass's view block and clock (engine renderer/tracer_frame.h TracerView
+	// carries the witness), so every drawn frame builds them, and before the effect
+	// world's frame, as the fire pass's publish of the distortion ribbons was.
+	MissionRoot *runtime = get_runtime();
+	if (EntityPresenter *entities = runtime != nullptr ? runtime->get_entity_presenter() : nullptr) {
+		entities->draw_frame_tracers();
+	}
 	EffectWorld *effect_world = get_effect_world();
 	if (effect_world != nullptr) {
 		// While the NVG composite is up the world renders as the NVG scene,
@@ -1302,11 +2067,15 @@ void GameWorld::render_light_frame() {
 	if (presenter != nullptr) {
 		viewmodel_parts = presenter->vm_parts();
 	}
+	post_load_part("light_select");
 	light_director_->render_frame(viewport != nullptr ? viewport->get_camera_3d() : nullptr,
 			get_frame_clock_ms(), viewmodel_parts, frame_stats_on_);
+	post_load_part_end();
 	// The terrain leg of the same pool: the next terrain frame re-draws its
 	// patches with the pool lights they overlap.
+	post_load_part("terrain_lights");
 	render_terrain_light_leg();
+	post_load_part_end();
 	// Feed the render-slot shadow device the same point-light context (its
 	// per-slot dominant-light pick reads the shared pool) plus the local
 	// player state for the retail priority/drape gates.

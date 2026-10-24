@@ -18,6 +18,8 @@
 //   /UDPNOVAWORLD <address>
 //                 a NovaWorld session server to probe in place of the gate's
 //                 UDPNOVAWORLD entries (up to six).
+//   /GLSVSSRIMS <n>, /GLSVSSAGRMS <n>
+//                 override the gate response's GLSVSSRIMS / GLSVSSAGRMS.
 //   /USEJUNCTION <n>, /CLEARJUNCTION <n>
 //                 override the gate response's USEJUNCTION / CLEARJUNCTION.
 //   --resource-dir <absolute path>
@@ -37,7 +39,17 @@
 //   --mission <name.bms>        boot straight into that single-player mission
 //                               through the menu's Start path (no navigation).
 //   --lan-host <mission.bms>    boot as a co-op LAN listen host on that mission.
+//   --lan-rotation <a.bms[,b.bms...]>
+//                               the --lan-host rotation's missions after its
+//                               first, in play order, as the host screen's
+//                               START appends its selected rows (launch option
+//                               0, the hook's LanHostRotation form)
+//                               [orig: UI_HandleHostSessionStart @0x556D88..0x556E2E;
+//                               MissionRotation_Append @0x5019D0].
 //   --lan-join <ip[:port]>      boot as a LAN joiner dialing that host.
+//   --lan-join browse[:port]    boot as a LAN joiner that searches as the LAN
+//                               screen does and joins the row found on that
+//                               port (the first row without one).
 //   --lan-port <n>              host bind port (1..65535; else the retail default).
 //   --lan-gametype <n|0xN>      numeric g_GameType override; absent = auto
 //                               (derived from the mission).
@@ -72,6 +84,7 @@
 // launches share one parser.
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -87,6 +100,7 @@ inline constexpr const char *kLaunchFlagLooseMission = "--loose-mission";
 inline constexpr const char *kLaunchFlagLooseRoot = "--loose-root";
 inline constexpr const char *kLaunchFlagMission = "--mission";
 inline constexpr const char *kLaunchFlagLanHost = "--lan-host";
+inline constexpr const char *kLaunchFlagLanRotation = "--lan-rotation";
 inline constexpr const char *kLaunchFlagLanJoin = "--lan-join";
 inline constexpr const char *kLaunchFlagLanPort = "--lan-port";
 inline constexpr const char *kLaunchFlagLanGametype = "--lan-gametype";
@@ -101,12 +115,48 @@ inline constexpr const char *kLaunchFlagNovaWorldHost = "--novaworld-host";
 inline constexpr const char *kLaunchFlagWorkingDir = "--working-dir";
 inline constexpr const char *kLaunchFlagNoHud = "/NOHUD";
 inline constexpr const char *kLaunchFlagNoReload = "/noreload";
+inline constexpr const char *kLaunchFlagConnectLog = "/CONNECTLOG";
+inline constexpr const char *kLaunchFlagNoConnectLog = "/NOCONNECTLOG";
 inline constexpr const char *kLaunchFlagLan = "/LAN";
+inline constexpr const char *kLaunchFlagScreenshotTga = "/sstga";
 inline constexpr const char *kLaunchFlagPostIpAddress = "/POSTIPADDRESS";
 inline constexpr const char *kLaunchFlagPostPortNumber = "/POSTPORTNUMBER";
 inline constexpr const char *kLaunchFlagUdpNovaWorld = "/UDPNOVAWORLD";
+inline constexpr const char *kLaunchFlagGlsvssRims = "/GLSVSSRIMS";
+inline constexpr const char *kLaunchFlagGlsvssAgrms = "/GLSVSSAGRMS";
 inline constexpr const char *kLaunchFlagUseJunction = "/USEJUNCTION";
 inline constexpr const char *kLaunchFlagClearJunction = "/CLEARJUNCTION";
+// The server log switches in retail's spellings, each the whole token in any case:
+// `/PROFILE <path>` the .sph server log, `/PUNT.TXT` or `/PUNTLOG` the punt log, `/CHEATLOG`
+// the cheat log, `/NETLOG` the net log on from the start, `/INOUT` the protocol's _inout.txt
+// log. The game and opennova-serve arm the same devices from them
+// (runtime/inmatch/server_log_devices.h).
+// [orig: Game_ParseCommandLineAndInit @0x4a778f (/PROFILE), @0x4a782d (/PUNT.TXT), @0x4a7863
+// (/PUNTLOG), @0x4a77fc (/CHEATLOG), @0x4a7a11 (/NETLOG), @0x4a743d..0x4a744f (/INOUT)]
+inline constexpr const char *kLaunchFlagProfile = "/PROFILE";
+inline constexpr const char *kLaunchFlagPuntTxt = "/PUNT.TXT";
+inline constexpr const char *kLaunchFlagPuntLog = "/PUNTLOG";
+inline constexpr const char *kLaunchFlagCheatLog = "/CHEATLOG";
+inline constexpr const char *kLaunchFlagNetLog = "/NETLOG";
+inline constexpr const char *kLaunchFlagInout = "/INOUT";
+struct LogSwitches {
+    std::string profile_path;
+    bool punt_log = false;
+    bool cheat_log = false;
+    bool net_log = false;
+    bool inout = false;
+    // `/CONNECTLOG` turns the _connectlog.txt debug log on, `/NOCONNECTLOG` off; the last one
+    // read wins, off by default [orig: g_ConnectLogEnabled @0xB4C720 (0 in the image); the
+    // stores @0x4A74AF (1) and @0x4A74C9 (0)].
+    bool connect_log = false;
+};
+
+// Parse one log switch at args[i]: the arguments it took (1, or 2 with its value), 0 when
+// args[i] is not a log switch, -1 when /PROFILE has no value (`error` says why). The
+// /PROFILE path is the next token [orig: @0x4a77a1..0x4a77b9].
+int parse_log_switch(const std::vector<std::string> &args, std::size_t i, LogSwitches &out,
+        std::string &error);
+
 // The /UDPNOVAWORLD table's bounds: six entries of 32 bytes (31 characters and the NUL).
 inline constexpr std::size_t kLaunchUdpNovaWorldMax = 6;
 inline constexpr std::size_t kLaunchUdpNovaWorldChars = 31;
@@ -121,7 +171,8 @@ struct LaunchFlags {
     bool loose_root = false;       // --loose-root
     std::string mission;           // --mission <name.bms>
     std::string lan_host;          // --lan-host <mission.bms>
-    std::string lan_join;          // --lan-join <ip[:port]>, verbatim
+    std::vector<std::string> lan_rotation; // --lan-rotation <a.bms[,b.bms...]>, empty entries dropped
+    std::string lan_join;          // --lan-join <ip[:port]> or browse[:port], verbatim
     int lan_port = 0;              // --lan-port; 0 = unset (1..65535 accepted)
     int lan_gametype = -1;         // --lan-gametype; -1 = auto (>= 0 accepted)
     int lan_mode = 0;              // --lan-mode; 0 = unset (1..4 accepted)
@@ -150,6 +201,12 @@ struct LaunchFlags {
     // @0x4A74D9..0x4A74E9 -> g_LanSwitch = 1 @0x4A74EB; Game_LoadConfig
     // @0x5514B1..0x5514BA].
     bool lan = false;
+    // /sstga: the whole token, any case: the Screen Shot action writes SS%0.5d.tga through the
+    // run-length TGA writer (formats/tga/tga.h tga_write_screenshot) instead of the JPEG
+    // [orig: Game_ParseCommandLineAndInit @0x4a7310 - `_stricmp(token, "/sstga")`
+    // @0x4A77C1..0x4A77D1 -> g_ScreenshotTga = 1 @0x4A77D3; read by Screenshot_CaptureToFile
+    // @0x522290 (the extension) and @0x5222F2 (the writer)].
+    bool screenshot_tga = false;
     // /POSTIPADDRESS <address> and /POSTPORTNUMBER <n>, each the whole token in any case and
     // its next token as it stands, the last one standing: the address the game resolves (DNS
     // on; one that does not resolve overrides nothing) and the port's CRT atol (0 overrides
@@ -171,6 +228,16 @@ struct LaunchFlags {
     //  Napi_CopyString(0xB4BFB0 + count * 32, token, 0x20) @0x4A751C..0x4A7528, the count
     //  @0x4A7530]
     std::vector<std::string> udp_novaworld;
+    // /GLSVSSRIMS <n> and /GLSVSSAGRMS <n>, each the whole token in any case: the CRT atol of
+    // the next token, the last one standing, with the switch's flag set, so the NovaWorld gate
+    // response takes a given one over its own GLSVSSRIMS / GLSVSSAGRMS whatever its value, 0
+    // included (NwuLobbySession::CommandLine). Empty when absent.
+    // [orig: Game_ParseCommandLineAndInit @0x4a7310 - "/GLSVSSRIMS" @0x4A753A, the next token
+    //  @0x4A754C..0x4A7557, _atol @0x4A755C into dword_B4C6A0 @0x4A7564, its flag dword_B4C69C
+    //  = 1 @0x4A7569; "/GLSVSSAGRMS" @0x4A756F, _atol @0x4A7591 into dword_B4C6A8 @0x4A7599,
+    //  its flag dword_B4C6A4 = 1 @0x4A759E]
+    std::optional<int> glsvss_rims;
+    std::optional<int> glsvss_agrms;
     // /USEJUNCTION <n> and /CLEARJUNCTION <n>: the CRT atol of the next token, the last one
     // standing, over the gate response's USEJUNCTION / CLEARJUNCTION; -1 (the words' initial
     // value) overrides nothing.
@@ -179,6 +246,9 @@ struct LaunchFlags {
     //  both -1 in .data @0x829F88]
     int use_junction = -1;
     int clear_junction = -1;
+    // The server log switches (parse_log_switch), read in the same walk: a /PROFILE's value
+    // token is stepped over.
+    LogSwitches log_switches;
 };
 
 LaunchFlags parse_launch_flags(const std::vector<std::string> &args);
@@ -189,10 +259,13 @@ int launch_lan_mode(const LaunchFlags &flags, int fallback);
 int launch_lan_max_players(const LaunchFlags &flags, int fallback);
 
 // A joiner's dial target from `--lan-join <ip[:port]>`: no flag reads an
-// empty ip; a missing or malformed port reads `default_port`.
+// empty ip; a missing or malformed port reads `default_port`. The host
+// `browse` (any case) is no address: `browse` is set, `ip` stays empty, and
+// the port names the row to join.
 struct LanEndpoint {
     std::string ip;
     int port = 0;
+    bool browse = false;
 };
 LanEndpoint launch_lan_join_endpoint(const LaunchFlags &flags, int default_port);
 

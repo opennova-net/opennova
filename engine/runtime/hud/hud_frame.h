@@ -20,6 +20,7 @@
 #include <runtime/hud/hud_map_view.h> // the DEATH window pass
 #include <runtime/hud/hud_overlay_windows.h>
 #include <runtime/hud/hud_server_status.h> // the server-status page
+#include <runtime/hud/hud_takeover_status.h> // the takeover dialog's state
 #include <runtime/hud/net_quality_indicators.h> // the connection indicators' state
 #include <runtime/hud/sight_overlay.h> // the SIGHTS row modes + sight-scale default
 
@@ -72,6 +73,13 @@ enum HudTexture : int32_t {
 	// sentinel, which sizes the device slot array.
 	kHudTexBoxBorder,
 	kHudTexBoxTile,
+	// The stdbox's interior brush: the border atlas's cell (3,0), lifted into its own
+	// wrap-addressed texture under the box material 0x651 when the style loads (the
+	// embedder cuts it from border.tga; no file of its own) [orig:
+	// BoxTexture_LoadAndSetupUVRegions @0x56ACD0 - the copy and zero loop
+	// @0x56ADBD..0x56AE44, the "BoxCtr" texture @0x56AE73, its material into rec+0x34
+	// @0x56AE78..0x56AE8C].
+	kHudTexBoxFill,
 	// The 16x16 connection-quality icon, a 4-row vertical atlas
 	// [orig: the quad @0x4241fb; the atlas load CNetworkIcons_LoadTextures @0x4c2cf0].
 	// neticon2.tga, iconPtrs[1] = g_NetConnectionIcon @0xB5E03C; the HUD's
@@ -229,6 +237,11 @@ struct HudQuad {
 	int32_t texture2 = kHudTexNone;
 	float stage2_w = 0.0f;
 	float stage2_h = 0.0f;
+	// The texture is wrap-addressed: the UVs run past [0, 1] and the sampler
+	// repeats the texture across the quad (the stdbox fill, one quad whose UV is the
+	// screen position over the brush cell) [orig: HUD_StdboxDrawFillWrapTiled
+	// @0x56B5D0 - one 4-vertex strip @0x56B6F5].
+	bool wrap = false;
 };
 
 // One textured triangle (the crosshair's tapered arm strips)
@@ -371,6 +384,11 @@ struct HudLayout {
 	// @0x59FB3B..0x59FB84 -> dword_2723810/14/18 (atof, atof,
 	// HUD_ParseTextAlignment)].
 	HudPosRecord breath_time;
+	// CONNECTSTATUS — the connection status line's anchor: x, y and the alignment word, three
+	// fields (def.h DefHudPosDef::connect_status carries the witness). STARTTIMER — the start
+	// timer box, x, y, w, h (HudStartTimer). Unauthored, both keep the BSS zero.
+	HudPosRecord connect_status;
+	std::array<int, 4> start_timer{};
 	// The Tab board's atlases (hud_scoreboard.h). The stdbox piece size is
 	// derived from the border atlas's own width (a 4x4 cell grid, so one cell
 	// is a quarter of it), the same texture-derived rule the icon strips use.
@@ -402,6 +420,11 @@ struct HudLayout {
 	std::array<bool, 3> lfp_icon_texture_valid{}; // team 1, team 2, neutral
 	bool lfp_tile_own_texture_valid = false;
 	bool lfp_tile_other_texture_valid = false;
+	// LFP_TAKEOVERDLG: the takeover dialog's anchor; unauthored, the BSS zero
+	// pair [orig: the hudpos writes g_HUDLfpTakeoverDlgX/Y @0x5a05a7 /
+	//  @0x5a05bf; read by HUD_DrawTakeoverStatus @0x59B64A / @0x59B652].
+	int lfp_takeover_x = 0;
+	int lfp_takeover_y = 0;
 	HudPosRecord clip_pos;
 	HudPosRecord stance_pos;
 	// HUDVEHSTANCEPOS — the vehicle panel's base before the rider's stance
@@ -568,7 +591,7 @@ struct HudWaypointState {
 	int32_t world_x = 0;
 	int32_t world_y = 0;
 	// Altitude, Q16. Drives the spinmap state-line tricolor and the
-	// WPIndctr frame. [orig: dword_2723520 read by HUD_UpdateWaypointAltitudeColor @0x590970]
+	// WPIndctr frame. [orig: g_WaypointPosZ (0x2723520) read by HUD_UpdateWaypointAltitudeColor @0x590970]
 	int32_t world_z = 0;
 };
 
@@ -700,7 +723,7 @@ struct HudEndRoundOverlayState {
 // tables. [orig: HUD_DrawEndRoundStatistics @0x5b7600 while dword_24C18AC]
 struct HudEndRoundStatisticsState {
 	bool shown = false;
-	bool raised = false; // [orig: g_SpawnSuccessGate && winner == 1 @0x5b763b]
+	bool raised = false; // [orig: g_RoundOver && winner == 1 @0x5b763b]
 	std::string title;   // gametext ("Score", "SCORE_TITLE")
 	std::array<std::string, 4> labels;
 	std::array<std::string, 4> values;
@@ -822,7 +845,16 @@ void set_vehicle_panel_anchor(const HudLayout &layout, int stance, HudVehiclePan
 // everything from the registry + the zone-timer entry; the element draws.
 struct HudLfpZone {
 	int letter_index = 0;   // 'A' + the spawn-zone list index
-	int team = 0;           // the zone entity's team byte (+0x162 & 0x1F)
+	// The zone entity's zone byte (+0x21A: the zone number, plus 32 x its rank
+	// on a client): the panel skips a zero byte and groups the markers by its
+	// low five bits [orig: HUD_DrawZoneStatusPanel `mov al, [eax+21Ah]`
+	//  @0x5A24CD / @0x5A25CE, `and ecx, 1Fh` @0x5A24D9 / @0x5A25D7].
+	int zone_byte = 0;
+	// The zone entity's Team byte (+0x162, signed) as this client holds it: the
+	// marker's sheet, colour, tile and its attack / ready tests
+	// [orig: HUD_DrawZoneMarker `mov al, [ebp+162h]; movsx eax, al`
+	//  @0x598734..0x59873A, the reads @0x598815 / @0x59893D].
+	int team = 0;
 	// The zone-timer entry's fields the marker reads [orig: EntryById[1] team,
 	//  [8] value, [9] control target, [10] limit, [11] rate, [12] active].
 	bool timer_present = false;
@@ -836,8 +868,9 @@ struct HudLfpZone {
 	// +0x220 the owning side's, +0x221 the other side's.
 	uint8_t count_owner = 0;
 	uint8_t count_other = 0;
-	// The transient minimap slot's flag byte for this zone (+4 & 0xC0 gates
-	// the marker) [orig: the word_28E5620 walk @0x5a2517..0x5a256e].
+	// The source byte (+4) of the zone's first regular overlay slot; its 0xC0
+	// capture bits gate the marker [orig: the word_28E5620 walk
+	//  @0x5a2517..0x5a256e, MapOverlay_FindRegularSlotByEntity @0x5BE870 inlined].
 	uint8_t capture_flags = 0;
 	bool in_cylinder = false;
 	int distance_m = 0;     // after the witnessed subtrahend, metres
@@ -846,9 +879,8 @@ struct HudLfpZone {
 struct HudLfpPanelState {
 	bool shown = false;
 	int local_team = 0;
-	// The session game type: the drawer's conquest arm (g_GameType ==
-	// 0x50010) is unmodelled and the element draws nothing under it
-	// [orig: @0x5a24a1].
+	// The session game type: the drawer's one game-type test picks the
+	// conquest arm (g_GameType == 0x50010) [orig: @0x5a24a1].
 	uint32_t game_type = 0;
 	std::string under_attack_text; // Overlays/STROVER_UNDERATTACK
 	std::string ready_text;        // Overlays/STROVER_READYFORTAKEOVER
@@ -882,7 +914,7 @@ struct HudSessionState {
 	int remaining_count = 0;             // g_ScoreboardDeadRowCount (the live count)
 	int row_count = 0;                   // g_ScoreboardRowCount
 	int spectator_count = 0;             // g_ScoreboardSpectatorCount
-	// T: g_TimeLimitMinutes on the authority, the S2C 0x64 copy dword_A821C0
+	// T: g_KothLimitMinutes on the authority, the S2C 0x64 copy dword_A821C0
 	// on a joiner [orig: HUD_DrawGameTimerOverlay @0x59CCDB..0x59CCEB].
 	int32_t time_limit_minutes = 0;
 	// Teams 1 and 2 of the 0x16 team table: score1 (movsx) and the KOTH hold
@@ -929,6 +961,67 @@ struct HudSlotBarSlot {
 	std::string key_label;
 };
 
+// THE FRAME-RATE OVERLAY: the local cheat word's 0x400 bit (the Debug row 118 "fps", the
+// embedder's World::rules.frame_rate_overlay) and the main loop's frame-rate window
+// (world::TickAccumulator::frame_rate_stats), one line in the bold label slot at design
+// (10, 80), half-bright in the snapshot twin g_HUDColors.active, which the gameplay overlays
+// draw ahead of the breath bar, past their master word and level-3 skip
+// (HudFrameCompiler::element_frame_rate_overlay).
+struct HudFrameRateOverlay {
+	bool shown = false;      // g_DebugCheatFlags & 0x400
+	int32_t average_fps = 0; // g_StatsAvgFps
+	int32_t min_fps = 0;     // g_StatsMinFps
+	int32_t max_fps = 0;     // g_StatsMaxFps
+	int32_t cpu_percent = 0; // g_StatsCpuPercent
+};
+// The overlay's line, "FR %2i  MN %2i MX %2i CPU %d" over the four statistics
+// [orig: HUD_DrawFrameRateOverlay @0x5BAE20 - the format pushed @0x5BAE4C, the sprintf
+//  @0x5BAE52].
+std::string frame_rate_overlay_text(const HudFrameRateOverlay &overlay);
+
+// THE CONNECTION STATUS LINE: on a joiner in a session, the round not over, that has heard
+// nothing from its server for more than two whole seconds, "<STROVER54> (<seconds>)" at the
+// hudpos CONNECTSTATUS anchor, by its alignment word (1 right, 2 centred, else left), in the
+// bold label slot, half-bright white (HudFrameCompiler::element_connect_status;
+// D-NET-NEW-LI-42). The 999 arm of g_DebugCheatFlags 0x8000000 is dead: nothing sets the bit.
+// [orig: HUD_DrawPingDisplay @0x59D9D0 - the dead cheat test @0x59D9E4, is_in_session
+//  @0x59D9F4, is_authority @0x59DA01, g_RoundOver @0x59DA0E,
+//  CNapiNetwork_GetSecondsSinceLastReceive called @0x59DA20, `cmp eax, 2; jle` @0x59DA25,
+//  GameText_GetString("Overlays", "STROVER54") called @0x59DA39, sprintf("%s (%i)") called
+//  @0x59DA4C, the alignment dword_272380C @0x59DA51, flags 1 @0x59DA62, colour -1 @0x59DA64,
+//  g_HUDLabelFontBold @0x59DA77, HUD_DrawTextLeftScaled called @0x59DA7E,
+//  HUD_DrawTextCenteredScaled called @0x59DAA2, the right leg @0x59DABF..0x59DACA;
+//  CNapiNetwork_GetSecondsSinceLastReceive @0x4C6ED0 - (GetTickCount() - conn+0x5E8) / 1000;
+//  HUD_DrawTextRightAlignedScaled @0x580BC0, HUD_DrawTextCenteredScaled @0x580B80 (each
+//  Viewport_ScaleToVirtualCoords, then the half-bright drawer)]
+struct HudConnectStatus {
+	bool shown = false;
+	int32_t seconds = 0; // the joiner connection's whole seconds since its last receive
+	std::string label;   // Overlays/STROVER54
+};
+std::string connect_status_text(const HudConnectStatus &status);
+
+// THE START TIMER: while the local client's pre-round timer runs, the hudpos STARTTIMER box
+// (x, y, w, h: the label box over (x, y)..(x + w, y + h), no title), then "<STROVER59> m:ss"
+// and STROVER63 one line lower, both centred at the box's middle column in the large label
+// slot, half-bright in g_HUDColors.active; the first line's top is the box's middle less the
+// height of "0" in that slot (HudFrameCompiler::element_start_timer; D-NET-NEW-LI-42). The
+// 999 arm of g_DebugCheatFlags 0x8000000 is dead.
+// [orig: HUD_DrawTimerOverlay @0x59DAF0 - the box words dword_272381C..dword_2723828
+//  @0x59DB0E..0x59DB40, the dead cheat test @0x59DB44, g_ClientPreRoundTimer @0x59DB27 /
+//  @0x59DB4F, HUD_DrawLabelBox called @0x59DB66, Viewport_ScaleToVirtualCoords called
+//  @0x59DB7A / @0x59DB8E, HUD_MeasureTextWH("0", g_HUDLabelFontLarge) called @0x59DBA7,
+//  STROVER59 @0x59DBDB, sprintf("%s %i:%02i") called @0x59DBEE, y += h / 2 - height
+//  @0x59DC0B, HUD_DrawTextCentered_HalfBright at x + w / 2 @0x59DC28, y += height @0x59DC34,
+//  STROVER63 @0x59DC45, the second line @0x59DC6E; HUD_ParseHudposToken @0x59FB8D..0x59FBE7
+//  (STARTTIMER: four atof fields)]
+struct HudStartTimer {
+	int32_t seconds = 0;  // g_ClientPreRoundTimer; 0 = not drawn
+	std::string label;    // Overlays/STROVER59
+	std::string footer;   // Overlays/STROVER63
+};
+std::string start_timer_text(const HudStartTimer &timer);
+
 // The /NOHUD overlay master word: the .data init 3, cleared to 0 by the
 // launch flag [orig: dword_840B18 (static 3); Game_ParseCommandLineAndInit
 // @0x4a7310 -> sub_58FF20(0) @0x4A7A09, its only writer].
@@ -952,6 +1045,9 @@ struct HudFrameState {
 	// `test dword_840B18, 2` @0x5A81CE]; the whole word gates
 	// HUD_DrawGameplayOverlays [orig: `cmp dword_840B18, 0` @0x5BDE9B].
 	uint32_t overlay_master = kHudOverlayMasterDefault;
+	HudFrameRateOverlay frame_rate; // element_frame_rate_overlay
+	HudConnectStatus connect_status; // element_connect_status
+	HudStartTimer start_timer;       // element_start_timer
 	// An in-game .mnu screen is open (the in-game menu, the armory, the
 	// deploy screen, the end-round board, the command map): the preround
 	// armory line yields to it (element_service_prompt). [orig: dword_255110C,
@@ -971,6 +1067,8 @@ struct HudFrameState {
 	KillAnnouncement kill_announcement;
 	// THE AAS ZONE STATUS PANEL (hud/hud_lfp_panel.h owns its policy).
 	HudLfpPanelState lfp_panel;
+	// THE TAKEOVER STATUS DIALOG (hud/hud_takeover_status.h).
+	HudTakeoverStatusState takeover_status;
 	float health_fraction = 1.0f;
 	int stance = 0;
     int mount_slot = 0, weapon_category = 0; // HUD info +560 and WeaponDef+0
@@ -1040,7 +1138,7 @@ struct HudFrameState {
 	// session (the embedder resolves it), centred at (512, 364) in the Impact38
 	// slot in g_HUDColors.active. The scene frame's gameplay overlays draw it
 	// below the blank declutter level; the status page draws it unconditionally.
-	// [orig: UI_DrawDisconnectReasonDialog @0x5b8eb0 — from
+	// [orig: UI_DrawQuitConfirmDialog @0x5b8eb0 — from
 	//  HUD_DrawGameplayOverlays @0x5be1ce (the level-3 skip @0x5be185) and
 	//  Server_DrawStatusScreen @0x50b270]
 	bool quit_dialog_open = false;
@@ -1100,9 +1198,6 @@ struct HudFrameState {
 	std::array<bool, kDeclutterSlotCount> declutter_visible =
 			declutter_all_visible();
 	int hud_detail_level = 0;
-	// The HUD item flash timers (hud_declutter.h HudItemFlash) the blinking
-	// items read this frame.
-	std::array<int32_t, HudItemFlash::kCount> item_flash{};
 	// The showhud 2-bit FP-view flags [orig: g_FpWeaponViewFlags — cycle
 	// (flags + 1) & 3 @ 0x4E0561]: bit 0 gates the FP gun/viewmodel draw
 	// (consumed device-side where the viewmodel submits), bit 1 gates the
@@ -1115,13 +1210,22 @@ struct HudFrameState {
 	// [orig: word_A85B7C, written only by NapiNPClientMsg_0x00A @0x430104], the
 	// drown limit's seconds [orig: g_WacVarBreathTime, from the same message
 	// @0x4301A1; 20 from WacScript_FreeAll @0x4f6381], the round-over latch the
-	// caller skips the bar under [orig: g_SpawnSuccessGate, tested
+	// caller skips the bar under [orig: g_RoundOver, tested
 	// @0x5BDECA..0x5BDED1], and the label the embedder resolves from gametext
 	// (Overlays/STROVER91).
 	int breath_samples = 0;
 	int breath_time = 20;
 	bool spawn_success_gate = false;
 	std::string breath_label;
+	// The scene frame calls the gameplay overlay pass at all: the embedder's frame verdict
+	// (inmatch::FrameOutcome::hud_pass_called), false where the call site's gates skip
+	// HUD_RenderAllOverlays (the F1 help, the dead bit, a death.mnu trigger or its latch, a
+	// chase view on foot, camera mode 4 and up, a skipped world). The pass's head tests it
+	// first (overlay_pass_runs); the scene frame's own legs draw as on any frame. True where no
+	// session frame ran.
+	// [orig: Render_ProcessMainSceneFrame @0x5CAB2B..0x5CAD04, the HUD_RenderAllOverlays calls
+	//  @0x5CACE3 / @0x5CAD04]
+	bool overlay_pass_called = true;
 	HudMinimapInput minimap;
 	// The mission's static footprint polygons (baked once per feed); the
 	// spinmap element lends them to the compile input by pointer — the
@@ -1200,6 +1304,38 @@ static_assert(kHudFontSlotImpact38 < kHudFontSlotCount,
 bool hud_weapon_group_visible(const HudFrameState &state);
 bool hud_stance_group_visible(const HudFrameState &state);
 
+// THE HUD'S PROCESS WORDS: the overlay state whose only writers are the draws and the BMS
+// arm, so no mission start, round init or HUD init touches it and it keeps its value into
+// the next mission, where the start's HUD init has zeroed only the fade stamps and the item
+// flash timers' last tick (HudFrameCompiler::reset_overlay_buffers). The embedder rebuilds its
+// HUD per mission and carries these into the new one (HudFrameCompiler::process_words /
+// carry_process_words). The two silhouette keys are pointers into process-lifetime storage
+// (the entity pools, the weapon def table), so a slot or def keeps its key across missions
+// (HudCombatState::vehicle_identity / weapon_identity). The chat and system rings are no
+// process words: every mission start clears all six chat channels.
+// [orig: g_HUDItemFlashTimers @0x2723CF8 (writers @0x59A9F7 / @0x5A302A); g_HUDStancePrev /
+//  g_HUDStanceCur (HUD_DrawStanceIndicator @0x599F10, the stores @0x599F8C / @0x599F92);
+//  g_HUDAmmoKeyBucket / g_HUDAmmoKeyReserve / g_HUDAmmoKeyClass (HUD_DrawAmmoIndicator
+//  @0x599A30, the stores @0x599AB4 / @0x599ABA / @0x599AC5); g_WaypointAltitudeColor /
+//  g_WaypointAltitudeBand (HUD_UpdateWaypointAltitudeColor @0x590970, the stores
+//  @0x59098E..0x5909C9); g_HUDSilhouetteVehicleKey (HUD_DrawTargetEntityOverlay, the store
+//  @0x59A604); g_HUDSilhouetteWeaponKey (HUD_DrawWeaponSilhouette, the store @0x59A744);
+//  HUD_InitOverlaySystem @0x5A4620 - its memset calls @0x5A491D / @0x5A4941 / @0x5A49C8 and
+//  the HUD_ResetAllOverlayBuffers call @0x5A4949; Game_StartMission @0x524360 - the
+//  Chat_ClearAllChannels call @0x524A10]
+struct HudProcessWords {
+	std::array<int32_t, HudItemFlash::kCount> item_flash_timers{};
+	int stance_prev = 0;
+	int stance_cur = 0;
+	int32_t ammo_key_bucket = 0;
+	int32_t ammo_key_reserve = 0;
+	uint8_t ammo_key_class = 0;
+	uint32_t waypoint_altitude_color = 0;
+	int waypoint_altitude_band = 0;
+	uint64_t silhouette_vehicle = 0;
+	std::string silhouette_weapon;
+};
+
 class HudFrameCompiler {
 public:
 	// `font` is the hudpos font loaded for the current width (null when hudpos
@@ -1266,29 +1402,56 @@ public:
 	// line, oldest first, NO expiry test [orig: HUD_DrawMessageLog
 	// @0x5b9d70 walks slots 16..1 of both rings @0x5b9e8a..0x5b9f1a].
 	const std::vector<HudMessageLine> &chat_lines() const { return chat_lines_; }
-	// The rings' lives are retail's per-slot countdowns, which run once per
-	// frame and outlive a mission start (Input_InitBindingSystem @0x525BA5
-	// clears only the flood table); the port stamps an expiry against the
-	// main-frame counter, which a mission start zeroes, so the clock's restart
-	// re-bases every held line by its jump, each keeping the frames it had left.
-	void rebase_message_clock(int delta);
+	// The rings' lives are retail's per-slot countdowns, which run once per frame; the port
+	// stamps an expiry against the main-frame counter instead. Only a mission start zeroes that
+	// counter, and the same start clears all six chat channels ahead of it, so a clock restart
+	// empties the rings [orig: Game_StartMission @0x524360 - the Chat_ClearAllChannels call
+	//  @0x524A10 ahead of the Game_ResetSessionHudState call @0x525BAA; Chat_ClearAllChannels
+	//  @0x497D30 - the CHAT memsets @0x497D3E / @0x497D54, the SYSTEM ones @0x497D6A /
+	//  @0x497D80].
+	void clear_message_rings();
 	void reset_runtime_state();
 	// Respawn clears the overlay clocks, retaining the chat/system rings and
 	// the previous stance/ammo values [orig: HUD_ResetAllOverlayBuffers
-	// @0x59dd40]. Of that routine the compiler holds state for exactly two
-	// words: stance_.stamp is dword_2723D38 and flash_stamp_ is dword_2723D48
-	// (cleared @0x59dd8f / @0x59dd89), the stamp stores of
-	// HUD_DrawStanceIndicator @0x599f98 and HUD_DrawAmmoIndicator @0x599aca;
-	// their prev/cur bytes (byte_2723D3C/D3D @0x599f8c/@0x599f92,
-	// byte_2723D4C @0x599ac5) are retained as in retail. The rest of the
-	// routine has no compiler-side state: the missile list unk_2722B40
-	// (memset @0x59dd4e), the radar blip table unk_2721F40 + the edge timers
-	// dword_2721EEC/EF0 (@0x59dd5e..0x59dd6a) and the radar tick
-	// dword_2723EAC (@0x59dd83) are the local player's radar state, reset by
-	// the round init (world::radar_reset); the layer visibility call
-	// @0x59dd75, dword_2723EA8 (@0x59dd7d) and the target-overlay stamp
-	// dword_2723D58 (@0x59dd95) have none here.
+	// @0x59dd40]. Of that routine the compiler holds state for four words: the
+	// three fade stamps, stance_.stamp g_HUDStanceFadeStamp, flash_stamp_
+	// g_HUDAmmoFadeStamp and silhouette_stamp_ g_HUDSilhouetteFadeStamp (cleared
+	// @0x59dd8f / @0x59dd89 / @0x59dd95), the stamp stores of
+	// HUD_DrawStanceIndicator @0x599f98, HUD_DrawAmmoIndicator @0x599aca and the
+	// one HUD_DrawTargetEntityOverlay @0x59a60a and HUD_DrawWeaponSilhouette
+	// @0x59a74a share, and the item flash timers' last tick g_HUDItemFlashLastTick
+	// (@0x59dd7d), item_flash_'s (HudItemFlash::reset_last_tick). The stamps'
+	// keys are retained as in retail: the prev/cur bytes (g_HUDStancePrev / g_HUDStanceCur
+	// @0x599f8c/@0x599f92, g_HUDAmmoKeyClass @0x599ac5) and the silhouette keys
+	// (silhouette_vehicle_ / silhouette_weapon_, g_HUDSilhouetteVehicleKey @0x59a604 /
+	// g_HUDSilhouetteWeaponKey @0x59a744). The rest of the routine has no compiler-side
+	// state: the missile list unk_2722B40 (memset @0x59dd4e), the radar blip
+	// table unk_2721F40 + the edge timers dword_2721EEC/EF0 (@0x59dd5e..0x59dd6a)
+	// and the radar's last tick g_RadarLastUpdateTick (@0x59dd83) are the local
+	// player's radar state (world::radar_reset); the layer visibility call
+	// @0x59dd75 at g_HUDDetailLevel (@0x59dd6f) is the embedder's (its declutter
+	// table, rebuilt at the stored level: HudOverlay::reset_overlay_buffers). Its
+	// two callers: the round init, through the local round reset effect
+	// (HudOverlay) and world::LocalPlayer::reset_for_new_round's radar_reset, and
+	// every mission start's HUD init, where the embedder builds a new HUD and the
+	// new kernel a new LocalPlayer, each of these words zero
+	// [orig: Game_InitNewRound @0x422740 - the call @0x4227A7; HUD_InitOverlaySystem
+	//  @0x5A4620 - the call @0x5A4949].
 	void reset_overlay_buffers();
+
+	// The 16 HUD item flash timers (hud_declutter.h HudItemFlash) BMS action 28 sub 37
+	// arms: the compiler owns them because the gameplay overlay pass ticks them at its head,
+	// past the round-over, white-flash and level-3 returns (compile_overlay_pass), and its
+	// blinking items, the big map's and the map windows' legs read them as they stand.
+	// The store: the timer only; the embedder rebuilds its declutter table at level 0
+	// [orig: RenderState_SetLayerVisibilityByIndex @0x5A3020 - the store @0x5A302A].
+	void set_item_flash(int index, int32_t value) { item_flash_.set(index, value); }
+	const HudItemFlash &item_flash() const { return item_flash_; }
+	// The process words as this HUD holds them, and a torn-down HUD's into this one
+	// (HudProcessWords carries the witness): each word only, so this HUD keeps its zeroed fade
+	// stamps and item flash last tick; no layer rebuild, no tick.
+	HudProcessWords process_words() const;
+	void carry_process_words(const HudProcessWords &words);
 
 	// The HUD-owned gates the radar legs ride, as bits the embedder hands the
 	// session's per-frame radar step (inmatch/session.h; world::radar_hud_frame):
@@ -1300,6 +1463,11 @@ public:
 	static constexpr uint32_t kRadarGatePass = 1u;
 	static constexpr uint32_t kRadarGateMapSite = 2u;
 	uint32_t radar_frame_gates(const HudFrameState &state) const;
+	// Whether the gameplay overlay pass runs past its head: its call site calls it
+	// (overlay_pass_called), then neither the round-over latch nor the white hit flash
+	// [orig: Render_ProcessMainSceneFrame - the calls @0x5CACE3 / @0x5CAD04;
+	//  HUD_RenderAllOverlays @0x5A8084..0x5A809F].
+	static bool overlay_pass_runs(const HudFrameState &state);
 
 	// THE CONNECTION INDICATORS' DRAWER, shared by both of retail's callers
 	// [orig: CNetQuality_DrawIndicators @0x4c3200]: the HUD compile's last
@@ -1392,6 +1560,10 @@ private:
 	// entry 2 is the hudpos hud_textcolor [orig: HUD_RenderAllOverlays
 	// @0x5A810C / HUD_DrawGameTimerOverlay @0x59CCB8].
 	uint32_t hud_palette(int index) const;
+	// The snapshot twin's HUD-init seed and its hudcolor-cycle store
+	// (hud_colors_active_), run at the head of each compile, the scene's and
+	// the status page's.
+	void sync_hud_colors_active(const HudFrameState &state);
 	void emit_rect(float x0, float y0, float x1, float y1, uint32_t color,
 			bool filled, int32_t texture = kHudTexNone, bool additive = false);
 	// HUD_DrawTexturedQuadWithBorder's draw of an image of tex_w x tex_h at design (x, y), the quad
@@ -1460,6 +1632,9 @@ private:
 	void element_weapon_cluster(const HudFrameState &state, float w, float h);
 	void element_heat(const HudFrameState &state, float w, float h);
 	void element_power(const HudFrameState &state, float w, float h);
+	void element_frame_rate_overlay(const HudFrameState &state, float w, float h);
+	void element_connect_status(const HudFrameState &state, float w, float h);
+	void element_start_timer(const HudFrameState &state, float w, float h);
 	void element_breath_bar(const HudFrameState &state, float w, float h);
 	void element_waypoint(const HudFrameState &state, float w, float h);
 	void element_spinmap(const HudFrameState &state, float w, float h);
@@ -1470,8 +1645,13 @@ private:
 	void layout_map_labels(const HudMapPass &pass, size_t begin, size_t end,
 			std::vector<GameFontQuad> &out) const;
 	bool corner_spinmap_visible(const HudFrameState &state) const;
+	// The corner map's own gates inside the pass, past its head (corner_spinmap_visible).
+	bool corner_spinmap_gates_(const HudFrameState &state) const;
+	// The pass's head past its call site: neither the round-over latch nor the white flash.
+	static bool overlay_pass_head_runs(const HudFrameState &state);
 	void element_objectives(const HudFrameState &state, float w, float h);
 	void element_attach_labels(const HudFrameState &state);
+	// The friendly tags' label pass (hud_frame_friendly_tags.cpp).
 	void element_friendly_tags(const HudFrameState &state, float surface_w);
 	// The MP session lines (hud_frame_session_lines.cpp) and the HUDLS bar
 	// (hud_frame_slot_bar.cpp).
@@ -1504,6 +1684,9 @@ private:
 	void compile_overlay_pass(const HudFrameState &state, float w, float h);
 	void compile_gameplay_overlay_windows(const HudFrameState &state, float w, float h);
 	void element_lfp_panel(const HudFrameState &state, float w, float h);
+	// The takeover status dialog (hud_takeover_status.cpp) [orig:
+	// HUD_DrawTakeoverStatus @0x59B630].
+	void element_takeover_status(const HudFrameState &state, float w, float h);
 	void element_scoreboard(const HudFrameState &state, float w, float h);
 	// The chat input line at design (50, y): the scene frame's panels pass
 	// y 608, the status page 480.
@@ -1586,20 +1769,60 @@ private:
 	MapWindowDraw command_map_draw_;
 	StanceFade stance_;
 	// The clip-indicator flash latch: the (bucket, reserve, class byte) key
-	// and the stamp, BSS-zero like retail's [orig: dword_2723D40 / dword_2723D44
-	// / byte_2723D4C, stamp dword_2723D48; HUD_DrawAmmoIndicator @0x599A96..0x599ACA].
+	// and the stamp, BSS-zero like retail's [orig: g_HUDAmmoKeyBucket / g_HUDAmmoKeyReserve
+	// / g_HUDAmmoKeyClass, stamp g_HUDAmmoFadeStamp; HUD_DrawAmmoIndicator @0x599A96..0x599ACA].
 	int32_t flash_key_bucket_ = 0;
 	int32_t flash_key_reserve_ = 0;
 	uint8_t flash_key_class_ = 0;
 	int flash_stamp_ = 0;
 	// THE SNAPSHOT TWIN g_HUDColors.active @0x24C1868: seeded table[index] |
-	// 0xFF000000 at HUD init [orig: HUD_InitTeamColorTable @0x51F240], rewritten
+	// 0xFF000000 at HUD init, entry 2 the 0xFF010101 placeholder
+	// [orig: HUD_InitTeamColorTable @0x51F240], rewritten
 	// table[index] by the hudcolor cycle [orig: @0x49AFC7] and restamped
 	// palette[index] (no alpha OR) every frame by the GAMEINFO drawer
 	// [orig: HUD_DrawGameTimerOverlay @0x59CCD0] — so under /NOHUD or the
-	// blank level the last restamp persists.
+	// blank level the last restamp persists, and a dedicated host's status
+	// page, which no gameplay pass precedes, keeps the seed.
 	uint32_t hud_colors_active_ = 0;
 	int hud_colors_active_index_ = -1; // -1 = not seeded yet
+	// Whether a gameplay overlay pass has refreshed g_HUDColors.palette entry 2 from the
+	// hudpos text colour since the HUD init left it the 0xFF010101 placeholder: the pass
+	// stores it at its head, past its early-outs, and nothing else writes the entry, so a
+	// dedicated host's (no gameplay pass) keeps the placeholder, which the hudcolor cycle's
+	// raw palette[index] store then reads (D-NET-NEW-L8-42); so does a frame the round-over
+	// latch or the white flash returns early (overlay_pass_runs) [orig: HUD_RenderAllOverlays
+	// @0x5A8070 - the round-over and white-flash returns @0x5A8084 / @0x5A8098, the level-3
+	// return @0x5A80C4, the store @0x5A810C; the cycle @0x49AFE0 / @0x49AFE7].
+	bool hud_palette2_refreshed_ = false;
+	// The item flash timers and their last tick (set_item_flash): BSS-zero, never
+	// cleared; only the overlay-buffer reset zeroes the last tick. A new mission's HUD
+	// takes the last one's timers (carry_process_words).
+	HudItemFlash item_flash_;
+	// THE ENTITY-INFO RECORD'S MAP FIELDS (g_HUDEntityInfo) as the pass's head last built them:
+	// the waypoint's active byte and position, and the nearest FARP. The head builds them past
+	// its round-over and white-flash returns, ahead of the level-3 one (compile); the corner map
+	// draws inside the pass from this frame's build, the big map, a scene-frame leg, and the map
+	// windows from the last build, so a gated frame's big map keeps it
+	// [orig: HUD_BuildEntityInfo @0x4B8440 - +0x175 @0x4B88B7 / @0x4B88E8, +0x190..0x198
+	//  @0x4B88F7..0x4B8914, +0x184..0x18C @0x4B89D4..0x4B89E6; HUD_DrawMapOverlay @0x5A5F40 -
+	//  the reads @0x5A7835, @0x5A7868, @0x5A7894, @0x5A7951; HUD_BuildMapOverlayView's call
+	//  @0x5A805A].
+	struct RecordMapFields {
+		bool waypoint_present = false;
+		int32_t waypoint_x = 0, waypoint_y = 0, waypoint_z = 0;
+		bool farp_present = false;
+		int32_t farp_x = 0, farp_y = 0;
+	};
+	RecordMapFields record_map_;
+	// g_WaypointAltitudeColor / g_WaypointAltitudeBand: the pass sets them past its level-3
+	// return while the record's waypoint is active and keeps them otherwise; BSS-zero, nothing
+	// else writes them (compile_overlay_pass).
+	uint32_t waypoint_altitude_color_ = 0;
+	int waypoint_altitude_band_ = 0;
+	// The silhouettes' shared fade stamp and their two keys, the controlled vehicle and the
+	// weapon, process words (HudProcessWords) [orig: g_HUDSilhouetteFadeStamp -
+	//  HUD_DrawTargetEntityOverlay @0x59A60A (key g_HUDSilhouetteVehicleKey @0x59A604),
+	//  HUD_DrawWeaponSilhouette @0x59A74A (key g_HUDSilhouetteWeaponKey @0x59A744)].
 	int silhouette_stamp_ = 0;
 	uint64_t silhouette_vehicle_ = 0;
 	std::string silhouette_weapon_;

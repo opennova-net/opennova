@@ -3,11 +3,12 @@
 // with the witnessed briefing2 -> briefing fallback [orig: @0x506649..0x506660];
 // the [Locations] LOCATION%03i and [PeopleNames] STRNAME%03i reads, each a
 // sprintf'd key matched whole by stricmp in the first matching section, the
-// first match winning [orig: TextResource_FindKeyInSection @0x75D1E0,
-// @0x75D205], so a key whose digits are not the %03i form answers nothing; the
-// override table searched first [orig: TextResource_FindEntryBySectionAndKey
-// @0x75D250, @0x75D27B], and the location read alone answering without a
-// mission table [orig: Entity_SpawnFromBMSRecord @0x40ECCA against @0x40F1A9];
+// first match winning [orig: TextResource_FindKeyInSection @0x75D1E0, the stricmp
+// called @0x75D1FB, its match jz @0x75D205], so a key whose digits are not the %03i
+// form answers nothing; the override table searched first [orig:
+// TextResource_FindEntryBySectionAndKey @0x75D250, @0x75D27B], and the location
+// read alone answering without a mission table [orig: Entity_SpawnFromBMSRecord
+// @0x40ECCA against @0x40F1A9];
 // a rejected table; a location's name by its record's name_index.
 #include <formats/rtxt/rtxt.h>
 #include <runtime/mission/mission_text.h>

@@ -12,23 +12,22 @@ world::TurretWindow replica_window(const replication::ClientEntityState &mount,
 		const replication::ClientState &state, const std::vector<mission::ItemSeatSpec> &specs,
 		const mission::ItemSeatSpec &spec) {
 	const mission::ItemEmplacementAttachmentSpec *arc = nullptr;
-	if (mount.carrier_handle != world::EntityHandle::kInvalid) {
-		for (const replication::ClientEntityState &carrier : state.entities) {
-			if (carrier.handle != mount.carrier_handle)
-				continue;
-			if (const mission::ItemSeatSpec *carrier_spec =
-							mission::item_seat_spec_for_type(specs, carrier.type_id)) {
-				for (const mission::ItemEmplacementAttachmentSpec &candidate :
-						carrier_spec->emplacement_attachments) {
-					if (candidate.anchor_found && candidate.anchor.bone_index == mount.mount_bone &&
-							(candidate.down_limit_bam | candidate.up_limit_bam |
-									candidate.right_limit_bam | candidate.left_limit_bam) != 0) {
-						arc = &candidate;
-						break;
-					}
+	// The carrier's row by its handle (ClientState::find's per-handle row, D-NET-NEW-LF-26).
+	const replication::ClientEntityState *carrier =
+			mount.carrier_handle != world::EntityHandle::kInvalid ? state.find(mount.carrier_handle)
+																	 : nullptr;
+	if (carrier != nullptr) {
+		if (const mission::ItemSeatSpec *carrier_spec =
+						mission::item_seat_spec_for_type(specs, carrier->type_id)) {
+			for (const mission::ItemEmplacementAttachmentSpec &candidate :
+					carrier_spec->emplacement_attachments) {
+				if (candidate.anchor_found && candidate.anchor.bone_index == mount.mount_bone &&
+						(candidate.down_limit_bam | candidate.up_limit_bam |
+								candidate.right_limit_bam | candidate.left_limit_bam) != 0) {
+					arc = &candidate;
+					break;
 				}
 			}
-			break;
 		}
 	}
 	const world::TurretWindow window = world::select_turret_window_bam(
@@ -138,7 +137,21 @@ void write_present_replica_vehicle_gun(float *record, const world::World &world,
 void tick_replica_emplaced_channels(replication::ClientState &state,
 		const std::vector<mission::ItemSeatSpec> &specs, world::World &world,
 		uint16_t self_handle, const replication::ClientWorldMaterializer *materializer,
-		bool wire_header_world) {
+		bool wire_header_world, ReplicaGunLeg leg) {
+	const bool pool1 = leg == ReplicaGunLeg::Pool1Walk;
+	// The seated persons, in row order: a carrier's gunner is found among them, not by a
+	// walk of every row for each carrier. Retail reaches the carrier from its rider, whose
+	// body update runs the seat leg on the carrier its own record holds, once per rider
+	// (D-NET-NEW-LF-26).
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the seat-type test @0x4B63A5,
+	//  Entity_AttachToBoneAndUpdateTransform (the call @0x4B63C7)]
+	std::vector<size_t> seated;
+	for (size_t i = 0; i < state.entities.size(); ++i) {
+		const replication::ClientEntityState &row = state.entities[i];
+		if (row.mount_bone != 0 &&
+				(row.cls == EntityClass::Player || row.cls == EntityClass::Infantry))
+			seated.push_back(i);
+	}
 	for (auto &mount : state.entities) {
 		// The row's own native row, by the replica rule while it is still this
 		// wire entity's type: a reused handle, a same-type newcomer included,
@@ -147,19 +160,29 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 				world::EntityHandle{mount.handle}, mount.type_id, wire_header_world);
 		const world::Entity *spin_source = local_mount;
 		const bool same_type = spin_source != nullptr;
-		mount.emplaced_spin_phase = same_type ? spin_source->emplaced_spin_phase : 0;
+		if (pool1) mount.emplaced_spin_phase = same_type ? spin_source->emplaced_spin_phase : 0;
 		// An 'ewep' render class publishes its held words whether or not a
 		// gunner is seated: an emptied turret keeps its last traverse.
 		// [orig: HUD_CacheWeaponSlotInfo @0x440930 via the 'ewep' render-class
 		//  row @0x82CFA0, no occupant test]
-		mount.emplaced_controls_valid = same_type && spin_source->emplaced_ctrl_publisher;
+		if (pool1)
+			mount.emplaced_controls_valid = same_type && spin_source->emplaced_ctrl_publisher;
+		// Retail's joiner holds a remote gunner as an entity attached to this
+		// UseGun seat; its body update's seat call writes this carrier's words
+		// every tick unless the rider's Flags carry the hidden or the dead bit.
+		// Ours holds it in the replica alone, so the carrier's own row learns
+		// the rider here, each frame.
+		// [orig: Entity_UpdateInfantryPlayerBody -- the hidden-bit return
+		//  @0x4B411E..0x4B4127, seat type 3 @0x4B63A5, the call @0x4B63C7;
+		//  Entity_AttachToBoneAndUpdateTransform -- the dead-bit skip
+		//  @0x5463FC..0x546400, HUD_CacheWeaponSlotInfo(parent) @0x546517..0x546518]
+		if (pool1 && local_mount != nullptr) local_mount->replica_usegun_rider = false;
 		const auto *spec = mission::item_seat_spec_for_type(specs, mount.type_id);
 		if (spec == nullptr)
 			continue;
-		for (auto &occupant : state.entities) {
-			if (occupant.carrier_handle != mount.handle || occupant.mount_bone == 0 ||
-					(occupant.cls != EntityClass::Player && occupant.cls != EntityClass::Infantry))
-				continue;
+		for (const size_t seated_index : seated) {
+			auto &occupant = state.entities[seated_index];
+			if (occupant.carrier_handle != mount.handle) continue;
 			bool gunner_seat = false;
 			for (const auto &seat : spec->seats)
 				if (seat.bone_index == occupant.mount_bone && seat.type == world::SeatType::Gunner)
@@ -167,9 +190,11 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 			if (!gunner_seat)
 				continue;
 			const auto *local_gunner = world.ai.for_handle(world.cached.local_player);
-			if (occupant.handle == self_handle && local_mount != nullptr &&
+			const bool own_copy = occupant.handle == self_handle && local_mount != nullptr &&
 					local_gunner != nullptr &&
-					local_mount->primary_weapon_owner == world.cached.local_player) {
+					local_mount->primary_weapon_owner == world.cached.local_player;
+			if (own_copy == pool1) break; // the other leg's gunner
+			if (own_copy) {
 				mount.emplaced_gun_yaw_word = local_mount->emplaced_gun_yaw_word;
 				mount.emplaced_gun_pitch_word = local_mount->emplaced_gun_pitch_word;
 				occupant.heading_bam = local_gunner->heading;
@@ -183,8 +208,12 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 				world::advance_emplaced_gun_channel(channel, look, mount.heading_bam,
 						mount.pitch_bam,
 						(spec->item_attrib2 & def::DEF_ITEM_ATTRIB2_ISTURRET) != 0);
-				world::clamp_emplaced_gun_channel(channel, look, mount.heading_bam, mount.pitch_bam,
-						replica_window(mount, state, specs, *spec));
+				// The class update's window leg sits behind the gun's slot Def (+0x2D4), as on
+				// the World's channel (world::tick_emplaced_weapon_channel carries the witness).
+				if (local_mount == nullptr || !local_mount->emplaced_update ||
+						world::emplaced_slot_def(world, *local_mount) != nullptr)
+					world::clamp_emplaced_gun_channel(channel, look, mount.heading_bam,
+							mount.pitch_bam, replica_window(mount, state, specs, *spec));
 				mount.emplaced_gun_yaw_word = channel.yaw;
 				mount.emplaced_gun_pitch_word = channel.pitch;
 				occupant.heading_bam = look.heading;
@@ -192,6 +221,16 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 				if (local_mount != nullptr) {
 					local_mount->emplaced_gun_yaw_word = channel.yaw;
 					local_mount->emplaced_gun_pitch_word = channel.pitch;
+					local_mount->replica_usegun_rider = occupant.handle != self_handle &&
+							(occupant.state_flags & (world::kEntityFlagCarried |
+									world::kEntityFlagDead)) == 0u;
+					// The window leg's tail over the rider's 0x0A MoveOrder byte: the
+					// tank-command call (world::emplaced_command_call carries the witness).
+					if (local_mount->emplaced_update &&
+							world::emplaced_slot_def(world, *local_mount) != nullptr)
+						world::emplaced_command_call(world, local_mount->ground_target,
+								local_mount->emplaced_command_stamp, occupant.handle == self_handle,
+								occupant.move_input, occupant.spawn_anim_slot);
 				}
 			}
 			occupant.yaw_byte =
@@ -202,6 +241,6 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 			break;
 		}
 	}
-	publish_replica_gun_words(state, specs, world, materializer, wire_header_world);
+	if (!pool1) publish_replica_gun_words(state, specs, world, materializer, wire_header_world);
 }
 } //namespace opennova::inmatch

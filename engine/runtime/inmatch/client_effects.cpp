@@ -1,5 +1,6 @@
 // Ordered client effects: class deaths, explosions, one-shots, revive, and radio.
 #include "client_runtime.h"
+#include <runtime/inmatch/loadout_submit.h> // apply_weapon_loadout_name_list (the own 0x5A apply)
 #include <runtime/world/world.h>
 #include <runtime/world/infantry_sound.h>
 #include <runtime/world/radio_call.h>
@@ -36,13 +37,19 @@ bool sound_actor(const ClientRuntime &runtime, const world::World &world,
     if (native_handle == world.cached.local_player) {
         if (const auto *local = world.registry.get(native_handle)) { out = *local; return true; }
     }
+    // The listen host's own client reads the authority's entity behind the handle:
+    // its 0x50 fold stores no Team (D-NET-736) [orig: NapiNPClientMsg_TeamAssign
+    // @0x4319E1..0x4319EE; NapiNPClientMsg_HandleSpawnEffect @0x430B10 (the pool resolve
+    // @0x430BEC) reads the host's own row].
+    if (runtime.is_authority())
+        if (const auto *entity = world.registry.get(native_handle)) { out = *entity; return true; }
     if (native_handle.pool() >= 1 && native_handle.pool() <= 3)
         if (const auto *twin = world.registry.get(native_handle)) { out = *twin; return true; }
     if (const auto *row = runtime.state().find(handle)) {
         out.handle = world::EntityHandle{row->handle};
         out.item_id = row->type_id;
         out.has_item_def = row->type_id != 0;
-        out.position = {float(row->x) / 65536.0f, float(row->y) / 65536.0f, float(row->z) / 65536.0f};
+        out.position.set_q16({row->x, row->y, row->z});
         out.team = row->team_known ? row->team : 0;
         out.flags = row->state_flags;
         out.engine_flags = row->rm_entity_flags;
@@ -83,20 +90,22 @@ bool in_active_radio_zone(const world::World &world, const world::Entity &speake
                 (entry.value_active && entry.value_target == entry.value_limit)) continue;
         const auto *zone = world.registry.get(world::EntityHandle{pair.first});
         if (!zone) continue;
-        const double dx = double(world::to_fixed(zone->position.x)) - world::to_fixed(speaker.position.x);
-        const double dy = double(world::to_fixed(zone->position.y)) - world::to_fixed(speaker.position.y);
+        const double dx = double(zone->position.x.q16) - speaker.position.x.q16;
+        const double dy = double(zone->position.y.q16) - speaker.position.y.q16;
         // The x87 length is clamped at flt_7C19E0 (0x7FFF0000) before ftol.
         const int32_t dist = int32_t(std::min(std::sqrt(dx*dx+dy*dy), 2147418112.0));
         const int32_t radius = int32_t(zone->zone_radius) << 16;
         if (dist > radius ||
-                std::abs(double(world::to_fixed(zone->position.z)) - world::to_fixed(speaker.position.z)) > radius/2) continue;
-        const auto matches = [&](const auto &slot) {
-            return slot.active && slot.handle == pair.first &&
-                (!(zone->item_attrib & 0x40000u) || !zone->zone_number || (slot.flags & 0xC0u));
-        };
-        bool visible = false;
-        for (const auto &slot : runtime.state().minimap.transient) if (matches(slot)) visible = true;
-        for (const auto &slot : runtime.state().minimap.special) if (matches(slot)) visible = true;
+                std::abs(double(zone->position.z.q16) - speaker.position.z.q16) > radius/2) continue;
+        // The zone's first regular overlay slot, then the SpawnPoint def, the
+        // zone number or the slot's source capture bits (+4 & 0xC0)
+        // [orig: MapOverlay_FindRegularSlotByEntity @0x5BE870 (the call @0x538197);
+        //  `test [edx+54h], 40000h` @0x5381A8, `cmp [ecx+21Ah], 0` @0x5381B1,
+        //  `test byte [eax+4], 0C0h` @0x5381BA].
+        const replication::ClientMinimapOverlaySlot *slot =
+            replication::find_regular_overlay_slot(runtime.state().minimap, pair.first);
+        const bool visible = slot != nullptr &&
+            (!(zone->item_attrib & 0x40000u) || !zone->zone_number || (slot->source & 0xC0u));
         if (!visible || dist >= best) continue;
         best = dist;
         nearest = zone;
@@ -126,9 +135,9 @@ void set_tracked_entity_target(replication::ClientState &state, const world::Wor
     target.handle = entity.handle.packed;
     target.ticks_remaining = entity.radio_request == 1
             ? 62u * static_cast<uint32_t>(entity.radio_request_seconds) : 496u;
-    target.position[0] = world::to_fixed(entity.position.x);
-    target.position[1] = world::to_fixed(entity.position.y);
-    target.position[2] = world::to_fixed(entity.position.z);
+    target.position[0] = entity.position.x.q16;
+    target.position[1] = entity.position.y.q16;
+    target.position[2] = entity.position.z.q16;
     target.friendly = entity.team == local->team || entity.team == 0;
     target.color = entity.radio_request == 1 ? hud::kHudPaletteLightBlue : 0xFFFFFFFFu;
     ++target.serial;
@@ -213,8 +222,12 @@ void ClientRuntime::tick_remote_stance_sounds(world::World &world) {
         std::snprintf(event.set_name, sizeof(event.set_name), "%s", set->c_str());
         world.out.slot_sounds.push_back(event);
     }
+    // The leg follows every exit of the body update (body_update_ended: bit 0, no channel,
+    // starved) [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the exits
+    // @0x4B411E..0x4B4135 and @0x4B4669..0x4B4670 ahead of the prone clear @0x4B4709].
     for (auto &row : state().entities) {
         if (row.cls != EntityClass::Player || (row.state_flags & 1u) != 0 ||
+                replication::ClientReplicaPipeline::body_update_ended(row) ||
                 (has_self_handle() && row.handle == self_handle())) continue;
         // The prone clear reads the +0x16C MOUNT parent's def, never the ground
         // link the wire carrier also names; mount_bone is the row's mounted test
@@ -230,6 +243,27 @@ void ClientRuntime::tick_remote_stance_sounds(world::World &world) {
 }
 
 void ClientRuntime::apply_received_effects(world::World &world) {
+    // The own client's 0x5A applies: the process's loadout name list, rebuilt from each list
+    // in receive order (D-NET-143) [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 -
+    //  @0x42920C..0x4293B9].
+    for (const WeaponLoadout &list : pending_own_weapon_loadouts_)
+        apply_weapon_loadout_name_list(world, list);
+    pending_own_weapon_loadouts_.clear();
+    // The own client's 0x49 echoes: one naming a person other than the local player dips that
+    // person's arms for 80 ticks on the host's world, the dip its body tick then runs down; the
+    // local player's arm and a non-person's arm refill, which the authority already did (the
+    // walk's immediate refill, the request handler's for a remote requester), so they add nothing.
+    // A row with no def takes neither arm (D-NET-NEW-L4-33).
+    // [orig: NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 - the local test @0x42C0F2..0x42C0F8,
+    //  the itemDef test @0x42C0FE..0x42C103, `cmp [ecx+5Ch], 3` @0x42C105, the stamp @0x42C10B]
+    for (const WeaponReload &reload : pending_own_reload_echoes_) {
+        const world::EntityHandle handle{reload.entity_handle};
+        if (handle == world.cached.local_player) continue;
+        const world::Entity *entity = world.registry.get(handle);
+        if (entity == nullptr || !entity->has_item_def || entity->item_type != 3) continue;
+        if (world::AiEntity *body = world.ai.for_handle(handle)) body->inf.arms_dip_ticks = 80;
+    }
+    pending_own_reload_echoes_.clear();
     for (const auto &request : view_.drain_effect_commands()) {
         if (const auto *squad = std::get_if<replication::ClientSquadEvent>(&request)) {
             apply_squad_event(world, *squad);
@@ -240,6 +274,25 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             // Entity_KillBySlotId @ 0x42BCE0]
             if (world.rules.logic_authority) continue;
             const world::EntityHandle handle{death->entity_handle};
+            // A 0x13 naming the joiner's own player lands on L: Health 0, the
+            // word as its deathAnimStateId, then its class callback with event 4
+            // (the plyr row's, whose seat leave queues the C2S 0x27). Any other
+            // pool-0 row is replica-only: the pipeline's fold ran its death.
+            // [orig: NapiNPClientMsg_EntityDeath @0x42EB50 - the resolve
+            //  @0x42EB87..0x42EBCC, Health = 0 @0x42EBD6, +0x2C0 @0x42EBDF, the
+            //  callback cb(entity, 4, 0) @0x42EBF0..0x42EBF5;
+            //  Entity_HandleDamageAndTriggerZones @0x407720 (the event-4 leg
+            //  @0x407A88..0x407B33)]
+            if (handle.pool() == 0 && !death->item_state && has_self_handle() &&
+                    death->entity_handle == self_handle()) {
+                world::Entity *local = world.registry.get(world.cached.local_player);
+                if (local == nullptr) continue;
+                local->health = 0;
+                if (world::AiEntity *body = world.ai.for_handle(local->handle)) body->health = 0;
+                local->death_anim_state = death->death_anim_state_id;
+                world::hit_record_class_event(world, *local, 4);
+                continue;
+            }
             if (handle.pool() < 1 || handle.pool() > 3) continue;
             world::Entity *victim = world.registry.get(handle);
             if (!victim) continue;
@@ -250,9 +303,29 @@ void ClientRuntime::apply_received_effects(world::World &world) {
                 victim->health = 0;
                 victim->alive = false;
                 victim->death_anim_state = death->death_anim_state_id;
-                victim->last_attacker = world::EntityHandle{};
-                world::destruction_notify_item_damage(world, *victim, 4);
+                // The victim's class callback whatever its class: an AI-data
+                // twin's brain machine (event 4, the death), an item's death
+                // class (D-NET-588) [orig: the callback @0x42EBF5;
+                // g_EntityClassEventCallbackTable @0x813000 - cveh @0x813378 ->
+                // EntityAI_ProcessGroundStateMachine @0x4583C0, CHel @0x8132A0 ->
+                // EntityAI_ProcessAirStateMachine @0x4581B0].
+                world::hit_record_class_event(world, *victim, 4);
             }
+        } else if (const auto *dead = std::get_if<replication::PlayerDeadRecord>(&request)) {
+            // A dead record naming the local entity lands its anim byte on L, after the 0x13
+            // whose class callback staged the bullet default in the same receive: the record's
+            // byte is the clip L's death edge plays (the host's own pick, a frag's
+            // death_grenade_*). A body with no def drops the record whole. Every other row's
+            // share folded in the decode.
+            // [orig: NetPacket_SerializePlayerState @0x4C09C0 - the def test @0x4C0F92, the
+            //  dead arms @0x4C100B..0x4C1027 / @0x4C10F1..0x4C10FB; NapiNPClientMsg_EntityDeath
+            //  @0x42EB50 ahead of NapiNPClientMsg_0x00A @0x42FEC0 in the receive's order]
+            if (world.rules.logic_authority || !local_entity_bound() ||
+                    dead->entity_handle != joiner_->local_player_entity())
+                continue;
+            world::Entity *local = world.registry.get(world.cached.local_player);
+            if (local == nullptr || !local->has_item_def) continue;
+            world::player_body_dead_record(world, *local, dead->anim_state_id);
         } else if (const auto *door = std::get_if<replication::DoorRowUpdate>(&request)) {
             // The pool row the handle names; an entity this peer never
             // materialized has no door records to write.
@@ -262,34 +335,37 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             if (const world::Entity *entity = world.registry.get(handle))
                 world.doors.apply_wire_row(*entity, door->number, door->state);
         } else if (const auto *dialog = std::get_if<replication::DialogLineCommand>(&request)) {
-            // The line rides the presentation's effect log with the local
-            // player's class, the clip's locale. [orig: NapiNPClientMsg_0x028
+            // The local player's class is the clip's locale. [orig: NapiNPClientMsg_0x028
             //  @0x425b88..0x425b94]
             const world::Entity *local = world.registry.get(world.cached.local_player);
             const int32_t player_class =
                     local != nullptr ? static_cast<int32_t>(local->player_class) : 0;
-            world.out.effects.push({"dialog_line", dialog->line, player_class, 0, 0,
-                    dialog->dialog_name});
-            // The line's chat legs: with no clip, "EX Cannot load audio: <def
-            // name>" on the SYSTEM ring in -56798 (0xFFFF2222); then the
-            // subtitle on the CHAT ring in -1 (white), both 930 ticks. The
-            // master-volume gate before the subtitle is the shell's.
-            // [orig: Dialog_LoadAudioClipLocalized @0x44DFD1..0x44DFF8
-            //  (Chat_AddMessageChannel2(msg, -56798, 930)), the subtitle
-            //  @0x44E144..0x44E150 -> Chat_AddSystemMessageIfValid @0x5275B0 ->
+            // The line's legs in the load's order: with no clip, "EX Cannot load audio: <def
+            // name>" on the SYSTEM ring in -56798 (0xFFFF2222), 930 ticks; then the master-volume
+            // gate: with g_DialogueVolume 0 nothing plays and no subtitle posts; past it the play
+            // (the typed order the presentation plays) and the subtitle on the CHAT ring in -1
+            // (white), 930 ticks.
+            // [orig: Dialog_LoadAudioClipLocalized @0x44DEF0 - the missing wave @0x44DFD1..0x44DFF8
+            //  (Chat_AddMessageChannel2(msg, -56798, 930)), the gate's call through dword_A8A23C
+            //  @0x44E0D7 and its test @0x44E0E2 (Dialog_ApplyDialogueVolumeAndPlayFactor
+            //  @0x527560, 0 at g_DialogueVolume 0 @0x527567), the play @0x44E0E4..0x44E136, the
+            //  subtitle @0x44E144..0x44E150 -> Chat_AddSystemMessageIfValid @0x5275B0 ->
             //  Chat_AddMessageChannel1(msg, -1, 930) @0x5275D5]
+            audio::DialogLinePlayback resolved;
             if (world.tables.dialog_bank != nullptr) {
-                const audio::DialogLinePlayback resolved = audio::resolve_dialog_line(
-                        world.tables.dialog_bank, world.tables.dialog_sounds,
+                resolved = audio::resolve_dialog_line(world.tables.dialog_bank,
+                        world.tables.dialog_sounds, world.tables.text_override,
                         world.tables.mission_text, dialog->dialog_name, dialog->line,
                         player_class);
                 if (resolved.line_found && resolved.file.empty())
                     pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::System,
                             0xFFFF2222u, "EX Cannot load audio: " + resolved.wave, false});
-                if (resolved.line_found && !resolved.text.empty())
-                    pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::Chat,
-                            0xFFFFFFFFu, resolved.text, false});
             }
+            if (dialogue_volume_ == 0) continue;
+            world.out.dialog_lines.push_back({dialog->dialog_name, dialog->line, player_class});
+            if (resolved.line_found && !resolved.text.empty())
+                pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::Chat,
+                        0xFFFFFFFFu, resolved.text, false});
         } else if (const auto *flash = std::get_if<replication::LightningTimerCommand>(&request)) {
             // [orig: NapiNPClientMsg_HandleTextCommand SETFLASH1 @0x429eea /
             //  @0x429ef5 -> g_EnvLightningTimerA]
@@ -307,9 +383,9 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             if (!local) continue;
             world::SoundSlotEvent event;
             std::memcpy(event.set_name, "MEDIC_KIT_USE", sizeof("MEDIC_KIT_USE"));
-            event.pos[0] = world::to_fixed(local->position.x);
-            event.pos[1] = world::to_fixed(local->position.y);
-            event.pos[2] = world::to_fixed(local->position.z);
+            event.pos[0] = local->position.x.q16;
+            event.pos[1] = local->position.y.q16;
+            event.pos[2] = local->position.z.q16;
             world.out.slot_sounds.push_back(event);
             world.script.voice.radio_set(world, "MEDIC_VOICE", local->handle);
         } else if (const auto *event = std::get_if<GameEventRecord>(&request)) {
@@ -431,9 +507,14 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             }
         }
     }
+}
+
+void ClientRuntime::track_voice_anchor(world::World &world) const {
     // An entity voice anchored on a decoded row follows that row, and stops
-    // once the row is gone or dead, as a freed or dead anchor stops it.
-    // [orig: Audio_UpdateAmbientStream @0x4ED9E8..0x4EDA2A]
+    // once the row is gone or dead, as a freed or dead anchor stops it: the
+    // scene frame's voice update, never the update's.
+    // [orig: Audio_UpdateAmbientStream @0x4ED9E8..0x4EDA2A, called from
+    //  Render_ProcessMainSceneFrame @0x5CA348 alone]
     const world::EntityHandle anchor = world.script.voice.speaker();
     if (anchor.valid() && role_ == Role::Joiner) {
         const replication::ClientEntityState *row = state().find(anchor.packed);
@@ -445,4 +526,24 @@ void ClientRuntime::apply_received_effects(world::World &world) {
                 : world::Vec3{});
     }
 }
+void ClientRuntime::post_authority_dialog_line(const world::World &world,
+		const audio::DialogLineRef &line) {
+	// [orig: Dialog_LoadAudioClip @0x44DD46 (g_DialogAudioSoundData null), @0x44DD74]
+	if (line.file.empty())
+		pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::System, 0xFFFF2222u,
+				"EX Cannot load audio: " + line.wave, false});
+	// The master-volume gate: with g_DialogueVolume 0 no subtitle posts [orig: the call through
+	// dword_A8A23C @0x44DE50, its test @0x44DE5B; Dialog_ApplyDialogueVolumeAndPlayFactor
+	// @0x527560 - 0 @0x527567..0x527569].
+	if (dialogue_volume_ == 0) return;
+	// The subtitle: the line of the loaded bank the queue's line names, its [Mission Dialog]
+	// entry first (audio::dialog_line_text). [orig: @0x44DDCD..0x44DE3C, @0x44DEC9]
+	const audio::DialogLinePlayback resolved = audio::resolve_dialog_line(world.tables.dialog_bank,
+			world.tables.dialog_sounds, world.tables.text_override, world.tables.mission_text,
+			line.dialog_name, line.line, 0);
+	if (resolved.line_found && !resolved.text.empty())
+		pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::Chat, 0xFFFFFFFFu,
+				resolved.text, false});
+}
+
 } // namespace opennova::inmatch

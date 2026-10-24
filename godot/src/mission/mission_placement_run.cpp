@@ -215,6 +215,10 @@ void MissionObjectPlacer::_place_bucket(MissionPlacementRun &p_run, size_t p_fir
 		const String graphic = _graphic_for(item_id);
 		if (graphic.is_empty()) {
 			++p_run.unresolved;
+			// Nothing to draw, but the mission start still spawns the def's particle effect
+			// (_append_model_less_item_effect_source).
+			_append_model_less_item_effect_source(kind, entity.index, entity.bms_id, item_id,
+					_entity_transform_for_item(entity.position, entity.rotation_deg, item_id));
 			continue;
 		}
 		const Transform3D xform = _entity_transform_for_item(
@@ -320,7 +324,7 @@ void MissionObjectPlacer::_place_static_group(MissionPlacementRun &p_run, int p_
 	}
 	Ref<ObjectData> shadow_data;
 	if (const Ref<ObjectData> *resolved =
-				object_data_cache_.getptr(graphic)) {
+				object_data_cache_.getptr(_object_data_key(graphic))) {
 		shadow_data = *resolved;
 	}
 	for (int i = 0; i < group.xforms.size(); ++i) {
@@ -537,8 +541,7 @@ void MissionObjectPlacer::_place_static_group(MissionPlacementRun &p_run, int p_
 			StaticPopulation &slots = static_populations_.write[population_index];
 			slots.slot_instance.push_back(instance_row);
 			slots.slot_binding.push_back(retained.bindings.size() - 1);
-			if (_static_slot_live(binding, retained.active_lod, retained.inset_lod,
-						retained.view_split)) {
+			if (_static_slot_live(binding, retained.active_lod, retained)) {
 				_static_population_append(population_index, instance_row,
 						retained.bindings.size() - 1);
 			}

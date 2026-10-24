@@ -88,6 +88,20 @@ public:
         entries.clear();
         current = -1;
         show = true;
+        route_markers_.clear();
+        holds_poi_list_ = false;
+    }
+
+    // The route's markers with their fields as the pool-3 entities hold them.
+    // Retail's list is pointers to entities, so when the point-of-interest list
+    // takes its place the route markers keep their name ids and done bytes, and
+    // the S2C 0x0F writer, which walks the mission's route table itself, reads
+    // them there in any game type (D-NET-NEW-LP-3).
+    // [orig: NetPacket_WriteWorldStateLoad0x0F - Pool_GetEntryUnchecked(3, ..)
+    //  @0x502F2D, entity+0x2A0 @0x502F48, entity+0x218 @0x502F5F;
+    //  Entity_BuildMapPoiLists @0x42de40 refills g_WaypointList only]
+    const std::vector<WaypointEntry> &route_markers() const {
+        return holds_poi_list_ ? route_markers_ : entries;
     }
 
     bool empty() const { return entries.empty(); }
@@ -121,6 +135,16 @@ public:
     // [orig: SpawnPoint_FindNearestEnemyBasePoint @ 0x4DD290]
     void select_nearest_enemy_base(const EntityRegistry &registry, const Entity &local,
                                   uint32_t game_type);
+    // The enemy capture point twin: in CTF or Flagball with more than one entry,
+    // the nearest entry with a def whose type is the local team's enemy capture
+    // point (team 1 -> 4098, team 2 -> 4100, team 3 -> 4103, team 4 -> 4102; any
+    // other team takes every def'd entry); the selection is kept when none is.
+    // [orig: SpawnPoint_FindNearestEnemyCapturePoint @0x4DD180 - the game types
+    //  @0x4DD180..0x4DD194, the count @0x4DD19A..0x4DD1A2, the def @0x4DD1D6, the
+    //  team pairs @0x4DD1E1..0x4DD21D, the distance @0x4DD225..0x4DD25C, the
+    //  store @0x4DD263..0x4DD267]
+    void select_nearest_enemy_capture_point(const EntityRegistry &registry,
+                                            const Entity &local, uint32_t game_type);
 
     // A fired BMS event completes every entry linked to it, chaining backward
     // through chain_back-flagged predecessors, then skips current past done
@@ -144,6 +168,22 @@ public:
     // @0x49d452..0x49d470]
     void manual_cycle(bool backward, const WaypointCycleContext &ctx);
 
+    // The nextflag action (catalog row 52, F8, code 32; Shift makes it backward): the
+    // selection steps to the next entry of the other side's, by `local_team` (1 or 2; any
+    // other team steps nothing). In game type 0x10004 an entry is the other side's flag by
+    // its def's type (4093 for team 1, 4091 for team 2); in 0x90002 / 0x10002 a target (def
+    // attrib 0x8000) whose team byte is the other team; any other game type, a list of one
+    // entry or none, and a list with no such entry step nothing. A current entry not in the
+    // list reads as index 0. Forward: up from the next index to the last, then up from 0 to
+    // the one before the current; backward: down from the previous index to 0, then down
+    // from the last to the current one inclusive. An entry whose entity or def is gone never
+    // matches; a null registry matches nothing.
+    // [orig: Input_HandleActionBinding @0x49AD40 - case 32 @0x49B6A9 (the sign -1 @0x49B6BC,
+    //  else 1 @0x49B6AD); Spectator_CycleTargetByTeam @0x4DBF00 - the count @0x4DBF0A, the
+    //  game types @0x4DBF1B / @0x4DC06C, the def-type leg @0x4DBF26..0x4DC05F, the team leg
+    //  @0x4DC078..0x4DC1C0]
+    void cycle_by_team(bool backward, const WaypointCycleContext &ctx, uint8_t local_team);
+
     // Forward-cycle current past done entries, stopping on wrap-around.
     // [orig: SpawnPoint_SkipBlocked @ 0x4de310]
     void skip_done(const WaypointCycleContext &ctx = {});
@@ -160,6 +200,9 @@ private:
     // The KOTH re-step's guard: the entry the last cycle landed on
     // [orig: dword_B79434 @0x4dc31e / @0x4dc333].
     EntityHandle cycle_guard_;
+    // The route the point-of-interest list displaced, and whether it did.
+    std::vector<WaypointEntry> route_markers_;
+    bool holds_poi_list_ = false;
 };
 
 

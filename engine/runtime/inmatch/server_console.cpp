@@ -3,6 +3,7 @@
 #include <runtime/inmatch/server_console.h>
 
 #include <base/io/le.h>
+#include <base/io/log.h> // io::logf (the /INOUT lines on the diagnostic channel)
 #include <base/io/strutil.h>
 #include <formats/def/def.h> // DefItemsFile (SAVENFO's rows)
 #include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
@@ -146,7 +147,7 @@ hud::ChatSendResult Server_SendConsoleChat(NapiNPServerCtx &ctx, int dispatch,
 	using Result = hud::ChatSendResult;
 	if (dispatch != hud::kChatDispatchGlobal || !ctx.is_authority || ctx.is_mp_session_peer)
 		return Result::Refused;
-	// `(!g_DeathScreenActive || g_SpawnSuccessGate)` holds on a host with no
+	// `(!g_DeathScreenActive || g_RoundOver)` holds on a host with no
 	// player of its own (its death screen never rises) [orig: @0x49a931].
 	if (text.empty()) return Result::Refused;
 	if (!chat_flood_check(ctx.console_chat_flood, text, frame)) return Result::Flooded;
@@ -191,28 +192,33 @@ uint32_t server_console_submit(NapiNPServerCtx &ctx, hud::ChatEntry &entry,
 
 namespace {
 
-std::string host_address(const NapiNPServerCtx &ctx) {
-	// [orig: @0x61e6c6..0x61e6fd — the protocol's socket address, else the
-	//  placeholder]
-	if (!ctx.local_address_known) return "???.???.???.???:?????";
-	return peer_addr_to_string(ctx.local_address); // Napi_FormatAddress "%s:%ld" @0x62df22
-}
-
-const char *connection_kind(const NapiNPConnection &conn) {
+const char *connection_kind(int type) {
 	// is_server (+0x2B) for a node the server created (type 1), is_client
 	// (+0x2A) for type 2 [orig: CNapiNPConnection_Create @0x62ad7b..0x62ae95].
-	if (conn.type == NapiNPConnection::kTypeServerSide) return "SERVER ";
-	if (conn.type == NapiNPConnection::kTypeClientSide) return "CLIENT ";
+	if (type == NapiNPConnection::kTypeServerSide) return "SERVER ";
+	if (type == NapiNPConnection::kTypeClientSide) return "CLIENT ";
 	return "";
 }
+
+const char *connection_kind(const NapiNPConnection &conn) { return connection_kind(conn.type); }
 
 } // namespace
 
 std::string inout_host_line(const NapiNPServerCtx &ctx, bool started) {
+	return inout_host_line(ctx.local_address_known ? &ctx.local_address : nullptr,
+			ctx.np_protocol.session_name, started);
+}
+
+std::string inout_host_line(const PeerAddr *local_address, const std::string &session_name,
+		bool started) {
 	// [orig: "%s : HOST STARTED \"%s\"." @0x7dfa7c / "%s : HOST STOPPED \"%s\"."
-	//  @0x7dfaac over the protocol's session name (+0x288)]
-	return host_address(ctx) + (started ? " : HOST STARTED \"" : " : HOST STOPPED \"") +
-			ctx.np_protocol.session_name + "\".";
+	//  @0x7dfaac over the protocol's session name (+0x288); the protocol's socket
+	//  address @0x61e6c6..0x61e6fd (the manager's socket +0xB8 read @0x61E7A6 for the
+	//  stop), else the placeholder (@0x61E7DD); Napi_FormatAddress "%s:%ld" @0x62df22]
+	const std::string address = local_address != nullptr ? peer_addr_to_string(*local_address)
+	                                                      : "???.???.???.???:?????";
+	return address + (started ? " : HOST STARTED \"" : " : HOST STOPPED \"") + session_name +
+			"\".";
 }
 
 std::string inout_player_added_line(const NapiNPConnection &conn) {
@@ -239,17 +245,18 @@ std::string napi_log_stamp(std::time_t t) {
 	return text;
 }
 
-NetLog::NetLog(ServerFileSink &files)
-	: files_(files), stamp_([] { return napi_log_stamp(std::time(nullptr)); }) {}
+NapiLog::NapiLog(ServerFileSink &files, std::string file_name)
+	: files_(files), file_name_(std::move(file_name)),
+	  stamp_([] { return napi_log_stamp(std::time(nullptr)); }) {}
 
-void NetLog::write_entry(const char *text) {
+void NapiLog::write_entry(const char *text) {
 	// Mode 3: the stamp (flag 4) and the line into the buffer, CR LF after it.
 	buffer_ += stamp_();
 	buffer_ += text;
 	buffer_ += "\r\n";
 }
 
-void NetLog::set_enabled(bool on) {
+void NapiLog::set_enabled(bool on) {
 	// [orig: NapiLog_SetEnabled @0x62F2B0 — the same state returns @0x62F2BD; the
 	//  stop line before the clear @0x62F2C5..0x62F2CF, the set before the start
 	//  line @0x62F2D7..0x62F2E0]
@@ -263,7 +270,7 @@ void NetLog::set_enabled(bool on) {
 	}
 }
 
-void NetLog::flush(uint32_t now_ms) {
+void NapiLog::flush(uint32_t now_ms) {
 	// [orig: NapiLog_Flush @0x62F1A0 — a nonempty buffer only; the open, the
 	//  write, the close; the buffer emptied whether the open held or not; the
 	//  stamp of the flush always]
@@ -271,18 +278,18 @@ void NetLog::flush(uint32_t now_ms) {
 		// The first open truncates the file (0x20 in the open's flags while
 		// the log's +16 stands), every later one appends; a failed open leaves
 		// +16 as it was [orig: NapiLog_EnsureOpen @0x62EDD8..0x62EDFB].
-		if (files_.write(kNetLogFileName, buffer_, /*append=*/!first_open_)) first_open_ = false;
+		if (files_.write(file_name_, buffer_, /*append=*/!first_open_)) first_open_ = false;
 		buffer_.clear();
 	}
 	last_flush_ms_ = now_ms;
 }
 
-void NetLog::flush_if_expired(uint32_t now_ms) {
+void NapiLog::flush_if_expired(uint32_t now_ms) {
 	// [orig: NapiLog_FlushIfExpired @0x62F2F0 — `now - last >= interval`]
-	if (now_ms - last_flush_ms_ >= kNetLogFlushIntervalMs) flush(now_ms);
+	if (now_ms - last_flush_ms_ >= kNapiLogFlushIntervalMs) flush(now_ms);
 }
 
-void NetLog::shutdown(uint32_t now_ms) {
+void NapiLog::shutdown(uint32_t now_ms) {
 	// [orig: NapiLog_Shutdown @0x62F310 — the stop line and the clear when on,
 	//  then the flush]
 	if (enabled_) {
@@ -290,6 +297,19 @@ void NetLog::shutdown(uint32_t now_ms) {
 		enabled_ = false;
 	}
 	flush(now_ms);
+}
+
+void write_inout_line(const NapiNPServerCtx &ctx, const std::string &line) {
+	write_inout_line(ctx.logs, line);
+}
+
+void write_inout_line(const ServerLogs &logs, const std::string &line) {
+	io::logf(io::LogLevel::kInfo, "%s", line.c_str());
+	if (logs.inout != nullptr && logs.inout->enabled()) logs.inout->write(line);
+}
+
+void open_inout_log(const NapiNPServerCtx &ctx) {
+	if (ctx.logs.inout != nullptr) ctx.logs.inout->set_enabled(ctx.logs.inout_switch);
 }
 
 namespace {
@@ -314,7 +334,7 @@ bool Server_HandleAdminNetlogCommand(NapiNPServerCtx &ctx, const std::string &li
 	const bool host_itself = slot == nullptr || slot_is_local(*slot);
 	if (strutil::starts_with_icase(line, "STAT")) return true;
 	if (!strutil::iequals(tokens[0], "NETLOG") || !host_itself || ctx.logs.net == nullptr) return false;
-	NetLog &log = *ctx.logs.net;
+	NapiLog &log = *ctx.logs.net;
 	log.set_enabled(!log.enabled());
 	if (slot != nullptr) {
 		char text[64];
@@ -392,6 +412,10 @@ std::string entity_usage_text(const world::World &world, const def::DefItemsFile
 }
 
 std::string inout_player_removed_line(const NapiNPConnection &conn) {
+	return inout_player_removed_line(conn, conn.type);
+}
+
+std::string inout_player_removed_line(const NapiNPConnection &conn, int type) {
 	// [orig: CNapiNPConnection_LogPlayerRemoved @0x61e940 — the disconnect
 	//  record's DS/DC/DP1/DP2 (+0x658..+0x664), DSTR (+0x668), DPC (+0x6E8),
 	//  DDSTR (+0x6EC) @0x61e99e..0x61e9c6, read whether latched or not]
@@ -400,7 +424,7 @@ std::string inout_player_removed_line(const NapiNPConnection &conn) {
 	std::snprintf(tail, sizeof(tail), "[%ld,%ld,%ld,%ld,\"%s\",%ld,\"%s\"]",
 			static_cast<long>(e.ds), static_cast<long>(e.dc), static_cast<long>(e.dp1),
 			static_cast<long>(e.dp2), e.dstr.c_str(), static_cast<long>(e.dpc), e.ddstr.c_str());
-	return peer_addr_to_string(conn.peer) + " : " + connection_kind(conn) + "PLAYER REMOVED \"" +
+	return peer_addr_to_string(conn.peer) + " : " + connection_kind(type) + "PLAYER REMOVED \"" +
 			conn.player_name + "\". " + tail;
 }
 

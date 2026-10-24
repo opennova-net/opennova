@@ -11,6 +11,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/entity.h> // Entity
 #include <runtime/world/shell_sort_by_value.h> // CPairList_ShellSortByValue
+#include <runtime/world/vehicle_motor.h> // entity_transform_local_to_world
 #include <base/gameprofile/game_type.h>
 #include <base/io/bam.h>
 #include <base/io/fixed.h>
@@ -29,22 +30,48 @@ namespace {
 // [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6; the vehicle motors'
 //  live +0x10..+0x18]
 void entity_orientation_words(const Entity &entity, int32_t out[3]) {
-    out[0] = entity.veh.yaw_seeded ? entity.veh.yaw_bam : spawn_angle_bam(90 - entity.yaw);
-    out[1] = entity.veh.yaw_seeded ? entity.veh.air_pitch_bam : spawn_angle_bam(entity.pitch);
-    out[2] = entity.veh.yaw_seeded ? entity.veh.air_roll_bam : spawn_angle_bam(entity.roll);
+    out[0] = entity.veh.yaw_seeded ? entity.veh.yaw_bam : entity.heading;
+    out[1] = entity.veh.yaw_seeded ? entity.veh.air_pitch_bam : entity.pitch_bam;
+    out[2] = entity.veh.yaw_seeded ? entity.veh.air_roll_bam : entity.roll_bam;
 }
 
 SpawnPointResult entity_pose(const Entity &entity) {
     SpawnPointResult out;
     out.found = true;
+    // The chosen entity's position words, copied raw (D-NET-507).
+    // [orig: Server_PositionPlayerForSpawn @0x50CF60 - the copies
+    //  @0x50CFB7..0x50CFE2 / @0x50D3DB..0x50D403]
     out.position = entity.position;
-    out.yaw = entity.yaw;
-    out.pitch = entity.pitch;
-    out.roll = entity.roll;
+    out.pitch_bam = entity.pitch_bam;
+    out.roll_bam = entity.roll_bam;
     int32_t words[3];
     entity_orientation_words(entity, words);
     out.heading_bam = words[0];
     return out;
+}
+
+// The spawn entity's position words as the placement leaves them: its model's "psp"
+// userpoint (Entity::spawn_point) through the entity's euler placement over its six
+// words, else the copied position raised 1.0, the z word's +0x10000 (D-NET-507). The
+// angle words stay the entity's copies (D-NET-NEW-L1-39).
+// [orig: Server_PositionPlayerForSpawn @0x50CF60 - ModelGPM_FindUserpointByName(+0x30,
+//  aPsp @0x7CF9C4) @0x50CFEE, Math_BuildFixedPointMatrixFromEulerAngles over the entity's
+//  +4 words @0x50D002, Math_FixedPointTransformPoint22 into the player's +4 @0x50D00E, else
+//  `add dword ptr [eax+0Ch], 10000h` @0x50D01C]
+void place_on_spawn_point(const Entity &entity, SpawnPointResult &out) {
+    if (!entity.spawn_point_valid) {
+        out.position.z.q16 = io::bam_add(out.position.z.q16, 0x10000);
+        return;
+    }
+    int32_t words[3];
+    entity_orientation_words(entity, words);
+    const int32_t origin[3] = {
+        entity.position.x.q16, entity.position.y.q16, entity.position.z.q16};
+    const CollisionMatrix placement =
+        collision_matrix_from_euler(words[0], words[1], words[2], origin);
+    int32_t placed[3];
+    placement.transform_point(entity.spawn_point, placed);
+    out.position.set_q16({placed[0], placed[1], placed[2]});
 }
 
 SpawnPointResult marker_pose(const World &world, const Entity &marker) {
@@ -53,31 +80,29 @@ SpawnPointResult marker_pose(const World &world, const Entity &marker) {
     if (parent == nullptr)
         return out;
 
-    // The parent's own +0x10..+0x18 words turn the marker's local position
-    // and add to its heading. [orig: Entity_TransformLocalToWorld @0x43BD00,
-    //  refEntity[3..5] @0x43BD22..0x43BD64]
+    // The parent's position and its own +0x10..+0x18 words turn the marker's
+    // local position, in the transform's own fixed point: truncated x87
+    // sines / cosines and a floor per product, roll, then pitch, then yaw,
+    // never a composed matrix's rounded sums (a deck marker on a dock slab at
+    // mission yaw 0 lands one unit off on X and Y through the matrix). The
+    // heading word is the two words' sum, wrapping; the marker's own pitch and
+    // roll stay. [orig: Entity_FindBestSpawnPoint @0x50CCC0 - the calls
+    //  @0x50CDC2 (each candidate's score) / @0x50CF0F (the winner);
+    //  Server_PositionPlayerForSpawn @0x50CF60 - the 6007 scatter @0x50D146, the
+    //  Co-op marker arm @0x50D416; Entity_TransformLocalToWorld @0x43BD00,
+    //  refEntity[3..5] @0x43BD22..0x43BD64, the heading add @0x43BE7E]
     int32_t parent_words[3];
     entity_orientation_words(*parent, parent_words);
-    const int32_t parent_position[3] = {
-        to_fixed(parent->position.x), to_fixed(parent->position.y),
-        to_fixed(parent->position.z)};
-    const CollisionMatrix parent_pose = collision_matrix_from_euler(
-        parent_words[0], parent_words[1], parent_words[2], parent_position);
-    const int32_t local[3] = {
-        to_fixed(marker.position.x), to_fixed(marker.position.y),
-        to_fixed(marker.position.z)};
-    int32_t transformed[3] = {};
-    parent_pose.transform_point(local, transformed);
-    constexpr float kFromFixed = io::kInvFp16One;
-    out.position = {transformed[0] * kFromFixed,
-                    transformed[1] * kFromFixed,
-                    transformed[2] * kFromFixed};
-    // Entity_TransformLocalToWorld adds heading while retaining the marker's
-    // local pitch and roll. Entity stores the inverse mission-yaw convention.
-    out.yaw = static_cast<int16_t>(std::lround(normalize_mission_yaw_deg(
-        static_cast<double>(parent->yaw) + marker.yaw - 90.0)));
-    // The heading word is the two words' sum, wrapping. [orig: @0x43BE7E]
-    out.heading_bam = io::bam_add(parent_words[0], out.heading_bam);
+    const int32_t ref[6] = {
+        parent->position.x.q16, parent->position.y.q16, parent->position.z.q16,
+        parent_words[0], parent_words[1], parent_words[2]};
+    int32_t pose[6] = {
+        marker.position.x.q16, marker.position.y.q16, marker.position.z.q16,
+        out.heading_bam, out.pitch_bam, out.roll_bam};
+    entity_transform_local_to_world(ref, pose);
+    // The transformed words are the pose's position words (D-NET-507).
+    out.position.set_q16({pose[0], pose[1], pose[2]});
+    out.heading_bam = pose[3];
     return out;
 }
 
@@ -125,11 +150,11 @@ SpawnPointResult best_marker_pose(World &world, int32_t marker_type,
     if (markers.empty())
         return {};
 
-    std::vector<Vec3> avoid;
+    std::vector<FixedVec3> avoid; // the players' position words (D-NET-507)
     world.registry.for_each([&](const Entity &entity) {
         if (entity.handle.pool() == 0 && entity.handle != spawning_player &&
             (entity.flags & kEntityFlagPlayer) != 0)
-            avoid.push_back(entity.position);
+            avoid.push_back(entity.position.q16());
     });
 
     // flt_7C19E0 is the shared float-to-int guard. The random arm is not an
@@ -144,13 +169,11 @@ SpawnPointResult best_marker_pose(World &world, int32_t marker_type,
         ScoredMarker row;
         row.pose = marker_pose(world, *marker);
         int64_t nearest = kDistanceClampFixed;
-        for (const Vec3 &other : avoid) {
+        for (const FixedVec3 &other : avoid) {
             const long double dx =
-                static_cast<long double>(to_fixed(row.pose.position.x)) -
-                to_fixed(other.x);
+                static_cast<long double>(row.pose.position.x.q16) - other.x;
             const long double dy =
-                static_cast<long double>(to_fixed(row.pose.position.y)) -
-                to_fixed(other.y);
+                static_cast<long double>(row.pose.position.y.q16) - other.y;
             const long double distance = std::sqrt(dx * dx + dy * dy);
             if (distance < static_cast<long double>(nearest)) {
                 nearest = static_cast<int64_t>(distance);
@@ -177,24 +200,35 @@ SpawnPointResult best_marker_pose(World &world, int32_t marker_type,
 // first-32 radius-gated type-6007 scatter markers within the zone, the shared
 // g_SpawnCycleCounter % (count+1) round-robin (0 = the zone entity itself, else
 // the (i-1)th 6007 marker parent-transformed), and the +0x10000 no-userpoint z arm].
-// The runtime-set model-userpoint name remains unrecovered; retain the exact
-// no-userpoint +1 z arm rather than inventing a name.
+// Ahead of the walk the zone entity's own spot is its model's "psp" userpoint, else
+// its position raised 1.0 (place_on_spawn_point, D-NET-NEW-L1-39).
 SpawnPointResult target_pose(World &world, const Entity &target) {
     SpawnPointResult out = entity_pose(target);
-    out.position.z += 1.0f;
+    place_on_spawn_point(target, out);
     if (target.zone_number == 0)
         return out;
 
+    // The 6007 walk on the words: the zone's +0x15E radius shifted to 16.16, each
+    // pool-3 6007 row's wrapping X/Y deltas from the target, the x87 length
+    // saturated at flt_7C19E0 and truncated, kept when not past the radius, the
+    // first 32 (D-NET-507).
+    // [orig: Server_PositionPlayerForSpawn @0x50CF60 - the radius `movzx` / `shl 10h`
+    //  @0x50D034 / @0x50D03B, the ItemTypeIndex test @0x50D081..0x50D08C, the deltas
+    //  @0x50D098 / @0x50D09B, the clamp @0x50D0B7..0x50D0C2, _ftol2_sse @0x50D0C4,
+    //  `jg` @0x50D0CD, the 32-row cap @0x50D0D6]
+    const int32_t radius = static_cast<int32_t>(static_cast<uint32_t>(target.zone_radius) << 16);
     std::array<const Entity *, 32> nearby{};
     size_t count = 0;
-    world.registry.for_each([&](const Entity &candidate) {
-        if (count == nearby.size() || candidate.handle.pool() != 3 ||
-            !candidate.has_item_def || candidate.item_id != 6007)
+    world.registry.for_each_in_pool(3, [&](const Entity &candidate) {
+        if (count == nearby.size() || !candidate.has_item_def || candidate.item_id != 6007)
             return;
-        const double dx = static_cast<double>(candidate.position.x) - target.position.x;
-        const double dy = static_cast<double>(candidate.position.y) - target.position.y;
-        const double radius = static_cast<double>(target.zone_radius);
-        if (dx * dx + dy * dy <= radius * radius)
+        const double dx = static_cast<int32_t>(static_cast<uint32_t>(candidate.position.x.q16) -
+                                               static_cast<uint32_t>(target.position.x.q16));
+        const double dy = static_cast<int32_t>(static_cast<uint32_t>(candidate.position.y.q16) -
+                                               static_cast<uint32_t>(target.position.y.q16));
+        const int32_t distance = static_cast<int32_t>(
+                std::min(std::sqrt(dx * dx + dy * dy), 2147418112.0)); // flt_7C19E0
+        if (distance <= radius)
             nearby[count++] = &candidate;
     });
     if (count == 0)
@@ -221,7 +255,10 @@ SpawnPointResult objective_coop_entity_pose(const World &world, uint8_t team) {
     if (selected == nullptr)
         return {};
     SpawnPointResult out = entity_pose(*selected);
-    out.position.z += 1.0f; // unrecovered userpoint name: exact absent arm
+    // [orig: Server_PositionPlayerForSpawn @0x50CF60 - the find @0x50D533,
+    //  Math_BuildFixedPointMatrixFromEulerAngles @0x50D547, Math_FixedPointTransformPoint22
+    //  @0x50D553, else `add dword ptr [ebx+0Ch], 10000h` @0x50D55D]
+    place_on_spawn_point(*selected, out);
     return out;
 }
 
@@ -296,16 +333,18 @@ SpawnPointResult no_pick_pose(World &world, EntityHandle spawning_player,
             : SpawnPointResult{};
     }
 
+    SpawnPointResult scored;
     if (primary_allowed && types.primary != 0 &&
         !markers_of_type(world, types.primary).empty()) {
         ++world.zones.spawn_cycle_counter;
-        return best_marker_pose(world, types.primary, spawning_player);
+        scored = best_marker_pose(world, types.primary, spawning_player);
+    } else {
+        ++world.zones.spawn_cycle_counter;
+        if (types.fallback != 0) scored = best_marker_pose(world, types.fallback, spawning_player);
     }
-
-    ++world.zones.spawn_cycle_counter;
-    return types.fallback != 0
-        ? best_marker_pose(world, types.fallback, spawning_player)
-        : SpawnPointResult{};
+    // [orig: Entity_FindBestSpawnPoint @0x50D56C, Entity_WarmUpOrganicAnimation @0x50D572]
+    scored.warm_up = true;
+    return scored;
 }
 
 } // namespace
@@ -406,8 +445,8 @@ SpawnZoneRegistry ZoneSystem::build_spawn_zone_list() const {
                     ? 232420u + static_cast<uint32_t>(e.handle.slot()) * 1360u
                     : 1865416u + static_cast<uint32_t>(e.handle.slot()) * 812u;
             rows.push_back(row);
-            const int32_t x = to_fixed(e.position.x);
-            const int32_t y = to_fixed(e.position.y);
+            const int32_t x = e.position.x.q16;
+            const int32_t y = e.position.y.q16;
             if (x < reg.min_x) reg.min_x = x;
             if (y < reg.min_y) reg.min_y = y;
             if (x > reg.max_x) reg.max_x = x;

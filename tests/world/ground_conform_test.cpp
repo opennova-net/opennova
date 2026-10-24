@@ -49,18 +49,28 @@ void test_shock_clamps_in_place() {
 	CHECK(shock == 7, "an in-range shock is untouched");
 }
 
-// travel = 0xFFFF - ftol(0xFFFF * (100 - spring_comp) * 0.01)
+// travel = 0xFFFF - ftol(0xFFFF * (100 - spring_comp) * 0.01f), the product at the
+// FPU's length. spring_comp 0 sits on a one-word edge (6553500 * 0.01f is 65534.9985: one
+// unit at 53 / 64 bits, none at base JO's 24), so it is not pinned as a literal (Q3-11).
+// spring_comp 30 is clear of the edge, at every length:
+//   fild (100 - 30) * 0xFFFF = 4587450 (exact); 0.01f (0x3C23D70A) = 10737418 * 2^-30.
+//   The exact product is 12314342051025 * 2^-28 = 45874.49897...: a 44-bit significand.
+//   53 bits (our double, a dedicated host): held exactly; trunc 45874.
+//   64 bits (JO:CA): held exactly; _ftol2_sse's store to double keeps it; trunc 45874.
+//   24 bits (JO): the ulp in [2^15, 2^16) is 2^-8; 0.49897 * 256 = 127.74 rounds to 128,
+//     so 45874.5; trunc 45874.
+//   travel = 0xFFFF - 45874 = 19661 at all three.
 void test_travel_from_def() {
 	CHECK(conform_travel_from_def(100) == kSuspFull,
 			"spring_comp 100 gives full travel");
-	CHECK(conform_travel_from_def(0) == 0, "spring_comp 0 gives no travel");
+	CHECK(conform_travel_from_def(30) == 19661, "spring_comp 30 gives 19661");
 	// 50% lands near half, allowing for the float round-trip.
 	const int32_t half = conform_travel_from_def(50);
 	CHECK(half > kSuspFull / 2 - 2 && half < kSuspFull / 2 + 2,
 			"spring_comp 50 is about half travel");
 	// Out-of-range percentages clamp rather than producing nonsense travel.
 	CHECK(conform_travel_from_def(150) == kSuspFull, "over 100 clamps");
-	CHECK(conform_travel_from_def(-20) == 0, "under 0 clamps");
+	CHECK(conform_travel_from_def(-20) == conform_travel_from_def(0), "under 0 clamps");
 }
 
 // A wheel already past its travel limit ABSORBS NOTHING — that is what a

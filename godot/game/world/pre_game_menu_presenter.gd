@@ -5,17 +5,28 @@ extends Node
 ## the host starts the game, not under the loading screen. The status line the
 ## join stands at fills the MESSAGES box; a failure parks the screen with the
 ## connection's reason text and only Cancel; the game start hands over to the
-## loading screen. The panel table and the status lines are the engine's
-## (inmatch/pre_game_menu.h, read through JoinScreenStatus); this presenter
-## only renders them and reports Cancel.
+## loading screen. A discovered session whose flag word offers a choice opens
+## the choice panels (GAME_PASSWORD, SPECTATE, the shared TEAM_PASSWORD) that
+## ACCEPT walks and BACK abandons. The panel table, the walk and the status
+## lines are the engine's (inmatch/pre_game_menu.h, read through
+## JoinScreenStatus); this presenter only renders them and reports Cancel and
+## the committed choice.
 
 const MENU_FILE := "pre.mnu"
 const MENU_SCREEN := "PRE_GAME_MENU"
 const MESSAGES := "MESSAGES"
 const ABORT_CANCEL := "ABORT_CANCEL"
+const BACK := "BACK"
+const ACCEPT := "ACCEPT"
+const GAME_PASSWORD := "GAME_PASSWORD"
+const SPECTATE := "SPECTATE"
+const TEAM_PASSWORD := "TEAM_PASSWORD"
 
-## The player pressed Cancel (or ESC): the join is abandoned.
+## The player pressed Cancel or BACK (or ESC): the join is abandoned.
 signal cancelled
+## The choice's last ACCEPT: the three controls as the commit reads them
+## (JoinTarget.apply_pre_game_choice routes them).
+signal choice_committed(game_password: String, spectate: bool, team_password: String)
 ## The host started the game: the loading screen takes over.
 signal game_starting
 
@@ -25,6 +36,8 @@ var _audio: MenuAudio = null
 var _driver: MenuDriver = null
 var _world: GameWorld = null
 var _panel := JoinScreenStatus.PANEL_PROGRESS
+# The discovered flag word the choice walks.
+var _choice_flags := 0
 # The game start's status line shows for one frame before the handoff.
 var _starting_shown := false
 
@@ -79,6 +92,39 @@ func show_failure(text: String) -> void:
 	_set_message(text)
 
 
+## The join machine's choice: the first panel the session's flag word asks for
+## (engine pre_game_entry_panel carries the witness). False when the word offers
+## no choice.
+func show_choice(server_flags: int) -> bool:
+	var panel_state := JoinScreenStatus.entry_panel(server_flags, false)
+	if panel_state == JoinScreenStatus.PANEL_PROGRESS:
+		return false
+	_world = null
+	_choice_flags = server_flags
+	_set_panel(panel_state)
+	return true
+
+
+## ACCEPT on the showing panel: the next panel, else the commit, which returns the
+## screen to its progress panel and reports the three controls (engine
+## pre_game_accept carries the witness).
+func accept() -> void:
+	var step := JoinScreenStatus.accept_step(_panel, _choice_flags, _is_checked(SPECTATE), false)
+	if step == JoinScreenStatus.ACCEPT_NONE:
+		return
+	if step == JoinScreenStatus.ACCEPT_ABORT:
+		cancel()
+		return
+	if step != JoinScreenStatus.ACCEPT_COMMIT:
+		_set_panel(step)
+		return
+	var game_password := _widget_text(GAME_PASSWORD)
+	var spectate := _is_checked(SPECTATE)
+	var team_password := _widget_text(TEAM_PASSWORD)
+	_set_panel(JoinScreenStatus.PANEL_PROGRESS)
+	choice_committed.emit(game_password, spectate, team_password)
+
+
 ## The Cancel button's action (ESC included).
 func cancel() -> void:
 	if is_open():
@@ -99,6 +145,11 @@ func close() -> void:
 
 func panel() -> int:
 	return _panel
+
+
+## The screen's menu driver (the tests drive its controls; null while closed).
+func get_menu_driver() -> MenuDriver:
+	return _driver
 
 
 ## The MESSAGES box's text (the test and probe read).
@@ -158,9 +209,27 @@ func _set_message(text: String) -> void:
 		_driver.set_widget_text(id, text)
 
 
+# ACCEPT walks the choice; BACK and ABORT_CANCEL both abandon the join (engine
+# inmatch/pre_game_menu.h pre_game_accept carries the witness).
 func _on_widget_activated(_id: int, widget_name: String) -> void:
-	if widget_name.nocasecmp_to(ABORT_CANCEL) == 0:
+	if widget_name.nocasecmp_to(ABORT_CANCEL) == 0 or widget_name.nocasecmp_to(BACK) == 0:
 		cancel()
+	elif widget_name.nocasecmp_to(ACCEPT) == 0:
+		accept()
+
+
+func _widget_text(widget_name: String) -> String:
+	if _driver == null:
+		return ""
+	var id := _driver.widget_id(widget_name)
+	return String(_driver.get_widget_text(id)) if id >= 0 else ""
+
+
+func _is_checked(widget_name: String) -> bool:
+	if _driver == null:
+		return false
+	var id := _driver.widget_id(widget_name)
+	return id >= 0 and bool(_driver.is_widget_checked(id))
 
 
 func _on_frame_gui_input(event: InputEvent) -> void:

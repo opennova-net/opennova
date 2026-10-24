@@ -183,11 +183,24 @@ std::array<uint32_t, charattr::kClassCount> charattr_class_attribute_rows(const 
 	return out;
 }
 
+std::array<std::array<int32_t, 3>, charattr::kClassCount> charattr_class_cammo_rows(const CharAttrTable &state) {
+	std::array<std::array<int32_t, 3>, charattr::kClassCount> out{};
+	for (size_t i = 0; i < charattr::kClassCount; ++i) {
+		const uint8_t class_id = static_cast<uint8_t>(i + 1);
+		out[i][0] = charattr_cammo_type_id(state, class_id, charattr::kJungleCammo);
+		out[i][1] = charattr_cammo_type_id(state, class_id, charattr::kDesertCammo);
+		out[i][2] = charattr_cammo_type_id(state, class_id, charattr::kArcticCammo);
+	}
+	return out;
+}
+
 void install_class_attribute_flags(world::World &world, const CharAttrTable *live,
 		const CharAttrTable &boot) {
 	const CharAttrTable &table = live != nullptr ? *live : boot;
 	world.tables.class_attribute_flags = charattr_class_attribute_rows(table);
 	world.tables.charattr_disabled_word = charattr_pack_disabled(table);
+	world.tables.class_cammo_type_ids = charattr_class_cammo_rows(table);
+	world.tables.class_cammo_installed = table.loaded;
 }
 
 } // namespace opennova::inmatch

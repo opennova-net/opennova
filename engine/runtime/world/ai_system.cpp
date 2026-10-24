@@ -3,6 +3,8 @@
 #include <runtime/world/ai.h>
 #include <runtime/devtools/tick_profile.h>
 #include <base/io/crt_ftol.h>
+#include <base/io/fixed.h>         // kQ22One (the barrage's Q22 table reads)
+#include <base/io/rotating_prng.h> // the barrage's ROL4 steps
 
 // The AI event queue and the AiSystem core: registration, per-entity rows, and the
 // tick that drives every handler above.
@@ -11,6 +13,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/body_anim.h>
 #include <runtime/world/mount_controls.h>
+#include <runtime/world/player_spawn.h>
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/vehicle_motor.h>
@@ -21,6 +24,7 @@
 
 #include "ai_detail.h"
 
+#include <runtime/world/body_trace.h>
 #include <runtime/world/world.h>
 
 namespace opennova::world {
@@ -53,10 +57,6 @@ int32_t apply_resolved_mounted_seat_frame(AiEntity &e, World &world,
         e.body_pitch = pose.pitch;
         e.roll = pose.roll;
     }
-    // Organics present from AiEntity.pos, not Entity.position.
-    e.pos[0] = to_fixed(occupant.position.x);
-    e.pos[1] = to_fixed(occupant.position.y);
-    e.pos[2] = to_fixed(occupant.position.z);
     return resolved_heading;
 }
 
@@ -78,37 +78,44 @@ bool remote_player_controls_vehicle(const AiEntity &e, const Entity &occupant,
 
 } // namespace
 
-// The mounted body's heading refresh after the seat frame is applied: the local
-// player, every NPC seat, a gunner and a remote peer driving the vehicle keep
-// their full-precision LOOK heading/pitch after the seat transform. Other wire
-// riders adopt the seat heading. [orig: org1 mounted @0x4BEF57..0x4BEF97;
-// Entity_AttachToBoneAndUpdateTransform @0x5463D0, the look
-// restore @0x546661 / @0x546664; world-wac-ai-re.md §22.4 / §5.38]
+// The mounted body's heading refresh after the seat frame is applied: every
+// organic rider keeps its full-precision LOOK heading/pitch after the seat
+// transform. The organic movers reach the UseGun attach for seat type 3 alone,
+// whose tail restores both look words saved at its entry; their other seats'
+// carry writes no look word (D-NET-NEW-L6-3). A non-organic brain keeps the
+// words the seat pose gave it: retail runs no seat mover for one (the seat bone's
+// readers are the organic movers, the request, the rope renderer and the suspension
+// bounce; its only non-organic mount is the WAC's) [orig:
+// Entity_GetBoneTransformAndOrientation @0x4B0C50, its callers @0x436540 / @0x4561F6 /
+// @0x4567F7 / @0x4B6510 / @0x4BED72; WacScript_TryMountEntityToVehicle @0x4F70F0].
+// [orig: Entity_UpdateInfantryPlayerBody `cmp [esi+168h], 3` @0x4B63A5..0x4B63BF,
+//  the carry @0x4B6510..0x4B6575; Entity_UpdateInfantryAI @0x4BEC0F..0x4BEC1B;
+//  Entity_AttachToBoneAndUpdateTransform @0x5463D0 - the saves @0x546416..0x54642C,
+//  the seat Yaw into +0x2D4 / +0x2D8 / +0x2E4 / +0x2E8 @0x546635..0x54665B, the
+//  restores @0x546661 (Yaw) / @0x546664 (Pitch); org1 mounted @0x4BEF57..0x4BEF97;
+//  world-wac-ai-re.md §22.4 / §5.38]
 bool AiSystem::refresh_mounted_pose(AiEntity &e, World &world) {
     Entity *occupant = world.registry.get(e.handle);
     if (occupant == nullptr || occupant->motor_suspended || !occupant->mounted || occupant->health <= 0) return false;
     Entity *vehicle = world.registry.get(occupant->mount_target);
-    if (vehicle == nullptr || occupant->mount_seat < 0 ||
-        occupant->mount_seat >= static_cast<int>(vehicle->seats.size()))
+    Seat seat;
+    if (vehicle == nullptr || !world.vehicles.rider_seat(*occupant, *vehicle, seat))
         return false;
-    const Seat &seat = vehicle->seats[occupant->mount_seat];
     const int32_t saved_look_heading = e.heading;
     const int32_t saved_look_pitch = e.pitch;
-    const int32_t seat_heading = apply_resolved_mounted_seat_frame(
-            e, world, *occupant, *vehicle, seat);
-
-    if (e.inf.active &&
-        (e.inf.is_local_player || npc_mounted_body(e, *occupant) ||
-         seat.type == SeatType::Gunner || remote_player_controls_vehicle(e, *occupant, seat))) {
-        // Independent LOOK was already promoted/chased in pose_if_mounted. Restore
-        // that exact value without consulting input latches or advancing aim again.
-        e.heading = saved_look_heading;
-        e.pitch = saved_look_pitch;
-        occupant->yaw = static_cast<int16_t>(std::lround(normalize_mission_yaw_deg(
-                mission_yaw_deg_from_bam_heading(saved_look_heading))));
-    } else {
+    const int32_t seat_heading =
+            apply_resolved_mounted_seat_frame(e, world, *occupant, *vehicle, seat);
+    if (!e.inf.active) {
         e.heading = seat_heading;
+        return true;
     }
+    // Independent LOOK was already promoted/chased in pose_if_mounted. Restore
+    // that exact value without consulting input latches or advancing aim again;
+    // the Yaw and Pitch words both take the look back.
+    e.heading = saved_look_heading;
+    e.pitch = saved_look_pitch;
+    occupant->heading = saved_look_heading;
+    occupant->pitch_bam = saved_look_pitch;
     return true;
 }
 
@@ -128,6 +135,7 @@ void AiEventQueue::process_timed(AiSystem &sys, World &world) {
         if (remaining <= 0.0f) {
             AiEntity *e = sys.at(entry.entity_index());
             if (e && e->brain.f[AiBrain::kOwner]) {
+                const int32_t state_before = e->brain.f[AiBrain::kCurState];
                 AiThinkCtx ctx{&sys, e, &world, &entry};
                 sys.row(e->brain.f[AiBrain::kCurState]).event(ctx); // off_815244
                 int32_t pend = e->brain.f[AiBrain::kPendState];
@@ -142,6 +150,9 @@ void AiEventQueue::process_timed(AiSystem &sys, World &world) {
                         e->brain.f[AiBrain::kCurState] = e->brain.f[AiBrain::kPendState];
                     }
                 }
+                // The body readout (an instrument, no behaviour; body_trace.h).
+                body_trace_ai_event(world, e->handle, entry.type(), state_before,
+                        e->brain.f[AiBrain::kCurState]);
             }
             // Compact: swap-with-last (faithful to the orig array compaction).
             buf_[index] = buf_[count_ - 1];
@@ -198,9 +209,14 @@ int AiSystem::attach(EntityHandle h) {
     AiEntity &e = entities_[index];
     e = AiEntity{};
     e.handle = h;
+    bind_self(e);
     e.brain.f[AiBrain::kOwner] = 1; // nonzero = live slot
     if (h.valid()) handle_to_ai_index_[h.packed] = index;
     return index;
+}
+
+void AiSystem::bind_self(AiEntity &e) {
+    e.self = registry_ != nullptr ? registry_->row_storage(e.handle) : nullptr;
 }
 
 void AiSystem::release(EntityHandle h) {
@@ -242,6 +258,7 @@ int AiSystem::attach_dismemberment_piece(
 
 int AiSystem::place_dismemberment_piece(EntityHandle h, AiEntity &&piece) {
     release(h);
+    bind_self(piece);
     int index = -1;
     for (int i = 0; i < static_cast<int>(entities_.size()); ++i) {
         if (entities_[i].brain.f[AiBrain::kOwner] == 0) {
@@ -457,13 +474,21 @@ void process_class_state_machine(
 // [orig: EntityAI_ProcessAirStateMachine @0x4581b0] event 0=update, 1=kill/damage
 // notification, 4=death.
 void AiSystem::process_air_state_machine(AiEntity &e, World &world, int event) {
+    const int32_t state_before = e.brain.f[AiBrain::kCurState];
     process_class_state_machine(*this, e, world, event, kAirClassGates);
+    // The body readout (an instrument, no behaviour; body_trace.h).
+    if (event != 0)
+        body_trace_class_event(world, e.handle, event, state_before, e.brain.f[AiBrain::kCurState]);
 }
 
 // [orig: EntityAI_ProcessGroundStateMachine @0x4583c0] event 0=update, 1=kill/damage
 // notification, 4=death.
 void AiSystem::process_ground_state_machine(AiEntity &e, World &world, int event) {
+    const int32_t state_before = e.brain.f[AiBrain::kCurState];
     process_class_state_machine(*this, e, world, event, kVehicleClassGates);
+    // The body readout (an instrument, no behaviour; body_trace.h).
+    if (event != 0)
+        body_trace_class_event(world, e.handle, event, state_before, e.brain.f[AiBrain::kCurState]);
 }
 
 void AiSystem::apply_transition(AiEntity &e, World &world) {
@@ -550,15 +575,631 @@ void AiSystem::think_brain(AiEntity &e, World &world) {
         process_air_state_machine(e, world, 0);
 }
 
+// A person body bound to a vehicle, aircraft or genx row runs that row's mover over its own
+// words; true when `row` is one of them (the body ran its mover). A vehicle or aircraft mover
+// loads the brain word (+0x64) at its head, which a person's class init never fills, stamps the
+// savedLivePose words from the body's Position and Yaw / Pitch / Roll words, and on the null brain
+// jumps to its matrix-build tail (the matrix of +4 into +0xB4, Flags |= 0x20000): no ground probe,
+// carrier ride, health cadence, input, motion or sound. Every mover a row's dispatcher selects
+// takes that path, whatever the def's +0x8DC selector or the afloat bit picks.
+// [orig: Entity_DispatchPhysics_cveh @0x48EFC0 (the +0x8DC select @0x48EFC7) and
+//  Entity_DispatchPhysics_ctrn @0x48F060 -> Entity_UpdateVehiclePhysics @0x48AF00 (`mov edi,
+//  [esi+64h]` @0x48AF1A, the stamp @0x48AF74..0x48AFA0, `jz` @0x48AFA6 -> the tail
+//  @0x48D43E..0x48D451) or Vehicle_ProcessSelectorZeroGround @0x46E100 (@0x46E119, the stamp
+//  @0x46E12D..0x46E15F, `jz` @0x46E165 -> @0x46F9B2..0x46F9C5); Entity_DispatchPhysicsUpdate
+//  @0x48F010 (catv: the afloat bit @0x48F014, else the same pair @0x48F041);
+//  Entity_DispatchPhysics_ctank @0x48F000 -> Entity_UpdateTankVehiclePhysics @0x488AB0
+//  (@0x488ACA, the stamp @0x488B24..0x488B50, `jz` @0x488B56 -> @0x48AEB6..0x48AEC9);
+//  Entity_DispatchPhysics_cbike @0x48EFF0 -> Entity_UpdateLightVehiclePhysics @0x483FE0
+//  (@0x483FFA, the stamp @0x484054..0x484080, `jz` @0x484086 -> @0x486A04..0x486A17);
+//  Entity_DispatchPhysics_cbot @0x48EF90 -> Entity_UpdateWatercraftPhysics @0x48D480
+//  (@0x48D499, the stamp @0x48D4AC..0x48D4E9, `jz` @0x48D4EF -> @0x48EF50..0x48EF63) or
+//  Vehicle_ProcessSelectorZeroBoat @0x46FA00 (@0x46FA19, the stamp @0x46FA2C..0x46FA5E, `jz`
+//  @0x46FA64 -> @0x471670..0x471683); cpln j_Entity_UpdateAircraftPhysics @0x45D6F0 and CHel
+//  -> Entity_UpdateAircraftPhysics @0x490310 (`mov ebx, [esi+64h]` @0x49032C, the stamp
+//  @0x490337..0x49036B, `jz` @0x490371 -> @0x492753..0x492766)]
+// The genx row's mover is the parent follow over the body's own words: the spawn stored it as
+// the body's +0x1C4, which the drop motion models (a re-fall replaces it), so the body runs its
+// installed drop motion, the ride on its +0x28 ground entity (update_dropped_object).
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the +0x1C4 store @0x43C453;
+//  Entity_UpdateParentTransform @0x4A88B0 - the def+0x8DC gate @0x4A88BB, the stamp
+//  @0x4A88D5..0x4A8902, the +0x28 read @0x4A88F1]
+// The rokt, hlfr and jvln movers write the body's +0x2B8 pending dword, which the motor's
+// pending anim (and its wire mirror, the dword the records test whole) is: rokt sets the high
+// word (+0x2BA) to 1 while it is 0; hlfr and jvln set the low word's bit 0 when the body has no
+// +0x170 link (Entity::primary_occupant), then return while that bit is set.
+// [orig: Entity_UpdateRocketFlag @0x443DD0 - the test @0x443DD4, the store @0x443DDE;
+//  Entity_UpdateGuidedMissile @0x446690 - the +0x170 test @0x4466B3..0x4466C9, `or word ptr
+//  [esi+2B8h], 1` @0x4466CB, the bit test @0x4466DA..0x4466DC to the return @0x446B82;
+//  Missile_UpdateGuidance @0x446BA0 - @0x446BBD..0x446BD7, @0x446BD9, @0x446BE8..0x446BEA to
+//  the return @0x44712F]
+// The envs, door and squib movers write no word of a person body's: envs registers its def's
+// loop emitter, door rebinds its def model's bone callbacks, and squib returns at its head on
+// the zero death tick (+0x1AC) a live body's update would have written; nor does upfx while
+// the body's 0x4 bit is clear (its def+0x8DC return, or envs's emitter). [orig:
+// Entity_UpdateEnvSoundEmitter @0x4A8080; Entity_SetDefaultBoneCallbacks @0x4A91D0 (the def
+// model @0x4A91D8, the slots @0x4A91F0..0x4A922D); Entity_ProcessProjectileTravel @0x448D50 -
+// `cmp dword ptr [ebp+1ACh], 0` @0x448D5E, `jz` @0x448D65 to the return @0x4497EE;
+// Entity_UpdateWaterPhysicsAndEffects @0x4A92E0 - @0x4A92E8, `test byte ptr [esi+24h], 4`
+// @0x4A92F5, the envs leg @0x4A93D6]
+// The envs row's mover IS the loop emitter, so the body registers its def's regional loop on
+// every pool-0 visit, with no gate; upfx's tail registers it on the batch's last tick for a def
+// with no physics selector (def+0x8DC) and a body with neither Flags 0x2 nor 0x4. Ahead of that
+// tail, a body whose 0x4 bit is set (on a person the NVG bit, the view refresh's) runs the
+// husk leg: the swap fade, the authority's one S2C 0x26 in a session (sub-type 0x20), and a
+// building def's two blasts (0x80). [orig: Entity_UpdateWaterPhysicsAndEffects @0x4A92E0 - the
+// bit @0x4A92F5, Entity_PublishSwapFadePhases called @0x4A9304, the 0x26 @0x4A9310..0x4A9336,
+// the +0x34 test @0x4A933D, the blasts @0x4A934E..0x4A93BD]
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-0 `call eax` @0x4C2472 (the envs row's
+//  entry Entity_UpdateEnvSoundEmitter @0x4A8080); Entity_UpdateWaterPhysicsAndEffects @0x4A92E0
+//  - the def+0x8DC test @0x4A92E8, `test byte ptr [esi+24h], 6` @0x4A93C5, dword_24E0E80
+//  @0x4A93CC, the call @0x4A93D6]
+// The psec row's mover is the physics step over the body's words, its velocity triple (+0x98 /
+// +0x9C / +0xA0) the motor's (InfantryState::vel) and its +0x270 word Entity::palm_state, zero
+// on a person (the spawn's memset; the class inits and the spawn reset write neither).
+// [orig: Entity_UpdatePhysicsStep @0x53BE10 - the stamp @0x53BE1E..0x53BE4D, the +0xA0 read
+//  @0x53BE58, the +0x270 test @0x53BE81; Entity_ResetToSpawnState @0x4B9610 - the zeroed
+//  +0x98..+0xA8 @0x4B9668..0x4B9686; PlayerClass_InitEntity @0x4B1060]
+// The ele0 row's mover (update_elevator) runs over a person's words: its lift the +0x1A8 word
+// (InfantryState::target_heading, the spawn reset's Yaw word), its vertical step +0xA0 the
+// motor's, its state +0x29C and previous state +0x2A0 the spawn memset's 0 on a player body
+// (Entity::veh.speed, Entity::script_next_ssn); the body's +0x28 ground entity the resolver's.
+// [orig: Entity_UpdateFallAndLandState @0x4A20E0 - +0x29C @0x4A2116, +0x1A8 @0x4A2124, +0xA0
+//  @0x4A2133, +0x2A0 @0x4A2187; Entity_ResetToSpawnState @0x4B9610 - +0x1A8 @0x4B9692]
+// The arty row's mover zeroes the velocity triple (the motor's), then on the session's
+// authority sends S2C 0x44 group 6 (Entity_SendEffectPacket, 0x136, msgClass 1): the +0x170
+// link's handle (0xFFFF with none), the +0x78 word, then the def+0x164 serializer's body, which
+// only the guided class rows' serializer writes for group 6, the attach triple +0x2E4 / +0x2E8 /
+// +0x2EC (the legs' re-plant pair and the aim heading on a person; the spawn reset's Yaw words).
+// The person rows' serializers and the vehicles' return -1 off group 11 and every other row has
+// none, so no packet leaves. Ahead of the send its barrage leg runs over the words the arty class
+// init stored at the spawn (player_body_class_init; D-NET-NEW-L4-23).
+// [orig: ArtyClass_UpdateBarrage @0x447140 - the zeroes @0x44714F..0x447163, the gate
+//  @0x447148 / @0x447185 / @0x447199 / @0x4471AE, the send @0x4472C9..0x4472D9;
+//  Entity_SendEffectPacket @0x445C40 - the serialize @0x445C6C, the -1 test @0x445C76, the send
+//  @0x445CA2; NetPacket_SerializeEntityForServer @0x4D6240 - the authority and def+0x164 test
+//  @0x4D62B1, the +0x170 handle @0x4D62B9..0x4D62F3, +0x78 @0x4D62FC, the group @0x4D632C;
+//  Entity_SerializeGuidedMissileState @0x447C50 - the group switch @0x447C80, group 6's +0x2E4 /
+//  +0x2E8 / +0x2EC writes @0x447DF6..0x447E44; NetPacket_SerializePlayerState
+//  @0x4C09C0 - `cmp [esi+1Ch], 0Bh` @0x4C09F6, the -1 @0x4C20D1; NetPacket_SerializeInfantryEntityState
+//  @0x4C0320 - @0x4C06E9, the -1 @0x4C06D8; Entity_SerializeVehicleState @0x460560 - @0x460B47,
+//  the -1 @0x460B3C; Entity_ResetToSpawnState @0x4B9610 - +0x2EC / +0x2E4 / +0x2E8
+//  @0x4B9698..0x4B96A4; ArtyClass_InitFromDef @0x443430 - +0x2C4 = 10 @0x443473]
+// The ewep row's mover reads a person's +0x2D4 word, the spawn reset's Yaw, as its weapon def:
+// on the batch's last tick, while the +0x30F byte (the top byte of the aimPoint X word, which
+// the organic init's anchor writes) is nonzero, it loads [Yaw+0x294] and, counting that byte
+// down, [Yaw+0x298]. Those two garbage-pointer reads are a deliberate fix of a retail bug: ours
+// never runs them over a person (PERMANENT, ratified by the maintainer, Q16-1 (a), 2026-10-22).
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - `mov esi, [ebp+2D4h]` @0x440E8E, the
+//  byte @0x4413A6, @0x4413B0, @0x441417; Entity_ResetToSpawnState @0x4B9610 - +0x2D4
+//  @0x4B96AA; Entity_InitOrganicAI @0x4BFCC0 - +0x30C @0x4C01E8 / @0x4C0238]
+// The rest of the ewep mover runs over the person's words (person_ewep_mover), the joiner's
+// destroy of its own body behind its C2S 0x0F pair included. A riding +0x170 occupant's turret
+// window (garbage-pointer limits, the Q16-1 (a) class) is not run; the tank-command call behind
+// it is.
+// The other item rows' movers over a person's words are not run (D-NET-NEW-L4-14 (a),
+// narrowed): towr, nade, rock, schl, clym, arti, aflr, gflr, stng,
+// squib past a nonzero death tick, hlfr / jvln's guidance past a +0x170 link and an even
+// pending word, and door's model callbacks.
+static void set_anim_pending(AiEntity &e, Entity &body, int32_t word) {
+    e.inf.anim_pending = word;
+    body.net_anim_pending = word;
+}
+
+// The ewep row's mover over a person body's words. The ground entity (+0x28) is the carrier: a
+// dead PlayerControl ground hides the body (Flags bit 0) and ends the update. The +0x2D4 word
+// (the right leg's chase yaw, the spawn reset's Yaw) stands for the slot def: zero ends the
+// update when there is a ground. A vehicle ground (def type 1) clears the body's Flags bits
+// 0..2 (on a person the hide, dead and NVG bits), copies its 16-bit Health word and its blink
+// quad; its def+0x144 CTRL writer writes only the global bus, which ours composes with the
+// carrier's pose. Anchored (the +0x319 byte, the spawn backup X's second byte, inside 1..the
+// ground model's userpoint count), the body rides that userpoint (person_ewep_anchored_attach).
+// Unanchored, a ground whose matrix bit is clear gives the body its root pose: the Position,
+// Yaw, Pitch and Roll words and savedLivePose as they are. The body's matrix bit is set either
+// way. Then, with the +0x2D4 word nonzero, the spin tail over the
+// spawn backup's bytes: while the aim anchor X's top byte (+0x30F) is nonzero, +0x31B (the
+// backup X's top byte) takes 60 and +0x30F counts down; +0x31B coasts down a step a tick,
+// adding 32 times what is left to the 16-bit word +0x320 (the backup Z's low half).
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the ground @0x440CBF, the dead
+//  PlayerControl hide @0x440CCA..0x440CE1, +0x2D4 @0x440E8E, the gate @0x440EA0, def type 1
+//  @0x440EA6..0x440EB1, `and [ebp+24h], 0FFFFFFF8h` @0x440EB3, Health @0x440EB7..0x440EBE,
+//  the quad @0x440EC5..0x440EEF, def+0x144 @0x440EF5..0x440EFF, the anchor test
+//  @0x440F04..0x440F34, the matrix-bit test @0x4410EA..0x4410F1, the root copy
+//  @0x441151..0x4411BC, `or [ebp+24h], 20000h` @0x4411C2, the gate @0x4411C9, the countdown
+//  @0x4413FE..0x44140E, the coast @0x44142B..0x441447; Entity_ResetToSpawnState @0x4B9610 -
+//  the backup @0x4B9632..0x4B9644, +0x2D4 @0x4B96AA]
+// Whether a link names a slot that holds no row, which retail's pointer reads as the zeroed
+// entity the shared destroy left there (it zeroes the slot and clears no other entity's link to
+// it). On the host (and in single player) the registry holds every row, so a vacant slot is that
+// zeroed one; a joiner's decoded rows live outside it, so there only a slot the destroy marked
+// is known zeroed.
+// [orig: Entity_Destroy @0x43E810 - the memset @0x43EA70 over +0..+0x2B4, the +0x154 and +0x219
+//  stores @0x43EA78..0x43EA7F, Entity_ClearAllReferences @0x465670 (the call @0x43E921; it
+//  clears AI targets alone, never a +0x28 or +0x170 link)]
+static bool link_reads_zeroed_slot(const World &world, EntityHandle link) {
+    return link.valid() && world.registry.get(link) == nullptr &&
+            (!world.destroyed_mark || world.destroyed_mark(link.packed));
+}
+
+// The anchored leg of the ewep mover over a person body. The anchor byte names a record of the
+// ground model's userpoint table (48 bytes each, 1-based). A record on the model's root part
+// (its subobject word +0x18 is 0) under a ground with a brain publishes the body's +0x322 /
+// +0x324 words to the ground brain by its profile type, as an addeweap child's gun words
+// (publish_gun_words_to_brain): on a person those are the spawn backup Z's high half and
+// detour_target[0]'s low half. Then the body's matrix is the record's attachment frame on the
+// ground's posed model (the provider's attachment-frame pose; the ground's matrix is its live
+// words'), savedLivePose takes the body's Position and Yaw / Pitch / Roll words as they were, and
+// those words take the frame's translation and euler. Without the ground's model data (no
+// provider answer) the words stay; savedLivePose is stored either way.
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the record @0x440F3A..0x440F40, the
+//  subobject test @0x440F50, the brain @0x440F5A, the profile type @0x440F65..0x440F6B, type 2
+//  @0x440F70..0x440F8A, type 1 @0x440F95..0x441020, the ground's matrix @0x441026..0x441086,
+//  Bone_BuildAttachmentMatrix @0x44109D, savedLivePose @0x4410A2..0x4410D7,
+//  Math_FixedPointMatrixToEulerAngles @0x4410DD, the jump @0x4410E5 to @0x4411BE;
+//  Entity_ResetToSpawnState @0x4B9610 - the backup Z +0x320 @0x4B9644]
+static void person_ewep_anchored_attach(World &world, AiEntity &e, Entity &body,
+                                        const Entity &ground, int anchor) {
+    int32_t subobject = -1;
+    if (world.pose_provider != nullptr &&
+            world.pose_provider->userpoint_subobject(world, ground, anchor, subobject) &&
+            subobject == 0)
+        publish_gun_words_to_brain(world, ground.handle,
+                static_cast<int16_t>(static_cast<uint32_t>(body.spawn_position.z.q16) >> 16),
+                static_cast<int16_t>(e.inf.detour_target[0]));
+    Seat point;
+    point.type = SeatType::Gunner;
+    point.bone_index = static_cast<uint8_t>(anchor);
+    point.attachment_frame = true;
+    MountedPose frame;
+    const bool posed = world.pose_provider != nullptr &&
+            world.pose_provider->resolve_mounted_pose(world, ground, point, frame);
+    body.saved_live_pos[0] = body.position.x.q16;
+    body.saved_live_pos[1] = body.position.y.q16;
+    body.saved_live_pos[2] = body.position.z.q16;
+    body.saved_live_yaw = body.heading;
+    body.saved_live_pitch = body.pitch_bam;
+    body.saved_live_roll = body.roll_bam;
+    body.saved_live_valid = true;
+    if (!posed) return;
+    body.position = frame.position;
+    body.heading = e.heading = frame.heading;
+    body.pitch_bam = e.pitch = frame.pitch;
+    body.roll_bam = e.roll = frame.roll;
+}
+
+// The memset over a body's first 0x2B4 bytes, which Entity_Destroy runs ahead of its tail and the
+// 0x18 record runs again ahead of its stores: every word ours keeps of that block, by its entity.h
+// offset, comes back zero (the def +0x1C / +0x20, Flags +0x24, the ground +0x28, the cause / carry
+// dword +0x2C, the model +0x30, Position and the Yaw / Pitch / Roll words, the eye triple
+// +0x6C..+0x74, the owning connection +0x78, the SSN +0x7C, savedLivePose, the velocity triple,
+// the Name +0xF4, the command group +0x11C, Health +0x11E, mana +0x120, +0x122, +0x124, the corpse
+// timer +0x148, the slot byte +0x154, +0x155, +0x156, the mount byte +0x157, the NetId +0x15C, the
+// ammo-def word +0x160, Team +0x162, the mount +0x168 / +0x16C, the occupant +0x170, the ride
+// hold +0x174, the last attacker +0x178, the toggle fallback +0x180, the radar / heat words
+// +0x1A6 / +0x1A4, the death tick +0x1AC, the reviving latch +0x1E0, the target refcount +0x212,
+// subType +0x214, refNum +0x215, the location +0x280, playerClass +0x294, +0x2AC and the
+// equipped ADM index +0x2B0, whose zero is the null def), and the AI entity's homes of block
+// words (below). Its words past +0x2B4 stay (the spawn backup, animSlot +0x374, the lean ramp and
+// radio words). Not here: the GRM facial slot (+0x1B8), which the destroy frees ahead of the memset
+// (the callers release ours: FacialSystem::release); the bound radius (+0x0) and the bounding-box
+// centre (+0x1FC), the model's stamps, which Entity_InitFromModel restamps (bind_spawned_body
+// re-derives both from the same model); and the input words (MoveOrder +0x12C, the analog bytes
+// +0x130..+0x133), which the next input pack and the 0x0A tail's stance re-latch
+// (NapiNPClientMsg_0x00A @0x430562 / @0x430570) restamp.
+// [orig: Entity_Destroy @0x43E810 - `push 2B4h` @0x43EA69, the memset @0x43EA70;
+//  NapiNPClientMsg_FullEntitySpawn @0x433780 - Entity_Destroy @0x433815, `push 2B4h` @0x43381A,
+//  the memset @0x433821]
+void clear_body_block_below_2b4(AiEntity &e, Entity &body) {
+    body.has_item_def = false;
+    body.item_type_index = 0;
+    body.item_id = 0;
+    body.has_graphic_model = false;
+    body.flags = 0;
+    body.engine_flags = 0;
+    body.ground_target = {};
+    body.carry_flags = 0;
+    body.cause_flags = 0;
+    body.position.set_q16(FixedVec3{0, 0, 0});
+    body.heading = e.heading = 0;
+    body.pitch_bam = e.pitch = 0;
+    body.roll_bam = e.roll = 0;
+    // The local body's input accumulates its Yaw and Pitch words, ours its look words
+    // (inf.target_heading, zeroed below, and inf.look_pitch), so the memset zeroes the look
+    // pitch too [orig: Input_HandleActionBinding_0 @0x4E0420 - `add [eax+14h], edx` @0x4E0D39].
+    e.inf.look_pitch = 0;
+    body.eye_offset_x = 0;
+    body.eye_offset_y = 0;
+    body.eye_offset_z = 0;
+    body.owner_connection_id = 0;
+    body.net_id = 0;
+    std::fill_n(body.saved_live_pos, 3, 0);
+    body.saved_live_yaw = 0;
+    body.saved_live_pitch = 0;
+    body.saved_live_roll = 0;
+    for (int axis = 0; axis < 3; ++axis) e.inf.vel[axis] = 0;
+    body.display_name.clear();
+    body.group_id = 0;
+    body.alive = true;
+    body.health = 0;
+    e.health = 0;
+    body.mana = 0;
+    body.ammo_count = 0;
+    body.damage_state = 0;
+    body.corpse_timer = 0;
+    body.player_slot_id = 0;
+    body.script_fire_userpoint_counter = 0;
+    body.occlusion_latch = 0;
+    body.mount_bone = 0;
+    body.minimap_net_id = 0;
+    body.ammo_def_word = 0;
+    body.team = 0;
+    body.mounted = false;
+    body.mount_target = {};
+    body.mount_type = SeatType::None;
+    body.primary_occupant = {};
+    body.ride_link_hold = 0;
+    body.last_attacker = {};
+    body.mount_toggle_fallback = {};
+    body.radar_sig = 0;
+    body.heat_sig = 0;
+    body.death_tick = 0;
+    body.medic_reviving = false;
+    body.ai_target_refcount = 0;
+    body.sub_type = 0;
+    body.ref_num = 0;
+    body.location_index = 0;
+    body.player_class = 0;
+    body.spawn_phase = 0;
+    body.equipped_adm_index = 0;
+    // The AI entity's homes of the same block: the DcbId +0x7C, the relation key +0x11C, Team
+    // +0x162, the body heading +0x8C and pitch +0x90 (savedLivePose's words, which the player
+    // body's head pose reads: `fild [esi+90h]` @0x4B6A8F), the lean angle +0xB0 (the camera's roll
+    // reads it, @0x437FCD), the standing-idle count +0x148 (the corpse timer's word: `add
+    // [esi+148h], 1` @0x4B727B, idle 0x2B + (count >= 0x3E) @0x4B7293), the eye triple, org2's
+    // jump latch / org1's target heading +0x1A8 (the local body's look yaw, its Yaw word, in
+    // ours), and the chase's stage +0x234..+0x244 and its
+    // count / bucket +0x27C / +0x27E.
+    e.net_id = 0;
+    e.relmat_id = 0;
+    e.team = 0;
+    e.inf.body_heading = 0;
+    e.body_pitch = 0;
+    e.inf.lean_angle = 0;
+    e.inf.idle_counter = 0;
+    e.inf.eye_offset_x = 0;
+    e.inf.eye_offset_y = 0;
+    e.inf.eye_offset_z = 0;
+    e.inf.jump_cooldown = 0;
+    e.inf.target_heading = 0;
+    std::fill_n(e.net_smooth_target, 3, 0);
+    e.net_smooth_heading = 0;
+    e.net_smooth_pitch = 0;
+    e.net_interp_progress = 0;
+    e.net_interp_steps = 0;
+}
+
+// Entity_Destroy over the local player's own body, which stays the local player's (retail's
+// g_LocalPlayerEntity keeps naming the slot): the GRM facial slot is freed first (+0x1B8 nonzero),
+// so the 0x18's model init allocates a fresh, append-only one; an AIData def's AI slot (+0x68) is
+// zeroed (a person never holds a brain at +0x64: its only allocator, Entity_InitVehicleAI, is a
+// vehicle / helicopter class init's); then the memset over +0..+0x2B4 (clear_body_block_below_2b4)
+// leaves it no def, so the pool-0 walk runs nothing over it (its +0x1C4 is 0), its uplink stops (the
+// serializer's def test) and its record applies are dropped (the case-2 def test); then the
+// destroy's tail stores 0xFF in the slot byte (+0x154). A 0x18 of its handle rebuilds it
+// (JoinerRole::rebuild_local_from_full_spawn).
+// [orig: Entity_Destroy @0x43E810 - the +0x1B8 test @0x43E88A, FaceAnim_FreeEntitySlot @0x57FCA0
+//  (the call @0x43E894), the AI slot memset @0x43E9AE, the memset @0x43EA70, +0x154 @0x43EA78;
+//  Entity_InitVehicleAI @0x460200 - the +0x64 store @0x460252, reached from the class table's
+//  CHel / cveh / cbot / cpln / ctrn rows (@0x8132A0, @0x813378..0x8133C0), not from the person
+//  rows org0 / org1 / plyr (@0x813018..0x813048);
+//  Entity_UpdateAllEntities @0x4C2100 - the null test @0x4C246F; Pool_SerializeEntityViaVTable
+//  @0x4D64E0 - the def test @0x4D654F..0x4D6554; NetPacket_SerializePlayerState @0x4C09C0 - the
+//  def test @0x4C0F92]
+static void destroy_local_body_in_place(World &world, AiEntity &e, Entity &body) {
+    world.facials.release(body);
+    body.facial_checked = false;
+    e.slot = AiSlot{};
+    clear_body_block_below_2b4(e, body);
+    body.player_slot_id = 0xFF;
+}
+
+void person_ewep_mover(World &world, AiEntity &e, Entity &body) {
+    Entity *ground = world.registry.get(body.ground_target);
+    if (emplaced_carrier_is_dead_hull(ground)) {
+        body.flags |= kEntityFlagCarried;
+        return;
+    }
+    // A live PlayerControl ground refills the anchor byte (+0x319, the spawn backup X's second
+    // byte) from its def's slot table by the body's slot byte (+0x214) when the byte reads 0xFF.
+    // A person's slot byte is the spawn's 0 (no person update, record writer, reset or init
+    // writes it), so the table's first slot answers; a slot byte past the four-byte table would
+    // read the def's next bytes, which ours does not model.
+    // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the PlayerControl test @0x440CD1, the
+    //  0xFF test @0x440CE6, `movsx ecx, byte ptr [ebp+214h]` @0x440CEF, the table byte
+    //  @0x440CF6, the store @0x440CFD; the table Entity_InitFromModel @0x40DE2C..0x40DE8A]
+    if (ground != nullptr && ground->has_item_def &&
+            (ground->item_attrib & kItemAttribPlayerControl) != 0) {
+        const uint32_t backup_x = static_cast<uint32_t>(body.spawn_position.x.q16);
+        const int8_t slot = static_cast<int8_t>(body.sub_type);
+        if (((backup_x >> 8) & 0xFFu) == 0xFFu && slot >= 0 && slot < 4)
+            body.spawn_position.x.q16 = static_cast<int32_t>((backup_x & 0xFFFF00FFu) |
+                    (static_cast<uint32_t>(ground->def_slot_userpoints[static_cast<size_t>(slot)]) << 8));
+    }
+    // A session peer off the authority asks the host again for a ground the shared destroy
+    // removed (the link still names its slot, whose destroyed mark is set) on a tick whose low
+    // seven bits are all set: a reliable C2S 0x0F for the ground's handle, then one for the
+    // body's own, then the body's destroy, and the update ends. The ground's refNum group
+    // removal and store act on a zeroed slot and change nothing. The local player's own body
+    // is destroyed in place (destroy_local_body_in_place), the reply's 0x18 rebuilding it; a
+    // decoded person's row the replica destroys (inmatch::run_replica_person_ewep).
+    // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the ground @0x440CBF, the gates
+    //  @0x440D03..0x440D24 (is_in_session, is_mp_session_peer, is_authority), the mark
+    //  `cmp byte ptr [edi+219h], 0` @0x440D2A, `and eax, 7Fh` / `cmp al, 7Fh`
+    //  @0x440D37..0x440D41, the ground's 0x0F @0x440DAB, EntityReference_RemoveFromRefGroup
+    //  @0x43EE40 (the call @0x440DC1) and the +0x215 store @0x440DC9, the body's 0x0F
+    //  @0x440E29, Entity_Destroy @0x440E2F, the tail @0x440E37]
+    if (body.ground_target.valid() && world.rules.mp_session && world.rules.mp_session_peer &&
+            !world.rules.logic_authority && world.destroyed_mark &&
+            world.destroyed_mark(body.ground_target.packed) &&
+            (world.logic_tick & 0x7Fu) == 0x7Fu) {
+        world.out.entity_info_requests.push_back(body.ground_target);
+        world.out.entity_info_requests.push_back(body.handle);
+        if (&body == world.registry.get(world.cached.local_player))
+            destroy_local_body_in_place(world, e, body);
+        return;
+    }
+    // A ground link to a destroyed slot reads a zeroed ground (link_reads_zeroed_slot): no def, no
+    // model and a clear matrix bit, so no vehicle leg and no anchor, and the root copy gives the
+    // body its zero words, Position (0, 0, 0), Yaw / Pitch / Roll 0 and a zero savedLivePose (the
+    // ground's matrix built from the zero angles first).
+    // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the def null tests @0x440CCD /
+    //  @0x440EA9, the model @0x440F04..0x440F09, the matrix bit @0x4410EA,
+    //  Math_BuildFixedPointMatrixFromEulerAngles @0x441149, the copy @0x441151..0x4411BC]
+    const bool zeroed_ground = ground == nullptr && link_reads_zeroed_slot(world, body.ground_target);
+    const int32_t def_word = e.inf.leg_yaw[0];
+    if (zeroed_ground) {
+        if (def_word == 0) return;
+        body.position.set_q16(FixedVec3{0, 0, 0});
+        body.heading = e.heading = 0;
+        body.pitch_bam = e.pitch = 0;
+        body.roll_bam = e.roll = 0;
+        std::fill_n(body.saved_live_pos, 3, 0);
+        body.saved_live_yaw = 0;
+        body.saved_live_pitch = 0;
+        body.saved_live_roll = 0;
+        body.saved_live_valid = true;
+        body.engine_flags |= kEntityFlagMatrixBuilt;
+    } else if (ground != nullptr) {
+        if (def_word == 0) return;
+        if (ground->has_item_def && ground->item_type == 1) {
+            constexpr uint32_t kLowBits = kEntityFlagCarried | kEntityFlagDead | kEntityFlagNVGWorn;
+            body.flags &= ~kLowBits;
+            body.engine_flags &= ~kLowBits;
+            body.alive = true;
+            const int16_t health = static_cast<int16_t>(ground->health);
+            body.health = health;
+            e.health = health;
+            for (int i = 0; i < 4; ++i) body.blink_hits[i] = ground->blink_hits[i];
+        }
+        const int8_t anchor = static_cast<int8_t>(
+                static_cast<uint32_t>(body.spawn_position.x.q16) >> 8);
+        const bool anchored = ground->has_graphic_model && ground->graphic_model_userpoints > 0 &&
+                anchor > 0 && static_cast<uint32_t>(anchor) <= ground->graphic_model_userpoints;
+        if (anchored) {
+            person_ewep_anchored_attach(world, e, body, *ground, anchor);
+        } else if (((ground->flags | ground->engine_flags) & kEntityFlagMatrixBuilt) == 0) {
+            body.position = ground->position;
+            const int32_t yaw = ground->veh.yaw_seeded ? ground->veh.yaw_bam : ground->heading;
+            const int32_t pitch = ground->veh.yaw_seeded ? ground->veh.air_pitch_bam
+                                                         : ground->pitch_bam;
+            const int32_t roll = ground->veh.yaw_seeded ? ground->veh.air_roll_bam
+                                                        : ground->roll_bam;
+            body.heading = e.heading = yaw;
+            body.pitch_bam = e.pitch = pitch;
+            body.roll_bam = e.roll = roll;
+            std::copy_n(ground->saved_live_pos, 3, body.saved_live_pos);
+            body.saved_live_yaw = ground->saved_live_yaw;
+            body.saved_live_pitch = ground->saved_live_pitch;
+            body.saved_live_roll = ground->saved_live_roll;
+            body.saved_live_valid = ground->saved_live_valid;
+        }
+        body.engine_flags |= kEntityFlagMatrixBuilt;
+    }
+    if (def_word == 0) return;
+    // The +0x170 link's leg. A linked entity that does not ride the body (its +0x16C mount link
+    // names another, or its slot reads zeroed) is let go: the link clears, the +0x1A2 word takes
+    // 0xFFFF and a nonzero +0x2B4 takes 7. On a person neither word has a reader, and +0x2B4 holds
+    // the spawn's 0 (no person update, record writer, reset or init touches either), so the
+    // clear is the leg. While the link holds, the +0x2AC clock takes 1. One riding the body takes
+    // the turret window over the body's +0x322 / +0x324 words, whose limits read the body's
+    // +0x2D4 word (the Yaw) as a weapon def, or its +0x2EC word as a slot pointer: garbage-pointer
+    // reads over a person, the Q16-1 (a) class, which ours does not run. The tank-command call
+    // behind them reads none of the limits, so it runs over the person's words: its +0x28 ground
+    // link and its +0x31C stamp, the spawn backup's Y word (world::emplaced_command_call).
+    // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the clamps @0x44123C / @0x44128C ahead
+    //  of the call @0x4412B6..0x44135C; Entity_ResetToSpawnState @0x4B9610 - +0x31C @0x4B963B]
+    // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the link @0x4411D1, `cmp [eax+16Ch], ebp`
+    //  @0x4411E4, Entity_GetWeaponTurretLimits @0x540D70 (the call @0x441228; slot +0x20 / +0x38
+    //  @0x540DB5..0x540E58), the COM2GUN leg @0x4412B6..0x441364, the let-go @0x441366..0x441380,
+    //  +0x2AC @0x44138A..0x441393; Entity_SpawnFromAnimSlotProperty @0x43C390 - +0x2B4 = 0
+    //  @0x43C518]
+    if (body.primary_occupant.valid()) {
+        const Entity *rider = world.registry.get(body.primary_occupant);
+        const bool rides_body = rider != nullptr && rider->mount_target == body.handle;
+        if (rides_body) {
+            uint32_t stamp = static_cast<uint32_t>(body.spawn_position.y.q16);
+            emplaced_command_call(world, body.ground_target, stamp,
+                    rider->handle == world.cached.local_player, rider->net_move_input,
+                    rider->anim_slot);
+            body.spawn_position.y.q16 = static_cast<int32_t>(stamp);
+        }
+        if (!rides_body && (rider != nullptr || link_reads_zeroed_slot(world, body.primary_occupant)))
+            body.primary_occupant = {};
+        if (body.primary_occupant.valid()) body.spawn_phase = 1;
+    }
+    uint32_t anchor_x = static_cast<uint32_t>(e.inf.aim_point[0]);
+    uint32_t backup_x = static_cast<uint32_t>(body.spawn_position.x.q16);
+    if ((anchor_x >> 24) != 0) {
+        backup_x = (backup_x & 0x00FFFFFFu) | (60u << 24);
+        anchor_x -= 1u << 24;
+        e.inf.aim_point[0] = static_cast<int32_t>(anchor_x);
+    }
+    uint8_t coast = static_cast<uint8_t>(backup_x >> 24);
+    if (coast != 0) {
+        --coast;
+        backup_x = (backup_x & 0x00FFFFFFu) | (static_cast<uint32_t>(coast) << 24);
+        if (coast != 0) {
+            // `movsx dx, al; shl dx, 5; add [ebp+320h], dx`: a 16-bit add.
+            const uint32_t z = static_cast<uint32_t>(body.spawn_position.z.q16);
+            const int step = static_cast<int8_t>(coast) * 32;
+            const uint16_t word = static_cast<uint16_t>(static_cast<uint32_t>(z) +
+                    static_cast<uint32_t>(step));
+            body.spawn_position.z.q16 = static_cast<int32_t>((z & 0xFFFF0000u) | word);
+        }
+    }
+    body.spawn_position.x.q16 = static_cast<int32_t>(backup_x);
+}
+
+static bool person_item_mover(World &world, PhysicsClass row, AiEntity &e, Entity &body) {
+    switch (row) {
+    case PhysicsClass::Ewep:
+        person_ewep_mover(world, e, body);
+        return true;
+    case PhysicsClass::Genx:
+        update_dropped_object(world, body);
+        return true;
+    case PhysicsClass::Rokt:
+        if ((static_cast<uint32_t>(e.inf.anim_pending) >> 16) == 0)
+            set_anim_pending(e, body, (e.inf.anim_pending & 0xFFFF) | 0x10000);
+        return true;
+    case PhysicsClass::Hlfr:
+    case PhysicsClass::Jvln:
+        if (!body.primary_occupant.valid()) set_anim_pending(e, body, e.inf.anim_pending | 1);
+        return true;
+    case PhysicsClass::Psec:
+        update_physics_step(world, body, e.inf.vel[0], e.inf.vel[1], e.inf.vel[2]);
+        return true;
+    case PhysicsClass::Envs:
+        update_item_ambient_sound(world, body);
+        return true;
+    case PhysicsClass::Upfx: {
+        const ItemDeathTraits *traits = world.tables.item_death_traits.get(body.item_id);
+        if (traits == nullptr || traits->physics != 0) return true;
+        const uint32_t flags = body.flags | body.engine_flags;
+        if ((flags & kEntityFlagNVGWorn) != 0) {
+            publish_swap_fade_phases(world, body);
+            upfx_husk_leg(world, body, *traits, body.destroy_progress);
+        }
+        if ((flags & (kEntityFlagDead | kEntityFlagHusk)) == 0 && world.rules.last_tick_of_batch)
+            update_item_ambient_sound(world, body);
+        return true;
+    }
+    case PhysicsClass::Door:
+    case PhysicsClass::Squib:
+        return true;
+    case PhysicsClass::Ele0:
+        update_elevator(world, body, e.inf.target_heading, e.inf.vel[2], body.veh.speed,
+                body.script_next_ssn);
+        return true;
+    case PhysicsClass::Arty: {
+        // The barrage over the person's words (D-NET-NEW-L4-23 (b), (c)): +0x2BC the start tick,
+        // +0x2C4 the shells left, +0x2C8 the delay, the Roll word's third byte the phase, the
+        // Pitch word the ROL4 stream. Each 32nd tick past the delay it steps the stream twice,
+        // fires the round of the +0x2B0 index from the Position pushed out along the Yaw word
+        // less the second step shifted up 16, by 50 units times the first step's low 17 bits
+        // over 2^16, at the mip chain's ground plus 700 units, pitch word 0xC0000040, with the
+        // +0x170 link as shooter, and counts a shell down.
+        // [orig: ArtyClass_UpdateBarrage @0x447140 - +0x2BC @0x447148, the gate @0x44717D /
+        //  @0x447185 / @0x447192..0x44719F / @0x4471A5..0x4471AE, the steps @0x4471B4..0x4471E9,
+        //  the table index @0x447203..0x44721E, the radius @0x44723D..0x447260, X / Y
+        //  @0x447264..0x447288, Terrain_SampleMipMaxHeightBilinear @0x606200 called @0x447290,
+        //  +0x2BC0000 @0x44729B, the block's pitch @0x4472B2, WeaponSlot_FireAndSpawnEffects @0x53F440 called
+        //  @0x4472BA (+0x170 @0x447295, +0x2B0 @0x4472A4), the count @0x4472C2]
+        const int32_t start = e.inf.anim_state;
+        for (int axis = 0; axis < 3; ++axis) e.inf.vel[axis] = 0;
+        const uint32_t elapsed = world.logic_tick - static_cast<uint32_t>(start);
+        if (start != 0 && e.inf.wpn_deferred != 0 &&
+                static_cast<int32_t>(elapsed) > e.inf.wpn_state &&
+                ((elapsed ^ ((static_cast<uint32_t>(e.roll) >> 16) & 0xFFu)) & 0x1Fu) == 0) {
+            uint32_t state = static_cast<uint32_t>(e.pitch);
+            io::rotating_prng_next16(state);
+            const uint32_t step = state;
+            io::rotating_prng_next16(state);
+            e.pitch = static_cast<int32_t>(state);
+            body.pitch_bam = e.pitch;
+            const int index = io::bam_table_index(
+                    static_cast<uint32_t>(e.heading) - (state << 16) + 0x200000u);
+            const int64_t cos_q22 = static_cast<int64_t>(io::bam_table_cos(index) * io::kQ22One);
+            const int64_t sin_q22 = static_cast<int64_t>(io::bam_table_sin(index) * io::kQ22One);
+            const int32_t radius = static_cast<int32_t>(
+                    (int64_t{0x320000} * static_cast<int32_t>(step & 0x1FFFFu) + 0x8000) >> 16);
+            FixedVec3 origin = body.position.q16();
+            origin.x = io::bam_add(origin.x, static_cast<int32_t>((radius * cos_q22) >> 22));
+            origin.y = io::bam_add(origin.y, static_cast<int32_t>((radius * sin_q22) >> 22));
+            const int32_t ground = world.tables.terrain != nullptr
+                    ? terrain::height_field_mip_max_bilinear_fixed(
+                              *world.tables.terrain, origin.x, origin.y)
+                    : 0;
+            origin.z = io::bam_add(ground, 0x2BC0000);
+            world.round_sim.fire_npc_ammo(world, body.primary_occupant, origin, e.heading,
+                    static_cast<int32_t>(0xC0000040u), body.equipped_adm_index);
+            --e.inf.wpn_deferred;
+        }
+        if (world.rules.mp_session && world.rules.logic_authority &&
+                player_item_row(world, body).guided_record) {
+            GuidedUpdateEvent send;
+            send.shooter = body.primary_occupant.valid() ? body.primary_occupant.packed : 0xFFFF;
+            send.net_id = static_cast<uint16_t>(body.owner_connection_id);
+            send.group = 6;
+            send.state.saved[0] = e.inf.leg_target[0];
+            send.state.saved[1] = e.inf.leg_target[1];
+            send.state.saved[2] = e.inf.aim_heading;
+            world.out.entity_events.push_back(send);
+        }
+        return true;
+    }
+    case PhysicsClass::Cveh:
+    case PhysicsClass::Ctrn:
+    case PhysicsClass::Catv:
+    case PhysicsClass::Ctank:
+    case PhysicsClass::Cbike:
+    case PhysicsClass::Cbot:
+    case PhysicsClass::Cpln:
+    case PhysicsClass::Chel:
+        stamp_saved_live_pose(body);
+        body.engine_flags |= kEntityFlagMatrixBuilt;
+        return true;
+    default:
+        return false;
+    }
+}
+
 void AiSystem::update_organic(AiEntity &e, World &world, uint32_t logic_tick) {
     const Entity *motor_entity = world.registry.get(e.handle);
     const bool motor_suspended = motor_entity != nullptr && motor_entity->motor_suspended;
     const devtools::ProfileScope entity_scope(world.profile, devtools::Slot::SIM_AI_INFANTRY);
     if (motor_suspended) return;
+    // The body's +0x1C4 is its bound row's move function: org1 the AI update, org2 the
+    // player-body update. The null row's stub is skipped, org0's and chld's are bare
+    // returns, and a body bound to an item row runs that row's mover over its own words:
+    // a vehicle, aircraft or genx row's, the rokt / hlfr / jvln rows' pending-word writes,
+    // psec's physics step, envs's and upfx's loop emitter, arty's barrage and session
+    // send, ewep's ground and spin legs (person_item_mover, the pool-0 walk's: a pool-1 slot's
+    // visit runs a row's vehicle
+    // mover and drop motion in its own legs); the other item rows' movers are not run here
+    // (D-NET-NEW-L4-14 (a), narrowed).
+    // [orig: Entity_UpdateAllEntities @0x4C2466..0x4C2472; Entity_UpdatePool1Slot
+    //  @0x4B8E41..0x4B8E53; Entity_UpdateOrg0Movement @0x4AFF60; the chld row's
+    //  Entity_UpdateChldClass @0x45D540]
+    const PhysicsClass move_row = body_move_row(world, e, motor_entity);
+    if (Entity *body = world.registry.get(e.handle); body != nullptr &&
+            e.handle.pool() == 0 && person_item_mover(world, move_row, e, *body))
+        return;
+    if (move_row != PhysicsClass::Org1 && move_row != PhysicsClass::Org2) return;
     // Joiners retain seat-follow presentation for wire-owned peers. The
     // authority continues into the remote org2 animation/collision tail:
     // mounted contact callbacks remain live while model push is suppressed.
-    if (e.net_is_remote_peer && pose_if_mounted(e, world) && !is_authority)
+    if (e.net_is_remote_peer && !is_authority && pose_if_mounted(e, world))
         return;
     // A client-only wire peer has no authority collision tail, so its
     // blink/indoors presentation state comes from the position-only refresh.
@@ -598,30 +1239,68 @@ static bool seat_borrows_mount_slot(const Entity &owner, const Entity &mount) {
             (mount.item_attrib & kItemAttribEweap) != 0);
 }
 
-// A borrower's link holds while it lives, stays seated in a borrowing seat and
-// still names the mount that names it.
-static bool gunner_holds_mount(const Entity &owner, const Entity &mount) {
-    return owner.health > 0 && owner.mounted && seat_borrows_mount_slot(owner, mount) &&
-           owner.mount_target == mount.handle;
+// A remote player's own slot, the row of its table its EquippedSlot names, pumped
+// with no input: the authority's arm of each accepted C2S 0x06 runs its FIRE, then
+// the walk runs RECOIL and, an empty clip with rounds left, RELOAD, whose request
+// relays as S2C 0x49 while nothing refills the host's copy but the player's own
+// C2S 0x25 (D-NET-336). The pools and the loaded-round bucket it reads are the
+// player's slot tables. [orig: WeaponAction_ProcessAllEntities @0x5426AD..0x5426C1
+// -> WeaponAction_ProcessFrame @0x540E60 (the def test @0x540E74);
+// Server_ClientFiredRound @0x50C27F..0x50C28B (the row it names);
+// Entity_GetScoreValueBySlotType @0x5406E0; WeaponSlot_GetSharedLoadedRounds
+// @0x5405F0]
+void AiSystem::pump_personal_slot(World &world, Entity &owner, uint32_t logic_tick) {
+    const auto row = owner.weapon_slots.find(owner.equipped_slot.combo);
+    if (row == owner.weapon_slots.end()) return;
+    const WeaponTableEntry *weapon = world.tables.weapons.by_index(row->second.adm_index);
+    if (weapon == nullptr) return;
+    PersonalWeaponSlot &slot = row->second;
+    const WeaponAmmoSeat seat = entity_ammo_seat(world, owner);
+    int32_t pool = 0;
+    int32_t loaded = 0;
+    if (world.remote_weapon_tables != nullptr)
+        (void)world.remote_weapon_tables->remote_ammo(world, owner.handle,
+                weapon->ammo_class_id, weapon->ammo_bucket, pool, loaded);
+    slot.reserve = weapon_seat_pool(seat, weapon->ammo_class_id, pool);
+    // A bucket weapon's loaded rounds are the bucket's; the row's own word stays.
+    const int32_t own_clip = slot.clip;
+    if (weapon->ammo_bucket != 0) slot.clip = weapon_seat_bucket(seat, loaded);
+    WeaponFsmInputs inputs;
+    inputs.is_local = false;
+    inputs.is_authority = is_authority;
+    inputs.reload_refills = reload_echo_refills(world, owner);
+    inputs.auto_reload = world.rules.auto_reload; // [orig: g_AutoReloadEnabled @ 0x24D2118]
+    inputs.current_tick = static_cast<int32_t>(logic_tick);
+    weapon_fire_environment_inputs(world, owner, inputs);
+    WeaponFsmEvents events;
+    weapon_fsm_tick(weapon->action_fsm, slot, inputs, events);
+    if (weapon->ammo_bucket != 0) slot.clip = own_clip;
+    if (events.reload_requested && is_authority) queue_walk_reload(world, owner, *weapon);
 }
 
-void AiSystem::release_stale_gunner_link(World &world, Entity &mount) {
-    if (!mount.primary_weapon_owner.valid()) return;
-    const Entity *owner = world.registry.get(mount.primary_weapon_owner);
-    if (owner == nullptr || !gunner_holds_mount(*owner, mount))
-        mount.primary_weapon_owner = EntityHandle{};
-}
-
-// Every pool-0 row's weapon slot is pumped, whatever its seat: a borrower's
-// is the mount's. [orig: WeaponAction_ProcessAllEntities @0x5426AD..0x5426C1]
+// Every pool-0 row's EquippedSlot is pumped, whatever its seat: a borrower's is
+// the carrier slot it names, seated or, after a refused UseGun attach, on foot
+// (D-NET-420); a remote player's own is a row of its table (D-NET-336).
+// [orig: WeaponAction_ProcessAllEntities @0x5426AD..0x5426C1]
 void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick) {
-    if (!owner.mounted) return;
-    Entity *mount = world.registry.get(owner.mount_target);
-    if (mount == nullptr || mount->primary_weapon_owner != owner.handle) return;
-    if (!gunner_holds_mount(owner, *mount)) {
-        mount->primary_weapon_owner = EntityHandle{};
+    if (owner.equipped_slot.kind == WeaponSlotRef::kPersonal) {
+        pump_personal_slot(world, owner, logic_tick);
         return;
     }
+    if (owner.equipped_slot.kind != WeaponSlotRef::kMount) return;
+    Entity *mount = world.registry.get(owner.equipped_slot.mount);
+    if (mount == nullptr) return;
+    // The slot's owner (its +0x24, the attach's store) fires from its borrowing seat,
+    // alive or not: the fire action tests the owner alone, so a gunner killed on the seat
+    // still fires a FIRE it had latched, from the gun. No fire request reaches a slot held
+    // on foot (the infantry request writes FIRE from a seat alone, and a remote player's
+    // accepted fire re-points to its personal slot first, Server_ClientFiredRound
+    // @0x50C1D4..0x50C28D).
+    // [orig: WeaponAction_Fire @0x542B10 - the owner test @0x542B24..0x542B2E;
+    //  Entity_CalcWeaponFirePosition @0x4DC750 - the parentSlot 3 test @0x4DC7A0]
+    const bool seated = owner.mounted && owner.mount_target == mount->handle &&
+            seat_borrows_mount_slot(owner, *mount) &&
+            mount->primary_weapon_owner == owner.handle;
     {
         AiEntity *gunner = for_handle(owner.handle);
         if (gunner == nullptr || mount->primary_weapon_slot_adm == 0xFF) return;
@@ -629,9 +1308,15 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
                 world.tables.weapons.by_index(mount->primary_weapon_slot_adm);
         if (weapon == nullptr || weapon->ammo_index < 0) return;
 
+        // The reload addresses the gun from a UseGun seat, else the row itself.
+        // [orig: WeaponAction_Reload @0x5430EA..0x543103]
+        const Entity *addressed = owner.mount_type == SeatType::Gunner && owner.mounted
+                ? world.registry.get(owner.mount_target) : nullptr;
+        if (addressed == nullptr) addressed = &owner;
         WeaponFsmInputs inputs;
         inputs.is_local = owner.handle == world.cached.local_player;
         inputs.is_authority = is_authority;
+        inputs.reload_refills = reload_echo_refills(world, *addressed);
         inputs.auto_reload = world.rules.auto_reload; // [orig: g_AutoReloadEnabled @ 0x24D2118]
         // The heat window is derived from the tick, so the pump needs it. AI gunners
         // sit on the emplaced guns that actually author heat, so this is the path
@@ -642,7 +1327,9 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
         weapon_fsm_tick(weapon->action_fsm, mount->primary_weapon_slot,
                         inputs, weapon_events);
         weapon_sound_publish(world, owner, weapon->action_fsm, weapon_events);
-        if (!weapon_events.fired || !is_authority) return;
+        if (weapon_events.reload_requested && is_authority)
+            queue_walk_reload(world, *addressed, *weapon);
+        if (!weapon_events.fired || !is_authority || !seated) return;
 
         // The slot owner is the gunner, while its def/ammo live on the parent.
         // A UseGun shot leaves through the gunner branch every mounted shooter
@@ -679,9 +1366,14 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
 		//  @0x542C1C..0x542C2F].
 		const int32_t fire_mode =
 				((weapon_events.fired_clip_before_consume & 3) << 4) | 2;
-		if (fire_ai_round(world, *gunner, fire, fire[3], fire[4], weapon->ammo_index,
-				fire_mode, mount->primary_weapon_slot_adm))
-			gunner->inf.aim_ref0 = gunner->inf.combat_target;
+		// The slot's fire leaves the gunner's +0x2F0 alone: only the body's anim-event
+		// fire blocks store its target there, and neither the request nor the fire
+		// action nor the send writes it. [orig: Entity_UpdateInfantryAI @0x4B9910 (the stores
+		//  @0x4BF381 / @0x4BF3F5 / @0x4BF4AD; none in the request @0x4BF4B3..0x4BF59E);
+		//  WeaponAction_Fire @0x542B10; Entity_FireWeaponAndSendPacket @0x42BD80;
+		//  Server_ClientFiredRound @0x50BAA0]
+		(void)fire_ai_round(world, *gunner, fire, fire[3], fire[4], weapon->ammo_index,
+				fire_mode, mount->primary_weapon_slot_adm);
     }
 }
 
@@ -698,16 +1390,20 @@ static void ride_parent_blink_quad(const World &world, Entity &occ) {
 
 bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     Entity *occ = world.registry.get(e.handle);
-    // A dead occupant cannot enter the live mounted-pose path: it must reach the
-    // infantry death edge, detach, then consume its staged death animation.
-    // [orig: Entity_UpdateInfantryAI @0x4b9960..0x4b9983]
-    if (occ == nullptr || !occ->mounted || occ->health <= 0) return false;
+    // The seat site keys on the parent alone. Org1's mounted-live local adds a
+    // positive Health word, which its caller tests; the player body's selector reads
+    // the parent and its def with no Health test, so a client's dead body (its death
+    // edge detaches only on the authority) keeps the seat until the record's detach.
+    // [orig: Entity_UpdateInfantryAI @0x4B9960..0x4B9985; Entity_UpdateInfantryPlayerBody
+    //  @0x4B637C..0x4B6392]
+    if (occ == nullptr || !occ->mounted) return false;
     Entity *veh = world.registry.get(occ->mount_target);
     if (veh == nullptr) {              // vehicle gone -> auto-dismount, resume normal AI
         world.vehicles.detach(e.handle);
         return false;
     }
-    if (occ->mount_seat < 0 || occ->mount_seat >= static_cast<int>(veh->seats.size())) return false;
+    Seat seat;
+    if (!world.vehicles.rider_seat(*occ, *veh, seat)) return false;
     // An NPC rider of a parent with an item def scrubs the chute/in-air/afloat/
     // ladder/dive/armory bits and stops its vertical velocity every tick (the
     // in-air bit's motor mirror goes with it). [orig: Entity_UpdateInfantryAI
@@ -725,7 +1421,6 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0;
     //  Entity_UpdateInfantryAI @0x4B9910; PLYRONSSN @0x4F1260]
     occ->ground_target = veh->handle;
-    const Seat &seat = veh->seats[occ->mount_seat];
     // An NPC's ordinary seat resolves through the carrier's seat bone. When that
     // lookup fails, the authority kills a rider boarding-ordered at the carrier
     // or at the carrier's ground link (crediting the carrier's last attacker) and
@@ -791,8 +1486,29 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         tick_emplaced_weapon_channel(world, *veh, *occ, e);
     const int32_t saved_look_heading = e.heading;
     const int32_t saved_look_pitch = e.pitch;
-    const int32_t seat_heading = apply_resolved_mounted_seat_frame(
-            e, world, *occ, *veh, seat);
+    // A player body's ordinary seat resolves through the carrier's seat bone too. When that
+    // lookup fails the body takes no pose and no seat animation; the authority detaches it
+    // (the player body's arm kills no one), a client keeps it seated. The seat block's tail
+    // still runs (groundEntity from parentEntity, the blink quad, the legs and their targets
+    // to the body heading) and the pass ends at the mounted site.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the UseGun test @0x4B63A5..0x4B63BF,
+    //  the bone call @0x4B6510, its test @0x4B6518..0x4B651A, Entity_DetachFromVehicleIfServer
+    //  @0x4359D0 called @0x4B6627, the tail @0x4B662F..0x4B66A3, the site's returns @0x4B6907
+    //  / @0x4B6977]
+    const bool player_seat_bone_lost = e.inf.active && !npc_mounted_body(e, *occ) &&
+            veh->has_item_def && seat.type != SeatType::Gunner && world.pose_provider != nullptr &&
+            !world.pose_provider->resolve_seat_bone(world, *veh, seat.bone_index);
+    int32_t seat_heading = e.inf.body_heading;
+    if (player_seat_bone_lost) {
+        if (is_authority) {
+            world.vehicles.detach(e.handle);
+            occ->ground_target = {};
+        }
+        e.inf.leg_yaw[0] = e.inf.leg_yaw[1] = e.inf.body_heading;
+        e.inf.leg_target[0] = e.inf.leg_target[1] = e.inf.body_heading;
+    } else {
+        seat_heading = apply_resolved_mounted_seat_frame(e, world, *occ, *veh, seat);
+    }
     ride_parent_blink_quad(world, *occ);
     if (e.inf.active && e.inf.is_local_player) {
         // The mounted LOCAL player keeps the LOOK as its entity yaw: the witnessed mounted
@@ -800,8 +1516,11 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         // player-owned — the drive motor reads it as the mouse-steer target
         // [orig: Entity_UpdateInfantryPlayerBody mounted leg (bodyHeading only) +
         //  Entity_UpdateVehiclePhysics steer source @0x48ba59/v61->Yaw].
-        occ->yaw = static_cast<int16_t>(std::lround(normalize_mission_yaw_deg(
-                mission_yaw_deg_from_bam_heading(e.inf.target_heading))));
+        occ->heading = e.inf.target_heading;
+        // So is its Pitch word the look, not the seat's (D-NET-NEW-L6-3)
+        // [orig: Input_HandleActionBinding_0 @0x4E0420
+        //  (the Pitch stores @0x4E0D39..0x4E0D5C, @0x4E0F50, @0x4E111C) writes +0x14].
+        occ->pitch_bam = e.inf.look_pitch;
         // Mirror the live inputs into the wire fields the motor consumes — tick_infantry's
         // per-tick mirror is skipped while mounted (one entity struct in the original; the
         // split is ours) [orig: the MoveOrder packer @0x4df68f-0x4df741].
@@ -817,18 +1536,25 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         // bank a jump for dismount [orig: the mounted-leg flag scrub &= 0xFF8F57DF].
         e.inf.jump_requested = false;
     }
-    // Occupants present their carried body in the captured seat frame. Independent
-    // player/gunner LOOK restored below must not rotate that body/collision pose.
-    e.heading = seat_heading;
+    // Occupants present their carried body in the captured seat frame (the body
+    // heading and the legs). An organic rider's Yaw word stays its look: the seat
+    // carry writes no +0x10, so a remote passenger keeps the yaw its chase set; the
+    // arms below restore or chase the look for the other riders. A non-organic
+    // brain takes the seat yaw: retail runs no seat mover for one (see
+    // refresh_mounted_pose's head).
+    // [orig: Entity_UpdateInfantryPlayerBody - the seat carry @0x4B6510..0x4B6575,
+    //  the remote chase @0x4B4361; Entity_UpdateInfantryAI @0x4BED72..0x4BEDDA]
+    if (!e.inf.active) e.heading = seat_heading;
     if (e.inf.active && e.inf.is_local_player) {
         // The seated LOOK stays mouse-instant at FULL precision: retail drives entity
         // Yaw/Pitch straight from input regardless of mount (the mounted body leg
         // writes bodyHeading/headLook from the bone, never the look) — the camera
-        // reads these mirrors, and the whole-degree occ->yaw roundtrip above (the
-        // wire/motor mirror) must not quantize or freeze it. tick_infantry's own
+        // reads these, and the occ->heading store above (the wire/motor Yaw
+        // word) must not freeze it. tick_infantry's own
         // mirrors (its lines `e.heading = inf.target_heading` / `e.pitch =
         // inf.look_pitch`) are skipped for the whole ride.
-        // [orig: Input_HandleActionBinding_0 @0x4e1330 writes entity+0x10/+0x14;
+        // [orig: Input_HandleActionBinding_0 @0x4E0420
+        //  (the Pitch stores @0x4E0D39..0x4E0D5C, @0x4E0F50, @0x4E111C) writes entity+0x10/+0x14;
         //  §23.5 — the entity Yaw is the LOOK, player-owned while seated]
         e.heading = e.inf.target_heading;
         e.pitch = e.inf.look_pitch;
@@ -838,8 +1564,8 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         // the owner's mouse-steer target, not the carrier yaw.
         e.heading = saved_look_heading;
         e.pitch = saved_look_pitch;
-        occ->yaw = static_cast<int16_t>(std::lround(normalize_mission_yaw_deg(
-                mission_yaw_deg_from_bam_heading(saved_look_heading))));
+        occ->heading = saved_look_heading;
+        occ->pitch_bam = saved_look_pitch; // the look's Pitch word (D-NET-NEW-L6-3)
     } else if (e.inf.active && (seat.type == SeatType::Gunner || npc_mounted_body(e, *occ))) {
         // Attachment writes the seat/base pose but restores the child's independent
         // live look. The look then chases the desired solution instead of snapping:
@@ -875,15 +1601,23 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
             e.heading = chased_look_heading;
             e.pitch = chased_look_pitch;
         }
-        occ->yaw = static_cast<int16_t>(std::lround(normalize_mission_yaw_deg(
-                mission_yaw_deg_from_bam_heading(e.heading))));
+        // The look chase writes the Yaw and Pitch words; the UseGun attach
+        // restores both (D-NET-NEW-L6-3). [orig: Entity_UpdateInfantryAI
+        //  @0x4BEF84 / @0x4BEF97; Entity_AttachToBoneAndUpdateTransform
+        //  @0x546661 / @0x546664]
+        occ->heading = e.heading;
+        occ->pitch_bam = e.pitch;
     }
     if (e.inf.active) {
-        const int mounted_state = mounted_anim_state_for_seat(*veh, seat, e.inf, root_motion);
-        if (e.inf.anim_state != mounted_state) {
-            e.inf.request_body_animation(mounted_state);
+        // The seat animation (+0x2BC, the deferred +0x2B8 cleared) is the posed arm's.
+        // [orig: Entity_UpdateInfantryPlayerBody @0x4B65A8..0x4B65C3]
+        if (!player_seat_bone_lost) {
+            const int mounted_state = mounted_anim_state_for_seat(*veh, seat, e.inf, root_motion);
+            if (e.inf.anim_state != mounted_state) {
+                e.inf.request_body_animation(mounted_state);
+            }
+            e.inf.anim_pending = 0;
         }
-        e.inf.anim_pending = 0;
         e.inf.move_mode = 0;
         e.inf.target_dist = 0;
         occ->body_anim_slot = body_anim_slot_from_state(e.inf.anim_state);
@@ -1001,6 +1735,9 @@ void AiSystem::on_load(World &) {
         entities_ = spawn_baseline_;
         anim_rings = spawn_baseline_rings_;
     }
+    // The restore replaced the registry's rows; each slot rebinds to its row,
+    // whose words the registry baseline restored.
+    for (AiEntity &e : entities_) bind_self(e);
     rebuild_handle_index();
     events.clear();
     relmat_calls.clear();
@@ -1020,9 +1757,7 @@ int32_t calc_average_ground_height(const terrain::TerrainHeightField &field, con
     if (!field.valid()) return INT32_MIN; // [orig: terrain assumed present; null -> no ground]
 
     auto sample = [&](int32_t x16, int32_t y16) -> int32_t {
-        const float h = terrain::height_field_height_mission_bilinear(field, static_cast<float>(x16) / 65536.0f,
-                                                         static_cast<float>(y16) / 65536.0f);
-        return static_cast<int32_t>(h * 65536.0f);
+        return terrain::height_field_height_bilinear_fixed(field, x16, y16); // the words (D-NET-507)
     };
 
     int32_t result;
@@ -1045,8 +1780,12 @@ int32_t calc_average_ground_height(const terrain::TerrainHeightField &field, con
         result = sample(pos[0], pos[1]);                             // [orig: radius 0 -> center only]
     }
 
-    // [orig: if (*(entity+368) && (int)worldY > result) result = worldY] water-surface clamp.
-    if (clearance.has_occupant && field.has_water && field.water_y > result) {
+    // The water-surface clamp, on the raw word (0 on a map without water: no dry
+    // sentinel). [orig: Entity_CalcAverageGroundHeight `if (*(entity+368) &&
+    //  (int)g_EnvWaterHeightFixed > result) result = g_EnvWaterHeightFixed`
+    //  @0x45732F..0x457331; the word's default Environment_InitDefaults
+    //  @0x57C011..0x57C01E]
+    if (clearance.has_occupant && field.water_y > result) {
         result = field.water_y;
     }
     // [orig: the caller's brain+0x30 when dead (@0x45734D), else brain+0x2C (@0x457367),

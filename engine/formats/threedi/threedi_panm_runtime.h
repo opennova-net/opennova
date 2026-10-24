@@ -13,8 +13,10 @@ namespace opennova::threedi {
 
 // Sample a PANM transform and return the raw 24.8 fixed-point value used by the
 // original animation code. The caller supplies:
-// - time_ms: the frame-shared GetTickCount DWORD
-//   [orig: g_RenderShaderTickMs @ 0x2721A40].
+// - time_ms: the frame-shared GetTickCount DWORD (the embedder's one clock,
+//   world::frame_tick_count_ms) [orig: g_RenderShaderTickMs @ 0x2721A40; the
+//   sampler's own copy g_RenderPanmTickMs @0x28E07B4, read @0x5B22C5; all stored
+//   from one GetTickCount call, Render_SubmitEntity @0x5DAD85..0x5DADA9].
 // - ctrl_values: optional view of the 96 signed int32 value dwords in retail's
 //   global register bus, indexed by the already-resolved global ordinal in
 //   control_param. The adjacent state dwords are omitted because PANM never

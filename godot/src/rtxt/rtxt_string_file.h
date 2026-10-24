@@ -10,6 +10,8 @@
 #include <godot_cpp/variant/string_name.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
+#include <memory>
+
 #include <formats/rtxt/rtxt.h>
 #include <runtime/hud/game_text_lookup.h> // the engine's ONE game-text seam
 
@@ -114,6 +116,22 @@ public:
 	static void clear_key_strings();
 	static bool has_key_strings();
 
+	// --- The process's text-override table (retail's g_TextOverrideTable) ---
+	// install_text_override copies THIS table in as the table every game-text
+	// lookup (game_text_lookup below) searches before the table it was asked,
+	// as the engine's section lookup does (rtxt::find_with_override, D-NET-675);
+	// the shell installs the mounted expansion's table (Strings) and
+	// clear_text_override forgets it.
+	void install_text_override() const;
+	static void clear_text_override();
+	// The installed table's text for (section, key), converted as
+	// get_string_in_section converts it; false with none installed or no entry.
+	static bool text_override_lookup(const char *p_section, const char *p_key, std::string &r_out);
+	// The installed table itself (null: none), for the engine lookups that take
+	// the override table as an argument (the mission catalog's titles, the cfg
+	// defaults' texts).
+	static std::shared_ptr<const opennova::rtxt::File> installed_text_override();
+
 	// Native access for the loader/saver.
 	const opennova::rtxt::File &get_native() const { return file_; }
 };
@@ -123,8 +141,15 @@ public:
 // fallback. The one factory every engine text argument comes from.
 inline opennova::hud::GameTextLookup game_text_lookup(const Ref<RtxtStringFile> &table) {
 	return [table](const char *section, const char *key, const char *fallback) {
-		if (table.is_valid() && table->has_string_in_section(section, key))
-			return opennova::to_std(table->get_string_in_section(section, key));
+		// With a table the override table answers first, then the table (no
+		// table answers the fallback before any search): GameText_GetString's
+		// order, witnessed at the engine's rtxt::find_with_override.
+		if (table.is_valid()) {
+			std::string text;
+			if (RtxtStringFile::text_override_lookup(section, key, text)) return text;
+			if (table->has_string_in_section(section, key))
+				return opennova::to_std(table->get_string_in_section(section, key));
+		}
 		return std::string(fallback);
 	};
 }

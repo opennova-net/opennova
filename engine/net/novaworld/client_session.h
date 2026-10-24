@@ -4,6 +4,7 @@
 #include <net/napi/tlv.h>           // NapiMessage (lobby container shape)
 #include <net/novaworld/lobby_vars.h> // HostRegistration / HostPlayerSlot
 #include <net/npwire/cs_config.h>
+#include <net/npwire/nw_session_framing.h> // ConnectionKeys / manager_connection_keys
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
 
@@ -25,8 +26,8 @@ namespace opennova {
 // legs and the server notifications:
 //
 //   start()                       -> ClientHello (0x41)
-//   <- ServerHello (0x81)            : learn host key `hk`
-//   ClientAuth (0x42)                : hk echoed, ck = client key, client scrk
+//   <- ServerHello (0x81)            : learn host key `hk`; draw the CK, then the SCRK
+//   ClientAuth (0x42)                : hk echoed, the drawn ck and client scrk
 //   <- ServerAuth (0x82)             : learn server key `sk` + server scrk (cr==1) + the CS block
 //   process_periodic_update() queues ClientConnected: begin lobby verification
 //   <- ServerStartVerify (0x83)
@@ -95,8 +96,9 @@ public:
 	};
 
 	struct Config {
-		uint32_t client_index = 1;   // ci — caller-chosen (binding: random)
-		uint32_t client_key = 1;     // ck — caller-chosen (binding: random)
+		// The CI: the connection's index on its protocol (NwuLobbySession: the lobby protocol's
+		// counter, 1 at every connect).
+		uint32_t client_index = 1;
 		// The gate tag echoed in ClientAuth NA: the title's, or the mount's gt.ssc's
 		// (title_gate_tag), copied into the connection's parameters at the connect.
 		// [orig: CNapiGameSession_ConnectToNovaWorld @0x4d494f - Napi_CopyString(params,
@@ -111,13 +113,16 @@ public:
 		//   PN   == the server game id "NOVAWORLDUDP",
 		//   PV1  == the title's lobby PV1 (JO's "0.0.0 2/10/2004 EM"),
 		//   PG   == the 16-byte protocol GUID (added in build_client_hello).
-		// CO/AP/BDAT are read but never validated, so CO and AP stay our identity;
-		// BDAT is the title's (a free field). The constants are
-		// CNapiGameSession_InitNPConnection @ 0x4d3be0's; the title's two come from
-		// lobby() (TitleIdentity::lobby_pv1 / lobby_bdat).
+		// CO/AP/BDAT are read but never validated. lobby() fills them as retail's lobby
+		// connection does: CO the company constant (TitleIdentity::co), AP the running
+		// executable's file name as the menu reads it (read_menu_exe_basename: uppercased by the
+		// main loop's entry) kept to 63 characters, BDAT the title's
+		// lobby BDAT; the title's PV1 is its lobby_pv1 (D-NET-722).
+		// [orig: CNapiGameSession_InitNPConnection @0x4d3be0 - CO @0x4d3cae, AP
+		//  Napi_GetExeBasename @0x4d3cc3 copied with Napi_CopyString(.., 0x40) @0x4d3cd2]
 		std::string nvs  = "NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic";
-		std::string co   = "OpenNova";
-		std::string ap   = "OpennovaGodotClient.exe";
+		std::string co;
+		std::string ap;
 		std::string bdat;                            // the title's lobby BDAT (free field)
 		std::string pn   = "NOVAWORLDUDP";           // validated == server game id
 		std::string pv1;                             // the title's lobby PV1, validated
@@ -180,14 +185,42 @@ public:
 		// [orig: CNapiGameSession_InitNPConnection @0x4d3df4..0x4d3eb8]
 		int32_t max_packet_size = 0;
 
-		// The fresh CK and SCRK a reconnect's re-join mints, the CK drawn from next_client_key
-		// until nonzero (make_session_key). Unset, the engine's own random draws
-		// (make_random_session_u32 / make_dev_scrk) stand; the owner injects its generator, a
-		// test a deterministic one.
-		// [orig: CNapiNPConnection_InitFromSession @0x626320 — NapiNP_GenerateSessionKey
-		//  @0x6263fb (CK), CNapiNPConnection_GenerateTxKey @0x626401 (SCRK)]
-		std::function<uint32_t()> next_client_key;
-		std::function<std::string()> next_scrk;
+		// The CK and the SCRK, drawn at each 0x81 the connection takes (the first connect's and
+		// every re-join's), the CK first. Unset: the process's one manager LCG
+		// (manager_connection_keys), which the game protocol's keys draw from too, as retail's one
+		// NAPI manager serves both protocols; a test injects its own keys.
+		// [orig: Nwu_HandleServerHello @0x626D20 - the re-join's CNapiNPConnection_InitFromSession
+		//  @0x627E8C, the first connect's @0x627EE5; InitFromSession @0x626320 -
+		//  NapiNP_GenerateSessionKey(manager) @0x6263F4 (the CK, stored @0x6263FB),
+		//  CNapiNPConnection_GenerateTxKey @0x626401 (the SCRK); the lobby protocol on g_NapiNPCtx's manager:
+		//  CNapiGameSession_InitNPConnection @0x4D3BE0 - NapiNPProtocol_Create @0x4D3C89;
+		//  NapiNPManager_Create @0x62C5E0, its one caller CNapiNetwork_Init @0x4CA638]
+		std::function<ConnectionKeys()> connection_keys;
+
+		// The connection's two game-session callbacks: `on_connection_up` at each state-5 entry
+		// (the first connect's accepted 0x82 and every re-join's), after the 0x82's fields are
+		// kept and ahead of the session's state 2; `on_connection_down` at the teardown of a
+		// connection in state 5, after its 0x46 burst and ahead of the session's state 0. The
+		// embedder writes the connect log's lines from them.
+		// [orig: CNapiGameSession_InitPlayerConnection @0x4D4160 - conn+0xC0 =
+		//  CNapiGameSession_OnNovaWorldConnected @0x4D428E, conn+0xC4 = CNapiGameSession_OnDisconnect
+		//  @0x4D429B; CNapiNPConnection_OnStateChange @0x626060 - the state-5 call @0x62622A (its
+		//  jge @0x626231); CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the state-5 call
+		//  @0x6254E7 after the burst @0x6254BF..0x6254D3]
+		std::function<void()> on_connection_up;
+		std::function<void()> on_connection_down;
+		// Each session packet the parse takes (the admitted in-order one and every queued one it
+		// releases, records or none), with its length, opcode included; the embedder writes the
+		// connect log's PROCESSING line. [orig: CNapiNPConnection_ParseMessages @0x625BC0 - the
+		//  connection's +0x274 callback with len + 1 (@0x625D1A..0x625D3E)]
+		std::function<void(std::size_t bytes)> on_packet_processed;
+		// A layer-4 record whose tag the NWU client registers no handler for (it registers tag 0,
+		// the lobby container, alone), once whole: its tag and length; the embedder writes the
+		// connect log's UNKNOWN MESSAGE line. [orig: CNapiNPConnection_DispatchMessage @0x622570 -
+		//  the reassembly ahead of NapiNPProtocol_FindMsgInfo (the call @0x622691), the client's
+		//  +0x27C callback @0x622711..0x62272A; the client table @0x82C088 (type 0 only),
+		//  installed by CNapiGameSession_InitNPConnection @0x4D3D7E]
+		std::function<void(uint8_t tag, std::size_t bytes)> on_unknown_message;
 
 		// The NovaWorld session connection of a title (complete:
 		// resolve_title_identity) whose gate manager holds `gate_tag`
@@ -250,12 +283,12 @@ public:
 	// + NWU already applied — ready for the wire). Transitions Idle -> Hello.
 	std::vector<uint8_t> start();
 
-	// The datagram the current connect stage re-sends on the retransmit cadence
-	// (SESSION_CONNECT_RETRANSMIT_MS): the ClientHello while awaiting the ServerHello,
-	// the ClientAuth while awaiting the ServerAuth; empty in every other state.
-	// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 (the 0x41 re-announce);
-	//  CNapiNPConnection_PumpStateMachine @0x6292e0 case 3 (the 0x42 re-send)]
-	std::vector<uint8_t> retransmit_stage_datagram();
+	// The first connect's re-announce: the ClientHello the enumerator re-sends on its cadence
+	// (SESSION_CONNECT_RETRANSMIT_MS, the owner's stamp) while awaiting the ServerHello; empty
+	// in every other state, once a give-up stopped the probe, and during a reconnect (its 0x41
+	// rides pump()). The 0x42 is the state machine's, sent by pump() (case 3).
+	// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 (the 0x41 re-announce)]
+	std::vector<uint8_t> reannounce_datagram();
 
 	// The 0x41 the enumerator sends one probe target: this connection's hello carrying the
 	// target's address and port as EIP / EPN, each written only when nonzero, and no ET (a
@@ -357,7 +390,8 @@ public:
 	//  @0x4d5c63 / @0x4d5c71; CNapiGameSession_InitHeapsAndSerializeCounter @0x4ce32f / @0x4ce33c]
 	void mark_host_lists();
 	// ClientHostPlayerAdded / ClientHostPlayerRemoved — queued only while Established (state 6).
-	// [orig: the state-6 wrappers @0x4d0e20 / @0x4d0e40]
+	// [orig: the state-6 wrappers CNapiGameSession_SendPlayerAddedIfHosting @0x4d0e20 /
+	//  CNapiGameSession_SendPlayerRemovedIfHosting @0x4d0e40]
 	bool send_host_player_added(const HostPlayerSlot &player);
 	bool send_host_player_removed(int player_number);
 	// ClientPlayerEnterRequest for a joiner entering the hosted game
@@ -376,8 +410,9 @@ public:
 	// The GSID the successful ServerHostResult's HostCommands carried (128-char cap): the
 	// value the in-match host publishes as its 0x81 SUS1. Empty until Established, and again
 	// from a connection teardown until a re-host's ServerHostResult re-supplies it.
-	// [orig: HandleHostVerifyResponse @0x4d59d0 @0x4d5bd6..0x4d5c0f -> server_user_string1;
-	//  CNapiGameSession_OnDisconnect @0x4cfc3b..0x4cfc54 clears both]
+	// [orig: CNapiGameSession_HandleHostVerifyResponse @0x4D59D0 (@0x4D5BD6..0x4D5C0F) ->
+	//  server_user_string1; CNapiGameSession_OnDisconnect @0x4CFAA0 (@0x4CFC3B..0x4CFC54) clears
+	//  both]
 	const std::string &host_gsid() const { return host_gsid_; }
 	int host_requires_join_ticket() const { return host_requires_join_ticket_; }
 
@@ -411,11 +446,13 @@ public:
 	uint32_t session_flags() const { return session_flags_; }
 	// The hosting/playing word (session+0x128, dword_B60108). Only the verify replies, the stop
 	// legs, the punt and the local reset write it; a peer close or the reap leaves it as it was.
-	// [orig: the writers HandleConnectVerifyResponse @0x4d5800, HandleHostVerifyResponse
-	//  @0x4d59d0, HandleVerifyResponse @0x4d1e00, HandleServerMessage @0x4d1c50,
-	//  HandleServerDisconnectMsg @0x4d1fa0, HandlePuntNotification @0x4d20b0,
-	//  CGameSession_StopHosting @0x4d0e60, CGameSession_StopPlaying @0x4d0ec0,
-	//  ResetToDisconnected @0x4d0890; the reader Game_ProcessMainFrame @0x52656d]
+	// [orig: the writers CNapiGameSession_HandleConnectVerifyResponse @0x4D5800,
+	//  CNapiGameSession_HandleHostVerifyResponse @0x4D59D0, CNapiGameSession_HandleVerifyResponse
+	//  @0x4D1E00, CNapiGameSession_HandleServerMessage @0x4D1C50,
+	//  CNapiGameSession_HandleServerDisconnectMsg @0x4D1FA0,
+	//  CNapiGameSession_HandlePuntNotification @0x4D20B0, CGameSession_StopHosting @0x4D0E60,
+	//  CGameSession_StopPlaying @0x4D0EC0, CNapiGameSession_ResetToDisconnected @0x4D0890; the
+	//  reader Game_ProcessMainFrame @0x5263F0 (@0x52656D)]
 	static constexpr int32_t kSessionRoleNone = 0;
 	static constexpr int32_t kSessionRoleVerified = 1;
 	static constexpr int32_t kSessionRoleHosting = 2;
@@ -427,6 +464,21 @@ public:
 	// [orig: CGameSession_SetState @0x4CE140 - the store @0x4CE1CD, the stamp @0x4CE1D5]
 	int lobby_state() const { return lobby_state_; }
 	uint32_t lobby_state_entered_ms() const { return lobby_state_entered_ms_; }
+	// The session's MsgCode word (session+0x130, dword_B60110): the last refusal's or server
+	// statement's MsgCode. ConnectOrHost's legs map it to their NWEC when the session leaves the
+	// leg's requested state without its success (host_leg_exit_tag / play_leg_exit_tag,
+	// connect_or_host.h). 0 at each connection's start and the reset; the play request clears
+	// it, the host request does not.
+	// [orig: the writers CNapiGameSession_HandleHostVerifyResponse @0x4D59D0 (the refusal
+	//  @0x4D5AE1), CNapiGameSession_HandleVerifyResponse @0x4D1E00 (@0x4D1EDC),
+	//  CNapiGameSession_HandleServerMessage @0x4D1C50 (@0x4D1D17),
+	//  CNapiGameSession_HandleServerDisconnectMsg @0x4D1FA0 (@0x4D2041),
+	//  CNapiGameSession_HandlePuntNotification @0x4D20B0 (@0x4D2177); the clears
+	//  CNapiGameSession_InitNPConnection @0x4D3BE0 (@0x4D40D9),
+	//  CNapiGameSession_ResetToDisconnected @0x4D0890 (@0x4D08EA),
+	//  CNapiGameSession_StartPlayingSession @0x4D45E0 (@0x4D460D); the readers
+	//  CNapiGameSession_ConnectOrHost @0x4D4F10 (@0x4D51F3, @0x4D55F7)]
+	int server_msg_code() const { return server_msg_code_; }
 
 	// ---- the first connect's give-ups ---------------------------------------
 	// RequestDisconnect: an NP connection that is up (its state 5) tears down (the 0x46 burst into
@@ -449,7 +501,7 @@ public:
 	bool reconnect_armed() const { return session_role_ != kSessionRoleNone; }
 	// Torn down (the peer's goodbye or description record, the reap) while armed and not yet
 	// back up: the session owns the 0x41 re-probe and the 0x42 re-join from here (the owner's
-	// first-connect retransmits and deadlines stand down; retransmit_stage_datagram() is
+	// first-connect retransmits and deadlines stand down; reannounce_datagram() is
 	// empty) until the re-join's 0x82 lands. [orig: the reconnect tail's guard
 	//  @0x629487..0x6294a5 — !conn_flag0 && conn_flag1 && is_client && +0x710]
 	bool reconnecting() const;
@@ -503,12 +555,40 @@ public:
 	//  @0x627EE5 -> CNapiNPConnection_InitFromSession @0x626320 (the connection's address
 	//  @0x6263B4 / @0x6263B7)]
 	uint32_t server_hellos_taken() const { return server_hellos_taken_; }
+	// The connection's peer, which the owner sets from the taken 0x81's sender whenever
+	// server_hellos_taken() moves: the session record's address and port, which InitFromSession
+	// copies into the connection and every 0x42 then carries as SIP / SPN, each written only when
+	// nonzero. `ip` is PeerAddr's packing (the socket layer's), `port` the port as it hands it.
+	// [orig: Nwu_HandleServerHello @0x626D20 - the record's +0x18 / +0x1C from the datagram's
+	//  address and port @0x62769D / @0x6276A1; CNapiNPConnection_InitFromSession @0x626320 - the
+	//  copy into conn+0x30 / +0x34 @0x6263B4 / @0x6263B7; CNapiNPConnection_SendClientJoin
+	//  @0x61FE20 - SIP from conn+0x30 @0x6201AE..0x6201C5, SPN from conn+0x34
+	//  @0x6201D2..0x6201E9]
+	void set_connection_peer(uint32_t ip, uint32_t port) {
+		peer_ip_ = ip;
+		peer_port_ = port;
+	}
+	// The last taken 0x81's SN, the session record's name. [orig: Nwu_HandleServerHello - SN
+	//  @0x627172, the record's +0x1FC @0x627CC5]
+	const std::string &server_hello_name() const { return server_hello_name_; }
+	// The enumerator's record list drains: a give-up's or an escape's connection pump, the punt,
+	// and each reconnect probe window's open (the embedder's records go, each with its line).
+	// [orig: CNapiGameSession_PumpConnection @0x4D0A40 - NapiNPEnumerator_DrainTimerList (the
+	//  call @0x4D0A84); CNapiGameSession_ProcessNetwork (the call @0x4D0A34);
+	//  CNapiGameSession_HandlePuntNotification (the call @0x4D21C8);
+	//  CNapiNPConnection_PumpStateMachine (the call @0x629646, the window's open)]
+	uint32_t enumerator_drains() const { return enumerator_drains_; }
+	// The peer's resend lists (0x84) that named a sequence, each counted once its resends are
+	// out. [orig: NapiNP_HandleResendList @0x623800 - the flag @0x6239AA, the client's +0x284
+	//  callback after the walk @0x623A24..0x623A37]
+	uint32_t resend_lists_named() const { return resend_lists_named_; }
 
 	State state() const { return state_; }
 	bool is_verified() const { return state_ == State::Verified; }
 
 	uint32_t client_index() const { return cfg_.client_index; }
-	uint32_t client_key() const { return cfg_.client_key; }
+	// The CK and SCRK the last 0x81 drew (0 and empty before the first).
+	uint32_t client_key() const { return client_key_; }
 	uint32_t server_host_key() const { return server_hk_; }
 	uint32_t server_key() const { return server_sk_; }
 	const std::string &client_scrk() const { return client_scrk_; }
@@ -521,6 +601,14 @@ public:
 	// [orig: CNapiGameSession_OnDisconnect @0x4cfb8e / @0x4cfbe3].
 	const std::string &server_web_domain() const { return server_web_domain_; }
 	const std::string &server_nwuid() const { return server_nwuid_; }
+	// The 0x82's NovaworldName CU (63 characters kept), "???" from a teardown on, and the 0x82's
+	// RIP / RPN (the address the server saw), as the connection keeps them.
+	// [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1570 - the name's Napi_CopyString(.., 64)
+	//  into session+0x37C @0x4D15DC; CNapiGameSession_OnDisconnect @0x4CFAA0 - "???" @0x4CFB7B;
+	//  NapiNP_HandleServerJoinResponse @0x629840 - conn+0x38 / +0x3C @0x629D8F / @0x629D92]
+	const std::string &server_novaworld_name() const { return server_novaworld_name_; }
+	uint32_t server_reflected_ip() const { return server_rip_; }
+	uint32_t server_reflected_port() const { return server_rpn_; }
 	const std::string &sess_id_string() const { return sess_id_string_; }
 	const std::string &last_error() const { return last_error_; }
 	// The connection's cs_dir0 block: the NOVAWORLDUDP template overlaid by the 0x82 and the
@@ -554,6 +642,8 @@ private:
 
 	// The 0x81's CI is this connection's and its identity block this protocol's.
 	bool server_hello_is_ours(const ServerHello &sh) const;
+	// InitFromSession's CK, then SCRK (Config::connection_keys, else the manager LCG).
+	void draw_connection_keys();
 	void on_server_hello(const std::vector<uint8_t> &body,
 	                     std::vector<std::vector<uint8_t>> &out);
 	void on_server_auth(const std::vector<uint8_t> &body);
@@ -575,6 +665,19 @@ private:
 	// The reconnect's halves of the pump: the enumerator's 0x41 re-announce, the 0x42 leg
 	// (case 3) and the schedule tail.
 	void pump_reconnect(std::vector<std::vector<uint8_t>> &out);
+	// The connect state's leg of the state machine (case 3), the first connect's and the
+	// re-join's alike: the join fails once more than SESSION_JOIN_TIMEOUT_MS passed since the
+	// state's entry (JFC 2, the connection down with no teardown), else the 0x42 goes once more
+	// than SESSION_CONNECT_RETRANSMIT_MS passed since the last one, the entry's stamp standing
+	// one interval back so the first goes at the first pump past the entry.
+	// [orig: CNapiNPConnection_PumpStateMachine @0x6292e0 case 3 @0x629508 - the timeout
+	//  @0x62950E..0x62951C (+0x5B4), JFC 2 @0x629525, state 4 @0x629564; the re-send test
+	//  @0x629580..0x629588 (+0x5B0), the stamp @0x62958F, CNapiNPConnection_SendClientJoin
+	//  @0x61FE20 (its one caller @0x629595); the lobby connection's +0x5B0 = 3000 @0x4D4318 and
+	//  +0x5B4 = 20000 @0x4D4321 (CNapiGameSession_InitPlayerConnection @0x4D4160)]
+	void pump_join(std::vector<std::vector<uint8_t>> &out);
+	// The connect state's entry on a taken 0x81, both connects': Auth with the stamps below.
+	void enter_connect_state();
 	void grow_reconnect_gap();
 	// The host and play legs' requests over the session-owned lists. [orig:
 	//  CNapiGameSession_StartHostingSession @0x4d4540 / StartPlayingSession @0x4d45e0]
@@ -594,10 +697,14 @@ private:
 
 	uint32_t server_hk_ = 0;       // ServerHello.hk — echoed in ClientAuth
 	uint32_t server_sk_ = 0;       // ServerAuth.sk — session_id on our 0x43s
-	std::string client_scrk_;      // we generate; encrypts our 0x43 inner stream
+	uint32_t client_key_ = 0;      // drawn at each 0x81 (draw_connection_keys)
+	std::string client_scrk_;      // drawn with it; encrypts our 0x43 inner stream
 	std::string server_scrk_;      // ServerAuth.scrk; decrypts inbound 0x83 inner
 	std::string server_nwuid_;     // ServerSessionInit NWUID — echoed in the verify
 	std::string server_web_domain_;// ServerSessionInit NovaworldWebDomainNameAndPortNumber
+	std::string server_novaworld_name_; // ServerSessionInit NovaworldName (session+0x37C)
+	uint32_t server_rip_ = 0;      // ServerSessionInit RIP (conn+0x38)
+	uint32_t server_rpn_ = 0;      // ServerSessionInit RPN (conn+0x3C)
 	std::string sess_id_string_;   // ServerVerifyResult.SessIdString
 	std::string last_error_;
 	CsConfig cs_ = novaworld_service_cs_config();
@@ -615,6 +722,11 @@ private:
 	bool disconnected_by_peer_ = false;
 	uint32_t tossed_datagrams_ = 0;
 	uint32_t server_hellos_taken_ = 0;
+	uint32_t peer_ip_ = 0;   // conn+0x30, the 0x42's SIP (set_connection_peer)
+	uint32_t peer_port_ = 0; // conn+0x34, the 0x42's SPN
+	std::string server_hello_name_;
+	uint32_t enumerator_drains_ = 0;
+	uint32_t resend_lists_named_ = 0;
 
 	// The clocks (all in the owner's ms clock).
 	uint32_t clock_ms_ = 0;
@@ -628,6 +740,7 @@ private:
 	bool first_probe_stopped_ = false; // a give-up stopped the first connect's probe
 	uint32_t session_flags_ = 0;         // session+0x120
 	int32_t session_role_ = kSessionRoleNone; // session+0x128
+	int server_msg_code_ = 0;            // session+0x130
 
 	// The session-owned var lists the host and play legs serialize: HostSetup (session+0x1CC),
 	// Host (+0x214), PlayerList (+0x25C) and the play leg's PlaySetup
@@ -651,8 +764,7 @@ private:
 	int reconnect_counter_ = 0;          // session+0x500
 
 	// The NP connection's reconnect state. [orig: NapiNPConnection — conn_flag1 +0x29, the
-	//  enumerator's timer_active / timer_start_tick / last_send_tick, +0x72C gap, +0x730 next,
-	//  +0x5E0 the state-3 entry, +0x5E4 the last 0x42]
+	//  enumerator's timer_active / timer_start_tick / last_send_tick, +0x72C gap, +0x730 next]
 	struct Reconnect {
 		bool was_connected = false;      // conn_flag1
 		bool probing = false;            // enumerator timer_active
@@ -661,10 +773,14 @@ private:
 		uint32_t last_probe_ms = 0;      // enumerator last_send_tick
 		uint32_t gap_ms = SESSION_RECONNECT_GAP_INITIAL_MS; // +0x72C
 		uint32_t next_ms = 0;            // +0x730
-		uint32_t join_started_ms = 0;    // +0x5E0
-		uint32_t join_last_send_ms = 0;  // +0x5E4
 	};
 	Reconnect reconnect_;
+	// The connect state's stamps, the first connect's and the re-join's: its entry and the last
+	// 0x42, which the entry sets one retransmit interval back (pump_join).
+	// [orig: CNapiNPConnection_InitFromSession @0x626320 - +0x5E0 = now @0x62648A, +0x5E4 =
+	//  now - +0x5B0 @0x626490..0x626499]
+	uint32_t join_started_ms_ = 0;       // +0x5E0
+	uint32_t join_last_send_ms_ = 0;     // +0x5E4
 	uint32_t dcnt_ = 0;                  // conn+0x734
 	uint32_t rcnt_ = 0;                  // conn+0x738
 	uint32_t jfc_ = 0; // conn+0x5F0
@@ -696,7 +812,7 @@ private:
 // AFTER 0x82, not in the identity emit.]
 ClientHello make_client_hello(const ClientSession::Config &cfg, std::string_view co);
 ClientAuth make_client_auth(const ClientSession::Config &cfg, std::string_view co, uint32_t server_hk,
-                            std::string_view client_scrk);
+                            uint32_t client_key, std::string_view client_scrk);
 
 // The gate-sourced inputs to the 0x42-join CU var set. Both the join (client)
 // and the host-registration (host) connection carry this same set — retail
@@ -706,7 +822,11 @@ ClientAuth make_client_auth(const ClientSession::Config &cfg, std::string_view c
 // gate response (ProcessResponse @ 0x4ced20) and are empty against the
 // permissive OpenNova gate.
 struct NovaWorldJoinCu {
-	std::string application = "OpennovaGodotClient.exe";  // exe basename
+	// Application: the running executable's file name as the menu reads it
+	// (read_menu_exe_basename, uppercased), its 512-byte read whole.
+	// [orig: CNapiGameSession_ConnectToNovaWorld @0x4d4640 - Napi_GetExeBasename(.., 0x200)
+	//  @0x4d4780, the CU @0x4d4798]
+	std::string application;
 	// BuildDateAndTime: the title's lobby BDAT (TitleIdentity::lobby_bdat).
 	// [orig: CNapiGameSession_ConnectToNovaWorld @0x4d479d]
 	std::string build_date_and_time;

@@ -127,6 +127,19 @@ int main() {
 	CHECK(slot_texture_size(0, 4) == 1024);
 	CHECK(slot_texture_size(9, 4) == 64);
 	CHECK(slot_texture_size(11, 4) == 32);
+	// The chain's making: the full arm at a detail above 0 [orig:
+	// RenderSlot_InitTextureChainIfEnabled @ 0x5d55f0; Game_StartMission's
+	// dedicated test skipping Render_InitRenderingSubsystems].
+	CHECK(creates_slot_texture_chain(false, 3));
+	CHECK(creates_slot_texture_chain(false, 1));
+	CHECK(!creates_slot_texture_chain(false, 0));
+	CHECK(!creates_slot_texture_chain(true, 3));
+	// The casters' geometry is the load's while the chain stands (D-NET-NEW-LF-27) [orig:
+	// Game_ReloadEntityModelsAndCallbacks @0x522830; RenderSlot_RenderEntityAndChildren
+	// - Entity_RenderWithLODCallback (the call @0x5d78e5)].
+	CHECK(slot_casters_load_with_models(3));
+	CHECK(slot_casters_load_with_models(1));
+	CHECK(!slot_casters_load_with_models(0));
 
 	// --- refresh cadence [orig: @ 0x5d76d9..0x5d7748].
 	CHECK(slot_refresh_mask(0) == 7);

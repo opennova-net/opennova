@@ -33,6 +33,9 @@ enum SightBlendMode {
 	MULTIPLY_AT,
 }
 
+# The ADD rows' additive program, preloaded (made as this script loads), not a CanvasItemMaterial
+# whose program waits for an idle frame (D-NET-NEW-LF-28).
+const ADD_SHADER := preload("res://shaders/canvas_blend_add.gdshader")
 const BLEND_AT_SHADER_CODE := """
 shader_type canvas_item;
 render_mode blend_mix;
@@ -208,8 +211,8 @@ func row_rect(index: int) -> Rect2:
 static func _material_for_blend(blend: int) -> Material:
 	match blend:
 		SightBlendMode.ADD:
-			var material := CanvasItemMaterial.new()
-			material.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
+			var material := ShaderMaterial.new()
+			material.shader = ADD_SHADER
 			return material
 		SightBlendMode.BLEND_AT:
 			return _shader_material(BLEND_AT_SHADER_CODE)

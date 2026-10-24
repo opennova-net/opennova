@@ -696,6 +696,28 @@ func test_material_normals_choose_exact_sources_and_preserve_blue_as_alpha() -> 
 	resources.clear()
 
 
+# A material row's loader makes its one device texture from the file it decoded in memory: a
+# normal map's pixels are computed from the decoded file, never from a texture of the file read
+# back, and a plain row's texture is the decoded file's own (engine renderer/material_texture.h
+# carries the witness, D-NET-NEW-L3-27). No decoded device texture is kept beside the rows'.
+func test_material_rows_make_one_texture_from_the_decoded_file() -> void:
+	var root := _make_flat_root("material_decoded_once")
+	WorldFixture.write_pff(self, root.path_join("resource.pff"), [
+		{"name": "brick.tga", "bytes": _normal_test_tga(61)},
+		{"name": "plain.tga", "bytes": TestFs.tga_bytes(Vector2i(4, 4), Color8(10, 20, 30, 255))},
+	])
+	var resources := ResourceRoot.new()
+	assert_eq(resources.mount_runtime(root, "", false), OK)
+	var normal: Texture2D = resources.load_material_texture("brick.tga", 4)
+	assert_eq(normal.get_image().get_pixel(0, 0), Color8(127, 127, 255, 61),
+			"the normal map computed from the decoded file")
+	var plain: Texture2D = resources.load_material_texture("plain.tga", 1)
+	assert_eq(plain.get_image().get_pixel(0, 0), Color8(10, 20, 30, 255), "the plain row's decoded file")
+	assert_eq(resources.get_decoded_texture_count(), 0,
+			"no texture of a row's file is made beside the row's own")
+	resources.clear()
+
+
 func _solid_test_tga(r: int, g: int, b: int) -> PackedByteArray:
 	var bytes := _normal_test_tga(b)
 	for i in range(16):

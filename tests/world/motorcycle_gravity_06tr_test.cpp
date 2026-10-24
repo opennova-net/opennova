@@ -148,7 +148,7 @@ int main() {
 
 	std::printf("motorcycle_gravity_06tr: ssn=%u launch_z=%.3f airborne_z=%.3f slide_z=%d "
 				"grounded=%d\n",
-			unsigned(kBikeSsn), launch.z + kLift, bike->position.z, bike->veh.slide_z,
+			unsigned(kBikeSsn), launch.z + kLift, float(bike->position.z), bike->veh.slide_z,
 			int(bike->veh.grounded));
 	return failures == 0 ? 0 : 1;
 }

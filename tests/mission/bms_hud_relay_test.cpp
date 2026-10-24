@@ -160,8 +160,11 @@ static void test_subgoal_announcements_relay_their_keys() {
     CHECK(relays.size() == 2);
     w.rules.logic_authority = true;
 
-    // Once the round is over the announcement neither posts nor relays.
+    // Once the round is over the announcement neither posts nor relays. A
+    // session round end stops no dialog line (its SP tail is gated on the
+    // session) [orig: Server_ProcessRoundEnd @0x516942..0x516948].
     w.process_round_end(1);
+    CHECK(!w.out.dialog_line_stop);
     sys.dispatch_action_for_test(w, action(bms::ActionType::SubGoalLost, 3));
     CHECK(relays.size() == 2);
 }

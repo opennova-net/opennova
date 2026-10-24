@@ -98,8 +98,7 @@ bool RotorWashSystem::contains(const Zone &z, const int32_t p[3]) const {
 }
 int32_t RotorWashSystem::ground(int32_t x, int32_t y) const {
 	return world_.tables.terrain
-			? to_fixed(terrain::height_field_height_mission_bilinear(
-					  *world_.tables.terrain, float(from_fixed(x)), float(from_fixed(y))))
+			? terrain::height_field_height_bilinear_fixed(*world_.tables.terrain, x, y)
 			: 0;
 }
 
@@ -282,13 +281,13 @@ FocalSwayPose RotorWashSystem::sway_pose(const Entity &e) const {
 	FocalSwayPose result;
 	if (!e.render_sway)
 		return result;
-	const int32_t p[3] = { to_fixed(e.position.x), to_fixed(e.position.y),
-		io::bam_add(to_fixed(e.position.z), 0x20000) };
+	const int32_t p[3] = { e.position.x.q16, e.position.y.q16,
+		io::bam_add(e.position.z.q16, 0x20000) };
 	int32_t magnitude, direction[3];
 	if (!sample_sway(p, magnitude, direction))
 		return result;
 	const uint32_t seed = world_.logic_tick + uint32_t(p[0] >> 14) + uint32_t(p[1] >> 14) +
-			uint32_t(to_fixed(e.position.z) >> 14);
+			uint32_t(e.position.z.q16 >> 14);
 	auto wave = [&](uint32_t rate, int32_t weight, int shift) {
 		const int32_t sine = sin22_of_bam_x87(int32_t(seed * rate));
 		return retail_q16_mul_rhu(weight, sine >> shift);
@@ -437,8 +436,9 @@ void RotorWashSystem::tick() {
 		// Terrain_OverlayAlloc @0x5CAFC4 (slot[31] there is the intensity
 		// word; the ray radius's `*(_ESI - 4)` @0x5CB265 is the DWORD index
 		// -4 = slot dword 27, the inner radius).
-		// [orig: WeatherParticle_UpdateAllEmitters @0x5CB4D1..0x5CB584;
-		//  WaterRing_SpawnAt @ 0x6108E0]
+		// The wake's own gate skips a zero water word (retail's one dry gate among
+		// the water readers) [orig: WeatherParticle_UpdateAllEmitters @0x5CB4BD..0x5CB4C4,
+		//  the wake @0x5CB4D1..0x5CB584; WaterRing_SpawnAt @ 0x6108E0]
 		if (world_.env.water_z != 0 && (world_.logic_tick & 7u) == 0) {
 			const int32_t height = io::bam_sub(z.frame.m[11], world_.env.water_z);
 			const float opacity = std::min(1.0f,

@@ -11,29 +11,30 @@
 
 #include <runtime/inmatch/napi_np_connection.h>
 
-namespace opennova::world {
-class World;
-}
-
 namespace opennova::inmatch {
 
 // The snapshot for `requester`: one {slot id, entity handle} per roster slot
 // in slot order that is live (bound to an entity), not the host's own slot
 // unless the host is a session peer, not a spectator, and on the requester's
 // team or the requester itself. A requester spawned outside a team game
-// carries team 255, so its snapshot holds itself alone. An inactive requester
-// gets an empty snapshot (count 0).
+// carries team 255, so its snapshot holds itself alone, unless its body was
+// destroyed (`requester_body_destroyed`: the mission teardown's pump, D-NET-NEW-L1-25):
+// the destroyed row reads its AI-record pointer as 0, so the slot's own team
+// applies. An inactive requester gets an empty snapshot (count 0).
 // [orig: NetPacket_SerializeVisiblePlayersSnapshot @0x506320 — the requester
-//  slot +4 gate @0x50635a, its team slot+0x1A0 @0x506372 forced to 255 by the
+//  slot +4 gate @0x50635a, its slot team +0x1A0 @0x50636B forced to 255 by the
 //  entity AI record's 0x200 bit @0x50637c..0x50638c (set at spawn outside the
-//  team types, Entity_SpawnFromAnimSlotProperty @0x43c546..0x43c54f), the
+//  team types, Entity_SpawnFromAnimSlotProperty @0x43c546..0x43c54f; a body
+//  zeroed by Entity_Destroy's memset @0x43EA70 has +0x68 = 0, so the
+//  `test eax, eax; jz` @0x50637F..0x506381 skips the rule), the
 //  per-slot gates @0x5063e0..0x506419 (+4 active, +0 entity, `!+5 ||
 //  is_mp_session_peer`, `!+96481 || !+97536` — +96481 is never set — and
-//  `!+100567`), the team / self / +96481 admit @0x506440, the entry slot+0x14
+//  `!+100567`), the team / self / +96481 admit @0x506422..0x506438 (the
+//  capacity `jge` @0x506440), the entry slot+0x14
 //  and packed handle @0x506445..0x506490]
 std::vector<uint8_t> build_visible_players_snapshot(const NapiNPConnection &requester,
-		const std::vector<NapiNPConnection> &roster, const world::World *world,
-		uint32_t game_type, bool mp_session_peer);
+		const std::vector<NapiNPConnection> &roster, uint32_t game_type,
+		bool mp_session_peer, bool requester_body_destroyed);
 
 // The join notice: S2C 0x4D {the joined slot id}, reliable, to every in-game
 // connection. Retail's one send reaches the joined slot too (it entered state

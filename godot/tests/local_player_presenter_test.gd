@@ -42,8 +42,43 @@ const PERSON_FIXTURE := "res://../fixtures/threedi/synth/person.3di"
 const SOLDIER_ADM_FIXTURE := "res://../fixtures/anim/soldier.adm"
 const IDLE_BAD_FIXTURE := "res://../fixtures/anim/idle.bad"
 const WALK_BAD_FIXTURE := "res://../fixtures/anim/walk.bad"
+# The main view's no-mirror bit (render/visual_layers.h MAIN_VIEW_NO_MIRROR).
+const MAIN_VIEW_NO_MIRROR := 1 << 22
 
 var _shared_root := ""
+# The binding model each presenter of the case reads (its keyboard pass's scan).
+var _models := {}
+
+
+# The keyboard pass's legs over a bare presenter (the shell's MainGame legs,
+# trimmed): no chat line, of the special-key chain only its digit arms (the
+# presenter's chain_digit_key, which the HUD presenter's chain runs), the binding
+# scan over the presenter's own binding model, every row's event into the
+# presenter's input router, and the release pass first (KeyboardPass carries the
+# order).
+class PresenterKeyLegs:
+	extends RefCounted
+	var presenter: LocalPlayerPresenter
+	var model: ControlsModel
+
+	func _init(p_presenter: LocalPlayerPresenter, p_model: ControlsModel) -> void:
+		presenter = p_presenter
+		model = p_model
+
+	func ring_release_pass() -> void:
+		presenter.run_key_release_pass()
+
+	func ring_chat_key(_key: InputEventKey) -> bool:
+		return false
+
+	func ring_special_key(key: InputEventKey) -> bool:
+		return presenter.chain_digit_key(ControlsModel.vk_from_godot_key(key.physical_keycode))
+
+	func ring_binding_code(scan_code: int) -> int:
+		return model.event_code(scan_code)
+
+	func ring_row_event(_key: InputEventKey, code: int, scan_code: int) -> void:
+		presenter.queue_row_event(code, model.event_signed(scan_code), scan_code)
 
 
 func before_all() -> void:
@@ -57,8 +92,10 @@ func after_all() -> void:
 func after_each() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	# A key a failed assertion left down must not leak into the next case.
-	for keycode in [KEY_SHIFT, KEY_CTRL, KEY_7, KEY_Z, KEY_X, KEY_C]:
+	for keycode in [KEY_SHIFT, KEY_CTRL, KEY_7, KEY_Z, KEY_X, KEY_C, KEY_0, KEY_B, KEY_N,
+			KEY_EQUAL, KEY_MINUS]:
 		_hold(keycode, false)
+	_models.clear()
 
 
 # Physical key state through Input, flushed so the router's next sample sees it.
@@ -71,25 +108,37 @@ func _hold(keycode: Key, pressed: bool) -> void:
 	Input.flush_buffered_events()
 
 
-# One press of a polled binding row over the live key state (Ctrl held for a
-# modified row), a frame down and a frame up.
+# A key's press or release as the shell takes it over a bare presenter: the key
+# state through Input, a key-down into the presenter's key queue, and the next
+# input frame's keyboard pass over the queue, whose row events wait in the input
+# router for the next sample (D-CTRL-6: an event row fires once per key-down).
+func _press(presenter: LocalPlayerPresenter, keycode: Key, pressed: bool) -> void:
+	_hold(keycode, pressed)
+	if pressed:
+		presenter.push_key_event(_key_event(keycode))
+	KeyboardPass.new(presenter.get_key_events()).drain(
+			PresenterKeyLegs.new(presenter, _models[presenter]))
+
+
+# One press of a binding row (Ctrl held for a modified row), a frame down and a
+# frame up.
 func _tap_row(world: GameWorld, presenter: LocalPlayerPresenter, camera: Camera3D,
 		keycode: Key, ctrl: bool = false) -> void:
 	if ctrl:
-		_hold(KEY_CTRL, true)
-	_hold(keycode, true)
+		_press(presenter, KEY_CTRL, true)
+	_press(presenter, keycode, true)
 	_frame(world, presenter, camera, 1)
-	_hold(keycode, false)
+	_press(presenter, keycode, false)
 	if ctrl:
-		_hold(KEY_CTRL, false)
+		_press(presenter, KEY_CTRL, false)
 	_frame(world, presenter, camera, 1)
 
 
 # --- real-world staging -------------------------------------------------------
 # The minimal fixture plus the committed model/anim fixtures arranged under the
 # names the production resolvers ask for: a small authored weapon table
-# (WPN_M4AUTO with gfx/animadm/pos rows), a person items.def row for the player visual item
-# (105310 -> person + soldier.adm), the infantry clip set (E_STAND.adm) so
+# (WPN_M4AUTO with gfx/animadm/pos rows), a person items.def row for the player's type
+# (105305 -> person + soldier.adm), the infantry clip set (E_STAND.adm) so
 # the motor's body selection runs, and the 19-bone person staged as the M4's
 # FP gun/arms rig with a wpn-key clip set over the committed .bads.
 
@@ -113,22 +162,38 @@ func _stage_root() -> String:
 	assert_eq(DirAccess.copy_absolute(
 			DefFixture.directory().path_join("weapon.def"),
 			root_dir.path_join("weapon.def")), OK)
-	# The player's third-person avatar: items.def person row 105310 (the placer's
-	# PLAYER_VISUAL_ITEM_ID) over the committed 19-bone person + soldier.adm.
-	# The minimal pack already authors a 105310 row (graphic US01), and a type
-	# id resolves to its FIRST row (retail's ItemList_FindIndexByTypeId stops
-	# at the first match), so the staged row leads the file.
+	# The player's third-person avatar: items.def person row 105305 (the row the
+	# local body's type word 0x14B9 names, D-NET-348) over the committed 19-bone
+	# person + soldier.adm. The minimal pack already authors a 105305 row, and a
+	# type id resolves to its FIRST row (retail's ItemList_FindIndexByTypeId
+	# stops at the first match), so the staged row leads the file; it is the
+	# body's spawn row too, so it carries the pack's 105305 keys bar the model.
 	var items_path := root_dir.path_join("items.def")
 	var base_items := FileAccess.get_file_as_string(items_path)
 	var items := FileAccess.open(items_path, FileAccess.WRITE)
 	assert_not_null(items, "staged items.def is writable")
-	items.store_string(TestFs.crlf("""begin "Player Character"
-  id 105310
+	# The "Null" marker leads, as in the shipped table: the player's row at
+	# ordinal 0 would build its body no proximity slice, so it would meet no
+	# building, ground probe or USE target [orig: Entity_BuildProximityListsFromPools
+	# @0x4B8EB0, the +0x1C test @0x4B8EF9].
+	items.store_string(TestFs.crlf(ItemDbFixture.NULL_ROW + """
+begin "Player Character"
+  id 105305
   type person
+  unit_type 9
   graphic person
   sid player
   anim_def soldier
-  hp 100
+  attrib: aidata fo notool pfoil
+  ai_function plyr
+  disk_function PLAYER
+  phrase_set 0
+  move_function org2
+  input_function troop
+  hp 150
+  armor 0 0
+  radarsig 300
+  mana 0
 end
 
 begin "Night Vision Goggles"
@@ -241,7 +306,9 @@ func _bare_world() -> GameWorld:
 func _attach_presenter(world: GameWorld, camera: Camera3D) -> LocalPlayerPresenter:
 	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(presenter)
-	presenter.setup(world, camera, null, ControlsModel.new())
+	var model := ControlsModel.new()
+	presenter.setup(world, camera, null, model)
+	_models[presenter] = model
 	presenter.set_input_override(_move_intent())
 	return presenter
 
@@ -265,6 +332,21 @@ func _frame(world: GameWorld, presenter: LocalPlayerPresenter, camera: Camera3D,
 		world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
 
 
+# One frame whose trigger and reload are the test's: a headless display captures no
+# mouse, so no router sample can hold the trigger. The presenter's frame head runs
+# as the shell's does, and the world ticks over a frame input of the test's, which
+# names no per-update source: the update reads its weapon bits (the router's own
+# sample, which every update takes, would replace them; engine
+# inmatch::TickInputSource carries the witness).
+func _trigger_frame(world: GameWorld, presenter: LocalPlayerPresenter, camera: Camera3D,
+		fire_held: bool, fire_pressed: bool, reload_pressed: bool) -> void:
+	presenter.before_world_tick(TICK, false, true)
+	var frame_input := MissionFrameInput.new()
+	frame_input.delta_seconds = TICK
+	frame_input.set_weapon_input(fire_held, fire_pressed, reload_pressed)
+	world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
+
+
 # Frames until `predicate` (no arguments -> bool) holds; false when `max_frames`
 # elapse first.
 func _frame_until(world: GameWorld, presenter: LocalPlayerPresenter, camera: Camera3D,
@@ -274,6 +356,34 @@ func _frame_until(world: GameWorld, presenter: LocalPlayerPresenter, camera: Cam
 		if bool(predicate.call()):
 			return true
 	return false
+
+
+# The spawn kit's apply mounts the slot its select stored, which plays SWITCHRANK on that
+# slot (engine world/player_loadout.cpp select_current_slot carries the witness): frames
+# until it has run out, the weapon idling with nothing queued.
+func _frame_until_weapon_idle(world: GameWorld, presenter: LocalPlayerPresenter,
+		camera: Camera3D) -> bool:
+	return _frame_until(world, presenter, camera, func() -> bool:
+		var view := world.local_player_weapon_view()
+		return int(view.current_action) == 0 and int(view.next_action) == 0)
+
+
+# Whether the held weapon is past its draw (neither running nor queuing SWITCHTO): a
+# category key over a running draw is refused, its SWITCHFROM never queued, and no
+# request is retained [orig: WeaponSlot_ForceQueueSwitchFrom @0x53F170 (the SWITCHFROM /
+# SWITCHTO refusal @0x53F17A..0x53F185)].
+func _not_drawing(world: GameWorld) -> bool:
+	var view := world.local_player_weapon_view()
+	return int(view.current_action) != 6 and int(view.next_action) != 6
+
+
+# Ticks the world with no presenter until the held weapon is past its draw.
+func _tick_until_drawn(world: GameWorld, camera: Camera3D, max_ticks: int = 120) -> bool:
+	for i in max_ticks:
+		if _not_drawing(world):
+			return true
+		world.tick(camera.global_position, camera.global_transform, TICK)
+	return _not_drawing(world)
 
 
 func _look(presenter: LocalPlayerPresenter, relative: Vector2, active: bool = true) -> bool:
@@ -357,11 +467,11 @@ func test_input_source_movement_reaches_the_motor_and_neutralizes_when_inactive(
 			"releasing the lean eases the composed roll back out")
 
 
-func test_mouse_motion_forwards_raw_pixels_to_the_sim_pipeline() -> void:
-	# The presenter no longer scales or accumulates look: raw pixel deltas go to
-	# Simulation.add_local_player_look and the witnessed integer pipeline —
-	# sens<<11, scoped zoom reduction, the pitch clamps — folds them in at the
-	# tick [orig: Input_ProcessMouseAxisBindings @0x499680].
+func test_mouse_motion_reaches_the_sim_pipeline_through_the_mouse_pump() -> void:
+	# The presenter neither scales nor spreads look: the motion's cursor offset
+	# rides the frame input to the session's mouse pump, whose axis words the
+	# witnessed integer pipeline (sens<<11, scoped zoom reduction, the pitch
+	# clamps) folds in at each tick [orig: Input_ProcessMouseAxisBindings @0x499680].
 	var world := _load_player_world()
 	var camera := Camera3D.new()
 	add_child_autofree(camera)
@@ -373,10 +483,16 @@ func test_mouse_motion_forwards_raw_pixels_to_the_sim_pipeline() -> void:
 
 	assert_true(_look(presenter, Vector2(300.0, 0.0)), "active mouse motion is consumed")
 	_frame(world, presenter, camera, 1)
-	# The default-sensitivity pipeline is exact: 300 px through the fresh sim's
-	# sens<<11 scale lands 6.591796875 degrees of yaw (mouse right = yaw right).
-	assert_almost_eq(float(sim.get_local_player_yaw_deg()) - yaw0, 6.591796875, 0.001,
-			"raw pixels reach the sim's witnessed integer look pipeline")
+	# The default-sensitivity pipeline is exact: the main frame's mouse pump
+	# hands the axis four times the cursor's 300 px on the frame's one tick
+	# (1200 through the fresh sim's sens<<11 scale: 26.3671875 degrees of yaw,
+	# mouse right = yaw right), and the two-tap sum hands the same 1200 again
+	# on the next tick (engine world::MouseAxisPump).
+	assert_almost_eq(float(sim.get_local_player_yaw_deg()) - yaw0, 26.3671875, 0.001,
+			"the cursor pixels reach the sim's witnessed integer look pipeline four-fold")
+	_frame(world, presenter, camera, 1)
+	assert_almost_eq(float(sim.get_local_player_yaw_deg()) - yaw0, 52.734375, 0.001,
+			"and the next tick's two-tap sum doubles it")
 
 	var pitch0 := float(sim.get_local_player_pitch_deg())
 	assert_true(_look(presenter, Vector2(0.0, 600.0)))
@@ -390,6 +506,36 @@ func test_mouse_motion_forwards_raw_pixels_to_the_sim_pipeline() -> void:
 	_frame(world, presenter, camera, 1)
 	assert_almost_eq(float(sim.get_local_player_yaw_deg()), yaw_now, 0.001,
 			"inactive motion leaves the sim's look state untouched")
+
+
+func test_the_paused_frame_pumps_the_cursor_on_each_update() -> void:
+	# The pause row's paused frames still run the main frame's mouse pump on the
+	# live cursor: no input frame consumes their axis, and the last paused
+	# update's share pairs with the first tick after the resume (engine
+	# inmatch::Session::run_paused_update_legs carries the witness).
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	var sim := world.get_sim()
+	_frame(world, presenter, camera, 2)
+	var yaw0 := float(sim.get_local_player_yaw_deg())
+	world.set_shell_paused(true)
+	assert_true(_look(presenter, Vector2(300.0, 0.0)), "active mouse motion is consumed")
+	_frame(world, presenter, camera, 1)
+	assert_almost_eq(float(sim.get_local_player_yaw_deg()), yaw0, 0.001,
+			"no tick turns the player under the pause")
+	world.set_shell_paused(false)
+	_frame(world, presenter, camera, 1)
+	# The paused update's one-update spread is four times the 300 px, and its
+	# two-tap half reaches the first tick after the resume: 1200 axis units,
+	# 26.3671875 degrees of yaw through the fresh sim's scale.
+	assert_almost_eq(float(sim.get_local_player_yaw_deg()) - yaw0, 26.3671875, 0.001,
+			"the last paused update's share turns the first tick after the resume")
+	_frame(world, presenter, camera, 1)
+	assert_almost_eq(float(sim.get_local_player_yaw_deg()) - yaw0, 26.3671875, 0.001,
+			"and nothing more")
 
 
 func test_stance_keys_are_three_key_select_requests() -> void:
@@ -406,9 +552,9 @@ func test_stance_keys_are_three_key_select_requests() -> void:
 	assert_eq(int(sim.get_local_player_stance()), 0, "the spawned player stands")
 
 	for pair in [[KEY_Z, 2], [KEY_X, 1], [KEY_C, 0]]:
-		_hold(pair[0], true)
+		_press(presenter, pair[0], true)
 		_frame(world, presenter, camera, 3)
-		_hold(pair[0], false)
+		_press(presenter, pair[0], false)
 		_frame(world, presenter, camera)
 		assert_eq(int(sim.get_local_player_stance()), int(pair[1]),
 				"the sim grants the requested stance for key %d" % pair[0])
@@ -430,21 +576,22 @@ func test_overlay_key_latch_and_remapped_wheel_reach_the_sim() -> void:
 	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(presenter)
 	presenter.setup(world, camera, null, model)
+	_models[presenter] = model
 	presenter.set_input_override(_move_intent())
 	await get_tree().process_frame
 	var sim := world.get_sim()
 
-	_hold(KEY_Z, true)
+	_press(presenter, KEY_Z, true)
 	_frame(world, presenter, camera, 2, false)
 	assert_eq(int(sim.get_local_player_stance()), 0, "an overlay blocks the new prone press")
 	_frame(world, presenter, camera, 2)
 	assert_eq(int(sim.get_local_player_stance()), 0, "closing it does not re-fire the held key")
-	_hold(KEY_Z, false)
+	_press(presenter, KEY_Z, false)
 	_frame(world, presenter, camera)
-	_hold(KEY_Z, true)
+	_press(presenter, KEY_Z, true)
 	_frame(world, presenter, camera, 3)
 	assert_eq(int(sim.get_local_player_stance()), 2, "a fresh press reaches the sim")
-	_hold(KEY_Z, false)
+	_press(presenter, KEY_Z, false)
 	_frame(world, presenter, camera)
 
 	var wheel := InputEventMouseButton.new()
@@ -651,19 +798,21 @@ func test_local_avatar_overlays_follow_the_first_person_rule() -> void:
 		fp_mask |= (vi as VisualInstance3D).layers
 	assert_ne(fp_mask & Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY, 0,
 			"first person hides the goggles from the camera by layer")
-	assert_eq(fp_mask & Water.VISUAL_LAYER_WORLD, 0, "and keeps them off the world layer")
+	assert_eq(fp_mask & (Water.VISUAL_LAYER_WORLD | Water.VISUAL_LAYER_WORLD_NO_MIRROR), 0,
+			"and keeps them off the world layers")
 	presenter.set_debug_third_person(true)
 	_frame(world, presenter, camera, 2)
 	var tp_mask := 0
 	for vi in _visual_instances(nvg):
 		tp_mask |= (vi as VisualInstance3D).layers
-	assert_ne(tp_mask & Water.VISUAL_LAYER_WORLD, 0, "third person draws the goggles")
+	assert_ne(tp_mask & Water.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
+			"third person draws the goggles, on the person's no-mirror world layer")
 	_tap_row(world, presenter, camera, KEY_N)
 	_frame(world, presenter, camera, 1)
 	assert_false(nvg.visible, "removed goggles hide")
 
 
-# The router's digit rows over the LIVE binding table and key state, on a row
+# The digit rows over the LIVE binding table and key state, on a row
 # that samples without mouse capture (the weapon-category rows need it and
 # headless has no cursor to capture): radarout rebound to 0 fires on a bare 0
 # (the dispatcher's fallback pass; no other modifier-less row carries the 0,
@@ -690,51 +839,108 @@ func test_use_hold_swallows_digit_rows_and_ctrl_digit_claims_them() -> void:
 	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(presenter)
 	presenter.setup(world, camera, null, model)
+	_models[presenter] = model
 	presenter.set_input_override(_move_intent())
 	await get_tree().process_frame
 	_frame(world, presenter, camera, 2)
 	var sim := world.get_sim()
 	var zoom := sim.get_hud_radar_zoom_q16()
 
-	_hold(KEY_0, true)
+	_press(presenter, KEY_0, true)
 	_frame(world, presenter, camera, 2)
 	assert_gt(sim.get_hud_radar_zoom_q16(), zoom, "a bare 0 fires the rebound radarout row")
-	_hold(KEY_0, false)
+	_press(presenter, KEY_0, false)
 	_frame(world, presenter, camera, 2)
 	zoom = sim.get_hud_radar_zoom_q16()
 
-	_hold(KEY_SHIFT, true)
+	_press(presenter, KEY_SHIFT, true)
 	_frame(world, presenter, camera, 2)  # the hold must have been live LAST frame
-	_hold(KEY_0, true)
+	_press(presenter, KEY_0, true)
 	_frame(world, presenter, camera, 3)
 	assert_eq(sim.get_hud_radar_zoom_q16(), zoom,
 			"a digit under the USE hold is the seat chord and reaches no row")
-	_hold(KEY_0, false)
-	_hold(KEY_SHIFT, false)
+	_press(presenter, KEY_0, false)
+	_press(presenter, KEY_SHIFT, false)
 	_frame(world, presenter, camera, 2)
 	assert_eq(sim.get_hud_radar_zoom_q16(), zoom, "releasing the hold fires nothing")
 
-	_hold(KEY_CTRL, true)
-	_hold(KEY_0, true)
+	_press(presenter, KEY_CTRL, true)
+	_press(presenter, KEY_0, true)
 	_frame(world, presenter, camera, 3)
 	assert_eq(sim.get_hud_radar_zoom_q16(), zoom,
 			"Ctrl+0 is the seat10 row: the modifier pass claims the key")
-	_hold(KEY_0, false)
-	_hold(KEY_CTRL, false)
+	_press(presenter, KEY_0, false)
+	_press(presenter, KEY_CTRL, false)
 	_frame(world, presenter, camera, 2)
 
-	_hold(KEY_0, true)
+	_press(presenter, KEY_0, true)
 	_frame(world, presenter, camera, 2)
 	assert_gt(sim.get_hud_radar_zoom_q16(), zoom, "the same bare 0 fires again")
-	_hold(KEY_0, false)
+	_press(presenter, KEY_0, false)
 	_frame(world, presenter, camera, 2)
 
 
-# The router's menu arms: while the HUD's F9 Emotes menu is open a digit is its
-# pick, closing the menu and reaching no row (radarout rebound to 0 stays put);
-# once the menu is closed the same 0 fires the row again.
-# [orig: Input_HandleSpecialKeys @0x49c731..0x49c77c; the consumed key skips
-#  the binding scan, Input_ProcessKeyboardEvents @0x49d2fb]
+# A key-down event as the shell's key leg takes it: its label and its physical key.
+func _key_event(keycode: Key) -> InputEventKey:
+	var key := InputEventKey.new()
+	key.keycode = keycode
+	key.physical_keycode = keycode
+	key.pressed = true
+	return key
+
+
+# The special-key chain's held-USE arm (s9 FOUND 3): while the USE hold the next
+# input frame reads holds (the presenter's is_use_held, engine
+# controls::PlayerActions::use_held), the arm takes a digit and passes every
+# other key to the chain's tail, so the round-over leg never runs for it. The
+# round's last input frame latched the hold; the next one's head drops the held
+# USE row under the round-over gate, the hold ends, and the round-over leg takes
+# the key (out of a session, every key). Shift is released at the end.
+# [orig: Input_HandleSpecialKeys @0x49c5c0 - the held-USE arm @0x49c6d8, its
+#  non-digit's jump to the tail @0x49c6e0, the round-over arm @0x49c7cf, every
+#  key taken out of a session @0x49c8d5; Input_ProcessFrame @0x49d520 - the aging
+#  @0x49d57f; Input_HandleActionBinding @0x49AD40 - g_RoundOver @0x49ADEE..0x49AE16]
+func test_the_use_hold_passes_a_key_past_the_round_over_leg() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := LocalPlayerPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, camera, null, ControlsModel.new())
+	presenter.set_input_override(_move_intent())
+	var hud := GameHudPresenter.new()
+	add_child_autofree(hud)
+	hud.setup(world, presenter, null)
+	await get_tree().process_frame
+	_frame(world, presenter, camera, 2)
+	var sim := world.get_sim()
+	assert_false(sim.is_mp_session(), "a single-player world")
+	assert_false(presenter.is_use_held(), "no hold before USE")
+
+	_hold(KEY_SHIFT, true)
+	_frame(world, presenter, camera, 2)
+	assert_true(presenter.is_use_held(), "the held USE row latched the hold")
+	# The script's first execution loses the round, USE still held.
+	assert_true(sim.compile_and_set_wac(PackedStringArray(["Lose(0)"])))
+	assert_true(_frame_until(world, presenter, camera,
+			func() -> bool: return sim.is_round_over(), 600), "the WAC Lose ends the round")
+	assert_true(presenter.is_use_held(), "the round's last input frame latched the hold")
+	assert_false(hud.handle_special_key(_key_event(KEY_Q)),
+			"under the hold the key passes the round-over leg and nothing takes it")
+	_frame(world, presenter, camera, 1)
+	assert_false(presenter.is_use_held(), "the round-over gate drops the held USE row")
+	assert_true(hud.handle_special_key(_key_event(KEY_Q)),
+			"with no hold the round-over leg takes every key out of a session")
+	_hold(KEY_SHIFT, false)
+	_frame(world, presenter, camera, 1)
+
+
+# The special-key chain's menu arms (the presenter's chain_digit_key, per key
+# event): while the HUD's F9 Emotes menu is open a digit's key-down is its pick,
+# closing the menu and reaching no row (radarout rebound to 0 stays put); once
+# the menu is closed the same 0 fires the row again.
+# [orig: Input_HandleSpecialKeys @0x49c731..0x49c77c; a take's skip of the
+#  binding scan, Input_ProcessKeyboardEvents @0x49d305]
 func test_open_voice_menu_takes_the_digit_before_the_rows() -> void:
 	var world := _load_player_world()
 	var camera := Camera3D.new()
@@ -750,6 +956,7 @@ func test_open_voice_menu_takes_the_digit_before_the_rows() -> void:
 	var presenter := LocalPlayerPresenter.new()
 	add_child_autofree(presenter)
 	presenter.setup(world, camera, null, model)
+	_models[presenter] = model
 	presenter.set_input_override(_move_intent())
 	var toggles := HudToggles.new()
 	presenter.set_hud_toggles(toggles)
@@ -762,17 +969,17 @@ func test_open_voice_menu_takes_the_digit_before_the_rows() -> void:
 	toggles.poll(0, true, false, false)
 	assert_true(toggles.is_emotes_menu_open(), "the emotes menu is open")
 
-	_hold(KEY_0, true)
+	_press(presenter, KEY_0, true)
 	_frame(world, presenter, camera, 2)
 	assert_false(toggles.is_emotes_menu_open(), "the digit picks and closes the menu")
 	assert_eq(sim.get_hud_radar_zoom_q16(), zoom, "the picked digit reaches no row")
-	_hold(KEY_0, false)
+	_press(presenter, KEY_0, false)
 	_frame(world, presenter, camera, 2)
 
-	_hold(KEY_0, true)
+	_press(presenter, KEY_0, true)
 	_frame(world, presenter, camera, 2)
 	assert_gt(sim.get_hud_radar_zoom_q16(), zoom, "with the menu closed the 0 fires the row")
-	_hold(KEY_0, false)
+	_press(presenter, KEY_0, false)
 	_frame(world, presenter, camera, 2)
 
 
@@ -952,6 +1159,146 @@ func test_aspect_mode_draws_through_a_target_of_the_selected_ratio() -> void:
 			"the native camera fov is the shared conversion at the surface aspect")
 
 
+# Retail stretches every frame onto the one backbuffer its device made at the game's
+# init (engine world/player_view.h ViewProjection carries the witness): the map
+# change's teardown holds the target, drawing nothing, and the next live frame draws
+# into the same one, its render buffers kept.
+func test_a_teardown_holds_the_stretched_target_for_the_next_live_frame() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	var sim := world.get_sim()
+	var size := camera.get_viewport().get_visible_rect().size
+	if size.x <= 0.0 or size.y <= 0.0:
+		pending("the headless viewport reports no size, so no target can be pinned")
+		return
+	var surface_ratio := size.y / size.x
+	var mode := 0 if absf(surface_ratio - 0.75) > 0.001 else 2
+	sim.set_local_player_aspect_mode(mode)
+	_frame(world, presenter, camera, 2)
+	var target: SubViewport = presenter.projection_viewport()
+	assert_not_null(target, "a mode off the surface ratio draws through a target")
+	if target == null:
+		return
+	presenter.teardown()
+	assert_null(presenter.projection_viewport(), "a held target is no reader's")
+	assert_true(is_instance_valid(target), "the teardown holds the target")
+	assert_eq(target.render_target_update_mode, SubViewport.UPDATE_DISABLED,
+			"the held target draws nothing")
+	assert_false(camera.get_viewport().disable_3d, "the surface draws its own 3D meanwhile")
+	presenter.setup(world, camera, null, _models[presenter])
+	presenter.set_input_override(_move_intent())
+	_frame(world, presenter, camera, 2)
+	assert_true(presenter.projection_viewport() == target,
+			"the next live frame draws into the same target")
+	assert_eq(target.render_target_update_mode, SubViewport.UPDATE_ALWAYS)
+	assert_true(camera.get_viewport().disable_3d,
+			"the surface's own 3D draw yields to the target again")
+
+
+# Retail's mission start selects the session's aspect mode ahead of its loads, over the
+# backbuffer its device made at init (engine world/player_view.h ViewProjection carries the
+# witness), so no live frame makes a surface: the start makes the stretched target, held, and
+# the first live frame draws into that same target.
+func test_a_mission_start_makes_and_holds_the_stretched_target() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	var sim := world.get_sim()
+	var size := camera.get_viewport().get_visible_rect().size
+	if size.x <= 0.0 or size.y <= 0.0:
+		pending("the headless viewport reports no size, so no target can be pinned")
+		return
+	var surface_ratio := size.y / size.x
+	var mode := 0 if absf(surface_ratio - 0.75) > 0.001 else 2
+	presenter.prepare_view_projection(mode)
+	assert_null(presenter.projection_viewport(), "a held target is no reader's")
+	var target := presenter.get_node_or_null("ViewProjectionTarget") as SubViewport
+	assert_not_null(target, "the mission start makes the target for a mode off the surface ratio")
+	if target == null:
+		return
+	assert_eq(target.render_target_update_mode, SubViewport.UPDATE_DISABLED,
+			"the held target draws nothing")
+	assert_true(target.size.x >= int(size.x) and target.size.y >= int(size.y),
+			"it is the mode's target, never below the surface on either axis")
+	# The target stands for retail's 8-bit backbuffer, which holds the frame's gamma-domain
+	# bytes: an 8-bit target whose camera draws with the world's environment, whose tonemap
+	# writes those bytes through FrameFx's display decode table (framefx_test pins the table).
+	assert_false(target.use_hdr_2d, "the target is 8-bit, as the backbuffer it stands for")
+	assert_false(camera.get_viewport().disable_3d, "the surface draws its own 3D meanwhile")
+	var blit := presenter.get_node_or_null("ViewProjectionBlit") as CanvasLayer
+	assert_true(blit != null and not blit.visible, "the held target's blit is hidden")
+	# A second start at the same mode keeps the one target.
+	presenter.prepare_view_projection(mode)
+	assert_true(presenter.get_node_or_null("ViewProjectionTarget") == target,
+			"the held target stands for the next start")
+	sim.set_local_player_aspect_mode(mode)
+	_frame(world, presenter, camera, 2)
+	assert_true(presenter.projection_viewport() == target,
+			"the first live frame draws into the target the start made")
+	assert_eq(target.render_target_update_mode, SubViewport.UPDATE_ALWAYS)
+
+
+# The load's one forced frame draws the scene through the held target, as the first live frame
+# will (retail's first scene draw lands on its one backbuffer): its render buffers and first
+# draw are the load's, the surface draws no 3D of its own for that frame, and the target stays
+# held, no reader's, its blit hidden.
+func test_the_load_forced_frame_draws_through_the_held_target() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	var size := camera.get_viewport().get_visible_rect().size
+	if size.x <= 0.0 or size.y <= 0.0:
+		pending("the headless viewport reports no size, so no target can be pinned")
+		return
+	var mode := 0 if absf(size.y / size.x - 0.75) > 0.001 else 2
+	presenter.prepare_view_projection(mode)
+	var target := presenter.get_node_or_null("ViewProjectionTarget") as SubViewport
+	assert_not_null(target, "the mission start makes the target")
+	if target == null:
+		return
+	var blit := presenter.get_node_or_null("ViewProjectionBlit") as CanvasLayer
+	world.emit_signal("hud_pipeline_warm", true)
+	assert_eq(target.render_target_update_mode, SubViewport.UPDATE_ALWAYS,
+			"the forced frame draws the held target")
+	assert_true(camera.get_viewport().disable_3d, "the surface draws no 3D of its own for it")
+	assert_null(presenter.projection_viewport(), "the target stays held: no reader's")
+	assert_true(blit != null and not blit.visible, "its blit stays hidden")
+	var through := target.get_node_or_null("ViewProjectionCamera") as Camera3D
+	assert_true(through != null and through.global_transform.is_equal_approx(camera.global_transform),
+			"the target's camera takes the load camera's pose")
+	world.emit_signal("hud_pipeline_warm", false)
+	assert_eq(target.render_target_update_mode, SubViewport.UPDATE_DISABLED,
+			"past the frame the target is held again")
+	assert_false(camera.get_viewport().disable_3d, "and the surface draws its own 3D")
+
+
+func test_a_mission_start_at_the_surface_ratio_drops_a_held_target() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	var size := camera.get_viewport().get_visible_rect().size
+	if size.x <= 0.0 or size.y <= 0.0:
+		pending("the headless viewport reports no size, so no target can be pinned")
+		return
+	var mode := 0 if absf(size.y / size.x - 0.75) > 0.001 else 2
+	presenter.prepare_view_projection(mode)
+	var target := presenter.get_node_or_null("ViewProjectionTarget") as SubViewport
+	assert_not_null(target, "the mission start makes the target")
+	# -1 selects the surface's own ratio: nothing stretches, so no target stands.
+	presenter.prepare_view_projection(-1)
+	assert_true(target == null or target.is_queued_for_deletion(),
+			"a start at the surface's ratio drops the held target")
+
+
 func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_models() -> void:
 	# Retail draws the local body/held weapon separately from the near-Z first-person
 	# overlay [orig: Player_RenderFirstPersonViewModel @ 0x4ded60]. The hidden
@@ -1047,16 +1394,16 @@ func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_mode
 	_frame(world, presenter, camera, 1)
 	for vi in _visual_instances(avatar):
 		assert_eq(vi.layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
-				Water.VISUAL_LAYER_WORLD,
-				"third person: the body returns to the normal world layer")
+				Water.VISUAL_LAYER_WORLD_NO_MIRROR,
+				"third person: the body returns to a person's world layer")
 		if vi is GeometryInstance3D:
 			assert_eq(vi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
 					"third person: body geometry renders and casts normally")
 	if held_weapon != null:
 		for vi in _visual_instances(held_weapon):
 			assert_eq(vi.layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
-					Water.VISUAL_LAYER_WORLD,
-					"third person: the held weapon returns to the normal world layer")
+					Water.VISUAL_LAYER_WORLD_NO_MIRROR,
+					"third person: the held weapon returns to a person's world layer")
 			if vi is GeometryInstance3D:
 				assert_eq(vi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
 						"third person: held-weapon geometry renders and casts normally")
@@ -1075,8 +1422,8 @@ func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_mode
 	_frame(world, presenter, camera, 1)
 	for vi in _visual_instances(avatar):
 		assert_eq(vi.layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
-				Water.VISUAL_LAYER_WORLD,
-				"the debug first-person body uses the visible world layer")
+				Water.VISUAL_LAYER_WORLD_NO_MIRROR,
+				"the debug first-person body uses a person's visible world layer")
 		if vi is GeometryInstance3D:
 			assert_eq(vi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
 					"the debug first-person body renders and casts normally")
@@ -1089,6 +1436,141 @@ func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_mode
 	presenter.teardown()
 	assert_eq(camera.cull_mask, saved_mask,
 			"teardown() restores the player camera's cull mask exactly")
+
+
+# Retail's composed avatar is one entity submission: the person callback runs for
+# the head submit and the body submit alike, and its camera-tracked gate keeps
+# every part off the camera in first person [orig: Terrain_RenderSectorEntitiesBySide
+# @0x5c7d50 - the head submit call @0x5c7ffc, the body submit's call @0x5c8039;
+# BoneCallback_org0_World @0x4e3940 - the gate @0x4e3ab3..0x4e3aca]. So every part
+# takes the body's first-person layer on each third -> first person edge, and a
+# part's own later layer write (a water mirror's verdict edge, a level rebuild;
+# here its caster flag's write) keeps it there: the head part, left on its own
+# world layer, drew its hat across the first-person view after the buggy's
+# chase view (L5-s42).
+func test_every_avatar_part_takes_the_first_person_layer_on_the_tp_fp_edge() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	_frame(world, presenter, camera, 2)
+	var avatar := _local_avatar(world)
+	assert_not_null(avatar, "the shared presenter built the real 3P avatar")
+	if avatar == null:
+		return
+	var parts: Array = [avatar]
+	parts.append_array(avatar.find_children("*", "ObjectModel", true, false))
+	assert_gt(parts.size(), 1, "the staged combo composes a head part under the body")
+
+	_rewrite_own_layers(parts)
+	_assert_avatar_layer(parts, Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY, "first person")
+	presenter.set_debug_third_person(true)
+	_frame(world, presenter, camera, 1)
+	_rewrite_own_layers(parts)
+	_assert_avatar_layer(parts, Water.VISUAL_LAYER_WORLD_NO_MIRROR, "third person")
+	presenter.set_debug_third_person(false)
+	_frame(world, presenter, camera, 1)
+	_rewrite_own_layers(parts)
+	_assert_avatar_layer(parts, Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY, "back in first person")
+	for part in parts:
+		for vi in _visual_instances(part):
+			if vi is GeometryInstance3D:
+				assert_eq((vi as GeometryInstance3D).cast_shadow,
+						GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
+						"back in first person every part stays a slot caster (hidden by layer)")
+	presenter.teardown()
+
+
+# Retail's water mirrors (the main scene's and the weapon Inset's, both through
+# Render_MainScene's reflected collect) draw only what that collect listed, and
+# above the water it keeps only the entities whose Flags carry 0x400: vehicles by
+# item type and records authored Reflective. No person carries it, the local
+# player included, so above the water no drawn part of the local person (the body
+# and its head, the held weapon, the worn goggles) is on either mirror camera;
+# below the water the collect runs unfiltered and the person waves draw the drawn
+# body there like any person's. The first-person body is on neither on either
+# side: its submit is gated in every pass.
+# [orig: Terrain_CollectVisibleEntitiesForReflection @0x5c90a0 - the filter word
+# @0x5c9109..0x5c911f, handed to pools 0 / 1 @0x5c9145 / @0x5c914e; Render_MainScene
+# @0x5c1240 - the below-water word @0x5c16f2..0x5c16f8, the collect @0x5c16fc;
+# Entity_InitFromModel @0x40e20a; Water_RenderReflectedWorldScene @0x5c8510 - the
+# person waves @0x5c8590 / @0x5c8599; BoneCallback_org0_World @0x4e3940 - the body
+# gate @0x4e3ab3..0x4e3aca]
+func test_no_drawn_local_person_part_is_on_a_water_mirror_above_the_water() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	_frame(world, presenter, camera, 2)
+	var water := world.get_node_or_null("Water") as Water
+	assert_not_null(water, "the packaged world ships the water node")
+	var avatar := _local_avatar(world)
+	assert_not_null(avatar, "the shared presenter built the real 3P avatar")
+	if water == null or avatar == null:
+		return
+	var above: Array[int] = [int(water.get_reflection_camera().cull_mask),
+			int(water.get_inset_reflection_camera().cull_mask)]
+	var below: Array[int] = []
+	for mask in above:
+		assert_eq(mask & Water.VISUAL_LAYER_WORLD_NO_MIRROR, 0, "the mirrors stand above the water")
+		# What Water installs on a mirror whose eye is below the water.
+		below.append(mask | Water.VISUAL_LAYER_WORLD_NO_MIRROR | MAIN_VIEW_NO_MIRROR)
+	_tap_row(world, presenter, camera, KEY_N)
+	_frame(world, presenter, camera, 1)
+	var parts: Array = [avatar]
+	parts.append_array(avatar.find_children("*", "ObjectModel", true, false))
+	var held: ObjectModel = presenter.held_weapon()
+	assert_not_null(held, "the kit's held weapon is built")
+	if held != null:
+		parts.append(held)
+	var nvg := presenter.person_overlays().get_node(PersonOverlayModels.KIND_NVG,
+			PersonOverlayModels.PASS_FIRST) as ObjectModel
+	assert_not_null(nvg, "worn goggles build their item model")
+	if nvg != null:
+		parts.append(nvg)
+	_assert_on_mirrors(parts, above, false, "first person, above the water")
+	_assert_on_mirrors(parts, below, false, "first person, below the water")
+	presenter.set_debug_third_person(true)
+	_frame(world, presenter, camera, 2)
+	_assert_on_mirrors(parts, above, false, "third person, above the water")
+	_assert_on_mirrors(parts, below, true, "third person, below the water")
+	presenter.teardown()
+
+
+func _assert_on_mirrors(parts: Array, masks: Array[int], drawn: bool, label: String) -> void:
+	for part in parts:
+		var layers := 0
+		for vi in _visual_instances(part as Node):
+			layers |= (vi as VisualInstance3D).layers
+		for m in masks.size():
+			if drawn:
+				assert_ne(layers & masks[m], 0,
+						"%s: mirror %d draws %s" % [label, m, (part as Node).name])
+			else:
+				assert_eq(layers & masks[m], 0,
+						"%s: mirror %d leaves %s" % [label, m, (part as Node).name])
+
+
+# Each part's own layer write, the body's first so a part's own write lands last
+# (the body's walk reaches its parts' nodes too): the caster flag's write
+# re-applies the part's own presentation layer, as its mirror verdict edges and
+# level rebuilds do in a live frame.
+func _rewrite_own_layers(parts: Array) -> void:
+	for part in parts:
+		var model := part as ObjectModel
+		var caster := model.is_shadow_caster_enabled()
+		model.set_shadow_caster_enabled(not caster)
+		model.set_shadow_caster_enabled(caster)
+
+
+func _assert_avatar_layer(parts: Array, expected: int, label: String) -> void:
+	for part in parts:
+		var model := part as ObjectModel
+		for vi in _visual_instances(model):
+			assert_eq((vi as VisualInstance3D).layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
+					expected, "%s: %s's %s" % [label, model.name, (vi as Node).name])
 
 
 # The game shell calls setup() from its own _ready — while the player camera's
@@ -1134,8 +1616,10 @@ func test_aim_range_measures_the_real_terrain_and_clamps_to_the_projection() -> 
 	sim.debug_teleport_local_player(Vector3(256.0, 256.0, h + 40.0), 0.0, 0.0)
 	_frame(world, presenter, camera, 1)
 
-	# Aim well below the horizon.
-	assert_true(_look(presenter, Vector2(0.0, 2500.0)))
+	# Aim well below the horizon. A look is at most a few hundred cursor pixels
+	# a frame (retail's pump re-centres the cursor in its window each frame);
+	# a far larger offset wraps the axis value's << 16 in retail and here alike.
+	assert_true(_look(presenter, Vector2(0.0, 400.0)))
 	_frame(world, presenter, camera, 16)
 	assert_lt(float(sim.get_local_player_pitch_deg()), -40.0)
 	var range_down := world.local_player_view().aim_range_units
@@ -1155,7 +1639,7 @@ func test_aim_range_measures_the_real_terrain_and_clamps_to_the_projection() -> 
 
 	# Aim at the sky: nothing is hit and the readout is the 1000-unit
 	# projection's far point.
-	assert_true(_look(presenter, Vector2(0.0, -8000.0)))
+	assert_true(_look(presenter, Vector2(0.0, -800.0)))
 	_frame(world, presenter, camera, 16)
 	assert_gt(float(sim.get_local_player_pitch_deg()), 45.0)
 	assert_between(world.local_player_view().aim_range_units, 999, 1001,
@@ -1276,17 +1760,16 @@ func test_fire_event_plays_the_fsm_clip_on_both_real_viewmodel_parts() -> void:
 	await get_tree().process_frame
 	var sim := world.get_sim()
 	_frame(world, presenter, camera, 2)
+	assert_true(_frame_until_weapon_idle(world, presenter, camera),
+			"the spawn kit's SWITCHRANK on its own slot runs out")
 	assert_eq(presenter.vm_parts().size(), 2)
 	for part_v in presenter.vm_parts():
 		assert_eq(String((part_v as ObjectModel).get_active_body_clip()),
 				"anim_wpn_idle", "the mounted weapon idles in its FP holding pose")
 	var serial_before := int(world.local_player_weapon_view().play_serial)
 
-	# One trigger pull, injected on the same seam the input router drives (the
-	# router's own sample overwrites earlier in this frame; last write wins).
-	var frame_input := presenter.before_world_tick(TICK, false, true)
-	frame_input.set_weapon_input(true, true, false)
-	world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
+	# One trigger pull on the session's frame input seam (_trigger_frame).
+	_trigger_frame(world, presenter, camera, true, true, false)
 
 	assert_eq(String(world.local_player_weapon_view().anim_key), "anim_wpn_fire",
 			"the real FSM entered its fire action")
@@ -1301,9 +1784,7 @@ func test_fire_event_plays_the_fsm_clip_on_both_real_viewmodel_parts() -> void:
 	var part0 := presenter.vm_parts()[0] as ObjectModel
 	var reached_recoil := false
 	for i in 30:
-		frame_input = presenter.before_world_tick(TICK, false, true)
-		frame_input.set_weapon_input(true, false, false)
-		world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
+		_trigger_frame(world, presenter, camera, true, false, false)
 		if String(part0.get_active_body_clip()) == "anim_wpn_recoil":
 			reached_recoil = true
 			break
@@ -1330,6 +1811,8 @@ func _assert_fire_mode_change_frames(ticks_per_frame: int) -> void:
 	var presenter := _attach_presenter(world, camera)
 	await get_tree().process_frame
 	_frame(world, presenter, camera, 2)
+	assert_true(_frame_until_weapon_idle(world, presenter, camera),
+			"the spawn kit's SWITCHRANK on its own slot runs out")
 	var sim := world.get_sim()
 	var previous_model := presenter.viewmodel()
 	var starting_weapon := String(sim.get_local_player_weapon_name())
@@ -1368,10 +1851,13 @@ func test_weapon_switch_events_are_owned_by_the_presenter_from_setup_to_teardown
 	# The sim answers category REQUESTS through the event drain
 	# (switch_to_weapon); the presenter is the ONE registered fixed-tick
 	# consumer from setup to teardown. Attachment is the adoption boundary:
-	# pre-setup history is discarded, never replayed; live events reinstall the
-	# FP presentation [orig: the ACCEPT re-mount WeaponLoadout_ApplyFromBuffer
-	# @0x565cd0 tail -> Player_MountWeaponSlot @0x4dfa40]; teardown releases the
-	# world-to-presenter callback.
+	# pre-setup history is discarded, never replayed. A switch's commit mounts the
+	# stored slot's def in the sim and queues its draw, presenter or not
+	# [orig: WeaponAction_SwitchFrom @0x5433B0 - the EquippedSlot store @0x543475,
+	# WeaponSlot_TryQueueSwitchTo @0x5434A3], so its record carries `installed` and the
+	# presenter's leg is the FP presentation alone, which follows the EquippedSlot's def
+	# [orig: Player_RenderFirstPersonViewModel @0x4DED60 - the EquippedSlot read @0x4DEDAA,
+	# its Def @0x4DEDBC]; teardown releases the world-to-presenter callback.
 	var world := _load_player_world()
 	var camera := Camera3D.new()
 	add_child_autofree(camera)
@@ -1387,6 +1873,9 @@ func test_weapon_switch_events_are_owned_by_the_presenter_from_setup_to_teardown
 			"the sim's switch walk runs without any presenter")
 	assert_eq(String(world.local_player_weapon_name()), "WPN_M4AUTO",
 			"the presentation weapon waits for a consumer")
+	# A category key over a running draw is refused, so each key below waits for the
+	# held weapon's draw to run out.
+	assert_true(_tick_until_drawn(world, camera), "the satchel's draw runs out")
 
 	# setup() discards exactly the pre-attachment history.
 	var presenter := _attach_presenter(world, camera)
@@ -1396,19 +1885,21 @@ func test_weapon_switch_events_are_owned_by_the_presenter_from_setup_to_teardown
 	assert_eq(String(world.local_player_weapon_name()), "WPN_M4AUTO",
 			"discarded history is never replayed into the presentation")
 
-	# Live: switch back to the primary, then to the satchel again — the second
-	# leg changes the installed def, so the FP viewmodel is reinstalled.
+	# Live: switch back to the primary, then to the satchel again. The second leg's
+	# commit mounts the satchel's def, so its record rebuilds the FP viewmodel.
 	sim.request_local_player_weapon_category(3)
 	assert_true(_frame_until(world, presenter, camera, func() -> bool:
 		return String(sim.get_local_player_weapon_name()) == "WPN_M4AUTO"),
 			"the live switch back to the primary completes")
 	_frame(world, presenter, camera, 2)
+	assert_true(_frame_until(world, presenter, camera, func() -> bool:
+		return _not_drawing(world)), "the primary's draw runs out")
 	var vm_before: Node3D = presenter.viewmodel()
 	assert_not_null(vm_before)
 	sim.request_local_player_weapon_category(7)
 	assert_true(_frame_until(world, presenter, camera, func() -> bool:
 		return String(world.local_player_weapon_name()) == "WPN_SATCHEL_CHARGE"),
-			"the live switch event reinstalls the parent weapon definition")
+			"the live switch event presents the def its commit mounted")
 	_frame(world, presenter, camera, 2)
 	assert_not_null(presenter.viewmodel(), "the satchel viewmodel rebuilt")
 	assert_ne(presenter.viewmodel(), vm_before,
@@ -1419,11 +1910,20 @@ func test_weapon_switch_events_are_owned_by_the_presenter_from_setup_to_teardown
 	# teardown() releases the callback: later events accumulate again and the
 	# presentation freezes at its last owned state.
 	presenter.teardown()
+	assert_true(_tick_until_drawn(world, camera), "the satchel's draw runs out")
 	sim.request_local_player_weapon_category(3)
 	for i in 45:
 		world.tick(camera.global_position, camera.global_transform, TICK)
-	assert_gt(world.drain_local_player_weapon_events().size(), 0,
+	var late_events := world.drain_local_player_weapon_events()
+	assert_gt(late_events.size(), 0,
 			"teardown releases the world-to-presenter callback")
+	var late_switch: PlayerWeaponEvent = null
+	for raw in late_events:
+		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_M4AUTO":
+			late_switch = raw
+	assert_not_null(late_switch, "the switch back's record waits undrained")
+	assert_true(late_switch != null and late_switch.installed,
+			"the commit mounted the primary's def with no presenter")
 	assert_eq(String(world.local_player_weapon_name()), "WPN_SATCHEL_CHARGE",
 			"no presenter, no presentation change")
 
@@ -1544,13 +2044,9 @@ func test_local_avatar_presents_the_parked_tick() -> void:
 
 	# The weapon channel: fire once, reload, and step to the park at the
 	# reload clip's wrap after the 80-tick window.
-	var frame_input := presenter.before_world_tick(TICK, false, true)
-	frame_input.set_weapon_input(true, true, false)
-	world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
+	_trigger_frame(world, presenter, camera, true, true, false)
 	_frame(world, presenter, camera, 16)
-	frame_input = presenter.before_world_tick(TICK, false, true)
-	frame_input.set_weapon_input(false, false, true)
-	world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
+	_trigger_frame(world, presenter, camera, false, false, true)
 	var weapon_parked := false
 	for i in 200:
 		_frame(world, presenter, camera, 1)

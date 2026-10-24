@@ -28,7 +28,8 @@
 //  NapiNPProtocol_DispatchOpcode @0x622b40 over g_NPOpcodeHandlers @0x849d90;
 //  NapiNPProtocol_HandleSessionPacket @0x626a00 — FindConnection(proto, 2,
 //  addr, port) @0x626ac5, the local-key test @0x626b72;
-//  NapiNPProtocol_HandleClientHello @0x6213b0 — the listening gate @0x621479]
+//  NapiNPProtocol_HandleClientHello @0x6213b0 — its refusals @0x621463..0x621479, the listening
+//  gate `cmp [ebp+1F5h]` @0x621463 first, then +0x1F6 and the size]
 // [orig: Nwu_HandleServerHello @0x626d20: the CI lookup @0x627533, a miss returning
 //  0 @0x626dcb]
 //

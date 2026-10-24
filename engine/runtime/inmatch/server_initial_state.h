@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -9,7 +10,7 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/mission/mission_text.h>
 
-// P3 — [orig: Server_SendInitialGameStateToPlayer @0x51bba0]. The two-track initial-state burst
+// P3 — [orig: Server_SendPlayerSlotStateFrame @0x51bba0]. The two-track initial-state burst
 // machine: it advances one connection's InitialStateBurst cursor and emits the §5.2a load sequence,
 // every body produced from real World + bms::File + host-config state (ADR 0003, no fixtures). The player-sync
 // serializers (0x2C server-name+map, 0x08 server-config, 0x2A table×6, 0x66 weapon-restrictions, 0x76
@@ -26,27 +27,60 @@ struct InitialStateMessage {
 	uint8_t tag = 0;
 	std::vector<uint8_t> body;
 	bool reliable = true;
+	// Not a record: the join's map-checksum punt at this place among its sends
+	// (Server_LogCRCMismatchPunt's type, 9 HMCRC or 10 CMCRC, and the punt-log reason), which
+	// the 0x0B receiver stages on the connection (D-NET-NEW-L1-5).
+	uint32_t host_punt = 0;
+	const char *host_punt_reason = nullptr;
 };
 
 struct InitialStateStep {
 	std::vector<InitialStateMessage> messages;  // emitted this step (0 or more)
 	uint32_t world_batches_emitted = 0;         // world-stream batches sent this step (drives F3 readiness)
 	bool advanced = false;                      // false => burst not eligible / already complete
-	bool reached_in_game = false;               // emitted the world-stream terminator (game-state 9) this step
 };
 
-// The retail CNapiServerConfig_BuildFlags computation captured by
-// create_session. ServerHello P2 and the trailing dword of S2C 0x08 both read
-// that snapshot; callers may use this helper to compute/inspect the live value.
+// The retail CNapiServerConfig_BuildFlags computation, live: create_session stores it as the
+// advertised P2 (np_protocol.build_flags, which an admin password SET recomputes); the S2C
+// 0x08's tail and the spawn pump's balance gate call it at the time (D-NET-NEW-L1-40).
+// [orig: CNapiServerConfig_BuildFlags @0x4C4DC0 - its callers CNapiGameSession_CreateSession
+//  @0x4C9A0F, ServerConfig_SerializeToPacket @0x505D29, CNapiServer_ProcessPendingPlayerSpawns
+//  @0x4C8E82]
 uint32_t build_server_config_flags(const NapiNPServerCtx &ctx);
 
+// The S2C 0x08 session-config record (51 bytes): the ten rule dwords, the seven config bytes
+// and BuildFlags called live. [orig: ServerConfig_SerializeToPacket @0x505BD0]
+std::vector<uint8_t> serialize_server_config(const NapiNPServerCtx &ctx);
+
 // Advance `conn.burst` by one phase step and return the message(s) to ship. Drive it once per frame
-// per non-spawned connection until reached_in_game. No-op (advanced=false) when ctx.world == nullptr,
-// the connection has not reached PlayerAdded, or its burst is already complete. Sets
-// conn.burst.spawned + game_state 9 on the terminator (the PeerSpawned source). now_tick sources the
-// 0x76 configured class-allow mask + 0x1A timestamp bodies. [orig: Server_SendInitialGameStateToPlayer @0x51bba0]
+// per non-spawned connection; the world stream's 0x1A leaves the slot in state 5, awaiting its
+// C2S 0x0B (the host's own client's too: HostRole::send_own_mission_status), whose join sets
+// conn.burst.spawned (the PeerSpawned source). No-op (advanced=false) when ctx.world == nullptr,
+// the connection has not reached PlayerAdded, or its burst is already complete. now_tick sources
+// the 0x76 configured class-allow mask + 0x1A timestamp bodies.
+// [orig: Server_SendPlayerSlotStateFrame @0x51bba0]
 InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiNPConnection &conn,
                                                      uint32_t now_tick = 0);
+
+// The join: the C2S 0x0B's, from its receiver (Server_HandlePlayerJoinRequest), a remote
+// joiner's and the host's own client's alike. Writes the slot's join words (chat stamp, the +89912 state
+// byte's bits, game state 10, and on the first state-6 entry the quality reset, the network
+// reset, the armory cooldown zero, the RTT countdown and the entry stamp), enters slot state 6
+// and returns this connection's game-start messages in order (0x41s, 0x42, 0x0F, 0x4D, 0x61,
+// 0x3E); the 0x4D's copies to the other joined clients go out on their transports. The 0x0B's
+// two map checksums (`client_checksums`, 0 where its body ends first) are compared against the
+// mission's after the 0x0F: a remote slot's mismatch is a punt among the messages
+// (InitialStateMessage::host_punt).
+// [orig: Server_OnPlayerJoin @0x51A680]
+std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiNPConnection &conn,
+		uint32_t now_tick, const std::array<uint32_t, 2> &client_checksums);
+
+// The S2C 0x0F body for `conn`: its body's pose and the game flags, its
+// ammo-pool image, the waypoint records (a team-1 body: the mission's player
+// route, any game type, D-NET-NEW-LP-3) and the host's location names.
+// [orig: NetPacket_WriteWorldStateLoad0x0F @0x502D10]
+std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const NapiNPConnection &conn,
+		uint32_t now_tick);
 
 // The deploy-map LOCATION labels for every type-2044 marker the promoted
 // `world` holds (the spawn's admitted records), in spawn order: the mission

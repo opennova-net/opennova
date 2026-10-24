@@ -23,7 +23,10 @@ class GameWorld;
 // live one over itself; a test fakes it by overriding the two hooks (ADR 0043
 // rule 11: a presenter depends on the narrowest surface it uses, never on a
 // world double). The bound verbs dispatch to a script override of the hook
-// first, else to the C++ implementation behind them.
+// first, else to the C++ implementation behind them. scene_drawn is whether the last
+// frame drew its world (GameWorld.get_last_frame_world_drawn: the scene frame, its
+// world-skip word down): a screen's world-block legs (the death.mnu close) run on it;
+// the base and a world-less view answer drawn.
 class WorldView : public RefCounted {
 	GDCLASS(WorldView, RefCounted)
 
@@ -32,15 +35,18 @@ protected:
 
 	GDVIRTUAL0R(Ref<Simulation>, _sim)
 	GDVIRTUAL0R(Ref<ResourceRoot>, _resource_root)
+	GDVIRTUAL0R(bool, _scene_drawn)
 
 	// The C++ implementations behind the bound verbs; the base answers none.
 	virtual Ref<Simulation> sim_impl() const { return Ref<Simulation>(); }
 	virtual Ref<ResourceRoot> resource_root_impl() const { return Ref<ResourceRoot>(); }
+	virtual bool scene_drawn_impl() const { return true; }
 
 public:
 	int64_t get_frame_clock_ms() const;
 	Ref<Simulation> sim();
 	Ref<ResourceRoot> resource_root();
+	bool scene_drawn();
 };
 
 // The armory screen's view of the world: the WorldView pair plus the weapon
@@ -55,26 +61,23 @@ protected:
 
 	GDVIRTUAL0R(Ref<WeaponDatabase>, _weapon_database)
 	GDVIRTUAL0R(Ref<PlayerViewmodelDef>, _local_player_viewmodel_def)
-	GDVIRTUAL2R(bool, _set_local_player_weapon_by_name, String, bool)
+	GDVIRTUAL1R(bool, _present_local_player_weapon, String)
 	GDVIRTUAL0(_clear_local_player_weapon)
 
 	virtual Ref<WeaponDatabase> weapon_database_impl() const { return Ref<WeaponDatabase>(); }
 	virtual Ref<PlayerViewmodelDef> local_player_viewmodel_def_impl() const {
 		return Ref<PlayerViewmodelDef>();
 	}
-	virtual bool set_local_player_weapon_by_name_impl(const String &p_weapon_name,
-			bool p_preserve_slot_state) {
-		return false;
-	}
+	virtual bool present_local_player_weapon_impl(const String &p_weapon_name) { return false; }
 	virtual void clear_local_player_weapon_impl() {}
 
 public:
 	Ref<WeaponDatabase> weapon_database();
 	// The equipped weapon's viewmodel definition, null when none is mounted.
 	Ref<PlayerViewmodelDef> local_player_viewmodel_def();
-	// Point the FP viewmodel + action FSM at `weapon_name` (the armory apply).
-	bool set_local_player_weapon_by_name(const String &p_weapon_name,
-			bool p_preserve_slot_state = false);
+	// Point the FP viewmodel at `weapon_name`, the def the armory apply mounted in the sim (the
+	// apply's select and mount; the presentation side alone, no second sim mount).
+	bool present_local_player_weapon(const String &p_weapon_name);
 	// The authored NONE row: no rendered/action weapon.
 	void clear_local_player_weapon();
 };
@@ -91,6 +94,7 @@ protected:
 	static void _bind_methods() {}
 	Ref<Simulation> sim_impl() const override;
 	Ref<ResourceRoot> resource_root_impl() const override;
+	bool scene_drawn_impl() const override;
 	GameWorld *world() const;
 
 private:
@@ -109,8 +113,7 @@ protected:
 	Ref<ResourceRoot> resource_root_impl() const override;
 	Ref<WeaponDatabase> weapon_database_impl() const override;
 	Ref<PlayerViewmodelDef> local_player_viewmodel_def_impl() const override;
-	bool set_local_player_weapon_by_name_impl(const String &p_weapon_name,
-			bool p_preserve_slot_state) override;
+	bool present_local_player_weapon_impl(const String &p_weapon_name) override;
 	void clear_local_player_weapon_impl() override;
 	GameWorld *world() const;
 

@@ -140,7 +140,7 @@ void scale_lut_lerps_into_the_half_extent() {
 // byte past the LUT (TableDef+0x148) on TableDef+0x248, the low byte of the
 // transform flags: 0 for a base table (CParticleTableDef_Construct
 // @ 0x5e26d4), the reference's mask for the transformed clone
-// (sub_5E80F0 @ 0x5e80fc), inverse 0x01 and reverse 0x02 (D-PTL-11).
+// (CParticleTableDef_ConstructClone @ 0x5e80fc), inverse 0x01 and reverse 0x02 (D-PTL-11).
 void the_last_scale_sample_blends_toward_the_table_flags() {
 	p::ParticleDef definition;
 	p::GraphicLayer graphic;

@@ -61,15 +61,51 @@ inline ScenePassGates scene_pass_gates(uint32_t blink_flags,
 }
 
 // The two water passes' gate: the authored water letter (accum bit 0x8)
-// skips them unless the frame's occlusion pass latched the water visible
-// (g_BlinkWaterVisible: the exterior latched, a camera building straddling
-// the water plane); before that pass runs, the letter alone decides
+// skips them unless the g_BlinkWaterVisible word the scene reads ahead of its
+// own collect is set (SceneWaterWord: the exterior latched, a camera building
+// straddling the water plane); with no collect yet, the letter alone decides
 // (`occlusion_water_visible` false).
 // [orig: Terrain_RenderWorldScene @ 0x5c93cb / @ 0x5c95d2..0x5c95ea;
 //  g_BlinkWaterVisible @ 0x29ACE40]
+// Those passes are the scene's strip alone, each drawn under g_WaterActive
+// [orig: Terrain_RenderWaterPass @ 0x610640, the test @0x610647]. The label
+// reaches nothing else of the water. The scene's mirror prerender gates on
+// g_WaterActive alone [orig: Render_TerrainScene @ 0x610c80, the test
+// @0x610cd2 ahead of the call @0x610ce0], past which only the height stands
+// [orig: Render_MainScene @ 0x5c1240, the branch @0x5c1268]; the bloom's water
+// redraw gates on neither [orig: FrameFX_RenderGlowSource @ 0x582940, the call
+// @0x582a5d], only on the eye's side (env::water_surface_sides). So a label
+// that skips the strip leaves the mirror rendering and the redraw drawing. The
+// weapon Inset pass holds the same with its own label and g_WaterActive.
 inline bool scene_water_visible(uint32_t blink_flags, bool occlusion_water_visible) {
 	return (blink_flags & world::kBlinkWaterOffBit) == 0 || occlusion_water_visible;
 }
+
+// The one g_BlinkWaterVisible word a frame's scenes share. Every collect's mask
+// build writes it: the main scene's, the weapon Inset's, and each water
+// mirror's, which runs ahead of its scene's own while that scene's water pass
+// is active (world/occlusion.h OcclusionWorld::mirror_water_visible). Each
+// scene core's water letter label reads it AHEAD of the scene's own collect,
+// so with its mirror up a scene's label takes the mirror collect's verdict, and
+// with it down the last collect's (the previous scene's: the last frame's
+// Inset or main). The scene's water passes then store its own collect's
+// verdict in the latch (env::water_pass_latch), read past that collect.
+// [orig: Terrain_RenderWorldScene @ 0x5c93a0 — the label's read @0x5c93c1
+//  ahead of its collect's call @0x5c94f0, the passes' reads @0x5c95d4 /
+//  @0x5c95e1; the mirror's collect Render_MainScene (the call @0x5c16fc);
+//  the writes Terrain_BuildSectorVisibilityMasks @ 0x5c8610 (@0x5c86c9,
+//  @0x5c8924, @0x5c89ab, @0x5c8aeb)]
+struct SceneWaterWord {
+	bool word = false;
+	// The scene's label ahead of its collect: its mirror's verdict lands on the
+	// word first when that mirror's collect ran (mirror_ran).
+	bool label(uint32_t blink_flags, bool mirror_ran, bool mirror_verdict) {
+		if (mirror_ran) word = mirror_verdict;
+		return scene_water_visible(blink_flags, word);
+	}
+	// The scene's own collect writes it.
+	void collect(bool verdict) { word = verdict; }
+};
 
 // The passes a letter change reopens. The letters gate the frame they are
 // read in: retail reads them at the top of the main frame, ahead of its
@@ -78,13 +114,14 @@ inline bool scene_water_visible(uint32_t blink_flags, bool occlusion_water_visib
 // and the scene core latches its water label from them ahead of its two water
 // passes [orig: Terrain_RenderWorldScene @ 0x5c93b8..0x5c93cd ahead of
 // @ 0x5c95d4..0x5c95ea]. A letter that clears on a tick therefore draws the
-// terrain (the indoors letter) or the water (the water letter) in that tick's
-// own frame, so a device that already ran those passes closed this frame
-// re-runs them on the edge. A letter that sets needs no edge: the pass it
-// closes is simply skipped from that frame on.
+// terrain (the indoors letter) in that tick's own frame, so a device that
+// already ran that pass closed this frame re-runs it on the edge. The water
+// letter takes no edge: its label gates the strips alone (scene_water_visible),
+// and it lands on them with the frame's collect, after the letters. A letter
+// that sets needs no edge: the pass it closes is simply skipped from that frame
+// on.
 struct ScenePassGateEdges {
 	bool terrain_opened = false;
-	bool water_opened = false;
 };
 
 inline ScenePassGateEdges scene_pass_gate_edges(uint32_t prev_letters,
@@ -92,7 +129,6 @@ inline ScenePassGateEdges scene_pass_gate_edges(uint32_t prev_letters,
 	const uint32_t cleared = prev_letters & ~next_letters;
 	ScenePassGateEdges edges;
 	edges.terrain_opened = (cleared & world::kBlinkIndoorsBit) != 0;
-	edges.water_opened = (cleared & world::kBlinkWaterOffBit) != 0;
 	return edges;
 }
 

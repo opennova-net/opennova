@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <memory>
 // P5 — inmatch::ClientRuntime (the headless Client_ProcessNetworkFrame role), always-on:
 //
 //  (A) Full in-process round-trip — client_runtime <-> the REAL np server legs <-> Server_TickUpdate
@@ -27,6 +28,9 @@
 
 #include <runtime/inmatch/charattr_table.h>
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/game_config_block.h>
+#include <runtime/inmatch/punt_log.h>
+#include <runtime/inmatch/server_files.h>
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/novaworld_link.h>
 #include <runtime/inmatch/host_session.h>
@@ -41,6 +45,8 @@
 #include "common/temp_dir.h"
 #include "host_test_setup.h"
 #include "conn_fixture.h"
+#include "enumerated_join.h"
+#include "joiner_mission_start.h" // the harness's end of a released mission start
 #include <runtime/inmatch/server_message_dispatch.h>
 
 #include <runtime/replication/connection.h>
@@ -76,6 +82,7 @@
 #include <array>
 #include <cstdio>
 #include <memory>
+#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -111,28 +118,8 @@ std::vector<uint8_t> encode_test_player_list(
 	return encode_player_list(frame);
 }
 
-std::vector<uint8_t> frame_server_session(SessionSequencing &seq,
-		const std::string &server_scrk, uint32_t client_key,
-		const std::vector<ProtocolMessage> &messages) {
-	std::vector<uint8_t> body;
-	if (!frame_session_packet(
-			seq, SessionCrypto{server_scrk, {}, client_key}, messages, body)) {
-		return {};
-	}
-	return nw_encode_outbound(
-			SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body));
-}
-
-bool decode_client_session(const std::vector<uint8_t> &datagram,
-		const std::string &client_scrk, ProtocolPacketHeader &header,
-		std::vector<ProtocolMessage> &messages) {
-	uint8_t opcode = 0;
-	std::vector<uint8_t> body;
-	return nw_decode_inbound(datagram.data(), datagram.size(), opcode, body) &&
-			opcode == SESSION_OPCODE_PROTOCOL_MESSAGE &&
-			decode_protocol_packet_plaintext(
-					body.data(), body.size(), client_scrk, header, messages);
-}
+using conn_fixture::decode_client_session;
+using conn_fixture::frame_server_session;
 
 const std::vector<uint8_t> &retail_join_request() {
 	static const std::vector<uint8_t> body = {
@@ -283,12 +270,9 @@ bool build_joiner_client_auth(inmatch::JoinRole role,
 	const std::vector<uint8_t> reply = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO,
 			server_hello_to_bytes(server_hello));
-	const inmatch::JoinerConnection::PollResult result =
-			joiner.handle_datagram(reply.data(), reply.size());
-	return result.outbound.size() == 1 &&
-			nw_decode_inbound(
-					result.outbound[0].data(), result.outbound[0].size(),
-					opcode, body) &&
+	(void)joiner.handle_datagram(reply.data(), reply.size());
+	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
+	return nw_decode_inbound(auth_datagram.data(), auth_datagram.size(), opcode, body) &&
 			opcode == SESSION_OPCODE_CLIENT_AUTH &&
 			parse_client_auth(body.data(), body.size(), out);
 }
@@ -381,6 +365,79 @@ bool run_spectator_clientauth_and_state_latch() {
 			"spectator ClientAuth carries retail JSR=1 and JSPP")) {
 		return false;
 	}
+
+	// JSPP rides on its own non-empty test, JSR's `jz` landing on it: the join
+	// choice's commit as a player keeps the spectator password it held, and that
+	// password goes up with no JSR [orig: CNapiServerInfo_SerializeToSession
+	// @0x4c3c54..0x4c3cb2]. The cfg block's words: a spectate commit writes both, a
+	// player commit the spectate word alone [orig: UI_PreGameMenuStateMachine
+	// @0x568bf0 / @0x568c33].
+	test_temp::TempDir dir("client_runtime_join_choice");
+	inmatch::GameConfigBlock block(dir.file("game.cfg"));
+	block.commit_join_choice(true, "spec");
+	block.commit_join_choice(false, "team");
+	if (!expect(block.cfg().join_spectate == 0 && block.cfg().join_spectator_password == "spec",
+			"a player commit keeps the block's spectator password"))
+		return false;
+	const auto auth_choice = [](const ClientAuth &auth, int &jspp_count, std::string &jspp,
+			bool &jsr) {
+		jspp_count = 0;
+		jspp.clear();
+		jsr = false;
+		for (const std::vector<uint8_t> &blob : auth.cu) {
+			uint8_t type = 0;
+			std::string name, value;
+			if (!parse_client_cu_chunk(blob.data(), blob.size(), type, name, value)) continue;
+			if (name == "JSPP") {
+				++jspp_count;
+				jspp = value;
+			}
+			if (name == "JSR") jsr = true;
+		}
+	};
+	const auto block_role = [&block]() {
+		return block.cfg().join_spectate != 0 ? inmatch::JoinRole::Spectator
+				: inmatch::JoinRole::Player;
+	};
+	ClientAuth kept;
+	if (!expect(build_joiner_client_auth(block_role(), block.cfg().join_spectator_password, kept),
+			"kept-password player ClientAuth builds"))
+		return false;
+	int jspp_count = 0;
+	std::string jspp;
+	bool jsr = false;
+	auth_choice(kept, jspp_count, jspp, jsr);
+	if (!expect(jspp_count == 1 && jspp == "spec" && !jsr,
+			"a player's kept spectator password rides JSPP=spec with no JSR"))
+		return false;
+	// The choice lives until the next main-menu entry: the MainMenu init's
+	// Game_LoadConfig runs Config_SetDefaults, whose memset zeroes the whole block,
+	// and no cfg row restores either word, so the next join that shows no choice
+	// sends neither JSR nor JSPP (D-NET-NEW-L2-12) [orig: Menu_InitShellResources
+	// @0x552500 - Game_LoadConfig @0x552534; Config_SetDefaults @0x54D030 - the memset
+	// @0x54D039..0x54D046].
+	block.commit_join_choice(true, "spec");
+	ClientAuth spectate_join;
+	if (!expect(build_joiner_client_auth(block_role(), block.cfg().join_spectator_password,
+				spectate_join), "the committed spectate join builds"))
+		return false;
+	auth_choice(spectate_join, jspp_count, jspp, jsr);
+	if (!expect(jsr && jspp_count == 1 && jspp == "spec",
+			"the commit's own join sends JSR=1 and JSPP"))
+		return false;
+	std::string menu_error;
+	if (!expect(block.enter_main_menu(inmatch::GameConfigBlock::MenuMount{}, menu_error) &&
+				block.cfg().join_spectate == 0 && block.cfg().join_spectator_password.empty(),
+			"a main-menu entry's read zeroes the join choice"))
+		return false;
+	ClientAuth after_menu;
+	if (!expect(build_joiner_client_auth(block_role(), block.cfg().join_spectator_password,
+				after_menu), "the no-choice join after the menu builds"))
+		return false;
+	auth_choice(after_menu, jspp_count, jspp, jsr);
+	if (!expect(!jsr && jspp_count == 0,
+			"a no-choice join after a return to the menu sends no JSR and no JSPP"))
+		return false;
 
 	const std::string client_scrk = "CLIENT-SPECTATOR-STATE-SCRK";
 	const std::string server_scrk = "SERVER-SPECTATOR-STATE-SCRK";
@@ -533,7 +590,7 @@ bool run_fire_queue_stamps_runtime_tick() {
 // but it DOES still transmit: the fire action's freshness predicate lives on the AUTHORITY
 // arm only, so a joiner emits the doomed 0x06 and lets the host discard it. Refusing it
 // client-side would be our own invention.
-// [orig: NapiNPClientMsg_HandleSessionKey @0x4297c0 (both globals @0x4297f8/@0x4297fd,
+// [orig: NapiNPClientMsg_HandleTickSeed @0x4297c0 (both globals @0x4297f8/@0x4297fd,
 //  short body -> 0 @0x4297eb); the zero-skip Client_ProcessNetworkFrame @0x42c193; the
 //  is_authority split Entity_FireWeaponAndSendPacket @0x42bdfd (client arm @0x42bf46,
 //  authority-only gate @0x42be3a); the host gate PlayerSlot_IsActive @0x4fc760 via
@@ -870,17 +927,12 @@ bool run_class_allow_mask_follows_retail_host() {
 // The capture-default C2S 0x2F body, re-derived independently of the production encoder:
 // [u8 team][u8 class 8][u32 slot] + the golden seven ADM rows ("-1" ammo/flags -> 0xFF) + 0xFF.
 // [wire: retail-lan-host-join-session f317-318; orig: NetPacket_SendLoadoutSubmit @0x42cdc0]
-std::vector<uint8_t> canned_loadout_body(uint8_t team, uint8_t slot_low_byte) {
-	std::vector<uint8_t> body = {team, 0x08, slot_low_byte, 0x00, 0x00, 0x00};
-	for (uint8_t adm : {uint8_t{0x18}, uint8_t{0x03}, uint8_t{0x2C}, uint8_t{0x28},
-	                    uint8_t{0x29}, uint8_t{0x2A}, uint8_t{0x02}}) {
-		body.push_back(adm);
-		body.push_back(0xFF);
-		body.push_back(0xFF);
-		body.push_back(0xFF);
-	}
-	body.push_back(0xFF);
-	return body;
+// A joiner with no kit seam and no weapon table submits the fresh profile's side class
+// (8) with every page row dropped (no ADM def names them) and slot 195 both times (no
+// local slot table to fill) [orig: NetPacket_SendLoadoutSubmit @0x42cdc0 - the name gate
+// @0x42cf0b; Player_InitPlayer @0x4e17ff].
+std::vector<uint8_t> fresh_no_table_loadout_body(uint8_t team) {
+	return {team, 0x08, 0xC3, 0x00, 0x00, 0x00, 0xFF};
 }
 
 // The two NovaWorld-only join tokens on the wire, decoded back off the framed
@@ -915,14 +967,15 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 		server_hello.sus2 = "revx02";
 		const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 				SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-		const inmatch::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+		(void)joiner.handle_datagram(
 				server_hello_datagram.data(), server_hello_datagram.size());
-		if (!expect(hello_result.outbound.size() == 1,
-		            "join-tokens: ServerHello emits one ClientAuth")) {
+		const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
+		if (!expect(!auth_datagram.empty(),
+		            "join-tokens: ServerHello leads to one ClientAuth")) {
 			return false;
 		}
-		return expect(nw_decode_inbound(hello_result.outbound[0].data(),
-		                                hello_result.outbound[0].size(), opcode, body) &&
+		return expect(nw_decode_inbound(auth_datagram.data(),
+		                                auth_datagram.size(), opcode, body) &&
 		                      opcode == SESSION_OPCODE_CLIENT_AUTH &&
 		                      parse_client_auth(body.data(), body.size(), client_auth),
 		              "join-tokens: decode ClientAuth");
@@ -1062,12 +1115,44 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 	              "no CC.BIN and a zero bias omit COUNTRYCODE and TZB");
 }
 
-bool run_retail_post_auth_prelude() {
+// The mission start: the S2C 0x1A only releases it, and its end (the embedder's load's)
+// pushes the 0x2F pair and the 0x0B (D-NET-531).
+// [orig: Game_StartMission @0x524360 - NapiClient_WaitForGameStart @0x524e29, the loads
+//  @0x525495..0x525762, the 0x2F @0x525836 / @0x525c2e, the 0x0B @0x52624b, the push
+//  @0x526255]
+// `side_password` is the join's team-password entry: the ClientAuth JSP carries it and the
+// mission start's C2S 0x0B leads with the same text; an entry of 17 or more characters
+// fills the 17-byte field with no NUL, so the string runs on into g_MapFileName, which the
+// S2C 0x2C rewrote last (D-NET-NEW-R3-4)
+// [orig: UI_JoinSelectedSession @0x569bf4..0x569bfa; Game_ApplySessionSettingsToGlobals
+//  @0x551d20..0x551d30, strncpy 0x11 @0x55202a; NapiNPClientMsg_MissionMapNames
+//  @0x427e6c; the 0x0B's read @0x52621f].
+// `held_in_the_queue` runs the join a host's balance gate holds after its 0x02 handler: the
+// p195 tdh-sidepw RO, whose side-A password met a host whose own player holds side A under
+// balance_join = 1 (2:0 against max(1, ceil(0 * 0.5))). The host nags the held joiner with
+// its S2C 0x03 on every pump pass past 1000 ms, about every 2 s, for as long as the gate
+// holds; retail's join screen shows the queue line off that record and waits, its
+// connection acking each nag, until the S2C 0x05. No wait of the join has a deadline
+// (D-NET-NEW-L2-44: ours failed this join at 60 s with its goodbyes).
+// [orig: NapiNPServerMsg_0x002 @0x512FD0 (the sends @0x5130AC..0x5131D5);
+//  CNapiServer_ProcessPendingPlayerSpawns @0x4C8DC0 - the side-password team @0x4C8ED1, the
+//  balance gate @0x4C8F0A..0x4C8F74, the nag @0x4C8F7A..0x4C8FD1;
+//  MultiPlayer_JoinSessionStateMachine @0x56A320 - the session tests @0x56A6DF / @0x56A758,
+//  the queue line @0x56A75E..0x56A8F1 (its one clock read @0x56A7A2)]
+bool run_retail_post_auth_prelude(const std::string &side_password = {},
+		bool held_in_the_queue = false) {
 	constexpr uint32_t kServerKey = 0x11223344u;
 	constexpr uint32_t kConnectionId = 3;
 	const std::string server_scrk = "SERVER-RETAIL-PRELUDE-SCRK";
-	inmatch::JoinerConnection joiner("RetailPrelude");
+	// The held join runs on a test clock, so its hold outlasts any 60 s window.
+	uint64_t clock_ms = 1000;
+	std::unique_ptr<inmatch::JoinerConnection> joiner_owner = held_in_the_queue
+			? std::make_unique<inmatch::JoinerConnection>(
+					  "RetailPrelude", [&clock_ms] { return clock_ms; })
+			: std::make_unique<inmatch::JoinerConnection>("RetailPrelude");
+	inmatch::JoinerConnection &joiner = *joiner_owner;
 	joiner.set_title(&kJo);
+	joiner.set_join_request(inmatch::JoinRole::Player, "", "", side_password);
 
 	// Drive the real 0x41/0x42 builders so the post-auth fixture uses this
 	// connection's live client key and SCRK.
@@ -1088,20 +1173,29 @@ bool run_retail_post_auth_prelude() {
 	server_hello.sus2 = "revx02";
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	const inmatch::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+	(void)joiner.handle_datagram(
 			server_hello_datagram.data(), server_hello_datagram.size());
-	if (!expect(hello_result.outbound.size() == 1,
-			"ServerHello emits one ClientAuth")) {
+	// The 0x42 leaves at the first pump whose clock reads past the connect state's start: the
+	// held join's test clock steps there (the steady helper waits on a clock it never moves).
+	const std::vector<uint8_t> auth_datagram = held_in_the_queue
+			? inmatch::test::enumerated_join_auth(joiner, clock_ms)
+			: inmatch::test::enumerated_join_auth(joiner);
+	if (!expect(!auth_datagram.empty(),
+			"ServerHello leads to one ClientAuth")) {
 		return false;
 	}
 
 	ClientAuth client_auth;
 	if (!expect(nw_decode_inbound(
-				hello_result.outbound[0].data(), hello_result.outbound[0].size(),
+				auth_datagram.data(), auth_datagram.size(),
 				opcode, body) &&
 				opcode == SESSION_OPCODE_CLIENT_AUTH &&
 				parse_client_auth(body.data(), body.size(), client_auth),
 			"decode retail-prelude ClientAuth")) {
+		return false;
+	}
+	if (!expect(side_password.empty() || auth_has_cu(client_auth, "JSP", side_password),
+			"the team-password entry rides the ClientAuth JSP")) {
 		return false;
 	}
 	ServerAuth server_auth = build_server_auth(
@@ -1245,10 +1339,102 @@ bool run_retail_post_auth_prelude() {
 		return false;
 	}
 
-	// Retail frame 14 is a post-handshake metadata bundle. While mission loading
-	// holds the gameplay drive, the client still sends frame 15's header-only ACK
-	// so the reliable server stream can advance.
-	joiner.set_world_ready(false);
+	if (held_in_the_queue) {
+		// The 0x02 handler's records as the p195 RO's retail host framed them (frame 13):
+		// the holdoff settings pair, the 0x01 verification, the 0x7A, the 0x7B and the
+		// 0x03 [queued 1][position 1][length 1].
+		const std::vector<uint8_t> nag = {0x01, 0x01, 0x00, 0x01, 0x00};
+		const uint64_t first_nag_ms = clock_ms;
+		server_seq.last_inbound_seq = 5;
+		uint32_t client_seq = 5;
+		int acks = 0;
+		// Every C2S packet of the hold is a header-only ACK: no record, no goodbye.
+		auto take_acks = [&](const std::vector<std::vector<uint8_t>> &packets) {
+			for (const std::vector<uint8_t> &packet : packets) {
+				if (!decode_client_session(packet, client_auth.scrk, client_header,
+						client_messages) || !client_messages.empty() || packet.size() != 18)
+					return false;
+				client_seq = client_header.seq_num;
+				++acks;
+			}
+			return true;
+		};
+		const std::vector<uint8_t> admission_datagram = frame_server_session(
+				server_seq, server_scrk, client_auth.ck,
+				{
+						make_protocol_message(
+								0x00, {0x00, 0x08, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x00, 0x00},
+								0xA0),
+						make_protocol_message(
+								0x00, {0x01, 0x08, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x00, 0x00},
+								0xA0),
+						make_protocol_message(0x01, {0x01, 0x00, 0x00, 0x00}),
+						make_protocol_message(0x7A, {0x00}),
+						make_protocol_message(0x7B, retail_full_player_info()),
+						make_protocol_message(0x03, nag),
+				});
+		if (!expect(take_acks(joiner.handle_datagram(admission_datagram.data(),
+						admission_datagram.size()).outbound) &&
+						take_acks(joiner.pump(0)) && acks == 1,
+				"held: the 0x02 handler's records draw one header-only ACK")) {
+			return false;
+		}
+		// The nags, one every 2 s for 72 s, past the 60 s our join screen gave the host.
+		for (int pass = 0; pass < 36; ++pass) {
+			clock_ms += 2000;
+			acks = 0;
+			server_seq.last_inbound_seq = client_seq;
+			const std::vector<uint8_t> nag_datagram = frame_server_session(
+					server_seq, server_scrk, client_auth.ck,
+					{make_protocol_message(0x03, nag)});
+			if (!expect(take_acks(joiner.handle_datagram(nag_datagram.data(),
+							nag_datagram.size()).outbound) &&
+							take_acks(joiner.pump(0)) && acks == 1,
+					"held: each nag draws one header-only ACK and nothing else")) {
+				return false;
+			}
+			if (!expect(joiner.in_pre_game() && !joiner.session_lost() &&
+							joiner.last_error().empty() &&
+							joiner.join_screen_stage() == inmatch::JoinScreenStage::Queued,
+					"held: the join screen waits in the queue, no deadline")) {
+				return false;
+			}
+		}
+		// The queue line's record: next in line, its elapsed time from the first queued
+		// record's stamp (the not-queued -> queued edge alone stamps it).
+		const inmatch::JoinQueueRecord &queue = joiner.join_queue();
+		if (!expect(queue.queued && queue.position == 1 && queue.length == 1 &&
+						queue.queued_since_ms == first_nag_ms,
+				"held: the queue record is the host's, stamped at the first nag")) {
+			return false;
+		}
+		// The gate admits: the spawn pump's own 0x03 [0], the settings pair, the 0x05, the
+		// 0x04 and the 0x7B; the joiner answers with frame 17's group.
+		server_seq.last_inbound_seq = client_seq;
+		const std::vector<uint8_t> held_start_datagram = frame_server_session(
+				server_seq, server_scrk, client_auth.ck,
+				{
+						make_protocol_message(0x03, {0x00}),
+						initial_settings[0],
+						initial_settings[1],
+						make_protocol_message(0x05, {0x01}),
+						make_protocol_message(0x04, retail_slot_assignment()),
+						make_protocol_message(0x7B, retail_full_player_info()),
+				});
+		const inmatch::JoinerConnection::PollResult held_start_result = joiner.handle_datagram(
+				held_start_datagram.data(), held_start_datagram.size());
+		return expect(held_start_result.outbound.size() == 1 &&
+						decode_client_session(held_start_result.outbound[0], client_auth.scrk,
+								client_header, client_messages) &&
+						client_messages.size() == 5 && client_messages[0].tag == 0x4E &&
+						client_messages[1].tag == 0x03 && client_messages[2].tag == 0x48 &&
+						client_messages[3].tag == 0x47 && client_messages[4].tag == 0x33 &&
+						joiner.in_mission_start() && !joiner.in_pre_game(),
+				"held: the admission after the hold starts the game as a prompt one does");
+	}
+
+	// Retail frame 14 is a post-handshake metadata bundle. With no semantic reply the
+	// client sends frame 15's header-only ACK so the reliable server stream can advance.
 	server_seq.last_inbound_seq = 5;
 	const std::vector<uint8_t> metadata_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
@@ -1267,13 +1453,21 @@ bool run_retail_post_auth_prelude() {
 						client_header, client_messages) &&
 				client_messages.empty() &&
 				matches_client_header(client_header, kServerKey, 6, 4),
-			"held mission load still ACKs the post-handshake metadata packet")) {
+			"the post-handshake metadata packet draws its header-only ACK")) {
+		return false;
+	}
+
+	// Ahead of the game-start flag the join screen's ABORT is the join state machine's
+	// FullDestroy(-1), not a mission-start abort [orig: PreMenu_OnAbortCancel @0x568CA0;
+	// MultiPlayer_JoinSessionStateMachine @0x56A320 - @0x56A3E3].
+	if (!expect(joiner.in_pre_game() && !joiner.in_mission_start(),
+			"the post-handshake stages are the pre-game join screen's")) {
 		return false;
 	}
 
 	// Golden retail frame 16: the game-start flag is carried after a second
 	// settings pair and before the authoritative full-player-info row. Retail
-	// reacts immediately, even while the local mission/world remains held.
+	// reacts immediately: no local mission is loaded before the S2C 0x1A.
 	server_seq.last_inbound_seq = 6;
 	const std::vector<uint8_t> game_start_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
@@ -1308,8 +1502,9 @@ bool run_retail_post_auth_prelude() {
 			"game-start emits retail frame 17's grouped pre-world admission request")) {
 		return false;
 	}
-	if (!expect(joiner.mission_known() && !joiner.world_ready(),
-			"full-player-info advertises the mission without releasing the local world hold")) {
+	if (!expect(joiner.mission_known() && joiner.in_mission_start() && !joiner.in_pre_game(),
+			"full-player-info advertises the mission; the game-start flag enters the mission "
+			"start's waits (the server-info leg)")) {
 		return false;
 	}
 
@@ -1351,9 +1546,12 @@ bool run_retail_post_auth_prelude() {
 		return false;
 	}
 
-	// Golden frames 21-23: the final mission-data chunk is followed by a valid
-	// player list. The client carries the pending ACK into ONE grouped 0x09+0x22
-	// packet instead of manufacturing an intervening header-only sequence.
+	// The final mission-data chunk queues the empty C2S 0x09 at once, whatever S2C
+	// 0x16 came (the retail corpus: run_20260426_120859 and _120102 send it alone,
+	// _113242 beside the 0x16's one 0x22 re-request); a later 0x16 queues nothing at
+	// the connection, its per-row 0x22s are ClientRuntime's fold (D-NET-526)
+	// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20, the queue @0x42cb43;
+	//  NapiNPClientMsg_PlayerList @0x42fc35].
 	server_seq.last_inbound_seq = 9;
 	constexpr uint32_t kMissionMpAttributes = 0x80003A06u;
 	std::vector<uint8_t> mission_data_chunk =
@@ -1378,37 +1576,123 @@ bool run_retail_post_auth_prelude() {
 			joiner.handle_datagram(
 					mission_data_datagram.data(), mission_data_datagram.size());
 	if (!expect(mission_data_result.outbound.empty() &&
+			mission_data_result.queued_send_messages.size() == 1 &&
+			mission_data_result.queued_send_messages[0].reliable &&
 			joiner.mp_attributes() == kMissionMpAttributes &&
 			joiner.session_max_players() == kMissionMaxPlayers,
-			"final mission-data chunk waits for the player-list boundary")) {
+			"final mission-data chunk queues the reliable 0x09")) {
+		return false;
+	}
+	const std::vector<std::vector<uint8_t>> sync_request =
+			joiner.frame_messages(mission_data_result.queued_send_messages);
+	if (!expect(sync_request.size() == 1 &&
+				decode_client_session(
+						sync_request[0], client_auth.scrk,
+						client_header, client_messages) &&
+				matches_client_header(client_header, kServerKey, 10, 7) &&
+				client_messages.size() == 1 &&
+				client_messages[0].tag == 0x09 &&
+				client_messages[0].payload.empty(),
+			"the 0x09 leaves alone, carrying the final chunk's ACK")) {
 		return false;
 	}
 
+	// The player-sync track's 0x2C names a map file other than the final chunk's block+84
+	// (31 'Z's): the last g_MapFileName writer before the 0x0B.
+	const std::string kSyncMapFile = "PRELUDE.BMS";
+	std::vector<uint8_t> map_names = {'P', 'r', 'e', 'l', 'u', 'd', 'e', 0x00};
+	map_names.insert(map_names.end(), kSyncMapFile.begin(), kSyncMapFile.end());
+	map_names.push_back(0x00);
 	const std::vector<uint8_t> player_list_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
-			{make_protocol_message(
-					0x16, encode_test_player_list({{0, 1}, {1, 2}}))});
+			{make_protocol_message(0x2C, std::move(map_names)),
+					make_protocol_message(
+							0x16, encode_test_player_list({{0, 1}, {1, 2}}))});
 	const inmatch::JoinerConnection::PollResult player_list_result =
 			joiner.handle_datagram(
 					player_list_datagram.data(), player_list_datagram.size());
-	if (!expect(player_list_result.outbound.size() == 1 &&
-				decode_client_session(
-						player_list_result.outbound[0], client_auth.scrk,
-						client_header, client_messages) &&
-				matches_client_header(client_header, kServerKey, 10, 8) &&
-				client_messages.size() == 2 &&
-				client_messages[0].tag == 0x09 &&
-				client_messages[0].payload.empty() &&
-				client_messages[1].tag == 0x22 &&
-				client_messages[1].payload ==
-						std::vector<uint8_t>({0x00, 0xF7, 0x1C}),
-			"player list emits retail frame 23's grouped 0x09+0x22 packet")) {
+	if (!expect(player_list_result.outbound.empty() &&
+				player_list_result.queued_send_messages.empty(),
+			"the player list sends nothing from the connection: no fused 0x22")) {
 		return false;
 	}
 
-	// S2C 0x11 is the safe preload boundary. While the binding still holds the
-	// advertised mission, the only allowed response is its send-boundary ACK:
-	// no spawn-menu 0x0A and no loadout/status packet may escape.
+	// D-NET-NEW-L2-19: the S2C 0x11 ends the sync-tail wait and the mission start goes
+	// straight on, with no mission load, into NapiClient_WaitForGameStart, which queues
+	// the empty reliable C2S 0x0A at its head and pumps it out: the 0x0A answers the 0x11
+	// itself (seq 11, carrying its ACK), ahead of any load, and nothing else leaves (the
+	// loadout and status wait for the 0x1A's mission start).
+	// [orig: NapiNPClientMsg_0x011 @0x4226E0; NapiClient_SendPlayerSyncAndWaitForSyncTail
+	//  @0x42CB20 - the return @0x42CBE7; Game_StartMission @0x524360 - the joiner arm's
+	//  sync-tail wait @0x524DAB, Game_LoadTerrainDuringConnect @0x524DF2,
+	//  Avatars_LoadComboModels @0x524E24, NapiClient_WaitForGameStart @0x524E29;
+	//  NapiClient_WaitForGameStart @0x42CC10 - the 0x0A @0x42CC3F, the send pump @0x42CC92]
+	// V-L2-s8 (NEW-L2-19 FOUND 3): the sync-tail wait tests the round-over gate ahead of the
+	// 0x11's flag. A fork that takes a 0x1D and then the 0x11 abandons the mission start: no
+	// 0x0A answers, no preload, the game loop's frames run (no mission-start abort counted).
+	// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 - @0x42CBC5 ahead of
+	//  @0x42CBE7; Game_StartMission @0x524360 - "aborted 1" @0x524DB0..0x524DD1]
+	{
+		inmatch::JoinerConnection fork = joiner;
+		SessionSequencing fork_seq = server_seq;
+		fork_seq.last_inbound_seq = 10;
+		const std::vector<uint8_t> round_end = frame_server_session(
+				fork_seq, server_scrk, client_auth.ck, {make_protocol_message(0x1D, {})});
+		(void)fork.handle_datagram(round_end.data(), round_end.size());
+		(void)fork.finish_receive_pump();
+		const std::vector<uint8_t> late_tail = frame_server_session(
+				fork_seq, server_scrk, client_auth.ck, {make_protocol_message(0x11, {})});
+		const inmatch::JoinerConnection::PollResult late = fork.handle_datagram(
+				late_tail.data(), late_tail.size());
+		bool queued_0a = false;
+		for (const std::vector<uint8_t> &dg : late.outbound) {
+			std::vector<ProtocolMessage> messages;
+			ProtocolPacketHeader header;
+			if (decode_client_session(dg, client_auth.scrk, header, messages))
+				for (const ProtocolMessage &m : messages) queued_0a |= m.tag == 0x0A;
+		}
+		if (!expect(fork.mission_start_aborted() && !queued_0a && !fork.preload_ready() &&
+						!fork.in_mission_start() &&
+						fork.send_pump_loop() ==
+								inmatch::JoinerConnection::SendPumpLoop::NetworkFrame,
+				"a round over in the sync-tail wait abandons the mission start: the late 0x11 "
+				"draws no 0x0A")) {
+			return false;
+		}
+	}
+
+	// D-NET-NEW-L2-19 (L2-s10 row 7): a 0x11 and then a round end in ONE receive pass: the
+	// sync-tail wait reads the gate ahead of the 0x11's flag after the whole pass, so the
+	// mission start is abandoned with no 0x0A and no preload, the 0x11 notwithstanding.
+	// [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 - the receive, then
+	//  @0x42CBC5 ahead of @0x42CBE7; Game_StartMission @0x524360 - "aborted 1"
+	//  @0x524DB0..0x524DD1; NapiClient_WaitForGameStart @0x42CC10 - the 0x0A @0x42CC3F]
+	{
+		inmatch::JoinerConnection fork = joiner;
+		SessionSequencing fork_seq = server_seq;
+		fork_seq.last_inbound_seq = 10;
+		const std::vector<uint8_t> tail = frame_server_session(
+				fork_seq, server_scrk, client_auth.ck, {make_protocol_message(0x11, {})});
+		const std::vector<uint8_t> round_end = frame_server_session(
+				fork_seq, server_scrk, client_auth.ck, {make_protocol_message(0x1D, {})});
+		(void)fork.handle_datagram(tail.data(), tail.size());
+		(void)fork.handle_datagram(round_end.data(), round_end.size());
+		(void)fork.finish_receive_pump();
+		bool sent_0a = false;
+		sent_0a = fork.take_world_stream_request().has_value();
+		for (const std::vector<uint8_t> &dg : fork.pump(0)) {
+			std::vector<ProtocolMessage> messages;
+			ProtocolPacketHeader header;
+			if (decode_client_session(dg, client_auth.scrk, header, messages))
+				for (const ProtocolMessage &m : messages) sent_0a |= m.tag == 0x0A;
+		}
+		if (!expect(fork.mission_start_aborted() && !sent_0a && !fork.preload_ready() &&
+						!fork.in_mission_start(),
+				"a 0x11 and a round over in one pass abandon the mission start: no 0x0A")) {
+			return false;
+		}
+	}
+
 	server_seq.last_inbound_seq = 10;
 	const std::vector<uint8_t> sync_tail_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
@@ -1416,41 +1700,51 @@ bool run_retail_post_auth_prelude() {
 	const inmatch::JoinerConnection::PollResult sync_tail_result =
 			joiner.handle_datagram(
 					sync_tail_datagram.data(), sync_tail_datagram.size());
-	if (!expect(sync_tail_result.outbound.empty(),
-			"terminal sync tail remains held before the local world is ready")) {
+	if (!expect(sync_tail_result.outbound.empty() && joiner.finish_receive_pump().empty(),
+			"the 0x11 sets the wait's flag: its 0x0A is owed to the send boundary")) {
 		return false;
 	}
-	const std::vector<std::vector<uint8_t>> sync_tail_ack = joiner.pump(0);
-	if (!expect(sync_tail_ack.size() == 1 &&
+	// The game-start wait's head queues it; the send frames it (the client runtime's queue).
+	const std::optional<ProtocolMessage> owed_0a = joiner.take_world_stream_request();
+	const std::vector<std::vector<uint8_t>> sync_tail_answer =
+			owed_0a ? joiner.frame_messages({*owed_0a}) : std::vector<std::vector<uint8_t>>{};
+	if (!expect(sync_tail_answer.size() == 1 &&
 				decode_client_session(
-						sync_tail_ack[0], client_auth.scrk,
+						sync_tail_answer[0], client_auth.scrk,
 						client_header, client_messages) &&
 				matches_client_header(client_header, kServerKey, 11, 9) &&
-				client_messages.empty() &&
-				joiner.preload_ready(),
-			"terminal 0x11 reaches preload_ready with only a header-only ACK")) {
+				client_messages.size() == 1 &&
+				client_messages[0].tag == 0x0A &&
+				client_messages[0].payload.empty() &&
+				joiner.preload_ready() && !joiner.mission_start_released() &&
+				joiner.in_mission_start(),
+			"the terminal 0x11 is answered by the empty 0x0A alone, before any load")) {
 		return false;
 	}
 	if (!expect(joiner.pump(0).empty(),
-			"preload hold prohibits 0x0A and loadout before world_ready")) {
+			"the 0x0A carried the 0x11's ACK: no loadout, no second packet")) {
 		return false;
 	}
 
-	// Installing the advertised mission releases exactly the empty 0x0A
-	// spawn-menu request. Loadout remains reactive to the later world-stream
-	// terminator rather than sharing this boundary.
-	joiner.set_world_ready(true);
-	const std::vector<std::vector<uint8_t>> world_release = joiner.pump(0);
-	if (!expect(world_release.size() == 1 &&
-				decode_client_session(
-						world_release[0], client_auth.scrk,
-						client_header, client_messages) &&
-				matches_client_header(client_header, kServerKey, 12, 9) &&
-				client_messages.size() == 1 &&
-				client_messages[0].tag == 0x0A &&
-				client_messages[0].payload.empty(),
-			"world_ready releases only the empty spawn-menu request")) {
-		return false;
+	// The world stream's wait tests the gate after its send, ahead of the 0x1A's flag: a
+	// 0x1A and a 0x1D in one pass abandon the mission start (no release, no load, no
+	// 0x2F / 0x2F / 0x0B) [orig: NapiClient_WaitForGameStart @0x42CC10 - @0x42CCA1 ahead of
+	// @0x42CCBF; Game_StartMission @0x524360 - "aborted 3" @0x524E2E..0x524E4F].
+	{
+		inmatch::JoinerConnection fork = joiner;
+		SessionSequencing fork_seq = server_seq;
+		fork_seq.last_inbound_seq = 12;
+		const std::vector<uint8_t> same_pass = frame_server_session(
+				fork_seq, server_scrk, client_auth.ck,
+				{make_protocol_message(0x1A, {}), make_protocol_message(0x1D, {})});
+		(void)fork.handle_datagram(same_pass.data(), same_pass.size());
+		(void)fork.finish_receive_pump();
+		inmatch::JoinerConnection::MissionStartSubmissions none;
+		if (!expect(fork.mission_start_aborted() && !fork.mission_start_released() &&
+						!fork.take_mission_start_submissions(none) && !fork.in_mission_start(),
+				"a round over in the world stream's pass abandons the 0x1A's mission start")) {
+			return false;
+		}
 	}
 
 	server_seq.last_inbound_seq = 12;
@@ -1460,22 +1754,45 @@ bool run_retail_post_auth_prelude() {
 	const inmatch::JoinerConnection::PollResult world_end_result =
 			joiner.handle_datagram(
 					world_end_datagram.data(), world_end_datagram.size());
-	if (!expect(world_end_result.outbound.size() == 1 &&
+	// The 0x1A only releases the mission start; its submissions are the runtime's to
+	// queue and pump (ClientRuntime::push_mission_start_end, D-NET-NEW-L2-6).
+	inmatch::JoinerConnection::MissionStartSubmissions submissions;
+	if (!expect(world_end_result.outbound.empty() && joiner.mission_start_released() &&
+				joiner.take_mission_start_submissions(submissions) &&
+				!joiner.mission_start_released() &&
+				!joiner.take_mission_start_submissions(submissions),
+			"the 0x1A releases the mission start, whose submissions are taken once")) {
+		return false;
+	}
+	// The final wait for the 0x0F counts no mission-start abort: its ESC only raises the
+	// cancel flag (V-L2-s8) [orig: Game_StartMission @0x524360 - @0x5262AB -> @0x5262E9].
+	if (!expect(!joiner.in_mission_start(), "the final wait is past the mission start's aborts")) {
+		return false;
+	}
+	// The second 0x2F and the 0x0B are built at their queue points, past the take (its
+	// Player_InitPlayer binding) and the receive (D-NET-NEW-L2-53).
+	const std::vector<std::vector<uint8_t>> mission_start_end = joiner.frame_messages(
+			{submissions.first_loadout, joiner.mission_start_second_loadout(),
+					joiner.mission_start_status()});
+	if (!expect(mission_start_end.size() == 1 &&
 				decode_client_session(
-						world_end_result.outbound[0], client_auth.scrk,
+						mission_start_end[0], client_auth.scrk,
 						client_header, client_messages) &&
-				matches_client_header(client_header, kServerKey, 13, 10) &&
+				matches_client_header(client_header, kServerKey, 12, 10) &&
 				client_messages.size() == 3 &&
 				client_messages[0].tag == 0x2F &&
-				client_messages[0].payload ==
-						canned_loadout_body(0x02, 0xC3) &&
+				client_messages[0].payload == fresh_no_table_loadout_body(0x02) &&
 				client_messages[1].tag == 0x2F &&
-				client_messages[1].payload ==
-						canned_loadout_body(0x02, 0xD4) &&
+				client_messages[1].payload == fresh_no_table_loadout_body(0x02) &&
 				client_messages[2].tag == 0x0B &&
-				!client_messages[2].payload.empty(),
-			"world-stream 0x1A triggers the capture-default loadout pair "
-			"(team from the 0x04 tail, slots 195/212)")) {
+				client_messages[2].payload ==
+						inmatch::build_mission_status(
+								side_password.size() < 17
+										? side_password
+										: side_password.substr(0, 17) + kSyncMapFile,
+								0x01070507u),
+			"the mission start's submissions: the fresh-profile loadout pair (team from "
+			"the 0x04 tail) and the 0x0B, which leads with the JSP's text")) {
 		return false;
 	}
 	// The same 0x1A ends the game-start wait: the mission start's input reset
@@ -1648,14 +1965,15 @@ bool run_early_sync_tail_latch() {
 	server_hello.hk = 0x99AA0011u;
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	const inmatch::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+	(void)joiner.handle_datagram(
 			server_hello_datagram.data(), server_hello_datagram.size());
-	if (!expect(hello_result.outbound.size() == 1, "early-tail: ClientAuth emitted")) {
+	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
+	if (!expect(!auth_datagram.empty(), "early-tail: ClientAuth emitted")) {
 		return false;
 	}
 	ClientAuth client_auth;
 	if (!expect(nw_decode_inbound(
-				hello_result.outbound[0].data(), hello_result.outbound[0].size(),
+				auth_datagram.data(), auth_datagram.size(),
 				opcode, body) &&
 				parse_client_auth(body.data(), body.size(), client_auth),
 			"early-tail: decode ClientAuth")) {
@@ -1758,8 +2076,9 @@ bool run_early_sync_tail_latch() {
 		return false;
 	}
 
-	// Completing the transfers + player list applies the latch: the grouped 0x09+0x22
-	// releases, preload_ready trips, and (world_ready default) pump releases the 0x0A.
+	// Completing the transfers applies the latch: the final 0x64 queues the 0x09 alone
+	// (no S2C 0x16 needed, D-NET-526), preload_ready trips, and the pump
+	// releases the 0x0A.
 	server_seq.last_inbound_seq = 7;
 	const std::vector<uint8_t> server_info_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
@@ -1772,28 +2091,28 @@ bool run_early_sync_tail_latch() {
 	const std::vector<uint8_t> mission_data_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x64, retail_transfer_chunk(1, 64, 0x5A))});
-	if (!expect(joiner.handle_datagram(
-				mission_data_datagram.data(), mission_data_datagram.size()).outbound.empty(),
-			"early-tail: mission-data final waits for the player list")) {
-		return false;
-	}
-	const std::vector<uint8_t> player_list_datagram = frame_server_session(
-			server_seq, server_scrk, client_auth.ck,
-			{make_protocol_message(0x16, encode_test_player_list({{0, 1}, {1, 2}}))});
-	const inmatch::JoinerConnection::PollResult player_list_result = joiner.handle_datagram(
-			player_list_datagram.data(), player_list_datagram.size());
-	if (!expect(player_list_result.outbound.size() == 1 &&
-				decode_client_session(
-						player_list_result.outbound[0], client_auth.scrk,
-						client_header, client_messages) &&
-				client_messages.size() == 2 &&
-				client_messages[0].tag == 0x09 &&
-				client_messages[1].tag == 0x22 &&
+	const inmatch::JoinerConnection::PollResult mission_data_result = joiner.handle_datagram(
+			mission_data_datagram.data(), mission_data_datagram.size());
+	if (!expect(mission_data_result.outbound.empty() &&
+				mission_data_result.queued_send_messages.size() == 1 &&
+				mission_data_result.queued_send_messages[0].tag == 0x09 &&
+				mission_data_result.queued_send_messages[0].payload.empty() &&
 				joiner.preload_ready(),
-			"early-tail: reaching the sync tail applies the latched 0x11")) {
+			"early-tail: the final 0x64 queues the 0x09 and applies the latched 0x11")) {
 		return false;
 	}
-	const std::vector<std::vector<uint8_t>> world_release = joiner.pump(0);
+	const std::vector<std::vector<uint8_t>> sync_request =
+			joiner.frame_messages(mission_data_result.queued_send_messages);
+	if (!expect(sync_request.size() == 1 &&
+				decode_client_session(
+						sync_request[0], client_auth.scrk, client_header, client_messages) &&
+				client_messages.size() == 1 && client_messages[0].tag == 0x09,
+			"early-tail: the 0x09 leaves alone at its send boundary")) {
+		return false;
+	}
+	const std::optional<ProtocolMessage> latched_0a = joiner.take_world_stream_request();
+	const std::vector<std::vector<uint8_t>> world_release =
+			latched_0a ? joiner.frame_messages({*latched_0a}) : std::vector<std::vector<uint8_t>>{};
 	if (!expect(world_release.size() == 1 &&
 				decode_client_session(
 						world_release[0], client_auth.scrk, client_header, client_messages) &&
@@ -1804,22 +2123,20 @@ bool run_early_sync_tail_latch() {
 		return false;
 	}
 
-	// Continuity past the latch: the world-stream terminator still triggers the
-	// grouped loadout/status packet.
+	// Continuity past the latch: the world-stream terminator still releases the
+	// mission start and its loadout/status submissions.
 	server_seq.last_inbound_seq = 11;
 	const std::vector<uint8_t> world_end_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x1A, {})});
 	const inmatch::JoinerConnection::PollResult world_end_result = joiner.handle_datagram(
 			world_end_datagram.data(), world_end_datagram.size());
-	return expect(world_end_result.outbound.size() == 1 &&
-				decode_client_session(
-						world_end_result.outbound[0], client_auth.scrk,
-						client_header, client_messages) &&
-				client_messages.size() == 3 &&
-				client_messages[0].tag == 0x2F &&
-				client_messages[1].tag == 0x2F &&
-				client_messages[2].tag == 0x0B,
+	inmatch::JoinerConnection::MissionStartSubmissions submissions;
+	return expect(world_end_result.outbound.empty() &&
+				joiner.take_mission_start_submissions(submissions) &&
+				submissions.first_loadout.tag == 0x2F &&
+				joiner.mission_start_second_loadout().tag == 0x2F &&
+				joiner.mission_start_status().tag == 0x0B,
 			"early-tail: the FSM continues normally past the latched stage");
 }
 
@@ -2005,7 +2322,7 @@ struct FirstLogicTickProbe final : w::ISystem {
 w::PlayerSpawn player_spawn(w::Vec3 pos, int16_t yaw, uint16_t net_id) {
 	w::PlayerSpawn s;
 	s.position = pos;
-	s.yaw = yaw;
+	s.heading = w::placed_heading_bam(yaw);
 	s.net_id = net_id;
 	return s;
 }
@@ -2071,13 +2388,20 @@ bool run_roundtrip() {
 	world.script.subgoals.show_win = 0x48u;
 	world.script.subgoals.show_lose = 0x90u;
 	ctx.world = &world;
+	// The host's Avatars.def combos holding the joiner's two ids, which the add validates
+	// (D-NET-137) [orig: Server_PlayerAdd @0x51CF87..0x51CFD8].
+	ctx.characters.add_entry(0, 0, 0, 0, 0, 2, 0, 1, false); // 0x0400
+	ctx.characters.add_entry(1, 0, 0, 7, 0, 2, 1, 4, false); // 0x8407
 	// The host's own local player (sets cached.local_player, which apply_player_intent refuses to snap).
 	const w::EntityHandle host_h = w::spawn_player(world, player_spawn({0, 0, 0}, 0, 0xFFF0));
 	if (!expect(host_h.valid(), "host's own player spawned (cached.local_player)")) return false;
 
-	inmatch::ClientRuntime client(kName);
+	// The joiner's wall clock follows the host time the harness drives (tick_connections'
+	// 300 ms per call below), so its paced wait loops (the 0x11 wait's send pump, §5.70.7)
+	// release as they would in real time.
+	uint64_t client_clock_ms = 1;
+	inmatch::ClientRuntime client(kName, [&client_clock_ms] { return client_clock_ms; });
 	client.set_title(&kJo);
-	client.set_world_ready(false); // discover the authoritative mission before installing its world
 	inmatch::CharacterJoinVars join_profile;
 	join_profile.char_id[0] = 0x0400; // nat 0, div 0, combo 2, good
 	join_profile.char_id[1] = 0x8407; // nat 7, div 0, combo 2, evil
@@ -2104,7 +2428,11 @@ bool run_roundtrip() {
 	bool saw_client_auth = false;
 	bool client_auth_has_retail_environment = false;
 	bool client_auth_has_retail_character_profile = false;
-	bool saw_world_drive_while_held = false;
+	// D-NET-NEW-L2-19: the 0x0A answers the 0x11 (never earlier); the mission start's
+	// 0x2F / 0x0B follow it.
+	bool saw_0a = false;
+	bool saw_0a_before_sync_tail = false;
+	bool saw_submission_before_0a = false;
 	std::string spawn_name;
 	auto note_event = [&](const inmatch::HostAcceptEvent &e) {
 		if (e.kind == inmatch::HostAcceptEvent::Kind::PeerSpawned && !spawned) {
@@ -2205,14 +2533,22 @@ bool run_roundtrip() {
 					}
 					if (message.tag == 0x02) {
 						saw_join_02 = true;
+						// The echo keeps the probe's second word, the host's file-transfer
+						// session id: 0 on this context, which no host role's mission start
+						// pointed at process words (D-NET-NEW-L8-20) [orig:
+						// NetPacket_BuildPaddedTimestampPayload @0x502A76;
+						// NapiNPClientMsg_HandleJoinResponse @0x42E119].
 						join_02_shape_ok = message.payload.size() == 256 &&
-							message.payload[4] == 0x02 && message.payload[5] == 0 &&
-							message.payload[6] == 0 && message.payload[7] == 0;
+							ctx.file_transfer_session == nullptr && message.payload[4] == 0 &&
+							message.payload[5] == 0 && message.payload[6] == 0 &&
+							message.payload[7] == 0;
 					}
-					if (!client.world_ready() &&
-					    (message.tag == 0x0A || message.tag == 0x2F ||
-					     message.tag == 0x0B))
-						saw_world_drive_while_held = true;
+					if (message.tag == 0x0A) {
+						if (!client.preload_ready()) saw_0a_before_sync_tail = true;
+						saw_0a = true;
+					}
+					if ((message.tag == 0x2F || message.tag == 0x0B) && !saw_0a)
+						saw_submission_before_0a = true;
 				}
 				break;
 			}
@@ -2224,8 +2560,13 @@ bool run_roundtrip() {
 
 	// --- 1) Retail post-auth exchange learns the mission while the world/load drive is held. ---
 	pump_host(client.start()); // ClientHello -> ServerHello (queued back to the client)
-	for (int f = 0; f < 20 && !client.mission_known(); ++f)
+	// The ServerHello's frame records the session, the next frame starts the connect state, and
+	// its 0x42 leaves once the clock reads past that start: the connect state's frames step the
+	// clock (D-NET-NEW-L2-25).
+	for (int f = 0; f < 24 && !client.mission_known(); ++f) {
+		if (client.phase() == inmatch::JoinerConnection::Phase::Auth) ++client_clock_ms;
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) pump_host(std::move(d));
+	}
 	if (!expect(client.mission_known(), "joiner learned mission metadata from S2C 0x7B")) return false;
 	if (!expect(client.server_name() == host_config.server_name &&
 	                    client.mission_name() == host_config.mission_file &&
@@ -2261,21 +2602,22 @@ bool run_roundtrip() {
 	}
 	for (int f = 0; f < 4; ++f) {
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) pump_host(std::move(d));
+		push_released_mission_start(client, pump_host);
 		for (inmatch::TickOut &t : inmatch::tick_connections(ctx, 300, tick++)) {
 			for (const inmatch::HostAcceptEvent &e : t.events) note_event(e);
 			for (const std::vector<uint8_t> &o : t.outbound) client.receive(o.data(), o.size());
 		}
 	}
-	if (!expect(!saw_world_drive_while_held &&
-	                    !spawned && !inmatch::connection_spawned(ctx, peer),
-	            "0x0A and loadout/status wait for world-ready")) return false;
-
-	// Install the advertised mission, then resume on the exact authenticated session.
-	client.set_world_ready(true);
+	if (!expect(!saw_0a_before_sync_tail && !saw_submission_before_0a,
+	            "the 0x0A answers the 0x11, and the loadout / status follow it")) return false;
 
 	// --- 2) Spawn-gate burst, driven entirely from the per-frame client role. ---
 	for (int f = 0; f < 120 && !spawned; ++f) {
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) pump_host(std::move(d));
+		// The 0x1A's frame: this harness has no load to run, so its end of the released mission
+		// start ships the push right after the frame, as the retired run_frame tail push did
+		// (R-L2-s35-1; joiner_mission_start.h).
+		push_released_mission_start(client, pump_host);
 		// Several host ticks per frame so entity_batch_count climbs through world streaming (F3) and the
 		// spawn gate opens; ship the burst replies back to the client. The match service advances
 		// with each host tick: the pending-player spawn pump admits only on its periodic second
@@ -2287,6 +2629,7 @@ bool run_roundtrip() {
 				for (const inmatch::HostAcceptEvent &e : t.events) note_event(e);
 				for (const std::vector<uint8_t> &o : t.outbound) client.receive(o.data(), o.size());
 			}
+			client_clock_ms += 300;
 		}
 	}
 	if (!expect(spawned, "the spawn-gate burst trips PeerSpawned")) return false;
@@ -2358,11 +2701,17 @@ bool run_roundtrip() {
 	if (!expect(client.is_deployed(), "client is deployed after owner-ID match plus the applicable 0x5A release")) return false;
 
 	// --- 4) In-match per-frame loop: client 0x0C -> apply_in_match_c2s -> Server_TickUpdate -> 0x0A fold ---
+	// The joiner reports itself half a unit along x from where the host's copy of its body
+	// stands: inside the authority chase's band (D-NET-NEW-LP-2).
+	const w::Entity *host_copy = world.registry.get(Hh);
+	if (!expect(host_copy != nullptr, "the host holds the joiner's body")) return false;
+	const int32_t hx = host_copy->position.x.q16, hy = host_copy->position.y.q16,
+	              hz = host_copy->position.z.q16;
 	PlayerExtendedUplink up;
 	up.carrier_handle = 0xFFFF;
-	up.pos_x = w::to_fixed(100.0);
-	up.pos_y = w::to_fixed(200.0);
-	up.pos_z = w::to_fixed(-50.0);
+	up.pos_x = hx + 0x8000;
+	up.pos_y = hy;
+	up.pos_z = hz;
 	up.heading = 0x2000; // -> mission yaw 45
 	up.pitch = 0x0100;
 
@@ -2395,13 +2744,17 @@ bool run_roundtrip() {
 	}
 	// With a World bound the host read-applies the 0x0C inside the dispatch walk, in
 	// wire order (retail's NapiNPServerMsg_0x00C @0x501C30); nothing is surfaced for
-	// the tick-time FIFO, so the joiner entity already sits at the uplink pose here.
+	// the tick-time FIFO, so the joiner body's chase target is already staged here, its
+	// live position still the host's own.
 	if (!expect(staged == 0, "no C2S 0x0C is staged for the tick drain once a World applies it inline")) return false;
 	{
-		const w::Entity *snapped = world.registry.get(Hh);
-		if (!expect(snapped != nullptr &&
-		                    snapped->position.x == static_cast<float>(w::from_fixed(up.pos_x)),
-		            "the dispatch walk SNAPped the joiner before the authoritative tick")) return false;
+		const w::Entity *body = world.registry.get(Hh);
+		const w::AiEntity *motor = world.ai.for_handle(Hh);
+		if (!expect(body != nullptr && motor != nullptr &&
+		                    motor->net_smooth_target[0] == up.pos_x &&
+		                    body->position.x.q16 == hx,
+		            "the dispatch walk staged the joiner's chase target before the authoritative tick"))
+			return false;
 	}
 
 	// This focused test invokes Server_TickUpdate without HostOwner's pump; open
@@ -2409,14 +2762,16 @@ bool run_roundtrip() {
 	// before the authoritative tick.
 	for (inmatch::NapiNPConnection &connection : ctx.np_protocol.connection_list)
 		if (connection.peer == peer) connection.s2c_send_boundary_open = true;
-	inmatch::Server_TickUpdate(ctx); // drain (SNAP) -> run_logic_tick -> emit per-connection 0x0A
+	inmatch::Server_TickUpdate(ctx); // drain -> run_logic_tick (the chase) -> emit per-connection 0x0A
 
+	// The body's update took the first of ten bucket steps toward the target:
+	// ((10 >> 1) + 0x8000) / 10 = 3277 along x, no vertical step.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B458A..0x4B45CA, z = 0 @0x4B4600]
 	const w::Entity *je = world.registry.get(Hh);
 	if (!expect(je != nullptr, "joiner entity present after the tick")) return false;
-	if (!expect(je->position.x == static_cast<float>(w::from_fixed(up.pos_x)) &&
-	                    je->position.y == static_cast<float>(w::from_fixed(up.pos_y)) &&
-	                    je->position.z == static_cast<float>(w::from_fixed(up.pos_z)),
-	            "joiner entity SNAPped to the C2S 0x0C uplink pose")) return false;
+	if (!expect(je->position.x.q16 == hx + 3277 && je->position.y.q16 == hy &&
+	                    je->position.z.q16 == hz,
+	            "the joiner's body chased its C2S 0x0C uplink one bucket step")) return false;
 	// The host's own player was NOT touched by the joiner's uplink (entity-scoped owner gate).
 	const w::Entity *ho = world.registry.get(host_h);
 	if (!expect(ho && ho->position.x == 0.0f && ho->position.y == 0.0f && ho->position.z == 0.0f,
@@ -2439,12 +2794,15 @@ bool run_roundtrip() {
 	for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick++))
 		pump_host(std::move(d)); // fold the 0x0A and ship any same-frame housekeeping
 
-	// The client's decoded view reflects the server's 0x0A: its anchor IS the joiner's post-SNAP
-	// position (emit_connection_s2c anchors to owned_entity), tying 0x0C-in -> 0x0A-out -> ClientState.
-	if (!expect(client.state().anchor_x == w::to_fixed(je->position.x) &&
-	                    client.state().anchor_y == w::to_fixed(je->position.y) &&
-	                    client.state().anchor_z == w::to_fixed(je->position.z),
-	            "client ClientState anchor == joiner's post-SNAP position (0x0A folded)")) return false;
+	// The client's decoded view reflects the server's 0x0A: its anchor IS the joiner's eye,
+	// Position plus CameraOffset, as the tick's send block found it, ahead of that tick's entity
+	// update (emit_connection_s2c anchors to owned_entity), tying 0x0C-in -> 0x0A-out ->
+	// ClientState. [orig: Server_SendEntityStateToPlayer @0x517BEF..0x517C13; the periodic send
+	// block precedes Game_ProcessMainFrame's entity update in Server_TickUpdate]
+	if (!expect(client.state().anchor_x == hx + je->eye_offset_x &&
+	                    client.state().anchor_y == hy + je->eye_offset_y &&
+	                    client.state().anchor_z == hz + je->eye_offset_z,
+	            "client ClientState anchor == the joiner's pre-update eye (0x0A folded)")) return false;
 	if (!expect(client.state().frames_applied >= 1, "client folded at least one 0x0A frame")) return false;
 	if (!expect(client.state().objective_updates_applied == 1 &&
 	                    client.state().objective_won == world.script.subgoals.won &&
@@ -2452,6 +2810,30 @@ bool run_roundtrip() {
 	                    client.state().objective_show_win == world.script.subgoals.show_win &&
 	                    client.state().objective_show_lose == world.script.subgoals.show_lose,
 	            "objective Co-op frame folds all four authoritative subgoal masks")) return false;
+
+	// The next tick's 0x0A carries the chased step: its send block reads the body after
+	// the first bucket step (hx + 3277), ahead of the second step.
+	// [orig: Server_SendEntityStateToPlayer @0x517BEF..0x517C13; Entity_UpdateInfantryPlayerBody
+	//  @0x4B458A..0x4B45CA]
+	for (inmatch::NapiNPConnection &connection : ctx.np_protocol.connection_list)
+		if (connection.peer == peer) connection.s2c_send_boundary_open = true;
+	inmatch::Server_TickUpdate(ctx);
+	bool got_step_0a = false;
+	while (udp_host.pop_outbound(raw)) {
+		if (raw.empty() || raw[0] != 0x0A) continue;
+		std::vector<uint8_t> inner(raw.begin() + 1, raw.end());
+		std::vector<uint8_t> dg83;
+		if (inmatch::frame_in_match_s2c(ctx, peer, 0x0A, inner, dg83)) {
+			client.receive(dg83.data(), dg83.size());
+			got_step_0a = true;
+		}
+	}
+	for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick++))
+		pump_host(std::move(d));
+	if (!expect(got_step_0a && client.state().anchor_x == hx + 3277 + je->eye_offset_x &&
+	                    client.state().anchor_y == hy + je->eye_offset_y &&
+	                    client.state().anchor_z == hz + je->eye_offset_z,
+	            "the next 0x0A anchors the joiner's eye one bucket step along")) return false;
 
 	// Partial 0x0A decoding is intentionally useful for entity presentation, but a
 	// packet that ends before the recipient tail must not manufacture health zero
@@ -2673,11 +3055,15 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	uint64_t client_now_ms = 1000;
 	inmatch::ClientRuntime client(kName, [&client_now_ms] { return client_now_ms; });
 	client.set_title(&kJo);
+	// A frame that took the S2C 0x1A ends this load-less harness's released mission start right
+	// after its own sends (joiner_mission_start.h).
 	auto client_frame = [&client, &client_now_ms](uint32_t now_tick) {
 		client_now_ms += 16;
-		return client.Client_ProcessNetworkFrame(now_tick);
+		std::vector<std::vector<uint8_t>> out = client.Client_ProcessNetworkFrame(now_tick);
+		push_released_mission_start(client,
+				[&out](std::vector<uint8_t> datagram) { out.push_back(std::move(datagram)); });
+		return out;
 	};
-	client.set_world_ready(false);
 	// The binding seam under test alongside the zones flow: the shell's applied kit
 	// replaces the capture-default 0x2F pair content (D-NET-168). The wire team byte
 	// stays host-owned — this co-op joiner latches the same team 1 reservation
@@ -2757,10 +3143,11 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	};
 
 	pump_host(client.start());
-	for (int f = 0; f < 20 && !client.mission_known(); ++f)
+	// Two more frames than the 0x81's reply took before (D-NET-NEW-L2-25: the 0x42 leaves the
+	// frame after the connect state starts, a frame after the ServerHello's).
+	for (int f = 0; f < 24 && !client.mission_known(); ++f)
 		for (std::vector<uint8_t> &d : client_frame(tick)) pump_host(std::move(d));
 	if (!expect(client.mission_known(), "zones: joiner learned the mission")) return false;
-	client.set_world_ready(true);
 
 	for (int f = 0; f < 120 && !spawned; ++f) {
 		for (std::vector<uint8_t> &d : client_frame(tick)) pump_host(std::move(d));
@@ -2898,10 +3285,14 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	if (!expect(submitted_loadouts[1] == expected_second,
 			"zones: second 0x2F carries the injected kit at the equipped combo")) return false;
 
-	// The mid-session re-submission (the armory ACCEPT leg): ONE more 0x2F with the
-	// same kit at the live equipped combo, host re-grants without disturbing the
-	// deployed player. [orig: WeaponLoadout_ApplyFromBuffer @0x565d94]
-	client.queue_loadout_resubmit();
+	// The armory ACCEPT leg: the one 0x2F the apply sends (inmatch::armory_accept_in_session
+	// builds it; here the same kit at the live equipped combo) rides the wire, and the host
+	// re-grants without disturbing the deployed player. [orig: WeaponLoadout_ApplyFromBuffer
+	// @0x565d94]
+	LoadoutSubmit armory;
+	if (!expect(decode_loadout_submit(expected_second.data(), expected_second.size(), armory) &&
+			client.queue_loadout_submit(armory),
+			"zones: the armory's 0x2F queues")) return false;
 	// Allow two of the dictated twelve-tick boundaries for the queued submit.
 	drive_frames(24, [&] { return submitted_loadouts.size() >= 3; });
 	return expect(submitted_loadouts.size() == 3 && submitted_loadouts[2] == expected_second,
@@ -2925,6 +3316,22 @@ bool run_joiner_remote_reload_stamps_before_same_frame_body_tick() {
 		if (type_id == 0x14B9u) return EntityClass::Player;
 		return EntityClass::Unknown;
 	});
+	// The items.def facts the handler's person test reads (ItemDef+0x5C): the
+	// player def a person (3); a second def the class map calls Player whose
+	// type is not one (D-NET-189).
+	constexpr uint16_t kOddPlayerType = 0x14BAu;
+	{
+		replication::ItemReplicationDefinition person;
+		person.definition_id = replication::ItemReplicationCatalog::kDefinitionIdOffset + 0x14B9;
+		person.item_type = 3;
+		person.ai_function = "plyr";
+		person.move_function = "org2";
+		replication::ItemReplicationDefinition odd = person;
+		odd.definition_id = replication::ItemReplicationCatalog::kDefinitionIdOffset + kOddPlayerType;
+		odd.item_type = 1;
+		client.view().set_item_catalog(std::make_shared<const replication::ItemReplicationCatalog>(
+				replication::ItemReplicationCatalog::from_definitions({person, odd})));
+	}
 
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> spawn = frame_server_session(
@@ -2939,15 +3346,22 @@ bool run_joiner_remote_reload_stamps_before_same_frame_body_tick() {
 	replication::ClientEntityState &non_person =
 			client.state().upsert(kNonPersonHandle);
 	non_person.cls = EntityClass::Vehicle;
+	// A Player-class row whose def is not a person takes no stamp.
+	constexpr uint16_t kOddHandle = 0x0009;
+	replication::ClientEntityState &odd = client.state().upsert(kOddHandle);
+	odd.cls = EntityClass::Player;
+	odd.type_id = kOddPlayerType;
 
 	const WeaponReload reload{kRemoteHandle, 0x00C5};
 	const WeaponReload non_person_reload{kNonPersonHandle, 0x00C6};
+	const WeaponReload odd_reload{kOddHandle, 0x00C7};
 	const std::vector<uint8_t> reload_echo = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{
 					make_protocol_message(0x49, encode_weapon_reload(reload)),
 					make_protocol_message(
 							0x49, encode_weapon_reload(non_person_reload)),
+					make_protocol_message(0x49, encode_weapon_reload(odd_reload)),
 			});
 	client.receive(reload_echo.data(), reload_echo.size());
 	(void)client.Client_ProcessNetworkFrame(2);
@@ -2966,10 +3380,14 @@ bool run_joiner_remote_reload_stamps_before_same_frame_body_tick() {
 				non_person.pitch_kick_accum == 0,
 			"reload order: the runtime does not invent the unmodeled non-Person refill"))
 		return false;
+	const replication::ClientEntityState *odd_after = client.state().find(kOddHandle);
+	if (!expect(odd_after != nullptr && odd_after->arms_dip_ticks == 0,
+			"reload order: the person test is the def's type, not the row's class"))
+		return false;
 
 	const std::vector<WeaponReload> notifications =
 			client.drain_reload_notifications();
-	return expect(notifications.size() == 2 &&
+	return expect(notifications.size() == 3 &&
 					notifications[0].entity_handle == kRemoteHandle &&
 					notifications[0].reload_param == reload.reload_param &&
 					notifications[1].entity_handle == kNonPersonHandle &&
@@ -3066,6 +3484,364 @@ bool run_host_client_reports_its_quality_over_the_loopback() {
 			return false;
 	}
 	return true;
+}
+
+// D-NET-604's send half: the listen host's own client seeds its tick from its looped-back
+// S2C 0x61 and, once the tick runs 29760 past the last keepalive, queues the C2S 0x34
+// [u32 tick] on its local connection like any client (no authority test); unseeded it
+// sends none. [orig: Client_ProcessNetworkFrame @0x42C180 - the seeded test
+// @0x42c1a9, `> 29760` @0x42c1c0, the queue @0x42c1e1; NapiNPClientMsg_HandleTickSeed
+// @0x4297c0 (no role gate)]
+bool run_host_client_keepalive_rides_the_loopback() {
+	for (const bool seeded : {true, false}) {
+		ns::LoopbackChannel host_loop;
+		inmatch::ClientRuntime host_view(host_loop);
+		host_view.view().set_mp_session(true);
+		constexpr uint32_t kSeed = 0x00012345u;
+		if (seeded) host_loop.host_send(s2c::TICK_SEED, {0x45, 0x23, 0x01, 0x00});
+		std::vector<std::pair<uint32_t, uint32_t>> sent; // frame, body tick
+		for (uint32_t frame = 1; frame <= 29762 + 29761; ++frame) {
+			host_view.Client_ProcessNetworkFrame(frame);
+			ns::Datagram datagram;
+			while (host_loop.host_recv(datagram)) {
+				if (datagram.tag != c2s::KEEPALIVE) continue;
+				if (!expect(datagram.body.size() == 4, "the 0x34 body is one u32"))
+					return false;
+				sent.emplace_back(frame, io::read_u32_le(datagram.body.data()));
+			}
+		}
+		// The seed lands in frame 1's receive; frame k's tick is seed + k - 1, and the
+		// first frame whose tick is more than 29760 past the seed sends it.
+		const std::vector<std::pair<uint32_t, uint32_t>> want = seeded
+				? std::vector<std::pair<uint32_t, uint32_t>>{{29762, kSeed + 29761},
+				                                             {29762 + 29761, kSeed + 2 * 29761}}
+				: std::vector<std::pair<uint32_t, uint32_t>>{};
+		if (!expect(sent == want, "the listen client's 0x34 rides its loopback, seeded only"))
+			return false;
+	}
+	return true;
+}
+
+// D-NET-710: the S2C 0x06 echo of a console line runs the client's command walk at its
+// place: a joiner's GETPLAYERLIST queues C2S 0x22 {0, 23799} and the 0x23 for the frame's
+// boundary; the listen host's own client takes the echo off its loopback and sends its
+// SERVER line's rest back over the local connection as C2S 0x24.
+// [orig: NapiNPClientMsg_HandleConsoleEcho @0x432BC0 -> NapiClientCmd_ParseAndExecute
+//  @0x4329C0; NapiClientCmd_HandleDebugCommand @0x42c983..0x42c9a9 / @0x42c8f7]
+bool run_console_echo_runs_the_client_walk() {
+	const std::string client_scrk = "CLIENT-CONSOLE-ECHO-SCRK";
+	const std::string server_scrk = "SERVER-CONSOLE-ECHO-SCRK";
+	inmatch::ClientRuntime client("ConsoleEcho", [] { return uint64_t{7000}; });
+	client.set_title(&kJo);
+	client.seed_session(0x434F4E53u, 1u, client_scrk, server_scrk,
+	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
+	                    0, 0x00100000u, /*replay_mode=*/false);
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	const std::vector<uint8_t> echo = frame_server_session(server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::CLIENT_CONSOLE_COMMAND,
+					{'G', 'E', 'T', 'P', 'L', 'A', 'Y', 'E', 'R', 'L', 'I', 'S', 'T', 0})});
+	client.receive(echo.data(), echo.size());
+	std::vector<uint8_t> order;
+	bool sync_body = false;
+	for (const std::vector<uint8_t> &datagram : client.Client_ProcessNetworkFrame(1)) {
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		if (!decode_client_session(datagram, client_scrk, header, messages)) continue;
+		for (const ProtocolMessage &m : messages) {
+			if (m.tag != 0x22 && m.tag != 0x23) continue;
+			order.push_back(m.tag);
+			if (m.tag == 0x22) sync_body = m.payload == std::vector<uint8_t>{0x00, 0xF7, 0x5C};
+		}
+	}
+	if (!expect(order == std::vector<uint8_t>{0x22, 0x23} && sync_body,
+			"a joiner's echoed GETPLAYERLIST sends 0x22 {0, 0x5CF7} then 0x23"))
+		return false;
+
+	ns::LoopbackChannel host_loop;
+	inmatch::ClientRuntime host_view(host_loop);
+	host_view.view().set_mp_session(true);
+	host_loop.host_send(s2c::CLIENT_CONSOLE_COMMAND,
+			{'S', 'E', 'R', 'V', 'E', 'R', ' ', 'B', 'A', 'N', ' ', '1', 0});
+	host_view.Client_ProcessNetworkFrame(1);
+	ns::Datagram datagram;
+	bool saw_line = false;
+	while (host_loop.host_recv(datagram)) {
+		if (datagram.tag == c2s::BAN_PUNT_COMMAND)
+			saw_line = datagram.body == std::vector<uint8_t>{'B', 'A', 'N', ' ', '1', 0};
+	}
+	return expect(saw_line, "the listen client's echoed SERVER line comes back as 0x24");
+}
+
+// The command entry's sender, Client_ProcessConsoleCommand's client half (D-NET-710): a
+// joiner queues the raw line as reliable C2S 0x04 [line][NUL] on its connection; the local
+// arms take theirs first (VERSION posts its line, nothing leaves); the listen host's own
+// client sends the line over its loopback; the one-second guard compares the tick with the
+// last stamp minus 1000 unsigned, so it never drops a line once the tick is past its first
+// second, and drops one inside it.
+// [orig: Client_ProcessConsoleCommand @0x520E80 - the guard @0x520ea4..0x520ec7,
+//  Client_ProcessLocalCommand @0x520BF0 (the call @0x520EEC), NetPacket_WriteNullableString
+//  @0x42A430, QueueReliableMessage(4, 1, 0) @0x520f29]
+bool run_console_command_sends_the_line() {
+	const std::string client_scrk = "CLIENT-CONSOLE-LINE-SCRK";
+	const std::string server_scrk = "SERVER-CONSOLE-LINE-SCRK";
+	uint64_t now = 7000;
+	inmatch::ClientRuntime client("ConsoleLine", [&now] { return now; });
+	client.set_title(&kJo);
+	client.seed_session(0x434F4E4Cu, 1u, client_scrk, server_scrk,
+	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
+	                    0, 0x00100000u, /*replay_mode=*/false);
+	const auto lines_sent = [&](uint32_t tick) {
+		std::vector<std::vector<uint8_t>> bodies;
+		for (const std::vector<uint8_t> &datagram : client.Client_ProcessNetworkFrame(tick)) {
+			ProtocolPacketHeader header;
+			std::vector<ProtocolMessage> messages;
+			if (!decode_client_session(datagram, client_scrk, header, messages)) continue;
+			for (const ProtocolMessage &m : messages)
+				if (m.tag == c2s::ADMIN_NETLOG_COMMAND) bodies.push_back(m.payload);
+		}
+		return bodies;
+	};
+	if (!expect(client.console_command("SERVER kick 2") &&
+	                    lines_sent(1) == std::vector<std::vector<uint8_t>>{
+	                            {'S', 'E', 'R', 'V', 'E', 'R', ' ', 'k', 'i', 'c', 'k', ' ', '2', 0}},
+			"a joiner's line leaves as C2S 0x04 [line][NUL]"))
+		return false;
+	// The same tick again: no throttle (the guard's compare is against the stamp - 1000).
+	if (!expect(client.console_command("again") && lines_sent(2).size() == 1,
+			"a second line in the same tick still leaves"))
+		return false;
+	if (!expect(client.console_command("version") && lines_sent(3).empty(),
+			"VERSION is a local arm: nothing leaves"))
+		return false;
+	// VERSION's line is "Version <version>  - <title>": the title is the start-up title
+	// text, g_TitleText (the connect log's TITLE word) [orig: Client_ProcessLocalCommand
+	// @0x520BF0 - the VERSION test @0x520D8E, "Version %s  - %s" @0x7D00AC over the words
+	// dword_3342E6C / dword_3342E68 @0x520D9A..0x520DA0; Game_ParseCommandLineAndInit @0x4A7310 -
+	// &g_TitleText @0x4A7CFB, the title sprintf from off_8154D8 @0x4A7D30..0x4A7D3C].
+	bool version_line = false;
+	const std::string title_tail = std::string("  - ") + kJo.connect_log_title;
+	for (const hud::FeedPost &post : client.drain_ring_posts())
+		version_line = version_line ||
+				(post.text.rfind("Version V", 0) == 0 && post.argb == 0xFFFFFFFFu &&
+						post.text.size() > title_tail.size() &&
+						post.text.compare(post.text.size() - title_tail.size(), title_tail.size(),
+								title_tail) == 0);
+	if (!expect(version_line, "VERSION posts the profile's version text and the title in -1"))
+		return false;
+	// Inside the tick's first second the stamp minus 1000 wraps: the next line is dropped.
+	inmatch::ClientRuntime early("ConsoleEarly", [&now] { return now; });
+	early.set_title(&kJo);
+	early.seed_session(0x434F4E45u, 1u, client_scrk, server_scrk,
+	                   1, 0, 0x0002, w::kPlayerInfantryTypeId,
+	                   0, 0x00100000u, /*replay_mode=*/false);
+	now = 500;
+	if (!expect(early.console_command("first"), "the first line is stamped at 500"))
+		return false;
+	now = 600;
+	if (!expect(!early.console_command("second"),
+			"600 < 500 - 1000 (unsigned): the guard drops the line"))
+		return false;
+
+	ns::LoopbackChannel host_loop;
+	inmatch::ClientRuntime host_view(host_loop);
+	host_view.view().set_mp_session(true);
+	if (!expect(host_view.console_command("NETLOG"), "the listen client takes its line"))
+		return false;
+	host_view.Client_ProcessNetworkFrame(1);
+	ns::Datagram datagram;
+	bool saw_line = false;
+	while (host_loop.host_recv(datagram))
+		if (datagram.tag == c2s::ADMIN_NETLOG_COMMAND)
+			saw_line = datagram.body == std::vector<uint8_t>{'N', 'E', 'T', 'L', 'O', 'G', 0};
+	if (!expect(saw_line, "the listen host's own client sends its line over the loopback"))
+		return false;
+
+	// D-NET-NEW-LI-27: a host's own client out of a session (single player, connection mode
+	// 3) is a session peer too. A line the local arms leave leaves as C2S 0x04 over its
+	// loopback, byte for byte the listen host's, and nothing of the client's walk runs until
+	// the server's S2C 0x06 echo comes back (no SYSTEM line, no debug word flipped here).
+	// [orig: Client_ProcessConsoleCommand @0x520E80 - the peer test @0x520EF8, the 0x04
+	//  @0x520F29; CGameSession_SetConnectionMode @0x4C49F0 - mode 3 @0x4C4A16..0x4C4A1B;
+	//  SinglePlayer_StartMission @0x561AF0 - 3 pushed @0x561BD9]
+	ns::LoopbackChannel sp_loop;
+	inmatch::ClientRuntime sp_view(sp_loop);
+	sp_view.view().set_mp_session(false);
+	if (!expect(sp_view.console_command("NETLOG"), "the single-player client takes its line"))
+		return false;
+	if (!expect(sp_view.console_command("CLIENTDEBUGMESSAGELIST"), "and its next one"))
+		return false;
+	sp_view.Client_ProcessNetworkFrame(1);
+	std::vector<std::vector<uint8_t>> sp_lines;
+	while (sp_loop.host_recv(datagram))
+		if (datagram.tag == c2s::ADMIN_NETLOG_COMMAND) sp_lines.push_back(datagram.body);
+	const std::string debug_list = "CLIENTDEBUGMESSAGELIST";
+	std::vector<uint8_t> debug_body(debug_list.begin(), debug_list.end());
+	debug_body.push_back(0);
+	if (!expect(sp_lines == std::vector<std::vector<uint8_t>>{
+	                             {'N', 'E', 'T', 'L', 'O', 'G', 0}, debug_body},
+			"both lines leave over the loopback as C2S 0x04 [line][NUL], in order"))
+		return false;
+	return expect(sp_view.drain_ring_posts().empty(),
+			"the client's walk waits for the echo: no SYSTEM line yet");
+}
+
+// L5-s3 / V-L5-s3: the client's entity-update body (the movers, the tracked target's
+// count) skips a frame in a session while the round-over gate is up, as it does in
+// the pre-round [orig: Game_ProcessMainFrame @0x5263F0 - g_ClientPreRoundTimer
+// @0x52672C..0x526732, is_in_session @0x526734..0x52673A, g_RoundOver
+// @0x52673C..0x526742, Entity_UpdateAllEntities @0x52674B].
+bool run_the_round_gate_holds_the_entity_update() {
+	const std::string client_scrk = "CLIENT-ROUND-GATE-SCRK";
+	const std::string server_scrk = "SERVER-ROUND-GATE-SCRK";
+	inmatch::ClientRuntime client("RoundGate", [] { return uint64_t{7000}; });
+	client.set_title(&kJo);
+	client.seed_session(0x52474154u, 1u, client_scrk, server_scrk,
+	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
+	                    0, 0x00100000u, /*replay_mode=*/false);
+	client.state().tracked_target.ticks_remaining = 5;
+	client.state().spawn_success_gate = true;
+	// The frame tick (g_CurrentTick's stand-in) steps on every main frame, the gated
+	// one too (D-NET-690) [orig: Game_ProcessMainFrame @0x5263F0 - `add g_CurrentTick,
+	// ebx` @0x5265B4 ahead of the entity gates @0x52672C..0x526742].
+	const uint32_t tick0 = client.view().frame_tick();
+	(void)client.Client_ProcessNetworkFrame(1);
+	if (!expect(client.in_session() && client.state().tracked_target.ticks_remaining == 5,
+			"the round-over gate in a session holds the entity update"))
+		return false;
+	if (!expect(client.view().frame_tick() == tick0 + 1,
+			"the gated main frame still steps the frame tick"))
+		return false;
+	client.state().spawn_success_gate = false;
+	(void)client.Client_ProcessNetworkFrame(2);
+	return expect(client.state().tracked_target.ticks_remaining == 4 &&
+					client.view().frame_tick() == tick0 + 2,
+			"with the gate down the entity update runs, stepping the frame tick once");
+}
+
+// D-NET-710: the console's input actions go through Input_QueueEvent's queue: the S2C
+// 0x06 walk's binding arm queues the record's code (the "respawn" token: code 55) for the
+// next input frame, and the queue holds 32 records, the 33rd dropped.
+// [orig: NapiClientCmd_ParseAndExecute @0x432a64..0x432ba1 -> Input_QueueEvent @0x4979C0,
+//  the cap @0x4979C8..0x4979CB]
+bool run_console_actions_queue_for_the_input_frame() {
+	const std::string client_scrk = "CLIENT-CONSOLE-QUEUE-SCRK";
+	const std::string server_scrk = "SERVER-CONSOLE-QUEUE-SCRK";
+	inmatch::ClientRuntime client("ConsoleQueue", [] { return uint64_t{7000}; });
+	opennova::controls::InputEventQueue queue; // the owning role's (Role::input_events)
+	client.set_input_event_queue(&queue);
+	client.set_title(&kJo);
+	client.seed_session(0x434F4E51u, 1u, client_scrk, server_scrk,
+	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
+	                    0, 0x00100000u, /*replay_mode=*/false);
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	const std::vector<uint8_t> echo = frame_server_session(server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::CLIENT_CONSOLE_COMMAND,
+					{'r', 'e', 's', 'p', 'a', 'w', 'n', 0})});
+	client.receive(echo.data(), echo.size());
+	(void)client.Client_ProcessNetworkFrame(1);
+	opennova::controls::InputEventRecord record;
+	if (!expect(queue.size() == 1 && queue.pop(record) && record.code == 55 && queue.empty(),
+			"the echoed respawn token queues code 55 once"))
+		return false;
+	bool queued = true;
+	for (int32_t i = 0; i < 33; ++i) queued = client.queue_console_action(i, 0, 0, 0);
+	return expect(!queued && queue.size() == opennova::controls::InputEventQueue::kCapacity &&
+					queue.at(0).code == 0 && queue.at(31).code == 31,
+			"the queue holds 32 records in order; the 33rd is dropped");
+}
+
+// The S2C 0x57's handler returns at once while the round-over gate is up: no pong for the
+// host's ping, no round trip measured for ours. The gate is read at the message's wire
+// position: a 0x57 ahead of the 0x1D in one packet is still answered, one behind it is not.
+// [orig: NapiNPClientMsg_0x057_RTT @0x432210 - `cmp g_RoundOver, 0` / `jnz locret`
+//  @0x432210..0x432217; NapiNPClientMsg_0x01D @0x430858 (the gate before the parse)]
+bool run_rtt_echo_waits_out_the_round_over_gate() {
+	const std::string client_scrk = "CLIENT-RTT-GATE-SCRK";
+	const std::string server_scrk = "SERVER-RTT-GATE-SCRK";
+	uint64_t now = 100000;
+	inmatch::ClientRuntime client("RttGate", [&now] { return now; });
+	client.set_title(&kJo);
+	client.seed_session(0x52545447u, 1u, client_scrk, server_scrk,
+	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
+	                    0, 0x00100000u, /*replay_mode=*/true);
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	const auto rtt = [](uint32_t ts, uint8_t echo) {
+		return make_protocol_message(s2c::RTT_ECHO,
+				{static_cast<uint8_t>(ts), static_cast<uint8_t>(ts >> 8),
+				 static_cast<uint8_t>(ts >> 16), static_cast<uint8_t>(ts >> 24), echo});
+	};
+	EndRoundHeader header;
+	header.winner_team = 2;
+	header.player_index = 0;
+	const ProtocolMessage round_over = make_protocol_message(s2c::END_ROUND_HEADER,
+			encode_end_round_header(header, /*non_team_form=*/false));
+	// One packet: a host ping, the 0x1D, a second host ping, then our own pong.
+	const std::vector<uint8_t> dg = frame_server_session(server_tx, server_scrk, 1u,
+			{rtt(0x11111111u, 1), round_over, rtt(0x22222222u, 1),
+			 rtt(static_cast<uint32_t>(now - 40), 0)});
+	client.receive(dg.data(), dg.size());
+	std::vector<std::vector<uint8_t>> pongs;
+	for (const std::vector<uint8_t> &datagram : client.Client_ProcessNetworkFrame(1)) {
+		ProtocolPacketHeader packet;
+		std::vector<ProtocolMessage> messages;
+		if (!decode_client_session(datagram, client_scrk, packet, messages)) continue;
+		for (const ProtocolMessage &m : messages)
+			if (m.tag == c2s::RTT_CONSUMED) pongs.push_back(m.payload);
+	}
+	if (!expect(pongs == std::vector<std::vector<uint8_t>>{{0x11, 0x11, 0x11, 0x11, 0x00}},
+			"the ping ahead of the 0x1D is answered; the one behind it is not"))
+		return false;
+	return expect(client.client_ping_ms() == 0,
+			"our own pong behind the 0x1D measures nothing");
+}
+
+// Every host ping the receive dispatches ahead of an open send boundary queues a pong of its
+// own: the echo arm queues one transient C2S 0x2C per request, and the connection appends
+// each message at its queue's tail with no replacement or merge, so the boundary ships every
+// pong in arrival order. A first send that leaves after the host's second timer ping carries
+// that ping's pong too (LP-s27 FOUND 2: a slow first send's third 0x2C). The only bound is
+// the connection's outgoing-message ceiling (its queued and retained messages against the
+// configured maximum), whose overflow requests a disconnect.
+// [orig: NapiNPClientMsg_0x057_RTT @0x432210 - the echo arm's queue call @0x43226D;
+//  CNapiNetwork_QueueReliableMessage @0x4C4FA0 (the call @0x4C4FCA) ->
+//  CNapiNPConnection_QueueMessage @0x628640 (the call @0x6286C3) -> NapiNPMessage_Create
+//  @0x627FC0 (the ceiling
+//  test @0x628048..0x628068, the tail append @0x6282C7..0x6282F0)]
+bool run_rtt_echo_pongs_append_in_arrival_order() {
+	const std::string client_scrk = "CLIENT-RTT-APPEND-SCRK";
+	const std::string server_scrk = "SERVER-RTT-APPEND-SCRK";
+	uint64_t now = 100000;
+	inmatch::ClientRuntime client("RttAppend", [&now] { return now; });
+	client.set_title(&kJo);
+	client.seed_session(0x52545441u, 1u, client_scrk, server_scrk,
+	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
+	                    0, 0x00100000u, /*replay_mode=*/true);
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	const auto ping = [](uint32_t ts) {
+		return make_protocol_message(s2c::RTT_ECHO,
+				{static_cast<uint8_t>(ts), static_cast<uint8_t>(ts >> 8),
+				 static_cast<uint8_t>(ts >> 16), static_cast<uint8_t>(ts >> 24), 1});
+	};
+	// Two packets, one host ping each, both received ahead of the frame's send.
+	const std::vector<uint8_t> first =
+			frame_server_session(server_tx, server_scrk, 1u, {ping(0x11111111u)});
+	const std::vector<uint8_t> second =
+			frame_server_session(server_tx, server_scrk, 1u, {ping(0x22222222u)});
+	client.receive(first.data(), first.size());
+	client.receive(second.data(), second.size());
+	// The pongs only: a per-frame ping of our own (echo flag 1) is not a reply.
+	std::vector<std::vector<uint8_t>> pongs;
+	for (const std::vector<uint8_t> &datagram : client.Client_ProcessNetworkFrame(1)) {
+		ProtocolPacketHeader packet;
+		std::vector<ProtocolMessage> messages;
+		if (!decode_client_session(datagram, client_scrk, packet, messages)) continue;
+		for (const ProtocolMessage &m : messages)
+			if (m.tag == c2s::RTT_CONSUMED && m.payload.size() == 5 && m.payload[4] == 0)
+				pongs.push_back(m.payload);
+	}
+	return expect(pongs == std::vector<std::vector<uint8_t>>{
+			{0x11, 0x11, 0x11, 0x11, 0x00}, {0x22, 0x22, 0x22, 0x22, 0x00}},
+			"each host ping queues its own pong; the send ships both in arrival order");
 }
 
 bool run_host_zone_timer_value_matches_retail_entry() {
@@ -3316,6 +4092,45 @@ bool run_zone_window_adoption_measures_from_the_local_player() {
 	host_view.Client_ProcessNetworkFrame();
 	return expect(tracked.zone == kNear,
 	              "zone adoption: a window past 20 u of the local player is not adopted");
+}
+
+// The revive countdown's frame count is the process's: a second runtime over the
+// same ClientProcessState continues the first's 63-frame phase instead of starting
+// its own [orig: g_SlotRefreshTimer @0xA85B80 -- Client_ProcessNetworkFrame
+// @0x42C27E..0x42C288 the step, @0x42C2DA the zero; no other access].
+bool run_revive_countdown_phase_is_the_process_s() {
+	inmatch::ClientProcessState process;
+	{
+		ns::LoopbackChannel first_loop;
+		inmatch::ClientRuntime first(first_loop);
+		first.use_process_state(&process);
+		for (int i = 0; i < 40; ++i) first.Client_ProcessNetworkFrame();
+	}
+	if (!expect(process.slot_refresh_timer == 40,
+	            "revive phase: the first runtime's 40 frames step the process word"))
+		return false;
+	ns::LoopbackChannel host_loop;
+	inmatch::ClientRuntime host_view(host_loop);
+	host_view.use_process_state(&process);
+	PlayerReplicationState rep;
+	rep.player_slot = 3;
+	rep.player_name = "Downed";
+	rep.entity_handle = 0x0007;
+	host_loop.host_send(0x46, encode_player_sync(rep, kPlayerSyncHasName));
+	PlayerDownedState downed;
+	downed.entity_handle = 0x0007;
+	downed.revive_seconds = 120;
+	host_loop.host_send(s2c::PLAYER_DOWNED_STATE, encode_player_downed_state(downed));
+	host_loop.host_send(s2c::VISIBLE_PLAYERS, {0x01, 0x03, 0x07, 0x00});
+	host_view.Client_ProcessNetworkFrame(); // the process's frame 41
+	const ns::ClientRosterSlot &slot = host_view.state().roster[3];
+	for (int i = 0; i < 21; ++i) host_view.Client_ProcessNetworkFrame(); // 42..62
+	if (!expect(slot.downed_revive_seconds == 120,
+	            "revive phase: the second runtime's 22 frames end the process's 62nd"))
+		return false;
+	host_view.Client_ProcessNetworkFrame(); // 63
+	return expect(slot.downed_revive_seconds == 119 && process.slot_refresh_timer == 0,
+	              "revive phase: the process's 63rd frame ticks the second runtime's slot");
 }
 
 // The client-side 1 Hz revive countdown: every 63rd client frame each active
@@ -3598,10 +4413,12 @@ bool run_host_as_client() {
 	w::AiSystem &ai = world.ai;
 	ctx.world = &world;
 
-	// Spawn the host's own player through the real pipeline (type-2 loopback -> spawn_player ->
-	// cached.local_player; binds conn.link.owned_entity = the host player, the D-NET-121 anchor).
+	// Add the host's own player through the real pipeline (the type-2 loopback's add binds no
+	// body), then the mission start's round init spawns it (spawn_player -> cached.local_player;
+	// binds conn.link.owned_entity = the host player, the D-NET-121 anchor; D-NET-NEW-L7-39).
 	const int spawned = inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
-	if (!expect(spawned == 1, "the host's own player spawned via the pipeline")) return false;
+	if (!expect(spawned == 1, "the host's own player added via the pipeline")) return false;
+	inmatch::test::round_init_own_body(ctx);
 
 	// Find the host loopback connection; confirm its owned_entity is the host player + mark it in-match.
 	// (In production burst.spawned latches when the host loopback's §5.2a burst completes — covered by
@@ -3754,6 +4571,7 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	infantry.kind = w::EntityKind::Organic;
 	infantry.item_id = 5311; // US02 organic in the production Godot witness
 	infantry.has_item_def = true; // its person def, as the item-traits sweep stamps it
+	infantry.item_type_index = 1; // the trait sweep's row (D-NET-487)
 	infantry.item_type = 3;
 	infantry.net_class_code = static_cast<uint8_t>(EntityClass::Infantry);
 	const w::EntityHandle infantry_h = world.registry.spawn(0, infantry);
@@ -3763,9 +4581,10 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	w::Entity gun;
 	gun.kind = w::EntityKind::Item;
 	gun.has_item_def = true; // seats need the def (D-NET-422)
+	gun.item_type_index = 1; // the trait sweep's row (D-NET-487)
 	gun.item_id = 1294; // B50Cal ewep
 	gun.position = {0.0f, 8.0f, 0.0f};
-	gun.yaw = 45;
+	gun.heading = w::placed_heading_bam(45);
 	gun.net_class_code = static_cast<uint8_t>(EntityClass::NoNetworkCallback);
 	w::Seat gunner;
 	gunner.type = w::SeatType::Gunner;
@@ -3793,9 +4612,20 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	cfg.socket_mode = inmatch::SocketMode::Socketless;
 	cfg.serve_and_play = true;
 	inmatch::start_host_session(owner, cfg);
+	// The session onto its World: its rules (the own add ran in the create, the World bound).
+	inmatch::bind_host_session_world(owner, cfg);
+	// The mission start's round init: the own body (the session create's add binds none), then
+	// the own client's load-time stream over the loopback (HostRole::init_round_after_premission,
+	// D-NET-NEW-L7-39).
+	inmatch::test::round_init_own_body(owner.ctx);
+	(void)inmatch::tick_connections(owner.ctx, /*elapsed_ms=*/0, owner.now_tick);
 
 	// Match Simulation's startup order: construct/install the replica pipeline after host bring-up,
-	// then fold the queued initial stream and first whole-world compact frame together.
+	// then fold the queued initial stream and first whole-world compact frame together. The
+	// mission start's end queues the own client's C2S 0x0B, which the first frame's receive pump
+	// hands to its receiver (D-NET-NEW-L4-5).
+	if (!expect(inmatch::test::deliver_host_own_mission_status(owner.ctx, owner.now_tick),
+	            "the own client's 0x0B reaches its receiver")) return false;
 	inmatch::Server_TickUpdate(owner.ctx);
 	inmatch::ClientRuntime host_view(host_loop);
 	host_view.view().set_item_class_resolver([](uint16_t type_id) {
@@ -3850,6 +4680,8 @@ bool run_host_startup_maps_claymore_preference() {
 		cfg.config.mp_attributes = 0x8000u;
 		cfg.socket_mode = inmatch::SocketMode::Socketless;
 		inmatch::start_host_session(owner, cfg);
+		// The session onto its World: its rules (the own add ran in the create, the World bound).
+		inmatch::bind_host_session_world(owner, cfg);
 		if (!expect(world.throwables.team_trigger_claymore,
 		            "host startup enables same-team claymore triggers for mp_attributes 0x8000"))
 			return false;
@@ -3865,6 +4697,8 @@ bool run_host_startup_maps_claymore_preference() {
 		cfg.config.mp_attributes = 0x3A06u;
 		cfg.socket_mode = inmatch::SocketMode::Socketless;
 		inmatch::start_host_session(owner, cfg);
+		// The session onto its World: its rules (the own add ran in the create, the World bound).
+		inmatch::bind_host_session_world(owner, cfg);
 		if (!expect(!world.throwables.team_trigger_claymore,
 		            "host startup disables same-team claymore triggers for default mp_attributes 0x3A06"))
 			return false;
@@ -3874,7 +4708,8 @@ bool run_host_startup_maps_claymore_preference() {
 }
 
 // The advertised NoTracers mission attribute (rules word bit 0) feeds the authoritative
-// tracer-visual gate the same way [orig: g_RulesFlags @ 0x24D1E34 & 1 @ 0x4ec41f].
+// tracer-visual gate the same way [orig: RoundData_SpawnRound @0x4EC0D0 - g_RulesFlags @0x24D1E34
+// & 1 @0x4EC72F / @0x4EC79D].
 bool run_host_startup_maps_no_tracers_rule() {
 	{
 		w::World world;
@@ -3885,6 +4720,8 @@ bool run_host_startup_maps_no_tracers_rule() {
 		cfg.config.mp_attributes = 0x0001u;
 		cfg.socket_mode = inmatch::SocketMode::Socketless;
 		inmatch::start_host_session(owner, cfg);
+		// The session onto its World: its rules (the own add ran in the create, the World bound).
+		inmatch::bind_host_session_world(owner, cfg);
 		if (!expect(world.round_sim.no_tracers_rule,
 		            "host startup arms the NoTracers rule for mp_attributes 0x0001"))
 			return false;
@@ -3900,6 +4737,8 @@ bool run_host_startup_maps_no_tracers_rule() {
 		cfg.config.mp_attributes = 0x3A06u;
 		cfg.socket_mode = inmatch::SocketMode::Socketless;
 		inmatch::start_host_session(owner, cfg);
+		// The session onto its World: its rules (the own add ran in the create, the World bound).
+		inmatch::bind_host_session_world(owner, cfg);
 		if (!expect(!world.round_sim.no_tracers_rule,
 		            "host startup clears the NoTracers rule for default mp_attributes 0x3A06"))
 			return false;
@@ -3909,8 +4748,12 @@ bool run_host_startup_maps_no_tracers_rule() {
 }
 
 // ---------------------------------------------------------------------------------------------------
-// (E) Host-owner registration boundary: a player created by tick_connections must be visible to
-// adapter registration before its first authoritative body tick and per-connection 0x0A fan.
+// (E) Host-owner registration boundary: the spawn pump runs in the server tick's periodic block,
+// after the before-tick hook and the script pass, and a body it adds registers at its spawn
+// (bind_spawned_body), ahead of its first entity update and any 0x0A fan.
+// [orig: Server_TickUpdate - the script pass @0x51D8BF, CNapiServer_ProcessPendingPlayerSpawns
+//  @0x51DBFD; Entity_SpawnFromAnimSlotProperty @0x43C390 - the AnimMap_RegisterEntity call
+//  @0x43C4DF; Game_ProcessMainFrame's Entity_UpdateAllEntities @0x52674B after the tick]
 // ---------------------------------------------------------------------------------------------------
 bool run_host_pump_hook_observes_remote_before_first_tick() {
 	w::World world;
@@ -3927,24 +4770,20 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 	peer_link.transport = std::make_unique<ns::UdpSessionTransport>(
 			ns::UdpSessionTransport::Role::Host);
 
+	// The node's dcb as its join's create takes it: the process's next connection index
+	// (D-NET-713).
+	const uint32_t late_dcb = next_connection_index();
 	inmatch::NapiNPConnection conn;
 	conn.peer = peer;
 	conn.type = 1;
-	conn.connection_id = inmatch::kFirstJoinerDcb;
+	conn.connection_id = late_dcb;
 	conn.player_name = "LateJoiner";
 	conn.self_id_seen = true;
 	conn.phase = inmatch::ConnectionPhase::PendingSpawn;
 	conn.link.transport = peer_link.transport.get();
 	conn.link.mode = ns::TransportMode::Client;
-	conn.reply.roster_pushed = true;
-	conn.reply.roster_completed_tick = 0;
-	conn.burst.sync_state = 4;
-	conn.burst.world_stream_phase = 8;
-	conn.burst.loadout_received = true;
-	conn.reply.mission_status_received = true; // the stock client's 0x0B, the bundle trigger
 	conn.burst.entity_batch_count = 1;
 	owner.ctx.np_protocol.connection_list.push_back(std::move(conn));
-	owner.ctx.np_protocol.next_connection_id = inmatch::kFirstJoinerDcb + 1;
 	// The fixture starts on the boundary after its already-pushed roster. Initial
 	// world records intentionally cannot share the roster's send tick.
 	owner.now_tick = 1;
@@ -3953,11 +4792,20 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 	FirstLogicTickProbe logic_probe;
 	logic_probe.hook = &hook;
 	world.add_system(&logic_probe);
+	// The registration seam at the body's spawn.
+	bool bound_live = false;
+	bool bound_ai = false;
+	bool bound_before_update = false;
+	owner.ctx.bind_spawned_body = [&](w::EntityHandle body) {
+		if (world.registry.get(body) == nullptr ||
+				world.registry.get(body)->owner_connection_id != late_dcb)
+			return;
+		bound_live = true;
+		bound_ai = ai.for_handle(body) != nullptr;
+		bound_before_update = world.logic_tick == 0;
+	};
 
-	// The pending-player spawn pump admits on the match's periodic second: this
-	// pump is the one that follows it. [orig: CNapiServer_ProcessPendingPlayerSpawns
-	//  @0x4C8DC0, called from Server_TickUpdate @0x51DBFD inside the reload-62 block]
-	world.match.advance_tick(world);
+	// A fresh match's first tick is a periodic second: its spawn pump adds the remote.
 	NullDatagramSocket sock;
 	inmatch::host_session_pump(owner, sock, &observe_host_before_server_tick, &hook);
 
@@ -3966,16 +4814,21 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 		if (candidate.peer == peer) remote = &candidate;
 	}
 	if (!expect(hook.calls == 1, "pre-Server_TickUpdate hook runs exactly once")) return false;
-	if (!expect(hook.saw_spawned_connection && hook.saw_live_entity && hook.saw_ai_component,
-			"hook observes the remote spawned and AI-attached by tick_connections")) return false;
-	if (!expect(hook.saw_before_logic && hook.saw_before_fan,
-			"hook runs before the remote's first logic tick and 0x0A fan")) return false;
+	if (!expect(!hook.saw_live_entity && hook.saw_before_logic,
+			"the hook and the script pass run before the periodic block's add")) return false;
 	if (!expect(logic_probe.ticks == 1 && logic_probe.first_tick_saw_hook &&
-				logic_probe.first_tick_saw_player,
-			"first authoritative logic tick observes completed registration")) return false;
+				!logic_probe.first_tick_saw_player,
+			"the frame's script pass precedes the add")) return false;
+	if (!expect(bound_live && bound_ai && bound_before_update,
+			"the added body registers at its spawn, AI-attached, before its first update"))
+		return false;
 	if (!expect(world.logic_tick == 1, "host pump advances exactly one logic tick")) return false;
-	if (!expect(remote != nullptr && remote->link.s2c_phase == 1,
-			"the first authoritative 0x0A fan follows registration")) return false;
+	// The add creates the body; the join (its C2S 0x0B, after the 0x09 / 0x0A legs) is a
+	// later pump's, so the remote is added, not yet joined (D-NET-500).
+	if (!expect(remote != nullptr && remote->link.owned_entity.valid() &&
+	                    remote->link.s2c_phase == 0 &&
+	                    remote->slot_state == inmatch::PlayerSlotState::Added,
+			"no 0x0A fan reaches the added remote before its join")) return false;
 	return true;
 }
 
@@ -4778,7 +5631,7 @@ bool run_connection_indicators_on_the_host_client() {
 // The C2S 0x0D chat producer: `[u8 channel][cstr]` with the `<...>` strip and
 // the 59-character cut, `Flooded` for a repeat within 0x500 main frames of
 // its entry, and nothing for the non-peer channels 4/5 [orig:
-// Chat_SendGlobalMessage @0x49A6B0; Chat_CheckFloodControl @0x498F60 —
+// Chat_SendTeamMessage @0x49A6B0; Chat_CheckFloodControl @0x498F60 —
 // `dword_A8705C - entry <= 0x500` @0x499028; Chat_StripHtmlTags @0x4983F0].
 bool run_chat_uplink_api() {
 	using Result = hud::ChatSendResult;
@@ -4867,8 +5720,11 @@ bool run_host_chat_uplink() {
 
 // The client window of CNetQuality: a ring of 400 ms round trips scores the
 // ping term 102, and once five 62-frame samples fill the window the combined
-// scalar folds to level 2 [orig: CNetQuality_UpdateMetrics @0x4C52C0;
-// the Game_ProcessMainFrame countdown; CNetQuality_SetLevel @0x4C3060].
+// scalar folds to level 2. The countdown starts at the mission start's 0, so the
+// first game-loop frame folds at once, ahead of that frame's receive; the folds
+// fall on frames 1, 63, 125, ... [orig: CNetQuality_UpdateMetrics @0x4C52C0;
+// the Game_ProcessMainFrame countdown @0x526537..0x526555, zeroed by
+// Game_StartMission @0x52439e; CNetQuality_SetLevel @0x4C3060].
 bool run_client_quality_level_folds_the_ping_ring() {
 	const std::string client_scrk = "CLIENT-QUALITY-SCRK";
 	const std::string server_scrk = "SERVER-QUALITY-SCRK";
@@ -4894,13 +5750,21 @@ bool run_client_quality_level_folds_the_ping_ring() {
 	client.receive(datagram.data(), datagram.size());
 	(void)client.Client_ProcessNetworkFrame(1);
 	if (!expect(client.client_average_ping_ms() == 400 && client.net_quality_level() == 0,
-			"ten pongs fill the ring; the level waits for the 62-frame fold"))
+			"ten pongs fill the ring after frame 1's fold sampled the floor 1 (1/5 -> level 0)"))
 		return false;
 	for (uint32_t tick = 2; tick <= 62; ++tick) (void)client.Client_ProcessNetworkFrame(tick);
-	if (!expect(client.net_quality_level() == 1,
-			"the first sample truncates to 102/5 -> level 1"))
+	if (!expect(client.net_quality_level() == 0, "the level waits for the next 62-frame fold"))
 		return false;
-	for (uint32_t tick = 63; tick <= 62 * 5; ++tick) (void)client.Client_ProcessNetworkFrame(tick);
+	(void)client.Client_ProcessNetworkFrame(63);
+	if (!expect(client.net_quality_level() == 1,
+			"the first ping sample truncates to (1 + 102)/5 -> level 1"))
+		return false;
+	for (uint32_t tick = 64; tick <= 62 * 4 + 1; ++tick) (void)client.Client_ProcessNetworkFrame(tick);
+	if (!expect(client.net_quality_level() == 1,
+			"four ping samples beside the floor fold (1 + 4 * 102)/5 -> level 1"))
+		return false;
+	for (uint32_t tick = 62 * 4 + 2; tick <= 62 * 5 + 1; ++tick)
+		(void)client.Client_ProcessNetworkFrame(tick);
 	return expect(client.net_quality_level() == 2 && client.state().net.level == 2 &&
 					client.state().net.ping_ms == 400,
 			"five samples of 102 fold to level 2 on the state as well");
@@ -4929,6 +5793,50 @@ bool run_client_quality_frame_pressure_follows_the_frame_rate() {
 	return expect(fold(0, false) == 3, "an unmeasured rate samples the ceiling 255 -> level 3");
 }
 
+// NEW-L5-1: the joiner's level folds the host scalar the S2C 0x79 stored with its own
+// window's: combined = max(host, client). A held window (here the round-over gate)
+// clears only the receive counters, so the host scalar still sets the level.
+// [orig: CNetQuality_UpdateMetrics @0x4C52C0 - the fold @0x4c585a..0x4c5867, the held
+//  clear CNetStats_ClearRecvCounters @0x4C2F90 (+0x10 and the window, not +0x0C);
+//  NapiNPClientMsg_NetworkQuality @0x429B00, the store @0x429b32]
+bool run_client_quality_takes_the_host_metric() {
+	const std::string client_scrk = "CLIENT-HOST-METRIC-SCRK";
+	const std::string server_scrk = "SERVER-HOST-METRIC-SCRK";
+	inmatch::ClientRuntime client("HostMetric", [] { return uint64_t{100000}; });
+	client.set_title(&kJo);
+	client.seed_session(0x10213243u, 1u, client_scrk, server_scrk,
+	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
+	                    0, 0x00100000u, /*replay_mode=*/false);
+	client.set_observed_frame_rate(62); // the client window samples its floor 1
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	uint32_t tick = 1;
+	const auto host_metric = [&](uint8_t metric) {
+		const std::vector<uint8_t> dg = frame_server_session(server_tx, server_scrk, 1u,
+				{make_protocol_message(s2c::NETWORK_QUALITY, {metric})});
+		client.receive(dg.data(), dg.size());
+	};
+	host_metric(0xAB); // 171: the band above 169
+	for (int i = 0; i < 62 * 2; ++i) (void)client.Client_ProcessNetworkFrame(tick++);
+	if (!expect(client.net_quality_level() == 3, "max(171, 1) buckets to level 3"))
+		return false;
+	host_metric(0x60); // 96: the 85..169 band
+	// The folds fall on frames 1, 63, 125, 187 (the countdown starts at the mission
+	// start's 0); frame 125's fold runs ahead of its receive, so 187 takes the 96.
+	for (int i = 0; i < 63; ++i) (void)client.Client_ProcessNetworkFrame(tick++);
+	if (!expect(client.net_quality_level() == 2, "a fresh 0x79 moves the level with it"))
+		return false;
+	EndRoundHeader header;
+	header.winner_team = 2;
+	header.player_index = 0;
+	const std::vector<uint8_t> end_datagram = frame_server_session(server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::END_ROUND_HEADER,
+					encode_end_round_header(header, /*non_team_form=*/false))});
+	client.receive(end_datagram.data(), end_datagram.size());
+	for (int i = 0; i < 62; ++i) (void)client.Client_ProcessNetworkFrame(tick++);
+	return expect(client.state().spawn_success_gate && client.net_quality_level() == 2,
+			"the held window keeps the host scalar: level 2, not 0");
+}
+
 // The NovaWorld exit leads the joiner's 62-frame block (D-NET-220): a NovaWorld
 // network type with its NWU session in use exits the mission with reason 12 once
 // the session's hosting/playing word holds neither 2 nor 3; a playing or hosting
@@ -4951,10 +5859,9 @@ bool run_novaworld_exit_on_a_joiner() {
 	verified.nwu_in_use = true;
 	verified.nwu_session_flags = 0x1A;
 	verified.nwu_session_role = 1;
-	if (!expect(run(verified, 61) == 0, "the exit waits for the 62-frame block"))
-		return false;
-	if (!expect(run(verified, 62) == inmatch::kMissionExitNovaWorld,
-			"a verified-only word exits with 12 on the block"))
+	if (!expect(run(verified, 1) == inmatch::kMissionExitNovaWorld,
+			"a verified-only word exits with 12 on the block, which the mission's first "
+			"game-loop frame runs (the countdown starts at the mission start's 0)"))
 		return false;
 	hud::NovaWorldLinkFacts playing = verified;
 	playing.nwu_session_flags = 0x0A;
@@ -4980,26 +5887,49 @@ bool run_novaworld_exit_on_a_joiner() {
 			"the NWU session's own exit store lands as is");
 }
 
-// The exit reason an in-match disconnect stores and the post-mission router's verdict on it
-// [orig: CNapiNetwork_OnDisconnectedFromServer @0x4c63d0 (the dc == 2 DPC switch);
-//  PostMenu_RouteMissionExit @0x568460]: class-2 records map their DPC (1 / 33 / an unlisted
-// code quit, 34 -> 5, 35 -> 7, 36..45 -> 9..18, 46 / 49 -> 19), any other class or a zero DPC
-// stores nothing; reasons 2, 5..7, 9..20 drop the NovaWorld session (5..7 / 20 with a gameerr
-// text, 9..19 with the disconnect text), every other reason keeps it on a NovaWorld session.
+// What an in-match disconnect does with its record and the post-mission router's verdict on the
+// reason [orig: CNapiNetwork_OnDisconnectedFromServer @0x4c63d0 (the dc == 2 DPC switch:
+//  Input_QueueEvent(36) @0x4C6596, Input_QueueEvent(3) @0x4C67A4); Input_HandleActionBinding
+//  @0x49AD40 (case 3 @0x49AF26, case 36 @0x49B780); PostMenu_RouteMissionExit @0x568460]:
+// class-2 records map their DPC (1 / 33 / an unlisted code queue input action 3, whose dispatch
+// stores 1; 34 queues action 36, whose dispatch stores 5; 35 -> 7, 36..45 -> 9..18, 46 / 49 -> 19
+// stored at once), any other class or a zero DPC does nothing; reasons 2, 5..7, 9..20 drop the
+// NovaWorld session (5..7 / 20 with a gameerr text, 9..19 with the disconnect text), every other
+// reason keeps it on a NovaWorld session.
 bool run_mission_exit_routes() {
-	const auto dpc = [](uint32_t dc, uint32_t code) {
+	const auto exit_of = [](uint32_t dc, uint32_t code) {
 		DisconnectEvent event;
 		event.dc = dc;
 		event.dpc = code;
-		return inmatch::mission_exit_reason_for_disconnect(event);
+		return inmatch::mission_exit_for_disconnect(event);
 	};
-	if (!expect(dpc(2, 0) == inmatch::kMissionExitNone, "a zero DPC stores nothing") ||
-			!expect(dpc(3, 40) == inmatch::kMissionExitNone, "a non-description class stores nothing") ||
-			!expect(dpc(2, 1) == inmatch::kMissionExitQuit, "DPC 1 queues the quit") ||
-			!expect(dpc(2, 33) == inmatch::kMissionExitQuit, "DPC 33 (a punt) queues the quit") ||
-			!expect(dpc(2, 50) == inmatch::kMissionExitQuit, "an unlisted DPC queues the quit") ||
-			!expect(dpc(2, 34) == inmatch::kMissionExitCdTrouble, "DPC 34 -> 5") ||
-			!expect(dpc(2, 35) == inmatch::kMissionExitPirate, "DPC 35 -> 7") ||
+	const auto dpc = [&exit_of](uint32_t dc, uint32_t code) { return exit_of(dc, code).reason; };
+	const auto queued = [&exit_of](uint32_t dc, uint32_t code) {
+		return exit_of(dc, code).input_action;
+	};
+	if (!expect(dpc(2, 0) == inmatch::kMissionExitNone && queued(2, 0) == 0,
+				"a zero DPC does nothing") ||
+			!expect(dpc(3, 40) == inmatch::kMissionExitNone && queued(3, 40) == 0,
+					"a non-description class does nothing") ||
+			!expect(dpc(2, 1) == inmatch::kMissionExitNone &&
+							queued(2, 1) == inmatch::kInputActionExit,
+					"DPC 1 queues input action 3") ||
+			!expect(dpc(2, 33) == inmatch::kMissionExitNone &&
+							queued(2, 33) == inmatch::kInputActionExit,
+					"DPC 33 (a punt) queues input action 3") ||
+			!expect(dpc(2, 50) == inmatch::kMissionExitNone &&
+							queued(2, 50) == inmatch::kInputActionExit,
+					"an unlisted DPC queues input action 3") ||
+			!expect(dpc(2, 34) == inmatch::kMissionExitNone &&
+							queued(2, 34) == inmatch::kInputActionCdTrouble,
+					"DPC 34 queues input action 36") ||
+			!expect(inmatch::mission_exit_reason_for_input_action(inmatch::kInputActionExit) ==
+							inmatch::kMissionExitQuit &&
+							inmatch::mission_exit_reason_for_input_action(
+									inmatch::kInputActionCdTrouble) == inmatch::kMissionExitCdTrouble,
+					"action 3 stores 1, action 36 stores 5") ||
+			!expect(dpc(2, 35) == inmatch::kMissionExitPirate && queued(2, 35) == 0,
+					"DPC 35 -> 7") ||
 			!expect(dpc(2, 36) == 9 && dpc(2, 39) == inmatch::kMissionExitNovaWorld &&
 							dpc(2, 45) == 18,
 					"DPC 36..45 -> 9..18") ||
@@ -5016,6 +5946,10 @@ bool run_mission_exit_routes() {
 			!expect(!route(1, false).keep_session, "a LAN session has nothing to keep") ||
 			!expect(!route(2, true).keep_session && route(2, true).error == E::None,
 					"a reset drops it without a text") ||
+			// [orig: PostMenu_RouteMissionExit @0x568460 - UI_NavHistoryPush(0) @0x56849A]
+			!expect(route(2, false).exits_game && !route(2, false).destroys_session &&
+							!route(1, false).exits_game && !route(4, false).exits_game,
+					"the reset's arm ends the game, the only arm that does") ||
 			!expect(route(5, true).error == E::CdTrouble && route(6, true).error == E::System &&
 							route(7, true).error == E::Pirate &&
 							route(20, true).error == E::BadMission && !route(20, true).keep_session,
@@ -5032,6 +5966,57 @@ bool run_mission_exit_routes() {
 	stored.set_title(&kJo);
 	return expect(stored.mission_exit_reason() == inmatch::kMissionExitNone,
 			"a healthy joiner has stored nothing");
+}
+
+// D-NET-NEW-L1-26, the joiner's leg: a connected joiner's teardown runs the client callback, which
+// keeps the first record in the process's latch and stores the switch over the LATCH: a host 0x86
+// with DC 2 / DPC 35 latches that record and exits 7. The latch outlives the session (a later
+// listen host's own leave reads it) until the next join's connect start clears it.
+// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the callback @0x6254D5..0x6254E7;
+//  CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the empty test @0x4C6535, the copy @0x4C6545,
+//  valid @0x4C6559, the switch from @0x4C655F (35 -> 7 @0x4C65A2);
+//  CNapiNetwork_StartClientConnection @0x4CA160 - the clear @0x4CA1A6..0x4CA1B4]
+bool run_kicked_joiner_latches_the_process_record() {
+	constexpr uint32_t kClientKey = 0x00C0FFEEu;
+	inmatch::ClientProcessState process;
+	inmatch::ClientRuntime kicked("LatchKicked", [] { return uint64_t{50000}; });
+	kicked.set_title(&kJo);
+	kicked.use_process_state(&process);
+	kicked.seed_session(0x0BADF00Du, kClientKey, "CLIENT-LATCH-SCRK", "SERVER-LATCH-SCRK",
+			1, 0, 0x0002, w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
+	DisconnectEvent kick;
+	kick.dc = 2;
+	kick.dpc = 35;
+	kick.dstr = "KICKED";
+	const std::vector<uint8_t> goodbye = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_GOODBYE, server_goodbye_to_bytes(kClientKey, kick));
+	kicked.receive(goodbye.data(), goodbye.size());
+	const std::vector<std::vector<uint8_t>> burst = kicked.Client_ProcessNetworkFrame(1);
+	if (!expect(!burst.empty() && kicked.session_lost(),
+	            "latch: the host's 0x86 tears the joiner down with its burst"))
+		return false;
+	if (!expect(process.disconnect_latch.valid && process.disconnect_latch.event.dc == 2u &&
+	                    process.disconnect_latch.event.dpc == 35u,
+	            "latch: the teardown's callback keeps the kick record in the process latch"))
+		return false;
+	if (!expect(kicked.mission_exit_reason() == inmatch::kMissionExitPirate,
+	            "latch: the switch over the latch stores exit 7"))
+		return false;
+	// The next join of the process: the latch holds until its connect start.
+	uint64_t now_ms = 60000;
+	inmatch::ClientRuntime next("LatchNext", [&now_ms] { return now_ms; });
+	next.set_title(&kJo);
+	next.use_process_state(&process);
+	inmatch::JoinerConnection::DiscoveredSession session;
+	session.present = true;
+	session.host_key = 0x0FE0E120u;
+	next.set_discovered_session(session);
+	if (!expect(process.disconnect_latch.valid, "latch: the record survives the session"))
+		return false;
+	(void)next.start();
+	return expect(!process.disconnect_latch.valid &&
+	                      next.mission_exit_reason() == inmatch::kMissionExitNone,
+	              "latch: the next join's connect start clears it");
 }
 
 bool run_direct_uplink_framing_is_transient() {
@@ -5260,6 +6245,77 @@ bool run_unrelated_loadout_cannot_revive_dead_client() {
 // releases nothing, and the self row's first alive sample is no edge.
 // [orig: NetPacket_SerializePlayerState @0x4C1109 -> Game_InitNewRound
 //  @0x4C114C, g_ClientDeployHold = 0 @0x4227CE; Server_DeployPlayer @0x5178C5]
+// D-NET-687: one pump holding the self record's respawn and then a 0x53: the respawn arm
+// writes the local player's Position in the receive, so the 0x53 later in the same pump
+// measures from the respawned Position. The frame's stamp put the body at 100 u; the
+// record respawns it at 10 u; the tracked zone sits at 85 u (75 u from the respawn) and
+// the new one at 12 u (2 u): the window is adopted. From the stale 100 u the new zone is
+// 88 u off and the window would not be.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the respawn arm @0x4C1109, the
+//  Position stores @0x4C110F..0x4C111D; NapiNPClientMsg_ZoneTimerWindow @0x428ae0 - the
+//  Position reads @0x428C19..0x428CB1, the compare @0x428CF5]
+bool run_zone_window_adoption_reads_the_pumps_respawn() {
+	const std::string client_scrk = "CLIENT-ZONE-RESPAWN-SCRK";
+	const std::string server_scrk = "SERVER-ZONE-RESPAWN-SCRK";
+	inmatch::ClientRuntime client("ZoneRespawn", [] { return uint64_t{4000}; });
+	client.set_title(&kJo);
+	client.seed_session(
+			0x50607081u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId,
+			0, 0x00100000u, /*replay_mode=*/false);
+	constexpr uint16_t kSelf = 0x0002;
+	constexpr uint16_t kTracked = 0x1003, kNear = 0x1004;
+	ns::ClientEntityState &self_row = client.state().upsert(kSelf);
+	self_row.type_id = w::kPlayerInfantryTypeId;
+	self_row.cls = EntityClass::Player;
+	client.state().upsert(kTracked).x = w::to_fixed(85.0);
+	client.state().upsert(kNear).x = w::to_fixed(12.0);
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	w::Entity body;
+	body.kind = w::EntityKind::Organic;
+	body.position = {100.0f, 0.0f, 0.0f};
+	world.cached.local_player = world.registry.spawn(0, body);
+	client.set_local_player_position(world);
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	uint32_t tick = 1;
+	auto self_record = [&](uint8_t flags, double x) {
+		FrameUpdate fu;
+		fu.carried_handle = 0xFFFF;
+		fu.health = (flags & 0x02u) != 0 ? 0 : 100;
+		FrameUpdateRecord rec;
+		rec.handle = kSelf;
+		rec.type_id = w::kPlayerInfantryTypeId;
+		rec.cls = EntityClass::Player;
+		rec.player.carrier_handle = 0xFFFF;
+		rec.player.state_flags = flags;
+		rec.player.pos_x_compressed = network_compress_fixedpoint(w::to_fixed(x));
+		fu.records.push_back(rec);
+		return make_protocol_message(0x0A, encode_frame_update(fu));
+	};
+	auto pump = [&](std::vector<ProtocolMessage> messages) {
+		const std::vector<uint8_t> dg =
+				frame_server_session(server_tx, server_scrk, 1u, std::move(messages));
+		client.receive(dg.data(), dg.size());
+		(void)client.Client_ProcessNetworkFrame(tick++);
+	};
+	pump({self_record(0x00, 100.0)});
+	pump({self_record(0x02, 100.0),
+			make_protocol_message(s2c::ZONE_TIMER_WINDOW,
+					zone_timer_window_body(kTracked, 0, 1, 0, 15, 1))});
+	const inmatch::ClientRuntime::TrackedCaptureWindow &tracked =
+			client.tracked_capture_window();
+	if (!expect(tracked.tracked() && tracked.zone == kTracked,
+			"respawn adoption: the first window is tracked from nothing"))
+		return false;
+	pump({self_record(0x00, 10.0),
+			make_protocol_message(s2c::ZONE_TIMER_WINDOW,
+					zone_timer_window_body(kNear, 0, 1, 0, 15, 1))});
+	return expect(tracked.zone == kNear,
+			"respawn adoption: the 0x53 after the self respawn measures from the respawned "
+			"Position");
+}
+
 bool run_self_respawn_edge_releases_a_revive_deploy() {
 	const std::string client_scrk = "CLIENT-REVIVE-EDGE-SCRK";
 	const std::string server_scrk = "SERVER-REVIVE-EDGE-SCRK";
@@ -5325,9 +6381,10 @@ bool run_self_respawn_edge_releases_a_revive_deploy() {
 // D-NET-235: a queued producer's message leaves at the next open send boundary even when the
 // player died in between. Retail's QueueReliableMessage puts it on the connection's list, and
 // PumpClientProtocolSend builds whatever is queued; only the 0x2C ping and the 0x0C uplink are
-// built behind the deploy gate, and nothing drains the list on death.
+// built behind the deploy gate, and nothing drains the list on death. The gate holds no death
+// (D-NET-529): the frame's 0x2C leaves beside the queued 0x27; the dead body builds no 0x0C.
 // [orig: Client_ProcessNetworkFrame @0x42c3ee..0x42c4a3 (the 0x2C / 0x0C builds behind
-//  is_in_session && !is_authority && !g_ClientDeployHold && !g_SpawnSuccessGate), the tail
+//  is_in_session && !is_authority && !g_ClientDeployHold && !g_RoundOver), the tail
 //  @0x42c4b1 -> PumpClientProtocolSend @0x42c4bc in every branch;
 //  CNapiNPConnection_DrainMessageQueues @0x625600 runs only at join @0x629dfc / @0x62c26f
 //  and destroy @0x62a50a]
@@ -5356,18 +6413,267 @@ bool run_queued_gameplay_survives_a_death_before_the_boundary() {
 	if (!expect(!client.is_deployed(), "the death closes the deploy gate this frame"))
 		return false;
 	bool saw_detach = false;
-	bool saw_ping_or_uplink = false;
+	bool saw_ping = false;
+	bool saw_uplink = false;
 	for (const std::vector<uint8_t> &datagram : boundary) {
 		ProtocolPacketHeader header;
 		std::vector<ProtocolMessage> messages;
 		if (!decode_client_session(datagram, client_scrk, header, messages)) continue;
 		for (const ProtocolMessage &message : messages) {
 			saw_detach = saw_detach || message.tag == 0x27;
-			saw_ping_or_uplink = saw_ping_or_uplink || message.tag == 0x2C || message.tag == 0x0C;
+			saw_ping = saw_ping || message.tag == 0x2C;
+			saw_uplink = saw_uplink || message.tag == 0x0C;
 		}
 	}
-	return expect(saw_detach && !saw_ping_or_uplink,
-			"the queued 0x27 leaves at the boundary; only the 0x2C/0x0C builds sit behind the gate");
+	return expect(saw_detach && saw_ping && !saw_uplink,
+			"the queued 0x27 leaves at the boundary with the frame's 0x2C; no 0x0C for the dead body");
+}
+
+// D-NET-529: a dead player's game loop runs the client net frame on. Every open boundary
+// carries the frame's 0x2C [ts][1] (the deploy gate holds no death), none carries a 0x0C (the
+// uplink build refuses the dead body), and the 310-frame 0x4C leg reports from a quality window
+// that samples on (death holds nothing there either). The deploy pick re-arms the hold and the
+// ping stops; the round-over gate stops it too. The retail joiner on the 03TR death screen sends
+// a 0x2C in every packet (the retail host echoes each in an S2C 0x57) and a 0x4C every 5 s.
+// [orig: Game_ProcessMainFrame @0x5263F0 -> Client_ProcessNetworkFrame @0x526692; the 0x4C leg
+//  @0x42c23e..0x42c279; the 0x2C gate @0x42c3ee..0x42c410, the 0x0C's @0x42c44f..0x42c46d;
+//  Player_BuildTag0CInputBody @0x42A550 (@0x42a58f, @0x42a599); CNetQuality_UpdateMetrics
+//  @0x4C52C0, the held test @0x4c5606..0x4c5630; Input_HandleActionBinding @0x49b067]
+// NEW-L8-8's joiner half: the client's S2C 0x61 (the session key) closes the connect
+// log while it is on: its "<time> : NET CLIENT DISABLING CONNECTLOG ..." line, then off
+// for the process; a later 0x61 writes nothing. The packet carrying it writes its client
+// lines first: the manager receive's RAW, COOKED and PROTOCOL (L2-s12), the client queue's
+// NET GOT, then the parse's NET PROCESSING at the head of ParseMessages, ahead of the messages
+// it dispatches (D-NET-NEW-L8-8's joiner half, s10).
+// [orig: NapiNPClientMsg_HandleTickSeed @0x4297C0 - `cmp g_ConnectLogEnabled, 0`
+//  @0x4297F1, the text @0x7C5398, the append @0x429831, the clear @0x42983E;
+//  NapiNPProtocol_PumpRecvQueues @0x6266A0 - NapiLog_OnRecv (proto+0x26C) @0x6268AA;
+//  CNapiNPConnection_ParseMessages @0x625BC0 - NapiLog_OnProcess (proto+0x274) @0x625D3E ahead
+//  of the message walk]
+bool run_the_session_key_closes_the_connect_log() {
+	struct MemoryFiles final : inmatch::ServerFileSink {
+		std::map<std::string, std::string> files;
+		bool exists(const std::string &name) override { return files.count(name) != 0; }
+		void remove(const std::string &name) override { files.erase(name); }
+		bool write(const std::string &name, std::string_view bytes, bool append) override {
+			if (!append) files[name].clear();
+			files[name].append(bytes.data(), bytes.size());
+			return true;
+		}
+	};
+	MemoryFiles files;
+	inmatch::ConnectLog log(files);
+	log.set_clock([] { return std::string("T"); });
+	log.start(inmatch::ConnectLogHeader{});
+	const std::size_t header_bytes = files.files[inmatch::kConnectLogFile].size();
+	const std::string client_scrk = "CLIENT-CONNECTLOG-SCRK";
+	const std::string server_scrk = "SERVER-CONNECTLOG-SCRK";
+	inmatch::ClientRuntime client("ConnectLog", [] { return uint64_t{4000}; });
+	client.set_title(&kJo);
+	client.set_connect_log(&log);
+	client.seed_session(0x50607082u, 1u, client_scrk, server_scrk, 1, 0, 0x0002,
+			w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	uint32_t tick = 1;
+	// The packet's length with its opcode byte, as the client lines print it, and the
+	// datagram's as the socket hands it over (the manager's RAW).
+	int32_t packet_bytes = 0;
+	std::size_t raw_bytes = 0;
+	const auto session_key = [&] {
+		const std::vector<uint8_t> dg = frame_server_session(server_tx, server_scrk, 1u,
+				{make_protocol_message(s2c::TICK_SEED, {0x10, 0x00, 0x00, 0x00})});
+		raw_bytes = dg.size();
+		std::vector<uint8_t> unpacked;
+		packet_bytes = nw_unpack_inbound(dg.data(), dg.size(), unpacked)
+				? static_cast<int32_t>(unpacked.size())
+				: 0;
+		client.receive(dg.data(), dg.size());
+		(void)client.Client_ProcessNetworkFrame(tick++);
+	};
+	if (!expect(log.enabled(), "connect log: /CONNECTLOG armed it")) return false;
+	session_key();
+	const std::string &text = files.files[inmatch::kConnectLogFile];
+	const std::string want =
+			"T : " + napi_got_raw_text(static_cast<int32_t>(raw_bytes), PeerAddr{}) +
+			"\r\n" + "T : " + napi_got_cooked_text(packet_bytes, PeerAddr{}) + "\r\n" +
+			"T : " + napi_got_protocol_text(packet_bytes, PeerAddr{}, kJo.pn) + "\r\n" +
+			"T : " + net_got_text(packet_bytes, PeerAddr{}, 0x83) + "\r\n" +
+			"T : " + inmatch::net_processing_text(packet_bytes, PeerAddr{}) + "\r\n" +
+			"T : NET CLIENT DISABLING CONNECTLOG BECAUSE WE DON'T NEED IT ANYMORE.\r\n";
+	if (!expect(!log.enabled() && packet_bytes > 0 && text.substr(header_bytes) == want,
+			"connect log: the session key writes the client's disabling line and turns it off"))
+		return false;
+	const std::size_t closed_bytes = text.size();
+	session_key();
+	return expect(files.files[inmatch::kConnectLogFile].size() == closed_bytes,
+			"connect log: a later session key writes nothing");
+}
+
+// D-NET-602: the 0x4C report count is the process's. Its only writers are the client
+// net frame's step and its zero at the report, so it runs free across joins: a second
+// join's first report lands at the count's phase, 311 - 200 = 111 frames in after a
+// first join ran 200, where a fresh count would wait 311.
+// [orig: Client_ProcessNetworkFrame @0x42C180 - the step @0x42C22D..0x42C239, the zero
+//  @0x42C246, the queue @0x42C279; g_NetQualityReportTimer @0xA85B84]
+bool run_the_report_timer_runs_for_the_process() {
+	const auto first_report = [](inmatch::ClientProcessState *process, int frames,
+			const char *scrk_tag) {
+		const std::string client_scrk = std::string("CLIENT-") + scrk_tag;
+		const std::string server_scrk = std::string("SERVER-") + scrk_tag;
+		inmatch::ClientRuntime client("ReportTimer", [] { return uint64_t{5000}; });
+		client.set_title(&kJo);
+		client.use_process_state(process);
+		client.seed_session(0x52535455u, 1u, client_scrk, server_scrk, 1, 0, 0x0002,
+				w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
+		const PlayerExtendedUplink uplink;
+		for (int frame = 1; frame <= frames; ++frame) {
+			for (const std::vector<uint8_t> &datagram :
+					client.Client_ProcessNetworkFrame(uplink, static_cast<uint32_t>(frame))) {
+				ProtocolPacketHeader header;
+				std::vector<ProtocolMessage> messages;
+				if (!decode_client_session(datagram, client_scrk, header, messages)) continue;
+				for (const ProtocolMessage &message : messages)
+					if (message.tag == c2s::CLIENT_QUALITY) return frame;
+			}
+		}
+		return 0;
+	};
+	inmatch::ClientProcessState process;
+	if (!expect(first_report(&process, 200, "TIMER-A") == 0 &&
+				process.net_quality_report_timer == 200,
+			"a first join's 200 frames count on the process's word"))
+		return false;
+	if (!expect(first_report(&process, 400, "TIMER-B") == 111,
+			"a second join's first 0x4C lands at the running phase, 111 frames in"))
+		return false;
+	return expect(first_report(nullptr, 400, "TIMER-C") == 311,
+			"a runtime with no process word starts its own count: 311 frames in");
+}
+
+bool run_dead_joiner_keeps_pinging_every_boundary() {
+	struct Tally {
+		int boundaries = 0;
+		int pings = 0;
+		int uplinks = 0;
+		int quality_reports = 0;
+		int picks = 0;
+		uint8_t quality_level = 0xFF;
+	};
+	const auto tally = [](const std::string &scrk,
+			const std::vector<std::vector<uint8_t>> &out, Tally &t) {
+		bool boundary = false;
+		for (const std::vector<uint8_t> &datagram : out) {
+			ProtocolPacketHeader header;
+			std::vector<ProtocolMessage> messages;
+			if (!decode_client_session(datagram, scrk, header, messages)) continue;
+			boundary = true;
+			for (const ProtocolMessage &message : messages) {
+				if (message.tag == 0x2C && message.payload.size() == 5 && message.payload[4] == 1)
+					++t.pings;
+				if (message.tag == 0x0C) ++t.uplinks;
+				if (message.tag == 0x0E) ++t.picks;
+				if (message.tag == 0x4C && message.payload.size() == 1) {
+					++t.quality_reports;
+					t.quality_level = message.payload[0];
+				}
+			}
+		}
+		if (boundary) ++t.boundaries;
+	};
+	const std::string client_scrk = "CLIENT-DEAD-PUMP-SCRK";
+	const std::string server_scrk = "SERVER-DEAD-PUMP-SCRK";
+	inmatch::ClientRuntime client("DeadPump", [] { return uint64_t{5000}; });
+	client.set_title(&kJo);
+	client.seed_session(
+			0x52535455u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId,
+			0, 0x00100000u, /*replay_mode=*/false);
+	client.set_observed_frame_rate(62);
+	const PlayerExtendedUplink uplink;
+	uint32_t tick = 1;
+	Tally alive;
+	tally(client_scrk, client.Client_ProcessNetworkFrame(uplink, tick++), alive);
+	if (!expect(alive.boundaries == 1 && alive.pings == 1 && alive.uplinks == 1,
+			"a living joiner's boundary carries its 0x2C and its 0x0C"))
+		return false;
+
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	FrameUpdate death;
+	death.carried_handle = 0xFFFF;
+	death.health = 0;
+	const std::vector<uint8_t> death_datagram = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{make_protocol_message(0x0A, encode_frame_update(death))});
+	client.receive(death_datagram.data(), death_datagram.size());
+	Tally dead;
+	for (int frame = 0; frame < 400; ++frame)
+		tally(client_scrk, client.Client_ProcessNetworkFrame(uplink, tick++), dead);
+	if (!expect(client.deployment_pick_pending() && !client.is_deployed() &&
+				client.gameplay_gate_open(),
+			"the death re-enters the picker with the deploy hold still open"))
+		return false;
+	if (!expect(dead.boundaries == 400 && dead.pings == 400 && dead.uplinks == 0,
+			"every dead boundary carries one 0x2C [ts][1] and no 0x0C"))
+		return false;
+	if (!expect(dead.quality_reports == 1 && dead.quality_level == 1,
+			"the 0x4C leg reports on the death screen from a window that samples on"))
+		return false;
+
+	if (!expect(client.queue_deployment_pick(0xFFFF), "the dead player picks Default Spawn"))
+		return false;
+	Tally picked;
+	for (int frame = 0; frame < 20; ++frame)
+		tally(client_scrk, client.Client_ProcessNetworkFrame(uplink, tick++), picked);
+	if (!expect(picked.picks == 1 && picked.pings == 0 && picked.uplinks == 0,
+			"the pick re-arms the deploy hold: its 0x0E leaves and the ping stops"))
+		return false;
+
+	inmatch::ClientRuntime round_over("RoundOverPump", [] { return uint64_t{5000}; });
+	round_over.set_title(&kJo);
+	round_over.seed_session(
+			0x56575859u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId,
+			0, 0x00100000u, /*replay_mode=*/false);
+	SessionSequencing round_tx = inmatch::make_jo_game_session_sequencing();
+	EndRoundHeader header;
+	header.winner_team = 2;
+	header.player_index = 0;
+	const std::vector<uint8_t> end_datagram = frame_server_session(round_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::END_ROUND_HEADER,
+					encode_end_round_header(header, /*non_team_form=*/false))});
+	round_over.receive(end_datagram.data(), end_datagram.size());
+	Tally over;
+	tally(client_scrk, round_over.Client_ProcessNetworkFrame(uplink, 1), over);
+	if (!expect(round_over.state().spawn_success_gate && over.boundaries == 1 &&
+				over.pings == 0 && over.uplinks == 0,
+			"the round-over gate shuts the frame's 0x2C and 0x0C"))
+		return false;
+
+	// The dead player's frame also runs the end-round linger: the round ends while it waits
+	// on the death screen, and the frame after the host's 0x25 stores exit 4.
+	// [orig: Client_ProcessNetworkFrame @0x42c3ab..0x42c3d3]
+	const std::vector<uint8_t> dead_end = frame_server_session(server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::END_ROUND_HEADER,
+					encode_end_round_header(header, /*non_team_form=*/false))});
+	client.receive(dead_end.data(), dead_end.size());
+	(void)client.Client_ProcessNetworkFrame(tick++);
+	const std::vector<uint8_t> reset = frame_server_session(server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::GAME_RESET, {})});
+	client.receive(reset.data(), reset.size());
+	(void)client.Client_ProcessNetworkFrame(tick++);
+	return expect(!client.in_match() && client.in_session() &&
+				client.mission_exit_reason() == inmatch::kMissionExitRoundOver,
+			"the dead player's frame runs the linger out after the 0x25");
+}
+
+// An armory ACCEPT's 0x2F for the queue-order tests (its content is
+// inmatch::armory_accept_in_session's; these read only where it rides).
+LoadoutSubmit armory_accept_submit() {
+	LoadoutSubmit submit;
+	submit.team = 1;
+	submit.player_class = 8;
+	submit.weapon_slot_index = 0xC3;
+	return submit;
 }
 
 bool run_live_frame_uses_wall_clock_and_batches_mount_requests() {
@@ -5383,7 +6689,7 @@ bool run_live_frame_uses_wall_clock_and_batches_mount_requests() {
 	if (!expect(client.queue_vehicle_attach(0x1007, 6),
 			"a deployed joiner can queue C2S 0x26 attach"))
 		return false;
-	client.queue_loadout_resubmit();
+	(void)client.queue_loadout_submit(armory_accept_submit());
 	const std::vector<std::vector<uint8_t>> attach_frame =
 			client.Client_ProcessNetworkFrame(999u);
 	if (!expect(attach_frame.size() == 1,
@@ -5525,7 +6831,7 @@ bool run_same_packet_holdoff_keeps_first_admission_boundary_open() {
 	client.receive(
 			server_hello_datagram.data(), server_hello_datagram.size());
 	const std::vector<std::vector<uint8_t>> auth_frame =
-			client.Client_ProcessNetworkFrame(0);
+			inmatch::test::frames_to_enumerated_join(client, 0);
 	ClientAuth client_auth;
 	if (!expect(auth_frame.size() == 1 &&
 	                    nw_decode_inbound(
@@ -5731,8 +7037,8 @@ bool run_missing_sequence_request_leaves_from_the_receive_pump() {
 // original carried and without touching the flush counter. A WR-flagged 0x85
 // is answered the same way by its pong.
 // [orig: NapiNP_HandleResendList @0x623800 -> CNapiNPConnection_SendSessionPacket
-//  @0x6239b6 -> CNapiNPManager_SendTo @0x61f039; Nwu_HandlePing @0x623a70 ->
-//  CNapiNPConnection_SendPing @0x623c6f -> CNapiNPManager_SendTo @0x61f261]
+//  @0x6239b6 -> CNapiNPManager_SendTo @0x61F032; Nwu_HandlePing @0x623a70 ->
+//  CNapiNPConnection_SendPing @0x623c6f -> CNapiNPManager_SendTo @0x61F25A]
 bool run_resend_answer_and_pong_leave_from_the_receive_pump() {
 	constexpr uint32_t kServerKey = 0x55667788u;
 	const std::string client_scrk = "CLIENT-HOLDOFF-RETAINED-SCRK";
@@ -5984,7 +7290,7 @@ bool run_c2s_producers_share_one_chronological_queue() {
 		                    client.queue_reload_request(reload),
 				"one-queue: the producers accept"))
 			return false;
-		client.queue_loadout_resubmit();
+		(void)client.queue_loadout_submit(armory_accept_submit());
 		if (!expect(client.queue_door_request(0x1005, 1, 0), "one-queue: the door request queues"))
 			return false;
 		std::vector<uint8_t> tags;
@@ -6367,7 +7673,7 @@ bool run_start_resets_reusable_runtime_state() {
 	if (!expect(client.queue_vehicle_attach(0x1007, 3),
 			"reuse fixture queues session-bound gameplay traffic"))
 		return false;
-	client.queue_loadout_resubmit();
+	(void)client.queue_loadout_submit(armory_accept_submit());
 	client.queue_deployment_pick(0xFFFFu);
 
 	SessionSequencing first_server_tx = inmatch::make_jo_game_session_sequencing();
@@ -6472,15 +7778,15 @@ bool run_joiner_correlates_handshake_echoes() {
 	ServerHello valid_hello = build_server_hello(hello, 0x7F000001u, 32769);
 	const std::vector<uint8_t> valid_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(valid_hello));
-	const inmatch::JoinerConnection::PollResult auth_request =
-			joiner.handle_datagram(valid_hello_datagram.data(), valid_hello_datagram.size());
-	if (!expect(auth_request.outbound.size() == 1 &&
+	(void)joiner.handle_datagram(valid_hello_datagram.data(), valid_hello_datagram.size());
+	const std::vector<uint8_t> auth_request = inmatch::test::enumerated_join_auth(joiner);
+	if (!expect(!auth_request.empty() &&
 	                    joiner.phase() == inmatch::JoinerConnection::Phase::Auth,
-			"matching ServerHello advances to Auth"))
+			"matching ServerHello leads to Auth"))
 		return false;
 	ClientAuth client_auth;
 	if (!expect(nw_decode_inbound(
-				auth_request.outbound[0].data(), auth_request.outbound[0].size(),
+				auth_request.data(), auth_request.size(),
 				opcode, body) &&
 	                    parse_client_auth(body.data(), body.size(), client_auth),
 			"echo-guard decodes ClientAuth"))
@@ -6501,8 +7807,8 @@ bool run_joiner_correlates_handshake_echoes() {
 
 // Both witnessed writers of g_LocalTeam must be falsifiable. S2C 0x04 installs
 // the admission team; S2C 0x75 byte 1 refreshes it when the server broadcasts
-// this player's live slot state. Read the result through frame_loadout_resubmit
-// — the same assigned_team_ source the 0x1A pair uses.
+// this player's live slot state. Read the latch the 0x1A pair's team byte uses
+// (the armory's 0x2F takes the body's team byte instead, @0x565D8C).
 // [orig: NapiNPClientMsg_SessionSlotConfig (0x04) @0x425410 -> g_LocalTeam @0x425499;
 // NapiNPClientMsg_SetSpectatorMode @0x4259E0 -> g_LocalTeam @0x425A32]
 bool run_team_latch_is_falsifiable() {
@@ -6513,15 +7819,8 @@ bool run_team_latch_is_falsifiable() {
 	joiner.seed_in_match(0x33445566u, 1u, client_scrk, server_scrk,
 	                     1, 0, 0x0001, w::kPlayerInfantryTypeId);
 
-	ProtocolPacketHeader header;
-	std::vector<ProtocolMessage> messages;
 	auto resubmit_team = [&](uint8_t &team_out) {
-		const std::vector<uint8_t> datagram = joiner.frame_loadout_resubmit();
-		if (datagram.empty() ||
-		    !decode_client_session(datagram, client_scrk, header, messages) ||
-		    messages.size() != 1 || messages[0].tag != 0x2F || messages[0].payload.empty())
-			return false;
-		team_out = messages[0].payload[0];
+		team_out = joiner.assigned_team();
 		return true;
 	};
 
@@ -6641,14 +7940,15 @@ bool run_padding_echo_retail_clamp(uint32_t requested_len, std::size_t expected_
 	server_hello.hk = 0x44556677u;
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	const inmatch::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+	(void)joiner.handle_datagram(
 			server_hello_datagram.data(), server_hello_datagram.size());
-	if (!expect(hello_result.outbound.size() == 1, "pad-clamp: ClientAuth emitted")) {
+	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
+	if (!expect(!auth_datagram.empty(), "pad-clamp: ClientAuth emitted")) {
 		return false;
 	}
 	ClientAuth client_auth;
 	if (!expect(nw_decode_inbound(
-				hello_result.outbound[0].data(), hello_result.outbound[0].size(),
+				auth_datagram.data(), auth_datagram.size(),
 				opcode, body) &&
 				parse_client_auth(body.data(), body.size(), client_auth),
 			"pad-clamp: decode ClientAuth")) {
@@ -6718,12 +8018,11 @@ bool run_padding_echo_retail_clamp(uint32_t requested_len, std::size_t expected_
 				client_messages[0].payload[2] == 0x22 &&
 				client_messages[0].payload[3] == 0x11 &&
 				client_messages[0].payload[4] == 0x02 &&
-				// dword 2 = the client net-frame counter (no pump ran here -> 0),
+				// dword 2 = the process's net-frame counter (D-NET-733; no state-6
+				// frame ran here, so whatever earlier joins in this process left),
 				// the consumed stats sample — not random filler.
-				client_messages[0].payload[8] == 0x00 &&
-				client_messages[0].payload[9] == 0x00 &&
-				client_messages[0].payload[10] == 0x00 &&
-				client_messages[0].payload[11] == 0x00,
+				io::read_u32_le(client_messages[0].payload.data() + 8) ==
+						inmatch::JoinerConnection::client_net_frame_counter(),
 			"pad-clamp: echo body follows max(12, min(len, 512)) with the 3-dword prefix")) {
 		return false;
 	}
@@ -6760,7 +8059,8 @@ bool run_joiner_goodbye_tears_down_host() {
 		return false;
 	}
 	client.receive(hello_result.outbound[0].data(), hello_result.outbound[0].size());
-	const std::vector<std::vector<uint8_t>> auth = client.Client_ProcessNetworkFrame(0);
+	const std::vector<std::vector<uint8_t>> auth =
+			inmatch::test::frames_to_enumerated_join(client, 0);
 	if (!expect(auth.size() == 1, "goodbye: client emits ClientAuth")) return false;
 	const inmatch::HandleResult auth_result = inmatch::handle_server_datagram(
 			host, peer, auth[0].data(), auth[0].size(), 0);
@@ -7391,6 +8691,28 @@ bool run_voice_menu_picks_round_trip_through_a_host() {
             "the host's own-copy 0x6D posts the joiner's radio line");
 }
 
+// The listen host's own client queues its 0x0F's completion pair on its own connection behind
+// what it queued before (L7-s29, L7-s28 FOUND): a 0x5A apply's mount request (a ForceCrouch spawn
+// weapon's C2S 0x1D, raised at the grant ahead of the receive) leaves ahead of the 0x22 / 0x23
+// pair, as retail's one outgoing list hands them to the loopback in queue order.
+// [orig: NapiNPClientMsg_0x00F - CNapiNetwork_QueueReliableMessage (the calls @0x42E690 /
+//  @0x42E6AB); Player_MountWeaponSlot @0x4DFA40 - the 0x1D's (the call @0x4DFC30);
+//  CNapiNetwork_QueueReliableMessage @0x4C4FA0 -> CNapiNPConnection_QueueMessage @0x628640]
+bool run_host_client_burst_follows_its_mount_request() {
+    ns::LoopbackChannel host_loop;
+    inmatch::ClientRuntime host_view(host_loop);
+    if (!expect(host_view.queue_stance_change(0xA9), "the host's own client queues the 0x1D"))
+        return false;
+    host_loop.host_send(s2c::WORLD_STATE_LOAD, {});
+    host_view.Client_ProcessNetworkFrame();
+    std::vector<uint8_t> tags;
+    ns::Datagram dg;
+    while (host_loop.host_recv(dg)) tags.push_back(dg.tag);
+    return expect(tags == std::vector<uint8_t>{c2s::STANCE_CHANGE, c2s::PLAYER_SYNC_REQUEST,
+                                               c2s::VISIBLE_PLAYERS_REQUEST},
+            "the mount's 0x1D leaves ahead of the 0x0F's 0x22 / 0x23 pair");
+}
+
 bool run_host_client_refreshes_visible_players() {
     ns::LoopbackChannel host_loop;
     inmatch::ClientRuntime host_view(host_loop);
@@ -7643,6 +8965,10 @@ std::vector<w::SoundSlotEvent> replica_mover_sounds(uint32_t flags, int32_t vel_
     row.rm_chute_carry_flags = chute_carry;
     row.x = 7 << 16;
     row.net_smooth_target[0] = row.x;
+    // Well above the water plane: the replica channel compares the raw plane
+    // (0 here, no dry sentinel), so a fall must not reach it.
+    row.z = 100 << 16;
+    row.net_smooth_target[2] = row.z;
     for (int t = 0; t < ticks; ++t) {
         runtime.view().tick_remote_motion(0xFFFF);
         runtime.tick_remote_stance_sounds(world);
@@ -7828,8 +9154,47 @@ bool run_guided_zero_steer_point_is_stored() {
     return expect(m->steer[0] == 65536 && !(m->flags & 1), "a fresh lifetime admits guidance");
 }
 
+// A group-4 read-full stores the target, the type and the point, and binds no
+// lock: the round's flags and its timer stay as they were, so it keeps steering
+// at the decoded point; a group 3 then binds the lock (flag 2, timer -1).
+// [orig: Entity_SerializeGuidedMissileState @0x447C50 read-full - group 4: the
+//  target @0x447F74, the type @0x4480C7, the point @0x4480E5..0x448129, the
+//  return @0x448122; group 3: the target @0x447ECE, LABEL_80 @0x448092 / @0x44809B]
+bool run_guided_group_four_binds_no_lock() {
+	ns::ClientReplicaPipeline view([](uint16_t) { return EntityClass::Player; });
+	auto round = std::make_unique<opennova::world::LiveRound>();
+	round->active = true; round->shot_seq = 5; round->max_age_ticks = 620;
+	round->guided_family = opennova::world::GuidedFamily::Stinger;
+	round->guided.timer = 7;
+	view.set_guided_round_resolver([&](int16_t id) { return id == 5 ? round.get() : nullptr; });
+	auto make_routed = [](GuidedFieldGroup group, const GuidedRecord &rec) {
+		std::vector<uint8_t> body{0x02, 0x00, 0x05, 0x00, static_cast<uint8_t>(group)};
+		const std::vector<uint8_t> payload =
+				encode_guided_field_group(GuidedMode::WriteFull, group, rec);
+		body.insert(body.end(), payload.begin(), payload.end());
+		return body;
+	};
+	GuidedRecord typed;
+	typed.target_slot = 0x1003;
+	typed.weapon_type = 0x0042;
+	typed.pos_x = 0x10000;
+	typed.pos_y = 0x20000;
+	typed.pos_z = 0x30000;
+	view.apply(0x44, make_routed(GuidedFieldGroup::TargetTypePos, typed));
+	const auto &m = round->guided;
+	if (!expect(m.target == 0x1003 && m.phase == 0x0042 && m.steer[0] == 0x10000 &&
+					m.steer[1] == 0x20000 && m.steer[2] == 0x30000,
+			"guided: group 4 stores the target, the type and the point")) return false;
+	if (!expect((m.flags & 2) == 0 && m.timer == 7,
+			"guided: group 4 leaves the lock flag and the timer")) return false;
+	view.apply(0x44, make_routed(GuidedFieldGroup::TargetPos, typed));
+	return expect((m.flags & 2) != 0 && m.timer == -1 && m.target == 0x1003,
+			"guided: group 3 binds the lock and parks the timer");
+}
+
 int main() {
 	const bool ok = run_guided_zero_steer_point_is_stored() &&
+	                run_guided_group_four_binds_no_lock() &&
 	                run_connection_indicators_on_a_joiner() &&
 	                run_connection_indicators_on_the_host_client() &&
 	                run_radio_events_preserve_order_chat_and_mute_state(false) &&
@@ -7840,6 +9205,7 @@ int main() {
                     run_emote_stamps_the_speaker_body_and_voices_it() &&
                     run_voice_menu_picks_round_trip_through_a_host() &&
                     run_host_client_refreshes_visible_players() &&
+                    run_host_client_burst_follows_its_mount_request() &&
                     run_contextual_radio_keys_match_retail() &&
                     run_charattr_challenge_table_matches_retail() &&
                     run_charattr_latches_follow_retail() &&
@@ -7849,6 +9215,9 @@ int main() {
 	                run_challenge_diagnostics_pass_through_the_runtime() &&
 	                run_fire_queue_stamps_runtime_tick() &&
 	                run_retail_post_auth_prelude() &&
+	                run_retail_post_auth_prelude("TeamPassword1234") &&
+	                run_retail_post_auth_prelude("TeamPassword12345678") &&
+	                run_retail_post_auth_prelude("blue1", /*held_in_the_queue=*/true) &&
 	                run_novaworld_join_tokens_ride_the_wire() &&
 	                run_early_sync_tail_latch() &&
 	                run_client_reducer_preserves_packet_message_order() &&
@@ -7859,12 +9228,15 @@ int main() {
 	                run_joiner_remote_reload_stamps_before_same_frame_body_tick() &&
 	                run_host_client_discards_authority_owned_reload_echoes() &&
 	                run_host_client_reports_its_quality_over_the_loopback() &&
+	                run_host_client_keepalive_rides_the_loopback() &&
+	                run_console_echo_runs_the_client_walk() &&
 	                run_joiner_weapon_pickup_reaches_the_pipeline() &&
 	                run_host_zone_timer_value_matches_retail_entry() &&
 	                run_zone_timer_channels_share_one_retail_entry() &&
 	                run_zone_presence_updates_only_a_tracked_window() &&
 	                run_zone_window_adoption_measures_from_the_local_player() &&
 	                run_roster_revive_countdown_ticks_once_per_63_frames() &&
+	                run_revive_countdown_phase_is_the_process_s() &&
 	                run_medic_request_queues_one_reliable_0x2e() &&
 	                run_respawn_request_queues_one_reliable_0x41() &&
 	                run_session_vars_exp_fanfare_walk() &&
@@ -7892,8 +9264,14 @@ int main() {
 	                run_split_batch_keeps_deployment_pick_ack_causal() &&
 	                run_unrelated_loadout_cannot_revive_dead_client() &&
 	                run_self_respawn_edge_releases_a_revive_deploy() &&
+	                run_zone_window_adoption_reads_the_pumps_respawn() &&
+	                run_console_actions_queue_for_the_input_frame() &&
+	                run_the_round_gate_holds_the_entity_update() &&
 	                run_live_frame_uses_wall_clock_and_batches_mount_requests() &&
 	                run_queued_gameplay_survives_a_death_before_the_boundary() &&
+	                run_dead_joiner_keeps_pinging_every_boundary() &&
+	                run_the_report_timer_runs_for_the_process() &&
+	                run_the_session_key_closes_the_connect_log() &&
 	                run_mounted_slot_select_and_reload_producers() &&
 	                run_same_packet_holdoff_keeps_first_admission_boundary_open() &&
 	                run_missing_sequence_request_leaves_from_the_receive_pump() &&
@@ -7928,8 +9306,13 @@ int main() {
 	                run_chat_uplink_api() && run_host_chat_uplink() &&
 	                run_client_quality_level_folds_the_ping_ring() &&
 	                run_client_quality_frame_pressure_follows_the_frame_rate() &&
+	                run_client_quality_takes_the_host_metric() &&
+	                run_console_command_sends_the_line() &&
+	                run_rtt_echo_waits_out_the_round_over_gate() &&
+	                run_rtt_echo_pongs_append_in_arrival_order() &&
 	                run_novaworld_exit_on_a_joiner() &&
 	                run_mission_exit_routes() &&
+	                run_kicked_joiner_latches_the_process_record() &&
 	                run_joiner_goodbye_tears_down_host();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;

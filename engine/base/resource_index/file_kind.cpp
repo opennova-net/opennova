@@ -233,7 +233,7 @@ constexpr FileKindFacts kRows[] = {
 	        .row,
 	Kind(FileKind::OtherDefs, ArchiveSlot::Localres).extensions(kOtherDefs).row,
 	// Opened with fopen by its bare name, from the install's folder whatever the expansion [orig:
-	// CUIStringTable_OpenAndLoad @ 0x63a500, from @ 0x55262b].
+	// CookieJar_OpenAndLoadFile @ 0x63a500, from @ 0x55262b].
 	Kind(FileKind::StringTableCoo, ArchiveSlot::Loose)
 	        .extensions(kStringTableCoo)
 	        .expansion(ExpansionLoose::RootOnly)

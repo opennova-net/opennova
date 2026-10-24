@@ -1,8 +1,14 @@
 #pragma once
 
 #include <runtime/inmatch/chat_flood.h>
+#include <runtime/inmatch/client_console.h> // the S2C 0x06 echo's command walk (D-NET-710)
+#include <runtime/inmatch/file_transfer_session.h> // the process's S2C 0x02 probe words
+#include <runtime/inmatch/gate_metrics_reports.h> // GateMetricsSink (the held teardown's PLAYER)
 #include <runtime/inmatch/joiner_connection.h>
+#include <runtime/inmatch/joiner_net_trace.h> // the joiner net readout (an instrument)
+#include <runtime/inmatch/mission_exit.h> // ProcessDisconnectLatch (the process latch)
 #include <runtime/devtools/tick_profile.h>
+#include <runtime/controls/input_event_queue.h> // the console's records (queue_console_action)
 #include <runtime/hud/hud_chat_entry.h> // ChatSendResult (the C2S 0x0D sender's outcome)
 #include <runtime/hud/net_quality_indicators.h> // g_NetQuality's display state
 #include <runtime/hud/feed_format.h>    // FeedPost (the client-raised ring lines)
@@ -11,6 +17,9 @@
 #include <runtime/replication/client_replica_pipeline.h> // ClientReplicaPipeline / ClientState
 #include <runtime/replication/net_quality.h>             // the CNetQuality window (the client half)
 #include <runtime/inmatch/session_transport.h>        // ISessionTransport
+#include <runtime/inmatch/vehicle_menu.h>             // VehicleMenu (vehicle.mnu VEHICLE)
+#include <runtime/world/weapon_inventory.h>          // LoadoutWeaponNameList (the process's name list)
+#include <base/io/crt_rand.h>                         // CrtRand (the process's CRT stream)
 
 #include <net/npwire/ingame_decode.h>     // PlayerExtendedUplink (the §5.10 0x0C body)
 
@@ -52,12 +61,177 @@
 // [orig: Client_ProcessNetworkFrame @0x42c180; PumpClientProtocolRecv @0x42c228 / Send @0x42c4bc;
 //  Player_BuildTag0CInputBody @0x42a550; docs/net §5.44]. No socket I/O lives here.
 namespace opennova::world { class World; }
+namespace opennova::audio { struct DialogLineRef; }
+namespace opennova::def { struct DefItemsFile; }
 
 namespace opennova::inmatch {
 
+class ConnectLog; // punt_log.h
+
+// The client half's process-lived words: retail keeps the 0x4C report's frame count, the
+// revive countdown's frame count and the vehicle screen's state in globals for the whole
+// process, so they run on across sessions, map changes and roles. The embedder that outlives
+// its sessions owns one and hands it to every client runtime (ClientRuntime::use_process_state);
+// a runtime with none keeps its own (a test fixture's).
+// [orig: g_NetQualityReportTimer @0xA85B84 - its only writers Client_ProcessNetworkFrame
+//  @0x42C239 (the step) and @0x42C246 (the zero at the report)]
+struct ClientProcessState {
+	// The report's period: the 311th step fires. [orig: Client_ProcessNetworkFrame @0x42C23E]
+	static constexpr uint32_t kNetQualityReportInterval = 310;
+	uint32_t net_quality_report_timer = 0;
+	// The 1 Hz revive countdown's frame count: stepped by every client net frame and zeroed
+	// only by its own 63rd step, so its phase runs on across sessions.
+	// [orig: g_SlotRefreshTimer @0xA85B80 -- its only accesses Client_ProcessNetworkFrame
+	//  @0x42C27E..0x42C288 (the step) and @0x42C2DA (the zero)]
+	uint32_t slot_refresh_timer = 0;
+	// The vehicle screen's state (vehicle_menu.h): the poll flag, its frame counter, the
+	// selection and the list live with the menu scene, which only the expansion reload or
+	// the quit destroys, so a later session in the same process polls from its start.
+	// [orig: g_VehicleMenuOpen @0x25DCF24, g_VehicleMenuPollCounter @0x25DCF28,
+	//  g_VehicleMenuSelection @0x25DCF2C; VehicleMenu_Close @0x563AC0, dispatched by
+	//  CUIScene_DestroyAllContent alone (@0x63C4DC)]
+	VehicleMenu vehicle_menu;
+	// The S2C 0x70 table and its received flag, which no session or mission start touches
+	// (the client runtime points its replica's store here: use_vehicle_spawn_store).
+	// [orig: g_VehicleSpawnAvailabilityReceived 0xA81BB0, the table 0xA81BC0]
+	replication::ClientVehicleSpawnAvailability vehicle_spawn_availability;
+	// The process's file-transfer session words (file_transfer_session.h): the id each S2C 0x02
+	// probe carries and its step countdown, stepped by every authority mission start (HostRole's
+	// bring-ups, a map change's and a single player's included) and by the server tick's head,
+	// which the host context reaches through NapiNPServerCtx::file_transfer_session.
+	// [orig: g_FileTransferSessionId @0xC86FCC, g_FileTransferSessionStepCountdown @0xC86FD0;
+	//  Game_StartMission @0x524360 (the add @0x5244B4, the store @0x5244C6); Server_TickUpdate
+	//  @0x51D7E0 (@0x51D809..0x51D820); CNetPlayer_SendFileTransferChunk @0x4C9440 (the read
+	//  @0x4C9468)]
+	FileTransferSession file_transfer_session;
+	// One client net frame's step, which every mission frame of every role runs (a Serve Only
+	// host's included, with no client runtime): true at the 311th, which zeroes the word before
+	// the session test, so the caller's report (in session, a session peer) is its own.
+	// [orig: Game_ProcessMainFrame @0x5263F0 (the unconditional call @0x526692); Client_ProcessNetworkFrame
+	//  @0x42C22D..0x42C23E (the step), @0x42C246 (the zero, between the session compare @0x42C240
+	//  and its branch @0x42C24C), the peer compare @0x42C24E (its branch @0x42C254)]
+	bool step_net_quality_report() {
+		if (++net_quality_report_timer <= kNetQualityReportInterval) return false;
+		net_quality_report_timer = 0;
+		return true;
+	}
+	// g_LocalPlayerEntity as the pool slot it points at (JoinerConnection::
+	// local_player_entity): bound by each mission start's Player_InitPlayer, never cleared.
+	// [orig: Player_InitPlayer @0x4E15F0 - the store @0x4E17EB]
+	uint16_t local_player_entity = 0xFFFFu;
+	// g_SaveScores: the savescores row's toggle (Role::dispatch_record), the command line's
+	// `/savescores` its other writer. Its readers arm a latch (dword_A85B78) that nothing
+	// reads, so the toggle's SYSTEM line is all it shows.
+	// [orig: g_SaveScores @0xB4C4D0 - its readers NapiNPClientMsg_0x056 @0x4321C9 and
+	//  @0x424780, both arming dword_A85B78 (@0x4321E4, @0x42479B), whose one other access
+	//  is ZoneTimers_ResetState's clear @0x4244A7; Game_ParseCommandLineAndInit @0x4A78C3]
+	bool save_scores = false;
+	// The eight counters the PuntCRC row prints (Role::dispatch_server_record). Only two have a
+	// writer, the CRC-mismatch punt's record (Server_CountCRCMismatchPunt): [1] steps for a
+	// type-9 punt (HMCRC, "Elev"), [2] for a type-10 one (CMCRC, "Detail"); the rest stay 0. They
+	// live for the process: no session or mission start clears them.
+	// [orig: dword_C9476C..dword_C94788, read only by Debug_PrintScoreCounters @0x4FD6A0
+	//  (@0x4FD6B4..0x4FD6E0); written only by Server_PlayerPuntCRCMisMatch @0x50F380 (dword_C94770
+	//  @0x50F4A8, dword_C94774 @0x50F4CA)]
+	std::array<int32_t, 8> punt_crc_counters{};
+	// g_LoadoutWeaponNameList (world/weapon_inventory.h): the image's initializer until an
+	// armory ACCEPT or a 0x5A apply writes it; no session or mission start touches it. The
+	// host role binds its worlds to it (World::loadout_weapon_names).
+	// [orig: g_LoadoutWeaponNameList @0x8333F8; its writers WeaponLoadout_ApplyFromBuffer
+	//  @0x565D46 and NapiNPClientMsg_HandleWeaponLoadoutSync @0x42920C..0x4292F0]
+	world::LoadoutWeaponNameList loadout_weapon_names;
+	// g_SpawnLoadoutBuffer (world/weapon_inventory.h SpawnLoadoutBuffer): empty in a fresh
+	// process, its writers' alone; the roles bind their kernels' loadouts to it
+	// (LocalPlayerLoadout::process_buffer). [orig: g_SpawnLoadoutBuffer @0x24D4E00]
+	world::SpawnLoadoutBuffer spawn_loadout_buffer;
+	// g_RoundStateInitTick as the last session create's round init stamped it
+	// (NapiNPServerCtx::round_state_init_tick): a single player's restart, which runs no
+	// round init, keeps it. [orig: Server_InitNewRoundState @0x51C8E0 (the store @0x51CBA0); Game_RestartRoundSP
+	//  @0x5263A0 -> Game_StartMission(1) @0x5263DB, no round init]
+	uint32_t round_state_init_tick = 0;
+	// The process's CRT stream (rand / srand's per-thread state, io/crt_rand.h). A host's session
+	// create seeds it and draws the session's keys before any mission World exists; each mission's
+	// World takes it at the bring-up (World::crt_rand) and a map change's teardown hands it back,
+	// so every load of the session draws on from the create's seed, as retail's one stream does.
+	// [orig: Server_InitNewRoundState @0x51C8E0 - Server_AllocatePlayerSlotTable called @0x51C97B
+	//  (srand @0x51C1AA, the session's one seed, and its rand), the key's rand @0x51CB6D;
+	//  CNapiGameSession_BuildAndCreateSession @0x5694D0 calls it @0x5695B3 and
+	//  SinglePlayer_StartMission @0x561AF0 @0x561C23, each ahead of its create and of the Game
+	//  Loop's Game_StartMission (GameLoop_Init @0x526370, the call @0x526377)]
+	io::CrtRand crt_rand;
+	// g_RoundTimeRemaining as the last mission left it, in ticks (-1 untimed). It is a process
+	// global no session or mission end writes, so a mission start's server-info update, which reads
+	// it ahead of the start's own stores, reads the last mission's clock: a map change's previous
+	// mission's, or a previous session's of any role in the same process (0 in a fresh process).
+	// While a mission runs its clock lives on its World (the authority's match) or its client (a
+	// joiner's S2C 0x0A copy); the host's map-change teardown and session close and a joiner's close
+	// hand it back here (D-NET-NEW-L1-52).
+	// [orig: g_RoundTimeRemaining @0x24C1958 (zero-initialized); its writers Game_StartMission
+	//  @0x524A5D (-1) and @0x525251 (3720 x the limit), Game_ProcessMainFrame's step @0x526602,
+	//  Server_CheckWinConditions @0x51B064 (0), CAdminServer_HandleSetCommand's GameTime @0x405E86,
+	//  a joiner's NapiNPClientMsg_0x00A @0x430220 / @0x430235, and NapiNPClientMsg_0x01F
+	//  @0x427CD8 / @0x427CE7, whose body runs on the authority alone (@0x427CB7) and which no
+	//  stock peer sends;
+	//  Lobby_UpdateServerInfo's read @0x4FED57, called @0x5248F5 ahead of @0x524A5D]
+	int32_t round_time_remaining_ticks = 0;
+	// ctx+0xD94, the client callback's disconnect latch (mission_exit.h ProcessDisconnectLatch):
+	// process-lived, first-wins, cleared at a join's connect start. The host's own client writes
+	// it at its teardown (NapiNPServerCtx::client_disconnect_latch), a joiner at its connected
+	// teardown (JoinerConnection::use_disconnect_latch) (D-NET-NEW-L1-26).
+	ProcessDisconnectLatch disconnect_latch;
+	// ctx+0x68 and the protocol's list past a host's error-arm exit: the server that exit left
+	// unstopped, until the next session reset stops it (napi_np_connection.h UnstoppedServer;
+	// D-NET-NEW-L1-26).
+	UnstoppedServer unstopped_server;
+	// The process's NovaWorld game session's leg of a player's teardown: a hosted match's, the
+	// listen host's own at its leave included, through the host context
+	// (NapiNPServerCtx::nwu_player_removed, remove_connection_player; D-NET-NEW-L9-29), and a held
+	// server's, stopped by the next host's session reset (stop_unstopped_server from
+	// HostRole::bring_up; D-NET-NEW-L9-21). ClientHostPlayerRemoved in state 6 alone and the slot's
+	// PlayerList vars dropped (NwuHostRole::clear_player_slot); the embedder that holds the
+	// session installs it, unset when none.
+	// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - CNapiGameSession_SendPlayerRemovedIfHosting
+	//  (the call @0x51B5F3; its state-6 test @0x4D0E48), NapiLinkedList_RemoveByUserData on the
+	//  session's PlayerList (the call @0x51B601)]
+	std::function<void(int player_number)> nwu_player_removed;
+	// The same session's METPROTOCOL sink for that teardown's PLAYER report, which no hosted
+	// match's context carries yet (Server_ReportHeldPlayerLeave); the same embedder installs and
+	// clears it with nwu_player_removed (D-NET-NEW-L9-22).
+	// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - Server_SendPlayerMetricsToGate (the call
+	//  @0x51B696)]
+	GateMetricsSink nwu_gate_metrics;
+	// The same session's own half of each periodic update a NovaWorld join's loading steps run,
+	// past the manager receive: the NOVAWORLDUDP protocol's pump over what that receive queued
+	// for it (its handlers' answers and due sends leave there), then its connection-state legs and
+	// its GLSVSS leg (NwuLobbySession::tick, which the shell's frame runs otherwise). The same
+	// embedder installs and clears it with nwu_player_removed; unset when no session is held.
+	// [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - on the game session object at
+	//  0xB5FFE0 (`mov ecx` @0x524938 ahead of the call @0x52493D), NapiNPManager_Pump(flags 4) (the call
+	//  @0x4D441F), then NapiNPProtocol_Pump(-1) on the session's protocol +0x6C (the call
+	//  @0x4D442E), the connection's state legs @0x4D4433..0x4D44B1, the GLSVSS leg
+	//  @0x4D44B7..0x4D4532]
+	std::function<void()> nwu_periodic_update;
+};
+
 class ClientRuntime {
 public:
+	// The process-lived client words this runtime steps (null: its own).
+	void use_process_state(ClientProcessState *state) {
+		external_process_ = state;
+		if (joiner_) joiner_->use_local_player_entity_word(state != nullptr ? &state->local_player_entity : nullptr);
+		// The joiner's leave callback writes the process latch (D-NET-NEW-L1-26).
+		if (joiner_) joiner_->use_disconnect_latch(&process_state().disconnect_latch);
+		view_.use_vehicle_spawn_store(&process_state().vehicle_spawn_availability);
+	}
 	enum class Role : uint8_t { Joiner, HostClient };
+	// The process's _connectlog.txt (punt_log.h ConnectLog; null: off): every S2C 0x61
+	// this client handles closes it (ConnectLog::disable_at_client_session_key); while it
+	// is on a joiner writes its client callbacks' lines (log_client_sends, the connection's
+	// receive-side lines).
+	void set_connect_log(ConnectLog *log) {
+		connect_log_ = log;
+		if (joiner_) joiner_->set_connect_log(log);
+	}
 
 	// Remote-joiner runtime. Transport-less: framed bytes in via receive(), framed bytes out via
 	// the start()/Client_ProcessNetworkFrame() return values (the owner pumps the socket).
@@ -74,7 +248,10 @@ public:
 	bool is_authority() const { return role_ == Role::HostClient; }
 
 	// --- connect / recv (Joiner) ---
-	// Begin the handshake; returns the framed ClientHello to ship (Idle->Hello). Empty for HostClient.
+	// Begin the handshake; returns the framed ClientHello to ship (Idle->Hello). Empty for HostClient
+	// and for a join from a discovered session, whose 0x42 the first pump past its start sends
+	// (D-NET-NEW-L2-24; an enumerated join's 0x81 leads to the same start a pass later,
+	// D-NET-NEW-L2-25).
 	std::vector<uint8_t> start();
 
 	// The joiner's in-place reload into the host's next mission, which the
@@ -96,13 +273,89 @@ public:
 	// Frame the retail leave burst (0x46 ClientGoodBye x4) for the owner to ship before dropping
 	// the socket. Empty for HostClient, before ServerAuth, or on a repeat call.
 	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253c0]
-	std::vector<std::vector<uint8_t>> disconnect();
+	// `leave_tag`: JoinerConnection::disconnect's.
+	std::vector<std::vector<uint8_t>> disconnect(std::string_view leave_tag = {});
+	// The session destroy, FullDestroy(reason), up to its session reset's connection destroy: the
+	// leave burst latching "N.C:SWWAD[1]:<reason>" (disconnect), then the connection destroy,
+	// which drains its enumerator (drain_enumerator with `enumerator_drain`). The reset's stop of
+	// a held server and then the transport's teardown (tear_down_transport) follow; the role runs
+	// them in that order (JoinerRole::destroy_session).
+	// [orig: CNapiGameSession_FullDestroy @0x4C96A0 - the sprintf @0x4C96CC, the leave @0x4C96DB,
+	//  CNapiGameSession_ResetActiveSession called @0x4C96E2, ahead of the teardown @0x4C9722;
+	//  CNapiGameSession_ResetActiveSession @0x4C8A70 - CNapiNPConnection_Destroy called @0x4C8A93
+	//  ahead of NapiNPProtocol_StopServer called @0x4C8AA1]
+	std::vector<std::vector<uint8_t>> destroy_session(int32_t reason,
+			const std::function<void()> &enumerator_drain = {});
+	// The session destroy's transport teardown, after the session reset
+	// (tear_down_session_transport): NET TEARING DOWN SOCKET while the connect log is on, unless
+	// the join runs on NovaWorld (`novaworld_join`: the menu's connect type 1 keeps the
+	// transport). A joiner's socket is always open (SetTransportMode 2 / 4 at the enumerate); it
+	// closes with the join's session. No-op for HostClient.
+	// [orig: CNapiGameSession_FullDestroy @0x4C96A0 - `networkConnectType_480 != 1` @0x4C9722,
+	//  the socket state @0x4C974E, CNapiNetwork_TearDownSocket (the calls @0x4C9763 / @0x4C976F);
+	//  CNapiNetwork_TearDownSocket @0x4C4C90 - the line @0x4C4CBE..0x4C4CE7 ahead of
+	//  NapiNPManager_CloseSocket @0x4C4CF5]
+	void tear_down_transport(bool novaworld_join);
+	// The session reset's connection destroy drains the connection's enumerator, every record
+	// writing its REMOVED line: the join's own enumerated record (a join with no row), then
+	// `enumerator_drain`, the embedder's records of the browse the join went on from (its
+	// records stay the enumerator's from the dial on: the dial stops the enumerator and nothing
+	// drains it until this destroy, or the next search or LAN screen).
+	// [orig: CNapiGameSession_ResetActiveSession @0x4C8A70 - CNapiNPConnection_Destroy called
+	//  @0x4C8A93; CNapiNPConnection_Destroy @0x62A4B0 - NapiNPEnumerator_DrainTimerList (the
+	//  call @0x62A554); CNapiNetwork_StartClientConnection @0x4CA160 - NapiTimer_Stop @0x4CA1D8]
+	void drain_enumerator(const std::function<void()> &enumerator_drain);
 
 	// Queue one reliable C2S 0x1D stance change (0xA9 crouch / 0xAA prone / 0xAC stand) from
 	// the stance key SELECT; it leaves inside the next open send boundary in queue order.
 	// False for HostClient or before in-match. [orig: cases 169/170/172 @0x4e0d77/@0x4e0df3/
 	// @0x4e0e3e -> CNapiNetwork_QueueReliableMessage @0x4e0de7]
 	bool queue_stance_change(uint16_t action_id);
+	// The receive handlers whose mount the embedder's after-receive leg runs: the 0x5A apply's
+	// (its select's mount request), a self 0x50's Player_InitPlayer(1) (its walk's mount) and a
+	// 0x35's pickup (Player_MountPickedUpWeapon's mount).
+	enum class ReceiveMount : uint8_t {
+		kWeaponLoadout,
+		kSelfTeamAssign,
+		kWeaponPickup,
+	};
+	// The C2S 0x1D such a mount raises: queued at its message's place among the receive's sends
+	// (`occurrence`: the receive's n-th such message, from 0), behind what the handlers ahead of
+	// it queued and ahead of what the handlers behind it in the datagram queued, as the handler's
+	// own mount queues it there; with no such message in this receive, at the queue's end. Gated
+	// as queue_stance_change.
+	// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - Player_MountWeaponSlot
+	//  @0x4296F4 -> CNapiNetwork_QueueReliableMessage(0x1D) @0x4DFC30, inside the receive
+	//  (Client_ProcessNetworkFrame @0x42C228): NapiNPProtocol_PumpRecvQueues @0x6266A0 parses
+	//  each packet (CNapiNPConnection_ParseMessages @0x62696B), whose loop dispatches each
+	//  message to its handler in the packet's order (CNapiNPConnection_ParseMessages @0x625BC0 -
+	//  CNapiNPConnection_DispatchMessage @0x625EF1); e.g. a time-sync ping behind the 0x5A
+	//  queues its reply after the 0x1D (NapiNPClientMsg_0x043 @0x42FA90 - the queue @0x42FAD3);
+	//  NapiNPClientMsg_TeamAssign @0x431910 - Player_InitPlayer(1) @0x431B14 past its sends;
+	//  NapiNPClientMsg_0x035 @0x4261A0 - Player_MountPickedUpWeapon @0x42624C / @0x42625B]
+	bool queue_receive_mount_stance_change(ReceiveMount at, std::size_t occurrence,
+			uint16_t action_id);
+	// How many messages of `at` this frame's receive folded (their marks).
+	std::size_t receive_mount_count(ReceiveMount at) const;
+	// One such message of this frame's receive: its kind, its occurrence among its kind's and,
+	// for a self 0x50, the team it names.
+	struct ReceiveLeg {
+		ReceiveMount at = ReceiveMount::kWeaponLoadout;
+		std::size_t occurrence = 0;
+		uint8_t team = 0;
+	};
+	// This frame's receive's such messages in the receive's order, the order the embedder's
+	// after-receive runs their legs in, each message's whole ahead of the next's.
+	// [orig: CNapiNPConnection_ParseMessages @0x625BC0 - CNapiNPConnection_DispatchMessage
+	//  @0x625EF1, once per message in the packet's order]
+	std::vector<ReceiveLeg> receive_legs() const;
+	// This frame's receive's S2C 0x5A grants, in arrival order. The receive leaves the last one
+	// as authoritative_loadout at the revision past them all; staging grant `i` sets it and the
+	// revision as they stood past that grant, so the embedder applies each grant at its turn, as
+	// each 0x5A's handler applies its own [orig: NapiNPClientMsg_HandleWeaponLoadoutSync
+	// @0x4290E0, run once per message by CNapiNPConnection_DispatchMessage @0x625EF1].
+	std::size_t receive_loadout_grant_count() const { return receive_loadout_grants_.size(); }
+	void stage_receive_loadout_grant(std::size_t i);
 	// Queue one reliable C2S 0x1A door section request {handle, record state,
 	// section} the joiner world's door callback raised; it leaves inside the
 	// next open send boundary in queue order. False for HostClient or before
@@ -110,9 +363,10 @@ public:
 	// CNapiNetwork_QueueReliableMessage @0x42d169]
 	bool queue_door_request(uint16_t handle, int16_t state, uint8_t section);
 
-	// Effective gameplay readiness. Every C2S gameplay send (0x0C uplink,
-	// 0x06 fire, 0x2C ping) requires both retail's g_ClientDeployHold hold to be open
-	// and the independent authoritative spawn/health latch to be released.
+	// Effective gameplay readiness. The C2S gameplay sends (0x0C uplink, 0x06 fire)
+	// require both retail's g_ClientDeployHold hold to be open and the independent
+	// authoritative spawn/health latch to be released; the frame's 0x2C ping needs the
+	// hold alone, so a dead player still pings (D-NET-529).
 	// Every valid 0x5A opens the literal gameplay gate even while a spawn-zone
 	// deploy screen remains pending; queuing C2S 0x0E closes only that gate. A
 	// complete recipient-local 0x0A tail with health <= 0 closes only the
@@ -125,16 +379,17 @@ public:
 	// The literal g_ClientDeployHold state. Every valid S2C 0x5A opens it, including
 	// an unrelated loadout echo while dead; that alone cannot resume gameplay.
 	bool gameplay_gate_open() const { return deployed_; }
-    // Local Game_InitNewRound clears the medic latch and gameplay hold.
+    // The listen host's own Game_InitNewRound (its deploy's: Server_DeployPlayer @0x517740,
+    // the call @0x5178AA) clears the medic latch and gameplay hold. A joiner's runs inside
+    // the receive, in the self record's respawn arm (NetPacket_SerializePlayerState
+    // @0x4C09C0, the Game_InitNewRound call @0x4C114C).
     void reset_local_round_state();
 	// Monotonic receive-side deployment-release edge. It advances when initial
 	// establishment becomes applicable (even if deploy UI remains pending), and
 	// again on an ACK-qualified post-pick release or the self record's respawn
 	// edge (a medic revive's deploy sends no 0x5A). Unrelated valid 0x5A grants
-	// still open gameplay_gate_open(), but do not invent a pose/respawn edge.
-	// Consumers use the revision,
-	// rather than positive health alone, to distinguish a real respawn from a
-	// stale 0x0A tail.
+	// still open gameplay_gate_open(), but do not invent a pose/respawn edge. L's
+	// redeploy is the self record's respawn arm alone (take_local_respawn_arm).
 	uint64_t deployment_release_revision() const {
 		return deployment_release_revision_;
 	}
@@ -172,6 +427,14 @@ public:
 	std::size_t retained_outbound_depth() const {
 		return (role_ == Role::Joiner && joiner_ != nullptr) ? joiner_->retained_outbound_depth()
 		                                                     : 0;
+	}
+	// The oldest packet sequence still holding a retained (unACKed) reliable record, 0 when
+	// none: against outbound_seq() read earlier, whether the records framed by then retired,
+	// whatever later ones the session framed since.
+	uint32_t oldest_retained_outbound_seq() const {
+		if (role_ != Role::Joiner || joiner_ == nullptr) return 0;
+		const auto &retained = joiner_->connection().seq.retained_outbound;
+		return retained.empty() ? 0 : retained.begin()->first;
 	}
 	uint32_t send_flush_counter() const {
 		return (role_ == Role::Joiner && joiner_ != nullptr)
@@ -233,7 +496,7 @@ public:
 	// Returns the framed datagrams to ship (handshake replies + burst + the per-frame housekeeping +
 	// the 0x0C). `uplink` is the §5.10 0x0C extended body (the OUTPUT of Player_BuildTag0CInputBody; the
 	// raw-input->entity motor, step 5a, runs host-side per ADR 0012 R1 and is NOT part of the headless
-	// client). The witnessed per-frame housekeeping is now PORTED (P6, §5.44): the 0x34 keepalive
+	// client); its sub-header carries the spawn record's type word, this entry having no local body. The witnessed per-frame housekeeping is now PORTED (P6, §5.44): the 0x34 keepalive
 	// (29760-tick), the 0x4C net-quality report (310-tick), the 0x2C RTT ping (every deployed frame),
 	// and the send_holdoff_countdown send-block gate — all on the Joiner role (HostClient's own-loopback
 	// housekeeping stays deferred-and-logged). seed_session() replay mode suppresses them for byte-parity.
@@ -241,12 +504,28 @@ public:
 	                                                             uint32_t now_tick = 0);
 	// The uplink BUILT at the send block, after this frame's receive fold, as
 	// the writer runs there: the builder fills the body (false = none this
-	// frame) and is called only when the deployed send block opens.
+	// frame) and is called only when the deployed send block opens. It also
+	// writes the sub-header's type word, which the serializer reads off the local
+	// body's def as it stands then (the reload's and the records' re-picks
+	// included, D-NET-NEW-L2-57); it arrives holding the spawn record's word.
 	// [orig: Client_ProcessNetworkFrame -- PumpClientProtocolRecv @0x42C228
-	//  ahead of Player_BuildTag0CInputBody @0x42C482]
-	using UplinkBuilder = std::function<bool(PlayerExtendedUplink &)>;
+	//  ahead of Player_BuildTag0CInputBody @0x42C482; Pool_SerializeEntityViaVTable
+	//  @0x4D64E0 - the def's type word @0x4D659F]
+	using UplinkBuilder = std::function<bool(PlayerExtendedUplink &, uint16_t &item_type_id)>;
+	// The receive handlers' writes on the embedder's own world (the local player's
+	// birth and its record, kit, team and world-state folds), run once per frame
+	// right after the receive pump, ahead of the send block whether or not its
+	// boundary opens: every handler runs inside the receive, on the local player
+	// that exists from the mission start, so the frame's 0x0C is built from what
+	// they left.
+	// [orig: Client_ProcessNetworkFrame @0x42C180 - CNapiNetwork_PumpClientProtocolRecv
+	//  (the call @0x42C228) ahead of the send block @0x42C3DD (the build from
+	//  g_LocalPlayerEntity @0x42C46F..0x42C482); the handlers' table g_NPMsgInfoClient,
+	//  installed by CNapiNetwork_Init @0x4CA4A0 (the store @0x4CA8D1)]
+	using AfterReceive = std::function<void()>;
 	std::vector<std::vector<uint8_t>> Client_ProcessNetworkFrame(const UplinkBuilder &build_uplink,
-	                                                             uint32_t now_tick = 0);
+	                                                             uint32_t now_tick = 0,
+	                                                             const AfterReceive &after_receive = {});
 	// No-uplink frame (HostClient, or a pre-deploy Joiner): recv pump + connect-drive only, no 0x0C.
 	std::vector<std::vector<uint8_t>> Client_ProcessNetworkFrame(uint32_t now_tick = 0);
 	// The frame's phases (SIM_CLIENT_SETUP/RECEIVE/MAINTENANCE/SEND) lap onto
@@ -290,19 +569,58 @@ public:
 	// 2 team, 12 squad, 11 crew; 4 red / 5 blue send only from a non-peer,
 	// and every process with a HUD is a session peer, so they queue nothing).
 	// The retail sender gates: non-empty; `!g_DeathScreenActive ||
-	// g_SpawnSuccessGate` — the local and crew keys test `!g_DeathScreenActive`
+	// g_RoundOver` — the local and crew keys test `!g_DeathScreenActive`
 	// alone; the flood table (a refusal is `Flooded`: the caller echoes the
 	// line); then the `<...>` strip. A joiner queues it reliable with the
 	// 310-flush lifetime; the listen host's own client (a peer too) sends it
 	// over its loopback to its own server, which fans it like any peer's.
 	// `text` is cut to 59 characters in place by the flood check; `frame` is
 	// the per-main-frame counter.
-	// [orig: Chat_SendLocalMessage @0x49A840 (13), Chat_SendTeamMessage @0x49A900 (IDB
-	//  misnomer; 1), Chat_SendGlobalMessage @0x49A6B0 (IDB misnomer; 2),
+	// [orig: Chat_SendLocalMessage @0x49A840 (13), Chat_SendGlobalMessage @0x49A900 (1),
+	//  Chat_SendTeamMessage @0x49A6B0 (2),
 	//  Chat_SendSquadMessage @0x49AA50 (12), Chat_SendAdminMessage @0x49A780
 	//  (11), Chat_SendAllMessage @0x49AC70 (4), Chat_SendBlueTeamMessage @0x49ABA0 (5) ->
 	//  CNapiNetwork_QueueReliableMessage(0xD, 1, 310)]
 	hud::ChatSendResult queue_chat_message(uint8_t channel, std::string &text, uint32_t frame);
+	// The command entry's sender, Client_ProcessConsoleCommand's client half: the
+	// one-second guard (which compares the tick with the last stamp minus 1000,
+	// unsigned, so it drops a line only after the tick ran backwards or within the
+	// tick's first second), Client_ProcessLocalCommand's arms (client_console.h) over
+	// the session word, then a session peer queues the raw line as reliable C2S 0x04
+	// [line][NUL] (user param 0): a joiner on its connection in the session; a host's
+	// own client, always a peer (connection mode 3: the listen host and single player
+	// alike, D-NET-NEW-LI-27), on its local client connection to its own server, whose
+	// handler runs NETLOG / STAT and echoes the rest back as S2C 0x06, which runs the
+	// client's walk (run_console_echo). An authority that is no peer is a host that
+	// does not play (mode 1), which has no client: its console is AdminConsole's. True
+	// when the line was taken. VERSION's version and title words default to the
+	// title's (gameprofile's version text, g_TitleText) when the embedder sets none.
+	// [orig: Client_ProcessConsoleCommand @0x520E80 - the guard @0x520ea4..0x520ec7,
+	//  Client_ProcessLocalCommand @0x520BF0 (the call @0x520EEC), the peer test @0x520EF8,
+	//  NetPacket_WriteNullableString @0x42A430 and QueueReliableMessage(4, 1, 0) @0x520f29;
+	//  Game_ParseCommandLineAndInit @0x4A7310 (the title sprintf @0x4A7D30..0x4A7D3C,
+	//  g_TitleText)]
+	bool console_command(const std::string &line);
+	// The local arms' seams the embedder owns (SAVEKEYS, SAVENFO, VERSION's words);
+	// in_session, version_line and queue_action are this runtime's.
+	void set_local_command_seams(ClientLocalCommandSeams seams) {
+		local_command_seams_ = std::move(seams);
+	}
+	// Input_QueueEvent as the console calls it (the local command's binding CRC arm and
+	// the S2C 0x06 walk's binding arm): a record per action into the input frame's event
+	// queue the owning role keeps (Role::input_events, installed through
+	// set_input_event_queue), whose cap drops one past 32 (controls::InputEventQueue).
+	// The next input frame's drain (Role::drain_input_events) dispatches them in order
+	// ahead of that frame's own presses, as the devices queue theirs behind, each through
+	// the one dispatcher a key's record meets (Role::dispatch_record: the role's arms, then
+	// the embedder's TickInputSource::dispatch_record). False when the record was dropped
+	// or no queue is installed.
+	// [orig: Input_QueueEvent @0x4979C0 - `cmp count, 20h; jge` @0x4979C8..0x4979CB,
+	//  the gates @0x4979D1..0x497A0B, the store @0x497A11..0x497A67; Input_ProcessFrame
+	//  @0x49D520 - Input_ProcessPlayerFrame @0x49D58B appends, the drain @0x49D599..0x49D5E7
+	//  into Input_HandleActionBinding @0x49D5D8]
+	bool queue_console_action(int32_t code, int32_t p1, int32_t p2, int32_t p3);
+	void set_input_event_queue(controls::InputEventQueue *queue) { input_events_ = queue; }
 	// An Emotes / Radio menu pick (1..10): C2S 0x14 / C2S 0x13 [i16 value].
 	// The sender carries no gate of its own: CNapiNetwork_QueueReliableMessage
 	// queues on any live connection. A joiner queues it with the one-send
@@ -322,6 +640,38 @@ public:
 	//  CNapiNetwork_QueueReliableMessage(0x4D, 1, 0, .., 0) @0x42DDB1),
 	//  MapOverlay_UpdateTimers(0x48A8) @0x5535C4]
 	bool queue_team_change_request();
+	// THE VEHICLE SCREEN'S SENDS (inmatch/vehicle_menu.h): the availability ask
+	// C2S 0x42 (no body) and the spawn pick C2S 0x40 [u16 bay][u8 group], each
+	// one reliable message with no finite lifetime (a joiner's held one-shot
+	// queue; the listen host's own client over its loopback to its own
+	// server). False when no session carries it.
+	// [orig: NetPacket_SendVehicleSpawnAvailabilityRequest @0x42DBE0 --
+	//  QueueReliableMessage(0x42, 1, 0, .., 0) @0x42DBFC;
+	//  NetPacket_SendVehicleSpawnRequest @0x42DB50 -- the body
+	//  @0x42DB64..0x42DB77, QueueReliableMessage(0x40, 1, 0, .., 3) @0x42DB81]
+	bool queue_vehicle_spawn_availability_request();
+	bool queue_vehicle_spawn_request(uint16_t source_handle, uint8_t type_index);
+	// The S2C 0x70 rows and received flag (process-lived: ClientProcessState).
+	const replication::ClientVehicleSpawnAvailability &vehicle_spawn_availability() const {
+		return view_.vehicle_spawn_availability();
+	}
+	// The S2C 0x70 received flag the screen's first open clears ahead of its
+	// ask [orig: VehicleMenu_Open @0x56425D].
+	void clear_vehicle_spawn_availability_received() {
+		view_.vehicle_spawn_availability().received = false;
+	}
+	// The vehicle screen's state, the process's (ClientProcessState::vehicle_menu)
+	// as retail's scene-lifetime globals are; its poll runs once per main frame
+	// of the game loop, after the client net frame (the roles call
+	// poll_vehicle_menu there).
+	VehicleMenu &vehicle_menu() { return process_state().vehicle_menu; }
+	// The process's loadout name list (g_LoadoutWeaponNameList, D-NET-143): a JoinerRole binds
+	// its worlds to it and rebuilds it at each S2C 0x5A apply.
+	world::LoadoutWeaponNameList &loadout_weapon_names() {
+		return process_state().loadout_weapon_names;
+	}
+	const VehicleMenu &vehicle_menu() const { return process_state().vehicle_menu; }
+	void poll_vehicle_menu(const world::World &world, const def::DefItemsFile *items);
 	// The main loop's measured frame rate for the quality metric's
 	// frame-pressure term [orig: g_StatsAvgFps (dword_24E1F10), read by
 	// CNetQuality_UpdateMetrics @0x4C5643]: inmatch::Session hands over its
@@ -329,10 +679,16 @@ public:
 	// retail's mode-init value (the ceiling metric 255) until the first 2 s
 	// window closes; any rate at or above 16 scores the floor. Joiner only.
 	void set_observed_frame_rate(int32_t fps) { observed_frame_rate_ = fps; }
+	// The client (RECEIVE) window the 62-frame fold samples into.
+	const replication::NetQualityWindow &client_quality_window() const {
+		return client_quality_window_;
+	}
 	// The local player's Position (fixed 16.16), the client handlers' read of
 	// g_LocalPlayerEntity->Position: each role stamps its world's local player
 	// ahead of the client frame (the joiner's L, the listen host's own body);
-	// with none the last stamp stands. The 0x53 adoption distance reads it
+	// with none the last stamp stands. The receive's own Position writes move it in
+	// wire order (a self record's respawn arm, a 0x0F), and the 0x53 adoption distance
+	// reads it at the 0x53's place in the pump (D-NET-687)
 	// [orig: NapiNPClientMsg_ZoneTimerWindow @0x428C19..0x428CB1].
 	void set_local_player_position(const world::World &world);
 	// The bucketed 0..4 quality level the C2S 0x4C report carries and the
@@ -344,6 +700,15 @@ public:
 	// display state this client keeps, stepped once per client frame while in
 	// a session, read by the HUD role facts.
 	const hud::NetQualityIndicators &net_quality_indicators() const { return net_indicators_; }
+	// CNapiNetwork_GetSecondsSinceLastReceive over the own connection: a joiner's connection's
+	// whole seconds since its last admitted receive (unsigned, as retail's divide); 0 with none.
+	// [orig: CNapiNetwork_GetSecondsSinceLastReceive @0x4C6ED0 - the connection +0xE60
+	//  @0x4C6ED1, (GetTickCount() - conn+0x5E8) / 1000 @0x4C6EDF..0x4C6EF6]
+	uint32_t seconds_since_last_receive() const {
+		return joiner_ != nullptr
+				? static_cast<uint32_t>(joiner_->milliseconds_since_last_receive() / 1000u)
+				: 0u;
+	}
 	// The authority's level: the host's server tick samples its send window
 	// and the host role stores the bucketed level here ahead of this client
 	// frame [orig: CNetQuality_UpdateMetrics @0x4c52c0 -> CNetQuality_SetLevel
@@ -353,7 +718,7 @@ public:
 	// The host protocol's link-error callbacks of one server tick, bit 0 a
 	// joiner's resend request (flag 1), bit 1 our own missing-sequence
 	// request (flag 2) [orig: NapiNP_HandleResendList cb_server_6 = NapiNPServer_OnResendListCallback
-	// @0x4c62a0, its call @0x623a0e; SendMissingSeqList cb_server_5 = @0x4c4681 @0x62379b ->
+	// @0x4c62a0, its call @0x623a0e; SendMissingSeqList cb_server_5 = @0x4C4680 @0x62379b ->
 	// the g_NetQuality flag stores]. The host role hands them over after
 	// this client frame, as retail's server tick runs after the indicators'
 	// update.
@@ -371,6 +736,11 @@ public:
 	// mission, and the post-mission router reads it.
 	void set_mission_exit_reason(int32_t reason) { mission_exit_reason_ = reason; }
 	int32_t mission_exit_reason() const;
+	// The input action the in-match connection's teardown queued (JoinerConnection::
+	// take_teardown_input_action; 0: none), taken once.
+	int32_t take_teardown_input_action() {
+		return joiner_ ? joiner_->take_teardown_input_action() : 0;
+	}
 	uint32_t client_ping_ms() const { return joiner_ ? joiner_->client_ping_ms() : 0; }
 	uint32_t client_average_ping_ms() const {
 		return joiner_ ? joiner_->client_average_ping_ms() : 0;
@@ -381,7 +751,24 @@ public:
 	// ordinary compact player echo; this only queues the reliable C2S 0x16.
 	bool queue_mounted_weapon_slot_selection(bool use_parent_slot);
 	bool queue_vehicle_attach(uint16_t vehicle_handle, uint8_t model_bone_index);
+	// The USE readout's send leg (an instrument, no behaviour: world/use_press_trace.h): the
+	// C2S 0x26 requests this runtime's send builds framed, since its creation.
+	uint32_t attach_requests_sent() const { return attach_requests_sent_; }
+	// The joiner net readout (an instrument, no behaviour: inmatch/joiner_net_trace.h): one
+	// record per client net frame run to its end (the joiner_net_trace probe).
+	const JoinerNetTrace &net_trace() const { return net_trace_; }
 	bool queue_vehicle_detach(uint16_t vehicle_handle);
+	// Entity_SendDetachPacket itself: the reliable C2S 0x27 [self][target][2 B],
+	// gated only on the target (the plyr class callback's seat leave; the mount
+	// toggle's caller adds its own gates in queue_vehicle_detach).
+	// [orig: Entity_SendDetachPacket @0x435510]
+	bool queue_detach_packet(uint16_t target_handle);
+	// One reliable C2S 0x0F entity request [u16 handle], appended to the send queue at once:
+	// the self-heal requests' encoding (queue_carrier_repair_requests), for a request a World
+	// mover raised behind this frame's send block (the ewep mover's stale-ground pair).
+	// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - QueueReliableMessage(0x0F, 1, 0)
+	//  @0x440DAB / @0x440E29]
+	void queue_entity_info_request(uint16_t handle);
 	std::vector<replication::ClientRoundEvent> drain_round_events();
 	// S2C 0x1E game events the recv fold surfaced this frame — the kill /
 	// objective / medic feed lane. The embedder formats each into a canned
@@ -398,27 +785,50 @@ public:
 	// clients retain the authority's already-applied gameplay state.
 	// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 — cb(entity, 4, 0) @0x42ebf5]
 	void apply_received_effects(world::World &world);
+	// The scripted voice's decoded-row anchor (a joiner's 0x2D speaker), for the scene
+	// frame's voice update ahead of ScriptVoiceChannel::frame: its live position, or the
+	// voice's stop once the row is gone or dead (client_effects.cpp carries the witness).
+	void track_voice_anchor(world::World &world) const;
 
 	// THE COMMAND MAP'S SQUAD AND WAYPOINT SENDS (client_squad.cpp): each
 	// queues its one reliable C2S (a joiner on its held one-shot queue, the
 	// listen host's client on its loopback to its own server); false when no
-	// session carries it. [orig: NetPacket_SendChatMessage @0x42ddc0 (0x17),
-	//  NetPacket_SendEntityUpdate @0x42de00 (0x4F), NetPacket_SendWeaponSlotSwitch
+	// session carries it. [orig: NetPacket_SendUserWaypointCreate @0x42ddc0 (0x17),
+	//  NetPacket_SendUserWaypointRemove @0x42de00 (0x4F), NetPacket_SendSquadJoin
 	//  @0x42dc10 (0x43), NetPacket_SendCommandType44 @0x42dc70 (0x44),
-	//  NetPacket_SendWeaponAction @0x42dcc0 (0x45), NetPacket_SendTeamChange
-	//  @0x42dd00 (0x46), NetPacket_SendVoteKick @0x42dd50 (0x4B), the punt vote
-	//  @0x5488ae (0x3F) — every IDB name a misnomer; all
+	//  NetPacket_SendFireteamAssign @0x42dcc0 (0x45), NetPacket_SendSquadRecruit
+	//  @0x42dd00 (0x46), NetPacket_SendGoCode @0x42dd50 (0x4B), the punt vote
+	//  @0x5488ae (0x3F); all
 	//  CNapiNetwork_QueueReliableMessage(tag, 1, 0)]
 	bool queue_squad_message(uint8_t c2s_tag, std::vector<uint8_t> body);
-	// The local player's roster slot (entity+0x154; the pipeline's
-	// set_local_player_slot).
-	int local_roster_slot() const { return view_.local_roster_slot(); }
+	// The local body's slot byte (g_LocalPlayerEntity+0x154; the pipeline's local_body_slot):
+	// the latched slot, 0xFF while the body is destroyed in place.
+	int local_body_slot() const { return view_.local_body_slot(); }
 	// The squad folds' HUD lines (hud/squad_feed.h) since the last drain.
 	std::vector<hud::SquadFeedLine> drain_squad_lines();
 	// Ring lines the client's own receive legs raise with their own sink and
 	// colour (a dialog line's "EX Cannot load audio" and subtitle), drained
 	// with the other feed lanes once per frame.
 	std::vector<hud::FeedPost> drain_ring_posts();
+	// g_DialogueVolume, the master-volume gate a dialog line's play and subtitle pass: the
+	// cfg's DialogueLevel (+0x1E4), which the session settings' apply copies at every
+	// session create, join and mission start and the in-game options' apply writes with
+	// the cfg word; the shell stamps the process block's word ahead of each frame. 0
+	// (the process's zeroed global) until stamped.
+	// [orig: g_DialogueVolume @0x24D20C8 - Game_ApplySessionSettingsToGlobals @0x5515A2
+	//  (called @0x524662, @0x5695B8, @0x569B07), UI_IngameOptionsDialogEventHandler
+	//  @0x554F7E..0x554F83; the gate Dialog_ApplyDialogueVolumeAndPlayFactor @0x527560
+	//  (0 @0x527567..0x527569)]
+	void set_dialogue_volume(int32_t level) { dialogue_volume_ = level; }
+	// The authority's own playback of a dialog line its queue loads (the listen host's or single
+	// player's client): with no wave of the line's name in the dialog bank's sounds, "EX Cannot
+	// load audio: <name>" on the SYSTEM ring in 0xFFFF2222; then the line's subtitle on the CHAT
+	// ring in white, both 930 ticks, as the joiner's leg posts them; the subtitle only past the
+	// master-volume gate (set_dialogue_volume), the missing wave's line ahead of it.
+	// [orig: Dialog_LoadAudioClip @0x44DCC0 - the missing wave @0x44DD5D..0x44DD74
+	//  (Chat_AddMessageChannel2(msg, -56798, 930)), the subtitle @0x44DDCD..0x44DE3C, the gate
+	//  @0x44DE50..0x44DE5B and its hook @0x44DEC9 (Chat_AddSystemMessageIfValid)]
+	void post_authority_dialog_line(const world::World &world, const audio::DialogLineRef &line);
 	// THE CMAP SCREEN'S OWN LEGS (client_squad.cpp): the world halves
 	// (world/user_waypoints.h) plus their sends — the placed waypoint's C2S
 	// 0x17 (target 0xFF) [orig: @0x54a1be], each removed one's C2S 0x4F
@@ -434,11 +844,13 @@ public:
 	// fireteam assignment [fireteam][count][members] (0x45), the order
 	// [kind][count][text][targets] (0x44) and the punt vote [target] (0x3F).
 	// [orig: CMap_EntityWidgetHandler @0x54865c / @0x548616;
-	//  CCommandMap_SendWeaponActionToTeammates @0x548d67;
+	//  CMap_SendFireteamAssign @0x548d67;
 	//  CMap_BuildAndSendOrderCommand @0x547839; CCommandMap_HandleOrderAction
 	//  @0x548c25; CMap_HandlePlayerListCallback @0x54889b..0x5488b9]
 	void send_squad_recruit(uint8_t target);
-	void send_squad_join(uint8_t leader);
+	// The join also plays the local body's RECRUIT_ACCEPT set when the leader is not its own
+	// slot byte [orig: NetPacket_SendSquadJoin @0x42dc3c..0x42dc5d].
+	void send_squad_join(world::World &world, uint8_t leader);
 	void send_fireteam_assign(uint8_t fireteam, const std::vector<uint8_t> &members);
 	void send_squad_order(uint8_t kind, const std::string &text,
 			const std::vector<uint8_t> &targets);
@@ -460,11 +872,27 @@ public:
 	                  uint16_t self_handle, uint16_t self_type, uint32_t game_type = 0,
 	                  uint32_t tick_seed = 0, bool replay_mode = true, uint8_t self_team = 0);
 
-	// The shell's kit for the 0x1A-released loadout-submission pair (Joiner only; see
-	// JoinerConnection::set_loadout_kit). HostClient has no 0x2F leg — its player fills
-	// server-side [orig: Server_InitAllPlayerEntitiesForRound @0x516aa0].
+	// The shell's kit for the mission start's loadout-submission pair: a joiner's
+	// (JoinerConnection::set_loadout_kit, released by the S2C 0x1A), or the listen
+	// host's own client's, whose pair HostRole queues at its mission start's end
+	// (D-NET-695) [orig: Game_StartMission @0x525836 / @0x525c2e, the session peer's
+	// gates @0x525767..0x525779 / @0x525BC4..0x525BD2].
 	void set_loadout_kit(JoinerConnection::LoadoutKit kit) {
-		if (joiner_) joiner_->set_loadout_kit(std::move(kit));
+		if (joiner_) {
+			joiner_->set_loadout_kit(std::move(kit));
+			return;
+		}
+		host_loadout_kit_ = std::move(kit);
+		host_loadout_kit_set_ = true;
+	}
+	// The listen host's own kit, null until the shell set one.
+	const JoinerConnection::LoadoutKit *host_loadout_kit() const {
+		return host_loadout_kit_set_ ? &host_loadout_kit_ : nullptr;
+	}
+	// The session start's per-side class and avatar words (g_CharClassTeam1/2,
+	// g_AvatarTeam1/2) a joiner holds; null on the host's own view.
+	const CharacterJoinVars *character_join_vars() const {
+		return joiner_ ? &joiner_->character_join_vars() : nullptr;
 	}
 	void set_character_join_vars(CharacterJoinVars vars) {
 		if (joiner_) joiner_->set_character_join_vars(vars);
@@ -487,6 +915,14 @@ public:
 	// JoinerConnection::set_expansion_version_root). Joiner only.
 	void set_expansion_version_root(std::string game_root) {
 		if (joiner_) joiner_->set_expansion_version_root(std::move(game_root));
+	}
+	// That root, whose CC.BIN a NovaWorld join's PING reads ("" off a joiner).
+	std::string expansion_version_root() const {
+		return joiner_ != nullptr ? joiner_->expansion_version_root() : std::string();
+	}
+	// The join's connect edge, read once (JoinerConnection::take_join_connected). Joiner only.
+	bool take_join_connected() {
+		return role_ == Role::Joiner && joiner_ != nullptr && joiner_->take_join_connected();
 	}
 	// The .joi-recovered game-session APPID join token (JoinerConnection::set_app_id).
 	// Joiner only; "0" is the LAN default.
@@ -517,6 +953,11 @@ public:
 	void set_cd_key_ids(cdkey::WireKeys ids) {
 		if (joiner_) joiner_->set_cd_key_ids(std::move(ids));
 	}
+	// The gate's GLSVSSREQUEST a NovaWorld 0x00 JOIN carries
+	// (JoinerConnection::set_glsvss_request). Joiner only.
+	void set_glsvss_request(std::string request) {
+		if (joiner_) joiner_->set_glsvss_request(std::move(request));
+	}
 	void set_charattr_table(CharAttrTable table) {
 		if (joiner_) joiner_->set_charattr_table(std::move(table));
 	}
@@ -538,14 +979,112 @@ public:
 		if (joiner_)
 			joiner_->set_loaded_model_challenge_snapshot(std::move(values));
 	}
-	// Queue the armory-ACCEPT loadout re-submission: one C2S 0x2F from the current kit seam,
-	// queued now as NetPacket_SendLoadoutSubmit queues it at the ACCEPT, so it leaves at the
-	// next open boundary in queue order [orig: @0x42d085] (JoinerConnection::prepare_loadout_resubmit).
-	void queue_loadout_resubmit() {
-		ProtocolMessage resubmit;
-		if (joiner_ && joiner_->prepare_loadout_resubmit(resubmit))
-			send_queue_.push_back(std::move(resubmit));
+	// The S2C 0x11's load (JoinerConnection::set_sync_tail_loading): an embedder whose 0x0B
+	// header terrain / environment load and avatar combo models run at the 0x11 declares it
+	// before the 0x11 arrives and clears it once that load has ended; meanwhile the frame
+	// neither receives nor sends, and the next frame queues the 0x0A at its head.
+	void set_sync_tail_loading(bool loading) {
+		if (joiner_) joiner_->set_sync_tail_loading(loading);
 	}
+	// The final S2C 0x64's load (JoinerConnection::set_mission_data_loading): an embedder whose
+	// effect system load runs between the mission data's end and the 0x09 at every mission
+	// start declares it once and ends each load; from the final 0x64 to that end the frame
+	// neither receives nor sends, and the next frame queues the 0x09 at its head.
+	void set_mission_data_loading(bool loading) {
+		if (joiner_) joiner_->set_mission_data_loading(loading);
+	}
+	bool mission_data_load_running() const {
+		return joiner_ && joiner_->mission_data_load_running();
+	}
+	void end_mission_data_load() {
+		if (joiner_) joiner_->end_mission_data_load();
+	}
+	bool mission_start_released() const { return joiner_ && joiner_->mission_start_released(); }
+	// Game_StartMission's network pumps from the 0x1A to the final wait for the S2C 0x0F,
+	// in its order: its receive pumps run the client pump and step the send-holdoff countdown,
+	// its send pumps build
+	// only at a spent countdown and reload it, so the first 0x2F, the second and the 0x0B
+	// leave in one packet or two by where the countdown stood; what it still holds at the
+	// last send leaves from the final wait's first pass, after its receive (D-NET-NEW-L2-6),
+	// which the role runs right after the push (JoinerRole::push_mission_start_end, with no
+	// frame between, D-NET-NEW-L2-35). The pumps run in two legs at the load's two points:
+	// push_mission_start_first_loadout once its definition and model loads are in (the
+	// send pump ahead of them, the receive after them, the first 0x2F built and queued, the
+	// four send pumps ahead of the model freeze), so a countdown spent there sends the first
+	// 0x2F alone mid-load; push_mission_start_end at its end (the pump after the freeze,
+	// the frame tick's zero, the receive, the second 0x2F and the 0x0B queued, the last
+	// send), running the first leg too when the embedder did not (D-NET-NEW-L2-35).
+	// [orig: Game_StartMission @0x524360 - NetClient_FlushAndSync @0x5253EF, the loads
+	//  @0x525495..0x525762, the receive @0x525784, the first 0x2F @0x525836, the pumps
+	//  @0x5258A2 / @0x5258EA / @0x5259F1 / @0x525A61, Render_InitMissionTextures @0x525A6E (the freeze), the pump
+	//  @0x525ACA, the zero @0x525B9F, the receive @0x525BD9, the second 0x2F @0x525C2E, the
+	//  0x0B @0x52624B, the send @0x526255]
+	// The legs are the role's and the embedder's, each at its point between the 0x1A's load
+	// and the 0x0B: `init_player`, the role's Player_InitPlayer on its own entity (L's birth),
+	// right after the submissions' take binds the local entity, ahead of the receive and the
+	// second 0x2F's queue; `start_block`, the null-tested block on the local entity with the
+	// proximity rebuild, past the second 0x2F's queue (D-NET-NEW-L2-52); `present`, the
+	// embedder's loading screen at 100 % (R-L2-s38-1, D-NET-NEW-L8-41); `latch`, the Attack
+	// & Defend role latch, ahead of the 0x0B's queue (D-NET-NEW-L2-52).
+	// [orig: Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC, the second 0x2F
+	//  @0x525C2E, the null tests @0x525C70 / @0x525C9A, Entity_BuildAllProximityLists
+	//  @0x525C90, `push 64h` @0x525D22, LoadingScreen_UpdateAndPresent @0x525D29,
+	//  Game_LatchAttackDefendRole @0x5260C1, the 0x0B @0x52620E..0x52624B, the send
+	//  @0x526255].
+	// The load's network points run the role's legs too (D-NET-NEW-L2-54). Each loading step
+	// runs the NovaWorld session's periodic update, whose manager pump reads the game's one
+	// socket (the session is built on the game's manager): what it reads waits on the client
+	// protocol's queue, the 0x84's resends and the 0x85's pong leave from inside it. A LAN
+	// session's update returns at its head (the session's +0 and +0x68 words are zero), so the
+	// load reads no socket. Each receive pump runs the client pump over that queue, every
+	// handler at its place (`after_receive`, the role's handler writes on its own entity), and
+	// then steps the countdown. `periodic_deposit` is the role's socket read ahead of each
+	// update's manager receive, set on a NovaWorld join alone.
+	// [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - the +0 / +0x68 tests @0x4D4403 /
+	//  @0x4D4411, NapiNPManager_Pump(flags 4) @0x4D441F; CNapiGameSession_InitNPConnection
+	//  @0x4D3BE0 - the game's manager @0x4D3C6B; CNapiGameSession_ResetToDisconnected @0x4D0890 -
+	//  +0x68 @0x4D08C3, +0 @0x4D092E; Game_StartMission @0x524360 - the receives @0x525784 /
+	//  @0x525BD9 (`is_in_session && is_mp_session_peer` alone); NapiNPProtocol_Pump @0x62A650 -
+	//  PumpRecvQueues @0x62A6AC ahead of PumpFlags @0x62A6F8]
+	struct MissionStartPumpLegs {
+		std::function<void()> periodic_deposit;
+		AfterReceive after_receive;
+	};
+	struct MissionStartEndLegs : MissionStartPumpLegs {
+		std::function<void()> init_player;
+		std::function<void()> start_block;
+		std::function<void()> present;
+		std::function<void()> latch;
+	};
+	std::vector<std::vector<uint8_t>> push_mission_start_first_loadout(
+			const MissionStartPumpLegs &legs = {});
+	std::vector<std::vector<uint8_t>> push_mission_start_end(
+			const MissionStartEndLegs &legs = {});
+	// A declared load of the mission start holds the frames (run_frame returns at its head):
+	// the released mission start's, the S2C 0x11's terrain load, the final S2C 0x64's effect
+	// load. Each runs the session's periodic update at its loading steps.
+	// [orig: Game_StartMission @0x524360 - the updates @0x52493D / @0x524999 / @0x5249B4 /
+	//  @0x5249CF around CEffectSystem_Init @0x524980; Game_LoadTerrainDuringConnect @0x520710 -
+	//  the updates @0x52072C / @0x5207E7]
+	bool declared_load_running() const {
+		return joiner_ && (joiner_->mission_start_released() || joiner_->sync_tail_load_running() ||
+				joiner_->mission_data_load_running());
+	}
+	// One periodic update of a declared load, outside the legs (the embedder's loading steps):
+	// the manager receive over what the role's deposit queued, its sends (already logged).
+	// Nothing outside a declared load.
+	std::vector<std::vector<uint8_t>> pump_mission_start_manager_receive();
+	// The messages queued for the next send boundary (the mission start's queue order).
+	std::size_t queued_send_count() const { return send_queue_.size(); }
+	void set_weapon_table(const world::WeaponTable *weapons) {
+		if (joiner_) joiner_->set_weapon_table(weapons);
+	}
+	// Queue the armory ACCEPT's C2S 0x2F (inmatch::armory_accept_in_session builds it), as
+	// NetPacket_SendLoadoutSubmit queues it at the ACCEPT, so it leaves at the next open
+	// boundary in queue order [orig: @0x42d085]: a joiner's through its connection's stage
+	// gate (JoinerConnection::prepare_loadout_submit), a listen host's own client's on its
+	// local connection. False when nothing was queued.
+	bool queue_loadout_submit(const LoadoutSubmit &submit);
 
 	bool deployment_pick_pending() const {
 		return joiner_ && joiner_->deployment_pick_pending();
@@ -576,6 +1115,14 @@ public:
 	// simulation re-styles friend/foe when it advances (the 0x04 latch at join is
 	// consumed through the spawn instead). [orig: g_LocalTeam store @0x4319db]
 	uint64_t self_team_revision() const { return self_team_revision_; }
+	// The team the last self S2C 0x50 stored on the joiner's own entity (its leg 2,
+	// whether or not that entity is the local one yet) [orig: @0x4319EE].
+	uint8_t self_assigned_team() const { return self_assigned_team_; }
+	// The team of every S2C 0x50 whose local arm ran (the per-side reselect and the 0x2F) since
+	// the last drain, in arrival order, a receive outside a frame's (the push's final-wait pass)
+	// included; the embedder's after-receive runs one leg per entry, the frame's at their marks
+	// (receive_legs) [orig: NapiNPClientMsg_TeamAssign @0x431A1B..0x431AAD, once per message].
+	std::vector<uint8_t> drain_self_team_assigns() { return std::move(self_team_assigns_); }
 	// Roster slots whose bookkeeping the host cleared via S2C 0x46 bit15. Draining
 	// keeps it a one-shot; the associated ENTITY row is deliberately untouched
 	// (only S2C 0x5D retires an entity). [orig: @0x431411..0x43144c]
@@ -596,6 +1143,13 @@ public:
 		return joiner_ ? joiner_->session_loss_reason() : std::string();
 	}
 	bool session_lost() const { return joiner_ && joiner_->session_lost(); }
+	// The session clock of the last S2C 0x58 (g_SessionStatus): 0 while none is held (the
+	// mission start's reset), else its uptime plus the GetTickCount time since its receipt,
+	// in u32 arithmetic. The status report's UP-TIME on a joiner, and its CMAP RULES text.
+	// [orig: CSessionTimer_GetElapsedMS @0x52D5F0 (`+0x70 - +0x74 + GetTickCount()`
+	//  @0x52D609); SessionStatus_ParseFromBuffer @0x530ED0 (the receipt stamp +0x74
+	//  @0x53109F..0x5310A7)]
+	uint32_t session_elapsed_ms() const;
 	// Accept the player's C2S 0x0E pick (0xFFFF default, 0xFFFE auto, else a
 	// spawn-target handle). Input case 12 closes retail's gameplay dword and queues
 	// the 0x0E now [orig: @0x49b17b]; framing waits for the next open send boundary,
@@ -609,12 +1163,6 @@ public:
 	// it over its loopback to its own server. False out of a session.
 	bool queue_spectator_convert();
 
-	// Pre-load join seam. Handshake and admission traffic continue through terminal S2C 0x11 while
-	// false; only C2S 0x0A and the resulting world/deployment stream are held.
-	void set_world_ready(bool ready) {
-		if (joiner_) joiner_->set_world_ready(ready);
-	}
-	bool world_ready() const { return joiner_ ? joiner_->world_ready() : true; }
 	bool mission_known() const { return joiner_ && joiner_->mission_known(); }
 	bool has_mission_header() const {
 		return joiner_ && joiner_->has_mission_header();
@@ -633,7 +1181,8 @@ public:
 		static const std::vector<uint8_t> empty;
 		return joiner_ ? joiner_->terrain_til_bytes() : empty;
 	}
-	// The terminal pre-world sync marker was received and its ACK reached the send boundary.
+	// The terminal pre-world sync marker was received and answered by the C2S 0x0A
+	// (JoinerConnection::preload_ready).
 	bool preload_ready() const { return joiner_ && joiner_->preload_ready(); }
 	// Admission-stage name for diagnostics (the shell's post-load join watchdog).
 	const char *admission_stage_name() const {
@@ -643,18 +1192,94 @@ public:
 	// Joiner state passthrough (HostClient: never InMatch, no self handle).
 	bool in_match() const { return joiner_ && joiner_->in_match(); }
 	bool in_session() const { return joiner_ && joiner_->in_session(); }
+	// The game loop runs (JoinerConnection::in_game_loop): alive, dead or redeploying.
+	// It is also the joiner's gate for every input-driven sender: the input frame,
+	// the HUD and the in-game screens that call them run in the main frame alone,
+	// which neither the join screen, the mission start's load nor its final wait
+	// runs (that wait reads the key queue against ESC only), so nothing input-driven
+	// is queued before the 0x0F ends the wait. A joiner's session-gated senders
+	// (the medic call, the Respawn key, the deploy pick and convert, the voice
+	// picks, the team change, the vehicle spawn screen) test this, not in_session.
+	// [orig: Game_ProcessMainFrame @0x5263F0 - Input_ProcessFrame @0x52661D;
+	//  Game_StartMission @0x524360 - the final wait @0x526295..0x5262E5, its ESC
+	//  test @0x5262A2..0x5262AD]
+	bool in_game_loop() const { return joiner_ && joiner_->in_game_loop(); }
+	// The final wait's ESC: it leaves the wait for the game loop and does nothing else
+	// (JoinerConnection::cancel_final_wait carries the witness); false outside the wait.
+	bool cancel_final_wait() { return joiner_ != nullptr && joiner_->cancel_final_wait(); }
+	// The mission start's final wait for the S2C 0x0F (JoinerConnection::in_final_wait).
+	bool in_final_wait() const { return joiner_ && joiner_->in_final_wait(); }
+	bool in_mission_start() const { return joiner_ && joiner_->in_mission_start(); }
+	bool in_pre_game() const { return joiner_ && joiner_->in_pre_game(); }
+	// ABORT's destroy reason (JoinerConnection::pre_game_cancel_reason carries the witness).
+	int32_t pre_game_cancel_reason() const {
+		return joiner_ ? joiner_->pre_game_cancel_reason() : -1;
+	}
+	bool mission_start_aborted() const { return joiner_ && joiner_->mission_start_aborted(); }
+	// The joiner runs its game loop's main frame (g_GameModeGameLoop's Game_ProcessMainFrame):
+	// from the mission start's end on (in_game_loop), and in a mission start the round-over
+	// gate abandoned, which pushes the game loop with nothing loaded. None of the join's waits
+	// (the join screen's state machine, Game_StartMission's loops) is a main frame, so the
+	// main frame's own legs step in this frame alone: the quality fold, the connection
+	// indicators, and the client net frame's link-error leg and 0x4C report (D-NET-NEW-L2-40).
+	// [orig: g_GameModeGameLoop's frame Game_ProcessMainFrame @0x5263F0, the one caller of
+	//  CNetQuality_UpdateIndicators @0x4C3090 (@0x52668D) and Client_ProcessNetworkFrame
+	//  @0x42C180 (@0x526692); Game_StartMission @0x524360 - "Mission loading aborted 1"
+	//  pushes g_GameModeGameLoop @0x524DB4, out of the final wait @0x5262F3]
+	bool in_main_frame() const {
+		return joiner_ && (joiner_->in_game_loop() || joiner_->mission_start_aborted());
+	}
+	uint32_t mp_attributes_revision() const {
+		return joiner_ ? joiner_->mp_attributes_revision() : 0u;
+	}
 	bool awaiting_deploy_pick() const { return joiner_ && joiner_->awaiting_deploy_pick(); }
 	bool has_self_handle() const { return joiner_ && joiner_->has_self_handle(); }
 	uint16_t self_handle() const { return joiner_ ? joiner_->self_handle() : 0; }
-	// The joiner's read of its own dead bit: the recipient-local 0x0A health
-	// tail (the client stores it as its own Health) or the self record's dead
-	// bit (byte13 bit 0x02 -> Flags & 2 in the local apply [orig: @0x4c1005]).
-	bool local_player_dead() const {
-		const replication::ClientState &cs = state();
-		if (cs.local_health <= 0) return true;
-		if (!has_self_handle()) return false;
-		const replication::ClientEntityState *self = cs.find(self_handle());
-		return self != nullptr && self->state_flags_known && (self->state_flags & 0x02u) != 0;
+	// The joiner's read of its own dead bit, the local entity's Flags & 2 the input
+	// dispatcher's head reads (and nothing else): live from the mission start's
+	// Player_InitPlayer, latched by the body's death edge from a Health of 0 or less
+	// (the recipient-local 0x0A tail, or a dead self record's zero) on a frame whose
+	// entity update runs it (not in the pre-round, not under the session's round-over
+	// hold, not under the local death screen, whose body tick returns at its head), and
+	// cleared by a self record's respawn arm (the record alive while the bit is set).
+	// So before the first tail the joiner reads alive (D-NET-562).
+	// [orig: Input_HandleActionBinding @0x49AD40 - a6 @0x49AD76..0x49AD7E;
+	//  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the death-screen return
+	//  @0x4B40F8..0x4B411A, the death edge @0x4B4BF1..0x4B4C02; Game_ProcessMainFrame
+	//  @0x5263F0 - the entity update's skip @0x526703..0x526742;
+	//  NetPacket_SerializePlayerState @0x4C09C0 - the dead record's Health zero
+	//  @0x4C10F1..0x4C10FB, the respawn arm @0x4C1109]
+	bool local_player_dead() const { return local_dead_latch_; }
+	// What the self record's respawn arm writes on the local entity, latched at that
+	// record: Position is the record's world sample (a carrier's compose included), Yaw the
+	// transform's out[3] (the carrier's Yaw plus the record's byte, the stage +0x240 word),
+	// Pitch the record's byte (out[4], a pass-through). The role's record fold lands it on L,
+	// once (take_local_respawn_arm). The arm's Roll store reads a word no read of this case
+	// writes (out[5] passes through @0x4C112A's uninitialized slot); L keeps 0.
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the stage +0x240 @0x4C0FD7,
+	//  Entity_TransformLocalToWorld @0x4C10D4, the arm's stores @0x4C110F..0x4C112A;
+	//  Entity_TransformLocalToWorld @0x43BD00 - out[3] @0x43BE7E, out[5] @0x43BE84,
+	//  out[4] @0x43BE8A]
+	struct LocalRespawnArm {
+		int32_t position[3] = {0, 0, 0};
+		int32_t yaw = 0;
+		int32_t pitch = 0;
+	};
+	bool take_local_respawn_arm(LocalRespawnArm &out) {
+		if (!local_respawn_arm_pending_) return false;
+		local_respawn_arm_pending_ = false;
+		out = local_respawn_arm_;
+		return true;
+	}
+	// The local entity's Health word as this frame's receive left it: each 0x0A's
+	// recipient tail stores it, then the record naming the local entity zeroes it when
+	// dead or, alive, raises a Health of 0 or less to 1 (the receive loop carries the
+	// witness). The dead latch and L's stored Health read it.
+	int16_t local_entity_health() const { return local_entity_health_; }
+	// The joiner's local player entity exists: a mission start's Player_InitPlayer
+	// bound it (JoinerConnection::local_player_entity), L spawned or not.
+	bool local_entity_bound() const {
+		return joiner_ && joiner_->local_player_entity() != 0xFFFFu;
 	}
 	JoinerConnection::Phase phase() const {
 		return joiner_ ? joiner_->phase() : JoinerConnection::Phase::Idle;
@@ -799,9 +1424,26 @@ public:
 
 private:
 	// Shared body for the Client_ProcessNetworkFrame overloads. `build_uplink` is nullptr for a
-	// no-uplink frame.
+	// no-uplink frame; `after_receive` (null or empty: none) runs after the receive.
 	std::vector<std::vector<uint8_t>> run_frame(
-			const UplinkBuilder *build_uplink, uint32_t now_tick);
+			const UplinkBuilder *build_uplink, uint32_t now_tick,
+			const AfterReceive *after_receive = nullptr);
+	// A joiner's datagrams as they leave, their connect-log lines written (NET SENDING each,
+	// then NET DISCONNECTING when the call ended the session that was up at its start), past
+	// the lines the frame's receive already wrote (receive_sends_logged_ /
+	// receive_leave_logged_, consumed here).
+	std::vector<std::vector<uint8_t>> log_client_sends(
+			std::vector<std::vector<uint8_t>> datagrams, bool session_lost_before);
+	// The connection's leave callback line, NET DISCONNECTING FROM SERVER with its record.
+	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the leave callback
+	//  @0x6254D5..0x6254E7; CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the line
+	//  @0x4C6421..0x4C6486]
+	void log_client_leave() const;
+	// How many leading datagrams of the frame's outbound the receive wrote its NET SENDING
+	// lines for (the manager receive's 0x84 / 0x85 sends, a client-pump teardown's burst), and
+	// whether that teardown wrote the leave line; log_client_sends consumes both.
+	std::size_t receive_sends_logged_ = 0;
+	bool receive_leave_logged_ = false;
 	devtools::TickProfile *profile_ = nullptr;
 	void stage_reload_notifications_before_body_tick();
 	bool apply_zone_timer_body(uint8_t tag, const std::vector<uint8_t> &body);
@@ -814,7 +1456,21 @@ private:
 	void adopt_tracked_window(const ZoneTimerWindow &window);
 	void advance_tracked_window();
 	TrackedCaptureWindow tracked_window_;
-	int32_t local_player_position_[3] = {0, 0, 0}; // set_local_player_position
+	// g_LocalPlayerEntity's Position as the receive's handlers read it: stamped from
+	// L at the frame head (set_local_player_position), then moved by the receive's
+	// own writes (the self record's respawn arm, the 0x0F) once the mission start
+	// bound the entity (local_entity_bound).
+	int32_t local_player_position_[3] = {0, 0, 0};
+	// local_player_dead's latch (the local entity's Flags & 2).
+	bool local_dead_latch_ = false;
+	// The self record's respawn arm, until the role lands it (take_local_respawn_arm).
+	LocalRespawnArm local_respawn_arm_;
+	bool local_respawn_arm_pending_ = false;
+	// The local entity's Health word as the receive leaves it (local_entity_health).
+	int16_t local_entity_health_ = 0;
+	ConnectLog *connect_log_ = nullptr; // set_connect_log
+	// The body tick's death edge over this frame's fold (local_player_dead).
+	void step_local_dead_latch();
 	// The client-side 1 Hz revive countdown over the roster: every 63rd frame
 	// each active slot with an entity and a nonzero revive window loses one
 	// second [orig: Client_ProcessNetworkFrame @0x42C27E..0x42C2DA —
@@ -826,9 +1482,10 @@ private:
 	void drain_visible_refreshes();
 	// The once-per-62-frames CNetQuality update + level fold that precedes the
 	// client net frame in the main frame [orig: Game_ProcessMainFrame — the
-	// dword_24D1DDC countdown (reload 62) gated is_in_session ->
+	// g_NetQualityUpdateCountdown countdown (reload 62) gated is_in_session ->
 	// CNetQuality_UpdateMetrics @0x4C52C0 + CNetQuality_SetLevel @0x4C3060].
 	void update_net_quality();
+	void reset_mission_start_quality();
 	// The link-error callbacks a mask carries (kNetQualityLinkError*), onto
 	// the indicators at this frame's clock.
 	void apply_net_quality_link_errors(uint32_t mask);
@@ -845,7 +1502,7 @@ private:
 	// their retail grouping. They still belong to PumpClientProtocolSend, so hold the already-framed
 	// datagrams behind the same field-3 gate and flush them before any later sequence allocated at
 	// the open boundary. (A 0x84 reconstruction and a 0x45 pong are not held: retail transmits them
-	// from the receive pump, PollResult::immediate_outbound.)
+	// from the manager receive, JoinerConnection::ManagerPass::immediate_outbound.)
 	std::deque<std::vector<uint8_t>> framed_send_queue_;
 	// The connection's one C2S queue: every producer (the 0x34 keepalive, the receive handlers'
 	// replies, the 0x4C report, the input-side one-shots, the deploy pick, the loadout
@@ -855,6 +1512,21 @@ private:
 	// [orig: CNapiNetwork_QueueReliableMessage @0x4c4fa0 -> CNapiNPConnection_QueueMessage
 	//  @0x628640, one outgoing list per connection]
 	std::deque<ProtocolMessage> send_queue_;
+	// Each ReceiveMount message this frame's receive folded: its kind, its occurrence among its
+	// kind's, the send_queue_ position past its own sends and its reducer entry, which orders two
+	// marks at one position (queue_receive_mount_stance_change); none outside the receive's frame.
+	struct ReceiveSendMark {
+		ReceiveMount at = ReceiveMount::kWeaponLoadout;
+		std::size_t occurrence = 0;
+		std::size_t position = 0;
+		std::size_t entry = 0;
+		uint8_t team = 0; // a self 0x50's team
+	};
+	std::vector<ReceiveSendMark> receive_send_marks_;
+	std::vector<WeaponLoadout> receive_loadout_grants_;
+	uint64_t receive_loadout_revision_base_ = 0;
+	void mark_receive_mount(ReceiveMount at, std::size_t entry, uint8_t team = 0);
+	uint32_t attach_requests_sent_ = 0; // the USE readout's count (attach_requests_sent)
 	// S2C 0x49 handlers run inside the receive pump. Preserve their decoded
 	// notifications for the embedding simulation after applying the remote-Person
 	// handler side effect before this frame's body tick.
@@ -866,7 +1538,23 @@ private:
 	std::unordered_map<uint16_t, ZoneState> zone_states_;
 	WeaponLoadout authoritative_loadout_;
 	uint64_t authoritative_loadout_revision_ = 0;
+	// The S2C 0x5A lists the listen host's own client received this frame, in receive
+	// order: apply_received_effects rebuilds the process's loadout name list from each
+	// (apply_weapon_loadout_name_list), at the fold between two server ticks, as retail's
+	// own client applies the list at the next frame's head (D-NET-143).
+	// [orig: Game_ProcessMainFrame @0x5263F0 - Client_ProcessNetworkFrame @0x526692 ->
+	//  CNapiNetwork_PumpClientProtocolRecv @0x42C228 -> NapiNPClientMsg_HandleWeaponLoadoutSync
+	//  @0x4290E0, ahead of Server_TickUpdate @0x5266B6]
+	std::vector<WeaponLoadout> pending_own_weapon_loadouts_;
+	// The S2C 0x49 echoes the listen host's own client received this frame, in receive order:
+	// apply_received_effects runs the handler's person arm of each on the host's world (the
+	// +0x371 arms dip), at the same fold as the loadout lists above.
+	// [orig: NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 - the person arm @0x42C105..0x42C113]
+	std::vector<WeaponReload> pending_own_reload_echoes_;
 	std::array<int32_t, kWorldStateAmmoPoolCount> authoritative_ammo_pools_{};
+	// The HostClient's kit (set_loadout_kit).
+	JoinerConnection::LoadoutKit host_loadout_kit_;
+	bool host_loadout_kit_set_ = false;
 	uint64_t authoritative_ammo_pools_revision_ = 0;
 	bool deployed_ = false;
 	bool input_reset_pending_ = false;
@@ -874,15 +1562,31 @@ private:
 	bool authoritative_spawn_released_ = false;
 	uint64_t authoritative_spawn_release_revision_ = 0;
 	uint64_t self_team_revision_ = 0;           // S2C 0x50 self re-latch edges
+	uint8_t self_assigned_team_ = 0;            // self_assigned_team
+	std::vector<uint8_t> self_team_assigns_;    // drain_self_team_assigns
 	std::vector<uint8_t> cleared_player_slots_; // S2C 0x46 bit15 roster clears
 
 	// --- §5.44 per-frame housekeeping counters (P6) — mirror the witnessed per-instance globals of
 	// [orig: Client_ProcessNetworkFrame @0x42c180]. The 0x34 keepalive / 0x4C net-quality / 0x2C RTT
 	// emits and the send-holdoff send-block gate, deferred-and-logged at P5, ported here. ---
 	uint32_t current_tick_ = 0;          // [orig: g_ClientCurrentTick @0xA8229C] bumped once per run_frame
-	uint32_t slot_refresh_frames_ = 0;   // [orig: g_SlotRefreshTimer @0xA85B80] the 1 Hz revive countdown
 	uint32_t last_keepalive_tick_ = 0;   // [orig: g_LastKeepaliveTick @0xA822A0] 0x34 send latch
-	uint32_t net_quality_timer_ = 0;     // [orig: g_NetQualityReportTimer @0xA85B84] 0x4C cadence
+	// [orig: g_NetQualityReportTimer @0xA85B84] the 0x4C cadence: the embedder's
+	// process-lived word (use_process_state), else this runtime's own.
+	ClientProcessState own_process_;
+	ClientProcessState *external_process_ = nullptr;
+	ClientProcessState &process_state() {
+		return external_process_ != nullptr ? *external_process_ : own_process_;
+	}
+	const ClientProcessState &process_state() const {
+		return external_process_ != nullptr ? *external_process_ : own_process_;
+	}
+	// The joiner's input-driven producers queue only in the game loop: a 0x5A that
+	// lands inside the mission start leaves the joiner InMatch in the final wait, which
+	// resets the key queue and reads ESC alone, so no action queues there.
+	// [orig: Game_StartMission @0x524360 - Input_ResetKeyQueue @0x526288, the loop's
+	//  Input_DequeueKeyEvent for ESC @0x5262a2..0x5262ad]
+	bool joiner_input_frame() const { return joiner_->in_match() && joiner_->in_game_loop(); }
 	uint32_t tag2c_send_cooldown_ = 0;   // [orig: g_Tag2CSendCooldown @0xA860D8] set 62 on a 0x2C send
 	                                     // and decremented, but never compared in @0x42C180;
 	                                     // vestigial/telemetry state, not a send throttle.
@@ -891,12 +1595,13 @@ private:
 	hud::NetQualityIndicators net_indicators_;
 	hud::NovaWorldLinkFacts novaworld_link_;
 	int32_t mission_exit_reason_ = 0;                    // [orig: g_MissionExitReason]
+	int32_t dialogue_volume_ = 0;                        // [orig: g_DialogueVolume @0x24D20C8]
 	// The client (RECEIVE) window of the CNetQuality object and its inputs
 	// [orig: CNetQuality_UpdateMetrics @0x4C52C0, the `is_mp_session_peer &&
 	//  !is_authority` half]. The host (SEND) window lives with the host's tick.
 	replication::NetQualityWindow client_quality_window_;
 	int32_t observed_frame_rate_ = 0;                    // [orig: dword_24E1F10, 0 @0x52B727]
-	int32_t quality_update_countdown_ = 62;              // [orig: dword_24D1DDC]
+	int32_t quality_update_countdown_ = 0;               // [orig: g_NetQualityUpdateCountdown]
 	ChatFloodTable chat_flood_{};                        // [orig: @0xB3B788] (chat_flood.h)
 	uint32_t send_holdoff_countdown_ = 0;// [orig: NapiNPConnection+0x648] 0 = send block open (default)
 	// The host-dictated send period (CS dir-0 field 3, H:0x00 mask 8): the
@@ -904,6 +1609,10 @@ private:
 	// send_holdoff_ticks; PumpFlags 0x200 reload @0x629802]. 0 = per-tick
 	// (the protocol template default). NovaWorld hosts dictate 12 (~5.2 Hz).
 	uint32_t send_holdoff_ticks_ = 0;
+	// The joiner net readout (joiner_net_trace.h): the frame's record as run_frame fills it,
+	// and the ring it lands in at the frame's end.
+	JoinerNetTraceRecord frame_trace_{};
+	JoinerNetTrace net_trace_;
 	// The retail loop the joiner's last frame ran in (a change is that loop's entry) and the
 	// GetTickCount stamp of a timed loop's last send-pump call (step_send_pump_loop).
 	JoinerConnection::SendPumpLoop send_pump_loop_ = JoinerConnection::SendPumpLoop::NetworkFrame;
@@ -911,9 +1620,45 @@ private:
 	// The receive pump's countdown step plus whether this frame's send pump call builds,
 	// per the loop the joiner's admission stage runs in.
 	bool step_send_pump_loop();
+	// One PumpClientProtocolSend build: the pre-framed packets, the connection's queue,
+	// then what `append` adds behind it (the frame's own 0x2C / 0x0C), the boundary's pump
+	// (its ACK) and the one flush.
+	void build_send_boundary(std::vector<std::vector<uint8_t>> &outbound, uint32_t now_tick,
+			const std::function<void(std::vector<ProtocolMessage> &)> &append = {});
+	// The frame's (0) leg, the NAPI manager's receive over every datagram the socket held, and a
+	// remote joiner's (1) leg, the client pump over what it queued with the receive pump's
+	// missing-sequence tail: false when a host teardown in it ended the session (its goodbyes
+	// in `outbound`, the leave line written). The frame and the load's pumps share both.
+	void manager_receive_pass(std::vector<std::vector<uint8_t>> &outbound);
+	bool client_receive_pass(std::vector<std::vector<uint8_t>> &outbound);
+	// The mission start's pumps (push_mission_start_first_loadout / _end): a send pump builds
+	// only at a spent countdown and reloads it, else it only ages the flush, and writes its
+	// lines at its send; a periodic update runs the manager receive on a NovaWorld join alone; a
+	// receive pump runs the client pump and the role's handler writes, then steps the countdown.
+	// The first leg: false when it does not run.
+	void mission_start_send_pump(std::vector<std::vector<uint8_t>> &outbound);
+	void mission_start_periodic_update(std::vector<std::vector<uint8_t>> &outbound,
+			const MissionStartPumpLegs &legs);
+	void mission_start_receive_pump(std::vector<std::vector<uint8_t>> &outbound,
+			const MissionStartPumpLegs &legs);
+	bool mission_start_first_leg(std::vector<std::vector<uint8_t>> &outbound,
+			const MissionStartPumpLegs &legs);
 	// The C2S 0x0F self-heal requests the replica fold and the stale-carrier sweep raised,
 	// appended to the one queue where their producer ran.
 	void queue_carrier_repair_requests();
+	// The S2C 0x06 echo of a console line: the client's command walk over it, its
+	// sends queued on this client's connection at the message's place, its lines
+	// posted to the SYSTEM ring (client_console.h, D-NET-710).
+	void run_console_echo(const std::vector<uint8_t> &body);
+	ClientConsoleState console_state_; // the process's console debug words
+	uint32_t console_guard_ms_ = 0;   // [orig: g_ConsoleCommandLastTick @0x24D1E04]
+	ClientLocalCommandSeams local_command_seams_;
+	controls::InputEventQueue *input_events_ = nullptr; // the role's (queue_console_action)
+	// GetTickCount (the console guard, the S2C 0x58's receipt stamp): the joiner's
+	// monotonic clock, else the process's steady clock.
+	uint32_t console_tick_ms() const;
+	// The GetTickCount stamp of the S2C 0x58 the replica last folded (session_elapsed_ms).
+	uint32_t session_status_receipt_ms_ = 0;
 
 	// seed_session() golden-replay mode: suppress the live per-frame housekeeping (0x34/0x4C/0x2C) so a
 	// seeded single-frame emission reproduces ONLY the captured 0x0C datagram byte-for-byte (the

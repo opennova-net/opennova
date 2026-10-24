@@ -104,14 +104,13 @@ public:
 	const opennova::world::DestructionEvents &value() const { return value_; }
 	static Ref<DestructionDrain> make(const TypedArray<HuskSwapEvent> &p_husk_swaps,
 			const TypedArray<DestructionEffectEvent> &p_effects, int p_debris_triangles,
-			int p_glass_points, int p_crackles, const PackedVector3Array &p_death_light_positions,
+			int p_crackles, const PackedVector3Array &p_death_light_positions,
 			const PackedFloat32Array &p_death_light_radii);
 
 	int get_explosions_processed() const { return value_.explosions_processed; }
 	int get_items_destroyed() const { return value_.items_destroyed; }
 	int get_crackles() const { return value_.crackles; }
 	int get_debris_triangles() const { return value_.debris_triangles; }
-	int get_glass_points() const { return value_.glass_points; }
 	PackedStringArray get_sound_names() const;
 	PackedVector3Array get_sound_positions() const;
 	PackedVector3Array get_death_light_positions() const;

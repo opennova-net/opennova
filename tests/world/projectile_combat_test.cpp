@@ -377,8 +377,11 @@ void test_arming_dud_and_armed_damage() {
 // the first def's 74 only when its `end` is read. It is the notarmmedammo of
 // the M203 and Mk19 grenades and the RPG and AT4 rockets, so a hit before
 // arming continues as the dud and deals nothing (the round's own kill zone
-// never queues). The defs below are the base file's M203 and its dud
-// (effects tables, tracers, lights and the dud's velocity aside).
+// never queues: the person handler's unarmed byte, set by the same elapsed-age
+// test as the dud swap, skips the push [orig: Projectile_HandleTerrainImpact_0
+// @0x4E98F0 - @0x4E9969..0x4E9978, the byte @0x4E99A4, read @0x4E9AE9]). The
+// defs below are the base file's M203 and its dud (effects tables, tracers,
+// lights and the dud's velocity aside).
 void test_base_game_m203_hit_before_arming_is_the_dud() {
     Rig r;
     static const char kText[] =
@@ -766,7 +769,7 @@ void test_body_armor_energy_and_impact_row() {
         // First loss: sqrt(620^2 - 200000000/875) -> 394 m/s.
         // Quantizing back to Q16/tick gives 393 for damage, then x1.25 -> 491.
         // The second loss consumes the remaining energy.
-        CHECK(r.world.round_sim.rounds[0].vel.x == 0.0f);
+        CHECK(r.world.round_sim.rounds[1].vel.x == 0.0f);
         CHECK(r.world.round_sim.impacts.size() == 2);
         if (r.world.round_sim.impacts.size() == 2) {
             CHECK(r.world.round_sim.impacts[0].effect_tag == 24);
@@ -834,7 +837,7 @@ void test_person_hit_applies_the_surface_drag_leg() {
         r.target_entity()->item_type = item_type;
         r.ammo().drag_fp16 = 0x10000; // a live coefficient; no body armor
         r.fire();
-        const Vec3 spawn_vel = r.world.round_sim.rounds[0].vel;
+        const Vec3 spawn_vel = r.world.round_sim.rounds[1].vel;
         r.world.round_sim.tick(r.world, nullptr);
         CHECK(r.world.round_sim.hits.size() == 1);
         FixedVec3 expected{to_fixed(spawn_vel.x), to_fixed(spawn_vel.y), to_fixed(spawn_vel.z)};
@@ -849,7 +852,7 @@ void test_person_hit_applies_the_surface_drag_leg() {
         } else {
             CHECK(recorded.x == to_fixed(spawn_vel.x));
         }
-        CHECK(r.world.round_sim.rounds[0].active);
+        CHECK(r.world.round_sim.rounds[1].active);
     }
 }
 
@@ -896,7 +899,8 @@ void test_network_oneshot_authority_and_session_gate() {
         if (target == nullptr) return;
         // Pin the independent retail world-role gate. Even if a client caller
         // forgets to mark its round VisualOnly, a non-authority network world
-        // cannot normalize entity words or queue the impact kill zone.
+        // cannot normalize entity words or queue the person impact's kill zone
+        // (the one producer that tests the session authority, @0x4E9AF0..0x4E9B00).
         target->health = 0x1FFFF;
         target->health_max = 0x1FFFE;
         AmmoTableEntry &ammo = r.world.tables.ammo.entries[0];
@@ -913,7 +917,10 @@ void test_network_oneshot_authority_and_session_gate() {
         // No authority, so no kill-zone push releases it: it passes the person.
         CHECK(r.world.round_sim.active_count == 1);
 
-        // The same world-role gate covers spawn-time instant kill zones.
+        // A spawn-time instant kill zone queues on every peer: its push tests no
+        // authority, and the drain's own damage read is 0 on a peer
+        // (D-NET-NEW-L6-6). [orig: RoundData_SpawnRound @0x4EC1F3..0x4EC20E;
+        //  WeaponEffect_PushExplosionQueueEntry @0x4E83C0]
         AmmoTableEntry instant;
         instant.name = "CLIENT_INSTANT";
         instant.valid = true;
@@ -929,7 +936,7 @@ void test_network_oneshot_authority_and_session_gate() {
         instant_params.origin = {1.0f, 0.0f, 1.0f};
         instant_params.ammo_index = instant_index;
         CHECK(r.world.round_sim.spawn(r.world, instant_params) < 0);
-        CHECK(r.world.explosions.queue.empty());
+        CHECK(r.world.explosions.queue.size() == 1);
     }
 }
 
@@ -1007,8 +1014,9 @@ void test_visual_only_rounds_have_no_gameplay_consequences() {
     const int entities_before = entity_count();
     const size_t devices_before = r.world.throwables.devices.size();
 
-    // Spawn-time instant killzones still emit their visual impact descriptor,
-    // but may not queue the authoritative explosion.
+    // Spawn-time instant killzones emit their visual impact descriptor and
+    // queue the kill zone on the peer too (D-NET-NEW-L6-6) [orig:
+    // RoundData_SpawnRound @0x4EC1F3..0x4EC20E].
     AmmoTableEntry instant;
     instant.name = "VISUAL_INSTANT";
     instant.valid = true;
@@ -1027,7 +1035,8 @@ void test_visual_only_rounds_have_no_gameplay_consequences() {
     CHECK(r.world.round_sim.spawn(r.world, instant_params,
                                   RoundConsequenceMode::VisualOnly) < 0);
     CHECK(r.world.round_sim.impacts.size() == impacts_before + 1);
-    CHECK(r.world.explosions.queue.empty());
+    CHECK(r.world.explosions.queue.size() == 1);
+    r.world.explosions.queue.clear();
 
     // A visual use-own-move charge reaches the exact retail rest conversion,
     // then releases without cloning a placed-device entity.
@@ -2180,6 +2189,39 @@ void test_friendly_fire_gate() {
     }
 }
 
+// The shot relations' singles are DcbIds (+0x7C, entity_dcb_id): a player shooter's is its
+// class init's 10000 + slot, which the setters' < 0x80 guard rejects, so its hit on an NPC
+// sets the group rows and the NPC's single row against the player's group, and no single row
+// of the player's own, where its net id (0 on our host) would set row 0.
+// [orig: Projectile_ProcessDamageOnTarget - shooter @0x4E80C0 / @0x4E80EA, target @0x4E80D0 /
+//  @0x4E80E1; ShotMatrix_SetSingleGroupBit @0x452B00 - `cmp eax, 80h` @0x452B04;
+//  PlayerClass_InitEntity @0x4B1149..0x4B1173]
+void test_shot_relations_key_a_player_shooter_by_its_dcb_id() {
+    Rig r;
+    r.world.ai.is_authority = true;
+    r.world.tables.ammo.entries[0].arm_age_ticks = 0;
+    Entity *s = r.world.registry.get(r.shooter);
+    Entity *t = r.world.registry.get(r.target);
+    s->team = 2;
+    t->team = 1;
+    s->group_id = 3;
+    t->group_id = 4;
+    s->flags |= kEntityFlagPlayer;
+    s->net_id = 0;
+    s->player_slot_id = 2;
+    t->net_id = 9;
+    CHECK(entity_dcb_id(r.world, *s) == 10002);
+    CHECK(r.fire() >= 0);
+    r.world.round_sim.tick(r.world, nullptr);
+    t = r.world.registry.get(r.target);
+    CHECK(t->health < 100);
+    const TriggerRelations &rel = r.world.script.relations;
+    CHECK(rel.group_group(TriggerRelations::kShot, 3, 4));
+    CHECK(rel.group_single(TriggerRelations::kShot, 3, 9));
+    CHECK(!rel.single_group(TriggerRelations::kShot, 0, 4));
+    CHECK(!rel.single_single(TriggerRelations::kShot, 0, 9));
+}
+
 void test_vehicle_occupant_reduction_count_cap_and_depth() {
     Rig r;
     r.world.registry.configure_pool(1, 2);
@@ -2339,6 +2381,19 @@ void test_retail_aerodynamic_drag_vectors() {
     FlightResult wet = fly_one_tick(FixedVec3{105704, 0, 0}, 0x100u, 65536, 0,
                                     4 * 65536, 5 * 65536);
     CHECK(wet.active && wet.vel.x == 105079);
+    // The drag compares the round's Z word with the water word raw: with no water
+    // authored the word is 0, so a round at or below Z 0 takes the x25 step and one
+    // above it the dry step [orig: Entity_ApplyDragAndBounceForce @0x4E5EC0 -
+    // @0x4E60A0..0x4E60A9, the x25 leg @0x4E616D].
+    FlightResult dry_map_low = fly_one_tick(FixedVec3{105704, 0, 0}, 0x100u, 65536, 0,
+                                            -65536, 0);
+    CHECK(dry_map_low.active && dry_map_low.vel.x == 105079);
+    FlightResult dry_map_zero = fly_one_tick(FixedVec3{105704, 0, 0}, 0x100u, 65536, 0,
+                                             0, 0);
+    CHECK(dry_map_zero.active && dry_map_zero.vel.x == 105079);
+    FlightResult dry_map_high = fly_one_tick(FixedVec3{105704, 0, 0}, 0x100u, 65536, 0,
+                                             65536, 0);
+    CHECK(dry_map_high.active && dry_map_high.vel.x == 105679);
     FlightResult slow_wet = fly_one_tick(FixedVec3{0x3fff, 0, 0}, 0x100u, 0, 0,
                                          4 * 65536, 5 * 65536);
     CHECK(!slow_wet.active);
@@ -2348,6 +2403,16 @@ void test_retail_aerodynamic_drag_vectors() {
     FlightResult edge_wet = fly_one_tick(FixedVec3{0x4000, 0, 0}, 0x100u, 0, 0,
                                          4 * 65536, 5 * 65536);
     CHECK(edge_wet.active && edge_wet.pos.x == 0x4000);
+    // The Z word is compared with the water word raw: with no water authored the
+    // word is 0, so a slow round below Z 0 stalls and one above it does not
+    // [orig: Projectile_UpdatePhysics @0x4EA12A..0x4EA137; Environment_InitDefaults
+    // @0x57C010 (@0x57C011..0x57C01E)].
+    FlightResult slow_dry_low = fly_one_tick(FixedVec3{0x3fff, 0, 0}, 0x100u, 0, 0,
+                                             -65536, 0);
+    CHECK(!slow_dry_low.active);
+    FlightResult slow_dry_high = fly_one_tick(FixedVec3{0x3fff, 0, 0}, 0x100u, 0, 0,
+                                              65536, 0);
+    CHECK(slow_dry_high.active);
 
     // Drag zero returns before the stability branch. With drag live, the exact
     // below-stable damping follows drag, including retail's NoGravity Z step.
@@ -2753,6 +2818,7 @@ void test_bullet_building_material_is_plain_plus_four() {
     Entity building;
     building.kind = EntityKind::Building;
     building.has_item_def = true;
+    building.item_type_index = 1; // a loaded row's def ordinal (+0x1C), the static prox list's gate
     building.item_type = 3;
     building.position = {4.0f, 0.0f, 0.0f};
     building.health = 1000;
@@ -2969,6 +3035,7 @@ void test_material_15_breaks_the_building_glass_section() {
         Entity building;
         building.kind = EntityKind::Building;
         building.has_item_def = true;
+        building.item_type_index = 1; // a loaded row's def ordinal (+0x1C), the static prox list's gate
         building.item_type = c.item_type;
         building.engine_flags = c.engine_flags;
         building.position = {4.0f, 0.0f, 0.0f};
@@ -3035,6 +3102,7 @@ void test_material_15_breaks_the_building_glass_section() {
     Entity building;
     building.kind = EntityKind::Building;
     building.has_item_def = true;
+    building.item_type_index = 1; // a loaded row's def ordinal (+0x1C), the static prox list's gate
     building.item_type = 5;
     building.position = {4.0f, 0.0f, 0.0f};
     building.health = 1000;
@@ -3186,7 +3254,8 @@ void test_item_callbacks_receive_geometric_section_on_both_peers() {
         const auto owner = world.registry.spawn(0, shooter);
         Entity seed; seed.kind = EntityKind::Building; seed.item_type = 5;
         seed.item_id = 812; seed.has_item_def = true; seed.health = 500;
-        seed.position = {4,0,0}; seed.yaw = 90;
+        seed.item_type_index = 1; // a loaded row's def ordinal (+0x1C), the static prox list's gate
+        seed.position = {4,0,0}; seed.heading = placed_heading_bam(90);
         const auto h = world.registry.spawn(2, seed);
         auto &target = *world.registry.get(h);
         if (!authority) target.item_section_damage[2] = 15;
@@ -3255,7 +3324,7 @@ struct PlayerVictimRig : HeapWorldFixture {
         PlayerSpawn spawn;
         spawn.position = {5.0f, 0.0f, 0.0f};
         spawn.net_id = 0xFFF1;
-        spawn.yaw = 90; // engine heading 0: the +X round arrives from behind
+        spawn.heading = placed_heading_bam(90); // engine heading 0: the +X round arrives from behind
         victim = spawn_remote_player(world, spawn);
         CHECK(victim.valid());
         if (Entity *v = world.registry.get(victim)) {
@@ -3351,8 +3420,8 @@ void test_round_hit_runs_the_player_waypoint_tail() {
     nav.channels[3].entries[0] = 0;
     nav.nodes.resize(1);
     nav.nodes[0].f[0] = 0x10000; // radius 1 u, centered on the body
-    nav.nodes[0].f[1] = body->pos[0];
-    nav.nodes[0].f[2] = body->pos[1];
+    nav.nodes[0].f[1] = body->self->position.x.q16;
+    nav.nodes[0].f[2] = body->self->position.y.q16;
     r->fire_and_tick();
     CHECK(v->spawn_phase == 64);
     CHECK(r->world.script.relations.single_visited(7, 3, 0));
@@ -3530,12 +3599,19 @@ void test_same_projectile_second_player_kill_latches_0x100() {
     }
 }
 
-// The kill accounting's lethal edge reads the health word BEFORE the hit: a
-// body an unclamped path left below zero is raised back to zero by the clamped
-// hit but restages no death, and a lethal hit on a dead-flagged body stages
-// its death without the kill event. [orig: Projectile_ProcessDamageOnTarget
+// The kill accounting's lethal edge reads the health word BEFORE the hit and
+// scores at the damage site, ahead of the subtraction: a scored victim's kill
+// tallies there (a teamless victim, a killer that is not the local player, out
+// of a session: by others, the team-0 count), and its death record carries
+// the transaction alone; a body an unclamped path
+// left below zero is raised back to zero by the clamped hit but restages no
+// death and scores nothing; a lethal hit on a dead-flagged body stages its
+// death and scores nothing. [orig: Projectile_ProcessDamageOnTarget
 // @0x4E80F7..0x4E8101 pre-hit health > 0, @0x4E810A damage >= health,
-// @0x4E811F Flags & 2 skipping the Score_ProcessKillEvent call @0x4E8133]
+// @0x4E811F Flags & 2 skipping the Score_ProcessKillEvent call @0x4E8133,
+// ahead of Health -= damage @0x4E81B3; Score_ProcessKillEvent @0x4FD400 - the
+// victim's score word @0x4FD422, the session test @0x4FD447,
+// Score_TallyKillByOthers @0x4FD300]
 void test_kill_event_reads_the_pre_hit_health_and_the_dead_flag() {
     HeapWorldFixture fixture;
     World &world = fixture.world;
@@ -3557,6 +3633,7 @@ void test_kill_event_reads_the_pre_hit_health_and_the_dead_flag() {
         t.health = health;
         t.flags = flags;
         t.engine_flags = flags;
+        t.item_score = 25; // the ItemDef `score` word the kill accounting reads
         return world.registry.spawn(0, t);
     };
 
@@ -3585,32 +3662,33 @@ void test_kill_event_reads_the_pre_hit_health_and_the_dead_flag() {
         world.round_sim.process_damage_hit(world, round, hit, velocity);
     };
 
+    CHECK(!world.rules.mp_session && world.cached.local_player != shooter);
     const EntityHandle live = spawn_victim(10, 0);
     hit_person(live);
     CHECK(world.registry.get(live)->health == 0);
+    CHECK(world.kill_stats.friendly_kills_by_others == 1);
     CHECK(world.round_sim.deaths.size() == 1);
-    if (world.round_sim.deaths.size() == 1)
-        CHECK(world.round_sim.deaths[0].kill_event);
 
     world.round_sim.deaths.clear();
     const EntityHandle below_zero = spawn_victim(-5, 0);
     hit_person(below_zero);
     CHECK(world.registry.get(below_zero)->health == 0);
     CHECK(world.round_sim.deaths.empty());
+    CHECK(world.kill_stats.friendly_kills_by_others == 1);
 
     world.round_sim.deaths.clear();
     const EntityHandle flagged = spawn_victim(10, kEntityFlagDead);
     hit_person(flagged);
     CHECK(world.registry.get(flagged)->health == 0);
     CHECK(world.round_sim.deaths.size() == 1);
-    if (world.round_sim.deaths.size() == 1)
-        CHECK(!world.round_sim.deaths[0].kill_event);
+    CHECK(world.kill_stats.friendly_kills_by_others == 1);
 }
 
 // On a non-authority in-session peer the person class callback still fires
 // (with Weapon_CalcImpactDamage's forced zero) on the peer's OWN body — the
 // only person a joiner resolves to a World entity: the hit stages the death
-// anim, tips the body (the FP camera roll's source), and stamps the attacker,
+// anim, stores the hit roll in the +0x94 word (not the Roll the eye and the
+// FP camera follow), and stamps the attacker,
 // with no health, hit, death, or cause-bit consequence. [orig:
 // Weapon_CalcImpactDamage @0x4ec933; Projectile_ProcessDamageOnTarget
 // @0x4e81b1 (authority-gated subtraction) / @0x4e820e (callback)]
@@ -3636,7 +3714,7 @@ void test_visual_person_hit_on_the_joiners_body_stages_and_rolls_without_consequ
     PlayerSpawn spawn;
     spawn.position = {5.0f, 0.0f, 0.0f};
     spawn.net_id = 0xFFF0;
-    spawn.yaw = 90;
+    spawn.heading = placed_heading_bam(90);
     const EntityHandle victim = spawn_player(world, spawn); // the joiner's own body
     CHECK(victim.valid() && world.cached.local_player == victim);
     AiEntity *body = world.ai.for_handle(victim);
@@ -3682,7 +3760,8 @@ void test_visual_person_hit_on_the_joiners_body_stages_and_rolls_without_consequ
     CHECK(v->cause_flags == 0);
     CHECK(v->death_anim_state == compute_death_anim_state(3, 2, death_cause::kBullet));
     CHECK(v->last_attacker == shooter);
-    if (body != nullptr) CHECK(body->roll == -0x05B05B00);
+    CHECK(v->saved_live_roll == -0x05B05B00);
+    if (body != nullptr) CHECK(body->roll == 0);
     world.collision = nullptr;
 }
 
@@ -4181,6 +4260,8 @@ static const NamedTest kTests[] = {
     {"test_exact_one_hop_vehicle_parent_damage_routing", test_exact_one_hop_vehicle_parent_damage_routing},
     {"test_zero_damage_hit_still_notifies_the_vehicle_brain", test_zero_damage_hit_still_notifies_the_vehicle_brain},
     {"test_friendly_fire_gate", test_friendly_fire_gate},
+    {"test_shot_relations_key_a_player_shooter_by_its_dcb_id",
+     test_shot_relations_key_a_player_shooter_by_its_dcb_id},
     {"test_vehicle_occupant_reduction_count_cap_and_depth", test_vehicle_occupant_reduction_count_cap_and_depth},
     {"test_retail_force_order_and_stock_gates", test_retail_force_order_and_stock_gates},
     {"test_retail_aerodynamic_drag_vectors", test_retail_aerodynamic_drag_vectors},

@@ -51,12 +51,21 @@ namespace opennova::inmatch {
 // stays inert.
 // [orig: Config_SetDefaults @0x54D030 -- engine/base/gameprofile/game_type.h
 //  game_rules carries each value's cite]
+// The game shell's host requests (HostSessionConfig) take the process cfg
+// block's mpattrib over this baseline's attribute word: retail's host screen
+// shows its six attribute switches from the block's word, its START writes
+// them back into the block, and the session create copies the block's word,
+// so the bits no switch shows, and a host with no screen (the launch-flag
+// host), keep the file's (D-NET-NEW-LP-4) [orig: UI_PopulateHostSettingsFromConfig
+// @0x5563E1..0x5564EE (multiplayerAttributeFlags_34C); CNapiGameSession_BuildAndCreateSession
+// @0x569662 -> game_settings.mp_attributes @0x56967F].
 GameConfig host_screen_default_config();
 
 // The session a host runs from: the session config and the words of the cfg
-// block the session reads beside it. The game's host screen fills it
-// through its read (apply_host_dialog_control); opennova-serve maps the
-// game.cfg block onto it (host_config.h host_session_settings). The defaults
+// block the session reads beside it. Both hosts map the game.cfg block onto
+// it (host_config.h): opennova-serve's session create (host_session_settings),
+// the game's host request (host_screen_from_block), whose screen reads into
+// the block first (host_settings.h apply_host_dialog_control). The defaults
 // are the cfg table's [orig: the MULTIPLAYER table @0x833050 -- mpmaxplayers
 // "64" @0x833278; the rest of the block zeroed by Config_SetDefaults' memset
 // @0x54D039..0x54D046, mp_gametype among it]; the lineup queue's words ride
@@ -78,13 +87,16 @@ struct HostFileReport {
 
 // One tokenized line onto the cfg block and the rotation, retail's per-key
 // arms in their order. False for a key no arm owns.
+// `max_player_arg` is the command line's `/maxplayers N` (0: none), which a
+// MaxPlayers line yields to.
 bool apply_host_file_line(const io::ConfigTokens &line, gamecfg::GameCfg &cfg,
 		HostRotation &rotation, const std::vector<mission_catalog::Row> &catalog,
-		HostFileReport *report = nullptr);
+		HostFileReport *report = nullptr, int32_t max_player_arg = 0);
 
 // The whole file through the game.cfg walk, over the block as it stands (the
 // game.cfg the process read, else its defaults).
 HostFileReport read_host_file(const char *text, size_t size, gamecfg::GameCfg &cfg,
-		HostRotation &rotation, const std::vector<mission_catalog::Row> &catalog);
+		HostRotation &rotation, const std::vector<mission_catalog::Row> &catalog,
+		int32_t max_player_arg = 0);
 
 } // namespace opennova::inmatch

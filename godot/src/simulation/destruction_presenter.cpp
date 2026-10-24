@@ -164,7 +164,6 @@ void DestructionPresenter::present_drained(const opennova::world::DestructionEve
 		}
 	}
 	stat_debris_triangles_ += p_events.debris_triangles;
-	stat_glass_points_ += p_events.glass_points;
 	// Sim-side rolls (S12b): the crackle EFFECT rides the ordinary effects
 	// drain above; its sound rides the fire pass's drain_fire_sounds.
 	stat_crackles_ += p_events.crackles;
@@ -216,6 +215,10 @@ void DestructionPresenter::restore_intact(const String &key) {
 }
 
 ObjectModel *DestructionPresenter::visual_model(ObjectModel *model) const {
+    // No husk is held (no swap applied this run, or every one restored): every model is its own
+    // visual, without building the identity key each present row asks it with (twice a row a
+    // frame: the destroy phases and the section mask).
+    if (husked_.is_empty()) return model;
     if (model == nullptr || model->get_entity_ref().is_null()) return model;
     const Ref<EntityRef> ref = model->get_entity_ref();
     const String key = identity_key(ref->get_bms_id(), opennova::world::spawn_origin_pack(
@@ -705,6 +708,40 @@ void DestructionPresenter::apply_piece_draws_inset(
 	}
 }
 
+// A water mirror's own piece draws: the reflected subscene collects the pieces
+// again over the view it draws from (engine inmatch/occlusion_collect.h
+// MirrorViewLists), with their own level. A piece the mirror draws takes that
+// level as the model's mirror state, drawn by its twin where the node's
+// differs; a piece it does not draw is hidden there.
+void DestructionPresenter::apply_piece_draws_mirror(int p_view,
+		const std::vector<opennova::world::DeathPieceDraw> &p_draws) {
+	HashSet<int> drawn;
+	for (const opennova::world::DeathPieceDraw &draw : p_draws) {
+		const int64_t *generation = piece_generation_.getptr(draw.slot);
+		if (generation == nullptr || *generation != static_cast<int64_t>(draw.generation)) {
+			continue;
+		}
+		ObjectModel *model = piece_model(draw.slot);
+		if (model == nullptr) {
+			continue;
+		}
+		model->set_destroyed_section_mask(draw.hidden_mask);
+		model->set_transform(piece_draw_transform(draw));
+		model->set_present_visible(true);
+		model->set_mirror_view_lod(p_view, draw.lod_level);
+		model->set_mirror_occlusion_hidden(p_view, false);
+		drawn.insert(draw.slot);
+	}
+	for (const KeyValue<int, ObjectID> &kv : piece_models_) {
+		if (drawn.has(kv.key)) {
+			continue;
+		}
+		if (ObjectModel *model = piece_model(kv.key)) {
+			model->set_mirror_occlusion_hidden(p_view, true);
+		}
+	}
+}
+
 void DestructionPresenter::unregister_piece_anchor(int p_slot) {
 	unregister_effect_anchor(piece_owner_key(p_slot));
 }
@@ -755,7 +792,6 @@ Ref<DestructionPresentStats> DestructionPresenter::get_stats() const {
 	stats->debris_triangles = stat_debris_triangles_;
 	stats->effects = stat_effects_;
 	stats->sounds = stat_sounds_;
-	stats->glass_points = stat_glass_points_;
 	stats->crackles = stat_crackles_;
 	return stats;
 }

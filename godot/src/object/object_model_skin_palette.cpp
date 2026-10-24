@@ -196,20 +196,22 @@ void ObjectModel::apply_skin_palette_bounds() {
 			instance->set_custom_aabb(box);
 		}
 	}
-	if (view_twins_.empty() || view_twin_lod_ < 0 ||
-			static_cast<std::size_t>(view_twin_lod_) >= level_surfaces_.size()) {
-		return;
-	}
 	RenderingServer *rs = RenderingServer::get_singleton();
 	if (rs == nullptr) {
 		return;
 	}
-	const std::vector<LevelSurface> &twin_level =
-			level_surfaces_[static_cast<std::size_t>(view_twin_lod_)];
-	for (const ViewTwin &twin : view_twins_) {
-		if (twin.surface >= 0 && static_cast<std::size_t>(twin.surface) < twin_level.size() &&
-				twin_level[static_cast<std::size_t>(twin.surface)].skin_palette) {
-			rs->instance_set_custom_aabb(twin.instance, skin_posed_bounds_);
+	for (const TwinSet &set : twin_sets_) {
+		if (set.twins.empty() || set.lod < 0 ||
+				static_cast<std::size_t>(set.lod) >= level_surfaces_.size()) {
+			continue;
+		}
+		const std::vector<LevelSurface> &twin_level =
+				level_surfaces_[static_cast<std::size_t>(set.lod)];
+		for (const ViewTwin &twin : set.twins) {
+			if (twin.surface >= 0 && static_cast<std::size_t>(twin.surface) < twin_level.size() &&
+					twin_level[static_cast<std::size_t>(twin.surface)].skin_palette) {
+				rs->instance_set_custom_aabb(twin.instance, skin_posed_bounds_);
+			}
 		}
 	}
 }

@@ -105,6 +105,62 @@ EntityHandle CollisionWorld::clip_segment_to_nearest_collision(
     return nearest;
 }
 
+EntityHandle CollisionWorld::find_nearest_by_ray(World &world, EntityHandle source,
+                                                 const int32_t start[3], const int32_t end[3]) {
+    // [orig: Entity_FindNearestByRay @0x413AF0]
+    int32_t clipped[3] = {end[0], end[1], end[2]};
+    const Entity *se = world.registry.get(source);
+    // [orig: `!sourceEntity || !(Flags & 0x800000)` @0x413B12 ->
+    //  Terrain_RaycastHeightmapHiRes_0 @0x413B1E]
+    if (terrain != nullptr && terrain->valid() &&
+            (se == nullptr || (se->flags & kEntityFlagIndoors) == 0))
+        (void)terrain_clip_segment(*terrain, start, clipped, clipped);
+    CollisionRay ray;
+    for (int axis = 0; axis < 3; ++axis) {
+        ray.start[axis] = start[axis];
+        ray.end[axis] = clipped[axis];
+    }
+    ray.refresh();
+    EntityHandle nearest;
+    CollisionTargetView view;
+    std::vector<CollisionMatrix> mats;
+    const auto test_row = [&](EntityHandle ch, const int32_t p[3], int32_t radius) {
+        // The ray box, Y then X then Z, then the line distance at the table's
+        // position and radius. [orig: @0x413C44..0x413CAA, @0x413D02..0x413DA7;
+        //  the dynamic twin @0x413E6A..0x413ED4, @0x413F2C..0x414004]
+        if (abs32(ray.mid[1] - p[1]) > radius + static_cast<int32_t>(ray.half[1]) ||
+                abs32(ray.mid[0] - p[0]) > radius + static_cast<int32_t>(ray.half[0]) ||
+                abs32(ray.mid[2] - p[2]) > radius + static_cast<int32_t>(ray.half[2]))
+            return;
+        if (ray_line_distance(ray.start, ray.dir, p) > radius) return;
+        const Entity *ce = world.registry.get(ch);
+        if (ce == nullptr) return;
+        // [orig: `test dword ptr [esi+24h], 2000001h` @0x413DB4; the
+        //  groundEntity chain @0x413DBD..0x413DDA]
+        if ((ce->flags & 0x2000001u) != 0) return;
+        EntityHandle g = ce->ground_target;
+        for (int depth = 0; depth < 3 && g.valid(); ++depth) {
+            if (g == source) return;
+            const Entity *ge = world.registry.get(g);
+            g = ge != nullptr ? ge->ground_target : EntityHandle{};
+        }
+        const CollisionTargetView *tv = target_view(world, ch, view, mats);
+        if (tv == nullptr) return;
+        // [orig: Entity_RaycastCollisionModel @0x413DE2 / @0x41400C]
+        if (collision_raycast_model(*tv, ray)) nearest = ch;
+    };
+    for (const StaticSlot &s : statics_) {
+        const int32_t p[3] = {static_slot_coord_q16(s.x), static_slot_coord_q16(s.y),
+                              static_slot_coord_q16(s.z)};
+        test_row(s.h, p, static_cast<int32_t>(s.radius) << 16);
+    }
+    for (const DynSlot &d : dynamics_) {
+        const int32_t p[3] = {d.x, d.y, d.z};
+        test_row(d.h, p, d.radius);
+    }
+    return nearest;
+}
+
 int32_t CollisionWorld::raycast_ground(World &world, EntityHandle source, const int32_t pos[3],
                                        int32_t dx, int32_t dy, int32_t z_up, int32_t z_drop,
                                        EntityHandle *out_hit_entity) {
@@ -207,11 +263,9 @@ terrain::TerrainRaycastSample los_field_point_cb(void *vctx, int32_t x, int32_t 
 
 terrain::TerrainRaycastSample los_field_bilinear_sample(const terrain::TerrainHeightField &f,
                                                         int32_t x, int32_t y) {
-    const float h = terrain::height_field_height_mission_bilinear(f, static_cast<float>(x) / 65536.0f,
-                                                     static_cast<float>(y) / 65536.0f);
     terrain::TerrainRaycastSample s;
     s.kind = terrain::TerrainRaycastSample::kHeight;
-    s.height_1616 = static_cast<int32_t>(h * 65536.0f);
+    s.height_1616 = terrain::height_field_height_bilinear_fixed(f, x, y); // the words (D-NET-507)
     return s;
 }
 
@@ -386,11 +440,25 @@ bool CollisionWorld::raycast_clear_cached(World &world, const int32_t a[3],
     return clear;
 }
 
+bool CollisionWorld::raycast_clear_to_person(World &world, const int32_t a[3],
+                                             const int32_t b[3], EntityHandle exclude_a,
+                                             EntityHandle parent_a,
+                                             const LosWireEndpoint &person) {
+    const bool clear = raycast_clear_impl(world, a, b, exclude_a, EntityHandle{}, parent_a,
+                                          person.parent, false, &person);
+    if (ray_debug_enabled_) {
+        ray_debug_record(RayDebugCategory::kUncategorized, world.logic_tick, a, b,
+                         nullptr, clear ? kRayDebugClear : kRayDebugBlocked);
+    }
+    return clear;
+}
+
 bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
                                         const int32_t b[3], EntityHandle exclude_a,
                                         EntityHandle exclude_b, EntityHandle parent_a,
                                         EntityHandle parent_b,
-                                        bool cache_target_views) {
+                                        bool cache_target_views,
+                                        const LosWireEndpoint *wire_b) {
     // [orig: Physics_RaycastTerrainAndSectors @ 0x539910, TRUE = clear; the LOS
     // callers pass ray radius 0, so the witnessed thick-ray Z-drop (@ 0x53994e)
     // and volume inflation are no-ops and are folded out here.]
@@ -406,9 +474,9 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
     // interiors) [orig: the Flags & 0x800000 pair gate @ 0x53994c]. The original's
     // null-entity buried-endpoint variant (@ 0x53999a) has no caller on the LOS
     // chain and is not modeled.
-    const bool both_indoors = ea != nullptr && eb != nullptr &&
-                              (ea->flags & kEntityFlagIndoors) != 0 &&
-                              (eb->flags & kEntityFlagIndoors) != 0;
+    const bool b_indoors = wire_b != nullptr ? wire_b->indoors
+                                             : eb != nullptr && (eb->flags & kEntityFlagIndoors) != 0;
+    const bool both_indoors = ea != nullptr && (ea->flags & kEntityFlagIndoors) != 0 && b_indoors;
     const bool terrain_hit = !both_indoors && terrain != nullptr && terrain->valid() &&
                              los_terrain_blocked(*terrain, a, b);
     lap.mark(devtools::Slot::SIM_REPLICATION_ENTITY_LOS_TERRAIN);
@@ -639,8 +707,12 @@ bool CollisionWorld::entity_los_clear_impl(World &world, EntityHandle listener,
 			// The 0x8000000 skip is sound-only: the walker's includeFlagged arg
 			// is the caller's allTypes [orig: push ebp @0x539ba4 -> @0x5387ac..0x5387b4].
             if (!all_types && (ce->engine_flags & kEntityFlagNoTarget) != 0) continue;
-			if (!all_types && ce->kind != EntityKind::Building)
-				continue; // [orig: itemDef+92 == 5]
+			// With allTypes clear only a Building-type def blocks: the candidate's own
+			// items.def type (ItemDef+0x5C == 5), not its record family, so a pool-2
+			// decoration (sandbags, crates, tyres: type 2) never blocks (D-NET-NEW-L2-41)
+			// [orig: Physics_RaycastFindCollisionEntity @0x539A70 - the candidate's itemDef
+			//  @0x539B7E, `test ebp, ebp` @0x539B9A, `cmp dword ptr [edx+5Ch], 5` @0x539B9E].
+			if (!all_types && !building_def_row(*ce)) continue;
 			// Candidates standing on the listener/source are excluded (one
             // level). [orig: the +0x28 groundEntity checks @ 0x538843-0x538877]
             if (ce->ground_target == listener) continue;

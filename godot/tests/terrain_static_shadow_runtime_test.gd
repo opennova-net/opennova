@@ -421,6 +421,60 @@ func test_caster_motion_waits_for_its_pages_to_recompose() -> void:
 	terrain_data = null
 
 
+# An alpha-tested caster's texture reaches the static shadows' alpha test as its pixels decoded
+# on the CPU with their levels: no device texture is made for it, so none is read back
+# (ObjectData::load_texture_image_name; each read back stalled the device once per caster texture
+# at every mission's first composed pages).
+func test_alpha_tested_caster_texture_decodes_on_the_cpu() -> void:
+	var dir := TestFs.cache_dir(self, "static_shadow_alpha")
+	TestFs.copy(self, SYN_HOUSE_UVSCROLL, dir.path_join("house.3di"))
+	for texture in ["wall.tga", "roof.tga", "wood.tga"]:
+		TestFs.write_bytes(self, dir.path_join(texture),
+				TestFs.tga_bytes(Vector2i(32, 32), Color(1.0, 1.0, 1.0, 1.0)))
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(dir), OK)
+	var object_data := ObjectData.new()
+	assert_eq(object_data.open_from_resource_root(root, "house.3di"), OK)
+
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(320, 180)
+	add_child_autofree(viewport)
+	var terrain_data := TerrainData.new()
+	terrain_data.set_trn_path(TestFs.staged_tmap(TMAP_STAGE))
+	assert_eq(terrain_data.load(), OK)
+	var terrain := Terrain.new()
+	viewport.add_child(terrain)
+	terrain.set_terrain_data(terrain_data)
+	terrain.build()
+	terrain.set_debug_no_frustum(true)
+	var camera := Camera3D.new()
+	viewport.add_child(camera)
+	camera.global_position = Vector3(64.0, 27.0, 64.0)
+	camera.make_current()
+	var placer := MissionObjectPlacer.create(null, null)
+	assert_true(placer.register_object_data("house", object_data))
+	var origin := Vector3(64.0, 0.0, 64.0)
+	origin.y = terrain_data.get_height_world(origin)
+	placer.register_static_instance(100, "house", 0,
+			Transform3D(Basis().scaled(Vector3(3.0, 3.0, 3.0)), origin), true)
+	terrain.set_static_shadow_placer(placer)
+	terrain.set_light_context(null, 1000)
+	var settled := await TestFs.settle_tile_cache(self, terrain)
+	assert_eq(int(settled["shadow_raster_failures"]), 0)
+	assert_gt(int(settled["shadow_provider_epoch_alpha_test_triangles"]), 0,
+		"the alpha-tested material rasterized against its texture's alpha")
+	assert_eq(root.get_decoded_texture_count(), 0,
+		"no device texture is made for a caster's alpha, so none is read back")
+
+	terrain.set_static_shadow_placer(null)
+	terrain.set_terrain_data(null)
+	viewport.free()
+	placer = null
+	object_data = null
+	terrain_data = null
+	TestFs.remove_dir_recursive(dir)
+
+
 func test_animated_caster_material_keeps_one_worker_snapshot_across_still_frames() -> void:
 	# Material animation is sampled at the tick of the frame that requests a
 	# page (retail evaluates tile-model materials inside the tile render), so

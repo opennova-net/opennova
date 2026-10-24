@@ -16,8 +16,16 @@ void ClientReplicaPipeline::apply_entity_routed(const std::vector<uint8_t> &body
     if (!decode_guided_field_group(GuidedMode::ReadFull, group, packet.body, packet.body_size, rec, used)) return;
     auto &s = round->guided;
     if (rec.launched) { s.flags |= 1; round->det_at_expiry = true; }
-    if (rec.target_cleared) { s.flags &= ~2u; s.target = 0xFFFF; s.timer = -1; }
-    if (rec.target_bound) { s.flags |= 2; s.target = rec.target_slot; s.timer = -1; }
+    // The full read stores the wire's target into +0x2D4 whole, so a round the local
+    // launch held goes with it (D-NET-64); only group 3 then binds the lock (flag 2,
+    // timer -1), group 4 storing the target, the type and the point alone, so the
+    // round keeps steering at the decoded point [orig: Entity_SerializeGuidedMissileState
+    //  @0x447C50 (ReadFull) - the clear @0x447E7D, the target stores @0x447ECE
+    //  (group 3) / @0x447F74 (group 4), group 3's LABEL_80 @0x448092 / @0x44809B,
+    //  group 4's return @0x448122].
+    if (rec.target_cleared) { s.flags &= ~2u; s.target = 0xFFFF; s.target_round = -1; s.timer = -1; }
+    if (rec.target_read) { s.target = rec.target_slot; s.target_round = -1; }
+    if (rec.target_bound) { s.flags |= 2; s.timer = -1; }
     if (group == GuidedFieldGroup::TargetTypePos) s.phase = rec.weapon_type;
     if (group == GuidedFieldGroup::TargetPos || group == GuidedFieldGroup::TargetTypePos || group == GuidedFieldGroup::Pos) {
         // Read-full stores every decoded coordinate, including an all-zero point.

@@ -6,6 +6,7 @@
 #include <base/io/json.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
+#include <base/io/tick_rate.h>
 
 #include <algorithm>
 #include <cmath>
@@ -120,15 +121,74 @@ template <typename T, typename Keep> void keep_if(std::vector<T> &records, Keep 
 constexpr uint64_t kBoundaryToleranceNs = 500000000ull; // a sample within 500 ms of each edge
 constexpr uint64_t kMaximumGameplayGapNs = 1000000000ull; // and none further apart than 1 s
 
+// The round ends of a declared rotation: each S2C 0x1D board in the steady window
+// (window.rotation_load_gap).
+std::vector<uint64_t> round_end_boards(const RunFacts &facts) {
+	std::vector<uint64_t> boards;
+	if (facts.info.rotation)
+		for (const wire::ParityEvent &event : facts.trace.events)
+			if (event.dir == 'S' && event.full_tag == 0x01D && !event.settings_update &&
+					facts.in_steady(event.ts_ns))
+				boards.push_back(event.ts_ns);
+	std::sort(boards.begin(), boards.end());
+	return boards;
+}
+
+// The round end lingers 2790 ticks in session before the teardown queues the 0x25
+// [orig: Server_ProcessRoundEnd @0x5164F0 (the arm @0x5166C4)]
+// [orig: Server_TickUpdate @0x51D7E0 (the drain @0x51D9A5..0x51D9CC)], one tick per
+// 16 ms quantum [orig: Game_MainLoop @0x52B630]; the board leaves at most one send
+// interval after its tick, so a 0x25 cannot follow its board by less than the linger
+// less the 500 ms edge tolerance (window.rotation_load_gap).
+constexpr uint64_t kRoundEndLingerTicks = 2790;
+constexpr uint64_t kRoundEndLingerNs = kRoundEndLingerTicks * uint64_t(io::kTickMs) * 1000000ull;
+
+void check_round_linger(const RunFacts &facts, std::vector<EvidenceFinding> &out) {
+	for (const uint64_t board : round_end_boards(facts))
+		for (const wire::ParityEvent &event : facts.trace.events)
+			if (event.dir == 'S' && event.full_tag == 0x025 && event.ts_ns > board &&
+					facts.in_steady(event.ts_ns)) {
+				if (event.ts_ns - board + kBoundaryToleranceNs < kRoundEndLingerNs) {
+					char buf[160];
+					std::snprintf(buf, sizeof(buf),
+							"the S2C 0x25 follows its round end's 0x1D by %.1f s, short of the "
+							"2790-tick linger (%.2f s)",
+							double(event.ts_ns - board) / 1e9, double(kRoundEndLingerNs) / 1e9);
+					out.push_back({ "ROUND_LINGER_SHORT", buf });
+				}
+				break;
+			}
+}
+
+// The end of a run's gameplay coverage: the steady end, or, for a run whose scenario
+// ends the joiner's session, the first S2C 0x103 description record in the steady
+// window. The punt queues the joiner the session disconnect
+// [orig: Server_HandleBanPuntCommand @0x50B380 (the queue @0x50B945..0x50B951)]; its
+// receipt moves the connection to state 6
+// [orig: CNapiNPConnection_HandleDescriptionPacket @0x621AE0 (SetState(6) @0x621D5F)],
+// and leaving state 5 tears the connection down at once
+// [orig: CNapiNPConnection_SetState @0x626250 (the teardown call @0x62628F)], so no
+// gameplay follows it (window.session_end).
+uint64_t session_coverage_end(const RunFacts &facts) {
+	static_assert(has_normalization("window.session_end"));
+	if (facts.info.ends_session)
+		for (const wire::ParityEvent &event : facts.trace.events)
+			if (event.dir == 'S' && facts.in_steady(event.ts_ns) &&
+					identity_of(uint8_t(event.full_tag & 0xFF), event.settings_update) == 0x103)
+				return event.ts_ns;
+	return facts.info.steady_end_ns;
+}
+
 void check_gameplay_coverage(const RunFacts &facts, char dir, std::vector<EvidenceFinding> &out) {
+	const uint64_t end = session_coverage_end(facts);
 	std::vector<uint64_t> samples;
 	if (dir == 'C') {
 		for (const wire::ParityUplinkState &state : facts.trace.uplinks)
-			if (state.decoded && facts.in_steady(state.ts_ns))
+			if (state.decoded && facts.in_steady(state.ts_ns) && state.ts_ns <= end)
 				samples.push_back(state.ts_ns);
 	} else {
 		for (const wire::ParityFrameState &state : facts.trace.frames)
-			if (state.decoded && facts.in_steady(state.ts_ns))
+			if (state.decoded && facts.in_steady(state.ts_ns) && state.ts_ns <= end)
 				samples.push_back(state.ts_ns);
 	}
 	// No samples at all is an absence the gameplay-cadence metric compares with RR
@@ -137,8 +197,47 @@ void check_gameplay_coverage(const RunFacts &facts, char dir, std::vector<Eviden
 		return;
 	std::sort(samples.begin(), samples.end());
 	const std::string label = dir == 'C' ? "C2S 0x0C" : "S2C 0x0A";
-	if (samples.front() > facts.info.steady_start_ns + kBoundaryToleranceNs ||
-			samples.back() + kBoundaryToleranceNs < facts.info.steady_end_ns)
+	// A dead joiner sends no uplink: retail's 0x0C build returns nothing for a body
+	// with no health or the dead flag. A C2S gap or window edge that a frame
+	// reporting the joiner's own health 0 falls in is that death, not a stall
+	// (window.dead_joiner_uplink).
+	static_assert(has_normalization("window.dead_joiner_uplink"));
+	auto dead_in = [&](uint64_t after, uint64_t until) {
+		if (dir != 'C')
+			return false;
+		for (const wire::ParityFrameState &frame : facts.trace.frames)
+			if (frame.decoded && frame.local_tail && frame.health == 0 && frame.ts_ns > after &&
+					frame.ts_ns <= until)
+				return true;
+		return false;
+	};
+	// E2's declared round-end pause (window.rotation_load_gap): a run whose host
+	// rotates stops gameplay at the round end and resumes it in the next mission.
+	// The round end moves each playing slot to state 7
+	// [orig: Server_ProcessRoundEnd @0x5164F0 (the store @0x51685E)] and the host's
+	// 0x0A goes to a state-6 slot only
+	// [orig: Server_SendEntityStateToPlayer @0x517BA0 (the gate @0x517BD2)]; the joiner's
+	// 0x1D raises its round-over gate
+	// [orig: NapiNPClientMsg_0x01D @0x430840 (the store @0x430858)], which holds its 0x0C
+	// [orig: Client_ProcessNetworkFrame @0x42C180 (the gate @0x42C467)] until the next
+	// mission's load clears it. So retail's last sample before the pause comes within one
+	// send interval of the round end's board: a gap (or the window's tail) whose first
+	// sample lies within 500 ms of an S2C 0x1D, on either side, is the pause; a stall of
+	// ours that merely ends in the round end is not. Every round end is excused alike.
+	static_assert(has_normalization("window.rotation_load_gap"));
+	const std::vector<uint64_t> round_ends = round_end_boards(facts);
+	auto paused = [&](uint64_t after, uint64_t until) {
+		for (const uint64_t board : round_ends)
+			if (board < until && (board > after ? board - after : after - board) <= kBoundaryToleranceNs)
+				return true;
+		return false;
+	};
+	const bool start_missing =
+			samples.front() > facts.info.steady_start_ns + kBoundaryToleranceNs &&
+			!dead_in(facts.info.steady_start_ns - kBoundaryToleranceNs, samples.front());
+	const bool end_missing = samples.back() + kBoundaryToleranceNs < end &&
+			!dead_in(samples.back(), end) && !paused(samples.back(), end);
+	if (start_missing || end_missing)
 		out.push_back({ "STEADY_BOUNDARY_GAMEPLAY_MISSING",
 				label +
 						" decoded gameplay has no sample within 500 ms of a steady "
@@ -146,10 +245,12 @@ void check_gameplay_coverage(const RunFacts &facts, char dir, std::vector<Eviden
 	uint64_t widest = 0;
 	uint64_t previous = facts.info.steady_start_ns;
 	for (const uint64_t ts : samples) {
-		widest = std::max(widest, ts - previous);
+		if (!paused(previous, ts) && !dead_in(previous, ts))
+			widest = std::max(widest, ts - previous);
 		previous = ts;
 	}
-	widest = std::max(widest, facts.info.steady_end_ns - previous);
+	if (!paused(previous, end) && !dead_in(previous, end))
+		widest = std::max(widest, end - previous);
 	if (widest > kMaximumGameplayGapNs) {
 		char buf[160];
 		std::snprintf(buf, sizeof(buf), " decoded gameplay has a %.1f ms gap in the steady window",
@@ -195,6 +296,10 @@ void check_datagram_accounting(const RunFacts &facts, std::vector<EvidenceFindin
 }
 
 } // namespace
+
+uint64_t coverage_end(const RunFacts &facts) {
+	return session_coverage_end(facts);
+}
 
 bool parse_utc_ns(std::string_view text, uint64_t &out) {
 	int64_t year, month, day, hour, minute, second;
@@ -274,6 +379,20 @@ bool read_run_info(const std::string &run_dir, const std::string &label, Evidenc
 		out.game_type = std::to_string(static_cast<uint64_t>(game_type->number));
 	}
 	out.port = json.get_int("port", 0);
+	const io::JsonValue *rotation = json.get("rotation");
+	out.rotation = rotation && rotation->is_array() && !rotation->array.empty();
+	// A scenario run keeps its scenario beside the summary (window.session_end).
+	const io::JsonValue *scenario_witness = json.get("scenario_witness");
+	if (scenario_witness && scenario_witness->is_object()) {
+		std::string scenario_text, scenario_error;
+		io::JsonValue scenario;
+		if (io::read_file_text(io::utf8_join(run_dir, "scenario.json"), scenario_text,
+					scenario_error) &&
+				io::json_parse(scenario_text, scenario, scenario_error) && scenario.is_object()) {
+			const io::JsonValue *ends = scenario.get("ends_joiner_session");
+			out.ends_session = ends && ends->is_bool() && ends->boolean;
+		}
+	}
 	out.steady_seconds = json.get_number("steady_seconds", 0.0);
 	if (!(out.steady_seconds > 0.0) || out.steady_seconds > 3600.0) {
 		error = label + ": steady_seconds must be a positive number of seconds";
@@ -295,6 +414,26 @@ bool read_run_info(const std::string &run_dir, const std::string &label, Evidenc
 	if (source == EvidenceSource::External) {
 		out.capture = out.external_capture;
 		out.perspective = "external";
+	} else if (source == EvidenceSource::Late) {
+		// E3: the late joiner's own capture and session; its steady window opens
+		// at its readiness (it joins mid-window) and closes with the cell's.
+		const io::JsonValue *late = json.get("late_joiner");
+		if (!late || !late->is_object()) {
+			error = label + ": " + summary_path + " records no late_joiner";
+			return false;
+		}
+		recorded_capture = late->get_string("capture_path", "");
+		out.capture = resolve_capture(recorded_capture, run_root, run_dir);
+		out.session = static_cast<int>(late->get_number("client_port", 0.0));
+		out.perspective = "late-joiner";
+		uint64_t ready_ns = 0;
+		if (out.session <= 0 || !parse_utc_ns(late->get_string("ready_utc", ""), ready_ns) ||
+				ready_ns >= out.steady_end_ns) {
+			error = label + ": late_joiner needs a client_port and a ready_utc inside the steady window";
+			return false;
+		}
+		out.steady_start_ns = std::max(out.steady_start_ns, ready_ns);
+		out.steady_seconds = double(out.steady_end_ns - out.steady_start_ns) / 1e9;
 	} else {
 		out.capture = resolve_capture(recorded_capture, run_root, run_dir);
 	}
@@ -311,7 +450,7 @@ bool read_run_info(const std::string &run_dir, const std::string &label, Evidenc
 RunFacts make_run_facts(RunInfo info, wire::ParityTrace trace) {
 	RunFacts facts;
 	facts.info = std::move(info);
-	facts.session = bind_session(trace, facts.evidence);
+	facts.session = facts.info.session != 0 ? facts.info.session : bind_session(trace, facts.evidence);
 	const int session = facts.session;
 	facts.trace = std::move(trace);
 	wire::ParityTrace &t = facts.trace;
@@ -324,6 +463,7 @@ RunFacts make_run_facts(RunInfo info, wire::ParityTrace trace) {
 	keep_if(t.uplinks, [session](const auto &r) { return r.session == session; });
 	keep_if(t.frames, [session](const auto &r) { return r.session == session; });
 	keep_if(t.entities, [session](const auto &r) { return r.session == session; });
+	keep_if(t.rounds, [session](const auto &r) { return r.session == session; });
 
 	static_assert(has_normalization("trace.ts_ns"));
 	bool any = false;
@@ -349,6 +489,7 @@ RunFacts make_run_facts(RunInfo info, wire::ParityTrace trace) {
 	} else {
 		check_gameplay_coverage(facts, 'C', facts.evidence);
 		check_gameplay_coverage(facts, 'S', facts.evidence);
+		check_round_linger(facts, facts.evidence);
 	}
 	check_datagram_accounting(facts, facts.evidence);
 	return facts;
@@ -395,10 +536,12 @@ char datagram_direction(const wire::ParityDatagram &datagram, int session) {
 		case CaptureDatagramClass::ClientHello:
 		case CaptureDatagramClass::ClientAuth:
 		case CaptureDatagramClass::ClientProtocol:
+		case CaptureDatagramClass::ClientGoodBye:
 			return 'C';
 		case CaptureDatagramClass::ServerHello:
 		case CaptureDatagramClass::ServerAuth:
 		case CaptureDatagramClass::ServerProtocol:
+		case CaptureDatagramClass::ServerGoodBye:
 			return 'S';
 		default:
 			return datagram.src_port == session ? 'C' : 'S';

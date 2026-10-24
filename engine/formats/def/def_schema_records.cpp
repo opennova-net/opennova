@@ -141,6 +141,7 @@ const std::vector<DefField> kItemFields = {
 	FIELD(DefItemDef, deathtime_ticks, Integer),
 	FIELD(DefItemDef, primary_weapon, Text),
 	FIELD(DefItemDef, huskfinal, Text),
+	FIELD(DefItemDef, huskshadow, Text),
 	FIELD_CUT(DefItemDef, sounddeath, 25), // strncpy(.., 0x18) [orig: @0x49FE81]
 	FIELD(DefItemDef, armor_impact, Integer),
 	FIELD(DefItemDef, armor_blast, Integer),

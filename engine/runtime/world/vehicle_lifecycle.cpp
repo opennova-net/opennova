@@ -3,11 +3,14 @@
 #include "ai.h"
 #include "angle.h"
 #include "collision.h"
+#include "player_spawn.h" // item_index_by_type_id
 #include "vehicle_motor_detail.h"
 #include <base/io/bam.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <iterator>
+#include <vector>
 
 namespace opennova::world {
 namespace {
@@ -29,20 +32,51 @@ struct Trig {
 void read_pose(const Entity &e, int32_t pose[6]) {
 	carrier_pose_fixed(e, pose, pose[3], pose[4], pose[5]);
 }
+// A pose into its reference's frame, in place: the position turned by the
+// reference's inverse attitude, the yaw less the reference's, pitch and roll
+// kept. [orig: Entity_TransformWorldToLocal @0x43BB50]
+void transform_world_to_local(const int32_t parent[6], int32_t pose[6]) {
+	const Trig t(parent, true);
+	const int32_t x = bam_sub(pose[0], parent[0]);
+	const int32_t y = bam_sub(pose[1], parent[1]);
+	const int32_t z = bam_sub(pose[2], parent[2]);
+	const int32_t tx = bam_sub(mul22(x, t.c[0]), mul22(y, t.s[0]));
+	const int32_t ty = bam_add(mul22(x, t.s[0]), mul22(y, t.c[0]));
+	const int32_t tz = bam_add(mul22(tx, t.s[1]), mul22(z, t.c[1]));
+	pose[0] = bam_sub(mul22(tx, t.c[1]), mul22(z, t.s[1]));
+	pose[1] = bam_sub(mul22(ty, t.c[2]), mul22(tz, t.s[2]));
+	pose[2] = bam_add(mul22(ty, t.s[2]), mul22(tz, t.c[2]));
+	pose[3] = bam_sub(pose[3], parent[3]);
+}
+} // namespace
+
+// See vehicle_motor.h. [orig: Entity_TransformLocalToWorld @0x43BD00]
+void entity_transform_local_to_world(const int32_t ref[6], int32_t pose[6]) {
+	const Trig t(ref);
+	const int32_t ry = bam_sub(mul22(pose[1], t.c[2]), mul22(pose[2], t.s[2]));
+	const int32_t rz = bam_add(mul22(pose[1], t.s[2]), mul22(pose[2], t.c[2]));
+	const int32_t px = bam_sub(mul22(pose[0], t.c[1]), mul22(rz, t.s[1]));
+	const int32_t pz = bam_add(mul22(pose[0], t.s[1]), mul22(rz, t.c[1]));
+	pose[0] = bam_add(ref[0], bam_sub(mul22(px, t.c[0]), mul22(ry, t.s[0])));
+	pose[1] = bam_add(ref[1], bam_add(mul22(px, t.s[0]), mul22(ry, t.c[0])));
+	pose[2] = bam_add(ref[2], pz);
+	pose[3] = bam_add(pose[3], ref[3]);
+}
+
+namespace {
 void write_pose(Entity &e, const int32_t pose[6]) {
-	e.position = { float(from_fixed(pose[0])), float(from_fixed(pose[1])),
-		float(from_fixed(pose[2])) };
+	e.position.set_q16({pose[0], pose[1], pose[2]});
 	e.veh.yaw_seeded = true;
 	e.veh.yaw_bam = pose[3];
 	e.veh.air_pitch_bam = pose[4];
 	e.veh.air_roll_bam = pose[5];
-	e.yaw = static_cast<int16_t>(std::lround(mission_yaw_deg_from_bam_heading(pose[3])));
-	e.pitch = degrees_i16_from_bam(pose[4]);
-	e.roll = degrees_i16_from_bam(pose[5]);
+	e.heading = pose[3];
+	e.pitch_bam = pose[4];
+	e.roll_bam = pose[5];
 }
 int32_t respawn_ground(World &world, Entity &e) {
-	const int32_t pos[3] = { to_fixed(e.position.x), to_fixed(e.position.y),
-		to_fixed(e.position.z) };
+	const int32_t pos[3] = { e.position.x.q16, e.position.y.q16,
+		e.position.z.q16 };
 	if (world.ai.collision != nullptr)
 		return world.ai.collision->raycast_ground(
 				world, e.handle, pos, 0, 0, 0x10000, 0x100000, &e.ground_target);
@@ -56,8 +90,6 @@ void mirror_pose(World &world, Entity &e) {
 	if (AiEntity *ai = world.ai.for_handle(e.handle)) {
 		int32_t pose[6];
 		read_pose(e, pose);
-		std::copy_n(pose, 3, ai->pos);
-		std::copy_n(pose, 3, ai->net_saved_live_pose);
 		ai->heading = pose[3];
 		ai->health = e.health;
 		ai->team = e.team;
@@ -67,28 +99,23 @@ void mirror_pose(World &world, Entity &e) {
 }
 } // namespace
 
-// [orig: Game_StartMission @0x526012..0x52606B;
-// Entity_TransformWorldToLocal @0x43BB50]
+// The settle writes no AI-slot word; its pose capture writes the spawn pose
+// (+0x24C..+0x260) and its support (+0x264): the AI slot's +0x10/+0x14 keep the
+// words the model init stamped
+// before it (the BMS record's, Entity::spawn_position), which the 0x0D AI
+// trailer streams, so a hull the settle tick moved still streams its record.
+// [orig: Game_StartMission @0x526012..0x52606B (the model init
+//  Entity_InitAllFromModels @0x52567F; Entity_InitFromModel @0x40E113..0x40E127);
+//  Entity_TransformWorldToLocal @0x43BB50]
 void VehicleSystem::capture_spawn_pose(Entity &e) {
 	auto &m = e.veh;
 	read_pose(e, m.spawn_pose);
-	e.spawn_position = e.position;
 	m.spawn_team = e.team;
 	m.spawn_support = e.ground_target;
 	if (const Entity *support = world_.registry.get(m.spawn_support)) {
 		int32_t parent[6];
 		read_pose(*support, parent);
-		const Trig t(parent, true);
-		const int32_t x = bam_sub(m.spawn_pose[0], parent[0]);
-		const int32_t y = bam_sub(m.spawn_pose[1], parent[1]);
-		const int32_t z = bam_sub(m.spawn_pose[2], parent[2]);
-		const int32_t tx = bam_sub(mul22(x, t.c[0]), mul22(y, t.s[0]));
-		const int32_t ty = bam_add(mul22(x, t.s[0]), mul22(y, t.c[0]));
-		const int32_t tz = bam_add(mul22(tx, t.s[1]), mul22(z, t.c[1]));
-		m.spawn_pose[0] = bam_sub(mul22(tx, t.c[1]), mul22(z, t.s[1]));
-		m.spawn_pose[1] = bam_sub(mul22(ty, t.c[2]), mul22(tz, t.s[2]));
-		m.spawn_pose[2] = bam_add(mul22(ty, t.s[2]), mul22(tz, t.c[2]));
-		m.spawn_pose[3] = bam_sub(m.spawn_pose[3], parent[3]);
+		transform_world_to_local(parent, m.spawn_pose);
 	}
 	m.spawn_pose_valid = true;
 }
@@ -106,17 +133,51 @@ bool VehicleSystem::resolve_spawn_pose(const Entity &e, int32_t pose[6]) const {
 			return false;
 		int32_t parent[6];
 		read_pose(*support, parent);
-		const Trig t(parent);
-		const int32_t ry = bam_sub(mul22(pose[1], t.c[2]), mul22(pose[2], t.s[2]));
-		const int32_t rz = bam_add(mul22(pose[1], t.s[2]), mul22(pose[2], t.c[2]));
-		const int32_t px = bam_sub(mul22(pose[0], t.c[1]), mul22(rz, t.s[1]));
-		const int32_t pz = bam_add(mul22(pose[0], t.s[1]), mul22(rz, t.c[1]));
-		pose[0] = bam_add(parent[0], bam_sub(mul22(px, t.c[0]), mul22(ry, t.s[0])));
-		pose[1] = bam_add(parent[1], bam_add(mul22(px, t.s[0]), mul22(ry, t.c[0])));
-		pose[2] = bam_add(parent[2], pz);
-		pose[3] = bam_add(pose[3], parent[3]);
+		entity_transform_local_to_world(parent, pose);
 	}
 	return true;
+}
+
+// The player spawn markers (types 6001..6004 and 6094..6097, each compared by
+// its items.def row: ItemList_FindIndexByTypeId answers 0 for a type no row
+// carries) take the entity a ray from 1 u over them to 7 u under them finds as
+// their ground link, null on a miss, and a marker that found one moves into
+// that entity's frame in place: its position and yaw carrier-local, as the
+// S2C 0x20 streams them and the spawn's pose turns them back (spawn_select's
+// marker_pose). [orig: Game_StartMission @0x524360 (the pool-3 walk
+// @0x525E6D..0x525F58, the probe @0x525F25..0x525F34, the transform
+// @0x525F39..0x525F50); Entity_FindGroundObjectByRay @0x414380 (the ray @0x414388..0x4143C4,
+// Entity_FindNearestByRay @0x4143C8, the store @0x4143D0)]
+void VehicleSystem::localize_deck_spawn_markers() {
+	static constexpr int32_t kTypes[] = {6001, 6094, 6003, 6096, 6004, 6097, 6002, 6095};
+	int32_t rows[8];
+	for (int i = 0; i < 8; ++i)
+		rows[i] = item_index_by_type_id(world_, kTypes[i]);
+	std::vector<EntityHandle> markers;
+	world_.registry.for_each_in_pool(3, [&](const Entity &e) {
+		if (std::find(std::begin(rows), std::end(rows), e.item_type_index) != std::end(rows))
+			markers.push_back(e.handle);
+	});
+	for (EntityHandle handle : markers) {
+		Entity *marker = world_.registry.get(handle);
+		if (marker == nullptr)
+			continue;
+		const int32_t start[3] = {marker->position.x.q16, marker->position.y.q16,
+				bam_add(marker->position.z.q16, 0x10000)};
+		const int32_t end[3] = {start[0], start[1], bam_sub(start[2], 0x80000)};
+		marker->ground_target = world_.ai.collision != nullptr
+				? world_.ai.collision->find_nearest_by_ray(world_, handle, start, end)
+				: EntityHandle{};
+		const Entity *ground = world_.registry.get(marker->ground_target);
+		if (ground == nullptr)
+			continue;
+		int32_t parent[6], pose[6];
+		read_pose(*ground, parent);
+		read_pose(*marker, pose);
+		transform_world_to_local(parent, pose);
+		marker->position.set_q16({pose[0], pose[1], pose[2]});
+		marker->heading = pose[3];
+	}
 }
 
 // [orig: Game_StartMission @0x525F80..0x526071]
@@ -135,6 +196,7 @@ void VehicleSystem::initialize_mission_vehicles() {
 		if (Entity *entry = world_.registry.get(handle))
 			setup_gunner_attachments(*entry);
 	}
+	localize_deck_spawn_markers();
 	for (EntityHandle handle : handles) {
 		Entity *entry = world_.registry.get(handle);
 		if (entry == nullptr)
@@ -145,18 +207,20 @@ void VehicleSystem::initialize_mission_vehicles() {
 			continue;
 		const int32_t ground = respawn_ground(world_, e);
 		if (ground != INT32_MIN) {
-			e.position.z = float(from_fixed(
-					std::max(world_.env.water_z, bam_add(ground, e.veh.air_probe_z_off))));
-			e.veh.ground_cache = to_fixed(e.position.z);
+			e.position.z.q16 =
+					std::max(world_.env.water_z, bam_add(ground, e.veh.air_probe_z_off));
+			e.veh.ground_cache = e.position.z.q16;
 		}
 		e.flags |= 0x40u;
 		e.engine_flags |= 0x40u;
-		if (vehicle_family_uses_direct_air_mover(t->family))
-			aircraft_client_tick(e, *t);
-		else if (t->family == VehicleFamily::Watercraft)
-			tick_watercraft_motor(e, *t);
-		else
-			tick_motor(e, *t);
+		// The installed +0x1C4 callback, the same one the per-tick update runs:
+		// the family mover with its head's brain promotion (0 -> 22 ground and
+		// boat, 0 -> 14 aircraft) and its occupant / AI drive leg, then the
+		// same-refNum children. (D-NET-515: the aircraft settle ran the bare
+		// physics tick, without the promotion or the AI leg.)
+		// [orig: Game_StartMission `call ecx` (+0x1C4) @0x525FF9..0x526010;
+		//  Entity_UpdateAircraftPhysics @0x490310 (0 -> 14 @0x490377..0x49037D)]
+		update_motor(e, /*is_authority=*/true);
 		capture_spawn_pose(e);
 		mirror_pose(world_, e);
 		// The respawn budget seed: a hull with an AI slot stores thinkCooldown
@@ -178,7 +242,7 @@ void VehicleSystem::initialize_mission_vehicles() {
 // (promote's item_has_brain), so the row is always known here. The model-range
 // words brain+0x2C/+0x30 come from the same models the first init read, so the
 // re-run leaves them as they are.
-// [orig: Entity_LookupRenderCallbacks @0x407E33..0x407E36 binds the row's fn2;
+// [orig: EntityDef_LookupClassCallbacks @0x407E33..0x407E36 binds the row's fn2;
 //  Entity_InitVehicleAIFromDef @0x4686C0 (stamp @0x4686D3..0x468703, slot gate
 //  @0x46878D, re-seed @0x46885B..0x468964); Entity_InitHelicopterAIFromDef
 //  @0x4683C0 (@0x4683D4..0x468404, @0x46848E, @0x46852A..0x468692)]
@@ -234,9 +298,14 @@ bool VehicleSystem::rerun_class_init(Entity &e) {
 // [orig: Entity_RespawnVehicle @0x45FF40]
 void VehicleSystem::respawn(Entity &e) {
 	// The ai_function class init runs first; only when it ran do the rotor
-	// speed/rate words drop. [orig: `cmp [eax+148h],ebx ... call ecx`
-	//  @0x45FF53..0x45FF68; +0x468/+0x460 = 0 @0x45FF6D..0x45FF73]
-	if (rerun_class_init(e)) {
+	// speed/rate words drop. A CHel / cpln row's init ends in its slot leg, brain or
+	// none, so an EWeap helicopter respawns with its slot bound and seeded afresh.
+	// [orig: `cmp [eax+148h],ebx ... call ecx` @0x45FF53..0x45FF68; +0x468/+0x460 = 0
+	//  @0x45FF6D..0x45FF73; Entity_InitHelicopterAIFromDef @0x4683C0 - the no-AI-slot leg's
+	//  jz @0x468493 and the brain leg's jmp @0x46869A, both into the call @0x4686A2]
+	const bool class_init_ran = rerun_class_init(e);
+	run_weapon_slot_class_init(e);
+	if (class_init_ran) {
 		e.veh.part_spin.rate = 0;
 		e.veh.part_spin.speed = 0;
 	}
@@ -331,9 +400,8 @@ void VehicleSystem::respawn(Entity &e) {
 	if (world_.ai.collision != nullptr) world_.ai.collision->rebuild_candidate_slices(world_);
 	const int32_t ground = respawn_ground(world_, e);
 	if (ground != INT32_MIN)
-		e.position.z =
-				float(from_fixed(std::max(world_.env.water_z, bam_add(ground, m.air_probe_z_off))));
-	m.ground_cache = to_fixed(e.position.z);
+		e.position.z.q16 = std::max(world_.env.water_z, bam_add(ground, m.air_probe_z_off));
+	m.ground_cache = e.position.z.q16;
 	stamp_saved_live_pose(e);
 	mirror_pose(world_, e);
 }
@@ -441,13 +509,9 @@ void VehicleSystem::cleanup_destroyed_ref_group(Entity &vehicle) {
 			//  the split's -1 guards @0x546382..0x54638B]
 			other->emplaced_gun_pitch_word = 0;
 			other->emplaced_gun_yaw_word = 0;
-			const auto *weapon = world_.tables.weapons.by_index(other->primary_weapon_slot_adm);
-			if (weapon != nullptr && weapon->startrounds != -1 && weapon->clipsize != -1) {
-				other->primary_weapon_slot.clip =
-						std::min<int32_t>(weapon->clipsize, weapon->startrounds);
-				other->primary_weapon_slot.reserve =
-						weapon->startrounds - other->primary_weapon_slot.clip;
-			}
+			// The slot its class init bound refills from the weapon's startrounds.
+			if (const auto *weapon = world_.tables.weapons.by_index(other->primary_weapon_slot_adm))
+				split_weapon_slot_ammo(*other, weapon->startrounds);
 		}
 		if (world_.rules.logic_authority && other->primary_occupant.valid())
 			detach(other->primary_occupant);
@@ -548,8 +612,8 @@ void VehicleSystem::setup_gunner_attachments(Entity &vehicle) {
 		const Entity *child = world.registry.get(attached_child_handle(b, slot));
 		if (child == nullptr)
 			continue;
-		const int32_t child_pos[3] = { to_fixed(child->position.x),
-			to_fixed(child->position.y), to_fixed(child->position.z) };
+		const int32_t child_pos[3] = { child->position.x.q16,
+			child->position.y.q16, child->position.z.q16 };
 		uint32_t best = 0xFFFFFFFFu;
 		int best_index = -1;
 		for (int j = 0; j < point_count; ++j) {
@@ -586,13 +650,13 @@ void VehicleSystem::update_attached_children(Entity &vehicle) {
 	const CollisionMatrix matrix = entity_placement_matrix(vehicle);
 	const int32_t heading = vehicle.veh.yaw_seeded
 			? vehicle.veh.yaw_bam
-			: bam_heading_from_mission_yaw_deg(static_cast<double>(vehicle.yaw));
+			: vehicle.heading;
 	const int32_t pitch = vehicle.veh.yaw_seeded
 			? vehicle.veh.air_pitch_bam
-			: bam_from_degrees_wrapped(static_cast<double>(vehicle.pitch));
+			: vehicle.pitch_bam;
 	const int32_t roll = vehicle.veh.yaw_seeded
 			? vehicle.veh.air_roll_bam
-			: bam_from_degrees_wrapped(static_cast<double>(vehicle.roll));
+			: vehicle.roll_bam;
 	for (int slot = 0; slot < count; ++slot) {
 		// A child with no assigned point is left alone [orig: @0x45D5F5].
 		const int32_t bone = b.f[AiBrain::kAttachSlots + 2 * slot];
@@ -607,12 +671,10 @@ void VehicleSystem::update_attached_children(Entity &vehicle) {
 		// included) [orig: @0x45D5FF..0x45D61D; @0x45D641..0x45D663].
 		int32_t world_point[3];
 		matrix.transform_point(t->agun_points[static_cast<size_t>(bone - 1)].position, world_point);
-		child->position = { static_cast<float>(from_fixed(world_point[0])),
-			static_cast<float>(from_fixed(world_point[1])),
-			static_cast<float>(from_fixed(world_point[2])) };
-		child->yaw = vehicle.yaw;
-		child->pitch = vehicle.pitch;
-		child->roll = vehicle.roll;
+		child->position.set_q16({world_point[0], world_point[1], world_point[2]});
+		child->heading = vehicle.heading;
+		child->pitch_bam = vehicle.pitch_bam;
+		child->roll_bam = vehicle.roll_bam;
 		child->veh.yaw_seeded = vehicle.veh.yaw_seeded;
 		child->veh.yaw_bam = vehicle.veh.yaw_bam;
 		child->veh.air_pitch_bam = vehicle.veh.air_pitch_bam;
@@ -630,11 +692,9 @@ void VehicleSystem::update_attached_children(Entity &vehicle) {
 		child->veh.air_pitch_rate = dead ? 0 : vehicle.veh.air_pitch_rate;
 		child->veh.air_roll_rate = dead ? 0 : vehicle.veh.air_roll_rate;
 		// One entity struct in retail: a child that carries its own brain reads
-		// the same words through the AiEntity mirrors.
+		// the same angle words through the AiEntity mirrors (its position is the
+		// child's own words, stored above).
 		if (AiEntity *child_ai = world.ai.for_handle(child->handle)) {
-			child_ai->pos[0] = world_point[0];
-			child_ai->pos[1] = world_point[1];
-			child_ai->pos[2] = world_point[2];
 			child_ai->heading = heading;
 			child_ai->pitch = pitch;
 			child_ai->roll = roll;

@@ -10,6 +10,8 @@ const MountLook := preload("res://tests/support/mount_look.gd")
 const TANK_POSITION := Vector2(10.0, 4.0)
 var _presenter: LocalPlayerPresenter
 var _controls: ControlsModel
+var _world: GameWorld
+var _camera: Camera3D
 var _dir := ""
 
 
@@ -17,6 +19,8 @@ func after_each() -> void:
 	if is_instance_valid(_presenter):
 		_presenter.teardown()
 	_presenter = null
+	_world = null
+	_camera = null
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	if not _dir.is_empty():
 		TestFs.remove_dir_recursive(_dir)
@@ -29,12 +33,22 @@ func _advance(sim: Simulation, count := 90) -> void:
 		_presenter.after_world_tick()
 
 
+# A notch is a record of the next update's message pump, which only an update whose
+# input source is the presenter's router runs (engine inmatch::TickInputSource carries
+# the witness): Simulation.step() is a probe's sourceless update, so the wheel steps
+# the session through the shell's frame path until an update ran.
 func _wheel(sim: Simulation, direction: MouseButton) -> void:
 	var event := InputEventMouseButton.new()
 	event.button_index = direction
 	event.pressed = true
 	assert_true(_presenter.handle_input(event, true), "configured wheel event reaches gameplay")
-	_advance(sim, 1)
+	var tick := int(sim.get_logic_tick())
+	for i in 8:
+		_world.tick(_camera.global_position, _camera.global_transform, Simulation.tick_dt(),
+				_presenter.before_world_tick(Simulation.tick_dt(), false, true))
+		if int(sim.get_logic_tick()) != tick:
+			break
+	assert_ne(int(sim.get_logic_tick()), tick, "an update ran the notch's record")
 
 
 func _zoom(sim: Simulation, def: WeaponDef) -> void:
@@ -89,11 +103,19 @@ func test_tanks_seats_optics_and_hud() -> void:
 		var camera := Camera3D.new()
 		add_child_autofree(camera)
 		camera.make_current()
+		_world = world
+		_camera = camera
 		_presenter = LocalPlayerPresenter.new()
 		add_child_autofree(_presenter)
 		_controls = ControlsModel.new()
 		_presenter.setup(world, camera, null, _controls)
 		var sim := world.get_sim()
+		# The first frame's receive pump joins the host's own slot from its own
+		# C2S 0x0B, placing the body at its spawn (D-NET-NEW-L4-5)
+		# [orig: Game_StartMission @0x52624B; Server_TickUpdate @0x51D895 ->
+		# NapiNPServerMsg_PlayerJoinRequest @0x51AB10]: the look and the settle
+		# below run on the joined body.
+		_advance(sim, 1)
 		var hull := sim.entity_card_by_net_id(placed_id)
 		var seat: EntityCardSeat = hull.get_seats()[0]
 		for attempt in 2:

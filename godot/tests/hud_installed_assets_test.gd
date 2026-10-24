@@ -89,6 +89,17 @@ func test_tank_and_pilot_hud_entry_exit() -> void:
 		sim.resolve_item_traits(items)
 		assert_eq(sim.load_weapon_table(art, "weapon.def"), OK)
 		assert_true(sim.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 1))
+		# The apply mounts the slot its select stored, which plays SWITCHRANK on that slot
+		# (engine world/player_loadout.cpp select_current_slot carries the witness); the def
+		# object installs over the idle slot once that has run out.
+		var apply_settled := false
+		for _settle in range(240):
+			var settling := sim.get_local_player_weapon_state()
+			if int(settling.current_action) == 0 and int(settling.next_action) == 0:
+				apply_settled = true
+				break
+			sim.step()
+		assert_true(apply_settled, "the apply's SWITCHRANK on its own slot runs out")
 		sim.set_local_player_weapon(weapons.get_weapon(weapons.find_weapon("WPN_M4AUTO")), {})
 		var seat_position := vehicle_position + control_seat.get_local()
 		MountLook.face(self, sim, seat_position, seat_position - Vector3(1, 0, 0))

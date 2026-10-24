@@ -31,9 +31,12 @@ func test_world_and_presenters_share_one_wall_clock_sample_per_process_frame() -
 	var panm := PanmClock.new()
 	assert_true(panm.sample(world.frame_clock_ms, Engine.get_process_frames()))
 	assert_eq(panm.time_ms, sampled & 0xffffffff, "PANM keeps the retail DWORD clock")
+	# The clock is the process's GetTickCount (engine world/tick_count_clock.h), which
+	# steps on the system timer's 15 and 16 ms: past one interval, the next display
+	# frame's sample is later.
+	OS.delay_msec(20)
 	await get_tree().process_frame
-	await get_tree().process_frame
-	assert_gt(world.frame_clock_ms, sampled, "the next display frame samples wall time again")
+	assert_gt(world.frame_clock_ms, sampled, "the next display frame samples the clock again")
 
 
 func test_panm_evaluator_accepts_the_full_unsigned_clock_domain() -> void:

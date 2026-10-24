@@ -471,7 +471,86 @@ ACTIVATE: ENABLE_HOME_TABS
 					<BODY justify="LEFT" vjustify="CENTER" column="8"></BODY>
 					<BODY justify="LEFT" vjustify="CENTER" column="9"></BODY>
 
+					<SUBST column="0" value="1000" URL>@ICON_STAT@</SUBST>
+					<SUBST column="0" value="1500" URL>@ICON_NOVAWORLD@</SUBST>
+					<SUBST column="0" value="2000" URL>@ICON_STATPASSWORD@</SUBST>
+					<SUBST column="0" value="2500" URL>@ICON_TOURNAMENT@</SUBST>
+					<SUBST column="0" value="3000" URL>@ICON_AFFIL_PUBLIC@</SUBST>
+					<SUBST column="0" value="3500" URL>@ICON_AFFIL_LOCKED@</SUBST>
+					<SUBST column="0" value="4000" URL>@ICON_CONSUMER@</SUBST>
+					<SUBST column="0" value="4500" URL>@ICON_PASSWORD@</SUBST>
 
+					<SUBST column="0" value="2" URL>@ICON_2@</SUBST>
+					<SUBST column="0" value="3" URL>@ICON_3@</SUBST>
+					<SUBST column="0" value="4" URL>@ICON_4@</SUBST>
+					<SUBST column="0" value="5" URL>@ICON_5@</SUBST>
+					<SUBST column="0" value="6" URL>@ICON_6@</SUBST>
+					<SUBST column="0" value="7" URL>@ICON_7@</SUBST>
+					<SUBST column="0" value="8" URL>@ICON_8@</SUBST>
+					<SUBST column="0" value="9" URL>@ICON_9@</SUBST>
+					<SUBST column="0" value="10" URL>@ICON_10@</SUBST>
+					<SUBST column="0" value="11" URL>@ICON_11@</SUBST>
+					<SUBST column="0" value="12" URL>@ICON_12@</SUBST>
+					<SUBST column="0" value="13" URL>@ICON_13@</SUBST>
+					<SUBST column="0" value="14" URL>@ICON_14@</SUBST>
+					<SUBST column="0" value="15" URL>@ICON_15@</SUBST>
+					<SUBST column="1" value="XX" URL>@FLAG_ICON_XX@</SUBST>
+					<SUBST column="1" value="AQ" URL>@FLAG_ICON_AQ@</SUBST>
+					<SUBST column="1" value="AR" URL>@FLAG_ICON_AR@</SUBST>
+					<SUBST column="1" value="AT" URL>@FLAG_ICON_AT@</SUBST>
+					<SUBST column="1" value="AU" URL>@FLAG_ICON_AU@</SUBST>
+					<SUBST column="1" value="BE" URL>@FLAG_ICON_BE@</SUBST>
+					<SUBST column="1" value="BR" URL>@FLAG_ICON_BR@</SUBST>
+					<SUBST column="1" value="CA" URL>@FLAG_ICON_CA@</SUBST>
+					<SUBST column="1" value="CH" URL>@FLAG_ICON_CH@</SUBST>
+					<SUBST column="1" value="CN" URL>@FLAG_ICON_CN@</SUBST>
+					<SUBST column="1" value="DE" URL>@FLAG_ICON_DE@</SUBST>
+					<SUBST column="1" value="DK" URL>@FLAG_ICON_DK@</SUBST>
+					<SUBST column="1" value="ES" URL>@FLAG_ICON_ES@</SUBST>
+					<SUBST column="1" value="EU" URL>@FLAG_ICON_EU@</SUBST>
+					<SUBST column="1" value="FI" URL>@FLAG_ICON_FI@</SUBST>
+					<SUBST column="1" value="FR" URL>@FLAG_ICON_FR@</SUBST>
+					<SUBST column="1" value="GB" URL>@FLAG_ICON_GB@</SUBST>
+					<SUBST column="1" value="GL" URL>@FLAG_ICON_GL@</SUBST>
+					<SUBST column="1" value="GR" URL>@FLAG_ICON_GR@</SUBST>
+					<SUBST column="1" value="UK" URL>@FLAG_ICON_UK@</SUBST>
+					<SUBST column="1" value="HK" URL>@FLAG_ICON_HK@</SUBST>
+					<SUBST column="1" value="HU" URL>@FLAG_ICON_HU@</SUBST>
+					<SUBST column="1" value="IE" URL>@FLAG_ICON_IE@</SUBST>
+					<SUBST column="1" value="IL" URL>@FLAG_ICON_IL@</SUBST>
+					<SUBST column="1" value="IN" URL>@FLAG_ICON_IN@</SUBST>
+					<SUBST column="1" value="IS" URL>@FLAG_ICON_IS@</SUBST>
+					<SUBST column="1" value="IT" URL>@FLAG_ICON_IT@</SUBST>
+					<SUBST column="1" value="JP" URL>@FLAG_ICON_JP@</SUBST>
+					<SUBST column="1" value="KR" URL>@FLAG_ICON_KR@</SUBST>
+					<SUBST column="1" value="LU" URL>@FLAG_ICON_LU@</SUBST>
+					<SUBST column="1" value="MX" URL>@FLAG_ICON_MX@</SUBST>
+					<SUBST column="1" value="NL" URL>@FLAG_ICON_NL@</SUBST>
+					<SUBST column="1" value="NO" URL>@FLAG_ICON_NO@</SUBST>
+					<SUBST column="1" value="NZ" URL>@FLAG_ICON_NZ@</SUBST>
+					<SUBST column="1" value="PL" URL>@FLAG_ICON_PL@</SUBST>
+					<SUBST column="1" value="PR" URL>@FLAG_ICON_PR@</SUBST>
+					<SUBST column="1" value="PT" URL>@FLAG_ICON_PT@</SUBST>
+					<SUBST column="1" value="RO" URL>@FLAG_ICON_RO@</SUBST>
+					<SUBST column="1" value="RU" URL>@FLAG_ICON_RU@</SUBST>
+					<SUBST column="1" value="SE" URL>@FLAG_ICON_SE@</SUBST>
+					<SUBST column="1" value="SG" URL>@FLAG_ICON_SG@</SUBST>
+					<SUBST column="1" value="TW" URL>@FLAG_ICON_TW@</SUBST>
+					<SUBST column="1" value="US" URL>@FLAG_ICON_US@</SUBST>
+					<SUBST column="1" value="ZA" URL>@FLAG_ICON_ZA@</SUBST>
+					<SUBST column="2" value="0" URL>@PB_ICON_0@</SUBST>
+					<SUBST column="2" value="1" URL>@PB_ICON_1@</SUBST>
+					<SUBST column="3" value="1" URL>@PI_ICON_1@</SUBST>
+					<SUBST column="3" value="2" URL>@PI_ICON_2@</SUBST>
+					<SUBST column="3" value="3" URL>@PI_ICON_3@</SUBST>
+					<SUBST column="3" value="4" URL>@PI_ICON_4@</SUBST>
+					<SUBST column="5" value="jox01" URL>@PROD_ICON_JOX1@</SUBST>
+					<SUBST column="5" value="reality" URL>@PROD_ICON_Reality@</SUBST>
+					<SUBST column="5" value="ic" URL>@PROD_ICON_IC@</SUBST>
+					<SUBST column="5" value="snajo" URL>@PROD_ICON_SNAJO@</SUBST>
+					<SUBST column="5" value="sgmod" URL>@PROD_ICON_SGMOD@</SUBST>
+					<SUBST column="5" value="ice" URL>@PROD_ICON_ICE@</SUBST>
+					<SUBST column="5" URL>@PROD_ICON_JOX0@</SUBST>
 				</COLUMN>
 				<ITEMS>
 					<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
@@ -881,7 +960,86 @@ ACTIVATE: ENABLE_HOME_TABS
 					<BODY justify="LEFT" vjustify="CENTER" column="8"></BODY>
 					<BODY justify="LEFT" vjustify="CENTER" column="9"></BODY>
 
+					<SUBST column="1" value="1000" URL>@ICON_STAT@</SUBST>
+					<SUBST column="1" value="1500" URL>@ICON_NOVAWORLD@</SUBST>
+					<SUBST column="1" value="2000" URL>@ICON_STATPASSWORD@</SUBST>
+					<SUBST column="1" value="2500" URL>@ICON_TOURNAMENT@</SUBST>
+					<SUBST column="1" value="3000" URL>@ICON_AFFIL_PUBLIC@</SUBST>
+					<SUBST column="1" value="3500" URL>@ICON_AFFIL_LOCKED@</SUBST>
+					<SUBST column="1" value="4000" URL>@ICON_CONSUMER@</SUBST>
+					<SUBST column="1" value="4500" URL>@ICON_PASSWORD@</SUBST>
 
+					<SUBST column="1" value="2" URL>@ICON_2@</SUBST>
+					<SUBST column="1" value="3" URL>@ICON_3@</SUBST>
+					<SUBST column="1" value="4" URL>@ICON_4@</SUBST>
+					<SUBST column="1" value="5" URL>@ICON_5@</SUBST>
+					<SUBST column="1" value="6" URL>@ICON_6@</SUBST>
+					<SUBST column="1" value="7" URL>@ICON_7@</SUBST>
+					<SUBST column="1" value="8" URL>@ICON_8@</SUBST>
+					<SUBST column="1" value="9" URL>@ICON_9@</SUBST>
+					<SUBST column="1" value="10" URL>@ICON_10@</SUBST>
+					<SUBST column="1" value="11" URL>@ICON_11@</SUBST>
+					<SUBST column="1" value="12" URL>@ICON_12@</SUBST>
+					<SUBST column="1" value="13" URL>@ICON_13@</SUBST>
+					<SUBST column="1" value="14" URL>@ICON_14@</SUBST>
+					<SUBST column="1" value="15" URL>@ICON_15@</SUBST>
+					<SUBST column="2" value="XX" URL>@FLAG_ICON_XX@</SUBST>
+					<SUBST column="2" value="AQ" URL>@FLAG_ICON_AQ@</SUBST>
+					<SUBST column="2" value="AR" URL>@FLAG_ICON_AR@</SUBST>
+					<SUBST column="2" value="AT" URL>@FLAG_ICON_AT@</SUBST>
+					<SUBST column="2" value="AU" URL>@FLAG_ICON_AU@</SUBST>
+					<SUBST column="2" value="BE" URL>@FLAG_ICON_BE@</SUBST>
+					<SUBST column="2" value="BR" URL>@FLAG_ICON_BR@</SUBST>
+					<SUBST column="2" value="CA" URL>@FLAG_ICON_CA@</SUBST>
+					<SUBST column="2" value="CH" URL>@FLAG_ICON_CH@</SUBST>
+					<SUBST column="2" value="CN" URL>@FLAG_ICON_CN@</SUBST>
+					<SUBST column="2" value="DE" URL>@FLAG_ICON_DE@</SUBST>
+					<SUBST column="2" value="DK" URL>@FLAG_ICON_DK@</SUBST>
+					<SUBST column="2" value="ES" URL>@FLAG_ICON_ES@</SUBST>
+					<SUBST column="2" value="EU" URL>@FLAG_ICON_EU@</SUBST>
+					<SUBST column="2" value="FI" URL>@FLAG_ICON_FI@</SUBST>
+					<SUBST column="2" value="FR" URL>@FLAG_ICON_FR@</SUBST>
+					<SUBST column="2" value="GB" URL>@FLAG_ICON_GB@</SUBST>
+					<SUBST column="2" value="GL" URL>@FLAG_ICON_GL@</SUBST>
+					<SUBST column="2" value="GR" URL>@FLAG_ICON_GR@</SUBST>
+					<SUBST column="2" value="UK" URL>@FLAG_ICON_UK@</SUBST>
+					<SUBST column="2" value="HK" URL>@FLAG_ICON_HK@</SUBST>
+					<SUBST column="2" value="HU" URL>@FLAG_ICON_HU@</SUBST>
+					<SUBST column="2" value="IE" URL>@FLAG_ICON_IE@</SUBST>
+					<SUBST column="2" value="IL" URL>@FLAG_ICON_IL@</SUBST>
+					<SUBST column="2" value="IN" URL>@FLAG_ICON_IN@</SUBST>
+					<SUBST column="2" value="IS" URL>@FLAG_ICON_IS@</SUBST>
+					<SUBST column="2" value="IT" URL>@FLAG_ICON_IT@</SUBST>
+					<SUBST column="2" value="JP" URL>@FLAG_ICON_JP@</SUBST>
+					<SUBST column="2" value="KR" URL>@FLAG_ICON_KR@</SUBST>
+					<SUBST column="2" value="LU" URL>@FLAG_ICON_LU@</SUBST>
+					<SUBST column="2" value="MX" URL>@FLAG_ICON_MX@</SUBST>
+					<SUBST column="2" value="NL" URL>@FLAG_ICON_NL@</SUBST>
+					<SUBST column="2" value="NO" URL>@FLAG_ICON_NO@</SUBST>
+					<SUBST column="2" value="NZ" URL>@FLAG_ICON_NZ@</SUBST>
+					<SUBST column="2" value="PL" URL>@FLAG_ICON_PL@</SUBST>
+					<SUBST column="2" value="PR" URL>@FLAG_ICON_PR@</SUBST>
+					<SUBST column="2" value="PT" URL>@FLAG_ICON_PT@</SUBST>
+					<SUBST column="2" value="RO" URL>@FLAG_ICON_RO@</SUBST>
+					<SUBST column="2" value="RU" URL>@FLAG_ICON_RU@</SUBST>
+					<SUBST column="2" value="SE" URL>@FLAG_ICON_SE@</SUBST>
+					<SUBST column="2" value="SG" URL>@FLAG_ICON_SG@</SUBST>
+					<SUBST column="2" value="TW" URL>@FLAG_ICON_TW@</SUBST>
+					<SUBST column="2" value="US" URL>@FLAG_ICON_US@</SUBST>
+					<SUBST column="2" value="ZA" URL>@FLAG_ICON_ZA@</SUBST>
+					<SUBST column="3" value="0" URL>@PB_ICON_0@</SUBST>
+					<SUBST column="3" value="1" URL>@PB_ICON_1@</SUBST>
+					<SUBST column="4" value="1" URL>@PI_ICON_1@</SUBST>
+					<SUBST column="4" value="2" URL>@PI_ICON_2@</SUBST>
+					<SUBST column="4" value="3" URL>@PI_ICON_3@</SUBST>
+					<SUBST column="4" value="4" URL>@PI_ICON_4@</SUBST>
+					<SUBST column="6" value="jox01" URL>@PROD_ICON_JOX1@</SUBST>
+					<SUBST column="6" value="reality" URL>@PROD_ICON_Reality@</SUBST>
+					<SUBST column="6" value="ic" URL>@PROD_ICON_IC@</SUBST>
+					<SUBST column="6" value="snajo" URL>@PROD_ICON_SNAJO@</SUBST>
+					<SUBST column="6" value="sgmod" URL>@PROD_ICON_SGMOD@</SUBST>
+					<SUBST column="6" value="ice" URL>@PROD_ICON_ICE@</SUBST>
+					<SUBST column="6" URL>@PROD_ICON_JOX0@</SUBST>
 				</COLUMN>
 				<ITEMS>
 					<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>

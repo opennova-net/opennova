@@ -102,11 +102,14 @@ void HudFrameCompiler::element_inset_cues(const HudFrameState &s, float w, float
 						draw_list_.lines.push_back({ x + sx * 2 * dx, y + sy * 2 * dy, x + sx * dx,
 								y + sy * dy, 1, 0xFFFF0000u });
 				// The friendly name centres on the aperture in the BOLD slot
-				// (Arial bold), half-bright red.
-				// [orig: Render_WeaponInsetScene -- slot 0xB4C394 @0x5CA0C0,
-				//  HUD_DrawTextAligned_HalfBright mode 2 @0x5CA0CF]
-				emit_slot_text(label_font_bold_, label_scale_, c.target_name.c_str(), x, y,
-						0xFF7F0000u, kFontAlignCenter);
+				// (Arial bold), half-bright red, when the display-name lookup
+				// named one (the role's, HudRoleFacts::inset_target_name).
+				// [orig: Render_WeaponInsetScene -- the null test @0x5CA0B3..0x5CA0B5,
+				//  slot 0xB4C394 @0x5CA0C0, HUD_DrawTextAligned_HalfBright mode 2
+				//  @0x5CA0CF]
+				if (!c.target_name.empty())
+					emit_slot_text(label_font_bold_, label_scale_, c.target_name.c_str(), x, y,
+							0xFF7F0000u, kFontAlignCenter);
 			}
 		}
 	}

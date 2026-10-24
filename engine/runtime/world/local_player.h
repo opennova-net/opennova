@@ -9,6 +9,7 @@
 
 #include <runtime/hud/hud_minimap.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/entity_registry.h>
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/player_input.h>
 #include <runtime/world/player_loadout.h>
@@ -17,6 +18,7 @@
 #include <runtime/world/player_view.h>
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/radar_contacts.h>
+#include <runtime/world/use_press_trace.h>
 #include <runtime/world/vehicle_attach.h>
 
 #include <cstdint>
@@ -101,6 +103,48 @@ public:
     // The input-flag word the held keys fold into every frame and the pack
     // reads and clears [orig: g_InputFlags @0xB3B728 / g_InputFlagsPrev @0xB3B72C].
     PlayerInputFlags input_flags;
+    // The input-flag bits this input frame's drained movement and look records set (a typed
+    // row's, a queued Last_move's), which the fold ORs beside the held keys' and then clears
+    // (apply_player_input_pre_tick); the key reset empties it with the word. Retail's cases OR
+    // them into the word during the drain, past the fold's clear of the reported bits, as the
+    // held keys' own re-queued records do.
+    // [orig: Input_ProcessFrame @0x49D520 - the fold @0x49D541 ahead of the drain's
+    //  Input_HandleActionBinding @0x49D5D8; Input_HandleActionBinding_0 @0x4E0420 - the cases
+    //  each InputFlag names]
+    uint32_t record_input_bits = 0;
+    // A movement or look row's code (the troop class callback's cases 147..159 and 176): the
+    // input-flag bit its bit form ORs, else 0 (any other code).
+    static uint32_t movement_case_bit(int32_t code);
+    // One such case as a record reaches it past the head: the bit form ORs its bit into
+    // record_input_bits, forward and back writing the X axis word with it; a nonzero first
+    // argument (a typed row's) writes forward's X, strafe-left's Y, turn-left's Z or lean-left's
+    // throttle word in place of the bit.
+    // [orig: Input_HandleActionBinding_0 @0x4E0420 - the cases each InputFlag names, their
+    //  argument tests and axis stores]
+    void apply_movement_case(int32_t code, int32_t p1);
+    // The input axis words the pack shifts to the entity's analog bytes: X (+0x130), Y
+    // (+0x131), Z (+0x132) and the throttle (+0x133, its dword's low word). Their writers are
+    // the movement rows' cases (apply_movement_case, and the held forward and back rows in
+    // set_movement_keys); each input frame's head zeroes X, Y and Z (zero_axis_words), the
+    // armory freeze too; the throttle word has no clear. Process globals: they survive a kernel
+    // replacement.
+    // [orig: g_InputAxisX @0xB3B750, g_InputAxisY @0xB3B752, g_InputAxisZ @0xB3B75A,
+    //  g_InputAxisThrottle @0xB3B75C; Player_PackInputStateToEntity @0x4DF79A..0x4DF7B4]
+    struct InputAxisWords {
+        int16_t x = 0;
+        int16_t y = 0;
+        int16_t z = 0;
+        int16_t throttle = 0;
+    };
+    InputAxisWords axis_words;
+    // X, Y and Z zero; the throttle's low word survives (only its dword's high word zeroes):
+    // the input frame's head, ahead of its drain (Role::drain_input_events), and the armory
+    // freeze. A frame that runs no input pass (a menu screen open) zeroes nothing, so the
+    // words the last pass left reach its packs.
+    // [orig: Input_ProcessFrame @0x49D520 - @0x49D54E, @0x49D555, @0x49D56A, the high word
+    //  @0x49D571, ahead of Input_ProcessPlayerFrame @0x49D58B; Game_ProcessMainFrame - the
+    //  UI_IsMenuScreenOpen test @0x52660D skips Input_ProcessFrame @0x52661D]
+    void zero_axis_words();
     // The local player's MoveOrder word (entity+0x12C) as the last pack wrote
     // it. It persists between packs: the motor, the keyboard look rotation and
     // the wire mirror read it every tick, and only a pack rewrites it; a
@@ -116,9 +160,9 @@ public:
     // only the release of a useitem key clears it. While it is set a further
     // press takes the arm and opens nothing, the WEAPON screen's ACCEPT and
     // CANCEL do nothing, and with no menu screen open every frame's input
-    // freezes after its fold (the input-flag word and the X axis word clear,
-    // MoveOrder keeps its stance bits). A process global, it survives a kernel
-    // replacement.
+    // freezes after its fold (the input-flag word and the X, Y and Z axis
+    // words clear, MoveOrder keeps its stance bits). A process global, it
+    // survives a kernel replacement.
     // [orig: Input_HandleActionBinding_0 @0x4E0B12..0x4E0B21;
     //  Input_HandleMenuKeyRelease @0x4DE2D0..0x4DE309;
     //  WeaponLoadout_ApplyFromBuffer @0x565CE4..0x565CEB;
@@ -134,9 +178,11 @@ public:
     // ToSpecial dispatch is dropped [orig: Input_ResetAllState @0x497ED0 --
     // the deferred queue's clear @0x497EF7].
     void clear_deferred_input();
-    // One frame of movement keys: stores the keys plus the sim-owned stance
-    // latch onto `input` and refreshes the view aggregates, whose binocular
-    // suppression reads the input word this frame's fold will leave. The
+    // One frame of movement keys (the held rows, behind the frame's drained
+    // records): stores the keys plus the sim-owned stance latch onto `input`,
+    // writes a held forward or back key's X axis word, and refreshes the view
+    // aggregates, whose binocular suppression reads the input word this
+    // frame's fold will leave. The
     // movement-held latch and the unscope-on-move belong to the pack
     // (apply_player_input_pre_tick). [orig: Player_UpdatePerFrame
     // `test byte ptr g_InputFlags, 1Eh` @0x4de3ae]
@@ -207,17 +253,66 @@ public:
     // no local player.
     bool apply_pose(const int32_t (&position_q16)[3], int32_t heading_bam, int32_t pitch_bam);
     void set_weapon_input(bool fire_held, bool fire_pressed, bool reload_pressed);
-    // The ToSpecial action (input case 220): each press or release edge of its
-    // keys queues one dispatch, and dispatch_to_special runs the queue with the
-    // keys' live state, keeping a deferred dispatch (and those behind it) for
-    // the next frame, as retail's 32-entry deferred input queue does.
+    // The left mouse button's down at the update's message pump: the PowerThrow windup's
+    // restart or clear (world::local_weapon_left_button_down).
+    void left_button_down();
+    // The reload row's arm at its record's dispatch (world::local_weapon_request_reload).
+    bool request_reload();
+    // Entity_UpdateWeaponOverlayFrameState over the local player, whose tables on the
+    // authority are its slot's (g_WeaponSlotArrayBase points there) and on a client its own:
+    // every loaded round cleared, the class pools seeded from the defs for its class, every
+    // clip redrawn through its seat. The held weapon's FSM carries its own copy of the
+    // magazine, which takes the redrawn clip. Its callers: the `allammo` pickup (powerup.h)
+    // and the cheat rows' codes 120 and 121 (inmatch::Role::dispatch_record). No local player
+    // or no inventory: nothing.
+    // [orig: Entity_UpdateWeaponOverlayFrameState @0x4DC340 - the authority's slot leg
+    //  @0x4DC354..0x4DC38F, the local leg @0x4DC39C..0x4DC3E1 / @0x4DC3EC..0x4DC433:
+    //  WeaponSlots_ClearLoadedRounds @0x5423C0, WeaponSlots_SeedAmmoPoolsFromDefs @0x541690,
+    //  WeaponSlots_RecalculateAmmoFromCapacity @0x542280]
+    void refresh_weapon_overlay();
+    // The fire row's press leg at its record's dispatch (world::local_weapon_press_fire).
+    bool press_fire();
+    // The fire row's record past the dispatcher's head and the cease fire (case 0x95): with
+    // the binocular view down, the binding held runs the press leg (a PowerThrow def's
+    // windup start from the keyboard alone, world::local_weapon_power_throw_press; any other
+    // def's gates and request latch, press_fire), the binding up the release leg (a running
+    // windup's throw, world::local_weapon_release_fire). True = a leg latched a request or
+    // started a windup.
+    // [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x95: g_BinocularsViewActive
+    //  @0x4E07B5, Input_IsBindingActive(0x95) @0x4E07D9, the release leg @0x4E07E9, the press
+    //  leg @0x4E08DC (the PowerThrow sign bit @0x4E08FD, the device test @0x4E090B)]
+    bool fire_record(bool binding_held, bool from_keyboard);
+    // The deferred input queue: Input_QueueDeferredEvent's records (a dispatch code and
+    // its first two arguments) in queue order, at most 32. The next input frame's flush
+    // queues each behind the frame's records with the deferred marker
+    // (inmatch::Role::drain_input_events), where each passes the head again; the input
+    // reset empties it (clear_deferred_input). Its writers: case 0xDC's deferral
+    // (dispatch_to_special) and the weapon pump's fire re-queue
+    // (LocalWeaponPumpIO::fire_deferred). The queue's own mode test (the row's mode bit
+    // for the death screen or not) drops nothing either writer queues: both run only for a
+    // live player past the head, and the death screen is a dead one's.
+    // [orig: Input_QueueDeferredEvent @0x4993E0 (the 32 cap @0x4993E8, the mode test
+    //  @0x499404..0x499415, the record @0x499420..0x49946B); Input_FlushDeferredEvents
+    //  @0x497AC0 from Input_ProcessFrame @0x49D591]
+    struct DeferredInputEvent {
+        int32_t code = 0;
+        int32_t p1 = 0;
+        int32_t p2 = 0;
+    };
+    // The fire row's code the re-queue names [orig: WeaponAction_Recoil `push 95h` @0x542E98].
+    static constexpr int32_t kDeferredFireCode = 0x95;
+    // ToSpecial's (catalog row 37) [orig: case 0xDC's Input_QueueDeferredEvent(ecx = the code)
+    //  @0x4E1210].
+    static constexpr int32_t kToSpecialCode = 0xDC;
+    std::vector<DeferredInputEvent> deferred_events;
+    void queue_deferred_event(int32_t code, int32_t p1 = 0, int32_t p2 = 0);
+    // The ToSpecial action (input case 220) at its record's dispatch, with the keys' live
+    // state: a reload or a draw in progress defers it to the next input frame
+    // (queue_deferred_event), as case 0xDC does.
     // [orig: the release pass Input_ProcessKeyboardEvents @0x49D249..0x49D2B9
     //  (row flags & 0x80800000; ToSpecial's row flags 0x8C000801), the press
-    //  @0x49D42F; Input_QueueDeferredEvent @0x4993E0 (the 32 cap @0x4993E8);
-    //  Input_FlushDeferredEvents @0x497AC0 from Input_ProcessFrame @0x49D591]
-    void queue_to_special();
+    //  @0x49D42F; Input_HandleActionBinding_0 case 0xDC @0x4E1161..0x4E1211]
     void dispatch_to_special(bool keys_held);
-    int32_t to_special_queued = 0;
     // The USE-ITEM mount toggle [orig: Input_ProcessFrame release edge
     // @0x49d6dc -> Entity_ToggleVehicleMount @0x436950], including the
     // out-of-session UseGun rejection (rules.mp_session, the retail
@@ -228,6 +323,11 @@ public:
     // transition synced, then the weapon-busy gate (no EquippedSlot passes)
     // [orig: Entity_ToggleVehicleMount @0x436958..0x436977].
     bool mount_toggle_allowed();
+    // The USE readout (an instrument, no behaviour; world/use_press_trace.h): the press and
+    // the toggle gate append here, a joiner's seat scan too (JoinerRole::queue_mount_toggle).
+    UsePressTrace use_trace;
+    // A record of `event` at this logic tick over the local body and its active slot.
+    UsePressRecord use_press_record(UsePressEvent event) const;
     // Numbered seat keys share the panel's list and their own idle/overheat
     // gate; a joiner uses the query then waits for the authority's reply.
     bool find_numbered_seat(int index, VehicleSeatSelection &out,
@@ -254,6 +354,13 @@ public:
     // The authority's read of the local player's dead bit (the entity flags;
     // a joiner reads its replica through inmatch::ClientRuntime::local_player_dead).
     bool local_player_dead() const;
+    // The action dispatcher's drop operand for a binding row flagged 0x1, on the
+    // authority: the constant 2 on a dedicated host in a session (an authority that is
+    // no session peer, whatever its body), else the local player's dead bit (a joiner
+    // reads its replica's bit). [orig: Input_HandleActionBinding @0x49AD40 -
+    //  is_in_session @0x49AD52, is_authority @0x49AD5D, is_mp_session_peer @0x49AD66,
+    //  `mov eax, 2` @0x49AD6F, Flags & 2 @0x49AD76..0x49AD7E]
+    bool action_dispatch_drops() const;
     // --- the medic call (the dead player's C2S 0x2E) -------------------------
     // The retail client medic-call cooldown: 310 ticks stamped at the send
     // [orig: Input_HandleActionBinding case 217 @0x49b511 `dword_B76804 =
@@ -308,12 +415,18 @@ public:
     // [orig: Entity_UpdateInfantryPlayerBody @ 0x4B40E0, block @0x4B5966..0x4B5C97]
     void apply_scoped_aim_drift(AiEntity &body, uint32_t logic_tick);
     // Preserve the retail process globals across a kernel replacement: the
-    // scoped-aim oscillators and the input pack's analog hysteresis. Other
-    // local input, weapon and view state still belongs to the new mission.
+    // scoped-aim oscillators, the input axis words and the input pack's analog
+    // hysteresis. Other local input, weapon and view state still belongs to the
+    // new mission.
     void carry_process_globals_from(const LocalPlayer &previous);
     // The post-tick local view in retail order: the sim-wrote-the-view fold,
     // then the per-frame view promoter and the camera compose.
     void run_local_view_tick();
+    // A paused single-player update's camera leg: the third-person camera's
+    // update alone (world::local_player_camera_update), which retail runs ahead
+    // of the pause test [orig: Game_ProcessMainFrame @0x5263F0 -- the
+    // ThirdPersonCamera_Update call @0x52676F, the pause test @0x526779].
+    void run_paused_camera_update();
     // The authority's own-slot fire gate the embedding role decides each frame
     // ahead of the weapon walk (true outside an MP listen host).
     // [orig: Entity_FireWeaponAndSendPacket @0x42be3a]
@@ -337,6 +450,25 @@ public:
     // 0xFFFF. [orig: Entity_UpdateInfantryPlayerBody -- headLookTarget (+0x344)
     //  @0x4b4f75 / @0x4b5036, the hit of a walk over every pool-0 row]
     uint16_t aim_wire_person() const { return aim_wire_person_; }
+    // The HUD pass head's record build (HudTargetCursor; the caller holds the head's gates),
+    // and the scene frame's read ahead of its pass: the weapon inset reads the cursor as the
+    // frame found it, the crosshair and the uplink the latest build (both held in
+    // view_tracker, which the combat feed reads).
+    // [orig: HUD_RenderAllOverlays @0x5A8070 - the HUD_BuildEntityInfo call @0x5A80BC;
+    //  Render_ProcessMainSceneFrame @0x5CA0F0 - the Render_WeaponInsetScene call @0x5CA949
+    //  ahead of the HUD_RenderAllOverlays calls @0x5CACE3 / @0x5CAD04]
+    void build_hud_target_cursor();
+    void note_hud_scene_head() { view_tracker.hud_cursor_at_scene = view_tracker.hud_cursor; }
+    const HudTargetCursor &hud_target_cursor() const { return view_tracker.hud_cursor; }
+    const HudTargetCursor &hud_target_cursor_at_scene() const {
+        return view_tracker.hud_cursor_at_scene;
+    }
+    // A decoded remote person's row went through the client's destroy: the cursor record names
+    // it no more (hud_target_cursor_note_destroyed carries the witness), nor does the local
+    // body's +0xC word, which the destroy's reference sweep clears in every AI slot naming it.
+    // [orig: Entity_Destroy @0x43E810 - Entity_ClearAllReferences called @0x43E921;
+    //  Entity_ClearAllReferences @0x465670 - the aiRuntime +0xC clear @0x4656DB..0x4656E7]
+    void note_wire_entity_destroyed(uint16_t wire_handle);
     // Reset the frame-input state and seed the look heading from the (auto-)
     // spawned local player's facing — the session bring-up's tail.
     void reset_local_player_input_to_player_facing();
@@ -344,10 +476,17 @@ public:
     // Retains NVG, camera-shake filters, map zoom, and physical held keys.
     // [orig: Game_InitNewRound @0x422740]
     void reset_for_new_round();
-    // The respawn's Player_InitPlayer resets, in order: with `rebuild_kit` the
-    // weapon leg (local_loadout_rebuild with the spawn-default select), then the
-    // view effects (local_player_view_reset: both cleared, NVG seeded from the
-    // mission's StartWithNVGOn bit) and the map state back to its spawn
+    // The round end's four view words, cleared on every role's own round end (the authority's,
+    // a joiner's admin cycle): the binocular view, the raw binocular toggle, the map overlay
+    // mode and the promoted scope byte; nothing else of the view is touched.
+    // [orig: Server_ProcessRoundEnd @0x5164F0 - g_BinocularsViewActive @0x5168EA,
+    //  g_BinocularsToggle @0x5168F0, g_MapOverlayMode @0x5168F6, g_WeaponScopeActive @0x5168FC]
+    void round_end_view_clear();
+    // The respawn's Player_InitPlayer resets, in order: the view effects
+    // (local_player_view_reset: both cleared, NVG seeded from the mission's
+    // StartWithNVGOn bit), then with `rebuild_kit` the weapon leg of a team assign's
+    // re-run (local_loadout_rebuild_on_team_assign: the spawn-default select and the walk,
+    // whose mount runs on a body in play), and the map state back to its spawn
     // defaults (HudMapControl::reset_spawn). A joiner's redeploy runs it
     // without the kit, which the release bundle's 0x5A already rebuilt
     // (D-NET-378). [orig: Player_InitPlayer @0x4E15F0 -- the zoom seeds
@@ -361,6 +500,10 @@ public:
     void sync_local_mounted_input_heading();
 
 private:
+    // The readout's press and toggle-gate records; each returns its argument.
+    UseItemArm note_use_press(UseItemArm arm);
+    bool note_use_toggle_gate(bool allowed);
+
     World &world_;
     float look_accum_x_ = 0.0f;
     float look_accum_y_ = 0.0f;
@@ -381,8 +524,9 @@ private:
     ScopedAimAxis scope_yaw_;
     ScopedAimAxis scope_pitch_;
     // The input pack's analog hysteresis: written only by the pack, never
-    // reset. [orig: byte_B79442 (axes latch), byte_B79440 (throttle latch),
-    //  byte_B79445/44/43 (the last stored X/Y/Z), byte_B79441 (the last throttle)]
+    // reset. [orig: g_InputAnalogAxesLatched @0xB79442, g_InputAnalogThrottleLatched
+    //  @0xB79440, g_InputAnalogLastX / Y / Z @0xB79445 / @0xB79444 / @0xB79443,
+    //  g_InputAnalogLastThrottle @0xB79441]
     struct AnalogPackState {
         bool axes_active = false;
         bool throttle_active = false;
@@ -390,14 +534,13 @@ private:
         int8_t last_throttle = 0;
     };
     AnalogPackState analog_pack_;
-    // The pack's analog legs onto the local player's entity+0x130..+0x133.
+    // The pack's analog legs: the axis words onto the local player's entity+0x130..+0x133.
     // [orig: Player_PackInputStateToEntity @0x4df793..0x4df8f8]
-    // x_frozen: the press latch's freeze zeroed the X axis word this frame.
-    void pack_analog_axes(Entity &entity, bool moving, bool x_frozen);
+    void pack_analog_axes(Entity &entity, bool moving);
     // The pack itself: the input-flag word onto MoveOrder, its movement legs
     // and analog axes, then the word saved and cleared
     // [orig: Player_PackInputStateToEntity @0x4df450].
-    void pack_input_word(bool x_frozen = false);
+    void pack_input_word();
 };
 
 } // namespace opennova::world

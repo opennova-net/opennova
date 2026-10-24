@@ -38,17 +38,17 @@ std::vector<ProtocolMessage> Server_HandleEmoteRequest(NapiNPConnection &sender,
 	broadcast.emote = static_cast<uint8_t>(request.value & 0xFF); // the low byte @0x501e7a
 	broadcast.player_index = world::pool0_index_byte(entity->handle);    // @0x501e87..0x501e92
 	const std::vector<uint8_t> body = encode_emote_broadcast(broadcast);
-	const int32_t sx = world::to_fixed(entity->position.x);
-	const int32_t sy = world::to_fixed(entity->position.y);
-	const int32_t sz = world::to_fixed(entity->position.z);
+	const int32_t sx = entity->position.x.q16;
+	const int32_t sy = entity->position.y.q16;
+	const int32_t sz = entity->position.z.q16;
 	for (NapiNPConnection &recipient : roster) {
 		// Slot active and NetPlayer state 10/11 [orig: @0x501ec0..0x501edb].
 		if (!is_in_match(recipient) || recipient.link.transport == nullptr) continue;
 		const world::Entity *other = world.registry.get(recipient.link.owned_entity);
 		if (other == nullptr) continue;
-		if (std::abs(world::to_fixed(other->position.x) - sx) > kEmoteRangePerAxisFixed ||
-				std::abs(world::to_fixed(other->position.y) - sy) > kEmoteRangePerAxisFixed ||
-				std::abs(world::to_fixed(other->position.z) - sz) > kEmoteRangePerAxisFixed)
+		if (std::abs(other->position.x.q16 - sx) > kEmoteRangePerAxisFixed ||
+				std::abs(other->position.y.q16 - sy) > kEmoteRangePerAxisFixed ||
+				std::abs(other->position.z.q16 - sz) > kEmoteRangePerAxisFixed)
 			continue;
 		// msgClass 0: the unreliable class [orig: SendFiltered(0x2D, 0, 1)
 		// @0x501f38].

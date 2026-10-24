@@ -75,8 +75,10 @@ bool check_timing_constants() {
 	if (!expect(make_session_app_id(9000, 0) == 1000u, "AppId wraps at 0x2328")) return false;
 	if (!expect(make_session_app_id(1234, 5) == 2239u, "AppId sums tick and rand")) return false;
 	if (!expect(SESSION_CONNECT_RETRANSMIT_MS == 3000u, "stage retransmit 3000 ms")) return false;
-	if (!expect(SESSION_GATE_PROBE_RETRY_MS == 3000u && SESSION_GATE_PROBE_TIMEOUT_MS == 30000u,
-	            "gate probe 3000 ms retry / 30000 ms deadline")) return false;
+	// Every fresh probe's cadence, over the 3000 / 30000 the context's creation stores.
+	// [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - 0x7D0 @0x4CE7B4, 0x2710 @0x4CE7C6]
+	if (!expect(SESSION_GATE_PROBE_RETRY_MS == 2000u && SESSION_GATE_PROBE_TIMEOUT_MS == 10000u,
+	            "gate probe 2000 ms retry / 10000 ms deadline")) return false;
 	if (!expect(SESSION_GLSVSS_POLL_MS == 1000u, "GLSVSS poll 1000 ms")) return false;
 	if (!expect(SESSION_HOST_INFO_REFRESH_TICKS == 1860u, "host info refresh 0x744 ticks")) return false;
 	// The six-slot cookie-key ring [orig: CSessionIdRing_AdvanceAndGenerate @0x4dbb80].
@@ -103,6 +105,18 @@ bool check_host_and_gate_error_maps() {
 	if (!expect(novaworld_host_error_tag(0x3F3) == "NWEC60", "1011 -> NWEC60")) return false;
 	if (!expect(novaworld_host_error_tag(1010) == "NWEC58", "other -> NWEC58")) return false;
 	if (!expect(std::string(NWEC_HOST_TIMEOUT) == "NWEC52", "host poll timeout NWEC52")) return false;
+	// The play leg's map over the session's MsgCode word [orig: CNapiGameSession_ConnectOrHost
+	//  @0x4D4F10 - @0x4D5604..0x4D569F]: signed compares, so -1 / -2 are NWEC13, not the poll's
+	//  own NWEC02 / NWEC03.
+	if (!expect(novaworld_play_error_tag(3000) == "NWEC04", "play 3000 -> NWEC04")) return false;
+	if (!expect(novaworld_play_error_tag(3001) == "NWEC05", "play 3001 -> NWEC05")) return false;
+	if (!expect(novaworld_play_error_tag(3006) == "NWEC10", "play 3006 -> NWEC10")) return false;
+	if (!expect(novaworld_play_error_tag(3007) == "NWEC13", "play 3007 -> NWEC13")) return false;
+	if (!expect(novaworld_play_error_tag(200) == "NWEC11", "play 200 -> NWEC11")) return false;
+	if (!expect(novaworld_play_error_tag(203) == "NWEC12", "play 203 -> NWEC12")) return false;
+	if (!expect(novaworld_play_error_tag(1009) == "NWEC14", "play 1009 -> NWEC14")) return false;
+	if (!expect(novaworld_play_error_tag(-1) == "NWEC13", "play -1 -> NWEC13")) return false;
+	if (!expect(novaworld_play_error_tag(-2) == "NWEC13", "play -2 -> NWEC13")) return false;
 	if (!expect(novaworld_gate_error_tag(-2, false) == "NWEC18", "gate -2 -> NWEC18")) return false;
 	if (!expect(novaworld_gate_error_tag(-8, false) == "NWEC24", "gate -8 -> NWEC24")) return false;
 	if (!expect(novaworld_gate_error_tag(-9, false) == "NWEC15", "gate -9 in phase 1 -> the NWEC15 default")) return false;

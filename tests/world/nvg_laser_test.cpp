@@ -9,6 +9,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/nvg_laser.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 using namespace opennova::world;
 
@@ -147,7 +148,7 @@ void test_clip_distance() {
 	crate_seed.has_item_def = true;
 	crate_seed.health = 40;
 	crate_seed.position = Vec3{6.0f, 0.0f, 1.0f};
-	crate_seed.yaw = 90; // identity model placement
+	crate_seed.heading = placed_heading_bam(90); // identity model placement
 	crate_seed.bound_radius = 1.0f;
 	const EntityHandle crate = w.registry.spawn(1, crate_seed);
 	CollisionWorld collision;

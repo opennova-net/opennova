@@ -66,6 +66,10 @@ using namespace program_process;
 namespace {
 
 const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// The JO demo's tag answers in JO's lobby with the reply that names the gate's POST pair and the
+// web endpoint (its live reply is unrecorded; JO's own answers in the live shape, D-NET-721).
+const opennova::TitleIdentity &kJoDemo =
+		*opennova::title_identity(opennova::gameprofile::GAME_JO_DEMO);
 
 constexpr const char *kWebHost = "web.example.test";
 
@@ -132,11 +136,12 @@ int livez_ok(ProgramProcess &process, const std::string &log_path) {
 
 // One gate probe to 127.0.0.1:`port`; its reply decoded into `out`, false when
 // none came within `wait_ms`.
-bool probe_gate(uint16_t port, opennova::GateResponse &out, int wait_ms = 3000) {
+bool probe_gate(uint16_t port, opennova::GateResponse &out, int wait_ms = 3000,
+		const char *tag = kJo.gate_tag) {
 	net::ScopedSocket client(net::udp_bind(0));
 	if (!client.is_valid())
 		return false;
-	const auto inner = opennova::gate_probe_build(kJo.gate_tag);
+	const auto inner = opennova::gate_probe_build(tag);
 	std::vector<uint8_t> probe(inner.size() + 16);
 	size_t probe_size = 0;
 	if (opennova::napi_envelope_encode(
@@ -171,13 +176,13 @@ int session_web_domain(uint16_t port, std::string &web_domain) {
 	};
 	send(session.start());
 	for (int i = 0; i < 25 && session.server_web_domain().empty(); ++i) {
+		session.set_clock_ms(static_cast<uint32_t>(i + 1)); // one millisecond a turn: a 0x81's 0x42 goes at the first pump past it
 		uint8_t rx[4096];
 		net::Endpoint from{};
 		const int n = net::udp_recv_from(client.get(), rx, sizeof(rx), from, 200);
-		if (n <= 0)
-			continue;
 		std::vector<std::vector<uint8_t>> out;
-		TEST_EXPECT(session.handle_datagram(rx, static_cast<size_t>(n), out));
+		if (n > 0)
+			TEST_EXPECT(session.handle_datagram(rx, static_cast<size_t>(n), out));
 		session.finish_receive_batch(out);
 		session.pump(out);
 		for (const auto &datagram : out)
@@ -233,7 +238,7 @@ int exercise_gate(const Binaries &bin, const test_temp::TempDir &temp,
 		if (livez_ok(process, log_path) != 0)
 			return 1;
 		opennova::GateResponse reply;
-		TEST_EXPECT(probe_gate(gate_port, reply));
+		TEST_EXPECT(probe_gate(gate_port, reply, 3000, kJoDemo.gate_tag));
 		TEST_EXPECT(reply.post_port == gate_port);
 		TEST_EXPECT(reply.udp_novaworld == std::vector<std::string>{ "127.0.0.9:64206" });
 		if (stop_cleanly(process, "gate", database, log_path) != 0)
@@ -327,7 +332,7 @@ int exercise_lobby(const Binaries &bin, const test_temp::TempDir &temp,
 			return 1;
 		const uint16_t gate_port = logged_port(read_text(gate_log), kGateLine);
 		opennova::GateResponse reply;
-		TEST_EXPECT(probe_gate(gate_port, reply));
+		TEST_EXPECT(probe_gate(gate_port, reply, 3000, kJoDemo.gate_tag));
 		TEST_EXPECT(reply.udp_novaworld == std::vector<std::string>{ lobby });
 		const std::string startup = std::string("http://") + kWebHost + ":8123/nwprepare.dll?";
 		if (reply.startup_url.compare(0, startup.size(), startup) != 0)
@@ -474,11 +479,10 @@ int exercise_web(const Binaries &bin, const test_temp::TempDir &temp,
 	TEST_EXPECT(logged_port(log, kHttpLine) == http_port);
 	TEST_EXPECT(!has(log, kGateLine) && !has(log, kNwUdpLine) && !has(log, kHealthLine) &&
 			!has(log, "[jobs]") && !has(log, "[fleet]"));
-	// The menus name the one web endpoint (ONNET_WEB_HOST) and the port, as the
-	// gate does.
+	// The menus name the one web endpoint (ONNET_WEB_HOST); each game's HOST_URL is its
+	// host page there (D-NET-NEW-L9-46), so the boot logs the host alone.
 	TEST_EXPECT(has(log,
-			"[http] HOST_URL=http://" + std::string(kWebHost) + ":" + std::to_string(http_port) +
-					"/nwhost.dll"));
+			"[http] web host " + std::string(kWebHost) + " (HOST_URL / GSB_SERVER per game)"));
 	TEST_EXPECT(wait_for_http(process, http_port, "/healthz"));
 	TEST_EXPECT(wait_for_http(process, http_port, "/livez"));
 	if (stop_cleanly(process, "web", database, log_path) != 0)

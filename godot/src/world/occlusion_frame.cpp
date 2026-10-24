@@ -28,6 +28,7 @@
 #include "terrain/terrain.h"
 #include "world/scar_presenter.h"
 
+#include <runtime/environment/water_mirror.h>
 #include <runtime/renderer/scene_pass_gates.h>
 
 using namespace godot;
@@ -45,6 +46,14 @@ ObjectID id_of(const Object *p_object) {
 
 int64_t ticks_usec() {
 	return static_cast<int64_t>(Time::get_singleton()->get_ticks_usec());
+}
+
+// A water mirror's collect view: the scene view's horizontal field on both
+// axes of the square reflection target (engine world/occlusion.h
+// OcclusionWorld::mirror_water_visible).
+double mirror_collect_fov(double p_fov_y_deg, double p_aspect) {
+	const double tan_h = std::tan(Math::deg_to_rad(p_fov_y_deg) * 0.5) * p_aspect;
+	return Math::rad_to_deg(2.0 * std::atan(tan_h));
 }
 
 } // namespace
@@ -120,19 +129,21 @@ opennova::renderer::ScenePassGateEdges OcclusionFrame::apply_blink_gates(bool p_
 	// retail's override is implicit; the remaining g_BlinkWaterVisible legs
 	// (a camera building straddling the water plane, the window latch) ride
 	// the section-mask slice (engine: runtime/renderer/scene_pass_gates.h).
+	// The label reaches the strips alone (renderer::scene_water_visible).
 	const bool water_off =
 			!opennova::renderer::scene_water_visible(static_cast<uint32_t>(flags), false);
 	if (water_off != blink_water_suppressed_) {
 		blink_water_suppressed_ = water_off;
 		if (Water *w = water()) {
-			w->set_visible(!water_off);
+			w->set_blink_water_views(!water_off, !water_off);
 		}
 	}
 	return edges;
 }
 
 void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
-		const Transform3D &p_camera_xform, bool p_forces_indoors, int p_object_detail) {
+		const Transform3D &p_camera_xform, bool p_forces_indoors, int p_object_detail,
+		const Transform3D &p_mirror_eye) {
 	Simulation *s = sim();
 	if (s == nullptr) {
 		return;
@@ -163,6 +174,20 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
 	if (w != nullptr && w->is_water_render_active()) {
 		water_z = w->get_water_height();
 	}
+	// The scene's water mirror collects ahead of it while its water pass is
+	// active, over the view block (the eye without the scene's optics offsets,
+	// which only its drawn reflection takes) and the view's horizontal field on
+	// both axes; the label then reads the word as it stands, the mirror's or the
+	// last collect's (renderer::SceneWaterWord).
+	const bool mirror_ran = w != nullptr && w->is_water_pass_active();
+	const bool mirror_verdict = mirror_ran &&
+			s->run_mirror_occlusion(Simulation::MIRROR_MAIN, p_mirror_eye, p_camera_xform,
+					mirror_collect_fov(fov_y, aspect),
+					opennova::env::kReflectionRttSize, fog, water_z, p_forces_indoors,
+					p_object_detail);
+	main_water_label_ = blink_water_word_.label(blink_letters_, mirror_ran, mirror_verdict);
+	apply_mirror_view(Simulation::MIRROR_MAIN, mirror_ran,
+			p_camera_xform.origin.y < water_z);
 	const bool stats_on = frame_stats_.is_valid() && frame_stats_->is_capture_active();
 	const bool timing = probe_timing_ || stats_on;
 	const int64_t native_start = timing ? ticks_usec() : 0;
@@ -307,14 +332,20 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
 	}
 
 	// The g_BlinkWaterVisible override legs the slice-1 gate deferred: with the
-	// authored water letter suppressing (accum bit 0x8), the water still renders
+	// authored water letter suppressing (accum bit 0x8), the water strip still draws
 	// when the frame latched the exterior or a camera building straddles the
 	// water plane. [orig: @ 0x5c93cb / @ 0x5c95d2 + g_BlinkWaterVisible
 	// @ 0x29ACE40]
 	const int64_t water_apply_start = timing ? ticks_usec() : 0;
+	// The collect wrote the word.
+	blink_water_word_.collect(s->occlusion_water_visible());
 	if (w != nullptr) {
-		w->set_visible(opennova::renderer::scene_water_visible(
-				blink_letters_, s->occlusion_water_visible()));
+		// The main view's label, on its strip alone (the Inset's lands with
+		// apply_inset_frame).
+		w->set_blink_water_views(main_water_label_, main_water_label_);
+		// The scene's water passes store this collect's verdict in the latch
+		// the next scenes' water-active tests read (Water::latch_blink_water).
+		w->latch_blink_water(main_water_label_, blink_water_word_.word);
 	}
 	if (timing) {
 		water_apply_us = ticks_usec() - water_apply_start;
@@ -346,7 +377,7 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
 }
 
 void OcclusionFrame::apply_inset_frame(Camera3D *p_camera, float p_viewport_width,
-		bool p_forces_indoors, int p_object_detail) {
+		bool p_forces_indoors, int p_object_detail, const Transform3D *p_mirror_block) {
 	Simulation *s = sim();
 	EntityIndex *registry = entity_index();
 	if (s == nullptr || registry == nullptr || p_camera == nullptr) {
@@ -371,14 +402,37 @@ void OcclusionFrame::apply_inset_frame(Camera3D *p_camera, float p_viewport_widt
 	}
 	request.force_indoors = p_forces_indoors;
 	request.object_detail = p_object_detail;
+	// The Inset scene's own water mirror collects ahead of its collect while
+	// the Inset's water pass is active: that test reads the latch the main
+	// scene's water pass left this frame (Water::open_inset_water_latch) over
+	// the Inset's own terrain bounds, fed ahead of this collect, and the
+	// mirror's eye is the view block it reflects (engine environment/
+	// water_mirror.h inset_mirror_source). Its label then reads the word as
+	// it stands.
+	bool mirror_ran = false;
+	if (w != nullptr) {
+		w->open_inset_water_latch();
+		mirror_ran = p_mirror_block != nullptr && w->is_inset_water_pass_active();
+	}
+	const bool mirror_verdict = mirror_ran &&
+			s->run_mirror_occlusion(Simulation::MIRROR_INSET, *p_mirror_block, *p_mirror_block,
+					mirror_collect_fov(request.fov_y_deg, request.aspect),
+					opennova::env::kReflectionRttSize, request.fog_dist_units,
+					request.water_z_units, p_forces_indoors, p_object_detail);
+	const bool inset_water_label =
+			blink_water_word_.label(blink_letters_, mirror_ran, mirror_verdict);
+	apply_mirror_view(Simulation::MIRROR_INSET, mirror_ran,
+			mirror_ran && p_mirror_block->origin.y < request.water_z_units);
 	const InsetOcclusionView &inset = s->run_inset_occlusion(request);
 	inset_active_ = true;
 	inset_foliage_mask_anchors_ = inset.foliage_mask_anchors;
-	// Each view's water gate (apply_frame applied the main one): the
-	// authored water letter and that view's own blink-water verdict.
+	// The Inset collect wrote the word. Each view's label on its own strip
+	// (apply_frame's main one kept), then the Inset's water passes store its
+	// verdict in the latch for the next frame's main scene.
+	blink_water_word_.collect(inset.water_visible);
 	if (w != nullptr) {
-		w->set_blink_water_views(!blink_water_suppressed_ || s->occlusion_water_visible(),
-				!blink_water_suppressed_ || inset.water_visible);
+		w->set_blink_water_views(main_water_label_, inset_water_label);
+		w->latch_blink_water(inset_water_label, blink_water_word_.word);
 	}
 	MissionObjectPlacer *statics = placer();
 	const auto note = [this](ObjectModel *p_node) {
@@ -445,15 +499,99 @@ void OcclusionFrame::apply_inset_frame(Camera3D *p_camera, float p_viewport_widt
 	}
 }
 
+void OcclusionFrame::apply_mirror_view(int p_view, bool p_ran, bool p_below_water) {
+	Simulation *s = sim();
+	EntityIndex *registry = entity_index();
+	if (!p_ran || s == nullptr || registry == nullptr) {
+		release_mirror(p_view);
+		return;
+	}
+	mirror_active_[p_view] = true;
+	ObjectModel::set_mirror_view_state(p_view, true, p_below_water);
+	MissionObjectPlacer *statics = placer();
+	if (statics != nullptr) {
+		statics->set_static_mirror_view_state(p_view, true, p_below_water);
+	}
+	const MirrorOcclusionView &view = s->mirror_occlusion(static_cast<Simulation::MirrorView>(p_view));
+	// Its building verdicts, as changes (the main leg's triple form): its raw
+	// section mask and batch/TOC visibility.
+	const PackedInt64Array &changes = view.building_changes;
+	for (int64_t i = 0; i + 2 < changes.size(); i += 3) {
+		if (ObjectModel *node = occlusion_node(registry, changes[i])) {
+			node->set_mirror_occlusion_section_mask(p_view,
+					Simulation::building_visibility_mask(changes[i + 1]), changes[i + 2]);
+			node->set_mirror_occlusion_hidden(p_view,
+					!Simulation::building_visibility_visible(changes[i + 1]));
+		} else if (statics != nullptr) {
+			statics->set_static_instance_mirror_occlusion_hidden(p_view,
+					static_cast<int>(changes[i]),
+					!Simulation::building_visibility_visible(changes[i + 1]));
+		}
+	}
+	// Its entity render gates, as changes.
+	const PackedInt32Array &culled = view.culled_changes;
+	if (culled.size() >= 2) {
+		const int64_t added = culled[0];
+		for (int64_t i = 1; i < 1 + added; ++i) {
+			if (ObjectModel *node = occlusion_node(registry, culled[i])) {
+				node->set_mirror_occlusion_hidden(p_view, true);
+			} else if (statics != nullptr) {
+				statics->set_static_instance_mirror_occlusion_hidden(p_view, culled[i], true);
+			}
+		}
+		for (int64_t i = 2 + added; i < culled.size(); ++i) {
+			if (ObjectModel *node = occlusion_node(registry, culled[i])) {
+				node->set_mirror_occlusion_hidden(p_view, false);
+			} else if (statics != nullptr) {
+				statics->set_static_instance_mirror_occlusion_hidden(p_view, culled[i], false);
+			}
+		}
+	}
+	// The same collect over the rows the wire walk draws, keyed by handle, and
+	// the subscene's own death-piece draws.
+	if (EntityPresenter *presenter = entities()) {
+		presenter->present_death_piece_draws_mirror(p_view, view.death_piece_draws);
+		presenter->set_wire_mirror_view(p_view, true);
+		const PackedInt32Array &wire = view.culled_wire_changes;
+		if (wire.size() >= 2) {
+			const int64_t added = wire[0];
+			for (int64_t i = 1; i < 1 + added; ++i) {
+				presenter->set_render_culled_mirror(p_view, wire[i], true);
+			}
+			for (int64_t i = 2 + added; i < wire.size(); ++i) {
+				presenter->set_render_culled_mirror(p_view, wire[i], false);
+			}
+		}
+	}
+}
+
+void OcclusionFrame::release_mirror(int p_view) {
+	if (!mirror_active_[p_view]) {
+		return;
+	}
+	mirror_active_[p_view] = false;
+	ObjectModel::set_mirror_view_state(p_view, false, false);
+	if (MissionObjectPlacer *statics = placer()) {
+		statics->set_static_mirror_view_state(p_view, false, false);
+	}
+	if (EntityPresenter *presenter = entities()) {
+		presenter->set_wire_mirror_view(p_view, false);
+	}
+	if (Simulation *s = sim()) {
+		s->release_mirror_occlusion(static_cast<Simulation::MirrorView>(p_view));
+	}
+}
+
 void OcclusionFrame::release_inset() {
+	release_mirror(Simulation::MIRROR_INSET);
 	if (!inset_active_) {
 		return;
 	}
 	inset_active_ = false;
 	inset_foliage_mask_anchors_ = PackedVector3Array();
-	// The strip back on the water layer, at the main view's gate.
+	// The strip back on the water layer, at the main view's label.
 	if (Water *w = water()) {
-		const bool main_water = w->is_visible();
+		const bool main_water = w->is_main_view_water();
 		w->set_blink_water_views(main_water, main_water);
 	}
 	for (const KeyValue<uint64_t, ObjectID> &entry : inset_nodes_) {
@@ -478,7 +616,7 @@ void OcclusionFrame::release_inset() {
 
 void OcclusionFrame::enter_probe_skip() {
 	if (Water *w = water()) {
-		w->set_visible(!blink_water_suppressed_);
+		w->set_blink_water_views(!blink_water_suppressed_, !blink_water_suppressed_);
 	}
 	release_overrides(false);
 }
@@ -503,6 +641,7 @@ ObjectModel *OcclusionFrame::occlusion_node(EntityIndex *p_registry, int64_t p_b
 }
 
 void OcclusionFrame::release_overrides(bool /*p_reset_semantics*/) {
+	release_mirror(Simulation::MIRROR_MAIN);
 	release_inset();
 	for (const KeyValue<int64_t, ObjectID> &entry : occlusion_node_cache_) {
 		ObjectModel *node = occlusion_hidden_release_node(entry.key);
@@ -619,10 +758,8 @@ void OcclusionFrame::reset_blink_frame_gates() {
 	if (Celestial *c = celestial()) {
 		c->set_sky_pass_gates(true, true);
 	}
-	if (blink_water_suppressed_) {
-		if (Water *w = water()) {
-			w->set_visible(true);
-		}
+	if (Water *w = water()) {
+		w->set_blink_water_views(true, true);
 	}
 	blink_indoors_ = false;
 	blink_water_suppressed_ = false;

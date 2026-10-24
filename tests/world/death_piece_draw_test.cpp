@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <runtime/renderer/object_lod.h>
+#include <runtime/world/angle.h>
 #include <runtime/world/death_piece_draw.h>
 #include <runtime/world/occlusion.h>
 #include <runtime/world/occlusion_camera.h>
@@ -94,9 +95,11 @@ DeathPiece section_piece(int section) {
 	piece.section = static_cast<uint8_t>(section);
 	piece.hidden_mask = 0x7u & ~(1u << section);
 	piece.pos = Vec3{10.0f, 20.0f, 5.0f};
-	piece.heading = 45.0f;
-	piece.pitch = -10.0f;
-	piece.roll = 5.0f;
+	// The piece's angle words (D-NET-507): 45 deg exactly, and the spawn form of
+	// -10 and 5 deg.
+	piece.heading = 0x20000000;
+	piece.pitch = spawn_angle_bam(-10);
+	piece.roll = spawn_angle_bam(5);
 	piece.render_scale = 1.3f;
 	piece.radius_q16 = q16(4.0);
 	return piece;
@@ -116,7 +119,9 @@ void test_piece_draw_row() {
 	CHECK(draw.pivoted);
 	CHECK(draw.pivot_q16[0] == q16(-1.5) && draw.pivot_q16[1] == q16(0.5) &&
 			draw.pivot_q16[2] == q16(0.25));
-	CHECK(draw.heading == 45.0f && draw.pitch == -10.0f && draw.roll == 5.0f);
+	CHECK(draw.heading == 45.0f &&
+			draw.pitch == static_cast<float>(degrees_from_angle_bam(spawn_angle_bam(-10))) &&
+			draw.roll == static_cast<float>(degrees_from_angle_bam(spawn_angle_bam(5))));
 	// The scale rides the matrix as ftol(scale * 65536.0).
 	CHECK(draw.scale == static_cast<float>(static_cast<int32_t>(1.3f * 65536.0)) / 65536.0f);
 	CHECK(!draw.below_water);

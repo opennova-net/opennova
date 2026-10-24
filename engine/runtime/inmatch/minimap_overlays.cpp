@@ -35,42 +35,6 @@ const replication::ClientRosterSlot *table_slot(const replication::ClientState &
     return slot.bound ? &slot : nullptr;
 }
 
-// Entity_GetDisplayName over the port's entity: null (false) under the rules
-// bit or off pool 0; a non-Player entity of the HUD team yields its authored
-// name or '^' + the compiled-in fallback at its pool-encoded id, another
-// team null; a Player entity names the first S2C 0x4C table slot that drives
-// it: the slot name, then " <ch>" tag "<co>" for a non-empty registry tag,
-// all within 64 bytes; no such slot is null.
-// [orig: Entity_GetDisplayName @0x59BF70 — rules @0x59BF70, pool 0
-//  @0x59BF84, team byte_27234FE (hudInfo+374) @0x59BFA6, fallback
-//  @0x59BFE4..0x59C04D, player slots @0x59C07A..0x59C0A9, the name
-//  Napi_CopyString(.., 64) @0x59c0bb and the wrap @0x59c0c0..0x59c0f9]
-bool display_name(const world::Entity &e, uint8_t hud_team, uint32_t rules_word,
-                  const replication::ClientState *cs, std::string &out) {
-    if ((rules_word & kRulesNoNames) != 0) return false;
-    if (e.handle.pool() != 0) return false;
-    if (((e.flags | e.engine_flags) & world::kEntityFlagPlayer) == 0) {
-        if (e.team != hud_team) return false;
-        out = e.display_name.empty() ? hud::friendly_tag_fallback_name(e.handle.packed)
-                                     : e.display_name;
-        return true;
-    }
-    if (cs == nullptr) return false;
-    for (const replication::ClientVisiblePlayer &entry : cs->visible_players) {
-        const replication::ClientRosterSlot *slot = table_slot(*cs, entry);
-        if (slot == nullptr || slot->entity_slot != e.handle.slot()) continue;
-        out.clear();
-        replication::string_append_n(out, slot->name, 64);
-        if (!slot->registry_clan.empty()) {
-            replication::string_append_n(out, " <ch>", 64);
-            replication::string_append_n(out, slot->registry_clan, 64);
-            replication::string_append_n(out, "<co>", 64);
-        }
-        return true;
-    }
-    return false;
-}
-
 // One bit-5 loop-1 entry's slot entity as the map reads it: a world entity
 // (the listen host's players, the local player) through the shared policy
 // and facts, a joiner's decoded Player row through its own fields.
@@ -172,6 +136,60 @@ void tracked_blip(const world::Entity &e, const world::Entity *local,
 
 } // namespace
 
+// Entity_GetDisplayName over one pool entity's fields: null (false) under the rules bit or off
+// pool 0; a non-Player entity of the HUD team yields its authored name or '^' + the
+// compiled-in fallback at its pool-encoded id, another team null; a Player entity names the
+// first S2C 0x4C table slot that drives it: the slot name, then " <ch>" tag "<co>" for a
+// non-empty registry tag, all within 64 bytes; no such slot is null.
+// [orig: Entity_GetDisplayName @0x59BF70 — rules @0x59BF70, pool 0
+//  @0x59BF84, team byte_27234FE (hudInfo+374) @0x59BFA6, fallback
+//  @0x59BFE4..0x59C04D, player slots @0x59C07A..0x59C0A9, the name
+//  Napi_CopyString(.., 64) @0x59c0bb and the wrap @0x59c0c0..0x59c0f9]
+static bool display_name_of(world::EntityHandle handle, uint32_t flags, uint8_t team,
+                            const std::string &name, uint8_t hud_team, uint32_t rules_word,
+                            const replication::ClientState *cs, std::string &out) {
+    if ((rules_word & kRulesNoNames) != 0) return false;
+    if (handle.pool() != 0) return false;
+    if ((flags & world::kEntityFlagPlayer) == 0) {
+        if (team != hud_team) return false;
+        out = name.empty() ? hud::friendly_tag_fallback_name(handle.packed) : name;
+        return true;
+    }
+    if (cs == nullptr) return false;
+    for (const replication::ClientVisiblePlayer &entry : cs->visible_players) {
+        const replication::ClientRosterSlot *slot = table_slot(*cs, entry);
+        if (slot == nullptr || slot->entity_slot != handle.slot()) continue;
+        out.clear();
+        replication::string_append_n(out, slot->name, 64);
+        if (!slot->registry_clan.empty()) {
+            replication::string_append_n(out, " <ch>", 64);
+            replication::string_append_n(out, slot->registry_clan, 64);
+            replication::string_append_n(out, "<co>", 64);
+        }
+        return true;
+    }
+    return false;
+}
+
+bool entity_display_name(const world::Entity &e, uint8_t hud_team, uint32_t rules_word,
+                         const replication::ClientState *cs, std::string &out) {
+    return display_name_of(e.handle, e.flags | e.engine_flags, e.team, e.display_name, hud_team,
+            rules_word, cs, out);
+}
+
+// A decoded remote person is the pool-0 entity retail's client built for its row: its wire
+// handle the slot, the spawn's Flags word (the Player bit 0x100) and team byte, the Name
+// the spawn copied (entity+0xF4) [orig: NapiNPClientMsg_0x00C @0x42E730 - the Name copy
+//  @0x42E867..0x42E8EA, the team @0x42E979, its own Player test @0x42EAC5].
+bool row_display_name(const replication::ClientEntityState &row, uint8_t hud_team,
+                      uint32_t rules_word, const replication::ClientState *cs,
+                      std::string &out) {
+    return display_name_of(world::EntityHandle{row.handle}, row.rm_entity_flags,
+            row.team_known ? row.team : uint8_t{0}, row.display_name, hud_team, rules_word, cs,
+            out);
+}
+
+
 void build_minimap_overlays(const MinimapOverlayInputs &in, hud::HudMinimapOverlays &out) {
     out = hud::HudMinimapOverlays{};
     out.game_type = in.game_type;
@@ -243,20 +261,20 @@ void build_minimap_overlays(const MinimapOverlayInputs &in, hud::HudMinimapOverl
     };
     std::sort(pool3.begin(), pool3.end(), by_slot);
     std::sort(pool4.begin(), pool4.end(), by_slot);
-    int16_t location = 0;
     for (const world::Entity *e : pool3) {
         hud::HudMinimapPoolEntity row;
         row.def_id = e->item_id;
-        row.x = world::to_fixed(e->position.x);
-        row.y = world::to_fixed(e->position.y);
-        row.radius_q16 = world::to_fixed(e->bound_radius);
-        if (e->item_id == def::DEF_TYPE_NAMED_LOCATION) row.location_index = location++;
+        row.x = e->position.x.q16;
+        row.y = e->position.y.q16;
+        row.radius_q16 = e->bound_radius.q16;
+        // The marker's own entity+0x280, the load's count at its spawn (D-NET-656).
+        if (e->item_id == def::DEF_TYPE_NAMED_LOCATION) row.location_index = e->location_index;
         out.pool3.push_back(row);
     }
     for (const world::Entity *e : pool4) {
         hud::HudMinimapPlayerWaypoint row;
-        row.x = world::to_fixed(e->position.x);
-        row.y = world::to_fixed(e->position.y);
+        row.x = e->position.x.q16;
+        row.y = e->position.y.q16;
         row.name = e->display_name;
         out.player_waypoints.push_back(row);
     }
@@ -283,8 +301,8 @@ void build_minimap_overlays(const MinimapOverlayInputs &in, hud::HudMinimapOverl
         const world::Entity *te = w->registry.get(world::EntityHandle{rt.handle});
         if (te != nullptr) {
             t.live_known = true;
-            t.live_x = world::to_fixed(te->position.x);
-            t.live_y = world::to_fixed(te->position.y);
+            t.live_x = te->position.x.q16;
+            t.live_y = te->position.y.q16;
             t.radio_request = te->radio_request == 1;
             t.hidden_bit = ((te->flags | te->engine_flags) & world::kEntityFlagCarried) != 0;
             t.aboard_vehicle = world::friendly_tag_aboard_vehicle(*w, te->ground_target);
@@ -360,7 +378,7 @@ void build_minimap_overlays(const MinimapOverlayInputs &in, hud::HudMinimapOverl
             if (e == local || e->team != local->team) continue;
             hud::HudMinimapName name;
             name.handle = slot.handle;
-            if (display_name(*e, local->team, in.rules_word, cs, name.text))
+            if (entity_display_name(*e, local->team, in.rules_word, cs, name.text))
                 out.names.push_back(std::move(name));
         }
     }

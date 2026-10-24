@@ -40,6 +40,10 @@ struct JoinSession {
 	std::string needexpkey;
 	std::string pfid;
 	std::string rid;             // RID of the host the client is joining
+	// A LAN-list join's link (the main page's @JOINLAN_URL@): the discovered server's
+	// GSID, which names the host when no RID does, and `lan`, nonzero for that join.
+	std::string gsid;
+	std::string lan;
 };
 
 struct HostSession {
@@ -47,6 +51,14 @@ struct HostSession {
 	std::string host_key;        // 48-char A-P alphabet (24 random bytes nibble-encoded)
 	std::string success;         // e.g. jop_2_host2.htm
 	std::string pfid;
+};
+
+// /NWLogout.dll's relay: the first call's pages, which its bare refresh renders.
+struct LogoutSession {
+	std::string session_tag;
+	std::string success;         // e.g. jop_2_login.htm
+	std::string failure;         // e.g. jop_2_main.htm
+	std::string msgbase;         // e.g. jop_2_msg.htm
 };
 
 // The sessions, in Redis (redis_client.h), so a dance's legs may land on
@@ -81,6 +93,11 @@ public:
 	// connection found dropped fails the call, as a second GETDEL after one the
 	// server ran would answer no session.
 	std::optional<HostSession> take_host(const std::string &tag);
+
+	void put_logout(const std::string &tag, const LogoutSession &session);
+	// The tag's session, removed in the same step (GETDEL): the relay's bare refresh logs out
+	// once. Never sent twice (RedisResend::Never), as take_host.
+	std::optional<LogoutSession> take_logout(const std::string &tag);
 
 private:
 	RedisPool &redis_;

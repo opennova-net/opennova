@@ -4,6 +4,7 @@
 // (the Godot Transform3D round trip contributed no semantics — its basis
 // conversions are reproduced here explicitly).
 #include <runtime/world/mounted_pose.h>
+#include <runtime/world/collision.h>
 #include <runtime/world/world.h>
 #include <runtime/world/vehicle_motor.h>
 
@@ -15,6 +16,7 @@
 #include <cmath>
 #include <vector>
 #include <base/io/bam.h>
+#include <base/io/crt_ftol.h>
 
 using namespace opennova::threedi;
 
@@ -194,6 +196,13 @@ bool affine_inverse(const Affine &t, Affine &o) {
 	return true;
 }
 
+// A part matrix that is the identity: the bone pass leaves its parent's.
+bool panm_matrix_is_identity(const ThreediMatrix4x4 &m) {
+	for (int i = 0; i < 16; ++i)
+		if (m.m[i] != ((i % 5) == 0 ? 1.0f : 0.0f)) return false;
+	return true;
+}
+
 // The evaluator's row-major render matrix into the model-world affine — the
 // exact panm_matrix_to_transform mapping (the (-x, y, z) mirror + row-vector
 // transpose).
@@ -228,6 +237,8 @@ bool resolve_model_mounted_pose(const Threedi3di3 &model,
 		const world::Entity &carrier, const world::Seat &seat,
 		const int32_t *ctrl_values, uint32_t time_ms,
 		world::MountedPose &out) {
+	if (seat.type == world::SeatType::Gunner && !seat.attachment_frame)
+		return resolve_usegun_seat_pose(model, carrier, seat, ctrl_values, time_ms, out);
 	MountedPosePartMatrices rest_parts;
 	MountedPosePartMatrices live_parts;
 	if (!evaluate_model_mounted_pose_parts(model, 0u, nullptr, rest_parts) ||
@@ -242,7 +253,7 @@ bool resolve_model_mounted_pose_from_parts(
 		const Threedi3di3 &model, const world::Entity &carrier,
 		const world::Seat &seat, const MountedPosePartMatrices &rest_parts,
 		const MountedPosePartMatrices &live_parts, world::MountedPose &out) {
-	if (seat.type != world::SeatType::Gunner || seat.bone_index == 0)
+	if (seat.type != world::SeatType::Gunner || !seat.attachment_frame || seat.bone_index == 0)
 		return false;
 	const int userpoint_index = static_cast<int>(seat.bone_index) - 1;
 	if (userpoint_index < 0 || model.user_points == nullptr ||
@@ -273,6 +284,29 @@ bool resolve_model_mounted_pose_from_parts(
 	if (!v3_finite(authored_model_position)) return false;
 
 	if (part_index >= part_count) return false;
+	// An addeweap child on its carrier's root part, the root unanimated (its
+	// rest and live matrices both the identity, so the bone pass leaves the
+	// carrier's own matrix), composes through the original's fixed / float
+	// pipeline word for word: the carrier's placement matrix, the userpoint
+	// through it, the child's position and eulers read back off the product.
+	// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - Bone_BuildAttachmentMatrix
+	//  @0x44109D, Math_FixedPointMatrixToEulerAngles @0x4410DD]
+	if (seat.attachment_frame && part_index == 0 &&
+			panm_matrix_is_identity(rest_parts[0]) && panm_matrix_is_identity(live_parts[0])) {
+		const int32_t point[3] = {up.x, up.y, up.z};
+		const int32_t look[3] = {up.rot_x, up.rot_y, up.rot_z};
+		CollisionMatrix child;
+		if (!collision_matrix_attach_userpoint(entity_placement_matrix(carrier), point, look,
+				child))
+			return false;
+		int32_t euler[3];
+		collision_matrix_to_euler(child, euler);
+		out.position.set_q16({child.m[3], child.m[7], child.m[11]});
+		out.heading = euler[0];
+		out.pitch = euler[1];
+		out.roll = euler[2];
+		return true;
+	}
 	const Affine rest_part = affine_from_panm_matrix(
 			rest_parts[static_cast<size_t>(part_index)]);
 	const Affine live_part = affine_from_panm_matrix(
@@ -290,12 +324,12 @@ bool resolve_model_mounted_pose_from_parts(
 	// Retail transforms the userpoint through the live carrier matrix; integer
 	// mission mirrors must not quantize a moving helicopter's attachment frame.
 	// [orig: Entity_GetBoneTransformAndOrientation @0x4b0c50, @0x4b0d42]
-	const double carrier_yaw = carrier.veh.yaw_seeded
-			? mission_yaw_deg_from_bam_heading(carrier.veh.yaw_bam) : carrier.yaw;
+	const double carrier_yaw = mission_yaw_deg_from_bam_heading(
+			carrier.veh.yaw_seeded ? carrier.veh.yaw_bam : carrier.heading);
 	const double carrier_pitch = carrier.veh.yaw_seeded
-			? carrier.veh.air_pitch_bam * kDegreesPerBam : carrier.pitch;
+			? carrier.veh.air_pitch_bam * kDegreesPerBam : degrees_from_angle_bam(carrier.pitch_bam);
 	const double carrier_roll = carrier.veh.yaw_seeded
-			? carrier.veh.air_roll_bam * kDegreesPerBam : carrier.roll;
+			? carrier.veh.air_roll_bam * kDegreesPerBam : degrees_from_angle_bam(carrier.roll_bam);
 	const M3 carrier_basis = model_basis_from_mission_euler(
 			carrier_pitch, carrier_yaw, carrier_roll);
 	if (!v3_finite(live_model_position) || !m3_finite(carrier_basis) ||
@@ -307,9 +341,10 @@ bool resolve_model_mounted_pose_from_parts(
 					-static_cast<double>(carrier.position.y)}};
 	const V3 live_world_position = affine_xform(carrier_world, live_model_position);
 	if (!v3_finite(live_world_position)) return false;
-	out.position = world::Vec3{static_cast<float>(live_world_position.x),
-			static_cast<float>(-live_world_position.z),
-			static_cast<float>(live_world_position.y)};
+	// The point's words straight from the double (no float view, D-NET-507).
+	out.position.set_q16({static_cast<int32_t>(live_world_position.x * 65536.0),
+			static_cast<int32_t>(-live_world_position.z * 65536.0),
+			static_cast<int32_t>(live_world_position.y * 65536.0)});
 
 	M3 live_basis;
 	if (seat.attachment_frame &&
@@ -348,11 +383,7 @@ bool resolve_model_mounted_pose_from_parts(
 		live_basis = m3_mul(m3_mul(carrier_basis, live_part.basis),
 				attachment_in_part);
 	} else {
-		const double baseline_yaw = seat.attachment_frame
-				? carrier_yaw + seat.yaw_offset
-				: seat.type == world::SeatType::Gunner
-				? carrier_yaw - seat.yaw_offset
-				: carrier_yaw + seat.yaw_offset;
+		const double baseline_yaw = carrier_yaw + seat.yaw_offset;
 		const M3 baseline_basis = model_basis_from_mission_euler(
 				carrier_pitch, baseline_yaw, carrier_roll);
 		M3 rest_basis_inverse;
@@ -387,6 +418,53 @@ bool resolve_model_mounted_pose_from_parts(
 	out.heading = bam_heading_from_mission_yaw_deg(yaw_deg);
 	out.pitch = bam_from_degrees_wrapped(pitch_deg);
 	out.roll = bam_from_degrees_wrapped(roll_deg);
+	return true;
+}
+
+// See mounted_pose.h. The carry rebuilds the carrier's +0xB4 matrix from its words
+// (entity_placement_matrix), swizzles it to render floats and copies it into every bone
+// slot, runs the model's bone pass over those inputs, converts the UseGun userpoint's
+// part back to Q22 / 16.16, transforms the userpoint's position words through it and
+// reads the occupant's Yaw / Pitch / Roll off it; the userpoint's direction words are
+// not read. A model with no part animation hands the inputs back, its every bone the
+// carrier's own matrix. [orig: Entity_AttachToBoneAndUpdateTransform @0x5463D0 - the
+// matrix build @0x546451..0x5464B4, Math_FixedPointToFloatMatrix4x4_Swizzled @0x5464CB,
+// the slot copies @0x5464D3..0x54650D, Model_TransformBoneMatrices @0x54652B (the
+// no-animation return @0x58F27C), Math_FloatMatrixToFixedPoint22 of the userpoint's part
+// (bone+0x18) @0x54653E, Math_FixedPointTransformPoint22 @0x546564,
+// Math_FixedPointMatrixToEulerAngles @0x54656F]
+bool resolve_usegun_seat_pose(const Threedi3di3 &model, const world::Entity &carrier,
+		const world::Seat &seat, const int32_t *ctrl_values, uint32_t time_ms,
+		world::MountedPose &out) {
+	if (seat.type != world::SeatType::Gunner || seat.attachment_frame || seat.bone_index == 0)
+		return false;
+	const size_t userpoint_index = static_cast<size_t>(seat.bone_index) - 1;
+	if (model.user_points == nullptr || userpoint_index >= model.user_point_count ||
+			model.lods == nullptr || model.lod_count == 0)
+		return false;
+	const ThreediUserPoint &up = model.user_points[userpoint_index];
+	if (up.subobject_index < 0 ||
+			static_cast<size_t>(up.subobject_index) >= model.lods[0].render_object_count)
+		return false;
+	ThreediMatrix4x4 carrier_float;
+	collision_matrix_to_render_float(entity_placement_matrix(carrier), carrier_float.m);
+	// One input per possible part (a node's part and parent indices are bytes).
+	const MountedPosePartMatrices inputs(256, carrier_float);
+	MountedPosePartMatrices bones;
+	threedi_panm_pose_parts_over(model, 0, time_ms, ctrl_values, inputs, bones, nullptr);
+	if (static_cast<size_t>(up.subobject_index) >= bones.size()) return false;
+	CollisionMatrix bone;
+	if (!collision_matrix_from_render_float(bones[static_cast<size_t>(up.subobject_index)].m, bone))
+		return false;
+	const int32_t point[3] = {up.x, up.y, up.z};
+	int32_t position[3];
+	bone.transform_point(point, position);
+	out.position.set_q16({position[0], position[1], position[2]});
+	int32_t euler[3];
+	collision_matrix_to_euler(bone, euler);
+	out.heading = euler[0];
+	out.pitch = euler[1];
+	out.roll = euler[2];
 	return true;
 }
 
@@ -440,6 +518,28 @@ void compose_vehicle_pose_controls(World &world, const Entity &carrier,
 uint32_t mounted_pose_time_ms(uint32_t logic_tick, int64_t override_ms) {
     return override_ms >= 0 ? static_cast<uint32_t>(override_ms)
                             : logic_tick * 16u;
+}
+
+// See mounted_pose.h. The x87 fpatan of (y, x), times retail's BAM-per-radian double,
+// truncated toward zero; a result of +2^31 (the -x axis) leaves the int32 range and
+// takes the CRT's indefinite, the 0x80000000 that is BAM 180 all the same.
+// [orig: Entity_GetBoneTransformAndOrientation @0x4B0C50 - `fild [var_14]` (y) then
+//  `fild [eventType]` (x) @0x4B0D69..0x4B0D6D, `fpatan` @0x4B0D74, `fmul dbl_7C19D8`
+//  @0x4B0D76, _ftol2_sse @0x4B0D7C]
+void seat_bone_pose_on_carrier_matrix(const Entity &carrier, const Seat &seat, MountedPose &out) {
+    const CollisionMatrix matrix = entity_placement_matrix(carrier);
+    int32_t position[3];
+    matrix.transform_point(seat.bone_point, position);
+    out.position.set_q16({position[0], position[1], position[2]});
+    int32_t direction[3];
+    matrix.rotate_point(seat.bone_direction, direction);
+    out.heading = io::retail_ftol_sse2(
+            std::atan2(static_cast<double>(direction[1]), static_cast<double>(direction[0])) *
+            io::kBamPerRadian);
+    int32_t euler[3];
+    collision_matrix_to_euler(matrix, euler);
+    out.pitch = euler[1];
+    out.roll = euler[2];
 }
 
 } // namespace opennova::world

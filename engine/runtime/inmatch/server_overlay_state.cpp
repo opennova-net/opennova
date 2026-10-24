@@ -182,11 +182,21 @@ void build_overlay_state_for_player(NapiNPServerCtx &ctx, world::World &world,
 	// [orig: @0x518755..0x518764 (the game types), @0x518766..0x518774 (the
 	//  walk), `cmp [edi+15F10h], 3Ch` / `jle` @0x518776..0x51877D, the pool
 	//  search @0x518781..0x5187A9, Server_QueueOverlayStateEntry(slot, handle,
-	//  2, 0x0C, 0, 0) @0x5187BE, the failed queue's jnz loc_518144 @0x5187C8,
+	//  2, 0x0C, 0, 0) @0x5187BE, the failed queue's jnz 0x518144 @0x5187C8,
 	//  the walk's end @0x5187DD]
+	// An orphaned row is a slot of the table too (D-NET-NEW-L1-24): its own carry count and
+	// body, a full ring flushing to its net player (none past the leave, Q7-36 (a)).
 	if (gt == game_type::kFlagBall || gt == game_type::kFlagMe) {
 		std::vector<NapiNPConnection *> slots;
 		for (NapiNPConnection &c : ctx.np_protocol.connection_list) slots.push_back(&c);
+		for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) {
+			const NapiNPConnection *net_player = orphan_net_player(ctx, orphan);
+			// The 0x20 arm sends to a server-side net player; a described one's queue drops it.
+			if (net_player == nullptr || net_player->type != NapiNPConnection::kTypeServerSide ||
+					net_player->host_disconnect_sent)
+				orphan.row.link.transport = nullptr;
+			slots.push_back(&orphan.row);
+		}
 		std::stable_sort(slots.begin(), slots.end(),
 				[](const NapiNPConnection *a, const NapiNPConnection *b) {
 					return a->reply.player_slot < b->reply.player_slot;
@@ -217,11 +227,11 @@ void build_overlay_state_for_player(NapiNPServerCtx &ctx, world::World &world,
 //  the call @0x5188D6, the phase and the cooldown re-arm @0x5188E5..0x5188FB
 //  on every return)]
 void emit_minimap_overlay_for_slot(NapiNPServerCtx &ctx, world::World &world,
-		NapiNPConnection &conn) {
+		NapiNPConnection &conn, bool in_match) {
 	if (!ctx.is_in_session) return;
 	if ((conn.type != NapiNPConnection::kTypeServerSide &&
 			conn.link.mode != replication::TransportMode::Loopback) ||
-			!is_in_match(conn) || conn.link.transport == nullptr)
+			!in_match)
 		return;
 	SessionReplyState &reply = conn.reply;
 	if (reply.minimap_overlay_cooldown != 0) {

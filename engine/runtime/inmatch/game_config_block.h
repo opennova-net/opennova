@@ -60,8 +60,9 @@
 
 namespace opennova::inmatch {
 
-// The first launch's video test, its words written into `cfg`: the aspect
-// word from the primary desktop's ratio and the quality words the test writes
+// The first launch's video test, its words written into `cfg`: the display mode
+// (video_res, "%ux%u" of the primary desktop), the aspect word from the
+// desktop's ratio and the quality words the test writes
 // on a capable device (renderer/aspect_ratio.h, object_lod.h, texture_filter.h,
 // particle_density.h, texture_compression.h, device_texture.h's terrain texture
 // detail carry each word's witness). Its other words (the terrain polygon,
@@ -69,6 +70,14 @@ namespace opennova::inmatch {
 // consumer here and keep the defaults' values.
 // [orig: Game_RunVideoTestDialog @0x53EC10 from Game_InitSubsystems @0x4A7125]
 void run_video_test(gamecfg::GameCfg &cfg, int32_t desktop_width, int32_t desktop_height);
+
+// The attribute word single player's mission start stores into the block after
+// its save (TeamChoose on), the word its SP session copies too: a process that
+// started a single-player mission hosts with it and its next save point writes
+// it [orig: SinglePlayer_StartMission - Game_SaveConfig @0x561BB2, the store
+// `multiplayerAttributeFlags_34C = 3A06h` @0x561BB7, the copy into
+// game_settings.mp_attributes @0x561CDB].
+inline constexpr int32_t kSinglePlayerMpAttrib = 0x3A06;
 
 class GameConfigBlock {
 public:
@@ -141,7 +150,15 @@ public:
 	bool reload_main_menu(const MenuMount &mount, std::string &error);
 	// A join's switch to the host's expansion: the new mount's weapon table
 	// for the reads and saves after, with no read and no save, so the next
-	// main-menu entry over that mount is a plain read. The switch rebuilds the
+	// main-menu entry over that mount is a plain read. The switch keeps the
+	// expansion it leaves, and the return to the main menu restores it right
+	// after the MainMenu push, handing the block that mount's table the same way
+	// (the embedder's mount; D-NET-622) [orig: Expansion_SwitchTo @0x5688C0 - the
+	// kept name @0x568921..0x568932; Expansion_ReloadAllAssets @0x568370 - the compare
+	// @0x56837A, the restore and clear @0x568390..0x5683A3, the archives
+	// @0x5683A9..0x5683B5, WeaponDef_LoadAll @0x5683F5, the profile load @0x5683FA;
+	// its calls @0x56870B (PostMenu_RouteMissionExit) and @0x56A401
+	// (MultiPlayer_JoinSessionStateMachine)]. The switch rebuilds the
 	// weapon table and reloads the profile, and it neither reads game.cfg nor
 	// raises the reload flag MainMenu's update tests, which only the front-end
 	// Options ACCEPT sets. The default texts stay: gametext.bin loads once.
@@ -150,6 +167,24 @@ public:
 	//  dword_252DD90 written only @0x55AD4F, @0x55AD5B and @0x55291D;
 	//  gametext.bin's one store @0x4A6FED]
 	void switch_expansion(std::string id, gamecfg::WeaponRoster weapons);
+	// Single player's mission start, after its save (the embedder's save
+	// point): the block's mpattrib becomes kSinglePlayerMpAttrib.
+	void single_player_mission_start() { cfg_.mpattrib = kSinglePlayerMpAttrib; }
+	// The join screen's commit into the block: the SPECTATE state always, the
+	// shared password only when SPECTATE was checked (else it went to the side
+	// password, which is the join's). Every join copies both into its
+	// ClientAuth's JSR and JSPP. No cfg row names either word, so the next
+	// read's defaults zero them: the choice lives until the next main-menu
+	// entry (the MainMenu init's read), and a join after a return to the menu
+	// that shows no choice sends neither (D-NET-NEW-L2-12).
+	// [orig: UI_PreGameMenuStateMachine @0x568A40 - the stores @0x568BF0 /
+	//  @0x568C33; UI_JoinSelectedSession @0x5699D0 - the copies @0x569C5D /
+	//  @0x569C6A; Game_LoadConfig @0x551480 -> Config_SetDefaults @0x54D030,
+	//  the memset @0x54D039..0x54D046]
+	void commit_join_choice(bool spectate, const std::string &spectator_password) {
+		cfg_.join_spectate = spectate ? 1 : 0;
+		if (spectate) cfg_.join_spectator_password = spectator_password;
+	}
 
 	// The last read: whether the file opened, whether its version discarded
 	// it for the defaults, and whether it set mpreset.

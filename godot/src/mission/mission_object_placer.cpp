@@ -16,6 +16,7 @@
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/object.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 #include <base/gameprofile/resource_missing.h>
 #include <runtime/anim/adm_fallback.h> // the .adm name every spawn loads (default.adm for a missing one)
@@ -116,6 +117,17 @@ void MissionObjectPlacer::_bind_methods() {
 			DEFVAL(opennova::renderer::kObjectLodDetailLevelMax));
 	ClassDB::bind_method(D_METHOD("get_static_instance_inset_lod", "bms_id"),
 			&MissionObjectPlacer::get_static_instance_inset_lod);
+	ClassDB::bind_method(D_METHOD("update_static_lods_for_mirror_view", "main_camera", "main_width",
+								 "object_detail"),
+			&MissionObjectPlacer::update_static_lods_for_mirror_view,
+			DEFVAL(opennova::renderer::kObjectLodDetailLevelMax));
+	ClassDB::bind_method(D_METHOD("set_static_mirror_view_state", "view", "open", "below_water"),
+			&MissionObjectPlacer::set_static_mirror_view_state);
+	ClassDB::bind_method(D_METHOD("set_static_instance_mirror_occlusion_hidden", "view", "bms_id",
+								 "hidden"),
+			&MissionObjectPlacer::set_static_instance_mirror_occlusion_hidden);
+	ClassDB::bind_method(D_METHOD("get_static_instance_mirror_lod", "view", "bms_id"),
+			&MissionObjectPlacer::get_static_instance_mirror_lod);
 	ClassDB::bind_method(
 			D_METHOD("get_static_instance_live_populations", "bms_id"),
 			&MissionObjectPlacer::get_static_instance_live_populations);
@@ -195,10 +207,6 @@ void MissionObjectPlacer::_bind_methods() {
 
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_LOD",
 			RENDER_LOD);
-	ClassDB::bind_integer_constant(get_class_static(), "",
-			"PLAYER_RUNTIME_TYPE_ID", PLAYER_RUNTIME_TYPE_ID);
-	ClassDB::bind_integer_constant(get_class_static(), "",
-			"PLAYER_VISUAL_ITEM_ID", PLAYER_VISUAL_ITEM_ID);
 }
 
 // --- wiring -----------------------------------------------------------------
@@ -477,7 +485,8 @@ ObjectModel *MissionObjectPlacer::build_animated_model(int p_item_id,
 	model->set_name(vformat("PlayerAvatar_%s", graphic));
 	model->set_graphic_name(graphic);
 	// Wire-streamed and avatar builds share this chain: vehicles reflect in
-	// the water mirror, persons and everything else never do (env #30).
+	// the water mirror above the water, persons and everything else only
+	// below it, where the collect runs unfiltered (env #30).
 	model->set_mirror_reflected(_item_is_mirror_reflected(p_item_id));
 	_configure_item_scale(model, p_item_id);
 	p_parent->add_child(model);
@@ -497,8 +506,6 @@ int MissionObjectPlacer::resolve_player_visual_item_id(int p_runtime_type_id) {
 		return p_runtime_type_id;
 	}
 	static_assert(MissionData::ITEM_ID_OFFSET == opennova::mission::kItemIdOffset);
-	static_assert(PLAYER_RUNTIME_TYPE_ID == opennova::mission::kPlayerRuntimeTypeId);
-	static_assert(PLAYER_VISUAL_ITEM_ID == opennova::mission::kPlayerVisualItemId);
 	const ItemDatabase *db = item_db_.ptr();
 	return opennova::mission::resolve_visual_item_id(p_runtime_type_id,
 			[db](int p_id) { return db->has_item(p_id); });
@@ -510,12 +517,13 @@ int MissionObjectPlacer::resolve_player_visual_item_id(int p_runtime_type_id) {
 // @0x5c7fea..0x5c8020: CharacterEntity blip +4 head then +0 body, see docs/playerinfo/avatars-re.md]) and the arms
 // model in first person. `fallback` = no combo resolved: with an EMPTY registry
 // retail draws the entity's own item model @0x5c8039 (blip handles 0), which is
-// what this returns. The remaining delta, recorded under avatars-re
-// D-PLAYERINFO-1 (FIXED; the row keeps this note): with a
-// populated registry retail's client 0x0C fold re-stamps an UNKNOWN id to the
-// first combo of the entity's team side (NapiNPClientMsg 0x0C @0x42eae4..
-// @0x42eb03 -> EntitySlot_LookupAndPackEntry side = team != 1) — the
-// reimpl has no registry validation yet (D-NET-137) and shows the item model.
+// what this returns. The delta recorded under avatars-re D-PLAYERINFO-1 (FIXED;
+// the row keeps this note): with a populated registry retail's client 0x0C fold
+// re-stamps an UNKNOWN id to the first combo of the entity's team side
+// (NapiNPClientMsg 0x0C @0x42eae4..@0x42eb03 -> CAvatarDefs_PackFirstComboOfAlignment
+// side = team != 1), and so does the joiner's decode view over its mounted
+// Avatars.def (engine ClientReplicaPipeline::resolve_player_net_id,
+// D-NET-NEW-L2-27), so a joiner's row reaches here with a table id.
 Ref<PlayerVisualSpec> MissionObjectPlacer::resolve_player_visual_spec(
 		int p_runtime_type_id, int p_character_id) {
 	_ensure_item_db();
@@ -701,18 +709,27 @@ String MissionObjectPlacer::_model_name_for(const String &p_graphic) const {
 	return basename.is_empty() ? String() : basename + String(".3di");
 }
 
+String MissionObjectPlacer::_object_data_key(const String &p_graphic) const {
+	return _model_name_for(p_graphic).to_lower();
+}
+
 Ref<ObjectData> MissionObjectPlacer::_load_object_data(
 		const String &p_graphic) {
-	const Ref<ObjectData> *cached = object_data_cache_.getptr(p_graphic);
+	const String key = _object_data_key(p_graphic);
+	const Ref<ObjectData> *cached = object_data_cache_.getptr(key);
 	if (cached != nullptr) {
 		return *cached;
 	}
 	Ref<ObjectData> data;
 	const String model_name = _model_name_for(p_graphic);
 	if (!model_name.is_empty() && resource_root_.is_valid()) {
+		const uint64_t load_start = Time::get_singleton()->get_ticks_usec();
 		Ref<ObjectData> d;
 		d.instantiate();
-		if (d->open_from_resource_root(resource_root_, model_name) == OK) {
+		const Error opened = d->open_from_resource_root(resource_root_, model_name);
+		++load_profile_.data_loads;
+		load_profile_.data_us += Time::get_singleton()->get_ticks_usec() - load_start;
+		if (opened == OK) {
 			data = d;
 		} else if (!resource_root_->has_file(model_name)) {
 			// No file of the name (one there that does not read is no miss): the log line the editor's
@@ -721,7 +738,7 @@ Ref<ObjectData> MissionObjectPlacer::_load_object_data(
 					"what draws it is not drawn");
 		}
 	}
-	object_data_cache_[p_graphic] = data;
+	object_data_cache_[key] = data;
 	return data;
 }
 
@@ -909,12 +926,15 @@ Ref<SkeletalAnim> MissionObjectPlacer::_skeletal_from_adm(
 	if (cached != nullptr) {
 		return *cached;
 	}
+	const uint64_t load_start = Time::get_singleton()->get_ticks_usec();
 	Ref<SkeletalAnim> skeletal;
 	skeletal.instantiate();
 	if (!skeletal->load_from_resource_root(resource_root_, adm_name,
 				p_bone_origins, p_bone_parents)) {
 		skeletal.unref();
 	}
+	++load_profile_.rig_loads;
+	load_profile_.rig_us += Time::get_singleton()->get_ticks_usec() - load_start;
 	skeletal_cache_[cache_key] = skeletal;
 	return skeletal;
 }
@@ -1084,10 +1104,14 @@ int MissionObjectPlacer::update_static_lod_views(const ObjectLodFrame *p_frames,
 	if (static_lod_instances_.is_empty() || p_frames == nullptr) {
 		return 0;
 	}
-	const int view_count = std::clamp(p_frame_count, 0, 2);
+	const int view_count = std::clamp(p_frame_count, 0, 4);
 	const bool inset = view_count > 1 && p_frames[1].valid;
+	bool mirror[2] = { false, false };
+	for (int m = 0; m < 2; ++m) {
+		mirror[m] = static_mirror_open_[m] && view_count > 2 + m && p_frames[2 + m].valid;
+	}
 	int valid_frames = 0;
-	for (int f = 0; f < view_count; ++f) {
+	for (int f = 0; f < std::min(view_count, 2); ++f) {
 		valid_frames += p_frames[f].valid ? 1 : 0;
 	}
 	if (valid_frames == 0) {
@@ -1138,11 +1162,36 @@ int MissionObjectPlacer::update_static_lod_views(const ObjectLodFrame *p_frames,
 													   : instance.occlusion_hidden,
 						  instance.inset_lod_own ? instance.inset_lod : main_lod)
 				: main_lod;
-		const bool split = inset && inset_lod != main_lod;
-		const bool unchanged = main_lod == instance.active_lod &&
-				split == instance.view_split && (!split || inset_lod == instance.inset_lod);
-		instance.inset_lod = inset_lod;
-		instance.inset_lod_own = inset;
+		// Each water mirror's own walk: its verdict (else the main view's by
+		// the water side) and the level its collect's projection selects;
+		// the shared rows show it the main level where it admits their layer.
+		int mirror_lod[2] = { -1, -1 };
+		bool mirror_differs = false;
+		for (int m = 0; m < 2; ++m) {
+			if (!mirror[m]) {
+				continue;
+			}
+			const bool admits = _static_instance_reflected(row) || static_mirror_below_[m];
+			// The walk above may have grown the instance array.
+			instances = static_lod_instances_.ptrw();
+			StaticLodInstance &self = instances[row];
+			const bool hidden = self.mirror_occlusion_own[m] ? self.mirror_occlusion_hidden[m]
+															: (self.occlusion_hidden || !admits);
+			mirror_lod[m] = view_level(p_frames[2 + m], hidden,
+					self.mirror_lod[m] >= 0 ? self.mirror_lod[m] : main_lod);
+			mirror_differs = mirror_differs || mirror_lod[m] != (admits ? main_lod : -1);
+		}
+		StaticLodInstance &current = instances[row];
+		const bool split = (inset && inset_lod != main_lod) || mirror_differs;
+		const bool unchanged = main_lod == current.active_lod && split == current.view_split &&
+				inset == current.inset_view &&
+				(!split || (inset_lod == current.inset_lod && mirror_lod[0] == current.mirror_lod[0] &&
+								   mirror_lod[1] == current.mirror_lod[1]));
+		current.inset_lod = inset_lod;
+		current.inset_lod_own = inset;
+		current.inset_view = inset;
+		current.mirror_lod[0] = mirror_lod[0];
+		current.mirror_lod[1] = mirror_lod[1];
 		if (unchanged) {
 			continue;
 		}
@@ -1175,6 +1224,17 @@ int MissionObjectPlacer::update_static_lods_for_views(Camera3D *p_main, float p_
 	return update_static_lod_views(frames, count);
 }
 
+int MissionObjectPlacer::update_static_lods_for_mirror_view(Camera3D *p_main,
+		float p_main_width, int p_object_detail) {
+	ObjectLodFrame frames[4];
+	frames[0] = ObjectLodFrame::from_camera(p_main, p_main_width, p_object_detail);
+	if (frames[0].valid) {
+		frames[2] = ObjectLodFrame::mirror_collect(p_main->get_global_transform(),
+				frames[0].tan_half_horizontal, p_main_width, p_object_detail);
+	}
+	return update_static_lod_views(frames, 4);
+}
+
 void MissionObjectPlacer::set_static_instance_inset_occlusion_hidden(int p_bms_id,
 		bool p_hidden) {
 	const auto *rec = static_sources_.instance(p_bms_id);
@@ -1193,6 +1253,69 @@ void MissionObjectPlacer::clear_static_instance_inset_occlusion() {
 		instances[row].inset_occlusion_hidden = false;
 		instances[row].inset_occlusion_own = false;
 	}
+}
+
+void MissionObjectPlacer::set_static_instance_mirror_occlusion_hidden(int p_view, int p_bms_id,
+		bool p_hidden) {
+	const auto *rec = static_sources_.instance(p_bms_id);
+	if (p_view < 0 || p_view > 1 || rec == nullptr || rec->lod_instance < 0 ||
+			rec->lod_instance >= static_lod_instances_.size()) {
+		return;
+	}
+	StaticLodInstance &instance = static_lod_instances_.ptrw()[rec->lod_instance];
+	instance.mirror_occlusion_hidden[p_view] = p_hidden;
+	instance.mirror_occlusion_own[p_view] = true;
+}
+
+void MissionObjectPlacer::set_static_mirror_view_state(int p_view, bool p_open,
+		bool p_below_water) {
+	if (p_view < 0 || p_view > 1) {
+		return;
+	}
+	static_mirror_below_[p_view] = p_below_water;
+	if (static_mirror_open_[p_view] == p_open) {
+		return;
+	}
+	static_mirror_open_[p_view] = p_open;
+	if (p_open) {
+		return;
+	}
+	StaticLodInstance *instances = static_lod_instances_.ptrw();
+	for (int row = 0; row < static_lod_instances_.size(); ++row) {
+		instances[row].mirror_occlusion_hidden[p_view] = false;
+		instances[row].mirror_occlusion_own[p_view] = false;
+	}
+}
+
+int MissionObjectPlacer::get_static_instance_mirror_lod(int p_view, int p_bms_id) const {
+	const auto *rec = static_sources_.instance(p_bms_id);
+	if (p_view < 0 || p_view > 1 || rec == nullptr || rec->lod_instance < 0 ||
+			rec->lod_instance >= static_lod_instances_.size()) {
+		return -2;
+	}
+	const StaticLodInstance &instance = static_lod_instances_[rec->lod_instance];
+	return instance.view_split ? instance.mirror_lod[p_view] : instance.active_lod;
+}
+
+bool MissionObjectPlacer::_static_instance_reflected(int p_instance_row) {
+	StaticLodInstance &instance = static_lod_instances_.write[p_instance_row];
+	if (instance.reflected >= 0) {
+		return instance.reflected != 0;
+	}
+	instance.reflected = 0;
+	for (const StaticLodBinding &binding : instance.bindings) {
+		if (binding.view != kStaticViewShared || binding.shadow_only || binding.population < 0 ||
+				binding.population >= static_populations_.size()) {
+			continue;
+		}
+		const MultiMeshInstance3D *node = Object::cast_to<MultiMeshInstance3D>(
+				ObjectDB::get_instance(static_populations_[binding.population].instance_node));
+		if (node != nullptr) {
+			instance.reflected = (node->get_layer_mask() & visual_layers::WORLD) != 0 ? 1 : 0;
+			break;
+		}
+	}
+	return instance.reflected != 0;
 }
 
 int MissionObjectPlacer::get_static_instance_inset_lod(int p_bms_id) const {
@@ -1220,13 +1343,20 @@ void MissionObjectPlacer::_ensure_static_view_twins(int p_instance_row) {
 		}
 		_static_view_twin(binding.population, kStaticViewMain);
 		_static_view_twin(binding.population, kStaticViewInset);
+		for (int m = 0; m < 2; ++m) {
+			if (static_mirror_open_[m]) {
+				_static_view_twin(binding.population,
+						m == 0 ? kStaticViewMirror : kStaticViewInsetMirror);
+			}
+		}
 	}
 }
 
 // The main-view twin keeps the source's layer with the world bits swapped for
-// the main-view bits the Inset camera lacks (its casting, Q3 source and
-// shadow metas kept); the Inset twin carries the Inset bit alone and casts
-// nothing (render/visual_layers.h carries the per-view design).
+// the beauty camera's alone, which neither the Inset camera nor a mirror
+// admits (its casting, Q3 source and shadow metas kept); the Inset twin and
+// each mirror's carry that view's own bit alone and cast nothing
+// (render/visual_layers.h carries the per-view design).
 int MissionObjectPlacer::_static_view_twin(int p_population, uint8_t p_view) {
 	if (p_population < 0 || p_population >= static_populations_.size()) {
 		return -1;
@@ -1236,7 +1366,9 @@ int MissionObjectPlacer::_static_view_twin(int p_population, uint8_t p_view) {
 		if (source.view != kStaticViewShared || source.shadow_only) {
 			return -1;
 		}
-		const int existing = p_view == kStaticViewMain ? source.main_twin : source.inset_twin;
+		const int existing = p_view == kStaticViewMain ? source.main_twin
+				: p_view == kStaticViewInset              ? source.inset_twin
+				: source.mirror_twin[p_view == kStaticViewMirror ? 0 : 1];
 		if (existing >= 0) {
 			return existing;
 		}
@@ -1269,15 +1401,14 @@ int MissionObjectPlacer::_static_view_twin(int p_population, uint8_t p_view) {
 	StaticPopulationInstance *mmi = memnew(StaticPopulationInstance);
 	mmi->set_multimesh(mm);
 	mmi->set_custom_aabb(source_node->get_custom_aabb());
-	uint32_t layer = visual_layers::INSET_VIEW;
+	uint32_t layer = p_view == kStaticViewInset ? uint32_t(visual_layers::INSET_VIEW)
+			: p_view == kStaticViewMirror           ? uint32_t(visual_layers::MIRROR_VIEW)
+													: uint32_t(visual_layers::INSET_MIRROR_VIEW);
 	if (p_view == kStaticViewMain) {
+		constexpr uint32_t kWorld = visual_layers::WORLD | visual_layers::WORLD_NO_MIRROR;
 		layer = source_node->get_layer_mask();
-		if ((layer & visual_layers::WORLD) != 0) {
-			layer = (layer & ~uint32_t(visual_layers::WORLD)) | visual_layers::MAIN_VIEW;
-		}
-		if ((layer & visual_layers::WORLD_NO_MIRROR) != 0) {
-			layer = (layer & ~uint32_t(visual_layers::WORLD_NO_MIRROR)) |
-					visual_layers::MAIN_VIEW_NO_MIRROR;
+		if ((layer & kWorld) != 0) {
+			layer = (layer & ~kWorld) | visual_layers::MAIN_VIEW_NO_REFLECTION;
 		}
 	}
 	mmi->set_layer_mask(layer);
@@ -1290,7 +1421,10 @@ int MissionObjectPlacer::_static_view_twin(int p_population, uint8_t p_view) {
 	mmi->set_bin_x(source_node->get_bin_x());
 	mmi->set_bin_z(source_node->get_bin_z());
 	mmi->set_name(String(source_node->get_name()) +
-			(p_view == kStaticViewMain ? "_MainView" : "_InsetView"));
+			(p_view == kStaticViewMain		  ? "_MainView"
+					: p_view == kStaticViewInset  ? "_InsetView"
+					: p_view == kStaticViewMirror ? "_MirrorView"
+												  : "_InsetMirrorView"));
 	if (source.shadow_tagged) {
 		mmi->set_shadow_tagged(true);
 		mmi->set_slot_bms_ids(source_node->get_slot_bms_ids());
@@ -1303,7 +1437,10 @@ int MissionObjectPlacer::_static_view_twin(int p_population, uint8_t p_view) {
 	static_populations_.push_back(twin);
 	const int index = static_populations_.size() - 1;
 	StaticPopulation &source_row = static_populations_.write[p_population];
-	(p_view == kStaticViewMain ? source_row.main_twin : source_row.inset_twin) = index;
+	(p_view == kStaticViewMain		  ? source_row.main_twin
+			: p_view == kStaticViewInset ? source_row.inset_twin
+										 : source_row.mirror_twin[p_view == kStaticViewMirror ? 0 : 1]) =
+			index;
 	static_population_by_node_[twin.instance_node] = index;
 	mmi->set_visible(false);
 	if (source.shadow_tagged) {
@@ -1396,13 +1533,20 @@ int MissionObjectPlacer::get_static_live_population_count() const {
 	return live;
 }
 
-bool MissionObjectPlacer::_static_slot_live(const StaticLodBinding &p_binding,
-		int p_main_lod, int p_inset_lod, bool p_split) {
+bool MissionObjectPlacer::_static_slot_live(const StaticLodBinding &p_binding, int p_main_lod,
+		const StaticLodInstance &p_instance) {
+	// A carved instance draws in no view; otherwise its split decision and the
+	// other views' levels ride the instance record.
+	const bool p_split = !p_instance.carved && p_instance.view_split;
 	switch (p_binding.view) {
 		case kStaticViewMain:
 			return p_split && p_binding.lod_index == p_main_lod;
 		case kStaticViewInset:
-			return p_split && p_binding.lod_index == p_inset_lod;
+			return p_split && p_instance.inset_view && p_binding.lod_index == p_instance.inset_lod;
+		case kStaticViewMirror:
+			return p_split && p_binding.lod_index == p_instance.mirror_lod[0];
+		case kStaticViewInsetMirror:
+			return p_split && p_binding.lod_index == p_instance.mirror_lod[1];
 		default:
 			break;
 	}
@@ -1419,11 +1563,6 @@ void MissionObjectPlacer::_write_static_instance_slots(int p_instance_row,
 	if (p_instance_row < 0 || p_instance_row >= static_lod_instances_.size()) {
 		return;
 	}
-	// A carved instance draws in no view; otherwise its split decision and
-	// Inset level ride the instance record.
-	const bool carved = static_lod_instances_[p_instance_row].carved;
-	const bool split = !carved && static_lod_instances_[p_instance_row].view_split;
-	const int inset_lod = split ? static_lod_instances_[p_instance_row].inset_lod : -1;
 	const int binding_count =
 			static_lod_instances_[p_instance_row].bindings.size();
 	for (int binding_index = 0; binding_index < binding_count; ++binding_index) {
@@ -1433,7 +1572,8 @@ void MissionObjectPlacer::_write_static_instance_slots(int p_instance_row,
 				binding.population >= static_populations_.size()) {
 			continue;
 		}
-		const bool live = _static_slot_live(binding, p_live_lod, inset_lod, split);
+		const bool live = _static_slot_live(binding, p_live_lod,
+				static_lod_instances_[p_instance_row]);
 		if (live == (binding.row >= 0)) {
 			continue;
 		}
@@ -1603,6 +1743,52 @@ String MissionObjectPlacer::graphic_for(int p_item_id) {
 Ref<ObjectData> MissionObjectPlacer::object_data_for(const String &p_graphic) {
 	_check_epoch();
 	return _load_object_data(p_graphic);
+}
+
+MissionObjectPlacer::LoadProfile MissionObjectPlacer::take_load_profile() {
+	const LoadProfile taken = load_profile_;
+	load_profile_ = LoadProfile();
+	return taken;
+}
+
+int MissionObjectPlacer::resolve_model_materials(const PackedStringArray &p_files,
+		const Callable &p_present) {
+	_check_epoch();
+	Time *time = Time::get_singleton();
+	const uint64_t start = time->get_ticks_usec();
+	// The split (an instrument): the files' data loads, the resolves, the presents.
+	uint64_t load_us = 0;
+	uint64_t resolve_us = 0;
+	uint64_t present_us = 0;
+	uint64_t present_max_us = 0;
+	int rows = 0;
+	// The textures the resolves made (the registry's growth; the rest of the rows found theirs
+	// registered by the placement's scene builds or an earlier row).
+	const int64_t registered_before =
+			resource_root_.is_valid() ? resource_root_->get_registered_material_texture_count() : 0;
+	for (int64_t i = p_files.size() - 1; i >= 0; --i) {
+		const uint64_t load_start = time->get_ticks_usec();
+		const Ref<ObjectData> data = _load_object_data(p_files[i]);
+		const uint64_t resolve_start = time->get_ticks_usec();
+		if (data.is_valid()) rows += data->resolve_materials();
+		const uint64_t present_start = time->get_ticks_usec();
+		if (p_present.is_valid()) p_present.call();
+		const uint64_t present_end = time->get_ticks_usec();
+		load_us += resolve_start - load_start;
+		resolve_us += present_start - resolve_start;
+		present_us += present_end - present_start;
+		present_max_us = std::max<uint64_t>(present_max_us, present_end - present_start);
+	}
+	const int64_t made = resource_root_.is_valid()
+			? resource_root_->get_registered_material_texture_count() - registered_before
+			: 0;
+	UtilityFunctions::print_verbose(vformat(
+			"MissionObjectPlacer: model materials %d row(s) over %d file(s): %d ms (data loads %d ms, "
+			"resolves %d ms making %d texture(s), presents %d ms, the slowest present %d ms)",
+			rows, p_files.size(), static_cast<int>((time->get_ticks_usec() - start) / 1000),
+			static_cast<int>(load_us / 1000), static_cast<int>(resolve_us / 1000), made,
+			static_cast<int>(present_us / 1000), static_cast<int>(present_max_us / 1000)));
+	return rows;
 }
 
 Node3D *MissionObjectPlacer::_ensure_container(Node3D *p_parent) {

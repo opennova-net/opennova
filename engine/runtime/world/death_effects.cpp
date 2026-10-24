@@ -130,8 +130,10 @@ void spawn_death_effect_banks(
 // The victim's +0x1CC emitter is released when the victim owns it (every
 // spawn into that slot tags the victim), then the ammo's secondary effect
 // spawns there: at the victim position, oriented (0, 0, -0.5), tagged with the
-// victim, and never re-posed (only pool 1 refreshes +0x1CC each tick,
-// Entity_UpdateAllEntities @0x4C22EC -> CEffect_UpdateEmitterTransform).
+// victim, and never re-posed: a person's walk re-poses no +0x1CC emitter, only
+// the pool-1 and pool-2 walks do (CEffect_UpdateEmitterTransform called by
+// Entity_UpdatePool1Slot @0x4B8E76 and by Entity_UpdateAllEntities' pool-2 walk,
+// its +0x1CC test @0x4C22EC, the call @0x4C22FA).
 // [orig: Projectile_ProcessExplosionQueue @0x4EB1FA..0x4EB292 — the release
 // @0x4EB20A..0x4EB224, the descriptor @0x4EB22A..0x4EB283 (flags 1, tag
 // @0x4EB263, orientation z 0xFFFF8000 @0x4EB278), the store @0x4EB292]
@@ -163,7 +165,10 @@ void update_dead_wreck_effects(World &world, Entity &e, const ItemDeathTraits *t
 		float water_height, DestructionEvents &events) {
 	if (traits == nullptr || !traits->husk_model_loaded)
 		return;
-	const float water = water_height <= -1.0e8f ? 0.0f : water_height;
+	// The raw water word, 0 on a map without water: every test compares it
+	// with no dry sentinel. [orig: the compare branches @0x493237, @0x493245, @0x49330F,
+	//  @0x493349, @0x4933D1; Environment_InitDefaults @0x57C011..0x57C01E]
+	const float water = water_height;
 	const auto matrix = effect_frame(e);
 	Vec3 position = e.position;
 	for (uint8_t slot = 0; slot < 4; ++slot) {

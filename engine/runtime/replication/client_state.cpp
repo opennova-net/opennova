@@ -13,22 +13,40 @@ namespace opennova::replication {
 
 // ---- ClientState lookup -----------------------------------------------------
 
-ClientEntityState *ClientState::find(uint16_t handle) {
-	// `entities` is intentionally public decoded state. Callers may clear,
-	// reorder, append, or edit it directly, so a separate handle-to-index cache
-	// cannot remain valid without changing that API. Keep lookup derived from
-	// the authoritative vector.
-	for (ClientEntityState &entity : entities) {
-		if (entity.handle == handle) return &entity;
+namespace {
+
+// The row holding `handle`: the cached row while it still holds the handle, else the first
+// row a walk finds, kept for the next lookup. `entities` stays the public decoded state its
+// callers clear, erase and append directly; the cache is checked against it on every use
+// (ClientRowIndexCache, D-NET-NEW-LF-26).
+size_t find_row(const std::vector<ClientEntityState> &entities,
+		const ClientRowIndexCache &cache, uint16_t handle) {
+	std::vector<uint16_t> &rows = cache.rows;
+	if (!rows.empty()) {
+		const uint16_t cached = rows[handle];
+		if (cached < entities.size() && entities[cached].handle == handle) return cached;
 	}
-	return nullptr;
+	for (size_t i = 0; i < entities.size(); ++i) {
+		if (entities[i].handle != handle) continue;
+		if (i < ClientRowIndexCache::kNoRow) {
+			if (rows.empty()) rows.assign(size_t{1} << 16, ClientRowIndexCache::kNoRow);
+			rows[handle] = static_cast<uint16_t>(i);
+		}
+		return i;
+	}
+	return entities.size();
+}
+
+} // namespace
+
+ClientEntityState *ClientState::find(uint16_t handle) {
+	const size_t row = find_row(entities, row_index, handle);
+	return row < entities.size() ? &entities[row] : nullptr;
 }
 
 const ClientEntityState *ClientState::find(uint16_t handle) const {
-	for (const ClientEntityState &entity : entities) {
-		if (entity.handle == handle) return &entity;
-	}
-	return nullptr;
+	const size_t row = find_row(entities, row_index, handle);
+	return row < entities.size() ? &entities[row] : nullptr;
 }
 
 ClientEntityState &ClientState::upsert(uint16_t handle) {
@@ -87,6 +105,18 @@ void fold_server_config_strings(const std::vector<uint8_t> &body, ClientServerCo
 	while (second_end < body.size() && body[second_end] != 0) ++second_end;
 	out.second.assign(body.begin() + static_cast<std::ptrdiff_t>(second_start),
 			body.begin() + static_cast<std::ptrdiff_t>(second_end));
+}
+
+// The table walk: the first slot whose length byte is 0 or whose id matches
+// takes the entry whole; a full table of other ids drops it [orig:
+// ServerCommandTable_AddEntry @0x422920 - `slot[1] && slot[0] != entry[0]` @0x42293A, the
+// end test @0x422947, the copy @0x422957..0x422963].
+void fold_server_command_entry(ClientServerCommandTable &table, const ServerCommandEntry &entry) {
+	for (ServerCommandEntry &slot : table) {
+		if (slot[1] != 0 && slot[0] != entry[0]) continue;
+		slot = entry;
+		return;
+	}
 }
 
 // strncpy(dst, src, 0x400): a source of 1024 or more characters leaves the

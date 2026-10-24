@@ -391,7 +391,7 @@ EndRoundColumnLayout end_round_column_layout(
 }
 
 void EndRoundTransition::reset() {
-	// [orig: Game_InitMissionRoundState @0x5b71b0 clears byte_28E561C/D, called
+	// [orig: Game_InitMissionRoundState @0x5b71b0 clears g_EndRoundOverlayFirstPass / g_EndRoundStatScreenOpened, called
 	//  from Game_StartMission @0x524360 (the call @0x525903)]
 	header_seen = false;
 	header_edge_ms = 0;
@@ -411,14 +411,14 @@ EndRoundTransitionStep EndRoundTransition::step(bool header_known, bool board_kn
 		return out;
 	}
 	if (!header_seen) {
-		// The first pass: byte_28E561C and t0 [orig: @0x5b8600 first pass].
+		// The first pass: g_EndRoundOverlayFirstPass and t0 [orig: @0x5b8600 first pass].
 		header_seen = true;
 		header_edge_ms = now_ms;
 		stat_opened = false;
 		out.announced = true;
 	}
 	if (stat_opened) {
-		// The locret @0x5b864a once byte_28E561D is set: no teardown, no overlay.
+		// The locret @0x5b864a once g_EndRoundStatScreenOpened is set: no teardown, no overlay.
 		return out;
 	}
 	// Every PRE-STAT pass tears the scene down and draws the overlay; the

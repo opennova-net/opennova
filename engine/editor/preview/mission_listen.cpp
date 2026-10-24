@@ -439,7 +439,7 @@ std::vector<ClipSoundFired> MissionListen::fire_sounds(const AssetScan *scan, au
 		const audio::DialogLineRef &line = each.line;
 		const dbf::Group *group = sources.bank_read ? audio::find_dialog(sources.bank, line.dialog_name) : nullptr;
 		const std::string text = group && line.line >= 0 && size_t(line.line) < group->lines.size()
-				? audio::dialog_line_text(sources.text_read ? &sources.text : nullptr, group->lines[size_t(line.line)])
+				? audio::dialog_line_text(nullptr, sources.text_read ? &sources.text : nullptr, group->lines[size_t(line.line)])
 				: std::string();
 		ClipSoundFired fired;
 		fired.tick = each.tick;

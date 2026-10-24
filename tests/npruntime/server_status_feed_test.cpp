@@ -76,12 +76,18 @@ void test_roster_and_facts() {
 			replication::TransportMode::Loopback, host, true);
 	h.reply.player_slot = 0;
 	h.reply.player_name = "Host";
+	// The status screen reads the slot's own team byte, not the body's
+	// [orig: Server_DrawStatusScreen @0x50A565] (D-NET-593).
+	h.assigned_team_valid = true;
+	h.assigned_team = 1;
 	h.receive_inactive_ms = 9000; // the host's own slot has no reap clock
 	ctx.np_protocol.connection_list.push_back(h);
 	inmatch::NapiNPConnection j = conn_fixture::make_conn(2, 1, &joe_wire,
 			replication::TransportMode::Client, joe, true);
 	j.reply.player_slot = 2;
 	j.reply.player_name = "Joe";
+	j.assigned_team_valid = true;
+	j.assigned_team = 2;
 	j.receive_inactive_ms = 3500;
 	ctx.np_protocol.connection_list.push_back(j);
 	// A joiner added but still loading (no completed burst), spectating.
@@ -128,6 +134,67 @@ void test_roster_and_facts() {
 	ctx.transport_mode = inmatch::NetworkType::Lan;
 	inmatch::fill_server_status_page(page, ctx, &world);
 	CHECK(!page.mp_session_peer && !page.novaworld);
+	// The roster's in-game test reads the slot's own state word: a punt writes
+	// none, so a punted joiner still reads in game; the round end moves every
+	// joined slot to 7, the host's own row included, and each reads grey
+	// through the linger.
+	// [orig: Server_DrawStatusScreen @0x50A2D0 (`cmp dword ptr [ebx+20h], 6`
+	//  @0x50A66C, 0xFFA0A0A0 @0x50A672); CNapiNPConnection_QueueDisconnectEvent
+	//  @0x4C7EF0 (no slot write); Server_ProcessRoundEnd @0x5164F0 (the 6 -> 7
+	//  store @0x51685E)]
+	inmatch::NapiNPConnection &host_row = ctx.np_protocol.connection_list[0];
+	inmatch::NapiNPConnection &joe_row = ctx.np_protocol.connection_list[1];
+	joe_row.host_disconnect_sent = true;
+	inmatch::fill_server_status_page(page, ctx, &world);
+	CHECK(page.slots[0].in_game && page.slots[2].in_game);
+	host_row.slot_state = inmatch::PlayerSlotState::RoundOver;
+	joe_row.host_disconnect_sent = false;
+	joe_row.slot_state = inmatch::PlayerSlotState::RoundOver;
+	inmatch::fill_server_status_page(page, ctx, &world);
+	CHECK(page.slots[0].active && !page.slots[0].in_game);
+	CHECK(page.slots[2].active && !page.slots[2].in_game);
+	CHECK(hud::server_status_roster_cell(page, 2, 0u).color == 0xFFA0A0A0u);
+}
+
+// A Serve Only host's own slot 0 has no connection, but the round init keeps it active and
+// local: the feed lists it so, the score list skips it as it skips a listen host's loopback
+// row, and the current logins count only the joiner (slot 1).
+// [orig: Server_InitNewRoundState @0x51C8E0 (+4 @0x51CA31, +5 @0x51CA35);
+//  HUD_DrawPlayerScoreList @0x500300 (the +5 skip @0x500370); Server_DrawStatusScreen
+//  @0x50A2D0 (`+4 && !+5` @0x50B148)]
+void test_dedicated_host_slot_zero() {
+	world::World world;
+	world.registry.configure_pool(0, 8);
+	world::MatchRules rules;
+	rules.game_type = 0x10000u;
+	world.match.configure(rules);
+	const world::EntityHandle joe = player(world, 1, 2, 5, 100, "Joe");
+	replication::LoopbackChannel joe_wire;
+	inmatch::NapiNPServerCtx ctx;
+	ctx.is_authority = 1;
+	ctx.is_mp_session_peer = 0;
+	ctx.config.max_players = 4;
+	ctx.host_slot.active = true;
+	ctx.host_slot.name = "Host";
+	inmatch::NapiNPConnection j = conn_fixture::make_conn(2, 1, &joe_wire,
+			replication::TransportMode::Client, joe, true);
+	j.reply.player_slot = 1;
+	j.reply.player_name = "Joe";
+	ctx.np_protocol.connection_list.push_back(j);
+	hud::ServerStatusPageState page;
+	inmatch::fill_server_status_page(page, ctx, &world);
+	CHECK(!page.mp_session_peer && page.slots.size() == 4);
+	CHECK(page.slots[0].active && page.slots[0].local);
+	CHECK(page.slots[1].active && !page.slots[1].local && page.slots[1].name == "Joe");
+	CHECK(!hud::server_status_score_row(page, 0).drawn);
+	CHECK(hud::server_status_score_row(page, 1).drawn);
+	page.text.current_logins = "Now";
+	const std::vector<hud::ServerStatusTextLine> bottom = hud::server_status_bottom_row(page);
+	CHECK(bottom.size() == 5 && bottom[4].text == "Now 1");
+	// A listen host's row 0 is its loopback connection's; the feed adds no row of its own.
+	ctx.host_slot.active = false;
+	inmatch::fill_server_status_page(page, ctx, &world);
+	CHECK(!page.slots[0].active && !page.slots[0].local);
 }
 
 // The total logins: the host's own loopback coming up counts one, every
@@ -153,6 +220,7 @@ void test_total_logins() {
 
 int main() {
 	test_roster_and_facts();
+	test_dedicated_host_slot_zero();
 	test_total_logins();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

@@ -11,6 +11,7 @@
 #include <runtime/inmatch/server_loadout_grant.h>    // PlayerSlot_RebuildKitForRound
 #include <runtime/inmatch/server_spawn.h>            // Server_BuildPlayerInfoAndAdd
 #include <runtime/inmatch/server_team_change.h>      // the auto-balance pair
+#include <runtime/inmatch/server_tick.h>             // route_match_objective_records
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/inmatch/session_transport.h>
 
@@ -27,15 +28,17 @@ bool slot_active(const NapiNPConnection &conn) {
 	return conn.phase >= ConnectionPhase::PlayerAdded;
 }
 
-// The teardown's Attack-and-Defend arm, on an in-session authority with the
+} // namespace
+
+// See map_change.h. The teardown's Attack-and-Defend arm, on an in-session authority with the
 // launch option set and the Post Menu pending. A SETNEXT latch at a first
 // half's end skips the swap: the half toggle is set and the latch cleared,
 // so the router clears the toggle and advances onto the SETNEXT entry.
-// Otherwise every live slot's team swaps 1 <-> 2 (its side's avatar and spawn
-// selection follow the team at its next spawn), the side-to-team map swaps,
-// and a set latch then sets the toggle and clears itself. The slot's pending
-// team byte (+100568), which the swap takes first when nonzero, is the
-// convert's `spectator_restore_team`; this swap does not read it (D-NET-591).
+// Otherwise every live slot first takes a nonzero restore byte (+100568, the
+// convert's `spectator_restore_team`) as its team (D-NET-591), then its team
+// swaps 1 <-> 2 (its side's avatar and spawn selection follow the team at its
+// next spawn), the side-to-team map swaps, and a set latch then sets the
+// toggle and clears itself.
 // [orig: Game_TeardownMission @0x522435..0x522520 -- the latch test
 //  @0x522448..0x522457, the slot walk @0x52245D..0x5224F4 (live: +4 and the
 //  entity pointer @0x522470..0x522479; the pending team @0x52247B..0x522485;
@@ -44,16 +47,24 @@ bool slot_active(const NapiNPConnection &conn) {
 //  latch @0x522519..0x522520]
 void swap_sides_or_latch(NapiNPServerCtx &ctx, HostRotation &rotation) {
 	if (!rotation.setnext_latch || rotation.is_flipped) {
-		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-			if (!slot_active(conn) || !conn.link.owned_entity.valid() || !conn.assigned_team_valid)
-				continue;
+		const auto swap_row = [](NapiNPConnection &conn) {
+			if (conn.spectator_restore_team != 0) {
+				conn.assigned_team = conn.spectator_restore_team;
+				conn.assigned_team_valid = true;
+			}
+			if (!conn.assigned_team_valid) return;
 			if (conn.assigned_team == 1)
 				conn.assigned_team = 2;
 			else if (conn.assigned_team == 2)
 				conn.assigned_team = 1;
-		}
-		// A Serve Only host's own slot 0 is live there too: retail's has its hidden
-		// body, which this port does not model (D-NET-352).
+		};
+		for (NapiNPConnection &conn : ctx.np_protocol.connection_list)
+			if (slot_active(conn) && conn.link.owned_entity.valid()) swap_row(conn);
+		// An orphaned row is a live row of the walk (D-NET-NEW-L1-24) [orig: Game_TeardownMission
+		//  - +4 and the entity pointer @0x522470..0x522479 over every row].
+		for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows)
+			if (orphan.row.link.owned_entity.valid()) swap_row(orphan.row);
+		// A Serve Only host's own slot 0 is live there too.
 		if (ctx.host_slot.active) {
 			if (ctx.host_slot.team == 1)
 				ctx.host_slot.team = 2;
@@ -67,19 +78,22 @@ void swap_sides_or_latch(NapiNPServerCtx &ctx, HostRotation &rotation) {
 	rotation.setnext_latch = false;
 }
 
-} // namespace
-
 // A kept slot's per-mission state, back to a fresh mission's, around the
 // identity the map change keeps: the connection's keys, sequencing, clocks,
 // admission and team; the link's transport, its spectator latch and the
 // client's medic preference; the reply state's name, roster slot, ping
 // history, team-change stamp and integrity salts, the latches that make
 // the admission's 0x04 / 0x7B boundary and the join announcement one-shot,
-// and the slot's kit: its loadout buffer, ammo pools, loaded-round buckets
-// and slot table, which the reset does not store to (the round init rebuilds
-// the slot table from them), and the retained list body.
-// The burst starts over at the kept slot's next C2S 0x37 (the 0x16 push),
-// as a stock joiner's reload asks for it.
+// and the slot's kit: its loadout buffer, ammo pools and loaded-round buckets,
+// which the reset does not store to, and the retained list body. The slot
+// table's rows are the player entity's (world::Entity::weapon_slots) and go
+// with it; the round init rebuilds every row on the slot's new entity from the
+// kept buffer, as retail's resets every entry of the kept table first
+// [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0 (the
+//  WeaponSlotPool_ResetAllEntries call @0x516C03)].
+// The burst's cursors start over; the slot's state word is the caller's (the
+// reset returns a slot in states 2..7 to state 1, so the kept joiner's reload
+// starts the player-sync track again with its C2S 0x09).
 // [orig: Server_DisconnectAndResetAllPlayerSlots @0x516160 -- the entity
 //  pointer, +360..+368, +376, +380, +460, +89856, +89864, +89868, +89932,
 //  +94372..+94380 cleared @0x5163B2..0x516417, the stats block re-inited
@@ -108,8 +122,6 @@ void reset_slot_for_next_mission(NapiNPConnection &conn) {
 	reply.admission_metadata_pushed = kept.admission_metadata_pushed;
 	reply.spawn_metadata_pushed = kept.spawn_metadata_pushed;
 	reply.admission_completed_tick = kept.admission_completed_tick;
-	reply.roster_counted = kept.roster_counted;
-	reply.roster_seen_gen = kept.roster_seen_gen;
 	reply.player_name = kept.player_name;
 	reply.player_slot = kept.player_slot;
 	// The kit outlives the mission [orig: the reset's stores @0x5163B2..0x516417
@@ -123,22 +135,30 @@ void reset_slot_for_next_mission(NapiNPConnection &conn) {
 
 	conn.score = 0;
 	conn.score_wire_mirror = 0;
-	conn.tick_seed = 0;
-	conn.fire_tick_floor = 0;
-	conn.fire_disarmed_at = 0;
-	conn.fire_tick_mode = false;
+	// The tick-seed transaction's words (+0x178C8..+0x178E0: the armed clock,
+	// the disarm stamp, the seed, the fire floor, the keepalive high water, the
+	// mode byte) outlive the mission: no mission-change or mission-start store
+	// touches them; only the seed's arm and disarm, the round end's inline
+	// disarm and the session's slot-table allocation write them, and the next
+	// join re-arms. [orig: the disp32 writers Server_SendRandomSeedToPlayer
+	//  @0x5101B3..0x5101EF (arm) / @0x510237..0x51024A (disarm),
+	//  Server_ProcessRoundEnd @0x516753..0x516765, Server_AllocatePlayerSlotTable
+	//  @0x51C250..0x51C25C (three byte stores); none in
+	//  Server_DisconnectAndResetAllPlayerSlots @0x5163A4..0x516432 or
+	//  Server_ResetAllPlayerSlotFrameState @0x4FC350..0x4FC3C9]
 	conn.phase = ConnectionPhase::PlayerAdded; // the slot stays active; its entity comes back
 	conn.discard_pre_deploy_uplinks = false;
 	conn.staged_frame_update.clear();
 	conn.frame_update_staged = false;
-	conn.pending_guidance.clear();
 	conn.world_stream_announced = false;
 	conn.spawned_announced = false;
+	const uint8_t game_state = conn.burst.game_state;
 	conn.burst = InitialStateBurst{};
-	// The slot table (+0x1D0) is left as well; the round init rebuilds it
-	// [orig: the reset stores +0x1CC alone @0x5163B2..0x516417;
+	conn.burst.game_state = game_state;
+	// The slot table (+0x1D0) is left as well; the round init rebuilds it, and the
+	// player entity's EquippedSlot (world::Entity::equipped_slot) goes with the
+	// mission's world [orig: the reset stores +0x1CC alone @0x5163B2..0x516417;
 	//  Server_InitAllPlayerEntitiesForRound @0x516BF3..0x516C20].
-	conn.equipped_slot = NapiNPConnection::EquippedSlotRef{};
 }
 
 namespace {
@@ -151,9 +171,19 @@ namespace {
 void reset_all_player_slots(HostRole &role) {
 	NapiNPServerCtx &ctx = role.state.host_owner.ctx;
 	HostRotation *rotation = role.rotation();
+	// Each row keeps its live age (+0x184) for the next mission's re-add
+	// (NapiNPConnection::kept_play_ticks): no store of the reset touches it [orig:
+	//  @0x5163A4..0x516432]. A row with no Match row this mission keeps the age it had.
+	mission::MissionKernel *kernel = role.kernel();
+	const auto keep_live_age = [kernel](NapiNPConnection &row) {
+		if (kernel == nullptr) return;
+		if (const world::MatchPlayer *player = kernel->world.match.player(row.link.owned_entity))
+			row.kept_play_ticks = player->play_ticks;
+	};
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (!slot_active(conn)) continue;
-		if (conn.burst.sync_state >= 2 && conn.link.transport != nullptr) {
+		const bool synced = conn.slot_state >= PlayerSlotState::PlayerSync;
+		if (synced && conn.link.transport != nullptr) {
 			if (conn.type == NapiNPConnection::kTypeServerSide) {
 				conn.link.transport->host_send(s2c::GAME_RESET, std::vector<uint8_t>{},
 						/*reliable=*/false);
@@ -169,7 +199,41 @@ void reset_all_player_slots(HostRole &role) {
 				++rotation->round_count;
 			}
 		}
+		// A slot in states 2..7: its net player back to game state 8, the slot to
+		// state 1 [orig: @0x5161E1 / @0x5161FD (state 2) .. @0x516392 / @0x5163AA
+		//  (state 7)].
+		if (synced) {
+			conn.burst.game_state = 8;
+			conn.slot_state = PlayerSlotState::Added;
+		}
+		keep_live_age(conn);
 		reset_slot_for_next_mission(conn);
+	}
+	// An orphaned row is an active row to the walk (D-NET-NEW-L1-24): in states 2..7 it takes
+	// its 0x25 through its net player (send_mask 0x20 sends through the row's +0x1C), the walk
+	// moves that net player to game state 8 and the row to state 1, and its per-mission state
+	// goes as any row's. Past its net player's leave ours reads none (Q7-36 (a)).
+	// [orig: Server_DisconnectAndResetAllPlayerSlots @0x516160 - the active byte @0x516190, the
+	//  row's +0x1C @0x51619C, the 0x25 to the row @0x5161C2..0x5161D4, the null test
+	//  @0x5161DB and CNetPlayer_SetGameState(8) called @0x5161E1, state 1 @0x5161FD;
+	//  NapiNPServer_SendFiltered @0x4C87E0 - the 0x20 arm, the row's +0x1C @0x4C8A1F, its
+	//  connection's type (+0x24 == 1, server side) @0x4C8A30..0x4C8A34;
+	//  CNapiNPConnection_Create @0x62ACB0 stores the type @0x62AD6C]
+	for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) {
+		NapiNPConnection &row = orphan.row;
+		NapiNPConnection *net_player = orphan_net_player(ctx, orphan);
+		const bool synced = row.slot_state >= PlayerSlotState::PlayerSync;
+		if (synced && net_player != nullptr &&
+				net_player->type == NapiNPConnection::kTypeServerSide &&
+				net_player->link.transport != nullptr)
+			net_player->link.transport->host_send(s2c::GAME_RESET, std::vector<uint8_t>{},
+					/*reliable=*/false);
+		if (synced) {
+			if (net_player != nullptr) net_player->burst.game_state = 8;
+			row.slot_state = PlayerSlotState::Added;
+		}
+		keep_live_age(row);
+		reset_slot_for_next_mission(row);
 	}
 }
 
@@ -184,23 +248,56 @@ MapChangeStep begin_host_map_change(HostRole &role,
 	mission::MissionKernel *kernel = role.kernel();
 	const bool authority_in_session = ctx.is_in_session != 0 && ctx.is_authority != 0;
 
-	// The /PROFILE log closes first, as every mission teardown closes it, so
+	// The Game Loop's shutdown heads with pools 0..2: every body and item is destroyed before
+	// the log closes, the swap arm runs and the teardown's pump answers anything, so that pump's
+	// handlers see the destroyed rows (D-NET-NEW-L1-25), as the session close's does. A carrier's
+	// destroy drops its flag, whose 0x2F is queued right there.
+	// [orig: Game_TeardownMission - Entity_Destroy over pools 0, 1 and 2 @0x52236F / @0x52239A /
+	//  @0x5223C0, ahead of CServerLog_CloseAndFree @0x5223F0, the swap arm @0x522435..0x522520
+	//  and Server_PumpNetworkTransport @0x522588]
+	// The last frame's entity pass's records first: retail queued them at their calls, ahead of
+	// the teardown (HostRole::close carries the witness).
+	if (kernel != nullptr && ctx.is_authority != 0) route_entity_pass_records(ctx, kernel->world);
+	if (kernel != nullptr) {
+		kernel->destroy_mission_pools();
+		route_teardown_drops(ctx, kernel->world);
+	}
+
+	// The /PROFILE log closes next, as every mission teardown closes it, so
 	// the next mission's start opens the next numbered file
 	// [orig: Game_TeardownMission @0x5223e2..0x5223f0 -> CServerLog_CloseAndFree,
 	//  ahead of the Post Menu test @0x522413].
 	if (ctx.logs.profile != nullptr) ctx.logs.profile->close();
 
-	// The Game Loop's shutdown with the Post Menu pending: the swap arm, then
-	// the per-mission teardown (pools 0..2, the authority's PostMission
-	// sweep), then the slot reset.
+	// With the Post Menu pending: the swap arm, then the teardown's pump, the authority's
+	// PostMission sweep over the destroyed pools, then the slot reset.
 	// [orig: Game_TeardownMission @0x522413..0x52241D (the Post Menu test),
-	//  the entities @0x52236F..0x5223C0, EventTrigger_UpdateAllWithFlag4
-	//  @0x52266C, Server_DisconnectAndResetAllPlayerSlots @0x52269B]
+	//  EventTrigger_UpdateAllWithFlag4 @0x52266C, Server_DisconnectAndResetAllPlayerSlots
+	//  @0x52269B]
 	if (authority_in_session && rotation != nullptr && rotation->list.map_launch_option != 0)
 		swap_sides_or_latch(ctx, *rotation);
+	// The teardown has emptied the server-info stream ahead of its pump; the next mission
+	// start rebuilds it [orig: Game_TeardownMission - CDataStream_Resize(&stru_C9480C, 0)
+	//  @0x5223D1, ahead of the pump @0x522588].
+	ctx.server_info_stream_emptied = true;
+	// The teardown's own server pump, after the swap and ahead of the PostMission pass and
+	// the slot reset: its receive steps each connection's send clock as every server pump
+	// does, so the reset's 0x25s leave at the next load's first pump where retail's do
+	// [orig: Game_TeardownMission - Server_PumpNetworkTransport @0x522588, ahead of
+	//  EventTrigger_UpdateAllWithFlag4 @0x52266C and the reset @0x52269B].
+	role.pump_load();
 	if (kernel != nullptr) {
-		kernel->run_post_mission_pass(/*is_authority=*/true);
-		role.map_change.crt_rand = kernel->world.crt_rand;
+		Server_RunPostMissionSweep(ctx, *kernel); // its actions send at their calls
+		// The old World hands the CRT stream back to the process, whose next World takes it:
+		// retail seeds it once per session (at the slot table's allocation), so the next
+		// mission continues it [orig: Server_AllocatePlayerSlotTable @0x51C1AA, srand's only
+		// session caller].
+		role.process_crt_rand() = kernel->world.crt_rand;
+		// ... as the round clock: the next mission start's update reads the old round's last
+		// value ahead of the start's own stores (D-NET-NEW-L1-52) [orig: g_RoundTimeRemaining
+		//  @0x24C1958; Lobby_UpdateServerInfo's read @0x4FED57, called @0x5248F5 ahead of
+		//  Game_StartMission's store @0x524A5D].
+		role.process_round_time_remaining_ticks() = kernel->world.match.remaining_ticks();
 	}
 	role.map_change.torn_down = true;
 	reset_all_player_slots(role);
@@ -235,16 +332,59 @@ MapChangeStep begin_host_map_change(HostRole &role,
 	if (!next) return MapChangeStep::RotationEnded;
 	// The next mission's start re-applies the cfg block to the session.
 	if (cfg_block != nullptr && session != nullptr) *session = host_session_settings(*cfg_block);
-	role.map_change.pending = true;
-	// The 0x25s leave at the next load's first pumps, ahead of the streams'
-	// rebuild [orig: Game_StartMission -> Server_PumpNetworkTransport
-	// @0x5245E8; the teardown's own pump @0x522588 precedes the reset].
+	// The next mission's load holds the spawn gate from its head (D-NET-116); the 0x25s
+	// leave at its first pump, ahead of the streams' rebuild, the old map's round-over
+	// latch still set (ours: no World until the bring-up).
+	// [orig: Game_StartMission @0x524360 - the set @0x524398, Server_PumpNetworkTransport
+	//  @0x5245E8, the stream rebuild @0x5247EB, the round-over clear @0x524A1F; the
+	//  teardown's own pump @0x522588 precedes the reset]
+	ctx.net_spawn_suspended = 1;
 	role.pump_load();
 	return MapChangeStep::NextMission;
 }
 
-void init_all_player_entities_for_round(HostRole &role) {
-	NapiNPServerCtx &ctx = role.state.host_owner.ctx;
+// See map_change.h.
+void route_teardown_drops(NapiNPServerCtx &ctx, world::World &world) {
+	if (ctx.is_authority == 0 || !world.rules.mp_session) return;
+	route_match_objective_records(ctx, world);
+}
+
+// See map_change.h.
+// [orig: Server_ResetAllPlayerSlotFrameState @0x4FC320 -- the table test
+//  @0x4FC323, the row walk @0x4FC350..0x4FC3DE; the ping word +0x170C0 and the
+//  two strike counters +0x170C4 / +0x170C6 @0x4FC356 / @0x4FC359 / @0x4FC35C;
+//  the latch +100567 @0x4FC350, the restore byte @0x4FC362..0x4FC36A, the slot
+//  team test @0x4FC36C, the clears of +100567, +100579, +97537 and +97536
+//  @0x4FC372..0x4FC384, the team store @0x4FC38C, the byte's clear @0x4FC398;
+//  the stats record CPlayerStats_ResetAllArrays(+0x48) @0x4FC39E, the
+//  score-sound cache +0x14C @0x4FC3A3, the script vars and the periodic
+//  counter +0x188..+0x19C @0x4FC3A9..0x4FC3C9]
+// The stats record, the script vars and the periodic counter belong to the
+// world's Match row, which the next mission's load builds fresh (its rows are
+// re-added at the round init), so those legs hold by construction.
+void Server_ResetAllPlayerSlotFrameState(NapiNPServerCtx &ctx) {
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		conn.reply.rtt_ms = 0;
+		conn.reply.min_ping_strikes = 0;
+		conn.reply.max_ping_strikes = 0;
+		conn.reply.score_delta_sound_value = 0;
+		const uint8_t restore = conn.spectator_restore_team;
+		if (conn.link.spectator && restore != 0) {
+			// +100579 is never set in JO and +97536 / +97537 follow the latch
+			// here (the 0x0A writer's spectator restamp), so the latch's clear
+			// is the four stores'.
+			const bool teamless = !conn.assigned_team_valid || conn.assigned_team == 0;
+			conn.link.spectator = false;
+			if (teamless) {
+				conn.assigned_team = restore;
+				conn.assigned_team_valid = true;
+			}
+		}
+		conn.spectator_restore_team = 0;
+	}
+}
+
+void init_all_player_entities_for_round(NapiNPServerCtx &ctx) {
 	if (ctx.is_authority == 0 || ctx.world == nullptr) return;
 	world::World &world = *ctx.world;
 	// Auto-balance first, while the previous-mode word still names the
@@ -257,9 +397,18 @@ void init_all_player_entities_for_round(HostRole &role) {
 	std::vector<NapiNPConnection *> slots;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list)
 		if (slot_active(conn) && !conn.link.owned_entity.valid()) slots.push_back(&conn);
+	// Every active row, an orphaned one too: its body is spawned from the row's own words, its
+	// owner the row's connection id (D-NET-NEW-L1-24) [orig: Server_InitAllPlayerEntitiesForRound
+	//  @0x516AA0 - the active byte @0x516AE0, Entity_SpawnFromAnimSlotProperty called @0x516B67,
+	//  the owner from row+0x18 @0x516B6C..0x516B72].
+	for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows)
+		if (slot_active(orphan.row) && !orphan.row.link.owned_entity.valid())
+			slots.push_back(&orphan.row);
 	std::stable_sort(slots.begin(), slots.end(), [](const NapiNPConnection *a,
 			const NapiNPConnection *b) { return a->reply.player_slot < b->reply.player_slot; });
 	const uint32_t game_type = ctx.config.game_type;
+	// Slot 0 first: a Serve Only host's own row's hidden body (D-NET-352).
+	(void)Server_SpawnHostSlotBody(ctx, world);
 	for (NapiNPConnection *conn : slots) {
 		// An objective mode or a non-team mode has no team 2: such a slot takes
 		// team 1 with its side-1 selections.
@@ -273,24 +422,22 @@ void init_all_player_entities_for_round(HostRole &role) {
 		// stamps @0x516B6C..0x516C20].
 		const world::EntityHandle h =
 				Server_BuildPlayerInfoAndAdd(ctx, *conn, world, /*round_init=*/true);
-		// Then the slot's table, rebuilt from its kept buffer. The listen host's
-		// own slot is its local inventory, which the local kit rebuilds (retail
-		// copies the host's g_SpawnLoadoutBuffer into it first, @0x516BCA..0x516BE3).
-		// [orig: @0x516BF3..0x516C20]
-		if (h.valid() && h != world.cached.local_player)
+		// Then the slot's table, rebuilt from its kept buffer; the authority's own
+		// slot (+5) first takes the spawn buffer into its buffer, and its table is
+		// the local one (D-NET-695) [orig: @0x516BC4..0x516BE3, @0x516BF3..0x516C20].
+		PlayerSlot_SeedOwnLoadoutBuffer(*conn, world);
+		if (h.valid())
 			if (world::Entity *player = world.registry.get(h))
 				PlayerSlot_RebuildKitForRound(*conn, world, *player);
 	}
-	// Every kept slot names a new entity: the roster every in-match client
-	// holds is stale.
-	++ctx.np_protocol.roster_generation;
 }
 
 void Server_BroadcastPlayerInfoToAll(NapiNPServerCtx &ctx) {
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (!slot_active(conn) || conn.link.transport == nullptr) continue;
 		conn.link.transport->host_send(s2c::FULL_PLAYER_INFO,
-				build_tag7b_session_summary(ctx.config, ctx.mission_text_title, conn),
+				build_tag7b_session_summary(ctx.config, ctx.mission_text_title, ctx.session_title,
+						conn),
 				/*reliable=*/true);
 	}
 }

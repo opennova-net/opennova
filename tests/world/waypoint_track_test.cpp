@@ -76,6 +76,48 @@ int main() {
         CHECK(track.current == -1); // count must exceed one
     }
 
+    // --- the enemy capture point twin: the team's pair (1 -> 4098, 2 -> 4100,
+    //     3 -> 4103, 4 -> 4102), a def'd entry with its Flags & 1 set still taken,
+    //     any team else taking every def'd entry; the selection kept when none is
+    //     [orig: SpawnPoint_FindNearestEnemyCapturePoint @0x4DD180 - the def
+    //     @0x4DD1D6, the pairs @0x4DD1E1..0x4DD21D, the strict compare @0x4DD263]
+    {
+        EntityRegistry registry;
+        registry.configure_pool(3, 4);
+        WaypointTrack track;
+        const int32_t ids[4] = {4098, 4100, 4098, 4103};
+        for (int i = 0; i < 4; ++i) {
+            Entity marker;
+            marker.item_id = ids[i];
+            marker.has_item_def = true;
+            marker.position = {float(10 - i), 0, 50};
+            CHECK(registry.spawn_at(EntityHandle::make(3, i), marker).valid());
+            WaypointEntry entry;
+            entry.node = i;
+            track.entries.push_back(entry);
+        }
+        Entity local;
+        local.team = 1;
+        track.select_nearest_enemy_capture_point(registry, local, 65540);
+        CHECK(track.current == 2); // the nearer 4098
+        registry.get(EntityHandle::make(3, 2))->flags |= 1;
+        track.select_nearest_enemy_capture_point(registry, local, 65544);
+        CHECK(track.current == 2); // no Flags test
+        local.team = 3;
+        track.select_nearest_enemy_capture_point(registry, local, 65540);
+        CHECK(track.current == 3);
+        local.team = 4; // no 4102 entry: the selection is kept
+        track.select_nearest_enemy_capture_point(registry, local, 65540);
+        CHECK(track.current == 3);
+        local.team = 0; // every def'd entry
+        registry.get(EntityHandle::make(3, 3))->has_item_def = false;
+        track.select_nearest_enemy_capture_point(registry, local, 65540);
+        CHECK(track.current == 2);
+        track.current = -1;
+        track.select_nearest_enemy_capture_point(registry, local, 0x30020);
+        CHECK(track.current == -1); // CTF and Flagball only
+    }
+
     // --- proximity advance: the NL approx distance (max + min/2) vs radius ---
     {
         WaypointTrack t;
@@ -249,6 +291,68 @@ int main() {
         t.show = false;
         t.manual_cycle(false, in_session(false));
         CHECK(t.current == 1);
+    }
+
+    // --- the nextflag action: the other side's entry by the local team (D-NET-NEW-LI-36)
+    //     [orig: Input_HandleActionBinding @0x49AD40 - case 32 @0x49B6A7;
+    //     Spectator_CycleTargetByTeam @0x4DBF00 - the count @0x4DBF0A, the def-type leg
+    //     (0x10004) @0x4DBF26..0x4DC05F, the team leg (0x90002 / 0x10002) @0x4DC078..0x4DC1C0] ---
+    {
+        EntityRegistry reg;
+        reg.configure_pool(3, 8);
+        const auto entry = [&reg](int32_t item_id, uint32_t attrib, uint8_t team) {
+            Entity seed;
+            seed.has_item_def = true;
+            seed.item_id = item_id;
+            seed.item_attrib = attrib;
+            seed.team = team;
+            const EntityHandle h = reg.spawn(3, seed);
+            WaypointEntry e;
+            e.pool = static_cast<uint8_t>(h.pool());
+            e.node = h.slot();
+            return e;
+        };
+        const auto ctx = [&reg](uint32_t game_type) {
+            WaypointCycleContext c;
+            c.registry = &reg;
+            c.game_type = game_type;
+            return c;
+        };
+        // The def-type leg: team 1 looks for type 4093.
+        WaypointTrack t;
+        t.entries = {entry(4091, 0, 2), entry(4093, 0, 2), entry(100, 0, 2), entry(4093, 0, 2)};
+        t.current = 0;
+        t.cycle_by_team(false, ctx(0x10004u), 1);
+        CHECK(t.current == 1);
+        t.cycle_by_team(false, ctx(0x10004u), 1);
+        CHECK(t.current == 3);
+        t.cycle_by_team(false, ctx(0x10004u), 1); // past the last: from 0 up to the current
+        CHECK(t.current == 1);
+        t.cycle_by_team(true, ctx(0x10004u), 1); // below 1 nothing: from the last down to 1
+        CHECK(t.current == 3);
+        t.cycle_by_team(true, ctx(0x10004u), 1);
+        CHECK(t.current == 1);
+        t.cycle_by_team(false, ctx(0x10004u), 3); // a team past 2 steps nothing
+        CHECK(t.current == 1);
+        t.cycle_by_team(false, ctx(0x30020u), 1); // nor does another game type
+        CHECK(t.current == 1);
+        // The team leg: team 2 looks for a target (attrib 0x8000) of team 1.
+        WaypointTrack u;
+        u.entries = {entry(1, 0x8000u, 1), entry(1, 0, 1), entry(1, 0x8000u, 2),
+                entry(1, 0x8000u, 1)};
+        u.current = -1; // no selection reads as entry 0
+        u.cycle_by_team(false, ctx(0x10002u), 2);
+        CHECK(u.current == 3);
+        u.cycle_by_team(true, ctx(0x90002u), 2);
+        CHECK(u.current == 0);
+        u.cycle_by_team(true, ctx(0x90002u), 2); // the backward wrap takes the current itself last
+        CHECK(u.current == 3);
+        // One entry steps nothing.
+        WaypointTrack one;
+        one.entries = {entry(4093, 0, 2)};
+        one.current = -1;
+        one.cycle_by_team(false, ctx(0x10004u), 1);
+        CHECK(one.current == -1);
     }
 
     // --- the show gate + clear ---

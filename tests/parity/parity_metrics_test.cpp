@@ -22,6 +22,7 @@
 #include <cstring>
 #include <functional>
 #include <initializer_list>
+#include <iterator>
 #include <map>
 #include <set>
 #include <string>
@@ -504,11 +505,17 @@ struct Case {
 };
 
 Case judge_case(wire::ParityTrace rr, wire::ParityTrace aa, wire::ParityTrace subject,
-		const char *topology = "RO") {
+		const char *topology = "RO", bool rotation = false, bool ends_session = false) {
 	Case c;
-	c.rr = make_run_facts(info_for("rr", "RR"), std::move(rr));
-	c.aa = make_run_facts(info_for("rr_aa", "RR"), std::move(aa));
-	c.subject = make_run_facts(info_for("subject", topology), std::move(subject));
+	auto info = [rotation, ends_session](const char *label, const char *top) {
+		RunInfo i = info_for(label, top);
+		i.rotation = rotation;
+		i.ends_session = ends_session;
+		return i;
+	};
+	c.rr = make_run_facts(info("rr", "RR"), std::move(rr));
+	c.aa = make_run_facts(info("rr_aa", "RR"), std::move(aa));
+	c.subject = make_run_facts(info("subject", topology), std::move(subject));
 	c.verdict = judge(c.rr, c.aa, { { topology, &c.subject } });
 	return c;
 }
@@ -584,6 +591,33 @@ void test_registry() {
 			"the handshake masks are the registry's");
 	check(initial_body_exempt('C', 0x021) && !initial_body_exempt('S', 0x07B),
 			"the initial-body exemptions are the registry's");
+}
+
+// The registered body masks: S2C 0x1A's tick is out of byte equality; S2C 0x64's
+// session block zeroes only its random seed, session id and token.
+void test_body_masks() {
+	check(initial_body_exempt('S', 0x01A), "the 0x1A game-start tick is exempt");
+
+	auto chunk = [](uint32_t offset, uint8_t fill, uint8_t name) {
+		std::string body(12, '\0');
+		body[0] = 1;                    // transfer id
+		body[4] = char(180);            // total size
+		body[8] = char(offset & 0xFF);  // chunk offset
+		// Random bytes (0..35, 148..179) get `fill`, the rules word and its neighbours
+		// (36..51) a constant, the three names (52..147) `name`.
+		for (uint32_t at = offset; at < 180; ++at)
+			body.push_back(char(at < 36 || at >= 148 ? fill : at < 52 ? 0x04 : name));
+		return body;
+	};
+	check(stable_body_key('S', 0x064, chunk(0, 0x11, 'A')) ==
+					stable_body_key('S', 0x064, chunk(0, 0x77, 'A')),
+			"0x64: the seed, session id and token are masked");
+	check(stable_body_key('S', 0x064, chunk(0, 0x11, 'A')) !=
+					stable_body_key('S', 0x064, chunk(0, 0x11, 'B')),
+			"0x64: the names compare");
+	check(stable_body_key('S', 0x064, chunk(140, 0x11, 'A')) ==
+					stable_body_key('S', 0x064, chunk(140, 0x77, 'A')),
+			"0x64: a chunk past the names masks the token by its block offset");
 }
 
 void test_timestamps() {
@@ -714,6 +748,544 @@ void test_tag_histogram() {
 		const Case c = judge_case(scripted(1), scripted(2), subject);
 		expect_row(c, 'S', "first_order", "", "fail", "FIRST_ORDER_MISMATCH");
 	}
+}
+
+// A periodic identity's small count is judged by RR's cadence over the compared
+// run's span from its first occurrence, not raw: a stream that starts at a session
+// event (ASH's integrity challenges after the joiner's C2S 0x0B) runs longer when the
+// readiness before it differs.
+void test_cadence_counts() {
+	check(periodic_cadence_ms({ 10 * kSec, 20 * kSec, 30 * kSec, 40 * kSec }, 45 * kSec) == 10000.0,
+			"a regular stream's cadence is its median gap");
+	check(periodic_cadence_ms({ 10 * kSec, 21 * kSec, 30 * kSec, 40 * kSec, 49 * kSec }, 50 * kSec) ==
+					9500.0,
+			"the median of an even gap count is the middle pair's mean");
+	check(periodic_cadence_ms({ 10 * kSec, 20 * kSec }, 25 * kSec) == 0.0,
+			"two occurrences are no cadence");
+	check(periodic_cadence_ms({ 10 * kSec, 12 * kSec, 30 * kSec }, 35 * kSec) == 0.0,
+			"irregular gaps are no cadence");
+	check(periodic_cadence_ms({ 10000 * kMs, 10200 * kMs, 10400 * kMs }, 40 * kSec) == 0.0,
+			"a burst that stopped is no cadence");
+	{
+		// R4's shape: four in RR from 25 s, six in the subject from 24 s over 11 s more.
+		MetricValue raw, cadence;
+		count_metric(raw, 4, 63000, 6, 80000);
+		check(raw.distance > raw.floor, "the raw count rule fails 6 against 4");
+		cadence_count_metric(cadence, 4, 10000, 6, 56000);
+		check(cadence.distance <= cadence.floor, "RR's cadence over the subject's span predicts 6");
+		MetricValue doubled;
+		cadence_count_metric(doubled, 4, 10000, 12, 56000);
+		check(doubled.distance > doubled.floor, "twice the cadence fails");
+	}
+
+	auto add = [](wire::ParityTrace &trace, const std::vector<uint64_t> &times) {
+		const wire::ParityEvent model = trace.events.back();
+		for (const uint64_t ts : times) {
+			wire::ParityEvent e = model;
+			e.dir = 'S';
+			e.full_tag = 0x079;
+			e.ts_ns = ts;
+			e.body = bytes({ 1, 0, 0, 0 });
+			e.length = e.body.size();
+			trace.events.push_back(e);
+		}
+	};
+	auto ms = [](std::initializer_list<uint64_t> list) {
+		std::vector<uint64_t> out;
+		for (const uint64_t v : list)
+			out.push_back(v * kMs);
+		return out;
+	};
+	wire::ParityTrace rr = scripted(1), aa = scripted(2);
+	add(rr, ms({ 10500, 13500, 16500, 19500 }));
+	add(aa, ms({ 10600, 13600, 16600, 19600 }));
+	{
+		wire::ParityTrace subject = scripted(3);
+		add(subject, ms({ 4500, 7500, 10500, 13500, 16500, 19500 }));
+		expect_row(judge_case(rr, aa, subject), 'S', "tag_count", "0x79:0", "pass");
+	}
+	{
+		wire::ParityTrace subject = scripted(3);
+		std::vector<uint64_t> fast;
+		for (uint64_t t = 4500; t <= 19500; t += 1500)
+			fast.push_back(t * kMs);
+		add(subject, fast);
+		expect_row(judge_case(rr, aa, subject), 'S', "tag_count", "0x79:0", "fail", "COUNT_MISMATCH");
+	}
+	{
+		wire::ParityTrace subject = scripted(3);
+		add(subject, ms({ 4500, 7500, 10500 }));
+		expect_row(judge_case(rr, aa, subject), 'S', "tag_count", "0x79:0", "fail", "COUNT_MISMATCH");
+	}
+}
+
+// The tag histogram's window: each run's first packet plus the pair's shorter
+// comparison interval, so a run whose readiness took longer is not counted over
+// more of the mission clock; and an identity landing just past a run's window end
+// is not missing (10 s presence grace), while one far past it is.
+void test_tag_window() {
+	auto add = [](wire::ParityTrace &trace, uint16_t identity, const std::vector<uint64_t> &times) {
+		const wire::ParityEvent model = trace.events.back();
+		for (const uint64_t ts : times) {
+			wire::ParityEvent e = model;
+			e.dir = 'S';
+			e.full_tag = identity;
+			e.ts_ns = ts;
+			e.body = bytes({ 3, 0 });
+			e.length = e.body.size();
+			trace.events.push_back(e);
+		}
+	};
+	auto burst = [](uint64_t from_ms) {
+		std::vector<uint64_t> out;
+		for (uint64_t i = 0; i < 10; ++i)
+			out.push_back((from_ms + i * 90) * kMs);
+		return out;
+	};
+	auto longer = [](wire::ParityTrace &trace) {
+		// The session's first packet a second earlier: a longer comparison interval.
+		wire::ParityPacket early = trace.packets.front();
+		early.ts_ns -= 1 * kSec;
+		trace.packets.insert(trace.packets.begin(), early);
+	};
+	{
+		wire::ParityTrace rr = scripted(1), aa = scripted(2), subject = scripted(3);
+		add(rr, 0x055, burst(10000));
+		add(aa, 0x055, burst(10000));
+		add(subject, 0x055, burst(10000));
+		add(subject, 0x055, burst(19050)); // past the common window, inside its own interval
+		longer(subject);
+		expect_row(judge_case(rr, aa, subject), 'S', "tag_count", "0x55:0", "pass");
+	}
+	{
+		wire::ParityTrace rr = scripted(1), aa = scripted(2), near = scripted(3), far = scripted(3);
+		add(rr, 0x056, { 18 * kSec });
+		add(aa, 0x056, { 18 * kSec });
+		add(near, 0x056, { 20500 * kMs });
+		add(far, 0x056, { 35 * kSec });
+		expect_row(judge_case(rr, aa, near), 'S', "tag_presence", "0x56:0", "pass");
+		expect_row(judge_case(rr, aa, far), 'S', "tag_presence", "0x56:0", "fail", "MISSING_TAG");
+	}
+}
+
+// A stream that opens at the joiner's own join (the per-slot overlay visit's S2C 0x40
+// runs only for a state-6 slot, which the join's C2S 0x0B sets) counts from each run's
+// join over the pair's shorter span from it (window.tag_stream_anchor): x1's kick RR
+// joined 34.6 s after its hello and RO 24.2 s, and the same stream counted over the
+// common window read 59 against 88. A stream that opens late after its join counts
+// short. A drawn burst's last 0x40 (after a full 97-byte one, any visit but the join's)
+// one entry (6 bytes) from a drawn tail of the other run is that draw
+// (length.S.0x40.burst_tail); the join burst's tail and a lone visit's 0x40 stay exact.
+void test_stream_anchor_and_burst_tail() {
+	// One visit per step: its 0x40s share a datagram. The first visit is the join's;
+	// the rest cycle.
+	auto stream = [](wire::ParityTrace &trace, uint64_t from, uint64_t step,
+						  std::vector<std::vector<size_t>> visits = { { 7 } }) {
+		const wire::ParityEvent model = trace.events.back();
+		size_t i = 0;
+		for (uint64_t ts = from; ts <= 22 * kSec; ts += step, ++i) {
+			const std::vector<size_t> &visit = i == 0 || visits.size() == 1
+					? visits[0]
+					: visits[1 + (i - 1) % (visits.size() - 1)];
+			for (const size_t length : visit) {
+				wire::ParityEvent e = model;
+				e.dir = 'S';
+				e.full_tag = 0x040;
+				e.ts_ns = ts;
+				e.frame = model.frame + 1 + int(i);
+				e.body.assign(length, uint8_t(i));
+				e.length = e.body.size();
+				trace.events.push_back(e);
+			}
+		}
+	};
+	auto join_later = [](wire::ParityTrace &trace, uint64_t by) {
+		for_events(trace, 'C', 0x00B, [by](wire::ParityEvent &e) { e.ts_ns += by; });
+	};
+	{
+		wire::ParityTrace rr = scripted(1), aa = scripted(2), early = scripted(3), late = scripted(3),
+						  fast = scripted(3);
+		// The reference joins 4 s later and its stream opens 0.6 s after its join.
+		join_later(rr, 4 * kSec);
+		join_later(aa, 4 * kSec);
+		stream(rr, 6 * kSec, 300 * kMs);
+		stream(aa, 6 * kSec, 300 * kMs);
+		stream(early, 2 * kSec, 300 * kMs); // the same stream after an earlier join
+		stream(late, 12 * kSec, 300 * kMs); // a stream that opens 10.6 s after its join
+		stream(fast, 2 * kSec, 150 * kMs);
+		expect_row(judge_case(rr, aa, early), 'S', "tag_count", "0x40:0", "pass");
+		expect_row(judge_case(rr, aa, late), 'S', "tag_count", "0x40:0", "fail", "COUNT_MISMATCH");
+		expect_row(judge_case(rr, aa, fast), 'S', "tag_count", "0x40:0", "fail", "COUNT_MISMATCH");
+	}
+	{
+		// A timer-phase stream (S2C 0x6F, one the first-occurrence order leaves out)
+		// counts from the join too: retail draws only its first send's phase, so one
+		// opening at another phase passes and one opening 10.6 s after its join fails,
+		// where counting from its own first passed it.
+		auto timer = [](wire::ParityTrace &trace, uint64_t from) {
+			const wire::ParityEvent model = trace.events.back();
+			for (uint64_t ts = from; ts <= 22 * kSec; ts += 500 * kMs) {
+				wire::ParityEvent e = model;
+				e.dir = 'S';
+				e.full_tag = 0x06F;
+				e.ts_ns = ts;
+				e.body = bytes({ 1, 0 });
+				e.length = e.body.size();
+				trace.events.push_back(e);
+			}
+		};
+		static_assert(first_order_excluded('S', 0x06F));
+		wire::ParityTrace rr = scripted(1), aa = scripted(2), phase = scripted(3), late = scripted(3);
+		timer(rr, 2 * kSec);
+		timer(aa, 2 * kSec);
+		timer(phase, 2300 * kMs);
+		timer(late, 12 * kSec);
+		expect_row(judge_case(rr, aa, phase), 'S', "tag_count", "0x6f:0", "pass");
+		expect_row(judge_case(rr, aa, late), 'S', "tag_count", "0x6f:0", "fail", "COUNT_MISMATCH");
+	}
+	{
+		const std::vector<std::vector<size_t>> reference = { { 97, 79 }, { 7 }, { 7 }, { 97, 79 }, { 7 } };
+		wire::ParityTrace rr = scripted(1), aa = scripted(2), tail = scripted(3), off = scripted(3),
+						  extra = scripted(3), join_off = scripted(3);
+		stream(rr, 6 * kSec, 300 * kMs, reference);
+		stream(aa, 6 * kSec, 300 * kMs, reference);
+		stream(tail, 6 * kSec, 300 * kMs, { { 97, 79 }, { 7 }, { 7 }, { 97, 73 }, { 7 } });
+		stream(off, 6 * kSec, 300 * kMs, { { 97, 79 }, { 7 }, { 7 }, { 97, 67 }, { 7 } });
+		stream(extra, 6 * kSec, 300 * kMs, { { 97, 79 }, { 7 }, { 97, 79 }, { 7 }, { 97, 73 } });
+		// The join's burst is no draw: its tail one entry off is ours.
+		stream(join_off, 6 * kSec, 300 * kMs, { { 97, 73 }, { 7 }, { 7 }, { 97, 79 }, { 7 } });
+		expect_row(judge_case(rr, aa, tail), 'S', "length_set", "0x40:0", "pass");
+		expect_row(judge_case(rr, aa, extra), 'S', "length_set", "0x40:0", "pass");
+		expect_row(judge_case(rr, aa, off), 'S', "length_set", "0x40:0", "fail",
+				"LENGTH_SET_MISMATCH");
+		expect_row(judge_case(rr, aa, join_off), 'S', "length_set", "0x40:0", "fail",
+				"LENGTH_SET_MISMATCH");
+	}
+	{
+		// A lone two-entry 0x40 against one-entry visits is no burst tail.
+		wire::ParityTrace rr = scripted(1), aa = scripted(2), lone = scripted(3);
+		stream(rr, 6 * kSec, 300 * kMs);
+		stream(aa, 6 * kSec, 300 * kMs);
+		stream(lone, 6 * kSec, 300 * kMs, { { 7 }, { 7 }, { 13 }, { 7 } });
+		expect_row(judge_case(rr, aa, lone), 'S', "length_set", "0x40:0", "fail",
+				"LENGTH_SET_MISMATCH");
+	}
+}
+
+// A message spliced into a scripted trace at `at`, in the datagram of the event before it
+// (the trace keeps capture order).
+void splice(wire::ParityTrace &trace, char dir, uint16_t identity, uint64_t at,
+		std::vector<uint8_t> body) {
+	auto at_or_after = std::find_if(trace.events.begin(), trace.events.end(),
+			[at](const wire::ParityEvent &event) { return event.ts_ns > at; });
+	wire::ParityEvent event;
+	event.frame = at_or_after == trace.events.begin() ? 1 : std::prev(at_or_after)->frame;
+	event.ts_ns = at;
+	event.dir = dir;
+	event.session = kClientPort;
+	event.participant = 1;
+	event.full_tag = identity;
+	event.material = true;
+	event.body = std::move(body);
+	event.length = event.body.size();
+	trace.events.insert(at_or_after, std::move(event));
+}
+
+// E2's round end and rotation in retail's order (x2's tdh-i3a-tdm-round RR joiner
+// capture: the zero 0x61 seed and the 7-byte 0x1D board in one datagram, the 0x56 the
+// board pull answers, the 0x25 after the linger and before the host's load, the joiner's
+// reload C2S 0x48 at once, then the next mission's 0x7B at the host's load end, its 0x0B
+// and first 0x0A; a retail joiner's first join carries two 0x7B). Gameplay pauses in
+// both directions from the round end to the next mission: the round end moves the slot
+// to state 7 and the host's 0x0A needs state 6 (Server_ProcessRoundEnd @0x51685E,
+// Server_SendEntityStateToPlayer @0x517BD2); the joiner's 0x1D raises the round-over
+// gate that holds its 0x0C (@0x430858, @0x42C467). The steady gap holding the round
+// end's board is that pause; a gap that does not hold it, or the same gap without a
+// declared rotation, is STEADY_GAMEPLAY_GAP.
+constexpr uint64_t kRoundEnd = 10200 * kMs;
+constexpr uint64_t kNextGameplay = 13 * kSec;
+
+struct Rotation {
+	bool zero_seed = true;
+	uint64_t pause_from = kRoundEnd;     // the gameplay pause's first moment
+	uint64_t reset_at = 11 * kSec;       // the 0x25 (retail: before the host's load)
+	uint64_t reload_at = 11150 * kMs;    // the joiner's reload 0x48, answering the 0x25
+	uint64_t announce_at = 11300 * kMs;  // the host's load-end 0x7B
+	uint64_t resume_at = kNextGameplay;  // the next mission's first gameplay
+};
+
+void test_rotation_load_gap() {
+	auto rotate = [](wire::ParityTrace trace, Rotation r = {}) {
+		std::vector<wire::ParityFrameState> frames;
+		for (const wire::ParityFrameState &frame : trace.frames)
+			if (frame.ts_ns < r.pause_from || frame.ts_ns >= r.resume_at)
+				frames.push_back(frame);
+		trace.frames = std::move(frames);
+		std::vector<wire::ParityUplinkState> uplinks;
+		for (const wire::ParityUplinkState &uplink : trace.uplinks)
+			if (uplink.ts_ns < r.pause_from || uplink.ts_ns >= r.resume_at)
+				uplinks.push_back(uplink);
+		trace.uplinks = std::move(uplinks);
+		splice(trace, 'S', 0x07B, 1290 * kMs, text_bytes("Untitled "));
+		splice(trace, 'S', 0x061, kRoundEnd,
+				r.zero_seed ? bytes({ 0, 0, 0, 0 }) : bytes({ 0, 0, 0xE5, 0 }));
+		splice(trace, 'S', 0x01D, kRoundEnd, bytes({ 0, 0, 0, 0, 0, 1, 1 }));
+		splice(trace, 'S', 0x056, 10400 * kMs, bytes({ 0x9E, 0, 0, 0, 0x15, 1, 2 }));
+		splice(trace, 'S', 0x025, r.reset_at, {});
+		splice(trace, 'C', 0x048, r.reload_at, bytes({ 3, 0, 0, 0 }));
+		splice(trace, 'S', 0x07B, r.announce_at, text_bytes("Untitled "));
+		splice(trace, 'S', 0x00B, r.announce_at + 200 * kMs, bytes({ 0x42, 0x4D, 0x53, 0x0C }));
+		return trace;
+	};
+	auto gap = [](const Case &c) {
+		for (const EvidenceRow &row : c.verdict.evidence)
+			if (row.code == "STEADY_GAMEPLAY_GAP")
+				return true;
+		return false;
+	};
+	auto milestones = [](const Case &c) {
+		const VerdictRow *row = find_row(c.verdict.rows, 'B', "milestones", "");
+		return row ? row->value.subject : std::string();
+	};
+	auto lingers_short = [](const RunFacts &run) {
+		for (const EvidenceFinding &finding : run.evidence)
+			if (finding.code == "ROUND_LINGER_SHORT")
+				return true;
+		return false;
+	};
+
+	const Case declared = judge_case(rotate(scripted(1)), rotate(scripted(2)), rotate(scripted(3)),
+			"RO", true);
+	check(!gap(declared), "the round-end pause of a declared rotation is no STEADY_GAMEPLAY_GAP");
+	expect_row(declared, 'B', "milestones", "", "pass");
+	expect_row(declared, 'B', "milestone_order", "", "pass");
+	const std::string order = milestones(declared);
+	size_t at = 0;
+	for (const char *name : { "S:0x61 round", "S:0x1d round", "S:0x56 round", "S:0x25 reset",
+				 "C:0x48 next", "S:0x7b next", "S:0x0b next", "S:0x0a next" }) {
+		const size_t found = order.find(name, at);
+		check(found != std::string::npos, std::string(name) + " follows in retail's order: " + order);
+		if (found != std::string::npos)
+			at = found;
+	}
+	check(order.find("0x5d") == std::string::npos, "no 0x5D belongs to the round end");
+
+	const Case seeded = judge_case(rotate(scripted(1), { false }), rotate(scripted(2), { false }),
+			rotate(scripted(3), { false }), "RO", true);
+	check(milestones(seeded).find("S:0x61 round") == std::string::npos,
+			"a nonzero seed ahead of the board is no round-end 0x61");
+
+	// A 0x25 held until the host's load end rides the 0x7B's datagram, and the joiner's
+	// 0x48 follows both: the inversion milestone_order keeps, not normalizes.
+	const Rotation ride{ true, kRoundEnd, 11300 * kMs, 11400 * kMs, 11300 * kMs };
+	const Case late_reset = judge_case(rotate(scripted(1)), rotate(scripted(2)),
+			rotate(scripted(3), ride), "OR", true);
+	expect_row(late_reset, 'B', "milestones", "", "pass");
+	expect_row(late_reset, 'B', "milestone_order", "", "fail", "MILESTONE_ORDER");
+	// An A/A presence difference (RR-aa's window cut before its next mission's first
+	// 0x0A) widens the presence row only: the same inversion still fails.
+	wire::ParityTrace cut_aa = rotate(scripted(2));
+	{
+		std::vector<wire::ParityEvent> events;
+		for (wire::ParityEvent &event : cut_aa.events)
+			if (!(event.dir == 'S' && event.full_tag == 0x00A && event.ts_ns > kRoundEnd))
+				events.push_back(std::move(event));
+		cut_aa.events = std::move(events);
+	}
+	const Case presence_aa = judge_case(rotate(scripted(1)), cut_aa, rotate(scripted(3), ride),
+			"OR", true);
+	const VerdictRow *aa_presence = find_row(presence_aa.verdict.aa, 'B', "milestones", "");
+	check(aa_presence && aa_presence->value.distance >= 1.0,
+			"RR-aa lacks the next mission's first 0x0A (an A/A presence difference)");
+	expect_row(presence_aa, 'B', "milestones", "", "pass");
+	expect_row(presence_aa, 'B', "milestone_order", "", "fail", "MILESTONE_ORDER");
+
+	// A stall of ours that ends in the round end is no pause: its first sample lies
+	// 2.2 s before the board.
+	const Case stall = judge_case(rotate(scripted(1)), rotate(scripted(2)),
+			rotate(scripted(3), { true, 8 * kSec }), "RO", true);
+	check(gap(stall), "a stall ending in the round end's board is a STEADY_GAMEPLAY_GAP");
+
+	// A second round end in a long window is excused the same way.
+	auto again = [](wire::ParityTrace trace, bool board) {
+		constexpr uint64_t kSecondEnd = 16 * kSec, kSecondNext = 18500 * kMs;
+		std::vector<wire::ParityFrameState> frames;
+		for (const wire::ParityFrameState &frame : trace.frames)
+			if (frame.ts_ns < kSecondEnd || frame.ts_ns >= kSecondNext)
+				frames.push_back(frame);
+		trace.frames = std::move(frames);
+		std::vector<wire::ParityUplinkState> uplinks;
+		for (const wire::ParityUplinkState &uplink : trace.uplinks)
+			if (uplink.ts_ns < kSecondEnd || uplink.ts_ns >= kSecondNext)
+				uplinks.push_back(uplink);
+		trace.uplinks = std::move(uplinks);
+		if (board)
+			splice(trace, 'S', 0x01D, kSecondEnd, bytes({ 0, 0, 0, 0, 0, 1, 1 }));
+		return trace;
+	};
+	const Case twice = judge_case(again(rotate(scripted(1)), true), again(rotate(scripted(2)), true),
+			again(rotate(scripted(3)), true), "RO", true);
+	check(!gap(twice), "a second round end's pause is no STEADY_GAMEPLAY_GAP");
+	const Case hole = judge_case(again(rotate(scripted(1)), true), again(rotate(scripted(2)), true),
+			again(rotate(scripted(3)), false), "RO", true);
+	check(gap(hole), "the same hole without its board is a STEADY_GAMEPLAY_GAP");
+
+	// The 0x25 follows its board by the 2790-tick linger (44.64 s) at least; these
+	// scripted rotations compress it, so each run reports it short.
+	check(lingers_short(declared.subject) && lingers_short(declared.rr),
+			"a 0x25 0.8 s after its board is ROUND_LINGER_SHORT");
+	auto lingered = [](uint64_t linger) {
+		RunInfo info = info_for("linger", "RO");
+		info.rotation = true;
+		info.steady_end_ns = 60 * kSec;
+		info.steady_completed_ns = info.steady_end_ns + 500 * kMs;
+		info.steady_seconds = double(info.steady_end_ns - info.steady_start_ns) / 1e9;
+		wire::ParityTrace trace = scripted(3);
+		splice(trace, 'S', 0x01D, kRoundEnd, bytes({ 0, 0, 0, 0, 0, 1, 1 }));
+		splice(trace, 'S', 0x025, kRoundEnd + linger, {});
+		return make_run_facts(info, std::move(trace));
+	};
+	check(!lingers_short(lingered(44700 * kMs)), "a 0x25 44.7 s after its board is no ROUND_LINGER_SHORT");
+	check(lingers_short(lingered(30 * kSec)), "a 0x25 30 s after its board is ROUND_LINGER_SHORT");
+
+	const Case resumed = judge_case(rotate(scripted(1)), rotate(scripted(2)),
+			rotate(scripted(3), { true, 11 * kSec }), "RO", true);
+	check(gap(resumed), "gameplay after the round end leaves a later gap a STEADY_GAMEPLAY_GAP");
+
+	const Case undeclared = judge_case(rotate(scripted(1)), rotate(scripted(2)), rotate(scripted(3)));
+	check(gap(undeclared), "the same gap without a declared rotation is STEADY_GAMEPLAY_GAP");
+
+	// A window that ends inside the pause (the host still loading at the steady end):
+	// its tail is the pause, and the legs past the steady end are the capture's tail.
+	const Rotation tail{ true, kRoundEnd, 11 * kSec, 11150 * kMs, 20500 * kMs, 30 * kSec };
+	const Case cut = judge_case(rotate(scripted(1), tail), rotate(scripted(2), tail),
+			rotate(scripted(3), tail), "RO", true);
+	check(!gap(cut), "a window ending inside the round-end pause has no STEADY_GAMEPLAY_GAP");
+	for (const EvidenceRow &row : cut.verdict.evidence)
+		check(row.code != "STEADY_BOUNDARY_GAMEPLAY_MISSING",
+				"the pause holds the window end: " + row.run + " " + row.detail);
+	const std::string cut_order = milestones(cut);
+	check(cut_order.find("C:0x48 next") != std::string::npos &&
+					cut_order.find("S:0x7b next") == std::string::npos,
+			"milestones count through the steady end only: " + cut_order);
+}
+
+// A dead joiner sends no C2S 0x0C (window.dead_joiner_uplink): a gap or a window
+// edge that a frame reporting the joiner's own health 0 falls in is its death; the
+// same hole while the frames report it alive is STEADY_GAMEPLAY_GAP.
+void test_dead_joiner_uplink() {
+	auto die = [](wire::ParityTrace trace, uint64_t from, uint64_t until, bool report_dead) {
+		std::vector<wire::ParityUplinkState> kept;
+		for (const wire::ParityUplinkState &u : trace.uplinks)
+			if (u.ts_ns < from || u.ts_ns >= until)
+				kept.push_back(u);
+		trace.uplinks = std::move(kept);
+		if (report_dead)
+			for (wire::ParityFrameState &frame : trace.frames)
+				if (frame.ts_ns >= from + 50 * kMs && frame.ts_ns < until)
+					frame.health = 0;
+		return trace;
+	};
+	auto coverage = [](const Case &c) {
+		for (const EvidenceRow &row : c.verdict.evidence)
+			if (row.code == "STEADY_GAMEPLAY_GAP" || row.code == "STEADY_BOUNDARY_GAMEPLAY_MISSING")
+				return true;
+		return false;
+	};
+	const uint64_t end = kSteadyStart + uint64_t(kSteadySeconds * 1e9) + kSec;
+	// Dead for the window's rest (a self nade), and dead then respawned.
+	for (const auto &[from, until] : { std::pair{ 12 * kSec, end }, std::pair{ 9 * kSec, 13 * kSec } }) {
+		const Case dead = judge_case(die(scripted(1), from, until, true),
+				die(scripted(2), from, until, true), die(scripted(3), from, until, true));
+		check(!coverage(dead), "a dead joiner's missing uplink is no coverage failure");
+		const Case alive = judge_case(die(scripted(1), from, until, true),
+				die(scripted(2), from, until, true), die(scripted(3), from, until, false));
+		check(coverage(alive), "the same hole while the joiner lives is a coverage failure");
+	}
+}
+
+// A scenario whose own play ends the joiner's session (window.session_end, E4's
+// kick): the host's punt reaches the joiner as the S2C 0x103 description record and
+// the connection tears down at once, so no gameplay follows. A run that declares it
+// ends its coverage at the record; the same silence without the declaration, or a
+// declared run with no record, is a coverage failure.
+void test_session_end() {
+	static constexpr uint64_t kPunt = 8 * kSec;
+	auto punt = [](wire::ParityTrace trace, bool record) {
+		auto drop = [](auto &records, auto gone) {
+			records.erase(std::remove_if(records.begin(), records.end(), gone), records.end());
+		};
+		drop(trace.uplinks, [](const wire::ParityUplinkState &u) { return u.ts_ns > kPunt; });
+		drop(trace.frames, [](const wire::ParityFrameState &f) { return f.ts_ns > kPunt; });
+		drop(trace.events, [](const wire::ParityEvent &e) {
+			return e.ts_ns > kPunt && (e.full_tag == 0x00C || e.full_tag == 0x00A);
+		});
+		if (record) {
+			splice(trace, 'S', 0x103, kPunt + 90 * kMs, bytes({ 0x44, 0x53, 0, 4, 0, 1, 0, 0, 0 }));
+			for_events(trace, 'S', 0x103, [](wire::ParityEvent &e) { e.settings_update = true; });
+		}
+		return trace;
+	};
+	auto coverage = [](const Case &c) {
+		for (const EvidenceRow &row : c.verdict.evidence)
+			if (row.code == "STEADY_GAMEPLAY_GAP" || row.code == "STEADY_BOUNDARY_GAMEPLAY_MISSING")
+				return true;
+		return false;
+	};
+	const Case declared = judge_case(punt(scripted(1), true), punt(scripted(2), true),
+			punt(scripted(3), true), "RO", false, true);
+	check(!coverage(declared), "a declared punt's silence after its record is no coverage failure");
+	const Case undeclared = judge_case(punt(scripted(1), true), punt(scripted(2), true),
+			punt(scripted(3), true));
+	check(coverage(undeclared), "the same silence without the declaration is a coverage failure");
+	const Case unrecorded = judge_case(punt(scripted(1), false), punt(scripted(2), false),
+			punt(scripted(3), false), "RO", false, true);
+	check(coverage(unrecorded), "a declared run whose capture holds no record keeps its window");
+
+	// Its rates count the covered play over that play's length: a punt landing 1.5 s
+	// sooner (x5's kick covered 1.08 to 1.29 s) reads the same gameplay cadence.
+	auto punt_at = [](wire::ParityTrace trace, uint64_t at) {
+		auto drop = [](auto &records, auto gone) {
+			records.erase(std::remove_if(records.begin(), records.end(), gone), records.end());
+		};
+		drop(trace.uplinks, [at](const wire::ParityUplinkState &u) { return u.ts_ns > at; });
+		drop(trace.frames, [at](const wire::ParityFrameState &f) { return f.ts_ns > at; });
+		drop(trace.events, [at](const wire::ParityEvent &e) {
+			return e.ts_ns > at && (e.full_tag == 0x00C || e.full_tag == 0x00A);
+		});
+		splice(trace, 'S', 0x103, at + 90 * kMs, bytes({ 0x44, 0x53, 0, 4, 0, 1, 0, 0, 0 }));
+		for_events(trace, 'S', 0x103, [](wire::ParityEvent &e) { e.settings_update = true; });
+		return trace;
+	};
+	const Case sooner = judge_case(punt_at(scripted(1), kPunt), punt_at(scripted(2), kPunt),
+			punt_at(scripted(3), kPunt - 1500 * kMs), "RO", false, true);
+	expect_row(sooner, 'S', "gameplay_cadence", "", "pass");
+	expect_row(sooner, 'C', "gameplay_cadence", "", "pass");
+	const Case undeclared_sooner = judge_case(punt_at(scripted(1), kPunt),
+			punt_at(scripted(2), kPunt), punt_at(scripted(3), kPunt - 1500 * kMs));
+	expect_row(undeclared_sooner, 'S', "gameplay_cadence", "", "fail", "GAMEPLAY_CADENCE");
+
+	// A stream's count runs from each run's join to its own punt over that span: a punt
+	// a readiness wait later (x6's kick: 15.26 s from the join on RR, 14.36 s on RR-aa,
+	// 16.82 s on OO) carries more of the same stream, not a faster one.
+	const Case later = judge_case(punt_at(scripted(1), kPunt), punt_at(scripted(2), kPunt),
+			punt_at(scripted(3), kPunt + 1500 * kMs), "RO", false, true);
+	expect_row(later, 'C', "tag_count", "0x0c:0", "pass");
+	const Case undeclared_later = judge_case(punt_at(scripted(1), kPunt),
+			punt_at(scripted(2), kPunt), punt_at(scripted(3), kPunt + 1500 * kMs));
+	expect_row(undeclared_later, 'C', "tag_count", "0x0c:0", "fail", "COUNT_MISMATCH");
+	// The same span sending the stream twice as often still fails.
+	wire::ParityTrace doubled = punt_at(scripted(3), kPunt);
+	std::vector<wire::ParityEvent> events;
+	for (const wire::ParityEvent &event : doubled.events) {
+		events.push_back(event);
+		if (event.dir == 'C' && event.full_tag == 0x00C)
+			events.push_back(event);
+	}
+	doubled.events = std::move(events);
+	const Case faster = judge_case(punt_at(scripted(1), kPunt), punt_at(scripted(2), kPunt),
+			std::move(doubled), "RO", false, true);
+	expect_row(faster, 'C', "tag_count", "0x0c:0", "fail", "COUNT_MISMATCH");
 }
 
 void test_aa_widening() {
@@ -926,6 +1498,213 @@ void test_integrity() {
 		const Case c = judge_case(scripted(1), scripted(2), subject);
 		expect_row(c, 'B', "integrity_alternation", "", "fail", "INTEGRITY_NOT_ALTERNATING");
 	}
+	{
+		// The family is one toggle flipped at every boundary, a slot challenged only
+		// while it plays (integrity.family_toggle): a boundary the joiner sat out
+		// (dead) flips it unseen, so two challenges two boundaries apart share a family;
+		// a host that flipped only on its sends would not.
+		wire::ParityTrace skipped = scripted(3);
+		erase_events(skipped, 'S', 0x030);
+		expect_row(judge_case(scripted(1), scripted(2), skipped), 'B', "integrity_alternation",
+				"", "pass");
+		wire::ParityTrace per_send = scripted(3);
+		erase_events(per_send, 'S', 0x030);
+		for_events(per_send, 'S', 0x031, [](wire::ParityEvent &e) {
+			if (e.ts_ns > 15 * kSec && e.ts_ns < 17 * kSec)
+				e.full_tag = 0x030;
+		});
+		expect_row(judge_case(scripted(1), scripted(2), per_send), 'B', "integrity_alternation",
+				"", "fail", "INTEGRITY_NOT_ALTERNATING");
+		// A mission change (its S2C 0x25) ends the count: the next mission's first
+		// family is free (x6's round RO retail host repeated across it).
+		auto across = [](bool reset) {
+			wire::ParityTrace trace = scripted(3);
+			for_events(trace, 'S', 0x030, [](wire::ParityEvent &e) {
+				if (e.ts_ns < 12 * kSec)
+					e.full_tag = 0x031;
+			});
+			for_events(trace, 'S', 0x031, [](wire::ParityEvent &e) {
+				if (e.ts_ns > 15 * kSec && e.ts_ns < 17 * kSec)
+					e.full_tag = 0x030;
+			});
+			if (reset)
+				splice(trace, 'S', 0x025, 8 * kSec, {});
+			return trace;
+		};
+		expect_row(judge_case(scripted(1), scripted(2), across(true)), 'B',
+				"integrity_alternation", "", "pass");
+		expect_row(judge_case(scripted(1), scripted(2), across(false)), 'B',
+				"integrity_alternation", "", "fail", "INTEGRITY_NOT_ALTERNATING");
+	}
+	{
+		// An ammo challenge between the join and the first uplink carries the class-init
+		// ADM's row (integrity.join_adm): the host's extra row there is the join's phase
+		// (x6's ash-deploy RO retail host: row 14 at join + 0.53 s); after the first
+		// uplink the same row is a host divergence.
+		auto extra_row = [](uint64_t at) {
+			wire::ParityTrace trace = scripted(3);
+			splice(trace, 'S', 0x031, at, bytes({ 0x0E, 0x34, 0x12 }));
+			std::vector<uint8_t> reply{ 0x0E };
+			put_u32(reply, 0xCAFEF00Du ^ 0x1234u);
+			put_u32(reply, 0x1234u);
+			splice(trace, 'C', 0x021, at + 20 * kMs, reply);
+			return trace;
+		};
+		const Case before = judge_case(scripted(1), scripted(2), extra_row(1600 * kMs), "OO");
+		expect_row(before, 'B', "integrity_rows", "ammo", "pass");
+		expect_row(before, 'B', "integrity_row_unwitnessed", "ammo", "pass");
+		const Case after = judge_case(scripted(1), scripted(2), extra_row(3 * kSec), "OO");
+		expect_row(after, 'B', "integrity_rows", "ammo", "fail", "HOST_AMMO_ROW_MISMATCH");
+	}
+	{
+		// The span ends at the host's apply of that first 0x0C, not at its crossing
+		// (integrity.join_adm): the host's pump answers the per-frame ping [ts][1] that rides
+		// ahead of the 0x0C with an S2C 0x57 [ts][0] before the 0x0C stores the ADM, and its
+		// messages leave in queue order, so a 0x31 ahead of that 0x57 was computed before the
+		// apply. p260's drive OO host sent row 14 50 ms after the first 0x0C crossed, in one
+		// datagram ahead of its 0x57; behind the 0x57 the same row is a host divergence.
+		auto seed_window = [](bool pong_first) {
+			wire::ParityTrace trace = scripted(3);
+			const auto uplink = std::find_if(trace.events.begin(), trace.events.end(),
+					[](const wire::ParityEvent &e) { return e.dir == 'C' && e.full_tag == 0x00C; });
+			const uint64_t at = uplink->ts_ns + 8 * kMs; // the host's next datagram
+			wire::ParityEvent ping = *uplink;
+			ping.full_tag = 0x02C;
+			ping.material = true;
+			ping.body = bytes({ 0x31, 0x3E, 0x6B, 0x2B, 1 });
+			ping.length = ping.body.size();
+			trace.events.insert(uplink, ping);
+			const std::vector<uint8_t> pong = bytes({ 0x31, 0x3E, 0x6B, 0x2B, 0 });
+			if (pong_first)
+				splice(trace, 'S', 0x057, at, pong);
+			splice(trace, 'S', 0x031, at, bytes({ 0x0E, 0x34, 0x12 }));
+			if (!pong_first)
+				splice(trace, 'S', 0x057, at, pong);
+			std::vector<uint8_t> reply{ 0x0E };
+			put_u32(reply, 0xCAFEF00Du ^ 0x1234u);
+			put_u32(reply, 0x1234u);
+			splice(trace, 'C', 0x021, at + 20 * kMs, reply);
+			return trace;
+		};
+		const Case seeded = judge_case(scripted(1), scripted(2), seed_window(false), "OO");
+		expect_row(seeded, 'B', "integrity_rows", "ammo", "pass");
+		expect_row(seeded, 'B', "integrity_row_unwitnessed", "ammo", "pass");
+		const Case applied = judge_case(scripted(1), scripted(2), seed_window(true), "OO");
+		expect_row(applied, 'B', "integrity_rows", "ammo", "fail", "HOST_AMMO_ROW_MISMATCH");
+		expect_row(applied, 'B', "integrity_row_unwitnessed", "ammo", "fail",
+				"INTEGRITY_ROW_UNWITNESSED");
+	}
+	{
+		// An ammo challenge carries the row of the ADM the uplinks name (integrity.held_adm):
+		// x6's selfnade holds the grenade (ADM 52, row 54) 6.5 s, under the two boundaries
+		// an ammo challenge needs, so RR's row 54 there against a run whose ammo boundary
+		// fell before the select is the stay's phase. A stay of two boundaries or more
+		// compares.
+		auto grenade = [](uint32_t seed, uint64_t from, uint64_t until, bool challenged) {
+			wire::ParityTrace trace = scripted(seed);
+			for (wire::ParityUplinkState &u : trace.uplinks)
+				if (u.ts_ns >= from && u.ts_ns < until)
+					u.adm = 52;
+			if (challenged) {
+				for_events(trace, 'S', 0x031, [from, until](wire::ParityEvent &e) {
+					if (e.ts_ns >= from && e.ts_ns < until)
+						e.body[0] = 0x36;
+				});
+				for_events(trace, 'C', 0x021, [from, until](wire::ParityEvent &e) {
+					if (e.ts_ns >= from && e.ts_ns < until + 20 * kMs)
+						e.body[0] = 0x36;
+				});
+			}
+			return trace;
+		};
+		// The 16 s ammo challenge: inside RR's 14..17 s stay, before the run's 16.5..19.5 s.
+		const Case short_stay = judge_case(grenade(1, 14 * kSec, 17 * kSec, true),
+				grenade(2, 14 * kSec, 17 * kSec, true), grenade(3, 16500 * kMs, 19500 * kMs, false),
+				"OR");
+		expect_row(short_stay, 'B', "integrity_rows", "ammo", "pass");
+		expect_row(short_stay, 'B', "integrity_row_unwitnessed", "ammo", "pass");
+		// Held 8..20 s (over two boundaries) on both sides: the row must be there.
+		const Case long_stay = judge_case(grenade(1, 8 * kSec, 21 * kSec, true),
+				grenade(2, 8 * kSec, 21 * kSec, true), grenade(3, 8 * kSec, 21 * kSec, false),
+				"OR");
+		expect_row(long_stay, 'B', "integrity_rows", "ammo", "fail", "HOST_AMMO_ROW_MISMATCH");
+	}
+}
+
+// A rotation's joiner joins each mission, and a stream that starts in a later mission
+// counts from that mission's join (window.tag_stream_anchor): round's next-mission S2C
+// 0x6E opens at the joiner's second C2S 0x0B (x8 RR 0.9 s, OO 0.2 s after it), and OO's
+// second join came 10.8 s after RR's (our host's map-change load), so counted from the
+// first join OO read 30 against 37 where the stream itself runs at RR's rate.
+void test_stream_anchor_rotation() {
+	auto rotation = [](uint32_t seed, uint64_t second_join) {
+		wire::ParityTrace trace = scripted(seed);
+		splice(trace, 'C', 0x00B, second_join, bytes({ 1 }));
+		for (uint64_t ts = second_join + 500 * kMs; ts <= 20 * kSec; ts += 500 * kMs)
+			splice(trace, 'S', 0x06E, ts, bytes({ 0 }));
+		return trace;
+	};
+	const Case c = judge_case(rotation(1, 6 * kSec), rotation(2, 6 * kSec), rotation(3, 10 * kSec));
+	expect_row(c, 'S', "tag_count", "0x6e:0", "pass");
+	// The same stream opening 4 s after its own mission's join still counts short.
+	wire::ParityTrace slow = scripted(3);
+	splice(slow, 'C', 0x00B, 6 * kSec, bytes({ 1 }));
+	for (uint64_t ts = 10 * kSec; ts <= 20 * kSec; ts += 500 * kMs)
+		splice(slow, 'S', 0x06E, ts, bytes({ 0 }));
+	const Case late = judge_case(rotation(1, 6 * kSec), rotation(2, 6 * kSec), slow);
+	expect_row(late, 'S', "tag_count", "0x6e:0", "fail", "COUNT_MISMATCH");
+}
+
+// The auto-reload loop re-sends until the first echo lands (count.reload_echo): RR's 2
+// and RR-aa's 3 against a subject's 5 are the echo's latency against the loop. A lone
+// request passes only when its echo landed inside the longest entry spacing the
+// reference's own requests allow: x7's selfnade RR sent 2 then 3 requests in two
+// consecutive datagrams 187 ms apart (spacing at most 93 ms) and x7 RO's joiner sent one,
+// its echo on the wire 55 ms later; x1's OR retail joiner sent one, echoed in 23 ms.
+void test_reload_echo() {
+	auto reloads = [](uint32_t seed, int n) {
+		wire::ParityTrace trace = scripted(seed);
+		for (int i = 0; i < n; ++i) {
+			const uint64_t at = 9 * kSec + uint64_t(i) * 190 * kMs;
+			splice(trace, 'C', 0x025, at, bytes({ 0x5D, 0x00, 0x45, 0x01 }));
+			splice(trace, 'S', 0x049, at + 80 * kMs, bytes({ 0x5D, 0x00, 0x45, 0x01 }));
+		}
+		return trace;
+	};
+	const Case more = judge_case(reloads(1, 2), reloads(2, 3), reloads(3, 5));
+	expect_row(more, 'C', "tag_count", "0x25:0", "pass");
+	expect_row(more, 'S', "tag_count", "0x49:0", "pass");
+	// One request per datagram with C datagrams between them bounds no spacing: a lone
+	// request still fails.
+	const Case lone = judge_case(reloads(1, 2), reloads(2, 3), reloads(3, 1));
+	expect_row(lone, 'C', "tag_count", "0x25:0", "fail", "COUNT_MISMATCH");
+	expect_row(lone, 'S', "tag_count", "0x49:0", "fail", "COUNT_MISMATCH");
+
+	// The scripted joiner sends a C datagram every tick (32 ms): a loop that put 2 requests
+	// in one and 3 in the next entered them at most 16 ms apart.
+	static constexpr uint64_t kLoopAt = 2 * kSec + 219 * kTick;
+	auto looped = [](uint32_t seed) {
+		wire::ParityTrace trace = scripted(seed);
+		for (int i = 0; i < 2; ++i)
+			splice(trace, 'C', 0x025, kLoopAt, bytes({ 0x5D, 0x00, 0x45, 0x01 }));
+		for (int i = 0; i < 3; ++i)
+			splice(trace, 'C', 0x025, kLoopAt + kTick, bytes({ 0x5D, 0x00, 0x45, 0x01 }));
+		for (int i = 0; i < 5; ++i)
+			splice(trace, 'S', 0x049, kLoopAt + 2 * kTick, bytes({ 0x5D, 0x00, 0x45, 0x01 }));
+		return trace;
+	};
+	auto single = [](uint32_t seed, uint64_t echo_after) {
+		wire::ParityTrace trace = scripted(seed);
+		splice(trace, 'C', 0x025, kLoopAt, bytes({ 0x5D, 0x00, 0x45, 0x01 }));
+		splice(trace, 'S', 0x049, kLoopAt + echo_after, bytes({ 0x5D, 0x00, 0x45, 0x01 }));
+		return trace;
+	};
+	const Case fast = judge_case(looped(1), looped(2), single(3, 10 * kMs));
+	expect_row(fast, 'C', "tag_count", "0x25:0", "pass");
+	expect_row(fast, 'S', "tag_count", "0x49:0", "pass");
+	const Case slow = judge_case(looped(1), looped(2), single(3, 25 * kMs));
+	expect_row(slow, 'C', "tag_count", "0x25:0", "fail", "COUNT_MISMATCH");
+	expect_row(slow, 'S', "tag_count", "0x49:0", "fail", "COUNT_MISMATCH");
 }
 
 void test_milestones_and_rates() {
@@ -957,6 +1736,71 @@ void test_milestones_and_rates() {
 		const Case c = judge_case(scripted(1), scripted(2), subject);
 		expect_row(c, 'S', "gameplay_cadence", "", "fail", "GAMEPLAY_CADENCE");
 	}
+	{
+		// The joiner sends while alive (window.alive_span): killed 4 s into the window on
+		// the reference and 7 s on the subject, its uplinks run at one rate.
+		auto killed = [](uint32_t seed, uint64_t at) {
+			wire::ParityTrace trace = scripted(seed);
+			std::vector<wire::ParityUplinkState> alive;
+			for (const wire::ParityUplinkState &u : trace.uplinks)
+				if (u.ts_ns < at)
+					alive.push_back(u);
+			trace.uplinks = std::move(alive);
+			splice(trace, 'S', 0x013, at, bytes({ 0x00, 0x10, 0x00, 0x00 }));
+			return trace;
+		};
+		const Case c = judge_case(killed(1, 9 * kSec), killed(2, 9 * kSec), killed(3, 12 * kSec));
+		expect_row(c, 'C', "gameplay_cadence", "", "pass");
+		// A joiner that stops sending while alive still reads short.
+		wire::ParityTrace quiet = scripted(3);
+		std::vector<wire::ParityUplinkState> early;
+		for (const wire::ParityUplinkState &u : quiet.uplinks)
+			if (u.ts_ns < 12 * kSec)
+				early.push_back(u);
+		quiet.uplinks = std::move(early);
+		const Case q = judge_case(killed(1, 9 * kSec), killed(2, 9 * kSec), quiet);
+		expect_row(q, 'C', "gameplay_cadence", "", "fail", "GAMEPLAY_CADENCE");
+	}
+	{
+		// x10 / x11's aikill: the joiner sends one uplink per 0.19 s and dies 1.3 to 1.9 s into
+		// the window. x10's RR sent 7 from 166 ms, the last 186 ms before its 0x13 (1508 ms);
+		// x11's OO sent 8 from 60 ms, the last 5 ms before its 0x13 (1394 ms): 4.64 against
+		// 5.74 /s over each span alive, the edges' phase against the send clock. The sends'
+		// own rate compares (window.alive_span).
+		auto brief = [](uint32_t seed, uint64_t first, size_t sends, uint64_t death,
+							 uint64_t period) {
+			wire::ParityTrace trace = scripted(seed);
+			std::vector<wire::ParityUplinkState> kept;
+			wire::ParityUplinkState model;
+			for (const wire::ParityUplinkState &u : trace.uplinks) {
+				if (u.ts_ns < kSteadyStart)
+					kept.push_back(u);
+				else
+					model = u;
+			}
+			for (size_t k = 0; k < sends; ++k) {
+				model.ts_ns = kSteadyStart + first + k * period;
+				kept.push_back(model);
+			}
+			trace.uplinks = std::move(kept);
+			splice(trace, 'S', 0x013, kSteadyStart + death, bytes({ 0x00, 0x10, 0x00, 0x00 }));
+			return trace;
+		};
+		const Case edges = judge_case(brief(1, 166 * kMs, 7, 1508 * kMs, 190 * kMs),
+				brief(2, 151 * kMs, 8, 1540 * kMs, 190 * kMs),
+				brief(3, 60 * kMs, 8, 1394 * kMs, 190 * kMs), "OO");
+		expect_row(edges, 'C', "gameplay_cadence", "", "pass");
+		// A joiner sending at another rate still fails: one per 0.27 s.
+		expect_row(judge_case(brief(1, 166 * kMs, 7, 1508 * kMs, 190 * kMs),
+						   brief(2, 151 * kMs, 8, 1540 * kMs, 190 * kMs),
+						   brief(3, 60 * kMs, 5, 1394 * kMs, 270 * kMs), "OO"),
+				'C', "gameplay_cadence", "", "fail", "GAMEPLAY_CADENCE");
+		// So does one silent for a second before its death.
+		expect_row(judge_case(brief(1, 166 * kMs, 7, 1508 * kMs, 190 * kMs),
+						   brief(2, 151 * kMs, 8, 1540 * kMs, 190 * kMs),
+						   brief(3, 60 * kMs, 4, 1900 * kMs, 190 * kMs), "OO"),
+				'C', "gameplay_cadence", "", "fail", "GAMEPLAY_CADENCE");
+	}
 }
 
 void test_state() {
@@ -973,6 +1817,149 @@ void test_state() {
 			u.carrier = 0x3001;
 		const Case c = judge_case(scripted(1), scripted(2), subject);
 		expect_row(c, 'C', "uplink_carrier", "", "fail", "UPLINK_CARRIER_MISMATCH");
+	}
+	{
+		// The carrier word is the position's frame of reference: one change (a respawn onto a
+		// building) in every run passes; a link that flips every few uplinks, as x7's
+		// fragrespawn RO / OO joiner did (92 / 101 changes against RR's 1), does not.
+		auto respawn = [](uint32_t seed, size_t flip_every) {
+			wire::ParityTrace trace = scripted(seed);
+			const size_t half = trace.uplinks.size() / 2;
+			for (size_t i = half; i < trace.uplinks.size(); ++i) {
+				const bool off = flip_every != 0 && (i - half) % flip_every == flip_every - 1;
+				trace.uplinks[i].carrier = off ? 0xFFFF : 0x2011;
+			}
+			return trace;
+		};
+		const Case once = judge_case(respawn(1, 0), respawn(2, 0), respawn(3, 0));
+		expect_row(once, 'C', "uplink_carrier_changes", "", "pass");
+		const Case flips = judge_case(respawn(1, 0), respawn(2, 0), respawn(3, 5));
+		expect_row(flips, 'C', "uplink_carrier_changes", "", "fail", "UPLINK_CARRIER_SEQUENCE");
+	}
+	{
+		// A mounted joiner's uplink sent in the net frame that received a S2C 0x0A names its
+		// mount's own ground link (uplink.echo_frame_carrier): p253's drive OR, a retail joiner
+		// on our host, sent the buggy 0x1002 from the gun 0x102E at state byte 0, and x7's OR
+		// none from the buggy's seat at the seat edge, its left neighbour standing on the buggy.
+		// Under the mount its latest own record names (a nonzero attach bone and a carrier), an
+		// uplink naming the mount's own ground link is dropped before the count: the buggy's
+		// latest record's carrier word (none on open ground), or, for the gun, which streams no
+		// record of its own, any one word per mount phase. The same flips under own records
+		// that name no mount still count, as does a third word under the buggy, or two words
+		// under the gun. Each run stands on the buggy for three uplinks, then mounts at the
+		// half; the buggy streams its records beside the scripted vehicle's.
+		struct Mount {
+			uint32_t mount, bone, ground, state;
+		};
+		const Mount gun{ 0x102E, 6, 0x1002, 0 };
+		const Mount seat{ 0x1002, 4, 0xFFFF, 0x40 };
+		auto drive = [](uint32_t seed, const Mount &m, size_t echo_every, bool edge,
+							 bool host_mounts, const std::vector<uint32_t> &words) {
+			wire::ParityTrace trace = scripted(seed);
+			const size_t half = trace.uplinks.size() / 2;
+			const uint64_t mounted_after = trace.uplinks[half - 1].ts_ns;
+			std::vector<wire::ParityEntity> entities;
+			for (wire::ParityEntity e : trace.entities) {
+				if (host_mounts && e.cls == 'P' && e.handle == 0x1000 && e.ts_ns > mounted_after) {
+					e.carrier = m.mount;
+					e.carrier_bone = m.bone;
+					e.carrier_local = true;
+					e.world_x = e.offset_x;
+					e.world_y = e.offset_y;
+					e.world_z = e.offset_z;
+				}
+				entities.push_back(e);
+				if (e.cls == 'V' && e.handle == 0x2003) {
+					e.handle = 0x1002;
+					entities.push_back(e);
+				}
+			}
+			trace.entities = std::move(entities);
+			size_t echoes = 0;
+			for (size_t i = half - 3; i < trace.uplinks.size(); ++i) {
+				wire::ParityUplinkState &u = trace.uplinks[i];
+				if (i < half) {
+					u.carrier = 0x1002;
+					continue;
+				}
+				const size_t k = i - half;
+				const bool echo =
+						(edge && k == 0) || (echo_every != 0 && k % echo_every == echo_every - 1);
+				u.carrier = echo ? words[echoes++ % words.size()] : m.mount;
+				u.state_flags = m.state;
+			}
+			return trace;
+		};
+		const uint32_t kStray = 0x2011;
+		for (const Mount &m : { gun, seat }) {
+			const std::vector<uint32_t> link{ m.ground };
+			const Case echoes = judge_case(drive(1, m, 0, false, true, link),
+					drive(2, m, 0, false, true, link), drive(3, m, 7, true, true, link));
+			expect_row(echoes, 'C', "uplink_carrier_changes", "", "pass");
+			const Case unmounted = judge_case(drive(1, m, 0, false, true, link),
+					drive(2, m, 0, false, true, link), drive(3, m, 7, true, false, link));
+			expect_row(unmounted, 'C', "uplink_carrier_changes", "", "fail",
+					"UPLINK_CARRIER_SEQUENCE");
+		}
+		// A word that is neither the buggy nor its link, under the buggy's seat, is no echo.
+		expect_row(judge_case(drive(1, seat, 0, false, true, { seat.ground }),
+						   drive(2, seat, 0, false, true, { seat.ground }),
+						   drive(3, seat, 7, true, true, { kStray })),
+				'C', "uplink_carrier_changes", "", "fail", "UPLINK_CARRIER_SEQUENCE");
+		// Under the gun the link is one word: the buggy and a second word in one phase both
+		// count.
+		expect_row(judge_case(drive(1, gun, 0, false, true, { gun.ground }),
+						   drive(2, gun, 0, false, true, { gun.ground }),
+						   drive(3, gun, 7, true, true, { gun.ground, kStray })),
+				'C', "uplink_carrier_changes", "", "fail", "UPLINK_CARRIER_SEQUENCE");
+	}
+	{
+		// A step across a carrier change is no motion: each carrier's uplinks are one
+		// sequence. x8's fragrespawn RR-aa and OR carried the respawn's jump from world into
+		// the hut's frame as their p90 step (3885822 / 3895546) where RR's ranked a motion
+		// step (102143), so OR failed on a frame change.
+		auto settle = [](uint32_t seed, int hut_x, bool jump_ranks) {
+			wire::ParityTrace trace = scripted(seed);
+			const size_t half = trace.uplinks.size() / 2;
+			for (size_t i = 0; i < trace.uplinks.size(); ++i) {
+				wire::ParityUplinkState &u = trace.uplinks[i];
+				const bool hut = i >= half;
+				const int moved = hut ? std::min(int(i - half), 8) : 0;
+				u.carrier = hut ? 0x2011 : 0xFFFF;
+				u.pos_x = hut ? int32_t(hut_x * 65536 + moved * 32768) : int32_t(1000 * 65536);
+				u.pos_y = hut ? int32_t(-3 * 65536) : int32_t(2000 * 65536);
+				u.pos_z = hut ? 65536 : 50 * 65536;
+			}
+			// One more motion step ahead of the respawn moves the p90's rank off the jump.
+			if (!jump_ranks)
+				trace.uplinks[half / 2].pos_x += 65536;
+			return trace;
+		};
+		// The subject's jump is one unit longer than RR-aa's, as OR's was: across frames it
+		// ranked past the A/A widening.
+		const Case c = judge_case(settle(1, 2, false), settle(2, 2, true), settle(3, 1, true));
+		expect_row(c, 'C', "uplink_position_step_p90", "", "pass");
+		const VerdictRow *aa = find_row(c.verdict.aa, 'C', "uplink_position_step_p90", "");
+		check(aa != nullptr && aa->status == "pass", "the frame change widens no A/A");
+	}
+	{
+		// A frame change is no motion either: a joiner standing still across its respawn into
+		// the hut's frame keys no uplink motion, as one that stood still in the world.
+		auto still = [](uint32_t seed, bool hut_half) {
+			wire::ParityTrace trace = scripted(seed);
+			const size_t half = trace.uplinks.size() / 2;
+			for (size_t i = 0; i < trace.uplinks.size(); ++i) {
+				wire::ParityUplinkState &u = trace.uplinks[i];
+				const bool hut = hut_half && i >= half;
+				u.carrier = hut ? 0x2011 : 0xFFFF;
+				u.pos_x = hut ? int32_t(2 * 65536) : int32_t(1000 * 65536);
+				u.pos_y = hut ? int32_t(-3 * 65536) : int32_t(2000 * 65536);
+				u.pos_z = hut ? 65536 : 50 * 65536;
+			}
+			return trace;
+		};
+		expect_row(judge_case(still(1, true), still(2, true), still(3, false)), 'C',
+				"uplink_motion", "", "pass");
 	}
 	{
 		// Session-local handles: another carrier/priority handle number is the same state.
@@ -1046,6 +2033,82 @@ void test_state() {
 			}
 		const Case c = judge_case(scripted(1), scripted(2), subject);
 		expect_row(c, 'S', "entity_motion", "P", "fail", "FRAME_ENTITY_CONSTANT");
+	}
+}
+
+// The camp AI's records (x7 selfnade's 0x0035): `lead` records at pitch `lead_pitch` from
+// the steady start, then its pitch at rest, stepping 210..212 every 20 frames.
+void add_camp_ai(wire::ParityTrace &trace, size_t lead, int32_t lead_pitch) {
+	std::vector<wire::ParityEntity> added;
+	size_t k = 0;
+	for (const wire::ParityFrameState &f : trace.frames) {
+		if (f.ts_ns < kSteadyStart)
+			continue;
+		wire::ParityEntity e;
+		e.frame = f.frame;
+		e.ts_ns = f.ts_ns;
+		e.session = kClientPort;
+		e.cls = 'I';
+		e.handle = 0x0035;
+		e.type_id = 1799;
+		e.pos_x = 4000;
+		e.pos_y = 4000;
+		e.pos_z = 100;
+		e.orient_a = 210;
+		e.orient_b = k < lead ? lead_pitch : 210 + int32_t(k / 20 % 3);
+		place(e, f);
+		added.push_back(e);
+		++k;
+	}
+	trace.entities.insert(trace.entities.end(), added.begin(), added.end());
+}
+
+// A dynamic sequence's lone transient lead sets no baseline (state.transient_lead): x7's
+// selfnade RR, RR-aa and RO carried 0x0035's one aim-change record (210,3) in the window
+// before its (210,210) rest, OR's fell before the window; a lead the next record repeats
+// is a rest and keeps its baseline.
+void test_dynamic_rules() {
+	auto runs = [](size_t lead) {
+		wire::ParityTrace rr = scripted(1), aa = scripted(2), subject = scripted(3);
+		add_camp_ai(rr, lead, 3);
+		add_camp_ai(aa, lead, 3);
+		add_camp_ai(subject, 0, 3);
+		return judge_case(std::move(rr), std::move(aa), std::move(subject));
+	};
+	{
+		const Case c = runs(1);
+		expect_row(c, 'S', "entity_I_orientation_displacement_p90", "", "pass");
+		expect_row(c, 'S', "entity_I_orientation_range_p90", "", "pass");
+	}
+	{
+		const Case c = runs(10);
+		expect_row(c, 'S', "entity_I_orientation_displacement_p90", "", "fail",
+				"DYNAMIC_RANGE_MISMATCH");
+	}
+	{
+		// A lone tail (state.transient_tail): x8's swap RR and RR-aa joiners stood still and
+		// sent the self-grenade's knockback on their last uplink before the death, OR's did
+		// not. The change its end cut sets no motion; two changes at the end still do.
+		auto still = [](uint32_t seed, int moved_tail) {
+			wire::ParityTrace trace = scripted(seed);
+			size_t last = 0;
+			for (size_t i = 0; i < trace.uplinks.size(); ++i) {
+				wire::ParityUplinkState &u = trace.uplinks[i];
+				u.pos_x = 1000 * 65536;
+				u.pos_y = 2000 * 65536;
+				u.pos_z = 50 * 65536;
+				if (u.ts_ns <= kSteadyStart + uint64_t(kSteadySeconds * 1e9))
+					last = i;
+			}
+			for (int k = 0; k < moved_tail; ++k)
+				trace.uplinks[last - size_t(k)].pos_x += (k + 1) * 32768;
+			trace.uplinks.resize(last + 1); // the uplinks stop at the window's last
+			return trace;
+		};
+		const Case tail = judge_case(still(1, 1), still(2, 1), still(3, 0));
+		expect_row(tail, 'C', "uplink_motion", "", "pass");
+		const Case moving = judge_case(still(1, 2), still(2, 2), still(3, 0));
+		expect_row(moving, 'C', "uplink_motion", "", "fail", "UPLINK_CONSTANT");
 	}
 }
 
@@ -1176,6 +2239,19 @@ void test_handshake_rules() {
 				"HANDSHAKE_MISMATCH");
 	}
 	{
+		// AP names the running program (D-NET-NEW-L9-2): its value and size leave the key;
+		// another field's size still compares.
+		wire::ParityTrace runtime = scripted(3), wide = scripted(3);
+		set_tlv(handshake_of(runtime, 0x41), "AP", text_bytes("Godot_v4.6.1-stable_win64.exe"));
+		std::vector<uint8_t> wide_eip;
+		put_u32(wide_eip, 0xFFFFFFFFu);
+		wide_eip.push_back(0);
+		set_tlv(handshake_of(wide, 0x41), "EIP", wide_eip);
+		expect_row(judge_case(scripted(1), scripted(2), runtime), 'C', "handshake", "0x41", "pass");
+		expect_row(judge_case(scripted(1), scripted(2), wide), 'C', "handshake", "0x41", "fail",
+				"HANDSHAKE_MISMATCH");
+	}
+	{
 		// CU CI0 keeps its low 16 bits: the residue high word never compares, the id does.
 		wire::ParityTrace bare = scripted(3), other_id = scripted(3);
 		set_cu(handshake_of(bare, 0x42), "CI0", "512");
@@ -1239,6 +2315,64 @@ void add_initial(wire::ParityTrace &trace, char dir, uint16_t host, uint16_t ide
 	}
 }
 
+// The host's admission reply and the spawn pump's add (S2C 0x03, the add's settings
+// records, 0x05, 0x04, 0x7B), a periodic-second phase draw apart: RR's two packets and
+// a run that carries both in one group alike (initial.S.spawn_pump_boundary); a
+// merged pair of other groups still fails.
+void test_spawn_pump_boundary() {
+	auto record = [](uint16_t tag) {
+		wire::ParityWireRecord r;
+		r.full_tag = tag;
+		r.raw_flags = 0x20;
+		r.encoded_length = 4;
+		return r;
+	};
+	const std::vector<uint16_t> reply = { 0x100, 0x100, 0x001, 0x07A, 0x07B, 0x003 };
+	const std::vector<uint16_t> add = { 0x003, 0x100, 0x100, 0x005, 0x004, 0x07B };
+	auto admit = [&](wire::ParityTrace &trace, bool merged, bool add_only_tail) {
+		// Ahead of the scripted initial stream (its first S2C packet's frame), at fresh
+		// sequence numbers.
+		size_t at = 0;
+		while (at < trace.packets.size() && trace.packets[at].dir != 'S')
+			++at;
+		wire::ParityPacket model = trace.packets[at];
+		model.flags = 0x00;
+		auto packet = [&](const std::vector<uint16_t> &tags, uint32_t seq) {
+			wire::ParityPacket p = model;
+			p.seq = seq;
+			p.tags = tags;
+			p.records.clear();
+			for (const uint16_t tag : tags)
+				p.records.push_back(record(tag));
+			return p;
+		};
+		std::vector<uint16_t> second = add;
+		if (add_only_tail)
+			second.erase(second.begin()); // no 0x03: not the pump's add
+		std::vector<wire::ParityPacket> inserted;
+		if (merged) {
+			std::vector<uint16_t> both = reply;
+			both.insert(both.end(), second.begin(), second.end());
+			inserted.push_back(packet(both, 7001));
+		} else {
+			inserted.push_back(packet(reply, 7001));
+			inserted.push_back(packet(second, 7002));
+		}
+		trace.packets.insert(trace.packets.begin() + long(at), inserted.begin(), inserted.end());
+	};
+	wire::ParityTrace rr = scripted(1), aa = scripted(2), merged = scripted(3), other = scripted(3);
+	admit(rr, false, false);
+	admit(aa, false, false);
+	admit(merged, true, false);
+	expect_row(judge_case(rr, aa, merged), 'S', "initial_grouping", "", "pass");
+	wire::ParityTrace rr2 = scripted(1), aa2 = scripted(2);
+	admit(rr2, false, true);
+	admit(aa2, false, true);
+	admit(other, true, true);
+	expect_row(judge_case(rr2, aa2, other), 'S', "initial_grouping", "", "fail",
+			"INITIAL_PACKET_GROUPING");
+}
+
 void test_initial_rules() {
 	{
 		// S2C 0x16 rides the scoreboard clock: leaving the 0x75/0x64 packet (its first
@@ -1275,11 +2409,40 @@ void test_initial_rules() {
 			}
 		std::stable_sort(split.packets.begin(), split.packets.end(),
 				[](const auto &x, const auto &y) { return x.frame < y.frame; });
-		add_initial(extra, 'C', 0x022, 0x022, bytes({ 1 }));
+		add_initial(extra, 'C', 0x022, 0x009, bytes({ 2, 2 }));
 		expect_row(judge_case(scripted(1), scripted(2), split), 'C', "initial_grouping", "",
 				"pass");
 		expect_row(judge_case(scripted(1), scripted(2), extra), 'C', "initial_grouping", "",
 				"fail", "INITIAL_PACKET_GROUPING");
+	}
+	{
+		// The joiner's C2S 0x22 re-requests an unbound S2C 0x16 row, so it rides the
+		// 0x16's phase (order.C.0x22.phase): with the 0x16 apart from the 0x11 (the
+		// scripted case) a 0x22 sent after the 0x0A moves no order and no group; with
+		// the 0x16 in the 0x11's packet on every run the joiner answers both in one
+		// pass, the 0x22 first, and the same move fails.
+		auto late_request = [](wire::ParityTrace trace) {
+			for (wire::ParityPacket &p : trace.packets)
+				if (p.dir == 'C' && p.tags.size() == 2 && p.tags[0] == 0x022) {
+					p.tags.erase(p.tags.begin());
+					p.records.erase(p.records.begin());
+					break;
+				}
+			erase_events(trace, 'C', 0x022);
+			add_initial(trace, 'C', 0x00A, 0x022, bytes({ 1 }));
+			return trace;
+		};
+		auto riding = [](wire::ParityTrace trace) {
+			add_initial(trace, 'S', 0x01C, 0x016, bytes({ 7, 7, 7 }));
+			return trace;
+		};
+		const Case apart = judge_case(scripted(1), scripted(2), late_request(scripted(3)));
+		expect_row(apart, 'C', "first_order", "", "pass");
+		expect_row(apart, 'C', "initial_grouping", "", "pass");
+		const Case rode = judge_case(riding(scripted(1)), riding(scripted(2)),
+				riding(late_request(scripted(3))));
+		expect_row(rode, 'C', "first_order", "", "fail", "FIRST_ORDER_MISMATCH");
+		expect_row(rode, 'C', "initial_grouping", "", "fail", "INITIAL_PACKET_GROUPING");
 	}
 	{
 		// A gameplay or world-page record's length and a fragment's length leave the
@@ -1344,6 +2507,46 @@ void test_initial_rules() {
 				[](wire::ParityEvent &e) { e.body = player_sync(0, 5, 0, 3); });
 		expect_row(judge_case(scripted(1), scripted(2), subject), 'S', "initial_body_set", "0x46:0",
 				"fail", "INITIAL_BODY_MISMATCH");
+	}
+	{
+		// The host answers each C2S 0x2F with its S2C 0x5A on the next boundary
+		// (initial.S.0x5a.reply): two replies in one packet and two in their own
+		// packets group alike; a missing reply does not.
+		auto replies = [](uint32_t seed, const std::vector<std::vector<uint16_t>> &packets) {
+			wire::ParityTrace trace = scripted(seed);
+			for (size_t i = 0; i < trace.packets.size(); ++i) {
+				if (trace.packets[i].dir != 'S' || trace.packets[i].tags.empty() ||
+						trace.packets[i].tags[0] != 0x07B)
+					continue;
+				const wire::ParityPacket host = trace.packets[i];
+				uint32_t seq = 8100;
+				std::vector<wire::ParityPacket> added;
+				for (const std::vector<uint16_t> &tags : packets) {
+					wire::ParityPacket p = host;
+					p.seq = ++seq;
+					p.tags = tags;
+					p.records.clear();
+					for (const uint16_t tag : tags) {
+						wire::ParityWireRecord r;
+						r.full_tag = tag;
+						r.raw_flags = 0x20;
+						r.encoded_length = 4;
+						p.records.push_back(r);
+					}
+					added.push_back(p);
+				}
+				trace.packets.insert(trace.packets.begin() + long(i), added.begin(), added.end());
+				break;
+			}
+			return trace;
+		};
+		const std::vector<std::vector<uint16_t>> together = { { 0x05A, 0x05A } };
+		const std::vector<std::vector<uint16_t>> apart = { { 0x05A }, { 0x05A } };
+		const std::vector<std::vector<uint16_t>> one = { { 0x05A } };
+		expect_row(judge_case(replies(1, together), replies(2, together), replies(3, apart)), 'S',
+				"initial_grouping", "", "pass");
+		expect_row(judge_case(replies(1, together), replies(2, together), replies(3, one)), 'S',
+				"initial_grouping", "", "fail", "INITIAL_PACKET_GROUPING");
 	}
 }
 
@@ -1423,9 +2626,175 @@ void test_world_records() {
 		expect_row(residue, 'S', "initial_records", "0x10:0", "pass");
 		check(find_row(residue.verdict.rows, 'S', "length_set", "0x10:0") == nullptr,
 				"S2C 0x10's length set follows the residue: left out");
+		// Its length and the length field's size leave the grouping key too
+		// (group.length_exempt): a longer last page sized LEN16 groups the same.
+		wire::ParityTrace sized = with(3, organic, statics(0x40, 7, 0x08020000));
+		for (wire::ParityPacket &p : sized.packets)
+			for (wire::ParityWireRecord &r : p.records)
+				if (p.dir == 'S' && r.full_tag == 0x010) {
+					r.raw_flags = 0x40;
+					r.encoded_length += 300;
+				}
+		expect_row(judge_case(with(1, organic, base_statics), with(2, organic, base_statics), sized),
+				'S', "initial_grouping", "", "pass");
 		const Case flags = judge_case(with(1, organic, base_statics),
 				with(2, organic, base_statics), with(3, organic, statics(0, 0, 0x00020000)));
 		expect_row(flags, 'S', "initial_records", "0x10:0", "fail", "INITIAL_RECORD_MISMATCH");
+	}
+	{
+		// The residue decides whether the last statics spill into one more page (x5's
+		// 01tr-coop-drive A/A: 53 against 54 S2C 0x10 messages), so the stream stands
+		// as one group at its first page however many packets carry it
+		// (group.S.0x10.run); a run with no stream at all still differs.
+		const std::vector<uint8_t> organic = organics(100, 5, 0);
+		auto spilled = [](wire::ParityTrace trace, const std::vector<uint8_t> &page) {
+			for (size_t i = 0; i < trace.packets.size(); ++i) {
+				const wire::ParityPacket &host = trace.packets[i];
+				if (host.dir != 'S' || host.tags.empty() || host.tags[0] != 0x07B)
+					continue;
+				wire::ParityPacket p = host;
+				p.seq = 8001;
+				p.tags = { 0x010 };
+				wire::ParityWireRecord r;
+				r.full_tag = 0x010;
+				r.raw_flags = 0x20;
+				r.encoded_length = uint32_t(page.size());
+				p.records = { r };
+				wire::ParityEvent e;
+				e.frame = p.frame;
+				e.ts_ns = p.ts_ns;
+				e.dir = 'S';
+				e.session = kClientPort;
+				e.participant = 1;
+				e.full_tag = 0x010;
+				e.length = page.size();
+				e.material = true;
+				e.body = page;
+				trace.packets.insert(trace.packets.begin() + long(i) + 1, p);
+				trace.events.push_back(e);
+				break;
+			}
+			return trace;
+		};
+		expect_row(judge_case(with(1, organic, base_statics), with(2, organic, base_statics),
+						   spilled(with(3, organic, base_statics), base_statics)),
+				'S', "initial_grouping", "", "pass");
+		wire::ParityTrace none = scripted(3);
+		add_initial(none, 'S', 0x07B, 0x00C, organic);
+		expect_row(judge_case(with(1, organic, base_statics), with(2, organic, base_statics), none),
+				'S', "initial_grouping", "", "fail", "INITIAL_PACKET_GROUPING");
+	}
+}
+
+// S2C 0x0D compares by slot with a live record's pose left out: a hull on water
+// (entity+0x24 bit 0x8000), an awake vehicle (bit 0x40 or an occupant) and a record
+// carried on a live one, its carrier on an earlier page. An awake vehicle's contact bit
+// and ground link follow its physics too; a carried record's carrier link compares. A
+// parked vehicle, a record carried on it and every other field compare.
+void test_pool_live_pose() {
+	struct Pose {
+		int32_t hull = 0, manned = 0, parked = 0, on_hull = 0, on_parked = 0;
+		uint8_t hull_team = 1;
+		bool manned_airborne = false, manned_on_hull = false, on_hull_moved = false,
+			 parked_airborne = false;
+	};
+	auto record = [](uint16_t slot, uint32_t entity_flags, int32_t jitter) {
+		PoolSpawnRecord r;
+		r.spawn_flags = kPoolSpawnHasEntityFlags | kPoolSpawnHasEulerZ | kPoolSpawnHasEulerX |
+				kPoolSpawnHasEulerY | kPoolSpawnHasTeamByte;
+		r.slot_id = slot;
+		r.item_type_id = 0x0500;
+		r.entity_flags = entity_flags;
+		r.pos_x = 0x100000 + jitter;
+		r.pos_y = 0x200000 - jitter;
+		r.pos_z = 0x0d0000 + jitter;
+		r.euler_z = 0x40000000 + jitter * 64;
+		r.euler_x = jitter * 32;
+		r.euler_y = -jitter * 16;
+		r.team_byte = 1;
+		return r;
+	};
+	auto pages = [&](const Pose &p) {
+		PoolSpawnBatch first, second;
+		first.records.push_back(record(0x1003, 0x00028400, p.hull));
+		first.records.back().team_byte = p.hull_team;
+		first.records.push_back(
+				record(0x1001, 0x00020440 | (p.manned_airborne ? 0x2000u : 0u), p.manned));
+		first.records.back().spawn_flags |= kPoolSpawnHasParentHandle;
+		first.records.back().parent_handle = 0x0055;
+		if (p.manned_on_hull) {
+			first.records.back().spawn_flags |= kPoolSpawnHasTargetHandle;
+			first.records.back().target_handle = 0x1003;
+		}
+		first.records.push_back(
+				record(0x1000, 0x00020400 | (p.parked_airborne ? 0x2000u : 0u), p.parked));
+		second.records.push_back(record(0x1004, 0x00020000, p.on_hull));
+		second.records.back().spawn_flags |= kPoolSpawnHasTargetHandle;
+		second.records.back().target_handle = p.on_hull_moved ? 0x1001 : 0x1003;
+		second.records.push_back(record(0x1005, 0x00020000, p.on_parked));
+		second.records.back().spawn_flags |= kPoolSpawnHasTargetHandle;
+		second.records.back().target_handle = 0x1000;
+		return std::make_pair(encode_pool_spawn_batch(first), encode_pool_spawn_batch(second));
+	};
+	auto with = [&](uint32_t seed, const Pose &p) {
+		wire::ParityTrace trace = scripted(seed);
+		const auto bodies = pages(p);
+		add_initial(trace, 'S', 0x07B, 0x00D, bodies.first);
+		add_initial(trace, 'S', 0x07B, 0x00D, bodies.second);
+		return trace;
+	};
+	const Pose rest;
+	Pose live = rest;
+	live.hull = 0x1e2;
+	live.manned = 5;
+	live.on_hull = 0x1e2;
+	live.manned_airborne = true;
+	live.manned_on_hull = true;
+	const Case moved = judge_case(with(1, rest), with(2, rest), with(3, live));
+	expect_row(moved, 'S', "initial_records", "0x0d:0", "pass");
+	check(find_row(moved.verdict.rows, 'S', "initial_body", "0x0d:0") == nullptr,
+			"S2C 0x0D compares as records, not bytes");
+	check(find_row(moved.verdict.rows, 'S', "length_set", "0x0d:0") == nullptr,
+			"S2C 0x0D's page lengths follow its live records' value-gated fields: left out");
+	for (const auto &change : std::vector<std::pair<const char *, Pose>>{
+				 { "a parked vehicle's z", [&] { Pose p = rest; p.parked = 1; return p; }() },
+				 { "a record carried on a parked vehicle",
+						 [&] { Pose p = rest; p.on_parked = 1; return p; }() },
+				 { "a live hull's team", [&] { Pose p = live; p.hull_team = 2; return p; }() },
+				 { "a parked vehicle's contact bit",
+						 [&] { Pose p = rest; p.parked_airborne = true; return p; }() },
+				 { "a carried record's carrier link",
+						 [&] { Pose p = rest; p.on_hull_moved = true; return p; }() } }) {
+		const Case c = judge_case(with(1, rest), with(2, rest), with(3, change.second));
+		const VerdictRow *row = find_row(c.verdict.rows, 'S', "initial_records", "0x0d:0");
+		check(row && row->status == "fail", std::string("0x0D: ") + change.first + " compares");
+	}
+	{
+		// The detail names every differing slot, each with every field it differs in
+		// (a fix lane reads the whole list, LX-s17): four slots here, past the old
+		// three-slot sample, the parked vehicle in its pose and its contact bit.
+		Pose four = live;
+		four.parked = 1;
+		four.parked_airborne = true;
+		four.on_parked = 1;
+		four.hull_team = 2;
+		four.on_hull_moved = true;
+		const Case c = judge_case(with(1, live), with(2, live), with(3, four));
+		const VerdictRow *row = find_row(c.verdict.rows, 'S', "initial_records", "0x0d:0");
+		check(row && row->status == "fail" && row->value.distance == 4.0,
+				"0x0D: four slots differ" + (row ? " (" + row->value.detail + ")" : std::string()));
+		if (row) {
+			const std::string &detail = row->value.detail;
+			for (const char *slot : { "slot 0x1000: ", "slot 0x1003: ", "slot 0x1004: ", "slot 0x1005: " })
+				check(detail.find(slot) != std::string::npos,
+						std::string("0x0D detail lists ") + slot + "(" + detail + ")");
+			const size_t parked = detail.find("slot 0x1000: ");
+			const size_t next = detail.find("; ", parked);
+			const std::string entry = detail.substr(parked, next - parked);
+			check(entry.find(", y ") != std::string::npos && entry.find(", euler_y ") != std::string::npos &&
+							entry.find(", in_air ") != std::string::npos,
+					"0x0D detail names every field a slot differs in (" + entry + ")");
+		}
 	}
 }
 
@@ -1480,15 +2849,40 @@ void test_reply_rules() {
 
 void test_order_rules() {
 	{
+		// A joiner's first S2C 0x40s ride the join bundle or follow the per-slot block a
+		// boundary later, by the C2S 0x0B's arrival (order.S.0x40): x6's aikill RR-aa
+		// and late RR carry them after the first gameplay frame, their partners before.
+		static_assert(first_order_excluded('S', 0x040));
+		auto overlay_at = [](uint32_t seed, uint64_t at) {
+			wire::ParityTrace trace = scripted(seed);
+			splice(trace, 'S', 0x040, at, bytes({ 1, 0, 0, 0, 0, 0, 0 }));
+			return trace;
+		};
+		expect_row(judge_case(overlay_at(1, 1900 * kMs), overlay_at(2, 1900 * kMs),
+						   overlay_at(3, 2500 * kMs)),
+				'S', "first_order", "", "pass");
+		// The join packet keys its 0x0A once: a second behind the bundle is the
+		// per-slot block's, by the same phase (initial.S.join_tail).
+		wire::ParityTrace tail = scripted(3);
+		for (wire::ParityPacket &p : tail.packets)
+			if (p.dir == 'S' && carries_low_tag(p, 0x00A)) {
+				p.tags.push_back(0x00A);
+				p.records.push_back(p.records.front());
+				break;
+			}
+		expect_row(judge_case(scripted(1), scripted(2), tail), 'S', "initial_grouping", "", "pass");
+	}
+	{
 		// S2C 0x46 is no milestone (the scoreboard's phase); C2S 0x09 -> S2C 0x2C is.
 		wire::ParityTrace early = scripted(3), late = scripted(3);
 		for_events(early, 'S', 0x046, [](wire::ParityEvent &e) { e.frame = 0; });
 		expect_row(judge_case(scripted(1), scripted(2), early), 'B', "milestones", "", "pass");
+		expect_row(judge_case(scripted(1), scripted(2), early), 'B', "milestone_order", "", "pass");
 		int frame_0f = 0;
 		for_events(late, 'S', 0x00F, [&frame_0f](wire::ParityEvent &e) { frame_0f = e.frame; });
 		for_events(late, 'C', 0x009, [frame_0f](wire::ParityEvent &e) { e.frame = frame_0f; });
-		expect_row(judge_case(scripted(1), scripted(2), late), 'B', "milestones", "", "fail",
-				"MILESTONE_MISMATCH");
+		expect_row(judge_case(scripted(1), scripted(2), late), 'B', "milestone_order", "", "fail",
+				"MILESTONE_ORDER");
 	}
 	{
 		// The integrity replies follow the host's process-global phase.
@@ -1537,6 +2931,64 @@ void test_order_rules() {
 	}
 }
 
+// order.S.clock (Q-LX-s28-1 (a)): a S2C event on the host's mission clock and one on the
+// joiner's admission order by the host tick the joiner was admitted on. The 0x0A timer
+// block carries the round clock as g_RoundTimeRemaining / 62 [orig: NetPacket_WritePlayerState
+// @0x4FF6B0 (@0x4FFA8D..0x4FFAA8)], stepped down a tick per 16 ms with g_CurrentTick
+// [orig: Game_ProcessMainFrame @0x5263F0 (@0x5265B4, @0x526602)]. Every scripted run takes
+// its S2C 0x0F at 1.38 s; `zero` is the wall time its round clock reaches zero.
+void test_order_clock() {
+	auto clocked = [](uint32_t seed, int64_t zero_ms, uint64_t death, uint64_t datagram) {
+		wire::ParityTrace trace = scripted(seed);
+		for (wire::ParityFrameState &f : trace.frames)
+			if (f.timer_present)
+				f.timer_seconds = zero_ms < 0
+						? -1
+						: int32_t((zero_ms * int64_t(kMs) - int64_t(f.ts_ns)) /
+								  (16 * int64_t(kMs)) / 62);
+		splice(trace, 'S', 0x013, death, bytes({ 0x14, 0x10, 0 }));
+		splice(trace, 'S', 0x039, datagram, bytes({ 1 }));
+		return trace;
+	};
+	// 03TR's shape: RR (and RR-aa) take the death 2 s before the datagram; the subject was
+	// admitted 4 s earlier on the mission clock, so the same death comes 2 s after it.
+	const wire::ParityTrace rr = clocked(1, 600000, 8 * kSec, 10 * kSec);
+	const wire::ParityTrace aa = clocked(2, 600000, 8 * kSec, 10 * kSec);
+	{
+		const Case c = judge_case(rr, aa, clocked(3, 604000, 12 * kSec, 10 * kSec));
+		expect_row(c, 'S', "first_order", "", "pass");
+		const VerdictRow *row = find_row(c.verdict.rows, 'S', "first_order");
+		check(row && row->value.distance == 0.0 &&
+						row->value.detail.find(
+								"; 1 across the admission and mission clocks left out "
+								"(admitted -") != std::string::npos,
+				"the cross-clock pair is left out, and the row says so (" +
+						(row ? row->value.detail : std::string("no row")) + ")");
+	}
+	// Without the round clock (co-op's -1) nothing tells the clocks apart: the pair counts.
+	expect_row(judge_case(rr, aa, clocked(3, -1, 12 * kSec, 10 * kSec)), 'S', "first_order", "",
+			"fail", "FIRST_ORDER_MISMATCH");
+	// Admitted at the same mission time: the death's 4 s is its own, on neither clock.
+	expect_row(judge_case(rr, aa, clocked(3, 600000, 12 * kSec, 10 * kSec)), 'S', "first_order", "",
+			"fail", "FIRST_ORDER_MISMATCH");
+	// Admitted 2 s earlier, the death 4 s later: off the mission clock by 2 s, it counts.
+	expect_row(judge_case(rr, aa, clocked(3, 602000, 12 * kSec, 10 * kSec)), 'S', "first_order", "",
+			"fail", "FIRST_ORDER_MISMATCH");
+	// The C2S order takes no clock: a C2S pair inverted the same way still counts.
+	{
+		auto c2s = [&clocked](uint32_t seed, int64_t zero_ms, uint64_t first, uint64_t second) {
+			wire::ParityTrace trace = clocked(seed, zero_ms, 8 * kSec, 10 * kSec);
+			splice(trace, 'C', 0x026, first, bytes({ 1 }));
+			splice(trace, 'C', 0x027, second, bytes({ 2 }));
+			return trace;
+		};
+		expect_row(
+				judge_case(c2s(1, 600000, 8 * kSec, 10 * kSec), c2s(2, 600000, 8 * kSec, 10 * kSec),
+						c2s(3, 604000, 12 * kSec, 10 * kSec)),
+				'C', "first_order", "", "fail", "FIRST_ORDER_MISMATCH");
+	}
+}
+
 void test_frame_rules() {
 	{
 		// flags2 counts sends: an offset counter passes, a step of two does not.
@@ -1551,6 +3003,65 @@ void test_frame_rules() {
 				"pass");
 		expect_row(judge_case(scripted(1), scripted(2), doubled), 'S', "frame_phase_step", "",
 				"fail", "FRAME_HEADER_FLAGS_MISMATCH");
+	}
+	{
+		// The route nibbles: over a full cycle (16 sends) every nibble shows, so a
+		// counter at another phase passes; a window cut to a few frames (x5's kick,
+		// about six) holds a phase slice, which the set does not compare.
+		auto phased = [](uint32_t seed, uint32_t shift, size_t keep) {
+			wire::ParityTrace trace = scripted(seed);
+			std::vector<wire::ParityFrameState> frames;
+			size_t steady = 0;
+			for (wire::ParityFrameState f : trace.frames) {
+				f.flags2 = (f.flags2 + shift) & 0xFFu;
+				if (f.ts_ns >= kSteadyStart && steady++ >= keep)
+					continue;
+				frames.push_back(f);
+			}
+			trace.frames = std::move(frames);
+			return trace;
+		};
+		constexpr size_t kAll = ~size_t(0);
+		expect_row(judge_case(phased(1, 0, kAll), phased(2, 0, kAll), phased(3, 5, kAll)), 'S',
+				"frame_flags2", "", "pass");
+		expect_row(judge_case(phased(1, 0, 6), phased(2, 3, 6), phased(3, 9, 6)), 'S',
+				"frame_flags2", "", "skip");
+		// A full RR window against a subject cut short: the subject is unexercised,
+		// which fails while the A/A compared.
+		expect_row(judge_case(phased(1, 0, kAll), phased(2, 0, kAll), phased(3, 9, 6)), 'S',
+				"frame_flags2", "", "fail");
+	}
+	{
+		// The mounted-ammo record rides the route nibble 8's frame alone
+		// (frame.mount_phase): over full windows a run that never carries it fails;
+		// six frames that hold it against six that do not are a phase slice (x5's
+		// kick: RR {0, none} against RO's {0}), which the set does not compare.
+		auto mounted = [](uint32_t seed, bool mount, size_t keep) {
+			wire::ParityTrace trace = scripted(seed);
+			std::vector<wire::ParityFrameState> frames;
+			size_t steady = 0;
+			for (wire::ParityFrameState f : trace.frames) {
+				const bool in_steady = f.ts_ns >= kSteadyStart;
+				if (in_steady && steady++ >= keep)
+					continue;
+				if (mount && ((f.flags2 & 0x0Fu) == 8u || (in_steady && steady == 1))) {
+					f.mount_present = true;
+					f.mount_handle = 0xFFFF;
+				}
+				frames.push_back(f);
+			}
+			trace.frames = std::move(frames);
+			return trace;
+		};
+		constexpr size_t kAll = ~size_t(0);
+		expect_row(judge_case(mounted(1, true, kAll), mounted(2, true, kAll),
+						   mounted(3, false, kAll)),
+				'S', "frame_mount", "", "fail", "FRAME_PASSENGER_PHASE_MISMATCH");
+		expect_row(judge_case(mounted(1, true, 6), mounted(2, true, 6), mounted(3, false, 6)),
+				'S', "frame_mount", "", "skip");
+		expect_row(judge_case(mounted(1, true, kAll), mounted(2, true, kAll),
+						   mounted(3, true, 6)),
+				'S', "frame_mount", "", "fail");
 	}
 	{
 		// The fps and CPU bytes are measurements; a CPU byte never written is not.
@@ -1629,6 +3140,548 @@ void test_frame_rules() {
 			"p90 is the nearest rank: two samples report the larger");
 }
 
+// The frame rows whose values a draw or a sampling phase picks, each judged by the rule
+// retail's own runs set: the mount record by the own carrier state it rides
+// (frame.mount_phase), the eye offset by its rests and transitions
+// (frame.self_offset_rests), the health by its full and dead values (frame.health_hit).
+void test_frame_draws() {
+	// Rewrites each steady frame (and the own record in it, handle 0x1000) of a scripted
+	// run through `f(index, frame, self)`, the index counting steady frames.
+	auto rewrite = [](wire::ParityTrace trace,
+						   const std::function<void(
+								   size_t, wire::ParityFrameState &, wire::ParityEntity &)> &f) {
+		std::map<int, wire::ParityEntity *> self;
+		for (wire::ParityEntity &e : trace.entities)
+			if (e.handle == 0x1000)
+				self[e.frame] = &e;
+		size_t index = 0;
+		for (wire::ParityFrameState &frame : trace.frames)
+			if (frame.ts_ns >= kSteadyStart && self.count(frame.frame))
+				f(index++, frame, *self[frame.frame]);
+		return trace;
+	};
+	{
+		// x6's drive: the turret stay is 10 frames; RR and RR-aa caught its nibble-8 frame,
+		// OR's stay fell between two. A stay shorter than the 16-frame cycle compares only
+		// when both runs carried a record in it.
+		auto turret = [&rewrite](uint32_t seed, uint32_t shift, uint32_t clip) {
+			return rewrite(scripted(seed),
+					[shift, clip](size_t i, wire::ParityFrameState &f, wire::ParityEntity &e) {
+						const bool mounted = i >= 40 && i < 50;
+						f.flags2 = uint32_t(i + shift) & 0xFFu;
+						f.mount_present = (f.flags2 & 0x0Fu) == 8u;
+						f.mount_handle = mounted ? 0x102E : 0xFFFF;
+						f.mount_bound = mounted;
+						f.mount_clip = mounted ? clip : 0;
+						f.mount_reserve = mounted ? 500 : 0;
+						e.carrier = mounted ? 0x102E : 0xFFFF;
+						e.carrier_bone = mounted ? 6 : 0;
+						e.carrier_local = mounted;
+					});
+		};
+		// Nibble 8 at steady frame 40 on RR and RR-aa (inside 40..49), at 37 and 53 on the
+		// subject.
+		const Case missed =
+				judge_case(turret(1, 0, 65535), turret(2, 0, 65535), turret(3, 3, 65535), "OR");
+		expect_row(missed, 'S', "frame_mount", "", "pass");
+		// The same stay caught with another record fails.
+		expect_row(judge_case(turret(1, 0, 65535), turret(2, 0, 65535), turret(3, 0, 7), "OR"), 'S',
+				"frame_mount", "", "fail", "FRAME_PASSENGER_PHASE_MISMATCH");
+		// A stay of a full cycle on both sides compares whether or not a run carried it.
+		auto seated = [&rewrite](uint32_t seed, bool carry) {
+			return rewrite(scripted(seed),
+					[carry](size_t i, wire::ParityFrameState &f, wire::ParityEntity &e) {
+						const bool mounted = i >= 40 && i < 70;
+						f.flags2 = uint32_t(i) & 0xFFu;
+						f.mount_present = (f.flags2 & 0x0Fu) == 8u && (carry || !mounted);
+						f.mount_handle = mounted ? 0x1002 : 0xFFFF;
+						f.mount_bound = mounted;
+						e.carrier = mounted ? 0x1002 : 0xFFFF;
+						e.carrier_bone = mounted ? 4 : 0;
+						e.carrier_local = mounted;
+					});
+		};
+		expect_row(judge_case(seated(1, true), seated(2, true), seated(3, false), "OR"), 'S',
+				"frame_mount", "", "fail", "FRAME_PASSENGER_PHASE_MISMATCH");
+	}
+	{
+		// x6's death eye: one curve sampled at another phase by each run, the rests and the
+		// transition between them shared; a tilt between two standing rests is its own
+		// transition (x6 hostkill OR before D-NET-518's roll fix).
+		static constexpr int32_t kStand = -0xD001, kDead = -9889;
+		auto dying = [&rewrite](uint32_t seed, int phase, bool tilt) {
+			return rewrite(scripted(seed),
+					[phase, tilt](size_t i, wire::ParityFrameState &, wire::ParityEntity &e) {
+						e.offset_x = e.offset_y = 0;
+						e.offset_z = kStand;
+						if (tilt && i == 60)
+							e.offset_x = 3840;
+						if (i >= 100 && i < 104) {
+							const int k = int(i - 100) * 3 + phase; // the tick each frame sampled
+							e.offset_z = kStand + (kDead - kStand) * (k + 1) / 13;
+						} else if (i >= 104) {
+							e.offset_z = kDead;
+						}
+					});
+		};
+		const Case phased =
+				judge_case(dying(1, 0, false), dying(2, 1, false), dying(3, 2, false), "OO");
+		expect_row(phased, 'S', "frame_self_offset", "", "pass");
+		const VerdictRow *row = find_row(phased.verdict.rows, 'S', "frame_self_offset");
+		check(row && row->value.reference == "{0,0,-13,0,0,-13>0,0,-2,0,0,-2}",
+				"the death compares as its rests and one transition (got " +
+						(row ? row->value.reference : std::string("no row")) + ")");
+		expect_row(judge_case(dying(1, 0, false), dying(2, 1, false), dying(3, 2, true), "OR"), 'S',
+				"frame_self_offset", "", "fail", "FRAME_ANCHOR_OFFSET_MISMATCH");
+		// x8's aikill: each death drew its own clip (the own record's anim state, state_b's
+		// high bits: RR 196, RR-aa 198, OO 216) and rested at that clip's eye (-9217 on RR and
+		// RR-aa, -8193 then -13153 on OO). A rest in a clip only one run plays is 'drawn'.
+		auto clipped = [&rewrite](uint32_t seed, uint32_t clip, int32_t first, int32_t last) {
+			return rewrite(scripted(seed),
+					[clip, first, last](size_t i, wire::ParityFrameState &, wire::ParityEntity &e) {
+						e.offset_x = e.offset_y = 0;
+						e.offset_z = kStand;
+						e.state_b = (44u << 8) | 9u;
+						if (i < 100)
+							return;
+						e.state_b = (clip << 8) | 9u;
+						if (i < 104)
+							e.offset_z = kStand + (first - kStand) * int32_t(i - 99) / 5;
+						else
+							e.offset_z = i < 120 ? first : last;
+					});
+		};
+		const Case drawn = judge_case(clipped(1, 196, -9217, -9217), clipped(2, 198, -9217, -9217),
+				clipped(3, 216, -8193, -13153), "OO");
+		expect_row(drawn, 'S', "frame_self_offset", "", "pass");
+		const VerdictRow *drawn_row = find_row(drawn.verdict.rows, 'S', "frame_self_offset");
+		check(drawn_row && drawn_row->aa_distance == 0.0 &&
+						drawn_row->value.subject == "{0,0,-13,0,0,-13>drawn,drawn}",
+				"two death clips' rests compare as drawn (got " +
+						(drawn_row ? drawn_row->value.subject : std::string("no row")) + ")");
+		// The clip RR played, resting elsewhere, compares by value.
+		expect_row(judge_case(clipped(1, 196, -9217, -9217), clipped(2, 198, -9217, -9217),
+						   clipped(3, 196, -13153, -13153), "OO"),
+				'S', "frame_self_offset", "", "fail", "FRAME_ANCHOR_OFFSET_MISMATCH");
+	}
+	{
+		// x5's aikill: RR's first hit left 36, RR-aa's 8 (base 114 at zone 1.0 and 1.25).
+		auto hit = [&rewrite](uint32_t seed, int32_t full, int32_t residual) {
+			return rewrite(scripted(seed),
+					[full, residual](size_t i, wire::ParityFrameState &f, wire::ParityEntity &) {
+						f.health = i < 100 ? full : i < 150 ? residual : 0;
+					});
+		};
+		expect_row(judge_case(hit(1, 150, 8), hit(2, 150, 8), hit(3, 150, 36), "OO"), 'S',
+				"frame_health", "", "pass");
+		// x8's aikill OR: 150 straight to 0 between two consecutive frames, the hit and the
+		// kill inside one frame step: no residual to compare.
+		expect_row(judge_case(hit(1, 150, 8), hit(2, 150, 8), hit(3, 150, 0), "OO"), 'S',
+				"frame_health", "", "pass");
+		// A run that never dies still misses the dead value.
+		auto alive = rewrite(scripted(3),
+				[](size_t, wire::ParityFrameState &f, wire::ParityEntity &) { f.health = 150; });
+		expect_row(judge_case(hit(1, 150, 8), hit(2, 150, 8), alive, "OO"), 'S', "frame_health", "",
+				"fail", "FRAME_HEADER_VALUES_MISMATCH");
+		expect_row(judge_case(hit(1, 150, 8), hit(2, 150, 8), hit(3, 120, 36), "OO"), 'S',
+				"frame_health", "", "fail", "FRAME_HEADER_VALUES_MISMATCH");
+	}
+	{
+		// Push 208's aikill OR: the AI's 75 hit landed between the last frame before the
+		// window (150) and the window's first frame (75), so the window opens on 150
+		// (frame.health_open). Every frame of the run is written, the window's by its
+		// steady index.
+		auto opened = [](uint32_t seed, int32_t before, int32_t first, int32_t residual) {
+			wire::ParityTrace trace = scripted(seed);
+			size_t index = 0;
+			for (wire::ParityFrameState &f : trace.frames) {
+				if (f.ts_ns < kSteadyStart) {
+					f.health = before;
+					continue;
+				}
+				const size_t i = index++;
+				f.health = i < 50 ? first : i < 100 ? residual : 0;
+			}
+			return trace;
+		};
+		expect_row(judge_case(opened(1, 150, 150, 36), opened(2, 150, 150, 8),
+						   opened(3, 150, 75, 75), "OR"),
+				'S', "frame_health", "", "pass");
+		// A hit the last frame before the window already carried leaves full unseen.
+		expect_row(judge_case(opened(1, 150, 150, 36), opened(2, 150, 150, 8),
+						   opened(3, 75, 75, 75), "OR"),
+				'S', "frame_health", "", "fail", "FRAME_HEADER_VALUES_MISMATCH");
+		// A 0 before a living window is an earlier life's (a respawn at the open): it opens
+		// nothing, so a run that never dies inside the window fails against a straight death
+		// inside it ({150} against {150, 0}, where the prepended 0 would have read {0, 150}).
+		auto reborn = [](uint32_t seed) {
+			wire::ParityTrace trace = scripted(seed);
+			for (wire::ParityFrameState &f : trace.frames)
+				f.health = f.ts_ns < kSteadyStart ? 0 : 150;
+			return trace;
+		};
+		expect_row(judge_case(opened(1, 150, 150, 0), opened(2, 150, 150, 0), reborn(3), "OR"),
+				'S', "frame_health", "", "fail", "FRAME_HEADER_VALUES_MISMATCH");
+		// Both sides reborn at the open, neither dying inside the window: {150} on both.
+		expect_row(judge_case(reborn(1), reborn(2), reborn(3), "OR"), 'S', "frame_health", "",
+				"pass");
+	}
+	{
+		// x10 / x11's aikill: the recipient dies at steady frame 100, and the first frame after
+		// the death, keyed on the dead list's class weights and age bytes, carried no vehicle
+		// on one run and some on another (frame.death_rekey). `bare` names the steady frame
+		// that carries none.
+		auto dies = [&rewrite](uint32_t seed, size_t bare) {
+			return rewrite(scripted(seed),
+					[bare](size_t i, wire::ParityFrameState &f, wire::ParityEntity &) {
+						f.health = i < 100 ? 150 : 0;
+						f.vehicles = i == bare ? 0 : 1;
+					});
+		};
+		constexpr size_t kNone = size_t(-1);
+		// x11 RO against x10's RR / RR-aa: {PV} against {P,PV}, only the death's frame apart.
+		expect_row(judge_case(dies(1, 100), dies(2, 100), dies(3, kNone), "RO"), 'S',
+				"frame_record_classes", "", "pass");
+		expect_row(judge_case(dies(1, kNone), dies(2, kNone), dies(3, 100), "OO"), 'S',
+				"frame_record_classes", "", "pass");
+		// A vehicle-less frame while alive, or past the death's first frame, still compares.
+		expect_row(judge_case(dies(1, kNone), dies(2, kNone), dies(3, 50), "OO"), 'S',
+				"frame_record_classes", "", "fail", "FRAME_RECORD_CLASS_MISMATCH");
+		expect_row(judge_case(dies(1, kNone), dies(2, kNone), dies(3, 101), "OO"), 'S',
+				"frame_record_classes", "", "fail", "FRAME_RECORD_CLASS_MISMATCH");
+	}
+	{
+		// x6's hostkill: the +0x168 countdown (weapon[1]) from `top` and the +0x170 one
+		// (weapon[2]) from 120, both started at steady frame `start` `skipped` seconds in, a
+		// second every 8 frames (two weapon blocks), +0x170 still running at the window's end
+		// (frame.weapon_countdown).
+		auto countdown = [&rewrite](uint32_t seed, size_t start, uint32_t skipped, uint32_t top) {
+			return rewrite(scripted(seed),
+					[start, skipped, top](
+							size_t i, wire::ParityFrameState &f, wire::ParityEntity &) {
+						if (!f.weapon_present)
+							return;
+						f.weapon[1] = f.weapon[2] = 0;
+						if (i < start)
+							return;
+						const uint32_t step = uint32_t(i - start) / 8 + skipped;
+						f.weapon[1] = step < top ? top - step : 0;
+						f.weapon[2] = 120 - step;
+					});
+		};
+		// RR-aa's first sample is the second second (x6: (4, 119) against RR's (5, 120)).
+		const Case late_sample =
+				judge_case(countdown(1, 40, 0, 5), countdown(2, 48, 1, 5), countdown(3, 48, 1, 5));
+		const VerdictRow *aa = find_row(late_sample.verdict.rows, 'S', "frame_weapon");
+		check(aa && aa->aa_distance == 0.0, "a countdown's first second missed is no A/A distance");
+		expect_row(late_sample, 'S', "frame_weapon", "", "pass");
+		// A countdown started two seconds later ends two higher at the window's end
+		// (x6: 79 on RR, 76 on OO).
+		expect_row(judge_case(countdown(1, 40, 0, 5), countdown(2, 40, 0, 5),
+						   countdown(3, 56, 0, 5), "OO"),
+				'S', "frame_weapon", "", "pass");
+		// A countdown from another value is no phase.
+		expect_row(judge_case(countdown(1, 40, 0, 5), countdown(2, 40, 0, 5),
+						   countdown(3, 40, 0, 7), "OO"),
+				'S', "frame_weapon", "", "fail", "FRAME_WEAPON_PHASE_MISMATCH");
+		// x8's swap: the team change starts +0x168 and +0x16C (weapon[1], weapon[3]) at 60 and
+		// the re-arm a second or less later +0x164 (weapon[4]) at 30, the per-slot pass between
+		// the two accepts or not: RR (60, 60, 30) and RR-aa a second later (59, 59, 29) stand 30
+		// apart, OR (59, 59, 30) 29 apart.
+		auto swap = [&rewrite](uint32_t seed, uint32_t skipped, uint32_t apart) {
+			return rewrite(scripted(seed),
+					[skipped, apart](size_t i, wire::ParityFrameState &f, wire::ParityEntity &) {
+						if (!f.weapon_present)
+							return;
+						f.weapon[1] = f.weapon[3] = f.weapon[4] = 0;
+						if (i < 40)
+							return;
+						const uint32_t step = uint32_t(i - 40) / 8 + skipped;
+						f.weapon[1] = f.weapon[3] = step < 60 ? 60 - step : 0;
+						f.weapon[4] = step + apart < 60 ? 60 - apart - step : 0;
+					});
+		};
+		const Case passed = judge_case(swap(1, 0, 30), swap(2, 1, 30), swap(3, 1, 29), "OR");
+		const VerdictRow *swap_row = find_row(passed.verdict.rows, 'S', "frame_weapon");
+		check(swap_row && swap_row->aa_distance == 0.0,
+				"a countdown pair started a second later is no A/A distance");
+		expect_row(passed, 'S', "frame_weapon", "", "pass");
+		// Three seconds apart is no pass between two accepts.
+		expect_row(judge_case(swap(1, 0, 30), swap(2, 1, 30), swap(3, 1, 27), "OR"), 'S',
+				"frame_weapon", "", "fail", "FRAME_WEAPON_PHASE_MISMATCH");
+	}
+}
+
+// x8's 01tr-coop: a parked vehicle's records carry its offset from the moving anchor rounded to
+// the compressed step (state.position_quantum), so its world position wobbles inside one step
+// and is no motion; a vehicle that drives further than its step still compares.
+void test_position_quantum() {
+	// The vehicle record (handle 0x2003) at world x 4000 + speed * k for its k-th record.
+	auto vehicle = [](uint32_t seed, int32_t speed) {
+		wire::ParityTrace trace = scripted(seed);
+		std::map<int, const wire::ParityFrameState *> frames;
+		for (const wire::ParityFrameState &f : trace.frames)
+			frames[f.frame] = &f;
+		int32_t k = 0;
+		for (wire::ParityEntity &e : trace.entities) {
+			if (e.cls != 'V')
+				continue;
+			const wire::ParityFrameState &f = *frames.at(e.frame);
+			e.pos_x = network_compress_fixedpoint(4000 * 65536 + speed * k++ - f.anchor_x);
+			e.pos_y = network_compress_fixedpoint(2100 * 65536 - f.anchor_y);
+			e.pos_z = network_compress_fixedpoint(50 * 65536 - f.anchor_z);
+			place(e, f);
+		}
+		return trace;
+	};
+	{
+		const Case parked = judge_case(vehicle(1, 0), vehicle(2, 0), vehicle(3, 0), "OO");
+		for (const char *row : { "entity_V_position_range_p90",
+					 "entity_V_position_displacement_p90", "entity_V_position_step_p90" })
+			check(find_row(parked.verdict.rows, 'S', row) == nullptr,
+					std::string("a parked vehicle has no ") + row);
+	}
+	// The vehicle record at a fixed anchor-relative y and z (both anchors are still), its x
+	// word `x_word` against the moving anchor, y moving `hop` at 12 s.
+	auto placed = [](uint32_t seed, uint16_t x_word, int32_t hop) {
+		wire::ParityTrace trace = scripted(seed);
+		std::map<int, const wire::ParityFrameState *> frames;
+		for (const wire::ParityFrameState &f : trace.frames)
+			frames[f.frame] = &f;
+		for (wire::ParityEntity &e : trace.entities) {
+			if (e.cls != 'V')
+				continue;
+			const wire::ParityFrameState &f = *frames.at(e.frame);
+			e.pos_x = x_word != 0 ? x_word : network_compress_fixedpoint(4000 * 65536 - f.anchor_x);
+			e.pos_y = network_compress_fixedpoint(100 * 65536 + (e.ts_ns >= 12 * kSec ? hop : 0));
+			e.pos_z = network_compress_fixedpoint(0);
+			place(e, f);
+		}
+		return trace;
+	};
+	{
+		// Two records prove their delta less their two half steps: at 100 units the step is
+		// 1/32 unit (16 << 7, exact here), so a 1-unit move counts 65536 - 2048, and the x
+		// word's wobble within its 2-unit steps none (x11 01tr-coop OO's downed pilot: a
+		// first record a 0.5-unit flip off counted its later sway whole, 0.64 units).
+		const Case hop =
+				judge_case(placed(1, 0, 65536), placed(2, 0, 65536), placed(3, 0, 65536), "OO");
+		for (const char *name : { "entity_V_position_range_p90",
+					 "entity_V_position_displacement_p90", "entity_V_position_step_p90" }) {
+			const VerdictRow *row = find_row(hop.verdict.rows, 'S', name);
+			check(row && row->value.reference == "63488" && row->value.subject == "63488",
+					std::string(name) + " counts the move less the two half steps (" +
+							(row ? row->value.reference : std::string("no row")) + ")");
+		}
+		// A zero word under nonzero shift bits is a value of 0 or -1 whose `bsr` left the call
+		// site's ECX as its shift bits, so it is exact: x8 RR's own record 93 wrote its x, the
+		// anchor's own, as 0x0002, and the host's body 92 standing on that x as 0x000A. A
+		// vehicle on 0x000A rides the anchor, 0.25 units a record, all of it motion (the
+		// word's 0.5-unit step would hide every record of it).
+		const uint16_t zero_word = network_compress_fixedpoint(0, 25);
+		check(zero_word == 0x000A, "a zero x with ECX 25 is the word 0x000A");
+		const Case ride = judge_case(
+				placed(1, zero_word, 0), placed(2, zero_word, 0), placed(3, zero_word, 0), "OO");
+		const VerdictRow *step = find_row(ride.verdict.rows, 'S', "entity_V_position_step_p90");
+		check(step && step->value.reference == "16384",
+				"a zero word's record steps with the anchor (" +
+						(step ? step->value.reference : std::string("no row")) + ")");
+	}
+	constexpr int32_t kDrive = 8 * 65536; // 8 units a record, beyond the 2-unit step
+	expect_row(judge_case(vehicle(1, kDrive), vehicle(2, kDrive), vehicle(3, kDrive), "OO"), 'S',
+			"entity_V_position_displacement_p90", "", "pass");
+	expect_row(judge_case(vehicle(1, kDrive), vehicle(2, kDrive), vehicle(3, 0), "OO"), 'S',
+			"entity_V_position_displacement_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
+	// x8 / x10 / x11's kick: six steady frames before the punt hold a slice of the boats'
+	// at-rest heave, 180 ticks a cycle, so under 16 steady frames on either side the entity
+	// rows skip (entity.short_window); sixteen on both sides compare again.
+	auto cut = [](wire::ParityTrace trace, size_t keep) {
+		std::vector<wire::ParityFrameState> frames;
+		size_t steady = 0;
+		for (const wire::ParityFrameState &f : trace.frames)
+			if (f.ts_ns < kSteadyStart || steady++ < keep)
+				frames.push_back(f);
+		trace.frames = std::move(frames);
+		return trace;
+	};
+	expect_row(judge_case(cut(vehicle(1, kDrive), 6), cut(vehicle(2, kDrive), 6),
+					   cut(vehicle(3, 0), 6), "OO"),
+			'S', "entity_V_position_displacement_p90", "", "skip");
+	expect_row(judge_case(cut(vehicle(1, kDrive), 16), cut(vehicle(2, kDrive), 16),
+					   cut(vehicle(3, 0), 16), "OO"),
+			'S', "entity_V_position_displacement_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
+}
+
+// x8's 01tr-coop (L7-s19): a civilian standing on the building under its placed spot streams
+// its position and heading local to that building (entity.carrier), where our x8 host sent
+// world records. Each handle's records run one sequence per carrier word: a walk on the
+// building compares with the same walk in world units, a still record against a walk fails,
+// and a change of carrier is a change of frame, never a step or a turn.
+void test_entity_carrier() {
+	// The civilian's pose at its k-th record and capture time: the carrier word (0xFFFF: none,
+	// the position a world one), the position in that frame (16.16) and the heading byte.
+	struct Pose {
+		uint32_t carrier = 0xFFFF;
+		int32_t x = 0, y = 0;
+		int32_t yaw = 0;
+	};
+	using Walk = std::function<Pose(int32_t k, uint64_t ts_ns)>;
+	auto civilian = [](uint32_t seed, const Walk &walk) {
+		wire::ParityTrace trace = scripted(seed);
+		std::map<int, const wire::ParityFrameState *> frames;
+		for (const wire::ParityFrameState &f : trace.frames)
+			frames[f.frame] = &f;
+		std::vector<wire::ParityEntity> entities;
+		int32_t k = 0;
+		for (const wire::ParityEntity &v : trace.entities) {
+			entities.push_back(v);
+			if (v.cls != 'V')
+				continue;
+			const wire::ParityFrameState &f = *frames.at(v.frame);
+			const Pose pose = walk(k++, v.ts_ns);
+			wire::ParityEntity e = v;
+			e.cls = 'I';
+			e.handle = 0x0032;
+			e.type_id = 2069;
+			e.orient_a = pose.yaw;
+			e.orient_b = 0;
+			e.state_a = e.state_b = e.vital = 0;
+			e.carrier = pose.carrier;
+			e.carrier_local = pose.carrier != 0xFFFF;
+			if (e.carrier_local) {
+				// The decode: a carrier-local offset is the position in the carrier's frame.
+				e.pos_x = network_compress_fixedpoint(pose.x);
+				e.pos_y = network_compress_fixedpoint(pose.y);
+				e.pos_z = network_compress_fixedpoint(-45000);
+				place(e, f);
+				e.world_x = e.offset_x;
+				e.world_y = e.offset_y;
+				e.world_z = e.offset_z;
+			} else {
+				e.pos_x = network_compress_fixedpoint(pose.x - f.anchor_x);
+				e.pos_y = network_compress_fixedpoint(pose.y - f.anchor_y);
+				e.pos_z = network_compress_fixedpoint(52 * 65536 - f.anchor_z);
+				place(e, f);
+			}
+			entities.push_back(e);
+		}
+		trace.entities = std::move(entities);
+		return trace;
+	};
+	static constexpr int32_t kUnit = 65536;
+	const Walk on_building = [](int32_t k, uint64_t) {
+		return Pose{ 0x213F, 2 * kUnit + k * kUnit, kUnit / 2, 40 };
+	};
+	const Walk in_world = [](int32_t k, uint64_t) {
+		return Pose{ 0xFFFF, -265 * kUnit + k * kUnit, 755 * kUnit, 90 };
+	};
+	const Walk still_on_building = [](int32_t, uint64_t) {
+		return Pose{ 0x213F, 2 * kUnit, kUnit / 2, 40 };
+	};
+	{
+		const Case c = judge_case(
+				civilian(1, on_building), civilian(2, on_building), civilian(3, in_world), "OO");
+		expect_row(c, 'S', "entity_motion", "I", "pass");
+		expect_row(c, 'S', "entity_I_position_step_p90", "", "pass");
+		expect_row(c, 'S', "entity_I_position_range_p90", "", "pass");
+	}
+	{
+		const Case c = judge_case(civilian(1, on_building), civilian(2, on_building),
+				civilian(3, still_on_building), "OO");
+		expect_row(c, 'S', "entity_motion", "I", "fail", "FRAME_ENTITY_CONSTANT");
+		expect_row(c, 'S', "entity_I_position_range_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
+	}
+	{
+		// A still civilian whose carrier changes (x8's 46: 0x206D, then 0x213D) has two
+		// constant sequences: no step, no turn, against a still world record.
+		const Walk two_buildings = [](int32_t, uint64_t ts_ns) {
+			const bool later = ts_ns >= 12 * kSec;
+			return later ? Pose{ 0x213D, -40 * kUnit, 12 * kUnit, 200 }
+						 : Pose{ 0x206D, 3 * kUnit, kUnit, 40 };
+		};
+		const Walk still_in_world = [](int32_t, uint64_t) {
+			return Pose{ 0xFFFF, -265 * kUnit, 755 * kUnit, 90 };
+		};
+		const Case c = judge_case(civilian(1, two_buildings), civilian(2, two_buildings),
+				civilian(3, still_in_world), "OO");
+		expect_row(c, 'S', "entity_motion", "I", "pass");
+		for (const char *row : { "entity_I_position_range_p90", "entity_I_position_step_p90",
+					 "entity_I_orientation_range_p90", "entity_I_orientation_step_p90" })
+			check(find_row(c.verdict.rows, 'S', row) == nullptr,
+					std::string("a change of carrier makes no ") + row);
+	}
+}
+
+// x10 / x11's 01tr-coop-drive OO (L4-s34): eleven far idle soldiers each streamed 2..4 records
+// in the 60 s window, and their looks run on the mission tick, so whether a few records
+// straddle a look change was the window's tick (I orientation range p90 16 against RR's 2). A
+// handle and carrier sequence under 16 records in the window leaves the entity rows, which
+// compare over the rest (entity.sparse_sequence).
+void test_entity_sparse_sequence() {
+	// Ten soldiers in every steady frame, their aim heading `dense` on every other record, and
+	// three with `sparse` records spread over the window whose aim turns `look` halfway.
+	auto soldiers = [](uint32_t seed, int32_t dense, size_t sparse, int32_t look) {
+		wire::ParityTrace trace = scripted(seed);
+		std::vector<const wire::ParityFrameState *> steady;
+		for (const wire::ParityFrameState &f : trace.frames)
+			if (f.ts_ns >= kSteadyStart && f.ts_ns <= kSteadyStart + uint64_t(kSteadySeconds * 1e9))
+				steady.push_back(&f);
+		auto soldier = [](const wire::ParityFrameState &f, uint32_t handle, int32_t aim) {
+			wire::ParityEntity e;
+			e.frame = f.frame;
+			e.ts_ns = f.ts_ns;
+			e.session = f.session;
+			e.cls = 'I';
+			e.handle = handle;
+			e.type_id = 2070;
+			e.pos_x = network_compress_fixedpoint(int32_t(800 + handle) * 65536 - f.anchor_x);
+			e.pos_y = network_compress_fixedpoint(690 * 65536 - f.anchor_y);
+			e.pos_z = network_compress_fixedpoint(42 * 65536 - f.anchor_z);
+			e.orient_a = 0xC0;
+			e.orient_b = (0xC0 + aim) % 256;
+			e.state_b = 0x2B;
+			place(e, f);
+			return e;
+		};
+		std::vector<wire::ParityEntity> added;
+		for (size_t i = 0; i < steady.size(); ++i)
+			for (uint32_t h = 0; h < 10; ++h)
+				added.push_back(soldier(*steady[i], 0x0040 + h, i % 2 ? dense : 0));
+		for (size_t k = 0; k < sparse; ++k)
+			for (uint32_t h = 0; h < 3; ++h)
+				added.push_back(soldier(*steady[k * steady.size() / sparse], 0x0050 + h,
+						k < sparse / 2 ? 0 : look));
+		trace.entities.insert(trace.entities.end(), added.begin(), added.end());
+		std::stable_sort(trace.entities.begin(), trace.entities.end(),
+				[](const wire::ParityEntity &x, const wire::ParityEntity &y) {
+					return x.ts_ns < y.ts_ns;
+				});
+		return trace;
+	};
+	{
+		// Fifteen records turning 40 leave the row; the ten dense soldiers' 2 compares.
+		const Case c = judge_case(
+				soldiers(1, 2, 15, 0), soldiers(2, 2, 15, 0), soldiers(3, 2, 15, 40), "OO");
+		expect_row(c, 'S', "entity_I_orientation_range_p90", "", "pass");
+		const VerdictRow *row = find_row(c.verdict.rows, 'S', "entity_I_orientation_range_p90");
+		check(row && row->value.subject == "2" && row->value.reference == "2",
+				"the I orientation range p90 runs over the dense soldiers alone");
+	}
+	// Sixteen records stay: their turn is the row's p90 (40 against 2).
+	expect_row(
+			judge_case(soldiers(1, 2, 16, 0), soldiers(2, 2, 16, 0), soldiers(3, 2, 16, 40), "OO"),
+			'S', "entity_I_orientation_range_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
+	// The dense soldiers' own turn still fails beside the dropped ones.
+	expect_row(
+			judge_case(soldiers(1, 2, 15, 0), soldiers(2, 2, 15, 0), soldiers(3, 40, 15, 0), "OO"),
+			'S', "entity_I_orientation_range_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
+	// The floor is per side: three soldiers RR streams 300 times stay on RR's side, so their
+	// turn fails against a run that starves them to 4 records, which drop.
+	expect_row(judge_case(soldiers(1, 2, 300, 40), soldiers(2, 2, 300, 40), soldiers(3, 2, 4, 40),
+					   "OO"),
+			'S', "entity_I_orientation_range_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
+}
+
 void test_steady_rules() {
 	{
 		// A steady packet groups as its record multiset, without the RTT replies its
@@ -1656,12 +3709,242 @@ void test_steady_rules() {
 		expect_row(judge_case(scripted(1), scripted(2), alone), 'S', "steady_group_distribution",
 				"", "fail", "GAMEPLAY_GROUP_DISTRIBUTION");
 	}
+	{
+		// The order runs over the producers' records (group.S.0x57.order): x7's ash-capture
+		// OR mostly packed [0x57, 0x40, 0x0A] where RR packed [0x40, 0x57, 0x0A], the 0x57's
+		// place its C2S 0x2C's arrival in the host's send window. The producers' own order
+		// still compares.
+		auto packed = [](uint32_t seed, const std::vector<uint16_t> &order) {
+			wire::ParityTrace trace = scripted(seed);
+			for (wire::ParityPacket &p : trace.packets)
+				if (p.dir == 'S' && p.tags.size() == 1 && p.tags[0] == 0x00A && p.frame % 3 == 0) {
+					const wire::ParityWireRecord gameplay = p.records.front();
+					p.tags.clear();
+					p.records.clear();
+					for (const uint16_t tag : order) {
+						wire::ParityWireRecord record = gameplay;
+						record.full_tag = tag;
+						if (tag != 0x00A)
+							record.encoded_length = tag == 0x057 ? 5 : 25;
+						p.tags.push_back(tag);
+						p.records.push_back(record);
+					}
+				}
+			return trace;
+		};
+		const std::vector<uint16_t> retail{ 0x040, 0x057, 0x046, 0x00A },
+				early{ 0x057, 0x040, 0x046, 0x00A }, swapped{ 0x057, 0x046, 0x040, 0x00A };
+		expect_row(judge_case(packed(1, retail), packed(2, retail), packed(3, early)), 'S',
+				"steady_order_distribution", "", "pass");
+		expect_row(judge_case(packed(1, retail), packed(2, retail), packed(3, swapped)), 'S',
+				"steady_order_distribution", "", "fail", "GAMEPLAY_ORDER_DISTRIBUTION");
+	}
+	{
+		// A share distribution compares at 13 samples or more on both sides
+		// (steady.distribution_floor): one sample's 1 / n share stays under the 0.08
+		// unit. x5's kick held 11 to 14 steady packets before the punt.
+		auto trimmed = [](uint32_t seed, size_t keep) {
+			wire::ParityTrace trace = scripted(seed);
+			std::vector<wire::ParityPacket> packets;
+			size_t steady = 0;
+			for (const wire::ParityPacket &p : trace.packets) {
+				if (p.dir == 'S' && p.ts_ns >= kSteadyStart && !p.records.empty() &&
+						steady++ >= keep)
+					continue;
+				packets.push_back(p);
+			}
+			trace.packets = std::move(packets);
+			return trace;
+		};
+		expect_row(judge_case(trimmed(1, 13), trimmed(2, 13), trimmed(3, 13)), 'S',
+				"steady_group_distribution", "", "skip");
+		expect_row(judge_case(trimmed(1, 14), trimmed(2, 14), trimmed(3, 14)), 'S',
+				"steady_group_distribution", "", "pass");
+		// One side short skips whichever run it is: x4..x6's kick retail runs held 10 to
+		// 14 steady packets before the punt, so a subject under 13 against an RR over
+		// it is the punt's phase, not an unexercised stream.
+		constexpr size_t kAll = ~size_t(0);
+		expect_row(judge_case(trimmed(1, kAll), trimmed(2, kAll), trimmed(3, 13)), 'S',
+				"steady_group_distribution", "", "skip");
+		expect_row(judge_case(trimmed(1, 13), trimmed(2, kAll), trimmed(3, kAll)), 'S',
+				"steady_group_distribution", "", "skip");
+	}
+}
+
+// --- the round events' fire target (round.target)
+
+struct RoundRun {
+	uint32_t shooter;
+	uint32_t flags;
+	size_t count;
+};
+
+// x8 / x9 01tr-coop-aikill: each shooter's S2C 0x0A round events to the joiner 0x005D by flag
+// byte, as L4-s31 counted them over the cells' decodes, every 0x40 target the joiner. The
+// rifles key I.alt (0x01 / 0x41), the mounted gunner 0x0006 I.adm (0x32 / 0x72).
+const std::vector<RoundRun> kAikillRR = { { 0x0019, 0x01, 4 }, { 0x0019, 0x41, 6 },
+	{ 0x0027, 0x01, 2 }, { 0x0027, 0x41, 10 }, { 0x0028, 0x01, 4 }, { 0x0028, 0x41, 8 },
+	{ 0x0001, 0x01, 9 }, { 0x0001, 0x41, 3 }, { 0x0000, 0x41, 1 }, { 0x0006, 0x32, 1 },
+	{ 0x0006, 0x72, 8 } };
+const std::vector<RoundRun> kAikillRRaa = { { 0x0019, 0x41, 5 }, { 0x0027, 0x01, 4 },
+	{ 0x0027, 0x41, 8 }, { 0x0028, 0x41, 6 }, { 0x0001, 0x01, 9 }, { 0x0001, 0x41, 3 },
+	{ 0x0000, 0x41, 2 }, { 0x0006, 0x72, 6 } };
+const std::vector<RoundRun> kAikillRO = { { 0x0019, 0x01, 4 }, { 0x0019, 0x41, 6 },
+	{ 0x0027, 0x41, 12 }, { 0x0028, 0x01, 3 }, { 0x0028, 0x41, 9 }, { 0x0001, 0x01, 6 },
+	{ 0x0001, 0x41, 6 }, { 0x0000, 0x41, 1 }, { 0x0006, 0x72, 13 } };
+// Our host before D-NET-NEW-L4-27 (x8 and x9 OR / OO): every rifle round 0x01, the gunner's
+// 0x32, none naming a target (RR's per-shooter totals).
+const std::vector<RoundRun> kAikillOursBefore = { { 0x0019, 0x01, 10 }, { 0x0027, 0x01, 12 },
+	{ 0x0028, 0x01, 12 }, { 0x0001, 0x01, 12 }, { 0x0000, 0x01, 1 }, { 0x0006, 0x32, 9 } };
+
+constexpr uint32_t kAikillJoiner = 0x005D;
+
+// The scripted case with the joiner as 0x005D, the aikill shooters' records in the window's
+// first frame only and `runs` one round per frame after it, each 0x40 round naming `target`:
+// a round's shooter resolves to its latest earlier record's class.
+wire::ParityTrace aikill(
+		uint32_t seed, const std::vector<RoundRun> &runs, uint32_t target = kAikillJoiner) {
+	wire::ParityTrace trace = scripted(seed);
+	for (wire::ParityUplinkState &u : trace.uplinks)
+		u.handle = kAikillJoiner;
+	for (wire::ParityEntity &e : trace.entities)
+		if (e.handle == 0x1000)
+			e.handle = kAikillJoiner;
+	std::vector<wire::ParityFrameState> window;
+	for (const wire::ParityFrameState &f : trace.frames)
+		if (f.ts_ns >= kSteadyStart && f.ts_ns <= kSteadyStart + uint64_t(kSteadySeconds * 1e9))
+			window.push_back(f);
+	for (const uint32_t shooter : { 0x0000u, 0x0001u, 0x0006u, 0x0019u, 0x0027u, 0x0028u }) {
+		wire::ParityEntity e;
+		e.frame = window.front().frame;
+		e.ts_ns = window.front().ts_ns;
+		e.session = kClientPort;
+		e.cls = 'I';
+		e.handle = shooter;
+		e.type_id = 1799;
+		e.pos_x = 4000 + shooter;
+		e.pos_y = 4000;
+		e.pos_z = 100;
+		place(e, window.front());
+		trace.entities.push_back(e);
+	}
+	size_t k = 1;
+	for (const RoundRun &run : runs)
+		for (size_t i = 0; i < run.count; ++i, ++k) {
+			wire::ParityRoundEvent round;
+			round.frame = window.at(k).frame;
+			round.ts_ns = window.at(k).ts_ns;
+			round.session = kClientPort;
+			round.shooter = run.shooter;
+			round.flags = run.flags;
+			round.adm = (run.flags & 0x02) ? 38 : 21;
+			round.target = (run.flags & 0x40) ? target : 0xFFFF;
+			round.seq = uint32_t(k);
+			trace.rounds.push_back(round);
+		}
+	return trace;
+}
+
+// Whether a kind of shooter's round events ever name a target, and whom, never their share:
+// retail's tag-2 writer reads the shooter's AI slot word live at the send [orig:
+// NetPacket_SerializeRoundEvent @0x504820 (@0x50484E / @0x504855, the flag
+// @0x5048BF..0x5048C1)], so the rounds before it acquires the joiner go without one.
+void test_round_target() {
+	auto share = [](const std::vector<RoundRun> &runs) {
+		size_t targeted = 0, total = 0;
+		for (const RoundRun &run : runs) {
+			total += run.count;
+			if (run.flags & 0x40)
+				targeted += run.count;
+		}
+		return std::to_string(targeted) + "/" + std::to_string(total);
+	};
+	check(share(kAikillRR) == "36/56" && share(kAikillRRaa) == "30/43" &&
+					share(kAikillRO) == "47/60" && share(kAikillOursBefore) == "0/56",
+			"the aikill oracle's per-cell shares (L4-s31)");
+	{
+		// Retail against retail: the shares differ, the rows do not.
+		const Case c =
+				judge_case(aikill(1, kAikillRR), aikill(2, kAikillRRaa), aikill(3, kAikillRO));
+		for (const char *kind : { "I.alt", "I.adm" }) {
+			expect_row(c, 'S', "round_target", kind, "pass");
+			expect_row(c, 'S', "round_target_relation", kind, "pass");
+		}
+		const VerdictRow *rr = find_row(c.verdict.rows, 'S', "round_target", "I.alt");
+		check(rr && rr->value.reference == "filled (28 of 47)" &&
+						rr->value.subject == "filled (34 of 47)",
+				"round_target renders each side's targeted rounds of the kind");
+	}
+	{
+		// Our host before L4-27: the rows x8 and x9's OR / OO would have failed on.
+		const Case c = judge_case(
+				aikill(1, kAikillRR), aikill(2, kAikillRRaa), aikill(3, kAikillOursBefore), "OR");
+		expect_row(c, 'S', "round_target", "I.alt", "fail", "ROUND_TARGET_MISSING");
+		expect_row(c, 'S', "round_target", "I.adm", "fail", "ROUND_TARGET_MISSING");
+		expect_row(c, 'S', "round_target_relation", "I.alt", "skip");
+	}
+	{
+		// Every round naming the joiner (no acquisition phase at all) is no divergence.
+		const std::vector<RoundRun> every = { { 0x0019, 0x41, 10 }, { 0x0027, 0x41, 12 },
+			{ 0x0028, 0x41, 12 }, { 0x0001, 0x41, 12 }, { 0x0000, 0x41, 1 }, { 0x0006, 0x72, 9 } };
+		const Case c =
+				judge_case(aikill(1, kAikillRR), aikill(2, kAikillRRaa), aikill(3, every), "OO");
+		expect_row(c, 'S', "round_target", "I.alt", "pass");
+		expect_row(c, 'S', "round_target", "I.adm", "pass");
+		expect_row(c, 'S', "round_target_relation", "I.adm", "pass");
+	}
+	{
+		// Whom: another entity, or the word for a pointer in no pool (@0x504882..0x504886).
+		const Case other = judge_case(
+				aikill(1, kAikillRR), aikill(2, kAikillRRaa), aikill(3, kAikillRO, 0x0042), "OO");
+		expect_row(other, 'S', "round_target", "I.alt", "pass");
+		expect_row(other, 'S', "round_target_relation", "I.alt", "fail",
+				"ROUND_TARGET_RELATION_MISMATCH");
+		const Case unpooled = judge_case(
+				aikill(1, kAikillRR), aikill(2, kAikillRRaa), aikill(3, kAikillRO, 0xFFFF), "OO");
+		expect_row(unpooled, 'S', "round_target_relation", "I.adm", "fail",
+				"ROUND_TARGET_RELATION_MISMATCH");
+		const VerdictRow *row =
+				find_row(unpooled.verdict.rows, 'S', "round_target_relation", "I.adm");
+		check(row && row->value.subject == "{unpooled}" && row->value.reference == "{self}",
+				"the relation renders 0xFFFF as unpooled and the joiner as self");
+	}
+	{
+		// The other way: RR's rounds never name a target and the run's do.
+		const Case c = judge_case(
+				aikill(1, kAikillOursBefore), aikill(2, kAikillOursBefore), aikill(3, kAikillRO));
+		expect_row(c, 'S', "round_target", "I.alt", "fail", "ROUND_TARGET_UNEXPECTED");
+	}
+	{
+		// A kind the run never fires is short: it fails unless RR-aa never fired it either.
+		const std::vector<RoundRun> rifles(kAikillRO.begin(), kAikillRO.end() - 1);
+		const std::vector<RoundRun> rifles_aa(kAikillRRaa.begin(), kAikillRRaa.end() - 1);
+		expect_row(judge_case(aikill(1, kAikillRR), aikill(2, kAikillRRaa), aikill(3, rifles)), 'S',
+				"round_target", "I.adm", "fail");
+		expect_row(judge_case(aikill(1, kAikillRR), aikill(2, rifles_aa), aikill(3, rifles)), 'S',
+				"round_target", "I.adm", "pass");
+	}
+	{
+		// No round in any run: no round rows.
+		const Case c = judge_case(scripted(1), scripted(2), scripted(3));
+		check(find_row(c.verdict.rows, 'S', "round_target", "I.alt") == nullptr,
+				"a case with no round events has no round rows");
+	}
 }
 
 } // namespace
 
 int main() {
 	test_registry();
+	test_body_masks();
+	test_cadence_counts();
+	test_pool_live_pose();
+	test_tag_window();
+	test_stream_anchor_and_burst_tail();
+	test_stream_anchor_rotation();
+	test_rotation_load_gap();
+	test_dead_joiner_uplink();
+	test_session_end();
 	test_timestamps();
 	test_identical();
 	test_tag_histogram();
@@ -1670,17 +3953,26 @@ int main() {
 	test_steady_and_envelope();
 	test_handshake();
 	test_integrity();
+	test_reload_echo();
 	test_milestones_and_rates();
 	test_state();
+	test_dynamic_rules();
 	test_evidence();
 	test_document();
 	test_handshake_rules();
+	test_spawn_pump_boundary();
 	test_initial_rules();
 	test_world_records();
 	test_reply_rules();
 	test_order_rules();
+	test_order_clock();
 	test_steady_rules();
 	test_frame_rules();
+	test_frame_draws();
+	test_position_quantum();
+	test_entity_carrier();
+	test_entity_sparse_sequence();
+	test_round_target();
 	if (g_failures) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);
 		return 1;

@@ -116,6 +116,12 @@ int LocalPlayerVisuals::local_player_character_id() const {
 	return id_sim.is_valid() ? id_sim->get_local_player_character_id() : 0;
 }
 
+int LocalPlayerVisuals::local_player_type_id() const {
+	const Ref<Simulation> type_sim = sim();
+	return type_sim.is_valid() ? type_sim->get_local_player_type_id()
+							   : static_cast<int>(opennova::world::kPlayerInfantryTypeId);
+}
+
 ObjectModel *LocalPlayerVisuals::build_local_player_held_weapon(const String &p_graphic) {
 	const Ref<MissionObjectPlacer> mission_placer = placer();
 	Node3D *parent = world_node3d();
@@ -151,7 +157,7 @@ void LocalPlayerVisuals::present_local_player_person_overlays(PersonOverlayModel
 			p_presentation);
 }
 
-ObjectModel *LocalPlayerVisuals::build_local_player_avatar() {
+ObjectModel *LocalPlayerVisuals::build_local_player_avatar(int p_type_id) {
 	const Ref<MissionObjectPlacer> mission_placer = placer();
 	Node3D *parent = world_node3d();
 	if (mission_placer.is_null() || parent == nullptr) {
@@ -160,7 +166,7 @@ ObjectModel *LocalPlayerVisuals::build_local_player_avatar() {
 	// The environment wires the TOD-reactive lighting/fog stamp -- without it
 	// the avatar freezes at the noon preview defaults (retail relights every
 	// entity per frame; witness: placement_traits.h ledger).
-	return mission_placer->build_player_animated_model(MissionObjectPlacer::PLAYER_RUNTIME_TYPE_ID, parent,
+	return mission_placer->build_player_animated_model(p_type_id, parent,
 			local_player_character_id());
 }
 
@@ -169,7 +175,7 @@ Ref<PlayerVisualSpec> LocalPlayerVisuals::local_player_visual_spec() {
 	if (mission_placer.is_null()) {
 		return Ref<PlayerVisualSpec>();
 	}
-	return mission_placer->resolve_player_visual_spec(MissionObjectPlacer::PLAYER_RUNTIME_TYPE_ID,
+	return mission_placer->resolve_player_visual_spec(local_player_type_id(),
 			local_player_character_id());
 }
 
@@ -225,13 +231,16 @@ PackedStringArray LocalPlayerVisuals::prewarm_loaded_model_challenge_definitions
 				}
 				challenge_sim->install_seat_specs_for_type_ids(item_db, warmed_order);
 				challenge_sim->resolve_item_traits(item_db);
+				// The rows' class init slot leg, now that their weapon names and models are in
+				// (engine: inmatch::JoinerRole::run_streamed_weapon_slot_class_inits).
+				challenge_sim->run_join_streamed_weapon_slot_class_inits();
 				challenge_sim->resolve_collision_instances(item_db);
 				challenge_sim->occlusion_init_mission();
 			}
 		}
 	}
 	const int player_visual_item_id = mission_placer->resolve_player_visual_item_id(
-			MissionObjectPlacer::PLAYER_RUNTIME_TYPE_ID);
+			local_player_type_id());
 	const String avatar_graphic = mission_placer->graphic_for(player_visual_item_id);
 	if (!avatar_graphic.is_empty()) {
 		mission_placer->object_data_for(avatar_graphic);
@@ -258,8 +267,7 @@ PackedStringArray LocalPlayerVisuals::prewarm_loaded_model_challenge_definitions
 	return resolved;
 }
 
-bool LocalPlayerVisuals::set_local_player_weapon_by_name(const String &p_weapon_name,
-		bool p_preserve_slot_state) {
+bool LocalPlayerVisuals::present_local_player_weapon(const String &p_weapon_name) {
 	if (p_weapon_name.is_empty()) {
 		return false;
 	}
@@ -272,12 +280,20 @@ bool LocalPlayerVisuals::set_local_player_weapon_by_name(const String &p_weapon_
 	}
 	viewmodel_weapon_override_ = p_weapon_name;
 	viewmodel_weapon_cleared_ = false;
-	local_weapon_preserve_slot_state_ = p_preserve_slot_state;
 	// The render-side def record (viewmodel gfx/adm/fov reads + the name guard).
 	local_weapon_ = weapon_db->get_weapon(index);
+	set_first_person_model_available(false);
+	return true;
+}
+
+bool LocalPlayerVisuals::set_local_player_weapon_by_name(const String &p_weapon_name,
+		bool p_preserve_slot_state) {
+	if (!present_local_player_weapon(p_weapon_name)) {
+		return false;
+	}
+	local_weapon_preserve_slot_state_ = p_preserve_slot_state;
 	const Ref<Simulation> mount_sim = sim();
 	if (mount_sim.is_valid()) {
-		set_first_person_model_available(false);
 		// One-step native mount (S6b, ADR 0028): the sim bakes the FSM from
 		// its RETAINED weapon.def row and seeds the clip rings from the rig's
 		// own .adm -- the mount is not hostage to the FP model load, matching
@@ -304,17 +320,18 @@ void LocalPlayerVisuals::apply_local_player_spawn_loadout() {
 			? loadout->engine_input()
 			: opennova::world::SpawnLoadoutInput();
 	const opennova::world::SpawnLoadoutPlan plan =
-			opennova::world::spawn_loadout_plan(input, spawn_sim->has_explicit_spawn_loadout());
-	if (plan.set_player_class) {
-		spawn_sim->set_local_player_class(plan.player_class);
-	}
+			opennova::world::spawn_loadout_plan(input, spawn_sim->has_explicit_spawn_loadout(),
+					spawn_sim->is_host_listening() || spawn_sim->is_joiner());
+	// No class commit: the body's class word is the mission start's Player_InitPlayer's (in a
+	// session the side word its Team names), which nothing after writes from the profile
+	// (the engine's spawn_loadout_plan carries the witness).
 	// Whatever the plan, the viewmodel then follows the inventory the spawn
 	// settled: the FP renderer reads the equipped slot's def and draws nothing
 	// without one (the engine's viewmodel_def_pick carries the witness).
 	switch (plan.action) {
 		case opennova::world::SpawnLoadoutAction::kNone:
 		case opennova::world::SpawnLoadoutAction::kSyncInventory:
-			sync_local_player_weapon_from_inventory(spawn_sim);
+			sync_local_player_weapon_from_inventory(spawn_sim, /*p_mount=*/true);
 			return;
 		case opennova::world::SpawnLoadoutAction::kApplyKit:
 			break;
@@ -323,18 +340,28 @@ void LocalPlayerVisuals::apply_local_player_spawn_loadout() {
 	for (const opennova::world::SpawnLoadoutKitRow &row : plan.kit) {
 		kit.push_back(WeaponKitEntry::make(opennova::to_gd(row.name), row.clips));
 	}
+	// An apply that took nothing (its 0x2F refused, or no kit applied) mounts nothing in the
+	// sim either: retail's ACCEPT mounts only on its offline arm, past its select; its session
+	// arm sends the 0x2F and skips to the tail (the engine's inmatch/loadout_submit.h
+	// armory_accept_in_session carries the witness). The viewmodel follows the inventory.
 	if (!spawn_sim->apply_local_player_loadout(kit, plan.player_class)) {
-		sync_local_player_weapon_from_inventory(spawn_sim);
+		sync_local_player_weapon_from_inventory(spawn_sim, /*p_mount=*/false);
 		return;
 	}
 	if (plan.after_apply == opennova::world::SpawnLoadoutAfterApply::kClearWeapon) {
 		clear_local_player_weapon();
 		return;
 	}
-	sync_local_player_weapon_from_inventory(spawn_sim);
+	// The apply mounts once, in the sim: offline its select's commit mounts the equipped
+	// slot's def and its mount request queues SWITCHRANK on that slot, which plays out; in a
+	// session the host's grant does both later. The viewmodel follows the equipped def with no
+	// second sim mount over the running switch (the engine's player_loadout.cpp
+	// select_current_slot carries the witness).
+	sync_local_player_weapon_from_inventory(spawn_sim, /*p_mount=*/false);
 }
 
-void LocalPlayerVisuals::sync_local_player_weapon_from_inventory(const Ref<Simulation> &p_sim) {
+void LocalPlayerVisuals::sync_local_player_weapon_from_inventory(const Ref<Simulation> &p_sim,
+		bool p_mount) {
 	const Ref<PlayerInventory> inventory = p_sim->get_local_player_inventory();
 	if (inventory.is_null() || !inventory->get_valid()) {
 		return;
@@ -347,7 +374,16 @@ void LocalPlayerVisuals::sync_local_player_weapon_from_inventory(const Ref<Simul
 		clear_local_player_weapon();
 		return;
 	}
-	set_local_player_weapon_by_name(equipped);
+	if (!present_local_player_weapon(equipped) || !p_mount) {
+		return;
+	}
+	// The spawn's mount writes none of the mount's view words, as retail's spawn writes none
+	// (the engine's local_weapon_install_spawn_by_name carries the witness).
+	local_weapon_preserve_slot_state_ = false;
+	if (!p_sim->install_local_player_spawn_weapon_by_name(equipped)) {
+		UtilityFunctions::push_warning(
+				vformat("GameWorld: sim has no retained weapon.def row for '%s'", equipped));
+	}
 }
 
 void LocalPlayerVisuals::clear_local_player_weapon() {
@@ -475,6 +511,69 @@ Node3D *LocalPlayerVisuals::build_local_player_viewmodel() {
 	// resolve is purely presentational, as in retail [orig: the FP model
 	// resolve @0x4ded60 is a render consumer, not a mount].
 	return container;
+}
+
+int LocalPlayerVisuals::build_viewmodel_pipeline_warm(Node3D *p_parent, int p_type_id,
+		int p_character_id) {
+	const Ref<MissionObjectPlacer> mission_placer = placer();
+	if (mission_placer.is_null() || p_parent == nullptr || viewmodel_weapon_cleared_) {
+		return 0;
+	}
+	Ref<PlayerViewmodelDef> def = local_player_viewmodel_def();
+	// Ahead of the mission start's spawn-kit apply no weapon is presented: the staged kit's first
+	// weapon, the one the apply presents (apply_local_player_spawn_loadout's plan), read off the
+	// weapon table with no memo, so the presented def's stays the apply's to make.
+	const Ref<Simulation> warm_sim = sim();
+	if (def.is_null() && spawn_loadout_.is_valid() && warm_sim.is_valid()) {
+		const opennova::world::SpawnLoadoutPlan plan = opennova::world::spawn_loadout_plan(
+				spawn_loadout_->engine_input(), warm_sim->has_explicit_spawn_loadout(),
+				warm_sim->is_host_listening() || warm_sim->is_joiner());
+		const Ref<WeaponDatabase> weapon_db = weapon_database();
+		if (plan.action == opennova::world::SpawnLoadoutAction::kApplyKit && !plan.kit.empty() &&
+				weapon_db.is_valid()) {
+			const int index = weapon_db->find_weapon(opennova::to_gd(plan.kit.front().name));
+			if (index >= 0) def = PlayerViewmodelDef::from_weapon_def(weapon_db->get_weapon(index));
+		}
+	}
+	if (def.is_null()) {
+		return 0;
+	}
+	// The spec and the two builds are build_local_player_viewmodel's, the character the warm's.
+	const Ref<PlayerVisualSpec> character_spec =
+			mission_placer->resolve_player_visual_spec(p_type_id, p_character_id);
+	const Ref<FpViewmodelSpec> spec = Simulation::fp_viewmodel_spec(true, def->get_gfx1(),
+			character_spec.is_valid() ? character_spec->get_arms() : String(), def->get_animadm(),
+			def->get_flags());
+	const String gun_name = spec->get_gun();
+	if (gun_name.is_empty()) {
+		return 0;
+	}
+	const String arms_name = spec->get_arms();
+	const String adm_name = spec->get_adm();
+	ObjectModel *const parts[] = {
+		spec->get_show_arms() && !arms_name.is_empty()
+				? mission_placer->build_model_from_graphic(arms_name, adm_name, p_parent, "anim_wpn_idle", gun_name)
+				: nullptr,
+		mission_placer->build_model_from_graphic(gun_name, adm_name, p_parent, "anim_wpn_idle", gun_name),
+	};
+	int built = 0;
+	for (ObjectModel *part : parts) {
+		if (part == nullptr) {
+			continue;
+		}
+		// The rig's per-part stamps (PlayerViewmodelRig::update_viewmodel).
+		part->set_presentation_layer(ObjectModel::PRESENTATION_LAYER_VIEWMODEL);
+		part->set_viewmodel_pass(true);
+		part->set_viewmodel_rig(true);
+		++built;
+	}
+	return built;
+}
+
+MissionObjectPlacer::LoadProfile LocalPlayerVisuals::take_placer_load_profile() {
+	const Ref<MissionObjectPlacer> mission_placer = placer();
+	return mission_placer.is_valid() ? mission_placer->take_load_profile()
+									 : MissionObjectPlacer::LoadProfile();
 }
 
 TypedArray<ObjectModel> LocalPlayerVisuals::local_player_viewmodel_parts() const {

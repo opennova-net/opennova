@@ -20,6 +20,7 @@
 #include <runtime/wac/wac_layered_load.h>
 #include <runtime/world/ammo_table_build.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/destruction.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/mount_controls.h>
@@ -66,6 +67,7 @@ MissionKernel::~MissionKernel() {
 	world.collision = nullptr;
 	world.pose_provider = nullptr;
 	world.tables.terrain = nullptr;
+	world.tables.weapon_defs = nullptr;
 	world.ai.collision = nullptr;
 	world.ai.terrain = nullptr;
 	world.ai.root_motion = nullptr;
@@ -177,6 +179,12 @@ void MissionKernel::bind_spawned_body(w::EntityHandle handle) {
 				[](int32_t) -> uint8_t { return 0; }, &assets(), handle);
 	mission::resolve_ai_weapons(world, *items, handle, &assets());
 	ensure_collision_instance(world, handle);
+	// The model init's facial slot, at the spawn: a person row takes its append-only slot
+	// there, not at the next tick's pass (a round init's body, the local player's among them,
+	// has its face from its birth; D-NET-NEW-L7-39) [orig: Entity_SpawnFromAnimSlotProperty
+	//  @0x43C390 - Entity_InitFromModel (the call @0x43C492) -> FaceAnim_AllocEntitySlot
+	//  (the call @0x40E22E)].
+	if (w::Entity *body = world.registry.get(handle)) world.facials.initialize_entity(world, *body);
 	// The host's spawn builds the slices after its model init, so the body's
 	// first slice reads the bound radius the model stamped.
 	// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - EntityDef_LoadModelsAndCallbacks
@@ -186,6 +194,18 @@ void MissionKernel::bind_spawned_body(w::EntityHandle handle) {
 	// @0x42E730, which never calls the builder; world::spawn_player already
 	// rebuilt there, so this rebuild adds no edge, it rereads the radius.
 	if (world.collision != nullptr) world.collision->refresh_after_registry_change(world);
+	// The body's animation map registers at its spawn, so a player the server tick's spawn
+	// pump adds is grounded before its first update [orig: Entity_SpawnFromAnimSlotProperty
+	// @0x43C390 - the AnimMap_RegisterEntity @0x40BB60 call @0x43C4DF].
+	resolve_new_infantry_adm_ids();
+	// Then the row's class init: the authority's spawn runs it after the registration (a plyr
+	// row's requests and warm-up, an org row's organic init); a joiner's own body is its
+	// 0x0C's, whose class init ran
+	// ahead of any registration [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the class
+	// init called @0x43C4FE; NapiNPClientMsg_0x00C @0x42E730 - @0x42E84D].
+	if (world.rules.logic_authority)
+		if (w::Entity *body = world.registry.get(handle))
+			w::player_body_class_init(world, *body);
 }
 
 int MissionKernel::resolve_collision_instances() {
@@ -232,6 +252,11 @@ void MissionKernel::retire_replica_entity(const w::EntityLifetime &lifetime) {
 }
 
 void MissionKernel::occlusion_init_mission() {
+	// The model init's class inits come first: the gnrc / gnrl / gnl2 rows cache the entity under
+	// them as their ground link, both roles, over the attached models and the placements.
+	// [orig: Game_StartMission - Entity_InitAllFromModels @0x52567F (no role gate) ->
+	//  Entity_CacheGroundEntityBelow @0x407D60 per row]
+	w::run_ground_cache_class_inits(world);
 	collision.build_initial_tables(world);
 	// The mission-start blink stamp runs ahead of the portal init.
 	// [orig: Game_StartMission — Entity_BuildProximityListsForPools12
@@ -246,7 +271,7 @@ int MissionKernel::adm_id_for_runtime_type(uint16_t type_id) {
 	const DefItemsFile *item_rows = items_table();
 	if (!infantry_adm_retained_ || item_rows == nullptr) return -2;
 	const assets::AssetStore *adm_source = adm_assets_ != nullptr ? adm_assets_ : &assets();
-	const int visual = mission::visual_item_id_for_runtime_type(type_id, *item_rows);
+	const int visual = mission::visual_item_id_for_runtime_type(type_id);
 	const DefItemDef *def = mission::find_item_def(*item_rows, visual);
 	// An item naming no table registers none, so its body holds no animation
 	// channel: every pool-0 registrar skips the .adm load and the registration
@@ -396,9 +421,12 @@ bool MissionKernel::load_mission_into_world(const KernelBootOptions &options) {
 void MissionKernel::register_mission_systems() {
 	events.load(mission.events, mission.triggers, mission.actions);
 	world.tables.mission_attrib_flags = static_cast<uint32_t>(mission.header.attrib_flags);
-	// The net half stands its session up here — between the world wiring and
-	// the system registration, exactly where the SP listen host's bring-up
-	// sits inside the load (inmatch::HostRole::bring_up_singleplayer)
+	// g_BmsClimate, which the player spawns read for their camouflage row
+	// (D-NET-348) [orig: Entity_SpawnFromAnimSlotProperty @0x43C391].
+	world.tables.bms_climate = static_cast<int32_t>(mission.header.climate);
+	// The net half binds the mission's World under its session here — between the
+	// world wiring and the system registration; a host boot created the session
+	// ahead of the load (inmatch::HostRole::create_session)
 	// [orig: SinglePlayer_StartMission @0x561af0].
 	if (bringup_net_session_) bringup_net_session_();
 	// The mission's script systems register in the faithful within-tick
@@ -426,6 +454,7 @@ void MissionKernel::capture_baseline() {
 	wac_baseline = wac.capture_runtime_state();
 	have_baseline = true;
 	have_wac_baseline = true;
+	if (baseline_captured) baseline_captured();
 }
 
 int MissionKernel::spawn_local_player_at_start(uint32_t game_type) {
@@ -435,10 +464,18 @@ int MissionKernel::spawn_local_player_at_start(uint32_t game_type) {
 	w::PlayerSpawn spawn;
 	if (sel.found) {
 		spawn.position = sel.position;
-		spawn.yaw = sel.yaw;
-		spawn.heading_bam = sel.heading_bam;
-		spawn.pitch = sel.pitch;
-		spawn.roll = sel.roll;
+		spawn.heading = sel.heading_bam;
+		spawn.pitch_bam = sel.pitch_bam;
+		spawn.roll_bam = sel.roll_bam;
+	} else {
+		// No start marker: the placement stores nothing, so the body keeps the
+		// zeroed entity's words, position 0 and heading word 0, as the session's
+		// add does (D-NET-NEW-L1-19). [orig: Server_InitAllPlayerEntitiesForRound
+		//  @0x516AA0 (the call @0x516B67) -> Entity_SpawnFromAnimSlotProperty - the
+		//  memset @0x43C3FE, the placement @0x43C459; Entity_FindBestSpawnPoint
+		//  @0x50CCC0 - no marker, no store (@0x50CD20)]
+		spawn.position = {0.0f, 0.0f, 0.0f};
+		spawn.heading = 0;
 	}
 	spawn.team = 1;
 	if (!spawn_local_player(spawn)) return -1;
@@ -463,9 +500,13 @@ bool MissionKernel::spawn_local_player(const w::PlayerSpawn &spawn) {
 		world.collision->refresh_after_registry_change(world);
 	}
 	resolve_new_infantry_adm_ids();
+	// The row's class init after the registration, as bind_spawned_body's [orig:
+	// Entity_SpawnFromAnimSlotProperty @0x43C390 - @0x43C4DF, @0x43C4FE].
+	if (world.rules.logic_authority)
+		if (w::Entity *body = world.registry.get(h)) w::player_body_class_init(world, *body);
 	// The look yaw starts at the spawn's heading word [orig:
 	// Entity_FindBestSpawnPoint @0x50CF4D].
-	local.reset_local_player_input(w::player_spawn_heading(spawn));
+	local.reset_local_player_input(spawn.heading);
 	w::local_player_view_reset(&world, local.weapon, local.view, local.view_tracker);
 	return true;
 }
@@ -531,21 +572,33 @@ bool MissionKernel::load_weapon_table(const BootFileSource &files,
 	if (weapon_defs_ok) def_free_weapons(&weapon_defs);
 	weapon_defs = file;
 	weapon_defs_ok = true;
+	world.tables.weapon_defs = &weapon_defs;
 	mission::stamp_seat_spec_turret_limits(world, seat_specs);
-	// The authoritative side's own player spawned before this feed: re-stamp
-	// its equipped default now that WPN_M4AUTO resolves by name
-	// [orig: PlayerClass_InitEntity @0x4B1116] (D-NET-143). A fresh session's
-	// own player only: a map change's kept slots spawn after the PreMission
-	// pass and take it at the spawn (D-NET-354).
-	const int m4 = world.tables.weapons.index_of("WPN_M4AUTO");
-	if (m4 >= 0) {
+	// The class inits' slot leg: every ewep row and every EWeap CHel / cpln row binds and
+	// seeds its MountSlot from the armory, both roles. Retail's mission start runs it with
+	// the armory already loaded; ours promotes ahead of the armory (the boot's step order, an
+	// embedder's later feed), so it runs as the armory lands, before anything mounts or ticks.
+	// [orig: Game_StartMission - Entity_InitAllFromModels @0x52567F (no role gate) ->
+	//  Entity_InitBoneReferences @0x441470 / Entity_InitHelicopterAIFromDef @0x4683C0]
+	world.vehicles.run_weapon_slot_class_inits();
+	// The bare kernel's own player spawned before this feed: re-stamp
+	// its equipped default now that the process's loadout name list's first name
+	// resolves by name (w::player_spawn_equipped_default)
+	// [orig: PlayerClass_InitEntity @0x4B1100..0x4B1116] (D-NET-143). A session's
+	// bodies spawn at its round init, after the PreMission pass, and take it at
+	// the spawn (D-NET-354, D-NET-NEW-L7-39).
+	const uint8_t equipped_default = w::player_spawn_equipped_default(world);
+	if (equipped_default != w::kAdmSlotNone) {
 		std::vector<w::EntityHandle> handles;
 		world.registry.for_each([&](const w::Entity &e) {
-			if (e.item_id == w::kPlayerInfantryTypeId && e.equipped_adm_index == w::kAdmSlotNone)
+			// A player body by its Player bit; one whose row runs no player class init
+			// holds the spawn's 0, which the none test passes over (D-NET-348).
+			if (((e.flags | e.engine_flags) & w::kEntityFlagPlayer) != 0 &&
+					e.equipped_adm_index == w::kAdmSlotNone)
 				handles.push_back(e.handle);
 		});
 		for (const w::EntityHandle h : handles)
-			if (w::Entity *e = world.registry.get(h)) e->equipped_adm_index = static_cast<uint8_t>(m4);
+			if (w::Entity *e = world.registry.get(h)) e->equipped_adm_index = equipped_default;
 	}
 	// The mission's stashed local.loadout/availability chunks promote NOW, through
 	// the witnessed SP-vs-net gate [orig: Mission_LoadBMSFile @ 0x40F4E0 — gate
@@ -568,7 +621,6 @@ bool MissionKernel::load_ammo_table(const BootFileSource &files,
 	// The whiz radius rides the loaded sound sets (the boot mounts them first).
 	w::resolve_ammo_whiz_radii(world.tables.ammo, world.tables.sound_sets);
 	w::resolve_weapon_round_types(world.tables.weapons, world.tables.ammo);
-	w::local_loadout_sync_damage_classes(world, local.loadout);
 	ammo_ok = true;
 	return true;
 }
@@ -586,6 +638,7 @@ bool MissionKernel::load_powerup_table(const BootFileSource &files,
 }
 
 bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
+	premission_pending = false;
 	mission_start_pending = false;
 	have_baseline = false;
 	have_wac_baseline = false;
@@ -661,7 +714,9 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		std::vector<uint8_t> text;
 		text_source = resolve_mission_text(files_, mission_basename, text);
 		text_size = text.size();
-		// g_TextMission, the table the dialog lines' subtitles read.
+		// g_TextMission, the table the dialog lines' subtitles read, and the
+		// override table their lookup searches first (D-NET-675).
+		world.tables.text_override = text_override_table.get();
 		world.tables.mission_text = nullptr;
 		mission_text_table = rtxt::File{};
 		std::string text_error;
@@ -757,10 +812,16 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 				&world, &script_effect_catalog, &script_sound_catalog, options.music_globals);
 		wac_loaded = status == wac::WacLayeredLoadStatus::kLoaded;
 	}
-	// The host's own player as an authoritative pool-0 entity (ADR 0012 /
+	// The bare kernel's own player as an authoritative pool-0 entity (ADR 0012 /
 	// net-re §5.2b) — after load (the spawn needs the AI system wired). A
-	// joiner's L spawns on the name-match instead.
-	if (options.playable && !options.joiner) {
+	// joiner's L spawns on the name-match instead, and a session host's at its
+	// round init past the PreMission pass (round_init, installed by the role's
+	// bring-up above): retail's session create spawns no local body, and its
+	// mission start's round init spawns every active slot's
+	// (D-NET-NEW-L7-39) [orig: Server_PlayerAdd's own arm @0x51CC33..0x51CC5D;
+	//  Game_StartMission @0x524360 - the EventTrigger_UpdateAllWithFlag2 call
+	//  @0x525B86, the Server_InitAllPlayerEntitiesForRound call @0x525BAF].
+	if (options.playable && !options.joiner && !round_init) {
 		step("spawn_local_player");
 		const int status = spawn_local_player_at_start(options.game_type);
 		if (status < 0)
@@ -770,7 +831,8 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 					"mission kernel: no player-start marker - spawned at the origin");
 	}
 	// Per-entity grounding: each soldier's OWN model .adm (D-INF-6). After
-	// the NPC promote AND the player spawn so both are covered.
+	// the NPC promote AND the bare kernel's player spawn so both are covered (a
+	// round init's bodies register at their spawn: bind_spawned_body).
 	if (has_files && has_item_db) {
 		step("infantry_adm");
 		rearm_infantry_adm();
@@ -841,11 +903,24 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	world.registry.for_each_in_pool(0, [&](const w::Entity &row) {
 		w::initialize_organic_ai(world, *world.registry.get(row.handle));
 	});
+	premission_authority = !options.joiner;
+	premission_pending = true;
+	// An embedder with a render device runs the pass after its mission inits
+	// (KernelBootOptions::defer_premission); the mission start follows it.
+	if (options.defer_premission) return true;
+	(void)begin_mission_start();
+	if (!options.defer_mission_start) complete_mission_start();
+	return true;
+}
+
+bool MissionKernel::begin_mission_start() {
+	if (!premission_pending) return false;
+	premission_pending = false;
 	// Only authority runs the PreMission whole-list pass. A joiner can
 	// carry a full BMS in a tool session without replaying its actions.
-	// [orig: Game_StartMission @0x525b86, g_NapiNPCtx.is_authority gate]
-	if (!options.joiner) {
-		step("premission");
+	// [orig: Game_StartMission @0x525b86, g_NapiNPCtx.is_authority gate @0x525B78]
+	if (premission_authority) {
+		boot_trace.emplace_back("premission");
 		world.run_logic_tick(/*is_authority=*/true, w::TickPhase::PreMission);
 		// Then the SP score block zeroes whole, so a PreMission SubGoalWon
 		// keeps its mask bit but not its tally; the WAC init and the census
@@ -860,16 +935,21 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// on every client alike [orig: Game_StartMission `mov tick, ebx` (ebx = 0)
 	// @0x525B9F, past the is_authority-gated pre pass @0x525B78..0x525B90;
 	// Game_ProcessMainFrame `add tick, ebx` @0x5265B4 ahead of the
-	// Entity_UpdateAllEntities call @0x52674B]. World::run_logic_tick advances its
-	// clock after the tick, so the same first frame starts from 1 here; a
-	// joiner, which runs no pre pass, otherwise ran every even/odd cadence one
-	// tick out of phase.
-	world.logic_tick = 1;
+	// Entity_UpdateAllEntities call @0x52674B]. The rest of the start runs at
+	// tick 0, the pool-1 settle's mover call included (complete_mission_start
+	// stores the first frame's 1 at its end); a joiner, which runs no pre pass,
+	// otherwise ran every even/odd cadence one tick out of phase.
+	world.logic_tick = 0;
 	// The HUD's frame counters restart with it [orig: Game_StartMission
 	// @0x525BAA -> Game_ResetSessionHudState @0x434BD0].
 	world.hud_frames = w::HudFrameCounters{};
 	mission_start_pending = true;
-	if (!options.defer_mission_start) complete_mission_start();
+	// Then the authority's round init and Player_InitPlayer (a session host's role):
+	// the first local body of the mission is born here, hidden, so the PreMission pass
+	// above met none (D-NET-NEW-L7-39) [orig: Game_StartMission - the
+	// Server_InitAllPlayerEntitiesForRound call @0x525BAF, the Player_InitPlayer call
+	// @0x525BBC, past Game_ResetSessionHudState @0x525BAA].
+	if (round_init) round_init();
 	return true;
 }
 
@@ -887,6 +967,15 @@ void MissionKernel::carry_across_load_from(MissionKernel &previous) {
 	// [orig: g_EntityUpdateCounter, whose one writer is
 	// Entity_UpdateAllEntities @0x4C2639]
 	world.entity_update_counter = previous.world.entity_update_counter;
+	// The round pool's cursor and id counter: the next mission's first round takes
+	// the slot after the last one's and mints the next id (D-NET-NEW-L7-18)
+	// [orig: g_RoundPoolCursor @0xB7E1A0 / g_RoundIdCounter @0xB7E1A4, written only by
+	//  CEntityManager_AllocateSlot @0x4EAAD0]
+	world.round_sim.carry_process_words_from(previous.world.round_sim);
+	// [orig: g_ServerNumPlayers @0xC8FC54, a process global whose one writer is
+	//  Server_CountActivePlayers @0x4FD900 (the store @0x4FD94B), each periodic second:
+	//  the next mission reads the last count until its first recount]
+	world.server_num_players = previous.world.server_num_players;
 	// [orig: dword_26970F4, whose only live writer is the cine render pass
 	//  Cine_RenderOverlays @0x570C66]
 	world.epilog.frame_drawn = previous.world.epilog.frame_drawn;
@@ -965,16 +1054,38 @@ bool MissionKernel::complete_mission_start() {
 	// [orig: Game_StartMission — Score_CountMissionSubgoalsAndUnits @0x525D5D,
 	//  then Cine_ReleaseAll @0x525DA8 and the intro arm @0x525DAF..0x525DD6].
 	world.epilog.mission_start(!restart_boot_, world.rules.mp_session, world);
-	if (world.rules.projectile_authority)
+	if (world.rules.projectile_authority) {
+		// The authority rebuilds the pool-0/1 tables and every slice once more, after the
+		// WAC initial run, so the settle's ground rays and the first update walk slices of
+		// the positions the start left [orig: Game_StartMission @0x524360 - the
+		// is_authority arm @0x525E58, Entity_BuildProximityLists_Pool01 @0x525E63,
+		// Entity_BuildProximityListsFromPools @0x525E68, ahead of the pool-1 settle
+		// @0x525F68..0x526095].
+		if (world.collision != nullptr) world.collision->rebuild_pool01_and_slices(world);
+		// The settle's mover call runs at the start's zeroed tick: its staggered legs
+		// (the aircraft and boat ground refresh's tick + 36 * DcbId, the regen cadence)
+		// and its stamps read 0 (D-NET-515) [orig: Game_StartMission - the zero @0x525B9F,
+		// the settle @0x525F80..0x526095 (`call ecx` @0x526010), no tick store between;
+		// Entity_UpdateAircraftPhysics @0x490316 (the read) / @0x4903A8 (`test cl, 7`)].
 		world.vehicles.initialize_mission_vehicles();
+	}
 	// The Attack & Defend side latch (world/local_player.h), after the round
 	// init and Player_InitPlayer (a map change's host player exists only from
 	// there), the initial WAC run and the weather settle. A joiner has no L
 	// here; it latches again at its spawn edge (joiner_role.cpp).
 	// [orig: Game_StartMission @0x524360 -- the Game_LatchAttackDefendRole call @0x5260C1]
 	local.latch_attack_defend_role(mission_game_type_);
+	// The first frame's add, ahead of its entity update: World::run_logic_tick steps its
+	// clock after the tick, so the first frame starts from 1, and the baseline holds it
+	// [orig: Game_ProcessMainFrame `add tick, ebx` @0x5265B4 ahead of the
+	//  Entity_UpdateAllEntities call @0x52674B].
+	world.logic_tick = 1;
 	capture_baseline();
 	mission_start_pending = false;
+	// The start ends with a session peer's C2S 0x0B, the playing host's own
+	// client's included (D-NET-NEW-L4-5) [orig: Game_StartMission
+	// @0x526189..0x526255].
+	if (net_mission_start_end) net_mission_start_end();
 	return true;
 }
 
@@ -987,10 +1098,10 @@ struct PrecipitationFloorContext {
 int32_t precipitation_terrain_height(void *ctx, int32_t x, int32_t y) {
 	MissionKernel *kernel = static_cast<PrecipitationFloorContext *>(ctx)->kernel;
 	if (!kernel->has_terrain()) return 0;
-	// [orig: Terrain_SampleHeightBilinear @ 0x6067b0] over the mission frame.
-	const float h = kernel->ground_height(static_cast<float>(x) / 65536.0f,
-			static_cast<float>(y) / 65536.0f);
-	return static_cast<int32_t>(h * 65536.0f);
+	// The sampler takes the slot's X / Y words and returns its height word
+	// (D-NET-507) [orig: WeatherParticle_UpdatePositions @0x5DEC40 (the
+	// Terrain_SampleHeightBilinear call @0x5DED75, the store @0x5DED85)].
+	return terrain::height_field_height_bilinear_fixed(kernel->terrain_store.height_field(), x, y);
 }
 
 bool precipitation_entity_hit(void *ctx, int32_t x, int32_t y, int32_t z_top,
@@ -1038,13 +1149,32 @@ void MissionKernel::update_precipitation(int32_t cam_x, int32_t cam_y, int32_t c
 //  Mission_ResetBmsState (the mission reset), whose
 //  EventSystem_FreeAll call @0x40DBEF zeroes the count @0x453266]
 void MissionKernel::run_post_mission_pass(bool is_authority) {
+	destroy_mission_pools();
+	run_post_mission_events(is_authority);
+}
+
+// Each row goes in pool and slot order. A person's destroy drops what it carries before its
+// fields are wiped, so a carried flag (a pool-1 item, still live while pool 0 is walked) lands
+// at its carrier's pose with its 0x2F state raised for the session host's route
+// (D-NET-NEW-L1-25).
+// [orig: Entity_Destroy @0x43E810 - the def+0x5C == 3 test @0x43E8B1, Entity_DropCarriedObject
+//  called @0x43E8B8; Entity_DropCarriedObject @0x439DF0]
+void MissionKernel::destroy_mission_pools() {
 	for (int pool = 0; pool <= 2; ++pool) {
 		std::vector<w::EntityHandle> rows;
 		world.registry.for_each_in_pool(pool, [&](const w::Entity &row) {
 			rows.push_back(row.handle);
 		});
-		for (const w::EntityHandle row : rows) world.registry.despawn(row);
+		for (const w::EntityHandle row : rows) {
+			if (const w::Entity *e = world.registry.get(row);
+					e != nullptr && e->kind == w::EntityKind::Organic)
+				world.match.drop_carried_object(world, row);
+			world.registry.despawn(row);
+		}
 	}
+}
+
+void MissionKernel::run_post_mission_events(bool is_authority) {
 	if (is_authority) events.run_post_mission_pass(world);
 }
 
@@ -1061,12 +1191,14 @@ bool MissionKernel::restore_baseline() {
 	local.weapon.reload_pressed = false;
 	local.weapon.usegun_switch = w::LocalUseGunSwitch::kNone;
 	local.weapon.usegun_slot_active = false;
+	local.weapon.usegun_on_foot = false;
 	local.weapon.usegun_mount = w::EntityHandle{};
 	local.weapon.usegun_weapon_adm = 0xFF;
 	local.weapon.usegun_pending_mount = w::EntityHandle{};
 	local.weapon.usegun_pending_weapon_adm = 0xFF;
 	local.weapon.usegun_saved_adm = 0xFF;
 	local.weapon.usegun_switch_action = -1;
+	local.weapon.usegun_pending_on_foot = false;
 	local.weapon.switch_deferred_action = -1;
 	world.restore(baseline); // rewinds registry/vars/env/clock + re-inits systems (incl.
 	                         // AI; WacSystem::on_load also resets its 62-tick accumulator)
@@ -1145,22 +1277,14 @@ bool MissionKernel::restore_baseline() {
 
 bool MissionKernel::install_weapon(const std::string &weapon_name, bool preserve_slot_state,
 		bool allow_same_weapon_rebake) {
-	if (!weapon_defs_ok || weapon_name.empty()) return false;
-	// The entry the weapon table holds for the name: a name's last block
-	// (def_weapon_index_by_name), the one whose descriptors the table baked.
-	const int index = def_weapon_index_by_name(weapon_defs.entries, weapon_defs.count, weapon_name.c_str());
-	if (index < 0) return false;
-	const DefWeaponDef *row = &weapon_defs.entries[index];
-	// The mount runs the descriptors the weapon table baked as it loaded, and
-	// its channel plays from the table's shared ANIMADM rings. A same-weapon
-	// re-bake (the dev tools' live ACTION edits) bakes the retained row as
-	// edited instead. [orig: Player_MountWeaponSlot @ 0x4dfa40; Anim_InitActions
-	// @ 0x541fa0 at the def's END]
-	w::WeaponInstallData data = w::weapon_install_data_from_def(*row);
-	data.table_baked = !allow_same_weapon_rebake;
-	w::local_weapon_install(world, local.weapon, data, preserve_slot_state,
+	return w::local_weapon_install_by_name(world, local.weapon, weapon_name, preserve_slot_state,
 			allow_same_weapon_rebake, local.inventory_valid ? &local.inventory : nullptr, local.view);
-	return true;
+}
+
+bool MissionKernel::install_spawn_weapon(const std::string &weapon_name) {
+	// [orig: Player_InitPlayer @0x4E15F0; world::local_weapon_install_spawn_by_name carries it]
+	return w::local_weapon_install_spawn_by_name(world, local.weapon, weapon_name,
+			local.inventory_valid ? &local.inventory : nullptr, local.view);
 }
 
 void MissionKernel::keep_weapon_action_edit(int action_id) {
@@ -1203,15 +1327,40 @@ std::vector<w::CollisionWorld::DebugHitboxEntity> MissionKernel::hitboxes(
 
 // --- world::IPoseProvider: seats ---------------------------------------------
 
+// The carrier's model, entity+0x30: what the load of its def's graphic returned. The seat
+// extraction names the graphic of every type with seat or attachment metadata; any other
+// type's (a person's ewep-row ground, say) comes off its def row.
+// [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 - the ThreediGp_LoadModel store @0x439FDC]
+assets::Model MissionKernel::carrier_model(const w::Entity &carrier) {
+	const auto graphic = mounted_graphics.find(carrier.item_id);
+	if (graphic != mounted_graphics.end()) return assets().model(graphic->second);
+	if (items_table() == nullptr) return {};
+	const DefItemDef *def = mission::find_item_def(*items_table(),
+			mission::visual_item_id_for_runtime_type(carrier.item_id));
+	if (def == nullptr || def->graphic[0] == '\0') return {};
+	return assets().model(std::string(def->graphic));
+}
+
+// The record's subobject word off the carrier's model. [orig: Entity_UpdateTransformAndTurret
+//  @0x440CA0 - the record @0x440F3A..0x440F40, `cmp dword ptr [ebx+18h], 0` @0x440F50]
+bool MissionKernel::userpoint_subobject(w::World &p_world, const w::Entity &carrier,
+		int userpoint_index, int32_t &out) {
+	if (&p_world != &world || userpoint_index <= 0) return false;
+	const assets::Model model = carrier_model(carrier);
+	if (!model || model->user_points == nullptr ||
+			static_cast<size_t>(userpoint_index) > model->user_point_count)
+		return false;
+	out = model->user_points[userpoint_index - 1].subobject_index;
+	return true;
+}
+
 bool MissionKernel::resolve_mounted_pose(w::World &p_world, const w::Entity &carrier,
 		const w::Seat &seat, w::MountedPose &out) {
 	// The kernel IS the world's IPoseProvider: the one mounted-pose
 	// resolver every embedder's world reaches.
 	if (&p_world != &world || seat.type != w::SeatType::Gunner || seat.bone_index == 0) return false;
 	++mounted_queries;
-	assets::Model model_asset;
-	const auto graphic = mounted_graphics.find(carrier.item_id);
-	if (graphic != mounted_graphics.end()) model_asset = assets().model(graphic->second);
+	const assets::Model model_asset = carrier_model(carrier);
 	if (!model_asset) {
 		++mounted_declines;
 		return false;
@@ -1259,6 +1408,15 @@ bool MissionKernel::resolve_mounted_pose(w::World &p_world, const w::Entity &car
 	std::copy(std::begin(ctrl_bus), std::end(ctrl_bus), controls.begin());
 	const uint32_t time_ms = world::mounted_pose_time_ms(world.logic_tick,
 			panm_time_override_ms);
+	// A UseGun rider's frame is the carrier model's bone pass over the carrier's own
+	// matrix, so the per-model part cache below does not serve it.
+	// [orig: Entity_AttachToBoneAndUpdateTransform @0x5463D0 (@0x5464CB..0x54656F)]
+	if (!seat.attachment_frame) {
+		const bool usegun = world::resolve_usegun_seat_pose(model, carrier, seat, ctrl_bus,
+				time_ms, out);
+		if (!usegun) ++mounted_declines;
+		return usegun;
+	}
 	if (mounted_cache_tick_ != world.logic_tick) {
 		mounted_live_cache_.clear();
 		mounted_cache_tick_ = world.logic_tick;
@@ -1404,7 +1562,7 @@ bool MissionKernel::build_wire_person_section_matrices(w::World &p_world, uint16
 		const DefItemsFile *items = items_table();
 		const DefItemDef *def = items != nullptr
 				? mission::find_item_def(*items,
-						  mission::visual_item_id_for_runtime_type(type_id, *items))
+						  mission::visual_item_id_for_runtime_type(type_id))
 				: nullptr;
 		const assets::AssetStore &models = assets();
 		if (def != nullptr && def->anim_def[0] != '\0' && def->graphic[0] != '\0' &&
@@ -1431,7 +1589,6 @@ bool MissionKernel::build_wire_person_section_matrices(w::World &p_world, uint16
 bool MissionKernel::build_section_matrices(w::World &p_world, w::EntityHandle entity,
 		int32_t model_id, const w::CollisionMatrix &entity_world, const w::CollisionModel &model,
 		std::vector<w::CollisionMatrix> &out) {
-	collision_pose.weapon_active = local.weapon.active;
 	collision_pose.panm_time_override_ms = panm_time_override_ms;
 	++collision_queries;
 	if (collision_pose.build_section_matrices(p_world, entity, model_id, entity_world, model, out))

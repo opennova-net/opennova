@@ -4,7 +4,7 @@
 // and its dirty word and re-reads the file through the game.cfg walk
 // [orig: Server_InitNewRoundState @0x51CB25..0x51CB3B -> File_ParseASCIIFileWithCallback
 // @0x53D980 with BanList_ParseIPEntry @0x4FD520]. The host's in-game ban appends the slot's
-// connection address and name and sets the dirty word [orig: Server_NotifyPlayerKicked
+// connection address and name and sets the dirty word [orig: Server_BanPlayerSlot
 // @0x5082D0, a misnomer]; the shutdown rewrites the file only when the list and the dirty
 // word are both nonzero [orig: Game_ShutdownSubsystems @0x4A539D -> j_BanList_SaveToFile
 // @0x508E20 -> BanList_SaveToFile @0x4FDD70]. The consumers are the protocol's address check

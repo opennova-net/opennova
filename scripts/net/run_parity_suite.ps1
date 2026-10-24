@@ -10,7 +10,9 @@
 #       -GodotLauncher C:\Godot\Godot_v4.6.1-stable_win64_console.exe `
 #       [-Prefix parity-20261011] [-Cases 01tr-coop,ash-i5a-aas-deploy] `
 #       [-Topologies RR,RR-aa,RO,OR,OO] `
-#       [-Resolution 2560x1440] [-Evidence summary|external] [-Plan]
+#       [-Resolution 2560x1440] [-Evidence summary|external] `
+#       [-ReferencePrefix parity-20261019-base [-ReferenceRoot <dir>]] `
+#       [-JoinerDial browse|direct] [-JoinerVerbose] [-AllowDirtyRepo] [-Plan]
 #
 # Run it from a real console: the cells' Godot console wrapper stalls without
 # one. -Resolution must match the retail copies' own video setting (the runner
@@ -28,10 +30,28 @@
 # every successful cell the case has, run now or earlier. -Plan prints the
 # cells and runs nothing.
 #
-# Prints PARITY_SUITE_CELL / PARITY_SUITE_CASE lines, then
+# -ReferencePrefix judges the subject cells against an earlier suite's RR and
+# RR-aa cells (<ReferencePrefix>-<case>-rr, -rr-aa under -ReferenceRoot, by
+# default .scratch\runs; the evidence copy retail-parity\runs-<prefix> once a
+# suite's runs moved there), which this suite then does not run. A retail cell
+# is evidence for its retail binary, hook build, mission, case inputs and
+# rendered hook configs, so a reference is taken only while its summaries
+# match the current Jointops.exe, onhook-mcp.exe and onHook proxy hashes, the
+# case's mission hash and inputs, and its RR and RR-aa configs match each
+# other; a subject cell's retail config must match the reference's of the same
+# role, or the case is not judged.
+#
+# The checkout must be clean (each cell refuses uncommitted tracked changes
+# unless -AllowDirtyRepo, a diagnostic); the OpenNova joiner browses unless
+# -JoinerDial direct, a diagnostic (run_parity_topology.ps1).
+#
+# Prints PARITY_SUITE_PREFIX and PARITY_SUITE_DLL (the GDExtension hashes),
+# PARITY_SUITE_CELL / PARITY_SUITE_CASE lines, then
 # PARITY_SUITE_STATUS=PASS|FAIL and PARITY_SUITE_REPORT=<suite-summary.json>.
 # PASS needs every selected cell to succeed and every selected case judged PASS
-# with all three subject topologies present. Exit 0 PASS, 1 FAIL.
+# with all three subject topologies present; a scenario case also needs every
+# cell to have played its scenario (compare_scenario.py's expect sequence, else
+# SCENARIO_FAIL). Exit 0 PASS, 1 FAIL.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -73,6 +93,29 @@ param(
     [ValidateRange(1, 65535)]
     [int] $JoinerMcpPort = 8976,
 
+    [ValidatePattern('^(?:|[A-Za-z0-9](?:[A-Za-z0-9._-]{0,30}[A-Za-z0-9])?)$')]
+    [string] $ReferencePrefix = "",
+
+    [string] $ReferenceRoot = "",
+
+    [ValidateSet("browse", "direct")]
+    [string] $JoinerDial = "browse",
+
+    # L2-s22's load probe: every RO / OO cell runs our joiner under --verbose
+    # (run_parity_topology.ps1 -JoinerVerbose), for its LoadTimeline: lines.
+    [switch] $JoinerVerbose,
+
+    [switch] $AllowDirtyRepo,
+
+    # A diagnostic: game probes for an OpenNova scenario actor, passed to every
+    # cell (run_parity_topology.ps1 -ActorScenarioProbes; a retail actor
+    # ignores it).
+    [string] $ActorScenarioProbes = "",
+
+    # The machine-load policy's build lock directory: each cell records its
+    # owner in machine_load (run_parity_topology.ps1 -BuildLockPath).
+    [string] $BuildLockPath = "",
+
     [switch] $Plan
 )
 
@@ -98,6 +141,54 @@ function Split-ListArgument {
         Where-Object { $_ })
 }
 
+# A case's optional field, or $Default when the case omits it (StrictMode
+# refuses a missing property). An array comes back unrolled: wrap the call in
+# @() to keep a one-entry or empty list a list.
+function Get-CaseField {
+    param($Case, [string] $Name, $Default)
+    if ($Case.PSObject.Properties.Name -contains $Name) { return $Case.$Name }
+    return $Default
+}
+
+# The extension cases' optional inputs (scripts\net\parity-extension-cases.json):
+# rotation (E2: the host's missions after `mission`), time_limit_minutes (E2:
+# the cell's round limit) and topologies (the cells the case has; default all
+# five, RR and RR-aa always among them).
+function Get-CaseRotation { param($Case) return @(Get-CaseField $Case "rotation" @()) }
+# late_joiner (E3): a second joiner of the first joiner's kind joins in the
+# steady window (retail only so far: RR, RR-aa, OR).
+function Get-CaseLateJoiner { param($Case) return [bool] (Get-CaseField $Case "late_joiner" $false) }
+function Get-CaseTimeLimit { param($Case) return [int] (Get-CaseField $Case "time_limit_minutes" 0) }
+# permanent_death (E5: the SERVER game.cfg's mp_permanent_death = 1 for the
+# cell) and host_player_class (E5: the retail host's class, 5..9, written into
+# the SERVER copy's weapon.sav record; 0 keeps the copy's).
+function Get-CasePermanentDeath { param($Case) return [bool] (Get-CaseField $Case "permanent_death" $false) }
+function Get-CaseHostPlayerClass { param($Case) return [int] (Get-CaseField $Case "host_player_class" 0) }
+# host_side_password_a / _b (D-NET-167's acceptance): the host's side
+# passwords, the SERVER game.cfg's mphostsidepassworda / b for the cell
+# (run_parity_topology.ps1 -HostSidePasswordA / B; "" keeps the copy's).
+function Get-CaseHostSidePassword { param($Case, [string] $Side) return [string] (Get-CaseField $Case "host_side_password_$Side" "") }
+# joiner_side_password: the side password the joiner enters on its join
+# screen, retail's or ours (run_parity_topology.ps1 -JoinerSidePassword).
+function Get-CaseJoinerSidePassword { param($Case) return [string] (Get-CaseField $Case "joiner_side_password" "") }
+# deploy_zones: the mission offers deploy zones, so a joiner joins on the
+# deploy screen; an in_match auto_deploy case deploys its retail roles with
+# onHook's deploy (run_parity_topology.ps1 -DeployZones).
+function Get-CaseDeployZones { param($Case) return [bool] (Get-CaseField $Case "deploy_zones" $false) }
+# serve_only: the host serves only (run_parity_topology.ps1 -ServeOnly): a
+# retail host as retail's Serve Only server, ours from the SERVER copy's
+# game.cfg `dedicated` = 1. No tracked case sets it (E4's kick stages a listen
+# host's SERVER PUNT ALL); the admin pass's round-end overlay cells do.
+function Get-CaseServeOnly { param($Case) return [bool] (Get-CaseField $Case "serve_only" $false) }
+# pre_join_mission_cycle: the host's admin console cycles its mission once
+# before the joiner starts, so the join is the host's second mission start's
+# (run_parity_topology.ps1 -PreJoinMissionCycle); every topology.
+function Get-CasePreJoinMissionCycle { param($Case) return [bool] (Get-CaseField $Case "pre_join_mission_cycle" $false) }
+function Get-CaseTopologies {
+    param($Case)
+    return @(Get-CaseField $Case "topologies" @("RR", "RR-aa", "RO", "OR", "OO"))
+}
+
 # An app builds from apps\<dir> as opennova-<dir, kebab-cased>.exe.
 function Find-App {
     param([string] $Dir)
@@ -121,19 +212,38 @@ function Read-ParityCases {
     if ([string] $table.schema -cne "opennova.parity-cases.v1") {
         throw "$Path is not an opennova.parity-cases.v1 table"
     }
+    # The corpus is pinned: items.def for the table, each case's mission.
+    if (-not ($table.PSObject.Properties.Name -contains "items_sha256") -or
+            [string] $table.items_sha256 -notmatch '^[0-9a-f]{64}$') {
+        throw "$Path pins no items_sha256"
+    }
+    # The SERVER copy's game.cfg is pinned too: both hosts run in that copy and
+    # read it; every cell checks it at its start and restores it at its end.
+    if (-not ($table.PSObject.Properties.Name -contains "server_game_cfg_sha256") -or
+            [string] $table.server_game_cfg_sha256 -notmatch '^[0-9a-f]{64}$') {
+        throw "$Path pins no server_game_cfg_sha256"
+    }
     $ids = @{}
     foreach ($case in @($table.cases)) {
-        foreach ($field in @("id", "mission", "game_type", "port", "readiness", "steady_seconds",
-                "exercise_input", "auto_deploy")) {
+        foreach ($field in @("id", "mission", "mission_sha256", "game_type", "port", "readiness",
+                "steady_seconds", "exercise_input", "auto_deploy")) {
             if (-not ($case.PSObject.Properties.Name -contains $field)) {
                 throw "Parity case '$($case.id)' has no $field"
             }
+        }
+        if ([string] $case.mission_sha256 -notmatch '^[0-9a-f]{64}$') {
+            throw "Parity case '$($case.id)': mission_sha256 is a lowercase SHA-256"
         }
         if ([string] $case.id -notmatch '^[a-z0-9](?:[a-z0-9-]{0,22}[a-z0-9])?$') {
             throw "Parity case id '$($case.id)' must be 1-24 lowercase letters, digits or dashes"
         }
         if ($ids.ContainsKey([string] $case.id)) { throw "Parity case id '$($case.id)' repeats" }
         $ids[[string] $case.id] = $true
+        # run_parity_topology.ps1's -SteadySeconds range: caught at load (and by
+        # -Plan), not by every attempt of the case's cells.
+        if ([int] $case.steady_seconds -lt 5 -or [int] $case.steady_seconds -gt 300) {
+            throw "Parity case '$($case.id)': steady_seconds is 5..300"
+        }
         if ([string] $case.readiness -cnotin @("in_match", "deploy_hold")) {
             throw "Parity case '$($case.id)': readiness is in_match or deploy_hold"
         }
@@ -141,10 +251,100 @@ function Read-ParityCases {
                 ([bool] $case.exercise_input -or [bool] $case.auto_deploy)) {
             throw "Parity case '$($case.id)': deploy_hold can neither exercise input nor auto-deploy"
         }
+        # A case may play a scenario (scenarios\<file>) in place of the input
+        # exercise: its actor plays it at the steady window's start.
+        if ($case.PSObject.Properties.Name -contains "scenario") {
+            if ([bool] $case.exercise_input) {
+                throw "Parity case '$($case.id)': a scenario replaces the input exercise"
+            }
+            if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot ("scenarios\" + [string] $case.scenario)) -PathType Leaf)) {
+                throw "Parity case '$($case.id)': no scenario scenarios\$($case.scenario)"
+            }
+        }
         # The runner checks the port against the SERVER copy's game.cfg LAN
         # host range (stock JO:CA 32768-32787).
         if ([int] $case.port -lt 1 -or [int] $case.port -gt 65535) {
             throw "Parity case '$($case.id)': port must be 1-65535"
+        }
+        foreach ($entry in @(Get-CaseRotation $case)) {
+            if ("$entry" -notmatch '^[^\\/:*?"<>|,\x00-\x1f]+\.[Bb][Mm][Ss]$') {
+                throw "Parity case '$($case.id)': rotation entry '$entry' is not a .BMS basename"
+            }
+        }
+        $limit = Get-CaseTimeLimit $case
+        if ($limit -lt 0 -or $limit -gt 600) {
+            throw "Parity case '$($case.id)': time_limit_minutes must be 0-600"
+        }
+        if ($case.PSObject.Properties.Name -contains "permanent_death" -and
+                $case.permanent_death -isnot [bool]) {
+            throw "Parity case '$($case.id)': permanent_death is true or false"
+        }
+        if ($case.PSObject.Properties.Name -contains "joiner_side_password" -and
+                ($case.joiner_side_password -isnot [string] -or
+                [string] $case.joiner_side_password -cnotmatch '^[\x21\x23-\x7E]{1,16}$')) {
+            throw "Parity case '$($case.id)': joiner_side_password is 1-16 printable ASCII characters, no space or quote"
+        }
+        foreach ($side in @("a", "b")) {
+            $name = "host_side_password_$side"
+            if ($case.PSObject.Properties.Name -contains $name -and
+                    ($case.$name -isnot [string] -or [string] $case.$name -cnotmatch '^[\x21\x23-\x7E]{1,16}$')) {
+                throw "Parity case '$($case.id)': $name is 1-16 printable ASCII characters, no space or quote"
+            }
+        }
+        if ($case.PSObject.Properties.Name -contains "serve_only" -and
+                $case.serve_only -isnot [bool]) {
+            throw "Parity case '$($case.id)': serve_only is true or false"
+        }
+        if ($case.PSObject.Properties.Name -contains "pre_join_mission_cycle" -and
+                $case.pre_join_mission_cycle -isnot [bool]) {
+            throw "Parity case '$($case.id)': pre_join_mission_cycle is true or false"
+        }
+        # The cycle's RR launches its host and joiner one by one, a path with no
+        # input exercise.
+        if ((Get-CasePreJoinMissionCycle $case) -and [bool] $case.exercise_input) {
+            throw "Parity case '$($case.id)': a pre_join_mission_cycle case plays no input exercise"
+        }
+        if ($case.PSObject.Properties.Name -contains "deploy_zones" -and
+                $case.deploy_zones -isnot [bool]) {
+            throw "Parity case '$($case.id)': deploy_zones is true or false"
+        }
+        if ((Get-CaseDeployZones $case) -and -not [bool] $case.auto_deploy) {
+            throw "Parity case '$($case.id)': deploy_zones deploys an in_match auto_deploy case's roles"
+        }
+        $class = Get-CaseHostPlayerClass $case
+        if ($class -notin @(0, 5, 6, 7, 8, 9)) {
+            throw "Parity case '$($case.id)': host_player_class is 5-9 (0 keeps the copy's)"
+        }
+        $caseTopologies = @(Get-CaseTopologies $case)
+        foreach ($name in $caseTopologies) {
+            if ($name -cnotin @("RR", "RR-aa", "RO", "OR", "OO")) {
+                throw "Parity case '$($case.id)': unknown topology '$name'"
+            }
+        }
+        if ("RR" -cnotin $caseTopologies -or "RR-aa" -cnotin $caseTopologies -or
+                @($caseTopologies | Where-Object { $_ -cin @("RO", "OR", "OO") }).Count -eq 0) {
+            throw "Parity case '$($case.id)': topologies needs RR, RR-aa and at least one subject"
+        }
+        # click steps are onHook's: the OpenNova scenario_play driver types
+        # char steps but clicks no menu widget (run_parity_topology.ps1), so a
+        # clicking actor stays retail.
+        if ($case.PSObject.Properties.Name -contains "scenario") {
+            $play = Get-Content -LiteralPath (Join-Path $PSScriptRoot ("scenarios\" + [string] $case.scenario)) -Raw | ConvertFrom-Json
+            $clicks = @(@($play.steps) + @(if ($play.PSObject.Properties.Name -contains "prelude") { @($play.prelude) }) |
+                Where-Object { $_.PSObject.Properties.Name -contains "click" })
+            $openNovaActorCells = if ([string] $play.actor -eq "host") { @("OR", "OO") } else { @("RO", "OO") }
+            if ($clicks.Count -gt 0 -and @($caseTopologies | Where-Object { $_ -cin $openNovaActorCells }).Count -gt 0) {
+                throw "Parity case '$($case.id)': its scenario clicks, so its $($play.actor) stays retail (no $($openNovaActorCells -join ' or '))"
+            }
+        }
+        # The host's class is written for a retail host (run_parity_topology.ps1).
+        if ($class -ne 0 -and @($caseTopologies | Where-Object { $_ -cin @("OR", "OO") }).Count -gt 0) {
+            throw "Parity case '$($case.id)': a host_player_class case runs RR, RR-aa and RO only"
+        }
+        # The runner wires a retail late joiner only (run_parity_topology.ps1).
+        if ((Get-CaseLateJoiner $case) -and
+                @($caseTopologies | Where-Object { $_ -cin @("RO", "OO") }).Count -gt 0) {
+            throw "Parity case '$($case.id)': a late-joiner case runs RR, RR-aa and OR only"
         }
     }
     return $table
@@ -170,12 +370,169 @@ function Get-CellArguments {
         "-OnHookMcpPath", $OnHookMcpPath,
         "-GodotLauncher", $GodotLauncher,
         "-HostMcpPort", [string] $HostMcpPort,
-        "-JoinerMcpPort", [string] $JoinerMcpPort
+        "-JoinerMcpPort", [string] $JoinerMcpPort,
+        "-ServerGameCfgSha256", [string] $Table.server_game_cfg_sha256
     )
     if ($Resolution) { $arguments += @("-Resolution", $Resolution) }
+    if ($BuildLockPath) { $arguments += @("-BuildLockPath", $BuildLockPath) }
     if ([bool] $Case.auto_deploy) { $arguments += "-AutoDeploy" }
     if ([bool] $Case.exercise_input) { $arguments += "-ExerciseInput" }
+    if ($Case.PSObject.Properties.Name -contains "scenario") {
+        $arguments += @("-Scenario", (Join-Path $PSScriptRoot ("scenarios\" + [string] $Case.scenario)))
+    }
+    if ($Cell.Topology -in @("RO", "OO")) { $arguments += @("-JoinerDial", $JoinerDial) }
+    if ($JoinerVerbose -and $Cell.Topology -in @("RO", "OO")) { $arguments += "-JoinerVerbose" }
+    $rotation = @(Get-CaseRotation $Case)
+    if ($rotation.Count -gt 0) { $arguments += @("-Rotation", ($rotation -join ",")) }
+    $limit = Get-CaseTimeLimit $Case
+    if ($limit -gt 0) { $arguments += @("-TimeLimitMinutes", [string] $limit) }
+    if (Get-CasePermanentDeath $Case) { $arguments += "-PermanentDeath" }
+    $sideA = Get-CaseHostSidePassword $Case "a"
+    if ($sideA) { $arguments += @("-HostSidePasswordA", $sideA) }
+    $sideB = Get-CaseHostSidePassword $Case "b"
+    if ($sideB) { $arguments += @("-HostSidePasswordB", $sideB) }
+    $joinerSide = Get-CaseJoinerSidePassword $Case
+    if ($joinerSide) { $arguments += @("-JoinerSidePassword", $joinerSide) }
+    $class = Get-CaseHostPlayerClass $Case
+    if ($class -ne 0) { $arguments += @("-HostPlayerClass", [string] $class) }
+    if (Get-CaseDeployZones $Case) { $arguments += "-DeployZones" }
+    if (Get-CaseServeOnly $Case) { $arguments += "-ServeOnly" }
+    if (Get-CasePreJoinMissionCycle $Case) { $arguments += "-PreJoinMissionCycle" }
+    if (Get-CaseLateJoiner $Case) { $arguments += "-LateJoiner" }
+    if ($AllowDirtyRepo) { $arguments += "-AllowDirtyRepo" }
+    if ($ActorScenarioProbes) { $arguments += @("-ActorScenarioProbes", $ActorScenarioProbes) }
     return $arguments
+}
+
+function Get-Sha256OrEmpty {
+    param([string] $Path)
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return "" }
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+function Read-RunSummary {
+    param([string] $RunRoot)
+    $path = Join-Path $RunRoot "run-summary.json"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    return Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+}
+
+# role -> sha256 of a summary's effective_retail_configs.
+function Get-RetailConfigHashes {
+    param($Summary)
+    $hashes = @{}
+    if ($Summary -and $Summary.PSObject.Properties.Name -contains "effective_retail_configs") {
+        foreach ($cfg in @($Summary.effective_retail_configs)) {
+            $hashes[[string] $cfg.role] = [string] $cfg.sha256
+        }
+    }
+    return $hashes
+}
+
+# Why a reference RR / RR-aa summary is not evidence for this case under the
+# current retail identity (an empty list when it is).
+function Get-ReferenceMismatches {
+    param($Summary, $Case, [string] $MissionSha256)
+    if (-not $Summary) { return @("no run-summary.json") }
+    $reasons = [System.Collections.Generic.List[string]]::new()
+    $fields = $Summary.PSObject.Properties.Name
+    $expected = [ordered]@{
+        topology = "RR"
+        retail_exe_sha256 = $script:CurrentRetail.retail_exe_sha256
+        onhook_mcp_sha256 = $script:CurrentRetail.onhook_mcp_sha256
+        onhook_proxy_sha256 = $script:CurrentRetail.onhook_proxy_sha256
+        mission = [string] $Case.mission
+        mission_sha256 = $MissionSha256
+        game_type = [string] $Case.game_type
+        port = [string] $Case.port
+        readiness_mode = [string] $Case.readiness
+        steady_seconds = [string] $Case.steady_seconds
+        exercise_input = [string] [bool] $Case.exercise_input
+        expansion = [string] $script:Table.expansion
+        host_session_name = [string] $script:Table.host_session_name
+    }
+    foreach ($name in $expected.Keys) {
+        $want = [string] $expected[$name]
+        if (-not ($fields -contains $name)) {
+            $reasons.Add("$name not recorded")
+        }
+        elseif ([string] $Summary.$name -cne $want) {
+            $reasons.Add("$name $($Summary.$name) is not $want")
+        }
+    }
+    # E2 inputs, checked when the case has them (a summary from before E2
+    # records neither and is evidence only for a case without them).
+    $rotation = (@(Get-CaseRotation $Case) -join ",")
+    $recordedRotation = if ($fields -contains "rotation") {
+        (@($Summary.rotation | ForEach-Object { [string] $_ }) -join ",")
+    } else { "" }
+    if ($recordedRotation -cne $rotation) {
+        $reasons.Add("rotation '$recordedRotation' is not '$rotation'")
+    }
+    $limit = Get-CaseTimeLimit $Case
+    $recordedLimit = if ($fields -contains "time_limit_minutes") {
+        [int] $Summary.time_limit_minutes
+    } else { 0 }
+    if ($recordedLimit -ne $limit) {
+        $reasons.Add("time_limit_minutes $recordedLimit is not $limit")
+    }
+    # E5 inputs: a summary from before E5 records neither (evidence only for a
+    # case without them).
+    $recordedPermanent = ($fields -contains "permanent_death") -and [bool] $Summary.permanent_death
+    if ($recordedPermanent -ne (Get-CasePermanentDeath $Case)) {
+        $reasons.Add("permanent_death $recordedPermanent is not $(Get-CasePermanentDeath $Case)")
+    }
+    foreach ($side in @("a", "b")) {
+        $name = "host_side_password_$side"
+        $recordedSide = if ($fields -contains $name) { [string] $Summary.$name } else { "" }
+        if ($recordedSide -cne (Get-CaseHostSidePassword $Case $side)) {
+            $reasons.Add("$name '$recordedSide' is not '$(Get-CaseHostSidePassword $Case $side)'")
+        }
+    }
+    $recordedJoinerSide = if ($fields -contains "joiner_side_password") { [string] $Summary.joiner_side_password } else { "" }
+    if ($recordedJoinerSide -cne (Get-CaseJoinerSidePassword $Case)) {
+        $reasons.Add("joiner_side_password '$recordedJoinerSide' is not '$(Get-CaseJoinerSidePassword $Case)'")
+    }
+    $recordedClass = if ($fields -contains "host_player_class") { [int] $Summary.host_player_class } else { 0 }
+    if ($recordedClass -ne (Get-CaseHostPlayerClass $Case)) {
+        $reasons.Add("host_player_class $recordedClass is not $(Get-CaseHostPlayerClass $Case)")
+    }
+    $recordedDeploy = ($fields -contains "deploy_zones") -and [bool] $Summary.deploy_zones
+    if ($recordedDeploy -ne (Get-CaseDeployZones $Case)) {
+        $reasons.Add("deploy_zones $recordedDeploy is not $(Get-CaseDeployZones $Case)")
+    }
+    $recordedServeOnly = ($fields -contains "host_kind") -and [string] $Summary.host_kind -eq "serve_only"
+    if ($recordedServeOnly -ne (Get-CaseServeOnly $Case)) {
+        $reasons.Add("serve_only $recordedServeOnly is not $(Get-CaseServeOnly $Case)")
+    }
+    $recordedCycle = ($fields -contains "pre_join_mission_cycle") -and ($null -ne $Summary.pre_join_mission_cycle)
+    if ($recordedCycle -ne (Get-CasePreJoinMissionCycle $Case)) {
+        $reasons.Add("pre_join_mission_cycle $recordedCycle is not $(Get-CasePreJoinMissionCycle $Case)")
+    }
+    $recordedLate = ($fields -contains "late_joiner") -and ($null -ne $Summary.late_joiner)
+    if ($recordedLate -ne (Get-CaseLateJoiner $Case)) {
+        $reasons.Add("late_joiner $recordedLate is not $(Get-CaseLateJoiner $Case)")
+    }
+    if ($fields -contains "retail_stock_observer" -and -not [bool] $Summary.retail_stock_observer) {
+        $reasons.Add("the retail roles ran without StockObserver")
+    }
+    $recordedCfg = if ($fields -contains "server_copy_files") {
+        [string] (@($Summary.server_copy_files) | Where-Object { $_.file -eq "game.cfg" } | Select-Object -First 1).sha256
+    } else { "" }
+    if ($recordedCfg -cne [string] $script:Table.server_game_cfg_sha256) {
+        $reasons.Add("SERVER game.cfg '$recordedCfg' is not the pinned $($script:Table.server_game_cfg_sha256)")
+    }
+    $wantScenario = if ($Case.PSObject.Properties.Name -contains "scenario") {
+        [string] (Get-Content -LiteralPath (Join-Path $PSScriptRoot ("scenarios\" + [string] $Case.scenario)) -Raw |
+            ConvertFrom-Json).name
+    } else { "" }
+    $hadScenario = if ($fields -contains "scenario_witness" -and $Summary.scenario_witness) {
+        [string] $Summary.scenario_witness.name
+    } else { "" }
+    if ($hadScenario -cne $wantScenario) {
+        $reasons.Add("scenario '$hadScenario' is not '$wantScenario'")
+    }
+    return @($reasons.ToArray())
 }
 
 $table = Read-ParityCases -Path $CasesPath
@@ -197,39 +554,119 @@ if ([string] $table.host_session_name -notmatch '^[\x20-\x7e]{1,31}$') {
     throw "host_session_name must be 1-31 printable ASCII characters"
 }
 
+$script:Table = $table
 $itemsPath = Join-Path $CorpusRoot "items.def"
 $parityExe = Find-App -Dir "parity"
 if (-not $Plan) {
     if (-not (Test-Path -LiteralPath $itemsPath -PathType Leaf)) {
         throw "The corpus has no items.def: $itemsPath"
     }
+    if ((Get-Sha256OrEmpty $itemsPath) -cne [string] $table.items_sha256) {
+        throw "The corpus items.def does not match the pinned items_sha256: $itemsPath"
+    }
     if (-not $parityExe) {
         throw "opennova-parity.exe is not built; run: cmake --build build --config Release --target opennova_parity"
     }
 }
 
+# The mission artifacts, each against its pin (the plan hashes what is there).
+$missionHashes = @{}
+foreach ($case in $selectedCases) {
+    $artifact = Join-Path $CorpusRoot ("missions\" + [string] $case.mission)
+    $sha256 = Get-Sha256OrEmpty $artifact
+    if (-not $sha256 -and -not $Plan) {
+        throw "Parity case '$($case.id)': the corpus has no mission $artifact"
+    }
+    if ($sha256 -and $sha256 -cne [string] $case.mission_sha256) {
+        throw "Parity case '$($case.id)': $artifact does not match the pinned mission_sha256"
+    }
+    $missionHashes[[string] $case.id] = $sha256
+}
+
+# The reference RR / RR-aa cells, each checked before any cell runs.
+$referenceRunsDir = ""
+$references = @{}
+if ($ReferencePrefix) {
+    if ($ReferencePrefix -ceq $Prefix) {
+        throw "-ReferencePrefix names this suite's own prefix; a resumed suite reuses its cells already"
+    }
+    $referenceRunsDir = if ($ReferenceRoot) {
+        (Resolve-Path -LiteralPath $ReferenceRoot).Path
+    } else { Join-Path $Repo ".scratch\runs" }
+    $script:CurrentRetail = [pscustomobject]@{
+        retail_exe_sha256 = Get-Sha256OrEmpty (Join-Path $RetailServerRoot "Jointops.exe")
+        onhook_mcp_sha256 = Get-Sha256OrEmpty $OnHookMcpPath
+        onhook_proxy_sha256 = Get-Sha256OrEmpty (Join-Path $RetailServerRoot "binkw32.dll")
+    }
+    foreach ($case in $selectedCases) {
+        $reference = @{}
+        foreach ($cell in @($Cells | Where-Object { $_.Name -in @("RR", "RR-aa") })) {
+            $refRunId = "$ReferencePrefix-$($case.id)-$($cell.Suffix)"
+            $refRoot = Join-Path $referenceRunsDir $refRunId
+            $refSummary = Read-RunSummary $refRoot
+            $reasons = @(Get-ReferenceMismatches $refSummary $case $missionHashes[[string] $case.id])
+            if ($reasons.Count -gt 0) {
+                throw "Parity case '$($case.id)': reference $refRunId is not evidence for this suite: $($reasons -join '; ')"
+            }
+            $reference[$cell.Name] = [pscustomobject]@{
+                run_id = $refRunId
+                run_root = $refRoot
+                configs = Get-RetailConfigHashes $refSummary
+            }
+        }
+        foreach ($role in @("server", "client")) {
+            $rr = [string] $reference["RR"].configs[$role]
+            if (-not $rr -or $rr -cne [string] $reference["RR-aa"].configs[$role]) {
+                throw "Parity case '$($case.id)': the reference RR and RR-aa $role hook configs differ or are missing"
+            }
+        }
+        $references[[string] $case.id] = $reference
+    }
+}
+
 $suiteDir = Join-Path $Repo ".scratch\parity-suites\$Prefix"
 New-Item -ItemType Directory -Force -Path $suiteDir | Out-Null
+$repoCommit = [string] (& git -C $Repo rev-parse HEAD 2>$null)
+$dllRuntime = Get-Sha256OrEmpty (Join-Path $Repo "godot\bin\libopennova.windows.template_debug.x86_64.dll")
+$dllEditor = Get-Sha256OrEmpty (Join-Path $Repo "godot\bin\libopennova_editor.windows.template_debug.x86_64.dll")
 Write-Host "PARITY_SUITE_PREFIX=$Prefix"
+Write-Host ("PARITY_SUITE_DLL runtime=$(if ($dllRuntime) { $dllRuntime } else { 'absent' })" +
+    " editor=$(if ($dllEditor) { $dllEditor } else { 'absent' }) commit=$repoCommit")
+if ($ReferencePrefix) {
+    Write-Host "PARITY_SUITE_REFERENCE prefix=$ReferencePrefix root=$referenceRunsDir"
+}
 
 $caseResults = [System.Collections.Generic.List[object]]::new()
 $cellFailures = 0
 foreach ($case in $selectedCases) {
     $artifact = Join-Path $CorpusRoot ("missions\" + [string] $case.mission)
-    $sha256 = ""
-    if (-not $Plan) {
-        if (-not (Test-Path -LiteralPath $artifact -PathType Leaf)) {
-            throw "Parity case '$($case.id)': the corpus has no mission $artifact"
-        }
-        $sha256 = (Get-FileHash -LiteralPath $artifact -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($case.PSObject.Properties.Name -contains "mission_sha256" -and
-                [string] $case.mission_sha256 -and [string] $case.mission_sha256 -cne $sha256) {
-            throw "Parity case '$($case.id)': $artifact does not match the pinned mission_sha256"
-        }
-    }
+    $sha256 = $missionHashes[[string] $case.id]
+    $reference = if ($ReferencePrefix) { $references[[string] $case.id] } else { $null }
 
     $cellResults = [ordered]@{}
+    $caseTopologies = @(Get-CaseTopologies $case)
     foreach ($cell in $Cells) {
+        if ($cell.Name -cnotin $caseTopologies) {
+            Write-Host "PARITY_SUITE_CELL case=$($case.id) topology=$($cell.Name) run=- status=not_applicable"
+            $cellResults[$cell.Name] = [pscustomobject]@{
+                run_id = ""
+                run_root = ""
+                status = "not_applicable"
+                selected = $false
+            }
+            continue
+        }
+        if ($reference -and $reference.ContainsKey($cell.Name)) {
+            $ref = $reference[$cell.Name]
+            Write-Host "PARITY_SUITE_CELL case=$($case.id) topology=$($cell.Name) run=$($ref.run_id) status=referenced"
+            $cellResults[$cell.Name] = [pscustomobject]@{
+                run_id = $ref.run_id
+                run_root = $ref.run_root
+                status = "referenced"
+                selected = $false
+            }
+            continue
+        }
         $runId = "$Prefix-$($case.id)-$($cell.Suffix)"
         if ($runId.Length -gt 56) { throw "RunId $runId is longer than the runner's 56 characters" }
         $runRoot = Join-Path $Repo ".scratch\runs\$runId"
@@ -241,7 +678,7 @@ foreach ($case in $selectedCases) {
         }
         elseif ($selected -and $Plan) {
             $status = "planned"
-            $shown = Get-CellArguments $table $case $cell $runId $artifact "<sha256>"
+            $shown = Get-CellArguments $table $case $cell $runId $artifact $(if ($sha256) { $sha256 } else { "<sha256>" })
             Write-Host ("PARITY_SUITE_PLAN case=$($case.id) topology=$($cell.Name) run=$runId args=" +
                 ($shown[5..($shown.Count - 1)] -join " "))
         }
@@ -293,21 +730,97 @@ foreach ($case in $selectedCases) {
         }
     }
 
-    $usable = @($Cells | Where-Object { $cellResults[$_.Name].status -in @("ran", "reused") })
+    $usable = @($Cells | Where-Object { $cellResults[$_.Name].status -in @("ran", "reused", "referenced") })
     $subjects = @($usable | Where-Object { $_.Name -in @("RO", "OR", "OO") })
-    $missing = @($Cells | Where-Object { $_.Name -in @("RO", "OR", "OO") -and $_ -notin $subjects } |
+    $missing = @($Cells | Where-Object { $_.Name -in @("RO", "OR", "OO") -and
+            $_.Name -cin $caseTopologies -and $_ -notin $subjects } |
         ForEach-Object { $_.Name })
+    # A referenced RR is evidence only for subjects whose retail role loaded the
+    # same rendered hook config: RO's retail host (server), OR's retail joiner
+    # (client).
+    $drift = [System.Collections.Generic.List[string]]::new()
+    if ($reference -and -not $Plan) {
+        foreach ($pair in @(@("RO", "server"), @("OR", "client"))) {
+            $result = $cellResults[$pair[0]]
+            if ($result.status -notin @("ran", "reused")) { continue }
+            $subjectConfig = [string] (Get-RetailConfigHashes (Read-RunSummary $result.run_root))[$pair[1]]
+            if ($subjectConfig -cne [string] $reference["RR"].configs[$pair[1]]) {
+                $drift.Add("$($pair[0]) $($pair[1]) hook config $subjectConfig is not the reference's")
+            }
+        }
+    }
+    # A scenario case's cells are first checked against the scenario's expect
+    # sequence (compare_scenario.py). A run whose sequence failed did not play the
+    # case, so it is not judged against one that did (x5 judged drive's rows from
+    # RR, RO and OO, whose USE never seated, and the revive's from three cells
+    # where nothing happened): a failed RR or RR-aa leaves the case unjudged, and
+    # a failed subject leaves the verdict, which then cannot pass.
+    $scenarioStatus = ""
+    $scenarioReport = ""
+    $scenarioFailed = @()
+    if (-not $Plan -and $drift.Count -eq 0 -and $usable.Count -gt 0 -and
+            $case.PSObject.Properties.Name -contains "scenario") {
+        $scenarioReport = Join-Path $suiteDir "$($case.id).scenario.json"
+        if (Test-Path -LiteralPath $scenarioReport) { Remove-Item -LiteralPath $scenarioReport -Force }
+        $scenarioArgs = @("-I", (Join-Path $PSScriptRoot "compare_scenario.py"), "--out", $scenarioReport)
+        $wireExe = Find-App -Dir "wire"
+        if ($wireExe) { $scenarioArgs += @("--wire", $wireExe) }
+        foreach ($cell in $usable) {
+            $scenarioArgs += (Join-Path $cellResults[$cell.Name].run_root "run-summary.json")
+        }
+        $scenarioLines = @(& python @scenarioArgs)
+        $scenarioExit = $LASTEXITCODE
+        $scenarioLines | ForEach-Object { Write-Host "PARITY_SUITE_SCENARIO case=$($case.id) $_" }
+        if ($scenarioExit -notin @(0, 1) -or -not (Test-Path -LiteralPath $scenarioReport -PathType Leaf)) {
+            $scenarioStatus = "ERROR"
+        }
+        else {
+            $played = Get-Content -LiteralPath $scenarioReport -Raw | ConvertFrom-Json
+            foreach ($cell in $usable) {
+                $runId = [string] $cellResults[$cell.Name].run_id
+                $result = @($played.cells | Where-Object { [string] $_.run_id -ceq $runId })
+                if ($result.Count -ne 1 -or -not [bool] $result[0].passed_expectations) {
+                    $scenarioFailed += $cell.Name
+                }
+            }
+            $scenarioStatus = if ($scenarioFailed.Count -gt 0) { "FAIL" } else { "PASS" }
+        }
+        Write-Host ("PARITY_SUITE_NOTE case=$($case.id) scenario=$scenarioStatus" +
+            " failed=$(if ($scenarioFailed.Count) { $scenarioFailed -join ',' } else { '-' }) report=$scenarioReport")
+        $usable = @($usable | Where-Object { $_.Name -notin $scenarioFailed })
+        $subjects = @($subjects | Where-Object { $_.Name -notin $scenarioFailed })
+    }
     $caseResult = [ordered]@{
         id = [string] $case.id
         status = "INCOMPLETE"
         failures = $null
         report = ""
         missing = @($missing)
+        reference_drift = @($drift.ToArray())
+        scenario = $scenarioStatus
+        scenario_report = $scenarioReport
+        scenario_failed = @($scenarioFailed)
         cells = $cellResults
     }
     $haveReference = @($usable | Where-Object { $_.Name -in @("RR", "RR-aa") }).Count -eq 2
     if ($Plan) {
         $caseResult.status = "PLANNED"
+    }
+    elseif ($drift.Count -gt 0) {
+        $caseResult.status = "ERROR"
+        Write-Host "PARITY_SUITE_NOTE case=$($case.id) not judged: $($drift -join '; ')"
+    }
+    elseif ($scenarioStatus -eq "ERROR") {
+        $caseResult.status = "ERROR"
+        Write-Host "PARITY_SUITE_NOTE case=$($case.id) not judged: the scenario check did not run"
+    }
+    elseif (@($scenarioFailed | Where-Object { $_ -in @("RR", "RR-aa") }).Count -gt 0) {
+        $caseResult.status = "SCENARIO_FAIL"
+        Write-Host "PARITY_SUITE_NOTE case=$($case.id) not judged: the reference did not play the scenario"
+    }
+    elseif ($haveReference -and $subjects.Count -eq 0 -and $scenarioFailed.Count -gt 0) {
+        $caseResult.status = "SCENARIO_FAIL"
+        Write-Host "PARITY_SUITE_NOTE case=$($case.id) not judged: every subject failed its scenario"
     }
     elseif ($haveReference -and $subjects.Count -gt 0) {
         $report = Join-Path $suiteDir "$($case.id).verdict.json"
@@ -334,6 +847,30 @@ foreach ($case in $selectedCases) {
         if ($caseResult.status -eq "PASS" -and $missing.Count -gt 0) {
             $caseResult.status = "INCOMPLETE"
         }
+        if ($caseResult.status -eq "PASS" -and $scenarioFailed.Count -gt 0) {
+            $caseResult.status = "SCENARIO_FAIL"
+        }
+        # E3: the late joiner's own session, judged as a second verdict (each
+        # run's late_joiner capture bound to its client port, from its readiness).
+        if (Get-CaseLateJoiner $case) {
+            $lateReport = Join-Path $suiteDir "$($case.id).late.verdict.json"
+            $lateArgs = @("--items", $itemsPath, "--out", $lateReport, "--evidence", "late")
+            foreach ($cell in $usable) {
+                $lateArgs += @($cell.Flag, $cellResults[$cell.Name].run_root)
+            }
+            $lateLines = @(& $parityExe @lateArgs)
+            $lateExit = $LASTEXITCODE
+            $lateLines | ForEach-Object { Write-Host $_ }
+            $lateStatus = @($lateLines | Where-Object { "$_" -like "PARITY_STATUS=*" } | Select-Object -Last 1)
+            $caseResult.late_status = if ($lateExit -in @(0, 1) -and $lateStatus.Count -eq 1) {
+                "$($lateStatus[0])".Substring("PARITY_STATUS=".Length)
+            } else { "ERROR" }
+            $caseResult.late_report = $lateReport
+            if ($caseResult.status -eq "PASS" -and $caseResult.late_status -ne "PASS") {
+                $caseResult.status = $caseResult.late_status
+            }
+            Write-Host "PARITY_SUITE_NOTE case=$($case.id) late joiner verdict=$($caseResult.late_status) report=$lateReport"
+        }
     }
     $caseResults.Add([pscustomobject] $caseResult)
     Write-Host ("PARITY_SUITE_CASE case=$($case.id) status=$($caseResult.status)" +
@@ -351,6 +888,12 @@ $suiteReport = Join-Path $suiteDir "suite-summary.json"
     status = $(if ($Plan) { "PLAN" } elseif ($pass) { "PASS" } else { "FAIL" })
     cell_failures = $cellFailures
     evidence = $Evidence
+    repo_commit = $repoCommit
+    gdextension_sha256 = $dllRuntime
+    gdextension_editor_sha256 = $dllEditor
+    joiner_dial = $JoinerDial
+    reference_prefix = $ReferencePrefix
+    reference_root = $referenceRunsDir
     cases = @($caseResults.ToArray())
 } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $suiteReport -Encoding UTF8
 if ($Plan) {

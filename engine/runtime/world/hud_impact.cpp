@@ -18,8 +18,8 @@ HudImpact predict_hud_impact(World &world, LocalPlayerWeapon &weapon, bool scope
 	const auto *terrain = world.ai.terrain;
 	if (!player)
 		return out;
-	out.position = { to_fixed(player->position.x), to_fixed(player->position.y),
-		to_fixed(player->position.z) };
+	out.position = { player->position.x.q16, player->position.y.q16,
+		player->position.z.q16 };
 	if (!ammo || !terrain || !terrain->valid())
 		return out;
 	int32_t pose[6];
@@ -48,9 +48,10 @@ HudImpact predict_hud_impact(World &world, LocalPlayerWeapon &weapon, bool scope
 			position.z = world.env.water_z;
 			out.hit = true;
 		} else {
-			const float x = float(from_fixed(position.x)), y = float(from_fixed(position.y));
-			if (position.z < to_fixed(terrain::height_field_height_mission(*terrain, x, y))) {
-				position.z = to_fixed(terrain::height_field_height_mission_bilinear(*terrain, x, y));
+			// The samplers take the words (D-NET-507).
+			if (position.z < terrain::height_field_height_fixed(*terrain, position.x, position.y)) {
+				position.z = terrain::height_field_height_bilinear_fixed(*terrain, position.x,
+						position.y);
 				out.hit = true;
 			}
 		}
@@ -60,8 +61,8 @@ HudImpact predict_hud_impact(World &world, LocalPlayerWeapon &weapon, bool scope
 	if (!out.hit)
 		return out;
 	out.position = { position.x, position.y, position.z };
-	const double dx = double(to_fixed(player->position.x)) - position.x;
-	const double dy = double(to_fixed(player->position.y)) - position.y;
+	const double dx = double(player->position.x.q16) - position.x;
+	const double dy = double(player->position.y.q16) - position.y;
 	out.distance_q16 = int32_t(std::min(std::hypot(dx, dy), 2147418112.0));
 	// The map radius is twice the lateral dispersion displacement.
 	// [orig: Player_UpdatePerFrame @0x4DE9F8..0x4DEAD2; map-slot +0x1C writes

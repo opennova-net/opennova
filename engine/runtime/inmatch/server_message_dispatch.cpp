@@ -1,25 +1,25 @@
 #include <runtime/inmatch/server_message_dispatch.h>
+#include <runtime/inmatch/server_dispatch_join.h>    // the admission FSM and the join cases
+#include <runtime/inmatch/server_dispatch_respawn.h> // the respawn and deploy cases
 #include <runtime/inmatch/server_visible_players.h>
 #include <runtime/inmatch/server_entity_routes.h> // Server_HandleDoorRowRequest (C2S 0x1A)
-#include <runtime/inmatch/server_team_change.h>
 #include <runtime/inmatch/server_kill_page.h>
 #include <runtime/inmatch/server_emote.h>
 #include <runtime/inmatch/server_radio_call.h>
 #include <runtime/inmatch/server_loadout_grant.h> // the 0x2F grant family (GrantedWeaponLoadout, grant_weapon_loadout, ...)
-#include <runtime/inmatch/server_join_check.h>    // the 0x00 JOIN's validation ladder
 #include <runtime/inmatch/server_fired_round.h>   // the C2S 0x06 fired round
 
 
 #include <runtime/inmatch/integrity_sources.h>
 #include <runtime/inmatch/end_round_protocol.h>
-#include <net/npwire/nw_session_framing.h> // make_random_session_u32 (the per-player tick seed)
-#include <runtime/inmatch/server_spawn.h> // Server_ReservePlayerTeam (0x04/spawn identity)
+#include <runtime/inmatch/server_spawn.h> // Server_HandlePlayerJoinRequest (C2S 0x0B)
 #include <runtime/inmatch/server_tick.h> // Server_StageHostDisconnect
 #include <runtime/inmatch/server_chat.h>         // the C2S 0x0D fan-out
 #include <runtime/inmatch/server_squad.h>        // the command map's squad legs
 #include <runtime/inmatch/server_net_quality.h>  // the 0x2C return leg / 0x4C store
 #include <runtime/inmatch/server_vehicle_spawn.h> // the 0x40 / 0x42 handlers
 #include <runtime/inmatch/napi_np_server_ctx.h>  // ServerDispatchInputs::server_ctx
+#include <runtime/inmatch/server_ban_lists.h>    // Server_HandleBanPuntCommand (C2S 0x24)
 #include <runtime/inmatch/session_status.h>
 #include <runtime/world/weapon_table_build.h> // loadout_entry_permitted (D-NET-141)
 
@@ -27,42 +27,32 @@
 #include <runtime/replication/entity_wire_bridge.h> // build_full_entity_spawn — the 0x0F -> 0x18 repair record
 
 #include <base/gameprofile/game_type.h>       // is_waypoint_family / is_stock_coop (§5.32, D-NET-203/205)
-#include <base/io/strutil.h>                  // iequals (the JOIN body's CD field)
-#include <net/npwire/flat_tlv.h>        // the C2S 0x00 JOIN body walk (the CD identity blob)
 #include <net/npwire/wire_handle.h>     // is_batch_end_sentinel / kInvalid (the wire handle home)
 #include <net/npwire/ingame_decode.h>   // decode_entity_packet_sub_header / decode_player_extended_uplink
 #include <net/npwire/ingame_encode.h>   // encode_player_sync / encode_player_list (§5.1)
 #include <net/npwire/ingame_message_id.h>
-#include <net/npwire/session_vars.h>     // the 0x60 server-info stream
+#include <net/title/title_identity.h>     // title_in_match (the 0x2F armory-only value)
 #include <net/npwire/replication_model.h> // PlayerReplicationState (POD) — the reply builders' input
-#include <net/title/title_identity.h> // title_in_match (the 0x64 rules word, DFX2-18)
 
 #include <runtime/world/entity.h> // world::Entity / EntityHandle: the bound entity read through owned_entity
 #include <runtime/world/local_player.h>
-#include <runtime/world/entity_spawn.h>  // entity_reset_to_spawn_state — the deploy revive (§5.61)
-#include <runtime/world/spawn_select.h>  // deploy target validation + one spawn-pose resolver
+#include <runtime/world/player_spawn.h> // rebind_player_camouflage_row (the 0x2F accept, D-NET-348)
 #include <runtime/world/shell_sort_by_value.h> // CPairList_ShellSortByValue (the 0x16 rows)
 #include <runtime/world/vehicle_attach.h> // entity_process_vehicle_attach / entity_detach_from_vehicle (0x26/0x27)
 #include <runtime/world/world.h>  // world::World::registry (the authoritative roster, §6.9)
 #include <runtime/audio/sound_profile.h> // compose_entity_sound_set — the 0x2E MEDIC_REQUEST composite
-#include <runtime/world/zone_chain.h>    // zone_chain_frontier_zone — the 0x1E ev-0x3A deploy hint
 #include <runtime/world/vehicle_mount.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
-#include <runtime/world/geom.h>
 #include <runtime/world/infantry.h>
 
 #include <algorithm>
-#include <array>
-#include <cstring>
-#include <iterator>
 #include <utility>
 #include <base/io/le.h>
 #include <cstddef>
 #include <cstdint>
 #include <cctype>
 #include <cstdlib>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -100,217 +90,12 @@ bool stage_integrity_crc_punt(const ServerDispatchInputs &inputs, NapiNPConnecti
 	return Server_StageHostDisconnect(conn, event);
 }
 
-// A game-layer join-gate rejection: the empty-string description record with
-// only the DPC reason set (DS=1 role, DC=2 class, DP1/DP2 0, DSTR/DDSTR "").
-// [orig: Server_ValidatePlayerJoinRequest @0x512100 failures ride
-// CNapiNPConnection_SendChatMessage @0x4c7ef0 with both strings g_EmptyStr ->
-// NapiNPDataTransfer_SendDescription @0x628c80]
-bool stage_join_gate_reject(NapiNPConnection &conn, uint32_t reason_dpc) {
-	DisconnectEvent event;
-	event.ds = 1;
-	event.dc = 2;
-	event.dpc = reason_dpc;
-	return Server_StageHostDisconnect(conn, event);
-}
-
 } // namespace
 
-MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config, bool mp_session_peer,
-		const TitleIdentity *title) {
-	MissionMetadataBlob blob{};
-	auto write_u32 = [&](std::size_t offset, uint32_t value) {
-		opennova::io::write_u32_le(blob.data() + offset, value);
-	};
-	auto write_fixed_string = [&](std::size_t offset, const std::string &value) {
-		const std::size_t count = std::min<std::size_t>(value.size(), 31);
-		std::memcpy(blob.data() + offset, value.data(), count);
-	};
-	for (std::size_t i = 0; i < 32; ++i) {
-		blob[i] = static_cast<uint8_t>(make_random_session_u32());
-		blob[148 + i] = static_cast<uint8_t>(make_random_session_u32());
-	}
-	uint32_t mission_session_id = 0;
-	while (mission_session_id == 0)
-		mission_session_id = make_random_session_u32() & 0xFFFFu;
-	write_u32(32, mission_session_id);
-	// +36: the slot limit less a non-peer (dedicated) host's own slot, at most 251: the
-	// session's cap on every host; +48: the cfg's raw unlimited-vehicles word dword_24D2258.
-	// [orig: Client_BuildMissionDataRequestBlock @0x51E897..0x51E8B9, @0x51E8C5..0x51E8CB]
-	const int32_t players = static_cast<int32_t>(config.player_slot_limit()) - !mp_session_peer;
-	write_u32(36, static_cast<uint32_t>(players > 251 ? 251 : players));
-	write_u32(40, config.game_type);
-	// A DFX2 authority ORs 0x10000 into the rules word [orig: @0x51b89e (dfx2.exe)].
-	write_u32(44, config.mp_attributes | title_in_match(title).rules_word_bits);
-	write_u32(48, static_cast<uint32_t>(config.unlimited_vehicles));
-	write_fixed_string(52, config.server_name);
-	write_fixed_string(84, config.mission_file);
-	// The 00TRg LAN oracle carries the map filename in both mission slots.
-	write_fixed_string(116, config.mission_file);
-	return blob;
-}
-
 namespace {
-
-// ---------------------------------------------------------------------------
-// Byte helpers. The §5.1
-// identity bodies (0x7A PCID, 0x7B session info) are FAITHFUL ports of the witnessed serializers
-// (NetPacket_WritePCID @0x5076e0, NapiNPMsg_0x7B_BuildPayload @0x507740; net-re §5.45, grilled
-// 2026-06-27), and so are the 0x46 slot-state record (NetPacket_SerializePlayerSync0x46 @0x505e80,
-// npwire encode_player_sync) and the 0x51 team-change confirm (NetPacket_WriteEntityPacket
-// @0x506bb0): D-NET-127 closed, its last 0x46 fields with D-NET-295 (net-re §8).
-// ---------------------------------------------------------------------------
-
-bool validates_padding_echo(
-		const NapiNPConnection &conn, const std::vector<uint8_t> &payload) {
-	// The server challenge advertises paddingLen=256. Retail echoes exactly that many bytes,
-	// preserving the first two position dwords and replacing the third with its net-frame counter.
-	return payload.size() == 256 &&
-	       io::read_u32_le(payload.data()) == conn.admission_padding_x &&
-	       io::read_u32_le(payload.data() + 4) == conn.admission_padding_y;
-}
-
-void append_cstr(std::vector<uint8_t> &out, const std::string &s) {
-	out.insert(out.end(), s.begin(), s.end());
-	out.push_back(0);
-}
-
-// The advertised mission's title arm, the session-variable stream's and the
-// 0x7B summary's alike: the mission text's [info]/title, else (empty) the
-// header's name. [orig: Game_SerializeMissionInfoToDataStream @0x523620
-// @0x5237df..0x52380d; NapiNPMsg_0x7B_BuildPayload @0x507740 @0x507835..0x50784f]
-const std::string &mission_title_or_header(const std::string &mission_text_title,
-		const std::string &header_name) {
-	return mission_text_title.empty() ? header_name : mission_text_title;
-}
-
-// The host context's resolved mission title; none on the World-less unit path.
-const std::string &context_mission_text_title(const NapiNPServerCtx *ctx) {
-	static const std::string kNone;
-	return ctx != nullptr ? ctx->mission_text_title : kNone;
-}
 
 bool is_default_ash_session_config(const GameConfig &cfg) {
 	return cfg.mission_name == "AS - Dormant Volcano Isle" && cfg.mission_file == "ASH_I5A.BMS";
-}
-
-// ---------------------------------------------------------------------------
-// §5.1 reply bodies — handshake + server-info + mission-metadata.
-// ---------------------------------------------------------------------------
-
-// tag=0x02 server push. [orig: NapiNPClientMsg_HandleJoinResponse @0x42E0F0 reads 12 B; D-NET-127 carried 512.]
-std::vector<uint8_t> build_tag02_push(uint32_t now_tick) {
-	std::vector<uint8_t> payload(512, 0);
-	io::write_u32_le(payload.data(), now_tick);
-	payload[4] = 0x02;
-	payload[8] = 0x00;
-	payload[9] = 0x01;
-	return payload;
-}
-
-// tag=0x7A: the recipient's own PCID (NOT the player name). [orig: NetPacket_WritePCID @0x5076e0 —
-// copies player+0x250, the 0x002 handler's target player @0x5130c2]. Empty on a LAN host -> a
-// single NUL (golden frame 134 = len 1, body 00).
-std::vector<uint8_t> build_tag7a_pcid(const NapiNPConnection &conn) {
-	std::vector<uint8_t> payload;
-	append_cstr(payload, conn.account.pcid);
-	return payload;
-}
-
-} // namespace
-
-// tag=0x7B session/player info. [orig: NapiNPMsg_0x7B_BuildPayload @0x507740] field order:
-// recipient player_name, PCID, server_name, advertised mission, map filename,
-// gametype(u32), empty_str, expansion. Retail's field-4 source switches at
-// @0x507822: waypoint-family modes use the active filename while other modes
-// use the resolved MissionText title, else (empty) the header's name
-// (@0x507835..0x50784f). The objective bit does not affect that selection.
-// Field 5 is always g_MapFileName.
-// (The PCID slot previously carried an invented "DEV-A02-0001" literal — D-NET-127; now sourced.)
-std::vector<uint8_t> build_tag7b_session_summary(const GameConfig &cfg,
-                                                 const std::string &mission_text_title,
-                                                 const NapiNPConnection &conn) {
-	std::vector<uint8_t> payload;
-	const std::string &advertised_mission =
-			game_type::is_waypoint_family(cfg.game_type)
-					? cfg.mission_file
-					: mission_title_or_header(mission_text_title, cfg.mission_name);
-	append_cstr(payload, conn.player_name.empty() ? conn.reply.player_name
-	                                             : conn.player_name); // recipient player_data+128
-	append_cstr(payload, conn.account.pcid); // [orig: NapiNPMsg_0x7B_BuildPayload @0x5077ac, player+0x250] the recipient's PCID
-	append_cstr(payload, cfg.server_name); // [orig: g_ServerNameStr @0x24D1FC4]
-	append_cstr(payload, advertised_mission);
-	append_cstr(payload, cfg.mission_file);// [orig: g_MapFileName @0x24D1F3E]
-	io::append_u32_le(payload, cfg.game_type);  // [orig: g_GameType @0x24D2128]
-	payload.push_back(0);                  // [orig: g_EmptyStr @0x7C08C6] empty C string
-	append_cstr(payload, cfg.expansion);   // [orig: g_ExpansionName @0xB4C584]
-	return payload;
-}
-
-namespace {
-
-// The chunk header + at most 200 bytes of the stream from `offset`, shared by the
-// 0x60 (server-info VarList) and 0x64 (mission block) transfers. Header dword 0 is
-// the LIVE transfer identity, dword 1 the total length and dword 2 the clamped
-// offset; an offset past the end yields an empty chunk. The client re-requests
-// with [id][nextOffset] (C2S 0x33/0x37) and a mismatched id restarts at 0.
-// [orig: NetPacket_WriteReplayDataBlock @0x5071F0 — copyLen clamp 200 @0x507255,
-//  header @0x50727D..0x5072A0; NetPacket_WriteFixed180Block @0x507300 (180-byte
-//  block, same 200 clamp); NapiNPServerMsg_HandleReplayRequest @0x515230 token
-//  compare @0x51528B; NapiNPServerMsg_0x037_SendCircularBuffer @0x5152E0 @0x51533B]
-constexpr uint32_t kTransferChunkBytes = 200;
-
-std::vector<uint8_t> build_transfer_chunk(uint32_t transfer_id, const uint8_t *stream,
-                                          uint32_t total, uint32_t offset) {
-	const uint32_t clamped_offset = std::min(offset, total);
-	const uint32_t copy_len = std::min(total - clamped_offset, kTransferChunkBytes);
-	std::vector<uint8_t> reply(12, 0);
-	io::write_u32_le(reply.data(), transfer_id);
-	io::write_u32_le(reply.data() + 4, total);
-	io::write_u32_le(reply.data() + 8, clamped_offset);
-	reply.insert(reply.end(), stream + clamped_offset, stream + clamped_offset + copy_len);
-	return reply;
-}
-
-// The [u32 id][u32 offset] body of a C2S 0x33/0x37 re-request. The retail
-// handlers read both dwords and reset the offset to 0 when the token is not
-// the live transfer id; a short body reads as {0, 0} (the first request is
-// eight zero bytes). [orig: @0x515230 / @0x5152E0]
-uint32_t chunk_request_offset(const std::vector<uint8_t> &payload, uint32_t live_transfer_id) {
-	if (payload.size() < 8) return 0;
-	const uint32_t token = static_cast<uint32_t>(payload[0]) |
-			(static_cast<uint32_t>(payload[1]) << 8) |
-			(static_cast<uint32_t>(payload[2]) << 16) |
-			(static_cast<uint32_t>(payload[3]) << 24);
-	const uint32_t offset = static_cast<uint32_t>(payload[4]) |
-			(static_cast<uint32_t>(payload[5]) << 8) |
-			(static_cast<uint32_t>(payload[6]) << 16) |
-			(static_cast<uint32_t>(payload[7]) << 24);
-	return token == live_transfer_id ? offset : 0u;
-}
-
-// tag=0x60 chunked server-info KV transfer: the authority's session-variable
-// stream (host_session_vars). [orig: NapiNPClientMsg_HandleFileTransferChunk @0x432350;
-// the stream Game_SerializeMissionInfoToDataStream @0x523620]
-std::vector<uint8_t> build_tag60_server_info(const GameConfig &cfg,
-                                             const std::string &mission_text_title,
-                                             uint32_t transfer_id, uint32_t offset) {
-	const std::vector<uint8_t> info_body =
-			encode_session_vars(host_session_vars(cfg, mission_text_title));
-	return build_transfer_chunk(transfer_id, info_body.data(),
-	                            static_cast<uint32_t>(info_body.size()), offset);
-}
-
-// tag=0x64 chunked mission-metadata transfer. [orig: NapiNPClientMsg_HandleMissionDataChunk (0x64) @0x432410]
-std::vector<uint8_t> build_tag64_mission_metadata(
-		const GameConfig &cfg, const MissionMetadataBlob *session_blob,
-		uint32_t transfer_id, uint32_t offset) {
-	MissionMetadataBlob fallback{};
-	if (session_blob == nullptr) {
-		fallback = build_mission_metadata_blob(cfg, !cfg.dedicated_server, nullptr); // no ctx
-		session_blob = &fallback;
-	}
-	return build_transfer_chunk(transfer_id, session_blob->data(),
-	                            static_cast<uint32_t>(session_blob->size()), offset);
 }
 
 // tag=0x57 RTT pong. [orig: NapiNPServerMsg_HandlePingResponse @0x515070 -> NetPacket_WriteInt32AndByte_0
@@ -346,7 +131,8 @@ std::vector<uint8_t> build_tag1a_tick(uint32_t now_tick) {
 // this is just the inmatch-side roster walk (it reads NapiNPConnection) that builds the entry list.
 std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 	                                    const std::vector<NapiNPConnection> &roster,
-                                        world::World *world) {
+                                        world::World *world,
+                                        const std::vector<OrphanedPlayerRow> *orphaned) {
 	PlayerListFrame frame;
 	world::MatchLiveScoreboard scoreboard;
 	if (world != nullptr) {
@@ -369,6 +155,17 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 		PlayerListEntry row;
 	};
 	std::vector<ScoredPlayerListEntry> rows;
+	// One row's scores: the mode stat and the points of its body's match record.
+	auto score_row = [&](PlayerListEntry &row, world::EntityHandle body) {
+		int32_t computed_score = 0;
+		if (world == nullptr) return computed_score;
+		if (const world::MatchPlayer *player = world->match.player(body)) {
+			row.score1 = static_cast<uint16_t>(world->match.primary_score(*player));
+			row.score2 = static_cast<uint16_t>(player->stats[world::MatchStats::kPoints]);
+			computed_score = world->match.computed_score(*player, scoreboard.team_mode);
+		}
+		return computed_score;
+	};
 	for (const NapiNPConnection &c : roster) {
 		if (c.phase < ConnectionPhase::PlayerAdded || !c.link.owned_entity.valid()) continue;
 		// Rows carry slots in state 6 exactly with a bound entity: a loading joiner is no row
@@ -409,6 +206,24 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 		}
 		rows.push_back({computed_score, row});
 	}
+	// An orphaned row is a slot row like any other: active, in state 6 when the re-add left it
+	// there, its slot team byte, its spectator latch and its body's score (D-NET-NEW-L1-24).
+	// [orig: Server_BuildAndBroadcastScoreboard @0x50D960 - the slot walk, state 6 @0x50D9F6,
+	//  the slot team @0x50DAF2]
+	const bool round_over = world != nullptr && world->match.outcome().ended;
+	if (orphaned != nullptr && !round_over) {
+		for (const OrphanedPlayerRow &orphan : *orphaned) {
+			const NapiNPConnection &o = orphan.row;
+			if (!o.burst.spawned || !o.link.owned_entity.valid()) continue;
+			PlayerListEntry row;
+			row.slot = o.reply.player_slot;
+			row.team = o.assigned_team_valid ? o.assigned_team : uint8_t{0};
+			row.spectator = o.link.spectator;
+			row.status_flags = 0;
+			const int32_t computed_score = score_row(row, o.link.owned_entity);
+			rows.push_back({computed_score, row});
+		}
+	}
 	// Retail scans the slots in numeric order, pairs each row with
 	// Player_ComputeScore's value, then shell-sorts the pair list by that value
 	// before serializing — the wire row order IS the board order, and the
@@ -444,7 +259,8 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 	//  +100579 = 0 @0x51CD5D; Server_HandlePlayerDisconnect's memset @0x51b87d]
 	frame.in_game_count = static_cast<uint8_t>(std::min<size_t>(
 			static_cast<size_t>(std::count_if(roster.begin(), roster.end(),
-					[](const NapiNPConnection &c) { return player_slot_active(c); })),
+					[](const NapiNPConnection &c) { return player_slot_active(c); })) +
+					(orphaned != nullptr ? orphaned->size() : size_t{0}),
 			0xFFu));
 	// The spectator count rides the row loop: each emitted row whose spectator
 	// latch (slot+100567) is set, the same byte the row's bit 0 carries
@@ -459,18 +275,7 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 	return encode_player_list(frame);
 }
 
-// tag=0x1E GAME-EVENT ev 0x3A (58) — the private deploy-screen frontier hint: "go capture zone N".
-// attacker byte = the requester team's frontier zone number [orig: Server_DeployPlayer
-// @0x517740 — GameEvent_BuildPayload(0x3A, ZoneSlotChain_FindFrontierZone(team), 0xFF, 0xFF, 0, 0)
-// @0x517A1D, mask 0x20; §5.26 8-B body via GameEvent_BuildPayload @0x5054E0]. The golden retail
-// frame-82540 body was {0x3a, 0x04, ...} — the retail host's live frontier at that moment; a
-// World-less host keeps that golden byte so the burst pins hold.
-std::vector<uint8_t> build_tag_1e_frontier_hint(uint8_t frontier_zone) {
-	return {0x3a, frontier_zone, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00};
-}
-std::vector<uint8_t> build_tag_1e_game_event_post_spawn() {
-	return build_tag_1e_frontier_hint(0x04); // the golden frame-82540 byte (World-less fallback)
-}
+} // namespace
 
 // ---------------------------------------------------------------------------
 // Dispatch helpers.
@@ -537,104 +342,29 @@ PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnect
 	return ctx;
 }
 
-// tag=0x04 join/slot-assignment body (24 B) [orig: NetPacket_WriteSlotAssignment @0x502b30, sent from
-// CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0]: [4x u32 netPlayer+60..72 stat dwords (0 on a fresh
-// join)][u8 g_difficulty g_SessionDifficulty][u8 player_slot (slot+20)][u8 slot capacity @0x24c0ca4][u32 0]
-// [u8 team (slot+416)]. The retail reader skips the four leading dwords and the
-// pad and stores bytes 16/17/18/23; byte 16 lands in the joiner's own
-// g_SessionDifficulty, the difficulty word its max-health and score tallies read.
-// [orig: NapiNPClientMsg_SessionSlotConfig @0x425410 (@0x4254A8 byte 16);
-//  Entity_GetMaxHealthWithDifficulty @0x43B8A0; Score_TallyKillByLocalPlayer @0x4FD160]
-std::vector<uint8_t> build_tag04_slot_assignment(uint8_t difficulty, uint8_t player_slot,
-                                                 uint8_t slot_capacity, uint8_t team) {
-	std::vector<uint8_t> payload(24, 0);
-	payload[16] = difficulty;    // [orig: g_SessionDifficulty's low byte, NetPacket_WriteSlotAssignment @0x502B96]
-	payload[17] = player_slot;   // the joiner's assigned slot index [orig slot+20]
-	payload[18] = slot_capacity; // player-slot array capacity [orig: g_PlayerSlotCapacity @0x24c0ca4]
-	payload[23] = team;          // [orig slot+416]
-	return payload;
-}
+namespace {
 
 // S2C 0x75 is the requesting player's live slot state, not a fixed
 // "spectator flags" fixture. Byte 0 is the spectator/death-screen bit and byte
 // 1 is playerSlot+416 (team), the slot's own byte whatever its body's team
 // (D-NET-651), written straight into the retail client's g_LocalTeam loadout
-// selector. [orig: NetPacket_SerializeHostEntityState (ex sub_510890) @0x510890
-// - `mov dl, [eax+1A0h]` @0x5108D0; NapiNPClientMsg_SetSpectatorMode @0x4259E0]
-std::vector<uint8_t> build_tag75_player_state(const NapiNPConnection &conn) {
+// selector. The authority's own slot's byte 0 reads the host's pre.mnu SPECTATE
+// word itself (GameConfig::join_spectate), normalized to 1; a remote slot's reads its
+// connection's latch, set at its join from a nonzero JSR and never by a later convert
+// (C2S 0x51 latches the slot alone), so a player converted in the match still reads 0.
+// [orig: NetPacket_SerializeHostEntityState (ex sub_510890) @0x510890 - the own
+//  slot's (+5) word @0x5108A1..0x5108A7, the connection entry's +0x37 `setnz`
+//  @0x5108AF..0x5108B6, the normalization @0x5108B9..0x5108BF, `mov dl, [eax+1A0h]`
+//  @0x5108D0; NapiNPServer_HandlePlayerJoinMessage - +0x1C8 against 0, +0x37 = 1
+//  @0x512E57..0x512E60; Server_ConvertPlayerToSpectator - the slot latch alone
+//  @0x519E61; NapiNPClientMsg_SetSpectatorMode @0x4259E0]
+std::vector<uint8_t> build_tag75_player_state(const GameConfig &config,
+		const NapiNPConnection &conn) {
 	const uint8_t team = conn.assigned_team_valid ? conn.assigned_team : 0;
-	return {static_cast<uint8_t>(conn.link.spectator ? 0x01u : 0x00u), team};
-}
-
-// tag=0x02 GLB_JOIN admission boundary. [orig: NapiNPServerMsg_0x002 @0x512FD0 emits
-// 0x01/0x7A/0x7B/0x03.] CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0 emits the later
-// 0x03/settings/0x05/0x04/0x7B boundary via build_spawn_pump_metadata. Both bodies and the
-// intervening packet boundary are witnessed by the PR #403 retail LAN capture:
-//   0x00 (settings flag 0xA0) = CS-config update [orig: CNapiNPConnection_SendConfigUpdate @0x6286e0:
-//        [u8 direction==0][u32 bit mask][u32 value per set bit]] — ours sets field idx 3 = 12 for both
-//        directions, matching the golden.
-//   0x03 = NetPacket_WriteWeaponRestrictionFlag @0x502ac0: [u8 1][u16 list-node count][u16 weapon mask
-//        (netPlayer inner+76)] when restriction data exists, else [u8 0].
-//   0x05 = NetPacket_WriteBoolTrue @0x502c00: exactly {0x01}.
-//   0x04 = NetPacket_WriteSlotAssignment @0x502b30 (build_tag04_slot_assignment above).]
-// The 0x04 carries THIS connection's live slot + the host's slot capacity + the assigned team —
-// byte 17 lands in g_LocalPlayerSlotId (the client's own slot id) and byte 18 in g_MaxPlayerSlots
-// (g_MaxPlayerSlots, the 0x46/0x22 roster-walk terminator): the prior hardcoded (1, 2, 2)
-// capped every client's walk at slot 1, so a third player's slot never bound (D-NET-158).
-void append_connection_settings(const GameConfig &cfg,
-                                std::vector<ProtocolMessage> &out) {
-	const uint32_t configured_holdoff = cfg.effective_send_holdoff_ticks();
-	const uint8_t holdoff = static_cast<uint8_t>(
-			configured_holdoff < 255 ? configured_holdoff : 255);
-	out.push_back(make_protocol_message(
-			hightag::CS_CONFIG_UPDATE,
-			{0, 0x08, 0, 0, 0, holdoff, 0, 0, 0},
-			PROTOCOL_MSG_FLAG_SETTINGS_UPDATE | PROTOCOL_MSG_FLAG_LEN8));
-	out.push_back(make_protocol_message(
-			hightag::CS_CONFIG_UPDATE,
-			{1, 0x08, 0, 0, 0, holdoff, 0, 0, 0},
-			PROTOCOL_MSG_FLAG_SETTINGS_UPDATE | PROTOCOL_MSG_FLAG_LEN8));
-}
-
-void emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
-                             std::vector<NapiNPConnection> &roster, world::World *world,
-                             const NapiNPServerCtx *ctx, std::vector<ProtocolMessage> &out) {
-	// Retail's 0x02 handler picks no slot row: it stamps the timing and the holdoff, sends the
-	// 0x01 / 0x7A / 0x7B / 0x03 records and sets game state 7, and Server_PlayerAdd picks the
-	// row at the add. So a joiner the lineup queue admitted past the rows completes its
-	// admission, and the spawn pump holds it past the cap (re-sending the 0x03) until a row
-	// frees. Ours reserves a row here when one is free (the delayed 0x04 and the live entity
-	// then agree); with none, the add reserves it.
-	// [orig: the C2S 0x02 handler @0x512FD0 - NapiNPServer_UpdateHoldoffTicks @0x513068, the
-	//  sends @0x5130AC..0x5131D5, game state 7 @0x51319C; Server_PlayerAdd's row pick
-	//  @0x51CC9A; CNapiServer_ProcessPendingPlayerSpawns's cap @0x4C8E13]
-	const uint8_t capacity =
-			static_cast<uint8_t>(cfg.total_player_slot_capacity()); // [orig: g_PlayerSlotCapacity @0x24c0ca4]
-	(void)Server_ReservePlayerSlot(roster, conn, capacity);
-	// Team is allocated at admission, even though it is intentionally not serialized until
-	// the later spawn-pump packet. Player-add consumes this reservation, so the delayed 0x04
-	// and the live entity cannot disagree.
-	if (world != nullptr) {
-		(void)Server_ReservePlayerTeam(cfg, /*is_in_session=*/true, roster, conn, *world,
-				ctx != nullptr ? ctx->rotation : nullptr, ctx != nullptr ? &ctx->host_slot : nullptr);
-	}
-
-	// The both-direction send-holdoff dictation (H:0x00 mask 8 / CS field 3)
-	// [orig: NapiNPServer_UpdateHoldoffTicks @0x4c5f40 sends @0x4c5fc0/@0x4c5fcb;
-	// the golden NovaWorld capture carries 0x0C = 12 here]. OpenNova dictates
-	// the resolved retail session period, unless the host supplied an explicit
-	// GameConfig override (D-NET-197).
-	const uint32_t configured_holdoff = cfg.effective_send_holdoff_ticks();
-	append_connection_settings(cfg, out);
-	conn.s2c_send_holdoff_ticks = clamp_send_holdoff_ticks(configured_holdoff);
-	reset_s2c_send_holdoff_counter(conn);
-	out.push_back(make_protocol_message(s2c::SYNC_STATE, {0x01, 0x00, 0x00, 0x00}));
-	out.push_back(make_protocol_message(s2c::PLAYER_NAME, build_tag7a_pcid(conn)));
-	out.push_back(make_protocol_message(
-			s2c::FULL_PLAYER_INFO,
-			build_tag7b_session_summary(cfg, context_mission_text_title(ctx), conn)));
-	// [u8 1][u16 count=1][u16 mask=1] — the golden's live restriction record shape.
-	out.push_back(make_protocol_message(s2c::SYNC_TICK, {0x01, 0x01, 0x00, 0x01, 0x00}));
+	const bool spectator = conn.type == NapiNPConnection::kTypeClientSide
+			? static_cast<uint8_t>(config.join_spectate) != 0
+			: conn.join_spectator_request != 0;
+	return {static_cast<uint8_t>(spectator ? 0x01u : 0x00u), team};
 }
 
 // Build a 0x46 player-sync for a SPECIFIC roster slot (the one the client's C2S 0x22 requests). Finds
@@ -677,304 +407,66 @@ void cache_client_pose(const std::vector<uint8_t> &payload, SessionReplyState &s
 	}
 }
 
-// The C2S 0x00 JOIN body's CD identity blob: the flat-TLV run is walked for
-// the "CD" field, whose value packs [name\0][value\0] pairs back to back (the
-// NovaWorld NAMEINFO / PCID / SQUADINFO / JOINTICKET cookies). A LAN join
-// carries no CD and yields no pairs. Each CD the walk meets replaces the
-// connection's cookie buffer (the previous one freed, a CD of no length leaving
-// none), so the last CD is the cookie, however the walk's fields overlap.
-// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 - the "CD" compare
-//  @0x512C45, the store @0x512C5D -> CNetPlayer_SetCookieBuffer @0x4C6060 (frees +0x2DC @0x4C6072, zeroes
-//  +0x2DC / +0x2E0 @0x4C6080..0x4C6086, keeps none for a length below 1
-//  @0x4C608E..0x4C6095, else a copy of the declared length); KeyValueBuffer_FindValue
-//  @0x4C2A30]
-std::vector<std::pair<std::string, std::string>> parse_join_identity_pairs(
-		const std::vector<uint8_t> &payload) {
-	std::vector<std::pair<std::string, std::string>> pairs;
-	const uint8_t *cookie = nullptr;
-	size_t cookie_bytes = 0;
-	size_t pos = 0;
-	while (pos < payload.size()) {
-		FlatTlvField field;
-		const size_t next = read_flat_tlv(payload.data(), payload.size(), pos, field);
-		if (next == kFlatTlvEnd || field.name.empty()) break;
-		pos = next;
-		if (!strutil::iequals(field.name, "CD")) continue;
-		// The cookie's bytes inside the JOIN: a CD that runs past them reads on in retail
-		// (D-NET-410), and the pairs past them are not read here.
-		cookie = field.size < 1 ? nullptr : field.value;
-		cookie_bytes = field.size < 1 ? 0 : field.present;
+// The first u32 of a body, or 0 for a body shorter than four bytes (no partial read).
+// [orig: the `packet + 4 <= end` tests @0x5024E2 / @0x511245]
+uint32_t read_u32_or_zero(const std::vector<uint8_t> &payload) {
+	return payload.size() >= 4 ? read_u32_le_lenient(payload, 0) : 0u;
+}
+
+// C2S 0x34, the keepalive: the value raises the slot's high-water when the slot is in its
+// tick mode and the value is at or past both the seed and the high-water, each a signed
+// compare; nothing is sent.
+// [orig: NapiNPServerMsg_UpdateAck @0x5024B0 — the authority @0x5024B7, the read
+//  @0x5024E2..0x5024E8, the tick mode +96480 @0x5024EA, the seed +96464 `jl` @0x5024F3,
+//  the high-water +96476 `jl` @0x5024FB, the store @0x502503]
+void dispatch_keepalive_ack(NapiNPConnection &conn, const std::vector<uint8_t> &payload) {
+	const int32_t value = static_cast<int32_t>(read_u32_or_zero(payload));
+	if (!conn.fire_tick_mode) return;
+	if (value < static_cast<int32_t>(conn.tick_seed)) return;
+	if (value < static_cast<int32_t>(conn.keepalive_ack_high_water)) return;
+	conn.keepalive_ack_high_water = static_cast<uint32_t>(value);
+}
+
+// C2S 0x4E, the squad registry walk: the registry node with the smallest id strictly past
+// the value (signed; the first of equals, which the upsert never makes), sent back as
+// S2C 0x6A action 3 to the requester alone, reliable; no node, nothing (a LAN host's
+// registry is empty).
+// [orig: NapiNPServerMsg_HandleSquadRegistryWalk @0x511210 — the authority @0x511217, the
+//  read @0x511245..0x51124B, CLinkedList_FindNextByNetId @0x52B190 (called @0x511253; the
+//  signed `jle` @0x52B1B5 and `jge` @0x52B1BD), mask 32 @0x51126C, the slot @0x511276,
+//  NetPacket_SerializeMinimapSlot(.., 3, node) @0x51127C, the send @0x51129E]
+void dispatch_squad_registry_walk(const NapiNPServerCtx *ctx, const std::vector<uint8_t> &payload,
+		std::vector<ProtocolMessage> &replies) {
+	if (ctx == nullptr) return;
+	const int32_t after = static_cast<int32_t>(read_u32_or_zero(payload));
+	const SquadRegistryNode *best = nullptr;
+	for (const SquadRegistryNode &node : ctx->squad_registry) {
+		if (node.squad_id <= after) continue;
+		if (best != nullptr && node.squad_id >= best->squad_id) continue;
+		best = &node;
 	}
-	if (cookie != nullptr) {
-		const uint8_t *cursor = cookie;
-		const uint8_t *end = cookie + cookie_bytes;
-		while (cursor < end) {
-			const uint8_t *name_end = std::find(cursor, end, uint8_t{0});
-			if (name_end == end) break;
-			const uint8_t *value_end = std::find(name_end + 1, end, uint8_t{0});
-			if (value_end == end) break;
-			pairs.emplace_back(std::string(cursor, name_end), std::string(name_end + 1, value_end));
-			cursor = value_end + 1;
-		}
-	}
-	return pairs;
+	if (best == nullptr) return;
+	ClanRosterUpdate reply;
+	reply.action = kClanRosterWalkReply;
+	reply.account_id = static_cast<uint32_t>(best->squad_id);
+	reply.name = best->name;
+	reply.tag = best->tag;
+	replies.push_back(make_protocol_message(s2c::CLAN_ROSTER, encode_clan_roster_update(reply)));
+}
+
+// C2S 0x24, the ban and punt line: its body to the NUL (or the end) through the console's
+// handler with the sender, which authorizes the local slot alone, so a remote line does
+// nothing and draws nothing. [orig: NapiNPServerMsg_0x024 @0x514DC0 — the authority
+//  @0x514DC7, the slot @0x514DCD..0x514DDF, Server_HandleBanPuntCommand(body, slot) @0x514DE7]
+void dispatch_ban_punt_command(NapiNPServerCtx *ctx, NapiNPConnection &conn,
+		const std::vector<uint8_t> &payload, std::vector<ProtocolMessage> &replies) {
+	if (ctx == nullptr) return;
+	const auto nul = std::find(payload.begin(), payload.end(), uint8_t{0});
+	const std::string line(payload.begin(), nul);
+	Server_HandleBanPuntCommand(*ctx, line, &conn, &replies);
 }
 
 } // namespace
-
-// The authority's session variables as its serializer writes them: the
-// configured server name; session_mission_name (the map filename for the
-// stock Co-op selector; objective/waypoint Co-op, bit 0x20000, and every other
-// mode keep MissionText's display title, else the header's name); the game
-// type; the custom text; the
-// map file; score.ini's EXP_FANFARE lo/hi thresholds (the joiner arms its
-// kill / headshot tones only when lo is nonzero and lo < hi, so {0,0}
-// silences them).
-// [orig: Game_SerializeMissionInfoToDataStream @0x523620 -- SERVERNAME
-//  <- g_ServerNameStr @0x5236b1, MISSIONNAME the coop arm @0x523758 else
-//  [info]/title @0x5237df, GAMETYPE @0x5238c7, CUSTOMTEXT @0x523914,
-//  MISSIONFILENAME @0x5239a6, EXP_FANFARE word_24C1170 @0x523a39;
-//  NapiNPClientMsg_ScoreDeltaSound @0x42A0B0]
-std::string session_mission_name(uint32_t game_type, const std::string &mission_file,
-		const std::string &mission_text_title, const std::string &header_name) {
-	return game_type::is_stock_coop(game_type)
-			? mission_file
-			: mission_title_or_header(mission_text_title, header_name);
-}
-
-SessionVars host_session_vars(const GameConfig &cfg, const std::string &mission_text_title) {
-	SessionVars vars;
-	vars.server_name = cfg.server_name;
-	vars.mission_name = session_mission_name(
-			cfg.game_type, cfg.mission_file, mission_text_title, cfg.mission_name);
-	vars.game_type = cfg.game_type;
-	vars.custom_text = cfg.custom_text;
-	vars.mission_file = cfg.mission_file;
-	vars.exp_fanfare = cfg.exp_fanfare;
-	return vars;
-}
-
-std::vector<ProtocolMessage> build_spawn_pump_metadata(
-		const GameConfig &config, const std::string &mission_text_title, NapiNPConnection &conn,
-		const std::vector<NapiNPConnection> &roster, world::World *world,
-		const HostRotation *rotation, const HostSlotRow *host_slot) {
-	std::vector<ProtocolMessage> messages;
-	const uint8_t capacity = static_cast<uint8_t>(
-			config.total_player_slot_capacity());
-	const std::optional<uint8_t> player_slot =
-			Server_ReservePlayerSlot(roster, conn, capacity);
-	if (!player_slot.has_value()) return messages;
-
-	uint8_t team = 2; // only used by a World-less test seam
-	if (world != nullptr) {
-		const world::Entity *entity = conn.link.owned_entity.valid()
-				? world->registry.get(conn.link.owned_entity)
-				: nullptr;
-		team = entity != nullptr
-				? entity->team
-				: Server_ReservePlayerTeam(
-						config, /*is_in_session=*/true, roster, conn, *world, rotation, host_slot);
-	}
-
-	// Exact CNapiServer_ProcessPendingPlayerSpawns ordering from the retail LAN
-	// witness. 0x03 is the one-byte reset variant, distinct from the five-byte
-	// restriction record returned by the C2S 0x02 handler.
-	messages.push_back(make_protocol_message(s2c::SYNC_TICK, {0x00}));
-	append_connection_settings(config, messages);
-	messages.push_back(make_protocol_message(s2c::GAME_START_SIGNAL, {0x01}));
-	// config_bytes[6] is the session's g_SessionDifficulty low byte (the S2C 0x08
-	// record's seventh byte) — the same word the 0x04 hands the joiner.
-	messages.push_back(make_protocol_message(
-			0x04, build_tag04_slot_assignment(
-					config.config_bytes[6], *player_slot, capacity, team)));
-	messages.push_back(make_protocol_message(
-			s2c::FULL_PLAYER_INFO, build_tag7b_session_summary(config, mission_text_title, conn)));
-	return messages;
-}
-
-std::vector<uint8_t> build_spawn_wave_status_body(
-		const world::World &world, const NapiNPConnection &conn) {
-	std::vector<uint8_t> body;
-	const world::EntityHandle requester = conn.link.owned_entity;
-	const uint8_t team = conn.assigned_team; // the slot team (D-NET-581) [orig: @0x5074CF]
-	const world::SpawnZoneRegistry zones = world.zones.build_spawn_zone_list();
-	std::vector<const world::SpawnWaveEntry *> visible;
-	for (const world::SpawnWaveEntry &entry : world.zones.spawn_waves.entries())
-		if (entry.team == team && visible.size() < 0xFFu) // [orig: @0x507539]
-			visible.push_back(&entry);
-	body.reserve(1 + visible.size() * 9);
-	body.push_back(static_cast<uint8_t>(visible.size()));
-	for (const world::SpawnWaveEntry *entry : visible) {
-		const uint16_t zone = entry->zone.valid()
-				? entry->zone.packed
-				: uint16_t{0xFFFF};
-		body.push_back(static_cast<uint8_t>(zone));
-		body.push_back(static_cast<uint8_t>(zone >> 8));
-		const int zone_index = world::spawn_zone_index_of(zones, entry->zone);
-		const uint16_t wire_index = zone_index >= 0
-				? static_cast<uint16_t>(zone_index)
-				: uint16_t{0xFFFF};
-		body.push_back(static_cast<uint8_t>(wire_index));
-		body.push_back(static_cast<uint8_t>(wire_index >> 8));
-		body.push_back(static_cast<uint8_t>(entry->queued.size()));
-		const uint16_t countdown = entry->requester_countdown(requester);
-		body.push_back(static_cast<uint8_t>(countdown));
-		body.push_back(static_cast<uint8_t>(countdown >> 8));
-		for (const world::EntityHandle member : entry->queued) {
-			body.push_back(static_cast<uint8_t>(member.packed));
-			body.push_back(static_cast<uint8_t>(member.packed >> 8));
-		}
-	}
-	return body;
-}
-
-std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
-		const GameConfig &config, NapiNPConnection &conn,
-		world::World &world, world::EntityHandle target_zone, uint16_t requested_handle,
-		ServerLogRecorder *server_log, const TitleIdentity *title) {
-	std::vector<ProtocolMessage> replies;
-	// The hold (slot state) clears first, ahead of the body's def test, so a refused
-	// mobile spawn below leaves the slot unheld (D-NET-552) [orig: Server_DeployPlayer
-	//  @0x517791 `and byte ptr [esi+15F38h], 0EFh`, the def test @0x517798].
-	conn.link.respawn_pending = false;
-	world.match.set_player_respawn_pending(conn.link.owned_entity, false);
-	if (!conn.link.owned_entity.valid()) return replies;
-	world::Entity *player = world.registry.get(conn.link.owned_entity);
-	if (player == nullptr) return replies;
-	// Server_DeployPlayer always releases the old seat before inspecting
-	// a requested mobile spawn. If the requester was the vehicle's primary
-	// occupant, this clears +0x170 and the subsequent mobile-spawn gate rejects.
-	// [orig: Server_DeployPlayer @0x5177A9..0x5177DB]
-	if (player->mounted)
-		world.vehicles.detach(player->handle);
-	const world::Entity *target = world.registry.get(target_zone);
-	const bool mobile_spawn = target != nullptr && target->is_spawn_point &&
-			target->item_type == 1;
-	if (mobile_spawn) {
-		// The root's dead bit, then its +0x170, then the walk [orig: Server_DeployPlayer
-		//  @0x5177CB / @0x5177CF, @0x5177D5 / @0x5177DB, @0x5177EA / @0x5177F4].
-		world::VehicleSeatSelection selected;
-		if (((target->flags | target->engine_flags) & world::kEntityFlagDead) != 0 ||
-				!target->primary_occupant.valid() ||
-				!world::find_best_vehicle_seat(
-						world, target_zone, player->handle, selected)) {
-			// Each a bare return [orig: @0x517A7C]; the next 0x0A shows the unheld slot, as
-			// the deploy's below [orig: NetPacket_WritePlayerState @0x4FF6D7, the hold @0x4FF7AA].
-			if (!conn.link.spectator) player->flags &= ~1u;
-			return replies;
-		}
-	}
-	// The revive latch (+89932) skips the spawn protection and the kit rebuild below;
-	// the placement lands a revive on its saved position (server_spawn.h). [orig: the
-	//  latch @0x51791C; GameEvent_RevivePlayer @0x517DCD..0x517E09 saves]
-	const bool revive_deploy = conn.reply.revive_pose_valid;
-	const world::SpawnPointResult pose =
-			Server_PositionDeployingPlayer(config, conn, world, *player, target_zone);
-	// The Co-op marker arm's chute bit and queued carrier mount survive the
-	// spawn-state reset below (it clears only the dead bit).
-	// [orig: Server_PositionPlayerForSpawn @0x50D424..0x50D45A]
-	world::apply_spawn_point_latches(*player, pose);
-	// The deploy's and the reset's signed raises to the row's difficulty-aware ceiling: 0 leaves
-	// the hp-0 body's 1, a wrapped one a dead player's health [orig: Server_DeployPlayer ->
-	// Entity_RaiseHealthToMax @0x51782F; Entity_ResetToSpawnState @0x4B97BC].
-	const bool def_hp = world.tables.player.has_item_def && world.tables.player.item_hp.has_value();
-	const int32_t ceiling = def_hp || player->health_max > 0 ? world::max_health_with_difficulty(
-			world, *player, def_hp ? *world.tables.player.item_hp : player->health_max) : 100;
-	if (world::retail_signed_i16(player->health) < ceiling) player->health = ceiling;
-	world::entity_reset_to_spawn_state(*player, ceiling);
-	// Spawn protection: every deploy of a non-bot slot whose revive latch (+89932)
-	// is clear stores the title's ticks into entity+292 (deploy_spawn_protection_ticks;
-	// the reset above never touches it); the per-tick arm in Server_TickUpdate counts it
-	// down, the first validated fire clears it, and Projectile_ProcessDamageOnTarget
-	// zeroes damage while it is nonzero. The bot (+96483) and revive-latch 0-stores have
-	// no roster feature to reach them here.
-	// [orig: Server_DeployPlayer @0x517740 — 0 @0x51790a (bot) / @0x51791c (revive)]
-	player->damage_state = revive_deploy ? 0 : deploy_spawn_protection_ticks(config.title, target);
-	if (world::AiEntity *motor =
-			world.ai.for_handle(player->handle);
-			motor != nullptr && motor->inf.active) {
-		const int32_t motor_position[3] = {
-				world::to_fixed(player->position.x),
-				world::to_fixed(player->position.y),
-				world::to_fixed(player->position.z),
-		};
-		// The placement's heading word (D-NET-376), a revive's included; with no
-		// pick the body keeps its own word (D-NET-377) [orig: @0x50D3F7; @0x50D60A].
-		const int32_t heading = pose.found ? pose.heading_bam : motor->heading;
-		world::infantry_respawn_snap(*motor, motor_position, heading, player->health);
-	}
-	// The reset's tail rebuilds every slice at the placed pose (restarting the 17-tick phase),
-	// then the body's list; its resolver pass is D-AI-9's [orig: Entity_ResetToSpawnState
-	// @0x4B9610 - the resolver @0x4B9755, the builder @0x4B98EB, its list @0x4B98F1].
-	if (world.collision != nullptr) world.collision->refresh_entity_proximity(world, *player);
-	// [orig: Server_DeployPlayer @0x5178aa]
-    if (player->handle == world.cached.local_player && world.local_player_state != nullptr)
-        world.local_player_state->reset_for_new_round();
-	// A deploy that is not a medic revive removes the devices a non-spectator
-	// placed in its last life (each through the notifying removal; they stay
-	// armed from the death until here), then rebuilds the slot's kit from its
-	// loadout buffer; a revived player keeps the kit it died with (D-NET-378).
-	// [orig: Server_DeployPlayer @0x517740 — the revive latch test
-	//  @0x5178C5, the spectator latch test @0x5178CD, the
-	//  Entity_RemovePlacedDevicesByOwner call @0x5178D8, the
-	//  PlayerSlot_InitWeaponsFromLoadout call @0x5178E1]
-	if (!revive_deploy) {
-		if (!conn.link.spectator) world.commands.remove_placed_devices_by_owner(player->handle);
-		// The listen host's own slot is skipped: ours keeps the host's local
-		// inventory apart from the slot and does not refill it at a deploy
-		// (D-NET-479; retail's local table is the slot table, built from its
-		// buffer, which the round init seeds from g_SpawnLoadoutBuffer
-		// @0x516BCA..0x516BE3 and the host's own 0x2F accepts rewrite). The slot
-		// takes no 0x2F here, so the rebuild would only empty it.
-		if (player->handle != world.cached.local_player)
-			PlayerSlot_InitWeaponsFromLoadout(conn, world, *player);
-	}
-	conn.discard_pre_deploy_uplinks = true;
-	// No +360 store; the +364 hold clears only for a raw handle other than
-	// 0xFFFF, resolvable or not [orig: Server_DeployPlayer @0x51786B..0x517872].
-	if (requested_handle != world::EntityHandle::kInvalid)
-		conn.link.spawn_target_hold_seconds = 0;
-	conn.link.downed_revive_seconds = 0;
-	conn.link.medic_request_active = false;
-	conn.link.death_cause_revivable = false;
-	// The deploy leg overwrites the whole +89912 state byte (1, or 3 while the
-	// pre-round timer runs: bit 1 is the pre-round loadout latch) and zeroes the
-	// +356 armory cooldown; a DFX2 deploy writes 3 at every deploy (DFX2-11).
-	// [orig: Server_DeployPlayer @0x517803/@0x517812; slot+0x164 = 0 @0x517900]
-	// [orig: Server_DeployPlayer @0x514a55 (dfx2.exe)]
-	conn.link.preround_loadout_latch = world.preround_delay_seconds != 0 ||
-			title_in_match(title).join_state_fixed;
-	conn.reply.frontier_hint_pending = false; // bits 0x04/0x08 of the same byte
-	conn.reply.capture_nag_held = false;
-	conn.link.armory_reuse_seconds = 0;
-	conn.link.last_deploy_tick = world.logic_tick;
-	conn.link.last_deploy_tick_valid = true;
-	// The next 0x0A clears the hide bit and re-sets a spectator's, so a deployed
-	// spectator stays hidden [orig: NetPacket_WritePlayerState @0x4FF6D7, @0x4FF7A1].
-	if (!conn.link.spectator) player->flags &= ~1u;
-	server_logs_deploy(server_log, *player); // /PROFILE's PBRK [orig: Server_DeployPlayer @0x517a27..0x517a37]
-	if (mobile_spawn) {
-		// Retail repeats FindBestSeatSlot after the reset, then requests the
-		// authoritative attach against the returned root/child seat owner.
-		// [orig: Server_DeployPlayer @0x517A3E..0x517A74]
-		world::VehicleSeatSelection selected;
-		if (world::find_best_vehicle_seat(
-					world, target_zone, player->handle, selected))
-			world.vehicles.request_attach(player->handle, selected);
-	}
-	// Never on a revive deploy, whose client leaves the deploy wait on its record's
-	// respawn edge (D-NET-379), nor out of a session (world.rules.mp_session)
-	// [orig: @0x5178F2, under the @0x5178C5 test and is_in_session @0x5178E9 / @0x5178EF].
-	if (!revive_deploy && world.rules.mp_session)
-		replies.push_back(make_protocol_message(0x5A, current_weapon_slot_list(conn, &world)));
-	replies.push_back(make_protocol_message(0x61, Server_RerollPlayerTickSeed(conn)));
-	// The slot team's frontier (D-NET-583) [orig: @0x5179BA, the call @0x5179D9]
-	const uint8_t frontier = world.zones.frontier_zone(conn.assigned_team);
-	if (frontier != 0)
-		replies.push_back(make_protocol_message(
-				s2c::GAME_EVENT, build_tag_1e_frontier_hint(frontier)));
-	return replies;
-}
 
 bool is_medic_recipient(const NapiNPConnection &candidate,
 		const world::World &world, int32_t team_filter) {
@@ -1005,115 +497,56 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       world::World *world,
                                                       const ServerDispatchInputs &inputs) {
 	std::vector<ProtocolMessage> replies;
-	// A staged high-table disconnect is terminal even though the owner retains
-	// the node briefly to flush that reliable record. Do not let a retransmitted
-	// session packet queue ordinary traffic during that flush window.
-	if (conn.host_disconnect_sent) return replies;
+	// A connection whose description went has its records parsed (the receive stamp, the ack,
+	// the sequencing and the fragment fold all ran ahead of this), but no record's handler runs:
+	// the per-record dispatch tests the description's sent byte after the record's lookup and
+	// skips the pre-handler and the handler, and the byte never clears, so the record that stages
+	// a description ends the handling of every later one, in its datagram and after. Both walks
+	// below test it ahead of each record (D-NET-NEW-L1-27).
+	// [orig: CNapiNPConnection_ParseMessages @0x625BC0 - the record walk calls
+	//  CNapiNPConnection_DispatchMessage @0x625EF1; CNapiNPConnection_DispatchMessage @0x622570 -
+	//  NapiNPProtocol_FindMsgInfo called @0x622687, `cmp byte ptr [esi+70Dh], 0` @0x622697 /
+	//  `jnz` @0x62269E past the handler's call @0x6226EF]
 	SessionReplyState &st = conn.reply;
 	const PlayerReplicationState rep = make_rep_state(config, conn, world);
 	const IntegritySources &integrity = config.integrity_sources;
 
-	// The loadout gate (burst phase 7→8) is opened ONLY by the C2S 0x2F handler (case 0x2F below).
-	// A prior auto-advance ("any C2S at phase 8") fired on stale handshake messages before the
-	// client had processed 0x1A, defeating the pacing. The loopback (type-2) bypasses the gate.
-
+	// The admission records first, each through its handler; the records after the one that
+	// completed the admission go on through the in-match switch (D-NET-NEW-L1-24).
+	size_t first_in_match = 0;
 	if (conn.admission_stage != GameAdmissionStage::Complete) {
-		const ProtocolMessage *admission_message = nullptr;
-		for (const ProtocolMessage &message : messages) {
-			if (message.flags.settings_update || message.full_tag >= PROTOCOL_FULL_TAG_HIGH_BASE) continue;
-			// Each leg is a distinct sequenced request/reply turn. Two gameplay records in one
-			// datagram cannot be a valid 0x00 -> 0x01 or 0x01 -> 0x02 exchange because the client
-			// has not received the intervening acknowledgement/challenge.
-			if (admission_message != nullptr) {
-				conn.admission_stage = GameAdmissionStage::Rejected;
-				return {};
-			}
-			admission_message = &message;
-		}
-		// Header-only ACKs are part of the captured flow and do not advance or violate the FSM.
-		if (admission_message == nullptr) return {};
-
-		switch (conn.admission_stage) {
-			case GameAdmissionStage::AwaitJoinRequest: {
-				if (admission_message->tag != 0x00) {
-					conn.admission_stage = GameAdmissionStage::Rejected;
-					return {};
-				}
-				// The JOIN handler latches the spectator request before validation;
-				// the local loopback bypasses the complete remote validator.
-				// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512aa0;
-				// Server_ValidatePlayerJoinRequest @0x5121ab..0x5121af -> @0x512a76 (conn+0x2E set = accept unvalidated)]
-				// Its TLV walk keeps the CD cookie, whose PCID / SQUADINFO a remote
-				// connection on a NovaWorld session decrypts before the validator.
-				conn.join_identity_pairs = parse_join_identity_pairs(admission_message->payload);
-				read_join_cd_key_ids(conn, admission_message->payload);
-				const bool pcid_decrypted = inputs.server_ctx != nullptr &&
-						load_join_account_from_cookie(*inputs.server_ctx, conn);
-				if (conn.type != NapiNPConnection::kTypeClientSide) {
-					conn.link.spectator = conn.join_spectator_request != 0;
-					const uint32_t reject_dpc = Server_ValidatePlayerJoinRequest(config,
-							inputs.server_ctx, conn, roster, admission_message->payload,
-							pcid_decrypted);
-					if (reject_dpc != 0) {
-						(void)stage_join_gate_reject(conn, reject_dpc);
-						conn.admission_stage = GameAdmissionStage::Rejected;
-						return {};
-					}
-				}
-				replies.push_back(make_protocol_message(s2c::INIT, {}));
-				conn.admission_stage = GameAdmissionStage::AwaitFormPost;
-				return replies;
-			}
-
-			case GameAdmissionStage::AwaitFormPost: {
-				if (admission_message->tag != 0x01 ||
-				    admission_message->payload != std::vector<uint8_t>{0x00}) {
-					conn.admission_stage = GameAdmissionStage::Rejected;
-					return {};
-				}
-				// State 3 under the ticket gate, else state 6 [orig: @0x512F87..0x512FB3].
-				conn.join_ticket_validation =
-						inputs.server_ctx != nullptr && join_tickets_required(*inputs.server_ctx);
-				std::vector<uint8_t> challenge = build_tag02_push(now_tick);
-				conn.admission_padding_x = io::read_u32_le(challenge.data());
-				conn.admission_padding_y = io::read_u32_le(challenge.data() + 4);
-				replies.push_back(
-						make_protocol_message(s2c::JOIN_PADDING_PROBE, std::move(challenge)));
-				conn.admission_stage = GameAdmissionStage::AwaitPaddingEcho;
-				return replies;
-			}
-
-			case GameAdmissionStage::AwaitPaddingEcho:
-				if (admission_message->tag != 0x02 ||
-				    !validates_padding_echo(conn, admission_message->payload)) {
-					conn.admission_stage = GameAdmissionStage::Rejected;
-					return {};
-				}
-				if (!st.admission_metadata_pushed) {
-					emit_admission_metadata(config, conn, roster, world, inputs.server_ctx, replies);
-					st.admission_metadata_pushed = true;
-					st.admission_completed_tick = now_tick;
-				}
-				conn.admission_stage = GameAdmissionStage::Complete;
-				conn.self_id_seen = true;
-				return replies;
-
-			case GameAdmissionStage::Rejected:
-				return {};
-			case GameAdmissionStage::Complete:
-				break;
-		}
+		replies = dispatch_admission(config, conn, messages, now_tick, roster, inputs,
+				&first_in_match);
+		if (conn.admission_stage != GameAdmissionStage::Complete) return replies;
 	}
 
-	for (const ProtocolMessage &msg : messages) {
+	for (size_t message_index = first_in_match; message_index < messages.size();
+			++message_index) {
+		const ProtocolMessage &msg = messages[message_index];
+		// No handler once the description went (D-NET-NEW-L1-27) [orig:
+		//  CNapiNPConnection_DispatchMessage @0x622570 - @0x622697 / @0x62269E].
+		if (conn.host_disconnect_sent) continue;
 		// Protocol-control + settings-update frames are not gameplay messages (the original filters
 		// these before the gameplay dispatch). [orig: dispatch_in_match_session_messages gate]
 		if (msg.flags.settings_update || msg.full_tag >= PROTOCOL_FULL_TAG_HIGH_BASE) continue;
+		// Ahead of the spawn pump's add the net player has no server slot (+0xC0, which only
+		// the add sets), and every handler of the server table but the admission's three is a
+		// bare return or returns at a zero slot: the records that follow a completing 0x02
+		// before the add (the same datagram, or a later one ahead of the pump) answer nothing,
+		// as does every record of a node whose add failed (D-NET-NEW-L1-24).
+		// [orig: the server table @0x82B5D8..0x82BA47; e.g. NapiNPServerMsg_HandleReplayRequest
+		//  (0x33) @0x515230 - the slot @0x515250..0x515258; NapiNPServerMsg_HandleVehicleDetach
+		//  (0x27) @0x4FC980 -> @0x435D0E..0x435D15; Server_PlayerAdd @0x51CBC0, the slot stores
+		//  @0x51CC52 / @0x51CD51]
+		if (msg.tag > 0x02 && !player_slot_active(conn)) continue;
 
 		switch (msg.tag) {
-			case c2s::JOIN: // JOIN ack [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0]
-				conn.join_identity_pairs = parse_join_identity_pairs(msg.payload);
-				replies.push_back(make_protocol_message(s2c::INIT, {}));
+			case c2s::JOIN:
+				// Answered only in net-player game state 1 with no server slot: the admission
+				// FSM's first arm. A completed admission is past it (7 on; a map change's
+				// rejoin is the 0x0B's), so a repeated 0x00 answers nothing.
+				// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 - `cmp [ebx+0A0h], 1`
+				//  @0x512AF9 / `jnz` @0x512B00 to the return @0x512EAC] (D-NET-NEW-L1-24)
 				break;
 			case c2s::AUTO_MEDIC_PREFERENCE: {
 				// One inverse checkbox dword copied to playerSlot+372: zero is
@@ -1150,13 +583,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					replies.push_back(std::move(m));
 				break;
 			case c2s::TEAM_CHANGE_REQUEST: // [orig: NapiNPServerMsg_0x04D_ChangeTeam @0x518F70]
-				if (world != nullptr && inputs.server_ctx != nullptr)
-					Server_HandleTeamChangeRequest(*inputs.server_ctx, conn, *world,
-							io::host_milliseconds_for_logic_tick(now_tick));
+				dispatch_team_change_request(conn, now_tick, world, inputs);
 				break;
 			case c2s::DEATH_TIMEOUT_RESET: // [orig: NapiNPServerMsg_DeathTimeoutReset @0x510540]
-				if (world != nullptr && inputs.server_ctx != nullptr)
-					Server_HandleDeathTimeoutReset(*inputs.server_ctx, conn, *world);
+				dispatch_death_timeout_reset(conn, world, inputs);
 				break;
 			case c2s::RADIO_CALL_REQUEST: { // [orig: NapiNPServerMsg_HandleRadioCall @0x514330]
 				if (world == nullptr) break;
@@ -1195,8 +625,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						st.time_sync_previous_client_ms = client_ms;
 					} else {
 						st.time_sync_latest_client_ms = client_ms;
+						// GetTickCount, the process clock (D-NET-NEW-L8-29)
+						// [orig: NapiNPServerMsg_ValidateTimeSync @0x5022B4].
 						st.time_sync_current_host_ms =
-								io::host_milliseconds_for_logic_tick(now_tick);
+								world::authority_tick_count_ms(world, now_tick);
 						const bool round_ok = client_delta_fits_retail_time_window(
 								client_ms - st.time_sync_previous_client_ms,
 								st.time_sync_current_host_ms -
@@ -1257,21 +689,17 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					return {};
 				break;
 			}
-			case c2s::JOIN_FORM_POST: // handshake push -> S2C 0x02 GLB_JOIN push [orig: NapiNPServerMsg_HandleJoinRequest @0x512ED0]
-				// Golden round-trip (f131-134): C 0x01 -> S 0x02 push -> C 0x02 -> S post-handshake
-				// burst. The retail client's join-FSM verification (state 6->7, 0x424740) needs this
-				// SEQUENCED exchange — a collapsed all-at-once burst leaves it stuck at "Verifying".
-				replies.push_back(make_protocol_message(s2c::JOIN_PADDING_PROBE, build_tag02_push(now_tick)));
+			case c2s::JOIN_FORM_POST:
+				// Answered only in net-player game state 2 with no server slot: the admission
+				// FSM's form-post arm. A completed admission is past state 2 (6 at the probe, 7
+				// on), so a repeated 0x01 answers nothing and draws nothing.
+				// [orig: NapiNPServerMsg_HandleJoinRequest @0x512ED0 - `cmp [edi+0A0h], 2`
+				//  @0x512EF1 / `jnz` @0x512EF8, `cmp [edi+0C0h], 0` @0x512EFE / `jnz` @0x512F05;
+				//  CNetPlayer_SetGameState(2) only from NapiNPServer_HandlePlayerJoinMessage
+				//  @0x512AA0 (the call @0x512E7D)]
 				break;
-			case c2s::JOIN_PADDING_ECHO: // duplicate GLB_JOIN reply after admission
-				// The first valid echo is consumed by the admission FSM above. A synthetic
-				// caller entering here gets the same one-shot metadata; spawn metadata and
-				// roster remain tick-owned boundaries.
-				if (!st.admission_metadata_pushed) {
-					emit_admission_metadata(config, conn, roster, world, inputs.server_ctx, replies);
-					st.admission_metadata_pushed = true;
-					st.admission_completed_tick = now_tick;
-				}
+			case c2s::JOIN_PADDING_ECHO: // the 0x02 again: its handler has no gate
+				dispatch_join_padding_echo(config, conn, now_tick, roster, inputs, replies);
 				break;
 			case c2s::PLAYER_SYNC_REQUEST: { // player-sync request [u8 slot][u16 fieldFlags] -> S2C 0x46 player-sync.
 				// [orig: NapiNPServerMsg_0x022 @0x514C90; §5.33] The client requests a SPECIFIC slot
@@ -1333,34 +761,16 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			case c2s::PING: // re-broadcast entity-state request -> 0x75 [orig: handler @0x510ED0]
 				replies.push_back(make_protocol_message(
 						s2c::SPECTATOR_FLAGS,
-						build_tag75_player_state(conn)));
+						build_tag75_player_state(config, conn)));
 				break;
 			case c2s::FILE_CHUNK_REQUEST: // server-info request -> 0x60 chunk [orig: NapiNPServerMsg_HandleReplayRequest (0x33) @0x515230]
-				replies.push_back(make_protocol_message(
-						s2c::FILE_TRANSFER_CHUNK,
-						build_tag60_server_info(
-								config, context_mission_text_title(inputs.server_ctx),
-								inputs.server_info_transfer_id,
-								chunk_request_offset(msg.payload, inputs.server_info_transfer_id))));
+				dispatch_file_chunk_request(config, msg, inputs, replies);
 				break;
 			case c2s::MISSION_CHUNK_REQUEST: // mission-file request -> 0x64 chunk only [orig: NapiNPServerMsg_0x037_SendCircularBuffer @0x5152E0]
-				replies.push_back(make_protocol_message(
-						s2c::MISSION_DATA_CHUNK,
-						build_tag64_mission_metadata(
-								config, inputs.mission_metadata_blob,
-								inputs.mission_metadata_transfer_id,
-								chunk_request_offset(msg.payload, inputs.mission_metadata_transfer_id))));
-				// The retail 00TRg join tail shares one send boundary:
-				// queued 0x75, this 0x64, then the initial 0x16. Publishing the
-				// roster on the preceding host tick makes the client request an
-				// early 0x46 repair and changes both ordering and packet grouping.
-				if (conn.reply.spawn_metadata_pushed &&
-				    !conn.reply.roster_pushed) {
-					replies.push_back(build_player_list_message(
-							config, roster, world));
-					conn.reply.roster_pushed = true;
-					conn.reply.roster_completed_tick = now_tick;
-				}
+				dispatch_mission_chunk_request(config, msg, inputs, replies);
+				break;
+			case c2s::CHECKSUM_RESPONSE: // the player-sync request -> slot state 2 [orig: NapiNPServerMsg_HandlePlayerSyncRequest @0x513200]
+				dispatch_player_sync_request(conn);
 				break;
 			case c2s::LOADOUT_SUBMIT: { // loadout request -> 0x5A [orig: NapiNPServerMsg_HandlePlayerLoadout (0x2F) @0x515790]
 				// Golden (f317-318): C 0x2F -> S 0x5A + game-start bundle. The 0x5A populates
@@ -1386,7 +796,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// re-arms from the death screen; an alive one only from an armory volume;
 				// the pre-round window and the first post-join/deploy submit (the latch)
 				// bypass it. [orig: NapiNPServerMsg_HandlePlayerLoadout @0x51581c..0x51583e
-				//  -> Server_SendWeaponSlotListToPlayer]
+				//  -> Server_SendWeaponSlotListToPlayer; the joined test, the net player's game
+				//  state 10 @0x5157F8]
 				if (is_in_match(conn) && !conn.link.preround_loadout_latch &&
 				    ((loadout_player->flags | loadout_player->engine_flags) &
 				     (world::kEntityFlagDead | world::kEntityFlagArmoryZone)) == 0u &&
@@ -1419,50 +830,94 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					replies.push_back(make_protocol_message(0x5A, current_weapon_slot_list(conn, world)));
 					break;
 				}
+				// The availability gate reads the host's weapon table and the requester's
+				// armory-zone bit (D-NET-693) [orig: @0x515A3F..0x515A58]; a World-less
+				// unit path has no host table, every entry reading 1.
+				LoadoutAvailability availability;
+				if (inputs.server_ctx != nullptr) {
+					availability.restrictions = &inputs.server_ctx->weapon_restrictions;
+					availability.armory_only = title_in_match(
+							inputs.server_ctx->np_protocol.identity).armory_only_availability;
+				}
+				availability.requester_in_armory_zone =
+						((loadout_player->flags | loadout_player->engine_flags) &
+						 world::kEntityFlagArmoryZone) != 0;
+				// The slot holding the local player grants into the local table
+				// (D-NET-695) [orig: Player_InitPlayer @0x4E18A8..0x4E18C1].
+				world::LocalPlayer *local = own_slot_local_player(conn, *world);
 				const GrantedWeaponLoadout grant =
 						grant_weapon_loadout(req, config.class_allow_mask, armory, conn,
 								world::entity_ammo_seat(*world, *loadout_player),
-								world->rules.sniper_zoom_fill);
-				// The accepted entries become the slot's loadout buffer, which every
-				// deploy rebuilds the kit from (D-NET-378) [orig: @0x515CBD..0x515D83].
+								world->rules.sniper_zoom_fill, &availability,
+								local != nullptr ? &local->inventory : nullptr);
+				// The kept entries become the slot's loadout buffer, which every
+				// deploy rebuilds the kit from (D-NET-378) [orig: @0x515A5A..0x515A7E,
+				// @0x515CBD..0x515D83].
 				st.loadout_buffer = req;
+				st.loadout_buffer.entries = grant.kept_entries;
 				st.loadout_buffer.player_class = grant.reply.avatar_class;
 				st.loadout_buffer_set = true;
-				// The accepted class is the slot's class and its PlayerType, at its store and its
-				// list send [orig: the slot store @0x515AA8; @0x515AE2; the
-				// Server_SendWeaponSlotListToPlayer call @0x515F95].
+				// The accepted class is the slot's class and its PlayerType, at its store
+				// [orig: the slot store @0x515AA8; @0x515AE2].
 				conn.slot_class = grant.reply.avatar_class;
 				conn.player_list_type = grant.reply.avatar_class;
 				write_ammo_damage_classes(conn, grant);
-				apply_granted_loadout(conn, grant, armory != nullptr);
-				if (armory != nullptr) {
+				apply_granted_loadout(conn, *loadout_player, grant, armory != nullptr, local);
+				if (armory != nullptr && local != nullptr) {
+					// The local player's EquippedSlot is the local table's equipped slot:
+					// the same store and clear.
+					const world::WeaponInventorySlot *submitted =
+							local->inventory.slot(static_cast<int32_t>(
+									req.weapon_slot_index <= 0x7FFFFFFFu ? req.weapon_slot_index
+																		  : 0x7FFFFFFFu));
+					const world::WeaponTableEntry *submitted_def =
+							submitted != nullptr && submitted->adm_index >= 0
+							? armory->by_index(static_cast<uint8_t>(submitted->adm_index))
+							: nullptr;
+					local->inventory.equipped_combo =
+							submitted_def != nullptr &&
+									(submitted_def->flags2 & world::weapon_flag2::kNoSelect) == 0
+							? static_cast<int32_t>(req.weapon_slot_index)
+							: -1;
+				} else if (armory != nullptr) {
 					// The accept points the entity's EquippedSlot at the submitted slot and
 					// clears it when that slot holds no def or a NoSelect one (flags2 bit 0).
 					// [orig: NapiNPServerMsg_HandlePlayerLoadout - the store @0x515F52..0x515F62,
 					//  the slot / def tests @0x515F73..0x515F7C, `and ecx, 1` @0x515F81 whose
 					//  zero skips the clear @0x515F88, the clear @0x515F8A]
-					conn.equipped_slot = {};
+					world::WeaponSlotRef &equipped = loadout_player->equipped_slot;
+					equipped = {};
 					const auto submitted = req.weapon_slot_index <= 0xFFFFu
-							? conn.weapon_slots.find(static_cast<uint16_t>(req.weapon_slot_index))
-							: conn.weapon_slots.end();
-					const world::WeaponTableEntry *submitted_def = submitted != conn.weapon_slots.end()
+							? loadout_player->weapon_slots.find(
+									  static_cast<uint16_t>(req.weapon_slot_index))
+							: loadout_player->weapon_slots.end();
+					const world::WeaponTableEntry *submitted_def =
+							submitted != loadout_player->weapon_slots.end()
 							? armory->by_index(submitted->second.adm_index)
 							: nullptr;
 					if (submitted_def != nullptr &&
 							(submitted_def->flags2 & world::weapon_flag2::kNoSelect) == 0) {
-						conn.equipped_slot.kind = NapiNPConnection::EquippedSlotRef::kPersonal;
-						conn.equipped_slot.combo = submitted->first;
+						equipped.kind = world::WeaponSlotRef::kPersonal;
+						equipped.combo = submitted->first;
+						equipped.adm = submitted->second.adm_index;
 					}
 				}
-				replies.push_back(make_protocol_message(s2c::WEAPON_LOADOUT, st.last_loadout_reply));
 				// Accepted soldier type -> entity+660 playerClass [orig: @0x515ab0] — feeds the
 				// §5.10 field-17 class nibble and the 0x0C/0x18 spawn records for this player.
 				loadout_player->player_class = grant.reply.avatar_class;
+				// Then the body's row by that class: its camouflage item (D-NET-348).
+				// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515AF3..0x515B93]
+				world::rebind_player_camouflage_row(*world, *loadout_player);
 				loadout_player->carry_flags =
 						(loadout_player->carry_flags & ~0x18u) | grant.carry_flags;
 				// The impact damage's copy of the slot's damage-class bytes (D-NET-508).
 				loadout_player->ammo_damage_class.assign(conn.ammo_damage_classes.begin(),
 						conn.ammo_damage_classes.end());
+				// The list send, last of the accept's slot writes, with its own legs (the
+				// local select and mount for the slot holding the local player) [orig: the
+				//  Server_SendWeaponSlotListToPlayer call @0x515F95].
+				weapon_slot_list_own_legs(conn, world);
+				replies.push_back(make_protocol_message(s2c::WEAPON_LOADOUT, st.last_loadout_reply));
 				// The accept re-arms the armory cooldown unless the pre-round latch is
 				// set, then clears the latch, class 0 included. [orig: @0x515b96..0x515bb3,
 				//  `if (!(byte & 2)) slot[89] = armoryReuseTime_A38; byte &= 0xFD`]
@@ -1488,10 +943,12 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// the full world stream on EVERY spawn-menu visit (state 5 -> 4 + phase reset);
 				// our tick loop skips spawned connections, so the mid-game re-stream stays an
 				// open divergence (see the D-NET-150 record).
-				if (!conn.burst.spawned && conn.burst.sync_state != 0) {
+				if (!conn.burst.spawned && conn.slot_state != PlayerSlotState::Free) {
+					// The report clocks at the record's receive (D-NET-NEW-L9-22).
+					gate_slot_clocks_game_state(conn, 9, conn.receive_stamp_ms, 0);
 					conn.burst.game_state = 9;              // [orig: @0x513295]
-					if (conn.burst.sync_state != 4)
-						conn.burst.sync_state = 4;          // [orig: @0x5132a0/@0x5132b1]
+					if (conn.slot_state != PlayerSlotState::WorldStream)
+						conn.slot_state = PlayerSlotState::WorldStream; // [orig: @0x5132a0/@0x5132b1]
 					conn.burst.world_stream_phase = InitialStateBurst::kStreamInit; // [orig: @0x5132f6]
 				}
 				// Golden (f161-162): C 0x0A (empty) -> S 0x19 (4 B tick) ONLY. The prior
@@ -1499,29 +956,35 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// g_ClientDeployHold (the deploy gate) via NapiClient_WaitForGameStart @0x42cc10,
 				// re-blocking deploy after 0x0F cleared it. The 0x16 pushes are proactive
 				// (post-handshake + periodic during world-stream), not reactive to 0x0A.
-				// The body is the host's GetTickCount, the 0x28 window's floor.
-				// [orig: NetPacket_WriteTimestampB @0x5046f0 -> S2C 0x19 @0x5132f1]
+				// The body is the host's GetTickCount, the 0x28 window's floor, on the
+				// clock the 0x26 sender stamps entity+560 with (D-NET-NEW-L8-28).
+				// [orig: NetPacket_WriteTimestampB @0x5046f0 (GetTickCount @0x5046FD)
+				//  -> S2C 0x19 @0x5132f1]
 				replies.push_back(make_protocol_message(s2c::SPAWN_ACK_TIMESTAMP,
-						build_tag1a_tick(io::host_milliseconds_for_logic_tick(
-								world != nullptr ? world->logic_tick : now_tick))));
+						build_tag1a_tick(world != nullptr
+										? world::authority_tick_count_ms(*world)
+										: io::host_milliseconds_for_logic_tick(now_tick))));
 				break;
 			case c2s::TEAM_SPAWN_ACK: { // team/spawn ack [u16 team_change_index] — NO reply on a plain join.
 				// [orig: NapiNPServerMsg_0x029 @0x514F10] replies S2C 0x51 ONLY when the index
 				// resolves to an entity in g_TeamChangeEntityList @0xC947C8 (gated
-				// !g_NetSpawnSuspended && !g_SpawnSuccessGate), and that reply is a REAL
+				// !g_NetSpawnSuspended && !g_RoundOver), and that reply is a REAL
 				// NetPacket_WriteEntityPacket @0x506BB0 record. The golden retail-ashi5a session's
 				// deploy-time C 0x29 draws NO 0x51 anywhere. The client FIELD-PARSES 0x51 —
 				// NapiNPClientMsg_HandlePlayerSpawn @0x431BB0 stamps team (+354) and NetId
 				// (@0x431cad) and REBINDS CharacterEntity (@0x431cf3) — so the former
 				// unconditional zero-id 0x51 "spawn-confirm" re-bound the joiner's own player
 				// to a vehicle archetype: the retail-join DBuggy1 shadow (D-NET-148). The
-				// gates: the authority (@0x514F11), the round-over latch (@0x514F2B; its
-				// reachable analog is the Match outcome, g_NetSpawnSuspended is unmodeled)
-				// and the sender's player slot (@0x514F38..0x514F53; the 0xA0 mask also
+				// gates: the authority (@0x514F11), the load's spawn gate (@0x514F1E, jnz
+				// @0x514F25: set for the length of the mission load, whose in-load pumps run
+				// this handler, D-NET-116), the round-over latch (@0x514F2B, jnz @0x514F32;
+				// its reachable analog is the Match outcome) and the
+				// sender's player slot (@0x514F38..0x514F53; the 0xA0 mask also
 				// needs it in the match). A short body reads index 0 (@0x514F5F..0x514F6A).
 				if (inputs.server_ctx == nullptr || world == nullptr ||
-						inputs.server_ctx->is_authority == 0 || world->match.outcome().ended ||
-						!is_in_match(conn))
+						inputs.server_ctx->is_authority == 0 ||
+						inputs.server_ctx->net_spawn_suspended != 0 ||
+						world->match.outcome().ended || !is_in_match(conn))
 					break;
 				const uint16_t index = msg.payload.size() >= 2
 						? static_cast<uint16_t>(msg.payload[0] | (msg.payload[1] << 8))
@@ -1544,145 +1007,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						encode_team_change_confirm(index, assign)));
 				break;
 			}
-			case c2s::RESPAWN_REQUEST: { // RESPAWN/DEPLOY request [i16 spawnHandle] — the deploy-map pick.
-				// [orig: Server_ProcessClientRequestRespawn @0x519AF0; net-re §5.61]. 0xFFFE = the
-				// auto frontier pick; a real handle resolves through the SpawnPoint/team gates and a
-				// NUMBERED zone additionally requires team match + control >= 1.0 (a contested zone
-				// stops accepting spawns). An ALIVE in-session player's request is a no-op [orig: the
-				// @0x519cce dead-or-flagged gate; only !is_in_session falls through @0x519cd7]; a DEAD
-				// one deploys at the selected zone's wave boundary, or NOW when that zone has no
-				// wave row: position at the pick (including §5.61's shared-counter 6007 scatter;
-				// only the runtime-named model userpoint remains open) else the per-team marker chain,
-				// reset-to-spawn-state, template health —
-				// Server_DeployPlayer's deploy leg [orig: @0x517740 -> Server_PositionPlayerForSpawn
-				// @0x50cf60 -> Entity_ResetToSpawnState @0x4B9610]. Deploy-time 0x61 seed re-send and
-				// the 0x1D overlay stay burst-only (tracked §5.61 deferral). A newly queued pick
-				// receives requester-local unreliable 0x6E immediately; immediate and wave release
-				// share Server_ReleasePlayerDeployment. [orig: SpawnWaveList_TryQueuePlayer
-				// @0x52A490; Server_SendSpawnWaveStatusToPlayer @0x50FF10]
-				if (!conn.burst.spawned) break;
-				// The round-over gate leads the handler: once the round ended no pick
-				// deploys, queues or answers, the round-end linger's dead joiners
-				// included (g_SpawnSuccessGate, our match outcome's `ended`, as the 0x29
-				// and 0x5D cases read it). [orig: Server_ProcessClientRequestRespawn
-				// @0x519AF0 - `cmp g_SpawnSuccessGate, ebp` @0x519AF6, `jnz` @0x519B00 to
-				// the bare return @0x519DF2, ahead of the authority test @0x519B06]
-				if (world != nullptr && world->match.outcome().ended) break;
-				if (world == nullptr || !conn.link.owned_entity.valid()) {
-					// World-less/unit-test path: the golden frame-82540 hint byte, as before.
-					replies.push_back(
-							make_protocol_message(s2c::GAME_EVENT, build_tag_1e_game_event_post_spawn()));
-					break;
-				}
-				world::Entity *player = world->registry.get(conn.link.owned_entity);
-				if (player == nullptr) break;
-				// Body: [i16 spawnHandle]; a short/absent body reads 0 [orig: @0x519b42..48].
-				const uint16_t pick = msg.payload.size() >= 2
-						? static_cast<uint16_t>(msg.payload[0] | (msg.payload[1] << 8))
-						: 0;
-				const world::Entity *target = nullptr;
-				const bool revive_latch = conn.reply.revive_pose_valid; // +89932
-				// The base is the slot team (+416), not the entity's (D-NET-464) [orig: @0x519B88;
-				//  the spectator legs @0x519B7A..0x519BC1].
-				const uint8_t request_team = world::deploy_request_team(*world, conn.assigned_team,
-						conn.link.spectator, pick, config.game_type);
-				uint16_t handle = pick;
-				if (pick == world::kDeployPickAutoTeam) {
-					// Conquer & Control rejects the auto pick outright, before the frontier
-					// resolve: no deploy, no wave queue, no reply.
-					// [orig: Server_ProcessClientRequestRespawn @0x519bc8..0x519bd4]
-					if (config.game_type == game_type::kConquerAndControl) break;
-					// Auto-deploy: the team's frontier zone; null falls back to the marker chain
-					// [orig: Spawn_FindEntityForTeam @0x4fc810 -> requestedHandle -1 on miss],
-					// as a revived player always does [orig: the latch @0x519c3d..0x519c4b].
-					const world::Entity *frontier = revive_latch ? nullptr
-							: world->zones.find_spawn_zone_for_team(request_team, config.game_type);
-					handle = frontier != nullptr ? frontier->handle.packed : world::kDeployPickNone;
-				}
-				if (handle != world::kDeployPickNone) {
-					// Every handle but 0xFFFF, the frontier's included: a revived player's pick,
-					// then +364, then the resolve against the requester entity's team, each
-					// refusing. Handle 0, and the absent-body default above, resolves pool 0
-					// index 0 like any other handle, so it deploys only when that entity is a
-					// same-team spawn point (a player never is). [orig: @0x519c5a; @0x519c67;
-					//  @0x519c58..0x519c88 resolve then return on null;
-					//  Server_ResolveSpawnTargetHandle @0x4FE110 — pool/index decode
-					//  @0x4fe13f..0x4fe159, attrib 0x40000 @0x4fe16f, team @0x4fe181]
-					if (revive_latch || conn.link.spawn_target_hold_seconds != 0) break;
-					target = world->zones.resolve_spawn_target(player->team, handle);
-					if (target == nullptr) break; // a silent no-op [orig: @0x519c88]
-				}
-				// Retail's `nodefaultspawnpoints` option is named after its UI,
-				// not its actual predicate. It applies only to a target-less pick
-				// and walks SpawnZoneList for an unnumbered or fully controlled
-				// same-team zone; it never counts living teammates.
-				// [orig: Server_ProcessClientRequestRespawn @0x519C8E..0x519CB2;
-				// Entity_HasAliveEntityOfTeam @0x4FC7B0; the revive latch @0x519c97]
-				if (config.default_spawn_requires_no_team_zone != 0 &&
-						!revive_latch && target == nullptr &&
-						world->zones.team_has_available_spawn_zone(request_team))
-					break;
-				// The dead-or-pending gate [orig: @0x519cc7 — requester must be dead
-				// (entity+36 & 2) OR respawn-flagged (slot+89912 & 0x10)]: an alive, unheld
-				// player's request is refused in a session; out of one (world.rules.mp_session)
-				// it deploys at once, ahead of +360, the seat, the zone and the wave
-				// [orig: is_in_session @0x519cd0 / @0x519cd7, the deploy @0x519cdd..0x519ce3].
-				const bool deploy_now = !conn.link.respawn_pending && player->health > 0;
-				if (deploy_now && world->rules.mp_session) break;
-				if (!deploy_now) {
-					// +360 follows the dead-or-pending test and silently rejects every
-					// pick, including Default Spawn. [orig: @0x519cf2]
-					if (conn.link.respawn_delay_seconds != 0) break;
-					if (target != nullptr && target->item_type == 1 &&
-							target->is_spawn_point) {
-						// A vehicle target is selectable only while its root's dead bit is
-						// clear, and while its weighted root/child seat walk finds a free slot.
-						// The root test refuses a dead root even when a live child would offer
-						// a seat; the walk gates only each entry it visits. The +0x170 gate is
-						// release's.
-						// [orig: Server_ProcessClientRequestRespawn @0x519D07..0x519D34 - the
-						//  root's dead bit @0x519D19 / @0x519D1D, the walk @0x519D2A]
-						world::VehicleSeatSelection selected;
-						if (((target->flags | target->engine_flags) & world::kEntityFlagDead) != 0 ||
-								!world::find_best_vehicle_seat(
-										*world, target->handle, player->handle, selected))
-							break;
-					}
-					// The zone-ownership gate [orig: @0x519d5f: entity+538 -> team match AND
-					// control(+540) >= 0x10000].
-					if (target != nullptr && target->zone_number != 0 &&
-					    (target->team != request_team || target->zone_control < 0x10000))
-						break;
-					// A spectator skips the wave [orig: @0x519D65..0x519D7F]; the queue asks as the
-					// slot team (D-NET-581) [orig: the TryQueuePlayer call @0x519D8F].
-					if (target != nullptr && !conn.link.spectator) {
-						if (world->zones.spawn_waves.try_queue(
-								target->handle, player->handle, conn.assigned_team)) {
-							ProtocolMessage status = make_protocol_message(s2c::SPAWN_WAVE_STATUS,
-									build_spawn_wave_status_body(*world, conn));
-							status.reliable = false;
-							replies.push_back(std::move(status));
-							break;
-						}
-						if (world->zones.spawn_waves.has_entry(target->handle)) break;
-					}
-					world->zones.spawn_waves.remove_player(player->handle);
-				}
-				const world::EntityHandle target_handle = target != nullptr
-						? target->handle
-						: world::EntityHandle{};
-				// The leg takes the stored handle [orig: Server_ProcessClientRequestRespawn,
-				//  the Server_DeployPlayer calls @0x519CE3/@0x519D7F/@0x519DC8/@0x519DE8].
-				std::vector<ProtocolMessage> deployment = Server_ReleasePlayerDeployment(
-						config, conn, *world, target_handle, target_handle.packed,
-						inputs.server_ctx != nullptr ? inputs.server_ctx->logs.profile : nullptr,
-						inputs.server_ctx != nullptr ? inputs.server_ctx->np_protocol.identity
-						                             : nullptr);
-				replies.insert(replies.end(),
-				               std::make_move_iterator(deployment.begin()),
-				               std::make_move_iterator(deployment.end()));
+			case c2s::RESPAWN_REQUEST: // RESPAWN/DEPLOY request [i16 spawnHandle] — the deploy-map pick.
+				dispatch_respawn_request(config, conn, msg, world, inputs, replies);
 				break;
-			}
 			case c2s::ENTITY_UPLINK:
 				// C2S player-input uplink. Pre-spawn it only caches the joiner's pose for
 				// the spawn; once the connection owns a player it is read-applied HERE, in
@@ -1694,7 +1021,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				//  @0x4D6A80 (mode-4 read-apply, owner gate @0x4D6B08)]
 				cache_client_pose(msg.payload, st);
 				if (world != nullptr && conn.burst.spawned)
-					replication::apply_connection_uplink(*world, conn.link, msg.payload);
+					replication::apply_connection_uplink(*world, conn.link, msg.payload,
+							conn.slot_state == PlayerSlotState::Joined); // [orig: @0x4C2017]
 				break;
 			case c2s::MOUNTED_WEAPON_SLOT_SELECT: {
 				// Action 6 on a designated-G attached EWeap selects which live
@@ -1710,42 +1038,45 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 							msg.payload.data(), msg.payload.size(),
 							selection, consumed))
 					break;
+				// The sender's EquippedSlot set (a serving host's own player's is
+				// LocalPlayer::equipped_slot_held, any other's its slot reference),
+				// then its parent a mountable gun with the G capability; nothing else
+				// gates it (no slot state, no addeweap parent identity;
+				// D-NET-NEW-L2-34). The two slots are the ones the guns' class inits
+				// bound at their spawn; the toggle binds neither.
+				// [orig: NapiNPServerMsg_HandleWeaponToggle @0x511A70 - +0x118 @0x511ACE,
+				//  the parent +0x16C @0x511AD8, Entity_IsMountableGun @0x511AE4, +0x326 & 2
+				//  @0x511AED; WeaponSlot_InitFromEntityDef @0x5466C0 runs from the class
+				//  inits alone]
 				world::Entity *player =
 						world->registry.get(conn.link.owned_entity);
-				if (player == nullptr || !player->use_gun_slot_swapped ||
-						!player->mount_target.valid())
-					break;
+				if (player == nullptr) break;
+				const bool equipped = player->handle == world->cached.local_player &&
+								world->local_player_state != nullptr
+						? world->local_player_state->equipped_slot_held()
+						: player->equipped_slot.kind != world::WeaponSlotRef::kNone;
+				if (!equipped || !player->mounted || !player->mount_target.valid()) break;
 				world::Entity *mount = world->registry.get(player->mount_target);
-				if (mount == nullptr || !mount->has_item_def ||
-						mount->item_type == 1u ||
-						(mount->item_attrib & world::kItemAttribEweap) == 0u ||
-						(mount->emplacement_attachment_flags & 0x02u) == 0u ||
-						!world->vehicles.prepare_weapon_slot(*mount))
-					break;
+				if (mount == nullptr || !world::mount_is_designated_g_gun(*mount)) break;
 
+				// The toggle writes the route bit and the EquippedSlot pointer
+				// alone (ours: the bit, which resolve_mounted_ammo_slot follows),
+				// never the AdmDef byte +0x2B0: the 0x31 row and the 0x0A
+				// animDef echo keep it until a fire or a 0x0C case-4 byte moves
+				// it. [orig: NapiNPServerMsg_HandleWeaponToggle - the clear
+				//  @0x511AFB and +0x118 = mount+0x2B4 @0x511B08; the set
+				//  @0x511B2C and +0x118 = parent+0x474 @0x511B38]
 				if (!selection.use_parent_slot) {
 					mount->primary_weapon_slot.redirect_to_parent_slot = false;
-					player->equipped_adm_index = mount->primary_weapon_slot_adm;
 					break;
 				}
 
 				// Retail follows groundEntity (+0x28), then requires a type-1
-				// EWeap ItemDef before setting the route bit. The generation
-				// sidecar rejects a recycled packed-handle lifetime.
-				if (!mount->ground_target.valid() ||
-						mount->emplacement_parent != mount->ground_target ||
-						mount->emplacement_parent_spawn_id == 0)
-					break;
+				// EWeap ItemDef before setting the route bit.
+				// [orig: @0x511B12..0x511B2A]
 				world::Entity *parent = world->registry.get(mount->ground_target);
-				if (parent == nullptr ||
-						parent->registry_spawn_id !=
-								mount->emplacement_parent_spawn_id ||
-						!parent->has_item_def || parent->item_type != 1u ||
-						(parent->item_attrib & world::kItemAttribEweap) == 0u ||
-						!world->vehicles.prepare_weapon_slot(*parent))
-					break;
+				if (!world::designated_g_route_carrier(parent)) break;
 				mount->primary_weapon_slot.redirect_to_parent_slot = true;
-				player->equipped_adm_index = parent->primary_weapon_slot_adm;
 				break;
 			}
 			case c2s::STANCE_CHANGE: { // STANCE CHANGE [i16 stanceCode] — the crouch/prone replication leg.
@@ -1843,8 +1174,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					pong.reliable = false; // SendFiltered @0x51510C userParam=1
 					replies.push_back(std::move(pong));
 				} else if (conn.link.owned_entity.valid()) {
+					// Now is GetTickCount, the process clock (D-NET-NEW-L8-30)
+					// [orig: @0x515116, `sub eax, edi` @0x51511C].
 					Server_RecordPingSample(config, conn, ts,
-							io::host_milliseconds_for_logic_tick(now_tick),
+							world::authority_tick_count_ms(world, now_tick),
 							inputs.server_ctx != nullptr && inputs.server_ctx->is_in_session != 0);
 				}
 				break;
@@ -1867,16 +1200,18 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					const auto nul = std::find(begin, msg.payload.end(), uint8_t{0});
 					uplink.text.assign(begin, nul);
 				}
+				// The throttle's now is GetTickCount, the process clock (D-NET-NEW-L8-32)
+				// [orig: NapiNPServer_HandleChatMessage @0x5137DE].
 				std::vector<ProtocolMessage> chat = Server_HandleChatMessage(
 						*inputs.server_ctx, conn, uplink,
-						io::host_milliseconds_for_logic_tick(now_tick), *world);
+						world::authority_tick_count_ms(world, now_tick), *world);
 				for (ProtocolMessage &m : chat) replies.push_back(std::move(m));
 				break;
 			}
 			case c2s::ADMIN_NETLOG_COMMAND: // [orig: NapiNPServerMsg_HandleConsoleLine @0x5199D0]
 				if (inputs.server_ctx != nullptr) // a peer's console line (server_console.h)
 					Server_HandleConsoleCommandMessage(*inputs.server_ctx, conn, msg.payload,
-							io::host_milliseconds_for_logic_tick(now_tick), replies);
+							world::authority_tick_count_ms(world, now_tick), replies); // GetTickCount @0x519A1E (D-NET-NEW-L8-32)
 				break;
 			case c2s::LOADED_MODEL_PAGE_REPLY: { // [orig: NapiNPServerMsg_0x03D @0x500EC0]
 				// Authority-gated; the body is never read: the handler stamps the
@@ -1886,8 +1221,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				break;
 			}
 			case c2s::VEHICLE_SPAWN_AVAILABILITY_REQUEST: { // [orig: NapiNPServerMsg_SendWeaponSlotStates @0x510930]
-				// No fields read; the reply is the requester's team availability
-				// (mask 32, reliable).
+				// No fields read; the reply is the availability for the
+				// requester's slot team, not its body's (D-NET-593) (mask 32,
+				// reliable). [orig: the slot through the net player
+				//  @0x51093D..0x510947; NetPacket_SerializeWeaponOverlaySlots_0's
+				//  `slot+0x1A0` @0x5105CD]
 				if (world == nullptr || inputs.server_ctx == nullptr ||
 						!conn.link.owned_entity.valid())
 					break;
@@ -1896,7 +1234,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				replies.push_back(make_protocol_message(
 						s2c::VEHICLE_SPAWN_AVAILABILITY,
 						Server_BuildVehicleSpawnAvailability(*inputs.server_ctx, *world,
-								requester->team)));
+								conn.assigned_team_valid ? conn.assigned_team : uint8_t{0})));
 				break;
 			}
 			case c2s::VEHICLE_SPAWN_REQUEST: { // [orig: NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C4C0]
@@ -1908,22 +1246,12 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				(void)Server_HandleVehicleSpawnRequest(*inputs.server_ctx, conn, request, *world);
 				break;
 			}
-			case c2s::SPECTATOR_RESPAWN: { // [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C840]
-				// Gates in order: the round-over latch (where the convert runs), authority,
-				// permanent death, a spectator capacity, a player, not a spectator; then
-				// Server_ConvertPlayerToSpectator(player, packet i16, 1). The conversion
-				// needs the owning context, so it is staged for the host tick.
-				if (inputs.server_ctx == nullptr || !inputs.server_ctx->is_authority) break;
-				if (!config.permanent_death || config.spectator_slots == 0) break;
-				if (!conn.link.owned_entity.valid() || conn.link.spectator) break;
-				st.spectator_convert_killer = msg.payload.size() >= 2
-						? static_cast<int16_t>(msg.payload[0] | (msg.payload[1] << 8))
-						: int16_t{0};
-				st.spectator_convert_pending = true;
+			case c2s::SPECTATOR_RESPAWN: // [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C840]
+				dispatch_spectator_respawn(config, conn, msg, world, inputs, replies);
 				break;
-			}
 			case c2s::MISSION_FILE_STATUS: // mission-file status report [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10]
-				Server_HandlePlayerJoinRequest(conn, world);
+				Server_HandlePlayerJoinRequest(
+						inputs.server_ctx, conn, world, now_tick, msg.payload, replies);
 				break;
 			case c2s::FIRED_ROUND: // client fired round -> ammo authority + the S2C 0x0A tag-2 round echo
 				Server_HandleClientFiredRound(config, conn, msg.payload.data(), msg.payload.size(), world);
@@ -1989,15 +1317,17 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (!world->tables.weapons.empty() &&
 				    conn.link.mode != replication::TransportMode::Loopback) {
 					// EWeap reload ignores the wire combo and follows the same live
-					// child/groundEntity route as fire and phase-8 serialization.
-					// [orig: WeaponSlot_ReloadAmmo @0x541720 -> @0x5460e0]
+					// child/groundEntity route as fire and phase-8 serialization, over
+					// the slot the entity's class init bound; a slot with no Def reloads
+					// nothing and no player leg follows.
+					// [orig: WeaponSlot_ReloadAmmo @0x541720 - the attrib test @0x541728..0x54172D,
+					//  Entity_GetWeaponSlots @0x5460e0 (the call @0x541730), the slot and
+					//  its Def tests @0x54178F..0x541791 / @0x54179A..0x54179C]
 					if (addressed_entity != nullptr &&
 							addressed_entity->has_item_def &&
 							(addressed_entity->item_attrib &
-									world::kItemAttribEweap) != 0u &&
-							world->vehicles.prepare_weapon_slot(*addressed_entity)) {
-						// [orig: WeaponSlot_ReloadAmmo's EWeap legs]
-						world->vehicles.reload_weapon_slot(*addressed_entity);
+									world::kItemAttribEweap) != 0u) {
+						(void)world->vehicles.reload_weapon_slot(*addressed_entity);
 						break;
 					}
 					NapiNPConnection *addressed_owner = nullptr;
@@ -2009,8 +1339,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						}
 					}
 					if (addressed_owner == nullptr) break;
-					auto slot_it = addressed_owner->weapon_slots.find(req.reload_param);
-					if (slot_it != addressed_owner->weapon_slots.end()) {
+					// The addressed player's own table [orig: playerSlot+0x1D0 +
+					//  100 * combo @0x54176D].
+					auto slot_it = addressed_entity->weapon_slots.find(req.reload_param);
+					if (slot_it != addressed_entity->weapon_slots.end()) {
 						const world::WeaponTableEntry *adm =
 								world->tables.weapons.by_index(slot_it->second.adm_index);
 						// The pool half of the refill: the remaining clip is refunded into
@@ -2021,7 +1353,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						// [orig: WeaponSlot_ReloadAmmo @0x541720 — refund @0x5417a2,
 						//  the clamped draw and slot+16 store @0x541811..0x541850]
 						if (adm != nullptr && adm->clipsize != -1) {
-							WeaponSlotState &slot = slot_it->second;
+							world::PersonalWeaponSlot &slot = slot_it->second;
 							const bool shared = adm->ammo_bucket != 0;
                             const uint32_t bucket = static_cast<uint32_t>(adm->ammo_bucket);
                             auto &shared_clips = addressed_owner->reply.shared_clips;
@@ -2084,10 +1416,18 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					const world::EntityHandle h{handle};
 					if (static_cast<size_t>(h.slot()) < world->registry.pool_capacity(pool)) {
 						FullEntitySpawnRecord frec;
+						// A free row serializes as its memory stands: the destroy's tail (its
+						// 0xFFFF / 0xFF stamps over the zeroed block, the last occupant's
+						// words past it) or, never taken since the pool's clear, all zeros.
+						// Either way its type 0 makes the client clear its slot.
+						// [orig: NetPacket_SerializeObjectToBuffer @0x504D10 over the pool
+						//  row @0x514201; Entity_Destroy @0x43EA70..0x43EA92; Pool_Clear @0x442060]
 						if (const world::Entity *e = world->registry.get(h)) {
 							frec = replication::build_full_entity_spawn(*e);
+						} else if (const world::Entity *stale = world->registry.destroyed_row(h)) {
+							frec = replication::build_destroyed_row_full_entity_spawn(h, *stale);
 						} else {
-							frec.slot_id = handle; // empty slot: type-0 record clears the client's entity
+							frec.slot_id = handle;
 						}
 						replies.push_back(make_protocol_message(s2c::FULL_ENTITY_SPAWN, encode_full_entity_spawn(frec)));
 					}
@@ -2112,9 +1452,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// EMPTY entry (`entry_dword[7] == 0`); the client destroys whatever it
 				// still holds in those slots (NapiNPClientMsg_DestroyEntityList
 				// @0x429730). The handler reads NO fields from the request. It answers
-				// on the authority only, is SKIPPED while g_NetSpawnSuspended or
-				// g_SpawnSuccessGate (round over) is set — our reachable analog of the
-				// latter is world->match.outcome().ended — and answers only a requester
+				// on the authority only, is SKIPPED while g_NetSpawnSuspended (the
+				// mission load's gate, ctx.net_spawn_suspended: the load's pumps run
+				// this handler, D-NET-116) or g_RoundOver (round over) is set — our
+				// reachable analog of the latter is world->match.outcome().ended —
+				// and answers only a requester
 				// whose session player (conn+0x160) and its server slot (+0xC0) are
 				// bound, which our PlayerAdded phase stands for (the 0x22 and 0x0F
 				// gates' analogue). The walk covers pool 0's used
@@ -2123,7 +1465,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// of a type items.def lacks (the lookup's miss answers row 0).
 				// [orig: NapiNPServerMsg_SendEmptySlots @0x51a600 — the authority
 				//  @0x51A600..0x51A607, g_NetSpawnSuspended @0x51A609..0x51A610
-				//  (unmodeled, D-NET-116), the round-over gate @0x51A612..0x51A619, the
+				//  (set for the length of the mission load, D-NET-116), the round-over
+				//  gate @0x51A612..0x51A619, the
 				//  session player @0x51A61F..0x51A627 and its slot @0x51A62A..0x51A632;
 				//  body builder Server_CollectEmptyPool0Slots @0x5160f0, the used read
 				//  @0x5160FF, the +0x1C test @0x516123]
@@ -2134,6 +1477,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (world == nullptr ||
 				    !decode_empty_slots_request(
 						msg.payload.data(), msg.payload.size(), consumed) ||
+				    inputs.server_ctx->net_spawn_suspended != 0 ||
 				    world->match.outcome().ended) {
 					break;
 				}
@@ -2162,9 +1506,14 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				const bool peer = inputs.server_ctx != nullptr
 						? inputs.server_ctx->is_mp_session_peer != 0
 						: (world != nullptr && world->rules.mp_session_peer);
+				// The mission teardown destroyed the bodies ahead of its pump: the requester's
+				// row reads as zeroed (D-NET-NEW-L1-25) [orig: Game_TeardownMission - Entity_Destroy
+				//  over pools 0..2 @0x52236F..0x5223C0 before Server_PumpNetworkTransport @0x522588].
+				const bool body_destroyed = world != nullptr && conn.link.owned_entity.valid() &&
+						world->registry.get(conn.link.owned_entity) == nullptr;
 				replies.push_back(make_protocol_message(s2c::VISIBLE_PLAYERS,
-						build_visible_players_snapshot(conn, roster, world,
-								config.game_type, peer)));
+						build_visible_players_snapshot(conn, roster, config.game_type, peer,
+								body_destroyed)));
 				break;
 			}
 			case c2s::LOADOUT_REQUEST: // the join-window kill page -> S2C 0x4E (server_kill_page.h)
@@ -2172,11 +1521,24 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						inputs.server_ctx, conn, msg.payload, world))
 					replies.push_back(std::move(m));
 				break;
+			case c2s::KEEPALIVE: // [orig: NapiNPServerMsg_UpdateAck @0x5024B0]
+				dispatch_keepalive_ack(conn, msg.payload);
+				break;
+			case c2s::GAME_START_ACK: // the squad registry walk [orig: NapiNPServerMsg_HandleSquadRegistryWalk @0x511210]
+				dispatch_squad_registry_walk(inputs.server_ctx, msg.payload, replies);
+				break;
+			case c2s::BAN_PUNT_COMMAND: // [orig: NapiNPServerMsg_0x024 @0x514DC0]
+				dispatch_ban_punt_command(inputs.server_ctx, conn, msg.payload, replies);
+				break;
 			default:
-				// The command map's squad / waypoint / punt legs (server_squad.h); 0x09
-				// checksum / 0x48 + per-frame client updates: consumed (no reactive reply).
-				if (inputs.server_ctx != nullptr && world != nullptr)
-					Server_HandleSquadMessage(*inputs.server_ctx, conn, msg.tag, msg.payload, *world);
+				// The command map's squad / waypoint / punt legs (server_squad.h); 0x48
+				// + per-frame client updates: consumed (no reactive reply). A record no
+				// named handler takes counts on the host's test seam
+				// (NapiNPServerCtx::unnamed_records).
+				if (inputs.server_ctx != nullptr && world != nullptr &&
+						Server_HandleSquadMessage(*inputs.server_ctx, conn, msg.tag, msg.payload, *world))
+					break;
+				if (inputs.server_ctx != nullptr) ++inputs.server_ctx->unnamed_records[msg.tag];
 				break;
 		}
 	}
@@ -2199,34 +1561,12 @@ bool bind_session_reply_player(NapiNPConnection &conn, std::string player_name, 
 
 ProtocolMessage build_player_list_message(const GameConfig &config,
                                           const std::vector<NapiNPConnection> &roster,
-                                          world::World *world) {
+                                          world::World *world,
+                                          const std::vector<OrphanedPlayerRow> *orphaned) {
 	ProtocolMessage message = make_protocol_message(
-			s2c::PLAYER_LIST, build_reply_tag_16(config, roster, world));
+			s2c::PLAYER_LIST, build_reply_tag_16(config, roster, world, orphaned));
 	message.reliable = false; // Server_BuildAndBroadcastScoreboard @0x50DE00 userParam=1
 	return message;
-}
-
-void broadcast_player_sync_on_join(const GameConfig &config,
-                                   std::vector<NapiNPConnection> &roster,
-                                   const NapiNPConnection &joined, const world::World *world) {
-	// [orig: Server_PlayerAdd @0x51D296 — one 0x46 (fieldFlags 0x1CF7, no ack: the walk is the
-	// JOINER's own concern) to every in-game connection]. Staged on each recipient's transport
-	// like the other broadcast handlers (0x49 relay / the leave removal); the per-connection
-	// flush frames it with that connection's own sequencing.
-	const PlayerReplicationState rep = make_rep_state(config, joined, world);
-	const std::vector<uint8_t> body = encode_player_sync(rep, kPlayerSyncJoinBroadcastFields);
-	for (NapiNPConnection &c : roster) {
-		if (&c == &joined || !is_in_match(c) || c.link.transport == nullptr) continue;
-		c.link.transport->host_send(s2c::PLAYER_SYNC, body);
-	}
-	// Retail's host-client reads the server's player-slot table in-process, so
-	// no self-0x46 exists on its wire. Our host's client view is fed over the
-	// type-2 loopback instead (ADR 0011 §3; the D-NET-114 self-stream), and it
-	// never runs the joiner's C2S 0x22 walk — carry the loopback player's OWN
-	// sync so the host-side roster (D-HUD-24) binds its slot and its 0x16 rows
-	// are accepted rather than dropped as unknown.
-	if (joined.type == NapiNPConnection::kTypeClientSide && joined.link.transport != nullptr)
-		joined.link.transport->host_send(s2c::PLAYER_SYNC, body);
 }
 
 } // namespace opennova::inmatch

@@ -25,6 +25,7 @@
 #include <base/gameprofile/gameprofile.h>
 #include <net/title/title_identity.h>
 #include "serve_test_support.h"
+#include "../npruntime/joiner_mission_start.h" // the harness's end of a released mission start
 
 #include "lister.h"
 #include "nw_udp_listener.h"
@@ -37,9 +38,11 @@
 #include <net/napi/session.h>
 #include <net/napi/tlv.h>
 #include <net/novacrypto/nwu.h>
+#include <net/novacrypto/pubcrypto.h> // encode_pub_value (the joiner's CD identity cookie)
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/connection/manager.h>
 #include <net/novaworld/gate_probe.h>
+#include <net/novaworld/join_identity.h> // build_pub_join_identity_plaintexts
 #include <net/novaworld/lobby_session.h>
 #include <net/npwire/lan_discovery.h>
 #include <net/npwire/peer_addr.h>
@@ -56,6 +59,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
@@ -158,16 +162,53 @@ int main() {
 	};
 	// The first full Host list is the starting map's mission start's: the host result published
 	// nothing (D-NET-465), and the request's Host list (BuildHostVarLists' first run) carries no
-	// GameType [orig: Game_StartMission @0x5248c6..0x524903].
+	// GameType. It left inside the start, ahead of the load and of every frame, as the mission
+	// start publishes and its periodic update sends before the load: TimeOfDay is the class the
+	// settings apply cleared (UNKNOWN) and TimeLeft the fresh process's round clock (0)
+	// [orig: Game_StartMission @0x524360 - Game_ApplySessionSettingsToGlobals called @0x524662
+	//  (the g_EnvTimeOfDayEnum store @0x55207B), Lobby_UpdateServerInfo called @0x5248F5,
+	//  CPlayerManager_RebuildLists(1) called @0x524903, CNapiGameSession_ProcessPeriodicUpdate
+	//  called @0x52493D; g_RoundTimeRemaining's stores @0x524A5D / @0x525251 follow].
 	std::optional<LobbyState> lobby;
-	for (int f = 0; f < 300 && !(lobby && var_has(lobby->last_host_update["Host"], "GameType"));
+	for (int f = 0; f < 500 && !(lobby && var_has(lobby->last_host_update["Host"], "GameType"));
 			++f) {
-		CHECK(server.frame(kFrame));
 		std::this_thread::sleep_for(2ms);
 		lobby = row();
 	}
 	CHECK(lobby.has_value());
 	if (!lobby) return 1;
+	CHECK(var(lobby->last_host_update["Host"], "TimeOfDay") == "Unknown");
+	CHECK(var(lobby->last_host_update["Host"], "TimeLeft") == "0");
+	CHECK(var(lobby->last_host_update["Host"], "MissionName") == "Serve Test Map");
+	// The session's create ran ahead of the mission start, so the update carries the keys its
+	// round-state init drew (D-NET-NEW-L1-50) [orig: CNapiGameSession_BuildAndCreateSession
+	// @0x5694D0 - Server_InitNewRoundState called @0x5695B3 (the g_GameServerBaffleKey store
+	// @0x51CB88, CSessionIdRing_Init called @0x51CB8E), ahead of GameLoop_Init's Game_StartMission
+	// call @0x526377; Lobby_UpdateServerInfo @0x4FE8C0 - @0x4FF191..0x4FF196, @0x4FF1CC].
+	for (const char *key : {"GameServerBaffleKey", "PCIDKey"}) {
+		const std::string value = var(lobby->last_host_update["Host"], key);
+		CHECK(value != "<absent>" && value != "0" && !value.empty());
+	}
+	// The round's first server tick refreshes the listing, its update reading the session's
+	// columns as that tick left them: the PCIDKey its cookie-key ring's advance just drew, not the
+	// one the lister's pass before the tick read (D-NET-NEW-L9-53; LN-s6's S3: our first refresh
+	// carried no PCIDKey where the retail hosts' carry the advanced key).
+	// [orig: Server_TickUpdate @0x51D7E0 - CSessionIdRing_AdvanceAndGenerate called @0x51D93D,
+	//  Lobby_UpdateServerInfo called @0x51D943; Lobby_UpdateServerInfo @0x4FE8C0 - the ring's
+	//  current key @0x4FF191..0x4FF196]
+	{
+		for (int f = 0; f < 120 && ctx.cookie_key_table.count < 2; ++f) CHECK(server.frame(kFrame));
+		CHECK(ctx.cookie_key_table.count >= 2);
+		const std::string advanced = std::to_string(ctx.cookie_key_table.current());
+		std::optional<LobbyState> refreshed;
+		for (int f = 0; f < 500; ++f) {
+			refreshed = row();
+			if (refreshed && var(refreshed->last_host_update["Host"], "PCIDKey") == advanced) break;
+			CHECK(server.frame(kFrame));
+			std::this_thread::sleep_for(2ms);
+		}
+		CHECK(refreshed && var(refreshed->last_host_update["Host"], "PCIDKey") == advanced);
+	}
 
 	// The service's only endpoint is the source of the host's NWU datagrams:
 	// the game socket.
@@ -319,6 +360,33 @@ int main() {
 	// A NovaWorld join carries the session's AppId as its APPID, the .joi CK's value; the
 	// host refuses a NovaWorld joiner without it (code 9, B-7).
 	client.set_app_id(std::to_string(server.lister()->host_role().app_id()));
+	// It also carries the CD identity cookie the service's /NWJoin.dll set for the joiner's
+	// account: PUBPCID, PUBNAMEINFO and PUBSQUADINFO, each encoded under the PCIDKey the host's
+	// Host list advertises, relayed as the [name\0][value\0] pairs of every PUB* cookie
+	// (LobbyHttpFlow::on_join_response). The host refuses a NovaWorld JOIN with no cookie (code
+	// 23) and one whose NAMEINFO or PCID does not decrypt (24 / 25), D-NET-702. This listener
+	// has no HTTP leg, so the test encodes them as /NWJoin.dll does; the service answers
+	// HostRequiresJoinTicket 0, so no JOINTICKET is read.
+	// [orig: Server_ValidatePlayerJoinRequest @0x512100 - 23 @0x512969, NAMEINFO @0x512648,
+	//  PCID @0x5126FE]
+	{
+		const std::optional<LobbyState> keyed = row();
+		CHECK(keyed && !keyed->pcid_key.empty());
+		const PubJoinIdentityPlaintexts identity =
+				build_pub_join_identity_plaintexts("A-LISTED-JOINER1", "ListedJoiner");
+		std::vector<uint8_t> cd;
+		for (const auto &[name, plain] : {std::pair{"PUBPCID", &identity.pcid},
+				     std::pair{"PUBNAMEINFO", &identity.name_info},
+				     std::pair{"PUBSQUADINFO", &identity.squad_info}}) {
+			std::string value;
+			CHECK(keyed && encode_pub_value(*plain, keyed->pcid_key, value));
+			cd.insert(cd.end(), name, name + std::char_traits<char>::length(name));
+			cd.push_back(0);
+			cd.insert(cd.end(), value.begin(), value.end());
+			cd.push_back(0);
+		}
+		client.set_join_cd_cookie(std::move(cd));
+	}
 	ship(client.start());
 	bool in_match = false;
 	for (int f = 0; f < 900 && !in_match; ++f) {
@@ -328,6 +396,7 @@ int main() {
 		}
 		drain();
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship(d);
+		push_released_mission_start(client, ship);
 		++tick;
 		in_match = client.in_match();
 	}
@@ -341,6 +410,7 @@ int main() {
 		if (!server.frame(kFrame)) break;
 		drain();
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship(d);
+		push_released_mission_start(client, ship);
 		++tick;
 		with_joiner = row();
 		if (with_joiner && with_joiner->roster.size() == 1) break;

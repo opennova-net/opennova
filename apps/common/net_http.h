@@ -23,8 +23,10 @@ struct HttpReply {
 using HttpResolver = std::function<bool(const std::string &host, Endpoint &out)>;
 
 // One blocking HTTP/1.0 exchange on its own connection: `method` ("GET", "POST", "PUT",
-// "DELETE"; every method but GET sends `body` with a Content-Length), the "Name: value" header
-// lines as given, then the reply read to the server's close or to its Content-Length. http://
+// "DELETE"; every method but GET sends `body` with a Content-Length, after the given lines unless
+// they carry one), the request line and Host first (the URL's authority, unless the given lines
+// carry a Host line of their own), then the "Name: value" header lines as given,
+// then the reply read to the server's close or to its Content-Length. http://
 // only. Every connect, send and recv waits at most `timeout_ms`.
 HttpReply http_exchange(const std::string &method, const std::string &url,
 		const std::vector<std::string> &headers, const std::string &body, int timeout_ms,

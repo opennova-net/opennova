@@ -19,13 +19,14 @@
 //     samples, and no disconnect marker (the log closes ahead of the slot
 //     disconnects, as retail's teardown closes it).
 // [orig: Server_DrawStatusScreen @0x50a2d0; HUD_DrawServerConsoleLines
-//  @0x5ba0a0; Chat_SendTeamMessage @0x49a900; NapiNPServer_HandleChatMessage
+//  @0x5ba0a0; Chat_SendGlobalMessage @0x49a900; NapiNPServer_HandleChatMessage
 //  @0x513760; CNapiNPConnection_LogHostStarted @0x61e6a0]
 #include "server.h"
 #include <base/gameprofile/gameprofile.h>
 #include <net/title/title_identity.h>
-#include "server_logs.h"
+#include <runtime/inmatch/server_log_devices.h>
 #include "serve_test_support.h"
+#include "../npruntime/joiner_mission_start.h" // the harness's end of a released mission start
 #include "status_console.h"
 
 #include <base/io/strutil.h>
@@ -306,16 +307,16 @@ void test_inout_lines() {
 }
 
 void test_switches_and_devices() {
-	serve::LogSwitches sw;
+	LogSwitches sw;
 	std::string error;
 	const std::vector<std::string> args = {"/profile", "host", "/PuntLog", "/CHEATLOG", "/PUNT.TXT", "/x"};
-	CHECK(serve::parse_log_switch(args, 0, sw, error) == 2 && sw.profile_path == "host");
-	CHECK(serve::parse_log_switch(args, 2, sw, error) == 1 && sw.punt_log);
-	CHECK(serve::parse_log_switch(args, 3, sw, error) == 1 && sw.cheat_log);
-	CHECK(serve::parse_log_switch(args, 4, sw, error) == 1);
-	CHECK(serve::parse_log_switch(args, 5, sw, error) == 0);
-	CHECK(serve::parse_log_switch({"/PROFILE"}, 0, sw, error) == -1);
-	CHECK(serve::parse_log_switch({"/netlog"}, 0, sw, error) == 1 && sw.net_log);
+	CHECK(parse_log_switch(args, 0, sw, error) == 2 && sw.profile_path == "host");
+	CHECK(parse_log_switch(args, 2, sw, error) == 1 && sw.punt_log);
+	CHECK(parse_log_switch(args, 3, sw, error) == 1 && sw.cheat_log);
+	CHECK(parse_log_switch(args, 4, sw, error) == 1);
+	CHECK(parse_log_switch(args, 5, sw, error) == 0);
+	CHECK(parse_log_switch({"/PROFILE"}, 0, sw, error) == -1);
+	CHECK(parse_log_switch({"/netlog"}, 0, sw, error) == 1 && sw.net_log);
 
 	// The devices in a working directory of their own.
 	const fs::path dir = fs::temp_directory_path() /
@@ -325,8 +326,8 @@ void test_switches_and_devices() {
 	const fs::path previous = fs::current_path();
 	fs::current_path(dir);
 	{
-		serve::ServerLogDevices devices;
-		serve::LogSwitches on;
+		inmatch::ServerLogDevices devices;
+		LogSwitches on;
 		on.profile_path = "host";
 		on.punt_log = true;
 		devices.arm(on);
@@ -345,8 +346,8 @@ void test_switches_and_devices() {
 	{
 		// A _DONETLOG.TXT in the working directory turns it on at the start.
 		std::ofstream("_DONETLOG.TXT") << "";
-		serve::ServerLogDevices devices;
-		devices.arm(serve::LogSwitches{});
+		inmatch::ServerLogDevices devices;
+		devices.arm(LogSwitches{});
 		CHECK(devices.logs().net->enabled());
 	}
 	std::ifstream netlog("_NETLOG.TXT", std::ios::binary);
@@ -371,7 +372,9 @@ void test_switches_and_devices() {
 }
 
 
-// One `.sph` file decoded: its map, the joiner's one roster row with at least
+// One `.sph` file decoded: its map, the roster's two rows (the host's own slot 0's hidden
+// body first, pool 0's first entry, then the joiner: the pass walks every pool-0 row with the
+// Player bit, D-NET-352 [orig: Game_StartMission @0x526135..0x52617B]), the joiner's at least
 // five eighth-tick samples, the end chunk and no disconnect marker.
 void check_capture(const fs::path &path, const char *map, const char *joiner) {
 	std::ifstream in(path, std::ios::binary);
@@ -379,9 +382,11 @@ void check_capture(const fs::path &path, const char *map, const char *joiner) {
 	ServerLogDocument doc;
 	CHECK(!bytes.empty() && decode_server_log(bytes.data(), bytes.size(), doc));
 	CHECK(doc.version == 2 && strutil::iequals(doc.mission, map));
-	CHECK(doc.roster.size() == 1);
-	const uint32_t id = doc.roster.empty() ? 0 : doc.roster[0].net_id;
-	CHECK(!doc.roster.empty() && doc.roster[0].name == joiner && id != 0);
+	CHECK(doc.roster.size() == 2);
+	uint32_t id = 0;
+	for (const auto &row : doc.roster)
+		if (row.name == joiner) id = row.net_id;
+	CHECK(id != 0);
 	size_t samples = 0;
 	for (const ServerLogFrame &f : doc.frames)
 		for (const ServerLogEntity &e : f.entities)
@@ -450,6 +455,7 @@ void test_serve_session_capture() {
 		if (!server.frame(kFrame)) return false;
 		drain();
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship(d);
+		push_released_mission_start(client, ship);
 		++tick;
 		return true;
 	};

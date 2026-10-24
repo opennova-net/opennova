@@ -22,12 +22,13 @@ int32_t impulse_q22(int64_t scale, int32_t table_q22) {
 // [orig: Entity_ApplyCollisionForce @0x4AF4A0]
 int collision_force_body(const int32_t pos[2], int32_t heading, uint32_t flags,
         const int32_t *owner_group, int32_t group, uint8_t hit_type, uint8_t force_type,
-        const Vec3 &source, uint8_t &r_hit_type, int32_t &r_player_move_timer,
+        const FixedVec3 &source, uint8_t &r_hit_type, int32_t &r_player_move_timer,
         int32_t &r_move_timer, int32_t r_vel[3]) {
     int damage_multiplier = 4; // [orig: @0x4af4c6]
     // atan2 * 683565275.5764316 (2^32 / 2pi) into a BAM bearing [orig: @0x4af4d8]
-    const int32_t dx = io::bam_sub(pos[0], static_cast<int32_t>(source.x * io::kFp16One));
-    const int32_t dy = io::bam_sub(pos[1], static_cast<int32_t>(source.y * io::kFp16One));
+    // The source's X/Y words (D-NET-507) [orig: `sub eax, [srcY]` @0x4AF4AA, `sub ecx, [srcX]` @0x4AF4B1].
+    const int32_t dx = io::bam_sub(pos[0], source.x);
+    const int32_t dy = io::bam_sub(pos[1], source.y);
     const int32_t angle_to_source = static_cast<int32_t>(static_cast<uint32_t>(
             static_cast<int64_t>(std::atan2(double(dy), double(dx)) * io::kBamPerRadian)));
     // Source within 90 degrees of the yaw (abs32 < 0x3FFFFFC0) [orig: @0x4af4e7]
@@ -101,7 +102,7 @@ int collision_force_body(const int32_t pos[2], int32_t heading, uint32_t flags,
 
 // [orig: Entity_ApplyCollisionForce @0x4AF4A0]
 void apply_collision_force(World &world, Entity &target, uint8_t hit_type,
-        uint8_t force_type, const Vec3 &source, EntityHandle attacker) {
+        uint8_t force_type, const FixedVec3 &source, EntityHandle attacker) {
     // The burn byte (+0x368), the velocity triple (+0x98/+0x9C/+0xA0) and the
     // engine-frame pose live on the infantry body; a person without one has
     // no target for either half.
@@ -111,9 +112,10 @@ void apply_collision_force(World &world, Entity &target, uint8_t hit_type,
     const uint32_t flags = target.flags | target.engine_flags;
     const Entity *owner = world.registry.get(attacker);
     const int32_t owner_group = owner != nullptr ? owner->group_id : 0;
-    const int damage_multiplier = collision_force_body(body->pos, body->heading, flags,
+    const int damage_multiplier = collision_force_body(body->self->position.words().data(), body->heading, flags,
             owner != nullptr ? &owner_group : nullptr, target.group_id, hit_type, force_type,
             source, inf.burn_state, inf.idle_counter, inf.combat_move_timer, inf.vel);
+    body_trace_force(world, target, hit_type, force_type, source, attacker, inf.vel); // the readout
     if (force_type != 3) return;
     // The local-player hit blackout [orig: @0x4af6c5..0x4af77e]
     if (!(target.handle == world.cached.local_player)) return;

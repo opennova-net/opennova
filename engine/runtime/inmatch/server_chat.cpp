@@ -1,5 +1,6 @@
 #include <runtime/inmatch/server_chat.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -7,10 +8,12 @@
 #include <formats/def/reserved_items.h>
 #include <net/npwire/ingame_encode.h>   // encode_chat_broadcast / encode_player_downed_state / encode_play_sound
 #include <net/npwire/ingame_message_id.h>
+#include <net/title/title_identity.h> // TitleInMatch::chat_squad_tag_wrapped
 #include <runtime/audio/oneshot_play.h>  // SoundSetIndex (the loaded banks)
 #include <runtime/audio/sound_profile.h> // compose_entity_sound_set — the 0x2E MEDIC_REQUEST composite
 #include <runtime/inmatch/server_console.h>  // the client-less host's CHAT ring
 #include <runtime/inmatch/server_message_dispatch.h> // is_medic_recipient
+#include <runtime/inmatch/server_squad_registry.h>    // the sender's squad tag
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/world.h>
@@ -57,32 +60,41 @@ const std::string *location_label(const NapiNPServerCtx &ctx, const world::World
 		return &ctx.mission_location_names[static_cast<size_t>(index)];
 	// Without the MissionText table the marker's own name stands in (the same
 	// fallback the 0x0F writer takes).
+	// The row whose +0x280 is the index, whatever its pool (D-NET-656).
 	static std::string fallback;
 	fallback.clear();
-	int walk = 0;
 	world.registry.for_each([&](const world::Entity &e) {
-		if (e.handle.pool() != 3 || e.item_id != def::DEF_TYPE_NAMED_LOCATION) return;
-		if (walk++ == index) fallback = e.name;
+		if (e.item_id != def::DEF_TYPE_NAMED_LOCATION || e.location_index != index) return;
+		if (fallback.empty()) fallback = e.name;
 	});
 	return fallback.empty() ? nullptr : &fallback;
 }
 
 } // namespace
 
+// The walk over pool 3's 2044 rows: the sender's X/Y words less the row's (wrapping
+// int32 subtractions), the x87 length saturated at flt_7C19E0 and truncated, taken
+// when below the row's entity+0 bound word and strictly below the best so far (the
+// earliest row wins a tie); the label is the row's own +0x280 (D-NET-656).
+// [orig: NapiNPServer_HandleChatMessage @0x513760 - the walk @0x51394C..0x5139D1: the
+//  type test @0x513979, the deltas @0x51398A / @0x51398D, the clamp @0x5139AA..0x5139B5,
+//  _ftol2_sse @0x5139B7, `cmp eax, [edi]` @0x5139BC, `cmp eax, ebx` @0x5139C0, +0x280
+//  @0x5139C6; its radio twin NapiNPServerMsg_HandleRadioCall @0x514330 - @0x51444C /
+//  @0x51444F, @0x514479, @0x51447E]
 int nearest_location_index(const world::World &world, const world::Entity &sender) {
 	int best = -1;
-	int index = 0;
-	float best_distance = 0.0f;
-	world.registry.for_each([&](const world::Entity &e) {
-		if (e.handle.pool() != 3 || e.item_id != def::DEF_TYPE_NAMED_LOCATION) return;
-		const int my_index = index++;
-		const float dx = sender.position.x - e.position.x;
-		const float dy = sender.position.y - e.position.y;
-		const float distance = std::sqrt(dx * dx + dy * dy);
-		if (distance < e.bound_radius && (best < 0 || distance < best_distance)) {
-			best = my_index;
-			best_distance = distance;
-		}
+	int32_t best_distance = INT32_MAX;
+	world.registry.for_each_in_pool(3, [&](const world::Entity &e) {
+		if (e.item_id != def::DEF_TYPE_NAMED_LOCATION) return;
+		const double dx = static_cast<int32_t>(
+				static_cast<uint32_t>(sender.position.x.q16) - static_cast<uint32_t>(e.position.x.q16));
+		const double dy = static_cast<int32_t>(
+				static_cast<uint32_t>(sender.position.y.q16) - static_cast<uint32_t>(e.position.y.q16));
+		const int32_t distance = static_cast<int32_t>(
+				std::min(std::sqrt(dx * dx + dy * dy), 2147418112.0)); // flt_7C19E0
+		if (distance >= e.bound_radius.q16 || distance >= best_distance) return;
+		best_distance = distance;
+		best = e.location_index;
 	});
 	return best;
 }
@@ -146,10 +158,21 @@ std::vector<ProtocolMessage> Server_HandleMedicRequest(const std::string *format
 		candidate.link.transport->host_send(
 				s2c::CHAT_BROADCAST, body, true, 0, false, kChatRetentionFlushes);
 	}
-	// [orig: Server_BroadcastMedicRequest @0x5154AC..0x51550B]
-	ProtocolMessage own_chat = make_protocol_message(s2c::CHAT_BROADCAST, body);
-	own_chat.retention_flushes = kChatRetentionFlushes;
-	replies.push_back(std::move(own_chat));
+	// The requester's own copy is the second send (mask 0x20, the target slot),
+	// queued at its call: ahead of the help call's 0x34, which the requester
+	// hears too, not behind the handler's return (the dual-send audit). A
+	// connection with no transport (a test seam) takes it as the reply.
+	// [orig: Server_BroadcastMedicRequest - the Medics' 0x14 (mask 0x5C0)
+	//  @0x5154DC, the requester's (mask 0x20) @0x51550B, the latch @0x515510,
+	//  then Server_SendOverlayActionToAlive @0x51552F]
+	if (conn.link.transport != nullptr) {
+		conn.link.transport->host_send(
+				s2c::CHAT_BROADCAST, body, true, 0, false, kChatRetentionFlushes);
+	} else {
+		ProtocolMessage own_chat = make_protocol_message(s2c::CHAT_BROADCAST, body);
+		own_chat.retention_flushes = kChatRetentionFlushes;
+		replies.push_back(std::move(own_chat));
+	}
 	conn.link.medic_request_active = true;
 	// The help call: the requester's body-model composite "<prefix>_MEDIC_REQUEST",
 	// positioned at the requester, to every slot in state 6/7 (mask 128, which
@@ -166,24 +189,27 @@ std::vector<ProtocolMessage> Server_HandleMedicRequest(const std::string *format
 	char set_name[24] = {};
 	audio::compose_entity_sound_set(requester->anim_slot, audio::kEntitySoundMedicRequest,
 			set_name, sizeof(set_name));
-	if (world->tables.sound_sets == nullptr || !world->tables.sound_sets->has(set_name))
-		return replies;
+	if (world->tables.sound_sets == nullptr) return replies;
+	const audio::SetLocation medic_set = world->tables.sound_sets->find(set_name);
+	if (!medic_set.valid()) return replies;
 	PlaySoundCommand cmd;
 	cmd.flag = 1;
-	cmd.sound_name = set_name;
+	// The resolved set's own spelling (audio::SetLocation::name) [orig:
+	//  NetPacket_WriteOverlayAction @0x505D99..0x505DAA].
+	cmd.sound_name = medic_set.name;
 	cmd.has_pos = true;
-	cmd.pos_x = static_cast<int16_t>(world::to_fixed(requester->position.x) >> 16);
-	cmd.pos_y = static_cast<int16_t>(world::to_fixed(requester->position.y) >> 16);
-	cmd.pos_z = static_cast<int16_t>(world::to_fixed(requester->position.z) >> 16);
+	cmd.pos_x = static_cast<int16_t>(requester->position.x.q16 >> 16);
+	cmd.pos_y = static_cast<int16_t>(requester->position.y.q16 >> 16);
+	cmd.pos_z = static_cast<int16_t>(requester->position.z.q16 >> 16);
 	const std::vector<uint8_t> sound_body = encode_play_sound(cmd);
 	for (NapiNPConnection &candidate : roster) {
 		if (!active_player_recipient(candidate)) continue;
 		if (candidate.link.mode == replication::TransportMode::Loopback) {
 			world::SoundSlotEvent local;
 			local.source_handle = conn.link.owned_entity.packed;
-			local.pos[0] = world::to_fixed(requester->position.x);
-			local.pos[1] = world::to_fixed(requester->position.y);
-			local.pos[2] = world::to_fixed(requester->position.z);
+			local.pos[0] = requester->position.x.q16;
+			local.pos[1] = requester->position.y.q16;
+			local.pos[2] = requester->position.z.q16;
 			local.slot = 0;
 			std::memcpy(local.set_name, set_name, sizeof(set_name));
 			world->out.slot_sounds.push_back(local);
@@ -220,7 +246,8 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 	const world::Entity *sender_entity = world.registry.get(sender.link.owned_entity);
 	if (sender_entity == nullptr) return replies;
 	const bool local_slot = sender.link.mode == replication::TransportMode::Loopback;
-	// (state 10/11 || slot+5) && (!spectator || g_SpawnSuccessGate) [orig: @0x5137D7]
+	// (state 10/11 || slot+5) && (!spectator || g_RoundOver) [orig: @0x5137D7; the net player's
+	//  game state 10 / 11 @0x5137AD..0x5137BB, slot+5 @0x5137BD..0x5137C1]
 	if (!(is_in_match(sender) || local_slot)) return replies;
 	if (sender.link.spectator) return replies;
 	// The 1000 ms per-sender throttle [orig: slot+100360 @0x5137FF..0x513820].
@@ -236,9 +263,14 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 			channel != 4 && channel != 11 && channel != 2)
 		return replies;
 	std::string formatted = sender.reply.player_name;              // slot+40 @0x5138FE
-	// The squad-tag suffix (slot+100572 -> the squad node's tag +81, chat_squad_tag_text)
-	// [orig: @0x513903..0x513930]: the squad list (Server_PlayerAdd's node, the S2C 0x6A
-	// family) is not modeled on this host, so no sender has one.
+	// The squad-tag suffix: the sender's squad key finds its registry node, whose
+	// tag follows the name [orig: @0x513903..0x513930 - slot+0x188DC, then
+	// CLinkedList_FindByTag, the node's +0x51].
+	if (sender.squad_key != 0) {
+		if (const SquadRegistryNode *node = find_squad_registry_node(ctx, sender.squad_key))
+			formatted += chat_squad_tag_text(node->tag,
+					title_in_match(ctx.np_protocol.identity).chat_squad_tag_wrapped);
+	}
 	if (channel == 2) {
 		const int location = nearest_location_index(world, *sender_entity);
 		if (const std::string *label = location_label(ctx, world, location)) {
@@ -259,9 +291,9 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 	int8_t wire_channel = channel;
 	if (channel == 4 || channel == 5) wire_channel = 2;
 	const int32_t sender_pos[3] = {
-			world::to_fixed(sender_entity->position.x),
-			world::to_fixed(sender_entity->position.y),
-			world::to_fixed(sender_entity->position.z)};
+			sender_entity->position.x.q16,
+			sender_entity->position.y.q16,
+			sender_entity->position.z.q16};
 
 	std::vector<NapiNPConnection> &roster = ctx.np_protocol.connection_list;
 	for (NapiNPConnection &recipient : roster) {
@@ -283,14 +315,18 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 			admit = recipient_entity != nullptr &&
 					carrier_vehicle(world, *recipient_entity) == sender_carrier;
 			break;
-		case 12: // same squad id (unmodeled: no squads) and !dy — nobody
-			admit = false;
+		case 12: // the same squad key (0 on a LAN host matches 0), then case 2's team
+			// test, and never under the triplet filter, the sender included
+			// [orig: @0x513EAE..0x513EE5 - slot+0x188DC, entity+0x162, +0x178E1,
+			//  +0x188D7, the filter word]
+			admit = !sender_only && recipient.squad_key == sender.squad_key &&
+					(recipient_team == sender_team || recipient.link.spectator);
 			break;
 		case 13: { // within 100 units on every axis [orig: @0x513FC2..0x51401E]
 			if (recipient_entity == nullptr) break;
-			const int32_t dx = world::to_fixed(recipient_entity->position.x) - sender_pos[0];
-			const int32_t dy = world::to_fixed(recipient_entity->position.y) - sender_pos[1];
-			const int32_t dz = world::to_fixed(recipient_entity->position.z) - sender_pos[2];
+			const int32_t dx = recipient_entity->position.x.q16 - sender_pos[0];
+			const int32_t dy = recipient_entity->position.y.q16 - sender_pos[1];
+			const int32_t dz = recipient_entity->position.z.q16 - sender_pos[2];
 			admit = std::abs(dx) <= kProximityPerAxisFixed &&
 					std::abs(dy) <= kProximityPerAxisFixed &&
 					std::abs(dz) <= kProximityPerAxisFixed;
@@ -329,15 +365,14 @@ namespace {
 // One join/leave line to every OTHER in-match connection [orig: the
 // send_mask 0x80 SendFiltered(0x32, reliable) @0x51d28a / @0x51b6d3].
 void fan_game_text(std::vector<NapiNPConnection> &roster, const NapiNPConnection &subject,
-		int8_t subtype, const world::World *world) {
+		int8_t subtype) {
 	FormattedGameText text;
 	text.subtype = subtype;
 	text.text = subject.reply.player_name; // [orig: slot+0x28]
-	// [orig: slot+0x1A0] — the live entity's team, else the reservation
-	uint8_t team = subject.assigned_team_valid ? subject.assigned_team : uint8_t{0};
-	if (world != nullptr && subject.link.owned_entity.valid()) {
-		if (const world::Entity *e = world->registry.get(subject.link.owned_entity)) team = e->team;
-	}
+	// The slot's own team byte, not its body's (D-NET-593) [orig: Server_PlayerAdd
+	//  `slot+0x1A0` @0x51D25C (the join's type 1); NetPacket_SerializeMinimapSlot_0
+	//  @0x505B80 (the leave's type 2)].
+	const uint8_t team = subject.assigned_team_valid ? subject.assigned_team : uint8_t{0};
 	text.team = static_cast<int8_t>(team);
 	const std::vector<uint8_t> body = encode_formatted_game_text(text);
 	for (NapiNPConnection &c : roster) {
@@ -349,13 +384,13 @@ void fan_game_text(std::vector<NapiNPConnection> &roster, const NapiNPConnection
 } // namespace
 
 void broadcast_player_joined_text(std::vector<NapiNPConnection> &roster,
-		const NapiNPConnection &joined, const world::World *world) {
-	fan_game_text(roster, joined, kGameTextPlayerJoined, world); // [orig: @0x51d21e]
+		const NapiNPConnection &joined) {
+	fan_game_text(roster, joined, kGameTextPlayerJoined); // [orig: @0x51d21e]
 }
 
 void broadcast_player_leaving_text(std::vector<NapiNPConnection> &roster,
-		const NapiNPConnection &leaver, const world::World *world) {
-	fan_game_text(roster, leaver, kGameTextPlayerLeaving, world); // [orig: @0x51b6a8]
+		const NapiNPConnection &leaver) {
+	fan_game_text(roster, leaver, kGameTextPlayerLeaving); // [orig: @0x51b6a8]
 }
 
 void Server_BroadcastDialogLine(NapiNPServerCtx &ctx, const std::string &dialog_name,

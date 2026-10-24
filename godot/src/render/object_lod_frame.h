@@ -53,6 +53,13 @@ struct ObjectLodFrame {
 	static ObjectLodFrame from_tangents(const Transform3D &p_camera_transform,
 			float p_tan_half_horizontal, float p_tan_half_vertical,
 			float p_viewport_width, int p_object_detail);
+	// The frame a water mirror's RLOD walk reads (engine environment/
+	// water_mirror.h mirror_collect_focal_pixels carries the witness): its
+	// collect's projection over the live eye `p_eye`, the scene view's
+	// horizontal half-angle on both axes of the square target, the target's
+	// focal, and the frame scale over the screen width.
+	static ObjectLodFrame mirror_collect(const Transform3D &p_eye, float p_tan_half_horizontal,
+			float p_screen_width, int p_object_detail);
 
 	// The half-angle tangents of the frustum a camera draws over its own
 	// viewport: Godot's fov is horizontal under KEEP_WIDTH and vertical

@@ -64,7 +64,7 @@ void Server_DissolveSquadOf(NapiNPServerCtx &ctx, NapiNPConnection &player);
 // for a punted target is reset to 0xFF. A stored target past the capacity
 // counts nothing (retail dereferences a NULL row there, a host crash).
 // [orig: Server_ProcessVoteKickResults @0x511400; the punt
-//  Server_SendValidatedChatToPlayer @0x50a210 -> CNapiNPConnection_SendChatMessage
+//  Server_SendValidatedChatToPlayer @0x50a210 -> CNapiNPConnection_QueueDisconnectEvent
 //  @0x4c7ef0 (a misnomer: the disconnect event)]
 void Server_ProcessVoteKickResults(NapiNPServerCtx &ctx);
 

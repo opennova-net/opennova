@@ -19,6 +19,7 @@
 #include <runtime/devtools/frame_stats_slots.h>
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 
 namespace opennova::devtools {
@@ -110,6 +111,36 @@ public:
 private:
 	TickProfile *profile_;
 	uint64_t last_;
+};
+
+// Many short laps onto one slot, each a few microseconds, which a ProfileScope's microsecond
+// clock would truncate: the laps sum in nanoseconds and land on the slot once, when the sum
+// goes out of scope. A null or inactive profile runs each lap with no clock read.
+class ProfileNsSum {
+public:
+	ProfileNsSum(TickProfile *profile, Slot slot)
+			: profile_(profile != nullptr && profile->active() ? profile : nullptr), slot_(slot) {}
+	~ProfileNsSum() {
+		if (profile_ != nullptr) profile_->add(slot_, ns_ / 1000);
+	}
+	ProfileNsSum(const ProfileNsSum &) = delete;
+	ProfileNsSum &operator=(const ProfileNsSum &) = delete;
+	template <class F>
+	void lap(F &&fn) {
+		if (profile_ == nullptr) {
+			fn();
+			return;
+		}
+		const auto start = std::chrono::steady_clock::now();
+		fn();
+		ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(
+				std::chrono::steady_clock::now() - start).count();
+	}
+
+private:
+	TickProfile *profile_;
+	Slot slot_;
+	int64_t ns_ = 0;
 };
 
 }  // namespace opennova::devtools

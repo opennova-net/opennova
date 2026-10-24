@@ -419,7 +419,14 @@ struct HudMinimapInput {
 	bool waypoint_present = false;
 	int32_t waypoint_x = 0;
 	int32_t waypoint_y = 0;
-	int32_t waypoint_z = 0; // Q16 [orig: dword_2723520, HUD_UpdateWaypointAltitudeColor @0x590970 altitude test]
+	int32_t waypoint_z = 0; // Q16 [orig: g_WaypointPosZ (0x2723520), HUD_UpdateWaypointAltitudeColor @0x590970 altitude test]
+	// The waypoint's altitude colour and band as the gameplay pass last set them (the HUD
+	// compiler holds them: HudFrameCompiler::compile_overlay_pass): the pointer's and the
+	// WPIndctr nub's colour, and the nub's frame, band 0 above, 1 below, 2 level.
+	// [orig: g_WaypointAltitudeColor / g_WaypointAltitudeBand, read by HUD_DrawMapOverlay
+	//  @0x5A7878 / @0x5A79E7 and @0x5A79B5]
+	uint32_t waypoint_altitude_color = 0;
+	int waypoint_altitude_band = 0;
 	// The nearest FARP HUD_BuildEntityInfo resolved this frame (hudInfo+0x10
 	// and g_TrackedTargetPos) [orig: @0x4b891a..0x4b89e3].
 	bool farp_present = false;
@@ -658,7 +665,7 @@ void hud_icon_strip_cell_uv(const HudMinimapInput &input, uint8_t icon,
 // The bearing every radar leg quantises: atan2(dx, dy) times `scale`, chopped
 // to 64 bits under the x87 control word with the low word kept. The add uses
 // +2^31/pi (dbl_7C19D8), the contact update and the threat ring its negation
-// (dbl_7C57B8).
+// (g_NegBamPerRadian).
 // [orig: Radar_AddBlip @0x59b2b4..0x59b2d1; Radar_UpdateContacts
 //  @0x59a8ab..0x59a8ca; HUD_DrawDirectionalIndicatorRing @0x5982b2..0x5982be]
 inline constexpr double kRadarBearingScale = 683565275.5764316;
@@ -789,8 +796,10 @@ struct HudMapControl {
 		zoom_q16 = spawn_zoom_q16;
 		big_zoom_q16 = spawn_big_zoom_q16;
 	}
-	// The render gate zeroes the mode whenever the local player is dead.
-	// [orig: @0x5cac67..0x5cac6d — g_MapOverlayMode = 0 on Flags & 2]
+	// The scene frame's world block zeroes the mode for a dead local body, once per frame
+	// that draws its world (inmatch::Session::step_map_overlay_death_clear).
+	// [orig: Render_ProcessMainSceneFrame @0x5CAC50..0x5CAC6D - Flags & 2 @0x5CAC63, its
+	//  jz @0x5CAC67, g_MapOverlayMode = 0 @0x5CAC6D]
 	void on_local_player_dead() { mode = 0; }
 	// The respawn init every overlay-window action runs zeroes the mode
 	// (hud_toggles.h kOverlayWindowsCleared) [orig: Game_InitRespawnState

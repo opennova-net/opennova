@@ -19,7 +19,8 @@ using opennova::to_gd;
 // --- ThrowableVisualRow ------------------------------------------------------
 
 Ref<ThrowableVisualRow> ThrowableVisualRow::make(int64_t p_key, int p_item_id, const Vector3 &p_pos,
-		const Vector3 &p_rotation_deg, const String &p_move_effect, bool p_move_effect_live) {
+		const Vector3 &p_rotation_deg, const String &p_move_effect, bool p_move_effect_live,
+		bool p_mirror_collected) {
 	opennova::world::ThrowableVisualRow v;
 	v.key = p_key;
 	v.item_id = p_item_id;
@@ -29,6 +30,7 @@ Ref<ThrowableVisualRow> ThrowableVisualRow::make(int64_t p_key, int p_item_id, c
 	v.roll_deg = p_rotation_deg.z;
 	v.move_effect = opennova::to_std(p_move_effect);
 	v.move_effect_live = p_move_effect_live;
+	v.mirror_collected = p_mirror_collected;
 	Ref<ThrowableVisualRow> out;
 	out.instantiate();
 	out->assign(v);
@@ -44,14 +46,15 @@ String ThrowableVisualRow::get_move_effect() const { return to_gd(value_.move_ef
 void ThrowableVisualRow::_bind_methods() {
 	ClassDB::bind_static_method("ThrowableVisualRow",
 			D_METHOD("make", "key", "item_id", "pos", "rotation_deg", "move_effect",
-					"move_effect_live"),
-			&ThrowableVisualRow::make, DEFVAL(String()), DEFVAL(true));
+					"move_effect_live", "mirror_collected"),
+			&ThrowableVisualRow::make, DEFVAL(String()), DEFVAL(true), DEFVAL(false));
 	OPENNOVA_RECORD_READ_ONLY(ThrowableVisualRow, Variant::INT, key)
 	OPENNOVA_RECORD_READ_ONLY(ThrowableVisualRow, Variant::INT, item_id)
 	OPENNOVA_RECORD_READ_ONLY(ThrowableVisualRow, Variant::VECTOR3, pos)
 	OPENNOVA_RECORD_READ_ONLY(ThrowableVisualRow, Variant::VECTOR3, rotation_deg)
 	OPENNOVA_RECORD_READ_ONLY(ThrowableVisualRow, Variant::STRING, move_effect)
 	OPENNOVA_RECORD_READ_ONLY(ThrowableVisualRow, Variant::BOOL, move_effect_live)
+	OPENNOVA_RECORD_READ_ONLY(ThrowableVisualRow, Variant::BOOL, mirror_collected)
 }
 
 // --- VehicleTrailVisualRow --------------------------------------------------

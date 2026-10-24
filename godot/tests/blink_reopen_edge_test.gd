@@ -31,16 +31,20 @@ const BUILDING_ITEM_DEF := """begin "Guard Tower"
   hp 5000
 end
 """
-# The player's body: items.def person row 105310 (the placer's
-# PLAYER_VISUAL_ITEM_ID) over the synthetic 19-bone person, leading the file
-# (a type id resolves to its FIRST row).
+# The player's body: items.def person row 105305 (the row the player's type
+# word 0x14B9 names, D-NET-348) over the synthetic 19-bone person, leading the
+# file (a type id resolves to its FIRST row); it is the body's spawn row too, so it
+# carries the boot fixture's 105305 keys (plyr / PLAYER / org2, hp 150).
 const PLAYER_ITEM_DEF := """begin "Player Character"
-  id 105310
+  id 105305
   type person
   graphic person
   sid player
   anim_def soldier
-  hp 100
+  hp 150
+  ai_function plyr
+  disk_function PLAYER
+  move_function org2
 end
 """
 # Mission-space (Z up) site of the building on the Tmap surface, west of the
@@ -102,8 +106,12 @@ func _stage_root() -> String:
 	for clip in ["soldier.adm", "idle.bad", "walk.bad"]:
 		TestFs.copy(self, "res://../fixtures/anim/" + clip, root_dir.path_join(clip))
 	var items := FileAccess.get_file_as_string(root_dir.path_join("items.def"))
-	TestFs.write_text(self, root_dir.path_join("items.def"), PLAYER_ITEM_DEF + "\n"
-			+ items + "\n" + BUILDING_ITEM_DEF)
+	# The "Null" marker leads, as in the shipped table: the player's row at
+	# ordinal 0 would build its body no proximity slice, so it would meet no
+	# building [orig: Entity_BuildProximityListsFromPools @0x4B8EB0, the +0x1C
+	# test @0x4B8EF9].
+	TestFs.write_text(self, root_dir.path_join("items.def"), ItemDbFixture.NULL_ROW + "\n"
+			+ PLAYER_ITEM_DEF + "\n" + items + "\n" + BUILDING_ITEM_DEF)
 	return root_dir
 
 
@@ -137,6 +145,12 @@ func _boot() -> Dictionary:
 	_presenter = LocalPlayerPresenter.new()
 	add_child_autofree(_presenter)
 	_presenter.setup(_world, _camera, null, ControlsModel.new())
+	# The load ends with the host's own slot waiting on its own C2S 0x0B; the
+	# first frame's receive pump runs its join, which places the body at its
+	# spawn (D-NET-NEW-L4-5) [orig: Game_StartMission @0x52624B;
+	# Server_TickUpdate @0x51D895 -> NapiNPServerMsg_PlayerJoinRequest
+	# @0x51AB10]. The test moves the player after that frame.
+	_frame()
 	return {"sim": sim, "site": site}
 
 

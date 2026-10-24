@@ -105,6 +105,29 @@ func test_page_mode_replaces_the_scene_frame() -> void:
 	assert_eq(viewport.disable_3d, had_3d, "the scene frame comes back")
 
 
+# The dedicated tick's order (GameHudPresenter._tick_dedicated_host): the frame's role facts
+# first, then the page, whose end-round leg (g_RoundOver) and connection indicators
+# (g_NetQuality, a Serve Only host's off its context: D-NET-NEW-L8-24) ride them.
+# [orig: Server_DrawStatusScreen @0x50a2d0 - `cmp g_RoundOver, 0` @0x50b286,
+#  CNetQuality_DrawIndicators(&g_NetQuality, 1) @0x50b2af]
+func test_role_facts_ride_the_page() -> void:
+	_staged_dir = HudFixture.stage_root(true)
+	var world := WorldFixture.boot_minimal(self, _staged_dir)
+	var presenter := HudFixture.presenter_over(self, world)
+	var hud: HudOverlay = presenter.get_game_hud()
+	var sim: Simulation = world.get_sim() if world != null else null
+	assert_not_null(sim, "the booted world carries its simulation")
+	if sim == null:
+		return
+	hud.set_role_facts(sim, null)
+	hud.set_server_status_page(true, false, null, sim)
+	assert_true(hud.is_server_status_page_shown(), "the page draws over the frame's role facts")
+	hud.queue_redraw()
+	await get_tree().process_frame
+	hud.set_server_status_page(false, false, null, sim)
+	assert_false(hud.is_server_status_page_shown())
+
+
 func test_consumed_key_reads_up_until_released() -> void:
 	var model := ControlsModel.new()
 	var vk := VK_RETURN

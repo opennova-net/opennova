@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <cstdlib>
 #include <base/io/rotating_prng.h>
 #include <cstdio>
@@ -17,6 +18,7 @@
 #include <runtime/controls/binding_set.h>
 #include <runtime/controls/player_actions.h>
 #include <runtime/hud/tip_system.h>
+#include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/angle.h>
@@ -77,7 +79,7 @@ LocalPlayerWeapon scoped_weapon(uint32_t flags, uint32_t flags2 = 0) {
 }
 
 void settle_ease(PlayerViewState &v) {
-    const float eye[3] = {0.0f, 0.0f, 0.0f};
+    const int32_t eye[3] = {0, 0, 0};
     for (int i = 0; i < kScopeEaseSteps + 1; ++i) player_view_tick(v, eye);
 }
 
@@ -105,7 +107,7 @@ void test_mounted_first_person_camera_belongs_to_the_carrier() {
     AiEntity *body = lw.ai.for_handle(lw.local);
     body->inf.active = true;
     body->inf.is_local_player = true;
-    body->pos[0] = 10 * 65536; body->pos[1] = 20 * 65536; body->pos[2] = 3 * 65536;
+    body->self->position.x.q16 = 10 * 65536; body->self->position.y.q16 = 20 * 65536; body->self->position.z.q16 = 3 * 65536;
     Entity &rider = lw.entity();
     rider.has_item_def = true;
     rider.item_type = 3;
@@ -146,11 +148,11 @@ void test_mounted_first_person_camera_belongs_to_the_carrier() {
     //  Entity_AttachToBoneAndUpdateTransform @0x5463D0 writes it through
     //  Math_FixedPointMatrixToEulerAngles @0x54656F]
     body->roll = bam_from_degrees_wrapped(2.49);
-    rider.roll = 2; // the whole-degree mirror
+    rider.roll_bam = spawn_angle_bam(2); // the whole-degree mirror
     CHECK(local_player_mounted_camera(lw.w, rider, out));
     CHECK(out[5] == body->roll);
     body->roll = 0;
-    rider.roll = 0;
+    rider.roll_bam = 0;
     // The `tank` render class draws the virtual display instead of the hull
     // for the local CLAIMANT in mode 0 only. [orig: 0x449EF0 @0x449F12..0x449F27]
     {
@@ -192,12 +194,12 @@ void test_mounted_first_person_camera_belongs_to_the_carrier() {
     // whole-degree mirrors. [orig: @0x4DC732..0x4DC741]
     live_hull.veh.air_pitch_bam = bam_from_degrees_wrapped(2.49);
     live_hull.veh.air_roll_bam = bam_from_degrees_wrapped(-1.51);
-    live_hull.pitch = 2;
-    live_hull.roll = -2;
+    live_hull.pitch_bam = spawn_angle_bam(2);
+    live_hull.roll_bam = spawn_angle_bam(-2);
     CHECK(local_player_mounted_camera(lw.w, rider, out));
     CHECK(out[4] == live_hull.veh.air_pitch_bam && out[5] == live_hull.veh.air_roll_bam);
     live_hull.veh.air_pitch_bam = live_hull.veh.air_roll_bam = 0;
-    live_hull.pitch = live_hull.roll = 0;
+    live_hull.pitch_bam = live_hull.roll_bam = 0;
     // No virtual display on a plain vehicle: the person legs keep the view.
     live_hull.virtual_display_camera = false;
     CHECK(!local_player_mounted_camera(lw.w, rider, out));
@@ -257,13 +259,13 @@ void test_seat_bone_pose_rider_legs() {
     lw.ai.attach(lw.local);
     AiEntity *body = lw.ai.for_handle(lw.local);
     body->inf.active = true;
-    body->pos[0] = 10 * 65536; body->pos[1] = 20 * 65536; body->pos[2] = 3 * 65536;
+    body->self->position.x.q16 = 10 * 65536; body->self->position.y.q16 = 20 * 65536; body->self->position.z.q16 = 3 * 65536;
     body->heading = 0x12345678;
     body->pitch = 0x01000000;
     body->roll = bam_from_degrees_wrapped(1.3);
     body->inf.eye_offset_z = 0x18000;
     Entity &rider = lw.entity();
-    rider.roll = 1; // the whole-degree mirror
+    rider.roll_bam = spawn_angle_bam(1); // the whole-degree mirror
     rider.saved_live_roll = 0x00400000;
     Entity parent;
     parent.has_item_def = true;
@@ -304,7 +306,7 @@ void test_unadmitted_seat_takes_the_ground_or_person_leg() {
     AiEntity *body = lw.ai.for_handle(lw.local);
     body->inf.active = true;
     body->inf.is_local_player = true;
-    body->pos[0] = 10 * 65536; body->pos[1] = 20 * 65536; body->pos[2] = 3 * 65536;
+    body->self->position.x.q16 = 10 * 65536; body->self->position.y.q16 = 20 * 65536; body->self->position.z.q16 = 3 * 65536;
     body->heading = 0x40000000; // mission yaw 0: the view faces +Y
     body->roll = bam_from_degrees_wrapped(1.25);
     body->inf.torso_roll = bam_from_degrees_wrapped(4.0);
@@ -345,7 +347,7 @@ void test_unadmitted_seat_takes_the_ground_or_person_leg() {
     CHECK(view.ground_leg_lift_q16 == 0x18000);
     for (int i = 0; i < 3; ++i) {
         const int32_t lift = static_cast<int32_t>((int64_t(up[i]) * 0x18000 + 0x8000) >> 16);
-        CHECK(near(frame.camera.eye[i], static_cast<float>((body->pos[i] + lift) / 65536.0)));
+        CHECK(near(frame.camera.eye[i], static_cast<float>((body->self->position.word(i) + lift) / 65536.0)));
     }
     CHECK(near(frame.camera.roll_deg, 1.25f));
     CHECK(near(frame.camera.pitch_deg, 0.0f));
@@ -361,6 +363,88 @@ void test_unadmitted_seat_takes_the_ground_or_person_leg() {
     local_player_view_frame(&lw.w, weapon, view, tracker, frame);
     CHECK(view.ground_leg_lift_q16 == 0);
     CHECK(near(frame.camera.eye[2], 4.0f));
+}
+
+// D-NET-330: the death screen's first-person sub-mode tracks its spectate target
+// and the mode-0 compose reads the TRACKED entity: the target's CameraOffset, aim
+// and torso roll make the view on an authority world. A joiner's target is a
+// decoded row with no body in its world, so its view stays on the local entity.
+// [orig: Camera_ComputeThirdPersonView @0x437D10 - `mov esi, g_CameraTrackedEntity`
+//  @0x437D2B, CameraOffset @0x437FA2..0x437FB7, the roll @0x437FCD..0x437FE6;
+//  Camera_SetTrackedEntity @0x4391E7..0x4391F9]
+void test_first_person_compose_reads_the_tracked_target() {
+    const auto near = [](float a, float b) { return std::fabs(a - b) < 1e-4f; };
+    auto lw = std::make_unique<LocalWorld>();
+    lw->ai.attach(lw->local);
+    AiEntity *body = lw->ai.for_handle(lw->local);
+    body->inf.active = true;
+    body->inf.is_local_player = true;
+    body->heading = 0x40000000;
+    lw->entity().eye_offset_z = 0x18000; // the local entity's 1.5 u
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.item_id = 0x14B9;
+    seed.net_id = 2;
+    seed.position = {30.0f, 40.0f, 5.0f};
+    seed.alive = true;
+    seed.health = 100;
+    seed.eye_offset_z = 0x10000; // the target's 1.0 u
+    const EntityHandle target = lw->w.registry.spawn(0, seed);
+    lw->ai.attach(target);
+    AiEntity *tbody = lw->ai.for_handle(target);
+    tbody->inf.active = true;
+    tbody->heading = 0x40000000; // mission yaw 0: the view faces +Y
+    tbody->inf.torso_roll = bam_from_degrees_wrapped(4.0);
+    LocalPlayerWeapon weapon;
+    PlayerViewState view;
+    view.camera_tracked = kCameraTrackedTargetKey | target.packed;
+    LocalPlayerViewTracker tracker;
+    LocalPlayerViewFrame frame;
+    local_player_view_frame(&lw->w, weapon, view, tracker, frame);
+    CHECK(frame.camera_pose_valid && !frame.mounted_camera);
+    CHECK(near(frame.camera.eye[0], 30.0f) && near(frame.camera.eye[1], 40.0f - 0.1875f));
+    CHECK(near(frame.camera.eye[2], 6.0f));
+    CHECK(near(frame.camera.roll_deg, 4.0f));
+    // A joiner's world with no decoded target in the spectator state: the local entity
+    // composes.
+    lw->w.rules.logic_authority = false;
+    local_player_view_frame(&lw->w, weapon, view, tracker, frame);
+    CHECK(near(frame.camera.eye[0], 10.0f) && near(frame.camera.eye[1], 20.0f - 0.1875f));
+    CHECK(near(frame.camera.eye[2], 4.5f));
+    CHECK(near(frame.camera.roll_deg, 0.0f));
+    // A joiner's decoded target: the local entity's pose copies the row's, and the row's
+    // compose words the spectator state carries (its eye 0.5 u, its 6 degree torso roll)
+    // stand in for the local entity's (the joiner half).
+    lw->w.spectator.death_screen = true;
+    lw->w.spectator.submode = 2;
+    lw->w.spectator.has_target = true;
+    lw->w.spectator.target_eye[2] = 0x8000;
+    lw->w.spectator.target_torso_roll = bam_from_degrees_wrapped(6.0);
+    local_player_view_frame(&lw->w, weapon, view, tracker, frame);
+    CHECK(near(frame.camera.eye[0], 10.0f) && near(frame.camera.eye[1], 20.0f - 0.1875f));
+    CHECK(near(frame.camera.eye[2], 3.5f));
+    CHECK(near(frame.camera.roll_deg, 6.0f));
+    // A seated decoded target composes its first person through the carrier legs its
+    // record names, as an authority's mounted body does: a troop-callback carrier
+    // gives its own Position + CameraOffset and rotation triple (D-NET-330).
+    // [orig: Camera_ComputeThirdPersonView @0x437D10 - @0x437DAC..0x437EAD; the troop
+    //  callback @0x4DC710 (@0x4DC732..0x4DC741)]
+    Entity hull;
+    hull.has_item_def = true;
+    hull.item_type = 1;
+    hull.position = {100.0f, 200.0f, 10.0f};
+    hull.veh.yaw_seeded = true;
+    hull.input_class = 1;
+    hull.virtual_display_camera = true;
+    hull.eye_offset_z = 2 * 65536;
+    const EntityHandle hull_handle = lw->w.registry.spawn(0, hull);
+    lw->w.spectator.target_seated = true;
+    lw->w.spectator.target_carrier = hull_handle;
+    lw->w.spectator.target_seat_type = static_cast<uint8_t>(SeatType::Passenger);
+    local_player_view_frame(&lw->w, weapon, view, tracker, frame);
+    CHECK(frame.mounted_camera);
+    CHECK(near(frame.camera.eye[0], 100.0f) && near(frame.camera.eye[1], 200.0f));
+    CHECK(near(frame.camera.eye[2], 12.0f));
 }
 
 // Both shake legs add their yaw delta to the BAM HEADING, so the mission yaw
@@ -390,8 +474,19 @@ void test_shake_turns_the_bam_heading() {
     camera_shake_sample(step, lw.w.weather.core.oscillator.prng, d_yaw, d_pitch, d_roll);
     CHECK(d_yaw != 0 && d_pitch != 0 && d_roll != 0);
     local_player_view_frame(&lw.w, w, v, t, shaken);
+    // The deltas land on the view's BAM words (g_ViewRot), as the adds do.
+    CHECK(shaken.camera.yaw_bam == static_cast<int32_t>(static_cast<uint32_t>(base.camera.yaw_bam) +
+                                                        static_cast<uint32_t>(d_yaw)));
+    CHECK(shaken.camera.pitch_bam == base.camera.pitch_bam + d_pitch);
+    CHECK(shaken.camera.roll_bam == base.camera.roll_bam + d_roll);
+    // The mission yaw mirror (90 - heading, kept in [0, 360)) takes the yaw
+    // delta negated.
     const double deg = 360.0 / 4294967296.0;
-    CHECK(std::fabs(shaken.camera.yaw_deg - (base.camera.yaw_deg - float(d_yaw * deg))) < 1e-4f);
+    double yaw_step = static_cast<double>(shaken.camera.yaw_deg) -
+            (static_cast<double>(base.camera.yaw_deg) - d_yaw * deg);
+    if (yaw_step > 180.0) yaw_step -= 360.0;
+    if (yaw_step < -180.0) yaw_step += 360.0;
+    CHECK(std::fabs(yaw_step) < 1e-4);
     CHECK(std::fabs(shaken.camera.pitch_deg - (base.camera.pitch_deg + float(d_pitch * deg))) < 1e-4f);
     CHECK(std::fabs(shaken.camera.roll_deg - (base.camera.roll_deg + float(d_roll * deg))) < 1e-4f);
     CHECK(v.shake.yaw == step.yaw && v.shake.pitch == step.pitch && v.shake.roll == step.roll);
@@ -853,7 +948,7 @@ void test_nvg_restore_latch_is_the_requests() {
     {
         Rig r;
         r.inventory.pending_combo = 66;
-        commit_pending_weapon_switch(r.lw.w, r.w, &r.inventory);
+        commit_pending_weapon_switch(r.lw.w, r.w, &r.inventory, PendingCommit::kSwitch);
         CHECK(r.inventory.equipped_combo == 66 && r.w.nvg_scope_restore);
         WeaponInstallData data;
         data.name = "LATCH_2";
@@ -948,10 +1043,19 @@ void test_vehicle_seats_clear_the_nvg_restore_latch() {
         CHECK(!r.lw.w.registry.get(r.vehicle)->seats[0].occupant.valid());
     }
     // The detach's mount: a ctrlx or UseGun detach clears a latch set while
-    // seated, a drvrx or a sitex keeps it.
+    // seated, a drvrx or a sitex keeps it. The mount needs the slot it restores
+    // (+0x308, else the current one) and the EquippedSlot to carry defs, so the
+    // player holds one (D-WPN-48).
     for (const SeatType seat : {SeatType::Controller, SeatType::Gunner, SeatType::Driver,
                                 SeatType::Passenger}) {
         Rig r(seat);
+        r.lw.w.tables.weapons.entries.resize(2);
+        r.lw.w.tables.weapons.entries[1].valid = true;
+        r.lw.w.tables.weapons.entries[1].category = 3;
+        r.player.inventory.reset(r.lw.w.tables.weapons);
+        r.player.inventory.slots[195].adm_index = 1;
+        r.player.inventory.equipped_combo = 195;
+        r.player.inventory_valid = true;
         CHECK(r.attach());
         r.player.weapon.nvg_scope_restore = true;
         CHECK(r.lw.w.vehicles.detach(r.lw.local));
@@ -960,10 +1064,12 @@ void test_vehicle_seats_clear_the_nvg_restore_latch() {
     }
 }
 
-// The detach mount's target on a borrowed seat: the personal slot the attach
+// The detach mount's target on a borrowed seat: +0x308, the slot the attach
 // saved, or the current slot when that has no def of category < 11; the latch
-// clears only with a target def (and an equipped weapon). An unborrowed seat's
-// target is not modelled: an active weapon clears it.
+// clears only with a target def (and an equipped weapon), and the target is the
+// mount's g_PendingWeaponSlot, whose def the switch back restores. An unborrowed seat's
+// target is entity+0x308, the last selected slot, under the same fallback, and
+// the mount itself runs (D-WPN-48).
 // [orig: Entity_DetachFromVehicle @0x43563a..0x43565f, the fallback
 //  @0x43564e..0x435658; Player_MountWeaponSlot @0x4dfa4d..0x4dfa74, @0x4dfb75]
 void test_detach_mount_latch_target() {
@@ -988,26 +1094,79 @@ void test_detach_mount_latch_target() {
         {2, true, true},      // a saved def of category 11: the current slot
         {1, false, true},     // a saved def of category 3 is the target
     };
+    // The borrowed gun whose slot the EquippedSlot is: the mount queues its switch back there
+    // inside the detach [orig: Entity_DetachFromVehicle @0x4355F0 (@0x43565F)].
+    world.registry.configure_pool(1, 4);
+    Entity gun_seed;
+    gun_seed.kind = EntityKind::Item;
+    gun_seed.has_item_def = true;
+    gun_seed.item_attrib = kItemAttribEweap;
+    gun_seed.alive = true;
+    const EntityHandle gun = world.registry.spawn(1, gun_seed);
     for (const Case &c : cases) {
         WeaponInventory inventory;
         inventory.reset(world.tables.weapons);
         inventory.equipped_combo = 3 * 65;
+        inventory.current_slot = 3 * 65; // the fallback's g_CurrentWeaponSlot
         inventory.slots[3 * 65].adm_index = c.current ? 1 : -1;
+        if (c.saved != 0xFF) {
+            inventory.selected_combo = 7 * 65;
+            inventory.slots[7 * 65].adm_index = c.saved;
+        }
         LocalPlayerWeapon w;
         w.active = true;
         w.usegun_slot_active = true;
-        w.usegun_saved_adm = c.saved;
+        w.usegun_mount = gun;
         w.nvg_scope_restore = true;
-        local_weapon_detach_mount(world, w, &inventory);
+        PlayerViewState view;
+        local_weapon_detach_mount(world, w, &inventory, view);
+        CHECK(w.nvg_scope_restore == !c.clears);
+        // A target's mount stages the switch back at once, queued on the gun's slot; none
+        // stages nothing.
+        CHECK(w.usegun_switch == (c.clears ? LocalUseGunSwitch::kDetach : LocalUseGunSwitch::kNone));
+        if (c.clears) {
+            // [orig: Player_MountWeaponSlot @0x4DFA40 (g_PendingWeaponSlot @0x4DFB16)]
+            const bool saved_target = c.saved == 1;
+            CHECK(inventory.pending_combo == (saved_target ? 7 * 65 : 3 * 65));
+            CHECK(w.usegun_saved_adm == 1);
+            CHECK(world.registry.get(gun)->primary_weapon_slot.next == weapon_action::kSwitchFrom);
+        }
+    }
+    // Unborrowed: +0x308 (the selected slot) else the current slot; the mount
+    // clears the latch past its early-outs, the target's def and the EquippedSlot's
+    // (the personal slot, here the current one), and an inactive weapon bails.
+    const Case unborrowed[] = {
+        {0xFF, false, false}, // no selected def, no current def
+        {0xFF, true, true},   // no selected def: the current slot
+        {2, false, false},    // a selected def of category 11, no current def
+        {2, true, true},      // a selected def of category 11: the current slot
+        {1, false, false},    // the selected slot, but no EquippedSlot def
+        {1, true, true},      // the selected slot
+    };
+    for (const Case &c : unborrowed) {
+        WeaponInventory inventory;
+        inventory.reset(world.tables.weapons);
+        inventory.equipped_combo = 3 * 65;
+        inventory.current_slot = 3 * 65; // the fallback's g_CurrentWeaponSlot
+        inventory.slots[3 * 65].adm_index = c.current ? 1 : -1;
+        if (c.saved != 0xFF) {
+            inventory.selected_combo = 7 * 65;
+            inventory.slots[7 * 65].adm_index = c.saved;
+        }
+        LocalPlayerWeapon w;
+        w.active = true;
+        w.nvg_scope_restore = true;
+        PlayerViewState view;
+        local_weapon_detach_mount(world, w, &inventory, view);
         CHECK(w.nvg_scope_restore == !c.clears);
     }
-    // Unborrowed: the active weapon clears it; no equipped weapon bails.
-    for (const bool active : {true, false}) {
+    {
         LocalPlayerWeapon w;
-        w.active = active;
+        w.active = false;
         w.nvg_scope_restore = true;
-        local_weapon_detach_mount(world, w, nullptr);
-        CHECK(w.nvg_scope_restore == !active);
+        PlayerViewState view;
+        local_weapon_detach_mount(world, w, nullptr, view);
+        CHECK(w.nvg_scope_restore);
     }
 }
 
@@ -1053,11 +1212,17 @@ void test_scope_press_after_a_reset_runs_its_leg() {
         CHECK(!v.scope_engaged && player_view_scope_settled(v));
         CHECK(lw.w.vehicles.detach(lw.local));
         CHECK(local_player_scope_view_visible(lw.w, w, v)); // the promoted byte still shows it
+        // The Driver held the occupant word: the detach stamps its EquippedSlot held-ready
+        // (64), which the scope-down writer does not count complete, so the toggle's queue
+        // takes IDLE until the next pump consumes the byte [orig: Entity_DetachFromVehicle
+        // @0x4355F0 (@0x43578C..0x435794); WeaponSlot_TryQueueScopeDown @0x53F080
+        // (@0x53F092..0x53F09E)].
+        CHECK(w.slot.phase == weapon_phase::kHeld);
         lw.w.weather.core.scalar_channels.camera_fov_target_fp = 20 << 16;
         CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
         CHECK(lw.w.weather.core.scalar_channels.camera_fov_target_fp == (80 << 16));
         CHECK(!player_view_scope_settled(v) && !v.scope_engaged && v.scope_hipfire);
-        CHECK(w.slot.next == weapon_action::kScopeDown);
+        CHECK(w.slot.next == weapon_action::kIdle);
         CHECK(!local_player_scope_view_visible(lw.w, w, v));
     }
     // The engage direction: the promoted byte cleared under a set target.
@@ -1318,6 +1483,7 @@ void test_forced_scope_toggle_sees_the_same_tick_promotion() {
             v.weapon_hip_pose.position_q16[i] = (256 + 64 * i) * 256;
             v.weapon_ads_pose.position_q16[i] = (496 + 64 * i) * 256;
         }
+        v.weapon_pose_bound_hip = v.weapon_hip_pose; // the bound def's, as an install binds it
         LocalPlayerViewTracker t;
         LocalViewSessionInputs s;
         local_player_view_tick(&lw.w, v, t, s, &w);
@@ -1326,7 +1492,7 @@ void test_forced_scope_toggle_sees_the_same_tick_promotion() {
         int steps = 0;
         {
             PlayerViewState probe = v;
-            const float eye[3] = {0.0f, 0.0f, 0.0f};
+            const int32_t eye[3] = {0, 0, 0};
             while (!player_view_scope_settled(probe) && steps < 64) {
                 player_view_tick(probe, eye);
                 ++steps;
@@ -1386,7 +1552,7 @@ void test_water_scope_legs() {
         }
         // One body water block, then the view tick that runs its legs.
         void tick(int32_t z, int32_t eye) {
-            body->pos[2] = z;
+            body->self->position.z.q16 = z;
             body->inf.eye_offset_z = eye;
             lw.ai.player_water_block(*body, lw.w, &lw.entity(), 0, true, lw.w.logic_tick);
             local_player_view_tick(&lw.w, v, t, s, &w);
@@ -1407,7 +1573,7 @@ void test_water_scope_legs() {
     // latch is set by the time the view tick runs it.
     {
         Rig r(elevation);
-        r.body->pos[2] = deep;
+        r.body->self->position.z.q16 = deep;
         r.lw.ai.player_water_block(*r.body, r.lw.w, &r.lw.entity(), 0, true, r.lw.w.logic_tick);
         const WaterScopeLegs &legs = r.lw.w.out.water_scope_legs;
         CHECK(legs.count == 2 && legs.legs[0].kind == Kind::Entry && legs.legs[1].kind == Kind::Eye);
@@ -1437,7 +1603,7 @@ void test_water_scope_legs() {
     {
         Rig r(elevation);
         r.lw.entity().flags |= kEntityFlagDrowning;
-        r.body->pos[2] = deep;
+        r.body->self->position.z.q16 = deep;
         r.body->inf.eye_offset_z = to_fixed(4.0);
         r.lw.ai.player_water_block(*r.body, r.lw.w, &r.lw.entity(), 0, true, r.lw.w.logic_tick);
         CHECK(r.lw.w.out.water_scope_legs.count == 1);
@@ -1484,6 +1650,7 @@ void test_water_scope_legs() {
             v.weapon_hip_pose.position_q16[i] = (256 + 64 * i) * 256;
             v.weapon_ads_pose.position_q16[i] = (496 + 64 * i) * 256;
         }
+        v.weapon_pose_bound_hip = v.weapon_hip_pose; // the bound def's, as an install binds it
         LocalPlayerViewTracker t;
         LocalViewSessionInputs s;
         local_player_view_tick(&lw.w, v, t, s, &w);
@@ -1491,7 +1658,7 @@ void test_water_scope_legs() {
         int steps = 0;
         {
             PlayerViewState probe = v;
-            const float eye[3] = {0.0f, 0.0f, 0.0f};
+            const int32_t eye[3] = {0, 0, 0};
             while (!player_view_scope_settled(probe) && steps < 64) {
                 player_view_tick(probe, eye);
                 ++steps;
@@ -1503,7 +1670,7 @@ void test_water_scope_legs() {
         lw.w.out.tip_events.clear();
         w.slot.phase = weapon_phase::kDone;
         w.slot.next = weapon_action::kIdle;
-        body.pos[2] = deep;
+        body.self->position.z.q16 = deep;
         lw.ai.player_water_block(body, lw.w, &lw.entity(), 0, true, lw.w.logic_tick);
         local_player_view_tick(&lw.w, v, t, s, &w);
         CHECK(!player_view_scope_settled(v) && !v.scope_engaged && v.scope_hipfire);
@@ -1524,9 +1691,9 @@ void test_water_scope_legs() {
         lw.entity().flags |= kEntityFlagDrowning;
         lw.entity().eye_offset_z = 0;
         body.inf.eye_offset_z = to_fixed(1.6);
-        body.pos[2] = to_fixed(4.9);
+        body.self->position.z.q16 = to_fixed(4.9);
         lw.ai.player_water_block(body, lw.w, &lw.entity(), 0, true, lw.w.logic_tick);
-        CHECK(body.pos[2] == to_fixed(5.0) + (-1225 >> 1) - (to_fixed(1.6) >> 1));
+        CHECK(body.self->position.z.q16 == to_fixed(5.0) + (-1225 >> 1) - (to_fixed(1.6) >> 1));
     }
 }
 
@@ -1543,7 +1710,7 @@ void test_tick_stamps_the_death_camera_on_the_local_dead_edge() {
     CHECK(v.on_foot);
     CHECK(!v.in_session);
     CHECK(v.view_tick == 100);
-    CHECK(t.tick_prev_valid);
+    CHECK(v.tp_anchor_valid); // the camera update tracks the local player from here
     // The local dead edge: stamped once at the transition tick, the lerp
     // camera computed on the mode-4 entry, both stable while dead.
     lw.w.logic_tick = 101;
@@ -1556,11 +1723,27 @@ void test_tick_stamps_the_death_camera_on_the_local_dead_edge() {
     local_player_view_tick(&lw.w, v, t, s, nullptr);
     CHECK(v.camera_mode == 4);
     CHECK(v.death_cam.start_tick == 101); // no re-stamp while dead
-    // The movement delta sampler follows the entity between ticks.
-    lw.entity().position.x += 2.0f;
+    // The FP motion lead steps on the tracked update from the entity's
+    // displacement since its mover-entry stamp, (Position - savedLivePose) << 8
+    // [orig: ThirdPersonCamera_Update @0x437AF0 (@0x437B92..0x437BB2, the
+    // recurrence @0x437BAC..0x437C0E)].
+    Entity &body = lw.entity();
+    body.saved_live_pos[0] = body.position.x.q16;
+    body.saved_live_pos[1] = body.position.y.q16;
+    body.saved_live_pos[2] = body.position.z.q16;
+    body.saved_live_valid = true;
+    body.position.x.q16 += 2 << 16;
+    const PlayerViewMotionLead before = t.motion_lead;
     local_player_view_tick(&lw.w, v, t, s, nullptr);
-    CHECK(t.tick_delta[0] == 2.0f);
-    CHECK(t.tick_delta[1] == 0.0f);
+    const int32_t sample = static_cast<int32_t>(static_cast<uint32_t>(2 << 16) << 8);
+    CHECK(t.motion_lead.prev_sample[0] == sample && t.motion_lead.prev_sample[1] == 0 &&
+          t.motion_lead.prev_sample[2] == 0);
+    // The recurrence in 32-bit words: vel += (prev - new - vel + 16) >> 5.
+    const int32_t inner = static_cast<int32_t>(static_cast<uint32_t>(before.prev_sample[0]) -
+            static_cast<uint32_t>(sample) - static_cast<uint32_t>(before.vel[0]) + 16u);
+    const int32_t expected_vel = static_cast<int32_t>(
+            static_cast<uint32_t>(before.vel[0]) + static_cast<uint32_t>(inner >> 5));
+    CHECK(t.motion_lead.vel[0] == expected_vel);
 }
 
 void test_tick_without_a_player_resolves_first_person() {
@@ -1689,6 +1872,70 @@ void test_frame_publishes_the_fp_draw_gates() {
     CHECK(frame.fp_round_winner_set);
 }
 
+// The Inset pass runs in the scene's non-NVG fork alone. An Inset raise the NVG press
+// catches mid-ease promotes under NVG (the press's own scope toggle needs the promoted
+// byte, so it neither drops the sight nor latches a restore), and that frame runs no
+// Inset pass (no second compose, no aperture) while the FP draw's Inset skip still holds.
+// [orig: Render_ProcessMainSceneFrame @0x5CA6AB..0x5CA6BF (g_NVGActive && !g_CameraMode:
+//  the NVG branch), the Inset gate @0x5CA937..0x5CA945 and call @0x5CA949 in the other;
+//  Input_HandleActionBinding_0 @0x4E0420 (the NVG press's Player_IsEquippedWeaponScoped
+//  call @0x4E06B3)]
+void test_inset_pass_runs_in_the_non_nvg_fork_alone() {
+    LocalWorld lw;
+    lw.w.weather.seed(WeatherSeed{});
+    LocalPlayerViewTracker tracker;
+    LocalPlayerViewFrame frame;
+    LocalPlayerWeapon up = scoped_weapon(DEF_WEAPON_FLAG_SCOPED, DEF_WEAPON_FLAG2_INSET);
+    PlayerViewState view;
+    CHECK(local_player_scope_toggle(lw.w, up, view, up.slot));
+    settle_ease(view);
+    local_player_view_frame(&lw.w, up, view, tracker, frame);
+    CHECK(frame.inset_scope_active && frame.fp_inset_scoped && !frame.world_skipped);
+    // A frame that skips its world (the session's word) runs no Inset pass either: the
+    // gate sits in the world block [orig: Render_ProcessMainSceneFrame @0x5CA620..0x5CA640].
+    view.world_skipped = true;
+    local_player_view_frame(&lw.w, up, view, tracker, frame);
+    CHECK(!frame.inset_scope_active && frame.fp_inset_scoped && frame.world_skipped);
+    view.world_skipped = false;
+
+    LocalPlayerWeapon caught = scoped_weapon(DEF_WEAPON_FLAG_SCOPED, DEF_WEAPON_FLAG2_INSET);
+    PlayerViewState raising;
+    CHECK(local_player_scope_toggle(lw.w, caught, raising, caught.slot));
+    CHECK(player_view_scope_ease_active(raising));
+    CHECK(local_player_nvg_toggle(lw.w, caught, raising));
+    CHECK(raising.nvg_active && raising.scope_engaged && !caught.nvg_scope_restore);
+    settle_ease(raising);
+    CHECK(player_view_scope_settled(raising));
+    local_player_view_frame(&lw.w, caught, raising, tracker, frame);
+    CHECK(!frame.inset_scope_active && frame.fp_inset_scoped);
+    CHECK(frame.inset_fov_over_zoom == 0.0f);
+}
+
+// The Inset byte is the Scoped selector's split: the Scoped query reads the def's
+// Scoped bit (flags & 1) and the promoted byte, and only past it does the Inset bit
+// (flags2 0x200) take the Inset byte instead of the Scoped one. A Sighted def's Inset
+// bit never reaches it: the Sighted query (flags & 2, the slot's action not SWITCHFROM)
+// raises the Sighted byte, and no Inset pass runs. Every shipped Inset row is Sighted.
+// [orig: Render_ProcessMainSceneFrame @0x5CA290..0x5CA2D5 (Player_IsEquippedWeaponScoped
+//  @0x4DCC80 called @0x5CA299, the Inset split @0x5CA2A2..0x5CA2C7,
+//  Player_IsVehicleGunnerScoped @0x4DCD30 called @0x5CA2CC), the Inset gate
+//  @0x5CA937..0x5CA945]
+void test_a_sighted_inset_def_runs_no_inset_pass() {
+    LocalWorld lw;
+    lw.w.weather.seed(WeatherSeed{});
+    LocalPlayerViewTracker tracker;
+    LocalPlayerViewFrame frame;
+    LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED, DEF_WEAPON_FLAG2_INSET);
+    PlayerViewState view;
+    CHECK(local_player_scope_toggle(lw.w, w, view, w.slot));
+    settle_ease(view);
+    local_player_view_frame(&lw.w, w, view, tracker, frame);
+    CHECK(frame.scope_settled);
+    CHECK(frame.frame_fx.sighted_selector && !frame.frame_fx.scoped_selector);
+    CHECK(!frame.inset_scope_active && !frame.fp_inset_scoped);
+    CHECK(frame.inset_fov_over_zoom == 0.0f);
+}
+
 void test_scope_zoom_clamps_and_weapon_category_fov_reset() {
     LocalWorld lw;
     LocalPlayerWeapon weapon = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED);
@@ -1737,7 +1984,7 @@ void test_scope_zoom_clamps_and_weapon_category_fov_reset() {
     step_slot.scope_zoom = 8;
     CHECK(local_player_adjust_scope_zoom(lw.w, stepped, step_view, step_slot, limits, -2));
     CHECK(step_slot.scope_zoom == 10);
-    lw.w.rules.allow_sniper_scope_zoom = true; // byte_A821F0
+    lw.w.rules.allow_sniper_scope_zoom = true; // g_SessionAllowSniperScopeZoom
     CHECK(local_player_scope_zoom_floor(lw.w, limits, 10) == 2);
     lw.w.rules.allow_sniper_scope_zoom = false;
     limits.category = 2;
@@ -1857,7 +2104,7 @@ void test_weapon_cycle_route_steps_the_zoom_and_the_mount_clamp() {
     local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 10, w.slot);
     CHECK(w.slot.scope_zoom == 6);
     // The class-6 lock at mount floors the zoom at the max; the session bit
-    // (World::rules.allow_sniper_scope_zoom = byte_A821F0) lifts it.
+    // (World::rules.allow_sniper_scope_zoom = g_SessionAllowSniperScopeZoom) lifts it.
     lw.entity().player_class = 6;
     w.slot.scope_zoom = 4;
     local_player_scope_zoom_mount_clamp(lw.w, limits, w.def.flags, 10, w.slot);
@@ -1903,6 +2150,20 @@ void test_weapon_cycle_route_steps_the_zoom_and_the_mount_clamp() {
     CHECK(lw.w.out.script_sounds.size() == 2);
 }
 
+// The category keys (cases 200-210) are refused while the binocular view is up or a PowerThrow
+// windup runs, before the walk. [orig: Input_HandleActionBinding_0 @0x4E0420 - cases 200-210:
+//  g_BinocularsViewActive @0x4E112A, g_FireChargeStartTick @0x4E1137, the walk @0x4E1152]
+void test_weapon_category_refused_while_a_windup_runs() {
+    LocalPlayerWeapon w = scoped_weapon(0);
+    PlayerViewState v;
+    CHECK(local_player_weapon_category_admitted(w, v));
+    w.power_throw_start_tick = 40;
+    CHECK(!local_player_weapon_category_admitted(w, v));
+    w.power_throw_start_tick = 0;
+    v.binoculars_view_active = true;
+    CHECK(!local_player_weapon_category_admitted(w, v));
+}
+
 // Exercise the complete default mouse binding -> action -> optical route.
 // [orig: catalog P/N @0x816A1C/@0x816A88; Input_HandleActionBinding_0 @0x4E0420]
 void test_default_wheel_binding_zooms_in_away_from_the_player() {
@@ -1918,10 +2179,14 @@ void test_default_wheel_binding_zooms_in_away_from_the_player() {
     std::size_t count = 0;
     const auto *rows = catalog(&count);
     const auto step = [&](uint16_t wheel, int expected) {
-        const int index = bindings.mouse_event_action(wheel, [](int) { return false; });
+        // The wheel's event (256 up, 512 down) takes its row by the binding walk; its record
+        // names the row's request (BindingSet::mouse_click_action, player_action_request).
+        const int index = bindings.mouse_click_action(wheel == kMouseWheelUp ? 0x100u : 0x200u,
+                [](int) { return false; });
         CHECK(index >= 0 && static_cast<std::size_t>(index) < count);
         if (index < 0 || static_cast<std::size_t>(index) >= count) return;
-        const auto request = player_wheel_action(rows[index].token);
+        const auto request = player_action_request(InputEventRecord{
+                action_code(rows[index].id), 0, 0, 0, false});
         CHECK(request && request->action == PlayerAction::WeaponCycle);
         if (!request) return;
         CHECK(local_player_weapon_cycle_route(lw.w, weapon, view, limits, request->value) == WeaponCycleRoute::kZoomStep);
@@ -2075,7 +2340,7 @@ void test_authored_rotation_bias_continues_through_air_reload_and_rebake() {
     data.view_ads_pose = {{512, -256, 1024}, {0x08000000u, 0x20000000u, 0x10000000u}};
     local_weapon_install(lw.w, weapon, data, false, false, nullptr, view);
     CHECK(local_player_scope_toggle(lw.w, weapon, view, weapon.slot));
-    const float eye[3] = {};
+    const int32_t eye[3] = {};
     for (int i = 0; i < 3; ++i) player_view_tick(view, eye);
     int32_t out[3];
     local_player_viewmodel_rotation_bias(&lw.w, weapon, view, out);
@@ -2113,11 +2378,14 @@ void test_authored_rotation_bias_continues_through_air_reload_and_rebake() {
     CHECK(out[1] == 0x10000000 && out[2] == 0x20000000);
 
     // Render-side clip rebaking the same installed weapon preserves the
-    // current authored pose. A real new mount resets the published bias.
+    // current authored pose. A real new mount's request clears the published bias;
+    // the install that follows keeps the words (D-NET-NEW-L7-28) [orig:
+    // Player_MountWeaponSlot @0x4DFA40 (@0x4DFBCF..0x4DFBE8)].
     local_weapon_install(lw.w, weapon, data, false, true, nullptr, view);
     local_player_viewmodel_rotation_bias(&lw.w, weapon, view, out);
     CHECK(static_cast<uint32_t>(out[0]) == 0xF8000000u);
     data.name = "NEW_ROTATION_MOUNT";
+    player_view_mount_clear_bias(view);
     local_weapon_install(lw.w, weapon, data, false, false, nullptr, view);
     local_player_viewmodel_rotation_bias(&lw.w, weapon, view, out);
     CHECK(out[0] == 0 && out[1] == 0 && out[2] == 0);
@@ -2144,7 +2412,8 @@ void test_airborne_view_bias_keeps_interp_and_resumes_on_landing() {
         view.weapon_hip_pose.position_q16[i] = hip[i] * 256.0f;
         view.weapon_ads_pose.position_q16[i] = sight[i] * 256.0f;
     }
-    const float eye[3] = {};
+    view.weapon_pose_bound_hip = view.weapon_hip_pose; // the bound def's, as an install binds it
+    const int32_t eye[3] = {};
     const auto check_bias = [&](float x, float y, float z) {
         float bias[3];
         local_player_viewmodel_bias(&lw.w, weapon, view, tracker, hip, 1920, 1080, bias);
@@ -2164,11 +2433,11 @@ void test_airborne_view_bias_keeps_interp_and_resumes_on_landing() {
     body.inf.vel[2] = 0x1600;
     local_player_view_frame(&lw.w, weapon, view, tracker, frame);
     CHECK(frame.suppress_view_bias && view.scope_engaged);
-    CHECK(view.weapon_pose_interp.position_bias_q16[0] == 3 * 4096);
+    CHECK(view.view_bias.position_q16[0] == 3 * 4096);
     check_bias(1.0f, 2.0f, 3.0f);
     body.inf.vel[2] = -0x1600;
     for (int i = 0; i < 5; ++i) player_view_tick(view, eye);
-    CHECK(view.weapon_pose_interp.position_bias_q16[0] == 8 * 4096);
+    CHECK(view.view_bias.position_q16[0] == 8 * 4096);
     CHECK(player_view_scope_ease_active(view));
     check_bias(1.0f, 2.0f, 3.0f);
 
@@ -2179,7 +2448,7 @@ void test_airborne_view_bias_keeps_interp_and_resumes_on_landing() {
     body.inf.airborne = false;
     body.inf.vel[2] = 0;
     local_player_view_frame(&lw.w, weapon, view, tracker, frame);
-    CHECK(!frame.suppress_view_bias && view.weapon_pose_interp.position_bias_q16[0] == 8 * 4096);
+    CHECK(!frame.suppress_view_bias && view.view_bias.position_q16[0] == 8 * 4096);
     // 8 of 15 steps: 8 * 4096 / 65536 = 0.5 u on the 240-unit x/y lanes and
     // 8 * 8192 / 65536 = 1.0 u on the 480-unit z lane (each lane eases its own span).
     check_bias(1.5f, 1.5f, 4.0f);
@@ -2203,9 +2472,9 @@ void test_airborne_view_bias_keeps_interp_and_resumes_on_landing() {
     // Only the ADS contribution drops: the independently clamped motion lead
     // and 4:3 framing drop still follow the hip offset on an airborne frame.
     lw.entity().flags |= kEntityFlagInAir;
-    tracker.tick_delta[0] = 1.0f;
-    tracker.tick_delta[1] = -1.0f;
-    tracker.tick_delta[2] = 4.0f;
+    tracker.motion_lead = PlayerViewMotionLead{};
+    const int32_t displacement[3] = {0x10000, -0x10000, 4 * 0x10000};
+    player_view_motion_lead_step(tracker.motion_lead, displacement);
     float bias[3];
     local_player_viewmodel_bias(&lw.w, weapon, view, tracker, hip, 800, 600, bias);
     CHECK(bias[0] == 1.0f - 1024.0f / 65536.0f);
@@ -2253,6 +2522,7 @@ void test_airborne_bias_is_separate_from_reload_and_force_scope_admission() {
             view.weapon_hip_pose.position_q16[i] = hip[i] * 256.0f;
             view.weapon_ads_pose.position_q16[i] = sight[i] * 256.0f;
         }
+        view.weapon_pose_bound_hip = view.weapon_hip_pose; // the bound def's, as an install binds it
         CHECK(player_view_set_engaged(view, true, false));
         settle_ease(view);
         LocalPlayerViewTracker tracker;
@@ -2397,7 +2667,8 @@ void test_use_item_arm_order() {
 }
 
 // The shell's class pick: 5..9 stamps L, a joiner without L latches it, the
-// rest change nothing; the resident kit is the spawn kit, else the default.
+// rest change nothing; the resident kit is the spawn buffer as it stands, empty
+// until a writer fills it (no default).
 void test_loadout_class_pick_and_resident_kit() {
     LocalWorld lw;
     LocalPlayerLoadout loadout;
@@ -2410,11 +2681,9 @@ void test_loadout_class_pick_and_resident_kit() {
     CHECK(local_loadout_set_player_class(no_player, loadout, 6));
     CHECK(loadout.pending_player_class == 6);
 
-    CHECK(local_loadout_kit(lw.w, loadout).size() ==
-            weapon_kit_default(lw.w.rules.title).size());
-    loadout.spawn_kit = {WeaponKitEntry{}};
-    loadout.spawn_kit[0].name = "WPN_TEST";
-    loadout.spawn_kit_set = true;
+    CHECK(local_loadout_kit(lw.w, loadout).empty());
+    loadout.spawn_kit() = {WeaponKitEntry{}};
+    loadout.spawn_kit()[0].name = "WPN_TEST";
     const std::vector<WeaponKitEntry> kit = local_loadout_kit(lw.w, loadout);
     CHECK(kit.size() == 1 && kit[0].name == "WPN_TEST");
 }
@@ -2440,10 +2709,19 @@ void test_view_uses_current_motor_offset_and_live_position() {
     view.debug_third_person_on_foot = true;
     LocalPlayerViewTracker tracker;
     LocalViewSessionInputs session;
+    // The first tracked update seeds the anchor at the Position, with no
+    // CameraOffset; the next one eases a quarter of the way to Position +
+    // CameraOffset in 16.16 [orig: Camera_SetTrackedEntity @0x4391D0
+    // (@0x439227..0x43923B); ThirdPersonCamera_Update @0x437AF0 (@0x437B67..0x437B76,
+    // @0x437C83..0x437CB5)].
     local_player_view_tick(&lw.w, view, tracker, session, nullptr);
-    CHECK(view.tp_anchor[0] == entity.position.x + 0.25f);
-    CHECK(view.tp_anchor[1] == entity.position.y - 0.5f);
-    CHECK(view.tp_anchor[2] == entity.position.z + 1.5f);
+    CHECK(view.tp_anchor_valid && view.tp_anchor_q16[0] == entity.position.x.q16 &&
+          view.tp_anchor_q16[1] == entity.position.y.q16 &&
+          view.tp_anchor_q16[2] == entity.position.z.q16);
+    local_player_view_tick(&lw.w, view, tracker, session, nullptr);
+    CHECK(view.tp_anchor_q16[0] == entity.position.x.q16 + ((0x4000 + 4) >> 2));
+    CHECK(view.tp_anchor_q16[1] == entity.position.y.q16 + ((-0x8000 + 4) >> 2));
+    CHECK(view.tp_anchor_q16[2] == entity.position.z.q16 + ((0x18000 + 4) >> 2));
 
     // A moving carrier/body re-anchors without another render or input sample.
     entity.position.x += 20.0f;
@@ -2829,7 +3107,7 @@ void test_target_lock_cadence_and_audio() {
     lw.w.collision = &collision;
     lw.ai.attach(lw.local);
     AiEntity &body = *lw.ai.for_handle(lw.local);
-    body.pos[0] = 10 << 16; body.pos[1] = 20 << 16; body.pos[2] = 3 << 16;
+    body.self->position.x.q16 = 10 << 16; body.self->position.y.q16 = 20 << 16; body.self->position.z.q16 = 3 << 16;
     body.team = 1; lw.entity().team = 1;
     LocalPlayer local(lw.w);
     local.weapon.active = true;
@@ -2996,8 +3274,9 @@ void test_scope_zero_bake_rows_follow_the_x87_scale() {
     CHECK(zero.elevation[5] == 2216066);
 }
 
-// Direct mounts retain the current pose and velocities. Published bias alone
-// clears, then the next step uses the newly bound def's hip reference.
+// Direct mounts retain the current pose and velocities, and the published bias words
+// too: their clear is the mount request's (player_view_mount_clear_bias), which a commit's
+// install does not run; the next step publishes against the newly bound def's hip.
 void test_direct_mount_retains_running_pose_and_forced_mount_targets_ads() {
     LocalWorld lw;
     for (int i = 0; i < 3; ++i) {
@@ -3018,9 +3297,11 @@ void test_direct_mount_retains_running_pose_and_forced_mount_targets_ads() {
     data.view_ads_pose = {{512, -256, 1024}, {0x08000000u, 0x20000000u, 0x10000000u}};
     local_weapon_install(lw.w, w, data, false, false, nullptr, v);
     CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
-    const float eye[3] = {};
+    const int32_t eye[3] = {};
     for (int i = 0; i < 3; ++i) player_view_tick(v, eye);
     const PlayerViewBiasInterp before = v.weapon_pose_interp;
+    const PlayerViewBias published_before = v.view_bias;
+    CHECK(published_before.rotation_bam[0] != 0);
     data.name = "POSE_1";
     data.view_hip_pose = {{10, 20, 30}, {0x02000000u, 0x03000000u, 0x04000000u}};
     local_weapon_install(lw.w, w, data, false, false, nullptr, v);
@@ -3030,10 +3311,17 @@ void test_direct_mount_retains_running_pose_and_forced_mount_targets_ads() {
         CHECK(v.weapon_pose_interp.current.rotation_bam[i] == before.current.rotation_bam[i]);
         CHECK(v.weapon_pose_interp.velocity.position_q16[i] == before.velocity.position_q16[i]);
         CHECK(v.weapon_pose_interp.velocity.rotation_bam[i] == before.velocity.rotation_bam[i]);
-        CHECK(v.weapon_pose_interp.position_bias_q16[i] == 0 &&
-              v.weapon_pose_interp.rotation_bias_bam[i] == 0);
+        CHECK(v.view_bias.position_q16[i] == published_before.position_q16[i] &&
+              v.view_bias.rotation_bam[i] == published_before.rotation_bam[i]);
     }
     CHECK(v.weapon_pose_interp.remaining == before.remaining);
+    // The request's clear zeroes the six words alone, the running pose kept.
+    PlayerViewState cleared = v;
+    player_view_mount_clear_bias(cleared);
+    for (int i = 0; i < 3; ++i) {
+        CHECK(cleared.view_bias.position_q16[i] == 0 && cleared.view_bias.rotation_bam[i] == 0);
+        CHECK(cleared.weapon_pose_interp.current.rotation_bam[i] == before.current.rotation_bam[i]);
+    }
     player_view_tick(v, eye);
     int32_t out[3];
     local_player_viewmodel_rotation_bias(&lw.w, w, v, out);
@@ -3045,10 +3333,11 @@ void test_direct_mount_retains_running_pose_and_forced_mount_targets_ads() {
     settle_ease(v);
     CHECK(player_view_scope_settled(v));
     data.name = "POSE_0";
+    const int32_t settled_bias = v.view_bias.rotation_bam[0];
     local_weapon_install(lw.w, w, data, false, false, nullptr, v);
     CHECK(player_view_scope_settled(v) && v.weapon_pose_interp.active);
     CHECK(v.weapon_pose_interp.current.rotation_bam[0] == 0x02000000u);
-    CHECK(v.weapon_pose_interp.rotation_bias_bam[0] == 0);
+    CHECK(v.view_bias.rotation_bam[0] == settled_bias);
     data.name = "POSE_2";
     local_weapon_install(lw.w, w, data, false, false, nullptr, v);
     CHECK(!player_view_scope_settled(v) && v.weapon_pose_interp.active);
@@ -3062,7 +3351,7 @@ void test_direct_mount_retains_running_pose_and_forced_mount_targets_ads() {
     data.view_ads_pose = {{0, 0, 0}, {0x10000000u, 0x20000000u, 0x30000000u}};
     local_weapon_install(lw.w, w, data, false, false, nullptr, v);
     CHECK(v.scope_engaged && player_view_scope_settled(v) && !v.scope_hipfire);
-    CHECK(v.weapon_pose_interp.active && v.weapon_pose_interp.rotation_bias_bam[0] == 0);
+    CHECK(v.weapon_pose_interp.active);
     CHECK(!local_player_scope_toggle(lw.w, w, v, w.slot)); // forced sight stays pinned
     player_view_tick(v, eye);
     local_player_viewmodel_rotation_bias(&lw.w, w, v, out);
@@ -3104,16 +3393,22 @@ void test_category_request_resets_before_commit_while_cycle_retains_pose() {
     PlayerViewState v;
     local_weapon_install(lw.w, w, data, false, false, &inventory, v);
     CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
-    const float eye[3] = {};
+    const int32_t eye[3] = {};
     player_view_tick(v, eye);
     const uint32_t current = v.weapon_pose_interp.current.rotation_bam[0];
     const uint32_t velocity = v.weapon_pose_interp.velocity.rotation_bam[0];
-    const int32_t published = v.weapon_pose_interp.rotation_bias_bam[0];
+    const int32_t published = v.view_bias.rotation_bam[0];
+    CHECK(published != 0);
     const auto cycle = weapon_cycle_slot(lw.w.tables.weapons, inventory, 1,
                                          local_weapon_switch_gates(lw.w, w, &inventory));
     CHECK(cycle.kind == WeaponSwitchOutcome::kMount && !cycle.reset_view);
     handle_weapon_switch_outcome(lw.w, w, &inventory, cycle, v);
     CHECK(v.weapon_pose_interp.active && v.weapon_pose_interp.current.rotation_bam[0] == current);
+    // The cycle's mount request clears the six published words, the pose kept
+    // [orig: Player_MountWeaponSlot @0x4DFBCF..0x4DFBE8].
+    CHECK(v.view_bias.rotation_bam[0] == 0);
+    player_view_tick(v, eye);
+    CHECK(v.view_bias.rotation_bam[0] != 0);
     w.slot.current = weapon_action::kIdle;
     const auto category = weapon_switch_to_handle(lw.w.tables.weapons, inventory, 65,
                                                   local_weapon_switch_gates(lw.w, w, &inventory));
@@ -3122,7 +3417,8 @@ void test_category_request_resets_before_commit_while_cycle_retains_pose() {
     CHECK(w.switch_in_flight && inventory.equipped_combo == 65); // action has not committed
     CHECK(!v.weapon_pose_interp.active && !v.scope_engaged && v.scope_hipfire);
     CHECK(v.weapon_pose_interp.current.rotation_bam[0] == velocity);
-    CHECK(v.weapon_pose_interp.rotation_bias_bam[0] == published); // reset is not mount bias clear
+    // The reset leaves the words (player_view_test); the category key's mount clears them.
+    CHECK(v.view_bias.rotation_bam[0] == 0);
     const auto denied = weapon_switch_to_handle(lw.w.tables.weapons, inventory, 11 * 65,
                                                 local_weapon_switch_gates(lw.w, w, &inventory));
     CHECK(denied.kind == WeaponSwitchOutcome::kDeny && denied.reset_view);
@@ -3215,6 +3511,9 @@ struct ScopedAimFixture : LocalWorld {
         entity().equipped_adm_index = 1;
         w.tables.weapons.entries.resize(2);
         w.tables.weapons.entries[1].valid = true;
+        // The def the fire cases install: a local fire names the firing slot's def by
+        // its name [orig: WeaponAction_Fire @0x542B10 - @0x542C1C..0x542C2F].
+        w.tables.weapons.entries[1].name = "WPN_AIM";
         player.weapon.active = true;
         player.view.scope_engaged = true;
         player.view.scope_settled = true;
@@ -3243,6 +3542,17 @@ void test_rendered_scope_applies_elevation_and_parallax() {
         CHECK(std::abs(zeroed.camera.pitch_deg - base.camera.pitch_deg + 1.40625f) < 0.00001f);
         // Mission yaw is 90 - retail BAM yaw, hence the inverted sign.
         CHECK(std::abs(zeroed.camera.yaw_deg - base.camera.yaw_deg + 0.703125f) < 0.00001f);
+        // The zero lands in the scene's local camera only: the view block the water
+        // mirror's collect reads keeps the compose [orig: Render_ProcessMainSceneFrame
+        // @0x5CA352..0x5CA398 (the copy), @0x5CA499 / @0x5CA4A0 (the zero);
+        // Water_ReflectionPrerender @0x5C2780].
+        CHECK(std::abs(zeroed.view_block.pitch_deg - base.camera.pitch_deg) < 0.00001f);
+        CHECK(std::abs(zeroed.view_block.yaw_deg - base.camera.yaw_deg) < 0.00001f);
+        CHECK(zeroed.view_block.roll_deg == zeroed.camera.roll_deg);
+        CHECK(zeroed.view_block.eye[0] == zeroed.camera.eye[0] &&
+              zeroed.view_block.eye[1] == zeroed.camera.eye[1] &&
+              zeroed.view_block.eye[2] == zeroed.camera.eye[2]);
+        CHECK(f.player.view_frame().view_block.pitch_deg == zeroed.view_block.pitch_deg);
         f.player.weapon.def.flags = DEF_WEAPON_FLAG_SIGHTED;
         auto sighted = f.player.present_view_frame();
         CHECK(std::abs(sighted.camera.pitch_deg - base.camera.pitch_deg) < 0.00001f);
@@ -3547,30 +3857,37 @@ void test_pack_masks_movement_under_a_nomove_weapon() {
     CHECK(m.player.view.scope_settled);
 }
 
-// The pack's analog legs: the forward/back key handlers also write the X axis
+// The pack's analog legs: the held forward/back rows also write the X axis
 // word (-1023 / +1023; back's row dispatches after forward's, so it wins when
-// both are held), shifted to a byte; a change of more than 32 latches the
-// axes on, a moving pack latches them off, and only a latched pack stores
-// them (else 0). The throttle has its own latch, a 0x14 deadzone, and drops
-// while a lean key is in the word. [orig: Input_HandleActionBinding_0 cases
-// 151/152 @0x4e0c6e..0x4e0cc5; Input_InitBindingSystem's row-order list;
-// Player_PackInputStateToEntity @0x4df793..0x4df8f8]
+// both are held), which each input frame's head zeroes (zero_axis_words),
+// shifted to a byte; a change of more than 32 latches the axes on, a moving
+// pack latches them off, and only a latched pack stores them (else 0). The
+// throttle word has its own latch, a 0x14 deadzone on its byte, drops while a
+// lean key is in the word, and no clear at the frame's head. [orig:
+// Input_HandleActionBinding_0 cases 151/152 @0x4e0c75 / @0x4e0cc5;
+// Input_InitBindingSystem's row-order list; Input_ProcessFrame
+// @0x49D54E..0x49D578; Player_PackInputStateToEntity @0x4df793..0x4df8f8]
 void test_pack_analog_axes_and_their_hysteresis() {
     ScopedAimFixture f;
     f.player.weapon.def.flags = 0;
     f.player.view.scope_engaged = false;
     f.player.view.scope_settled = false;
     // Opposing keys: no movement, the X word is back's.
+    f.player.zero_axis_words();
     f.player.set_movement_keys(true, true, false, false, false, false, false);
+    CHECK(f.player.axis_words.x == 1023);
     f.player.apply_player_input_pre_tick(/*pack_input=*/true);
     CHECK(!f.player.move_order.moving);
     CHECK(f.entity().net_analog_x == 127);
     CHECK(f.entity().net_analog_y == 0 && f.entity().net_analog_z == 0);
-    // Released: the latch holds, the axis follows to 0.
+    // Released: the frame's head zeroed the word; the latch holds, the axis
+    // follows to 0.
+    f.player.zero_axis_words();
     f.player.set_movement_keys(false, false, false, false, false, false, false);
     f.player.apply_player_input_pre_tick(/*pack_input=*/true);
     CHECK(f.entity().net_analog_x == 0);
     // Forward alone moves: the latch drops and the axes zero.
+    f.player.zero_axis_words();
     f.player.set_movement_keys(true, false, false, false, false, false, false);
     f.player.apply_player_input_pre_tick(/*pack_input=*/true);
     CHECK(f.player.move_order.moving);
@@ -3585,20 +3902,59 @@ void test_pack_analog_axes_and_their_hysteresis() {
     CHECK(m.entity().net_analog_x == -128);
 
     // The throttle: inside the deadzone it reads 0; past it the latch stores
-    // it; a lean key drops it.
+    // it, through the next frame's head; a lean key drops it.
     ScopedAimFixture t;
     t.player.weapon.def.flags = 0;
     t.player.view.scope_engaged = false;
     t.player.view.scope_settled = false;
-    t.player.input.analog_throttle = 0x13;
+    t.player.axis_words.throttle = 0x13 << 3;
     t.player.apply_player_input_pre_tick(/*pack_input=*/true);
     CHECK(t.entity().analog_throttle == 0);
-    t.player.input.analog_throttle = 64;
+    t.player.axis_words.throttle = 64 << 3;
+    t.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(t.entity().analog_throttle == 64);
+    t.player.zero_axis_words();
+    CHECK(t.player.axis_words.throttle == 64 << 3);
     t.player.apply_player_input_pre_tick(/*pack_input=*/true);
     CHECK(t.entity().analog_throttle == 64);
     t.player.set_movement_keys(false, false, false, false, true, false, false);
     t.player.apply_player_input_pre_tick(/*pack_input=*/true);
     CHECK(t.entity().analog_throttle == 0);
+}
+
+// A typed forward under a NoMove weapon (D-NET-NEW-LI-39): the record's bit form
+// sets the forward bit and writes the X axis word (-1023); the pack strips the
+// bit, so the body stands, and the unmoving pack latches X's byte -128, which
+// the C2S 0x0C carries as 0x80. The argument form writes X alone, no bit, and the
+// next frame's head zeroes it. [orig: Input_HandleActionBinding_0 @0x4E0420 -
+// case 152 `or g_InputFlags, 2` @0x4E0CBE, `mov g_InputAxisX, 0FC01h` @0x4E0CC5,
+// `mov g_InputAxisX, ax` @0x4E0CB1; Player_PackInputStateToEntity -
+// `g_InputFlags &= 0xFFFF9FE1` @0x4df482, the X read @0x4DF7A6, the store
+// @0x4DF888; NetPacket_SerializePlayerState case 3 @0x4C1B2E..0x4C1B74]
+void test_a_typed_forward_under_a_nomove_weapon_ships_its_x_byte() {
+    ScopedAimFixture m;
+    m.player.weapon.def.flags = static_cast<int32_t>(DEF_WEAPON_FLAG_NOMOVE);
+    CHECK(LocalPlayer::movement_case_bit(152) == kInputFlagForward);
+    m.player.zero_axis_words();
+    m.player.apply_movement_case(152, 0);
+    CHECK(m.player.record_input_bits == kInputFlagForward && m.player.axis_words.x == -1023);
+    m.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(!m.player.move_order.moving && m.player.move_order.direction_bits == 0);
+    CHECK(m.entity().net_analog_x == -128);
+    const opennova::PlayerExtendedUplink up =
+            opennova::replication::build_player_uplink(m.w, m.entity(), m.body());
+    CHECK(up.analog_x == 0x80 && up.analog_y == 0 && up.analog_z == 0);
+    // The argument form: X takes the argument, no bit; still latched (a change of
+    // 165), the pack stores 37.
+    m.player.zero_axis_words();
+    m.player.apply_movement_case(152, 300);
+    CHECK(m.player.record_input_bits == 0 && m.player.axis_words.x == 300);
+    m.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(m.entity().net_analog_x == 37);
+    // The next frame's head zeroes the word: the latched pack stores 0.
+    m.player.zero_axis_words();
+    m.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(m.entity().net_analog_x == 0);
 }
 
 // The authority arm's own-slot gate: a refused local shot spawns no round
@@ -3844,7 +4200,32 @@ void test_hud_death_gate_is_the_death_screen_latch_alone() {
     CHECK(!frame.hud_combat.state.death_screen);
 }
 
+// L5-s7 FOUND 2: the on-foot follow anchor chases Position + CameraOffset a
+// quarter step per update in 16.16 with the +4 add: a target 7 above moves it 2,
+// one 5 below moves it 1 down, one 4 below not at all (a float quarter step
+// would move each of them).
+// [orig: ThirdPersonCamera_Update @0x437AF0 - the target @0x437B67..0x437B76,
+//  `(target - anchor + 4) >> 2` @0x437C83..0x437CB5]
+void test_on_foot_anchor_quarter_step_is_integer() {
+    PlayerViewState v;
+    v.third_person = true;
+    const int32_t seed[3] = {0x10000, -0x20000, 0x8000};
+    player_view_anchor_tick(v, seed, seed);
+    CHECK(v.tp_anchor_valid && v.tp_anchor_q16[0] == 0x10000 &&
+          v.tp_anchor_q16[1] == -0x20000 && v.tp_anchor_q16[2] == 0x8000);
+    const int32_t moved[3] = {0x10007, -0x20000 - 5, 0x8000 - 4};
+    player_view_anchor_tick(v, moved, moved);
+    CHECK(v.tp_anchor_q16[0] == 0x10002);
+    CHECK(v.tp_anchor_q16[1] == -0x20001);
+    CHECK(v.tp_anchor_q16[2] == 0x8000);
+    player_view_anchor_tick(v, moved, moved);
+    CHECK(v.tp_anchor_q16[0] == 0x10004); // (5 + 4) >> 2
+    CHECK(v.tp_anchor_q16[1] == -0x20001); // 4 below now: (-4 + 4) >> 2 = 0
+    CHECK(v.tp_anchor_q16[2] == 0x8000);
+}
+
 int main() {
+    test_on_foot_anchor_quarter_step_is_integer();
     test_hud_context_tracks_mount_weapon_and_dismount();
     test_hud_death_gate_is_the_death_screen_latch_alone();
     test_rendered_scope_applies_elevation_and_parallax();
@@ -3858,6 +4239,7 @@ int main() {
     test_armory_press_latch_freezes_input();
     test_pack_masks_movement_under_a_nomove_weapon();
     test_pack_analog_axes_and_their_hysteresis();
+    test_a_typed_forward_under_a_nomove_weapon_ships_its_x_byte();
     test_authority_fire_gate_refuses_the_round();
     test_scoped_aim_survives_kernel_replacement_without_sharing_sessions();
     test_target_lock_cadence_and_audio();
@@ -3882,6 +4264,7 @@ int main() {
     test_mounted_first_person_camera_belongs_to_the_carrier();
     test_seat_bone_pose_rider_legs();
     test_unadmitted_seat_takes_the_ground_or_person_leg();
+    test_first_person_compose_reads_the_tracked_target();
     test_shake_turns_the_bam_heading();
     test_chase_lookahead_follows_the_hull_on_every_compose();
     test_scope_toggle_refuses_inactive_weapon();
@@ -3914,9 +4297,12 @@ int main() {
     test_airborne_bias_is_separate_from_reload_and_force_scope_admission();
     test_scope_fov_target_and_render_queries_share_weather_state();
     test_frame_publishes_the_fp_draw_gates();
+    test_inset_pass_runs_in_the_non_nvg_fork_alone();
+    test_a_sighted_inset_def_runs_no_inset_pass();
     test_scope_zoom_clamps_and_weapon_category_fov_reset();
     test_arms_dip_follows_the_weapon_category_not_the_anim_map();
     test_weapon_cycle_route_steps_the_zoom_and_the_mount_clamp();
+    test_weapon_category_refused_while_a_windup_runs();
     test_default_wheel_binding_zooms_in_away_from_the_player();
     test_frame_chase_shake_consumes_the_tick();
     test_use_item_vehicle_loadout_zone_gates();

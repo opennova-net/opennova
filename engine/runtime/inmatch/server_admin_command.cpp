@@ -8,11 +8,10 @@
 #include <net/npwire/session_hello.h>   // DisconnectEvent
 #include <net/novaworld/lobby_vars.h> // parse_host_and_port / resolve_address_without_dns
 #include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/server_player_death.h> // Server_RunPlayerDeath
 #include <runtime/inmatch/server_spawn.h> // Server_ChangeEntityTeam
 #include <runtime/inmatch/server_tick.h> // Server_StageHostDisconnect
 #include <runtime/world/entity.h>
-#include <runtime/world/infantry.h>     // compute_death_anim_state / death_cause
-#include <runtime/world/round_sim.h>
 #include <runtime/world/world.h>
 
 #include <algorithm>
@@ -39,10 +38,12 @@ int32_t atol_token(const std::string &token) {
 	return io::retail_atol(token.c_str());
 }
 
-// Player-slot state 6: an added player still in the match with its entity.
+// Player-slot state 6 (joined) with its entity: a slot still joining (1..5)
+// or joined into a finished round (7) is no target.
+// [orig: KillPlayer `cmp dword ptr [eax+20h], 6` @0x4D29C6, the entity
+//  @0x4D29D0; ChangeTeam / SwapTeam state 6 @0x4D32E6, the entity @0x4D32EC]
 bool slot_in_game(const NapiNPConnection &conn) {
-	return conn.phase >= ConnectionPhase::PlayerAdded && conn.phase < ConnectionPhase::Goodbye &&
-	       conn.link.owned_entity.valid();
+	return conn.slot_state == PlayerSlotState::Joined && conn.link.owned_entity.valid();
 }
 
 // PlayerState_GetByIndex: an index outside [0, capacity) is no slot, so a
@@ -182,7 +183,7 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 	//   ServerCommand before its session exists keeps it clear, as
 	//   opennova-serve's session-less one does (ServeListing::on_command), so
 	//   only SetMPReset passes there;
-	// - the player table (dword_24C0CA0; the World here), only the
+	// - the player table (g_PlayerSlotTableReady; the World here), only the
 	//   player-targeted verbs and ChangeTeam / SwapTeam;
 	// - the token count, every verb that reads an argument it cannot default.
 	// SetMPReset tests the token count alone, so it runs on any receiver this
@@ -246,23 +247,21 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 			send_reliable(*target, s2c::CHAT_BROADCAST, chat_body(channel, args[1]));
 			return outcome;
 		}
-		// KillPlayer: the slot must be in the game; health and the kill credit
-		// are cleared and the death check runs the full player-death event.
-		// [orig: @0x4D29C6..0x4D29EC -> Entity_CheckAndProcessDeath @0x51B550 ->
-		//  GameEvent_PlayerDeath @0x516DD0 for a Flags&0x100 player]
+		// KillPlayer: the slot must be in the game; Health and the kill credit
+		// are cleared and the death check runs the player-death transaction
+		// inline. Nothing stores the dead bit, so the body's edge in the next
+		// entity update raises the transaction a second time.
+		// [orig: @0x4D29C6 (state 6), @0x4D29D0 (the entity), Health 0
+		//  @0x4D29DA, +0x178 = 0 @0x4D29E3, Entity_CheckAndProcessDeath
+		//  @0x4D29EC -> GameEvent_PlayerDeath @0x51B55F for a Flags & 0x100
+		//  player; the edge Entity_UpdateInfantryPlayerBody @0x4B4BF1..0x4B4CEA]
 		if (!slot_in_game(*target)) return outcome;
 		world::Entity *entity = world->registry.get(target->link.owned_entity);
 		if (entity == nullptr) return outcome;
 		outcome.handled = true;
 		entity->health = 0;
 		entity->last_attacker = world::EntityHandle{};
-		entity->death_anim_state = world::compute_death_anim_state(
-				0, 0, world::death_cause::kGeneric);
-		world::RoundDeath death;
-		death.victim = entity->handle;
-		death.victim_handle = entity->handle.packed;
-		death.event_flags = entity->cause_flags & 0xF00u;
-		world->round_sim.deaths.push_back(death);
+		Server_RunPlayerDeath(ctx, *world, entity->handle);
 		return outcome;
 	}
 	if (strutil::iequals(verb, "TextChatServer")) {
@@ -296,12 +295,14 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		return outcome;
 	}
 	if (strutil::iequals(verb, "Cycle") || strutil::iequals(verb, "EndMission") || strutil::iequals(verb, "GameOver")) {
-		// The round end with the parsed winner, then the 620-tick linger in
-		// place of the 2790 Server_ProcessRoundEnd stored [orig: @0x4D31BF..0x4D31CA].
+		// The round end with the parsed winner, run inline (its 0x61 / 0x1D go
+		// out here), then the 620-tick linger stored over the 2790 it stored,
+		// unconditionally (D-NET-NEW-L1-16) [orig: Server_ProcessRoundEnd @0x4D31C0,
+		// g_EndRoundLingerTimer = 0x26C @0x4D31CA].
 		if (world == nullptr) return outcome;
 		outcome.handled = true;
-		world->process_round_end(parse_winner_team(args));
-		ctx.round_end_linger_override_ticks = 0x26C;
+		Server_ProcessRoundEnd(ctx, *world, parse_winner_team(args));
+		ctx.round_end_linger_ticks = 0x26C;
 		return outcome;
 	}
 	if (strutil::iequals(verb, "Earthquake")) {
@@ -332,10 +333,12 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		return outcome;
 	}
 	if (strutil::iequals(verb, "TimeOfDay")) {
-		// HHMM, 1200 when absent or outside 0..2399; hours = floor(v * 0.01),
-		// minutes = the remainder, packed as a minute of day
-		// [orig: @0x4D2BE3..0x4D2C94 -> Environment_SetCurrentTime @0x57C4B0;
-		//  the lighting caches reset @0x4D2C9C/@0x4D2CA1 ride env.generation here].
+		// HHMM, 1200 when absent or outside 0..2399, packed into the clock word
+		// (environment_time_from_hhmm) and set with the epoch tickdown's 10, then the tile
+		// cache's reset and the environment cube's full refresh (WeatherState::
+		// reset_time_caches) (D-NET-NEW-LI-35) [orig: CNapiGameSession_HandleServerCommand
+		//  @0x4D22F0 - @0x4D2BE3..0x4D2C15, Environment_SetCurrentTime called @0x4D2C94,
+		//  Terrain_ResetTileCache called @0x4D2C9C, EnvCube_ForceFullRefresh called @0x4D2CA1].
 		if (world == nullptr) return outcome;
 		outcome.handled = true;
 		int32_t hhmm = 1200;
@@ -343,9 +346,8 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 			hhmm = atol_token(args[0]);
 			if (hhmm < 0 || hhmm >= 2400) hhmm = 1200;
 		}
-		const int32_t hours = static_cast<int32_t>(std::floor(static_cast<double>(hhmm) * 0.01));
-		const int32_t minutes = hhmm - hours * 100;
-		world->commands.set_time_of_day_minutes(hours * 60 + minutes);
+		world->weather.set_current_time(environment_time_from_hhmm(hhmm));
+		world->weather.reset_time_caches();
 		return outcome;
 	}
 	if (strutil::iequals(verb, "SetServerName")) {
@@ -357,6 +359,9 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		outcome.config_changed = true;
 		ctx.config.server_name = args[0].substr(0, 31);
 		ctx.np_protocol.session_name = ctx.config.server_name;
+		// The session title, which the status report, the Co-op 0x7B and MISSIONNAME read
+		// [orig: Napi_CopyString(g_SessionTitle, .., 32) @0x4D2D0D].
+		ctx.session_title = ctx.config.server_name;
 		return outcome;
 	}
 	if (strutil::iequals(verb, "SetServerMsg")) {
@@ -372,6 +377,56 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 	// slot's weapon tables) and DisarmPlayer (sub_4DC440) act on the retail
 	// weapon-overlay tables, which this host does not model.
 	return outcome;
+}
+
+uint32_t environment_time_from_hhmm(int32_t hhmm) {
+	// fild; fmul 0.01f; floor; ftol, at the 53-bit precision the port keeps; the 0x51EB851F
+	// divide by 100 and the 0x88888889 divides by 60 truncate toward zero, as C's.
+	// [orig: CNapiGameSession_HandleServerCommand @0x4D22F0 - fild @0x4D2C19, `fmul
+	//  flt_7C56A8` @0x4D2C24, _floor called @0x4D2C3F, _ftol2_sse called @0x4D2C44, the
+	//  divides @0x4D2C1D..0x4D2C86, the word @0x4D2C88..0x4D2C91]
+	const int32_t hours = static_cast<int32_t>(
+			std::floor(static_cast<double>(hhmm) * static_cast<double>(0.01f)));
+	const int32_t minutes = hhmm % 100;
+	const int32_t total =
+			static_cast<int32_t>(static_cast<uint32_t>(minutes) + 60u * static_cast<uint32_t>(hours));
+	const uint32_t hour_word = static_cast<uint32_t>(total / 60) << 24;
+	const uint32_t minute_word = static_cast<uint32_t>(minutes % 60) * 0x44400u;
+	return hour_word | minute_word;
+}
+
+bool Server_SetNetworkDelay(NapiNPServerCtx &ctx, int32_t delay_ticks) {
+	if (ctx.is_in_session == 0 || ctx.is_authority == 0) return false;
+	if (static_cast<uint32_t>(delay_ticks) > 100u) return false; // `ja` @0x50CBF0
+	// The sends to every in-match slot but the host's own (mask 0x90), each reliable.
+	const auto fan = [&ctx](uint8_t tag, const std::vector<uint8_t> &body) {
+		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
+			if (conn.link.mode == replication::TransportMode::Loopback) continue; // 0x10
+			conn.link.transport->host_send(tag, body);
+		}
+	};
+	std::vector<uint8_t> delay(4);
+	const uint32_t raw = static_cast<uint32_t>(delay_ticks);
+	for (int i = 0; i < 4; ++i) delay[static_cast<size_t>(i)] = static_cast<uint8_t>(raw >> (8 * i));
+	fan(s2c::NETWORK_DELAY, delay);
+	// 1000 * delay * holdoff in 32 bits, then the signed divide by 62.
+	const uint32_t holdoff = ctx.config.effective_send_holdoff_ticks();
+	const int32_t scaled = static_cast<int32_t>(holdoff * raw * 1000u);
+	const std::string text = "Delay set to " + std::to_string(scaled / 62) + "ms";
+	ChatBroadcast chat;
+	chat.channel = 0;
+	chat.sender_slot = kNoSenderSlot;
+	chat.text = text;
+	fan(s2c::CHAT_BROADCAST, encode_chat_broadcast(chat));
+	return true;
+}
+
+void Server_ForceRoundEndAndClearState(NapiNPServerCtx &ctx, world::World &world) {
+	Server_ProcessRoundEnd(ctx, world, 0);
+	ctx.round_wins[0] = 0;
+	ctx.round_wins[1] = 0;
+	ctx.rounds_played = 0;
 }
 
 } // namespace opennova::inmatch

@@ -35,6 +35,10 @@ signal host_requested(config: HostSessionConfig)
 # cell text; this panel only renders them).
 const COLUMN_TITLES: PackedStringArray = [
 	"Server", "Mission", "Mode", "Players", "Ping", "Access"]
+# The menu file holding the host dialog: the multiplayer menu, whose host
+# buttons open its MULTI_PLAYER_HOST with file="mp.mnu" and whose
+# NW_MULTI_PLAYER the NovaWorld arm returns to.
+const HOST_DIALOG_MENU := "mp.mnu"
 
 enum Screen { CONNECTING, LOGIN, LOBBY, HOST, MESSAGE }
 
@@ -49,6 +53,7 @@ var _target_option: OptionButton
 var _username_edit: LineEdit
 var _password_edit: LineEdit
 var _login_button: Button
+var _remember_login_check: CheckBox
 var _filter_edit: LineEdit
 var _type_filter: OptionButton
 var _hide_full_check: CheckBox
@@ -66,15 +71,15 @@ var _sort_column := NovaWorldServerBrowser.COLUMN_NAME
 var _sort_ascending := true
 var _can_login := false        # true once the gate reply gives us a startup_url
 var _logged_in := false
-# Stashed at join time: the selected row's mission + our callsign. joined_game carries the
-# resolved address plus the APPID join token and CD identity cookie, so we remember the mission
-# (the joiner must know the host's mission to load it) and pair them when the join resolves.
+var _signing_in := false       # a Login's post in flight
+# A left press landed on this sign-in field: its release over the field is the click.
+var _sign_in_press_field: LineEdit = null
+# Stashed at join time: the selected row's mission. joined_game carries the resolved address
+# plus the APPID join token and CD identity cookie, so we remember the mission (the joiner must
+# know the host's mission to load it) and pair them when the join resolves. The player's name is
+# the session's (NetSessionController: the CHAR cookie, else the profile's callsign).
 var _pending_mission := ""
-var _pending_player := ""
 var _pending_expansion := ""  # the joined row's GSB Exp: the host's expansion
-# The signed-in NovaWorld handle — the callsign every NW join uses (retail
-# parity: the service identity names the player, not the local profile).
-var _nw_callsign := ""
 # The install's expansions, listed once per server-list fill (join_block_reason
 # reads it for every row the table draws).
 var _installed_expansions := PackedStringArray()
@@ -132,6 +137,8 @@ func _bind_scene_ui() -> void:
 	_username_edit = get_node(pages + "LoginView/LoginCard/LoginMargin/LoginForm/UsernameEdit")
 	_password_edit = get_node(pages + "LoginView/LoginCard/LoginMargin/LoginForm/PasswordEdit")
 	_login_button = get_node(pages + "LoginView/LoginCard/LoginMargin/LoginForm/LoginButton")
+	_remember_login_check = get_node(
+			pages + "LoginView/LoginCard/LoginMargin/LoginForm/RememberLoginCheck")
 	_filter_edit = get_node(pages + "LobbyView/Toolbar/SearchEdit")
 	_type_filter = get_node(pages + "LobbyView/Toolbar/TypeFilter")
 	_refresh_button = get_node(pages + "LobbyView/Toolbar/RefreshButton")
@@ -158,7 +165,31 @@ func _bind_scene_ui() -> void:
 	_target_option.item_selected.connect(_on_target_selected)
 	_close_button.pressed.connect(_on_close_pressed)
 	_login_button.pressed.connect(_on_login_pressed)
-	_password_edit.text_submitted.connect(func(_text: String) -> void: _on_login_pressed())
+	# The sign-in page's REMEMBER_LOGIN checkbox (JO's and DFX2's templates' "Remember my login
+	# information."): a click flips it and stores its state (_on_remember_login_toggled); it takes
+	# no keyboard, as the page's checkbox takes only clicks.
+	_remember_login_check.toggled.connect(_on_remember_login_toggled)
+	# Enter in a sign-in field lets the keyboard go, then runs the page's VK_RETURN hotkey (each
+	# page's submit carries one: JO's ACCEPT, DFX2's LOGIN), which presses the submit when it is
+	# shown and enabled; with no field holding the keyboard, Enter runs the same hotkey
+	# (_unhandled_key_input). So one Enter submits, from either field or from neither. The page's
+	# edits take the keys as the menu's do (engine: MenuRuntime::commit_edit_ and handle_key, the
+	# edit's Enter and the focus-gated hotkey scan, D-NET-NEW-L9-56); the commit event an edit's
+	# Enter emits has no taker on the sign-in page.
+	for edit: LineEdit in [_username_edit, _password_edit]:
+		edit.text_submitted.connect(_on_sign_in_field_submitted.bind(edit))
+	# The sign-in fields as the page's edits take input (engine: LobbyHttpFlow's remembered
+	# login): a click (a press and its release over the field) clears the remembered fill, a
+	# keystroke does not; a field takes the keyboard only from its own click or from its
+	# partner's Tab (the page's TAB actions), and each keystroke re-runs the submit gate. The
+	# page's edits take 16 characters (MAXCHAR="16") and have no context menu.
+	for edit: LineEdit in [_username_edit, _password_edit]:
+		edit.focus_mode = Control.FOCUS_CLICK
+		edit.max_length = 16
+		edit.context_menu_enabled = false
+		edit.text_changed.connect(func(_text: String) -> void: _refresh_sign_in_gate())
+	_username_edit.gui_input.connect(_on_username_input)
+	_password_edit.gui_input.connect(_on_password_input)
 	_filter_edit.text_changed.connect(func(_text: String) -> void: _rebuild_view())
 	_type_filter.clear()
 	_type_filter.add_item("All modes")
@@ -227,8 +258,24 @@ func _on_message_action_pressed() -> void:
 func _return_to_login() -> void:
 	_set_status("Connected. Sign in to continue.")
 	_set_screen(Screen.LOGIN)
+	# The page opens with no field holding the keyboard: one is taken by a click.
 	if _username_edit != null:
-		_username_edit.grab_focus()
+		_username_edit.release_focus()
+		_password_edit.release_focus()
+	_refresh_sign_in_gate()
+
+
+# A failed sign-in's way back: the sign-in page shown again, its fields as the page makes them
+# (empty) and its remembered fill re-run (engine: LobbyHttpFlow::reshow_sign_in).
+func _reshow_sign_in() -> void:
+	if _client != null:
+		_client.reshow_sign_in()
+	if _username_edit != null:
+		_username_edit.clear()
+		_password_edit.clear()
+		_password_edit.placeholder_text = ""
+	_return_to_login()
+	_apply_remembered_login()
 
 
 func _return_to_lobby() -> void:
@@ -269,6 +316,8 @@ func _create_client(start_now: bool = true) -> void:
 	_client = NovaWorldClient.new()
 	# The session speaks the mounted game's title (its identity and gate tag).
 	_client.resource_root = resource_root
+	# The session socket scans the process's cfg block's mpnovaworld quad.
+	_client.set_game_config(GameCfgStore.block())
 	add_child(_client)
 	_client.host = _resolved_host()
 	_client.gate_port = gate_port
@@ -292,6 +341,7 @@ func _client_handlers() -> Dictionary:
 		"server_pings_updated": _on_server_pings_updated,
 		"login_succeeded": _on_login_succeeded,
 		"login_failed": _on_login_failed,
+		"web_lobby_opened": _on_web_lobby_opened,
 		"join_failed": _on_join_failed,
 		"joined_game": _on_joined_game,
 		"hosting_started": _on_hosting_started,
@@ -360,7 +410,7 @@ func _reset_connection_state() -> void:
 		_login_button.disabled = true
 	_can_login = false
 	_logged_in = false
-	_nw_callsign = ""
+	_signing_in = false
 	_rows = []
 	_view = []
 	_pings = {}
@@ -368,7 +418,6 @@ func _reset_connection_state() -> void:
 	if _population_label != null:
 		_population_label.text = ""
 	_pending_mission = ""
-	_pending_player = ""
 	_pending_expansion = ""
 	_joining_rid = 0
 	# The host Start button is held only while a host request is in flight.
@@ -416,9 +465,7 @@ func _on_connected() -> void:
 		return # returning from a failed join; the typed failure owns the next screen
 	_can_login = true
 	_login_button.disabled = false
-	_set_status("Connected. Sign in to continue.")
-	_set_screen(Screen.LOGIN)
-	_username_edit.grab_focus()
+	_return_to_login()
 
 
 func _on_disconnected(reason: String) -> void:
@@ -690,16 +737,21 @@ func _on_login_pressed() -> void:
 		_show_message("Login is not available in this build.", "Back to Sign In",
 				Callable(self, "_return_to_login"), Screen.LOGIN)
 		return
-	if not _can_login:
-		return  # no session to sign in on (its Login is disabled; this guards Enter)
-	var user := _username_edit.text.strip_edges()
+	if not _can_login or _signing_in:
+		return  # no session, or a sign-in in flight (Login is disabled; this guards Enter)
+	var user := _username_edit.text
 	var pwd := _password_edit.text
-	if user.is_empty() or pwd.is_empty():
-		_show_message("Enter both your account name and password.", "Back to Sign In",
-				Callable(self, "_return_to_login"), Screen.LOGIN)
+	# The page's submit gate (DFX2's LOGIN; JO's ACCEPT posts whatever the fields hold).
+	if not _client.is_sign_in_submit_enabled(user, pwd):
 		return
+	_signing_in = true
 	_login_button.disabled = true
 	_set_status("Signing in as %s..." % user)
+	# The sign-in page's remembered login, no field clicked: its Login posts the remembered name,
+	# an empty password and the remembered data (engine: LobbyHttpFlow::login_remembered).
+	if pwd.is_empty() and _client.has_remembered_login():
+		_client.login_remembered()
+		return
 	_client.login(user, pwd)
 
 
@@ -707,9 +759,9 @@ func _on_login_succeeded(nwhandle: String) -> void:
 	if not _can_login:
 		return  # the session was reset while the sign-in was in flight
 	_logged_in = true
+	_signing_in = false
 	_login_button.disabled = true
 	_password_edit.clear()
-	set_signed_in_handle(nwhandle)
 	_host_button.disabled = _target == NovaWorldSettings.Target.REAL
 	_rows.clear()
 	_pings.clear()
@@ -722,30 +774,15 @@ func _on_login_succeeded(nwhandle: String) -> void:
 	_set_screen(Screen.LOBBY)
 
 
-# On NovaWorld the account handle IS the in-game callsign: the host rosters
-# the player under the service identity (the NAMEINFO cookie name), and a
-# stock client sends that handle as its ClientAuth NA. Wire-witnessed live
-# 2026-08-31 (stock `na="ljim"` = the host's 0x7B/0x46 roster name); a local
-# callsign would leave the joiner's name-match waiting for a roster row that
-# never exists, parked in the pre-spawn free-cam forever.
-func set_signed_in_handle(nwhandle: String) -> void:
-	if not nwhandle.strip_edges().is_empty():
-		_nw_callsign = nwhandle.strip_edges()
-
-
-# The callsign a join uses: the signed-in NW handle, else the local callsign.
-func join_callsign() -> String:
-	return _nw_callsign if not _nw_callsign.is_empty() else player_name
-
-
 func _on_login_failed(reason: String) -> void:
 	if not _can_login:
 		return  # the reset already reported the session
 	_logged_in = false
+	_signing_in = false
 	_password_edit.clear()
 	_login_button.disabled = false
 	_set_status("Sign-in failed.")
-	_show_message(reason, "Back to Sign In", Callable(self, "_return_to_login"), Screen.LOGIN)
+	_show_message(reason, "Back to Sign In", Callable(self, "_reshow_sign_in"), Screen.LOGIN)
 
 
 # --- Join (ADR 0010 Phase 5) --------------------------------------------
@@ -769,9 +806,6 @@ func _on_join_pressed() -> void:
 	_joining_rid = rid
 	_pending_mission = row.mission_name
 	_pending_expansion = row.exp.strip_edges()
-	# The NW handle when signed in (retail: your account name is your callsign
-	# in NovaWorld games — see set_signed_in_handle); the local callsign otherwise.
-	_pending_player = join_callsign()
 	_set_status("Joining %s..." % row.name)
 	_join_button.disabled = true
 	if _client != null:
@@ -811,21 +845,20 @@ static func _with_tag(text: String, tag: String) -> String:
 
 
 # The NWJoin handshake resolved the host's in-match address. Hand it (with the
-# stashed browse-time mission hint + callsign) to MainGame. The in-match runtime
+# stashed browse-time mission hint) to MainGame, which names the player from the session. The in-match runtime
 # authenticates again, then S2C 0x7B/0x0B owns the actual mission load exactly as
 # for LAN; the lobby hint is never a local-BMS requirement (D-NET-194).
 func _on_joined_game(host: String, port: int, app_id: String, cd_cookie: PackedByteArray) -> void:
 	# A join that resolves after the session was reset has no stash to enter with.
 	if not _logged_in or _suppress_client_messages:
 		return
-	_set_status("Entering %s:%d as %s..." % [host, port, _pending_player])
+	_set_status("Entering %s:%d..." % [host, port])
 	var target := JoinTarget.new()
 	# The NovaWorld connect type the menu picked (the squad talk row's gate).
 	target.network_type = JoinTarget.NETWORK_NOVAWORLD
 	target.host_ip = host
 	target.port = port
 	target.mission = _pending_mission
-	target.player_name = _pending_player
 	# The host registered its expansion as the GSB Exp; the join switches to it
 	# before it dials (the enumeration's SUS2 refines it when it answers).
 	target.expansion = _pending_expansion
@@ -834,6 +867,8 @@ func _on_joined_game(host: String, port: int, app_id: String, cd_cookie: PackedB
 	# CD identity cookie (packed PUB* blob) it validates in the 0x00 JOIN (code 23).
 	target.app_id = app_id
 	target.cd_cookie = cd_cookie
+	# The gate's GLSVSSREQUEST, which the NovaWorld 0x00 JOIN carries last (D-NET-723).
+	target.glsvss_request = _client.get_glsvss_request()
 	# The proxy-assisted join fields (the .joi NI/NP/BK) and the LN lobby number
 	# ride the target so the in-match joiner can install its rendezvous config
 	# and pick the LAN-discovered endpoint over the relay.
@@ -861,9 +896,20 @@ func _on_host_pressed() -> void:
 				"Back to Host Game", Callable(self, "_return_to_host"), Screen.HOST)
 		return
 	_set_status("Starting host...")
+	# Retail's NovaWorld host is its host dialog, the LAN host's MULTI_PLAYER_HOST, whose START
+	# reads the controls back into the process's cfg block before its NovaWorld arm opens the
+	# hosting URL; this page's map picker stands in for that dialog, untouched. It opens on
+	# the block (the populate writes the cap clamped to the screen's into it) and reads back
+	# every control as the mounted menu's screen shows it, so the block keeps game.cfg's words
+	# the screen can show, the session's name among them (no name of the page's own), and
+	# takes the screen's for the rest: a spin's row 0 for a word no row holds, the location
+	# row's own name, with no pb\pbcl.dll PunkBuster's 0 (engine inmatch/host_settings.h
+	# read_untouched_host_dialog carries the witness). The request seeds from the block
+	# (HostSessionConfig), and every mission start applies the block again (engine
+	# inmatch::apply_block_session_settings).
+	GameCfgStore.block().read_untouched_host_dialog(_host_dialog_document())
 	var config := HostSessionConfig.new()
 	config.channel = HostSessionConfig.CHANNEL_NOVAWORLD
-	config.server_name = "%s's Game" % player_name
 	config.mission = mission
 	# The authority plays the starting map's mode: g_GameType comes from the
 	# mission, as the LAN host screen's request derives it.
@@ -884,6 +930,18 @@ func _on_host_pressed() -> void:
 		_on_host_failed("NWEC01")
 		return
 	_client.start_hosting(config.to_session_options())
+
+
+# The mounted menu holding the host dialog (HOST_DIALOG_MENU); null when the mount has
+# none, which leaves only the populate's clamp.
+func _host_dialog_document() -> MnuDocument:
+	if resource_root == null:
+		return null
+	var bytes := resource_root.read_file(HOST_DIALOG_MENU)
+	if bytes.is_empty():
+		return null
+	var doc := MnuDocument.new()
+	return doc if doc.load_from_bytes(bytes) == OK else null
 
 
 # The service accepted the hosting (the session is in state 6): the mission
@@ -938,10 +996,12 @@ func release_client() -> NovaWorldClient:
 
 
 ## The NovaWorld menu's re-entry after a match: the session comes back still
-## verified, leaves its hosting and its play (each statement only from its own
-## states), and the player lands back in the logged-in lobby with the list
-## refreshed -- no reconnect, no sign-in (UI_EnterNovaWorldMenu's chain short-circuits
-## on a live session; docs/net/novaworld-net-re.md).
+## verified and leaves its hosting and its play (each statement only from its own
+## states), with no reconnect (the connect chain returns at once on a live session),
+## and the menu opens its web lobby again as every entry does: the startup URL, whose
+## pages land on the lobby for a login the service remembers, its list loading, or on
+## the sign-in page (the engine's LobbyHttpFlow::enter carries the witness;
+## docs/net/novaworld-net-re.md). A session that is not verified lands on sign-in.
 func adopt_client(client: NovaWorldClient) -> void:
 	if client == null:
 		return
@@ -956,22 +1016,143 @@ func adopt_client(client: NovaWorldClient) -> void:
 			client.get_parent().remove_child(client)
 		add_child(client)
 	_can_login = true
-	_logged_in = client.is_authenticated()
+	_logged_in = false
+	_signing_in = false
 	_wire_client(client)
 	client.stop_hosting()
 	client.stop_playing()
-	_host_button.disabled = not _logged_in or _target == NovaWorldSettings.Target.REAL
+	_host_button.disabled = true
 	_rows.clear()
 	_pings.clear()
-	_browser_loading = _logged_in
+	_browser_loading = false
 	_rebuild_type_filter()
 	_rebuild_view()
-	if not _logged_in:
+	if client.get_state() != NovaWorldClient.STATE_CONNECTED:
 		_return_to_login()
 		return
-	_set_status("Signed in.")
-	_set_screen(Screen.LOBBY)
-	client.refresh_servers()
+	_set_status("Opening NovaWorld...")
+	_set_screen(Screen.CONNECTING)
+	client.open_web_lobby()
+
+
+# The entry's page (the first entry's, which loads behind the sign-in screen,
+# or a re-entry's): the lobby (a login the service remembers; the list loads
+# behind it) or the sign-in page, whose Login posts its form.
+func _on_web_lobby_opened(signed_in: bool, nwhandle: String) -> void:
+	if not _can_login:
+		return  # the session was reset while the entry was in flight
+	if signed_in:
+		_on_login_succeeded(nwhandle)
+		return
+	_logged_in = false
+	_login_button.disabled = false
+	if _screen != Screen.LOGIN:
+		_return_to_login()
+	_apply_remembered_login()
+
+
+# The sign-in page's remembered login (engine: LobbyHttpFlow::remembered_login_name): the name
+# fills the account box, and while the fill stands the password box shows the masked placeholder
+# until a field is clicked (after a LOGIN press, until the home page shows, the name alone); the
+# REMEMBER_LOGIN checkbox shows the state the page's activation set from game.cfg's
+# rememberlogin; then the submit gate.
+func _apply_remembered_login() -> void:
+	if _client == null or _username_edit == null or _password_edit == null:
+		return
+	_remember_login_check.set_pressed_no_signal(_client.is_remember_login_checked())
+	var remembered := _client.get_remembered_login_name()
+	if not remembered.is_empty():
+		_username_edit.text = remembered
+	if _client.has_remembered_login():
+		_password_edit.placeholder_text = "********"
+	_refresh_sign_in_gate()
+
+
+# The REMEMBER_LOGIN checkbox clicked, `checked` its state after the click: the browser state's
+# property and game.cfg's rememberlogin take it (engine: LobbyHttpFlow::store_remember_login); the
+# shell's game.cfg save points write it, and the next sign-in page's fill reads it.
+func _on_remember_login_toggled(checked: bool) -> void:
+	if _client != null:
+		_client.store_remember_login(checked)
+
+
+# A sign-in field clicked: the remembered login's fill clears, then the submit gate (engine:
+# LobbyHttpFlow::clear_remembered_login).
+func _clear_remembered_login() -> void:
+	if _password_edit != null:
+		_password_edit.placeholder_text = ""
+	if _client != null:
+		_client.clear_remembered_login()
+	_refresh_sign_in_gate()
+
+
+# The page's submit gate over the fields as they stand (engine:
+# LobbyHttpFlow::sign_in_submit_enabled), on a connected session's sign-in page; a sign-in in
+# flight keeps Login disabled.
+func _refresh_sign_in_gate() -> void:
+	if _client == null or _login_button == null or not _can_login or _signing_in or _logged_in:
+		return
+	if _client.get_state() != NovaWorldClient.STATE_CONNECTED:
+		return
+	_login_button.disabled = not _client.is_sign_in_submit_enabled(
+			_username_edit.text, _password_edit.text)
+
+
+func _on_username_input(event: InputEvent) -> void:
+	_on_sign_in_field_input(_username_edit, _password_edit, event)
+
+
+func _on_password_input(event: InputEvent) -> void:
+	_on_sign_in_field_input(_password_edit, _username_edit, event)
+
+
+# A sign-in field's input as the page's edit takes it: a left press and its release over the
+# field is a click, which clears the remembered fill (a keystroke does not); Tab moves the
+# keyboard to the partner field (the page's TAB action), with no click.
+func _on_sign_in_field_input(field: LineEdit, partner: LineEdit, event: InputEvent) -> void:
+	var button := event as InputEventMouseButton
+	if button != null and button.button_index == MOUSE_BUTTON_LEFT:
+		if button.pressed:
+			_sign_in_press_field = field
+		else:
+			var over := Rect2(Vector2.ZERO, field.size).has_point(button.position)
+			if _sign_in_press_field == field and over:
+				_clear_remembered_login()
+			_sign_in_press_field = null
+		return
+	var key := event as InputEventKey
+	if key != null and key.pressed and key.keycode == KEY_TAB:
+		partner.grab_focus()
+		field.accept_event()
+
+
+# Enter in a sign-in field (see the wiring in _bind_scene_ui): the field lets the keyboard go,
+# then the page's VK_RETURN hotkey.
+func _on_sign_in_field_submitted(_text: String, field: LineEdit) -> void:
+	field.release_focus()
+	_press_sign_in_submit()
+
+
+# The sign-in page's VK_RETURN hotkey: the submit pressed when the page shows and the submit is
+# enabled (DFX2's LOGIN gate, a sign-in in flight, no session: disabled).
+func _press_sign_in_submit() -> void:
+	if _screen != Screen.LOGIN or not login_enabled():
+		return
+	_on_login_pressed()
+
+
+# Enter with no sign-in field holding the keyboard (a focused field takes its own Enter): the
+# page's VK_RETURN hotkey.
+func _unhandled_key_input(event: InputEvent) -> void:
+	var key := event as InputEventKey
+	if key == null or not key.pressed:
+		return
+	if key.keycode != KEY_ENTER and key.keycode != KEY_KP_ENTER:
+		return
+	if _screen != Screen.LOGIN or not is_visible_in_tree():
+		return
+	get_viewport().set_input_as_handled()
+	_press_sign_in_submit()
 
 
 ## A match that ended with an error text shows it in the NovaWorld error dialog
@@ -1165,6 +1346,10 @@ func host_failed(reason: String) -> void:
 
 
 func _on_close_pressed() -> void:
+	# The player's ESC while the menu waits on the first connect or a play: the client gives
+	# it up with its NWEC (NWEC41 / NWEC47, the play's NWEC03), which this panel shows (D-NET-571).
+	if _client != null and _client.escape_connect():
+		return
 	_closing = true
 	if _client != null:
 		_client.stop()

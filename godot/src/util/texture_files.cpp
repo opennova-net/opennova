@@ -43,6 +43,17 @@ Ref<Texture2D> TextureFiles::load_texture(const String &name, renderer::TextureL
 	return result;
 }
 
+Ref<Image> TextureFiles::load_image_with_mipmaps(const String &name, renderer::TextureLoader loader) const {
+	const String file = name.replace("\\", "/").get_file();
+	if (file.is_empty()) return Ref<Image>();
+	renderer::TextureFileQuery query;
+	query.exists = [this](const std::string &candidate) { return has_(candidate); };
+	return opennova::load_image_with_mipmaps(renderer::texture_load_attempts(loader, to_std(file), query),
+			[this](const renderer::TextureLoad &load) {
+				return load.source == renderer::TextureFileSource::Mounted ? read_(to_gd(load.file)) : PackedByteArray();
+			});
+}
+
 // ResourceRoot::load_material_texture's rule over these files: the texture registered under
 // the row's key (renderer::texture_registry_key), else the one file the row's loader opens and
 // the reader that decodes it (renderer::material_texture_source, as a load:
@@ -69,17 +80,7 @@ Ref<Texture> TextureFiles::material_row_texture_(const String &name, uint8_t typ
 		return cached->second;
 	}
 	const renderer::TextureLoad load = renderer::material_texture_load(source, type);
-	Ref<Texture2D> image;
-	if (load.reader != renderer::TextureReader::None) {
-		const std::string key = "material-image:" + std::to_string(static_cast<int>(load.reader)) + ":" +
-		                        std::to_string(static_cast<int>(load.transform)) + ":" +
-		                        to_std(to_gd(load.file).to_lower());
-		auto cached = cache_.find(key);
-		if (cached == cache_.end())
-			cached = cache_.emplace(key, load_material_image_from_bytes(load, read_(to_gd(load.file)))).first;
-		image = cached->second;
-	}
-	return prepare_material_texture(image, name, type);
+	return make_material_texture(load, [this, &load] { return read_(to_gd(load.file)); }, name, type);
 }
 
 } // namespace opennova

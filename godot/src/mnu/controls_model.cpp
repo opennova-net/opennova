@@ -16,6 +16,10 @@ using namespace godot;
 
 namespace {
 
+// The device id the scripted device's replayed key events carry, so the key queue's
+// scan leaves their rows to the hold (ControlsModel::is_scripted_key_event).
+constexpr int32_t kScriptedKeyDevice = 0x7E5C;
+
 opennova::controls::Device device_of(int p_device) {
 	if (p_device == ControlsModel::DEVICE_MOUSE) {
 		return opennova::controls::Device::Mouse;
@@ -206,15 +210,16 @@ bool ControlsModel::is_token_key_down(const char *p_token) const {
 	const opennova::controls::BindingRecord *r =
 			bindings_.record(bindings_.index_of_token(p_token));
 	if (r == nullptr) return false;
-	Input *input = Input::get_singleton();
-	for (const int vk : {static_cast<int>(r->primary), static_cast<int>(r->secondary)}) {
-		if (vk == 0) continue;
-		const int key = godot_key_from_vk(vk);
-		if (key_reset_.held(vk, input != nullptr && key != 0 &&
-						input->is_physical_key_pressed(static_cast<Key>(key))))
-			return true;
-	}
+	for (const int vk : {static_cast<int>(r->primary), static_cast<int>(r->secondary)})
+		if (vk != 0 && is_key_state_down(vk)) return true;
 	return false;
+}
+
+bool ControlsModel::is_key_state_down(int p_vk) const {
+	Input *input = Input::get_singleton();
+	const int key = godot_key_from_vk(p_vk);
+	return key_reset_.held(p_vk, input != nullptr && key != 0 &&
+			input->is_physical_key_pressed(static_cast<Key>(key)));
 }
 
 void ControlsModel::reset_key_state() {
@@ -230,6 +235,29 @@ void ControlsModel::key_down_event(int p_godot_key) {
 	key_reset_.key_down(vk_from_godot_key(p_godot_key));
 }
 
+int ControlsModel::event_code(int p_scan_code) const {
+	const auto key_down = [this](int vk) { return vk_down_(vk); };
+	// The scan names a catalog index; its dispatch code is the row id's (the port's
+	// catalog leaves row 66 out, so an index past it is not its id).
+	const int index = bindings_.event_row(p_scan_code, key_down);
+	std::size_t count = 0;
+	const opennova::controls::ActionDef *rows = opennova::controls::catalog(&count);
+	return index >= 0 && static_cast<std::size_t>(index) < count
+			? opennova::controls::action_code(rows[index].id)
+			: -1;
+}
+
+bool ControlsModel::event_signed(int p_scan_code) const {
+	const auto key_down = [this](int vk) { return vk_down_(vk); };
+	bool fallback_signed = false;
+	bindings_.event_row(p_scan_code, key_down, &fallback_signed);
+	return fallback_signed;
+}
+
+bool ControlsModel::is_scripted_key_event(const Ref<InputEventKey> &p_event) {
+	return p_event.is_valid() && p_event->get_device() == kScriptedKeyDevice;
+}
+
 void ControlsModel::consume_key_press(int p_vk) {
 	if (p_vk > 0 && p_vk < static_cast<int>(consumed_vks_.size())) consumed_vks_[p_vk] = true;
 }
@@ -242,24 +270,49 @@ void ControlsModel::advance_scripted_input(int64_t p_logic_tick) {
 	const std::vector<int> after = script.held_codes();
 	Input *input = Input::get_singleton();
 	if (input == nullptr) return;
-	const auto replay = [&](int p_code, bool p_pressed) {
+	// The row's bound key (slot 1, else slot 2) with that slot's modifier, as
+	// Godot keys: a keyboard press of a modified binding (Ctrl+1's seat1,
+	// Ctrl+F6's hudcolor) holds the modifier, without which the bare key would
+	// reach the row the key alone binds (the 1's Knife, the F6's huddetail).
+	struct Slot {
+		int key = 0;
+		int mod = 0;
+	};
+	const auto slot_of = [&](int p_code) {
+		Slot slot;
 		const opennova::controls::ActionDef *def = opennova::controls::action_for_code(p_code);
-		if (def == nullptr) return false;
+		if (def == nullptr) return slot;
 		const opennova::controls::BindingRecord *r =
 				bindings_.record(bindings_.index_of_token(def->token));
-		if (r == nullptr) return false;
-		const int key = godot_key_from_vk(r->primary != 0 ? r->primary : r->secondary);
-		if (key == 0) return false;
+		if (r == nullptr) return slot;
+		const bool first = r->primary != 0;
+		slot.key = godot_key_from_vk(first ? r->primary : r->secondary);
+		slot.mod = godot_key_from_vk(first ? r->primary_mod : r->secondary_mod);
+		return slot;
+	};
+	const auto key_event = [input](int p_key, bool p_pressed) {
 		Ref<InputEventKey> event;
 		event.instantiate();
-		event->set_keycode(static_cast<Key>(key));
-		event->set_physical_keycode(static_cast<Key>(key));
+		event->set_device(kScriptedKeyDevice);
+		event->set_keycode(static_cast<Key>(p_key));
+		event->set_physical_keycode(static_cast<Key>(p_key));
 		event->set_pressed(p_pressed);
 		input->parse_input_event(event);
-		return true;
 	};
 	const auto holds = [](const std::vector<int> &p_codes, int p_code) {
 		return std::find(p_codes.begin(), p_codes.end(), p_code) != p_codes.end();
+	};
+	const auto replay = [&](int p_code, bool p_pressed) {
+		const Slot slot = slot_of(p_code);
+		if (slot.key == 0) return false;
+		if (p_pressed && slot.mod != 0) key_event(slot.mod, true);
+		key_event(slot.key, p_pressed);
+		// The modifier comes up with its last scripted row.
+		if (!p_pressed && slot.mod != 0 &&
+				std::none_of(after.begin(), after.end(),
+						[&](int p_held) { return slot_of(p_held).mod == slot.mod; }))
+			key_event(slot.mod, false);
+		return true;
 	};
 	bool replayed = false;
 	for (const int code : after) {
@@ -268,12 +321,64 @@ void ControlsModel::advance_scripted_input(int64_t p_logic_tick) {
 	for (const int code : before) {
 		if (!holds(after, code)) replayed = replay(code, false) || replayed;
 	}
+	// Each typed character arrives as the keystroke onHook's driver hands
+	// retail within the step's tick: the key's press carrying the character
+	// (WM_KEYDOWN, then the WM_CHAR stored into its ring entry), then its
+	// release; an open line's editor takes it through the shell's chat route
+	// (HudChatEntry::key_event -> hud::ChatEntry::key) as the tick's ring
+	// drain hands the editor a capture-mode entry (engine
+	// devtools/scripted_input.h carries the witness). A letter is its own key
+	// (shifted when upper case), backspace and return theirs, any other
+	// printable character the key Godot gives its code.
+	for (const uint8_t character : script.take_chars()) {
+		Key key = static_cast<Key>(character);
+		if (character == 0x08) key = KEY_BACKSPACE;
+		else if (character == 0x0D) key = KEY_ENTER;
+		else if (character >= 'a' && character <= 'z') key = static_cast<Key>(character - 'a' + 'A');
+		for (const bool pressed : {true, false}) {
+			Ref<InputEventKey> event;
+			event.instantiate();
+			event->set_device(kScriptedKeyDevice);
+			event->set_keycode(key);
+			event->set_physical_keycode(key);
+			event->set_shift_pressed(character >= 'A' && character <= 'Z');
+			if (pressed && character >= 0x20) event->set_unicode(character);
+			event->set_pressed(pressed);
+			input->parse_input_event(event);
+		}
+		replayed = true;
+	}
 	// The key state lands now, in step with the held tokens the sample reads
 	// next, not at the next frame's event flush.
 	if (replayed) input->flush_buffered_events();
 }
 
 bool ControlsModel::is_token_pressed(const String &p_token) const {
+	return token_pressed_(p_token, true);
+}
+
+bool ControlsModel::is_token_held_off_keyboard(const String &p_token) const {
+	return token_pressed_(p_token, false, false);
+}
+
+bool ControlsModel::is_token_scripted_left_button(const char *p_token) const {
+	const opennova::controls::BindingRecord *r = bindings_.record(bindings_.index_of_token(p_token));
+	return r != nullptr && r->mouse_mask == opennova::controls::kMouseLeft &&
+			scripted_input_.is_valid() && !bindings_.keyboard_captured() &&
+			scripted_input_->native().token_held(p_token);
+}
+
+int ControlsModel::mouse_click_code(int p_event) const {
+	const auto key_down = [this](int vk) { return vk_down_(vk); };
+	const int index = bindings_.mouse_click_action(static_cast<uint32_t>(p_event), key_down,
+			bindings_.scan_death_screen());
+	std::size_t count = 0;
+	const auto *cat = opennova::controls::catalog(&count);
+	return index >= 0 && static_cast<std::size_t>(index) < count
+			? opennova::controls::action_code(cat[index].id) : -1;
+}
+
+bool ControlsModel::token_pressed_(const String &p_token, bool p_keyboard, bool p_mouse) const {
 	const CharString token = p_token.utf8();
 	const int index = bindings_.index_of_token(token.get_data());
 	const opennova::controls::BindingRecord *r = bindings_.record(index);
@@ -289,7 +394,7 @@ bool ControlsModel::is_token_pressed(const String &p_token) const {
 	if (input == nullptr) {
 		return false;
 	}
-	if (pressed_key_for_token(p_token) != 0) {
+	if (p_keyboard && pressed_key_for_token(p_token) != 0) {
 		return true;
 	}
 	uint16_t held = 0;
@@ -297,7 +402,7 @@ bool ControlsModel::is_token_pressed(const String &p_token) const {
     if (input->is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)) held |= opennova::controls::kMouseRight;
     if (input->is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE)) held |= opennova::controls::kMouseMiddle;
     const auto key_down = [this](int vk) { return vk_down_(vk); };
-    if (bindings_.pressed_mouse(index, held, key_down)) return true;
+    if (p_mouse && bindings_.pressed_mouse(index, held, key_down)) return true;
     // A disabled joystick is never polled (engine BindingSet::set_joystick_enabled).
     if (r->joy_button != 0 && bindings_.joystick_enabled()) {
         const auto devices = input->get_connected_joypads();
@@ -391,7 +496,10 @@ Dictionary ControlsModel::save_blob() const {
 	const opennova::controls::ActionDef *cat = opennova::controls::catalog(&n);
 	for (std::size_t i = 0; i < n; ++i) {
 		const opennova::controls::BindingRecord *r = bindings_.record(static_cast<int>(i));
-		if (r == nullptr || cat[i].token == nullptr) continue;
+		// The rows a player's binding table carries: those whose flags hold 0x4000000 (engine
+		// profile/player_profiles.cpp default_binding_table carries the witness); the cheat
+		// row's token field is its command CRC, no text (engine controls/controls.cpp).
+		if (r == nullptr || cat[i].token == nullptr || (cat[i].flags & 0x4000000u) == 0) continue;
 		PackedInt32Array values;
 		values.push_back(r->primary);
 		values.push_back(r->secondary);
@@ -479,6 +587,10 @@ void ControlsModel::_bind_methods() {
 			&ControlsModel::mouse_mask_from_godot_button);
 	ClassDB::bind_method(D_METHOD("consume_key_press", "vk"), &ControlsModel::consume_key_press);
 	ClassDB::bind_method(D_METHOD("is_vk_down", "vk"), &ControlsModel::is_vk_down);
+	ClassDB::bind_method(D_METHOD("event_code", "scan_code"), &ControlsModel::event_code);
+	ClassDB::bind_method(D_METHOD("event_signed", "scan_code"), &ControlsModel::event_signed);
+	ClassDB::bind_static_method("ControlsModel", D_METHOD("is_scripted_key_event", "event"),
+			&ControlsModel::is_scripted_key_event);
 	ClassDB::bind_method(D_METHOD("reset_key_state"), &ControlsModel::reset_key_state);
 	ClassDB::bind_method(D_METHOD("key_down_event", "key"), &ControlsModel::key_down_event);
 	ClassDB::bind_static_method("ControlsModel",

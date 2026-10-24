@@ -26,6 +26,14 @@ using namespace opennova::crt;
 
 namespace opennova::world {
 
+int32_t death_water_q16(float water_height) {
+    return to_fixed(water_height);
+}
+
+int32_t entity_top_q16(const Entity &e) {
+    return io::bam_add(e.position.z.q16, e.bound_radius.q16);
+}
+
 namespace {
 
 // Authored impact slots use the entity pose; the fallback plays where the
@@ -43,11 +51,18 @@ void wreck_impact_sound(World &world, const Entity &e, const ItemDeathTraits *tr
 }
 
 // The environment water plane (env.water_z, 16.16 — the #265 sound-profile
-// home; 0 = no water authored) as float units [orig: g_EnvWaterHeightFixed
-// @0x26c6454].
+// home) as float units: 0 when no water is authored, the word retail keeps.
+// [orig: Environment_InitDefaults @0x57C010 - the memset @0x57C011..0x57C01E over
+// g_EnvWaterHeightFixed @0x26C6454; its writers TimeOfDay_ParseProperty @0x57CB6A, the float
+// setter @0x57D68F, Terrain_Init's override @0x60FCBA]
 float world_water_z(const World &world) {
-    return world.env.water_z != 0 ? static_cast<float>(world.env.water_z) / io::kFp16One
-                                  : -1.0e9f;
+    return static_cast<float>(world.env.water_z) / io::kFp16One;
+}
+
+// The water plane as the word retail compares against, 0 when none is authored
+// (no dry sentinel). [orig: g_EnvWaterHeightFixed @0x26C6454]
+int32_t world_water_q16(const World &world) {
+    return world.env.water_z;
 }
 
 // The witnessed rol-xor PRNG stream the death paths roll [orig: the inline
@@ -57,15 +72,6 @@ float world_water_z(const World &world) {
 // them for the death pieces (D-ITEM-4). The wreck-fire crackle draws World's
 // stream C instead (World::next_prng16_c).]
 uint16_t death_rand16(World &world) { return world.destruction_rng.next16(); }
-
-// Piece spin rate: max * (rand % 100)/100, floored at min — NOT uniform in
-// [min, max]; a quarter of WHEEL rolls land exactly on the floor. Degrees per
-// tick (retail stores deg * 2^32/360 as BAM32/tick). [orig: @ 0x57b940]
-float spin_rate_roll(World &world, const DeathPieceType &tp) {
-    const float t = static_cast<float>(death_rand16(world) % 100) * 0.01f;
-    const float v = tp.spin_max * t;
-    return v < tp.spin_min ? tp.spin_min : v;
-}
 
 // The BAM32/tick spin rate the aircraft death initializer stores directly, in
 // the retail evaluation order: floor = ftol(min * 11930464.0f); r = PRNG % 100;
@@ -115,29 +121,20 @@ constexpr int32_t kPiecePhysicsYawStepBam = 0x02D82D82;
 constexpr int32_t kPiecePitchSnapThresholdBam = 0x02D82D80;
 constexpr int32_t kPiecePitchStepBam = 0x016C16C0;
 
-int32_t death_water_q16(float water_height) {
-    return water_height <= -1.0e8f ? INT32_MIN : to_fixed(water_height);
-}
-
-int16_t death_angle_degrees_from_bam(int32_t bam) {
-    return static_cast<int16_t>(std::lround(double(bam) * kDegreesPerBam));
-}
-
 void seed_piece_physics_angles(Entity &entity) {
     Entity::VehicleMotorState &motion = entity.veh;
     if (motion.yaw_seeded) return;
-    motion.yaw_bam = spawn_angle_bam(90 - entity.yaw);
-    motion.air_pitch_bam = spawn_angle_bam(entity.pitch);
-    motion.air_roll_bam = spawn_angle_bam(entity.roll);
+    motion.yaw_bam = entity.heading;
+    motion.air_pitch_bam = entity.pitch_bam;
+    motion.air_roll_bam = entity.roll_bam;
     motion.yaw_seeded = true;
 }
 
 void publish_piece_physics_angles(Entity &entity) {
     const Entity::VehicleMotorState &motion = entity.veh;
-    entity.yaw = static_cast<int16_t>(std::lround(
-            mission_yaw_deg_from_bam_heading(motion.yaw_bam)));
-    entity.pitch = death_angle_degrees_from_bam(motion.air_pitch_bam);
-    entity.roll = death_angle_degrees_from_bam(motion.air_roll_bam);
+    entity.heading = motion.yaw_bam;
+    entity.pitch_bam = motion.air_pitch_bam;
+    entity.roll_bam = motion.air_roll_bam;
 }
 
 // Entity_RaycastGroundHeight @0x4142c0 casts a short vertical segment from
@@ -153,10 +150,8 @@ int32_t piece_physics_ground_probe_q16(
     if (terrain == nullptr || !terrain->valid()) return end_z;
     const int32_t query_x = io::bam_add(entity_x_q16, offset_x_q16);
     const int32_t query_y = io::bam_add(entity_y_q16, offset_y_q16);
-    const int32_t terrain_z = to_fixed(
-            terrain::height_field_height_mission_bilinear(
-                    *terrain, static_cast<float>(from_fixed(query_x)),
-                    static_cast<float>(from_fixed(query_y))));
+    const int32_t terrain_z =
+            terrain::height_field_height_bilinear_fixed(*terrain, query_x, query_y);
     return terrain_z <= start_z && terrain_z >= end_z ? terrain_z : end_z;
 }
 
@@ -245,14 +240,11 @@ void queue_named_landing_blast(World &world, const Entity &entity,
     blast.hit_word = 1;
     blast.pos = entity.position;
     blast.radius_override = radius;
-    world.explosions.queue_explosion(world, blast);
+    // The gated entry [orig: WeaponEffect_QueueExplosion @0x4E8330, from
+    //  DeathPiece_PhysicsUpdate @0x48F6FE / @0x48F71E, Entity_InitDeathState
+    //  @0x48F864, Entity_UpdateFallingDeathPhysics @0x494209].
+    world.explosions.queue_explosion_on_authority(world, blast);
 }
-
-float vec_len(const Vec3 &v) {
-    return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
-}
-
-Vec3 vec_sub(const Vec3 &a, const Vec3 &b) { return Vec3{a.x - b.x, a.y - b.y, a.z - b.z}; }
 
 // Retail uses the entity's complete placement matrix for model-local death
 // anchors: Rz(90-yaw) * Ry(-pitch) * Rx(roll).  Reuse the same Q22 builder
@@ -261,9 +253,9 @@ Vec3 vec_sub(const Vec3 &a, const Vec3 &b) { return Vec3{a.x - b.x, a.y - b.y, a
 CollisionMatrix destruction_orientation(const Entity &target) {
     const int32_t origin[3] = {0, 0, 0};
     return collision_matrix_from_euler(
-            bam_heading_from_mission_yaw_deg(static_cast<double>(target.yaw)),
-            bam_from_degrees_wrapped(static_cast<double>(target.pitch)),
-            bam_from_degrees_wrapped(static_cast<double>(target.roll)), origin);
+            target.heading,
+            target.pitch_bam,
+            target.roll_bam, origin);
 }
 
 Vec3 rotate_authored_point(const CollisionMatrix &orientation, const Vec3 &point) {
@@ -275,15 +267,17 @@ Vec3 rotate_authored_point(const CollisionMatrix &orientation, const Vec3 &point
                 rotated[2] * io::kInvFp16One};
 }
 
-// LOS between two points: collision-world walk when available (terrain +
-// pools), else the terrain leg alone; no data -> clear. Endpoints carry the
-// witnessed +0.25 u lift [orig: the +0x4000 z adds @ 0x4eb4ca..0x4eb4f6].
+// LOS between two word points: collision-world walk when available (terrain +
+// pools), else the terrain leg alone; no data -> clear. The callers pass the
+// words retail builds: pool 0 the victim's and the entry's Position words raw
+// with a -0x4000 height offset (-0x2000 for the knife), pool 1 both Z words
+// lifted 0x4000 with -0x4000 (D-NET-507). [orig: Projectile_ProcessExplosionQueue
+// @0x4EAD80 - pool 0 @0x4EB0A8..0x4EB0D7, @0x4EB138, the call @0x4EB162; pool 1
+// @0x4EB479..0x4EB4C3, the call @0x4EB4CA]
 bool blast_los_clear(World &world, CollisionWorld *collision,
                      const terrain::TerrainHeightField *terrain,
-                     const Vec3 &from, const Vec3 &to,
-                     EntityHandle endpoint, float z_bias, bool query_parent_cleared) {
-    const int32_t a[3] = {to_fixed(from.x), to_fixed(from.y), to_fixed(from.z + z_bias)};
-    const int32_t b[3] = {to_fixed(to.x), to_fixed(to.y), to_fixed(to.z + z_bias)};
+                     const int32_t a[3], const int32_t b[3],
+                     EntityHandle endpoint, int32_t height_offset, bool query_parent_cleared) {
     if (collision != nullptr) {
         const CollisionWorld::RayDebugScope ray_scope(
                 collision, CollisionWorld::RayDebugCategory::kExplosionLos);
@@ -295,19 +289,19 @@ bool blast_los_clear(World &world, CollisionWorld *collision,
         // just below terrain remains reachable. The pool-0 leg also nulls the
         // victim's parentEntity around the call (@0x4eb158/@0x4eb16c).
         // [orig: Projectile_ProcessExplosionQueue @ 0x4EAD80, calls @ 0x4EB162/0x4EB4CA]
-        return collision->entity_los_clear(world, endpoint, {}, a, b, -0x4000,
+        return collision->entity_los_clear(world, endpoint, {}, a, b, height_offset,
                                            /*all_types=*/true, query_parent_cleared);
     }
     if (terrain != nullptr && terrain->valid()) {
-        // The same null-entity terrain leg when no collision device is bound.
+        // The same null-entity terrain leg when no collision device is bound:
+        // the ray rides the height offset's negation above the points.
         // [orig: Physics_CheckTerrainLineOfSight @ 0x53B080]
         const auto buried = [&](const int32_t p[3]) {
-            return to_fixed(terrain::height_field_height_mission_bilinear(*terrain,
-                    p[0] * io::kInvFp16One, p[1] * io::kInvFp16One)) > p[2];
+            return terrain::height_field_height_bilinear_fixed(*terrain, p[0], p[1]) > p[2];
         };
         if (buried(a) || buried(b)) return true;
-        const int32_t raised_a[3] = {a[0], a[1], a[2] + 0x4000};
-        const int32_t raised_b[3] = {b[0], b[1], b[2] + 0x4000};
+        const int32_t raised_a[3] = {a[0], a[1], io::bam_sub(a[2], height_offset)};
+        const int32_t raised_b[3] = {b[0], b[1], io::bam_sub(b[2], height_offset)};
         return !los_terrain_blocked(*terrain, raised_a, raised_b);
     }
     return true;
@@ -347,10 +341,11 @@ bool runs_tree_death_body(const World &world, const Entity &target) {
 // so a victim at the exact antipode (delta 0x80000000, whose abs stays
 // INT_MIN) passes even the narrowest cone, and a negative half-angle rejects
 // every other bearing.
-bool cone_compare(const ExplosionEntry &e, int32_t cone_half_bam, const Vec3 &to_target) {
+// The bearing takes the victim's word deltas, each fild exactly (D-NET-507)
+// [orig: `fild var_A8; fild var_A4; fpatan; fmul dbl_7C19D8` @0x4EAFD9..0x4EAFE3].
+bool cone_compare(const ExplosionEntry &e, int32_t cone_half_bam, int32_t dx, int32_t dy) {
     const int64_t scaled = static_cast<int64_t>(
-            std::atan2(static_cast<double>(to_target.y), static_cast<double>(to_target.x)) *
-            io::kBamPerRadian);
+            std::atan2(static_cast<double>(dy), static_cast<double>(dx)) * io::kBamPerRadian);
     const uint32_t ang = static_cast<uint32_t>(scaled);
     const int32_t diff = static_cast<int32_t>(ang - static_cast<uint32_t>(e.dir_bam));
     const int32_t sign = diff < 0 ? -1 : 0;
@@ -362,18 +357,85 @@ bool cone_compare(const ExplosionEntry &e, int32_t cone_half_bam, const Vec3 &to
 
 // The gate every type but the knife runs: a zero half-angle passes every
 // bearing [orig: pool 0 `cmp [esp+0C0h+var_98], 0; jz` @0x4EAFD2..0x4EAFD7].
-bool cone_gate(const ExplosionEntry &e, int32_t cone_half_bam, const Vec3 &to_target) {
+bool cone_gate(const ExplosionEntry &e, int32_t cone_half_bam, int32_t dx, int32_t dy) {
     if (cone_half_bam == 0) return true;
-    return cone_compare(e, cone_half_bam, to_target);
+    return cone_compare(e, cone_half_bam, dx, dy);
+}
+
+// A victim's sweep words: its word deltas from the entry (victim less entry,
+// wrapping), each made absolute (`cdq; xor; sub`) and tested against the reach
+// word, then the x87 length saturated at flt_7C19E0 and truncated against it
+// (D-NET-507). [orig: Projectile_ProcessExplosionQueue @0x4EAD80 - pool 0
+//  @0x4EAF29..0x4EAFA2, pool 1 @0x4EB3CD..0x4EB44F, pool 2 @0x4EB604..0x4EB690]
+struct SweepWords {
+    int32_t dx = 0, dy = 0, dz = 0;
+    int32_t length = 0;
+};
+int32_t fixed_distance(const EntityPosition &a, const EntityPosition &b);
+int32_t x87_length(int32_t dx, int32_t dy, int32_t dz);
+bool sweep_within(const Entity &t, const ExplosionEntry &e, int32_t reach, SweepWords &out) {
+    out.dx = io::bam_sub(t.position.x.q16, e.pos.x.q16);
+    out.dy = io::bam_sub(t.position.y.q16, e.pos.y.q16);
+    out.dz = io::bam_sub(t.position.z.q16, e.pos.z.q16);
+    if (io::bam_abs(out.dx) > reach || io::bam_abs(out.dy) > reach || io::bam_abs(out.dz) > reach)
+        return false;
+    out.length = fixed_distance(t.position, e.pos);
+    return out.length <= reach;
+}
+
+// Pool 2's distance from the entry to the victim's model box, the graphic
+// model's +0x18 (X/Y) and +0x1C (Z) half-extents about the Position words: per
+// axis the entry's overshoot past the near face (wrapping words, 0 inside),
+// each held to the radius word, then their saturated truncated x87 length,
+// held to it too (the bound sphere is not this leg's surface). Both extents
+// are 0 for every 3DI3 model (ItemDeathTraits::model_radius_xy_q16 / _z_q16),
+// so the box is the Position point. [orig: Projectile_ProcessExplosionQueue
+// @0x4EAD80 - the extents `mov edx, [ebp+1Ch]` @0x4EB6FD / `mov eax, [ebp+18h]`
+// @0x4EB700, the box @0x4EB6FD..0x4EB7AE, the length @0x4EB7B4..0x4EB7EA]
+bool pool2_box_distance(const Entity &t, const ExplosionEntry &e, const SweepWords &sw,
+                        int32_t half_xy, int32_t half_z, int32_t radius, int32_t &out) {
+    const auto axis = [&](int32_t victim, int32_t entry, int32_t victim_less_entry,
+                          int32_t half) {
+        int32_t d = 0;
+        if (entry > io::bam_add(victim, half))
+            d = io::bam_sub(io::bam_sub(entry, victim), half); // @0x4EB70E..0x4EB724
+        if (entry < io::bam_sub(victim, half))
+            d = io::bam_sub(victim_less_entry, half); // @0x4EB728..0x4EB734
+        return d;
+    };
+    const int32_t dx = axis(t.position.x.q16, e.pos.x.q16, sw.dx, half_xy);
+    if (dx > radius) return false; // @0x4EB738..0x4EB73C
+    const int32_t dy = axis(t.position.y.q16, e.pos.y.q16, sw.dy, half_xy);
+    if (dy > radius) return false; // @0x4EB76F..0x4EB773
+    const int32_t dz = axis(t.position.z.q16, e.pos.z.q16, sw.dz, half_z);
+    if (dz > radius) return false; // @0x4EB7AA..0x4EB7AE
+    out = x87_length(dx, dy, dz);
+    return out <= radius; // @0x4EB7E6..0x4EB7EA
+}
+
+// The victim's distance to the blast past its bound word, a signed subtract
+// floored at 0 (`sub; jns`). [orig: pool 0 @0x4EB03C..0x4EB042, pool 1
+// @0x4EB56F..0x4EB577]
+int32_t sweep_surface(int32_t length, int32_t bound) {
+    const int32_t surface = io::bam_sub(length, bound);
+    return surface < 0 ? 0 : surface;
 }
 
 // The fixed-point length of a victim's offset: the fixed deltas' length,
 // capped at 2147418112.0 and truncated [orig: pool 0 @0x4EAF66..0x4EAF97,
 // flt_7C19E0, _ftol2_sse].
-int32_t fixed_distance(const Vec3 &a, const Vec3 &b) {
-    const double dx = double(int32_t(uint32_t(to_fixed(a.x)) - uint32_t(to_fixed(b.x))));
-    const double dy = double(int32_t(uint32_t(to_fixed(a.y)) - uint32_t(to_fixed(b.y))));
-    const double dz = double(int32_t(uint32_t(to_fixed(a.z)) - uint32_t(to_fixed(b.z))));
+int32_t fixed_distance(const EntityPosition &a, const EntityPosition &b) {
+    return x87_length(io::bam_sub(a.x.q16, b.x.q16), io::bam_sub(a.y.q16, b.y.q16),
+                      io::bam_sub(a.z.q16, b.z.q16));
+}
+
+// The three words' x87 length, (dx^2 + dy^2) + dz^2, saturated at flt_7C19E0
+// and truncated [orig: pool 0 @0x4EAF66..0x4EAF97; pool 2's box length
+// @0x4EB7B4..0x4EB7DF].
+int32_t x87_length(int32_t dx_word, int32_t dy_word, int32_t dz_word) {
+    const double dx = double(dx_word);
+    const double dy = double(dy_word);
+    const double dz = double(dz_word);
     double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
     if (dist > 2147418112.0) dist = 2147418112.0;
     return io::retail_ftol_sse2(dist);
@@ -394,39 +456,79 @@ void apply_item_blast_damage(World &world, Entity &target, int32_t damage,
     else
         target.health = 0;
     // deathCallback(entity, 2, 0) — the explosion-hit notify [orig: @ 0x4e6f93].
+    const EntityHandle victim = target.handle; // a device's event may remove the item
     destruction_notify_item_damage(world, target, 2, {0, damage});
     if (target.health <= 0 && before > 0) {
-        // Score_ProcessKillEvent equivalence: stage the death for the host's
-        // kill routing (scoring + broadcasts) [orig: @ 0x4e6fb4].
+        // The kill scores here, at once, after the callback, crediting +0x178 as the
+        // callback left it; an item the callback removed scores nothing (its zeroed
+        // words in retail). The record stages the death for the host's broadcasts.
+        // [orig: Entity_ApplyWeaponDamage @0x4E6820 - Health <= 0 @0x4E6F98, before > 0
+        //  @0x4E6FA2, +0x178 @0x4E6FA9, the Score_ProcessKillEvent call @0x4E6FB4]
+        if (const Entity *still = world.registry.get(victim))
+            world.match.process_kill_event(world, still->last_attacker, victim);
         RoundDeath d;
-        d.victim = target.handle;
+        d.victim = victim;
         d.killer = attacker;
-        d.victim_handle = target.handle.packed;
+        d.victim_handle = victim.packed;
         d.killer_handle = attacker.packed;
         d.ammo_index = ammo_index;
-        // [orig: Entity_ApplyWeaponDamage @0x4E6820 (the Score_ProcessKillEvent
-        // call @0x4E6FB4)]
-        d.kill_event = true;
         world.round_sim.deaths.push_back(d);
     }
 }
 
 // The per-victim callback a queue entry's type installs [orig: the jumptable
-// @ 0x4eadc6 targets — Entity_ApplyWeaponDamage, Entity_ApplyVehicleCollisionDamage,
-// nullsub_91].
-enum class KillZoneCallback : uint8_t { None, WeaponDamage, Melee };
+// @ 0x4eadc6 targets — Entity_ApplyWeaponDamage, Entity_ApplyKnifeKillZoneDamage,
+// GameEvent_HandleMedicInteraction, nullsub_91].
+enum class KillZoneCallback : uint8_t { None, WeaponDamage, Melee, Medic };
+
+// The kz-type-3 callback for one pool-0 victim: a person that is not the
+// healer, a live healer, the same team; a DEAD victim not already being revived
+// is revived, a live one below its max health healed. The max is the def hp:
+// the difficulty scaling touches only the local player outside a network
+// session, where GameEvent_HealPlayer never finds the second player slot it
+// needs. The authority's host session runs each transaction here, in the
+// queue, ahead of the pool-0 walk (a heal closes a death edge its walk would
+// raise); a world it does not drive keeps the interaction for the host's drain.
+// [orig: GameEvent_HandleMedicInteraction @0x4E6790 - the victim's def type 3
+//  @0x4E679C, the healer (entry+0x20) @0x4E67A3, the gates @0x4E67A6..0x4E67BD,
+//  the dead arm @0x4E67C2..0x4E67D8, the live arm @0x4E67E3..0x4E6805;
+//  Entity_GetMaxHealthWithDifficulty @0x43B8A0, the session and local-player
+//  tests @0x43B8AD..0x43B8C6]
+void medic_interaction_callback(World &world, Entity &target, const ExplosionEntry &e) {
+    if (target.item_type != 3) return;
+    const Entity *healer = world.registry.get(e.owner);
+    if (healer == nullptr || healer == &target || (healer->flags & kEntityFlagDead) != 0u ||
+            healer->team != target.team)
+        return;
+    MedicInteraction interaction{target.handle, healer->handle, false};
+    if ((target.flags & kEntityFlagDead) != 0u) {
+        if (target.medic_reviving) return;
+        interaction.revive = true;
+    } else if (retail_signed_i16(target.health) >= retail_signed_i16(target.health_max)) {
+        return;
+    }
+    // Both arms act on the authority alone: a peer's own kit entry (queued on
+    // every peer) revives and heals nothing [orig: GameEvent_HandleMedicInteraction
+    //  @0x4E6790 - `cmp g_NapiNPCtx.is_authority` @0x4E67CD / `jz` @0x4E67D4 (the
+    //  dead arm), @0x4E67F7 / @0x4E67FE (the live arm)].
+    if (!world.ai.is_authority) return;
+    if (world.entity_update_transactions != nullptr)
+        world.entity_update_transactions->medic_interaction(world, interaction);
+    else
+        world.round_sim.medic_interactions.push_back(interaction);
+}
 
 // The ammo's kill-zone damage as the drain and its callbacks read it: the
 // kz_damage word off-session or on the session authority, 0 on a session
-// peer [orig: Entity_GetNetIdIfAuthority @ 0x4E4010 — an IDB misnomer; it
-// returns word +0x2E @0x4E4029].
+// peer [orig: AmmoDef_GetKzDamageIfAuthority @ 0x4E4010, which returns word
+// +0x2E @0x4E4029].
 int32_t kz_damage_if_authority(const World &world, const AmmoTableEntry &ammo) {
     if (world.rules.mp_session && !world.rules.logic_authority) return 0;
     return ammo.kz_damage;
 }
 
 // The kind-1 (knife) kill-zone callback for one victim [orig:
-// Entity_ApplyVehicleCollisionDamage @ 0x4E6620]. Only a live, non-immune
+// Entity_ApplyKnifeKillZoneDamage @ 0x4E6620]. Only a live, non-immune
 // person other than the source takes it; it deals the ammo's kz_damage in
 // full (no falloff, armor, occupant or NoDie term), latches the knife cause
 // bit and notifies the class callback with event 3.
@@ -438,9 +540,9 @@ void entity_apply_melee_damage(World &world, Entity &target, const ExplosionEntr
     // The approach quadrant from the victim toward the entry point.
     // [orig: @0x4E666A..0x4E66B1 — the fpatan @0x4E668D; the shift @0x4E6725]
     const int quadrant = approach_quadrant(
-            bam_heading_from_mission_yaw_deg(static_cast<double>(target.yaw)),
-            io::bam_sub(to_fixed(e.pos.x), to_fixed(target.position.x)),
-            io::bam_sub(to_fixed(e.pos.y), to_fixed(target.position.y)),
+            target.heading,
+            io::bam_sub(e.pos.x.q16, target.position.x.q16),
+            io::bam_sub(e.pos.y.q16, target.position.y.q16),
             kCollisionQuadrantBias);
     const int32_t before = target.health;
     if (before <= 0) return; // [orig: `test bp, bp; jle` @0x4E66B7..0x4E66BE]
@@ -454,41 +556,42 @@ void entity_apply_melee_damage(World &world, Entity &target, const ExplosionEntr
     target.death_anim_state = compute_death_anim_state(
             kCollisionDeathBone, quadrant, kCollisionDeathCause); // [orig: @0x4E674C]
     target.cause_flags |= kDamageFlagCollision; // [orig: @0x4E6740]
-    // deathCallback(target, 3, 0) [orig: @0x4E6752]: the person callbacks
-    // take event 3 like the blast's event 2, except that the plyr body keeps
-    // its cause bits (3 is in the no-clear set) and only re-arms its think
-    // before its waypoint tail [orig: Entity_HandleDamageAndTriggerZones
-    //  @0x407B3B..0x407B4F, @0x407B5E, the tail @0x407B64..0x407C6B]. The AI
-    // reaction rides the RoundHit drain, as for a blast.
+    // deathCallback(target, 3, 0) for every victim, no null test [orig: the event word
+    // @0x4E673A, the call @0x4E6752]: a player body runs its bound row's callback
+    // (player_body_row_event, D-NET-348): the plyr body keeps its cause bits (3 is in the
+    // no-clear set), runs its health tail and re-arms its think before its waypoint tail [orig:
+    // Entity_HandleDamageAndTriggerZones @0x407B3B..0x407B4F, @0x407B5E, the tail
+    // @0x407B64..0x407C6B]; an NPC the organic class's, its think re-armed at 62
+    // (person_class_event). The AI reaction rides the RoundHit drain, as for a blast.
     world.round_sim.hits.push_back(RoundHit{target.handle, target.last_attacker, damage});
-    if ((flags & kEntityFlagPlayer) != 0) {
-        target.spawn_phase = 64;
-        player_body_waypoint_visits(world, target);
-    }
+    const EntityHandle victim = target.handle; // a device row's event may remove the body
+    person_class_event(world, target, 3);
     if (collision_kill_fires(before, target.health)) {
-        // The kill event credits the entry's source itself, not the walk
-        // [orig: `mov edx, [ebx+20h]` @0x4E676A -> Score_ProcessKillEvent
-        //  @0x4E6773].
+        // The kill scores here, at once, after the event-3 callback, and credits the
+        // entry's source itself, not the walk; a body the callback removed scores
+        // nothing (its zeroed def word in retail)
+        // [orig: Entity_ApplyKnifeKillZoneDamage @0x4E6620 - the Health re-read
+        //  @0x4E6757, before > 0 @0x4E6761, `mov edx, [ebx+20h]` @0x4E676A, the
+        //  Score_ProcessKillEvent call @0x4E6773].
+        world.match.process_kill_event(world, e.owner, victim);
         RoundDeath d;
-        d.victim = target.handle;
+        d.victim = victim;
         d.killer = e.owner;
-        d.victim_handle = target.handle.packed;
+        d.victim_handle = victim.packed;
         d.killer_handle = e.owner.packed;
         d.ammo_index = e.ammo_index;
         d.event_flags = target.cause_flags & 0xF00u;
-        // [orig: Entity_ApplyVehicleCollisionDamage @0x4E6620 (the
-        // Score_ProcessKillEvent call @0x4E6773)]
-        d.kill_event = true;
         world.round_sim.deaths.push_back(d);
     }
 }
 
 // The AoE damage applicator for one victim [orig: Entity_ApplyWeaponDamage
-// @ 0x4e6820]. `distance` is the surface distance (center distance minus the
-// victim's bound radius, clamped at 0 by the caller), `blast_radius` the
-// resolved radius.
+// @ 0x4e6820]. `d16` is the surface distance word (the center length less the
+// victim's bound word, floored at 0 by the sweep), `blast16` the resolved
+// radius word, the two dwords the sweep pushes (D-NET-507) [orig: `push var_AC;
+// push var_B0` @0x4EB306..0x4EB30F].
 void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity &target, const ExplosionEntry &e,
-                                float distance, float blast_radius) {
+                                int32_t d16, int32_t blast16) {
     if ((target.engine_flags & kEntityFlagDead) != 0) return; // [orig: Flags & 2 @ 0x4e682e]
     const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
     // In a session only the authority applies blast damage, and a Building
@@ -523,10 +626,8 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
     // Linear falloff from kz_minradius to the blast radius in 16.16: the fraction
     // is a truncating Q16 quotient and the multiply rounds at 0x8000; type 4
     // (radius blast / direct hit) skips it [orig: @ 0x4e6943-0x4e699c].
-    const int32_t d16 = to_fixed(distance);
     if (e.type != ammo_kz::kRadiusBlast) {
         const int32_t min16 = to_fixed(ammo->kz_minradius);
-        const int32_t blast16 = to_fixed(blast_radius);
         if (d16 > min16 && blast16 - min16 > 0) {
             const int32_t t16 = static_cast<int32_t>(
                     (static_cast<int64_t>(d16 - min16) << 16) / (blast16 - min16));
@@ -537,8 +638,8 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
     // Blast armor class gate [orig: @ 0x4e69b0 — ammo penetration_kz (+200)
     // must reach def+0x192].
     if (traits != nullptr && ammo->penetration_kz < traits->armor_blast) damage = 0;
-    // The damage-disabled word (entity+0x124: a player's spawn protection or
-    // dead latch, a death piece's -1) zeroes the damage [orig: `cmp dword ptr
+    // The damage-disabled word (entity+0x124: a player's spawn protection, a
+    // spectator's -1, a death piece's -1) zeroes the damage [orig: `cmp dword ptr
     // [esi+124h], 0` @ 0x4e69b8..0x4e69c3].
     if (target.damage_state != 0) damage = 0;
     // A vehicle's occupants reduce what reaches its hull; dfx2.exe's twin has
@@ -570,10 +671,10 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
         // point, biased by 0x1FFFFFFF, so a blast in front is quadrant 0
         // [orig: the entry-minus-target fpatan @ 0x4e6a07..0x4e6a2e,
         //  `add ecx, 1FFFFFFFh; shr ecx, 1Eh` @ 0x4e6a58..0x4e6a5e].
-        const int32_t heading_bam = bam_heading_from_mission_yaw_deg(target.yaw);
+        const int32_t heading_bam = target.heading;
         const int quadrant = approach_quadrant(heading_bam,
-                io::bam_sub(to_fixed(e.pos.x), to_fixed(target.position.x)),
-                io::bam_sub(to_fixed(e.pos.y), to_fixed(target.position.y)), 0x1FFFFFFFu);
+                io::bam_sub(e.pos.x.q16, target.position.x.q16),
+                io::bam_sub(e.pos.y.q16, target.position.y.q16), 0x1FFFFFFFu);
         int cause = death_cause::kExplosive;
         if (d16 >= 0x40000 && d16 < 0x80000)
             cause = (death_rand16(world) < 0x4000) ? death_cause::kFire : death_cause::kExplosive;
@@ -585,46 +686,56 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
             else
                 target.health = 0;
             target.last_attacker = attacker; // [orig: +0x178 @ 0x4e6b11]
+            body_trace_blast(world, target, e.type, attacker, e.pos.words().data(), damage,
+                    before); // the readout (body_trace.h)
             target.death_anim_state = compute_death_anim_state(1, quadrant, cause);
             // The processed hit feeds the AI reaction stamps, like a round hit
             // [orig: the deathCallback(2) notify @ 0x4e6b72].
             world.round_sim.hits.push_back(RoundHit{target.handle, attacker, damage});
-            // That notify is the class callback with event 2: on a live PLAYER
-            // body the plyr callback clears the kill-cause bits 8..11 (a
-            // latched head-shot bit does not survive a blast, so a blast kill
-            // routes as an ordinary death), re-arms the 64-tick think and runs
-            // its waypoint tail
-            // [orig: Entity_HandleDamageAndTriggerZones @0x40772f dead return;
+            // That notify is the class callback with event 2, for every person it
+            // reaches (person_class_event: a player body's bound row's,
+            // player_body_row_event; an NPC the organic class's, its think
+            // re-armed at 62): on a live plyr-row PLAYER
+            // body the plyr callback runs its health tail, clears the kill-cause
+            // bits 8..11 (a latched head-shot bit does not survive a blast, so
+            // a blast kill routes as an ordinary death), re-arms the 64-tick
+            // think and runs its waypoint tail
+            // [orig: Entity_ApplyWeaponDamage @0x4E6820 (`mov eax, [esi+1C8h]`
+            //  @0x4E6B63, the call @0x4E6B72);
+            //  Entity_HandleDamageAndTriggerZones @0x40772f dead return;
             //  @0x407b4d..0x407b4f clear; @0x407b5e / @0x407c71 re-arm; the
             //  tail @0x407B64..0x407C6B].
-            if (((target.flags | target.engine_flags) & kEntityFlagPlayer) != 0) {
-                player_body_class_think(target);
-                player_body_waypoint_visits(world, target);
-            }
+            const EntityHandle victim = target.handle; // a device row's event may remove the body
+            person_class_event(world, target, 2);
             // Right after that notify, a blast on the LOCAL player arms the red
             // damage vignette + the camera shake and the radar blip, unless the
             // record's kz type is 3 (the medic heal); the source is the entry's
             // entity (+0x20), the blip point the entry's position (+0x00)
             // [orig: @0x4e6b77..0x4e6b8a -> Player_OnDamageReceived @0x4dd880].
             if (target.handle == world.cached.local_player && e.type != ammo_kz::kMedic) {
-                const int32_t blast[3] = {to_fixed(e.pos.x), to_fixed(e.pos.y), to_fixed(e.pos.z)};
+                const int32_t blast[3] = {e.pos.x.q16, e.pos.y.q16, e.pos.z.q16};
                 player_on_damage_received(world, radar_entity_source(world, e.owner), blast);
             }
             if (target.health <= 0 && before > 0) {
                 world.script.relations.group(target.group_id).alert = TriggerRelations::kAlertRed;
+                // The kill scores here, at once, after the class callback: the
+                // dead-source walk runs again into +0x178 and the kill credits
+                // it; a body the callback removed scores nothing (its zeroed
+                // def word in retail). The death edge's scorer reads the cause
+                // word as this blast's callback left it.
+                // [orig: Entity_ApplyWeaponDamage @0x4E6820 - the callback
+                //  @0x4E6B72, Health <= 0 @0x4E6B92, before > 0 @0x4E6B9C, the
+                //  walk @0x4E6BA0..0x4E6BE1, the Score_ProcessKillEvent call
+                //  @0x4E6BFE over +0x178 @0x4E6BF0]
+                target.last_attacker = resolve_attacker_chain(world, e.owner);
+                world.match.process_kill_event(world, target.last_attacker, victim);
                 RoundDeath d;
-                d.victim = target.handle;
-                d.killer = attacker;
-                d.victim_handle = target.handle.packed;
-                d.killer_handle = attacker.packed;
+                d.victim = victim;
+                d.killer = target.last_attacker;
+                d.victim_handle = victim.packed;
+                d.killer_handle = target.last_attacker.packed;
                 d.ammo_index = e.ammo_index;
-                // The kill accounting runs here, and the death edge's scorer
-                // reads the cause word as this blast's class callback left it
-                // [orig: Entity_ApplyWeaponDamage @0x4E6820 (the class
-                // callback call @0x4E6B72, the Score_ProcessKillEvent call
-                // @0x4E6BFE)].
                 d.event_flags = target.cause_flags & 0xF00u;
-                d.kill_event = true;
                 world.round_sim.deaths.push_back(d);
             }
         }
@@ -642,8 +753,8 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
         const CollisionModel *model = collision->model(collision->entity_model_id(target.handle));
         CollisionMatrix matrix;
         if (model != nullptr && collision->entity_section_matrix(world, target.handle, 0, matrix)) {
-            const int32_t center[3] = {to_fixed(e.pos.x), to_fixed(e.pos.y), to_fixed(e.pos.z)};
-            const int32_t radius = to_fixed(blast_radius);
+            const int32_t center[3] = {e.pos.x.q16, e.pos.y.q16, e.pos.z.q16};
+            const int32_t radius = blast16;
             for (size_t i = 0; i < model->sections.size(); ++i) {
                 const CollisionSection &section = model->sections[i];
                 if (!collision_section_breaks(section.flags)) continue;
@@ -669,68 +780,9 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
             }
         }
     }
+    // The readout's item record, ahead of the drain (body_trace.h; the next tick record shows it).
+    body_trace_blast(world, target, e.type, attacker, e.pos.words().data(), damage, target.health);
     apply_item_blast_damage(world, target, damage, attacker, e.ammo_index);
-}
-
-bool glass_point_is_broken(const Entity &target, size_t point_index) {
-    const size_t word = point_index / 64u;
-    if (word >= target.broken_glass_point_bits.size()) return false;
-    return (target.broken_glass_point_bits[word] &
-            (uint64_t{1} << (point_index & 63u))) != 0;
-}
-
-void mark_glass_point_broken(Entity &target, size_t point_index) {
-    const size_t word = point_index / 64u;
-    if (target.broken_glass_point_bits.size() <= word)
-        target.broken_glass_point_bits.resize(word + 1u, 0);
-    target.broken_glass_point_bits[word] |=
-            uint64_t{1} << (point_index & 63u);
-}
-
-// One exact static-building window point. The containing building was already
-// admitted by the explosion's resolved-radius sweep; each point independently
-// uses the AMMO definition's authored kz_maxradius. Retail marks the point
-// broken before four probability slots, and every slot consumes two PRNG draws
-// even when its effect does not fire.
-// [orig: Projectile_ProcessExplosionQueue @0x4eb814-0x4eb84d;
-// Terrain_SpawnEffectsAtUserPoint @0x5cee20]
-void shatter_glass_points(World &world, Entity &target, const Vec3 &blast_pos,
-                          float authored_radius, DestructionEvents &events) {
-    if (authored_radius <= 0.0f ||
-        (target.engine_flags & kEntityFlagHusk) != 0)
-        return;
-    const ItemDeathTraits *traits =
-            world.tables.item_death_traits.get(target.item_id);
-    if (traits == nullptr || traits->glass_points.empty()) return;
-
-    const CollisionMatrix orientation = destruction_orientation(target);
-    for (size_t point_index = 0;
-         point_index < traits->glass_points.size(); ++point_index) {
-        if (glass_point_is_broken(target, point_index)) continue;
-        const GlassPointTrait &point = traits->glass_points[point_index];
-        const Vec3 offset = rotate_authored_point(orientation, point.local_pos);
-        const Vec3 world_pos{target.position.x + offset.x,
-                             target.position.y + offset.y,
-                             target.position.z + offset.z};
-        if (vec_len(vec_sub(world_pos, blast_pos)) > authored_radius) continue;
-
-        mark_glass_point_broken(target, point_index);
-        ++events.glass_points;
-        const Vec3 world_dir =
-                rotate_authored_point(orientation, point.local_dir);
-        for (size_t effect_index = 0; effect_index < 4; ++effect_index) {
-            // Effect_RollSurfaceEffectProbability reseeds the process CRT from
-            // the first PRNG_Next16 draw even though its percentage roll comes
-            // from the second PRNG draw. Later scorch texture selection sees
-            // this side effect. [orig: @0x5CC1F0]
-            crt_srand(death_rand16(world));
-            const uint16_t roll = death_rand16(world) % 100u;
-            if (static_cast<int>(roll) <= static_cast<int>(
-                        kGlassShatterAltProbability[effect_index] * 100.0f))
-                events.effects.push_back(DestructionEffectEvent{
-                        kGlassShatterEffects[effect_index], world_pos, world_dir});
-        }
-    }
 }
 
 } // namespace
@@ -746,9 +798,18 @@ const DeathPieceType &death_piece_type(int index) {
 
 void ExplosionSim::queue_explosion(World &world, const ExplosionEntry &e) {
     (void)world;
-    // [orig: WeaponEffect_QueueExplosion @ 0x4e8330 — authority-only (our sim
-    // runs on the authority by construction, the RoundSim rule), 64-entry cap,
-    // silent drop when full.]
+    // No gate: every peer that flies a round pushes its kill zone (FX-1); the
+    // 64-entry cap drops silently [orig: WeaponEffect_PushExplosionQueueEntry
+    // @0x4E83C0, `cmp edi, 40h; jge` @0x4E83C7..0x4E83CA].
+    if (queue.size() >= static_cast<size_t>(kCapacity)) return;
+    queue.push_back(e);
+}
+
+void ExplosionSim::queue_explosion_on_authority(World &world, const ExplosionEntry &e) {
+    // [orig: WeaponEffect_QueueExplosion @0x4E8330 - `cmp g_NapiNPCtx.is_authority,
+    //  edi; jz` @0x4E8333..0x4E8339, then the cap `cmp ebx, 40h; jge`
+    //  @0x4E8342..0x4E8345]
+    if (!world.rules.logic_authority) return;
     if (queue.size() >= static_cast<size_t>(kCapacity)) return;
     queue.push_back(e);
 }
@@ -768,91 +829,60 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
         ++events.explosions_processed;
         const AmmoTableEntry *ammo = world.tables.ammo.by_index(e.ammo_index);
         if (ammo == nullptr) continue;
-        // Type dispatch [orig: the switch @ 0x4eadc6]: 3 (the medic kit) routes
-        // to the medic interaction below; every other type picks its per-victim
-        // callback and radius further down.
-        if (e.type == ammo_kz::kMedic) {
-            // The kz-type-3 callback is GameEvent_HandleMedicInteraction only
-            // when the owner's class carries the Medic charattr (AnimMap slot
-            // bit 8) [orig: Projectile_ProcessExplosionQueue case 3
-            // @0x4EADDD..0x4EADFC, the charattr test @0x4EADEA..0x4EADF4]. Per
-            // organic in the blast radius (the ordinary pool-0 sweep shape): a
-            // person that is not the healer, a live healer, the same team; a
-            // DEAD target that is not already being revived is revived, a live
-            // one below its max health is healed. The max is the def hp: the
-            // difficulty scaling touches only the local player outside a
-            // network session, where GameEvent_HealPlayer never finds the
-            // second player slot it needs.
-            // [orig: GameEvent_HandleMedicInteraction @0x4E6790 — gates
-            //  @0x4E679C..0x4E67BD, dead arm @0x4E67C2..0x4E67D8, live arm
-            //  @0x4E67E3..0x4E6805; Entity_GetMaxHealthWithDifficulty @0x43B8A0,
-            //  the session and local-player tests @0x43B8AD..0x43B8C6]
-            const Entity *healer = world.registry.get(e.owner);
-            if (healer == nullptr ||
-                    !world.tables.class_has_attribute(healer->player_class,
-                            MissionTables::kCharAttrMedic) ||
-                    (healer->flags & kEntityFlagDead) != 0u)
-                continue;
-            const float medic_radius = e.radius_override != 0.0f
-                    ? e.radius_override : ammo->kz_maxradius;
-            const size_t pool0 = world.registry.pool_capacity(0);
-            for (size_t s = 0; s < pool0; ++s) {
-                Entity *t = world.registry.get(EntityHandle::make(0, static_cast<int>(s)));
-                if (t == nullptr || t == healer || t->kind != EntityKind::Organic) continue;
-                if (t->team != healer->team) continue;
-                const Vec3 d = vec_sub(t->position, e.pos);
-                const float bound = t->bound_radius > 0.0f ? t->bound_radius : 0.6f;
-                if (vec_len(d) - bound > medic_radius) continue;
-                if ((t->flags & kEntityFlagDead) != 0u) {
-                    if (t->medic_reviving) continue;
-                    world.round_sim.medic_interactions.push_back(
-                            MedicInteraction{t->handle, healer->handle, /*revive=*/true});
-                } else if (retail_signed_i16(t->health) < retail_signed_i16(t->health_max)) {
-                    world.round_sim.medic_interactions.push_back(
-                            MedicInteraction{t->handle, healer->handle, /*revive=*/false});
-                }
-            }
-            continue;
-        }
         // The callback and radius each type takes [orig: the jumptable
         // @ 0x4eadc6]: 2/5/6/7 the weapon damage at kz_maxradius (@ 0x4eadcd);
         // 1 the knife callback at kz_maxradius, one unit wider when the
-        // source's class carries KnifeBonus (@ 0x4eae0c..0x4eae34); 4 the
-        // weapon damage at the source's bound radius when there is a source
-        // (@ 0x4eae3c..0x4eae52); any other type a no-op callback at radius 0
-        // (@ 0x4eae56). A nonzero override replaces the radius
+        // source's class carries KnifeBonus (@ 0x4eae0c..0x4eae34); 3 the medic
+        // interaction at kz_maxradius when the source's class carries Medic
+        // (AnimMap slot bit 8), else no callback at radius 0 (@0x4EADDD..0x4EAE0A);
+        // 4 the weapon damage at the source's bound radius when there is a
+        // source (@ 0x4eae3c..0x4eae52); any other type a no-op callback at
+        // radius 0 (@ 0x4eae56). A nonzero override replaces the radius
         // (@ 0x4eae64..0x4eae80) and a zero radius drops the whole entry, the
         // kill switch for zero-radius bullet rows (@ 0x4eae84).
+        // The radius is a word (var_AC): the ammo's kz_maxradius word, the
+        // source's bound word, or the override float times 65536 truncated;
+        // only a zero radius drops the entry (D-NET-507).
         const Entity *source = world.registry.get(e.owner);
         KillZoneCallback callback = KillZoneCallback::None;
-        float blast_radius = 0.0f;
+        int32_t radius_q16 = 0;
         switch (e.type) {
             case ammo_kz::kKnife:
                 callback = KillZoneCallback::Melee;
-                blast_radius = ammo->kz_maxradius; // [orig: E+28 -> +56 @ 0x4eae0c]
+                radius_q16 = to_fixed(ammo->kz_maxradius); // [orig: E+28 -> +56 @ 0x4eae0c]
                 if (source != nullptr &&
                         world.tables.class_has_attribute(
                                 source->player_class, MissionTables::kCharAttrKnifeBonus))
-                    blast_radius += 1.0f; // [orig: add edi, 10000h @ 0x4eae34]
+                    radius_q16 = io::bam_add(radius_q16, 0x10000); // [orig: add edi, 10000h @ 0x4eae34]
+                break;
+            case ammo_kz::kMedic:
+                // [orig: the charattr test @0x4EADEA..0x4EADF4, the radius
+                //  @0x4EADF9, the callback @0x4EADFC]
+                if (source != nullptr &&
+                        world.tables.class_has_attribute(
+                                source->player_class, MissionTables::kCharAttrMedic)) {
+                    callback = KillZoneCallback::Medic;
+                    radius_q16 = to_fixed(ammo->kz_maxradius);
+                }
                 break;
             case ammo_kz::kStandard:
             case ammo_kz::kC4:
             case ammo_kz::kBullets:
             case ammo_kz::kSlash:
                 callback = KillZoneCallback::WeaponDamage;
-                blast_radius = ammo->kz_maxradius; // [orig: E+28 -> +56 @ 0x4eadcd]
+                radius_q16 = to_fixed(ammo->kz_maxradius); // [orig: E+28 -> +56 @ 0x4eadcd]
                 break;
             case ammo_kz::kRadiusBlast:
                 callback = KillZoneCallback::WeaponDamage;
-                blast_radius = source != nullptr ? source->bound_radius
-                                                 : ammo->kz_maxradius; // [orig: @ 0x4eae52]
+                radius_q16 = source != nullptr ? source->bound_radius.q16
+                                               : to_fixed(ammo->kz_maxradius); // [orig: `mov edi, [eax]` @ 0x4eae52]
                 break;
             default:
                 break;
         }
         if (e.radius_override != 0.0f)
-            blast_radius = e.radius_override;    // [orig: the E+0x2C float @ 0x4eae64]
-        if (blast_radius <= 0.0f) continue;
+            radius_q16 = to_fixed(e.radius_override); // [orig: the E+0x2C float, fmul, _ftol2 @ 0x4eae64..0x4eae7e]
+        if (radius_q16 == 0) continue;             // [orig: `cmp edi, ebx; jz` @ 0x4eae84]
         const int32_t cone_half = ammo->kz_pieslice_bam; // [orig: E+28 -> +60 @ 0x4eadad]
         const EntityHandle resolved = resolve_attacker_chain(world, e.owner);
         // The friendly-fire gate each pool leg asks of (victim, resolved
@@ -862,35 +892,61 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
         const auto pair_protected = [&](const Entity &t) {
             return damage_pair_protected(world, t, resolved_entity);
         };
+        // The in-session same-team skip pools 1 and 2 run in the sweep itself
+        // for a victim whose def authors attrib 0x8000, against the entry's
+        // source (entry+0x20), ahead of the cone: such a victim takes neither the
+        // callback nor the attacker fill nor the blast-center store [orig: pool 1
+        // @0x4EB4DA..0x4EB502 (the team bytes `mov cl, [edi+162h]` @0x4EB4F6), pool
+        // 2 @0x4EB6A1..0x4EB6C9].
+        const auto session_team_immune = [&](const Entity &t) {
+            if (!world.rules.mp_session || source == nullptr) return false;
+            const ItemDeathTraits *traits = world.tables.item_death_traits.get(t.item_id);
+            return traits != nullptr && traits->team_protect && t.team == source->team;
+        };
         // One victim's callback, then the drain's own attacker store when the
         // callback left the victim without one [orig: `call [esp+var_9C]`
         // @ 0x4eb312 / @ 0x4eb58c / @ 0x4eb868, the +0x178 fallbacks
         // @ 0x4eb319..0x4eb329 / @ 0x4eb593..0x4eb5a4 / @ 0x4eb86f..0x4eb880].
-        const auto run_callback = [&](Entity &t, float surface) {
+        // The leg stores the entry's +0x28 word into the victim's +0x1BA ahead
+        // of the call (@0x4EB184 / @0x4EB585 / @0x4EB861); no reader of that
+        // word is ported.
+        const auto run_callback = [&](Entity &t, int32_t surface) {
             if (callback == KillZoneCallback::WeaponDamage)
-                entity_apply_weapon_damage(world, collision, t, e, surface, blast_radius);
+                entity_apply_weapon_damage(world, collision, t, e, surface, radius_q16);
             else if (callback == KillZoneCallback::Melee)
                 entity_apply_melee_damage(world, t, e);
+            else if (callback == KillZoneCallback::Medic)
+                medic_interaction_callback(world, t, e);
             if (!t.last_attacker.valid()) t.last_attacker = resolved;
         };
+        const int32_t entry_words[3] = {e.pos.x.q16, e.pos.y.q16, e.pos.z.q16};
 
         // --- pool 0, organics [orig: @ 0x4eaeda-0x4eb32c] — skipped when the
-        // ammo flags NoOItems [orig: the & 0x80000 gate @ 0x4eaece]. ---
+        // ammo flags NoOItems [orig: the & 0x80000 gate @ 0x4eaece]. Every
+        // type runs it, the medic kit included. ---
         if ((ammo->flags & kAmmoFlagNoOItems) == 0) {
             const size_t pool0 = world.registry.pool_capacity(0);
             for (size_t s = 0; s < pool0; ++s) {
                 Entity *t = world.registry.get(EntityHandle::make(0, static_cast<int>(s)));
-                if (t == nullptr || (t->engine_flags & 0x1u) != 0) continue;
-                const float bound = t->bound_radius > 0.0f ? t->bound_radius : 0.6f;
-                // The organic reaction band reaches 2x the blast radius
-                // [orig: max_check_range = radius + 2*blast @ 0x4eaf2b].
-                const Vec3 d = vec_sub(t->position, e.pos);
-                const float reach = bound + 2.0f * blast_radius;
-                if (std::abs(d.x) > reach || std::abs(d.y) > reach || std::abs(d.z) > reach)
+                // A row with no ItemTypeIndex, or Flags & 1, leaves the walk
+                // [orig: @0x4EAF15..0x4EAF23].
+                if (t == nullptr || t->item_type_index == 0 || (t->engine_flags & 0x1u) != 0)
                     continue;
-                const float dist = vec_len(d);
-                if (dist > reach) continue;
-                if (t->health <= 0 && (t->engine_flags & kEntityFlagDead) != 0) continue;
+                // The organic reaction band reaches the bound word plus twice
+                // the radius word [orig: `mov ebx, [edi]; lea ebp, [ebx+eax*2]`
+                // @0x4eaf29..0x4eaf2b].
+                const int32_t bound = t->bound_radius.q16;
+                const int32_t reach = static_cast<int32_t>(
+                        static_cast<uint32_t>(bound) + 2u * static_cast<uint32_t>(radius_q16));
+                SweepWords sw;
+                if (!sweep_within(*t, e, reach, sw)) continue;
+                // A victim whose damage-disabled word (entity+0x124: spawn
+                // protection, a spectator's -1) is set skips straight to the
+                // +0x1BA store and the player arm, whose own +0x124 test and the
+                // kill event's null attacker leave nothing, then the callback's
+                // +0x124 skip: nothing reaches it [orig: `cmp dword ptr [edi+124h],
+                // 0; jnz loc_4EB178` @0x4EAFA8..0x4EAFAF; @0x4EB2C4, @0x4EB2FA..0x4EB300].
+                if (t->damage_state != 0) continue;
                 // The knife's zone (kztype 1, rounds_kz_Knife) skips the cone in
                 // a session for a victim within its kz_minradius, and otherwise
                 // runs the compare even at a zero half-angle; every other type
@@ -901,13 +957,25 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 // @0x8133E0]
                 if (e.type == ammo_kz::kKnife) {
                     const bool within = world.rules.mp_session &&
-                            fixed_distance(t->position, e.pos) <= to_fixed(ammo->kz_minradius);
-                    if (!within && !cone_compare(e, cone_half, d)) continue;
-                } else if (!cone_gate(e, cone_half, d)) {
+                            sw.length <= to_fixed(ammo->kz_minradius);
+                    if (!within && !cone_compare(e, cone_half, sw.dx, sw.dy)) continue;
+                } else if (!cone_gate(e, cone_half, sw.dx, sw.dy)) {
                     continue;
                 }
-                float surface = dist - bound;
-                if (surface < 0.0f) surface = 0.0f;
+                // The slash (kztype 7) never reaches its source, and from a
+                // source with an AI slot only the slot's target (+0xC)
+                // [orig: @0x4EB000..0x4EB028].
+                if (e.type == ammo_kz::kSlash && source != nullptr) {
+                    if (t == source) continue;
+                    if (const AiEntity *slot_owner = world.ai.for_handle(source->handle)) {
+                        if (slot_owner->slot.f[3] == 0 ||
+                                slot_owner->slot.f[3] != static_cast<int32_t>(t->handle.packed) + 1)
+                            continue;
+                    }
+                }
+                // The knife never reaches its own source [orig: @0x4EB02E..0x4EB036].
+                if (e.type == ammo_kz::kKnife && t->handle == e.owner) continue;
+                const int32_t surface = sweep_surface(sw.length, bound);
                 // The OUTER-BAND flinch, ahead of the blast-radius cut: an
                 // organic anywhere in the 2x reaction band takes the ammo
                 // reaction notify, so an explosive near-miss that deals no
@@ -918,68 +986,80 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 // lastAttacker) still rides the RoundHit drain, so a pure
                 // near-miss stamps no AI reaction here yet.
                 if (t->item_type == 3) entity_on_damage_received(world, *t, ammo);
-                if (surface > blast_radius) continue; // [orig: @0x4eb064..0x4eb06c]
+                if (surface > radius_q16) continue; // [orig: @0x4eb064..0x4eb06c]
                 // A medic entry and the attacker's own body pass the gate
                 // unasked [orig: `cmp [esi+18h], 3` @0x4eb076, the self compare
                 // @0x4eb07c, the call @0x4eb086].
                 if (e.type != ammo_kz::kMedic && t->handle != resolved && pair_protected(*t))
                     continue;
-                if (e.type != ammo_kz::kRadiusBlast) {
-                    // The mounted-occupant gate ahead of the LOS [orig: the
-                    // parentSlot switch @0x4eb0e2..0x4eb136]: seats 1/2/5 with
-                    // a parent that has no ItemDef, or a type-1 (vehicle)
-                    // parent, leave the sweep — a crew takes its damage through
-                    // the vehicle; seat 3 (a gun standing on something) leaves
-                    // it when the parent's groundEntity is a vehicle. Every
-                    // other seat state falls through to the LOS.
-                    const SeatType seat = t->mount_type;
-                    const Entity *parent = t->mount_target.valid()
-                            ? world.registry.get(t->mount_target) : nullptr;
-                    if (seat == SeatType::Passenger || seat == SeatType::Controller ||
-                            seat == SeatType::Driver) {
-                        if (parent != nullptr && (!parent->has_item_def || parent->item_type == 1))
-                            continue;
-                    } else if (seat == SeatType::Gunner) {
-                        const Entity *ground = (parent != nullptr && parent->ground_target.valid())
-                                ? world.registry.get(parent->ground_target) : nullptr;
-                        if (ground != nullptr && ground->has_item_def && ground->item_type == 1)
+                // An ammo whose kz_damage word is 0 skips the seat gate and the
+                // LOS [orig: `cmp word ptr [eax+2Eh], 0; jz loc_4EB178`
+                // @0x4EB09D..0x4EB0A2].
+                if (ammo->kz_damage != 0) {
+                    // The knife's LOS runs at -0x2000 and skips the seat gate;
+                    // type 4 skips both [orig: `sub eax, 1; jz` @0x4EB0CF..0x4EB0DB
+                    // -> `mov ecx, 0FFFFE000h` @0x4EB138; `sub eax, 3; jz`
+                    // @0x4EB0DD..0x4EB0E0; `cmp ebp, 4; jz` @0x4EB13D..0x4EB140].
+                    int32_t height_offset = -0x4000; // [orig: @0x4EB0D2]
+                    if (e.type == ammo_kz::kKnife) {
+                        height_offset = -0x2000;
+                    } else if (e.type != ammo_kz::kRadiusBlast) {
+                        // The mounted-occupant gate ahead of the LOS [orig: the
+                        // parentSlot switch @0x4eb0e2..0x4eb136]: seats 1/2/5 with
+                        // a parent that has no ItemDef, or a type-1 (vehicle)
+                        // parent, leave the sweep — a crew takes its damage through
+                        // the vehicle; seat 3 (a gun standing on something) leaves
+                        // it when the parent's groundEntity is a vehicle. Every
+                        // other seat state falls through to the LOS.
+                        const SeatType seat = t->mount_type;
+                        const Entity *parent = t->mount_target.valid()
+                                ? world.registry.get(t->mount_target) : nullptr;
+                        if (seat == SeatType::Passenger || seat == SeatType::Controller ||
+                                seat == SeatType::Driver) {
+                            if (parent != nullptr && (!parent->has_item_def || parent->item_type == 1))
+                                continue;
+                        } else if (seat == SeatType::Gunner) {
+                            const Entity *ground = (parent != nullptr && parent->ground_target.valid())
+                                    ? world.registry.get(parent->ground_target) : nullptr;
+                            if (ground != nullptr && ground->has_item_def && ground->item_type == 1)
+                                continue;
+                        }
+                    }
+                    // The LOS gate from the victim's Position words to the
+                    // entry's, unlifted [orig: @0x4EB0A8..0x4EB0CA, the call
+                    // @0x4eb162]. The victim's parentEntity is NULLED around the
+                    // call, so its own mount hull is a blocker here.
+                    if (e.type != ammo_kz::kRadiusBlast) {
+                        const int32_t victim_words[3] = {
+                                t->position.x.q16, t->position.y.q16, t->position.z.q16};
+                        if (!blast_los_clear(world, collision, terrain, victim_words, entry_words,
+                                             t->handle, height_offset, /*query_parent_cleared=*/true))
                             continue;
                     }
-                    // The LOS gate [orig: @ 0x4eb162 — type 4 direct hits skip
-                    // it]. The victim's parentEntity is NULLED around the call,
-                    // so its own mount hull is a blocker here.
-                    if (!blast_los_clear(world, collision, terrain, t->position, e.pos,
-                                         t->handle, 0.0f, /*query_parent_cleared=*/true))
-                        continue;
                 }
-                // A victim whose damage-disabled word (entity+0x124: spawn
-                // protection or the dead latch) is set skips the burn, the hit
-                // emitter and every later leg [orig: `cmp [edi+124h], ebx; jnz`
-                // @ 0x4eb17e..0x4eb18b].
-                if (t->damage_state == 0) {
-                    // Burn reacts before the damage callback's armor/team gates.
-                    // [orig: Projectile_ProcessExplosionQueue @0x4EB1D2]
-                    if (t->item_type == 3)
-                        apply_collision_force(world, *t, ammo->secondary_anim, ammo->kz_physics, e.pos, e.owner);
-                    // Then the victim's presentation, every pool-0 type: the
-                    // ammo's kz_sound full-volume at the victim, and its
-                    // secondary_effect into the victim's +0x1CC slot (the
-                    // witness sits on spawn_victim_hit_emitter).
-                    // [orig: @0x4EB1DA..0x4EB1EA (the +0x4C set ->
-                    //  Entity_PlaySound3D_FullVolume), @0x4EB1F2..0x4EB292 (the
-                    //  +0x48 effect)]
-                    if (!ammo->kz_sound.empty())
-                        world.out.fire_sounds.play_immediate(ammo->kz_sound.c_str(),
-                                t->position, t->bms_id, t->handle.packed);
-                    if (!ammo->secondary_effect.empty())
-                        spawn_victim_hit_emitter(*t, ammo->secondary_effect, events);
-                    // An entry that deals no damage here stops after the burn:
-                    // a zero kz_damage, or any entry on a non-authority session
-                    // peer, where the damage read returns 0; the medic kit is
-                    // the exception [orig: Entity_GetNetIdIfAuthority @0x4E4010
-                    // called @ 0x4eb2a0, the type-3 test @ 0x4eb2ac..0x4eb2b0].
-                    if (kz_damage_if_authority(world, *ammo) == 0) continue;
-                }
+                // Burn reacts before the damage callback's armor/team gates.
+                // [orig: Projectile_ProcessExplosionQueue @0x4EB1D2]
+                if (t->item_type == 3)
+                    apply_collision_force(world, *t, ammo->secondary_anim, ammo->kz_physics, e.pos.q16(), e.owner);
+                // Then the victim's presentation, every pool-0 type: the
+                // ammo's kz_sound full-volume at the victim, and its
+                // secondary_effect into the victim's +0x1CC slot (the
+                // witness sits on spawn_victim_hit_emitter).
+                // [orig: @0x4EB1DA..0x4EB1EA (the +0x4C set ->
+                //  Entity_PlaySound3D_FullVolume), @0x4EB1F2..0x4EB292 (the
+                //  +0x48 effect)]
+                if (!ammo->kz_sound.empty())
+                    world.out.fire_sounds.play_immediate(ammo->kz_sound.c_str(),
+                            t->position, t->bms_id, t->handle.packed);
+                if (!ammo->secondary_effect.empty())
+                    spawn_victim_hit_emitter(*t, ammo->secondary_effect, events);
+                // An entry that deals no damage here stops after the burn:
+                // a zero kz_damage, or any entry on a non-authority session
+                // peer, where the damage read returns 0; the medic kit is
+                // the exception [orig: AmmoDef_GetKzDamageIfAuthority @0x4E4010
+                // called @ 0x4eb2a0, the type-3 test @ 0x4eb2ac..0x4eb2b0].
+                if (kz_damage_if_authority(world, *ammo) == 0 && e.type != ammo_kz::kMedic)
+                    continue;
                 // A LIVE player body inside the blast arms the local damage
                 // feedback a SECOND time, ahead of the damage callback: retail
                 // gates on Flags & 0x100 (Player) && !(Flags & 2) (alive), the
@@ -992,16 +1072,10 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 //  Score_ProcessNetworkKillEvent @0x4eb2f2 -> @0x4fd49d]
                 if (((t->flags | t->engine_flags) & kEntityFlagPlayer) != 0 &&
                         (t->engine_flags & kEntityFlagDead) == 0 &&
-                        t->damage_state == 0 &&
                         t->handle == world.cached.local_player &&
                         e.type != ammo_kz::kMedic) {
-                    const int32_t blast[3] = {to_fixed(e.pos.x), to_fixed(e.pos.y),
-                            to_fixed(e.pos.z)};
-                    player_on_damage_received(world, radar_entity_source(world, e.owner), blast);
+                    player_on_damage_received(world, radar_entity_source(world, e.owner), entry_words);
                 }
-                // The damage-disabled word keeps the callback away entirely
-                // [orig: `cmp [edi+124h], ebx; jnz` @ 0x4eb2fa..0x4eb300].
-                if (t->damage_state != 0) continue;
                 run_callback(*t, surface);
             }
         }
@@ -1011,38 +1085,53 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
         // [orig: @ 0x4eb337..0x4eb343], and nor does an entry that deals no
         // damage (a zero kz_damage, or a non-authority session peer)
         // [orig: @ 0x4eb349..0x4eb36c] — pool 2 included.
-        if (e.type == ammo_kz::kKnife || kz_damage_if_authority(world, *ammo) == 0) continue;
+        if (e.type == ammo_kz::kKnife || e.type == ammo_kz::kMedic ||
+                kz_damage_if_authority(world, *ammo) == 0)
+            continue;
         if ((ammo->flags & kAmmoFlagNoMItems) == 0) {
             const size_t pool1 = world.registry.pool_capacity(1);
             for (size_t s = 0; s < pool1; ++s) {
                 Entity *t = world.registry.get(EntityHandle::make(1, static_cast<int>(s)));
-                if (t == nullptr) continue;
+                if (t == nullptr || t->item_type_index == 0) continue; // [orig: @0x4EB3B5]
                 if ((t->engine_flags & 0x1u) != 0 ||
                     (t->engine_flags & kEntityFlagIndestructible) != 0)
-                    continue; // [orig: @ 0x4eb3cb]
-                const float bound = t->bound_radius > 0.0f ? t->bound_radius : 1.0f;
-                const Vec3 d = vec_sub(t->position, e.pos);
-                const float reach = bound + blast_radius;
-                if (std::abs(d.x) > reach || std::abs(d.y) > reach || std::abs(d.z) > reach)
-                    continue;
-                const float dist = vec_len(d);
-                if (dist > reach) continue;
+                    continue; // [orig: @ 0x4eb3bf..0x4eb3cb]
+                // The reach is the bound word plus the radius word [orig:
+                // `mov ebp, [edi]; add ebp, var_AC` @0x4eb3d2..0x4eb3d4].
+                const int32_t bound = t->bound_radius.q16;
+                SweepWords sw;
+                if (!sweep_within(*t, e, io::bam_add(bound, radius_q16), sw)) continue;
                 if (pair_protected(*t)) continue; // [orig: @0x4eb45b]
-                // LOS with the witnessed +0.25 lift [orig: @ 0x4eb4ca]; this
-                // leg leaves the item's parentEntity in place.
-                if (e.type != ammo_kz::kRadiusBlast &&
-                    !blast_los_clear(world, collision, terrain, t->position, e.pos,
-                                     t->handle, 0.25f, /*query_parent_cleared=*/false))
-                    continue;
-                if (!cone_gate(e, cone_half, d)) continue;
-                // Tree-class targets record the blast center as the debris
+                // The LOS from the victim's Position words to the entry's, both
+                // Z words lifted 0x4000, for every type when the ammo's
+                // kz_damage word is nonzero; this leg leaves the item's
+                // parentEntity in place [orig: `cmp word ptr [eax+2Eh], 0; jz`
+                // @0x4EB472..0x4EB477, the points @0x4EB479..0x4EB4C3, the call
+                // @0x4EB4CA].
+                if (ammo->kz_damage != 0) {
+                    const int32_t victim_words[3] = {t->position.x.q16, t->position.y.q16,
+                            io::bam_add(t->position.z.q16, 0x4000)};
+                    const int32_t lifted_entry[3] = {entry_words[0], entry_words[1],
+                            io::bam_add(entry_words[2], 0x4000)};
+                    if (!blast_los_clear(world, collision, terrain, victim_words, lifted_entry,
+                                         t->handle, -0x4000, /*query_parent_cleared=*/false))
+                        continue;
+                }
+                if (session_team_immune(*t)) continue;
+                if (!cone_gate(e, cone_half, sw.dx, sw.dy)) continue;
+                // An item with a zero bound word leaves the sweep [orig: `mov ecx,
+                // [edi]; test ecx, ecx; jz` @0x4eb535..0x4eb539].
+                if (bound == 0) continue;
+                // A live row whose death callback is the destructible one takes
+                // the entry's words into its savedLivePose, the section-debris
                 // launch origin [orig: the deathCallback ==
-                // Entity_HandleDestructibleDeathEvent check @ 0x4eb553].
-                if (t->health > 0 && runs_tree_death_body(world, *t))
-                    t->death_blast_center = e.pos;
-                float surface = dist - bound;
-                if (surface < 0.0f) surface = 0.0f;
-                run_callback(*t, surface);
+                // Entity_HandleDestructibleDeathEvent check @0x4EB53F, Health > 0
+                // @0x4EB54B..0x4EB553, the stores @0x4EB555..0x4EB569].
+                if (t->health > 0 && runs_tree_death_body(world, *t)) {
+                    std::copy_n(entry_words, 3, t->saved_live_pos);
+                    t->saved_live_valid = true;
+                }
+                run_callback(*t, sweep_surface(sw.length, bound));
             }
         }
 
@@ -1052,30 +1141,44 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
             const size_t pool2 = world.registry.pool_capacity(2);
             for (size_t s = 0; s < pool2; ++s) {
                 Entity *t = world.registry.get(EntityHandle::make(2, static_cast<int>(s)));
-                if (t == nullptr || (t->engine_flags & 0x1u) != 0) continue;
-                const float bound = t->bound_radius > 0.0f ? t->bound_radius : 1.0f;
-                const Vec3 d = vec_sub(t->position, e.pos);
-                const float reach = bound + blast_radius;
-                if (std::abs(d.x) > reach || std::abs(d.y) > reach || std::abs(d.z) > reach)
+                if (t == nullptr || t->item_type_index == 0 || (t->engine_flags & 0x1u) != 0)
+                    continue; // [orig: @0x4EB5F4..0x4EB602]
+                // The reach is the bound word plus the radius word [orig:
+                // `mov ebp, [edi]; add ebp, var_AC` @0x4eb609..0x4eb60b].
+                const int32_t bound = t->bound_radius.q16;
+                SweepWords sw;
+                if (!sweep_within(*t, e, io::bam_add(bound, radius_q16), sw)) continue;
+                // A row with no graphic model (entity+0x30) leaves the walk
+                // [orig: `mov ebp, [edi+30h]; test ebp, ebp; jz` @0x4EB696..0x4EB69B].
+                if (!t->has_graphic_model) continue;
+                if (session_team_immune(*t)) continue;
+                if (!cone_gate(e, cone_half, sw.dx, sw.dy)) continue;
+                const ItemDeathTraits *traits = world.tables.item_death_traits.get(t->item_id);
+                int32_t distance = 0;
+                if (!pool2_box_distance(*t, e, sw,
+                                        traits != nullptr ? traits->model_radius_xy_q16 : 0,
+                                        traits != nullptr ? traits->model_radius_z_q16 : 0,
+                                        radius_q16, distance))
                     continue;
-                if (vec_len(d) > reach) continue;
-                if (!cone_gate(e, cone_half, d)) continue;
-                // The witnessed AABB-face distance refinement rides the model
-                // bounds [orig: @ 0x4eb700-0x4eb7f6]; the bound-sphere reach
-                // stands in until per-model AABBs reach the world (tracked).
-                float surface = vec_len(d) - bound;
-                if (surface < 0.0f) surface = 0.0f;
-                if (surface > blast_radius) continue;
                 if (pair_protected(*t)) continue; // [orig: @0x4eb7f6]
-                // Window shatter at the GLASS1..4 user points [orig:
-                // Terrain_SpawnEffectsAtUserPoint x4 @ 0x4eb814-0x4eb85d].
-                // Collision resolution retained the intact-model point; this
-                // leg emits the already transformed transient effect rows.
-                shatter_glass_points(
-                        world, *t, e.pos, ammo->kz_maxradius, events);
-                if (t->health > 0 && runs_tree_death_body(world, *t))
-                    t->death_blast_center = e.pos;
-                run_callback(*t, surface);
+                // The four window calls (GLASS1..GLASS4) change nothing: every row
+                // of retail's static model / GLASS table (35 rows, 192 bytes each)
+                // carries the projected-decal word (+0xBC) set, and a set word
+                // leaves the point before its scar and its four effect rolls, so
+                // no scar, no effect, no PRNG draw and no CRT reseed follows a
+                // blast's window point (the bullet leg owns window glass).
+                // [orig: Projectile_ProcessExplosionQueue @0x4EAD80 - the calls
+                //  @0x4EB814 / @0x4EB827 / @0x4EB83A / @0x4EB84D;
+                //  Terrain_SpawnEffectsAtUserPoint @0x5CEE20 - `cmp [ecx+0BCh], 0;
+                //  jnz` @0x5CF04D..0x5CF054 past Scar_AddEntry @0x5CF072 and the
+                //  rolls @0x5CF0CA..0x5CF154 (their useAltProbability pushes from
+                //  @0x5CF0B3; Effect_RollSurfaceEffectProbability @0x5CC1F0, its 100.0
+                //  scale @0x5CC25A over g_SurfaceEffectProbTable @0x8418B8) to the next
+                //  point @0x5CF180; Terrain_FindSurfaceMaterialEntry @0x5CC280 over the
+                //  table @0x841980]
+                // Pool 2 stores no blast center, and hands the callback the box
+                // distance [orig: `push ebx` @0x4EB85E].
+                run_callback(*t, distance);
             }
         }
     }
@@ -1095,7 +1198,8 @@ void emit_death_sounds_and_effects(World &world, Entity &target, bool silent) {
     if (!silent && traits != nullptr && !traits->sound_death.empty())
         ev.sounds.push_back(DestructionSoundEvent{traits->sound_death, target.position});
     if (silent || traits == nullptr) return;
-	const bool submerged = target.position.z + target.bound_radius < world_water_z(world);
+	// [orig: Entity_InitDeathSounds @0x4939B0 - @0x493A6E..0x493A73, `jge` @0x493A79]
+	const bool submerged = entity_top_q16(target) < world_water_q16(world);
 	spawn_death_effect_banks(target, *traits, submerged, ev);
 	// The kz blasts: one kz_OrganicBlast r=5.0 per husk KZ user point, else one
 	// at the entity with r = kz ?: bound radius [orig:
@@ -1112,20 +1216,35 @@ void emit_death_sounds_and_effects(World &world, Entity &target, bool silent) {
         blast.hit_word = 1;
         if (traits->kz_points.empty()) {
             blast.pos = target.position;
-            blast.radius_override =
-                    traits->kz > 0.0f ? traits->kz
-                                      : (target.bound_radius > 0.0f ? target.bound_radius
-                                                                    : 1.0f);
-            world.explosions.queue_explosion(world, blast);
+            // The def's kz, else the bound word in whole units, a signed divide
+            // truncating toward zero (0 leaves the ammo's radius at the drain).
+            // [orig: Entity_QueueKzBlastAtUserPoints @0x4EABF0 - the def +408
+            //  test @0x4ead26, `mov eax, [esi]; cdq; and edx, 0FFFFh; add eax, edx;
+            //  sar eax, 10h` @0x4EAD30..0x4EAD3B, fild @0x4ead42]
+            blast.radius_override = traits->kz != 0.0f
+                    ? traits->kz
+                    : float(target.bound_radius.q16 / 65536);
+            // The gated entry: a peer's death chain queues no blast (FOUND V1)
+            // [orig: Entity_QueueKzBlastAtUserPoints -> WeaponEffect_QueueExplosion
+            //  @0x4EAD68; @0x4E8333..0x4E8339].
+            world.explosions.queue_explosion_on_authority(world, blast);
         } else {
             const CollisionMatrix orientation = destruction_orientation(target);
-            for (const Vec3 &p : traits->kz_points) {
-                const Vec3 offset = rotate_authored_point(orientation, p);
-                blast.pos = Vec3{target.position.x + offset.x,
-                                 target.position.y + offset.y,
-                                 target.position.z + offset.z};
+            for (const FixedVec3 &p : traits->kz_points) {
+                // The user point's words through the entity's matrix onto its words
+                // (D-NET-507) [orig: Entity_QueueKzBlastAtUserPoints @0x4EABF0 -
+                //  the words @0x4EAC93..0x4EACAA, Math_FixedPointTransformPoint22
+                //  @0x4EACB6].
+                const int32_t local[3] = {p.x, p.y, p.z};
+                int32_t offset[3];
+                orientation.rotate_point(local, offset);
+                blast.pos.set_q16({io::bam_add(target.position.x.q16, offset[0]),
+                                   io::bam_add(target.position.y.q16, offset[1]),
+                                   io::bam_add(target.position.z.q16, offset[2])});
                 blast.radius_override = kKzPointBlastRadius; // [orig: the 5.0 at @ 0x4eace7]
-                world.explosions.queue_explosion(world, blast);
+                // [orig: -> WeaponEffect_QueueExplosion @0x4EACE7, gated
+                //  @0x4E8333..0x4E8339]
+                world.explosions.queue_explosion_on_authority(world, blast);
             }
         }
     }
@@ -1145,7 +1264,7 @@ void process_destructible_death(World &world, Entity &target) {
         world.collision->ensure_entity_instance(world, target.handle);
         const std::vector<SectionDebrisSample> samples =
                 world.collision->sample_section_debris(
-                        world, target.handle, target.death_blast_center);
+                        world, target.handle, target.saved_live_pos);
         // Material 17 (foliage) spawns with the ENTITY as the descriptor's
         // owner tag (+12), so its group takes the section gate; wood spawns
         // with tag 0 [orig: Entity_SpawnSectionDebris @ 0x43F580 — the entity
@@ -1177,9 +1296,10 @@ void process_destructible_death(World &world, Entity &target) {
                                           target.spawned_piece_mask, target.position});
     // The item's footprint retires the terrain pages composed under it
     // [orig: Entity_ProcessDestructibleDeath @ 0x43fc12..0x43fc5e].
+    // The box is the position words less and plus the bound word (twice on
+    // x / y), word arithmetic [orig: @0x43FC12..0x43FC42].
     world.out.terrain_scorches.emit_page_invalidation(
-            int32_t(target.position.x * 65536), int32_t(target.position.y * 65536),
-            int32_t(target.bound_radius * 65536));
+            target.position.x.q16, target.position.y.q16, target.bound_radius.q16);
     // The S2C 0x26 entity-state broadcast (Server_SendEntityStatePacket
     // @ 0x509d70) is the net track's emit — staged with the other MP legs
     // (tracked §24).
@@ -1200,7 +1320,9 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
     const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
     if (traits == nullptr || !traits->husk_model_loaded) return 0;
     if ((target.engine_flags & kEntityFlagHusk) != 0) return 0;
-    if (target.position.z + target.bound_radius < world_water_z(world)) return 0;
+    // [orig: Entity_SpawnDeathPieces @0x493400 - `mov ecx, [ebp+0Ch]; mov edx, [ebp+0];
+    //  add edx, ecx; cmp edx, g_EnvWaterHeightFixed; jl` @0x4934D7..0x4934E5]
+    if (entity_top_q16(target) < world_water_q16(world)) return 0;
     // The explosion glow flash [orig: the LightPool_SpawnGlowEffect
     // (@ 0x5a8d83) call inside Entity_SpawnDeathPieces @ 0x49351a — 2x the
     // piece model's bound radius, non-decorations only; the presenter's light
@@ -1269,9 +1391,9 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
         // def+0x1BC unless it is zero [orig: fcomp/jnp @ 0x4936f1..0x493708].
         p.render_scale = traits->debris_scale != 0.0f ? traits->debris_scale : 1.0f;
         p.pos = target.position;
-        p.heading = static_cast<float>(pose_bam[0] * kDegreesPerBam);
-        p.pitch = static_cast<float>(pose_bam[1] * kDegreesPerBam);
-        p.roll = static_cast<float>(pose_bam[2] * kDegreesPerBam);
+        p.heading = pose_bam[0];
+        p.pitch = pose_bam[1];
+        p.roll = pose_bam[2];
         p.radius_q16 = traits->piece_model.radius_q16;
         // The piece collapses every other LOD-0 section of the piece model
         // [orig: @ 0x493889..0x4938b0 — shl wraps the count mod 32].
@@ -1286,9 +1408,9 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
             orientation.rotate_point(
                     traits->piece_model.section_origin_q16[static_cast<size_t>(s)].data(),
                     offset);
-            p.pos.x += offset[0] * io::kInvFp16One;
-            p.pos.y += offset[1] * io::kInvFp16One;
-            p.pos.z += offset[2] * io::kInvFp16One;
+            p.pos.set_q16({io::bam_add(p.pos.x.q16, offset[0]),
+                           io::bam_add(p.pos.y.q16, offset[1]),
+                           io::bam_add(p.pos.z.q16, offset[2])});
         }
         // Launch direction, the witnessed two-stage build [orig: @ 0x493718-
         // 0x49380e]: (1) 2D-normalize the +-0.5 random spread around the wreck
@@ -1311,13 +1433,21 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
             hy /= hlen;
         }
         const float vz = static_cast<int32_t>(death_rand16(world)) / io::kFp16One;
-        p.vel = Vec3{hx * tp.vel_scale, hy * tp.vel_scale,
-                     vz * tp.vel_scale * 1.25f};
-        // Spin rates: max*(rand%100)/100 floored at min, DEGREES PER TICK
-        // [orig: the sub pair @ 0x4937b0 -> @ 0x57b940 — deg * 2^32/360 BAM32
-        // per tick, uniform{0..99}/100 of max clamped up to min].
-        p.spin_a = spin_rate_roll(world, tp);
-        p.spin_b = spin_rate_roll(world, tp);
+        // Spin rates: the BAM32 words per tick, max * (rand % 100) / 100 floored
+        // at min [orig: the pair @0x4937AB / @0x4937C0 -> Death_RandomSpinRateBam
+        // @0x57B940, stored @0x4937B0 / @0x4937C5], drawn after the vertical's
+        // rand and ahead of the velocity words.
+        p.spin_a = death_random_spin_rate_bam(world, tp.spin_min, tp.spin_max);
+        p.spin_b = death_random_spin_rate_bam(world, tp.spin_min, tp.spin_max);
+        // The velocity words: vel_scale times the unit direction times 65536,
+        // truncated (_ftol2); the vertical lifts by 1.25 [orig: `fld [edi+10h];
+        // fmul hx; fld flt_7C32BC; fmul st(1), st` @0x4937C8..0x4937DC -> +0x1C;
+        // `fmul hy; fmul st, st(1)` @0x4937E4..0x4937ED -> +0x20; `fmul
+        // flt_7C6F18; fmul vz; fmulp` @0x4937F5..0x493804 -> +0x24].
+        const double scale = static_cast<double>(tp.vel_scale);
+        p.vel[0] = io::retail_ftol_sse2(scale * hx * io::kFp16OneD);
+        p.vel[1] = io::retail_ftol_sse2(scale * hy * io::kFp16OneD);
+        p.vel[2] = io::retail_ftol_sse2(scale * 1.25 * static_cast<double>(vz) * io::kFp16OneD);
         // Bounce budget: rand % lifetime + 1, floored at lifetime/8
         // [orig: @ 0x49385b-0x493885].
         int bounces = tp.lifetime > 0 ? (death_rand16(world) % tp.lifetime) + 1 : 1;
@@ -1363,7 +1493,7 @@ void entity_init_aircraft_death(World &world, Entity &target, bool simulate) {
 	if (world.rules.logic_authority) {
 		const float radius = traits != nullptr && traits->kz != 0.0f
 				? traits->kz
-				: float(to_fixed(target.bound_radius) / 65536);
+				: float(target.bound_radius.q16 / 65536);
 		queue_named_landing_blast(world, target, kAmmoKzMItemBlast, radius);
 	}
 	world.out.scars.clear_entity(target.handle);
@@ -1375,7 +1505,7 @@ void entity_init_aircraft_death(World &world, Entity &target, bool simulate) {
 		target.death_motion = DeathMotionMode::PiecePhysics;
     }
 	else {
-		const bool water = to_fixed(target.position.z) <= world.env.water_z;
+		const bool water = target.position.z.q16 <= world.env.water_z;
 		Vec3 pos = target.position;
 		if (water)
 			pos.z = float(from_fixed(world.env.water_z));
@@ -1412,12 +1542,17 @@ void entity_init_aircraft_death(World &world, Entity &target, bool simulate) {
 }
 
 void entity_update_death_transforms(World &world, Entity &target, bool silent) {
-    // [orig: Entity_UpdateDeathTransforms @ 0x494660 — pose snapshot (the AI
-    // rows already snapshot net_saved_live_pose), then the unitType dispatch,
-    // then the death sounds.]
+    // [orig: Entity_UpdateDeathTransforms @ 0x494660 — pose snapshot, then the
+    // unitType dispatch, then the death sounds.]
     // The refNum group cleanup leads. [orig: @0x494669..0x494673 ->
     // Vehicle_ReleaseEWeapGroupOnDestruction @0x547040]
     if (target.ref_num != 0) world.vehicles.cleanup_destroyed_ref_group(target);
+    // The pose snapshot: savedLivePose (+0x80..+0x88) and the attitude triple
+    // (+0x8C..+0x94) take Position and the Yaw / Pitch / Roll words, the one
+    // store the dying vehicle's still-test reads (D-NET-507). [orig:
+    // Entity_UpdateDeathTransforms @0x494660 - @0x49467B..0x4946B2, the +0x80
+    // store @0x494684, +0x8C / +0x90 / +0x94 @0x4946A4 / @0x4946AB / @0x4946B2]
+    stamp_saved_live_pose(target);
     const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
     const int unit_type = traits != nullptr ? traits->unit_type : 0;
     const bool matched_row = unit_type == 1 || unit_type == 2 || unit_type == 3 ||
@@ -1627,9 +1762,9 @@ void tick_item_death_motion(World &world, Entity &entity,
     if (e->death_motion == DeathMotionMode::PiecePhysics) {
         seed_piece_physics_angles(*e);
         Entity::VehicleMotorState &motion = e->veh;
-        int32_t x_q16 = to_fixed(e->position.x);
-        int32_t y_q16 = to_fixed(e->position.y);
-        int32_t z_q16 = to_fixed(e->position.z);
+        int32_t x_q16 = e->position.x.q16;
+        int32_t y_q16 = e->position.y.q16;
+        int32_t z_q16 = e->position.z.q16;
         const int32_t water_q16 = death_water_q16(water_height);
         if (z_q16 >= water_q16) {
             motion.slide_z = io::bam_sub(
@@ -1666,10 +1801,7 @@ void tick_item_death_motion(World &world, Entity &entity,
         x_q16 = io::bam_add(x_q16, motion.vel_x);
         y_q16 = io::bam_add(y_q16, motion.vel_y);
         z_q16 = io::bam_add(z_q16, motion.slide_z);
-        e->position = Vec3{
-                static_cast<float>(from_fixed(x_q16)),
-                static_cast<float>(from_fixed(y_q16)),
-                static_cast<float>(from_fixed(z_q16))};
+        e->position.set_q16({x_q16, y_q16, z_q16});
         update_dead_wreck_effects(
                 world, *e, traits, water_height, events);
         const PiecePhysicsSlope slope = piece_physics_slope(
@@ -1678,7 +1810,7 @@ void tick_item_death_motion(World &world, Entity &entity,
             e->death_motion = DeathMotionMode::PiecePitchSettle;
             z_q16 = io::bam_sub(
                     slope.ground_q16, kPiecePhysicsLandingOffsetQ16);
-            e->position.z = static_cast<float>(from_fixed(z_q16));
+            e->position.z.q16 = z_q16;
             motion.air_pitch_rate = slope.forward_bam;
             events.effects.push_back(DestructionEffectEvent{
                     "Effect_HeloGroundHit", e->position,
@@ -1686,11 +1818,14 @@ void tick_item_death_motion(World &world, Entity &entity,
             world.out.terrain_scorches.emit_standard(
                     x_q16, y_q16, 7, world.logic_tick);
             if (world.rules.logic_authority) {
+                // The def's kz, else the bound word in whole units, a signed
+                // divide truncating toward zero. [orig: DeathPiece_PhysicsUpdate
+                //  @0x48F500 - the def +408 test @0x48F6BA, `mov eax, [esi]; cdq;
+                //  and edx, 0FFFFh; add eax, edx; sar eax, 10h` @0x48F6CF..0x48F6DA]
                 const float radius =
                         traits != nullptr && traits->kz != 0.0f
                         ? traits->kz
-                        : static_cast<float>(
-                                  static_cast<int32_t>(e->bound_radius));
+                        : static_cast<float>(e->bound_radius.q16 / 65536);
                 queue_named_landing_blast(
                         world, *e, kAmmoKzOrganicBlast, radius);
                 queue_named_landing_blast(
@@ -1707,6 +1842,14 @@ void tick_item_death_motion(World &world, Entity &entity,
         publish_piece_physics_angles(*e);
         return;
     }
+    // The routed falling and the static callbacks stamp savedLivePose (+0x80..+0x94: the
+    // Position words and the Yaw / Pitch / Roll words) at their head, ahead of any move, so a
+    // reader of the wreck's displacement (a body standing on it, its run-over push) takes this
+    // tick's alone (D-NET-897: the dead 50cal gunner on the 03TR hull).
+    // [orig: Entity_UpdateFallingDeathPhysics @0x493F70 - the stores @0x493FAA..0x493FD9;
+    //  Entity_UpdateStaticDeathPhysics @0x494230 - the stores @0x494279..0x4942A0]
+    if (e->death_motion == DeathMotionMode::Falling || e->death_motion == DeathMotionMode::Static)
+        stamp_saved_live_pose(*e);
     if (e->death_motion != DeathMotionMode::Static &&
         e->veh.slide_z == 0 && e->veh.vel_x == 0 && e->veh.vel_y == 0)
         return;
@@ -1720,34 +1863,41 @@ void tick_item_death_motion(World &world, Entity &entity,
     const bool routed_falling = e->death_motion == DeathMotionMode::Falling;
     const bool static_motion = e->death_motion == DeathMotionMode::Static;
     if (routed_falling) e->engine_flags &= ~kEntityFlagMatrixBuilt;
-    const Vec3 old_position = e->position;
+    const EntityPosition old_position = e->position;
     if (static_motion) {
-        // Entity_UpdateStaticDeathPhysics @ 0x494230 samples the
-        // current ground before movement and clears the building bit.
-        float ground = -1.0e9f;
-        if (terrain != nullptr && terrain->valid())
-            ground = terrain::height_field_height_mission_bilinear(
-                    *terrain, e->position.x, e->position.y);
+        // Entity_UpdateStaticDeathPhysics @ 0x494230 samples the current
+        // ground at the Position words before movement and clears the
+        // building bit; the water term, the landing line and the snap are
+        // words (D-NET-507). No terrain samples as an empty cell, 0.
+        // [orig: Terrain_SampleHeightBilinear @0x494250; water - ground
+        //  against 655360 @0x4942B2 / 0 @0x4942C0, Z = ground @0x4942C3;
+        //  the landing compare @0x4943CC / @0x4943D1, Z = ground @0x4943D7]
+        const int32_t ground = terrain != nullptr && terrain->valid()
+                ? terrain::height_field_height_bilinear_fixed(
+                        *terrain, e->position.x.q16, e->position.y.q16)
+                : 0;
         e->engine_flags &= ~kEntityFlagMatrixBuilt;
-        const float static_water =
-                water_height <= -1.0e8f ? 0.0f : water_height;
-        const float water_above_ground = static_water - ground;
-        if (water_above_ground < 0.0f) {
-            e->position.z = ground;
+        const int32_t static_water = to_fixed(water_height);
+        const int32_t water_above_ground = io::bam_sub(static_water, ground);
+        if (water_above_ground <= 655360 && water_above_ground < 0) {
+            e->position.z.q16 = ground;
             e->death_motion = DeathMotionMode::Generic;
             // [orig: Entity_UpdateStaticDeathPhysics call @ 0x4942c6]
             transition_to_ground_death(*e, traits, events);
         }
-        const float landing_line = water_above_ground > 10.0f
-                ? ground - 25.0f
+        const int32_t landing_line = water_above_ground > 655360
+                ? io::bam_sub(ground, 1638400)
                 : ground;
 
-        // The callback then advances, truncates the float 0.97 damp
+        // The callback then advances (the velocity words added to the
+        // position words, D-NET-507), truncates the float 0.97 damp
         // toward zero, zeroes raw components under 8, and applies
         // half-gravity only once horizontal motion stops.
-        e->position.x += e->veh.vel_x / io::kFp16One;
-        e->position.y += e->veh.vel_y / io::kFp16One;
-        e->position.z += e->veh.slide_z / io::kFp16One;
+        // [orig: Entity_UpdateStaticDeathPhysics @0x494230 - the adds
+        //  @0x4942D4 / @0x4942EA / @0x4942F9]
+        e->position.x.q16 = io::bam_add(e->position.x.q16, e->veh.vel_x);
+        e->position.y.q16 = io::bam_add(e->position.y.q16, e->veh.vel_y);
+        e->position.z.q16 = io::bam_add(e->position.z.q16, e->veh.slide_z);
         e->veh.vel_x = static_cast<int32_t>(
                 static_cast<float>(e->veh.vel_x) * 0.9700000286102295f);
         e->veh.vel_y = static_cast<int32_t>(
@@ -1756,8 +1906,8 @@ void tick_item_death_motion(World &world, Entity &entity,
         if (e->veh.vel_y > -8 && e->veh.vel_y < 8) e->veh.vel_y = 0;
         if (e->veh.vel_x == 0 && e->veh.vel_y == 0) {
             e->veh.slide_z -= 167;
-            if (e->position.z < landing_line) {
-                e->position.z = ground;
+            if (e->position.z.q16 < landing_line) {
+                e->position.z.q16 = ground;
                 e->death_motion = DeathMotionMode::Generic;
                 // [orig: Entity_UpdateStaticDeathPhysics call @ 0x4943da]
                 transition_to_ground_death(*e, traits, events);
@@ -1768,40 +1918,60 @@ void tick_item_death_motion(World &world, Entity &entity,
     // Gravity [orig: -334/tick above water; below water the horizontal
     // halves per tick and the fall pins at -4096
     // @ 0x493fe5/@ 0x461ddf].
-    if (e->position.z + e->bound_radius >= water_height) {
+    // The top word against the water word, a signed compare.
+    // [orig: Entity_UpdateFallingDeathPhysics @0x493F70 - `mov eax, [esi];
+    //  add eax, [esi+0Ch]` @0x493FCB..0x493FCD, `cmp eax, g_EnvWaterHeightFixed;
+    //  jge` @0x493FDF..0x493FE5]
+    const int32_t water_q16 = death_water_q16(water_height);
+    if (entity_top_q16(*e) >= water_q16) {
         e->veh.slide_z -= 334;
     } else {
         e->veh.vel_x >>= 1;
         e->veh.vel_y >>= 1;
         e->veh.slide_z = -4096;
     }
-    float ground = -1.0e9f;
+    // The ground is a word (D-NET-507); INT32_MIN stands for no ground.
+    int32_t ground = INT32_MIN;
 			e->ground_target = {};
 			// The routed wreck queries posed models as well as terrain.
 			// [orig: Entity_UpdateFallingDeathPhysics @0x493FF1..0x494001]
 			if (world.ai.collision != nullptr) {
-				const int32_t pos[3] = { to_fixed(e->position.x), to_fixed(e->position.y),
-					to_fixed(e->position.z) };
+				const int32_t pos[3] = { e->position.x.q16, e->position.y.q16,
+					e->position.z.q16 };
 				const int32_t height = world.ai.collision->raycast_ground(
 						world, e->handle, pos, 0, 0, 0x10000, 0x200000, &e->ground_target);
-				if (height != INT32_MIN)
-					ground = float(from_fixed(height));
+				ground = height;
 			} else if (terrain != nullptr && terrain->valid())
-				ground = terrain::height_field_height_mission_bilinear(
-						*terrain, e->position.x, e->position.y);
-			// The wreck rests with section 0's lowest extent on the ground
-    // [orig: ground -= |sec0 z min| @ 0x461e23-0x461e4b]. The ground above
-    // is the object-aware probe (terrain plus posed models, retail's mask
-    // 0x200000 @ 0x461e1a); the inverted += |z max| leg
-    // (@ 0x494034-0x49405e) is not taken here (world-wac-ai-re.md D-ITEM-9).
-    if (traits != nullptr) ground -= std::abs(traits->husk_rest_min_z);
-    const float old_top = e->position.z + e->bound_radius;
-    const float new_z = e->position.z + e->veh.slide_z / io::kFp16One;
-    const float new_x = e->position.x + e->veh.vel_x / io::kFp16One;
-    const float new_y = e->position.y + e->veh.vel_y / io::kFp16One;
+				ground = terrain::height_field_height_bilinear_fixed(
+						*terrain, e->position.x.q16, e->position.y.q16);
+			// The wreck rests on its husk's collision section 0: the ground less
+    // |z min| upright, plus |z max| inverted, by the sign of the head matrix's
+    // up row (this leg never turns the wreck, so the live Euler words are the
+    // head's). The ground above is the object-aware probe (terrain plus posed
+    // models, retail's mask 0x200000 @ 0x461e1a).
+    // [orig: Entity_UpdateFallingDeathPhysics @0x493F70 - the up row
+    //  @0x493F8E..0x493F9D, its sign test @0x49402F..0x494034, +0x58
+    //  @0x494036..0x494047, +0x54 @0x49404D..0x49405E]
+    if (traits != nullptr && ground != INT32_MIN) {
+        if (entity_placement_matrix(*e).m[10] >= 0)
+            ground = io::bam_sub(ground, io::bam_abs(traits->husk_rest_z_lo_q16));
+        else
+            ground = io::bam_add(ground, io::bam_abs(traits->husk_rest_z_hi_q16));
+    }
+    const int32_t old_top_q16 = entity_top_q16(*e);
+    // The pose advances by the velocity words, word arithmetic (D-NET-507).
+    // [orig: Entity_UpdateFallingDeathPhysics @0x493F70 - @0x494077..0x49407D,
+    //  the commit @0x49421C..0x494221; Entity_ProcessFallingDeathPhysics @0x461D30 -
+    //  @0x461E5C / @0x461E64, the commit @0x461EAA..0x461EAF]
+    const int32_t new_x_q16 = io::bam_add(e->position.x.q16, e->veh.vel_x);
+    const int32_t new_y_q16 = io::bam_add(e->position.y.q16, e->veh.vel_y);
+    const int32_t new_z_q16 = io::bam_add(e->position.z.q16, e->veh.slide_z);
+    const float new_z = io::fp16_16_to_float(new_z_q16);
+    const float new_x = io::fp16_16_to_float(new_x_q16);
+    const float new_y = io::fp16_16_to_float(new_y_q16);
     if (!routed_falling) {
-        e->position.x = new_x;
-        e->position.y = new_y;
+        e->position.x.q16 = new_x_q16;
+        e->position.y.q16 = new_y_q16;
     }
 			// No per-tick horizontal damp: the falling legs keep velocity until
 			// water or ground [orig: 0x461d30/0x493f70 — the 0.97 damp belongs
@@ -1809,22 +1979,26 @@ void tick_item_death_motion(World &world, Entity &entity,
 			// The water-crossing splash [orig: @ 0x49409f-0x494100 — the def
 			// water-impact sound slot (+156), with the fallback when empty;
 			// dword_2C25C64 resolves to Effect_MedSplash].
-			if (routed_falling && new_z + e->bound_radius < water_height &&
-					old_top > water_height) {
+			// The new top below the water word and the old top above it, word
+			// adds and signed compares. [orig: @0x494086..0x49409F - `lea edx,
+			//  [eax+ebx]; cmp edx, ecx; jge`, `mov edx, [esi+0Ch]; add edx, eax;
+			//  cmp edx, ecx; jle`]
+			if (routed_falling && io::bam_add(new_z_q16, e->bound_radius.q16) < water_q16 &&
+					old_top_q16 > water_q16) {
 				events.effects.push_back(DestructionEffectEvent{
                 "Effect_MedSplash", Vec3{new_x, new_y, water_height},
                 Vec3{0.0f, 0.0f, 1.0f}});
 				wreck_impact_sound(world, *e, traits, 39, "IMP_DEBLRG_WATER",
 						Vec3{ new_x, new_y, water_height }, events);
 			}
-			if (new_z <= ground) {
+			if (ground != INT32_MIN && new_z_q16 <= ground) {
         // Ground contact [orig: Entity_TransitionToGroundDeath
         // @ 0x493080 + the landing legs @ 0x494113-0x494209]. The
         // generic leg restores the pre-move pose and clears vertical
         // motion. The routed leg transitions state here but its common
         // tail still commits the integrated pose and retains velocity.
         if (routed_falling) {
-            e->position.z = ground;
+            e->position.z.q16 = ground;
             e->death_motion = DeathMotionMode::Generic;
             // [orig: Entity_UpdateFallingDeathPhysics call @ 0x494113]
             transition_to_ground_death(*e, traits, events);
@@ -1836,8 +2010,8 @@ void tick_item_death_motion(World &world, Entity &entity,
 					// [orig: ground-entity test @0x49414E; scorch 7 call
 					// @0x49416B..0x494179]
 					if (!e->ground_target.valid())
-						world.out.terrain_scorches.emit_standard(to_fixed(e->position.x),
-								to_fixed(e->position.y), 7, world.logic_tick);
+						world.out.terrain_scorches.emit_standard(e->position.x.q16,
+								e->position.y.q16, 7, world.logic_tick);
 				} else {
 					e->position = old_position;
             e->veh.slide_z = 0;
@@ -1851,20 +2025,23 @@ void tick_item_death_motion(World &world, Entity &entity,
 				if (routed_falling) {
 					wreck_impact_sound(world, *e, traits, 35, "IMP_VCL_DROP", e->position, events);
 					if (world.rules.logic_authority) {
+						// The def's kz, else the bound word in whole units,
+						// truncated toward zero. [orig: Entity_UpdateFallingDeathPhysics
+						//  - the def +0x198 test @0x4941C7..0x4941D4, the word's
+						//  `cdq` / `sar eax, 10h` @0x4941DE..0x4941E9]
 						const float radius =
-                        (traits != nullptr && traits->kz > 0.0f)
+                        (traits != nullptr && traits->kz != 0.0f)
                         ? traits->kz
-                        : (e->bound_radius > 0.0f ? e->bound_radius
-                                                  : 1.0f);
+                        : float(e->bound_radius.q16 / 65536);
                 queue_named_landing_blast(
                         world, *e, kAmmoKzOrganicBlast, radius);
 					}
 				}
     } else if (!routed_falling) {
-        e->position.z = new_z;
+        e->position.z.q16 = new_z_q16;
     }
     if (routed_falling)
-        e->position = Vec3{new_x, new_y, new_z};
+        e->position.set_q16({new_x_q16, new_y_q16, new_z_q16});
 }
 
 // ----------------------------------------------------------------------------
@@ -1886,78 +2063,92 @@ DeathPiece &DeathPieceSim::alloc() {
 void DeathPieceSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                          float water_height, DestructionEvents &events) {
     // [orig: DeathPiece_TickAll @ 0x57b900 -> Entity_ProcessDeathPiecePhysics
-    // @ 0x492dd0]
-    constexpr float kGravity = 334.0f / io::kFp16One; // the falling-death gravity
+    // @ 0x492dd0] The piece is a row on words (D-NET-507).
+    const int32_t water = death_water_q16(water_height);
     for (DeathPiece &p : pieces) {
         if (!p.active || p.settled) continue;
         const DeathPieceType &tp = death_piece_type(p.type_index);
-        // Gravity or the underwater sink, keyed on the PRE-move position
-        // [orig: Entity_ApplyGravitySimple @ 0x492d80 — above water
-        // vel.z -= 334; below it the horizontal halves per tick and the fall
-        // pins at -4096].
-        if (p.pos.z >= water_height) {
-            p.vel.z -= kGravity;
+        // Gravity or the underwater sink, keyed on the PRE-move Z word: above
+        // the water word vz += -334; below it the horizontal words halve
+        // (`sar 1`) and the fall pins at -4096; then Position += velocity and
+        // Yaw / Pitch += the spin words. [orig: Entity_ApplyGravitySimple
+        // @0x492D80 - `cmp ecx, g_EnvWaterHeightFixed; jge` @0x492D84..0x492D8D,
+        // @0x492D8F..0x492D95, `add [eax+24h], 0FFFFFEB2h` @0x492D9E, the adds
+        // @0x492DA5..0x492DC2]
+        if (p.pos.z.q16 < water) {
+            p.vel[0] = io::bam_sar(p.vel[0], 1);
+            p.vel[1] = io::bam_sar(p.vel[1], 1);
+            p.vel[2] = -4096;
         } else {
-            p.vel.x *= 0.5f;
-            p.vel.y *= 0.5f;
-            p.vel.z = -4096.0f / io::kFp16One;
+            p.vel[2] = io::bam_add(p.vel[2], -334);
         }
-        p.pos.x += p.vel.x;
-        p.pos.y += p.vel.y;
-        p.pos.z += p.vel.z;
-        // Spin integrates per tick, no scaling — the rates ARE degrees/tick
-        // [orig: Yaw += spin_a / Pitch += spin_b @ 0x492db9/0x492dc2].
-        p.heading += p.spin_a;
-        p.pitch += p.spin_b;
-        float ground = -1.0e9f;
-        if (terrain != nullptr && terrain->valid())
-            ground = terrain::height_field_height_mission_bilinear(*terrain, p.pos.x, p.pos.y);
-        ground += 1024.0f / 65536.0f; // [orig: the +1024 rest offset @ 0x492e0d]
-        if (p.pos.z < water_height) {
-            // Water: splash at the surface crossing, sink, free at ground
-            // [orig: @ 0x492e1b-0x492ebe].
-            if (p.pos.z - p.vel.z > water_height) { // strict [orig: @ 0x492e20]
-                const Vec3 at{p.pos.x, p.pos.y, water_height};
+        p.pos.set_q16({io::bam_add(p.pos.x.q16, p.vel[0]), io::bam_add(p.pos.y.q16, p.vel[1]),
+                       io::bam_add(p.pos.z.q16, p.vel[2])});
+        p.heading = io::bam_add(p.heading, p.spin_a);
+        p.pitch = io::bam_add(p.pitch, p.spin_b);
+        // The ground word under the moved X / Y words plus the 1024 rest offset
+        // [orig: Terrain_SampleHeightBilinear @0x492DFA, `add edi, 400h`
+        // @0x492E0D].
+        // A world with no terrain bound (a bare rig) has no ground.
+        const int32_t ground = terrain != nullptr && terrain->valid()
+                ? io::bam_add(terrain::height_field_height_bilinear_fixed(
+                          *terrain, p.pos.x.q16, p.pos.y.q16), 0x400)
+                : INT32_MIN;
+        const int32_t z = p.pos.z.q16;
+        if (z < water) {
+            // Water: a splash where the move crossed the plane (the pre-move Z
+            // strictly above it), at the X / Y words and the water word; freed
+            // at or under the ground word [orig: `sub eax, [esi+24h]; cmp eax,
+            // ecx; jle` @0x492E1B..0x492E20, the point @0x492E45..0x492E58, the
+            // free `cmp [esi+0Ch], edi; jg` @0x492E90..0x492E93].
+            if (io::bam_sub(z, p.vel[2]) > water) {
+                const EntityPosition at = EntityPosition::of_q16({p.pos.x.q16, p.pos.y.q16, water});
                 if (tp.splash_fx != nullptr)
                     events.effects.push_back(
                             DestructionEffectEvent{tp.splash_fx, at, Vec3{}, 0, 0});
                 if (tp.splash_snd != nullptr)
                     events.sounds.push_back(DestructionSoundEvent{tp.splash_snd, at});
             }
-            if (p.pos.z <= ground) p.active = false;
+            if (z <= ground) p.active = false;
             continue;
         }
-        if (p.pos.z >= ground) continue; // still airborne
+        if (z >= ground) continue; // still airborne [orig: `cmp eax, edi; jge` @0x492ECE]
         // Ground contact.
         if (p.bounces_left > 0) {
-            // [orig: @ 0x492ed6-0x492fb2 — spin halves, velocity x0.95, the
-            // vertical negates through the type bounce factor, dust + the
-            // speed-gated bounce sound.]
+            // The spin words halve (`sar 1`), the horizontal words take 0.95
+            // truncated, the vertical the type's bounce factor negated, the Z
+            // word lands on the ground word; then dust, and the bounce sound when
+            // the velocity words' saturated x87 length passes 0x5000 [orig:
+            // @0x492ED6..0x492F22, `cmp eax, 5000h; jle` @0x492F87..0x492F8C].
             --p.bounces_left;
-            p.spin_a *= 0.5f;
-            p.spin_b *= 0.5f;
-            p.vel.x *= 0.95f;
-            p.vel.y *= 0.95f;
-            p.vel.z = -p.vel.z * tp.bounce;
-            p.pos.z = ground;
+            p.spin_a = io::bam_sar(p.spin_a, 1);
+            p.spin_b = io::bam_sar(p.spin_b, 1);
+            constexpr double kBounceKeep = static_cast<double>(0.95f); // flt_7C6FB8
+            p.vel[0] = io::retail_ftol_sse2(static_cast<double>(p.vel[0]) * kBounceKeep);
+            p.vel[1] = io::retail_ftol_sse2(kBounceKeep * static_cast<double>(p.vel[1]));
+            p.vel[2] = static_cast<int32_t>(0u - static_cast<uint32_t>(io::retail_ftol_sse2(
+                    static_cast<double>(p.vel[2]) * static_cast<double>(tp.bounce))));
+            p.pos.z.q16 = ground;
             if (tp.bounce_fx != nullptr)
                 events.effects.push_back(
                         DestructionEffectEvent{tp.bounce_fx, p.pos, Vec3{}, 0, 0});
-            const float speed = vec_len(p.vel);
-            if (speed > 20480.0f / io::kFp16One && tp.bounce_snd != nullptr)
+            // The length sums (vz^2 + vy^2) + vx^2 [orig: the filds and squares
+            // @0x492F49..0x492F69].
+            if (x87_length(p.vel[2], p.vel[1], p.vel[0]) > 0x5000 && tp.bounce_snd != nullptr)
                 events.sounds.push_back(DestructionSoundEvent{tp.bounce_snd, p.pos});
         } else {
-            // Exhausted [orig: @0x492EDB..0x493048]: release the trail, add a
-            // permanent scorch unless the debris row carries bit 1 (CACTUS_),
-            // then final effect/sound and persist (bit 0) or free. Scorch
-            // texture selection therefore advances the shared CRT before the
-            // presentation events below. [orig: flag test @0x492FDF; scorch 7
-            // call @0x492FE7]
-            p.pos.z = ground;
+            // Exhausted [orig: the bounce count's `jle` @0x492EDB ->
+            // @0x492FBC..0x493048]: release the trail, add a
+            // permanent scorch at the X / Y words unless the debris row carries
+            // bit 1 (CACTUS_), then the final sound and effect and persist (bit
+            // 0: the spin and velocity words and the update callback zeroed) or
+            // free. The Z word stays where the move left it (no landing store on
+            // this arm). Scorch texture selection advances the shared CRT before
+            // the presentation events below. [orig: flag test @0x492FD7; scorch 7
+            // call @0x492FE7; the persist stores @0x493039..0x493048]
             if ((p.flags & 0x2u) == 0) {
                 world.out.terrain_scorches.emit_standard(
-                        to_fixed(p.pos.x), to_fixed(p.pos.y),
-                        7, world.logic_tick);
+                        p.pos.x.q16, p.pos.y.q16, 7, world.logic_tick);
             }
             if (tp.final_fx != nullptr)
                 events.effects.push_back(
@@ -1966,7 +2157,8 @@ void DeathPieceSim::tick(World &world, const terrain::TerrainHeightField *terrai
                 events.sounds.push_back(DestructionSoundEvent{tp.final_snd, p.pos});
             if ((p.flags & 0x1u) != 0) {
                 p.settled = true; // stays visible where it landed
-                p.vel = Vec3{};
+                p.vel[0] = p.vel[1] = p.vel[2] = 0;
+                p.spin_a = p.spin_b = 0;
             } else {
                 p.active = false; // [orig: the memset free @ 0x493029]
             }

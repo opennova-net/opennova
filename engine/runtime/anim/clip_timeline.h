@@ -70,6 +70,9 @@ public:
 	// @0x40B1A2..0x40B1B1]; -1 = unarmed.
 	double seconds_at(int32_t ticks, int32_t armed_boundary) const;
 	bool stopped_at(int32_t ticks) const;
+	// The per-tick step the channel adds to t, fps / 62 / frames as a float.
+	// [orig: AnimChannel_InitFromData @0x410560, delta store @0x4105BA]
+	float delta() const { return delta_; }
 	int32_t length_ticks() const;
 	int32_t boundary_after(int32_t ticks) const;
 	static constexpr float kPark = 0.99999f;

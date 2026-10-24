@@ -221,6 +221,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_map_source.cpp # a char map and a foliage map made from a picture
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_alpha.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_device_job.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_geometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_planner.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_raster.cpp
@@ -299,7 +300,6 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_combat.cpp          # the D-AI-4 combat pass
     ${CMAKE_CURRENT_SOURCE_DIR}/world/organic_fire.cpp             # an NPC body's ammo bytes, launch points and clip fire shots
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_animation.cpp     # motor-head channel update
-    ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_remote_anim.cpp   # remote-player body anim (size gate)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_sound.cpp          # the foley/footstep slot-sound leg
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_water.cpp          # the §29.1 water/float channel
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_weapon_channel.cpp # the secondary AnimMap channel (§14.8)
@@ -430,6 +430,12 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/connection_fan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/entity_wire_bridge.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/item_replication_catalog.cpp
+    # --- parity lane L2 sources ---
+    # --- parity lane L3 sources ---
+    # --- parity lane L5 sources ---
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_legs.cpp # the organic replica bodies' leg phases (split off client_replica_motion.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_view.cpp # the player body's view phase, both bodies' (split off infantry.cpp / client_replica_legs.cpp)
+    # --- parity lane L6 sources ---
     # inmatch — the in-match session (ex net/inmatch + net/npruntime, ADR 0043
     # d4): the fixed-tick session, the listen-host frame, the IDA-faithful
     # server/client state machines and frame loops, the transports
@@ -488,6 +494,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/punt_log.cpp # _PUNT.TXT, _CHEAT.TXT and punt.log
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_squad.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_idle_timers.cpp          # the every-32 player breath samples (split off server_tick.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_deploy.cpp               # the deploy, death, spectator and team-change legs (split off server_spawn.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_dispatch_join.cpp        # the admission FSM and the join cases (split off server_message_dispatch.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_dispatch_respawn.cpp     # the respawn and deploy cases (split off server_message_dispatch.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_entity_routes.cpp       # the item events, crossings and guidance routes (split off server_tick.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_initial_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_loadout_grant.cpp        # the C2S 0x2F grant family (split off server_message_dispatch.cpp)
@@ -495,10 +504,12 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_net_quality.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_overlay_state.cpp        # the 14-tick minimap overlay visits (split off server_tick.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_medic.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_player_death.cpp         # the player-death transaction and the death queue (split off server_tick.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_powerup.cpp              # the remote powerup grants and the S2C 0x35 fan (split off server_tick.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_tick.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_tick_maintenance.cpp     # the per-tick and periodic-second maintenance legs (split off server_tick.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_vehicle_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_visible_players.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_emote.cpp
@@ -515,6 +526,38 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/role_feeds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/effect_pose_index.cpp # the present-effect pose index (wire / SSN / BMS / origin)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/udp_session_transport.cpp
+    # --- parity lane L1 sources ---
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_entity_state.cpp        # the per-slot 0x0A writer (split off server_tick.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/unstopped_server.cpp           # the held server's legs (split off napi_np_protocol.cpp)
+    # --- parity lane L2 sources ---
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/loaded_model_list.cpp # the mission start's model-def list, the C2S 0x3D page (D-NET-527)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_console.cpp # the client's console command walk over the S2C 0x06 echo (D-NET-710)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_role_gameplay_events.cpp # JoinerRole's decoded-gameplay appliers (split off joiner_role.cpp)
+    # --- parity lane L3 sources ---
+    # --- parity lane L4 sources ---
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_select.cpp # the infantry state selection + commit (split off infantry.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/slot_staging.cpp # the parity runner's slot staging (a slot body's Position write)
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/body_trace.cpp # the body readout's recording calls (an instrument; the body_trace probe)
+    # --- parity lane L5 sources ---
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/vehicle_menu.cpp # the vehicle screen (vehicle.mnu VEHICLE, D-NET-NEW-L5-5)
+    # --- parity lane L7 sources ---
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_mission_start.cpp # ClientRuntime's mission-start pump legs (split off client_runtime.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon_usegun.cpp # the local player's UseGun transition leg (split off player_weapon.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/deployable_spawn.cpp # a vehicle bay's deployable (D-NET-332)
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/projectile_target_ring.cpp # the flare rounds' target ring (D-NET-64)
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/round_pool.cpp # the round pool's allocator and 0x59 found leg (D-ITEMDEF-32)
+    # --- parity lane L8 sources ---
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_squad_registry.cpp # the NovaWorld squad registry (D-NET-NEW-L8-2)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_log_devices.cpp # the log devices the server switches arm (game and serve)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/remote_admin.cpp # the process's remote-admin console half (game and serve)
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_friendly_tags.cpp # the friendly tags' label pass (split off hud_frame.cpp)
+    # --- parity lane L9 sources ---
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/gate_metrics_reports.cpp # the METPROTOCOL report clocks and senders (D-NET-NEW-L9-22)
+    # --- parity lane LH sources ---
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_takeover_status.cpp # the takeover dialog (HUD_DrawTakeoverStatus)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/takeover_status_feed.cpp # its nearest zone-timer entry
+    # --- parity lane LF sources ---
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/tick_count_clock.cpp # the main loop's GetTickCount clock (D-NET-NEW-LF-2)
 )
 
 # engine/ is the one public include root (ADR 0040): <runtime/<lib>/file.h>.
@@ -607,6 +650,7 @@ set(_opennova_terrain_fp_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_alpha.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_device_job.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_geometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_planner.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_raster.cpp

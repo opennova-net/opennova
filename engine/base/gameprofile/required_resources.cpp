@@ -80,6 +80,8 @@ const RequiredResource k_required_resources[] = {
     { "items.def", BOOT_PHASE_BOOT, RES_REQUIRED, 0,
       "missing -> the boot goes on with no item definitions: the loader returns 1 whatever its parse did, so the \"Unable to load items.def\" fatal wired at the callsite is never reached",
       "[orig: Game_InitSubsystems @ 0x4a71a3 -> ItemDefs_LoadAndValidate @ 0x4a1da0 (File_ParseASCIIFile's result unread @ 0x4a1e12, returns 1 @ 0x4a20a2); the unreachable fatal @ 0x4a71af -> Game_FatalErrorWithMessageBox @ 0x4a5160]", "items_def" },
+    // RES_SOFT: the line goes through ErrorLog_WriteTimestamped, whose gate a stock run never
+    // sets, so no _errlog.txt is written (D-NET-357); the same for powerup.def below.
     { "charattr.def", BOOT_PHASE_BOOT, RES_SOFT, 0,
       "missing -> _errlog.txt \"Server ERROR! Could not load charattr definitions.\", continues",
       "[orig: Game_Run @ 0x4a7fe3 -> CharAttr_LoadFromDef @ 0x412140]", "charattr_def" },
@@ -144,7 +146,7 @@ const RequiredResource k_required_resources[] = {
       "[orig: UI_CreateMenuBinkVideos @ 0x54b590; strings @ 0x7d2a00-0x7d2a54]", "footer_bik" },
     { "nw_cdata.coo", BOOT_PHASE_MENU, RES_REQUIRED, 0,
       "HRESULT ignored",
-      "[orig: Menu_InitShellResources @ 0x55262b -> CUIStringTable_OpenAndLoad @ 0x63a500]", "nw_cdata" },
+      "[orig: Menu_InitShellResources @ 0x55262b -> CookieJar_OpenAndLoadFile @ 0x63a500]", "nw_cdata" },
     { "main.mnu", BOOT_PHASE_MENU, RES_FATAL, 0,
       "menu never appears — boot dead-ends silently (no dialog); the entry node is \"Startup\"",
       "[orig: Menu_InitShellResources @ 0x552651 -> UIScene_LoadAndParseContent @ 0x63c830 -> CUIScene_SelectNodeByName @ 0x63b6b0]", "main_menu" },

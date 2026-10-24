@@ -87,10 +87,22 @@ public:
     EntityHandle speaker() const { return state_.portrait; } // g_VoicePlaybackEntity
 
     // Physical completion uses both the generation and clip identity: an old
-    // callback cannot finish a replacement voice or a newly loaded mission.
+    // callback cannot finish a replacement voice or a newly loaded mission. The
+    // channel's validation runs it, in the scene frame's update alone.
+    // [orig: Audio_UpdateAmbientStream @0x4ED9C0 - AudioChannel_ValidateHandle
+    //  @0x4EDA2A, its failure's release @0x4EDA31..0x4EDA50]
     void finish(uint64_t serial, const lwf::WavPcm *clip);
     void refresh(World &world);
+    // The scene frame's update: the anchor reset, then the stream's distance gain
+    // (refresh, then sample). Retail calls it from the scene frame alone, so a frame
+    // the status page stands in for neither stops a voice nor completes one.
+    // [orig: Render_ProcessMainSceneFrame @0x5CA348 -> Audio_UpdateAmbientStream @0x4ED9C0]
     Frame frame(World &world, Vec3 listener);
+    // The channel as it stands, with the distance gain at `listener`, and no anchor
+    // reset: what a start plays with (its gain is the same distance curve's) and what
+    // the device follows between scene frames.
+    // [orig: Audio_Play3DPositionalSound @0x4ECC80 - @0x4ECC90..0x4ECD5B]
+    Frame sample(const World &world, Vec3 listener) const;
     State snapshot() const { return state_; }
     void restore(const State &state);
     void reset();

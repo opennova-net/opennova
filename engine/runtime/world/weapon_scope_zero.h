@@ -41,7 +41,7 @@ int16_t weapon_scope_zero_adjust(const WeaponScopeZero &zero, int16_t current,
 int32_t weapon_scope_zero_pitch(const WeaponScopeZero &zero, int16_t step);
 // The zero-yaw term (retail MountSlot+8 = WeaponSlotState::zero_yaw): atan2(+0x8C,
 // (+0x9C * step) << 16 floored at 100 m) in BAM, 0 without a parallax key. The
-// slot installs (local_weapon_install, VehicleSystem::prepare_weapon_slot) seed
+// slot installs (local_weapon_install, VehicleSystem::init_weapon_slot_from_entity_def) seed
 // it outside the flags & 3 elevation gate; the adjust recomputes it and alone
 // negates it for a negative +0x8C (its caller's leg). LocalPlayer::view_frame
 // applies it in the modern main-scene Sighted/Scoped branches: add MountSlot+8

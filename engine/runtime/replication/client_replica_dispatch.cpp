@@ -191,11 +191,10 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 				static_cast<std::size_t>(assigned.slot()) <
 						world::retail_pool_capacity(assigned.pool())) {
 			// Retail stores the entity's Team off the authority only [orig: `cmp
-			// g_NapiNPCtx.is_authority` @0x4319e1, the store @0x4319ee]; the listen
-			// host's view still takes it, because two host-view readers (the deploy
-			// zone teams, the effects' sound actor) read it there. D-NET-736:
-			// the host view's 0x50 Team store.
-			apply_team_assign(assign.entity_handle, assign.team);
+			// g_NapiNPCtx.is_authority` @0x4319E1, the store @0x4319EE]: the listen
+			// host's readers take the authority's own entity (the deploy zone teams
+			// through zone_team_byte, the effects' sound actor off its world).
+			if (!authority_recipient_) apply_team_assign(assign.entity_handle, assign.team);
 			// A player's team change asks for its 0x46 team field and a fresh
 			// 0x4C snapshot; the 0x22 slot byte is the handle's low byte (the
 			// pool-0 index) [orig: NapiNPClientMsg_TeamAssign @0x431a15 (the
@@ -351,7 +350,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		// A client raises the talk keys' reset hold until the next 0x0F and
 		// the round-over latch; the authority's arm only counts
 		// [orig: NapiNPClientMsg_GameReset @0x422800 — the is_authority test
-		// @0x422803, `g_SpawnSuccessGate = 1` @0x422849, `dword_24C195C = 1`
+		// @0x422803, `g_RoundOver = 1` @0x422849, `dword_24C195C = 1`
 		// @0x42284e].
 		if (!authority_recipient_) {
 			state_.round_reset_hold = true;
@@ -446,6 +445,75 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::SERVER_CONFIG_STRINGS: // a client's briefing strings (0x7E)
 		fold_server_config_strings(body, state_.server_config_strings);
 		state_.mark_changed();
+		break;
+	case s2c::NETWORK_QUALITY: { // the host's quality metric (0x79)
+		// One byte into CNetQuality +0x0C, 0 when the body is empty; the client's
+		// quality update combines it with its own (client_state.h host_metric)
+		// [orig: NapiNPClientMsg_NetworkQuality @0x429B00 - @0x429B11, @0x429B15,
+		//  @0x429B32; sender Server_TickUpdate @0x51D7E0 (the send @0x51E1DD)].
+		uint8_t metric = 0;
+		size_t consumed = 0;
+		if (!decode_network_quality(body.data(), body.size(), metric, consumed)) metric = 0;
+		state_.net.host_metric = metric;
+		break;
+	}
+	case s2c::VEHICLE_SPAWN_AVAILABILITY: { // the reply to C2S 0x42 (0x70)
+		// Every reply stores its rows and raises the received flag, a short or
+		// unterminated body included [orig: NapiNPClientMsg_HandleVehicleSpawnAvailability
+		// @0x429A30 - both exits store the count and the flag @0x429AC8..0x429ACE /
+		// @0x429AE2..0x429AE7; sender NapiNPServerMsg_SendWeaponSlotStates @0x510930 (the
+		// send @0x51097D)].
+		VehicleSpawnAvailabilityList list;
+		(void)decode_vehicle_spawn_availability(body.data(), body.size(), list);
+		ClientVehicleSpawnAvailability &store = vehicle_spawn_availability();
+		store.rows = std::move(list.rows);
+		store.received = true;
+		state_.mark_changed();
+		break;
+	}
+	case s2c::CHAT_HISTORY: { // one server-command table entry (0x2A)
+		// Off the authority only. Retail reads the ten bytes only when the body
+		// holds them and adds its stack entry either way, so a short body adds
+		// uninitialized bytes; no stock host sends one (its entries are ten
+		// bytes, NetPacket_CopyTenBytes), and ours drops it.
+		// [orig: NapiNPClientMsg_0x02A @0x425BA0 - @0x425BB9, @0x425BC6..0x425BE1]
+		if (authority_recipient_ || body.size() < kServerCommandEntryBytes) break;
+		ServerCommandEntry entry{};
+		for (std::size_t i = 0; i < kServerCommandEntryBytes; ++i) entry[i] = body[i];
+		fold_server_command_entry(state_.server_commands, entry);
+		break;
+	}
+	// Retail's handler stores nothing here: an empty body.
+	// [orig: NapiNPClientMsg_0x007 @0x422730, NapiNPClientMsg_0x01C @0x4227F0 (the
+	//  host's join tail sends it, Server_SendPlayerSlotStateFrame @0x51BBA0 (the
+	//  send @0x51C021)), NapiNPClientMsg_0x05E @0x4297B0, NapiNPClientMsg_0x05F @0x4228F0,
+	//  NapiNPClientMsg_0x065 @0x429870, NapiNPClientMsg_0x07F @0x429E60: each a
+	//  bare retn]
+	case s2c::RESERVED_NOOP_07:
+	case s2c::NOOP:
+	case s2c::RESERVED_NOOP_5E:
+	case s2c::RESERVED_NOOP_5F:
+	case s2c::RESERVED_NOOP_65:
+	case s2c::RESERVED_NOOP_7F:
+		break;
+	// Retail stores a global no client code reads: 0x1B the network delay
+	// (g_NetworkDelayTicks; its other access is the authority's own store), 0x7A
+	// a name into 0xA86C80 (written by the 0x7B, the connect and the disconnect
+	// besides, read by nothing).
+	// [orig: NapiNPClientMsg_HandleNetworkDelay @0x426080 (a misnomer) - the stores
+	//  @0x42609C / @0x4260A4, sender Server_SetNetworkDelay @0x50CBC0 (the send @0x50CC01);
+	//  NapiNPClientMsg_HandlePlayerName @0x429B40 - the store @0x429B8D, sender
+	//  NapiNPServerMsg_0x002 @0x512FD0 (the send @0x5130D9); the other stores
+	//  NapiNPClientMsg_HandlePlayerInfoFull @0x429BB0 (@0x429DCB),
+	//  CNapiNetwork_OnConnectedToServer @0x4C62E0 (@0x4C630D),
+	//  CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 (@0x4C64BA)]
+	case s2c::NETWORK_DELAY:
+	case s2c::PLAYER_NAME:
+		break;
+	// The echo of our console line: no replica state; the client runtime runs its
+	// command walk (inmatch::ClientRuntime::run_console_echo, D-NET-710)
+	// [orig: NapiNPClientMsg_HandleConsoleEcho @0x432BC0].
+	case s2c::CLIENT_CONSOLE_COMMAND:
 		break;
 	default:
 		// Game-start scalars and other non-entity tags this reducer

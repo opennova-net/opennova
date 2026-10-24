@@ -3,10 +3,10 @@ extends GameProbe
 ## parity_joiner_ready: wait until this OpenNova joiner (a --lan-join launch)
 ## reaches the requested readiness and return its witness. `in_match` is a
 ## live local player in the protocol InMatch phase (with `auto_deploy` the
-## default deployment pick is sent when the host asks and readiness also
-## waits for it to clear); `deploy_hold` is the witnessed split of net-re
-## 5.61: the pick pending on a granted self handle with the DEATH screen
-## presented. The witness is published as progress every heartbeat while
+## owed deployment pick, ParityJoinerWitness.auto_deploy_pick, is sent and
+## readiness also waits for it to clear); `deploy_hold` is the witnessed
+## split of net-re 5.61: the pick pending on a granted self handle with the
+## DEATH screen presented. The witness is published as progress every heartbeat while
 ## waiting and is the verdict's data when ready; the runner's readiness
 ## classifiers (scripts/net/lib.ps1) read it unchanged.
 
@@ -32,10 +32,11 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		var now := Time.get_ticks_msec()
 		var state := ParityJoinerWitness.read_state(ctx)
 		if not state.is_empty():
-			if auto_deploy and not ParityJoinerWitness.pick_sent and bool(state.pick_pending):
+			var pick := ParityJoinerWitness.auto_deploy_pick(state)
+			if auto_deploy and not ParityJoinerWitness.pick_sent and pick >= 0:
 				var sim := ctx.sim()
-				ParityJoinerWitness.pick_sent = sim != null and bool(sim.send_deployment_pick(0))
-				ctx.log("default deployment pick sent=%s" % str(ParityJoinerWitness.pick_sent))
+				ParityJoinerWitness.pick_sent = sim != null and bool(sim.send_deployment_pick(pick))
+				ctx.log("deployment pick %d sent=%s" % [pick, str(ParityJoinerWitness.pick_sent)])
 				state = ParityJoinerWitness.read_state(ctx)
 			if not state.is_empty():
 				var ready := ParityJoinerWitness.in_match_ready(state, readiness_mode, auto_deploy) \

@@ -7,7 +7,7 @@
 //   initial_count      how many each identity carries (the count rule)
 //   initial_body_set   a phase-bound identity's distinct bodies (S2C 0x16, 0x46)
 //   initial_records    the world stream decoded record by record, keyed by slot
-//                      (S2C 0x0C organics, S2C 0x10 statics)
+//                      (S2C 0x0C organics, S2C 0x0D pool spawns, S2C 0x10 statics)
 // Every route is the registry's (normalization.h).
 
 #include "metric.h"
@@ -28,15 +28,41 @@ namespace opennova::parity {
 
 namespace {
 
+// Whether records[at] opens the spawn pump's add of an admitted joiner: S2C 0x03,
+// the settings records the add queues, then 0x05, 0x04 and 0x7B
+// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8DC0 (the 0x03 @0x4C9034, the add
+//  @0x4C903A, the 0x05 @0x4C909D, the 0x04 @0x4C90D7, the 0x7B @0x4C9111)].
+bool spawn_pump_add_at(const std::vector<wire::ParityWireRecord> &records, size_t at) {
+	if (at >= records.size() || records[at].full_tag != 0x003)
+		return false;
+	size_t i = at + 1;
+	while (i < records.size() && records[i].full_tag == identity_of(0x00, true))
+		++i;
+	static const uint16_t kTail[] = { 0x005, 0x004, 0x07B };
+	for (const uint16_t tag : kTail) {
+		if (i >= records.size() || records[i].full_tag != tag)
+			return false;
+		++i;
+	}
+	return true;
+}
+
 // Each origin packet's grouping, through the first gameplay packet. A NACK replay
 // repeats an earlier (SID, sequence); only the origin counts. A timer-phase
 // identity (a FirstOrder exclusion) leaves the key, and a packet left with no
 // record drops out. A boundary-tolerant direction yields one element per record,
 // its packet's flags with its framing, so a merged or split packet costs nothing.
-std::vector<std::string> initial_groups(const RunFacts &run, char dir) {
+// With `sync_phase` the C2S 0x22 re-requests leave too (order.C.0x22.phase); the
+// S2C 0x10 pages leave the key and the stream stands as one element at its first
+// page (group.S.0x10.run).
+std::vector<std::string> initial_groups(const RunFacts &run, char dir, bool sync_phase) {
 	static_assert(has_normalization("packet.sid_seq_ack"));
 	static_assert(has_normalization("order.S.0x16"));
 	static_assert(has_normalization("initial.C.pump_boundary"));
+	static_assert(has_normalization("order.C.0x22.phase"));
+	static_assert(has_normalization("group.S.0x10.run"));
+	static_assert(has_normalization("initial.S.0x5a.reply"));
+	bool static_run = false;
 	std::map<std::pair<uint32_t, uint32_t>, int> earliest;
 	for (const wire::ParityPacket &packet : run.trace.packets) {
 		if (packet.dir != dir)
@@ -56,18 +82,59 @@ std::vector<std::string> initial_groups(const RunFacts &run, char dir) {
 		wire::ParityPacket kept = packet;
 		kept.records.clear();
 		kept.tags.clear();
-		for (const wire::ParityWireRecord &record : packet.records)
+		bool static_page = false;
+		size_t loadout_replies = 0;
+		// The window's last S2C packet carries the join bundle's own 0x0A; a second one
+		// behind it is the per-slot block's, there by the C2S 0x0B's arrival against the
+		// send holdoff (initial.S.join_tail).
+		static_assert(has_normalization("initial.S.join_tail"));
+		const bool closing = dir == 'S' && carries_low_tag(packet, gameplay_identity(dir));
+		bool gameplay_seen = false;
+		for (const wire::ParityWireRecord &record : packet.records) {
+			if (dir == 'S' && record.full_tag == 0x010) {
+				static_page = true;
+				continue;
+			}
+			if (closing && record.full_tag == gameplay_identity(dir)) {
+				if (gameplay_seen)
+					continue;
+				gameplay_seen = true;
+			}
+			if (dir == 'S' && record.full_tag == 0x05A) {
+				++loadout_replies;
+				continue;
+			}
+			if (dir == 'C' && sync_phase && record.full_tag == 0x022)
+				continue;
 			if (!first_order_excluded(dir, record.full_tag)) {
 				kept.records.push_back(record);
 				kept.tags.push_back(record.full_tag);
 			}
+		}
+		if (static_page && !static_run) {
+			static_run = true;
+			groups.push_back("S2C 0x10 stream");
+		}
+		for (size_t i = 0; i < loadout_replies; ++i)
+			groups.push_back("S2C 0x5a reply");
 		if (flat) {
 			char flags[8];
 			std::snprintf(flags, sizeof(flags), "0x%02x", unsigned(packet.flags));
 			for (const wire::ParityWireRecord &record : kept.records)
 				groups.push_back(std::string(flags) + "|" + wire_key(dir, record));
 		} else if (!kept.records.empty()) {
-			groups.push_back(group_key(kept));
+			// The spawn pump's add opens its own group (initial.S.spawn_pump_boundary).
+			static_assert(has_normalization("initial.S.spawn_pump_boundary"));
+			size_t from = 0;
+			for (size_t i = 1; i <= kept.records.size(); ++i) {
+				if (i < kept.records.size() && !(dir == 'S' && spawn_pump_add_at(kept.records, i)))
+					continue;
+				wire::ParityPacket part = kept;
+				part.records.assign(kept.records.begin() + from, kept.records.begin() + i);
+				part.tags.assign(kept.tags.begin() + from, kept.tags.begin() + i);
+				groups.push_back(group_key(part));
+				from = i;
+			}
 		}
 		if (carries_low_tag(packet, gameplay_identity(dir)))
 			break;
@@ -153,11 +220,14 @@ std::set<std::string> body_set(char dir, uint16_t identity, const std::vector<st
 }
 
 // One decoded world-stream record: its fields, plus the pose fields a live
-// record leaves out (the live flag is decided by RR's record).
+// record leaves out and the physics state (contact flag, ground link) one live by
+// its own physics leaves out (both flags are decided by RR's record).
 struct WorldRecord {
 	Fields fields;
 	Fields pose;
+	Fields state;
 	bool live = false;
+	bool self_live = false;
 };
 
 using WorldRecords = std::map<uint32_t, WorldRecord>; // by slot; the first sighting
@@ -221,21 +291,98 @@ void static_records(const std::string &raw, WorldRecords &out) {
 	}
 }
 
+// A pool spawn record's own liveness and its carrier (+0x28, the record's target).
+struct PoolLink {
+	bool live = false;
+	uint16_t carrier = 0xFFFF;
+};
+
+// S2C 0x0D pool spawns. A record whose physics runs every tick is live
+// (initial.S.0x0d.live_pose): a hull on water (entity+0x24 bit 0x8000), a vehicle
+// the sleep gate keeps awake (bit 0x2000 or 0x40, or an occupant: the parent), and,
+// folded in world_records, a record carried on a live one. One live by its own physics
+// also leaves out its contact bit (0x2000) and its ground link (the target), which its
+// mover re-probes every tick.
+void pool_records(const std::string &raw, WorldRecords &out, std::map<uint32_t, PoolLink> &links) {
+	static_assert(has_normalization("initial.S.0x0d.live_pose"));
+	constexpr uint32_t kInAir = 0x2000;
+	constexpr uint32_t kAwakeFlags = 0x8000 | kInAir | 0x40;
+	// The euler presence bits follow the values (the serializer sets each for a
+	// nonzero angle, NetPacket_SerializeEntityPoolToPacket_0 @0x503B3A..0x503B74): the
+	// pose carries them; the target's bit rides the ground link.
+	constexpr uint16_t kStateBits =
+			kPoolSpawnHasEulerZ | kPoolSpawnHasEulerX | kPoolSpawnHasEulerY | kPoolSpawnHasTargetHandle;
+	PoolSpawnBatch batch;
+	decode_pool_spawn_batch(reinterpret_cast<const uint8_t *>(raw.data()), raw.size(), batch);
+	const size_t complete = batch.records.size() - (batch.last_record_partial ? 1 : 0);
+	for (size_t i = 0; i < complete; ++i) {
+		const PoolSpawnRecord &r = batch.records[i];
+		if (out.count(r.slot_id))
+			continue; // the first sighting
+		char flags[8], entity_flags[16];
+		std::snprintf(flags, sizeof(flags), "%04x", unsigned(r.spawn_flags & ~kStateBits));
+		std::snprintf(entity_flags, sizeof(entity_flags), "%08x", unsigned(r.entity_flags & ~kInAir));
+		std::string mounts;
+		for (const uint16_t handle : r.mount_handles)
+			mounts += num(handle) + ",";
+		mounts += num(r.mount_handle_8) + "," + num(r.mount_handle_9);
+		WorldRecord record;
+		record.fields = { { "spawn_flags", flags }, { "type", num(r.item_type_id) },
+			{ "name", r.entity_name }, { "entity_flags", entity_flags },
+			{ "section", num(r.section_mask) }, { "team", num(r.team_byte) },
+			{ "parent", num(r.parent_handle) },
+			{ "seat_mask", num(r.seat_mask) }, { "mounts", mounts }, { "bone", num(r.bone_byte) },
+			{ "ai_profile_1", num(r.ai_profile_1) }, { "ai_profile_2", num(r.ai_profile_2) },
+			{ "ai_name", r.ai_name }, { "ref_num", num(r.alert_byte) },
+			{ "sub_type", num(r.action_byte) }, { "sound_latch", num(r.sound_latch_byte) },
+			{ "zone_rank", num(r.zone_number_rank) }, { "zone_radius", num(r.zone_radius) },
+			{ "difficulty", num(r.difficulty_byte) } };
+		record.pose = { { "x", num(r.pos_x) }, { "y", num(r.pos_y) }, { "z", num(r.pos_z) },
+			{ "euler_z", num(r.euler_z) }, { "euler_x", num(r.euler_x) },
+			{ "euler_y", num(r.euler_y) } };
+		record.state = { { "in_air", num((r.entity_flags & kInAir) ? 1 : 0) },
+			{ "target", num((r.spawn_flags & kPoolSpawnHasTargetHandle) ? r.target_handle : -1) } };
+		PoolLink link;
+		link.live = ((r.spawn_flags & kPoolSpawnHasEntityFlags) && (r.entity_flags & kAwakeFlags)) ||
+				(r.spawn_flags & kPoolSpawnHasParentHandle);
+		record.self_live = link.live;
+		if (r.spawn_flags & kPoolSpawnHasTargetHandle)
+			link.carrier = r.target_handle;
+		links.emplace(r.slot_id, link);
+		out.emplace(r.slot_id, std::move(record));
+	}
+}
+
 WorldRecords world_records(uint16_t identity, const std::vector<std::string> &raw) {
 	WorldRecords out;
+	std::map<uint32_t, PoolLink> links;
 	for (const std::string &body : raw) {
 		if (identity == 0x00C)
 			organic_records(body, out);
+		else if (identity == 0x00D)
+			pool_records(body, out, links);
 		else if (identity == 0x010)
 			static_records(body, out);
 	}
+	// A record carried on a live one is live, its carrier often on an earlier page.
+	for (bool changed = true; changed;) {
+		changed = false;
+		for (auto &entry : links) {
+			const auto carrier = links.find(entry.second.carrier);
+			if (!entry.second.live && carrier != links.end() && carrier->second.live) {
+				entry.second.live = true;
+				changed = true;
+			}
+		}
+	}
+	for (const auto &entry : links)
+		out[entry.first].live = entry.second.live;
 	return out;
 }
 
-// The first field two records differ in ("" when they match); every differing
-// field's name lands in `names`.
-std::string first_difference(const Fields &a, const Fields &b, std::set<std::string> &names) {
-	std::string first;
+// Every field two records differ in, "name RR vs run" each, appended to `what`
+// after ", "; every differing field's name lands in `names`.
+void differences(const Fields &a, const Fields &b, std::set<std::string> &names, std::string &what) {
 	for (size_t i = 0; i < std::max(a.size(), b.size()); ++i) {
 		const char *name = i < a.size() ? a[i].first : b[i].first;
 		const std::string x = i < a.size() ? a[i].second : "-";
@@ -243,10 +390,8 @@ std::string first_difference(const Fields &a, const Fields &b, std::set<std::str
 		if (x == y)
 			continue;
 		names.insert(name);
-		if (first.empty())
-			first = std::string(name) + " " + x + " vs " + y;
+		what += (what.empty() ? "" : ", ") + std::string(name) + " " + x + " vs " + y;
 	}
-	return first;
 }
 
 MetricValue compare_records(char dir, uint16_t identity, const std::vector<std::string> &raw_a,
@@ -268,21 +413,22 @@ MetricValue compare_records(char dir, uint16_t identity, const std::vector<std::
 			what = fa == a.end() ? "RR has none" : "the run has none";
 			names.insert("slot");
 		} else {
-			what = first_difference(fa->second.fields, fb->second.fields, names);
-			if (!fa->second.live) {
-				const std::string pose = first_difference(fa->second.pose, fb->second.pose, names);
-				what = what.empty() ? pose : what;
-			}
+			differences(fa->second.fields, fb->second.fields, names, what);
+			if (!fa->second.live)
+				differences(fa->second.pose, fb->second.pose, names, what);
+			if (!fa->second.self_live)
+				differences(fa->second.state, fb->second.state, names, what);
 		}
 		if (what.empty())
 			continue;
 		for (const std::string &name : names)
 			++by_field[name];
-		if (++differing <= 3) {
-			char head[24];
-			std::snprintf(head, sizeof(head), "slot 0x%04x: ", unsigned(slot));
-			examples += (examples.empty() ? "" : "; ") + std::string(head) + what;
-		}
+		++differing;
+		// Every differing slot with every field it differs in (a fix lane reads
+		// the slot list, not a sample of it).
+		char head[24];
+		std::snprintf(head, sizeof(head), "slot 0x%04x: ", unsigned(slot));
+		examples += (examples.empty() ? "" : "; ") + std::string(head) + what;
 	}
 	std::string fields;
 	for (const auto &entry : by_field)
@@ -301,7 +447,10 @@ MetricValue compare_records(char dir, uint16_t identity, const std::vector<std::
 
 void compare_initial(
 		const RunFacts &rr, const RunFacts &other, char dir, std::vector<MetricValue> &out) {
-	const std::vector<std::string> ga = initial_groups(rr, dir), gb = initial_groups(other, dir);
+	const bool sync_phase =
+			dir == 'C' && (sync_request_phase_bound(rr) || sync_request_phase_bound(other));
+	const std::vector<std::string> ga = initial_groups(rr, dir, sync_phase),
+								   gb = initial_groups(other, dir, sync_phase);
 	const char *unit = group_boundary_tolerant(dir) ? " records" : " groups";
 	MetricValue grouping = make_metric(dir, "initial_grouping", "", "INITIAL_PACKET_GROUPING");
 	grouping.distance = double(edit_distance(ga, gb));

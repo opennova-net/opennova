@@ -49,10 +49,11 @@ struct Rig {
         Entity gun_seed;
         gun_seed.kind = EntityKind::Item;
         gun_seed.has_item_def = true; // seats need the def (D-NET-422)
+        gun_seed.item_type_index = 2; // a resolved def row: the walk skips row 0 (WeaponAction_ProcessAllEntities @0x542690, @0x5426F2)
         gun_seed.health = 100;
         gun_seed.alive = true;
-        gun_seed.yaw = 0;
-        gun_seed.pitch = 0;
+        gun_seed.heading = placed_heading_bam(0);
+        gun_seed.pitch_bam = 0;
         gun_seed.item_attrib2 = attrib2;
         // An 'ewep' render class: the writer that publishes the gun words.
         gun_seed.emplaced_ctrl_publisher = true;
@@ -65,6 +66,7 @@ struct Rig {
 
         Entity gunner;
         gunner.kind = EntityKind::Organic;
+        gunner.item_type_index = 3; // a resolved def row: the walk skips row 0 (WeaponAction_ProcessAllEntities @0x542690, @0x5426B9)
         gunner.player_class = 8;
         gunner.health = 100;
         gunner.alive = true;
@@ -269,6 +271,26 @@ void test_isturret_npc_gunner_yaw_tether() {
     CHECK(r.gun().emplaced_gun_yaw_word == static_cast<int16_t>(0x93));
 }
 
+// D-NET-NEW-L5-29, the authority's channel: an NPC gunner's tick tethers its Yaw first (the
+// gun's ai-fn in the pool-1 walk), then its seat branch chases the aim words: the Yaw a quarter
+// of the way (the step clamped to +-0x2000000), the Pitch an eighth.
+// [orig: Entity_UpdateChildAttachment @0x4409A0 - the NPC tether @0x440abd..0x440ade;
+//  Entity_UpdateInfantryAI @0x4B9910 - the look @0x4BEF57..0x4BEF97; Entity_UpdateAllEntities
+//  @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9 ahead of the pool-0 walk @0x4C2426..0x4C2472]
+void test_isturret_npc_gunner_tether_then_look() {
+    Rig r(/*local=*/false, /*player_bit=*/false,
+            opennova::def::DEF_ITEM_ATTRIB2_ISTURRET);
+    r.look(bam_sub(kGunHeading, 10 * kBamPerDegree), 0);
+    r.body->inf.aim_heading = kGunHeading;
+    r.body->inf.aim_pitch = 0x08000000;
+    CHECK(r.w.ai.pose_if_mounted(*r.body, r.w));
+    // The tether leaves 0x3D275280 (the gun's Yaw less 4 degrees and the word's half); the
+    // chase adds (0x40000000 - 0x3D275280 + 2) >> 2 = 0xB62B60; the Pitch (0x08000000 + 4) >> 3.
+    CHECK(r.body->heading == 0x3DDD7DE0);
+    CHECK(r.gunner().heading == 0x3DDD7DE0);
+    CHECK(r.body->pitch == 0x01000000);
+}
+
 // IsTurret, a remote Player occupant: neither tether — the look stays, the
 // word still slews. [orig: the Player bit jnz @0x440abb skips the NPC clamp;
 //  the local compare @0x440a76 fails for a remote human]
@@ -416,10 +438,10 @@ void test_parent_publication_helo_clamped_pair() {
     ParentRig pr(/*profile_type=*/1, 0, kItemAttribEweap);
     const int32_t look_heading = bam_sub(kGunHeading, 50 * kBamPerDegree);
     pr.r.look(look_heading, -25 * kBamPerDegree);
-    // Aircraft +0x474 is initialized from items.def primary_weapon, just
-    // as an ewep's +0x2B4 is. Resolve it through the production channel tick.
+    // Aircraft +0x474 is bound from items.def primary_weapon by its class init at
+    // its spawn, just as an ewep's +0x2B4 is; the clamp reads that bound Def.
     // [orig: Entity_InitInfantryBoneData @0x490173..0x49017b;
-    // WeaponSlot_InitFromEntityDef @0x5466d8..0x54670a]
+    // WeaponSlot_InitFromEntityDef @0x5466d8..0x54670a; slot-1 def [edi+494h] @0x440fbc]
     auto &table = pr.r.w.tables.weapons;
     table.entries.resize(2);
     WeaponTableEntry &slot1 = table.entries[1];
@@ -429,6 +451,10 @@ void test_parent_publication_helo_clamped_pair() {
     slot1.turret_pitch_max_deg = 20;
     slot1.turret_pitch_min_deg = 10;
     pr.r.w.registry.get(pr.parent_h)->primary_weapon = slot1.name;
+    // An unbound parent slot clamps nothing and publishes nothing.
+    CHECK(pr.r.w.ai.pose_if_mounted(*pr.r.body, pr.r.w));
+    CHECK(pr.parent_ai->brain.f[AiBrain::kActivePitch] == 0);
+    CHECK(pr.r.w.vehicles.init_weapon_slot_from_entity_def(*pr.r.w.registry.get(pr.parent_h)));
     CHECK(pr.r.w.ai.pose_if_mounted(*pr.r.body, pr.r.w));
     CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == 30 * kBamPerDegree);
     CHECK(pr.parent_ai->brain.f[AiBrain::kStagingBlock + 3] == 30 * kBamPerDegree);
@@ -475,9 +501,9 @@ void test_attached_turret_slews_once_per_world_tick() {
         CHECK(r.gun().emplaced_gun_yaw_word == 0x93);
         CHECK(r.body->heading == look);
         if (attached) {
-            CHECK(r.body->pos[0] == to_fixed(8));
-            CHECK(r.body->pos[1] == to_fixed(12));
-            CHECK(r.body->pos[2] == to_fixed(4));
+            CHECK(r.body->self->position.x.q16 == to_fixed(8));
+            CHECK(r.body->self->position.y.q16 == to_fixed(12));
+            CHECK(r.body->self->position.z.q16 == to_fixed(4));
         }
         r.w.run_logic_tick(true);
         CHECK(r.gun().emplaced_gun_yaw_word == 0x126);
@@ -648,10 +674,15 @@ void test_parent_publication_runs_unoccupied_every_tick() {
     CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == 0x12340000);
     // ...and the slot gate's exit skips the matrix bit too [orig: @0x440EA0].
     CHECK((pr.r.gun().engine_flags & kEntityFlagMatrixBuilt) == 0);
-    // A slot the port has not bound yet still carries the Def its item def
-    // names: retail binds it at spawn.
-    // [orig: WeaponSlot_InitFromEntityDef @0x5466E8..0x54670A]
+    // The gate reads the slot the gun's class init bound, never the name its item
+    // def carries: an unbound gun naming a weapon still publishes nothing until its
+    // init binds the slot. [orig: WeaponSlot_InitFromEntityDef @0x5466E8..0x54670A,
+    //  from Entity_InitBoneReferences @0x441482]
     pr.r.gun().primary_weapon = "CHILD_GUN";
+    tick_emplaced_weapon_class_update(pr.r.w, pr.r.gun());
+    CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == 0x12340000);
+    CHECK(pr.r.w.vehicles.init_weapon_slot_from_entity_def(pr.r.gun()));
+    CHECK(pr.r.gun().primary_weapon_slot_adm == 0);
     tick_emplaced_weapon_class_update(pr.r.w, pr.r.gun());
     CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == yaw);
 }
@@ -795,7 +826,7 @@ void test_freed_carrier_row_keeps_the_child() {
     w.registry.despawn(pr.parent_h);
     tick_emplaced_weapon_class_update(w, gun);
     CHECK(gun.position.x == 0.0f && gun.position.y == 0.0f && gun.position.z == 0.0f);
-    CHECK(gun.yaw == 90 && gun.pitch == 0 && gun.roll == 0);
+    CHECK(gun.heading == placed_heading_bam(90) && gun.pitch_bam == 0 && gun.roll_bam == 0);
     CHECK((gun.engine_flags & kEntityFlagMatrixBuilt) != 0);
     CHECK((gun.flags & kEntityFlagCarried) != 0);
 
@@ -933,6 +964,7 @@ int main() {
     test_isturret_slews_per_tick();
     test_isturret_local_gunner_yaw_tether();
     test_isturret_npc_gunner_yaw_tether();
+    test_isturret_npc_gunner_tether_then_look();
     test_isturret_remote_player_untethered();
     test_isturret_recoil_after_rate_clamp();
     test_isturret_window_pins_after_slew();

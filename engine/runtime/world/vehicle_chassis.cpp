@@ -120,7 +120,7 @@ CollisionMatrix four_wheel_orientation(const int32_t c[4][3]) {
 // lean_velocity*0.01) and scaleFactor=1 (unclamped error/8192).
 // [orig: Entity_SmoothHeadingToTarget @0x45B2C0 (IDB name; the bike lean —
 //  its sole caller is Entity_ProcessLightVehiclePhysics @0x479600, site
-//  @0x47A7B1..0x47A7D3). The boat servo is Vehicle_UpdateTurretRotation
+//  @0x47A7B1..0x47A7D3). The boat servo is Vehicle_UpdateBoatLean
 //  @0x45AEA0 below.]
 void vehicle_bike_lean(Entity &e, const VehicleTraits &t, int32_t error) {
 	auto &m = e.veh;
@@ -179,9 +179,8 @@ void vehicle_bike_lean(Entity &e, const VehicleTraits &t, int32_t error) {
 
 // Planing boats retain both the lean acceleration and the error interval
 // used to decelerate it. The +470 interval is deliberately a 16-bit store.
-// [orig: IDB: Vehicle_UpdateTurretRotation @0x45AEA0 (a misnomer — the boat
-//  lean servo; its sole caller is Entity_ProcessPlatformPhysics @0x481870,
-//  site @0x4838CF)]
+// [orig: Vehicle_UpdateBoatLean @0x45AEA0 (its sole caller is Entity_ProcessPlatformPhysics
+//  @0x481870, site @0x4838CF)]
 // Platform capsize latch and righting feed the retained chassis state.
 // [orig: @0x483474..0x48348B, @0x4835DA..0x48367D]
 void vehicle_boat_lean(Entity &e, const VehicleTraits &traits, int32_t error) {
@@ -266,10 +265,12 @@ void vehicle_clear_chassis(Entity::VehicleMotorState &m) {
 	m.chassis_contact_active = false;
 }
 
-// Consume and clear all four force records, retaining their rotational delta.
-// [orig: Entity_ClearSuspensionForces @0x468980;
-// Entity_ComputeChassisOrientation @0x463940]
-static void compute_chassis_forces(Entity &e, const int32_t corners[4][3], int mode) {
+// Fold the quad into the retained matrix: each corner moved by its live force record (none
+// moves under a zero rate), fitted, and the fit's delta from the current euler matrix appended.
+// [orig: Entity_ComputeChassisOrientation @0x463940 (the force offsets inside
+//  Vehicle_ComputeAveragedOrientation @0x459A50 / Vehicle_ComputeOrientationFrom4Wheels
+//  @0x459310); Entity_ClearSuspensionForces @0x468980 calls it when a record is live]
+void vehicle_compute_chassis_orientation(Entity &e, const int32_t corners[4][3], int mode) {
 	auto &m = e.veh;
 	{
 		int32_t moved[4][3];
@@ -307,7 +308,7 @@ void vehicle_clear_chassis_forces(Entity &e, const int32_t corners[4][3], int mo
 	for (const auto &force : e.veh.chassis_forces)
 		any |= force.rate != 0;
 	if (any)
-		compute_chassis_forces(e, corners, mode);
+		vehicle_compute_chassis_orientation(e, corners, mode);
 	for (auto &force : e.veh.chassis_forces)
 		force = {};
 }
@@ -327,15 +328,15 @@ void vehicle_queue_suspension_force(
 	force.scratch = 3;
 }
 
-// A crashed tank striking the ground on its tracks. The first strike in each
-// speed band plays one tumble cue; every call re-enters the crash state and
-// queues one force per wheel: supported wheels press along -up, clear wheels
-// lift along +up, each stiffened by the hull's forward tilt. A missing input
-// only enters the crash state.
-// [orig: Entity_ApplyWheelSuspensionForces @0x463560, called from
-//  Entity_ProcessWheeledVehiclePhysics @0x478A9F / @0x478C4D]
-void vehicle_apply_wheel_suspension_forces(World &world, Entity &e, const VehicleTraits &traits,
-		bool has_contact, const int32_t *support, const CollisionMatrix *matrix) {
+namespace {
+
+// The strike both force helpers run, instruction for instruction but for the two rate constants:
+// the first strike in each speed band plays one tumble cue; every call re-enters the crash state
+// and queues one force per wheel: supported wheels press along -up at 8000 less tilt * press_k,
+// clear wheels lift along +up at 800 less tilt * lift_k, tilt being the hull's |forward.z| as a
+// fraction. A missing input only enters the crash state.
+void apply_strike_forces(World &world, Entity &e, const VehicleTraits &traits, bool has_contact,
+		const int32_t *support, const CollisionMatrix *matrix, float press_k, float lift_k) {
 	auto &m = e.veh;
 	if (!has_contact || support == nullptr || matrix == nullptr) {
 		// [orig: @0x463563..0x463583 -> @0x463727..0x46373A]
@@ -373,15 +374,36 @@ void vehicle_apply_wheel_suspension_forces(World &world, Entity &e, const Vehicl
 	if (tilt < 0.0)
 		tilt = 0.0;
 	for (int k = 0; k < 4; ++k) {
-		// [orig: `cmp dword ptr [edx], 0; jle` @0x4636C2; flt_7C6EA8 = -3000.0,
-		//  flt_7C6EA4 = -1000.0; Entity_QueueSuspensionForce call @0x463704]
+		// [orig: `cmp dword ptr [edx], 0; jle` @0x4636C2 / @0x4638B2; Entity_QueueSuspensionForce
+		//  calls @0x463704 / @0x4638F4]
 		if (support[k] > 0)
 			vehicle_queue_suspension_force(
-					m, k, io::bam_sub(8000, int32_t(tilt * double(-3000.0f))), down);
+					m, k, io::bam_sub(8000, int32_t(tilt * double(press_k))), down);
 		else
 			vehicle_queue_suspension_force(
-					m, k, io::bam_sub(800, int32_t(tilt * double(-1000.0f))), up);
+					m, k, io::bam_sub(800, int32_t(tilt * double(lift_k))), up);
 	}
+}
+
+} // namespace
+
+// A crashed tank striking the ground on its tracks.
+// [orig: Entity_ApplyWheelSuspensionForces @0x463560 (flt_7C6EA8 = -3000.0, flt_7C6EA4 = -1000.0),
+//  called from Entity_ProcessWheeledVehiclePhysics @0x478A9F / @0x478C4D]
+void vehicle_apply_wheel_suspension_forces(World &world, Entity &e, const VehicleTraits &traits,
+		bool has_contact, const int32_t *support, const CollisionMatrix *matrix) {
+	apply_strike_forces(world, e, traits, has_contact, support, matrix, -3000.0f, -1000.0f);
+}
+
+// A crashed tracked hull striking the ground: the tank's strike with the lighter press and lift.
+// Its only callers are the tracked solve's.
+// [orig: Entity_ApplyTrackedVehicleSuspensionForces @0x463750 (the cues @0x463794..0x463829, +0x2EC
+//  @0x463832, flt_7C3310 @0x46386F, flt_7C6EB0 = -1500.0 / flt_7C6EAC = -700.0 @0x46388E..0x463894,
+//  the support words at a 12-byte stride from +8 @0x46389C / @0x4638F9; the missing-input arm
+//  @0x463917..0x46392A), called from Entity_ProcessTrackedVehiclePhysics @0x47E56C / @0x47E861]
+void vehicle_apply_tracked_suspension_forces(World &world, Entity &e, const VehicleTraits &traits,
+		bool has_contact, const int32_t *support, const CollisionMatrix *matrix) {
+	apply_strike_forces(world, e, traits, has_contact, support, matrix, -1500.0f, -700.0f);
 }
 
 // Apply this tick's retained matrix BEFORE advancing its identity blend.
@@ -413,14 +435,67 @@ void vehicle_apply_chassis(World &world, Entity &e, CollisionMatrix &matrix) {
 			matrix.m[4 * row + col] = bam_shl_wrap(v[row], 6);
 	}
 }
+// Corner k is the origin plus two products, each rounded on its own:
+// (+/-length/2 * (row0 >> 6) + 0x8000) >> 16 and (+/-width/2 * (row1 >> 6) + 0x8000) >> 16, row 0
+// the forward words m[0] / m[4] / m[8] and row 1 the side words m[1] / m[5] / m[9], each `sar 6`.
+// So the corner is not the Q22 matrix applied to the corner point. The halves are
+// ftol(span * 0.5f) and ftol(span * -0.5f), truncated toward zero.
+// [orig: Entity_ComputeBoundingQuad @0x45B6E0 - the halves @0x45B8E4..0x45B8FC, @0x45B9A8,
+//  @0x45BA40..0x45BA86 (flt_7C59B0 = -0.5f), @0x45BC83; c0 @0x45BA6E..0x45BA7E, c1
+//  @0x45BBD2..0x45BBE4, c2 @0x45BD36..0x45BD48, c3 @0x45BE93..0x45BE9F. The callers pass row 1
+//  (Math_ExtractRow1FromFixedPoint22 @0x6137D0, the row-1 extractor) as its right axis with the width and row 0
+//  (Math_ExtractRow0FromFixedPoint22 @0x613770) as its up axis with the length, e.g.
+//  Entity_ProcessTrackedVehiclePhysics @0x47DA5C..0x47DAE2]
+void vehicle_bounding_quad(const CollisionMatrix &matrix, int32_t width, int32_t length,
+		int32_t x, int32_t y, int32_t z, int32_t out[4][3]) {
+	const int32_t half_width = width / 2, half_length = length / 2;
+	const int32_t forward[4] = { half_length, half_length, -half_length, -half_length };
+	const int32_t side[4] = { half_width, -half_width, -half_width, half_width };
+	const int32_t origin[3] = { x, y, z };
+	for (int k = 0; k < 4; ++k)
+		for (int i = 0; i < 3; ++i)
+			out[k][i] = io::bam_add(io::bam_add(origin[i],
+					retail_q16_mul_rhu(forward[k], matrix.m[4 * i] >> 6)),
+					retail_q16_mul_rhu(side[k], matrix.m[4 * i + 1] >> 6));
+}
+// The square arm takes the larger of |width| and |length| (into the length's slot) and halves it,
+// and lifts by half |z_span| (the model's collision block +0x2C - +0x28, the box Z pair) along
+// row 2 of the matrix it builds from the entity's own euler words, not along the caller's axes:
+// lifted = origin + rhu(lift * row2), c0 = origin + rhu(half * axis), c1 = origin - that,
+// c2 = lifted - that, c3 = lifted + that, each product rounded on its own. The halves are
+// ftol(word * 0.5f) of a nonnegative word, exact below 2^24 at every x87 length.
+// [orig: Entity_ComputeBoundingQuad @0x45B6E0 - the larger |extent| @0x45B6F5..0x45B71A; the
+//  lift's span (+0x30 -> +0xB0, +0x2C - +0x28, abs) @0x45B721..0x45B74A;
+//  Math_BuildFixedPointMatrixFromEulerAngles @0x613F40 over the entity's +4 block @0x45B75C and
+//  its Math_ExtractRow2FromFixedPoint22 @0x6137A0 @0x45B76B; the lifted origin
+//  @0x45B773..0x45B7DF; the half extent flt_7C3B94 (0.5f) @0x45B7C9..0x45B7E8; the axis
+//  products @0x45B7EC..0x45B878; c0 @0x45B886..0x45B896, c1 @0x45B89D..0x45B8AF, c2
+//  @0x45B8B2..0x45B8CA, c3 @0x45B8CD..0x45B8DC]
+void vehicle_square_quad(const CollisionMatrix &euler, int32_t z_span, int32_t width,
+		int32_t length, const int32_t axis[3], int32_t x, int32_t y, int32_t z, int32_t out[4][3]) {
+	const int32_t half = std::max(io::bam_abs(width), io::bam_abs(length)) / 2;
+	const int32_t lift = io::bam_abs(z_span) / 2;
+	const int32_t origin[3] = { x, y, z };
+	for (int i = 0; i < 3; ++i) {
+		const int32_t lifted =
+				io::bam_add(origin[i], retail_q16_mul_rhu(lift, euler.m[4 * i + 2] >> 6));
+		const int32_t along = retail_q16_mul_rhu(half, axis[i]);
+		out[0][i] = io::bam_add(origin[i], along);
+		out[1][i] = io::bam_sub(origin[i], along);
+		out[2][i] = io::bam_sub(lifted, along);
+		out[3][i] = io::bam_add(lifted, along);
+	}
+}
 // Shared settled/airborne suspension state machine. Contact records retain
-// all seven probes: the slow inverted path also reads spine slots 4 and 6.
-// [orig: Entity_ProcessWheeledVehicleSuspension @0x46B140;
-// Entity_ComputeSuspensionAndOrientation @0x4698A0]
-bool vehicle_suspension_fit(World &world, Entity &e, int32_t corners[4][3], const bool *contacts,
-		PlatFit &out, int32_t px, int32_t py, int32_t pz, bool tank) {
+// all seven probes: the slow inverted path also reads spine slots 4 and 6. The matrix every arm
+// reads and writes is the solve's occupant, its matrix handle.
+// [orig: Entity_ProcessWheeledVehicleSuspension @0x46B140 (its matrix argument read @0x46B180 and
+//  @0x46B46B..0x46B48F, applied @0x46B3F5); Entity_ComputeSuspensionAndOrientation @0x4698A0]
+bool vehicle_suspension_fit(World &world, Entity &e, const CollisionMatrix &occupant,
+		int32_t corners[4][3], const bool *contacts, PlatFit &out, int32_t px, int32_t py,
+		int32_t pz, bool tank) {
 	auto &m = e.veh;
-	CollisionMatrix matrix = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam).q22;
+	CollisionMatrix matrix = occupant;
 	bool fit = true;
 	out.z_avg = out.positive_z_avg = pz;
 	// A pending request enters the latch seed. A client still missing the
@@ -458,19 +533,9 @@ bool vehicle_suspension_fit(World &world, Entity &e, int32_t corners[4][3], cons
 			// [orig: spans @0x469B93..0x469BA5 (tank) / @0x46B449..0x46B462
 			//  (tracked); Entity_ComputeBoundingQuad @0x45B6E0 halves both
 			//  @0x45B8E4..0x45B9A3; calls @0x469D54/@0x469F65, @0x46B50F/@0x46B6D6]
-			if (const auto *traits = world.vehicles.traits.get(e.item_id)) {
-				const int32_t hx = (traits->box_x_hi - traits->box_x_lo) >> 1;
-				const int32_t hy = (traits->box_y_hi - traits->box_y_lo) >> 1;
-				const int32_t local[4][3] = { { hx, hy, 0 }, { hx, -hy, 0 }, { -hx, -hy, 0 },
-					{ -hx, hy, 0 } };
-				for (int k = 0; k < 4; ++k) {
-					int32_t rotated[3];
-					matrix.rotate_point(local[k], rotated);
-					corners[k][0] = io::bam_add(px, rotated[0]);
-					corners[k][1] = io::bam_add(py, rotated[1]);
-					corners[k][2] = io::bam_add(pz, rotated[2]);
-				}
-			}
+			if (const auto *traits = world.vehicles.traits.get(e.item_id))
+				vehicle_bounding_quad(matrix, traits->box_y_hi - traits->box_y_lo,
+						traits->box_x_hi - traits->box_x_lo, px, py, pz, corners);
 			vehicle_clear_chassis(m);
 			const auto force = [&](int k, int32_t rate, const int32_t direction[3]) {
 				auto &f = m.chassis_forces[k];
@@ -530,17 +595,19 @@ bool vehicle_suspension_fit(World &world, Entity &e, int32_t corners[4][3], cons
 	out.pitch_bam = angles[1];
 	out.roll_bam = angles[2];
 	out.fwd_z = double(matrix.m[8]) / 4194304.0;
+	out.matrix = matrix;
 	return fit;
 }
 // The boat's two buoyancy/ground calls always pass waterContact=1 and a
 // null contact array. Its capsize threshold and slow inverted force differ
 // from the wheeled suspension callback used by the settled/airborne leg.
 // [orig: Entity_ComputeSuspensionOrientation @0x46C8E0;
-// calls @0x483D00/@0x483F2B]
+// calls @0x483D00/@0x483F2B, its matrix the solve's occupant]
 void vehicle_boat_suspension_fit(World &world, Entity &e, const VehicleTraits &t,
-		int32_t corners[4][3], PlatFit &out, int32_t px, int32_t py, int32_t pz) {
+		const CollisionMatrix &occupant, int32_t corners[4][3], PlatFit &out, int32_t px,
+		int32_t py, int32_t pz) {
 	auto &m = e.veh;
-	CollisionMatrix matrix = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam).q22;
+	CollisionMatrix matrix = occupant;
 	out.z_avg = out.positive_z_avg = pz;
 	int32_t a[3], b[3], normal[3];
 	int64_t edge[3], cross[3];
@@ -564,7 +631,7 @@ void vehicle_boat_suspension_fit(World &world, Entity &e, const VehicleTraits &t
 			if (std::all_of(std::begin(m.plat_acc), std::end(m.plat_acc),
 						[](int32_t v) { return v >= 0; })) {
 				vehicle_clear_chassis(m);
-				compute_chassis_forces(e, corners, 0);
+				vehicle_compute_chassis_orientation(e, corners, 0);
 				if ((e.flags & kEntityFlagInAir) != 0)
 					fit = false;
 			}
@@ -612,5 +679,6 @@ void vehicle_boat_suspension_fit(World &world, Entity &e, const VehicleTraits &t
 	out.pitch_bam = angles[1];
 	out.roll_bam = angles[2];
 	out.fwd_z = double(matrix.m[8]) / 4194304.0;
+	out.matrix = matrix;
 }
 } // namespace opennova::world::detail

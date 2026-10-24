@@ -1,4 +1,5 @@
-// Time-domain skeletal pose evaluation over sample_clip's baked frame table —
+// Time-domain skeletal pose evaluation over a clip's keys (sample_clip's whole table,
+// or a rig's clip sampling each key at its first read, Clip::key) —
 // the frame-window selection, interpolation, blend, BN## bone-tag parsing, and
 // .bad bind-rest math the shell binding's skeletal evaluator carried
 // (ADR 0028). The clip sampling itself stays anim_sample.h's; this header owns
@@ -25,8 +26,9 @@ struct PoseBone {
 
 // Sample a clip at a playhead (seconds) into parent-local bones. The pose
 // table holds frame_count + 1 keys (the header counts INTERVALS; the sampler
-// bakes every channel key). Loops cycle the frame_count interval windows (the
-// seam key ~= key 0; the original's loop-wrap window is unwalked); one-shots
+// samples every channel key), the window's two read through Clip::key. Loops
+// cycle the frame_count interval windows (the seam key ~= key 0; the original's
+// loop-wrap window is unwalked); one-shots
 // play every window and HOLD the true final key — a one-frame clip is one
 // full window of motion, not a static pose. A clip with no frames clears the
 // output. [orig: BoneAnim_FindKeyframeAtTime @0x410220 — hold-last past the

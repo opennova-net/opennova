@@ -358,6 +358,53 @@ func test_crosshair_requires_active_weapon() -> void:
 		"An armed hip stance emits the five tapered regions (14 triangles).")
 
 
+# The scene frame calls the gameplay overlay pass only past its call site's gates (the F1
+# help, the dead bit, a death.mnu trigger or its latch, a chase view on foot, camera mode 4 and
+# up; GameWorld.get_last_frame_hud_pass_called): an uncalled pass draws none of its elements,
+# the crosshair among them [orig: Render_ProcessMainSceneFrame @0x5CAB2B..0x5CAD04, the
+# HUD_RenderAllOverlays calls @0x5CACE3 / @0x5CAD04; HUD_RenderAllOverlays - the
+# HUD_DrawCrosshair call @0x5A84E5].
+func test_the_overlay_pass_draws_only_where_the_scene_frame_calls_it() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"ALPHAFADE 30 50 3",
+	]), PackedStringArray(["cross01.tga"]), {
+		"cross01.tga": Vector2i(8, 8),
+	})
+	var hud := _make_overlay()
+	hud.configure(fixture.layout, fixture.root)
+	hud.set_weapon_state(true, -1, -1, 0, 0, false, false, false, 0)
+	assert_eq(hud.get_draw_list_stats().tris, 14, "the called pass draws the crosshair")
+	hud.set_overlay_pass_called(false)
+	assert_eq(hud.get_draw_list_stats().tris, 0, "an uncalled pass draws none of it")
+	hud.set_overlay_pass_called(true)
+	assert_eq(hud.get_draw_list_stats().tris, 14, "the next called pass draws it again")
+
+
+# BMS action 28 sub 37's item flash rebuilds the layer table at level 0 and
+# keeps the stored hud_detail level; the round init's overlay-buffer reset
+# rebuilds it at the stored level again [orig: RenderState_SetLayerVisibilityByIndex
+# @0x5A3020 -> CRenderState_SetLayerVisibility(0) @0x5A3031; HUD_ResetAllOverlayBuffers
+# @0x59DD40 - g_HUDDetailLevel @0x59DD6F, the CRenderState_SetLayerVisibility call
+# @0x59DD75].
+func test_the_overlay_buffer_reset_rebuilds_the_layer_table_at_the_stored_level() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"ALPHAFADE 30 50 3",
+		"HUDDECLUT_XHAIRS 0 1 0 0",
+	]), PackedStringArray(["cross01.tga"]), {
+		"cross01.tga": Vector2i(8, 8),
+	})
+	var hud := _make_overlay()
+	hud.configure(fixture.layout, fixture.root)
+	hud.set_weapon_state(true, -1, -1, 0, 0, false, false, false, 0)
+	hud.set_hud_detail_level(1)
+	assert_eq(hud.get_draw_list_stats().tris, 14, "level 1 shows the crosshair row")
+	hud.set_item_flash(3, 0x40)
+	assert_eq(hud.get_draw_list_stats().tris, 0, "the flash rebuilds the table at level 0")
+	assert_eq(hud.get_hud_detail_level(), 1, "and keeps the stored level")
+	hud.reset_overlay_buffers()
+	assert_eq(hud.get_draw_list_stats().tris, 14, "the reset rebuilds it at the stored level")
+
+
 # install_weapon is set_weapon over a PlayerHudWeaponDef's slice (the
 # presenter's weapon change), and clear_weapon for none: the clip graphic and
 # one round icon per round in the clip draw at the HUDCLIP anchor.
@@ -932,6 +979,12 @@ func test_player_view_effects_draw_retail_asset_stack() -> void:
 			+ "Render_ProcessMainSceneFrame @ 0x5cac4b, after the scene composites].")
 	assert_not_null(veil.material as ShaderMaterial,
 			"The veil rect samples the opennova_sun_veil_alpha global via its shader.")
+	# Retail skips the quad when the glare is 2 or less [orig:
+	# Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8b0 (cmp @ 0x5ad925, jle @ 0x5ad928)]:
+	# a gated frame (a zero alpha) blends nothing over the surface.
+	var veil_shader := (veil.material as ShaderMaterial).shader if veil.material is ShaderMaterial else null
+	assert_true(veil_shader != null and veil_shader.code.contains("discard;"),
+			"A gated frame's veil fragments discard: no full-surface zero-alpha blend.")
 	assert_true(effects.is_nvg_mask_visible(),
 			"First-person-visible NVG draws the NVG.tga mask and gain scale "
 			+ "[orig: NVG_DrawMaskAndGain @0x5cffab..0x5d0055].")
@@ -964,10 +1017,18 @@ func test_player_view_effects_damage_feedback_quads() -> void:
 			"and the red vignette before the revive tint.")
 	assert_false(white.show_behind_parent,
 			"The quads follow the binocular/NVG draw, not precede it.")
-	var tint_material := revive.material as CanvasItemMaterial
+	# The multiply rides a preloaded program (made as the script loads), not a
+	# CanvasItemMaterial, whose program waits for the first idle frame: past a
+	# mission load, the reveal (D-NET-NEW-LF-28).
+	var tint_material := revive.material as ShaderMaterial
 	assert_not_null(tint_material,
 			"The revive tint multiplies the frame rather than covering it.")
-	assert_eq(tint_material.blend_mode, CanvasItemMaterial.BLEND_MODE_MUL)
+	if tint_material != null:
+		assert_not_null(tint_material.shader)
+		assert_true(tint_material.shader.code.contains("render_mode blend_mul;"),
+				"the multiply blend, the default texel x colour")
+		assert_false(tint_material.shader.code.contains("void fragment"),
+				"nothing else: the program a BLEND_MODE_MUL CanvasItemMaterial makes")
 
 	# A full white flash: opaque white, no texture involved.
 	effects.update_damage_feedback(255, 0, 0, 255)
@@ -1074,7 +1135,7 @@ func test_message_log_lists_expired_lines() -> void:
 
 # The stdbox border pieces bind the boxtile camo as a second texture stage the
 # flat HUD material combines, screen-anchored; the fill does not
-# [orig: CGfxTexture_Create(BoxTexA, BoxTexB, 0x651, 2) @0x56af3c, applied for
+# [orig: GfxShader_CreateTwoTexture(BoxTexA, BoxTexB, 0x651, 2) @0x56af3c, applied for
 #  the pieces @0x56b902; HUD_DrawTexturedQuad_0 @0x56b3e0].
 func test_stdbox_pieces_carry_the_camo_stage() -> void:
 	var fixture := _load_temp_layout(PackedStringArray([
@@ -1102,16 +1163,21 @@ func test_stdbox_pieces_carry_the_camo_stage() -> void:
 	# @0x56b700, the diffuse @0x56b70e..0x56b713; BoxTexture_LoadAndSetupUVRegions
 	# 0x651 @0x56ae78 / @0x56af2d].
 	var pieces := 0
-	var fills := 0
 	for row: Dictionary in _flat_rows(hud, Vector2i(128, 128)):
 		assert_true(_flat_doubled(row), "a box quad carries the MODULATE2X flag")
 		assert_eq(row.colors[0].to_argb32(), 0xFF7F7F7F, "at the raw half-bright diffuse")
 		if row.uvs[0].x >= 4.0:
 			pieces += 1
-		else:
-			fills += 1
 	assert_eq(pieces, 8, "the eight pieces add the camo stage")
-	assert_gt(fills, 0, "the fill tiles draw the stage-0 doubling alone")
+	# The fill is ONE wrap-addressed quad on the atlas's lifted 32 px brush cell
+	# [orig: BoxTexture_LoadAndSetupUVRegions @0x56acd0 ("BoxCtr" @0x56ae73);
+	#  HUD_StdboxDrawFillWrapTiled @0x56b5d0, one strip @0x56b6f5].
+	var fills := _flat_rows(hud, Vector2i(32, 32))
+	assert_eq(fills.size(), 1, "the fill draws one quad, not a tile per cell")
+	if fills.size() == 1:
+		assert_true(_flat_doubled(fills[0]), "the fill draws the stage-0 doubling alone")
+		assert_eq(fills[0].uvs[0].x, 32.0, "its UV carries only the wrap flag")
+		assert_eq(fills[0].colors[0].to_argb32(), 0xFF7F7F7F, "at the raw half-bright diffuse")
 	await get_tree().process_frame
 	assert_true(is_instance_valid(hud), "The two-stage pieces render safely.")
 	hud.set_message_log_shown(false)
@@ -1482,10 +1548,12 @@ func test_sighted_m4_builds_all_authored_sight_card_rows() -> void:
 	assert_almost_eq(card.row_rect(2).size.x, reticle_authored.size.x * 0.75, 2.0,
 		"The default sight-scale index draws the red-dot row at three quarters width")
 	var reticle_row := card.get_child(2) as Control
-	var reticle_material := reticle_row.material as CanvasItemMaterial
+	# The additive program, preloaded (D-NET-NEW-LF-28): the program a BLEND_MODE_ADD
+	# CanvasItemMaterial makes, made as the card's script loads.
+	var reticle_material := reticle_row.material as ShaderMaterial
 	assert_not_null(reticle_material, "The red-dot row gets a canvas material")
 	if reticle_material != null:
-		assert_eq(reticle_material.blend_mode, CanvasItemMaterial.BLEND_MODE_ADD,
+		assert_true(reticle_material.shader.code.contains("render_mode blend_add;"),
 			"The M4 red-dot layer renders additively")
 	# The presenter folds the binocular suppression into the card switch.
 	card.set_card_up(false)

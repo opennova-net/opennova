@@ -11,6 +11,7 @@
 #include <runtime/mission/event_runtime.h>
 #include <formats/mission/bms.h>
 #include <runtime/world/ai.h>
+#include <base/io/bam.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h>
@@ -56,7 +57,7 @@ static Entity make_gun(uint16_t ssn, float x, float y, float z, int16_t yaw) {
     e.has_item_def = true; // seats need the def (D-NET-422)
     e.has_graphic_model = true;
     e.position = {x, y, z};
-    e.yaw = yaw;
+    e.heading = world::placed_heading_bam(yaw);
     Seat s;
     s.type = SeatType::Gunner;
     e.seats.push_back(s);
@@ -131,13 +132,19 @@ static void test_mount_config_lifecycle() {
     w.tables.weapons.entries[1].clipsize = -1;
     w.tables.weapons.entries[1].valid = true;
     const EntityHandle gh = w.registry.spawn(1, gun);
+    // The gun's class init binds its slot at the spawn; the mount below binds nothing
+    // [orig: Entity_InitBoneReferences @0x441470 -> WeaponSlot_InitFromEntityDef (the
+    //  call @0x441482); Entity_AttachToUseGunSlot @0x546B80].
+    CHECK(w.vehicles.init_weapon_slot_from_entity_def(*w.registry.get(gh)));
     Entity soldier = make_soldier(100, 0.f, 0.f, 0.f);
     soldier.equipped_adm_index = 7;
     soldier.flags |= 0x100u;
     soldier.engine_flags |= 0x100u;
     const EntityHandle sh = w.registry.spawn(0, soldier);
+    // The player-flag body answers the script by its DcbId, 10000 + its slot byte 0
+    // (entity_dcb_id, D-NET-NEW-L4-21), not its record word 100.
 
-    CHECK(w.commands.mount(100, 200));
+    CHECK(w.commands.mount(10000, 200));
     CHECK(w.registry.get(sh)->mounted_config_valid);
     CHECK(w.registry.get(sh)->mounted_config == 0);
     CHECK(w.registry.get(sh)->mount_bone == 7);
@@ -145,15 +152,16 @@ static void test_mount_config_lifecycle() {
     // [orig: Entity_AttachToUseGunSlot @0x546c56-0x546c7c]
     CHECK((w.registry.get(sh)->flags & 0x40u) == 0);
     CHECK((w.registry.get(sh)->engine_flags & 0x40u) == 0);
-    CHECK(w.registry.get(sh)->equipped_adm_index == 1);
-    CHECK(w.registry.get(sh)->pre_use_gun_equipped_adm_index == 7);
+    // The attach writes no AdmDef byte (NEW-L7-3) [orig: Entity_AttachToUseGunSlot
+    // @0x546B80].
+    CHECK(w.registry.get(sh)->equipped_adm_index == 7);
     CHECK(w.registry.get(sh)->use_gun_slot_swapped);
     CHECK(w.registry.get(gh)->primary_weapon_owner == sh);
     CHECK(w.registry.get(gh)->primary_weapon_slot_adm == 1);
     CHECK(w.registry.get(gh)->primary_weapon_slot.clip == -1);
     const auto occupied = std::make_unique<World::Snapshot>(w.snapshot());
 
-    CHECK(w.commands.dismount(100));
+    CHECK(w.commands.dismount(10000));
     CHECK(!w.registry.get(sh)->mounted_config_valid);
     CHECK(w.registry.get(sh)->mounted_config == 0);
     CHECK(w.registry.get(sh)->mount_bone == 0);
@@ -161,15 +169,16 @@ static void test_mount_config_lifecycle() {
     CHECK((w.registry.get(sh)->engine_flags & 0x40u) == 0);
     CHECK(w.registry.get(sh)->equipped_adm_index == 7);
     CHECK(!w.registry.get(sh)->use_gun_slot_swapped);
-    CHECK(!w.registry.get(gh)->primary_weapon_owner.valid());
+    // The gun's MountSlot keeps its owner through the detach [orig: Entity_DetachFromVehicle
+    // @0x4355F0 - no +0x24 store].
+    CHECK(w.registry.get(gh)->primary_weapon_owner == sh);
 
     w.restore(*occupied);
     CHECK(w.registry.get(sh)->mounted);
     CHECK(w.registry.get(sh)->mounted_config_valid);
     CHECK(w.registry.get(sh)->mounted_config == 0);
     CHECK(w.registry.get(sh)->mount_bone == 7);
-    CHECK(w.registry.get(sh)->equipped_adm_index == 1);
-    CHECK(w.registry.get(sh)->pre_use_gun_equipped_adm_index == 7);
+    CHECK(w.registry.get(sh)->equipped_adm_index == 7);
     CHECK(w.registry.get(sh)->use_gun_slot_swapped);
     CHECK(w.registry.get(gh)->primary_weapon_owner == sh);
     CHECK(w.registry.get(gh)->emplaced_config_valid);
@@ -543,7 +552,7 @@ int main() {
         // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
         vehicle.item_attrib = world::kItemAttribPlayerControl;
         vehicle.position = {100.f, 200.f, 7.f};
-        vehicle.yaw = -90;
+        vehicle.heading = world::placed_heading_bam(-90);
         Seat control;
         control.type = SeatType::Controller;
         control.seat_local = {-0.7148895f, -0.1189880f, 2.1048889f};
@@ -580,23 +589,23 @@ int main() {
         ctx.is_authority = true;
         w.update_all_entities(ctx);
         AiEntity *ae = ai.at(idx);
-        CHECK(ae->pos[0] == to_fixed(10.0));
-        CHECK(ae->pos[1] == to_fixed(20.0));
-        CHECK(ae->pos[2] == to_fixed(5.0));
+        CHECK(ae->self->position.x.q16 == to_fixed(10.0));
+        CHECK(ae->self->position.y.q16 == to_fixed(20.0));
+        CHECK(ae->self->position.z.q16 == to_fixed(5.0));
         CHECK(ae->inf.anim_state == 67); // anim_emplaced request
         CHECK(ae->inf.clip_phase == 42); // data-less body keeps its current channel
 
         // Move the gun -> the gunner follows next tick.
         w.registry.get(gh)->position = {30.f, 40.f, 5.f};
         w.update_all_entities(ctx);
-        CHECK(ae->pos[0] == to_fixed(30.0));
-        CHECK(ae->pos[1] == to_fixed(40.0));
+        CHECK(ae->self->position.x.q16 == to_fixed(30.0));
+        CHECK(ae->self->position.y.q16 == to_fixed(40.0));
 
         // Even with a locomotion target set, a mounted gunner does NOT path-follow.
         ae->brain.f[AiBrain::kOutSpeed] = 9999;
         ae->brain.f[AiBrain::kWorkPosX] = to_fixed(999.0);
         w.update_all_entities(ctx);
-        CHECK(ae->pos[0] == to_fixed(30.0)); // still seated, not moved toward 999
+        CHECK(ae->self->position.x.q16 == to_fixed(30.0)); // still seated, not moved toward 999
 
         // Vehicle gone -> auto-dismount, occupant resumes normal AI.
         w.registry.despawn(gh);
@@ -655,8 +664,8 @@ int main() {
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
         Entity gun = make_gun(200, 10.f, 20.f, 5.f, 37);
-        gun.pitch = -12;
-        gun.roll = 17;
+        gun.pitch_bam = world::spawn_angle_bam(-12);
+        gun.roll_bam = world::spawn_angle_bam(17);
         gun.seats[0].yaw_offset = 11;
         w.registry.spawn(1, gun);
         const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
@@ -683,9 +692,13 @@ int main() {
         // After Entity_RequestVehicleAttach establishes the seat base, later UseGun
         // look updates remain independent while the body stays in the carried frame.
         // [orig: request pre-snap @0x4364a0; UseGun save/restore @0x546416..0x546664]
-        CHECK(occ->yaw == 80);
-        CHECK(occ->pitch == -12);
-        CHECK(occ->roll == 17);
+        CHECK(occ->heading == kLookHeading); // the Yaw word is the live look
+        // So is the Pitch word (here the unchased look 0); the seat's -12 is the
+        // body pitch's, its Roll word the occupant's (D-NET-NEW-L6-3). [orig:
+        //  Entity_AttachToBoneAndUpdateTransform @0x546632 (Roll), @0x546664 (the
+        //  Pitch word restored); Entity_UpdateInfantryAI's look chase @0x4BEF97]
+        CHECK(occ->pitch_bam == 0 && ae->pitch == 0);
+        CHECK(occ->roll_bam == world::spawn_angle_bam(17));
         CHECK(ae->heading == kLookHeading);
         CHECK(ae->inf.body_heading == kSeatHeading);
         CHECK(ae->inf.leg_yaw[0] == kSeatHeading);
@@ -713,8 +726,8 @@ int main() {
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
         Entity gun = make_gun(200, 10.f, 20.f, 5.f, 37);
-        gun.pitch = -12;
-        gun.roll = 17;
+        gun.pitch_bam = world::spawn_angle_bam(-12);
+        gun.roll_bam = world::spawn_angle_bam(17);
         gun.seats[0].yaw_offset = 11;
         w.registry.spawn(1, gun);
         const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
@@ -734,16 +747,21 @@ int main() {
         ae->body_pitch = 0x12345678;
         ae->roll = 0x23456789;
 
-        CHECK(w.commands.mount(100, 200));
+        // The local player's body answers the script by its DcbId, 10000 + its slot byte 0
+        // (entity_dcb_id, D-NET-NEW-L4-21), not its record word 100.
+        CHECK(w.commands.mount(10000, 200));
         CHECK(ae->heading == request_heading);
         CHECK(ae->inf.target_heading == request_heading);
         ae->inf.target_heading = look_heading; // first post-attach mouse look
         CHECK(ai.pose_if_mounted(*ae, w));
         const Entity *occ = w.registry.get(sh);
         CHECK(occ != nullptr);
-        CHECK(occ->yaw == 137); // degree-rounded registry/wire/motor look mirror
-        CHECK(occ->pitch == -12);
-        CHECK(occ->roll == 17);
+        CHECK(occ->heading == look_heading); // the registry/wire/motor Yaw word is the look
+        // The Pitch word is the mouse look too (D-NET-NEW-L6-3) [orig:
+        //  Input_HandleActionBinding_0 @0x4E0420
+        //  (the Pitch stores @0x4E0D39..0x4E0D5C, @0x4E0F50, @0x4E111C) writes +0x14]; the Roll word the seat's.
+        CHECK(occ->pitch_bam == kLookPitch);
+        CHECK(occ->roll_bam == world::spawn_angle_bam(17));
         CHECK(ae->heading == look_heading); // full precision, never the seat heading
         CHECK(ae->pitch == kLookPitch);
         CHECK(ae->inf.target_heading == look_heading);
@@ -770,7 +788,7 @@ int main() {
         vehicle.has_item_def = true; // seats need the def (D-NET-422)
         vehicle.has_graphic_model = true;
         vehicle.position = {10.f, 20.f, 5.f};
-        vehicle.yaw = 15;
+        vehicle.heading = world::placed_heading_bam(15);
         Seat passenger;
         passenger.type = SeatType::Passenger;
         passenger.yaw_offset = 90;
@@ -789,7 +807,8 @@ int main() {
         Entity *occ = w.registry.get(sh);
         CHECK(occ->mounted);
         CHECK(occ->mount_target == vh);
-        CHECK(occ->yaw == 105);
+        // The carrier's word turned by the seat's 90-degree offset.
+        CHECK(occ->heading == opennova::io::bam_sub(world::placed_heading_bam(15), 0x40000000));
 
         TickContext ctx{};
         ctx.is_authority = true;
@@ -804,6 +823,7 @@ int main() {
         w.registry.configure_pool(0, 16);
         const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
         AiSystem ai;
+        ai.bind_registry(&w.registry);
         const int idx = ai.attach(sh);
         ai.at(idx)->net_id = 100;
         ai.at(idx)->inf.active = true;

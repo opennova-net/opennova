@@ -24,7 +24,7 @@ namespace opennova::hud {
 // their colour first (the HUD's half-bright drawers, the menus' text sink), so
 // a half-bright colour reads at full brightness. The underline pass is
 // untextured and doubles its colour on the CPU instead (GameFontUnderline).
-// [orig: GameFont_LoadFromBlob @0x674740 — sub_676D50(page, 0x651) @0x674825,
+// [orig: GameFont_LoadFromBlob @0x674740 — GfxShader_CreateForTexture(page, 0x651) @0x674825,
 //  kept at font+0xA0[page] @0x67483B; CGameFont_Create @0x674b9c / @0x674d1e,
 //  the same word; CGameFont_DrawText @0x6752c0 binds font+0xA0[page] per run,
 //  GfxShader_ApplyPassChecked @0x675a9e / @0x675d10]

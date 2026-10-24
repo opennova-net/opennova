@@ -126,13 +126,15 @@ struct GameEntitySnapshot {
 	// infantry motor (AiSystem::mirror_wire_anim). Defaults keep snapshot-only tests on the
 	// retail spawn/idle bytes (44/0). (D-NET-159)
 	uint8_t anim_state_id = 44;
-	uint8_t anim_pending_id = 0;
+	// The whole +0x2B8 dword (snapshot_anim_byte tests it whole).
+	int32_t anim_pending_id = 0;
 	uint8_t anim_channel_ratio = 0;
-	// InfantryCompactRecord's two witnessed orientation sources. These stay full
+	// InfantryCompactRecord's witnessed orientation sources. These stay full
 	// BAM32 in the transport-neutral snapshot; connection_fan performs the retail
-	// byte packing from entity+0x2EC/+0x2D0. They add no wire fields.
-	int32_t infantry_target_heading_bam = 0; // entity+748: clamp around heading, rounded high byte
-	int32_t infantry_aim_pitch_bam = 0;      // entity+720: rounded high byte (wire aim_yaw_byte)
+	// byte packing from entity+0x1A8/+0x2EC/+0x2D0. They add no wire fields.
+	int32_t infantry_target_heading_bam = 0; // entity+424 (+0x1A8): the yaw byte's source
+	int32_t infantry_aim_heading_bam = 0;    // entity+748 (+0x2EC): clamp around heading, rounded high byte
+	int32_t infantry_aim_pitch_bam = 0;      // entity+720: rounded high byte (wire aim_pitch_byte)
 	// entity+0x157 attachBoneId — the RAW wire seat bone this player mounted by; the mounted
 	// player record's byte 0 [orig: @0x4c0a1a reads +0x157 when mounted]. 0 when unmounted.
 	uint8_t veh_bone = 0;
@@ -202,6 +204,10 @@ struct GameEntitySnapshot {
 	// integration step; pool-0 per-tick displacement is not stored by our movers and stays 0
 	// (tracked D-NET-139 residual — infantry priority rides distance/angle/age).
 	uint8_t tick_speed_q6 = 0;
+	// entity+0 boundRadius (16.16), which the priority list subtracts from the row's
+	// distance before the tile shift [orig: Server_BuildEntityPriorityList @0x50E8DC
+	// (pool 0), @0x50EDC9 (pool 1)].
+	int32_t bound_radius_q16 = 0;
 	// pool-1: a live controller occupies the vehicle (entity+0x170) [orig: @0x50efc9 — +200].
 	bool occupied = false;
 	// pool-0: mounted AND the carrier def lacks attrib 0x20 (EWEAP) — such riders LOSE the
@@ -224,5 +230,14 @@ struct GameEntitySnapshot {
 	// wire field; stamped by the host caller that knows the connection list.
 	bool owner_hidden = false;
 };
+
+// The anim byte the player and infantry records carry: the pending dword's low byte while the
+// dword is nonzero, else the current state's. [orig: NetPacket_SerializePlayerState @0x4C09C0 -
+// `cmp dword ptr [edi+2B8h], 0` @0x4C0CC7, `mov cl, [edi+2B8h]` @0x4C0CD6, `mov cl, [edi+2BCh]`
+// @0x4C0CDE; NetPacket_SerializeInfantryEntityState @0x4C0320 - @0x4C0988 / @0x4C0997 /
+// @0x4C099F]
+inline uint8_t snapshot_anim_byte(const GameEntitySnapshot &s) {
+	return s.anim_pending_id != 0 ? static_cast<uint8_t>(s.anim_pending_id) : s.anim_state_id;
+}
 
 } // namespace opennova

@@ -49,6 +49,11 @@ public:
 	// local-player origin, not the first-person camera offset.
 	void advance_frame(const Vector3 &p_player_position);
 	void force_capture();
+	// The mission load's render subsystems: the cube's device objects (the blit's shader,
+	// cubemap and pipeline) ahead of the first capture's copy (engine
+	// renderer/environment_cube.h creates_environment_cube carries the witness,
+	// D-NET-NEW-LF-13).
+	void create_cube_device();
 
 	bool is_cube_ready() const { return cube_ready_; }
 	bool is_capture_pending() const { return capture_pending_; }
@@ -93,6 +98,7 @@ private:
 	bool _publish_completed_capture();
 	bool _wire_cube(RenderingServer *p_rs);
 	void _publish_on_render_thread();
+	void _create_on_render_thread();
 	void _release_on_render_thread();
 	void _publish_inactive();
 

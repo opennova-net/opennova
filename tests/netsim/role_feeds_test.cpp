@@ -6,17 +6,23 @@
 // bare-role fallbacks.
 // [orig: NapiNPClientMsg_0x01D @0x430840; StatScreen_PopulateStatResultsList
 //  @0x562240; UI_UpdateDeathScreenContent @0x5536a0]
+#include <base/gameprofile/game_type.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/effect_pose_index.h>
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/role_feeds.h>
+#include <runtime/inmatch/host_settings.h> // mission_session_title
+#include <runtime/hud/hud_math.h> // friendly_tag_fallback_name
 #include <runtime/replication/client_world_materializer.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/radio_call.h>
 
 #include <cstdio>
+#include <initializer_list>
 #include <map>
+#include <memory>
 #include <string>
 
 using namespace opennova;
@@ -28,7 +34,374 @@ static int failures = 0;
 		if (!(c)) { std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++failures; } \
 	} while (0)
 
+// The weapon inset's friendly name (D-NET-655): Entity_GetDisplayName of the
+// HUD target cursor, the aim lock else the head-look target, over the live
+// rules word, the HUD's team and the role's S2C 0x4C slot table; none when
+// the lookup names none. The cursor is the HUD pass's record as the scene frame
+// found it (D-NET-NEW-L8-48): each read below runs one pass's build, then the
+// next scene frame's read; the stale cases follow.
+// [orig: Render_WeaponInsetScene -- @0x5CA0A4..0x5CA0B5; HUD_BuildEntityInfo
+//  -- the lock @0x4B87F0, the head-look target @0x4B881F; Entity_GetDisplayName
+//  @0x59BF70; HUD_RenderAllOverlays @0x5A8070 -- the build @0x5A80BC]
+static void inset_target_name_cases() {
+	auto runtime_heap = std::make_unique<ClientRuntime>("host");
+	ClientRuntime &host_runtime = *runtime_heap;
+	// The kernel on the heap: main's frame already holds several (1 MB stack).
+	auto kernel_heap = std::make_unique<mission::MissionKernel>();
+	mission::MissionKernel &kernel = *kernel_heap;
+	kernel.world.registry.configure_pool(0, 8);
+	world::Entity local;
+	local.kind = world::EntityKind::Organic;
+	local.team = 1;
+	const world::EntityHandle me = kernel.world.registry.spawn(0, local);
+	kernel.world.cached.local_player = me;
+	kernel.world.ai.attach(me);
+	world::Entity mate;
+	mate.kind = world::EntityKind::Organic;
+	mate.team = 1;
+	mate.display_name = "Mate";
+	const world::EntityHandle mate_h = kernel.world.registry.spawn(0, mate);
+	world::Entity foe = mate;
+	foe.team = 2;
+	foe.display_name = "Foe";
+	const world::EntityHandle foe_h = kernel.world.registry.spawn(0, foe);
+	world::Entity unnamed = mate;
+	unnamed.display_name.clear();
+	const world::EntityHandle unnamed_h = kernel.world.registry.spawn(0, unnamed);
+	world::Entity player = mate;
+	player.display_name = "Body";
+	player.flags |= world::kEntityFlagPlayer;
+	const world::EntityHandle player_h = kernel.world.registry.spawn(0, player);
+	RoleView host;
+	host.runtime = &host_runtime;
+	host.kernel = &kernel;
+	world::AiEntity *body = kernel.world.ai.for_handle(me);
+	CHECK(body != nullptr);
+	if (body != nullptr) {
+		// The targeting update writes the lock into both (local_player_targeting.cpp).
+		const auto lock = [body](world::EntityHandle h) {
+			body->inf.combat_target = h;
+			body->slot.f[3] = world::AiSlot::target_word(world::TargetRef{h});
+		};
+		// One frame: the HUD pass builds the record, the next scene frame's inset reads it.
+		const auto inset = [&]() {
+			build_hud_entity_info(kernel, false);
+			kernel.local.note_hud_scene_head();
+			return hud_role_facts(host).inset_target_name;
+		};
+		CHECK(inset().empty()); // no cursor
+		body->inf.head_look_target = mate_h;
+		CHECK(inset() == "Mate");
+		// The lock outranks the head-look target; another team names none.
+		lock(foe_h);
+		CHECK(inset().empty());
+		// An unnamed teammate: '^' + the fallback at its pool-encoded id.
+		lock(unnamed_h);
+		CHECK(inset() ==
+				hud::friendly_tag_fallback_name(unnamed_h.packed));
+		// FriendlyTag 0 in the live rules word nulls every name.
+		kernel.world.rules.mpattrib = 0x400;
+		lock(mate_h);
+		CHECK(inset().empty());
+		kernel.world.rules.mpattrib = 0;
+		// A player names the first 0x4C slot driving it, never its body's
+		// name; with none it is unnamed.
+		lock(player_h);
+		CHECK(inset().empty());
+		replication::ClientRosterSlot &slot = host_runtime.state().roster[3];
+		slot.bound = true;
+		slot.name = "Pat";
+		slot.registry_clan = "TAG";
+		slot.entity_slot = static_cast<int16_t>(player_h.slot());
+		host_runtime.state().visible_players.push_back({3, player_h.packed});
+		CHECK(inset() == "Pat <ch>TAG<co>");
+		// A lock on a round (a flare the heat lock took, the +0xC word) is the cursor: no
+		// pool holds a round, so the inset names nothing, whatever the head-look target
+		// [orig: HUD_BuildEntityInfo @0x4B8440 (@0x4B87ED..0x4B882D); Render_WeaponInsetScene
+		//  @0x5C9740 (the pool test @0x5C9F78)] (D-NET-64).
+		lock(world::EntityHandle{});
+		body->inf.head_look_target = mate_h;
+		CHECK(inset() == "Mate");
+		body->slot.f[3] = world::AiSlot::target_word(world::TargetRef::of_round(3));
+		CHECK(inset().empty());
+		// An entity lock in the same word names its entity again.
+		lock(mate_h);
+		CHECK(inset() == "Mate");
+		// The cursor is the word alone, read once: a word the guided round's init wrote
+		// without the combat target names the word's entity, and a combat target over a
+		// zero word is no cursor, so the head-look target names itself
+		// [orig: HUD_BuildEntityInfo @0x4B8440 - the word @0x4B87F0, the head-look store
+		//  only for a zero word (`cmp dword ptr [esi+168h], 0` @0x4B8816, @0x4B881F)].
+		body->inf.combat_target = world::EntityHandle{};
+		body->slot.f[3] = world::AiSlot::target_word(world::TargetRef{unnamed_h});
+		CHECK(inset() ==
+				hud::friendly_tag_fallback_name(unnamed_h.packed));
+		body->inf.combat_target = foe_h;
+		body->slot.f[3] = 0;
+		CHECK(inset() == "Mate");
+		// The scene frame reads ahead of its own pass: the inset names the last pass's
+		// cursor, and this frame's build shows on the next frame [orig: Render_ProcessMainSceneFrame
+		//  @0x5CA0F0 - the inset @0x5CA949 ahead of the pass @0x5CACE3 / @0x5CAD04].
+		body->inf.combat_target = world::EntityHandle{};
+		body->inf.head_look_target = unnamed_h;
+		kernel.local.note_hud_scene_head();
+		CHECK(hud_role_facts(host).inset_target_name == "Mate");
+		build_hud_entity_info(kernel, false);
+		CHECK(hud_role_facts(host).inset_target_name == "Mate");
+		kernel.local.note_hud_scene_head();
+		CHECK(hud_role_facts(host).inset_target_name ==
+				hud::friendly_tag_fallback_name(unnamed_h.packed));
+		// A pass that returns at its head builds nothing: the round-over latch, the white hit
+		// flash and a missing local player each leave the last build standing
+		// [orig: HUD_RenderAllOverlays @0x5A8084 / @0x5A8098 / @0x5A80A3, ahead of the build
+		//  @0x5A80BC].
+		body->inf.head_look_target = mate_h;
+		build_hud_entity_info(kernel, true);
+		kernel.local.note_hud_scene_head();
+		CHECK(hud_role_facts(host).inset_target_name ==
+				hud::friendly_tag_fallback_name(unnamed_h.packed));
+		kernel.local.view.flash.white = 40;
+		CHECK(inset() == hud::friendly_tag_fallback_name(unnamed_h.packed));
+		kernel.local.view.flash.white = 0;
+		kernel.world.cached.local_player = world::EntityHandle{};
+		build_hud_entity_info(kernel, false);
+		kernel.world.cached.local_player = me;
+		kernel.local.note_hud_scene_head();
+		CHECK(hud_role_facts(host).inset_target_name ==
+				hud::friendly_tag_fallback_name(unnamed_h.packed));
+		CHECK(inset() == "Mate");
+		// The destroy zeroes the cursor word: a target destroyed since the build names none
+		// until the next build [orig: Entity_Destroy @0x43E810 - @0x43E89C..0x43E8A4].
+		kernel.world.registry.despawn(mate_h);
+		CHECK(hud_role_facts(host).inset_target_name.empty());
+		// On a joiner the cursor may name a decoded remote person: the pool-0 entity retail's
+		// client built for its row, named by the same lookup over the row's Flags word, team
+		// byte and Name, a player through the 0x4C slot driving its slot, with no team gate
+		// (D-NET-NEW-L8-53) [orig: Entity_GetDisplayName @0x59BF70 - the Player test
+		//  @0x59BFA0, the team gate @0x59BFB2, the slot walk @0x59C07A..0x59C0BB].
+		replication::ClientState &cs = host_runtime.state();
+		replication::ClientEntityState &remote = cs.upsert(0x0006);
+		remote.rm_entity_flags = world::kEntityFlagPlayer;
+		remote.team = 2;
+		remote.team_known = true;
+		remote.display_name = "Body";
+		replication::ClientEntityState &rifleman = cs.upsert(0x0007);
+		rifleman.team = 1;
+		rifleman.team_known = true;
+		rifleman.display_name = "Rifleman";
+		const auto scene_names = [&](uint16_t wire_handle) {
+			world::HudTargetCursor cursor;
+			cursor.wire_person = wire_handle;
+			kernel.local.view_tracker.hud_cursor_at_scene = cursor;
+			return hud_role_facts(host).inset_target_name;
+		};
+		CHECK(scene_names(0x0006).empty()); // a player no 0x4C slot drives
+		replication::ClientRosterSlot &wire_slot = cs.roster[4];
+		wire_slot.bound = true;
+		wire_slot.name = "Remote";
+		wire_slot.entity_slot = 6;
+		cs.visible_players.push_back({4, 0x0006});
+		CHECK(scene_names(0x0006) == "Remote"); // the other team's player too
+		CHECK(scene_names(0x0007) == "Rifleman"); // a non-player of the HUD team
+		rifleman.display_name.clear();
+		CHECK(scene_names(0x0007) == hud::friendly_tag_fallback_name(0x0007));
+		rifleman.team = 2;
+		CHECK(scene_names(0x0007).empty()); // a non-player of another team
+		kernel.world.rules.mpattrib = 0x400;
+		CHECK(scene_names(0x0006).empty()); // FriendlyTag 0 nulls every name
+		kernel.world.rules.mpattrib = 0;
+		CHECK(scene_names(0x0009).empty()); // no row holds the handle
+		kernel.local.view_tracker.hud_cursor_at_scene = world::HudTargetCursor{};
+	}
+}
+
+// The expansion's override table is searched before vmacros.bin: its entries
+// win, a key it lacks reads vmacros.bin's, and the radio chat line resolves the
+// same way [orig: HUD_DrawRadioTitleMenu @0x5BFBD5 / @0x5BFC5D, HUD_DrawEmotesMenu
+// @0x5BFF45 / @0x5BFFCD, VMacros_GetMacroText @0x5B7196 ->
+// TextResource_FindEntryBySectionAndKey @0x75D27B].
+static void voice_macro_override_cases() {
+	auto runtime_heap = std::make_unique<ClientRuntime>("macros");
+	// The kernel on the heap: main's frame already holds several (1 MB stack).
+	auto kernel_heap = std::make_unique<mission::MissionKernel>();
+	mission::MissionKernel &kernel = *kernel_heap;
+	kernel.world.registry.configure_pool(0, 8);
+	world::Entity seed;
+	seed.kind = world::EntityKind::Organic;
+	seed.team = 2;
+	kernel.world.cached.local_player = kernel.world.registry.spawn(0, seed);
+	RoleView view;
+	view.runtime = runtime_heap.get();
+	view.kernel = &kernel;
+	view.joiner = true;
+	auto macro_table = [](std::initializer_list<std::pair<const char *, const char *>> rows) {
+		rtxt::File table;
+		table.sections.push_back(rtxt::Section{"macrotext", static_cast<uint32_t>(rows.size())});
+		for (const auto &row : rows) {
+			rtxt::Entry entry;
+			entry.key = row.first;
+			entry.text = row.second;
+			table.entries.push_back(entry);
+		}
+		return table;
+	};
+	kernel.world.tables.voice_macros =
+			macro_table({{"RADIO_TITLE", "Radio"}, {"EMOTES_TITLE", "Emotes"}, {"EMO_1", "Hello"}});
+	const rtxt::File override_table = macro_table({{"RADIO_TITLE", "Expansion Radio"}, {"EMO_1", "Wave"}});
+	kernel.world.tables.text_override = &override_table;
+	const auto over = std::make_unique<HudRoleFacts>(
+			hud_role_facts(view, kHudVoiceMenuEmotes | kHudVoiceMenuRadio));
+	CHECK(over->radio_menu.title == "Expansion Radio" && over->emotes_menu.title == "Emotes");
+	CHECK(over->emotes_menu.texts[0] == "Wave" && over->emotes_menu.texts[1] == "EMO_2");
+	CHECK(world::radio_call_text(kernel.world, "EMO_1", "Pat", nullptr) == "Pat: Wave");
+	CHECK(world::radio_call_text(kernel.world, "RADIO_TITLE", "Pat", nullptr) == "Pat: Expansion Radio");
+	kernel.world.tables.text_override = nullptr;
+	CHECK(world::radio_call_text(kernel.world, "EMO_1", "Pat", nullptr) == "Pat: Hello");
+}
+
+// The joiner's lighting wire walk takes the decoded row whose wire handle equals
+// its native L's packed handle like any other (H and L are separate domains; the
+// self row is the self handle's): a cached context there is re-evaluated and
+// emitted, where the L comparison erased it and emitted nothing (D-NET-698)
+// [orig: Terrain_SetupEffectForEntity @0x5C74A0 per drawn entity].
+static void lighting_walk_keeps_the_row_at_l_cases() {
+	auto runtime_heap = std::make_unique<ClientRuntime>("LightAtL");
+	auto kernel_heap = std::make_unique<mission::MissionKernel>();
+	mission::MissionKernel &kernel = *kernel_heap;
+	world::World &w = kernel.world;
+	w.registry.configure_pool(0, 8);
+	world::Entity seed;
+	seed.kind = world::EntityKind::Organic;
+	w.cached.local_player = w.registry.spawn_at(world::EntityHandle::make(0, 3), seed);
+	replication::ClientEntityState &row = runtime_heap->state().upsert(w.cached.local_player.packed);
+	row.type_id = 0x0011;
+	row.cls = EntityClass::Player;
+	RoleView jv;
+	jv.kernel = &kernel;
+	jv.runtime = runtime_heap.get();
+	jv.joiner = true;
+	EntityLightingFeed feed;
+	feed.layout_revision_seen = 0; // the layout this cache was built for
+	feed.last_by_wire[w.cached.local_player.packed].quality = 2;
+	const int32_t step[3] = { 0, 0, 65536 * 200 };
+	std::vector<EntityLightingChange> changes;
+	feed.collect(jv, step, {}, {}, 0, changes);
+	// The row keeps its cached context (re-evaluated in place), where the L
+	// comparison erased it as a self row.
+	CHECK(feed.last_by_wire.count(w.cached.local_player.packed) == 1);
+}
+
+// A Serve Only host folds no 0x1D: its end-round words are the board its own round end built,
+// the globals HUD_DrawEndRoundStatsOverlay reads, and its status page's end-round leg runs the
+// transition on its g_RoundOver. Before the round ends nothing is announced; after, the header
+// is known and the board never (only a client's 0x56 landing sets g_ScoreboardDirty, so stat.mnu
+// never opens), and the overlay reads the board's rows: each name cut to the 32-byte entry.
+// [orig: Server_ProcessRoundEnd @0x5164F0 (Server_BuildEndOfRoundScoreboard @0x516590,
+//  g_RoundOver @0x5168E4); Server_BuildEndOfRoundScoreboard @0x508F30 (the name @0x5090D3, the
+//  primary @0x509152); Server_DrawStatusScreen @0x50A2D0 (@0x50B286..0x50B2A3);
+//  UI_ProcessEndRoundScreenTransition @0x5B8600 (`cmp g_ScoreboardDirty, 0` @0x5B8600)]
+static void serve_only_end_round_cases() {
+	auto kernel_heap = std::make_unique<mission::MissionKernel>();
+	mission::MissionKernel &kernel = *kernel_heap;
+	world::World &w = kernel.world;
+	w.rules.mp_session = true;
+	w.registry.configure_pool(0, 8);
+	world::MatchRules rules;
+	rules.game_type = game_type::kDeathmatch;
+	w.match.configure(rules);
+	world::Entity body;
+	body.kind = world::EntityKind::Organic;
+	const world::EntityHandle ann = w.registry.spawn_at(world::EntityHandle::make(0, 1), body);
+	const world::EntityHandle bob = w.registry.spawn_at(world::EntityHandle::make(0, 2), body);
+	w.match.upsert_player({ann, 1, "Ann"});
+	w.match.upsert_player({bob, 2, "A name longer than thirty-one characters"});
+	auto ctx = std::make_unique<NapiNPServerCtx>();
+	ctx->is_in_session = 1;
+	RoleView serve_only;
+	serve_only.host = ctx.get();
+	serve_only.kernel = &kernel;
+	CHECK(!end_round_session_state(serve_only).header_known);
+	CHECK(end_round_overlay_input(serve_only).player_names[0].empty());
+	CHECK(w.match.finish(0, w));
+	const EndRoundSessionState s = end_round_session_state(serve_only);
+	CHECK(s.header_known && !s.board_known && s.session_open && !s.team_mode);
+	CHECK(s.game_type == game_type::kDeathmatch && s.winner == 0 && s.draw); // two zero rows tie
+	const hud::EndRoundOverlayInput in = end_round_overlay_input(serve_only);
+	CHECK(in.game_type == game_type::kDeathmatch && in.draw && in.winner_team == 0);
+	CHECK(in.local_team == 0 && !in.death_screen);
+	const std::string &n0 = in.player_names[0];
+	const std::string &n1 = in.player_names[1];
+	CHECK((n0 == "Ann" && n1 == "A name longer than thirty-one c") ||
+	      (n1 == "Ann" && n0 == "A name longer than thirty-one c"));
+	CHECK(in.player_names[2].empty() && in.player_scores[0] == 0 && in.player_scores[1] == 0);
+	// A listen host or a joiner keeps its client's folded words (none here).
+	ClientRuntime own("ServeOnlyOwn");
+	RoleView listen = serve_only;
+	listen.runtime = &own;
+	CHECK(!end_round_session_state(listen).header_known);
+}
+
+// The scene frame's call of its HUD pass (the session's radar step runs on it): no call
+// while a death.mnu trigger holds (the deploy-map overlay; the dead bit in session) or
+// the open latch is left over; in camera mode 0 or under the death screen for a body
+// without the dead bit, the F1 help shut; in the chase view from a control seat alone.
+// [orig: Render_ProcessMainSceneFrame @0x5CAB2B..0x5CAB58, @0x5CAC81 (g_DeployScreenActive),
+//  @0x5CAC8E (g_DeathMenuOpenLatch), @0x5CACA6..0x5CACDD (the mode, the death screen, the
+//  seat), @0x5CACED..0x5CACFE (the dead bit, g_HelpScreenOpen); the calls @0x5CACE3 / @0x5CAD04]
+static void hud_pass_call_site_cases() {
+	auto runtime_heap = std::make_unique<ClientRuntime>("hud");
+	ClientRuntime &runtime = *runtime_heap;
+	auto kernel_heap = std::make_unique<mission::MissionKernel>();
+	mission::MissionKernel &kernel = *kernel_heap;
+	kernel.world.registry.configure_pool(0, 8);
+	world::Entity seed;
+	seed.alive = true;
+	seed.health = 100;
+	const world::EntityHandle local = kernel.world.registry.spawn(0, seed);
+	kernel.world.cached.local_player = local;
+	RoleView view;
+	view.kernel = &kernel;
+	view.runtime = &runtime;
+	world::PlayerViewState &v = kernel.local.view;
+	CHECK(hud_overlays_called(view, false));
+	CHECK(!hud_overlays_called(view, true)); // the F1 help
+	runtime.state().deploy_overlay_active = true;
+	CHECK(!hud_overlays_called(view, false)); // the menu's open leg
+	runtime.state().deploy_overlay_active = false;
+	runtime.state().death_menu_open_latch = true;
+	CHECK(!hud_overlays_called(view, false)); // the close leg
+	runtime.state().death_menu_open_latch = false;
+	world::Entity &body = *kernel.world.registry.get(local);
+	body.flags |= world::kEntityFlagDead;
+	CHECK(!hud_overlays_called(view, false)); // out of session: the mode-0 leg's dead bit
+	kernel.world.rules.mp_session = true;
+	CHECK(!hud_overlays_called(view, false)); // in session: the death trigger
+	kernel.world.rules.mp_session = false;
+	body.flags &= ~world::kEntityFlagDead;
+	v.camera_mode = 1;
+	CHECK(!hud_overlays_called(view, false)); // the chase view on foot
+	body.mounted = true;
+	body.mount_type = world::SeatType::Gunner;
+	CHECK(!hud_overlays_called(view, false));
+	body.mount_type = world::SeatType::Driver;
+	CHECK(hud_overlays_called(view, false)); // parentSlot 5
+	body.mount_type = world::SeatType::Controller;
+	CHECK(hud_overlays_called(view, true)); // parentSlot 2; this leg reads no help word
+	body.mounted = false;
+	v.death_screen_active = true;
+	CHECK(hud_overlays_called(view, false)); // the death screen takes the mode-0 leg
+	v.death_screen_active = false;
+	v.camera_mode = 4;
+	CHECK(!hud_overlays_called(view, false));
+	RoleView bare;
+	CHECK(!hud_overlays_called(bare, false));
+}
+
 int main() {
+	hud_pass_call_site_cases();
+	voice_macro_override_cases();
+	lighting_walk_keeps_the_row_at_l_cases();
+	serve_only_end_round_cases();
 	// The bare local role: nothing folded, nothing gathered.
 	{
 		RoleView bare;
@@ -69,6 +442,9 @@ int main() {
 		host.config.mission_name = "Dormant Volcano Isle";
 		host.config.mission_file = "ASH_I5A.BMS";
 		host.config.game_type = 0x10010;
+		// The mission start's session title (g_SessionTitle): the map file with no override table,
+		// which the stock Co-op MISSIONNAME advertises (D-NET-NEW-L8-16).
+		host.session_title = mission_session_title(nullptr, host.config.mission_file);
 		RoleView view;
 		view.host = &host;
 		host.is_mp_session_peer = 0;
@@ -225,6 +601,19 @@ int main() {
 		CHECK(h.samples == 12 && h.breath_time == 30 && !h.spawn_success_gate);
 		const BreathBarFacts none = breath_bar_facts(RoleView{});
 		CHECK(none.samples == 0 && none.breath_time == 20 && !none.spawn_success_gate);
+		// A Serve Only host (a host context, no client runtime): g_RoundOver is the
+		// authority's own round-end latch, which its status page's end-round leg tests
+		// [orig: Server_ProcessRoundEnd @0x5164F0 (@0x5168E4); Server_DrawStatusScreen
+		//  @0x50A2D0 (`cmp g_RoundOver, 0` @0x50B286)].
+		NapiNPServerCtx serve_only_ctx;
+		RoleView serve_only;
+		serve_only.host = &serve_only_ctx;
+		serve_only.kernel = &kernel;
+		CHECK(!breath_bar_facts(serve_only).spawn_success_gate);
+		kernel.world.match.latch_round_over();
+		CHECK(breath_bar_facts(serve_only).spawn_success_gate);
+		// A listen host keeps its own client's folded latch.
+		CHECK(!breath_bar_facts(host).spawn_success_gate);
 	}
 
 	// The HUD's role facts: the session lines' globals off the replica (a
@@ -719,6 +1108,8 @@ int main() {
 		cold.kernel = &kernel;
 		CHECK(index.for_handle(cold, 5) == nullptr);
 	}
+
+	inset_target_name_cases();
 
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

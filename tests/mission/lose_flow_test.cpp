@@ -503,6 +503,11 @@ int run_self_kill(testrig::MissionRig &rig) {
 	if (!expect(me != nullptr && me->alive && me->health > 0, "the player is alive at spawn")) return 1;
 	std::printf("lose-flow: self-kill player team=%d hp=%d score=%d\n", int(me->team), me->health,
 			me->item_score);
+	// The first frame's receive pump joins the player from its own C2S 0x0B under the
+	// 620-tick spawn protection, which the next frame's walk clears outside a session
+	// (D-NET-NEW-L4-5) [orig: Server_OnPlayerJoin @0x51A882; Server_UpdateAllActivePlayerSlots
+	//  @0x51889C].
+	run.tick();
 	w::ExplosionEntry blast;
 	blast.pos = me->position;
 	blast.type = ammo->kztype;

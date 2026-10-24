@@ -7,6 +7,7 @@
 #include <formats/mission/mission_params.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/vehicle_motor.h> // stamp_saved_live_pose
 #include <runtime/world/vehicle_part_anim.h>
 #include <runtime/world/world.h>
 
@@ -229,6 +230,48 @@ void initialize_class_brain(AiEntity &ae, const aip::Profile *profile, bool heli
         b.f[51] = (uint16_t(ai.prng_step_a()) % 20) << 16;
 }
 
+void initialize_item_class_brain(AiEntity &ae, World &world, AiSystem &ai,
+		const aip::Profile *profile, bool helicopter_init) {
+	// A vehicle brain whose .aip did not load still walks the loader's sort of
+	// the zeroed record's four keys [orig: AIProfile_LoadOrFind @0x45FECA].
+	if (profile == nullptr) sort_class_walk(ae.profile, false);
+	// The class init writes the per-node mover speeds brain[49]/[50] from its own
+	// profile offsets and, for the helicopter family, draws the patrol offset; the
+	// family is the item's ai_function row, not the profile type
+	// [orig: Entity_InitHelicopterAIFromDef @0x4683C0; Entity_InitVehicleAIFromDef @0x4686C0].
+	initialize_class_brain(ae, profile, helicopter_init, ai);
+	// The allocator's own seeds (state 0, the constant block, the PRNG C draw) land for
+	// every vehicle-family brain — retail always reaches @0x460200 for an AI-data item,
+	// profile row found or not (AIProfile_LoadOrFind never returns null there)
+	// [orig: the def callbacks' @0x460200 call @0x4687ff / @0x4684bf / @0x4684cf]. (The
+	// former flags100 |= 2 no-acquire stand-in is gone: the class walk gates on the
+	// profile's priority words, and the shipped drivable-transport profiles author them
+	// zero — the same no-scan outcome, now via the witnessed path.)
+	initialize_vehicle_brain(ae, world, ae.heading);
+	// The allocator's smooth-target seed: the hull's staged target and heading are its own
+	// pose and the interpolation progress zero, so a client chase's first pass measures no
+	// distance and holds. (+0x244 / +0x248, the staged pitch and roll, have no hull reader
+	// here and are not carried.)
+	// [orig: Entity_InitVehicleAI @0x460200 - the pose reads @0x4602F0..0x4602F6, +0x234 /
+	//  +0x238 / +0x23C @0x4602F9..0x46030B, +0x240 (Yaw) @0x460314, +0x27C = 0 @0x460326]
+	if (Entity *hull = world.registry.get(ae.handle)) {
+		hull->veh.net_smooth_target[0] = hull->position.x.q16;
+		hull->veh.net_smooth_target[1] = hull->position.y.q16;
+		hull->veh.net_smooth_target[2] = hull->position.z.q16;
+		hull->veh.net_smooth_heading = hull->heading;
+		hull->veh.net_interp_progress = 0;
+		// The brain's received registers, which a client's mover mirrors into its command
+		// ahead of any record: speed and lateral zero, the steer the hull's own Yaw, so a
+		// hull no record has staged yet holds its heading.
+		// [orig: Entity_InitVehicleAI @0x460200 - brain+0x2C4 = 0 @0x46032D, +0x2C8 = 0
+		//  @0x460333, +0x2CC = Yaw @0x46034F..0x460352; the cveh client mirror
+		//  @0x48B7F8..0x48B80A]
+		hull->veh.net_recv_speed = 0;
+		hull->veh.net_recv_lat = 0;
+		hull->veh.net_recv_steer_bam = hull->heading;
+	}
+}
+
 namespace {
 
 // Kind -> g_PoolList index: the BMS loader places each record list in its own pool
@@ -259,13 +302,17 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
     s.bms_id = e.id; // carry the file entity id so the embedder can map this entity back to its placed node
     s.kind = kind;
     s.item_id = e.type_id;
-    s.position.x = e.get_x();
-    s.position.y = e.get_y();
-    s.position.z = e.get_z();
+    // The record's three 16.16 dwords, copied raw (D-NET-507).
+    // [orig: Entity_SpawnFromBMSRecord @0x40EB30..0x40EB3F]
+    s.position.set_q16({e.x, e.y, e.z});
 	s.spawn_position = s.position;
-	s.yaw = e.yaw;
-	s.pitch = e.pitch;
-    s.roll = e.roll;
+	// The Yaw word: the spawn angle of 90 - the record's yaw (D-NET-NEW-L6-2).
+	// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
+	s.heading = placed_heading_bam(e.yaw);
+	// The Pitch / Roll words: the record's degrees in the spawn form
+	// (D-NET-NEW-L6-3). [orig: Entity_SpawnFromBMSRecord @0x40EB69..0x40EBA6]
+	s.pitch_bam = spawn_angle_bam(e.pitch);
+    s.roll_bam = spawn_angle_bam(e.roll);
     s.team = e.team;
 	s.vehicle_spawn_team = static_cast<int8_t>(e.team_budget);
 	s.group_id = e.group_id;
@@ -327,9 +374,9 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
     if (kind == EntityKind::Marker &&
         (e.type_id == def::DEF_TYPE_WAYPOINT || e.type_id == def::DEF_TYPE_KOTH_CENTRE ||
          e.type_id == def::DEF_TYPE_NAMED_LOCATION)) {
-        s.bound_radius = e.wp_distance != 0
-            ? static_cast<float>(e.wp_distance)
-            : 0.5f;
+        s.bound_radius.q16 = e.wp_distance != 0
+            ? static_cast<int32_t>(static_cast<uint32_t>(e.wp_distance) << 16)
+            : 0x8000;
     }
     return s;
 }
@@ -352,9 +399,9 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
     // ((90 - yaw)<<16/360)<<16, spawn_angle_bam]. The waypoint mover writes the same engine frame (atan2(dY,dX) bearing
     // into kWorkHeading), so storing the seed in the engine frame keeps a unit's facing consistent
     // whether parked or moving; the present pass converts engine-heading -> mission yaw for the basis.
-    ae.pos[0] = e.x;
-    ae.pos[1] = e.y;
-    ae.pos[2] = e.z;
+    // The position is the entity's own words (the record's, raw), read through ae.self; the
+    // slot's spawn copy of them is Entity::spawn_position (D-NET-507).
+    // [orig: Entity_SpawnFromBMSRecord @0x40EB33; Entity_InitFromModel @0x40E113..0x40E127]
     ae.heading = spawn_angle_bam(90 - e.yaw);
     ae.team = e.team;
 
@@ -391,28 +438,14 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
 			break;
 		}
     }
-    // A vehicle brain whose .aip did not load still walks the loader's sort of
-    // the zeroed record's four keys [orig: AIProfile_LoadOrFind @0x45FECA].
-    if (profile == nullptr && kind == EntityKind::Item) sort_class_walk(ae.profile, false);
-	// A placed item's class init writes the per-node mover speeds brain[49]/[50]
-	// from its own profile offsets and, for the helicopter family, draws the
-	// patrol offset; the family is the item's ai_function row, not the profile
-	// type [orig: Entity_InitHelicopterAIFromDef @0x4683C0;
-	// Entity_InitVehicleAIFromDef @0x4686C0].
+	// A placed item's class init (initialize_item_class_brain). Organics never run it:
+	// their AiSlot is the retail AI record [orig: Entity_InitAllFromModels pool-1 loop
+	// @0x40E5B8..0x40E5D8].
 	if (kind == EntityKind::Item) {
 		const bool helicopter_init =
 				opts.ai_profile_defaults && opts.ai_profile_defaults(e.type_id).helicopter_init;
-		initialize_class_brain(ae, profile, helicopter_init, ai);
+		initialize_item_class_brain(ae, world, ai, profile, helicopter_init);
 	}
-	// The allocator's own seeds (state 0, the constant block, the PRNG C draw) land for
-	// every vehicle-family brain — retail always reaches @0x460200 for an AI-data item,
-	// profile row found or not (AIProfile_LoadOrFind never returns null there). Organics
-	// never run it: their AiSlot is the retail AI record [orig: Entity_InitAllFromModels
-	// pool-1 loop @0x40E5B8..0x40E5D8 -> the def callbacks' @0x460200 call @0x4687ff /
-	// @0x4684bf / @0x4684cf]. (The former flags100 |= 2 no-acquire stand-in is gone: the
-	// class walk gates on the profile's priority words, and the shipped drivable-transport
-	// profiles author them zero — the same no-scan outcome, now via the witnessed path.)
-	if (kind == EntityKind::Item) initialize_vehicle_brain(ae, world, ae.heading);
 
     // Waypoint route words, copied verbatim from the slot words init_ai_slot just
     // stored: no count test and no clamp, so a route onto an empty list or a start
@@ -544,10 +577,13 @@ void initialize_item_seats(Entity &entity, const std::vector<ItemSeatSpec> &spec
     entity.emplaced_config = spec->mount_config_valid ? spec->mount_config : 0;
     entity.armory_points = spec->armory_points;
     entity.primary_weapon = spec->primary_weapon;
+    // The def's addeweap slot table [orig: Entity_InitFromModel @0x40DC30 - @0x40DE2C..0x40DE8A].
+    entity.def_slot_userpoints = spec->slot_userpoints;
     // The item-definition traits (has_item_def, item_attrib) come only from
     // the items.def sweep; a seat spec never stands in for a definition row.
     if (spec->seats.empty()) return;
     entity.seats = spec->seats;
+    entity.off_table_seats = spec->off_table_seats;
     for (Seat &seat : entity.seats) {
         seat.occupant = EntityHandle{};
     }
@@ -558,7 +594,7 @@ namespace {
 // The reference registry: every refNum a spawned entity already holds. A
 // carrier without one takes the lowest free id (1..255, else 0) when its first
 // child spawns, and every child joins the carrier's group.
-// [orig: Entity_SpawnWeaponOverlays @0x40F361..0x40F389, the walk over
+// [orig: Entity_SpawnAddEWeapChildren @0x40F361..0x40F389, the walk over
 //  g_EntityReferenceRegistry.occupied]
 std::array<bool, 256> reference_registry(const World &world) {
     std::array<bool, 256> occupied{};
@@ -574,7 +610,7 @@ std::array<bool, 256> reference_registry(const World &world) {
 // Children use a non-BMS origin sentinel so the listen-server EntityPresenter
 // wire walk cannot defer them to an unrelated placed node with the same
 // (kind,index). A failed allocation ends the carrier's walk.
-// [orig: Entity_SpawnWeaponOverlays @0x40F300 — the pool allocation @0x40F393,
+// [orig: Entity_SpawnAddEWeapChildren @0x40F300 — the pool allocation @0x40F393,
 //  its failure exit @0x40F39F]
 void spawn_carrier_attachments(World &world, EntityHandle carrier_handle,
         const std::vector<ItemSeatSpec> &specs, std::array<bool, 256> &ref_occupied,
@@ -601,16 +637,18 @@ void spawn_carrier_attachments(World &world, EntityHandle carrier_handle,
         Entity child_seed;
         child_seed.kind = EntityKind::Item;
         child_seed.item_id = attachment.child_type_id;
+        // The carrier's position words, copied raw (D-NET-507).
+        // [orig: Entity_SpawnAddEWeapChildren @0x40F3C5..0x40F3EB]
         child_seed.position = carrier->position;
-        child_seed.yaw = carrier->yaw;
-        child_seed.pitch = carrier->pitch;
-        child_seed.roll = carrier->roll;
+        child_seed.heading = carrier->heading;
+        child_seed.pitch_bam = carrier->pitch_bam;
+        child_seed.roll_bam = carrier->roll_bam;
         child_seed.team = carrier->team;
         // The child's record takes the carrier's command group and refNum;
         // the spawn then copies the carrier's Flags over the child's and
         // stamps the slot index as its subType, the key the ewep class init
         // looks its anchor up by (a joiner's too).
-        // [orig: Entity_SpawnWeaponOverlays — group +0x11C @0x40F3BB, refNum
+        // [orig: Entity_SpawnAddEWeapChildren — group +0x11C @0x40F3BB, refNum
         //  +0x215 @0x40F3B1, Flags @0x40F404..0x40F408, subType = slot
         //  @0x40F40E; Entity_InitBoneReferences @0x4415E1..0x4415FF]
         child_seed.group_id = carrier->group_id;
@@ -624,11 +662,24 @@ void spawn_carrier_attachments(World &world, EntityHandle carrier_handle,
         child_seed.sub_type = attachment.stored_slot != 0
                 ? static_cast<uint8_t>(attachment.stored_slot - 1) : uint8_t{0};
         child_seed.spawn_origin = 0xFFFFFFFFu;
-        const EntityHandle child_handle =
-                world.registry.spawn(pool_for_kind(EntityKind::Item), child_seed);
+        // includeInUse 0: a destroyed row is passed over (D-NET-485).
+        // [orig: Entity_SpawnAddEWeapChildren - `push 0` @0x40F38F, Pool_AllocEntry @0x40F393]
+        const EntityHandle child_handle = world.registry.spawn(
+                pool_for_kind(EntityKind::Item), child_seed, EntityRegistry::Reuse::Fresh);
         if (!child_handle.valid()) {
             ++result.dropped;
             return;
+        }
+        // The child's record spawn stamps the running spawn-phase counter into
+        // its +0x2AC think clock and steps it by 11, as a placed record's does,
+        // so a load's children think on staggered ticks (an unoccupied gun on
+        // its carrier then re-arms that clock to 62 at every think).
+        // [orig: Entity_SpawnAddEWeapChildren @0x40F300 - Entity_SpawnFromBMSRecord
+        //  (the call @0x40F3FF), its stamp @0x40EC8C..0x40ECB8]
+        if (Entity *stamped = world.registry.get(child_handle)) {
+            stamped->class_think_ticks =
+                    static_cast<int32_t>(world.bms_spawn_phase_counter % 60u);
+            world.bms_spawn_phase_counter += 11u;
         }
         result.handles.push_back(child_handle);
         Entity *child = world.registry.get(child_handle);
@@ -923,8 +974,18 @@ PromoteResult promote_mission(const bms::File &m, World &world,
         // @0x453000/@0x453100 match record[0]; mission::zone_box_flat].
         Aabb raw = b;
         raw.min.z = at.get_z_min(); raw.max.z = at.get_z_max();
+        // The record's words ride along for the tests that compare them: the
+        // trigger Z words (the record's when it constrains Z, else
+        // 0xC0000000 / 0x40000000) and the raw Z words (D-NET-507).
+        // [orig: Entity_IsBmsRefInTriggerBounds @0x43E531..0x43E56F;
+        //  WacCmd_SsnArea3D @0x4F1000..0x4F100E]
+        const std::array<int32_t, 2> trigger_z = at.constrains_z()
+                ? std::array<int32_t, 2>{at.z_min, at.z_max}
+                : std::array<int32_t, 2>{static_cast<int32_t>(0xC0000000u), 0x40000000};
         world.registry.register_area(std::string(), b, at.is_active(), at.id, raw,
-                                     zone_box_flat(at));
+                                     zone_box_flat(at),
+                                     std::array<int32_t, 4>{at.x_min, at.x_max, at.y_min, at.y_max},
+                                     trigger_z, std::array<int32_t, 2>{at.z_min, at.z_max});
     }
 
     // [orig: Mission_LoadBMSFile @0x40FCC3] Normalize each bounding-box axis.
@@ -945,14 +1006,15 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             world.reverb.regions.push_back(r);
         }
         if (box.type != int32_t(bms::BoundingBoxType::Location)) continue;
-        Aabb bounds;
-        bounds.min = {std::min(box.min_x, box.max_x) / 65536.0f,
-                      std::min(box.min_y, box.max_y) / 65536.0f,
-                      std::min(box.min_z, box.max_z) / 65536.0f};
-        bounds.max = {std::max(box.min_x, box.max_x) / 65536.0f,
-                      std::max(box.min_y, box.max_y) / 65536.0f,
-                      std::max(box.min_z, box.max_z) / 65536.0f};
-        world.registry.register_location(bounds, box.ref_id);
+        LocationVolume location;
+        const int32_t lo[3] = {box.min_x, box.min_y, box.min_z};
+        const int32_t hi[3] = {box.max_x, box.max_y, box.max_z};
+        for (int i = 0; i < 3; ++i) {
+            location.min_q16[i] = std::min(lo[i], hi[i]);
+            location.max_q16[i] = std::max(lo[i], hi[i]);
+        }
+        location.id = box.ref_id;
+        world.registry.register_location(location);
     }
 
 	// Spawn actors + AI brains (organics are AI-driven; vehicles get brains in the vehicle
@@ -982,10 +1044,15 @@ PromoteResult promote_mission(const bms::File &m, World &world,
         return opts.ai_profile_defaults(type_id).known &&
                (opts.item_attributes(type_id) & kItemAttribAIData) != 0;
     };
-    // dword_A77638, zeroed by the mission reset every load runs [orig: the
+    // g_BmsSpawnPhaseCounter, zeroed by the mission reset every load runs [orig: the
     // reset Mission_ResetBmsState @0x40DBD1, called
-    // from Mission_LoadBMSFile @0x40F50E]
-    uint32_t spawn_phase_counter = 0;
+    // from Mission_LoadBMSFile @0x40F50E]. The world keeps it past the load: the
+    // addeweap children below and a later deployable's children step it on.
+    world.bms_spawn_phase_counter = 0;
+    // g_LocationNameCount: each type-0x7FC spawn takes it and adds one, in the load's
+    // pool order (items, buildings, markers, organics) [orig: Entity_SpawnFromBMSRecord
+    //  @0x40E9F0 - the read @0x40F188, the store @0x40F18F, the add @0x40F20C].
+    int16_t location_name_count = 0;
     auto promote_vec = [&](const std::vector<bms::Entity> &vec, EntityKind kind, bool ai_capable_default) {
         // Pool 0's used count is the ACCEPTED record count while every
         // accepted record still lands at its record index, so with k
@@ -1012,11 +1079,20 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             const bool admit = admitted[idx] != 0;
             ++idx;
             if (!admit) { ++r.dropped; continue; }
-            if (idx > used_window) { ++r.dropped; continue; } // record index >= used
+            if (idx > used_window) {
+                // Record index >= used: retail still spawns the accepted record into
+                // its slot, so its stamp steps the spawn-phase counter.
+                // [orig: Mission_LoadBMSFile @0x40F4E0 (the call @0x40FB19) ->
+                //  Entity_SpawnFromBMSRecord's stamp @0x40EC8C..0x40ECB8]
+                world.bms_spawn_phase_counter += 11u;
+                ++r.dropped;
+                continue;
+            }
             bms::Entity e = record;
             if (e.type_id == 5305) e.type_id = 4999 + kBmsTeammateClass;
             Entity seed = make_seed(e, kind, static_cast<uint16_t>(e.id), origin);
             if (record.type_id == 5305) seed.player_class = kBmsTeammateClass;
+            if (e.type_id == def::DEF_TYPE_NAMED_LOCATION) seed.location_index = location_name_count++;
             // The authored display name: name_index 0 = none; the resolver maps
             // the index through the mission RTXT [PeopleNames] STRNAME%03i entry
             // and the copy truncates at the retail 15 chars [orig:
@@ -1044,16 +1120,29 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             ++r.spawned;
             if (Entity *spawned = world.registry.get(h)) {
                 initialize_item_seats(*spawned, opts.item_seat_specs);
+                // savedLivePose (+0x80..+0x94) takes the Position words and the
+                // Yaw / Pitch / Roll words at the model init, which runs for every
+                // row before the def's init callbacks, so the organic AI init's aim
+                // basis is the spawn position and a static carrier's delta is zero
+                // (D-NET-507: the one store). [orig: Entity_InitFromModel @0x40DC30 -
+                //  @0x40E14B..0x40E18C: `mov ecx, [edi]; mov [esi+80h], ecx`
+                //  @0x40E14B..0x40E14D, +0x84 @0x40E15D / @0x40E160, +0x88
+                //  @0x40E153 / @0x40E169, +0x8C @0x40E166 / @0x40E172, +0x90
+                //  @0x40E16F / @0x40E17B, +0x94 @0x40E178 / @0x40E18C;
+                //  Entity_InitAllFromModels @0x40E460; Entity_InitOrganicAI
+                //  @0x4BFCC0 - +0x30C @0x4C01E8, +0x310 @0x4C01EE, +0x314 @0x4C01FB]
+                stamp_saved_live_pose(*spawned);
                 // The spawn-phase stagger: every spawned record takes the load
                 // counter modulo 60 into entity+0x2AC and the counter steps by
                 // 11, so the first blink/indoors refresh of the statics is spread
                 // over the first 60 ticks in 11-tick steps instead of all firing
-                // in the first cohort pass [orig: `mov ecx,dword_A77638 ...
-                // mov [esi+2ACh],ecx; add dword_A77638,0Bh` @0x40ec8c..0x40ecb8;
+                // in the first cohort pass [orig: `mov ecx,g_BmsSpawnPhaseCounter ...
+                // mov [esi+2ACh],ecx; add g_BmsSpawnPhaseCounter,0Bh` @0x40ec8c..0x40ecb8;
                 // the counter resets per load]. Vehicles re-stamp their own
                 // 0..15 phase below.
-                spawned->class_think_ticks = static_cast<int32_t>(spawn_phase_counter % 60u);
-                spawn_phase_counter += 11u;
+                spawned->class_think_ticks =
+                        static_cast<int32_t>(world.bms_spawn_phase_counter % 60u);
+                world.bms_spawn_phase_counter += 11u;
             }
             const bool ai_capable =
                     ai_capable_default ||
@@ -1127,21 +1216,25 @@ PromoteResult promote_mission(const bms::File &m, World &world,
     return r;
 }
 
-void stash_mission_loadout_rules(
-        const bms::File &mission,
-        std::vector<std::pair<std::string, int32_t>> &r_availability_rows,
-        std::vector<world::WeaponKitEntry> &r_kit_rows) {
-    r_availability_rows.clear();
-    r_kit_rows.clear();
+std::vector<std::pair<std::string, int32_t>> mission_availability_pairs(const bms::File &mission) {
+    std::vector<std::pair<std::string, int32_t>> pairs;
     for (const bms::ItemAvailabilityEntry &row : mission.item_availability) {
         if (row.name.empty()) continue;
         // The status byte is SIGNED in retail: -1 is the "mission allowed"
         // sentinel the availability builder maps to 3 [orig:
         // WeaponDef_BuildItemRestrictionTable @0x54ddb0 reads `(char)name[strlen+1]`,
         // `== -1 -> 3`]; an unsigned widen (255) would never hit that arm.
-        r_availability_rows.emplace_back(row.name,
-                                         static_cast<int32_t>(static_cast<int8_t>(row.status)));
+        pairs.emplace_back(row.name, static_cast<int32_t>(static_cast<int8_t>(row.status)));
     }
+    return pairs;
+}
+
+void stash_mission_loadout_rules(
+        const bms::File &mission,
+        std::vector<std::pair<std::string, int32_t>> &r_availability_rows,
+        std::vector<world::WeaponKitEntry> &r_kit_rows) {
+    r_availability_rows = mission_availability_pairs(mission);
+    r_kit_rows.clear();
     for (const bms::WeaponLoadoutRecord &row : mission.loadout.entries) {
         if (row.name.empty()) continue;
         world::WeaponKitEntry entry;

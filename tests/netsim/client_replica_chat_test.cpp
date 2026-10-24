@@ -113,7 +113,7 @@ int main() {
 	host_owned->apply(s2c::GAME_RESET, {});
 	CHECK(!host_owned->state().round_reset_hold);
 
-	// THE ROUND-OVER LATCH (g_SpawnSuccessGate): a client's 0x25 raises it,
+	// THE ROUND-OVER LATCH (g_RoundOver): a client's 0x25 raises it,
 	// the authority's does not; a 0x1D header raises it even when its body
 	// does not parse; only a mission start lowers it [orig:
 	// NapiNPClientMsg_GameReset @0x422849; NapiNPClientMsg_0x01D @0x430858;

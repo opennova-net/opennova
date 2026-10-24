@@ -6,6 +6,8 @@
 #include <runtime/inmatch/server_ban_lists.h>
 #include <runtime/inmatch/server_console.h> // Server_SendConsoleChat, the CHAT ring
 #include <runtime/inmatch/server_initial_state.h> // build_server_config_flags
+#include <runtime/inmatch/server_tick.h> // Server_ProcessRoundEnd
+#include <runtime/world/local_player.h> // LocalPlayer::round_end_view_clear
 #include <runtime/world/world.h>
 
 #include <base/gameprofile/game_type.h>
@@ -16,6 +18,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
 #include <net/title/title_identity.h> // title_in_match (WEAPON's armory value, DFX2-10)
+#include <runtime/hud/feed_format.h> // kHudColorWhite (g_HUDColors.palette[0])
 #include <runtime/hud/hud_chat_entry.h> // kChatDispatchGlobal, chat_dispatch_flood_color
 
 #include <cstdio>
@@ -164,10 +167,13 @@ std::string AdminConsole::game_settings_reply() const {
 	const GameConfig &c = ctx_.config;
 	const world::World *world = ctx_.world;
 	const gamecfg::GameCfg *block = seams_.config_block;
-	const uint32_t rules = world != nullptr ? world->rules.mpattrib : c.mp_attributes;
+	const AdminProcessMission *process = seams_.process_mission;
+	const uint32_t rules = rules_flags();
 	// GameTime's remaining whole minutes: g_RoundTimeRemaining / 60 / 62, the C division
 	// truncating toward zero, so an untimed round (-1) reads 0.
-	const int32_t remaining = world != nullptr ? world->match.remaining_ticks() : 0;
+	const int32_t remaining = process != nullptr
+			? process->round_ticks_remaining
+			: (world != nullptr ? world->match.remaining_ticks() : 0);
 	std::string out;
 	out += settings_row("AutoBalanceOnRecycle", itos(c.auto_balance_enabled));
 	out += settings_row("PuntVote", itos(c.voting_enabled));
@@ -184,7 +190,7 @@ std::string AdminConsole::game_settings_reply() const {
 	out += settings_row("DoMaxPingCheck", itos(c.do_max_ping_check));
 	out += settings_row("MaxPing", itos(static_cast<int32_t>(c.max_ping)));
 	out += settings_row("MaxFriendlyKills", itos(c.max_friendly_kills));
-	out += settings_row("GameTime", itos(remaining / 60 / 62) + "/" + itos(static_cast<int32_t>(c.respawn_time)));
+	out += settings_row("GameTime", itos(remaining / 60 / 62) + "/" + itos(static_cast<int32_t>(c.round_time_limit_minutes)));
 	out += settings_row("FriendlyFire", itos((rules & GameConfig::kMpAttribNoFriendlyFire) == 0));
 	out += settings_row("FriendlyTags", itos((rules & GameConfig::kMpAttribNoFriendlyTag) == 0));
 	out += settings_row("TeamTriggerClaymore", itos((rules >> 15) & 1u));
@@ -202,29 +208,44 @@ std::string AdminConsole::game_settings_reply() const {
 	return out;
 }
 
+void apply_rules_word(world::World &world, uint32_t word) {
+	world.rules.mpattrib = word;
+	world.rules.no_friendly_fire = (word & GameConfig::kMpAttribNoFriendlyFire) != 0;
+	world.rules.auto_scope_zero = (word & GameConfig::kMpAttribAutoScopeZero) != 0;
+	world.throwables.team_trigger_claymore = (word & GameConfig::kMpAttribClaymorePref) != 0;
+	world.round_sim.no_tracers_rule = (word & GameConfig::kMpAttribNoTracers) != 0;
+}
+
 namespace {
 
-// The rules word onto the world the round reads it from: the word itself and the per-mission
-// facts the boot derives from it (host_role.cpp, host_session.cpp), so a SET of a rule bit is
-// live at once, as retail's single g_RulesFlags is.
-// [orig: g_RulesFlags @0x24D1E34 — the FriendlyFire / FriendlyTags / TeamTriggerClaymore /
-//  Tracers sets @0x405DE1..0x405F48]
+// The rules word onto the world the round reads it from (apply_rules_word), so a SET of a rule
+// bit is live at once, as retail's single g_RulesFlags is; with no world, the context's word.
+// [orig: g_RulesFlags @0x24D1E34 — CAdminServer_HandleSetCommand @0x405A60: the FriendlyFire /
+//  FriendlyTags / TeamTriggerClaymore / Tracers stores @0x405EB4..0x405F86]
 void set_live_rules_word(NapiNPServerCtx &ctx, uint32_t word) {
-	world::World *world = ctx.world;
-	if (world == nullptr) {
+	if (ctx.world == nullptr) {
 		ctx.config.mp_attributes = word;
 		return;
 	}
-	world->rules.mpattrib = word;
-	world->rules.no_friendly_fire = (word & GameConfig::kMpAttribNoFriendlyFire) != 0;
-	world->rules.auto_scope_zero = (word & GameConfig::kMpAttribAutoScopeZero) != 0;
-	world->throwables.team_trigger_claymore = (word & GameConfig::kMpAttribClaymorePref) != 0;
-	world->round_sim.no_tracers_rule = (word & GameConfig::kMpAttribNoTracers) != 0;
+	apply_rules_word(*ctx.world, word);
 }
 
 uint32_t live_rules_word(const NapiNPServerCtx &ctx) {
 	return ctx.world != nullptr ? ctx.world->rules.mpattrib : ctx.config.mp_attributes;
 }
+
+} // namespace
+
+uint32_t AdminConsole::rules_flags() const {
+	return seams_.process_mission != nullptr ? seams_.process_mission->rules_word : live_rules_word(ctx_);
+}
+
+void AdminConsole::set_rules_flags(uint32_t word) {
+	set_live_rules_word(ctx_, word);
+	if (seams_.process_mission != nullptr) seams_.process_mission->rules_word = word;
+}
+
+namespace {
 
 // strncpy(field, value, 0x11): a 17-character value keeps no terminator (D-NET-359).
 std::string password_field(const std::string &value) {
@@ -238,7 +259,8 @@ std::string password_field(const std::string &value) {
 //  server_flags = game_settings.game_type and build_flags = CNapiServerConfig_BuildFlags
 //  @0x4C4DC0]
 void republish_flags(NapiNPServerCtx &ctx) {
-	ctx.np_protocol.server_flags = ctx.config.game_type;
+	// game_settings' type is the create's (D-NET-NEW-L1-40).
+	ctx.np_protocol.server_flags = ctx.session_game_type;
 	ctx.np_protocol.build_flags = build_server_config_flags(ctx);
 }
 
@@ -265,17 +287,23 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 		if (strutil::iequals(key, "ServerPassword")) {
 			if (block != nullptr) block->mp_host_game_password.clear();
 			if (protocol_up) {
+				// The protocol's join password, then game_settings' (D-NET-NEW-L1-43)
+				// [orig: Napi_CopyString(+0x300) @0x405AD6, CAITask_SetName @0x405AE8].
+				ctx_.np_protocol.server_password.clear();
 				c.server_password.clear();
 				republish_flags(ctx_);
 			}
 		} else if (strutil::iequals(key, "SideAPassword")) {
 			if (block != nullptr) block->mp_host_side_password_a.clear();
+			// The block's word the remote add reads live (D-NET-NEW-L1-46).
+			c.cfg_side_a_password.clear();
 			if (protocol_up) {
 				c.side_a_password.clear();
 				republish_flags(ctx_);
 			}
 		} else if (strutil::iequals(key, "SideBPassword")) {
 			if (block != nullptr) block->mp_host_side_password_b.clear();
+			c.cfg_side_b_password.clear();
 			if (protocol_up) {
 				c.side_b_password.clear();
 				republish_flags(ctx_);
@@ -291,10 +319,10 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 	const std::string &value = args[1];
 	const int32_t v = atol_of(value);
 	bool not_found = false;
-	uint32_t rules = live_rules_word(ctx_);
+	uint32_t rules = rules_flags();
 	const auto set_rule_bit = [&](uint32_t bit, bool on) {
 		rules = on ? (rules | bit) : (rules & ~bit);
-		set_live_rules_word(ctx_, rules);
+		set_rules_flags(rules);
 	};
 	if (strutil::iequals(key, "AutoBalanceOnRecycle")) {
 		// No shadow write: the save keeps the old autoBalanceOnRecycle_528. [orig: @0x405BC3]
@@ -341,12 +369,15 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 		if (block != nullptr) block->numallowablefriendlykills = v;
 	} else if (strutil::iequals(key, "GameTime")) {
 		// The round clock restarts at the full new limit: g_RoundTimeRemaining = 3720 * value.
-		c.respawn_time = static_cast<uint32_t>(v);
+		c.round_time_limit_minutes = static_cast<uint32_t>(v);
 		if (block != nullptr) block->time_limit = v;
 		if (world != nullptr) {
 			world->match.live_rules().game_time_minutes = static_cast<uint32_t>(v);
 			world->match.set_remaining_ticks(static_cast<int32_t>(3720u * static_cast<uint32_t>(v)));
 		}
+		// [orig: `imul eax, 0E88h` @0x405E80, g_RoundTimeRemaining @0x405E86, whatever the scene]
+		if (seams_.process_mission != nullptr)
+			seams_.process_mission->round_ticks_remaining = static_cast<int32_t>(3720u * static_cast<uint32_t>(v));
 	} else if (strutil::iequals(key, "FriendlyFire")) {
 		set_rule_bit(GameConfig::kMpAttribNoFriendlyFire, v == 0); // inverted
 	} else if (strutil::iequals(key, "FriendlyTags")) {
@@ -393,12 +424,16 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 		const std::string pw = password_field(value);
 		if (block != nullptr) block->mp_host_game_password = pw;
 		if (protocol_up) {
+			// [orig: Napi_CopyString(+0x300) @0x4061F8, CAITask_SetName @0x40620A]
+			ctx_.np_protocol.server_password = pw;
 			c.server_password = pw;
 			republish_flags(ctx_);
 		}
 	} else if (strutil::iequals(key, "SideAPassword")) {
 		const std::string pw = password_field(value);
 		if (block != nullptr) block->mp_host_side_password_a = pw;
+		// The block's word the remote add reads live (D-NET-NEW-L1-46) [orig: @0x406230].
+		c.cfg_side_a_password = pw;
 		if (protocol_up) {
 			c.side_a_password = pw;
 			republish_flags(ctx_);
@@ -406,6 +441,7 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 	} else if (strutil::iequals(key, "SideBPassword")) {
 		const std::string pw = password_field(value);
 		if (block != nullptr) block->mp_host_side_password_b = pw;
+		c.cfg_side_b_password = pw; // [orig: @0x406268]
 		if (protocol_up) {
 			c.side_b_password = pw;
 			republish_flags(ctx_);
@@ -416,7 +452,7 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 	}
 	// The rules word into its shadows: the cfg block's, and the port's one dword_2550A04
 	// store (GameConfig::mp_attributes). [orig: @0x406185]
-	rules = live_rules_word(ctx_);
+	rules = rules_flags();
 	c.mp_attributes = rules;
 	if (block != nullptr) block->mpattrib = static_cast<int32_t>(rules);
 	if (not_found) {
@@ -458,17 +494,91 @@ std::string AdminConsole::rotation_lines(bool query_fillers) const {
 	return out;
 }
 
-// The round end with no winner and the 620-tick linger in the Game Loop, else the refusal.
-// [orig: CAdminServer_HandleMissionCommand @0x4065E7..0x40662A; CAdminServer_HandleGotoCommand
-//  @0x404A74..0x404AAF -> Server_ProcessRoundEnd(0) @0x5164F0]
-void AdminConsole::cycle_tail(std::vector<std::string> &replies) {
-	if (in_game() && ctx_.world != nullptr) {
-		ctx_.world->process_round_end(0);
-		ctx_.round_end_linger_override_ticks = kCycleLingerTicks;
-		replies.emplace_back(kCycling);
-	} else {
-		replies.emplace_back(kMustBeInGame);
+namespace {
+
+// A joiner's own Server_ProcessRoundEnd(0), the cycle tail's. Over its empty slot table it scores
+// nobody and sends nothing; its board build rebuilds the end-round words its overlay reads, which
+// its round-over latch then draws (HUD_DrawOverlayPanels' g_RoundOver arm, the transition's first
+// pass; the STAT arm waits on g_ScoreboardDirty, which no build writes): the winner 0, the two team
+// words, the draw flag, rows 0..2 cleared (the memset; no row is built). The team words count the
+// zone chain's zones by the team byte the joiner holds (A&S, C&C), else read its team records'
+// primary field (the joiner world's Match records). A team type's draw is the words' equality; any
+// other type's, with no row, stays 1. The player index (the 0x1D's own byte) is not the build's.
+// Then the latch and the local view's four words. g_MissionRunning's 0 has no reader on a joiner
+// (its readers Server_ClientFiredRound, Server_SendPlayerSlotStateFrame and Server_PlayerAdd run
+// on the authority alone), so nothing models it.
+// [orig: Server_ProcessRoundEnd @0x5164F0 (g_MissionRunning @0x5164FC, the board build call
+//  @0x516590, g_RoundOver @0x5168E4, the view words @0x5168EA..0x5168FC);
+//  Server_BuildEndOfRoundScoreboard @0x508F30 (the memset @0x508F3F, the winner @0x508F77, the
+//  zone counts @0x508FBF..0x508FD7, the team records' primaries @0x508FA7 / @0x508FB8, @0x508FE0,
+//  the rowless draw @0x50909D / @0x509270, the team draw @0x5092AD, g_EndRoundDrawFlag @0x5092B2);
+//  CTeamSlotManager_CountByTeam @0x4A2A40 (the team byte @0x4A2A96); HUD_DrawOverlayPanels
+//  @0x5C0060 (UI_ProcessEndRoundScreenTransition @0x5C0072)]
+void joiner_round_end(ClientRuntime &client, world::World *world) {
+	replication::ClientState &state = client.state();
+	const uint32_t type = client.game_type();
+	int32_t scores[2] = {0, 0};
+	if (world != nullptr) {
+		if (type == game_type::kAdvanceAndSecure || type == game_type::kConquerAndControl) {
+			for (const world::EntityHandle handle : world->zones.chain.zones) {
+				const world::Entity *zone = world->registry.get(handle);
+				if (zone == nullptr) continue;
+				// The zone's team byte as this joiner holds it (role_feeds' zone_team_byte).
+				const replication::ClientEntityState *row = state.find(zone->handle.packed);
+				const uint8_t team = row != nullptr && row->team_known ? row->team : zone->team;
+				if (team == 1)
+					++scores[0];
+				else if (team == 2)
+					++scores[1];
+			}
+		} else {
+			scores[0] = world->match.team_primary_score(1);
+			scores[1] = world->match.team_primary_score(2);
+		}
 	}
+	EndRoundHeader &header = state.end_round.header;
+	header.winner_team = 0;
+	header.team_score_0 = static_cast<int16_t>(scores[0]);
+	header.team_score_1 = static_cast<int16_t>(scores[1]);
+	header.draw = game_type::is_team(type) ? static_cast<uint8_t>(scores[0] == scores[1]) : uint8_t{1};
+	for (int i = 0; i < 3; ++i) {
+		header.player_names[i].clear();
+		header.player_scores[i] = 0;
+	}
+	state.end_round.header_known = true;
+	state.spawn_success_gate = true;
+	state.mark_changed();
+	if (world != nullptr && world->local_player_state != nullptr)
+		world->local_player_state->round_end_view_clear();
+}
+
+} // namespace
+
+// The round end with no winner, run inline (its 0x61 / 0x1D go out here), then the
+// 620-tick linger stored over the round end's, unconditionally, in the Game Loop, else
+// the refusal (D-NET-NEW-L1-16). The Game Loop test alone gates it, so a joiner's console
+// cycles too: its own round end (joiner_round_end) runs over its empty slot table, rebuilds its
+// board words, raises its process's round-over latch, clears its view's words and stores the
+// linger, which its client frame then counts down (the joiner's MISSION CYCLE shows the overlay
+// and leaves on exit 4 after 620 ticks; GOTO MENUSTATE's quit leaves first).
+// [orig: CAdminServer_HandleMissionCommand @0x4065E7..0x40662A (Server_ProcessRoundEnd(0)
+//  @0x40660B, the store @0x40661F); CAdminServer_HandleGotoCommand @0x404A74..0x404AAF
+//  (UI_GetCurrentGameMode() == &g_GameModeGameLoop @0x404A7E, @0x404A95, the store
+//  @0x404AA5); Server_ProcessRoundEnd @0x5164F0 (g_RoundOver @0x5168E4, the 2790
+//  @0x5166C4 under is_in_session); Client_ProcessNetworkFrame @0x42C3AB..0x42C3D3]
+void AdminConsole::cycle_tail(std::vector<std::string> &replies) {
+	if (!in_game()) {
+		replies.emplace_back(kMustBeInGame);
+		return;
+	}
+	if (ctx_.world != nullptr) {
+		Server_ProcessRoundEnd(ctx_, *ctx_.world, 0);
+		ctx_.round_end_linger_ticks = kCycleLingerTicks;
+	} else if (seams_.host_client != nullptr) {
+		joiner_round_end(*seams_.host_client, seams_.joiner_world);
+		seams_.host_client->state().end_round_linger_ticks = static_cast<int32_t>(kCycleLingerTicks);
+	}
+	replies.emplace_back(kCycling);
 }
 
 // [orig: CAdminServer_HandleMissionCommand @0x4062E0 — LIST @0x406338..0x406483, AVAILABLE
@@ -631,76 +741,89 @@ void AdminConsole::handle_weapon(const Args &args, std::vector<std::string> &rep
 	replies.emplace_back("OK - Weapon availbility changed.");
 }
 
-// Client_ProcessLocalCommand's arms a host reaches with no client of its own: each takes a
-// line its prefix opens. PunkBuster's command hook comes first in retail and is not modeled
-// (D-NET-371). A `pb_` line, behind one leading '/' or '\\', is taken whatever PunkBuster's
-// state: retail hands it to the PunkBuster module (`pb_sv_` to its server half, any other to
-// its client half), each a call that does nothing with no PunkBuster context, and returns 1.
-// The WAC overlay toggles by name are not modeled (D-NET-371); SAVEKEYS is
-// taken here, its keylist.key dump of the profile's binding table not modeled, nor is the arm
-// past VERSION, which out of a session matches the line's CRC against the binding table and
-// queues its input action (D-NET-710). SAVENFO writes debug.nfo (entity_usage_text); VERSION posts
-// "Version <version>  - <title>" to the SYSTEM ring in white with the 930-tick life.
-// [orig: Client_ProcessLocalCommand @0x520BF0 — PBServer_InvokeCommandCallback @0x520C2A; the `pb_` arm
-//  @0x520C3B..0x520CB6: the '/' or '\\' skip @0x520C3B..0x520C45, strnicmp(.., "pb_", 3)
-//  @0x520C50 (the string @0x7CCF84), "sv_" @0x520C6B, the PunkBuster calls @0x520C94 /
-//  @0x520CC9 (0x4DA3F0 / 0x4D7ED0, each a no-op with no context 0xB608F4), return 1; the
-//  WAC overlays @0x520CF1, SAVEKEYS @0x520D10 (KeyBinding_DumpAllToFile @0x54C0A0), SAVENFO
-//  @0x520D4B (Entity_DumpUsageStatistics("debug.nfo") @0x520D5C), VERSION @0x520D8E (the
-//  format @0x7D00AC, Chat_AddMessageChannel2(.., -1, 930) @0x520DC2), the binding CRC
-//  @0x520DF2..0x520E5B]
+// Client_ProcessLocalCommand's arms a host reaches with no client of its own
+// (client_process_local_command, client_console.h): a `pb_` line is taken, PunkBuster's;
+// SAVEKEYS is taken, a host with no client holding no binding table to dump; SAVENFO writes
+// debug.nfo (entity_usage_text); VERSION posts "Version <version>  - <title>" to the SYSTEM
+// ring in white with the 930-tick life; out of a session the binding CRC arm has no input
+// layer to queue to here.
+// [orig: Client_ProcessLocalCommand @0x520BF0 - SAVENFO @0x520D4B
+//  (Entity_DumpUsageStatistics("debug.nfo") @0x520D5C); fopen("w+") @0x40E6B2]
 bool AdminConsole::local_command(const std::string &line) {
-	const size_t skip = !line.empty() && (line[0] == '/' || line[0] == '\\') ? 1 : 0;
-	if (strutil::starts_with_icase(std::string_view(line).substr(skip), "pb_")) return true;
-	if (strutil::starts_with_icase(line, "SAVEKEYS")) return true;
-	if (strutil::starts_with_icase(line, "SAVENFO")) {
+	ClientLocalCommandSeams seams;
+	seams.in_session = ctx_.is_in_session != 0;
+	seams.save_nfo = [this] {
 		const char *name = "debug.nfo";
 		const std::string file = entity_usage_file_name(name);
 		const def::DefItemsFile *items = seams_.items_table ? seams_.items_table() : nullptr;
-		if (ctx_.world != nullptr && ctx_.logs.files != nullptr && !file.empty()) {
-			// fopen("w+"): text mode, each '\n' on the disk a CR LF [orig: @0x40E6B2].
-			std::string text;
-			for (const char c : entity_usage_text(*ctx_.world, items, name)) {
-				if (c == '\n') text += '\r';
-				text += c;
-			}
-			(void)ctx_.logs.files->write(file, text, /*append=*/false);
+		if (ctx_.world == nullptr || ctx_.logs.files == nullptr || file.empty()) return;
+		// fopen("w+"): text mode, each '\n' on the disk a CR LF.
+		std::string text;
+		for (const char c : entity_usage_text(*ctx_.world, items, name)) {
+			if (c == '\n') text += '\r';
+			text += c;
 		}
-		return true;
-	}
-	if (strutil::starts_with_icase(line, "VERSION")) {
-		const std::string text = "Version " + seams_.version_text + "  - " + seams_.title_text;
+		(void)ctx_.logs.files->write(file, text, /*append=*/false);
+	};
+	seams.version_text = seams_.version_text;
+	seams.title_text = seams_.title_text;
+	seams.version_line = [this](const std::string &text) {
 		if (seams_.system_message) seams_.system_message(text, 0xFFFFFFFFu);
-		return true;
-	}
-	return false;
+	};
+	seams.toggle_overlay = seams_.toggle_overlay;
+	seams.queue_action = [this](int32_t code, int32_t p1, int32_t p2, int32_t p3) {
+		if (seams_.input_events != nullptr) (void)seams_.input_events->push({code, p1, p2, p3, false});
+	};
+	return client_process_local_command(line, seams);
 }
 
-// The host's own console line: Client_ProcessLocalCommand's arms first; then a session peer
-// queues the line to its own server as reliable C2S 0x04, whose authority half echoes back as
-// S2C 0x06 whatever NETLOG does not take (Server_HandleConsoleCommandMessage); an authority that
-// is not a peer runs the NETLOG handler (a `STAT` prefix taken whole; NETLOG toggling the net
-// log and going on), Server_HandleBanPuntCommand, then NapiClientCmd_ParseAndExecute, whose
-// debug commands and key-binding queue are not modeled (D-NET-710). Its one-second guard compares the tick
-// with the last stamp minus 1000, so it never drops a line.
-// [orig: Client_ProcessConsoleCommand @0x520E80 — the guard, Client_ProcessLocalCommand
-//  @0x520EEC, the peer's QueueReliableMessage(4) with NetPacket_WriteNullableString @0x42A430,
-//  the authority's Server_HandleAdminNetlogCommand(line, 0) @0x5175D0,
-//  Server_HandleBanPuntCommand(line, 0) @0x50B380, NapiClientCmd_ParseAndExecute @0x4329C0]
+// The process's console line (Client_ProcessConsoleCommand, the typed console's sender too). A
+// session peer (a listen host, single player, a joiner) is its own client's: the client runs the
+// one-second guard and Client_ProcessLocalCommand's arms over its own seams and rings, then queues
+// the line to its server as reliable C2S 0x04, whose authority half echoes back as S2C 0x06
+// whatever NETLOG does not take (Server_HandleConsoleCommandMessage);
+// ClientRuntime::console_command carries that half. An authority that is not a peer runs the
+// local arms, then the NETLOG handler (a `STAT` prefix taken whole; NETLOG toggling the net log
+// and going on), Server_HandleBanPuntCommand, then NapiClientCmd_ParseAndExecute: its debug
+// commands and the server command table's walk (client_console.h); its key-binding queue is the
+// input layer's (D-NET-710). Its one-second guard compares the tick with the last stamp minus
+// 1000, so it never drops a line.
+// [orig: CAdminServer_HandleCmdCommand @0x404997 (j_Client_ProcessConsoleCommand);
+//  Client_ProcessConsoleCommand @0x520E80 — the guard, Client_ProcessLocalCommand @0x520EEC, the
+//  peer's QueueReliableMessage(4) with NetPacket_WriteNullableString @0x42A430, the authority
+//  test @0x520F49, the authority's Server_HandleAdminNetlogCommand(line, 0) @0x5175D0 (the call
+//  @0x520F55), Server_HandleBanPuntCommand(line, 0) @0x50B380 (the call @0x520F63),
+//  NapiClientCmd_ParseAndExecute @0x4329C0 (the call @0x520f70, its taken test @0x520F7A)]
+// Only a host that does not play reaches the authority's arms here: connection mode 1 clears
+// the peer bit, and a host's own client (mode 3, single player too) is always a peer
+// (ClientRuntime::console_command, D-NET-NEW-LI-27).
 void AdminConsole::console_command(const std::string &line) {
-	if (local_command(line)) return;
 	if (ctx_.is_mp_session_peer != 0) {
-		if (seams_.host_client != nullptr) {
-			std::vector<uint8_t> body(line.begin(), line.end());
-			body.push_back(0);
-			seams_.host_client->queue_host_message(c2s::ADMIN_NETLOG_COMMAND, std::move(body));
-		}
+		if (seams_.host_client != nullptr) (void)seams_.host_client->console_command(line);
 		return;
 	}
+	if (local_command(line)) return;
 	if (ctx_.is_authority == 0) return;
 	std::vector<ProtocolMessage> no_slot_replies;
 	if (Server_HandleAdminNetlogCommand(ctx_, line, nullptr, no_slot_replies)) return;
-	Server_HandleBanPuntCommand(ctx_, line);
+	if (Server_HandleBanPuntCommand(ctx_, line)) return;
+	// The client's command walk ends it (client_console.h): its lines reach the
+	// SYSTEM ring, its binding records the process's input event queue; a host that is not a
+	// session peer has no client connection, so what the walk would send goes nowhere.
+	std::vector<std::string> lines;
+	ClientConsoleContext walk;
+	walk.in_session = ctx_.is_in_session != 0;
+	walk.novaworld = ctx_.transport_mode == NetworkType::NovaWorld;
+	walk.authority = true;
+	walk.state = &console_state_;
+	walk.system_lines = &lines;
+	// Its binding records join the process's input event queue (Seams::input_events).
+	walk.queue_action = [this](int32_t code, int32_t p1, int32_t p2, int32_t p3) {
+		if (seams_.input_events != nullptr) (void)seams_.input_events->push({code, p1, p2, p3, false});
+	};
+	(void)client_parse_and_execute(line, walk);
+	if (seams_.system_message)
+		for (const std::string &text : lines) seams_.system_message(text, hud::kHudColorWhite);
 }
 
 // [orig: CAdminServer_HandleCmdCommand @0x4048D0 — the arguments joined, each followed by one
@@ -759,7 +882,7 @@ void AdminConsole::handle_goto(const Args &args, std::vector<std::string> &repli
 // keyed on the one per-main-frame counter (set_main_frame). On that host the authority arm is
 // Server_SendConsoleChat's, which posts the sent line to the host's CHAT ring
 // (`ctx.console_chat`), and a refusal's echo lands in the same ring in Global's flood colour.
-// [orig: Chat_SendTeamMessage @0x49A900 (an IDB misnomer; the global sender) — the gates
+// [orig: Chat_SendGlobalMessage @0x49A900 (the global sender) - the gates
 //  @0x49A931, Chat_CheckFloodControl @0x49A93B, Chat_StripHtmlTags @0x49A971 into 64 bytes,
 //  the peer's QueueReliableMessage(0xD) @0x49A9B4, the authority's SendFiltered(0x14, 1, 310)
 //  with mask 0x80 @0x49AA1D and Chat_DispatchToChannel(0xFF, 10, message) @0x49AA2A, the

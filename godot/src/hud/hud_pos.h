@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/canvas_item.hpp>
 #include <godot_cpp/classes/font.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
+#include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/color.hpp>
@@ -211,6 +212,9 @@ public:
 	static Array font_page_textures(const Ref<FntResource> &p_font);
 	// The canvas_item shader an item whose glyph runs draw through their page's material carries.
 	static String glyph_shader_code();
+	// That shader as the one process-wide glyph program every glyph-shader item shares (font_page_glyphs
+	// glyph_canvas_shader: each menu frame, the loading screen's splash, the editor's font viewport).
+	static Ref<Shader> glyph_shader();
 
 	// The first-person view-effect spec (hud/view_effects.h carries the
 	// values and witnesses): binocular/NVG overlay rects in the 1024x768

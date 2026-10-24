@@ -73,15 +73,6 @@ inline uint8_t yaw_byte_from_bam(int32_t bam) {
 	return static_cast<uint8_t>(static_cast<uint32_t>(bam) >> 24);
 }
 
-inline int32_t chase_infantry_pitch(int32_t current, uint8_t target_byte) {
-	const int32_t target = static_cast<int32_t>(
-			static_cast<uint32_t>(target_byte) << 24);
-	const int32_t delta = opennova::io::bam_sub(target, current);
-	const int32_t step = opennova::io::bam_sar(
-			opennova::io::bam_add(delta, 4), 3);
-	return opennova::io::bam_add(current, step);
-}
-
 // Disarm the row's root-motion channel: the next free-standing tick re-arms
 // it fresh from the wire state (+ the live phase seed). Used by the mover
 // freezes (dead/bit0/carried — retail applies the anim byte per record
@@ -94,7 +85,6 @@ void row_channel_disarm(ClientEntityState &es) {
 	es.rm_blend_weight = 1.0f;
 	es.rm_blend_step = 0.0f;
 	es.rm_prev_bottom_live = false;
-	es.rm_leg_seeded = false;
 }
 } // namespace
 
@@ -169,6 +159,25 @@ void ClientReplicaPipeline::apply_organic_spawn(const std::vector<uint8_t> &body
 		// promote].
 		es.net_smooth_heading = rec.orientation;
 		es.net_target_heading_bam = rec.orientation;
+		// The model init stamps the body heading (+0x8C) with the Yaw too: the mission start's
+		// for the load stream's rows.
+		// [orig: Entity_InitAllFromModels -> Entity_InitFromModel @0x40DC30 - +0x8C @0x40E172,
+		//  the stage +0x240 @0x40E1A7]
+		es.rm_body_heading = rec.orientation;
+		// Then an org1 row's class init stamps its aim heading (+0x2EC) and its four leg
+		// words with the Yaw, the Pitch and Roll staying 0 (D-NET-NEW-L5-35).
+		// [orig: Entity_InitAllFromModels @0x40E460 - the pool-0 init callbacks
+		//  @0x40E5DA..0x40E60B (Game_StartMission's call @0x52567F); Entity_InitOrganicAI
+		//  @0x4BFCC0 - +0x2EC @0x4BFD59, +0x2E4 / +0x2E8 @0x4BFD5F / @0x4BFD65, +0x2D4 / +0x2D8
+		//  @0x4BFD6B / @0x4BFD71, Roll @0x4BFD99, Pitch @0x4BFDA2 (the org1 class row's init
+		//  @0x81303C)]
+		if (es.cls == EntityClass::Infantry) seed_org1_init_words(es, rec.orientation);
+		// A player row's class init stamps its four leg words and its body heading with the
+		// Yaw, its Pitch, roll and lean words staying 0 (D-NET-NEW-L5-42).
+		// [orig: Entity_InitAllFromModels @0x40E460 - the pool-0 init callbacks
+		//  @0x40E5F0..0x40E60B; PlayerClass_InitEntity @0x4B1060 - @0x4B117C..0x4B11CD (the plyr
+		//  class row's init @0x813054)]
+		if (es.cls == EntityClass::Player) seed_player_init_words(es, rec.orientation);
 		es.heading_known = true;
 		es.pitch_bam = 0; // organic spawn carries no entity+20/+24 Euler fields
 		es.roll_bam = 0;
@@ -191,10 +200,19 @@ void ClientReplicaPipeline::apply_organic_spawn(const std::vector<uint8_t> &body
 		es.spawn_anim_slot = rec.anim_slot;
 		es.spawn_player_class = rec.player_class;
 		es.spawn_byte_154 = rec.player_slot_id;
+		// A record of the local body's handle stores its slot byte (local_body_slot)
+		// [orig: @0x42EA06].
+		if (rec.slot_id == viewer_handle_) local_body_slot_ = rec.player_slot_id;
 		es.spawn_ref_num = rec.alert_level;
 		es.spawn_sub_type = rec.sub_type;
 		es.mount_bone = rec.weapon_type;
 		if (in_pool_tables(rec.parent_handle)) es.carrier_handle = rec.parent_handle;
+		// Then a player's NetId the joiner's own avatar table lacks becomes the first
+		// combo of its Team's side (D-NET-NEW-L2-27) [orig: NapiNPClientMsg_0x00C
+		//  @0x42E730 - the Player test @0x42EAC5, CAvatarDefs_HasPackedId @0x42EADB,
+		//  CAvatarDefs_PackFirstComboOfAlignment @0x42EAFB, the store @0x42EB03].
+		if ((rec.minimap_flags & world::kEntityFlagPlayer) != 0)
+			es.net_id = resolve_player_net_id(es.net_id, es.team);
 		changed = true;
 	}
 	if (changed) state_.mark_changed();
@@ -214,10 +232,14 @@ void ClientReplicaPipeline::land_compact_pose(ClientEntityState &es, int32_t wx,
 		int32_t wy, int32_t wz, bool has_heading, int32_t heading_bam,
 		bool force_live_snap) {
 	es.net_has_compact = true;
+	es.record_sample[0] = wx;
+	es.record_sample[1] = wy;
+	es.record_sample[2] = wz;
 	if (!remote_motion_mode_ || force_live_snap || es.net_world_mover) {
 		// Live snap: the host/SP roles (full-rate loopback; the authority never
 		// interpolates, D-NET-89), the respawn edge [orig: live snap +
-		// Entity_ResetToSpawnState @0x4C113C], and the vehicle dead-pose form.
+		// Entity_ResetToSpawnState @0x4B9610 (the call @0x4C113C)], and the vehicle
+		// dead-pose form.
 		es.x = wx;
 		es.y = wy;
 		es.z = wz;
@@ -229,16 +251,53 @@ void ClientReplicaPipeline::land_compact_pose(ClientEntityState &es, int32_t wx,
 			es.pitch_bam = static_cast<int32_t>(
 					static_cast<uint32_t>(es.pitch_byte) << 24);
 		}
+		// An organic row's respawn runs the reset over the snapped pose: the spawn backup
+		// takes Position and +0x2D4 the Yaw, and the body heading (+0x8C) the Yaw.
+		// [orig: Entity_ResetToSpawnState @0x4B9610 - @0x4B9623..0x4B9644, +0x8C @0x4B968C,
+		//  @0x4B96AA]
+		if (force_live_snap &&
+				(es.cls == EntityClass::Player || es.cls == EntityClass::Infantry)) {
+			es.spawn_backup[0] = es.x;
+			es.spawn_backup[1] = es.y;
+			es.spawn_backup[2] = es.z;
+			es.reset_yaw = es.heading_bam;
+			// The reset is the class's either way: it stamps the four leg words with the Yaw
+			// and zeroes savedLivePitch (+0x90) and Roll (D-NET-NEW-L5-42); an org1 body's
+			// +0x2EC stamp is the record's own aim heading store's to overwrite later in the
+			// same read.
+			// [orig: Entity_ResetToSpawnState @0x4B9610 - +0x2E4 / +0x2E8 @0x4B969E / @0x4B96A4,
+			//  +0x2D4 / +0x2D8 @0x4B96AA / @0x4B96B0, +0x2EC @0x4B9698, +0x90 @0x4B97DD, Roll
+			//  @0x4B97E3; NetPacket_SerializeInfantryEntityState @0x4C0320 - the reset
+			//  @0x4C05EC, the +0x2EC store @0x4C066C; NetPacket_SerializePlayerState @0x4C09C0 -
+			//  the reset @0x4C113C]
+			es.rm_body_heading = es.heading_bam;
+			es.rm_leg_yaw[0] = es.rm_leg_yaw[1] = es.heading_bam;
+			es.rm_leg_target[0] = es.rm_leg_target[1] = es.heading_bam;
+			es.rm_leg_seeded = true;
+			es.rm_body_pitch = 0;
+			es.roll_bam = 0;
+			// The torso roll (+0x2DC) and the lean (+0xB0) stay: neither arm nor the reset
+			// stores them (D-NET-NEW-L5-61) [orig: NetPacket_SerializePlayerState @0x4C09C0 - the
+			//  arm @0x4C1109..0x4C114C; NetPacket_SerializeInfantryEntityState @0x4C0320 - the arm
+			//  @0x4C05B3..0x4C05FE; Entity_ResetToSpawnState @0x4B9610].
+		}
 		if (force_live_snap && remote_motion_mode_) {
 			// Retail stages the target BEFORE the respawn branch snaps the live
 			// pose [orig: LABEL_123 staging precedes the +0x24&2 snap @0x4C1109+]
 			// — the staged target stays at the wire pose, so the next mover tick
 			// sees a zero delta (deadband) instead of gliding anywhere.
+			// An infantry record's respawn arm still promotes the previous stage into the
+			// target (+0x1A8) ahead of its new stage, over the reset's +0x1A8 = Yaw
+			// (D-NET-NEW-L5-33). [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 -
+			//  Entity_ResetToSpawnState @0x4C05EC (+0x1A8 @0x4B9692), then the promote
+			//  @0x4C0646..0x4C0653 and the stage @0x4C0693]
+			const int32_t previous_stage = es.net_smooth_heading;
 			es.net_smooth_target[0] = wx;
 			es.net_smooth_target[1] = wy;
 			es.net_smooth_target[2] = wz;
 			es.net_smooth_heading = has_heading ? heading_bam : es.heading_bam;
-			es.net_target_heading_bam = es.net_smooth_heading;
+			es.net_target_heading_bam = es.cls == EntityClass::Infantry
+					? previous_stage : es.net_smooth_heading;
 			es.net_interp_steps = 0;
 			es.net_interp_progress = 0;
 		}
@@ -271,9 +330,13 @@ void ClientReplicaPipeline::land_compact_pose(ClientEntityState &es, int32_t wx,
 	es.net_interp_progress = 0; // [orig: @0x4C0FFC — bucket +0x27E is NOT reset]
 }
 
+// Every call is one C2S 0x0F: retail's reliable queue creates a message per call, so two
+// requests for one handle in a frame (two children of one stale carrier, two records of one
+// slot) both go out.
+// [orig: CNapiNetwork_QueueReliableMessage @0x4C4FA0 -> CNapiNPConnection_QueueMessage
+//  @0x628640 (the NapiNPMessage_Create call @0x6286C3); the calls @0x440DAB / @0x440E29, the
+//  0x0A type bail @0x4307E9, the carrier bail @0x4608AE..0x4608C1]
 void ClientReplicaPipeline::queue_carrier_repair(uint16_t handle) {
-	for (uint16_t h : carrier_repair_requests_)
-		if (h == handle) return;
 	carrier_repair_requests_.push_back(handle);
 }
 
@@ -293,6 +356,12 @@ std::vector<ClientReplicaPipeline::ReplicaCorpseDecay>
 ClientReplicaPipeline::drain_corpse_decays() {
 	std::vector<ReplicaCorpseDecay> out;
 	out.swap(corpse_decays_);
+	return out;
+}
+
+std::vector<uint16_t> ClientReplicaPipeline::drain_respawn_releases() {
+	std::vector<uint16_t> out;
+	out.swap(respawn_releases_);
 	return out;
 }
 
@@ -342,6 +411,8 @@ void ClientReplicaPipeline::apply_pool_spawn(const std::vector<uint8_t> &body) {
 		// the empty string for any other def). [orig: NapiNPClientMsg_0x00D
 		//  @0x433320..0x43334A]
 		es.display_name = rec.entity_name;
+		// The AI slot's +156 name, the AI trailer's [orig: @0x433363..0x43337C].
+		es.spawn_ai_name = rec.ai_name;
 		// The 0x0D handler memsets the full slot and has no entity+124
 		// net-id field. Preserve retail's resulting zero, not ClientState's
 		// unknown/sentinel default.
@@ -392,6 +463,63 @@ void ClientReplicaPipeline::apply_pool_spawn(const std::vector<uint8_t> &body) {
 	if (changed) state_.mark_changed();
 }
 
+bool ClientReplicaPipeline::follows_carrier_seat(const ClientEntityState &child) {
+	// A world-mover VEHICLE is predicted by the embedding sim from the
+	// composed record sample whatever its carrier (a pool-1 deck, or
+	// the static a bridge/roof/ramp resolves to), its mover riding the
+	// carrier as its ground link; its row publishes the mirrored
+	// predicted pose, so the per-tick recompose must not drag it back
+	// to the record's sample between records. [orig:
+	// Entity_SerializeVehicleState stages the composed sample and lands
+	// groundEntity @0x4607cd..0x460802; no rigid re-attach]. A
+	// dead-pose wreck on a pool-1 deck keeps the seat-follow: the
+	// mover is frozen for it (JoinerRole) and the dead-pose form's
+	// carrier handling is not re-witnessed here.
+	const bool dead_pose = child.state_flags_known &&
+			(child.state_flags & kVehicleFlagDeadPose) != 0u;
+	const bool world_predicted = child.cls == EntityClass::Vehicle &&
+			child.net_world_mover &&
+			child.carrier_handle != wire_handle::kInvalid &&
+			(!dead_pose || world::EntityHandle{child.carrier_handle}.pool() != 1);
+	// A dead org1 body in a seat its record still names takes the free-standing branch, which
+	// poses no seat: the seat pose is the in-vehicle branch's alone (visit_remote_row).
+	// [orig: Entity_UpdateInfantryAI @0x4B9910 - the seat test @0x4B9960..0x4B9985, the seat
+	//  pose @0x4BEBEC..0x4BEDDA]
+	if (child.cls == EntityClass::Infantry && child.net_health_zero) return false;
+	return child.net_seat_valid && child.carrier_handle != wire_handle::kInvalid &&
+			!world_predicted;
+}
+
+void ClientReplicaPipeline::follow_carrier_seat(ClientEntityState &child,
+		const ClientEntityState *carrier) {
+	if (carrier == nullptr) {
+		child.net_seat_valid = false;
+		return;
+	}
+	const WorldPose posed = network_transform_local_to_world(
+			child.net_seat_local[0], child.net_seat_local[1],
+			child.net_seat_local[2], carrier->x, carrier->y,
+			carrier->z, static_cast<uint32_t>(carrier->heading_bam),
+			static_cast<uint32_t>(carrier->pitch_bam),
+			static_cast<uint32_t>(carrier->roll_bam));
+	child.x = posed.x;
+	child.y = posed.y;
+	child.z = posed.z;
+	// A seated player body's Yaw word is its chase's (visit_remote_row's carrier branch): its
+	// mounted site's seat carry writes the body heading, Roll and savedLivePitch only.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the angle apply @0x4B43E6..0x4B440A,
+	//  the seat carry @0x4B654E..0x4B6575]
+	if (child.cls == EntityClass::Player) return;
+	// So is a seated org1 body's (every one followed is alive, follows_carrier_seat): its seat
+	// branch's look half (tick_org1_looks); the bone pose writes the body heading, Roll and
+	// savedLivePitch.
+	// [orig: Entity_UpdateInfantryAI @0x4B9910 - the bone pose @0x4BED96..0x4BEDDA, the look
+	//  @0x4BEF57..0x4BEF97]
+	if (child.cls == EntityClass::Infantry) return;
+	child.heading_bam = io::bam_add(carrier->heading_bam, child.net_seat_local_heading_bam);
+	child.yaw_byte = yaw_byte_from_bam(child.heading_bam);
+}
+
 void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 	std::vector<uint16_t> sweep_destroyed;
 	// ClientState intentionally keeps its decoded rows public, so its general
@@ -424,9 +552,10 @@ void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 	//  @0x440ca0 — groundEntity read @0x440cbf, bone re-resolve @0x440cfd,
 	//  carrier-matrix bone compose @0x44109d with position+Euler adoption
 	//  @0x4410dd, no-bone verbatim carrier-pose adoption @0x4410ea..0x4411bc]
-	// Without model bone tables at this layer, the recompose below carries the
-	// rigid child-in-carrier pose captured from the 0x0D absolutes — the same
-	// client-subset simplification the parent-follow path already pins.
+	// A joiner's world runs that update itself for every row it holds (the row's
+	// world_class_update, D-NET-690); without model bone tables at this layer,
+	// the recompose below carries the rigid child-in-carrier pose captured from
+	// the 0x0D absolutes for a row no world holds.
 	std::vector<uint16_t> persistent_carrier(state_.entities.size(), wire_handle::kInvalid);
 	for (std::size_t i = 0; i < state_.entities.size(); ++i) {
 		const ClientEntityState &child = state_.entities[i];
@@ -458,44 +587,22 @@ void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 			// Compact-carried player/infantry/vehicle rows retain the latest
 			// successfully resolved local sample. A missing carrier invalidates
 			// the sample rather than leaving an offset that could attach to a
-			// later handle reuse.
-			// A world-mover VEHICLE is predicted by the embedding sim from the
-			// composed record sample whatever its carrier (a pool-1 deck, or
-			// the static a bridge/roof/ramp resolves to), its mover riding the
-			// carrier as its ground link; its row publishes the mirrored
-			// predicted pose, so the per-tick recompose must not drag it back
-			// to the record's sample between records. [orig:
-			// Entity_SerializeVehicleState stages the composed sample and lands
-			// groundEntity @0x4607cd..0x460802; no rigid re-attach]. A
-			// dead-pose wreck on a pool-1 deck keeps the seat-follow: the
-			// mover is frozen for it (JoinerRole) and the dead-pose form's
-			// carrier handling is not re-witnessed here.
-			const bool dead_pose = child.state_flags_known &&
-					(child.state_flags & kVehicleFlagDeadPose) != 0u;
-			const bool world_predicted = child.cls == EntityClass::Vehicle &&
-					child.net_world_mover &&
-					child.carrier_handle != wire_handle::kInvalid &&
-					(!dead_pose || world::EntityHandle{child.carrier_handle}.pool() != 1);
-			if (child.net_seat_valid && child.carrier_handle != wire_handle::kInvalid &&
-					!world_predicted) {
-				const ClientEntityState *carrier = find_row(child.carrier_handle);
-				if (carrier == nullptr) {
-					child.net_seat_valid = false;
-				} else {
-					const WorldPose posed = network_transform_local_to_world(
-							child.net_seat_local[0], child.net_seat_local[1],
-							child.net_seat_local[2], carrier->x, carrier->y,
-							carrier->z, static_cast<uint32_t>(carrier->heading_bam),
-							static_cast<uint32_t>(carrier->pitch_bam),
-							static_cast<uint32_t>(carrier->roll_bam));
-					child.x = posed.x;
-					child.y = posed.y;
-					child.z = posed.z;
-					child.heading_bam = io::bam_add(
-							carrier->heading_bam, child.net_seat_local_heading_bam);
-					child.yaw_byte = yaw_byte_from_bam(child.heading_bam);
-				}
-			}
+			// later handle reuse (follows_carrier_seat / follow_carrier_seat).
+			// A row the walk parked takes its carrier at its own visit instead,
+			// as a pool-0 rider's own update poses it at its mounted site in the
+			// pool-0 walk (visit_parked_rows, D-NET-196); until then it keeps
+			// the pose its last tick left. A person bound to an item row takes no seat
+			// pose: that is the org2 body's mounted site, which its +0x1C4 never runs
+			// (D-NET-892) [orig: Entity_UpdateAllEntities @0x4C2100 - the +0x1C4 call
+			// @0x4C2472; Entity_UpdateInfantryPlayerBody @0x4B40E0 - the site selector
+			// @0x4B637C..0x4B638F]. Nor does an organic body whose update exited ahead of
+			// that site this tick (body_update_ended).
+			const bool organic = child.cls == EntityClass::Player ||
+			                     child.cls == EntityClass::Infantry;
+			if (!child.rm_parked && follows_carrier_seat(child) &&
+					!person_takes_item_row(child, parked_self_) &&
+					!(organic && body_update_ended(child)))
+				follow_carrier_seat(child, find_row(child.carrier_handle));
 
 			if (persistent_carrier[child_index] == wire_handle::kInvalid) continue;
 			// Only the addeweap/no-callback family rides this persistent
@@ -510,17 +617,31 @@ void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 			// vehicle to its spawn-time occupant — on non-COOP retail hosts,
 			// "a vehicle follows the player around" (one per map, whichever
 			// spawn record carried flag 0x0100).
+			// A genx row the joiner's world rides runs its own update: the ride
+			// and the fall, no stale-carrier sweep and no hide (D-NET-690).
+			// [orig: the genx row @0x82AC10 -> Entity_UpdateParentTransform
+			//  @0x4A88B0, which stores no Flags]
+			if (child.world_class_update == ClientEntityState::WorldClassUpdate::Genx)
+				continue;
 			ClientEntityState *parent = find_row(persistent_carrier[child_index]);
 			if (parent == nullptr) {
-				// The pure-client stale-carrier sweep [orig: @0x440d41..
-				// 0x440e2f]: after a 128-tick unresolvable run, request BOTH
-				// rows over C2S 0x0F and locally destroy the child — the
-				// authority's re-spawn re-materializes the pair. A later batch
-				// may still provide the carrier inside the window, which
-				// resets the run below.
-				if (tick_sweep && depth == 0 &&
-				    ++child.carrier_missing_ticks >= 128) {
-					queue_carrier_repair(persistent_carrier[child_index]);
+				// The pure-client stale-carrier sweep: a carrier the shared
+				// destroy removed (its slot's destroyed mark) on a tick whose
+				// low seven bits are all set requests BOTH rows over C2S 0x0F,
+				// the carrier's first, and locally destroys the child; the
+				// authority's re-spawn re-materializes the pair. A carrier no
+				// record ever wrote carries no mark and is never swept. The
+				// role gates (in session, a session peer, not the authority)
+				// are the remote-motion mode's: the authority never runs it.
+				// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the gates
+				//  @0x440D03..0x440D24, the mark @0x440D2A, `and eax, 7Fh` /
+				//  `cmp al, 7Fh` @0x440D3C..0x440D41, the carrier's 0x0F
+				//  @0x440DAB, the child's @0x440E29, Entity_Destroy @0x440E2F]
+				const uint16_t carrier_handle = persistent_carrier[child_index];
+				if (tick_sweep && depth == 0 && (frame_tick_ & 0x7Fu) == 0x7Fu &&
+						std::find(state_.destroyed_marks.begin(), state_.destroyed_marks.end(),
+								carrier_handle) != state_.destroyed_marks.end()) {
+					queue_carrier_repair(carrier_handle);
 					queue_carrier_repair(child.handle);
 					if (std::find(sweep_destroyed.begin(), sweep_destroyed.end(),
 							child.handle) == sweep_destroyed.end())
@@ -528,7 +649,15 @@ void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 				}
 				continue;
 			}
-			child.carrier_missing_ticks = 0;
+			// An ewep row the joiner's world composes: the class update poses it
+			// from the carrier's posed model at its subType's anchor and owns the
+			// dead-carrier hide; the world's pose is read back into this row
+			// (JoinerRole::mirror_mission_entities, D-NET-690).
+			// [orig: Entity_UpdateTransformAndTurret @0x440CA0 -- the hide
+			//  @0x440CDD, Bone_BuildAttachmentMatrix @0x44109D, the adoption
+			//  @0x4410DD]
+			if (child.world_class_update == ClientEntityState::WorldClassUpdate::Ewep)
+				continue;
 			// The dead-carrier leg. Retail's client HIDES the child in place —
 			// carrier Flags & 2 -> child Flags |= 1, return, no pose follow — and
 			// the live carrier's vehicle block clears the child's low Flags bits
@@ -728,6 +857,7 @@ void ClientReplicaPipeline::apply_pool3_batch(const std::vector<uint8_t> &body) 
 		es.spawn_entity_flags = 0;
 		es.spawn_section_mask = 0;
 		es.spawn_ammo_count = rec.ammo_count;
+		es.spawn_location_index = static_cast<int16_t>(rec.weapon_type); // [orig: @0x425D7E]
 		es.spawn_bound_radius_q16 =
 				static_cast<int32_t>(rec.orientation_val);
 		es.spawn_ref_num = 0;
@@ -776,7 +906,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			state_.enemy_tags_visible = true;
 			++state_.death_screen_opens;        // [orig: @0x42ffb8..0x42ffc9]
 			// The spectator tip, unless the round is over [orig:
-			// `cmp g_SpawnSuccessGate` @0x42ffd0 -> CTipSystem_HandleEvent(22)
+			// `cmp g_RoundOver` @0x42ffd0 -> CTipSystem_HandleEvent(22)
 			// @0x42ffdf; the spectate-mode toast stamp dword_24C18F0 = 186
 			// @0x42ffe4 rides the unported toast, docs/interface/hud-re.md].
 			if (!state_.spawn_success_gate)
@@ -789,6 +919,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 	if (fu.local_tail_present) {
 		state_.local_health = fu.health;
 		state_.local_armor = fu.armor; // [orig: @0x430442]
+		state_.local_carried_handle = fu.carried_handle; // [orig: @0x4305F2]
 		++state_.health_updates_applied;
 		state_.local_stance_bits = static_cast<uint8_t>(fu.state_flag_byte & 0x03u); // [orig: @0x4303e5]
 	}
@@ -946,9 +1077,10 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// queued and the callback runs against a NULL target, consuming the
 		// record's bytes and landing nothing. A handle outside pools 0..4 or
 		// past its pool's capacity resolves to no slot at all: consumed
-		// silently, no request. A compact record therefore NEVER creates or
-		// re-types a row — only the spawn stream (0x0C/0x0D/0x10/0x20/0x18)
-		// does, and a row the team-assign leg created ahead of its spawn
+		// silently, no request. A compact record therefore never creates a row,
+		// and only the player record's def re-pick below re-types one (by its
+		// class, D-NET-348); the spawn stream (0x0C/0x0D/0x10/0x20/0x18) creates
+		// and types rows, and a row the team-assign leg created ahead of its spawn
 		// (type 0) is exactly retail's itemDef-less slot. [orig:
 		// NapiNPClientMsg_0x00A @0x42FEC0 — the pool resolve `(handle &
 		// 0xF000) < 0x5000` + `slot < capacity`, the check @0x4307B1..0x4307C4
@@ -968,7 +1100,10 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 				continue;
 			}
 		}
-		if (rec.cls == EntityClass::NoNetworkCallback) {
+		// A guided record is its header alone: the serializer's mode-2 call with format 11
+		// reads and writes nothing, so the row stays as it stands (D-NET-NEW-L1-28)
+		// [orig: NapiNPClientMsg_0x00A @0x42FEC0 - @0x430804 / @0x43080C, the call @0x430828].
+		if (rec.cls == EntityClass::NoNetworkCallback || rec.cls == EntityClass::Guided) {
 			record_folded[rec_i] = 1u;
 			continue;
 		}
@@ -979,8 +1114,18 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			record_carrier = rec.vehicle.parent_slot_handle;
 		else if (rec.cls == EntityClass::Infantry)
 			record_carrier = rec.infantry.vehicle_slot_handle;
+		// The carrier's slot must hold a def: no row, or a typeless one (a slot the
+		// team-assign leg created ahead of its spawn), is the slot whose itemDef is null,
+		// and the record drops whole, its dead arms included (each class's resolve tests
+		// itemDef ahead of its applies) [orig: NetPacket_SerializePlayerState @0x4C09C0 -
+		// `cmp dword ptr [ebp+20h], 0` @0x4C107B, the 0x0F @0x4C10AE, the return
+		// @0x4C10C7, ahead of the dead test @0x4C0FE1; NetPacket_SerializeInfantryEntityState
+		// @0x4C0320 - @0x4C0554, the return @0x4C0595; Entity_SerializeVehicleState
+		// @0x460560 - @0x46087A].
+		const ClientEntityState *carrier_row = record_carrier != wire_handle::kInvalid
+				? state_.find(record_carrier) : nullptr;
 		if (record_carrier != wire_handle::kInvalid &&
-				state_.find(record_carrier) == nullptr) {
+				(carrier_row == nullptr || carrier_row->type_id == 0)) {
 			if (sweep == 0) continue; // the carrier may appear this frame
 			queue_carrier_repair(record_carrier);
 			record_folded[rec_i] = 1u;
@@ -989,7 +1134,8 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		record_folded[rec_i] = 1u;
 		// The row exists with this exact type (the pre-apply check above): a
 		// compact never upserts, and a handle reused for a different type is
-		// re-armed by the spawn stream that re-typed it, never here.
+		// re-armed by the spawn stream that re-typed it; a player record's def
+		// re-pick (below) is the one re-type a compact makes.
 		ClientEntityState &es = *state_.find(rec.handle);
 		// Capture the previous body-anim sample before the per-record clear: if
 		// this record REPLACES it with a different state within one decode fold,
@@ -1009,13 +1155,14 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// normalized row before class-specific assignment so dismounts and class changes
 		// cannot retain a stale carrier/bone selector from an earlier frame.
 		es.carrier_handle = wire_handle::kInvalid;
+		es.record_carrier = wire_handle::kInvalid;
 		es.mount_bone = 0;
 		es.seat_type = 0;
 		// Carrier identity and its resolved local pose form one atomic sample.
 		// The second pass re-arms this only if the final carrier resolves.
 		es.net_seat_valid = false;
 		es.pitch_byte = 0;
-		es.aim_yaw_byte = 0;
+		es.aim_pitch_byte = 0;
 		es.anim_state_id = 0;
 		es.anim_channel_ratio = 0;
 
@@ -1054,6 +1201,16 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			if (was_known && was_dead && is_alive) {
 				++es.respawn_revision;
 				respawned_this_record = true;
+				// The respawn arm's reset releases the body's +0x1CC group (its corpse leg's
+				// decay, or a hit's), every organic row's, the own one's included, inside the
+				// decode: the embedder stops it at the receive's point (drain_respawn_releases),
+				// as it does an expired row's in the walk (erase_expired_remote_rows).
+				// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the dead test @0x4C1109,
+				//  Entity_ResetToSpawnState @0x4B9610 called @0x4C113C;
+				//  NetPacket_SerializeInfantryEntityState @0x4C0320 - the dead test @0x4C05B3, the
+				//  call @0x4C05EC; the reset's release @0x4B97CB..0x4B97F5]
+				if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry)
+					respawn_releases_.push_back(es.handle);
 			}
 		}
 		// The organic wire-dead position skip (LABEL_151). Vehicle wrecks are the
@@ -1067,8 +1224,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// 0xFFFF, D-NET-151), lift the local offset through the carrier's pose from this
 		// view's own state [orig: op2 resolves the carrier from g_PoolList and runs
 		// Entity_TransformLocalToWorld @0x4c10d4; a carrier with no itemDef DROPS the
-		// record and queues a C2S 0x0F entity request — request plumbing an in-process
-		// view does not need, so an unknown carrier just skips the position sample].
+		// record and queues a C2S 0x0F entity request, the fold's carrier gate above].
 		// Carrier-local samples are queued for a second pass after every record has
 		// updated the view. Production order is pool-0 child before pool-1 carrier.
 		uint16_t cx = 0, cy = 0, cz = 0;
@@ -1084,6 +1240,12 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// ::ground). carrier_handle keeps the seat relation alone.
 		uint16_t ground_carrier = wire_handle::kInvalid;
 		int32_t ground_local_heading = 0;
+		// The class the row held before this record (entity+0x294 as the readers
+		// take it: the last compact's nibble, else the spawn's), which a dead
+		// record's def re-pick reads below.
+		const uint8_t prior_player_class = es.net_has_compact
+				? static_cast<uint8_t>(es.health_class_byte & 0x0Fu)
+				: es.spawn_player_class;
 		switch (rec.cls) {
 		case EntityClass::Player:
 			cx = rec.player.pos_x_compressed;
@@ -1091,6 +1253,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			cz = rec.player.pos_z_compressed;
 			es.carrier_handle = rec.player.vehicle_bone != 0
 					? rec.player.carrier_handle : wire_handle::kInvalid;
+			es.record_carrier = rec.player.carrier_handle;
 			es.mount_bone = rec.player.vehicle_bone;
 			es.seat_type = rec.player.seat_type;
 			es.pitch_byte = rec.player.pitch_byte;
@@ -1099,9 +1262,17 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			es.equipped_adm_index = rec.player.anim_def_index;
 			es.state_flags = rec.player.state_flags;
 			es.move_input = rec.player.move_input_byte;
-			es.health_class_byte = rec.player.health_class_byte;
+			// A dead record skips the class store, so the row keeps the last live
+			// record's class (entity+0x294) for its class readers [orig:
+			// NetPacket_SerializePlayerState @0x4C09C0 - the dead arms' Health = 0
+			// @0x4C1027 / @0x4C10FB and their jumps past the
+			// Entity_SetHealthFromDifficultyByte call @0x4C11BA (@0x4C102E /
+			// @0x4C1104 -> @0x4C11D7)].
+			es.health_class_byte = wire_dead
+					? static_cast<uint8_t>((rec.player.health_class_byte & 0xF0u) |
+							prior_player_class)
+					: rec.player.health_class_byte;
 			if (es.carrier_handle != wire_handle::kInvalid) {
-				es.pitch_bam = static_cast<int32_t>(static_cast<uint32_t>(es.pitch_byte) << 24);
 				pending_carrier_poses.push_back(PendingCarrierPose{
 						rec.handle, rec.player.carrier_handle, cx, cy, cz,
 						static_cast<int32_t>(
@@ -1197,23 +1368,26 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			es.carrier_handle = rec.infantry.seat_bone_idx != 0
 					? rec.infantry.vehicle_slot_handle : wire_handle::kInvalid;
 			es.mount_bone = rec.infantry.seat_bone_idx;
-			es.pitch_byte = rec.infantry.pitch_byte;
-			es.aim_yaw_byte = rec.infantry.aim_yaw_byte;
+			es.pitch_byte = rec.infantry.aim_heading_byte;
+			es.aim_pitch_byte = rec.infantry.aim_pitch_byte;
 			es.anim_state_id = rec.infantry.anim_byte;
 			es.state_flags = rec.infantry.flags_byte;
-			// The compact carries desired aim pitch (entity+0x2D0), not live
-			// entity+0x14. Retail's remote gunner rebuilds the latter locally
-			// with the same wrapped one-eighth chase as authoritative AI.
-			// [orig: chase @0x4bef7b..0x4bef97]
-			if (es.carrier_handle != wire_handle::kInvalid) {
-				es.pitch_bam = chase_infantry_pitch(
-						es.pitch_bam, rec.infantry.aim_yaw_byte);
-			}
+			// The record writes the aim words (+0x2EC, +0x2D0), not the live Yaw / Pitch: the
+			// body's look chases them every tick, a seated body's in its seat branch, a
+			// free-standing one's after its body chase (tick_org1_looks).
+			// [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 - the stores @0x4C066C /
+			//  @0x4C0672; Entity_UpdateInfantryAI @0x4B9910 - the seated look
+			//  @0x4BEF57..0x4BEF97, the free-standing look @0x4BEB18..0x4BEBE7]
+			es.rm_aim_heading_word = static_cast<int32_t>(
+					static_cast<uint32_t>(rec.infantry.aim_heading_byte) << 24);
+			es.rm_aim_word = static_cast<int32_t>(
+					static_cast<uint32_t>(rec.infantry.aim_pitch_byte) << 24);
 			if (es.carrier_handle != wire_handle::kInvalid) {
 				pending_carrier_poses.push_back(PendingCarrierPose{
 						rec.handle, rec.infantry.vehicle_slot_handle, cx, cy, cz,
 						static_cast<int32_t>(
-								static_cast<uint32_t>(rec.infantry.yaw_byte) << 24)});
+								static_cast<uint32_t>(rec.infantry.yaw_byte) << 24),
+						/*ground=*/false, /*force_live_snap=*/respawned_this_record});
 				skip_pos = true;
 			} else if (rec.infantry.vehicle_slot_handle != wire_handle::kInvalid) {
 				ground_carrier = rec.infantry.vehicle_slot_handle;
@@ -1265,6 +1439,12 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			if (wire_dead) {
 				es.net_health_zero = true;
 				if (!row_was_dead) es.net_death_anim = es.anim_state_id;
+				// The client's own body takes the same arms at the effect pass, in this
+				// receive's order (PlayerDeadRecord) [orig: @0x4C100B..0x4C1027 /
+				// @0x4C10F1..0x4C10FB].
+				if (rec.cls == EntityClass::Player)
+					pending_effect_commands_.push_back(
+							PlayerDeadRecord{rec.handle, static_cast<int16_t>(es.anim_state_id)});
 			} else if (respawned_this_record) {
 				es.rm_entity_flags &= ~world::kEntityFlagDead;
 				es.net_health_zero = false;
@@ -1280,31 +1460,71 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
                         ((flags & 0x100u) ? 2 : 0) | ((flags & 0x200u) ? 1 : 0));
             }
 		}
+		// Every player record then re-picks the body's def by its class: a live
+		// remote record's class is the field-17 nibble the health apply stores, a
+		// dead record skips that apply and keeps the class it had, and the client's
+		// own record skips it always (the resolver reads L's class word,
+		// D-NET-NEW-L2-57); the camouflage item for the mission climate is looked up
+		// as a row, and a row other than the body's rebinds it (the def, its models
+		// and bone types). The row then carries the new type, so the next record of
+		// the old one fails the pre-apply check above and queues the C2S 0x0F
+		// (D-NET-348).
+		// [orig: NetPacket_SerializePlayerState @0x4C09C0 -
+		//  the Entity_SetHealthFromDifficultyByte @0x4AD580 call @0x4C11BA (its class store
+		//  @0x4AD5A2),
+		//  the dead arms' jumps past it @0x4C102E / @0x4C1104, the remote stores
+		//  @0x4C11DF..0x4C1242, the climate pick @0x4C1248..0x4C129C,
+		//  ItemList_FindIndexByTypeId @0x4C129D, the compare @0x4C12A5..0x4C12A8, the
+		//  rebind @0x4C12B8..0x4C12D6, AnimMap_InitBoneTypes @0x4C12E0 / @0x4C12EC]
+		if (rec.cls == EntityClass::Player && replica_player_cammo_resolver_) {
+			const uint8_t player_class = wire_dead
+					? prior_player_class
+					: static_cast<uint8_t>(rec.player.health_class_byte & 0x0Fu);
+			uint16_t row_type = 0;
+			if (replica_player_cammo_resolver_(rec.handle, player_class, row_type) &&
+					row_type != es.type_id)
+				retype_row(es, row_type);
+		}
+		// Every player record, dead or alive, then lands its flags byte on a remote
+		// body's Flags bits 0 and 2..7 (the dead bit stays the row's own): the
+		// carried, NVG, binoculars, scope, chute, mounted and climb bits the body's
+		// update reads (the air-steer's chute test among them). The client's own
+		// body takes 0xE1 onto L (joiner_role_replica_world.cpp).
+		// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the byte in bl
+		//  @0x4C0FDD, `xor ebx, [edi+24h]` @0x4C12F4, `and ebx, 0FDh` @0x4C1307,
+		//  `xor [edi+24h], ebx` @0x4C1311]
+		if (rec.cls == EntityClass::Player)
+			es.rm_entity_flags ^= (es.rm_entity_flags ^ rec.player.state_flags) & 0xFDu;
 		if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry ||
 				rec.cls == EntityClass::Vehicle) {
 			es.heading_known = true;
 			++es.compact_revision;
 		}
-		// Root-channel lifecycle at the organic freeze/respawn edges: a frozen
-		// row (bit0/carried) never root-ticks, so its channel is DISARMED —
+		// Root-channel lifecycle at the organic freeze/respawn edges: a bit0
+		// row never runs its body pass, so its channel is DISARMED —
 		// presentation falls back to the per-record wire anim byte exactly as
-		// retail applies it [orig: @0x4c1153] (the seat clips dispatch). A
+		// retail applies it [orig: @0x4c1153]; so are the other carried rows. A
+		// seated player row's pass runs its
+		// channel at its head (tick_seated_body: the mounted eye's capsule,
+		// D-NET-330), and the row presents that channel
+		// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the bit0
+		// test @0x4B411E, the dual update @0x4B41DF]. A
 		// dead row is not frozen: its mover runs and the death edge commits
 		// the death clip to the channel. The respawn edge keeps the channel
-		// (the next state blends out of the death clip) and resets what
-		// Entity_ResetToSpawnState resets on the row: the leg and body yaws
-		// re-seed to the new heading, and the velocities zero
-		// [orig: @0x4b962c velocityX/Y + slideDecay = 0; @0x4b968c..0x4b96b0
-		// bodyHeading and the four leg yaws = Yaw]. (The one-shot phase seed
-		// rides the arbitration's direct-commit leg — net_anim_ratio.)
+		// (the next state blends out of the death clip) and zeroes the velocities
+		// Entity_ResetToSpawnState zeroes [orig: @0x4b962c velocityX/Y + slideDecay = 0];
+		// the reset's yaw stamps are land_compact_pose's. A frozen row's disarm leaves its
+		// leg words as they stand: its update returns ahead of its leg chase and holds them.
+		// (The one-shot phase seed rides the arbitration's direct-commit leg — net_anim_ratio.)
 		if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry) {
+			const bool seated_player = rec.cls == EntityClass::Player &&
+					es.carrier_handle != wire_handle::kInvalid && es.mount_bone != 0;
 			const bool row_frozen =
 					(has_state_flags && (state_flags & 0x01u) != 0u) ||
-					es.carrier_handle != wire_handle::kInvalid;
+					(es.carrier_handle != wire_handle::kInvalid && !seated_player);
 			if (row_frozen) {
 				row_channel_disarm(es);
 			} else if (respawned_this_record) {
-				es.rm_leg_seeded = false;
 				es.rm_vel_xy[0] = 0;
 				es.rm_vel_xy[1] = 0;
 				es.rm_vel_z = 0;
@@ -1404,13 +1624,47 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		child->x = w.x;
 		child->y = w.y;
 		child->z = w.z;
+		child->record_sample[0] = w.x;
+		child->record_sample[1] = w.y;
+		child->record_sample[2] = w.z;
 		// World heading = carrier + local for every carried class: the player
 		// read composes its yaw byte [orig: @0x4c10d4] and the vehicle read
 		// lifts its eulerZ through Entity_TransformLocalToWorld's out[3] =
 		// carrier[3] + local[3] [orig: @0x4608ce / @0x43bd00 -> the entity+576
 		// store @0x4607f5]. BAM addition holds in the yaw byte's 8-bit ring.
-		child->heading_bam = io::bam_add(carrier->heading_bam, pending.local_heading_bam);
-		child->yaw_byte = yaw_byte_from_bam(child->heading_bam);
+		const int32_t heading = io::bam_add(carrier->heading_bam, pending.local_heading_bam);
+		child->yaw_byte = yaw_byte_from_bam(heading);
+		// A seated person's record falls into the same stage and count reset as a
+		// free-standing one does after the vehicle compose. A player record writes no live
+		// Yaw / Pitch there: it stages the composed sample, yaw and pitch (land_compact_pose),
+		// which the chase steps (visit_remote_row's carrier branch) on a client; the respawn
+		// edge and the authority's snap folds land them live, as there.
+		// [orig: NetPacket_SerializePlayerState @0x4C09C0 - Entity_TransformLocalToWorld
+		//  @0x4C10D4, the stores @0x4C0FD7..0x4C0FF6, the reset @0x4C0FFC;
+		//  NetPacket_SerializeInfantryEntityState @0x4C0320 - Entity_TransformLocalToWorld
+		//  @0x4C05A2, the block @0x4C04E1, the reset @0x4C04EC]
+		if (child->cls == EntityClass::Player) {
+			land_compact_pose(*child, w.x, w.y, w.z, true, heading, pending.force_live_snap);
+		} else if (child->cls == EntityClass::Infantry) {
+			// On a client a seated infantry record stages its composed sample and promotes the
+			// previous stage into the target (+0x1A8), as a free-standing one does: the
+			// in-vehicle branch's chase restages it, and a dead seated body's free-standing
+			// branch chases it (D-NET-NEW-L5-34).
+			// [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 - the promote
+			//  @0x4C0646..0x4C0653, the stage @0x4C0689..0x4C06AA]
+			if (remote_motion_mode_)
+				land_compact_pose(*child, w.x, w.y, w.z, true, heading, pending.force_live_snap);
+			child->net_interp_progress = 0;
+			// An infantry record writes the live Yaw on its respawn edge alone; a live seated
+			// body's is its look's (tick_org1_looks).
+			// [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 - the respawn arm's
+			//  +0x10 store @0x4C05D5, the stage @0x4C0689..0x4C06AA]
+			if (pending.force_live_snap || child->mount_bone == 0 ||
+					(child->state_flags & world::kEntityFlagDead) != 0u)
+				child->heading_bam = heading;
+		} else {
+			child->heading_bam = heading;
+		}
 		// A deck-carried vehicle is a carried OBJECT (the bit0-flagged attach
 		// class @0x43C14A) whose mover is bit0-skipped — the per-tick
 		// seat-follow owns its motion between records, so nothing chases a

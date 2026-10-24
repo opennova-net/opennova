@@ -35,12 +35,16 @@ bool gate_response_decrypt_and_parse(const uint8_t *data, size_t len,
 		out = GateResponse{};
 		return false;
 	}
+	return gate_response_parse(gate_response_decrypt(data, len, nwu_key), out);
+}
+
+std::string gate_response_decrypt(const uint8_t *data, size_t len, std::string_view nwu_key) {
+	if (!data || len == 0) return {};
 	std::vector<uint8_t> plain(data, data + len);
 	// [orig: NapiNP_DecryptBuffer(buf, len, "GATEAPI") @0x633bcc ->
 	//  CNapiGateManager_SetResponseBuffer @0x633650]
 	nwu_encrypt(plain.data(), plain.size(), nwu_key);
-	std::string body(reinterpret_cast<const char *>(plain.data()), plain.size());
-	return gate_response_parse(body, out);
+	return std::string(reinterpret_cast<const char *>(plain.data()), plain.size());
 }
 
 } // namespace opennova

@@ -390,10 +390,14 @@ void PreviewSceneLayers::run_environment_() {
 	// As the game's load reads it (WorldScene::load_environment): the terrain's .trn, overcast.def
 	// (the overcast table), then the .env over them, a .env that is not there skipped with the
 	// earlier passes standing over the engine's own environment (env-tod-re.md #38, #43); the
-	// weather's colours snapped, the bodies and the drops read through the project's files,
-	// FrameFX's mission texture, the cube captured again. What the load lacks is a note, as the
-	// game's load reports it.
+	// weather's colours snapped, the bodies and the drops read through the project's files, the
+	// cube captured again. What the load lacks is a note, as the game's load reports it.
 	const WorldEnvironmentLoad load = scene_.load_environment(root_files_, trn, environment);
+	// The device draws, as the game's full arm does: the environment's celestial bodies, its sky
+	// maps and FrameFX's mission texture load with it.
+	scene_.load_celestial_models(root_files_, /*p_draws=*/true);
+	scene_.load_sky_maps(/*p_dedicated_host=*/false);
+	scene_.init_frame_fx_mission_textures(/*p_dedicated_host=*/false);
 	if (load.environment_missing)
 		note_missing(kEnvironment, source_.environment);
 	if (load.overcast_missing)

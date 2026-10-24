@@ -8,9 +8,12 @@ class World;
 
 namespace opennova::inmatch {
 
-// Drain the kill-zone pass's admitted medic interactions in their sweep order
-// through the two transactions GameEvent_HandleMedicInteraction routes to: a
-// dead target's revive and a live, hurt target's heal.
+// The two transactions GameEvent_HandleMedicInteraction routes to, a dead
+// target's revive and a live, hurt target's heal. The host session runs them
+// inline in its entity update's explosion queue, ahead of the pool-0 walk
+// (ServerEntityUpdateTransactions::medic_interaction, sends staged for the next
+// tick's head); this drains, in their sweep order, the interactions a world
+// queued without the session's transactions armed.
 //
 // The revive, in order: the victim's "being revived" latch, the victim slot's
 // revive pose armed and its revive window and respawn penalty closed, its

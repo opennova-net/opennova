@@ -74,6 +74,7 @@ constexpr KeyWitness kKeyWitness[] = {
 	{ "HUDSCOPEZEROXY", "[orig: HUD_ParseHudposToken, the HUDSCOPEZEROXY arm @ 0x5A1282]" },
 	{ "HUDSCOPEMAGXY", "[orig: HUD_ParseHudposToken, the HUDSCOPEMAGXY arm @ 0x5A12C6]" },
 	{ "LFP_FLAGS", "[orig: HUD_ParseHudposToken, the LFP_FLAGS arm @ 0x5A0549]" },
+	{ "LFP_TAKEOVERDLG", "[orig: HUD_ParseHudposToken, the LFP_TAKEOVERDLG arm @ 0x5A058D]" },
 	{ "HUDSPINMAPX1", "[orig: HUD_ParseHudposToken, the HUDSPINMAPX1 arm @ 0x59F7D4]" },
 	{ "HUDSPINMAPY1", "[orig: HUD_ParseHudposToken, the HUDSPINMAPY1 arm @ 0x59F831]" },
 	{ "HUDSPINMAPX2", "[orig: HUD_ParseHudposToken, the HUDSPINMAPX2 arm @ 0x59F804]" },

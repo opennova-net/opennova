@@ -100,6 +100,10 @@ struct HudCombatState {
 	// [orig: g_DeathScreenActive @0xA860EC -- HUD_DrawCrosshair @0x592646,
 	//  HUD_RenderOverlays @0x5A7BBC, HUD_RenderAllOverlays @0x5A850D]
 	bool death_screen = false;
+	// The white hit flash's word is burning: the gameplay overlay pass returns at its head
+	// (HudFrameCompiler::compile; world/player_view.h screen_flash_hud_overlays_suppressed)
+	// [orig: HUD_RenderAllOverlays @0x5A8098..0x5A809F].
+	bool white_flash = false;
 	// Armory/bay use one line; an eligible FARP replaces it later in the walk.
 	int service_prompt = 0, service_wait_seconds = 0;
 	bool service_above_declutter = false;
@@ -116,7 +120,10 @@ struct HudCombatState {
 	HudProjectedPoint vehicle_fixed_point, vehicle_lag_point;
 	// The mortar distance template, Overlays/STROVER_DIST. Unresolved it is
 	// GameText_GetString's miss, "" [orig: @0x5A8961 -> the miss @0x51EC08].
-	std::string target_name, impact_format;
+	std::string impact_format;
+	// The inset's friendly name, the role's display-name lookup of the HUD
+	// target cursor (inmatch::HudRoleFacts::inset_target_name); empty draws none.
+	std::string target_name;
 	int32_t impact_x_q16 = 0, impact_y_q16 = 0, impact_radius_q16 = 0;
 	uint16_t impact_distance_m = 0;
 	float inset_fov_over_zoom = 0, designator_scale = 1;

@@ -2,6 +2,7 @@
 
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/wire_handle.h>
+#include <runtime/inmatch/character_registry.h>
 #include <runtime/world/entity.h>
 
 #include <algorithm>
@@ -62,6 +63,27 @@ void ClientReplicaPipeline::apply_full_entity_spawn(const std::vector<uint8_t> &
     row.heading_known = true;
     row.net_smooth_heading = row.heading_bam;
     row.net_target_heading_bam = row.heading_bam;
+    // The model init after the Yaw store stamps the body heading (+0x8C) with it.
+    // [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - the Yaw @0x433B8C, the
+    //  Entity_InitFromModel call @0x433E6C; Entity_InitFromModel @0x40DC30 - +0x8C @0x40E172]
+    row.rm_body_heading = row.heading_bam;
+    // Then the class init: an org1 row's stamps its aim heading and its four leg words with the
+    // Yaw and zeroes its Pitch (D-NET-NEW-L5-35); a player row's stamps its four leg words and
+    // its body heading with the Yaw and zeroes its Pitch and its roll and lean words
+    // (D-NET-NEW-L5-42).
+    // [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - the init callback @0x433E74..0x433E82;
+    //  Entity_InitOrganicAI @0x4BFCC0; PlayerClass_InitEntity @0x4B1060]
+    if (row.cls == EntityClass::Infantry) seed_org1_init_words(row, row.heading_bam);
+    if (row.cls == EntityClass::Player) seed_player_init_words(row, row.heading_bam);
+    // The handler registers the body's channel, so the update after it runs with one
+    // (D-NET-NEW-L5-44); a type whose sources are unarmed stays pending.
+    // [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - AnimMap_RegisterEntity @0x40BB60 called
+    //  @0x433DAA]
+    if ((row.cls == EntityClass::Player || row.cls == EntityClass::Infantry) &&
+            replica_adm_resolver_) {
+        const int adm_id = replica_adm_resolver_(row.type_id);
+        if (adm_id >= -1) row.rm_adm_id = static_cast<int16_t>(adm_id);
+    }
     row.net_smooth_target[0] = row.x;
     row.net_smooth_target[1] = row.y;
     row.net_smooth_target[2] = row.z;
@@ -77,6 +99,9 @@ void ClientReplicaPipeline::apply_full_entity_spawn(const std::vector<uint8_t> &
     row.spawn_ai_state = rec.ai_state;
     row.spawn_anim_slot = rec.anim_slot;
     row.spawn_byte_154 = rec.player_slot_id;
+    // A record of the local body's handle rebuilds its slot byte, the in-place destroy's 0xFF
+    // included (local_body_slot) [orig: @0x433BBB].
+    if (rec.slot_id == viewer_handle_) local_body_slot_ = rec.player_slot_id;
     row.spawn_mount_mask = rec.seat_mask;
     for (std::size_t i = 0; i < 8; ++i)
         row.spawn_mount_handles[i] = resolved_spawn_handle(rec.mount_handles[i]);
@@ -86,17 +111,35 @@ void ClientReplicaPipeline::apply_full_entity_spawn(const std::vector<uint8_t> &
     row.target_handle = resolved_spawn_handle(rec.ground_entity_handle);
     row.carrier_handle = resolved_spawn_handle(rec.parent_entity_handle);
     row.resolved_ground = row.target_handle;
+    // A player's NetId the joiner's own avatar table lacks takes its Team side's first
+    // combo (D-NET-NEW-L2-27) [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - the
+    //  Player test @0x433DB2, CAvatarDefs_HasPackedId @0x433DDD,
+    //  CAvatarDefs_PackFirstComboOfAlignment @0x433DFF, the store @0x433E07].
+    if ((rec.minimap_flags & world::kEntityFlagPlayer) != 0)
+        row.net_id = resolve_player_net_id(row.net_id, row.team);
     state_.mark_changed();
     refresh_carried_entities();
 }
 
 // Deferred gameplay notifications belong to the current slot lifetime. A later
 // destroy/repair must not apply them to the newly materialized replacement.
+// A dead player record's arms write the slot as the record decodes, so a later
+// spawn of that slot in the same receive re-inits what they wrote (a 0x0C clears
+// the slot whole; a 0x18 destroys it, clears Health and Flags and its class init
+// re-requests +0x2BC / +0x2B8), and a destroy frees it: the queued share goes
+// with the slot's 0x13s.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the dead arms @0x4C100B..0x4C1027 /
+//  @0x4C10F1..0x4C10FB; NapiNPClientMsg_0x00C @0x42E730 - the memsets called @0x42E7F1 /
+//  @0x42E7FE; NapiNPClientMsg_FullEntitySpawn @0x433780 - Entity_Destroy called @0x433815,
+//  the memset @0x433821, the class init called @0x433E82; PlayerClass_InitEntity @0x4B1060 -
+//  +0x2BC @0x4B1161, +0x2B8 @0x4B1176]
 void ClientReplicaPipeline::discard_entity_notifications(uint16_t handle) {
     pending_effect_commands_.erase(std::remove_if(pending_effect_commands_.begin(),
             pending_effect_commands_.end(), [handle](const ClientEffectCommand &command) {
-                const auto *death = std::get_if<EntityDeathEvent>(&command);
-                return death && death->entity_handle == handle;
+                if (const auto *death = std::get_if<EntityDeathEvent>(&command))
+                    return death->entity_handle == handle;
+                const auto *dead = std::get_if<PlayerDeadRecord>(&command);
+                return dead != nullptr && dead->entity_handle == handle;
             }), pending_effect_commands_.end());
 	pending_weapon_reloads_.erase(std::remove_if(pending_weapon_reloads_.begin(),
 			pending_weapon_reloads_.end(), [handle](const WeaponReload &event) {
@@ -110,6 +153,11 @@ uint32_t ClientReplicaPipeline::begin_entity_lifetime(uint16_t handle) {
 		if (prior->spawn_revision != 0) revision = prior->spawn_revision;
 	if (++revision == 0) ++revision;
 	discard_entity_notifications(handle);
+	// The record's memset clears the slot's destroyed mark with the rest
+	// [orig: Entity_Destroy @0x43E810 (the mark @0x43EA7F); NapiNPClientMsg_0x00D @0x432C40
+	//  (the memset @0x432D23)].
+	state_.destroyed_marks.erase(std::remove(state_.destroyed_marks.begin(),
+			state_.destroyed_marks.end(), handle), state_.destroyed_marks.end());
 	return revision;
 }
 
@@ -118,6 +166,10 @@ void ClientReplicaPipeline::erase_entity_tree(uint16_t root_handle) {
 	// target re-picks while its row still stands [orig: @0x43e820..0x43e838].
 	spectate_on_entity_removed(root_handle);
 	discard_entity_notifications(root_handle);
+	// The destroy zeroes the HUD target cursor naming its entity, ahead of its group walk
+	// [orig: Entity_Destroy @0x43E810 - `cmp g_HUDTargetCursorEntity, esi` @0x43E89C, the clear
+	//  @0x43E8A4, the EntityReference_DestroyEWeapGroup call @0x43E9CD].
+	if (replica_destroy_observer_) replica_destroy_observer_(root_handle);
 	// The client runs the shared Entity_Destroy, refNum walk included. The row
 	// leaves its refNum group first (the streamed refNum byte stands in for the
 	// list the 0x0D / 0x10 / 0x18 handlers joined it to); then a non-person
@@ -184,6 +236,11 @@ void ClientReplicaPipeline::erase_entity_tree(uint16_t root_handle) {
 			state_.entities.end());
 	if (detached || state_.entities.size() != before)
 		state_.mark_topology_changed();
+	// The zeroed slot is marked destroyed [orig: Entity_Destroy @0x43EA70
+	// memset, `mov byte ptr [esi+219h], 1` @0x43EA7F].
+	if (std::find(state_.destroyed_marks.begin(), state_.destroyed_marks.end(), root_handle) ==
+			state_.destroyed_marks.end())
+		state_.destroyed_marks.push_back(root_handle);
 }
 
 // The carried flag leaves its person carrier, keeping the carrier's pose
@@ -227,9 +284,8 @@ void ClientReplicaPipeline::destroy_pool0_slot(uint16_t pool0_index) {
 // [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — the non-authority entity team store @0x4319ee]
 void ClientReplicaPipeline::apply_team_assign(uint16_t handle, uint8_t team) {
 	// Not the 0xFFFF sentinel, and the pool nibble must address one of the five
-	// entity pools; the slot-capacity gate is the callers' (the 0x50 and 0x51
-	// folds), and so is the authority test (the 0x51 fold's; the 0x50 fold stores
-	// the Team on the host view too, D-NET-736).
+	// entity pools; the slot-capacity gate and the authority test are the
+	// callers' (the 0x50 fold @0x4319E1, the 0x51 fold @0x431C6D).
 	const world::EntityHandle h{handle};
 	if (!h.valid() || h.pool() >= world::kEntityPoolCount) return;
 	ClientEntityState &entity = state_.upsert(handle);
@@ -248,10 +304,29 @@ void ClientReplicaPipeline::apply_player_identity(uint16_t handle, uint16_t net_
 	const world::EntityHandle h{handle};
 	if (!h.valid() || h.pool() >= world::kEntityPoolCount) return;
 	ClientEntityState &entity = state_.upsert(handle);
-	if (entity.net_id == net_id && entity.spawn_anim_slot == anim_slot) return;
-	entity.net_id = net_id;
+	// The NetId the avatar table lacks takes the first combo of the side the row's Team
+	// names, the Team the fold above stored (D-NET-NEW-L2-27) [orig:
+	//  NapiNPClientMsg_TeamAssign @0x431910 - CAvatarDefs_HasPackedId @0x431B4D, the store
+	//  @0x431B77; NapiNPClientMsg_HandlePlayerSpawn @0x431BB0 - @0x431CB4, @0x431CDE].
+	const uint16_t stored = resolve_player_net_id(net_id, entity.team);
+	if (entity.net_id == stored && entity.spawn_anim_slot == anim_slot) return;
+	entity.net_id = stored;
 	entity.spawn_anim_slot = anim_slot;
 	state_.mark_changed();
+}
+
+// The client handlers' NetId test on a player entity: an id the joiner's own avatar
+// table holds stands; any other is replaced by the first combo of the alignment the
+// entity's Team picks (Team 1 the good side, every other Team the evil), which an empty
+// table packs as 0. No registry installed passes the id through.
+// [orig: CAvatarDefs_HasPackedId @0x57B140 (CAvatarDefs_FindComboByPackedId != 0
+//  @0x57B15A); the alignment `cmp byte ptr [entity+162h], 1` + setnz @0x42EAE4..0x42EAED;
+//  CAvatarDefs_PackFirstComboOfAlignment @0x57AD40]
+uint16_t ClientReplicaPipeline::resolve_player_net_id(uint16_t net_id, uint8_t team) const {
+	if (characters_ == nullptr || characters_->find_by_packed_id(net_id) != nullptr)
+		return net_id;
+	return characters_->first_character_id(
+			team != 1 ? avatars::AVATAR_ALIGN_EVIL : avatars::AVATAR_ALIGN_GOOD);
 }
 
 // One team-change list entry: the addressed slot takes the entry's team off
@@ -260,7 +335,7 @@ void ClientReplicaPipeline::apply_player_identity(uint16_t handle, uint16_t net_
 // [orig: NapiNPClientMsg_HandlePlayerSpawn @0x431BB0 — the handle gates
 //  @0x431c1a..0x431c49, Team @0x431c6d (!is_authority), the C2S 0x29
 //  {index + 1} @0x431c88..0x431c99, the player gate @0x431ca5, NetId
-//  @0x431cad with the MinimapSlot_HasEntity fallback @0x431cb4..0x431cde,
+//  @0x431cad with the CAvatarDefs_HasPackedId fallback @0x431cb4..0x431cde,
 //  CharacterEntity @0x431cfc, animSlot @0x431cff]
 void ClientReplicaPipeline::apply_team_change_confirm(const std::vector<uint8_t> &body) {
 	TeamChangeConfirm entry;

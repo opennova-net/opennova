@@ -64,6 +64,12 @@ public:
 	Ref<FrameStatsWindow> drain();
 	static String slot_name(int p_slot);
 	static String slot_description(int p_slot);
+	// The process's RenderingDevice GLSL compiles so far, [count, microseconds]
+	// (render/rd_glsl.h; an instrument the verbose PipelineCompiles line reads).
+	static PackedInt64Array rd_glsl_compile_totals();
+	// The process's RenderingDevice pipeline creates so far, render and compute,
+	// [count, microseconds] (render/rd_glsl.h; the same line reads them).
+	static PackedInt64Array rd_pipeline_create_totals();
 
 	opennova::devtools::FrameStatsBoard &board() { return board_; }
 	// Emit capture_changed when the board's capture state moved since the

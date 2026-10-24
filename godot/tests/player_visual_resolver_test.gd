@@ -48,7 +48,7 @@ func test_selected_character_builds_composed_head_body_and_per_part_camo() -> vo
 	assert_not_null(items)
 	items.store_string(TestFs.crlf(
 			"begin Player\n"
-			+ " id 105310\n type person\n graphic person\nend\n"))
+			+ " id 105305\n type person\n graphic person\nend\n"))
 	items.close()
 	var avatars := FileAccess.open(avatar_path, FileAccess.WRITE)
 	assert_not_null(avatars)
@@ -128,17 +128,36 @@ func test_selected_character_builds_composed_head_body_and_per_part_camo() -> vo
 
 
 
-func test_runtime_player_type_resolves_to_us01_visual_item() -> void:
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/terrain/tmap")), OK)
-	var placer := MissionObjectPlacer.create(root, null)
+# A body's def is the row its type word names, the player's included: 0x14B9
+# binds "Player #1, Multiplayer" (105305), 5310 the single player's (105310)
+# [orig: NetPacket_SerializePlayerState @0x4C09C0 - the call @0x4C129D, the def /
+#  model stores @0x4C12B8..0x4C12D6] (D-NET-348).
+func test_runtime_player_type_resolves_to_its_own_row() -> void:
+	# Both player rows as the shipped table authors them (the Tmap fixture carries
+	# only the single player's, so the with-Tmap rigs keep a def-less body).
+	var tmp := ProjectSettings.globalize_path(
+			"user://player_rows_%d.def" % Time.get_ticks_usec())
+	var file := FileAccess.open(tmp, FileAccess.WRITE)
+	assert_not_null(file)
+	file.store_string(TestFs.crlf(
+			"begin \"Player #1, Single player\"\n  id 105310\n  type person\n"
+			+ "  graphic US01\n  anim_def US01\nend\n"
+			+ "begin \"Player #1, Multiplayer\"\n  id 105305\n  type person\n"
+			+ "  graphic US01\n  anim_def US01\nend\n"))
+	file.close()
+	var items := ItemDatabase.new()
+	assert_eq(items.load(tmp), OK)
+	var placer := MissionObjectPlacer.create(null, items)
 	var db := placer.get_item_db()
 	assert_eq(db.get_graphic(0x14B9), "", "runtime type id is not an items.def authoring id")
 
 	var visual_id := int(placer.resolve_player_visual_item_id(0x14B9))
-	assert_eq(visual_id, 105310)
+	assert_eq(visual_id, 105305)
 	assert_eq(db.get_graphic(visual_id), "US01")
 	assert_eq(db.get_anim_def(visual_id), "US01")
+	assert_eq(int(placer.resolve_player_visual_item_id(5310)), 105310,
+			"a single player's 5310 body binds its own row")
+	DirAccess.remove_absolute(tmp)
 
 
 func test_raw_runtime_item_type_resolves_to_full_items_def_id() -> void:

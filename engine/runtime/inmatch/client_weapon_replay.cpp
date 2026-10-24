@@ -33,8 +33,15 @@ bool local_slot(world::World &world, const world::Entity &mount) {
 
 // Replica organics borrow the exact materialized carrier slot. An ordinary
 // on-foot remote has no EquippedSlot: its equipped-ADM byte is display state.
+// The record's route legs run on the remote's parent when it is a mountable gun
+// with the G capability, whatever the seat, byte 2 only onto a groundEntity that
+// is a type-1 EWeap (D-NET-NEW-L2-34). The slots are the ones the guns' class
+// inits bound at their spawn; no leg here binds or seeds one.
 // [orig: Entity_AttachToUseGunSlot @0x546B80; Entity_AttachToVehicleSlot @0x4946D0;
-//  NetPacket_SerializePlayerState @0x4C09C0]
+//  NetPacket_SerializePlayerState @0x4C09C0 - the parent @0x4C1346, the gates
+//  @0x4C1367..0x4C137E, byte 1 @0x4C1390 / @0x4C139D, byte 2's groundEntity gates
+//  @0x4C13C1..0x4C13E5 and @0x4C13EB / @0x4C13F8; WeaponSlot_InitFromEntityDef @0x5466C0
+//  runs from the class inits alone]
 void sync_replica_weapon_slots(replication::ClientState &state, world::World &world,
         uint16_t self_handle) {
     for (auto &row : state.entities) {
@@ -46,16 +53,11 @@ void sync_replica_weapon_slots(replication::ClientState &state, world::World &wo
             continue;
         const auto type = seat_type(row, *mount);
         if (type != world::SeatType::Gunner && type != world::SeatType::Controller) continue;
-        if (!world.vehicles.prepare_weapon_slot(*mount) || local_slot(world, *mount)) continue;
+        if (local_slot(world, *mount)) continue;
         mount->primary_weapon_owner = world::EntityHandle{row.handle};
-        if (type == world::SeatType::Gunner && mount->item_type != 1u &&
-                (mount->emplacement_attachment_flags & 2u)) {
+        if (world::mount_is_designated_g_gun(*mount)) {
             auto *parent = world.registry.get(mount->ground_target);
-            const bool parent_valid = parent && mount->emplacement_parent == parent->handle &&
-                    mount->emplacement_parent_spawn_id == parent->registry_spawn_id &&
-                    parent->has_item_def && parent->item_type == 1u &&
-                    (parent->item_attrib & world::kItemAttribEweap) &&
-                    world.vehicles.prepare_weapon_slot(*parent);
+            const bool parent_valid = world::designated_g_route_carrier(parent);
             if (parent_valid && !local_slot(world, *parent))
                 parent->primary_weapon_owner = world::EntityHandle{row.handle};
             if (row.seat_type == 1) mount->primary_weapon_slot.redirect_to_parent_slot = false;
@@ -132,7 +134,11 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
         if (row.type_id && row.weapon_slot_handle != 0xFFFF) borrowers.push_back(row.handle);
     std::sort(borrowers.begin(), borrowers.end());
     std::vector<uint16_t> pumped;
-    const auto pump = [&](world::Entity &entity) {
+    // walked_z is the Z of the entity the walk hands the frame: the borrowing body for a
+    // borrowed slot, the gun itself for an unoccupied one.
+    // [orig: WeaponAction_ProcessAllEntities @0x542690 - the pool-0 push @0x5426BF, the
+    //  pool-1 push @0x542714]
+    const auto pump = [&](world::Entity &entity, int32_t walked_z) {
         auto *mount = &entity;
         if (local_slot(world, *mount)) return;
         const auto *def = world.tables.weapons.by_index(mount->primary_weapon_slot_adm);
@@ -143,7 +149,7 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
         const auto *native_owner = world.registry.get(mount->primary_weapon_owner);
         if (row) {
             owner.handle = world::EntityHandle{row->handle};
-            owner.position = {float(row->x)/65536.0f, float(row->y)/65536.0f, float(row->z)/65536.0f};
+            owner.position.set_q16({row->x, row->y, row->z});
             owner.mount_target = world::EntityHandle{row->carrier_handle};
             if (const auto *carrier = world.registry.get(owner.mount_target))
                 owner.mount_type = seat_type(*row, *carrier);
@@ -156,7 +162,11 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
         // @0x24D2118; WeaponAction_Idle @0x5429a6 tests no owner].
         input.auto_reload = world.rules.auto_reload;
         input.current_tick = static_cast<int32_t>(world.logic_tick);
-        input.submerged = world.env.water_z != 0 && world::to_fixed(owner.position.z) <= world.env.water_z;
+        // The heat window's water gate compares the walked entity's Z with the plane raw
+        // (no dry sentinel), never the slot owner's [orig: WeaponAction_ProcessFrame
+        // @0x540E60 - the walked entity's Z @0x541004, `cmp eax, g_EnvWaterHeightFixed;
+        // jg` @0x541007..0x54100D].
+        input.submerged = walked_z <= world.env.water_z;
         input.last_tick_of_batch = world.rules.last_tick_of_batch;
         world::WeaponFsmEvents events;
         world::weapon_fsm_tick(def->action_fsm, slot, input, events);
@@ -168,26 +178,31 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
         if (!mount || std::find(pumped.begin(), pumped.end(), mount->handle.packed) != pumped.end())
             continue;
         pumped.push_back(mount->handle.packed);
-        pump(*mount);
+        pump(*mount, row->z);
     }
     for (size_t i = 0; i < world.registry.pool_capacity(1); ++i) {
         auto *mount = world.registry.get(world::EntityHandle::make(1, static_cast<int>(i)));
         if (!mount || !mount->has_item_def || !(mount->item_attrib & world::kItemAttribEweap) ||
                 mount->primary_occupant.valid() || mount->primary_weapon_slot.heat_window_end_tick == 0 ||
                 std::find(pumped.begin(), pumped.end(), mount->handle.packed) != pumped.end()) continue;
-        pump(*mount);
+        pump(*mount, mount->position.z.q16);
     }
 }
 
-void apply_weapon_pickups(JoinerRole &role, ClientRuntime &rt, world::World &world,
-        world::LocalPlayer &lp) {
-    for (const WeaponPickupNotice &notice : rt.drain_weapon_pickups()) {
-        // Only the picker's own client acts [orig: Player_MountPickedUpWeapon @0x4E03DC]
-        if (!rt.has_self_handle() || notice.picker_handle != rt.self_handle()) continue;
-        world::EntityHandle row_handle;
-        row_handle.packed = notice.powerup_handle;
-        world::powerup_weapon_grant_received(world, lp,
-                role.replica_world_entity(world, row_handle), rt.local_player_dead());
-    }
+void apply_weapon_pickup(JoinerRole &role, ClientRuntime &rt, world::World &world,
+        world::LocalPlayer &lp, const WeaponPickupNotice &notice) {
+    // Only the picker's own client acts [orig: Player_MountPickedUpWeapon @0x4E03DC]
+    if (!rt.has_self_handle() || notice.picker_handle != rt.self_handle()) return;
+    world::EntityHandle row_handle;
+    row_handle.packed = notice.powerup_handle;
+    // The row is the one the world already holds: the after-receive runs this ahead of the
+    // frame's replica materialization, so a powerup row born in this same receive is not
+    // found. Its weapon word +0x2B0 has one writer, the pickup's contact pass in a world
+    // tick on a row materialized earlier, so such a row carries weapon 0 and the grant
+    // refuses it either way [orig: PowerupAction_Pickup @0x4428A0 - the store @0x4428FB].
+    // Should a fresh row ever take its weapon word from the wire, this lookup moves behind
+    // the materialization.
+    world::powerup_weapon_grant_received(world, lp,
+            role.replica_world_entity(world, row_handle), rt.local_player_dead());
 }
 } // namespace opennova::inmatch

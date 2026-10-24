@@ -1,3 +1,4 @@
+#include <array>
 #include <cstdio>
 #include <memory>
 #include <runtime/wac/compiler.h>
@@ -6,6 +7,7 @@
 #include <runtime/world/world.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/entity_pose.h>
+#include <runtime/world/angle.h>
 #include <formats/threedi/threedi_3di3.h>
 
 using namespace opennova::world;
@@ -46,7 +48,7 @@ struct Fixture {
     EntityHandle marker(int number, Vec3 position, int pool = 3, bool itemdef = true) {
         Entity e;
         e.item_id = kParticleEffectMarkerTypeId; e.has_item_def = itemdef;
-        e.wp_number = number; e.position = position; e.yaw = 90;
+        e.wp_number = number; e.position = position; e.heading = placed_heading_bam(90);
         e.health = 0; e.alive = false; // no health gate in these scans
         return world.registry.spawn(pool, e);
     }
@@ -141,6 +143,36 @@ static void test_area_draws_use_ai_stream_and_actual_surface_height() {
     CHECK(f.world.ai.prng_a == saved_ai_seed);
 }
 
+// The launch box takes the area record's own words (D-NET-507): 21,000 units out
+// with low bits set, the round leaves x_min plus the drawn share of the x span and
+// y_min plus the drawn share of the y span, word for word (the same AI-stream
+// draws as above: +1 on a one-unit span, +2 x 32785 on a two-unit span); a float
+// view of the box drops those low bits. [orig: WacCmd_AmmoArea @0x4EE240 -
+//  @0x4EE272..0x4EE28C]
+static void test_area_launch_box_takes_the_record_words() {
+    Fixture f;
+    std::vector<uint16_t> heights(512 * 512, 10 * 256);
+    std::vector<int> sectors(256, 1);
+    opennova::terrain::TerrainHeightField terrain;
+    terrain.heightmap = heights.data(); terrain.dim = 512;
+    terrain.layout.sector_grid = sectors.data();
+    f.world.ai.terrain = &terrain;
+    f.world.ai.prng_a = 0;
+    const int32_t x_min = 0x52081235;
+    const int32_t y_min = 0x51F84321;
+    const Aabb bounds{{21000.07f, 20984.26f, 1000}, {21001.07f, 20986.26f, 1100}};
+    f.world.registry.register_area("artillery", bounds, false, 91, bounds, false,
+            std::array<int32_t, 4>{x_min, x_min + 0x10000, y_min, y_min + 0x20000});
+    f.script("ammoarea(SCRIPT,91) store(v1)\n");
+    CHECK(f.world.script.vars.get_mission(1) == 0);
+    CHECK(f.world.out.rounds.count == 1);
+    if (f.world.out.rounds.count == 1) {
+        const auto &round = f.world.out.rounds.records[0];
+        CHECK(round.origin_x == x_min + 1);
+        CHECK(round.origin_y == y_min + 2 * 32785);
+    }
+}
+
 static void test_rain_rng_exact_pose_and_restore() {
     Fixture f;
     Entity player; player.position = {100, 200, 5};
@@ -148,9 +180,9 @@ static void test_rain_rng_exact_pose_and_restore() {
     f.world.cached.local_player = local;
     f.world.ai.attach(local);
     auto &body = *f.world.ai.for_handle(local);
-    body.pos[0] = 100 * 65536 + 7;
-    body.pos[1] = 200 * 65536 + 9;
-    body.pos[2] = 5 * 65536 + 11;
+    body.self->position.x.q16 = 100 * 65536 + 7;
+    body.self->position.y.q16 = 200 * 65536 + 9;
+    body.self->position.z.q16 = 5 * 65536 + 11;
     const Program p = f.compile_script("ammorain(SCRIPT) store(v1)\n");
     CHECK(p.ok());
     WacVm vm; vm.load(p);
@@ -216,7 +248,7 @@ static void test_ssn_fire_uses_the_models_alternating_userpoints() {
     Entity seed;
     seed.net_id = 1; seed.item_id = 11; seed.has_item_def = true;
     seed.kind = EntityKind::Item; seed.health = 100;
-    seed.position = {10, 20, 30}; seed.yaw = 90;
+    seed.position = {10, 20, 30}; seed.heading = placed_heading_bam(90);
     const auto shooter = f.world.registry.spawn(1, seed);
     const int model_id = collision.add_model(CollisionModel{});
     collision.assign_entity(shooter, model_id);
@@ -259,16 +291,16 @@ static void test_ssn_fire_uses_the_models_alternating_userpoints() {
     CHECK(f.world.script.vars.get_mission(3) == 1 && entity().script_fire_userpoint_counter == 0);
     CHECK(f.world.out.rounds.count == 2 && f.world.round_sim.fired.size() == 3);
     CHECK(entity().primary_occupant == victim);
-    const uint32_t last_stat = f.world.out.rounds.last_stat();
+    const uint32_t clock = f.world.out.rounds.frame_clock;
     f.world.restore(baseline);
     CHECK(!f.world.rules.cease_fire);
     CHECK(f.world.out.rounds.count == 0 && f.world.out.rounds.cursor == 0);
-    CHECK(f.world.out.rounds.last_stat() == last_stat);
+    CHECK(f.world.out.rounds.frame_clock == clock); // the frame clock runs on with the session
     CHECK(entity().script_fire_userpoint_counter == 0 && !entity().last_attacker.valid());
     CHECK(!entity().primary_occupant.valid());
     f.script("ammo2ssn(SCRIPT,1,2)\n");
     CHECK(f.world.out.rounds.count == 1 && f.world.out.rounds.records[0].origin_x == 11 * 65536);
-    CHECK(f.world.out.rounds.records[0].stat == last_stat + 1);
+    CHECK(f.world.out.rounds.records[0].stat == clock);
 
     // ItemDef/health-word/model/zero-ammo gates precede the alternating byte.
     entity().has_item_def = false;
@@ -304,6 +336,7 @@ int main() {
     test_ammo_names_bind_indices_and_reject_unknown_names();
     test_target_scan_and_projectile_damage();
     test_area_draws_use_ai_stream_and_actual_surface_height();
+    test_area_launch_box_takes_the_record_words();
     test_rain_rng_exact_pose_and_restore();
     test_entry_authority_and_ceasefire_presentation();
     test_ssn_fire_uses_the_models_alternating_userpoints();

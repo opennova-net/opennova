@@ -6,10 +6,11 @@
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_index.h>
 #include <formats/def/def.h>
+#include <runtime/world/local_player_view.h>
+#include <runtime/world/tick_count_clock.h>
 #include <runtime/world/world.h>
 
 #include <algorithm>
-#include <chrono>
 #include <numeric>
 #include <unordered_set>
 #include <utility>
@@ -34,10 +35,10 @@ grm::Point offset(const grm::Gesture *g, const std::string &name) {
 
 void position_of(const World &world, const Entity &entity, int32_t out[2]) {
 	if (const AiEntity *body = world.ai.for_handle(entity.handle)) {
-		out[0] = body->pos[0]; out[1] = body->pos[1];
+		out[0] = body->self->position.x.q16; out[1] = body->self->position.y.q16;
 	} else {
-		out[0] = static_cast<int32_t>(entity.position.x * 65536.0f);
-		out[1] = static_cast<int32_t>(entity.position.y * 65536.0f);
+		out[0] = entity.position.x.q16;
+		out[1] = entity.position.y.q16;
 	}
 }
 
@@ -52,7 +53,7 @@ int facial_expression_index(const std::string &name) {
 
 void step_facial_animation(FacialSlot &slot, bool dead, uint32_t display_frame,
 		uint32_t wall_time_ms) {
-	// [orig: CScarDecal_Update @0x57FA50]
+	// [orig: FaceAnim_UpdateSlot @0x57FA50]
 	slot.blend += 0.125f;
 	if ((display_frame & 63u) == 0) {
 		// Render-family draw: the thread-local effects stream, not
@@ -203,8 +204,11 @@ void FacialSystem::initialize(World &world) {
 
 void FacialSystem::tick(World &world) {
 	initialize(world);
-	const uint32_t now_ms = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::steady_clock::now().time_since_epoch()).count());
+	// The process's GetTickCount, the main loop's clock (world/tick_count_clock.h)
+	// [orig: FaceAnim_UpdateSlot @0x57FA50 - GetTickCount @0x57FAEA].
+	const uint32_t now_ms = frame_tick_count_ms();
+	// [orig: FaceAnim_UpdateAllSlots @0x580000 - the live test (+0x0C) @0x580011,
+	//  FaceAnim_UpdateSlot called @0x580019; its call @0x4C21FB]
 	for (auto &slot : slots_) {
 		const Entity *entity = world.registry.get(slot.owner);
 		if (!entity || entity->registry_spawn_id != slot.spawn_id) continue;
@@ -272,6 +276,24 @@ void FacialSystem::compile_draws(World &world, int32_t camera_x, int32_t camera_
 		draw.eye_offset = {slot.eyes.x * 0.02f, slot.eyes.y * 0.01f};
 		out.push_back(std::move(draw));
 	}
+}
+
+void FacialSystem::render_scene_passes(World &world, const LocalPlayerViewFrame &view,
+		std::vector<FacialDraw> &out) {
+	// No local player, no scene frame [orig: Render_ProcessMainSceneFrame @0x5CA137]; a frame
+	// that skips its world runs neither pass [orig: `test ebx, ebx; jnz` @0x5CA4EA..0x5CA4EC
+	// past the main pass, @0x5CA620..0x5CA640 past the world and the Inset].
+	if (!view.camera_pose_valid || view.world_skipped) return;
+	// The sort's local-player skip reads the camera mode [orig: Scar_SortSlotsByDistance
+	// @0x57FED6..0x57FEE5].
+	const bool first_person = view.camera_mode == 0;
+	// The main scene's pass [orig: Render_ProcessMainSceneFrame @0x5CA50C].
+	compile_draws(world, view.camera.pos_q16[0], view.camera.pos_q16[1], first_person, out);
+	// The Inset scene's own, inside that pass [orig: Render_ProcessMainSceneFrame @0x5CA949 ->
+	// Render_WeaponInsetScene @0x5C99BC].
+	if (view.inset_scope_active)
+		compile_draws(world, view.inset_camera.pos_q16[0], view.inset_camera.pos_q16[1],
+				first_person, out);
 }
 
 } // namespace opennova::world

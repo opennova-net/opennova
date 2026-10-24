@@ -4,6 +4,9 @@
 #include <runtime/world/weapon_inventory.h>    // the slot table's fill, pools and clips
 #include <runtime/world/weapon_table_build.h>  // loadout_entry_permitted (D-NET-141)
 #include <runtime/world/entity.h>
+#include <runtime/world/local_player.h>    // the authority's own slot table is the local one
+#include <runtime/world/player_loadout.h>  // the spawn buffer (local_loadout_kit)
+#include <runtime/world/player_weapon.h>   // the list's local select and mount
 #include <runtime/world/world.h>
 
 #include <algorithm>
@@ -31,15 +34,52 @@ struct KitEntry {
 	uint8_t variant = 0;
 };
 
-// The entries the masks admit, in request order: the slot's loadout buffer (the map
-// availability, D-NET-693, is not ported). [orig: @0x515A17..0x515A58]
+// The entries the masks admit, and the availability, in request order: the slot's
+// loadout buffer. [orig: @0x515A17..0x515A58]
 std::vector<KitEntry> admitted_entries(const LoadoutSubmit &req, uint8_t avatar_class,
-                                       const world::WeaponTable &table) {
+                                       const world::WeaponTable &table,
+                                       const LoadoutAvailability *availability = nullptr) {
 	std::vector<KitEntry> out;
 	for (const LoadoutSubmitEntry &e : req.entries) {
 		const world::WeaponTableEntry *def = table.by_index(e.adm_index);
 		if (def == nullptr) continue; // the AdmDef_GetEntryByIndex fail leg
 		if (!world::loadout_entry_permitted(*def, req.team, avatar_class)) continue;
+		// The entry's availability: 0 refuses it; the armory-only value keeps it only
+		// inside an armory zone. [orig: `mov eax, g_ArmoryWeaponAvailability[edx*4]`
+		//  @0x515A3F, the zero test @0x515A46..0x515A48, `cmp eax, 2` @0x515A4A, the
+		//  requester's Flags 0x400000 @0x515A4F..0x515A58]
+		if (availability != nullptr) {
+			int32_t value = 1;
+			if (availability->restrictions != nullptr)
+				for (const auto &r : *availability->restrictions)
+					if (r.first == e.adm_index) value = r.second;
+			if (value == 0) continue;
+			if (value == availability->armory_only && !availability->requester_in_armory_zone)
+				continue;
+		}
+		KitEntry k;
+		k.adm_index = e.adm_index;
+		k.def = def;
+		k.count = static_cast<int8_t>(e.ammo_primary);
+		k.count2 = static_cast<int8_t>(e.ammo_secondary);
+		k.variant = e.variant;
+		out.push_back(k);
+	}
+	return out;
+}
+
+// The slot's loadout buffer as its rebuilds read it: every entry whose weapon resolves,
+// with no mask or availability test, which are the accept's alone (the buffer holds
+// what an accept kept, or the spawn buffer the round init seeded the authority's own
+// slot from). [orig: PlayerSlot_InitWeaponsFromLoadout @0x515550 - the fill over the
+//  slot's display list @0x515581, the buffer walk @0x5155EB..0x515761 (each name
+//  resolved @0x51560D, a miss skipped @0x5156B5); Server_InitAllPlayerEntitiesForRound
+//  @0x516BF3..0x516C0E]
+std::vector<KitEntry> buffer_entries(const LoadoutSubmit &buffer, const world::WeaponTable &table) {
+	std::vector<KitEntry> out;
+	for (const LoadoutSubmitEntry &e : buffer.entries) {
+		const world::WeaponTableEntry *def = table.by_index(e.adm_index);
+		if (def == nullptr) continue;
 		KitEntry k;
 		k.adm_index = e.adm_index;
 		k.def = def;
@@ -67,13 +107,21 @@ std::vector<std::string> kit_display_list(const std::vector<KitEntry> &entries,
 }
 
 // The table the rebuild starts over: the slot's ammo pools and loaded-round buckets as
-// they stand, its slots emptied by the fill; the first seed zeroes every pool, and only
-// the revive latch keeps the buckets. [orig: WeaponSlotPool_ResetAllEntries @0x53F240
-//  clears the 780 slots alone]
+// they stand (the local table's for the slot holding the local player), its slots
+// emptied by the fill; the first seed zeroes every pool, and only the revive latch keeps
+// the buckets. [orig: WeaponSlotPool_ResetAllEntries @0x53F240 clears the 780 slots alone]
 world::WeaponInventory slot_inventory(const world::WeaponTable &table,
-                                      const NapiNPConnection &conn) {
+                                      const NapiNPConnection &conn,
+                                      const world::WeaponInventory *local_table) {
 	world::WeaponInventory inv;
 	inv.reset(table);
+	if (local_table != nullptr) {
+		const size_t pools = std::min(inv.pools.size(), local_table->pools.size());
+		for (size_t i = 0; i < pools; ++i) inv.pools[i] = local_table->pools[i];
+		const size_t buckets = std::min(inv.shared_clips.size(), local_table->shared_clips.size());
+		for (size_t i = 0; i < buckets; ++i) inv.shared_clips[i] = local_table->shared_clips[i];
+		return inv;
+	}
 	const size_t pools = std::min(inv.pools.size(), conn.reply.ammo_pools.size());
 	for (size_t i = 0; i < pools; ++i) inv.pools[i] = conn.reply.ammo_pools[i];
 	const size_t buckets = std::min(inv.shared_clips.size(), conn.reply.shared_clips.size());
@@ -85,7 +133,7 @@ world::WeaponInventory slot_inventory(const world::WeaponTable &table,
 // keeping it. [orig: WeaponSlotPool_ResetAllEntries @0x53F240 +
 //  WeaponSlotTable_LoadAllFromDefs @0x5414E0, the incumbent kept @0x5415D6]
 // The fill's sniper lock reads the session's zoom rule [orig: WeaponSlot_InitFromDef
-//  @0x53EF07..0x53EF25 - byte_A821F0 in a session on a peer, else the config's
+//  @0x53EF07..0x53EF25 - g_SessionAllowSniperScopeZoom in a session on a peer, else the config's
 //  allowSniperScopeZoom, the same value on a host].
 void reload_slots(const world::WeaponTable &table, world::WeaponInventory &inv,
                   const std::vector<std::string> &display, uint8_t player_class,
@@ -144,26 +192,6 @@ void seed_and_recalc(const world::WeaponTable &table, world::WeaponInventory &in
 		std::fill(inv.shared_clips.begin(), inv.shared_clips.end(), 0);
 	}
 	world::weapon_inventory_recalc_clips(table, inv, seat);
-}
-
-// Every populated slot whose def draws pool units has its loaded rounds zeroed (the
-// slot word, or its def's bucket, which a controller seat does not write), unless the
-// entity sits a UseGun seat (+0x168 3).
-// [orig: WeaponSlots_ClearLoadedRounds @0x5423C0 (ex WeaponSlots_ClearLoadedRounds) - the seat test
-//  @0x5423C5, the def[56] gate @0x5423E6, WeaponSlot_SetSharedLoadedRounds(bucket, 0) (its seat test
-//  @0x540684..0x540692) or slot+16 = 0]
-void clear_loaded_rounds(const world::WeaponTable &table, world::WeaponInventory &inv,
-                         const world::WeaponAmmoSeat &seat) {
-	if (seat.parent_slot == 3) return;
-	for (int32_t combo = 0; combo < world::weapon_combo::kSlotCount; ++combo) {
-		const world::WeaponInventorySlot *slot = inv.slot(combo);
-		if (slot == nullptr || slot->adm_index < 0) continue;
-		const world::WeaponTableEntry *def =
-				table.by_index(static_cast<uint8_t>(slot->adm_index));
-		if (def == nullptr || def->ammo_class_count == 0) continue;
-		if (def->ammo_bucket != 0 && !world::weapon_seat_writes_buckets(seat)) continue;
-		world::weapon_inventory_set_loaded_rounds(table, inv, combo, 0);
-	}
 }
 
 // Each entry's pool set from its count, in entry order: min(count, maxclips) clips,
@@ -235,6 +263,7 @@ void finish_grant(const world::WeaponTable &table, const world::WeaponInventory 
 	for (size_t i = 0; i < pools; ++i) grant.ammo_pools[i] = inv.pools[i];
 	const size_t buckets = std::min(grant.shared_clips.size(), inv.shared_clips.size());
 	for (size_t i = 0; i < buckets; ++i) grant.shared_clips[i] = inv.shared_clips[i];
+	grant.table = std::make_shared<const world::WeaponInventory>(inv);
 	for (int32_t combo = 0; combo < world::weapon_combo::kSlotCount; ++combo) {
 		const world::WeaponInventorySlot *slot = inv.slot(combo);
 		if (slot == nullptr || slot->adm_index < 0) continue;
@@ -284,7 +313,9 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 										  const world::WeaponTable *table,
 										  const NapiNPConnection &conn,
 										  const world::WeaponAmmoSeat &seat,
-										  bool allow_sniper_scope_zoom) {
+										  bool allow_sniper_scope_zoom,
+										  const LoadoutAvailability *availability,
+										  const world::WeaponInventory *local_table) {
 	const bool allow_zoom = allow_sniper_scope_zoom;
 	GrantedWeaponLoadout grant;
 	WeaponLoadout &reply = grant.reply;
@@ -309,7 +340,16 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 	}
 
 	if (table != nullptr && !table->empty()) {
-		const std::vector<KitEntry> entries = admitted_entries(req, reply.avatar_class, *table);
+		const std::vector<KitEntry> entries =
+				admitted_entries(req, reply.avatar_class, *table, availability);
+		for (const KitEntry &e : entries) {
+			LoadoutSubmitEntry kept;
+			kept.adm_index = e.adm_index;
+			kept.ammo_primary = static_cast<uint8_t>(e.count);
+			kept.ammo_secondary = static_cast<uint8_t>(e.count2);
+			kept.variant = e.variant;
+			grant.kept_entries.push_back(kept);
+		}
 		const uint8_t cls = reply.avatar_class;
 		// The slot's table from the accepted entries: the display list, a fill keeping
 		// the first weapon on a combo, the pools seeded and one clip drawn; the list
@@ -323,7 +363,7 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 		//  PlayerSlot_BuildNameTable @0x515DE9, PlayerSlot_FullUpdatePipeline @0x515DEF
 		//  (@0x50BA60), WeaponSlots_ClearLoadedRounds @0x515DFF, the entry loop
 		//  @0x515E0D..0x515F33, the recalc @0x515F4D]
-		world::WeaponInventory inv = slot_inventory(*table, conn);
+		world::WeaponInventory inv = slot_inventory(*table, conn, local_table);
 		reload_slots(*table, inv, kit_display_list(entries, *table), cls, allow_zoom);
 		world::weapon_inventory_seed_pools(*table, inv, cls);
 		world::weapon_inventory_recalc_clips(*table, inv, seat);
@@ -332,7 +372,7 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 		display = slot_name_table(*table, inv);
 		reinit_listed_slots(*table, inv, display, cls, seat, allow_zoom);
 		seed_and_recalc(*table, inv, cls, conn.reply.revive_pose_valid, seat);
-		clear_loaded_rounds(*table, inv, seat);
+		world::weapon_inventory_clear_loaded_rounds(*table, inv, seat);
 		for (const KitEntry &e : entries) {
 			// The entity's carry bits from the accepted entries alone: the fills' own
 			// were cleared @0x515DF6 [orig: @0x515E2C..0x515E54].
@@ -351,6 +391,7 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 	}
 
 	if (req.player_class == 0) return grant; // no entry matches the empty mask
+	grant.kept_entries = req.entries;
 	// Resource-less test/diagnostic fallback: no AmmoDef relationship exists, but duplicate
 	// ADM slots still behave like a table load (last entry wins) and serialize only once.
 	for (const LoadoutSubmitEntry &e : req.entries) {
@@ -386,8 +427,16 @@ void write_ammo_damage_classes(NapiNPConnection &conn, const GrantedWeaponLoadou
 	}
 }
 
-void apply_granted_loadout(NapiNPConnection &conn, const GrantedWeaponLoadout &grant,
-                           bool rebuild_rows) {
+world::LocalPlayer *own_slot_local_player(const NapiNPConnection &conn, world::World &world) {
+	if (world.local_player_state == nullptr || !conn.link.owned_entity.valid() ||
+	    conn.link.owned_entity != world.cached.local_player)
+		return nullptr;
+	return world.local_player_state;
+}
+
+void apply_granted_loadout(NapiNPConnection &conn, world::Entity &player,
+                           const GrantedWeaponLoadout &grant, bool rebuild_rows,
+                           world::LocalPlayer *local) {
 	SessionReplyState &st = conn.reply;
 	// Each row's fourth byte is the slot's damage-class byte at the weapon's OWN AdmDef
 	// index, read when the list is built: so a weapon whose index equals an accepted
@@ -403,17 +452,32 @@ void apply_granted_loadout(NapiNPConnection &conn, const GrantedWeaponLoadout &g
 	// Retain the GRANTED body: the deploy-release bundle re-sends it (the client's
 	// 0x5A apply is the deploy un-latcher — resets g_ClientDeployHold; §5.30, D-NET-156).
 	st.last_loadout_reply = encode_weapon_loadout(reply);
+	if (local != nullptr) {
+		// The slot table is the local table: the rebuilt slots, pools, buckets and the
+		// fill's carry and quick-switch words land there; EquippedSlot and the selection
+		// words are the body's and stay (D-NET-695, D-NET-479) [orig: Player_InitPlayer
+		//  @0x4E18A8..0x4E18C1; the fill's tail WeaponSlotTable_LoadAllFromDefs
+		//  @0x541626..0x54166E].
+		if (!rebuild_rows || grant.table == nullptr) return;
+		world::WeaponInventory &inv = local->inventory;
+		const world::WeaponInventory &rebuilt = *grant.table;
+		inv.slots = rebuilt.slots;
+		inv.pools = rebuilt.pools;
+		inv.shared_clips = rebuilt.shared_clips;
+		inv.carry_flags = rebuilt.carry_flags;
+		inv.quick_switch_combo = rebuilt.quick_switch_combo;
+		inv.quick_switch_stash = rebuilt.quick_switch_stash;
+		local->inventory_valid = true;
+		return;
+	}
 	st.ammo_pools = grant.ammo_pools;
 	st.shared_clips = grant.shared_clips;
 	// The 0x06 pipeline used to seed a full clip on first fire; the rebuild now owns
 	// the rows retail's leaves behind.
 	if (!rebuild_rows) return;
-	conn.weapon_slots.clear();
-	for (const GrantedWeaponLoadout::Row &row : grant.rows) {
-		WeaponSlotState &slot = conn.weapon_slots[row.combo];
-		slot.adm_index = row.adm_index;
-		slot.clip = row.clip;
-	}
+	player.weapon_slots.clear();
+	for (const GrantedWeaponLoadout::Row &row : grant.rows)
+		player.weapon_slots[row.combo] = world::PersonalWeaponSlot(row.adm_index, row.clip);
 }
 
 void PlayerSlot_InitWeaponsFromLoadout(NapiNPConnection &conn, world::World &world,
@@ -427,7 +491,7 @@ void PlayerSlot_InitWeaponsFromLoadout(NapiNPConnection &conn, world::World &wor
 	const bool allow_zoom = world.rules.sniper_zoom_fill;
 	const LoadoutSubmit &buffer = conn.reply.loadout_buffer;
 	const uint8_t cls = static_cast<uint8_t>(conn.slot_class);
-	const std::vector<KitEntry> entries = admitted_entries(buffer, buffer.player_class, table);
+	const std::vector<KitEntry> entries = buffer_entries(buffer, table);
 	// The deploy's own rebuild over the display list the last rebuild left (its slots'
 	// weapons in combo order, which a fill of the buffer's list reproduces): a fill, the
 	// pools seeded and one clip drawn; the list rebuilt; a second fill, the list rebuilt
@@ -441,7 +505,9 @@ void PlayerSlot_InitWeaponsFromLoadout(NapiNPConnection &conn, world::World &wor
 	//  PlayerSlot_SeedAmmoPoolsAndRecalc @0x5155D7, WeaponSlots_ClearLoadedRounds
 	//  @0x5155E1, the buffer walk @0x5155EB..0x515761 (each name resolved @0x51560D),
 	//  the recalc @0x51577C]
-	world::WeaponInventory inv = slot_inventory(table, conn);
+	world::LocalPlayer *local = own_slot_local_player(conn, world);
+	world::WeaponInventory inv =
+			slot_inventory(table, conn, local != nullptr ? &local->inventory : nullptr);
 	reload_slots(table, inv, kit_display_list(entries, table), cls, allow_zoom);
 	world::weapon_inventory_seed_pools(table, inv, cls);
 	world::weapon_inventory_recalc_clips(table, inv, seat);
@@ -450,7 +516,7 @@ void PlayerSlot_InitWeaponsFromLoadout(NapiNPConnection &conn, world::World &wor
 	display = slot_name_table(table, inv);
 	reinit_listed_slots(table, inv, display, cls, seat, allow_zoom);
 	seed_and_recalc(table, inv, cls, conn.reply.revive_pose_valid, seat);
-	clear_loaded_rounds(table, inv, seat);
+	world::weapon_inventory_clear_loaded_rounds(table, inv, seat);
 	for (const KitEntry &e : entries) set_kit_pools(table, inv, e, /*accept=*/false);
 	world::weapon_inventory_recalc_clips(table, inv, seat);
 	GrantedWeaponLoadout grant;
@@ -458,7 +524,7 @@ void PlayerSlot_InitWeaponsFromLoadout(NapiNPConnection &conn, world::World &wor
 	grant.ammo_pools = conn.reply.ammo_pools;
 	grant.shared_clips = conn.reply.shared_clips;
 	finish_grant(table, inv, conn.assigned_team, grant);
-	apply_granted_loadout(conn, grant, /*rebuild_rows=*/true);
+	apply_granted_loadout(conn, player, grant, /*rebuild_rows=*/true, local);
 	// The fill's carry bits stay on the entity: every listed weapon's
 	// [orig: WeaponSlotTable_LoadAllFromDefs - the clear @0x541503, the bits
 	//  @0x5415AA / @0x5415BC].
@@ -471,7 +537,7 @@ void PlayerSlot_RebuildKitForRound(NapiNPConnection &conn, world::World &world,
 	if (table.empty()) return;
 	const LoadoutSubmit &buffer = conn.reply.loadout_buffer;
 	const uint8_t cls = static_cast<uint8_t>(conn.slot_class);
-	const std::vector<KitEntry> entries = admitted_entries(buffer, buffer.player_class, table);
+	const std::vector<KitEntry> entries = buffer_entries(buffer, table);
 	const world::WeaponAmmoSeat seat = world::entity_ammo_seat(world, player);
 	const bool allow_zoom = world.rules.sniper_zoom_fill;
 	// The round init's rebuild of a kept slot from its buffer: the display list, a
@@ -481,7 +547,9 @@ void PlayerSlot_RebuildKitForRound(NapiNPConnection &conn, world::World &world,
 	//  AvatarDef_BuildDisplayList @0x516BF3, WeaponSlotPool_ResetAllEntries @0x516C03,
 	//  WeaponSlotTable_LoadAllFromDefs @0x516C0E, PlayerSlot_BuildNameTable @0x516C14,
 	//  PlayerSlot_ReinitListedSlots @0x516C1A, PlayerSlot_SeedAmmoPoolsAndRecalc @0x516C20]
-	world::WeaponInventory inv = slot_inventory(table, conn);
+	world::LocalPlayer *local = own_slot_local_player(conn, world);
+	world::WeaponInventory inv =
+			slot_inventory(table, conn, local != nullptr ? &local->inventory : nullptr);
 	reload_slots(table, inv, kit_display_list(entries, table), cls, allow_zoom);
 	const std::vector<std::string> display = slot_name_table(table, inv);
 	reinit_listed_slots(table, inv, display, cls, seat, allow_zoom);
@@ -491,18 +559,101 @@ void PlayerSlot_RebuildKitForRound(NapiNPConnection &conn, world::World &world,
 	grant.ammo_pools = conn.reply.ammo_pools;
 	grant.shared_clips = conn.reply.shared_clips;
 	finish_grant(table, inv, conn.assigned_team, grant);
-	apply_granted_loadout(conn, grant, /*rebuild_rows=*/true);
+	apply_granted_loadout(conn, player, grant, /*rebuild_rows=*/true, local);
 	// The fill's carry bits [orig: WeaponSlotTable_LoadAllFromDefs @0x541503 /
 	//  @0x5415AA / @0x5415BC].
 	player.carry_flags = (player.carry_flags & ~0x18u) | inv.carry_flags;
 }
 
-// The player's live soldier class (entity+660), the header byte a current-slot-list re-send carries
-// [orig: Server_SendWeaponSlotListToPlayer @0x502550 reads player+89820 = player[22455]].
-uint8_t current_player_class(const NapiNPConnection &conn, const world::World *world) {
-	if (world == nullptr || !conn.link.owned_entity.valid()) return 0;
-	const world::Entity *pe = world->registry.get(conn.link.owned_entity);
-	return pe != nullptr ? pe->player_class : 0;
+// The own slot's loadout buffer as g_SpawnLoadoutBuffer: each kept entry by its weapon's
+// name, its counts read signed (the buffer's "%d" text of the accept's signed reads) and
+// its fourth value. [orig: Server_SendWeaponSlotListToPlayer @0x502617..0x502627; the
+// buffer's text NapiNPServerMsg_HandlePlayerLoadout @0x515CBD..0x515D83]
+static void copy_buffer_to_spawn_kit(const NapiNPConnection &conn, const world::World &world,
+		world::LocalPlayerLoadout &loadout) {
+	std::vector<world::WeaponKitEntry> kit;
+	for (const LoadoutSubmitEntry &e : conn.reply.loadout_buffer.entries) {
+		const world::WeaponTableEntry *def = world.tables.weapons.by_index(e.adm_index);
+		if (def == nullptr) continue;
+		world::WeaponKitEntry k;
+		k.name = def->name;
+		k.ammo_primary = static_cast<int8_t>(e.ammo_primary);
+		k.ammo_secondary = static_cast<int8_t>(e.ammo_secondary);
+		k.flags = e.variant;
+		kit.push_back(std::move(k));
+	}
+	loadout.spawn_kit() = std::move(kit);
+}
+
+// The slot's class, which the list reads for its PlayerType and its header byte, the
+// entity's never (D-NET-695) [orig: Server_SendWeaponSlotListToPlayer @0x502550 -
+//  `mov eax, [ebp+15EDCh]` @0x5025A8, `mov cl, [ebp+15EDCh]` @0x5025E0].
+uint8_t current_player_class(const NapiNPConnection &conn) {
+	return static_cast<uint8_t>(conn.slot_class);
+}
+
+void weapon_slot_list_own_legs(NapiNPConnection &conn, world::World *world) {
+	// The PlayerType from the slot's class, no test ahead of it [orig: @0x5025A8..0x5025DB].
+	conn.player_list_type = conn.slot_class;
+	// The authority's own slot only: its loadout buffer into the spawn buffer, then its
+	// class into the profile class of the slot team's side [orig: `cmp byte [ebp+5], 0;
+	//  jz` @0x5025EC / @0x502615; `rep movsd` of 0x200 dwords from +0x170C8 into
+	//  g_SpawnLoadoutBuffer @0x502617..0x502627; the team +0x1A0 against 1 and 3
+	//  @0x502629..0x502635, g_CharClassTeam2 @0x50263D, g_CharClassTeam1 @0x50264B].
+	if (conn.type == NapiNPConnection::kTypeClientSide) {
+		if (world != nullptr && world->local_player_state != nullptr)
+			copy_buffer_to_spawn_kit(conn, *world, world->local_player_state->loadout);
+		const bool side_a = conn.assigned_team == 1 || conn.assigned_team == 3;
+		conn.char_vars.char_class[side_a ? 0 : 1] = static_cast<uint8_t>(conn.slot_class);
+		// The process's loadout name list is not the send's: the own client rebuilds it when
+		// it applies the list, at its next receive (ClientRuntime's own-client fold:
+		// apply_weapon_loadout_name_list), after this tick's spawn pump (D-NET-143).
+	}
+	// After the rows, the slot whose entity is the local player: the current slot word takes
+	// the body's equipped AdmDef's combo (category * 65 + rank; the word stays when the index
+	// names no weapon), Player_SelectWeaponSlot of the word, then Player_MountWeaponSlot of
+	// the EquippedSlot [orig: g_LocalPlayerEntity against the slot's entity @0x5028B8..0x5028CB,
+	//  AdmDef_GetEntryByIndex(entity+0x2B0) @0x5028D5, the combo and its g_CurrentWeaponSlot
+	//  store @0x5028E1..0x5028ED, the word's read @0x5028F5, the select @0x5028FC, the mount
+	//  of entity+0x118 @0x502907..0x50290E].
+	if (world == nullptr) return;
+	world::LocalPlayer *local = own_slot_local_player(conn, *world);
+	const world::Entity *body = world->registry.get(conn.link.owned_entity);
+	if (local == nullptr || body == nullptr) return;
+	const world::WeaponTable &table = world->tables.weapons;
+	if (const world::WeaponTableEntry *def = table.by_index(body->equipped_adm_index))
+		local->inventory.current_slot =
+				def->category * world::weapon_combo::kRanksPerCategory + def->rank;
+	const int32_t combo = local->inventory.current_slot;
+	const world::WeaponSwitchGates gates =
+			world::local_weapon_switch_gates(*world, local->weapon, &local->inventory);
+	world::weapon_select_slot(table, local->inventory, combo, !gates.equip_blocked);
+	world::local_player_mount_weapon_slot(*world, local->weapon, local->inventory, local->view,
+			local->inventory.equipped_combo);
+}
+
+void PlayerSlot_SeedOwnLoadoutBuffer(NapiNPConnection &conn, world::World &world) {
+	if (conn.type != NapiNPConnection::kTypeClientSide || world.local_player_state == nullptr)
+		return;
+	// The resident kit as g_SpawnLoadoutBuffer holds it: each entry by its weapon's
+	// index, its two counts and its fourth value (a name no weapon carries resolves
+	// nothing at the rebuild, as AdmDef_FindIndexByName finds nothing for it).
+	const world::WeaponTable &table = world.tables.weapons;
+	LoadoutSubmit &buffer = conn.reply.loadout_buffer;
+	buffer.entries.clear();
+	for (const world::WeaponKitEntry &e :
+	     world::local_loadout_kit(world, world.local_player_state->loadout)) {
+		const int adm = table.index_of(e.name.c_str());
+		if (adm < 0) continue;
+		LoadoutSubmitEntry kept;
+		kept.adm_index = static_cast<uint8_t>(adm);
+		kept.ammo_primary = static_cast<uint8_t>(e.ammo_primary);
+		kept.ammo_secondary = static_cast<uint8_t>(e.ammo_secondary);
+		kept.variant = static_cast<uint8_t>(e.flags);
+		buffer.entries.push_back(kept);
+	}
+	buffer.player_class = static_cast<uint8_t>(conn.slot_class);
+	conn.reply.loadout_buffer_set = true;
 }
 
 // The tag=0x5A body for every re-send that grants NOTHING new (the 0x2F envelope abort, the deploy
@@ -518,13 +669,11 @@ std::vector<uint8_t> build_current_loadout_reply(const std::vector<uint8_t> &ret
 	return encode_weapon_loadout(current);
 }
 
-// The list send first sets the slot's PlayerType to its class, then builds the list.
-// [orig: Server_SendWeaponSlotListToPlayer @0x502550: slot+0x15EDC @0x5025A8, the
-//  SetOrCreate @0x5025DB, no test ahead of it]
-std::vector<uint8_t> current_weapon_slot_list(NapiNPConnection &conn, const world::World *world) {
-	const uint8_t player_class = current_player_class(conn, world);
-	conn.player_list_type = player_class;
-	return build_current_loadout_reply(conn.reply.last_loadout_reply, player_class);
+// The list send's own legs first, then the list.
+// [orig: Server_SendWeaponSlotListToPlayer @0x502550]
+std::vector<uint8_t> current_weapon_slot_list(NapiNPConnection &conn, world::World *world) {
+	weapon_slot_list_own_legs(conn, world);
+	return build_current_loadout_reply(conn.reply.last_loadout_reply, current_player_class(conn));
 }
 
 } // namespace opennova::inmatch

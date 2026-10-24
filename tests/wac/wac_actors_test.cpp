@@ -3,6 +3,7 @@
 #include <runtime/wac/vm.h>
 #include <runtime/wac/wac_system.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 using namespace opennova::world;
 using namespace opennova::wac;
@@ -145,14 +146,14 @@ static void test_force_animation_think_cadence_and_retry() {
 static void test_fall_changes_only_live_z_and_wraps() {
     Fixture f;
     auto &body = f.body();
-    body.pos[0] = 65536; body.pos[1] = -65536; body.pos[2] = 2147418112;
+    body.self->position.x.q16 = 65536; body.self->position.y.q16 = -65536; body.self->position.z.q16 = 2147418112;
     body.inf.vel[2] = -99;
     body.inf.jump_cooldown = 7;
     f.entity().position = {1.0f, -1.0f, 32767.0f};
-    const int32_t expected = static_cast<int32_t>(uint32_t(body.pos[2]) + 0x1F40000u);
+    const int32_t expected = static_cast<int32_t>(uint32_t(body.self->position.z.q16) + 0x1F40000u);
     f.script("fall() store(v1)\n");
     CHECK(f.world.script.vars.get_mission(1) == 1);
-    CHECK(body.pos[0] == 65536 && body.pos[1] == -65536 && body.pos[2] == expected);
+    CHECK(body.self->position.x.q16 == 65536 && body.self->position.y.q16 == -65536 && body.self->position.z.q16 == expected);
     CHECK(f.entity().position.z == float(from_fixed(expected)));
     CHECK(body.inf.vel[2] == -99 && body.inf.jump_cooldown == 7);
     f.world.cached.local_player = {};
@@ -199,7 +200,7 @@ static void test_dropflare_reaches_round_sim_and_checks_itemdef() {
                            {{-65536, 0, 0}, {65536, 0, 65536}}};
     f.world.vehicles.traits.set(f.entity().item_id, traits);
     f.entity().position = {100.0f, 200.0f, 5.0f};
-    f.entity().yaw = 90;
+    f.entity().heading = placed_heading_bam(90);
     f.script("dropflare(1) store(v1)\n");
     CHECK(f.world.script.vars.get_mission(1) == 1);
     CHECK(f.world.out.rounds.count == 2);
@@ -224,11 +225,11 @@ static void test_turn_reaches_the_motor_and_org2_word() {
     Fixture f;
     f.body().inf.body_heading = 0;
     f.body().heading = 0;
-    f.entity().yaw = 90;
+    f.entity().heading = placed_heading_bam(90);
     f.script("ssnturn(1,0) store(v1)\n");
     CHECK(f.world.script.vars.get_mission(1) == 1);
     CHECK(f.body().inf.target_heading == 0x40000000);
-    CHECK(f.body().heading == 0 && f.entity().yaw == 90);
+    CHECK(f.body().heading == 0 && f.entity().heading == placed_heading_bam(90));
     f.world.ai.tick_infantry(f.body(), f.world, 1);
     CHECK(f.body().heading == 60614190); // body carry followed by independent idle look chase
     CHECK(f.body().inf.body_heading == 69273360);
@@ -251,17 +252,19 @@ static void test_turn_reaches_the_motor_and_org2_word() {
         f.body().net_is_remote_peer = player_kind == 1;
         f.entity().engine_flags = player_kind == 2 ? kEntityFlagPlayer : 0;
         f.body().inf.jump_cooldown = 7;
-        f.script("ssnturn(1,91)\n");
+        // A player body answers the script by its DcbId, 10000 + its slot byte 0
+        // (entity_dcb_id, D-NET-NEW-L4-21), not its record word 1.
+        f.script("ssnturn(10000,91)\n");
         CHECK(f.body().inf.jump_cooldown == -11927552);
         CHECK(f.body().inf.target_heading == 0x40000000);
     }
     Entity prop;
-    prop.net_id = 2; prop.item_id = 12; prop.yaw = 17; prop.item_type_index = 7;
+    prop.net_id = 2; prop.item_id = 12; prop.heading = placed_heading_bam(17); prop.item_type_index = 7;
     const auto h = f.world.registry.spawn(2, prop);
     f.script("ssnturn(2,0) store(v4)\nssnturn(99,0) store(v5)\n");
     CHECK(f.world.script.vars.get_mission(4) == 1);
     CHECK(f.world.script.vars.get_mission(5) == 0);
-    CHECK(f.world.registry.get(h)->yaw == 17);
+    CHECK(f.world.registry.get(h)->heading == placed_heading_bam(17));
 }
 
 static void test_tele_copies_live_and_saved_position_without_resetting_actor() {
@@ -270,15 +273,15 @@ static void test_tele_copies_live_and_saved_position_without_resetting_actor() {
     target.net_id = 2;
     target.item_id = 0; target.has_item_def = false; target.health = 0;
     target.position = {100.0f, 200.0f, 30.0f};
-    target.yaw = 90; target.pitch = 45; target.roll = -30;
+    target.heading = placed_heading_bam(90); target.pitch_bam = spawn_angle_bam(45); target.roll_bam = spawn_angle_bam(-30);
     const auto h = f.world.registry.spawn(1, target);
     f.world.ai.attach(h);
     const int32_t precise[3] = {6553601, 13107203, 1966105};
     auto *target_body = f.world.ai.for_handle(h);
-    for (int axis = 0; axis < 3; ++axis) target_body->pos[axis] = precise[axis];
+    for (int axis = 0; axis < 3; ++axis) target_body->self->position.word(axis) = precise[axis];
     f.entity().health = 0; f.entity().alive = false;
     f.entity().flags = kEntityFlagDead;
-    f.entity().yaw = 31; f.entity().pitch = 7; f.entity().roll = -4;
+    f.entity().heading = placed_heading_bam(31); f.entity().pitch_bam = spawn_angle_bam(7); f.entity().roll_bam = spawn_angle_bam(-4);
     f.entity().saved_live_yaw = 123;
     f.entity().saved_live_pitch = 456;
     f.entity().saved_live_roll = 789;
@@ -299,15 +302,15 @@ static void test_tele_copies_live_and_saved_position_without_resetting_actor() {
     CHECK(f.entity().ground_target == h && f.entity().mount_toggle_fallback == h);
     CHECK(f.entity().mounted && f.entity().mount_target == h);
     CHECK(f.entity().mount_type == SeatType::Passenger);
-    CHECK(f.entity().yaw == 31 && f.entity().pitch == 7 && f.entity().roll == -4);
+    CHECK(f.entity().heading == placed_heading_bam(31) && f.entity().pitch_bam == spawn_angle_bam(7) &&
+          f.entity().roll_bam == spawn_angle_bam(-4)); // the words, untouched (D-NET-NEW-L6-3)
     CHECK(f.body().heading == 111 && f.body().pitch == 222 && f.body().roll == 333);
     CHECK(f.entity().saved_live_yaw == 123 && f.entity().saved_live_pitch == 456 &&
           f.entity().saved_live_roll == 789 && f.entity().saved_live_valid);
     CHECK(f.body().inf.vel[0] == 17 && f.body().inf.vel[1] == -21 &&
           f.body().inf.vel[2] == 91 && f.body().inf.jump_cooldown == 7);
     for (int axis = 0; axis < 3; ++axis) {
-        CHECK(f.body().pos[axis] == precise[axis]);
-        CHECK(f.body().net_saved_live_pose[axis] == precise[axis]);
+        CHECK(f.body().self->position.word(axis) == precise[axis]);
         CHECK(f.entity().saved_live_pos[axis] == precise[axis]);
     }
     CHECK(f.entity().position.x == float(from_fixed(precise[0])));

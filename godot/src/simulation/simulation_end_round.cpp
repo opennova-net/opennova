@@ -33,6 +33,9 @@ namespace {
 opennova::hud::EndRoundTextLookup overlays_lookup(const Ref<RtxtStringFile> &gametext) {
 	return [gametext](const std::string &key, std::string &value) {
 		if (gametext.is_null()) return false;
+		// The override table first (D-NET-675).
+		if (RtxtStringFile::text_override_lookup(opennova::hud::kGameTextOverlays, key.c_str(), value))
+			return true;
 		const String k = opennova::to_gd(key);
 		if (!gametext->has_string_in_section(opennova::hud::kGameTextOverlays, StringName(k))) return false;
 		value = opennova::to_std(gametext->get_string_in_section(opennova::hud::kGameTextOverlays, StringName(k)));
@@ -76,8 +79,10 @@ Ref<EndRoundOverlay> Simulation::get_end_round_overlay(const Ref<RtxtStringFile>
 	// The resolved ladder: keys through the gametext Overlays table, the
 	// empty-resolve folds and the printf forms applied by the engine
 	// (hud::end_round_overlay_resolve), plus the design-space safe area.
+	// The role's announcement: a client's folded 0x1D header, a Serve Only host's own round end
+	// (inmatch/role_feeds.h end_round_session_state).
 	opennova::hud::EndRoundOverlayLadder ladder;
-	if (runtime_ && runtime_->state().end_round.header_known) {
+	if (opennova::inmatch::end_round_session_state(role_view()).header_known) {
 		ladder.lines = opennova::hud::end_round_overlay_resolve(
 				opennova::hud::end_round_overlay_lines(end_round_overlay_input()),
 				overlays_lookup(p_gametext));

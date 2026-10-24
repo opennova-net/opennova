@@ -4,10 +4,12 @@
 #include <runtime/world/world.h>
 #include <runtime/world/collision.h>
 #include <base/io/bam.h>
+#include <base/io/fixed.h>
 #include <base/io/strutil.h>
-#include <base/io/tick_rate.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/vehicle_motor.h>
 #include <runtime/terrain_query/height_field.h>
+#include <cstdio>
 #include <cstring>
 #include <algorithm>
 #include <iterator>
@@ -35,8 +37,8 @@ void regional_sound_event(World &world, Entity &entity, int phase) {
         SoundSlotEvent sound;
         sound.source_handle = entity.handle.packed;
         sound.slot = static_cast<uint8_t>(audio::kSlotShotDawn + region);
-        int32_t pos[3] = {int32_t(entity.position.x * 65536),
-                int32_t(entity.position.y * 65536), int32_t(entity.position.z * 65536)};
+        int32_t pos[3] = {entity.position.x.q16,
+                entity.position.y.q16, entity.position.z.q16};
         if (traits->has_sound_point) {
             // The SOUND userpoint rides the cached entity orientation matrix
             // (entity+0xB4), which carries the def scale on its rotation
@@ -67,7 +69,7 @@ void regional_sound_event(World &world, Entity &entity, int phase) {
 // ported death body (kUnwitnessed while its callback is unported). The walk
 // is a whole-string stricmp; a miss and the empty tag take row 0.
 // [orig: g_EntityClassEventCallbackTable @0x813000, count 41 @0x8133D8;
-//  Entity_LookupRenderCallbacks @0x407dc0 — stricmp @0x407de2, the row-0
+//  EntityDef_LookupClassCallbacks @0x407dc0 — the stricmp call @0x407DD8, the row-0
 //  default @0x407dee; EntityDef_InitAllCallbacks @0x4a5aa9 pushes "Null" for
 //  an empty tag]
 ItemDeathClass item_death_class_from_tag(const char *ai_function) {
@@ -89,11 +91,11 @@ ItemDeathClass item_death_class_from_tag(const char *ai_function) {
 		{"gnl2", ItemDeathClass::kGnl2},          // @0x8130F0 -> 0x4070F0
 		{"flag", ItemDeathClass::kFlag},   // @0x813108 -> 0x408430
 		{"squib", ItemDeathClass::kSquib},  // @0x813120 -> 0x449810
-		{"nade", ItemDeathClass::kNull},          // @0x813138 -> no event callback (0)
-		{"schl", ItemDeathClass::kUnwitnessed},   // @0x813150 -> 0x443670
-		{"clym", ItemDeathClass::kUnwitnessed},   // @0x813168 -> 0x4438C0
-		{"vmne", ItemDeathClass::kUnwitnessed},   // @0x813180 -> 0x443BB0
-		{"lndm", ItemDeathClass::kUnwitnessed},   // @0x813198 -> 0x441A40
+		{"nade", ItemDeathClass::kNoCallback},    // @0x813138 -> no event callback (0)
+		{"schl", ItemDeathClass::kSatchel},       // @0x813150 -> 0x443670
+		{"clym", ItemDeathClass::kClaymore},      // @0x813168 -> 0x4438C0
+		{"vmne", ItemDeathClass::kAVMine},        // @0x813180 -> 0x443BB0
+		{"lndm", ItemDeathClass::kLandmine},      // @0x813198 -> 0x441A40
 		{"bldg", ItemDeathClass::kBuilding},   // @0x8131B0 -> 0x43EE60
 		{"bld2", ItemDeathClass::kCollapsingBuilding},   // @0x8131C8 -> 0x43EEE0
 		{"cran", ItemDeathClass::kCrane},   // @0x8131E0 -> 0x43FC70
@@ -104,7 +106,7 @@ ItemDeathClass item_death_class_from_tag(const char *ai_function) {
 		{"tree", ItemDeathClass::kTree},          // @0x813258 -> 0x440210
 		{"palm", ItemDeathClass::kPalm},   // @0x813270 -> 0x53C4C0
 		{"psec", ItemDeathClass::kNull},          // @0x813288 -> 0x406FF0
-		{"CHel", ItemDeathClass::kUnwitnessed},   // @0x8132A0 -> 0x4581B0
+		{"CHel", ItemDeathClass::kBrainMachine},  // @0x8132A0 -> 0x4581B0
 		// [orig: MissileClass_HandleEvent @0x443630 == the Entity null row body @0x406FF0
 		//  (`+0x2AC = 0x1000000; return`), byte-identical]
 		{"rokt", ItemDeathClass::kNull},          // @0x8132B8 -> 0x443630
@@ -117,15 +119,52 @@ ItemDeathClass item_death_class_from_tag(const char *ai_function) {
 		{"aflr", ItemDeathClass::kNone},          // @0x813330 -> 0x443650
 		{"gflr", ItemDeathClass::kNone},          // @0x813348 -> 0x443660
 		{"pwrp", ItemDeathClass::kNull},          // @0x813360 -> 0x406FF0
-		{"cveh", ItemDeathClass::kUnwitnessed},   // @0x813378 -> 0x4583C0
-		{"cbot", ItemDeathClass::kUnwitnessed},   // @0x813390 -> 0x462130
-		{"cpln", ItemDeathClass::kUnwitnessed},   // @0x8133A8 -> 0x462120
-		{"ctrn", ItemDeathClass::kUnwitnessed},   // @0x8133C0 -> 0x462140
+		{"cveh", ItemDeathClass::kBrainMachine},  // @0x813378 -> 0x4583C0
+		{"cbot", ItemDeathClass::kBrainMachine},  // @0x813390 -> 0x462130
+		{"cpln", ItemDeathClass::kBrainMachine},  // @0x8133A8 -> 0x462120
+		{"ctrn", ItemDeathClass::kBrainMachine},  // @0x8133C0 -> 0x462140
 	};
 	if (ai_function == nullptr || ai_function[0] == '\0') return ItemDeathClass::kNull;
 	for (const Row &row : kRows)
 		if (strutil::iequals(row.name, ai_function)) return row.cls;
 	return ItemDeathClass::kNull; // [orig: the row-0 miss default @0x407dee]
+}
+
+void cache_ground_entity_below(World &world, Entity &e) {
+	// [orig: Entity_CacheGroundEntityBelow @0x407D60 - the `cmp [esi+28h], 0; jnz` @0x407D68, the
+	//  ray (x, y, z) -> (x, y, z - 0xA0000) @0x407D6E..0x407D9D, Physics_RaycastNearestEntity
+	//  @0x5394B0 (the call @0x407DA1), the store @0x407DA9]
+	if (e.ground_target.valid() || world.collision == nullptr)
+		return;
+	const int32_t x = e.position.x.q16, y = e.position.y.q16, z = e.position.z.q16;
+	e.ground_target = world.collision->raycast_nearest_entity(
+			world, e.handle, FixedVec3{ x, y, z }, FixedVec3{ x, y, io::bam_sub(z, 0xA0000) });
+}
+
+void run_ground_cache_class_init(World &world, Entity &e) {
+	// [orig: the rows gnrc @0x8130C0, gnrl @0x8130D8 and gnl2 @0x8130F0 carry
+	//  Entity_CacheGroundEntityBelow @0x407D60 as their def+0x148, every other row another init
+	//  or none; each caller's `if (def)` / `if (def+0x148)` gates]
+	if (!e.has_item_def)
+		return;
+	const ItemDeathTraits *traits = world.tables.item_death_traits.get(e.item_id);
+	if (traits == nullptr)
+		return;
+	if (traits->death_class == ItemDeathClass::kGnrc ||
+			traits->death_class == ItemDeathClass::kGnrl ||
+			traits->death_class == ItemDeathClass::kGnl2)
+		cache_ground_entity_below(world, e);
+}
+
+void run_ground_cache_class_inits(World &world) {
+	// [orig: Entity_InitAllFromModels @0x40E460 - the def+0x148 calls over pool 2 @0x40E55B,
+	//  pool 3 @0x40E59A, pool 1 @0x40E5D3 and pool 0 after it]
+	for (const int pool : { 2, 3, 1, 0 }) {
+		for (size_t i = 0; i < world.registry.pool_capacity(pool); ++i) {
+			if (Entity *e = world.registry.get(EntityHandle::make(pool, uint16_t(i))))
+				run_ground_cache_class_init(world, *e);
+		}
+	}
 }
 
 namespace {
@@ -284,10 +323,18 @@ void gnrc_death_event(World &world, Entity &target, int phase, int32_t section,
 // @0x407242, death tick if unset @0x407258, +0x2AC = 0x20 @0x40725f.
 void gnl2_death_expiry(World &world, Entity &target, int32_t section) {
 	target.class_think_ticks = kGnl2DeathThinkTicks;
-	const Vec3 raised{target.position.x, target.position.y, target.position.z + 1.0f};
+	// The blast point is the row's X/Y words and its Z word raised by 0x10000,
+	// copied raw (D-NET-507); the heading is the row's Yaw word, which for a
+	// placed row is its spawn angle (low half zero), so the S2C 0x21 streams
+	// that word's high half (D-NET-NEW-V6-1). [orig: Entity_HandleDeathEvent
+	//  @0x4070F0 - the pose copy @0x4071F4..0x40722F, `add eax, 10000h`
+	//  @0x40720D, the Yaw word `mov ecx, [esi+10h]` @0x40720A stored @0x407226,
+	//  into Server_BroadcastExplosionEffect @0x407233; the Yaw word
+	//  Entity_SpawnFromBMSRecord @0x40EB66]
     spawn_item_explosion(world, world.registry.get(target.last_attacker),
-            {to_fixed(raised.x),to_fixed(raised.y),to_fixed(raised.z)},
-            bam_heading_from_mission_yaw_deg(target.yaw), 60);
+            {target.position.x.q16, target.position.y.q16,
+             io::bam_add(target.position.z.q16, 0x10000)},
+            target.heading, 60);
     emit_item_state(world, target, section);
 	land_class_husk(world, target);
 	if (target.death_tick == 0) target.death_tick = world.logic_tick;
@@ -433,16 +480,31 @@ void tree_death_event(World &world, Entity &target, int phase, int32_t section) 
 void barrel_event(World &world, Entity &target) {
     if (!world.rules.logic_authority) return;
     if ((target.engine_flags & kEntityFlagDead) != 0) {
+        // The pose is the row's words and its Yaw word (a placed row's spawn
+        // angle), raw (D-NET-NEW-V6-1). [orig: Entity_HandleDeathOnAuthority
+        //  @0x407CC0 - the words @0x407CDB..0x407CE4, the Yaw word `mov eax,
+        //  [esi+10h]` @0x407CE8 stored @0x407CEB, `push 0Ah` @0x407CEF, the call
+        //  @0x407D0E; the Yaw word Entity_SpawnFromBMSRecord @0x40EB66]
         spawn_item_explosion(world, nullptr,
-                {to_fixed(target.position.x),to_fixed(target.position.y),to_fixed(target.position.z)},
-                bam_heading_from_mission_yaw_deg(target.yaw), 10);
+                {target.position.x.q16,target.position.y.q16,target.position.z.q16},
+                target.heading, 10);
         if (world.rules.mp_session) world.out.entity_events.push_back(EntityRemoveEvent{target.handle.packed});
+        // A Player-bit body (a player bound to a brrl row, D-NET-348) takes its placed
+        // devices with it [orig: Server_RemoveEntityAndNotify @0x50A270 - the test
+        //  @0x50A2B1 (its jz @0x50A2B8), Entity_RemovePlacedDevicesByOwner @0x50A2BB,
+        //  Entity_Destroy @0x50A2C4].
+        if (((target.flags | target.engine_flags) & kEntityFlagPlayer) != 0)
+            world.commands.remove_placed_devices_by_owner(target.handle);
         world.commands.remove_ssn(target.handle);
     } else if (target.health > 0) {
         target.class_think_ticks = 1920;
     } else {
         world.out.scars.clear_entity(target.handle);
         mark_class_dead(target); // [orig: `or [esi+24h],2` @0x407D34]
+        // A player body's dead bit is the Flags word every player path reads (the uplink's
+        // pose gate drops its pose from here) [orig: NetPacket_SerializePlayerState @0x4C09C0 (`test byte [edi+24h], 2` @0x4C2000)].
+        if (((target.flags | target.engine_flags) & kEntityFlagPlayer) != 0)
+            target.flags |= kEntityFlagDead;
         target.class_think_ticks = 10;
     }
 }
@@ -458,7 +520,11 @@ void queue_class_blast(World &world, const Entity &entity, const char *name, flo
     blast.owner = entity.handle;
     blast.hit_word = 1;
     blast.radius_override = radius;
-    world.explosions.queue_explosion(world, blast);
+    // The gated entry [orig: WeaponEffect_QueueExplosion @0x4E8330 (@0x4E8333..0x4E8339),
+    //  from Entity_ProcessBld2Destruction @0x43F2A6 / @0x43F2C7,
+    //  Entity_ProcessCraneCollapse @0x44014A / @0x44016B and the genx row's husk tail
+    //  Entity_UpdateWaterPhysicsAndEffects @0x4A939C / @0x4A93BD].
+    world.explosions.queue_explosion_on_authority(world, blast);
 }
 
 // [orig: bld2 callback Entity_ProcessBld2Destruction @0x43EEE0]
@@ -475,8 +541,8 @@ void collapsing_building_event(World &world, Entity &entity, int phase, bool cra
                 if (entity.attach_parent.valid()) return;
                 const auto *other = world.tables.item_death_traits.get(candidate.item_id);
                 if (other == nullptr || !other->model_loaded || !strutil::iequals(other->graphic_name, partner)) return;
-                if (int32_t(candidate.position.x * 65536) != int32_t(entity.position.x * 65536) ||
-                        int32_t(candidate.position.y * 65536) != int32_t(entity.position.y * 65536)) return;
+                if (candidate.position.x.q16 != entity.position.x.q16 ||
+                        candidate.position.y.q16 != entity.position.y.q16) return;
                 entity.attach_parent = candidate.handle;
                 world.registry.get(candidate.handle)->attach_parent = entity.handle;
             });
@@ -504,11 +570,11 @@ void collapsing_building_event(World &world, Entity &entity, int phase, bool cra
     }
     if ((entity.engine_flags & kEntityFlagDead) != 0 && entity.collapse_step < 64) {
         if (entity.collapse_step == 0 && !traits->particledeath.empty()) {
-            const int32_t origin[] = {int32_t(entity.position.x * 65536),
-                    int32_t(entity.position.y * 65536), int32_t(entity.position.z * 65536)};
+            const int32_t origin[] = {entity.position.x.q16,
+                    entity.position.y.q16, entity.position.z.q16};
             const auto matrix = collision_matrix_from_euler(
-                    bam_heading_from_mission_yaw_deg(entity.yaw), bam_from_degrees_wrapped(entity.pitch),
-                    bam_from_degrees_wrapped(entity.roll), origin);
+                    entity.heading, entity.pitch_bam,
+                    entity.roll_bam, origin);
             const int32_t width = io::bam_sub(traits->model_max_q16[0], traits->model_min_q16[0]);
             const int32_t height = io::bam_sub(traits->model_max_q16[1], traits->model_min_q16[1]);
             const int nx = std::max(2, width / 393216);
@@ -538,14 +604,15 @@ void collapsing_building_event(World &world, Entity &entity, int phase, bool cra
             // @0x43F192..0x43F1DA; cran Entity_ProcessCraneCollapse
             // @0x440036..0x44007E; both call
             // Terrain_InvalidateTileCacheRegion @0x605C10].
+            // The box takes the bound word (entity+0) [orig: bld2 `mov ecx, [esi];
+            //  lea eax, [ecx+ecx]` @0x43F192..0x43F194].
             world.out.terrain_scorches.emit_page_invalidation(
-                    int32_t(entity.position.x * 65536), int32_t(entity.position.y * 65536),
-                    int32_t(entity.bound_radius * 65536));
+                    entity.position.x.q16, entity.position.y.q16, entity.bound_radius.q16);
             // Four stack arguments: x, y, kind, GPM radius. Crane's kind 0
             // is a no-op (and consumes no CRT draw).
             // [orig: bld2 @0x43F1E3..0x43F1F1; cran @0x440087..0x440095]
-            world.out.terrain_scorches.emit_sized(int32_t(entity.position.x * 65536),
-                    int32_t(entity.position.y * 65536), crane ? 0 : 7,
+            world.out.terrain_scorches.emit_sized(entity.position.x.q16,
+                    entity.position.y.q16, crane ? 0 : 7,
                     traits->model_radius_q16, world.logic_tick);
         }
         ++entity.collapse_step;
@@ -583,8 +650,8 @@ void building_event(World &world, Entity &target) {
     const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
     if (traits == nullptr || !traits->model_loaded) return;
     world.out.scars.clear_entity(target.handle);
-    const int32_t pos[3] = {int32_t(target.position.x * 65536),
-            int32_t(target.position.y * 65536), int32_t(target.position.z * 65536)};
+    const int32_t pos[3] = {target.position.x.q16,
+            target.position.y.q16, target.position.z.q16};
     const int32_t radius[3] = {traits->model_radius_xy_q16,
             traits->model_radius_xy_q16, traits->model_radius_z_q16};
     int32_t lo[3], hi[3];
@@ -600,8 +667,8 @@ void building_event(World &world, Entity &target) {
             if (row.item_type_index == 0) return;
             if (pool == 0 && row.damage_state != 0) return;
             if (pool == 2 && row.has_item_def && row.item_type == 5) return;
-            const int32_t p[3] = {int32_t(row.position.x * 65536),
-                    int32_t(row.position.y * 65536), int32_t(row.position.z * 65536)};
+            const int32_t p[3] = {row.position.x.q16,
+                    row.position.y.q16, row.position.z.q16};
             for (int axis = 0; axis < 3; ++axis)
                 if (p[axis] < lo[axis] || p[axis] > hi[axis]) return;
             world.registry.get(row.handle)->health = 0;
@@ -616,11 +683,11 @@ void building_event(World &world, Entity &target) {
 
 void emit_item_state(World &world, Entity &target, int32_t section) {
     if (world.rules.logic_authority && world.rules.mp_session) {
-        // The host's GetTickCount seam, the clock its S2C 0x19 / 0x1A / 0x0F
-        // stamps and the C2S 0x28 kill-page window share.
+        // The host's GetTickCount, the clock its S2C 0x19 / 0x1A / 0x0F stamps
+        // and the C2S 0x28 kill-page window share (D-NET-NEW-L8-28).
         // [orig: Server_SendEntityStatePacket @0x509D70 — entity+560 =
         //  GetTickCount() @0x509D7A]
-        target.last_state_sent_ms = io::host_milliseconds_for_logic_tick(world.logic_tick);
+        target.last_state_sent_ms = authority_tick_count_ms(world);
         world.out.entity_events.push_back(ItemStateEvent{target.handle.packed, static_cast<int16_t>(section)});
     }
 }
@@ -646,6 +713,14 @@ void update_item_destroy_fade(World &world, Entity &entity) {
     entity.destroy_phases_q16.fill(0);
     entity.destroy_progress = 0;
     if ((entity.engine_flags & kEntityFlagHusk) == 0) return;
+    publish_swap_fade_phases(world, entity);
+}
+
+// [orig: Entity_PublishSwapFadePhases @0x5C3F40 - the six zeroes @0x5C3F48..0x5C3F66, the
+//  delay @0x5C3F6C..0x5C3FA6]
+void publish_swap_fade_phases(World &world, Entity &entity) {
+    entity.destroy_phases_q16.fill(0);
+    entity.destroy_progress = 0;
     const auto *traits=world.tables.item_death_traits.get(entity.item_id);
     if (!traits) return;
     const DestroyFadeClock clock=destroy_fade_clock(int32_t(world.logic_tick-entity.death_tick),
@@ -685,6 +760,69 @@ void update_item_ambient_sound(World &world, const Entity &entity) {
     sound.volume_q8_8=uint16_t((uint32_t(blend)*65535u+32768u)>>16);
     sound.pitch_q16=65536; sound.lane=uint8_t(region.region); sound.set_name=set;
     world.out.sound_emitters.publish(std::move(sound));
+}
+
+// [orig: Entity_UpdateFallAndLandState @0x4A20E0]
+void update_elevator(World &world, Entity &entity, int32_t &lift, int32_t &vel_z, int32_t &state,
+        int32_t &prev_state) {
+    // The savedLivePose stamp from the Position and Yaw / Pitch / Roll words
+    // [orig: @0x4A20E8..0x4A2141].
+    stamp_saved_live_pose(entity);
+    // The step from the state word into the lift, Z and the vertical step
+    // [orig: `shl eax, 0Ah; add eax, 0FFFFFC00h` @0x4A2116..0x4A211F, @0x4A2124 / @0x4A212A /
+    //  @0x4A2133].
+    const int32_t step = io::bam_add(int32_t(uint32_t(state) << 10), -0x400);
+    lift = io::bam_add(lift, step);
+    entity.position.z.q16 = io::bam_add(entity.position.z.q16, step);
+    vel_z = step;
+    // Stopped, lowering while the lift is above 0; raising below 8 units while the +0x28
+    // ground entity's own +0x28 is this one [orig: @0x4A2147..0x4A2154, @0x4A215E..0x4A217B].
+    state = lift > 0 ? 0 : 1;
+    if (const Entity *ground = world.registry.get(entity.ground_target);
+            ground != nullptr && ground->ground_target == entity.handle)
+        state = lift >= 0x80000 ? 1 : 2;
+    if (state == prev_state) return; // [orig: @0x4A2187..0x4A218D]
+    prev_state = state;              // [orig: @0x4A2191]
+    const ItemDeathTraits *traits = world.tables.item_death_traits.get(entity.item_id);
+    if (traits == nullptr) return;
+    // The stop's cue, the def's door-open set at the Position words [orig: @0x4A2197..0x4A21A5
+    //  -> Sound_PlayWithDistanceAttenuation(def+0x848)].
+    if (state == 1 && !traits->door_open_set.empty()) {
+        SoundSlotEvent cue;
+        cue.source_handle = entity.handle.packed;
+        cue.pos[0] = entity.position.x.q16;
+        cue.pos[1] = entity.position.y.q16;
+        cue.pos[2] = entity.position.z.q16;
+        std::snprintf(cue.set_name, sizeof(cue.set_name), "%s", traits->door_open_set.c_str());
+        world.out.slot_sounds.push_back(cue);
+    }
+    // The def's first loop at the Position words, lane 0, 10 ticks, pitch 1.0, full volume
+    // (the +0x98 velocity pointer it passes is not carried) [orig: @0x4A21AD..0x4A21F2 ->
+    //  SoundEmitter_RegisterSetLayers(def+0x82C)]. Retail reads the set with no null test
+    //  [orig: SoundEmitter_RegisterSetLayers @0x528340 - `cmp [ebp+24h], ebx` @0x528381], so a
+    // def with no first loop faults there on a session peer; ours registers none, a deliberate
+    // fix of a retail crash (D-NET-NEW-L4-24, PERMANENT: ratified by the maintainer, Q15-1 (a),
+    // 2026-10-22).
+    const std::string &loop = traits->regional_loops[0];
+    if (loop.empty()) return;
+    SoundEmitterEvent sound;
+    sound.source_spawn_id = entity.registry_spawn_id;
+    sound.source_handle = entity.handle.packed;
+    sound.source_bms_id = entity.bms_id;
+    sound.emitted_tick = world.logic_tick;
+    sound.pos = {entity.position.x.q16 / io::kFp16One, entity.position.y.q16 / io::kFp16One,
+            entity.position.z.q16 / io::kFp16One};
+    sound.lifetime_ticks = 10;
+    sound.pitch_q16 = 65536;
+    sound.volume_q8_8 = 0xFFFF;
+    sound.lane = 0;
+    sound.set_name = loop;
+    world.out.sound_emitters.publish(std::move(sound));
+}
+
+void update_item_elevator(World &world, Entity &entity) {
+    update_elevator(world, entity, entity.elevator_lift, entity.veh.slide_z, entity.veh.speed,
+            entity.script_next_ssn);
 }
 
 // The client's kill of one slot, run by the S2C 0x26 kill-sync (its section
@@ -728,12 +866,52 @@ void destruction_notify_item_damage(World &world, Entity &target, int phase, Ite
         return;
     }
 	const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
-	switch (traits != nullptr ? traits->death_class : ItemDeathClass::kUnwitnessed) {
+	run_item_class_event(world, target,
+			traits != nullptr ? traits->death_class : ItemDeathClass::kUnwitnessed, traits, phase, hit);
+}
+
+void run_item_class_event(World &world, Entity &target, ItemDeathClass cls,
+		const ItemDeathTraits *traits, int phase, ItemHitContext hit) {
+	switch (cls) {
 	case ItemDeathClass::kNull:
         target.class_think_ticks = 0x1000000;
 		return; // [orig: 0x406FF0 — +0x2AC = 0x1000000 and nothing else]
 	case ItemDeathClass::kNone:
 		return; // [orig: AflrClass_HandleEvent @0x443650 / GflrClass_HandleEvent @0x443660 — retn]
+	case ItemDeathClass::kNoCallback:
+		// The row's event word is 0: the think and the round hit test it and call nothing
+		// [orig: the nade row @0x813138; Entity_UpdateInfantryPlayerBody @0x4B4BD2..0x4B4BDA;
+		//  Projectile_ProcessDamageOnTarget @0x4E8205]. The blast and knife sites call it
+		// unguarded, which crashes retail (PERMANENT, Q7-21: ours calls nothing).
+		return;
+	case ItemDeathClass::kSatchel:
+	case ItemDeathClass::kClaymore:
+	case ItemDeathClass::kAVMine:
+		// The device's think is its event callback, so a damage site's phase runs it
+		// too: the authority's Health <= 0 booms at the hit, a joiner's net kill (4)
+		// spawns the boom round [orig: schl @0x813150 -> Entity_SatchelThink @0x443670,
+		//  clym @0x813168 -> Entity_ClaymoreThink @0x4438C0, vmne @0x813180 ->
+		//  Entity_AVMineThink @0x443BB0, the callbacks the item's +0x1C8 holds]
+		world.throwables.device_class_event(world, target,
+				cls == ItemDeathClass::kSatchel     ? ThrowClass::kSatchel
+						: cls == ItemDeathClass::kClaymore ? ThrowClass::kClaymore
+														   : ThrowClass::kAVMine,
+				phase);
+		return;
+	case ItemDeathClass::kLandmine:
+		// The field's think is its event callback and never reads the phase, so a damage
+		// site runs the same think as the pool-1 visit [orig: lndm @0x813198 ->
+		// Entity_LandmineThink @0x441A40, its phase argument unread]. A player body bound to
+		// the row runs no hardpoint think (Q7-21 (2), PERMANENT: no struct-aliasing emulation).
+		if (target.kind != EntityKind::Organic) world.minefields.think(world, target);
+		return;
+	case ItemDeathClass::kBrainMachine:
+		// The brain machines return at a null +0x64 brain [orig: EntityAI_ProcessAirStateMachine
+		//  @0x4581B0 (@0x4581B9..0x4581BE); EntityAI_ProcessGroundStateMachine @0x4583C0
+		//  (@0x4583CA..0x4583D1)]: an item this notify reaches has none (an AI-slotted item
+		// dies through its machine, hit_record_class_event), and a player body bound to the
+		// row takes no brain (Q7-21 (2), PERMANENT). No +0x2AC write, no death, no sound.
+		return;
 	case ItemDeathClass::kGnrc:
 		gnrc_death_event(world, target, phase, hit.section, hit.event_flags);
 		return;
@@ -767,8 +945,10 @@ void destruction_notify_item_damage(World &world, Entity &target, int phase, Ite
             // [orig: @0x43F889..0x43F8DC]
             if (hit.section < 1 || hit.section > 30) return;
             if (!world.doors.target_section_closed(target, hit.section)) return;
-            const uint32_t mask = 1u << ((hit.section - target.door_first_bone) & 31);
-            world.doors.command(world, target, 6, mask);
+            // The hit section's bit into +0x2B4, then the door event 6 reads it
+            // [orig: `mov [edx+2B4h], eax` @0x43F8CA, the jmp @0x43F8DC].
+            target.door_touch_mask = 1u << ((hit.section - target.door_first_bone) & 31);
+            world.doors.command(world, target, 6);
         } else {
             world.doors.command(world, target, phase);
         }
@@ -784,7 +964,7 @@ void destruction_notify_item_damage(World &world, Entity &target, int phase, Ite
         palm_item_event(world, target, phase, hit);
         return;
     case ItemDeathClass::kEmitter:
-        world.item_emitters.event(world, target, *traits, phase);
+        if (traits != nullptr) world.item_emitters.event(world, target, *traits, phase);
         return;
     case ItemDeathClass::kCrane:
         collapsing_building_event(world, target, phase, true);
@@ -809,9 +989,9 @@ bool tick_item_class_motion(World &world, Entity &entity,
     update_item_destroy_fade(world, entity);
     if (tick_item_section_motion(world, entity)) return true;
     if (entity.death_motion == DeathMotionMode::CraneFalling) {
-        int32_t ground = terrain != nullptr && terrain->valid() ? int32_t(
-                terrain::height_field_height_mission_bilinear(*terrain,
-                    entity.position.x, entity.position.y) * 65536) : 0;
+        int32_t ground = terrain != nullptr && terrain->valid()
+                ? terrain::height_field_height_bilinear_fixed(*terrain,
+                    entity.position.x.q16, entity.position.y.q16) : 0;
         if (const Entity *parent = world.registry.get(entity.attach_parent)) {
             if (const auto *traits = world.tables.item_death_traits.get(parent->item_id))
                 ground = io::bam_add(ground, io::bam_sub(
@@ -819,14 +999,14 @@ bool tick_item_class_motion(World &world, Entity &entity,
                         io::bam_abs(traits->model_section0_max_z_q16)));
         }
         entity.veh.slide_z = io::bam_sub(entity.veh.slide_z, 65536);
-        int32_t z = io::bam_add(int32_t(entity.position.z * 65536), entity.veh.slide_z);
+        int32_t z = io::bam_add(entity.position.z.q16, entity.veh.slide_z);
         if (z <= ground) {
             entity.health = -1;
             entity.class_think_ticks = 0;
             entity.death_motion = DeathMotionMode::BuildingEffects;
             z = ground;
         }
-        entity.position.z = z / 65536.0f;
+        entity.position.z.q16 = z;
         return true;
     }
     if (entity.death_motion != DeathMotionMode::BuildingEffects) return false;
@@ -838,19 +1018,24 @@ bool tick_item_class_motion(World &world, Entity &entity,
     if ((entity.engine_flags & 6u) == 0 && world.rules.last_tick_of_batch)
         update_item_ambient_sound(world, entity);
     if ((entity.engine_flags & kEntityFlagHusk) == 0) return true;
-    const double progress = entity.destroy_progress;
+    upfx_husk_leg(world, entity, *traits, entity.destroy_progress);
+    return true;
+}
+
+// [orig: Entity_UpdateWaterPhysicsAndEffects @0x4A92E0 - the 0x26 @0x4A9310..0x4A9336, the
+//  blasts @0x4A933D..0x4A93BD]
+void upfx_husk_leg(World &world, Entity &entity, const ItemDeathTraits &traits, double progress) {
     // The one-time 0x26 send uses subtype bit 0x20.
     if (world.rules.mp_session && world.rules.logic_authority && (entity.sub_type & 0x20) == 0) {
         emit_item_state(world, entity, 0);
         entity.sub_type |= 0x20;
     }
-    if ((!traits->primary_husk_loaded || progress >= 1.0) &&
+    if ((!traits.primary_husk_loaded || progress >= 1.0) &&
             world.rules.logic_authority && (entity.sub_type & 0x80) == 0 && entity.item_type == 5) {
         entity.sub_type |= 0x80;
-        queue_class_blast(world, entity, kAmmoKzOrganicBlast, traits->kz);
-        queue_class_blast(world, entity, kAmmoKzMItemBlast, traits->kz);
+        queue_class_blast(world, entity, kAmmoKzOrganicBlast, traits.kz);
+        queue_class_blast(world, entity, kAmmoKzMItemBlast, traits.kz);
     }
-    return true;
 }
 
 // The pool-2/3 cohort walks of the entity update: each row on its slot cohort
@@ -870,7 +1055,9 @@ bool tick_item_class_motion(World &world, Entity &entity,
 void tick_item_event_pool(World &world, int pool) {
     if (pool < 2 || pool > 3) return;
     const uint32_t stride = pool == 2 ? 8u : 64u;
-    const float water_z = world.env.water_z != 0 ? world.env.water_z / 65536.0f : -1.0e9f;
+    // The water word, 0 when none is authored (no dry sentinel; D-NET-507)
+    // [orig: g_EnvWaterHeightFixed @0x26C6454].
+    const float water_z = world.env.water_z / 65536.0f;
     const size_t cap = world.registry.pool_capacity(pool);
     for (size_t slot = 0; slot < cap; ++slot) {
         const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
@@ -917,6 +1104,11 @@ void tick_item_event_pool(World &world, int pool) {
         if (entity != nullptr && entity->registry_spawn_id == lifetime &&
                 entity->drop_motion != DropMotion::None)
             update_dropped_object(world, *entity);
+        // An ele0 def's own mover, on the same cohort [orig: Entity_UpdateFallAndLandState
+        //  @0x4A20E0 through @0x4C22E7 / @0x4C2393].
+        entity = world.registry.get(handle);
+        if (entity != nullptr && entity->registry_spawn_id == lifetime && entity->elevator_motion)
+            update_item_elevator(world, *entity);
     }
 }
 

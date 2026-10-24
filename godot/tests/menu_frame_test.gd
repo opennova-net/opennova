@@ -105,3 +105,27 @@ func test_menu_text_draws_through_the_font_pages_modulate2x() -> void:
 		for c: Color in row.colors:
 			assert_eq(c.to_argb32(), 0xFF7F7F7F, "white's diffuse is the sink's halved white")
 	TestFs.remove_dir_recursive(dir)
+
+
+# Every menu draws through the one process-wide glyph program (hud/font_page_glyphs
+# glyph_canvas_shader): one Shader, so its device version and its pipelines are made once
+# (the load's forced frame draws it) and no screen's first draw makes them again, as retail's
+# menus all draw through one fixed-function device state (D-NET-NEW-LF-28). The loading
+# screen's splash shares it too (loading_screen_splash_test).
+func test_every_frame_draws_through_the_one_glyph_program() -> void:
+	var shared := HudPos.glyph_shader()
+	assert_not_null(shared, "the process-wide glyph program exists")
+	if shared == null:
+		return
+	assert_eq(HudPos.glyph_shader(), shared, "one instance, every call")
+	assert_eq(shared.code, MenuFrame.glyph_shader_code(), "it is the menu items' shader")
+	for i in 2:
+		var doc := MnuDocument.new()
+		assert_eq(doc.load_from_bytes(MNU_TEXT.to_utf8_buffer()), OK)
+		var frame := MenuFrame.new()
+		frame.size = Vector2(800, 600)
+		add_child_autofree(frame)
+		assert_true(frame.configure(doc, "", null, null, null))
+		assert_null(frame.get_glyph_shader(), "no program before the first draw")
+		frame.get_glyph_submissions()
+		assert_eq(frame.get_glyph_shader(), shared, "frame %d draws through the shared program" % i)

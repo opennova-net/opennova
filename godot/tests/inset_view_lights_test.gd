@@ -130,3 +130,37 @@ func test_a_part_under_a_body_the_main_view_hides_follows_the_body() -> void:
 	assert_false(part.is_inset_view_drawn())
 	assert_eq(part.get_view_twin_count(), 0)
 	ObjectModel.update_authored_lods_for_views(main_camera, 640.0, null, 0.0)
+
+
+# The same submit rule while the main view draws the body: a part with no Inset
+# verdict of its own (the avatar head, a held gun) leaves the Inset with a body
+# the Inset's collect drops, and comes back with it.
+func test_a_part_with_no_verdict_of_its_own_goes_with_its_body() -> void:
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var body := _fixture_model(container)
+	assert_not_null(body)
+	if body == null:
+		return
+	var part := _fixture_model(body)
+	assert_not_null(part)
+	if part == null:
+		return
+	var main_camera := _view_camera(Vector2i(640, 480), 90.0)
+	var inset_camera := _view_camera(Vector2i(256, 256), 10.0)
+	ObjectModel.update_authored_lods_for_views(main_camera, 640.0, inset_camera, 256.0)
+	# The part's own Inset state with no collect verdict (as the level walk
+	# gives a head its own level): every section, as the main view's.
+	part.set_inset_occlusion_section_mask(-1, 0)
+	body.set_inset_occlusion_hidden(true)
+	ObjectModel.update_authored_lods_for_views(main_camera, 640.0, inset_camera, 256.0)
+	assert_true(body.is_visible_in_tree())
+	assert_true(body.is_view_split(), "the body leaves the Inset")
+	assert_true(part.is_view_split(), "and its part with it")
+	assert_false(part.is_inset_view_drawn())
+	body.set_inset_occlusion_hidden(false)
+	ObjectModel.update_authored_lods_for_views(main_camera, 640.0, inset_camera, 256.0)
+	assert_false(body.is_view_split())
+	assert_false(part.is_view_split())
+	assert_true(part.is_inset_view_drawn())
+	ObjectModel.update_authored_lods_for_views(main_camera, 640.0, null, 0.0)

@@ -34,21 +34,21 @@ void PreviewEffects::mount(const std::shared_ptr<const opennova::editor::Project
 	if (!files) {
 		stamped_.reset();
 		root_->clear();
-		if (ParticleRenderer *renderer = this->renderer()) renderer->set_texture_provider(Callable());
+		if (ParticleRenderer *renderer = this->renderer()) renderer->set_image_provider(Callable());
 		return;
 	}
 	// A fresh record of what is read, the root mounted over it (its caches dropped).
 	stamped_ = std::make_shared<opennova::StampedFiles>(files);
 	root_->mount_files(stamped_);
 	if (ParticleRenderer *renderer = this->renderer())
-		renderer->set_texture_provider(
-				Callable(root_.ptr(), "load_texture").bind(ResourceRoot::TEXTURE_LOADER_PARTICLE));
+		renderer->set_image_provider(
+				Callable(root_.ptr(), "load_image").bind(ResourceRoot::TEXTURE_LOADER_PARTICLE));
 }
 
 void PreviewEffects::show(const std::shared_ptr<opennova::particle::EffectScene> &scene) {
 	// The renderer builds its catalog (the graphics, the atlas) from the scene's definitions as it first
-	// draws them: a scene opened anew is a catalog anew, its graphics read through the mount (cached by
-	// it until a file read moves, mount()).
+	// draws them: a scene opened anew is a catalog anew, its graphics decoded from the mount's files
+	// (mount() replaces the mount when a file read moves).
 	shown_ = scene;
 	scene_->share_native_scene(scene);
 }
@@ -68,7 +68,7 @@ void PreviewEffects::clear() {
 	shown_.reset();
 	scene_->share_native_scene(nullptr);
 	if (ParticleRenderer *renderer = this->renderer()) {
-		renderer->set_texture_provider(Callable());
+		renderer->set_image_provider(Callable());
 		if (renderer->is_inside_tree()) renderer->render_now(0);
 	}
 	mounted_.reset();

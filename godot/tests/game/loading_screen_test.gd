@@ -170,6 +170,59 @@ func test_canvas_layer_screen_tracks_viewport_resize() -> void:
 		"the submitted loading image is transformed across the full new surface")
 
 
+# --- a present draws the screen alone [orig: LoadingScreen_UpdateAndPresent
+# @0x586be0 - Clear @0x586c5a, the screen @0x586c64, the bar @0x586cd0, Present
+# @0x586d53] --------------------------------------------------------------------
+
+func test_a_present_holds_every_offscreen_target_but_the_screens_viewport_chain() -> void:
+	# The debug view's chain: an outer target holding the screen's viewport (the
+	# GameViewport), the loading layer and the screen inside it.
+	var outer := _target(self, SubViewport.UPDATE_ALWAYS)
+	var screen_viewport := _target(outer, SubViewport.UPDATE_ALWAYS)
+	var layer := CanvasLayer.new()
+	screen_viewport.add_child(layer)
+	var screen := _setup_screen(LoadingScreenInfo.for_mission("00TRg.bms"))
+	layer.add_child(screen)
+	# The offscreen targets: a cube face whose capture is pending, a mirror drawing
+	# every frame, a sibling drawing when visible, and one already off.
+	var face := _target(screen_viewport, SubViewport.UPDATE_ONCE)
+	var mirror := _target(screen_viewport, SubViewport.UPDATE_ALWAYS)
+	var sibling := _target(self, SubViewport.UPDATE_WHEN_VISIBLE)
+	var idle := _target(screen_viewport, SubViewport.UPDATE_DISABLED)
+	assert_eq(screen.get_viewport(), screen_viewport, "the screen draws in its own viewport")
+
+	var held := LoadingScreen.hold_offscreen_targets(self, screen.get_viewport())
+	assert_eq(held.size(), 3, "the face, the mirror and the sibling are held; the idle one is off already")
+	for target: SubViewport in [face, mirror, sibling, idle]:
+		assert_eq(_server_mode(target), RenderingServer.VIEWPORT_UPDATE_DISABLED,
+				"%s draws nothing in the present" % target.name)
+	assert_eq(_server_mode(screen_viewport), RenderingServer.VIEWPORT_UPDATE_ALWAYS,
+			"the screen's own viewport draws the screen")
+	assert_eq(_server_mode(outer), RenderingServer.VIEWPORT_UPDATE_ALWAYS,
+			"a viewport containing the screen's draws it")
+
+	LoadingScreen.release_offscreen_targets(held)
+	assert_eq(_server_mode(face), RenderingServer.VIEWPORT_UPDATE_ONCE,
+			"a pending capture still draws with the next world frame")
+	assert_eq(_server_mode(mirror), RenderingServer.VIEWPORT_UPDATE_ALWAYS)
+	assert_eq(_server_mode(sibling), RenderingServer.VIEWPORT_UPDATE_WHEN_VISIBLE)
+	assert_eq(_server_mode(idle), RenderingServer.VIEWPORT_UPDATE_DISABLED)
+
+
+func test_a_present_holds_a_target_by_its_server_mode_not_its_node_property() -> void:
+	# A drawn UPDATE_ONCE target keeps the node property while the server's copy is
+	# off: the present has nothing of it to hold.
+	var face := _target(self, SubViewport.UPDATE_ONCE)
+	RenderingServer.viewport_set_update_mode(face.get_viewport_rid(),
+			RenderingServer.VIEWPORT_UPDATE_DISABLED)
+	assert_eq(face.render_target_update_mode, SubViewport.UPDATE_ONCE)
+	var held := LoadingScreen.hold_offscreen_targets(self, get_viewport())
+	assert_eq(held.size(), 0, "a drawn capture is not held")
+	LoadingScreen.release_offscreen_targets(held)
+	assert_eq(_server_mode(face), RenderingServer.VIEWPORT_UPDATE_DISABLED,
+			"the release leaves a target it did not hold as it was")
+
+
 func test_background_availability_is_publicly_observable() -> void:
 	var screen := _setup_screen(LoadingScreenInfo.for_mission("00TRg.bms"))
 	assert_true(screen.has_background(),
@@ -217,6 +270,21 @@ func _setup_screen(info: LoadingScreenInfo) -> LoadingScreen:
 	screen.setup(root, info)
 	assert_true(screen.has_background(), "the test pcx decodes into a texture")
 	return screen
+
+
+func _target(parent: Node, mode: SubViewport.UpdateMode) -> SubViewport:
+	var target := SubViewport.new()
+	target.size = Vector2i(16, 16)
+	target.render_target_update_mode = mode
+	if parent == self:
+		add_child_autofree(target)
+	else:
+		parent.add_child(target)
+	return target
+
+
+func _server_mode(target: SubViewport) -> int:
+	return RenderingServer.viewport_get_update_mode(target.get_viewport_rid())
 
 
 # Our own base game's gametext.bin (assets/, ADR 0048), whose table carries the

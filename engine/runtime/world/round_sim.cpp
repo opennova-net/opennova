@@ -150,7 +150,7 @@ RandomSpreadOffset weapon_calc_shotgun_spread_offset(
 // check). Shared with the throwable motors.
 // [orig: WeaponEffect_PushExplosionQueueEntry @ 0x4E83C0 — the type from word
 //  +0x2C @0x4E842E, the radius override fldz @0x4E83FA / fstp @0x4E8432]
-void detonate_round(World &world, const LiveRound &round, const Vec3 &at,
+void detonate_round(World &world, const LiveRound &round, const EntityPosition &at,
                     const AmmoTableEntry &ammo) {
     ExplosionEntry explosion;
     explosion.pos = at;
@@ -216,19 +216,19 @@ void push_round_debug(RoundSim &sim, const RoundDebugEvent &event) {
 }
 
 // The hit-time body roll: EVERY projectile hit on a torso-stack bone (bone < 5)
-// of a not-yet-dead body tips it ~8 deg toward the shot — front quadrant
-// positive, rear negative — lethal or not, whatever the damage number, on both
+// of a not-yet-dead body stores ~8 deg toward the shot (front quadrant
+// positive, rear negative), lethal or not, whatever the damage number, on both
 // peers (the class callback runs after the authority-gated subtraction with
-// damage 0 on a joiner). The store is bodyRoll (entity+0x94), our
-// AiEntity::roll — the field the slope pass then chases toward the ground
-// slope (infantry_slope_pass conform leg) and the torso roll chases in turn
-// (fp_roll = torso_roll + lean/4), so a living body visibly flinches and
-// settles back while a corpse tips onto the terrain.
+// damage 0 on a joiner). The store is the savedLivePose roll word (+0x94,
+// Entity::saved_live_roll), not the body's Roll (+0x18, AiEntity::roll) that
+// the player body's eye leg reads and the slope pass decays or chases, so a
+// hit tips neither the eye nor the body.
 // [orig: OrganicClass_HandleEvent gate @0x40755e; +0x05B05B00 @0x407564;
 //  -0x05B05B00 @0x407575; Entity_HandleDamageAndTriggerZones gate @0x4078c6;
-//  @0x4078cc / @0x407918]
-void apply_hit_body_roll(AiEntity *body, int32_t bone, int quadrant) {
-    if (body != nullptr) hit_body_roll(body->roll, bone, quadrant);
+//  @0x4078cc / @0x407918; the eye's Roll `fild [esi+18h]` @0x4B6A68; the
+//  slope pass's Roll @0x4B6DD1..0x4B6DDC / @0x4B6FE7..0x4B6FF4]
+void apply_hit_body_roll(Entity &victim, int32_t bone, int quadrant) {
+    hit_body_roll(victim.saved_live_roll, bone, quadrant);
 }
 
 Entity make_dismemberment_piece_seed(const Entity &victim, uint32_t cut_mask,
@@ -270,6 +270,7 @@ Entity make_dismemberment_piece_seed(const Entity &victim, uint32_t cut_mask,
 
     piece.health = 0;
     piece.alive = false;
+    piece.death_effect_active[0] &= static_cast<uint8_t>(~1u); // +0x1CC [orig: @0x40769E]
     piece.damage_state = -1;
     piece.death_anim_state = death_anim_state;
     piece.corpse_timer = 0;
@@ -282,11 +283,9 @@ Entity make_dismemberment_piece_seed(const Entity &victim, uint32_t cut_mask,
     piece.net_analog_z = 0;
 	piece.analog_throttle = 0;
 	piece.equipped_adm_index = kAdmSlotNone;
-	piece.pre_use_gun_equipped_adm_index = kAdmSlotNone;
     piece.use_gun_slot_swapped = false;
     piece.hidden = false;
     piece.last_attacker = EntityHandle{};
-    piece.death_blast_center = Vec3{};
     piece.death_tick = 0;
     // Equivalent to the original's ~newBoneBits, since ~(~old & cut) =
     // old | ~cut. [orig: clone sectionMask store @0x407691]
@@ -329,7 +328,7 @@ Entity make_dismemberment_piece_seed(const Entity &victim, uint32_t cut_mask,
     piece.mount_bone = 0;
     piece.ground_target = EntityHandle{};
     piece.mounted_child = EntityHandle{};
-    piece.last_fire_target = EntityHandle{};
+    piece.last_fire_target = TargetRef{};
     piece.spawn_position = piece.position;
     return piece;
 }
@@ -483,9 +482,10 @@ void apply_aerodynamic_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
         (static_cast<int64_t>(raw) << 16) / ammo.drag_fp16;
     const int64_t scaled_drag = first_division / io::kTicksPerSecondInt;
     // A positive surface multiplier scales the step directly and skips the
-    // water/air legs [orig: the surfaceNormal > 0 arm @0x4e604e..0x4e6097
-    // ahead of the water-height test @0x4e60a9].
-    const bool underwater = water_z_q16 != 0 && position_z_q16 <= water_z_q16;
+    // water/air legs [orig: the surfaceNormal > 0 arm @0x4e604e..0x4e6097]; the
+    // Z word against the water word raw, a dry map's 0 included, picks x25 [orig:
+    // Entity_ApplyDragAndBounceForce @0x4E5EC0 - @0x4E60A0..0x4e60a9, @0x4E616D].
+    const bool underwater = position_z_q16 <= water_z_q16;
     const int64_t drag_step = surface_normal > 0 ? scaled_drag * surface_normal
                               : underwater      ? scaled_drag * 25
                                                 : scaled_drag;
@@ -620,7 +620,7 @@ RoundSourceState resolve_round_source(World &world,
 
     AiEntity *body = world.ai.for_handle(params.owner);
     const int32_t source_z =
-            body != nullptr ? body->pos[2] : to_fixed(entity->position.z);
+            body != nullptr ? body->self->position.z.q16 : entity->position.z.q16;
     // The below-water classifier projects the per-tick EYE height (the shared
     // entity_eye_below_water witness) wherever the drowning bit is clear.
     // eye_offset_z is the ported +0x74 channel (0 when never stamped, the
@@ -804,21 +804,26 @@ void person_class_round_legs(World &world, Entity &victim, const HitRecord &reco
     // @0x407478, Entity_ComputeAnimSlotIndex call @0x407483].
     const Vec3 vel = vec_from_fixed(record.round_vel_q16);
     const int quadrant = death_quadrant_from_round(
-            bam_heading_from_mission_yaw_deg(victim.yaw), vel.x, vel.y);
+            victim.heading, vel.x, vel.y);
     victim.death_anim_state =
             compute_death_anim_state(record.section, quadrant, death_cause::kBullet);
     // The ammo's burn/force pair from the round's position, crediting its
-    // owner [orig: Entity_ApplyCollisionForce call @0x4074BA]. The ammo's
-    // hit emitter (ammo dword +72, its `secondary_effect`) and its 173 clip
-    // stay with D-ITEM-6 on this native leg; a joiner's wire-built person rows
-    // run them (wire_person_hit.cpp) [orig: @0x4074C7..0x40754A,
-    // @0x4076D3..0x4076D5].
+    // owner [orig: Entity_ApplyCollisionForce call @0x4074BA].
     if (ammo != nullptr)
         apply_collision_force(world, victim, ammo->secondary_anim, ammo->kz_physics,
-                              record.round_pos, record.round_owner);
+                              record.round_pos.q16(), record.round_owner);
+    // The ammo's hit emitter (+72, `secondary_effect`) into the body's +0x1CC
+    // slot, the explosion queue's victim descriptor (spawn_victim_hit_emitter).
+    // [orig: OrganicClass_HandleEvent @0x407310 - +72 @0x407453, the release
+    //  @0x4074DB..0x4074F9, the descriptor @0x4074FF..0x40753A, the store @0x40754A;
+    //  the plyr twin Entity_HandleDamageAndTriggerZones @0x407720 - @0x4077BB,
+    //  @0x407843..0x4078B2; AmmoDef_ParseProperty -> +0x48 @0x40AA36]
+    const bool hit_emitter = ammo != nullptr && !ammo->secondary_effect.empty();
+    if (hit_emitter)
+        spawn_victim_hit_emitter(victim, ammo->secondary_effect, world.out.destruction);
     const bool dead = ((victim.flags | victim.engine_flags) & kEntityFlagDead) != 0;
     // [orig: the torso-stack roll @0x40755E..0x407575]
-    if (!dead) apply_hit_body_roll(world.ai.for_handle(victim.handle), record.section, quadrant);
+    if (!dead) apply_hit_body_roll(victim, record.section, quadrant);
     // Entity_OnDamageReceived(victim, ammo, owner): the local head here, the
     // AI tail on the RoundHit drain [orig: the call @0x407588].
     entity_on_damage_received(world, victim, ammo);
@@ -830,6 +835,9 @@ void person_class_round_legs(World &world, Entity &victim, const HitRecord &reco
         try_spawn_dismemberment_piece(world, victim, record.round_vel_q16,
                                       record.section, victim.death_anim_state,
                                       /*was_alive=*/true);
+    // Then the fire death, after the cut (a clone keeps the section's clip)
+    // [orig: @0x4076D3..0x4076D5; the plyr twin @0x407A7A..0x407A7C].
+    if (hit_emitter) victim.death_anim_state = anim_state::kDeathFire;
 }
 
 int hit_record_death_anim_state(const HitRecord &record, int32_t victim_heading_bam) {
@@ -839,14 +847,6 @@ int hit_record_death_anim_state(const HitRecord &record, int32_t victim_heading_
             death_cause::kBullet);
 }
 
-uint16_t RoundSim::allocate_round_id(uint16_t sequence_word) {
-    spawn_allocated_ = true;
-    if (sequence_word != 0xFFFFu) return last_allocated_round_id_ = sequence_word; // @0x4EAB12
-    round_id_counter_ = (round_id_counter_ + 1u) & 0x1FFu;           // @0x4EAAF5..0x4EAB04
-    return last_allocated_round_id_ = static_cast<uint16_t>(
-            (uint32_t(local_slot_id) << 9) | round_id_counter_);
-}
-
 void RoundSim::reset() noexcept {
 	rounds.assign(kCapacity, LiveRound{});
 	active_count = 0;
@@ -854,7 +854,6 @@ void RoundSim::reset() noexcept {
 	impacts.clear();
 	hits.clear();
 	fired.clear();
-	guided_updates.clear();
 	next_impact_order = 1;
 	next_presentation_generation_ = 1;
 	debug_trail = {};
@@ -866,6 +865,7 @@ void RoundSim::reset() noexcept {
 	// [orig: Projectile_InitDragTable's memset @0x4E7921..0x4E7929, run from
 	//  Game_StartMission @0x525729]
 	hit_record = HitRecord{};
+	target_ring.reset(); // [orig: Projectile_InitDragTable @0x4E78D0 (@0x4E792E..0x4E7945)]
 }
 
 void RoundSim::present_fire(World &world, const RoundSpawnParams &params) {
@@ -880,7 +880,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         // A row the table does not hold reads as retail's zeroed record: no flag
         // leg, so the allocation still takes its id [orig: g_AmmoDefTable
         //  + 276 * index @0x4EC146; CEntityManager_AllocateSlot @0x4EC388].
-        allocate_round_id(descriptor.shot_seq);
+        allocate_slot(world, descriptor.shot_seq);
         return -1;
     }
     // The descriptor's pitch takes the shooter's zero elevation ahead of every
@@ -907,7 +907,11 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         explosion.ammo_index = params.ammo_index;
         explosion.owner = params.owner;
         explosion.hit_word = params.shot_seq;
-        if (authoritative) world.explosions.queue_explosion(world, explosion);
+        // Every peer that spawns the round queues its kill zone: the push tests
+        // no authority, and the drain's own reads keep the damage the
+        // authority's (FX-1) [orig: RoundData_SpawnRound @0x4EC1F3..0x4EC20E;
+        //  WeaponEffect_PushExplosionQueueEntry @0x4E83C0 (no gate)].
+        world.explosions.queue_explosion(world, explosion);
 
         if (ammo->kztype == ammo_kz::kKnife) {
             // Knife alone adds the bounded, effects-only ray. It is not a
@@ -920,9 +924,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                 const Vec3 direction = fire_direction(
                     params.dir_yaw_bam, params.dir_pitch_bam);
                 ProjectileTrace trace;
-                trace.start = FixedVec3{to_fixed(params.origin.x),
-                                        to_fixed(params.origin.y),
-                                        to_fixed(params.origin.z)};
+                trace.start = params.origin.q16();
                 trace.end = FixedVec3{
                     trace.start.x + to_fixed(direction.x * ammo->kz_maxradius),
                     trace.start.y + to_fixed(direction.y * ammo->kz_maxradius),
@@ -988,7 +990,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                     //  AmmoDef_ProcessImpactEffect @0x40a170 (its
                     //  Impact_SpawnGlassEffectsOrScar call @0x40a264);
                     //  Projectile_ProcessExplosionQueue's type-1 skip
-                    //  @0x4eb340..0x4eb343; Entity_ApplyVehicleCollisionDamage
+                    //  @0x4eb340..0x4eb343; Entity_ApplyKnifeKillZoneDamage
                     //  @0x4e6620].
                 }
             }
@@ -1008,16 +1010,31 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         return -1;
     }
     if ((ammo->flags & kAmmoFlagDetonateSatchels) != 0) {
-        // Detonatesatchels [orig: @ 0x4ec234 -> Entity_DetonateSatchelsByOwner]
-        if (authoritative)
-            world.throwables.detonate_satchels_by_owner(world, params.owner);
+        // Detonatesatchels on every peer, no gate; only the authority's satchel think
+        // acts on the mark [orig: @0x4EC231..0x4EC237 -> Entity_DetonateSatchelsByOwner
+        //  @0x546ED0; Entity_SatchelThink @0x443670 - @0x44368D, @0x443698].
+        world.throwables.detonate_satchels_by_owner(world, params.owner);
         return -1;
     }
     if ((ammo->flags & kAmmoFlagDesignateTarget) != 0) {
         // The designator dispatches to its tracker instead of allocating a
-        // projectile. That tracker is outside RoundSim; critically, this return
-        // precedes both shotgun/ordinary spawn and recoil.
-        // [orig: RoundData_SpawnRound @0x4EC249]
+        // projectile: the authority marks its firer's designation at the spawn
+        // point, for the firing weapon's life and radius (the host's table owns
+        // it); this return precedes both shotgun/ordinary spawn and recoil.
+        // [orig: RoundData_SpawnRound @0x4EC249, the authority test @0x4EC251,
+        //  the weapon's +0x454 / +0x458 @0x4EC25E / @0x4EC264,
+        //  EntityTracker_RegisterOrUpdate(firer, point, ticks, radius, 1) @0x4EC270]
+        const WeaponTableEntry *designator = world.tables.weapons.by_index(params.adm_index);
+        if (authoritative && designator != nullptr) {
+            DesignationMark mark;
+            mark.firer = params.owner;
+            mark.point[0] = params.origin.x.q16;
+            mark.point[1] = params.origin.y.q16;
+            mark.point[2] = params.origin.z.q16;
+            mark.ticks = designator->designation_ticks;
+            mark.radius_units = designator->hud_splash_radius;
+            world.out.designation_marks.push_back(mark);
+        }
         return -1;
     }
     if ((ammo->flags & kAmmoFlagClaymore) != 0) {
@@ -1037,27 +1054,22 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         apply_round_recoil(*ammo, source);
         return first;
     }
-    // The allocation stamps the round's id, which seeds its spread below; it
-    // follows the shotgun leg and precedes everything else, so the legs below
-    // that fly nothing here still take their id [orig: RoundData_SpawnRound ->
-    // CEntityManager_AllocateSlot @0x4EC388, which never fails; the seed
-    // round+0x78 @0x4EC394].
-    const uint16_t round_id = allocate_round_id(params.shot_seq);
-    // Null/non-ballistic ammo spawns nothing at this altitude: the Knife(1)/Medic(3)
-    // kill zones are the immediate-raycast leaves [orig: kztype dispatch @0x4ec21f],
-    // `hasitem` ammo places an item entity instead of flying.
-    if (ammo->velocity <= 0) return -1;
-    if (ammo->kztype == 1 || ammo->kztype == 3) return -1;
-    if ((ammo->flags & kAmmoFlagHasItem) != 0) return -1;
-
-    int slot = -1;
-    for (int i = 0; i < kCapacity; ++i) {
-        if (!rounds[static_cast<size_t>(i)].active) {
-            slot = i;
-            break;
-        }
-    }
-    if (slot < 0) return -1; // pool exhausted [orig: allocator scan @0xB7DFA0 flags]
+    // The allocation takes the slot and stamps the round's id, which seeds its
+    // spread below; it follows the shotgun leg and precedes everything else
+    // [orig: RoundData_SpawnRound -> CEntityManager_AllocateSlot @0x4EC388, which
+    // never fails; the seed round+0x78 @0x4EC394].
+    const int slot = allocate_slot(world, params.shot_seq);
+    const uint16_t round_id = rounds[static_cast<size_t>(slot)].shot_seq;
+    // Past the allocation every round flies, whatever its ammo: a velocity of 0 or
+    // less launches at that speed, a kill-zone kztype is read only inside the
+    // instantkillzone leg (the knife's raycast), and no leg reads `hasitem`
+    // [orig: RoundData_SpawnRound - the kztype test @0x4EC21B inside the 0x400 leg
+    //  (its Weapon_RaycastAndSpawnImpact call @0x4ec21f), no test between the
+    //  allocation @0x4EC388 and the speed's (v << 16) / 62 @0x4EC58E..0x4EC5AB; no
+    //  fire path tests 0x200 ahead of its call:
+    //  Entity_FireWeaponAndSendPacket @0x42BD80 (the call @0x42C008),
+    //  RoundData_AddRound @0x4FDB40 (the call @0x4FDC58),
+    //  NetPacket_DeserializeRoundEvent @0x42F270 (the call @0x42F5BA)].
 
     int32_t final_yaw = params.dir_yaw_bam;
     int32_t final_pitch = params.dir_pitch_bam;
@@ -1072,14 +1084,12 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
             const int category = std::min<int>(source.stance_category, 2);
             const int row = vertical_spread ? 3 : category;
             int32_t spread = weapon->error_fp16[row];
-            if (source.recoil_pitch != nullptr) {
-                spread = io::bam_add(
-                        spread, io::bam_sar(*source.recoil_pitch, 8));
-            }
-            if (source.weapon_weight_spread != nullptr) {
-                spread = io::bam_add(
-                        spread, io::bam_sar(*source.weapon_weight_spread, 7));
-            }
+            // Only a person def adds the accumulators [orig: RoundData_SpawnRound
+            //  @0x4EC0D0 - the def-type test @0x4EC3F1..0x4EC3F8, the adds @0x4EC3FA..0x4EC40E].
+            if (source.person_with_item_def && source.recoil_pitch != nullptr)
+                spread = io::bam_add(spread, io::bam_sar(*source.recoil_pitch, 8));
+            if (source.person_with_item_def && source.weapon_weight_spread != nullptr)
+                spread = io::bam_add(spread, io::bam_sar(*source.weapon_weight_spread, 7));
             // The up/down limit keys on the raw prone bit, not the row: a
             // prone body whose row a mask bit or a mount overrode still takes
             // +0xD0 [orig: `cmp outZ, 0; jnz` @0x4EC44E, `cmp outX, 0; jnz`
@@ -1143,12 +1153,17 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
     r.shot_seq = round_id;
     r.presentation_generation = next_presentation_generation_++;
     r.pos = params.origin;
-    r.prev_z_q16 = to_fixed(params.origin.z); // [orig: +0x80..+0x88 = Position @0x4ec643..0x4ec655]
-    r.vel = vec_from_fixed(launch_q16);
+    // [orig: RoundData_SpawnRound @0x4EC0D0 - Position @0x4EC62B / @0x4EC631 / @0x4EC63A,
+    //  the +0x80..+0x88 copy @0x4EC643..0x4EC655]
+    r.prev_z_q16 = params.origin.z.q16;
+    r.vel.set_q16(launch_q16); // [orig: +0x98 / +0x9C / +0xA0 @0x4ec5dd..0x4ec60d]
     r.age_ticks = 0;
     // noage rounds never expire on time [orig: flag 0x4000]; everything else uses the
     // ammo max_age (already in 62 Hz ticks).
     r.max_age_ticks = ((ammo->flags & kAmmoFlagNoAge) != 0) ? INT32_MAX : ammo->max_age_ticks;
+    // The +0x114 copy of the ammo flags [orig: @0x4EC615].
+    r.noage = (ammo->flags & kAmmoFlagNoAge) != 0;
+    r.priority = (ammo->flags & def::DEF_AMMO_FLAG_PRIORITY) != 0;
 
     // The tracer decision [orig: RoundData_SpawnRound @0x4ec184-0x4ec1e5]: every
     // tracer_rate-th round FROM THE FIRING WEAPON SLOT is a tracer — the counter is
@@ -1218,20 +1233,19 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
     // The result becomes round ItemTypeIndex(+28); Entity_InitFromItemDef binds
     // the class motor
     // (+452) / think (+456) from the items.def ai_function/move_function tags,
-    // and the init callback seeds 1 deg/tick spin @ 0x4435A0].
+    // and the init callback, throwable_round_init].
     r.yaw_bam = final_yaw;
     r.pitch_bam = final_pitch;
     const int32_t item_id = throwable_item_for_viewer(
             ammo->tracer_item_friendly, ammo->tracer_item_enemy, r.team, local_team);
-    if (item_id != 0 && (!no_tracers_rule || forcetracer)) {
+    if (item_id == 0) {
+        r.item_type_id = 1; // no TrcrID item: item 1, no def [orig: @0x4EC7C1]
+    } else if (!no_tracers_rule || forcetracer) {
         r.item_type_id = item_id;
-        if (const ThrowableClassRow *row = world.throwables.classes.get(item_id)) {
-            r.motor = row->motor;
-            r.think = row->think;
-        }
-        r.spin_yaw = 11930464;   // 1 deg/tick [orig: Entity_InitThrowableSpin_*]
-        r.spin_pitch = 11930464;
-        r.spin_roll = 11930464;
+        r.has_item_def = true;
+        const ThrowableClassRow *row = world.throwables.classes.get(item_id);
+        if (row != nullptr) { r.motor = row->motor; r.think = row->think; r.move_row = row->move_row; }
+        throwable_round_init(world, r, row);
     }
 
     init_guided(world, r, *ammo);
@@ -1281,18 +1295,11 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
         // ring [orig: CEntityManager_AllocateSlot from Weapon_SpawnProjectileBurst
         //  @0x4EB957 / ...WithSpread @0x4EBC10; the cursor returns @0x4EBB98 /
         //  @0x4EBE6D].
-        const uint16_t pellet_id = allocate_round_id(params.shot_seq);
+        const int slot = allocate_slot(world, params.shot_seq);
+        const uint16_t pellet_id = rounds[static_cast<size_t>(slot)].shot_seq;
         const int64_t pieslice = ammo.kz_pieslice_bam;
         const uint16_t r1 = world.throwables.fan_prng();
         const uint16_t r2 = world.throwables.fan_prng();
-        int slot = -1;
-        for (int i = 0; i < kCapacity; ++i) {
-            if (!rounds[static_cast<size_t>(i)].active) {
-                slot = i;
-                break;
-            }
-        }
-        if (slot < 0) continue;
         int32_t yaw;
         int32_t pitch;
         if (shotgun_spread) {
@@ -1325,9 +1332,12 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
         r.shot_seq = pellet_id;
         r.presentation_generation = next_presentation_generation_++;
         r.pos = params.origin;
-        r.prev_z_q16 = to_fixed(params.origin.z); // [orig: the spawn's +0x80 copy @0x4ec655]
-        r.vel = vec_from_fixed(launch_q16);
+        r.prev_z_q16 = params.origin.z.q16; // [orig: the spawn's +0x80 copy @0x4ec655]
+        r.vel.set_q16(launch_q16);
         r.max_age_ticks = ammo.max_age_ticks;
+        // The +0x114 copy [orig: @0x4EBAF9 / @0x4EBDC6].
+        r.noage = (ammo.flags & kAmmoFlagNoAge) != 0;
+        r.priority = (ammo.flags & def::DEF_AMMO_FLAG_PRIORITY) != 0;
         r.team = owner_ent != nullptr ? static_cast<uint8_t>(owner_ent->team)
                                       : params.shooter_team;
         r.tracer = false;
@@ -1408,8 +1418,8 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
         // A non-authority in-session peer runs the SAME hit path with
         // Weapon_CalcImpactDamage's forced zero [orig: @0x4ec933..0x4ec93a]:
         // no health, hits, or deaths, but the person class callback still
-        // fires (@0x4e820e) and stages the death anim / tips the body on the
-        // joiner too. Only a person with a World entity reaches this leg on a
+        // fires (@0x4e820e) and stages the death anim / stores the +0x94 hit roll
+        // on the joiner too. Only a person with a World entity reaches this leg on a
         // joiner (the wire person proxies never resolve to geometry_entity,
         // collision_trace.cpp), i.e. the joiner's own body.
         const bool peer_person_hit = world.rules.mp_session &&
@@ -1433,7 +1443,7 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                                                 collision.bone_index, *target, shooter,
                                                 r.ammo_index, world);
             if (authoritative && critical_hit) target->cause_flags |= 0x800u;
-            r.vel = vec_from_fixed(velocity_q16);
+            r.vel.set_q16(velocity_q16);
             if ((target->engine_flags & kEntityFlagIndestructible) != 0 ||
                 target->armor_impact == -1 ||
                 ammo->penetration_impact < target->armor_impact ||
@@ -1460,23 +1470,60 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
             // [orig: Entity_HandleDamageAndTriggerZones @0x40772f]
             const bool target_not_dead =
                 ((target->flags | target->engine_flags) & kEntityFlagDead) == 0;
-            // The local player's damage feedback (red vignette + camera shake +
-            // radar blip) arms on every hit that beats the 5-point floor, after
-            // the class damage callback and ahead of the kill routing; retail
-            // tests the value it just computed, not the applied health delta.
-            // The source is the projectile, the point its Position
-            // [orig: Projectile_ProcessDamageOnTarget @0x4e8213..0x4e822b ->
-            //  Player_OnDamageReceived @0x4dd880].
-            if (target_not_dead && target->handle == world.cached.local_player && damage > 5) {
-                const int32_t at[3] = {to_fixed(r.pos.x), to_fixed(r.pos.y), to_fixed(r.pos.z)};
+            const PlayerBodyClass row_class =
+                person_hit_row_class(world, *target, damage_target_is_person);
+            // The local player's damage feedback (vignette, shake, blip) past the 5-point floor,
+            // after the event-1 callback, whose dead bit it re-reads (retail scores before both)
+            // [orig: Projectile_ProcessDamageOnTarget - the score @0x4E8133, @0x4E81FF..0x4E820E,
+            //  @0x4E8213, @0x4E8219..0x4E8224, Player_OnDamageReceived @0x4DD880 (@0x4E822B)].
+            const auto local_damage_feedback = [&]() {
+                const Entity *victim = world.registry.get(damage_entity);
+                if (victim == nullptr || ((victim->flags | victim->engine_flags) & kEntityFlagDead) ||
+                        victim->handle != world.cached.local_player || damage <= 5)
+                    return;
+                const int32_t at[3] = {r.pos.x.q16, r.pos.y.q16, r.pos.z.q16};
                 player_on_damage_received(world, radar_round_source(world, r,
                         static_cast<uint32_t>(&r - rounds.data())), at);
+            };
+            // On the authority every hit sets the shot relations; the lethal gate reads the health
+            // word BEFORE this hit's subtraction (+0x124: damage_state's zero above). The kill
+            // scores at once, while the victim exists, unless it is flagged dead; a player body
+            // then counts on the round (0x100 past the first), takes the attacker and fires its
+            // bound row's event 4 over the previous hit's record (a device row may destroy the
+            // body there: Q7-34 (a)). [orig: Projectile_ProcessDamageOnTarget relations
+            //  @0x4E809C..0x4E80EF, the gate @0x4E80F7..0x4E8119 (damage >= health @0x4E810A),
+            //  the dead test @0x4E811F, Score_ProcessKillEvent @0x4FD400 (the call @0x4E8133),
+            //  Flags & 0x100 @0x4E8151..0x4E8159, the count @0x4E815B..0x4E816B, +0x178
+            //  @0x4E8186, the callback @0x4E819C..0x4E81A1, ahead of Health -= damage @0x4E81B3]
+            const int32_t pre_hit_health = target->health;
+            if (authoritative) {
+                if (shooter != nullptr) {
+                    // DcbId singles (+0x7C, entity_dcb_id): a player's 10000 + slot fails the
+                    // < 0x80 guard [orig: Projectile_ProcessDamageOnTarget @0x4E7FB0 - shooter
+                    //  @0x4E80C0 / @0x4E80EA, target @0x4E80D0 / @0x4E80E1]
+                    auto &rel = world.script.relations;
+                    const int sg = shooter->group_id, ss = entity_dcb_id(world, *shooter);
+                    const int vg = target->group_id, vs = entity_dcb_id(world, *target);
+                    rel.set_group_group(TriggerRelations::kShot, sg, vg);
+                    rel.set_single_group(TriggerRelations::kShot, ss, vg);
+                    rel.set_group_single(TriggerRelations::kShot, sg, vs);
+                    rel.set_single_single(TriggerRelations::kShot, ss, vs);
+                }
+                if (pre_hit_health > 0 && damage >= pre_hit_health) {
+                    if (target_not_dead)
+                        world.match.process_kill_event(world, r.owner, damage_entity);
+                    if (((target->flags | target->engine_flags) & kEntityFlagPlayer) != 0) {
+                        if (++r.player_kills > 1) target->cause_flags |= 0x100u;
+                        target->last_attacker = r.owner;
+                        player_body_row_event(world, *target, 4);
+                        if ((target = world.registry.get(damage_entity)) == nullptr) return;
+                    }
+                }
             }
-            // The record every event-1 callback reads, on both peers: this
-            // round, the damage, the struck section and the target.
-            // [orig: Projectile_ProcessDamageOnTarget
-            //  Projectile_CopyEntityToHitRecord @0x4E81BA..0x4E81C0, +0x30
-            //  @0x4E81C9, +0x38 @0x4E81D2, +0x48 @0x4E81D7]
+            // The record every event-1 callback reads, on both peers: this round, the damage,
+            // the struck section and the target. [orig: Projectile_ProcessDamageOnTarget
+            //  Projectile_CopyEntityToHitRecord @0x4E81BA..0x4E81C0, +0x30 @0x4E81C9, +0x38
+            //  @0x4E81D2, +0x48 @0x4E81D7]
             copy_round_to_hit_record(hit_record, r, velocity_q16);
             hit_record.damage = damage;
             hit_record.section =
@@ -1488,33 +1535,18 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                 // [orig: Projectile_ProcessDamageOnTarget @ 0x4E7FB0]
                 destruction_notify_item_damage(world, *target, 1,
                         {collision.section_index, damage, r.yaw_bam, r.pitch_bam, r.roll_bam});
+                local_damage_feedback();
             } else {
-                // The lethal edge reads the health word BEFORE this hit's
-                // subtraction: a body already at or below zero never re-enters
-                // the kill chain [orig: Projectile_ProcessDamageOnTarget
-                // @0x4E80F7..0x4E8101 `test ax, ax; jle`, damage >= health
-                // @0x4E810A].
-                const int32_t pre_hit_health = target->health;
                 // Only the health write waits on a nonzero damage. The shot
-                // relations, the attacker stamp and the class callback run on
-                // every hit, a zero-damage one (armor, the Indestructible bit,
-                // a damage_state hull) included, so a vehicle brain still takes
-                // its event 1 and a person its alert.
-                // [orig: Projectile_ProcessDamageOnTarget relations
-                //  @0x4E809C..0x4E80EF, health `test ebx, ebx` @0x4E81AB..0x4E81B3,
-                //  callback @0x4E81FF..0x4E820E; the ground brain queues the event
-                //  EntityAI_ProcessGroundStateMachine @0x4584F6..0x458530]
+                // relations (above), the attacker stamp and the class callback
+                // run on every hit, a zero-damage one (armor, the Indestructible
+                // bit, a damage_state hull) included, so a vehicle brain still
+                // takes its event 1 and a person its alert.
+                // [orig: Projectile_ProcessDamageOnTarget health `test ebx, ebx`
+                //  @0x4E81AB..0x4E81B3, callback @0x4E81FF..0x4E820E; the ground
+                //  brain queues the event EntityAI_ProcessGroundStateMachine
+                //  @0x4584F6..0x458530]
                 if (authoritative) {
-                    if (shooter != nullptr) {
-                        auto &rel = world.script.relations;
-                        const int sg = shooter->group_id, ss = shooter->net_id;
-                        const int vg = target->group_id, vs = target->net_id;
-                        rel.set_group_group(TriggerRelations::kShot, sg, vg);
-                        rel.set_single_group(TriggerRelations::kShot, ss, vg);
-                        rel.set_group_single(TriggerRelations::kShot, sg, vs);
-                        rel.set_single_single(TriggerRelations::kShot, ss, vs);
-                    }
-
                     // The original writes the subtraction back through a signed 16-bit
                     // entity+286 field. Preserve its modulo-2^16 wrap explicitly.
                     if (damage != 0)
@@ -1522,9 +1554,9 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                             static_cast<int64_t>(target->health) - static_cast<int64_t>(damage));
                     hits.push_back(RoundHit{damage_entity, r.owner, damage,
                                             primary_section, secondary_section});
-                    if (damage_target_is_person) {
+                    if (damage_target_is_person && row_class != PlayerBodyClass::kItem) {
                         // [orig: OrganicClass_HandleEvent @0x4074BA; twin @0x407822]
-                        apply_collision_force(world, *target, ammo->secondary_anim, ammo->kz_physics, r.pos, r.owner);
+                        apply_collision_force(world, *target, ammo->secondary_anim, ammo->kz_physics, r.pos.q16(), r.owner);
                     }
                     if (!damage_target_is_person) {
                         target->last_attacker = r.owner;
@@ -1542,54 +1574,46 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                     // slot, which the death edge's fallback also restores.
                     if ((target->item_attrib & kItemAttribEweap) == 0)
                         target->last_attacker = r.owner;
-                    // The person class callback, event 1 with a projectile:
-                    // EVERY hit (lethal or not, damage 0 included) selects the
-                    // death anim from the hit bone + attack quadrant into +0x2C0
-                    // and tips the body on a torso-stack bone; a later kill
-                    // that stamps nothing (WAC kill/SSNHP/GroupHP) plays this
-                    // hit's clip, while killSSN and KillSingle clear it first
-                    // [orig: WacCmd_KillSsn @0x4F1EBD;
-                    // Entity_KillByNetId @0x43DC1B].
-                    // The roll, the mask switch, and the anim selector all
-                    // consume the SAME hit-record bone (hitRecord[14]);
+                    // The person class callback, event 1 with a projectile: EVERY hit (lethal
+                    // or not, damage 0 included) selects the death anim from the hit bone +
+                    // attack quadrant into +0x2C0 and sets the +0x94 roll on a torso-stack bone; a
+                    // later kill that stamps nothing (WAC kill/SSNHP/GroupHP) plays this hit's
+                    // clip, while killSSN and KillSingle clear it first [orig: WacCmd_KillSsn
+                    // @0x4F1EBD; Entity_KillByNetId @0x43DC1B]. The roll, the mask switch, and
+                    // the anim selector all consume the SAME hit-record bone (hitRecord[14]);
                     // death_section is our preserved copy of that record field.
-                    // [orig: OrganicClass_HandleEvent @0x407478 quadrant,
-                    //  @0x407483 select, @0x40755e / @0x4075f6 gates;
-                    //  Entity_HandleDamageAndTriggerZones @0x4077e0 / @0x4077eb
-                    //  / @0x4078c6]
+                    // [orig: OrganicClass_HandleEvent @0x407478 quadrant, @0x407483 select,
+                    //  @0x40755e / @0x4075f6 gates; Entity_HandleDamageAndTriggerZones
+                    //  @0x4077e0 / @0x4077eb / @0x4078c6]
                     const int32_t heading_bam =
-                        bam_heading_from_mission_yaw_deg(target->yaw);
+                        target->heading;
                     const int quadrant =
                         death_quadrant_from_round(heading_bam, r.vel.x, r.vel.y);
                     const int32_t death_section =
                         primary_section >= 0 ? primary_section : 1;
-                    if (target_not_dead) {
+                    // No dead return in the org callback, the roll's test aside; the plyr one has [orig:
+                    //  OrganicClass_HandleEvent @0x407483, @0x40755E; Entity_HandleDamageAndTriggerZones @0x40772F].
+                    if (row_class == PlayerBodyClass::kOrganic ||
+                            (target_not_dead && row_class == PlayerBodyClass::kPlayer)) {
                         target->death_anim_state =
                             compute_death_anim_state(death_section, quadrant,
                                                      death_cause::kBullet);
-                        AiEntity *victim_body = world.ai.for_handle(target->handle);
-                        apply_hit_body_roll(victim_body, death_section, quadrant);
-                        // The plyr callback re-arms the player body's 64-tick
-                        // think cadence on every event it handles, around its
-                        // waypoint tail.
-                        // [orig: Entity_HandleDamageAndTriggerZones @0x407b5e /
-                        //  @0x407c71; the tail @0x407B64..0x407C6B]
-                        if (((target->flags | target->engine_flags) & kEntityFlagPlayer) != 0) {
+                        if (target_not_dead) apply_hit_body_roll(*target, death_section, quadrant);
+                        // The plyr callback's health tail, then its 64-tick re-arm around the
+                        // waypoint tail [orig: Entity_HandleDamageAndTriggerZones - @0x407ACD..0x407B33,
+                        //  the re-arms @0x407b5e / @0x407c71; the tail @0x407B64..0x407C6B].
+                        if (row_class == PlayerBodyClass::kPlayer) {
+                            player_body_health_tail(world, *target);
                             target->spawn_phase = 64;
                             player_body_waypoint_visits(world, *target);
                         }
                     }
+                    if (row_class == PlayerBodyClass::kItem) // its row's (a barrel may remove it)
+                        player_body_row_event(world, *target, 1);
+                    if ((target = world.registry.get(damage_entity)) == nullptr) return;
+                    local_damage_feedback();
                     if (authoritative && damage != 0 && pre_hit_health > 0 &&
                         target->health <= 0) {
-                        // A lethal player-flag hit counts on the ROUND; past the
-                        // first kill the victim takes the same-projectile cause
-                        // bit 0x100 before the death is reported.
-                        // [orig: Projectile_ProcessDamageOnTarget @0x4e8112 lethal
-                        //  gate, @0x4e8159 Flags&0x100, @0x4e8169..0x4e816b]
-                        if (target_was_alive &&
-                            ((target->flags | target->engine_flags) & kEntityFlagPlayer) != 0 &&
-                            ++r.player_kills > 1)
-                            target->cause_flags |= 0x100u;
                         try_spawn_dismemberment_piece(
                             world, *target, velocity_q16,
                             death_section, target->death_anim_state,
@@ -1608,11 +1632,6 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                         // cause bits at the death edge [orig: @0x516f4d /
                         // @0x517188..0x517206]; the sim snapshots them here.
                         d.event_flags = target->cause_flags & 0xF00u;
-                        // The kill accounting skips a body already flagged
-                        // dead [orig: Projectile_ProcessDamageOnTarget @0x4E7FB0,
-                        // `test byte ptr [esi+24h], 2` @0x4E811F around the
-                        // Score_ProcessKillEvent call @0x4E8133].
-                        d.kill_event = target_not_dead;
                         deaths.push_back(d);
                     }
                 } else if (authoritative && damage != 0) {
@@ -1628,7 +1647,6 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                         d.adm_index = r.adm_index;
                         d.ammo_index = r.ammo_index;
                         d.event_flags = target->cause_flags & 0xF00u;
-                        d.kill_event = target_not_dead; // [orig: @0x4E811F]
                         deaths.push_back(d);
                     }
                 }
@@ -1697,7 +1715,10 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             //  call @0x4E9F1E]
             const AmmoTableEntry *fuze_ammo = world.tables.ammo.by_index(r.ammo_index);
             if (fuze_ammo != nullptr && r.det_at_expiry && fuze_ammo->kztype != 0) {
-                if (authoritative) detonate_round(world, r, r.pos, *fuze_ammo);
+                // On every peer: the head tests no authority, so a joiner's own
+                // grenade queues its blast and the drain's walk pushes the
+                // joiner's body (FX-1) [orig: @0x4E9DC6..0x4E9E03].
+                detonate_round(world, r, r.pos, *fuze_ammo);
                 RoundImpact imp;
                 imp.position = r.pos;
                 imp.direction = Vec3{0.0f, 0.0f, 1.0f};
@@ -1721,8 +1742,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             event.p1 = r.pos;
             event.hit = r.pos;
             push_round_debug(*this, event);
-            r.active = false;
-            --active_count;
+            retire_round(r);
             continue;
         }
         ++r.age_ticks;
@@ -1733,6 +1753,10 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         const uint32_t ammo_flags = ammo != nullptr ? ammo->flags : 0;
 
         if (ammo && r.guided_family != GuidedFamily::None) tick_guided(world, r, *ammo, authoritative);
+        // The +452 call, the flares' and rokt's [orig: Projectile_UpdatePhysics @0x4E9D70 (@0x4EA085)].
+        else if ((ammo_flags & kAmmoFlagUseOwnMove) == 0 && (r.motor == ThrowClass::kAirFlare ||
+                         r.motor == ThrowClass::kGroundFlare)) flare_motor_tick(world, *this, r, terrain);
+        else if (r.move_row == PhysicsClass::Rokt) rocket_motor_tick(r);
 
         // `ignore` rounds skip the stock sweep after their class motor.
         if ((ammo_flags & kAmmoFlagIgnore) != 0) continue;
@@ -1745,10 +1769,9 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // @0x4E9E6D; the useownmove leg returns @0x4EA069 before it].
         if ((ammo_flags & kAmmoFlagUseOwnMove) == 0 &&
             (ammo_flags & def::DEF_AMMO_FLAG_NOCOLLIDE) == 0 && !r.indoors_word &&
-            to_fixed(r.pos.z) < -io::kFp16OneInt) {
+            r.pos.z.q16 < -io::kFp16OneInt) {
             if (r.trail_slot >= 0) trails.request_kill(r.trail_slot);
-            r.active = false;
-            --active_count;
+            retire_round(r);
             continue;
         }
 
@@ -1775,7 +1798,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     r.max_age_ticks == INT32_MAX ? INT32_MAX
                                                  : r.max_age_ticks - r.age_ticks;
                 const bool clipped = round_effect_should_release_for_water(
-                    ammo_flags, to_fixed(r.pos.z), world.env.water_z);
+                    ammo_flags, r.pos.z.q16, world.env.water_z);
                 if (clipped) {
                     r.move_effect_live = false;
                 } else if (round_effect_should_spawn(has_move_effect, r.move_effect_live,
@@ -1809,14 +1832,15 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     trails.append(r.trail_slot, trail_anchor(r));
                     trails.request_kill(r.trail_slot);
                 }
-                r.active = false;
-                --active_count;
+                retire_round(r);
             }
             continue;
         }
 
-        const FixedVec3 position_q16{to_fixed(r.pos.x), to_fixed(r.pos.y), to_fixed(r.pos.z)};
-        FixedVec3 velocity_q16{to_fixed(r.vel.x), to_fixed(r.vel.y), to_fixed(r.vel.z)};
+        // The round's words as they stand [orig: Projectile_UpdatePhysics - Position
+        //  @0x4EA22C..0x4EA23D, velocity @0x4EA0DC..0x4EA0E8].
+        const FixedVec3 position_q16 = r.pos.q16();
+        FixedVec3 velocity_q16 = r.vel.q16();
 
         const FixedVec3 incoming_velocity_q16 = velocity_q16;
 
@@ -1826,9 +1850,14 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // the next tick's lifetime head check [orig: the +684/+28 zero
         // @0x4ea142-0x4ea148 with no early return]. Model that as one final
         // ordinary sweep followed by retirement at the end of this iteration.
+        // The Z word is compared with the water word raw, signed, with no dry
+        // gate: a map with no water authored keeps the word 0, so a slow round
+        // below Z 0 stalls there too [orig: Projectile_UpdatePhysics `cmp ecx,
+        // g_EnvWaterHeightFixed; jge` @0x4EA12A..0x4EA137, the speed @0x4EA13E;
+        // Environment_InitDefaults @0x57C010 (@0x57C011..0x57C01E)].
         const bool submerged_stall =
-            ammo != nullptr && world.env.water_z != 0 &&
-            position_q16.z < world.env.water_z && fixed_magnitude(velocity_q16) < 0x4000;
+            ammo != nullptr && position_q16.z < world.env.water_z &&
+            fixed_magnitude(velocity_q16) < 0x4000;
 
         // Exact-zero is a distinct retail leaf: no sweep or position commit, one
         // gravity step even for NoGravity ammo, and no aerodynamic drag. A
@@ -1836,11 +1865,10 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // another sweep.
         if (velocity_q16.x == 0 && velocity_q16.y == 0 && velocity_q16.z == 0) {
             velocity_q16.z -= kProjectileGravityQ16;
-            r.vel = vec_from_fixed(velocity_q16);
+            r.vel.set_q16(velocity_q16); // [orig: `vz -= 167` @0x4EA162]
             if (submerged_stall) {
                 if (r.trail_slot >= 0) trails.request_kill(r.trail_slot);
-                r.active = false;
-                --active_count;
+                retire_round(r);
             }
             continue;
         }
@@ -1859,8 +1887,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         //  @0x4E9E6D (Projectile_ReleaseEffects @0x4E8280)]
         if (end_q16.z < static_cast<int32_t>(0xC1800000u)) {
             if (r.trail_slot >= 0) trails.request_kill(r.trail_slot);
-            r.active = false;
-            --active_count;
+            retire_round(r);
             continue;
         }
 
@@ -1895,16 +1922,15 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             // The tick's tail runs the tracer whiz on every path through the
             // sweep [orig: Projectile_UpdatePhysics @0x4ea98e].
             round_tracer_whiz(world, r, ammo, position_q16, end_q16, incoming_velocity_q16);
-            r.pos = vec_from_fixed(end_q16);
-            if (r.guided_family == GuidedFamily::None && (ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
-            if (ammo != nullptr && r.guided_family == GuidedFamily::None)
+            r.pos.set_q16(end_q16); // [orig: the commit @0x4EAA3F..0x4EAA45]
+            if (!round_class_motor_bound(r) && (ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
+            if (ammo != nullptr && !round_class_motor_bound(r))
                 apply_aerodynamic_drag(velocity_q16, *ammo, end_q16.z, world.env.water_z,
                                        /*surface_normal=*/0);
-            r.vel = vec_from_fixed(velocity_q16);
+            r.vel.set_q16(velocity_q16); // [orig: @0x4EAA5A, the drag @0x4EAA69]
             if (submerged_stall) {
                 if (r.trail_slot >= 0) trails.request_kill(r.trail_slot);
-                r.active = false;
-                --active_count;
+                retire_round(r);
             }
             continue;
         }
@@ -1951,7 +1977,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 impact_ammo_index = dud;
                 dud_replacement = r;
                 dud_replacement.ammo_index = dud;
-                dud_replacement.pos = impact_position;
+                dud_replacement.pos.set_q16(impact_q16);
                 dud_replacement.max_age_ticks =
                     ((dud_ammo->flags & kAmmoFlagNoAge) != 0)
                         ? INT32_MAX
@@ -2004,7 +2030,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         if (entity_impact_handler_leg && handler_has_def) {
             material_energy_survives =
                     subtract_material_energy(velocity_q16, r.mass_q16, material_cost);
-            r.vel = vec_from_fixed(velocity_q16);
+            r.vel.set_q16(velocity_q16);
         }
         // A victim already flagged dead drops the whole impact-effect
         // presentation for two face classes: a person body (itemDef+92 == 3)
@@ -2286,7 +2312,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // AmmoDef_ProcessImpactEffect @0x40a24e..0x40a264 passes the entity,
         // the hit record and the kind (ammo word +0x76) to
         // Impact_SpawnGlassEffectsOrScar @0x5CF1B0 -> Scar_AddEntry @0x5CC830;
-        // the GLASS userpoint leg's residual is recorded in world/impact_scar.h].
+        // the GLASS userpoint leg runs first inside scar_add_entry, world/impact_scar.h].
         if (impact_target != nullptr && !(entity_impact_handler_leg && !handler_has_def)) {
             const AmmoTableEntry *scar_ammo = world.tables.ammo.by_index(impact_ammo_index);
             scar_add_entry(world, collision, *impact_target,
@@ -2305,15 +2331,19 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         //    @0x4E9866 (absorbed), @0x4E986E (kztype), @0x4E9875..0x4E9884
         //    (arm age), push @0x4E98A2; the returns of
         //    Projectile_ProcessDamageOnTarget @0x4E7FCB / @0x4E823D..0x4E8266];
-        //  - person: a kill-zone class, an armed round, the session authority
-        //    and a nonzero kz_damage [orig: Projectile_HandleTerrainImpact_0
-        //    @0x4E9AE2..0x4E9B08, push @0x4E9B26];
+        //  - person: a kill-zone class, an armed round (the unarmed byte @0x4E9969..0x4E99A4,
+        //    read @0x4E9AE9), the session authority and a nonzero kz_damage [orig:
+        //    Projectile_HandleTerrainImpact_0 @0x4E98F0 - @0x4E9AE2..0x4E9B08, push @0x4E9B26];
         //  - water: the lifetime is halved first, then only an ODD class
         //    passes the compiled `!prearm & kztype` bit test, and the halved
         //    age must strictly pass the arm age [orig:
         //    Projectile_SpawnImpactEffect @0x4E9C40..0x4E9C62, push @0x4E9C81].
+        // Only the person handler tests the session authority; the terrain,
+        // item and water producers push on every peer that flies the round
+        // (FX-1) [orig: @0x4E928C..0x4E92C0, @0x4E9866..0x4E98A2,
+        //  @0x4E9C40..0x4E9C81: no authority test].
         bool kill_zone_pushed = false;
-        if (authoritative && ammo != nullptr) {
+        if (ammo != nullptr) {
             const bool armed = r.age_ticks >= ammo->arm_age_ticks;
             bool produce = false;
             switch (collision.hit_class) {
@@ -2326,7 +2356,8 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     break;
                 }
                 case ProjectileHitClass::Person:
-                    produce = ammo->kztype != 0 && armed && ammo->kz_damage != 0;
+                    produce = authoritative && ammo->kztype != 0 && armed &&
+                              ammo->kz_damage != 0;
                     break;
                 case ProjectileHitClass::Water: {
                     const int32_t remaining = r.max_age_ticks - r.age_ticks;
@@ -2338,7 +2369,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 default:
                     break;
             }
-            if (produce) detonate_round(world, r, impact_position, *ammo);
+            if (produce) detonate_round(world, r, EntityPosition::of_q16(impact_q16), *ammo);
             kill_zone_pushed = produce;
         }
 
@@ -2398,14 +2429,14 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 beyond(position_q16.y, incoming_velocity_q16.y),
                 beyond(position_q16.z, incoming_velocity_q16.z)};
             round_tracer_whiz(world, r, ammo, position_q16, next_position, incoming_velocity_q16);
-            r.pos = vec_from_fixed(next_position);
-            if (r.guided_family == GuidedFamily::None) {
+            r.pos.set_q16(next_position); // [orig: the commit @0x4EAA3F..0x4EAA45]
+            if (!round_class_motor_bound(r)) {
                 if ((ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
                 if (ammo != nullptr)
                     apply_aerodynamic_drag(velocity_q16, *ammo, next_position.z,
                             world.env.water_z, /*surface_normal=*/0);
             }
-            r.vel = vec_from_fixed(velocity_q16);
+            r.vel.set_q16(velocity_q16);
             continue;
         }
 
@@ -2436,14 +2467,14 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 beyond(position_q16.y, incoming_velocity_q16.y),
                 beyond(position_q16.z, incoming_velocity_q16.z)};
             round_tracer_whiz(world, r, ammo, position_q16, next_position, incoming_velocity_q16);
-            r.pos = vec_from_fixed(next_position);
-            if (r.guided_family == GuidedFamily::None) {
+            r.pos.set_q16(next_position); // [orig: the commit @0x4EAA3F..0x4EAA45]
+            if (!round_class_motor_bound(r)) {
                 if ((ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
                 if (ammo != nullptr)
                     apply_aerodynamic_drag(velocity_q16, *ammo, next_position.z,
                             world.env.water_z, /*surface_normal=*/0);
             }
-            r.vel = vec_from_fixed(velocity_q16);
+            r.vel.set_q16(velocity_q16);
             continue;
         }
 
@@ -2456,11 +2487,10 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         if (has_dud_replacement) {
             r = dud_replacement;
         } else {
-            r.active = false;
-            --active_count;
+            retire_round(r);
         }
     }
-
+    target_ring.count_down(); // [orig: Weapon_UpdateAllProjectiles @0x4EC020 (@0x4EC0A1..0x4EC0CF)]
     trails.tick();
 }
 

@@ -84,6 +84,15 @@ public:
 	virtual bool resolve_seat_bone(World &, const Entity & /*carrier*/, int /*bone_index*/) {
 		return true;
 	}
+	// The subobject word (+0x18) of the carrier model's userpoint record by 1-based index,
+	// the part the point rides. False without the carrier's model data or for an index off
+	// the table, which leaves the ewep publication off.
+	// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the record @0x440F3A..0x440F40,
+	//  `cmp dword ptr [ebx+18h], 0` @0x440F50]
+	virtual bool userpoint_subobject(World &, const Entity & /*carrier*/,
+			int /*userpoint_index*/, int32_t & /*out*/) {
+		return false;
+	}
 
 	// --- muzzles / userpoints ------------------------------------------------
 	// A person's launch userpoint on its posed skeleton (16.16 world).

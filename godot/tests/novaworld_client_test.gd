@@ -30,6 +30,16 @@ func test_defaults_and_property_roundtrip() -> void:
 	client.free()
 
 
+# A session's player name is its CHAR cookie, else the profile's callsign: a session whose
+# browser holds no CHAR (an unstarted one) names the callsign it is given (the engine's
+# novaworld_character_name is pinned by the http_login ctest; D-NET-NEW-L9-43).
+func test_session_player_name_without_a_character_is_the_callsign() -> void:
+	var client := NovaWorldClient.new()
+	assert_eq(client.get_session_player_name("Walker"), "Walker")
+	assert_eq(client.get_session_player_name(""), "")
+	client.free()
+
+
 func test_browser_and_join_are_rejected_before_authentication() -> void:
 	var client := NovaWorldClient.new()
 	add_child_autofree(client)
@@ -71,6 +81,56 @@ func test_start_probes_gate_and_stop_is_idempotent() -> void:
 	assert_eq(client.get_state(), NovaWorldClient.STATE_GATE_PROBING,
 		"start() works again after a stop()")
 	client.stop()
+
+
+# The session socket opens first and stands as the process's transport socket; the gate
+# worker's socket, bound after it, is the gate manager's own and takes nothing from it
+# (engine: inmatch::gate_port_quad carries the witness).
+func test_the_session_socket_stays_the_process_transport_past_the_gate_bind() -> void:
+	var client := NovaWorldClient.new()
+	add_child_autofree(client)
+	client.host = "127.0.0.1"
+	client.gate_port = 1
+	client.start()
+	var pump: UdpPump = client.get_game_pump()
+	assert_not_null(pump, "start() made the session socket")
+	if pump != null:
+		assert_true(pump.is_open(), "the session socket bound")
+		assert_true(pump.is_process_transport(),
+			"the session socket, not the gate's, is the process's transport socket")
+	client.stop()
+
+
+# A session socket that binds nothing goes on, as retail's failed mode-4 open does: the
+# gate's start runs as ever over a closed session socket, whose datagrams go nowhere
+# (engine: inmatch::write_novaworld_socket_open_lines carries the witness).
+func test_a_failed_session_socket_open_goes_on_to_the_gate_probe() -> void:
+	var blocker := UdpPump.new()
+	assert_eq(blocker.bind_listen(0), OK)
+	var occupied_port := blocker.local_port()
+	assert_gt(occupied_port, 0)
+	var block := GameConfigBlock.new()
+	block.set_word("mpnovaworldportmin", occupied_port)
+	block.set_word("mpnovaworldportmax", occupied_port)
+	block.set_word("mpnovaworldportdelta", 1)
+	block.set_word("mpnovaworldportrandom", 0)
+	var client := NovaWorldClient.new()
+	add_child_autofree(client)
+	client.set_game_config(block)
+	client.host = "127.0.0.1"
+	client.gate_port = 1
+	client.start()
+	assert_eq(client.get_state(), NovaWorldClient.STATE_GATE_PROBING,
+		"the failed session socket open goes on to the gate's start")
+	var pump: UdpPump = client.get_game_pump()
+	assert_not_null(pump)
+	if pump != null:
+		assert_false(pump.is_open(), "the session socket stays closed")
+	assert_true(blocker.is_process_transport(),
+		"neither the closed session socket nor the gate's took the process transport")
+	client.stop()
+	assert_eq(client.get_state(), NovaWorldClient.STATE_DISCONNECTED)
+	blocker.close()
 
 
 func test_late_join_http_completion_cannot_resurrect_a_stopped_or_restarted_client() -> void:
@@ -164,7 +224,9 @@ func test_every_http_request_has_a_finite_timeout() -> void:
 	for child in client.get_children():
 		if child is HTTPRequest:
 			requests.append(child as HTTPRequest)
-	assert_eq(requests.size(), 4, "browser, login, join, and host each own one HTTP request")
+	# The menu entry's startup-URL leg (open_web_lobby, D-NET-NEW-L9-37) owns the fifth.
+	assert_eq(requests.size(), 5,
+			"browser, login, entry, join, and host each own one HTTP request")
 	for request in requests:
 		assert_gt(request.timeout, 0.0, "no Matchmaking HTTP leg can wait forever")
 	client.stop()

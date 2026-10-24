@@ -47,9 +47,10 @@ std::vector<Endpoint> resolve_ipv4_all(const std::string &host);
 // This machine's host name (gethostname); empty when it cannot be read.
 std::string local_host_name();
 
-// Open a UDP socket and bind it to `port` on all interfaces. Pass port=0
-// for an ephemeral port (the bound port is reported back in `out_bound`).
-Socket udp_bind(uint16_t port, uint16_t *out_bound = nullptr);
+// Open a UDP socket and bind it to `port` on `address`, an in_addr word as the platform stores
+// it (0, the default, every interface). Pass port=0 for an ephemeral port (the bound port is
+// reported back in `out_bound`).
+Socket udp_bind(uint16_t port, uint16_t *out_bound = nullptr, uint32_t address = 0);
 
 // Send a datagram.
 int udp_send_to(Socket &s, const Endpoint &to, const uint8_t *data, size_t len);

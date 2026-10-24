@@ -34,7 +34,13 @@
 // (wh - 0.1) [orig: Render_MainScene @ 0x5c1561..0x5c1578 plane wh - 0.1,
 // armed while wh != 0; Terrain_RenderSectorBatch @ 0x6092c6..0x60935b]).
 // The shaders port it as a discard in the mirror pass (the one camera whose
-// mask omits the water layer, render/visual_layers.h). The reflected pass
+// mask omits the water layer, render/visual_layers.h). Every mirror render
+// arms it, the weapon Inset's included, whatever the main scene's
+// g_WaterActive: the reflected pass sets g_WaterMirrorActive on entry [orig:
+// Water_RenderReflectedWorldScene @ 0x5c8510, the store @0x5c8540] and the
+// terrain's plane rides each terrain pass of a render with a height [orig:
+// Render_MainScene @ 0x5c1240, the branch @0x5c155f, the arm @0x5c1567], which
+// is every render (the height branch @0x5c1268). The reflected pass
 // fogs with the dry weather block whatever side the eye is on
 // (EnvironmentState::build_water_mirror_fog) and never swaps the terrain's
 // stage 3 to the water noise (the mirror context's below-water word is 0
@@ -43,6 +49,7 @@
 
 #include <formats/env/env.h>
 #include <runtime/renderer/d3d9_raster.h>
+#include <runtime/renderer/object_lod.h> // object_lod_focal_pixels
 
 #include <cstdint>
 
@@ -78,6 +85,24 @@ namespace opennova::env {
 // this square; a shell whose camera couples its two fovs through the
 // target's own ratio must supply that projection explicitly.
 inline constexpr int kReflectionRttSize = 512;
+
+// A water mirror's RLOD walk selects each listed entity's level with the
+// projected radius its collect stored for it, not one of its own: the collect
+// projects over the live eye with the viewport at the square target, so the
+// focal is the target side's over the scene view's horizontal half-angle,
+// while its frame scale is the screen width's (g_OverlayCtx).
+// [orig: Terrain_RenderSectorEntities hands Render_SectorEntity the list entry's
+//  stored radius (@0x5C7C99 / @0x5C7D13), which the sub-pixel floor
+//  (@0x5C42D8) and Model_SelectRlodLevel (@0x5C42EB) read; the collectors store
+//  g_MainViewportProjectedRadiusQ16 per entry (@0x5C71C5..0x5C71D8, @0x5C903B..0x5C904E);
+//  Render_MainScene sets the viewport to the target (Render_SetViewport
+//  @0x5C1614) ahead of the collect's Viewport_BuildProjectionMatrix @0x5C16E8 over
+//  the live block; Terrain_CollectVisibleEntitiesForReflection @0x5C90A0 writes
+//  g_RlodFrameScale over g_OverlayCtx @0x5C90E5..0x5C90F1]
+inline int32_t mirror_collect_focal_pixels(double tan_half_horizontal) {
+	return renderer::object_lod_focal_pixels(static_cast<float>(kReflectionRttSize),
+			tan_half_horizontal);
+}
 
 // The witnessed reflected-scene dim (env #37's mechanism): after the mirrored
 // sky/terrain/world render into the RTT, detail >= 2 multiplies the WHOLE
@@ -245,6 +270,54 @@ inline WaterMirrorView build_water_mirror_view(const MirrorSourceView &source,
 	view.aspect = source.aspect;
 	view.raster_shift = renderer::d3d9_raster_ndc_shift(kReflectionRttSize, kReflectionRttSize);
 	return view;
+}
+
+// The weapon Inset pass renders a mirror of its own. Its scene re-runs the terrain routine with
+// no world position [orig: Render_WeaponInsetScene @ 0x5c9740 -> Render_TerrainScene(pass, NULL)
+// (the call @0x5c99b7) -> Water_ReflectionPrerender (the call @0x610ce0, under the g_WaterActive
+// the Inset's own view set: the test @0x610cd2) -> Render_MainScene (the call @0x5c27c6)],
+// which mirrors the view block g_ViewPos / g_ViewRot as the main frame's prerender does. That
+// block holds the Inset's own compose (Camera_ComputeThirdPersonView, the call @0x5c9841)
+// without the Inset's slot offsets: the pass copies it into its local camera
+// (@0x5c9857..0x5c9888) and offsets only that copy (@0x5c98fc / @0x5c9903). With no world
+// position the mirror projects at aspect 1.0 (@0x5c125c) through the fov the Inset's viewport
+// build left (dword_A7839C, read @0x5c1336; the Inset built it @0x5c999b from its
+// elevation-derived fov @0x5c98ea), which Viewport_BuildProjectionMatrix @ 0x410fb0 spans
+// across the rect's width (@0x410fc6..0x410fcb). It renders into the one
+// g_WaterReflectionTexture (GTexRT_SelectThunk @0x5c15d5), after the main scene drew its water
+// over the main frame's image, so the Inset's water and every later reader of the target sample
+// the Inset's image (bloom_water_mirror_image).
+inline constexpr float kInsetMirrorAspect = 1.0f;
+
+// The Inset mirror's source from its view block: the block's pose and the Inset's horizontal
+// fov in `view_block`, at the Inset's aspect.
+inline MirrorSourceView inset_mirror_source(MirrorSourceView view_block) {
+	view_block.projection = MirrorProjection::kPerspective;
+	view_block.keep_aspect_height = false;
+	view_block.aspect = kInsetMirrorAspect;
+	view_block.frustum_offset_x = 0.0f;
+	view_block.frustum_offset_y = 0.0f;
+	view_block.v_offset = 0.0f;
+	return view_block;
+}
+
+// The image a frame's bloom redraws its water over: the last mirror the frame rendered. The
+// bloom runs after the Inset pass [orig: Render_ProcessMainSceneFrame: FrameFX_ApplyScreenEffect
+// type 2 (the call @0x5caa97) after Render_WeaponInsetScene (the call @0x5ca949)], and its glow
+// source's water [orig: FrameFX_BloomKernel @ 0x5841d0 -> FrameFX_RenderGlowSource (the call
+// @0x584234) -> Render_WaterSurface(0, 1) (the call @0x582a5d)] marches the main view, rebuilt
+// after the Inset (@0x5ca958), through g_WaterShaderBlendNV (loaded @0x5c3452, applied by the
+// call @0x5c3478), which samples g_WaterReflectionTexture (Water_InitSurfaceShaders @ 0x5c19b0:
+// the build's call @0x5c1c37, stored @0x5c1c4d). So on a
+// frame whose Inset pass rendered its mirror the main view's bloom water samples the Inset's
+// image, else the main frame's.
+enum class WaterMirrorImage : uint8_t {
+	kMain,
+	kInset,
+};
+
+constexpr WaterMirrorImage bloom_water_mirror_image(bool inset_mirror_rendered) {
+	return inset_mirror_rendered ? WaterMirrorImage::kInset : WaterMirrorImage::kMain;
 }
 
 } // namespace opennova::env

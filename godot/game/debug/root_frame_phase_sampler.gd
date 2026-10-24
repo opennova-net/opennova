@@ -13,7 +13,11 @@ extends Node
 ## callbacks queued (every call_deferred and queue_redraw -> _draw of the
 ## frame) runs before the marker, and the SceneTree tail (draws the flush
 ## itself queued, transform notifications, timers/tweens, node frees,
-## accessibility, the RenderingServer sync) after it.
+## accessibility, the RenderingServer sync) after it. The queued part splits
+## once more by its queuer: the shell drops a marker at each boundary of its
+## gameplay legs (queue_flush_leg), and each marker fires right after the work
+## queued ahead of it, so the time since the previous marker is what the leg
+## between them queued; the late boundary's marker closes the rest.
 
 
 class LateBoundary:
@@ -40,6 +44,8 @@ var _process_end_usec := 0
 var _pre_draw_usec := 0
 var _post_draw_usec := 0
 var _flush_marker_usec := 0
+# The last fired leg marker of this flush (queue_flush_leg); 0 before the first.
+var _flush_leg_usec := 0
 var _last_node_count := -1
 var _physics_start_usec := 0
 var _pending_physics_usec := 0
@@ -207,7 +213,31 @@ func _mark_flush_queue() -> void:
 	var now := Time.get_ticks_usec()
 	if _process_end_usec > 0:
 		_board.add(FrameStats.FRAME_FLUSH_QUEUED, now - _process_end_usec)
+	# What was queued after the shell's last leg marker: its round flow, the later nodes.
+	if _flush_leg_usec > 0:
+		_board.add(FrameStats.FRAME_FLUSH_REST, now - _flush_leg_usec)
+	_flush_leg_usec = 0
 	_flush_marker_usec = now
+
+
+## Queue the marker that closes one of the shell's gameplay legs: it fires in
+## the flush right after the work queued ahead of it and lands the time since
+## the previous leg marker (the flush's start for the first) on `slot`, the
+## leg's FRAME_FLUSH_* slot. The shell calls it at each leg's end.
+func queue_flush_leg(slot: int) -> void:
+	if _board == null or not _board.is_capture_active():
+		return
+	_fire_flush_leg.bind(slot).call_deferred()
+
+
+func _fire_flush_leg(slot: int) -> void:
+	if _board == null or not _board.is_capture_active():
+		return
+	var now := Time.get_ticks_usec()
+	var since := _flush_leg_usec if _flush_leg_usec > 0 else _process_end_usec
+	if since > 0:
+		_board.add(slot, now - since)
+	_flush_leg_usec = now
 
 
 # RenderingServer.frame_pre_draw: the deferred flush (every call_deferred and
@@ -222,6 +252,7 @@ func _on_frame_pre_draw() -> void:
 	if _flush_marker_usec > 0:
 		_board.add(FrameStats.FRAME_FLUSH_TAIL, now - _flush_marker_usec)
 	_flush_marker_usec = 0
+	_flush_leg_usec = 0
 	_process_end_usec = 0
 	_pre_draw_usec = now
 
@@ -259,6 +290,7 @@ func _set_capture_active(active: bool) -> void:
 	_pre_draw_usec = 0
 	_post_draw_usec = 0
 	_flush_marker_usec = 0
+	_flush_leg_usec = 0
 	_last_node_count = -1
 	_physics_start_usec = 0
 	_pending_physics_usec = 0

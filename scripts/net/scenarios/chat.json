@@ -1,0 +1,25 @@
+{
+  "schema": "opennova.scenario.v1",
+  "name": "chat",
+  "mission": "TDH_I3A.bms",
+  "game_type": 65536,
+  "actor": "joiner",
+  "steps": [
+    {"tick": 0, "press": 1},
+    {"tick": 20, "char": "h"},
+    {"tick": 22, "char": "e"},
+    {"tick": 24, "char": "l"},
+    {"tick": 26, "char": "l"},
+    {"tick": 28, "char": "o"},
+    {"tick": 32, "char": "\r"},
+    {"tick": 150, "end": true}
+  ],
+  "settle_seconds": 5,
+  "expect": {
+    "sequence": [
+      {"dir": "C", "kind": "console_line", "text_hex": "68656c6c6f"},
+      {"dir": "S", "kind": "console_echo", "text_hex": "68656c6c6f"}
+    ],
+    "count_kinds": ["console_line", "console_echo"]
+  }
+}

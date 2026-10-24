@@ -104,6 +104,21 @@ WaterFrameInputs build_water_frame_inputs(const EnvironmentState *env,
 // Render_DrawViewportColorQuad @ 0x5c38e0]
 uint8_t underwater_murk_overlay_alpha_byte(float murk);
 
+// The no-water sentinel belongs to the water's own draws alone: a zero
+// g_EnvWaterHeightFixed skips the surface [orig: Render_WaterSurface
+// @ 0x5c32e0..0x5c32e7], the mirror render and with it the mirror's clip arm
+// (the main scene's and the weapon Inset's prerender alike) [orig:
+// Render_MainScene @ 0x5c125e..0x5c1268, the return @ 0x5c19a5] and the glint
+// [orig: Terrain_RenderWorldScene @ 0x5c96b5..0x5c96be, ahead of
+// Environment_UpdateSunGlare's call @ 0x5c96c0]. The waterline itself stands
+// at zero: the transparent split is stored from the height with no test
+// (renderer/render_order.h transparent_queue_for), and every eye-side test
+// compares the eye against the height the same way
+// (EnvironmentState::classify_render_eye).
+constexpr bool water_draws_at_height(float water_height) {
+	return water_height != 0.0f;
+}
+
 // The camera-side gate of Render_WaterSurface's two calls
 // [orig: Render_WaterSurface @ 0x5c32ed..0x5c330a]: the view-0 (above)
 // call draws only while the camera is strictly above the plane
@@ -118,5 +133,22 @@ struct WaterSurfaceSides {
 };
 
 WaterSurfaceSides water_surface_sides(float eye_y, float water_height);
+
+// The water pass's latch, the Blink water word g_WaterActive reads
+// [orig: g_WaterPassBlinkLatch @ 0x31BC910]. A
+// scene's two water passes run only past its water letter (Terrain_RenderWorldScene @ 0x5c93a0:
+// the label @0x5c93b8..0x5c93cd ahead of the Terrain_RenderWaterPass calls @0x5c95dc /
+// @0x5c95ea), and each stores the g_BlinkWaterVisible that scene's collect left
+// (Terrain_RenderWaterPass @ 0x610640: the store @0x610666, or @0x610671 with no water active).
+// Terrain_SetupViewAndLighting @ 0x60fe40 then forces g_WaterActive on it (the test @0x60ff20,
+// the store @0x60ff33). It is one word for every scene of a frame: the main scene's
+// g_WaterActive (its Render_TerrainScene, the call @0x5ca504) reads what the last scene's water
+// pass left; the weapon Inset pass's own (its Render_TerrainScene, the call @0x5c99b7) reads
+// the main collect's of the same frame (Terrain_RenderWorldScene, the call @0x5ca8ec); and the
+// Inset's collect (the call @0x5c9de9) leaves its own for the next frame's main scene. A scene
+// whose letter skips its water passes leaves the latch as it was.
+constexpr bool water_pass_latch(bool latch, bool water_pass_runs, bool blink_water_visible) {
+	return water_pass_runs ? blink_water_visible : latch;
+}
 
 } // namespace opennova::env

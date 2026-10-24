@@ -24,7 +24,7 @@ extends GutTest
 # RESOLVABLE non-zero type id so they survive the present's `type_id != 0` filter — with the old
 # item_id 0 they were invisible by construction, which is why the joiner only ever saw the host
 # player. The witnessed initial-state burst streams EVERY entity pool to the joiner at world-load
-# [orig: Server_SendInitialGameStateToPlayer @0x51bba0]: pool-2 statics (0x10), pool-1 (0x0D, omitted
+# [orig: Server_SendPlayerSlotStateFrame @0x51bba0]: pool-2 statics (0x10), pool-1 (0x0D, omitted
 # by our host — D-NET-97), pool-0 dynamics (0x0C), pool-3 markers (0x20). Terrain/environment/tile
 # resources are resolved from the exact 0x0B header and optional 0x45 overlay; every allocated
 # entity-pool row is streamed rather than reconstructed from a local BMS body.
@@ -66,6 +66,9 @@ const MountLook := preload("res://tests/support/mount_look.gd")
 # the sitex rows retired: the corpus authors no zero-offset control seat, and
 # the same-frame carrier-follow pin below compares L against the carrier root.
 const NATIVE_MODEL_DIR := "res://.godot/native_3dp_coop_two_sim"
+# The minted Avatars.def: a fresh profile over it packs side A's first good
+# combo as 0x0200 (tests/fixtures/minimal_avatars_gen.cpp).
+const AVATARS_FIXTURE := "res://../fixtures/avatars/synth_avatars.def"
 
 
 func before_all() -> void:
@@ -84,6 +87,15 @@ func before_all() -> void:
 		carrier = NativeModelFixture.with_renamed_user_point(carrier, site, "x" + site.substr(1))
 	assert_true(NativeModelFixture.write_native_model(NATIVE_MODEL_DIR, "carrierzero.3di", carrier),
 			"composed the zero-offset control-seat carrier fixture")
+
+
+# The host's Avatars.def: the player add validates each side's packed character
+# id against its combos and re-resolves one it lacks (D-NET-137).
+func _host_avatars() -> AvatarDatabase:
+	var db := AvatarDatabase.new()
+	assert_eq(db.load(ProjectSettings.globalize_path(AVATARS_FIXTURE)), OK,
+			"the Avatars.def fixture loads")
+	return db
 
 
 func _native_asset_root() -> ResourceRoot:
@@ -139,10 +151,12 @@ func _attachment_row(anchor_name: String, ambiguous: bool) -> String:
 # bound (D-NET-422), and the table's own 105004 row follows and loses. The row
 # alone would not do: the sweep stamps every body its table lacks Unknown, so a
 # player (row 105305) no longer falls back to Player (entity_class_of) and the
-# joiner cannot size its record.
+# joiner cannot size its record. The "Null" row leads, as in the shipped table,
+# so the carrier's ItemTypeIndex is not 0 and the 0x0D streams it (D-NET-487).
 func _attachment_traits_db(anchor_name: String) -> ItemDatabase:
 	return ItemDbFixture.load_with(self, "coop_attachment_traits.def",
-			_attachment_row(anchor_name, false), ItemDbFixture.fixture_text(self))
+			ItemDbFixture.NULL_ROW + _attachment_row(anchor_name, false),
+			ItemDbFixture.fixture_text(self))
 
 
 func _combat_mission() -> MissionData:
@@ -188,8 +202,9 @@ func _vehicle_peer_mission() -> MissionData:
 	# decoded pool-1 wire row; their world poses must remain the same.
 	assert_not_null(md.add_entity(MissionData.KIND_ITEM, 101291,
 			Vector3(40, 30, 0), Vector3(10, 0, 20)))
-	# A synthetic cbot with non-zero authored attitude catches first-arm
-	# prediction accidentally replacing the retained spawn Euler with zero. It
+	# A synthetic cbot with a non-zero authored attitude; the authority's mission
+	# start settle fits it to the water plane, and the joiner's first arm must
+	# retain the attitude the authority streams, never its own zero. It
 	# sits beside the joiner start so the same real-UDP case can also exercise a
 	# local control-seat body following the final predicted carrier pose.
 	assert_not_null(md.add_entity(MissionData.KIND_ITEM, 105008,
@@ -226,7 +241,11 @@ func _net_watercraft_item_db() -> ItemDatabase:
 	assert_true(base_items.contains("  graphic Dbuggy1\n"))
 	base_items = base_items.replace(
 			"  graphic Dbuggy1\n", "  graphic carrierzero\n")
-	return ItemDbFixture.load_with(self, "net_watercraft_items.def", base_items,
+	# The "Null" row leads, as in the shipped table: the committed table's first
+	# row (the Dune Buggy) would otherwise take ItemTypeIndex 0, which the 0x0D
+	# passes over (D-NET-487).
+	return ItemDbFixture.load_with(self, "net_watercraft_items.def",
+			ItemDbFixture.NULL_ROW + base_items,
 			"""begin "Net Watercraft Fixture"
   id 105008
   type vehicle
@@ -279,16 +298,6 @@ func _fixture_m4() -> WeaponDef:
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var index := weapons.find_weapon("WPN_M4AUTO")
-	assert_gte(index, 0)
-	return weapons.get_weapon(index) if index >= 0 else null
-
-
-func _fixture_m9() -> WeaponDef:
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(DefFixture.directory()), OK)
-	var weapons := WeaponDatabase.new()
-	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
-	var index := weapons.find_weapon("WPN_M9Beretta")
 	assert_gte(index, 0)
 	return weapons.get_weapon(index) if index >= 0 else null
 
@@ -445,7 +454,11 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 	host_options.expansion = "jox01"
 	host_options.game_type = 0x30020
 	host_options.max_players = 4
-	host_options.class_allow_mask = 0x0155
+	# The host dialog's class words, not a mask: ALWAYS (1) for classes 0, 2, 4, 6 and 8,
+	# NEVER (0) for the rest; the session's first mission builds the S2C 0x76 mask 0x0155.
+	# [orig: HostDialog_OnClassAvailabilityListClick @0x55781A..0x557839;
+	#  Game_ApplySessionSettingsToGlobals @0x551882..0x551996]
+	host_options.class_availability = PackedInt32Array([1, 0, 1, 0, 1, 0, 1, 0, 1, 0])
 	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
@@ -453,11 +466,9 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "PreloadJoiner"))
-	joiner.set_join_world_ready(false)
 
 	# Retail authenticates before constructing the wire-header world. Drive only
-	# that connection until post-auth 0x7B supplies map_file; no World exists yet and
-	# the spawn/load drive remains held.
+	# that connection until post-auth 0x7B supplies map_file; no World exists yet.
 	var learned := false
 	for _i in range(600):
 		joiner.poll_join_preload()
@@ -481,8 +492,8 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 	assert_eq(host.get_host_peer_count(), 1, "one authenticated connection exists before load")
 
 	# This low-level simulation fixture uses a complete mission object to construct
-	# its World and release the same ClientRuntime/socket's world-ready gate; the
-	# production GameWorld path supplies an exact header-only document instead.
+	# its World over the same ClientRuntime/socket; the production GameWorld path
+	# supplies an exact header-only document instead, after the S2C 0x1A.
 	# A reconnect would create a second host node or lose the live session.
 	assert_true(joiner.load_from_mission_data(mission))
 	var reached := false
@@ -593,7 +604,14 @@ func test_joiner_folds_the_phase2_environment_into_its_weather_home() -> void:
 	assert_true(host.command_fog_distance(291))
 	assert_true(host.command_sky_speed(170))
 	assert_true(host.command_snow(0, 1))
-	assert_true(host.command_quake(60))
+	# The quake outlasts the loop's 1200 host ticks (WacCmd_Quake stores 6 x seconds: 3600),
+	# so its countdown is live whenever the join lands. The join over real UDP runs on the two
+	# processes' wall clocks (the joiner's GetTickCount legs, the host's protocol timers on its
+	# process clock, D-NET-NEW-L8-27..37) while this loop steps a host tick every ~2 ms, so the
+	# step the first record lands on follows the machine's speed; a 60 s quake (360 ticks)
+	# ran out under it on the Linux runner (push 196). The wire carries the count capped at
+	# 255 (retail's NetPacket_WritePlayerState, the cap at 0x4FFB0B).
+	assert_true(host.command_quake(600))
 
 	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
@@ -667,15 +685,42 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	assert_true(reached, "joiner reached in-match (handshake -> spawn gate -> 0x0C name-match)")
 	assert_eq(host.get_host_peer_count(), before_peers + 1, "host registered exactly one joiner peer")
 	assert_true(joiner.has_local_player(), "joiner spawned its local player L at the H-learned pose")
-	# Retail's initial join sends no C2S 0x0E: the S2C 0x0F completes
-	# admission and the joiner deploys directly (witnessed on the wire
-	# against a live retail co-op host). The 0x0E spawn pick belongs to the DEATH
-	# flow — drive it there through the authority's real death transaction.
+	# Retail's initial join forces no C2S 0x0E: the S2C 0x0F completes
+	# admission (witnessed on the wire against a live retail co-op host). The
+	# only 0x0E before the death flow below is the player's own overlay pick.
 	assert_false(joiner.is_join_deploy_pick_pending(),
 			"the initial join deploys with no forced C2S 0x0E")
 	var health_before_death := joiner.get_local_player_health()
 	assert_gt(health_before_death, 0,
 			"the initial authoritative spawn latch keeps local L alive")
+	# The fixture's team-owned spawn zone holds the joining slot at the deploy
+	# overlay (the join sets the slot's undeployed bit whenever the mission has
+	# spawn zones), and every 0x0A re-hides a held slot's body. A hidden body's
+	# tick returns ahead of its death edge, on the host and on the joiner alike,
+	# so a held joiner the authority kills reads alive until its hold releases.
+	# Deploy out of the join hold first (the overlay's default pick): the death
+	# transaction then lands on an unhidden body, the host's death edge raises
+	# its dead bit and the dead self record latches the joiner's.
+	# [orig: Server_OnPlayerJoin @0x51A680 - SpawnZoneList_GetCount @0x51A6E9,
+	#  the undeployed bit `or byte [esi+15F38h], 10h` @0x51A6F2;
+	#  NetPacket_WritePlayerState @0x4FF6B0 - the held slot's hide
+	#  @0x4FF7AA..0x4FF7B8; Entity_UpdateInfantryPlayerBody @0x4B40E0 - the
+	#  hidden return @0x4B411B..0x4B4127 ahead of the death edge
+	#  @0x4B4BF1..0x4B4C02]
+	assert_true(joiner.is_deploy_overlay_active(),
+			"the spawn-zone mission holds the joiner at the deploy overlay")
+	var join_hold_released := false
+	for i in range(1200):
+		if i % 64 == 0:
+			joiner.send_deployment_pick(0)
+		host.step()
+		joiner.step()
+		if not joiner.is_deploy_overlay_active():
+			join_hold_released = true
+			break
+		OS.delay_msec(2)
+	assert_true(join_hold_released,
+			"the overlay's default pick releases the join hold")
 	assert_true(_kill_joiner_from_host(host, joiner),
 			"the authority's death transaction killed the joiner")
 	var death_pick_pending := false
@@ -867,7 +912,7 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 			"the real joiner name-match path binds local L's body ADM")
 
 	# JOINER sees the host's full ENTITY world: the witnessed initial-state burst streams EVERY entity
-	# pool to a joining player [orig: Server_SendInitialGameStateToPlayer @0x51bba0, sync-state 4] —
+	# pool to a joining player [orig: Server_SendPlayerSlotStateFrame @0x51bba0, sync-state 4] —
 	# phase 1 pool-2 statics under S2C 0x10, phase 2 pool-1 under 0x0D, phase 3 pool-0 dynamics (AI +
 	# players) under 0x0C, phase 4 pool-3 markers under 0x20 (each bounded by Pool_GetUsedCount(idx)).
 	# So the joiner's present carries the host AI organics AND the pool-2 building. What is not an
@@ -949,10 +994,19 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 		host.step()
 		joiner.step()
 		OS.delay_msec(2)
+	# That zero is a fresh death edge on the authority's player body, so its death
+	# transaction arms the pick hold again (three seconds this soon after the zone
+	# deployment), during which a pick is silently dropped: settle past it as the
+	# first leg does. [orig: GameEvent_PlayerDeath @0x516ec4..0x516eeb; the +360
+	#  refusal @0x519cf2]
+	for _i in range(260):
+		host.step()
+		joiner.step()
 
 	# The player's 0x0E pick is released by an ACK-qualified 0x5A. That edge
-	# reuses L (rather than spawning a second local entity), but revival still
-	# waits for the following fresh positive recipient-health tail.
+	# reuses L (rather than spawning a second local entity); the release's alive
+	# self record revives it in its receive (the record's respawn arm,
+	# D-NET-NEW-L2-55).
 	assert_true(joiner.is_join_deploy_pick_pending(),
 			"death returned the established joiner to its deployment picker")
 	assert_true(joiner.send_deployment_pick(0),
@@ -974,7 +1028,7 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 			break
 		OS.delay_msec(2)
 	assert_true(revived,
-			"the post-pick release plus a later positive tail revives existing local L")
+			"the post-pick release's alive self record revives existing local L")
 	assert_gt(revived_card.get_health(), 0)
 	assert_eq(revived_card.get_ai_health(), revived_card.get_health(),
 			"the registry and infantry motor health revive atomically")
@@ -1008,9 +1062,9 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 
 func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -> void:
 	# A child hanging from an articulated EWEAP userpoint has no live compact of
-	# its own. The remote client has enough stock wire state to recover this one
-	# family: the parent's pose plus its decoded gunner's yaw/pitch. Generic
-	# PLAYPARTANIM is intentionally not part of this contract.
+	# its own: the remote client's world runs its ewep class update, composing
+	# it from the carrier's posed model, whose EWEAP words follow the decoded
+	# gunner's yaw/pitch (D-NET-690).
 	var model := ObjectData.new()
 	assert_eq(model.open_file(ProjectSettings.globalize_path(
 			"res://../fixtures/threedi/synth/mount.3di")), OK)
@@ -1057,15 +1111,14 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	assert_eq(weapons.load(DefFixture.directory().path_join("weapon.def")), OK)
 	var personal: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
-	var mounted: WeaponDef = weapons.get_weapon(
-			weapons.find_weapon("WPN_EMPLCD50NA"))
 	host.set_local_player_weapon(personal, {})
 	host.drain_local_player_weapon_events()
 	assert_true(host.local_player_toggle_mount())
 	host.step()
 	for raw in host.drain_local_player_weapon_events():
 		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_EMPLCD50NA":
-			host.set_local_player_weapon(mounted, {}, true)
+			# The commit mounted the gun's def on the sim; the event is the viewmodel's.
+			assert_true((raw as PlayerWeaponEvent).installed)
 	assert_true(host.entity_card_by_ai_index(0).is_mounted(),
 			"host player remains mounted after the local switch commit")
 
@@ -1120,15 +1173,19 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	assert_lt(joiner_after.distance_to(host_after), 0.35,
 			"decoded gunner controls reconstruct the remote articulated anchor")
 
-	# The stock child record identifies parent + type, not the authored attachment
-	# row. If that type occurs more than once, even when only one row resolved a
-	# userpoint, a remote client must keep the spawn-derived rigid pose rather than
-	# guess which sibling owns the decoded child.
+	# The child's subType names its stored attachment slot, and the ewep class
+	# update anchors it there on every peer (D-NET-690): a same-type sibling row
+	# in the carrier's table does not unseat it, so the remote child keeps
+	# following the articulated anchor.
 	assert_true(joiner.install_seat_specs_for_type_ids(
 			_attachment_items_db(anchor_name, true), PackedInt32Array([5004])))
-	var ambiguous_position := _present_position_for_type(joiner, 1419)
-	assert_lt(ambiguous_position.distance_to(joiner_before), 0.01,
-			"ambiguous same-type children retain the rigid decoded fallback")
+	for _tick in range(5):
+		host.step()
+		joiner.step()
+		OS.delay_msec(2)
+	var sibling_position := _present_position_for_type(joiner, 1419)
+	assert_lt(sibling_position.distance_to(_present_position_for_type(host, 1419)), 0.35,
+			"a same-type sibling row leaves the child on its subType's anchor")
 
 
 func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
@@ -1185,10 +1242,14 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
 		return
+	# H by its wire handle: the Serve Only host's mission start also spawned its own row's
+	# hidden player body (D-NET-352, D-NET-NEW-L7-39) [orig: Game_StartMission @0x524360 -
+	# the Server_InitAllPlayerEntitiesForRound call @0x525BAF].
 	var host_joiner_index := -1
+	var joiner_h := joiner.get_local_player_wire_handle()
 	for ai_index in range(host.get_entity_count()):
 		var card: EntityCard = host.entity_card_by_ai_index(ai_index)
-		if card.get_item_id() == 0x14B9:
+		if card.get_item_id() == 0x14B9 and card.get_wire_handle() == joiner_h:
 			host_joiner_index = ai_index
 			break
 	assert_gte(host_joiner_index, 0,
@@ -1634,20 +1695,36 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	host.set_asset_root(root)
+	# The joiner's side-A id 0x0200 names a combo of the host's table, so the add
+	# keeps it (D-NET-137).
+	host.set_character_avatar_database(_host_avatars())
 	assert_true(host.install_seat_specs_for_type_ids(
 			watercraft_db, PackedInt32Array([1291, 5008])))
 	assert_gt(host.get_mounted_graphic_source_count(), 0,
 			"the native install resolved the drivable model sources")
+	# The items table precedes the load: the spawn's AIData test and the class init
+	# brain each AIData brain-class row (the buggy's chel, the watercraft's cbot), and
+	# a brainless hull's mover stops at its head (D-NET-433)
+	# [orig: Entity_SpawnFromBMSRecord @0x40ED4E; Entity_UpdateWatercraftPhysics
+	#  @0x48D4EF -> @0x48EF50].
+	host.resolve_item_traits(watercraft_db)
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
 	host.resolve_item_traits(watercraft_db)
 
 	var joiner := Simulation.new()
+	# The joiner's shell installs its mounted Avatars.def's fresh profile, as the
+	# game's join does; a joiner that installs none carries the empty table's
+	# id 0, which this pin is not about (D-NET-NEW-L2-7).
+	var avatars := AvatarDatabase.new()
+	assert_eq(avatars.load(ProjectSettings.globalize_path(AVATARS_FIXTURE)), OK)
+	joiner.set_join_character_profile(avatars.character_join_profile({}, true))
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "VehicleObserver"))
 	joiner.set_asset_root(root)
 	assert_true(joiner.install_seat_specs_for_type_ids(
 			watercraft_db, PackedInt32Array([1291, 5008])))
+	joiner.resolve_item_traits(watercraft_db)
 	assert_true(joiner.load_from_mission_data(mission))
 	_install_combat_tables(joiner)
 	joiner.resolve_item_traits(watercraft_db)
@@ -1687,8 +1764,22 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	assert_true(joiner_vehicle.is_finite(),
 			"the joiner publishes the decoded pool-1 dune buggy")
 	if host_vehicle.is_finite() and joiner_vehicle.is_finite():
-		assert_lt(joiner_vehicle.distance_to(host_vehicle), 0.05,
-				"the joiner vehicle does not collapse onto or float over its player")
+		# The planar pose only: this rig has no ground under the buggy, and retail's
+		# client falls there too. Each record lands the host's slideDecay (-162 after
+		# its sleep) on the row [orig: Entity_SerializeVehicleState @0x460560 (the
+		# +0xA0 store @0x46091e)]. The row's contact byte is the spawn's 0 (D-NET-433),
+		# so the first predicted tick moves nothing, and gravity leaves slideDecay
+		# past the tracked sleep gate's (-350, 0) window [orig:
+		# Entity_ProcessTrackedVehiclePhysics @0x47C1C0 (@0x47C2BD..0x47C2D1)]. The
+		# full solve then finds no pad and sets Flags 0x2000 [orig: @0x47E57B], which
+		# keeps the gate shut; the hull falls between records and the airborne chase
+		# pulls it back. The host never leaves its gate, so its Z holds. With ground
+		# under it the joiner's solve rests the hull, which a groundless rig cannot pin.
+		var planar_gap := Vector2(joiner_vehicle.x - host_vehicle.x,
+				joiner_vehicle.z - host_vehicle.z).length()
+		assert_lt(planar_gap, 0.05,
+				"the joiner vehicle keeps the authority's planar pose (host %s, joiner %s)"
+				% [host_vehicle, joiner_vehicle])
 		var player_pos: Vector3 = joiner.get_local_player_position()
 		assert_gt(joiner_vehicle.distance_to(player_pos), 20.0,
 				"the authored distant vehicle stays distant from the joiner")
@@ -1709,12 +1800,16 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 				joiner_snapshot[joiner_base + Simulation.PF_ROLL_DEG],
 				host_snapshot[host_base + Simulation.PF_ROLL_DEG], 0.01,
 				"the joiner publishes the decoded/predicted vehicle roll")
+		assert_almost_eq(
+				wrapf(joiner_snapshot[joiner_base + Simulation.PF_YAW_DEG]
+						- host_snapshot[host_base + Simulation.PF_YAW_DEG], -180.0, 180.0),
+				0.0, 0.01, "the joiner publishes the decoded/predicted vehicle heading")
 	# The physics family is the item's def trait, so it is read from the
 	# placed row's own card. A placed item owns an AI brain only when its row
 	# carries the AI-class attrib AND a brain-class ai_function at spawn
-	# (Entity_SpawnFromBMSRecord's AIData test, then the class init), and
-	# this fixture resolves its items after the load, so the buggy is not an
-	# AI-pool row.
+	# (Entity_SpawnFromBMSRecord's AIData test, then the class init); this
+	# fixture's items table precedes the load, so the buggy (ai_function chel)
+	# is brained, while its move_function still picks its physics family.
 	var family := -1
 	if not host_record.is_empty():
 		var host_rows: PackedFloat32Array = host_record["snapshot"]
@@ -1737,10 +1832,11 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 		var joiner_boat: PackedFloat32Array = joiner_boat_record["snapshot"]
 		var host_boat_base := int(host_boat_record["base"])
 		var joiner_boat_base := int(joiner_boat_record["base"])
-		assert_ne(host_boat[host_boat_base + Simulation.PF_PITCH_DEG], 0.0,
-				"the authored watercraft pitch is non-zero")
-		assert_ne(host_boat[host_boat_base + Simulation.PF_ROLL_DEG], 0.0,
-				"the authored watercraft roll is non-zero")
+		# The mission start's settle wakes every PlayerControl row (Flags 0x40) and
+		# runs its mover once, so the afloat watercraft's platform solve fits the hull
+		# to the flat water plane: the authored attitude does not survive the load on
+		# the authority, and the joiner arms from whatever the authority holds
+		# [orig: Game_StartMission @0x525FFF (the 0x40 OR), the mover call @0x526010].
 		assert_almost_eq(
 				joiner_boat[joiner_boat_base + Simulation.PF_PITCH_DEG],
 				host_boat[host_boat_base + Simulation.PF_PITCH_DEG], 0.01,
@@ -1815,6 +1911,23 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	host.set_local_player_weapon(_fixture_m4(), {})
 	joiner.set_local_player_weapon(_fixture_m4(), {})
+	for _settle in range(8):
+		host.step()
+		joiner.step()
+	# The joiner's in-match submit empties its slot table until the host's 0x5A lands, and
+	# the grant's select mounts the granted M4 itself: a fresh slot whose clip channel and
+	# serials start over (D-NET-NEW-LI-25). The shot's window opens past that mount, or its
+	# play_serial pin would read the restarted channel.
+	# [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the select @0x4296E3]
+	var granted := false
+	for _grant in range(240):
+		if joiner.get_local_player_inventory().equipped_name == "WPN_M4AUTO":
+			granted = true
+			break
+		host.step()
+		joiner.step()
+		OS.delay_msec(2)
+	assert_true(granted, "the host's grant reached the joiner ahead of the shot")
 	for _settle in range(8):
 		host.step()
 		joiner.step()
@@ -1946,6 +2059,13 @@ func test_listen_host_reload_relays_over_loopback_without_double_refill() -> voi
 	var host := Simulation.new()
 	var host_options := HostSessionOptions.new()
 	host_options.game_type = 0x30020
+	# In a session the listen host's armory ACCEPT is its own client's 0x2F, which
+	# its own slot's accept grants into the local table (D-NET-695); a live player
+	# outside an armory volume is answered with the current list, so both kits are
+	# chosen in the pre-round window (host StartDelay), then the round opens.
+	# [orig: WeaponLoadout_ApplyFromBuffer @0x565D4D..0x565D9C;
+	#  NapiNPServerMsg_HandlePlayerLoadout's gate @0x51581C..0x51583E]
+	host_options.start_delay = PREROUND_START_DELAY
 	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
@@ -1964,11 +2084,22 @@ func test_listen_host_reload_relays_over_loopback_without_double_refill() -> voi
 	var m4 := _fixture_m4()
 	assert_true(host.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
-	host.set_local_player_weapon(m4, {})
-	joiner.set_local_player_weapon(m4, {})
-	for _settle in range(3):
+	for _i in range(PREROUND_START_DELAY * 62 + 40):
 		host.step()
 		joiner.step()
+	assert_eq(_inventory_clip(host, "WPN_M4AUTO"), 30,
+			"the listen host's pre-round submit is granted into its local table")
+	host.set_local_player_weapon(m4, {})
+	joiner.set_local_player_weapon(m4, {})
+	# The grant's list mounted the host's EquippedSlot on an idle hand, which
+	# draws it (SWITCHTO, about half a second): settle until the draw ends.
+	# [orig: Server_SendWeaponSlotListToPlayer -> Player_MountWeaponSlot @0x50290E;
+	#  WeaponAction_SwitchTo's -900 timer, +30 a tick @0x543207 / @0x54327B]
+	for _settle in range(80):
+		host.step()
+		joiner.step()
+		if host.get_local_player_weapon_state().current_action < 2:
+			break
 
 	# Spend one host round, then wait for the local FSM to return to an input-
 	# accepting state. The authority refill remains immediate, but retail also
@@ -2130,9 +2261,8 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 			switched = true
 			break
 	assert_true(switched, "the joiner switched to its secondary before the echo")
-	# Mirror LocalPlayerPresenter consuming the committed switch event: mount the
-	# newly selected definition so later ticks bridge the M9 FSM to the M9 slot.
-	joiner.set_local_player_weapon(_fixture_m9(), {})
+	# The committed switch mounted the newly selected definition itself, so later ticks
+	# bridge the M9 FSM to the M9 slot with no presenter install.
 	assert_eq(_inventory_clip(joiner, "WPN_M4AUTO"), spent_m4_clip,
 			"the original M4 slot stays spent while its echo is withheld")
 	assert_eq(_inventory_clip(joiner, "WPN_M9Beretta"), 15,
@@ -2192,6 +2322,17 @@ func test_joiner_deploy_release_keeps_the_last_granted_kit() -> void:
 		OS.delay_msec(2)
 	assert_eq(_inventory_clip(joiner, "WPN_M9Beretta"), 15,
 			"the pre-round submit is granted")
+	# The death comes once the round runs: a client runs no entity update while its
+	# pre-round timer (the 0x0A's phase-0 byte) is nonzero, so the body tick whose
+	# death edge latches the dead bit from a Health of 0 waits for the round, and a
+	# joiner killed in the pre-round reads alive until it opens (D-NET-562). Let the
+	# timer run out (StartDelay seconds of authority ticks); the grant survives it.
+	# [orig: Game_ProcessMainFrame @0x5263F0 - `cmp g_ClientPreRoundTimer` @0x52672C,
+	#  Entity_UpdateAllEntities @0x52674B; Entity_UpdateInfantryPlayerBody @0x4B40E0 -
+	#  the death edge @0x4B4BF1..0x4B4C02]
+	for _i in range(PREROUND_START_DELAY * 62 + 40):
+		joiner.step()
+		host.step()
 	assert_true(_kill_joiner_from_host(host, joiner),
 			"the authority's death transaction killed the joiner")
 	if not joiner.is_local_player_dead():
@@ -2262,9 +2403,20 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 
 	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	joiner.set_local_player_weapon(_fixture_m4(), {})
-	for _settle in range(3):
+	# The host's grant answers the submit: its apply selects the M4 and mounts the slot it
+	# selected, which plays SWITCHRANK on that slot (engine world/player_loadout.cpp
+	# select_current_slot carries the witness), and a trigger press during a switch queues
+	# no fire. Settle until the granted M4 idles with nothing queued.
+	var granted := false
+	for _settle in range(120):
 		joiner.step()
 		host.step()
+		var settled := joiner.get_local_player_weapon_state()
+		if String(joiner.get_local_player_inventory().equipped_name) == "WPN_M4AUTO" \
+				and int(settled.current_action) == 0 and int(settled.next_action) == 0:
+			granted = true
+			break
+	assert_true(granted, "the granted M4 idles past its SWITCHRANK")
 
 	# Empty the magazine through the real local FSM/C2S fire path. Stop pumping
 	# the host on the exact joiner frame that queues the empty-slot reload, so its
@@ -2626,6 +2778,52 @@ func test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload() -> void:
 
 
 
+# The joiner's body takes the mission start's Player_InitPlayer class word at its birth: the
+# class byte of the side its team names from the join's character profile (team 1 or 3 the
+# first side), whatever class the shell's pre-spawn kit apply carried. The body is born in the
+# mission start, ahead of the host's answer to its 0x2F (D-NET-NEW-L2-52), so the S2C 0x5A's
+# handler then stores its grant word on the body and on its side's word: the class the joiner's
+# 0x2F submitted and the host granted back. No weapon profile is loaded here, so that 0x2F
+# carries the fresh record's side class, 8. Neither is the pre-spawn apply's 5 (the engine's
+# JoinerRole::stamp_init_player_class, the joiner's 0x5A grant leg and spawn_loadout_plan
+# carry the witness).
+func test_joiner_body_takes_its_sides_class_word_over_the_prespawn_apply() -> void:
+	var mission := _combat_mission()
+	var host := Simulation.new()
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	_install_combat_tables(host)
+
+	var joiner := Simulation.new()
+	var avatars := AvatarDatabase.new()
+	assert_eq(avatars.load(ProjectSettings.globalize_path(AVATARS_FIXTURE)), OK)
+	var profile := avatars.character_join_profile({
+		"team": 0,
+		"side_profiles": [{"team": 0, "player_class": 6}, {"team": 1, "player_class": 7}],
+	}, true)
+	assert_eq([profile.get_player_class(0), profile.get_player_class(1)], [6, 7],
+			"the join carries the two side class bytes")
+	joiner.set_join_character_profile(profile)
+	assert_true(joiner.enable_join(
+			"127.0.0.1", host.get_host_listen_port(), "SideClassJoiner"))
+	assert_true(joiner.load_from_mission_data(mission))
+	_install_combat_tables(joiner)
+	# The shell's runtime-start apply, ahead of the spawn, with the profile's own class 5.
+	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 5),
+			"the pre-spawn apply latches the kit")
+
+	assert_true(_drive_pair_to_match(host, joiner),
+			"joiner reached the real-UDP in-match seam")
+	if not joiner.is_joined_in_match():
+		return
+	assert_eq(joiner.get_local_player_class(), 8,
+			"the body's class is the 0x5A's grant word past the side word, not the pre-spawn apply's 5")
+
+
+
 func _subrate_walk_mission() -> MissionData:
 	# A populated-enough entity set that the BANDWIDTH-capped 0x0A rotates
 	# entities across frames (the D-NET-154 regime): eight parked AI organics
@@ -2810,7 +3008,6 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "GunnerWatcher"))
-	joiner.set_join_world_ready(false)
 	var header := PackedByteArray()
 	for _tick in range(800):
 		joiner.poll_join_preload()
@@ -3006,6 +3203,9 @@ func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> voi
 	var host := Simulation.new()
 	var host_options := HostSessionOptions.new()
 	host_options.game_type = 0x30020
+	# The listen host's in-session ACCEPT is its own client's 0x2F (D-NET-695): its
+	# grenade kit is chosen in the pre-round window, then the round opens.
+	host_options.start_delay = PREROUND_START_DELAY
 	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
@@ -3023,11 +3223,20 @@ func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> voi
 
 	var smoke := _smoke_grenade()
 	assert_true(host.apply_local_player_loadout([WeaponKitEntry.make("WPN_GRENADESM")], 8))
+	for _i in range(PREROUND_START_DELAY * 62 + 40):
+		host.step()
+		joiner.step()
+	assert_ne(_inventory_clip(host, "WPN_GRENADESM"), -1,
+			"the listen host's pre-round submit is granted into its local table")
 	host.set_local_player_weapon(smoke, {})
-	for _settle in range(20):
+	# The grant's list mounted the host's EquippedSlot on an idle hand, which
+	# draws it (SWITCHTO): settle until the draw ends.
+	for _settle in range(80):
 		host.step()
 		joiner.step()
 		OS.delay_msec(1)
+		if _settle >= 19 and host.get_local_player_weapon_state().current_action < 2:
+			break
 
 	var host_health_before := host.get_local_player_health()
 	var joiner_health_before := joiner.get_local_player_health()

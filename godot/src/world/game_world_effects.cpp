@@ -32,28 +32,38 @@ void GameWorld::route_mission_effects(const Array &p_effects) {
 			continue;
 		}
 		const String kind = eff->get_kind();
-		if (kind == "dialog_line") {
-			// A co-op host's dialog line: name in the text, line in a, the local
-			// player's class in b (engine: client_effects / resolve_dialog_line).
-			if (audio != nullptr) {
-				audio->play_dialog_line(eff->get_text(), eff->get_a(), eff->get_b());
-			}
-		} else if (kind == "dialog_wav") {
+		if (kind == "dialog_wav") {
 			// WAC wave/pwave: a scripted voice .wav by filename on its own channel.
 			if (audio != nullptr) {
-				audio->sync_script_voice();
+				audio->follow_script_voice();
 			}
 		}
 	}
 }
 
+// A co-op host's dialog lines this peer plays (engine: client_effects' typed order,
+// resolve_dialog_line), each at once on a voice of its own.
+void GameWorld::route_dialog_lines() {
+	const Ref<Simulation> sim = get_sim();
+	MissionAudio *audio = get_mission_audio();
+	if (sim.is_null()) return;
+	std::vector<opennova::world::DialogLineOrder> lines;
+	sim->drain_dialog_lines(lines);
+	if (audio == nullptr) return;
+	for (const opennova::world::DialogLineOrder &line : lines)
+		audio->play_dialog_line(opennova::to_gd(line.dialog_name), line.line, line.player_class);
+}
+
 void GameWorld::route_script_effects() {
     const Ref<Simulation> sim = get_sim();
+    if (sim.is_null()) return;
     EffectWorld *effects = get_effect_world();
-    if (sim.is_null() || effects == nullptr) return;
+    // A dedicated host has no effect world (start_effect_world): its descriptors drain unshown.
+    // Any other load's wait for its effect world.
+    if (effects == nullptr && sim->session_role() != Simulation::ROLE_DEDICATED_HOST) return;
     std::vector<opennova::world::ScriptEffectEvent> events;
     sim->drain_script_effects(events);
-    if (events.empty()) return;
+    if (events.empty() || effects == nullptr) return;
     // Compilation can register stock aliases before any FX command executes.
     // BMS's direct named lookup sees those definitions too.
     for (const auto &name : sim->script_effect_names()) effects->intern_effect(opennova::to_gd(name));
@@ -167,6 +177,7 @@ void GameWorld::on_runtime_fixed_tick(int p_logic_tick) {
 	route_terrain_scorches();
 	route_round_impacts();
     route_script_effects();
+	route_dialog_lines();
 	// The dialog channel's playback tick, once a logic tick, after this tick's
 	// PlayWavList dialogs registered in the world's dialog table: its slots
 	// load their lines on their timers (runtime/audio/dialog_queue).
