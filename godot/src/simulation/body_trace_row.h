@@ -53,6 +53,17 @@ public:
 	int get_brain_pend() const { return value_.brain_pend; }
 	int get_think_clock() const { return value_.think_clock; }
 	int get_ai_event() const { return value_.ai_event; }
+	PackedInt32Array get_eye() const;
+	int get_eye_source() const { return value_.eye_source; }
+	int get_anim_state() const { return value_.anim_state; }
+	int get_anim_playing() const { return value_.anim_playing; }
+	int get_anim_prev() const { return value_.anim_prev; }
+	int get_anim_blend_milli() const { return value_.anim_blend_milli; }
+	int get_clip_phase() const { return value_.clip_phase; }
+	int get_capsule_bottom() const { return value_.capsule_bottom; }
+	bool get_airborne() const { return value_.airborne; }
+	PackedInt32Array get_resolve_push() const;
+	int get_contact_item() const { return value_.contact_item; }
 
 	Dictionary to_json_value() const;
 };

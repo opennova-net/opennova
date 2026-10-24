@@ -24,6 +24,16 @@ PackedInt32Array BodyTraceRow::get_vel() const { return triple(value_.vel); }
 
 PackedInt32Array BodyTraceRow::get_source() const { return triple(value_.source); }
 
+PackedInt32Array BodyTraceRow::get_eye() const { return triple(value_.eye); }
+
+PackedInt32Array BodyTraceRow::get_resolve_push() const {
+	PackedInt32Array out;
+	out.resize(2);
+	out.set(0, value_.resolve_push[0]);
+	out.set(1, value_.resolve_push[1]);
+	return out;
+}
+
 Dictionary BodyTraceRow::to_json_value() const {
 	Dictionary out;
 	out["seq"] = get_seq();
@@ -53,6 +63,17 @@ Dictionary BodyTraceRow::to_json_value() const {
 	out["brain_pend"] = get_brain_pend();
 	out["think_clock"] = get_think_clock();
 	out["ai_event"] = get_ai_event();
+	out["eye"] = get_eye();
+	out["eye_source"] = get_eye_source();
+	out["anim_state"] = get_anim_state();
+	out["anim_playing"] = get_anim_playing();
+	out["anim_prev"] = get_anim_prev();
+	out["anim_blend_milli"] = get_anim_blend_milli();
+	out["clip_phase"] = get_clip_phase();
+	out["capsule_bottom"] = get_capsule_bottom();
+	out["airborne"] = get_airborne();
+	out["resolve_push"] = get_resolve_push();
+	out["contact_item"] = get_contact_item();
 	return out;
 }
 
@@ -84,5 +105,16 @@ void BodyTraceRow::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::INT, brain_pend)
 	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::INT, think_clock)
 	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::INT, ai_event)
+	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::PACKED_INT32_ARRAY, eye)
+	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::INT, eye_source)
+	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::INT, anim_state)
+	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::INT, anim_playing)
+	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::INT, anim_prev)
+	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::INT, anim_blend_milli)
+	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::INT, clip_phase)
+	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::INT, capsule_bottom)
+	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::BOOL, airborne)
+	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::PACKED_INT32_ARRAY, resolve_push)
+	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::INT, contact_item)
 	ClassDB::bind_method(D_METHOD("to_json_value"), &BodyTraceRow::to_json_value);
 }

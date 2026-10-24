@@ -1007,6 +1007,9 @@ struct InfantryState {
     int32_t dbg_root_dx = 0, dbg_root_dy = 0;
     int32_t dbg_res_dx = 0, dbg_res_dy = 0;
     int32_t dbg_contact_item = 0; // last resolve's contact source item type
+    // The last eye restamp's source (the body readout's tap, body_trace.h): 0 none yet, 1 the
+    // local body's head anchor, 2 the capsule legs.
+    uint8_t dbg_eye_source = 0;
     // Fire-aim instrument: how many rounds this body fired with a valid aim
     // solution vs falling back to the body heading (a live engagement showed
     // ~half of all AI shots leaving 180 deg off the target).

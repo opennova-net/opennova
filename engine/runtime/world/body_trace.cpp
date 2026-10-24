@@ -47,9 +47,24 @@ void body_trace_tick(World &world) {
             record.pos[1] = e->position.y.q16;
             record.pos[2] = e->position.z.q16;
             if (const AiEntity *body = world.ai.for_handle(h); body != nullptr && body->inf.active) {
-                record.vel[0] = body->inf.vel[0];
-                record.vel[1] = body->inf.vel[1];
-                record.vel[2] = body->inf.vel[2];
+                const InfantryState &inf = body->inf;
+                record.vel[0] = inf.vel[0];
+                record.vel[1] = inf.vel[1];
+                record.vel[2] = inf.vel[2];
+                record.eye[0] = inf.eye_offset_x;
+                record.eye[1] = inf.eye_offset_y;
+                record.eye[2] = inf.eye_offset_z;
+                record.eye_source = inf.dbg_eye_source;
+                record.anim_state = static_cast<int16_t>(inf.anim_state);
+                record.anim_playing = static_cast<int16_t>(inf.body_clip_state());
+                record.anim_prev = static_cast<int16_t>(inf.anim_prev);
+                record.anim_blend_milli = static_cast<int16_t>(inf.anim_blend_weight * 1000.0f);
+                record.clip_phase = inf.clip_phase;
+                record.capsule_bottom = inf.prev_capsule_bottom;
+                record.airborne = inf.airborne;
+                record.resolve_push[0] = inf.dbg_res_dx;
+                record.resolve_push[1] = inf.dbg_res_dy;
+                record.contact_item = inf.dbg_contact_item;
             } else {
                 record.vel[0] = e->veh.vel_x;
                 record.vel[1] = e->veh.vel_y;

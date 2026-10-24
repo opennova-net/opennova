@@ -39,6 +39,20 @@ struct Rig {
         AiEntity &body = *w->ai.at(w->ai.attach(a));
         body.inf.active = true;
         body.inf.vel[2] = -5;
+        body.inf.eye_offset_x = 11;
+        body.inf.eye_offset_y = -12;
+        body.inf.eye_offset_z = 13;
+        body.inf.dbg_eye_source = 1;
+        body.inf.anim_state = 31;
+        body.inf.anim_playing_state = 31;
+        body.inf.anim_prev = 176;
+        body.inf.anim_blend_weight = 0.25f;
+        body.inf.clip_phase = 4;
+        body.inf.prev_capsule_bottom = 6790;
+        body.inf.airborne = true;
+        body.inf.dbg_res_dx = 0;
+        body.inf.dbg_res_dy = -270;
+        body.inf.dbg_contact_item = 1203;
         w->logic_tick = 77;
     }
 };
@@ -63,6 +77,14 @@ static void test_the_tick_records_each_watched_handle() {
     CHECK(rows[0].logic_tick == 77);
     CHECK(rows[0].pos[0] == (1 << 16) && rows[0].pos[1] == (2 << 16) && rows[0].pos[2] == (3 << 16));
     CHECK(rows[0].vel[2] == -5); // the infantry body's triple
+    // The motor's eye, channel and resolve taps.
+    CHECK(rows[0].eye[0] == 11 && rows[0].eye[1] == -12 && rows[0].eye[2] == 13);
+    CHECK(rows[0].eye_source == 1);
+    CHECK(rows[0].anim_state == 31 && rows[0].anim_playing == 31 && rows[0].anim_prev == 176);
+    CHECK(rows[0].anim_blend_milli == 250 && rows[0].clip_phase == 4);
+    CHECK(rows[0].capsule_bottom == 6790 && rows[0].airborne);
+    CHECK(rows[0].resolve_push[0] == 0 && rows[0].resolve_push[1] == -270);
+    CHECK(rows[0].contact_item == 1203);
     CHECK(rows[0].health == 90);
     CHECK(!rows[0].mounted && rows[0].mount_target == 0xFFFFu);
     CHECK(rows[0].ground_target == 0xFFFFu);

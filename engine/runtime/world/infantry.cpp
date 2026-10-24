@@ -2205,7 +2205,9 @@ void AiSystem::infantry_restamp_eye(AiEntity &e, World &world, const RootMotionF
         inf.eye_offset_x = to_fixed(head[0]);
         inf.eye_offset_y = to_fixed(head[1]);
         inf.eye_offset_z = to_fixed(head[2]);
+        inf.dbg_eye_source = 1;
     } else {
+        inf.dbg_eye_source = 2;
         // Player extent cap: on foot @0x4B698C, mounted @0x4B66D9.
         // [orig: @0x4B698C / @0x4B66D9; floors @0x4B6B98 / @0x4B68E7]
         const int32_t extent = frame.capsule_top - frame.capsule_bottom;

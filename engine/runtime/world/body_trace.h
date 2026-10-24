@@ -90,6 +90,23 @@ struct BodyTraceRecord {
     int16_t brain_pend = -1;
     int32_t think_clock = 0;
     int32_t ai_event = 0;
+    // kTick, a body with an infantry motor: its eye offset (+0x6C..+0x74, the movement
+    // resolver's second test point less Position) and the restamp's source (1 the local body's
+    // head anchor, 2 the capsule legs, 0 none yet), its body channel (the requested state, the
+    // playing one, the outgoing one, the cross-fade weight in thousandths, the playhead) and
+    // the capsule bottom the channel last sampled, its airborne latch, and the last resolve's
+    // horizontal correction and the item type of its last contact.
+    int32_t eye[3] = {};
+    uint8_t eye_source = 0;
+    int16_t anim_state = -1;
+    int16_t anim_playing = -1;
+    int16_t anim_prev = -1;
+    int16_t anim_blend_milli = 0;
+    int32_t clip_phase = 0;
+    int32_t capsule_bottom = 0;
+    bool airborne = false;
+    int32_t resolve_push[2] = {};
+    int32_t contact_item = 0;
 };
 
 // The watched handles and the last kCapacity records; seq counts every record appended.

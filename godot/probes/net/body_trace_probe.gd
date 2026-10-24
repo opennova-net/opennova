@@ -14,7 +14,13 @@ extends GameProbe
 ##   `health`, its seat (`mounted`, `mount_target`, `mount_seat`, `mount_bone`), +0x28
 ##   (`ground_target`) and its collision model instance (`collision_model`, -1 none); for a
 ##   row with a brain, its current and pending states (`brain_state`, `brain_pend`, -1 without
-##   one) and the think countdown +0x2AC (`think_clock`).
+##   one) and the think countdown +0x2AC (`think_clock`); for a body with an infantry motor,
+##   its eye offset (`eye`, the movement resolver's second test point less Position) and the
+##   restamp's source (`eye_source`: 1 the local body's head anchor, 2 the capsule legs, 0
+##   none yet), its body channel (`anim_state`, `anim_playing`, `anim_prev`,
+##   `anim_blend_milli`, `clip_phase`) and the capsule bottom it last sampled
+##   (`capsule_bottom`), its `airborne` latch, and the last resolve's horizontal correction
+##   (`resolve_push`) and the item type of its last contact (`contact_item`).
 ## and, as they happen:
 ## - `ground_probe`: the movement resolver's settle-tail probe on it: the probe's start
 ##   (`pos`), the height it returned (`probe_z`), the entity it hit (`ground_target`, the word
