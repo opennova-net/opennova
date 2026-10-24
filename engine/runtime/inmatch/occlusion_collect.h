@@ -7,8 +7,13 @@
 // the collected persons carry. The main scene's collect and the weapon Inset
 // pass's both run it, each over its own frame words (world/occlusion.h
 // OcclusionView); the latches it ticks are the entities' own, whichever view
-// collects. [orig: Terrain_CollectVisibleEntities_0 @ 0x5c6f20 /
-// Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60]
+// collects. The lists are that collect's alone: it empties them before it
+// walks and its pass draws only what they hold, so an embedder reconciles per
+// frame only the rows a view's lists hold. [orig: Terrain_CollectVisibleEntities_0
+// @ 0x5c6f20 / Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60;
+// Terrain_CollectVisibleEntities @ 0x5c9160 - the counts zeroed:
+// g_SectorPersonCount @ 0x5c916b, g_VisibleBuildingCount @ 0x5c9171,
+// g_SectorEntityCount @ 0x5c9177]
 
 #include <runtime/inmatch/present_rows.h> // PresentRowsContext
 #include <runtime/world/entity.h>

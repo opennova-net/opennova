@@ -30,6 +30,7 @@
 namespace godot {
 
 HashSet<ObjectModel *> ObjectModel::inset_view_models_;
+HashSet<ObjectModel *> ObjectModel::inset_view_walk_models_;
 bool ObjectModel::inset_view_open_ = false;
 HashSet<ObjectModel *> ObjectModel::mirror_view_models_;
 HashSet<ObjectModel *> ObjectModel::mirror_view_walk_models_;
@@ -384,6 +385,12 @@ int ObjectModel::update_authored_lod_views(const ObjectLodFrame *p_frames,
 
 void ObjectModel::mark_inset_view() {
 	inset_view_models_.insert(this);
+	inset_view_walk_models_.insert(this);
+}
+
+// The Inset's own collect dropped the model: it is in none of its lists.
+bool ObjectModel::inset_view_dropped() const {
+	return (inset_own_ & kInsetOwnOcclusion) != 0 && inset_occlusion_hidden_;
 }
 
 void ObjectModel::set_inset_view_open(bool p_open) {
@@ -403,20 +410,21 @@ void ObjectModel::set_inset_view_open(bool p_open) {
 		model->refresh_view_split();
 	}
 	inset_view_models_.clear();
+	inset_view_walk_models_.clear();
 }
 
 void ObjectModel::refresh_inset_views() {
 	refresh_mirror_views();
-	if (inset_view_models_.is_empty()) {
+	if (inset_view_walk_models_.is_empty()) {
 		return;
 	}
 	static LocalVector<ObjectModel *> &models = *memnew(LocalVector<ObjectModel *>);
 	models.clear();
-	for (ObjectModel *model : inset_view_models_) {
+	for (ObjectModel *model : inset_view_walk_models_) {
 		models.push_back(model);
 	}
 	for (ObjectModel *model : models) {
-		if (inset_view_models_.has(model)) {
+		if (inset_view_walk_models_.has(model)) {
 			model->refresh_view_split();
 		}
 	}
@@ -534,11 +542,17 @@ void ObjectModel::refresh_view_split() {
 	if (!view_split_ && inset.twins.empty() && (!inset_view_open_ || inset_own_ == 0)) {
 		inset_view_models_.erase(this);
 	}
-	// The walk holds the models an open mirror's lists still hold: one every
-	// open mirror's own collect dropped draws in no mirror and has no twins,
-	// and its split follows only its node's edges (retail's reflected subscene
-	// walks only the lists its collect empties and refills each frame; engine
-	// inmatch/occlusion_collect.h MirrorViewLists carries the witness).
+	// Each walk holds the models its view's lists still hold: one the view's
+	// own collect dropped draws nothing there and has no twins, and its split
+	// follows only its node's edges (retail's scene and reflected collects
+	// empty their lists and refill them each frame, and each pass walks only
+	// them; engine inmatch/occlusion_collect.h collect_view_verdicts and
+	// MirrorViewLists carry the witness).
+	if (inset_view_open_ && inset_view_models_.has(this) && !inset_view_dropped()) {
+		inset_view_walk_models_.insert(this);
+	} else {
+		inset_view_walk_models_.erase(this);
+	}
 	if (marked) {
 		const bool listed = (mirror_view_open_[0] && !mirror_view_dropped(0)) ||
 				(mirror_view_open_[1] && !mirror_view_dropped(1));
@@ -643,9 +657,10 @@ void ObjectModel::mark_mirror_view(int /*p_view*/) {
 	}
 }
 
-// A node edge the reconcile reads (the pixel gate, the layer, the tree): a
-// marked model the walk left is reconciled again by the next walk.
-void ObjectModel::relist_mirror_view() {
+void ObjectModel::relist_view_walks() {
+	if (inset_view_open_ && inset_view_models_.has(this)) {
+		inset_view_walk_models_.insert(this);
+	}
 	if (mirror_view_models_.has(this)) {
 		mirror_view_walk_models_.insert(this);
 	}
@@ -1246,14 +1261,14 @@ void ObjectModel::sync_view_twin(TwinSet &r_set) {
 }
 
 void ObjectModel::sync_view_twins() {
-	for (ObjectModel *model : inset_view_models_) {
+	// A twin draws only a model its view's lists hold (the walks).
+	for (ObjectModel *model : inset_view_walk_models_) {
 		TwinSet &inset = model->twin_sets_[kTwinInset];
 		if (!inset.twins.empty()) {
 			model->sync_view_twin(inset);
 			model->sync_inset_section_twins(true);
 		}
 	}
-	// A mirror's twins draw only a model its lists hold (the walk).
 	for (ObjectModel *model : mirror_view_walk_models_) {
 		for (int m = 0; m < 2; ++m) {
 			TwinSet &set = model->twin_sets_[kTwinMirror + m];

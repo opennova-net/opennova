@@ -478,9 +478,15 @@ private:
 	};
 	std::vector<InsetSectionTwin> inset_section_twins_;
 	void sync_inset_section_twins(bool p_drawn);
+	// Every model the Inset gave a verdict (its node edges reconcile it), and
+	// the walk: the marked models the Inset's lists still hold, as the
+	// mirrors' below (a model the Inset's own collect dropped draws nothing
+	// there whatever its node does).
 	static HashSet<ObjectModel *> inset_view_models_;
+	static HashSet<ObjectModel *> inset_view_walk_models_;
 	static bool inset_view_open_;
 	void mark_inset_view();
+	bool inset_view_dropped() const;
 	static void set_inset_view_open(bool p_open);
 	static void refresh_inset_views();
 	void refresh_view_split();
@@ -526,13 +532,15 @@ private:
 	// each walk reconciles. Retail's reflected subscene walks only its
 	// collect's lists, emptied at every collect; a model every open mirror's
 	// own collect dropped draws in no mirror whatever its node does, so it
-	// leaves the walk and its node's edges relist it (relist_mirror_view).
+	// leaves the walk and its node's edges relist it (relist_view_walks).
 	static HashSet<ObjectModel *> mirror_view_models_;
 	static HashSet<ObjectModel *> mirror_view_walk_models_;
 	static bool mirror_view_open_[2];
 	static bool mirror_view_below_[2];
 	void mark_mirror_view(int p_view);
-	void relist_mirror_view();
+	// A node edge the reconcile reads (the pixel gate, the layer, the tree):
+	// a model a view marked and its walk left is reconciled by the next walk.
+	void relist_view_walks();
 	bool mirror_view_dropped(int p_view) const;
 	static void refresh_mirror_views();
 	// Whether the mirror camera of view `p_view` admits the node's own layer
@@ -1127,10 +1135,10 @@ public:
 	static int update_authored_lod_views(const ObjectLodFrame *p_frames, int p_frame_count,
 			const ObjectLodFrame *p_mirror_gate_frames = nullptr);
 	// The models the alternate views (the weapon Inset, the water mirrors)
-	// reconcile each walk: the Inset's marked set and the mirrors' walk (a
-	// FrameStats VALUE).
+	// reconcile each walk: the models their lists hold (a FrameStats VALUE).
 	static int64_t get_view_marked_count() {
-		return static_cast<int64_t>(inset_view_models_.size() + mirror_view_walk_models_.size());
+		return static_cast<int64_t>(
+				inset_view_walk_models_.size() + mirror_view_walk_models_.size());
 	}
 	// The two-camera form (view 1 null = no Inset view), for tools and tests.
 	static int update_authored_lods_for_views(Camera3D *p_main, float p_main_width,

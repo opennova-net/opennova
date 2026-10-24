@@ -449,6 +449,44 @@ func test_a_twin_level_poses_its_parts_with_no_node() -> void:
 	assert_eq(model.get_view_twin_count(), 0)
 
 
+# The Inset's walk follows its own collect's lists, as the water mirrors' does:
+# retail's scene collect empties its lists each pass and the pass walks only
+# them (engine inmatch/occlusion_collect.h collect_view_verdicts). A model the
+# Inset's collect drops, off the Inset's own view, leaves the walk; its node's
+# own edges still keep it off the Inset, and the Inset listing it brings it back.
+func test_a_model_the_inset_drops_leaves_the_walk() -> void:
+	var placer := _placer()
+	_place(placer, 106401)
+	var model := placer.get_placed_models()[0] as ObjectModel
+	var main := _view_camera(Vector2i(640, 480), 90.0, 200.0)
+	var inset := _view_camera(Vector2i(256, 256), 10.0, 200.0)
+	# The Inset looks away: its own level walk never reaches the model.
+	inset.global_transform = Transform3D(Basis(Vector3.UP, PI), Vector3(0, 0, 200))
+	ObjectModel.update_authored_lods_for_views(main, 640.0, inset, 256.0)
+	model.set_inset_occlusion_hidden(false)
+	ObjectModel.update_authored_lods_for_views(main, 640.0, inset, 256.0)
+	assert_eq(ObjectModel.get_view_marked_count(), 1, "the Inset lists it: walked")
+	model.set_inset_occlusion_hidden(true)
+	ObjectModel.update_authored_lods_for_views(main, 640.0, inset, 256.0)
+	assert_true(model.is_view_split(), "the node leaves the Inset")
+	assert_eq(ObjectModel.get_view_marked_count(), 0, "dropped: out of the walk")
+	# The main view hides the node: nothing left to keep off the Inset.
+	model.set_occlusion_hidden(true)
+	assert_false(model.is_view_split())
+	# Shown again, its own edge takes it off the Inset again, with no walk.
+	model.set_occlusion_hidden(false)
+	assert_true(model.is_view_split())
+	ObjectModel.update_authored_lods_for_views(main, 640.0, inset, 256.0)
+	assert_eq(ObjectModel.get_view_marked_count(), 0)
+	# The Inset lists it again: walked, and one node on the world bits.
+	model.set_inset_occlusion_hidden(false)
+	ObjectModel.update_authored_lods_for_views(main, 640.0, inset, 256.0)
+	assert_eq(ObjectModel.get_view_marked_count(), 1)
+	assert_false(model.is_view_split())
+	ObjectModel.update_authored_lods_for_views(main, 640.0, null, 0.0)
+	assert_eq(ObjectModel.get_view_marked_count(), 0)
+
+
 func test_a_sub_pixel_model_in_the_main_view_stays_drawn_in_the_inset_only() -> void:
 	var placer := _placer()
 	var placed := _place(placer, 106401)

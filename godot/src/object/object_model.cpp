@@ -165,6 +165,7 @@ ObjectModel::~ObjectModel() {
 	pixel_cull_models_.erase(this);
 	free_all_view_twins();
 	inset_view_models_.erase(this);
+	inset_view_walk_models_.erase(this);
 	mirror_view_models_.erase(this);
 	mirror_view_walk_models_.erase(this);
 	retire_geometry_instances();
@@ -383,7 +384,7 @@ void ObjectModel::set_presentation_layer(PresentationLayer p_layer) {
 	}
 	presentation_layer_ = p_layer;
 	apply_presentation_layer_below(this);
-	relist_mirror_view();
+	relist_view_walks();
 }
 
 uint32_t ObjectModel::presentation_layer_mask(bool p_auxiliary) const {
@@ -732,7 +733,7 @@ void ObjectModel::set_camera_pixel_culled(bool p_culled) {
 	if (camera_pixel_culled_ == p_culled) return;
 	camera_pixel_culled_ = p_culled;
 	apply_presentation_layer_below(this);
-	relist_mirror_view();
+	relist_view_walks();
 }
 
 ObjectModel *ObjectModel::get_authored_lod_owner() const {
@@ -1418,8 +1419,8 @@ void ObjectModel::_notification(int p_what) {
 			refresh_view_split();
 		}
 	} else if (p_what == NOTIFICATION_ENTER_TREE) {
-		// Back in the tree: a mirror reconciles the node again.
-		relist_mirror_view();
+		// Back in the tree: the views reconcile the node again.
+		relist_view_walks();
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
 		// The twins live in the world's scenario, not under this node.
 		free_all_view_twins();
@@ -1448,6 +1449,7 @@ void ObjectModel::_notification(int p_what) {
 		water_mirror_clip_models_.erase(this);
 		free_all_view_twins();
 		inset_view_models_.erase(this);
+		inset_view_walk_models_.erase(this);
 		mirror_view_models_.erase(this);
 		mirror_view_walk_models_.erase(this);
 		retire_geometry_instances();
