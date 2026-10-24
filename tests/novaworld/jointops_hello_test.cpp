@@ -119,7 +119,7 @@ int main() {
 
 	// _strupr under the ".ACP" locale on code page 1252: the 60 small letters LCMapStringA
 	// raises (a..z, 0x9A / 0x9C / 0x9E, 0xFF, 0xE0..0xFE but 0xF7), every other byte kept.
-	// [orig: _strupr @0x78E671 - _strupr_s_l called @0x78E6C5; _strupr_s_l_stat @0x78E4C2 -
+	// [orig: _strupr @0x78E671 - __strupr_s_l called @0x78E6C5; __strupr_s_l_stat @0x78E4C2 -
 	//  __crtLCMapStringA(.., LCMAP_UPPERCASE, ..) called @0x78E5F7]
 	check(cp1252_strupr("Jointops.exe") == "JOINTOPS.EXE", "the retail file name uppercases");
 	check(cp1252_strupr("dfx2.exe /mod x") == "DFX2.EXE /MOD X", "digits, spaces and '/' are kept");
