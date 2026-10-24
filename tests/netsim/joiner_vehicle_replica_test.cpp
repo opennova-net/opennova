@@ -137,8 +137,9 @@ struct Harness {
 				});
 	}
 	w::Entity &hull() { return *kernel->world.registry.get(tank); }
-	// One §5.13 record for the hull at its own position, then the joiner frame.
-	void record(uint8_t flags, uint16_t health_word) {
+	// One §5.13 record for the hull at its own position, then the joiner frame. The
+	// dead-pose form carries the wreck's euler X / Y words.
+	void record(uint8_t flags, uint16_t health_word, int16_t euler_x = 0, int16_t euler_y = 0) {
 		const w::Entity &e = hull();
 		FrameUpdate fu;
 		fu.flags2 = 0;
@@ -157,6 +158,8 @@ struct Harness {
 		r.vehicle.pos_z_compressed = network_compress_fixedpoint(0);
 		r.vehicle.flags_byte = flags;
 		r.vehicle.is_dead_pose = (flags & kVehicleCompactFlagDeadPose) != 0;
+		r.vehicle.euler_x = euler_x;
+		r.vehicle.euler_y = euler_y;
 		r.vehicle.health_word = health_word;
 		fu.records.push_back(r);
 		role.runtime->view().apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
@@ -291,6 +294,37 @@ bool run_live_record_respawns_the_dead_client_row() {
 	                     h.hull().primary_weapon_slot.reserve == 29,
 	             "respawn: the class init re-seeds the spent rockets");
 	ok &= expect(h.hull().veh.net_predicted, "respawn: the client mover re-arms");
+	return ok;
+}
+
+// D-NET-NEW-L4-31 (V-ROLL-BV D1): a tilted wreck respawns level. The live form stages zero
+// Pitch / Roll words, the respawn edge copies them into the row and the respawn builds its
+// matrix from them, so the row and its mover's arming take 0 / 0, not the last dead-pose
+// record's euler X / Y.
+// [orig: Entity_SerializeVehicleState @0x460560 - `xor eax, eax` @0x4607E5, the live form's
+//  stores @0x4608EB / @0x4608F1, the dead-pose form's @0x460823 / @0x460829, the copy
+//  @0x46094B..0x460961; Entity_RespawnVehicle @0x45FF40 - the matrix call @0x460179]
+bool run_tilted_wreck_respawns_level() {
+	Harness h;
+	bool ok = true;
+	constexpr int16_t kWreckPitch = 0x1000;
+	constexpr int16_t kWreckRoll = -0x0800;
+	h.record(0x00, 2000);
+	h.record(0x02, 2000);
+	h.record(0x06, 0, kWreckPitch, kWreckRoll);
+	ok &= expect(h.hull().pitch_bam == int32_t(kWreckPitch) * 65536 &&
+	                     h.hull().roll_bam == int32_t(kWreckRoll) * 65536,
+	             "level respawn: the wreck rests at its dead-pose tilt");
+	h.record(0x00, 2500);
+	ok &= expect(((h.hull().flags | h.hull().engine_flags) & w::kEntityFlagDead) == 0,
+	             "level respawn: the live record respawns the client row");
+	ok &= expect(h.hull().pitch_bam == 0 && h.hull().roll_bam == 0,
+	             "level respawn: the respawned row stands level");
+	ok &= expect(h.hull().veh.air_pitch_bam == 0 && h.hull().veh.air_roll_bam == 0,
+	             "level respawn: the client mover arms level");
+	const replication::ClientEntityState *row = h.role.runtime->state().find(h.tank.packed);
+	ok &= expect(row != nullptr && row->pitch_bam == 0 && row->roll_bam == 0,
+	             "level respawn: the replica row carries the level attitude");
 	return ok;
 }
 
@@ -824,6 +858,7 @@ int main() {
 	ok &= run_hull_holds_its_spawn_pose_until_its_first_compact();
 	ok &= run_destroyed_bit_kills_the_client_row();
 	ok &= run_live_record_respawns_the_dead_client_row();
+	ok &= run_tilted_wreck_respawns_level();
 	ok &= run_freeze_predicate_and_pivot_clear();
 	ok &= run_remote_driver_is_the_claimant();
 	ok &= run_unresolved_attachment_follows_its_target_carrier();

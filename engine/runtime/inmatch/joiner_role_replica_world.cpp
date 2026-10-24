@@ -1305,6 +1305,23 @@ void JoinerRole::mirror_mission_entity(replication::ClientEntityState &es) {
 				//  Entity_RespawnVehicle call @0x460964]
 				if ((es.state_flags & world::kEntityFlagDead) == 0u &&
 						((local->flags | local->engine_flags) & world::kEntityFlagDead) != 0u) {
+					// The copied Pitch / Roll are the record's staged words: zeros for the live
+					// form, the record's own euler X / Y for the dead-pose form, never the last
+					// wreck record's tilt, so the respawn builds a level matrix. The row keeps
+					// them too, so the mover's arming below seeds the same attitude.
+					// [orig: Entity_SerializeVehicleState @0x460560 - `xor eax, eax` @0x4607E5,
+					//  the form test @0x4607E7 / @0x460805; the live form's stores @0x4608EB /
+					//  @0x4608F1, the dead-pose form's @0x460823 / @0x460829;
+					//  Entity_RespawnVehicle @0x45FF40 - the matrix call @0x460179]
+					if ((es.state_flags & replication::kVehicleFlagDeadPose) == 0u) {
+						es.pitch_bam = 0;
+						es.roll_bam = 0;
+					}
+					// The record's vertical velocity lands ahead of the respawn, which then
+					// writes its own -501 over it: the pending word is spent.
+					// [orig: Entity_SerializeVehicleState - the +0xA0 store @0x46091E ahead of
+					//  the call @0x460964; Entity_RespawnVehicle - slideDecay = -501 @0x45FFE1]
+					es.vehicle_vertical_velocity_pending = false;
 					local->position.x.q16 = es.x;
 					local->position.y.q16 = es.y;
 					local->position.z.q16 = es.z;
