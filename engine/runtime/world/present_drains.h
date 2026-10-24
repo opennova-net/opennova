@@ -79,6 +79,19 @@ struct ThrowableVisualRow {
     float roll_deg = 0.0f;
     std::string move_effect;
     bool move_effect_live = true;
+    // Whether a water mirror's reflected collect walks the row's population.
+    // A flying round lies in the RoundPool, which only a scene's collect walks
+    // (the main view's and the weapon Inset's), so its model draws in no
+    // mirror on either side of the water; its move effect, tracer and glow are
+    // the reflected subscene's own passes and stay. A placed device is a
+    // pool-1 entity, which the reflected collect walks under its Flags match.
+    // [orig: Terrain_CollectVisibleEntities @0x5C9160 - the RoundPool walk from
+    //  RoundPool_GetBase (the call @0x5C91C1) into g_SectorEntityList @0x5C9334;
+    //  Terrain_CollectVisibleEntitiesForReflection @0x5C90A0 - the statics and
+    //  pools 0 / 1 alone (the calls @0x5C913D, @0x5C9145, @0x5C914E);
+    //  Entity_CloneFromTemplateByType @0x4398A0 - the device's pool 1 (the
+    //  Pool_AllocEntry call @0x439966)]
+    bool mirror_collected = false;
 };
 
 // One sampled watercraft wake frame. `handle_packed` plus the registry spawn

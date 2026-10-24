@@ -607,7 +607,7 @@ bool ObjectModel::mirror_admits_layer(int p_view) const {
 	switch (presentation_layer_) {
 		case PRESENTATION_LAYER_WORLD:
 		case PRESENTATION_LAYER_LOCAL_BODY:
-			return mirror_reflected_ || mirror_view_below_[p_view];
+			return mirror_collected_ && (mirror_reflected_ || mirror_view_below_[p_view]);
 		default:
 			return false;
 	}

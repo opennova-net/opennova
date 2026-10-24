@@ -134,6 +134,57 @@ func test_a_person_in_every_presentation_state_is_off_the_mirrors_above_the_wate
 						"state %d: mirror %d never draws a person the camera does not" % [state, m])
 
 
+# The reflected collect walks the statics and the entity pools 0 / 1 alone; the
+# RoundPool is walked by a scene's collect (the main view's and the weapon
+# Inset's) and by no mirror's. A model whose population the reflected collect
+# never walks (a flying round's: a thrown grenade, a rocket) is on neither
+# mirror camera on either side of the water, while the scene views keep it; a
+# pool-1 entity beside it (a placed device) is on both mirrors below the water.
+# Only a below-water eye tells the two apart: above the water the flag match
+# leaves both off.
+# [orig: Terrain_CollectVisibleEntitiesForReflection @0x5c90a0 - the calls
+# @0x5c913d, @0x5c9145, @0x5c914e; Terrain_CollectVisibleEntities @0x5c9160 -
+# the RoundPool_GetBase call @0x5c91c1]
+func test_a_model_the_reflected_collect_never_walks_is_on_no_mirror_either_side() -> void:
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var round_model := _fixture_model(container)
+	var device := _fixture_model(container)
+	assert_not_null(round_model)
+	assert_not_null(device)
+	if round_model == null or device == null:
+		return
+	assert_true(round_model.mirror_collected, "a model's population is collected by default")
+	round_model.mirror_collected = false
+	var mirrors: Array[int] = [Water.REFLECTION_CULL_MASK | MIRROR_VIEW,
+			Water.REFLECTION_CULL_MASK | INSET_MIRROR_VIEW]
+	for m in mirrors.size():
+		var above := mirrors[m]
+		var below := above | WORLD_NO_MIRROR | MAIN_VIEW_NO_MIRROR
+		assert_eq(_all_layers(round_model) & below, 0,
+				"mirror %d: the round's model is off it below the water" % m)
+		assert_eq(_all_layers(round_model) & above, 0,
+				"mirror %d: and above it" % m)
+		assert_ne(_all_layers(device) & below, 0,
+				"mirror %d: the pool-1 entity is on it below the water" % m)
+	assert_ne(_all_layers(round_model) & SCENE_VIEW_NO_REFLECTION, 0,
+			"the scene views still draw the round's model")
+	# A mirror rendering below the water gives the round no draw of its own:
+	# no split, no twin.
+	var main_camera := _view_camera(Vector2i(640, 480), 90.0)
+	ObjectModel.set_mirror_view_state(0, true, true)
+	ObjectModel.set_mirror_view_state(1, true, true)
+	ObjectModel.update_authored_lods_for_views(main_camera, 640.0, null, 0.0)
+	for m in 2:
+		assert_false(round_model.is_mirror_view_split(m))
+		assert_eq(round_model.get_mirror_view_twin_count(m), 0)
+	assert_eq(_all_layers(round_model) & (WORLD | WORLD_NO_MIRROR | MIRROR_VIEW | INSET_MIRROR_VIEW),
+			0, "still on no mirror's bit")
+	# Collected again: back on the world layer the below-water mirrors admit.
+	round_model.mirror_collected = true
+	assert_ne(_all_layers(round_model) & WORLD_NO_MIRROR, 0)
+
+
 func test_a_node_the_main_view_hides_draws_in_the_mirror_on_a_twin() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)

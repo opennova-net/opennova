@@ -399,6 +399,26 @@ void ObjectModel::set_presentation_layer(PresentationLayer p_layer) {
 	relist_view_walks();
 }
 
+void ObjectModel::set_mirror_collected(bool p_collected) {
+	if (mirror_collected_ == p_collected) {
+		return;
+	}
+	mirror_collected_ = p_collected;
+	apply_presentation_layer_below(this);
+	relist_view_walks();
+}
+
+// The world layer by the mirror policy: off both mirrors where the reflected
+// collect never walks the model's population (the scene-view bit no mirror
+// mask carries), else the Flags match on either side of the water (WORLD) or
+// the below-water view's unfiltered collect alone (WORLD_NO_MIRROR).
+uint32_t ObjectModel::mirror_policy_world_layer() const {
+	if (!mirror_collected_) {
+		return LAYER_SCENE_VIEW_NO_REFLECTION;
+	}
+	return mirror_reflected_ ? LAYER_WORLD : LAYER_WORLD_NO_MIRROR;
+}
+
 uint32_t ObjectModel::presentation_layer_mask(bool p_auxiliary) const {
 	uint32_t base = 0;
 	bool markers = true;
@@ -407,7 +427,7 @@ uint32_t ObjectModel::presentation_layer_mask(bool p_auxiliary) const {
 			// Mission placement has already resolved the engine's two-part
 			// building/vehicle reflection policy; this device leg only maps
 			// that typed decision to Godot visibility layers.
-			base = mirror_reflected_ ? LAYER_WORLD : LAYER_WORLD_NO_MIRROR;
+			base = mirror_policy_world_layer();
 			markers = !p_auxiliary;
 			break;
 		case PRESENTATION_LAYER_LOCAL_BODY:
@@ -416,7 +436,7 @@ uint32_t ObjectModel::presentation_layer_mask(bool p_auxiliary) const {
 			// mission/placement_traits.h item_is_mirror_reflected; no person
 			// carries the Reflective bit), so above the water it is off both
 			// mirrors and below it they collect it unfiltered.
-			base = mirror_reflected_ ? LAYER_WORLD : LAYER_WORLD_NO_MIRROR;
+			base = mirror_policy_world_layer();
 			break;
 		case PRESENTATION_LAYER_LOCAL_BODY_HIDDEN:
 			base = LAYER_FP_BODY_SHADOW_ONLY;
@@ -451,6 +471,7 @@ uint32_t ObjectModel::presentation_layer_mask(bool p_auxiliary) const {
 		// camera lacks (a twin draws the Inset's).
 		base = base == LAYER_WORLD ? LAYER_MAIN_VIEW
 				: base == LAYER_WORLD_NO_MIRROR ? LAYER_MAIN_VIEW_NO_MIRROR
+				: base == LAYER_SCENE_VIEW_NO_REFLECTION ? LAYER_MAIN_VIEW_NO_REFLECTION
 				: base;
 	}
 	return markers ? (base | shadow_caster_layers_) : base;
@@ -2124,6 +2145,12 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_mirror_reflected);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "mirror_reflected"),
 			"set_mirror_reflected", "get_mirror_reflected");
+	ClassDB::bind_method(D_METHOD("set_mirror_collected", "collected"),
+			&ObjectModel::set_mirror_collected);
+	ClassDB::bind_method(D_METHOD("get_mirror_collected"),
+			&ObjectModel::get_mirror_collected);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "mirror_collected"),
+			"set_mirror_collected", "get_mirror_collected");
 	ClassDB::bind_method(D_METHOD("set_presentation_layer", "layer"),
 			&ObjectModel::set_presentation_layer);
 	ClassDB::bind_method(D_METHOD("set_avatar_part", "part"), &ObjectModel::set_avatar_part);

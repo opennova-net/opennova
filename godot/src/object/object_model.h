@@ -556,6 +556,7 @@ private:
 	// pixel gate moved the node off every camera.
 	bool mirror_admits_base(int p_view) const;
 	bool mirror_admits_layer(int p_view) const;
+	uint32_t mirror_policy_world_layer() const;
 	// The held weapon's 2 px gate through mirror `p_view`'s drawn view
 	// (update_authored_lod_views), marking the model.
 	void set_mirror_pixel_culled(int p_view, bool p_culled);
@@ -601,6 +602,7 @@ private:
 	ObjectID slot_shadow_capture_with_;
 	ObjectID entity_light_owner_;
 	bool mirror_reflected_ = false;
+	bool mirror_collected_ = true;
 	AvatarPart avatar_part_ = AVATAR_PART_NONE;
 	int character_id_ = 0; // the composed avatar's character id (0xffff-masked)
 	Vector3i avatar_camo_; // the arms' raw camo triplet for the per-submit FP writer
@@ -967,6 +969,15 @@ public:
 			const PackedStringArray &p_part_local_registers = PackedStringArray());
 	void set_mirror_reflected(bool p_reflected) { mirror_reflected_ = p_reflected; }
 	bool get_mirror_reflected() const { return mirror_reflected_; }
+	// Whether a water mirror's reflected collect walks this model's population
+	// at all (true for the entity pools and the statics, which it walks under
+	// the Flags match mirror_reflected stands for). A model it never walks (a
+	// flying round's: the RoundPool is a scene collect's alone) is on no
+	// mirror camera above or below the water and stays on the scene views
+	// (render/visual_layers.h SCENE_VIEW_NO_REFLECTION;
+	// world::ThrowableVisualRow::mirror_collected carries the witness).
+	void set_mirror_collected(bool p_collected);
+	bool get_mirror_collected() const { return mirror_collected_; }
 	void set_avatar_part(AvatarPart p_part) { avatar_part_ = p_part; }
 	AvatarPart get_avatar_part() const { return avatar_part_; }
 	void set_character_id(int p_id) { character_id_ = p_id; }

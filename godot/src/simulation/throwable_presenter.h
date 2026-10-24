@@ -92,7 +92,7 @@ private:
 	void present_move_effect(int64_t p_key, const String &p_effect,
 			const Transform3D &p_transform, bool p_live);
 	void retire_move_effect(int64_t p_key);
-	bool build_model(int p_item_id, ModelSlot &r_slot);
+	bool build_model(int p_item_id, bool p_mirror_collected, ModelSlot &r_slot);
 	static void free_model(const ModelSlot &p_slot);
 
 	ObjectID sim_id_; // null in data-driven tests

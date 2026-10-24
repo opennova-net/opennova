@@ -78,7 +78,10 @@ enum : uint32_t {
 	// the water (the below-water masks admit WORLD_NO_MIRROR and
 	// MAIN_VIEW_NO_MIRROR, so neither can exclude). The scars ride them: retail
 	// draws their batches in the scene's own draw alone (engine
-	// renderer/scar_draw_list.h kScarBatchesReflect carries the witness).
+	// renderer/scar_draw_list.h kScarBatchesReflect carries the witness). So
+	// do the flying rounds' models: the RoundPool is a scene collect's alone
+	// (object/object_model.h set_mirror_collected; engine
+	// world/present_drains.h ThrowableVisualRow::mirror_collected).
 	SCENE_VIEW_NO_REFLECTION = 1u << 26,
 	MAIN_VIEW_NO_REFLECTION = 1u << 27,
 	SHADOW_CASTER_MASK = STATIC_SHADOW_CASTER | DYNAMIC_SHADOW_CASTER,

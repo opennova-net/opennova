@@ -95,6 +95,55 @@ func test_present_uses_the_canonical_bms_basis_and_godot_position() -> void:
 	presenter.teardown()
 
 
+# A flying round's model is on no water mirror on either side of the water (its
+# row's population is the RoundPool, which no reflected collect walks); a placed
+# device's model keeps the pool-1 entity's rule, on both mirrors below the water.
+# [orig: Terrain_CollectVisibleEntitiesForReflection @0x5c90a0 - the calls
+# @0x5c913d, @0x5c9145, @0x5c914e; Terrain_CollectVisibleEntities @0x5c9160 -
+# the RoundPool_GetBase call @0x5c91c1]
+func test_a_flying_rounds_model_is_on_no_mirror_and_a_placed_device_keeps_its_rule() -> void:
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var placer := _round_placer()
+	var presenter := _make_presenter(container, placer)
+	var device_key := (1 << 62) | 0x1005
+	presenter.present_throwable_visuals([
+		_row(7, 1883, Vector3(1, 2, 3), Vector3.ZERO),
+		ThrowableVisualRow.make(device_key, 1883, Vector3(4, 5, 6), Vector3.ZERO, "", false, true),
+	])
+	var models := _thrown_models(container)
+	assert_eq(models.size(), 2, "one model per row")
+	var round_model: ObjectModel = null
+	var device_model: ObjectModel = null
+	for m in models:
+		var model := m as ObjectModel
+		if model.position.is_equal_approx(Vector3(1, 2, 3)):
+			round_model = model
+		else:
+			device_model = model
+	assert_not_null(round_model)
+	assert_not_null(device_model)
+	if round_model == null or device_model == null:
+		presenter.teardown()
+		return
+	assert_false(round_model.mirror_collected, "the round's population is the RoundPool")
+	assert_true(device_model.mirror_collected, "the device is a pool-1 entity")
+	const WORLD_NO_MIRROR := 1 << 16
+	const MAIN_VIEW_NO_MIRROR := 1 << 22
+	const MIRROR_BITS := (1 << 24) | (1 << 25)
+	var below := Water.REFLECTION_CULL_MASK | MIRROR_BITS | WORLD_NO_MIRROR | MAIN_VIEW_NO_MIRROR
+	var round_layers := 0
+	for node in round_model.find_children("*", "MeshInstance3D", true, false):
+		round_layers |= (node as MeshInstance3D).layers
+	var device_layers := 0
+	for node in device_model.find_children("*", "MeshInstance3D", true, false):
+		device_layers |= (node as MeshInstance3D).layers
+	assert_ne(round_layers, 0, "the round's model carries visual instances")
+	assert_eq(round_layers & below, 0, "no mirror camera admits the round's model")
+	assert_ne(device_layers & below, 0, "the below-water mirrors admit the device's")
+	presenter.teardown()
+
+
 func test_move_effect_spawns_once_follows_full_round_pose_and_stops_with_round() -> void:
 	# effects_table tag 1 is a continuously attached round effect in retail:
 	# AmmoDef+0x70 -> round+0x1CC at @0x4e9f58/@0x4ea8ae, updated by
