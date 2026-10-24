@@ -502,6 +502,9 @@ void NovaWorldClient::stop() {
 	}
 	gsb_request_in_flight_ = false;
 	authenticated_ = false;
+	pending_login_ = false;
+	pending_login_user_ = String();
+	pending_login_pass_ = String();
 	server_entries_.clear();
 	server_pings_ = Dictionary();
 	++ping_generation_; // a sweep still running reports into a list that is gone
@@ -602,12 +605,11 @@ opennova::NwuLobbySession::Hooks NovaWorldClient::make_lobby_hooks() {
 				String("The NovaWorld gate named no session server; its lobby without one is not "
 					   "supported."));
 	};
-	// The session login verified: the menu opens its web lobby over the gate's startup URL; the
-	// shell's lobby page loads from the same URL (engine http_flow.h http_getting_line).
-	hooks.on_connect_validated = [this]() {
-		sync_flow_context();
-		lobby_.connect_log(opennova::http_getting_line(flow_.resolve_startup_url()));
-	};
+	// The session login verified: the menu's state 9 opens its web lobby over the gate's startup
+	// URL, as every entry does (open_web_lobby, engine LobbyHttpFlow::enter): the start page, NWStart
+	// and the sign-in page (or the lobby page for a login the service remembers) load while the
+	// player reads the sign-in screen.
+	hooks.on_connect_validated = [this]() { open_web_lobby(); };
 	// The gate and connect lines to the process's _connectlog.txt.
 	hooks.connect_log_on = []() {
 		return g_process_connect_log != nullptr && g_process_connect_log->enabled();
@@ -1106,16 +1108,29 @@ void NovaWorldClient::on_enter_request_completed(int result, int response_code,
 		}
 		break;
 	case opennova::EnterResult::Kind::Lobby:
-		// The service remembered the login: the lobby page, whose list load follows.
+		// The service remembered the login: the lobby page, whose list load follows (a press that
+		// waited for the page has nothing to post).
+		pending_login_ = false;
 		authenticated_ = true;
 		emit_signal("web_lobby_opened", true, opennova::cp1252_to_gd(r.nwhandle));
 		trigger_gsb();
 		break;
 	case opennova::EnterResult::Kind::SignIn:
 		authenticated_ = false;
+		if (pending_login_) {
+			// A Login pressed while the page loaded posts its form now.
+			pending_login_ = false;
+			const String user = pending_login_user_;
+			const String pass = pending_login_pass_;
+			pending_login_user_ = String();
+			pending_login_pass_ = String();
+			login(user, pass);
+			break;
+		}
 		emit_signal("web_lobby_opened", false, String());
 		break;
 	case opennova::EnterResult::Kind::Failed:
+		pending_login_ = false;
 		authenticated_ = false;
 		emit_signal("login_failed", opennova::to_gd(r.reason));
 		break;
@@ -1136,6 +1151,14 @@ void NovaWorldClient::login(const String &username, const String &password) {
 	}
 	if (flow_.login_active()) {
 		return;  // a login is already in flight
+	}
+	// The entry's open is still in flight (the startup URL, NWStart): the sign-in page's form can
+	// only be posted once that page is shown, so the press waits for it (on_enter_request_completed).
+	if (flow_.enter_active()) {
+		pending_login_ = true;
+		pending_login_user_ = username;
+		pending_login_pass_ = password;
+		return;
 	}
 	sync_flow_context();
 	const opennova::LoginResult r = flow_.login(

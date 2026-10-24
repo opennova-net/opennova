@@ -1008,7 +1008,8 @@ func adopt_client(client: NovaWorldClient) -> void:
 	client.open_web_lobby()
 
 
-# The entry's page: the lobby (a login the service remembers; the list loads
+# The entry's page (the first entry's, which loads behind the sign-in screen,
+# or a re-entry's): the lobby (a login the service remembers; the list loads
 # behind it) or the sign-in page, whose Login posts its form.
 func _on_web_lobby_opened(signed_in: bool, nwhandle: String) -> void:
 	if not _can_login:
@@ -1018,7 +1019,8 @@ func _on_web_lobby_opened(signed_in: bool, nwhandle: String) -> void:
 		return
 	_logged_in = false
 	_login_button.disabled = false
-	_return_to_login()
+	if _screen != Screen.LOGIN:
+		_return_to_login()
 
 
 ## A match that ended with an error text shows it in the NovaWorld error dialog

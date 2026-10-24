@@ -229,6 +229,9 @@ public:
 	// startup URL opened, its start page followed to NWStart, whose page is the lobby (a login the
 	// service remembers: web_lobby_opened(true, nwhandle), then the list load) or the sign-in page
 	// (web_lobby_opened(false, ""), whose Login posts that page's form); a failure is login_failed.
+	// The first entry runs it itself once the session validates (the menu's state 9); the panel
+	// runs it on a re-entry. A Login pressed while it is in flight posts once the sign-in page
+	// lands.
 	void open_web_lobby();
 
 	// Account login (ADR 0010 Phase 3). Runs the EPASK HTTP login chain
@@ -396,6 +399,9 @@ private:
 	// sequencing/cookie-jar all live in flow_ (engine/net/novaworld); these are pure pumps.
 	HTTPRequest *login_http_ = nullptr;
 	HTTPRequest *enter_http_ = nullptr; // the menu entry's startup-URL leg (open_web_lobby)
+	// A Login pressed while the entry's open was in flight: posted once the sign-in page lands.
+	bool pending_login_ = false;
+	String pending_login_user_, pending_login_pass_;
 	HTTPRequest *join_http_ = nullptr;
 	HTTPRequest *host_http_ = nullptr;
 	// The lobby HTTP orchestration: the EPASK login chain, the GSB fetch, and the
