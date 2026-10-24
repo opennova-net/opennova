@@ -7,7 +7,9 @@ class IItemPieceSpawner {
 public:
     virtual ~IItemPieceSpawner() = default;
     // The callback supplies the retail template. The definition selects its
-    // allocation pool; MissionKernel binds the model before returning it.
+    // allocation pool; MissionKernel binds the model before returning it. It
+    // publishes no proximity table and builds no list: the caller runs its own
+    // tail (a palm fragment's own list; none for a section piece).
     virtual EntityHandle spawn_item_piece(const Entity &seed) = 0;
 };
 bool tower_item_event(World &world, Entity &entity, int phase, ItemHitContext hit);

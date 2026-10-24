@@ -5415,6 +5415,11 @@ add_test(NAME npruntime_player_redeploy_reset COMMAND npruntime_player_redeploy_
 add_executable(teleport_tails_test world/teleport_tails_test.cpp)
 target_link_libraries(teleport_tails_test PRIVATE opennova_runtime)
 add_test(NAME teleport_tails COMMAND teleport_tails_test)
+# V-ROLL-BH's FOUND on D-NET-NEW-L5-72 (L5-s36): an item piece's spawn publishes no table and keeps
+# the slice phase; a palm fragment builds its own list, a section piece none.
+add_executable(fragment_spawn_tail_test world/fragment_spawn_tail_test.cpp)
+target_link_libraries(fragment_spawn_tail_test PRIVATE opennova_runtime)
+add_test(NAME fragment_spawn_tail COMMAND fragment_spawn_tail_test)
 
 # --- parity lane L6 (stream/16.16) ---
 # D-NET-507: the entity position is retail's 16.16 words from the BMS spawn through a

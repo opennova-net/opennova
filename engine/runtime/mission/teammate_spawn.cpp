@@ -187,7 +187,14 @@ world::EntityHandle MissionKernel::spawn_item_piece(const world::Entity &seed) {
     //  bytes verbatim @0x43997D; the +0x1C4 update Entity_UpdatePool1Slot
     //  calls @0x4B8E41..0x4B8E53; Render_SectorEntity @0x5C431B]
     ensure_collision_instance(world, handle);
-    collision.refresh_after_registry_change(world);
+    // No table is published here: the clone and both spawners run no Pool01, Pool2 or
+    // slice build, so the pool tables keep their tick epoch and the slices their 17-tick
+    // phase. A palm fragment's own list is its spawner's tail (palm_transition); a
+    // section piece takes none.
+    // [orig: Entity_CloneFromTemplateByType @0x4398A0 (callees Pool_AllocEntry,
+    //  Entity_AllocateAISlot, AnimMap_RegisterEntity); Entity_SpawnSectionEntity @0x4402D0
+    //  (no proximity callee); Palm_SpawnFragment @0x53C1C0 - Entity_BuildProximityList
+    //  called @0x53C39D alone]
     return handle;
 }
 } // namespace opennova::mission

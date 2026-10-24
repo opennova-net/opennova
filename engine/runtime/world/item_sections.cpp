@@ -242,12 +242,22 @@ void palm_transition(World &world, Entity &entity, int section) {
         seed.death_motion = DeathMotionMode::PalmPiece;
         const int32_t x = entity.position.x.q16;
         const int32_t y = entity.position.y.q16;
+        // The B stream's seed: the palm's pool-2 index, 8 * type and both position
+        // words' cells. [orig: Palm_SpawnFragment - PRNG_SetSeed_B (ex sub_6130E0)
+        //  called @0x53C29A]
         world.prng16_b_state = uint32_t(entity.handle.slot() + 8 * type) +
                 uint32_t((y >> 10) & ~63) + uint32_t((x >> 10) & ~63);
         seed.veh.vel_x = (world.next_prng16_b() & 8191) - 4096;
         seed.veh.vel_y = (world.next_prng16_b() & 8191) - 4096;
         seed.veh.slide_z = (world.next_prng16_b() & 8191) + 2048;
-        if (world.item_piece_spawner) world.item_piece_spawner->spawn_item_piece(seed);
+        const EntityHandle fragment = world.item_piece_spawner
+                ? world.item_piece_spawner->spawn_item_piece(seed) : EntityHandle{};
+        // The fragment's own list, after its model init, and no table: the pool tables
+        // and the slices stand as the tick left them.
+        // [orig: Palm_SpawnFragment @0x53C1C0 - Entity_InitFromModel called @0x53C397,
+        //  Entity_BuildProximityList @0x53C39D]
+        if (Entity *piece = world.registry.get(fragment); piece && world.collision)
+            world.collision->refresh_blink(world, *piece);
     }
     if (world.rules.mp_session && traits && !traits->sound_death.empty())
         world.out.destruction.sounds.push_back({traits->sound_death, entity.position});
