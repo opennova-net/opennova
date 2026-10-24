@@ -738,7 +738,8 @@ std::shared_ptr<const SimulationPresentSnapshot> Simulation::build_present_snaps
 	if (!present_.snapshot || present_.snapshot.use_count() != 1)
 		present_.snapshot = std::make_shared<SimulationPresentSnapshot>();
 	auto &frame = *present_.snapshot;
-	frame.rows.clear();
+	// The builders size the kept row buffer themselves (each row is written whole), so it is
+	// not cleared and refilled here.
 	frame.door_phases.clear();
 	present_.last_snapshot_body_us = 0;
 	if (runtime_ && kernel_) {
@@ -755,6 +756,8 @@ std::shared_ptr<const SimulationPresentSnapshot> Simulation::build_present_snaps
 			opennova::inmatch::build_world_present_rows(context, present_.pool_lifecycle,
 					frame.rows, frame.door_phases);
 		}
+	} else {
+		frame.rows.clear();
 	}
 	present_.last_entity_count = static_cast<int>(frame.rows.size() / PF_STRIDE);
 	// Reuse the identity storage and compare exact fields, never a hash.

@@ -339,10 +339,20 @@ static void write_present_replica_slot_march(float *r, mission::MissionKernel &k
 			{shape.bbox_center_q16.x, shape.bbox_center_q16.y, shape.bbox_center_q16.z});
 }
 
+// The frame's row buffer at `rows` rows. Each row's writer initializes it whole
+// (initialize_client_replica_present_row zero-fills the row first), so the buffer the
+// snapshot keeps from frame to frame is resized, never filled again ahead of the writers
+// (D-NET-NEW-LF-22, LF-s19).
+static void size_present_rows(std::vector<float> &out, int rows) {
+	out.resize(static_cast<size_t>(rows) * PF_STRIDE);
+}
+
 void build_client_replica_present_rows(const PresentRowsContext &context,
 		PoolPresentLifecycleMap &lifecycle, std::vector<float> &out, DoorPhaseTable &door_phases) {
-	out.clear();
-	if (context.runtime == nullptr) return;
+	if (context.runtime == nullptr) {
+		out.clear();
+		return;
+	}
 	mission::MissionKernel &kernel = context.kernel;
 	ClientRuntime &runtime = *context.runtime;
 	const bool joiner = context.joiner;
@@ -355,7 +365,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			carried_object_types_by_carrier(cs);
 	const ClientReplicaPresentContext replica_present_context{
 			&kernel.seat_specs, &kernel.world.tables.weapons, joiner, &carried_types};
-	out.assign(static_cast<size_t>(count) * PF_STRIDE, 0.0f);
+	size_present_rows(out, count);
 	door_phases.clear();
 	float *w = out.data();
 	for (int i = 0; i < count; ++i) {
@@ -719,7 +729,6 @@ uint32_t replica_entity_flags_dword(const replication::ClientEntityState &es) {
 void build_world_present_rows(const PresentRowsContext &context,
 		PoolPresentLifecycleMap &lifecycle, std::vector<float> &out,
 		DoorPhaseTable &door_phases) {
-	out.clear();
 	mission::MissionKernel &kernel = context.kernel;
 	const World &w = kernel.world;
 	const Entity *local_player = w.registry.get(w.cached.local_player);
@@ -732,7 +741,7 @@ void build_world_present_rows(const PresentRowsContext &context,
 	// without a def keeps PF_TYPE_ID 0, which the wire pass skips.
 	int count = 0;
 	w.registry.for_each([&](const Entity &) { ++count; });
-	out.assign(static_cast<size_t>(count) * PF_STRIDE, 0.0f);
+	size_present_rows(out, count);
 	door_phases.clear();
 	float *rows = out.data();
 	int i = 0;
