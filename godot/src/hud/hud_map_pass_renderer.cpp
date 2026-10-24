@@ -16,8 +16,26 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <vector>
 
 using namespace godot;
+
+namespace {
+
+// A triangle run's vertex arrays, built natively and handed to the server in one copy per
+// array at its submit: no engine call per vertex. The device form of retail's map draw,
+// whose vertices go to the device in one batch per draw (D-NET-NEW-LF-22, LF-s18).
+template <class Packed, class T>
+Packed packed_copy(const std::vector<T> &p_values) {
+	Packed out;
+	out.resize(static_cast<int64_t>(p_values.size()));
+	if (!p_values.empty())
+		std::memcpy(out.ptrw(), p_values.data(), p_values.size() * sizeof(T));
+	return out;
+}
+
+} // namespace
 
 HudMapPassRenderer::~HudMapPassRenderer() {
 	release();
@@ -139,13 +157,14 @@ void HudMapPassRenderer::render(const opennova::hud::HudMapPass &p_map,
 	// map redraw must not request one RenderingServer polygon per triangle
 	// (each polygon is its own GPU buffer request — the per-tri form measured
 	// in whole milliseconds on missions with dense footprint sets).
-	PackedVector2Array points, uvs;
-	PackedColorArray colors;
-	PackedInt32Array indices;
+	std::vector<Vector2> points, uvs;
+	std::vector<Color> colors;
+	std::vector<int32_t> indices;
 	const auto flush_tris = [&](const RID &item, const Ref<Texture2D> &tex) {
-		if (indices.is_empty()) return;
-		rs->canvas_item_add_triangle_array(item, indices, points, colors, uvs,
-				PackedInt32Array(), PackedFloat32Array(),
+		if (indices.empty()) return;
+		rs->canvas_item_add_triangle_array(item, packed_copy<PackedInt32Array>(indices),
+				packed_copy<PackedVector2Array>(points), packed_copy<PackedColorArray>(colors),
+				packed_copy<PackedVector2Array>(uvs), PackedInt32Array(), PackedFloat32Array(),
 				tex.is_valid() ? tex->get_rid() : RID());
 		points.clear();
 		uvs.clear();
@@ -195,15 +214,23 @@ void HudMapPassRenderer::render(const opennova::hud::HudMapPass &p_map,
 	const Ref<Texture2D> &terrain_texture = p_textures.terrain;
 	for (const opennova::hud::HudMapTri &tri : p_map.terrain)
 		push_map_tri(tri);
-	if (!indices.is_empty()) {
+	if (!indices.empty()) {
 		// Second (additive) half of the x4 output stage — see ensure. The
-		// additive item repeats the same arrays.
-		rs->canvas_item_add_triangle_array(add_item, indices, points, colors,
-				uvs, PackedInt32Array(), PackedFloat32Array(),
-				terrain_texture.is_valid() ? terrain_texture->get_rid()
-						: RID());
+		// additive item repeats the same arrays (one copy for both items).
+		const PackedInt32Array terrain_indices = packed_copy<PackedInt32Array>(indices);
+		const PackedVector2Array terrain_points = packed_copy<PackedVector2Array>(points);
+		const PackedColorArray terrain_colors = packed_copy<PackedColorArray>(colors);
+		const PackedVector2Array terrain_uvs = packed_copy<PackedVector2Array>(uvs);
+		const RID terrain_rid = terrain_texture.is_valid() ? terrain_texture->get_rid() : RID();
+		rs->canvas_item_add_triangle_array(add_item, terrain_indices, terrain_points,
+				terrain_colors, terrain_uvs, PackedInt32Array(), PackedFloat32Array(), terrain_rid);
+		rs->canvas_item_add_triangle_array(base_item, terrain_indices, terrain_points,
+				terrain_colors, terrain_uvs, PackedInt32Array(), PackedFloat32Array(), terrain_rid);
+		points.clear();
+		uvs.clear();
+		colors.clear();
+		indices.clear();
 	}
-	flush_tris(base_item, terrain_texture);
 
 	// Retail's alpha-tested depthspin draw is opaque and follows the completed
 	// terrain output. Canvas splits that output across base/additive items, so
@@ -224,6 +251,8 @@ void HudMapPassRenderer::render(const opennova::hud::HudMapPass &p_map,
 		PackedColorArray line_colors;
 		line_points.resize(static_cast<int64_t>(lines.size()) * 2);
 		line_colors.resize(static_cast<int64_t>(lines.size()));
+		Vector2 *point_out = line_points.ptrw();
+		Color *color_out = line_colors.ptrw();
 		int64_t li = 0;
 		for (const opennova::hud::HudMapLine &line : lines) {
 			if (line.color_end != 0 && line.color_end != line.color) {
@@ -237,9 +266,9 @@ void HudMapPassRenderer::render(const opennova::hud::HudMapPass &p_map,
 				rs->canvas_item_add_polyline(top_item, ends, end_colors, 1.0f);
 				continue;
 			}
-			line_points.set(li * 2, Vector2(line.x0, line.y0));
-			line_points.set(li * 2 + 1, Vector2(line.x1, line.y1));
-			line_colors.set(li, opennova::color_from_argb(line.color));
+			point_out[li * 2] = Vector2(line.x0, line.y0);
+			point_out[li * 2 + 1] = Vector2(line.x1, line.y1);
+			color_out[li] = opennova::color_from_argb(line.color);
 			++li;
 		}
 		if (li == 0) return;
@@ -283,12 +312,12 @@ void HudMapPassRenderer::render(const opennova::hud::HudMapPass &p_map,
 
 	// One sprite run onto the top item, and its copy into the owner's record.
 	const auto flush_sprites = [&](int slot, const Ref<Texture2D> &tex) {
-		if (record_ != nullptr && !indices.is_empty()) {
+		if (record_ != nullptr && !indices.empty()) {
 			Dictionary row;
 			row["texture"] = slot;
 			row["size"] = tex.is_valid() ? Vector2i(tex->get_width(), tex->get_height()) : Vector2i();
-			row["uvs"] = uvs;
-			row["colors"] = colors;
+			row["uvs"] = packed_copy<PackedVector2Array>(uvs);
+			row["colors"] = packed_copy<PackedColorArray>(colors);
 			record_->push_back(row);
 		}
 		flush_tris(top_item, tex);
