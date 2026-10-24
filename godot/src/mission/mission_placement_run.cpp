@@ -541,8 +541,7 @@ void MissionObjectPlacer::_place_static_group(MissionPlacementRun &p_run, int p_
 			StaticPopulation &slots = static_populations_.write[population_index];
 			slots.slot_instance.push_back(instance_row);
 			slots.slot_binding.push_back(retained.bindings.size() - 1);
-			if (_static_slot_live(binding, retained.active_lod, retained.inset_lod,
-						retained.view_split)) {
+			if (_static_slot_live(binding, retained.active_lod, retained)) {
 				_static_population_append(population_index, instance_row,
 						retained.bindings.size() - 1);
 			}

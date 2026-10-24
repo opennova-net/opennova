@@ -476,9 +476,53 @@ func test_static_instance_moves_into_view_twin_populations_while_the_views_diffe
 		assert_eq((twin as MultiMeshInstance3D).layers, INSET_VIEW)
 	for twin in parent.find_children("*_MainView", "MultiMeshInstance3D", true, false):
 		assert_eq((twin as MultiMeshInstance3D).layers & WORLD_BITS, 0)
-		assert_ne((twin as MultiMeshInstance3D).layers & MAIN_VIEW_BITS, 0)
+		# The beauty camera's own bit: neither the Inset nor a mirror admits it
+		# (each draws from its own twin population while the views differ).
+		assert_eq((twin as MultiMeshInstance3D).layers & MAIN_VIEW_BITS, 0)
+		assert_ne((twin as MultiMeshInstance3D).layers & (1 << 27), 0)
 	# The views converge when the Inset closes: back in the shared population.
 	placer.update_static_lods_for_views(main, 640.0, null, 0.0)
+	names = placer.get_static_instance_live_populations(bms_id)
+	assert_eq(names.size(), 1)
+	assert_false(String(names[0]).ends_with("View"), "the shared population: %s" % [names])
+
+
+func test_a_static_the_mirror_draws_at_its_own_level_takes_mirror_rows() -> void:
+	var placer := _static_placer()
+	var placed := _place(placer, 106403)
+	var bms_id: int = placed.entities[0].bms_id
+	# 50 u out the crate projects to 22.2 px in the 640 px main image (level 0,
+	# over the 20 px row) and to 17.8 px in its mirror's collect, whose focal is
+	# the 512 px target's over the same horizontal field (level 1): the mirror
+	# draws its own level from its own twin population (engine environment/
+	# water_mirror.h mirror_collect_focal_pixels). Below the water the mirror
+	# admits the crate's own layer.
+	var main := _view_camera(Vector2i(640, 480), 90.0, 50.0)
+	placer.set_static_mirror_view_state(0, true, true)
+	placer.update_static_lods_for_mirror_view(main, 640.0)
+	assert_eq(placer.get_static_instance_lod(bms_id), 0)
+	assert_eq(placer.get_static_instance_mirror_lod(0, bms_id), 1)
+	var names: Array = placer.get_static_instance_live_populations(bms_id)
+	var main_rows := 0
+	var mirror_rows := 0
+	for population_name in names:
+		if String(population_name).ends_with("_MainView"):
+			main_rows += 1
+		elif String(population_name).ends_with("_MirrorView"):
+			mirror_rows += 1
+	assert_eq(names.size(), 2, "no shared row while the views differ: %s" % [names])
+	assert_eq(main_rows, 1, "the main view's level in its main-view twin")
+	assert_eq(mirror_rows, 1, "the mirror's level in its mirror twin")
+	var parent: Node3D = placed.parent
+	for twin in parent.find_children("*_MirrorView", "MultiMeshInstance3D", true, false):
+		assert_eq((twin as MultiMeshInstance3D).layers, 1 << 24, "the mirror's own bit alone")
+	# The mirror's own collect drops it: the mirror draws none.
+	placer.set_static_instance_mirror_occlusion_hidden(0, bms_id, true)
+	placer.update_static_lods_for_mirror_view(main, 640.0)
+	assert_eq(placer.get_static_instance_mirror_lod(0, bms_id), -1)
+	# The mirror closes: back in the shared population.
+	placer.set_static_mirror_view_state(0, false, false)
+	placer.update_static_lods_for_mirror_view(main, 640.0)
 	names = placer.get_static_instance_live_populations(bms_id)
 	assert_eq(names.size(), 1)
 	assert_false(String(names[0]).ends_with("View"), "the shared population: %s" % [names])

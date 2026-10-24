@@ -117,6 +117,17 @@ void MissionObjectPlacer::_bind_methods() {
 			DEFVAL(opennova::renderer::kObjectLodDetailLevelMax));
 	ClassDB::bind_method(D_METHOD("get_static_instance_inset_lod", "bms_id"),
 			&MissionObjectPlacer::get_static_instance_inset_lod);
+	ClassDB::bind_method(D_METHOD("update_static_lods_for_mirror_view", "main_camera", "main_width",
+								 "object_detail"),
+			&MissionObjectPlacer::update_static_lods_for_mirror_view,
+			DEFVAL(opennova::renderer::kObjectLodDetailLevelMax));
+	ClassDB::bind_method(D_METHOD("set_static_mirror_view_state", "view", "open", "below_water"),
+			&MissionObjectPlacer::set_static_mirror_view_state);
+	ClassDB::bind_method(D_METHOD("set_static_instance_mirror_occlusion_hidden", "view", "bms_id",
+								 "hidden"),
+			&MissionObjectPlacer::set_static_instance_mirror_occlusion_hidden);
+	ClassDB::bind_method(D_METHOD("get_static_instance_mirror_lod", "view", "bms_id"),
+			&MissionObjectPlacer::get_static_instance_mirror_lod);
 	ClassDB::bind_method(
 			D_METHOD("get_static_instance_live_populations", "bms_id"),
 			&MissionObjectPlacer::get_static_instance_live_populations);
@@ -1092,10 +1103,14 @@ int MissionObjectPlacer::update_static_lod_views(const ObjectLodFrame *p_frames,
 	if (static_lod_instances_.is_empty() || p_frames == nullptr) {
 		return 0;
 	}
-	const int view_count = std::clamp(p_frame_count, 0, 2);
+	const int view_count = std::clamp(p_frame_count, 0, 4);
 	const bool inset = view_count > 1 && p_frames[1].valid;
+	bool mirror[2] = { false, false };
+	for (int m = 0; m < 2; ++m) {
+		mirror[m] = static_mirror_open_[m] && view_count > 2 + m && p_frames[2 + m].valid;
+	}
 	int valid_frames = 0;
-	for (int f = 0; f < view_count; ++f) {
+	for (int f = 0; f < std::min(view_count, 2); ++f) {
 		valid_frames += p_frames[f].valid ? 1 : 0;
 	}
 	if (valid_frames == 0) {
@@ -1146,11 +1161,36 @@ int MissionObjectPlacer::update_static_lod_views(const ObjectLodFrame *p_frames,
 													   : instance.occlusion_hidden,
 						  instance.inset_lod_own ? instance.inset_lod : main_lod)
 				: main_lod;
-		const bool split = inset && inset_lod != main_lod;
-		const bool unchanged = main_lod == instance.active_lod &&
-				split == instance.view_split && (!split || inset_lod == instance.inset_lod);
-		instance.inset_lod = inset_lod;
-		instance.inset_lod_own = inset;
+		// Each water mirror's own walk: its verdict (else the main view's by
+		// the water side) and the level its collect's projection selects;
+		// the shared rows show it the main level where it admits their layer.
+		int mirror_lod[2] = { -1, -1 };
+		bool mirror_differs = false;
+		for (int m = 0; m < 2; ++m) {
+			if (!mirror[m]) {
+				continue;
+			}
+			const bool admits = _static_instance_reflected(row) || static_mirror_below_[m];
+			// The walk above may have grown the instance array.
+			instances = static_lod_instances_.ptrw();
+			StaticLodInstance &self = instances[row];
+			const bool hidden = self.mirror_occlusion_own[m] ? self.mirror_occlusion_hidden[m]
+															: (self.occlusion_hidden || !admits);
+			mirror_lod[m] = view_level(p_frames[2 + m], hidden,
+					self.mirror_lod[m] >= 0 ? self.mirror_lod[m] : main_lod);
+			mirror_differs = mirror_differs || mirror_lod[m] != (admits ? main_lod : -1);
+		}
+		StaticLodInstance &current = instances[row];
+		const bool split = (inset && inset_lod != main_lod) || mirror_differs;
+		const bool unchanged = main_lod == current.active_lod && split == current.view_split &&
+				inset == current.inset_view &&
+				(!split || (inset_lod == current.inset_lod && mirror_lod[0] == current.mirror_lod[0] &&
+								   mirror_lod[1] == current.mirror_lod[1]));
+		current.inset_lod = inset_lod;
+		current.inset_lod_own = inset;
+		current.inset_view = inset;
+		current.mirror_lod[0] = mirror_lod[0];
+		current.mirror_lod[1] = mirror_lod[1];
 		if (unchanged) {
 			continue;
 		}
@@ -1183,6 +1223,17 @@ int MissionObjectPlacer::update_static_lods_for_views(Camera3D *p_main, float p_
 	return update_static_lod_views(frames, count);
 }
 
+int MissionObjectPlacer::update_static_lods_for_mirror_view(Camera3D *p_main,
+		float p_main_width, int p_object_detail) {
+	ObjectLodFrame frames[4];
+	frames[0] = ObjectLodFrame::from_camera(p_main, p_main_width, p_object_detail);
+	if (frames[0].valid) {
+		frames[2] = ObjectLodFrame::mirror_collect(p_main->get_global_transform(),
+				frames[0].tan_half_horizontal, p_main_width, p_object_detail);
+	}
+	return update_static_lod_views(frames, 4);
+}
+
 void MissionObjectPlacer::set_static_instance_inset_occlusion_hidden(int p_bms_id,
 		bool p_hidden) {
 	const auto *rec = static_sources_.instance(p_bms_id);
@@ -1201,6 +1252,69 @@ void MissionObjectPlacer::clear_static_instance_inset_occlusion() {
 		instances[row].inset_occlusion_hidden = false;
 		instances[row].inset_occlusion_own = false;
 	}
+}
+
+void MissionObjectPlacer::set_static_instance_mirror_occlusion_hidden(int p_view, int p_bms_id,
+		bool p_hidden) {
+	const auto *rec = static_sources_.instance(p_bms_id);
+	if (p_view < 0 || p_view > 1 || rec == nullptr || rec->lod_instance < 0 ||
+			rec->lod_instance >= static_lod_instances_.size()) {
+		return;
+	}
+	StaticLodInstance &instance = static_lod_instances_.ptrw()[rec->lod_instance];
+	instance.mirror_occlusion_hidden[p_view] = p_hidden;
+	instance.mirror_occlusion_own[p_view] = true;
+}
+
+void MissionObjectPlacer::set_static_mirror_view_state(int p_view, bool p_open,
+		bool p_below_water) {
+	if (p_view < 0 || p_view > 1) {
+		return;
+	}
+	static_mirror_below_[p_view] = p_below_water;
+	if (static_mirror_open_[p_view] == p_open) {
+		return;
+	}
+	static_mirror_open_[p_view] = p_open;
+	if (p_open) {
+		return;
+	}
+	StaticLodInstance *instances = static_lod_instances_.ptrw();
+	for (int row = 0; row < static_lod_instances_.size(); ++row) {
+		instances[row].mirror_occlusion_hidden[p_view] = false;
+		instances[row].mirror_occlusion_own[p_view] = false;
+	}
+}
+
+int MissionObjectPlacer::get_static_instance_mirror_lod(int p_view, int p_bms_id) const {
+	const auto *rec = static_sources_.instance(p_bms_id);
+	if (p_view < 0 || p_view > 1 || rec == nullptr || rec->lod_instance < 0 ||
+			rec->lod_instance >= static_lod_instances_.size()) {
+		return -2;
+	}
+	const StaticLodInstance &instance = static_lod_instances_[rec->lod_instance];
+	return instance.view_split ? instance.mirror_lod[p_view] : instance.active_lod;
+}
+
+bool MissionObjectPlacer::_static_instance_reflected(int p_instance_row) {
+	StaticLodInstance &instance = static_lod_instances_.write[p_instance_row];
+	if (instance.reflected >= 0) {
+		return instance.reflected != 0;
+	}
+	instance.reflected = 0;
+	for (const StaticLodBinding &binding : instance.bindings) {
+		if (binding.view != kStaticViewShared || binding.shadow_only || binding.population < 0 ||
+				binding.population >= static_populations_.size()) {
+			continue;
+		}
+		const MultiMeshInstance3D *node = Object::cast_to<MultiMeshInstance3D>(
+				ObjectDB::get_instance(static_populations_[binding.population].instance_node));
+		if (node != nullptr) {
+			instance.reflected = (node->get_layer_mask() & visual_layers::WORLD) != 0 ? 1 : 0;
+			break;
+		}
+	}
+	return instance.reflected != 0;
 }
 
 int MissionObjectPlacer::get_static_instance_inset_lod(int p_bms_id) const {
@@ -1228,13 +1342,20 @@ void MissionObjectPlacer::_ensure_static_view_twins(int p_instance_row) {
 		}
 		_static_view_twin(binding.population, kStaticViewMain);
 		_static_view_twin(binding.population, kStaticViewInset);
+		for (int m = 0; m < 2; ++m) {
+			if (static_mirror_open_[m]) {
+				_static_view_twin(binding.population,
+						m == 0 ? kStaticViewMirror : kStaticViewInsetMirror);
+			}
+		}
 	}
 }
 
 // The main-view twin keeps the source's layer with the world bits swapped for
-// the main-view bits the Inset camera lacks (its casting, Q3 source and
-// shadow metas kept); the Inset twin carries the Inset bit alone and casts
-// nothing (render/visual_layers.h carries the per-view design).
+// the beauty camera's alone, which neither the Inset camera nor a mirror
+// admits (its casting, Q3 source and shadow metas kept); the Inset twin and
+// each mirror's carry that view's own bit alone and cast nothing
+// (render/visual_layers.h carries the per-view design).
 int MissionObjectPlacer::_static_view_twin(int p_population, uint8_t p_view) {
 	if (p_population < 0 || p_population >= static_populations_.size()) {
 		return -1;
@@ -1244,7 +1365,9 @@ int MissionObjectPlacer::_static_view_twin(int p_population, uint8_t p_view) {
 		if (source.view != kStaticViewShared || source.shadow_only) {
 			return -1;
 		}
-		const int existing = p_view == kStaticViewMain ? source.main_twin : source.inset_twin;
+		const int existing = p_view == kStaticViewMain ? source.main_twin
+				: p_view == kStaticViewInset              ? source.inset_twin
+				: source.mirror_twin[p_view == kStaticViewMirror ? 0 : 1];
 		if (existing >= 0) {
 			return existing;
 		}
@@ -1277,15 +1400,14 @@ int MissionObjectPlacer::_static_view_twin(int p_population, uint8_t p_view) {
 	StaticPopulationInstance *mmi = memnew(StaticPopulationInstance);
 	mmi->set_multimesh(mm);
 	mmi->set_custom_aabb(source_node->get_custom_aabb());
-	uint32_t layer = visual_layers::INSET_VIEW;
+	uint32_t layer = p_view == kStaticViewInset ? uint32_t(visual_layers::INSET_VIEW)
+			: p_view == kStaticViewMirror           ? uint32_t(visual_layers::MIRROR_VIEW)
+													: uint32_t(visual_layers::INSET_MIRROR_VIEW);
 	if (p_view == kStaticViewMain) {
+		constexpr uint32_t kWorld = visual_layers::WORLD | visual_layers::WORLD_NO_MIRROR;
 		layer = source_node->get_layer_mask();
-		if ((layer & visual_layers::WORLD) != 0) {
-			layer = (layer & ~uint32_t(visual_layers::WORLD)) | visual_layers::MAIN_VIEW;
-		}
-		if ((layer & visual_layers::WORLD_NO_MIRROR) != 0) {
-			layer = (layer & ~uint32_t(visual_layers::WORLD_NO_MIRROR)) |
-					visual_layers::MAIN_VIEW_NO_MIRROR;
+		if ((layer & kWorld) != 0) {
+			layer = (layer & ~kWorld) | visual_layers::MAIN_VIEW_NO_REFLECTION;
 		}
 	}
 	mmi->set_layer_mask(layer);
@@ -1298,7 +1420,10 @@ int MissionObjectPlacer::_static_view_twin(int p_population, uint8_t p_view) {
 	mmi->set_bin_x(source_node->get_bin_x());
 	mmi->set_bin_z(source_node->get_bin_z());
 	mmi->set_name(String(source_node->get_name()) +
-			(p_view == kStaticViewMain ? "_MainView" : "_InsetView"));
+			(p_view == kStaticViewMain		  ? "_MainView"
+					: p_view == kStaticViewInset  ? "_InsetView"
+					: p_view == kStaticViewMirror ? "_MirrorView"
+												  : "_InsetMirrorView"));
 	if (source.shadow_tagged) {
 		mmi->set_shadow_tagged(true);
 		mmi->set_slot_bms_ids(source_node->get_slot_bms_ids());
@@ -1311,7 +1436,10 @@ int MissionObjectPlacer::_static_view_twin(int p_population, uint8_t p_view) {
 	static_populations_.push_back(twin);
 	const int index = static_populations_.size() - 1;
 	StaticPopulation &source_row = static_populations_.write[p_population];
-	(p_view == kStaticViewMain ? source_row.main_twin : source_row.inset_twin) = index;
+	(p_view == kStaticViewMain		  ? source_row.main_twin
+			: p_view == kStaticViewInset ? source_row.inset_twin
+										 : source_row.mirror_twin[p_view == kStaticViewMirror ? 0 : 1]) =
+			index;
 	static_population_by_node_[twin.instance_node] = index;
 	mmi->set_visible(false);
 	if (source.shadow_tagged) {
@@ -1404,13 +1532,20 @@ int MissionObjectPlacer::get_static_live_population_count() const {
 	return live;
 }
 
-bool MissionObjectPlacer::_static_slot_live(const StaticLodBinding &p_binding,
-		int p_main_lod, int p_inset_lod, bool p_split) {
+bool MissionObjectPlacer::_static_slot_live(const StaticLodBinding &p_binding, int p_main_lod,
+		const StaticLodInstance &p_instance) {
+	// A carved instance draws in no view; otherwise its split decision and the
+	// other views' levels ride the instance record.
+	const bool p_split = !p_instance.carved && p_instance.view_split;
 	switch (p_binding.view) {
 		case kStaticViewMain:
 			return p_split && p_binding.lod_index == p_main_lod;
 		case kStaticViewInset:
-			return p_split && p_binding.lod_index == p_inset_lod;
+			return p_split && p_instance.inset_view && p_binding.lod_index == p_instance.inset_lod;
+		case kStaticViewMirror:
+			return p_split && p_binding.lod_index == p_instance.mirror_lod[0];
+		case kStaticViewInsetMirror:
+			return p_split && p_binding.lod_index == p_instance.mirror_lod[1];
 		default:
 			break;
 	}
@@ -1427,11 +1562,6 @@ void MissionObjectPlacer::_write_static_instance_slots(int p_instance_row,
 	if (p_instance_row < 0 || p_instance_row >= static_lod_instances_.size()) {
 		return;
 	}
-	// A carved instance draws in no view; otherwise its split decision and
-	// Inset level ride the instance record.
-	const bool carved = static_lod_instances_[p_instance_row].carved;
-	const bool split = !carved && static_lod_instances_[p_instance_row].view_split;
-	const int inset_lod = split ? static_lod_instances_[p_instance_row].inset_lod : -1;
 	const int binding_count =
 			static_lod_instances_[p_instance_row].bindings.size();
 	for (int binding_index = 0; binding_index < binding_count; ++binding_index) {
@@ -1441,7 +1571,8 @@ void MissionObjectPlacer::_write_static_instance_slots(int p_instance_row,
 				binding.population >= static_populations_.size()) {
 			continue;
 		}
-		const bool live = _static_slot_live(binding, p_live_lod, inset_lod, split);
+		const bool live = _static_slot_live(binding, p_live_lod,
+				static_lod_instances_[p_instance_row]);
 		if (live == (binding.row >= 0)) {
 			continue;
 		}

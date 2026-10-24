@@ -1652,7 +1652,7 @@ void GameWorld::render_material_frame() {
 		// The retained static instances select their RLOD per entity from the
 		// same views (the placer rewrites only the slots that crossed).
 		if (placer_.is_valid()) {
-			placer_->update_static_lod_views(frames, frame_count);
+			placer_->update_static_lod_views(frames, 4);
 		}
 	}
 	// The Inset pass's own light legs over the twins and verdicts just

@@ -506,6 +506,10 @@ void OcclusionFrame::apply_mirror_view(int p_view, bool p_ran, bool p_below_wate
 	}
 	mirror_active_[p_view] = true;
 	ObjectModel::set_mirror_view_state(p_view, true, p_below_water);
+	MissionObjectPlacer *statics = placer();
+	if (statics != nullptr) {
+		statics->set_static_mirror_view_state(p_view, true, p_below_water);
+	}
 	const MirrorOcclusionView &view = s->mirror_occlusion(static_cast<Simulation::MirrorView>(p_view));
 	// Its building verdicts, as changes (the main leg's triple form): its raw
 	// section mask and batch/TOC visibility.
@@ -516,6 +520,10 @@ void OcclusionFrame::apply_mirror_view(int p_view, bool p_ran, bool p_below_wate
 					Simulation::building_visibility_mask(changes[i + 1]), changes[i + 2]);
 			node->set_mirror_occlusion_hidden(p_view,
 					!Simulation::building_visibility_visible(changes[i + 1]));
+		} else if (statics != nullptr) {
+			statics->set_static_instance_mirror_occlusion_hidden(p_view,
+					static_cast<int>(changes[i]),
+					!Simulation::building_visibility_visible(changes[i + 1]));
 		}
 	}
 	// Its entity render gates, as changes.
@@ -525,11 +533,15 @@ void OcclusionFrame::apply_mirror_view(int p_view, bool p_ran, bool p_below_wate
 		for (int64_t i = 1; i < 1 + added; ++i) {
 			if (ObjectModel *node = occlusion_node(registry, culled[i])) {
 				node->set_mirror_occlusion_hidden(p_view, true);
+			} else if (statics != nullptr) {
+				statics->set_static_instance_mirror_occlusion_hidden(p_view, culled[i], true);
 			}
 		}
 		for (int64_t i = 2 + added; i < culled.size(); ++i) {
 			if (ObjectModel *node = occlusion_node(registry, culled[i])) {
 				node->set_mirror_occlusion_hidden(p_view, false);
+			} else if (statics != nullptr) {
+				statics->set_static_instance_mirror_occlusion_hidden(p_view, culled[i], false);
 			}
 		}
 	}
@@ -557,6 +569,9 @@ void OcclusionFrame::release_mirror(int p_view) {
 	}
 	mirror_active_[p_view] = false;
 	ObjectModel::set_mirror_view_state(p_view, false, false);
+	if (MissionObjectPlacer *statics = placer()) {
+		statics->set_static_mirror_view_state(p_view, false, false);
+	}
 	if (EntityPresenter *presenter = entities()) {
 		presenter->set_wire_mirror_view(p_view, false);
 	}
