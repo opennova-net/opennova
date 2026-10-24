@@ -400,14 +400,17 @@ function Copy-ImGuiLibs {
 
 # A full package carries every current runtime file. Previous release removals
 # are retained so clients can skip releases. Content and expansion files are
-# separate products; the base builder omits expansion/ from ONRUNTIME.
+# separate products; the base builder omits expansion/ from ONRUNTIME. Its
+# command file ships in the zip beside the files it lists, so a fresh install's
+# first check finds the runtime current instead of fetching it again.
 function New-RuntimeUpdate {
     param([string]$StageDir)
     $empty = New-StageDir ".stage-update-empty"
+    $command = Join-Path $StageDir "ONRUNTIME.CMD"
     try {
         $arguments = @("build", "--from", $empty, "--to", $StageDir, "--out", $RUNTIME_SFS,
             "--base", "ONRUNTIME.CMD", "--product-name", "OpenNova Runtime", "--exe", "opennova.exe",
-            "--version-file", "onversion.txt", "--full")
+            "--version-file", "onversion.txt", "--full", "--command-out", $command)
         if ($PreviousRuntimePackage) { $arguments += @("--previous", $PreviousRuntimePackage) }
         & $UPDATE_TOOL @arguments
         if ($LASTEXITCODE -ne 0) { throw "Building the full runtime update failed" }
@@ -456,19 +459,20 @@ function Test-UpdaterBoot {
         $exe = Join-Path $StageDir "update.exe"
         Invoke-UpdaterSmoke -Exe $exe -Arguments "--help" -ExpectedExit 0 -LogDir $smoke
         Invoke-UpdaterSmoke -Exe $exe -Arguments "--check /game unknown" -ExpectedExit 2 -LogDir $smoke
-        # An empty product has no pending rows, proving the public current=0
-        # result without teaching this packaging script to decode SFS files.
+        # A JO product with no rows (as the service answers an unpublished retail
+        # product) proves the public current=0 result without teaching this
+        # packaging script to decode SFS files.
         $empty = Join-Path $smoke "empty"
         New-Item -ItemType Directory -Path $empty | Out-Null
-        $emptyPackage = Join-Path $smoke "current.sfs"
-        & $UPDATE_TOOL build --from $empty --to $empty --out $emptyPackage --base ONEMPTY.CMD --full
+        $joPackage = Join-Path $smoke "jo.sfs"
+        & $UPDATE_TOOL build --from $empty --to $empty --out $joPackage --base JOPTR.CMD --full
         if ($LASTEXITCODE -ne 0) { throw "Building the current-product smoke fixture failed" }
         $probe = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
         $probe.Start()
         $port = $probe.LocalEndpoint.Port
         $probe.Stop()
         $server = Start-Process -FilePath $UPDATE_TOOL -WindowStyle Hidden -PassThru `
-            -ArgumentList "serve --package `"$RUNTIME_SFS`" --package `"$emptyPackage`" --product ONRUNTIME=ONRUNTIME.CMD --product ONEMPTY=ONEMPTY.CMD --server-host 127.0.0.1 --port $port --loopback" `
+            -ArgumentList "serve --package `"$RUNTIME_SFS`" --package `"$joPackage`" --product ONRUNTIME=ONRUNTIME.CMD --product JOTRus=JOPTR.CMD --server-host 127.0.0.1 --port $port --loopback" `
             -RedirectStandardOutput (Join-Path $smoke "server.log") -RedirectStandardError (Join-Path $smoke "server-error.log")
         $ready = $false
         $deadline = [DateTime]::UtcNow.AddSeconds(20)
@@ -479,27 +483,32 @@ function Test-UpdaterBoot {
             finally { $socket.Dispose() }
         }
         if (-not $ready) { throw "Loopback updater smoke server did not start" }
-        $current = Join-Path $smoke "current"
-        New-Item -ItemType Directory -Path $current | Out-Null
-        $wizard = "[HEADER]`r`nCMD=ONEMPTY.CMD`r`nURL=127.0.0.1`r`nPRODUCT_LOGIN=ONEMPTY`r`n"
-        [IO.File]::WriteAllText((Join-Path $current "OPENNOVA.WIZ"), $wizard)
-        [IO.File]::WriteAllText((Join-Path $current "UPDATE.WIZ"), $wizard)
+        # A JO-shaped folder: JO:CA's wizard (its CMD names the product) and nothing else.
+        $jo = Join-Path $smoke "jo"
+        New-Item -ItemType Directory -Path $jo | Out-Null
+        [IO.File]::WriteAllText((Join-Path $jo "UPDATE.WIZ"), "[HEADER]`r`nCMD=JOPTR.CMD`r`nURL=127.0.0.1`r`nPRODUCT_LOGIN=JOTRqq`r`n")
+        # The staged runtime (its ONRUNTIME.CMD beside it) and the JO folder are both
+        # current: 0, with /game and with the folder's wizard choosing the product.
         Invoke-UpdaterSmoke -Exe $exe -ExpectedExit 0 -LogDir $smoke `
-            -Arguments "--check /game jo --runtime-dir `"$current`" --resource-dir `"$current`" --server 127.0.0.1 --port $port"
-        Assert-StageHoldsOnly -StageDir $current -Staged @("OPENNOVA.WIZ", "UPDATE.WIZ")
-        # The synthetic selected-game directory holds only its wizard. Both
-        # runtime and selected content are checked; missing rows report 10.
-        $content = Join-Path $smoke "content"
-        New-Item -ItemType Directory -Path $content | Out-Null
-        [IO.File]::WriteAllText((Join-Path $content "UPDATE.WIZ"), "[HEADER]`r`nCMD=ONRUNTIME.CMD`r`nURL=127.0.0.1`r`nPRODUCT_LOGIN=ONRUNTIME`r`n")
+            -Arguments "--check /game jo --runtime-dir `"$StageDir`" --resource-dir `"$jo`" --server 127.0.0.1 --port $port"
+        Invoke-UpdaterSmoke -Exe $exe -ExpectedExit 0 -LogDir $smoke `
+            -Arguments "--check --runtime-dir `"$StageDir`" --resource-dir `"$jo`" --server 127.0.0.1 --port $port"
+        Assert-StageHoldsOnly -StageDir $jo -Staged @("UPDATE.WIZ")
+        # A runtime directory holding only its wizard lacks every runtime row: 10.
+        $bare = Join-Path $smoke "bare"
+        New-Item -ItemType Directory -Path $bare | Out-Null
+        Copy-Item -LiteralPath (Join-Path $StageDir "OPENNOVA.WIZ") -Destination $bare
         Invoke-UpdaterSmoke -Exe $exe -ExpectedExit 10 -LogDir $smoke `
-            -Arguments "--check /game jo --runtime-dir `"$StageDir`" --resource-dir `"$content`" --server 127.0.0.1 --port $port"
-        Assert-StageHoldsOnly -StageDir $content -Staged @("UPDATE.WIZ")
+            -Arguments "--check /game jo --runtime-dir `"$bare`" --resource-dir `"$jo`" --server 127.0.0.1 --port $port"
+        Assert-StageHoldsOnly -StageDir $bare -Staged @("OPENNOVA.WIZ")
+        # OpenNova content never targets another game's folder: refused before any row.
+        Invoke-UpdaterSmoke -Exe $exe -ExpectedExit 1 -LogDir $smoke `
+            -Arguments "--check /game opennova --runtime-dir `"$StageDir`" --resource-dir `"$jo`" --server 127.0.0.1 --port $port"
         $server.Kill()
         $server.WaitForExit()
         Invoke-UpdaterSmoke -Exe $exe -ExpectedExit 1 -LogDir $smoke `
-            -Arguments "--check /game jo --runtime-dir `"$StageDir`" --resource-dir `"$content`" --server 127.0.0.1 --port $port"
-        Assert-StageHoldsOnly -StageDir $content -Staged @("UPDATE.WIZ")
+            -Arguments "--check /game jo --runtime-dir `"$bare`" --resource-dir `"$jo`" --server 127.0.0.1 --port $port"
+        Assert-StageHoldsOnly -StageDir $jo -Staged @("UPDATE.WIZ")
     }
     finally {
         if ($null -ne $server) {
@@ -599,6 +608,7 @@ only needed for the original Jointops.exe and dfx2.exe.
     $staged.Add("README.txt")
     Test-GodotAppBoot -ExePath $stagedExe
     New-RuntimeUpdate -StageDir $stagePath
+    $staged.Add("ONRUNTIME.CMD")
     Test-UpdaterBoot -StageDir $stagePath
     Assert-StageHoldsOnly -StageDir $stagePath -Staged $staged
     Compress-Archive -Path (Join-Path $stagePath "*") -DestinationPath $GAME_ZIP -Force
