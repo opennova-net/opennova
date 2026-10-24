@@ -465,7 +465,7 @@ function Test-UpdaterBoot {
         $empty = Join-Path $smoke "empty"
         New-Item -ItemType Directory -Path $empty | Out-Null
         $joPackage = Join-Path $smoke "jo.sfs"
-        & $UPDATE_TOOL build --from $empty --to $empty --out $joPackage --base JOPTR.CMD --full
+        & $UPDATE_TOOL build --from $empty --to $empty --out $joPackage --base JOPTR.CMD --version 1.7.5.7 --full
         if ($LASTEXITCODE -ne 0) { throw "Building the current-product smoke fixture failed" }
         $probe = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
         $probe.Start()
