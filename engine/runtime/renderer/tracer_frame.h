@@ -115,8 +115,18 @@ struct TracerVec3 {
 // same subscene under its own mirrored block [orig: Render_WeaponInsetScene @0x5C9740 -
 // the Render_TerrainScene call @0x5C99B7; Render_TerrainScene @0x610C80 - the
 // Water_ReflectionPrerender call @0x610CE0; Water_ReflectionPrerender @0x5C2780 - the
-// Render_MainScene call @0x5C27C6]. So each view that draws the pool builds its own
-// frame against its own eye: the scene's and each rendering mirror's.
+// Render_MainScene call @0x5C27C6]. The weapon Inset's scene runs the world scene, the
+// pool's two passes among it, under the Inset's own block and the projection of its own
+// field [orig: Render_WeaponInsetScene @0x5C9740 - Viewport_BuildProjectionMatrix
+// (&g_MainViewport, the Inset block) the call @0x5C99CB, past its mirror's prerender,
+// Render_SetViewProjectionWithDefaults at the block's fov the call @0x5C9DAE,
+// Terrain_RenderWorldScene the call @0x5C9DE9; Terrain_RenderWorldScene @0x5C93A0 - the
+// pool's calls @0x5C95AC / @0x5C9687]; the projection's _11 the minimum width reads is
+// that view's field's cotangent whatever its target [orig: Render_SetViewProjectionWithDefaults
+// @0x58F6B0 - the Render_SetViewAndProjectionMatrices call @0x58F6CF;
+// Render_SetViewAndProjectionMatrices @0x58D900 - the D3DXMatrixPerspectiveFovLH call
+// @0x58D9DE]. So each view that draws the pool builds its own frame against its own eye,
+// view and field: the main scene's, the weapon Inset's and each rendering mirror's.
 struct TracerView {
 	TracerVec3 camera;                  // the eye [orig: byte_A78364]
 	// The view matrix's third column: the look direction, either sign

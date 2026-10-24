@@ -280,7 +280,8 @@ func test_tracer_rung_follows_the_eye_water_side() -> void:
 	presenter.teardown()
 
 
-const SCENE_VIEW_NO_REFLECTION := 1 << 26
+const MAIN_VIEW_NO_REFLECTION := 1 << 27
+const INSET_VIEW := 1 << 21
 const MIRROR_VIEW := 1 << 24
 const INSET_MIRROR_VIEW := 1 << 25
 
@@ -348,9 +349,9 @@ func test_a_mirror_builds_its_ribbons_against_its_own_eye() -> void:
 		6.0, 1.0, 0.0, 1.0,
 	])
 
-	# The scene views' ribbons and each mirror's ride their own bits.
+	# The main view's ribbons and each mirror's ride their own bits.
 	assert_eq((container.get_node("FireTracers") as MeshInstance3D).layers,
-			SCENE_VIEW_NO_REFLECTION, "the scene views' ribbons: no mirror admits the bit")
+			MAIN_VIEW_NO_REFLECTION, "the main view's ribbons: no other view admits the bit")
 	assert_eq((container.get_node("FireTracersMirror") as MeshInstance3D).layers,
 			MIRROR_VIEW, "the main scene's mirror draws its own")
 	assert_eq((container.get_node("FireTracersInsetMirror") as MeshInstance3D).layers,
@@ -404,6 +405,74 @@ func test_a_mirror_builds_its_ribbons_against_its_own_eye() -> void:
 				"below the water the mirror's ribbons are the live eye's")
 	assert_eq(presenter.fire_mirror_ribbon_mesh(1).get_surface_count(), 1,
 			"the Inset's mirror renders: it builds its own")
+	presenter.teardown()
+
+
+# The weapon Inset's scene runs the world scene, the tracer pool's passes among it,
+# under the Inset's own block and the projection of its own field, so its ribbons face
+# the Inset's eye and take the minimum width its field gives: far off, a zoomed Inset's
+# ribbons are as much narrower as its field's cotangent is larger, while the main
+# view's stay its own. The Inset's camera is the effect world's second scene camera.
+# [orig: Render_WeaponInsetScene @0x5C9740 - the calls @0x5C99CB, @0x5C9DAE, @0x5C9DE9;
+# CEffectChannel_RenderRibbon @0x5DB8A0 - the minimum width @0x5DC0D6..0x5DC0F7]
+func test_the_inset_scene_builds_its_ribbons_against_its_own_view() -> void:
+	var audio := MissionAudio.create(null, null)
+	autofree(audio)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var camera := _ribbon_camera(container)
+	camera.look_at(Vector3(0, 1, -300), Vector3.UP)
+	var effects := EffectWorld.new()
+	add_child_autofree(effects)
+	var presenter := EntityPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup_passes(container, null, null, audio, effects, null, null, null)
+	# A far stdred trail along the views' x axis: the minimum width rules there.
+	var rows := PackedFloat32Array([
+		1.0, 1.0, 4.0,
+		0.0, 1.0, -300.0, 1.0,
+		2.0, 1.0, -300.0, 1.0,
+		4.0, 1.0, -300.0, 1.0,
+		6.0, 1.0, -300.0, 1.0,
+	])
+	assert_eq((container.get_node("FireTracersInset") as MeshInstance3D).layers, INSET_VIEW,
+			"the Inset's ribbons ride the bit only its camera admits")
+
+	presenter.draw_tracer_rows(rows)
+	var mesh: ArrayMesh = presenter.fire_ribbon_mesh()
+	assert_eq(mesh.get_surface_count(), 1)
+	if mesh.get_surface_count() != 1:
+		presenter.teardown()
+		return
+	var main_before := _vertices(mesh)
+	assert_eq(presenter.fire_inset_ribbon_mesh().get_surface_count(), 0,
+			"no Inset pass: no Inset ribbons")
+
+	# The Inset pass: a zoomed view from the same eye.
+	var inset := _mirror_camera(camera.global_transform, SubViewport.UPDATE_ALWAYS)
+	inset.fov = 10.0
+	effects.set_second_scene_camera(inset)
+	presenter.draw_tracer_rows(rows)
+	assert_eq(_vertices(mesh), main_before, "the main view's ribbons are unchanged")
+	var inset_mesh: ArrayMesh = presenter.fire_inset_ribbon_mesh()
+	assert_eq(inset_mesh.get_surface_count(), 1, "the rendering Inset builds its ribbons")
+	if inset_mesh.get_surface_count() == 1:
+		var main_verts := _vertices(mesh)
+		var inset_verts := _vertices(inset_mesh)
+		var main_width := (main_verts[0] - main_verts[1]).length()
+		var inset_width := (inset_verts[0] - inset_verts[1]).length()
+		var main_scale := camera.get_camera_projection().x.x
+		var inset_scale := inset.get_camera_projection().x.x
+		assert_gt(inset_scale, main_scale * 2.0, "the zoomed field's cotangent is larger")
+		assert_almost_eq(inset_width * inset_scale, main_width * main_scale,
+				main_width * main_scale * 1e-3, "each ribbon takes its own field's minimum width")
+		assert_gt(absf(_first_side(inset_mesh).dot(inset.global_transform.basis.y)), 0.999,
+				"and faces the Inset's eye")
+
+	effects.set_second_scene_camera(null)
+	presenter.draw_tracer_rows(rows)
+	assert_eq(presenter.fire_inset_ribbon_mesh().get_surface_count(), 0,
+			"the Inset pass closed: no Inset ribbons")
 	presenter.teardown()
 
 

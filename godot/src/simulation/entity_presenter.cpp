@@ -196,6 +196,8 @@ void EntityPresenter::_bind_methods() {
 			&EntityPresenter::set_tracer_mirror_cameras);
 	ClassDB::bind_method(D_METHOD("fire_mirror_ribbon_mesh", "mirror"),
 			&EntityPresenter::fire_mirror_ribbon_mesh);
+	ClassDB::bind_method(D_METHOD("fire_inset_ribbon_mesh"),
+			&EntityPresenter::fire_inset_ribbon_mesh);
 	ClassDB::bind_method(D_METHOD("scar_presenter"), &EntityPresenter::scar_presenter);
 	ClassDB::bind_method(D_METHOD("present_fires", "events"),
 			&EntityPresenter::present_fires);
@@ -439,6 +441,10 @@ void EntityPresenter::set_tracer_mirror_cameras(Camera3D *p_mirror, Camera3D *p_
 
 Ref<ArrayMesh> EntityPresenter::fire_mirror_ribbon_mesh(int p_mirror) const {
 	return fire_->mirror_ribbon_mesh(p_mirror);
+}
+
+Ref<ArrayMesh> EntityPresenter::fire_inset_ribbon_mesh() const {
+	return fire_->inset_ribbon_mesh();
 }
 
 ScarPresenter *EntityPresenter::scar_presenter() const {

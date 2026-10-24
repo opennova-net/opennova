@@ -104,9 +104,10 @@ struct NvgLaserView {
 // ctest); this pass compiles the trail rows through it against the render camera
 // and uploads one surface per run of same-material channel draws, in pool order,
 // on the ladder rung of the frame's tracer slot (tracer_rung: the far-side slot
-// while the eye is below the water); each rendering water mirror compiles the
-// rows again against its own camera (set_mirror_cameras). The three materials
-// are the witnessed ones
+// while the eye is below the water); the weapon Inset's scene and each
+// rendering water mirror compile the rows again against their own cameras
+// (the effect world's second scene camera, set_mirror_cameras). The three
+// materials are the witnessed ones
 // (godot/shaders/tracer_ribbon_{stock,smoke,nvg}.gdshader), each fogged per its
 // style's +0 word. The round's item graphic (frndlyTrcrID/foeTrcrID +
 // TRACER_SCALE/TRACER_WIDTH nodes) is D-AI-12d; the light_move glow (round+0x1B4)
@@ -143,7 +144,9 @@ public:
 	// subscene runs the pool's main pass under its own view (engine
 	// renderer/tracer_frame.h TracerView carries the witness), so while a mirror
 	// renders its ribbons are built against its own camera, on the bit only that
-	// mirror admits; the scene views' ribbons ride the bit no mirror admits.
+	// mirror admits. So are the weapon Inset scene's, against the effect world's
+	// second scene camera while that pass renders; the main view's ribbons ride
+	// the bit the beauty camera alone admits.
 	void set_mirror_cameras(Camera3D *p_mirror, Camera3D *p_inset_mirror);
 
 	// Once per present (beside the other passes), after the sim advanced. The
@@ -184,15 +187,23 @@ public:
 	// reach-ins.
 	Ref<ArrayMesh> ribbon_mesh() const { return mesh_; }
 	// Water mirror `p_mirror`'s ribbons (0 the main scene's mirror, 1 the
-	// Inset's), the same read seam.
+	// Inset's) and the weapon Inset scene's, the same read seam.
 	Ref<ArrayMesh> mirror_ribbon_mesh(int p_mirror) const;
+	Ref<ArrayMesh> inset_ribbon_mesh() const { return views_[kViewInset].mesh; }
 
 private:
-	// The mirrors' ribbon geometry, one instance per mirror on its own bit.
-	struct MirrorRibbons {
+	// The other views that draw the pool, each its own ribbons on the bit only
+	// its camera admits: the weapon Inset's scene, the main scene's water
+	// mirror, the Inset's mirror.
+	enum : size_t {
+		kViewInset = 0,
+		kViewMirror = 1,
+		kViewCount = 3,
+	};
+	struct ViewRibbons {
 		Ref<ArrayMesh> mesh;
 		ObjectID mesh_instance_id;
-		ObjectID camera_id;
+		ObjectID camera_id; // a mirror's camera (the Inset's is the effect world's)
 	};
 
 	Simulation *sim() const;
@@ -200,9 +211,9 @@ private:
 	EffectWorld *fx() const;
 	EffectLightDirector *lights() const;
 	MissionEnvironment *environment() const;
-	// Mirror `p_mirror`'s camera while that mirror renders, else null.
-	Camera3D *rendering_mirror_camera(int p_mirror) const;
-	// The scene views' ribbon instance's layer (the pipeline warm's own aside).
+	// View `p_view`'s camera while that view renders, else null.
+	Camera3D *rendering_view_camera(size_t p_view) const;
+	// The main view's ribbon instance's layer (the pipeline warm's own aside).
 	void set_main_ribbon_layer(uint32_t p_layer);
 	void free_mesh_instance();
 
@@ -219,8 +230,8 @@ private:
 	opennova::renderer::TracerRibbonFrame frame_;
 	opennova::renderer::TracerRibbonFrame distortion_frame_;
 	opennova::renderer::TracerRibbonFrame laser_frame_; // one beam's ribbon, reused
-	opennova::renderer::TracerRibbonFrame mirror_frame_; // one mirror's ribbons, reused
-	std::array<MirrorRibbons, 2> mirrors_;
+	opennova::renderer::TracerRibbonFrame view_frame_; // one other view's ribbons, reused
+	std::array<ViewRibbons, kViewCount> views_;
 	std::vector<opennova::renderer::TracerChannelInput> channels_;
 	int64_t stat_fires_ = 0;
 	int64_t stat_sounds_ = 0;
