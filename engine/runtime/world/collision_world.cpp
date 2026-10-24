@@ -728,7 +728,6 @@ const std::vector<uint32_t> &CollisionWorld::stable_los_candidates_for_ray(
 }
 
 void CollisionWorld::build_tick_tables(World &world) {
-    if (trace_profile_enabled_) trace_profile_ = TraceProfile{};
     // Resolver contacts are a per-logic-tick stream. A pre-round or ended
     // match may deliberately skip the gameplay drain, so never carry a touch
     // into a later tick.

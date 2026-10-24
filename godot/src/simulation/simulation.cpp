@@ -953,6 +953,10 @@ Vector4i Simulation::get_last_projectile_trace_counts() const {
 			trace_profile_lane(tp.person_survivors));
 }
 
+void Simulation::clear_projectile_trace_profile() {
+	if (kernel_ != nullptr) kernel_->collision.clear_trace_profile();
+}
+
 Vector2i Simulation::get_last_projectile_trace_faces() const {
 	const opennova::world::CollisionWorld::TraceProfile &tp =
 			kernel_->collision.trace_profile();

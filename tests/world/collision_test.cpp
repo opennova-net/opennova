@@ -4912,8 +4912,11 @@ void test_projectile_trace_profile_is_opt_in_and_parity_neutral() {
     // Repeating a state is not an edge and preserves this tick's snapshot.
     collision.set_trace_profile_enabled(true);
     CHECK(collision.trace_profile().calls == 1);
-    // Tick boundaries reset an active capture.
+    // A table build is no reset: the consumer clears what it read, so a tick
+    // that builds no tables never re-reads a running sum.
     collision.build_tick_tables(world);
+    CHECK(collision.trace_profile().calls == 1);
+    collision.clear_trace_profile();
     CHECK(profile_is_empty(collision.trace_profile()));
     CHECK(hits_match(unprofiled, collision.trace_projectile(world, trace)));
     CHECK(collision.trace_profile().calls == 1);

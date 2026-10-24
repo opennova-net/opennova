@@ -1288,6 +1288,11 @@ public:
     void contact_debug_record(ContactDebugKind kind, uint32_t tick, EntityHandle target,
                               const int32_t pos[3], uint8_t hit_class) const;
     const TraceProfile &trace_profile() const { return trace_profile_; }
+    // The profile's consumer clears what it read (the board's feed at each logic tick's sink),
+    // so every trace counts in one reading: those ahead of a tick's table build (the projectile
+    // pass), a render frame's between ticks, and a tick that builds no tables (a host alone,
+    // whose entity update does not run) read their own traces, never a running sum.
+    void clear_trace_profile() const { trace_profile_ = TraceProfile{}; }
     bool trace_profile_enabled() const { return trace_profile_enabled_; }
     // Profiling is disabled by default. Each enable/disable edge clears the
     // snapshot so a new consumer never inherits another capture's counters.

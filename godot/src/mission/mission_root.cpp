@@ -918,29 +918,33 @@ int MissionRoot::stats_role_value() const {
 }
 
 void MissionRoot::feed_projectile_trace_stats() {
-	if (frame_stats_.is_null() || !frame_stats_->is_capture_active() ||
-			!has_trace_stats_sampling_) {
+	if (sim_.is_null()) {
 		return;
 	}
-	// Three value-type native reads preserve each logic tick's snapshot without
+	// Three value-type native reads take each logic tick's traces without
 	// allocating a Dictionary on the capture hot path. In a catch-up render
-	// frame the board folds each tick into one complete-frame peak.
-	const Vector4i counts = sim_->get_last_projectile_trace_counts();
-	if (counts.x <= 0) {
-		return;
+	// frame the board folds each tick into one complete-frame peak. The sink
+	// then clears the profile, so the next tick reads its own traces, never a
+	// running sum (a host alone builds no tick tables).
+	if (frame_stats_.is_valid() && frame_stats_->is_capture_active() &&
+			has_trace_stats_sampling_) {
+		const Vector4i counts = sim_->get_last_projectile_trace_counts();
+		if (counts.x > 0) {
+			const Vector4i times = sim_->get_last_projectile_trace_times_us();
+			const Vector2i faces = sim_->get_last_projectile_trace_faces();
+			frame_stats_->add(FrameStats::TRACE_TERRAIN, times.x);
+			frame_stats_->add(FrameStats::TRACE_STATIC, times.y);
+			frame_stats_->add(FrameStats::TRACE_DYNAMIC, times.z);
+			frame_stats_->add(FrameStats::TRACE_PERSON, times.w);
+			frame_stats_->add(FrameStats::TRACE_CALLS, counts.x);
+			frame_stats_->add(FrameStats::TRACE_STATIC_SURVIVORS, counts.y);
+			frame_stats_->add(FrameStats::TRACE_DYNAMIC_SURVIVORS, counts.z);
+			frame_stats_->add(FrameStats::TRACE_PERSON_SURVIVORS, counts.w);
+			frame_stats_->add(FrameStats::TRACE_STATIC_FACES, faces.x);
+			frame_stats_->add(FrameStats::TRACE_DYNAMIC_FACES, faces.y);
+		}
 	}
-	const Vector4i times = sim_->get_last_projectile_trace_times_us();
-	const Vector2i faces = sim_->get_last_projectile_trace_faces();
-	frame_stats_->add(FrameStats::TRACE_TERRAIN, times.x);
-	frame_stats_->add(FrameStats::TRACE_STATIC, times.y);
-	frame_stats_->add(FrameStats::TRACE_DYNAMIC, times.z);
-	frame_stats_->add(FrameStats::TRACE_PERSON, times.w);
-	frame_stats_->add(FrameStats::TRACE_CALLS, counts.x);
-	frame_stats_->add(FrameStats::TRACE_STATIC_SURVIVORS, counts.y);
-	frame_stats_->add(FrameStats::TRACE_DYNAMIC_SURVIVORS, counts.z);
-	frame_stats_->add(FrameStats::TRACE_PERSON_SURVIVORS, counts.w);
-	frame_stats_->add(FrameStats::TRACE_STATIC_FACES, faces.x);
-	frame_stats_->add(FrameStats::TRACE_DYNAMIC_FACES, faces.y);
+	sim_->clear_projectile_trace_profile();
 }
 
 Ref<MissionFrameOutcome> MissionRoot::advance_session_frame(

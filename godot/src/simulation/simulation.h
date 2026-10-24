@@ -1693,13 +1693,16 @@ public:
 	bool is_runtime_profiling_enabled() const {
 		return runtime_profiling_enabled_;
 	}
-	// Allocation-free last-tick trace sampling for the F3 hot path. Vector
-	// lanes are times=(terrain, static, dynamic, person),
+	// Allocation-free trace sampling for the F3 hot path: the traces since the
+	// last clear, which the board's per-tick feed makes after its read (engine
+	// CollisionWorld::clear_trace_profile). Vector lanes are
+	// times=(terrain, static, dynamic, person),
 	// counts=(calls, static survivors, dynamic survivors, person survivors),
 	// and faces=(static, dynamic).
 	Vector4i get_last_projectile_trace_times_us() const;
 	Vector4i get_last_projectile_trace_counts() const;
 	Vector2i get_last_projectile_trace_faces() const;
+	void clear_projectile_trace_profile();
 	// Allocation-free int forms of the same last-frame counters, for per-frame
 	// sampling by the F3 frame-stats board (a Dictionary per frame would churn).
 	int64_t get_last_present_snapshot_us() const {
