@@ -191,10 +191,23 @@ func test_the_forced_frame_draws_the_local_models_and_the_hud_ahead_of_the_birth
 	assert_true(world.get_viewport().disable_3d, "and its draw held under the loading screen")
 	if water != null:
 		assert_false(water.is_mirror_enabled(), "the water draws no mirror under the hold")
+	# A frame under the hold is no render frame: the environment cube neither counts it nor captures
+	# in it, as retail's wait draws no frame; the frame the hold drops in is its next.
+	var cube := world.get_node_or_null("EnvironmentCubeCapture") as EnvironmentCubeCapture
+	assert_not_null(cube, "the world's environment cube")
+	var camera := world.get_viewport().get_camera_3d()
+	var eye := camera.global_transform if camera != null else Transform3D()
+	var cube_frames: int = cube.get_render_frame_index() if cube != null else 0
+	world.tick(eye.origin, eye)
+	if cube != null:
+		assert_eq(cube.get_render_frame_index(), cube_frames, "a held frame is no render frame")
 	world.set_presentation_held(false)
 	assert_false(world.get_viewport().disable_3d, "the reveal drops the hold")
 	if water != null:
 		assert_true(water.is_mirror_enabled())
+	world.tick(eye.origin, eye)
+	if cube != null:
+		assert_eq(cube.get_render_frame_index(), cube_frames + 1, "the first drawn frame counts")
 	hud.teardown()
 	world.unload()
 

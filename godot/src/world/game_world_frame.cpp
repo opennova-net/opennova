@@ -1029,11 +1029,16 @@ GameWorld::LegResult GameWorld::leg_inset_water(FrameContext &r_ctx) {
 }
 
 GameWorld::LegResult GameWorld::leg_framefx(FrameContext &r_ctx) {
+	// A frame under the loading presentation's hold draws no view (set_presentation_held), so no
+	// reader takes a focused Q3 frame: retail's wait draws no frame at all (D-NET-NEW-LF-29).
+	if (presentation_held_) return kLegSkipped;
 	sync_framefx_frame();
 	return kLegRan;
 }
 
 GameWorld::LegResult GameWorld::leg_slot_shadows(FrameContext &r_ctx) {
+	// No capture under the hold: its view draws nothing for a drape to shade (D-NET-NEW-LF-29).
+	if (presentation_held_) return kLegSkipped;
 	render_slot_shadow_frame();
 	return kLegRan;
 }
@@ -1069,6 +1074,9 @@ GameWorld::LegResult GameWorld::leg_clear(FrameContext &r_ctx) {
 }
 
 GameWorld::LegResult GameWorld::leg_environment_cube(FrameContext &r_ctx) {
+	// A frame under the hold is no render frame: the cube counts its 128 render frames, and takes
+	// its first capture, from the first frame drawn, as retail's wait draws none (D-NET-NEW-LF-29).
+	if (presentation_held_) return kLegSkipped;
 	render_environment_cube_frame();
 	return kLegRan;
 }
