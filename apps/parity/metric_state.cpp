@@ -999,11 +999,32 @@ void compare_entities(const RunFacts &rr, const RunFacts &other, std::vector<Met
 		fill_metric(out, 'S', "entity_motion", "FRAME_ENTITY_CONSTANT",
 				changing_handles(ca, sequence, position) > 0,
 				changing_handles(cb, sequence, position) > 0, key);
-		auto samples = [&sequence](const std::vector<const E *> &entities, bool orientation) {
+		// A sequence under 16 records in the window holds a slice of its entity's motion, as
+		// a window under 16 frames does, and which slice is the window's phase. Either the
+		// priority list sends the entity only when its age byte wins the budget [orig:
+		// Server_BuildEntityPriorityList @0x50E590 (the age adds @0x50E62B..0x50E634)] [orig:
+		// NetPacket_SerializeEntityStatesToPacket @0x50F070 (the age reset @0x50F168, the
+		// budget test @0x50F345)], as for x10 / x11's drive's eleven far idle soldiers at 2..4
+		// records in 60 s, or a carrier change cuts the sequence, as for capture's host body
+		// settling on base 0x1033 for the window's first 5..9 frames before 0x1032. An idle
+		// soldier's look runs on the mission tick, key = g_CurrentTick + 36 x DcbId [orig:
+		// Entity_UpdateInfantryAI @0x4B9910 (@0x4B9948..0x4B9959)]: it re-picks its look
+		// target when the key's low byte is 0, every 256 ticks [orig: Entity_UpdateInfantryAI
+		// @0x4B9910 (the gate @0x4BE0CA..0x4BE0E8)], so whether a few records straddle a look
+		// change is the window's mission tick, not the host's rule. Such a sequence leaves
+		// the dynamic rows, the same 16 the window itself needs (entity.sparse_sequence).
+		static_assert(has_normalization("entity.sparse_sequence"));
+		auto samples = [&sequence, min_records = kMotionWindowFrames](
+							   const std::vector<const E *> &entities, bool orientation) {
+			std::map<std::string, size_t> records;
+			for (const E *e : entities)
+				++records[sequence(*e)];
 			std::vector<Sample> out;
 			for (const E *e : entities) {
 				Sample sample;
 				sample.group = sequence(*e);
+				if (records[sample.group] < min_records)
+					continue;
 				if (orientation) {
 					sample.axes = { double(e->orient_a), double(e->orient_b) };
 				} else {

@@ -802,6 +802,27 @@ inline constexpr Normalization kNormalizations[] = {
 			"(V range 640), less on RR-aa (256, its displacement 0 against RR's 384) and x10's "
 			"OO (256), and the crest on x11's OO (0). The entity range, displacement and step "
 			"rows compare only with 16 steady frames or more on both sides" },
+	{ "entity.sparse_sequence", MaskKind::Field, 'S', 0x00A, "entity motion of a sparse sequence",
+			0,
+			"a handle and carrier sequence under 16 records in the window holds a slice of its "
+			"entity's motion, as a window under 16 frames does (entity.short_window), and "
+			"which slice is the window's phase. Either the priority list sends the entity only "
+			"when its age byte wins the frame's budget (Server_BuildEntityPriorityList "
+			"@0x50E590, the age adds @0x50E62B..0x50E634; NetPacket_SerializeEntityStatesToPacket "
+			"@0x50F070, the age reset @0x50F168, the budget test @0x50F345), or a carrier change "
+			"cuts the sequence. An idle soldier's look runs on the mission tick: its key is "
+			"g_CurrentTick + 36 x DcbId (Entity_UpdateInfantryAI @0x4B9910, @0x4B9948..0x4B9959) "
+			"and it re-picks its look target when the key's low byte is 0, every 256 ticks (the "
+			"gate @0x4BE0CA..0x4BE0E8), its aim heading the look bearing (@0x4BE65D) or the body "
+			"heading (@0x4BE47A). x10 and x11's 01tr-coop-drive OO (host ticks 7011 and 7026 at "
+			"the window's end) held eleven far idle soldiers at 2..4 records in 60 s, ten of them "
+			"straddling a look change (I orientation range p90 16 against RR's 2), where x7..x9's "
+			"OO (ticks 7411..7473) caught 8 or 9 and the retail-host runs 7..9; x9 and x11's OR "
+			"(our host) sent x8 RR's looks byte for byte. x8's ash-i5a-aas-capture: the host's "
+			"body streamed on base 0x1033 for the 9 frames of its deploy settle RR's window "
+			"caught (0.51 units of fall) and RR-aa's 8 (a trimmed lead, range 0), then on 0x1032. "
+			"Such a sequence leaves the entity range, displacement and step rows, which compare "
+			"over the rest; a window under 16 frames keeps none" },
 	{ "round.target", MaskKind::Field, 'S', 0x00A, "round event flags / target", 0,
 			"a S2C 0x0A round event carries flag 0x40 and its target word when the shooter's AI "
 			"slot word (+0x68 -> +0xC) names a target at the send, the target's pool handle or "

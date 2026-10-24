@@ -3480,6 +3480,71 @@ void test_entity_carrier() {
 	}
 }
 
+// x10 / x11's 01tr-coop-drive OO (L4-s34): eleven far idle soldiers each streamed 2..4 records
+// in the 60 s window, and their looks run on the mission tick, so whether a few records
+// straddle a look change was the window's tick (I orientation range p90 16 against RR's 2). A
+// handle and carrier sequence under 16 records in the window leaves the entity rows, which
+// compare over the rest (entity.sparse_sequence).
+void test_entity_sparse_sequence() {
+	// Ten soldiers in every steady frame, their aim heading `dense` on every other record, and
+	// three with `sparse` records spread over the window whose aim turns `look` halfway.
+	auto soldiers = [](uint32_t seed, int32_t dense, size_t sparse, int32_t look) {
+		wire::ParityTrace trace = scripted(seed);
+		std::vector<const wire::ParityFrameState *> steady;
+		for (const wire::ParityFrameState &f : trace.frames)
+			if (f.ts_ns >= kSteadyStart && f.ts_ns <= kSteadyStart + uint64_t(kSteadySeconds * 1e9))
+				steady.push_back(&f);
+		auto soldier = [](const wire::ParityFrameState &f, uint32_t handle, int32_t aim) {
+			wire::ParityEntity e;
+			e.frame = f.frame;
+			e.ts_ns = f.ts_ns;
+			e.session = f.session;
+			e.cls = 'I';
+			e.handle = handle;
+			e.type_id = 2070;
+			e.pos_x = network_compress_fixedpoint(int32_t(800 + handle) * 65536 - f.anchor_x);
+			e.pos_y = network_compress_fixedpoint(690 * 65536 - f.anchor_y);
+			e.pos_z = network_compress_fixedpoint(42 * 65536 - f.anchor_z);
+			e.orient_a = 0xC0;
+			e.orient_b = (0xC0 + aim) % 256;
+			e.state_b = 0x2B;
+			place(e, f);
+			return e;
+		};
+		std::vector<wire::ParityEntity> added;
+		for (size_t i = 0; i < steady.size(); ++i)
+			for (uint32_t h = 0; h < 10; ++h)
+				added.push_back(soldier(*steady[i], 0x0040 + h, i % 2 ? dense : 0));
+		for (size_t k = 0; k < sparse; ++k)
+			for (uint32_t h = 0; h < 3; ++h)
+				added.push_back(soldier(*steady[k * steady.size() / sparse], 0x0050 + h,
+						k < sparse / 2 ? 0 : look));
+		trace.entities.insert(trace.entities.end(), added.begin(), added.end());
+		std::stable_sort(trace.entities.begin(), trace.entities.end(),
+				[](const wire::ParityEntity &x, const wire::ParityEntity &y) {
+					return x.ts_ns < y.ts_ns;
+				});
+		return trace;
+	};
+	{
+		// Fifteen records turning 40 leave the row; the ten dense soldiers' 2 compares.
+		const Case c = judge_case(
+				soldiers(1, 2, 15, 0), soldiers(2, 2, 15, 0), soldiers(3, 2, 15, 40), "OO");
+		expect_row(c, 'S', "entity_I_orientation_range_p90", "", "pass");
+		const VerdictRow *row = find_row(c.verdict.rows, 'S', "entity_I_orientation_range_p90");
+		check(row && row->value.subject == "2" && row->value.reference == "2",
+				"the I orientation range p90 runs over the dense soldiers alone");
+	}
+	// Sixteen records stay: their turn is the row's p90 (40 against 2).
+	expect_row(
+			judge_case(soldiers(1, 2, 16, 0), soldiers(2, 2, 16, 0), soldiers(3, 2, 16, 40), "OO"),
+			'S', "entity_I_orientation_range_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
+	// The dense soldiers' own turn still fails beside the dropped ones.
+	expect_row(
+			judge_case(soldiers(1, 2, 15, 0), soldiers(2, 2, 15, 0), soldiers(3, 40, 15, 0), "OO"),
+			'S', "entity_I_orientation_range_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
+}
+
 void test_steady_rules() {
 	{
 		// A steady packet groups as its record multiset, without the RTT replies its
@@ -3769,6 +3834,7 @@ int main() {
 	test_frame_draws();
 	test_position_quantum();
 	test_entity_carrier();
+	test_entity_sparse_sequence();
 	test_round_target();
 	if (g_failures) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);
