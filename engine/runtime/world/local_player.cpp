@@ -77,6 +77,16 @@ void LocalPlayer::set_movement_keys(bool forward, bool back, bool left,
 	input.lean_left = lean_left;
 	input.lean_right = lean_right;
 	input.jump = jump;
+	// The held forward and back rows' cases write the X axis word beside their bits. Their
+	// events queue behind the frame's records (the console's first, then the key scan's), so a
+	// held key's write lands last, back's row after forward's in the analog list's row order.
+	// [orig: Input_ProcessPlayerFrame @0x49D4C0 - Input_ProcessAnalogBindings called @0x49D50C
+	//  (Input_QueueEvent(code, 0, 0, 0) called @0x499660); Input_HandleActionBinding_0 - case
+	//  152 `mov g_InputAxisX, 0FC01h` @0x4E0CC5, case 151 `mov g_InputAxisX, 3FFh` @0x4E0C75;
+	//  rows 2 / 3 of the binding table @0x8159A8 enter g_InputAnalogBindingIndices in row order
+	//  (Input_InitBindingSystem @0x499B6A..0x499BA5)]
+	if (forward) axis_words.x = -1023;
+	if (back) axis_words.x = 1023;
 	// Stance comes from the sim-owned SELECT latches (latch_stance — the
 	// C2S 0x1D apply semantics [orig: @0x501c60]).
 	input.crouch = stance_latch_ == 1;
@@ -684,33 +694,76 @@ void LocalPlayer::apply_scoped_aim_drift(AiEntity &body, uint32_t logic_tick) {
 void LocalPlayer::carry_process_globals_from(const LocalPlayer &previous) {
 	scope_yaw_ = previous.scope_yaw_;
 	scope_pitch_ = previous.scope_pitch_;
+	axis_words = previous.axis_words;
 	analog_pack_ = previous.analog_pack_;
 	armory_press_latched = previous.armory_press_latched;
 }
 
-void LocalPlayer::pack_analog_axes(w::Entity &entity, bool moving, bool x_frozen) {
+uint32_t LocalPlayer::movement_case_bit(int32_t code) {
+	// [orig: Input_HandleActionBinding_0 @0x4E0420 - 147 `or g_InputFlags, 4000h` @0x4E10C8;
+	//  148 2000h @0x4E10F1; 151 4 @0x4E0C6E; 152 2 @0x4E0CBE; 153 1000h @0x4E0D66; 154 40h
+	//  @0x4E0EB5; 155 20h @0x4E0F83; 156 8 @0x4E1041; 157 10h @0x4E1066; 158 100h @0x4E108C;
+	//  159 200h @0x4E10B7; 176 8000h @0x4E0CD5]
+	switch (code) {
+	case 147: return w::kInputFlagLeanRight;
+	case 148: return w::kInputFlagLeanLeft;
+	case 151: return w::kInputFlagBack;
+	case 152: return w::kInputFlagForward;
+	case 153: return w::kInputFlagJump;
+	case 154: return w::kInputFlagLookDown;
+	case 155: return w::kInputFlagLookUp;
+	case 156: return w::kInputFlagLeft;
+	case 157: return w::kInputFlagRight;
+	case 158: return w::kInputFlagTurnLeft;
+	case 159: return w::kInputFlagTurnRight;
+	case 176: return w::kInputFlagFreeLook;
+	default: return 0;
+	}
+}
+
+void LocalPlayer::apply_movement_case(int32_t code, int32_t p1) {
+	// The argument forms: a nonzero first argument stores its low word into the row's axis
+	// word and sets no bit (forward X, strafe-left Y, turn-left Z, lean-left the throttle's
+	// low word). [orig: Input_HandleActionBinding_0 @0x4E0420 - 152: the argument's test
+	//  @0x4E0CAD, `mov g_InputAxisX, ax` @0x4E0CB1; 156: @0x4E1030 / `jz` @0x4E1032,
+	//  `mov g_InputAxisY, ax` @0x4E1034; 158: @0x4E107B / @0x4E107D, `mov g_InputAxisZ, ax`
+	//  @0x4E107F; 148: @0x4E10E0 / @0x4E10E2, `mov word ptr g_InputAxisThrottle, ax` @0x4E10E4]
+	int16_t *axis = code == 152 ? &axis_words.x : code == 156 ? &axis_words.y :
+			code == 158 ? &axis_words.z : code == 148 ? &axis_words.throttle : nullptr;
+	if (axis != nullptr && p1 != 0) {
+		*axis = static_cast<int16_t>(static_cast<uint16_t>(p1));
+		return;
+	}
+	// The bit forms: the case's bit, which the fold carries beside the held keys'; back and
+	// forward write X too (+1023 / -1023). [orig: 151 `or g_InputFlags, 4` @0x4E0C6E,
+	//  `mov g_InputAxisX, 3FFh` @0x4E0C75; 152 `or g_InputFlags, 2` @0x4E0CBE,
+	//  `mov g_InputAxisX, 0FC01h` @0x4E0CC5]
+	record_input_bits |= movement_case_bit(code);
+	if (code == 151) axis_words.x = 1023;
+	if (code == 152) axis_words.x = -1023;
+}
+
+void LocalPlayer::zero_axis_words() {
+	// [orig: Input_ProcessFrame @0x49D520 - g_InputAxisX @0x49D54E, g_InputAxisY @0x49D555,
+	//  g_InputAxisZ @0x49D56A, g_InputAxisThrottle's high word @0x49D571; Game_ProcessMainFrame
+	//  - the armory freeze's @0x52663E, @0x526645, @0x52665A, @0x526661]
+	axis_words.x = 0;
+	axis_words.y = 0;
+	axis_words.z = 0;
+}
+
+void LocalPlayer::pack_analog_axes(w::Entity &entity, bool moving) {
 	AnalogPackState &a = analog_pack_;
-	// The axis words, shifted to bytes. The keyboard's only writers are the
-	// forward and back handlers on the X word (-1023 / +1023); back's binding
-	// row follows forward's in the analog dispatch list, so it lands last when
-	// both are held. Y and Z have joystick writers only.
-	// [orig: Input_HandleActionBinding_0 case 151 `word_B3B750 = 1023`
-	//  @0x4e0c75, case 152 `= -1023` @0x4e0cc5; rows 2/3 of the binding table
-	//  @0x8159A8 enter g_InputAnalogBindingIndices in row order
-	//  (Input_InitBindingSystem @0x499b6a..); the shifts @0x4df79a..0x4df7cd]
-	// The press latch's freeze zeroes the X word (and the joystick-only Y and
-	// Z words) after the handlers wrote it; the throttle's word survives (the
-	// pack reads dword_B3B75C's low word, the freeze clears its high word).
-	// [orig: Game_ProcessMainFrame word_B3B750 @0x52663E, word_B3B752
-	//  @0x526645, word_B3B75A @0x52665A, dword_B3B75C+2 @0x526661; the
-	//  throttle read @0x4df7a0]
-	const int16_t word_x = x_frozen ? int16_t(0)
-			: input.back ? int16_t(1023) : (input.forward ? int16_t(-1023) : int16_t(0));
-	const int8_t x = static_cast<int8_t>(word_x >> 3);
-	const int8_t y = 0;
-	const int8_t z = 0;
+	// The axis words, shifted to bytes: X off the dword at g_InputAxisX (its low word's bits
+	// 3..10), Y, Z and the throttle off their words.
+	// [orig: Player_PackInputStateToEntity - g_InputAxisY @0x4DF79A, g_InputAxisThrottle
+	//  @0x4DF7A0, g_InputAxisX @0x4DF7A6, g_InputAxisZ @0x4DF7B4; the shifts @0x4DF7AC,
+	//  @0x4DF7BA, @0x4DF7C2, @0x4DF7CD]
+	const int8_t x = static_cast<int8_t>(axis_words.x >> 3);
+	const int8_t y = static_cast<int8_t>(axis_words.y >> 3);
+	const int8_t z = static_cast<int8_t>(axis_words.z >> 3);
 	// The throttle byte, zeroed inside its 0x14 deadzone [orig: @0x4df7c2..0x4df7d5].
-	int8_t throttle = input.analog_throttle;
+	int8_t throttle = static_cast<int8_t>(axis_words.throttle >> 3);
 	if (std::abs(static_cast<int32_t>(throttle)) < 0x14) throttle = 0;
 	// A change of more than 32 from the last stored value latches each group
 	// on; a moving pack latches both off. [orig: @0x4df7d7..0x4df84e]
@@ -749,7 +802,7 @@ void LocalPlayer::pack_analog_axes(w::Entity &entity, bool moving, bool x_frozen
 	}
 }
 
-void LocalPlayer::pack_input_word(bool x_frozen) {
+void LocalPlayer::pack_input_word() {
 	World &world = world_;
 	// The pack: the accumulated word onto MoveOrder, then the word is
 	// saved as the previous pack's and cleared. The analog throttle is
@@ -785,7 +838,7 @@ void LocalPlayer::pack_input_word(bool x_frozen) {
 			w::weapon_fsm_queue_scope_down(*w::active_local_weapon_slot(world, weapon));
 	}
 	if (w::Entity *entity = world.registry.get(world.cached.local_player))
-		pack_analog_axes(*entity, move_order.moving, x_frozen);
+		pack_analog_axes(*entity, move_order.moving);
 	input_flags.clear_after_pack();
 }
 
@@ -842,25 +895,27 @@ void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 			: records;
 	input_flags.fold(w::player_input_flags(input, absorb) | record_bits);
 	// The armory press latch freezes the frame's input after the fold: the
-	// word clears and MoveOrder keeps only its stance bits (the X axis word's
-	// clear rides the pack below). A menu screen open skips the input pass and
-	// this freeze with it, and the STAT and DEATH (deploy) screens run the
-	// pass without the freeze. The freeze here is ungated: under those two
-	// screens the shell feeds the frame's keys, but the action head drops every
-	// movement and look row there (the dead operand, the deploy overlay, the
-	// round-over gate), and the death screen's spectator, alive and with neither
-	// up, latches nothing there: the latch is a live body's USE press in an
-	// armory volume, which the key's release clears, and the death screen's
-	// binding scan never admits that row. So the word the freeze would clear is
-	// empty there.
+	// word and the X, Y and Z axis words clear (the throttle's low word
+	// survives) and MoveOrder keeps only its stance bits. A menu screen open
+	// skips the input pass and this freeze with it, and the STAT and DEATH
+	// (deploy) screens run the pass without the freeze. The freeze here is
+	// ungated: under those two screens the shell feeds the frame's keys, but
+	// the action head drops every movement and look row there (the dead
+	// operand, the deploy overlay, the round-over gate), and the death screen's
+	// spectator, alive and with neither up, latches nothing there: the latch is
+	// a live body's USE press in an armory volume, which the key's release
+	// clears, and the death screen's binding scan never admits that row. So the
+	// word the freeze would clear is empty there.
 	// [orig: Game_ProcessMainFrame -- the menu test @0x52660D..0x526614,
 	//  Input_ProcessFrame @0x52661D, the block @0x526625..0x526679: the latch
-	//  test @0x526625, g_InputFlags = 0 @0x526632, MoveOrder (entity+0x12C)
-	//  &= 0x300 @0x52666F; UI_ProcessMenuScreenFrame's pass @0x54E68D..0x54E695 under
-	//  sub_54B980's flag from StatScreen_ShowCallback @0x56287D and
-	//  DeathScreen_UpdateUI @0x55316E]
+	//  test @0x526625, g_InputFlags = 0 @0x526632, g_InputAxisX @0x52663E, g_InputAxisY
+	//  @0x526645, g_InputAxisZ @0x52665A, g_InputAxisThrottle's high word @0x526661,
+	//  MoveOrder (entity+0x12C) &= 0x300 @0x52666F; UI_ProcessMenuScreenFrame's pass
+	//  @0x54E68D..0x54E695 under sub_54B980's flag from StatScreen_ShowCallback
+	//  @0x56287D and DeathScreen_UpdateUI @0x55316E]
 	if (armory_press_latched) {
 		input_flags.flags = 0;
+		zero_axis_words();
 		w::PlayerBodyInput held;
 		held.stance = move_order.stance;
 		held.look_heading = move_order.look_heading;
@@ -872,7 +927,7 @@ void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 	// `test byte ptr g_InputFlags, 1Eh` @0x4de3ae; the pack follows @0x42c3e9].
 	view.movement_input = (input_flags.flags & w::kInputFlagDirectionMask) != 0;
 	w::local_player_view_refresh(&world, view);
-	if (pack_input) pack_input_word(armory_press_latched);
+	if (pack_input) pack_input_word();
     // The keyboard turn/look rotation reads the MoveOrder bits the last pack
     // wrote; the prone halving reads its stance bit. Both pitch limits follow
     // body slope. [orig: Entity_ApplyFreeLookRotation @0x4ae090 -- MoveOrder

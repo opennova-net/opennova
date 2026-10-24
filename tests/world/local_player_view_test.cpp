@@ -18,6 +18,7 @@
 #include <runtime/controls/binding_set.h>
 #include <runtime/controls/player_actions.h>
 #include <runtime/hud/tip_system.h>
+#include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/angle.h>
@@ -3856,30 +3857,37 @@ void test_pack_masks_movement_under_a_nomove_weapon() {
     CHECK(m.player.view.scope_settled);
 }
 
-// The pack's analog legs: the forward/back key handlers also write the X axis
+// The pack's analog legs: the held forward/back rows also write the X axis
 // word (-1023 / +1023; back's row dispatches after forward's, so it wins when
-// both are held), shifted to a byte; a change of more than 32 latches the
-// axes on, a moving pack latches them off, and only a latched pack stores
-// them (else 0). The throttle has its own latch, a 0x14 deadzone, and drops
-// while a lean key is in the word. [orig: Input_HandleActionBinding_0 cases
-// 151/152 @0x4e0c6e..0x4e0cc5; Input_InitBindingSystem's row-order list;
-// Player_PackInputStateToEntity @0x4df793..0x4df8f8]
+// both are held), which each input frame's head zeroes (zero_axis_words),
+// shifted to a byte; a change of more than 32 latches the axes on, a moving
+// pack latches them off, and only a latched pack stores them (else 0). The
+// throttle word has its own latch, a 0x14 deadzone on its byte, drops while a
+// lean key is in the word, and no clear at the frame's head. [orig:
+// Input_HandleActionBinding_0 cases 151/152 @0x4e0c75 / @0x4e0cc5;
+// Input_InitBindingSystem's row-order list; Input_ProcessFrame
+// @0x49D54E..0x49D578; Player_PackInputStateToEntity @0x4df793..0x4df8f8]
 void test_pack_analog_axes_and_their_hysteresis() {
     ScopedAimFixture f;
     f.player.weapon.def.flags = 0;
     f.player.view.scope_engaged = false;
     f.player.view.scope_settled = false;
     // Opposing keys: no movement, the X word is back's.
+    f.player.zero_axis_words();
     f.player.set_movement_keys(true, true, false, false, false, false, false);
+    CHECK(f.player.axis_words.x == 1023);
     f.player.apply_player_input_pre_tick(/*pack_input=*/true);
     CHECK(!f.player.move_order.moving);
     CHECK(f.entity().net_analog_x == 127);
     CHECK(f.entity().net_analog_y == 0 && f.entity().net_analog_z == 0);
-    // Released: the latch holds, the axis follows to 0.
+    // Released: the frame's head zeroed the word; the latch holds, the axis
+    // follows to 0.
+    f.player.zero_axis_words();
     f.player.set_movement_keys(false, false, false, false, false, false, false);
     f.player.apply_player_input_pre_tick(/*pack_input=*/true);
     CHECK(f.entity().net_analog_x == 0);
     // Forward alone moves: the latch drops and the axes zero.
+    f.player.zero_axis_words();
     f.player.set_movement_keys(true, false, false, false, false, false, false);
     f.player.apply_player_input_pre_tick(/*pack_input=*/true);
     CHECK(f.player.move_order.moving);
@@ -3894,20 +3902,59 @@ void test_pack_analog_axes_and_their_hysteresis() {
     CHECK(m.entity().net_analog_x == -128);
 
     // The throttle: inside the deadzone it reads 0; past it the latch stores
-    // it; a lean key drops it.
+    // it, through the next frame's head; a lean key drops it.
     ScopedAimFixture t;
     t.player.weapon.def.flags = 0;
     t.player.view.scope_engaged = false;
     t.player.view.scope_settled = false;
-    t.player.input.analog_throttle = 0x13;
+    t.player.axis_words.throttle = 0x13 << 3;
     t.player.apply_player_input_pre_tick(/*pack_input=*/true);
     CHECK(t.entity().analog_throttle == 0);
-    t.player.input.analog_throttle = 64;
+    t.player.axis_words.throttle = 64 << 3;
+    t.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(t.entity().analog_throttle == 64);
+    t.player.zero_axis_words();
+    CHECK(t.player.axis_words.throttle == 64 << 3);
     t.player.apply_player_input_pre_tick(/*pack_input=*/true);
     CHECK(t.entity().analog_throttle == 64);
     t.player.set_movement_keys(false, false, false, false, true, false, false);
     t.player.apply_player_input_pre_tick(/*pack_input=*/true);
     CHECK(t.entity().analog_throttle == 0);
+}
+
+// A typed forward under a NoMove weapon (D-NET-NEW-LI-39): the record's bit form
+// sets the forward bit and writes the X axis word (-1023); the pack strips the
+// bit, so the body stands, and the unmoving pack latches X's byte -128, which
+// the C2S 0x0C carries as 0x80. The argument form writes X alone, no bit, and the
+// next frame's head zeroes it. [orig: Input_HandleActionBinding_0 @0x4E0420 -
+// case 152 `or g_InputFlags, 2` @0x4E0CBE, `mov g_InputAxisX, 0FC01h` @0x4E0CC5,
+// `mov g_InputAxisX, ax` @0x4E0CB1; Player_PackInputStateToEntity -
+// `g_InputFlags &= 0xFFFF9FE1` @0x4df482, the X read @0x4DF7A6, the store
+// @0x4DF888; NetPacket_SerializePlayerState case 3 @0x4C1B2E..0x4C1B74]
+void test_a_typed_forward_under_a_nomove_weapon_ships_its_x_byte() {
+    ScopedAimFixture m;
+    m.player.weapon.def.flags = static_cast<int32_t>(DEF_WEAPON_FLAG_NOMOVE);
+    CHECK(LocalPlayer::movement_case_bit(152) == kInputFlagForward);
+    m.player.zero_axis_words();
+    m.player.apply_movement_case(152, 0);
+    CHECK(m.player.record_input_bits == kInputFlagForward && m.player.axis_words.x == -1023);
+    m.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(!m.player.move_order.moving && m.player.move_order.direction_bits == 0);
+    CHECK(m.entity().net_analog_x == -128);
+    const opennova::PlayerExtendedUplink up =
+            opennova::replication::build_player_uplink(m.w, m.entity(), m.body());
+    CHECK(up.analog_x == 0x80 && up.analog_y == 0 && up.analog_z == 0);
+    // The argument form: X takes the argument, no bit; still latched (a change of
+    // 165), the pack stores 37.
+    m.player.zero_axis_words();
+    m.player.apply_movement_case(152, 300);
+    CHECK(m.player.record_input_bits == 0 && m.player.axis_words.x == 300);
+    m.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(m.entity().net_analog_x == 37);
+    // The next frame's head zeroes the word: the latched pack stores 0.
+    m.player.zero_axis_words();
+    m.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(m.entity().net_analog_x == 0);
 }
 
 // The authority arm's own-slot gate: a refused local shot spawns no round
@@ -4192,6 +4239,7 @@ int main() {
     test_armory_press_latch_freezes_input();
     test_pack_masks_movement_under_a_nomove_weapon();
     test_pack_analog_axes_and_their_hysteresis();
+    test_a_typed_forward_under_a_nomove_weapon_ships_its_x_byte();
     test_authority_fire_gate_refuses_the_round();
     test_scoped_aim_survives_kernel_replacement_without_sharing_sessions();
     test_target_lock_cadence_and_audio();

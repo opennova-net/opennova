@@ -3095,6 +3095,86 @@ bool run_holdoff_window_taps_reach_the_boundary_uplink() {
 			"holdoff taps: L's MoveOrder follows the B2 pack");
 }
 
+// The movement rows' records write the input axis words, which the pack shifts into the
+// C2S 0x0C's analog bytes (D-NET-NEW-LI-39). Each frame: the records, the input pass (the
+// frame's head zeroes X, Y and Z; the drain dispatches the records past the head; the held
+// rows, none here), then the role tick's pack and send block. A typed argument writes
+// forward's X, strafe-left's Y, turn-left's Z or lean-left's throttle word and sets no bit;
+// the bit forms of back and forward write X with their bit (the later record wins); the
+// throttle (+0x133) is the entity's alone and its word has no clear. Values from the pack's
+// arithmetic: the word >> 3 as a byte; a change of more than 32 latches the axes on, a moving
+// pack latches them off, and only a latched pack stores them (else 0).
+// [orig: Input_ProcessFrame @0x49D520 - the zeroes @0x49D54E..0x49D578, the drain's
+//  Input_HandleActionBinding @0x49D5D8; Input_HandleActionBinding_0 @0x4E0420 - 151
+//  @0x4E0C75, 152 @0x4E0CB1 / @0x4E0CC5, 156 @0x4E1034 / @0x4E1041, 158 @0x4E107F, 148
+//  @0x4E10E4; Player_PackInputStateToEntity @0x4DF79A..0x4DF8F8; Client_ProcessNetworkFrame
+//  @0x42C3E9 -> Player_BuildTag0CInputBody @0x42C482]
+bool run_movement_records_ride_the_uplink_axes() {
+	Harness h;
+	h.kernel->world.load_systems();
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input); // the spawn frame
+	if (!expect(h.role.local_spawned(), "axis words: L spawned")) return false;
+	// The head's gates open (their defaults): no deploy overlay, no round over, no pre-round.
+	h.role.runtime->state().deploy_overlay_active = false;
+	h.role.runtime->state().spawn_success_gate = false;
+	h.kernel->world.preround_delay_seconds = 0;
+	using Record = opennova::controls::InputEventRecord;
+	const auto frame = [&h](std::initializer_list<Record> records) {
+		for (const Record &record : records) (void)h.role.input_events().push(record);
+		const std::size_t before = h.socket.datagrams.size();
+		h.role.apply_input(h.input);
+		h.role.run_tick(h.input);
+		return uplinks_since(h.socket, before);
+	};
+	const auto axes = [](const std::vector<PlayerExtendedUplink> &shipped, uint8_t x, uint8_t y,
+			uint8_t z) {
+		return shipped.size() == 1 && shipped[0].analog_x == x && shipped[0].analog_y == y &&
+				shipped[0].analog_z == z;
+	};
+	const auto moving = [](const std::vector<PlayerExtendedUplink> &shipped) {
+		return !shipped.empty() && (shipped[0].move_input_byte & w::Entity::kMoveOrderMoving) != 0;
+	};
+	// "move_forward 300", "strafe_left -300", "turn_left 800": 37, -38, 100, no movement.
+	std::vector<PlayerExtendedUplink> shipped =
+			frame({Record{152, 300, 0, 0, false}, Record{156, -300, 0, 0, false},
+					Record{158, 800, 0, 0, false}});
+	if (!expect(axes(shipped, 0x25, 0xDA, 0x64) && !moving(shipped),
+			"axis words: the typed arguments ride the 0x0C's analog bytes, no movement"))
+		return false;
+	// The next frame's head zeroes the words: the latched pack ships 0.
+	shipped = frame({});
+	if (!expect(axes(shipped, 0, 0, 0), "axis words: the zero after the frame's head"))
+		return false;
+	// A bit-form strafe: its bit moves the body (the latch drops), no word.
+	shipped = frame({Record{156, 0, 0, 0, false}});
+	if (!expect(axes(shipped, 0, 0, 0) && moving(shipped),
+			"axis words: a bit-form strafe moves and writes no axis"))
+		return false;
+	// Back then forward: opposing bits (no movement), X forward's -1023 (-128); the other
+	// order leaves back's +1023 (127).
+	shipped = frame({Record{151, 0, 0, 0, false}, Record{152, 0, 0, 0, false}});
+	if (!expect(axes(shipped, 0x80, 0, 0) && !moving(shipped),
+			"axis words: the bit forms write X, the later record's"))
+		return false;
+	shipped = frame({Record{152, 0, 0, 0, false}, Record{151, 0, 0, 0, false}});
+	if (!expect(axes(shipped, 0x7F, 0, 0), "axis words: back's X when it lands last"))
+		return false;
+	// "lean_left 300": the throttle word, 37 on the entity's +0x133, not in the 0x0C; the
+	// next frame's head leaves it.
+	shipped = frame({Record{148, 300, 0, 0, false}});
+	const w::Entity *local = h.kernel->local.player();
+	if (!expect(axes(shipped, 0, 0, 0) && local != nullptr && local->analog_throttle == 37,
+			"axis words: a throttle argument latches the entity's throttle byte alone"))
+		return false;
+	shipped = frame({});
+	local = h.kernel->local.player();
+	return expect(axes(shipped, 0, 0, 0) && local != nullptr && local->analog_throttle == 37,
+			"axis words: the throttle word survives the frame's head");
+}
+
 // S2C 0x0F re-snaps L to the authoritative pose it carries (position, yaw,
 // pitch, roll and the look yaw) once per decoded 0x0F, and the un-hide runs
 // while no death screen is up [orig: NapiNPClientMsg_0x00F @0x42E200 — the
@@ -6291,6 +6371,7 @@ int main() {
 	ok &= run_two_team_assigns_each_run_on_their_own_side();
 	ok &= run_an_unmarked_team_assign_runs_ahead_of_the_frames();
 	ok &= run_holdoff_window_taps_reach_the_boundary_uplink();
+	ok &= run_movement_records_ride_the_uplink_axes();
 	ok &= run_end_round_header_holds_the_entity_update();
 	ok &= run_world_state_load_resnaps_local_pose();
 	ok &= run_revive_deploy_respawns_l_on_its_record_edge();

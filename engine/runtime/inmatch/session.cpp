@@ -300,6 +300,10 @@ void Role::drain_input_events(TickInputSource *source, uint32_t held_action_bits
 	input_queue_reset_ = false;
 	if (!input_frame_runs()) return;
 	if ((held_action_bits & HELD_MENU_OPEN) != 0) return;
+	// The frame's head zeroes the input axis words ahead of the drain, whose movement records
+	// and the held rows behind them write them again (D-NET-NEW-LI-39) [orig: Input_ProcessFrame
+	//  @0x49D520 - @0x49D54E..0x49D578].
+	kernel_->local.zero_axis_words();
 	pause_flips_ = pause_flips;
 	to_special_held_ = (held_action_bits & HELD_TO_SPECIAL) != 0;
 	fire_held_ = (held_action_bits & HELD_FIRE) != 0;
@@ -532,42 +536,20 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 		return;
 	}
 	// The movement and look rows as records (a typed row's, a queued Last_move's), each its
-	// troop class callback case past the head: the case ORs its input-flag bit into the word,
-	// which the fold carries beside the held keys' (LocalPlayer::record_input_bits; the look
-	// rows' AbsorbPitch refusal rides the fold). A nonzero first argument (an axis) writes the
-	// row's axis word instead, which this port does not model. Their g_DebugCheatFlags 0x20 gate
-	// is dead (controls::PlayerActionFrame::scroll_lock_off carries that witness). The record
-	// then goes on to the embedder, whose device owes the Scroll Lock turn-off the back, forward
-	// (fourth argument 0) and strafe cases run (D-NET-NEW-LI-39).
-	// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 147 `or g_InputFlags, 4000h` @0x4E10C8;
-	//  148: the argument @0x4E10E2, the axis @0x4E10E4, 2000h @0x4E10F1; 151:
-	//  Input_DisableScrollLock called @0x4E0C66, 4 @0x4E0C6E; 152: the fourth argument
-	//  @0x4E0C92, Input_DisableScrollLock called @0x4E0C9E, the argument @0x4E0CAD, the axis
-	//  @0x4E0CB1, 2 @0x4E0CBE; 153: 1000h @0x4E0D66; 154: Entity_CheckWeaponSeatFlags @0x4E0EA5,
-	//  40h @0x4E0EB5; 155: @0x4E0F73, 20h @0x4E0F83; 156: Input_DisableScrollLock called
-	//  @0x4E1021, the argument @0x4E1032, 8 @0x4E1041; 157: Input_DisableScrollLock called
-	//  @0x4E105E, 10h @0x4E1066; 158: the argument @0x4E107D, 100h @0x4E108C; 159: 200h
-	//  @0x4E10B7; 176: 8000h @0x4E0CD5]
-	uint32_t movement_bit = 0;
-	bool analog_form = record.p1 != 0;
-	switch (code) {
-	case 147: movement_bit = world::kInputFlagLeanRight; analog_form = false; break;
-	case 148: movement_bit = world::kInputFlagLeanLeft; break;
-	case 151: movement_bit = world::kInputFlagBack; analog_form = false; break;
-	case 152: movement_bit = world::kInputFlagForward; break;
-	case 153: movement_bit = world::kInputFlagJump; analog_form = false; break;
-	case 154: movement_bit = world::kInputFlagLookDown; analog_form = false; break;
-	case 155: movement_bit = world::kInputFlagLookUp; analog_form = false; break;
-	case 156: movement_bit = world::kInputFlagLeft; break;
-	case 157: movement_bit = world::kInputFlagRight; analog_form = false; break;
-	case 158: movement_bit = world::kInputFlagTurnLeft; break;
-	case 159: movement_bit = world::kInputFlagTurnRight; analog_form = false; break;
-	case 176: movement_bit = world::kInputFlagFreeLook; analog_form = false; break;
-	default: break;
-	}
-	if (movement_bit != 0) {
+	// troop class callback case past the head (world::LocalPlayer::apply_movement_case): the
+	// bit form ORs its input-flag bit, which the fold carries beside the held keys' (the look
+	// rows' AbsorbPitch refusal rides the fold), forward and back writing the X axis word with
+	// it; a nonzero first argument writes the row's axis word instead (D-NET-NEW-LI-39). Their
+	// g_DebugCheatFlags 0x20 gate is dead (controls::PlayerActionFrame::scroll_lock_off carries
+	// that witness). The record then goes on to the embedder, whose device owes the Scroll Lock
+	// turn-off the back, forward (fourth argument 0) and strafe cases run.
+	// [orig: Input_HandleActionBinding_0 @0x4E0420 - 151: Input_DisableScrollLock called
+	//  @0x4E0C66; 152: the fourth argument @0x4E0C92, Input_DisableScrollLock called @0x4E0C9E;
+	//  154: Entity_CheckWeaponSeatFlags @0x4E0EA5; 155: @0x4E0F73; 156: Input_DisableScrollLock
+	//  called @0x4E1021; 157: Input_DisableScrollLock called @0x4E105E]
+	if (world::LocalPlayer::movement_case_bit(code) != 0) {
 		if (!action_head_admits(code)) return;
-		if (!analog_form) kernel_->local.record_input_bits |= movement_bit;
+		kernel_->local.apply_movement_case(code, record.p1);
 		if (source != nullptr) source->dispatch_record(record);
 		return;
 	}

@@ -112,6 +112,39 @@ public:
     //  Input_HandleActionBinding @0x49D5D8; Input_HandleActionBinding_0 @0x4E0420 - the cases
     //  each InputFlag names]
     uint32_t record_input_bits = 0;
+    // A movement or look row's code (the troop class callback's cases 147..159 and 176): the
+    // input-flag bit its bit form ORs, else 0 (any other code).
+    static uint32_t movement_case_bit(int32_t code);
+    // One such case as a record reaches it past the head: the bit form ORs its bit into
+    // record_input_bits, forward and back writing the X axis word with it; a nonzero first
+    // argument (a typed row's) writes forward's X, strafe-left's Y, turn-left's Z or lean-left's
+    // throttle word in place of the bit.
+    // [orig: Input_HandleActionBinding_0 @0x4E0420 - the cases each InputFlag names, their
+    //  argument tests and axis stores]
+    void apply_movement_case(int32_t code, int32_t p1);
+    // The input axis words the pack shifts to the entity's analog bytes: X (+0x130), Y
+    // (+0x131), Z (+0x132) and the throttle (+0x133, its dword's low word). Their writers are
+    // the movement rows' cases (apply_movement_case, and the held forward and back rows in
+    // set_movement_keys); each input frame's head zeroes X, Y and Z (zero_axis_words), the
+    // armory freeze too; the throttle word has no clear. Process globals: they survive a kernel
+    // replacement.
+    // [orig: g_InputAxisX @0xB3B750, g_InputAxisY @0xB3B752, g_InputAxisZ @0xB3B75A,
+    //  g_InputAxisThrottle @0xB3B75C; Player_PackInputStateToEntity @0x4DF79A..0x4DF7B4]
+    struct InputAxisWords {
+        int16_t x = 0;
+        int16_t y = 0;
+        int16_t z = 0;
+        int16_t throttle = 0;
+    };
+    InputAxisWords axis_words;
+    // X, Y and Z zero; the throttle's low word survives (only its dword's high word zeroes):
+    // the input frame's head, ahead of its drain (Role::drain_input_events), and the armory
+    // freeze. A frame that runs no input pass (a menu screen open) zeroes nothing, so the
+    // words the last pass left reach its packs.
+    // [orig: Input_ProcessFrame @0x49D520 - @0x49D54E, @0x49D555, @0x49D56A, the high word
+    //  @0x49D571, ahead of Input_ProcessPlayerFrame @0x49D58B; Game_ProcessMainFrame - the
+    //  UI_IsMenuScreenOpen test @0x52660D skips Input_ProcessFrame @0x52661D]
+    void zero_axis_words();
     // The local player's MoveOrder word (entity+0x12C) as the last pack wrote
     // it. It persists between packs: the motor, the keyboard look rotation and
     // the wire mirror read it every tick, and only a pack rewrites it; a
@@ -127,9 +160,9 @@ public:
     // only the release of a useitem key clears it. While it is set a further
     // press takes the arm and opens nothing, the WEAPON screen's ACCEPT and
     // CANCEL do nothing, and with no menu screen open every frame's input
-    // freezes after its fold (the input-flag word and the X axis word clear,
-    // MoveOrder keeps its stance bits). A process global, it survives a kernel
-    // replacement.
+    // freezes after its fold (the input-flag word and the X, Y and Z axis
+    // words clear, MoveOrder keeps its stance bits). A process global, it
+    // survives a kernel replacement.
     // [orig: Input_HandleActionBinding_0 @0x4E0B12..0x4E0B21;
     //  Input_HandleMenuKeyRelease @0x4DE2D0..0x4DE309;
     //  WeaponLoadout_ApplyFromBuffer @0x565CE4..0x565CEB;
@@ -145,9 +178,11 @@ public:
     // ToSpecial dispatch is dropped [orig: Input_ResetAllState @0x497ED0 --
     // the deferred queue's clear @0x497EF7].
     void clear_deferred_input();
-    // One frame of movement keys: stores the keys plus the sim-owned stance
-    // latch onto `input` and refreshes the view aggregates, whose binocular
-    // suppression reads the input word this frame's fold will leave. The
+    // One frame of movement keys (the held rows, behind the frame's drained
+    // records): stores the keys plus the sim-owned stance latch onto `input`,
+    // writes a held forward or back key's X axis word, and refreshes the view
+    // aggregates, whose binocular suppression reads the input word this
+    // frame's fold will leave. The
     // movement-held latch and the unscope-on-move belong to the pack
     // (apply_player_input_pre_tick). [orig: Player_UpdatePerFrame
     // `test byte ptr g_InputFlags, 1Eh` @0x4de3ae]
@@ -380,8 +415,9 @@ public:
     // [orig: Entity_UpdateInfantryPlayerBody @ 0x4B40E0, block @0x4B5966..0x4B5C97]
     void apply_scoped_aim_drift(AiEntity &body, uint32_t logic_tick);
     // Preserve the retail process globals across a kernel replacement: the
-    // scoped-aim oscillators and the input pack's analog hysteresis. Other
-    // local input, weapon and view state still belongs to the new mission.
+    // scoped-aim oscillators, the input axis words and the input pack's analog
+    // hysteresis. Other local input, weapon and view state still belongs to the
+    // new mission.
     void carry_process_globals_from(const LocalPlayer &previous);
     // The post-tick local view in retail order: the sim-wrote-the-view fold,
     // then the per-frame view promoter and the camera compose.
@@ -488,8 +524,9 @@ private:
     ScopedAimAxis scope_yaw_;
     ScopedAimAxis scope_pitch_;
     // The input pack's analog hysteresis: written only by the pack, never
-    // reset. [orig: byte_B79442 (axes latch), byte_B79440 (throttle latch),
-    //  byte_B79445/44/43 (the last stored X/Y/Z), byte_B79441 (the last throttle)]
+    // reset. [orig: g_InputAnalogAxesLatched @0xB79442, g_InputAnalogThrottleLatched
+    //  @0xB79440, g_InputAnalogLastX / Y / Z @0xB79445 / @0xB79444 / @0xB79443,
+    //  g_InputAnalogLastThrottle @0xB79441]
     struct AnalogPackState {
         bool axes_active = false;
         bool throttle_active = false;
@@ -497,14 +534,13 @@ private:
         int8_t last_throttle = 0;
     };
     AnalogPackState analog_pack_;
-    // The pack's analog legs onto the local player's entity+0x130..+0x133.
+    // The pack's analog legs: the axis words onto the local player's entity+0x130..+0x133.
     // [orig: Player_PackInputStateToEntity @0x4df793..0x4df8f8]
-    // x_frozen: the press latch's freeze zeroed the X axis word this frame.
-    void pack_analog_axes(Entity &entity, bool moving, bool x_frozen);
+    void pack_analog_axes(Entity &entity, bool moving);
     // The pack itself: the input-flag word onto MoveOrder, its movement legs
     // and analog axes, then the word saved and cleared
     // [orig: Player_PackInputStateToEntity @0x4df450].
-    void pack_input_word(bool x_frozen = false);
+    void pack_input_word();
 };
 
 } // namespace opennova::world
