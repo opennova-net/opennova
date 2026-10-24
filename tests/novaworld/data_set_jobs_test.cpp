@@ -324,8 +324,8 @@ struct Rig {
 		spec.to = io::os_path(root + "/to");
 		spec.package_product = "Synthetic Product";
 		if (products.empty()) {
-			spec.products.push_back({ "", "", "SYNPTR.CMD", "", "", "" });
-			spec.products.push_back({ "expansion/jox01", "jox01", "SYNEPTR.CMD", "", "", "" });
+			spec.products.push_back({ "", "", "SYNPTR.CMD", "Synthetic Product", "1.0.0.10", "" });
+			spec.products.push_back({ "expansion/jox01", "jox01", "SYNEPTR.CMD", "Synthetic Expansion", "1.0.0.11", "" });
 		} else {
 			spec.products = std::move(products);
 		}
@@ -722,7 +722,8 @@ int test_apply() {
 			!rig.has(tree_prefix(building) + "readme.txt"));
 	if (int rc = expect_manifest_matches_store(rig, *tree))
 		return rc;
-	TEST_EXPECT(tree->version_text == kBaseVersionUpdated);
+	// The release's version, its command file's (no version file read for a release, ADR 0067).
+	TEST_EXPECT(tree->version_text == "1.0.0.10");
 	TEST_EXPECT(tree->missions.size() == 3);
 	TEST_EXPECT(tree->missions.size() == 3 && tree->missions[0].file == "alpha.bms" &&
 			tree->missions[1].file == "bravo.bms" && tree->missions[2].file == "charlie.bms" &&
@@ -743,7 +744,7 @@ int test_apply() {
 			std::fprintf(stderr, "  tree: %s\n", tree->error.c_str());
 		return 1;
 	}
-	TEST_EXPECT(tree->files.size() == 3 && tree->version_text == kExpVersionUpdated);
+	TEST_EXPECT(tree->files.size() == 3 && tree->version_text == "1.0.0.11");
 	TEST_EXPECT(tree->missions.size() == 2 && tree->missions[0].file == "delta.bms" &&
 			tree->missions[0].title == "Delta Op" && tree->missions[1].file == "exp.bms");
 	for (const char *archive : { "jox01.pff", "jox01L.pff" }) {

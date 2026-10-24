@@ -54,7 +54,7 @@ came from a retail install was replaced by a minted or authored file.
 ## Authored files
 
 `game/` holds small authored menu, stylesheet, string-table and HUD-layout samples
-retained from OpenNova's game when its content moved to `opennova-assets`.
+retained from OpenNova's game when its content left the engine repository.
 The native and Godot menu tests read these samples with generated fonts,
 images and game resources; they never require the authored game checkout.
 

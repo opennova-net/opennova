@@ -48,8 +48,8 @@ int test_build(const test_temp::TempDir &dir, update::SfsPackage &package) {
 	spec.from = io::os_path(dir.file("from"));
 	spec.to = io::os_path(dir.file("to"));
 	spec.package_product = "Synthetic Product";
-	spec.products.push_back({ "", "", "SYNPTR.CMD", "", "", "" });
-	spec.products.push_back({ "expansion/jox01", "jox01", "SYNEPTR.CMD", "", "", "" });
+	spec.products.push_back({ "", "", "SYNPTR.CMD", "Synthetic Product", "1.0.0.10", "" });
+	spec.products.push_back({ "expansion/jox01", "jox01", "SYNEPTR.CMD", "Synthetic Expansion", "1.0.0.11", "" });
 	std::vector<update_tool::ProductReport> report;
 	std::string error;
 	TEST_EXPECT(update_tool::build_update_package(spec, package, report, error));
@@ -66,7 +66,8 @@ int test_build(const test_temp::TempDir &dir, update::SfsPackage &package) {
 	TEST_EXPECT(cmd.has_value());
 	if (!cmd)
 		return 1;
-	// The header from version.txt; the loose rows and removes at the root, then the archive's.
+	// The header the release names (no version file read: version.txt is a loose file like any); the
+	// loose rows and removes at the root, then the archive's.
 	TEST_EXPECT(cmd->product == "Synthetic Product" && cmd->version == "1.0.0.10");
 	TEST_EXPECT(row(*cmd, "same.txt") == nullptr && row(*cmd, "update.log") == nullptr);
 	const update::CommandRow *version = row(*cmd, "version.txt");
@@ -229,14 +230,14 @@ int test_history(const test_temp::TempDir &dir) {
 		pff::pff_close(&archive);
 		TEST_EXPECT(correct);
 	}
-	// Runtime metadata is separate from the retail content's version.txt.
-	TEST_EXPECT(write_text(latest + "/onversion.txt", "OpenNova Runtime, V3.2.1;"));
+	// The runtime's header is the release's alone: a version text in its tree is read for nothing.
+	TEST_EXPECT(write_text(latest + "/version.txt", "OpenNova Runtime, V9.9.9;"));
 	spec.previous.reset();
-	spec.products[0] = {"", "", "ONRUNTIME.CMD", "", "", "opennova.exe", "onversion.txt"};
+	spec.products[0] = {"", "", "ONRUNTIME.CMD", "OpenNova Runtime", "3.2.1", "opennova.exe"};
 	TEST_EXPECT(update_tool::build_update_package(spec, p3, report, error));
 	const auto runtime = update::read_command_file(std::string(p3.sections[0].entries[0].data.begin(), p3.sections[0].entries[0].data.end()));
 	TEST_EXPECT(runtime && runtime->product == "OpenNova Runtime" && runtime->version == "3.2.1");
-	TEST_EXPECT(row(*runtime, "onversion.txt") && !row(*runtime, "version.txt"));
+	TEST_EXPECT(row(*runtime, "version.txt") != nullptr);
 	// An archive removed for a release and then recreated keeps its member history.
 	// A client skipping that absent release must lose the old member too.
 	const std::string absent = dir.file("history-absent"), recreated = dir.file("history-recreated");

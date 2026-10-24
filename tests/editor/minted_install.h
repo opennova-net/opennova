@@ -1,7 +1,7 @@
 #pragma once
 // A synthetic packed install for editor integration tests. Files deliberately cover
 // menus, symbols, sound dependencies, terrain, missions, and expansion mounting.
-// No dependency on authored content from the separate opennova-assets repository.
+// No dependency on authored content: no repository holds OpenNova's game (ADR 0067).
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>

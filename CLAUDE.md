@@ -30,10 +30,11 @@ easier to relay than to rediscover.
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service
   data and deployment stack (DEPLOY.md).
-- The game projects and authoring sources live in [opennova-assets](https://github.com/opennova-net/opennova-assets),
-  with `assets/`, `expansions/`, and `art/` preserved there. The engine package ships
-  `opennova.exe`, `update.exe`, `revupdat.exe`, native dependencies and bootstrap
-  configuration. First standalone launch downloads content. `/game` selects
+- No repository holds game data (ADR 0067). Every product's OpenNova Editor project (our own
+  game and its expansion, the retail games' imports) is kept by the maintainer outside git;
+  its release is `scripts/package_release.py`'s package, uploaded in the admin's Game data.
+  CI ships only the runtime: `opennova.exe`, `update.exe`, `revupdat.exe`, native dependencies
+  and bootstrap configuration. First standalone launch downloads content. `/game` selects
   `opennova` (default), `jo`, or `dfx2`; retail installs are selected explicitly.
 - `tests/` — C++ ctest suite (separate from `godot/tests/`; different runners).
 - `tests/blender/` — the Blender add-on's Python tests: ctest registers each as a

@@ -410,7 +410,7 @@ function New-RuntimeUpdate {
     try {
         $arguments = @("build", "--from", $empty, "--to", $StageDir, "--out", $RUNTIME_SFS,
             "--base", "ONRUNTIME.CMD", "--product-name", "OpenNova Runtime", "--exe", "opennova.exe",
-            "--version-file", "onversion.txt", "--full", "--command-out", $command)
+            "--product", "OpenNova Runtime", "--version", $Version, "--full", "--command-out", $command)
         if ($PreviousRuntimePackage) { $arguments += @("--previous", $PreviousRuntimePackage) }
         & $UPDATE_TOOL @arguments
         if ($LASTEXITCODE -ne 0) { throw "Building the full runtime update failed" }
@@ -577,9 +577,7 @@ try {
     $staged.Add("update.exe")
     $staged.Add("revupdat.exe")
     [IO.File]::WriteAllText((Join-Path $stagePath "OPENNOVA.WIZ"), "[HEADER]`r`nCMD=ONRUNTIME.CMD`r`nURL=update.opennova.net`r`nPRODUCT_LOGIN=ONRUNTIME`r`n")
-    [IO.File]::WriteAllText((Join-Path $stagePath "onversion.txt"), "OpenNova Runtime, V$Version;`r`n")
     $staged.Add("OPENNOVA.WIZ")
-    $staged.Add("onversion.txt")
     $expansion = Join-Path $stagePath "expansion\onjo1"
     New-Item -ItemType Directory -Path $expansion -Force | Out-Null
     [IO.File]::WriteAllText((Join-Path $expansion "UPDATE.WIZ"), "[HEADER]`r`nCMD=ONJO1.CMD`r`nURL=update.opennova.net`r`nPRODUCT_LOGIN=ONJO1`r`n")

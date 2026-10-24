@@ -45,5 +45,5 @@ all rows when the command file changes, avoiding the retail prefix-CRC precheck
 for a newly published release; subsequent repair checks retain the retail CRC
 and archive timestamp behavior.
 
-Build the runtime package with `--base ONRUNTIME.CMD --version-file onversion.txt`
-so its product/version metadata and payload leave the retail `version.txt` alone.
+Build the runtime package with `--base ONRUNTIME.CMD --product "OpenNova Runtime" --version <v>`:
+every package's PRODUCT and VERSION are the release's, and no version file is read or written (ADR 0067).

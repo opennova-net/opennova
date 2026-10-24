@@ -740,13 +740,9 @@ Outcome build_release_tree(ObjectStore &store, const std::string &scratch_root,
 		return Outcome::Refused;
 	}
 	ready.bytes = total_bytes(ready.files);
-	// The version from the file when it is here (written, or brought for a row), else the
-	// baseline's while the tree still holds it.
-	const auto version = local.find("version.txt");
-	if (version != local.end())
-		ready.version_text = version_text_of(version->second);
-	else if (files.count("version.txt") != 0)
-		ready.version_text = baseline.version_text;
+	// The release's version, its command file's VERSION (ADR 0067: no version file is read for a
+	// release; a stock baseline's version.txt names only what the stock install is).
+	ready.version_text = section.version;
 	if (!scan_missions(data_set, dir, local, ready.missions, why))
 		return Outcome::Refused;
 	if (!put_manifest(store, scratch, tree_id, ready, why))

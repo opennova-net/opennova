@@ -6,8 +6,11 @@
 #include <base/io/file_io.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
+#include <base/vfs/vfs.h>
 #include <formats/update/apply.h>
+#include <formats/update/command_file.h>
 #include <formats/update/update_crc.h>
+#include <formats/update/update_wizard.h>
 
 #include <ctime>
 #include <fstream>
@@ -27,30 +30,43 @@ using namespace opennova;
 
 constexpr const char *kSucceeded = "Operation completed successfully!";
 
-// version.txt as the result box reads it: its command-file CRC, or none when it does not open.
+// The installed command file of the folder's game (its wizard's CMD), as the result box reads it: its
+// CRC and its VERSION, or none when it does not open. Retail reads version.txt here; ours reads the
+// command file the release wrote, whose VERSION is the release's (D-UPD-11).
 struct VersionMark {
 	bool present = false;
 	uint32_t crc = 0;
+	std::string version;
 };
 
 VersionMark version_mark(const std::filesystem::path &dir) {
+	// The wizard's CMD; a folder with none is OpenNova's own (the client's rule, discover_products).
+	std::string wizard;
+	const std::string command = vfs_update_wizard_text(io::utf8_path(dir), wizard)
+	                                    ? update::read_update_wizard(wizard).cmd
+	                                    : std::string(update::kOpenNovaCommandFile);
 	std::vector<uint8_t> bytes;
 	std::string ignored;
-	if (!io::read_file_bytes(io::utf8_path(dir / "version.txt"), bytes, ignored)) return {};
-	return {true, update::command_file_crc(bytes.data(), bytes.size())};
+	if (command.empty() || !update::is_safe_row_name(command) ||
+			!io::read_file_bytes(io::utf8_path(dir / command), bytes, ignored))
+		return {};
+	VersionMark mark{true, update::command_file_crc(bytes.data(), bytes.size()), std::string()};
+	if (const std::optional<update::CommandFile> file =
+					update::read_command_file(std::string(bytes.begin(), bytes.end())))
+		mark.version = file->version;
+	return mark;
 }
 
 // The result box's text as retail composes it: the result line, then "No Update Needed!" when a
-// successful run left version.txt as it found it, else "Current Version:" and the file's text;
-// nothing more when version.txt does not open. [orig: Cupdate2Dlg_ReportResult @ 0x405140 (UPDATE.EXE)]
+// successful run left the command file as it found it, else "Current Version:" and its VERSION; nothing
+// more when it does not open. [orig: Cupdate2Dlg_ReportResult @ 0x405140 (UPDATE.EXE), which reads
+// version.txt in its place: D-UPD-11]
 std::string result_text(const std::string &line, bool ok, const std::filesystem::path &dir,
 		const VersionMark &start) {
-	std::vector<uint8_t> bytes;
-	std::string ignored;
-	if (!io::read_file_bytes(io::utf8_path(dir / "version.txt"), bytes, ignored)) return line;
-	if (ok && start.present && update::command_file_crc(bytes.data(), bytes.size()) == start.crc)
-		return line + "\r\nNo Update Needed!\r\n";
-	return bytes.empty() ? line : line + "\r\nCurrent Version:\r\n" + std::string(bytes.begin(), bytes.end());
+	const VersionMark now = version_mark(dir);
+	if (!now.present) return line;
+	if (ok && start.present && now.crc == start.crc) return line + "\r\nNo Update Needed!\r\n";
+	return now.version.empty() ? line : line + "\r\nCurrent Version:\r\n" + now.version + "\r\n";
 }
 
 bool execute(const updater::Options &options, updater::Result &result, std::string &error,

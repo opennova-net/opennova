@@ -37,9 +37,9 @@ using namespace opennova;
 const char kUsage[] =
 		"usage:\n"
 		"  opennova-update-tool build --from <dir> --to <dir> --out <file.sfs>\n"
-		"      --base <CMD> [--expansion <name>=<CMD>]... [--product-name <registry name>]\n"
-		"      [--exe <file>] [--exclude <path|dir/>]... [--no-remove] [--prefix <update.exe>]\n"
-		"      [--full [--previous <file.sfs>]] [--version-file <base version file>]\n"
+		"      --base <CMD> [--expansion <name>=<CMD>]... --version <version> [--product <name>]\n"
+		"      [--product-name <registry name>] [--exe <file>] [--exclude <path|dir/>]...\n"
+		"      [--no-remove] [--prefix <update.exe>] [--full [--previous <file.sfs>]]\n"
 		"      [--command-out <file>]\n"
 		"  opennova-update-tool inspect <file.sfs>\n"
 		"  opennova-update-tool serve --package <file.sfs>... --product <LOGIN>=<CMD>...\n"
@@ -72,7 +72,7 @@ bool read_package(const std::string &path, update::SfsPackage &package, std::str
 
 int run_build(int argc, char **argv) {
 	update_tool::BuildSpec spec;
-	std::string out, prefix, base_cmd, exe, previous, command_out, version_file = "version.txt";
+	std::string out, prefix, base_cmd, exe, previous, command_out, product, version;
 	std::vector<std::pair<std::string, std::string>> expansions;
 	for (int i = 0; i < argc; ++i) {
 		const std::string arg = argv[i];
@@ -107,8 +107,10 @@ int run_build(int argc, char **argv) {
 			prefix = v;
 		} else if (arg == "--previous") {
 			previous = v;
-		} else if (arg == "--version-file") {
-			version_file = v;
+		} else if (arg == "--product") {
+			product = v;
+		} else if (arg == "--version") {
+			version = v;
 		} else if (arg == "--command-out") {
 			command_out = v;
 		} else {
@@ -121,10 +123,14 @@ int run_build(int argc, char **argv) {
 		return usage_error("build needs --base or an --expansion");
 	if (!command_out.empty() && base_cmd.empty())
 		return usage_error("--command-out writes the --base product's command file");
+	// The release's version and product name, in every command file it writes: no version file is
+	// read (ADR 0067).
+	if (version.empty())
+		return usage_error("build needs --version, the release's version");
 	if (!base_cmd.empty())
-		spec.products.push_back({ "", "", base_cmd, "", "", exe, version_file });
+		spec.products.push_back({ "", "", base_cmd, product, version, exe });
 	for (const auto &[name, cmd] : expansions)
-		spec.products.push_back({ "expansion/" + name, name, cmd, "", "", "" });
+		spec.products.push_back({ "expansion/" + name, name, cmd, product, version, "" });
 
 	update::SfsPackage package;
 	std::vector<update_tool::ProductReport> report;

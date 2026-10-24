@@ -180,6 +180,7 @@ jobs:
           # the foreground (game_mcp.BehindLaunch; docs/mcp.md "Launching").
           python -B -m unittest discover -s scripts/mcp -p "test_*.py"
           python -B -m unittest discover -s scripts -p test_publish_update.py
+          python -B -m unittest discover -s scripts -p test_package_release.py
 
       # The OpenNova Switcher's xunit suite (switcher/, ADR 0054): here, the
       # required `test` check gates it; package-switcher-windows.yml runs it

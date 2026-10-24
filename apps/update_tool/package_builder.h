@@ -30,10 +30,9 @@ struct ProductSpec {
 	std::string subdir; // the product's root under each tree: "" or "expansion/jox01"
 	std::string expansion; // its PACKAGEBREAK name: "" for the base product, else "jox01"
 	std::string command_file; // JOPTR.CMD
-	std::string product; // the command file's PRODUCT; empty: from version.txt
-	std::string version; // VERSION; empty: from version.txt
+	std::string product; // the command file's PRODUCT, as the release names the product
+	std::string version; // VERSION, the release's (no version file is read: ADR 0067)
 	std::string exe; // EXE, launched at DONE when /RUN; empty for none
-	std::string version_file = "version.txt"; // native runtime uses onversion.txt
 };
 
 struct BuildSpec {
@@ -60,9 +59,5 @@ struct ProductReport {
 // The package, or false with `error`. `report` gets a line per product.
 bool build_update_package(const BuildSpec &spec, update::SfsPackage &out,
 		std::vector<ProductReport> &report, std::string &error);
-
-// "Joint Operations: Escalation, V1.3.0.0; English" -> product "Joint Operations: Escalation",
-// version "1.3.0.0". False when the text has no ", V".
-bool split_version_text(std::string_view text, std::string &product, std::string &version);
 
 } // namespace opennova::update_tool

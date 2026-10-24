@@ -26,9 +26,8 @@ retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
 | `deploy/`, `infra/`, `backend/` | Local and hosted service infrastructure. |
 
 Runtime asset loading is native and the supported object input is 3DI. The
-game's authoring sources, base project, and expansion projects live in
-[opennova-assets](https://github.com/opennova-net/opennova-assets), preserving
-their `art/`, `assets/`, and `expansions/` layout. The
+repository holds no game data: OpenNova's own game downloads through the updater
+on first launch, built from OpenNova Editor projects outside the repository. The
 experimental [Blender add-on](tools/blender/opennova_3di/README.md) imports and
 exports 3DI models and their ADM/BAD animations for authoring, using the
 bundled native `opennova-3di` readers and writers. See its documentation for

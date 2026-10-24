@@ -276,24 +276,6 @@ bool build_product(const BuildSpec &spec, const ProductSpec &product, update::Sf
 		add_blob(name, content);
 		++report.loose_rows;
 	}
-	if (cmd.product.empty() || cmd.version.empty()) {
-		std::vector<uint8_t> text;
-		if (!update::is_safe_row_name(product.version_file)) {
-			error = "unsafe version file name"; return false;
-		}
-		const fs::path version = to_root / io::os_path(product.version_file);
-		std::string ignored;
-		if (fs::exists(version, ec) && read_bytes(version, text, ignored)) {
-			std::string product_text, version_text;
-			if (split_version_text(
-						std::string(text.begin(), text.end()), product_text, version_text)) {
-				if (cmd.product.empty())
-					cmd.product = product_text;
-				if (cmd.version.empty())
-					cmd.version = version_text;
-			}
-		}
-	}
 	if (spec.removes) {
 		for (const auto &[key, path] : from_files) {
 			if (to_files.count(key))
@@ -385,17 +367,6 @@ bool build_product(const BuildSpec &spec, const ProductSpec &product, update::Sf
 }
 
 } // namespace
-
-bool split_version_text(std::string_view text, std::string &product, std::string &version) {
-	const size_t marker = text.find(", V");
-	if (marker == std::string_view::npos)
-		return false;
-	product = std::string(text.substr(0, marker));
-	std::string_view rest = text.substr(marker + 3);
-	const size_t end = rest.find_first_of(";\r\n");
-	version = std::string(rest.substr(0, end));
-	return !product.empty() && !version.empty();
-}
 
 bool build_update_package(const BuildSpec &spec, update::SfsPackage &out,
 		std::vector<ProductReport> &report, std::string &error) {

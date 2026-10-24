@@ -41,8 +41,8 @@ That keeps source ownership visible and makes retail compatibility the acceptanc
 
 OpenNova ships a minimal runtime and downloads its own game on first run. The
 "Indigo Shore" mission, "Indigo Storm" expansion, and their authoring sources
-live in [opennova-assets](https://github.com/opennova-net/opennova-assets), in
-the original `assets/`, `expansions/`, and `art/` layout. It never distributes
+are OpenNova Editor projects kept outside the repository, released through the
+admin's update packages; no repository holds game data. It never distributes
 retail game data. Users select a product with `/game` (default `opennova`) and
 can point the same executable at an existing JO or DFX2 install with
 `--resource-dir`. The editor is a separate download and application. Test-only

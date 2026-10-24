@@ -184,8 +184,8 @@ int run(const test_temp::TempDir &dir) {
 	spec.from = io::os_path(dir.file("from"));
 	spec.to = io::os_path(dir.file("to"));
 	spec.package_product = "Synthetic Product";
-	spec.products.push_back({ "", "", "SYNPTR.CMD", "", "", "" });
-	spec.products.push_back({ "expansion/jox01", "jox01", "SYNEPTR.CMD", "", "", "" });
+	spec.products.push_back({ "", "", "SYNPTR.CMD", "Synthetic Product", "1.0.0.10", "" });
+	spec.products.push_back({ "expansion/jox01", "jox01", "SYNEPTR.CMD", "Synthetic Expansion", "1.0.0.11", "" });
 	update::SfsPackage package;
 	std::vector<update_tool::ProductReport> report;
 	std::string error;
