@@ -16,6 +16,7 @@ import contextlib
 import math
 import os
 import re
+import stat
 import subprocess
 import tempfile
 
@@ -267,7 +268,8 @@ def playing(data, action, slot=None):
 # --- the CLI ----------------------------------------------------------------
 
 def bundled_cli_path():
-    return os.path.join(os.path.dirname(__file__), "bin", "opennova-3di.exe")
+    name = "opennova-3di.exe" if os.name == "nt" else "opennova-3di"
+    return os.path.join(os.path.dirname(__file__), "bin", name)
 
 
 def cli_path(context=None):
@@ -296,6 +298,11 @@ def run_cli(context, args, failure, timeout=None, hide=()):
     if not os.path.isfile(cli):
         raise failure(f"opennova-3di not found at {cli}")
     try:
+        # Blender installs extensions with ZipFile.extract, which drops POSIX
+        # execute bits. Restore only our bundled CLI's owner bit; a custom
+        # executable in preferences keeps the permissions its owner chose.
+        if os.name == "posix" and cli == bundled_cli_path() and not os.access(cli, os.X_OK):
+            os.chmod(cli, stat.S_IMODE(os.stat(cli).st_mode) | stat.S_IXUSR)
         result = subprocess.run([cli, *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
                                 timeout=timeout)
     except (OSError, subprocess.SubprocessError) as e:

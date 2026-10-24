@@ -46,7 +46,7 @@ included. Export the base game first, and again after changing it.
   `expansion/onjo1/` with `onjo1L.pff` (the mission's text), `onjo1.pff`
   (everything else) and the loose `onjo1.bin`, `version.txt`, `Monjo1.sbf` and
   `Gonjo1.sbf`.
-- The game zip (`scripts/package_godot_windows.ps1`) exports the base game and
+- The game archive (`scripts/package_godot.py`) exports the base game and
   this project and ships the expansion as `expansion/onjo1/` beside the
   base game's archives, where both OpenNova (`opennova.exe -- /exp onjo1`, or
   the main menu's MODS) and the original game dropped beside the base game's archives

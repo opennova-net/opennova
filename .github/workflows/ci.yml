@@ -486,7 +486,7 @@ jobs:
   # RelWithDebInfo made it a 674 MiB artifact and a compiler cache several
   # times this size.
   build-gdextension-linux:
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+c8a+m7i+m7a/image=ubuntu24-full-x64/volume=100gb/extras=s3-cache', github.run_id) }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-24.04' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+c8a+m7i+m7a/image=ubuntu24-full-x64/volume=100gb/extras=s3-cache', github.run_id) }}
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     permissions:
@@ -557,7 +557,7 @@ jobs:
             godot/bin/libopennova_editor.linux.${{ matrix.target }}.x86_64.so
 
   godot-tests-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [build-gdextension-linux]   # skipped with it on docs-only PRs
     env:
       GODOT_VERSION: 4.6.1-stable
@@ -900,138 +900,35 @@ jobs:
   # The game archive and the editor archive (the editor plus the runtime it
   # plays a project with).
   package-godot-windows:
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb/extras=s3-cache', github.run_id) }}
     needs: [build-gdextension-windows]
-    outputs:
-      game_artifact_url: ${{ steps.upload_game.outputs.artifact-url }}
-      editor_artifact_url: ${{ steps.upload_editor.outputs.artifact-url }}
-    env:
-      GODOT_VERSION: 4.6.1-stable
-      GODOT_VERSION_PLAIN: 4.6.1
-    steps:
-      # Magic Cache: this job's actions/cache calls go to the ci account's S3
-      # bucket (a no-op on GitHub's runners, a fork's).
-      - uses: runs-on/action@v2
+    uses: ./.github/workflows/package-godot.yml
+    with:
+      platform: windows
+      export_mode: ${{ github.event_name == 'pull_request' && 'debug' || 'release' }}
+      prebuilt: true
 
-      - uses: actions/checkout@v4
-        with:
-          lfs: false   # scoped below: the package reads assets/ and expansions/ only
-          submodules: recursive
-
-      # The models, clips and textures in assets/ ride LFS. Their objects are
-      # cached by the pointer set, so a run restores them instead of
-      # spending LFS bandwidth on every package. Like every large cache here,
-      # only master saves it: a PR-scoped copy is readable by that PR alone
-      # and crowds the repository's 10 GB cache.
-      - name: Key the bundled LFS assets
-        id: assets-lfs
-        shell: bash
-        run: echo "key=assets-lfs-$(git lfs ls-files -l -I 'assets/**,expansions/**' | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore the bundled LFS assets
-        id: assets-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .git/lfs/objects
-          key: ${{ steps.assets-lfs.outputs.key }}
-
-      - name: Pull Git LFS assets (assets/ and expansions/ only)
-        shell: bash
-        run: |
-          git lfs install --local
-          git lfs pull --include="assets/**,expansions/**"
-
-      - name: Save the bundled LFS assets
-        if: github.ref == 'refs/heads/master' && steps.assets-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .git/lfs/objects
-          key: ${{ steps.assets-lfs.outputs.key }}
-
-      - name: Cache Godot binary
-        uses: actions/cache@v4
-        with:
-          path: .godot-bin
-          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
-
-      # The x86_64 Windows templates only (the export preset's target), not the
-      # whole 1.2 GB set: package_godot_windows.ps1 skips its download
-      # whenever version.txt is present.
-      - name: Restore Godot export templates
-        id: templates-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            ~/AppData/Roaming/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable/version.txt
-            ~/AppData/Roaming/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable/icudt_godot.dat
-            ~/AppData/Roaming/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable/windows_*_x86_64*
-          key: godot-export-templates-windows-${{ env.GODOT_VERSION }}
-
-      # Every flavour this run built (template_debug only on a PR).
-      - name: Download GDExtension
-        uses: actions/download-artifact@v4
-        with:
-          pattern: gdext_windows_*
-          merge-multiple: true
-          path: godot/bin
-
-      # The game zip ships the OpenNova Editor's export of assets/ (ADR 0048
-      # d8), which the package script makes with opennova-project, built here
-      # from the root project as the test job builds it (Ninja + sccache over
-      # its win-root cache, read only: that job saves it).
-      - name: Set up MSVC environment
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      - name: Restore the compiler cache
-        uses: ./.github/actions/compiler-cache
-        with:
-          flavour: win-root
-          mode: restore
-
-      # PRs export in debug mode (debug export template + the template_debug DLL,
-      # the development flavour); pushes and manual runs export in
-      # release mode like the release workflow.
-      - name: Package Godot Windows apps
-        shell: pwsh
-        env:
-          CMAKE_GENERATOR: Ninja
-          CMAKE_CXX_COMPILER_LAUNCHER: sccache
-          CMAKE_C_COMPILER_LAUNCHER: sccache
-        run: scripts/package_godot_windows.ps1 -SkipBuild -ExportMode ${{ github.event_name == 'pull_request' && 'debug' || 'release' }}
-
-      - name: Save Godot export templates
-        if: github.ref == 'refs/heads/master' && steps.templates-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ~/AppData/Roaming/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable/version.txt
-            ~/AppData/Roaming/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable/icudt_godot.dat
-            ~/AppData/Roaming/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable/windows_*_x86_64*
-          key: godot-export-templates-windows-${{ env.GODOT_VERSION }}
-
-      - name: Upload OpenNova Windows game zip
-        id: upload_game
-        uses: actions/upload-artifact@v7
-        with:
-          path: dist/opennova-game-windows-v*.zip
-          archive: false
-          if-no-files-found: error
-
-      - name: Upload OpenNova Windows editor zip
-        id: upload_editor
-        uses: actions/upload-artifact@v7
-        with:
-          path: dist/opennova-editor-windows-v*.zip
-          archive: false
-          if-no-files-found: error
+  package-godot-linux:
+    needs: [build-gdextension-linux]
+    uses: ./.github/workflows/package-godot.yml
+    with:
+      platform: linux
+      export_mode: ${{ github.event_name == 'pull_request' && 'debug' || 'release' }}
+      prebuilt: true
 
   # The same installable Blender package is built for PRs and tagged releases.
   package-blender-windows:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    uses: ./.github/workflows/package-blender-windows.yml
+    uses: ./.github/workflows/package-blender.yml
+    with:
+      platform: windows
+
+  package-blender-linux:
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    uses: ./.github/workflows/package-blender.yml
+    with:
+      platform: linux
 
   # The native apps (opennova-3di, opennova-extract, opennova-lan-probe,
   # opennova-parity, opennova-serve, opennova-update-tool and opennova-wire)
@@ -1043,7 +940,19 @@ jobs:
     permissions:
       contents: read
       actions: write   # its compiler cache's branch save replaces older entries
-    uses: ./.github/workflows/package-apps-windows.yml
+    uses: ./.github/workflows/package-apps.yml
+    with:
+      platform: windows
+
+  package-apps-linux:
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    permissions:
+      contents: read
+      actions: write
+    uses: ./.github/workflows/package-apps.yml
+    with:
+      platform: linux
 
   # The OpenNova Switcher (switcher/, .NET, ADR 0054): its xunit suite and the
   # single-file opennova-switcher.exe in one zip, built for PRs and tagged
@@ -1053,12 +962,12 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     uses: ./.github/workflows/package-switcher-windows.yml
 
-  # Surface the Windows packages on the PR as a single comment that updates
+  # Surface the Windows and Linux packages on the PR as a single comment that updates
   # in place after every package succeeds. A failed package leaves the previous
   # comment untouched.
   pr-build-links:
     runs-on: ubuntu-latest
-    needs: [package-godot-windows, package-blender-windows, package-apps-windows, package-switcher-windows]
+    needs: [package-godot-windows, package-godot-linux, package-blender-windows, package-blender-linux, package-apps-windows, package-apps-linux, package-switcher-windows]
     if: github.event_name == 'pull_request'
     permissions:
       contents: read
@@ -1071,6 +980,10 @@ jobs:
           EDITOR_URL: ${{ needs.package-godot-windows.outputs.editor_artifact_url }}
           BLENDER_URL: ${{ needs.package-blender-windows.outputs.artifact_url }}
           APPS_URL: ${{ needs.package-apps-windows.outputs.artifact_url }}
+          LINUX_GAME_URL: ${{ needs.package-godot-linux.outputs.game_artifact_url }}
+          LINUX_EDITOR_URL: ${{ needs.package-godot-linux.outputs.editor_artifact_url }}
+          LINUX_BLENDER_URL: ${{ needs.package-blender-linux.outputs.artifact_url }}
+          LINUX_APPS_URL: ${{ needs.package-apps-linux.outputs.artifact_url }}
           SWITCHER_URL: ${{ needs.package-switcher-windows.outputs.artifact_url }}
         with:
           script: |
@@ -1085,15 +998,15 @@ jobs:
               marker,
               '### OpenNova CI builds',
               '',
-              `Windows builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})). The game uses the debug export template and template_debug GDExtension. The Blender add-on, the apps and the switcher are Release builds. Tagged releases publish every package, with the game in release mode.`,
+              `Windows x64 and Ubuntu 24.04+ x64 builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})). The game uses the debug export template and template_debug GDExtension. The Blender add-on, the apps and the switcher are Release builds. Tagged releases publish every package, with the game in release mode.`,
               '',
-              '| Build | Download |',
-              '| --- | --- |',
-              `| Runtime: opennova.exe with the placeholder menu; PLAY RETAIL plays your own Joint Operations install | [opennova-game-windows.zip](${process.env.GAME_URL}) |`,
-              `| Editor: opennova-editor.exe with the runtime it plays a project with (experimental) | [opennova-editor-windows.zip](${process.env.EDITOR_URL}) |`,
-              `| Blender 5.0+ add-on for Windows: import/export .3di models and their .adm/.bad animations; install the zip from disk | [opennova-blender-addon-windows.zip](${process.env.BLENDER_URL}) |`,
-              `| Apps: opennova-3di, opennova-extract, opennova-lan-probe, opennova-parity, opennova-serve (the headless game server), opennova-update-tool and opennova-wire | [opennova-apps-windows.zip](${process.env.APPS_URL}) |`,
-              `| Switcher: opennova-switcher.exe, a tray app that switches retail Joint Operations between OpenNova's NovaWorld and NovaLogic's through the hosts file; run it as administrator | [opennova-switcher-windows.zip](${process.env.SWITCHER_URL}) |`,
+              '| Build | Windows x64 | Linux x64 |',
+              '| --- | --- | --- |',
+              `| Game: bundled game and PLAY RETAIL | [ZIP](${process.env.GAME_URL}) | [tar.gz](${process.env.LINUX_GAME_URL}) |`,
+              `| Editor with its Play runtime (experimental) | [ZIP](${process.env.EDITOR_URL}) | [tar.gz](${process.env.LINUX_EDITOR_URL}) |`,
+              `| Blender 5.0+ add-on: install from disk | [ZIP](${process.env.BLENDER_URL}) | [ZIP](${process.env.LINUX_BLENDER_URL}) |`,
+              `| Apps: command-line tools and opennova-serve | [ZIP](${process.env.APPS_URL}) | [tar.gz](${process.env.LINUX_APPS_URL}) |`,
+              `| Switcher: original Windows games' NovaWorld hosts-file switcher; run as administrator | [ZIP](${process.env.SWITCHER_URL}) | Windows only |`,
               '',
               'Downloading requires a GitHub login. Artifacts are removed after 90 days. This comment updates on each successful build.',
             ].join('\n');

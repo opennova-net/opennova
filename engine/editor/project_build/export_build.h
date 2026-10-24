@@ -41,6 +41,8 @@ enum class CoreFinding;
 // ExportRun steps the copy a budget of bytes at a time (S16: progress and cancel, as the build's own
 // phases are stepped); cancelled before its folder is replaced, it removes its staging folder and leaves
 // the folder as it was (export.cancelled).
+// On POSIX it preserves each file's rwx permissions, including executable runtimes; a permissions
+// failure refuses the export before replacing the destination (export.write).
 inline constexpr const char *kExportRecordFileName = "export.json";
 inline constexpr int kExportRecordSchemaVersion = 1;
 

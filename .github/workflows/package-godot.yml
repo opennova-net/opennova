@@ -1,0 +1,159 @@
+name: Package Godot apps
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: Native desktop platform (windows or linux)
+        type: string
+        required: true
+      export_mode:
+        description: Godot export mode (debug or release)
+        type: string
+        default: release
+      prebuilt:
+        description: Download this run's GDExtensions instead of compiling them
+        type: boolean
+        default: false
+    outputs:
+      artifact_id:
+        value: ${{ jobs.package.outputs.artifact_id }}
+      editor_artifact_id:
+        value: ${{ jobs.package.outputs.editor_artifact_id }}
+      game_artifact_url:
+        value: ${{ jobs.package.outputs.game_artifact_url }}
+      editor_artifact_url:
+        value: ${{ jobs.package.outputs.editor_artifact_url }}
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ${{ (github.event.pull_request.head.repo.fork || startsWith(github.ref, 'refs/tags/')) && (inputs.platform == 'windows' && 'windows-latest' || 'ubuntu-24.04') || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image={1}/volume=150gb/extras=s3-cache', github.run_id, inputs.platform == 'windows' && 'windows25-full-x64' || 'ubuntu24-full-x64') }}
+    outputs:
+      artifact_id: ${{ steps.upload_game.outputs.artifact-id }}
+      editor_artifact_id: ${{ steps.upload_editor.outputs.artifact-id }}
+      game_artifact_url: ${{ steps.upload_game.outputs.artifact-url }}
+      editor_artifact_url: ${{ steps.upload_editor.outputs.artifact-url }}
+    env:
+      GODOT_VERSION: 4.6.1-stable
+      GODOT_VERSION_PLAIN: 4.6.1
+      TEMPLATES_DIR: ${{ inputs.platform == 'windows' && '~/AppData/Roaming/Godot/export_templates' || '~/.local/share/godot/export_templates' }}
+      CMAKE_GENERATOR: Ninja
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+    steps:
+      - uses: runs-on/action@v2
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up MSVC environment
+        if: inputs.platform == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Test the shared packager
+        shell: bash
+        run: python scripts/test_package_godot.py
+
+      - name: Install Ninja
+        if: inputs.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build
+
+      - name: Key the bundled LFS assets
+        id: assets-lfs
+        shell: bash
+        run: echo "key=assets-lfs-$(git lfs ls-files -l -I 'assets/**,expansions/**' | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the bundled LFS assets
+        id: assets-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .git/lfs/objects
+          key: ${{ steps.assets-lfs.outputs.key }}
+
+      - name: Materialize the bundled assets
+        shell: bash
+        run: |
+          git lfs install --local
+          git lfs pull --include="assets/**,expansions/**"
+
+      - name: Save the bundled LFS assets
+        if: github.ref == 'refs/heads/master' && steps.assets-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .git/lfs/objects
+          key: ${{ steps.assets-lfs.outputs.key }}
+
+      - name: Cache Godot binary
+        uses: actions/cache@v4
+        with:
+          path: .godot-bin
+          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Restore platform export templates
+        id: templates-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.TEMPLATES_DIR }}/${{ env.GODOT_VERSION_PLAIN }}.stable/version.txt
+            ${{ env.TEMPLATES_DIR }}/${{ env.GODOT_VERSION_PLAIN }}.stable/icudt_godot.dat
+            ${{ env.TEMPLATES_DIR }}/${{ env.GODOT_VERSION_PLAIN }}.stable/${{ inputs.platform }}_*
+          key: godot-export-templates-${{ inputs.platform }}-${{ env.GODOT_VERSION }}
+
+      - name: Download this run's GDExtensions
+        if: inputs.prebuilt
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gdext_${{ inputs.platform }}_*
+          merge-multiple: true
+          path: godot/bin
+
+      # The root test job saves this cache; packaging only restores it.
+      - name: Restore compiler cache
+        uses: ./.github/actions/compiler-cache
+        with:
+          flavour: ${{ inputs.platform == 'windows' && 'win-root' || 'linux-root' }}
+          mode: restore
+
+      - name: Build, package and smoke-test the desktop products
+        shell: bash
+        run: python scripts/package_godot.py --platform ${{ inputs.platform }} --export-mode ${{ inputs.export_mode }} ${{ inputs.prebuilt && '--skip-build' || '' }}
+
+      - name: Save platform export templates
+        if: github.ref == 'refs/heads/master' && steps.templates-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.TEMPLATES_DIR }}/${{ env.GODOT_VERSION_PLAIN }}.stable/version.txt
+            ${{ env.TEMPLATES_DIR }}/${{ env.GODOT_VERSION_PLAIN }}.stable/icudt_godot.dat
+            ${{ env.TEMPLATES_DIR }}/${{ env.GODOT_VERSION_PLAIN }}.stable/${{ inputs.platform }}_*
+          key: godot-export-templates-${{ inputs.platform }}-${{ env.GODOT_VERSION }}
+
+      - name: Upload game archive
+        id: upload_game
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/opennova-game-${{ inputs.platform }}-v*.${{ inputs.platform == 'windows' && 'zip' || 'tar.gz' }}
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload editor archive
+        id: upload_editor
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/opennova-editor-${{ inputs.platform }}-v*.${{ inputs.platform == 'windows' && 'zip' || 'tar.gz' }}
+          archive: false
+          if-no-files-found: error
+
+      - name: Compiler cache stats
+        if: always()
+        shell: bash
+        run: sccache --show-stats

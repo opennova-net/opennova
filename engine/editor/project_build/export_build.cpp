@@ -318,6 +318,16 @@ void ExportRun::copy(uint64_t budget) {
 		}
 		if (offset_ < file.size) return;
 		close_streams();
+#ifndef _WIN32
+		// Streamed copies otherwise lose the runtime's execute bits. Apply only rwx bits,
+		// after closing the output, to every file (including the person's carried files).
+		std::error_code ec;
+		const fs::perms mode = fs::status(system_path(file.from), ec).permissions();
+		if (!ec) fs::permissions(system_path(target), mode & fs::perms::all, fs::perm_options::replace, ec);
+		if (ec)
+			return fail(CoreFinding::ExportWrite,
+			            "cannot copy permissions from " + file.from + " to " + target + ": " + ec.message());
+#endif
 		if (file.listed) {
 			report_.files.push_back(file.to);
 			report_.bytes += file.size;

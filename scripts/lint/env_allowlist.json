@@ -9,6 +9,7 @@
     "scripts/mcp/*.py": ["GODOT_BIN"],
     "scripts/render/*.ps1": ["GODOT_BIN"],
     "scripts/*.ps1": ["APPDATA"],
+    "scripts/package_godot.py": ["APPDATA", "XDG_DATA_HOME"],
     "tests/common/test_paths.h": ["TEMP", "TMP"],
     "tests/novaworld/billing_stripe_e2e_test.cpp": ["ONNET_STRIPE_TEST_SECRET_KEY"],
     "apps/novaworld_*/*": ["*"],

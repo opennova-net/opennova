@@ -8,7 +8,7 @@ maintainer = "OpenNova contributors"
 type = "add-on"
 license = ["SPDX:MIT"]
 blender_version_min = "5.0.0"
-platforms = ["windows-x64"]
+platforms = ["windows-x64", "linux-x64"]
 
 [permissions]
 files = "Read and write models, scene files and their textures"

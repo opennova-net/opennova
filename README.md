@@ -104,6 +104,7 @@ $GODOT_BIN --path godot -- --resource-dir "C:/Games/Joint Operations"
 
 The packaged Windows runtime loads the game files beside `opennova.exe`: run it, or
 `opennova.exe -- --resource-dir "C:\Games\Joint Operations"`.
+On Linux, run `./opennova` or `./opennova -- --resource-dir "/path/to/Joint Operations"`.
 
 For loose data without boot archives, add `--loose-root /d`. `/game <code>`
 selects the game (default `jo`); `/exp <name>` selects an expansion. A
@@ -128,7 +129,7 @@ A PR's CI build comment also links `opennova-blender-addon-windows.zip`.
 Tagged [releases](https://github.com/opennova-net/opennova/releases) include
 `opennova-blender-addon-windows-v<version>.zip`. Install that zip directly in
 Blender 5.0 or newer using **Preferences > Get Extensions > Install from Disk**.
-The add-on currently supports Windows x64.
+The add-on supports Windows x64 and Linux x64; choose the ZIP for your platform.
 
 The native apps ship together in `opennova-apps-windows.zip` (on a PR's build
 comment) and `opennova-apps-windows-v<version>.zip` (on tagged releases): the
@@ -136,7 +137,7 @@ comment) and `opennova-apps-windows-v<version>.zip` (on tagged releases): the
 `opennova-update-tool` (builds and serves packed game updates for NovaLogic's updater) and
 `opennova-wire` command-line tools and the headless game server
 (`opennova-serve`, with a sample host file; it plays a map rotation and takes retail's
-remote admin), for Windows x64. Its `README.txt` describes each one. The NovaWorld
+remote admin), for Windows and Linux x64. Its `README.txt` describes each one. The NovaWorld
 service runs on Linux only; on Windows, run the local stack (`scripts/dev_stack.sh up`,
 [DEVELOPING.md](DEVELOPING.md), "Run the NovaWorld servers locally") under Docker Desktop.
 
@@ -150,6 +151,34 @@ reaches OpenNova's NovaWorld (`nw.opennova.net`) by itself. It needs administrat
 exe is unsigned, so releases also carry the zip's SHA-256
 (`opennova-switcher-windows-v<version>.zip.sha256`) to check before running it.
 See [switcher/README.md](switcher/README.md).
+
+### Linux downloads
+
+Linux packages target **Ubuntu 24.04 or newer, x86-64**, and comparable distributions
+with glibc 2.39 or newer and the standard C++ runtime. The game and editor need a
+working Vulkan graphics driver. No Godot install is needed.
+
+| Product | Tagged release download |
+| --- | --- |
+| Game, with the same bundled game and expansions as Windows | `opennova-game-linux-v<version>.tar.gz` |
+| Editor and its Play runtime | `opennova-editor-linux-v<version>.tar.gz` |
+| Native tools and headless game server | `opennova-apps-linux-v<version>.tar.gz` |
+| Blender 5.0+ add-on | `opennova-blender-addon-linux-v<version>.zip` |
+
+Extract tar.gz packages into their own folders to preserve executable permissions:
+
+```bash
+mkdir opennova-game
+tar -xzf "opennova-game-linux-v<version>.tar.gz" -C opennova-game
+cd opennova-game
+./opennova
+```
+
+For the editor, extract its archive and run `./editor/opennova-editor`; keep `editor/`
+and `runtime/` together. Install the Linux Blender ZIP directly using **Install from Disk**.
+PR build links offer the same Linux products; apps and Blender omit the version in
+their CI filenames. PR game/editor builds include debug tools; master and tagged
+release builds use release exports. The Switcher is Windows-only.
 
 ## Run your own NovaWorld
 

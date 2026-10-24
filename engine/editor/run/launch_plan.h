@@ -43,7 +43,7 @@ struct LaunchPlan {
 	std::vector<std::string> staged;
 };
 
-// The packaged runtime (opennova.exe) on `build_dir`, in `run_dir`. `engine_args` are Godot's own
+// The packaged runtime on `build_dir`, in `run_dir`. `engine_args` are Godot's own
 // options for the child (`--headless`, `--windowed`, `--quit-after N`), placed before
 // the `--` that starts the game flags. A build of the expansion `expansion` (ADR 0046 S16) runs on
 // the run directory prepare_expansion_run staged, with `/exp <expansion>`; so does a build
@@ -221,7 +221,7 @@ std::string launch_plan_command_line(const LaunchPlan &plan);
 // where it runs from and allocates the MCP port); the settings can name another runtime.
 struct PlayLauncher {
 	bool source_run = false;
-	std::string executable;          // opennova.exe, or the Godot binary for a source run
+	std::string executable;          // the OpenNova runtime, or the Godot binary for a source run
 	std::string godot_project_dir;   // the checkout's godot/ directory (source runs only)
 	std::vector<std::string> engine_args; // Godot options for the child, before the game flags
 	int mcp_port = 0;                // 0 = no endpoint
@@ -230,7 +230,7 @@ struct PlayLauncher {
 // The launcher of an editor running as `editor_executable`: a source run drives that binary
 // on `godot_project_dir`; a packaged editor runs the runtime the package puts beside it, in
 // the release layout's runtime/ directory next to the editor's own
-// (<editor dir>/../runtime/opennova.exe).
+// (<editor dir>/../runtime/opennova, with .exe on Windows).
 PlayLauncher make_play_launcher(bool source_run, const std::string &editor_executable,
                                 const std::string &godot_project_dir, int mcp_port,
                                 std::vector<std::string> engine_args);
