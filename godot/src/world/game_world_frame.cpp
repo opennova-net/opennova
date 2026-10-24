@@ -75,10 +75,20 @@ void print_post_load_counts(Node *p_world, const ResourceRoot *p_root, const Str
 	if (p_world == nullptr || !p_world->is_inside_tree()) return;
 	// The offscreen targets, each with its server-side update mode, its size, its last
 	// frame's 3D draw calls (a first 3D draw builds a target's render buffers) and its
-	// last measured GPU draw; each line turns on the timing of every target it lists, so
-	// a target made after the load's end reads its own draw from its next line on.
+	// last measured GPU and CPU draw; each line turns on the timing of every target it
+	// lists, so a target made after the load's end reads its own draw from its next line
+	// on. The root's CPU and GPU draw lead the list: a first frame's server-side work
+	// lands on whichever viewport draws first, so the CPU of every viewport is read
+	// together (LF-s18).
 	const bool load_end = p_label == String("load_end");
 	PackedStringArray targets;
+	{
+		const RID root_rid = p_world->get_tree()->get_root()->get_viewport_rid();
+		rs->viewport_set_measure_render_time(root_rid, true);
+		targets.push_back(vformat("root gpu %.1f ms cpu %.1f ms",
+				rs->viewport_get_measured_render_time_gpu(root_rid),
+				rs->viewport_get_measured_render_time_cpu(root_rid)));
+	}
 	TypedArray<Node> found =
 			p_world->get_tree()->get_root()->find_children("*", "SubViewport", true, false);
 	for (int64_t i = 0; i < found.size(); ++i) {
@@ -91,9 +101,10 @@ void print_post_load_counts(Node *p_world, const ResourceRoot *p_root, const Str
 				RenderingServer::VIEWPORT_RENDER_INFO_TYPE_VISIBLE,
 				RenderingServer::VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME);
 		if (mode == RenderingServer::VIEWPORT_UPDATE_DISABLED && draws == 0) continue;
-		targets.push_back(vformat("%s %dx%d mode %d draws %d gpu %.1f ms", target->get_name(),
-				target->get_size().x, target->get_size().y, mode, draws,
-				rs->viewport_get_measured_render_time_gpu(rid)));
+		targets.push_back(vformat("%s %dx%d mode %d draws %d gpu %.1f ms cpu %.1f ms",
+				target->get_name(), target->get_size().x, target->get_size().y, mode, draws,
+				rs->viewport_get_measured_render_time_gpu(rid),
+				rs->viewport_get_measured_render_time_cpu(rid)));
 	}
 	UtilityFunctions::print_verbose(vformat("Post-load targets %s: [%s]", p_label,
 			String(", ").join(targets)));
