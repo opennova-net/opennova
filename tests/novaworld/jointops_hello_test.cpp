@@ -123,9 +123,9 @@ int main() {
 	//  __crtLCMapStringA(.., LCMAP_UPPERCASE, ..) called @0x78E5F7]
 	check(cp1252_strupr("Jointops.exe") == "JOINTOPS.EXE", "the retail file name uppercases");
 	check(cp1252_strupr("dfx2.exe /mod x") == "DFX2.EXE /MOD X", "digits, spaces and '/' are kept");
-	check(cp1252_strupr("ÿàþ") == "ÀÞ",
+	check(cp1252_strupr("\x9A\x9C\x9E\xFF\xE0\xFE") == "\x8A\x8C\x8E\x9F\xC0\xDE",
 	      "the high small letters raise to their capitals");
-	check(cp1252_strupr("÷ßµªº") == "÷ßµªº",
+	check(cp1252_strupr("\xF7\xDF\xB5\xAA\xBA\x83") == "\xF7\xDF\xB5\xAA\xBA\x83",
 	      "the division sign, sharp s, micro, the ordinals and f hook stay");
 	int raised = 0;
 	for (int byte = 1; byte < 256; ++byte)
