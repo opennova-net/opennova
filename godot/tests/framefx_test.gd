@@ -601,6 +601,8 @@ func test_production_object_q3_contributes_pixels_and_obeys_beauty_depth() -> vo
 	if q3_image == null:
 		return
 	assert_eq(q3_image.get_size(), beauty_image.get_size())
+	# Retail's altbuffer is backbuffer-sized and 8-bit (A8R8G8B8 under an X8R8G8B8 display).
+	assert_eq(q3_image.get_format(), Image.FORMAT_RGBA8, "the Q3 target is the 8-bit altbuffer")
 	var footprint := _q3_footprint_presence(beauty_image, q3_image)
 	assert_gt(int(footprint.footprint), 50,
 			"the bulb covers a measurable beauty footprint")

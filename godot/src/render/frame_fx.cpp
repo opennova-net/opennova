@@ -1021,8 +1021,13 @@ bool FrameFxCompositorEffect::Impl::ensure_targets(
 		target.scene_scratch = make_texture(size, color_format->get_format());
 		target.scene_scratch_framebuffer = make_framebuffer(target.scene_scratch);
 		// The Q3 framebuffer binds the resolved depth; ensure_q3_framebuffer
-		// builds it on the first Q3 draw, never with the decode chain.
-		target.q3_color = make_texture(size, color_format->get_format(), true);
+		// builds it on the first Q3 draw, never with the decode chain. It is
+		// retail's altbuffer: backbuffer-sized and 8-bit, A8R8G8B8 under an
+		// X8R8G8B8 display, so every Q3 draw blends and clamps its gamma-domain
+		// bytes there as retail's do, and the frame's clear and the capture read
+		// move half the bytes the float scene format would (runtime/renderer/
+		// q3_frame.h carries the FrameFX_CreateAltBufferTexture witness).
+		target.q3_color = make_texture(size, kRgba8, true);
 		target.capture = make_texture(capture_size, kRgba8);
 		target.capture_framebuffer = make_framebuffer(target.capture);
 		target.low_a = make_texture(work, kRgba8);
