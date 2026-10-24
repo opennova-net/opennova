@@ -77,6 +77,13 @@ struct SlotCaptureFrameCounters {
 	int draw_calls = 0;
 };
 
+// What the load's warm packed (SlotCaptureAdapter::warm_streams).
+struct SlotCaptureWarmCounters {
+	int surfaces = 0;
+	int packed_vertices = 0;
+	int readbacks = 0;
+};
+
 // Device adapter for the render-slot silhouette captures (the RD twin of the
 // FrameFx focused-Q3 adapter): the main thread compiles each request's caster
 // geometry into an immutable frame (Q3GeometryCache streams, the PROJSHAD
@@ -90,6 +97,11 @@ public:
 	~SlotCaptureAdapter();
 
 	void compile_frame(const std::vector<SlotCaptureRequest> &p_requests);
+	// The load's warm: every admitted surface of the casters' visible geometry
+	// (ObjectModel instance ids) takes its packed stream now, as the game's
+	// mission start loads every row's model ahead of the first frame
+	// (SlotShadow::warm_caster_streams carries the witness); publishes nothing.
+	SlotCaptureWarmCounters warm_streams(const std::vector<std::uint64_t> &p_casters);
 	void clear_frame();
 	// Render-side: consume evictions, upload streams and bone palettes, draw
 	// every capture of the published frame, resolve into its target. Returns

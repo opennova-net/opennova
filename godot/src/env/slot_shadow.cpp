@@ -18,6 +18,7 @@
 #include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <chrono>
 #include <cmath>
 #include <utility>
 #include <vector>
@@ -180,6 +181,7 @@ void SlotShadow::_bind_methods() {
 			&SlotShadow::set_shadow_detail);
 	ClassDB::bind_method(D_METHOD("get_shadow_detail"), &SlotShadow::get_shadow_detail);
 	ClassDB::bind_method(D_METHOD("create_capture_targets"), &SlotShadow::create_capture_targets);
+	ClassDB::bind_method(D_METHOD("warm_caster_streams"), &SlotShadow::warm_caster_streams);
 	ClassDB::bind_method(D_METHOD("set_local_player_model", "model"),
 			&SlotShadow::set_local_player_model);
 	ClassDB::bind_method(D_METHOD("set_local_player_parent_model", "model"),
@@ -257,6 +259,35 @@ void SlotShadow::create_capture_targets() {
 	for (int order = 0; order < opennova::renderer::kSlotCaptureCount; ++order) {
 		_ensure_capture_target(order, opennova::renderer::slot_texture_size(order, shadow_detail_));
 	}
+}
+
+int SlotShadow::warm_caster_streams() {
+	if (shutdown_ || !is_inside_tree() ||
+			!opennova::renderer::slot_casters_load_with_models(shadow_detail_)) {
+		return 0;
+	}
+	_ensure_captures();
+	if (effect_.is_null()) {
+		return 0;
+	}
+	if (!caster_records_valid_ || caster_records_revision_ != caster_group_revision()) {
+		_rebuild_caster_records();
+	}
+	std::vector<uint64_t> casters;
+	casters.reserve(caster_records_.size());
+	for (const CasterRecord &record : caster_records_) {
+		casters.push_back(uint64_t(record.id));
+	}
+	const auto start = std::chrono::steady_clock::now();
+	const SlotCaptureWarmCounters warmed = effect_->adapter().warm_streams(casters);
+	const int64_t usec = std::chrono::duration_cast<std::chrono::microseconds>(
+			std::chrono::steady_clock::now() - start)
+								 .count();
+	UtilityFunctions::print_verbose(vformat(
+			"SlotShadow: the load's caster warm: %d caster(s), %d surface(s), %d packed vertices, %d readback(s), %.1f ms",
+			static_cast<int64_t>(casters.size()), warmed.surfaces, warmed.packed_vertices,
+			warmed.readbacks, static_cast<double>(usec) / 1000.0));
+	return warmed.surfaces;
 }
 
 void SlotShadow::set_local_player_model(ObjectModel *p_model) {

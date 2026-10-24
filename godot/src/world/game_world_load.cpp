@@ -1761,6 +1761,13 @@ int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTim
 		// and deterministic helper quads are actually submitted to force_draw.
 		const bool was_visible = is_visible();
 		set_visible(true);
+		// The slot captures' casters pack their geometry here, every caster of the world, so a
+		// caster's first capture draws what the load made and not the first scene frame's pack
+		// (engine renderer/render_slot_shadow.h slot_casters_load_with_models carries the
+		// witness, D-NET-NEW-LF-27). Ahead of the person warm, whose models leave with it.
+		leg("slot_casters");
+		if (slot_shadow_ != nullptr) slot_shadow_->warm_caster_streams();
+		leg_end();
 		// The skinned models the first revealed frame would build draw in this frame too, so
 		// their pipelines compile here, behind the loading screen, not in that frame's draw
 		// (D-NET-NEW-LF-15; the one forced frame stays one, D-NET-NEW-L3-47).

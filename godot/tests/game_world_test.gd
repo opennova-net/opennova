@@ -1941,7 +1941,8 @@ func test_a_dedicated_host_loads_no_effect_system() -> void:
 # spawn, no pipeline warm, no forced frame); a listen host's runs the same freeze, then the warm.
 # Neither builds a listed model at the freeze (D-NET-NEW-L3-25, D-NET-NEW-L3-31).
 func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
-	var warm_legs := ["effects_warm", "effect_spawn", "present_pipelines", "person_pipelines",
+	var warm_legs := ["effects_warm", "effect_spawn", "present_pipelines", "slot_casters",
+			"person_pipelines",
 			"local_body", "view_model", "wire_identities", "hud_pipelines", "forced_draw_1",
 			"force_sync", "warm_reset"]
 	for serve_and_play in [true, false]:

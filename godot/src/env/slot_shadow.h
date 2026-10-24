@@ -106,6 +106,12 @@ public:
 	// made (engine renderer/render_slot_shadow.h creates_slot_texture_chain carries the
 	// witness, D-NET-NEW-LF-24). Without a RenderingDevice nothing is made.
 	void create_capture_targets();
+	// The load's caster geometry: every caster of this node's world packs its admitted
+	// surfaces' streams now (SlotCaptureAdapter::warm_streams), so the first capture of each
+	// draws what the load made, as the game's mission start loads every row's model ahead of
+	// its first frame (engine renderer/render_slot_shadow.h slot_casters_load_with_models
+	// carries the witness, D-NET-NEW-LF-27). The surfaces packed; 0 with the chain off.
+	int warm_caster_streams();
 	// The local player's model: halved slot priority, the every-frame
 	// refresh exception, and the first-person drape gates (detail >= 2, not
 	// prone) (engine: runtime/renderer/render_slot_shadow.cpp).

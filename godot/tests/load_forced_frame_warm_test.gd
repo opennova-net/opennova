@@ -146,6 +146,11 @@ func test_the_forced_frame_draws_the_local_models_and_the_hud_ahead_of_the_birth
 		var hud_leg := names.find("hud_pipelines")
 		var mirror := names.find("water_mirror")
 		var frame := names.find("forced_draw_1")
+		# The slot captures' casters pack their geometry ahead of the person warm, whose models
+		# leave with it (D-NET-NEW-LF-27).
+		var casters := names.find("slot_casters")
+		assert_true(casters >= 0 and casters < person,
+				"the casters' geometry packs ahead of the person warm: %s" % [names])
 		assert_true(person >= 0 and person < body and body < view_model and view_model < wire
 				and wire < hud_leg and hud_leg < mirror and mirror < frame,
 				"the body, the view model and the wire identities, the HUD, the water's reflection target, then the one frame: %s"

@@ -156,6 +156,18 @@ int slot_texture_size(int texture_order, int shadow_detail);
 constexpr bool creates_slot_texture_chain(bool dedicated_host, int shadow_detail) noexcept {
 	return !dedicated_host && shadow_detail > 0;
 }
+// A capture draws each caster, and its claimed children, through the model its row holds,
+// which the mission start's reload loaded for every pool-1 and pool-2 row ahead of the
+// first frame: the casters' geometry is the load's, and a caster's first capture makes
+// none [orig: Game_StartMission @0x524360 - Game_ReloadEntityModelsAndCallbacks called
+// @0x52550E; Game_ReloadEntityModelsAndCallbacks @0x522830 - EntityDef_LoadModelsAndCallbacks
+// called @0x5229B8; RenderSlot_RenderEntityAndChildren @0x5d7690 -
+// Entity_RenderWithLODCallback (the call @0x5d78e5)]. A device that packs a caster's
+// geometry for its captures therefore packs every caster's at the load, while the chain
+// stands (D-NET-NEW-LF-27).
+constexpr bool slot_casters_load_with_models(int shadow_detail) noexcept {
+	return shadow_detail > 0;
+}
 // Each capture clears its RT to 0x00FFFFFF — white RGB, alpha 0 — before
 // the PROJSHAD black draws [orig: RenderSlot_RenderEntityAndChildren
 // @ 0x5d780f, GTexRT_SelectThunk with color_mask 0xFFFFFF]; the drape reads

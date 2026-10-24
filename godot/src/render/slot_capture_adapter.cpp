@@ -326,6 +326,80 @@ void write_matrix(PackedByteArray &r_bytes, int64_t p_offset,
 	std::memcpy(r_bytes.ptrw() + p_offset, values.data(), sizeof(values));
 }
 
+// One caster surface's PROJSHAD admission and its packed stream (the frame's
+// compile and the load's warm share it, so a stream the warm packed is the
+// one the first capture finds).
+enum class SurfaceAdmission { Unclassified, NoPass, NoStream, Admitted };
+
+struct AdmittedSurface {
+	Ref<ShaderMaterial> material;
+	ObjectMaterialClassification classification;
+	Ref<Texture2D> diffuse;
+	Ref<Texture2D> detail;
+	ObjectProjectedShadowPolicy policy = ObjectProjectedShadowPolicy::NoPass;
+	ObjectProjectedShadowCoverage coverage = ObjectProjectedShadowCoverage::NoPass;
+	std::shared_ptr<const Q3PackedStream> stream;
+};
+
+SurfaceAdmission admit_surface(Q3GeometryCache &r_cache, GeometryInstance3D *p_source,
+		const Ref<Mesh> &p_mesh, ArrayMesh *p_array_mesh, int p_surface, bool p_skinned,
+		AdmittedSurface &r_surface) {
+	const Ref<Material> material = active_material(p_source, p_mesh, p_surface);
+	r_surface.material = material;
+	if (r_surface.material.is_null() ||
+			!Q3SourceRegistry::object_material_classification(material,
+					r_surface.classification)) {
+		// An ArrayMesh surface whose material is not a registered
+		// object material (no ObjectMaterialClassification): retail
+		// submits no PROJSHAD pass for an effect without one, and no
+		// coverage source exists to invent one from. Counted as
+		// unclassified; a non-ArrayMesh instance (a PrimitiveMesh)
+		// never reaches this test and is not counted.
+		return SurfaceAdmission::Unclassified;
+	}
+	r_surface.diffuse = texture_parameter(r_surface.material, "u_diffuse");
+	r_surface.detail = texture_parameter(r_surface.material, "u_detail");
+	ObjectShaderKey key = build_object_shader_key(r_surface.classification);
+	if (r_surface.detail.is_null()) {
+		// The runtime's missing-detail downgrade: an unresolved
+		// secondary composes the no-detail technique
+		// (object_model_materials.cpp).
+		key &= ~OSCAP_DETAIL;
+	}
+	const ObjectShaderPipelineDescriptor pipeline = describe_object_shader_pipeline(key);
+	r_surface.policy = object_projected_shadow_policy(pipeline.technique);
+	r_surface.coverage = object_projected_shadow_coverage(pipeline.technique);
+	if (r_surface.policy == ObjectProjectedShadowPolicy::NoPass ||
+			r_surface.coverage == ObjectProjectedShadowCoverage::NoPass ||
+			(r_surface.policy == ObjectProjectedShadowPolicy::MaterialBlend &&
+					r_surface.classification.blend == ObjectBlendMode::Additive)) {
+		// No PROJSHAD declaration, or the _FFP material-blend pass
+		// of an additive material: black added to the RT is a no-op.
+		return SurfaceAdmission::NoPass;
+	}
+	// Keyed on the mesh as well as the node: an ObjectModel surface
+	// slot swaps a different ArrayMesh onto the same MeshInstance3D
+	// per authored RLOD level (apply_level_surfaces), and the slot
+	// pass follows no per-source geometry generation, so each
+	// level's arrays are their own retained entry and a crossing
+	// selects the level's packed stream instead of drawing the
+	// first-seen level's silhouette forever.
+	Q3GeometryCache::Request cache_request;
+	cache_request.key = {p_source->get_instance_id(), p_surface,
+		static_cast<std::uint64_t>(p_array_mesh->get_rid().get_id())};
+	cache_request.geometry_generation = 1;
+	cache_request.pack.source = Q3Source::Object;
+	cache_request.pack.uv_u = vector3_parameter(r_surface.material,
+			"u_uv_transform_u", Vector3(1, 0, 0));
+	cache_request.pack.uv_v = vector3_parameter(r_surface.material,
+			"u_uv_transform_v", Vector3(0, 1, 0));
+	cache_request.pack.skin_channels = p_skinned;
+	r_surface.stream = r_cache.acquire(cache_request, [&](bool &r_read_back) {
+		return surface_arrays(p_array_mesh, p_surface, r_read_back);
+	});
+	return r_surface.stream ? SurfaceAdmission::Admitted : SurfaceAdmission::NoStream;
+}
+
 } // namespace
 
 class SlotCaptureAdapter::Impl {
@@ -995,68 +1069,27 @@ void SlotCaptureAdapter::compile_frame(
 			std::uint32_t first_bone = 0;
 			bool bones_appended = false;
 			for (int surface = 0; surface < array_mesh->get_surface_count(); ++surface) {
-				const Ref<Material> material = active_material(source, mesh, surface);
-				const Ref<ShaderMaterial> shader_material = material;
-				ObjectMaterialClassification classification;
-				if (shader_material.is_null() ||
-						!Q3SourceRegistry::object_material_classification(material,
-								classification)) {
-					// An ArrayMesh surface whose material is not a registered
-					// object material (no ObjectMaterialClassification): retail
-					// submits no PROJSHAD pass for an effect without one, and no
-					// coverage source exists to invent one from. Counted as
-					// unclassified; a non-ArrayMesh instance (a PrimitiveMesh)
-					// never reaches this test and is not counted.
-					++counters.unclassified_surfaces;
-					continue;
+				AdmittedSurface admitted;
+				switch (admit_surface(cache, source, mesh, array_mesh.ptr(), surface,
+						!palette.empty(), admitted)) {
+					case SurfaceAdmission::Unclassified:
+						++counters.unclassified_surfaces;
+						continue;
+					case SurfaceAdmission::NoPass:
+						++counters.no_pass_surfaces;
+						continue;
+					case SurfaceAdmission::NoStream:
+						continue;
+					case SurfaceAdmission::Admitted:
+						break;
 				}
-				const Ref<Texture2D> diffuse = texture_parameter(shader_material, "u_diffuse");
-				const Ref<Texture2D> detail = texture_parameter(shader_material, "u_detail");
-				ObjectShaderKey key = build_object_shader_key(classification);
-				if (detail.is_null()) {
-					// The runtime's missing-detail downgrade: an unresolved
-					// secondary composes the no-detail technique
-					// (object_model_materials.cpp).
-					key &= ~OSCAP_DETAIL;
-				}
-				const ObjectShaderPipelineDescriptor pipeline =
-						describe_object_shader_pipeline(key);
-				const ObjectProjectedShadowPolicy policy =
-						object_projected_shadow_policy(pipeline.technique);
-				const ObjectProjectedShadowCoverage coverage =
-						object_projected_shadow_coverage(pipeline.technique);
-				if (policy == ObjectProjectedShadowPolicy::NoPass ||
-						coverage == ObjectProjectedShadowCoverage::NoPass ||
-						(policy == ObjectProjectedShadowPolicy::MaterialBlend &&
-								classification.blend == ObjectBlendMode::Additive)) {
-					// No PROJSHAD declaration, or the _FFP material-blend pass
-					// of an additive material: black added to the RT is a no-op.
-					++counters.no_pass_surfaces;
-					continue;
-				}
-				// Keyed on the mesh as well as the node: an ObjectModel surface
-				// slot swaps a different ArrayMesh onto the same MeshInstance3D
-				// per authored RLOD level (apply_level_surfaces), and the slot
-				// pass follows no per-source geometry generation, so each
-				// level's arrays are their own retained entry and a crossing
-				// selects the level's packed stream instead of drawing the
-				// first-seen level's silhouette forever.
-				Q3GeometryCache::Request cache_request;
-				cache_request.key = {source_id, surface,
-					static_cast<std::uint64_t>(array_mesh->get_rid().get_id())};
-				cache_request.geometry_generation = 1;
-				cache_request.pack.source = Q3Source::Object;
-				cache_request.pack.uv_u = vector3_parameter(shader_material,
-						"u_uv_transform_u", Vector3(1, 0, 0));
-				cache_request.pack.uv_v = vector3_parameter(shader_material,
-						"u_uv_transform_v", Vector3(0, 1, 0));
-				cache_request.pack.skin_channels = !palette.empty();
-				std::shared_ptr<const Q3PackedStream> stream = cache.acquire(
-						cache_request, [&](bool &r_read_back) {
-							return surface_arrays(array_mesh.ptr(), surface, r_read_back);
-						});
-				if (!stream)
-					continue;
+				const Ref<ShaderMaterial> &shader_material = admitted.material;
+				const ObjectMaterialClassification &classification = admitted.classification;
+				const Ref<Texture2D> &diffuse = admitted.diffuse;
+				const Ref<Texture2D> &detail = admitted.detail;
+				const ObjectProjectedShadowPolicy policy = admitted.policy;
+				const ObjectProjectedShadowCoverage coverage = admitted.coverage;
+				const std::shared_ptr<const Q3PackedStream> &stream = admitted.stream;
 				DeviceCommand command;
 				command.stream = stream;
 				command.first_transform = static_cast<std::uint32_t>(frame->transforms.size());
@@ -1129,6 +1162,44 @@ void SlotCaptureAdapter::compile_frame(
 	impl_->counters = counters;
 	impl_->compiled_surfaces = compiled_surfaces;
 	impl_->cached_entries = cache.entry_count();
+}
+
+SlotCaptureWarmCounters SlotCaptureAdapter::warm_streams(
+		const std::vector<std::uint64_t> &p_casters) {
+	SlotCaptureWarmCounters warmed;
+	if (!impl_)
+		return warmed;
+	Q3GeometryCache &cache = impl_->geometry_cache;
+	const Q3GeometryCache::FrameCounters before = cache.frame_counters();
+	std::vector<GeometryInstance3D *> instances;
+	for (const std::uint64_t caster : p_casters)
+		collect_visible_geometry(Object::cast_to<Node>(ObjectDB::get_instance(caster)), instances);
+	for (GeometryInstance3D *source : instances) {
+		Ref<Mesh> mesh;
+		MeshInstance3D *mesh_instance = Object::cast_to<MeshInstance3D>(source);
+		if (mesh_instance != nullptr) {
+			mesh = mesh_instance->get_mesh();
+		} else if (MultiMeshInstance3D *multi_instance =
+				Object::cast_to<MultiMeshInstance3D>(source)) {
+			const Ref<MultiMesh> multimesh = multi_instance->get_multimesh();
+			if (multimesh.is_valid())
+				mesh = multimesh->get_mesh();
+		}
+		Ref<ArrayMesh> array_mesh = mesh;
+		if (array_mesh.is_null())
+			continue;
+		const bool skinned = !skin_palette(mesh_instance).empty();
+		for (int surface = 0; surface < array_mesh->get_surface_count(); ++surface) {
+			AdmittedSurface admitted;
+			if (admit_surface(cache, source, mesh, array_mesh.ptr(), surface, skinned, admitted) ==
+					SurfaceAdmission::Admitted)
+				++warmed.surfaces;
+		}
+	}
+	const Q3GeometryCache::FrameCounters &after = cache.frame_counters();
+	warmed.packed_vertices = static_cast<int>(after.packed_vertices - before.packed_vertices);
+	warmed.readbacks = static_cast<int>(after.readbacks - before.readbacks);
+	return warmed;
 }
 
 void SlotCaptureAdapter::clear_frame() {
