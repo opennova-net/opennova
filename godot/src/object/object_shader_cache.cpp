@@ -193,6 +193,7 @@ void ObjectShaderCache::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_shader_for_key", "key"), &ObjectShaderCache::get_shader_for_key);
 	ClassDB::bind_method(D_METHOD("load_effect_set"), &ObjectShaderCache::load_effect_set);
 	ClassDB::bind_method(D_METHOD("get_effect_set_size"), &ObjectShaderCache::get_effect_set_size);
+	ClassDB::bind_method(D_METHOD("get_effect_set_bind_count"), &ObjectShaderCache::get_effect_set_bind_count);
 	ClassDB::bind_method(D_METHOD("configure_material_for_key", "material", "key"), &ObjectShaderCache::configure_material_for_key);
 	ClassDB::bind_method(D_METHOD("classify", "shader_tag", "material_flags", "emissive_type", "is_glass_flag", "alpha_test_byte"), &ObjectShaderCache::classify);
 	ClassDB::bind_method(D_METHOD("get_known_shader_tags"), &ObjectShaderCache::get_known_shader_tags);
@@ -284,6 +285,14 @@ int ObjectShaderCache::load_effect_set() {
 		const Ref<Shader> shader = loader->load(p_path, "Shader");
 		if (shader.is_valid()) {
 			effect_set_.push_back(shader);
+			// The device compiles a shader at its first material bind, not at its resource's load:
+			// a held material binds it here, as configure_material_for_key does, so the set compiles
+			// with the renderer's start and no load's first bind compiles one (D-NET-NEW-LF-21).
+			Ref<ShaderMaterial> bind;
+			bind.instantiate();
+			bind->set_shader(shader);
+			bind->set_shader_parameter("u_thermal_wave_draw", false);
+			effect_set_binds_.push_back(bind);
 		}
 	};
 	const ObjectBlendMode blends[] = { ObjectBlendMode::Opaque, ObjectBlendMode::AlphaBlend,

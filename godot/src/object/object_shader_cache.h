@@ -41,6 +41,8 @@ public:
 	int load_effect_set();
 	// The effect set's held resources (a test seam).
 	int get_effect_set_size() const { return static_cast<int>(effect_set_.size()); }
+	// The held materials that bound the set's shaders at its load, one a resource (a test seam).
+	int get_effect_set_bind_count() const { return static_cast<int>(effect_set_binds_.size()); }
 
 	int32_t classify(const String &shader_tag,
 			int32_t material_flags,
@@ -84,6 +86,7 @@ private:
 	static ObjectShaderCache *singleton;
 	std::unordered_map<uint32_t, Ref<Shader>> cache;
 	Vector<Ref<Shader>> effect_set_; // load_effect_set
+	Vector<Ref<ShaderMaterial>> effect_set_binds_; // load_effect_set
 	bool effect_set_loaded_ = false;
 	Ref<ImageTexture> phong_map_texture;
 	float water_split_height = 0.0f;
