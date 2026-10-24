@@ -123,11 +123,23 @@ void ClientReplicaPipeline::apply_full_entity_spawn(const std::vector<uint8_t> &
 
 // Deferred gameplay notifications belong to the current slot lifetime. A later
 // destroy/repair must not apply them to the newly materialized replacement.
+// A dead player record's arms write the slot as the record decodes, so a later
+// spawn of that slot in the same receive re-inits what they wrote (a 0x0C clears
+// the slot whole; a 0x18 destroys it, clears Health and Flags and its class init
+// re-requests +0x2BC / +0x2B8), and a destroy frees it: the queued share goes
+// with the slot's 0x13s.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the dead arms @0x4C100B..0x4C1027 /
+//  @0x4C10F1..0x4C10FB; NapiNPClientMsg_0x00C @0x42E730 - the memsets called @0x42E7F1 /
+//  @0x42E7FE; NapiNPClientMsg_FullEntitySpawn @0x433780 - Entity_Destroy called @0x433815,
+//  the memset @0x433821, the class init called @0x433E82; PlayerClass_InitEntity @0x4B1060 -
+//  +0x2BC @0x4B1161, +0x2B8 @0x4B1176]
 void ClientReplicaPipeline::discard_entity_notifications(uint16_t handle) {
     pending_effect_commands_.erase(std::remove_if(pending_effect_commands_.begin(),
             pending_effect_commands_.end(), [handle](const ClientEffectCommand &command) {
-                const auto *death = std::get_if<EntityDeathEvent>(&command);
-                return death && death->entity_handle == handle;
+                if (const auto *death = std::get_if<EntityDeathEvent>(&command))
+                    return death->entity_handle == handle;
+                const auto *dead = std::get_if<PlayerDeadRecord>(&command);
+                return dead != nullptr && dead->entity_handle == handle;
             }), pending_effect_commands_.end());
 	pending_weapon_reloads_.erase(std::remove_if(pending_weapon_reloads_.begin(),
 			pending_weapon_reloads_.end(), [handle](const WeaponReload &event) {

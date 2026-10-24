@@ -1114,8 +1114,18 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			record_carrier = rec.vehicle.parent_slot_handle;
 		else if (rec.cls == EntityClass::Infantry)
 			record_carrier = rec.infantry.vehicle_slot_handle;
+		// The carrier's slot must hold a def: no row, or a typeless one (a slot the
+		// team-assign leg created ahead of its spawn), is the slot whose itemDef is null,
+		// and the record drops whole, its dead arms included (each class's resolve tests
+		// itemDef ahead of its applies) [orig: NetPacket_SerializePlayerState @0x4C09C0 -
+		// `cmp dword ptr [ebp+20h], 0` @0x4C107B, the 0x0F @0x4C10AE, the return
+		// @0x4C10C7, ahead of the dead test @0x4C0FE1; NetPacket_SerializeInfantryEntityState
+		// @0x4C0320 - @0x4C0554, the return @0x4C0595; Entity_SerializeVehicleState
+		// @0x460560 - @0x46087A].
+		const ClientEntityState *carrier_row = record_carrier != wire_handle::kInvalid
+				? state_.find(record_carrier) : nullptr;
 		if (record_carrier != wire_handle::kInvalid &&
-				state_.find(record_carrier) == nullptr) {
+				(carrier_row == nullptr || carrier_row->type_id == 0)) {
 			if (sweep == 0) continue; // the carrier may appear this frame
 			queue_carrier_repair(record_carrier);
 			record_folded[rec_i] = 1u;
@@ -1214,8 +1224,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// 0xFFFF, D-NET-151), lift the local offset through the carrier's pose from this
 		// view's own state [orig: op2 resolves the carrier from g_PoolList and runs
 		// Entity_TransformLocalToWorld @0x4c10d4; a carrier with no itemDef DROPS the
-		// record and queues a C2S 0x0F entity request — request plumbing an in-process
-		// view does not need, so an unknown carrier just skips the position sample].
+		// record and queues a C2S 0x0F entity request, the fold's carrier gate above].
 		// Carrier-local samples are queued for a second pass after every record has
 		// updated the view. Production order is pool-0 child before pool-1 carrier.
 		uint16_t cx = 0, cy = 0, cz = 0;

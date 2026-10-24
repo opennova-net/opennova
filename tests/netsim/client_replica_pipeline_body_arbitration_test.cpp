@@ -13,6 +13,7 @@
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
+#include <net/npwire/ingame_message_id.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/infantry.h>
 
@@ -43,7 +44,7 @@ EntityClass classify(uint16_t type_id) {
 }
 
 std::vector<uint8_t> player_frame(uint8_t anim_state, uint8_t ratio,
-		uint8_t state_flags = 0) {
+		uint8_t state_flags = 0, uint16_t carrier = 0xFFFF, uint8_t bone = 0) {
 	FrameUpdate fu;
 	fu.anchor_x = 100 << 16;
 	fu.anchor_y = 200 << 16;
@@ -55,7 +56,8 @@ std::vector<uint8_t> player_frame(uint8_t anim_state, uint8_t ratio,
 	rec.handle = kPlayerHandle;
 	rec.type_id = kPlayerType;
 	rec.cls = EntityClass::Player;
-	rec.player.carrier_handle = 0xFFFF;
+	rec.player.carrier_handle = carrier;
+	rec.player.vehicle_bone = bone;
 	rec.player.pos_x_compressed = network_compress_fixedpoint(1 << 16);
 	rec.player.pos_y_compressed = network_compress_fixedpoint(2 << 16);
 	rec.player.pos_z_compressed = network_compress_fixedpoint(0);
@@ -286,6 +288,85 @@ void test_dead_records_queue_behind_the_0x13() {
 		if (const auto *next = std::get_if<ns::PlayerDeadRecord>(&c))
 			queued += next->anim_state_id == as::kDeathGrenadeBase ? 1 : 100;
 	expect(queued == 1, "each dead record queues its byte");
+}
+
+// V-ROLL-BL N2 on D-NET-NEW-L5-75: a carrier-local record whose carrier slot holds no def (no
+// row, or a typeless one the team-assign leg made ahead of its spawn) drops whole, its dead
+// arms included: nothing queues, the row keeps its byte, the carrier takes a C2S 0x0F. A typed
+// carrier lets the same record land.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - `cmp dword ptr [ebp+20h], 0` @0x4C107B, the
+//  0x0F @0x4C10AE, the return @0x4C10C7 ahead of the dead test @0x4C0FE1]
+void test_defless_carrier_drops_the_dead_record() {
+	constexpr uint16_t kCarrier = 0x1010;
+	constexpr uint16_t kCarrierType = 0x0400;
+	const uint8_t dead = static_cast<uint8_t>(opennova::world::kEntityFlagDead);
+	struct Form {
+		bool row;
+		uint16_t type;
+		bool lands;
+		const char *what;
+	};
+	const Form forms[] = {
+		{false, 0, false, "a carrier with no row drops the dead record whole"},
+		{true, 0, false, "a typeless carrier row drops the dead record whole"},
+		{true, kCarrierType, true, "a typed carrier lets the dead record land"},
+	};
+	for (const Form &f : forms) {
+		for (const uint8_t bone : {uint8_t{0}, uint8_t{3}}) {
+			ns::ClientReplicaPipeline view;
+			view.set_item_class_resolver(&classify);
+			seed_row(view);
+			if (f.row) view.state().upsert(kCarrier).type_id = f.type;
+			view.apply(0x0A, player_frame(as::kDeathGrenadeBase, 0, dead, kCarrier, bone));
+			int queued = 0;
+			for (const ns::ClientEffectCommand &c : view.drain_effect_commands())
+				if (const auto *record = std::get_if<ns::PlayerDeadRecord>(&c))
+					queued += record->entity_handle == kPlayerHandle ? 1 : 100;
+			const std::vector<uint16_t> repairs = view.drain_carrier_repair_requests();
+			const ns::ClientEntityState *row = view.state().find(kPlayerHandle);
+			expect(queued == (f.lands ? 1 : 0), f.what);
+			expect(f.lands ? repairs.empty()
+			               : repairs.size() == 1 && repairs[0] == kCarrier,
+					f.lands ? "a typed carrier requests nothing"
+					        : "the def-less carrier takes one C2S 0x0F");
+			expect(row != nullptr &&
+							(row->anim_state_id == as::kDeathGrenadeBase) == f.lands &&
+							row->net_health_zero == f.lands,
+					f.lands ? "the landed record stores its byte and Health 0"
+					        : "the dropped record leaves the row as it stood");
+		}
+	}
+}
+
+// V-ROLL-BL N1 on D-NET-NEW-L5-75: a dead record's queued share belongs to its slot's lifetime.
+// Retail's dead arms write the slot as the record decodes; a 0x18 for that slot later in the
+// same receive destroys and re-inits it (Health in the memset, +0x2BC / +0x2B8 in the class
+// init), so the share the effect pass would land on the rebuilt body drops with the slot's
+// 0x13s. Another slot's 0x18 leaves it.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the dead arms @0x4C100B..0x4C1027 /
+//  @0x4C10F1..0x4C10FB; NapiNPClientMsg_FullEntitySpawn @0x433780 - Entity_Destroy called
+//  @0x433815, the memset @0x433821, the class init called @0x433E82; PlayerClass_InitEntity
+//  @0x4B1060 - +0x2BC @0x4B1161, +0x2B8 @0x4B1176]
+void test_slot_restart_drops_a_queued_dead_record() {
+	const uint8_t dead = static_cast<uint8_t>(opennova::world::kEntityFlagDead);
+	for (const bool same_slot : {true, false}) {
+		ns::ClientReplicaPipeline view;
+		view.set_item_class_resolver(&classify);
+		seed_row(view);
+		view.apply(0x0A, player_frame(as::kDeathGrenadeBase, 0, dead));
+		FullEntitySpawnRecord rec;
+		rec.slot_id = same_slot ? kPlayerHandle : uint16_t{0x0003};
+		rec.item_type_id = kPlayerType;
+		rec.item_type = 3;
+		rec.minimap_flags = static_cast<uint16_t>(opennova::world::kEntityFlagPlayer);
+		view.apply(s2c::FULL_ENTITY_SPAWN, encode_full_entity_spawn(rec));
+		int queued = 0;
+		for (const ns::ClientEffectCommand &c : view.drain_effect_commands())
+			if (std::get_if<ns::PlayerDeadRecord>(&c) != nullptr) ++queued;
+		expect(queued == (same_slot ? 0 : 1),
+				same_slot ? "the slot's 0x18 later in the receive drops its queued dead record"
+				          : "another slot's 0x18 leaves the dead record queued");
+	}
 }
 
 // L5-s7 FOUND 4: every player record, dead or alive, lands its flags byte on the
@@ -1119,6 +1200,8 @@ int main() {
 	test_parked_row_keeps_its_body_legs_until_its_visit();
 	test_record_flags_land_on_the_mirror();
 	test_dead_records_queue_behind_the_0x13();
+	test_defless_carrier_drops_the_dead_record();
+	test_slot_restart_drops_a_queued_dead_record();
 	test_remote_lean_ramp_gates();
 	test_remote_body_conform_chases_the_slope();
 	test_tapped_roll_locks_and_queues();
