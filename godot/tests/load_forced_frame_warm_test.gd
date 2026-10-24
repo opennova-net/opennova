@@ -208,6 +208,10 @@ func test_the_forced_frame_draws_the_local_models_and_the_hud_ahead_of_the_birth
 	world.tick(eye.origin, eye)
 	if cube != null:
 		assert_eq(cube.get_render_frame_index(), cube_frames + 1, "the first drawn frame counts")
+		# That frame takes this mission's six faces and samples them: the cube is ready at the request
+		# and its copy runs in that frame's draw, ahead of the beauty view's opaque pass.
+		if RenderingServer.get_rendering_device() != null:
+			assert_true(cube.is_cube_ready(), "the reveal frame's cube is this mission's, ready at its request")
 	hud.teardown()
 	world.unload()
 

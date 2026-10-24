@@ -743,8 +743,9 @@ vec3 obj_environment_cube_approx(vec3 reflection_ws) {
 	vec3 direction = normalize(reflection_ws);
 	if (!opennova_environment_cube_ready) {
 		// Dummy/headless renderers cannot produce the six GPU faces. The live
-		// Forward+ path publishes synchronously before its visible main draw;
-		// this only keeps editor/resource-validation contexts defined.
+		// Forward+ path readies the cube at a capture's request and copies the
+		// faces inside that frame's draw, ahead of the beauty view's opaque
+		// pass; this only keeps editor/resource-validation contexts defined.
 		return obj_hemi(direction);
 	}
 	vec3 dimmed_sky = texture(opennova_environment_cube, direction).rgb;

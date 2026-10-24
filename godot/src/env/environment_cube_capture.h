@@ -4,6 +4,7 @@
 #include <memory>
 
 #include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/compositor.hpp>
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
@@ -42,6 +43,8 @@ public:
 	static constexpr uint8_t kSkyDimByte =
 			opennova::renderer::kEnvironmentCubeDimByte;
 
+	// The mission start's terrain: the next capture takes all six faces, and
+	// the previous mission's cube is unready until it does.
 	void set_terrain_data(const Ref<TerrainData> &p_data);
 	Ref<TerrainData> get_terrain_data() const { return terrain_data_; }
 
@@ -94,9 +97,15 @@ protected:
 
 private:
 	void _ensure_capture_nodes();
+	void _ensure_blit();
+	void _ensure_draw_effect();
+	void _uninstall_draw_effect();
 	void _request_capture(const Vector3 &p_player_position);
+	bool _arm_copy(RenderingServer *p_rs);
 	bool _publish_completed_capture();
+	bool _bind_cube(RenderingServer *p_rs);
 	bool _wire_cube(RenderingServer *p_rs);
+	void _arm_on_render_thread();
 	void _publish_on_render_thread();
 	void _create_on_render_thread();
 	void _release_on_render_thread();
@@ -106,15 +115,23 @@ private:
 	SubViewport *viewports_[kFaceCount]{};
 	Camera3D *cameras_[kFaceCount]{};
 	std::unique_ptr<EnvironmentCubeBlit> blit_;
+	// The copy into the cube inside the frame that renders the faces: the
+	// pre-opaque effect on the WorldEnvironment's compositor, and the request
+	// the render thread arms it with.
+	Ref<EnvironmentCubeCompositorEffect> draw_effect_;
+	Ref<Compositor> draw_effect_installed_into_;
+	ObjectID world_environment_id_;
+	EnvironmentCubeBlit::Request armed_request_{};
 	Ref<TextureCubemapRD> environment_cube_;
 	Vector3 capture_origin_;
 	int64_t render_frame_index_ = 0;
-	// Copies handed to the render thread, and the number of them whose cube
+	// Copies armed on the render thread, and the number of them whose cube
 	// has been wired to the shader global; the blit's completed count closes
-	// the loop (one frame later under a threaded render model, immediately
-	// under the default one).
+	// the loop (in the request frame's draw, else at the next advance).
 	uint64_t requested_publishes_ = 0;
 	uint64_t wired_publishes_ = 0;
+	// The pending capture's copy is armed (its count is in requested_publishes_).
+	bool copy_armed_ = false;
 	bool capture_pending_ = false;
 	bool cube_ready_ = false;
 	bool force_pending_ = true;

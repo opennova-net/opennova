@@ -247,6 +247,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(SkyDome);
 	GDREGISTER_CLASS(Water);
 	GDREGISTER_CLASS(Celestial);
+	GDREGISTER_CLASS(EnvironmentCubeCompositorEffect);
 	GDREGISTER_CLASS(EnvironmentCubeCapture);
 	GDREGISTER_CLASS(MissionPlacementStats);
 	GDREGISTER_CLASS(MissionPlacementRun);

@@ -147,6 +147,82 @@ func test_cadence_recopies_every_128th_frame_into_the_same_cube() -> void:
 	assert_eq(cube.texture_rd_rid, cube_rid)
 
 
+func _draw_copies(compositor: Compositor) -> Array:
+	if compositor == null:
+		return []
+	return compositor.compositor_effects.filter(
+			func(effect: CompositorEffect) -> bool: return effect is EnvironmentCubeCompositorEffect)
+
+
+# The copy into the cube runs in the frame that renders the faces, in the beauty view's pre-opaque
+# pass: the capture's effect joins the compositor of the WorldEnvironment the beauty view draws with,
+# follows a replaced compositor (FrameFx and DisplayDecode install fresh ones) and leaves with the
+# capture (V-ROLL-BY on D-NET-NEW-LF-29).
+func test_the_capture_installs_its_pre_opaque_copy_on_the_world_environments_compositor() -> void:
+	var holder := Node3D.new()
+	add_child_autofree(holder)
+	var environment := WorldEnvironment.new()
+	environment.environment = Environment.new()
+	holder.add_child(environment)
+	var capture := EnvironmentCubeCapture.new()
+	holder.add_child(capture)
+	await get_tree().process_frame
+	var first := environment.compositor
+	var copies := _draw_copies(first)
+	assert_eq(copies.size(), 1, "the capture's copy joined the environment's compositor")
+	if copies.size() == 1:
+		assert_eq(copies[0].effect_callback_type, CompositorEffect.EFFECT_CALLBACK_TYPE_PRE_OPAQUE)
+	var fresh := Compositor.new()
+	environment.compositor = fresh
+	capture.advance_frame(Vector3.ZERO)
+	assert_eq(_draw_copies(fresh).size(), 1, "a replaced compositor is followed")
+	assert_eq(_draw_copies(first).size(), 0, "and the old one left")
+	holder.remove_child(capture)
+	assert_eq(_draw_copies(fresh).size(), 0, "the copy leaves with the capture")
+	capture.free()
+
+
+# The frame that renders the faces copies them in its own draw and samples them: the cube is ready at
+# the request and the copy has run when that frame's draw ends, before any later advance, as retail
+# renders the faces ahead of the scene's draws in the frame that samples them. A mission start
+# unreadies the last mission's cube until its own first capture.
+func test_the_request_frame_copies_the_faces_in_its_own_draw() -> void:
+	if not _device_available():
+		pending("requires a windowed Forward+ RenderingDevice run")
+		return
+	var view := SubViewport.new()
+	view.size = Vector2i(64, 64)
+	view.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(view)
+	var environment := WorldEnvironment.new()
+	environment.environment = Environment.new()
+	view.add_child(environment)
+	var camera := Camera3D.new()
+	view.add_child(camera)
+	camera.make_current()
+	var capture := EnvironmentCubeCapture.new()
+	view.add_child(capture)
+	await get_tree().process_frame
+	# The mission load's render subsystems make the cube ahead of the first capture.
+	capture.create_cube_device()
+	await RenderingServer.frame_post_draw
+	capture.advance_frame(Vector3.ZERO)
+	assert_true(capture.is_capture_pending())
+	assert_true(capture.is_cube_ready(), "the request frame's cube is ready at its request")
+	assert_eq(capture.get_device_publish_count(), 0)
+	await RenderingServer.frame_post_draw
+	assert_eq(capture.get_device_publish_count(), 1, "the copy ran in the request frame's draw")
+	capture.advance_frame(Vector3.ZERO)
+	assert_false(capture.is_capture_pending())
+	assert_eq(capture.get_device_publish_count(), 1, "the next advance copies nothing again")
+	capture.set_terrain_data(null)
+	assert_false(capture.is_cube_ready(), "a mission start unreadies the last mission's cube")
+	capture.advance_frame(Vector3.ZERO)
+	assert_true(capture.is_cube_ready(), "its first capture readies it at the request")
+	await RenderingServer.frame_post_draw
+	assert_eq(capture.get_device_publish_count(), 2)
+
+
 func test_exit_tree_releases_the_device_cube_and_re_entry_recopies() -> void:
 	if not _device_available():
 		pending("requires a windowed Forward+ RenderingDevice run")
