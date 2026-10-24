@@ -433,6 +433,7 @@ void LobbyHttpFlow::reset() {
 	join_step_ = JoinStep::Idle;
 	enter_step_ = EnterStep::Idle;
 	sign_in_page_shown_ = false;
+	identity_seeded_ = false;
 	login_page_url_.clear();
 	join_page_url_.clear();
 	host_page_url_.clear();
@@ -619,7 +620,11 @@ std::vector<std::pair<std::string, std::string>> LobbyHttpFlow::identity_seed() 
 	return seed;
 }
 
+// The two writers run once per connect, ahead of the web lobby's first request: a later entry or
+// login of the same session finds the jar as the pages left it (a page's USEJUNCTION stays).
 void LobbyHttpFlow::seed_identity_cookies() {
+	if (identity_seeded_) return;
+	identity_seeded_ = true;
 	for (const auto &kv : identity_seed()) jar_.set(kv.first, kv.second);
 }
 
@@ -663,6 +668,7 @@ EnterResult LobbyHttpFlow::enter() {
 	if (ctx_.title == nullptr) return enter_fail("no title identity to open the NovaWorld lobby with");
 	const std::string url = resolve_startup_url();
 	if (url.empty()) return enter_fail("no gate startup_url yet — connect first");
+	seed_identity_cookies();
 	sign_in_page_shown_ = false;
 	enter_step_ = EnterStep::Prepare;
 	HttpRequestSpec req;

@@ -221,8 +221,9 @@ public:
 	std::string resolve_startup_url() const;
 
 	// --- the NovaWorld menu's entry (EnterResult) ---
-	// Begin: the startup URL's GET (NeedRequest), or Failed with no title or startup URL. The jar
-	// is kept: a re-entry carries the login the service may remember.
+	// Begin: the startup URL's GET (NeedRequest), or Failed with no title or startup URL. The
+	// connect's identity set is seeded ahead of the session's first request (seed_identity_cookies,
+	// once per session); the jar is kept: a re-entry carries the login the service may remember.
 	// [orig: UI_EnterNovaWorldMenu @0x5588F0 - g_StartupURL cleared @0x5588FF, the connect state 1
 	//  @0x558949; UI_ProcessLANSessionStateMachine @0x558DE0 - state 1 stops hosting and playing
 	//  on a live session (CGameSession_StopHosting called @0x558E76, CGameSession_StopPlaying
@@ -360,6 +361,8 @@ private:
 	EnterStep enter_step_ = EnterStep::Idle;
 	// The sign-in page is the one shown (an entry landed on it): Login posts its form.
 	bool sign_in_page_shown_ = false;
+	// The connect's identity set is in the jar (seed_identity_cookies: once per session).
+	bool identity_seeded_ = false;
 	// Each leg's last request's URL: the page its answer is, whose template it names.
 	std::string login_page_url_, join_page_url_, host_page_url_, enter_page_url_;
 	TemplateHold<LoginResult> login_template_;

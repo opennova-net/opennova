@@ -954,6 +954,36 @@ static bool test_enter_reentry() {
 	return g_fail == 0;
 }
 
+// The connect's identity set rides the session's first request, whichever leg sends it (the
+// entry's at the validated connect, D-NET-NEW-L9-38), and is seeded once: a later entry or login
+// finds the jar as the pages left it (D-NET-NEW-L9-26).
+// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - USEJUNCTION @0x4CF74E;
+//  CNapiGameSession_OnNovaWorldConnected @0x4D1570 - NWUID (the call @0x4D16A9)]
+static bool test_enter_seeds_identity_once() {
+	nw::process_browser_cache().clear();
+	nw::LobbyHttpContext c = templated_ctx();
+	c.use_junction = 1;
+	c.identity_vars = {{"NWUID", ""}, {"MyInstalledExpBits", "3"}};
+	c.server_nwuid = "ABCDEF0123456789";
+	nw::LobbyHttpFlow f;
+	f.set_context(c);
+	nw::EnterResult r = f.enter();
+	const std::vector<std::string> want = {"Cookie: USEJUNCTION=1;", "Cookie: JUNCTIONCODE=;",
+			"Cookie: NWUID=ABCDEF0123456789;", "Cookie: MyInstalledExpBits=3;"};
+	expect(r.request.headers.size() == 8 &&
+	               std::vector<std::string>(r.request.headers.begin() + 4, r.request.headers.end()) == want,
+	       "the first entry's request carries the identity set, in its order");
+	r = f.on_enter_response(true, 200, set_cookie("USEJUNCTION=0"), bytes(kStartPage));
+	r = f.on_enter_response(true, 200, {}, bytes(kLoginPage));
+	r = f.on_enter_response(true, 200, {}, bytes("<IB3 login mnx>"));
+	expect(r.kind == nw::EnterResult::Kind::SignIn, "the sign-in page");
+	r = f.enter();
+	const std::string *junction = f.cookies().find("USEJUNCTION");
+	expect(junction != nullptr && *junction == "0", "a later entry keeps the page's USEJUNCTION");
+	nw::process_browser_cache().clear();
+	return g_fail == 0;
+}
+
 int main() {
 	test_gate_reply_jar_fields();
 	test_meta_refresh_walk();
@@ -970,6 +1000,7 @@ int main() {
 	test_page_template_file();
 	test_login_template_legs();
 	test_enter_reentry();
+	test_enter_seeds_identity_once();
 	std::fprintf(stderr, g_fail == 0 ? "OK\n" : "FAILED (%d)\n", g_fail);
 	return g_fail == 0 ? 0 : 1;
 }
