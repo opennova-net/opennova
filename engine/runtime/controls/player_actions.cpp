@@ -354,13 +354,19 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 				frame.requests.push_back({Action::Respawn, 0, respawn_code, event.sign});
 			continue;
 		}
+		bool owned = false;
 		for (const ActionRow &row : kRows) {
 			if (row_code(row.token) != event.code) continue;
+			owned = true;
 			const bool active = row.gate == Gate::Captured ? captured : gate.active;
 			if (active && admitted(row.token) && gate.simulation_available)
 				frame.requests.push_back(request_of(row, true, event.sign));
 			break;
 		}
+		// A row no arm here owns: the scan queued its event all the same, so it is a record for
+		// the drain's dispatcher (player_actions_own_code carries the witness).
+		if (!owned)
+			frame.requests.push_back({Action::EmbedderRow, event.param, event.code, event.sign});
 	}
 	// The off-keyboard arms' press edges behind the keyboard pass's events (ToSpecial's
 	// arm both edges): the joystick's and the scripted hold's, whose toggle pass runs behind
@@ -472,6 +478,16 @@ int WheelRemainder::feed(int32_t delta) {
 	for (; remainder_ >= kWheelDelta; remainder_ -= kWheelDelta) ++notches;  // @ 0x761575..0x7615AA
 	for (; remainder_ <= -kWheelDelta; remainder_ += kWheelDelta) --notches; // @ 0x7615AC..0x7615DB
 	return notches;
+}
+
+bool player_actions_own_code(int code) {
+	if (code == row_code("attack_1") || code == row_code("ToSpecial") ||
+			code == row_code("magazine") || code == row_code("MedicReq") ||
+			code == row_code("respawn") || (code >= 500 && code <= 502))
+		return true;
+	for (const auto &row : kRows)
+		if (row_code(row.token) == code) return true;
+	return false;
 }
 
 std::optional<PlayerActionRequest> player_action_request(const InputEventRecord &record) {

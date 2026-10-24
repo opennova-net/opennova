@@ -335,7 +335,11 @@ bool local_player_in_armory_zone(const World &world);
 // vehicle-loadout arm (@0x4e0ab2..0x4e0b05), and else the mount chain. With a
 // menu screen open an armory press that passes the latch and the countdown
 // closes it instead (@0x4e0b35..0x4e0b3c), a latched or refused one closing
-// nothing. The armory arm's press latch (g_WeaponScreenOpenDebounce, set @0x4e0b21
+// nothing, and a vehicle-loadout press closes it ahead of its team test
+// (UI_IsMenuScreenOpen @0x4E0ABD, UI_CloseMenuScreen called @0x4E0AC6, the team
+// @0x4E0AEB): the embedder's shell runs both closes over the pass-through screens,
+// the only menu screens an input frame runs under, and the vehicle arm's team test
+// past them (D-NET-NEW-LI-40). The armory arm's press latch (g_WeaponScreenOpenDebounce, set @0x4e0b21
 // before the countdown test, cleared on the key's release by
 // Input_HandleMenuKeyRelease @0x4de2d0) is LocalPlayer::armory_press_latched; a
 // press takes the arm through it (LocalPlayer::take_use_item_press).

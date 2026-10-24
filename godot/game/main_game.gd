@@ -1912,12 +1912,20 @@ func _run_record_leg(code: int, param: int) -> void:
 ## each close handing play back with its input reset (_leave_screen).
 func _toggle_weapon_screen() -> void:
 	if _menu_screen_open():
-		if _state == State.DEPLOY and _deploy_presenter != null:
-			_deploy_presenter.close()
-		elif _state == State.END_ROUND and _end_round_presenter != null:
-			_end_round_presenter.close()
+		_close_drain_menu_screen()
 		return
 	_open_armory()
+
+
+## The menu screen a drained record's case closes (the weapon-screen toggle's, the USE row's
+## armory and vehicle legs'): a drain runs under no menu screen but the pass-through ones
+## (death.mnu's DEATH, stat.mnu's STAT), each close handing play back with its input reset
+## (_leave_screen).
+func _close_drain_menu_screen() -> void:
+	if _state == State.DEPLOY and _deploy_presenter != null:
+		_deploy_presenter.close()
+	elif _state == State.END_ROUND and _end_round_presenter != null:
+		_end_round_presenter.close()
 
 
 ## The Screen Shot action's device leg (case 2): the frame as it last drew, written as the
@@ -2419,17 +2427,21 @@ func _process(delta: float) -> void:
 				frame_elapsed, frame_input)
 	var probe_t2 := Time.get_ticks_usec() if timing else 0
 	if _player_presenter != null:
-		# The held USE row's armory arm took its open in an update's sample (engine
-		# controls::PlayerActions, through the sim's press latch); the shell
-		# opens what it names, over live play only: the screen open refuses while
-		# another menu screen is up (engine world::pass_through_close_axis carries
-		# the witness).
-		if _player_presenter.take_use_item_armory_request() and _state == State.WORLD:
+		# The held USE row's armory and vehicle-loadout arms took their press in an update's
+		# sample (engine controls::PlayerActions, through the sim's press latch). With a menu
+		# screen up (a pass-through one) either arm closes it instead of opening its own;
+		# over live play the armory opens weapon.mnu WEAPON, the vehicle arm vehicle.mnu
+		# VEHICLE past its team test (engine world::local_player_use_item_arm carries the
+		# witness, D-NET-NEW-LI-40).
+		var armory: bool = _player_presenter.take_use_item_armory_request()
+		var vehicle: bool = _player_presenter.take_use_item_vehicle_menu_request()
+		var use_sim: Simulation = _world.get_sim() if _world != null else null
+		if (armory or vehicle) and _menu_screen_open():
+			_close_drain_menu_screen()
+		elif armory and _state == State.WORLD:
 			_open_armory()
-		# The vehicle-loadout arm's open (engine controls::PlayerActions; the team
-		# gate in the router): vehicle.mnu VEHICLE over live play.
-		if _player_presenter.take_use_item_vehicle_menu_request() and _state == State.WORLD \
-				and _vehicle_menu_presenter != null:
+		elif vehicle and _state == State.WORLD and _vehicle_menu_presenter != null \
+				and use_sim != null and use_sim.local_player_vehicle_zone_team_matches():
 			_vehicle_menu_presenter.open()
 	# Camera placement runs in the world frame now (local-view device leg,
 	# D-RORD-8); this covers frames that skip it (probe world-skip, no live world).

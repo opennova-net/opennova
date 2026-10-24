@@ -148,6 +148,16 @@ struct PlayerActionRequest {
 //  @0x49B3DE..0x49B44D reads the sign); Input_HandleActionBinding_0 @0x4E0420]
 std::optional<PlayerActionRequest> player_action_request(const InputEventRecord &record);
 
+// Whether the device poll owns a key event's code (PlayerActions::poll's arms: the fire,
+// ToSpecial, reload, medic and Respawn rows, the death screen's spectator rows, the action
+// table's rows). The key scan queues every row it matches, so an event no arm here owns is
+// a record all the same (PlayerAction::EmbedderRow), for the role's and the embedder's arms
+// at the drain: a keylist binding on "exit", "nextflag" or "netdelay" reaches its case as a
+// typed token does (D-NET-NEW-LI-41).
+// [orig: Input_ProcessKeyboardEvents @0x49D1F0 - Input_QueueEvent per scanned key-down, the
+//  modifier pass @0x49D42F and the fallback @0x49D488]
+bool player_actions_own_code(int code);
+
 struct PlayerActionPoll {
 	bool active = false;
 	bool captured = false;

@@ -60,12 +60,10 @@ opennova::controls::UseItemPressArm use_item_arm(Simulation &p_sim) {
 	switch (p_sim.take_use_item_press()) {
 		case Simulation::USE_ITEM_ARM_MOUNT_CHAIN: return Arm::kMountChain;
 		case Simulation::USE_ITEM_ARM_ARMORY: return Arm::kOpenArmory;
-		// The vehicle-loadout arm opens vehicle.mnu when the ground's team
-		// byte is 0 or the player's, else takes the press (engine
-		// local_player_vehicle_zone_team_matches carries the witness).
-		case Simulation::USE_ITEM_ARM_VEHICLE_LOADOUT:
-			return p_sim.local_player_vehicle_zone_team_matches() ? Arm::kOpenVehicleMenu
-			                                                      : Arm::kTaken;
+		// The vehicle-loadout arm's request: the shell closes a menu screen up, else opens
+		// vehicle.mnu past the team test (engine world::local_player_use_item_arm and
+		// local_player_vehicle_zone_team_matches carry the witness).
+		case Simulation::USE_ITEM_ARM_VEHICLE_LOADOUT: return Arm::kOpenVehicleMenu;
 		default: return Arm::kTaken;
 	}
 }
@@ -336,13 +334,13 @@ opennova::inmatch::InputPacket PlayerInputRouter::sample_tick(uint32_t p_logic_t
 	if (frame_player_) {
 		sample_input_frame(tick_input, tick_scripted_look_, tick_spectating_);
 	} else {
-		// No sample takes the action rows' events: they are dropped. The talk and HUD
-		// rows' run with or without a local player (the command prompt a Serve Only
-		// host opens), as do the escape row's and the deploy picks, so their key-downs are
-		// records still, a pick's with its parameter.
+		// No sample takes the action rows' events: they are dropped. Every other row's
+		// key-down is a record still (the talk and HUD rows' run with or without a local
+		// player, the command prompt a Serve Only host opens, as do the escape row's, the deploy
+		// picks with their parameter, and a keylist binding on a row no arm of the poll owns;
+		// engine controls::player_actions_own_code carries the witness).
 		for (const opennova::controls::KeyRowEvent &event : action_events_)
-			if (!event.release && (talk_row_of(event.code) >= 0 || hud_row_of(event.code) >= 0 ||
-										  shell_record(event.code)))
+			if (!event.release && !opennova::controls::player_actions_own_code(event.code))
 				sample_records_.push_back({event.code, event.param, 0, 0, event.sign});
 		action_events_.clear();
 	}

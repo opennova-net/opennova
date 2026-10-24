@@ -294,6 +294,33 @@ bool test_embedder_rows_keep_the_key_order() {
 	return true;
 }
 
+// A bound key of a row no arm of the poll owns is a record all the same (D-NET-NEW-LI-41): a
+// keylist binding on "exit" (code 3) and on "nextflag" (code 32) queue their codes in key
+// order with the action rows', under none of the table's gates, for the drain's dispatcher.
+// [orig: Input_ProcessKeyboardEvents @0x49D1F0 - Input_QueueEvent per scanned key-down, the
+//  modifier pass @0x49D42F and the fallback @0x49D488]
+bool test_unowned_rows_are_records() {
+	PlayerActions actions;
+	QueuedKeys keys;
+	CHECK(code_of("exit") == 3 && code_of("nextflag") == 32);
+	CHECK(!player_actions_own_code(3) && !player_actions_own_code(32) &&
+			player_actions_own_code(code_of("Knife")) && player_actions_own_code(55) &&
+			player_actions_own_code(501));
+	PlayerActionPoll gate = kLive;
+	gate.key_events = {key_row("exit", 0x70), key_row("Knife", '1'), key_row("nextflag", 0x77)};
+	auto frame = poll_frame(actions, keys, gate);
+	CHECK(frame.requests.size() == 3 && frame.requests[0].action == Action::EmbedderRow &&
+			frame.requests[0].code == 3 && frame.requests[1].code == code_of("Knife") &&
+			frame.requests[2].action == Action::EmbedderRow && frame.requests[2].code == 32);
+	PlayerActionPoll inactive = gate;
+	inactive.active = false;
+	inactive.captured = false;
+	frame = poll_frame(actions, keys, inactive);
+	CHECK(frame.requests.size() == 2 && frame.requests[0].code == 3 &&
+			frame.requests[1].code == 32);
+	return true;
+}
+
 // The fire row (attack_1, code 149) is an event row: its key's press is a record per key
 // event (an OS repeat again) under captured gameplay input and the scan's mode word, in key
 // order with the action rows'; the release pass's event is a record under no gate; its
@@ -1149,6 +1176,7 @@ int main() {
 			test_menu_freezes_the_use_hold, test_to_special_release_over_a_screen,
 			test_event_rows_fire_once_per_event, test_the_chain_takes_digit_keys,
 			test_reload_medic_and_respawn_fire_on_their_events, test_embedder_rows_keep_the_key_order,
+			test_unowned_rows_are_records,
 			test_to_special_dispatches_its_key_events, test_fire_row_dispatches_its_key_events,
 			test_only_the_scripted_left_button_owes_the_left_down,
 			test_spectator_rows_fire_on_their_events,
