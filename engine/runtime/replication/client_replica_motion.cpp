@@ -2283,11 +2283,14 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 		parked.rm_parked = true;
 		if (pool1_interleave_ && (parked.handle >> 12u) == 1u) {
 			pool1_rows_.push_back(parked.handle);
-			pool1_parked_[parked.handle] = walk[k];
+			if (pool1_parked_.empty()) pool1_parked_.assign(0x1000u, 0u);
+			size_t &slot = pool1_parked_[parked.handle & 0x0FFFu];
+			if (slot == 0) ++pool1_parked_count_;
+			slot = walk[k] + 1;
 			continue;
 		}
 		(remote_walk_key(parked.handle) <= split ? middle_rows_ : parked_rows_)
-				.push_back(parked.handle);
+				.push_back(ParkedRow{ parked.handle, walk[k] });
 	}
 	remote_motion_expired_.clear();
 	for (size_t k = 0; k < through; ++k)
@@ -2304,7 +2307,7 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 void ClientReplicaPipeline::tick_remote_motion_through_self() {
 	finish_pool1_rows();
 	if (middle_rows_.empty()) return;
-	std::vector<uint16_t> rows;
+	std::vector<ParkedRow> rows;
 	rows.swap(middle_rows_);
 	visit_parked_rows(rows);
 }
@@ -2313,9 +2316,16 @@ void ClientReplicaPipeline::tick_remote_motion_after_self() {
 	// A middle half the embedder never ran keeps the walk's order.
 	tick_remote_motion_through_self();
 	if (parked_rows_.empty()) return;
-	std::vector<uint16_t> rows;
+	std::vector<ParkedRow> rows;
 	rows.swap(parked_rows_);
 	visit_parked_rows(rows);
+}
+
+ClientEntityState *ClientReplicaPipeline::parked_row(const ParkedRow &parked) {
+	return parked.index < state_.entities.size() &&
+					state_.entities[parked.index].handle == parked.handle
+			? &state_.entities[parked.index]
+			: state_.find(parked.handle);
 }
 
 // A pool-1 row's visit at its own slot of the World's pool-1 walk: its carrier follow
@@ -2326,14 +2336,12 @@ void ClientReplicaPipeline::tick_remote_motion_after_self() {
 // @0x4C2158..0x4C21E9, the Entity_UpdatePool1Slot calls @0x4C21B9 / @0x4C21D0 /
 // @0x4C21E0 / @0x4C21E9]
 ClientEntityState *ClientReplicaPipeline::visit_pool1_row(uint16_t handle) {
-	const auto parked = pool1_parked_.find(handle);
-	if (parked == pool1_parked_.end()) return nullptr;
-	const size_t index = parked->second;
-	pool1_parked_.erase(parked);
-	ClientEntityState *es = index < state_.entities.size() &&
-					state_.entities[index].handle == handle
-			? &state_.entities[index]
-			: state_.find(handle);
+	if ((handle >> 12u) != 1u || pool1_parked_count_ == 0) return nullptr;
+	size_t &slot = pool1_parked_[handle & 0x0FFFu];
+	if (slot == 0) return nullptr;
+	ClientEntityState *es = parked_row(ParkedRow{ handle, slot - 1 });
+	slot = 0;
+	--pool1_parked_count_;
 	if (es == nullptr || !es->rm_parked) return nullptr;
 	es->rm_parked = false;
 	if (follows_carrier_seat(*es)) follow_carrier_seat(*es, state_.find(es->carrier_handle));
@@ -2346,8 +2354,9 @@ ClientEntityState *ClientReplicaPipeline::visit_pool1_row(uint16_t handle) {
 
 std::vector<uint16_t> ClientReplicaPipeline::unvisited_pool1_rows() const {
 	std::vector<uint16_t> rows;
+	if (pool1_parked_count_ == 0) return rows;
 	for (const uint16_t handle : pool1_rows_)
-		if (pool1_parked_.count(handle) != 0) rows.push_back(handle);
+		if (pool1_parked_[handle & 0x0FFFu] != 0) rows.push_back(handle);
 	return rows;
 }
 
@@ -2355,16 +2364,19 @@ void ClientReplicaPipeline::finish_pool1_rows() {
 	if (pool1_rows_.empty()) return;
 	std::vector<uint16_t> rows;
 	rows.swap(pool1_rows_);
+	// Every row the World's walk reached took its visit there: only a row still parked
+	// takes one here.
+	if (pool1_parked_count_ == 0) return;
 	for (const uint16_t handle : rows) visit_pool1_row(handle);
 }
 
-void ClientReplicaPipeline::visit_parked_rows(std::vector<uint16_t> &rows) {
+void ClientReplicaPipeline::visit_parked_rows(std::vector<ParkedRow> &rows) {
 	// The rows may have moved in the vector since the walk parked them (the first
-	// half's erase): find each by handle, in the walk's order.
-	std::unordered_map<uint16_t, size_t> row_by_handle;
-	row_by_handle.reserve(state_.entities.size());
-	for (size_t i = 0; i < state_.entities.size(); ++i)
-		row_by_handle.emplace(state_.entities[i].handle, i);
+	// half's erase): each is taken at its parked index while that still holds it, else
+	// found by handle, in the walk's order (parked_row). Retail's pool-0 walk reaches each
+	// slot from the pool base by its stride, with no lookup over the rows (D-NET-NEW-LF-26).
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool base and stride @0x4C2426..0x4C2431,
+	//  the +0x1C4 call @0x4C2472]
 	remote_motion_expired_.clear();
 	// Each parked row's lean decay and arms dip (with the torso roll) open its own
 	// visit, as retail's body update runs them in its own pass; the embedder's
@@ -2378,10 +2390,10 @@ void ClientReplicaPipeline::visit_parked_rows(std::vector<uint16_t> &rows) {
 	//  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the decay @0x4B5C97, the dip
 	//  @0x4B5CAB..0x4B5CE7, the selection gate @0x4B5D71, the site selector
 	//  @0x4B637C..0x4B638F, the ramp @0x4B7DBF]
-	for (const uint16_t handle : rows) {
-		const auto it = row_by_handle.find(handle);
-		if (it == row_by_handle.end()) continue;
-		ClientEntityState &es = state_.entities[it->second];
+	for (const ParkedRow &parked : rows) {
+		ClientEntityState *const row = parked_row(parked);
+		if (row == nullptr) continue;
+		ClientEntityState &es = *row;
 		es.rm_parked = false;
 		if (person_takes_item_row(es, parked_self_)) {
 			visit_remote_row(es, parked_self_, parked_tick_);
@@ -2407,19 +2419,16 @@ void ClientReplicaPipeline::visit_parked_rows(std::vector<uint16_t> &rows) {
 		// An organic body whose update exits ahead of its mounted site keeps its pose
 		// (body_update_ends_ahead).
 		const bool organic = es.cls == EntityClass::Player || es.cls == EntityClass::Infantry;
-		if (follows_carrier_seat(es) && !(organic && body_update_ends_ahead(es))) {
-			const auto carrier = row_by_handle.find(es.carrier_handle);
-			follow_carrier_seat(es, carrier == row_by_handle.end()
-					? nullptr : &state_.entities[carrier->second]);
-		}
+		if (follows_carrier_seat(es) && !(organic && body_update_ends_ahead(es)))
+			follow_carrier_seat(es, state_.find(es.carrier_handle));
 		visit_remote_row(es, parked_self_, parked_tick_);
 	}
 	// Each parked row's selection and lean ramp close its own visit, as the
 	// first half's rows' did (select_row_weapon_channels, tick_lean_ramp).
-	for (const uint16_t handle : rows) {
-		const auto it = row_by_handle.find(handle);
-		if (it == row_by_handle.end()) continue;
-		ClientEntityState &es = state_.entities[it->second];
+	for (const ParkedRow &parked : rows) {
+		ClientEntityState *const row = parked_row(parked);
+		if (row == nullptr) continue;
+		ClientEntityState &es = *row;
 		if (person_takes_item_row(es, parked_self_)) continue;
 		select_row_weapon_channel(es, parked_self_, parked_tick_);
 		lean_ramp_row(es);

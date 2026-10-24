@@ -5828,3 +5828,11 @@ target_link_libraries(clip_keys_test PRIVATE opennova_runtime)
 target_include_directories(clip_keys_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(clip_keys_test PRIVATE cxx_std_17)
 add_test(NAME clip_keys COMMAND clip_keys_test)
+# The joiner's parked replica rows at their own entries (runtime/replication
+# client_replica_pipeline.h ParkedRow, the pool-1 slot table; D-NET-NEW-LF-26): each slot's
+# visit once, a row that moved since it parked found by its handle, the unreached rows in walk
+# order, the pool-0 halves.
+add_executable(netsim_replica_walk_lookups_test netsim/replica_walk_lookups_test.cpp)
+target_link_libraries(netsim_replica_walk_lookups_test PRIVATE opennova_net opennova_runtime)
+target_compile_features(netsim_replica_walk_lookups_test PRIVATE cxx_std_17)
+add_test(NAME netsim_replica_walk_lookups COMMAND netsim_replica_walk_lookups_test)

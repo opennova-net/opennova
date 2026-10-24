@@ -140,6 +140,19 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 		uint16_t self_handle, const replication::ClientWorldMaterializer *materializer,
 		bool wire_header_world, ReplicaGunLeg leg) {
 	const bool pool1 = leg == ReplicaGunLeg::Pool1Walk;
+	// The seated persons, in row order: a carrier's gunner is found among them, not by a
+	// walk of every row for each carrier. Retail reaches the carrier from its rider, whose
+	// body update runs the seat leg on the carrier its own record holds, once per rider
+	// (D-NET-NEW-LF-26).
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the seat-type test @0x4B63A5,
+	//  Entity_AttachToBoneAndUpdateTransform (the call @0x4B63C7)]
+	std::vector<size_t> seated;
+	for (size_t i = 0; i < state.entities.size(); ++i) {
+		const replication::ClientEntityState &row = state.entities[i];
+		if (row.mount_bone != 0 &&
+				(row.cls == EntityClass::Player || row.cls == EntityClass::Infantry))
+			seated.push_back(i);
+	}
 	for (auto &mount : state.entities) {
 		// The row's own native row, by the replica rule while it is still this
 		// wire entity's type: a reused handle, a same-type newcomer included,
@@ -168,10 +181,9 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 		const auto *spec = mission::item_seat_spec_for_type(specs, mount.type_id);
 		if (spec == nullptr)
 			continue;
-		for (auto &occupant : state.entities) {
-			if (occupant.carrier_handle != mount.handle || occupant.mount_bone == 0 ||
-					(occupant.cls != EntityClass::Player && occupant.cls != EntityClass::Infantry))
-				continue;
+		for (const size_t seated_index : seated) {
+			auto &occupant = state.entities[seated_index];
+			if (occupant.carrier_handle != mount.handle) continue;
 			bool gunner_seat = false;
 			for (const auto &seat : spec->seats)
 				if (seat.bone_index == occupant.mount_bone && seat.type == world::SeatType::Gunner)

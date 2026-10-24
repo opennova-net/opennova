@@ -989,27 +989,38 @@ private:
 	std::vector<ReplicaPeerSphere> contact_peer_scratch_;
 	// tick_remote_motion's walk order over state_.entities (reused capacity).
 	std::vector<size_t> walk_order_scratch_;
+	// A parked row: its handle and its index in state_.entities when parked, re-checked
+	// against the handle at its visit (a row the walk's first half erased moved).
+	struct ParkedRow {
+		uint16_t handle = 0;
+		size_t index = 0;
+	};
+	// The parked row's entry now: at its index while that still holds it, else by handle.
+	ClientEntityState *parked_row(const ParkedRow &parked);
 	// The own-body split (set_self_body_split): the rows the walk parked through the
 	// own row's slot (middle_rows_) and past it (parked_rows_), each in walk order,
 	// and the tick they wait in.
 	bool self_body_split_ = false;
-	std::vector<uint16_t> middle_rows_;
-	std::vector<uint16_t> parked_rows_;
+	std::vector<ParkedRow> middle_rows_;
+	std::vector<ParkedRow> parked_rows_;
 	uint16_t parked_self_ = 0xFFFFu;
 	uint32_t parked_tick_ = 0;
 	// The pool-1 interleave (set_pool1_interleave): the pool-1 rows the walk parked, in
-	// walk order, and each one's index in state_.entities when parked (re-checked
-	// against its handle at its visit).
+	// walk order, and by slot (the handle's low twelve bits) each one's index in
+	// state_.entities when parked plus one, 0 once visited (re-checked against its handle
+	// at its visit), with the count still parked: a slot's own entry, as the World's walk
+	// reaches each slot (D-NET-NEW-LF-26).
 	bool pool1_interleave_ = false;
 	std::vector<uint16_t> pool1_rows_;
-	std::unordered_map<uint16_t, size_t> pool1_parked_;
+	std::vector<size_t> pool1_parked_;
+	size_t pool1_parked_count_ = 0;
 	// The pool-1 rows the World's walk never reached, ahead of the parked pool-0 rows.
 	void finish_pool1_rows();
 	// The walk's expired corpses (handle, the def names a decay), erased after
 	// each half's visits.
 	std::vector<std::pair<uint16_t, bool>> remote_motion_expired_;
 	// One parked half's visits (tick_remote_motion_through_self / _after_self).
-	void visit_parked_rows(std::vector<uint16_t> &rows);
+	void visit_parked_rows(std::vector<ParkedRow> &rows);
 	// A compact-carried row that follows its carrier between records: a resolved
 	// seat-local sample on a carrier, except a world-mover vehicle, which the
 	// embedding sim predicts (its row publishes the mirrored pose).
