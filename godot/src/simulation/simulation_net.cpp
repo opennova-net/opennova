@@ -465,6 +465,9 @@ opennova::inmatch::AdminConsole::Seams Simulation::remote_admin_seams(
 	seams.toggle_overlay = [this](const std::string &p_line) {
 		return kernel_ && kernel_->wac.toggle_cheat(p_line, !is_joiner(), kernel_->world);
 	};
+	// A host's command walk queues its binding records on the role's input event queue (engine
+	// inmatch/admin_console.h Seams::input_events carries the witness).
+	seams.input_events = host_role_ != nullptr ? &host_role_->input_events() : nullptr;
 	// The status report's gametext is the process's: GameWorld::remote_admin_seams sets it for
 	// every console (engine inmatch/remote_admin.h process_game_text).
 	const opennova::TitleIdentity *title = session_title(net_.title);

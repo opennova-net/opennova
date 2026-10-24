@@ -771,6 +771,9 @@ bool AdminConsole::local_command(const std::string &line) {
 		if (seams_.system_message) seams_.system_message(text, 0xFFFFFFFFu);
 	};
 	seams.toggle_overlay = seams_.toggle_overlay;
+	seams.queue_action = [this](int32_t code, int32_t p1, int32_t p2, int32_t p3) {
+		if (seams_.input_events != nullptr) (void)seams_.input_events->push({code, p1, p2, p3, false});
+	};
 	return client_process_local_command(line, seams);
 }
 
@@ -805,8 +808,8 @@ void AdminConsole::console_command(const std::string &line) {
 	if (Server_HandleAdminNetlogCommand(ctx_, line, nullptr, no_slot_replies)) return;
 	if (Server_HandleBanPuntCommand(ctx_, line)) return;
 	// The client's command walk ends it (client_console.h): its lines reach the
-	// SYSTEM ring; a host that is not a session peer has no client connection,
-	// so what the walk would queue is sent nowhere.
+	// SYSTEM ring, its binding records the process's input event queue; a host that is not a
+	// session peer has no client connection, so what the walk would send goes nowhere.
 	std::vector<std::string> lines;
 	ClientConsoleContext walk;
 	walk.in_session = ctx_.is_in_session != 0;
@@ -814,6 +817,10 @@ void AdminConsole::console_command(const std::string &line) {
 	walk.authority = true;
 	walk.state = &console_state_;
 	walk.system_lines = &lines;
+	// Its binding records join the process's input event queue (Seams::input_events).
+	walk.queue_action = [this](int32_t code, int32_t p1, int32_t p2, int32_t p3) {
+		if (seams_.input_events != nullptr) (void)seams_.input_events->push({code, p1, p2, p3, false});
+	};
 	(void)client_parse_and_execute(line, walk);
 	if (seams_.system_message)
 		for (const std::string &text : lines) seams_.system_message(text, hud::kHudColorWhite);

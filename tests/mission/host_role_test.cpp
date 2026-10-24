@@ -35,6 +35,8 @@
 #include <runtime/inmatch/null_datagram_socket.h>
 #include <runtime/inmatch/udp_session_transport.h>
 #include <runtime/inmatch/mission_rotation.h> // HostRotation (the LastGame row)
+#include <runtime/inmatch/admin_console.h> // AdminConsole (a Serve Only host's typed line)
+#include <formats/gamecfg/game_cfg.h> // gamecfg::defaults (the console's cfg block)
 #include <base/io/tick_rate.h> // kTicksPerSecondInt
 
 #include "../common/boot_file_source.h"
@@ -705,6 +707,24 @@ void check_server_rows_reach_their_arms(std::map<std::string, std::string> &file
 		CHECK(kernel.world.weather.tod_advance_per_tick == 0x18000000u / 248u);
 		dispatch(497, 0);
 		CHECK(kernel.world.weather.tod_advance_per_tick == 0x18000000u / 248u);
+		// A typed `tod 0630` on this host (its console's command walk, the remote admin's CMD)
+		// queues the row's record with atol(0630) on the role's queue, which the drain then
+		// dispatches (D-NET-NEW-LI-43).
+		// [orig: Client_ProcessConsoleCommand @0x520E80 - NapiClientCmd_ParseAndExecute called
+		//  @0x520F70; NapiClientCmd_ParseAndExecute @0x4329C0 - Input_QueueEvent called @0x432BA1]
+		gamecfg::GameCfg block = gamecfg::defaults();
+		inmatch::AdminConsole::Seams seams;
+		seams.config_block = &block;
+		seams.input_events = &role.input_events();
+		inmatch::AdminConsole console(role.state.host_owner.ctx, std::move(seams));
+		console.set_scene(inmatch::AdminScene::GameLoop);
+		std::vector<std::string> replies;
+		(void)console.dispatch(AdminSession{"boss", 0xFFFFFFFFu}, "CMD tod 0630", replies);
+		CHECK(role.input_events().size() == 1 && role.input_events().at(0).code == 438 &&
+				role.input_events().at(0).p1 == 630);
+		role.drain_input_events(nullptr, 0);
+		CHECK(role.input_events().empty() &&
+				kernel.world.weather.tod_fixed24 == ((6u << 24) | (30u * 0x44400u)));
 	}
 }
 

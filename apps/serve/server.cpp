@@ -1118,6 +1118,9 @@ void Server::bind_admin_console() {
 	//  CNapiNetwork_DisconnectActiveConnection @0x4C918F (no connection, no record);
 	//  PostMenu_RouteMissionExit @0x5684AB -> CNapiGameSession_FullDestroy @0x4C96A0 (the call
 	//  @0x568683)]
+	// CMD's binding records (a typed `tod 1230`) join the role's input event queue, which every
+	// update's drain dispatches (engine inmatch/admin_console.h Seams::input_events).
+	seams.input_events = &role_->input_events();
 	inmatch::RemoteAdminBinding binding;
 	binding.host = &role_->state.host_owner.ctx;
 	admin_consoles_.bind(binding, std::move(seams));

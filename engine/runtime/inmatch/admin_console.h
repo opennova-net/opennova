@@ -10,6 +10,7 @@
 // [orig: CAdminServer_DispatchCommand @0x406720; CAdminServer_HandleStatus @0x402E30]
 
 #include <net/admin/admin_server.h>
+#include <runtime/controls/input_event_queue.h> // InputEventQueue (the walk's binding records)
 #include <runtime/inmatch/client_console.h> // ClientConsoleState (the console walk's debug words)
 #include <runtime/inmatch/rotation_admin.h>
 
@@ -168,6 +169,16 @@ public:
 		// The local command's WAC overlay toggle over the running mission's script
 		// (ClientLocalCommandSeams::toggle_overlay; wac::WacSystem::toggle_cheat). Unset: none.
 		std::function<bool(const std::string &line)> toggle_overlay;
+		// The process's input event queue (the role's, Role::input_events), on which the command
+		// walk of a host that is not a session peer and the local arms' out-of-session CRC arm
+		// queue the binding records they name, as a client's do: the next input frame's drain
+		// dispatches them (Role::dispatch_record), so a Serve Only host's typed `tod`, `netdelay`
+		// or `Ban` reaches its case. Null: they queue nothing (D-NET-NEW-LI-43).
+		// [orig: Client_ProcessConsoleCommand @0x520E80 - NapiClientCmd_ParseAndExecute called
+		//  @0x520F70; NapiClientCmd_ParseAndExecute @0x4329C0 - Input_QueueEvent called @0x432B4C /
+		//  @0x432BA1 (no authority test); Client_ProcessLocalCommand @0x520BF0 - Input_QueueEvent
+		//  called @0x520E5B]
+		controls::InputEventQueue *input_events = nullptr;
 		// The process's mission globals the status report prints and GET GAMESETTINGS' live
 		// words (RemoteAdminConsoles keeps them; SET writes the live words); null reads the
 		// context's own mission (a console whose session is the process's).
