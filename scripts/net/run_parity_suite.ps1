@@ -177,8 +177,9 @@ function Get-CaseJoinerSidePassword { param($Case) return [string] (Get-CaseFiel
 function Get-CaseDeployZones { param($Case) return [bool] (Get-CaseField $Case "deploy_zones" $false) }
 # serve_only: the host serves only (run_parity_topology.ps1 -ServeOnly): a
 # retail host as retail's Serve Only server, ours from the SERVER copy's
-# game.cfg `dedicated` = 1. No tracked case sets it (E4's kick stages a listen
-# host's SERVER PUNT ALL); the admin pass's round-end overlay cells do.
+# game.cfg `dedicated` = 1. E1's dedicated-host cases set it (01tr-coop-serve,
+# ash-i5a-aas-serve), as do the admin pass's round-end overlay cells; E4's kick
+# stages a listen host's SERVER PUNT ALL instead.
 function Get-CaseServeOnly { param($Case) return [bool] (Get-CaseField $Case "serve_only" $false) }
 # pre_join_mission_cycle: the host's admin console cycles its mission once
 # before the joiner starts, so the join is the host's second mission start's
@@ -299,10 +300,13 @@ function Read-ParityCases {
                 $case.pre_join_mission_cycle -isnot [bool]) {
             throw "Parity case '$($case.id)': pre_join_mission_cycle is true or false"
         }
-        # The cycle's RR launches its host and joiner one by one, a path with no
-        # input exercise.
-        if ((Get-CasePreJoinMissionCycle $case) -and [bool] $case.exercise_input) {
-            throw "Parity case '$($case.id)': a pre_join_mission_cycle case plays no input exercise"
+        # A Serve Only, mission-cycle or joiner side-password RR launches its host
+        # and joiner one by one, a path with no input exercise
+        # (run_parity_topology.ps1), so its RR and RR-aa would stand still while
+        # its subjects move.
+        if (((Get-CasePreJoinMissionCycle $case) -or (Get-CaseServeOnly $case) -or
+                (Get-CaseJoinerSidePassword $case)) -and [bool] $case.exercise_input) {
+            throw "Parity case '$($case.id)': a serve_only, pre_join_mission_cycle or joiner_side_password case plays no input exercise"
         }
         if ($case.PSObject.Properties.Name -contains "deploy_zones" -and
                 $case.deploy_zones -isnot [bool]) {

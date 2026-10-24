@@ -157,6 +157,44 @@
       "exercise_input": false,
       "auto_deploy": false,
       "scenario": "capture_base.json"
+    },
+    {
+      "id": "tdh-i3a-tdm-chat",
+      "mission": "TDH_I3A.bms",
+      "mission_sha256": "8978c7afac2d7ba0f1b09c5a358412c74bace3424f31dd647a4aadc8f5811a33",
+      "game_type": 65536,
+      "port": 32787,
+      "readiness": "in_match",
+      "steady_seconds": 45,
+      "exercise_input": false,
+      "auto_deploy": true,
+      "scenario": "chat.json"
+    },
+    {
+      "id": "01tr-coop-serve",
+      "mission": "01TR.bms",
+      "mission_sha256": "7ceb5dac231f6dd0a78a41302889cb325629369cf7599ee31b506a98ea2cd590",
+      "game_type": 65568,
+      "port": 32786,
+      "readiness": "in_match",
+      "steady_seconds": 45,
+      "exercise_input": false,
+      "auto_deploy": true,
+      "serve_only": true,
+      "note": "E1's dedicated host on 01tr-coop's mission: the host serves only (retail's Serve Only server, ours with the SERVER copy's game.cfg dedicated = 1). No input exercise: a Serve Only RR launches its host and joiner one by one, a path with none."
+    },
+    {
+      "id": "ash-i5a-aas-serve",
+      "mission": "ASH_I5A.BMS",
+      "mission_sha256": "81521961f7c4d6cca08ef37d741c147f98c2f75bf4e5a7a107021076181e8c14",
+      "game_type": 65552,
+      "port": 32787,
+      "readiness": "deploy_hold",
+      "steady_seconds": 35,
+      "exercise_input": false,
+      "auto_deploy": false,
+      "serve_only": true,
+      "note": "E1's dedicated host on ash-i5a-aas-deploy's inputs: the host serves only, the joiner holds on the deploy screen."
     }
   ]
 }
