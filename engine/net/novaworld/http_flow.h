@@ -470,7 +470,10 @@ private:
 	// The menu browser's GET headers and its form post's (each past the request line and Host).
 	std::vector<std::string> request_headers() const;
 	std::vector<std::string> post_headers(std::size_t content_length) const;
-	void merge_response_cookies(const std::vector<std::string> &response_headers);
+	// An answer's cookies stored as the browser's response handler stores them, for every answer
+	// whatever its step or status does next (response_cookie_batch: none from a 304 or from a 301 /
+	// 302 that names a LOCATION).
+	void merge_response_cookies(int code, const std::vector<std::string> &response_headers);
 	void seed_identity_cookies();
 	// The jar's identity seed in retail's order (the gate reply's fields, then the connection-up's),
 	// the live nwuid for the empty NWUID entry.

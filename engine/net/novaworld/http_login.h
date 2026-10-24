@@ -112,6 +112,20 @@ struct CookieEntry {
 //  the CR LF test against word_7C1310 called @0x6591AF]
 std::vector<CookieEntry> parse_set_cookie_headers(const std::vector<std::string> &response_headers);
 
+// The Set-Cookie batch the browser's response handler takes from an answer of HTTP status
+// `status`, which it runs for every answer: none from a 304 (the answer is freed and the handler
+// returns), none from a 301 or 302 whose header text holds "LOCATION" anywhere, case-insensitively
+// (the handler follows the redirect instead: the text past the word, its spaces and ':', up to a
+// CR, LF, tab or space, enqueued as the next request), else parse_set_cookie_headers' cookies. A
+// 301 or 302 with no "LOCATION" is taken as any other answer. The header text is the one
+// parse_set_cookie_headers rebuilds.
+// [orig: HTTP_ResponseHandler @0x659480 - the status (atol called @0x6594DA past the first word),
+//  301 tested @0x6594E2, 302 @0x6594EC, 304 @0x6594F3 (the answer freed @0x6594FF, 1 returned
+//  @0x65950A), "LOCATION" searched (String_FindCaseInsensitiveSubstring called @0x65951C; none:
+//  on to the cookies, the jz @0x659528), the redirect enqueued (strtok called @0x65957A,
+//  HTTP_RequestEnqueue called @0x659593); every other answer to the SET-COOKIE scan @0x65961B]
+std::vector<CookieEntry> response_cookie_batch(int status, const std::vector<std::string> &response_headers);
+
 // The connection tokens NWJoin.dll hands back in the `.joi` response, used to
 // reach the hosted game. NK is url_cipher-encoded (host "ip:port"); CK is
 // url_cipher-encoded and, decoded, is a DECIMAL the retail client atol()s into

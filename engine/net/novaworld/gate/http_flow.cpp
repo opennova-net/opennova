@@ -550,7 +550,7 @@ template <typename Result>
 std::optional<Result> LobbyHttpFlow::template_answered(TemplateHold<Result> &hold, bool transport_ok,
 		int code, const std::vector<std::string> &response_headers, const std::vector<uint8_t> &body) {
 	if (!hold.next) return std::nullopt;
-	if (transport_ok) merge_response_cookies(response_headers);
+	if (transport_ok) merge_response_cookies(code, response_headers);
 	const bool window = (code >= 200 && code <= 206) || code == 100 || code == 101;
 	process_browser_cache().complete(hold.url, transport_ok && window && !body.empty());
 	std::optional<Result> next = std::move(hold.next);
@@ -645,12 +645,16 @@ std::vector<std::string> LobbyHttpFlow::post_headers(std::size_t content_length)
 	return h;
 }
 
-// An answer's Set-Cookie headers as the browser stores them: parsed off the header text, then the
-// jar's store with the batch (none: no store).
-// [orig: HTTP_ResponseHandler @0x659480 - the batch built @0x65961B..0x6596CF,
-//  CookieJar_UpdateFromURL called @0x6596DD only when it holds an entry (@0x6596D1)]
-void LobbyHttpFlow::merge_response_cookies(const std::vector<std::string> &response_headers) {
-	const std::vector<CookieEntry> batch = parse_set_cookie_headers(response_headers);
+// An answer's Set-Cookie headers as the browser stores them: parsed off the header text unless
+// the status rules take none (response_cookie_batch), then the jar's store with the batch (none:
+// no store). The pump runs the handler for every answer, ahead of what the page does next, so
+// each leg merges an answer before its own status test.
+// [orig: CGopherWnd_PumpRequests @0x659740 - HTTP_ResponseHandler called @0x6599F3;
+//  HTTP_ResponseHandler @0x659480 - the status rules @0x6594E2..0x659528, the batch built
+//  @0x65961B..0x6596CF, CookieJar_UpdateFromURL called @0x6596DD only when it holds an entry
+//  (@0x6596D1)]
+void LobbyHttpFlow::merge_response_cookies(int code, const std::vector<std::string> &response_headers) {
+	const std::vector<CookieEntry> batch = response_cookie_batch(code, response_headers);
 	if (!batch.empty()) jar().update(batch);
 }
 
@@ -749,13 +753,13 @@ EnterResult LobbyHttpFlow::on_enter_response(bool transport_ok, int code,
 		return std::move(*held);
 	const EnterStep step = enter_step_;
 	if (step == EnterStep::Idle) return enter_fail("entry response with no pending step");
+	if (transport_ok) merge_response_cookies(code, response_headers);
 	if (!transport_ok || code != 200) {
 		enter_step_ = EnterStep::Idle;
 		const std::string message = extract_message(body);
 		if (!message.empty()) return enter_fail(message);
 		return enter_fail("the NovaWorld lobby did not open (code " + std::to_string(code) + ")");
 	}
-	merge_response_cookies(response_headers);
 	capture_globals(body);
 	const std::string page_url = enter_page_url_;
 
@@ -1033,6 +1037,8 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 			template_answered(login_template_, transport_ok, code, response_headers, body))
 		return std::move(*held);
 	const LoginStep step = login_step_;
+	// Store Set-Cookie BEFORE branching, a failed status's answer's too.
+	if (transport_ok && step != LoginStep::Idle) merge_response_cookies(code, response_headers);
 	if (!transport_ok || code != 200) {
 		login_step_ = LoginStep::Idle;
 		const std::string message = extract_message(body);
@@ -1040,7 +1046,6 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 		return login_fail("login HTTP failed (code " + std::to_string(code) + ")");
 	}
 	if (step == LoginStep::Idle) return login_fail("login response with no pending step");
-	merge_response_cookies(response_headers); // store Set-Cookie BEFORE branching
 	capture_globals(body);
 	const std::string page_url = login_page_url_;
 
@@ -1206,6 +1211,7 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 			template_answered(join_template_, transport_ok, code, response_headers, body))
 		return std::move(*held);
 	const JoinStep step = join_step_;
+	if (transport_ok) merge_response_cookies(code, response_headers);
 	if (!transport_ok || code != 200) {
 		join_step_ = JoinStep::Idle;
 		// The .joi page's refresh is the browser's page alone: the join it started goes on.
@@ -1218,7 +1224,6 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 		if (!message.empty()) return join_fail(message);
 		return join_fail("join HTTP failed (code " + std::to_string(code) + ")");
 	}
-	merge_response_cookies(response_headers);
 	// A page whose title is a connect string saves the jar ahead of its parse.
 	save_at_connect_page(to_string_body(body));
 
@@ -1394,11 +1399,11 @@ HostKeyResult LobbyHttpFlow::on_host_response(bool transport_ok, int code,
 			template_answered(host_template_, transport_ok, code, response_headers, body))
 		return std::move(*held);
 	if (host_step_ == HostStep::Idle) return host_fail("host response with no pending step");
+	if (transport_ok) merge_response_cookies(code, response_headers);
 	// The HOSTKEY page's refresh is the browser's page alone: its answer, or its failure, settles
 	// the leg.
 	if (host_step_ == HostStep::Page) {
 		host_step_ = HostStep::Idle;
-		if (transport_ok) merge_response_cookies(response_headers);
 		HostKeyResult settled;
 		settled.kind = HostKeyResult::Kind::Settled;
 		return settled;
@@ -1409,7 +1414,6 @@ HostKeyResult LobbyHttpFlow::on_host_response(bool transport_ok, int code,
 		if (!message.empty()) return host_fail(message);
 		return host_fail("host HTTP failed (code " + std::to_string(code) + ")");
 	}
-	merge_response_cookies(response_headers);
 	capture_globals(body);
 	const std::string html = to_string_body(body);
 	// A page whose title is a connect string saves the jar ahead of its parse.

@@ -171,9 +171,9 @@ bool is_root_path(const std::optional<std::string> &s) {
 	return s && strutil::iequals(*s, "/");
 }
 
-} // namespace
-
-std::vector<CookieEntry> parse_set_cookie_headers(const std::vector<std::string> &response_headers) {
+// The answer's header text as the browser's response handler reads it: each line and CR LF, then
+// the blank line's CR LF.
+std::string response_header_text(const std::vector<std::string> &response_headers) {
 	std::string joined;
 	for (const std::string &line : response_headers) {
 		joined += line;
@@ -182,6 +182,13 @@ std::vector<CookieEntry> parse_set_cookie_headers(const std::vector<std::string>
 	joined += "\r\n";
 	// The response is a C string to the browser: a NUL ends it.
 	joined.resize(std::strlen(joined.c_str()));
+	return joined;
+}
+
+} // namespace
+
+std::vector<CookieEntry> parse_set_cookie_headers(const std::vector<std::string> &response_headers) {
+	const std::string joined = response_header_text(response_headers);
 	const CookieText t{joined};
 	std::vector<CookieEntry> out;
 	size_t from = 0;
@@ -196,6 +203,16 @@ std::vector<CookieEntry> parse_set_cookie_headers(const std::vector<std::string>
 		if (parse_one_cookie(t, cookie, entry)) out.push_back(std::move(entry));
 	}
 	return out;
+}
+
+// See http_login.h.
+// [orig: HTTP_ResponseHandler @0x659480 - @0x6594E2..0x6594F8, @0x65951C..0x659528]
+std::vector<CookieEntry> response_cookie_batch(int status, const std::vector<std::string> &response_headers) {
+	if (status == 304) return {};
+	if ((status == 301 || status == 302) &&
+	    strutil::ifind(response_header_text(response_headers), "LOCATION") != std::string_view::npos)
+		return {};
+	return parse_set_cookie_headers(response_headers);
 }
 
 JoiConnection parse_joi_connection_string(const std::string &body) {

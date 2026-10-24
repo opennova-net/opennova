@@ -427,6 +427,69 @@ int test_remember_login_click() {
 	return 0;
 }
 
+// The response handler's status rules (D-NET-NEW-L9-63), which it applies to every answer: a 304
+// stores no cookie, nor does a 301 or 302 whose header text holds "LOCATION" anywhere in any case
+// (a Location header, a Content-Location one, the word inside a cookie's own text: the redirect is
+// followed instead); a 301 or 302 with no such word, a 303 or 307 with one, a 200 with one, a 404
+// and a 500 store theirs.
+// [orig: HTTP_ResponseHandler @0x659480 - 301 tested @0x6594E2, 302 @0x6594EC, 304 @0x6594F3 (1
+//  returned @0x65950A), "LOCATION" searched (String_FindCaseInsensitiveSubstring called @0x65951C;
+//  none: the jz @0x659528 to the cookies), the SET-COOKIE scan @0x65961B]
+int test_response_status_rules() {
+	using opennova::response_cookie_batch;
+	const std::string set = "Set-Cookie: A=1; Path=/";
+	const auto stores = [&](int status, std::vector<std::string> headers) {
+		const std::vector<CookieEntry> batch = response_cookie_batch(status, headers);
+		return batch.size() == 1 && batch[0].name == "A" && batch[0].value == "1";
+	};
+	TEST_EXPECT(stores(200, {set}));
+	TEST_EXPECT(!stores(304, {set}));
+	TEST_EXPECT(!stores(304, {"Content-Type: text/html", set}));
+	TEST_EXPECT(!stores(301, {"Location: http://gs.opennova.test/a", set}));
+	TEST_EXPECT(!stores(302, {set, "Location: /NWStart.dll"}));
+	TEST_EXPECT(!stores(302, {"location:/a", set}));
+	TEST_EXPECT(!stores(302, {"Content-Location: /a", set}));
+	TEST_EXPECT(!stores(302, {"Set-Cookie: A=1; Path=/LocationX"}));
+	TEST_EXPECT(stores(301, {set}));
+	TEST_EXPECT(stores(302, {"Content-Type: text/html", set}));
+	TEST_EXPECT(stores(303, {"Location: /a", set}));
+	TEST_EXPECT(stores(307, {"Location: /a", set}));
+	TEST_EXPECT(stores(200, {"Location: /a", set}));
+	TEST_EXPECT(stores(404, {set}));
+	TEST_EXPECT(stores(500, {set}));
+	return 0;
+}
+
+// The flow stores an answer's cookies ahead of its leg's status test, under the status rules: a
+// failed login's 404 keeps its cookie, a 304's and a LOCATION 302's are dropped, a 302 with none
+// keeps its own.
+// [orig: CGopherWnd_PumpRequests @0x659740 - HTTP_ResponseHandler called @0x6599F3]
+int test_flow_merges_every_answer() {
+	opennova::LobbyHttpContext ctx;
+	ctx.title = opennova::title_identity(opennova::gameprofile::GAME_JO);
+	TEST_EXPECT(ctx.title != nullptr);
+	ctx.gate_tag = ctx.title->gate_tag;
+	ctx.startup_url = "http://gs.opennova.test:8080/NWStart.dll?prepare=1";
+	ctx.post_ip = "gs.opennova.test";
+	ctx.post_port = "8080";
+	opennova::LobbyHttpFlow flow;
+	flow.set_context(ctx);
+	const auto answer = [&](int status, std::vector<std::string> headers) {
+		TEST_EXPECT(flow.login("player", "secret").kind == opennova::LoginResult::Kind::NeedRequest);
+		TEST_EXPECT(flow.on_login_response(true, status, headers, page("<HTML></HTML>")).kind ==
+		            opennova::LoginResult::Kind::Failed);
+		return 0;
+	};
+	TEST_EXPECT(answer(404, {"Set-Cookie: FAILED=1; Path=/"}) == 0);
+	TEST_EXPECT(answer(304, {"Set-Cookie: UNMODIFIED=1; Path=/"}) == 0);
+	TEST_EXPECT(answer(302, {"Location: /a", "Set-Cookie: MOVED=1; Path=/"}) == 0);
+	TEST_EXPECT(answer(302, {"Set-Cookie: STAYED=1; Path=/"}) == 0);
+	TEST_EXPECT(flow.cookies().find("FAILED") != nullptr && *flow.cookies().find("FAILED") == "1");
+	TEST_EXPECT(flow.cookies().find("UNMODIFIED") == nullptr && flow.cookies().find("MOVED") == nullptr);
+	TEST_EXPECT(flow.cookies().find("STAYED") != nullptr);
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -440,6 +503,8 @@ int main() {
 	if (test_menu_browser_state() != 0) return 1;
 	if (test_flow_save_sites() != 0) return 1;
 	if (test_remember_login_click() != 0) return 1;
+	if (test_response_status_rules() != 0) return 1;
+	if (test_flow_merges_every_answer() != 0) return 1;
 	std::printf("cookie_jar: all checks passed\n");
 	return 0;
 }
