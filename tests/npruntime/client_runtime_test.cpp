@@ -3795,6 +3795,55 @@ bool run_rtt_echo_waits_out_the_round_over_gate() {
 			"our own pong behind the 0x1D measures nothing");
 }
 
+// Every host ping the receive dispatches ahead of an open send boundary queues a pong of its
+// own: the echo arm queues one transient C2S 0x2C per request, and the connection appends
+// each message at its queue's tail with no replacement or merge, so the boundary ships every
+// pong in arrival order. A first send that leaves after the host's second timer ping carries
+// that ping's pong too (LP-s27 FOUND 2: a slow first send's third 0x2C). The only bound is
+// the connection's outgoing-message ceiling (its queued and retained messages against the
+// configured maximum), whose overflow requests a disconnect.
+// [orig: NapiNPClientMsg_0x057_RTT @0x432210 - the echo arm's queue call @0x43226D;
+//  CNapiNetwork_QueueReliableMessage @0x4C4FA0 (the call @0x4C4FCA) ->
+//  CNapiNPConnection_QueueMessage @0x628640 (the call @0x6286C3) -> NapiNPMessage_Create
+//  @0x627FC0 (the ceiling
+//  test @0x628048..0x628068, the tail append @0x6282C7..0x6282F0)]
+bool run_rtt_echo_pongs_append_in_arrival_order() {
+	const std::string client_scrk = "CLIENT-RTT-APPEND-SCRK";
+	const std::string server_scrk = "SERVER-RTT-APPEND-SCRK";
+	uint64_t now = 100000;
+	inmatch::ClientRuntime client("RttAppend", [&now] { return now; });
+	client.set_title(&kJo);
+	client.seed_session(0x52545441u, 1u, client_scrk, server_scrk,
+	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
+	                    0, 0x00100000u, /*replay_mode=*/true);
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	const auto ping = [](uint32_t ts) {
+		return make_protocol_message(s2c::RTT_ECHO,
+				{static_cast<uint8_t>(ts), static_cast<uint8_t>(ts >> 8),
+				 static_cast<uint8_t>(ts >> 16), static_cast<uint8_t>(ts >> 24), 1});
+	};
+	// Two packets, one host ping each, both received ahead of the frame's send.
+	const std::vector<uint8_t> first =
+			frame_server_session(server_tx, server_scrk, 1u, {ping(0x11111111u)});
+	const std::vector<uint8_t> second =
+			frame_server_session(server_tx, server_scrk, 1u, {ping(0x22222222u)});
+	client.receive(first.data(), first.size());
+	client.receive(second.data(), second.size());
+	// The pongs only: a per-frame ping of our own (echo flag 1) is not a reply.
+	std::vector<std::vector<uint8_t>> pongs;
+	for (const std::vector<uint8_t> &datagram : client.Client_ProcessNetworkFrame(1)) {
+		ProtocolPacketHeader packet;
+		std::vector<ProtocolMessage> messages;
+		if (!decode_client_session(datagram, client_scrk, packet, messages)) continue;
+		for (const ProtocolMessage &m : messages)
+			if (m.tag == c2s::RTT_CONSUMED && m.payload.size() == 5 && m.payload[4] == 0)
+				pongs.push_back(m.payload);
+	}
+	return expect(pongs == std::vector<std::vector<uint8_t>>{
+			{0x11, 0x11, 0x11, 0x11, 0x00}, {0x22, 0x22, 0x22, 0x22, 0x00}},
+			"each host ping queues its own pong; the send ships both in arrival order");
+}
+
 bool run_host_zone_timer_value_matches_retail_entry() {
 	ns::LoopbackChannel host_loop;
 	inmatch::ClientRuntime host_view(host_loop);
@@ -9260,6 +9309,7 @@ int main() {
 	                run_client_quality_takes_the_host_metric() &&
 	                run_console_command_sends_the_line() &&
 	                run_rtt_echo_waits_out_the_round_over_gate() &&
+	                run_rtt_echo_pongs_append_in_arrival_order() &&
 	                run_novaworld_exit_on_a_joiner() &&
 	                run_mission_exit_routes() &&
 	                run_kicked_joiner_latches_the_process_record() &&
