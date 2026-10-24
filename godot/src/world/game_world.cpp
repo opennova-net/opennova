@@ -1252,6 +1252,7 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_item_effect_director"), &GameWorld::get_item_effect_director);
 	ClassDB::bind_method(D_METHOD("get_terrain_node"), &GameWorld::get_terrain_node);
 	ClassDB::bind_method(D_METHOD("get_foliage_dispatcher"), &GameWorld::get_foliage_dispatcher);
+	ClassDB::bind_method(D_METHOD("get_scene_overlay_cached_meshes"), &GameWorld::get_scene_overlay_cached_meshes);
 	ClassDB::bind_method(D_METHOD("get_item_db"), &GameWorld::get_item_db);
 	ClassDB::bind_method(D_METHOD("get_environment_node"), &GameWorld::get_environment_node);
 	ClassDB::bind_method(D_METHOD("get_weather_node"), &GameWorld::get_weather_node);

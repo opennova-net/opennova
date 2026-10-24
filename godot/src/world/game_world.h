@@ -702,6 +702,9 @@ public:
 	// one): the vegetation asset caches live on it for the world's whole life
 	// (the shell's exit empties them through clear_asset_cache).
 	FoliageDispatcher *get_foliage_dispatcher() const { return dispatcher_; }
+	// The meshes whose surfaces the overlay tail's cache holds (a read seam: the load's celestial
+	// leg reads the sky bodies', D-NET-NEW-LF-20).
+	int get_scene_overlay_cached_meshes() const { return scene_overlay_bodies_.cached_meshes(); }
 	// The mounted item database (null before a mission), for the F3 snapshot
 	// writer's display-name/graphic enrichment.
 	Ref<ItemDatabase> get_item_db() const;

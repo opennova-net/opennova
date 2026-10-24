@@ -432,6 +432,14 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	timeline->span("celestial");
 	scene_.load_celestial_models(resource_root_,
 			opennova::env::builds_celestial_draws(dedicated_host));
+	// The overlay tail reads each built body's surfaces once, a device readback that stalls the
+	// frame it lands in: here, where the bodies build, not in the first frame that appends them
+	// (the glare, the glint and the water mirror's redraw of the discs; D-NET-NEW-LF-20).
+	if (celestial_ != nullptr) {
+		for (ObjectModel *body : celestial_->get_body_models()) {
+			scene_overlay_bodies_.prime(body);
+		}
+	}
 	timeline->end_span();
 	// The HUD's overlay init, on every mission start and every role: past the rows' init
 	// and ahead of a joiner's first 0x2F. The shell's HUD builds here, its layout and its

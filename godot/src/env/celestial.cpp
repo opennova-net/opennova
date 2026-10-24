@@ -680,6 +680,17 @@ void Celestial::_set_body_q3_pose(Body &p_body, const Ref<ObjectData> &p_data,
 	}
 }
 
+Vector<ObjectModel *> Celestial::get_body_models() const {
+	Vector<ObjectModel *> out;
+	for (const String &key : { String("sun"), String("moon"), String("glare"), String("glint") }) {
+		const Body *body = bodies_.getptr(key);
+		if (body != nullptr && body->model != nullptr) {
+			out.push_back(body->model);
+		}
+	}
+	return out;
+}
+
 Celestial::OverlayBodies Celestial::get_overlay_bodies() const {
 	const auto row = [this](const char *p_key) {
 		OverlayBody out;

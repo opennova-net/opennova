@@ -318,6 +318,21 @@ int SceneOverlayModelSurfaces::append(opennova::renderer::SceneOverlaySlot p_slo
 	return appended;
 }
 
+void SceneOverlayModelSurfaces::prime(Node *p_model) {
+	if (p_model == nullptr) {
+		return;
+	}
+	if (MeshInstance3D *instance = Object::cast_to<MeshInstance3D>(p_model)) {
+		const Ref<Mesh> mesh = instance->get_mesh();
+		if (mesh.is_valid()) {
+			(void)geometry_for(mesh);
+		}
+	}
+	for (int32_t i = 0; i < p_model->get_child_count(); ++i) {
+		prime(p_model->get_child(i));
+	}
+}
+
 void SceneOverlayModelSurfaces::take_over(Node *p_model) {
 	if (p_model == nullptr) {
 		return;
