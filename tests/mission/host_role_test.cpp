@@ -606,8 +606,10 @@ void check_server_rows_reach_their_arms(std::map<std::string, std::string> &file
 		ctx.rotation = nullptr;
 		// tod (row 95, code 438): a session peer's authority sets nothing.
 		const uint32_t tod = kernel.world.weather.tod_fixed24;
+		const uint32_t peer_resets = kernel.world.weather.time_set_resets;
 		dispatch(438, 1230);
-		CHECK(kernel.world.weather.tod_fixed24 == tod);
+		CHECK(kernel.world.weather.tod_fixed24 == tod &&
+				kernel.world.weather.time_set_resets == peer_resets);
 		// Ban (row 93, code 107): slot 1 is listed and punted, and the SYSTEM line posts.
 		ctx.server_text.kicked = "Kicked:";
 		dispatch(107, 1);
@@ -655,11 +657,14 @@ void check_server_rows_reach_their_arms(std::map<std::string, std::string> &file
 			(void)role.input_events().push(controls::InputEventRecord{code, p1, 0, 0, false});
 			role.drain_input_events(nullptr, 0);
 		};
-		// tod 1230: 12 << 24 | 30 * 0x44400, the tickdown 10.
+		// tod 1230: 12 << 24 | 30 * 0x44400, the tickdown 10, then one tile-cache and cube reset
+		// (@0x49BE4B / @0x49BE50).
 		kernel.world.weather.tod_epoch_tickdown = 0;
+		const uint32_t resets = kernel.world.weather.time_set_resets;
 		dispatch(438, 1230);
 		CHECK(kernel.world.weather.tod_fixed24 == ((12u << 24) | (30u * 0x44400u)) &&
-				kernel.world.weather.tod_epoch_tickdown == 10);
+				kernel.world.weather.tod_epoch_tickdown == 10 &&
+				kernel.world.weather.time_set_resets == resets + 1);
 		// todrate 4: 0x18000000 / 248; todrate 0 keeps it.
 		dispatch(497, 4);
 		CHECK(kernel.world.weather.tod_advance_per_tick == 0x18000000u / 248u);

@@ -649,13 +649,15 @@ bool Role::dispatch_server_record(const controls::InputEventRecord &record) {
 	}
 	// tod: on an authority that is not a session peer (a dedicated host, in a session or
 	// not), the record's first argument as HHMM sets the clock word, unclamped
-	// (environment_time_from_hhmm); the weather's command generation carries the lighting
-	// refresh.
+	// (environment_time_from_hhmm), then the tile cache's reset and the environment cube's
+	// full refresh (WeatherState::reset_time_caches).
 	// [orig: Input_HandleActionBinding @0x49AD40 - case 438, the gates @0x49BDAB..0x49BDBF, the
 	//  packing @0x49BDC5..0x49BE42, Environment_SetCurrentTime called @0x49BE43,
-	//  Terrain_ResetTileCache called @0x49BE4B, sub_610680 called @0x49BE50]
+	//  Terrain_ResetTileCache called @0x49BE4B, EnvCube_ForceFullRefresh called @0x49BE50]
 	if (is(kTodRow)) {
-		if (authority && !peer) world.weather.set_current_time(environment_time_from_hhmm(record.p1));
+		if (!authority || peer) return true;
+		world.weather.set_current_time(environment_time_from_hhmm(record.p1));
+		world.weather.reset_time_caches();
 		return true;
 	}
 	// todrate: the same gates and a nonzero argument; the clock's advance per tick is

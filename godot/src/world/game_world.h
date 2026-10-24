@@ -991,6 +991,8 @@ private:
 	MissionEnvironment *env_ = nullptr;
 	Water *water_ = nullptr;
 	EnvironmentCubeCapture *environment_cube_ = nullptr;
+	// The weather's time-set reset count the cube last answered (render_environment_cube_frame).
+	uint32_t cube_time_set_resets_ = 0;
 	FrameFx *framefx_ = nullptr;
 	Weather *weather_ = nullptr;
 	Precipitation *precipitation_ = nullptr;

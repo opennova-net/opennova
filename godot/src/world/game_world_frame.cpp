@@ -1527,6 +1527,14 @@ void GameWorld::render_environment_cube_frame() {
 	if (!world_ready_ || environment_cube_ == nullptr) {
 		return;
 	}
+	// A time set's cube reset refreshes all six faces at the next capture (engine
+	// world::WeatherState::reset_time_caches carries the witness).
+	const opennova::world::WeatherState *weather =
+			env_ != nullptr ? env_->state().weather() : nullptr;
+	if (weather != nullptr && weather->time_set_resets != cube_time_set_resets_) {
+		cube_time_set_resets_ = weather->time_set_resets;
+		environment_cube_->force_capture();
+	}
 	Vector3 capture_position = render_camera_xform().origin;
 	Ref<Simulation> capture_sim = get_sim();
 	if (capture_sim.is_valid()) {

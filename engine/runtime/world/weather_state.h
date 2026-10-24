@@ -169,6 +169,10 @@ struct WeatherState {
     uint32_t tod_advance_per_tick = 0;
     int32_t tod_epoch_tickdown = kTodEpochTicks;
     uint32_t tod_epoch = 0;
+    // The time sets' cache resets (reset_time_caches): each step owes the terrain tile cache
+    // its emptying and the environment cube its six-face refresh; the render devices answer a
+    // change of the count. A count, so a device that reads it once a frame misses no step.
+    uint32_t time_set_resets = 0;
     // Script lvalue, preserved until a keyframed TOD computation writes 0/1.
     // [orig: WacCmd_Set @ 0x4ED520; Environment_ComputeTimeOfDayColors @ 0x57DE40]
     int32_t night_phase = 0; // g_EnvIsNightPhase @ 0x26C645C
@@ -276,6 +280,14 @@ struct WeatherState {
     // The todrate row's store: g_EnvTodAdvancePerTick as given.
     // [orig: Input_HandleActionBinding @0x49AD40 - case 497 the store @0x49BE8D]
     void set_tod_advance_per_tick(uint32_t advance) { tod_advance_per_tick = advance; }
+    // The two resets the time sets run right after Environment_SetCurrentTime (the ServerCommand
+    // TimeOfDay and the tod row; the mission start's sets run neither): every tile-cache record
+    // emptied, and the environment cube's faces-rendered count zeroed, which makes its next
+    // update render all six faces (time_set_resets).
+    // [orig: Terrain_ResetTileCache @0x605FB0 (keys -1, flags 0 @0x605FC0..0x605FC5);
+    //  EnvCube_ForceFullRefresh @0x610680 (g_EnvCubeFacesRendered = 0); EnvCube_Update
+    //  @0x6106A0 - `g_EnvCubeFacesRendered < 6` takes six faces @0x6106EB, the add @0x6107BC]
+    void reset_time_caches() { ++time_set_resets; }
     // The dev-tool scrub (MCP rows, GameWorld's debug seam): the exact
     // minute on the 8.24 clock. Not a witnessed handler — the WAC `tod`
     // math above keeps its 0x44444-per-minute truncation.

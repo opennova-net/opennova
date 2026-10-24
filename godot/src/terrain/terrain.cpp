@@ -858,6 +858,16 @@ const std::vector<opennova::TerrainTilePageBinding> &Terrain::_compose_pages(
 					cached_env_node->state().weather() != nullptr
 			? cached_env_node->state().weather()->tod_epoch
 			: 0u;
+	// A time set's tile-cache reset empties every page (engine world::WeatherState::
+	// reset_time_caches carries the witness).
+	const uint32_t time_set_resets = cached_env_node != nullptr &&
+					cached_env_node->state().weather() != nullptr
+			? cached_env_node->state().weather()->time_set_resets
+			: 0u;
+	if (time_set_resets != seen_time_set_resets) {
+		seen_time_set_resets = time_set_resets;
+		tile_cache_device.invalidate_all_pages();
+	}
 	tile_cache_device.begin_frame(++page_sweep_id, tod_epoch);
 	// Every missing visible page composes before the patches draw.
 	return tile_cache_device.compose_frame(draw_list, page_tile_tint, page_light_direction);

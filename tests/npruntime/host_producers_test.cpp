@@ -1172,16 +1172,20 @@ bool check_server_commands() {
 		return false;
 	out = inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "Earthquake", "", {"99"});
 	if (!expect(f.world.weather.quake_ticks == 240u, "Earthquake clamps to 40 seconds")) return false;
-	// TimeOfDay packs retail's clock word, hour << 24 | minute * 0x44400, and sets the minute
-	// counter's tickdown to 10 (D-NET-NEW-LI-35) [orig: CNapiGameSession_HandleServerCommand
-	// @0x4D22F0 - the packing @0x4D2C19..0x4D2C91, Environment_SetCurrentTime called @0x4D2C94;
+	// TimeOfDay packs retail's clock word, hour << 24 | minute * 0x44400, sets the minute
+	// counter's tickdown to 10, then owes the tile cache's reset and the environment cube's full
+	// refresh (D-NET-NEW-LI-35) [orig: CNapiGameSession_HandleServerCommand @0x4D22F0 - the
+	// packing @0x4D2C19..0x4D2C91, Environment_SetCurrentTime called @0x4D2C94,
+	// Terrain_ResetTileCache called @0x4D2C9C, EnvCube_ForceFullRefresh called @0x4D2CA1;
 	// Environment_SetCurrentTime @0x57C4B0 - the stores @0x57C4B4 / @0x57C4B9]. The pins sit
 	// clear of an exact hundred, where floor(hhmm * 0.01f) depends on the x87 precision.
 	f.world.weather.tod_epoch_tickdown = 0;
+	const uint32_t resets = f.world.weather.time_set_resets;
 	out = inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "TimeOfDay", "", {"0630"});
 	if (!expect(out.handled && f.world.weather.tod_fixed24 == ((6u << 24) | (30u * 0x44400u)) &&
-					f.world.weather.tod_epoch_tickdown == 10,
-			"TimeOfDay 0630 = hour 6, minute 30, the tickdown 10"))
+					f.world.weather.tod_epoch_tickdown == 10 &&
+					f.world.weather.time_set_resets == resets + 1,
+			"TimeOfDay 0630 = hour 6, minute 30, the tickdown 10, one cache reset"))
 		return false;
 	out = inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "TimeOfDay", "", {"2400"});
 	if (!expect(f.world.weather.tod_fixed24 == inmatch::environment_time_from_hhmm(1200),

@@ -334,10 +334,11 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 	}
 	if (strutil::iequals(verb, "TimeOfDay")) {
 		// HHMM, 1200 when absent or outside 0..2399, packed into the clock word
-		// (environment_time_from_hhmm) and set with the epoch tickdown's 10
-		// (D-NET-NEW-LI-35) [orig: CNapiGameSession_HandleServerCommand @0x4D22F0 -
-		//  @0x4D2BE3..0x4D2C15, Environment_SetCurrentTime called @0x4D2C94; the lighting
-		//  caches' resets @0x4D2C9C / @0x4D2CA1 ride the weather's command generation here].
+		// (environment_time_from_hhmm) and set with the epoch tickdown's 10, then the tile
+		// cache's reset and the environment cube's full refresh (WeatherState::
+		// reset_time_caches) (D-NET-NEW-LI-35) [orig: CNapiGameSession_HandleServerCommand
+		//  @0x4D22F0 - @0x4D2BE3..0x4D2C15, Environment_SetCurrentTime called @0x4D2C94,
+		//  Terrain_ResetTileCache called @0x4D2C9C, EnvCube_ForceFullRefresh called @0x4D2CA1].
 		if (world == nullptr) return outcome;
 		outcome.handled = true;
 		int32_t hhmm = 1200;
@@ -346,6 +347,7 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 			if (hhmm < 0 || hhmm >= 2400) hhmm = 1200;
 		}
 		world->weather.set_current_time(environment_time_from_hhmm(hhmm));
+		world->weather.reset_time_caches();
 		return outcome;
 	}
 	if (strutil::iequals(verb, "SetServerName")) {

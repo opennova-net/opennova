@@ -98,6 +98,9 @@ public:
 	void set_device_shadow_enabled(bool p_enabled);
 	PackedByteArray read_device_layer(int p_layer) const;
 	void invalidate_static_shadow_pages();
+	// Every page cold, the time sets' tile-cache reset (engine world::WeatherState::
+	// reset_time_caches carries the witness).
+	void invalidate_all_pages() { _invalidate_all(); }
 	// Appends one already-resolved permanent record and retires exactly the
 	// occupied cache pages its inclusive Q16 bounds touch.
 	bool append_terrain_scorch(
