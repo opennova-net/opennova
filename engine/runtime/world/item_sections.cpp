@@ -243,8 +243,8 @@ void palm_transition(World &world, Entity &entity, int section) {
         const int32_t x = entity.position.x.q16;
         const int32_t y = entity.position.y.q16;
         // The B stream's seed: the palm's pool-2 index, 8 * type and both position
-        // words' cells. [orig: Palm_SpawnFragment - PRNG_SetSeed_B (ex sub_6130E0)
-        //  called @0x53C29A]
+        // words' cells. [orig: Palm_SpawnFragment @0x53C1C0 (the PRNG_SetSeed_B call
+        //  @0x53C29A)]
         world.prng16_b_state = uint32_t(entity.handle.slot() + 8 * type) +
                 uint32_t((y >> 10) & ~63) + uint32_t((x >> 10) & ~63);
         seed.veh.vel_x = (world.next_prng16_b() & 8191) - 4096;
