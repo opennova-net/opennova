@@ -275,11 +275,15 @@ static func release_offscreen_targets(held: Array) -> void:
 
 ## An instrument (--verbose only): a present whose forced draw ran 50 ms or more names
 ## its split (the forced draw's frame setup, the scene and canvas updates ahead of the
-## draws), the root's and the screen viewport's last measured draws, the offscreen
-## targets it held, the texture and buffer memory the load made on the device since
-## the previous present (the uploads this forced draw's frame carries), and what the
-## forced draw drew on the screen viewport: its canvas draw calls and items, each canvas
-## layer with visible canvas items there, and the pipelines the forced draw compiled.
+## draws), the measured draws of the frame drawn before it, the offscreen targets it
+## held, the texture and buffer memory the load made on the device since the previous
+## present, and what the forced draw drew on the screen viewport: its canvas draw calls
+## and items, each canvas layer with visible canvas items there, and the pipelines the
+## forced draw compiled. The device keeps a ring of frames: a forced draw ends by waiting
+## on the fence of the frame its next slot last held and reading that frame's GPU and
+## CPU timestamps, so the measured draws (and the wall past the draw's own recording) are
+## the frame drawn before this present (in a load, the load's one forced world frame when
+## it ran since the previous present), never the present's own.
 func _note_slow_present(draw_usec: int, present_start_ms: int, screen_viewport: Viewport,
 		held: Array, texture_bytes: int, buffer_bytes: int, compiles_before: Array) -> void:
 	if draw_usec < 50000 or not OS.is_stdout_verbose():
@@ -289,7 +293,7 @@ func _note_slow_present(draw_usec: int, present_start_ms: int, screen_viewport: 
 		held_names.append("%s %dx%d mode %d" % [row[2], row[3].x, row[3].y, row[1]])
 	var root_rid := get_tree().root.get_viewport_rid()
 	var screen_rid := screen_viewport.get_viewport_rid()
-	print_verbose("LoadingScreen: present at %d%%: %d ms, force_draw %d ms (frame setup %.1f ms); the root's last measured draw gpu %.1f ms cpu %.1f ms; the screen viewport %s's gpu %.1f ms cpu %.1f ms; the targets held: [%s]" % [
+	print_verbose("LoadingScreen: present at %d%%: %d ms, force_draw %d ms (frame setup %.1f ms); the frame drawn before it (the timestamps a forced draw reads): the root gpu %.1f ms cpu %.1f ms, the screen viewport %s gpu %.1f ms cpu %.1f ms; the targets held: [%s]" % [
 			_progress, GameWorld.tick_count_ms() - present_start_ms, draw_usec / 1000,
 			RenderingServer.get_frame_setup_time_cpu(),
 			RenderingServer.viewport_get_measured_render_time_gpu(root_rid),
