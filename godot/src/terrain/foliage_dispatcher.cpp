@@ -11,6 +11,7 @@
 #include "terrain/terrain_data.h"
 #include "terrain/terrain_tile_info.h"
 #include "terrain/terrain_foliage_def.h"
+#include "world/load_timeline.h"
 #include "util/string_convert.h"
 
 #include <godot_cpp/classes/base_material3d.hpp>
@@ -1879,18 +1880,38 @@ FoliageDispatcher::_expansion_samplers() {
 
 void FoliageDispatcher::_compile_and_apply(
     const opennova::renderer::FoliageViewInput &p_view) {
+  _part("visuals");
   _ensure_visuals();
+  _part_end();
+  _part("materials");
   _update_materials();
+  _part_end();
 
+  _part("compile");
   const opennova::renderer::FoliageDrawList &draw_list =
       compiler_.compile(p_view, _world_samplers(), _expansion_samplers());
+  _part_end();
+  _part("meshes");
   _refresh_model_meshes();
+  _part_end();
+  _part("apply");
   _apply_draw_list(draw_list, main_set_, true);
+  _part_end();
+  _part("masks");
   if (is_visible_in_tree()) {
     mask_pass_.publish(this, draw_list, compiler_, fd_textures_);
   } else {
     mask_pass_.clear();
   }
+  _part_end();
+}
+
+void FoliageDispatcher::_part(const char *p_name) {
+  if (part_timeline_ != nullptr) part_timeline_->span(p_name);
+}
+
+void FoliageDispatcher::_part_end() {
+  if (part_timeline_ != nullptr) part_timeline_->end_span();
 }
 
 void FoliageDispatcher::render_inset_frame(Camera3D *p_camera,

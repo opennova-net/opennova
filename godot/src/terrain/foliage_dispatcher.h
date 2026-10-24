@@ -37,6 +37,7 @@ namespace godot {
 
 class Camera3D;
 class Image;
+class LoadTimeline;
 class ObjectData;
 class RenderingServer;
 class ResourceRoot;
@@ -202,6 +203,12 @@ public:
   // Runtime frame. Reads exact detail patch keys/distances from the wired
   // Terrain::get_foliage_detail_patches_native().
   void render_frame(const Transform3D &p_camera_xform, int64_t p_time_ms);
+  // An instrument: the timeline a post-load frame's foliage_view span is open on (GameWorld sets
+  // it around this frame's render_frame, null otherwise); the main view's parts nest under that
+  // span: "visuals" (the instance nodes' first build), "materials", "compile" (the frame
+  // compiler's cells and draw list), "meshes" (the model meshes' refresh), "apply" (the draw
+  // list onto the instances), "masks" (the MODEL masks' publish).
+  void set_part_timeline(LoadTimeline *p_timeline) { part_timeline_ = p_timeline; }
 
   // The weapon Inset pass's own foliage frame, compiled after the main frame
   // and after the Inset's own collect: its detail cells from its own terrain
@@ -475,6 +482,9 @@ private:
   bool material_inputs_written_ = false;
 
   FrameStats frame_stats_{};
+  LoadTimeline *part_timeline_ = nullptr;
+  void _part(const char *p_name);
+  void _part_end();
   int64_t backend_server_writes() const;
   int64_t total_frame_calls_ = 0;
 

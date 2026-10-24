@@ -1090,7 +1090,10 @@ void GameWorld::render_foliage_frame() {
 		}
 		post_load_part_end();
 		post_load_part("foliage_view");
+		// A post-load frame's parts nest under foliage_view (an instrument).
+		dispatcher_->set_part_timeline(post_load_leg_);
 		dispatcher_->render_frame(camera_xform, get_frame_clock_ms());
+		dispatcher_->set_part_timeline(nullptr);
 		post_load_part_end();
 		post_load_part("foliage_masks");
 		ObjectModel::refresh_foliage_mask_frame(
@@ -1603,7 +1606,10 @@ void GameWorld::render_sun_veil_frame() {
 // poses are camera-relative) (engine: runtime/renderer/render_slot_shadow.h).
 void GameWorld::render_slot_shadow_frame() {
 	if (slot_shadow_ != nullptr) {
+		// A post-load frame's parts nest under its slot_shadows span (an instrument).
+		slot_shadow_->set_part_timeline(post_load_leg_);
 		slot_shadow_->advance_frame();
+		slot_shadow_->set_part_timeline(nullptr);
 	}
 }
 

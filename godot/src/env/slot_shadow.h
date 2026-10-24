@@ -27,6 +27,7 @@ namespace godot {
 
 class EffectLightDirector;
 class LightScene;
+class LoadTimeline;
 class MissionEnvironment;
 class ObjectModel;
 class TerrainData;
@@ -99,6 +100,12 @@ public:
 	// The retail shadow-detail option (0..4) driving the RT chain base and
 	// the refresh cadence. The packaged runtime serves the top setting.
 	void set_shadow_detail(int p_detail);
+	int get_shadow_detail() const { return shadow_detail_; }
+	// The mission start's render subsystems: the 12 capture targets at the retail chain's sizes
+	// for this detail, ahead of the first capture, so an order's first capture finds its target
+	// made (engine renderer/render_slot_shadow.h creates_slot_texture_chain carries the
+	// witness, D-NET-NEW-LF-24). Without a RenderingDevice nothing is made.
+	void create_capture_targets();
 	// The local player's model: halved slot priority, the every-frame
 	// refresh exception, and the first-person drape gates (detail >= 2, not
 	// prone) (engine: runtime/renderer/render_slot_shadow.cpp).
@@ -120,6 +127,13 @@ public:
 	// One display frame: plan, publish the armed capture requests, publish
 	// the drape terms.
 	void advance_frame();
+	// An instrument: the timeline a post-load frame's slot_shadows span is open on (GameWorld
+	// sets it around this frame's advance_frame, null otherwise); the frame's parts nest under
+	// that span: "records" (the caster registry's rebuild), "plan" (the planner, the capture
+	// poses, the drape patches and terms), "compile" (the capture adapter's frame), then a
+	// zero-length "readbacks_<n>_packed_<v>" naming that compile's first-sight readbacks and
+	// packed vertices.
+	void set_part_timeline(LoadTimeline *p_timeline) { part_timeline_ = p_timeline; }
 	// F3 Stats capture toggle for the capture pass's RD GPU span (see
 	// SlotCaptureCompositorEffect::set_gpu_timing_enabled).
 	void set_gpu_timing_enabled(bool p_enabled);
@@ -281,6 +295,9 @@ private:
 	// @0x54d546, copied into g_RenderSlotDetailLevel @0x5d6159); 4 is the
 	// unreachable 1024-base oversample tier.
 	int shadow_detail_ = 3;
+	LoadTimeline *part_timeline_ = nullptr;
+	void _part(const String &p_name);
+	void _part_end();
 	uint32_t frame_ = 0;
 	int report_captures_ = 0;
 	int report_bound_ = 0;

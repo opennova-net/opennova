@@ -142,6 +142,20 @@ inline constexpr float kSilhouetteCaptureFar = 5000.2f;   // @ 0x58d399
 // [orig: RenderSlot_InitTextureChain @ 0x5d5320].
 inline constexpr int kSlotTextureCount = 12;
 int slot_texture_size(int texture_order, int shadow_detail);
+// The chain is made with the mission start's render subsystems, past the
+// terrain's tile cache targets and ahead of the first capture, while the
+// shadow-detail option is above 0; a dedicated host's start jumps over the
+// render subsystems (terrain/terrain_load_legs.h carries that test), so it
+// makes none [orig: Render_InitRenderingSubsystems @ 0x586ee0 -
+// Terrain_CreateTileCacheTargets called @ 0x586f01,
+// RenderSlot_InitTextureChainIfEnabled called @ 0x586f13;
+// RenderSlot_InitTextureChainIfEnabled @ 0x5d55f0 - the detail test
+// @ 0x5d55f0..0x5d55f7, RenderSlot_InitTextureChain jumped to @ 0x5d55f9;
+// RenderSlot_InitTextureChain - each RT by GTexRT_Construct (the call
+// @ 0x5d5382) and GRenderTarget_CreateSurfaces (the call @ 0x5d539c)].
+constexpr bool creates_slot_texture_chain(bool dedicated_host, int shadow_detail) noexcept {
+	return !dedicated_host && shadow_detail > 0;
+}
 // Each capture clears its RT to 0x00FFFFFF — white RGB, alpha 0 — before
 // the PROJSHAD black draws [orig: RenderSlot_RenderEntityAndChildren
 // @ 0x5d780f, GTexRT_SelectThunk with color_mask 0xFFFFFF]; the drape reads

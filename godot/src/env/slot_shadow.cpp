@@ -32,6 +32,7 @@
 #include "object/object_model.h"
 #include "render/visual_layers.h"
 #include "terrain/terrain_data.h"
+#include "world/load_timeline.h"
 
 namespace godot {
 
@@ -177,6 +178,8 @@ void SlotShadow::_bind_methods() {
 			&SlotShadow::set_light_context);
 	ClassDB::bind_method(D_METHOD("set_shadow_detail", "detail"),
 			&SlotShadow::set_shadow_detail);
+	ClassDB::bind_method(D_METHOD("get_shadow_detail"), &SlotShadow::get_shadow_detail);
+	ClassDB::bind_method(D_METHOD("create_capture_targets"), &SlotShadow::create_capture_targets);
 	ClassDB::bind_method(D_METHOD("set_local_player_model", "model"),
 			&SlotShadow::set_local_player_model);
 	ClassDB::bind_method(D_METHOD("set_local_player_parent_model", "model"),
@@ -245,6 +248,15 @@ void SlotShadow::set_light_context(const Vector3 &p_gain, int p_time_ms,
 
 void SlotShadow::set_shadow_detail(int p_detail) {
 	shadow_detail_ = CLAMP(p_detail, 0, 4);
+}
+
+void SlotShadow::create_capture_targets() {
+	if (shutdown_) {
+		return;
+	}
+	for (int order = 0; order < opennova::renderer::kSlotCaptureCount; ++order) {
+		_ensure_capture_target(order, opennova::renderer::slot_texture_size(order, shadow_detail_));
+	}
 }
 
 void SlotShadow::set_local_player_model(ObjectModel *p_model) {
@@ -739,7 +751,9 @@ void SlotShadow::advance_frame() {
 	if (live) {
 		if (!caster_records_valid_ ||
 				caster_records_revision_ != caster_group_revision()) {
+			_part("records");
 			_rebuild_caster_records();
+			_part_end();
 		}
 		casters.reserve(caster_records_.size());
 		bool pruned = false;
@@ -795,6 +809,7 @@ void SlotShadow::advance_frame() {
 		return;
 	}
 
+	_part("plan");
 	const uint64_t local_id = uint64_t(local_player_id_);
 	// The vehicle the local player rides (entity+0x16C) shares the local
 	// player's halved priority and every-frame refresh (retail:
@@ -1054,11 +1069,27 @@ void SlotShadow::advance_frame() {
 		last_light_diffuse_ = light_diffuse;
 	}
 	_hide_patches_from(drawn_patch_mask);
+	_part_end();
 	// The armed requests compile into this frame's device draw list; an
 	// unarmed order keeps its previous capture (retail's sticky RT).
 	if (effect_.is_valid()) {
+		_part("compile");
 		effect_->adapter().compile_frame(requests_);
+		_part_end();
+		if (part_timeline_ != nullptr) {
+			const SlotCaptureFrameCounters counters = effect_->adapter().frame_counters();
+			_part(vformat("readbacks_%d_packed_%d", counters.readbacks, counters.packed_vertices));
+			_part_end();
+		}
 	}
+}
+
+void SlotShadow::_part(const String &p_name) {
+	if (part_timeline_ != nullptr) part_timeline_->span(p_name);
+}
+
+void SlotShadow::_part_end() {
+	if (part_timeline_ != nullptr) part_timeline_->end_span();
 }
 
 void SlotShadow::set_gpu_timing_enabled(bool p_enabled) {

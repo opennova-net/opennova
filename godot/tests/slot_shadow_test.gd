@@ -100,6 +100,23 @@ func test_drape_binds_the_twelve_capture_textures_once() -> void:
 	assert_null(SlotShadow.get_capture_texture(12), "no texture past the chain")
 
 
+func test_the_mission_start_makes_the_whole_chain_ahead_of_the_first_capture() -> void:
+	# Retail makes the twelve RTs with the mission start's render subsystems (engine
+	# renderer/render_slot_shadow.h creates_slot_texture_chain, D-NET-NEW-LF-24): every
+	# order's target stands at the chain's size before any capture arms; without a
+	# RenderingDevice none is made.
+	var shadow := SlotShadow.new()
+	add_child_autofree(shadow)
+	shadow.set_shadow_detail(3)
+	shadow.create_capture_targets()
+	var sizes := [512, 512, 256, 256, 128, 128, 64, 64, 32, 32, 32, 32]
+	var device := RenderingServer.get_rendering_device() != null
+	for order in range(12):
+		assert_eq(shadow.get_capture_target_size(order), int(sizes[order]) if device else 0,
+				"order %d's target (device: %s)" % [order, device])
+	assert_eq(shadow.get_armed_capture_mask(), 0, "no capture armed by the making")
+
+
 func test_admitted_caster_publishes_one_capture_request() -> void:
 	var environment := _environment()
 	var camera := _camera()

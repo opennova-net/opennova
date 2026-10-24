@@ -21,6 +21,7 @@
 #include <runtime/mission/placement_traits.h> // builds_placement_draws (the dedicated host's placement)
 #include <runtime/terrain/terrain_load_legs.h> // the dedicated arm's terrain legs
 #include <runtime/renderer/environment_cube.h> // creates_environment_cube (the render subsystems)
+#include <runtime/renderer/render_slot_shadow.h> // creates_slot_texture_chain (the render subsystems)
 #include <runtime/renderer/frame_fx_effects.h> // creates_view_effect_shaders (the mission textures)
 #include <runtime/renderer/tracer_frame.h> // creates_tracer_pool_shaders (the mission textures)
 
@@ -1345,6 +1346,13 @@ void GameWorld::load_terrain_textures(const Ref<LoadTimeline> &p_timeline, bool 
 	}
 	terrain_->build(opennova::terrain::builds_lod_cache(p_dedicated_host),
 			opennova::terrain::builds_tile_cache_targets(p_dedicated_host));
+	// The render subsystems' slot capture chain past the tile cache's targets, ahead of the first
+	// capture: the full arm's, at a shadow detail above 0 (engine renderer/render_slot_shadow.h
+	// creates_slot_texture_chain carries the witness, D-NET-NEW-LF-24).
+	if (slot_shadow_ != nullptr && opennova::renderer::creates_slot_texture_chain(
+					p_dedicated_host, slot_shadow_->get_shadow_detail())) {
+		slot_shadow_->create_capture_targets();
+	}
 	if (opennova::terrain::loads_foliage_definitions(p_dedicated_host)) configure_foliage();
 	p_timeline->end_span();
 }
