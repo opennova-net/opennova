@@ -229,6 +229,8 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_attach_label_text", "index"),
 			&HudOverlay::get_attach_label_text);
 	ClassDB::bind_method(D_METHOD("get_scoreboard_header_text"), &HudOverlay::get_scoreboard_header_text);
+	ClassDB::bind_method(D_METHOD("get_frame_rate_overlay_text"),
+			&HudOverlay::get_frame_rate_overlay_text);
 	ClassDB::bind_method(D_METHOD("get_attach_label_position", "index"),
 			&HudOverlay::get_attach_label_position);
 	ClassDB::bind_method(D_METHOD("set_friendly_tags", "shown", "camera_xform",
@@ -1426,6 +1428,12 @@ int HudOverlay::get_attach_label_selected() const {
 	return -1;
 }
 
+String HudOverlay::get_frame_rate_overlay_text() const {
+	return state_.frame_rate.shown
+			? opennova::to_gd(opennova::hud::frame_rate_overlay_text(state_.frame_rate))
+			: String();
+}
+
 String HudOverlay::get_attach_label_text(int p_index) const {
 	if (p_index < 0 || p_index >= static_cast<int>(state_.attach_labels.size())) {
 		return String();
@@ -1632,6 +1640,7 @@ void HudOverlay::set_role_facts(const Ref<Simulation> &p_sim,
 	state_.session = facts.session;
 	state_.squad_orders = facts.squad_orders;
 	state_.net_quality = facts.net_quality;
+	state_.frame_rate = facts.frame_rate;
 	inset_target_name_ = facts.inset_target_name;
 	opennova::hud::hud_session_text(game_text_lookup(p_gametext), state_.session.text);
 	for (size_t c = 0; c < state_.slot_bar.size(); ++c) {

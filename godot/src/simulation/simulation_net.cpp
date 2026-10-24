@@ -514,43 +514,33 @@ void Simulation::install_console_seams() {
 		return kernel_ && kernel_->wac.toggle_cheat(p_line, !is_joiner(), kernel_->world);
 	};
 	runtime_->set_local_command_seams(std::move(seams));
-	// The console's queued input actions whose arms are the game's, at their input frame
-	// (the role keeps the Respawn row's 55, the medic call's 217 and the stance selects):
-	// the exit, the scope, the deploy pick, the punt by slot and the seat selects, the
-	// scope's and the seats' behind their rows' dispatcher head (engine
-	// inmatch/client_runtime.h set_console_action_sink carries the witness).
-	runtime_->set_console_action_sink([this](int32_t p_code, int32_t p_param, int32_t, int32_t) {
-		switch (p_code) {
-		case 3:
-			// The action's Exit Mission tone, then its exit: the tone rides the world's
-			// interface sound channel, which the session leg's terminal frame still plays
-			// (GameWorld::leg_session; engine inmatch/mission_exit.h kExitMissionSoundset
-			// carries the witness).
-			if (kernel_) {
-				opennova::world::ScriptSoundEvent tone;
-				tone.kind = opennova::world::ScriptSoundEvent::Kind::Interface;
-				tone.name = opennova::inmatch::kExitMissionSoundset;
-				kernel_->world.out.script_sounds.push_back(std::move(tone));
-			}
-			input_action_exit();
-			break;
-		case 6:
-			if (active_role().action_head_admits(p_code))
-				(void)request_local_player_scope_toggle();
-			break;
-		case 12:
-			(void)send_deployment_pick(p_param);
-			break;
-		case 34:
-			if (inmatch::NapiNPServerCtx *ctx = host_ctx())
-				inmatch::validated_punt(*ctx, p_param, 33, "ComIdPunt");
-			break;
-		default:
-			if (p_code >= 182 && p_code <= 191 && active_role().action_head_admits(p_code))
-				(void)local_player_select_seat(p_code - 182);
-			break;
+}
+
+bool Simulation::dispatch_action_record(int32_t p_code, int32_t p_param) {
+	namespace inmatch = opennova::inmatch;
+	// The exit row's case 3 (row 77 "exit"): the action's Exit Mission tone, then its exit.
+	// The tone rides the world's interface sound channel, which the session leg's terminal
+	// frame still plays (GameWorld::leg_session; engine inmatch/mission_exit.h
+	// kExitMissionSoundset and inmatch/remote_admin.h input_action_exit carry the witness).
+	if (p_code == 3) {
+		if (kernel_) {
+			opennova::world::ScriptSoundEvent tone;
+			tone.kind = opennova::world::ScriptSoundEvent::Kind::Interface;
+			tone.name = inmatch::kExitMissionSoundset;
+			kernel_->world.out.script_sounds.push_back(std::move(tone));
 		}
-	});
+		input_action_exit();
+		return true;
+	}
+	// The punt row's case 34 (row 87 "Punt"): the slot the record's first argument names,
+	// reason 33 "ComIdPunt", the authority's alone (engine inmatch/admin_console.h
+	// validated_punt carries the witness).
+	if (p_code == 34) {
+		if (inmatch::NapiNPServerCtx *ctx = host_ctx())
+			inmatch::validated_punt(*ctx, p_param, 33, "ComIdPunt");
+		return true;
+	}
+	return false;
 }
 
 opennova::inmatch::RemoteAdminBinding Simulation::remote_admin_binding() {

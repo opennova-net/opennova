@@ -956,6 +956,24 @@ struct HudSlotBarSlot {
 	std::string key_label;
 };
 
+// THE FRAME-RATE OVERLAY: the local cheat word's 0x400 bit (the Debug row 118 "fps", the
+// embedder's World::rules.frame_rate_overlay) and the main loop's frame-rate window
+// (world::TickAccumulator::frame_rate_stats), one line in the bold label slot at design
+// (10, 80), half-bright in the snapshot twin g_HUDColors.active, which the gameplay overlays
+// draw ahead of the breath bar, past their master word and level-3 skip
+// (HudFrameCompiler::element_frame_rate_overlay).
+struct HudFrameRateOverlay {
+	bool shown = false;      // g_DebugCheatFlags & 0x400
+	int32_t average_fps = 0; // g_StatsAvgFps
+	int32_t min_fps = 0;     // g_StatsMinFps
+	int32_t max_fps = 0;     // g_StatsMaxFps
+	int32_t cpu_percent = 0; // g_StatsCpuPercent
+};
+// The overlay's line, "FR %2i  MN %2i MX %2i CPU %d" over the four statistics
+// [orig: HUD_DrawFrameRateOverlay @0x5BAE20 - the format pushed @0x5BAE4C, the sprintf
+//  @0x5BAE52].
+std::string frame_rate_overlay_text(const HudFrameRateOverlay &overlay);
+
 // The /NOHUD overlay master word: the .data init 3, cleared to 0 by the
 // launch flag [orig: dword_840B18 (static 3); Game_ParseCommandLineAndInit
 // @0x4a7310 -> sub_58FF20(0) @0x4A7A09, its only writer].
@@ -979,6 +997,7 @@ struct HudFrameState {
 	// `test dword_840B18, 2` @0x5A81CE]; the whole word gates
 	// HUD_DrawGameplayOverlays [orig: `cmp dword_840B18, 0` @0x5BDE9B].
 	uint32_t overlay_master = kHudOverlayMasterDefault;
+	HudFrameRateOverlay frame_rate; // element_frame_rate_overlay
 	// An in-game .mnu screen is open (the in-game menu, the armory, the
 	// deploy screen, the end-round board, the command map): the preround
 	// armory line yields to it (element_service_prompt). [orig: dword_255110C,
@@ -1563,6 +1582,7 @@ private:
 	void element_weapon_cluster(const HudFrameState &state, float w, float h);
 	void element_heat(const HudFrameState &state, float w, float h);
 	void element_power(const HudFrameState &state, float w, float h);
+	void element_frame_rate_overlay(const HudFrameState &state, float w, float h);
 	void element_breath_bar(const HudFrameState &state, float w, float h);
 	void element_waypoint(const HudFrameState &state, float w, float h);
 	void element_spinmap(const HudFrameState &state, float w, float h);

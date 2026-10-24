@@ -310,8 +310,7 @@ void Role::drain_input_events(TickInputSource *source, uint32_t held_action_bits
 	std::vector<world::LocalPlayer::DeferredInputEvent> deferred;
 	deferred.swap(kernel_->local.deferred_events);
 	for (const world::LocalPlayer::DeferredInputEvent &event : deferred)
-		(void)input_events_.push({event.code, event.p1, event.p2, kDeferredMarker, false,
-				controls::InputEventOrigin::Device});
+		(void)input_events_.push({event.code, event.p1, event.p2, kDeferredMarker, false});
 	controls::InputEventRecord record;
 	while (input_events_.pop(record)) {
 		dispatch_record(record, source);
@@ -330,9 +329,15 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	// Input_HandleActionBinding's switch by the record's code: the Respawn row
 	// (catalog row 68, code 55) and the medic call (row 64 MedicReq, code 217) are
 	// the role's arms, behind their own head gates; every other code is the
-	// embedder's (its screens' and devices' arms).
+	// embedder's (its screens' and devices' arms), whatever queued the record: a key's,
+	// a console line's local CRC arm or its echo's walk (by any row's token, so any
+	// catalog code) all reach the one dispatcher (D-NET-NEW-LI-30).
 	// [orig: Input_HandleActionBinding @0x49AD40 - case 55 @0x49B20B, case 217
-	//  @0x49B4B4; the catalog codes word_8159A8 + 108 * row]
+	//  @0x49B4B4; the catalog codes word_8159A8 + 108 * row; Input_ProcessFrame @0x49D520 -
+	//  the drain's one Input_HandleActionBinding call @0x49D5D8; NapiClientCmd_ParseAndExecute
+	//  @0x4329C0 - the token walk @0x432A64..0x432A94 over all 768 records, the CRC walk
+	//  @0x432AA9..0x432B3E, Input_QueueEvent(record, ..) @0x432B4C / @0x432BA1;
+	//  Client_ProcessLocalCommand @0x520BF0 - Input_QueueEvent @0x520E5B]
 	constexpr int kRespawnRow = 68;
 	constexpr int kMedicRequestRow = 64;
 	// The "quit" row 78 (code 4, flags 0x04000000: no head gate) stores exit reason 2 and
@@ -522,11 +527,9 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 			(!action_head_admits(code) || kernel_->world.rules.mp_session ||
 					!kernel_->world.cached.local_player.valid()))
 		return;
-	if (record.origin == controls::InputEventOrigin::Device) {
-		if (source != nullptr) source->dispatch_record(record);
-		return;
-	}
-	if (ClientRuntime *runtime = client_runtime()) runtime->dispatch_to_console_action_sink(record);
+	// The embedder's one dispatch (TickInputSource::dispatch_record), a console record's and a
+	// key's alike; an update with no device (a dedicated host, a probe's direct frame) has none.
+	if (source != nullptr) source->dispatch_record(record);
 }
 
 bool Role::reset_local_input() {

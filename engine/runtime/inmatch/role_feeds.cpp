@@ -347,7 +347,12 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 		out.net_quality.novaworld_icon =
 				view.host->transport_mode == NetworkType::NovaWorld && view.host->nwu_in_use;
 	}
+	out.frame_rate.average_fps = view.frame_rate.average_fps;
+	out.frame_rate.min_fps = view.frame_rate.min_fps;
+	out.frame_rate.max_fps = view.frame_rate.max_fps;
+	out.frame_rate.cpu_percent = view.frame_rate.cpu_percent;
 	if (view.kernel == nullptr) return out;
+	out.frame_rate.shown = view.kernel->world.rules.frame_rate_overlay;
 	// The drawer's session gate, the same session bit as the MP lines below
 	// [orig: `cmp is_in_session, 0` @0x4c3210].
 	out.net_quality.in_session = view.kernel->world.rules.mp_session;

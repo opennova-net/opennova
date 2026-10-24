@@ -5,16 +5,11 @@
 
 namespace opennova::controls {
 
-// Which embedder leg takes a record the role does not own: the console's (its queued
-// actions, which the session's console sink dispatches) or the device passes' (the shell's
-// input source). Retail's record has no such field: its one dispatcher takes every record;
-// ours keeps two embedder legs because a dedicated host has a console and no device.
-enum class InputEventOrigin : uint8_t { Console, Device };
-
 // One record of the input frame's event queue: the dispatch code, the three arguments the
 // queueing pass hands over and the sign bit (bit 31 of the queued code, the fire's Shift
 // sign, which the dequeue splits off). The key scan queues its rows with the three
-// arguments 0.
+// arguments 0. A record carries nothing of what queued it: a key's and a console line's
+// walk's alike reach the one dispatcher (inmatch::Role::dispatch_record).
 // [orig: Input_QueueEvent @0x4979C0 (the stores @0x497A1A / @0x497A34 / @0x497A4E /
 //  @0x497A67); Input_DequeueEvent @0x497F30 (the code's low 31 bits @0x497F4A, the
 //  arguments @0x497F51..0x497F6E, the sign `shr 1Fh` @0x497F7A); Input_ProcessKeyboardEvents
@@ -26,7 +21,6 @@ struct InputEventRecord {
 	int32_t p2 = 0;
 	int32_t p3 = 0;
 	bool sign = false;
-	InputEventOrigin origin = InputEventOrigin::Device;
 };
 
 // g_InputEventQueueStorage: 32 records behind a count. A push at a count of 32 is dropped

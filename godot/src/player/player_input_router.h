@@ -89,9 +89,11 @@ public:
 	// The update's records into the role's event queue, in order (the wheel's, the talk
 	// and HUD rows' off-keyboard edges, then the sample's: its key events, the talk, HUD
 	// and pause rows' among the action rows', then the action rows' off-keyboard edges),
-	// and a drained one back to its arm: a talk row's through the chat line, a HUD row's
-	// (the pause row's after the role's flip) through the HUD's toggles, an action row's
-	// through the dispatcher's head (engine inmatch::TickInputSource carries the witness).
+	// and a drained one back to its arm, a console line's record as a key's: a talk row's
+	// through the chat line, a HUD row's (the pause row's after the role's flip) through the
+	// HUD's toggles, the shell's through its record leg, an action row's through the
+	// dispatcher's head, the exit's and the punt's through the sim (engine
+	// inmatch::TickInputSource carries the witness).
 	void queue_records(opennova::controls::InputEventQueue &r_records) override;
 	void dispatch_record(const opennova::controls::InputEventRecord &p_record) override;
 	// The input frame's tail behind the update's drain: the USE hold's release edge.
@@ -109,9 +111,10 @@ public:
 	// the frame head's read holds for the frame.
 	void set_menu_screen_probe(const Callable &p_probe) { menu_screen_probe_ = p_probe; }
 	// The shell's arms for the records it owns, called as (code, first argument) when the
-	// update's drain reaches one: the escape row's (code 18, the Escape action) and the
-	// deploy pick's (input event 12, its pick). Kept across a teardown, as the shell installs
-	// it once; unset, those records do nothing.
+	// update's drain reaches one, a key's or a console line's: the escape row's (code 18, the
+	// Escape action), the screen shot's (code 2), the cheat row 117's weapon-screen toggle
+	// (code 40) and the deploy pick's (input event 12, its pick). Kept across a teardown, as
+	// the shell installs it once; unset, those records do nothing.
 	void set_record_leg(const Callable &p_leg) { record_leg_ = p_leg; }
 	bool handle_input(const Ref<InputEvent> &p_event, bool p_active);
 

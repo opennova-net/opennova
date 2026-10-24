@@ -505,8 +505,7 @@ int main() {
 			// The pause row's record (catalog row 70, code 25), the drain's to flip.
 			void queue_records(opennova::controls::InputEventQueue &records) override {
 				if (static_cast<int>(calls.size()) - 1 == flip_at)
-					(void)records.push({opennova::controls::action_code(70), 0, 0, 0, false,
-							opennova::controls::InputEventOrigin::Device});
+					(void)records.push({opennova::controls::action_code(70), 0, 0, 0, false});
 			}
 		};
 		auto target = std::make_unique<TickProbe>();
@@ -621,10 +620,9 @@ int main() {
 			void queue_records(opennova::controls::InputEventQueue &records) override {
 				if (calls++ != 0) return;
 				const opennova::controls::InputEventRecord pause{opennova::controls::action_code(70),
-						0, 0, 0, false, opennova::controls::InputEventOrigin::Device};
+						0, 0, 0, false};
 				(void)records.push(pause);
-				(void)records.push({zoom, 0, 0, 0, false,
-						opennova::controls::InputEventOrigin::Device});
+				(void)records.push({zoom, 0, 0, 0, false});
 				(void)records.push(pause);
 			}
 			// The radar zoom's record reaches the source between the flips.

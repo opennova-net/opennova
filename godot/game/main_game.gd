@@ -34,6 +34,10 @@ const DEV_TOOLS_KEY := KEY_INSERT
 # with the retail-configurable binding rows (huddetail's default; hudcolor's is
 # Ctrl+F6, D-CTRL-4).
 const PICK_KEY := KEY_F6
+# The cheat row 117's dispatch code: its record reaches the shell's arm past the engine's
+# gates, out of a session with a local player (engine inmatch::Role::dispatch_record carries
+# the witness), and toggles the WEAPON screen (_toggle_weapon_screen).
+const WEAPON_SCREEN_CODE := 40
 # ARMORY = the WEAPON screen over LIVE play: the world keeps ticking (the witnessed
 # armory runs with no world-stop leg — and under the listen-server model a pausing
 # host would freeze every peer), only the mouse is released and player input idles.
@@ -1880,21 +1884,40 @@ func _queue_pick(param: int) -> void:
 ## (PlayerInputRouter::set_record_leg): the escape row's (case 18), the Escape
 ## action: over live play, with no HUD window to close, the in-game menu opens;
 ## under a pass-through screen never (a menu screen is open), nor once the round
-## is over; or input event 12, the pick (the deploy keys', a co-op round-over
-## RESTART's), with or without the deploy screen open. A case that reset the
-## input (its Input_ResetAllState: the role's memset of the event queue ends the
-## drain there) owes the devices' reset, which runs at once.
+## is over; the cheat row 117's weapon-screen toggle (case 40); or input event 12,
+## the pick (the deploy keys', a co-op round-over RESTART's), with or without the
+## deploy screen open. A console line's record reaches these arms as a key's does.
+## A case that reset the input (its Input_ResetAllState: the role's memset of the
+## event queue ends the drain there) owes the devices' reset, which runs at once.
 func _run_record_leg(code: int, param: int) -> void:
 	if code == KeyboardPass.ESCAPE_CODE:
 		if not _run_escape_action() and is_gameplay_input_active():
 			_pause()
 	elif code == KeyboardPass.SCREEN_SHOT_CODE:
 		_take_screen_shot()
+	elif code == WEAPON_SCREEN_CODE:
+		_toggle_weapon_screen()
 	elif _deploy_presenter != null:
 		_deploy_presenter.send_pick(param)
 	var sim: Simulation = _world.get_sim() if _world != null else null
 	if sim != null and bool(sim.take_input_reset()):
 		_reset_key_state()
+
+
+## The weapon-screen toggle (case 40, the cheat row 117's), past the engine's gates (out of a
+## session, a local player): an open menu screen closes, else weapon.mnu's WEAPON opens, the
+## WEAPON screen's word (State.ARMORY) with it; no armory zone gates it (engine
+## inmatch::Role::dispatch_record carries the witness). A drain runs under no menu screen but
+## the pass-through ones (death.mnu's DEATH, stat.mnu's STAT), so those are what it closes,
+## each close handing play back with its input reset (_leave_screen).
+func _toggle_weapon_screen() -> void:
+	if _menu_screen_open():
+		if _state == State.DEPLOY and _deploy_presenter != null:
+			_deploy_presenter.close()
+		elif _state == State.END_ROUND and _end_round_presenter != null:
+			_end_round_presenter.close()
+		return
+	_open_armory()
 
 
 ## The Screen Shot action's device leg (case 2): the frame as it last drew, written as the

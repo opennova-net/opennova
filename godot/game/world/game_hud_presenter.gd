@@ -690,8 +690,8 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# action_for_code carries the witness), formatted again only when a
 	# binding changed or the HUD was rebuilt.
 	_apply_slot_bar_key_labels()
-	# The breath bar, the MP session lines, the HUDLS scan and the open menus,
-	# from the same sim and gametext table (HudOverlay.set_role_facts
+	# The breath bar, the MP session lines, the HUDLS scan, the open menus and the
+	# frame-rate overlay, from the same sim and gametext table (HudOverlay.set_role_facts
 	# carries the witness).
 	_game_hud.set_role_facts(sim, Strings.get_table(Strings.TABLE_GAMETEXT))
 	_apply_friendly_tags()

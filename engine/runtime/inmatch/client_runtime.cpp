@@ -2204,8 +2204,7 @@ bool ClientRuntime::console_command(const std::string &line) {
 
 bool ClientRuntime::queue_console_action(int32_t code, int32_t p1, int32_t p2, int32_t p3) {
 	// [orig: Input_QueueEvent @0x4979C0 - the cap @0x4979C8..0x4979CB]
-	return input_events_ != nullptr &&
-			input_events_->push({code, p1, p2, p3, false, controls::InputEventOrigin::Console});
+	return input_events_ != nullptr && input_events_->push({code, p1, p2, p3, false});
 }
 
 void ClientRuntime::queue_carrier_repair_requests() {

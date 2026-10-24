@@ -66,6 +66,7 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <functional>
 #include <initializer_list>
 #include <memory>
 #include <string>
@@ -4455,7 +4456,7 @@ bool run_respawn_key_resets_input_and_sends_0x41() {
 			ok &= expect(h.role.runtime->local_player_dead(),
 					"respawn key: the self record's dead bit reads dead");
 			body->inf.anim_state = w::anim_state::kWalkForward;
-			(void)h.role.input_events().push(opennova::controls::InputEventRecord{55, 0, 0, 0, false, opennova::controls::InputEventOrigin::Device});
+			(void)h.role.input_events().push(opennova::controls::InputEventRecord{55, 0, 0, 0, false});
 			h.role.apply_input(press);
 			ok &= expect(body->inf.anim_state == w::anim_state::kWalkForward,
 					"respawn key: a dead L takes no reset");
@@ -4474,7 +4475,7 @@ bool run_respawn_key_resets_input_and_sends_0x41() {
 		// @0x497EE6; Input_ProcessFrame - the count test @0x49D5E0].
 		press.player.movement.forward = true;
 		(void)h.role.take_input_reset();
-		(void)h.role.input_events().push(opennova::controls::InputEventRecord{55, 0, 0, 0, false, opennova::controls::InputEventOrigin::Device});
+		(void)h.role.input_events().push(opennova::controls::InputEventRecord{55, 0, 0, 0, false});
 		h.role.apply_input(press);
 		ok &= expect(body->inf.anim_state == w::anim_state::kIdle &&
 				lp.input_flags.flags == 0 && lp.input_flags.prev == 0 &&
@@ -4858,6 +4859,18 @@ bool run_the_mission_start_reload_repicks_the_player_rows() {
 	return ok;
 }
 
+// The embedder's dispatch as a device stands for it: every drained record the role does not
+// own, in order (inmatch::TickInputSource::dispatch_record), a console line's too.
+struct RecordingDevice final : inmatch::TickInputSource {
+	std::vector<int32_t> codes;
+	std::function<void(int32_t)> arm;
+	inmatch::InputPacket sample_tick(uint32_t) override { return {}; }
+	void dispatch_record(const opennova::controls::InputEventRecord &record) override {
+		codes.push_back(record.code);
+		if (arm) arm(record.code);
+	}
+};
+
 // D-NET-710: a console-queued action dispatches by its code at the next input frame:
 // the Respawn row's code 55 runs the Respawn key's arm (its head gates, the input reset,
 // the bodiless 0x41), a code the role does not own goes to the embedder's dispatch. The
@@ -4873,9 +4886,8 @@ bool run_a_console_action_dispatches_by_code() {
 	h.role.poll_preload();
 	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
-	std::vector<int32_t> sunk;
-	h.role.runtime->set_console_action_sink(
-			[&sunk](int32_t code, int32_t, int32_t, int32_t) { sunk.push_back(code); });
+	RecordingDevice device;
+	h.input.source = &device;
 	(void)h.role.runtime->queue_console_action(201, 0, 0, 0);
 	(void)h.role.runtime->queue_console_action(55, 0, 0, 0);
 	(void)h.role.runtime->queue_console_action(202, 0, 0, 0);
@@ -4883,7 +4895,7 @@ bool run_a_console_action_dispatches_by_code() {
 	for (int i = 0; i < 3; ++i) h.role.run_tick(h.input);
 	ProtocolMessage m;
 	return expect(h.socket.last_message(c2s::DEATH_TIMEOUT_RESET, m) && m.payload.empty() &&
-					sunk == std::vector<int32_t>{201},
+					device.codes == std::vector<int32_t>{201},
 			"console actions: code 55 sends the bodiless 0x41; code 201 goes to the embedder; "
 			"the reset drops 202");
 }
@@ -5030,15 +5042,14 @@ bool run_the_console_quit_stores_the_reset_exit() {
 	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
-	std::vector<int32_t> sunk;
-	h.role.runtime->set_console_action_sink(
-			[&sunk](int32_t code, int32_t, int32_t, int32_t) { sunk.push_back(code); });
+	RecordingDevice device;
+	h.input.source = &device;
 	(void)h.role.runtime->queue_console_action(4, 0, 0, 0);
 	h.socket.datagrams.clear();
 	h.role.apply_input(h.input);
 	inmatch::SessionError lost;
 	bool ok = expect(h.role.runtime->mission_exit_reason() == inmatch::kMissionExitReset &&
-					sunk.empty() && h.socket.datagrams.empty() && h.role.session_lost(lost),
+					device.codes.empty() && h.socket.datagrams.empty() && h.role.session_lost(lost),
 			"console quit: code 4 stores exit reason 2 on the runtime and sends nothing");
 	h.role.close();
 	std::size_t goodbyes = 0;
@@ -5092,9 +5103,8 @@ bool run_a_stance_select_and_the_look_take_the_rows_head() {
 				"seat head: the seat key's row follows the stance row's head");
 		ok &= expect(h.role.action_head_admits(201) == (gate == Gate::None || gate == Gate::PreRound),
 				"knife head: no 0x400, so only the overlay and the round over drop it");
-		std::vector<int32_t> sunk;
-		h.role.runtime->set_console_action_sink(
-				[&sunk](int32_t code, int32_t, int32_t, int32_t) { sunk.push_back(code); });
+		RecordingDevice device;
+		h.input.source = &device;
 		h.socket.datagrams.clear();
 		// The console's "Prone" (row 9, code 170) dispatches at the role's input frame.
 		(void)h.role.runtime->queue_console_action(170, 0, 0, 0);
@@ -5111,7 +5121,8 @@ bool run_a_stance_select_and_the_look_take_the_rows_head() {
 		h.role.apply_input(walk);
 		ok &= expect(h.kernel->local.input.forward == admitted,
 				admitted ? "held head: the forward key holds" : "held head: the gate drops the forward key");
-		ok &= expect(sunk.empty(), "stance head: the stance codes are the role's, not the embedder's");
+		ok &= expect(device.codes.empty(),
+				"stance head: the stance codes are the role's, not the embedder's");
 		for (int i = 0; i < 12; ++i) h.role.run_tick(h.input);
 		ProtocolMessage select;
 		const bool console_sent = h.socket.last_message(0x1D, select);
@@ -5134,7 +5145,7 @@ bool run_a_stance_select_and_the_look_take_the_rows_head() {
 }
 
 // D-NET-685 (V-L2-s7): the deploy action's head runs Input_ResetAllState, whose event-queue
-// memset ends the input frame's drain, so a console-queued pick (code 12, the game's sink)
+// memset ends the input frame's drain, so a console-queued pick (code 12, the shell's arm)
 // leaves the codes queued behind it undispatched: the Respawn row's 55 sends no 0x41 and the
 // embedder never sees the code after it.
 // [orig: Input_HandleActionBinding @0x49AD40 - case 12 @0x49B024, Input_ResetAllState
@@ -5147,13 +5158,13 @@ bool run_a_console_deploy_pick_ends_the_drain() {
 	h.role.poll_preload();
 	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
-	std::vector<int32_t> sunk;
-	// The game's sink takes 12 as the deploy pick (Simulation::send_deployment_pick ->
-	// Role::request_deployment_pick).
-	h.role.runtime->set_console_action_sink([&](int32_t code, int32_t, int32_t, int32_t) {
-		sunk.push_back(code);
+	// The embedder's dispatch takes 12 as the deploy pick (the shell's arm:
+	// Simulation::send_deployment_pick -> Role::request_deployment_pick).
+	RecordingDevice device;
+	device.arm = [&h](int32_t code) {
 		if (code == 12) (void)h.role.request_deployment_pick(0xFFFFu);
-	});
+	};
+	h.input.source = &device;
 	(void)h.role.take_input_reset();
 	(void)h.role.runtime->queue_console_action(12, 0, 0, 0);
 	(void)h.role.runtime->queue_console_action(55, 0, 0, 0);
@@ -5161,7 +5172,7 @@ bool run_a_console_deploy_pick_ends_the_drain() {
 	h.role.apply_input(h.input);
 	for (int i = 0; i < 3; ++i) h.role.run_tick(h.input);
 	ProtocolMessage m;
-	bool ok = expect(sunk == std::vector<int32_t>{12},
+	bool ok = expect(device.codes == std::vector<int32_t>{12},
 			"console deploy pick: the drain ends at the pick (201 never reaches the embedder)");
 	ok &= expect(!h.socket.last_message(c2s::DEATH_TIMEOUT_RESET, m),
 			"console deploy pick: the Respawn code behind it sends no 0x41");

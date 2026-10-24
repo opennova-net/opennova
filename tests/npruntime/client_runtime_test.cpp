@@ -3740,8 +3740,7 @@ bool run_console_actions_queue_for_the_input_frame() {
 	client.receive(echo.data(), echo.size());
 	(void)client.Client_ProcessNetworkFrame(1);
 	opennova::controls::InputEventRecord record;
-	if (!expect(queue.size() == 1 && queue.pop(record) && record.code == 55 &&
-					record.origin == opennova::controls::InputEventOrigin::Console && queue.empty(),
+	if (!expect(queue.size() == 1 && queue.pop(record) && record.code == 55 && queue.empty(),
 			"the echoed respawn token queues code 55 once"))
 		return false;
 	bool queued = true;

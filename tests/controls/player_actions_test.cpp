@@ -418,8 +418,7 @@ bool test_spectator_rows_fire_on_their_events() {
 	// Each is a record of the update's drain by its code, which maps back to its request
 	// (LI-s15).
 	CHECK(requests[0].code == 502 && requests[1].code == 500 && requests[2].code == 502);
-	const auto back = player_action_request(InputEventRecord{501, 0, 0, 0, false,
-			InputEventOrigin::Device});
+	const auto back = player_action_request(InputEventRecord{501, 0, 0, 0, false});
 	CHECK(back && back->action == Action::Spectate && back->value == 501 && back->code == 501);
 	CHECK(actions.poll_spectator(keys, true).empty()); // no off-keyboard arm held
 	PlayerActionPoll idle = dead;
@@ -806,8 +805,7 @@ bool test_key_rows_carry_their_dispatch_codes() {
 	}
 	// The wheel's record names the row the walk took (BindingSet::mouse_click_action): its
 	// code maps back to the row's request.
-	const auto wheel = player_action_request(InputEventRecord{212, 0, 0, 0, false,
-			InputEventOrigin::Device});
+	const auto wheel = player_action_request(InputEventRecord{212, 0, 0, 0, false});
 	CHECK(wheel && wheel->action == Action::WeaponCycle && wheel->value == 1 && wheel->code == 212);
 	{
 		PlayerActions actions;

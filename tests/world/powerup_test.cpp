@@ -583,7 +583,8 @@ void test_allammo_refills_populated_slot() {
 // which the cheat rows' codes 120 and 121 run as the allammo pickup does: every loaded round
 // cleared, the pools seeded from the defs, every clip redrawn and the FSM taking the clip. And
 // under the infinite-ammo bit every pool read through the seat is the class's carry cap,
-// ahead of the class-1 leg; a class past the cap table reads 0.
+// ahead of the class-1 leg. (Retail indexes g_AmmoClassMaxCarry unchecked; a class past the
+// table reading 0 is ours' bound, not a witnessed value.)
 // [orig: Entity_UpdateWeaponOverlayFrameState @0x4DC340 - WeaponSlots_ClearLoadedRounds
 //  @0x4DC3B1, WeaponSlots_SeedAmmoPoolsFromDefs @0x4DC3CF, WeaponSlots_RecalculateAmmoFromCapacity
 //  @0x4DC3E1; Entity_GetScoreValueBySlotType @0x5406E0 - `test g_DebugCheatFlags, 100h`
@@ -609,7 +610,7 @@ void test_weapon_overlay_refresh_and_the_cheat_caps() {
     CHECK(cheat.cheat_carry_caps != nullptr);
     CHECK(weapon_seat_pool(cheat, 11, 5) == 120 && weapon_seat_pool(cheat, 12, 5) == 90);
     CHECK(weapon_seat_pool(cheat, 1, 5) == 6);
-    CHECK(weapon_seat_pool(cheat, 200, 5) == 0);
+    CHECK(weapon_seat_pool(cheat, 200, 5) == 0); // ours' bound past the cap table (unwitnessed)
 }
 
 // A row that refills AND heals, touched at full health by a remote player: the

@@ -1063,9 +1063,14 @@ public:
 	bool escape_input_reset();
 	// Input action 3, the exit: the quit dialog's yes and a menu screen's confirmation (the
 	// in-game CONFIRM_YES, the death screen's yes: `p_menu_screen`) run it inline and a
-	// console-queued code 3 at its input frame (engine inmatch/remote_admin.h input_action_exit
+	// code 3 record at its input frame (engine inmatch/remote_admin.h input_action_exit
 	// and ExitSite carry the witness): a joiner's CIDEMIS goodbye leaves inside it.
 	void input_action_exit(bool p_menu_screen = false);
+	// The arms of the drained records the sim owns, reached through the player input router's
+	// dispatch (a key's record and a console line's alike; engine inmatch::TickInputSource::
+	// dispatch_record carries the witness): code 3 the exit with its Exit Mission tone, code 34
+	// the punt of the slot `p_param` names (the authority's alone). False for any other code.
+	bool dispatch_action_record(int32_t p_code, int32_t p_param);
 	// Monotonic initial-admission boundary: the host's S2C 0x0F has landed in the
 	// deploy wait, for any role (D-NET-678). Deploy-pick state is intentionally
 	// exposed separately.

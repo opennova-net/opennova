@@ -21,9 +21,8 @@ namespace {
 	} \
 } while (false)
 
-InputEventRecord record(int32_t code, bool sign = false,
-		InputEventOrigin origin = InputEventOrigin::Device) {
-	return InputEventRecord{code, 0, 0, 0, sign, origin};
+InputEventRecord record(int32_t code, bool sign = false) {
+	return InputEventRecord{code, 0, 0, 0, sign};
 }
 
 // [orig: Input_QueueEvent @0x4979C0 (the cap `cmp count, 20h; jge` @0x4979C8..0x4979CB, the
@@ -37,7 +36,7 @@ bool test_the_33rd_record_is_dropped() {
 	return true;
 }
 
-// The front record first, its arguments, sign and origin kept; the rest shifted down.
+// The front record first, its arguments and sign kept; the rest shifted down.
 // [orig: Input_DequeueEvent @0x497F30 (the code's low 31 bits @0x497F4A, the arguments
 //  @0x497F51..0x497F6E, the sign @0x497F7A, the shift @0x497F95..0x497FB2, the count's step
 //  @0x497FB6)]
@@ -45,11 +44,11 @@ bool test_the_drain_takes_the_front_record() {
 	InputEventQueue queue;
 	InputEventRecord out;
 	CHECK(queue.empty() && !queue.pop(out));
-	CHECK(queue.push(InputEventRecord{4, 7, 8, 9, false, InputEventOrigin::Console}));
+	CHECK(queue.push(InputEventRecord{4, 7, 8, 9, false}));
 	CHECK(queue.push(record(23, true)));
 	CHECK(queue.push(record(201)));
 	CHECK(queue.pop(out) && out.code == 4 && out.p1 == 7 && out.p2 == 8 && out.p3 == 9 &&
-			out.origin == InputEventOrigin::Console);
+			!out.sign);
 	CHECK(queue.size() == 2 && queue.at(0).code == 23 && queue.at(0).sign);
 	// A record queued while the drain runs joins its back.
 	CHECK(queue.push(record(152)));

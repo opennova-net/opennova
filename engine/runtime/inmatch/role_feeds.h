@@ -21,6 +21,7 @@
 #include <runtime/world/friendly_tags.h>
 #include <runtime/world/lfp_feed.h>
 #include <runtime/world/spawn_select.h>
+#include <runtime/world/tick_accumulator.h> // FrameRateStats (the frame-rate overlay)
 #include <runtime/world/weapon_inventory.h> // WeaponSlotBarCategory
 
 #include <array>
@@ -71,6 +72,9 @@ struct RoleView {
 	// pick, deploy_screen_status); the in-match rules word is
 	// session_rules_word's.
 	uint32_t staged_mp_attributes = 0;
+	// The session's frame-rate window (Session::frame_rate_stats), the frame-rate overlay's
+	// four words.
+	world::TickAccumulator::FrameRateStats frame_rate;
 };
 
 // The session rules word the role's HUD gates test (g_RulesFlags, the
@@ -247,6 +251,12 @@ struct HudRoleFacts {
 	// [orig: Render_WeaponInsetScene -- g_HUDTargetCursorEntity @0x5CA0A4, the call
 	//  @0x5CA0AB, the null test @0x5CA0B3..0x5CA0B5; HUD_BuildEntityInfo @0x4B87ED..0x4B8825]
 	std::string inset_target_name;
+	// The frame-rate overlay: shown while the local cheat word's 0x400 bit stands
+	// (World::rules.frame_rate_overlay), over the view's frame-rate window.
+	// [orig: HUD_DrawGameplayOverlays @0x5BDE60 - `test g_DebugCheatFlags, 400h` @0x5BDEB5;
+	//  HUD_DrawFrameRateOverlay @0x5BAE20 - g_StatsCpuPercent @0x5BAE2E, g_StatsMaxFps
+	//  @0x5BAE33, g_StatsMinFps @0x5BAE39, g_StatsAvgFps @0x5BAE40]
+	hud::HudFrameRateOverlay frame_rate;
 };
 // `voice_menus`: bit 0 asks for the emotes menu, bit 1 for the radio menu.
 inline constexpr uint32_t kHudVoiceMenuEmotes = 1u;

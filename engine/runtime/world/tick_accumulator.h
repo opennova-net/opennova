@@ -57,7 +57,9 @@ struct FrameLock {
 // 2000 ms the average frame rate becomes frames * 16000 / sum and both
 // counters restart. The smoothed bank still holds the previous frame's
 // sub-4 ms residual, so a steady 16 ms stream reads 58, not 62. The rate reads
-// 0 from the mode-init reset until the first full window.
+// 0 from the mode-init reset until the first full window. The same window keeps the
+// longest and the shortest smoothed bank it counted, which publish as the minimum and
+// maximum frame rates (frame_rate_stats).
 class TickAccumulator {
 public:
 	// 16 ms; matches AiEventQueue::kFrameDt.
@@ -120,6 +122,8 @@ public:
 		phase_ = 0;
 		carry_ = 0.0;
 		average_fps_ = 0;
+		min_fps_ = 0;
+		max_fps_ = 0;
 		frame_count_ = 0;
 		frame_time_sum_ = 0;
 		cpu_percent_ = 0;
@@ -164,15 +168,46 @@ public:
 	}
 	int32_t cpu_percent() const { return cpu_percent_; }
 
+	// The window's frame-rate extrema beside its average: every frame's smoothed bank, after
+	// it is counted, raises the longest (unsigned) and lowers the shortest; when the window
+	// closes the maximum rate becomes 16000 / shortest (a shortest of 0 reads 1) and the
+	// minimum 16000 / longest, and the two restart at 2000 ms and 1. Unlike the counters,
+	// the extrema have no mode-init reset: their first window starts from the process's
+	// statics, 125 ms and 1, and the published rates read 0 from the mode-init reset until
+	// the first full window. The frame-rate overlay draws the four (hud::HudFrameRateOverlay).
+	// [orig: Game_MainLoop @0x52B630 - the longest `cmp esi, ebp; jbe` @0x52B8F6 and its
+	//  store @0x52B902, the shortest `cmp esi, ecx; jnb` @0x52B90E and its store @0x52B914,
+	//  the zero shortest's 1 @0x52B946..0x52B94F, the restarts @0x52B97B / @0x52B985, the
+	//  publishes g_StatsMaxFps @0x52B99D and g_StatsMinFps @0x52B9A9 (`mov eax, 3E80h; div`
+	//  @0x52B994..0x52B999 / @0x52B9A2..0x52B9A7); the mode-init reset zeroes the rates
+	//  alone @0x52B739 / @0x52B73F; the statics g_StatsMinFrameTimeFp4 @0x83016C = 2000 and
+	//  g_StatsMaxFrameTimeFp4 @0x830170 = 1]
+	struct FrameRateStats {
+		int32_t average_fps = 0; // g_StatsAvgFps
+		int32_t min_fps = 0;     // g_StatsMinFps
+		int32_t max_fps = 0;     // g_StatsMaxFps
+		int32_t cpu_percent = 0; // g_StatsCpuPercent
+	};
+	FrameRateStats frame_rate_stats() const {
+		return {average_fps_, min_fps_, max_fps_, cpu_percent_};
+	}
+
 private:
 	// Game_MainLoop seeds the bank with one millisecond (`esi = 16` @0x52B63C).
 	static constexpr int32_t kInitialBankUnits = 16;
+	// The shortest frame's static, 125 ms, and its window restart, 2000 ms.
+	static constexpr uint32_t kShortestFrameStatic = 2000;
+	static constexpr uint32_t kShortestFrameRestart = 2000u * kUnitsPerMs;
 
 	int32_t bank_ = kInitialBankUnits;   // esi: residual + this frame's elapsed, smoothed
 	int32_t smoothed_ = 0;               // g_FrameTimeSmoothedFp4
 	uint8_t phase_ = 0;                  // g_TickPhase (a byte, free-running)
 	double carry_ = 0.0;                 // sub-unit wall-clock remainder
 	int32_t average_fps_ = 0;            // g_StatsAvgFps
+	int32_t min_fps_ = 0;                // g_StatsMinFps
+	int32_t max_fps_ = 0;                // g_StatsMaxFps
+	uint32_t shortest_frame_ = kShortestFrameStatic; // g_StatsMinFrameTimeFp4
+	uint32_t longest_frame_ = 1;         // g_StatsMaxFrameTimeFp4
 	uint32_t frame_count_ = 0;           // g_StatsFrameCount
 	uint32_t frame_time_sum_ = 0;        // g_StatsFrameTimeSumFp4
 	int32_t cpu_percent_ = 0;            // g_StatsCpuPercent

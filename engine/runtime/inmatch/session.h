@@ -218,6 +218,17 @@ public:
 		(void)new_sample;
 	}
 	virtual void queue_records(controls::InputEventQueue &records) { (void)records; }
+	// The embedder's arms for every record the role does not own (Role::dispatch_record), a
+	// key's and a console line's alike: the talk and HUD rows, the shell's records (the
+	// escape row, the deploy pick from the record's first argument, the screen shot, the
+	// weapon-screen toggle), the action rows' requests past their head (the scope, the seat
+	// selects, the weapon rows, ...), the exit (3) and the punt of the slot the first argument
+	// names (34, reason 33 "ComIdPunt", the authority's alone).
+	// [orig: Input_HandleActionBinding @0x49AD40 - case 3 @0x49AF26..0x49AF42, case 12
+	//  @0x49B024 (the pick @0x49B0C3..0x49B17B), case 34 @0x49B766..0x49B773, the class
+	//  callback @0x49AEB6 -> Input_HandleActionBinding_0 @0x4E0420 - case 6
+	//  @0x4E0492..0x4E04F0, case 182 @0x4E0B7E (the calls @0x4E0B81..0x4E0C22); the catalog
+	//  rows 105 (flags 0x4C000C01) and 17..26 (0x0C000C01)]
 	virtual void dispatch_record(const controls::InputEventRecord &record) { (void)record; }
 	// The input frame's tail after the update's drain, when the frame ran (no menu screen, a
 	// joiner in its game loop): the held USE row's release edge (controls::PlayerActions::
@@ -481,9 +492,10 @@ public:
 	// pause row (25), the reload row (211: the request on the slot equipped then), ToSpecial
 	// (220: one dispatch with the keys' state, a deferral kept for the next input frame) and
 	// the fire row (149: the binding's live test, the press leg's fire request).
-	// Every other record goes to the embedder: a console record to the console sink
-	// (ClientRuntime::set_console_action_sink), a device record to `source`
-	// (TickInputSource::dispatch_record). A joiner outside its game loop runs no input
+	// Every other record goes to the embedder's one dispatch, `source`
+	// (TickInputSource::dispatch_record), a console line's record and a key's alike, as
+	// retail's one dispatcher takes both; with no source nothing takes it. A joiner outside
+	// its game loop runs no input
 	// frame, nor does an update under a menu screen: the records wait (a screen's close
 	// resets them). Session::run_updates runs it in every update, ahead of the update's
 	// body, and apply_input when called on its own (TickInput::drained). Ahead of the
@@ -531,7 +543,7 @@ public:
 	// apply, the tick, the weapon walk).
 	void flush_stance_requests();
 	// One drained record, dispatched by its code (drain_input_events): the arms the role
-	// owns, every other code to the embedder's leg its origin names. The pause row (catalog
+	// owns, every other code to the embedder's dispatch (`source`). The pause row (catalog
 	// row 70, code 25, flags 0x05000800: no bit 0, so it runs under the pause) is the role's
 	// past the head: out of a session its case flips the single-player pause word the head
 	// reads for the records behind it and, when the word is now set, shuts the audio
@@ -700,6 +712,11 @@ public:
 	};
 	FrameStatistics frame_statistics() const {
 		return {frames_last_second_, accumulator_.cpu_percent()};
+	}
+	// The frame-rate window's four statistics, the frame-rate overlay's words
+	// (world::TickAccumulator::frame_rate_stats carries the witness).
+	world::TickAccumulator::FrameRateStats frame_rate_stats() const {
+		return accumulator_.frame_rate_stats();
 	}
 
 	// THE FRAME'S RADAR STEP. Retail's HUD pass runs on every frame that draws

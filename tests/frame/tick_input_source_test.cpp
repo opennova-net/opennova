@@ -535,8 +535,7 @@ void test_the_keyboard_pass_runs_in_the_update_that_samples_it() {
 		// The pause row's record (catalog row 70, code 25), whose flip lowers the word.
 		void queue_records(opennova::controls::InputEventQueue &records) override {
 			if (pause_due)
-				(void)records.push({opennova::controls::action_code(70), 0, 0, 0, false,
-						opennova::controls::InputEventOrigin::Device});
+				(void)records.push({opennova::controls::action_code(70), 0, 0, 0, false});
 			pause_due = false;
 		}
 		InputPacket sample_tick(uint32_t logic_tick) override {
@@ -630,7 +629,6 @@ void test_the_keyboard_pass_runs_in_the_update_that_samples_it() {
 using Dispatched = std::vector<std::pair<int32_t, uint32_t>>; // (code, the logic tick)
 
 void test_the_update_drains_its_records_in_queue_order() {
-	using opennova::controls::InputEventOrigin;
 	using opennova::controls::InputEventQueue;
 	using opennova::controls::InputEventRecord;
 	struct RecordDevice final : TickInputSource {
@@ -644,7 +642,7 @@ void test_the_update_drains_its_records_in_queue_order() {
 		void queue_records(InputEventQueue &records) override {
 			if (samples < per_sample.size())
 				for (const int32_t code : per_sample[samples])
-					(void)records.push({code, 0, 0, 0, false, InputEventOrigin::Device});
+					(void)records.push({code, 0, 0, 0, false});
 			++samples;
 		}
 		void dispatch_record(const InputEventRecord &record) override {
@@ -654,7 +652,7 @@ void test_the_update_drains_its_records_in_queue_order() {
 			if (record.code == reset_code) role->reset_all_input_state();
 		}
 	};
-	const InputEventRecord quit{4, 0, 0, 0, false, InputEventOrigin::Console}; // row 78
+	const InputEventRecord quit{4, 0, 0, 0, false}; // row 78
 	FrameInput three;
 	three.delta_seconds = TickAccumulator::kTickDt * 3.0;
 	{
@@ -724,7 +722,6 @@ void test_the_update_drains_its_records_in_queue_order() {
 //  WeaponSlot_RequestReload @0x53F110); Input_HandleActionBinding @0x49AD40 (case 25 @0x49B520, the pause gate
 //  @0x49ADDD..0x49ADE8); Input_ProcessFrame @0x49D520 (Input_FlushDeferredEvents @0x49D591)]
 void test_the_reload_record_meets_the_head_in_key_order() {
-	using opennova::controls::InputEventOrigin;
 	using opennova::controls::InputEventQueue;
 	const int32_t pause = opennova::controls::action_code(70);  // 25
 	const int32_t reload = opennova::controls::action_code(47); // 211
@@ -737,7 +734,7 @@ void test_the_reload_record_meets_the_head_in_key_order() {
 			if (queued) return;
 			queued = true;
 			for (const int32_t code : codes)
-				(void)records.push({code, 0, 0, 0, false, InputEventOrigin::Device});
+				(void)records.push({code, 0, 0, 0, false});
 		}
 	};
 	for (const bool reload_first : {true, false}) {
@@ -779,7 +776,6 @@ void test_the_reload_record_meets_the_head_in_key_order() {
 //  Input_QueueDeferredEvent @0x4993E0; Input_ProcessFrame @0x49D520 (Input_FlushDeferredEvents
 //  @0x49D591); Input_HandleActionBinding_0 case 0x95 @0x4E07B5..0x4E08DC]
 void test_the_deferred_fire_record() {
-	using opennova::controls::InputEventOrigin;
 	using opennova::controls::InputEventQueue;
 	struct Device final : TickInputSource {
 		bool held = true;
@@ -793,7 +789,7 @@ void test_the_deferred_fire_record() {
 		void queue_records(InputEventQueue &records) override {
 			if (queued) return;
 			queued = true;
-			if (pause_first) (void)records.push({25, 0, 0, 0, false, InputEventOrigin::Device});
+			if (pause_first) (void)records.push({25, 0, 0, 0, false});
 		}
 	};
 	for (const int face : {0, 1, 2, 3}) { // held; up; a cease fire; a pause row ahead of it
@@ -830,7 +826,6 @@ void test_the_deferred_fire_record() {
 //  Input_ProcessFrame @0x52661D, in every update); Input_HandleActionBinding @0x49AD40
 //  (UI_OpenMenuScreen("game.mnu", "INGAME") @0x49B3B6)]
 void test_a_menu_screen_an_update_opens_gates_the_frames_later_updates() {
-	using opennova::controls::InputEventOrigin;
 	using opennova::controls::InputEventQueue;
 	using opennova::controls::InputEventRecord;
 	struct MenuDevice final : TickInputSource {
@@ -843,7 +838,7 @@ void test_a_menu_screen_an_update_opens_gates_the_frames_later_updates() {
 			return p;
 		}
 		void queue_records(InputEventQueue &records) override {
-			(void)records.push({samples == 1 ? 201 : 203, 0, 0, 0, false, InputEventOrigin::Device});
+			(void)records.push({samples == 1 ? 201 : 203, 0, 0, 0, false});
 		}
 		void dispatch_record(const InputEventRecord &record) override {
 			dispatched.push_back(record.code);
@@ -874,7 +869,6 @@ void test_a_menu_screen_an_update_opens_gates_the_frames_later_updates() {
 //  @0x49AD40 - case 12's Input_ResetAllState @0x49B042; Input_ResetAllState @0x497ED0 (the
 //  memset @0x497EE6)]
 void test_a_deploy_pick_is_a_record_of_the_drain_in_key_order() {
-	using opennova::controls::InputEventOrigin;
 	using opennova::controls::InputEventQueue;
 	using opennova::controls::InputEventRecord;
 	struct PickDevice final : TickInputSource {
@@ -887,10 +881,10 @@ void test_a_deploy_pick_is_a_record_of_the_drain_in_key_order() {
 			if (queued) return;
 			queued = true;
 			for (const InputEventRecord &record :
-					{InputEventRecord{201, 0, 0, 0, false, InputEventOrigin::Device},
-							InputEventRecord{12, 0xFFFE, 0, 0, false, InputEventOrigin::Device},
-							InputEventRecord{18, 0, 0, 0, false, InputEventOrigin::Device},
-							InputEventRecord{203, 0, 0, 0, false, InputEventOrigin::Device}})
+					{InputEventRecord{201, 0, 0, 0, false},
+							InputEventRecord{12, 0xFFFE, 0, 0, false},
+							InputEventRecord{18, 0, 0, 0, false},
+							InputEventRecord{203, 0, 0, 0, false}})
 				(void)records.push(record);
 		}
 		void dispatch_record(const InputEventRecord &record) override {
@@ -906,7 +900,7 @@ void test_a_deploy_pick_is_a_record_of_the_drain_in_key_order() {
 	device.role = role.get();
 	Session session(*role);
 	CHECK(load(session), "the session runs");
-	CHECK(role->input_events().push({4, 0, 0, 0, false, InputEventOrigin::Console}),
+	CHECK(role->input_events().push({4, 0, 0, 0, false}),
 			"the console's quit record waits at the head");
 	FrameInput three;
 	three.delta_seconds = TickAccumulator::kTickDt * 3.0;
@@ -931,7 +925,6 @@ void test_a_deploy_pick_is_a_record_of_the_drain_in_key_order() {
 //  Input_IsBindingActive(0x95) @0x4E07D9, the release leg @0x4E07E9, the press leg
 //  @0x4E08DC (the PowerThrow sign bit @0x4E08FD, the device test @0x4E090B)]
 void test_the_fire_record_tests_its_binding_live() {
-	using opennova::controls::InputEventOrigin;
 	using opennova::controls::InputEventQueue;
 	CHECK(opennova::controls::action_code(43) == 149, "attack_1's code");
 	struct FireDevice final : TickInputSource {
@@ -946,7 +939,7 @@ void test_the_fire_record_tests_its_binding_live() {
 		void queue_records(InputEventQueue &records) override {
 			if (queued) return;
 			queued = true;
-			(void)records.push({149, 0, 0, 0, false, InputEventOrigin::Device});
+			(void)records.push({149, 0, 0, 0, false});
 		}
 	};
 	for (const int face : {0, 1, 2}) { // held; up; held under a cease fire
@@ -1031,7 +1024,6 @@ void test_the_fire_record_tests_its_binding_live() {
 //  @0x542E7F, Input_QueueDeferredEvent @0x542E9D; Input_ProcessFrame @0x49D520 -
 //  Input_FlushDeferredEvents @0x49D591, the drain @0x49D599..0x49D5D8]
 void test_the_weapon_rows_take_the_whole_head() {
-	using opennova::controls::InputEventOrigin;
 	using opennova::controls::InputEventQueue;
 	const int32_t fire = opennova::controls::action_code(43);   // 149
 	const int32_t reload = opennova::controls::action_code(47); // 211
@@ -1046,7 +1038,7 @@ void test_the_weapon_rows_take_the_whole_head() {
 		}
 		void queue_records(InputEventQueue &records) override {
 			for (const int32_t code : next)
-				(void)records.push({code, 0, 0, 0, false, InputEventOrigin::Device});
+				(void)records.push({code, 0, 0, 0, false});
 			next.clear();
 		}
 	};
@@ -1168,7 +1160,6 @@ void test_the_hud_toggle_rows_take_the_whole_head() {
 //  @0x49D599..0x49D5E7, the release edge @0x49D6C1..0x49D6DC; Input_ResetAllState @0x497ED0
 //  (the memset @0x497EE6)]
 void test_a_reset_ahead_drops_the_use_record_and_the_tail_follows_the_drain() {
-	using opennova::controls::InputEventOrigin;
 	using opennova::controls::InputEventQueue;
 	using opennova::controls::InputEventRecord;
 	const int32_t use = opennova::controls::action_code(44);
@@ -1189,7 +1180,7 @@ void test_a_reset_ahead_drops_the_use_record_and_the_tail_follows_the_drain() {
 			if (queued) return;
 			queued = true;
 			for (const int32_t code : codes)
-				(void)records.push({code, 0, 0, 0, false, InputEventOrigin::Device});
+				(void)records.push({code, 0, 0, 0, false});
 		}
 		void dispatch_record(const InputEventRecord &record) override {
 			dispatched.push_back(record.code);
@@ -1242,7 +1233,6 @@ void test_a_reset_ahead_drops_the_use_record_and_the_tail_follows_the_drain() {
 //  @0x49AE1C..0x49AE23; Input_HandleActionBinding_0 @0x4E0420 - case 123 @0x4E07A4]
 void test_the_cheat_row_flips_the_ai_skip_bit_out_of_a_session_only() {
 	using opennova::controls::ActionClass;
-	using opennova::controls::InputEventOrigin;
 	const opennova::controls::ActionDef *row = opennova::controls::action_for_code(123);
 	CHECK(row != nullptr && row->id == 116 && row->flags == 0x10u && row->modes == 1u &&
 					row->cls == ActionClass::Cheat && row->default_key == 0 &&
@@ -1264,7 +1254,7 @@ void test_the_cheat_row_flips_the_ai_skip_bit_out_of_a_session_only() {
 	opennova::world::World &world = role->kernel.world;
 	ClientLocalCommandSeams seams;
 	seams.queue_action = [&role](int32_t code, int32_t p1, int32_t p2, int32_t p3) {
-		(void)role->input_events().push({code, p1, p2, p3, false, InputEventOrigin::Console});
+		(void)role->input_events().push({code, p1, p2, p3, false});
 	};
 	seams.in_session = true;
 	CHECK(!client_process_local_command(line, seams) && role->input_events().empty(),
@@ -1287,7 +1277,7 @@ void test_the_cheat_row_flips_the_ai_skip_bit_out_of_a_session_only() {
 	// queue it), and the head's 0x10 test drops it.
 	world.rules.mp_session = true;
 	CHECK(!role->action_head_admits(123), "the head drops record 123 in a session");
-	CHECK(role->input_events().push({123, 0, 0, 0, false, InputEventOrigin::Console}),
+	CHECK(role->input_events().push({123, 0, 0, 0, false}),
 			"a record 123 in a session");
 	(void)session.advance(three);
 	CHECK(!world.rules.ai_rules_skip_local_player && role->input_events().empty(),
@@ -1309,7 +1299,6 @@ void test_the_cheat_row_flips_the_ai_skip_bit_out_of_a_session_only() {
 void test_the_sibling_cheat_and_debug_rows_take_their_arms() {
 	using opennova::controls::ActionClass;
 	using opennova::controls::ActionDef;
-	using opennova::controls::InputEventOrigin;
 	using opennova::controls::InputEventQueue;
 	using opennova::controls::InputEventRecord;
 	struct Cheat {
@@ -1347,7 +1336,7 @@ void test_the_sibling_cheat_and_debug_rows_take_their_arms() {
 		InputPacket sample_tick(uint32_t) override { return {}; }
 		void queue_records(InputEventQueue &records) override {
 			for (const int32_t code : codes)
-				(void)records.push({code, 0, 0, 0, false, InputEventOrigin::Device});
+				(void)records.push({code, 0, 0, 0, false});
 			codes.clear();
 		}
 		void dispatch_record(const InputEventRecord &record) override {
@@ -1364,7 +1353,7 @@ void test_the_sibling_cheat_and_debug_rows_take_their_arms() {
 	three.delta_seconds = TickAccumulator::kTickDt * 3.0;
 	three.tick_source = &device;
 	const auto console = [&role](int32_t code) {
-		return role->input_events().push({code, 0, 0, 0, false, InputEventOrigin::Console});
+		return role->input_events().push({code, 0, 0, 0, false});
 	};
 	CHECK(console(121), "a record 121");
 	(void)session.advance(three);
@@ -1408,6 +1397,59 @@ void test_the_sibling_cheat_and_debug_rows_take_their_arms() {
 	CHECK(device.dispatched.empty(), "and the weapon screen's");
 }
 
+// D-NET-NEW-LI-30 (LI-s26 row 0, LI-s25 FOUND 3): the console's walks can queue any catalog
+// row's code: the echo's walk by the first token against every record's token (case-blind),
+// then by its CRC, with up to three atol arguments; the local command's out of a session by the
+// whole line's CRC. Retail's drain hands every record to its one dispatcher, so a typed token
+// reaches the arm a key's record reaches: past the role's own arms (the reload row's
+// "magazine", 211), each record goes to the embedder's dispatch in queue order, its arguments
+// kept: the HUD rows "Verbose" (37) and "help" (8), "restart" (12, the deploy pick, its argument
+// 3), "exit" (3), the weapon row "Knife" (201), and the cheat row 117's weapon-screen toggle (40)
+// past its gates, out of a session with a local player.
+// [orig: NapiClientCmd_ParseAndExecute @0x4329C0 - the token walk @0x432A64..0x432A94, the CRC
+//  walk @0x432AA9..0x432B3E, Input_QueueEvent @0x432B4C / @0x432BA1; Client_ProcessLocalCommand
+//  @0x520BF0 - the CRC walk @0x520E17..0x520E30, Input_QueueEvent @0x520E5B; Input_ProcessFrame
+//  @0x49D520 - Input_HandleActionBinding @0x49D5D8; Input_HandleActionBinding @0x49AD40 - case
+//  40 UI_OpenWeaponScreenSinglePlayer called @0x49B7E7]
+void test_a_typed_token_reaches_the_embedders_arm() {
+	struct Device final : TickInputSource {
+		std::vector<std::pair<int32_t, int32_t>> dispatched; // (code, first argument)
+		InputPacket sample_tick(uint32_t) override { return {}; }
+		void dispatch_record(const opennova::controls::InputEventRecord &record) override {
+			dispatched.push_back({record.code, record.p1});
+		}
+	};
+	auto role = std::make_unique<TickRecorder>();
+	spawn_local_player(*role);
+	Session session(*role);
+	CHECK(load(session), "the session runs");
+	Device device;
+	FrameInput three;
+	three.delta_seconds = TickAccumulator::kTickDt * 3.0;
+	three.tick_source = &device;
+	ClientConsoleContext walk;
+	walk.queue_action = [&role](int32_t code, int32_t p1, int32_t p2, int32_t p3) {
+		(void)role->input_events().push({code, p1, p2, p3, false});
+	};
+	for (const char *line : {"VERBOSE", "help", "magazine", "restart 3", "exit", "Knife"})
+		CHECK(client_parse_and_execute(line, walk), line);
+	// A line whose CRC is row 117's token dword 0xCE42F6BD (letters chosen for the CRC).
+	const std::string cheat = "LI-s26 HbbkHNAA";
+	CHECK(opennova::vfs_version_crc(reinterpret_cast<const uint8_t *>(cheat.data()), cheat.size()) ==
+					static_cast<int32_t>(0xCE42F6BDu),
+			"the cheat line's CRC is row 117's token");
+	ClientLocalCommandSeams seams;
+	seams.queue_action = walk.queue_action;
+	CHECK(client_process_local_command(cheat, seams), "out of a session the CRC arm queues 40");
+	CHECK(role->input_events().size() == 7, "seven records wait");
+	(void)session.advance(three);
+	const std::vector<std::pair<int32_t, int32_t>> want = {
+			{37, 0}, {8, 0}, {12, 3}, {3, 0}, {201, 0}, {40, 0}};
+	CHECK(device.dispatched == want,
+			"every record but the role's own reaches the embedder's dispatch in order");
+	CHECK(role->input_events().empty(), "the drain took them all");
+}
+
 int main() {
 	test_steps_land_on_their_ticks_inside_a_six_tick_frame();
 	test_a_frame_sample_alone_quantizes_to_the_frame();
@@ -1430,6 +1472,7 @@ int main() {
 	test_a_reset_ahead_drops_the_use_record_and_the_tail_follows_the_drain();
 	test_the_cheat_row_flips_the_ai_skip_bit_out_of_a_session_only();
 	test_the_sibling_cheat_and_debug_rows_take_their_arms();
+	test_a_typed_token_reaches_the_embedders_arm();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

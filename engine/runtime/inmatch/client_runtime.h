@@ -596,34 +596,16 @@ public:
 	// queue the owning role keeps (Role::input_events, installed through
 	// set_input_event_queue), whose cap drops one past 32 (controls::InputEventQueue).
 	// The next input frame's drain (Role::drain_input_events) dispatches them in order
-	// ahead of that frame's own presses, as the devices queue theirs behind. False when
-	// the record was dropped or no queue is installed.
+	// ahead of that frame's own presses, as the devices queue theirs behind, each through
+	// the one dispatcher a key's record meets (Role::dispatch_record: the role's arms, then
+	// the embedder's TickInputSource::dispatch_record). False when the record was dropped
+	// or no queue is installed.
 	// [orig: Input_QueueEvent @0x4979C0 - `cmp count, 20h; jge` @0x4979C8..0x4979CB,
 	//  the gates @0x4979D1..0x497A0B, the store @0x497A11..0x497A67; Input_ProcessFrame
 	//  @0x49D520 - Input_ProcessPlayerFrame @0x49D58B appends, the drain @0x49D599..0x49D5E7
 	//  into Input_HandleActionBinding @0x49D5D8]
 	bool queue_console_action(int32_t code, int32_t p1, int32_t p2, int32_t p3);
 	void set_input_event_queue(controls::InputEventQueue *queue) { input_events_ = queue; }
-	// Where a dispatched console action whose arm the role does not own goes: the
-	// embedder's action dispatch by code (its screens' and devices' arms). Unset: the
-	// action goes nowhere. The game's sink takes 3 the exit (input_action_exit), 12 the
-	// deploy pick from the record's parameter (0 the default, 0xFFFE the auto pick, else
-	// the spawn-zone list's index plus one), 34 the punt of the slot the parameter names
-	// (reason 33, "ComIdPunt", the authority's alone), and past their rows' head
-	// (Role::action_head_admits) the class callback's 6 the scope (a mounted gun's
-	// C2S 0x16) and 182..191 the seat selects (Entity_FindAvailableSeat's index 0..9, a
-	// joiner's C2S 0x26). The stance selects are the role's (Role::request_stance).
-	// [orig: Input_HandleActionBinding @0x49AD40 - case 3 @0x49AF26..0x49AF42, case 12
-	//  @0x49B024 (the pick @0x49B0C3..0x49B17B), case 34 @0x49B766..0x49B773, the class
-	//  callback @0x49AEB6 -> Input_HandleActionBinding_0 @0x4E0420 - case 6
-	//  @0x4E0492..0x4E04F0, case 182 @0x4E0B7E (the calls @0x4E0B81..0x4E0C22); the catalog rows 105
-	//  (flags 0x4C000C01) and 17..26 (0x0C000C01)]
-	void set_console_action_sink(ClientConsoleQueueAction sink) {
-		console_action_sink_ = std::move(sink);
-	}
-	void dispatch_to_console_action_sink(const controls::InputEventRecord &record) const {
-		if (console_action_sink_) console_action_sink_(record.code, record.p1, record.p2, record.p3);
-	}
 	// An Emotes / Radio menu pick (1..10): C2S 0x14 / C2S 0x13 [i16 value].
 	// The sender carries no gate of its own: CNapiNetwork_QueueReliableMessage
 	// queues on any live connection. A joiner queues it with the one-send
@@ -1642,7 +1624,6 @@ private:
 	ClientConsoleState console_state_; // the process's console debug words
 	uint32_t console_guard_ms_ = 0;   // [orig: g_ConsoleCommandLastTick @0x24D1E04]
 	ClientLocalCommandSeams local_command_seams_;
-	ClientConsoleQueueAction console_action_sink_;
 	controls::InputEventQueue *input_events_ = nullptr; // the role's (queue_console_action)
 	// GetTickCount (the console guard, the S2C 0x58's receipt stamp): the joiner's
 	// monotonic clock, else the process's steady clock.

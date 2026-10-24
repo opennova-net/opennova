@@ -130,7 +130,7 @@ void run_the_roles_frame_reads_the_dedicated_operand() {
 		CHECK(lp.action_dispatch_drops() == !peer);
 		// The Respawn key: past the head, Player_ResetLocalInput resets the devices and
 		// memsets the frame's queue (the frame's movement keys never land).
-		(void)r.role.input_events().push(opennova::controls::InputEventRecord{55, 0, 0, 0, false, opennova::controls::InputEventOrigin::Device});
+		(void)r.role.input_events().push(opennova::controls::InputEventRecord{55, 0, 0, 0, false});
 		r.frame(0);
 		CHECK(r.role.take_input_reset() == peer);
 		CHECK(!lp.input.forward); // the reset's memset, or the head dropping the held row

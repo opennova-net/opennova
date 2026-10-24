@@ -207,6 +207,96 @@ func test_h_is_the_sp_pause_key_and_no_hud_key() -> void:
 	assert_true(shell.is_gameplay_input_active(), "play continues after the unpause")
 
 
+# Frames until `predicate` holds, bounded by wall time: a single-player console line rides
+# the loopback (the client frame sends its C2S 0x04, the next frame's server receive
+# echoes it as S2C 0x06 and its client receive walks it), and the record the walk queues
+# dispatches at the update after.
+func _await_true(predicate: Callable) -> bool:
+	var deadline := Time.get_ticks_msec() + 3000
+	while not bool(predicate.call()) and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	return bool(predicate.call())
+
+
+# One console line through the real key path: the backquote fires the command row
+# (catalog row 71, VK 0xC0), whose record opens the command line (input action 1, no
+# session gate); each character is a key-down the open line takes by its character,
+# and Enter sends the line through the console command (engine hud_chat_entry.h
+# ChatEntry::key and inmatch/client_runtime.h console_command carry the witness).
+# True when the line opened and the Enter closed it.
+func _type_console_line(text: String) -> bool:
+	var hud: GameHudPresenter = _shell.get_hud_presenter()
+	await _tap(KEY_QUOTELEFT)
+	var capturing := func() -> bool: return hud.is_chat_capturing()
+	if not await _await_true(capturing):
+		return false
+	for ch in text:
+		var keycode := ch.to_upper().unicode_at(0) as Key
+		var down := _key_event(keycode, true)
+		down.unicode = ch.unicode_at(0)
+		Input.parse_input_event(down)
+		await _next_update()
+		Input.parse_input_event(_key_event(keycode, false))
+	await _tap(KEY_ENTER)
+	return not hud.is_chat_capturing()
+
+
+# A typed console token of a row whose arm is the embedder's reaches that arm
+# (D-NET-NEW-LI-30): "help" (catalog row 106, code 8) rides the loopback, the echo's
+# walk queues its record, and the drain hands it to the HUD's toggle as F1's record
+# (engine inmatch::Role::dispatch_record carries the witness).
+func test_a_typed_console_token_reaches_the_hud_row() -> void:
+	var shell := await _booted_in_world()
+	if shell == null:
+		return
+	var toggles: HudToggles = shell.get_hud_presenter().toggles()
+	assert_false(toggles.is_help_open(), "the key-binding help starts closed")
+	assert_true(await _type_console_line("help"), "the command line takes the line")
+	var opened := func() -> bool: return toggles.is_help_open()
+	assert_true(await _await_true(opened), "the typed help opens the key-binding help, as F1 does")
+
+
+# The cheat row 117's code 40 (D-NET-NEW-LI-31): a console line whose CRC is the row's
+# token queues its record out of a session, and past the engine's gates (out of a
+# session, a local player) the shell's toggle opens weapon.mnu's WEAPON screen over live
+# play with no armory zone (engine inmatch::Role::dispatch_record carries the witness).
+func test_the_weapon_screen_cheat_line_opens_the_armory() -> void:
+	var shell := await _booted_in_world()
+	if shell == null:
+		return
+	assert_eq(shell.shell_state_name(), "world", "live play")
+	# A line whose CRC-32/MPEG-2 is row 117's token dword 0xCE42F6BD (letters chosen for it).
+	assert_true(await _type_console_line("LI-s26 HbbkHNAA"), "the command line takes the line")
+	var opened := func() -> bool: return shell.shell_state_name() == "armory"
+	assert_true(await _await_true(opened), "the toggle opens the WEAPON screen")
+	shell.resume()
+	assert_eq(shell.shell_state_name(), "world", "the screen's close hands play back")
+
+
+# The Debug row 118's "fps" (code 74): the typed token's record flips the cheat word's
+# 0x400 bit, under which the HUD draws the frame-rate line over the main loop's window
+# in the original's format; a second "fps" takes it down (engine hud/hud_frame.h
+# HudFrameRateOverlay and world::TickAccumulator::frame_rate_stats carry the witness).
+func test_fps_raises_the_frame_rate_overlay() -> void:
+	var shell := await _booted_in_world()
+	if shell == null:
+		return
+	var hud: HudOverlay = shell.get_hud_presenter().get_game_hud()
+	assert_not_null(hud, "the HUD overlay is built")
+	if hud == null:
+		return
+	assert_eq(hud.get_frame_rate_overlay_text(), "", "the overlay starts down")
+	assert_true(await _type_console_line("fps"), "the command line takes the line")
+	var raised := func() -> bool: return hud.get_frame_rate_overlay_text().begins_with("FR ")
+	assert_true(await _await_true(raised), "the typed fps raises the overlay")
+	var line := hud.get_frame_rate_overlay_text()
+	var shape := RegEx.create_from_string("^FR [ 0-9]{2,}  MN [ 0-9]{2,} MX [ 0-9]{2,} CPU [0-9]+$")
+	assert_not_null(shape.search(line), "the line keeps the original's format: '%s'" % line)
+	assert_true(await _type_console_line("fps"), "the command line takes the second line")
+	var lowered := func() -> bool: return hud.get_frame_rate_overlay_text() == ""
+	assert_true(await _await_true(lowered), "a second fps takes the overlay down")
+
+
 # A key event dispatches at the next update's drain (D-NET-NEW-LI-8): a headless
 # frame can bank under one 16 ms quantum, so the H press may wait a few frames for
 # the update that reads it. Bounded by wall time, not frames.

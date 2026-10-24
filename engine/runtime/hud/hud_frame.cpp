@@ -529,12 +529,19 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	// Render_ProcessMainSceneFrame, not this pass [orig: @ 0x5cac50 ->
 	// HUD_BuildMapOverlayView @ 0x5a7e10] — element_spinmap's own gates
 	// suppress the corner map at this level.
-	// The breath bar and the service prompts are HUD_DrawGameplayOverlays'
-	// legs, outside that early-out; the bar is called first
-	// [orig: HUD_DrawGameplayOverlays @0x5BDE60 — the bar @0x5BDED3, the
-	//  prompts @0x5BDF1B..0x5BE10E].
+	// The frame-rate overlay, the breath bar and the service prompts are
+	// HUD_DrawGameplayOverlays' legs, outside that early-out, in that order. Its own
+	// level-3 skip jumps past the overlay and the bar to the FARP leg (the service
+	// prompt's own level test keeps that) (D-NET-NEW-LI-32, D-NET-NEW-LI-33)
+	// [orig: HUD_DrawGameplayOverlays @0x5BDE60 — `cmp g_HUDDetailLevel, 3; jz` @0x5BDEA8
+	//  to @0x5BDFF6, the overlay @0x5BDEB5..0x5BDEC2, the bar @0x5BDED3, the prompts
+	//  @0x5BDF1B..0x5BE10E].
 	if (gameplay_overlays) {
-		element_(HudElement::BreathBar, [&] { element_breath_bar(state, surface_w, surface_h); });
+		if (state.hud_detail_level != 3) {
+			element_(HudElement::FrameRateOverlay,
+					[&] { element_frame_rate_overlay(state, surface_w, surface_h); });
+			element_(HudElement::BreathBar, [&] { element_breath_bar(state, surface_w, surface_h); });
+		}
 		element_(HudElement::ServicePrompt, [&] { element_service_prompt(state, surface_w, surface_h); });
 	}
 	element_(HudElement::InsetCues, [&] { element_inset_cues(state, surface_w, surface_h); });
@@ -1666,6 +1673,31 @@ void HudFrameCompiler::emit_progress_bar(int xl, int yt, int xr, int yb, uint32_
 		x1 = mid + span * 0.5f;
 	}
 	emit_rect(x0, static_cast<float>(yt + 2), x1, static_cast<float>(yb - 2), fill, true);
+}
+
+std::string frame_rate_overlay_text(const HudFrameRateOverlay &overlay) {
+	char line[80];
+	std::snprintf(line, sizeof(line), "FR %2i  MN %2i MX %2i CPU %d", overlay.average_fps,
+			overlay.min_fps, overlay.max_fps, overlay.cpu_percent);
+	return line;
+}
+
+void HudFrameCompiler::element_frame_rate_overlay(const HudFrameState &state, float w, float h) {
+	// Under the cheat word's 0x400 bit, the line at design (10, 80) in the bold label slot, the
+	// snapshot twin's colour half-bright (flags 1 selects nothing there).
+	// [orig: HUD_DrawGameplayOverlays @0x5BDE60 - `test g_DebugCheatFlags, 400h` @0x5BDEB5,
+	//  HUD_DrawFrameRateOverlay called @0x5BDEC2; HUD_DrawFrameRateOverlay @0x5BAE20 -
+	//  g_HUDColors.active @0x5BAE57, flags 1 @0x5BAE5D, y 80 @0x5BAE65, x 10 @0x5BAE67,
+	//  g_HUDLabelFontBold @0x5BAE69, HUD_DrawTextLeftScaled called @0x5BAE6E;
+	//  HUD_DrawTextLeftScaled @0x580B40 - Viewport_ScaleToVirtualCoords called @0x580B4F,
+	//  HUD_DrawTextLeft_HalfBright called @0x580B72; HUD_DrawTextLeft_HalfBright @0x5804C0 - the
+	//  colour `sar eax, 1; and eax, 7F7F7Fh` @0x5804D8..0x5804DC, `or eax, 0FF000000h`
+	//  @0x5804F0, the flags tested 100h @0x5804E1 and 2 @0x5804F5 alone]
+	if (!state.frame_rate.shown) return;
+	const std::string line = frame_rate_overlay_text(state.frame_rate);
+	emit_slot_text(label_font_bold_, label_scale_, line.c_str(), sx(10.0f, w), sy(80.0f, h),
+			half_bright_argb(hud_colors_active_), 0u);
+	++draw_list_.elements_drawn;
 }
 
 void HudFrameCompiler::element_breath_bar(const HudFrameState &state, float w, float h) {

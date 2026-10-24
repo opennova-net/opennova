@@ -214,10 +214,53 @@ int check_cpu_percent() {
     return 0;
 }
 
+// The window's extrema (D-NET-NEW-LI-32, the frame-rate overlay's MN / MX) [orig: Game_MainLoop
+// @0x52B630 - the longest @0x52B8F6..0x52B902, the shortest @0x52B90E..0x52B914, the restarts
+// @0x52B97B / @0x52B985, g_StatsMaxFps @0x52B99D, g_StatsMinFps @0x52B9A9, the mode-init reset
+// @0x52B739 / @0x52B73F; the statics @0x83016C = 2000, @0x830170 = 1]: every counted frame's
+// smoothed bank raises the longest and lowers the shortest; the window publishes 16000 /
+// longest as the minimum rate and 16000 / shortest as the maximum, then restarts them at
+// 32000 units and 1. The mode-init reset zeroes the published rates alone.
+int check_frame_rate_extrema() {
+    // A steady 200 ms stream banks 3216 units a frame (the 1 ms residual re-counted) and
+    // closes the window on the 10th (32160): the process's first window starts from the
+    // 125 ms static, so its maximum reads 16000 / 2000 = 8 though no frame was that short,
+    // and its minimum 16000 / 3216 = 4.
+    {
+        TickAccumulator acc;
+        for (int i = 0; i < 9; ++i) acc.bank(0.2);
+        TickAccumulator::FrameRateStats s = acc.frame_rate_stats();
+        TEST_EXPECT(s.min_fps == 0 && s.max_fps == 0);
+        acc.bank(0.2);
+        s = acc.frame_rate_stats();
+        TEST_EXPECT(s.average_fps == 4 && s.min_fps == 4 && s.max_fps == 8);
+        // The restart's 2000 ms: the next window's maximum is its own frames', 4.
+        for (int i = 0; i < 10; ++i) acc.bank(0.2);
+        s = acc.frame_rate_stats();
+        TEST_EXPECT(s.average_fps == 4 && s.min_fps == 4 && s.max_fps == 4);
+    }
+    // The mode-init reset keeps the extrema: five 200 ms frames, the reset, then a 16 ms
+    // stream (272 units a frame) whose window closes on its 118th frame with the 3216-unit
+    // frame from before the reset still its longest: the minimum reads 16000 / 3216 = 4,
+    // the maximum 16000 / 272 = 58.
+    {
+        TickAccumulator acc;
+        for (int i = 0; i < 5; ++i) acc.bank(0.2);
+        acc.reset();
+        TickAccumulator::FrameRateStats s = acc.frame_rate_stats();
+        TEST_EXPECT(s.average_fps == 0 && s.min_fps == 0 && s.max_fps == 0 && s.cpu_percent == 0);
+        for (int i = 0; i < 118; ++i) acc.bank(TickAccumulator::kTickDt);
+        s = acc.frame_rate_stats();
+        TEST_EXPECT(s.average_fps == 58 && s.max_fps == 58 && s.min_fps == 4);
+    }
+    return 0;
+}
+
 } // namespace
 
 int main() {
     if (int rc = check_bank()) return rc;
     if (int rc = check_cpu_percent()) return rc;
+    if (int rc = check_frame_rate_extrema()) return rc;
     return check_frame_rate();
 }

@@ -301,6 +301,9 @@ public:
 	// The Tab board's header strings as the overlay holds them to draw (a read seam for the tests): the title, the
 	// game type's rung, the players' and the spectators' lines and the paging hint, as the board's entry composed them.
 	PackedStringArray get_scoreboard_header_text() const;
+	// The frame-rate overlay's line as the overlay holds it to draw (a read seam for the tests),
+	// "" while the cheat word's 0x400 bit is down (engine hud/hud_frame.h HudFrameRateOverlay).
+	String get_frame_rate_overlay_text() const;
 	Vector2 get_attach_label_position(int p_index) const;
 	// The overhead friendly tags (D-HUD-20): the sim's pool-0 gather
 	// (Simulation::fill_friendly_tags) lifted, projected through the play

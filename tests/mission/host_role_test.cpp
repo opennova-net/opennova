@@ -271,7 +271,7 @@ void check_listen_host_deploy_convert(std::map<std::string, std::string> &files)
 		CHECK(!own->link.spectator);
 		// The Respawn key's 0x41 kills the body through the server's handler.
 		inmatch::TickInput press = tick_input(0);
-		(void)role.input_events().push(opennova::controls::InputEventRecord{55, 0, 0, 0, false, opennova::controls::InputEventOrigin::Device});
+		(void)role.input_events().push(opennova::controls::InputEventRecord{55, 0, 0, 0, false});
 		role.apply_input(press);
 		role.run_tick(tick_input(0));
 		role.run_tick(tick_input(0));
@@ -449,8 +449,7 @@ void check_single_player_console_line_rides_the_loopback(
 	// The cheat line: a test line whose CRC is row 116's token dword 0xFF623840.
 	const std::string cheat = "LI-s24 \xA8\xB5\x97[";
 	CHECK(host.client_runtime->console_command(cheat));
-	CHECK(events.size() == 1 && events.at(0).code == 123 &&
-			events.at(0).origin == controls::InputEventOrigin::Console);
+	CHECK(events.size() == 1 && events.at(0).code == 123);
 	CHECK(!kernel.world.rules.ai_rules_skip_local_player);
 	role.drain_input_events(nullptr, 0);
 	CHECK(events.empty() && kernel.world.rules.ai_rules_skip_local_player);
@@ -462,8 +461,28 @@ void check_single_player_console_line_rides_the_loopback(
 	role.run_tick(tick_input(0)); // the client frame sends the 0x04, after the server's receive
 	CHECK(events.empty());
 	role.run_tick(tick_input(0)); // the server's receive echoes it, the client's receive walks it
-	CHECK(events.size() == 1 && events.at(0).code == respawn &&
-			events.at(0).origin == controls::InputEventOrigin::Console);
+	CHECK(events.size() == 1 && events.at(0).code == respawn);
+	// D-NET-NEW-LI-30 (LI-s26 row 0, LI-s25 FOUND 3): a typed token of a row whose arm is the
+	// embedder's reaches that arm through the one dispatcher a key's record meets. "verbose"
+	// (row 75, code 37) and "help" (row 106, code 8) are HUD rows, "exit" (row 77, code 3) the
+	// sim's exit; "magazine" (row 47, code 211) is the role's own reload arm and goes no further.
+	events.reset();
+	struct Device final : inmatch::TickInputSource {
+		std::vector<int32_t> codes;
+		inmatch::InputPacket sample_tick(uint32_t) override { return {}; }
+		void dispatch_record(const controls::InputEventRecord &record) override {
+			codes.push_back(record.code);
+		}
+	};
+	Device device;
+	for (const char *line : {"verbose", "magazine", "help", "exit"})
+		CHECK(host.client_runtime->console_command(line));
+	role.run_tick(tick_input(0));
+	role.run_tick(tick_input(0));
+	CHECK(events.size() == 4 && events.at(0).code == 37 && events.at(1).code == 211 &&
+			events.at(2).code == 8 && events.at(3).code == 3);
+	role.drain_input_events(&device, 0);
+	CHECK(events.empty() && device.codes == std::vector<int32_t>({37, 8, 3}));
 }
 
 // Its own frame: main's locals already fill the 1 MB test stack.
@@ -1395,7 +1414,7 @@ int main() {
 		if (own == nullptr || body == nullptr) continue;
 		CHECK(body->health > 0 && !kernel.local.local_player_dead());
 		inmatch::TickInput press = tick_input(0);
-		(void)role.input_events().push(opennova::controls::InputEventRecord{55, 0, 0, 0, false, opennova::controls::InputEventOrigin::Device});
+		(void)role.input_events().push(opennova::controls::InputEventRecord{55, 0, 0, 0, false});
 		role.apply_input(press);
 		role.run_tick(tick_input(0));
 		CHECK(body->health > 0); // the press frame only flushed it

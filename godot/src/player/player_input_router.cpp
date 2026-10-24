@@ -44,9 +44,13 @@ constexpr int kEscapeRow = 67;
 // The Screen Shot row (code 2): its case writes the frame to a file, the shell's device leg
 // (engine gameprofile/player_files.h screenshot_file_name carries the witness).
 constexpr int kScreenShotRow = 69;
+// The cheat row 117's code 40, past the role's gates (out of a session, a local player): the
+// shell's weapon-screen toggle (engine inmatch::Role::dispatch_record carries the witness).
+constexpr int kWeaponScreenRow = 117;
 bool shell_record(int p_code) {
 	return p_code == kDeployPickCode || p_code == opennova::controls::action_code(kEscapeRow) ||
-			p_code == opennova::controls::action_code(kScreenShotRow);
+			p_code == opennova::controls::action_code(kScreenShotRow) ||
+			p_code == opennova::controls::action_code(kWeaponScreenRow);
 }
 
 // The held USE row's arm through the sim's press latch (engine
@@ -339,8 +343,7 @@ opennova::inmatch::InputPacket PlayerInputRouter::sample_tick(uint32_t p_logic_t
 		for (const opennova::controls::KeyRowEvent &event : action_events_)
 			if (!event.release && (talk_row_of(event.code) >= 0 || hud_row_of(event.code) >= 0 ||
 										  shell_record(event.code)))
-				sample_records_.push_back({event.code, event.param, 0, 0, event.sign,
-						opennova::controls::InputEventOrigin::Device});
+				sample_records_.push_back({event.code, event.param, 0, 0, event.sign});
 		action_events_.clear();
 	}
 	tick_scripted_look_ = Vector2();
@@ -392,13 +395,12 @@ void PlayerInputRouter::run_update_rows(uint32_t p_logic_tick, bool p_new_sample
 		for (int row = 0; row < HudChatEntry::ROW_COUNT; ++row)
 			if ((talk_fired & (1 << row)) != 0)
 				row_records_.push_back({row_token_code(opennova::hud::chat_talk_row_token(row)), 0, 0,
-						0, false, opennova::controls::InputEventOrigin::Device});
+						0, false});
 		for (int row = 0; row < HudToggles::ROW_COUNT; ++row) {
 			if ((hud_fired & (1 << row)) == 0) continue;
 			const char *token = opennova::hud::hud_toggle_row_token(row);
 			row_records_.push_back({row_token_code(token), 0, 0, 0,
-					controls_.is_valid() && controls_->is_token_fire_signed(String(token)),
-					opennova::controls::InputEventOrigin::Device});
+					controls_.is_valid() && controls_->is_token_fire_signed(String(token))});
 		}
 	}
 	row_samples_.clear();
@@ -445,10 +447,11 @@ void PlayerInputRouter::dispatch_record(const opennova::controls::InputEventReco
 		if (poll_hud_toggles(record_sim, 1 << hud_row, p_record.sign)) key_events()->reset();
 		return;
 	}
-	// The escape row's record (case 18: the Escape action) and a deploy pick's (case 12, its
-	// pick the record's first argument) run the shell's arms at their place in the drain;
-	// their cases' input reset (the role's memset of the event queue) ends the drain there,
-	// and the shell's leg runs the devices' reset at once.
+	// The escape row's record (case 18: the Escape action), the screen shot's (case 2), the
+	// weapon-screen toggle's (case 40) and a deploy pick's (case 12, its pick the record's
+	// first argument) run the shell's arms at their place in the drain; the escape's and the
+	// pick's input reset (the role's memset of the event queue) ends the drain there, and the
+	// shell's leg runs the devices' reset at once.
 	if (shell_record(p_record.code)) {
 		if (record_leg_.is_valid()) record_leg_.call(p_record.code, p_record.p1);
 		return;
@@ -463,8 +466,12 @@ void PlayerInputRouter::dispatch_record(const opennova::controls::InputEventReco
 		apply_immediate(actions_.use_item_record(use_item_arm(*record_sim.ptr())), record_sim);
 		return;
 	}
-	if (const auto request = opennova::controls::player_action_request(p_record))
+	if (const auto request = opennova::controls::player_action_request(p_record)) {
 		apply_player_action(*record_sim.ptr(), *request);
+		return;
+	}
+	// The sim's own records: the exit (3) and the punt by slot (34), a console line's in play.
+	(void)record_sim->dispatch_action_record(p_record.code, p_record.p1);
 }
 
 void PlayerInputRouter::end_input_frame() {
@@ -672,8 +679,7 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 		if (request.code < 0) continue;
 		const int32_t first =
 				request.action == opennova::controls::PlayerAction::EmbedderRow ? request.value : 0;
-		sample_records_.push_back({request.code, first, 0, 0, request.sign,
-				opennova::controls::InputEventOrigin::Device});
+		sample_records_.push_back({request.code, first, 0, 0, request.sign});
 	}
 	// The death screen's own rows (the spectate sub-mode and target): their key events are
 	// the poll's records in key order; their off-keyboard arms' press edges are records of
@@ -681,8 +687,7 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 	// its dispatch (dispatch_record, engine controls::player_action_request).
 	if (p_spectating && action_sim.is_valid()) {
 		for (const auto &request : actions_.poll_spectator(GodotActionSource(controls_), active))
-			sample_records_.push_back({request.code, 0, 0, 0, request.sign,
-					opennova::controls::InputEventOrigin::Device});
+			sample_records_.push_back({request.code, 0, 0, 0, request.sign});
 	}
 }
 
@@ -894,8 +899,7 @@ void PlayerInputRouter::queue_mouse_event_record(int p_event) {
 	const opennova::controls::ActionDef *def = opennova::controls::action_for_code(code);
 	if (code >= 0)
 		pump_records_.push_back({code, 0, 0, 0,
-				controls_->is_vk_down(0x10) || (def != nullptr && (def->flags & 0x200u) != 0),
-				opennova::controls::InputEventOrigin::Device});
+				controls_->is_vk_down(0x10) || (def != nullptr && (def->flags & 0x200u) != 0)});
 }
 
 void PlayerInputRouter::reset() {

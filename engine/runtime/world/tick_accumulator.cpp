@@ -42,16 +42,26 @@ int TickAccumulator::bank(double delta, FrameLock *lock) {
 	// [orig: @0x52B8ED, @0x52B8F4, @0x52B91A, @0x52B952..0x52B98F].
 	++frame_count_;
 	frame_time_sum_ += static_cast<uint32_t>(bank_);
+	// The window's longest and shortest smoothed bank, unsigned [orig: @0x52B8F6..0x52B914].
+	const uint32_t frame = static_cast<uint32_t>(bank_);
+	if (frame > longest_frame_) longest_frame_ = frame;
+	if (frame < shortest_frame_) shortest_frame_ = frame;
 	if (frame_time_sum_ >= kFrameRateWindowUnits) {
 		// The CPU share first, over the updates the window's drains ran
 		// [orig: @0x52b926..0x52b948 — `shl edi, 4` of max(count, 1)].
 		const uint32_t updates = update_count_ != 0 ? update_count_ : 1u;
 		cpu_percent_ = static_cast<int32_t>(update_ms_ * 100u / (updates * 16u));
+		const uint32_t shortest = shortest_frame_ != 0 ? shortest_frame_ : 1u; // @0x52B94F
 		average_fps_ = static_cast<int32_t>(frame_count_ * kUnitsPerSecond / frame_time_sum_);
 		frame_count_ = 0;
 		frame_time_sum_ = 0;
 		update_count_ = 0;
 		update_ms_ = 0;
+		// The extrema restart, then publish over the window's values [orig: @0x52B97B..0x52B9A9].
+		max_fps_ = static_cast<int32_t>(kUnitsPerSecond / shortest);
+		min_fps_ = static_cast<int32_t>(kUnitsPerSecond / longest_frame_);
+		shortest_frame_ = kShortestFrameRestart;
+		longest_frame_ = 1;
 	}
 
 	// Drain 4 ms quanta while at least 4 ms remain; the logic update runs on

@@ -2185,7 +2185,7 @@ void test_default_wheel_binding_zooms_in_away_from_the_player() {
         CHECK(index >= 0 && static_cast<std::size_t>(index) < count);
         if (index < 0 || static_cast<std::size_t>(index) >= count) return;
         const auto request = player_action_request(InputEventRecord{
-                action_code(rows[index].id), 0, 0, 0, false, InputEventOrigin::Device});
+                action_code(rows[index].id), 0, 0, 0, false});
         CHECK(request && request->action == PlayerAction::WeaponCycle);
         if (!request) return;
         CHECK(local_player_weapon_cycle_route(lw.w, weapon, view, limits, request->value) == WeaponCycleRoute::kZoomStep);

@@ -3408,6 +3408,62 @@ void test_compiler_breath_bar(const fnt_font_t *font) {
 	CHECK(hidden(gated), "breathtime 0 skips the bar");
 }
 
+// The frame-rate overlay (D-NET-NEW-LI-32, LI-s26 row 2) and the gameplay overlays' level-3
+// skip (D-NET-NEW-LI-33): under the cheat word's 0x400 bit the line "FR %2i  MN %2i MX %2i CPU %d"
+// draws at design (10, 80) in the bold label slot, the snapshot twin g_HUDColors.active
+// half-bright; the overlay master word takes it down, and detail level 3 skips it and the
+// breath bar after it, while the bar draws below that level.
+// [orig: HUD_DrawGameplayOverlays @0x5BDE60 - `cmp dword_840B18, 0` @0x5BDE9B, `cmp
+//  g_HUDDetailLevel, 3; jz` @0x5BDEA8, `test g_DebugCheatFlags, 400h` @0x5BDEB5,
+//  HUD_DrawFrameRateOverlay called @0x5BDEC2, HUD_DrawBreathBar called @0x5BDED3;
+//  HUD_DrawFrameRateOverlay @0x5BAE20 - the format @0x5BAE4C, the sprintf @0x5BAE52,
+//  g_HUDColors.active @0x5BAE57, y 80 @0x5BAE65, x 10 @0x5BAE67, g_HUDLabelFontBold
+//  @0x5BAE69; HUD_DrawTextLeft_HalfBright @0x5804C0 - @0x5804D8..0x5804F0]
+void test_compiler_frame_rate_overlay(const fnt_font_t *font) {
+	using namespace opennova::hud;
+	HudFrameRateOverlay overlay;
+	overlay.average_fps = 58;
+	overlay.min_fps = 4;
+	overlay.max_fps = 125;
+	overlay.cpu_percent = 7;
+	const std::string text = frame_rate_overlay_text(overlay);
+	CHECK(text == "FR 58  MN  4 MX 125 CPU 7", "the original's format, %2i padding to two");
+	HudLayout layout;
+	layout.breath_time = {300, 100, 0, 0, true};
+	HudFrameCompiler compiler;
+	compiler.configure(layout, font);
+	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
+	HudFrameState state;
+	state.hud_color_index = 0; // white: the twin's seed 0xFFFFFFFF
+	state.frame_rate = overlay;
+	const uint32_t bold_page = static_cast<uint32_t>(kHudFontSlotLabelBold) * FNT_MAX_PAGES;
+	const auto bold_glyphs = [&](const HudDrawList &list) {
+		std::vector<GameFontQuad> out;
+		for (const GameFontQuad &g : list.glyphs)
+			if (g.page == bold_page) out.push_back(g);
+		return out;
+	};
+	CHECK(bold_glyphs(compiler.compile(state, 1024, 768)).empty(), "the bit down draws nothing");
+	state.frame_rate.shown = true;
+	std::vector<GameFontQuad> line = bold_glyphs(compiler.compile(state, 1024, 768));
+	CHECK(line.size() == text.size(), "one bold glyph per character");
+	CHECK(!line.empty() && line[0].x_top_left == 9.5f && line[0].y_top == 79.5f &&
+					line[0].color == 0xFF7F7F7Fu,
+			"the line at design (10, 80), the twin half-bright");
+	HudFrameState hidden = state;
+	hidden.overlay_master = 0;
+	CHECK(bold_glyphs(compiler.compile(hidden, 1024, 768)).empty(), "/NOHUD takes it down");
+	// The breath bar's label rides the same slot: 20 s of breath, 40 of 80 samples.
+	state.breath_time = 20;
+	state.breath_samples = 40;
+	state.breath_label = "Breath";
+	line = bold_glyphs(compiler.compile(state, 1024, 768));
+	CHECK(line.size() == text.size() + 6, "below level 3 the overlay and the bar's label draw");
+	state.hud_detail_level = 3;
+	CHECK(bold_glyphs(compiler.compile(state, 1024, 768)).empty(),
+			"level 3 skips the overlay and the breath bar");
+}
+
 // The mounted dispatch in HUD_RenderOverlays is intentionally asymmetric:
 // pilots/drivers use category > 9, passengers retain their stance/panel, and
 // gunners follow WPNGRP. XHAIRS remains a separate gate in every seat.
@@ -3538,6 +3594,7 @@ int main() {
 	test_bordered_image_sites(&font);
 	test_death_arm_skips_the_dispatcher(&font);
 	test_compiler_breath_bar(&font);
+	test_compiler_frame_rate_overlay(&font);
 	test_scope_details(&font);
 	test_optical_distance_long_format(&font);
 	test_kill_announcement(&font);
