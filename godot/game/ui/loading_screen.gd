@@ -48,6 +48,10 @@ var _font_large: FontFile = null
 var _progress := 0        # exact real-stage checkpoint
 var _last_drawn_progress := -1
 var _last_present_ms := -HudPos.LOADING_PRESENT_INTERVAL_MS
+# The instrument's device memory at the last present (--verbose only): the slow-present
+# line names what the load made on the device between two presents.
+var _present_texture_bytes := -1
+var _present_buffer_bytes := -1
 var _layout_viewport: Viewport = null
 var _layout_base_size := Vector2.ZERO
 var _presented_size := Vector2i.ZERO
@@ -202,9 +206,19 @@ func present(force := false) -> void:
 			# timed from the load's first present.
 			RenderingServer.viewport_set_measure_render_time(get_tree().root.get_viewport_rid(), true)
 			RenderingServer.viewport_set_measure_render_time(viewport.get_viewport_rid(), true)
+		var texture_bytes := -1
+		var buffer_bytes := -1
+		if OS.is_stdout_verbose():
+			texture_bytes = RenderingServer.get_rendering_info(
+					RenderingServer.RENDERING_INFO_TEXTURE_MEM_USED)
+			buffer_bytes = RenderingServer.get_rendering_info(
+					RenderingServer.RENDERING_INFO_BUFFER_MEM_USED)
 		var draw_start := Time.get_ticks_usec()
 		RenderingServer.force_draw(true, 0.0)
-		_note_slow_present(Time.get_ticks_usec() - draw_start, now, viewport, held)
+		_note_slow_present(Time.get_ticks_usec() - draw_start, now, viewport, held,
+				texture_bytes, buffer_bytes)
+		_present_texture_bytes = texture_bytes
+		_present_buffer_bytes = buffer_bytes
 		release_offscreen_targets(held)
 		viewport.disable_3d = world_was_off
 
@@ -242,10 +256,11 @@ static func release_offscreen_targets(held: Array) -> void:
 
 ## An instrument (--verbose only): a present whose forced draw ran 50 ms or more names
 ## its split (the forced draw's frame setup, the scene and canvas updates ahead of the
-## draws), the root's and the screen viewport's last measured draws, and the offscreen
-## targets it held.
+## draws), the root's and the screen viewport's last measured draws, the offscreen
+## targets it held, and the texture and buffer memory the load made on the device since
+## the previous present (the uploads this forced draw's frame carries).
 func _note_slow_present(draw_usec: int, present_start_ms: int, screen_viewport: Viewport,
-		held: Array) -> void:
+		held: Array, texture_bytes: int, buffer_bytes: int) -> void:
 	if draw_usec < 50000 or not OS.is_stdout_verbose():
 		return
 	var held_names := PackedStringArray()
@@ -262,6 +277,10 @@ func _note_slow_present(draw_usec: int, present_start_ms: int, screen_viewport: 
 			RenderingServer.viewport_get_measured_render_time_gpu(screen_rid),
 			RenderingServer.viewport_get_measured_render_time_cpu(screen_rid),
 			", ".join(held_names)])
+	if _present_texture_bytes >= 0 and texture_bytes >= 0:
+		print_verbose("LoadingScreen: since the previous present: textures %+d MB, buffers %+d MB" % [
+				(texture_bytes - _present_texture_bytes) >> 20,
+				(buffer_bytes - _present_buffer_bytes) >> 20])
 
 
 ## Give a newly mounted Control one complete SceneTree frame to receive layout
