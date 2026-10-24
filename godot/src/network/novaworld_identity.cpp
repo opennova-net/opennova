@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -52,11 +53,17 @@ LocaleCodes locale_codes(std::string locale) {
 	return out;
 }
 
+// The boot's sample of the NWHWI device facts (sample_device_identity), held for the process.
+std::optional<opennova::HardwareIdentity> &device_identity() {
+	static std::optional<opennova::HardwareIdentity> sample;
+	return sample;
+}
+
 // The NWHWI device facts (engine HardwareIdentity, make_nwhwi): on Windows the engine's reads,
 // retail's own (read_display_adapter on the cfg's hw3d_deviceno, read_primary_screen_size);
 // elsewhere the renderer's adapter name and memory and the display server's primary screen stand
-// in. The physical memory is the OS's, and the display mode game.cfg's over that desktop.
-opennova::HardwareIdentity collect_hardware_identity(const opennova::gamecfg::GameCfg &cfg) {
+// in. The physical memory is the OS's. A failed DxDiag query leaves the display memory 0.
+opennova::HardwareIdentity read_device_identity(const opennova::gamecfg::GameCfg &cfg) {
 	opennova::HardwareIdentity hw;
 	if (!opennova::read_display_adapter(static_cast<uint32_t>(cfg.hw3d_deviceno), hw)) {
 		if (RenderingServer *rendering = RenderingServer::get_singleton()) {
@@ -77,12 +84,15 @@ opennova::HardwareIdentity collect_hardware_identity(const opennova::gamecfg::Ga
 			hw.desktop_height = size.y;
 		}
 	}
-	opennova::gamecfg::display_size(cfg, hw.desktop_width, hw.desktop_height, hw.display_width,
-			hw.display_height);
 	return hw;
 }
 
 } // namespace
+
+void sample_device_identity(const opennova::gamecfg::GameCfg &cfg) {
+	std::optional<opennova::HardwareIdentity> &sample = device_identity();
+	if (!sample) sample = read_device_identity(cfg);
+}
 
 opennova::LobbyIdentityParams collect_lobby_identity_params(const opennova::gamecfg::GameCfg &cfg) {
 	opennova::LobbyIdentityParams out;
@@ -113,7 +123,13 @@ opennova::LobbyIdentityParams collect_lobby_identity_params(const opennova::game
 		}
 	}
 
-	out.nwhwi = opennova::make_nwhwi(collect_hardware_identity(cfg));
+	// NWHWI at the connect only formats: the boot's device facts (a process that skipped the boot's
+	// sample takes it here, once) and game.cfg's display mode now.
+	sample_device_identity(cfg);
+	opennova::HardwareIdentity hw = *device_identity();
+	opennova::gamecfg::display_size(cfg, hw.desktop_width, hw.desktop_height, hw.display_width,
+			hw.display_height);
+	out.nwhwi = opennova::make_nwhwi(hw);
 
 	// The stand-in tokens' machine words take the renderer's adapter name (the model name, then
 	// "OpenNova", where it has none).

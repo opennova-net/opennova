@@ -3,6 +3,7 @@
 #include "mnu/menu_driver.h"
 #include "mnu/mnu_document.h"
 #include "network/join_target.h"
+#include "network/novaworld_identity.h" // sample_device_identity (the boot's NWHWI facts)
 #include "resource_index/launch_flags.h"
 #include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
@@ -108,6 +109,9 @@ bool GameConfigBlock::enter_main_menu(const Ref<ResourceRoot> &p_root,
 	take_launch_switches(block_);
 	const bool kept = block_.enter_main_menu(menu_mount(p_root, p_gametext, p_desktop), error);
 	warn_save_error(error);
+	// The boot's renderer start and device creation follow its game.cfg read: the NWHWI device
+	// facts are sampled there, once (network/novaworld_identity.h).
+	sample_device_identity(block_.cfg());
 	return kept;
 }
 

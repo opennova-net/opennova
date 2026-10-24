@@ -132,22 +132,24 @@ std::string listing_failure(int code, int32_t networkconnecttype, const std::str
 			"; networkconnecttype = 2, or a start without --master-host, serves LAN only)";
 }
 
-// The NWHWI a Serve Only host's verify Cookie carries. A /SERVEONLY boot opens the renderer as any
-// other (only the video test is skipped), so the cookie is this machine's by the builder's own
-// rule: the adapter and display memory by retail's reads on the cfg's hw3d_deviceno, the physical
-// memory, game.cfg's display mode and the desktop main() sampled.
-// [orig: Game_InitSubsystems @0x4A6CD0 - Renderer_Init called @0x4A70F2, the serve-only test
-//  @0x4A710C skipping only Game_RunVideoTestDialog, Renderer_SetDisplayModeWithFallback called
-//  @0x4A722A; CNapiGameSession_OnNovaWorldConnected @0x4D1570 - sprintf called @0x4D178F]
-std::string serve_hardware_identity(const gamecfg::GameCfg &cfg, const ServeOptions &options) {
+// The device facts a Serve Only host's NWHWI prints, sampled once at its boot. A /SERVEONLY boot
+// opens the renderer as any other (only the video test is skipped), so they are this machine's by
+// retail's reads: the physical memory (the command line's GlobalMemoryStatus), the desktop main()
+// sampled (Renderer_Init's), adapter 0's description and the cfg's hw3d_deviceno adapter's DxDiag
+// display memory (the device creation's). Off Windows read_display_adapter has no Direct3D, so
+// the description is retail's no-device "(null)" and the display memory 0; a failed DxDiag query
+// is 0 too (the device keeps the query's result only when it is not negative).
+// [orig: Game_ParseCommandLineAndInit @0x4A7310 - g_VideoMemoryMB stored @0x4A7E15;
+//  Game_InitSubsystems @0x4A6CD0 - Renderer_Init called @0x4A70F2, the serve-only test @0x4A710C
+//  skipping only Game_RunVideoTestDialog, Renderer_SetDisplayModeWithFallback called @0x4A722A;
+//  CGfxDevice_CreateDevice @0x67E5D0 - the query called @0x67EBEC, kept @0x67EBFD or 0 @0x67EC25]
+HardwareIdentity sample_device_identity(const gamecfg::GameCfg &cfg, const ServeOptions &options) {
 	HardwareIdentity hw;
-	read_display_adapter(static_cast<uint32_t>(cfg.hw3d_deviceno), hw);
 	read_total_physical_memory(hw.total_phys_bytes);
 	hw.desktop_width = options.desktop_width;
 	hw.desktop_height = options.desktop_height;
-	gamecfg::display_size(cfg, hw.desktop_width, hw.desktop_height, hw.display_width,
-			hw.display_height);
-	return make_nwhwi(hw);
+	read_display_adapter(static_cast<uint32_t>(cfg.hw3d_deviceno), hw);
+	return hw;
 }
 
 } // namespace
@@ -293,6 +295,9 @@ bool Server::begin(std::string &error, const std::atomic<bool> *cancel) {
 		stop();
 		return false;
 	}
+	// The renderer's start and its device creation, after that game.cfg read: the device facts
+	// NWHWI prints (sample_device_identity), read once.
+	device_identity_ = sample_device_identity(config_.cfg(), options_);
 	// The subsystems' tail: admin.cfg and the listener [orig: Game_InitSubsystems
 	// @0x4A72B8..0x4A72D9, after the game.cfg read @0x4A70AB].
 	open_admin();
@@ -893,7 +898,12 @@ bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *canc
 	lister_options.server_logs = &server_logs_;
 	lister_options.gate_ports = inmatch::gate_bind_ports(config_.cfg());
 	lister_options.extended_metrics = config_.cfg().mp_extract_extended_metric_information != 0;
-	lister_options.hardware_identity = serve_hardware_identity(config_.cfg(), options_);
+	// NWHWI at the connect: the boot's device facts and game.cfg's display mode, formatted
+	// [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1570 - sprintf called @0x4D178F].
+	HardwareIdentity hw = device_identity_;
+	gamecfg::display_size(config_.cfg(), hw.desktop_width, hw.desktop_height, hw.display_width,
+			hw.display_height);
+	lister_options.hardware_identity = make_nwhwi(hw);
 	last_lister_exit_ = -1;
 	lister_ = std::make_unique<Lister>(lister_options, *listing_, &demux_->session());
 	const NwuLobbySession &lobby = lister_->lobby();

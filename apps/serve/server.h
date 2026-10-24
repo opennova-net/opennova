@@ -257,6 +257,10 @@ private:
 	void select_chat_font();
 
 	ServeOptions options_;
+	// The device facts NWHWI prints, sampled once at the boot where retail's renderer reads them
+	// (begin: after the subsystems' game.cfg read); the listing only formats them with game.cfg's
+	// display mode.
+	HardwareIdentity device_identity_;
 	// The title the server speaks (/game's, JO's without one: mount) and its gate tag, the
 	// title's or the mount's gt.ssc's (title_gate_tag).
 	const TitleIdentity *title_ = nullptr;
