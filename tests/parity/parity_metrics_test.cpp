@@ -1557,6 +1557,44 @@ void test_integrity() {
 		expect_row(after, 'B', "integrity_rows", "ammo", "fail", "HOST_AMMO_ROW_MISMATCH");
 	}
 	{
+		// The span ends at the host's apply of that first 0x0C, not at its crossing
+		// (integrity.join_adm): the host's pump answers the per-frame ping [ts][1] that rides
+		// ahead of the 0x0C with an S2C 0x57 [ts][0] before the 0x0C stores the ADM, and its
+		// messages leave in queue order, so a 0x31 ahead of that 0x57 was computed before the
+		// apply. p260's drive OO host sent row 14 50 ms after the first 0x0C crossed, in one
+		// datagram ahead of its 0x57; behind the 0x57 the same row is a host divergence.
+		auto seed_window = [](bool pong_first) {
+			wire::ParityTrace trace = scripted(3);
+			const auto uplink = std::find_if(trace.events.begin(), trace.events.end(),
+					[](const wire::ParityEvent &e) { return e.dir == 'C' && e.full_tag == 0x00C; });
+			const uint64_t at = uplink->ts_ns + 8 * kMs; // the host's next datagram
+			wire::ParityEvent ping = *uplink;
+			ping.full_tag = 0x02C;
+			ping.material = true;
+			ping.body = bytes({ 0x31, 0x3E, 0x6B, 0x2B, 1 });
+			ping.length = ping.body.size();
+			trace.events.insert(uplink, ping);
+			const std::vector<uint8_t> pong = bytes({ 0x31, 0x3E, 0x6B, 0x2B, 0 });
+			if (pong_first)
+				splice(trace, 'S', 0x057, at, pong);
+			splice(trace, 'S', 0x031, at, bytes({ 0x0E, 0x34, 0x12 }));
+			if (!pong_first)
+				splice(trace, 'S', 0x057, at, pong);
+			std::vector<uint8_t> reply{ 0x0E };
+			put_u32(reply, 0xCAFEF00Du ^ 0x1234u);
+			put_u32(reply, 0x1234u);
+			splice(trace, 'C', 0x021, at + 20 * kMs, reply);
+			return trace;
+		};
+		const Case seeded = judge_case(scripted(1), scripted(2), seed_window(false), "OO");
+		expect_row(seeded, 'B', "integrity_rows", "ammo", "pass");
+		expect_row(seeded, 'B', "integrity_row_unwitnessed", "ammo", "pass");
+		const Case applied = judge_case(scripted(1), scripted(2), seed_window(true), "OO");
+		expect_row(applied, 'B', "integrity_rows", "ammo", "fail", "HOST_AMMO_ROW_MISMATCH");
+		expect_row(applied, 'B', "integrity_row_unwitnessed", "ammo", "fail",
+				"INTEGRITY_ROW_UNWITNESSED");
+	}
+	{
 		// An ammo challenge carries the row of the ADM the uplinks name (integrity.held_adm):
 		// x6's selfnade holds the grenade (ADM 52, row 54) 6.5 s, under the two boundaries
 		// an ammo challenge needs, so RR's row 54 there against a run whose ammo boundary

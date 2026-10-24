@@ -1068,27 +1068,57 @@ void compare_handshakes(
 
 struct Transaction {
 	bool valid = false;
-	bool join_adm = false; // ammo, before the joiner's first uplink (integrity.join_adm)
+	bool join_adm = false; // ammo, before the host applied the first uplink (integrity.join_adm)
 	uint32_t adm = UINT32_MAX; // ammo: the ADM the latest C2S 0x0C before it named
 	uint32_t row = 0;
 	uint32_t base_crc = 0; // the reply CRC with the challenge key XORed out
 };
 
-// The spans from each C2S 0x0B (a join) to the first C2S 0x0C after it, in which the
-// host still holds the body's class-init ADM (integrity.join_adm).
-std::vector<std::pair<uint64_t, uint64_t>> join_adm_windows(const RunFacts &run) {
-	std::vector<std::pair<uint64_t, uint64_t>> out;
+// The spans, as [first, last) indices of the trace's events in capture order, from each
+// C2S 0x0B (a join) to the host's apply of the first C2S 0x0C after it, in which the host
+// still holds the body's class-init ADM (integrity.join_adm). The host's tick runs its
+// receive pump before the scoreboard boundary [orig: Server_TickUpdate @0x51D7E0 (the
+// CNapiNetwork_PumpServerProtocolRecv call @0x51D895, the challenge call @0x51D912)]. The
+// joiner queues its per-frame ping [ts][1] ahead of its 0x0C [orig: Client_ProcessNetworkFrame
+// @0x42C180 (the ping @0x42C44A, the 0x0C @0x42C4A3)], so the pump answers that datagram's
+// ping with an S2C 0x57 [ts][0] [orig: NapiNPServerMsg_HandlePingResponse @0x515070 (the send
+// @0x51510C)] before the 0x0C stores the ADM (@0x4C20A3), and a slot's messages leave in
+// queue order [orig: CNapiNPConnection_BuildOutgoingPackets @0x628430 (the walk from the
+// queue's head @0x6284A7)]: a challenge ahead of that 0x57 was computed before the apply.
+// Without the 0x57 on the wire the span ends at the 0x0C.
+std::vector<std::pair<size_t, size_t>> join_adm_windows(const RunFacts &run) {
+	const std::vector<wire::ParityEvent> &events = run.trace.events;
+	std::vector<std::pair<size_t, size_t>> out;
 	bool open = false;
-	for (const wire::ParityEvent &event : run.trace.events) {
+	for (size_t i = 0; i < events.size(); ++i) {
+		const wire::ParityEvent &event = events[i];
 		if (event.dir != 'C')
 			continue;
 		const uint16_t identity = event_identity(event);
 		if (identity == 0x00B && !open) {
-			out.emplace_back(event.ts_ns, UINT64_MAX);
+			out.emplace_back(i, events.size());
 			open = true;
-		} else if (identity == 0x00C && open) {
-			out.back().second = event.ts_ns;
-			open = false;
+			continue;
+		}
+		if (identity != 0x00C || !open)
+			continue;
+		out.back().second = i;
+		open = false;
+		const wire::ParityEvent *ping = nullptr;
+		for (const wire::ParityEvent &other : events)
+			if (other.dir == 'C' && other.frame == event.frame && event_identity(other) == 0x02C &&
+					other.body.size() >= 5 && other.body[4] != 0) {
+				ping = &other;
+				break;
+			}
+		for (size_t k = i + 1; ping && k < events.size(); ++k) {
+			const wire::ParityEvent &pong = events[k];
+			if (pong.dir == 'S' && event_identity(pong) == 0x057 && pong.body.size() >= 5 &&
+					pong.body[4] == 0 &&
+					std::equal(pong.body.begin(), pong.body.begin() + 4, ping->body.begin())) {
+				out.back().second = k;
+				break;
+			}
 		}
 	}
 	return out;
@@ -1138,8 +1168,8 @@ std::vector<Transaction> transactions(const RunFacts &run, bool ammo) {
 	// @0x4B1116] until the joiner's uplink does [orig: NetPacket_SerializePlayerState
 	// @0x4C20A3] (or a fired round [orig: Server_ClientFiredRound @0x50BD56]).
 	static_assert(has_normalization("integrity.join_adm"));
-	const std::vector<std::pair<uint64_t, uint64_t>> windows =
-			ammo ? join_adm_windows(run) : std::vector<std::pair<uint64_t, uint64_t>>{};
+	const std::vector<std::pair<size_t, size_t>> windows =
+			ammo ? join_adm_windows(run) : std::vector<std::pair<size_t, size_t>>{};
 	std::vector<Transaction> out;
 	size_t uplink = 0;
 	uint32_t latest_adm = UINT32_MAX;
@@ -1166,8 +1196,7 @@ std::vector<Transaction> transactions(const RunFacts &run, bool ammo) {
 		Transaction t;
 		t.adm = ammo ? latest_adm : UINT32_MAX;
 		for (const auto &window : windows)
-			t.join_adm = t.join_adm ||
-					(challenge.ts_ns >= window.first && challenge.ts_ns < window.second);
+			t.join_adm = t.join_adm || (i >= window.first && i < window.second);
 		if (challenge.body.size() == 3 && reply && reply->body.size() == reply_size) {
 			t.row = challenge.body[0];
 			const uint32_t key = u16_at(challenge.body, 1);
@@ -1234,10 +1263,10 @@ void compare_integrity(const RunFacts &rr, const RunFacts &other, const CompareO
 			};
 			return !held(stays_a) || !held(stays_b);
 		};
-		// A challenge before the joiner's first uplink carries the class-init ADM's
-		// row, there by the join's phase against the boundary: it leaves the rows,
-		// the oracle and the CRC checks, its reply's shape still counts
-		// (integrity.join_adm).
+		// A challenge the host computed before it applied the joiner's first uplink
+		// carries the class-init ADM's row, there by the join's phase against the
+		// boundary: it leaves the rows, the oracle and the CRC checks, its reply's shape
+		// still counts (integrity.join_adm).
 		for (const Transaction &t : ta)
 			if (t.valid && !t.join_adm) {
 				oracle[t.row].insert(t.base_crc);
