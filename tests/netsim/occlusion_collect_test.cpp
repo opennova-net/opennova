@@ -265,12 +265,38 @@ void test_the_walk_order() {
 	decoration.item_type = 6;
 	kernel.occlusion.assign_render_model(decoration.handle, unstamped);
 	w::Entity *const order[5] = {&decoration, &person, &spawned, &local, &vehicle};
-	for (w::Entity *e : order) e->occlusion_latch = 0;
+	const char *const names[5] = {"decoration", "person", "spawned", "local", "vehicle"};
 
 	im::ClientRuntime runtime("OcclusionCollectOrder");
 	opennova::replication::ClientEntityState &twin_row = runtime.state().upsert(spawned.handle.packed);
 	twin_row.type_id = 0x0055;
 	twin_row.cls = opennova::EntityClass::Infantry;
+
+	const w::OcclusionFrameCamera cam = camera_down_x();
+	kernel.occlusion.build_frame(kernel.world, kernel.collision, cam);
+	im::WireOcclusionLatchMap latches;
+	std::vector<w::EntityHandle> scratch;
+	std::vector<int32_t> culled_bms;
+	std::vector<int32_t> culled_wire;
+	std::vector<w::Vec3> anchors;
+	const auto dump = [&](const char *when) {
+		std::printf("walk order %s: culled_bms", when);
+		for (const int32_t id : culled_bms) std::printf(" %d", id);
+		std::printf(", culled_wire");
+		for (const int32_t h : culled_wire) std::printf(" 0x%04x", h);
+		std::printf(", latches");
+		for (int i = 0; i < 5; ++i)
+			std::printf(" %s=%d", names[i], static_cast<int>(order[i]->occlusion_latch));
+		std::printf("\n");
+	};
+	// The fixture first, apart from the order: with every latch held, each of the
+	// five rows passes the gates ahead of the latch (no draw).
+	for (w::Entity *e : order) e->occlusion_latch = 5;
+	im::collect_view_verdicts(im::PresentRowsContext{kernel, &runtime, false}, latches, scratch, cam,
+			culled_bms, culled_wire, anchors);
+	if (!expect(culled_bms.empty() && culled_wire.empty(), "every row passes the gates"))
+		dump("(held latches)");
+	for (w::Entity *e : order) e->occlusion_latch = 0;
 
 	uint32_t stream = 0x13579BDFu;
 	kernel.occlusion.bind_focal_wind_random(&stream);
@@ -289,22 +315,24 @@ void test_the_walk_order() {
 		for (int j = i + 1; j < 5; ++j)
 			expect(expected[i] != expected[j], "the seed's five draws are distinct");
 
-	const w::OcclusionFrameCamera cam = camera_down_x();
-	kernel.occlusion.build_frame(kernel.world, kernel.collision, cam);
-	im::WireOcclusionLatchMap latches;
-	std::vector<w::EntityHandle> scratch;
-	std::vector<int32_t> culled_bms;
-	std::vector<int32_t> culled_wire;
-	std::vector<w::Vec3> anchors;
 	im::collect_view_verdicts(im::PresentRowsContext{kernel, &runtime, false}, latches, scratch, cam,
 			culled_bms, culled_wire, anchors);
-	expect(culled_bms.empty() && culled_wire.empty(), "every row is collected");
-	expect(stream == expected_stream, "five re-arms, one draw each");
-	expect(decoration.occlusion_latch == expected[0], "the static takes the first draw");
-	expect(person.occlusion_latch == expected[1], "pool 0 slot 2's placed person the second");
-	expect(spawned.occlusion_latch == expected[2], "pool 0 slot 4's runtime spawn the third");
-	expect(local.occlusion_latch == expected[3], "pool 0 slot 6's local player the fourth");
-	expect(vehicle.occlusion_latch == expected[4], "pool 1's vehicle the last");
+	bool ok = expect(culled_bms.empty() && culled_wire.empty(), "every row is collected");
+	ok = expect(stream == expected_stream, "five re-arms, one draw each") && ok;
+	ok = expect(decoration.occlusion_latch == expected[0], "the static takes the first draw") && ok;
+	ok = expect(person.occlusion_latch == expected[1], "pool 0 slot 2's placed person the second") &&
+			ok;
+	ok = expect(spawned.occlusion_latch == expected[2], "pool 0 slot 4's runtime spawn the third") &&
+			ok;
+	ok = expect(local.occlusion_latch == expected[3], "pool 0 slot 6's local player the fourth") &&
+			ok;
+	ok = expect(vehicle.occlusion_latch == expected[4], "pool 1's vehicle the last") && ok;
+	if (!ok) {
+		dump("(re-armed)");
+		std::printf("walk order: expected");
+		for (int i = 0; i < 5; ++i) std::printf(" %d", static_cast<int>(expected[i]));
+		std::printf(", stream 0x%08x (expected 0x%08x)\n", stream, expected_stream);
+	}
 }
 
 // The statics' walk is the static prox list's tail, and the list counts at most
