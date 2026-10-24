@@ -156,6 +156,11 @@ public:
 	// precedent): EntityPresenter's bound legs feed the same rows from tests
 	// without a live sim.
 	void present();
+	// Once per drawn scene frame, after the frame placed its views (GameWorld's
+	// particles leg): the sim's live trails built for every view that draws the
+	// pool, against this frame's cameras and clock (engine
+	// renderer/tracer_frame.h TracerView carries the witness).
+	void draw_frame_tracers();
 	void present_slot_sounds(const std::vector<opennova::world::SoundSlotEvent> &p_events);
 	void present_sound_emitters(const std::vector<opennova::world::SoundEmitterEvent> &p_events);
 	void present_fires(const std::vector<opennova::world::FirePresentationRow> &p_events);

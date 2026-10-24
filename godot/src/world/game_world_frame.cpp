@@ -2005,6 +2005,15 @@ void GameWorld::render_material_frame() {
 }
 
 void GameWorld::render_particle_frame() {
+	// The tracer pool's ribbons first, for this frame's placed views (the scene, the
+	// weapon Inset, the water mirrors): retail builds them at each scene pass's draw
+	// from that pass's view block and clock (engine renderer/tracer_frame.h TracerView
+	// carries the witness), so every drawn frame builds them, and before the effect
+	// world's frame, as the fire pass's publish of the distortion ribbons was.
+	MissionRoot *runtime = get_runtime();
+	if (EntityPresenter *entities = runtime != nullptr ? runtime->get_entity_presenter() : nullptr) {
+		entities->draw_frame_tracers();
+	}
 	EffectWorld *effect_world = get_effect_world();
 	if (effect_world != nullptr) {
 		// While the NVG composite is up the world renders as the NVG scene,

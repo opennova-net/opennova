@@ -476,6 +476,43 @@ func test_the_inset_scene_builds_its_ribbons_against_its_own_view() -> void:
 	presenter.teardown()
 
 
+# Retail builds the tracer pool's ribbons at each drawn frame's scene pass, from the view
+# block that frame rebuilt just ahead of it and the clock read at the draw, so ours build
+# in the frame's particles leg, after the frame placed its views, from the sim's live
+# trails (GameWorld::render_particle_frame -> EntityPresenter.draw_frame_tracers); the
+# ticked present no longer builds them against the camera the frame has not placed yet.
+# [orig: Render_ProcessMainSceneFrame @0x5CA0F0 - the Viewport_BuildProjectionMatrix call
+# @0x5CA5D2, the Terrain_RenderWorldScene call @0x5CA8EC]
+func test_the_ribbons_build_in_the_drawn_frame_not_the_ticked_present() -> void:
+	var world := WorldFixture.boot_minimal(self)
+	var runtime := world.get_runtime()
+	assert_not_null(runtime)
+	if runtime == null:
+		return
+	runtime.pause()
+	var presenter := runtime.get_entity_presenter()
+	var camera := Camera3D.new()
+	presenter.add_child(camera)
+	camera.position = Vector3(0, 5, 10)
+	camera.current = true
+	var mesh: ArrayMesh = presenter.fire_ribbon_mesh()
+	assert_not_null(mesh, "the loaded world hosts the ribbon geometry")
+	if mesh == null:
+		return
+	presenter.draw_tracer_rows(PackedFloat32Array([
+		1.0, 1.0, 3.0,
+		0.0, 1.0, 0.0, 1.0,
+		2.0, 1.0, 0.0, 1.0,
+		4.0, 1.0, 0.0, 1.0,
+	]))
+	assert_eq(mesh.get_surface_count(), 1, "the data leg built a ribbon")
+	presenter.present_passes()
+	assert_eq(mesh.get_surface_count(), 1, "the ticked present builds no ribbons")
+	presenter.draw_frame_tracers()
+	assert_eq(mesh.get_surface_count(), 0,
+			"the frame's build takes the sim's live trails: the minimal mission has none")
+
+
 # The tracer pool's distortion ribbons (the styles with a +0x828 word: the
 # rocket, the AT4, the sniper) publish into the effect world's FrameFX drawer
 # and draw in the type-0 row with slot 2 = 256B (retail

@@ -127,6 +127,11 @@ struct TracerVec3 {
 // Render_SetViewAndProjectionMatrices @0x58D900 - the D3DXMatrixPerspectiveFovLH call
 // @0x58D9DE]. So each view that draws the pool builds its own frame against its own eye,
 // view and field: the main scene's, the weapon Inset's and each rendering mirror's.
+// The pool draws in every drawn frame's scene pass, built at that draw from the view block
+// the frame rebuilt just ahead of it [orig: Render_ProcessMainSceneFrame @0x5CA0F0 - the
+// Viewport_BuildProjectionMatrix call @0x5CA5D2, the Terrain_RenderWorldScene call
+// @0x5CA8EC] and the clock read at the draw (the GetTickCount call @0x5DC104): the frames
+// are built once per drawn frame after its views are placed, not once per update.
 struct TracerView {
 	TracerVec3 camera;                  // the eye [orig: byte_A78364]
 	// The view matrix's third column: the look direction, either sign

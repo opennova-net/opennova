@@ -205,6 +205,13 @@ void FirePresenter::present() {
 	std::vector<opennova::world::SoundEmitterEvent> emitters;
 	s->drain_sound_emitter_events(emitters);
 	present_sound_emitters(emitters);
+}
+
+void FirePresenter::draw_frame_tracers() {
+	Simulation *s = sim();
+	if (mesh_.is_null() || s == nullptr) {
+		return;
+	}
 	draw_tracer_rows(s->get_tracer_trails());
 }
 
@@ -326,7 +333,7 @@ void FirePresenter::present_fire_sounds(const std::vector<opennova::world::Ready
 
 // The compiled ribbon draws [orig: CEffectChannel_RenderRibbon @ 0x5DB8A0 —
 // the math and the style tables live natively in
-// engine/runtime/renderer/tracer_frame.cpp]. This pass drains the sim's trail
+// engine/runtime/renderer/tracer_frame.cpp]. This pass reads the sim's trail
 // rows (framed [style_id, age, count, then count x (x, y, z, w)] per channel),
 // compiles them against the viewport's render camera and uploads one surface
 // per run of same-material channel draws, in pool order, on the frame's
@@ -336,10 +343,13 @@ void FirePresenter::draw_tracer_rows(const PackedFloat32Array &p_rows) {
 	if (mesh_.is_null()) {
 		return;
 	}
-	mesh_->clear_surfaces();
+	// Built every drawn frame: an empty mesh is left as it is.
+	if (mesh_->get_surface_count() > 0) {
+		mesh_->clear_surfaces();
+	}
 	set_main_ribbon_layer(visual_layers::MAIN_VIEW_NO_REFLECTION);
 	for (ViewRibbons &other : views_) {
-		if (other.mesh.is_valid()) {
+		if (other.mesh.is_valid() && other.mesh->get_surface_count() > 0) {
 			other.mesh->clear_surfaces();
 		}
 	}

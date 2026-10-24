@@ -341,6 +341,9 @@ public:
 	Vector3 listener_position() const { return listener_position_; }
 	// The four passes in drive order, once per ticked present frame.
 	void present_passes();
+	// The fire pass's tracer ribbons, once per drawn scene frame after the frame
+	// placed its views (FirePresenter::draw_frame_tracers).
+	void draw_frame_tracers();
 	// present_passes() timed per pass (PassProfileSlot, microseconds) for the
 	// stats board.
 	PackedInt64Array profile_present_passes();
