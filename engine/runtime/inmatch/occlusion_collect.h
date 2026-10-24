@@ -66,7 +66,13 @@ void collect_building_verdicts(const world::World &world, const world::Collision
 // the tiles around them), and the mask build's g_BlinkWaterVisible. The
 // subscene then collects its own death pieces over the view it draws from
 // (world::mirror_reflected_view; the embedder runs OcclusionWorld::
-// collect_death_piece_draws there at the max-quality water detail).
+// collect_death_piece_draws there at the max-quality water detail). The lists
+// are this collect's alone: each collect empties them before it walks, and the
+// subscene draws only what they hold, so an embedder reconciles per frame only
+// the rows a mirror's lists hold (a dropped row draws in no mirror).
+// [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0 - the counts
+//  zeroed: g_SectorPersonCount @ 0x5c90b7, g_VisibleBuildingCount @ 0x5c90bd,
+//  g_SectorEntityCount @ 0x5c90c9]
 // [orig: Water_RenderReflectedWorldScene @ 0x5c8510 - Terrain_RenderSectorModels
 //  @ 0x5c8576 over the collect's batch and masks, Terrain_RenderSectorEntities
 //  @ 0x5c857b, Terrain_RenderSectorEntitiesBySide @ 0x5c8590 / @ 0x5c8599 with

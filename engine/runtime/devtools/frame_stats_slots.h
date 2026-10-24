@@ -61,7 +61,7 @@
     X(MODEL_AWAKE_MODELS, "VALUE: models visited by the shared awake walk") \
     X(MODEL_RENDERABLE_MODELS, "VALUE: visited models currently camera-submitted") \
     X(MODEL_VIEW_WALK, "the per-view RLOD walk, the held-weapon gates and the weapon Inset / water-mirror split reconcile (ObjectModel::update_authored_lod_views)") \
-    X(MODEL_VIEW_MARKED, "VALUE: models the weapon Inset and water-mirror views reconciled (refresh_view_split over their marked sets)") \
+    X(MODEL_VIEW_MARKED, "VALUE: models the weapon Inset and water-mirror views reconciled (refresh_view_split over the Inset's marked set and the models the mirrors' lists hold)") \
     X(WORLD_SLOT_SHADOW, "render-slot ground-shadow planning/publication") \
     X(WORLD_PARTICLES, "EffectWorld render-frame publication") \
     X(WORLD_CLEAR, "viewport clear-color publication") \

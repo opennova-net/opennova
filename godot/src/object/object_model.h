@@ -521,10 +521,19 @@ private:
 		bool split = false;
 	};
 	MirrorState mirror_[2];
+	// Every model a mirror view gave a verdict (its node edges reconcile it),
+	// and the walk: the marked models the mirrors' lists still hold, which
+	// each walk reconciles. Retail's reflected subscene walks only its
+	// collect's lists, emptied at every collect; a model every open mirror's
+	// own collect dropped draws in no mirror whatever its node does, so it
+	// leaves the walk and its node's edges relist it (relist_mirror_view).
 	static HashSet<ObjectModel *> mirror_view_models_;
+	static HashSet<ObjectModel *> mirror_view_walk_models_;
 	static bool mirror_view_open_[2];
 	static bool mirror_view_below_[2];
 	void mark_mirror_view(int p_view);
+	void relist_mirror_view();
+	bool mirror_view_dropped(int p_view) const;
 	static void refresh_mirror_views();
 	// Whether the mirror camera of view `p_view` admits the node's own layer
 	// by its water side (WORLD always, WORLD_NO_MIRROR below the water): the
@@ -1115,9 +1124,10 @@ public:
 	static int update_authored_lod_views(const ObjectLodFrame *p_frames, int p_frame_count,
 			const ObjectLodFrame *p_mirror_gate_frames = nullptr);
 	// The models the alternate views (the weapon Inset, the water mirrors)
-	// reconcile each walk: their marked sets (a FrameStats VALUE).
+	// reconcile each walk: the Inset's marked set and the mirrors' walk (a
+	// FrameStats VALUE).
 	static int64_t get_view_marked_count() {
-		return static_cast<int64_t>(inset_view_models_.size() + mirror_view_models_.size());
+		return static_cast<int64_t>(inset_view_models_.size() + mirror_view_walk_models_.size());
 	}
 	// The two-camera form (view 1 null = no Inset view), for tools and tests.
 	static int update_authored_lods_for_views(Camera3D *p_main, float p_main_width,

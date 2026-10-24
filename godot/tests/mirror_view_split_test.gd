@@ -134,3 +134,41 @@ func test_the_held_weapon_gate_runs_through_the_mirrors_drawn_view() -> void:
 			main_camera.global_transform)
 	assert_false(weapon.is_mirror_pixel_culled(0))
 	assert_false(weapon.is_mirror_view_split(0))
+
+
+# Retail's reflected subscene walks only its collect's lists, which the collect
+# empties each time it runs (Terrain_CollectVisibleEntitiesForReflection,
+# Water_RenderReflectedWorldScene). A model the mirror's own collect drops
+# leaves the views' walk; its node's own edges still move it off the mirror, and
+# the mirror listing it again brings it back into the walk.
+func test_a_model_the_mirror_drops_leaves_the_walk() -> void:
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var model := _fixture_model(container)
+	assert_not_null(model)
+	if model == null:
+		return
+	var main_camera := _view_camera(Vector2i(640, 480), 90.0)
+	ObjectModel.set_mirror_view_state(0, true, true)
+	model.set_mirror_occlusion_hidden(0, false)
+	ObjectModel.update_authored_lods_for_views(main_camera, 640.0, null, 0.0)
+	assert_eq(ObjectModel.get_view_marked_count(), 1, "the mirror lists it: walked")
+	model.set_mirror_occlusion_hidden(0, true)
+	ObjectModel.update_authored_lods_for_views(main_camera, 640.0, null, 0.0)
+	assert_true(model.is_mirror_view_split(0), "the node leaves the mirror")
+	assert_eq(ObjectModel.get_view_marked_count(), 0, "dropped: out of the walk")
+	# The main view hides the node: nothing left to keep off the mirror.
+	model.set_occlusion_hidden(true)
+	assert_false(model.is_mirror_view_split(0))
+	# Shown again, its own edge takes it off the mirror again, with no walk.
+	model.set_occlusion_hidden(false)
+	assert_true(model.is_mirror_view_split(0))
+	assert_eq(_surface_layers(model) & (WORLD | WORLD_NO_MIRROR | MIRROR_VIEW), 0)
+	ObjectModel.update_authored_lods_for_views(main_camera, 640.0, null, 0.0)
+	assert_eq(ObjectModel.get_view_marked_count(), 0)
+	# The mirror lists it again: walked, and back on the world layer.
+	model.set_mirror_occlusion_hidden(0, false)
+	ObjectModel.update_authored_lods_for_views(main_camera, 640.0, null, 0.0)
+	assert_eq(ObjectModel.get_view_marked_count(), 1)
+	assert_false(model.is_mirror_view_split(0))
+	assert_ne(_surface_layers(model) & WORLD_NO_MIRROR, 0)
