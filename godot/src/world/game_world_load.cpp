@@ -1622,7 +1622,7 @@ void GameWorld::start_mission_audio(const Ref<MissionData> &p_mission, const Str
 		mission_audio->set_time_of_day_hhmm(env_->get_time_of_day());
 	}
 	UtilityFunctions::print_verbose(vformat(
-			"GameWorld: mission audio — %d/%d sound markers resolved, %d bank(s), %d ambient candidate(s), %d/%d physical channel(s) allocated",
+			"GameWorld: mission audio: %d/%d sound markers resolved, %d bank(s), %d ambient candidate(s), %d/%d physical channel(s) allocated",
 			stats->get_markers_resolved(), stats->get_markers_total(), stats->get_banks_loaded(),
 			stats->get_ambient_candidates(), stats->get_physical_channels(), stats->get_channel_budget()));
 
@@ -1769,7 +1769,7 @@ int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTim
 	const int64_t unresolved =
 			effect_world != nullptr ? effect_world->get_unresolved_texture_names().size() : 0;
 	UtilityFunctions::print_verbose(vformat(
-			"GameWorld: effect warm pass — %d effect(s) precompiled, %d unresolved texture(s)", spawned, unresolved));
+			"GameWorld: effect warm pass: %d effect(s) precompiled, %d unresolved texture(s)", spawned, unresolved));
 	return spawned;
 }
 
@@ -1873,7 +1873,7 @@ EffectWorld *GameWorld::create_effect_world(const Ref<ResourceRoot> &p_resource_
 	if (p_timeline.is_valid()) p_timeline->span("texture_atlases");
 	effect_world->build_texture_atlases();
 	if (p_timeline.is_valid()) p_timeline->end_span();
-	UtilityFunctions::print_verbose(vformat("GameWorld: effect world — %d effect(s) across %d .ptl file(s)",
+	UtilityFunctions::print_verbose(vformat("GameWorld: effect world: %d effect(s) across %d .ptl file(s)",
 			count, effect_world->file_count()));
 	return effect_world;
 }

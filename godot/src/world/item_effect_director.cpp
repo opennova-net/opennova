@@ -240,7 +240,7 @@ void ItemEffectDirector::reattach() {
 		}
 	}
 	if (attached > 0) {
-		UtilityFunctions::print_verbose(vformat("GameWorld: item effects — %d emitter(s)", attached));
+		UtilityFunctions::print_verbose(vformat("GameWorld: item effects: %d emitter(s)", attached));
 	}
 }
 
