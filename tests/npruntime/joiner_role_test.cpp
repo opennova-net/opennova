@@ -3929,9 +3929,14 @@ bool run_the_respawn_arm_lands_l_in_its_receive() {
 	auto &self_row = h.role.runtime->state().upsert(0x0005);
 	self_row.cls = EntityClass::Player;
 	self_row.type_id = w::kPlayerInfantryTypeId;
-	// The hut's replica row.
+	// The hut's replica row, typed as the load's 0x10 page types every pool-2 row it streams
+	// (fragrespawn's Jungle Hut 2 is TDH_I3A, wire type 1203): a typeless row is a slot with
+	// no def, whose records the carrier gate drops whole [orig: NapiNPClientMsg_0x010 @0x433400 -
+	// the type read @0x4334AE, type 0 leaving the slot zeroed @0x4334B8;
+	// NetPacket_SerializePlayerState @0x4C09C0 - @0x4C107B].
 	auto &hut_row = h.role.runtime->state().upsert(hh.packed);
 	hut_row.cls = EntityClass::NoNetworkCallback;
+	hut_row.type_id = 1203;
 	hut_row.x = hut.position.x.q16;
 	hut_row.y = hut.position.y.q16;
 	hut_row.z = hut.position.z.q16;
