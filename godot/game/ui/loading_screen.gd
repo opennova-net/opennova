@@ -52,6 +52,12 @@ var _last_present_ms := -HudPos.LOADING_PRESENT_INTERVAL_MS
 # line names what the load made on the device between two presents.
 var _present_texture_bytes := -1
 var _present_buffer_bytes := -1
+# The instrument's tally of the presents this screen made (--verbose only): their count, their
+# summed and their longest wall, printed when the screen leaves the tree, so a load's wall can be
+# told from its presents' share of it.
+var _presents := 0
+var _presents_usec := 0
+var _present_max_usec := 0
 var _layout_viewport: Viewport = null
 var _layout_base_size := Vector2.ZERO
 var _presented_size := Vector2i.ZERO
@@ -171,6 +177,17 @@ func present(force := false) -> void:
 		return
 	_last_present_ms = now
 	_last_drawn_progress = _progress
+	var present_start := Time.get_ticks_usec()
+	_present_now(now)
+	var present_usec := Time.get_ticks_usec() - present_start
+	_presents += 1
+	_presents_usec += present_usec
+	_present_max_usec = maxi(_present_max_usec, present_usec)
+
+
+## The present itself (present() decided it is due): the window's events, the fit and the bar,
+## then the forced draw of the screen's viewport chain alone.
+func _present_now(now: int) -> void:
 	# The original pumps window messages and presents mid-load; process_events
 	# + force_draw are the shell-side equivalents so the OS window stays live
 	# and the screen refreshes while the load blocks the main loop
@@ -421,6 +438,9 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	if _presents > 0 and OS.is_stdout_verbose():
+		print_verbose("LoadingScreen: %d present(s), %d ms (the longest %d ms)" % [
+				_presents, _presents_usec / 1000, _present_max_usec / 1000])
 	if _layout_viewport != null and _layout_viewport.size_changed.is_connected(
 			_fit_to_viewport):
 		_layout_viewport.size_changed.disconnect(_fit_to_viewport)

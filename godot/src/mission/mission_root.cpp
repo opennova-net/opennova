@@ -201,7 +201,7 @@ int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData>
 				join_target->get_player_name(), join_role,
 				spectator_password, join_target->get_server_password())) {
 			UtilityFunctions::push_warning(vformat(
-					"MissionRoot: could not dial co-op host %s:%d — joiner disabled.",
+					"MissionRoot: could not dial co-op host %s:%d: joiner disabled.",
 					join_target->get_host_ip(), join_target->get_port()));
 		}
 		// The JOIN VERSIONCRCSTRING checksum reads the loose
@@ -297,6 +297,9 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 	if (options.is_null()) {
 		options.instantiate();
 	}
+	// The setup's split (an instrument, the verbose line at its end): the session's stage, the
+	// mission boot, the index and the presenter.
+	const int64_t setup_start = now_usec();
 	clear_present_effect_poses();
 	setup_error_ = OK;
 	process_exit_ = false;
@@ -317,6 +320,7 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 			return 0;
 		}
 	}
+	const int64_t stage_end = now_usec();
 	sim_->set_music_director(options->get_music_director());
 	sim_->set_frame_stats(frame_stats_);
 	has_trace_stats_sampling_ = sim_.is_valid();
@@ -363,6 +367,7 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 	// The world's load runs the boot's phase B after its device stages; an
 	// isolated root (tests, tools) ends the load here, the start pending.
 	if (!options->get_mission_start_deferred()) sim_->finish_load_without_environment();
+	const int64_t boot_end = now_usec();
 	// The shared render/PANM presentation DWORD — re-stamped after the boot
 	// because the load reset cleared it (an order-free scalar, not a boot step).
 	if (presentation_time_ms_ >= 0) {
@@ -438,6 +443,15 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 	// Capture the authored node transforms now (pre-tick) so Stop restores them whether the caller
 	// played or only stepped. Cheap; the game never Stops but holding the map costs nothing.
 	capture_transforms();
+	const int64_t setup_end = now_usec();
+	UtilityFunctions::print_verbose(vformat(
+			"MissionRoot: setup %d ms: stage %d ms, boot %d ms, index and presenter %d ms (%d placed "
+			"model(s), %d entities)",
+			static_cast<int>((setup_end - setup_start) / 1000),
+			static_cast<int>((stage_end - setup_start) / 1000),
+			static_cast<int>((boot_end - stage_end) / 1000),
+			static_cast<int>((setup_end - boot_end) / 1000), placed_models.size(),
+			sim_->get_entity_count()));
 	return sim_->get_entity_count();
 }
 

@@ -1394,7 +1394,7 @@ bool Terrain::build_begin(bool p_lod_cache, bool p_tile_cache_targets) {
 	build_done_ = 0;
 	build_total_ = 0;
 	if (terrain_data.is_null() || !terrain_data->is_loaded()) {
-		UtilityFunctions::push_warning("Terrain::build() — terrain_data not loaded");
+		UtilityFunctions::push_warning("Terrain::build(): terrain_data not loaded");
 		return false;
 	}
 	// The prepare unit, a unit per tile, then the pool, the surface inputs' three

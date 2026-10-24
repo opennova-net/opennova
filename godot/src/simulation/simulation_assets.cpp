@@ -197,7 +197,7 @@ int Simulation::resolve_collision_instances(
 	// Production installs the shared native asset source first (ADR 0044).
 	if (!kernel_->assets().has_source()) {
 		godot::UtilityFunctions::print_verbose(
-				"Simulation: no asset root installed — collision/occlusion "
+				"Simulation: no asset root installed: collision/occlusion "
 				"extraction has no model source (install set_asset_root first)");
 	}
 	// The sweep itself is the kernel's (mission::resolve_collision_instances

@@ -285,7 +285,7 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 	// the two states that mean "no ambience will play" so they surface in logs.
 	if (stats_->get_banks_loaded() == 0) {
 		UtilityFunctions::push_warning(vformat(
-				"MissionAudio: no sound banks loaded (probed %s) — mission ambience will be silent",
+				"MissionAudio: no sound banks loaded (probed %s): mission ambience will be silent",
 				global_chain_text));
 		// The log line the editor's Play reads back into a Problems row (ADR 0046 DI-27): game.lwf, the
 		// global chain's bank the game's own sets live in, which a project makes or imports to be heard.
@@ -293,7 +293,7 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 				vformat("no sound bank loaded (probed %s), so the mission is silent", global_chain_text));
 	} else if (stats_->get_markers_total() > 0 && stats_->get_markers_resolved() == 0) {
 		UtilityFunctions::push_warning(vformat(
-				"MissionAudio: 0/%d sound markers resolved (item db %s) — mission ambience will be silent",
+				"MissionAudio: 0/%d sound markers resolved (item db %s): mission ambience will be silent",
 				stats_->get_markers_total(), item_db_.is_null() ? String("missing") : String("loaded")));
 	}
 
