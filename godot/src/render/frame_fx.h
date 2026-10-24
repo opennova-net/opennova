@@ -108,6 +108,16 @@ public:
 	// RenderingServer.force_sync(); an empty Ref means no target exists (no
 	// RenderingDevice, no frame yet, or an unmapped attachment format).
 	Ref<Image> capture_q3_target();
+	// The render targets that hold the scene's gamma-domain numbers as they are
+	// (any thread): a viewport with use_hdr_2d, whose texture Godot's tonemap
+	// writes with no sRGB encode, so the terminal display decode would only be
+	// undone. Every view drawing into one skips the decode, and the target
+	// keeps the numbers retail's 8-bit backbuffer holds (color.gdshaderinc) for
+	// the 8-bit canvas that draws it. The owner registers the target's render
+	// target (RenderingServer::viewport_get_render_target) and forgets it
+	// before the viewport goes.
+	static void set_display_passthrough_target(const RID &p_render_target, bool p_passthrough);
+	static bool is_display_passthrough_target(const RID &p_render_target);
 
 	void _render_callback(int32_t p_effect_callback_type,
 			RenderData *p_render_data) override;

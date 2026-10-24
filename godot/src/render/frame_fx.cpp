@@ -89,6 +89,12 @@ constexpr std::uint32_t kBeautyCameraMask = 0x0CD78C01u; // + MAIN_VIEW bits 20/
 constexpr std::int32_t kWorkSide = opennova::renderer::kFrameFxWorkSide;
 constexpr std::uint32_t kPushConstantBytes = 64u;
 
+// FrameFxCompositorEffect::set_display_passthrough_target's registry: the
+// render targets' RID ids, written on the main thread, read by the render
+// callback.
+std::mutex g_passthrough_mutex;
+std::vector<std::uint64_t> g_passthrough_targets;
+
 // The fragment stage a draw evaluates (pc.mode_taps.x).
 enum class FramePass : std::int32_t {
 	Stretch = 0,
@@ -583,6 +589,9 @@ public:
 	RID decode_pipeline;
 	bool decode_compute_failed = false;
 	std::size_t decode_in_place_views = 0;
+	// Views of the last frame that drew into a display-passthrough target
+	// (set_display_passthrough_target): no decode ran for them.
+	std::size_t decode_passthrough_views = 0;
 	RID sampler;
 	RID repeat_sampler;
 	RID scanlines;
@@ -1618,6 +1627,10 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 	nvg_sights_drawn = 0;
 	std::size_t draws = 0;
 	std::size_t in_place_views = 0;
+	// A target that keeps the gamma-domain numbers (Godot writes it with no
+	// sRGB encode) takes no decode: the pair would cancel.
+	const bool passthrough =
+			FrameFxCompositorEffect::is_display_passthrough_target(buffers->get_render_target());
 	bool sampled_q3 = false;
 	bool q3_failed = false;
 	bool effects_failed = false;
@@ -1656,7 +1669,10 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 
 		// All 3D retail draws have blended as gamma-domain numeric values. Copy
 		// once, then apply the display-backend transfer immediately before Godot's
-		// sRGB output encoding. Canvas/viewmodel/HUD passes run afterward.
+		// sRGB output encoding. Canvas/viewmodel/HUD passes run afterward. A
+		// passthrough target gets neither the transfer nor the encode.
+		if (passthrough)
+			continue;
 		if (gpu_timing && view == 0)
 			rd->capture_timestamp("opennova_decode_begin");
 		if (target.decode_image_uniform.is_valid() &&
@@ -1696,6 +1712,7 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 		gpu_draw_calls = draws;
 		view_count = count;
 		decode_in_place_views = in_place_views;
+		decode_passthrough_views = passthrough ? count : 0;
 		last_size = size;
 		last_capture_size = targets.empty() ? Vector2i() :
 				targets.front().capture_size;
@@ -1721,7 +1738,8 @@ Dictionary FrameFxCompositorEffect::Impl::report() const {
 	result["terminal_transfer"] = "srgb_inverse_then_display_encode";
 	// How the last frame's views ran that transfer: in place (one compute
 	// pass per view) or copied and drawn back (two full-frame passes).
-	result["terminal_decode"] = decode_in_place_views == 0 ? "copy_and_draw" :
+	result["terminal_decode"] = decode_passthrough_views > 0 ? "passthrough_target" :
+			decode_in_place_views == 0 ? "copy_and_draw" :
 			decode_in_place_views == view_count ? "compute_in_place" : "mixed";
 	result["terminal_decode_compute_failed"] = decode_compute_failed;
 	result["callback_seen"] = callback_seen;
@@ -1771,6 +1789,9 @@ FrameFxCompositorEffect::~FrameFxCompositorEffect() = default;
 void FrameFxCompositorEffect::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_backend_report"),
 			&FrameFxCompositorEffect::get_backend_report);
+	ClassDB::bind_static_method("FrameFxCompositorEffect",
+			D_METHOD("is_display_passthrough_target", "render_target"),
+			&FrameFxCompositorEffect::is_display_passthrough_target);
 }
 
 void FrameFxCompositorEffect::create_glow_source_device() {
@@ -1863,6 +1884,28 @@ Dictionary FrameFxCompositorEffect::get_backend_report() const {
 
 Ref<Image> FrameFxCompositorEffect::capture_q3_target() {
 	return impl_ ? impl_->capture_q3_target() : Ref<Image>();
+}
+
+void FrameFxCompositorEffect::set_display_passthrough_target(const RID &p_render_target,
+		bool p_passthrough) {
+	if (!p_render_target.is_valid())
+		return;
+	const std::uint64_t id = static_cast<std::uint64_t>(p_render_target.get_id());
+	std::lock_guard<std::mutex> lock(g_passthrough_mutex);
+	const auto it = std::find(g_passthrough_targets.begin(), g_passthrough_targets.end(), id);
+	if (p_passthrough && it == g_passthrough_targets.end())
+		g_passthrough_targets.push_back(id);
+	else if (!p_passthrough && it != g_passthrough_targets.end())
+		g_passthrough_targets.erase(it);
+}
+
+bool FrameFxCompositorEffect::is_display_passthrough_target(const RID &p_render_target) {
+	if (!p_render_target.is_valid())
+		return false;
+	const std::uint64_t id = static_cast<std::uint64_t>(p_render_target.get_id());
+	std::lock_guard<std::mutex> lock(g_passthrough_mutex);
+	return std::find(g_passthrough_targets.begin(), g_passthrough_targets.end(), id) !=
+			g_passthrough_targets.end();
 }
 
 void FrameFxCompositorEffect::_render_callback(

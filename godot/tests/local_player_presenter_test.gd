@@ -1221,6 +1221,14 @@ func test_a_mission_start_makes_and_holds_the_stretched_target() -> void:
 			"the held target draws nothing")
 	assert_true(target.size.x >= int(size.x) and target.size.y >= int(size.y),
 			"it is the mode's target, never below the surface on either axis")
+	# The target stands for retail's backbuffer, which holds the frame's gamma-domain bytes:
+	# Godot writes an HDR target with no sRGB encode, so FrameFX runs no display decode for it.
+	assert_true(target.use_hdr_2d, "the target keeps the scene's numbers as they are")
+	# The headless renderer makes no render targets (an invalid RID): the set is pinned where one exists.
+	var render_target := RenderingServer.viewport_get_render_target(target.get_viewport_rid())
+	if render_target.is_valid():
+		assert_true(FrameFxCompositorEffect.is_display_passthrough_target(render_target),
+				"FrameFX skips the display decode for the target")
 	assert_false(camera.get_viewport().disable_3d, "the surface draws its own 3D meanwhile")
 	var blit := presenter.get_node_or_null("ViewProjectionBlit") as CanvasLayer
 	assert_true(blit != null and not blit.visible, "the held target's blit is hidden")
@@ -1285,10 +1293,14 @@ func test_a_mission_start_at_the_surface_ratio_drops_a_held_target() -> void:
 	presenter.prepare_view_projection(mode)
 	var target := presenter.get_node_or_null("ViewProjectionTarget") as SubViewport
 	assert_not_null(target, "the mission start makes the target")
+	var render_target := RenderingServer.viewport_get_render_target(target.get_viewport_rid()) \
+			if target != null else RID()
 	# -1 selects the surface's own ratio: nothing stretches, so no target stands.
 	presenter.prepare_view_projection(-1)
 	assert_true(target == null or target.is_queued_for_deletion(),
 			"a start at the surface's ratio drops the held target")
+	assert_false(FrameFxCompositorEffect.is_display_passthrough_target(render_target),
+			"the dropped target leaves FrameFX's passthrough set")
 
 
 func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_models() -> void:
