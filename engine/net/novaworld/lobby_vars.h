@@ -243,8 +243,9 @@ struct HardwareIdentity {
 	//  identifier's Description sprintf'd @0x67C5D0]
 	bool has_adapter = false;
 	std::string adapter_description;
-	// The rendering adapter's display memory in MB: the leading number of DxDiag's
-	// szDisplayMemoryEnglish, truncated; 0 when the query finds none.
+	// The rendering adapter's display memory in MB as retail's 32-bit process reads it: the leading
+	// number of DxDiag's szDisplayMemoryEnglish, truncated, in the 32-bit view
+	// (wow64_display_memory_mb over a 64-bit process's read); 0 when the query finds none.
 	int64_t display_memory_mb = 0;
 	// The machine's physical memory in bytes.
 	uint64_t total_phys_bytes = 0;
@@ -254,6 +255,30 @@ struct HardwareIdentity {
 	int32_t desktop_width = 0;
 	int32_t desktop_height = 0;
 };
+
+// DxDiag's display memory as a 32-bit process reads it, from the MB count a 64-bit process reads:
+// the count, but 4095 above it. Retail is a 32-bit process, and DxDiag's figure is the sum of the
+// adapter's three segment sizes as DXGI describes the adapter (dedicated video, dedicated system,
+// shared system), shifted right by 20 ("%I64d MB"), in both DxDiag builds. Windows' 32-bit DXGI
+// clamps that sum to 0xFFFF0000 before it describes the adapter (the excess taken from the shared
+// size down to 0x3FFF0000, then from the dedicated system size, then from the dedicated video
+// size), so the 32-bit figure is the 64-bit one's minimum with 0xFFFF0000 >> 20 = 4095 (the floor
+// commutes with the minimum). Witnessed in the platform's own images, not Jointops.exe:
+// SysWOW64 dxgi.dll (image base 0x10000000; Windows 11, the build on the parity machine): the
+// segment clamp at 0x10041D44 over D3DKMT_SEGMENTSIZEINFO (queried as type 3, 0x18 bytes, its
+// results stored into the description at 0x1003D262..0x1003D277): the sum's test against
+// 0x7FFF0000 at 0x10041D8D, the limit at 0x1009391F..0x10093936 (0xFFFF0000, or 0x7FFF0000 when
+// the process's "LowVidMemCap" setting is set: read by that name at 0x1003B7D0, the name at
+// 0x100230B8; where Windows keeps it is not witnessed), the shared size's floor at
+// 0x1009395F..0x100939A8, the dedicated system size at 0x100939B8..0x100939D2, the dedicated video
+// size at 0x100939D7..0x100939E5; SysWOW64 dxdiagn.dll: the sum and "%I64d MB" at
+// 0x100365EB..0x10036638, System32 dxdiagn.dll the same sum at 0x180023992..0x1800239C5. Not
+// ported: the LowVidMemCap setting (2047; Jointops.exe carries none where it was witnessed: its
+// NWHWI printed 0, a count with bit 11 set) and the quirk path (QuirkIsEnabled 0x10000A at
+// 0x10041D68, for an adapter whose query reports no memory: a quarter of the physical memory as
+// its dedicated and as its shared size).
+inline constexpr int64_t kWow64DisplayMemoryCapMb = 4095;
+int64_t wow64_display_memory_mb(int64_t display_memory_mb);
 
 // NWHWI's second field: the query's number shifted into bytes in 32 bits, which the device keeps
 // only when it is not negative (else 0), shifted back logically; so a size whose bit 11 is set

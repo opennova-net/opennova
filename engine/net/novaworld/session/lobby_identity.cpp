@@ -217,7 +217,8 @@ bool read_display_adapter(uint32_t adapter, HardwareIdentity &out) {
 	out.display_memory_mb = 0;
 	if (adapter < count && SUCCEEDED(d3d->GetAdapterIdentifier(adapter, 0, &identifier))) {
 		const HRESULT com = CoInitialize(nullptr);
-		out.display_memory_mb = dxdiag_display_memory_mb(identifier.DeviceIdentifier);
+		// The count in retail's 32-bit view (wow64_display_memory_mb).
+		out.display_memory_mb = wow64_display_memory_mb(dxdiag_display_memory_mb(identifier.DeviceIdentifier));
 		if (SUCCEEDED(com)) CoUninitialize();
 	}
 	d3d->Release();

@@ -424,6 +424,20 @@ int main() {
 		expect(nw::nwhwi_display_memory_mb(16271) == 0, "16271 MB has bit 11 set: 0");
 		expect(nw::nwhwi_display_memory_mb(-1) == 0, "a failed query's -1 is negative: 0");
 
+		// D-NET-NEW-L9-60: retail's 32-bit view of the count, the 64-bit count's minimum with
+		// 0xFFFF0000 >> 20 (the 32-bit DXGI clamps the segment sizes' sum to 0xFFFF0000; the
+		// witness is the platform's, lobby_vars.h), so any adapter past 4 GiB prints 0.
+		expect(nw::kWow64DisplayMemoryCapMb == (0xFFFF0000ll >> 20), "the cap is the clamp's MB");
+		expect(nw::wow64_display_memory_mb(0) == 0 && nw::wow64_display_memory_mb(1536) == 1536 &&
+		               nw::wow64_display_memory_mb(4095) == 4095,
+		       "a count at or under the clamp is the 64-bit count");
+		expect(nw::wow64_display_memory_mb(4096) == 4095 && nw::wow64_display_memory_mb(16384) == 4095,
+		       "a count past the clamp reads 4095 in 32 bits");
+		expect(nw::nwhwi_display_memory_mb(nw::wow64_display_memory_mb(16384)) == 0 &&
+		               nw::nwhwi_display_memory_mb(nw::wow64_display_memory_mb(3000)) == 0 &&
+		               nw::nwhwi_display_memory_mb(nw::wow64_display_memory_mb(2047)) == 2047,
+		       "NWHWI prints 0 for any 32-bit count with bit 11 set, 4095 included");
+
 		expect(nw::nwhwi_physical_memory_mb(0) == 0, "no memory prints 0");
 		expect(nw::nwhwi_physical_memory_mb(0x20000000u) == 512, "512 MiB prints 512");
 		expect(nw::nwhwi_physical_memory_mb(0x3FF3FFFFu) == 1023, "under 1023.25 MiB rounds down");

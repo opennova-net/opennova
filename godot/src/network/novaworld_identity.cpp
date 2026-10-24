@@ -72,7 +72,9 @@ opennova::HardwareIdentity read_device_identity(const opennova::gamecfg::GameCfg
 			if (RenderingDevice *device = rendering->get_rendering_device()) {
 				uint64_t video_memory = device->get_device_total_memory();
 				if (video_memory == 0) video_memory = device->get_driver_total_memory();
-				hw.display_memory_mb = static_cast<int64_t>(video_memory >> 20u);
+				// In retail's 32-bit view, as the engine's read gives it (wow64_display_memory_mb).
+				hw.display_memory_mb =
+						opennova::wow64_display_memory_mb(static_cast<int64_t>(video_memory >> 20u));
 			}
 		}
 	}
