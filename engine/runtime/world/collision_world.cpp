@@ -64,14 +64,12 @@ void CollisionWorld::assign_entity(EntityHandle h, int32_t model_id,
         husk = existing->second.husk_model_id;
     }
     instances_[h.packed] = Instance{model_id, husk, registry_spawn_id};
-    if (h.pool() == 2) statics_dirty_ = true;
     invalidate_trace_view(h);
 }
 
 void CollisionWorld::remove_entity_instance(EntityHandle h) {
     if (!h.valid()) return;
     instances_.erase(h.packed);
-    if (h.pool() == 2) statics_dirty_ = true;
     invalidate_trace_view(h);
 }
 
@@ -216,7 +214,6 @@ bool CollisionWorld::ensure_entity_instance(World &world, EntityHandle h) {
         // The packed slot was despawned/reused. Never let its old intact or
         // husk model satisfy a query for the new registry lifetime.
         instances_.erase(existing);
-        if (h.pool() == 2) statics_dirty_ = true;
         invalidate_trace_view(h);
     }
     if (pose_provider_ == nullptr) return false;
@@ -796,7 +793,6 @@ void CollisionWorld::prune_stale_bindings(World &world) {
         if (entity == nullptr ||
             (it->second.registry_spawn_id != 0 &&
              it->second.registry_spawn_id != entity->registry_spawn_id)) {
-            if (h.pool() == 2) statics_dirty_ = true;
             it = instances_.erase(it);
         } else {
             ++it;
@@ -806,11 +802,14 @@ void CollisionWorld::prune_stale_bindings(World &world) {
 }
 
 void CollisionWorld::build_statics(World &world) {
-    // --- pool-2 statics: buildings first, then the rest. Built at mission
-    // start / teleport / the instance and registry edges that arm
-    // statics_dirty_, never per tick [orig: Entity_BuildAllProximityLists
-    // @0x4c20f0 -> 0x4b9430; xrefs = Entity_InitAllFromModels @0x40e5a1,
-    // Game_StartMission @0x525c90 and the teleport paths] ---
+    // --- pool-2 statics: buildings first, then the rest. Built at the first table
+    // build and at retail's Pool2 calls alone, the load and the mission start
+    // (build_initial_tables, build_all_tables) and the three teleports
+    // (rebuild_statics); between them a row spawned, moved or removed stays as the
+    // last build left it [orig: Entity_BuildProximityLists_Pool2 @0x4B9430, its
+    // callers Entity_BuildAllProximityLists @0x4C20F0 (from Entity_InitAllFromModels
+    // @0x40E5A1 and Game_StartMission @0x525C90), Entity_TeleportTeamToSpawn @0x43D4F8,
+    // EventAction_TeleportEntityToSpawn @0x43E1F2, WacCmd_TeleSsn @0x4F7F3E] ---
     statics_.clear();
     static_building_count_ = 0;
     auto push_static = [&](const Entity &e) {
@@ -1193,13 +1192,19 @@ void CollisionWorld::refresh_after_registry_change(World &world) {
         if (tick_tables_built_) build_initial_tables(world);
         return;
     }
-    // Entity_BuildAllProximityLists is the spawn/teleport path in retail: the
-    // statics table rebuilds here and nowhere per tick. Route through the
-    // normal builder so pool snapshots and the shared arena remain one coherent
-    // epoch; forcing the cadence gate also resets its counter.
+    // The pool-0 / pool-1 tables and every slice; the statics stand as the last Pool2 call
+    // left them (build_all_tables, rebuild_statics). Route through the normal builder so pool
+    // snapshots and the shared arena remain one coherent epoch; forcing the cadence gate also
+    // resets its counter.
     slice_refresh_counter_ = 16;
-    statics_dirty_ = true;
     build_tick_tables(world);
+}
+
+void CollisionWorld::build_all_tables(World &world) {
+    // [orig: Entity_BuildAllProximityLists @0x4C20F0 - Entity_BuildProximityLists_Pool2,
+    //  then Entity_BuildProximityLists_Pool01, then Entity_BuildProximityListsFromPools]
+    statics_dirty_ = true;
+    refresh_after_registry_change(world);
 }
 
 } // namespace opennova::world

@@ -747,7 +747,8 @@ void HostRole::init_local_player_at_mission_start() {
 		world::local_loadout_rebuild(world, kernel_->local.loadout, kernel_->local.weapon,
 				kernel_->local.inventory, kernel_->local.inventory_valid,
 				/*select_spawn_default=*/true);
-	if (world.collision != nullptr) world.collision->refresh_after_registry_change(world);
+	// Every table, the statics with them [orig: Entity_BuildAllProximityLists @0x525C90].
+	if (world.collision != nullptr) world.collision->build_all_tables(world);
 	if (player != nullptr) player->flags |= world::kEntityFlagCarried;
 }
 

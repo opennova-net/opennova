@@ -1099,7 +1099,9 @@ void World::restore(const Snapshot &s) {
     script.squad_events = s.squad_events;
     script.forced_animation = s.forced_animation;
     diagnostics = s.diagnostics; // retain boot gaps, discard findings from the previous playthrough
-    if (collision != nullptr) collision->refresh_after_registry_change(*this);
+    // The restart's reload builds every table, the statics with them [orig: Mission_LoadBMSFile
+    //  re-run -> Entity_InitAllFromModels @0x40E460 - Entity_BuildAllProximityLists @0x40E5A1].
+    if (collision != nullptr) collision->build_all_tables(*this);
     registry.for_each([&](const Entity &vehicle) {
         if (vehicle.primary_occupant.valid())
             vehicles.emit_control_started(vehicle);

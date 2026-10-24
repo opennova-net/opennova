@@ -417,7 +417,8 @@ void JoinerRole::run_mission_start_local_block() {
 		L->medic_reviving = false;
 		L->flags &= ~world::kEntityFlagCarried;
 	}
-	if (world.collision != nullptr) world.collision->refresh_after_registry_change(world);
+	// Every table, the statics with them [orig: Entity_BuildAllProximityLists @0x525C90].
+	if (world.collision != nullptr) world.collision->build_all_tables(world);
 	if (L != nullptr) L->flags |= world::kEntityFlagCarried;
 }
 

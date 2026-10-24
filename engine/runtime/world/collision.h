@@ -1337,10 +1337,10 @@ public:
     // tick. The statics table (pool 2, [orig: Entity_BuildProximityLists_Pool2
     // @ 0x4b9430]: buildings first [0..static_building_count), all statics
     // [0..static_count), positions quantized (p + 0x8000) >> 16 as u16, radius
-    // padded +111876, cap 1200) is rebuilt only when a pool-2 instance or the
-    // registry changed — retail builds it at mission start and on teleport
-    // (Entity_BuildAllProximityLists @ 0x4c20f0), never per tick; the instance
-    // and registry-lifetime edges below stand in for those paths.
+    // padded +111876, cap 1200) is built at the first build and then only at retail's
+    // Pool2 calls: the load and the mission start (Entity_BuildAllProximityLists
+    // @ 0x4c20f0: build_initial_tables, build_all_tables) and the teleports
+    // (rebuild_statics), never per tick.
     // [orig: Entity_BuildProximityListsFromPools @ 0x4b8eb0] per-entity candidate
     // slices (dyn radius+4.0u / statics; pool-1 radius+6.0u) into a 3000-entry arena.
     void build_tick_tables(World &world);
@@ -1348,9 +1348,14 @@ public:
     // such as portal setup and first-tick grounding. The 17-tick cadence only
     // governs steady-state rebuilds.
     void build_initial_tables(World &world);
-    // A spawn or registry rewind immediately republishes the existing pool
-    // snapshot and its candidate slices.
+    // A spawn or registry rewind immediately republishes the pool-0 / pool-1 tables and
+    // every candidate slice; the statics stand (a Pool2 call is build_all_tables').
     void refresh_after_registry_change(World &world);
+    // Every table: the statics, the pool-0 / pool-1 tables and every slice (or, before the
+    // first slices, the pre-logic snapshot). The mission start's local-player block and a
+    // restart's reload. [orig: Entity_BuildAllProximityLists @0x4C20F0, called by
+    //  Entity_InitAllFromModels @0x40E5A1 and Game_StartMission @0x525C90]
+    void build_all_tables(World &world);
     // Direct candidate rebuild plus this entity's blink refresh. Pool position
     // snapshots stay at their published epoch; unrelated contacts are retained.
     // [orig: WacCmd_Tele @0x4F22D0 -> 0x4B8EB0, 0x4B3DC0]

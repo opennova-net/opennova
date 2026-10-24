@@ -213,6 +213,30 @@ bool run_the_statics_list_every_typed_defd_row() {
 	              "statics: a row with no collision block lists at the pad's one unit");
 }
 
+// The statics change only at a Pool2 call: a pool-2 row spawned (its instance assigned) or
+// removed after the first build stays as that build left the table through every tick build and
+// every registry-change refresh, until the load / mission-start BuildAll (or a teleport's Pool2).
+// [orig: Entity_BuildProximityLists_Pool2 @0x4B9430 - callers Entity_BuildAllProximityLists
+//  @0x4C20F0 (Entity_InitAllFromModels @0x40E5A1, Game_StartMission @0x525C90) and the teleports
+//  @0x43D4F8 / @0x43E1F2 / @0x4F7F3E; Entity_UpdateAllEntities @0x4C2100 - the tick's Pool01
+//  call @0x4C240A]
+bool run_the_statics_change_only_at_a_pool2_call() {
+	Rig r;
+	r.build();
+	const int32_t statics = r.collision->static_count();
+	const w::EntityHandle late = r.spawn_static();
+	w::CollisionModel box;
+	box.sections.push_back(w::CollisionSection{});
+	r.collision->assign_entity(late, r.collision->add_model(std::move(box)));
+	for (int i = 0; i < 17; ++i) r.collision->build_tick_tables(*r.world);
+	r.collision->refresh_after_registry_change(*r.world);
+	if (!expect(r.collision->static_count() == statics,
+	            "statics timing: no tick build or refresh lists a late static")) return false;
+	r.collision->build_all_tables(*r.world);
+	return expect(r.collision->static_count() == statics + 1,
+	              "statics timing: the BuildAll lists it");
+}
+
 } // namespace
 
 int main() {
@@ -222,6 +246,7 @@ int main() {
 	ok &= run_the_group_rebuilds_every_table_then_each_members_list();
 	ok &= run_tele_ssn_rebuilds_the_statics_for_a_building_marker_alone();
 	ok &= run_the_statics_list_every_typed_defd_row();
+	ok &= run_the_statics_change_only_at_a_pool2_call();
 	if (!ok) return 1;
 	std::printf("teleport_tails_test: OK\n");
 	return 0;
