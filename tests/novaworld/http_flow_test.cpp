@@ -807,9 +807,11 @@ static bool test_browser_request_host() {
 
 // D-NET-NEW-L9-48: the Host's open sets PLoad "" and EXP (the expansion's name) in the jar ahead
 // of its @HOST_URL@ lookup, appended after the login's cookies, so the host leg's requests and the
-// host request's Cookie var-list end with them: the LN S1 / S1d retail host legs' 32 cookies end
-// "PERSISTENTREMEMBERLOGINDATA, PLoad, EXP", their ClientHostRequest Cookie lists carry PLoad ""
-// and EXP "" there, and no response sets either. A second host leg updates both in place.
+// host request's Cookie var-list carry them right after the login's PERSISTENTREMEMBERLOGINDATA,
+// ahead of the cookies the host leg's responses set: the LN S1 / S1d retail host legs' 32 cookies
+// end "PERSISTENTREMEMBERLOGINDATA, PLoad, EXP", their ClientHostRequest Cookie lists carry
+// PERSISTENTREMEMBERLOGINDATA, PLoad "" and EXP "" at vars 30..32 and then the host leg's 15, and
+// no response sets either. A second host leg updates both in place.
 // [orig: UI_HandleHostSessionStart @0x556D00 - CUIBrowser_AddFormField called @0x556F21 /
 //  @0x556F36, ahead of CUIScene_FindNamedValue called @0x556F46; CookieJar_UpdateFromURL
 //  @0x64E630 - the in-place value @0x64E7FF, the append @0x64E8F7..0x64E91C]

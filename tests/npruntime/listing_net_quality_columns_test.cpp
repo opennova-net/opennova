@@ -3,8 +3,9 @@
 // frame's first sample, the frame-rate counter still 0 (its first 2 s window not closed), stores
 // the bandwidth term 255 into one slot of five, so MI1 reads 51; five samples at 16 fps or more
 // read 1. Ping and loss stay 0 with no eligible slot. The LN S1 / S1d / S2r2 retail listen hosts
-// publish MI1 "0" at registration, "51" in the update after the load and "1" in the first
-// periodic update (LN-s6's S3 record), MI2 and MI3 never leaving "0".
+// publish MI1 "0" at registration, "51" in the update after the load (the round's first tick's
+// refresh, after its first sample) and "1" in the first periodic update (LN-s6's S3 record); in
+// S1d's scrubbed stream MI2 and MI3 stay "0" while its joiner sits on the deploy screen.
 // [orig: Lobby_UpdateServerInfo @0x4FE8C0 - g_NetQualityHostAvgBandwidth read @0x4FEB3C ("MI1"),
 //  g_NetQualityHostAvgPing @0x4FEB71 ("MI2"), g_NetQualityHostAvgLoss @0x4FEBA6 ("MI3");
 //  CNetQuality_UpdateMetrics @0x4C52C0 - the bandwidth term @0x4C531B..0x4C5350, the averages

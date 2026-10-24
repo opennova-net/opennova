@@ -189,6 +189,26 @@ int main() {
 		const std::string value = var(lobby->last_host_update["Host"], key);
 		CHECK(value != "<absent>" && value != "0" && !value.empty());
 	}
+	// The round's first server tick refreshes the listing, its update reading the session's
+	// columns as that tick left them: the PCIDKey its cookie-key ring's advance just drew, not the
+	// one the lister's pass before the tick read (D-NET-NEW-L9-53; LN-s6's S3: our first refresh
+	// carried no PCIDKey where the retail hosts' carry the advanced key).
+	// [orig: Server_TickUpdate @0x51D7E0 - CSessionIdRing_AdvanceAndGenerate called @0x51D93D,
+	//  Lobby_UpdateServerInfo called @0x51D943; Lobby_UpdateServerInfo @0x4FE8C0 - the ring's
+	//  current key @0x4FF191..0x4FF196]
+	{
+		for (int f = 0; f < 120 && ctx.cookie_key_table.count < 2; ++f) CHECK(server.frame(kFrame));
+		CHECK(ctx.cookie_key_table.count >= 2);
+		const std::string advanced = std::to_string(ctx.cookie_key_table.current());
+		std::optional<LobbyState> refreshed;
+		for (int f = 0; f < 500; ++f) {
+			refreshed = row();
+			if (refreshed && var(refreshed->last_host_update["Host"], "PCIDKey") == advanced) break;
+			CHECK(server.frame(kFrame));
+			std::this_thread::sleep_for(2ms);
+		}
+		CHECK(refreshed && var(refreshed->last_host_update["Host"], "PCIDKey") == advanced);
+	}
 
 	// The service's only endpoint is the source of the host's NWU datagrams:
 	// the game socket.

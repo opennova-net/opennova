@@ -41,7 +41,8 @@ void read_session_listing_columns(
 	//  ("MI1", the SetOrCreate called @0x4FEB6C), g_NetQualityHostAvgPing @0x4FEB71 ("MI2"),
 	//  g_NetQualityHostAvgLoss @0x4FEBA6 ("MI3"), each "%ld"; CNetQuality_UpdateMetrics @0x4C52C0 -
 	//  this+5..7 stored @0x4C557F..0x4C5585 and clamped @0x4C5588..0x4C55B3, `this`
-	//  g_NetQualityLevel (Game_ProcessMainFrame @0x526586, the call @0x52658B)]
+	//  g_NetQualityLevel (Game_ProcessMainFrame @0x5263F0 - the this load @0x526586, the call
+	//  @0x52658B)]
 	r.mi1 = ctx.host_quality_window.avg_bandwidth;
 	r.mi2 = ctx.host_quality_window.avg_ping;
 	r.mi3 = ctx.host_quality_window.avg_loss;
