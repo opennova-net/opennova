@@ -333,10 +333,11 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		return outcome;
 	}
 	if (strutil::iequals(verb, "TimeOfDay")) {
-		// HHMM, 1200 when absent or outside 0..2399; hours = floor(v * 0.01),
-		// minutes = the remainder, packed as a minute of day
-		// [orig: @0x4D2BE3..0x4D2C94 -> Environment_SetCurrentTime @0x57C4B0;
-		//  the lighting caches reset @0x4D2C9C/@0x4D2CA1 ride env.generation here].
+		// HHMM, 1200 when absent or outside 0..2399, packed into the clock word
+		// (environment_time_from_hhmm) and set with the epoch tickdown's 10
+		// (D-NET-NEW-LI-35) [orig: CNapiGameSession_HandleServerCommand @0x4D22F0 -
+		//  @0x4D2BE3..0x4D2C15, Environment_SetCurrentTime called @0x4D2C94; the lighting
+		//  caches' resets @0x4D2C9C / @0x4D2CA1 ride the weather's command generation here].
 		if (world == nullptr) return outcome;
 		outcome.handled = true;
 		int32_t hhmm = 1200;
@@ -344,9 +345,7 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 			hhmm = atol_token(args[0]);
 			if (hhmm < 0 || hhmm >= 2400) hhmm = 1200;
 		}
-		const int32_t hours = static_cast<int32_t>(std::floor(static_cast<double>(hhmm) * 0.01));
-		const int32_t minutes = hhmm - hours * 100;
-		world->commands.set_time_of_day_minutes(hours * 60 + minutes);
+		world->weather.set_current_time(environment_time_from_hhmm(hhmm));
 		return outcome;
 	}
 	if (strutil::iequals(verb, "SetServerName")) {
@@ -376,6 +375,22 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 	// slot's weapon tables) and DisarmPlayer (sub_4DC440) act on the retail
 	// weapon-overlay tables, which this host does not model.
 	return outcome;
+}
+
+uint32_t environment_time_from_hhmm(int32_t hhmm) {
+	// fild; fmul 0.01f; floor; ftol, at the 53-bit precision the port keeps; the 0x51EB851F
+	// divide by 100 and the 0x88888889 divides by 60 truncate toward zero, as C's.
+	// [orig: CNapiGameSession_HandleServerCommand @0x4D22F0 - fild @0x4D2C19, `fmul
+	//  flt_7C56A8` @0x4D2C24, _floor called @0x4D2C3F, _ftol2_sse called @0x4D2C44, the
+	//  divides @0x4D2C1D..0x4D2C86, the word @0x4D2C88..0x4D2C91]
+	const int32_t hours = static_cast<int32_t>(
+			std::floor(static_cast<double>(hhmm) * static_cast<double>(0.01f)));
+	const int32_t minutes = hhmm % 100;
+	const int32_t total =
+			static_cast<int32_t>(static_cast<uint32_t>(minutes) + 60u * static_cast<uint32_t>(hours));
+	const uint32_t hour_word = static_cast<uint32_t>(total / 60) << 24;
+	const uint32_t minute_word = static_cast<uint32_t>(minutes % 60) * 0x44400u;
+	return hour_word | minute_word;
 }
 
 } // namespace opennova::inmatch

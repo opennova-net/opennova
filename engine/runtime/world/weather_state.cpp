@@ -280,6 +280,12 @@ void WeatherState::command_time_of_day_minutes(int32_t minute_of_day) {
     bump_command();
 }
 
+void WeatherState::set_current_time(uint32_t fixed24) {
+    tod_fixed24 = fixed24;
+    tod_epoch_tickdown = 10;
+    bump_command();
+}
+
 void WeatherState::debug_set_time_of_day_minutes(double minute_of_day) {
     tod_fixed24 = tod_fixed24_from_minutes(minute_of_day);
     bump_command();

@@ -80,4 +80,16 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		std::string_view verb, std::string_view target_suffix,
 		const std::vector<std::string> &args);
 
+// The environment clock word an HHMM sets: hours = floor(hhmm * 0.01f) (the float constant
+// widened, at the 53-bit precision the port keeps: an exact hundred reads one hour short, as a
+// dedicated host's 53-bit and JO:CA's 64-bit x87 compute it, where JO's 24-bit mode rounds to
+// the hour), minutes = hhmm % 100, then the word
+// ((minutes + 60 * hours) / 60) << 24 | (minutes % 60) * 0x44400, every step 32-bit and signed
+// as retail's. The ServerCommand TimeOfDay and the tod input row pack the same word.
+// [orig: CNapiGameSession_HandleServerCommand @0x4D22F0 - `fmul flt_7C56A8` @0x4D2C24, _floor
+//  called @0x4D2C3F, the packing @0x4D2C49..0x4D2C91, Environment_SetCurrentTime called
+//  @0x4D2C94; Input_HandleActionBinding @0x49AD40 - case 438 the same @0x49BDC5..0x49BE42;
+//  flt_7C56A8 = 0x3C23D70A (0.01f)]
+uint32_t environment_time_from_hhmm(int32_t hhmm);
+
 } // namespace opennova::inmatch

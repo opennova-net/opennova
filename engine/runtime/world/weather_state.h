@@ -267,6 +267,15 @@ struct WeatherState {
     void command_sky_height(int32_t height_raw);                // [orig: WacCmd_SkyHeight @ 0x4edec0]
     void command_quake(int32_t seconds);                        // [orig: WacCmd_Quake @ 0x4ed4c0]
     void command_time_of_day_minutes(int32_t minute_of_day);    // [orig: WacCmd_Tod @ 0x4edc70]
+    // Environment_SetCurrentTime: the 8.24 clock word as given (the day wrap is the
+    // tick's), the minute counter's tickdown set to 10. The tod row and the
+    // ServerCommand TimeOfDay set it (inmatch::environment_time_from_hhmm).
+    // [orig: Environment_SetCurrentTime @0x57C4B0 - g_EnvCurTimeFixed24 @0x57C4B4,
+    //  g_EnvTodEpochTickdown = 10 @0x57C4B9]
+    void set_current_time(uint32_t fixed24);
+    // The todrate row's store: g_EnvTodAdvancePerTick as given.
+    // [orig: Input_HandleActionBinding @0x49AD40 - case 497 the store @0x49BE8D]
+    void set_tod_advance_per_tick(uint32_t advance) { tod_advance_per_tick = advance; }
     // The dev-tool scrub (MCP rows, GameWorld's debug seam): the exact
     // minute on the 8.24 clock. Not a witnessed handler — the WAC `tod`
     // math above keeps its 0x44444-per-minute truncation.
