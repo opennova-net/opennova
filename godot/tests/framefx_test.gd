@@ -271,18 +271,19 @@ func test_world_frame_module_owns_beauty_depth_q3_and_the_terminal_effect() -> v
 		assert_eq(table.get_height(), 1)
 		var image := table.get_image()
 		if image != null:
-			assert_eq(image.get_format(), Image.FORMAT_RGBAF,
-					"32-bit float texels: the table adds no rounding of its own")
-			# Texel i holds the exact sRGB decode of its centre (i + 0.5) / 4096, the u at
-			# which the tonemap's linear clamped sampler reads it.
+			assert_eq(image.get_format(), Image.FORMAT_RGBA16,
+					"16-bit unsigned-normalised texels: every source byte comes back to itself")
+			# Texel i holds the sRGB decode of its centre (i + 0.5) / 4096, the u at which
+			# the tonemap's linear clamped sampler reads it, rounded to the 16-bit step.
 			for texel in [0, 165, 166, 2047, 4095]:
 				var encoded := (float(texel) + 0.5) / 4096.0
 				var decoded := encoded / 12.92 if encoded < 0.04045 \
 						else pow((encoded + 0.055) / 1.055, 2.4)
+				var stored := floorf(decoded * 65535.0 + 0.5) / 65535.0
 				var pixel := image.get_pixel(texel, 0)
-				assert_almost_eq(pixel.r, decoded, 0.000001)
-				assert_almost_eq(pixel.g, decoded, 0.000001)
-				assert_almost_eq(pixel.b, decoded, 0.000001)
+				assert_almost_eq(pixel.r, stored, 0.000001)
+				assert_almost_eq(pixel.g, stored, 0.000001)
+				assert_almost_eq(pixel.b, stored, 0.000001)
 	assert_eq(camera.cull_mask, 215452673,
 			"the module selects the one supported beauty camera signature")
 	assert_false(report.has("far_alpha_stage"),

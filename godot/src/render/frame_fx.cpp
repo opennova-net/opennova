@@ -493,34 +493,37 @@ std::map<std::int64_t, ObjectID> &scenario_decodes() {
 // sRGB-encoded number, so texel i holds the decode of its centre
 // (i + 0.5) / N and the read interpolates the curve between centres: at 4096
 // texels the interpolation error stays under 3e-8 and the clamped half texel
-// at each end under 0.08 of an 8-bit step, so an 8-bit source value comes
-// back to its own byte and a blended one rounds to the pair's byte but for
-// about 1 in 10,000 values at a rounding edge (the decode pass's half-float
-// store moved about 1 in 100).
+// at each end under 0.08 of an 8-bit step.
 constexpr int kDisplayDecodeTableTexels = 4096;
 
 // The decode table as Godot's tonemap reads a 1D colour correction: one row,
 // each channel the transfer kGlslGammaToLinear applies (the exact sRGB
-// inverse), 32-bit float texels so the table adds no rounding of its own.
+// inverse), in 16-bit unsigned-normalised texels. The tonemap filters three
+// reads of it a pixel, and a 64-bit texel costs the texture units fewer filter
+// cycles than a 128-bit float one. Every 8-bit source value still comes back
+// to its own byte (the largest error is 0.07 of a step), and a blended value
+// rounds to the pair's byte but for about 1 in 1,500 at a rounding edge (1 in
+// 12,500 with float texels; the decode pass's half-float store moved about 1 in
+// 100; D-NET-NEW-L3-64).
 Ref<ImageTexture> make_display_decode_table() {
 	PackedByteArray bytes;
 	bytes.resize(static_cast<int64_t>(kDisplayDecodeTableTexels) * 4 *
-			static_cast<int64_t>(sizeof(float)));
-	float *texels = reinterpret_cast<float *>(bytes.ptrw());
+			static_cast<int64_t>(sizeof(uint16_t)));
+	uint16_t *texels = reinterpret_cast<uint16_t *>(bytes.ptrw());
 	for (int i = 0; i < kDisplayDecodeTableTexels; ++i) {
 		const double encoded = (static_cast<double>(i) + 0.5) /
 				static_cast<double>(kDisplayDecodeTableTexels);
 		const double decoded = encoded < 0.04045 ?
 				encoded / 12.92 :
 				std::pow((encoded + 0.055) / 1.055, 2.4);
-		const float value = static_cast<float>(decoded);
+		const uint16_t value = static_cast<uint16_t>(std::floor(decoded * 65535.0 + 0.5));
 		texels[i * 4 + 0] = value;
 		texels[i * 4 + 1] = value;
 		texels[i * 4 + 2] = value;
-		texels[i * 4 + 3] = 1.0f;
+		texels[i * 4 + 3] = 65535;
 	}
 	const Ref<Image> image = Image::create_from_data(kDisplayDecodeTableTexels, 1,
-			false, Image::FORMAT_RGBAF, bytes);
+			false, Image::FORMAT_RGBA16, bytes);
 	return ImageTexture::create_from_image(image);
 }
 
