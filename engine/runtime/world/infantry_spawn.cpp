@@ -611,13 +611,13 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity,
                 const int32_t eye_offset[3] = {
                         inf.eye_offset_x, inf.eye_offset_y, inf.eye_offset_z};
                 // The tick's one resolver, so its ladder entry runs as it does in an update:
-                // the gate against the anchor reads savedLivePose.Z (+0x88), which the reset
-                // leaves, and the entry's lift reads the stance bits.
+                // the gate against the anchor reads savedLivePose.Z (+0x88) as it stands, which
+                // the reset leaves (a fresh spawn's memset 0 included), and the entry's lift
+                // reads the stance bits.
                 // [orig: Entity_ResetToSpawnState @0x4B9610 - the three pushes @0x4B9752..0x4B9754;
                 //  Entity_MovementCollisionResolver @0x4B2BD0 - `sub edi, [esi+88h]` @0x4B327D,
                 //  MoveOrder @0x4B331E, +0xEC00 @0x4B3332, +0x9C00 @0x4B3342, +0x5000 @0x4B334B]
-                const LadderResolveIO lio = make_ladder_resolve_io(
-                        *body, entity.saved_live_valid ? entity.saved_live_pos[2] : pos[2]);
+                const LadderResolveIO lio = make_ladder_resolve_io(*body, entity.saved_live_pos[2]);
                 const int32_t clearance = ai.collision->resolve_entity(
                         world, entity.handle, body->collide_state, pos.data(),
                         inf.vel, inf.vel[2], frame.capsule_bottom, frame.capsule_top,

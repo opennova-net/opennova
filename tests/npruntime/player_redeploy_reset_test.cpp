@@ -264,57 +264,93 @@ w::CollisionModel ladder_model() {
 	return model;
 }
 
-// The reset resolves through the tick's one resolver, its ladder entry included: a live player
-// body reset on a ladder's CL volume, its savedLivePose above the anchor and its look level,
-// takes the from-above entry (no facing test) and latches the ladder (Flags 0x100000), which
-// only the climb channels set (a resolve without them keeps the raw ground link alone).
-// [orig: Entity_ResetToSpawnState @0x4B9610 - the pushes @0x4B9752..0x4B9754, the call
-//  @0x4B9755; Entity_MovementCollisionResolver @0x4B2BD0 - `sub edi, [esi+88h]` @0x4B327D,
-//  the player gate @0x4B329F..0x4B32D7 (its Pitch read @0x4B32C8), the fresh entry's latch
-//  `or ecx, 100000h` @0x4B32DD stored @0x4B32E5, the snap from above @0x4B330D..0x4B3319]
-bool run_the_reset_resolve_enters_a_ladder() {
-	auto world = std::make_unique<w::World>();
-	auto collision = std::make_unique<w::CollisionWorld>();
+// A live body reset on a ladder's CL box: the body off the anchor column at (8.5, 7.75, 0), its
+// savedLivePose 1.5 units off the +Y face and 2 units up (above the anchor), its look level.
+// Heap-held (the 1 MB test-main stack under MSVC).
+struct LadderRig {
+	std::unique_ptr<w::World> world = std::make_unique<w::World>();
+	std::unique_ptr<w::CollisionWorld> collision = std::make_unique<w::CollisionWorld>();
 	Source source;
-	world->registry.configure_pool(0, 8);
-	world->registry.configure_pool(2, 4);
-	world->collision = collision.get();
-	world->ai.collision = collision.get();
-	world->ai.root_motion = &source;
-	world->ai.is_authority = true;
-	w::PlayerSpawn spawn;
-	spawn.position.x.q16 = 8 * kOne;
-	spawn.position.y.q16 = 8 * kOne;
-	spawn.position.z.q16 = 0;
-	spawn.team = 1;
-	const w::EntityHandle body = w::spawn_remote_player(*world, spawn);
-	w::Entity &e = *world->registry.get(body);
-	e.item_type_index = 3;
-	e.bound_radius = 1;
-	e.flags &= ~(w::kEntityFlagInAir | w::kEntityFlagLadderContact);
-	e.engine_flags &= ~(w::kEntityFlagInAir | w::kEntityFlagLadderContact);
-	w::Entity ladder;
-	ladder.kind = w::EntityKind::Building;
-	ladder.position = {8.0f, 8.0f, 0.0f};
-	ladder.heading = w::placed_heading_bam(90); // the identity rotation
-	ladder.bound_radius = 30;
-	ladder.alive = true;
-	const w::EntityHandle ladder_h = world->registry.spawn(2, ladder);
-	collision->assign_entity(ladder_h, collision->add_model(ladder_model()));
-	for (int i = 0; i < 17; ++i) collision->build_tick_tables(*world);
-	if (!expect(collision->candidate_count(body) >= 1, "ladder: the body's slice holds the ladder"))
+	w::EntityHandle body;
+
+	explicit LadderRig(bool player) {
+		world->registry.configure_pool(0, 8);
+		world->registry.configure_pool(2, 4);
+		world->collision = collision.get();
+		world->ai.collision = collision.get();
+		world->ai.root_motion = &source;
+		world->ai.is_authority = true;
+		w::PlayerSpawn spawn;
+		spawn.position.x.q16 = 8 * kOne + kOne / 2;
+		spawn.position.y.q16 = 7 * kOne + 3 * kOne / 4;
+		spawn.position.z.q16 = 0;
+		spawn.team = 1;
+		body = w::spawn_remote_player(*world, spawn);
+		w::Entity &e = entity();
+		e.item_type_index = 3;
+		e.bound_radius = 1;
+		uint32_t cleared = w::kEntityFlagInAir | w::kEntityFlagLadderContact;
+		if (!player) cleared |= w::kEntityFlagPlayer;
+		e.flags &= ~cleared;
+		e.engine_flags &= ~cleared;
+		w::Entity ladder;
+		ladder.kind = w::EntityKind::Building;
+		ladder.position = {8.0f, 8.0f, 0.0f};
+		ladder.heading = w::placed_heading_bam(90); // the identity rotation, Yaw word 0
+		ladder.bound_radius = 30;
+		ladder.alive = true;
+		const w::EntityHandle ladder_h = world->registry.spawn(2, ladder);
+		collision->assign_entity(ladder_h, collision->add_model(ladder_model()));
+		for (int i = 0; i < 17; ++i) collision->build_tick_tables(*world);
+		e.saved_live_pos[0] = 8 * kOne + kOne / 2;
+		e.saved_live_pos[1] = 9 * kOne + kOne / 2;
+		e.saved_live_pos[2] = 2 * kOne;
+		e.saved_live_valid = true;
+		world->ai.for_handle(body)->pitch = 0;
+		world->entity_update_counter = 1;
+	}
+
+	w::Entity &entity() { return *world->registry.get(body); }
+};
+
+// The reset resolves through the tick's one resolver, its ladder entry included. A player body
+// takes the fresh entry from above (no facing test; the level look agrees with the anchor below
+// savedLivePose.Z): it is snapped onto the anchor column, (8, 8) (the box's mid pulled back 0.375
+// along the ladder's Yaw, its first plane's -90 degrees), at the anchor less 0x1000 (the box's
+// top less one unit, 0.5, so 0x7000), and latched. The resolve takes no lift (no ground under
+// it). A resolve without the climb channels latches on any CL touch but never snaps.
+// [orig: Entity_ResetToSpawnState @0x4B9610 - the pushes @0x4B9752..0x4B9754, the call
+//  @0x4B9755, the lift test @0x4B975D..0x4B9761; Entity_MovementCollisionResolver @0x4B2BD0 -
+//  `sub edi, [esi+88h]` @0x4B327D, the player gate @0x4B329F..0x4B32D7 (its Pitch read
+//  @0x4B32C8), the latch `or ecx, 100000h` @0x4B32DD stored @0x4B32E5, the column @0x4B32F2..
+//  0x4B3308, the snap from above @0x4B330D..0x4B3319; Entity_ComputeBoneCollisionForce
+//  @0x4AE150 - the CL anchor @0x4AE894..0x4AEA30]
+bool run_the_reset_resolve_enters_a_ladder() {
+	LadderRig r(/*player=*/true);
+	if (!expect(r.collision->candidate_count(r.body) >= 1, "ladder: the body's slice holds the ladder"))
 		return false;
-	// The last stamp 1.5 units off the +Y face and 2 units up: above the anchor.
-	e.saved_live_pos[0] = 8 * kOne;
-	e.saved_live_pos[1] = 9 * kOne + kOne / 2;
-	e.saved_live_pos[2] = 2 * kOne;
-	e.saved_live_valid = true;
-	w::AiEntity &ai = *world->ai.for_handle(body);
-	ai.pitch = 0;
-	world->entity_update_counter = 1;
-	w::entity_reset_to_spawn_state(*world, world->ai, e);
-	return expect((world->registry.get(body)->flags & w::kEntityFlagLadderContact) != 0,
-	              "ladder: the reset's resolve latches the ladder from above");
+	w::entity_reset_to_spawn_state(*r.world, r.world->ai, r.entity());
+	const w::Entity &e = r.entity();
+	if (!expect(e.position.x.q16 == 8 * kOne && e.position.y.q16 == 8 * kOne,
+	            "ladder: the entry snaps the body onto the anchor column")) return false;
+	if (!expect(e.position.z.q16 == kOne / 2 - 0x1000,
+	            "ladder: from above, the body sits at the anchor less 0x1000")) return false;
+	return expect((e.flags & w::kEntityFlagLadderContact) != 0,
+	              "ladder: the entry latches the ladder");
+}
+
+// The fresh entry's gate: a body with no Player bit (0x100), no AI move order and no climb
+// behavior (aiRuntime +4 & 0x400) never latches a CL volume it touches, nor snaps onto it.
+// [orig: Entity_MovementCollisionResolver @0x4B2BD0 - the move order `jnz` @0x4B325D, the Player
+//  bit @0x4B325F..0x4B3265, the climb behavior `jz` @0x4B3271]
+bool run_the_reset_resolve_gates_a_non_climber_off_a_ladder() {
+	LadderRig r(/*player=*/false);
+	w::entity_reset_to_spawn_state(*r.world, r.world->ai, r.entity());
+	const w::Entity &e = r.entity();
+	if (!expect(e.position.x.q16 == 8 * kOne + kOne / 2 && e.position.z.q16 == 0,
+	            "ladder gate: the non-climber is not snapped")) return false;
+	return expect((e.flags & w::kEntityFlagLadderContact) == 0,
+	              "ladder gate: the non-climber does not latch");
 }
 
 // Retail's reset neither reads nor stores MoveOrder: the stance bits are the player deploy's own
@@ -470,6 +506,7 @@ int main() {
 	ok &= run_the_reset_on_a_dead_body_resolves_nothing();
 	ok &= run_the_reset_leaves_the_stance_bits();
 	ok &= run_the_reset_resolve_enters_a_ladder();
+	ok &= run_the_reset_resolve_gates_a_non_climber_off_a_ladder();
 	ok &= run_the_reset_leaves_the_local_players_revive_word();
 	ok &= run_the_deploy_pushes_the_body_out_of_a_wall();
 	ok &= run_a_joiner_bodys_death_edge_reads_its_flags();
