@@ -438,8 +438,8 @@ int test_fields() {
 	TEST_EXPECT(compose(m, whole));
 	TEST_EXPECT(mission::set_entity_property_int(whole, mission::EntityKind::Item, 0, "map_symbol", 300, error) &&
 	            whole.items[0].map_symbol == 255);
-	// An AI flag past the known attributes is refused, by the editor (its names are every bit the
-	// record holds) and by the format's rule.
+	// An AI flag past the known attributes that the record does not hold is refused, by the editor
+	// and by the format's rule (the format keeps a file's own bits whole, D-MIS-21).
 	TEST_EXPECT(!schema(MissionKind::Item, "ai_flags").open_choices && !set(item, "ai_flags", int64_t(1) << 3, error));
 	TEST_EXPECT(!mission::set_entity_property_int(whole, mission::EntityKind::Item, 0, "ai_flags", 1 << 3, error) &&
 	            error == "Mission entity AI flags include unsupported bits");
@@ -453,6 +453,10 @@ int test_fields() {
 			            choice.label == "No shadow" && choice.description.find("no sun shadow") != std::string::npos &&
 			            choice.description.find("Terrain_CollectAndRenderTileModels @ 0x60D42F") !=
 			                    std::string::npos);
+		else if (choice.name == "NotOnMap")
+			TEST_EXPECT(choice.value == int64_t(uint32_t(bms::BmsiAttributeFlags::NotOnMap)) &&
+			            choice.label == "Not on the map" &&
+			            choice.description.find("Server_BuildOverlayStateForPlayer @ 0x51809B") != std::string::npos);
 		else
 			TEST_EXPECT(choice.label.empty() && choice.description.empty());
 	}

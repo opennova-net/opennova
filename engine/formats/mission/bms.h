@@ -167,6 +167,11 @@ enum class BmsiAttributeFlags : uint32_t {
     NavigationWaypoint = 1 << 22,
     Reflective = 1 << 23,
     NoShadow = 1 << 24,
+    // The spawn sets bit 0x80 of the entity+0x2C dword, and the minimap overlay's pool-2 scan and
+    // pool-1 visits skip an entity holding it; DFX2's Astrp_* missions author it on buildings
+    // [orig: Entity_SpawnFromBMSRecord @0x40ED3B..0x40ED44; Server_BuildOverlayStateForPlayer
+    //  @0x51809B, @0x51849C]
+    NotOnMap = 1 << 25,
 };
 
 inline BmsiAttributeFlags operator|(BmsiAttributeFlags a, BmsiAttributeFlags b) {

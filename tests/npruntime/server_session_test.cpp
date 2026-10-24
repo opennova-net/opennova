@@ -5641,6 +5641,35 @@ bool check_minimap_overlay_flagball_carried_flag() {
 	return ok;
 }
 
+// The pool-2 scan and the pool-1 visits pass over an entity whose +0x2C dword
+// holds bit 0x80, which the BMS attribute NotOnMap sets at spawn: no slot is
+// sent its entry.
+// [orig: Server_BuildOverlayStateForPlayer @0x51809B (pool 2), @0x51849C
+//  (pool 1); Entity_SpawnFromBMSRecord @0x40ED3B..0x40ED44]
+bool check_minimap_overlay_skips_not_on_map() {
+	using namespace opennova;
+	auto s = std::make_unique<FlagOverlayScene>();
+	if (!build_flag_overlay_scene(*s, game_type::kCaptureTheFlag, 3, 5)) return false;
+	const world::EntityHandle shown = world::EntityHandle::make(2, 0);
+	const world::EntityHandle off_map = world::EntityHandle::make(2, 1);
+	world::Entity *building = s->world.registry.get(off_map);
+	world::Entity *loose = s->world.registry.get(s->loose);
+	if (!expect(building != nullptr && loose != nullptr, "the scene holds the building and the flag"))
+		return false;
+	building->cause_flags |= world::kCauseFlagNotOnMap;
+	loose->cause_flags |= world::kCauseFlagNotOnMap;
+	inmatch::Server_TickUpdate(s->ctx);
+	const auto a = drain_overlay_batches(s->a_transport);
+	const auto b = drain_overlay_batches(s->b_transport);
+	bool ok = expect(overlay_row(a, shown) != nullptr && overlay_row(b, shown) != nullptr,
+	                 "a building without the bit is listed");
+	ok = expect(overlay_row(a, off_map) == nullptr && overlay_row(b, off_map) == nullptr,
+	            "the pool-2 scan passes over a NotOnMap building") && ok;
+	ok = expect(overlay_row(a, s->loose) == nullptr && overlay_row(b, s->loose) == nullptr,
+	            "the pool-1 visit passes over a NotOnMap item") && ok;
+	return ok;
+}
+
 // In FlagBall and Flag Me the visit's last pass walks the slot table and, for
 // each slot whose flag carry is past 60 seconds, queues an icon-2, colour-12
 // entry naming that slot's body, handed to the WALKED slot: a ring that is
@@ -5934,6 +5963,7 @@ int main() {
 	ok = check_minimap_overlay_zone_capture_bits() && ok;
 	ok = check_minimap_overlay_reads_the_slot_team() && ok;
 	ok = check_minimap_overlay_flagball_carried_flag() && ok;
+	ok = check_minimap_overlay_skips_not_on_map() && ok;
 	ok = check_minimap_overlay_flag_carrier_pass() && ok;
 	ok = check_preround_delay_phase_boundary() && ok;
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");

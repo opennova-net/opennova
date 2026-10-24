@@ -249,14 +249,20 @@ int bad_parse_buffer(const uint8_t *data, size_t data_size, BadFile *out) {
         // [6] + [5] * (100 + 12 * row) @0x410327..0x41033b; BoneAnim_TransformBones @0x410360,
         // the next row at +12 * bone_count @0x4104a0..0x4104a5]. Retail files carry one row
         // more (201 of 202 translated clips), which only a zero-weight read reaches; the
-        // parser stops at row frame_count.
+        // parser stops at row frame_count. A clip may also stop one row short, at row
+        // frame_count - 1 (DFX2's Crc_Atk3): retail's last interval then reads past the
+        // table, and the parser repeats the last stored row there, so the pose holds
+        // (docs/anim/adm-bad-format-re.md D-ANIM-8).
         if ((out->flags & 2u) != 0) {
             size_t trans_off = bones_offset + (size_t)out->bone_count * bone_stride;
             size_t sample_count = (size_t)out->bone_count * ((size_t)out->frame_count + 1);
-            size_t expected = sample_count * trans_stride;
+            size_t stored = sample_count;
 
-            if (!in_range(trans_off, expected, data_size)) {
-                bad_free(out); return -1;
+            if (!in_range(trans_off, sample_count * trans_stride, data_size)) {
+                stored = (size_t)out->bone_count * (size_t)out->frame_count;
+                if (out->frame_count == 0 || !in_range(trans_off, stored * trans_stride, data_size)) {
+                    bad_free(out); return -1;
+                }
             }
             out->num_translations = sample_count;
             out->translations = (float (*)[3])malloc(sample_count * 3 * sizeof(float));
@@ -265,7 +271,8 @@ int bad_parse_buffer(const uint8_t *data, size_t data_size, BadFile *out) {
             {
                 size_t idx;
                 for (idx = 0; idx < sample_count; ++idx) {
-                    size_t base = trans_off + idx * trans_stride;
+                    size_t from = idx < stored ? idx : idx - out->bone_count;
+                    size_t base = trans_off + from * trans_stride;
                     out->translations[idx][0] = read_f32(data, base + 0);
                     out->translations[idx][1] = read_f32(data, base + 4);
                     out->translations[idx][2] = read_f32(data, base + 8);

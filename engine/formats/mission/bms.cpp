@@ -22,23 +22,6 @@ namespace {
 
 using strutil::fixed_string;
 
-constexpr uint32_t kKnownBmsiAttributeMask =
-    static_cast<uint32_t>(BmsiAttributeFlags::Blind) |
-    static_cast<uint32_t>(BmsiAttributeFlags::Guarding) |
-    static_cast<uint32_t>(BmsiAttributeFlags::RemoveIfLessThan) |
-    static_cast<uint32_t>(BmsiAttributeFlags::RemoveIfMoreThan) |
-    static_cast<uint32_t>(BmsiAttributeFlags::SinglePlayerOnly) |
-    static_cast<uint32_t>(BmsiAttributeFlags::MultiplayerOnly) |
-    static_cast<uint32_t>(BmsiAttributeFlags::Berserk) |
-    static_cast<uint32_t>(BmsiAttributeFlags::FlyingOrganic) |
-    static_cast<uint32_t>(BmsiAttributeFlags::Coward) |
-    static_cast<uint32_t>(BmsiAttributeFlags::EngineRunning) |
-    static_cast<uint32_t>(BmsiAttributeFlags::AdvancedAmmo) |
-    static_cast<uint32_t>(BmsiAttributeFlags::Indestructible) |
-    static_cast<uint32_t>(BmsiAttributeFlags::NavigationWaypoint) |
-    static_cast<uint32_t>(BmsiAttributeFlags::Reflective) |
-    static_cast<uint32_t>(BmsiAttributeFlags::NoShadow);
-
 bool parse_header(io::ByteReader& r, Header& h, std::string& error, bool wire_header = false) {
     size_t start = r.position();
 
@@ -180,11 +163,9 @@ bool parse_entity(io::ByteReader& r, Entity& e, std::string& error) {
     e.type_id = r.read_i32();
     e.name_index = r.read_i32();
     e.id = r.read_i32();
+    // The whole dword: the spawn tests its bits one by one and refuses none
+    // [orig: Entity_SpawnFromBMSRecord @0x40e9f0] (docs/mission/mis-format-re.md D-MIS-21).
     e.bmsi_attributes = r.read_u32();
-    if ((e.bmsi_attributes & ~kKnownBmsiAttributeMask) != 0) {
-        error = "BMS entity has unsupported AI attribute bits";
-        return false;
-    }
     e.x = r.read_i32();
     e.y = r.read_i32();
     e.z = r.read_i32();
@@ -269,7 +250,7 @@ void write_entity(io::ByteWriter& w, const Entity& e) {
     w.write_i32(e.type_id);
     w.write_i32(e.name_index);
     w.write_i32(e.id);
-    w.write_u32(e.bmsi_attributes & kKnownBmsiAttributeMask);
+    w.write_u32(e.bmsi_attributes);
     w.write_i32(e.x);
     w.write_i32(e.y);
     w.write_i32(e.z);

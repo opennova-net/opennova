@@ -426,6 +426,26 @@ int main() {
 		TEST_EXPECT(reparsed_first_item.spawns == 5);
 		TEST_EXPECT(reparsed_first_item.no_more_than == 2);
 	}
+	// The attribute dword reads and writes whole, the bits no name covers too: DFX2's Astrp
+	// missions author NotOnMap, and the spawn reads bits (0x100) the editor names none of
+	// (D-MIS-21).
+	{
+		opennova::bms::File whole = reparsed;
+		const uint32_t attributes =
+				static_cast<uint32_t>(opennova::bms::BmsiAttributeFlags::NotOnMap) | 0x100u | 0x40000000u;
+		whole.items[0].bmsi_attributes = attributes;
+		std::vector<uint8_t> whole_bytes;
+		opennova::bms::File whole_back;
+		TEST_EXPECT(write_document(whole, whole_bytes) && load_document(whole_bytes, whole_back) &&
+		            whole_back.items[0].bmsi_attributes == attributes);
+		// The editor sets the named bits around the ones the record holds, and still refuses a new
+		// bit no name covers.
+		const int with_blind =
+				static_cast<int>(attributes | static_cast<uint32_t>(opennova::bms::BmsiAttributeFlags::Blind));
+		TEST_EXPECT(set_entity_property_int(whole_back, EntityKind::Item, 0, "ai_flags", with_blind, error) &&
+		            whole_back.items[0].bmsi_attributes == static_cast<uint32_t>(with_blind));
+		TEST_EXPECT(!set_entity_property_int(whole_back, EntityKind::Item, 0, "ai_flags", with_blind | 0x200, error));
+	}
 	const std::vector<WaypointSummary> summaries = waypoint_summaries(reparsed);
 	TEST_EXPECT(summaries.size() == opennova::bms::kWaypointRecordCount);
 	TEST_EXPECT(std::any_of(summaries.begin(), summaries.end(), [](const WaypointSummary &summary) {
@@ -855,17 +875,20 @@ int main() {
 		TEST_EXPECT(strict_error.find("action") != std::string::npos);
 	}
 
-	// --- Modeling policy: entity AI flags must be a known BmsiAttributeFlags combination. ---
+	// --- An entity's AI attribute dword is read and written whole, whatever bits it holds: the
+	// spawn refuses none (D-MIS-21). ---
 	{
-		std::vector<uint8_t> bad_ai_flags = original;
+		std::vector<uint8_t> unnamed_ai_flags = original;
 		const size_t first_item_ai_flags = opennova::bms::kHeaderSize +
 		                                   original_loadout_len +
 		                                   original_secondary_len + 12;
-		write_u32_le(bad_ai_flags, first_item_ai_flags, 1u << 29);
-		opennova::bms::File rejected;
+		write_u32_le(unnamed_ai_flags, first_item_ai_flags, (1u << 29) | (1u << 25));
+		opennova::bms::File kept;
 		std::string ai_error;
-		TEST_EXPECT(!opennova::bms::parse(bad_ai_flags.data(), bad_ai_flags.size(), rejected, ai_error));
-		TEST_EXPECT(ai_error.find("AI") != std::string::npos);
+		std::vector<uint8_t> written;
+		TEST_EXPECT(opennova::bms::parse(unnamed_ai_flags.data(), unnamed_ai_flags.size(), kept, ai_error) &&
+		            kept.items[0].bmsi_attributes == ((1u << 29) | (1u << 25)));
+		TEST_EXPECT(opennova::bms::write(kept, written, ai_error) && written == unnamed_ai_flags);
 	}
 
 	// --- Modeling policy: editor-reserved entity fields are canonical zero. ---

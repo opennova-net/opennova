@@ -350,6 +350,11 @@ inline constexpr uint32_t kEntityFlagScriptDisabled = 0x10000000; // WAC disable
 // unholdSSN clears; the org1 think holds the NPC in place while it is set.
 // [orig: WacCmd_HoldSsn @0x4F785D; Entity_UpdateInfantryAI @0x4BD235]
 inline constexpr uint32_t kCauseFlagScriptHold = 0x2000;
+// The entity+0x2C bit the BMS attribute NotOnMap (1<<25) sets at spawn; the minimap overlay's
+// pool-2 scan and pool-1 visits skip an entity holding it.
+// [orig: Entity_SpawnFromBMSRecord @0x40ED3B..0x40ED44; Server_BuildOverlayStateForPlayer
+//  @0x51809B, @0x51849C]
+inline constexpr uint32_t kCauseFlagNotOnMap = 0x80;
 
 // The BMS-attribute part of a streamed Flags dword, mapped back onto the
 // record attribute bits the placement traits read (Reflective 1<<23,

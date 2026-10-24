@@ -341,11 +341,11 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
     if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::Indestructible)) s.engine_flags |= kEntityFlagIndestructible;
     if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::Reflective)) s.engine_flags |= kEntityFlagReflective;
     if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::NoShadow)) s.engine_flags |= kEntityFlagNoShadow;
-    // Attribute 0x2000000 sets bit 0x80 of the entity+0x2C dword, still outside
+    // NotOnMap (0x2000000) sets bit 0x80 of the entity+0x2C dword, still outside
     // the AI branch [orig: Entity_SpawnFromBMSRecord @0x40ED3B..0x40ED44]. The
     // Guarding / EngineRunning / FlyingOrganic entity bits sit inside the AI
     // branch (fold_ai_entity_flags).
-    if (attrib & 0x2000000u) s.cause_flags |= 0x80u;
+    if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::NotOnMap)) s.cause_flags |= kCauseFlagNotOnMap;
     s.ammo_count = e.map_symbol; // BMS byte 81 -> entity+290 [orig: @0x40e9f0]
     s.ref_num = e.ref_num;       // BMS byte 153 -> entity+533 [orig: @0x40e9f0]
     // A record refNum joins the row to that refNum's group list [orig:

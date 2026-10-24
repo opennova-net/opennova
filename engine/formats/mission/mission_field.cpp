@@ -238,6 +238,7 @@ constexpr MissionChoice kAiAttributes[] = {
 	{"Berserk", 1 << 11},       {"FlyingOrganic", 1 << 14}, {"Coward", 1 << 16},
 	{"EngineRunning", 1 << 17}, {"AdvancedAmmo", 1 << 18},  {"Indestructible", 1 << 21},
 	{"NavigationWaypoint", 1 << 22}, {"Reflective", 1 << 23}, {"NoShadow", 1 << 24},
+	{"NotOnMap", 1 << 25},
 };
 // A path's flags as the game reads them (bms.h WaypointFlags): bit 1 the player's route, the first path
 // holding it the waypoint list the player is sent [orig: NetPacket_WriteWorldStateLoad0x0F @ 0x502D10,
@@ -290,6 +291,7 @@ static_assert(kMissionTypes[2].value == int64_t(bms::MissionType::TenthMountain)
 static_assert(kAttribFlags[19].value == int64_t(uint32_t(bms::AttribFlags::SearchAndDestroy)) &&
               kAttribFlags[4].value == int64_t(uint32_t(bms::AttribFlags::ForceIndoors)));
 static_assert(kAiAttributes[14].value == int64_t(uint32_t(bms::BmsiAttributeFlags::NoShadow)) &&
+              kAiAttributes[15].value == int64_t(uint32_t(bms::BmsiAttributeFlags::NotOnMap)) &&
               kAiAttributes[9].value == int64_t(uint32_t(bms::BmsiAttributeFlags::EngineRunning)));
 static_assert(kWaypointFlags[1].value == int64_t(uint32_t(bms::WaypointFlags::PlayerRoute)) &&
               kWaypointFlags[2].value == int64_t(uint32_t(bms::WaypointFlags::RedTeam)));
@@ -461,13 +463,16 @@ constexpr uint32_t kKnownAiAttributeMask =
 	static_cast<uint32_t>(bms::BmsiAttributeFlags::Indestructible) |
 	static_cast<uint32_t>(bms::BmsiAttributeFlags::NavigationWaypoint) |
 	static_cast<uint32_t>(bms::BmsiAttributeFlags::Reflective) |
-	static_cast<uint32_t>(bms::BmsiAttributeFlags::NoShadow);
+	static_cast<uint32_t>(bms::BmsiAttributeFlags::NoShadow) |
+	static_cast<uint32_t>(bms::BmsiAttributeFlags::NotOnMap);
 
-// ai_flags refuses a bit past the known attribute mask.
+// ai_flags refuses a bit past the known attribute mask that the record does not already hold: the
+// format keeps the whole dword (D-MIS-21), so a file's other bits stay through an edit of the named ones.
 bool set_ai_flags(void *record, const MissionValue &value, std::string &error) {
 	int64_t number = 0;
 	if (!integer_of(value, number, error)) return false;
-	if ((static_cast<uint32_t>(number) & ~kKnownAiAttributeMask) != 0) {
+	const uint32_t held = as<E>(record).bmsi_attributes;
+	if ((static_cast<uint32_t>(number) & ~kKnownAiAttributeMask & ~held) != 0) {
 		error = "Mission entity AI flags include unsupported bits";
 		return false;
 	}
