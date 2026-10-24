@@ -167,6 +167,9 @@ int main() {
 		TEST_EXPECT(block.enter_main_menu(mount, error));
 		TEST_EXPECT(block.video_test_ran() && block.menu_mount() == "game|");
 		TEST_EXPECT(block.cfg().display_16x9 == 1); // a widescreen desktop's row
+		// The display mode is the sample: video_res "%ux%u" of it (Game_RunVideoTestDialog
+		// @0x53ED42 / @0x53ED48, Format_ResolutionString called @0x53ED9B), saved with the rest.
+		TEST_EXPECT(block.cfg().video_res == "1920x1080");
 		TEST_EXPECT(block.cfg().object_polydetail == 2 && block.cfg().texfilter_level == 1);
 		TEST_EXPECT(block.cfg().particle_density == 2 && block.cfg().texcompression_level == 1);
 		TEST_EXPECT(block.cfg().terrain_texdetail == 3); // full detail
@@ -174,6 +177,15 @@ int main() {
 		TEST_EXPECT(block.file_read() && !block.version_reset()); // the entry read the saved file
 		const std::string saved = read_text(dir.file("game.cfg"));
 		TEST_EXPECT(saved.find("display_16x9         = 1\r\n") != std::string::npos);
+		TEST_EXPECT(saved.find("video_res            = 1920x1080\r\n") != std::string::npos);
+		// The block's display mode follows the first launch's sample, not a later desktop.
+		int32_t mode_width = 0;
+		int32_t mode_height = 0;
+		opennova::gamecfg::display_size(block.cfg(), 2560, 1440, mode_width, mode_height);
+		TEST_EXPECT(mode_width == 1920 && mode_height == 1080);
+		TEST_EXPECT(opennova::gamecfg::format_resolution_string(1920, 1080, 6) == "1920x" &&
+		            opennova::gamecfg::format_resolution_string(-1, 0, 32) == "4294967295x0" &&
+		            opennova::gamecfg::format_resolution_string(800, 600, 0).empty());
 
 		// A later entry over the same mount reads the file again (no second
 		// video test: the seeded words stay as the file has them now), and a

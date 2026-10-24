@@ -450,6 +450,14 @@ std::string format_fixed(double value, int precision);
 //  @0x551303 into outWidth @0x2550718 / outHeight]
 bool parse_resolution_dimensions(const std::string &text, int32_t &width, int32_t &height);
 
+// Format_ResolutionString: "%ux%u" of `width` and `height` (each read unsigned), kept to
+// `max_len` - 1 characters (the strncpy of `max_len` bytes and the terminator at `max_len` - 1);
+// "" for a `max_len` below 1. The first launch's video test writes the desktop sample into
+// video_res with it (max_len 32).
+// [orig: Format_ResolutionString @0x51E670 - the `maxLen >= 1` test @0x51E68F, sprintf "%ux%u"
+//  called @0x51E6A5, strncpy @0x51E6B1, the terminator @0x51E6B9]
+std::string format_resolution_string(int32_t width, int32_t height, int max_len);
+
 // The display mode's width and height as the block holds them (+0x60 / +0x64): the defaults'
 // primary desktop size, replaced by a video_res that parses. The boot then opens the renderer at
 // that mode and writes back the mode it set, the same one when the device opens (no fallback in a

@@ -470,6 +470,16 @@ bool parse_resolution_dimensions(const std::string &text, int32_t &width, int32_
 	return true;
 }
 
+// [orig: Format_ResolutionString @0x51E670]
+std::string format_resolution_string(int32_t width, int32_t height, int max_len) {
+	if (max_len < 1) return std::string();
+	char text[64] = {};
+	std::snprintf(text, sizeof(text), "%ux%u", static_cast<unsigned>(width), static_cast<unsigned>(height));
+	std::string out(text);
+	if (out.size() > static_cast<size_t>(max_len - 1)) out.resize(static_cast<size_t>(max_len - 1));
+	return out;
+}
+
 // [orig: Config_SetDefaults @0x54D030 - @0x54D0F6 / @0x54D10A; Config_ParseSettingsLine @0x54F740
 //  - @0x551303]
 void display_size(const GameCfg &cfg, int32_t desktop_width, int32_t desktop_height, int32_t &width,

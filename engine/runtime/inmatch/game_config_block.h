@@ -60,8 +60,9 @@
 
 namespace opennova::inmatch {
 
-// The first launch's video test, its words written into `cfg`: the aspect
-// word from the primary desktop's ratio and the quality words the test writes
+// The first launch's video test, its words written into `cfg`: the display mode
+// (video_res, "%ux%u" of the primary desktop), the aspect word from the
+// desktop's ratio and the quality words the test writes
 // on a capable device (renderer/aspect_ratio.h, object_lod.h, texture_filter.h,
 // particle_density.h, texture_compression.h, device_texture.h's terrain texture
 // detail carry each word's witness). Its other words (the terrain polygon,
