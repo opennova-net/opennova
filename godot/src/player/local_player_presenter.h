@@ -177,6 +177,11 @@ public:
 	// object); siblings of the avatar like the held weapon.
 	Ref<PersonOverlayModels> person_overlays() const { return person_overlays_; }
 	Camera3D *camera() const;
+	// The view block this frame's compose left (engine world/local_player_view.h
+	// LocalPlayerViewFrame::view_block, which carries the witness): the camera's
+	// stamped pose without the main scene's optics offsets, the eye the main
+	// scene's water mirror collects from. False with no composed pose.
+	bool get_view_block_transform(Transform3D &r_out) const;
 	// THE FRAME'S PROJECTION over the surface (the engine's world::view_projection
 	// for the session aspect mode): the horizontal fov is the policy fov in
 	// every mode and the vertical half-extent follows the SELECTED ratio, so a

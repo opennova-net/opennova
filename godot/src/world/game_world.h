@@ -826,6 +826,10 @@ private:
 	// local-view leg's hand-over), else null.
 	Camera3D *inset_pass_camera() const;
 	Transform3D render_camera_xform() const;
+	// The eye the main scene's water mirror collects from: the view block the
+	// frame's compose left (LocalPlayerPresenter::get_view_block_transform)
+	// while the local view's camera draws the frame, else render_camera_xform().
+	Transform3D main_mirror_collect_eye() const;
 	void stamp_iris_samples(const Transform3D &p_camera_xform);
 	void render_terrain_light_leg();
 	void sample_auxiliary_render_stats(bool p_stats_on);

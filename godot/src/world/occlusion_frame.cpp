@@ -142,7 +142,8 @@ opennova::renderer::ScenePassGateEdges OcclusionFrame::apply_blink_gates(bool p_
 }
 
 void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
-		const Transform3D &p_camera_xform, bool p_forces_indoors, int p_object_detail) {
+		const Transform3D &p_camera_xform, bool p_forces_indoors, int p_object_detail,
+		const Transform3D &p_mirror_eye) {
 	Simulation *s = sim();
 	if (s == nullptr) {
 		return;
@@ -174,12 +175,13 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
 		water_z = w->get_water_height();
 	}
 	// The scene's water mirror collects ahead of it while its water pass is
-	// active, over the same eye and the view's horizontal field on both axes;
-	// the label then reads the word as it stands, the mirror's or the last
-	// collect's (renderer::SceneWaterWord).
+	// active, over the view block (the eye without the scene's optics offsets,
+	// which only its drawn reflection takes) and the view's horizontal field on
+	// both axes; the label then reads the word as it stands, the mirror's or the
+	// last collect's (renderer::SceneWaterWord).
 	const bool mirror_ran = w != nullptr && w->is_water_pass_active();
 	const bool mirror_verdict = mirror_ran &&
-			s->run_mirror_occlusion(Simulation::MIRROR_MAIN, p_camera_xform,
+			s->run_mirror_occlusion(Simulation::MIRROR_MAIN, p_mirror_eye, p_camera_xform,
 					mirror_collect_fov(fov_y, aspect),
 					opennova::env::kReflectionRttSize, fog, water_z, p_forces_indoors,
 					p_object_detail);
@@ -413,7 +415,7 @@ void OcclusionFrame::apply_inset_frame(Camera3D *p_camera, float p_viewport_widt
 		mirror_ran = p_mirror_block != nullptr && w->is_inset_water_pass_active();
 	}
 	const bool mirror_verdict = mirror_ran &&
-			s->run_mirror_occlusion(Simulation::MIRROR_INSET, *p_mirror_block,
+			s->run_mirror_occlusion(Simulation::MIRROR_INSET, *p_mirror_block, *p_mirror_block,
 					mirror_collect_fov(request.fov_y_deg, request.aspect),
 					opennova::env::kReflectionRttSize, request.fog_dist_units,
 					request.water_z_units, p_forces_indoors, p_object_detail);

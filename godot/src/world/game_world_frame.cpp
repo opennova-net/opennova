@@ -1458,6 +1458,21 @@ Transform3D GameWorld::render_camera_xform() const {
 	return frame_camera_xform_;
 }
 
+// The main scene's water mirror collects from the raw view block, while the
+// scene's own view and the mirrored block it draws with take the optics
+// offsets (engine world/local_player_view.h LocalPlayerViewFrame::view_block
+// carries the witness).
+Transform3D GameWorld::main_mirror_collect_eye() const {
+	LocalPlayerPresenter *presenter = local_view_presenter();
+	Camera3D *camera = render_camera();
+	Transform3D block;
+	if (presenter != nullptr && camera != nullptr && presenter->camera() == camera &&
+			presenter->get_view_block_transform(block)) {
+		return block;
+	}
+	return render_camera_xform();
+}
+
 void GameWorld::apply_occlusion_frame() {
 	// The render-occlusion frame is camera-driven: it runs every render frame
 	// (retail collects visible entities per scene render, not per sim tick),
@@ -1466,7 +1481,7 @@ void GameWorld::apply_occlusion_frame() {
 	// (engine: runtime/world/occlusion.cpp)
 	if (world_ready_ && !frame_skip_occlusion_) {
 		occlusion_->apply_frame(image_camera(), surface_width(), render_camera_xform(),
-				mission_forces_indoors(), object_detail_);
+				mission_forces_indoors(), object_detail_, main_mirror_collect_eye());
 	}
 }
 
@@ -1597,7 +1612,7 @@ void GameWorld::render_material_frame() {
 	if (Camera3D *image = image_camera()) {
 		frames[0] = ObjectLodFrame::from_camera(image, surface_width(), object_detail_);
 		if (water_ != nullptr && water_->is_water_pass_active() && frames[0].valid) {
-			frames[2] = ObjectLodFrame::mirror_collect(image->get_global_transform(),
+			frames[2] = ObjectLodFrame::mirror_collect(main_mirror_collect_eye(),
 					frames[0].tan_half_horizontal, surface_width(), object_detail_);
 		}
 	}

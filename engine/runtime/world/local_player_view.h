@@ -565,6 +565,18 @@ struct LocalPlayerViewFrame {
     float fp_pitch_recoil_deg = 0.0f;
     float fp_roll_deg = 0.0f;
     PlayerCameraPose camera;
+    // The view block the main scene's compose leaves in g_ViewPos / g_ViewRot: `camera`
+    // without the main scene's optics offsets (the binocular sway, the slot zero), which land
+    // in the scene's local copy only. The scene's water mirror collects from this block; the
+    // mirrored block it draws with takes the offsets as well, so its reflected view is the
+    // mirror of `camera`.
+    // [orig: Render_ProcessMainSceneFrame @0x5CA0F0 - the copy @0x5CA352..0x5CA398, the sway
+    //  @0x5CA403 / @0x5CA407, the Sighted zero @0x5CA45E / @0x5CA465, the Scoped zero
+    //  @0x5CA499 / @0x5CA4A0; Water_ReflectionPrerender @0x5C2780 (the raw words
+    //  @0x5C2783..0x5C27C2); Render_MainScene @0x5C1240 - the collect's block @0x5C168D..0x5C16E1
+    //  and its projection @0x5C16E8, the drawn block's sway @0x5C13A2 / @0x5C13A8 /
+    //  @0x5C141A / @0x5C1420 and zero @0x5C13DF / @0x5C13E6 / @0x5C1456 / @0x5C145D]
+    PlayerCameraPose view_block;
     // The carrier owns this frame's first-person view (see
     // local_player_mounted_camera).
     bool mounted_camera = false;

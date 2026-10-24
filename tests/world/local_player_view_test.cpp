@@ -3541,6 +3541,17 @@ void test_rendered_scope_applies_elevation_and_parallax() {
         CHECK(std::abs(zeroed.camera.pitch_deg - base.camera.pitch_deg + 1.40625f) < 0.00001f);
         // Mission yaw is 90 - retail BAM yaw, hence the inverted sign.
         CHECK(std::abs(zeroed.camera.yaw_deg - base.camera.yaw_deg + 0.703125f) < 0.00001f);
+        // The zero lands in the scene's local camera only: the view block the water
+        // mirror's collect reads keeps the compose [orig: Render_ProcessMainSceneFrame
+        // @0x5CA352..0x5CA398 (the copy), @0x5CA499 / @0x5CA4A0 (the zero);
+        // Water_ReflectionPrerender @0x5C2780].
+        CHECK(std::abs(zeroed.view_block.pitch_deg - base.camera.pitch_deg) < 0.00001f);
+        CHECK(std::abs(zeroed.view_block.yaw_deg - base.camera.yaw_deg) < 0.00001f);
+        CHECK(zeroed.view_block.roll_deg == zeroed.camera.roll_deg);
+        CHECK(zeroed.view_block.eye[0] == zeroed.camera.eye[0] &&
+              zeroed.view_block.eye[1] == zeroed.camera.eye[1] &&
+              zeroed.view_block.eye[2] == zeroed.camera.eye[2]);
+        CHECK(f.player.view_frame().view_block.pitch_deg == zeroed.view_block.pitch_deg);
         f.player.weapon.def.flags = DEF_WEAPON_FLAG_SIGHTED;
         auto sighted = f.player.present_view_frame();
         CHECK(std::abs(sighted.camera.pitch_deg - base.camera.pitch_deg) < 0.00001f);

@@ -2133,14 +2133,19 @@ public:
 	                         int p_object_detail = opennova::renderer::kObjectLodDetailLevelMax);
 	// The weapon Inset pass's own collect, after the main one (simulation_present_state.h).
 	const InsetOcclusionView &run_inset_occlusion(const InsetOcclusionRequest &p_request);
-	// A water mirror's collect ahead of its scene's: the live eye unmirrored over
-	// a square view of p_fov_deg; returns the word its mask build leaves, the one
-	// its scene's water letter label reads (engine world/occlusion.h
-	// OcclusionWorld::mirror_water_visible). Its lists land in mirror_occlusion(p_mirror).
+	// A water mirror's collect ahead of its scene's: the view block's eye
+	// unmirrored (p_collect_eye, the compose without the scene's optics offsets:
+	// engine world/local_player_view.h LocalPlayerViewFrame::view_block) over a
+	// square view of p_fov_deg; its reflected subscene's death pieces test against
+	// the mirror of p_reflected_eye, the view that subscene draws from. Returns the
+	// word its mask build leaves, the one its scene's water letter label reads
+	// (engine world/occlusion.h OcclusionWorld::mirror_water_visible). Its lists
+	// land in mirror_occlusion(p_mirror).
 	enum MirrorView { MIRROR_MAIN = 0, MIRROR_INSET = 1 };
-	bool run_mirror_occlusion(MirrorView p_mirror, const Transform3D &p_camera, double p_fov_deg,
-			double p_viewport_width, double p_fog_dist_units, double p_water_z_units,
-			bool p_force_indoors, int p_object_detail);
+	bool run_mirror_occlusion(MirrorView p_mirror, const Transform3D &p_collect_eye,
+			const Transform3D &p_reflected_eye, double p_fov_deg, double p_viewport_width,
+			double p_fog_dist_units, double p_water_z_units, bool p_force_indoors,
+			int p_object_detail);
 	const MirrorOcclusionView &mirror_occlusion(MirrorView p_mirror) const;
 	// The mirror stopped rendering: its view and baselines reset.
 	void release_mirror_occlusion(MirrorView p_mirror);

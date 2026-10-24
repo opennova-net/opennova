@@ -1394,6 +1394,7 @@ void local_player_view_frame(World *world, LocalPlayerWeapon &w, PlayerViewState
     // The main scene composes its camera once per rendered frame
     // [orig: Render_ProcessMainSceneFrame @0x5CA34D].
     if (!local_player_camera_compose(*world, v, t, out.camera, out.mounted_camera)) return;
+    out.view_block = out.camera;
     out.inset_camera = out.camera;
     out.inset_view_block = out.camera;
     if (out.inset_scope_active) {
@@ -1415,6 +1416,7 @@ void local_player_view_observe(World *world, LocalPlayerWeapon &w, const PlayerV
     // Between composes the view is what the last one left behind.
     out.camera = t.composed;
     out.mounted_camera = t.composed_mounted;
+    out.view_block = out.camera;
     out.inset_camera = out.camera;
     out.inset_view_block = out.camera;
     if (out.inset_scope_active) apply_inset_slot_offsets(*world, w, out);

@@ -848,6 +848,17 @@ void LocalPlayerPresenter::stamp_camera_pose() {
 	}
 }
 
+bool LocalPlayerPresenter::get_view_block_transform(Transform3D &r_out) const {
+	if (!view_.is_valid() || !view_->get_camera_pose_valid()) {
+		return false;
+	}
+	// Stamped as the camera is (stamp_camera_pose).
+	const auto &block = view_->native_frame().view_block;
+	r_out = mission_view_transform(
+			mission_to_godot(block.eye), block.yaw_deg, block.pitch_deg, block.roll_deg);
+	return true;
+}
+
 // The local player's lighting contexts: the body/held gun take the entity's
 // sun-quality factor, the FP submit keeps effectScale=1, both key the
 // interior group from blink_hits[0] (the engine's

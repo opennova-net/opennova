@@ -525,8 +525,9 @@ bool LocalPlayer::select_numbered_seat(int index) {
 
 namespace {
 
-// The main scene's camera zero, after camera composition. Input, body aim
-// and the unadjusted targeting query retain their own frames.
+// The main scene's camera zero, after camera composition, in its local camera
+// only: f.view_block keeps the compose (world/local_player_view.h). Input, body
+// aim and the unadjusted targeting query retain their own frames.
 // [orig: Render_ProcessMainSceneFrame @ 0x5ca0f0,
 // Sighted @0x5ca452..0x5ca465; Scoped @0x5ca494..0x5ca4a0]
 void apply_main_scene_optics(World &world, LocalPlayerWeapon &weapon,

@@ -140,9 +140,13 @@ public:
 	// in pixels, the projector's focal source. (The marched iris-exposure
 	// weather feed that renders alongside stays on GameWorld's frozen-pose
 	// iris stamp.) `object_detail` is the session's object detail the frame's
-	// death pieces draw at (GameWorld's session copy).
+	// death pieces draw at (GameWorld's session copy). `mirror_eye` is the
+	// view block the scene's water mirror collects from (GameWorld::
+	// main_mirror_collect_eye: `camera_xform` without the scene's optics
+	// offsets).
 	void apply_frame(Camera3D *p_camera, float p_viewport_width,
-			const Transform3D &p_camera_xform, bool p_forces_indoors, int p_object_detail);
+			const Transform3D &p_camera_xform, bool p_forces_indoors, int p_object_detail,
+			const Transform3D &p_mirror_eye);
 	// The weapon Inset pass's own collect, after this frame's main one
 	// (engine: world/occlusion.h OcclusionView carries the witness): the sim
 	// runs it over `camera` on the Inset view's frame words, and its verdicts

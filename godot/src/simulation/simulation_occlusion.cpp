@@ -190,17 +190,18 @@ void Simulation::release_inset_occlusion() {
 	present_.inset_occlusion = InsetOcclusionView();
 }
 
-bool Simulation::run_mirror_occlusion(MirrorView p_mirror, const Transform3D &p_camera,
-		double p_fov_deg, double p_viewport_width, double p_fog_dist_units,
-		double p_water_z_units, bool p_force_indoors, int p_object_detail) {
+bool Simulation::run_mirror_occlusion(MirrorView p_mirror, const Transform3D &p_collect_eye,
+		const Transform3D &p_reflected_eye, double p_fov_deg, double p_viewport_width,
+		double p_fog_dist_units, double p_water_z_units, bool p_force_indoors,
+		int p_object_detail) {
 	MirrorOcclusionView &view = present_.mirror_occlusion[p_mirror];
 	view.building_changes = PackedInt64Array();
 	view.culled_changes = PackedInt32Array();
 	view.culled_wire_changes = PackedInt32Array();
 	if (!kernel_) return false;
-	const opennova::world::OcclusionViewSpec spec = occlusion_view_spec(p_camera, p_fov_deg,
-			1.0, p_viewport_width, p_fog_dist_units, p_water_z_units, p_force_indoors,
-			kernel_->collision.local_player_blink_flags, p_object_detail);
+	const opennova::world::OcclusionViewSpec spec = occlusion_view_spec(p_collect_eye,
+			p_fov_deg, 1.0, p_viewport_width, p_fog_dist_units, p_water_z_units,
+			p_force_indoors, kernel_->collision.local_player_blink_flags, p_object_detail);
 	opennova::world::OcclusionFrameCamera cam;
 	opennova::world::occlusion_camera_from_view(spec, cam);
 	// The mirror's collect, its entity walk and building verdicts included (engine
@@ -222,9 +223,13 @@ bool Simulation::run_mirror_occlusion(MirrorView p_mirror, const Transform3D &p_
 	// The reflected subscene's own death-piece collect over the view it draws
 	// from (engine world/occlusion_camera.h mirror_reflected_view and
 	// inmatch/occlusion_collect.h MirrorViewLists carry the witness; the
-	// max-quality water detail runs it, which environment/water_mirror.h fixes).
+	// max-quality water detail runs it, which environment/water_mirror.h fixes):
+	// the mirrored block takes the scene's optics offsets the collect's lacks.
+	const opennova::world::OcclusionViewSpec drawn = occlusion_view_spec(p_reflected_eye,
+			p_fov_deg, 1.0, p_viewport_width, p_fog_dist_units, p_water_z_units,
+			p_force_indoors, kernel_->collision.local_player_blink_flags, p_object_detail);
 	opennova::world::OcclusionFrameCamera reflected;
-	opennova::world::occlusion_camera_from_view(opennova::world::mirror_reflected_view(spec),
+	opennova::world::occlusion_camera_from_view(opennova::world::mirror_reflected_view(drawn),
 			reflected);
 	kernel_->occlusion.collect_death_piece_draws(kernel_->world, reflected,
 			view.death_piece_draws);
