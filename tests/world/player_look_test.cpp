@@ -154,6 +154,24 @@ int main() {
         CHECK(!s.invert_y); // the step never touches the invert
     }
 
+    // --- the scopescale row (dispatch 49, the troop class callback): an argument sets the
+    //     word, else +-16 by the sign, then 512 and above clamp to 511, 128 and below to 128
+    //     (D-NET-NEW-LI-38) [orig: Input_HandleActionBinding_0 @0x4E0420 - case 49
+    //     @0x4E0574..0x4E05AE] ---
+    {
+        PlayerLookSettings s; // the word's static 0
+        CHECK(player_look_scope_scale(s, 0, false) == 0x80 && s.scope_scale == 0x80); // 16 clamps up
+        CHECK(player_look_scope_scale(s, 0, false) == 0x90);
+        CHECK(player_look_scope_scale(s, 0, true) == 0x80);
+        CHECK(player_look_scope_scale(s, 0, true) == 0x80);  // 112 clamps up
+        CHECK(player_look_scope_scale(s, 300, true) == 300); // a typed value, the sign unread
+        s.scope_scale = 0x1F0;
+        CHECK(player_look_scope_scale(s, 0, false) == 0x1FF); // 0x200 itself clamps
+        CHECK(player_look_scope_scale(s, 1000, false) == 0x1FF);
+        CHECK(player_look_scope_scale(s, 0x81, false) == 0x81); // 129 is kept
+        CHECK(s.sensitivity == kMouseSensitivityDefault);    // the mouse word untouched
+    }
+
     // --- a pass-through screen's close (DEATH, STAT): the re-centre writes the
     //     cursor's client offset from (0x140, 0xF0) into the axis words and the
     //     close's input frame reads it whole, one update's axis input with no

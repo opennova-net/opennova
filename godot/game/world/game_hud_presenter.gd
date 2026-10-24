@@ -1392,8 +1392,11 @@ func _apply_toggle_events(events: int) -> void:
 	var look_sim: Simulation = _world.get_sim() if _world != null else null
 	if events & HudToggles.EVENT_MOUSE_FLIPPED and look_sim != null:
 		look_sim.flip_local_player_mouse()
+	# A typed mousescale's argument rides above the event bits and sets the word outright
+	# (engine hud_toggles.h kMouseScaleParamShift).
 	if events & HudToggles.EVENT_MOUSE_SCALE_STEPPED and look_sim != null:
-		var scale := look_sim.step_local_player_mouse_scale(0,
+		var scale := look_sim.step_local_player_mouse_scale(
+				events >> HudToggles.MOUSE_SCALE_PARAM_SHIFT,
 				(events & HudToggles.EVENT_MOUSE_SCALE_NEGATIVE) != 0)
 		var line := HudToggles.mouse_scale_toast(Strings.get_table(Strings.TABLE_GAMETEXT), scale)
 		if _game_hud != null and not line.is_empty():

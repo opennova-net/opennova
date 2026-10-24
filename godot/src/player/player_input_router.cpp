@@ -444,7 +444,8 @@ void PlayerInputRouter::dispatch_record(const opennova::controls::InputEventReco
 	}
 	const int hud_row = hud_row_of(p_record.code);
 	if (hud_row >= 0) {
-		if (poll_hud_toggles(record_sim, 1 << hud_row, p_record.sign)) key_events()->reset();
+		if (poll_hud_toggles(record_sim, 1 << hud_row, p_record.sign, p_record.p1))
+			key_events()->reset();
 		return;
 	}
 	// The escape row's record (case 18: the Escape action), the screen shot's (case 2), the
@@ -465,6 +466,23 @@ void PlayerInputRouter::dispatch_record(const opennova::controls::InputEventReco
 		if (!record_sim->action_head_admits(p_record.code)) return;
 		apply_immediate(actions_.use_item_record(use_item_arm(*record_sim.ptr())), record_sim);
 		return;
+	}
+	// A movement or look row's record the role took past the head (a typed row's, a queued
+	// Last_move's): the back, forward (fourth argument 0) and strafe cases' Scroll Lock
+	// turn-off, once a frame (engine inmatch::Role::dispatch_record carries the witness).
+	switch (p_record.code) {
+		case 147: case 148: case 151: case 152: case 153: case 154: case 155: case 156:
+		case 157: case 158: case 159: case 176: {
+			const bool turns_off = p_record.code == 151 || p_record.code == 156 ||
+					p_record.code == 157 || (p_record.code == 152 && p_record.p3 == 0);
+			if (turns_off) {
+				opennova::controls::PlayerActionFrame frame;
+				frame.scroll_lock_off.push_back(p_record.code);
+				apply_immediate(frame, record_sim);
+			}
+			return;
+		}
+		default: break;
 	}
 	if (const auto request = opennova::controls::player_action_request(p_record)) {
 		apply_player_action(*record_sim.ptr(), *request);
@@ -692,7 +710,7 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 }
 
 bool PlayerInputRouter::poll_hud_toggles(const Ref<Simulation> &p_sim, int p_rows_fired,
-		bool p_mouse_scale_negative) {
+		bool p_mouse_scale_negative, int32_t p_mouse_scale_param) {
 	// The HUD's key rows are action bindings like the rest: the input frame's
 	// key scan fires them and its drain dispatches them, every tick, so a row
 	// pressed for one tick of a multi-tick frame fires on that tick. hudcolor
@@ -726,11 +744,16 @@ bool PlayerInputRouter::poll_hud_toggles(const Ref<Simulation> &p_sim, int p_row
 	// session peer any role but a dedicated host. The mousescale row steps by
 	// its fire's sign bit (Shift on a modifier-less key).
 	const int role = p_sim->session_role();
-	const int64_t events = hud_toggles_->dispatch(p_rows_fired, frame_gameplay_input_active_,
+	int64_t events = hud_toggles_->dispatch(p_rows_fired, frame_gameplay_input_active_,
 			p_sim->is_mp_session(),
 			opennova::game_type::is_objective(static_cast<uint32_t>(p_sim->get_session_game_type())),
 			!p_sim->local_player_dead(), role != Simulation::ROLE_JOINER,
 			role != Simulation::ROLE_DEDICATED_HOST, p_mouse_scale_negative, head_drops);
+	// A typed mousescale's argument rides above the event bits (engine
+	// hud_toggle_event::kMouseScaleParamShift carries the witness).
+	if ((events & HudToggles::EVENT_MOUSE_SCALE_STEPPED) != 0)
+		events |= static_cast<int64_t>(static_cast<uint64_t>(static_cast<uint32_t>(p_mouse_scale_param))
+				<< HudToggles::MOUSE_SCALE_PARAM_SHIFT);
 	if (events != 0) hud_toggle_events_.push_back(events);
 	// The pause row's flip reaches the session at this update (engine
 	// inmatch::Session::run_updates); the HUD presenter's later apply of the event

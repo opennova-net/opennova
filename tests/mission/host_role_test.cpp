@@ -587,6 +587,41 @@ void check_server_rows_reach_their_arms(std::map<std::string, std::string> &file
 		dispatch(47, 0);
 		CHECK(lines.size() == 1 && lines[0].text == "1:0 2:3 3:1 4:0 5:0 6:0 7:0 8:0" &&
 				lines[0].system_ring && lines[0].argb == 0xFFFFFFFFu);
+		// scopescale (row 74, code 49): the session's scope-scale word steps (0 + 16 clamps to
+		// 128) and the Misc toast takes it as $A; a typed argument sets it (D-NET-NEW-LI-38)
+		// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 49 @0x4E056D..0x4E05F2].
+		kernel.local.look_settings.scope_scale = 0;
+		dispatch(49, 0);
+		CHECK(kernel.local.look_settings.scope_scale == 0x80 && lines.size() == 1 &&
+				std::string(lines[0].key) == "STRMISC_SCOPESCALE" && lines[0].text == "128" &&
+				lines[0].system_ring && lines[0].argb == 0xFFFFFFFFu);
+		dispatch(49, 300);
+		CHECK(kernel.local.look_settings.scope_scale == 300 && lines.size() == 1 &&
+				lines[0].text == "300");
+		// The movement and look rows as records (D-NET-NEW-LI-39): a typed forward row ORs its
+		// input-flag bit for the frame's fold, an axis form (a first argument) sets none, and
+		// Last_move queues the forward row's record into the same drain; the next tick's fold
+		// carries the bit into the word its pack reports.
+		// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 152 @0x4E0CBE, the axis
+		//  @0x4E0CB1, case 176 @0x4E0CD5, 425's Input_QueueEvent(152, 0, 0, 1) @0x4E13ED]
+		host.client_runtime->state().deploy_overlay_active = false;
+		host.client_runtime->state().spawn_success_gate = false;
+		kernel.world.cached.client_preround_timer = 0;
+		kernel.local.record_input_bits = 0;
+		dispatch(152, 0);
+		CHECK(kernel.local.record_input_bits == w::kInputFlagForward);
+		role.run_tick(tick_input(0));
+		CHECK(kernel.local.record_input_bits == 0 &&
+				((kernel.local.input_flags.prev | kernel.local.input_flags.flags) &
+						w::kInputFlagForward) != 0);
+		dispatch(152, 300);
+		CHECK(kernel.local.record_input_bits == 0);
+		dispatch(425, 0);
+		CHECK(kernel.local.record_input_bits == w::kInputFlagForward && role.input_events().empty());
+		kernel.local.record_input_bits = 0;
+		dispatch(176, 0);
+		CHECK(kernel.local.record_input_bits == w::kInputFlagFreeLook);
+		kernel.local.record_input_bits = 0;
 		// netdelay (row 89, code 103): the remote slot takes S2C 0x1B [2], then the chat line.
 		replication::Datagram sent;
 		while (transport->pop_outbound(sent)) {}

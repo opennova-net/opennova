@@ -39,6 +39,11 @@ constexpr int32_t kLookPitchProneMax = 0x1C71C700;    // +40 deg while prone
 struct PlayerLookSettings {
     int32_t sensitivity = kMouseSensitivityDefault; // [orig: g_MouseSensitivity]
     bool invert_y = false; // flipmouse [orig: g_MouseInvertY; default OFF = push-forward looks up]
+    // The scopescale row's word: the session copy seeds it (profile::SessionInput::scope_scale),
+    // the row steps it, and nothing else reads it (its toast shows it).
+    // [orig: g_ScopeScale @0x24D2080 (static 0) - its accesses Input_HandleActionBinding_0
+    //  @0x4E0580 / @0x4E0594 / @0x4E05AE and Game_ApplySessionSettingsToGlobals @0x551630]
+    int32_t scope_scale = 0;
 };
 
 // The flipmouse row (catalog 79, dispatch 9): the LIVE Y invert flips. The
@@ -61,6 +66,16 @@ void player_look_flip_mouse(PlayerLookSettings &s);
 //  id >> 31) from Input_ProcessKeyboardEvents @0x49d452..0x49d483 and
 //  Input_TryDispatchBindingByWeaponType @0x499180..0x4991a4]
 int32_t player_look_mouse_scale(PlayerLookSettings &s, int32_t param_value, bool negative);
+
+// The scopescale row (catalog 74, dispatch 49, the troop class callback's case) on the
+// session's word: a nonzero `param_value` (a typed `scopescale <n>`) sets it outright, else it
+// steps by 16, down when the record carries the sign bit, then clamps: 512 and above to 511,
+// 128 and below to 128. Returns the new word, which the STRMISC_SCOPESCALE toast shows as $A.
+// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 49: the param @0x4E0574, the sign
+//  @0x4E0578, +16 @0x4E0587, -16 @0x4E058C, the store @0x4E0594, `cmp eax, 200h; jl`
+//  @0x4E058F..0x4E0599 -> 1FFh @0x4E059B, `cmp eax, 80h; jg` @0x4E05A2..0x4E05A7 -> 80h
+//  @0x4E05A9, the store @0x4E05AE]
+int32_t player_look_scope_scale(PlayerLookSettings &s, int32_t param_value, bool negative);
 
 struct PlayerLookDelta { int32_t yaw = 0, pitch = 0; };
 // Shared scaling before human-view or AbsorbPitch bounds are applied.

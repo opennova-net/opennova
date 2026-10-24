@@ -103,6 +103,15 @@ public:
     // The input-flag word the held keys fold into every frame and the pack
     // reads and clears [orig: g_InputFlags @0xB3B728 / g_InputFlagsPrev @0xB3B72C].
     PlayerInputFlags input_flags;
+    // The input-flag bits this input frame's drained movement and look records set (a typed
+    // row's, a queued Last_move's), which the fold ORs beside the held keys' and then clears
+    // (apply_player_input_pre_tick); the key reset empties it with the word. Retail's cases OR
+    // them into the word during the drain, past the fold's clear of the reported bits, as the
+    // held keys' own re-queued records do.
+    // [orig: Input_ProcessFrame @0x49D520 - the fold @0x49D541 ahead of the drain's
+    //  Input_HandleActionBinding @0x49D5D8; Input_HandleActionBinding_0 @0x4E0420 - the cases
+    //  each InputFlag names]
+    uint32_t record_input_bits = 0;
     // The local player's MoveOrder word (entity+0x12C) as the last pack wrote
     // it. It persists between packs: the motor, the keyboard look rotation and
     // the wire mirror read it every tick, and only a pack rewrites it; a

@@ -459,6 +459,7 @@ opennova::profile::SessionInput live_input(const opennova::mission::MissionKerne
 	opennova::profile::SessionInput live;
 	live.mouse_sensitivity = kernel.local.look_settings.sensitivity;
 	live.invert_mouse = kernel.local.look_settings.invert_y;
+	live.scope_scale = kernel.local.look_settings.scope_scale;
 	live.auto_reload = kernel.world.rules.auto_reload;
 	return live;
 }
@@ -467,6 +468,7 @@ void install_input(opennova::mission::MissionKernel &kernel,
 		const opennova::profile::SessionInput &input) {
 	kernel.local.look_settings.sensitivity = input.mouse_sensitivity;
 	kernel.local.look_settings.invert_y = input.invert_mouse;
+	kernel.local.look_settings.scope_scale = input.scope_scale;
 	kernel.world.rules.auto_reload = input.auto_reload;
 }
 

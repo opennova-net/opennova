@@ -214,10 +214,11 @@ private:
 	void sample_input_frame(const Ref<MissionFrameInput> &p_input, const Vector2 &p_scripted_look,
 			bool p_spectating);
 	// A drained HUD toggle row record (`p_rows_fired`, 1 << HudToggles::Row) through the
-	// HUD's toggles, whose menus the later action rows read. True when the pause row
-	// flipped the HUD's pause word.
+	// HUD's toggles, whose menus the later action rows read; a mousescale event carries the
+	// record's first argument above its event bits (HudToggles::MOUSE_SCALE_PARAM_SHIFT). True
+	// when the pause row flipped the HUD's pause word.
 	bool poll_hud_toggles(const Ref<Simulation> &p_sim, int p_rows_fired,
-			bool p_mouse_scale_negative);
+			bool p_mouse_scale_negative, int32_t p_mouse_scale_param = 0);
 	// A drained talk row record (`p_rows_fired`, 1 << HudChatEntry row) through the
 	// HUD's chat line, with or without a local player.
 	void poll_talk_rows(const Ref<Simulation> &p_sim, int p_rows_fired);

@@ -31,6 +31,9 @@ struct SessionInput {
 	// g_MouseSensitivity <- +1424, copied unclamped; the look scales by it << 11
 	// [orig: @0x551618..0x55161e; @0x4996dd].
 	int32_t mouse_sensitivity = 128;
+	// g_ScopeScale <- +1480 plus 0x80, the scopescale row's word
+	// [orig: @0x551624..0x551630].
+	int32_t scope_scale = 0x80;
 	// g_AutoReloadEnabled <- +1524, forced 0 under `/noreload`
 	// [orig: @0x551a24..0x551a48; the flag Game_ParseCommandLineAndInit
 	//  @0x4a76d7..0x4a76e9 -> dword_B4C4F4].

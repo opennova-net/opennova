@@ -23,6 +23,18 @@ int32_t player_look_mouse_scale(PlayerLookSettings &s, int32_t param_value, bool
     return v;
 }
 
+int32_t player_look_scope_scale(PlayerLookSettings &s, int32_t param_value, bool negative) {
+    int32_t v = param_value;
+    if (v == 0) {
+        const uint32_t word = static_cast<uint32_t>(s.scope_scale);
+        v = static_cast<int32_t>(negative ? word - 16u : word + 16u);
+    }
+    if (v >= 0x200) v = 0x1FF;
+    else if (v <= 0x80) v = 0x80;
+    s.scope_scale = v;
+    return v;
+}
+
 PlayerLookDelta player_look_delta(const PlayerLookSettings &s,
         int32_t dx_px, int32_t dy_px, int32_t scoped_zoom) {
     // Y sense: the axis word is +down; the default (flipmouse OFF) negates

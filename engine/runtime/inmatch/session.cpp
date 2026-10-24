@@ -19,6 +19,7 @@
 #include <array>
 #include <chrono>
 #include <cstdio>
+#include <string>
 #include <thread>
 #include <utility>
 
@@ -517,6 +518,75 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 		if (action_head_admits(code)) {
 			world::World &world = kernel_->world;
 			world.rules.frame_rate_overlay = !world.rules.frame_rate_overlay;
+		}
+		return;
+	}
+	// The Last_move row 16's 425 past the head (flags 0x0C000405): the troop class callback
+	// queues the forward row's record, its fourth argument 1 (no Scroll Lock turn-off), which
+	// joins this drain (D-NET-NEW-LI-39).
+	// [orig: Input_HandleActionBinding_0 @0x4E0420 - `cmp 425` @0x4E046F,
+	//  Input_QueueEvent(152, 0, 0, 1) called @0x4E13ED]
+	constexpr int kLastMoveRow = 16;
+	if (code == controls::action_code(kLastMoveRow)) {
+		if (action_head_admits(code)) (void)input_events_.push({152, 0, 0, 1, false});
+		return;
+	}
+	// The movement and look rows as records (a typed row's, a queued Last_move's), each its
+	// troop class callback case past the head: the case ORs its input-flag bit into the word,
+	// which the fold carries beside the held keys' (LocalPlayer::record_input_bits; the look
+	// rows' AbsorbPitch refusal rides the fold). A nonzero first argument (an axis) writes the
+	// row's axis word instead, which this port does not model. Their g_DebugCheatFlags 0x20 gate
+	// is dead (controls::PlayerActionFrame::scroll_lock_off carries that witness). The record
+	// then goes on to the embedder, whose device owes the Scroll Lock turn-off the back, forward
+	// (fourth argument 0) and strafe cases run (D-NET-NEW-LI-39).
+	// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 147 `or g_InputFlags, 4000h` @0x4E10C8;
+	//  148: the argument @0x4E10E2, the axis @0x4E10E4, 2000h @0x4E10F1; 151:
+	//  Input_DisableScrollLock called @0x4E0C66, 4 @0x4E0C6E; 152: the fourth argument
+	//  @0x4E0C92, Input_DisableScrollLock called @0x4E0C9E, the argument @0x4E0CAD, the axis
+	//  @0x4E0CB1, 2 @0x4E0CBE; 153: 1000h @0x4E0D66; 154: Entity_CheckWeaponSeatFlags @0x4E0EA5,
+	//  40h @0x4E0EB5; 155: @0x4E0F73, 20h @0x4E0F83; 156: Input_DisableScrollLock called
+	//  @0x4E1021, the argument @0x4E1032, 8 @0x4E1041; 157: Input_DisableScrollLock called
+	//  @0x4E105E, 10h @0x4E1066; 158: the argument @0x4E107D, 100h @0x4E108C; 159: 200h
+	//  @0x4E10B7; 176: 8000h @0x4E0CD5]
+	uint32_t movement_bit = 0;
+	bool analog_form = record.p1 != 0;
+	switch (code) {
+	case 147: movement_bit = world::kInputFlagLeanRight; analog_form = false; break;
+	case 148: movement_bit = world::kInputFlagLeanLeft; break;
+	case 151: movement_bit = world::kInputFlagBack; analog_form = false; break;
+	case 152: movement_bit = world::kInputFlagForward; break;
+	case 153: movement_bit = world::kInputFlagJump; analog_form = false; break;
+	case 154: movement_bit = world::kInputFlagLookDown; analog_form = false; break;
+	case 155: movement_bit = world::kInputFlagLookUp; analog_form = false; break;
+	case 156: movement_bit = world::kInputFlagLeft; break;
+	case 157: movement_bit = world::kInputFlagRight; analog_form = false; break;
+	case 158: movement_bit = world::kInputFlagTurnLeft; break;
+	case 159: movement_bit = world::kInputFlagTurnRight; analog_form = false; break;
+	case 176: movement_bit = world::kInputFlagFreeLook; analog_form = false; break;
+	default: break;
+	}
+	if (movement_bit != 0) {
+		if (!action_head_admits(code)) return;
+		if (!analog_form) kernel_->local.record_input_bits |= movement_bit;
+		if (source != nullptr) source->dispatch_record(record);
+		return;
+	}
+	// The scopescale row 74's 49, the troop class callback's case past the head (flags
+	// 0x04000000): the session's scope-scale word steps by the record's argument and sign
+	// (world::player_look_scope_scale), then the Misc toast STRMISC_SCOPESCALE with the word as
+	// its $A goes to the SYSTEM ring in white (D-NET-NEW-LI-38).
+	// [orig: Input_HandleActionBinding @0x49AD40 - the def+0x170 callback @0x49AEB6;
+	//  Input_HandleActionBinding_0 @0x4E0420 - case 49 @0x4E056D, sprintf("%i") called @0x4E05BE,
+	//  GameText_GetString("Misc", "STRMISC_SCOPESCALE") called @0x4E05E0, Chat_FormatPlayerTokens
+	//  called @0x4E05E9, Chat_AddMessageChannel2(.., -1, 930) called @0x4E05F2]
+	constexpr int kScopeScaleRow = 74;
+	if (code == controls::action_code(kScopeScaleRow)) {
+		if (action_head_admits(code)) {
+			const int32_t scale = world::player_look_scope_scale(kernel_->local.look_settings,
+					record.p1, record.sign);
+			world::HudChatLine line{"Misc", "STRMISC_SCOPESCALE", 0xFFFFFFFFu, true};
+			line.text = std::to_string(scale);
+			kernel_->world.out.hud_chat_lines.push_back(std::move(line));
 		}
 		return;
 	}

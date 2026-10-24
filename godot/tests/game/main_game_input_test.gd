@@ -308,6 +308,21 @@ func test_fps_raises_the_frame_rate_overlay() -> void:
 	assert_true(await _await_true(lowered), "a second fps takes the overlay down")
 
 
+# A typed HUD-toggle row's argument reaches its case (D-NET-NEW-LI-38): "mousescale 200"
+# rides the loopback, the echo's walk queues the row's record with atol(200) as its first
+# argument, and the step takes it as the word outright (engine hud/hud_toggles.h
+# kMouseScaleParamShift carries the witness).
+func test_a_typed_mousescale_sets_the_word() -> void:
+	var shell := await _booted_in_world()
+	if shell == null:
+		return
+	var sim: Simulation = shell.get_world().get_sim()
+	assert_ne(int(sim.get_session_mouse_sensitivity()), 200, "the word starts elsewhere")
+	assert_true(await _type_console_line("mousescale 200"), "the command line takes the line")
+	var set_word := func() -> bool: return int(sim.get_session_mouse_sensitivity()) == 200
+	assert_true(await _await_true(set_word), "the typed argument sets the sensitivity to 200")
+
+
 # A key event dispatches at the next update's drain (D-NET-NEW-LI-8): a headless
 # frame can bank under one 16 ms quantum, so the H press may wait a few frames for
 # the update that reads it. Bounded by wall time, not frames.

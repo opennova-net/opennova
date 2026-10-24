@@ -88,7 +88,8 @@ void LocalPlayer::set_movement_keys(bool forward, bool back, bool left,
 	//  `test byte ptr g_InputFlags, 1Eh` @0x4de3ae, ahead of the pack]
 	// The press latch's freeze leaves that word empty.
 	view.movement_input = !armory_press_latched &&
-			(input_flags.folded(w::player_input_flags(input, false)) & w::kInputFlagDirectionMask) != 0;
+			(input_flags.folded(w::player_input_flags(input, false) | record_input_bits) &
+					w::kInputFlagDirectionMask) != 0;
 	w::local_player_view_refresh(&world, view);
 }
 
@@ -796,6 +797,7 @@ void LocalPlayer::reset_key_input() {
 	const w::Entity *local = player();
 	if (local == nullptr || !local->has_item_def) return;
 	input_flags.flags = 0; // [orig: `mov g_InputFlags, 0` @0x4B2B9E]
+	record_input_bits = 0;
 	pack_input_word();     // [orig: Player_PackInputStateToEntity @0x4B2BA8]
 	// A moving state drops to the idle at once [orig: `test
 	// g_AnimStateFlagsTable[animStateId*4], 1` @0x4B2BB8, `mov [eax+2BCh], 2Bh`
@@ -807,6 +809,8 @@ void LocalPlayer::reset_key_input() {
 
 void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 	World &world = world_;
+	const uint32_t records = record_input_bits;
+	record_input_bits = 0;
 	if (!world.cached.local_player.valid()) return;
 	// The per-tick shake decay, ahead of the entity update's arms and the
 	// weather tick's quake hard-set: retail decays in Player_UpdatePerFrame
@@ -830,7 +834,13 @@ void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 	// bit the last pack did not report stays set until the next pack.
 	// [orig: Input_ProcessFrame @0x49d541, then the handler dispatch
 	//  Input_HandleActionBinding_0 @0x4e0420]
-	input_flags.fold(w::player_input_flags(input, absorb));
+	// The drained records' bits fold with them, the look rows' under the same AbsorbPitch
+	// refusal their cases run [orig: Input_HandleActionBinding_0 - cases 154 / 155 @0x4E0EA5 /
+	//  @0x4E0F73].
+	const uint32_t record_bits = absorb
+			? records & ~(w::kInputFlagLookUp | w::kInputFlagLookDown)
+			: records;
+	input_flags.fold(w::player_input_flags(input, absorb) | record_bits);
 	// The armory press latch freezes the frame's input after the fold: the
 	// word clears and MoveOrder keeps only its stance bits (the X axis word's
 	// clear rides the pack below). A menu screen open skips the input pass and

@@ -57,6 +57,11 @@ public:
 		EVENT_MOUSE_SCALE_NEGATIVE = opennova::hud::hud_toggle_event::kMouseScaleNegative,
 		EVENT_JOIN_LOCK_TOGGLED = opennova::hud::hud_toggle_event::kJoinLockToggled,
 	};
+	// The mousescale record's argument above the event bits of a 64-bit event word (engine
+	// hud_toggle_event::kMouseScaleParamShift carries the witness).
+	enum {
+		MOUSE_SCALE_PARAM_SHIFT = opennova::hud::hud_toggle_event::kMouseScaleParamShift,
+	};
 	// The special-key legs' result bits (engine hud_special_key).
 	enum SpecialKey {
 		SPECIAL_KEY_CONSUMED = opennova::hud::hud_special_key::kConsumed,
