@@ -6,6 +6,7 @@
 // docs/net/novaworld-net-re.md §5.57]
 #pragma once
 
+#include <base/io/strutil.h>
 #include <cctype>
 #include <cstdint>
 #include <memory>
@@ -213,8 +214,8 @@ struct WeaponTable {
             const std::string &n = ammo_class_names[i];
             size_t j = 0;
             while (j < n.size() && name[j] != '\0' &&
-                   std::tolower(static_cast<unsigned char>(n[j])) ==
-                           std::tolower(static_cast<unsigned char>(name[j])))
+                   strutil::ascii_tolower(n[j]) ==
+                           strutil::ascii_tolower(name[j]))
                 ++j;
             if (j == n.size() && name[j] == '\0') return static_cast<int>(i);
         }
@@ -233,7 +234,7 @@ struct WeaponTable {
         static constexpr char kNull[] = "null";
         size_t k = 0;
         while (kNull[k] != '\0' &&
-               std::tolower(static_cast<unsigned char>(weapon_name[k])) == kNull[k])
+               strutil::ascii_tolower(weapon_name[k]) == kNull[k])
             ++k;
         if (kNull[k] == '\0' && weapon_name[k] == '\0') return -1;
         for (size_t i = 0; i < entries.size(); ++i) {
@@ -241,8 +242,8 @@ struct WeaponTable {
             const std::string &n = entries[i].name;
             size_t j = 0;
             while (j < n.size() && weapon_name[j] != '\0' &&
-                   std::tolower(static_cast<unsigned char>(n[j])) ==
-                           std::tolower(static_cast<unsigned char>(weapon_name[j])))
+                   strutil::ascii_tolower(n[j]) ==
+                           strutil::ascii_tolower(weapon_name[j]))
                 ++j;
             if (j == n.size() && weapon_name[j] == '\0') return static_cast<int>(i);
         }

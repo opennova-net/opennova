@@ -7,6 +7,7 @@
 // docs/net/novaworld-net-re.md §5.60]
 #pragma once
 
+#include <base/io/strutil.h>
 #include <cctype>
 #include <cstdint>
 #include <string>
@@ -78,8 +79,8 @@ inline int impact_effect_tag_index(const char *name) {
         const char *t = kImpactEffectTagNames[i];
         size_t j = 0;
         while (t[j] != '\0' && name[j] != '\0' &&
-               std::tolower(static_cast<unsigned char>(t[j])) ==
-                       std::tolower(static_cast<unsigned char>(name[j])))
+               strutil::ascii_tolower(t[j]) ==
+                       strutil::ascii_tolower(name[j]))
             ++j;
         if (t[j] == '\0' && name[j] == '\0') return i;
     }
@@ -305,8 +306,8 @@ struct AmmoTable {
             const std::string &n = entries[i].name;
             size_t j = 0;
             while (j < n.size() && ammo_name[j] != '\0' &&
-                   std::tolower(static_cast<unsigned char>(n[j])) ==
-                           std::tolower(static_cast<unsigned char>(ammo_name[j])))
+                   strutil::ascii_tolower(n[j]) ==
+                           strutil::ascii_tolower(ammo_name[j]))
                 ++j;
             if (j == n.size() && ammo_name[j] == '\0') return static_cast<int>(i);
         }
