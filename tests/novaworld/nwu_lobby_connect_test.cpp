@@ -2000,7 +2000,50 @@ void check_first_join_timing() {
 	rig.lobby.close();
 }
 
+// The lobby 0x42 names the connection's peer, the taken 0x81's sender, as SIP (the address in
+// network order) and SPN (the port as an LE dword), right after NA, in every 0x42 of the connect
+// (LN S1d / S2: retail's lobby 0x42 carries SIP / SPN = its 0x81's sender; ours carried neither).
+// [orig: Nwu_HandleServerHello @0x626D20 - the record's address / port @0x62769D / @0x6276A1;
+//  CNapiNPConnection_InitFromSession @0x626320 - conn+0x30 / +0x34 @0x6263B4 / @0x6263B7;
+//  CNapiNPConnection_SendClientJoin @0x61FE20 - SIP @0x6201AE..0x6201C5, SPN
+//  @0x6201D2..0x6201E9]
+void check_join_names_its_peer() {
+	Rig rig;
+	rig.start(10);
+	const std::vector<uint8_t> hello = rig.last(SESSION_OPCODE_CLIENT_HELLO);
+	rig.session.inbound.push_back({ kServer, server_hello_to(hello) });
+	rig.lobby.tick(2000);
+	rig.lobby.tick(2001);
+	rig.lobby.tick(2001 + SESSION_CONNECT_RETRANSMIT_MS + 1);
+	CHECK(rig.count(SESSION_OPCODE_CLIENT_AUTH) == 2);
+	for (const auto &dg : rig.session.sent) {
+		uint8_t op = 0;
+		std::vector<uint8_t> body;
+		if (!decode(dg.second, op, body) || op != SESSION_OPCODE_CLIENT_AUTH)
+			continue;
+		ClientAuth auth;
+		CHECK(parse_client_auth(body.data(), body.size(), auth));
+		CHECK(auth.sip == kServer.ip && auth.spn == kServer.port);
+		// NA's value, then SIP 7F 00 00 01 and SPN CE FA 00 00 (64206), each a four-byte field.
+		const std::vector<uint8_t> na_sip_spn = [&] {
+			std::vector<uint8_t> v{ 'N', 'A', 0 };
+			v.push_back(static_cast<uint8_t>(auth.na.size() + 1));
+			v.push_back(0);
+			v.insert(v.end(), auth.na.begin(), auth.na.end());
+			static const uint8_t kSipSpn[] = { 0, 'S', 'I', 'P', 0, 4, 0, 0x7F, 0, 0, 1,
+					'S', 'P', 'N', 0, 4, 0, 0xCE, 0xFA, 0, 0 };
+			v.insert(v.end(), std::begin(kSipSpn), std::end(kSipSpn));
+			return v;
+		}();
+		CHECK(!auth.na.empty() &&
+				std::search(body.begin(), body.end(), na_sip_spn.begin(), na_sip_spn.end()) !=
+						body.end());
+	}
+	rig.lobby.close();
+}
+
 int main() {
+	check_join_names_its_peer();
 	check_head_pump_resends();
 	check_first_join_timing();
 	check_host_player_add_sends_update();

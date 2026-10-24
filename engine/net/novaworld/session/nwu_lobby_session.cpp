@@ -1200,12 +1200,13 @@ void NwuLobbySession::poll_session() {
 		const uint32_t resend_lists = session_->resend_lists_named();
 		rx.ok = session_->handle_datagram(rx.bytes.data(), rx.bytes.size(), replies);
 		// A 0x81 the connection took makes its record and points the connection at the reply's
-		// sender, where its 0x42 goes.
+		// sender, where its 0x42 goes and which the 0x42 names as SIP / SPN.
 		// [orig: CNapiNPConnection_InitFromSession @0x626320 - the session record's address
 		//  and port into the connection @0x6263B4 / @0x6263B7]
 		if (session_->server_hellos_taken() != hellos_taken) {
 			note_server_hello(from);
 			nw_peer_ = from;
+			session_->set_connection_peer(from.ip, from.port);
 		}
 		rx.state_after = static_cast<int>(session_->state());
 		rx.replies = replies.size();

@@ -329,7 +329,8 @@ ClientAuth make_client_auth(const ClientSession::Config &cfg, std::string_view c
 	for (const auto &v : cfg.cu_vars) {
 		auth.cu.push_back(make_client_cu_chunk(v.type, v.name, v.value));
 	}
-	// sip/spn stay 0 (retail omits the tag when 0).
+	// SIP / SPN are the connection's peer (ClientSession::build_client_auth); 0 here, and a 0 is
+	// not written.
 	return auth;
 }
 
@@ -354,6 +355,11 @@ std::vector<uint8_t> ClientSession::build_client_auth() {
 	// nonzero, so a first join is unchanged) [orig: SendClientJoin @0x62033d..0x62037f].
 	auth.dcnt = dcnt_;
 	auth.rcnt = rcnt_;
+	// The connection's peer, the 0x81's sender, as SIP / SPN.
+	// [orig: CNapiNPConnection_SendClientJoin @0x61FE20 - SIP @0x6201AE..0x6201C5, SPN
+	//  @0x6201D2..0x6201E9; CNapiNPConnection_InitFromSession @0x6263B4 / @0x6263B7]
+	auth.sip = peer_ip_;
+	auth.spn = peer_port_;
 	return nw_encode_outbound(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
 }
 

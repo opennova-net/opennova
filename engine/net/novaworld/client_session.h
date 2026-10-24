@@ -554,6 +554,19 @@ public:
 	//  @0x627EE5 -> CNapiNPConnection_InitFromSession @0x626320 (the connection's address
 	//  @0x6263B4 / @0x6263B7)]
 	uint32_t server_hellos_taken() const { return server_hellos_taken_; }
+	// The connection's peer, which the owner sets from the taken 0x81's sender whenever
+	// server_hellos_taken() moves: the session record's address and port, which InitFromSession
+	// copies into the connection and every 0x42 then carries as SIP / SPN, each written only when
+	// nonzero. `ip` is PeerAddr's packing (the socket layer's), `port` the port as it hands it.
+	// [orig: Nwu_HandleServerHello @0x626D20 - the record's +0x18 / +0x1C from the datagram's
+	//  address and port @0x62769D / @0x6276A1; CNapiNPConnection_InitFromSession @0x626320 - the
+	//  copy into conn+0x30 / +0x34 @0x6263B4 / @0x6263B7; CNapiNPConnection_SendClientJoin
+	//  @0x61FE20 - SIP from conn+0x30 @0x6201AE..0x6201C5, SPN from conn+0x34
+	//  @0x6201D2..0x6201E9]
+	void set_connection_peer(uint32_t ip, uint32_t port) {
+		peer_ip_ = ip;
+		peer_port_ = port;
+	}
 	// The last taken 0x81's SN, the session record's name. [orig: Nwu_HandleServerHello - SN
 	//  @0x627172, the record's +0x1FC @0x627CC5]
 	const std::string &server_hello_name() const { return server_hello_name_; }
@@ -708,6 +721,8 @@ private:
 	bool disconnected_by_peer_ = false;
 	uint32_t tossed_datagrams_ = 0;
 	uint32_t server_hellos_taken_ = 0;
+	uint32_t peer_ip_ = 0;   // conn+0x30, the 0x42's SIP (set_connection_peer)
+	uint32_t peer_port_ = 0; // conn+0x34, the 0x42's SPN
 	std::string server_hello_name_;
 	uint32_t enumerator_drains_ = 0;
 	uint32_t resend_lists_named_ = 0;
