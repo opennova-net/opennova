@@ -1575,6 +1575,15 @@ func test_sighted_m4_builds_all_authored_sight_card_rows() -> void:
 			"The M4 red-dot layer renders additively")
 		assert_false(reticle_material.shader.code.contains("void fragment"),
 			"nothing else: the program a BLEND_MODE_ADD CanvasItemMaterial makes")
+	# The glass row (multiplyat) draws through the preloaded multiply program, alpha-tested: the
+	# program is made as the card's script loads, not when this card built its rows, which past a
+	# mission load is the reveal frame (D-NET-NEW-LF-28).
+	var glass_material := (card.get_child(1) as Control).material as ShaderMaterial
+	assert_not_null(glass_material, "The glass row gets a canvas material")
+	if glass_material != null:
+		assert_eq(glass_material.shader, load("res://shaders/sights_multiply.gdshader"),
+			"the one preloaded multiply program, not one built from code per card")
+		assert_true(bool(glass_material.get_shader_parameter("alpha_test")), "multiplyat alpha-tests")
 	# The presenter folds the binocular suppression into the card switch.
 	card.set_card_up(false)
 	await get_tree().process_frame

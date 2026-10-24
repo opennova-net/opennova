@@ -33,46 +33,13 @@ enum SightBlendMode {
 	MULTIPLY_AT,
 }
 
-# The ADD rows' additive program, preloaded (made as this script loads), not a CanvasItemMaterial
-# whose program waits for an idle frame (D-NET-NEW-LF-28).
+# The rows' programs, preloaded: each is made as this script loads, not when a card first builds its
+# rows (a CanvasItemMaterial's waits for an idle frame, a Shader built from code is made at its
+# build), which past a mission load is the reveal frame (D-NET-NEW-LF-28).
 const ADD_SHADER := preload("res://shaders/canvas_blend_add.gdshader")
-const BLEND_AT_SHADER_CODE := """
-shader_type canvas_item;
-render_mode blend_mix;
-
-void fragment() {
-	vec4 texel = texture(TEXTURE, UV);
-	if (texel.a <= 128.0 / 255.0) {
-		discard;
-	}
-	COLOR = texel;
-}
-"""
-const ADD_AT_SHADER_CODE := """
-shader_type canvas_item;
-render_mode blend_add;
-
-void fragment() {
-	vec4 texel = texture(TEXTURE, UV);
-	if (texel.a <= 128.0 / 255.0) {
-		discard;
-	}
-	COLOR = texel;
-}
-"""
-const MULTIPLY_SHADER_CODE := """
-shader_type canvas_item;
-render_mode blend_mul;
-uniform bool alpha_test = false;
-
-void fragment() {
-	vec4 texel = texture(TEXTURE, UV);
-	if (alpha_test && texel.a <= 128.0 / 255.0) {
-		discard;
-	}
-	COLOR = vec4(texel.rgb * 2.0, texel.a);
-}
-"""
+const BLEND_AT_SHADER := preload("res://shaders/sights_blend_at.gdshader")
+const ADD_AT_SHADER := preload("res://shaders/sights_add_at.gdshader")
+const MULTIPLY_SHADER := preload("res://shaders/sights_multiply.gdshader")
 
 class SightRowControl:
 	extends Control
@@ -211,29 +178,25 @@ func row_rect(index: int) -> Rect2:
 static func _material_for_blend(blend: int) -> Material:
 	match blend:
 		SightBlendMode.ADD:
-			var material := ShaderMaterial.new()
-			material.shader = ADD_SHADER
-			return material
+			return _shader_material(ADD_SHADER)
 		SightBlendMode.BLEND_AT:
-			return _shader_material(BLEND_AT_SHADER_CODE)
+			return _shader_material(BLEND_AT_SHADER)
 		SightBlendMode.MULTIPLY:
 			return _multiply_material(false)
 		SightBlendMode.ADD_AT:
-			return _shader_material(ADD_AT_SHADER_CODE)
+			return _shader_material(ADD_AT_SHADER)
 		SightBlendMode.MULTIPLY_AT:
 			return _multiply_material(true)
 	return null
 
 
 static func _multiply_material(alpha_test: bool) -> ShaderMaterial:
-	var material := _shader_material(MULTIPLY_SHADER_CODE)
+	var material := _shader_material(MULTIPLY_SHADER)
 	material.set_shader_parameter("alpha_test", alpha_test)
 	return material
 
 
-static func _shader_material(code: String) -> ShaderMaterial:
-	var shader := Shader.new()
-	shader.code = code
+static func _shader_material(shader: Shader) -> ShaderMaterial:
 	var material := ShaderMaterial.new()
 	material.shader = shader
 	return material
