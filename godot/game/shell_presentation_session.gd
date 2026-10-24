@@ -67,6 +67,9 @@ func finish_world_load(
 	world.visible = true
 	world.set_presentation_held(false)
 	_set_layer_children_visible(hud, true)
+	# The reveal's process frame, beside the PostLoadFrame and SlowFrame lines (an instrument).
+	print_verbose("ShellPresentation: the world revealed at frame=%d unix_ms=%d" % [
+			Engine.get_process_frames(), int(Time.get_unix_time_from_system() * 1000.0)])
 
 
 ## The frozen-shell capture seam: after a fixture moves the beauty camera with
