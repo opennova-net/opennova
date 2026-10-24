@@ -49,15 +49,19 @@ constexpr const char *kWorldMeshName = "ScarWorld";
 // A scar's layers: a scene view's own and no mirror's (engine
 // renderer/scar_draw_list.h kScarBatchesReflect). The world bits a mirror
 // admits swap for the scene-view bits no mirror mask carries (beauty and
-// Inset, or beauty alone while the owner's views differ); every other bit
-// (the casters', the slot capture's, the Inset's) is kept.
+// Inset, or beauty alone while the owner's views differ), and the mirrors'
+// private bits a split owner's node keeps for the mirror that still agrees
+// (object/object_model.h) are dropped; every other bit (the casters', the
+// slot capture's, the Inset's) is kept.
 uint32_t scar_layer_mask(uint32_t p_layer) {
 	if (opennova::renderer::kScarBatchesReflect) {
 		return p_layer;
 	}
 	constexpr uint32_t kScene = visual_layers::WORLD | visual_layers::WORLD_NO_MIRROR;
 	constexpr uint32_t kMain = visual_layers::MAIN_VIEW | visual_layers::MAIN_VIEW_NO_MIRROR;
-	uint32_t out = p_layer;
+	constexpr uint32_t kMirrors =
+			visual_layers::MIRROR_VIEW | visual_layers::INSET_MIRROR_VIEW;
+	uint32_t out = p_layer & ~kMirrors;
 	if ((out & kScene) != 0) {
 		out = (out & ~kScene) | visual_layers::SCENE_VIEW_NO_REFLECTION;
 	}

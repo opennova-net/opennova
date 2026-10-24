@@ -17,6 +17,14 @@ const SCENE_VIEW_NO_REFLECTION := 1 << 26
 const MAIN_VIEW_NO_REFLECTION := 1 << 27
 const MAIN_VIEW := 1 << 20
 const INSET_VIEW := 1 << 21
+# The water mirrors' private bits (render/visual_layers.h).
+const MIRROR_VIEW := 1 << 24
+const INSET_MIRROR_VIEW := 1 << 25
+
+
+func after_each() -> void:
+	ObjectModel.set_mirror_view_state(0, false, false)
+	ObjectModel.set_mirror_view_state(1, false, false)
 
 
 func _fixture_model(parent: Node) -> ObjectModel:
@@ -168,3 +176,51 @@ func test_a_split_owners_entity_ring_takes_an_inset_twin() -> void:
 	presenter.present_inset(main, {OWNER_A: model})
 	assert_eq(presenter.get_inset_entity_twin_count(), 0)
 	presenter.set_inset_view(false, Vector3.ZERO)
+
+
+# A node one water mirror drops and the other still sees keeps that mirror's
+# private bit; its scar ring takes the node's scene-view bits and no mirror's,
+# as retail's reflected subscene (Water_RenderReflectedWorldScene) has no scar
+# draw (engine renderer/scar_draw_list.h kScarBatchesReflect).
+func test_a_mirror_split_owners_ring_takes_no_mirror_bit() -> void:
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var model := _fixture_model(container)
+	assert_not_null(model)
+	if model == null:
+		return
+	var parts: Dictionary = model.get_render_part_nodes()
+	assert_gt(parts.size(), 0)
+	if parts.is_empty():
+		return
+	var section := int(parts.keys()[0])
+	var main_camera := _view_camera(Vector2i(640, 480), 90.0)
+	# Both mirrors below the water admit the no-mirror model's node; the main
+	# scene's mirror drops it, the Inset's agrees.
+	ObjectModel.set_mirror_view_state(0, true, true)
+	ObjectModel.set_mirror_view_state(1, true, true)
+	ObjectModel.update_authored_lods_for_views(main_camera, 640.0, null, 0.0)
+	model.set_mirror_occlusion_hidden(0, true)
+	ObjectModel.update_authored_lods_for_views(main_camera, 640.0, null, 0.0)
+	assert_true(model.is_mirror_view_split(0))
+	assert_false(model.is_mirror_view_split(1))
+	var part: Node3D = parts[section]
+	var surface_layers := -1
+	for child in part.get_children():
+		if child is GeometryInstance3D:
+			surface_layers = (child as GeometryInstance3D).layers
+			break
+	assert_ne(surface_layers & INSET_MIRROR_VIEW, 0, "the node keeps the agreeing mirror's bit")
+	var presenter := ScarPresenter.new()
+	add_child_autofree(presenter)
+	var main := _draw_list()
+	_batch(main, OWNER_A, section, true, 1)
+	presenter.present(main, {OWNER_A: model})
+	var ring: MeshInstance3D = null
+	for child in part.get_children():
+		if String(child.name).begins_with("Scars_"):
+			ring = child
+	assert_not_null(ring, "the ring rides the section node")
+	if ring != null:
+		assert_eq(ring.layers & (MIRROR_VIEW | INSET_MIRROR_VIEW), 0, "no mirror draws the scars")
+		assert_ne(ring.layers & SCENE_VIEW_NO_REFLECTION, 0, "the scene views still do")
