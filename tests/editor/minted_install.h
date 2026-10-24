@@ -1,18 +1,7 @@
 #pragma once
-// A packed game install minted from OpenNova's own game (ADR 0048): the base game's project in assets/ and its
-// expansion's in expansions/onjo1, each file packed where a build of the project puts it (the boot table's three
-// archives by its kind's slot, archive_routing.h, through our own PFF writer; the kinds the game reads loose beside
-// them; the expansion's pair and its folder's files under expansion/onjo1/), the layout the install view mounts as a
-// stock launch does (install_view.h). What the editor's tests that open a game install read in place of a retail one.
-//
-// The files are the projects' own, each one the game reads (a project's file and its folders' alike, as the editor
-// finds a file anywhere in it; its project file, its README and its cache are none): the plain files byte for byte,
-// and those .gitattributes keeps in Git LFS (the models, clips, textures, normal maps, sounds and music banks: CI's
-// test jobs pull fixtures/ alone, so there they are pointers) each a stand-in of its kind, the editor's blank of it
-// (blank/blank_factory.h, through our own writers), so a run reads the same bytes whether LFS was pulled or not. An
-// import source (an image or a terrain set under art/, beside its record) is no game file: the files its record lists
-// as its outputs, which the editor's Build makes from it, are in its place, stood in the same way, a terrain set's
-// terrain by terrain_outputs. Header-only, test support only.
+// A synthetic packed install for editor integration tests. Files deliberately cover
+// menus, symbols, sound dependencies, terrain, missions, and expansion mounting.
+// No dependency on authored content from the separate opennova-assets repository.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -26,16 +15,17 @@
 #include <utility>
 #include <vector>
 
+#include <base/gameprofile/required_resources.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/file_kind.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/blank/blank_factory.h>
-#include <editor/import/sidecar.h>
-#include <editor/import/terrain_import.h>
+#include <editor/documents/document_types.h>
 #include <editor/project_build/archive_routing.h>
 #include <formats/dds/dds.h>
+#include <formats/lwf/lwf.h>
 #include <formats/lwf/wav_pcm.h>
 #include <formats/pff/pff.h>
 #include <formats/tga/tga.h>
@@ -62,7 +52,7 @@ struct File {
 	Bytes bytes;
 };
 
-// The expansion the install carries (expansions/onjo1, "Indigo Storm").
+// The synthetic expansion the install carries.
 inline constexpr const char *kExpansion = "onjo1";
 
 inline std::string repo() {
@@ -75,209 +65,128 @@ inline std::string extension_of(const std::string &name) {
 	return dot == std::string::npos ? std::string() : opennova::strutil::to_lower(name.substr(dot));
 }
 
-// Whether .gitattributes keeps a file of assets/ or expansions/ in Git LFS: the models, clips, textures, normal
-// maps, images, sounds and music banks (assets/**/*.3di ... *.wav), but the two textures the menus name, which it
-// keeps plain (assets/newarow1.tga, assets/onmnbg.tga) so that the bundled-menu tests read them.
-inline bool rides_lfs(const std::string &name) {
-	static const char *const kLfs[] = {".3di", ".bad", ".dds", ".mdt", ".pcx", ".png", ".sbf", ".tga", ".wav"};
-	const std::string lower = opennova::strutil::to_lower(name);
-	if (lower == "newarow1.tga" || lower == "onmnbg.tga") return false;
-	const std::string extension = extension_of(name);
-	return std::any_of(std::begin(kLfs), std::end(kLfs), [&](const char *e) { return extension == e; });
+// A small install corpus made by our writers and focused menu fixtures.
+inline void put(std::vector<File> &out, const std::string &name, std::vector<uint8_t> bytes) {
+	const std::string key = opennova::pff::normalized_logical_name(name);
+	for (File &file : out) if (opennova::pff::normalized_logical_name(file.name) == key) {
+		file.bytes = share(std::move(bytes));
+		return;
+	}
+	out.push_back({name, share(std::move(bytes))});
 }
-
-// The stand-in for a file of `name`: the editor's blank of its kind, by its name (make_blank: a model of one
-// triangle, a clip of one bone at rest, the game's missing-texture checkerboard in the name's format, a wave of
-// one sample of silence, a tile placement of no tile), else the first factory of the kind (a music bank's).
-inline bool stand_in(const std::string &name, std::vector<uint8_t> &out, std::string &error) {
+inline void text_file(std::vector<File> &out, const std::string &name, const std::string &text) {
+	const std::string stored = opennova::strutil::normalized_crlf_line_ends(text);
+	put(out, name, std::vector<uint8_t>(stored.begin(), stored.end()));
+}
+inline bool blank(std::vector<File> &out, const std::string &name, std::string &error,
+                  const std::string &role = "",
+                  const std::vector<std::pair<std::string, std::string>> &values = {}) {
 	using namespace opennova::editor;
-	const AssetKind kind = classify_asset(name, nullptr);
-	BlankRequest request;
-	request.logical_name = name;
-	request.project_title = "OpenNova";
+	BlankRequest request{name, role, "Synthetic install", values};
+	std::vector<uint8_t> bytes;
 	Diagnostic why;
-	if (make_blank(request, kind, out, why)) return true;
-	for (size_t i = 0; i < blank_factory_count(); ++i) {
-		const BlankFactory *factory = blank_factory_at(i);
-		if (factory->kind == kind && make_from(*factory, request, out, why)) return true;
-	}
-	error = name + ": no blank of its kind (" + why.message + ")";
-	return false;
-}
-
-// A terrain set's outputs (the terrain importer's, import/terrain_import.h, as its record lists them), stood in:
-// the .trn naming the others as the import writes it (its names by the set's stem, the set's foliage blocks, the
-// four quadrants of the atlas in the middle of an 8 by 8 grid from (-4, -4), the importer's island layout), the
-// heights and ground mesh the minted Tmap terrain's (fixtures/terrain/tmap/Tmap.cpt, minimal_terrain_gen: a bake
-// is far too slow for a stand-in), the colour, detail and blend maps the import makes where the set gives none
-// (their sizes the game's), every other output its blank. False, with `error`, for a set that does not read or
-// an output of no stand-in.
-inline bool terrain_outputs(const std::string &set_path, const std::vector<std::string> &outputs, std::vector<File> &out,
-                            std::string &error) {
-	opennova::editor::TerrainSet set;
-	std::string why;
-	if (!opennova::editor::parse_terrain_set(test_io::read_file(set_path), set, why)) {
-		error = set_path + ": " + why;
+	if (!make_blank(request, classify_asset(name, nullptr), bytes, why)) {
+		error = name + ": " + why.message;
 		return false;
 	}
-	std::string stem = fs::path(set_path).stem().string();
-	const auto has = [&outputs](const std::string &name) {
-		return std::find(outputs.begin(), outputs.end(), name) != outputs.end();
-	};
-	for (const std::string &name : outputs) {
-		std::vector<uint8_t> bytes;
-		const std::string extension = extension_of(name);
-		if (extension == ".trn") {
-			opennova::TrnConfig trn;
-			trn.name = stem;
-			trn.colormap = stem + "_c.tga";
-			trn.detailmap = stem + "_dm.tga";
-			trn.detailmap_c1 = trn.detailmap_c2 = trn.detailmap_c3 = stem + "_dt.tga";
-			trn.detailblendmap = stem + "_d1.tga";
-			trn.polydata = stem + ".cpt";
-			trn.tileinfo = stem + ".til";
-			if (has(stem + "_t.tga")) trn.tilestrip = stem + "_t.tga";
-			if (has(stem + "_m.pcx")) trn.charmap = stem + "_m.pcx";
-			if (has(stem + "_f.pcx")) trn.foliagemap = stem + "_f.pcx";
-			trn.sector_count = trn.sector_rows = 8;
-			trn.origin_x = trn.origin_y = -4;
-			trn.sector_grid[3][3] = 1;
-			trn.sector_grid[3][4] = 3;
-			trn.sector_grid[4][3] = 2;
-			trn.sector_grid[4][4] = 4;
-			trn.foliage_defs = set.foliage;
-			std::ostringstream text;
-			if (!opennova::save_trn(text, trn, why)) {
-				error = name + ": " + why;
-				return false;
-			}
-			const std::string written = text.str();
-			bytes.assign(written.begin(), written.end());
-		} else if (name == stem + "_c.tga" || name == stem + "_dt.tga" || name == stem + "_dm.tga" || name == stem + "_d1.tga") {
-			// The maps the import makes when the set gives none, at their sizes (the game's colour map is exactly 1024
-			// a side [orig: PolyTrn_InitTextures @ 0x60B3A7]): the colour map grey, the detail and its coefficient
-			// map 512 a side of mid grey, the blend map all red (the first splat layer everywhere).
-			const bool blend = name == stem + "_d1.tga", detail = name == stem + "_dt.tga" || name == stem + "_dm.tga";
-			const uint32_t side = detail ? 512 : 1024;
-			std::vector<uint8_t> pixels(size_t(side) * side * 4, 128);
-			for (size_t i = 0; i < pixels.size(); i += 4) {
-				if (blend) pixels[i] = 255, pixels[i + 1] = pixels[i + 2] = 0;
-				pixels[i + 3] = 255;
-			}
-			if (!(blend ? opennova::tga::tga_write_rgba32(pixels.data(), side, side, bytes, why)
-			            : opennova::tga::tga_write_rgb24(pixels.data(), side, side, bytes, why))) {
-				error = name + ": " + why;
-				return false;
-			}
-		} else if (extension == ".cpt") {
-			bytes = test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.cpt"));
-			if (bytes.empty() || test_io::is_lfs_pointer(bytes)) {
-				error = "fixtures/terrain/tmap/Tmap.cpt does not read (git lfs pull fixtures/)";
-				return false;
-			}
-		} else if (!stand_in(name, bytes, error)) {
-			return false;
-		}
-		out.push_back({name, share(std::move(bytes))});
+	// Empty definition tables are valid authoring output, but the retail VFS's
+	// zero-byte extraction path cannot serve them. A comment keeps the table empty.
+	if (bytes.empty()) {
+		const std::string comment = "// Empty synthetic table.\r\n";
+		bytes.assign(comment.begin(), comment.end());
+	}
+	put(out, name, std::move(bytes));
+	return true;
+}
+inline bool fixture(std::vector<File> &out, const std::string &name, const std::string &path, std::string &error) {
+	auto bytes = test_io::read_file(test_paths_fixture(path.c_str()));
+	if (bytes.empty() || test_io::is_lfs_pointer(bytes)) {
+		error = "Missing fixture " + path + " (pull fixtures/ from LFS)";
+		return false;
+	}
+	put(out, name, std::move(bytes));
+	return true;
+}
+inline bool manifest(std::vector<File> &out, bool expansion, std::string &error) {
+	using namespace opennova::gameprofile;
+	using namespace opennova::editor;
+	for (int i = 0; i < gameprofile_required_resource_count(); ++i) {
+		const RequiredResource &row = *gameprofile_required_resource_at(i);
+		if (bool(row.flags & RES_F_EXPANSION) != expansion || (row.flags & RES_F_PLAYER_FILE)) continue;
+		if (!expansion && (row.flags & RES_F_PATTERN)) continue;
+		if (!find_blank_factory_for_role(row.role)) continue;
+		const std::string name = expansion ? gameprofile_expansion_file_name(&row, kExpansion) : row.name;
+		if (!blank(out, name, error, row.role)) return false;
 	}
 	return true;
 }
-
-// The game files of the project at `root`: every file of it (its folders' too) but its project file, its README,
-// its cache and export folders (.opennova/, build/) and its import sources with their records, by its last part;
-// a file .gitattributes keeps in LFS as its stand-in, and an import record's outputs in its source's place (the
-// image importer's textures their blanks, the terrain importer's terrain_outputs), in the order of the files'
-// paths. False, with `error`, for two files of one name (the game reads one), a plain file that is an LFS pointer
-// (an LFS rule rides_lfs does not know), or a file of no stand-in.
-inline bool project_files(const std::string &root, std::vector<File> &out, std::string &error) {
-	std::vector<fs::path> paths;
-	std::error_code ec;
-	for (fs::recursive_directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
-		const std::string part = it->path().filename().string();
-		if (it->is_directory(ec)) {
-			if (part == ".opennova" || part == "build") it.disable_recursion_pending();
-			continue;
-		}
-		if (it->is_regular_file(ec)) paths.push_back(it->path());
+inline bool sound_bank(std::vector<File> &out, const std::string &name, std::string &error) {
+	opennova::lwf::File bank;
+	bank.singles.push_back({"tone", 0, "tone.wav"});
+	opennova::lwf::Multi set;
+	set.name = "TEST_TONE";
+	set.pitch_base = opennova::lwf::kPitchUnityQ16;
+	opennova::lwf::Playlist list;
+	list.falloff_radius = 100;
+	opennova::lwf::Sndparm member;
+	member.pitch_scaled = opennova::lwf::kPitchUnityQ16;
+	member.volume = member.clamp_volume = 255;
+	for (const char *trigger : {"TEST_TONE", "MOUSE_OVER", "CLICK_SELECT", "MOVER_COMBO", "CLICK_VALUE"}) {
+		set.name = trigger;
+		set.playlist_indices = {uint32_t(bank.playlists.size())};
+		list.sndparm_indices = {uint32_t(bank.sndparms.size())};
+		bank.multis.push_back(set);
+		bank.playlists.push_back(list);
+		bank.sndparms.push_back(member);
 	}
-	if (ec) {
-		error = root + ": " + ec.message();
-		return false;
-	}
-	std::sort(paths.begin(), paths.end());
-	// The import sources: each record's source and the other files its import reads (a terrain set's images).
-	const std::string suffix = opennova::editor::kImportSidecarSuffix;
-	std::vector<fs::path> sources;
-	for (const fs::path &path : paths) {
-		if (extension_of(path.filename().string()) != suffix) continue;
-		const std::string source = path.string().substr(0, path.string().size() - suffix.size());
-		sources.push_back(fs::path(source));
-		opennova::editor::ImportSidecar record;
-		opennova::editor::Diagnostic unread;
-		if (opennova::editor::load_import_sidecar(path.string(), record, unread))
-			for (const std::string &input : record.inputs) sources.push_back(fs::path(source).parent_path() / input);
-	}
-	const auto imported = [&sources](const fs::path &path) {
-		return std::find(sources.begin(), sources.end(), path) != sources.end();
-	};
-	std::map<std::string, std::string> taken; // normalized name -> the path that gave it
-	const auto add = [&](const std::string &name, Bytes bytes, const std::string &from) {
-		const std::string key = opennova::pff::normalized_logical_name(name);
-		if (!taken.emplace(key, from).second) {
-			error = name + " twice: " + taken[key] + " and " + from;
-			return false;
-		}
-		out.push_back({name, std::move(bytes)});
-		return true;
-	};
-	for (const fs::path &path : paths) {
-		const std::string name = path.filename().string();
-		const std::string lower = opennova::strutil::to_lower(name);
-		if (lower == "project.opennova" || extension_of(name) == ".md" || imported(path)) continue;
-		if (extension_of(name) == suffix) {
-			// An import record: the files its source makes, in its place.
-			opennova::editor::ImportSidecar record;
-			opennova::editor::Diagnostic unread;
-			if (!opennova::editor::load_import_sidecar(path.string(), record, unread)) {
-				error = path.string() + ": " + unread.message;
-				return false;
-			}
-			const std::string source = path.string().substr(0, path.string().size() - suffix.size());
-			std::vector<File> made;
-			if (record.importer == opennova::editor::kTerrainImporterId) {
-				if (!terrain_outputs(source, record.outputs, made, error)) return false;
-			} else {
-				for (const std::string &output : record.outputs) {
-					std::vector<uint8_t> bytes;
-					if (!stand_in(output, bytes, error)) return false;
-					made.push_back({output, share(std::move(bytes))});
-				}
-			}
-			for (File &file : made)
-				if (!add(file.name, file.bytes, path.string())) return false;
-			continue;
-		}
-		std::vector<uint8_t> bytes;
-		if (rides_lfs(name)) {
-			if (!stand_in(name, bytes, error)) return false;
-		} else {
-			bytes = test_io::read_file(path.string());
-			if (test_io::is_lfs_pointer(bytes)) {
-				error = path.string() + " is a Git LFS pointer: an LFS rule of .gitattributes minted_install.h does not know";
-				return false;
-			}
-		}
-		if (!add(name, share(std::move(bytes)), path.string())) return false;
-	}
+	std::vector<uint8_t> bytes;
+	if (!opennova::lwf::encode_lwf(bank, bytes, error)) return false;
+	put(out, name, std::move(bytes));
 	return true;
 }
-
-// The base game's files (assets/) and the expansion's (expansions/onjo1).
+inline bool mission(std::vector<File> &out, const std::string &stem, std::string &error) {
+	return blank(out, stem + ".bms", error, "", {{"terrain", "Tmap"}, {"environment", "testday"}}) &&
+	       blank(out, stem + ".bin", error, opennova::editor::kBlankMissionTextRole) &&
+	       blank(out, stem + ".til", error) && blank(out, stem + ".pcx", error);
+}
 inline bool base_game(std::vector<File> &out, std::string &error) {
-	return project_files(repo() + "/assets", out, error);
+	out.clear();
+	if (!manifest(out, false, error)) return false;
+	for (const char *name : {"main.mnu", "sp.mnu", "mp.mnu", "options.mnu", "game.mnu", "player.mnu",
+	                        "weapon.mnu", "pre.mnu", "cmap.mnu", "stat.mnu", "death.mnu", "vehicle.mnu",
+	                        "menu_style.mns", "brand.mns", "menutxt.bin", "gametext.bin"})
+		if (!fixture(out, name, std::string("game/") + name, error)) return false;
+	for (const char *name : {"onmnu19.fnt", "onmnub23.fnt", "onttl40.fnt", "newarow1.tga", "onmnbg.tga",
+	                        "tone.wav", "test.3di", "test.bad", "test.adm", "test_rst.bad", "test.ptl",
+	                        "compring.tga", "TSDicon.tga", "cross01.tga", "testday.env", "testnight.env",
+	                        "testdawn.env", "testdusk.env", "testfog.env", "Cloud01.pcx", "Cloud01b.pcx",
+	                        "msun.3di", "fmoon4.3di", "mglare.3di", "oncredit.kda"})
+		if (!blank(out, name, error)) return false;
+	text_file(out, "overcast.def", "// Synthetic overcast defaults.\n");
+	for (int i = 2; i <= 25; ++i) {
+		char name[16];
+		std::snprintf(name, sizeof name, "cross%02d.tga", i);
+		if (!blank(out, name, error)) return false;
+	}
+	// This terrain fixture's dependencies use generated textures and models.
+	for (const char *name : {"Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"})
+		if (!fixture(out, name, std::string("terrain/tmap/") + name, error)) return false;
+	for (const char *name : {"mnml_c.tga", "mnml_dm.tga", "mnml_dc1.tga", "mnml_dc2.tga", "mnml_dc3.tga",
+	                        "mnml_dmd.tga", "mnml_t.tga", "mnml_d1.tga", "bush1.3di", "bush2.3di"})
+		if (!blank(out, name, error)) return false;
+	// Terrain's color map has a fixed 1024-square reader contract.
+	std::vector<uint8_t> color, pixels(1024 * 1024 * 4, 128);
+	for (size_t i = 3; i < pixels.size(); i += 4) pixels[i] = 255;
+	if (!opennova::tga::tga_write_rgb24(pixels.data(), 1024, 1024, color, error)) return false;
+	put(out, "mnml_c.tga", std::move(color));
+	text_file(out, "weapon.def", "weapon \"TEST_WEAPON\"\nround_type AT_NULL\nend\n");
+	if (!sound_bank(out, "menu.lwf", error) || !sound_bank(out, "game.lwf", error) ||
+	    !mission(out, "onjo_m1", error)) return false;
+	return true;
 }
 inline bool expansion_game(std::vector<File> &out, std::string &error) {
-	return project_files(repo() + "/expansions/" + kExpansion, out, error);
+	out.clear();
+	return manifest(out, true, error) && mission(out, "onjo_e1", error);
 }
 
 inline uint64_t total_bytes(const std::vector<File> &files) {
@@ -294,12 +203,20 @@ inline uint64_t total_bytes(const std::vector<File> &files) {
 // False, with `error`, when nothing is left to copy or the textures alone pass `bytes`.
 inline bool scale_to(std::vector<File> &files, size_t count, uint64_t bytes, std::string &error) {
 	using namespace opennova::editor;
+	files.erase(std::remove_if(files.begin(), files.end(), [](const File &file) {
+		return route_asset(classify_asset(file.name, file.bytes.get())) == opennova::ArchiveSlot::None;
+	}), files.end());
 	const size_t base = files.size();
 	std::vector<size_t> sources;
 	for (size_t i = 0; i < base; ++i) {
 		const std::string copy = "x0" + extension_of(files[i].name);
-		if (classify_asset(copy, files[i].bytes.get()) == classify_asset(files[i].name, files[i].bytes.get()) &&
-		    route_asset(classify_asset(copy, files[i].bytes.get())) != opennova::ArchiveSlot::None)
+		const AssetKind kind = classify_asset(copy, files[i].bytes.get());
+		const opennova::ArchiveSlot slot = route_asset(kind);
+		// Grow the boot archives' document corpus. Loose banks are enumerated by
+		// the install view separately and are not part of this archive export sweep.
+		if (kind == classify_asset(files[i].name, files[i].bytes.get()) &&
+		    slot != opennova::ArchiveSlot::None && slot != opennova::ArchiveSlot::Loose &&
+		    (document_type_for(kind) || kind == AssetKind::Texture || kind == AssetKind::Font))
 			sources.push_back(i);
 	}
 	if (sources.empty()) {

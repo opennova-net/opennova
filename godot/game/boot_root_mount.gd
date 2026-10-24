@@ -22,45 +22,19 @@ static func mount(dir: String, allow_loose_root: bool) -> ResourceRoot:
 	return root
 
 
-## The game code the bundled game mounts under: its project's target game
-## (assets/project.opennova's `target_game`).
+## The compatibility profile of the bundled OpenNova game.
 const BUNDLED_GAME := "jo"
-## Where the OpenNova Editor's Export of a project puts the game as it ships,
-## relative to the project (assets/project.opennova's `export.output`): the
-## editor's Export, `opennova-project export assets`.
-const PROJECT_EXPORT_DIR := "build/export"
-## The archive every export of a standalone game holds (its boot table's).
-const EXPORT_ARCHIVE := "resource.pff"
 
 
-## The bundled game's folder (ADR 0048 d8). An exported exe's own directory,
-## which the game zip fills with the editor's export of the base game
-## (scripts/package_godot_windows.ps1). A source run's, the same export of the
-## base game project (project_game_dir).
+## The game ZIP carries the exported content beside its executable. Source
+## runs select an external content project or install with --resource-dir.
 static func bundled_assets_dir() -> String:
-	if OS.has_feature("template"):
-		return OS.get_executable_path().get_base_dir()
-	return project_game_dir(bundled_project_dir())
-
-
-## The base game's editor project, a source run's repo `assets/` beside the
-## Godot project (ADR 0048 d7). Its files, not the game the Build makes of them.
-static func bundled_project_dir() -> String:
-	return ProjectSettings.globalize_path("res://").path_join("../assets").simplify_path()
-
-
-## The game an editor project ships: its export folder where an export of it
-## is there, else, never exported, the project folder itself, which boots its
-## menu but holds none of the files its imports make (a mission's terrain among
-## them).
-static func project_game_dir(project_dir: String) -> String:
-	var exported := project_dir.path_join(PROJECT_EXPORT_DIR)
-	return exported if FileAccess.file_exists(exported.path_join(EXPORT_ARCHIVE)) else project_dir
+	return OS.get_executable_path().get_base_dir()
 
 
 ## Mount the bundled game: the editor's Build of the base game (its boot-table
 ## archives and loose files) mounted as an install is, else, with no archive,
-## the folder as a plain loose root (a source run's unexported project). It is
+## the folder as a plain loose root. It is
 ## OpenNova's own data, which the Build's gate vouched for, so the retail boot
 ## manifest is not reported against it. The
 ## expansion it mounts over the base is chosen as for any game folder (mount):

@@ -1,7 +1,7 @@
 extends GutTest
 
-# Corpus render harness (display-axis proof): every screen of every menu our
-# base game ships (assets/*.mnu, ADR 0048) and of the authored every-widget
+# Corpus render harness (display-axis proof): every screen of the focused
+# menu-contract corpus (fixtures/game/*.mnu) and of the authored every-widget
 # fixtures must compile through the engine draw walk (MenuFrame over
 # MenuFrameCompiler) without crashing - the runtime counterpart to the C++
 # round-trip coverage test. No textures or fonts are mounted, so assets degrade
@@ -10,11 +10,11 @@ extends GutTest
 # JO menu set uses, so each construct the shipped screens draw is drawn here.
 
 const MENUS := [
-	"res://../assets/main.mnu", "res://../assets/sp.mnu", "res://../assets/mp.mnu",
-	"res://../assets/options.mnu", "res://../assets/game.mnu",
-	"res://../assets/player.mnu", "res://../assets/weapon.mnu",
-	"res://../assets/pre.mnu", "res://../assets/cmap.mnu", "res://../assets/stat.mnu",
-	"res://../assets/death.mnu", "res://../assets/vehicle.mnu",
+	"res://../fixtures/game/main.mnu", "res://../fixtures/game/sp.mnu", "res://../fixtures/game/mp.mnu",
+	"res://../fixtures/game/options.mnu", "res://../fixtures/game/game.mnu",
+	"res://../fixtures/game/player.mnu", "res://../fixtures/game/weapon.mnu",
+	"res://../fixtures/game/pre.mnu", "res://../fixtures/game/cmap.mnu", "res://../fixtures/game/stat.mnu",
+	"res://../fixtures/game/death.mnu", "res://../fixtures/game/vehicle.mnu",
 	"res://../fixtures/mnu/all_widgets.mnu", "res://../fixtures/mnu/widgets.mnu",
 ]
 

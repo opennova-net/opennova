@@ -438,7 +438,7 @@ func _stage_impact_fixture(name: String) -> String:
 	return root_dir
 
 
-# The staged harness item for KIND_BUILDING tests. The shipped assets/items.def
+# The staged harness item for KIND_BUILDING tests. The authored items.def
 # carries only what the minimal mission places or the engine spawns by fixed id,
 # so the staged root appends its own catalogue entry for the fixture model the
 # stagers copy in as GuardTwr1.3di. CRLF: retail's .def parser stops at a bare LF.
@@ -3601,7 +3601,7 @@ func test_emit_callback_uses_live_particle_groups_on_fixed_ticks() -> void:
 
 
 # The first armory open over the production world: our base game's WEAPON screen
-# (assets/weapon.mnu) and string tables (assets/menutxt.bin, assets/gametext.bin)
+# (fixtures/game/weapon.mnu) and string tables (menutxt.bin, gametext.bin)
 # beside ArmoryFixture's loadout catalog (authored rows, the satchel's
 # loadout_subclasses 1 and its detonator row among them), staged over the minimal
 # root.
@@ -3609,9 +3609,9 @@ func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 	Strings.clear()
 	var root_dir := _staged(WorldFixture.stage_minimal_root("first_armory_open"))
 	var staged := {
-		"res://../assets/weapon.mnu": "weapon.mnu",
-		"res://../assets/menutxt.bin": "menutxt.BIN",
-		"res://../assets/gametext.bin": "gametext.bin",
+		"res://../fixtures/game/weapon.mnu": "weapon.mnu",
+		"res://../fixtures/game/menutxt.bin": "menutxt.BIN",
+		"res://../fixtures/game/gametext.bin": "gametext.bin",
 	}
 	for source in staged:
 		var target := root_dir.path_join(staged[source])

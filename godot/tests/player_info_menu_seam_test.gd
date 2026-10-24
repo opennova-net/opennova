@@ -1680,13 +1680,13 @@ func test_accept_leaves_the_side_not_shown() -> void:
 # --- The authored PLAYER_INFO screen and the loadout catalog ---------------------
 
 # Our base game's player.mnu: the authored PLAYER_INFO widget tree the runtime opens.
-const ASSETS_PLAYER_MNU := "res://../assets/player.mnu"
+const ASSETS_PLAYER_MNU := "res://../fixtures/game/player.mnu"
 
 
 func _assets_player_doc() -> MnuDocument:
 	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(FileAccess.get_file_as_bytes(ASSETS_PLAYER_MNU)), OK,
-		"assets/player.mnu loads")
+		"fixture player.mnu loads")
 	return doc
 
 

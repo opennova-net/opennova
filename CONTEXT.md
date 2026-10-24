@@ -520,7 +520,8 @@ Godot editor is always "the Godot editor".
 _Avoid_: ONED (the retired product), mod tools, modtools, terrain editor
 
 **Bundled assets**:
-The `assets/` directory shipped beside `opennova.exe`: OpenNova's own game data,
+The export of the `assets/` project in `opennova-assets`, shipped beside
+`opennova.exe`: OpenNova's own game data,
 authored from scratch: OpenNova's own small game, the "Indigo Shore" mission
 (single player and Co-op over LAN) and its "Indigo Storm" expansion, whose main
 menu also offers **PLAY RETAIL**. The game mounts it when no `--resource-dir` is

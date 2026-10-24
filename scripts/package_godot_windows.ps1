@@ -1,14 +1,14 @@
 # Build and export the Windows products. Produces
 # dist/opennova-game-windows-v<version>.zip (opennova.exe, its matching native
 # dependencies and, beside them, OpenNova's own game: the OpenNova Editor's export of
-# the base game project assets/, ADR 0048 d8, with each expansion project under
-# expansions/ exported into its expansion/<name>/, ADR 0046 T5) and
+# the content checkout's assets/ project, ADR 0048 d8, with each project under
+# its expansions/ exported into expansion/<name>/, ADR 0046 T5) and
 # dist/opennova-editor-windows-v<version>.zip (editor/ = the OpenNova Editor,
 # runtime/ = the game it plays a project with, ADR 0046 d1). Retail game data is
 # supplied by the player. Debug exports include the game's ImGui tools; the
 # editor carries ImGui in both.
 # Usage: pwsh -File scripts/package_godot_windows.ps1 [-ExportMode release|debug] [-SkipBuild]
-#        [-ProjectCli <opennova-project.exe>]
+#        [-ProjectCli <opennova-project.exe>] [-ContentRoot <opennova-assets checkout>]
 
 param(
     # CI builds the GDExtension once per flavour (the build-gdextension-windows job)
@@ -21,6 +21,9 @@ param(
     # scripts/build.sh configures it (CMAKE_GENERATOR and the compiler launcher
     # from the environment, as CI's package job sets them).
     [string]$ProjectCli = "",
+    # The separate content repository; defaults to opennova-assets beside this
+    # engine checkout. Only its tracked assets/ and expansions/ files are staged.
+    [string]$ContentRoot = "",
     # Godot export mode. "release" (default; what the release workflow ships):
     # --export-release, and the packaged exes load the template_release
     # GDExtensions. "debug" (pull-request CI): --export-debug, and the packaged exes
@@ -36,7 +39,14 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"  # keeps Invoke-WebRequest fast on large files
 
 $ROOT = (Resolve-Path "$PSScriptRoot\..").Path
+
+if (-not $ContentRoot) { $ContentRoot = Join-Path (Split-Path $ROOT -Parent) "opennova-assets" }
+if (-not (Test-Path -LiteralPath (Join-Path $ContentRoot "assets\project.opennova") -PathType Leaf)) {
+    throw "Content project missing from '$ContentRoot'. Clone https://github.com/opennova-net/opennova-assets and pass its checkout with -ContentRoot."
+}
+$CONTENT_ROOT = (Resolve-Path -LiteralPath $ContentRoot).Path
 Set-Location $ROOT
+Write-Host "=== Content checkout: $CONTENT_ROOT ==="
 
 # Install the ImGui bridge: the game's dev tools (debug) and the editor's windows.
 Write-Host "=== Installing the imgui-godot addon ==="
@@ -390,7 +400,7 @@ function Test-EditorAppBoot {
     }
 }
 
-# Stage the TRACKED files of one project folder of the repository (assets/, an
+# Stage the TRACKED files of one project folder of the content repository (assets/, an
 # expansion under expansions/; never a wildcard copy: a working checkout may hold
 # untracked local data there that must never ship, and the editor's cache). The
 # models, clips and textures ride LFS, so a checkout without them pulled holds
@@ -399,20 +409,20 @@ function Copy-TrackedProject {
     param([string]$Folder, [string]$StageDir)
 
     New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
-    $tracked = & git -C $ROOT ls-files -z -- $Folder
+    $tracked = & git -C $CONTENT_ROOT ls-files -z -- $Folder
     if ($LASTEXITCODE -ne 0) { throw "git ls-files $Folder failed (exit $LASTEXITCODE)" }
     $names = @($tracked -split "`0" | Where-Object { $_ })
     if ($names.Count -eq 0) { throw "No tracked files found under $Folder/" }
     $pointerHead = "version https://git-lfs.github.com/spec/v1"
 
     foreach ($name in $names) {
-        $src = Join-Path $ROOT ($name -replace "/", "\")
+        $src = Join-Path $CONTENT_ROOT ($name -replace "/", "\")
         if (-not (Test-Path -LiteralPath $src)) { throw "Tracked file missing from the working tree: $name" }
         $head = New-Object byte[] $pointerHead.Length
         $stream = [IO.File]::OpenRead($src)
         try { $read = $stream.Read($head, 0, $head.Length) } finally { $stream.Dispose() }
         if ([Text.Encoding]::ASCII.GetString($head, 0, $read) -eq $pointerHead) {
-            throw "Tracked file is an unpulled LFS pointer: $name (run git lfs pull --include=`"$Folder/**`")"
+            throw "Tracked file is an unpulled LFS pointer: $name (run git -C `"$CONTENT_ROOT`" lfs pull --include=`"$Folder/**`")"
         }
         $rel = $name.Substring($Folder.Length + 1) -replace "/", "\"
         $dst = Join-Path $StageDir $rel
@@ -426,7 +436,7 @@ function Copy-TrackedProject {
 # staged as a project of their own, then the OpenNova Editor's export of it, as
 # its File > Export makes one: the build's three boot-table archives and loose
 # files (the editor's Build refuses a project the game could not boot) and
-# export.json. Each expansion project of the repository (expansions/<folder>/,
+# export.json. Each expansion project of the content repository (expansions/<folder>/,
 # its project.opennova naming assets/ as its base game's project, ADR 0046 T5)
 # is staged beside it as the repository lays them out, exported over the base
 # game's export, and its expansion\<name>\ folder put into $GameDir, where the
@@ -454,7 +464,7 @@ function Export-BaseGame {
         New-Item -ItemType Directory -Force -Path $GameDir | Out-Null
         Copy-Item -Path (Join-Path $baseExport "*") -Destination $GameDir -Recurse -Force
 
-        $projects = & git -C $ROOT ls-files -- "expansions/*/project.opennova"
+        $projects = & git -C $CONTENT_ROOT ls-files -- "expansions/*/project.opennova"
         if ($LASTEXITCODE -ne 0) { throw "git ls-files expansions failed (exit $LASTEXITCODE)" }
         foreach ($projectFile in @($projects | Where-Object { $_ })) {
             $folder = Split-Path $projectFile -Parent

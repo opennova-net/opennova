@@ -38,13 +38,12 @@ func _launch(args: PackedStringArray, expected_exit: int, verbose := false) -> S
 	return log_text
 
 
-func test_no_path_boots_the_bundled_menu() -> void:
-	# ADR 0048: no --resource-dir mounts the bundled assets/ placeholder menu;
-	# MainGame logs the marker once that menu is up.
-	var log_text := _launch([], 0, true)
-	assert_string_contains(log_text, "OpenNova: bundled menu up from")
-	assert_false(log_text.contains("bundled assets not found"), log_text)
-	assert_false(log_text.contains("no menu found in resource dir"), log_text)
+func test_source_run_without_a_path_requires_external_content() -> void:
+	# Godot's executable directory has no game data. The source checkout no
+	# longer contributes a fallback menu; --resource-dir selects external data.
+	var log_text := _launch([], 1, true)
+	assert_string_contains(log_text, "no bundled game content beside the executable")
+	assert_string_contains(log_text, "--resource-dir")
 
 
 func test_missing_argument_value_reports_usage() -> void:
@@ -78,12 +77,13 @@ func test_game_cfg_with_mpreset_ends_the_process_at_the_start() -> void:
 	var dir := OS.get_cache_dir().path_join("opennova_cli_mpreset_%d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
 	_dirs.append(dir)
+	WorldFixture.stage_shell_archives(self, dir, false)
 	var cfg_path := dir.path_join("game.cfg")
 	var text := "version = 29\r\nmpreset = 1\r\n"
 	var file := FileAccess.open(cfg_path, FileAccess.WRITE)
 	file.store_string(text)
 	file.close()
-	var log_text := _launch(["--working-dir", dir], 0, true)
+	var log_text := _launch(["--working-dir", dir, "--resource-dir", dir], 0, true)
 	assert_false(
 		log_text.contains("OpenNova: bundled menu up from"),
 		"the process ends before the menu: %s" % log_text
@@ -94,8 +94,8 @@ func test_game_cfg_with_mpreset_ends_the_process_at_the_start() -> void:
 	file = FileAccess.open(cfg_path, FileAccess.WRITE)
 	file.store_string("version = 29\r\nmpreset = 0\r\n")
 	file.close()
-	log_text = _launch(["--working-dir", dir], 0, true)
-	assert_string_contains(log_text, "OpenNova: bundled menu up from")
+	log_text = _launch(["--working-dir", dir, "--resource-dir", dir], 0, true)
+	assert_false(log_text.contains("no menu found in resource dir"), log_text)
 	assert_true(
 		FileAccess.file_exists(dir.path_join("player.sav")), "the menu's start saved the profile"
 	)

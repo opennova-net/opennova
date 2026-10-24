@@ -1516,7 +1516,7 @@ static int test_shipped_scripts() {
 			for (const auto &[message, line] : reports) std::fprintf(stderr, "  %s: \"%s\" at %d\n", script.name, message.c_str(), line);
 		TEST_EXPECT(reports == script.reports);
 	}
-	const editor_test::VariantFiles variants = editor_test::variant_files({"fixtures/wac", "assets"}, {".wac"});
+	const editor_test::VariantFiles variants = editor_test::variant_files({"fixtures/wac", "fixtures/game"}, {".wac"});
 	int failures = editor_test::report_missing(variants);
 	for (const std::string &path : variants.files) {
 		const std::vector<uint8_t> bytes = editor_test::repo_bytes(path);
@@ -1538,15 +1538,25 @@ static int test_shipped_scripts() {
 	return failures;
 }
 
-// Every music script of the format's fixtures and of the base game (assets/gamemus.bin, menumus.bin) through its MUS
-// text and back byte for byte (MDEdit's layout written again, as JO:CA's two are), unblocked, with no finding.
+// The format fixtures and the generated shell/mission scripts through MUS text and back byte for byte,
+// unblocked and with no findings.
 static int test_music_scripts() {
-	const editor_test::VariantFiles variants = editor_test::variant_files({"fixtures/mus", "assets"}, {".bin"});
+	const editor_test::VariantFiles variants = editor_test::variant_files({"fixtures/mus", "fixtures/game"}, {".bin"});
 	int failures = editor_test::report_missing(variants);
 	const DocumentType *type = document_type_for(AssetKind::MusicScript);
+	std::vector<std::pair<std::string, std::vector<uint8_t>>> cases;
+	for (const std::string &path : variants.files) cases.emplace_back(path, editor_test::repo_bytes(path));
+	for (const char *role : {"menumus_bin", "gamemus_bin"}) {
+		BlankRequest request;
+		request.role = role;
+		request.logical_name = std::string(role).substr(0, 7) + ".bin";
+		std::vector<uint8_t> bytes;
+		Diagnostic error;
+		TEST_EXPECT(make_blank(request, AssetKind::MusicScript, bytes, error));
+		cases.emplace_back(request.logical_name, std::move(bytes));
+	}
 	size_t scripts = 0;
-	for (const std::string &path : variants.files) {
-		const std::vector<uint8_t> bytes = editor_test::repo_bytes(path);
+	for (const auto &[path, bytes] : cases) {
 		if (classify_asset(path, &bytes) != AssetKind::MusicScript) continue; // a string table
 		std::unique_ptr<DocumentBase> document = type->make();
 		Diagnostic error;
@@ -1610,7 +1620,7 @@ static int test_shipped_credits() {
 	                           {ReferenceKind::Font, "onmnu19"},
 	                           {ReferenceKind::MenuTexture, "logo.tga"},
 	                           {ReferenceKind::MenuTexture, "cr2.png"}}));
-	const editor_test::VariantFiles variants = editor_test::variant_files({"fixtures/cbin", "assets"}, {".kda"});
+	const editor_test::VariantFiles variants = editor_test::variant_files({"fixtures/cbin", "fixtures/game"}, {".kda"});
 	int failures = editor_test::report_missing(variants);
 	size_t writable = 0;
 	for (const std::string &path : variants.files) {
@@ -1681,7 +1691,7 @@ static int test_shader_registry() {
 	if (registered.size() != 46 || std::set<std::string>(registered.begin(), registered.end()) != registry)
 		for (const std::string &tag : registered) std::fprintf(stderr, "  registered %s\n", tag.c_str());
 	TEST_EXPECT(registered.size() == 46 && std::set<std::string>(registered.begin(), registered.end()) == registry);
-	const editor_test::VariantFiles variants = editor_test::variant_files({"assets"}, {".fx"});
+	const editor_test::VariantFiles variants = editor_test::variant_files({"fixtures/game"}, {".fx"});
 	int failures = editor_test::report_missing(variants);
 	for (const std::string &path : variants.files) {
 		const std::vector<uint8_t> stored = editor_test::repo_bytes(path);

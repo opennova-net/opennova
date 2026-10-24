@@ -201,7 +201,7 @@ static int test_sheet(const variant_fixtures::Input &input) {
 // Every sheet of the variant set: fixtures/mns/'s (the format's minted sheets) and our base game's (assets/).
 static int test_every_sheet() {
 	std::vector<variant_fixtures::Input> inputs;
-	const bool all = variant_fixtures::inputs({"fixtures/mns", "assets"}, ".mns", {kShippedForm}, inputs);
+	const bool all = variant_fixtures::inputs({"fixtures/mns", "fixtures/game"}, ".mns", {kShippedForm}, inputs);
 	int failures = all ? 0 : 1;
 	for (const variant_fixtures::Input &input : inputs) {
 		const int failed = test_sheet(input);

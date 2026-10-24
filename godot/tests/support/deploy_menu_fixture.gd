@@ -2,7 +2,7 @@ class_name DeployMenuFixture
 extends RefCounted
 
 ## The named controls consumed by DeployScreenPresenter, with authored text.
-## Our base game's assets/death.mnu compiles in the menu-corpus test
+## The focused fixtures/game/death.mnu compiles in the menu-corpus test
 ## (mnu/mnu_corpus_test.gd).
 ## `targets` names the files to author into `res_dir` (death.mnu, gametext.bin,
 ## menutxt.bin).

@@ -5,8 +5,8 @@ extends GameShell
 # .mnu menu set + audio from the chosen resource dir) and hands off to a GameWorld
 # when the player starts a mission, with pause + return-to-menu on demand.
 # Everything (menus, audio, terrain, missions) loads from the --resource-dir
-# supplied at launch; without one the shell boots OpenNova's own bundled
-# assets/, whose placeholder menu hands over to a picked retail install through
+# supplied at launch; without one the shell boots the exported content beside
+# its executable, whose placeholder menu hands over to a picked retail install through
 # PLAY RETAIL (ADR 0048).
 
 const PlayerOptionsScript := preload("res://game/player_options.gd")
@@ -745,16 +745,15 @@ func _enter_bundled_menu() -> bool:
 	var root := BootRootMount.mount_bundled(BootRootMount.bundled_assets_dir())
 	if root == null:
 		return false
+	if not root.has_file(_menu_shell.main_menu_file):
+		push_warning("OpenNova: no bundled game content beside the executable; use --resource-dir to select external content.")
+		return false
 	_root = root
 	if not _enter_menu(root.get_root_dir()):
 		return false
 	if _process_exit_pending:
 		return true
 	var built := root.is_runtime_mount()
-	if not built and not OS.has_feature("template"):
-		push_warning(("OpenNova: the base game in %s is not exported: its project folder boots the menu, "
-				+ "but not its missions, whose terrain only its Build makes (opennova-project export assets, "
-				+ "or the OpenNova Editor's Export)") % BootRootMount.bundled_project_dir())
 	# The boot marker the CLI startup contract test and the package smoke read (--verbose).
 	print_verbose("OpenNova: bundled menu up from %s (%s)" % [root.get_root_dir(), "build" if built else "loose"])
 	return true

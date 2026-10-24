@@ -56,7 +56,7 @@ A slice that moves the `docs/` pointer must name a commit already on docs `maste
   PRs build the `template_debug` GDExtension; master and manual runs also build
   `template_release`. Packaging publishes three Windows zips (`package-godot-windows`,
   `package-blender-windows`, `package-apps-windows`): the game runtime with its bundled
-  `assets/` placeholder (ADR 0048; retail data comes through `--resource-dir` or PLAY
+  game from `opennova-assets` (ADR 0048; retail data comes through `--resource-dir` or PLAY
   RETAIL), the Blender add-on (that workflow also runs `tests/blender/*_test.py` under
   Blender against the packaged add-on), and the native apps. PRs package debug-mode exports.
 

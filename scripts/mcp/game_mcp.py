@@ -979,7 +979,7 @@ def build_parser() -> argparse.ArgumentParser:
     launch.add_argument("--timeout", type=float, default=240.0, help="seconds to wait for the endpoint")
     launch.add_argument("--loose", action="store_true", help="/d: loose files beside the archives override them")
     launch.add_argument("--loose-root", action="store_true", help="--loose-root: mount an archive-less directory as loose files")
-    launch.add_argument("--resource-dir", default=None, help="game data directory (default: the base game, assets/)")
+    launch.add_argument("--resource-dir", default=None, help="exported OpenNova content or an existing retail install")
     launch.add_argument("--exp", default=None, help="/exp <name>: mount an expansion")
     launch.add_argument("--game", default=None, help="/game <code>: jo, jodemo, ...")
     launch.add_argument("--loose-mission", default=None, help="boot this loose .bms from --resource-dir")

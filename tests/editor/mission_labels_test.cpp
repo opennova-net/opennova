@@ -625,7 +625,7 @@ std::vector<uint8_t> records_table() {
 // scale.bms, at the most records a shipped mission holds in each table, held to the bound well under a frame.
 int test_sweep() {
 	TableSetNames names;
-	const std::string base = repo() + "/assets/";
+	const std::string base = repo() + "/fixtures/game/";
 	for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(base)) {
 		const std::string name = entry.path().filename().string();
 		const std::string extension = opennova::strutil::to_lower(entry.path().extension().string());

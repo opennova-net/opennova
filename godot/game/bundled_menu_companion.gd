@@ -1,7 +1,7 @@
 class_name BundledMenuCompanion
 extends MenuCompanion
 
-# Drives the bundled assets/ main menu (OpenNova's placeholder, ADR 0048) by
+# Drives the bundled content's main menu (OpenNova's placeholder, ADR 0048) by
 # control NAME: PLAY_RETAIL hands the session over to the player's retail
 # install, CHANGE_FOLDER picks another one, EXIT quits (the way the shell wires
 # retail's EXIT control, which a companion that owns the menu takes over). The

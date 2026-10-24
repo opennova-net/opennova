@@ -1,10 +1,8 @@
 #pragma once
 // The files a document type's core leg opens over a format's variants: every file of the repository's
-// directories it names (a format's fixtures/<format>/, the base game's assets/) whose extension is one of a
+// fixture directories it names whose extension is one of a
 // list (without case), in name order, and the paths the format's own rows commit, which must be there: a
-// missing one is a failure, never a skip. The paths are the repository root's. A file of our own game (assets/,
-// expansions/) that Git LFS keeps and the checkout has not pulled (CI's test jobs pull fixtures/ alone) is its
-// pointer: skipped, said, never swept as a file of its format; the minted variants under fixtures/ carry the forms.
+// missing one or an unpulled LFS pointer is a failure. The paths are the repository root's.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -24,13 +22,8 @@ namespace editor_test {
 struct VariantFiles {
 	std::vector<std::string> files;   // repository-relative, in name order, each once
 	std::vector<std::string> missing; // the expected paths that are not there
-	std::vector<std::string> skipped; // the game's files that are unpulled LFS pointers
+	std::vector<std::string> skipped; // retained for caller reporting; required fixtures are never skipped
 };
-
-// Whether a directory is our own game's (assets/, expansions/...), whose LFS files a checkout may not have pulled.
-inline bool game_dir(const std::string &dir) {
-	return dir.rfind("assets", 0) == 0 || dir.rfind("expansions", 0) == 0;
-}
 
 inline std::string repo_path(const std::string &relative) {
 	return std::string(test_paths_repo_root(__FILE__)) + "/" + relative;
@@ -52,9 +45,8 @@ inline VariantFiles variant_files(const std::vector<std::string> &dirs, const st
 			if (!entry.is_regular_file(ec)) continue;
 			const std::string name = opennova::io::utf8_path(entry.path().filename());
 			if (!wanted(name)) continue;
-			if (game_dir(dir) && test_io::is_lfs_pointer(repo_bytes(dir + "/" + name))) {
-				std::printf("[skip] %s/%s is an unpulled LFS pointer\n", dir.c_str(), name.c_str());
-				out.skipped.push_back(dir + "/" + name);
+			if (test_io::is_lfs_pointer(repo_bytes(dir + "/" + name))) {
+				out.missing.push_back(dir + "/" + name);
 				continue;
 			}
 			out.files.push_back(dir + "/" + name);

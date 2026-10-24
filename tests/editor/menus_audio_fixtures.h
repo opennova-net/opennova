@@ -1,7 +1,7 @@
 #pragma once
 // The inputs the menu and sound document sweeps read: every file of an extension in the folders a sweep
-// covers (the formats' minted variants under fixtures/<format>/, OpenNova's own base game in assets/, its
-// expansion projects under expansions/), and the variants a sweep requires by name, each a failure when it
+// covers (the formats' minted variants under fixtures/<format>/ and authored menu samples under
+// fixtures/game/), and the variants a sweep requires by name, each a failure when it
 // is missing, never a skip. The JO corpus these sweeps once read from a retail install is closed, so each of
 // its variants is minted once (tests/fixtures/*_gen.cpp, the format's lane) and read here.
 #include <cstddef>
@@ -45,14 +45,14 @@ inline const std::vector<std::string> &menu_variants() {
 }
 
 // The menus the menu rows sweep (editor_menus, editor_menu_table, editor_menu_render): fixtures/mnu/'s, the
-// base game's (assets/, the screens the game shows, modelled on the original's) and the variants above.
-inline bool menus(std::vector<Input> &out) { return inputs({"fixtures/mnu", "assets"}, ".mnu", menu_variants(), out); }
+// authored game samples (fixtures/game/) and the variants above.
+inline bool menus(std::vector<Input> &out) { return inputs({"fixtures/mnu", "fixtures/game"}, ".mnu", menu_variants(), out); }
 
 // The expansion's own main.mnu for the menu rows' install legs (minted_install.h mint_with): the base game's with its
 // STARTUP screen's MUSICVAR 2, so the expansion's mount serves a menu of a base game's name with other bytes (swept
-// again) beside the ones it serves unchanged (counted once). False where assets/main.mnu holds no MUSICVAR 1.
+// again) beside the ones it serves unchanged (counted once). False where fixtures/game/main.mnu holds no MUSICVAR 1.
 inline bool expansion_main_menu(std::vector<uint8_t> &out) {
-	const std::vector<uint8_t> base = editor_test::repo_bytes("assets/main.mnu");
+	const std::vector<uint8_t> base = editor_test::repo_bytes("fixtures/game/main.mnu");
 	std::string text(base.begin(), base.end());
 	const std::string from = "<MUSICVAR>1</MUSICVAR>";
 	const size_t at = text.find(from);

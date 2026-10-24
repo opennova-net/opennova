@@ -440,30 +440,13 @@ int test_shipped_forms(std::map<std::string, size_t> &read) {
 int test_fixtures(const std::string &repo, std::map<std::string, size_t> &read) {
 	std::vector<std::string> files = {"fixtures/cbin/particle_dot.tga", "fixtures/cbin/credits_image.png",
 	                                  "fixtures/env/cloud01.pcx",       "fixtures/env/cloud01b.pcx",
-	                                  "fixtures/terrain/tmap/Tmap_m.pcx", "fixtures/terrain/tmap/Tmap_f.pcx",
-	                                  "expansions/onjo1/models/onshed1_0.dds", "expansions/onjo1/models/onshed1_0d.dds",
-	                                  "expansions/onjo1/models/onshed1_1d.dds", "expansions/onjo1/models/onshed1_0n.mdt"};
+	                                  "fixtures/terrain/tmap/Tmap_m.pcx", "fixtures/terrain/tmap/Tmap_f.pcx"};
 	for (const char *variant : {"charmap_m.pcx", "foliage_f.pcx", "picture.pcx", "grey_info2.pcx", "rgb24.pcx", "trntile_a.tga",
 	                            "map_d1.tga", "map_c.tga", "bare24.tga"})
 		files.push_back(std::string("fixtures/terrain/variants/") + variant);
-	size_t base_game = 0;
-	for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(repo + "/assets")) {
-		const std::string name = entry.path().filename().string();
-		if (!entry.is_regular_file() || classify_asset(name, nullptr) != AssetKind::Texture) continue;
-		files.push_back("assets/" + name);
-		++base_game;
-	}
-	TEST_EXPECT(base_game > 100);
-	size_t failed = 0, unpulled = 0;
+	size_t failed = 0;
 	for (const std::string &file : files) {
 		const std::vector<uint8_t> bytes = test_io::read_file(repo + "/" + file);
-		// Our own game's files ride Git LFS, and CI's test jobs pull fixtures/ alone: a pointer is skipped, said (the
-		// forms are the minted fixtures' and test_shipped_forms').
-		if ((file.rfind("assets/", 0) == 0 || file.rfind("expansions/", 0) == 0) && test_io::is_lfs_pointer(bytes)) {
-			std::printf("[skip] %s is an unpulled LFS pointer\n", file.c_str());
-			++unpulled;
-			continue;
-		}
 		const bool whole = !bytes.empty() && opens_whole(file, bytes);
 		std::unique_ptr<DocumentBase> document = make_texture_document();
 		Diagnostic error;
@@ -478,9 +461,7 @@ int test_fixtures(const std::string &repo, std::map<std::string, size_t> &read) 
 		++read[extension_of(file)];
 	}
 	TEST_EXPECT(failed == 0);
-	std::printf("fixtures: %zu texture files (%zu of the base game, %zu unpulled LFS pointers skipped) each opened whole "
-	            "and saved as read\n",
-	            files.size() - unpulled, base_game, unpulled);
+	std::printf("fixtures: %zu texture variants opened whole and saved as read\n", files.size());
 	return 0;
 }
 

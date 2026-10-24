@@ -83,8 +83,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: false   # scoped below: the package reads assets/ and expansions/ only
+          lfs: false   # game content comes from its separate checkout below
           submodules: recursive
+
+      - name: Check out the bundled content baseline
+        uses: actions/checkout@v4
+        with:
+          repository: opennova-net/opennova-assets
+          ref: 0f8513af27469fad81e9f2e89c644d602adc5983
+          path: .content/opennova-assets
+          lfs: false
+          sparse-checkout: |
+            assets
+            expansions
 
       # The models, clips and textures in assets/ ride LFS. Their objects are
       # cached by the pointer set, so a run restores them instead of
@@ -92,16 +103,18 @@ jobs:
       - name: Key the bundled LFS assets
         id: assets-lfs
         shell: bash
-        run: echo "key=assets-lfs-$(git lfs ls-files -l -I 'assets/**,expansions/**' | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+        working-directory: .content/opennova-assets
+        run: echo "key=opennova-assets-lfs-$(git lfs ls-files -l -I 'assets/**,expansions/**' | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
       - name: Cache the bundled LFS assets
         uses: actions/cache@v4
         with:
-          path: .git/lfs/objects
+          path: .content/opennova-assets/.git/lfs/objects
           key: ${{ steps.assets-lfs.outputs.key }}
 
       - name: Pull Git LFS assets (assets/ and expansions/ only)
         shell: bash
+        working-directory: .content/opennova-assets
         run: |
           git lfs install --local
           git lfs pull --include="assets/**,expansions/**"
@@ -120,7 +133,7 @@ jobs:
 
       - name: Package Godot Windows apps
         shell: pwsh
-        run: scripts/package_godot_windows.ps1
+        run: scripts/package_godot_windows.ps1 -ContentRoot .content/opennova-assets
 
       - name: Upload OpenNova Windows game zip
         id: upload_game

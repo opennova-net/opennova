@@ -124,9 +124,12 @@ inline Files clips() {
 	             });
 }
 
-// The animation maps: the authored tables (fixtures/anim), the base game's (assets/: plain blobs, no LFS pull)
-// and any the anim rows mint (fixtures/adm).
-inline Files maps() { return files({"fixtures/anim", "fixtures/adm", "assets"}, {".adm"}, {}); }
+// The animation maps: the person and viewmodel rigs, small soldier table, and syntax variants.
+inline Files maps() {
+	return files({"fixtures/anim", "fixtures/game"}, {".adm"},
+	             {"fixtures/anim/forms.adm", "fixtures/anim/rig19.adm", "fixtures/anim/soldier.adm",
+	              "fixtures/anim/US01.adm", "fixtures/anim/vm40.adm"});
+}
 
 // The face animations: the authored person.grm and the one the grm rows mint at the scale and in the layout
 // Black Hawk Down's tool wrote its 13 faces in (tests/fixtures/minimal_grm_gen.cpp), which the writer must give

@@ -1190,7 +1190,7 @@ add_test(NAME minimal_rtxt_gen COMMAND minimal_rtxt_gen_test)
 
 # Synthetic fonts: validity, byte-stable round trips and drawable glyphs.
 # The stroke font (formats/fnt/fnt_stroke_font.h) mints
-# assets/opennova.fnt and fixtures/fnt/synth_{1,3}page.fnt, byte-compared every
+# fixtures/fnt/synth_{1,3}page.fnt, byte-compared every
 # run (--write regenerates).
 add_executable(minimal_fnt_gen_test fixtures/minimal_fnt_gen.cpp)
 target_link_libraries(minimal_fnt_gen_test PRIVATE opennova_formats)
@@ -2490,7 +2490,7 @@ add_test(NAME mnu_unit COMMAND mnu_unit_test)
 # Compat sweep over the tree's menus (tests/mnu/repo_menus.h): the authored set
 # under fixtures/mnu, shipped_forms.mnu among them (every element, attribute and
 # lexical form the shipped JO menus use, in their byte form), and the base game's
-# screens in assets/: the reader against the retail-reader oracle, no write
+# samples in fixtures/game/: the reader against the retail-reader oracle, no write
 # issue, and the writer's fixed point.
 add_executable(mnu_compat_test mnu/mnu_compat_test.cpp)
 target_link_libraries(mnu_compat_test PRIVATE opennova_base opennova_formats)
@@ -3407,7 +3407,7 @@ add_test(NAME wac_dispatch_sweep COMMAND wac_dispatch_sweep_test)
 # The WAC language's words (runtime/wac/wac_lexis.h): the keywords, the comment start and the
 # operand prefixes, checked against what the compiler reads.
 add_test(NAME wac_lexis COMMAND wac_lexis_test)
-# The corpus sweep: every committed .wac script (assets/, expansions/, fixtures/wac/;
+# The corpus sweep: every committed .wac fixture (fixtures/wac/;
 # argv dirs override) against the original compiler's listing of it.
 add_test(NAME wac_corpus COMMAND wac_corpus_test)
 
@@ -4904,7 +4904,7 @@ add_test(NAME def_write COMMAND def_write_test)
 # hudpos.def's writer (formats/def/def_hudpos_write.h, ADR 0003; the editor deep-integration plan's DI-37):
 # read, written and read again the same model, its bytes canonical, over every key it writes, the authored
 # fixtures/def/hudpos.def (JO:CA's spellings, with and without its trailing NUL; its written form pinned by
-# FNV-1a64) and the base game's assets/hudpos.def.
+# FNV-1a64) and the authored fixtures/game/hudpos.def.
 # charattr.def's loader and writer (formats/charattr, ADR 0003): the classes in order to the first
 # missing, the first section of a label, each value's source and the unread sections; written and read
 # again the same rows; the authored fixtures/charattr/charattr.def in JO:CA's layout (classes 1..9,
