@@ -404,11 +404,24 @@ bool run(const Options &options, const std::vector<Product> &products, Result &r
 	error.clear();
 	if (net::startup() != 0) { error = "Unable to initialize networking."; return false; }
 	Worker worker{options, progress, cancel, Clock::now() + std::chrono::seconds(10), error};
+	std::string failure;
 	for (const Product &product : products) {
-		if (!update_product(worker, product, result)) return false;
+		if (!update_product(worker, product, result)) {
+			// An install stops at its first failure. A check goes on: one dead or unpublished
+			// product (a registered expansion's) must not hide another product's update.
+			if (!options.check) return false;
+			if (failure.empty()) failure = error;
+			continue;
+		}
 		// Let the helper replace this process before continuing with content. A
 		// later product failure must not strand an already staged updater revision.
 		if (result.revision_pending) break;
+	}
+	// A check with an update reports it; one with none fails when any product could not be
+	// checked, since that product may have one.
+	if (!result.available && !failure.empty()) {
+		error = failure;
+		return false;
 	}
 	error.clear();
 	worker.status(result.available ? "Operation completed successfully!" : "No Update Needed!");

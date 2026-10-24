@@ -39,6 +39,8 @@ bool discover_products(const Options &options, std::vector<Product> &out, std::s
 // The same worker drives the dialog, --check and loopback tests. Checks write no files.
 // Downloads are validated before a product is changed; a failed write can leave a partial
 // install, which a subsequent run rechecks. Cancellation is checked before installation.
+// An install stops at the first failing product; a check goes on past one, reporting an
+// update another product has, and fails only when it found none and a product failed.
 bool run(const Options &options, const std::vector<Product> &products, Result &result,
 		std::string &error, const ProgressSink &progress = {}, const std::atomic_bool *cancel = nullptr);
 

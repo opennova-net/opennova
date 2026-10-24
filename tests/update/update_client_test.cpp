@@ -115,6 +115,30 @@ int test_retail_server_list(const test_temp::TempDir &temp) {
 	return 0;
 }
 
+// A check goes on past a product it cannot check: another product's update is still
+// reported; with none found, the check fails, as the dead product may have one.
+int test_check_goes_past_a_failing_product(const test_temp::TempDir &temp) {
+	Server server;
+	std::string error;
+	TEST_EXPECT(server.start(package("Checked beside an unpublished product"), error));
+	updater::Options options;
+	options.runtime_dir = temp.path;
+	options.resource_dir = io::os_path(temp.file("check past"));
+	options.server = "127.0.0.1";
+	options.port = server.listener.ports()[0];
+	options.check = true;
+	const std::vector<updater::Product> products{{temp.path / "unpublished", "MISSING", "MISSING.CMD", {}, true},
+			{options.resource_dir, "TEST", "TEST.CMD", {}, true}};
+	updater::Result result;
+	TEST_EXPECT(updater::run(options, products, result, error) && result.available && result.products == 1);
+	options.check = false;
+	TEST_EXPECT(!updater::run(options, products, result, error)); // an install stops at the first
+	TEST_EXPECT(updater::run(options, {products[1]}, result, error) && result.applied);
+	options.check = true;
+	TEST_EXPECT(!updater::run(options, products, result, error) && !result.available && !error.empty());
+	return 0;
+}
+
 int test_failures(const test_temp::TempDir &temp) {
 	Server server;
 	std::string error;
@@ -248,6 +272,7 @@ int main() {
 	test_temp::TempDir temp("update_client");
 	if (int rc = test_first_install(temp)) return rc;
 	if (int rc = test_retail_server_list(temp)) return rc;
+	if (int rc = test_check_goes_past_a_failing_product(temp)) return rc;
 	if (int rc = test_failures(temp)) return rc;
 	if (int rc = test_revision(temp)) return rc;
 	if (int rc = test_options_and_discovery(temp)) return rc;
