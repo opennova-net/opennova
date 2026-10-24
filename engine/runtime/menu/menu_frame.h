@@ -110,7 +110,13 @@ inline float menu_text_anchor(int design, float scale) {
 // STENCIL and BRUSH handles with mode 0x651 / two stages; CUIElement_DrawFrame
 // @ 0x64a392.. -> CUIElement_DrawTexturedQuad @ 0x649e80]. A frame piece's corners are
 // floats, so the device covers what Direct3D 9 does: the pixels whose centres lie
-// in [x0, x1) x [y0, y1).
+// in [x0, x1) x [y0, y1). The game composes a piece on the device as it draws it,
+// every frame: the window's draw binds border_material and submits the pieces
+// [orig: CUIElement_DrawFrame @ 0x64a210 - CTextureManager_ApplyMaterial (the call
+// @ 0x64a2c6), CUIElement_DrawTexturedQuad (the first call @ 0x64a392);
+// CUIElement_DrawTexturedQuad @ 0x649e80 - GDynamicVB_DrawPrimitive (the call
+// @ 0x649fea)], so a piece first shown (death.mnu's MAP and shroud at its reveal)
+// costs that frame no composition of its own (D-NET-NEW-LF-25).
 struct MenuQuad {
 	float x0 = 0.0f;
 	float y0 = 0.0f;

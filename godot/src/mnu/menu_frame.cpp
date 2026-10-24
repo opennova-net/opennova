@@ -26,13 +26,16 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/rect2.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <map>
 #include <string>
+#include <vector>
 
 using namespace godot;
 using namespace opennova::fnt;
@@ -58,9 +61,9 @@ int positive_mod(int value, int divisor) {
 
 // A bilinear sample of a WRAP-addressed texture at a UV: the four texels around
 // (u * W - 0.5, v * H - 0.5), their indices wrapped.
-Color sample_bilinear_wrap(const Ref<Image> &image, float u, float v) {
-	const int width = image->get_width();
-	const int height = image->get_height();
+Color sample_bilinear_wrap(const MenuImageTexels &texels, float u, float v) {
+	const int width = texels.width;
+	const int height = texels.height;
 	const float px = u * static_cast<float>(width) - 0.5f;
 	const float py = v * static_cast<float>(height) - 0.5f;
 	const float fx0 = std::floor(px);
@@ -71,11 +74,59 @@ Color sample_bilinear_wrap(const Ref<Image> &image, float u, float v) {
 	const int y1 = (y0 + 1) % height;
 	const float fx = px - fx0;
 	const float fy = py - fy0;
-	const Color top = image->get_pixel(x0, y0).lerp(
-			image->get_pixel(x1, y0), fx);
-	const Color bottom = image->get_pixel(x0, y1).lerp(
-			image->get_pixel(x1, y1), fx);
+	const Color top = texels.at(x0, y0).lerp(texels.at(x1, y0), fx);
+	const Color bottom = texels.at(x0, y1).lerp(texels.at(x1, y1), fx);
 	return top.lerp(bottom, fy);
+}
+
+// An image's texels read once as Image::get_pixel reads each: the engine's own conversion
+// to RGBAF stores every texel's get_pixel colour (Image::convert between a byte format and
+// a float one takes its per-texel set_pixel(get_pixel) path), so a composition samples
+// get_pixel's values to the bit with no binding call per texel. A compressed image reads as
+// get_pixel's refusal does, Color() at every texel.
+MenuImageTexels read_texels(const Ref<Image> &p_image) {
+	MenuImageTexels out;
+	out.width = p_image->get_width();
+	out.height = p_image->get_height();
+	if (p_image->is_compressed()) {
+		out.refused = true;
+		return out;
+	}
+	Ref<Image> floats = p_image;
+	if (p_image->get_format() != Image::FORMAT_RGBAF) {
+		floats = p_image->duplicate();
+		floats->convert(Image::FORMAT_RGBAF);
+	}
+	const PackedByteArray data = floats->get_data();
+	const size_t count = static_cast<size_t>(out.width) * static_cast<size_t>(out.height) * 4;
+	if (static_cast<size_t>(data.size()) < count * sizeof(float)) {
+		out.refused = true;
+		return out;
+	}
+	out.rgba.resize(count);
+	std::memcpy(out.rgba.data(), data.ptr(), count * sizeof(float));
+	return out;
+}
+
+// The composed colours as Image::set_pixel writes them into an RGBA8 image: they land in an
+// RGBAF image, and the engine's own conversion to RGBA8 quantises each with set_pixel's rule
+// (the same per-texel set_pixel(get_pixel) path), in one native pass.
+Ref<Image> rgba8_from_colors(int p_width, int p_height, const std::vector<float> &p_rgba) {
+	PackedByteArray bytes;
+	bytes.resize(static_cast<int64_t>(p_rgba.size() * sizeof(float)));
+	std::memcpy(bytes.ptrw(), p_rgba.data(), p_rgba.size() * sizeof(float));
+	Ref<Image> image = Image::create_from_data(p_width, p_height, false, Image::FORMAT_RGBAF, bytes);
+	image->convert(Image::FORMAT_RGBA8);
+	return image;
+}
+
+void store_color(std::vector<float> &r_rgba, int p_width, int p_x, int p_y, const Color &p_color) {
+	float *texel = r_rgba.data() +
+			(static_cast<size_t>(p_y) * static_cast<size_t>(p_width) + static_cast<size_t>(p_x)) * 4;
+	texel[0] = p_color.r;
+	texel[1] = p_color.g;
+	texel[2] = p_color.b;
+	texel[3] = p_color.a;
 }
 
 } // namespace
@@ -392,11 +443,10 @@ Ref<Texture2D> MenuFrame::texture_for_quad_(
 		return drawn.is_valid() ? drawn : textures_[static_cast<size_t>(p_quad.texture)];
 	}
 
-	const Ref<Image> first = texture_images_[static_cast<size_t>(p_quad.texture)];
 	if (has_second) {
-		return frame_piece_texture_(p_quad, first,
-				texture_images_[static_cast<size_t>(p_quad.texture2)]);
+		return frame_piece_texture_(p_quad);
 	}
+	const Ref<Image> first = texture_images_[static_cast<size_t>(p_quad.texture)];
 	const int first_w = first->get_width();
 	const int first_h = first->get_height();
 	const int src_x0 = std::clamp(
@@ -431,15 +481,20 @@ Ref<Texture2D> MenuFrame::texture_for_quad_(
 		if (cached.is_valid()) {
 			return cached;
 		}
-		Ref<Image> tile = Image::create(src_w, src_h, false, Image::FORMAT_RGBA8);
+		// Each tile pixel is set_pixel(get_pixel) of its phased source texel, composed over
+		// the texels read once (read_texels, rgba8_from_colors).
+		const MenuImageTexels &texels = slot_texels_(p_quad.texture);
+		std::vector<float> rgba(static_cast<size_t>(src_w) * static_cast<size_t>(src_h) * 4);
 		for (int y = 0; y < src_h; ++y) {
 			for (int x = 0; x < src_w; ++x) {
-				tile->set_pixel(x, y,
-						first->get_pixel(src_x0 + (phase_x + x) % src_w,
-								src_y0 + (phase_y + y) % src_h));
+				store_color(rgba, src_w, x, y,
+						texels.at(src_x0 + (phase_x + x) % src_w, src_y0 + (phase_y + y) % src_h));
 			}
 		}
-		const Ref<Texture2D> texture = ImageTexture::create_from_image(tile);
+		++composed_tiles_;
+		composed_tile_pixels_ += static_cast<int64_t>(src_w) * src_h;
+		const Ref<Texture2D> texture =
+				ImageTexture::create_from_image(rgba8_from_colors(src_w, src_h, rgba));
 		keep_frame_texture_(key, texture);
 		return texture;
 	}
@@ -454,9 +509,12 @@ Ref<Texture2D> MenuFrame::texture_for_quad_(
 // game's textures are (created WRAP, LINEAR: flags 0x140000 and 0x40000), then the
 // two MODULATE2X stages over the quad's diffuse, each saturated, the alpha the
 // product. Drawn 1:1 over the pixels it covers, the image is what the game's
-// rasteriser writes there.
-Ref<Texture2D> MenuFrame::frame_piece_texture_(const opennova::menu::MenuQuad &p_quad,
-		const Ref<Image> &p_stencil, const Ref<Image> &p_brush) {
+// rasteriser writes there. The game's device composes a piece as it draws it, so
+// a piece first shown costs its draw alone (the MenuQuad contract carries the
+// witness): the composition reads each texture's texels once and writes the
+// pixels in one native pass (read_texels, rgba8_from_colors), with no binding
+// call per covered pixel.
+Ref<Texture2D> MenuFrame::frame_piece_texture_(const opennova::menu::MenuQuad &p_quad) {
 	const opennova::renderer::PixelRect px =
 			opennova::renderer::d3d9_quad_pixels(p_quad.x0, p_quad.y0, p_quad.x1, p_quad.y1);
 	const int dst_w = px.x1 - px.x0;
@@ -480,8 +538,10 @@ Ref<Texture2D> MenuFrame::frame_piece_texture_(const opennova::menu::MenuQuad &p
 	if (cached.is_valid()) {
 		return cached;
 	}
+	const MenuImageTexels &stencil_texels = slot_texels_(p_quad.texture);
+	const MenuImageTexels &brush_texels = slot_texels_(p_quad.texture2);
 	const Color diffuse = opennova::color_from_argb(p_quad.color);
-	Ref<Image> composed = Image::create(dst_w, dst_h, false, Image::FORMAT_RGBA8);
+	std::vector<float> composed(static_cast<size_t>(dst_w) * static_cast<size_t>(dst_h) * 4);
 	const float span_x = p_quad.x1 - p_quad.x0;
 	const float span_y = p_quad.y1 - p_quad.y0;
 	for (int y = 0; y < dst_h; ++y) {
@@ -491,20 +551,32 @@ Ref<Texture2D> MenuFrame::frame_piece_texture_(const opennova::menu::MenuQuad &p
 		for (int x = 0; x < dst_w; ++x) {
 			const float window_x = static_cast<float>(px.x0 + x);
 			const float u = p_quad.u0 + (p_quad.u1 - p_quad.u0) * (window_x - p_quad.x0) / span_x;
-			const Color stencil = sample_bilinear_wrap(p_stencil, u, v);
-			const Color brush = sample_bilinear_wrap(p_brush,
+			const Color stencil = sample_bilinear_wrap(stencil_texels, u, v);
+			const Color brush = sample_bilinear_wrap(brush_texels,
 					(window_x + 0.5f) / p_quad.texture2_period_x, brush_v);
 			const float r0 = std::min(1.0f, 2.0f * stencil.r * diffuse.r);
 			const float g0 = std::min(1.0f, 2.0f * stencil.g * diffuse.g);
 			const float b0 = std::min(1.0f, 2.0f * stencil.b * diffuse.b);
-			composed->set_pixel(x, y,
+			store_color(composed, dst_w, x, y,
 					Color(std::min(1.0f, 2.0f * r0 * brush.r), std::min(1.0f, 2.0f * g0 * brush.g),
 							std::min(1.0f, 2.0f * b0 * brush.b), stencil.a * diffuse.a * brush.a));
 		}
 	}
-	const Ref<Texture2D> texture = ImageTexture::create_from_image(composed);
+	++composed_pieces_;
+	composed_piece_pixels_ += static_cast<int64_t>(dst_w) * dst_h;
+	const Ref<Texture2D> texture =
+			ImageTexture::create_from_image(rgba8_from_colors(dst_w, dst_h, composed));
 	keep_frame_texture_(key, texture);
 	return texture;
+}
+
+const MenuImageTexels &MenuFrame::slot_texels_(int32_t p_slot) {
+	auto found = draw_texels_.find(p_slot);
+	if (found == draw_texels_.end()) {
+		found = draw_texels_.emplace(p_slot, read_texels(texture_images_[static_cast<size_t>(p_slot)]))
+						.first;
+	}
+	return found->second;
 }
 
 opennova::menu::MenuWidgetState &MenuFrame::widget_(int p_index) {
@@ -1061,6 +1133,7 @@ void MenuFrame::_draw() {
 		rs->canvas_item_set_visible(slot_canvas_item_, false);
 		return;
 	}
+	const auto draw_start = std::chrono::steady_clock::now();
 	const Vector2 scale = design_scale_();
 	const opennova::menu::MenuDrawList &list =
 			compiler_.compile(state_, scale.x, scale.y);
@@ -1225,6 +1298,22 @@ void MenuFrame::_draw() {
 				}
 				break;
 		}
+	}
+	draw_texels_.clear();
+	// A draw that composed frame pieces or tiles (a screen's first show, a widget first
+	// shown) names its cost under --verbose.
+	if (composed_pieces_ > 0 || composed_tiles_ > 0) {
+		const int64_t draw_usec = std::chrono::duration_cast<std::chrono::microseconds>(
+				std::chrono::steady_clock::now() - draw_start)
+										  .count();
+		UtilityFunctions::print_verbose(vformat(
+				"MenuFrame %s: draw %.1f ms, composed %d frame piece(s) over %d px and %d tile(s) over %d px",
+				get_name(), static_cast<double>(draw_usec) / 1000.0, composed_pieces_,
+				composed_piece_pixels_, composed_tiles_, composed_tile_pixels_));
+		composed_pieces_ = 0;
+		composed_piece_pixels_ = 0;
+		composed_tiles_ = 0;
+		composed_tile_pixels_ = 0;
 	}
 }
 

@@ -7,6 +7,7 @@
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
@@ -58,6 +59,24 @@ public:
 
 private:
 	std::map<std::string, Entry> entries_;
+};
+
+// A menu image's texels as Image::get_pixel reads them, read once (menu_frame.cpp
+// read_texels): what MenuFrame composes a frame piece or a phased tile from.
+struct MenuImageTexels {
+	int width = 0;
+	int height = 0;
+	// A compressed image: get_pixel refuses every read with Color().
+	bool refused = false;
+	std::vector<float> rgba; // width x height x RGBA
+	Color at(int p_x, int p_y) const {
+		if (refused) {
+			return Color();
+		}
+		const float *texel = rgba.data() +
+				(static_cast<size_t>(p_y) * static_cast<size_t>(width) + static_cast<size_t>(p_x)) * 4;
+		return Color(texel[0], texel[1], texel[2], texel[3]);
+	}
 };
 
 // The compiled-menu device leg (ADR 0033 R2) over the engine's
@@ -364,8 +383,9 @@ protected:
 private:
 	opennova::menu::MenuWidgetState &widget_(int p_index);
 	Ref<Texture2D> texture_for_quad_(const opennova::menu::MenuQuad &p_quad);
-	Ref<Texture2D> frame_piece_texture_(const opennova::menu::MenuQuad &p_quad,
-			const Ref<Image> &p_stencil, const Ref<Image> &p_brush);
+	Ref<Texture2D> frame_piece_texture_(const opennova::menu::MenuQuad &p_quad);
+	// A texture slot's texels for this draw's compositions, read on the first ask.
+	const MenuImageTexels &slot_texels_(int32_t p_slot);
 	// A composed frame texture by key, kept across configures while drawn (the
 	// cache lets go of what two configures in a row did not draw).
 	Ref<Texture2D> cached_frame_texture_(const std::string &p_key) const;
@@ -404,6 +424,13 @@ private:
 		uint64_t used = 0; // the configure that last drew it
 	};
 	mutable std::map<std::string, FrameTexture> frame_texture_cache_;
+	// The slots the draw composed frame pieces and tiles from, each image's texels read once
+	// (let go as the draw ends), and the draw's composition counts (its --verbose line).
+	std::map<int32_t, MenuImageTexels> draw_texels_;
+	int32_t composed_pieces_ = 0;
+	int64_t composed_piece_pixels_ = 0;
+	int32_t composed_tiles_ = 0;
+	int64_t composed_tile_pixels_ = 0;
 	uint64_t configure_count_ = 0;
 	// Each kept font's pages, uploaded on first draw, by the load's serial.
 	std::map<uint64_t, std::vector<Ref<Texture2D>>> font_pages_by_serial_;
