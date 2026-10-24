@@ -122,11 +122,22 @@ public:
 	~SceneOverlayCompositorEffect() override;
 
 	void set_view_kind(ViewKind p_kind);
+	// Draw through `p_owner`'s device objects: its shader, samplers, white texture, vertex format
+	// and pipeline cache. A renderer's view passes share one set, so the pipeline one view's pass
+	// (or the load's warm) made for a framebuffer format serves every view of that format. Set
+	// before either pass draws.
+	void share_device(const Ref<SceneOverlayCompositorEffect> &p_owner);
 	// The stage's device objects (its shader, samplers, white texture and vertex format), created
 	// at the mission textures stage with the tracer pool's materials, its NVG laser's among them
 	// (ParticleRenderer::create_tracer_pool_devices), queued on the render thread (rd_glsl.h
 	// call_device_create). The callback's own create then finds them.
 	void create_device();
+	// The load's forced frame's warm (ParticleRenderer::warm_pipelines): this pass's next callback
+	// makes every combine's pipeline (renderer::kSceneOverlayPipelineStates) for its view's
+	// framebuffer format into the shared device, drawing nothing for it; cancel drops a request
+	// no callback serviced (a view that did not render in that frame).
+	void request_pipeline_warm();
+	void cancel_pipeline_warm();
 	void publish(const std::shared_ptr<const SceneOverlaySubmission> &p_submission);
 	void clear_submission();
 	// Release RenderingDevice objects only while the owner knows the server
@@ -142,6 +153,7 @@ protected:
 	static void _bind_methods();
 
 private:
+	class Device;
 	class Impl;
 	std::unique_ptr<Impl> impl_;
 

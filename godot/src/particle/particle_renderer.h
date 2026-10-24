@@ -116,7 +116,9 @@ public:
 
 	// Deterministic pipeline warm for the loading screen: one centimeter quad
 	// per FirstPerson spatial shader plus a one-shot request for all eight
-	// World RenderingDevice pipelines on the compositor's real framebuffer.
+	// World RenderingDevice pipelines on the compositor's real framebuffer, and
+	// one for every overlay combine's pipeline on each view's framebuffer
+	// format (SceneOverlayCompositorEffect::request_pipeline_warm).
 	// Warming by spawning effects alone is timing-dependent (delayed emitters
 	// emit nothing during the warm frames). clear_warm_pipelines frees the
 	// quads and cancels an unserviced compositor request.

@@ -609,6 +609,72 @@ void test_the_ribbon_combines_and_their_fog() {
 		CHECK(v.fog == 1.0f);
 }
 
+// The pipeline states an embedder makes ahead of the first draw are exactly the
+// states the builders emit, each once: every batch any builder makes finds its
+// state listed, and every listed state is one a builder makes. Retail's tail
+// draws through states made with the device and the mission textures
+// [orig: CGfxDevice_CreateDefaultRenderStates @ 0x6780a0 - called by
+// CD3DDevice_InitializeDisplay @ 0x679add; CEffectEmitterPool_CreateShaders
+// @ 0x5dc8f0 - called by Render_InitMissionTextures @ 0x587240].
+void test_the_pipeline_states_are_every_builder_state() {
+	SceneOverlayFrame frame;
+	PrecipitationDrawFrame rain;
+	rain.drops = 1;
+	rain.vertices = {0, 0, 0, 0.5f, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 1};
+	append_precipitation_overlay(rain, 1, frame);
+	std::vector<LightCoronaQuad> quads(1);
+	quads[0].half_size = 0.5f;
+	append_corona_overlay(quads, 2, frame);
+	const float rgb[3] = {0.2f, 0.4f, 0.6f};
+	append_underwater_murk_overlay(rgb, 200, 5.0f, frame);
+	const float tri[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+	const float uv[6] = {0, 0, 1, 0, 0, 1};
+	const float unit[3] = {1.0f, 1.0f, 1.0f};
+	append_self_lum_overlay(SceneOverlaySlot::SunGlare, tri, uv, 3, rgb, unit, 1.0f, 3, frame);
+	append_self_lum_overlay(SceneOverlaySlot::MirrorCelestialBodies, tri, uv, 3, rgb, unit, 1.0f,
+			3, frame, SceneOverlayDepth::FarBand);
+	append_mirror_dim_overlay(64.0f / 255.0f, frame);
+	const float points[12] = {
+		0.0f, 1.0f, 0.0f, 1.0f,
+		0.0f, 1.0f, -0.25f, 1.0f,
+		0.0f, 1.0f, -0.5f, 1.0f,
+	};
+	TracerView view;
+	view.camera = {0.0f, 1.0f, 2.0f};
+	view.forward = {0.0f, 0.0f, -1.0f};
+	view.projection_x_scale = 1.0f;
+	view.tick_ms = 1000;
+	TracerRibbonFrame beam;
+	append_tracer_beam(points, 3, 8, view, beam);
+	const SceneOverlayFog fog;
+	append_nvg_laser_overlay(beam, 4, fog, frame);
+	append_tracer_ribbon_overlay(beam, 4, fog, frame, SceneOverlaySlot::MirrorTracerRibbons);
+	append_tracer_ribbon_overlay(stock_and_smoke_ribbons(), 4, fog, frame,
+			SceneOverlaySlot::MirrorTracerRibbons);
+	CHECK(frame.batches.size() == 11);
+
+	const auto listed = [](SceneOverlayShading shading, bool depth_test) {
+		int count = 0;
+		for (const SceneOverlayPipelineState &state : kSceneOverlayPipelineStates)
+			count += state.shading == shading && state.depth_test == depth_test ? 1 : 0;
+		return count;
+	};
+	for (const SceneOverlayBatch &batch : frame.batches)
+		CHECK(listed(batch.shading, scene_overlay_depth_test(batch.depth)) == 1);
+	for (const SceneOverlayPipelineState &state : kSceneOverlayPipelineStates) {
+		bool made = false;
+		for (const SceneOverlayBatch &batch : frame.batches)
+			made = made || (batch.shading == state.shading &&
+								   scene_overlay_depth_test(batch.depth) == state.depth_test);
+		CHECK(made);
+	}
+	// The far band tests depth as the plain test does (one pipeline); ALWAYS
+	// does not.
+	CHECK(scene_overlay_depth_test(SceneOverlayDepth::TestNoWrite));
+	CHECK(scene_overlay_depth_test(SceneOverlayDepth::FarBand));
+	CHECK(!scene_overlay_depth_test(SceneOverlayDepth::Always));
+}
+
 // The SRCBLEND / DESTBLEND words each combine draws with.
 void test_the_combines_blend_words() {
 	const auto words = [](SceneOverlayShading shading, int source, int dest) {
@@ -638,6 +704,7 @@ int main() {
 	test_the_nvg_laser_beam_overlay();
 	test_a_mirror_draws_its_ribbons_ahead_of_its_coronas();
 	test_the_ribbon_combines_and_their_fog();
+	test_the_pipeline_states_are_every_builder_state();
 	test_the_combines_blend_words();
 	if (failures != 0) {
 		std::printf("renderer_scene_overlay: %d failure(s)\n", failures);

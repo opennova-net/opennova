@@ -566,6 +566,12 @@ public:
 		for_each_overlay([](Ref<SceneOverlayCompositorEffect> &overlay) {
 			overlay.instantiate();
 		});
+		// One device set for every view's overlay pass: a pipeline made for a
+		// framebuffer format serves every view of that format.
+		for (Ref<SceneOverlayCompositorEffect> *overlay :
+				{&reflection_overlay, &second_scene_overlay, &inset_mirror_overlay}) {
+			(*overlay)->share_device(world_overlay);
+		}
 		// The mirror's reflected scene draws its tracer ribbons, then its
 		// coronas, after its particle passes; the Inset pass's own mirror draws
 		// its own ribbons and closes its target the same way
@@ -1258,6 +1264,12 @@ void ParticleRenderer::warm_pipelines(const Vector3 &p_position) {
 	impl_->for_each_effect([](Ref<ParticleCompositorEffect> &effect) {
 		effect->request_pipeline_warm();
 	});
+	// Every overlay combine's pipeline, made in the same frame for each view format that frame
+	// draws (D-NET-NEW-L3-73; renderer/scene_overlay.h kSceneOverlayPipelineStates carries the
+	// witness).
+	impl_->for_each_overlay([](Ref<SceneOverlayCompositorEffect> &overlay) {
+		overlay->request_pipeline_warm();
+	});
 	Ref<QuadMesh> quad;
 	quad.instantiate();
 	quad->set_size(Vector2(0.01f, 0.01f));
@@ -1283,6 +1295,9 @@ void ParticleRenderer::clear_warm_pipelines() {
 	if (impl_) {
 		impl_->for_each_effect([](Ref<ParticleCompositorEffect> &effect) {
 			effect->cancel_pipeline_warm();
+		});
+		impl_->for_each_overlay([](Ref<SceneOverlayCompositorEffect> &overlay) {
+			overlay->cancel_pipeline_warm();
 		});
 	}
 	for (Node *node : warm_nodes_) {

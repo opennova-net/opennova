@@ -392,6 +392,80 @@ void SceneOverlayModelSurfaces::clear() {
 	placed_.clear();
 }
 
+// The overlay stage's device objects: one shader, its samplers and fallback
+// texture, one vertex format, and the pipelines and texture sets made over them.
+// Every view's pass of a renderer draws through one set (share_device), so a
+// pipeline made for a framebuffer format, by a draw or by the load's warm,
+// serves every view whose target has that format. Made and used on the render
+// thread; released by the owner while the server is drained.
+class SceneOverlayCompositorEffect::Device {
+public:
+	struct PipelineKey {
+		int64_t framebuffer_format = -1;
+		std::uint8_t shading = 0;
+		bool depth_test = false;
+
+		bool operator<(const PipelineKey &p_other) const {
+			return std::tie(framebuffer_format, shading, depth_test) <
+					std::tie(p_other.framebuffer_format, p_other.shading, p_other.depth_test);
+		}
+	};
+
+	RenderingDevice *rd = nullptr;
+	RID shader;
+	RID sampler;
+	RID wrap_sampler; // the tracer pool's wrapping texture stages
+	RID white_texture;
+	int64_t vertex_format = RenderingDevice::INVALID_FORMAT_ID;
+	std::map<PipelineKey, RID> pipelines;
+	std::map<std::uint64_t, RID> texture_uniform_sets;
+	// The pipelines made, for the reports read off the render thread.
+	std::atomic<std::size_t> pipeline_count{0};
+
+	bool ready() const {
+		return rd != nullptr && shader.is_valid() && sampler.is_valid() &&
+				wrap_sampler.is_valid() && white_texture.is_valid() &&
+				vertex_format != RenderingDevice::INVALID_FORMAT_ID;
+	}
+
+	// False with the status and failure the calling pass reports.
+	bool initialize(std::string &r_status, std::string &r_failure);
+	// The pipeline of one state (renderer::SceneOverlayPipelineState) for a
+	// framebuffer format, made at its first ask; an invalid RID on failure.
+	RID pipeline_for(int64_t p_framebuffer_format, SceneOverlayShading p_shading,
+			bool p_depth_test);
+	RID uniform_set_for(const RID &p_server_texture, bool p_wrap);
+
+	void release() {
+		for (auto &entry : texture_uniform_sets) {
+			if (rd != nullptr && entry.second.is_valid() &&
+					rd->uniform_set_is_valid(entry.second))
+				rd->free_rid(entry.second);
+		}
+		texture_uniform_sets.clear();
+		for (auto &entry : pipelines) {
+			if (rd != nullptr && entry.second.is_valid() &&
+					rd->render_pipeline_is_valid(entry.second))
+				rd->free_rid(entry.second);
+		}
+		pipelines.clear();
+		pipeline_count.store(0, std::memory_order_release);
+		free_rid(white_texture);
+		free_rid(wrap_sampler);
+		free_rid(sampler);
+		free_rid(shader);
+		vertex_format = RenderingDevice::INVALID_FORMAT_ID;
+		rd = nullptr;
+	}
+
+private:
+	void free_rid(RID &p_rid) {
+		if (rd != nullptr && p_rid.is_valid())
+			rd->free_rid(p_rid);
+		p_rid = RID();
+	}
+};
+
 class SceneOverlayCompositorEffect::Impl {
 public:
 	struct Diagnostics {
@@ -406,17 +480,9 @@ public:
 		std::vector<int> submitted_slots;
 		std::vector<int> drawn_slots;
 		bool callback_seen = false;
-	};
-
-	struct PipelineKey {
-		int64_t framebuffer_format = -1;
-		std::uint8_t shading = 0;
-		std::uint8_t depth = 0;
-
-		bool operator<(const PipelineKey &p_other) const {
-			return std::tie(framebuffer_format, shading, depth) <
-					std::tie(p_other.framebuffer_format, p_other.shading, p_other.depth);
-		}
+		std::uint64_t pipeline_warm_requests = 0;
+		std::uint64_t pipeline_warm_requests_serviced = 0;
+		std::size_t warmed_framebuffer_formats = 0;
 	};
 
 	struct ViewTarget {
@@ -428,25 +494,21 @@ public:
 
 	std::atomic<int> view_kind{VIEW_SCENE};
 	std::atomic<bool> shutdown_requested{false};
+	std::atomic<bool> warm_requested{false};
 	mutable std::mutex submission_mutex;
 	std::shared_ptr<const SceneOverlaySubmission> latest;
 	mutable std::mutex diagnostics_mutex;
 	Diagnostics diagnostics;
 
+	std::shared_ptr<Device> device = std::make_shared<Device>();
+	// The device this pass's own objects (its framebuffers and vertex buffer) live on.
 	RenderingDevice *rd = nullptr;
-	RID shader;
-	RID sampler;
-	RID wrap_sampler; // the NVG laser's wrapping texture stages
-	RID white_texture;
 	RID vertex_buffer;
 	std::uint32_t vertex_capacity = 0;
 	std::uint64_t uploaded_frame_id = std::numeric_limits<std::uint64_t>::max();
-	int64_t vertex_format = RenderingDevice::INVALID_FORMAT_ID;
 	TypedArray<RID> vertex_buffers;
 	PackedInt64Array vertex_offsets;
 	PackedByteArray push_constants;
-	std::map<PipelineKey, RID> pipelines;
-	std::map<std::uint64_t, RID> texture_uniform_sets;
 	std::vector<ViewTarget> targets;
 	std::uint64_t target_buffers_id = 0;
 	std::vector<SceneOverlayBatch> draw_list;
@@ -478,29 +540,19 @@ public:
 		target_buffers_id = 0;
 	}
 
-	void release_all() {
+	void release_view_resources() {
 		release_targets();
-		for (auto &entry : texture_uniform_sets) {
-			if (rd != nullptr && entry.second.is_valid() &&
-					rd->uniform_set_is_valid(entry.second))
-				rd->free_rid(entry.second);
-		}
-		texture_uniform_sets.clear();
-		for (auto &entry : pipelines) {
-			if (rd != nullptr && entry.second.is_valid() &&
-					rd->render_pipeline_is_valid(entry.second))
-				rd->free_rid(entry.second);
-		}
-		pipelines.clear();
 		free_rid(vertex_buffer);
 		vertex_capacity = 0;
 		uploaded_frame_id = std::numeric_limits<std::uint64_t>::max();
-		free_rid(white_texture);
-		free_rid(wrap_sampler);
-		free_rid(sampler);
-		free_rid(shader);
-		vertex_format = RenderingDevice::INVALID_FORMAT_ID;
 		rd = nullptr;
+	}
+
+	// This pass's objects, then the shared device's (the first pass's release
+	// frees those; the others find them gone).
+	void release_all() {
+		release_view_resources();
+		device->release();
 	}
 
 	bool initialize_rd();
@@ -508,36 +560,53 @@ public:
 			const Vector2i &p_size);
 	bool upload(const SceneOverlaySubmission &p_submission);
 	RID pipeline_for(int64_t p_framebuffer_format, const SceneOverlayBatch &p_batch);
-	RID uniform_set_for(const RID &p_server_texture, bool p_wrap);
+	bool warm_pipelines(RenderData *p_render_data);
 	void draw(const SceneOverlaySubmission &p_submission, RenderData *p_render_data);
 };
 
 bool SceneOverlayCompositorEffect::Impl::initialize_rd() {
-	if (rd != nullptr && shader.is_valid() && sampler.is_valid() &&
-			wrap_sampler.is_valid() && white_texture.is_valid() &&
-			vertex_format != RenderingDevice::INVALID_FORMAT_ID)
-		return true;
-	release_all();
+	if (!device->ready()) {
+		release_view_resources();
+		std::string status;
+		std::string failure;
+		if (!device->initialize(status, failure)) {
+			set_status(status, failure);
+			return false;
+		}
+	}
+	rd = device->rd;
+	if (push_constants.size() != kPushConstantBytes) {
+		vertex_buffers.resize(1);
+		vertex_offsets.resize(1);
+		push_constants.resize(kPushConstantBytes);
+	}
+	return true;
+}
+
+bool SceneOverlayCompositorEffect::Device::initialize(std::string &r_status,
+		std::string &r_failure) {
+	release();
+	const auto fail = [&](const char *p_status, const std::string &p_failure) {
+		r_status = p_status;
+		r_failure = p_failure;
+		release();
+		return false;
+	};
 	RenderingServer *server = RenderingServer::get_singleton();
 	rd = server != nullptr ? server->get_rendering_device() : nullptr;
 	if (rd == nullptr) {
-		set_status("compatibility_renderer_unsupported",
+		return fail("compatibility_renderer_unsupported",
 				"RenderingDevice is unavailable; the overlay stage requires Forward+ or Mobile");
-		return false;
 	}
 	Ref<RDShaderSPIRV> spirv;
 	const std::string errors =
 			compile_rd_spirv(rd, vertex_shader_source(), fragment_shader_source(), spirv);
 	if (!errors.empty()) {
-		set_status("shader_compile_failed", errors);
-		release_all();
-		return false;
+		return fail("shader_compile_failed", errors);
 	}
 	shader = rd->shader_create_from_spirv(spirv, "OpenNova scene overlay stage");
 	if (!shader.is_valid()) {
-		set_status("shader_create_failed", "RenderingDevice rejected the overlay shader");
-		release_all();
-		return false;
+		return fail("shader_create_failed", "RenderingDevice rejected the overlay shader");
 	}
 	Ref<RDSamplerState> sampler_state;
 	sampler_state.instantiate();
@@ -572,9 +641,7 @@ bool SceneOverlayCompositorEffect::Impl::initialize_rd() {
 	data.push_back(white);
 	white_texture = rd->texture_create(format, view, data);
 	if (!sampler.is_valid() || !wrap_sampler.is_valid() || !white_texture.is_valid()) {
-		set_status("device_resource_failed", "the overlay sampler or fallback texture failed");
-		release_all();
-		return false;
+		return fail("device_resource_failed", "the overlay sampler or fallback texture failed");
 	}
 	TypedArray<Ref<RDVertexAttribute>> attributes;
 	auto attribute = [&](std::uint32_t p_location, RenderingDevice::DataFormat p_format,
@@ -601,13 +668,8 @@ bool SceneOverlayCompositorEffect::Impl::initialize_rd() {
 			static_cast<std::uint32_t>(offsetof(SceneOverlayVertex, fog)));
 	vertex_format = rd->vertex_format_create(attributes);
 	if (vertex_format == RenderingDevice::INVALID_FORMAT_ID) {
-		set_status("vertex_format_failed", "RenderingDevice rejected the overlay vertex format");
-		release_all();
-		return false;
+		return fail("vertex_format_failed", "RenderingDevice rejected the overlay vertex format");
 	}
-	vertex_buffers.resize(1);
-	vertex_offsets.resize(1);
-	push_constants.resize(kPushConstantBytes);
 	return true;
 }
 
@@ -681,8 +743,53 @@ bool SceneOverlayCompositorEffect::Impl::upload(const SceneOverlaySubmission &p_
 
 RID SceneOverlayCompositorEffect::Impl::pipeline_for(int64_t p_framebuffer_format,
 		const SceneOverlayBatch &p_batch) {
-	const PipelineKey key{p_framebuffer_format, static_cast<std::uint8_t>(p_batch.shading),
-			static_cast<std::uint8_t>(p_batch.depth)};
+	const RID pipeline = device->pipeline_for(p_framebuffer_format, p_batch.shading,
+			opennova::renderer::scene_overlay_depth_test(p_batch.depth));
+	if (!pipeline.is_valid())
+		set_status("pipeline_create_failed", "RenderingDevice rejected an overlay pipeline");
+	return pipeline;
+}
+
+// The load's one forced frame: every state's pipeline (renderer::kSceneOverlayPipelineStates)
+// for each framebuffer format this view's targets have, made in the frame's own callback and
+// drawing nothing, so the first draw of any combine in any view of that format (the first tracer
+// seen in a reflection among them) makes none (D-NET-NEW-L3-73).
+bool SceneOverlayCompositorEffect::Impl::warm_pipelines(RenderData *p_render_data) {
+	if (!initialize_rd())
+		return false;
+	Ref<RenderSceneBuffers> generic_buffers = p_render_data->get_render_scene_buffers();
+	RenderSceneBuffersRD *buffers = Object::cast_to<RenderSceneBuffersRD>(generic_buffers.ptr());
+	if (buffers == nullptr) {
+		set_status("pipeline_warm_render_data_unsupported",
+				"the overlay pipeline warm requires RenderSceneBuffersRD");
+		return false;
+	}
+	const std::uint32_t view_count = buffers->get_view_count();
+	if (!ensure_targets(buffers, view_count, buffers->get_internal_size()))
+		return false;
+	std::vector<int64_t> formats;
+	for (std::uint32_t view = 0; view < view_count; ++view) {
+		const int64_t format = rd->framebuffer_get_format(targets[view].framebuffer);
+		if (std::find(formats.begin(), formats.end(), format) != formats.end())
+			continue;
+		formats.push_back(format);
+		for (const opennova::renderer::SceneOverlayPipelineState &state :
+				opennova::renderer::kSceneOverlayPipelineStates) {
+			if (!device->pipeline_for(format, state.shading, state.depth_test).is_valid()) {
+				set_status("pipeline_create_failed", "RenderingDevice rejected an overlay pipeline");
+				return false;
+			}
+		}
+	}
+	std::lock_guard<std::mutex> lock(diagnostics_mutex);
+	++diagnostics.pipeline_warm_requests_serviced;
+	diagnostics.warmed_framebuffer_formats = formats.size();
+	return true;
+}
+
+RID SceneOverlayCompositorEffect::Device::pipeline_for(int64_t p_framebuffer_format,
+		SceneOverlayShading p_shading, bool p_depth_test) {
+	const PipelineKey key{p_framebuffer_format, static_cast<std::uint8_t>(p_shading), p_depth_test};
 	const auto found = pipelines.find(key);
 	if (found != pipelines.end())
 		return found->second;
@@ -697,7 +804,7 @@ RID SceneOverlayCompositorEffect::Impl::pipeline_for(int64_t p_framebuffer_forma
 	// No overlay draw writes depth. LESSEQUAL on retail's forward depth is
 	// GREATER_OR_EQUAL on Godot's reversed depth; ALWAYS drops the test.
 	depth->set_enable_depth_write(false);
-	depth->set_enable_depth_test(p_batch.depth != SceneOverlayDepth::Always);
+	depth->set_enable_depth_test(p_depth_test);
 	depth->set_depth_compare_operator(RenderingDevice::COMPARE_OP_GREATER_OR_EQUAL);
 	Ref<RDPipelineColorBlendStateAttachment> attachment;
 	attachment.instantiate();
@@ -706,7 +813,7 @@ RID SceneOverlayCompositorEffect::Impl::pipeline_for(int64_t p_framebuffer_forma
 	// on the colour; the alpha blends the same way under SRCALPHA / INVSRCALPHA
 	// and keeps the target's otherwise.
 	const opennova::renderer::SceneOverlayBlend blend_words =
-			opennova::renderer::scene_overlay_blend(p_batch.shading);
+			opennova::renderer::scene_overlay_blend(p_shading);
 	attachment->set_src_color_blend_factor(blend_factor(blend_words.source));
 	attachment->set_dst_color_blend_factor(blend_factor(blend_words.dest));
 	const bool source_over = blend_words.source == SceneOverlayBlendFactor::SrcAlpha &&
@@ -725,15 +832,14 @@ RID SceneOverlayCompositorEffect::Impl::pipeline_for(int64_t p_framebuffer_forma
 	blend->set_attachments(attachments);
 	const RID pipeline = create_rd_render_pipeline(rd, shader, p_framebuffer_format, vertex_format,
 			RenderingDevice::RENDER_PRIMITIVE_TRIANGLES, raster, multisample, depth, blend);
-	if (!pipeline.is_valid()) {
-		set_status("pipeline_create_failed", "RenderingDevice rejected an overlay pipeline");
+	if (!pipeline.is_valid())
 		return RID();
-	}
 	pipelines.emplace(key, pipeline);
+	pipeline_count.store(pipelines.size(), std::memory_order_release);
 	return pipeline;
 }
 
-RID SceneOverlayCompositorEffect::Impl::uniform_set_for(const RID &p_server_texture,
+RID SceneOverlayCompositorEffect::Device::uniform_set_for(const RID &p_server_texture,
 		bool p_wrap) {
 	RenderingServer *server = RenderingServer::get_singleton();
 	RID texture = server != nullptr && p_server_texture.is_valid() ?
@@ -833,7 +939,7 @@ void SceneOverlayCompositorEffect::Impl::draw(const SceneOverlaySubmission &p_su
 			const RID pipeline = pipeline_for(format, batch);
 			const RID texture = batch.texture < p_submission.textures.size() ?
 					p_submission.textures[batch.texture] : RID();
-			const RID uniform_set = uniform_set_for(texture, wraps(batch.shading));
+			const RID uniform_set = device->uniform_set_for(texture, wraps(batch.shading));
 			if (!pipeline.is_valid() || !uniform_set.is_valid())
 				continue;
 			write_u32(push_constants, 96, static_cast<std::uint32_t>(batch.shading));
@@ -849,7 +955,7 @@ void SceneOverlayCompositorEffect::Impl::draw(const SceneOverlaySubmission &p_su
 			vertex_offsets[0] = static_cast<int64_t>(batch.first_vertex) * kVertexStride;
 			rd->draw_list_bind_render_pipeline(list, pipeline);
 			rd->draw_list_bind_uniform_set(list, uniform_set, 0);
-			rd->draw_list_bind_vertex_buffers_format(list, vertex_format, batch.vertex_count,
+			rd->draw_list_bind_vertex_buffers_format(list, device->vertex_format, batch.vertex_count,
 					vertex_buffers, vertex_offsets);
 			rd->draw_list_set_push_constant(list, push_constants, kPushConstantBytes);
 			rd->draw_list_draw(list, false, 1);
@@ -883,6 +989,25 @@ void SceneOverlayCompositorEffect::_bind_methods() {}
 
 void SceneOverlayCompositorEffect::set_view_kind(ViewKind p_kind) {
 	impl_->view_kind.store(p_kind, std::memory_order_release);
+}
+
+void SceneOverlayCompositorEffect::share_device(const Ref<SceneOverlayCompositorEffect> &p_owner) {
+	if (p_owner.is_valid() && p_owner.ptr() != this)
+		impl_->device = p_owner->impl_->device;
+}
+
+void SceneOverlayCompositorEffect::request_pipeline_warm() {
+	if (impl_->shutdown_requested.load(std::memory_order_acquire))
+		return;
+	{
+		std::lock_guard<std::mutex> lock(impl_->diagnostics_mutex);
+		++impl_->diagnostics.pipeline_warm_requests;
+	}
+	impl_->warm_requested.store(true, std::memory_order_release);
+}
+
+void SceneOverlayCompositorEffect::cancel_pipeline_warm() {
+	impl_->warm_requested.store(false, std::memory_order_release);
 }
 
 void SceneOverlayCompositorEffect::create_device() {
@@ -956,6 +1081,16 @@ void SceneOverlayCompositorEffect::write_backend_report(Dictionary &result) cons
 	for (int slot : d.drawn_slots)
 		drawn.push_back(slot);
 	result["drawn_slots"] = drawn;
+	result["pipeline_warm_requests"] = static_cast<int64_t>(d.pipeline_warm_requests);
+	result["pipeline_warm_requests_serviced"] =
+			static_cast<int64_t>(d.pipeline_warm_requests_serviced);
+	result["warmed_framebuffer_formats"] = static_cast<int64_t>(d.warmed_framebuffer_formats);
+	result["pipeline_states"] =
+			static_cast<int64_t>(opennova::renderer::kSceneOverlayPipelineStates.size());
+	// The shared device: the pipelines it holds and which device it is (one per renderer).
+	result["device_pipelines"] = static_cast<int64_t>(
+			impl_->device->pipeline_count.load(std::memory_order_acquire));
+	result["device_id"] = static_cast<int64_t>(reinterpret_cast<std::uintptr_t>(impl_->device.get()));
 }
 
 void SceneOverlayCompositorEffect::_render_callback(int32_t p_effect_callback_type,
@@ -968,6 +1103,9 @@ void SceneOverlayCompositorEffect::_render_callback(int32_t p_effect_callback_ty
 	}
 	if (p_effect_callback_type != static_cast<int32_t>(get_effect_callback_type()))
 		return;
+	// The load's one forced frame services a warm request here, whatever this view draws.
+	if (impl_->warm_requested.exchange(false, std::memory_order_acq_rel))
+		impl_->warm_pipelines(p_render_data);
 	const std::shared_ptr<const SceneOverlaySubmission> submission = impl_->snapshot();
 	if (!submission) {
 		impl_->set_status("waiting_for_submission");

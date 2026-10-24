@@ -213,6 +213,34 @@ struct SceneOverlayBlend {
 // comments above carry each one's witness).
 SceneOverlayBlend scene_overlay_blend(SceneOverlayShading shading);
 
+// One device pipeline state an overlay batch draws under: its combine and
+// whether it tests depth (SceneOverlayDepth below: TestNoWrite and FarBand both
+// test LESSEQUAL without writing, the band being the vertex stage's; Always
+// does not test).
+struct SceneOverlayPipelineState {
+	SceneOverlayShading shading;
+	bool depth_test;
+};
+
+// Every pipeline state the builders below emit. Retail draws the tail through
+// render states made ahead of any frame, with the device and the mission
+// textures [orig: CGfxDevice_CreateDefaultRenderStates @ 0x6780a0 - called by
+// CD3DDevice_InitializeDisplay @ 0x679add; CEffectEmitterPool_CreateShaders
+// @ 0x5dc8f0 - called by Render_InitMissionTextures @ 0x587240], so no draw makes
+// one: an embedder makes each state's pipeline for every framebuffer format its
+// views draw into ahead of the first draw that needs it.
+inline constexpr std::array<SceneOverlayPipelineState, 9> kSceneOverlayPipelineStates = {{
+	{SceneOverlayShading::Modulate2xBlend, true},  // the precipitation
+	{SceneOverlayShading::AdditiveModulate, true}, // the coronas
+	{SceneOverlayShading::SelfLumAdditive, false}, // the glare and the glint
+	{SceneOverlayShading::SelfLumAdditive, true},  // a mirror's far-band sky redraw
+	{SceneOverlayShading::FlatBlend, false},       // the underwater murk
+	{SceneOverlayShading::DimMultiply, false},     // the mirror dim
+	{SceneOverlayShading::NvgLaser, true},         // the NVG laser beams and channels
+	{SceneOverlayShading::RibbonStock, true},      // the tracer ribbons
+	{SceneOverlayShading::RibbonSmoke, true},
+}};
+
 // How a tracer-pool batch's per-vertex fog term reads (SceneOverlayVertex::fog).
 // The pass fog the device runs [orig: CD3DDevice_SetFogParameters @ 0x677960;
 // CD3DDevice_SetFogAndBlendMode @ 0x677740, the primary fog state's case 0]:
@@ -236,6 +264,11 @@ enum class SceneOverlayDepth : uint8_t {
 	// [kQ3FarBandMinZ, kQ3FarBandMaxZ] (Render_SetViewportFarDepth), z-write off.
 	FarBand = 2,
 };
+
+// Whether a batch at `depth` tests depth (its SceneOverlayPipelineState's).
+inline constexpr bool scene_overlay_depth_test(SceneOverlayDepth depth) {
+	return depth != SceneOverlayDepth::Always;
+}
 
 enum class SceneOverlayGeometry : uint8_t {
 	World = 0,     // world-space positions (render frame) under the view projection

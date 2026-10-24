@@ -411,6 +411,64 @@ func test_pipeline_warm_is_serviced_by_the_real_rd_compositor() -> void:
 			"explicit shutdown frees warmed RenderingDevice resources exactly once")
 
 
+const OVERLAY_BACKENDS := ["world_overlay_backend", "reflection_overlay_backend",
+	"second_scene_overlay_backend", "inset_mirror_overlay_backend"]
+
+
+# The overlay passes' warm (D-NET-NEW-L3-73): every view's overlay pass takes the
+# request with the particle passes', and the frame's callback makes every
+# overlay combine's pipeline for its view's framebuffer format into the one
+# device every view's overlay pass shares, drawing nothing, so no view's first
+# draw of a combine (the first tracer seen in a reflection) makes one. Retail's
+# tail draws through render states made with the device and the mission
+# textures (engine renderer/scene_overlay.h kSceneOverlayPipelineStates carries
+# the witness).
+func test_the_overlay_warm_makes_every_combine_pipeline_in_the_shared_device() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(64, 64)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var camera := Camera3D.new()
+	camera.position = Vector3(0, 0, 5)
+	camera.current = true
+	viewport.add_child(camera)
+	var renderer := ParticleRenderer.new()
+	viewport.add_child(renderer)
+	await get_tree().process_frame
+
+	renderer.warm_pipelines(Vector3.ZERO)
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+	var report := renderer.get_debug_draw_list_report()
+	var device_id := int((report.get("world_overlay_backend", {}) as Dictionary).get("device_id", 0))
+	assert_ne(device_id, 0)
+	for key in OVERLAY_BACKENDS:
+		var overlay: Dictionary = report.get(key, {})
+		assert_eq(int(overlay.get("pipeline_warm_requests", 0)), 1, "%s takes the warm request" % key)
+		assert_eq(int(overlay.get("device_id", -1)), device_id,
+				"%s draws through the one shared device" % key)
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	report = renderer.get_debug_draw_list_report()
+	var world: Dictionary = report.get("world_overlay_backend", {})
+	if not bool(world.get("callback_seen", false)):
+		renderer.shutdown()
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	assert_eq(int(world.get("pipeline_warm_requests_serviced", 0)), 1,
+			String(world.get("failure", "the overlay warm was not serviced")))
+	var formats := int(world.get("warmed_framebuffer_formats", 0))
+	assert_gt(formats, 0)
+	assert_eq(int(world.get("device_pipelines", 0)), int(world.get("pipeline_states", -1)) * formats,
+			"every combine's pipeline, once per framebuffer format, and no draw made one")
+	assert_eq(int((report.get("second_scene_overlay_backend", {}) as Dictionary).get(
+			"device_pipelines", -1)), int(world.get("device_pipelines", 0)),
+			"the Inset's pass finds them in the shared device")
+	renderer.shutdown()
+	assert_engine_error_count(0,
+			"explicit shutdown frees the shared overlay device exactly once")
+
+
 func test_camera_compositor_coordinates_multiple_particle_renderers() -> void:
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(64, 64)

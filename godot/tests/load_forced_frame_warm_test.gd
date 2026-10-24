@@ -253,3 +253,44 @@ func test_a_joiners_forced_frame_warms_its_body_ahead_of_its_birth() -> void:
 		assert_false(names.has("forced_draw_2"), "still one forced frame: %s" % [names])
 		assert_gte(_models_warmed(names), 1, "the join's character's body drew: %s" % [names])
 	world.unload()
+
+
+# The forced frame makes every overlay combine's pipeline too (D-NET-NEW-L3-73): each view's
+# overlay pass takes the warm request with the particle passes', and the frame's own callback makes
+# every combine's pipeline for its view's framebuffer format into the one device every view's
+# overlay pass shares, drawing nothing, so the first overlay draw past the reveal (the first tracer
+# seen in a reflection among them) makes none. Retail's tail draws through render states made with
+# the device and the mission textures (engine renderer/scene_overlay.h kSceneOverlayPipelineStates
+# carries the witness). The made pipelines need the real rendering device: pending under the
+# headless dummy renderer.
+func test_the_forced_frame_makes_every_overlay_pipeline() -> void:
+	var root_dir := _stage_root("overlay_pipeline_warm")
+	var world := WorldFixture.make_world(self)
+	var loadout := PlayerSpawnLoadout.new()
+	loadout.primary = "WPN_M4AUTO"
+	loadout.player_class = 8
+	world.set_local_player_spawn_loadout(loadout)
+	assert_eq(WorldFixture.load_mission(world, root_dir), OK)
+	var timeline: LoadTimeline = world.last_load_timeline()
+	assert_not_null(timeline)
+	if timeline != null:
+		assert_true(Array(timeline.span_names()).has("forced_draw_1"), "the load drew its forced frame")
+	var report: Dictionary = world.get_effect_world().get_debug_draw_list_report()
+	var world_overlay: Dictionary = report.get("world_overlay_backend", {})
+	for key in ["world_overlay_backend", "reflection_overlay_backend",
+			"second_scene_overlay_backend", "inset_mirror_overlay_backend"]:
+		var overlay: Dictionary = report.get(key, {})
+		assert_gte(int(overlay.get("pipeline_warm_requests", 0)), 1,
+				"%s took the forced frame's warm request" % key)
+		assert_eq(int(overlay.get("device_id", -1)), int(world_overlay.get("device_id", -2)),
+				"%s draws through the one shared device" % key)
+	if not bool(world_overlay.get("callback_seen", false)):
+		world.unload()
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	assert_gte(int(world_overlay.get("pipeline_warm_requests_serviced", 0)), 1,
+			String(world_overlay.get("failure", "the forced frame serviced no overlay warm")))
+	assert_gte(int(world_overlay.get("device_pipelines", 0)),
+			int(world_overlay.get("pipeline_states", -1)),
+			"every combine's pipeline exists after the load")
+	world.unload()
