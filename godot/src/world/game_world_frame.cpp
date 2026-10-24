@@ -14,10 +14,14 @@
 #include <runtime/inmatch/joiner_net_trace.h> // the post-load frames' net-pass marks
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the frame clock)
 
+#include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/canvas_layer.hpp>
 #include <godot_cpp/classes/color_rect.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/environment.hpp>
+#include <godot_cpp/classes/material.hpp>
+#include <godot_cpp/classes/mesh.hpp>
+#include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/performance.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
@@ -27,6 +31,8 @@
 #include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/visual_instance3d.hpp>
+#include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/callable_method_pointer.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -52,6 +58,46 @@ namespace {
 
 int64_t now_us() {
 	return static_cast<int64_t>(Time::get_singleton()->get_ticks_usec());
+}
+
+// What a target's camera admits (an instrument, --verbose only; LF-s19 row 2a): every visual
+// instance of its world inside the camera's frustum whose layers its cull mask takes, counted by
+// node class, name, mesh and material, and the server-only instances (no node) beside them. Read
+// passively: the culling query changes nothing.
+String target_draw_census(SubViewport *p_target) {
+	Camera3D *camera = p_target->get_camera_3d();
+	const Ref<World3D> world = p_target->find_world_3d();
+	if (camera == nullptr || world.is_null()) return String();
+	const uint32_t mask = camera->get_cull_mask();
+	const PackedInt64Array ids =
+			RenderingServer::get_singleton()->instances_cull_convex(camera->get_frustum(), world->get_scenario());
+	HashMap<String, int64_t> rows;
+	int64_t serverside = 0;
+	for (int64_t i = 0; i < ids.size(); ++i) {
+		VisualInstance3D *visual = Object::cast_to<VisualInstance3D>(ObjectDB::get_instance(ObjectID(uint64_t(ids[i]))));
+		if (visual == nullptr) {
+			++serverside;
+			continue;
+		}
+		if ((visual->get_layer_mask() & mask) == 0 || !visual->is_visible_in_tree()) continue;
+		String key = vformat("%s %s", visual->get_class(), visual->get_name());
+		if (MeshInstance3D *mesh = Object::cast_to<MeshInstance3D>(visual)) {
+			const Ref<Mesh> resource = mesh->get_mesh();
+			const Ref<Material> material = mesh->get_material_override().is_valid()
+					? mesh->get_material_override()
+					: (resource.is_valid() && resource->get_surface_count() > 0 ? resource->surface_get_material(0) : Ref<Material>());
+			key += vformat(" mesh %s %d surf, %s", resource.is_valid() ? resource->get_class() : String("-"),
+					resource.is_valid() ? resource->get_surface_count() : 0,
+					material.is_valid() ? material->get_class() : String("-"));
+		}
+		rows[key] = (rows.has(key) ? rows[key] : 0) + 1;
+	}
+	PackedStringArray out;
+	for (const KeyValue<String, int64_t> &row : rows) {
+		out.push_back(vformat("%s x%d", row.key, row.value));
+	}
+	out.push_back(vformat("server-only x%d", serverside));
+	return String("; ").join(out);
 }
 
 // The process's object counts at the load's end and at each post-load frame's start (an
@@ -117,6 +163,17 @@ void print_post_load_counts(Node *p_world, const ResourceRoot *p_root, const Str
 	}
 	UtilityFunctions::print_verbose(vformat("Post-load targets %s: [%s]", p_label,
 			String(", ").join(targets)));
+	// The water mirror's admitted instances at the load's end (the forced frame's warm drew
+	// them) and over the first frames (each line the previous frame's): row 2a's census.
+	if (load_end || p_label == String("frame_1") || p_label == String("frame_2") ||
+			p_label == String("frame_3") || p_label == String("frame_4")) {
+		for (int64_t i = 0; i < found.size(); ++i) {
+			SubViewport *target = Object::cast_to<SubViewport>(found[i]);
+			if (target == nullptr || target->get_name() != StringName("WaterReflectionViewport")) continue;
+			UtilityFunctions::print_verbose(vformat("Post-load mirror census %s: [%s]", p_label,
+					target_draw_census(target)));
+		}
+	}
 	// The orphan nodes by class and name: at the load's end (the next flush frees them,
 	// and the device objects they hold go with them two frames on) and on any later
 	// line that still has some.
