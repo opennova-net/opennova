@@ -353,6 +353,12 @@ void WeaponRange::reset_() {
 		wall.kind = world::EntityKind::Building;
 		wall.item_type = 5;
 		wall.has_item_def = true;
+		// The range's stand-in for a placed building carries an item type ordinal (+0x1C) as every
+		// loaded def'd row does, so the static list holds it and the rounds and the aim ray meet it.
+		// The range's own row: it reads no items.def, and no reader takes a def from this ordinal.
+		// [orig: Entity_SpawnFromBMSRecord - +0x1C @0x40EBFC; Entity_BuildProximityLists_Pool2
+		//  @0x4B9430 - the +0x1C and def tests @0x4B945D / @0x4B9466]
+		wall.item_type_index = 1;
 		wall.alive = true;
 		wall.health = kTargetHealth;
 		wall.health_max = kTargetHealth;
