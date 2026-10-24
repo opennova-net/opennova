@@ -1205,6 +1205,16 @@ void GameWorld::place_streamed_mission_objects(const Ref<Simulation> &p_sim,
 	leg("place");
 	mission_stats_ = placer_->place_entities(records, runtime, options);
 	leg_end();
+	// The streamed statics' terrain shadow casters resolve here, inside the load, as the authored
+	// placement's do (place_mission_objects): the producer attaches past the placement that
+	// finished its sources, so the first frame that draws the terrain finds every caster's
+	// geometry and texture alpha made and composes its pages loading nothing (engine
+	// mission/mission_load_plan.h carries the witness, D-NET-NEW-LF-18).
+	leg("static_shadows");
+	if (terrain_ != nullptr) {
+		terrain_->set_static_shadow_placer(placer_);
+	}
+	leg_end();
 	leg("rebind");
 	if (runtime != nullptr) {
 		runtime->rebind_placed_entities(placer_);

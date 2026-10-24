@@ -88,7 +88,22 @@
 //    profile's character and the staged spawn kit
 //    [orig: Game_StartMission @0x524360 - Game_ReloadEntityModelsAndCallbacks
 //    called @0x52550E, Entity_InitAllFromModels called @0x52567F, the 0x0B's
-//    queue called @0x52624B].
+//    queue called @0x52624B];
+//  - so the terrain tile compose loads nothing either: it draws each static
+//    caster through the model its row holds, and the mission start's reload
+//    loaded every pool-1 and pool-2 row's models ahead of the 0x0B (the freeze
+//    above resolves their materials). A joiner's streamed pools are placed in
+//    the load, past the stream's materialize, and their casters resolve there
+//    with them, as the authored placement's do: each caster's geometry and its
+//    texture's alpha are made ahead of the first frame that draws the terrain
+//    (GameWorld's static_shadows leg of the streamed placement,
+//    D-NET-NEW-LF-18)
+//    [orig: Game_ReloadEntityModelsAndCallbacks @0x522830 -
+//    EntityDef_LoadModelsAndCallbacks called @0x5229B8 for each pool-1 row (its
+//    graphic model stored to the row @0x5229D7) and @0x522B16 for each pool-2
+//    row (@0x522B35); Terrain_CollectAndRenderTileModels @0x60D250 - the pools
+//    it walks @0x60D3A0..0x60D3B1, the row's model read @0x60D87E,
+//    Render_SubmitEntity called @0x60D971].
 
 namespace opennova::mission {
 
