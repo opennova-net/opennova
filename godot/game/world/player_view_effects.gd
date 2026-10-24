@@ -10,8 +10,9 @@ extends Control
 # engine's HudPos constants/statics — the witnesses live at the engine home,
 # engine/runtime/hud hud/view_effects.h.
 const SUN_VEIL_SHADER := preload("res://shaders/sun_veil_overlay.gdshader")
-# The revive tint's multiply, a resource so its program is made as this script loads, not at the
-# first idle frame past a mission load (the reveal) a CanvasItemMaterial waits for (D-NET-NEW-LF-28).
+# The revive tint's multiply, a Shader rather than a CanvasItemMaterial, whose program waits for the
+# first idle frame past a mission load (the reveal); a Shader makes its device program at its first
+# get_rid(), and the load's HUD leg makes this one and the veil's (GameHudPresenter, D-NET-NEW-LF-28).
 const REVIVE_TINT_SHADER := preload("res://shaders/canvas_blend_mul.gdshader")
 
 var _root: ResourceRoot

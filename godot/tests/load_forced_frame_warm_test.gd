@@ -181,6 +181,17 @@ func test_the_forced_frame_draws_the_local_models_and_the_hud_ahead_of_the_birth
 	if overlay != null:
 		assert_true(overlay.is_configured(), "and loaded it ahead of the frame")
 		assert_false(overlay.is_inside_tree(), "the first live frame mounts it, as before")
+	# The HUD's canvas programs are made in the load: a Shader makes its device program at its first
+	# get_rid(), which for the SIGHTS card's rows was their first build, the reveal frame
+	# (D-NET-NEW-LF-28); every later material binds the program the load made.
+	var programs := hud.get_load_canvas_programs()
+	assert_eq(programs.size(), 6, "the load made the HUD's six canvas programs")
+	var shaders: Array[Shader] = [HudSightsCard.ADD_SHADER, HudSightsCard.BLEND_AT_SHADER,
+			HudSightsCard.ADD_AT_SHADER, HudSightsCard.MULTIPLY_SHADER,
+			PlayerViewEffects.SUN_VEIL_SHADER, PlayerViewEffects.REVIVE_TINT_SHADER]
+	for i in range(mini(programs.size(), shaders.size())):
+		assert_true(programs[i].is_valid(), "program %d has its RID" % i)
+		assert_eq(programs[i], shaders[i].get_rid(), "program %d is the one its materials bind" % i)
 	# The frame draws the world with the hold lifted for it alone, and leaves the world shown: every
 	# later frame under the screen keeps the hold, and the reveal drops it with no node shown
 	# (D-NET-NEW-LF-29).

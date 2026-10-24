@@ -68,6 +68,8 @@ var _game_hud: HudOverlay = null
 # Whether the load's forced frame mounted the overlay (_on_hud_pipeline_warm), which the
 # frame's end takes off the tree again.
 var _hud_warm_mounted := false
+# The canvas programs the load's HUD leg made (_make_canvas_programs).
+var _load_canvas_programs: Array[RID] = []
 # The HUD's process words across the per-mission overlay rebuild (the item flash timers, the
 # stance and ammo keys, the waypoint altitude colour, the silhouette keys): retail's are process
 # words no mission start resets, so each keeps its value into the next mission (engine
@@ -552,6 +554,25 @@ func _load_hud_textures(full_arm: bool) -> void:
 			_world.get_minimap_water_mask() if _world != null else null,
 			_session_texcompression_level())
 	_view_effects.set_resource_root(root)
+	_make_canvas_programs()
+
+
+# The HUD's canvas programs, made in the load (D-NET-NEW-LF-28): a Shader makes its device program
+# (a shader-cache lookup, a compile on a fresh install) at its first get_rid(), when the first
+# material binds it, which for the SIGHTS card's rows is their first build, past a mission load the
+# reveal frame.
+func _make_canvas_programs() -> void:
+	_load_canvas_programs.clear()
+	for shader: Shader in [HudSightsCard.ADD_SHADER, HudSightsCard.BLEND_AT_SHADER,
+			HudSightsCard.ADD_AT_SHADER, HudSightsCard.MULTIPLY_SHADER,
+			PlayerViewEffects.SUN_VEIL_SHADER, PlayerViewEffects.REVIVE_TINT_SHADER]:
+		_load_canvas_programs.append(shader.get_rid())
+
+
+## The canvas programs the load's HUD leg made, in _make_canvas_programs' order (a read seam for
+## the load pins).
+func get_load_canvas_programs() -> Array[RID]:
+	return _load_canvas_programs
 
 
 # The first frame a mission has a player of its own (a dedicated host's first

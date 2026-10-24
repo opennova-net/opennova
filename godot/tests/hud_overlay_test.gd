@@ -1035,9 +1035,9 @@ func test_player_view_effects_damage_feedback_quads() -> void:
 			"and the red vignette before the revive tint.")
 	assert_false(white.show_behind_parent,
 			"The quads follow the binocular/NVG draw, not precede it.")
-	# The multiply rides a preloaded program (made as the script loads), not a
-	# CanvasItemMaterial, whose program waits for the first idle frame: past a
-	# mission load, the reveal (D-NET-NEW-LF-28).
+	# The multiply rides a preloaded Shader (its program made by the load's HUD
+	# leg, GameHudPresenter), not a CanvasItemMaterial, whose program waits for
+	# the first idle frame: past a mission load, the reveal (D-NET-NEW-LF-28).
 	var tint_material := revive.material as ShaderMaterial
 	assert_not_null(tint_material,
 			"The revive tint multiplies the frame rather than covering it.")
@@ -1567,7 +1567,7 @@ func test_sighted_m4_builds_all_authored_sight_card_rows() -> void:
 		"The default sight-scale index draws the red-dot row at three quarters width")
 	var reticle_row := card.get_child(2) as Control
 	# The additive program, preloaded (D-NET-NEW-LF-28): the program a BLEND_MODE_ADD
-	# CanvasItemMaterial makes, made as the card's script loads.
+	# CanvasItemMaterial makes, made by the load's HUD leg.
 	var reticle_material := reticle_row.material as ShaderMaterial
 	assert_not_null(reticle_material, "The red-dot row gets a canvas material")
 	if reticle_material != null:
@@ -1575,9 +1575,9 @@ func test_sighted_m4_builds_all_authored_sight_card_rows() -> void:
 			"The M4 red-dot layer renders additively")
 		assert_false(reticle_material.shader.code.contains("void fragment"),
 			"nothing else: the program a BLEND_MODE_ADD CanvasItemMaterial makes")
-	# The glass row (multiplyat) draws through the preloaded multiply program, alpha-tested: the
-	# program is made as the card's script loads, not when this card built its rows, which past a
-	# mission load is the reveal frame (D-NET-NEW-LF-28).
+	# The glass row (multiplyat) draws through the preloaded multiply program, alpha-tested: one
+	# Shader every card shares, whose program the load's HUD leg makes, not this card's first rows,
+	# which past a mission load are the reveal frame's (D-NET-NEW-LF-28).
 	var glass_material := (card.get_child(1) as Control).material as ShaderMaterial
 	assert_not_null(glass_material, "The glass row gets a canvas material")
 	if glass_material != null:

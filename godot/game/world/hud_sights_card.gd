@@ -33,9 +33,11 @@ enum SightBlendMode {
 	MULTIPLY_AT,
 }
 
-# The rows' programs, preloaded: each is made as this script loads, not when a card first builds its
-# rows (a CanvasItemMaterial's waits for an idle frame, a Shader built from code is made at its
-# build), which past a mission load is the reveal frame (D-NET-NEW-LF-28).
+# The rows' programs, one Shader each, shared by every card (a CanvasItemMaterial's program waits
+# for an idle frame, a Shader built from code is a new program at each build). A Shader makes its
+# device program at its first get_rid(), when the first material binds it, so the load's HUD leg
+# makes these (GameHudPresenter), not a card's first rows past a mission load, the reveal frame
+# (D-NET-NEW-LF-28).
 const ADD_SHADER := preload("res://shaders/canvas_blend_add.gdshader")
 const BLEND_AT_SHADER := preload("res://shaders/sights_blend_at.gdshader")
 const ADD_AT_SHADER := preload("res://shaders/sights_add_at.gdshader")
