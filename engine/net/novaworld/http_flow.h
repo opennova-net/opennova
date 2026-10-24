@@ -306,9 +306,10 @@ private:
 	// template's (queued while the page is processed) ahead of the page's next (a refresh queued at
 	// a later frame, a list load the template's own action starts).
 	// [orig: CGopherWnd_PumpRequests @0x659740 (the gopher window's request pump) - a request whose
-	//  +0x70 word is set marks the pass @0x6599A3..0x6599A8 and every later such request waits
-	//  @0x65976C..0x659775; the template's fetch passes that word as 1 (UI_ProcessWebResponseContent
-	//  @0x63D450, `push 1` @0x63D6C7), as UIScene_OpenUrl's page fetch does (@0x63E3AF)]
+	//  +0x70 word (the fetch's count argument) is set marks the pass @0x6599A3..0x6599A8 and every
+	//  later such request waits @0x65976C..0x659775; the template's fetch passes that count as 1
+	//  (UI_ProcessWebResponseContent @0x63D450, `push 1` @0x63D6C7), as UIScene_OpenUrl's page fetch
+	//  does (`push 1` @0x63E39E)]
 	template <typename Result>
 	struct TemplateHold {
 		std::string url;            // the template GET's URL

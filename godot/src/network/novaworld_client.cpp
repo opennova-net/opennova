@@ -1113,6 +1113,8 @@ void NovaWorldClient::on_enter_request_completed(int result, int response_code,
 		// The service remembered the login: the lobby page, whose list load follows (a press that
 		// waited for the page has nothing to post).
 		pending_login_ = false;
+		pending_login_user_ = String();
+		pending_login_pass_ = String();
 		authenticated_ = true;
 		emit_signal("web_lobby_opened", true, opennova::cp1252_to_gd(r.nwhandle));
 		trigger_gsb();
@@ -1133,6 +1135,8 @@ void NovaWorldClient::on_enter_request_completed(int result, int response_code,
 		break;
 	case opennova::EnterResult::Kind::Failed:
 		pending_login_ = false;
+		pending_login_user_ = String();
+		pending_login_pass_ = String();
 		authenticated_ = false;
 		emit_signal("login_failed", opennova::to_gd(r.reason));
 		break;

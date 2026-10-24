@@ -130,6 +130,25 @@ std::optional<HostSession> host_of(const std::string &tag, const RedisReply &rep
 	return s;
 }
 
+std::string logout_value(const LogoutSession &s) {
+	std::string v;
+	for (const std::string &f : { s.success, s.failure, s.msgbase })
+		put_field(v, f);
+	return v;
+}
+
+std::optional<LogoutSession> logout_of(const std::string &tag, const RedisReply &reply) {
+	const auto f = fields_of(reply, 3);
+	if (!f)
+		return std::nullopt;
+	LogoutSession s;
+	s.session_tag = tag;
+	s.success = (*f)[0];
+	s.failure = (*f)[1];
+	s.msgbase = (*f)[2];
+	return s;
+}
+
 } // namespace
 
 std::string SessionStore::generate_tag(const std::string &dll_name) {
@@ -176,6 +195,15 @@ std::optional<HostSession> SessionStore::get_host(const std::string &tag) {
 std::optional<HostSession> SessionStore::take_host(const std::string &tag) {
 	return host_of(
 			tag, redis_.command({ "GETDEL", redis_.key("host:" + tag) }, RedisResend::Never));
+}
+
+void SessionStore::put_logout(const std::string &tag, const LogoutSession &session) {
+	set(redis_, redis_.key("logout:" + tag), logout_value(session));
+}
+
+std::optional<LogoutSession> SessionStore::take_logout(const std::string &tag) {
+	return logout_of(
+			tag, redis_.command({ "GETDEL", redis_.key("logout:" + tag) }, RedisResend::Never));
 }
 
 } // namespace opennova::novaworld_server

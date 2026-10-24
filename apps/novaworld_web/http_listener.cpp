@@ -1579,13 +1579,56 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 	CROW_ROUTE(app, "/NWLogin.dll").methods("GET"_method)(handle_login_get);
 	CROW_ROUTE(app, "/nwlogin.dll").methods("GET"_method)(handle_login_get);
 
-	// ----- Phase I.1: /NWLogout.dll real teardown ------------------------
-	// Drops the HTTP-side LoginSession and the persistent-cookie pin so
-	// the same retail process won't auto-resume as the prior identity.
-	// UDP side keeps running until GOODBYE/heartbeat-timeout — that's the
-	// protocol's contract; logout here is HTTP-only.
+	// ----- /NWLogout.dll: the two-call relay ---------------------------------
+	// The live service's logout is a relay, as its login, join and host are (LN's S1 / S1b / S1d
+	// records, 2026-10-23): the page link's call (success, failure, msgbase, relay, nodb) is
+	// answered with the relay page and a LOGOUTSESSIONTAG (YOURIP and LOGOUTSESSIONTAG its only
+	// cookies), and the page's bare refresh, the tag on its cookie, with the success page (the
+	// login page) whose cookies are YOURIP and the cleared NWH, NWHANDLE, CHAR, NWI, NWV, NWD,
+	// STATSDISPLAYCHID and PERSISTENTEXPRESSLOGINDATA. The relay's legs are told apart as NWJoin's
+	// and NWHost's are (net/novaworld/relay_request.h). The refresh drops the HTTP-side login
+	// session and the persistent-cookie pin, so the process resumes as no one; the UDP side keeps
+	// running until its goodbye or the reap (the protocol's contract). The relay page's message is
+	// this service's text (the live one is unrecorded).
 	auto handle_logout = [this, templates_dir](const crow::request &req) {
 		const auto cookies = parse_cookie_header(request_cookie_header(req));
+		std::string logout_tag;
+		if (auto it = cookies.find("LOGOUTSESSIONTAG"); it != cookies.end()) logout_tag = it->second;
+
+		if (classify_relay_request(has_relay_first_call_query(req), !logout_tag.empty()) ==
+				RelayLeg::First) {
+			const char *success_param = req.url_params.get("success");
+			const catalog::GameRow &game = client_game(impl_->games, req, cookies, {},
+			                                           success_param ? success_param : "");
+			LogoutSession s;
+			s.session_tag = sessions_.generate_tag("NWLogout.dll");
+			s.success = success_param ? success_param : game.page("login.htm");
+			s.failure = req.url_params.get("failure") ? req.url_params.get("failure") : game.page("main.htm");
+			s.msgbase = req.url_params.get("msgbase") ? req.url_params.get("msgbase") : game.page("msg.htm");
+			const std::string relay_template =
+					req.url_params.get("relay") ? req.url_params.get("relay") : game.page("relay.htm");
+			sessions_.put_logout(s.session_tag, s);
+			std::printf("[http] /NWLogout.dll relay -> tag %s success->%s\n",
+					loggable_secret(s.session_tag).c_str(), loggable(s.success).c_str());
+
+			TemplateVars vars{
+				{"MESSAGE",          "Logging out..."},
+				{"REFRESH_ENDPOINT", "NWLogout.dll"},
+				{"HOST_URL",         host_url()},
+				{"GSB_SERVER",       gsb_url(game)},
+				{"JOINLAN_URL",      game.join_lan_url},
+			};
+			crow::response res(200);
+			res.body = render_template_file(templates_dir, relay_template, vars);
+			res.set_header("Content-Type", "text/html");
+			add_standard_headers(res);
+			add_cookie(res, "YOURIP", req.remote_ip_address);
+			add_cookie(res, "LOGOUTSESSIONTAG", s.session_tag);
+			return res;
+		}
+
+		// The relay's bare refresh: the logout itself, once per tag.
+		const std::optional<LogoutSession> relay = sessions_.take_logout(logout_tag);
 		std::string tag;
 		if (auto it = cookies.find("LOGINSESSIONTAG"); it != cookies.end()) tag = it->second;
 		if (!tag.empty()) {
@@ -1610,10 +1653,9 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			}
 		}
 
-		const char *success_param = req.url_params.get("success");
-		const catalog::GameRow &game = client_game(impl_->games, req, cookies, {},
-		                                           success_param ? success_param : "");
-		const std::string success_tpl = success_param ? success_param : game.page("login.htm");
+		const std::string named = relay ? relay->success : std::string();
+		const catalog::GameRow &game = client_game(impl_->games, req, cookies, {}, named);
+		const std::string success_tpl = named.empty() ? game.page("login.htm") : named;
 		std::printf("[http] /NWLogout.dll tag=%s persist_dropped=%d -> %s\n",
 				loggable_secret(tag).c_str(), persist_it != cookies.end() ? 1 : 0,
 				loggable(success_tpl).c_str());
@@ -1633,12 +1675,8 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		}
 		add_standard_headers(res);
 		add_cookie(res, "YOURIP", req.remote_ip_address);
-		// Clear identity cookies so retail's IB3 doesn't auto-resume.
-		// (We don't explicitly clear PERSISTENTEXPRESSLOGINDATA — retail
-		// owns that one.)
-		for (const char *name : {"NWH","NWHANDLE","CHAR","NWI","NWV","NWD",
-		                          "STATSDISPLAYCHID","PCID","EXPBITS",
-		                          "LOGINSESSIONTAG"}) {
+		for (const char *name : {"NWH", "NWHANDLE", "CHAR", "NWI", "NWV", "NWD", "STATSDISPLAYCHID",
+		                          "PERSISTENTEXPRESSLOGINDATA"}) {
 			add_cookie(res, name, "");
 		}
 		return res;

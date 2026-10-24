@@ -3810,11 +3810,28 @@ int test_nwstart_remembers_the_login(Harness &h) {
 	TEST_EXPECT(in.code == 200 && lobby_page(in) && !login_page(in));
 	TEST_EXPECT(names(in) == start_cookies);
 
-	// A tag the service holds no login for, and the tag after its logout, get the login page.
+	// A tag the service holds no login for, and the tag after its logout, get the login page. The
+	// logout is the live service's relay: the page link's call answers the relay page with YOURIP
+	// and LOGOUTSESSIONTAG, its bare refresh the login page with YOURIP and eight cookies cleared.
 	out = h.send_to(h.fresh_port, "GET", start,
 			{ "Cookie: EPASK=" + epask + "; LOGINSESSIONTAG=nope" });
 	TEST_EXPECT(out.code == 200 && login_page(out));
-	TEST_EXPECT(h.send_to(h.fresh_port, "GET", "/NWLogout.dll", { jar }).code == 200);
+	const auto logout_first = h.send_to(h.fresh_port, "GET",
+			"/NWLogout.dll?success=jop_2_login.htm&failure=jop_2_main.htm&msgbase=jop_2_msg.htm"
+			"&relay=jop_2_relay.htm&nodb=jop_2_nodb.htm",
+			{ jar });
+	const std::string logout_tag = set_cookie_value(logout_first, "LOGOUTSESSIONTAG");
+	TEST_EXPECT(logout_first.code == 200 && !logout_tag.empty() && !login_page(logout_first));
+	TEST_EXPECT(body_text(logout_first).find("NWLogout.dll") != std::string::npos);
+	TEST_EXPECT(names(logout_first) == (std::vector<std::string>{ "LOGOUTSESSIONTAG", "YOURIP" }));
+	out = h.send_to(h.fresh_port, "GET", start, { jar });
+	TEST_EXPECT(out.code == 200 && lobby_page(out));
+	const auto logout = h.send_to(h.fresh_port, "GET", "/NWLogout.dll",
+			{ jar + "; LOGOUTSESSIONTAG=" + logout_tag });
+	TEST_EXPECT(logout.code == 200 && login_page(logout));
+	TEST_EXPECT(names(logout) == (std::vector<std::string>{ "CHAR", "NWD", "NWH", "NWHANDLE", "NWI",
+			"NWV", "PERSISTENTEXPRESSLOGINDATA", "STATSDISPLAYCHID", "YOURIP" }));
+	TEST_EXPECT(set_cookie_value(logout, "NWHANDLE").empty());
 	out = h.send_to(h.fresh_port, "GET", start, { jar });
 	TEST_EXPECT(out.code == 200 && login_page(out) && !lobby_page(out));
 	return 0;
@@ -4132,7 +4149,7 @@ int test_name_and_value_rules(Harness &h) {
 // missing template, with no file's bytes: the absolute and dot-segment names,
 // raw and percent-encoded, the backslash and drive names, a hidden file and a
 // symlink planted in the templates root, on /NWAccount.dll and
-// /NWCharacter.dll (404), /NWLogout.dll ("Logged out."), /nwprepare.dll,
+// /NWCharacter.dll (404), /NWLogout.dll's relay refresh ("Logged out."), /nwprepare.dll,
 // /NWStart.dll, both /NWJoin.dll and /NWHost.dll legs, and the retail
 // POST /NWLogin.dll's msgbase / failure page (a bad password) and its relay and
 // success pages (a good one): an empty page.
@@ -4171,8 +4188,12 @@ int test_template_names_refused(Harness &h) {
 					get("/NWAccount.dll?success=" + q), 404, not_found, "NWAccount " + what));
 			TEST_EXPECT(expect(
 					get("/nwcharacter.dll?success=" + q), 404, not_found, "nwcharacter " + what));
-			TEST_EXPECT(expect(
-					get("/NWLogout.dll?success=" + q), 200, "Logged out.", "NWLogout " + what));
+			const auto logout_first = get("/NWLogout.dll?success=" + q);
+			const std::string logout_tag = set_cookie_value(logout_first, "LOGOUTSESSIONTAG");
+			TEST_EXPECT(logout_first.transport_ok && logout_first.code == 200 && !logout_tag.empty() &&
+					!carries_secret(logout_first));
+			TEST_EXPECT(expect(get("/NWLogout.dll", { "Cookie: LOGOUTSESSIONTAG=" + logout_tag }), 200,
+					"Logged out.", "NWLogout " + what));
 			TEST_EXPECT(expect(get("/nwprepare.dll?url=" + q), 200, "", "nwprepare " + what));
 			TEST_EXPECT(expect(get("/NWStart.dll?OUT=" + q), 200, "", "NWStart " + what));
 			TEST_EXPECT(
@@ -4255,7 +4276,11 @@ int test_retail_templates_render(Harness &h) {
 
 	const auto account = h.send_to(h.secure_port, "GET", "/NWAccount.dll?success=jop_2_main.htm");
 	TEST_EXPECT(account.transport_ok && account.code == 200 && !body_text(account).empty());
-	const auto logout = h.send_to(h.secure_port, "GET", "/NWLogout.dll");
+	const auto logout_first = h.send_to(h.secure_port, "GET", "/NWLogout.dll");
+	const std::string logout_tag = set_cookie_value(logout_first, "LOGOUTSESSIONTAG");
+	TEST_EXPECT(logout_first.transport_ok && logout_first.code == 200 && !logout_tag.empty());
+	const auto logout = h.send_to(h.secure_port, "GET", "/NWLogout.dll",
+			{ "Cookie: LOGOUTSESSIONTAG=" + logout_tag });
 	TEST_EXPECT(logout.transport_ok && logout.code == 200);
 	const nws::TemplateVars jo_vars{
 		{ "HOST_URL", base + "/nwhost.dll" },

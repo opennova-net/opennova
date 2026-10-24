@@ -28,19 +28,25 @@ std::string browser_combine_url(const std::string &base, const std::string &rela
 //  @0x64DF05, "cache\" (0x7E14F0) copied @0x64DF28..0x64DF44]
 std::string browser_cache_key(const std::string &url);
 
-// The browser's cache list: one entry per key, keys compared case-insensitively. A fetch whose
-// key has no entry files one and requests the URL; a fetch whose entry holds a download is served
-// from it; a fetch whose entry's download is in flight joins it. A download that ends with a
-// stored body (a 2xx with bytes; the browser writes the file only then) is held for the process's
-// life; any other end leaves no file, so the next fetch of the key requests it again.
+// The browser's cache list as a page's template meets it: one entry per key, keys compared
+// case-insensitively. A fetch whose key has no entry files one and requests the URL; a fetch
+// whose entry holds a download is served from it; a fetch whose entry's download is in flight
+// joins it. The template's fetch passes the store-and-keep flag (the fetch's user_context, the
+// entry's +0x24), so a download that ends with a stored body (a 2xx with bytes; the browser writes
+// the file only then) is held for the process's life; any other end leaves no file, so the next
+// fetch of the key requests it again. A page's own fetch passes the flag clear: its entry is
+// unlinked at its end and never stored, so pages are not filed here.
 // [orig: CUIBrowser_AsyncFetchURLContent @0x64DE80 - the walk over g_UICacheEntryList
 //  (String_CompareNoCase called @0x64DFF9), a new entry and its request (HTTP_RequestEnqueue
 //  called @0x64E114), the held test `cmp [esi+0Ch], ebx` @0x64E122, the cache file's fopen
 //  called @0x64E131 (none: the entry dropped and filed afresh @0x64E13F..0x64E18F), the served
 //  callback @0x64E1FB, a pending entry's callback appended and no second request
-//  (@0x64E2D8..0x64E2DE); HTTP_DownloadCompletionCallback @0x64DB20 - the 2xx window
-//  @0x64DB8D..0x64DBB3, the write's tests @0x64DBC1 / @0x64DBCA / @0x64DBD3 and its fopen called
-//  @0x64DBED, the entry's +0xC set @0x64DC9D on every end]
+//  (@0x64E2D8..0x64E2DE); UI_ProcessWebResponseContent @0x63D450 - the template's user_context 1
+//  pushed @0x63D6C5; UIScene_OpenUrl @0x63E2F0 - the page's user_context 0 pushed @0x63E39A;
+//  HTTP_DownloadCompletionCallback @0x64DB20 - the 2xx window @0x64DB8D..0x64DBB3, the write's
+//  tests @0x64DBC1 / @0x64DBCA and the store flag's (+0x24) @0x64DBD3, its fopen called
+//  @0x64DBED, the entry's +0xC set @0x64DC9D on every end, an entry whose store flag is clear
+//  unlinked and freed @0x64DCFB..0x64DD52]
 class BrowserCache {
 public:
 	// A fetch of `url`: true when it goes out as a request (the key has no entry, or its entry

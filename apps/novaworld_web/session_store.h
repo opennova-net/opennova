@@ -53,6 +53,14 @@ struct HostSession {
 	std::string pfid;
 };
 
+// /NWLogout.dll's relay: the first call's pages, which its bare refresh renders.
+struct LogoutSession {
+	std::string session_tag;
+	std::string success;         // e.g. jop_2_login.htm
+	std::string failure;         // e.g. jop_2_main.htm
+	std::string msgbase;         // e.g. jop_2_msg.htm
+};
+
 // The sessions, in Redis (redis_client.h), so a dance's legs may land on
 // different web replicas: one key per tag (<prefix>login:<tag>, join:, host:),
 // written with a TTL of kTtl, so a session a client never followed up (a bot's
@@ -85,6 +93,11 @@ public:
 	// connection found dropped fails the call, as a second GETDEL after one the
 	// server ran would answer no session.
 	std::optional<HostSession> take_host(const std::string &tag);
+
+	void put_logout(const std::string &tag, const LogoutSession &session);
+	// The tag's session, removed in the same step (GETDEL): the relay's bare refresh logs out
+	// once. Never sent twice (RedisResend::Never), as take_host.
+	std::optional<LogoutSession> take_logout(const std::string &tag);
 
 private:
 	RedisPool &redis_;
