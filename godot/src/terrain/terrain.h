@@ -110,6 +110,8 @@ private:
 		// uploads only when they differ (a full RGBAF texture update otherwise).
 		PackedByteArray uploaded;
 		int enabled_written = -1; // -1 unset, else the bool last pushed
+		// The light rows the bytes the texture holds carry (0: every row zero, as made).
+		size_t total_written = 0;
 	};
 
 	// Lightweight RenderingServer instance pool for one view's visible

@@ -1020,6 +1020,7 @@ void Terrain::_ensure_light_rows(LightRows &r_rows) {
 	r_rows.texture = ImageTexture::create_from_image(r_rows.image);
 	r_rows.uploaded = r_rows.bytes.duplicate();
 	r_rows.enabled_written = -1;
+	r_rows.total_written = 0;
 }
 
 void Terrain::_bind_light_textures() {
@@ -1117,6 +1118,15 @@ int Terrain::_render_light_rows(const opennova::TerrainDrawList &draw_list, Ligh
 			light_time_ms, cached_weather_node, recip_packed,
 			light_patch_rows.data());
 	r_total = static_cast<int>(total);
+	// No light reaches a patch and the rows the texture holds carry none (all zero): the
+	// rewrite would rebuild the same zero bytes, so it and its compare are skipped.
+	if (total == 0 && r_rows.total_written == 0) {
+		if (r_rows.enabled_written != 0) {
+			p_material->set_shader_parameter("u_terrain_light_enabled", false);
+			r_rows.enabled_written = 0;
+		}
+		return 0;
+	}
 	// Rewrite the whole rows image: a slot that lost its lights reads count 0.
 	r_rows.bytes.fill(0);
 	float *texels = reinterpret_cast<float *>(r_rows.bytes.ptrw());
@@ -1155,6 +1165,7 @@ int Terrain::_render_light_rows(const opennova::TerrainDrawList &draw_list, Ligh
 		std::memcpy(r_rows.uploaded.ptrw(), r_rows.bytes.ptr(),
 				static_cast<size_t>(byte_count));
 	}
+	r_rows.total_written = total;
 	const int enabled = r_total > 0 ? 1 : 0;
 	if (enabled != r_rows.enabled_written) {
 		p_material->set_shader_parameter("u_terrain_light_enabled", enabled != 0);
