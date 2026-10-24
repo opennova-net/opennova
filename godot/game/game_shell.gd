@@ -51,6 +51,19 @@ func get_frame_stats() -> FrameStats:
 	return null
 
 
+## A probe reading the FrameStats board holds it for its run
+## (ProbeContext.frame_stats); while any hold stands, the shell's own
+## every-frame drain (the --verbose slow-frame readout) leaves the board to it.
+## The null shell has no such drain.
+func hold_frame_stats(_held: bool) -> void:
+	pass
+
+
+## A hold on the FrameStats board stands (hold_frame_stats).
+func is_frame_stats_held() -> bool:
+	return false
+
+
 ## The mounted runtime root.
 func current_resource_root() -> ResourceRoot:
 	return null

@@ -6,8 +6,9 @@ extends Node
 ## prints one line for each drained window whose wall time reached SLOW_FRAME_US, naming
 ## the time slots that took the most of it. A joiner's verbose log then carries, beside its
 ## LoadTimeline and JoinWindow lines, where every heavy frame of the join went (the frames
-## after the S2C 0x0F included); unix_ms lines it up with the capture. The open dev tools
-## own the board: no drain while they are up. Beside it, a PipelineCompiles line names each
+## after the S2C 0x0F included); unix_ms lines it up with the capture. The open dev tools,
+## and a probe holding the board for its run (perf_mission_rows), own the board: no drain
+## while they do. Beside it, a PipelineCompiles line names each
 ## frame whose read found pipelines compiled since the previous read (Godot's, by source, our
 ## RenderingDevice GLSL compiles and our RenderingDevice pipeline creates): the frames that pay a
 ## first draw's compiles. While the world times its first frames past a load
@@ -66,7 +67,8 @@ func _init() -> void:
 	process_priority = 2_147_483_647
 
 
-## `tools_open` answers whether the dev tools are up (they drain the board then);
+## `tools_open` answers whether the board's reader is elsewhere (the dev tools up, or a
+## probe holding it for its run: they drain it then, and this readout leaves it undrained);
 ## `post_load_open` whether the world still times its first frames past a load.
 func setup(board: FrameStats, tools_open: Callable, post_load_open := Callable()) -> void:
 	_board = board

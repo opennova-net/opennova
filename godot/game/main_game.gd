@@ -80,6 +80,8 @@ var _frame_stats := FrameStats.new()
 # RenderingServer measurement edge latch and the wall-frame clock.
 var _render_stats := RootRenderStatsSampler.new()
 var _frame_phase_sampler := RootFramePhaseSampler.new()
+# The probes holding the FrameStats board for their runs (hold_frame_stats).
+var _frame_stats_holds := 0
 var _mp_companion: MpMenuCompanion  # drives the multiplayer (mp.mnu) menu by control name
 var _bundled_companion: BundledMenuCompanion  # the bundled menu's PLAY RETAIL / CHANGE FOLDER / EXIT
 var _retail_picker: FileDialog  # the PLAY RETAIL folder picker, while open
@@ -139,7 +141,7 @@ func _init() -> void:
 	# Under --verbose the heavy frames print where they went (an instrument).
 	if OS.is_stdout_verbose():
 		var slow_frames := SlowFrameReport.new()
-		slow_frames.setup(_frame_stats, is_dev_tools_open, _post_load_frames_open)
+		slow_frames.setup(_frame_stats, _frame_stats_read_elsewhere, _post_load_frames_open)
 		add_child(slow_frames)
 	_dev_tools = DevTools.new()
 	_dev_tools.name = "DevTools"
@@ -624,6 +626,20 @@ func _sync_dev_tools_pick_policy() -> void:
 
 func is_dev_tools_open() -> bool:
 	return _dev_tools != null and _dev_tools.is_open()
+
+
+func hold_frame_stats(held: bool) -> void:
+	_frame_stats_holds = maxi(_frame_stats_holds + (1 if held else -1), 0)
+
+
+func is_frame_stats_held() -> bool:
+	return _frame_stats_holds > 0
+
+
+# The board's reader is elsewhere this frame: the open dev tools, or a probe's
+# hold (hold_frame_stats). The slow-frame readout then leaves it undrained.
+func _frame_stats_read_elsewhere() -> bool:
+	return is_dev_tools_open() or is_frame_stats_held()
 
 
 # Whether the world still times its first frames past a load (the slow-frame readout's post-load
