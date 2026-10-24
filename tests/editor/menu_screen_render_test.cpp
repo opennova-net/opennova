@@ -409,7 +409,13 @@ void print_totals(const char *leg, const SweepTotals &totals) {
 static int test_variant_menus() {
 	std::vector<variant_fixtures::Input> menus;
 	const bool all = variant_fixtures::menus(menus);
-	const std::string root = variant_fixtures::repo() + "/assets";
+	test_temp::TempDir scratch("opennova_menu_render_variants");
+	const std::string root = scratch.root();
+	std::vector<minted_install::File> generated;
+	std::string error;
+	if (!minted_install::base_game(generated, error)) return 1;
+	for (const auto &file : generated)
+		if (!test_io::write_file(root + "/" + file.name, *file.bytes)) return 1;
 	LooseFiles files(root);
 	opennova::menu::MenuStyleSource style;
 	const std::map<std::string, std::string> &vars = style.vars(files);

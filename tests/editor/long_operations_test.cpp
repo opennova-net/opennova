@@ -1050,6 +1050,8 @@ static int test_install_open() {
 	TEST_EXPECT(v.project.open && v.activity.last_operation.end == OperationEnd::Done && !v.findings.diagnostics.empty());
 	// Every name minted is the install's and offered to the project, and the project is at its scale: all
 	// but the few files of a kind no document type opens, nor a texture or a font.
+	std::printf("install scale: %zu minted, %zu mounted, %zu offered, %zu exported\n", game.size(),
+	            view.files().size(), v.project.retail_files.size(), exported);
 	TEST_EXPECT(view.files().size() == kInstallFiles && v.project.retail_files.size() == kInstallFiles &&
 	            exported * 100 >= kInstallFiles * 99);
 	std::printf("install: %zu files exported (%.1f MB); opened in %zu polls, %.0f ms (the request %.1f ms, the first "

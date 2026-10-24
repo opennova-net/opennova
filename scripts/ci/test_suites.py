@@ -57,7 +57,7 @@ def godot_methods(repo: Path, scripts: list[str]) -> dict[str, list[str]]:
 
 
 # No test reads retail data (the suite runs on minted and authored fixtures and
-# the tree's own assets/): nothing under tests/ or godot/tests/ names a retail
+# focused game samples under fixtures/): nothing under tests/ or godot/tests/ names a retail
 # root variable or the retired retail-root helpers.
 RETAIL_READS = ("OPENNOVA_JO_", "retail_paths", "retail_mission_files", "RetailData")
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hpp", ".inc", ".gd", ".py", ".cmake", ".txt", ".json"}

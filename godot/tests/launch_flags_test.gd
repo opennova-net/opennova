@@ -62,7 +62,7 @@ func test_absent_flags_fall_back() -> void:
 
 
 func test_resource_dir_without_a_value_is_given_but_empty() -> void:
-	# The shell's usage error, distinct from no flag (the bundled assets/ boot).
+	# The shell's usage error, distinct from no flag (content beside the executable).
 	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir"]))
 	assert_eq(LaunchFlags.resource_dir(), "")
 	assert_true(LaunchFlags.resource_dir_given())

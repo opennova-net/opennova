@@ -1,13 +1,14 @@
 extends GutTest
 
-## The no-argument boot (ADR 0048): OpenNova's bundled game and its main menu,
-## and its PLAY RETAIL hand-over to a retail install.
+## The bundled menu contract over authored samples and synthetic boot data,
+## including its PLAY RETAIL hand-over to a retail install.
 
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 
 var _config: TestFs.Snapshot
 var _retail_dir := ""
+var _boot_dir := ""
 var _dirs: Array[String] = []
 var _shell: MainGame = null
 
@@ -16,8 +17,10 @@ func before_each() -> void:
 	# The test's own opennova.cfg: none of the developer's keys (an earlier build's
 	# [resources] expansion) reaches it, so what it finds there is what it wrote.
 	_config = TestFs.isolate(STATE_CONFIG_PATH)
-	# No launch flags: the shell boots the bundled menu.
-	LaunchFlags.set_args_override(PackedStringArray([]))
+	# Source tests supply their content explicitly, just as a source game run does.
+	_boot_dir = _stage_authored_menu()
+	LaunchFlags.set_args_override(PackedStringArray([
+			"--resource-dir", _boot_dir, "--loose-root", "/d"]))
 	ResourceDirSettings.set_game("jo")
 	ResourceDirSettings.set_retail_dir("")
 	Strings.clear()
@@ -44,6 +47,26 @@ func _boot() -> MainGame:
 	return shell
 
 
+func _project_dir() -> String:
+	return ProjectSettings.globalize_path("res://../fixtures/game")
+
+
+func _stage_authored_menu() -> String:
+	var dir := WorldFixture.stage_minimal_root("authored_menu")
+	_dirs.append(dir)
+	for file_name in DirAccess.get_files_at(_project_dir()):
+		if file_name.get_extension().to_lower() in ["mnu", "mns", "bin"]:
+			assert_eq(DirAccess.copy_absolute(_project_dir().path_join(file_name),
+					dir.path_join(file_name)), OK)
+	# The menu geometry is authored; fonts and images are small synthetic fixtures.
+	for file_name in ["onmnu19.fnt", "onmnub23.fnt", "onttl40.fnt"]:
+		assert_eq(DirAccess.copy_absolute(ProjectSettings.globalize_path(
+				"res://../fixtures/fnt/synth_1page.fnt"), dir.path_join(file_name)), OK)
+	assert_eq(DirAccess.copy_absolute(dir.path_join("newarow1.tga"),
+			dir.path_join("onmnbg.tga")), OK)
+	return dir
+
+
 # A packed retail-shaped install (the three boot-table archives).
 func _stage_retail() -> String:
 	var dir := OS.get_cache_dir().path_join(
@@ -64,13 +87,13 @@ func _same_dir(a: String, b: String) -> bool:
 	return a.replace("\\", "/").rstrip("/").to_lower() == b.replace("\\", "/").rstrip("/").to_lower()
 
 
-func test_no_resource_dir_boots_the_bundled_placeholder_menu() -> void:
+func test_explicit_content_boots_the_placeholder_menu() -> void:
 	_shell = await _boot()
 	var root := _shell.current_resource_root()
-	assert_not_null(root, "the bundled assets/ mounted")
+	assert_not_null(root, "the staged menu fixtures mounted")
 	if root == null:
 		return
-	assert_true(_same_dir(root.get_root_dir(), BootRootMount.bundled_assets_dir()))
+	assert_true(_same_dir(root.get_root_dir(), _boot_dir))
 	var menu := _shell.get_menu_shell()
 	assert_eq(menu.get_current_menu_file().to_lower(), "main.mnu")
 	var driver := menu.get_driver()
@@ -122,17 +145,11 @@ func _temp_dir(label: String) -> String:
 	return dir
 
 
-# ADR 0048 d8: a source run plays the base game project's export, its export
-# folder once an export of it is there; never exported, the project folder.
-func test_a_project_plays_its_export_once_there_is_one() -> void:
-	var project := _temp_dir("project")
-	assert_true(_same_dir(BootRootMount.project_game_dir(project), project), "never exported: the project")
-	var exported := project.path_join(BootRootMount.PROJECT_EXPORT_DIR)
-	assert_eq(DirAccess.make_dir_recursive_absolute(exported), OK)
-	assert_true(_same_dir(BootRootMount.project_game_dir(project), project),
-			"an export folder holding no export is none")
-	WorldFixture.stage_shell_archives(self, exported, false)
-	assert_true(_same_dir(BootRootMount.project_game_dir(project), exported), "its export")
+# A launch without an explicit directory only looks beside its executable;
+# the source tree no longer contains an authoring project to discover.
+func test_default_content_directory_is_beside_the_executable() -> void:
+	assert_true(_same_dir(BootRootMount.bundled_assets_dir(),
+			OS.get_executable_path().get_base_dir()))
 
 
 # The Build's boot-table archives mount as an install's do; a folder with none
@@ -195,7 +212,7 @@ func test_the_bundled_mods_screen_lists_the_base_game_and_its_expansions() -> vo
 	var build := _temp_dir("mods")
 	var resources := WorldFixture.shell_archive_entries(self, WorldFixture.SHELL_RESOURCE_FILES)
 	resources.append({"name": "options.mnu", "bytes": FileAccess.get_file_as_bytes(
-			BootRootMount.bundled_project_dir().path_join("options.mnu"))})
+			_project_dir().path_join("options.mnu"))})
 	WorldFixture.stage_shell_archives(self, build, false)
 	WorldFixture.write_pff(self, build.path_join("resource.pff"), resources)
 	var storm := build.path_join("expansion/onx")
@@ -270,7 +287,7 @@ func _expansion_info_bin(exp_name: String, exp_desc: String) -> PackedByteArray:
 # companion that owns the bundled menu relays it for the shell to quit.
 func test_exit_is_relayed_by_name() -> void:
 	var text := FileAccess.get_file_as_string(
-			BootRootMount.bundled_project_dir().path_join("main.mnu"))
+			_project_dir().path_join("main.mnu"))
 	var driver := MenuDriverFixture.driver_over(self,
 			MenuDriverFixture.doc_from_xml(self, text), "main.mnu")
 	var companion := BundledMenuCompanion.new()

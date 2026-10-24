@@ -13,8 +13,8 @@ listing writes pool words as values and catalog handles as their names.
 VM slice: jo-c's wac_runtime_oracle executes compiled synthetic programs on
 the original WacScript_ExecuteBytecode @0x4F58B0 for a few steps.
 
-Corpus slice: the .wac scripts the tree commits (assets/, expansions/,
-fixtures/wac/) compile with empty catalogs; only the SHA-256 of each source and
+Corpus slice: the .wac samples under fixtures/game/ and fixtures/wac/
+compile with empty catalogs; only the SHA-256 of each source and
 of its listing are written, never script bytes.
 
 Requires pefile and unicorn; the native tests use the committed vectors.
@@ -626,10 +626,10 @@ def vm_vectors(compiler, jo_c, exe, steps=4):
 
 
 def committed_rows(compiler, repo):
-    # The scripts the tree commits (the base game, its expansions, the test scripts), each
+    # The authored and minted test scripts retained in the engine tree, each
     # loadable by RUN, compiled with empty catalogs: the original compiler's listing of
     # each, by the source's SHA-256 (wac_corpus_test).
-    paths = sorted(p for sub in ('assets', 'expansions', 'fixtures/wac') for p in (repo / sub).rglob('*')
+    paths = sorted(p for sub in ('fixtures/game', 'fixtures/wac') for p in (repo / sub).rglob('*')
                    if p.is_file() and p.suffix.lower() == '.wac')
     files = {p.name.upper(): p.read_bytes() for p in paths}
     rows = {}

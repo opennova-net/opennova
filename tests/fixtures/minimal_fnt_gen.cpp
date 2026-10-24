@@ -2,8 +2,7 @@
 // build -> validate -> write -> parse -> re-write must be byte-stable, and the
 // label glyphs the authored menus use must have pixels.
 //
-// The same builder mints the bundled assets/opennova.fnt (the placeholder main
-// menu's one font, ADR 0048) and the committed FNT test fixtures fixtures/fnt/
+// The builder mints the committed FNT test fixtures fixtures/fnt/
 // synth_1page.fnt and synth_3page.fnt (one and three pages; the three-page
 // form spreads the glyph slots over its pages). They are byte-compared every
 // run; `--write` (re)writes them. No retail font is carried.
@@ -119,10 +118,9 @@ int main(int argc, char **argv) {
 	fnt_free(&three);
 
 	const std::string repo = test_paths_repo_root(__FILE__);
-	failures += guard_fixture(repo + "/assets/opennova.fnt", 1, write_mode);
 	failures += guard_fixture(repo + "/fixtures/fnt/synth_1page.fnt", 1, write_mode);
 	failures += guard_fixture(repo + "/fixtures/fnt/synth_3page.fnt", 3, write_mode);
 
-	if (failures == 0) std::printf("OK: generated font valid + byte-reproducible; assets and FNT fixtures match\n");
+	if (failures == 0) std::printf("OK: generated font valid + byte-reproducible; FNT fixtures match\n");
 	return failures == 0 ? 0 : 1;
 }

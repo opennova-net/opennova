@@ -40,8 +40,6 @@ inline const std::vector<Entry> &entries() {
 	        // A mission whose area triggers take a shipped training mission's shape (mission_set_gen.cpp's, which
 	        // mission_mis_idempotency reads).
 	        {"fixtures/bms/synth_areas.bms", false},
-	        {"assets/onjo_m1.bms", false},
-	        {"expansions/onjo1/missions/onjo1_m1.bms", false},
 	        // The loadout chunks five shipped missions carry damaged (D-EVT-7, bms-event-runtime-re.md 6.3a), the
 	        // format's corpus row's (mission_corpus): a record cut short before the terminator (ASP_G8a.bms,
 	        // ASR_C2A.bms), strings past the terminator (TDH_G1A.bms), no terminator (TKR_G3A.bms, TKX_G5B.bms).

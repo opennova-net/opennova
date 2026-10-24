@@ -4,8 +4,8 @@
 // sound sets, ammo, mission text; the seven default groups), written by
 // scripts/oracles/wac_parity.py; the port compiles the same file the same way
 // and must write the same listing. Only hashes are committed. The scripts are
-// the tree's own: the base game (assets/), its expansions (expansions/) and the
-// test scripts (fixtures/wac/), among them fixtures/wac/forms.wac, authored to
+// authored samples retained under fixtures/game/ and the test scripts under
+// fixtures/wac/, among them fixtures/wac/forms.wac, authored to
 // hold every lexical and statement form the 48 shipped scripts use (surveyed
 // 2026-10-19, when this row last read them: both comment starts, CR LF lines,
 // tabs and trailing blanks, mixed case, no final line end, AND / OR / NOT,
@@ -56,7 +56,8 @@ int main(int argc, char **argv) {
 	for (int i = 1; i < argc; ++i) dirs.push_back(argv[i]);
 	if (dirs.empty()) {
 		const std::string root = test_paths_repo_root(__FILE__);
-		for (const char *sub : {"/assets", "/expansions", "/fixtures/wac"}) dirs.push_back(root + sub);
+		dirs.push_back(root + "/fixtures/wac");
+		dirs.push_back(root + "/fixtures/game");
 	}
 
 	std::map<std::string, std::string> scripts; // upper-case file name -> path, for RUN

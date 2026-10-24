@@ -189,7 +189,7 @@ std::vector<uint8_t> mono_wave8(size_t frames, uint32_t rate) {
 // IMA ADPCM variants decoded to their frames among them.
 int test_every_wave() {
 	std::vector<variant_fixtures::Input> inputs;
-	const bool all = variant_fixtures::inputs({"fixtures/lwf", "assets"}, ".wav",
+	const bool all = variant_fixtures::inputs({"fixtures/lwf", "fixtures/game"}, ".wav",
 	                                          std::vector<std::string>(std::begin(kAdpcmVariants), std::end(kAdpcmVariants)), inputs);
 	struct Wave {
 		std::string label;
@@ -199,12 +199,16 @@ int test_every_wave() {
 	std::vector<Wave> waves;
 	for (const variant_fixtures::Input &input : inputs) {
 		const bool adpcm = std::find(std::begin(kAdpcmVariants), std::end(kAdpcmVariants), input.label) != std::end(kAdpcmVariants);
-		waves.push_back({input.label, test_io::read_file(input.path), adpcm || input.label.rfind("assets/", 0) == 0});
+		waves.push_back({input.label, test_io::read_file(input.path), adpcm || input.label.rfind("fixtures/game/", 0) == 0});
 	}
 	waves.push_back({"16-bit PCM at 5000 Hz", mono_wave(500, 0.25, 5000), true});
 	waves.push_back({"16-bit PCM at 16000 Hz", mono_wave(1600, 0.25, 16000), true});
 	waves.push_back({"8-bit PCM at 8000 Hz", mono_wave8(800, 8000), true});
 	waves.push_back({"8-bit PCM at 48000 Hz", mono_wave8(4800, 48000), true});
+	for (int rate : {11025, 22050, 44100}) {
+		waves.push_back({"16-bit PCM at " + std::to_string(rate) + " Hz", mono_wave(rate / 10, 0.25, rate), true});
+		waves.push_back({"8-bit PCM at " + std::to_string(rate) + " Hz", mono_wave8(rate / 10, rate), true});
+	}
 	size_t refused = 0, adpcm = 0;
 	for (const Wave &w : waves) {
 		WaveDocument wave;

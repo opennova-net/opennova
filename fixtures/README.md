@@ -53,6 +53,11 @@ came from a retail install was replaced by a minted or authored file.
 
 ## Authored files
 
+`game/` holds small authored menu, stylesheet, string-table and HUD-layout samples
+retained from OpenNova's game when its content moved to `opennova-assets`.
+The native and Godot menu tests read these samples with generated fonts,
+images and game resources; they never require the authored game checkout.
+
 `def/items.def` (test rows 106100..), `def/weapon.def` and `def/ammo.def` (the armory the native weapon-table, handshake and
 round-trail tests read: the shipped JO:CA weapon.def's 94 weapons in the shipped order, the rows
 the tests pin carrying the shipped field values and every other row its name alone, and the

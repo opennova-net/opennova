@@ -84,8 +84,8 @@ including `user://opennova.cfg`). On any reported failure:
 `extends GutTest`, named `*_test.gd`, anywhere under `godot/tests/` (subdirs
 are collected). Repo fixtures are reached one level above `res://`:
 `ProjectSettings.globalize_path("res://").path_join("../fixtures/...")`. No test
-reads retail data: its inputs are minted or authored fixtures and the tree's own
-`assets/` (`godot/tests/CLAUDE.md`; `scripts/ci/test_suites.py --check-layout`
+reads retail data: its inputs are minted or authored fixtures under `fixtures/`
+(`godot/tests/CLAUDE.md`; `scripts/ci/test_suites.py --check-layout`
 fails a script that names a retail root). A script whose every test needs a
 RenderingDevice lives under `godot/tests/windowed/` and runs only with
 `--windowed`; headless it is never selected. A headless script that mixes in

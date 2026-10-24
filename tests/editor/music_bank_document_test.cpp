@@ -267,13 +267,8 @@ const char *const kStaleChunks = "fixtures/sbf/tool_bank.sbf";
 // the game never reads (a header word, a chunk's reserved pair and tail) the writer's, which the findings list (S26:
 // the writer writes its model alone), the stale-chunk bank's among them; saved again, the same bytes.
 int test_every_bank() {
-	std::vector<variant_fixtures::Input> inputs, more;
-	const bool all = variant_fixtures::inputs({"fixtures/sbf", "assets"}, ".sbf", {kStaleChunks}, inputs);
-	// The expansion's folder holds banks (each swept, or an unpulled LFS pointer skipped).
-	size_t unpulled = 0;
-	TEST_EXPECT(variant_fixtures::inputs({"expansions/onjo1/music"}, ".sbf", {}, more, &unpulled) &&
-	            more.size() + unpulled > 0);
-	inputs.insert(inputs.end(), more.begin(), more.end());
+	std::vector<variant_fixtures::Input> inputs;
+	const bool all = variant_fixtures::inputs({"fixtures/sbf", "fixtures/game"}, ".sbf", {kStaleChunks}, inputs);
 	size_t banks = 0, streams = 0;
 	for (const variant_fixtures::Input &input : inputs) {
 		const std::vector<uint8_t> bytes = test_io::read_file(input.path);

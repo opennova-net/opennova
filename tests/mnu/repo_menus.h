@@ -2,7 +2,7 @@
 // installed game's: the authored set under fixtures/mnu (widgets.mnu, all_widgets.mnu, the
 // render and keyboard cases, and shipped_forms.mnu, every element, attribute and lexical form
 // the shipped JO menus use, written in their byte form) and the base game's own screens in
-// assets/ (ADR 0048; the editor's writer form). No retail byte: the shipped menus were
+// fixtures/game/ (the editor's writer form). No retail byte: the shipped menus were
 // surveyed once for the constructs they hold, and each is authored here (fixtures/README.md).
 #pragma once
 
@@ -35,18 +35,18 @@ inline std::vector<std::string> files(const std::string &dir, const char *ext) {
 	return out;
 }
 
-// The authored menus (fixtures/mnu) then the base game's (assets/).
+// The authored menus (fixtures/mnu) then the retained game samples (fixtures/game).
 inline std::vector<std::string> menus() {
 	std::vector<std::string> out = files("fixtures/mnu", ".mnu");
-	const std::vector<std::string> base = files("assets", ".mnu");
+	const std::vector<std::string> base = files("fixtures/game", ".mnu");
 	out.insert(out.end(), base.begin(), base.end());
 	return out;
 }
 
-// The stylesheets: the authored ones (fixtures/mns) then the base game's (assets/).
+// The stylesheets: the authored ones (fixtures/mns) then the game samples (fixtures/game).
 inline std::vector<std::string> stylesheets() {
 	std::vector<std::string> out = files("fixtures/mns", ".mns");
-	const std::vector<std::string> base = files("assets", ".mns");
+	const std::vector<std::string> base = files("fixtures/game", ".mns");
 	out.insert(out.end(), base.begin(), base.end());
 	return out;
 }

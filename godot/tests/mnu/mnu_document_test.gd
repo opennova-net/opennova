@@ -4,11 +4,11 @@ extends GutTest
 # verify a serialize round-trip plus the core mutation surface.
 
 const FIXTURE := "res://../fixtures/mnu/widgets.mnu"
-# Our own base game's stylesheet (assets/, ADR 0048): it defines the shipped
+# The authored menu-contract stylesheet: it defines the shipped
 # menu_style.mns's names in the shipped order (the reference set's
 # mns/menu_style.mns: 12 defines, DEF_FONTNAME first, DEF_IMAGE_DEFAULT_BG last),
 # with our own values, behind a comment header the game's reader skips.
-const MENU_STYLE := "res://../assets/menu_style.mns"
+const MENU_STYLE := "res://../fixtures/game/menu_style.mns"
 const MENU_STYLE_DEFINES := 12
 const MENU_STYLE_FIRST := "DEF_FONTNAME"
 const MENU_STYLE_LAST := "DEF_IMAGE_DEFAULT_BG"
@@ -233,7 +233,7 @@ func test_mns_entry_add_rename_remove_move() -> void:
 
 func _menu_style_bytes() -> PackedByteArray:
 	var bytes := FileAccess.get_file_as_bytes(MENU_STYLE)
-	assert_gt(bytes.size(), 0, "assets/menu_style.mns is readable")
+	assert_gt(bytes.size(), 0, "fixture menu_style.mns is readable")
 	return bytes
 
 

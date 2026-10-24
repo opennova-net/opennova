@@ -1202,7 +1202,9 @@ static int test_apply_install_expansion() {
 		            (row.source.as.empty() ? row.name == file->member : row.source.as == row.name));
 		if (!file || !file->loose_path.empty()) continue;
 		std::vector<uint8_t> planned, served;
-		TEST_EXPECT(origin.read(*file, planned) && vfs_read_served(game, file->member, served) && planned == served);
+		const bool same = origin.read(*file, planned) && vfs_read_served(game, file->member, served) && planned == served;
+		if (!same) std::fprintf(stderr, "install expansion: %s differs between import and game mount\n", file->member.c_str());
+		TEST_EXPECT(same);
 		++checked;
 		own += row.source.as.empty() ? 0 : 1;
 		expansion_layer += file->layer == InstallFile::Layer::Expansion ? 1 : 0;
@@ -1269,7 +1271,7 @@ static int test_apply_install_expansion() {
 	            "onjo1's archives opened directly, %zu loose against the disk), planned in %.1f s\n",
 	            smallest->name.c_str(), plan.file_count(), plan.total_bytes() / 1e6, checked, expansion_layer, own, independent,
 	            loose_rows, seconds);
-	TEST_EXPECT(checked > 100 && expansion_layer > 0 && own > 0);
+	TEST_EXPECT(checked > expansion_layer && expansion_layer > 0 && own > 0);
 	return 0;
 }
 

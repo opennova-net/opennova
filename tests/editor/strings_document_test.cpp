@@ -463,7 +463,7 @@ int section_names_and_moves() {
 // or, for a table whose strings are not grouped as the game reads them (the document's regroup note), the format's
 // regrouped table; none opens blocked. A table cut short opens none.
 int variant_tables() {
-	const editor_test::VariantFiles variants = editor_test::variant_files({"fixtures/rtxt", "assets"}, {".bin"});
+	const editor_test::VariantFiles variants = editor_test::variant_files({"fixtures/rtxt", "fixtures/game"}, {".bin"});
 	int failures = editor_test::report_missing(variants);
 	std::vector<std::pair<std::string, std::vector<uint8_t>>> inputs{{"the minted ungrouped table", minted_table(false)}};
 	for (const std::string &path : variants.files) inputs.emplace_back(path, editor_test::repo_bytes(path));

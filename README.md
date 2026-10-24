@@ -17,9 +17,6 @@ retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
 | --- | --- |
 | `engine/` | Native formats, runtime, networking, and service code. |
 | `godot/` | Godot game, project resources, and GDScript tests. |
-| `assets/` | OpenNova's own game, an OpenNova Editor project whose Build ships beside `opennova.exe`: its menus, the "Indigo Shore" mission, and the models, sounds and textures exported from the authoring sources in `art/` (`assets/README.md`). |
-| `expansions/` | OpenNova's own expansions, each an OpenNova Editor expansion project on the base game in `assets/` (today `onjo1`, Indigo Storm); the game zip ships each one built in `expansion/<name>/` ([expansions/README.md](expansions/README.md)). |
-| `art/` | Authoring sources (Blender scenes and their textures, in Git LFS) whose exports land in `assets/`. |
 | `apps/` | Native command-line and NovaWorld service applications. |
 | `switcher/` | OpenNova Switcher: a Windows tray app that points a stock Joint Operations or Delta Force Xtreme 2 install at OpenNova's NovaWorld, NovaLogic's, or an address you enter, through the hosts file (.NET 8, with its xunit tests). Only the original exes need it: `opennova.exe` reaches OpenNova's NovaWorld itself. |
 | `tools/blender/opennova_3di/` | Experimental Blender add-on for importing and exporting NovaLogic 3DI models and their ADM/BAD animations. |
@@ -29,6 +26,9 @@ retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
 | `deploy/`, `infra/`, `backend/` | Local and hosted service infrastructure. |
 
 Runtime asset loading is native and the supported object input is 3DI. The
+game's authoring sources, base project, and expansion projects live in
+[opennova-assets](https://github.com/opennova-net/opennova-assets), preserving
+their `art/`, `assets/`, and `expansions/` layout. The
 experimental [Blender add-on](tools/blender/opennova_3di/README.md) imports and
 exports 3DI models and their ADM/BAD animations for authoring, using the
 bundled native `opennova-3di` readers and writers. See its documentation for
@@ -90,20 +90,22 @@ once on a fresh checkout, and run it:
 
 ```bash
 $GODOT_BIN --headless --path godot --import   # once; retry it if a cold cache crashes it
-$GODOT_BIN --path godot
+$GODOT_BIN --path godot -- --resource-dir "C:/Games/Joint Operations"
 ```
 
-With no arguments the game opens OpenNova's own game from `assets/`.
-Press **PLAY RETAIL** and choose your Joint Operations install folder to play
-the retail game. The folder is remembered for the next launch; **CHANGE FOLDER**
-picks another. To boot a game-data directory directly instead:
+Source checkouts need `--resource-dir` pointing to exported OpenNova content or
+an existing retail install. OpenNova's content projects live in `opennova-assets`;
+open `assets/project.opennova` there in the editor and export it to a game directory.
+To boot that export:
 
 ```bash
-$GODOT_BIN --path godot -- --resource-dir "C:/Games/Joint Operations"
+$GODOT_BIN --path godot -- --resource-dir "C:/Games/OpenNova"
 ```
 
 The packaged Windows runtime loads the game files beside `opennova.exe`: run it, or
 `opennova.exe -- --resource-dir "C:\Games\Joint Operations"`.
+Its **PLAY RETAIL** control selects and remembers a retail install;
+**CHANGE FOLDER** selects another.
 
 For loose data without boot archives, add `--loose-root /d`. `/game <code>`
 selects the game (default `jo`); `/exp <name>` selects an expansion. A

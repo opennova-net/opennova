@@ -247,7 +247,7 @@ int test_blank() {
 // byte-identical. A fixture missing fails.
 int test_fixtures(const std::string &repo) {
 	int swept = 0, failures = 0;
-	for (const char *file : {"assets/onjo_m1.til", "expansions/onjo1/missions/onjo1_m1.til", "fixtures/terrain/variants/med.til"}) {
+	for (const char *file : {"fixtures/terrain/variants/med.til"}) {
 		const std::vector<uint8_t> bytes = test_io::read_file(repo + "/" + file);
 		TilDocument document;
 		Diagnostic error;
