@@ -750,10 +750,10 @@ static void spawn_corpse_decay(World &world, Entity &entity, const std::string &
 // corpse leg's); a joiner tracking the row is despawned by the priority list's freed-row test
 // instead.
 // [orig: Entity_UpdateInfantryAI @0x4B9F93 -> Entity_Destroy @0x43E810 (no send among its
-//  callees); the updater then leaves through loc_4BFC89 @0x4B9F9B; Server_RemoveEntityAndNotify
-//  @0x50A270 has no caller in Entity_UpdateInfantryAI; the freed-row despawn
-//  Server_BuildEntityPriorityList @0x50E7F3; the org2 twin Entity_UpdateInfantryPlayerBody
-//  @0x4B4E5F, its return @0x4B4E71]
+//  callees); the updater then leaves through its jmp 0x4BFC89 @0x4B9F9B;
+//  Server_RemoveEntityAndNotify @0x50A270 has no caller in Entity_UpdateInfantryAI; the
+//  freed-row despawn Server_BuildEntityPriorityList @0x50E7F3; the org2 twin
+//  Entity_UpdateInfantryPlayerBody @0x4B4E5F, its return @0x4B4E71]
 static void destroy_corpse(World &world, AiSystem &ai, Entity &entity) {
     release_corpse_effect(world, entity);
     entity.hidden = true;

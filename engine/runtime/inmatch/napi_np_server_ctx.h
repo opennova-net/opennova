@@ -873,6 +873,8 @@ struct NapiNPServerCtx {
 // re-stamps), with the row's transport pointed at that connection's for the walk; none once the
 // connection has left (identities are never reused), when the row's transport is cleared, where
 // retail reads a freed net player (Q7-36 (a), OrphanedPlayerRow).
+// [orig: NapiNPServer_SendFiltered @0x4C87E0 - the walk's row filter +0xC0 @0x4C888C, the 0x20 /
+//  0xA0 target arm's +0x1C @0x4C8A1F]
 inline NapiNPConnection *orphan_net_player(NapiNPServerCtx &ctx, OrphanedPlayerRow &orphan) {
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (conn.net_player_serial == 0 || conn.net_player_serial != orphan.row.net_player_serial)

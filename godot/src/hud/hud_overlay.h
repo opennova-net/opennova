@@ -228,8 +228,8 @@ public:
 	String post_feed_lines(const Ref<Simulation> &p_sim, const Ref<RtxtStringFile> &p_gametext,
 			bool p_mp_verbose);
 	// The CMAP chat panel's send (CHAT_TEAM: `p_all` false; CHAT_ALL: true):
-	// the line through the team (Chat_SendGlobalMessage, a misnomer) or the
-	// global (Chat_SendTeamMessage, a misnomer) sender; a flooded line echoes
+	// the line through the team (Chat_SendTeamMessage) or the
+	// global (Chat_SendGlobalMessage) sender; a flooded line echoes
 	// on the CHAT ring in that sender's colour. Returns the ChatSendResult.
 	// Witness: hud-re "The windowed map views" (CMap_HandleChatSubmit).
 	// CMAP's CHAT_MSGS slot: the console messages (the engine's

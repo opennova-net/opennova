@@ -279,7 +279,8 @@ void fill_round_glows(const World &world, std::vector<RoundGlowRow> &r_rows) {
 }
 
 // A host that presents no entity drops what the passes would have drained (the header
-// carries the witness).
+// carries the witness) [orig: GameLoop_RenderFrame @0x521310 - the jz @0x521355 past the scene
+// arm].
 void discard_entity_presentation(World &world) {
 	world.round_sim.fired.clear();
 	(void)world.out.fire_sounds.drain();

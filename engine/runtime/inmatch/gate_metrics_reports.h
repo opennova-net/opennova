@@ -42,7 +42,8 @@ struct GateMetricsSink {
 
 // The process's two phase clocks: SERVER's, which runs from the session create to the session's
 // end, and SERVERMISSION's, which each linger expiry constructs again for the next mission.
-// [orig: g_ProcessServerTick @0xC87020; g_MissionServerTick @0xC87598]
+// [orig: g_ProcessServerTick @0xC87020; g_MissionServerTick @0xC87598; each built at static init by
+//  CServerTick_Ctor @0x511B50 (the zeroing @0x511BA2, CServerTick_Construct @0x511BAC)]
 struct GateMetricsClocks {
 	GateServerTick process;
 	GateServerTick mission;

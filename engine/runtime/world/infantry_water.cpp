@@ -156,8 +156,8 @@ void AiSystem::player_water_block(AiEntity &e, World &world, Entity *tick_entity
     if (entry_z >= water || (flags & kEntityFlagLadderContact) != 0) {
         tick_entity->flags &= ~(kEntityFlagDrowning | kEntityFlagDiveLatch);
         tick_entity->engine_flags &= ~(kEntityFlagDrowning | kEntityFlagDiveLatch);
-        // The exit falls into the eye leg [orig: loc_4B8373 @0x4b8373..0x4b8378
-        //  -> @0x4b837b], so a shallow body whose eye is under still toggles.
+        // The exit falls into the eye leg [orig: Entity_UpdateInfantryPlayerBody
+        //  @0x4b8373..0x4b8378 -> @0x4b837b], so a shallow body whose eye is under still toggles.
         record_eye_scope_leg(world, e, *tick_entity, water);
         return;
     }

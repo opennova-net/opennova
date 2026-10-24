@@ -1003,8 +1003,8 @@ void test_the_placement_warm_up_counts_by_the_dcb_id() {
 // savedLivePose stamped), the org0 class row's org1 the AI update (the stamp, no MoveOrder read),
 // and a row naming none binds the null row, whose stub the walk skips: nothing runs. A World with
 // no items rows binds a player body the seed's row (org2) and any other body org1.
-// [orig: Entity_UpdateAllEntities @0x4C2100 - the read @0x4C2460, the nullsub_2 compare
-//  @0x4C2466..0x4C246B, the null test @0x4C246F, the call @0x4C2472;
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the read @0x4C2460, the Entity_UpdateNullClass
+//  compare @0x4C2466..0x4C246B, the null test @0x4C246F, the call @0x4C2472;
 //  Entity_SpawnFromAnimSlotProperty @0x43C390 - @0x43C440, the store @0x43C453;
 //  Entity_UpdateInfantryPlayerBody @0x4B40E0 - MoveOrder @0x4B414B, the stamp
 //  @0x4B4187..0x4B419C; Entity_UpdateInfantryAI @0x4B9910 - the stamp @0x4B9A53..0x4B9A6E;
@@ -1068,8 +1068,8 @@ void test_the_update_follows_the_rows_move_function() {
 
 // The same dispatch through the entity update's pool-0 walk: a body on the null row is skipped
 // whole (no update, no tail), a body on the org2 row runs its update.
-// [orig: Entity_UpdateAllEntities @0x4C2100 - the nullsub_2 compare @0x4C2466..0x4C246B, the
-//  null test @0x4C246F to the next slot, the call @0x4C2472]
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the Entity_UpdateNullClass compare
+//  @0x4C2466..0x4C246B, the null test @0x4C246F to the next slot, the call @0x4C2472]
 void test_the_walk_skips_a_null_row_body_whole() {
 	struct Case {
 		uint8_t player_class;
@@ -1113,7 +1113,7 @@ void test_the_walk_skips_a_null_row_body_whole() {
 //  @0x484086 -> @0x486A04..0x486A17; Entity_UpdateWatercraftPhysics @0x48D480 - @0x48D4EF ->
 //  @0x48EF50..0x48EF63; Vehicle_ProcessSelectorZeroBoat @0x46FA00 - @0x46FA64 ->
 //  @0x471670..0x471683; Entity_UpdateAircraftPhysics @0x490310 - @0x490371 ->
-//  @0x492753..0x492766; nullsub_82 @0x45D540]
+//  @0x492753..0x492766; Entity_UpdateChldClass @0x45D540]
 void test_a_vehicle_row_body_runs_its_movers_person_path() {
 	struct Case {
 		w::PhysicsClass row;

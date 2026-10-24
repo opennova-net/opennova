@@ -28,8 +28,8 @@ inline constexpr uint32_t kLfpIconMaterialWord = 0x300631u;
 // The box styles (border.tga with boxtile.tga, border3.tga alone): the extracted
 // fill cell's, the atlas-with-secondary's and the atlas-alone's materials [orig:
 // BoxTexture_LoadAndSetupUVRegions @0x56acd0 — GfxShader_CreateForTexture(cell, 0x651) @0x56ae78,
-// CGfxTexture_Create(atlas, secondary, 0x651, 2) @0x56af2d, GfxShader_CreateForTexture(atlas,
-// 0x651) @0x56af43].
+// GfxShader_CreateTwoTexture(atlas, secondary, 0x651, 2) @0x56af2d,
+// GfxShader_CreateForTexture(atlas, 0x651) @0x56af43].
 inline constexpr uint32_t kBoxMaterialWord = 0x651u;
 
 // The tip panel's icons, k_tip.tga / g_tip.tga [orig: CTipSystem_Init @0x5b6970 —

@@ -965,7 +965,7 @@ void test_uses_section() {
 	CHECK(std::string(ui_kit::nothing_names_it(true)) == "No file of the project names it or what it defines." &&
 	              std::string(ui_kit::nothing_names_it(false)) == "No file of the project names it.",
 	      "one wording for nothing naming it, a file's with what it defines");
-	text = frame_of([] { ui_kit::finding_line(DiagnosticSeverity::Error, "Refused [orig: Rename_Plan @ 0x401000]."); });
+	text = frame_of([] { ui_kit::finding_line(DiagnosticSeverity::Error, "Refused [orig: the rename plan @ 0x401000]."); });
 	CHECK(text.find("Refused.") != std::string::npos && text.find("[orig:") == std::string::npos,
 	      "a finding on one line, without its citations");
 	// A modal's text, the one wrapped prose the rule keeps: whole, on as many lines as a dialog's width takes.

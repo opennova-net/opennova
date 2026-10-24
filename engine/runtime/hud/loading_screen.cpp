@@ -52,8 +52,8 @@ std::size_t utf8_sequence_length(const std::string &text, std::size_t at) {
 // (`use_kerning_wrap`) lines by the font's tab-width field font+0x168; every
 // loading-screen call site passes `use_kerning_start = 0` [orig: @0x521fee,
 // @0x52201a, @0x52203c, @0x5220bd]. Render_LoadingScreen sets that field (the
-// one GText_SetLineSpacing @ 0x674720 also writes) to 120 on Arials18.fnt and
-// 0 on Arial22.fnt [orig: sub_6741C0 @0x6741c0, called @0x521f42 /
+// one GText_SetTabWidth @ 0x674710 also writes) to 120 on Arials18.fnt and
+// 0 on Arial22.fnt [orig: CGameFont_SetTabWidth @0x6741c0, called @0x521f42 /
 // @0x521fae], but only the large font's sites pass
 // `use_kerning_wrap = 1` (the small font's pass 0 [orig: @0x5220bb,
 // @0x5220f8]), so the offset folds out here. The 120 is the small font's tab

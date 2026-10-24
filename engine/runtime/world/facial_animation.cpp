@@ -207,6 +207,8 @@ void FacialSystem::tick(World &world) {
 	// The process's GetTickCount, the main loop's clock (world/tick_count_clock.h)
 	// [orig: FaceAnim_UpdateSlot @0x57FA50 - GetTickCount @0x57FAEA].
 	const uint32_t now_ms = frame_tick_count_ms();
+	// [orig: FaceAnim_UpdateAllSlots @0x580000 - the live test (+0x0C) @0x580011,
+	//  FaceAnim_UpdateSlot called @0x580019; its call @0x4C21FB]
 	for (auto &slot : slots_) {
 		const Entity *entity = world.registry.get(slot.owner);
 		if (!entity || entity->registry_spawn_id != slot.spawn_id) continue;

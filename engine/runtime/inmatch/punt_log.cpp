@@ -281,6 +281,8 @@ void server_logs_punt(const ServerLogs &logs, const NapiNPConnection &conn, cons
 	logs.punt->write_punt(conn.reply.player_slot, conn.reply.player_name, reason, "");
 }
 
+// [orig: CNapiGameSession_HandleServerMessage @0x4D1C50 - the NOVAWORLD STOP HOSTING line's
+//  NapiFile_AppendLine @0x4D1DBC]
 void server_logs_inout_line(const ServerLogs &logs, const std::string &text) {
 	if (!logs.inout_switch || logs.files == nullptr) return;
 	logs.files->write("_inout.txt",

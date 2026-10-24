@@ -83,6 +83,69 @@ class AutoNames(unittest.TestCase):
                                   cite_sweep.entry_info("j_sub_4B0000", "0x401234")), "idb-autoname")
 
 
+class ImportCalls(unittest.TestCase):
+    """`call ds:__imp_GetTickCount` calls GetTickCount: the IDB names the thunk `GetTickCount`
+    and the table entry `__imp_GetTickCount`, so the call-site test reads the entry's name."""
+
+    def test_an_import_entry_answers_to_its_symbol(self):
+        self.assertIn("GetTickCount", cite_sweep.import_forms("__imp_GetTickCount"))
+        self.assertIn("D3DXCreateTexture", cite_sweep.import_forms("__imp__D3DXCreateTexture@36"))
+
+    def test_a_plain_name_is_no_import_entry(self):
+        self.assertEqual(cite_sweep.import_forms("GetTickCount"), set())
+        self.assertEqual(cite_sweep.import_forms(""), set())
+
+    def test_the_import_call_reads_as_a_call_site(self):
+        # the join row refs_symbol returns for `GetTickCount @0x4c408a`: the cited name lives at the
+        # thunk 0x61d0d0, the site's own instruction calls through the table entry
+        info = row(fs="0x4c4060", fn="CNetPlayer_SetGameState", tea="0x61d0d0", ref="0x4c408a")
+        self.assertEqual(classify("GetTickCount", "0x4c408a", info), "call-site")
+        info = row(fs="0x4c4060", fn="CNetPlayer_SetGameState", tea="0x61d0d0")
+        self.assertEqual(classify("GetTickCount", "0x4c408a", info), "name-elsewhere")
+
+
+class GodotLegs(unittest.TestCase):
+    """A reverse link to a godot/ file stands while that file defines the symbols the line names
+    for it: the Godot side carries no marker (godot_orig_cites only shrinks)."""
+
+    FILES = {
+        "godot/src/network/lan_session.cpp": "void LanSession::stop_enumerator() {}\nvoid LanSession::_process(double) {}",
+        "godot/game/mp_menu_companion.gd": "func _on_lan_join() -> void:\n\tpass",
+        "engine/net/npwire/lan_discovery.h": "class LanDiscoveryBrowser { void stop(); };",
+    }
+
+    def read(self, path):
+        return self.FILES.get(path, "")
+
+    def test_a_leg_still_in_its_file_stands(self):
+        line = "godot::LanSession::_process (the window's end; L2-s17) @ godot/src/network/lan_session.cpp"
+        self.assertTrue(cite_sweep.godot_leg_defined(line, "godot/src/network/lan_session.cpp", self.read))
+        line = "MpMenuCompanion._on_lan_join (the row index the join walks to) @ godot/game/mp_menu_companion.gd"
+        self.assertTrue(cite_sweep.godot_leg_defined(line, "godot/game/mp_menu_companion.gd", self.read))
+
+    def test_every_symbol_must_be_defined(self):
+        line = ("godot::LanSession::_process + godot::LanSession::destroy_pre_dial_session (state 9) "
+                "@ godot/src/network/lan_session.cpp")
+        self.assertFalse(cite_sweep.godot_leg_defined(line, "godot/src/network/lan_session.cpp", self.read))
+
+    def test_ida_names_and_file_names_are_prose(self):
+        line = ("godot::LanSession::stop_enumerator (CNapiNetwork_DrainPendingDataTransfers, the keylist.key and "
+                "CC.BIN reads) @ godot/src/network/lan_session.cpp")
+        self.assertEqual(cite_sweep.leg_symbols(line, "godot/src/network/lan_session.cpp")[1],
+                         ["godot::LanSession::stop_enumerator"])
+
+    def test_only_godot_paths_and_named_symbols(self):
+        line = "opennova::LanDiscoveryBrowser::stop @ engine/net/npwire/lan_discovery.h"
+        self.assertFalse(cite_sweep.godot_leg_defined(line, "engine/net/npwire/lan_discovery.h", self.read))
+        line = "the click godot/game/mp_menu_companion.gd _on_lan_join"
+        self.assertFalse(cite_sweep.godot_leg_defined(line, "godot/game/mp_menu_companion.gd", self.read))
+
+    def test_a_list_shares_its_symbols(self):
+        line = ("opennova::LanDiscoveryBrowser::stop + godot::LanSession::stop_enumerator "
+                "@ engine/net/npwire/lan_discovery.h, godot/src/network/lan_session.cpp")
+        self.assertTrue(cite_sweep.godot_leg_defined(line, "godot/src/network/lan_session.cpp", self.read))
+
+
 class Unchanged(unittest.TestCase):
     def test_the_accepted_forms(self):
         self.assertEqual(classify("Foo_Bar", "0x500000", cite_sweep.entry_info("Foo_Bar", "0x500000")), "ok")

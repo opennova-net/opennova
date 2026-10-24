@@ -314,9 +314,9 @@ void test_listen_host_self_join_lines() {
 // the in-order parse takes NET PROCESSING with the parse's length plus its opcode byte.
 // [orig: NapiLog_OnSend @0x4C4760 - SendAnnouncePacket @0x61FDCA, SendClientJoin @0x6203F0,
 //  SendSessionPacket @0x61F00D; NapiNPProtocol_PumpRecvQueues @0x6266A0 - NapiLog_OnRecv
-//  @0x6268AA; Nwu_HandleServerHello @0x626D20 - @0x6278D7; CNapiNetwork_OnSessionDiscovered
-//  @0x4C8470; CNapiNetwork_OnConnectedToServer @0x4C62E0; CNapiNPConnection_ParseMessages
-//  @0x625D3E]
+//  (proto+0x26C) @0x6268AA; Nwu_HandleServerHello @0x626D20 - @0x6278D7;
+//  CNapiNetwork_OnSessionDiscovered @0x4C8470; CNapiNetwork_OnConnectedToServer @0x4C62E0;
+//  CNapiNPConnection_ParseMessages @0x625D3E]
 void test_remote_joiner_client_lines() {
 	MemoryFiles files;
 	inmatch::ConnectLog log{files};
@@ -455,7 +455,7 @@ void test_remote_joiner_client_lines() {
 //  packet @0x6239A4, CNapiNPConnection_SendSessionPacket (the call @0x6239B6);
 //  NapiNPProtocol_HandleSessionPacket @0x626A00 - the key @0x626B72, the queue @0x626CB0,
 //  the queued leg's active test @0x626B01; NapiNPProtocol_PumpRecvQueues @0x6266A0 -
-//  NapiLog_OnRecv @0x6268AA; CNapiNPConnection_ParseMessages @0x625BC0 - @0x625D3E]
+//  NapiLog_OnRecv (proto+0x26C) @0x6268AA; CNapiNPConnection_ParseMessages @0x625BC0 - @0x625D3E]
 void test_remote_joiner_manager_pass_ahead_of_the_client_pump() {
 	MemoryFiles files;
 	inmatch::ConnectLog log{files};

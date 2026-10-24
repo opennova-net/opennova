@@ -831,7 +831,7 @@ void test_a_row_joins_the_listed_session_at_its_index() {
 //  the cooked callback @0x623254; NapiNPManager_HandlePacket @0x622F10 - cb_on_dispatch
 //  @0x622FCD, cb_on_error(4) @0x622FF9; Nwu_HandleServerHello @0x626D20 - the CI @0x627541,
 //  the enumerator running @0x627559, the queue @0x627F45; NapiNPProtocol_PumpRecvQueues
-//  @0x6266A0 - NapiLog_OnRecv @0x6268AA ahead of the handler @0x6268D0]
+//  @0x6266A0 - NapiLog_OnRecv (proto+0x26C) @0x6268AA ahead of the handler @0x6268D0]
 void test_each_datagram_writes_the_managers_lines_and_net_got() {
     std::vector<std::string> lines;
     opennova::LanDiscoveryBrowser b;

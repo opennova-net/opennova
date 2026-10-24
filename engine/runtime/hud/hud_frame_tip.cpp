@@ -48,7 +48,7 @@ void HudFrameCompiler::element_tip(const HudFrameState &state, bool alternate, f
 
 	// The large label slot, its tab stop 192 design px on the surface: the
 	// body lays its key columns out on it [orig: Viewport_ScaleToVirtualCoords
-	// (192) @0x5b6eaa, sub_6741C0 (the font's tab width, this+0x168)
+	// (192) @0x5b6eaa, CGameFont_SetTabWidth (the font's tab width, this+0x168)
 	// @0x5b6ebd].
 	const GameFont &font = label_font_large_.font() != nullptr ? label_font_large_ : font_;
 	const float scale = label_font_large_.font() != nullptr ? label_large_scale_ : hud_font_scale_;

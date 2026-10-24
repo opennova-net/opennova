@@ -787,11 +787,11 @@ void AiSystem::aircraft_combat_tick(AiEntity &ai, World &world) {
 	// arithmetically and compared UNSIGNED against the folded bearing delta —
 	// so a byte >= 0x80 yields a negative limit that admits every bearing.
 	// [orig: movsx eax, byte ptr [profile+67]; or eax, 1 @0x471736..0x47173a;
-	//  or ecx, 2; sar ecx, 1; cmp eax, ecx; ja loc_472DF5 @0x472477..0x472481]
+	//  or ecx, 2; sar ecx, 1; cmp eax, ecx; ja 0x472DF5 @0x47247A..0x472481]
 	const int32_t limit = (int32_t(int8_t(p.fov_secondary)) | 3) >> 1;
 	// Out of arc jumps straight to the epilogue: the bone byte and last_weapon
 	// keep their values so the continuation leg keeps firing between processed
-	// ticks. [orig: ja loc_472DF5 @0x472481 -> pop/ret @0x472df5]
+	// ticks. [orig: ja 0x472DF5 @0x472481 -> pop/ret @0x472df5]
 	if (folded_angle(bam_sub(bearing, ai.heading)) > uint32_t(limit))
 		return;
 	for (int which = 1; which <= 2; ++which) {

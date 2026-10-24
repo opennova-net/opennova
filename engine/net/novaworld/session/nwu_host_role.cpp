@@ -113,7 +113,8 @@ void NwuHostRole::update_server_info() {
 
 // The mission start runs its update only on a NovaWorld authority in session; while the request
 // is out the marks stay and the first refresh in state 6 carries the whole lists.
-// [orig: Game_StartMission @0x5248c6..0x5248dc (the NovaWorld session gates)]
+// [orig: Game_StartMission @0x5248c6..0x5248dc (the NovaWorld session gates); the first
+//  mission's send Server_SendMetricsToGate @0x4FB0A0]
 void NwuHostRole::publish_mission_start(int32_t session_round_count) {
 	if (phase_ == Phase::Idle)
 		return;

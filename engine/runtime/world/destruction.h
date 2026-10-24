@@ -238,7 +238,7 @@ struct ItemDeathTraits {
     // Each model's scar-cache bone callback (+0xAC) returns no matrix array (LOD 0's RMDL tag
     // is the bone table's 'pwp0' row), so a hit on section 0 projects no decal
     // (collision_resolve.cpp's scar_bones_null) [orig: Scar_ProjectDecalOntoEntity
-    //  @0x5CE52C..0x5CE564].
+    //  @0x5CE52C..0x5CE564; BoneCallback_pwp0_Bone @0x4E29E0, `xor eax, eax; retn`].
     bool graphic_scar_bones_null = false;
     bool husk_scar_bones_null = false;
     std::string particlefx;

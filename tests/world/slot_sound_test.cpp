@@ -417,7 +417,7 @@ void test_landing_pair_alive_and_dead() {
         // epilogue, so no body is left to land on tick 2.
         // [orig: seed +0x148 = def+0x890 @0x4b9c97; ItemDef_ParseProperty
         //  @0x49fa6c-0x49faa0 (62*s, 0 -> 496, +62); decrement @0x4b9e74;
-        //  Entity_Destroy @0x4b9f93 then jmp loc_4BFC89 @0x4b9f9b]
+        //  Entity_Destroy @0x4b9f93 then jmp 0x4BFC89 @0x4b9f9b]
         ent->deathtime_ticks = 496 + 62;
         ent->corpse_timer = ent->deathtime_ticks;
     }

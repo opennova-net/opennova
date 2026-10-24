@@ -10,7 +10,7 @@
 // 119 characters into the newest of 40 raw slots. The status page shows its
 // four newest slots [orig: NapiNPServer_HandleChatMessage — the
 // `!is_mp_session_peer` posts @0x514147..0x51415b and their siblings in each
-// channel arm; Chat_SendTeamMessage @0x49aa2a; Chat_DispatchToChannel
+// channel arm; Chat_SendGlobalMessage @0x49aa2a; Chat_DispatchToChannel
 // @0x42b910 -> Chat_AddMessageChannel1 @0x4985d0, the raw shift
 // @0x4985d7..0x4985f4 and the 119-byte copy @0x49861e..0x498654;
 // HUD_DrawServerConsoleLines @0x5ba0bd reads the CHAT raw slots 3..0 on a
@@ -22,7 +22,7 @@
 // to every in-match slot and posts the line to the host's own CHAT ring in
 // white. Every other talk row queues a C2S 0x0D on the local client
 // connection, which such a host never creates, so it sends nothing
-// [orig: Chat_SendTeamMessage (IDB misnomer — the GLOBAL sender) @0x49a900 —
+// [orig: Chat_SendGlobalMessage @0x49a900 —
 // `is_mp_session_peer` @0x49a980, the authority arm @0x49a9da..0x49aa2a;
 // CNapiNetwork_QueueReliableMessage @0x4c4fa0 no-ops without ctx+0xE60, which
 // CNapiGameSession_CreateSession @0x4c9b6a..0x4c9b9c creates only for an
@@ -202,7 +202,7 @@ std::vector<ServerConsoleLine> server_console_rows(const std::vector<ServerConso
 // in-match slot (send mask 0x80), then the unstripped line to the host's CHAT
 // ring in white — and returns Broadcast. Every other dispatch is Refused (its
 // sender's queue has no connection). `frame` is the per-main-frame counter.
-// [orig: Chat_SendTeamMessage @0x49a900 — the gates @0x49a931, flood
+// [orig: Chat_SendGlobalMessage @0x49a900 — the gates @0x49a931, flood
 //  @0x49a93b, strip @0x49a971, mask 128 @0x49a9f2, NetPacket_WriteTwoBytesAndCString
 //  (.., 255, 10, ..) @0x49aa18, SendFiltered(0x14, 1, 310) @0x49aa1d,
 //  Chat_DispatchToChannel(0xFF, 10, message) @0x49aa2a]

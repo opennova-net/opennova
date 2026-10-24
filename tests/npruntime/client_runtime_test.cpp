@@ -6447,9 +6447,9 @@ bool run_queued_gameplay_survives_a_death_before_the_boundary() {
 // it dispatches (D-NET-NEW-L8-8's joiner half, s10).
 // [orig: NapiNPClientMsg_HandleTickSeed @0x4297C0 - `cmp g_ConnectLogEnabled, 0`
 //  @0x4297F1, the text @0x7C5398, the append @0x429831, the clear @0x42983E;
-//  NapiNPProtocol_PumpRecvQueues @0x6266A0 - NapiLog_OnRecv @0x6268AA;
-//  CNapiNPConnection_ParseMessages @0x625BC0 - NapiLog_OnProcess @0x625D3E ahead of the
-//  message walk]
+//  NapiNPProtocol_PumpRecvQueues @0x6266A0 - NapiLog_OnRecv (proto+0x26C) @0x6268AA;
+//  CNapiNPConnection_ParseMessages @0x625BC0 - NapiLog_OnProcess (proto+0x274) @0x625D3E ahead
+//  of the message walk]
 bool run_the_session_key_closes_the_connect_log() {
 	struct MemoryFiles final : inmatch::ServerFileSink {
 		std::map<std::string, std::string> files;

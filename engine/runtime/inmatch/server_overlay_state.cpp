@@ -182,7 +182,7 @@ void build_overlay_state_for_player(NapiNPServerCtx &ctx, world::World &world,
 	// [orig: @0x518755..0x518764 (the game types), @0x518766..0x518774 (the
 	//  walk), `cmp [edi+15F10h], 3Ch` / `jle` @0x518776..0x51877D, the pool
 	//  search @0x518781..0x5187A9, Server_QueueOverlayStateEntry(slot, handle,
-	//  2, 0x0C, 0, 0) @0x5187BE, the failed queue's jnz loc_518144 @0x5187C8,
+	//  2, 0x0C, 0, 0) @0x5187BE, the failed queue's jnz 0x518144 @0x5187C8,
 	//  the walk's end @0x5187DD]
 	// An orphaned row is a slot of the table too (D-NET-NEW-L1-24): its own carry count and
 	// body, a full ring flushing to its net player (none past the leave, Q7-36 (a)).

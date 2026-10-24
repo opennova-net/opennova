@@ -1767,7 +1767,7 @@ int main() {
 		// The host's chat line, emote and radio call take the same path as
 		// its 0x1D: queued on its own client connection at the press, sent by
 		// that frame's client frame, dispatched by the next frame's server
-		// tick. [orig: Chat_SendTeamMessage QueueReliableMessage(0xD) @0x49a9b4;
+		// tick. [orig: Chat_SendGlobalMessage QueueReliableMessage(0xD) @0x49a9b4;
 		//  NetPacket_SendEmoteRequest @0x42c147 (0x14); NetPacket_SendRadioCallRequest
 		//  @0x42c177 (0x13); the manager FIFO drained @0x526528]
 		inmatch::ClientRuntime &own = *host.client_runtime;

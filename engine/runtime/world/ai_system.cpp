@@ -1189,8 +1189,8 @@ void AiSystem::update_organic(AiEntity &e, World &world, uint32_t logic_tick) {
     // mover and drop motion in its own legs); the other item rows' movers are not run here
     // (D-NET-NEW-L4-14 (a), narrowed).
     // [orig: Entity_UpdateAllEntities @0x4C2466..0x4C2472; Entity_UpdatePool1Slot
-    //  @0x4B8E41..0x4B8E53; Entity_UpdateOrg0Movement @0x4AFF60; the chld row's nullsub_82
-    //  @0x45D540]
+    //  @0x4B8E41..0x4B8E53; Entity_UpdateOrg0Movement @0x4AFF60; the chld row's
+    //  Entity_UpdateChldClass @0x45D540]
     const PhysicsClass move_row = body_move_row(world, e, motor_entity);
     if (Entity *body = world.registry.get(e.handle); body != nullptr &&
             e.handle.pool() == 0 && person_item_mover(world, move_row, e, *body))

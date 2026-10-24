@@ -159,6 +159,8 @@ uint32_t advance_connection_index(uint32_t &counter) {
 	return counter;
 }
 
+// The process's counter, zero with the protocol, created once per process [orig:
+//  NapiNPProtocol_Create @0x625730 - the 0xFE0-byte memset called @0x62576C].
 uint32_t next_connection_index() {
 	static std::mutex mutex;
 	static uint32_t counter = 0;

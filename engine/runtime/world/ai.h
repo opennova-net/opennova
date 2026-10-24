@@ -595,12 +595,12 @@ bool player_body_network_chase(AiEntity &e, Entity &body, bool authority, bool l
 // case: a World with no items rows or whose peer read no charattr.def) runs the seed's row,
 // and in a World with no items rows every other body runs org1.
 // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - @0x43C440, the store @0x43C453;
-//  Entity_UpdateAllEntities @0x4C2100 - the read @0x4C2460, the nullsub_2 compare
+//  Entity_UpdateAllEntities @0x4C2100 - the read @0x4C2460, the Entity_UpdateNullClass compare
 //  @0x4C2466..0x4C246B, the null test @0x4C246F, the call @0x4C2472;
 //  Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53; g_EntityClassPhysicsTable rows org0
 //  @0x82AC1C -> Entity_UpdateOrg0Movement @0x4AFF60 (a bare retn), org1 @0x82AC28 ->
 //  Entity_UpdateInfantryAI @0x4B9910, org2 @0x82AC34 -> Entity_UpdateInfantryPlayerBody
-//  @0x4B40E0, null @0x82ABC8 -> nullsub_2 @0x4A8070]
+//  @0x4B40E0, null @0x82ABC8 -> Entity_UpdateNullClass @0x4A8070]
 PhysicsClass body_move_row(const World &world, const AiEntity &body, const Entity *entity);
 
 // The ewep row's mover over a person body's words (ai_system.cpp carries the witness): the

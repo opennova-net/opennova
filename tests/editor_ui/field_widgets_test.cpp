@@ -156,7 +156,7 @@ void test_ranged_number() {
 	bare.id = "count";
 	CHECK(widgets::field_tip(bare) == "count", "nothing made up");
 	// A description's citations stay in the code: the tooltip says the words alone.
-	field.description = "Below it a texel is cut [orig: Material_AlphaTest @ 0x58b000].";
+	field.description = "Below it a texel is cut [orig: the alpha test @ 0x58b000].";
 	CHECK(widgets::field_tip(field).find("[orig:") == std::string::npos &&
 	              widgets::field_tip(field).find("Below it a texel is cut.") != std::string::npos,
 	      "a description without its citations");

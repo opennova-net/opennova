@@ -14,6 +14,7 @@
 
 namespace opennova::mission {
 
+// [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 - the loaded test @0x439F9C..0x439FB3]
 void MissionKernel::merge_item_seat_specs(int32_t item_type) {
 	const def::DefItemsFile *table = items_table();
 	if (table == nullptr) return;

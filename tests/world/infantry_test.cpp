@@ -3322,7 +3322,7 @@ void test_death_presentation() {
             removal_sent = removal_sent || std::holds_alternative<EntityRemoveEvent>(event);
         CHECK(!removal_sent);
         // [orig: Entity_Destroy @0x43e810 memsets the brain @0x43e995, and the
-        //  updater leaves through loc_4BFC89 @0x4b9f9b: no pose survives the row]
+        //  updater leaves through jmp 0x4BFC89 @0x4b9f9b: no pose survives the row]
         CHECK(ai.for_handle(h) == nullptr);
     }
 

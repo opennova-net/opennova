@@ -828,7 +828,7 @@ float particle_scale_curve_blend(const CurveRef &curve, int lut_index, float fra
 	// CEffectTableDef_ParseCallback @ 0x5e4070; CParticleTableDef_Construct
 	// @ 0x5e26d4]; a transformed clone's is the reference's mask, inverse 0x01 |
 	// reverse 0x02 [orig: CParticleManager_FindTableDefByName @ 0x5e95da..0x5e95fc
-	// -> sub_5E80F0 @ 0x5e80fc; the bits CEffectTableDef_ApplyTransform
+	// -> CParticleTableDef_ConstructClone @ 0x5e80fc; the bits CEffectTableDef_ApplyTransform
 	// @ 0x5e2730 / @ 0x5e273c tests]. The resolve hands an unmodified reference
 	// only a base table (flags 0) and a modified one only the clone stamped with
 	// its own mask (@ 0x5e95b8..0x5e95c6), so the byte is the reference's mask

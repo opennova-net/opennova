@@ -56,9 +56,10 @@ bool read_total_physical_memory(uint64_t &bytes);
 // two calls. False off Windows, or when either reads 0. Retail reads them at three sites: the
 // renderer's desktop (NWHWI's), the config defaults' display mode and the first launch's video
 // test (the fresh profile's aspect seed, renderer::fresh_profile_aspect_mode).
-// [orig: Renderer_Init @0x586350 - GetSystemMetrics(0) called @0x58635C into
-//  g_RendererDesktopWidth @0x586360, GetSystemMetrics(1) called @0x586363 into
-//  g_RendererDesktopHeight @0x586365; Config_SetDefaults @0x54D030 - @0x54D0F3 / @0x54D0FB;
+// [orig: Renderer_Init @0x586350 - GetSystemMetrics(0) called @0x58635C into this+0x14
+//  @0x586360, GetSystemMetrics(1) called @0x586363 into this+0x18 @0x586365 (this = 0x840960,
+//  Game_InitSubsystems @0x4A70ED: g_RendererDesktopWidth / g_RendererDesktopHeight);
+//  Config_SetDefaults @0x54D030 - @0x54D0F3 / @0x54D0FB;
 //  Game_RunVideoTestDialog @0x53EC10 - GetSystemMetrics(0) called @0x53ECD8, (1) @0x53ECE2]
 bool read_primary_screen_size(int32_t &width, int32_t &height);
 

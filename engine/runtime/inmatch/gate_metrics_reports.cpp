@@ -206,8 +206,8 @@ void Server_ProcessPeriodicTimerUpdate(NapiNPServerCtx &ctx) {
 	gate_update_max_player_counts(ctx, clocks.mission);
 	clocks.process.close_phase(ctx.tick_count_ms);
 	clocks.mission.close_phase(ctx.tick_count_ms);
-	// The NovaWorld leg between them (@0x4FC061..0x4FC07A) calls sub_4CE130(0), a stub that
-	// returns -1 [orig: sub_4CE130 @0x4CE130]: nothing to port.
+	// The NovaWorld leg between them (@0x4FC061..0x4FC07A) calls an unnamed stub with 0 that
+	// returns -1 [orig: the stub @0x4CE130, `or eax, -1; retn 4`]: nothing to port.
 	Server_SendServerMetricsToGate(ctx);
 	clocks.process.reset(ctx.tick_count_ms);
 	clocks.mission.reset(ctx.tick_count_ms);

@@ -2216,7 +2216,7 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 //
 // What binds where:
 //  - The BORDER PIECES bind border x boxtile — one combined material
-//    [orig: CGfxTexture_Create (ex sub_676EA0)(BoxTexA, BoxTexB, 0x651, 2) -> style+0x30 @0x56af3c,
+//    [orig: GfxShader_CreateTwoTexture(BoxTexA, BoxTexB, 0x651, 2) -> style+0x30 @0x56af3c,
 //    applied for the piece pass @0x56b902]. Its preferred permutation runs
 //    stage 0 MODULATE2X(TEXTURE, DIFFUSE) and stage 1 MODULATE2X(CURRENT,
 //    TEXTURE1), alpha MODULATE(TEXTURE, DIFFUSE) then MODULATE(CURRENT,

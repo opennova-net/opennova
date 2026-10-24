@@ -56,7 +56,8 @@ public:
     // Setters mirror the retail write guards; group rows use the low 6 bits of
     // the commandGroup the way the 64-entry table indexes, single rows are the
     // raw authored SSN with the < 0x80 guard [orig: e.g. SeesMatrix_SetSingleSingleBit
-    // @ 0x452bf0, SeesMatrix_SetGroupSingleBit @ 0x452b60].
+    // @ 0x452bf0, SeesMatrix_SetGroupSingleBit @ 0x452b60, ShotMatrix_SetSingleGroupBit
+    // @ 0x452b00, TargetedMatrix_SetSingleGroupBit @ 0x452b30].
 
     void set_group_group(Relation r, int a, int b) {
         if (!group_ok(a) || !group_ok(b)) return;

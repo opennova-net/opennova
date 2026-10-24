@@ -46,9 +46,8 @@ inline constexpr int kChatDispatchCommand = 1;
 inline constexpr int kChatDispatchConsole = 20;
 
 // The C2S 0x0D channel byte each dispatch's sender writes, -1 for none
-// [orig: Chat_SendLocalMessage 13 @0x49a8d6; Chat_SendTeamMessage (IDB misnomer — the
-//  GLOBAL sender) 1 @0x49a9af; Chat_SendGlobalMessage (IDB misnomer — the
-//  TEAM sender) 2 @0x49a74f; Chat_SendSquadMessage 12 @0x49aaff;
+// [orig: Chat_SendLocalMessage 13 @0x49a8d6; Chat_SendGlobalMessage 1 @0x49a9af;
+//  Chat_SendTeamMessage 2 @0x49a74f; Chat_SendSquadMessage 12 @0x49aaff;
 //  Chat_SendAdminMessage (the CREW sender) 11 @0x49a816; Chat_SendAllMessage
 //  4 @0x49ad1c; Chat_SendBlueTeamMessage 5 @0x49ac4c].
 int chat_dispatch_channel(int dispatch);
@@ -104,8 +103,8 @@ struct ChatEntryFacts {
 // embedder to echo the (truncated) line to the CHAT ring in the dispatch's
 // flood color; `Refused` does nothing. `Broadcast` is the Global sender's
 // authority arm on a host with no client of its own: the line went out to
-// every player, and that arm stamps no debounce [orig: Chat_SendTeamMessage
-// (IDB misnomer — the GLOBAL sender) @0x49a9da..0x49aa2a; the stamp
+// every player, and that arm stamps no debounce [orig: Chat_SendGlobalMessage
+// @0x49a9da..0x49aa2a; the stamp
 // @0x49a9be is the peer arm's alone].
 enum class ChatSendResult : uint8_t { Refused, Sent, Flooded, Broadcast };
 // The begin's stored sender [orig: dword_B3E1D4]: the dispatch picks the

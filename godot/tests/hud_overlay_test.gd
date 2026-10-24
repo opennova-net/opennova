@@ -1127,7 +1127,7 @@ func test_message_log_lists_expired_lines() -> void:
 
 # The stdbox border pieces bind the boxtile camo as a second texture stage the
 # flat HUD material combines, screen-anchored; the fill does not
-# [orig: CGfxTexture_Create(BoxTexA, BoxTexB, 0x651, 2) @0x56af3c, applied for
+# [orig: GfxShader_CreateTwoTexture(BoxTexA, BoxTexB, 0x651, 2) @0x56af3c, applied for
 #  the pieces @0x56b902; HUD_DrawTexturedQuad_0 @0x56b3e0].
 func test_stdbox_pieces_carry_the_camo_stage() -> void:
 	var fixture := _load_temp_layout(PackedStringArray([

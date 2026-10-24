@@ -1257,7 +1257,8 @@ void JoinerRole::pump() {
 	// Ahead of them, the replica guns' channels: each gun's ai-fn and class update run in the
 	// pool-1 walk, so a remote gunner's words and window store precede its body's chase
 	// (D-NET-NEW-L5-31). [orig: Entity_UpdatePool1Slot @0x4B8DD0 - the +0x1C8 call @0x4B8E3C,
-	//  the +0x1C4 call @0x4B8E53; Entity_UpdateAllEntities @0x4C2100 - @0x4C2158..0x4C21E9]
+	//  the +0x1C4 call @0x4B8E53; Entity_UpdateAllEntities @0x4C2100 - @0x4C2158..0x4C21E9; the
+	//  gun's Entity_UpdateChildAttachment @0x4409A0]
 	world.before_pool0_walk = [this, &rt, &kernel, &world] {
 		const devtools::ProfileScope prewalk(world.profile, devtools::Slot::SIM_WALK_REPLICA_POOL0);
 		devtools::ProfileLap parts(world.profile); // its three parts (an instrument)

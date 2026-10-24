@@ -1378,7 +1378,7 @@ void Session::step_map_overlay_death_clear(const FrameOutcome &out) {
 	// closes for a body with the dead bit, once per drawn frame that draws its world (a
 	// frame that skips it, and the status page, run no world block) [orig:
 	// Render_ProcessMainSceneFrame - the world-skip jump @0x5CA620..0x5CA640, the HUD pass's
-	// return to loc_5CAB95 @0x5CAD09, the sun veil @0x5CAC4B, `cmp g_MapOverlayMode, 0`
+	// return to 0x5CAB95 @0x5CAD09, the sun veil @0x5CAC4B, `cmp g_MapOverlayMode, 0`
 	// @0x5CAC50, `test byte ptr [ecx+24h], 2` @0x5CAC63, the clear @0x5CAC6D].
 	if (out.world_skipped || role_ == nullptr || role_->kernel() == nullptr) return;
 	hud::HudMapControl &map = role_->kernel()->local.hud_map_control;

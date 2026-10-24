@@ -12,7 +12,9 @@ For each marker the tool asks the IDB what lives at the address and classifies t
   ok            the IDB name at the address is the cited name
   inner-site    the address is inside the cited function (a site cite: `Func @0xSITE`)
   call-site     an instruction at/after the address calls or references the cited symbol
-                (the `Callee @0xCALLSITE` form)
+                (the `Callee @0xCALLSITE` form), an import through its table entry
+                (`GetTickCount @0x...` over `call ds:__imp_GetTickCount`, or over a
+                `call esi` IDA tracked to that entry) included
   site-only     the marker names no symbol (`@0xADDR` alone, or a prose word before the @)
                 and the address is a defined location -- accepted
   other-image   the marker names another image (scripts/lint/cite_images.py: every image
@@ -44,6 +46,10 @@ For each marker the tool asks the IDB what lives at the address and classifies t
                        kept the basename, or a push-down moved the port to its engine home)
   reimpl-orphan        the named path exists but no code file cites the function any more
                        (the port was deleted, or its marker dropped) -- adjudicate by hand
+
+A link to a godot/ file is neither: the Godot side carries no marker (godot_orig_cites only
+shrinks), so such a link stands while that file still defines every code symbol the line names
+for its `@` list (godot_leg_defined).
 
 Names compare in their MSVC-demangled and undecorated forms too: the statically linked D3DX
 `?LoadDDS@CImage@D3DXTex@@AAEJPBXK@Z` answers to `D3DXTex::CImage::LoadDDS`, the import
@@ -253,6 +259,11 @@ def name_forms(name, _ms=_re.compile(r"^\?(\?[01]|\?_7)?([A-Za-z_]\w*)@((?:[A-Za
         forms.add(m.group(1))
     return forms
 globals()["name_forms"] = name_forms
+def import_forms(name):
+    """The forms of the symbol an import-table entry (`__imp_GetTickCount`,
+    `__imp__D3DXCreateTexture@36`) holds: an indirect `call ds:__imp_X` calls X."""
+    return name_forms(name[6:]) if (name or "").startswith("__imp_") else set()
+globals()["import_forms"] = import_forms
 '''
 exec(NAME_FORMS_SRC)
 
@@ -381,6 +392,11 @@ def refs_symbol(ea, tea, tok, f):
                 hit = tn.endswith("_" + tok) or tok in name_forms(tn)
             if hit and (best is None or abs(x - ea) < abs(best - ea)):
                 best = x
+        # an import called through its table entry: `call ds:__imp_GetTickCount`, or
+        # `call esi` once IDA has tracked the entry into the register (its xref says so)
+        if tok and (best is None or abs(x - ea) < abs(best - ea)) and any(
+                tok in import_forms(idc.get_name(r.to) or "") for r in idautils.XrefsFrom(x, 0)):
+            best = x
     return ("0x%%x" %% best) if best is not None else None
 for key in KEYS:
     a, tok = key
@@ -545,6 +561,74 @@ def stem_siblings(path):
 # unmarked (`godot/src/... (device leg)`)
 ORPHAN_OK = re.compile(r"unported|not ported|retired|deferr|no cite|no marker|device leg", re.I)
 
+# The Godot side carries no marker (ADR 0042 d7: godot_orig_cites only shrinks), so a link to a
+# godot/ file is checked against the symbols the line names for it instead.
+GODOT_LEG_ROOTS = ("godot/src/", "godot/game/", "godot/editor/")
+LEG_SYMBOL = re.compile(r"(?<![\w.:/-])[A-Za-z_]\w*(?:(?:::|\.)~?[A-Za-z_]\w*)+")
+LEG_LIST_SEP = re.compile(r"\s*(?:,|\+|/|\band\b)\s*")
+NOT_A_SYMBOL_LEAF = {"bin", "key", "mnu", "def", "cfg", "txt", "nfo", "coo", "htm", "html", "joi",
+                     "exe", "dll", "mis", "pff", "ini", "log", "sph", "wav", "fnt", "tga", "dds"}
+
+
+def leg_symbols(line, tok):
+    """The paths of the `@ a, b` list holding tok and the code symbols the line's prose names
+    for that list (the text from the previous path to its `@`): qualified names only
+    (`godot::LanSession::stop_enumerator`, `MpMenuCompanion._on_lan_join`), never a file name
+    (`keylist.key`), an all-caps word pair (`CC.BIN`) or an IDB name."""
+    i = line.find(tok)
+    at = line.rfind("@ ", 0, i) if i >= 0 else -1
+    if at < 0:
+        return [], []
+    paths, j = [], at + 2
+    while True:
+        m = REIMPL_TOKEN.match(line, j)
+        if not m:
+            break
+        paths.append(m.group(1))
+        sep = LEG_LIST_SEP.match(line, m.end())
+        if not sep or not sep.group(0).strip():
+            break
+        j = sep.end()
+    head = line.find("reimpl:")
+    prev = max([m.end() for m in REIMPL_TOKEN.finditer(line, 0, at)] + [head + 7 if head >= 0 else 0])
+    syms = []
+    for s in LEG_SYMBOL.findall(line[prev:at]):
+        parts = re.split(r"::|\.", s.replace("~", ""))
+        if (any(len(p) < 2 for p in parts) or all(p.isupper() for p in parts)
+                or parts[-1].lower() in NOT_A_SYMBOL_LEAF):
+            continue
+        syms.append(s)
+    return (paths if tok in paths else []), syms
+
+
+def leg_defines(sym, path, text):
+    """`text` (the file and its .h/.cpp sibling) defines sym: its leaf as a word, and its owner
+    (the component before the leaf, when it is a class: a namespace is lower case) as a word or
+    as the file's own CamelCase stem (`mp_menu_companion.gd` is MpMenuCompanion)."""
+    parts = re.split(r"::|\.", sym.replace("~", ""))
+    if not re.search(r"\b%s\b" % re.escape(parts[-1]), text):
+        return False
+    if len(parts) < 2 or parts[-2][0].islower():
+        return True
+    stem = os.path.splitext(os.path.basename(path))[0]
+    return (parts[-2] == "".join(w.capitalize() for w in stem.split("_"))
+            or bool(re.search(r"\b%s\b" % re.escape(parts[-2]), text)))
+
+
+def godot_leg_defined(line, tok, read):
+    """A link to a godot/ file stands when the line names symbols for its `@` list, every one is
+    defined in a file of that list, and tok's own file defines at least one of them: a device or
+    GDScript leg that is still where the link says. `read(path)` is the file's text."""
+    if not tok.startswith(GODOT_LEG_ROOTS):
+        return False
+    paths, syms = leg_symbols(line, tok)
+    if not paths or not syms:
+        return False
+    texts = {p: read(p) for p in paths}
+    if not all(any(leg_defines(s, p, t) for p, t in texts.items()) for s in syms):
+        return False
+    return any(leg_defines(s, tok, texts[tok]) for s in syms)
+
 
 def collapse_homes(homes):
     """Citing files grouped by directory + stem (`x.h` and `x.cpp` are one home); each group
@@ -612,9 +696,8 @@ def classify_reimpl(rows, pairs, all_tracked):
     addrs = [a for a, _ in cites]
     text_cache = {}
 
-    def names_function(path, fname):
-        """The file still names the function in prose (a marker without this address, a
-        `[merged-into:]`, a short form): keep the link, a human decides."""
+    def read(path):
+        """The file's text with its .h/.cpp sibling's."""
         if path not in text_cache:
             text_cache[path] = ""
             for p in (path,) + tuple(stem_siblings(path)):
@@ -622,7 +705,12 @@ def classify_reimpl(rows, pairs, all_tracked):
                     text_cache[path] += open(os.path.join(REPO, p), encoding="utf-8", errors="replace").read()
                 except OSError:
                     pass
-        return bool(fname) and fname in text_cache[path]
+        return text_cache[path]
+
+    def names_function(path, fname):
+        """The file still names the function in prose (a marker without this address, a
+        `[merged-into:]`, a short form): keep the link, a human decides."""
+        return bool(fname) and fname in read(path)
 
     n, out, edits = 0, [], []
     for ea, start, end, name, slot, text in rows:
@@ -640,6 +728,8 @@ def classify_reimpl(rows, pairs, all_tracked):
                                       # retired port, a device-side leg the ratchets keep unmarked)
                 if cands and any(names_function(c, name) for c in cands):
                     continue          # the file names the function without this address
+                if cands and godot_leg_defined(line, tok, read):
+                    continue          # a marker-free Godot-side leg, still where the link says
                 target = pick_home(homes, tok, bool(cands), by_base)
                 cls = "reimpl-stale" if not cands else ("reimpl-moved" if homes else "reimpl-orphan")
                 out.append((cls, ea, name, tok, target or "", "slot%d" % slot, line.strip()[:160],

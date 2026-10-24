@@ -627,7 +627,7 @@ private:
 			if (f.params_pending != 0) {
 				// A refused token takes the scratch dword and feeds the next
 				// slot. [orig: @0x4F3A71..0x4F3AFD, the scratch @0x4F3AE2, the
-				// jump back to loc_4F3990 @0x4F3AED]
+				// jump back to 0x4F3990 @0x4F3AED]
 				--f.params_pending;
 				int out_type = 0;
 				const std::optional<Operand> param =

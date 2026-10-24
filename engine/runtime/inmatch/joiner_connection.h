@@ -387,9 +387,9 @@ public:
 	// left. Once the session is lost the packets still queued write their NET GOT and nothing
 	// else (drain_client_queue_after_teardown), and the call returns false.
 	// [orig: NapiNPProtocol_PumpRecvQueues @0x6266A0 - the queue_mask & 2 leg @0x6267F2..0x6268D5
-	//  (NapiLog_OnRecv @0x6268AA ahead of the handler's queued call @0x6268D0), the connection
-	//  walk @0x626910..0x6269E8 (the head test @0x626960, CNapiNPConnection_ParseMessages
-	//  @0x62696B)]
+	//  (NapiLog_OnRecv (proto+0x26C) @0x6268AA ahead of the handler's queued call @0x6268D0),
+	//  the connection walk @0x626910..0x6269E8 (the head test @0x626960,
+	//  CNapiNPConnection_ParseMessages @0x62696B)]
 	bool pump_client_queue(PollResult &out);
 	// After a teardown in the client pump: every packet still queued is read with its NET GOT
 	// line; each queued leg then finds the connection down and returns at its active test.

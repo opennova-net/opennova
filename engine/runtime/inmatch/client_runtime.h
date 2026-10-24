@@ -576,8 +576,8 @@ public:
 	// over its loopback to its own server, which fans it like any peer's.
 	// `text` is cut to 59 characters in place by the flood check; `frame` is
 	// the per-main-frame counter.
-	// [orig: Chat_SendLocalMessage @0x49A840 (13), Chat_SendTeamMessage @0x49A900 (IDB
-	//  misnomer; 1), Chat_SendGlobalMessage @0x49A6B0 (IDB misnomer; 2),
+	// [orig: Chat_SendLocalMessage @0x49A840 (13), Chat_SendGlobalMessage @0x49A900 (1),
+	//  Chat_SendTeamMessage @0x49A6B0 (2),
 	//  Chat_SendSquadMessage @0x49AA50 (12), Chat_SendAdminMessage @0x49A780
 	//  (11), Chat_SendAllMessage @0x49AC70 (4), Chat_SendBlueTeamMessage @0x49ABA0 (5) ->
 	//  CNapiNetwork_QueueReliableMessage(0xD, 1, 310)]

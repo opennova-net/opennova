@@ -912,7 +912,7 @@ hud::ChatSendResult ClientRuntime::queue_chat_message(uint8_t channel, std::stri
 		// The listen host's client half queues it on its own local connection
 		// like a joiner's: its client frame sends it and the next frame's
 		// server tick dispatches it, the 0x1D's path (queue_stance_change).
-		// [orig: Chat_SendTeamMessage `cmp is_mp_session_peer` @0x49a980 ->
+		// [orig: Chat_SendGlobalMessage `cmp is_mp_session_peer` @0x49a980 ->
 		//  CNapiNetwork_QueueReliableMessage(0xD) @0x49a9b4]
 		send_queue_.push_back(std::move(chat));
 		return Result::Sent;
@@ -1271,7 +1271,7 @@ bool ClientRuntime::client_receive_pass(std::vector<std::vector<uint8_t>> &outbo
 			//  burst @0x6254B4..0x6254D3, the leave callback @0x6254D5..0x6254E7,
 			//  NapiNPDSPQueue_ClearPendingList @0x62556B,
 			//  NapiNPDSPQueue_ClearOutgoing @0x625574; NapiNPProtocol_PumpRecvQueues
-			//  @0x6266A0 - NapiLog_OnRecv @0x6268AA]
+			//  @0x6266A0 - NapiLog_OnRecv (proto+0x26C) @0x6268AA]
 			recv_fifo_.clear();
 			framed_send_queue_.clear();
 			send_queue_.clear();

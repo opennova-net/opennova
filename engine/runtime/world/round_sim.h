@@ -332,8 +332,8 @@ struct LiveRound {
     ThrowClass motor{};
     ThrowClass think{};
     // The item's physics row, whose update the +452 word holds (def+0x158), the null row's
-    // nullsub_2 included [orig: Entity_InitFromItemDef @0x49E550 (@0x49E586..0x49E58C);
-    // g_EntityClassPhysicsTable @0x82ABC8].
+    // Entity_UpdateNullClass included [orig: Entity_InitFromItemDef @0x49E550
+    // (@0x49E586..0x49E58C); g_EntityClassPhysicsTable @0x82ABC8].
     PhysicsClass move_row = PhysicsClass::Null;
     // Landed-on / stuck-to entity [orig: +40 groundEntity; the motors follow
     // it through the parent's own (live − savedLivePose) delta channel —

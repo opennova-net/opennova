@@ -2029,7 +2029,7 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 	// The pieces' second texture stage: with the boxtile camo loaded every
 	// border piece carries it at the camo's own dims (the screen-anchored UV1
 	// divisors) and the fill carries none; without the camo's dims nothing
-	// does. [orig: CGfxTexture_Create(BoxTexA, BoxTexB, 0x651, 2) @0x56af3c,
+	// does. [orig: GfxShader_CreateTwoTexture(BoxTexA, BoxTexB, 0x651, 2) @0x56af3c,
 	//  applied for the pieces @0x56b902; the style floats @0x56b357/@0x56b361]
 	for (const HudQuad &q : wide)
 		CHECK(q.texture2 == opennova::hud::kHudTexNone,

@@ -402,7 +402,8 @@ CreateSessionResult HostRole::create_session(const HostBringup &bringup) {
 	// slot clock to phase 0 and its PLAYER report under what this host's setup left (its game type,
 	// the CC.BIN its tick init read again), on a NovaWorld host (D-NET-NEW-L9-22)
 	// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - the removal @0x51B5F3, CServerTick_SetState(0)
-	//  @0x51B690, Server_SendPlayerMetricsToGate @0x51B696].
+	//  @0x51B690, Server_SendPlayerMetricsToGate @0x51B696; the tick init Server_InitServerTicks
+	//  @0x5018C0].
 	const std::string reset_gcc = vfs_country_code(host_cfg.game_root);
 	stop_unstopped_server(client_process_->unstopped_server, host_cfg.logs, socket_,
 			host_cfg.local_address_known ? &host_cfg.local_address : nullptr,

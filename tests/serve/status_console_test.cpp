@@ -19,7 +19,7 @@
 //     samples, and no disconnect marker (the log closes ahead of the slot
 //     disconnects, as retail's teardown closes it).
 // [orig: Server_DrawStatusScreen @0x50a2d0; HUD_DrawServerConsoleLines
-//  @0x5ba0a0; Chat_SendTeamMessage @0x49a900; NapiNPServer_HandleChatMessage
+//  @0x5ba0a0; Chat_SendGlobalMessage @0x49a900; NapiNPServer_HandleChatMessage
 //  @0x513760; CNapiNPConnection_LogHostStarted @0x61e6a0]
 #include "server.h"
 #include <base/gameprofile/gameprofile.h>

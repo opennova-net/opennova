@@ -1066,6 +1066,7 @@ bool Server_StageHostPunt(
 	return stage_host_punt(connection, mismatch_type);
 }
 
+// [orig: Server_PlayerPuntCRCMisMatch @0x50F380]
 void Server_CountCRCMismatchPunt(NapiNPServerCtx &ctx, const NapiNPConnection &connection,
 		uint32_t mismatch_type) {
 	if (ctx.punt_crc_counters == nullptr) return;

@@ -230,7 +230,8 @@ void JoinerConnection::on_server_goodbye(const std::vector<uint8_t> &body, PollR
 	// NET SENDING lines and the leave's NET DISCONNECTING FROM SERVER follow it at once, before
 	// the frame's later packets [orig: Nwu_HandleDisconnect @0x623CE0 - the key test @0x623E74
 	// ahead of the queue @0x624149; NapiNPProtocol_PumpRecvQueues @0x6266A0 - NapiLog_OnRecv
-	// @0x6268AA; CNapiNPConnection_RequestDisconnect @0x61E0F0 - SetState(6) @0x61E0FA].)
+	// (proto+0x26C) @0x6268AA; CNapiNPConnection_RequestDisconnect @0x61E0F0 - SetState(6)
+	// @0x61E0FA].)
 	DisconnectEvent event;
 	(void)parse_disconnect_event(body.data() + 4, body.size() - 4, event);
 	// Teardown owns this receive result, exactly like the H:0x03 description punt.

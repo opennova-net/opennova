@@ -24,7 +24,7 @@ namespace opennova {
 //      number as the session's "Lan" var. GS is copied by the parser but no
 //      retail code ever reads the buffer (a single xref: the parse call).
 //      [orig: URL_ParseConnectionQueryString @0x54DFB0 - the LN atol (the call
-//       @0x54E336, its store @0x54e33e), the GS copy into g_GsBuf @0x54e38a; the
+//       @0x54E336, its store @0x54e33e), the GS copy @0x54e38a into g_GsBuf; the
 //       consumers CNapiGameSession_InitTransportConnection @0x4C9E10 - `if (g_LobbyNum)`
 //       @0x4C9E65..0x4c9e6c selects byte_C8FE7C/byte_C8FEBC over g_NkBuf / g_NkExtraBuf,
 //       and CNapiGameSession_ConnectOrHost @0x4D4F10 - g_LobbyNum @0x4d5418, "Lan"
