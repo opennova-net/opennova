@@ -3799,8 +3799,8 @@ void test_sub_quantum_step() {
 // The final run's 03tr-dm OO (LX-s37): the far rows' age sweep sent the Downed Pilot 0x0039
 // (I:2075) once a capture on every cell, 17.7..19.1 s after the game start, and OO's window
 // opened 19.0 s after it where the other four opened at 13.3..15.0 s, so its one record fell
-// 1.35 s before the window. A type sent once a handle through each window end on both runs
-// compares on presence (entity.capture_singleton).
+// 1.35 s before the window. A type sent once a handle in each whole capture compares on
+// presence (entity.capture_singleton).
 void test_entity_capture_singleton() {
 	// The camp AI's dense I records on every run, and the pilot's records at `at` (one
 	// record at each time, from the first 0x0A frame at or after it).
@@ -3870,6 +3870,15 @@ void test_entity_capture_singleton() {
 	expect_row(judge_case(run(1, { 9 * kSec }), run(2, { 8 * kSec }),
 					   run(3, { 3 * kSec, 4 * kSec }), "OO"),
 			'S', "entity_types", "", "fail", "FRAME_ENTITY_TYPES_MISMATCH");
+	// The count runs over the whole capture, past the window's end (20 s; the capture runs
+	// to 22 s): one record before the window and a second in the tail is no singleton, so
+	// it compares and the window lacks the type.
+	expect_row(judge_case(run(1, { 9 * kSec }), run(2, { 8 * kSec }),
+					   run(3, { 4 * kSec, 21 * kSec }), "OO"),
+			'S', "entity_types", "", "fail", "FRAME_ENTITY_TYPES_MISMATCH");
+	// A lone record in the tail is the capture's one send: present.
+	expect_row(judge_case(run(1, { 9 * kSec }), run(2, { 8 * kSec }), run(3, { 21 * kSec }), "OO"),
+			'S', "entity_types", "", "pass");
 }
 
 void test_steady_rules() {
