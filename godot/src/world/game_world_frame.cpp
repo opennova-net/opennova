@@ -1004,6 +1004,21 @@ void GameWorld::render_foliage_frame() {
 		const float water_height = water_ != nullptr ? water_->get_water_height() : 0.0f;
 		dispatcher_->set_water_height(water_height);
 		const Transform3D camera_xform = render_camera_xform();
+		// The scene's water mirror prerenders first: its MODEL masks around the
+		// persons its own collect listed, over the view its subscene draws from
+		// (FoliageDispatcher::render_mirror_frame).
+		Camera3D *mirror_camera = water_ != nullptr && water_->is_water_pass_active()
+				? water_->get_reflection_camera()
+				: nullptr;
+		Ref<Simulation> mirror_sim = runtime != nullptr ? runtime->get_sim() : Ref<Simulation>();
+		if (mirror_camera != nullptr && mirror_sim.is_valid()) {
+			dispatcher_->render_mirror_frame(Simulation::MIRROR_MAIN,
+					mirror_camera->get_global_transform(),
+					mirror_sim->mirror_occlusion(Simulation::MIRROR_MAIN).foliage_mask_anchors,
+					get_frame_clock_ms());
+		} else {
+			dispatcher_->release_mirror_frame(Simulation::MIRROR_MAIN);
+		}
 		dispatcher_->render_frame(camera_xform, get_frame_clock_ms());
 		ObjectModel::refresh_foliage_mask_frame(
 				static_cast<float>(camera_xform.origin.y), water_height);
@@ -1633,6 +1648,22 @@ void GameWorld::render_material_frame() {
 						object_detail_);
 			}
 			if (dispatcher_ != nullptr) {
+				// The Inset's water mirror prerenders ahead of the Inset's scene
+				// core: its MODEL masks first.
+				MissionRoot *inset_runtime = get_runtime();
+				Ref<Simulation> inset_sim =
+						inset_runtime != nullptr ? inset_runtime->get_sim() : Ref<Simulation>();
+				Camera3D *inset_mirror = frames[3].valid && water_ != nullptr
+						? water_->get_inset_reflection_camera()
+						: nullptr;
+				if (inset_mirror != nullptr && inset_sim.is_valid()) {
+					dispatcher_->render_mirror_frame(Simulation::MIRROR_INSET,
+							inset_mirror->get_global_transform(),
+							inset_sim->mirror_occlusion(Simulation::MIRROR_INSET).foliage_mask_anchors,
+							get_frame_clock_ms());
+				} else {
+					dispatcher_->release_mirror_frame(Simulation::MIRROR_INSET);
+				}
 				dispatcher_->render_inset_frame(inset,
 						occlusion_->get_inset_foliage_mask_anchors(), get_frame_clock_ms());
 			}
@@ -1645,6 +1676,7 @@ void GameWorld::render_material_frame() {
 		}
 		if (dispatcher_ != nullptr) {
 			dispatcher_->release_inset_frame();
+			dispatcher_->release_mirror_frame(Simulation::MIRROR_INSET);
 		}
 	}
 	if (frames[0].valid || frame_count == 2) {

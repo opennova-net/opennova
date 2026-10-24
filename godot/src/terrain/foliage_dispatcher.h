@@ -217,6 +217,21 @@ public:
   void release_inset_frame();
   bool is_inset_frame_live() const { return inset_live_; }
 
+  // A water mirror's MODEL masks (view 0 the main scene's mirror, 1 the weapon
+  // Inset's): its reflected subscene's BySide waves update and draw the MODEL
+  // tiles around the persons its own collect listed, from the view it draws
+  // from, with no detail blanket (the reflection context collects no detail
+  // foliage); engine inmatch/occlusion_collect.h MirrorViewLists carries the
+  // witness. Compiled on the shared placement caches ahead of the scene's own
+  // frame (the mirror prerenders first), drawn on that mirror's own bit.
+  void render_mirror_frame(int p_view, const Transform3D &p_eye,
+                           const PackedVector3Array &p_anchors, int64_t p_time_ms);
+  // The mirror stopped rendering: hide and unbind its draws.
+  void release_mirror_frame(int p_view);
+  bool is_mirror_frame_live(int p_view) const {
+    return p_view >= 0 && p_view <= 1 && mirror_live_[p_view];
+  }
+
   void reset();
   // The foliage cells whose instances read a ground or map texel `p_rect` changed (an editor's sculpt or paint,
   // ADR 0046 S25; on the Godot plane, x and z, whole units) dropped and grown again when next visible
@@ -438,6 +453,9 @@ private:
   };
   DrawSet main_set_;
   DrawSet inset_set_;
+  // The water mirrors' MODEL masks: [0] on MIRROR_VIEW, [1] on INSET_MIRROR_VIEW.
+  DrawSet mirror_set_[2];
+  bool mirror_live_[2] = {false, false};
   // An Inset frame compiled since the Inset opened (release_inset_frame).
   bool inset_live_ = false;
   // The material inputs last written (texture RIDs): _update_materials
