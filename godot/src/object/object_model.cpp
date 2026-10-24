@@ -2037,6 +2037,11 @@ void ObjectModel::_bind_methods() {
 					"inset_camera", "inset_width", "object_detail"),
 			&ObjectModel::update_authored_lods_for_views,
 			DEFVAL(opennova::renderer::kObjectLodDetailLevelMax));
+	ClassDB::bind_static_method("ObjectModel",
+			D_METHOD("update_authored_lods_for_mirror_view", "main_camera", "main_width",
+					"mirror_eye", "object_detail"),
+			&ObjectModel::update_authored_lods_for_mirror_view,
+			DEFVAL(opennova::renderer::kObjectLodDetailLevelMax));
 	ClassDB::bind_static_method("ObjectModel", D_METHOD("sync_view_twins"),
 			&ObjectModel::sync_view_twins);
 	ClassDB::bind_static_method("ObjectModel", D_METHOD("take_build_profile"),
@@ -2191,6 +2196,8 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_attachment_pixel_cull);
 	ClassDB::bind_method(D_METHOD("is_camera_pixel_culled"),
 			&ObjectModel::is_camera_pixel_culled);
+	ClassDB::bind_method(D_METHOD("is_mirror_pixel_culled", "view"),
+			&ObjectModel::is_mirror_pixel_culled);
 	ClassDB::bind_method(D_METHOD("get_authored_lod_projection_owner"),
 			&ObjectModel::get_authored_lod_projection_owner);
     ClassDB::bind_method(D_METHOD("set_geometry_visible", "visible"), &ObjectModel::set_geometry_visible);

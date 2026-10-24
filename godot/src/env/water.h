@@ -219,6 +219,11 @@ public:
 	// The weapon Inset pass's own mirror and strip (advance_inset_frame).
 	SubViewport *get_inset_reflection_viewport() const { return inset_mirror_.viewport; }
 	Camera3D *get_inset_reflection_camera() const { return inset_mirror_.camera; }
+	// The pose a water mirror draws its reflected subscene from for the view
+	// pose it mirrors (engine environment/water_mirror.h build_water_mirror_view):
+	// the pose _install_mirror_view gives that mirror's camera, read without
+	// placing it (the Inset's mirror is placed after the frame's level walk).
+	Transform3D mirror_view_transform(const Transform3D &p_source) const;
 	MeshInstance3D *get_inset_mesh_instance() const { return inset_mesh_instance_; }
 	Ref<ShaderMaterial> get_inset_water_material() const { return inset_material_; }
 

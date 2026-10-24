@@ -194,6 +194,21 @@ inline int attachment_lod_index(int parent_lod_index, int lod_count) {
 // [orig: BoneCallback_org0_World @ 0x4e3cf6..0x4e3d4b — the state test
 //  @ 0x4e3cfe, Viewport_TransformAndClipPoint @ 0x4e3d39 with the radius
 //  @ 0x4e3d2b, `cmp dword_A784F0, 20000h` @ 0x4e3d41]
+// The gate runs in every subscene that draws the person, through that
+// subscene's own projection: the callback projects through
+// g_ViewportViewMatrixFixed and g_MainViewport, which each
+// Viewport_BuildProjectionMatrix rebuilds from its block, so in a water
+// mirror's reflected subscene they hold the second projection over the
+// mirrored block (the reflected eye, the scene's optics offsets included, over
+// the mirror target's square rect), not the mirror collect's raw eye. The
+// mirror's per-entity state is the clip bit 1, which the test does not skip.
+// [orig: BoneCallback_org0_World @0x4E3940 - the gate @0x4E3D07..0x4E3D4B, the
+//  projection @0x4E3D21..0x4E3D39;
+//  Viewport_BuildProjectionMatrix @0x410FB0 - g_ViewportViewMatrixFixed (the
+//  viewport's +0xBC) @0x4111F0..0x411298; Render_MainScene @0x5C1240 - the
+//  second projection @0x5C170B ahead of Water_RenderReflectedWorldScene
+//  @0x5C171F; Terrain_RenderSectorEntities @0x5C7B60 - the clip bit @0x5C7C38;
+//  RenderSlot_RenderEntityAndChildren @0x5D7690 - bits 4 / 2 @0x5D78D9 / @0x5D78DE]
 inline constexpr int32_t kHeldWeaponMinProjectedRadiusQ16 = 0x20000;
 inline bool held_weapon_projection_culled(int32_t projected_radius_q16) {
   return projected_radius_q16 < kHeldWeaponMinProjectedRadiusQ16;

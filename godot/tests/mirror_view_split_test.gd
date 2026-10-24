@@ -100,3 +100,37 @@ func test_a_node_the_mirror_does_not_collect_leaves_it() -> void:
 	ObjectModel.update_authored_lods_for_views(main_camera, 640.0, null, 0.0)
 	assert_false(model.is_mirror_view_split(0))
 	assert_ne(_surface_layers(model) & WORLD_NO_MIRROR, 0)
+
+
+# Retail's held-weapon 2 px gate projects through the subscene's own
+# projection: in a water mirror the mirrored block's, the reflected eye over the
+# mirror target, not the mirror collect's eye (engine renderer/object_lod.h
+# held_weapon_projection_culled). A gun the main view draws and the mirror's
+# drawn view sees under 2 px leaves that mirror alone.
+func test_the_held_weapon_gate_runs_through_the_mirrors_drawn_view() -> void:
+	var weapon := ObjectModel.new()
+	add_child_autofree(weapon)
+	weapon.set_authored_lod_enabled(true)
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(MODEL_3DI)), OK)
+	weapon.set_object_data(data)
+	weapon.set_attachment_pixel_cull(true)
+	weapon.position = Vector3(0.0, 0.0, 55.0)
+	var main_camera := _view_camera(Vector2i(640, 480), 90.0)
+	ObjectModel.set_mirror_view_state(0, true, true)
+	var far_eye := Transform3D(Basis.IDENTITY, Vector3(0.0, 0.0, 200055.0))
+	ObjectModel.update_authored_lods_for_mirror_view(main_camera, 640.0, far_eye)
+	assert_false(weapon.is_camera_pixel_culled(), "the main view draws it")
+	assert_true(weapon.is_mirror_pixel_culled(0), "the mirror's drawn view sees it under 2 px")
+	assert_true(weapon.is_mirror_view_split(0))
+	assert_eq(weapon.get_mirror_view_twin_count(0), 0)
+	var layers := 0
+	for node in weapon.find_children("*", "MeshInstance3D", true, false):
+		layers |= (node as MeshInstance3D).layers
+	assert_eq(layers & (WORLD | WORLD_NO_MIRROR | MIRROR_VIEW), 0, "the gun leaves the mirror")
+	assert_ne(layers & SCENE_VIEW_NO_REFLECTION, 0, "and still draws for the scene views")
+	# The mirror's drawn view comes near: its gate draws the gun again.
+	ObjectModel.update_authored_lods_for_mirror_view(main_camera, 640.0,
+			main_camera.global_transform)
+	assert_false(weapon.is_mirror_pixel_culled(0))
+	assert_false(weapon.is_mirror_view_split(0))

@@ -1158,6 +1158,25 @@ void Water::_update_reflection_camera(Camera3D *p_cam, const Projection &p_proje
 			p_cam->get_h_offset(), Vector2i(source_size));
 }
 
+Transform3D Water::mirror_view_transform(const Transform3D &p_source) const {
+	const auto to_vec3 = [](const Vector3 &v) {
+		return opennova::env::Vec3{static_cast<float>(v.x),
+				static_cast<float>(v.y), static_cast<float>(v.z)};
+	};
+	opennova::env::MirrorSourceView source;
+	source.basis_x = to_vec3(p_source.basis.get_column(0));
+	source.basis_y = to_vec3(p_source.basis.get_column(1));
+	source.basis_z = to_vec3(p_source.basis.get_column(2));
+	source.origin = to_vec3(p_source.origin);
+	const opennova::env::WaterMirrorView view =
+			opennova::env::build_water_mirror_view(source, water_height_);
+	const auto to_v3 = [](const opennova::env::Vec3 &v) {
+		return Vector3(v.x, v.y, v.z);
+	};
+	return Transform3D(Basis(to_v3(view.basis_x), to_v3(view.basis_y), to_v3(view.basis_z)),
+			to_v3(view.origin));
+}
+
 uint32_t Water::_mirror_own_layer(const MirrorRig &p_rig) const {
 	return &p_rig == &inset_mirror_ ? uint32_t(visual_layers::INSET_MIRROR_VIEW)
 									: uint32_t(visual_layers::MIRROR_VIEW);

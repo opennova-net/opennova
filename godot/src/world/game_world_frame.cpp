@@ -1608,11 +1608,18 @@ void GameWorld::render_material_frame() {
 	// Views 2 and 3: each water mirror's reflected subscene, which selects its
 	// levels with its own collect's projection (ObjectLodFrame::mirror_collect),
 	// while that mirror renders.
+	// Each mirror's drawn view gates the held weapons there (the mirror gate
+	// frames): the reflected eye over the collect's projection
+	// (ObjectModel::update_authored_lod_views).
 	ObjectLodFrame frames[4];
+	ObjectLodFrame mirror_gates[2];
 	if (Camera3D *image = image_camera()) {
 		frames[0] = ObjectLodFrame::from_camera(image, surface_width(), object_detail_);
 		if (water_ != nullptr && water_->is_water_pass_active() && frames[0].valid) {
 			frames[2] = ObjectLodFrame::mirror_collect(main_mirror_collect_eye(),
+					frames[0].tan_half_horizontal, surface_width(), object_detail_);
+			mirror_gates[0] = ObjectLodFrame::mirror_collect(
+					water_->mirror_view_transform(image->get_global_transform()),
 					frames[0].tan_half_horizontal, surface_width(), object_detail_);
 		}
 	}
@@ -1661,6 +1668,9 @@ void GameWorld::render_material_frame() {
 					ObjectLodFrame::camera_tangents(inset, tan_h, tan_v)) {
 				frames[3] = ObjectLodFrame::mirror_collect(mirror_block, tan_h, surface_width(),
 						object_detail_);
+				mirror_gates[1] = ObjectLodFrame::mirror_collect(
+						water_->mirror_view_transform(mirror_block), tan_h, surface_width(),
+						object_detail_);
 			}
 			if (dispatcher_ != nullptr) {
 				// The Inset's water mirror prerenders ahead of the Inset's scene
@@ -1668,12 +1678,14 @@ void GameWorld::render_material_frame() {
 				MissionRoot *inset_runtime = get_runtime();
 				Ref<Simulation> inset_sim =
 						inset_runtime != nullptr ? inset_runtime->get_sim() : Ref<Simulation>();
+				// Over the view the Inset's mirror draws from this frame: its camera
+				// is placed later in the frame (Water::advance_inset_frame).
 				Camera3D *inset_mirror = frames[3].valid && water_ != nullptr
 						? water_->get_inset_reflection_camera()
 						: nullptr;
 				if (inset_mirror != nullptr && inset_sim.is_valid()) {
 					dispatcher_->render_mirror_frame(Simulation::MIRROR_INSET,
-							inset_mirror->get_global_transform(),
+							water_->mirror_view_transform(mirror_block),
 							inset_sim->mirror_occlusion(Simulation::MIRROR_INSET).foliage_mask_anchors,
 							get_frame_clock_ms());
 				} else {
@@ -1695,7 +1707,7 @@ void GameWorld::render_material_frame() {
 		}
 	}
 	if (frames[0].valid || frame_count == 2) {
-		ObjectModel::update_authored_lod_views(frames, 4);
+		ObjectModel::update_authored_lod_views(frames, 4, mirror_gates);
 		// The retained static instances select their RLOD per entity from the
 		// same views (the placer rewrites only the slots that crossed).
 		if (placer_.is_valid()) {

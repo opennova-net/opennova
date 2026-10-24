@@ -511,11 +511,13 @@ private:
 	// verdict of its own takes its owner's, as retail draws a part inside its
 	// owner's submit; one no mirror view marked follows its node.
 	struct MirrorState {
-		uint8_t own = 0; // kInsetOwnOcclusion / kInsetOwnSections / kInsetOwnLod
+		uint8_t own = 0; // kInsetOwnOcclusion / kInsetOwnSections / kInsetOwnLod / kInsetOwnPixel
 		bool occlusion_hidden = false;
 		int64_t section_mask = -1;
 		int lod = 0;
 		bool subpixel_hidden = false;
+		// The held weapon's 2 px gate through the mirror's drawn view.
+		bool pixel_culled = false;
 		bool split = false;
 	};
 	MirrorState mirror_[2];
@@ -525,8 +527,14 @@ private:
 	void mark_mirror_view(int p_view);
 	static void refresh_mirror_views();
 	// Whether the mirror camera of view `p_view` admits the node's own layer
-	// by its water side (WORLD always, WORLD_NO_MIRROR below the water).
+	// by its water side (WORLD always, WORLD_NO_MIRROR below the water): the
+	// node's presentation layer (mirror_admits_layer), unless the main view's
+	// pixel gate moved the node off every camera.
 	bool mirror_admits_base(int p_view) const;
+	bool mirror_admits_layer(int p_view) const;
+	// The held weapon's 2 px gate through mirror `p_view`'s drawn view
+	// (update_authored_lod_views), marking the model.
+	void set_mirror_pixel_culled(int p_view, bool p_culled);
 	// The mirror's draw verdict for the model (its own, else its owner's while
 	// the main view hides the owner, else the main view's by the water side).
 	bool mirror_view_draws(int p_view) const;
@@ -1098,10 +1106,23 @@ public:
 	// are the model's Inset state, drawn by a twin where they differ
 	// (object_model_views.cpp). A frame set without view 1 closes the Inset
 	// view and converges every split model.
-	static int update_authored_lod_views(const ObjectLodFrame *p_frames, int p_frame_count);
+	// `p_mirror_gate_frames` (two frames, or null) are the water mirrors' DRAWN
+	// views, the reflected eye over its collect's projection: the held
+	// weapon's 2 px gate runs in every subscene through that subscene's own
+	// projection, which in a mirror is the second one over the mirrored block
+	// (BoneCallback_org0_World's gate; engine renderer/object_lod.h
+	// held_weapon_projection_culled), not the collect's eye views 2 and 3 carry.
+	static int update_authored_lod_views(const ObjectLodFrame *p_frames, int p_frame_count,
+			const ObjectLodFrame *p_mirror_gate_frames = nullptr);
 	// The two-camera form (view 1 null = no Inset view), for tools and tests.
 	static int update_authored_lods_for_views(Camera3D *p_main, float p_main_width,
 			Camera3D *p_inset, float p_inset_width,
+			int p_object_detail = opennova::renderer::kObjectLodDetailLevelMax);
+	// The main view plus the main scene's water mirror, for tests: the mirror's
+	// collect over the main camera's eye (view 2) and its drawn view from
+	// `mirror_eye` (the gate frame), both over the mirror target's projection.
+	static int update_authored_lods_for_mirror_view(Camera3D *p_main, float p_main_width,
+			const Transform3D &p_mirror_eye,
 			int p_object_detail = opennova::renderer::kObjectLodDetailLevelMax);
 	// The frame driver's leg after the awake advance: every twin follows its
 	// model's final transform, part pose, instance uniforms and strip rung.
@@ -1214,6 +1235,11 @@ public:
 	// keeps its render-slot capture, which retail's slot pass draws untested.
 	void set_attachment_pixel_cull(bool p_enabled);
 	bool is_camera_pixel_culled() const { return camera_pixel_culled_; }
+	// Mirror `p_view`'s own gate verdict (false while it gave none).
+	bool is_mirror_pixel_culled(int p_view) const {
+		return p_view >= 0 && p_view <= 1 && (mirror_[p_view].own & kInsetOwnPixel) != 0 &&
+				mirror_[p_view].pixel_culled;
+	}
     void set_geometry_visible(bool p_visible);
     void set_rigid_parts(bool p_rigid);
 	ObjectModel *get_authored_lod_owner() const;

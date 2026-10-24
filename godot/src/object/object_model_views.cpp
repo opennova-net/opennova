@@ -104,13 +104,29 @@ int ObjectModel::update_authored_lods_for_views(Camera3D *p_main, float p_main_w
 	return applied;
 }
 
+int ObjectModel::update_authored_lods_for_mirror_view(Camera3D *p_main, float p_main_width,
+		const Transform3D &p_mirror_eye, int p_object_detail) {
+	ObjectLodFrame frames[kViewCount];
+	ObjectLodFrame gates[2];
+	frames[kMainView] = ObjectLodFrame::from_camera(p_main, p_main_width, p_object_detail);
+	if (frames[kMainView].valid) {
+		frames[kMirrorView] = ObjectLodFrame::mirror_collect(p_main->get_global_transform(),
+				frames[kMainView].tan_half_horizontal, p_main_width, p_object_detail);
+		gates[0] = ObjectLodFrame::mirror_collect(p_mirror_eye,
+				frames[kMainView].tan_half_horizontal, p_main_width, p_object_detail);
+	}
+	const int applied = update_authored_lod_views(frames, kViewCount, gates);
+	sync_view_twins();
+	return applied;
+}
+
 // [engine: renderer::select_object_lod, object_subpixel_culled and
 //  project_bound_sphere_radius_q16 own the witnessed rules — the sector-entity
 //  draw returns before the RLOD walk below 0.75 px (retail Render_SectorEntity
 //  @ 0x5c42d8..0x5c42de); this walk feeds them each registered model per
 //  view, on that view's own frame scale]
 int ObjectModel::update_authored_lod_views(const ObjectLodFrame *p_frames,
-		int p_frame_count) {
+		int p_frame_count, const ObjectLodFrame *p_mirror_gate_frames) {
 	const int view_count =
 			p_frames == nullptr ? 0 : std::clamp(p_frame_count, 0, kViewCount);
 	const bool inset = view_count > kInsetView && p_frames[kInsetView].valid;
@@ -134,20 +150,33 @@ int ObjectModel::update_authored_lod_views(const ObjectLodFrame *p_frames,
 	// at its attach point, the raw radius against 0x20000. The node leaves the
 	// main camera when the main view culls it; the Inset view keeps its own
 	// verdict. A sphere a view does not see is not drawn by that camera either
-	// way. [retail BoneCallback_org0_World @ 0x4e3d07..0x4e3d4b]
+	// way. Each water mirror gates through the view its subscene draws from
+	// (the gate frames), not its collect's eye (engine renderer/object_lod.h
+	// held_weapon_projection_culled carries the witness).
 	for (ObjectModel *model : pixel_cull_models_) {
 		bool seen[kViewCount] = {};
 		bool drawn[kViewCount] = {};
+		bool mirror_seen[2] = {};
+		bool mirror_drawn[2] = {};
 		if (model->is_inside_tree()) {
 			const Vector3 origin = model->get_global_transform().origin;
-			for (int v = 0; v < view_count; ++v) {
+			const int32_t radius = model->attachment_pixel_cull_radius_q16_;
+			for (int v = 0; v < view_count && v < kMirrorView; ++v) {
 				int32_t projected_q16 = 0;
-				if (!p_frames[v].valid || !p_frames[v].project_q16(origin,
-								model->attachment_pixel_cull_radius_q16_, projected_q16)) {
+				if (!p_frames[v].valid || !p_frames[v].project_q16(origin, radius, projected_q16)) {
 					continue;
 				}
 				seen[v] = true;
 				drawn[v] = !opennova::renderer::held_weapon_projection_culled(projected_q16);
+			}
+			for (int m = 0; m < 2 && p_mirror_gate_frames != nullptr; ++m) {
+				int32_t projected_q16 = 0;
+				if (!mirror_view_open_[m] || !p_mirror_gate_frames[m].valid ||
+						!p_mirror_gate_frames[m].project_q16(origin, radius, projected_q16)) {
+					continue;
+				}
+				mirror_seen[m] = true;
+				mirror_drawn[m] = !opennova::renderer::held_weapon_projection_culled(projected_q16);
 			}
 		}
 		model->set_camera_pixel_culled(seen[kMainView] && !drawn[kMainView]);
@@ -155,6 +184,13 @@ int ObjectModel::update_authored_lod_views(const ObjectLodFrame *p_frames,
 			model->inset_camera_pixel_culled_ = !drawn[kInsetView];
 			model->inset_own_ |= kInsetOwnPixel;
 			model->mark_inset_view();
+		}
+		// A mirror keeps its verdict for a sphere its view does not see, as the
+		// Inset view does.
+		for (int m = 0; m < 2; ++m) {
+			if (mirror_seen[m]) {
+				model->set_mirror_pixel_culled(m, !mirror_drawn[m]);
+			}
 		}
 	}
 	if (authored_lod_models_.is_empty()) {
@@ -533,9 +569,10 @@ bool ObjectModel::inset_view_draws() const {
 // WORLD_NO_MIRROR below the water (render/visual_layers.h), never a layer no
 // mirror mask carries.
 bool ObjectModel::mirror_admits_base(int p_view) const {
-	if (camera_pixel_culled_) {
-		return false;
-	}
+	return !camera_pixel_culled_ && mirror_admits_layer(p_view);
+}
+
+bool ObjectModel::mirror_admits_layer(int p_view) const {
 	switch (presentation_layer_) {
 		case PRESENTATION_LAYER_WORLD:
 			return mirror_reflected_ || mirror_view_below_[p_view];
@@ -570,8 +607,11 @@ bool ObjectModel::mirror_view_draws(int p_view) const {
 	const bool subpixel = (mirror_[p_view].own & kInsetOwnLod) != 0
 			? mirror_[p_view].subpixel_hidden
 			: subpixel_hidden_;
+	const bool pixel = (mirror_[p_view].own & kInsetOwnPixel) != 0
+			? mirror_[p_view].pixel_culled
+			: camera_pixel_culled_;
 	return ancestors && !external_hidden && present_visible_ && !hidden && !subpixel &&
-			!camera_pixel_culled_ && (own || mirror_admits_base(p_view));
+			!pixel && (own || mirror_admits_layer(p_view));
 }
 
 // The model and its model descendants (its parts draw inside its submit).
@@ -658,6 +698,16 @@ void ObjectModel::set_mirror_view_subpixel(int p_view, int p_lod_index, bool p_s
 	mark_mirror_view(p_view);
 }
 
+void ObjectModel::set_mirror_pixel_culled(int p_view, bool p_culled) {
+	if ((mirror_[p_view].own & kInsetOwnPixel) != 0 && mirror_[p_view].pixel_culled == p_culled &&
+			mirror_view_models_.has(this)) {
+		return;
+	}
+	mirror_[p_view].pixel_culled = p_culled;
+	mirror_[p_view].own |= kInsetOwnPixel;
+	mark_mirror_view(p_view);
+}
+
 void ObjectModel::clear_mirror_occlusion(int p_view) {
 	if (p_view < 0 || p_view > 1) {
 		return;
@@ -667,6 +717,7 @@ void ObjectModel::clear_mirror_occlusion(int p_view) {
 	mirror_[p_view].section_mask = -1;
 	mirror_[p_view].lod = 0;
 	mirror_[p_view].subpixel_hidden = false;
+	mirror_[p_view].pixel_culled = false;
 	if (mirror_view_models_.has(this)) {
 		refresh_view_split();
 	}
@@ -696,6 +747,7 @@ void ObjectModel::set_mirror_view_state(int p_view, bool p_open, bool p_below_wa
 			model->mirror_[p_view].section_mask = -1;
 			model->mirror_[p_view].lod = 0;
 			model->mirror_[p_view].subpixel_hidden = false;
+			model->mirror_[p_view].pixel_culled = false;
 		}
 		model->refresh_view_split();
 		// The water side decides which mirror bits a split node keeps.
