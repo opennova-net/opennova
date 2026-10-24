@@ -384,8 +384,7 @@ int test_migration_mapping() {
 	fs::create_directories(staged);
 	for (const auto &entry : fs::directory_iterator(all)) {
 		const std::string name = entry.path().filename().string();
-		if (name.rfind("0011", 0) != 0 && name.rfind("0013", 0) != 0 &&
-				name.rfind("0023", 0) != 0)
+		if (name.rfind("0011", 0) != 0 && name.rfind("0013", 0) != 0)
 			fs::copy_file(entry.path(), staged / name);
 	}
 	db::run_migrations(db, staged);
@@ -410,7 +409,7 @@ int test_migration_mapping() {
 						 "AND column_name IN ('game', 'expansion');")
 					.empty());
 	TEST_EXPECT(find_data_set(db, jo)->updater_login == "JOTRus" && find_data_set(db, jox)->updater_login == "JOEus" &&
-			find_data_set(db, dfx2)->updater_login.empty());
+			find_data_set(db, dfx2)->updater_login == "DFX2");
 	return 0;
 }
 
