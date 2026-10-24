@@ -939,6 +939,17 @@ float fov_vertical_from_horizontal_deg(float fov_h_deg, float aspect);
 // (renderer/d3d9_raster.h): the surface's pixels, since retail stretches the
 // pass through its projection onto the backbuffer itself; a shell whose pixel
 // centres sit at i + 0.5 translates its clip image by it.
+// That backbuffer is the device's, made at the game's init (and again only by a
+// display-mode change); no mission start, teardown, map change or view without
+// a player makes or frees one, so a shell's target stands for it while its mode
+// is selected, held (drawing nothing) through every exit from live play, never
+// built again per mission.
+// [orig: Game_Run @0x4A7FB0 - Game_InitSubsystems @0x4A6CD0 (the call
+//  @0x4A7FD5); Game_InitSubsystems - Renderer_SetDisplayModeWithFallback
+//  @0x587370 (the call @0x4A722A); Renderer_SetDisplayModeWithFallback -
+//  CD3DDevice_InitializeDisplay @0x679890 (the calls @0x587426 / @0x587461 /
+//  @0x5874A7 / @0x5874E2); CD3DDevice_InitializeDisplay - CGfxDevice_CreateDevice
+//  @0x67E5D0 (the call @0x6798FB)]
 struct ViewProjection {
     float fov_h_deg = 0.0f; // the horizontal fov, mode-invariant
     float fov_v_deg = 0.0f; // 2 * atan(tan(fov_h/2) * selected)

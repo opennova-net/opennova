@@ -1155,6 +1155,45 @@ func test_aspect_mode_draws_through_a_target_of_the_selected_ratio() -> void:
 			"the native camera fov is the shared conversion at the surface aspect")
 
 
+# Retail stretches every frame onto the one backbuffer its device made at the game's
+# init (engine world/player_view.h ViewProjection carries the witness): the map
+# change's teardown holds the target, drawing nothing, and the next live frame draws
+# into the same one, its render buffers kept.
+func test_a_teardown_holds_the_stretched_target_for_the_next_live_frame() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	var sim := world.get_sim()
+	var size := camera.get_viewport().get_visible_rect().size
+	if size.x <= 0.0 or size.y <= 0.0:
+		pending("the headless viewport reports no size, so no target can be pinned")
+		return
+	var surface_ratio := size.y / size.x
+	var mode := 0 if absf(surface_ratio - 0.75) > 0.001 else 2
+	sim.set_local_player_aspect_mode(mode)
+	_frame(world, presenter, camera, 2)
+	var target: SubViewport = presenter.projection_viewport()
+	assert_not_null(target, "a mode off the surface ratio draws through a target")
+	if target == null:
+		return
+	presenter.teardown()
+	assert_null(presenter.projection_viewport(), "a held target is no reader's")
+	assert_true(is_instance_valid(target), "the teardown holds the target")
+	assert_eq(target.render_target_update_mode, SubViewport.UPDATE_DISABLED,
+			"the held target draws nothing")
+	assert_false(camera.get_viewport().disable_3d, "the surface draws its own 3D meanwhile")
+	presenter.setup(world, camera, null, _models[presenter])
+	presenter.set_input_override(_move_intent())
+	_frame(world, presenter, camera, 2)
+	assert_true(presenter.projection_viewport() == target,
+			"the next live frame draws into the same target")
+	assert_eq(target.render_target_update_mode, SubViewport.UPDATE_ALWAYS)
+	assert_true(camera.get_viewport().disable_3d,
+			"the surface's own 3D draw yields to the target again")
+
+
 func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_models() -> void:
 	# Retail draws the local body/held weapon separately from the near-Z first-person
 	# overlay [orig: Player_RenderFirstPersonViewModel @ 0x4ded60]. The hidden

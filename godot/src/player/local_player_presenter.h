@@ -363,6 +363,11 @@ private:
 	void feed_virtual_display(bool p_live);
 	void update_view_projection(const opennova::world::ViewProjection &p_projection,
 			bool p_nvg_raster);
+	// An exit from live play keeps the target (engine world/player_view.h
+	// ViewProjection: retail's backbuffer is made once): it stops drawing, the
+	// blit hides and the surface draws its own 3D again; the next live frame
+	// draws into it with its render buffers kept.
+	void hold_view_projection();
 	void release_view_projection();
 	void update_avatar(const Vector3 &p_pos);
 	GameplayCamera *fly_camera() const;
@@ -394,6 +399,10 @@ private:
 	ObjectID projection_camera_id_;
 	ObjectID projection_blit_layer_id_;
 	ObjectID projection_surface_id_;
+	// The same target while held (hold_view_projection): no reader sees it.
+	ObjectID held_projection_viewport_id_;
+	ObjectID held_projection_camera_id_;
+	ObjectID held_projection_blit_layer_id_;
 	float projection_scale_y_ = 1.0f;
 	bool nvg_raster_active_ = false;
 	// The NVG raster's frame frustum as served to TargetProjectionXrInterface

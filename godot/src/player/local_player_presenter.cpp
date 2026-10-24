@@ -609,9 +609,9 @@ void LocalPlayerPresenter::clear_models() {
 	release_avatar();
 	viewmodel_rig_->clear_viewmodel();
 	// Every exit from live play (no player, a spectator, teardown) also ends
-	// the vehicle's first-person display.
+	// the vehicle's first-person display, and holds the stretched target.
 	feed_virtual_display(false);
-	release_view_projection();
+	hold_view_projection();
 	Camera3D *cam = camera();
 	if (cam != nullptr && camera_saved_fov_ > 0.0f) {
 		cam->set_fov(camera_saved_fov_);
@@ -1019,6 +1019,26 @@ void LocalPlayerPresenter::update_view_projection(const opennova::world::ViewPro
 	}
 	SubViewport *target = projection_viewport();
 	Camera3D *through = projection_camera();
+	if (target == nullptr && through == nullptr) {
+		// The held target draws again (hold_view_projection).
+		SubViewport *held = Object::cast_to<SubViewport>(
+				ObjectDB::get_instance(held_projection_viewport_id_));
+		CanvasLayer *held_blit = Object::cast_to<CanvasLayer>(
+				ObjectDB::get_instance(held_projection_blit_layer_id_));
+		if (held != nullptr && held_blit != nullptr &&
+				ObjectDB::get_instance(held_projection_camera_id_) != nullptr) {
+			held->set_update_mode(SubViewport::UPDATE_ALWAYS);
+			held_blit->set_visible(true);
+			projection_viewport_id_ = held_projection_viewport_id_;
+			projection_camera_id_ = held_projection_camera_id_;
+			projection_blit_layer_id_ = held_projection_blit_layer_id_;
+			held_projection_viewport_id_ = ObjectID();
+			held_projection_camera_id_ = ObjectID();
+			held_projection_blit_layer_id_ = ObjectID();
+			target = projection_viewport();
+			through = projection_camera();
+		}
+	}
 	if (target == nullptr || through == nullptr) {
 		release_view_projection();
 		target = memnew(SubViewport);
@@ -1119,6 +1139,34 @@ void LocalPlayerPresenter::_notification(int p_what) {
 	}
 }
 
+void LocalPlayerPresenter::hold_view_projection() {
+	SubViewport *target = projection_viewport();
+	CanvasLayer *blit_layer =
+			Object::cast_to<CanvasLayer>(ObjectDB::get_instance(projection_blit_layer_id_));
+	if (target == nullptr || blit_layer == nullptr || projection_camera() == nullptr) {
+		if (target != nullptr || blit_layer != nullptr) {
+			release_view_projection();
+		}
+		return;
+	}
+	if (Viewport *surface = Object::cast_to<Viewport>(ObjectDB::get_instance(projection_surface_id_))) {
+		surface->set_disable_3d(false);
+	}
+	projection_surface_id_ = ObjectID();
+	TargetProjectionXrInterface::release(target);
+	target->set_update_mode(SubViewport::UPDATE_DISABLED);
+	blit_layer->set_visible(false);
+	held_projection_viewport_id_ = projection_viewport_id_;
+	held_projection_camera_id_ = projection_camera_id_;
+	held_projection_blit_layer_id_ = projection_blit_layer_id_;
+	projection_viewport_id_ = ObjectID();
+	projection_camera_id_ = ObjectID();
+	projection_blit_layer_id_ = ObjectID();
+	projection_scale_y_ = 1.0f;
+	nvg_raster_active_ = false;
+	nvg_raster_served_ = false;
+}
+
 void LocalPlayerPresenter::release_view_projection() {
 	if (Viewport *surface = Object::cast_to<Viewport>(ObjectDB::get_instance(projection_surface_id_))) {
 		surface->set_disable_3d(false);
@@ -1131,6 +1179,15 @@ void LocalPlayerPresenter::release_view_projection() {
 		TargetProjectionXrInterface::release(target);
 		target->queue_free();
 	}
+	if (Node *held_blit = Object::cast_to<Node>(ObjectDB::get_instance(held_projection_blit_layer_id_))) {
+		held_blit->queue_free();
+	}
+	if (Node *held = Object::cast_to<Node>(ObjectDB::get_instance(held_projection_viewport_id_))) {
+		held->queue_free();
+	}
+	held_projection_blit_layer_id_ = ObjectID();
+	held_projection_viewport_id_ = ObjectID();
+	held_projection_camera_id_ = ObjectID();
 	projection_blit_layer_id_ = ObjectID();
 	projection_viewport_id_ = ObjectID();
 	projection_camera_id_ = ObjectID();
