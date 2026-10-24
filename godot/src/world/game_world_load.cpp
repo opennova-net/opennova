@@ -1369,9 +1369,10 @@ void GameWorld::configure_foliage() {
 		return;
 	}
 	// The definitions' load creates the foliage's vertex shaders first: the MODEL masks' device
-	// shader here (engine terrain/terrain_load_legs.h loads_foliage_definitions carries the
-	// witness, D-NET-NEW-LF-13).
+	// shader and the tiers' shaders and materials here (engine terrain/terrain_load_legs.h
+	// loads_foliage_definitions carries the witness, D-NET-NEW-LF-13, D-NET-NEW-LF-19).
 	dispatcher_->create_mask_device();
+	dispatcher_->create_tier_shaders();
 	const Array diagnostics = scene_.configure_foliage(resource_root_, terrain_data_);
 	for (int64_t i = 0; i < diagnostics.size(); ++i) {
 		const Dictionary diagnostic = diagnostics[i];

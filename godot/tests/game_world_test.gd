@@ -2012,6 +2012,10 @@ func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 		if dispatcher != null:
 			assert_eq(dispatcher.get_terrain_data() != null, serve_and_play,
 					"the foliage configures on a listen host's start alone")
+			# The definitions' load creates the tiers' shaders and materials with the foliage's
+			# vertex shaders, inside the load: no frame has drawn foliage yet (D-NET-NEW-LF-19).
+			assert_eq(bool(dispatcher.get_backend_report().get("tier_shaders", false)), serve_and_play,
+					"the foliage tiers' shaders are made by a listen host's load alone")
 		# The terrain's LOD cache (its tiles' meshes) builds in the same terrain leg, which a
 		# dedicated host's start jumps over; its textures build on both arms (D-NET-NEW-L3-32;
 		# engine terrain/terrain_load_legs.h builds_lod_cache carries the witness).

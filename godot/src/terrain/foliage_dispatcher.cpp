@@ -1426,6 +1426,9 @@ Dictionary FoliageDispatcher::get_backend_report() const {
   Dictionary result;
   result["backend"] = "rendering_server_rid";
   result["scenario_bound"] = draw_scenario_.is_valid();
+  result["tier_shaders"] = detail_high_shader_.is_valid() &&
+                           detail_low_shader_.is_valid() &&
+                           silhouette_shader_.is_valid();
   result["detail_pool_size"] =
       static_cast<int64_t>(main_set_.detail_pool.size());
   result["model_pool_size"] =
