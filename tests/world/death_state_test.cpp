@@ -230,6 +230,66 @@ void test_death_edge_fallback_clears_the_attacker() {
 	}
 }
 
+// A dead player record's anim byte on the body it names: a body its death edge has not
+// flagged takes the byte as its deathAnimStateId over the bullet default the class callback of
+// a 0x13 ahead of it in the same receive staged, and the edge then plays the byte (the host's
+// own pick: a frag kill's death_grenade_forward, where the 0x13's word is 0); once flagged, a
+// record's byte is the requested state, the deferred one cleared.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - `test byte ptr [edi+24h], 2` @0x4C100B,
+//  +0x2C0 @0x4C10F5, +0x2BC @0x4C1019, +0x2B8 @0x4C1021; Entity_HandleDamageAndTriggerZones
+//  @0x407720 - Entity_ComputeAnimSlotIndex(e, 0, 0, 1) @0x407ADF, +0x2BC @0x407AFB;
+//  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the edge's +0x2C0 read @0x4B4C72..0x4B4CA3]
+void test_dead_record_byte_is_the_played_clip() {
+	auto world_owner = std::make_unique<World>();
+	World &world = *world_owner;
+	world.registry.configure_pool(0, 4);
+	world.tables.player.has_item_def = true;
+	world.tables.player.item_type = 3;
+	world.tables.player.item_hp = 100;
+	DeathClipSource clips;
+	world.ai.is_authority = true;
+	world.ai.root_motion = &clips;
+
+	PlayerSpawn spawn;
+	spawn.position = {5.0f, 0.0f, 0.0f};
+	spawn.net_id = 0xFFF1;
+	const EntityHandle handle = spawn_remote_player(world, spawn);
+	Entity *ent = world.registry.get(handle);
+	AiEntity *body = world.ai.for_handle(handle);
+	CHECK(ent != nullptr && body != nullptr);
+	if (ent == nullptr || body == nullptr) return;
+	body->net_is_remote_peer = true;
+
+	// The 0x13's leg: Health 0, its word 0, then the class callback's event 4, whose health tail
+	// stages and requests the bullet default.
+	ent->health = 0;
+	body->health = 0;
+	ent->death_anim_state = 0;
+	player_body_class_event(world, *ent, 4);
+	const int bullet = compute_death_anim_state(0, 0, death_cause::kBullet);
+	CHECK(ent->death_anim_state == bullet);
+	CHECK(body->inf.anim_state == bullet);
+
+	// The dead record after it: its byte replaces the staged clip.
+	player_body_dead_record(world, *ent, anim_state::kDeathGrenadeBase);
+	CHECK(ent->death_anim_state == anim_state::kDeathGrenadeBase);
+	CHECK(body->inf.anim_state == bullet); // the request waits for the edge
+
+	// The body's death edge plays the record's byte and consumes the park.
+	run_ticks(world, 1, 2);
+	CHECK((ent->flags & kEntityFlagDead) != 0);
+	CHECK(body->inf.anim_state == anim_state::kDeathGrenadeBase);
+	CHECK(ent->death_anim_state == 0);
+
+	// A dead record on the flagged body: its byte is the request, the deferred one cleared, the
+	// park untouched.
+	body->inf.anim_pending = anim_state::kIdle;
+	player_body_dead_record(world, *ent, anim_state::kDeathGrenadeBase + 2);
+	CHECK(body->inf.anim_state == anim_state::kDeathGrenadeBase + 2);
+	CHECK(body->inf.anim_pending == 0);
+	CHECK(ent->death_anim_state == 0);
+}
+
 } // namespace
 
 int main() {
@@ -238,6 +298,7 @@ int main() {
 	test_player_body_think_cadence();
 	test_npc_body_keeps_its_spawn_phase();
 	test_death_edge_fallback_clears_the_attacker();
+	test_dead_record_byte_is_the_played_clip();
 	if (failures == 0) std::printf("death_state_test: all checks passed\n");
 	return failures == 0 ? 0 : 1;
 }

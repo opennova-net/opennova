@@ -247,6 +247,19 @@ void player_body_health_tail(World &world, Entity &body) {
 }
 
 // See the infantry.h contract.
+void player_body_dead_record(World &world, Entity &body, int anim_state) {
+    // [orig: NetPacket_SerializePlayerState @0x4C09C0 - `test byte ptr [edi+24h], 2` @0x4C100B]
+    if (((body.flags | body.engine_flags) & kEntityFlagDead) == 0) {
+        body.death_anim_state = anim_state; // [orig: @0x4C10F5]
+        return;
+    }
+    if (AiEntity *motor = world.ai.for_handle(body.handle)) {
+        motor->inf.anim_state = anim_state; // +0x2BC [orig: @0x4C1019]
+        motor->inf.anim_pending = 0;        // +0x2B8 [orig: @0x4C1021]
+    }
+}
+
+// See the infantry.h contract.
 void player_body_class_event(World &world, Entity &body, int event) {
     // [orig: the dead return @0x40772A..0x40772F]
     if (((body.flags | body.engine_flags) & kEntityFlagDead) != 0) return;

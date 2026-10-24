@@ -244,6 +244,50 @@ void test_dead_park_and_respawn_edges() {
 			"the next record direct-commits over the death state");
 }
 
+// Every dead player record queues its anim byte for the effect pass, behind a 0x13 the same
+// receive carried ahead of it, so the client's own body takes the record's byte after that
+// 0x13's class callback staged the bullet default; an alive record queues nothing.
+// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 (the callback @0x42EBF5) ahead of
+//  NetPacket_SerializePlayerState @0x4C09C0's dead arms @0x4C100B..0x4C1027 /
+//  @0x4C10F1..0x4C10FB in one receive]
+void test_dead_records_queue_behind_the_0x13() {
+	ns::ClientReplicaPipeline view;
+	view.set_item_class_resolver(&classify);
+	seed_row(view);
+	view.apply(0x0A, player_frame(as::kIdle2, 0));
+	bool alive_queued = false;
+	for (const ns::ClientEffectCommand &c : view.drain_effect_commands())
+		alive_queued = alive_queued || std::get_if<ns::PlayerDeadRecord>(&c) != nullptr;
+	expect(!alive_queued, "an alive record queues no dead-record byte");
+
+	const uint8_t dead = static_cast<uint8_t>(opennova::world::kEntityFlagDead);
+	const std::vector<uint8_t> body13 = {static_cast<uint8_t>(kPlayerHandle & 0xFFu),
+			static_cast<uint8_t>(kPlayerHandle >> 8), 0x00, 0x00}; // deathAnimStateId 0
+	view.apply(0x13, body13);
+	view.apply(0x0A, player_frame(as::kDeathGrenadeBase, 0, dead));
+	std::vector<ns::ClientEffectCommand> fx;
+	for (ns::ClientEffectCommand &c : view.drain_effect_commands())
+		if (std::get_if<ns::EntityDeathEvent>(&c) != nullptr ||
+				std::get_if<ns::PlayerDeadRecord>(&c) != nullptr)
+			fx.push_back(std::move(c));
+	const auto *death = fx.size() == 2 ? std::get_if<ns::EntityDeathEvent>(&fx[0]) : nullptr;
+	const auto *record = fx.size() == 2 ? std::get_if<ns::PlayerDeadRecord>(&fx[1]) : nullptr;
+	expect(death != nullptr && death->entity_handle == kPlayerHandle &&
+					death->death_anim_state_id == 0,
+			"the 0x13 queues first, its word 0");
+	expect(record != nullptr && record->entity_handle == kPlayerHandle &&
+					record->anim_state_id == as::kDeathGrenadeBase,
+			"the dead record queues its byte behind it");
+
+	// A dead record on the dead row queues its byte again (the dead leg's +0x2BC store).
+	view.apply(0x0A, player_frame(as::kDeathGrenadeBase, 0, dead));
+	int queued = 0;
+	for (const ns::ClientEffectCommand &c : view.drain_effect_commands())
+		if (const auto *next = std::get_if<ns::PlayerDeadRecord>(&c))
+			queued += next->anim_state_id == as::kDeathGrenadeBase ? 1 : 100;
+	expect(queued == 1, "each dead record queues its byte");
+}
+
 // L5-s7 FOUND 4: every player record, dead or alive, lands its flags byte on the
 // row's Flags mirror under 0xFD: bits 0 and 2..7 become the record's (a cleared
 // bit clears), the dead bit and every upper bit stay the row's.
@@ -1074,6 +1118,7 @@ int main() {
 	test_own_body_serves_the_rings_at_its_slot();
 	test_parked_row_keeps_its_body_legs_until_its_visit();
 	test_record_flags_land_on_the_mirror();
+	test_dead_records_queue_behind_the_0x13();
 	test_remote_lean_ramp_gates();
 	test_remote_body_conform_chases_the_slope();
 	test_tapped_roll_locks_and_queues();

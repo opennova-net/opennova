@@ -199,6 +199,18 @@ void player_body_class_event(World &world, Entity &body, int event);
 //  @0x407B20 / @0x407B33)]
 void player_body_health_tail(World &world, Entity &body);
 
+// A dead player record's anim byte on the body it names, the client's own included: a body its
+// death edge has not flagged dead takes the byte as its deathAnimStateId (+0x2C0), which that
+// edge then requests; one already flagged dead takes it as its requested state (+0x2BC), the
+// deferred one (+0x2B8) cleared. Both store the Health 0 the caller keeps. A 0x13 earlier in
+// the same receive ran the class callback first, so the record's byte replaces the clip that
+// callback staged.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the record's dead test `test bl, 2`
+//  @0x4C0FE1, the body's `test byte ptr [edi+24h], 2` @0x4C100B; the live leg +0x2C0
+//  @0x4C10F5, Health @0x4C10FB; the dead leg +0x2BC @0x4C1019, +0x2B8 @0x4C1021, Health
+//  @0x4C1027; the byte @0x4C0F23]
+void player_body_dead_record(World &world, Entity &body, int anim_state);
+
 // The organic class's event callback (org0 / org1): event 1 puts a body without the Player bit
 // and its trigger group on red alert (a player body's kill goes to the network kill scorer,
 // which past its round test only reaches GameEvent_ProcessScoring case 2, as the plyr arm's),

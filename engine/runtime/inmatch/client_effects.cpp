@@ -296,6 +296,21 @@ void ClientRuntime::apply_received_effects(world::World &world) {
                 // EntityAI_ProcessAirStateMachine @0x4581B0].
                 world::hit_record_class_event(world, *victim, 4);
             }
+        } else if (const auto *dead = std::get_if<replication::PlayerDeadRecord>(&request)) {
+            // A dead record naming the local entity lands its anim byte on L, after the 0x13
+            // whose class callback staged the bullet default in the same receive: the record's
+            // byte is the clip L's death edge plays (the host's own pick, a frag's
+            // death_grenade_*). A body with no def drops the record whole. Every other row's
+            // share folded in the decode.
+            // [orig: NetPacket_SerializePlayerState @0x4C09C0 - the def test @0x4C0F92, the
+            //  dead arms @0x4C100B..0x4C1027 / @0x4C10F1..0x4C10FB; NapiNPClientMsg_EntityDeath
+            //  @0x42EB50 ahead of NapiNPClientMsg_0x00A @0x42FEC0 in the receive's order]
+            if (world.rules.logic_authority || !local_entity_bound() ||
+                    dead->entity_handle != joiner_->local_player_entity())
+                continue;
+            world::Entity *local = world.registry.get(world.cached.local_player);
+            if (local == nullptr || !local->has_item_def) continue;
+            world::player_body_dead_record(world, *local, dead->anim_state_id);
         } else if (const auto *door = std::get_if<replication::DoorRowUpdate>(&request)) {
             // The pool row the handle names; an entity this peer never
             // materialized has no door records to write.

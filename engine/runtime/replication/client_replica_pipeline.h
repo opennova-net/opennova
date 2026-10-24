@@ -58,6 +58,16 @@ struct EntityDeathEvent {
     // [orig: @0x42EC78 (0x26) / @0x4318b5 (0x4E)].
     int32_t kill_flags = 0;
 };
+// A dead player record, in receive order with the 0x13s around it: its anim byte lands on
+// the body the record names. The replica rows fold it in the decode; the effect pass hands
+// the client's own body its share (world::player_body_dead_record), after any 0x13 the same
+// receive carried ahead of it.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the dead arms @0x4C100B..0x4C1027 /
+//  @0x4C10F1..0x4C10FB, the byte @0x4C0F23]
+struct PlayerDeadRecord {
+    uint16_t entity_handle = 0xFFFF;
+    int16_t anim_state_id = 0;
+};
 // A chat line on channel 13 (local) names its sender's slot: the sender's
 // person becomes the map's tracked target. The slot resolves at the effect
 // pass, which owns the entities. [orig: Chat_DispatchToChannel @0x42B9CD..
@@ -107,7 +117,7 @@ struct DialogLineCommand {
 };
 using ClientEffectCommand = std::variant<PlaySoundCommand, MedicVoiceRequest,
         TrackedPlayerVoice, GameEventRecord, ExplosionEffectRecord, EntityDeathEvent,
-        EmoteBroadcast, LocalChatSpeaker, ClientSquadEvent, TipEventCommand,
+        PlayerDeadRecord, EmoteBroadcast, LocalChatSpeaker, ClientSquadEvent, TipEventCommand,
         LightningTimerCommand, DoorRowUpdate, DialogLineCommand, HudDetailBlankCommand>;
 
 class ClientReplicaPipeline {

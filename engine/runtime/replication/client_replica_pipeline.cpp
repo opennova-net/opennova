@@ -1430,6 +1430,12 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			if (wire_dead) {
 				es.net_health_zero = true;
 				if (!row_was_dead) es.net_death_anim = es.anim_state_id;
+				// The client's own body takes the same arms at the effect pass, in this
+				// receive's order (PlayerDeadRecord) [orig: @0x4C100B..0x4C1027 /
+				// @0x4C10F1..0x4C10FB].
+				if (rec.cls == EntityClass::Player)
+					pending_effect_commands_.push_back(
+							PlayerDeadRecord{rec.handle, static_cast<int16_t>(es.anim_state_id)});
 			} else if (respawned_this_record) {
 				es.rm_entity_flags &= ~world::kEntityFlagDead;
 				es.net_health_zero = false;
