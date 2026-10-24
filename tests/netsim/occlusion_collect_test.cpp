@@ -95,8 +95,7 @@ void dump_gates(const char *what, opennova::mission::MissionKernel &kernel,
 	const bool on_axis = kernel.occlusion.sphere_render_visible(kernel.collision, cam, axis, 0,
 			held, 0);
 	std::printf("%s: flags 0x%x engine 0x%x blink 0x%x 0x%x 0x%x 0x%x render_model %d "
-				"collision_model %d sphere at its place %d on the axis %d
-",
+				"collision_model %d sphere at its place %d on the axis %d\n",
 			what, e.flags, e.engine_flags, e.blink_hits[0], e.blink_hits[1], e.blink_hits[2],
 			e.blink_hits[3], kernel.occlusion.has_render_model(e.handle) ? 1 : 0,
 			kernel.collision.model_for(kernel.world, e.handle) != nullptr ? 1 : 0,
