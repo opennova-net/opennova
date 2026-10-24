@@ -583,6 +583,27 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu,
 	//  list's record (tag 1 @0x50F257) then the g_RoundEventRefs chain's
 	//  (tag 2 @0x50F326, NetPacket_SerializeRoundEvent @0x50F331) in each turn,
 	//  the terminator @0x50F366]
+	// A record with no carrier compresses its anchor-relative x with ECX holding a payload
+	// address: the player's write left it at its carrier word (`lea ecx, [eax+1]` past the
+	// seat byte), the vehicle's at its x word (`lea ecx, [eax+2]` past the parent word), both
+	// the record body's byte 2. So a folded x takes that address's shift bits, and a folded y
+	// and z re-chain off the word before them (`movzx ecx, ax` after each call).
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - @0x4C0A89, the call @0x4C0BE1, the
+	//  chain @0x4C0BE6 / @0x4C0C15; Entity_SerializeVehicleState @0x460560 - @0x460C55,
+	//  the call @0x460C78, the chain @0x460C7D / @0x460CA7]
+	const auto world_fold = [&out](auto rec) {
+		if (!(rec.pos_zero_fold & kPosFoldX)) return rec;
+		const auto folded = [](uint16_t word) { return (word & 1u) != 0 ? -1 : 0; };
+		rec.pos_x_compressed = network_compress_fixedpoint(folded(rec.pos_x_compressed),
+				kNapiMsgPayloadBufAddress + uint32_t(out.size()) + 2u);
+		if (rec.pos_zero_fold & kPosFoldY)
+			rec.pos_y_compressed = network_compress_fixedpoint(folded(rec.pos_y_compressed),
+					rec.pos_x_compressed);
+		if (rec.pos_zero_fold & kPosFoldZ)
+			rec.pos_z_compressed = network_compress_fixedpoint(folded(rec.pos_z_compressed),
+					rec.pos_y_compressed);
+		return rec;
+	};
 	const std::size_t turns = std::max(fu.records.size(), fu.round_events.size());
 	for (std::size_t turn = 0; turn < turns; ++turn) {
 		if (turn < fu.records.size()) {
@@ -592,13 +613,15 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu,
 				w.u8(1);
 				w.u16(rec.handle);
 				w.u16(rec.type_id);
-				append(encode_player_compact_record(rec.player));
+				append(encode_player_compact_record(rec.player.carrier_handle == 0xFFFF
+						? world_fold(rec.player) : rec.player));
 				break;
 			case EntityClass::Vehicle:
 				w.u8(1);
 				w.u16(rec.handle);
 				w.u16(rec.type_id);
-				append(encode_vehicle_compact_record(rec.vehicle));
+				append(encode_vehicle_compact_record(rec.vehicle.parent_slot_handle == 0xFFFF
+						? world_fold(rec.vehicle) : rec.vehicle));
 				break;
 			case EntityClass::Infantry:
 				w.u8(1);

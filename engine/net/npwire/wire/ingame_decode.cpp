@@ -81,7 +81,7 @@ WorldPose network_transform_local_to_world(int32_t lx, int32_t ly, int32_t lz,
 WorldPose network_transform_world_to_local(int32_t wx, int32_t wy, int32_t wz,
                                            int32_t px, int32_t py, int32_t pz,
                                            uint32_t yaw_bam, uint32_t pitch_bam,
-                                           uint32_t roll_bam) {
+                                           uint32_t roll_bam, int32_t *exit_ecx) {
 	const auto [sr, cr, sp, cp, sy, cy] = euler_q22(yaw_bam, pitch_bam, roll_bam);
 	const int32_t nsr = -sr, nsp = -sp, nsy = -sy; // ftol(sin * -2^22) @0x43BBE0..0x43BC0D
 	const auto m = mul_q22;
@@ -95,6 +95,8 @@ WorldPose network_transform_world_to_local(int32_t wx, int32_t wy, int32_t wz,
 	const int32_t tz = m(dz, cp) + m(tx, nsp);  //                  (@0x43bc90-0x43bcaa)
 	l.y = m(ty, cr) - m(tz, nsr);               // roll^-1 about X (@0x43bcb4-0x43bcce)
 	l.z = m(tz, cr) + m(ty, nsr);               //                 (@0x43bcd3-0x43bcee)
+	// ECX at the return: z's roll term, `mov ecx, eax` @0x43BCDF.
+	if (exit_ecx != nullptr) *exit_ecx = m(ty, nsr);
 	return l;
 }
 

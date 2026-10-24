@@ -229,9 +229,23 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	fu.passenger = hdr.mount_ammo;
 
 	for (const GameEntitySnapshot &e : entities) {
-		const uint16_t cx = network_compress_fixedpoint(e.x - ax);
-		const uint16_t cy = network_compress_fixedpoint(e.y - ay);
-		const uint16_t cz = network_compress_fixedpoint(e.z - az);
+		// The anchor-relative triple. A value that folds to 0 / -1 takes its word's shift
+		// bits from the call's ECX (network_compress_fixedpoint): y's and z's hold the word
+		// before them (`movzx ecx, ax`); the infantry's x holds the live Yaw (+0x10, loaded
+		// ahead of its +0x1A8 swap); the player's and the vehicle's x a payload address,
+		// which the frame encoder supplies from pos_zero_fold (world_fold).
+		// [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 - `mov ecx, [edi+10h]`
+		//  @0x4C07C0, the calls @0x4C086A / @0x4C0894 / @0x4C08BE, the chain @0x4C086F /
+		//  @0x4C0899; NetPacket_SerializePlayerState @0x4C09C0 - @0x4C0BE6 / @0x4C0C15;
+		//  Entity_SerializeVehicleState @0x460560 - @0x460C7D / @0x460CA7]
+		const uint32_t world_x_ecx =
+				e.entity_class == EntityClass::Infantry ? uint32_t(e.euler_z) : 0u;
+		const uint16_t cx = network_compress_fixedpoint(e.x - ax, world_x_ecx);
+		const uint16_t cy = network_compress_fixedpoint(e.y - ay, cx);
+		const uint16_t cz = network_compress_fixedpoint(e.z - az, cy);
+		const uint8_t world_fold = uint8_t((compress_folds_to_zero(e.x - ax) ? kPosFoldX : 0) |
+				(compress_folds_to_zero(e.y - ay) ? kPosFoldY : 0) |
+				(compress_folds_to_zero(e.z - az) ? kPosFoldZ : 0));
 		// Coarse wire heading from the engine BAM (D-NET-86). The write sides differ per class:
 		// the PLAYER record TRUNCATES the high byte [orig: `*(u8*)(entity+19)` @0x4c0c5d — no
 		// rounding]; the INFANTRY record ROUNDS `(v+0x800000)>>24` of its target heading (the
@@ -275,9 +289,15 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 						uint32_t(e.carrier_yaw_bam), uint32_t(e.carrier_pitch_bam),
 						uint32_t(e.carrier_roll_bam));
 				rec.player.carrier_handle = organic_carrier;
-				rec.player.pos_x_compressed = network_compress_fixedpoint(local.x);
-				rec.player.pos_y_compressed = network_compress_fixedpoint(local.y);
-				rec.player.pos_z_compressed = network_compress_fixedpoint(local.z);
+				// ECX: x's call holds the local x itself (`mov ecx, [esp+78h+triggerData]`),
+				// y's and z's the word before them [orig: @0x4C0B0C, the calls @0x4C0B11 /
+				// @0x4C0B36 / @0x4C0B5B, the chain @0x4C0B16 / @0x4C0B3B]
+				rec.player.pos_x_compressed =
+						network_compress_fixedpoint(local.x, uint32_t(local.x));
+				rec.player.pos_y_compressed =
+						network_compress_fixedpoint(local.y, rec.player.pos_x_compressed);
+				rec.player.pos_z_compressed =
+						network_compress_fixedpoint(local.z, rec.player.pos_y_compressed);
 				// LOCAL heading = own - carrier (the transform's out[3]); the wire byte is
 				// its arithmetic high byte [orig: sar eax,18h @0x4c0b85].
 				rec.player.yaw_byte = uint8_t(
@@ -287,6 +307,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 				rec.player.pos_x_compressed = cx;
 				rec.player.pos_y_compressed = cy;
 				rec.player.pos_z_compressed = cz;
+				rec.player.pos_zero_fold = world_fold;
 				rec.player.yaw_byte = yaw_byte_trunc; // truncated high byte [orig: @0x4c0c5d]
 			}
 			rec.player.pitch_byte =
@@ -362,9 +383,15 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 						uint32_t(e.carrier_yaw_bam), uint32_t(e.carrier_pitch_bam),
 						uint32_t(e.carrier_roll_bam));
 				rec.vehicle.parent_slot_handle = e.ground_handle;
-				rec.vehicle.pos_x_compressed = network_compress_fixedpoint(local.x);
-				rec.vehicle.pos_y_compressed = network_compress_fixedpoint(local.y);
-				rec.vehicle.pos_z_compressed = network_compress_fixedpoint(local.z);
+				// ECX: x's call holds the local x itself, y's and z's the word before them
+				// [orig: @0x460BBB, the calls @0x460BC0 / @0x460BE5 / @0x460C0A, the chain
+				//  @0x460BC5 / @0x460BEA]
+				rec.vehicle.pos_x_compressed =
+						network_compress_fixedpoint(local.x, uint32_t(local.x));
+				rec.vehicle.pos_y_compressed =
+						network_compress_fixedpoint(local.y, rec.vehicle.pos_x_compressed);
+				rec.vehicle.pos_z_compressed =
+						network_compress_fixedpoint(local.z, rec.vehicle.pos_y_compressed);
 				// LOCAL heading = own - carrier (the transform's out[3]), rounded to its
 				// high i16 exactly like the free-standing form [orig: @0x460c2a ->
 				// `add ecx,8000h; sar ecx,10h` @0x460cf2..0x460d0a].
@@ -375,6 +402,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 				rec.vehicle.pos_x_compressed = cx;
 				rec.vehicle.pos_y_compressed = cy;
 				rec.vehicle.pos_z_compressed = cz;
+				rec.vehicle.pos_zero_fold = world_fold;
 				rec.vehicle.euler_z = yaw_bam16; // world heading i16 [orig: @0x460cec -> @0x460d0a]
 			}
 			rec.vehicle.flags_byte = e.state_flags;
@@ -398,15 +426,21 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			// the joiner's family prediction integrates between records; the reader lands it
 			// when the wire flags clear bit 0x02 [orig: write @0x460d5a..0x460d7b; read
 			// @0x460910..0x46091e]. (The old "weapon X" reading was a D-NET-63-era misnomer.)
-			rec.vehicle.vertical_velocity =
-					network_compress_fixedpoint(e.vehicle_vertical_velocity);
+			// Its call's ECX holds the heading word's high byte under the flags byte (`mov cl,
+			// [edi+24h]` over the `movzx ecx, cx` of the rounded heading), which a folded
+			// velocity's word takes [orig: @0x460D01, @0x460D13, the call @0x460D61].
+			rec.vehicle.vertical_velocity = network_compress_fixedpoint(e.vehicle_vertical_velocity,
+					(uint32_t(uint16_t(rec.vehicle.euler_z)) & 0xFF00u) | rec.vehicle.flags_byte);
 			// Live prediction registers: fixed-point forward/lateral commands use
-			// the retail 16-bit codec; steering is the rounded BAM32 high word.
-			// [orig: @0x460dc2..0x460e10; net-re section 5.13]
-			rec.vehicle.weapon_aim_y =
-					network_compress_fixedpoint(e.vehicle_forward_speed_reg);
-			rec.vehicle.weapon_aim_z =
-					network_compress_fixedpoint(e.vehicle_lateral_speed_reg);
+			// the retail 16-bit codec; steering is the rounded BAM32 high word. A folded
+			// forward word takes its shift bits from the health word its call's ECX holds
+			// (`movzx ecx, word ptr [edi+11Eh]`), a folded lateral one from the forward word.
+			// [orig: @0x460dc2..0x460e10, @0x460D84, the calls @0x460DA8 / @0x460DCF, the chain
+			//  @0x460DAD; net-re section 5.13]
+			rec.vehicle.weapon_aim_y = network_compress_fixedpoint(e.vehicle_forward_speed_reg,
+					rec.vehicle.health_word);
+			rec.vehicle.weapon_aim_z = network_compress_fixedpoint(e.vehicle_lateral_speed_reg,
+					rec.vehicle.weapon_aim_y);
 			rec.vehicle.weapon_heading_bam = static_cast<int16_t>(
 					(static_cast<uint32_t>(e.vehicle_steer_target_bam) +
 					 0x00008000u) >> 16);
@@ -427,14 +461,22 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			rec.infantry.seat_bone_idx =
 					e.mount_handle != wire_handle::kInvalid ? e.veh_bone : 0;
 			if (organic_carrier != wire_handle::kInvalid && e.carrier_pose_valid) {
+				// x's compress call reads the ECX the transform returns with (z's roll term),
+				// y's and z's the word before them [orig: Entity_TransformWorldToLocal
+				//  @0x43BB50 (`mov ecx, eax` @0x43BCDF); the calls @0x4C07ED / @0x4C0812 /
+				//  @0x4C0837, the chain @0x4C07F2 / @0x4C0817]
+				int32_t transform_ecx = 0;
 				const WorldPose local = network_transform_world_to_local(
 						e.x, e.y, e.z, e.carrier_x, e.carrier_y, e.carrier_z,
 						uint32_t(e.carrier_yaw_bam), uint32_t(e.carrier_pitch_bam),
-						uint32_t(e.carrier_roll_bam));
+						uint32_t(e.carrier_roll_bam), &transform_ecx);
 				rec.infantry.vehicle_slot_handle = organic_carrier;
-				rec.infantry.pos_x_compressed = network_compress_fixedpoint(local.x);
-				rec.infantry.pos_y_compressed = network_compress_fixedpoint(local.y);
-				rec.infantry.pos_z_compressed = network_compress_fixedpoint(local.z);
+				rec.infantry.pos_x_compressed =
+						network_compress_fixedpoint(local.x, uint32_t(transform_ecx));
+				rec.infantry.pos_y_compressed =
+						network_compress_fixedpoint(local.y, rec.infantry.pos_x_compressed);
+				rec.infantry.pos_z_compressed =
+						network_compress_fixedpoint(local.z, rec.infantry.pos_y_compressed);
 				const uint32_t local_heading =
 						uint32_t(e.infantry_target_heading_bam) - uint32_t(e.carrier_yaw_bam);
 				rec.infantry.yaw_byte =
@@ -1065,9 +1107,16 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 		rec.shot_seq = ev.shot_seq;
 		// Fire origin compressed against the SAME anchor the frame header carries
 		// [orig: @0x504994 subtracts g_PriorityRefX/Y/Z — the recipient refs].
-		rec.pos_x_compressed = network_compress_fixedpoint(int32_t(ev.origin_x - int32_t(ax)));
-		rec.pos_y_compressed = network_compress_fixedpoint(int32_t(ev.origin_y - int32_t(ay)));
-		rec.pos_z_compressed = network_compress_fixedpoint(int32_t(ev.origin_z - int32_t(az)));
+		// A folded x takes its shift bits from the shot sequence word its call's ECX holds
+		// (`movzx ecx, word ptr [edi+1Ch]`, the word written just before), a folded y and z
+		// from the word before them [orig: @0x50496F, the calls @0x50498F / @0x5049B9 /
+		// @0x5049E3, the chain @0x504994 / @0x5049BE].
+		rec.pos_x_compressed = network_compress_fixedpoint(int32_t(ev.origin_x - int32_t(ax)),
+				rec.shot_seq);
+		rec.pos_y_compressed = network_compress_fixedpoint(int32_t(ev.origin_y - int32_t(ay)),
+				rec.pos_x_compressed);
+		rec.pos_z_compressed = network_compress_fixedpoint(int32_t(ev.origin_z - int32_t(az)),
+				rec.pos_y_compressed);
 		// Direction BAM high words, rounded [orig: @0x504a18/@0x504a3c].
 		rec.yaw_bam_high = uint16_t((uint32_t(ev.dir_yaw) + 0x8000u) >> 16);
 		rec.pitch_bam_high = uint16_t((uint32_t(ev.dir_pitch) + 0x8000u) >> 16);

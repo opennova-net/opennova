@@ -38,14 +38,21 @@ namespace opennova {
 // §5.14 compact record; the result round-trips through the decompressor within one
 // quantization step (the codec is lossy/float-like).
 //
-// Divergence (documented): the original calls `bsr` on the folded magnitude with
-// no zero guard, so `value` in {0, -1} (which fold to 0) is undefined in retail.
-// We return the sign bit there — the only value that round-trips (0->0, -1->1->-1).
-inline uint16_t network_compress_fixedpoint(int32_t value) {
+// A value of 0 or -1 folds to a zero magnitude, and `bsr` on a zero source leaves
+// its destination as it was: ECX, which the function never loads and saves and
+// restores around its body, so it still holds the caller's ECX at the call. The
+// shift bits of a zero word therefore come from that register (the mantissa is
+// (8 << s) >> s, masked to 0), and `ecx` is it: each serializer's call site names
+// what its ECX holds (the value itself, the word written just before, a buffer
+// address, ...). 0 (or any word under 15) gives the plain sign word.
+// [orig: Network_CompressFixedPoint @0x4C2780 - the pushes @0x4C2783 / @0x4C2788,
+//  `bsr ecx, eax` @0x4C279D, the borrow mask @0x4C27A0..0x4C27AC, the pops @0x4C27CF]
+inline uint16_t network_compress_fixedpoint(int32_t value, uint32_t ecx = 0) {
 	const uint32_t sign = uint32_t(value) >> 31;        // 0 or 1  [4c279a]
 	const int32_t  smask = value >> 31;                  // 0 or -1 (arith)  [4c2795]
 	const uint32_t fold = uint32_t(value ^ smask);       // |value| folded  [4c2798]
-	if (fold == 0) return uint16_t(sign);                // bsr-undefined guard
+	if (fold == 0) // bsr leaves ECX: `sub ecx, 0Fh`, the borrow mask, `or ecx, 1` [4c27a0..4c27ac]
+		return uint16_t((((ecx >= 15u) ? ecx - 15u : 0u) | 1u) & 0x0Eu) | uint16_t(sign);
 	uint32_t bsr = 31;                                   // highest set-bit index  [4c279d]
 	for (uint32_t m = fold; !(m & 0x80000000u); m <<= 1) --bsr;
 	const uint32_t shift = ((bsr >= 15) ? (bsr - 15) : 0u) | 1u; // [4c27a0..4c27ac]
@@ -53,6 +60,20 @@ inline uint16_t network_compress_fixedpoint(int32_t value) {
 	if (mantissa > 0xFFFFu) mantissa = 0xFFFFu;                   // clamp  [4c27b8..4c27bf]
 	return uint16_t((mantissa & 0xFFF0u) | (shift & 0x0Eu) | sign); // [4c27b5..4c27cb]
 }
+
+// True when `value` folds to a zero magnitude, so its compressed word takes its
+// shift bits from the call site's ECX (network_compress_fixedpoint).
+inline bool compress_folds_to_zero(int32_t value) {
+	return value == 0 || value == -1;
+}
+
+// The S2C 0x0A payload's buffer. Server_SendEntityStateToPlayer points its writer at
+// g_NapiMsgPayloadBuf, a static at a fixed address in the image, so the payload's byte
+// n sits at 0xB5BBB0 + n, and a serializer whose ECX holds its write cursor at a
+// compress call writes a zero word whose shift bits come from that address.
+// [orig: Server_SendEntityStateToPlayer @0x517BA0 - the writer's base @0x517C2C;
+//  g_NapiMsgPayloadBuf @0xB5BBB0]
+inline constexpr uint32_t kNapiMsgPayloadBufAddress = 0x00B5BBB0u;
 
 // Encode a S2C 0x20 bulk pool-3 sync body (§5.12) — the exact bytes
 // `decode_pool3_sync_batch` consumes. Faithful port of

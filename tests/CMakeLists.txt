@@ -5304,6 +5304,11 @@ add_test(NAME npruntime_entity_info_query_reply COMMAND npruntime_entity_info_qu
 add_executable(ai_round_damage_test world/ai_round_damage_test.cpp)
 target_link_libraries(ai_round_damage_test PRIVATE opennova_runtime)
 add_test(NAME ai_round_damage COMMAND ai_round_damage_test)
+# A compressed zero's shift bits from each serializer call site's ECX: the payload addresses,
+# the word before, the Yaw, the health word (D-NET-NEW-L4-28; retail frame 252 of x8 RR).
+add_executable(netsim_compress_zero_fold_test netsim/compress_zero_fold_test.cpp)
+target_link_libraries(netsim_compress_zero_fold_test PRIVATE opennova_runtime)
+add_test(NAME netsim_compress_zero_fold COMMAND netsim_compress_zero_fold_test)
 
 # --- parity lane L5 (client replica) ---
 # The joiner's own player record Flags folded into L under 0xE1 and echoed by the same

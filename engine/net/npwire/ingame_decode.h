@@ -77,11 +77,13 @@ WorldPose network_transform_local_to_world(int32_t lx, int32_t ly, int32_t lz,
 // them can differ by one LSB). The original is a 6-dword pose transform: out[3] =
 // heading - carrier heading, out[4]/out[5] pitch/roll pass through untouched
 // (@0x43bb7b-0x43bb8d) — callers compose headings with plain BAM subtraction, so this
-// returns position only.
+// returns position only. `exit_ecx`, when given, receives the ECX the function returns
+// with: z's roll term, m(ty, -sin roll), its last `mov ecx, eax` (@0x43BCDF), which the
+// infantry serializer's x compress call reads (network_compress_fixedpoint).
 WorldPose network_transform_world_to_local(int32_t wx, int32_t wy, int32_t wz,
                                            int32_t px, int32_t py, int32_t pz,
                                            uint32_t yaw_bam, uint32_t pitch_bam,
-                                           uint32_t roll_bam);
+                                           uint32_t roll_bam, int32_t *exit_ecx = nullptr);
 
 // S2C 0x0D spawn_flags gate bits (§5.11 field map). Names follow the witnessed
 // wire-field names; the struct fields alert_byte/action_byte below keep their
@@ -698,7 +700,17 @@ struct PlayerCompactRecord {
 	                                  // sentinel (entries stride 1120) [orig: @0x4c11f2/@0x4c120d;
 	                                  // witness 2026-07-02 — an unknowing sender must use 0xFF]
 	uint8_t  health_class_byte = 0;   // → Entity_SetHealthFromDifficultyByte
+	// Host write side only, never on the wire: bit 0 / 1 / 2 set when pos x / y / z
+	// folded to a zero magnitude (0 or -1). With no carrier the frame encoder writes x
+	// from the payload address of the carrier word, the ECX the world leg's compress
+	// call holds, and re-chains y and z off it (kPosFold*; encode_frame_update).
+	uint8_t  pos_zero_fold = 0;
 };
+
+// pos_zero_fold's bits (PlayerCompactRecord, VehicleCompactRecord).
+inline constexpr uint8_t kPosFoldX = 0x01;
+inline constexpr uint8_t kPosFoldY = 0x02;
+inline constexpr uint8_t kPosFoldZ = 0x04;
 
 // One §5.13 compact record (15 B dead-pose / 21 B live). Decoded by
 // [orig: Entity_SerializeVehicleState @ 0x460560]. Used by items with
@@ -755,6 +767,10 @@ struct VehicleCompactRecord {
 	uint16_t weapon_aim_y = 0;            // src vehicleData[136] -> read-dest vehicleData[177] (compressed)
 	uint16_t weapon_aim_z = 0;            // src vehicleData[135] -> read-dest vehicleData[178] (compressed)
 	int16_t  weapon_heading_bam = 0;      // src vehicleData[132] -> read-dest vehicleData[179] (BAM high i16)
+	// Host write side only, never on the wire (kPosFold*): with no parent the frame
+	// encoder writes a folded x from the payload address of the x word itself, the
+	// ECX the world leg's compress call holds, and re-chains y and z off it.
+	uint8_t  pos_zero_fold = 0;
 };
 
 // One §5.14 compact record (14 B fixed). Decoded by
