@@ -514,7 +514,10 @@ func open_novaworld_panel(start_client := true) -> void:
 	_novaworld_panel.host_requested.connect(_on_novaworld_host_requested)
 
 
+# The NovaWorld screen's close (NW_MULTI_PLAYER's deactivation) saves the menu's cookie jar to
+# nw_cdata.coo (NovaWorldClient.save_cookie_jar; engine MenuBrowserState).
 func _on_novaworld_closed() -> void:
+	NovaWorldClient.save_cookie_jar()
 	_dismiss_novaworld_panel()
 
 

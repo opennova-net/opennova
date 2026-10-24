@@ -1138,12 +1138,17 @@ void test_play_uses_current_http_cookies() {
 	for (const auto &entry : retry_cookies) if (entry.name == "NWCDKIID") ++cdkiid_count;
 	expect(cdkiid_count == 1, "the refreshed Cookie list contains no duplicate identity entry");
 
+	// The jar is the menu browser's, which no session's end clears (D-NET-NEW-L9-59): a reset flow's
+	// next play request carries the cookies as the jar holds them.
+	// [orig: Menu_InitShellResources @0x552500 - the jar made with the menu, once (@0x5525A6);
+	//  CGameMenu_Destructor @0x63E100 - freed with it]
 	respond_all(server, sent(client, client.stop_playing()));
 	flow.reset();
 	respond_all(server, sent(client, client.request_playing(setup)));
 	const auto &reset_cookies = server.lobby.play_state["Cookie"];
-	expect(!var_has(reset_cookies, "NWPF") && !var_has(reset_cookies, "PUBJOINTICKET") &&
-	               !var_has(reset_cookies, "PCID"), "cleared HTTP cookies cannot leak into another play request");
+	expect(var_value(reset_cookies, "NWPF") == "38" && var_value(reset_cookies, "PUBJOINTICKET") == "ticket-2" &&
+	               var_value(reset_cookies, "PCID") == "account",
+	       "a session's reset keeps the menu browser's jar");
 }
 
 // One named param of a container ("" when absent).

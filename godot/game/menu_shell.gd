@@ -665,7 +665,7 @@ func _consume_expansion_reload_request() -> void:
 # clears the root, so the previous game is mounted again to recover.
 # [orig: Game_ReloadExpansionAndMods @ 0x552710 — the archives closed and
 #  reopened @ 0x552770..0x552798; Menu_TeardownShellAndCloseBinkVideos
-#  @ 0x54e430 destroys the menu scene (dword_2551104 @ 0x54e4a3) and
+#  @ 0x54e430 destroys the menu scene (g_MenuDestroyOnTeardown @ 0x54e4a3) and
 #  Menu_InitShellResources @ 0x552500 makes it anew: main.mnu @ 0x552656, its
 #  start screen @ 0x552668]
 func _mount_expansion(name: String) -> void:
@@ -673,9 +673,12 @@ func _mount_expansion(name: String) -> void:
 		return
 	var dir := _root.get_root_dir()
 	var prev := _current_expansion()
-	# The menu's teardown forgets the kept NovaWorld gate response: the next
-	# NovaWorld entry probes the gate again (D-NET-706; the witness is the
-	# engine's NwuLobbySession::GateMemory::forget).
+	# The menu's teardown saves its cookie jar to nw_cdata.coo (MainGame makes
+	# the menu's jar anew from it after the reload; NovaWorldClient.save_cookie_jar)
+	# and forgets the kept NovaWorld gate response: the next NovaWorld entry
+	# probes the gate again (D-NET-706; the witness is the engine's
+	# NwuLobbySession::GateMemory::forget).
+	NovaWorldClient.save_cookie_jar()
 	NovaWorldClient.forget_gate_response()
 	# The reload closes every archive before it mounts the pick, so the pick's
 	# text-override table loads as at boot (docs/vfs/vfs-pff-mount-re.md,
@@ -771,6 +774,9 @@ func _on_url_requested(url: String, external: bool) -> void:
 	var target := url
 	if not (target.begins_with("http://") or target.begins_with("https://")):
 		target = "https://" + target
+	# The external browser's open saves the menu's cookie jar first
+	# (NovaWorldClient.save_cookie_jar; engine MenuBrowserState).
+	NovaWorldClient.save_cookie_jar()
 	OS.shell_open(target)
 
 

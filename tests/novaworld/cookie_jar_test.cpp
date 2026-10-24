@@ -1,13 +1,29 @@
 // The menu browser's cookie jar as retail keeps it (D-NET-NEW-L9-58): the Set-Cookie parse off the
 // answer's header text, the store's match (the name case-insensitively, then the path rule) and the
-// by-name read.
+// by-name read. And its file across processes, nw_cdata.coo (D-NET-NEW-L9-59): the volume key, the
+// writer's bytes, the PERSISTENT* filter, the REMEMBER_LOGIN rule, the reader, the menu browser
+// state's create and save.
 // [orig: HTTP_ResponseHandler @0x659480; HttpCookie_Parse @0x658F60; CookieJar_UpdateFromURL
-//  @0x64E630; CookieJar_GetValueByName @0x64EA90; String_CompareNoCase @0x650000]
+//  @0x64E630; CookieJar_GetValueByName @0x64EA90; String_CompareNoCase @0x650000;
+//  CDKey_GenerateVolumeFingerprint @0x651ED0; Crypto_EncryptBuffer @0x437510;
+//  CUIScene_SaveCookieJarFile @0x63BA60; CookieJar_SaveToFile @0x64EE60;
+//  CUIStringTable_OpenAndLoad @0x63A500; CUIStringTable_LoadFromFile @0x64F290]
 
+#include <net/novaworld/cookie_jar_file.h>
+#include <net/novaworld/http_flow.h>
 #include <net/novaworld/http_login.h>
+#include <net/novacrypto/epask.h>
+#include <net/novacrypto/url_cipher.h>
+#include <net/title/title_identity.h>
 
+#include <base/gameprofile/gameprofile.h>
+
+#include <base/io/file_io.h>
+
+#include "common/temp_dir.h"
 #include "common/test_expect.h"
 
+#include <array>
 #include <optional>
 #include <string>
 #include <vector>
@@ -121,6 +137,237 @@ int test_store() {
 	return 0;
 }
 
+
+// The volume key: the arithmetic of CDKey_GenerateVolumeFingerprint over a chosen volume (serial
+// 0x1234ABCD, maximum component length 255, flags 0x03E700FF, "GAMES" on NTFS), restated from the
+// disassembly into these bytes; the key is the bytes to the first zero.
+opennova::RetailMachineInputs chosen_volume() {
+	opennova::RetailMachineInputs volume;
+	volume.volume_serial = 0x1234ABCDu;
+	volume.maximum_component_length = 255;
+	volume.filesystem_flags = 0x03E700FFu;
+	volume.volume_name = "GAMES";
+	volume.filesystem_name = "NTFS";
+	return volume;
+}
+
+int test_volume_key() {
+	opennova::RetailMachineInputs volume = chosen_volume();
+	const std::array<uint8_t, 16> expected = {0xF5, 0x8C, 0x0C, 0x30, 0x20, 0xE9, 0x77, 0x56,
+			0x76, 0xE8, 0x91, 0x50, 0xF9, 0x98, 0x06, 0x23};
+	TEST_EXPECT(opennova::volume_fingerprint(volume) == expected);
+	TEST_EXPECT(opennova::cookie_jar_key(volume) == std::string(expected.begin(), expected.end()));
+	// A name byte that zeroes byte 5 cuts the key there (the cipher reads the key's strlen).
+	volume.volume_name = std::string("GAMES") + static_cast<char>(0xE9);
+	TEST_EXPECT(opennova::volume_fingerprint(volume)[5] == 0);
+	const std::array<uint8_t, 5> cut = {0xF5, 0x8C, 0x0C, 0x30, 0x20};
+	TEST_EXPECT(opennova::cookie_jar_key(volume) == std::string(cut.begin(), cut.end()));
+	// A volume that reads nothing (off Windows): "00000000" twice over, nothing else.
+	TEST_EXPECT(opennova::cookie_jar_key(opennova::RetailMachineInputs{}) == std::string(16, '0'));
+	return 0;
+}
+
+// The file the writer makes for saved_jar(), restated byte by byte from the cited writer and cipher
+// (the leading word 1, the magic "2OOC", one record per PERSISTENT* entry: the node word 0, five
+// length-prefixed strings under the chosen volume's key, a null one a length of 0, then the
+// entry's word).
+const std::vector<uint8_t> kTwoRecordFile = {
+		0x01, 0x00, 0x00, 0x00, 0x32, 0x4F, 0x4F, 0x43, 0x00, 0x00, 0x00, 0x00,
+		0x1B, 0x00, 0x00, 0x00, 0xAF, 0x89, 0xA4, 0x57, 0x82, 0x1F, 0xB4, 0x5C,
+		0xF5, 0x6B, 0xE7, 0x62, 0xD0, 0x0A, 0x53, 0xB2, 0x40, 0x09, 0x31, 0xD8,
+		0x08, 0xA9, 0x36, 0xE0, 0x7B, 0xDE, 0x72, 0x10, 0x00, 0x00, 0x00, 0x50,
+		0xA2, 0xD3, 0x03, 0x59, 0xC9, 0x7F, 0x9C, 0x3B, 0x4B, 0xDC, 0x62, 0xF1,
+		0x7C, 0xDB, 0x53, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x1A, 0x00, 0x00, 0x00, 0x06, 0x17, 0x84, 0x78, 0xF4, 0x56, 0xC4, 0x38,
+		0x75, 0xD5, 0x23, 0x48, 0x67, 0x76, 0xB5, 0xF3, 0x99, 0x91, 0x08, 0x08,
+		0x79, 0xD6, 0x50, 0xBB, 0xEE, 0x52, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00,
+};
+
+CookieJar saved_jar() {
+	CookieJar jar;
+	jar.update({entry("NWHANDLE", "Walker", std::string("/")),
+			entry("PERSISTENTREMEMBERLOGINDATA", "ABCDEFGHIJKLMNOP", std::string("/")),
+			entry("LOGINSESSIONTAG", "t", std::string("/")),
+			entry("PERSISTENTEXPRESSLOGINDATA", "", std::string("/"))});
+	return jar;
+}
+
+// The PERSISTENT* filter and the REMEMBER_LOGIN rule: only names beginning PERSISTENT
+// (case-insensitively) are saved; PERSISTENTEXPRESSLOGINDATA only while REMEMBER_LOGIN is not
+// "UNCHECKED", the leading word saying which.
+int test_writer() {
+	const std::string key = opennova::cookie_jar_key(chosen_volume());
+	const CookieJar jar = saved_jar();
+	TEST_EXPECT(opennova::write_cookie_jar(jar, false, key) == kTwoRecordFile);
+	const std::vector<uint8_t> unchecked = opennova::write_cookie_jar(jar, true, key);
+	TEST_EXPECT(unchecked.size() < kTwoRecordFile.size() && unchecked[0] == 0);
+	CookieJar read_back;
+	opennova::read_cookie_jar(unchecked.data(), unchecked.size(), key, read_back);
+	TEST_EXPECT(read_back.entries().size() == 1 &&
+	            read_back.entries()[0].name == "PERSISTENTREMEMBERLOGINDATA");
+	CookieJar lower;
+	lower.update({entry("persistentNote", "x")});
+	CookieJar lower_back;
+	const std::vector<uint8_t> lower_file = opennova::write_cookie_jar(lower, false, key);
+	opennova::read_cookie_jar(lower_file.data(), lower_file.size(), key, lower_back);
+	TEST_EXPECT(lower_back.entries().size() == 1 && lower_back.entries()[0].value == "x");
+	// The empty jar: the word and the magic alone (the editor's blank).
+	TEST_EXPECT(opennova::write_cookie_jar(CookieJar{}, false, key) ==
+	            (std::vector<uint8_t>{1, 0, 0, 0, '2', 'O', 'O', 'C'}));
+	return 0;
+}
+
+// The reader appends the records as they are, every string text again (a null one ""); another
+// volume's key reads other bytes; a short, foreign or truncated file adds nothing past its whole
+// records.
+int test_reader() {
+	const std::string key = opennova::cookie_jar_key(chosen_volume());
+	CookieJar jar;
+	jar.set("YOURIP", "203.0.113.7");
+	opennova::read_cookie_jar(kTwoRecordFile.data(), kTwoRecordFile.size(), key, jar);
+	TEST_EXPECT(jar.entries().size() == 3 && jar.entries()[0].name == "YOURIP");
+	const CookieEntry &remembered = jar.entries()[1];
+	TEST_EXPECT(remembered.name == "PERSISTENTREMEMBERLOGINDATA" && remembered.value == "ABCDEFGHIJKLMNOP");
+	TEST_EXPECT(remembered.path && *remembered.path == "/" && remembered.expires &&
+	            remembered.expires->empty() && remembered.domain && remembered.domain->empty());
+	TEST_EXPECT(jar.entries()[2].name == "PERSISTENTEXPRESSLOGINDATA" && jar.entries()[2].value.empty());
+
+	CookieJar other;
+	opennova::read_cookie_jar(kTwoRecordFile.data(), kTwoRecordFile.size(), std::string(16, '0'), other);
+	TEST_EXPECT(other.entries().size() == 2 && other.entries()[0].name != "PERSISTENTREMEMBERLOGINDATA");
+
+	CookieJar none;
+	std::vector<uint8_t> foreign = kTwoRecordFile;
+	foreign[4] = 'R';
+	opennova::read_cookie_jar(foreign.data(), foreign.size(), key, none);
+	const std::vector<uint8_t> blank = {0, 0, 0, 0, 'R', 'S', 'T', 'R'};
+	opennova::read_cookie_jar(blank.data(), blank.size(), key, none);
+	opennova::read_cookie_jar(kTwoRecordFile.data(), 7, key, none);
+	TEST_EXPECT(none.empty());
+	CookieJar truncated;
+	opennova::read_cookie_jar(kTwoRecordFile.data(), kTwoRecordFile.size() - 1, key, truncated);
+	TEST_EXPECT(truncated.entries().size() == 1);
+	return 0;
+}
+
+// The menu browser state: its save writes the file under the REMEMBER_LOGIN property, its creation
+// drops the property, empties the jar and loads the file; the LOGIN mark is not the scene's.
+int test_menu_browser_state() {
+	test_temp::TempDir dir("cookie_jar_state");
+	const std::string path = dir.file("nw_cdata.coo");
+	const std::string key = opennova::cookie_jar_key(chosen_volume());
+	opennova::MenuBrowserState state;
+	std::string error;
+	TEST_EXPECT(state.save(error)); // no file: nothing written
+	state.create(path, key);
+	TEST_EXPECT(state.jar.empty() && !state.remember_login_checked);
+	state.jar = saved_jar();
+	state.remember_login_checked = false;
+	state.login_button_pressed = true;
+	TEST_EXPECT(state.save(error));
+	std::vector<uint8_t> bytes;
+	TEST_EXPECT(opennova::io::read_file_bytes(path, bytes, error));
+	TEST_EXPECT(bytes == opennova::write_cookie_jar(saved_jar(), true, key));
+	state.remember_login_checked = true;
+	TEST_EXPECT(state.save(error));
+	state.create(path, key);
+	TEST_EXPECT(!state.remember_login_checked && state.login_button_pressed);
+	TEST_EXPECT(state.jar.entries().size() == 2 &&
+	            *state.jar.find("PERSISTENTREMEMBERLOGINDATA") == "ABCDEFGHIJKLMNOP" &&
+	            state.jar.find("NWHANDLE") == nullptr);
+	// The reloaded cookie's path is "/" as written, so the browser's write of the name (a null
+	// path) still updates it in place.
+	state.jar.set("PERSISTENTREMEMBERLOGINDATA", "");
+	TEST_EXPECT(state.jar.entries().size() == 2 && state.jar.find("PERSISTENTREMEMBERLOGINDATA")->empty());
+	return 0;
+}
+
+
+std::vector<uint8_t> page(const std::string &text) {
+	return std::vector<uint8_t>(text.begin(), text.end());
+}
+
+// The jar the file at `path` holds under `key` (empty when there is no file).
+CookieJar saved_at(const std::string &path, const std::string &key) {
+	CookieJar jar;
+	std::vector<uint8_t> file;
+	std::string error;
+	if (opennova::io::read_file_bytes(path, file, error)) opennova::read_cookie_jar(file.data(), file.size(), key, jar);
+	return jar;
+}
+
+// The flow's saves on the browser state it shares: the home page's showing (a login's success), a
+// connect page ahead of its parse (the .joi here; a relay page is none); the REMEMBER_LOGIN property
+// the sign-in page's activation sets from game.cfg's rememberlogin, which the next save reads; a
+// session's reset keeping the jar.
+// [orig: UI_SaveCookieJarOnHomeTabs @0x557530 - the save called @0x55753B; UI_ProcessWebResponseContent
+//  @0x63D450 - event 7 raised @0x63D634; UI_DispatchScreenEvent @0x54E6A0 - case 7's save called
+//  @0x54F2C5; UI_LoadPersistentLoginCredentials @0x557330 - CCheckWnd_SetCheckedState called
+//  @0x55744A; Menu_InitShellResources @0x552500 - the jar made once (@0x5525A6)]
+int test_flow_save_sites() {
+	test_temp::TempDir dir("cookie_jar_flow");
+	const std::string path = dir.file("nw_cdata.coo");
+	const std::string key = opennova::cookie_jar_key(chosen_volume());
+	opennova::MenuBrowserState state;
+	state.create(path, key);
+	opennova::LobbyHttpContext ctx;
+	ctx.title = opennova::title_identity(opennova::gameprofile::GAME_JO);
+	TEST_EXPECT(ctx.title != nullptr);
+	ctx.gate_tag = ctx.title->gate_tag;
+	ctx.startup_url = "http://gs.opennova.test:8080/NWStart.dll?prepare=1";
+	ctx.post_ip = "gs.opennova.test";
+	ctx.post_port = "8080";
+	ctx.remember_login = false;
+	opennova::LobbyHttpFlow flow;
+	flow.share_browser(state);
+	flow.set_context(ctx);
+	TEST_EXPECT(&flow.browser() == &state);
+
+	opennova::EpaskParams epask;
+	TEST_EXPECT(opennova::generate_epask(epask));
+	flow.login("player", "secret");
+	flow.on_login_response(true, 200, {"Set-Cookie: EPASK=" + opennova::epask_to_string(epask)}, {});
+	flow.on_login_response(true, 200, {"Set-Cookie: LOGINSESSIONTAG=t; Path=/"},
+			page("<HTML><HEAD><META http-equiv=\"refresh\" CONTENT=0;URL=\"NWLogin.dll\"></HEAD></HTML>"));
+	TEST_EXPECT(saved_at(path, key).empty());
+	const opennova::LoginResult login = flow.on_login_response(true, 200,
+			{"Set-Cookie: NWHANDLE=P; Path=/", "Set-Cookie: PERSISTENTEXPRESSLOGINDATA=E; Path=/"},
+			page("<HTML></HTML>"));
+	TEST_EXPECT(login.kind == opennova::LoginResult::Kind::Succeeded);
+	CookieJar file = saved_at(path, key);
+	TEST_EXPECT(file.entries().size() == 1 && *file.find("PERSISTENTEXPRESSLOGINDATA") == "E");
+	TEST_EXPECT(state.jar.find("NWHANDLE") != nullptr);
+
+	// The sign-in page's activation: REMEMBER_LOGIN takes rememberlogin (clear here).
+	TEST_EXPECT(!state.remember_login_checked);
+	flow.reshow_sign_in();
+	TEST_EXPECT(state.remember_login_checked && !*state.remember_login_checked);
+
+	const std::string nk = opennova::url_cipher_encode("10.1.2.3:3001", opennova::URL_CIPHER_KEY_NK);
+	flow.join(777);
+	flow.on_join_response(true, 200, {"Set-Cookie: PERSISTENTRELAY=1; Path=/"},
+			page("<HTML><HEAD><META http-equiv=\"refresh\" CONTENT=0;URL=\"NWJoin.dll\"></HEAD></HTML>"));
+	TEST_EXPECT(saved_at(path, key).find("PERSISTENTRELAY") == nullptr);
+	const opennova::JoinResult joined = flow.on_join_response(true, 200,
+			{"Set-Cookie: PERSISTENTJOIN=2; Path=/"},
+			page("<TITLE> [NK=" + nk + "&NI=192.168.5.9&NP=17479&GS=x]</TITLE>"));
+	TEST_EXPECT(joined.kind == opennova::JoinResult::Kind::Resolved);
+	file = saved_at(path, key);
+	TEST_EXPECT(file.find("PERSISTENTJOIN") != nullptr && file.find("PERSISTENTRELAY") != nullptr);
+	TEST_EXPECT(file.find("PERSISTENTEXPRESSLOGINDATA") == nullptr);
+	std::vector<uint8_t> bytes;
+	std::string error;
+	TEST_EXPECT(opennova::io::read_file_bytes(path, bytes, error) && bytes.size() > 8 && bytes[0] == 0);
+
+	// The jar is the menu's: a session's reset leaves it whole.
+	flow.reset();
+	TEST_EXPECT(flow.cookies().find("NWHANDLE") != nullptr && flow.cookies().find("PERSISTENTJOIN") != nullptr);
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -128,6 +375,11 @@ int main() {
 	if (test_parse_walks_into_the_next_line() != 0) return 1;
 	if (test_parse_expires_and_secure() != 0) return 1;
 	if (test_store() != 0) return 1;
+	if (test_volume_key() != 0) return 1;
+	if (test_writer() != 0) return 1;
+	if (test_reader() != 0) return 1;
+	if (test_menu_browser_state() != 0) return 1;
+	if (test_flow_save_sites() != 0) return 1;
 	std::printf("cookie_jar: all checks passed\n");
 	return 0;
 }

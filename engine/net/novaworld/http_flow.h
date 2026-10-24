@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -11,6 +12,7 @@
 #include <net/novaworld/gsb.h>        // GsbResponse / gsb_parse_response (reused)
 #include <net/novaworld/proxy_rendezvous.h> // ProxyRendezvousConfig (proxy_rendezvous_from_join)
 #include <net/novaworld/http_login.h> // CookieJar / LoginFormField / build_login_post_body / parse_joi_connection_string
+#include <net/novaworld/cookie_jar_file.h> // MenuBrowserState (the jar, REMEMBER_LOGIN, the LOGIN mark, nw_cdata.coo)
 
 #include <net/novacrypto/epask.h> // EpaskParams / epask_to_string / epask_from_string
 
@@ -244,12 +246,19 @@ struct HostKeyResult {
 };
 
 // The single stateful lobby HTTP flow. One per session; the owner sets the context, then drives login /
-// GSB / join. The cookie jar is SHARED across all three (login's NWHANDLE/PCID ride GSB + join).
+// GSB / join. The cookie jar is SHARED across all three (login's NWHANDLE/PCID ride GSB + join), and it
+// is the menu browser state's: a flow's own unless the owner shares the process's (share_browser), as
+// the game does, so the jar outlives every session and process's NovaWorld entry, as retail's does.
 class LobbyHttpFlow {
 public:
 	void set_context(LobbyHttpContext ctx) { ctx_ = std::move(ctx); }
 	const LobbyHttpContext &context() const { return ctx_; }
-	void reset(); // start()/stop() equivalent: clears the jar + both machines (keeps the context)
+	// start()/stop() equivalent: both machines and the session's state cleared (keeps the context and
+	// the browser state: the jar is the menu's, which no session start or end clears).
+	void reset();
+	// The flow works on `state` from now on (the game's: process_menu_browser()).
+	void share_browser(MenuBrowserState &state) { browser_ = &state; }
+	MenuBrowserState &browser() { return *browser_; }
 
 	// The derived base "http://host[:port]" for the lobby HTTP endpoint (empty until the gate replies).
 	// (see godot/src/network/novaworld_client.cpp http_base())
@@ -403,7 +412,7 @@ public:
 	const std::string *browser_global(const std::string &name) const;
 
 	// Exposed for the owner's cookie diagnostics / tests.
-	const CookieJar &cookies() const { return jar_; }
+	const CookieJar &cookies() const { return browser_->jar; }
 	// Current browser cookies plus the locale/initial identity for UDP statements.
 	std::vector<std::pair<std::string, std::string>> session_cookie_vars() const;
 
@@ -453,20 +462,35 @@ private:
 	// The shown sign-in page's submit: its form posted under the start page's EPASK.
 	LoginResult post_shown_sign_in();
 	// A Login press: the shown page's submit, else the start page's open and its sign-in page's
-	// submit; on a page whose submit is LOGIN the press marks login_button_pressed_.
+	// submit; on a page whose submit is LOGIN the press marks the browser state's
+	// login_button_pressed.
 	LoginResult submit_sign_in();
 	// The title's sign-in page submits with the LOGIN control (TitlePages::sign_in_submit).
 	bool sign_in_submit_is_login() const;
-	// The sign-in page's activation: the remembered login's fill (remembered_login_name).
+	// The sign-in page's activation: its REMEMBER_LOGIN checkbox set to game.cfg's rememberlogin
+	// (the scene's property with it), then the remembered login's fill (remembered_login_name).
+	// [orig: UI_LoadPersistentLoginCredentials @0x557330 - the checkbox found @0x557433 and set
+	//  (CCheckWnd_SetCheckedState called @0x55744A) whatever rememberlogin holds]
 	void fill_remembered_login();
 	// The home page shown (the main page, its template's ACTIVATE on ENABLE_HOME_TABS): a login's
-	// success, an entry that lands on the lobby. The LOGIN press's mark is cleared. Retail saves
-	// the jar to nw_cdata.coo there first; this flow keeps the jar in memory.
+	// success, an entry that lands on the lobby. The jar is saved to its file, then the LOGIN
+	// press's mark is cleared.
 	// [orig: UI_SaveCookieJarOnHomeTabs @0x557530 (registered on ENABLE_HOME_TABS for every event
 	//  class, mask -1, by UI_RegisterNWMultiplayerCallbacks @0x559800, the call @0x559873) -
 	//  CUIScene_SaveCookieJarFile("nw_cdata.coo") called @0x55753B, g_LoginButtonPressed = 0
 	//  @0x557540]
 	void show_home_page();
+	// A page whose title raises the scene's event 7 (it starts "[NK=" or "[HOSTKEY=", past the
+	// leading characters that are neither a letter nor '['): the jar is saved to its file ahead of
+	// the connect string's parse.
+	// [orig: UI_ProcessWebResponseContent @0x63D450 - the skip @0x63D5BB..0x63D5DE, "[NK=" compared
+	//  (_strnicmp called @0x63D5E8), "[HOSTKEY=" (@0x63D604), event 7 raised (CUIScene_RaiseEvent
+	//  called @0x63D634); UI_DispatchScreenEvent @0x54E6A0 - case 7's CUIScene_SaveCookieJarFile
+	//  called @0x54F2C5, ahead of URL_ParseConnectionQueryString called @0x54F30A]
+	void save_at_connect_page(const std::string &html);
+	// The browser state's jar file written (MenuBrowserState::save), a failure only logged, as
+	// retail drops the save's HRESULT.
+	void save_jar_file();
 	// The jar's EPASK bundle read into epask_, as the sign-in page's submit encrypts under it; the
 	// failure's reason when the jar holds none or the modexp gate rejects it.
 	std::string take_epask(const std::vector<uint8_t> &page);
@@ -479,8 +503,14 @@ private:
 	std::string absolute_url(const std::string &url) const;
 	HostKeyResult host_get(const std::string &url);
 
+	// The browser state: the jar, the REMEMBER_LOGIN property, the LOGIN mark and the jar file. A
+	// flow's own until the owner shares another (share_browser).
+	std::unique_ptr<MenuBrowserState> own_browser_ = std::make_unique<MenuBrowserState>();
+	MenuBrowserState *browser_ = own_browser_.get();
+	CookieJar &jar() { return browser_->jar; }
+	const CookieJar &jar() const { return browser_->jar; }
+
 	LobbyHttpContext ctx_;
-	CookieJar jar_;
 	EpaskParams epask_;
 	LoginStep login_step_ = LoginStep::Idle;
 	int login_poll_count_ = 0;
@@ -496,11 +526,6 @@ private:
 	// The shown sign-in page's remembered fill: the NAME edit's decoded account name and the
 	// rememberlogindata edit's value (the cookie), the latter empty once a field was clicked.
 	std::string remembered_name_, remember_fill_;
-	// A LOGIN control was pressed (g_LoginButtonPressed: set by the press, cleared when the home
-	// page shows (show_home_page); reset() keeps it, as the process global outlives a session).
-	// [orig: UI_MarkLoginButtonPressed @0x557520 (LOGIN's event-8 callback, registered @0x559963);
-	//  UI_SaveCookieJarOnHomeTabs @0x557530 - the clear @0x557540]
-	bool login_button_pressed_ = false;
 	// The connect's identity set is in the jar (seed_identity_cookies: once per session).
 	bool identity_seeded_ = false;
 	// Each leg's last request's URL: the page its answer is, whose template it names.

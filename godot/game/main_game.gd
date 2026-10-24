@@ -100,6 +100,7 @@ var _keys := KeyboardPass.new()
 var _chosen_avatar: Dictionary = {}  # canonical active + per-side PLAYER_INFO selection
 var _profile_root_key := ""  # reload the profile only when the mounted game/expansion changes
 var _intro_tail_run := false  # the first menu start's profile save ran
+var _menu_browser_made := false  # the first menu entry made the menu browser (its cookie jar)
 var _world_load := WorldLoadCoordinatorScript.new()
 var _world_load_pending := false
 # The mission a `--mission` launch starts in, until its load ends: one that fails is named on a
@@ -820,6 +821,12 @@ func _enter_menu(dir: String) -> bool:
 	if not GameCfgStore.enter_main_menu(_root):
 		exit_process(0)
 		return true
+	# The menu's creation follows the first entry's game.cfg read: the menu browser's cookie jar,
+	# loaded from nw_cdata.coo in the working directory, lives for the process (engine
+	# MenuBrowserState; NovaWorldClient.create_cookie_jar).
+	if not _menu_browser_made:
+		_menu_browser_made = true
+		NovaWorldClient.create_cookie_jar(LaunchFlags.working_dir())
 	_player_options.reload()
 	# The player profile loads after the menu's text tables and game.cfg, at
 	# every main-menu entry, as the original's menu init loads it
@@ -984,6 +991,10 @@ func _on_game_reloaded() -> void:
 	if not GameCfgStore.reload_main_menu(_root):
 		exit_process(0)
 		return
+	# The menu made anew after its teardown (whose save MenuShell ran): its cookie jar loaded again
+	# from nw_cdata.coo, the session cookies the file does not keep gone (NovaWorldClient.
+	# create_cookie_jar).
+	NovaWorldClient.create_cookie_jar(LaunchFlags.working_dir())
 	_player_options.reload()
 	refresh_local_profile_for_mount(true)
 
@@ -1165,8 +1176,10 @@ func request_quit() -> void:
 		return
 	_quit_requested = true
 	# The main loop's exit saves game.cfg before the shutdown
-	# (docs/gamecfg/game-cfg-re.md, the save points).
+	# (docs/gamecfg/game-cfg-re.md, the save points), and the menu's teardown on the way out saves
+	# its cookie jar to nw_cdata.coo (NovaWorldClient.save_cookie_jar).
 	GameCfgStore.save()
+	NovaWorldClient.save_cookie_jar()
 	var load_operation := begin_runtime_shutdown()
 	# The subsystems' shutdown, after the cursor's show: Scroll Lock off, Num Lock
 	# as the start found it, Caps Lock off (engine controls::kVkNumLock carries the

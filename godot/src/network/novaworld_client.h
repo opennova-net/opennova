@@ -149,6 +149,15 @@ public:
 	// forgotten, so the next start() probes the gate again
 	// (opennova::NwuLobbySession::GateMemory::forget, D-NET-706).
 	static void forget_gate_response();
+	// The menu's creation (the process's first main menu, and the menu made anew after a mods
+	// reload): the process's menu browser state made anew, its jar emptied and loaded from
+	// nw_cdata.coo in `dir`, the game's working directory, under the current volume's key
+	// (engine: MenuBrowserState::create, cookie_jar_key).
+	static void create_cookie_jar(const String &dir);
+	// A save site of the shell (the menu's teardown on the way out or before a mods reload, the
+	// NovaWorld screen's close, an external browser's open): the process's jar written to its file
+	// (engine: MenuBrowserState::save; a failure is only reported, as retail drops it).
+	static void save_cookie_jar();
 	// The process's _connectlog.txt (the game world's log device, which `/CONNECTLOG` arms):
 	// the NovaWorld gate and connect lines go to it (null: none).
 	static void set_process_connect_log(opennova::inmatch::ConnectLog *log);

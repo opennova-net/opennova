@@ -483,7 +483,6 @@ HostKeyResult host_fail(std::string reason) {
 }
 
 void LobbyHttpFlow::reset() {
-	jar_ = CookieJar{};
 	host_step_ = HostStep::Idle;
 	host_hops_ = 0;
 	globals_.clear();
@@ -623,7 +622,7 @@ std::string LobbyHttpFlow::resolve_startup_url() const {
 std::vector<std::string> LobbyHttpFlow::request_headers() const {
 	std::vector<std::string> h{"Accept: image/jpeg, image/x-pcx, image/pcx, image/png, text/html",
 			"Accept-Language: en", "User-Agent: NovaLogic IBrowse 2.0", "Pragma: no-cache"};
-	for (const std::string &line : jar_.cookie_header_lines()) {
+	for (const std::string &line : jar().cookie_header_lines()) {
 		h.push_back("Cookie: " + line);
 	}
 	return h;
@@ -640,7 +639,7 @@ std::vector<std::string> LobbyHttpFlow::post_headers(std::size_t content_length)
 	std::vector<std::string> h{"Accept: text/html", "Accept-Language: en",
 			"User-Agent: NovaLogic IBrowse 2.0", "Content-Length: " + std::to_string(content_length),
 			"Content-type: application/x-www-form-urlencoded"};
-	for (const std::string &line : jar_.cookie_header_lines()) {
+	for (const std::string &line : jar().cookie_header_lines()) {
 		h.push_back("Cookie: " + line);
 	}
 	return h;
@@ -652,7 +651,7 @@ std::vector<std::string> LobbyHttpFlow::post_headers(std::size_t content_length)
 //  CookieJar_UpdateFromURL called @0x6596DD only when it holds an entry (@0x6596D1)]
 void LobbyHttpFlow::merge_response_cookies(const std::vector<std::string> &response_headers) {
 	const std::vector<CookieEntry> batch = parse_set_cookie_headers(response_headers);
-	if (!batch.empty()) jar_.update(batch);
+	if (!batch.empty()) jar().update(batch);
 }
 
 // The identity set as the jar takes it, ahead of every cookie a page sets. Two writers fill it
@@ -688,7 +687,7 @@ std::vector<std::pair<std::string, std::string>> LobbyHttpFlow::identity_seed() 
 void LobbyHttpFlow::seed_identity_cookies() {
 	if (identity_seeded_) return;
 	identity_seeded_ = true;
-	for (const auto &kv : identity_seed()) jar_.set(kv.first, kv.second);
+	for (const auto &kv : identity_seed()) jar().set(kv.first, kv.second);
 }
 
 // The Cookie var-list reads the browser jar at use, then overlays the locale three when
@@ -699,7 +698,7 @@ void LobbyHttpFlow::seed_identity_cookies() {
 //  called @0x4CE3E5), the +0x33C test @0x4CE44E / @0x4CE455, CountryName @0x4CE46B, Language
 //  @0x4CE480, TimeZoneBias @0x4CE4AC]
 std::vector<std::pair<std::string, std::string>> LobbyHttpFlow::session_cookie_vars() const {
-	CookieJar cookies = jar_;
+	CookieJar cookies = jar();
 	for (const auto &kv : identity_seed()) {
 		if (!cookies.find(kv.first) || is_locale_identity_var(kv.first)) cookies.set(kv.first, kv.second);
 	}
@@ -784,7 +783,7 @@ EnterResult LobbyHttpFlow::on_enter_response(bool transport_ok, int code,
 				show_home_page();
 				EnterResult r;
 				r.kind = EnterResult::Kind::Lobby;
-				const std::string *nh = jar_.find("NWHANDLE");
+				const std::string *nh = jar().find("NWHANDLE");
 				r.nwhandle = nh != nullptr ? *nh : std::string();
 				return r;
 			}
@@ -837,7 +836,7 @@ LoginResult LobbyHttpFlow::login(const std::string &username, const std::string 
 //  ahead of the callback chain: CWnd_EmitEventToNamedHandlerAndCallbacks @0x646970 - the handler
 //  @0x64698E, the chain from @0x6469C2)]
 LoginResult LobbyHttpFlow::submit_sign_in() {
-	if (sign_in_submit_is_login()) login_button_pressed_ = true;
+	if (sign_in_submit_is_login()) browser_->login_button_pressed = true;
 	// The sign-in page an entry landed on is the page shown: its submit posts its form under the
 	// EPASK the start page set, with no second open of the startup URL.
 	if (sign_in_page_shown_) return post_shown_sign_in();
@@ -898,11 +897,14 @@ LoginResult LobbyHttpFlow::login_remembered() {
 void LobbyHttpFlow::fill_remembered_login() {
 	remembered_name_.clear();
 	remember_fill_.clear();
+	// The REMEMBER_LOGIN checkbox takes game.cfg's rememberlogin at every activation, the scene's
+	// property with it (retail sets it after the fill, which reads nothing of it).
+	browser_->remember_login_checked = ctx_.remember_login;
 	if (!ctx_.remember_login) return;
 	constexpr std::size_t kCookieCopy = 0x1FF;
 	constexpr std::size_t kDecodedRoom = 0x200;
 	std::string cookie;
-	if (const std::string *value = jar_.find("PERSISTENTREMEMBERLOGINDATA")) cookie = value->substr(0, kCookieCopy);
+	if (const std::string *value = jar().find("PERSISTENTREMEMBERLOGINDATA")) cookie = value->substr(0, kCookieCopy);
 	std::string account, second;
 	if (!decode_key_value(cookie, kRememberedLoginKeyChain, account, second, kDecodedRoom, kDecodedRoom))
 		return;
@@ -913,8 +915,8 @@ void LobbyHttpFlow::fill_remembered_login() {
 	// [orig: UI_LoadPersistentLoginCredentials @0x557330 - g_LoginButtonPressed tested @0x5573C7,
 	//  CUIBrowser_AddFormField(PERSISTENTREMEMBERLOGINDATA, "") called @0x557421, the jar's
 	//  store (CookieJar::update) taking it]
-	if (login_button_pressed_) {
-		jar_.set("PERSISTENTREMEMBERLOGINDATA", std::string());
+	if (browser_->login_button_pressed) {
+		jar().set("PERSISTENTREMEMBERLOGINDATA", std::string());
 		return;
 	}
 	remember_fill_ = cookie;
@@ -922,7 +924,26 @@ void LobbyHttpFlow::fill_remembered_login() {
 
 // See http_flow.h.
 void LobbyHttpFlow::show_home_page() {
-	login_button_pressed_ = false;
+	save_jar_file();
+	browser_->login_button_pressed = false;
+}
+
+// See http_flow.h. The title test is the one on_host_response's HOSTKEY branch makes.
+void LobbyHttpFlow::save_at_connect_page(const std::string &html) {
+	const std::string title = page_title(html);
+	std::size_t start = 0;
+	while (start < title.size() && !std::isalpha(static_cast<unsigned char>(title[start])) &&
+	       title[start] != '[')
+		++start;
+	const std::string_view head = std::string_view(title).substr(start);
+	if (strutil::starts_with_icase(head, "[NK=") || strutil::starts_with_icase(head, "[HOSTKEY="))
+		save_jar_file();
+}
+
+void LobbyHttpFlow::save_jar_file() {
+	std::string error;
+	if (!browser_->save(error))
+		opennova::io::logf(opennova::io::LogLevel::kWarn, "nw_cdata.coo: %s", error.c_str());
 }
 
 // The jar's EPASK bundle, which the sign-in page's submit encrypts its fields under, with the
@@ -930,7 +951,7 @@ void LobbyHttpFlow::show_home_page() {
 // <= 258 or a non-positive exponent): refused here, before any request, rather than at the
 // post's body.
 std::string LobbyHttpFlow::take_epask(const std::vector<uint8_t> &page) {
-	const std::string *epask = jar_.find("EPASK");
+	const std::string *epask = jar().find("EPASK");
 	if (epask == nullptr || epask->empty()) {
 		const std::string message = extract_message(page);
 		return message.empty() ? std::string("server issued no EPASK cookie") : message;
@@ -1049,7 +1070,7 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 				return login_post(ib3_form_inputs(to_string_body(body), kSignInForm));
 			}
 			case LoginStep::Post: {
-				const std::string *tag = jar_.find("LOGINSESSIONTAG");
+				const std::string *tag = jar().find("LOGINSESSIONTAG");
 				if (tag == nullptr || tag->empty()) {
 					login_step_ = LoginStep::Idle;
 					const std::string message = extract_message(body);
@@ -1072,8 +1093,8 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 			}
 			case LoginStep::Poll:
 			default: {
-				const std::string *nh = jar_.find("NWHANDLE");
-				const std::string *pc = jar_.find("PCID");
+				const std::string *nh = jar().find("NWHANDLE");
+				const std::string *pc = jar().find("PCID");
 				if (nh && !nh->empty()) {
 					login_step_ = LoginStep::Idle;
 					show_home_page();
@@ -1188,6 +1209,8 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 		return join_fail("join HTTP failed (code " + std::to_string(code) + ")");
 	}
 	merge_response_cookies(response_headers);
+	// A page whose title is a connect string saves the jar ahead of its parse.
+	save_at_connect_page(to_string_body(body));
 
 	switch (step) {
 		case JoinStep::First: {
@@ -1238,7 +1261,7 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 			r.app_id = conn.app_id;  // the game-session APPID join token (decoded CK)
 			// The PUB* identity cookies the authenticated login/NWJoin set, packed
 			// as the CD blob the 0x00 JOIN relays (host code 23).
-			r.cd_cookie = jar_.build_prefixed_blob("PUB");
+			r.cd_cookie = jar().build_prefixed_blob("PUB");
 			// The .joi page refreshes (JO's to jop_2_jend.htm, "10;"), and the menu browser follows
 			// it at its next frame whatever the delay: the page's delay, in seconds, is stored where
 			// the frame's test reads a GetTickCount deadline, so the test passes at once (the LN S1b
@@ -1262,7 +1285,7 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 					r.cd_cookie.size(),
 					[&] {
 						size_t n = 0;
-						for (const CookieEntry &entry : jar_.entries())
+						for (const CookieEntry &entry : jar().entries())
 							if (entry.name.rfind("PUB", 0) == 0) ++n;
 						return n;
 					}());
@@ -1345,8 +1368,8 @@ HostKeyResult LobbyHttpFlow::host_get(const std::string &url) {
 //  @0x556F36, ahead of CUIScene_FindNamedValue called @0x556F46]
 HostKeyResult LobbyHttpFlow::host(const std::string &expansion) {
 	if (host_active()) return host_fail("host already in flight");
-	jar_.set("PLoad", "");
-	jar_.set("EXP", expansion);
+	jar().set("PLoad", "");
+	jar().set("EXP", expansion);
 	const std::string *host_url = browser_global("@HOST_URL@");
 	if (host_url == nullptr || host_url->empty())
 		return host_fail("the NovaWorld main page set no @HOST_URL@ — log in first");
@@ -1379,6 +1402,8 @@ HostKeyResult LobbyHttpFlow::on_host_response(bool transport_ok, int code,
 	merge_response_cookies(response_headers);
 	capture_globals(body);
 	const std::string html = to_string_body(body);
+	// A page whose title is a connect string saves the jar ahead of its parse.
+	save_at_connect_page(html);
 	// The title test skips leading characters that are neither a letter nor '[', then compares
 	// case-insensitively. [orig: UI_ProcessWebResponseContent @0x63d5bb..0x63d604]
 	const std::string title = page_title(html);

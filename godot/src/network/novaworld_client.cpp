@@ -35,6 +35,7 @@
 #include <net/novaworld/gate_response.h>
 #include <net/novaworld/gsb.h>
 #include <net/novaworld/http_flow.h>
+#include <net/novaworld/lobby_identity.h> // read_retail_machine_inputs (the jar file's volume key)
 #include <net/novaworld/lobby_vars.h>
 #include <net/novaworld/ping_sweep.h>
 #include <net/novaworld/proxy_rendezvous.h>
@@ -83,7 +84,11 @@ const char *state_name(NovaWorldClient::State s) {
 } // namespace
 
 NovaWorldClient::NovaWorldClient() :
-		lobby_(make_lobby_hooks(), make_lobby_environment()), host_role_(lobby_, make_host_hooks()) {}
+		lobby_(make_lobby_hooks(), make_lobby_environment()), host_role_(lobby_, make_host_hooks()) {
+	// The menu browser's jar is the process's: every panel's client and every session share it
+	// (engine: MenuBrowserState).
+	flow_.share_browser(opennova::process_menu_browser());
+}
 // A hosted match may still hold the shared pump: its demux must not call into
 // this lobby once it is gone.
 NovaWorldClient::~NovaWorldClient() {
@@ -111,6 +116,10 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("disconnect_at_exit"), &NovaWorldClient::disconnect_at_exit);
 	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("forget_gate_response"),
 			&NovaWorldClient::forget_gate_response);
+	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("create_cookie_jar", "dir"),
+			&NovaWorldClient::create_cookie_jar);
+	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("save_cookie_jar"),
+			&NovaWorldClient::save_cookie_jar);
 	ClassDB::bind_method(D_METHOD("get_glsvss_request"), &NovaWorldClient::get_glsvss_request);
 	ClassDB::bind_method(D_METHOD("get_session_player_name", "profile_name"),
 			&NovaWorldClient::get_session_player_name);
@@ -424,6 +433,22 @@ void NovaWorldClient::start() {
 
 void NovaWorldClient::forget_gate_response() {
 	opennova::process_gate_memory().forget();
+}
+
+// The key is the current directory's volume's, as retail's GetVolumeInformationA on a null root
+// reads it (engine: read_retail_machine_inputs; off Windows it reads nothing and the key is the
+// fingerprint of an all-zero volume).
+void NovaWorldClient::create_cookie_jar(const String &p_dir) {
+	opennova::RetailMachineInputs volume;
+	opennova::read_retail_machine_inputs(volume);
+	opennova::process_menu_browser().create(
+			opennova::to_std(p_dir.path_join(opennova::kCookieJarFileName)), opennova::cookie_jar_key(volume));
+}
+
+void NovaWorldClient::save_cookie_jar() {
+	std::string error;
+	if (!opennova::process_menu_browser().save(error))
+		UtilityFunctions::push_warning(String("NovaWorldClient: ") + opennova::to_gd(error));
 }
 
 namespace {
