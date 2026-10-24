@@ -184,6 +184,30 @@ public:
 			int64_t p_layout_revision);
 	void present_wire_rows_view(PresentRowsView p_snap, int p_stride,
 			int64_t p_layout_revision);
+	// The wire walk's parts, timed (an instrument with no behaviour: MissionRoot takes it in
+	// place of present_wire_rows_view while the frame-stats board captures, for the F3 wire
+	// rows and the --verbose SessionLeg line). Nanoseconds per part; the rows' walk total
+	// beside them, whose remainder past the parts is the walk's own loop.
+	enum WireProfilePart {
+		WIRE_PROFILE_PLAN = 0,
+		WIRE_PROFILE_POSE,
+		WIRE_PROFILE_CTRL,
+		WIRE_PROFILE_BODY,
+		WIRE_PROFILE_WEAPON,
+		WIRE_PROFILE_SOUNDS,
+		WIRE_PROFILE_HELD,
+		WIRE_PROFILE_VIEWS,
+		WIRE_PROFILE_CULLED,
+		WIRE_PROFILE_PART_COUNT,
+	};
+	struct WireProfile {
+		int64_t ns[WIRE_PROFILE_PART_COUNT] = {};
+		int64_t walk_ns = 0;
+		int64_t rows = 0;
+		int64_t cold_plans = 0;
+	};
+	WireProfile profile_present_wire_rows_view(PresentRowsView p_snap, int p_stride,
+			int64_t p_layout_revision);
 
 	// The occlusion frame's render-gate verdict for one wire row (the
 	// collector gate the placed rows get by bms id). A culled row's node
@@ -747,6 +771,8 @@ private:
 	// The cold walk's instrument (--verbose): the new rows' first presents timed apart.
 	bool wire_profile_first_presents_ = false;
 	uint64_t wire_first_present_usec_ = 0;
+	// The parts' instrument (profile_present_wire_rows_view): set for that one walk.
+	WireProfile *wire_profile_ = nullptr;
 	int64_t last_present_logic_tick_ = -1;
 	int64_t stat_spawned_ = 0;
 	int64_t stat_unresolved_ = 0;

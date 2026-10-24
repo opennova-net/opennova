@@ -80,6 +80,7 @@
     X(OCCL_WATER_APPLY, "final blink-water visibility write") \
     /* MissionRoot legs */ \
     X(SIM_STEP, "sim.step() total, summed over the frame's logic ticks") \
+    X(SIM_ADVANCE, "Simulation.advance_session_frame total: the session frame (its ticks and their sinks, the bank, each update's input frame, the render legs) and its outcome's marshalling") \
     X(SIM_NET, "native wire leg of step: the joiner's recv/uplink pump, or the host's local ClientState decode/fold") \
     X(SIM_HOST_PREP, "viewport/input/request setup before the portable host pump") \
     X(SIM_HOST_PUMP, "complete inmatch host owner iteration") \
@@ -186,6 +187,17 @@
     X(PRESENT_WIRE, "EntityPresenter wire walk (present_snapshot)") \
     X(PRESENT_WIRE_LIVE, "VALUE: wire-direct nodes alive (EntityPresenter wire walk)") \
     X(PRESENT_WIRE_PENDING, "VALUE: wire rows still owed a cold spawn") \
+    X(PRESENT_WIRE_PLAN, "the wire walk's plan: its currency check, or the cold re-plan with its spawns, the retire sweep and the spectator framing") \
+    X(PRESENT_WIRE_POSE, "wire rows: the ragdoll note, the husk, parachute, march, terrain and destroy stamps, the transform compose and write, the right-hand collapse, the aim overlay") \
+    X(PRESENT_WIRE_CTRL, "wire rows: the CTRL/PART block (procedural part phases, the CTRL writers)") \
+    X(PRESENT_WIRE_BODY, "wire rows: the respawn reset and the remote body animation dispatch / blend ticks") \
+    X(PRESENT_WIRE_WEAPON, "wire rows: the upper-body weapon channel dispatch") \
+    X(PRESENT_WIRE_SOUNDS, "wire rows: the remote-body footstep / foley walk") \
+    X(PRESENT_WIRE_HELD, "wire rows: the held weapon (the skeleton walk, the bone-16 attach, its transform) and the item overlays") \
+    X(PRESENT_WIRE_VIEWS, "wire rows: the section mask, the per-view verdicts and the node visibility") \
+    X(PRESENT_WIRE_CULLED, "wire rows: the collector-culled rows' legs") \
+    X(PRESENT_WIRE_ROWS, "VALUE: wire rows the walk presented") \
+    X(PRESENT_WIRE_COLD_PLANS, "VALUE: the wire walk's cold re-plans (the plan was not current)") \
     X(PRESENT_FIRE, "") \
     X(PRESENT_DESTRUCTION, "") \
     X(PRESENT_THROWABLE, "") \

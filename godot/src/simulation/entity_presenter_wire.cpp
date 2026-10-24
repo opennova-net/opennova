@@ -17,6 +17,8 @@
 #include "object/object_data.h"
 #include "world/scar_presenter.h"
 
+#include <chrono>
+
 // The WIRE (joiner/MP) walk: the COLD path (spawn/defer/unresolved
 // bookkeeping, the liveness prune, held-weapon builds, the spawn signal and
 // stats — the former WirePresentPass) followed by the per-row hot walk (the
@@ -149,6 +151,27 @@ bool leg_inputs_unchanged(const float *p, int base, const int *fields,
 	cache_valid = true;
 	return false;
 }
+
+// The wire walk's parts clock (profile_present_wire_rows_view, an instrument): one steady_clock
+// read in nanoseconds, so a part shorter than a microsecond still sums.
+int64_t wire_profile_now_ns() {
+	return static_cast<int64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+			std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+// Laps one row's legs onto the walk's parts; no clock read without a profile.
+struct WireLap {
+	EntityPresenter::WireProfile *profile;
+	int64_t last;
+	explicit WireLap(EntityPresenter::WireProfile *p_profile) :
+			profile(p_profile), last(p_profile != nullptr ? wire_profile_now_ns() : 0) {}
+	void mark(int p_part) {
+		if (profile == nullptr) return;
+		const int64_t now = wire_profile_now_ns();
+		profile->ns[p_part] += now - last;
+		last = now;
+	}
+};
 
 } // namespace
 
@@ -379,6 +402,19 @@ void EntityPresenter::register_wire_held_weapon(int p_handle, ObjectModel *p_nod
 	apply_lighting_context(p_handle);
 }
 
+EntityPresenter::WireProfile EntityPresenter::profile_present_wire_rows_view(
+		PresentRowsView p_snap, int p_stride, int64_t p_layout_revision) {
+	WireProfile profile;
+	wire_profile_ = &profile;
+	const int64_t start = wire_profile_now_ns();
+	present_wire_rows_view(p_snap, p_stride, p_layout_revision);
+	const int64_t total = wire_profile_now_ns() - start;
+	wire_profile_ = nullptr;
+	// The plan is the walk's time outside its rows' walk.
+	profile.ns[WIRE_PROFILE_PLAN] = total - profile.walk_ns;
+	return profile;
+}
+
 void EntityPresenter::present_wire_snapshot(const PackedFloat32Array &p_snap,
 		int p_stride, int64_t p_layout_revision) {
 	present_wire_rows_view({p_snap.ptr(), p_snap.size()}, p_stride, p_layout_revision);
@@ -410,6 +446,7 @@ void EntityPresenter::present_wire_rows_view(PresentRowsView p_snap,
 	}
 	begin_wire_plan(p_layout_revision, p_stride, p_snap.size(),
 			index_generation, local_handle);
+	if (wire_profile_ != nullptr) ++wire_profile_->cold_plans;
 	const float *snap = p_snap.ptr();
 	const int count = int(p_snap.size() / p_stride);
 	HashMap<int32_t, bool> live;
@@ -861,6 +898,7 @@ void EntityPresenter::reset_wire_plan_state() {
 void EntityPresenter::present_wire_rows(PresentRowsView snap,
 		int stride, int tick_delta) {
 	const int64_t size = snap.size();
+	const int64_t walk_start = wire_profile_ != nullptr ? wire_profile_now_ns() : 0;
 	for (WireRow &row : wire_rows_) {
 		if (row.base < 0 || row.base + stride > size) {
 			continue;
@@ -870,6 +908,7 @@ void EntityPresenter::present_wire_rows(PresentRowsView snap,
 		if (model == nullptr) {
 			continue;
 		}
+		if (wire_profile_ != nullptr) ++wire_profile_->rows;
 		if (wire_profile_first_presents_ && row.spawned_now) {
 			// A new row's first present, timed apart (the cold walk's instrument).
 			const uint64_t start = Time::get_singleton()->get_ticks_usec();
@@ -880,6 +919,7 @@ void EntityPresenter::present_wire_rows(PresentRowsView snap,
 		}
 		row.spawned_now = false;
 	}
+	if (wire_profile_ != nullptr) wire_profile_->walk_ns += wire_profile_now_ns() - walk_start;
 }
 
 void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
@@ -888,6 +928,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 			"ctrl leg field table must match the row cache size");
 	const float *p = snap.ptr();
 	const int base = row.base;
+	WireLap lap(wire_profile_);
 	note_ragdoll_row(model, row.handle, p, base);
 	// A row the occlusion frame's collector gate culled is not drawn: no
 	// presentation leg runs for it (the sector walk only visits collected
@@ -928,6 +969,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 			apply_wire_body_anim(row, model, snap, tick_delta);
 		}
 		present_wire_row_body_sounds(row, snap);
+		lap.mark(WIRE_PROFILE_CULLED);
 		return;
 	}
     if (wfield_i(p, base, Simulation::PF_HUSK) != 0) {
@@ -987,6 +1029,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 		}
 		row.aim_valid = aim_valid;
 	}
+	lap.mark(WIRE_PROFILE_POSE);
 	// The CTRL/PART block is input-gated as one unit: every field all four
 	// semantic writers, the focal sway and both procedural part channels
 	// consume sits in kCtrlLegFields, so an unchanged set means the node's presenter-owned
@@ -1005,6 +1048,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 		wire_controls_apply(model, snap, base);
 		model->end_ctrl_update();
 	}
+	lap.mark(WIRE_PROFILE_CTRL);
 	if (respawned_since_present) {
 		model->reset_remote_body_state();
 		row.anim_state = -2; // force the next body-anim dispatch through
@@ -1023,6 +1067,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 		row.foot_phase = -1;
 	}
 	apply_wire_body_anim(row, model, snap, tick_delta);
+	lap.mark(WIRE_PROFILE_BODY);
 	// The upper-body weapon channel: the hold pose this player's held weapon and
 	// scope state select. -1 means no channel this frame, which clears any pose
 	// left over from the weapon it was holding before. Dispatch is gated on the
@@ -1065,7 +1110,9 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 			row.wpn_src_variant = wpn_src_variant;
 		}
 	}
+	lap.mark(WIRE_PROFILE_WEAPON);
 	present_wire_row_body_sounds(row, snap);
+	lap.mark(WIRE_PROFILE_SOUNDS);
 	const bool next_visible =
 			wfield_i(p, base, Simulation::PF_HIDDEN) == 0 &&
 			wfield_i(p, base, Simulation::PF_LOCAL_VIEW_SUPPRESSED) == 0;
@@ -1074,8 +1121,10 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 	// transition releases once, and never-publishing rows leave the channel to
 	// its other writer (the occlusion frame pass on buildings).
 	stamp_section_mask(model, p, base, row.destroyed_section_mask);
+	lap.mark(WIRE_PROFILE_VIEWS);
 	update_wire_held_weapon(row, model, snap, next_visible);
 	update_wire_person_overlays(row, model, snap, next_visible);
+	lap.mark(WIRE_PROFILE_HELD);
 	wire_respawn_revisions_.insert(row.handle, respawn_revision);
 	// Each view's collector verdict on the body and its held gun (drawn
 	// inside the body's submit): the node keeps the main view's, the Inset's
@@ -1090,6 +1139,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 	if (model->is_visible() != node_visible) {
 		model->set_visible(node_visible);
 	}
+	lap.mark(WIRE_PROFILE_VIEWS);
 }
 
 void EntityPresenter::apply_wire_row_views(const WireRow &row, ObjectModel *model,

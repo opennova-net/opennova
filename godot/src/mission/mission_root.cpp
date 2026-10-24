@@ -740,11 +740,30 @@ void MissionRoot::present_entity_rows(bool p_stats_on) {
 		presenter->present_rows(rows, stride, layout_revision, door_phases.data(),
 				static_cast<int64_t>(door_phases.size()));
 	}
-	// The wire walk is a no-op until setup_wire ran (a placer-less preview).
-	const int64_t wire_start = p_stats_on ? now_usec() : 0;
-	presenter->present_wire_rows_view(rows, stride, layout_revision);
-	if (p_stats_on) {
+	// The wire walk is a no-op until setup_wire ran (a placer-less preview). Under capture its
+	// parts are timed too (EntityPresenter::profile_present_wire_rows_view, an instrument).
+	if (!p_stats_on) {
+		presenter->present_wire_rows_view(rows, stride, layout_revision);
+	} else {
+		const int64_t wire_start = now_usec();
+		const EntityPresenter::WireProfile wire =
+				presenter->profile_present_wire_rows_view(rows, stride, layout_revision);
 		frame_stats_->add(FrameStats::PRESENT_WIRE, now_usec() - wire_start);
+		static constexpr int kWireParts[EntityPresenter::WIRE_PROFILE_PART_COUNT] = {
+			FrameStats::PRESENT_WIRE_PLAN,
+			FrameStats::PRESENT_WIRE_POSE,
+			FrameStats::PRESENT_WIRE_CTRL,
+			FrameStats::PRESENT_WIRE_BODY,
+			FrameStats::PRESENT_WIRE_WEAPON,
+			FrameStats::PRESENT_WIRE_SOUNDS,
+			FrameStats::PRESENT_WIRE_HELD,
+			FrameStats::PRESENT_WIRE_VIEWS,
+			FrameStats::PRESENT_WIRE_CULLED,
+		};
+		for (int part = 0; part < EntityPresenter::WIRE_PROFILE_PART_COUNT; ++part)
+			frame_stats_->add(kWireParts[part], wire.ns[part] / 1000);
+		frame_stats_->add(FrameStats::PRESENT_WIRE_ROWS, wire.rows);
+		frame_stats_->add(FrameStats::PRESENT_WIRE_COLD_PLANS, wire.cold_plans);
 		const Ref<WirePresentStats> wire_stats = presenter->get_wire_stats_record();
 		frame_stats_->add(FrameStats::PRESENT_WIRE_LIVE, wire_stats->live);
 		frame_stats_->add(FrameStats::PRESENT_WIRE_PENDING, wire_stats->pending);
@@ -809,10 +828,13 @@ bool MissionRoot::tick() {
 	input.instantiate();
 	input->set_delta_seconds(Simulation::tick_dt());
 	Ref<MissionFrameOutcome> outcome;
+	const bool stats_on = stats_capture_on();
+	const int64_t advance_start = stats_on ? now_usec() : 0;
 	{
 		TickSinkScope sink(sim_.ptr(), this);
 		outcome = sim_->step_session_frame(input);
 	}
+	if (stats_on) frame_stats_->add(FrameStats::SIM_ADVANCE, now_usec() - advance_start);
 	read_frame_perf(outcome);
 	if (outcome.is_valid() && !outcome->is_terminal() && outcome->did_tick()) {
 		present_session_frame(true);
@@ -924,10 +946,16 @@ Ref<MissionFrameOutcome> MissionRoot::advance_session_frame(
 		presenter->set_listener_position(p_input->get_camera_position());
 	}
 	Ref<MissionFrameOutcome> outcome;
+	// The session frame's whole call, its ticks and their sinks inside (an instrument: the
+	// remainder past them is the bank, the updates' input frames, the render legs and the
+	// outcome's marshalling).
+	const bool stats_on = stats_capture_on();
+	const int64_t advance_start = stats_on ? now_usec() : 0;
 	{
 		TickSinkScope sink(sim_.ptr(), this);
 		outcome = sim_->advance_session_frame(p_input);
 	}
+	if (stats_on) frame_stats_->add(FrameStats::SIM_ADVANCE, now_usec() - advance_start);
 	read_frame_perf(outcome);
 	if (outcome.is_null() || outcome->is_terminal()) {
 		return outcome;

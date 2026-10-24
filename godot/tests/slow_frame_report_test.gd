@@ -73,3 +73,32 @@ func test_the_post_load_frames_run_on_to_a_joiners_first_uplink() -> void:
 	assert_true(GameWorld.post_load_frames_continue(8, true), "a joiner awaiting its first 0x0C runs on")
 	assert_true(GameWorld.post_load_frames_continue(119, true), "up to the cap")
 	assert_false(GameWorld.post_load_frames_continue(120, true), "never past the cap")
+
+
+# The SessionLeg line: a session window's means per frame, the session-leg slots in the board's
+# order (world_runtime first), then the remainders past their parts: the session frame past its
+# ticks and sinks, the sim step past its phases, the wire walk past its parts, the session leg
+# past the session frame and the present walks.
+func test_the_session_leg_line_gives_the_parts_and_their_remainders_per_frame() -> void:
+	var sums := PackedInt64Array()
+	sums.resize(FrameStats.SLOT_COUNT)
+	sums.fill(0)
+	var amounts := {
+		FrameStats.FRAME_WALL: 160_000, FrameStats.WORLD_RUNTIME: 80_000,
+		FrameStats.SIM_STEP: 28_000, FrameStats.SIM_ADVANCE: 40_000, FrameStats.SIM_NET: 8_000,
+		FrameStats.SIM_CLIENT_WORLD: 12_000, FrameStats.SIM_SINK: 4_000,
+		FrameStats.PRESENT_SNAPSHOT: 4_000, FrameStats.PRESENT_WIRE: 32_000,
+		FrameStats.PRESENT_WIRE_PLAN: 4_000, FrameStats.PRESENT_WIRE_POSE: 12_000,
+		FrameStats.SIM_TICKS: 6, FrameStats.PRESENT_WIRE_ROWS: 3_200,
+		FrameStats.PRESENT_WIRE_COLD_PLANS: 1, FrameStats.SIM_ENTITY_COUNT: 900,
+	}
+	for slot: int in amounts:
+		sums[slot] = amounts[slot]
+	assert_eq(SlowFrameReport.session_leg_line(sums, 4, 9, 1000),
+			"SessionLeg: frame=9 unix_ms=1000 over 4 frame(s): wall 40.0 ms, updates 1.50, "
+			+ "wire rows 800, cold plans 1, per frame ms: world_runtime 20.00, sim_step 7.00, "
+			+ "sim_advance 10.00, sim_net 2.00, sim_client_world 3.00, sim_sink 1.00, "
+			+ "present_snapshot 1.00, present_wire 8.00, present_wire_plan 1.00, "
+			+ "present_wire_pose 3.00, session_frame_other 2.00, sim_step_other 2.00, "
+			+ "wire_other 4.00, runtime_other 1.00")
+	assert_eq(SlowFrameReport.session_leg_line(sums, 0, 9, 1000), "", "no frames, no line")

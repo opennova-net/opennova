@@ -46,7 +46,9 @@ inline constexpr Slot k_sim_unattributed[] = {Slot::SIM_HOST_PREP, Slot::SIM_HOS
 inline constexpr Slot k_trace[] = {Slot::TRACE_TERRAIN, Slot::TRACE_STATIC, Slot::TRACE_DYNAMIC, Slot::TRACE_PERSON};
 inline constexpr Slot k_present[] = {Slot::PRESENT_SNAPSHOT, Slot::PRESENT_MISSION, Slot::PRESENT_WIRE, Slot::PRESENT_FIRE, Slot::PRESENT_DESTRUCTION, Slot::PRESENT_THROWABLE, Slot::PRESENT_SCARS};
 inline constexpr Slot k_mission_rows_remainder[] = {Slot::PRESENT_MISSION_CORE, Slot::PRESENT_MISSION_AIM, Slot::PRESENT_MISSION_CONTROLS, Slot::PRESENT_MISSION_VISIBILITY, Slot::PRESENT_MISSION_BODY};
-inline constexpr Slot k_runtime_overhead[] = {Slot::SIM_STEP, Slot::SIM_SINK, Slot::PRESENT_SNAPSHOT, Slot::PRESENT_MISSION, Slot::PRESENT_WIRE, Slot::PRESENT_FIRE, Slot::PRESENT_DESTRUCTION, Slot::PRESENT_THROWABLE, Slot::PRESENT_SCARS};
+inline constexpr Slot k_session_frame_other[] = {Slot::SIM_STEP, Slot::SIM_SINK};
+inline constexpr Slot k_wire_rows_remainder[] = {Slot::PRESENT_WIRE_PLAN, Slot::PRESENT_WIRE_POSE, Slot::PRESENT_WIRE_CTRL, Slot::PRESENT_WIRE_BODY, Slot::PRESENT_WIRE_WEAPON, Slot::PRESENT_WIRE_SOUNDS, Slot::PRESENT_WIRE_HELD, Slot::PRESENT_WIRE_VIEWS, Slot::PRESENT_WIRE_CULLED};
+inline constexpr Slot k_runtime_overhead[] = {Slot::SIM_ADVANCE, Slot::PRESENT_SNAPSHOT, Slot::PRESENT_MISSION, Slot::PRESENT_WIRE, Slot::PRESENT_FIRE, Slot::PRESENT_DESTRUCTION, Slot::PRESENT_THROWABLE, Slot::PRESENT_SCARS};
 inline constexpr Slot k_occl[] = {Slot::OCCL_BUILD, Slot::OCCL_PROBE, Slot::OCCL_APPLY, Slot::OCCL_GLUE};
 inline constexpr Slot k_occl_apply_remainder[] = {Slot::OCCL_BUILDING_QUERY, Slot::OCCL_BUILDING_APPLY, Slot::OCCL_CULL_QUERY, Slot::OCCL_CULL_APPLY, Slot::OCCL_LIGHT_QUERY, Slot::OCCL_LIGHT_APPLY, Slot::OCCL_WATER_APPLY};
 inline constexpr Slot k_env[] = {Slot::WORLD_WEATHER, Slot::WORLD_BLINK, Slot::WORLD_IRIS};
@@ -166,6 +168,7 @@ inline constexpr StatsRow kRows[] = {
 	{"effects_drain", "Effects drain", 3, RowKind::SPAN, Slot::EFFECTS_DRAIN, nullptr, 0},
 	{"sim_sink", "Godot tick sink", 3, RowKind::SPAN, Slot::SIM_SINK, nullptr, 0},
 	{"effects", "Effects tick", 3, RowKind::SPAN, Slot::EFFECTS_TICK, nullptr, 0},
+	{"session_frame_other", "Session frame remainder (bank, input frames, render legs, marshalling)", 3, RowKind::RESIDUAL, Slot::SIM_ADVANCE, k_session_frame_other, 2},
 	{"present", "Present", 3, RowKind::GROUP, Slot::COUNT, k_present, 7},
 	{"snapshot", "Row snapshot", 4, RowKind::SPAN, Slot::PRESENT_SNAPSHOT, nullptr, 0},
 	{"snapshot_body", "Body columns", 5, RowKind::SPAN, Slot::PRESENT_SNAPSHOT_BODY, nullptr, 0},
@@ -177,11 +180,21 @@ inline constexpr StatsRow kRows[] = {
 	{"mission_rows_body", "Body pose", 5, RowKind::SPAN, Slot::PRESENT_MISSION_BODY, nullptr, 0},
 	{"mission_rows_remainder", "Mission-row orchestration remainder", 5, RowKind::RESIDUAL, Slot::PRESENT_MISSION, k_mission_rows_remainder, 5},
 	{"wire_rows", "Wire rows", 4, RowKind::SPAN, Slot::PRESENT_WIRE, nullptr, 0},
+	{"wire_plan", "Plan check / cold re-plan", 5, RowKind::SPAN, Slot::PRESENT_WIRE_PLAN, nullptr, 0},
+	{"wire_pose", "Stamps + transform + aim", 5, RowKind::SPAN, Slot::PRESENT_WIRE_POSE, nullptr, 0},
+	{"wire_ctrl", "CTRL/PART block", 5, RowKind::SPAN, Slot::PRESENT_WIRE_CTRL, nullptr, 0},
+	{"wire_body", "Remote body animation", 5, RowKind::SPAN, Slot::PRESENT_WIRE_BODY, nullptr, 0},
+	{"wire_weapon", "Weapon channel", 5, RowKind::SPAN, Slot::PRESENT_WIRE_WEAPON, nullptr, 0},
+	{"wire_sounds", "Body sounds", 5, RowKind::SPAN, Slot::PRESENT_WIRE_SOUNDS, nullptr, 0},
+	{"wire_held", "Held weapon + item overlays", 5, RowKind::SPAN, Slot::PRESENT_WIRE_HELD, nullptr, 0},
+	{"wire_views", "Section mask + view verdicts", 5, RowKind::SPAN, Slot::PRESENT_WIRE_VIEWS, nullptr, 0},
+	{"wire_culled", "Culled rows", 5, RowKind::SPAN, Slot::PRESENT_WIRE_CULLED, nullptr, 0},
+	{"wire_rows_remainder", "Wire-walk remainder", 5, RowKind::RESIDUAL, Slot::PRESENT_WIRE, k_wire_rows_remainder, 9},
 	{"fire", "Fire", 4, RowKind::SPAN, Slot::PRESENT_FIRE, nullptr, 0},
 	{"destruction", "Destruction", 4, RowKind::SPAN, Slot::PRESENT_DESTRUCTION, nullptr, 0},
 	{"throwable", "Throwable", 4, RowKind::SPAN, Slot::PRESENT_THROWABLE, nullptr, 0},
 	{"scars", "Scars", 4, RowKind::SPAN, Slot::PRESENT_SCARS, nullptr, 0},
-	{"runtime_overhead", "Session/presentation overhead", 3, RowKind::RESIDUAL, Slot::WORLD_RUNTIME, k_runtime_overhead, 9},
+	{"runtime_overhead", "Session/presentation overhead", 3, RowKind::RESIDUAL, Slot::WORLD_RUNTIME, k_runtime_overhead, 8},
 	{"local_view", "Local view publication", 2, RowKind::SPAN, Slot::WORLD_LOCAL_VIEW, nullptr, 0},
 	{"framefx", "Q3 compile", 2, RowKind::SPAN, Slot::WORLD_FRAMEFX, nullptr, 0},
 	{"scene_env", "Scene fog/ambient publication", 2, RowKind::SPAN, Slot::WORLD_SCENE_ENV, nullptr, 0},
