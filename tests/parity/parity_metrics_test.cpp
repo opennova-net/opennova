@@ -1563,17 +1563,29 @@ void test_integrity() {
 		// messages leave in queue order, so a 0x31 ahead of that 0x57 was computed before the
 		// apply. p260's drive OO host sent row 14 50 ms after the first 0x0C crossed, in one
 		// datagram ahead of its 0x57; behind the 0x57 the same row is a host divergence.
+		// Decoys pin the matcher's flag and time-word tests. The uplink datagram carries the
+		// joiner's answer to a host ping, [host ts][0], ahead of its own ping (p260's frame
+		// 257) [orig: NapiNPClientMsg_0x057_RTT @0x432210 (the flag cleared @0x43225C, the
+		// queue call @0x43226D)]. Ahead of the 0x31 ride the host's own ping to the slot,
+		// [ts][1] [orig: Server_TickUpdate @0x51D7E0 (the time @0x51E417, the flag @0x51E433,
+		// the send @0x51E450)], here in the joiner's millisecond (one machine's GetTickCount),
+		// and an answer to an older ping. A matcher that took the first 0x2C, a 0x57 with the
+		// ping's time words whatever its flag, or any answer would end the span there.
 		auto seed_window = [](bool pong_first) {
 			wire::ParityTrace trace = scripted(3);
 			const auto uplink = std::find_if(trace.events.begin(), trace.events.end(),
 					[](const wire::ParityEvent &e) { return e.dir == 'C' && e.full_tag == 0x00C; });
 			const uint64_t at = uplink->ts_ns + 8 * kMs; // the host's next datagram
-			wire::ParityEvent ping = *uplink;
-			ping.full_tag = 0x02C;
-			ping.material = true;
+			wire::ParityEvent answer = *uplink;
+			answer.full_tag = 0x02C;
+			answer.material = true;
+			answer.body = bytes({ 0x0D, 0x3E, 0x6B, 0x2B, 0 });
+			answer.length = answer.body.size();
+			wire::ParityEvent ping = answer;
 			ping.body = bytes({ 0x31, 0x3E, 0x6B, 0x2B, 1 });
-			ping.length = ping.body.size();
-			trace.events.insert(uplink, ping);
+			trace.events.insert(uplink, { answer, ping });
+			splice(trace, 'S', 0x057, at, bytes({ 0x31, 0x3E, 0x6B, 0x2B, 1 }));
+			splice(trace, 'S', 0x057, at, bytes({ 0x30, 0x3D, 0x6B, 0x2B, 0 }));
 			const std::vector<uint8_t> pong = bytes({ 0x31, 0x3E, 0x6B, 0x2B, 0 });
 			if (pong_first)
 				splice(trace, 'S', 0x057, at, pong);
