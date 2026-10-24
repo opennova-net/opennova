@@ -4396,7 +4396,7 @@ int test_header_values_cannot_split(Harness &h) {
 	TEST_EXPECT(split_free(reply));
 	TEST_EXPECT(has_set_cookie(reply, "VER1=; Path=/") && has_set_cookie(reply, "VER2=; Path=/"));
 	TEST_EXPECT(body_text(reply) ==
-			"http://127.0.0.1:" + std::to_string(h.port) + "/nwhost.dll|" +
+			"http://127.0.0.1:" + std::to_string(h.port) + "/jop_2_host1.htm|" +
 					"http://127.0.0.1:" + std::to_string(h.port) + "/jop_2.gsb");
 
 	// A stored nwhandle, and expansion bits an admin set: the retail login's
