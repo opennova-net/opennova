@@ -8,7 +8,6 @@
 #pragma once
 
 #include <base/io/strutil.h>
-#include <cctype>
 #include <cstdint>
 #include <string>
 #include <vector>

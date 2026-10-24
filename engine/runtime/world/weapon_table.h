@@ -7,7 +7,6 @@
 #pragma once
 
 #include <base/io/strutil.h>
-#include <cctype>
 #include <cstdint>
 #include <memory>
 #include <string>

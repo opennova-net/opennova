@@ -120,31 +120,23 @@ func test_a_framed_screen_draws_its_pieces_through_their_material() -> void:
 			"the fill, the box's fill cell and its eight pieces compile")
 	var pieces := frame.get_frame_piece_submissions()
 	assert_eq(pieces.size(), 8, "the box's eight border pieces reach the server")
-	# The material is a server canvas texture: a server with a RenderingDevice makes one per
-	# texture pair, the headless dummy server none (it hands back an empty RID).
-	var has_device := RenderingServer.get_rendering_device() != null
-	var material := RID()
+	# The material is a server canvas texture, which the headless dummy server does not make
+	# (it hands back an empty RID): its sharing and reuse are pinned on the device, by
+	# tests/windowed/menu_frame_piece_material_test.gd.
 	for piece in pieces:
 		var row := piece as Dictionary
 		# The stencil and the brush at their own sizes: the shader reads the brush's
 		# period off its size (its height across x, its width down y).
 		assert_eq((row["stencil"] as Texture2D).get_size(), Vector2(32, 32))
 		assert_eq((row["brush"] as Texture2D).get_size(), Vector2(16, 8))
-		if has_device:
-			assert_true((row["material"] as RID).is_valid(), "each piece binds its material")
-			if material.is_valid():
-				assert_eq(row["material"], material, "the pieces share the pair's one material")
-			material = row["material"]
 		assert_true((row["color"] as Color).is_equal_approx(Color8(0x7F, 0x7F, 0x7F, 0xFF)),
 				"the border diffuse 0xFF7F7F7F")
 		var uv := row["uv"] as Rect2
 		assert_true(uv.position.x >= 0.0 and uv.end.x <= 1.0 and uv.position.y >= 0.0
 				and uv.end.y <= 1.0, "the stencil cell's UVs: %s" % uv)
-	# A second draw makes no new material.
+	# A second draw submits the same eight pieces.
 	var again := frame.get_frame_piece_submissions()
 	assert_eq(again.size(), 8)
-	if has_device:
-		assert_eq((again[0] as Dictionary)["material"], material)
 
 
 func test_the_shader_runs_the_two_stage_border_branch() -> void:
