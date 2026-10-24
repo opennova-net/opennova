@@ -226,6 +226,11 @@ public:
 	// clamp are the engine's, re-exported for the shell's options owner.
 	void set_object_polydetail(int p_level) { object_polydetail_ = p_level; }
 	int get_object_polydetail() const { return object_polydetail_; }
+	// The options' aspect mode (renderer/aspect_ratio.h): the shell hands it over
+	// whenever it changes, and each mission start selects it for the local view
+	// ahead of the start's loads (LocalPlayerPresenter::prepare_view_projection).
+	void set_aspect_mode(int p_mode) { aspect_mode_ = p_mode; }
+	int get_aspect_mode() const { return aspect_mode_; }
 	int get_object_detail() const { return object_detail_; }
 	static int object_detail_fresh_profile();
 	static int clamp_object_detail(int p_level);
@@ -1135,6 +1140,8 @@ private:
 	// the LOD frames and the occlusion frame's death pieces read.
 	int object_polydetail_ = opennova::renderer::kObjectLodDetailFreshProfile;
 	int object_detail_ = opennova::renderer::kObjectLodDetailFreshProfile;
+	// The options' aspect mode (set_aspect_mode); -1 selects the surface's own ratio.
+	int aspect_mode_ = -1;
 	// The options' texfilter_level (set_texfilter_level) and the session's copy
 	// of it taken at each mission start; publish_texfilter_state hands both to
 	// the device leg (render/texture_filter_device).

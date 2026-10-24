@@ -943,7 +943,11 @@ float fov_vertical_from_horizontal_deg(float fov_h_deg, float aspect);
 // display-mode change); no mission start, teardown, map change or view without
 // a player makes or frees one, so a shell's target stands for it while its mode
 // is selected, held (drawing nothing) through every exit from live play, never
-// built again per mission.
+// built again per mission. The mode itself is selected at each mission start,
+// ahead of its loads: the start sets the stretch from the session's aspect mode
+// [orig: Game_StartMission @0x524360 - Render_SetAspectRatioMode @0x58D870 (the
+//  call @0x524732)], so a shell's target for that mode stands (held) from the
+// mission start on, and no live frame makes it.
 // [orig: Game_Run @0x4A7FB0 - Game_InitSubsystems @0x4A6CD0 (the call
 //  @0x4A7FD5); Game_InitSubsystems - Renderer_SetDisplayModeWithFallback
 //  @0x587370 (the call @0x4A722A); Renderer_SetDisplayModeWithFallback -

@@ -631,6 +631,16 @@ void GameWorld::copy_mission_start_options() {
 	// ragdoll/ragdoll_option.h).
 	ragdolls_.set_enabled(game_config_.is_valid() &&
 			opennova::ragdoll::ragdolls_enabled(game_config_->native().cfg().no_blood));
+	// The session's aspect mode selected for the local view, ahead of the start's loads,
+	// as retail's start sets its projection there over the backbuffer its device made at
+	// init (engine world/player_view.h ViewProjection carries the witness): the stretched
+	// target is made and held now, so no live frame makes it. A dedicated host draws no
+	// local view.
+	if (!drive_.pending_dedicated()) {
+		if (LocalPlayerPresenter *presenter = local_view_presenter()) {
+			presenter->prepare_view_projection(aspect_mode_);
+		}
+	}
 }
 
 // The mission start's head through its terrain, past the start's copies of the options

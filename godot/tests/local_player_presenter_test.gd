@@ -1194,6 +1194,67 @@ func test_a_teardown_holds_the_stretched_target_for_the_next_live_frame() -> voi
 			"the surface's own 3D draw yields to the target again")
 
 
+# Retail's mission start selects the session's aspect mode ahead of its loads, over the
+# backbuffer its device made at init (engine world/player_view.h ViewProjection carries the
+# witness), so no live frame makes a surface: the start makes the stretched target, held, and
+# the first live frame draws into that same target.
+func test_a_mission_start_makes_and_holds_the_stretched_target() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	var sim := world.get_sim()
+	var size := camera.get_viewport().get_visible_rect().size
+	if size.x <= 0.0 or size.y <= 0.0:
+		pending("the headless viewport reports no size, so no target can be pinned")
+		return
+	var surface_ratio := size.y / size.x
+	var mode := 0 if absf(surface_ratio - 0.75) > 0.001 else 2
+	presenter.prepare_view_projection(mode)
+	assert_null(presenter.projection_viewport(), "a held target is no reader's")
+	var target := presenter.get_node_or_null("ViewProjectionTarget") as SubViewport
+	assert_not_null(target, "the mission start makes the target for a mode off the surface ratio")
+	if target == null:
+		return
+	assert_eq(target.render_target_update_mode, SubViewport.UPDATE_DISABLED,
+			"the held target draws nothing")
+	assert_true(target.size.x >= int(size.x) and target.size.y >= int(size.y),
+			"it is the mode's target, never below the surface on either axis")
+	assert_false(camera.get_viewport().disable_3d, "the surface draws its own 3D meanwhile")
+	var blit := presenter.get_node_or_null("ViewProjectionBlit") as CanvasLayer
+	assert_true(blit != null and not blit.visible, "the held target's blit is hidden")
+	# A second start at the same mode keeps the one target.
+	presenter.prepare_view_projection(mode)
+	assert_true(presenter.get_node_or_null("ViewProjectionTarget") == target,
+			"the held target stands for the next start")
+	sim.set_local_player_aspect_mode(mode)
+	_frame(world, presenter, camera, 2)
+	assert_true(presenter.projection_viewport() == target,
+			"the first live frame draws into the target the start made")
+	assert_eq(target.render_target_update_mode, SubViewport.UPDATE_ALWAYS)
+
+
+func test_a_mission_start_at_the_surface_ratio_drops_a_held_target() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	var size := camera.get_viewport().get_visible_rect().size
+	if size.x <= 0.0 or size.y <= 0.0:
+		pending("the headless viewport reports no size, so no target can be pinned")
+		return
+	var mode := 0 if absf(size.y / size.x - 0.75) > 0.001 else 2
+	presenter.prepare_view_projection(mode)
+	var target := presenter.get_node_or_null("ViewProjectionTarget") as SubViewport
+	assert_not_null(target, "the mission start makes the target")
+	# -1 selects the surface's own ratio: nothing stretches, so no target stands.
+	presenter.prepare_view_projection(-1)
+	assert_true(target == null or target.is_queued_for_deletion(),
+			"a start at the surface's ratio drops the held target")
+
+
 func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_models() -> void:
 	# Retail draws the local body/held weapon separately from the near-Z first-person
 	# overlay [orig: Player_RenderFirstPersonViewModel @ 0x4ded60]. The hidden

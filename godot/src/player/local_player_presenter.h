@@ -101,6 +101,11 @@ public:
 	void setup(Node *p_world, Camera3D *p_camera, GameplayCamera *p_fly_camera = nullptr,
 			const Ref<ControlsModel> &p_controls = Ref<ControlsModel>());
 	void teardown();
+	// The mission start's selection of the session's aspect mode (GameWorld's start
+	// copies): the stretched target for that mode is made and held ahead of the
+	// first live frame, as retail's backbuffer stands before it (the definition
+	// carries the witness).
+	void prepare_view_projection(int p_aspect_mode);
 
 	// Drop the built FP viewmodel so the next update pass rebuilds
 	// gun/arms/FSM from the (changed) equipped weapon -- the armory ACCEPT
@@ -363,6 +368,8 @@ private:
 	void feed_virtual_display(bool p_live);
 	void update_view_projection(const opennova::world::ViewProjection &p_projection,
 			bool p_nvg_raster);
+	// The target, its camera and its blit, live (the caller holds it or sizes it).
+	SubViewport *make_view_projection_target();
 	// An exit from live play keeps the target (engine world/player_view.h
 	// ViewProjection: retail's backbuffer is made once): it stops drawing, the
 	// blit hides and the surface draws its own 3D again; the next live frame

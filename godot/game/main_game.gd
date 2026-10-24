@@ -167,6 +167,9 @@ func _on_player_options_changed(state: PlayerOptions.State) -> void:
 	if _world != null:
 		_world.set_object_polydetail(state.object_polydetail)
 		_world.set_texfilter_level(state.texfilter_level)
+		# The aspect mode each mission start selects for the local view (the
+		# stretched target made and held there, GameWorld.set_aspect_mode).
+		_world.set_aspect_mode(state.aspect_mode)
 		# The particle density, the texture compression and the terrain
 		# texture detail reach the next mission the world starts (its session
 		# copies, D-RMAT-24, D-RMAT-20).

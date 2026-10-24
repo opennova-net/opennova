@@ -1028,6 +1028,8 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_object_polydetail", "level"),
 			&GameWorld::set_object_polydetail);
 	ClassDB::bind_method(D_METHOD("get_object_polydetail"), &GameWorld::get_object_polydetail);
+	ClassDB::bind_method(D_METHOD("set_aspect_mode", "mode"), &GameWorld::set_aspect_mode);
+	ClassDB::bind_method(D_METHOD("get_aspect_mode"), &GameWorld::get_aspect_mode);
 	ClassDB::bind_method(D_METHOD("get_object_detail"), &GameWorld::get_object_detail);
 	ClassDB::bind_static_method("GameWorld", D_METHOD("object_detail_fresh_profile"),
 			&GameWorld::object_detail_fresh_profile);

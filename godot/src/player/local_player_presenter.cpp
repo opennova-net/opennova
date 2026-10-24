@@ -1005,9 +1005,84 @@ void LocalPlayerPresenter::update_scope_camera() {
 // surface's World3D, its own camera mirroring the gameplay camera at the
 // mode-invariant horizontal fov, and a CanvasLayer beneath the root canvas
 // blitting the target over the whole surface (whose own 3D draw is switched
-// off meanwhile). Built on the first stretched frame, sized and mirrored
-// every frame, released when the mode returns to the surface's ratio or the
-// player goes away.
+// off meanwhile). Made, held, by the mission start that selects the mode
+// (prepare_view_projection), else on the first stretched frame; sized and
+// mirrored every frame, released when the mode returns to the surface's ratio
+// or the player goes away.
+SubViewport *LocalPlayerPresenter::make_view_projection_target() {
+	release_view_projection();
+	SubViewport *target = memnew(SubViewport);
+	target->set_name("ViewProjectionTarget");
+	target->set_update_mode(SubViewport::UPDATE_ALWAYS);
+	target->set_clear_mode(SubViewport::CLEAR_MODE_ALWAYS);
+	target->set_disable_input(true);
+	add_child(target);
+	Camera3D *through = memnew(Camera3D);
+	through->set_name("ViewProjectionCamera");
+	through->set_keep_aspect_mode(Camera3D::KEEP_WIDTH);
+	target->add_child(through);
+	through->make_current();
+	CanvasLayer *blit_layer = memnew(CanvasLayer);
+	blit_layer->set_name("ViewProjectionBlit");
+	blit_layer->set_layer(kViewProjectionBlitLayer);
+	add_child(blit_layer);
+	TextureRect *blit = memnew(TextureRect);
+	blit->set_name("ViewProjectionImage");
+	blit->set_texture(target->get_texture());
+	blit->set_expand_mode(TextureRect::EXPAND_IGNORE_SIZE);
+	blit->set_stretch_mode(TextureRect::STRETCH_SCALE);
+	blit->set_texture_filter(CanvasItem::TEXTURE_FILTER_LINEAR);
+	blit->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+	blit->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
+	blit_layer->add_child(blit);
+	projection_viewport_id_ = ObjectID(target->get_instance_id());
+	projection_camera_id_ = ObjectID(through->get_instance_id());
+	projection_blit_layer_id_ = ObjectID(blit_layer->get_instance_id());
+	return target;
+}
+
+// The mission start's selection of the stretched mode: retail's frame draws through
+// the projection the start sets (Render_SetAspectRatioMode over the session's mode,
+// ahead of the start's loads) onto the backbuffer its device made at the game's init,
+// so no first frame makes a surface (engine world/player_view.h ViewProjection carries
+// both witnesses). The target stands for that backbuffer: the start makes it for the
+// mode it selects and holds it (drawing nothing, its blit hidden, the surface's own
+// 3D untouched), so the first live frame only draws into it; a held target of another
+// size is resized, and a mode at the surface's ratio drops it. A live target is the
+// frame's and stays as it is.
+void LocalPlayerPresenter::prepare_view_projection(int p_aspect_mode) {
+	Camera3D *cam = camera();
+	Viewport *surface = cam != nullptr ? cam->get_viewport() : nullptr;
+	if (surface == nullptr || !is_inside_tree() || projection_viewport() != nullptr) {
+		return;
+	}
+	const Vector2 size = surface->get_visible_rect().size;
+	if (size.x <= 0.0f || size.y <= 0.0f) {
+		return;
+	}
+	const opennova::world::ViewProjection projection = opennova::world::view_projection(
+			cam->get_fov(), p_aspect_mode, static_cast<int>(size.x), static_cast<int>(size.y));
+	if (Math::abs(projection.scale_y - 1.0f) < kViewProjectionUnstretched) {
+		release_view_projection();
+		return;
+	}
+	SubViewport *target = Object::cast_to<SubViewport>(ObjectDB::get_instance(held_projection_viewport_id_));
+	const bool held = target != nullptr &&
+			ObjectDB::get_instance(held_projection_camera_id_) != nullptr &&
+			ObjectDB::get_instance(held_projection_blit_layer_id_) != nullptr;
+	if (!held) {
+		target = make_view_projection_target();
+	}
+	const Vector2i target_size(projection.target_w, projection.target_h);
+	if (target->get_size() != target_size) {
+		target->set_size(target_size);
+	}
+	mirror_viewport_quality(surface, target);
+	if (!held) {
+		hold_view_projection();
+	}
+}
+
 void LocalPlayerPresenter::update_view_projection(const opennova::world::ViewProjection &p_projection,
 		bool p_nvg_raster) {
 	Camera3D *cam = camera();
@@ -1040,34 +1115,8 @@ void LocalPlayerPresenter::update_view_projection(const opennova::world::ViewPro
 		}
 	}
 	if (target == nullptr || through == nullptr) {
-		release_view_projection();
-		target = memnew(SubViewport);
-		target->set_name("ViewProjectionTarget");
-		target->set_update_mode(SubViewport::UPDATE_ALWAYS);
-		target->set_clear_mode(SubViewport::CLEAR_MODE_ALWAYS);
-		target->set_disable_input(true);
-		add_child(target);
-		through = memnew(Camera3D);
-		through->set_name("ViewProjectionCamera");
-		through->set_keep_aspect_mode(Camera3D::KEEP_WIDTH);
-		target->add_child(through);
-		through->make_current();
-		CanvasLayer *blit_layer = memnew(CanvasLayer);
-		blit_layer->set_name("ViewProjectionBlit");
-		blit_layer->set_layer(kViewProjectionBlitLayer);
-		add_child(blit_layer);
-		TextureRect *blit = memnew(TextureRect);
-		blit->set_name("ViewProjectionImage");
-		blit->set_texture(target->get_texture());
-		blit->set_expand_mode(TextureRect::EXPAND_IGNORE_SIZE);
-		blit->set_stretch_mode(TextureRect::STRETCH_SCALE);
-		blit->set_texture_filter(CanvasItem::TEXTURE_FILTER_LINEAR);
-		blit->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
-		blit->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
-		blit_layer->add_child(blit);
-		projection_viewport_id_ = ObjectID(target->get_instance_id());
-		projection_camera_id_ = ObjectID(through->get_instance_id());
-		projection_blit_layer_id_ = ObjectID(blit_layer->get_instance_id());
+		target = make_view_projection_target();
+		through = projection_camera();
 	}
 	// The NVG raster is retail's 512 square at the frame's frustum, its texels
 	// non-square: a projection the camera cannot draw on a square target, so
@@ -1319,6 +1368,8 @@ void LocalPlayerPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("setup", "world", "camera", "fly_camera", "controls"),
 			&LocalPlayerPresenter::setup, DEFVAL(Variant()), DEFVAL(Variant()));
 	ClassDB::bind_method(D_METHOD("teardown"), &LocalPlayerPresenter::teardown);
+	ClassDB::bind_method(D_METHOD("prepare_view_projection", "aspect_mode"),
+			&LocalPlayerPresenter::prepare_view_projection);
 	ClassDB::bind_method(D_METHOD("refresh_viewmodel"), &LocalPlayerPresenter::refresh_viewmodel);
 	ClassDB::bind_method(D_METHOD("viewmodel_generation"), &LocalPlayerPresenter::viewmodel_generation);
 	ClassDB::bind_method(D_METHOD("set_input_override", "intent"), &LocalPlayerPresenter::set_input_override);
