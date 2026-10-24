@@ -671,6 +671,17 @@ void FoliageMaskCompositorEffect::_render_callback(int32_t p_effect_callback_typ
 		frame = impl_->frame;
 		view_frame = impl_->view_frame;
 	}
+	// A frame whose views have no MODEL mask to draw runs no pass: retail draws
+	// a mask only inside the wave of a crouched or prone person it anchors (the
+	// header carries the witness), and the person shaders sample the target
+	// only while a view's flag is up, which FoliageMaskPass raises with draws
+	// alone; so no frame clears the full-surface target and its depth for
+	// nothing. While either view has draws, each view's pass runs, an empty
+	// one too: the two views share the target and both flags gate on the same
+	// eye (the weapon Inset's is the main view's), so a view's pass must clear
+	// the other view's masks before its own opaque pass samples the target.
+	const bool any_draws = (frame && !frame->draws.empty()) ||
+			(view_frame && !view_frame->draws.empty());
 	// Each scene pass draws its own view's masks: the weapon Inset's render
 	// (its camera the one the Inset frame was compiled for) takes the Inset
 	// frame, every other view the main one.
@@ -681,13 +692,7 @@ void FoliageMaskCompositorEffect::_render_callback(int32_t p_effect_callback_typ
 			frame = view_frame;
 		}
 	}
-	// A view with no MODEL mask to draw runs no pass: retail draws a mask only
-	// inside the wave of a crouched or prone person it anchors (the header
-	// carries the witness), and the person shaders sample the target only
-	// while the view's flag is up, which FoliageMaskPass raises with draws
-	// alone; so no frame clears the full-surface target and its depth for
-	// nothing.
-	if (!frame || frame->draws.empty()) {
+	if (!frame || !any_draws) {
 		return;
 	}
 	impl_->draw(*frame, p_render_data);
