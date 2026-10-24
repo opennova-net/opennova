@@ -44,18 +44,31 @@ shader_type canvas_item;
 render_mode unshaded, blend_mix;
 
 varying flat float modulate2x_on;
+varying flat float frame_piece_on;
+varying vec2 window_xy;
 
 void vertex() {
 	modulate2x_on = 0.0;
+	frame_piece_on = 0.0;
+	window_xy = VERTEX;
 	if (UV.y <= -8.0) {
 		UV.y += 16.0;
 		modulate2x_on = 1.0;
+	} else if (UV.x <= -8.0) {
+		UV.x += 16.0;
+		frame_piece_on = 1.0;
 	}
 }
 
 void fragment() {
 	if (modulate2x_on > 0.5) {
 		COLOR.rgb = min(COLOR.rgb * 2.0, vec3(1.0));
+	}
+	if (frame_piece_on > 0.5) {
+		vec2 brush_size = vec2(textureSize(NORMAL_TEXTURE, 0));
+		vec4 brush = texture(NORMAL_TEXTURE, (window_xy + vec2(0.5)) / brush_size.yx);
+		vec3 stage0 = min(COLOR.rgb * 2.0, vec3(1.0));
+		COLOR = vec4(min(stage0 * 2.0 * brush.rgb, vec3(1.0)), COLOR.a * brush.a);
 	}
 }
 )";

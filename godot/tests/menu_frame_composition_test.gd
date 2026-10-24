@@ -1,13 +1,15 @@
 extends GutTest
 
-# A MenuFrame composes a frame piece and a fill tile over its textures' texels in one
-# native pass (godot/src/mnu/menu_frame.cpp read_texels, rgba8_from_colors): the texels
-# are read once through the engine's conversion to RGBAF, and the composed colours reach
-# RGBA8 through the engine's conversion back. Those two conversions are Image's own
-# per-texel get_pixel / set_pixel, so the bytes are the ones the per-pixel binding calls
-# wrote; these pins hold the engine to that, and a framed screen composes its pieces. The
-# game's device composes a piece as it draws it (engine menu/menu_frame.h, the MenuQuad
-# contract), so death.mnu's first shown pieces cost no draw of their own (D-NET-NEW-LF-25).
+# A MenuFrame composes a fill tile over its texture's texels in one native pass
+# (godot/src/mnu/menu_frame.cpp read_texels, rgba8_from_colors): the texels are read once
+# through the engine's conversion to RGBAF, and the composed colours reach RGBA8 through the
+# engine's conversion back. Those two conversions are Image's own per-texel get_pixel /
+# set_pixel, so the bytes are the ones the per-pixel binding calls wrote; these pins hold the
+# engine to that. A frame border piece composes nothing: as the game's device draws it
+# (engine menu/menu_frame.h, the MenuQuad contract), the piece's quad goes to the server with
+# its stencil and its brush bound in one two-stage material, and the glyph shader's
+# frame-piece branch runs the stages, so death.mnu's first shown pieces cost no composition
+# (D-NET-NEW-LF-25).
 
 const MNU_FRAMED := """
 <SCREEN>
@@ -101,11 +103,11 @@ func _gradient_tga(size: Vector2i, seed_value: int) -> PackedByteArray:
 	return bytes
 
 
-func test_a_framed_screen_composes_its_pieces_once() -> void:
+func test_a_framed_screen_draws_its_pieces_through_their_material() -> void:
 	var dir := TestFs.cache_dir(self, "menu_frame_composition")
 	_temp_dirs.append(dir)
 	TestFs.write_bytes(self, dir.path_join("border.tga"), _gradient_tga(Vector2i(32, 32), 11))
-	TestFs.write_bytes(self, dir.path_join("tile.tga"), _gradient_tga(Vector2i(16, 16), 5))
+	TestFs.write_bytes(self, dir.path_join("tile.tga"), _gradient_tga(Vector2i(16, 8), 5))
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(dir), OK)
 	var doc := MnuDocument.new()
@@ -116,7 +118,32 @@ func test_a_framed_screen_composes_its_pieces_once() -> void:
 	assert_true(frame.configure(doc, "", root, null, null))
 	assert_true(frame.get_draw_list_stats().quads >= 10,
 			"the fill, the box's fill cell and its eight pieces compile")
-	# The first draw composes the pieces and the tile; the second reads them kept.
-	frame.get_glyph_submissions()
-	frame.get_glyph_submissions()
-	assert_true(frame.is_configured())
+	var pieces := frame.get_frame_piece_submissions()
+	assert_eq(pieces.size(), 8, "the box's eight border pieces reach the server")
+	var material := RID()
+	for piece in pieces:
+		var row := piece as Dictionary
+		# The stencil and the brush at their own sizes: the shader reads the brush's
+		# period off its size (its height across x, its width down y).
+		assert_eq((row["stencil"] as Texture2D).get_size(), Vector2(32, 32))
+		assert_eq((row["brush"] as Texture2D).get_size(), Vector2(16, 8))
+		assert_true((row["material"] as RID).is_valid(), "each piece binds its material")
+		if material.is_valid():
+			assert_eq(row["material"], material, "the pieces share the pair's one material")
+		material = row["material"]
+		assert_true((row["color"] as Color).is_equal_approx(Color8(0x7F, 0x7F, 0x7F, 0xFF)),
+				"the border diffuse 0xFF7F7F7F")
+		var uv := row["uv"] as Rect2
+		assert_true(uv.position.x >= 0.0 and uv.end.x <= 1.0 and uv.position.y >= 0.0
+				and uv.end.y <= 1.0, "the stencil cell's UVs: %s" % uv)
+	# A second draw makes no new material.
+	var again := frame.get_frame_piece_submissions()
+	assert_eq(again.size(), 8)
+	assert_eq((again[0] as Dictionary)["material"], material)
+
+
+func test_the_shader_runs_the_two_stage_border_branch() -> void:
+	var code := MenuFrame.glyph_shader_code()
+	assert_true(code.contains("NORMAL_TEXTURE"), "the brush rides the material's normal slot")
+	assert_true(code.contains("UV.x <= -8.0"), "a piece's UV.x carries the flag")
+	assert_true(code.contains("brush_size.yx"), "the brush period is its height across x")

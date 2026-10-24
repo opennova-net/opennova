@@ -39,9 +39,17 @@ bool font_page_runs_modulate2x();
 // vertex colour), saturated per channel, the alpha MODULATE as COLOR has it,
 // under the SRCALPHA/INVSRCALPHA blend. The flag is negative because a menu's
 // tiled rects carry UVs far above 1 and none below 0; every other command keeps
-// the default texel x vertex colour.
+// the default texel x vertex colour. A command whose UV.x carries
+// kFramePieceCanvasUvFlag is a frame border piece in retail's two-stage border
+// material, drawn through a CanvasTexture whose normal slot holds the brush:
+// stage 0 the stencil (TEXTURE at UV) x diffuse, MODULATE2X; stage 1 that x the
+// brush SCREEN-anchored at ((x + 0.5) / brush height, (y + 0.5) / brush width) of
+// the command's own (window) coordinates, MODULATE2X; each saturated, the alpha
+// the stencil's x the diffuse's x the brush's (the MenuQuad contract, engine
+// menu/menu_frame.h, carries the witness).
 const char *glyph_canvas_shader_code();
 inline constexpr float kGlyphCanvasUvFlag = -16.0f;
+inline constexpr float kFramePieceCanvasUvFlag = -16.0f;
 
 // One page run's triangle array.
 struct GlyphRunArrays {

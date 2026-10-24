@@ -59,26 +59,6 @@ int positive_mod(int value, int divisor) {
 	return result < 0 ? result + divisor : result;
 }
 
-// A bilinear sample of a WRAP-addressed texture at a UV: the four texels around
-// (u * W - 0.5, v * H - 0.5), their indices wrapped.
-Color sample_bilinear_wrap(const MenuImageTexels &texels, float u, float v) {
-	const int width = texels.width;
-	const int height = texels.height;
-	const float px = u * static_cast<float>(width) - 0.5f;
-	const float py = v * static_cast<float>(height) - 0.5f;
-	const float fx0 = std::floor(px);
-	const float fy0 = std::floor(py);
-	const int x0 = positive_mod(static_cast<int>(fx0), width);
-	const int y0 = positive_mod(static_cast<int>(fy0), height);
-	const int x1 = (x0 + 1) % width;
-	const int y1 = (y0 + 1) % height;
-	const float fx = px - fx0;
-	const float fy = py - fy0;
-	const Color top = texels.at(x0, y0).lerp(texels.at(x1, y0), fx);
-	const Color bottom = texels.at(x0, y1).lerp(texels.at(x1, y1), fx);
-	return top.lerp(bottom, fy);
-}
-
 // An image's texels read once as Image::get_pixel reads each: the engine's own conversion
 // to RGBAF stores every texel's get_pixel colour (Image::convert between a byte format and
 // a float one takes its per-texel set_pixel(get_pixel) path), so a composition samples
@@ -141,6 +121,11 @@ MenuFrame::~MenuFrame() {
 	if (slot_canvas_item_.is_valid()) {
 		rs->free_rid(slot_canvas_item_);
 	}
+	for (const auto &entry : piece_materials_) {
+		if (entry.second.canvas.is_valid()) {
+			rs->free_rid(entry.second.canvas);
+		}
+	}
 	if (overlay_upper_canvas_item_.is_valid()) {
 		rs->free_rid(overlay_upper_canvas_item_);
 	}
@@ -188,6 +173,18 @@ Array MenuFrame::get_glyph_submissions() {
 	glyph_record_ = &out;
 	_draw();
 	glyph_record_ = nullptr;
+	queue_redraw();
+	return out;
+}
+
+Array MenuFrame::get_frame_piece_submissions() {
+	Array out;
+	if (!configured_ || !is_inside_tree()) {
+		return out;
+	}
+	piece_record_ = &out;
+	_draw();
+	piece_record_ = nullptr;
 	queue_redraw();
 	return out;
 }
@@ -444,7 +441,9 @@ Ref<Texture2D> MenuFrame::texture_for_quad_(
 	}
 
 	if (has_second) {
-		return frame_piece_texture_(p_quad);
+		// A frame piece draws its stencil through its two-stage material
+		// (frame_piece_material_).
+		return textures_[static_cast<size_t>(p_quad.texture)];
 	}
 	const Ref<Image> first = texture_images_[static_cast<size_t>(p_quad.texture)];
 	const int first_w = first->get_width();
@@ -501,73 +500,35 @@ Ref<Texture2D> MenuFrame::texture_for_quad_(
 	return Ref<Texture2D>();
 }
 
-// A frame border piece as Direct3D 9 rasterises it (the MenuQuad contract,
-// engine menu/menu_frame.h): one texel per pixel it covers
-// (renderer::d3d9_quad_pixels), each at the window coordinate of its centre: the
-// stencil at the UV that centre interpolates to, the brush screen-anchored at
-// ((x + 0.5) / period_x, (y + 0.5) / period_y), both wrapped and bilinear as the
-// game's textures are (created WRAP, LINEAR: flags 0x140000 and 0x40000), then the
-// two MODULATE2X stages over the quad's diffuse, each saturated, the alpha the
-// product. Drawn 1:1 over the pixels it covers, the image is what the game's
-// rasteriser writes there. The game's device composes a piece as it draws it, so
-// a piece first shown costs its draw alone (the MenuQuad contract carries the
-// witness): the composition reads each texture's texels once and writes the
-// pixels in one native pass (read_texels, rgba8_from_colors), with no binding
-// call per covered pixel.
-Ref<Texture2D> MenuFrame::frame_piece_texture_(const opennova::menu::MenuQuad &p_quad) {
-	const opennova::renderer::PixelRect px =
-			opennova::renderer::d3d9_quad_pixels(p_quad.x0, p_quad.y0, p_quad.x1, p_quad.y1);
-	const int dst_w = px.x1 - px.x0;
-	const int dst_h = px.y1 - px.y0;
-	if (dst_w <= 0 || dst_h <= 0 || p_quad.texture2_period_x <= 0.0f ||
-			p_quad.texture2_period_y <= 0.0f || p_quad.x1 <= p_quad.x0 || p_quad.y1 <= p_quad.y0) {
-		return Ref<Texture2D>();
+// A frame border piece's material as retail's device draws it (the MenuQuad contract,
+// engine menu/menu_frame.h): a server canvas texture binding the stencil and, in its normal
+// channel, the brush, both wrapped and bilinear as the game's textures are (created WRAP,
+// LINEAR: flags 0x140000 and 0x40000); the glyph shader's frame-piece branch runs the two
+// MODULATE2X stages per pixel over the quad as the device's two texture stages do. Retail
+// binds the border material and submits the pieces every frame, each quad's brush texcoords
+// (pos + 0.5) / period per vertex (the MenuQuad contract carries the witness), so a piece
+// first shown costs its draw alone: the material is made once per texture pair, never a
+// composed image (D-NET-NEW-LF-25, LF-s18).
+RID MenuFrame::frame_piece_material_(const opennova::menu::MenuQuad &p_quad) {
+	const std::string key = texture_keys_[static_cast<size_t>(p_quad.texture)] + ":" +
+			texture_keys_[static_cast<size_t>(p_quad.texture2)];
+	PieceMaterial &material = piece_materials_[key];
+	if (material.canvas.is_valid()) {
+		return material.canvas;
 	}
-	const auto bits = [](float value) {
-		uint32_t out = 0;
-		std::memcpy(&out, &value, sizeof(out));
-		return std::to_string(out);
-	};
-	const std::string key = "piece:" + texture_keys_[static_cast<size_t>(p_quad.texture)] + ":" +
-			texture_keys_[static_cast<size_t>(p_quad.texture2)] + ":" + bits(p_quad.x0) + ":" +
-			bits(p_quad.y0) + ":" + bits(p_quad.x1) + ":" + bits(p_quad.y1) + ":" + bits(p_quad.u0) +
-			":" + bits(p_quad.v0) + ":" + bits(p_quad.u1) + ":" + bits(p_quad.v1) + ":" +
-			bits(p_quad.texture2_period_x) + ":" + bits(p_quad.texture2_period_y) + ":" +
-			std::to_string(p_quad.color);
-	const Ref<Texture2D> cached = cached_frame_texture_(key);
-	if (cached.is_valid()) {
-		return cached;
-	}
-	const MenuImageTexels &stencil_texels = slot_texels_(p_quad.texture);
-	const MenuImageTexels &brush_texels = slot_texels_(p_quad.texture2);
-	const Color diffuse = opennova::color_from_argb(p_quad.color);
-	std::vector<float> composed(static_cast<size_t>(dst_w) * static_cast<size_t>(dst_h) * 4);
-	const float span_x = p_quad.x1 - p_quad.x0;
-	const float span_y = p_quad.y1 - p_quad.y0;
-	for (int y = 0; y < dst_h; ++y) {
-		const float window_y = static_cast<float>(px.y0 + y);
-		const float v = p_quad.v0 + (p_quad.v1 - p_quad.v0) * (window_y - p_quad.y0) / span_y;
-		const float brush_v = (window_y + 0.5f) / p_quad.texture2_period_y;
-		for (int x = 0; x < dst_w; ++x) {
-			const float window_x = static_cast<float>(px.x0 + x);
-			const float u = p_quad.u0 + (p_quad.u1 - p_quad.u0) * (window_x - p_quad.x0) / span_x;
-			const Color stencil = sample_bilinear_wrap(stencil_texels, u, v);
-			const Color brush = sample_bilinear_wrap(brush_texels,
-					(window_x + 0.5f) / p_quad.texture2_period_x, brush_v);
-			const float r0 = std::min(1.0f, 2.0f * stencil.r * diffuse.r);
-			const float g0 = std::min(1.0f, 2.0f * stencil.g * diffuse.g);
-			const float b0 = std::min(1.0f, 2.0f * stencil.b * diffuse.b);
-			store_color(composed, dst_w, x, y,
-					Color(std::min(1.0f, 2.0f * r0 * brush.r), std::min(1.0f, 2.0f * g0 * brush.g),
-							std::min(1.0f, 2.0f * b0 * brush.b), stencil.a * diffuse.a * brush.a));
-		}
-	}
-	++composed_pieces_;
-	composed_piece_pixels_ += static_cast<int64_t>(dst_w) * dst_h;
-	const Ref<Texture2D> texture =
-			ImageTexture::create_from_image(rgba8_from_colors(dst_w, dst_h, composed));
-	keep_frame_texture_(key, texture);
-	return texture;
+	RenderingServer *rs = RenderingServer::get_singleton();
+	material.stencil = textures_[static_cast<size_t>(p_quad.texture)];
+	material.brush = textures_[static_cast<size_t>(p_quad.texture2)];
+	material.canvas = rs->canvas_texture_create();
+	rs->canvas_texture_set_channel(material.canvas, RenderingServer::CANVAS_TEXTURE_CHANNEL_DIFFUSE,
+			material.stencil->get_rid());
+	rs->canvas_texture_set_channel(material.canvas, RenderingServer::CANVAS_TEXTURE_CHANNEL_NORMAL,
+			material.brush->get_rid());
+	rs->canvas_texture_set_texture_filter(material.canvas,
+			RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR);
+	rs->canvas_texture_set_texture_repeat(material.canvas,
+			RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_ENABLED);
+	return material.canvas;
 }
 
 const MenuImageTexels &MenuFrame::slot_texels_(int32_t p_slot) {
@@ -1180,13 +1141,26 @@ void MenuFrame::_draw() {
 			return;
 		}
 		if (quad.texture2 != opennova::menu::kMenuTexNone) {
-			// frame_piece_texture_ rasterised retail's two-stage material over the
-			// pixels the piece covers; its colour is in the image.
-			const opennova::renderer::PixelRect px =
-					opennova::renderer::d3d9_quad_pixels(quad.x0, quad.y0, quad.x1, quad.y1);
-			rs->canvas_item_add_texture_rect(target,
-					Rect2(px.x0 - centre, px.y0 - centre, px.x1 - px.x0, px.y1 - px.y0),
-					tex->get_rid(), false);
+			// The piece's quad at its window corners with the stencil at u0..v1 across
+			// it, through its two-stage material (frame_piece_material_): the UV.x flag
+			// selects the glyph shader's frame-piece branch.
+			const RID material = frame_piece_material_(quad);
+			const Vector2 stencil_size = tex->get_size();
+			if (piece_record_ != nullptr) {
+				Dictionary row;
+				row["rect"] = rect;
+				row["uv"] = Rect2(quad.u0, quad.v0, quad.u1 - quad.u0, quad.v1 - quad.v0);
+				row["color"] = color;
+				row["stencil"] = tex;
+				row["brush"] = textures_[static_cast<size_t>(quad.texture2)];
+				row["material"] = material;
+				piece_record_->push_back(row);
+			}
+			rs->canvas_item_add_texture_rect_region(target, rect, material,
+					Rect2((quad.u0 + kFramePieceCanvasUvFlag) * stencil_size.x,
+							quad.v0 * stencil_size.y, (quad.u1 - quad.u0) * stencil_size.x,
+							(quad.v1 - quad.v0) * stencil_size.y),
+					color, false, false);
 		} else if (quad.tiled) {
 			// The phased tile repeats from the rect's corner: pixel x shows texel
 			// x mod cell, retail's (x + 0.5) / cell (the MenuQuad contract).
@@ -1300,18 +1274,16 @@ void MenuFrame::_draw() {
 		}
 	}
 	draw_texels_.clear();
-	// A draw that composed frame pieces or tiles (a screen's first show, a widget first
-	// shown) names its cost under --verbose.
-	if (composed_pieces_ > 0 || composed_tiles_ > 0) {
+	// A draw that composed fill tiles (a screen's first show, a widget first shown) names
+	// its cost under --verbose; frame pieces compose nothing (the device draws them).
+	if (composed_tiles_ > 0) {
 		const int64_t draw_usec = std::chrono::duration_cast<std::chrono::microseconds>(
 				std::chrono::steady_clock::now() - draw_start)
 										  .count();
 		UtilityFunctions::print_verbose(vformat(
-				"MenuFrame %s: draw %.1f ms, composed %d frame piece(s) over %d px and %d tile(s) over %d px",
-				get_name(), static_cast<double>(draw_usec) / 1000.0, composed_pieces_,
-				composed_piece_pixels_, composed_tiles_, composed_tile_pixels_));
-		composed_pieces_ = 0;
-		composed_piece_pixels_ = 0;
+				"MenuFrame %s: draw %.1f ms, composed %d tile(s) over %d px",
+				get_name(), static_cast<double>(draw_usec) / 1000.0, composed_tiles_,
+				composed_tile_pixels_));
 		composed_tiles_ = 0;
 		composed_tile_pixels_ = 0;
 	}
@@ -1384,6 +1356,8 @@ void MenuFrame::_bind_methods() {
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("glyph_shader_code"),
 			&MenuFrame::glyph_shader_code);
 	ClassDB::bind_method(D_METHOD("get_glyph_submissions"), &MenuFrame::get_glyph_submissions);
+	ClassDB::bind_method(D_METHOD("get_frame_piece_submissions"),
+			&MenuFrame::get_frame_piece_submissions);
 	ClassDB::bind_method(
 			D_METHOD("configure", "document", "screen_name", "root", "style",
 					"override_text"),

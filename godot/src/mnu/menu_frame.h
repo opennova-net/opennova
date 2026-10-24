@@ -62,7 +62,7 @@ private:
 };
 
 // A menu image's texels as Image::get_pixel reads them, read once (menu_frame.cpp
-// read_texels): what MenuFrame composes a frame piece or a phased tile from.
+// read_texels): what MenuFrame composes a phased fill tile from.
 struct MenuImageTexels {
 	int width = 0;
 	int height = 0;
@@ -358,6 +358,10 @@ public:
 	// [{page, uvs, colors}].
 	static String glyph_shader_code();
 	Array get_glyph_submissions();
+	// The test seam's copy of each frame piece as submitted: [{rect, uv, color, stencil,
+	// brush, material}] (the piece's window rect, its stencil UV rect, its diffuse, its two
+	// textures and its two-stage material's server canvas texture).
+	Array get_frame_piece_submissions();
 
 	void _draw() override;
 
@@ -383,7 +387,8 @@ protected:
 private:
 	opennova::menu::MenuWidgetState &widget_(int p_index);
 	Ref<Texture2D> texture_for_quad_(const opennova::menu::MenuQuad &p_quad);
-	Ref<Texture2D> frame_piece_texture_(const opennova::menu::MenuQuad &p_quad);
+	// A frame piece's two-stage material (a server canvas texture), made once per pair.
+	RID frame_piece_material_(const opennova::menu::MenuQuad &p_quad);
 	// A texture slot's texels for this draw's compositions, read on the first ask.
 	const MenuImageTexels &slot_texels_(int32_t p_slot);
 	// A composed frame texture by key, kept across configures while drawn (the
@@ -424,11 +429,17 @@ private:
 		uint64_t used = 0; // the configure that last drew it
 	};
 	mutable std::map<std::string, FrameTexture> frame_texture_cache_;
-	// The slots the draw composed frame pieces and tiles from, each image's texels read once
-	// (let go as the draw ends), and the draw's composition counts (its --verbose line).
+	// The frame pieces' two-stage materials by the stencil's and the brush's keys: the
+	// server canvas texture and the two textures it binds (kept with it), freed with this.
+	struct PieceMaterial {
+		RID canvas;
+		Ref<Texture2D> stencil;
+		Ref<Texture2D> brush;
+	};
+	std::map<std::string, PieceMaterial> piece_materials_;
+	// The slots the draw composed fill tiles from, each image's texels read once (let go as
+	// the draw ends), and the draw's composition counts (its --verbose line).
 	std::map<int32_t, MenuImageTexels> draw_texels_;
-	int32_t composed_pieces_ = 0;
-	int64_t composed_piece_pixels_ = 0;
 	int32_t composed_tiles_ = 0;
 	int64_t composed_tile_pixels_ = 0;
 	uint64_t configure_count_ = 0;
@@ -454,6 +465,8 @@ private:
 	Ref<ShaderMaterial> glyph_material_;
 	// Set while get_glyph_submissions records the glyph runs _draw submits.
 	Array *glyph_record_ = nullptr;
+	// Set while get_frame_piece_submissions records the frame pieces _draw submits.
+	Array *piece_record_ = nullptr;
 };
 
 } // namespace godot
