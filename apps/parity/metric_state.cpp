@@ -342,13 +342,23 @@ bool own_handle(const RunFacts &run, uint32_t &handle) {
 // back [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 (@0x4B41A2..0x4B41B4)]. So while
 // the own record names a mount M, each uplink names M except one built in a frame that
 // received a S2C 0x0A, which names M's own ground link: none for a buggy seat on open
-// ground, the buggy 0x1002 for its gun 0x102E. The rule this replaces keyed on the state
-// byte's 0x40, which a seat sets [orig: Entity_AttachToVehicleSlot @0x4946D0 (the or
-// @0x494760)] and which every gunner uplink in the corpus lacks, so it missed the gun's
-// echoes. The judge cannot see which frame received a 0x0A, and the gun streams no record of
-// its own to name its link, so an uplink whose carrier is not the mount the latest own
-// record at or before it names is that echo, and is dropped (uplink.echo_frame_carrier).
+// ground, the buggy 0x1002 for its gun 0x102E. A vehicle's record carries that link as its
+// carrier word [orig: Entity_SerializeVehicleState @0x460560 (the link +0x28 read @0x460B4D,
+// 0xFFFF for none @0x460C61)] and the joiner's read of it re-lands the link (the store
+// @0x460802), so where M streams records of its own the echo is the carrier word of M's
+// latest record at or before the uplink. The judge cannot see which frame received a 0x0A,
+// so an uplink naming that word under M is the echo, and is dropped; one naming any other
+// word is kept and counted. The gun streams no record of its own and its link is not on the
+// wire: there an uplink not naming M is dropped when the words so dropped under one mount
+// phase (a run of own records naming M) are one word, as M's link is, else all are kept
+// (uplink.echo_frame_carrier). The first rule keyed on the state byte's 0x40, which a seat
+// sets [orig: Entity_AttachToVehicleSlot @0x4946D0 (the or @0x494760)] and which every
+// gunner uplink in the corpus lacks, so it missed the gun's echoes.
 constexpr uint32_t kUplinkCarrierNone = 0xFFFF;
+
+bool names_mount(const wire::ParityEntity &record) {
+	return record.carrier_bone != 0 && record.carrier != kUplinkCarrierNone;
+}
 
 std::vector<const wire::ParityUplinkState *> without_echo_frames(
 		const RunFacts &run, const std::vector<const wire::ParityUplinkState *> &states) {
@@ -357,20 +367,54 @@ std::vector<const wire::ParityUplinkState *> without_echo_frames(
 	if (!own_handle(run, own))
 		return states;
 	std::vector<const wire::ParityEntity *> records;
+	// Each mount's own records of a class that carries a carrier word.
+	std::map<uint32_t, std::vector<const wire::ParityEntity *>> mounts;
 	for (const wire::ParityEntity &e : run.trace.entities)
-		if (e.cls == 'P' && e.handle == own)
+		if (e.cls == 'P' && e.handle == own) {
 			records.push_back(&e);
-	std::vector<const wire::ParityUplinkState *> kept;
-	const wire::ParityEntity *latest = nullptr;
-	size_t next = 0;
-	for (const wire::ParityUplinkState *s : states) {
-		while (next < records.size() && records[next]->ts_ns <= s->ts_ns)
-			latest = records[next++];
-		const bool mounted = latest != nullptr && latest->carrier_bone != 0 &&
-				latest->carrier != kUplinkCarrierNone;
-		if (!mounted || s->carrier == latest->carrier)
-			kept.push_back(s);
+			if (names_mount(e))
+				mounts[e.carrier];
+		}
+	for (const wire::ParityEntity &e : run.trace.entities) {
+		const auto found = mounts.find(e.handle);
+		if (found != mounts.end() && (e.cls == 'P' || e.cls == 'V' || e.cls == 'I'))
+			found->second.push_back(&e);
 	}
+	enum class Echo { Keep, Drop, Unlinked };
+	std::vector<Echo> echo(states.size(), Echo::Keep);
+	std::vector<size_t> phase_of(states.size(), 0);
+	std::map<size_t, std::set<uint32_t>> unlinked_words; // per mount phase
+	const wire::ParityEntity *latest = nullptr;
+	size_t next = 0, phase = 0;
+	for (size_t i = 0; i < states.size(); ++i) {
+		const wire::ParityUplinkState &s = *states[i];
+		while (next < records.size() && records[next]->ts_ns <= s.ts_ns) {
+			const wire::ParityEntity &record = *records[next++];
+			if (names_mount(record) &&
+					(latest == nullptr || !names_mount(*latest) ||
+							latest->carrier != record.carrier))
+				++phase;
+			latest = &record;
+		}
+		if (latest == nullptr || !names_mount(*latest) || s.carrier == latest->carrier)
+			continue;
+		const std::vector<const wire::ParityEntity *> &own_records = mounts[latest->carrier];
+		if (!own_records.empty()) {
+			const auto after = std::upper_bound(own_records.begin(), own_records.end(), s.ts_ns,
+					[](uint64_t ts, const wire::ParityEntity *r) { return ts < r->ts_ns; });
+			if (after != own_records.begin() && (*std::prev(after))->carrier == s.carrier)
+				echo[i] = Echo::Drop;
+			continue;
+		}
+		echo[i] = Echo::Unlinked;
+		phase_of[i] = phase;
+		unlinked_words[phase].insert(s.carrier);
+	}
+	std::vector<const wire::ParityUplinkState *> kept;
+	for (size_t i = 0; i < states.size(); ++i)
+		if (!(echo[i] == Echo::Drop ||
+					(echo[i] == Echo::Unlinked && unlinked_words[phase_of[i]].size() == 1)))
+			kept.push_back(states[i]);
 	return kept;
 }
 
@@ -415,8 +459,8 @@ void compare_uplinks(const RunFacts &rr, const RunFacts &other, std::vector<Metr
 	};
 	MetricValue frames = metric('C', "uplink_carrier_changes", "", "UPLINK_CARRIER_SEQUENCE");
 	count_metric(frames, carrier_changes(rr, a), 0.0, carrier_changes(other, b), 0.0);
-	frames.detail = "changes of the carrier word between consecutive uplinks, each uplink not "
-					"naming the mount its own record names dropped";
+	frames.detail = "changes of the carrier word between consecutive uplinks, each uplink under "
+					"a mount naming the mount's own ground link dropped";
 	out.push_back(frames);
 	auto occupied = [](const U &s, int slot) {
 		return s.priority_handle[slot] != 0 || s.priority_score[slot] != 0;

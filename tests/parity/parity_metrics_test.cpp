@@ -1803,21 +1803,25 @@ void test_state() {
 		// mount's own ground link (uplink.echo_frame_carrier): p253's drive OR, a retail joiner
 		// on our host, sent the buggy 0x1002 from the gun 0x102E at state byte 0, and x7's OR
 		// none from the buggy's seat at the seat edge, its left neighbour standing on the buggy.
-		// An uplink not naming the mount its latest own record names (a nonzero attach bone
-		// and a carrier) is dropped before the count; the same flips under own records that
-		// name no mount still count. Each run stands on the buggy for three uplinks, then
-		// mounts at the half.
+		// Under the mount its latest own record names (a nonzero attach bone and a carrier), an
+		// uplink naming the mount's own ground link is dropped before the count: the buggy's
+		// latest record's carrier word (none on open ground), or, for the gun, which streams no
+		// record of its own, any one word per mount phase. The same flips under own records
+		// that name no mount still count, as does a third word under the buggy, or two words
+		// under the gun. Each run stands on the buggy for three uplinks, then mounts at the
+		// half; the buggy streams its records beside the scripted vehicle's.
 		struct Mount {
 			uint32_t mount, bone, ground, state;
 		};
 		const Mount gun{ 0x102E, 6, 0x1002, 0 };
 		const Mount seat{ 0x1002, 4, 0xFFFF, 0x40 };
 		auto drive = [](uint32_t seed, const Mount &m, size_t echo_every, bool edge,
-							 bool host_mounts) {
+							 bool host_mounts, const std::vector<uint32_t> &words) {
 			wire::ParityTrace trace = scripted(seed);
 			const size_t half = trace.uplinks.size() / 2;
 			const uint64_t mounted_after = trace.uplinks[half - 1].ts_ns;
-			for (wire::ParityEntity &e : trace.entities)
+			std::vector<wire::ParityEntity> entities;
+			for (wire::ParityEntity e : trace.entities) {
 				if (host_mounts && e.cls == 'P' && e.handle == 0x1000 && e.ts_ns > mounted_after) {
 					e.carrier = m.mount;
 					e.carrier_bone = m.bone;
@@ -1826,6 +1830,14 @@ void test_state() {
 					e.world_y = e.offset_y;
 					e.world_z = e.offset_z;
 				}
+				entities.push_back(e);
+				if (e.cls == 'V' && e.handle == 0x2003) {
+					e.handle = 0x1002;
+					entities.push_back(e);
+				}
+			}
+			trace.entities = std::move(entities);
+			size_t echoes = 0;
 			for (size_t i = half - 3; i < trace.uplinks.size(); ++i) {
 				wire::ParityUplinkState &u = trace.uplinks[i];
 				if (i < half) {
@@ -1835,20 +1847,33 @@ void test_state() {
 				const size_t k = i - half;
 				const bool echo =
 						(edge && k == 0) || (echo_every != 0 && k % echo_every == echo_every - 1);
-				u.carrier = echo ? m.ground : m.mount;
+				u.carrier = echo ? words[echoes++ % words.size()] : m.mount;
 				u.state_flags = m.state;
 			}
 			return trace;
 		};
+		const uint32_t kStray = 0x2011;
 		for (const Mount &m : { gun, seat }) {
-			const Case echoes = judge_case(drive(1, m, 0, false, true), drive(2, m, 0, false, true),
-					drive(3, m, 7, true, true));
+			const std::vector<uint32_t> link{ m.ground };
+			const Case echoes = judge_case(drive(1, m, 0, false, true, link),
+					drive(2, m, 0, false, true, link), drive(3, m, 7, true, true, link));
 			expect_row(echoes, 'C', "uplink_carrier_changes", "", "pass");
-			const Case unmounted = judge_case(drive(1, m, 0, false, true),
-					drive(2, m, 0, false, true), drive(3, m, 7, true, false));
+			const Case unmounted = judge_case(drive(1, m, 0, false, true, link),
+					drive(2, m, 0, false, true, link), drive(3, m, 7, true, false, link));
 			expect_row(unmounted, 'C', "uplink_carrier_changes", "", "fail",
 					"UPLINK_CARRIER_SEQUENCE");
 		}
+		// A word that is neither the buggy nor its link, under the buggy's seat, is no echo.
+		expect_row(judge_case(drive(1, seat, 0, false, true, { seat.ground }),
+						   drive(2, seat, 0, false, true, { seat.ground }),
+						   drive(3, seat, 7, true, true, { kStray })),
+				'C', "uplink_carrier_changes", "", "fail", "UPLINK_CARRIER_SEQUENCE");
+		// Under the gun the link is one word: the buggy and a second word in one phase both
+		// count.
+		expect_row(judge_case(drive(1, gun, 0, false, true, { gun.ground }),
+						   drive(2, gun, 0, false, true, { gun.ground }),
+						   drive(3, gun, 7, true, true, { gun.ground, kStray })),
+				'C', "uplink_carrier_changes", "", "fail", "UPLINK_CARRIER_SEQUENCE");
 	}
 	{
 		// A step across a carrier change is no motion: each carrier's uplinks are one
