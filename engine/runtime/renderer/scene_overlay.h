@@ -87,7 +87,7 @@ inline constexpr std::array<SceneOverlaySlot, 6> kSceneOverlayOrder = {
 //   @ 0x5deede..0x5deef4 (the fall read and its zeroing)];
 // - its own corona walk: EffectWorld_RenderLightCoronas(1) @ 0x5c96ad at the
 //   corona phase the Inset's own effect-world prologue advanced (it runs once
-//   per scene pass) [orig: EffectWorld_BeginScenePass @ 0x5a9f70 `add dword_2732DA0, 1`,
+//   per scene pass) [orig: EffectWorld_BeginScenePass @ 0x5a9f70 `add g_EffectScenePassCounter, 1`,
 //   called @ 0x5ca69c by Render_ProcessMainSceneFrame and @ 0x5c9a5d by the
 //   Inset], gating owned coronas on the section masks the Inset's own
 //   collect wrote [orig: Terrain_CollectVisibleEntities @ 0x5c94f0;
