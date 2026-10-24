@@ -20,7 +20,8 @@ namespace fs = std::filesystem;
 namespace {
 
 struct Server {
-	update_tool::PackageCatalog catalog{{"127.0.0.1"}};
+	explicit Server(std::vector<std::string> hosts = {"127.0.0.1"}) : catalog(std::move(hosts)) {}
+	update_tool::PackageCatalog catalog;
 	update::UpdateServer server{catalog};
 	net::UpdateTcpServer listener{server};
 	std::atomic_bool stop{false};
@@ -93,6 +94,24 @@ int test_first_install(const test_temp::TempDir &temp) {
 	TEST_EXPECT(updater::run(options, products, result, error) && result.available);
 	options.check = false;
 	TEST_EXPECT(updater::run(options, products, result, error) && result.applied);
+	return 0;
+}
+
+// The service names retail's ftp.novaworld.com in SERVER.LST for the products a stock
+// UPDATE.EXE reaches through the Switcher; this client dials the gateway it came through.
+int test_retail_server_list(const test_temp::TempDir &temp) {
+	Server server({"ftp.novaworld.com"});
+	std::string error;
+	TEST_EXPECT(server.start(package("Served under retail's update host"), error));
+	updater::Options options;
+	options.runtime_dir = temp.path;
+	options.resource_dir = io::os_path(temp.file("retail list"));
+	options.server = "127.0.0.1";
+	options.port = server.listener.ports()[0];
+	options.check = true;
+	const std::vector<updater::Product> products{{options.resource_dir, "TEST", "TEST.CMD", {}, false}};
+	updater::Result result;
+	TEST_EXPECT(updater::run(options, products, result, error) && result.available);
 	return 0;
 }
 
@@ -170,6 +189,8 @@ int test_options_and_discovery(const test_temp::TempDir &temp) {
 	std::vector<updater::Product> products;
 	TEST_EXPECT(updater::discover_products(options, products, error));
 	TEST_EXPECT(products.size() == 1 && products[0].login == "JOTRus" && !products[0].native);
+	// Never the wizard's own URL: OpenNova's service, the runtime's OPENNOVA.WIZ naming it.
+	TEST_EXPECT(products[0].gateways == std::vector<std::string>({"update.opennova.net"}));
 	// Retail expansions still need their installed archive, so copying a wizard alone
 	// cannot install a retail expansion.
 	TEST_EXPECT(synthetic_trees::write_text(temp.file("retail/expansion/testexp/UPDATE.WIZ"),
@@ -187,6 +208,11 @@ int test_options_and_discovery(const test_temp::TempDir &temp) {
 	TEST_EXPECT(updater::parse_options({}, temp.path / "retail/update.exe", options, error));
 	TEST_EXPECT(updater::discover_products(options, products, error) && products.size() == 2);
 	TEST_EXPECT(products[0].login == "ONRUNTIME" && products[1].login == "JOTRus" && !products[1].native);
+	TEST_EXPECT(synthetic_trees::write_text(temp.file("retail/OPENNOVA.WIZ"),
+			"[HEADER]\r\nCMD=ONRUNTIME.CMD\r\nPRODUCT_LOGIN=ONRUNTIME\r\nURL=update.test.example\r\n"));
+	TEST_EXPECT(updater::discover_products(options, products, error) && products.size() == 2);
+	TEST_EXPECT(products[0].gateways == std::vector<std::string>({"update.test.example"}) &&
+			products[1].gateways == products[0].gateways);
 	TEST_EXPECT(updater::parse_options({"/game", "JO"}, temp.path / "retail/update.exe", options, error));
 	TEST_EXPECT(updater::discover_products(options, products, error) && products.size() == 2);
 	// A wizard naming a game OpenNova does not update (BHD's) is refused outright.
@@ -221,6 +247,7 @@ int main() {
 	TEST_EXPECT(net::startup() == 0);
 	test_temp::TempDir temp("update_client");
 	if (int rc = test_first_install(temp)) return rc;
+	if (int rc = test_retail_server_list(temp)) return rc;
 	if (int rc = test_failures(temp)) return rc;
 	if (int rc = test_revision(temp)) return rc;
 	if (int rc = test_options_and_discovery(temp)) return rc;

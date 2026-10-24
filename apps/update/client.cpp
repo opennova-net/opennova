@@ -27,6 +27,8 @@ namespace fs = std::filesystem;
 namespace {
 using Clock = std::chrono::steady_clock;
 
+constexpr const char *kServiceHost = "update.opennova.net";
+
 fs::path named_file(const fs::path &dir, const std::string &name) {
 	std::error_code ec;
 	const fs::path exact = dir / io::os_path(name);
@@ -56,10 +58,35 @@ bool wizard_product(const fs::path &dir, const fs::path &wizard_file,
 	product.command = wizard.cmd;
 	product.login = wizard.product_login;
 	product.native = product.native || strutil::iequals(product.login, "ONRUNTIME") ||
-			strutil::iequals(product.login, "OPENNOVA") || strutil::iequals(product.login, "ONJO1");
-	for (const std::string &host : {wizard.url, wizard.url2, wizard.url3})
-		if (!host.empty()) product.gateways.push_back(host);
+			strutil::iequals(product.login, "OPENNOVA");
 	return true;
+}
+
+// Every product updates from OpenNova's service: the runtime's OPENNOVA.WIZ URLs, else
+// update.opennova.net; a product's own wizard URLs are never dialed. Retail overwrites its
+// wizard's URLs with the dead ftp*.novaworld.com hosts (updater-re section 3; D-UPD-2).
+std::vector<std::string> service_gateways(const fs::path &runtime_dir) {
+	std::vector<std::string> hosts;
+	std::string text, ignored;
+	if (io::read_file_text(io::utf8_path(named_file(runtime_dir, "OPENNOVA.WIZ")), text, ignored)) {
+		const update::UpdateWizard wizard = update::read_update_wizard(text);
+		for (const std::string &host : {wizard.url, wizard.url2, wizard.url3})
+			if (!host.empty()) hosts.push_back(host);
+	}
+	if (hosts.empty()) hosts.push_back(kServiceHost);
+	return hosts;
+}
+
+// The update server a SERVER.LST row names, as dialed: the service names retail's
+// ftp.novaworld.com for the products a stock UPDATE.EXE reaches through the Switcher's hosts
+// block; this client reaches that same service at the gateway it came through instead.
+std::string dialed_server(const std::string &listed, const std::string &gateway) {
+	const std::string host = strutil::to_lower(strutil::trim(listed));
+	const std::string_view domain = "novaworld.com";
+	const bool novaworld = host == domain ||
+			(host.size() > domain.size() && strutil::ends_with_icase(host, domain) &&
+					host[host.size() - domain.size() - 1] == '.');
+	return novaworld ? gateway : listed;
 }
 
 struct Worker {
@@ -142,7 +169,7 @@ struct Worker {
 	}
 	bool open_product(const Product &product, net::ScopedSocket &out) {
 		std::vector<std::string> hosts = options.server.empty() ? product.gateways : std::vector<std::string>{options.server};
-		if (hosts.empty()) hosts.push_back("update.opennova.net");
+		if (hosts.empty()) hosts.push_back(kServiceHost);
 		std::vector<uint16_t> ports;
 		if (options.port) ports.push_back(options.port);
 		else ports.assign(std::begin(update::kGatewayPorts), std::end(update::kGatewayPorts));
@@ -161,7 +188,8 @@ struct Worker {
 			(void)net::tcp_send_all(gateway.get(), reinterpret_cast<const uint8_t *>(close.data()), close.size());
 			// Every advertised server is a failover candidate. A single-server gateway, the
 			// deployed service's form, needs no LOADTEST round trip (updater-re section 5).
-			for (const std::string &server : servers) {
+			for (const std::string &listed : servers) {
+				const std::string server = dialed_server(listed, host);
 				status("Opening update server...", server);
 				if (connect(server, port, out) && login(out.get(), product, update::kIdServerLogin)) return true;
 			}
@@ -307,12 +335,9 @@ bool discover_products(const Options &o, std::vector<Product> &out, std::string 
 	out.clear();
 	std::error_code ec;
 	if (!o.no_runtime) {
-		Product runtime{o.runtime_dir, "ONRUNTIME", "ONRUNTIME.CMD", {"update.opennova.net"}, true};
+		Product runtime{o.runtime_dir, "ONRUNTIME", "ONRUNTIME.CMD", {}, true};
 		const fs::path wizard = named_file(o.runtime_dir, "OPENNOVA.WIZ");
-		if (fs::exists(wizard, ec)) {
-			runtime.gateways.clear();
-			if (!wizard_product(o.runtime_dir, wizard, runtime, error)) return false;
-		}
+		if (fs::exists(wizard, ec) && !wizard_product(o.runtime_dir, wizard, runtime, error)) return false;
 		out.push_back(std::move(runtime));
 	}
 	// The folder's own UPDATE.WIZ names what it holds (boot_policy.h folder_product, ADR 0067
@@ -347,7 +372,7 @@ bool discover_products(const Options &o, std::vector<Product> &out, std::string 
 		}
 	}
 	if (native_content) {
-		out.push_back({o.resource_dir, "OPENNOVA", "OPENNOVA.CMD", {"update.opennova.net"}, true});
+		out.push_back({o.resource_dir, "OPENNOVA", "OPENNOVA.CMD", {}, true});
 	} else {
 		Product retail;
 		if (!wizard_product(o.resource_dir, named_file(o.resource_dir, "UPDATE.WIZ"), retail, error)) return false;
@@ -368,6 +393,8 @@ bool discover_products(const Options &o, std::vector<Product> &out, std::string 
 		expansion.native = expansion.native || native_content;
 		out.push_back(std::move(expansion));
 	}
+	const std::vector<std::string> gateways = service_gateways(o.runtime_dir);
+	for (Product &product : out) product.gateways = gateways;
 	return true;
 }
 
