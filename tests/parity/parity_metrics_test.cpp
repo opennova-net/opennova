@@ -3566,6 +3566,11 @@ void test_entity_sparse_sequence() {
 	expect_row(
 			judge_case(soldiers(1, 2, 15, 0), soldiers(2, 2, 15, 0), soldiers(3, 40, 15, 0), "OO"),
 			'S', "entity_I_orientation_range_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
+	// The floor is per side: three soldiers RR streams 300 times stay on RR's side, so their
+	// turn fails against a run that starves them to 4 records, which drop.
+	expect_row(judge_case(soldiers(1, 2, 300, 40), soldiers(2, 2, 300, 40), soldiers(3, 2, 4, 40),
+					   "OO"),
+			'S', "entity_I_orientation_range_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
 }
 
 void test_steady_rules() {
