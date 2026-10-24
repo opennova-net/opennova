@@ -42,15 +42,21 @@ bool has_anchor(const std::vector<w::Vec3> &v, float x, float y, float z) {
 	return false;
 }
 
-// Presentation frame: the eye at mission (0, 0, 2) looking down mission +x.
+// Presentation frame: the eye at mission (0, 0, 2) looking down mission +x,
+// every component of the triad set (the spec's defaults look down -z).
 w::OcclusionFrameCamera camera_down_x(float water_z_units = -1000.0f) {
 	w::OcclusionViewSpec view;
 	view.eye[0] = 0.0f;
 	view.eye[1] = 2.0f;
 	view.eye[2] = 0.0f;
-	view.forward[0] = 1.0f;
-	view.right[2] = 1.0f;
-	view.up[1] = 1.0f;
+	const float forward[3] = {1.0f, 0.0f, 0.0f};
+	const float right[3] = {0.0f, 0.0f, 1.0f};
+	const float up[3] = {0.0f, 1.0f, 0.0f};
+	for (int i = 0; i < 3; ++i) {
+		view.forward[i] = forward[i];
+		view.right[i] = right[i];
+		view.up[i] = up[i];
+	}
 	view.fov_y_deg = 60.0f;
 	view.aspect = 16.0f / 9.0f;
 	view.viewport_width = 1920.0f;
@@ -74,6 +80,27 @@ w::Entity &row(opennova::mission::MissionKernel &kernel, int pool, int slot, w::
 	seed.occlusion_latch = 5;
 	const w::EntityHandle h = kernel.world.registry.spawn_at(w::EntityHandle::make(pool, slot), seed);
 	return *kernel.world.registry.get(h);
+}
+
+// Which gate drops a row: its Flags words, its blink quad, its render and
+// collision models, and the sphere leg (a held latch, no draw) at its own place
+// and on the camera's axis at the same depth and height.
+void dump_gates(const char *what, opennova::mission::MissionKernel &kernel,
+		const w::OcclusionFrameCamera &cam, const w::Entity &e) {
+	uint8_t held = 5;
+	const int32_t at[3] = {e.position.x.q16, e.position.y.q16, e.position.z.q16};
+	const int32_t axis[3] = {e.position.x.q16, 0, e.position.z.q16};
+	const bool at_place = kernel.occlusion.sphere_render_visible(kernel.collision, cam, at, 0,
+			held, 0);
+	const bool on_axis = kernel.occlusion.sphere_render_visible(kernel.collision, cam, axis, 0,
+			held, 0);
+	std::printf("%s: flags 0x%x engine 0x%x blink 0x%x 0x%x 0x%x 0x%x render_model %d "
+				"collision_model %d sphere at its place %d on the axis %d
+",
+			what, e.flags, e.engine_flags, e.blink_hits[0], e.blink_hits[1], e.blink_hits[2],
+			e.blink_hits[3], kernel.occlusion.has_render_model(e.handle) ? 1 : 0,
+			kernel.collision.model_for(kernel.world, e.handle) != nullptr ? 1 : 0,
+			at_place ? 1 : 0, on_axis ? 1 : 0);
 }
 
 void test_the_walk() {
@@ -299,8 +326,10 @@ void test_the_walk_order() {
 	for (w::Entity *e : order) e->occlusion_latch = 5;
 	im::collect_view_verdicts(im::PresentRowsContext{kernel, &runtime, false}, latches, scratch, cam,
 			culled_bms, culled_wire, anchors);
-	if (!expect(culled_bms.empty() && culled_wire.empty(), "every row passes the gates"))
+	if (!expect(culled_bms.empty() && culled_wire.empty(), "every row passes the gates")) {
 		dump("(held latches)");
+		dump_gates("walk order decoration", kernel, cam, decoration);
+	}
 	for (w::Entity *e : order) e->occlusion_latch = 0;
 
 	uint32_t stream = 0x13579BDFu;
@@ -393,6 +422,36 @@ void test_the_statics_bound() {
 	expect(unlisted.occlusion_latch == 0, "a def-less row is never listed");
 }
 
+// A listed decoration to the right of the camera's axis (a negative mission y,
+// the camera looking down mission +x) is collected: inside the frustum, its
+// latch held, nothing ahead of the latch drops it.
+// [orig: Terrain_CollectVisibleEntities_0 @ 0x5c6f20 - the gates ahead of the latch
+//  @ 0x5c6fd1..0x5c7112, the latch @ 0x5c7125..0x5c7162]
+void test_a_decoration_right_of_the_axis_is_collected() {
+	auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+	opennova::mission::MissionKernel &kernel = *kernel_heap;
+	kernel.world.registry.configure_pool(2, 16);
+	opennova::renderer::ObjectProjectionSphere unstamped;
+	unstamped.valid = true;
+	w::Entity &decoration = row(kernel, 2, 3, w::EntityKind::Building, 303, 20.0f, -1.0f);
+	decoration.has_item_def = true;
+	decoration.item_type_index = 1;
+	decoration.item_type = 6;
+	kernel.occlusion.assign_render_model(decoration.handle, unstamped);
+	const w::OcclusionFrameCamera cam = camera_down_x();
+	kernel.occlusion.build_frame(kernel.world, kernel.collision, cam);
+	im::WireOcclusionLatchMap latches;
+	std::vector<w::EntityHandle> scratch;
+	std::vector<int32_t> culled_bms;
+	std::vector<int32_t> culled_wire;
+	std::vector<w::Vec3> anchors;
+	im::collect_view_verdicts(im::PresentRowsContext{kernel, nullptr, false}, latches, scratch, cam,
+			culled_bms, culled_wire, anchors);
+	if (!expect(culled_bms.empty() && decoration.occlusion_latch == 4,
+				"a decoration right of the axis is collected and its latch ticks"))
+		dump_gates("right of the axis", kernel, cam, decoration);
+}
+
 } // namespace
 
 int main() {
@@ -400,6 +459,7 @@ int main() {
 	test_the_mirror_walk();
 	test_the_walk_order();
 	test_the_statics_bound();
+	test_a_decoration_right_of_the_axis_is_collected();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;
