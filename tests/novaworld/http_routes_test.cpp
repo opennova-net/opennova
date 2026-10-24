@@ -5003,6 +5003,17 @@ int test_template_values_escaped(Harness &h) {
 	auto reply = start("jop_2_main.htm", "jop_2_msg.htm");
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	TEST_EXPECT(body_text(reply) == filled("jop_2_main.htm", "jop_2_msg.htm"));
+	// The live sign-in page as NWStart answers the live query (LN's S2 record): 4634 B, every line
+	// ending CRLF, the help text's "Create Account: " with its trailing space.
+	{
+		const std::string live = body_text(reply);
+		std::size_t bare_lf = 0;
+		for (std::size_t i = 0; i < live.size(); ++i)
+			if (live[i] == '\n' && (i == 0 || live[i - 1] != '\r'))
+				++bare_lf;
+		TEST_EXPECT(live.size() == 4634 && bare_lf == 0 &&
+				live.find("\r\nCreate Account: \r\n") != std::string::npos);
+	}
 	reply = start("x\"><b>in</b>", "m'><i>");
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	TEST_EXPECT(
