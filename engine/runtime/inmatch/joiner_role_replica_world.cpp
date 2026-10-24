@@ -1295,6 +1295,29 @@ void JoinerRole::mirror_mission_entity(replication::ClientEntityState &es) {
 			//  @0x460AF1..0x460AFF; the short form's zero @0x460688]
 			if (es.state_flags_known && es.compact_revision != m.net_seen_revision) {
 				int16_t health_word = static_cast<int16_t>(es.health_word);
+				// A live record on a row the client holds dead is the host's respawn: the
+				// record's pose lands as the row's own, then the client respawns the vehicle
+				// itself (its class init and slot re-seed, its Flags, Health and damage
+				// state, its emitters, the intact model, the ground probe), ahead of the
+				// record's Flags and health word below.
+				// [orig: Entity_SerializeVehicleState @0x460560 - the wire bit @0x460918, the
+				//  row's dead bit @0x46092B, the pose copy @0x460933..0x460961, the
+				//  Entity_RespawnVehicle call @0x460964]
+				if ((es.state_flags & world::kEntityFlagDead) == 0u &&
+						((local->flags | local->engine_flags) & world::kEntityFlagDead) != 0u) {
+					local->position.x.q16 = es.x;
+					local->position.y.q16 = es.y;
+					local->position.z.q16 = es.z;
+					if (m.yaw_seeded) {
+						m.yaw_bam = es.heading_bam;
+						m.air_pitch_bam = es.pitch_bam;
+						m.air_roll_bam = es.roll_bam;
+					}
+					local->heading = es.heading_bam;
+					local->pitch_bam = es.pitch_bam;
+					local->roll_bam = es.roll_bam;
+					world.vehicles.respawn(*local);
+				}
 				if ((es.state_flags & world::kEntityFlagDead) != 0u &&
 						((local->flags | local->engine_flags) &
 								world::kEntityFlagDead) == 0u) {

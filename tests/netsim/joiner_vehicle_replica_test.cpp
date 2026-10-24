@@ -244,6 +244,56 @@ bool run_destroyed_bit_kills_the_client_row() {
 	return ok;
 }
 
+// D-NET-NEW-L4-31: a live record on a row the client holds dead is the host's respawn, and
+// the client respawns the vehicle itself: the dead bit goes, the record's health word lands
+// over the def's, the intact model comes back, the client mover re-arms, and an EWeap
+// aircraft's class init re-seeds its spent rockets.
+// [orig: Entity_SerializeVehicleState @0x460560 - the wire bit @0x460918, the row's dead bit
+//  @0x46092B, the pose copy @0x460933..0x460961, the Entity_RespawnVehicle call @0x460964;
+//  Entity_RespawnVehicle @0x45FF40 - the class init call @0x45FF68, Flags @0x460009;
+//  Entity_InitInfantryBoneData @0x490160 - the bind @0x49017B, the split @0x490192]
+bool run_live_record_respawns_the_dead_client_row() {
+	Harness h;
+	bool ok = true;
+	w::World &world = h.kernel->world;
+	h.record(0x00, 2000);
+	h.record(0x02, 2000);
+	ok &= expect(((h.hull().flags | h.hull().engine_flags) & w::kEntityFlagDead) != 0,
+	             "respawn: the destroyed bit killed the client row");
+	h.record(0x06, 0);
+	// The hull as an EWeap aircraft row whose rockets the fight spent.
+	world.tables.weapons.entries.resize(2);
+	w::WeaponTableEntry &rockets = world.tables.weapons.entries[1];
+	rockets.name = "WPN_TESTROCKETS";
+	rockets.valid = true;
+	rockets.clipsize = 12;
+	rockets.startrounds = 41;
+	w::ItemDeathTraits air;
+	air.air_class_init = true;
+	world.tables.item_death_traits.set(kTankType, air);
+	h.hull().item_attrib |= w::kItemAttribEweap;
+	h.hull().primary_weapon = rockets.name;
+	h.hull().primary_weapon_slot_adm = 1;
+	h.hull().primary_weapon_slot.clip = 0;
+	h.hull().primary_weapon_slot.reserve = 0;
+	world.out.destruction.husk_swaps.clear();
+	h.record(0x00, 2500);
+	ok &= expect(((h.hull().flags | h.hull().engine_flags) & w::kEntityFlagDead) == 0,
+	             "respawn: the live record respawns the client row");
+	ok &= expect(h.hull().health == 2500 && h.hull().alive,
+	             "respawn: the record's health word lands over the def's");
+	bool intact = false;
+	for (const w::HuskSwapEvent &swap : world.out.destruction.husk_swaps)
+		intact |= swap.restore_intact && swap.wire_handle == h.tank.packed;
+	ok &= expect(intact, "respawn: the intact model comes back");
+	ok &= expect(h.hull().primary_weapon_slot_adm == 1 &&
+	                     h.hull().primary_weapon_slot.clip == 12 &&
+	                     h.hull().primary_weapon_slot.reserve == 29,
+	             "respawn: the class init re-seeds the spent rockets");
+	ok &= expect(h.hull().veh.net_predicted, "respawn: the client mover re-arms");
+	return ok;
+}
+
 // Wire bit0 is not a vehicle freeze: no vehicle mover tests it and the pool-1
 // update calls the mover ungated. A frozen wreck also drops the tank's pivot
 // latch and yaw rate so its fold cannot keep the fourth loop alive.
@@ -773,6 +823,7 @@ int main() {
 	ok &= run_record_tail_mirrors_flags_and_health();
 	ok &= run_hull_holds_its_spawn_pose_until_its_first_compact();
 	ok &= run_destroyed_bit_kills_the_client_row();
+	ok &= run_live_record_respawns_the_dead_client_row();
 	ok &= run_freeze_predicate_and_pivot_clear();
 	ok &= run_remote_driver_is_the_claimant();
 	ok &= run_unresolved_attachment_follows_its_target_carrier();
