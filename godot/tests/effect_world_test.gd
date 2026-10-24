@@ -127,7 +127,8 @@ func test_the_atlas_builds_once_from_decoded_frames() -> void:
 # start, past each frame it decodes and past its walk (engine runtime/hud/loading_screen.h
 # carries the witness).
 # [orig: CEffectSystem_Init @0x5f6070 - LoadingScreen_PresentStoredProgress called @0x5f630b
-#  (each loose .ptl), @0x5f6582 (past the archive walk); CParticleManager_BuildTextureAtlases
+#  (each loose .ptl), @0x5f6451 (each loose gore file), @0x5f6582 (past the archive walk);
+#  CParticleManager_BuildTextureAtlases
 #  @0x5e8db0 - the calls @0x5e8dfb, @0x5e8e0c, @0x5e8ef5]
 func test_the_effect_loaders_present_the_stored_checkpoint_as_they_go() -> void:
 	# synth_minimal_effect's graphic1 is spark.tga.

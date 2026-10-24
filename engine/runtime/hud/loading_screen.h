@@ -155,7 +155,8 @@ inline bool loading_present_due(int elapsed_ms, bool reported_changed) {
 // [orig: CEffectSystem_Init @0x5f6070 - LoadingScreen_PresentStoredProgress @0x586d70 called
 //  @0x5f630b (the loose .ptl leg), @0x5f6451 (the loose gore leg), @0x5f6582 (past the
 //  archive walk); CParticleManager_BuildTextureAtlases @0x5e8db0 - the calls @0x5e8dfb (its
-//  start), @0x5e8e0c (past the size probes, sub_5E32E0 called @0x5e8e02) and @0x5e8ef5 (each
+//  start), @0x5e8e0c (past the size probes, CParticleManager_ProbeAllTextureSizes called
+//  @0x5e8e02) and @0x5e8ef5 (each
 //  frame's iteration, ahead of its CTextureData_LoadTGA call @0x5e9087);
 //  CEffectSystem_BuildTextureAtlases @0x5f65b0 <- Game_StartMission @0x524360 (the call
 //  @0x5249b9). The terrain's loaders present the same way between their steps

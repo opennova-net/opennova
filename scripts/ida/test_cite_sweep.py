@@ -105,13 +105,16 @@ class ImportCalls(unittest.TestCase):
 
 
 class GodotLegs(unittest.TestCase):
-    """A reverse link to a godot/ file stands while that file defines the symbols the line names
+    """A reverse link to a godot/ file stands while that file names the symbols the line names
     for it: the Godot side carries no marker (godot_orig_cites only shrinks)."""
 
     FILES = {
         "godot/src/network/lan_session.cpp": "void LanSession::stop_enumerator() {}\nvoid LanSession::_process(double) {}",
         "godot/game/mp_menu_companion.gd": "func _on_lan_join() -> void:\n\tpass",
         "engine/net/npwire/lan_discovery.h": "class LanDiscoveryBrowser { void stop(); };",
+        # a caller: it names LanSession and calls stop_enumerator, it defines neither
+        "godot/src/world/game_world.cpp": "void GameWorld::leave_lan() {\n\tLanSession *s = lan_session();\n"
+                                          "\ts->stop_enumerator();\n}",
     }
 
     def read(self, path):
@@ -119,14 +122,14 @@ class GodotLegs(unittest.TestCase):
 
     def test_a_leg_still_in_its_file_stands(self):
         line = "godot::LanSession::_process (the window's end; L2-s17) @ godot/src/network/lan_session.cpp"
-        self.assertTrue(cite_sweep.godot_leg_defined(line, "godot/src/network/lan_session.cpp", self.read))
+        self.assertTrue(cite_sweep.godot_leg_named(line, "godot/src/network/lan_session.cpp", self.read))
         line = "MpMenuCompanion._on_lan_join (the row index the join walks to) @ godot/game/mp_menu_companion.gd"
-        self.assertTrue(cite_sweep.godot_leg_defined(line, "godot/game/mp_menu_companion.gd", self.read))
+        self.assertTrue(cite_sweep.godot_leg_named(line, "godot/game/mp_menu_companion.gd", self.read))
 
-    def test_every_symbol_must_be_defined(self):
+    def test_every_symbol_must_be_named(self):
         line = ("godot::LanSession::_process + godot::LanSession::destroy_pre_dial_session (state 9) "
                 "@ godot/src/network/lan_session.cpp")
-        self.assertFalse(cite_sweep.godot_leg_defined(line, "godot/src/network/lan_session.cpp", self.read))
+        self.assertFalse(cite_sweep.godot_leg_named(line, "godot/src/network/lan_session.cpp", self.read))
 
     def test_ida_names_and_file_names_are_prose(self):
         line = ("godot::LanSession::stop_enumerator (CNapiNetwork_DrainPendingDataTransfers, the keylist.key and "
@@ -136,14 +139,24 @@ class GodotLegs(unittest.TestCase):
 
     def test_only_godot_paths_and_named_symbols(self):
         line = "opennova::LanDiscoveryBrowser::stop @ engine/net/npwire/lan_discovery.h"
-        self.assertFalse(cite_sweep.godot_leg_defined(line, "engine/net/npwire/lan_discovery.h", self.read))
+        self.assertFalse(cite_sweep.godot_leg_named(line, "engine/net/npwire/lan_discovery.h", self.read))
         line = "the click godot/game/mp_menu_companion.gd _on_lan_join"
-        self.assertFalse(cite_sweep.godot_leg_defined(line, "godot/game/mp_menu_companion.gd", self.read))
+        self.assertFalse(cite_sweep.godot_leg_named(line, "godot/game/mp_menu_companion.gd", self.read))
 
     def test_a_list_shares_its_symbols(self):
         line = ("opennova::LanDiscoveryBrowser::stop + godot::LanSession::stop_enumerator "
                 "@ engine/net/npwire/lan_discovery.h, godot/src/network/lan_session.cpp")
-        self.assertTrue(cite_sweep.godot_leg_defined(line, "godot/src/network/lan_session.cpp", self.read))
+        self.assertTrue(cite_sweep.godot_leg_named(line, "godot/src/network/lan_session.cpp", self.read))
+
+    def test_a_mention_passes_for_a_leg_that_moved_the_known_gap(self):
+        # The rule tests a mention, not a definition: a link left on a file that only calls the
+        # symbol (the leg moved to lan_session.cpp, the old file still calls it) passes. A moved
+        # Godot leg is found by reading; this pins the gap so a stricter rule shows as a change here.
+        line = "godot::LanSession::stop_enumerator (the window's end) @ godot/src/world/game_world.cpp"
+        self.assertTrue(cite_sweep.godot_leg_named(line, "godot/src/world/game_world.cpp", self.read))
+        # A file that no longer names the symbol at all still fails.
+        line = "godot::LanSession::stop_enumerator (the window's end) @ godot/src/world/world_scene.cpp"
+        self.assertFalse(cite_sweep.godot_leg_named(line, "godot/src/world/world_scene.cpp", self.read))
 
 
 class Unchanged(unittest.TestCase):

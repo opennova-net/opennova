@@ -1063,8 +1063,8 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 				// start page that names no refresh is the page shown, whose form posts at once.
 				// [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620; UI_ProcessWebResponseContent
 				//  @0x63D450 - the refresh to the scene's +0x3C @0x63D501, its delay to +0x40
-				//  @0x63D507; CUIScene_EndFrame @0x63E600 - `cmp eax, [esi+40h]` against
-				//  GetTickCount @0x63E626, UIScene_OpenUrl called @0x63E635]
+				//  @0x63D507; CUIScene_EndFrame @0x63E600 - `cmp eax, [esi+40h]` @0x63E626 against
+				//  GetTickCount called @0x63E620, UIScene_OpenUrl called @0x63E635]
 				const std::string refresh = relay_refresh_url(body);
 				if (refresh.empty())
 					return login_post(ib3_form_inputs(to_string_body(body), kSignInForm));
@@ -1284,8 +1284,8 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 			// [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620 - the delay's strtol stored to
 			//  the parser's +4 @0x655783; CUIHTMLParser_BuildContentNodeFromHTML @0x656080 - the
 			//  copy @0x6563EB; UI_ProcessWebResponseContent @0x63D450 - the scene's +0x40 @0x63D507;
-			//  CUIScene_EndFrame @0x63E600 - `cmp eax, [esi+40h]` against GetTickCount @0x63E626,
-			//  UIScene_OpenUrl called @0x63E635]
+			//  CUIScene_EndFrame @0x63E600 - `cmp eax, [esi+40h]` @0x63E626 against GetTickCount
+			//  called @0x63E620, UIScene_OpenUrl called @0x63E635]
 			const std::string next = relay_refresh_url(body);
 			if (!next.empty()) {
 				join_step_ = JoinStep::Page;

@@ -48,8 +48,10 @@ For each marker the tool asks the IDB what lives at the address and classifies t
                        (the port was deleted, or its marker dropped) -- adjudicate by hand
 
 A link to a godot/ file is neither: the Godot side carries no marker (godot_orig_cites only
-shrinks), so such a link stands while that file still defines every code symbol the line names
-for its `@` list (godot_leg_defined).
+shrinks), so such a link stands while that file still names every code symbol the line names
+for its `@` list (godot_leg_named): the symbol's leaf as a word, its owner as a word or as the
+file's CamelCase stem. That is a mention, not a definition: a leg that moved while its old
+file still calls the symbol passes, so a moved Godot leg is found by reading, not by this rule.
 
 Names compare in their MSVC-demangled and undecorated forms too: the statically linked D3DX
 `?LoadDDS@CImage@D3DXTex@@AAEJPBXK@Z` answers to `D3DXTex::CImage::LoadDDS`, the import
@@ -601,10 +603,11 @@ def leg_symbols(line, tok):
     return (paths if tok in paths else []), syms
 
 
-def leg_defines(sym, path, text):
-    """`text` (the file and its .h/.cpp sibling) defines sym: its leaf as a word, and its owner
+def leg_names(sym, path, text):
+    """`text` (the file and its .h/.cpp sibling) names sym: its leaf as a word, and its owner
     (the component before the leaf, when it is a class: a namespace is lower case) as a word or
-    as the file's own CamelCase stem (`mp_menu_companion.gd` is MpMenuCompanion)."""
+    as the file's own CamelCase stem (`mp_menu_companion.gd` is MpMenuCompanion). A call names
+    a symbol as well as its definition does."""
     parts = re.split(r"::|\.", sym.replace("~", ""))
     if not re.search(r"\b%s\b" % re.escape(parts[-1]), text):
         return False
@@ -615,19 +618,21 @@ def leg_defines(sym, path, text):
             or bool(re.search(r"\b%s\b" % re.escape(parts[-2]), text)))
 
 
-def godot_leg_defined(line, tok, read):
+def godot_leg_named(line, tok, read):
     """A link to a godot/ file stands when the line names symbols for its `@` list, every one is
-    defined in a file of that list, and tok's own file defines at least one of them: a device or
-    GDScript leg that is still where the link says. `read(path)` is the file's text."""
+    named in a file of that list, and tok's own file names at least one of them (leg_names).
+    A mention is enough, so a leg that moved while its old file still calls the symbol passes:
+    the rule catches a link whose file no longer names the symbols at all. `read(path)` is the
+    file's text."""
     if not tok.startswith(GODOT_LEG_ROOTS):
         return False
     paths, syms = leg_symbols(line, tok)
     if not paths or not syms:
         return False
     texts = {p: read(p) for p in paths}
-    if not all(any(leg_defines(s, p, t) for p, t in texts.items()) for s in syms):
+    if not all(any(leg_names(s, p, t) for p, t in texts.items()) for s in syms):
         return False
-    return any(leg_defines(s, tok, texts[tok]) for s in syms)
+    return any(leg_names(s, tok, texts[tok]) for s in syms)
 
 
 def collapse_homes(homes):
@@ -728,8 +733,8 @@ def classify_reimpl(rows, pairs, all_tracked):
                                       # retired port, a device-side leg the ratchets keep unmarked)
                 if cands and any(names_function(c, name) for c in cands):
                     continue          # the file names the function without this address
-                if cands and godot_leg_defined(line, tok, read):
-                    continue          # a marker-free Godot-side leg, still where the link says
+                if cands and godot_leg_named(line, tok, read):
+                    continue          # a marker-free Godot-side leg whose file still names it
                 target = pick_home(homes, tok, bool(cands), by_base)
                 cls = "reimpl-stale" if not cands else ("reimpl-moved" if homes else "reimpl-orphan")
                 out.append((cls, ea, name, tok, target or "", "slot%d" % slot, line.strip()[:160],
