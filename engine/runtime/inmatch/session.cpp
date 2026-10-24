@@ -1465,9 +1465,15 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		// run the one update loop: the paused legs (the lock tone's word drains
 		// there) until an update's pause row lowers the word (run_updates). The frame
 		// then renders and runs its HUD pass, where the menu pause keeps the lock
-		// tone unregistered.
+		// tone unregistered. The main loop has no pause gate on its render callback or
+		// its re-base read, so a paused frame past a re-based render banks only the time
+		// since that render, as a running one does [orig: Game_MainLoop @0x52BAA7..0x52BAC6
+		// (the render callback's call @0x52BAC6), the re-base read @0x52BAC8..0x52BAD2].
+		const double elapsed = rebase_clock_ && input.since_render_seconds >= 0.0
+				? input.since_render_seconds : input.delta_seconds;
+		rebase_clock_ = false;
 		uint32_t lock_stamp_ms = 0;
-		const int32_t due = bank_frame(input.delta_seconds, input, lock_stamp_ms);
+		const int32_t due = bank_frame(elapsed, input, lock_stamp_ms);
 		// The mouse pump heads every main frame, ahead of the pause word's test, so its
 		// words hold what the paused frames pumped: the paused frame's cursor waits for
 		// its first update as a running frame's does, and no input frame consumes the
@@ -1487,6 +1493,17 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		// world-skip legs); both arms count.
 		step_scene_head(input, out);
 		count_rendered_frame();
+		// The scene frame draws the in-game menu, then reaches its clear and its count-down
+		// with no pause test, so the three frames past a start (the SP restart's, a menu
+		// opened inside them) present black and re-base under the menu too
+		// [orig: GameLoop_RenderFrame - the scene arm @0x521CE8; Render_ProcessMainSceneFrame
+		//  - UI_IsMenuScreenOpen @0x5CAE13, the menu @0x5CAE31, the clear @0x5CAE62..0x5CAE94,
+		//  the count-down @0x5CAF08, the re-base flag @0x5CAF0E].
+		if (out.scene_drawn && start_rebase_frames_ > 0) {
+			out.start_blank = true;
+			--start_rebase_frames_;
+			rebase_clock_ = true;
+		}
 		if (!out.terminal() && out.scene_drawn) {
 			step_hud_scene_cursor();
 			out.hud_pass_called = hud_pass_called(input, out);

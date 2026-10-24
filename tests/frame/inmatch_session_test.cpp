@@ -263,6 +263,39 @@ int main() {
 				"no render sample: the frame delta banks")) return 1;
 	}
 
+	// Under the pause the scene frame still draws, so the start frames count down there too:
+	// the SP restart arms three and leaves the session paused, and its first three paused
+	// frames present black and re-base, the fourth not; each paused frame past a re-based
+	// render banks only the time since it (its paused updates none), the fifth its full
+	// 160 ms over the seed-only history, 2 updates, as the running frames above
+	// [orig: Game_MainLoop @0x52BAA7..0x52BAC6 (the render callback @0x52BAC6), the re-base
+	//  read @0x52BAC8..0x52BAD2; GameLoop_RenderFrame - the scene arm @0x521CE8;
+	//  Render_ProcessMainSceneFrame - the menu @0x5CAE13 / @0x5CAE31, the clear
+	//  @0x5CAE62..0x5CAE94, the count-down @0x5CAF08, the re-base flag @0x5CAF0E].
+	{
+		auto target_heap = std::make_unique<TickProbe>();
+		TickProbe &target = *target_heap;
+		Session session(target);
+		if (!load(session)) return 1;
+		if (!expect(session.reset_to_baseline().applied() && session.state() == State::Paused,
+				"paused start: the restart leaves the session paused")) return 1;
+		FrameInput slow;
+		slow.delta_seconds = TickAccumulator::kTickDt * 10.0;
+		slow.since_render_seconds = 0.0;
+		for (int frame = 0; frame < 4; ++frame) {
+			const FrameOutcome out = session.advance(slow);
+			if (!expect(out.scene_drawn && out.perf.updates == 0 && out.ticks_run() == 0,
+					"paused start: a re-based paused frame banks only the time since the "
+					"last render")) return 1;
+			if (!expect(out.start_blank == (frame < 3),
+					"paused start: the first three paused frames present black")) return 1;
+		}
+		const FrameOutcome after_start = session.advance(slow);
+		if (!expect(after_start.perf.updates == 2 && after_start.ticks_run() == 0 &&
+					!after_start.start_blank && session.state() == State::Paused,
+				"paused start: after the start frames the paused frame banks its full time")) return 1;
+	}
+
 	// A joiner's mission start ends at its final wait for the S2C 0x0F, not at the load:
 	// the update that leaves the wait ends the mode's initialize, so the frame drains no
 	// further update, the main loop resets its bank, smoothing and phase, and its first frame,
