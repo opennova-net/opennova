@@ -370,6 +370,10 @@ private:
 			bool p_nvg_raster);
 	// The target, its camera and its blit, live (the caller holds it or sizes it).
 	SubViewport *make_view_projection_target();
+	// The load's one forced frame through the held target (GameWorld's
+	// hud_pipeline_warm edges, connected by setup, dropped by teardown).
+	bool draw_held_view_projection(bool p_drawing);
+	void disconnect_forced_frame();
 	// An exit from live play keeps the target (engine world/player_view.h
 	// ViewProjection: retail's backbuffer is made once): it stops drawing, the
 	// blit hides and the surface draws its own 3D again; the next live frame

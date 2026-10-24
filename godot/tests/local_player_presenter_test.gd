@@ -1235,6 +1235,42 @@ func test_a_mission_start_makes_and_holds_the_stretched_target() -> void:
 	assert_eq(target.render_target_update_mode, SubViewport.UPDATE_ALWAYS)
 
 
+# The load's one forced frame draws the scene through the held target, as the first live frame
+# will (retail's first scene draw lands on its one backbuffer): its render buffers and first
+# draw are the load's, the surface draws no 3D of its own for that frame, and the target stays
+# held, no reader's, its blit hidden.
+func test_the_load_forced_frame_draws_through_the_held_target() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	var size := camera.get_viewport().get_visible_rect().size
+	if size.x <= 0.0 or size.y <= 0.0:
+		pending("the headless viewport reports no size, so no target can be pinned")
+		return
+	var mode := 0 if absf(size.y / size.x - 0.75) > 0.001 else 2
+	presenter.prepare_view_projection(mode)
+	var target := presenter.get_node_or_null("ViewProjectionTarget") as SubViewport
+	assert_not_null(target, "the mission start makes the target")
+	if target == null:
+		return
+	var blit := presenter.get_node_or_null("ViewProjectionBlit") as CanvasLayer
+	world.emit_signal("hud_pipeline_warm", true)
+	assert_eq(target.render_target_update_mode, SubViewport.UPDATE_ALWAYS,
+			"the forced frame draws the held target")
+	assert_true(camera.get_viewport().disable_3d, "the surface draws no 3D of its own for it")
+	assert_null(presenter.projection_viewport(), "the target stays held: no reader's")
+	assert_true(blit != null and not blit.visible, "its blit stays hidden")
+	var through := target.get_node_or_null("ViewProjectionCamera") as Camera3D
+	assert_true(through != null and through.global_transform.is_equal_approx(camera.global_transform),
+			"the target's camera takes the load camera's pose")
+	world.emit_signal("hud_pipeline_warm", false)
+	assert_eq(target.render_target_update_mode, SubViewport.UPDATE_DISABLED,
+			"past the frame the target is held again")
+	assert_false(camera.get_viewport().disable_3d, "and the surface draws its own 3D")
+
+
 func test_a_mission_start_at_the_surface_ratio_drops_a_held_target() -> void:
 	var world := _load_player_world()
 	var camera := Camera3D.new()

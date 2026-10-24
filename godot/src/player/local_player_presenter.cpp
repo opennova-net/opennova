@@ -49,6 +49,9 @@ const Vector2 kNoProjection(INFINITY, INFINITY);
 constexpr int kViewProjectionBlitLayer = -1;
 // Ratios within this of the surface's own draw the surface directly.
 constexpr float kViewProjectionUnstretched = 0.0001f;
+// GameWorld's edges around the load's one forced frame: true ahead of its draw,
+// false once it drained.
+constexpr const char *kForcedFrameSignal = "hud_pipeline_warm";
 
 // The target renders the world the surface used to: mirror the surface's 3D
 // quality settings onto it (a runtime SubViewport starts from the project
@@ -195,7 +198,14 @@ void LocalPlayerPresenter::set_fp_gun_visible(bool p_visible) {
 
 void LocalPlayerPresenter::setup(Node *p_world, Camera3D *p_camera, GameplayCamera *p_fly_camera,
 		const Ref<ControlsModel> &p_controls) {
+	disconnect_forced_frame();
 	world_id_ = p_world != nullptr ? ObjectID(p_world->get_instance_id()) : ObjectID();
+	// The load's one forced frame draws through the held stretched target
+	// (draw_held_view_projection).
+	if (p_world != nullptr && p_world->has_signal(kForcedFrameSignal)) {
+		p_world->connect(kForcedFrameSignal,
+				callable_mp(this, &LocalPlayerPresenter::draw_held_view_projection));
+	}
 	camera_id_ = p_camera != nullptr ? ObjectID(p_camera->get_instance_id()) : ObjectID();
 	fly_camera_id_ = p_fly_camera != nullptr ? ObjectID(p_fly_camera->get_instance_id()) : ObjectID();
 	visuals_.unref();
@@ -246,7 +256,17 @@ void LocalPlayerPresenter::setup(Node *p_world, Camera3D *p_camera, GameplayCame
 	}
 }
 
+void LocalPlayerPresenter::disconnect_forced_frame() {
+	Node *node = world();
+	const Callable forced_frame = callable_mp(this, &LocalPlayerPresenter::draw_held_view_projection);
+	if (node != nullptr && node->has_signal(kForcedFrameSignal) &&
+			node->is_connected(kForcedFrameSignal, forced_frame)) {
+		node->disconnect(kForcedFrameSignal, forced_frame);
+	}
+}
+
 void LocalPlayerPresenter::teardown() {
+	disconnect_forced_frame();
 	if (Node *node = world()) {
 		// Release the world-to-presenter fixed-tick seam (only when it is
 		// still ours).
@@ -1081,6 +1101,56 @@ void LocalPlayerPresenter::prepare_view_projection(int p_aspect_mode) {
 	if (!held) {
 		hold_view_projection();
 	}
+}
+
+// The load's one forced frame (GameWorld's edges: `p_drawing` true ahead of its draw,
+// false once it drained) draws the scene through the held target, as the first live
+// frame will: retail's first scene draw lands on the one backbuffer its device made at
+// init (engine world/player_view.h ViewProjection carries the witness), so the target's
+// render buffers and first draw are the load's, and the surface draws no 3D of its own
+// meanwhile. The target stays held: no reader sees it and its blit stays hidden. The
+// load camera's pose and frustum, at its horizontal fov, are the frame's. Returns
+// whether a held target took the frame.
+bool LocalPlayerPresenter::draw_held_view_projection(bool p_drawing) {
+	SubViewport *target = Object::cast_to<SubViewport>(ObjectDB::get_instance(held_projection_viewport_id_));
+	Camera3D *through = Object::cast_to<Camera3D>(ObjectDB::get_instance(held_projection_camera_id_));
+	Camera3D *cam = camera();
+	Viewport *surface = cam != nullptr ? cam->get_viewport() : nullptr;
+	if (target == nullptr || through == nullptr || surface == nullptr) {
+		return false;
+	}
+	if (!p_drawing) {
+		target->set_update_mode(SubViewport::UPDATE_DISABLED);
+		surface->set_disable_3d(false);
+		return true;
+	}
+	const Vector2 size = surface->get_visible_rect().size;
+	if (size.x <= 0.0f || size.y <= 0.0f) {
+		return false;
+	}
+	double fov_h = cam->get_fov();
+	if (cam->get_keep_aspect_mode() == Camera3D::KEEP_HEIGHT) {
+		fov_h = Math::rad_to_deg(2.0 * Math::atan(Math::tan(Math::deg_to_rad(fov_h) * 0.5) *
+				static_cast<double>(size.x) / static_cast<double>(size.y)));
+	}
+	mirror_viewport_quality(surface, target);
+	through->set_global_transform(cam->get_global_transform());
+	through->set_fov(fov_h);
+	through->set_near(cam->get_near());
+	through->set_far(cam->get_far());
+	through->set_cull_mask(cam->get_cull_mask());
+	if (through->get_environment() != cam->get_environment()) {
+		through->set_environment(cam->get_environment());
+	}
+	if (through->get_attributes() != cam->get_attributes()) {
+		through->set_attributes(cam->get_attributes());
+	}
+	if (through->get_compositor() != cam->get_compositor()) {
+		through->set_compositor(cam->get_compositor());
+	}
+	target->set_update_mode(SubViewport::UPDATE_ALWAYS);
+	surface->set_disable_3d(true);
+	return true;
 }
 
 void LocalPlayerPresenter::update_view_projection(const opennova::world::ViewProjection &p_projection,
