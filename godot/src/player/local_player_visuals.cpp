@@ -510,17 +510,34 @@ Node3D *LocalPlayerVisuals::build_local_player_viewmodel() {
 	return container;
 }
 
-int LocalPlayerVisuals::build_viewmodel_pipeline_warm(Node3D *p_parent) {
+int LocalPlayerVisuals::build_viewmodel_pipeline_warm(Node3D *p_parent, int p_type_id,
+		int p_character_id) {
 	const Ref<MissionObjectPlacer> mission_placer = placer();
 	if (mission_placer.is_null() || p_parent == nullptr || viewmodel_weapon_cleared_) {
 		return 0;
 	}
-	const Ref<PlayerViewmodelDef> def = local_player_viewmodel_def();
+	Ref<PlayerViewmodelDef> def = local_player_viewmodel_def();
+	// Ahead of the mission start's spawn-kit apply no weapon is presented: the staged kit's first
+	// weapon, the one the apply presents (apply_local_player_spawn_loadout's plan), read off the
+	// weapon table with no memo, so the presented def's stays the apply's to make.
+	const Ref<Simulation> warm_sim = sim();
+	if (def.is_null() && spawn_loadout_.is_valid() && warm_sim.is_valid()) {
+		const opennova::world::SpawnLoadoutPlan plan = opennova::world::spawn_loadout_plan(
+				spawn_loadout_->engine_input(), warm_sim->has_explicit_spawn_loadout(),
+				warm_sim->is_host_listening() || warm_sim->is_joiner());
+		const Ref<WeaponDatabase> weapon_db = weapon_database();
+		if (plan.action == opennova::world::SpawnLoadoutAction::kApplyKit && !plan.kit.empty() &&
+				weapon_db.is_valid()) {
+			const int index = weapon_db->find_weapon(opennova::to_gd(plan.kit.front().name));
+			if (index >= 0) def = PlayerViewmodelDef::from_weapon_def(weapon_db->get_weapon(index));
+		}
+	}
 	if (def.is_null()) {
 		return 0;
 	}
-	// The spec and the two builds are build_local_player_viewmodel's.
-	const Ref<PlayerVisualSpec> character_spec = local_player_visual_spec();
+	// The spec and the two builds are build_local_player_viewmodel's, the character the warm's.
+	const Ref<PlayerVisualSpec> character_spec =
+			mission_placer->resolve_player_visual_spec(p_type_id, p_character_id);
 	const Ref<FpViewmodelSpec> spec = Simulation::fp_viewmodel_spec(true, def->get_gfx1(),
 			character_spec.is_valid() ? character_spec->get_arms() : String(), def->get_animadm(),
 			def->get_flags());

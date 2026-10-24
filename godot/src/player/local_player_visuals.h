@@ -139,10 +139,13 @@ public:
 	// resolve.
 	Node3D *build_local_player_viewmodel();
 	// The load's forced frame's warm of that build (GameWorld::build_person_pipeline_warm): the gun
-	// and arms build_local_player_viewmodel builds for the equipped def, under `p_parent`, with the
-	// view model's pass flags, and none of its state (no parts list, no availability, no report).
-	// The caller frees them past the frame. Returns the parts built (0 with no equipped def).
-	int build_viewmodel_pipeline_warm(Node3D *p_parent);
+	// and arms build_local_player_viewmodel builds, under `p_parent`, with the view model's pass
+	// flags, and none of its state (no parts list, no availability, no report, no def memo). The
+	// def is the presented weapon's, else, ahead of the mission start's spawn-kit apply, the staged
+	// kit's first weapon, the one that apply presents; the arms are the character `p_type_id` /
+	// `p_character_id` resolves to (the identity the caller warms the body with). The caller frees
+	// them past the frame. Returns the parts built (0 with no def).
+	int build_viewmodel_pipeline_warm(Node3D *p_parent, int p_type_id, int p_character_id);
 	// The placer's model-file and animation-map reads since the last take (an instrument:
 	// LocalPlayerPresenter's model builds print them under --verbose). C++ siblings only.
 	MissionObjectPlacer::LoadProfile take_placer_load_profile();

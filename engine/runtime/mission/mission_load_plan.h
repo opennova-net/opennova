@@ -80,9 +80,12 @@
 //    skinned models its first revealed frame would otherwise build (the local
 //    body, its view model, one model per identity the wire walk cold-spawns),
 //    freed past it, so their meshes, rigs and pipelines are made in the load
-//    (GameWorld's person_pipelines leg, D-NET-NEW-LF-15); a joiner's L is born at
-//    the push past the load, so its body and view model are its learned self
-//    record's there
+//    (GameWorld's person_pipelines leg, D-NET-NEW-LF-15); the frame runs ahead of
+//    L's birth on every role (a host's and a single player's Player_InitPlayer in
+//    the mission start past the device stages, a joiner's at the push past the
+//    load), so the body and view model are the identity and kit the birth will
+//    bind: a joiner's learned self record where it holds one, else the local
+//    profile's character and the staged spawn kit
 //    [orig: Game_StartMission @0x524360 - Game_ReloadEntityModelsAndCallbacks
 //    called @0x52550E, Entity_InitAllFromModels called @0x52567F, the 0x0B's
 //    queue called @0x52624B].

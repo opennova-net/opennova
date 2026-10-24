@@ -1807,23 +1807,33 @@ Node3D *GameWorld::build_person_pipeline_warm(const Vector3 &p_position,
 		(void)placer_->take_load_profile();
 	}
 	PackedStringArray graphics;
-	// The local body and its view model, once the local player is known: a joiner's L is born
-	// at the mission start's push, past this load, so its type word, character id and kit are
-	// its learned record's here (Simulation::has_learned_self_record), the ones L's birth binds
-	// and the first frame past the load builds (D-NET-NEW-LF-15).
+	// The local body and its view model, as the mission start's Player_InitPlayer will bind them
+	// and the first frame past the load builds them (D-NET-NEW-LF-15). This frame runs ahead of
+	// L's birth on every role: a host's and a single player's mission start runs past the device
+	// stages (the deferred mission_start leg), a joiner's L is born at the push past its load. So
+	// the identity is the session's once it names one, L's or a joiner's learned self record
+	// (Simulation::has_learned_self_record: its type word and character id), else the local
+	// character profile's side-0 character (a team-1 spawn's side) over the player type; the
+	// weapon is the presented one, else the staged spawn kit's first, which the mission start's
+	// apply presents (LocalPlayerVisuals::build_viewmodel_pipeline_warm). The warm is the device's
+	// pipeline compile with no retail counterpart: an identity the spawn then names otherwise
+	// warmed another person's models, at their build's cost alone.
 	int viewmodel_parts = 0;
-	if (sim->has_local_player() || sim->has_learned_self_record()) {
-		leg("local_body");
-		if (ObjectModel *body = placer_->build_player_animated_model(
-					sim->get_local_player_type_id(), warm, sim->get_local_player_character_id())) {
-			graphics.push_back(body->get_graphic_name());
-		}
+	const bool identity_named = sim->has_local_player() || sim->has_learned_self_record();
+	const int local_type_id = sim->get_local_player_type_id();
+	const int local_character_id = identity_named ? sim->get_local_player_character_id()
+			: local_character_profile_.is_valid() ? local_character_profile_->get_character_id(0)
+												  : 0;
+	leg("local_body");
+	if (ObjectModel *body = placer_->build_player_animated_model(local_type_id, warm, local_character_id)) {
+		graphics.push_back(body->get_graphic_name());
+	}
+	leg_end();
+	if (player_visuals_.is_valid()) {
+		leg("view_model");
+		viewmodel_parts = player_visuals_->build_viewmodel_pipeline_warm(warm, local_type_id,
+				local_character_id);
 		leg_end();
-		if (player_visuals_.is_valid()) {
-			leg("view_model");
-			viewmodel_parts = player_visuals_->build_viewmodel_pipeline_warm(warm);
-			leg_end();
-		}
 	}
 	leg("wire_identities");
 	const int wire_models = runtime->warm_wire_spawn_pipelines(
