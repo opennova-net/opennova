@@ -35,20 +35,20 @@ void test_the_main_scene_order_and_the_mirror_subset() {
 	CHECK(kSceneOverlayOrder[4] == SceneOverlaySlot::UnderwaterMurk);
 	CHECK(kSceneOverlayOrder[5] == SceneOverlaySlot::SunGlare);
 	// The mirror draws its tracer ribbons (@ 0x5c85f6) after its two particle
-	// passes, then the coronas (@ 0x5c85fd), then Render_MainScene's dim
+	// passes, then its own corona walk (@ 0x5c85fd), then Render_MainScene's dim
 	// (@ 0x5c186c) and the far-band sun/moon and glow redraw (@ 0x5c18fb,
 	// @ 0x5c1904). The Inset's mirror runs the same subscene and closing with
-	// its own ribbons and its own sky redraw; the coronas and the dim are the
-	// main mirror's batches.
+	// its own ribbons, its own corona walk and its own sky redraw; the dim is
+	// the main mirror's batch.
 	CHECK(kMirrorOverlayOrder.size() == 5);
 	CHECK(kMirrorOverlayOrder[0] == SceneOverlaySlot::MirrorTracerRibbons);
-	CHECK(kMirrorOverlayOrder[1] == SceneOverlaySlot::LightCoronas);
+	CHECK(kMirrorOverlayOrder[1] == SceneOverlaySlot::MirrorLightCoronas);
 	CHECK(kMirrorOverlayOrder[2] == SceneOverlaySlot::MirrorDim);
 	CHECK(kMirrorOverlayOrder[3] == SceneOverlaySlot::MirrorCelestialBodies);
 	CHECK(kMirrorOverlayOrder[4] == SceneOverlaySlot::MirrorSunGlow);
 	CHECK(kInsetMirrorOverlayOrder.size() == 5);
 	CHECK(kInsetMirrorOverlayOrder[0] == SceneOverlaySlot::InsetMirrorTracerRibbons);
-	CHECK(kInsetMirrorOverlayOrder[1] == SceneOverlaySlot::LightCoronas);
+	CHECK(kInsetMirrorOverlayOrder[1] == SceneOverlaySlot::InsetMirrorLightCoronas);
 	CHECK(kInsetMirrorOverlayOrder[2] == SceneOverlaySlot::MirrorDim);
 	CHECK(kInsetMirrorOverlayOrder[3] == SceneOverlaySlot::InsetMirrorCelestialBodies);
 	CHECK(kInsetMirrorOverlayOrder[4] == SceneOverlaySlot::InsetMirrorSunGlow);
@@ -83,10 +83,16 @@ void test_the_main_scene_order_and_the_mirror_subset() {
 		CHECK(list[4].slot == SceneOverlaySlot::UnderwaterMurk);
 		CHECK(list[5].slot == SceneOverlaySlot::SunGlare);
 	}
+	// The mirror never draws the main scene's walk; its own walk rides its own
+	// slot.
 	compile_scene_overlay(frame, kMirrorOverlayOrder.data(), kMirrorOverlayOrder.size(), list);
-	CHECK(list.size() == 2);
-	for (const SceneOverlayBatch &batch : list)
-		CHECK(batch.slot == SceneOverlaySlot::LightCoronas);
+	CHECK(list.empty());
+	append_corona_overlay(quads, 5, frame, SceneOverlaySlot::MirrorLightCoronas);
+	compile_scene_overlay(frame, kMirrorOverlayOrder.data(), kMirrorOverlayOrder.size(), list);
+	CHECK(list.size() == 1 && list[0].slot == SceneOverlaySlot::MirrorLightCoronas &&
+			list[0].texture == 5);
+	compile_scene_overlay(frame, kSceneOverlayOrder.data(), kSceneOverlayOrder.size(), list);
+	CHECK(list.size() == 6);
 }
 
 // The weapon Inset pass runs the same scene core with (view, 0, 0, 0)
@@ -175,7 +181,7 @@ void test_the_inset_tail_draws_its_own_walks_and_no_glare() {
 		CHECK(list[4].slot == SceneOverlaySlot::SunGlare);
 	}
 	compile_scene_overlay(frame, kMirrorOverlayOrder.data(), kMirrorOverlayOrder.size(), list);
-	CHECK(list.size() == 1 && list[0].slot == SceneOverlaySlot::LightCoronas);
+	CHECK(list.empty());
 }
 
 void test_the_murk_gate_includes_the_waterline() {
@@ -278,12 +284,12 @@ void test_the_mirror_closes_with_the_dim_and_the_far_band_redraw() {
 	append_mirror_dim_overlay(64.0f / 255.0f, frame);
 	std::vector<LightCoronaQuad> quads(1);
 	quads[0].half_size = 0.5f;
-	append_corona_overlay(quads, 3, frame);
+	append_corona_overlay(quads, 3, frame, SceneOverlaySlot::MirrorLightCoronas);
 	std::vector<SceneOverlayBatch> list;
 	compile_scene_overlay(frame, kMirrorOverlayOrder.data(), kMirrorOverlayOrder.size(), list);
 	CHECK(list.size() == 4);
 	if (list.size() == 4) {
-		CHECK(list[0].slot == SceneOverlaySlot::LightCoronas);
+		CHECK(list[0].slot == SceneOverlaySlot::MirrorLightCoronas);
 		CHECK(list[1].slot == SceneOverlaySlot::MirrorDim);
 		CHECK(list[1].shading == SceneOverlayShading::DimMultiply);
 		CHECK(list[1].depth == SceneOverlayDepth::Always);
@@ -298,9 +304,9 @@ void test_the_mirror_closes_with_the_dim_and_the_far_band_redraw() {
 		CHECK(list[3].slot == SceneOverlaySlot::MirrorSunGlow);
 		CHECK(list[3].depth == SceneOverlayDepth::FarBand);
 	}
-	// The main scene never draws the mirror's closing slots.
+	// The main scene never draws the mirror's slots.
 	compile_scene_overlay(frame, kSceneOverlayOrder.data(), kSceneOverlayOrder.size(), list);
-	CHECK(list.size() == 1);
+	CHECK(list.empty());
 }
 
 // The weapon Inset's mirror closes its own target with its own sky redraw: the
@@ -474,7 +480,8 @@ TracerRibbonFrame stock_and_smoke_ribbons() {
 // then its coronas [orig: Water_RenderReflectedWorldScene @ 0x5c85db, @ 0x5c85e5,
 // @ 0x5c85f6, @ 0x5c85fd]: each mirror's ribbons lead its own overlay pass (the
 // pair precede the pass), one batch per channel in pool order, ahead of the
-// coronas, and no other view draws them.
+// coronas, and no other view draws them. Each mirror's coronas are its own walk
+// in its own slot; the scene views draw neither mirror's.
 void test_a_mirror_draws_its_ribbons_ahead_of_its_coronas() {
 	const TracerRibbonFrame ribbons = stock_and_smoke_ribbons();
 	CHECK(ribbons.draws.size() == 2);
@@ -482,6 +489,8 @@ void test_a_mirror_draws_its_ribbons_ahead_of_its_coronas() {
 	std::vector<LightCoronaQuad> quads(1);
 	quads[0].half_size = 0.5f;
 	append_corona_overlay(quads, 3, frame);
+	append_corona_overlay(quads, 3, frame, SceneOverlaySlot::MirrorLightCoronas);
+	append_corona_overlay(quads, 3, frame, SceneOverlaySlot::InsetMirrorLightCoronas);
 	const SceneOverlayFog fog;
 	append_tracer_ribbon_overlay(ribbons, 5, fog, frame, SceneOverlaySlot::InsetMirrorTracerRibbons);
 	append_tracer_ribbon_overlay(ribbons, 5, fog, frame, SceneOverlaySlot::MirrorTracerRibbons);
@@ -494,7 +503,7 @@ void test_a_mirror_draws_its_ribbons_ahead_of_its_coronas() {
 		CHECK(list[0].shading == SceneOverlayShading::RibbonStock);
 		CHECK(list[1].slot == SceneOverlaySlot::MirrorTracerRibbons);
 		CHECK(list[1].shading == SceneOverlayShading::RibbonSmoke);
-		CHECK(list[2].slot == SceneOverlaySlot::LightCoronas);
+		CHECK(list[2].slot == SceneOverlaySlot::MirrorLightCoronas);
 		CHECK(list[3].slot == SceneOverlaySlot::MirrorDim);
 	}
 	compile_scene_overlay(frame, kInsetMirrorOverlayOrder.data(), kInsetMirrorOverlayOrder.size(),
@@ -503,7 +512,7 @@ void test_a_mirror_draws_its_ribbons_ahead_of_its_coronas() {
 	if (list.size() == 4) {
 		CHECK(list[0].slot == SceneOverlaySlot::InsetMirrorTracerRibbons);
 		CHECK(list[1].slot == SceneOverlaySlot::InsetMirrorTracerRibbons);
-		CHECK(list[2].slot == SceneOverlaySlot::LightCoronas);
+		CHECK(list[2].slot == SceneOverlaySlot::InsetMirrorLightCoronas);
 	}
 	// The scene views keep their own ribbons (a mesh on their own bits).
 	compile_scene_overlay(frame, kSceneOverlayOrder.data(), kSceneOverlayOrder.size(), list);

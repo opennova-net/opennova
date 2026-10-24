@@ -11,6 +11,7 @@
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
 #include "particle/effect_scene.h"
@@ -59,6 +60,8 @@ private:
 	bool shutdown_ = false;
 	bool procedural_fallback_enabled_ = false;
 	std::vector<Node *> warm_nodes_;
+	// The last overlay frame published to the view passes (get_scene_overlay_slot_positions).
+	std::shared_ptr<const SceneOverlaySubmission> scene_overlay_submission_;
 
 	void _invalidate_catalog();
 	void _restore_device_state();
@@ -169,6 +172,10 @@ public:
 	// tail, the mirror its coronas); one immutable frame reaches all three.
 	// Null clears them. Not bound to Godot.
 	void publish_scene_overlay(const std::shared_ptr<const SceneOverlaySubmission> &p_submission);
+	// The vertex positions (the render frame) the last published overlay frame's batches of
+	// `p_slot` (renderer::SceneOverlaySlot) carry, in submission order: a typed read of where a
+	// view's walk placed its draws.
+	PackedVector3Array get_scene_overlay_slot_positions(int p_slot) const;
 
 	// Renderer-owned diagnostics are plain values. No MeshInstance or material
 	// references escape through the F3/debug seam. They are read from each

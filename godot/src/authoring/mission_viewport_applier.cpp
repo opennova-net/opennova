@@ -1247,7 +1247,7 @@ void MissionViewportApplier::present(double dt) {
 	const int64_t effects_start = now_us();
 	layers_->present_particles(clock_ms_);
 	layers_->present_drops();
-	layers_->present_overlay(shown_lights_ ? lights_.ptr() : nullptr);
+	layers_->present_overlay(shown_lights_ ? lights_.ptr() : nullptr, clock_ms_);
 	leg_us_[2] = now_us() - effects_start;
 	layers_->present_frame_effects();
 	layers_->present_clear_and_cube();

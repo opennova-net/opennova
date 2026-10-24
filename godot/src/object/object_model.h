@@ -1184,6 +1184,11 @@ public:
 	void set_mirror_occlusion_hidden(int p_view, bool p_hidden);
 	void set_mirror_occlusion_section_mask(int p_view, int64_t p_raw_mask, int64_t p_forced_mask);
 	void clear_mirror_occlusion(int p_view);
+	// The raw section mask mirror view `p_view`'s corona walk gates this model's owned lights on:
+	// that mirror's collect's verdict; a sectioned model it did not mark reads 0, as each collect
+	// clears the whole mask array before it writes (engine renderer/scene_overlay.h
+	// kMirrorOverlayOrder carries the witness); -1 (no verdict in any view) passes the gate.
+	int64_t get_mirror_view_section_mask(int p_view) const;
 	// A presenter-driven model's level in a mirror (the death pieces' own level
 	// walk, run per collect): the set_active_lod of that mirror's view.
 	void set_mirror_view_lod(int p_view, int p_lod_index);

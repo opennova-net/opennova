@@ -149,9 +149,16 @@ public:
 	// stops.
 	void render_inset_frame(Camera3D *p_camera, int64_t p_time_ms);
 	void release_inset_frame();
+	// Each water mirror's own corona walk, once per frame after both mirrors' cameras are placed
+	// (GameWorld's scene_overlay leg): the reflected subscene walks the coronas again at the
+	// mirror's eye, under its dry fog, owned coronas gated on the section masks that mirror's own
+	// collect wrote, at the phase its host pass's prologue had not yet advanced
+	// (renderer/scene_overlay.h kMirrorOverlayOrder carries the witness). A null camera (a mirror
+	// that does not render this frame) drops that mirror's walk. Not bound to Godot.
+	void render_mirror_coronas(Camera3D *p_mirror, Camera3D *p_inset_mirror, int64_t p_time_ms);
 	// This frame's corona billboards into the post-particle overlay tail
-	// (renderer/scene_overlay.h): the main walk's, and the Inset walk's in its
-	// own slot. Not bound to Godot.
+	// (renderer/scene_overlay.h): the main walk's, and the Inset's and each
+	// mirror's walk in its own slot. Not bound to Godot.
 	void append_overlay(SceneOverlaySubmission &r_submission);
 	// The 62 Hz lifecycle decay (engine: runtime/renderer/light_scene.h) — beside EffectWorld.advance_fixed_tick.
 	void advance_fixed_tick();
@@ -297,10 +304,18 @@ private:
 	std::vector<opennova::renderer::LightCoronaQuad> coronas_;
 	// The weapon Inset pass's own walk this frame (render_inset_frame).
 	std::vector<opennova::renderer::LightCoronaQuad> inset_coronas_;
-	// The frame & 3 jitter phase: every walk advances it, as retail's
+	// Each water mirror's own walk this frame (render_mirror_coronas): [0] the
+	// main scene's mirror, [1] the weapon Inset's.
+	std::vector<opennova::renderer::LightCoronaQuad> mirror_coronas_[2];
+	// The frame & 3 jitter phase: every scene walk advances it, as retail's
 	// effect-world prologue does once per scene pass (scene_overlay.h
-	// kInsetOverlayOrder).
+	// kInsetOverlayOrder). A mirror's subscene runs ahead of its host pass's
+	// prologue, so the main scene's mirror walks at the phase before the main
+	// walk's advance and the Inset's mirror at the main walk's.
 	int corona_frame_ = 0;
+	int mirror_corona_phase_[2] = {0, 0};
+	// The mirrors' fog for their walks: the reflected subscene's dry block.
+	Ref<EnvLightValues> mirror_corona_fog_;
 	// The procedural corona texture "texlightcrn": the law (the 128x128
 	// 0.4 - 0.45 d falloff, truncated, the transparent border) lives
 	// portable in renderer::corona_texture_argb; this only wraps the bytes in

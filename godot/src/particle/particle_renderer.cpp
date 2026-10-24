@@ -1114,6 +1114,8 @@ void ParticleRenderer::_bind_methods() {
 			&ParticleRenderer::get_draw_command_count);
 	ClassDB::bind_method(D_METHOD("get_debug_draw_list_report"),
 			&ParticleRenderer::get_debug_draw_list_report);
+	ClassDB::bind_method(D_METHOD("get_scene_overlay_slot_positions", "slot"),
+			&ParticleRenderer::get_scene_overlay_slot_positions);
 	ClassDB::bind_method(D_METHOD("get_debug_emitter_bounds"),
 			&ParticleRenderer::get_debug_emitter_bounds);
 	ClassDB::bind_method(D_METHOD("get_unresolved_texture_names"),
@@ -1328,6 +1330,7 @@ void ParticleRenderer::shutdown() {
 		overlay->set_enabled(false);
 		overlay->clear_submission();
 	});
+	scene_overlay_submission_.reset();
 	impl_->detach_compositors();
 
 	// Detaching affects the next render setup. Drain a callback already queued
@@ -1380,9 +1383,28 @@ void ParticleRenderer::publish_scene_overlay(
 		const std::shared_ptr<const SceneOverlaySubmission> &p_submission) {
 	if (shutdown_ || !impl_)
 		return;
+	scene_overlay_submission_ = p_submission;
 	impl_->for_each_overlay([&p_submission](Ref<SceneOverlayCompositorEffect> &overlay) {
 		overlay->publish(p_submission);
 	});
+}
+
+PackedVector3Array ParticleRenderer::get_scene_overlay_slot_positions(int p_slot) const {
+	PackedVector3Array positions;
+	if (!scene_overlay_submission_) {
+		return positions;
+	}
+	const opennova::renderer::SceneOverlayFrame &frame = scene_overlay_submission_->frame;
+	for (const opennova::renderer::SceneOverlayBatch &batch : frame.batches) {
+		if (static_cast<int>(batch.slot) != p_slot) {
+			continue;
+		}
+		for (uint32_t i = 0; i < batch.vertex_count; ++i) {
+			const opennova::renderer::SceneOverlayVertex &v = frame.vertices[batch.first_vertex + i];
+			positions.push_back(Vector3(v.position[0], v.position[1], v.position[2]));
+		}
+	}
+	return positions;
 }
 
 void ParticleRenderer::set_hidden(bool p_hidden) {

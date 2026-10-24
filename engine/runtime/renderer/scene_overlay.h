@@ -53,6 +53,10 @@ enum class SceneOverlaySlot : uint8_t {
 	// (kInsetMirrorOverlayOrder).
 	InsetMirrorCelestialBodies = 15,
 	InsetMirrorSunGlow = 16,
+	// Each water mirror's own corona walk, at that mirror's eye
+	// (kMirrorOverlayOrder, kInsetMirrorOverlayOrder).
+	MirrorLightCoronas = 17,
+	InsetMirrorLightCoronas = 18,
 };
 
 // The main scene's tail, in draw order. The scope's aperture view runs the
@@ -115,8 +119,19 @@ inline constexpr std::array<SceneOverlaySlot, 5> kInsetOverlayOrder = {
 // the call @ 0x5c85fd; all four behind the g_WaterDetailLevel >= 2 test
 // @ 0x5c85ad..0x5c85b4, which the locked profile passes]. The mirror's particle
 // pair are its overlay pass's two predecessors, so its ribbons lead the pass,
-// ahead of its coronas; the precipitation drawer's one caller is the main scene
-// core [orig: Render_WeatherTrailParticles <- @ 0x5c96a6]. Render_MainScene
+// ahead of its coronas. The coronas are the mirror's own walk: the walk reads
+// the pass's eye for its 100-unit cull and its march toward the camera
+// [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40 - the eye words read
+// @ 0x5ab09d..0x5ab0a9, the Vec3_NormalizeFloat call @ 0x5ab28b], the pass's view
+// rows for its near-depth test (@ 0x5ab0fc..0x5ab143), the phase word
+// (@ 0x5ab06e), and the section masks the mirror's own collect wrote, cleared
+// at every collect [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0 -
+// the Terrain_BuildSectorVisibilityMasks call @ 0x5c9136;
+// Terrain_BuildSectorVisibilityMasks @ 0x5c8610 - the memset call @ 0x5c8624],
+// and fogs to black under the subscene's dry block [orig:
+// Environment_ApplyFogAndAmbient(0, 0) the call @ 0x5c8519]. The precipitation
+// drawer's one caller is the main scene core [orig: Render_WeatherTrailParticles
+// <- @ 0x5c96a6]. Render_MainScene
 // then closes the mirror target: at water detail >= 2 the fullscreen dim
 // (DESTCOLOR / ZERO under 0xFF404040 [orig: Render_MainScene @ 0x5c1727
 // gate, @ 0x5c1856..0x5c189e]), and at FrameFX quality >= 3 the far depth
@@ -126,7 +141,7 @@ inline constexpr std::array<SceneOverlaySlot, 5> kInsetOverlayOrder = {
 // The locked profile runs both.
 inline constexpr std::array<SceneOverlaySlot, 5> kMirrorOverlayOrder = {
 	SceneOverlaySlot::MirrorTracerRibbons, // @ 0x5c85f6
-	SceneOverlaySlot::LightCoronas,        // @ 0x5c85fd
+	SceneOverlaySlot::MirrorLightCoronas,  // @ 0x5c85fd
 	SceneOverlaySlot::MirrorDim,
 	SceneOverlaySlot::MirrorCelestialBodies,
 	SceneOverlaySlot::MirrorSunGlow,
@@ -142,12 +157,13 @@ inline constexpr std::array<SceneOverlaySlot, 5> kMirrorOverlayOrder = {
 // @ 0x5c2783..0x5c27b6, the Render_MainScene call @ 0x5c27c6], whose discs sit at
 // that pass's camera [orig: Render_CelestialBodies @ 0x5acaa0 - the camera word
 // read by the Math_FixedPointToFloat3_YNegated call @ 0x5acae5]. So its pass
-// leads with its own ribbons, built against its own camera, and closes with
-// its own sky redraw at its own eye; the coronas and the full-target dim are
-// the main mirror's batches.
+// leads with its own ribbons, built against its own camera, walks its own
+// coronas at its own eye over its own collect's section masks, and closes with
+// its own sky redraw at its own eye; the full-target dim is the main mirror's
+// batch.
 inline constexpr std::array<SceneOverlaySlot, 5> kInsetMirrorOverlayOrder = {
 	SceneOverlaySlot::InsetMirrorTracerRibbons,
-	SceneOverlaySlot::LightCoronas,
+	SceneOverlaySlot::InsetMirrorLightCoronas,
 	SceneOverlaySlot::MirrorDim,
 	SceneOverlaySlot::InsetMirrorCelestialBodies,
 	SceneOverlaySlot::InsetMirrorSunGlow,
@@ -352,9 +368,9 @@ void append_precipitation_overlay(const PrecipitationDrawFrame &precipitation,
 // The corona billboards: one camera-facing quad per segment, the
 // premultiplied colour as its diffuse, depth-tested, no depth write
 // [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40 — fog+blend mode 2
-// @ 0x5aafb6]. `slot` names the walk: the main scene's (LightCoronas, which
-// the water mirror draws too) or the weapon Inset pass's own
-// (InsetLightCoronas).
+// @ 0x5aafb6]. `slot` names the walk: the main scene's (LightCoronas), the
+// weapon Inset pass's own (InsetLightCoronas), or a water mirror's own
+// (MirrorLightCoronas, InsetMirrorLightCoronas).
 void append_corona_overlay(const std::vector<LightCoronaQuad> &quads, uint32_t texture,
 		SceneOverlayFrame &out, SceneOverlaySlot slot = SceneOverlaySlot::LightCoronas);
 

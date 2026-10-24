@@ -1358,6 +1358,23 @@ void GameWorld::render_scene_overlay_frame() {
 		post_load_part_end();
 		post_load_part("coronas");
 		if (light_director_.is_valid()) {
+			// Each mirror that renders this frame walks its own coronas at its own eye, both
+			// mirrors' cameras placed by now (the water and inset_water legs).
+			Camera3D *mirror = nullptr;
+			Camera3D *inset_mirror = nullptr;
+			if (water_ != nullptr && is_water_render_active()) {
+				const SubViewport *target = water_->get_reflection_viewport();
+				if (target != nullptr && target->get_update_mode() != SubViewport::UPDATE_DISABLED &&
+						water_->get_reflection_camera() != nullptr &&
+						water_->get_reflection_camera()->is_inside_tree()) {
+					mirror = water_->get_reflection_camera();
+				}
+				if (water_->is_inset_mirror_rendered() && water_->get_inset_reflection_camera() != nullptr &&
+						water_->get_inset_reflection_camera()->is_inside_tree()) {
+					inset_mirror = water_->get_inset_reflection_camera();
+				}
+			}
+			light_director_->render_mirror_coronas(mirror, inset_mirror, get_frame_clock_ms());
 			light_director_->append_overlay(*submission);
 		}
 		post_load_part_end();

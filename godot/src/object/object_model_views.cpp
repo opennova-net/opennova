@@ -758,6 +758,16 @@ void ObjectModel::set_mirror_occlusion_section_mask(int p_view, int64_t p_raw_ma
 	mark_mirror_view(p_view);
 }
 
+int64_t ObjectModel::get_mirror_view_section_mask(int p_view) const {
+	if (p_view < 0 || p_view > 1) {
+		return occlusion_section_mask_;
+	}
+	if ((mirror_[p_view].own & kInsetOwnSections) != 0) {
+		return mirror_[p_view].section_mask;
+	}
+	return occlusion_section_mask_ == -1 ? -1 : 0;
+}
+
 void ObjectModel::set_mirror_view_lod(int p_view, int p_lod_index) {
 	if (p_view < 0 || p_view > 1) {
 		return;
