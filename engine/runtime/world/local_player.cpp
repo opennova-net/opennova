@@ -979,6 +979,9 @@ void LocalPlayer::reset_for_new_round() {
     w::radar_reset(radar);
     Entity *local = player();
     if (local == nullptr) return;
+    // The local player's being-revived word, which the spawn-state reset leaves on it
+    // [orig: Game_InitNewRound @0x422740 - `mov [eax+1E0h], ebx` @0x4227D4].
+    local->medic_reviving = false;
     // [orig: Game_InitNewRound @0x422740; Camera_ResetToLocalPlayer @0x4a3d30]
     view.binoculars_requested = false;
     view.binoculars_raised = false;

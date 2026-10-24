@@ -213,6 +213,23 @@ bool run_the_reset_on_a_dead_body_resolves_nothing() {
 	              "dead reset: the tail's list runs on the body");
 }
 
+// The reset clears the being-revived word (+0x1E0) off the local player alone; the local
+// player's is the round init's, so a reset without one (a teleport) leaves it set.
+// [orig: Entity_ResetToSpawnState @0x4B9610 - `cmp esi, g_LocalPlayerEntity; jz`
+//  @0x4B97FB..0x4B9801, `mov [esi+1E0h], ebx` @0x4B9803; Game_InitNewRound @0x422740 - @0x4227D4]
+bool run_the_reset_leaves_the_local_players_revive_word() {
+	Rig remote(/*dead=*/false);
+	remote.entity().medic_reviving = true;
+	w::entity_reset_to_spawn_state(*remote.world, remote.world->ai, remote.entity());
+	if (!expect(!remote.entity().medic_reviving, "revive word: the reset clears a remote body's"))
+		return false;
+	Rig local(/*dead=*/false);
+	local.world->cached.local_player = local.body;
+	local.entity().medic_reviving = true;
+	w::entity_reset_to_spawn_state(*local.world, local.world->ai, local.entity());
+	return expect(local.entity().medic_reviving, "revive word: the reset leaves the local player's");
+}
+
 // A pool-2 ladder: one CL (type-4) box, x -1..1, y -1..0.25, z -2..1.5 off the entity's
 // origin, its first plane the +Y face (the ladder's facing).
 w::CollisionModel ladder_model() {
@@ -453,6 +470,7 @@ int main() {
 	ok &= run_the_reset_on_a_dead_body_resolves_nothing();
 	ok &= run_the_reset_leaves_the_stance_bits();
 	ok &= run_the_reset_resolve_enters_a_ladder();
+	ok &= run_the_reset_leaves_the_local_players_revive_word();
 	ok &= run_the_deploy_pushes_the_body_out_of_a_wall();
 	ok &= run_a_joiner_bodys_death_edge_reads_its_flags();
 	if (!ok) return 1;

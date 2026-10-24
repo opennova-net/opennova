@@ -648,6 +648,13 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity,
     entity.spawn_heading = heading;
     entity.spawn_flags = flags & ~kEntityFlagDead;
     release_corpse_effect(world, entity);
+    // The being-revived word (+0x1E0) clears off the local player alone; the local's is
+    // Game_InitNewRound's (LocalPlayer::reset_for_new_round), so a reset the local player takes
+    // without a round init (a teleport) keeps it.
+    // [orig: Entity_ResetToSpawnState @0x4B9610 - `cmp esi, g_LocalPlayerEntity; jz`
+    //  @0x4B97FB..0x4B9801, `mov [esi+1E0h], ebx` @0x4B9803; Game_InitNewRound @0x422740 -
+    //  @0x4227D4]
+    if (entity.handle != world.cached.local_player) entity.medic_reviving = false;
     if (body != nullptr) {
         body->health = static_cast<int16_t>(entity.health);
         entity.net_anim_state = static_cast<uint8_t>(body->inf.anim_state);
