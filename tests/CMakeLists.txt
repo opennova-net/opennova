@@ -5309,6 +5309,15 @@ add_test(NAME ai_round_damage COMMAND ai_round_damage_test)
 add_executable(netsim_compress_zero_fold_test netsim/compress_zero_fold_test.cpp)
 target_link_libraries(netsim_compress_zero_fold_test PRIVATE opennova_runtime)
 add_test(NAME netsim_compress_zero_fold COMMAND netsim_compress_zero_fold_test)
+# The class inits' MountSlot leg: an ewep's and an EWeap aircraft's slot bound and seeded at
+# the spawn (the ewep's split behind its model), kept through mount / dismount / remount, re-seeded
+# by the aircraft's respawn, refilled by a PlayerControl carrier's death, bound as the armory
+# lands (L4-s37).
+add_executable(weapon_slot_class_init_test world/weapon_slot_class_init_test.cpp)
+target_link_libraries(weapon_slot_class_init_test
+    PRIVATE opennova_net opennova_runtime opennova_formats opennova_base)
+target_include_directories(weapon_slot_class_init_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME weapon_slot_class_init COMMAND weapon_slot_class_init_test)
 
 # --- parity lane L5 (client replica) ---
 # The joiner's own player record Flags folded into L under 0xE1 and echoed by the same

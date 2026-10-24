@@ -438,10 +438,10 @@ void test_parent_publication_helo_clamped_pair() {
     ParentRig pr(/*profile_type=*/1, 0, kItemAttribEweap);
     const int32_t look_heading = bam_sub(kGunHeading, 50 * kBamPerDegree);
     pr.r.look(look_heading, -25 * kBamPerDegree);
-    // Aircraft +0x474 is initialized from items.def primary_weapon, just
-    // as an ewep's +0x2B4 is. Resolve it through the production channel tick.
+    // Aircraft +0x474 is bound from items.def primary_weapon by its class init at
+    // its spawn, just as an ewep's +0x2B4 is; the clamp reads that bound Def.
     // [orig: Entity_InitInfantryBoneData @0x490173..0x49017b;
-    // WeaponSlot_InitFromEntityDef @0x5466d8..0x54670a]
+    // WeaponSlot_InitFromEntityDef @0x5466d8..0x54670a; slot-1 def [edi+494h] @0x440fbc]
     auto &table = pr.r.w.tables.weapons;
     table.entries.resize(2);
     WeaponTableEntry &slot1 = table.entries[1];
@@ -451,6 +451,10 @@ void test_parent_publication_helo_clamped_pair() {
     slot1.turret_pitch_max_deg = 20;
     slot1.turret_pitch_min_deg = 10;
     pr.r.w.registry.get(pr.parent_h)->primary_weapon = slot1.name;
+    // An unbound parent slot clamps nothing and publishes nothing.
+    CHECK(pr.r.w.ai.pose_if_mounted(*pr.r.body, pr.r.w));
+    CHECK(pr.parent_ai->brain.f[AiBrain::kActivePitch] == 0);
+    CHECK(pr.r.w.vehicles.init_weapon_slot_from_entity_def(*pr.r.w.registry.get(pr.parent_h)));
     CHECK(pr.r.w.ai.pose_if_mounted(*pr.r.body, pr.r.w));
     CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == 30 * kBamPerDegree);
     CHECK(pr.parent_ai->brain.f[AiBrain::kStagingBlock + 3] == 30 * kBamPerDegree);
@@ -670,10 +674,15 @@ void test_parent_publication_runs_unoccupied_every_tick() {
     CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == 0x12340000);
     // ...and the slot gate's exit skips the matrix bit too [orig: @0x440EA0].
     CHECK((pr.r.gun().engine_flags & kEntityFlagMatrixBuilt) == 0);
-    // A slot the port has not bound yet still carries the Def its item def
-    // names: retail binds it at spawn.
-    // [orig: WeaponSlot_InitFromEntityDef @0x5466E8..0x54670A]
+    // The gate reads the slot the gun's class init bound, never the name its item
+    // def carries: an unbound gun naming a weapon still publishes nothing until its
+    // init binds the slot. [orig: WeaponSlot_InitFromEntityDef @0x5466E8..0x54670A,
+    //  from Entity_InitBoneReferences @0x441482]
     pr.r.gun().primary_weapon = "CHILD_GUN";
+    tick_emplaced_weapon_class_update(pr.r.w, pr.r.gun());
+    CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == 0x12340000);
+    CHECK(pr.r.w.vehicles.init_weapon_slot_from_entity_def(pr.r.gun()));
+    CHECK(pr.r.gun().primary_weapon_slot_adm == 0);
     tick_emplaced_weapon_class_update(pr.r.w, pr.r.gun());
     CHECK(pr.parent_ai->brain.f[AiBrain::kActiveYaw] == yaw);
 }

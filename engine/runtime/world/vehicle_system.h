@@ -220,13 +220,36 @@ public:
     const Entity *claimant(const Entity &vehicle, Entity &scratch) const;
     bool claimant_present(const Entity &vehicle) const;
     // Swap a UseGun occupant to the parent's embedded weapon slot, preserving the
-    // personal equipped AdmDef for detach. Returns true once the parent weapon resolves.
-    // [orig: Entity_AttachToUseGunSlot @0x546b80..0x546c73]
-    bool bind_use_gun_slot(Entity &occupant, Entity &vehicle);
-    // Resolve an entity's authored primary_weapon into its embedded MountSlot and
-    // seed clip/reserve when the weapon table becomes available. Entity promotion
-    // can precede armory loading, so callers use this at the first live slot edge.
-    bool prepare_weapon_slot(Entity &vehicle);
+    // personal equipped AdmDef for detach. The slot is the one the parent's class init
+    // bound: the attach stores its owner and touches nothing else in it.
+    // [orig: Entity_AttachToUseGunSlot @0x546b80..0x546c73 (the owner store @0x546c73)]
+    void bind_use_gun_slot(Entity &occupant, Entity &vehicle);
+    // The entity's embedded MountSlot cleared, then bound to the weapon its def's
+    // primary_weapon names and seeded from that weapon: the scope words, the clip word
+    // (the def's clipsize), the reserve word (raw startrounds when either word is 0xFFFF,
+    // else their 16-bit difference). An empty or unknown name leaves the slot clear and
+    // unbound (false). Retail runs it only from the class inits below.
+    // [orig: WeaponSlot_InitFromEntityDef @0x5466C0]
+    bool init_weapon_slot_from_entity_def(Entity &entity);
+    // The bound slot's clip and reserve split from `total` rounds: none when the slot's
+    // weapon is clipless or its startrounds is -1, else the total capped at startrounds,
+    // the clip the clipsize capped at that total, the reserve the rest.
+    // [orig: WeaponSlot_SplitAmmoIntoClipAndReserve @0x546370 (the +0x2B4 slot);
+    //  WeaponSlot_SplitVehicleAmmoIntoClipAndReserve @0x546310 (the +0x474 slot)]
+    void split_weapon_slot_ammo(Entity &entity, int32_t total);
+    // The slot leg of the entity's def+0x148 class init: an ewep row binds its slot and,
+    // with its model loaded and a weapon bound, splits its startrounds; a CHel / cpln row
+    // whose def carries EWeap does the same without the model test. Every other row's init
+    // touches no slot. The mission start, a deployable and its addeweap children, a
+    // joiner's arriving rows and a vehicle's respawn run it; no mount does.
+    // [orig: Entity_InitBoneReferences @0x441470 (the ewep row's init dword @0x81309C); the
+    //  CHel / cpln rows' Entity_InitHelicopterAIFromDef @0x4683C0 -> Entity_InitInfantryBoneData
+    //  @0x490160]
+    void run_weapon_slot_class_init(Entity &entity);
+    // The mission start's pass of that leg over pools 2, 3, 1 and 0, as the model init
+    // runs the class inits; ours runs it as the armory lands (MissionKernel::load_weapon_table).
+    // [orig: Entity_InitAllFromModels @0x40E460]
+    void run_weapon_slot_class_inits();
     const WeaponSlotState *resolve_mounted_ammo_slot(const Entity &mount) const;
     // Resolve the EWeap MountSlot selected by retail's live route bit. A type-1
     // vehicle uses its own embedded slot. An attached non-vehicle EWeap uses its

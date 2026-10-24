@@ -298,9 +298,14 @@ bool VehicleSystem::rerun_class_init(Entity &e) {
 // [orig: Entity_RespawnVehicle @0x45FF40]
 void VehicleSystem::respawn(Entity &e) {
 	// The ai_function class init runs first; only when it ran do the rotor
-	// speed/rate words drop. [orig: `cmp [eax+148h],ebx ... call ecx`
-	//  @0x45FF53..0x45FF68; +0x468/+0x460 = 0 @0x45FF6D..0x45FF73]
-	if (rerun_class_init(e)) {
+	// speed/rate words drop. A CHel / cpln row's init ends in its slot leg, brain or
+	// none, so an EWeap helicopter respawns with its slot bound and seeded afresh.
+	// [orig: `cmp [eax+148h],ebx ... call ecx` @0x45FF53..0x45FF68; +0x468/+0x460 = 0
+	//  @0x45FF6D..0x45FF73; Entity_InitHelicopterAIFromDef @0x4683C0 - the no-AI-slot leg's
+	//  jz @0x468493 and the brain leg's jmp @0x46869A, both into the call @0x4686A2]
+	const bool class_init_ran = rerun_class_init(e);
+	run_weapon_slot_class_init(e);
+	if (class_init_ran) {
 		e.veh.part_spin.rate = 0;
 		e.veh.part_spin.speed = 0;
 	}
@@ -504,13 +509,9 @@ void VehicleSystem::cleanup_destroyed_ref_group(Entity &vehicle) {
 			//  the split's -1 guards @0x546382..0x54638B]
 			other->emplaced_gun_pitch_word = 0;
 			other->emplaced_gun_yaw_word = 0;
-			const auto *weapon = world_.tables.weapons.by_index(other->primary_weapon_slot_adm);
-			if (weapon != nullptr && weapon->startrounds != -1 && weapon->clipsize != -1) {
-				other->primary_weapon_slot.clip =
-						std::min<int32_t>(weapon->clipsize, weapon->startrounds);
-				other->primary_weapon_slot.reserve =
-						weapon->startrounds - other->primary_weapon_slot.clip;
-			}
+			// The slot its class init bound refills from the weapon's startrounds.
+			if (const auto *weapon = world_.tables.weapons.by_index(other->primary_weapon_slot_adm))
+				split_weapon_slot_ammo(*other, weapon->startrounds);
 		}
 		if (world_.rules.logic_authority && other->primary_occupant.valid())
 			detach(other->primary_occupant);

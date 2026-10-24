@@ -120,7 +120,7 @@ struct Rig {
 		u.seat_local = {0.0f, -1.0f, 1.0f};
 		g.seats.push_back(u);
 		gun_h = world.registry.spawn(1, g);
-		CHECK(world.vehicles.prepare_weapon_slot(gun()));
+		CHECK(world.vehicles.init_weapon_slot_from_entity_def(gun()));
 
 		claimant_h = body(false);
 		requester_h = body(true);
@@ -472,7 +472,7 @@ void test_a_ctrlx_seat_saves_a_gun_held_on_foot() {
 		c.seat_local = {0.5f, 1.5f, 1.0f};
 		b.seats.push_back(c);
 		const w::EntityHandle b_h = world.registry.spawn(1, b);
-		CHECK(world.vehicles.prepare_weapon_slot(*world.registry.get(b_h)));
+		CHECK(world.vehicles.init_weapon_slot_from_entity_def(*world.registry.get(b_h)));
 
 		CHECK(r.attach(r.claimant_h, 0)); // the claimant holds A's +368
 		world.cached.local_player = r.requester_h;
@@ -602,7 +602,7 @@ void test_a_borrowed_seat_detach_mounts_the_current_slot() {
 		c.seat_local = {0.5f, 1.5f, 1.0f};
 		b.seats.push_back(c);
 		const w::EntityHandle b_h = world.registry.spawn(1, b);
-		CHECK(world.vehicles.prepare_weapon_slot(*world.registry.get(b_h)));
+		CHECK(world.vehicles.init_weapon_slot_from_entity_def(*world.registry.get(b_h)));
 
 		CHECK(r.attach(r.claimant_h, 0)); // the claimant holds A's +368
 		world.cached.local_player = r.requester_h;

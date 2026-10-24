@@ -1725,7 +1725,7 @@ void test_vehicle_slot_install_seeds_the_zero_yaw() {
     weapon.action_fsm.scope_zero.paralax_distance_q16 = -(2 << 16);
     Entity mount;
     mount.primary_weapon = weapon.name;
-    CHECK(world.vehicles.prepare_weapon_slot(mount));
+    CHECK(world.vehicles.init_weapon_slot_from_entity_def(mount));
     CHECK(mount.primary_weapon_slot.scope_zero == 3);
     CHECK(mount.primary_weapon_slot.zero_pitch == 0);      // flags & 3 clear
     CHECK(mount.primary_weapon_slot.zero_yaw == -4557034); // atan(-2 / 300), sign kept

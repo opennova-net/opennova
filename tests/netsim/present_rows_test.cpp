@@ -1078,6 +1078,13 @@ bool test_joiner_hull_gun_words_follow_the_turret_child() {
 	kernel.world.tables.weapons.entries.resize(1);
 	kernel.world.tables.weapons.entries[0].valid = true;
 	kernel.world.tables.weapons.entries[0].name = "WPN_TURRET";
+	// The turret's class init bound its slot at the spawn (the joiner's mission start
+	// pass); the class update's Def gate reads that slot [orig:
+	//  WeaponSlot_InitFromEntityDef @0x5466C0; Entity_UpdateTransformAndTurret
+	//  @0x440E8C..0x440EA0].
+	if (!expect(kernel.world.vehicles.init_weapon_slot_from_entity_def(*turret),
+			"the turret's slot binds"))
+		return false;
 	w::VehicleTraits traits;
 	traits.render_family = w::VehicleRenderFamily::Tank;
 	traits.family = w::VehicleFamily::Tank;
@@ -1131,6 +1138,9 @@ bool test_joiner_hull_gun_words_follow_the_turret_child() {
 	w::Entity *plain_child = spawn_pool_row(plain, 1, 1, 701);
 	plain_child->primary_weapon = "WPN_TURRET";
 	plain.world.tables.weapons.entries = kernel.world.tables.weapons.entries;
+	if (!expect(plain.world.vehicles.init_weapon_slot_from_entity_def(*plain_child),
+			"the plain child's slot binds"))
+		return false;
 	plain.world.vehicles.traits.set(700, traits);
 	plain.seat_specs.push_back(spec);
 	hull_row.handle = plain_hull->handle.packed;

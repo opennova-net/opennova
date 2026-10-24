@@ -26,7 +26,7 @@
 #include <runtime/world/geom.h>
 #include <runtime/world/tp_camera_mount.h>
 #include <runtime/world/vehicle_motor.h> // carrier_pose_fixed
-#include <runtime/world/vehicle_mount.h> // vehicle_prepare_weapon_slot, mount_blocks_weapon_channel
+#include <runtime/world/vehicle_mount.h> // mount_is_designated_g_gun, mount_blocks_weapon_channel
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/world.h>
 #include <base/io/bam.h>
@@ -181,11 +181,9 @@ bool local_player_mount_slot_select(World &world, const LocalPlayerWeapon &w,
                         ? world.registry.get(player->mount_target)
                         : nullptr;
     if (mount == nullptr || !mount_is_designated_g_gun(*mount)) return false;
-    (void)world.vehicles.prepare_weapon_slot(*mount);
     const bool use_parent_slot = !mount->primary_weapon_slot.redirect_to_parent_slot;
     Entity *parent = use_parent_slot ? world.registry.get(mount->ground_target) : nullptr;
     if (use_parent_slot && !designated_g_route_carrier(parent)) return true;
-    if (parent != nullptr) (void)world.vehicles.prepare_weapon_slot(*parent);
     out.applies = true;
     out.use_parent_slot = use_parent_slot;
     out.mount = player->mount_target;

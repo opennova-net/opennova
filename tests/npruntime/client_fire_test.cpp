@@ -182,6 +182,12 @@ bool check_mounted_slot_select_fire_and_reload() {
 	child.primary_weapon = child_weapon.name;
 	const w::EntityHandle child_h = world.registry.spawn(1, child);
 	w::Entity *live_child = world.registry.get(child_h);
+	// Each class init binds its slot at the spawn; neither the toggle nor the fire binds
+	// one [orig: WeaponSlot_InitFromEntityDef @0x5466C0].
+	if (!expect(world.vehicles.init_weapon_slot_from_entity_def(*live_parent) &&
+			world.vehicles.init_weapon_slot_from_entity_def(*live_child),
+			"the spawn binds both slots"))
+		return false;
 	w::Entity *player = world.registry.get(shooter);
 	player->mounted = true;
 	player->mount_target = child_h;
@@ -1059,7 +1065,8 @@ bool check_a_controller_seat_fires_from_the_userpoint() {
 	hull.weapon_userpoint_bytes[2][0] = 4; // the request's barrel
 	const w::EntityHandle hull_h = world.registry.spawn(1, hull);
 	w::Entity *live_hull = world.registry.get(hull_h);
-	if (!expect(world.vehicles.prepare_weapon_slot(*live_hull), "the hull's slot binds"))
+	if (!expect(world.vehicles.init_weapon_slot_from_entity_def(*live_hull),
+			"the hull's slot binds"))
 		return false;
 	CarrierPoints points;
 	points.carrier = hull_h;

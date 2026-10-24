@@ -1032,8 +1032,8 @@ void JoinerRole::sync_authoritative_mount() {
 	// record's attach above left it (an L on foot, or one whose attach did not take,
 	// runs them on what it rides, none on foot), with retail's gates alone: the
 	// parent a mountable gun with the G capability, and for byte 2 its groundEntity
-	// a type-1 EWeap (D-NET-NEW-L2-34). The slot init (prepare_weapon_slot, our
-	// stand-in for the spawn-time MountSlot init) runs but gates nothing. Each leg
+	// a type-1 EWeap (D-NET-NEW-L2-34). The slots are the ones the guns' class inits
+	// bound at their spawn. Each leg
 	// stores the mount's route bit and L's EquippedSlot alone, never L's AdmDef byte
 	// (+0x2B0), which the next C2S 0x0C echoes (D-NET-NEW-L3-15's joiner leg).
 	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - Entity_TryAttachOrDetach called
@@ -1053,8 +1053,6 @@ void JoinerRole::sync_authoritative_mount() {
 			world::Entity *parent =
 					select_parent ? world.registry.get(mount->ground_target) : nullptr;
 			if (!select_parent || world::designated_g_route_carrier(parent)) {
-				(void)world.vehicles.prepare_weapon_slot(*mount);
-				if (parent != nullptr) (void)world.vehicles.prepare_weapon_slot(*parent);
 				route_changed =
 						mount->primary_weapon_slot.redirect_to_parent_slot != select_parent;
 				mount->primary_weapon_slot.redirect_to_parent_slot =

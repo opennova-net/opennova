@@ -574,6 +574,13 @@ bool MissionKernel::load_weapon_table(const BootFileSource &files,
 	weapon_defs_ok = true;
 	world.tables.weapon_defs = &weapon_defs;
 	mission::stamp_seat_spec_turret_limits(world, seat_specs);
+	// The class inits' slot leg: every ewep row and every EWeap CHel / cpln row binds and
+	// seeds its MountSlot from the armory, both roles. Retail's mission start runs it with
+	// the armory already loaded; ours promotes ahead of the armory (the boot's step order, an
+	// embedder's later feed), so it runs as the armory lands, before anything mounts or ticks.
+	// [orig: Game_StartMission - Entity_InitAllFromModels @0x52567F (no role gate) ->
+	//  Entity_InitBoneReferences @0x441470 / Entity_InitHelicopterAIFromDef @0x4683C0]
+	world.vehicles.run_weapon_slot_class_inits();
 	// The bare kernel's own player spawned before this feed: re-stamp
 	// its equipped default now that the process's loadout name list's first name
 	// resolves by name (w::player_spawn_equipped_default)

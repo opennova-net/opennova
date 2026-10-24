@@ -1055,6 +1055,17 @@ static void configure_test_emplacement_weapon(WeaponTableEntry &weapon) {
     weapon.action_fsm.actions[weapon_action::kRecoil].delay_end = 1;
 }
 
+// The guns' class inits: each pool-1 row naming a weapon binds and seeds its slot at its
+// spawn, ahead of any mount, which binds none.
+// [orig: Entity_InitBoneReferences @0x441470 -> WeaponSlot_InitFromEntityDef (the call
+//  @0x441482)]
+static void bind_test_gun_slots(World &w) {
+    w.registry.for_each_in_pool(1, [&](const Entity &row) {
+        if (!row.primary_weapon.empty())
+            w.vehicles.init_weapon_slot_from_entity_def(*w.registry.get(row.handle));
+    });
+}
+
 static void configure_rifleman(AiEntity &npc, uint16_t net_id, uint8_t team) {
     npc.inf.active = true;
     npc.team = team;
@@ -1449,6 +1460,7 @@ static void test_mounted_gunner_acquires_and_fires() {
     AiEntity &npc = *ai.at(ai.attach(npc_h));
     configure_rifleman(npc, 0x11, 1);
     npc.profile.organic.ammo.fill(0); // mounted fire must not use the personal rifle slot
+    bind_test_gun_slots(*w);
     CHECK(w->commands.mount(0x11, 0x31));
 
     bool acquired = false;
@@ -1573,6 +1585,7 @@ static void test_mounted_gunner_fires_from_the_slot_barrel() {
         AiEntity &npc = *ai.at(ai.attach(npc_h));
         configure_rifleman(npc, 0x11, 1);
         npc.profile.organic.ammo.fill(0);
+        bind_test_gun_slots(*w);
         CHECK(w->commands.mount(0x11, 0x31));
         w->registry.get(points.gun)->has_item_def = false; // the def-less gun past boarding
         CHECK(w->registry.get(points.gun)->primary_weapon_slot.clip == -1);
@@ -1682,6 +1695,7 @@ static void test_weapon_fire_position_legs() {
     w->tables.weapons.entries[1].name.assign(1, 'x');
     w->tables.weapons.entries[1].valid = true;
     configure_test_emplacement_weapon(w->tables.weapons.entries[1]);
+    bind_test_gun_slots(*w);
     CHECK(w->commands.mount(0x11, 0x31));
     CHECK(sys.weapon_fire_position(*w, person, out) == 1);
     CHECK(out[0] == (7 << 16) && out[1] == (8 << 16) && out[2] == (9 << 16));
@@ -1829,6 +1843,7 @@ static void test_turret_gunners_scan_from_the_gun_point() {
         npc.self->position.x.q16 = 2 << 16;
         npc.self->position.y.q16 = 100 << 16;
         npc.profile.organic.ammo.fill(0);
+        bind_test_gun_slots(*w);
         CHECK(w->commands.mount(0x11, 0x31));
         CHECK(w->registry.get(point.gun)->primary_weapon_slot.clip == (cannon ? 1 : -1));
 
@@ -2022,6 +2037,7 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     npc.inf.combat_target = target_h;
     npc.inf.aim_valid = true;
     npc.inf.aim_heading = 0;
+    bind_test_gun_slots(*w);
     CHECK(w->commands.mount(0x11, 0x31));
     w->registry.get(w->registry.find_by_net_id(0x31))->has_item_def = false; // the def-less gun past boarding
 
@@ -2213,6 +2229,7 @@ static void test_weapon_walk_visits_pool0_in_slot_order() {
     const EntityHandle second_gun = spawn_gun(0x32);  // pool-1 slot 1
     const EntityHandle early = spawn_npc(0x11);       // pool-0 slot 0
     const EntityHandle late = spawn_npc(0x12);        // pool-0 slot 1
+    bind_test_gun_slots(*w);
     CHECK(w->commands.mount(0x12, 0x31));
     CHECK(w->commands.mount(0x11, 0x32));
     w->registry.get(first_gun)->primary_weapon_slot.next = weapon_action::kFire;
@@ -2276,6 +2293,7 @@ static void test_mounted_request_copies_the_parent_adm_byte() {
     configure_rifleman(npc, 0x11, 1);
     npc.slot.f[15] = 6 << 16;
     npc.inf.combat_target = target_h;
+    bind_test_gun_slots(*w);
     CHECK(w->commands.mount(0x11, 0x31));
     CHECK(w->registry.get(gun_h)->primary_weapon_slot_adm == 1);
     w->registry.get(npc_h)->equipped_adm_index = 7; // the rider's personal byte
@@ -2344,6 +2362,7 @@ static void test_mounted_gunner_runs_the_anim_event_fire_block() {
     ai.root_motion = &clips;
     AiEntity &npc = *ai.at(ai.attach(npc_h));
     configure_rifleman(npc, 0x11, 1);
+    bind_test_gun_slots(*w);
     CHECK(w->commands.mount(0x11, 0x31));
 
     TickContext ctx{};
@@ -2415,6 +2434,7 @@ static void test_mounted_request_runs_for_a_passenger() {
         AiEntity &npc = *ai.at(ai.attach(npc_h));
         configure_rifleman(npc, 0x12, 1);
         npc.inf.combat_target = target_h;
+        bind_test_gun_slots(*w);
         CHECK(w->commands.mount(0x12, 0x31));
         CHECK(w->registry.get(npc_h)->mount_type == SeatType::Passenger);
         w->registry.get(npc_h)->equipped_adm_index = 7; // the rider's personal byte
@@ -2484,6 +2504,7 @@ static void test_mounted_request_copies_the_parents_live_byte() {
     configure_rifleman(npc, 0x11, 1);
     npc.slot.f[15] = 6 << 16;
     npc.inf.combat_target = target_h;
+    bind_test_gun_slots(*w);
     CHECK(w->commands.mount(0x11, 0x31));
     CHECK(w->registry.get(gun_h)->primary_weapon_slot_adm == 1);
     w->registry.get(gun_h)->equipped_adm_index = 5; // the gun's own AI fire wrote it
@@ -2542,6 +2563,7 @@ static void test_mounted_look_traverses_before_fire_request() {
     npc.inf.aim_heading = 0x20000000;
     npc.inf.aim_pitch = 0;
     npc.heading = 0;
+    bind_test_gun_slots(*w);
     CHECK(w->commands.mount(0x11, 0x31));
 
     CHECK(ai.pose_if_mounted(npc, *w));

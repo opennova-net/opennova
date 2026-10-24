@@ -868,6 +868,9 @@ void arm_usegun_seat(Rig &r) {
     r.w.tables.weapons.entries[0].valid = true;
     r.player().flags |= kEntityFlagPlayer;
     r.player().engine_flags |= kEntityFlagPlayer;
+    // The gun's class init binds its slot at the spawn; no mount binds it
+    // [orig: WeaponSlot_InitFromEntityDef @0x5466C0].
+    r.w.vehicles.init_weapon_slot_from_entity_def(r.veh());
 }
 
 // Arms the local player the way the boot's Player_InitPlayer leg does: the
@@ -983,7 +986,7 @@ void test_usegun_round_trip_reads_the_personal_bucket() {
     local_loadout_rebuild(r.w, local.loadout, local.weapon, local.inventory,
             local.inventory_valid, /*select_spawn_default=*/true);
     r.veh().item_attrib |= kItemAttribEweap; // the UseGun's own slot
-    CHECK(r.w.vehicles.prepare_weapon_slot(r.veh()));
+    CHECK(r.w.vehicles.init_weapon_slot_from_entity_def(r.veh()));
     local.inventory.shared_clips[1] = 30;
     // The shell's installs, as the switch events ask for them.
     const auto install = [&](const char *name, int32_t clipsize, bool preserve) {
@@ -1131,7 +1134,7 @@ void test_binoculars_survive_all_but_the_camera_reset() {
         carrier.primary_weapon = "WPN_HULL";
         carrier.position = {200.0f, 200.0f, 10.0f};
         const EntityHandle carrier_h = r.w.registry.spawn(1, carrier);
-        CHECK(r.w.vehicles.prepare_weapon_slot(*r.w.registry.get(carrier_h)));
+        CHECK(r.w.vehicles.init_weapon_slot_from_entity_def(*r.w.registry.get(carrier_h)));
         r.veh().item_type = 2;
         r.veh().item_attrib |= kItemAttribEweap;
         r.veh().emplacement_attachment_flags = 0x02;
@@ -2793,7 +2796,7 @@ void test_sighted_vehicle_weapon_seeds_its_zero_pitch() {
         for (int i = 0; i < 40; ++i) zero.elevation[size_t(i)] = (i + 1) * 1000;
         Entity mount;
         mount.primary_weapon = gun.name;
-        CHECK(w.vehicles.prepare_weapon_slot(mount));
+        CHECK(w.vehicles.init_weapon_slot_from_entity_def(mount));
         const int16_t step = weapon_scope_zero_initial(zero);
         CHECK(mount.primary_weapon_slot.scope_zero == step);
         if (flags != 0) {
@@ -2805,7 +2808,7 @@ void test_sighted_vehicle_weapon_seeds_its_zero_pitch() {
     }
 }
 
-void test_prepare_vehicle_weapon_slot_after_armory_load() {
+void test_entity_def_slot_init_seeds_the_words() {
     World w;
     w.tables.weapons.entries.resize(4);
     WeaponTableEntry &weapon = w.tables.weapons.entries[3];
@@ -2816,20 +2819,29 @@ void test_prepare_vehicle_weapon_slot_after_armory_load() {
 
     Entity mount;
     mount.primary_weapon = weapon.name;
-    CHECK(w.vehicles.prepare_weapon_slot(mount));
+    CHECK(w.vehicles.init_weapon_slot_from_entity_def(mount));
     CHECK(mount.primary_weapon_slot_adm == 3);
     CHECK(mount.primary_weapon_slot.clip == 12);
     CHECK(mount.primary_weapon_slot.reserve == 29);
 
-    // Preparing an already-live slot is idempotent: a later route edge must
-    // never refund cartridges spent since the first armory resolution.
+    // The init clears the whole slot first, its owner and route bit with it, and
+    // seeds it afresh: a re-run (a respawned aircraft's class init) refills it.
+    // [orig: WeaponSlot_InitFromEntityDef @0x5466C0 - the memset @0x5466D3]
     mount.primary_weapon_slot.clip = 7;
     mount.primary_weapon_slot.reserve = 23;
     mount.primary_weapon_slot.redirect_to_parent_slot = true;
-    CHECK(w.vehicles.prepare_weapon_slot(mount));
-    CHECK(mount.primary_weapon_slot.clip == 7);
-    CHECK(mount.primary_weapon_slot.reserve == 23);
-    CHECK(mount.primary_weapon_slot.redirect_to_parent_slot);
+    mount.primary_weapon_owner = EntityHandle::make(0, 1);
+    CHECK(w.vehicles.init_weapon_slot_from_entity_def(mount));
+    CHECK(mount.primary_weapon_slot.clip == 12);
+    CHECK(mount.primary_weapon_slot.reserve == 29);
+    CHECK(!mount.primary_weapon_slot.redirect_to_parent_slot);
+    CHECK(!mount.primary_weapon_owner.valid());
+    // An unknown name (or "null") leaves the slot clear and unbound.
+    mount.primary_weapon = "null";
+    CHECK(!w.vehicles.init_weapon_slot_from_entity_def(mount));
+    CHECK(mount.primary_weapon_slot_adm == kAdmSlotNone);
+    CHECK(mount.primary_weapon_slot.clip == 0 && mount.primary_weapon_slot.reserve == 0);
+    mount.primary_weapon = weapon.name;
 
     // The reserve word is retail's: raw startrounds when either word is 0xFFFF,
     // else the unclamped 16-bit difference. [orig: WeaponSlot_InitFromEntityDef
@@ -2848,7 +2860,7 @@ void test_prepare_vehicle_weapon_slot_after_armory_load() {
         weapon.startrounds = s.startrounds;
         Entity fresh;
         fresh.primary_weapon = weapon.name;
-        CHECK(w.vehicles.prepare_weapon_slot(fresh));
+        CHECK(w.vehicles.init_weapon_slot_from_entity_def(fresh));
         CHECK(fresh.primary_weapon_slot.clip == s.clip);
         CHECK(fresh.primary_weapon_slot.reserve == s.reserve);
     }
@@ -2859,7 +2871,7 @@ void test_prepare_vehicle_weapon_slot_after_armory_load() {
 // class-6 sniper lock, so even a sniper-class gunner's cannon starts at the
 // floor. [orig: WeaponSlot_InitFromEntityDef entityPtr 0 @0x546706;
 //  WeaponSlot_InitFromDef @0x53EEF7 / @0x53EF2D..0x53EF44]
-void test_prepare_vehicle_weapon_slot_seeds_the_zoom() {
+void test_entity_def_slot_init_seeds_the_zoom() {
     World w;
     w.tables.weapons.entries.resize(3);
     WeaponTableEntry &cannon = w.tables.weapons.entries[1];
@@ -2878,15 +2890,16 @@ void test_prepare_vehicle_weapon_slot_seeds_the_zoom() {
 
     Entity gun;
     gun.primary_weapon = cannon.name;
-    CHECK(w.vehicles.prepare_weapon_slot(gun));
+    CHECK(w.vehicles.init_weapon_slot_from_entity_def(gun));
     CHECK(gun.primary_weapon_slot.scope_zoom == 2);
-    // A later prepare of the same live slot keeps the stepped zoom.
+    // A re-run of the init (a respawned aircraft's class init) re-seeds the zoom;
+    // no mount runs it, so a stepped zoom survives every mount.
     gun.primary_weapon_slot.scope_zoom = 6;
-    CHECK(w.vehicles.prepare_weapon_slot(gun));
-    CHECK(gun.primary_weapon_slot.scope_zoom == 6);
+    CHECK(w.vehicles.init_weapon_slot_from_entity_def(gun));
+    CHECK(gun.primary_weapon_slot.scope_zoom == 2);
     Entity roof;
     roof.primary_weapon = rcws.name;
-    CHECK(w.vehicles.prepare_weapon_slot(roof));
+    CHECK(w.vehicles.init_weapon_slot_from_entity_def(roof));
     CHECK(roof.primary_weapon_slot.scope_zoom == 1);
 }
 
@@ -5928,9 +5941,9 @@ int main() {
 	test_enemy_occupant_blocks_scan();
     test_bms_mount_predicates();
     test_mounted_ammo_slot_route();
-    test_prepare_vehicle_weapon_slot_after_armory_load();
+    test_entity_def_slot_init_seeds_the_words();
     test_sighted_vehicle_weapon_seeds_its_zero_pitch();
-    test_prepare_vehicle_weapon_slot_seeds_the_zoom();
+    test_entity_def_slot_init_seeds_the_zoom();
     test_ai_drive_leg();
     test_ai_drive_avoid_brake();
     test_ai_drive_avoid_quantized_footprints();

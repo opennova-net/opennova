@@ -914,10 +914,10 @@ void AiSystem::infantry_mounted_fire_pass(AiEntity &e, World &world,
     if (occ == nullptr || !occ->mounted) return;
     Entity *mount = world.registry.get(occ->mount_target);
     if (mount == nullptr) return;
-    // The parent's weapon slot and AdmDef byte exist from its own init in
-    // retail; the port seeds them lazily. [orig: WeaponSlot_InitFromEntityDef
-    //  @0x5466C0]
-    world.vehicles.prepare_weapon_slot(*mount);
+    // The parent's weapon slot and AdmDef byte are its class init's, bound at its
+    // spawn (VehicleSystem::run_weapon_slot_class_init); the request binds nothing.
+    // [orig: WeaponSlot_InitFromEntityDef @0x5466C0, from Entity_InitBoneReferences
+    //  @0x441482]
     if (!inf.combat_target.valid()) return;
 
     // The dedicated request runs on its four-tick infantry cadence, then a
@@ -941,8 +941,8 @@ void AiSystem::infantry_mounted_fire_pass(AiEntity &e, World &world,
 
     // Past the cadence and the stagger the rider takes the parent's live AdmDef
     // byte (+0x2B0). WeaponSlot_InitFromEntityDef stores the slot's byte there
-    // at the parent's spawn (kept here as primary_weapon_slot_adm, seeded on
-    // first use), and the parent's own AI fire overwrites it with the ammo byte
+    // at the parent's spawn (kept here as primary_weapon_slot_adm, which its
+    // class init binds), and the parent's own AI fire overwrites it with the ammo byte
     // of every ready block (kept in its equipped_adm_index). A parent that
     // names no weapon and never fired holds its spawn clear's zero, not the
     // port's none sentinel. [orig: Entity_UpdateInfantryAI @0x4BF4F4..0x4BF4FA;

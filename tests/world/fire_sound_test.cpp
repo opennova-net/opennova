@@ -268,6 +268,9 @@ void test_replica_borrows_the_carrier_slot_for_received_actions() {
     Seat seat; seat.type = SeatType::Gunner; seat.bone_index = 7; gun.seats.push_back(seat);
     gun.weapon_userpoint_bytes[2][1] = 1; // only the third magazine-selected muzzle
     const auto handle = r.world.registry.spawn(1, gun);
+    // The gun's class init binds its slot at the spawn; the replica sync binds none
+    // [orig: WeaponSlot_InitFromEntityDef @0x5466C0].
+    CHECK(r.world.vehicles.init_weapon_slot_from_entity_def(*r.world.registry.get(handle)));
     rp::ClientState state;
     rp::ClientEntityState peer;
     peer.handle = 3; peer.type_id = 11; peer.cls = opennova::EntityClass::Player;
@@ -322,6 +325,7 @@ void test_replica_borrows_the_carrier_slot_for_received_actions() {
     hull.item_attrib |= 0x40u;
     const auto parent_handle = r.world.registry.spawn(1, hull);
     auto *parent = r.world.registry.get(parent_handle);
+    CHECK(r.world.vehicles.init_weapon_slot_from_entity_def(*parent));
     mount->emplacement_attachment_flags = 2;
     mount->ground_target = mount->emplacement_parent = parent_handle;
     mount->emplacement_parent_spawn_id = parent->registry_spawn_id;

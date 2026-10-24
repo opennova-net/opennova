@@ -1218,6 +1218,10 @@ int main() {
 		const auto gun_handle = world.registry.spawn(1, gun);
 		CHECK(gun_handle.valid());
 		if (!gun_handle.valid()) return 1;
+		// Each class init binds its own slot at the spawn
+		// [orig: WeaponSlot_InitFromEntityDef @0x5466C0].
+		CHECK(world.vehicles.init_weapon_slot_from_entity_def(*world.registry.get(hull_handle)));
+		CHECK(world.vehicles.init_weapon_slot_from_entity_def(*world.registry.get(gun_handle)));
 		// Single player is out of a session, where the UseGun attach refuses a
 		// player holding no EquippedSlot (D-NET-446): the gunner's spawn select
 		// equips its rifle, as the boot's Player_InitPlayer leg does.
@@ -1240,7 +1244,6 @@ int main() {
 		CHECK(world.vehicles.process_attach(world.cached.local_player, gun_handle, 1));
 		auto &live_gun = *world.registry.get(gun_handle);
 		auto &live_hull = *world.registry.get(hull_handle);
-		CHECK(world.vehicles.prepare_weapon_slot(live_hull));
 		live_gun.primary_weapon_slot.clip = 0;
 		live_gun.primary_weapon_slot.reserve = 37;
 		live_hull.primary_weapon_slot.clip = 123;
@@ -1507,6 +1510,9 @@ int main() {
 		const auto gun_handle = world.registry.spawn(1, gun);
 		CHECK(gun_handle.valid());
 		if (!gun_handle.valid()) return 1;
+		// The gun's class init binds its slot at the spawn
+		// [orig: WeaponSlot_InitFromEntityDef @0x5466C0].
+		CHECK(world.vehicles.init_weapon_slot_from_entity_def(*world.registry.get(gun_handle)));
 		CHECK(world.vehicles.process_attach(npc, gun_handle, 1));
 		// The walk visits only rows with a resolved def row (ItemTypeIndex != 0); the
 		// synthetic mission's NPC has none of its own.

@@ -35,12 +35,13 @@ bool local_slot(world::World &world, const world::Entity &mount) {
 // on-foot remote has no EquippedSlot: its equipped-ADM byte is display state.
 // The record's route legs run on the remote's parent when it is a mountable gun
 // with the G capability, whatever the seat, byte 2 only onto a groundEntity that
-// is a type-1 EWeap; the slot init (prepare_weapon_slot, our stand-in for the
-// spawn-time MountSlot init) gates nothing (D-NET-NEW-L2-34).
+// is a type-1 EWeap (D-NET-NEW-L2-34). The slots are the ones the guns' class
+// inits bound at their spawn; no leg here binds or seeds one.
 // [orig: Entity_AttachToUseGunSlot @0x546B80; Entity_AttachToVehicleSlot @0x4946D0;
 //  NetPacket_SerializePlayerState @0x4C09C0 - the parent @0x4C1346, the gates
 //  @0x4C1367..0x4C137E, byte 1 @0x4C1390 / @0x4C139D, byte 2's groundEntity gates
-//  @0x4C13C1..0x4C13E5 and @0x4C13EB / @0x4C13F8; WeaponSlot_InitFromEntityDef @0x5466C0]
+//  @0x4C13C1..0x4C13E5 and @0x4C13EB / @0x4C13F8; WeaponSlot_InitFromEntityDef @0x5466C0
+//  runs from the class inits alone]
 void sync_replica_weapon_slots(replication::ClientState &state, world::World &world,
         uint16_t self_handle) {
     for (auto &row : state.entities) {
@@ -52,13 +53,11 @@ void sync_replica_weapon_slots(replication::ClientState &state, world::World &wo
             continue;
         const auto type = seat_type(row, *mount);
         if (type != world::SeatType::Gunner && type != world::SeatType::Controller) continue;
-        (void)world.vehicles.prepare_weapon_slot(*mount);
         if (local_slot(world, *mount)) continue;
         mount->primary_weapon_owner = world::EntityHandle{row.handle};
         if (world::mount_is_designated_g_gun(*mount)) {
             auto *parent = world.registry.get(mount->ground_target);
             const bool parent_valid = world::designated_g_route_carrier(parent);
-            if (parent_valid) (void)world.vehicles.prepare_weapon_slot(*parent);
             if (parent_valid && !local_slot(world, *parent))
                 parent->primary_weapon_owner = world::EntityHandle{row.handle};
             if (row.seat_type == 1) mount->primary_weapon_slot.redirect_to_parent_slot = false;

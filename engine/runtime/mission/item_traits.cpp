@@ -226,6 +226,10 @@ void fill_spawn_row(world::PlayerTemplate &row, const DefItemDef *def,
 world::ItemDeathTraits item_death_traits_from_def(const DefItemDef &def) {
     world::ItemDeathTraits t;
     t.death_class = world::item_death_class_from_tag(def.ai_function);
+    // The CHel / cpln rows' init, by the same whole-tag stricmp [orig: CHel @0x8132A0 and
+    //  cpln @0x8133A8, the init dword +12; EntityDef_LookupClassCallbacks @0x407DC0]
+    t.air_class_init = strutil::iequals(def.ai_function, "chel") ||
+            strutil::iequals(def.ai_function, "cpln");
     std::copy(std::begin(def.destroy_timing_ticks), std::end(def.destroy_timing_ticks),
             std::begin(t.destroy_timing_ticks));
     t.physics = def.physics;

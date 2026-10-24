@@ -132,6 +132,10 @@ static void test_mount_config_lifecycle() {
     w.tables.weapons.entries[1].clipsize = -1;
     w.tables.weapons.entries[1].valid = true;
     const EntityHandle gh = w.registry.spawn(1, gun);
+    // The gun's class init binds its slot at the spawn; the mount below binds nothing
+    // [orig: Entity_InitBoneReferences @0x441470 -> WeaponSlot_InitFromEntityDef (the
+    //  call @0x441482); Entity_AttachToUseGunSlot @0x546B80].
+    CHECK(w.vehicles.init_weapon_slot_from_entity_def(*w.registry.get(gh)));
     Entity soldier = make_soldier(100, 0.f, 0.f, 0.f);
     soldier.equipped_adm_index = 7;
     soldier.flags |= 0x100u;

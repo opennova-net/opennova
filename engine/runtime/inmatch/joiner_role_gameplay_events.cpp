@@ -111,11 +111,13 @@ void JoinerRole::apply_gameplay_events() {
 		// [orig: NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 - the non-person
 		//  WeaponSlot_ReloadAmmo call @0x42C116, whose EWeap slot @0x54172D]
 		if (!rt.has_self_handle() || reload.entity_handle != rt.self_handle()) {
+			// The slot is the one the entity's class init bound; one with no Def
+			// reloads nothing [orig: WeaponSlot_ReloadAmmo @0x541720 - the slot and its
+			//  Def tests @0x54178F..0x541791 / @0x54179A..0x54179C].
 			world::Entity *mount = world.registry.get(world::EntityHandle{reload.entity_handle});
 			if (mount != nullptr && mount->has_item_def &&
-					(mount->item_attrib & world::kItemAttribEweap) != 0u &&
-					world.vehicles.prepare_weapon_slot(*mount))
-				world.vehicles.reload_weapon_slot(*mount);
+					(mount->item_attrib & world::kItemAttribEweap) != 0u)
+				(void)world.vehicles.reload_weapon_slot(*mount);
 			continue;
 		}
 		if (!lp.inventory_valid) continue;

@@ -1042,11 +1042,12 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// LocalPlayer::equipped_slot_held, any other's its slot reference),
 				// then its parent a mountable gun with the G capability; nothing else
 				// gates it (no slot state, no addeweap parent identity;
-				// D-NET-NEW-L2-34). The slot init (prepare_weapon_slot, our stand-in
-				// for the spawn-time MountSlot init) runs but gates nothing.
+				// D-NET-NEW-L2-34). The two slots are the ones the guns' class inits
+				// bound at their spawn; the toggle binds neither.
 				// [orig: NapiNPServerMsg_HandleWeaponToggle @0x511A70 - +0x118 @0x511ACE,
 				//  the parent +0x16C @0x511AD8, Entity_IsMountableGun @0x511AE4, +0x326 & 2
-				//  @0x511AED; WeaponSlot_InitFromEntityDef @0x5466C0]
+				//  @0x511AED; WeaponSlot_InitFromEntityDef @0x5466C0 runs from the class
+				//  inits alone]
 				world::Entity *player =
 						world->registry.get(conn.link.owned_entity);
 				if (player == nullptr) break;
@@ -1057,7 +1058,6 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (!equipped || !player->mounted || !player->mount_target.valid()) break;
 				world::Entity *mount = world->registry.get(player->mount_target);
 				if (mount == nullptr || !world::mount_is_designated_g_gun(*mount)) break;
-				(void)world->vehicles.prepare_weapon_slot(*mount);
 
 				// The toggle writes the route bit and the EquippedSlot pointer
 				// alone (ours: the bit, which resolve_mounted_ammo_slot follows),
@@ -1076,7 +1076,6 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// [orig: @0x511B12..0x511B2A]
 				world::Entity *parent = world->registry.get(mount->ground_target);
 				if (!world::designated_g_route_carrier(parent)) break;
-				(void)world->vehicles.prepare_weapon_slot(*parent);
 				mount->primary_weapon_slot.redirect_to_parent_slot = true;
 				break;
 			}
@@ -1318,15 +1317,17 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (!world->tables.weapons.empty() &&
 				    conn.link.mode != replication::TransportMode::Loopback) {
 					// EWeap reload ignores the wire combo and follows the same live
-					// child/groundEntity route as fire and phase-8 serialization.
-					// [orig: WeaponSlot_ReloadAmmo @0x541720 -> @0x5460e0]
+					// child/groundEntity route as fire and phase-8 serialization, over
+					// the slot the entity's class init bound; a slot with no Def reloads
+					// nothing and no player leg follows.
+					// [orig: WeaponSlot_ReloadAmmo @0x541720 - the attrib test @0x541728..0x54172D,
+					//  Entity_GetWeaponSlots @0x5460e0 (the call @0x541730), the slot and
+					//  its Def tests @0x54178F..0x541791 / @0x54179A..0x54179C]
 					if (addressed_entity != nullptr &&
 							addressed_entity->has_item_def &&
 							(addressed_entity->item_attrib &
-									world::kItemAttribEweap) != 0u &&
-							world->vehicles.prepare_weapon_slot(*addressed_entity)) {
-						// [orig: WeaponSlot_ReloadAmmo's EWeap legs]
-						world->vehicles.reload_weapon_slot(*addressed_entity);
+									world::kItemAttribEweap) != 0u) {
+						(void)world->vehicles.reload_weapon_slot(*addressed_entity);
 						break;
 					}
 					NapiNPConnection *addressed_owner = nullptr;

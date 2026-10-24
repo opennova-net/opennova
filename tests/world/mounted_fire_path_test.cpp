@@ -120,7 +120,7 @@ void test_a_seat_switch_onto_a_gun_fires_the_gun(w::SeatType gun_seat, bool rout
 			gun_seat == w::SeatType::Gunner ? "UseGun" : "ctrlx00");
 	gun_seed.primary_weapon = "WPN_MINIGUN";
 	const w::EntityHandle gun_h = world.registry.spawn(1, gun_seed);
-	CHECK(world.vehicles.prepare_weapon_slot(*world.registry.get(gun_h)));
+	CHECK(world.vehicles.init_weapon_slot_from_entity_def(*world.registry.get(gun_h)));
 
 	w::Entity pl;
 	pl.kind = w::EntityKind::Organic;

@@ -1594,7 +1594,7 @@ bool run_received_reload_refills_an_eweap_entity() {
     tank.primary_weapon = gun.name;
     const w::EntityHandle tank_h = world.registry.spawn(1, tank);
     w::Entity *live = world.registry.get(tank_h);
-    if (!expect(live != nullptr && world.vehicles.prepare_weapon_slot(*live),
+    if (!expect(live != nullptr && world.vehicles.init_weapon_slot_from_entity_def(*live),
             "reload: the tank's slot resolves")) return false;
     live->primary_weapon_slot.clip = 1;
     live->primary_weapon_slot.reserve = 8;

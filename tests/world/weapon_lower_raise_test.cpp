@@ -646,7 +646,7 @@ EntityHandle spawn_gun(World &world, const char *weapon, float x) {
 	g.seats.push_back(u);
 	const EntityHandle h = world.registry.spawn(1, g);
 	Entity *spawned = world.registry.get(h);
-	CHECK(spawned != nullptr && world.vehicles.prepare_weapon_slot(*spawned));
+	CHECK(spawned != nullptr && world.vehicles.init_weapon_slot_from_entity_def(*spawned));
 	return h;
 }
 

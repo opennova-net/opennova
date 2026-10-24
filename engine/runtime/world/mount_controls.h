@@ -456,8 +456,9 @@ inline void emplaced_command_call(World &world, EntityHandle ground, uint32_t &s
 // [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53 (the class update, no
 //  age or occupant gate); Entity_UpdateTransformAndTurret Def gate
 //  @0x440E8C..0x440EA0]
-// That aircraft slot is initialized from the parent's authored primary_weapon,
-// the same field used for an ewep's +0x2B4 slot. Resolve that existing table row.
+// That aircraft slot is the one the parent's class init bound from its authored
+// primary_weapon, the field an ewep's +0x2B4 slot binds from: its Def is the
+// parent's primary_weapon_slot_adm row.
 // [orig: Entity_InitInfantryBoneData @0x490160, call @0x49017b;
 // WeaponSlot_InitFromEntityDef @0x5466c0, primary_weapon @0x5466d8]
 // [orig: Entity_UpdateTransformAndTurret @0x440ca0: parent @0x440cbf,
@@ -468,18 +469,13 @@ inline void emplaced_command_call(World &world, EntityHandle ground, uint32_t &s
 //  slot-1 def [edi+494h] @0x440fbc, Math_ClampAngleToBounds yaw (+0x144,
 //  -0x144) @0x440fea and pitch (+0x13C, +0x140) @0x440ffa, stores
 //  @0x441007/@0x44100d (yaw) and @0x44101a/@0x441020 (pitch)]
-// The gun's inline slot Def. Retail binds it at spawn from the def's
-// primary weapon name; the port binds the slot on its first use, so an
-// unbound gun resolves the same name.
+// The gun's inline slot Def (+0x2D4): the weapon its class init bound from the def's
+// primary weapon name at the spawn (VehicleSystem::run_weapon_slot_class_init), null
+// for a gun whose name bound none.
 // [orig: WeaponSlot_InitFromEntityDef @0x5466C0 (name lookup @0x5466E8,
-//  the slot Def @0x546709..0x54670A)]
+//  the slot Def @0x546709..0x54670A), from Entity_InitBoneReferences @0x441482]
 inline const WeaponTableEntry *emplaced_slot_def(const World &world, const Entity &gun) {
-	if (gun.primary_weapon_slot_adm != kAdmSlotNone)
-		return world.tables.weapons.by_index(gun.primary_weapon_slot_adm);
-	const int index = world.tables.weapons.index_of(gun.primary_weapon.c_str());
-	return index >= 0 && index <= 0xFF
-			? world.tables.weapons.by_index(static_cast<uint8_t>(index))
-			: nullptr;
+	return world.tables.weapons.by_index(gun.primary_weapon_slot_adm);
 }
 
 // The publication's value leg, by the parent brain's profile type: GROUND
@@ -504,9 +500,9 @@ inline EmplacedParentGunWords emplaced_parent_gun_words(const World &world,
 		return out;
 	}
 	if (profile_type != 1 || (parent.item_attrib & kItemAttribEweap) == 0) return out;
-	const int weapon_index = world.tables.weapons.index_of(parent.primary_weapon.c_str());
-	if (weapon_index < 0) return out;
-	const WeaponTableEntry &parent_weapon = world.tables.weapons.entries[weapon_index];
+	const WeaponTableEntry *bound = world.tables.weapons.by_index(parent.primary_weapon_slot_adm);
+	if (bound == nullptr) return out;
+	const WeaponTableEntry &parent_weapon = *bound;
 	out.pitch_bam = emplaced_word_bam(pitch_word);
 	const int32_t yaw_range = turret_window_limit_bam(parent_weapon.turret_yaw_range_deg);
 	emplaced_clamp_turret_bam(out.yaw_bam, yaw_range, opennova::io::bam_sub(0, yaw_range));

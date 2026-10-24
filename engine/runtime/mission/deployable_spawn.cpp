@@ -172,6 +172,10 @@ world::EntityHandle MissionKernel::spawn_deployable(uint16_t item_id, uint8_t te
 	// [orig: Entity_SpawnDeployable @0x51C2B0 - the def+0x148 load @0x51C454, the call
 	//  @0x51C462; Entity_CacheGroundEntityBelow @0x407D60]
 	world::run_ground_cache_class_init(world, *world.registry.get(handle));
+	// And an EWeap CHel / cpln row's: its MountSlot bound and seeded from its def's weapon.
+	// [orig: the def+0x148 call @0x51C462 -> Entity_InitHelicopterAIFromDef @0x4683C0 ->
+	//  Entity_InitInfantryBoneData @0x490160]
+	world.vehicles.run_weapon_slot_class_init(*world.registry.get(handle));
 	mission::resolve_ai_weapons(world, *table, handle, &assets());
 	// The bound sphere, the deployable bit, then the addeweap children, which copy the
 	// carrier's Flags [orig: Entity_ComputeBoundingSphere @0x5C69A0 (the call @0x51C48D),
@@ -183,6 +187,11 @@ world::EntityHandle MissionKernel::spawn_deployable(uint16_t item_id, uint8_t te
 	for (EntityHandle child : children.handles) {
 		mission::resolve_item_traits(world, *table, item_wire_class_, &assets(), child);
 		ensure_collision_instance(world, child);
+		// Each child's class init after its models: an ewep child binds and seeds its
+		// MountSlot [orig: Entity_SpawnAddEWeapChildren @0x40F300 - the +0x30 store
+		//  @0x40F422, the def+0x148 call @0x40F43E -> Entity_InitBoneReferences @0x441470].
+		if (Entity *spawned = world.registry.get(child))
+			world.vehicles.run_weapon_slot_class_init(*spawned);
 	}
 	collision.refresh_after_registry_change(world);
 	return handle;

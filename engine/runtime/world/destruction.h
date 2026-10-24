@@ -191,6 +191,11 @@ struct ItemDeathTraits {
     // The event/death callback row (item_death_class_from_tag on the def's
     // ai_function) — destruction_notify_item_damage dispatches on it.
     ItemDeathClass death_class = ItemDeathClass::kUnwitnessed;
+    // The same row's def+0x148 class init is the aircraft one (a CHel or cpln row), whose
+    // tail binds an EWeap def's MountSlot (VehicleSystem::run_weapon_slot_class_init).
+    // [orig: CHel @0x8132A0 -> Entity_InitHelicopterAIFromDef @0x4683C0; cpln @0x8133A8 ->
+    //  j_Entity_InitHelicopterAIFromDef @0x474550]
+    bool air_class_init = false;
     // Intact MODEL/CMDL carriers used by building class callbacks.
     bool model_loaded = false;
     bool model_bounds_loaded = false;
