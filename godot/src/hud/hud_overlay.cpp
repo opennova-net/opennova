@@ -143,6 +143,7 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("configure", "hudpos", "root", "full_arm"), &HudOverlay::configure,
 			DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("is_configured"), &HudOverlay::is_configured);
+	ClassDB::bind_method(D_METHOD("get_additive_material"), &HudOverlay::get_additive_material);
 	ClassDB::bind_method(D_METHOD("set_crosshair_style", "style"), &HudOverlay::set_crosshair_style);
 	ClassDB::bind_method(D_METHOD("get_crosshair_style"), &HudOverlay::get_crosshair_style);
 	ClassDB::bind_method(D_METHOD("set_crosshair_color", "rgb"), &HudOverlay::set_crosshair_color);

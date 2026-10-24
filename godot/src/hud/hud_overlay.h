@@ -96,6 +96,8 @@ public:
 	void configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> &p_root,
 			bool p_full_arm = true);
 	bool is_configured() const;
+	// The additive rows' material as it stands (null until a full-arm configure made it): a read seam.
+	Ref<ShaderMaterial> get_additive_material() const { return additive_material_; }
 	void set_scope_state(const Ref<PlayerLocalView> &p_view, const Ref<RtxtStringFile> &p_gametext);
     void set_player_context(const Ref<PlayerLocalView> &p_view);
 	void set_combat_state(const Ref<PlayerLocalView> &view, const Transform3D &camera,

@@ -59,6 +59,24 @@ func _make_overlay() -> HudOverlay:
 	return hud
 
 
+# The HUD's additive rows (its additive child item, the map passes) draw through the preloaded
+# additive program, made in configure's load leg with the map pass's materials, not at their first
+# draw nor at an idle material flush (D-NET-NEW-LF-28).
+func test_the_additive_rows_program_is_made_in_the_load() -> void:
+	var fixture := _load_temp_layout(PackedStringArray(), PackedStringArray())
+	var hud := _make_overlay()
+	assert_null(hud.get_additive_material(), "none ahead of the load")
+	hud.configure(fixture.layout, fixture.root)
+	var material := hud.get_additive_material()
+	assert_not_null(material, "the full arm's load made it")
+	if material != null:
+		assert_not_null(material.shader)
+		assert_true(material.shader.code.contains("render_mode blend_add;"),
+				"the additive blend, the default texel x colour")
+		assert_false(material.shader.code.contains("void fragment"),
+				"nothing else: the program a BLEND_MODE_ADD CanvasItemMaterial makes")
+
+
 func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 	var fixture := _load_temp_layout(PackedStringArray([
 		"HUDSPINMAPX1 810",
@@ -1555,6 +1573,8 @@ func test_sighted_m4_builds_all_authored_sight_card_rows() -> void:
 	if reticle_material != null:
 		assert_true(reticle_material.shader.code.contains("render_mode blend_add;"),
 			"The M4 red-dot layer renders additively")
+		assert_false(reticle_material.shader.code.contains("void fragment"),
+			"nothing else: the program a BLEND_MODE_ADD CanvasItemMaterial makes")
 	# The presenter folds the binocular suppression into the card switch.
 	card.set_card_up(false)
 	await get_tree().process_frame
