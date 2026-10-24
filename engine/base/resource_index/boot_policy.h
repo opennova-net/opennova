@@ -12,6 +12,9 @@
 //                 folder's UPDATE.WIZ names it (folder_product below); a folder
 //                 with no wizard is OpenNova's. OpenNova uses JO's engine profile.
 //   --no-update  disable update checks and installation (editor Play and tests).
+//   --after-update
+//                 the launch update.exe relaunches after a first-run install: a game
+//                 that still finds no content stops instead of installing again.
 //   /LAN          every game.cfg read forces mpnovaworldhostlanonly on: a
 //                 NovaWorld host advertises LAN only.
 //   /POSTIPADDRESS <address>, /POSTPORTNUMBER <n>
@@ -85,6 +88,7 @@ inline constexpr const char *kLaunchFlagLooseOverride = "/d";
 inline constexpr const char *kLaunchFlagExpansion = "/exp";
 inline constexpr const char *kLaunchFlagGame = "/game";
 inline constexpr const char *kLaunchFlagNoUpdate = "--no-update";
+inline constexpr const char *kLaunchFlagAfterUpdate = "--after-update";
 inline constexpr const char *kLaunchFlagResourceDir = "--resource-dir";
 inline constexpr const char *kLaunchFlagLooseMission = "--loose-mission";
 inline constexpr const char *kLaunchFlagLooseRoot = "--loose-root";
@@ -120,6 +124,7 @@ struct LaunchFlags {
     std::string game;              // /game <code>, lowercased
     bool game_given = false;
     bool no_update = false;        // editor Play and tests never check or install updates
+    bool after_update = false;     // relaunched by update.exe after a first-run install
     std::string resource_dir;      // --resource-dir <path>
     bool resource_dir_given = false; // --resource-dir present, even without a value
     std::string loose_mission;     // --loose-mission <name.bms>

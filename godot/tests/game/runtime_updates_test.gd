@@ -23,6 +23,22 @@ func test_check_and_handoff_preserve_product_roots_and_relaunch_arguments() -> v
 			"--run-arg", "/exp", "--run-arg", "onx"]))
 
 
+# A first-run install marks its relaunch once; the menu's UPDATE never does, and an
+# earlier marker is not carried into a later install.
+func test_a_bootstrap_install_marks_its_relaunch_once() -> void:
+	var marked := RuntimeUpdates.install_arguments(1234, true)
+	assert_eq(marked.slice(marked.size() - 2), PackedStringArray(["--run-arg", "--after-update"]))
+	RuntimeUpdates.configure("opennova", "C:/Runtime", "D:/Game Data",
+			PackedStringArray(["--verbose", "--", "/exp", "onx", "--after-update"]), true)
+	assert_false(RuntimeUpdates.install_arguments(1234).has("--after-update"))
+	var again := RuntimeUpdates.install_arguments(1234, true)
+	assert_eq(again.count("--after-update"), 1)
+	assert_eq(again.count("--"), 1)
+	RuntimeUpdates.configure("opennova", "C:/Runtime", "D:/Game Data", PackedStringArray(), true)
+	assert_eq(RuntimeUpdates.install_arguments(1234, true).slice(9), PackedStringArray([
+			"--run-arg", "--", "--run-arg", "--after-update"]), "no game arguments: the marker after --")
+
+
 func test_availability_only_follows_successful_native_available_exit() -> void:
 	assert_false(RuntimeUpdates.available)
 	RuntimeUpdates.complete_check(10)

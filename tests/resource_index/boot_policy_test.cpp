@@ -238,6 +238,7 @@ void test_flags_win_over_fallbacks_and_jo_is_the_default_game() {
     CHECK(launch_game(parse_launch_flags({"/game", "dfx"}), "jo") == "dfx");
     CHECK(!launch_product_supported(parse_launch_flags({"/game"}), "jo"));
     CHECK(parse_launch_flags({"--NO-UPDATE"}).no_update && !none.no_update);
+    CHECK(parse_launch_flags({"--", "--after-update"}).after_update && !none.after_update);
     const LaunchFlags set = parse_launch_flags({"/exp", "jox01", "/game", "JODEMO", "--resource-dir", "E:/y"});
     CHECK(launch_expansion(set, "revx02") == "jox01");
     CHECK(launch_game(set, "dfx") == "jodemo");

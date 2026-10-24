@@ -91,6 +91,11 @@ func _show_bootstrap() -> void:
 	column.add_child(_exit_button())
 	if not RuntimeUpdates.is_enabled():
 		_bootstrap_status.text = "Game content is missing. Updates are disabled for this launch."
+	elif LaunchFlags.after_update():
+		# The updater finished but the content still does not boot: offer the
+		# download again rather than looping updater and game into each other.
+		_bootstrap_status.text = ("The download finished, but OpenNova's game content is still "
+				+ "incomplete. Try the download again.")
 	else:
 		_install_content.call_deferred()
 
@@ -139,7 +144,7 @@ func _exit_button() -> Button:
 
 
 func _install_content() -> void:
-	if RuntimeUpdates.launch_update():
+	if RuntimeUpdates.launch_update(true):
 		get_tree().quit()
 	else:
 		_bootstrap_status.text = RuntimeUpdates.last_error

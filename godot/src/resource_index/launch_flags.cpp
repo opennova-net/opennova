@@ -58,6 +58,7 @@ void LaunchFlags::_bind_methods() {
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("product_supported"), &LaunchFlags::product_supported);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("game_given"), &LaunchFlags::game_given);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("no_update"), &LaunchFlags::no_update);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("after_update"), &LaunchFlags::after_update);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("launch_directory"),
 			&LaunchFlags::launch_directory);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("resource_dir"),
@@ -126,6 +127,7 @@ bool LaunchFlags::product_supported() {
 
 bool LaunchFlags::game_given() { return parse().game_given; }
 bool LaunchFlags::no_update() { return parse().no_update; }
+bool LaunchFlags::after_update() { return parse().after_update; }
 
 String LaunchFlags::launch_directory() { return to_gd(launch_dir_of(parse())); }
 

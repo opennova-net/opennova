@@ -7,6 +7,8 @@ signal availability_changed(available: bool)
 signal check_finished(exit_code: int)
 
 const CHECK_TIMEOUT_MS := 15000
+## The relaunch marker a first-run install passes to the game (boot_policy.h).
+const AFTER_UPDATE_FLAG := "--after-update"
 
 var available := false
 var last_error := ""
@@ -49,10 +51,20 @@ func check_arguments() -> PackedStringArray:
 	return arguments
 
 
-func install_arguments(parent_pid: int) -> PackedStringArray:
+## `bootstrap`: a first-run install, whose relaunch carries AFTER_UPDATE_FLAG so a
+## game that still finds no content stops instead of starting the updater again.
+func install_arguments(parent_pid: int, bootstrap := false) -> PackedStringArray:
 	var arguments := PackedStringArray(["/RUN", "--parent-pid", str(parent_pid)])
 	arguments.append_array(_product_arguments())
+	var relaunch := PackedStringArray()
 	for argument in _run_args:
+		if argument != AFTER_UPDATE_FLAG:
+			relaunch.append(argument)
+	if bootstrap:
+		if not relaunch.has("--"):
+			relaunch.append("--")
+		relaunch.append(AFTER_UPDATE_FLAG)
+	for argument in relaunch:
 		arguments.append("--run-arg")
 		arguments.append(argument)
 	return arguments
@@ -103,7 +115,7 @@ func complete_check(exit_code: int) -> void:
 	check_finished.emit(exit_code)
 
 
-func launch_update() -> bool:
+func launch_update(bootstrap := false) -> bool:
 	if not _enabled:
 		last_error = "Updates are disabled for this launch."
 		return false
@@ -111,7 +123,7 @@ func launch_update() -> bool:
 	if not FileAccess.file_exists(updater_path()):
 		last_error = "update.exe is missing from the OpenNova installation."
 		return false
-	if OS.create_process(updater_path(), install_arguments(OS.get_process_id()), false) <= 0:
+	if OS.create_process(updater_path(), install_arguments(OS.get_process_id(), bootstrap), false) <= 0:
 		last_error = "Could not start update.exe."
 		return false
 	return true

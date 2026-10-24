@@ -35,6 +35,8 @@ public:
 	// True when `/game` was passed, even without a value.
 	static bool game_given();
 	static bool no_update();
+	// True when update.exe relaunched the game after a first-run content install.
+	static bool after_update();
 	// The directory the launch reads: `--resource-dir`, else the executable's.
 	static String launch_directory();
 	// `--resource-dir <path>` (process-local, never persisted), or "".

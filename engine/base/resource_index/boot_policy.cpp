@@ -113,6 +113,7 @@ LaunchFlags parse_launch_flags(const std::vector<std::string> &args) {
     f.game = strutil::to_lower(value_after(args, kLaunchFlagGame));
     f.game_given = has_flag(args, kLaunchFlagGame);
     f.no_update = has_flag(args, kLaunchFlagNoUpdate);
+    f.after_update = has_flag(args, kLaunchFlagAfterUpdate);
     f.resource_dir = value_after(args, kLaunchFlagResourceDir);
     f.resource_dir_given = has_flag(args, kLaunchFlagResourceDir);
     f.loose_mission = value_after(args, kLaunchFlagLooseMission);
