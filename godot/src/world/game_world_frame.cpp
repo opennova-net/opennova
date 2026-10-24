@@ -27,6 +27,7 @@
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/classes/window.hpp>
+#include <godot_cpp/classes/rendering_device.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/classes/time.hpp>
@@ -98,6 +99,35 @@ String target_draw_census(SubViewport *p_target) {
 	}
 	out.push_back(vformat("server-only x%d", serverside));
 	return String("; ").join(out);
+}
+
+// A target's draw by the renderer's own sections (an instrument, --verbose with --gpu-profile,
+// which turns the renderer's section timestamps on; LF-s19 row 2a): the device's captured
+// timestamps of the frame it last read back, from the target's "vp_begin_" mark to its "vp_end_",
+// each section with the CPU it took to the next mark. Empty when no section was captured.
+String target_draw_sections(SubViewport *p_target) {
+	RenderingDevice *rd = RenderingServer::get_singleton()->get_rendering_device();
+	if (rd == nullptr) return String();
+	const String id = String::num_uint64(p_target->get_viewport_rid().get_id());
+	const String begin = String("vp_begin_") + id;
+	const String end = String("vp_end_") + id;
+	const uint32_t count = rd->get_captured_timestamps_count();
+	PackedStringArray out;
+	bool inside = false;
+	for (uint32_t i = 0; i + 1 < count; ++i) {
+		const String name = rd->get_captured_timestamp_name(i);
+		if (!inside) {
+			inside = name == begin;
+			if (!inside) continue;
+		} else if (name == end) {
+			break;
+		}
+		const double cpu_ms = double(rd->get_captured_timestamp_cpu_time(i + 1) -
+									  rd->get_captured_timestamp_cpu_time(i)) / 1000.0;
+		if (cpu_ms >= 0.05) out.push_back(vformat("%s %.2f", name, cpu_ms));
+	}
+	if (out.is_empty()) return String();
+	return vformat("rd frame %d: %s", int64_t(rd->get_captured_timestamps_frame()), String("; ").join(out));
 }
 
 // The process's object counts at the load's end and at each post-load frame's start (an
@@ -172,6 +202,16 @@ void print_post_load_counts(Node *p_world, const ResourceRoot *p_root, const Str
 			if (target == nullptr || target->get_name() != StringName("WaterReflectionViewport")) continue;
 			UtilityFunctions::print_verbose(vformat("Post-load mirror census %s: [%s]", p_label,
 					target_draw_census(target)));
+		}
+	}
+	// The served targets' draws by the renderer's sections (--gpu-profile beside --verbose).
+	for (int64_t i = 0; i < found.size(); ++i) {
+		SubViewport *target = Object::cast_to<SubViewport>(found[i]);
+		if (target == nullptr || !target->is_using_xr()) continue;
+		const String sections = target_draw_sections(target);
+		if (!sections.is_empty()) {
+			UtilityFunctions::print_verbose(vformat("Post-load sections %s %s: [%s]", p_label,
+					target->get_name(), sections));
 		}
 	}
 	// The orphan nodes by class and name: at the load's end (the next flush frees them,
