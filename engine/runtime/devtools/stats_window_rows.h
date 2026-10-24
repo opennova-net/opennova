@@ -28,7 +28,7 @@ namespace stats_rows {
 
 inline constexpr Slot k_ai_infantry_collision_unattributed[] = {Slot::SIM_AI_INFANTRY_COLLISION_CONTACTS, Slot::SIM_AI_INFANTRY_COLLISION_REPULSION, Slot::SIM_AI_INFANTRY_COLLISION_GROUND};
 inline constexpr Slot k_ai_infantry_unattributed[] = {Slot::SIM_AI_INFANTRY_COMBAT, Slot::SIM_AI_INFANTRY_ANIMATION, Slot::SIM_AI_INFANTRY_MOTION, Slot::SIM_AI_INFANTRY_COLLISION};
-inline constexpr Slot k_update_walks_other[] = {Slot::SIM_AI_INFANTRY, Slot::SIM_WALK_THINK, Slot::SIM_WALK_MOTOR, Slot::SIM_WALK_EWEP, Slot::SIM_WALK_ITEMS, Slot::SIM_WALK_DEVICES, Slot::SIM_WALK_MOUNTED};
+inline constexpr Slot k_update_walks_other[] = {Slot::SIM_AI_INFANTRY, Slot::SIM_WALK_THINK, Slot::SIM_WALK_MOTOR, Slot::SIM_WALK_EWEP, Slot::SIM_WALK_ITEMS, Slot::SIM_WALK_DEVICES, Slot::SIM_WALK_MOUNTED, Slot::SIM_WALK_REPLICA_ROWS, Slot::SIM_WALK_REPLICA_POOL0};
 inline constexpr Slot k_update_entities_unattributed[] = {Slot::SIM_UPDATE_WALKS, Slot::SIM_UPDATE_ATTACHMENTS, Slot::SIM_UPDATE_HELILIFT_FACES, Slot::SIM_UPDATE_PRECIPITATION, Slot::SIM_UPDATE_PIECES_EVENTS, Slot::SIM_UPDATE_PROJECTILES, Slot::SIM_UPDATE_EXPLOSIONS, Slot::SIM_UPDATE_PROXIMITY};
 inline constexpr Slot k_attachment_unattributed[] = {Slot::SIM_ATTACHMENT_ORPHANS, Slot::SIM_ATTACHMENT_CHILDREN, Slot::SIM_ATTACHMENT_RIDERS};
 inline constexpr Slot k_world_unattributed[] = {Slot::SIM_WORLD_SETUP, Slot::SIM_WORLD_SCRIPTS, Slot::SIM_UPDATE_ENTITIES, Slot::SIM_WORLD_HOUSEKEEPING};
@@ -91,7 +91,9 @@ inline constexpr StatsRow kRows[] = {
 	{"walk_items", "Item legs", 9, RowKind::SPAN, Slot::SIM_WALK_ITEMS, nullptr, 0},
 	{"walk_devices", "Placed devices", 9, RowKind::SPAN, Slot::SIM_WALK_DEVICES, nullptr, 0},
 	{"walk_mounted", "Mounted brains' seat pose", 9, RowKind::SPAN, Slot::SIM_WALK_MOUNTED, nullptr, 0},
-	{"update_walks_other", "Walk remainder", 9, RowKind::RESIDUAL, Slot::SIM_UPDATE_WALKS, k_update_walks_other, 7},
+	{"walk_replica_rows", "Joiner: decoded pool-1 rows' slot visits", 9, RowKind::SPAN, Slot::SIM_WALK_REPLICA_ROWS, nullptr, 0},
+	{"walk_replica_pool0", "Joiner: replica legs ahead of the pool-0 walk", 9, RowKind::SPAN, Slot::SIM_WALK_REPLICA_POOL0, nullptr, 0},
+	{"update_walks_other", "Walk remainder", 9, RowKind::RESIDUAL, Slot::SIM_UPDATE_WALKS, k_update_walks_other, 9},
 	{"update_attachments", "Emplacement attachments", 8, RowKind::SPAN, Slot::SIM_UPDATE_ATTACHMENTS, nullptr, 0},
 	{"attachment_orphans", "Orphan-chain cleanup", 9, RowKind::SPAN, Slot::SIM_ATTACHMENT_ORPHANS, nullptr, 0},
 	{"attachment_children", "Child attachment pose", 9, RowKind::SPAN, Slot::SIM_ATTACHMENT_CHILDREN, nullptr, 0},
@@ -103,6 +105,7 @@ inline constexpr StatsRow kRows[] = {
 	{"update_projectiles", "Rotor wash + projectile rounds", 8, RowKind::SPAN, Slot::SIM_UPDATE_PROJECTILES, nullptr, 0},
 	{"update_explosions", "Explosions, round hits, pool-2/3 walks, doors", 8, RowKind::SPAN, Slot::SIM_UPDATE_EXPLOSIONS, nullptr, 0},
 	{"update_proximity", "Pool-0/1 proximity tables", 8, RowKind::SPAN, Slot::SIM_UPDATE_PROXIMITY, nullptr, 0},
+	{"proximity_replica", "Joiner: decoded rows at the proximity build", 9, RowKind::SPAN, Slot::SIM_PROXIMITY_REPLICA, nullptr, 0},
 	{"update_entities_unattributed", "Entity-update unattributed", 8, RowKind::RESIDUAL, Slot::SIM_UPDATE_ENTITIES, k_update_entities_unattributed, 8},
 	{"world_housekeeping", "World housekeeping", 7, RowKind::SPAN, Slot::SIM_WORLD_HOUSEKEEPING, nullptr, 0},
 	{"world_unattributed", "World-update unattributed", 7, RowKind::RESIDUAL, Slot::SIM_SERVER_WORLD, k_world_unattributed, 4},

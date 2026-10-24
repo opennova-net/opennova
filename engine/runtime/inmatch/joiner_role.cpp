@@ -1252,6 +1252,7 @@ void JoinerRole::pump() {
 	// (D-NET-NEW-L5-31). [orig: Entity_UpdatePool1Slot @0x4B8DD0 - the +0x1C8 call @0x4B8E3C,
 	//  the +0x1C4 call @0x4B8E53; Entity_UpdateAllEntities @0x4C2100 - @0x4C2158..0x4C21E9]
 	world.before_pool0_walk = [this, &rt, &kernel, &world] {
+		const devtools::ProfileScope prewalk(world.profile, devtools::Slot::SIM_WALK_REPLICA_POOL0);
 		tick_replica_emplaced_channels(rt.state(), kernel.seat_specs, world, self_wire_handle(),
 				&materializer_, kernel.wire_header_world, ReplicaGunLeg::Pool1Walk);
 		rt.view().tick_remote_motion_through_self();
@@ -1267,7 +1268,8 @@ void JoinerRole::pump() {
 	//  the Weapon_UpdateAllProjectiles call @0x4C223A, the Entity_BuildProximityLists_Pool01
 	//  call @0x4C240A; Entity_BuildProximityLists_Pool01 @0x4B9340 (the pool-1 copies
 	//  @0x4B9389..0x4B93A7)]
-	world.before_proximity_build = [this, &rt] {
+	world.before_proximity_build = [this, &rt, &world] {
+		const devtools::ProfileScope replica(world.profile, devtools::Slot::SIM_PROXIMITY_REPLICA);
 		for (const uint16_t handle : rt.view().unvisited_pool1_rows())
 			visit_replica_pool1_slot(world::EntityHandle{handle});
 		mirror_predicted_vehicles();
@@ -1277,8 +1279,9 @@ void JoinerRole::pump() {
 	// walk, interleaved with the World's movers in slot order (visit_replica_pool1_slot,
 	// D-NET-196).
 	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9]
-	world.pool1_slot_leg = [this](world::EntityHandle handle) {
-		visit_replica_pool1_slot(handle);
+	devtools::ProfileNsSum slot_visits(world.profile, devtools::Slot::SIM_WALK_REPLICA_ROWS);
+	world.pool1_slot_leg = [this, &slot_visits](world::EntityHandle handle) {
+		slot_visits.lap([&] { visit_replica_pool1_slot(handle); });
 	};
 	// The tick's own phases land on the SIM_WORLD_* / SIM_UPDATE_* rows inside run_logic_tick.
 	world.run_logic_tick(
