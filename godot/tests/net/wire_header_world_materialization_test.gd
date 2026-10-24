@@ -656,18 +656,20 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	assert_true(joiner.request_local_player_scope_toggle(),
 			"header-only child recovered designated-G action-6 capability")
 	# The toggle binds and seeds nothing: the parent's slot keeps the words its
-	# class init seeded at the load (the fixture 50cal's clipsize word 1; its
-	# -1 startrounds leaves the split out). The witness below arrives only once
-	# the authority has taken action 6's route.
+	# class init seeded at the load: the CHel leg's split of the fixture 50cal's
+	# 210 startrounds, clip = its clipsize 100 capped at the total, the rest in
+	# reserve. The witness below arrives only once the authority has taken
+	# action 6's route.
 	# [orig: NapiNPServerMsg_HandleWeaponToggle @0x511A70 (the set @0x511B2C);
 	#  WeaponSlot_InitFromEntityDef @0x5466C0, called only by the ewep and the
-	#  CHel / cpln inits @0x441482 / @0x49017B]
+	#  CHel / cpln inits @0x441482 / @0x49017B; the CHel leg's split
+	#  WeaponSlot_SplitVehicleAmmoIntoClipAndReserve @0x546310, called @0x490192]
 	for _tick in range(120):
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
 		OS.delay_msec(1)
-	assert_eq(host.entity_card_by_net_id(parent_bms_id).get_primary_weapon_clip(), 1,
+	assert_eq(host.entity_card_by_net_id(parent_bms_id).get_primary_weapon_clip(), 100,
 			"the parent's slot keeps its class init's words through the toggle")
 	assert_eq(host.debug_set_world_entity_weapon_ammo(
 			parent_bms_id, 7, 19), OK)
