@@ -314,6 +314,15 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"settle_ms": { "type": "integer", "minimum": 0, "default": 3000 },
 					"window_ms": { "type": "integer", "minimum": 100, "default": 2000 },
 				}, [], true, true, 120_000),
+		ProbeDef.make("gpu_passes",
+				"The frame's GPU time per viewport and per pass: read the RenderingDevice's "
+				+ "captured timestamps every frame of the window, split them per viewport "
+				+ "(vp_begin_ / vp_end_) and charge each interval to the label that opens it "
+				+ "(the renderer's pass labels need the engine's --gpu-profile flag).",
+				PERF + "gpu_passes_probe.gd", {
+					"warmup_seconds": { "type": "number", "minimum": 0.0, "default": 3.0 },
+					"window_seconds": { "type": "number", "minimum": 0.5, "default": 10.0 },
+				}, [], true, true, 300_000),
 		ProbeDef.make("render_fixture_capture",
 				"The exact-pose production-world capture for one docs/render/render-fixtures-v1.json "
 				+ "fixture: boots its saved mission, realizes the catalog camera/TOD, captures "
