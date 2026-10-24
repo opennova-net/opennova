@@ -26,6 +26,7 @@ config/custom_user_dir_name.opennova_editor="OpenNova Editor"
 
 Strings="*res://game/strings/strings.gd"
 MusicService="*res://game/world/music_service.gd"
+RuntimeUpdates="*res://game/runtime_updates.gd"
 ImGuiRoot="*uid://dugmpnsxaagba"
 
 [display]

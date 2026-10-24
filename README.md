@@ -3,10 +3,10 @@
 OpenNova is an open-source C++ and Godot reimplementation of the Joint
 Operations generation of NovaLogic games. The repository contains the game
 runtime, native format readers, NovaWorld-compatible services, and the project
-web portal. The game ships with OpenNova's own small game, made in the OpenNova
-Editor: "Indigo Shore", a mission for single player and Co-op over LAN, and its
-"Indigo Storm" expansion. It also runs in place of `Jointops.exe`, playing retail
-Joint Operations from your own install (**PLAY RETAIL**).
+web portal. The minimal runtime downloads OpenNova's own game on first run:
+"Indigo Shore", a mission for single player and Co-op over LAN, and its
+"Indigo Storm" expansion. The same `opennova.exe` can run against an existing
+Joint Operations or Delta Force Xtreme 2 install: put it in that game's folder and run it.
 
 This is a pre-1.0 project. Implemented systems and known differences from the
 retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
@@ -90,35 +90,37 @@ once on a fresh checkout, and run it:
 
 ```bash
 $GODOT_BIN --headless --path godot --import   # once; retry it if a cold cache crashes it
-$GODOT_BIN --path godot -- --resource-dir "C:/Games/Joint Operations"
+$GODOT_BIN --path godot -- /game jo --resource-dir "C:/Games/Joint Operations" --no-update
 ```
 
-Source checkouts need `--resource-dir` pointing to exported OpenNova content or
-an existing retail install. OpenNova's content projects live in `opennova-assets`;
-open `assets/project.opennova` there in the editor and export it to a game directory.
-To boot that export:
+In its own folder the packaged runtime plays OpenNova's game, and its first launch
+downloads OpenNova's content through the adjacent `update.exe`. Existing content
+starts normally while an update check runs in the background; **UPDATE** appears
+in the main menu when a newer package is available. Installed content works offline.
+
+To play a retail install, extract the runtime into the retail game's folder and run
+`opennova.exe`: without `/game`, the folder's `UPDATE.WIZ` says which game it holds
+(Joint Operations or Delta Force Xtreme 2; a folder without one is OpenNova's). A
+folder whose wizard names another game is refused. `/game` chooses explicitly, also
+for a separate content directory:
 
 ```bash
-$GODOT_BIN --path godot -- --resource-dir "C:/Games/OpenNova"
+opennova.exe -- /game dfx2 --resource-dir "C:/Games/Delta Force Xtreme 2"
 ```
 
-The packaged Windows runtime loads the game files beside `opennova.exe`: run it, or
-`opennova.exe -- --resource-dir "C:\Games\Joint Operations"`.
-Its **PLAY RETAIL** control selects and remembers a retail install;
-**CHANGE FOLDER** selects another.
-
 For loose data without boot archives, add `--loose-root /d`. `/game <code>`
-selects the game (default `jo`); `/exp <name>` selects an expansion. A
+selects `opennova`, `jo`, or `dfx2`; `/exp <name>` selects an expansion. A
 `--resource-dir` directory is never saved. An empty `--resource-dir` prints
-usage and exits with code 2; an invalid or unmountable directory exits with
-code 1.
+usage and exits with code 2. Use `--no-update` for development runs; Editor Play
+sets it automatically. Source checkouts use exported content from the assets
+repository or an existing retail install.
 
 ## Downloads
 
 CI and tagged releases publish `opennova-game-windows-v<version>.zip`. It
-contains `opennova.exe`, the matching native dependencies, OpenNova's own PFFs and
-loose game files at the ZIP root, expansions under `expansion/`, and launch
-instructions. Retail game data is supplied separately. Debug builds include
+contains `opennova.exe`, its native dependencies, `update.exe`, `revupdat.exe`,
+and the small bootstrap configuration. Game content is downloaded on first run.
+Retail game data is supplied separately. Debug builds include
 the game's dev tools (Insert).
 
 They also publish `opennova-editor-windows-v<version>.zip`: `editor/` holds the

@@ -355,7 +355,6 @@ static func boot_shell(test: GutTest, working_dir := "") -> MainGame:
 
 	LaunchFlags.set_args_override(
 			PackedStringArray(["--resource-dir", _last_shell_dir, "--working-dir", run_dir]))
-	ResourceDirSettings.set_game("jo")
 	var packed := load(MAIN_GAME_SCENE_PATH) as PackedScene
 	var shell := packed.instantiate() as MainGame
 	test.assert_not_null(shell)

@@ -7,7 +7,7 @@ extends GutTest
 # frames, and the verdict's record; then the wait-false / collect split and
 # the refusals. The joiner's pose write rides tests/net/joiner_apply_pose_test.
 
-const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
+const STATE_CONFIG_PATH := "user://opennova.cfg"
 
 var _config: TestFs.Snapshot
 var _temp_dir := ""

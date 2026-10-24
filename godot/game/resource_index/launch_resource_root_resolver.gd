@@ -7,7 +7,7 @@ extends ResourceRootResolver
 
 
 func _resource_dir() -> String:
-	return LaunchFlags.resource_dir()
+	return BootRootMount.launch_directory()
 
 
 func _expansion() -> String:
@@ -15,4 +15,4 @@ func _expansion() -> String:
 
 
 func _game() -> String:
-	return LaunchFlags.game(ResourceDirSettings.get_game())
+	return LaunchFlags.game()

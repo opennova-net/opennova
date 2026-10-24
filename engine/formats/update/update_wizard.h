@@ -1,10 +1,8 @@
 #pragma once
 
 // UPDATE.WIZ, the product's update wizard file; cc.bin's territory; update.inf.
-// docs/update/updater-re.md §2.
-//
-// STAGED, NOT WIRED: consumed by apps/update (the client, ADR 0061 phase 3); until those land only
-// tests/update include it.
+// docs/update/updater-re.md §2. Read by apps/update (the client) and, through the game folder's
+// product (base/resource_index/boot_policy.h folder_product), by the game's launch.
 
 #include <cstddef>
 #include <cstdint>
@@ -60,6 +58,18 @@ std::string substitute_territory(std::string_view value, const Territory &territ
 // Every wizard value but DRIVE with the territory substituted, as the reader leaves them.
 // [orig: Cupdate2Dlg_ReadWizard @ 0x404c90 (UPDATE.EXE)]
 UpdateWizard with_territory(UpdateWizard wizard, const Territory &territory);
+
+// The command files of the products a game folder's stock wizard names (ADR 0067 d2): JO's, as
+// JO:CA's UPDATE.WIZ ships it (§2), DFX2's, as the Steam DFX2 install's UPDATE.WIZ ships it
+// (CMD=DFX2.CMD, PRODUCT_LOGIN=DFX2), and OpenNova content's own (the content repository's
+// generated wizard). A CMD names no territory placeholder, so the territory never changes it.
+inline constexpr std::string_view kJoCommandFile = "JOPTR.CMD";
+inline constexpr std::string_view kDfx2CommandFile = "DFX2.CMD";
+inline constexpr std::string_view kOpenNovaCommandFile = "OPENNOVA.CMD";
+
+// The product a wizard's CMD names: "jo", "dfx2" or "opennova" (ASCII case-blind, as the
+// updater opens the file); "" for any other (BHD's DFBHD.CMD, an expansion's JOEPTR.CMD).
+std::string wizard_product(std::string_view cmd);
 
 // update.inf as REVUPDAT writes it before relaunching the updater.
 // [orig: RevUpdate_WndProc @ 0x401290 (REVUPDAT.EXE)]

@@ -8,9 +8,10 @@
 // fetching and unpacking the package into its cache; the stock client's sequence
 // (update_tool_test's test_serve: the gateway's LOGIN and SERVER.LST naming the update host,
 // then the update server's LOGIN, the command file's CRC and the files, each answered from
-// the cache); a login no published release serves refused; the release retired and the
-// catalog refreshed, the login refused and the package dropped from the cache; a second
-// release published, served after a refresh.
+// the cache); a login no data set names refused, and a seeded retail product no release
+// serves answered current (its command file with no rows); the release retired and the
+// catalog refreshed, the base's login refused, the retail expansion's current again, and the
+// package dropped from the cache; a second release published, served after a refresh.
 
 #include "core/local_object_store.h"
 #include "data_sets/data_set_repository.h"
@@ -22,6 +23,7 @@
 #include <base/io/file_io.h>
 #include <base/io/os_path.h>
 #include <base/io/sha256.h>
+#include <formats/update/command_file.h>
 #include <formats/update/server_list.h>
 #include <formats/update/sfs.h>
 #include <formats/update/update_crc.h>
@@ -36,6 +38,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -121,6 +124,47 @@ std::string text_of(const std::vector<uint8_t> &bytes) {
 	return std::string(bytes.begin(), bytes.end());
 }
 
+// The logins the catalog serves, exactly `logins`.
+bool serves(const nws::update_service::ReleaseCatalog &catalog, const std::set<std::string> &logins) {
+	std::set<std::string> served;
+	for (const auto &s : catalog.served())
+		served.insert(s.login);
+	return served == logins;
+}
+
+// A retail product answered current: the gateway's SERVER.LST names ftp.novaworld.com, and
+// the update server's command file (whose CRC it reports) reads with no rows and names `exe`.
+bool answers_current(uint16_t port, const char *login, const char *command_file, const char *exe) {
+	std::vector<update::Reply> r;
+	net::Socket gateway = connect_to(port);
+	bool ok = gateway.is_valid() &&
+			exchange(gateway,
+					update::encode_login(login, "", update::kIdGatewayLogin) +
+							update::encode_get(
+									{ std::string(update::kServerListName) }, update::kIdServerList),
+					2, r) &&
+			r[0].result == 0 && r[1].result == 0 &&
+			update::read_server_list(text_of(r[1].payload)) ==
+					std::vector<std::string>{ "ftp.novaworld.com" };
+	close_after(gateway);
+	if (!ok)
+		return false;
+	net::Socket server = connect_to(port);
+	ok = server.is_valid() &&
+			exchange(server,
+					update::encode_login(login, "", update::kIdServerLogin) +
+							update::encode_crc(command_file, update::kIdCommandFile) +
+							update::encode_get({ command_file }, update::kIdCommandFile),
+					3, r) &&
+			r[0].result == 0 && r[2].result == 0 &&
+			r[1].crc ==
+					update::crc_as_signed(
+							update::command_file_crc(r[2].payload.data(), r[2].payload.size()));
+	close_after(server);
+	const auto command = ok ? update::read_command_file(text_of(r[2].payload)) : std::nullopt;
+	return command && command->rows.empty() && command->exe == exe;
+}
+
 // A release of `sha` (its package at updates/<sha>.sfs already) with `sections`, published.
 int64_t publish(Database &db, const std::string &sha, int64_t bytes,
 		const std::vector<hosted::NewReleaseSection> &sections) {
@@ -196,7 +240,8 @@ int run(const test_temp::TempDir &dir) {
 	TEST_EXPECT(listener.start());
 	TEST_EXPECT(listener.ports().size() == 1 && listener.ports()[0] != 0);
 	const uint16_t port = listener.ports()[0];
-	TEST_EXPECT(listener.catalog().product_count() == 2);
+	// The two published products, and the seeded retail products no release serves.
+	TEST_EXPECT(serves(listener.catalog(), { "SYNus", "SYNEus", "JOTRus", "JOEus", "DFX2" }));
 	const std::string cache = dir.file("cache");
 	TEST_EXPECT(fs::is_regular_file(io::os_path(io::utf8_join(cache, sha + ".sfs"))));
 	TEST_EXPECT(fs::is_regular_file(io::os_path(io::utf8_join(cache, sha + "/0/SYNPTR.CMD"))));
@@ -262,8 +307,11 @@ int run(const test_temp::TempDir &dir) {
 		TEST_EXPECT(cmd != nullptr && r[2].result == 0 && r[2].payload == cmd->data);
 		close_after(socket);
 	}
-	// A login no published release serves (the seeded JOTRus has none; an unknown name).
-	TEST_EXPECT(login_result(port, "JOTRus") < 0);
+	// A seeded retail product no release serves answers current (JO:CA's JOPTR.CMD, the
+	// Steam DFX2's DFX2.CMD); a login no data set names is refused.
+	TEST_EXPECT(answers_current(port, "JOTRus", "JOPTR.CMD", "Jointops.exe"));
+	TEST_EXPECT(answers_current(port, "DFX2", "DFX2.CMD", "dfx2.exe"));
+	TEST_EXPECT(answers_current(port, "JOEus", "JOEPTR.CMD", ""));
 	TEST_EXPECT(login_result(port, "NOPEus") < 0);
 	// A login is matched without case, as retail's catalog matched products.
 	TEST_EXPECT(login_result(port, "synus") == 0);
@@ -274,8 +322,9 @@ int run(const test_temp::TempDir &dir) {
 		TEST_EXPECT(hosted::retire_release(*db, release));
 	}
 	listener.refresh_now();
-	TEST_EXPECT(listener.catalog().product_count() == 0);
-	TEST_EXPECT(login_result(port, "SYNus") < 0 && login_result(port, "SYNEus") < 0);
+	TEST_EXPECT(serves(listener.catalog(), { "SYNEus", "JOTRus", "JOEus", "DFX2" }));
+	TEST_EXPECT(login_result(port, "SYNus") < 0);
+	TEST_EXPECT(answers_current(port, "SYNEus", "SYNEPTR.CMD", ""));
 	TEST_EXPECT(!fs::exists(io::os_path(io::utf8_join(cache, sha + ".sfs"))));
 	TEST_EXPECT(!fs::exists(io::os_path(io::utf8_join(cache, sha))));
 
@@ -289,8 +338,8 @@ int run(const test_temp::TempDir &dir) {
 							{ { base, "", "SYNPTR.CMD", "1.0.0.10", 4, 100 } }) != 0);
 	}
 	listener.refresh_now();
-	TEST_EXPECT(listener.catalog().product_count() == 1);
-	TEST_EXPECT(login_result(port, "SYNus") == 0 && login_result(port, "SYNEus") < 0);
+	TEST_EXPECT(serves(listener.catalog(), { "SYNus", "SYNEus", "JOTRus", "JOEus", "DFX2" }));
+	TEST_EXPECT(login_result(port, "SYNus") == 0 && answers_current(port, "SYNEus", "SYNEPTR.CMD", ""));
 	TEST_EXPECT(fs::is_regular_file(io::os_path(io::utf8_join(cache, sha2 + "/0/SYNPTR.CMD"))));
 	TEST_EXPECT(!fs::exists(io::os_path(io::utf8_join(cache, sha2 + "/1"))));
 	listener.stop();

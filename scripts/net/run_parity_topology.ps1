@@ -266,7 +266,7 @@ function Get-FileSha256OrNull {
 }
 $RepoCommit = (& git -C $Repo rev-parse HEAD 2>$null)
 $RepoDirty = [bool] (& git -C $Repo status --porcelain --untracked-files=no 2>$null)
-$GdextensionDll = Join-Path $Repo "godot\bin\libopennova.windows.template_debug.x86_64.dll"
+$GdextensionDll = Join-Path $Repo "godot\bin\opennovad.dll"
 # A retail LAN host binds only inside its game.cfg mplanserverportmin..max
 # (stock JO:CA: 32768..32787), so a port outside the SERVER copy's own range can
 # never host a retail cell.

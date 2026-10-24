@@ -39,16 +39,14 @@ packs into PFF archives only when the user plays or exports. There is no proprie
 project database: the project file is plain text and every asset is a readable file.
 That keeps source ownership visible and makes retail compatibility the acceptance test.
 
-OpenNova ships the runtime and format libraries plus its own authored game:
-the "Indigo Shore" mission and its "Indigo Storm" expansion, made in the OpenNova
-Editor. Their projects and authoring sources live in
-[opennova-assets](https://github.com/opennova-net/opennova-assets), in the original
-`assets/`, `expansions/`, and `art/` layout. The packaged game's main menu offers
-PLAY RETAIL to select and remember a retail install (ADR 0048); OpenNova never
-distributes retail game data. Users point it at their own game-data directory, on the
-command line (`--resource-dir`, ADR 0045) or through that picker. The editor is
-a separate download and a separate application. Test-only synthetic fixtures
-remain separate from both products.
+OpenNova ships a minimal runtime and downloads its own game on first run. The
+"Indigo Shore" mission, "Indigo Storm" expansion, and their authoring sources
+live in [opennova-assets](https://github.com/opennova-net/opennova-assets), in
+the original `assets/`, `expansions/`, and `art/` layout. It never distributes
+retail game data. Users select a product with `/game` (default `opennova`) and
+can point the same executable at an existing JO or DFX2 install with
+`--resource-dir`. The editor is a separate download and application. Test-only
+synthetic fixtures remain separate from both products.
 
 ## Target games
 

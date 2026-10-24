@@ -273,7 +273,7 @@ int test_list(Harness &h) {
 			str(json["titles"][1]) == "dfx2");
 	TEST_EXPECT(json["games"].size() == 3 && str(json["games"][1]["slug"]) == "jop_2_consumer" &&
 			!str(json["games"][1]["display_name"]).empty());
-	TEST_EXPECT(json["data_sets"].size() == 4);
+	TEST_EXPECT(json["data_sets"].size() == 5);
 	TEST_EXPECT(str(json["data_sets"][0]["kind"]) == "base" &&
 			str(json["data_sets"][3]["kind"]) == "expansion");
 	const auto jo = listed_data_set(h, h.jo);
@@ -858,6 +858,37 @@ int test_releases(Harness &h) {
 	return 0;
 }
 
+int test_runtime_release(Harness &h) {
+	int64_t runtime = 0;
+	int64_t release = 0;
+	{
+		auto db = h.pool.acquire();
+		runtime = seeded(*db, "OpenNova runtime");
+		TEST_EXPECT(runtime != 0);
+		release = hosted::create_release(*db, "runtime test", 1, "test");
+		TEST_EXPECT(hosted::set_release_status(*db, release, hosted::ReleaseStatus::Uploading,
+				hosted::ReleaseStatus::Validating));
+		TEST_EXPECT(hosted::set_release_validated(*db, release, std::string(64, 'c'), 1,
+				"OpenNova runtime", { { runtime, "", "ONRUNTIME.CMD", "1.0", 1, 1 } }));
+	}
+	const std::string path = "/api/admin/releases/" + std::to_string(release);
+	const auto json = json_of(h.admin("POST", path + "/publish"), 202);
+	TEST_EXPECT(json && str(json["release"]["status"]) == "published" &&
+			str(json["release"]["sections"][0]["display_name"]) == "OpenNova runtime");
+	{
+		auto db = h.pool.acquire();
+		TEST_EXPECT(!queued_job(*db, "release.apply:" + std::to_string(release) + ":" +
+				std::to_string(runtime)));
+		TEST_EXPECT(hosted::list_trees(*db, runtime).empty());
+		const auto products = hosted::published_sections(*db);
+		TEST_EXPECT(products.size() == 1 && products[0].updater_login == "ONRUNTIME" &&
+				products[0].command_file == "ONRUNTIME.CMD" && !products[0].retail_updater);
+	}
+	TEST_EXPECT(refused(h.admin("POST", "/api/admin/data-sets/" + std::to_string(runtime) +
+			"/trees", R"({"files":[{"name":"opennova.exe","size":1}]})"), 409, "update_only"));
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -905,6 +936,7 @@ int main(int argc, char **argv) {
 			{ "create_patch_delete", test_create_patch_delete },
 			{ "tree_upload", test_tree_upload },
 			{ "releases", test_releases },
+			{ "runtime_release", test_runtime_release },
 		};
 		rc = 0;
 		for (const Case &c : cases) {

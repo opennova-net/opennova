@@ -829,6 +829,11 @@ target_link_libraries(update_apply_test PRIVATE opennova_update_tool_core)
 target_include_directories(update_apply_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME update_apply COMMAND update_apply_test)
 
+add_executable(update_client_test update/update_client_test.cpp)
+target_link_libraries(update_client_test PRIVATE opennova_update_core opennova_update_tool_core Threads::Threads)
+target_include_directories(update_client_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME update_client COMMAND update_client_test)
+
 # Audio sound-set member selection state machine (FIRST/RANDOM/SEQUENTIAL/RANDOM_SEQ),
 # pushed down from sound_bank.gd into engine/runtime/audio.
 add_executable(sound_selector_test audio/sound_selector_test.cpp)

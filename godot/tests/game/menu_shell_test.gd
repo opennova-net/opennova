@@ -45,7 +45,7 @@ class _MissingBankMusicRoot extends RefCounted:
 		return PackedByteArray([1])
 
 
-const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
+const STATE_CONFIG_PATH := "user://opennova.cfg"
 
 var _state_config: TestFs.Snapshot
 var _run_dir := ""
@@ -1597,7 +1597,7 @@ func test_mods_apply_refuses_on_a_loose_root_and_keeps_the_mount() -> void:
 func _persisted_expansion_key() -> bool:
 	var config := ConfigFile.new()
 	return config.load(STATE_CONFIG_PATH) == OK \
-			and config.has_section_key(ResourceDirSettings.SECTION, "expansion")
+			and config.has_section_key("resources", "expansion")
 
 
 # D-MNU-14: the SP mission list rides the catalog — Co-op-family rows only,

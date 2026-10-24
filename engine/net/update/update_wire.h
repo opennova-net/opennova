@@ -112,4 +112,9 @@ struct Reply {
 // SIZE is Malformed. NeedMore until the header and the whole payload are buffered.
 Frame decode_reply(const uint8_t *data, size_t size, Reply &out, size_t &consumed);
 
+// Header-only decoding for a client receiving a large file in bounded socket chunks.
+// Complete means the header is valid; `consumed` is its length, `out.size` the payload
+// length to receive next. The caller enforces its request's payload bound before allocating.
+Frame decode_reply_header(const uint8_t *data, size_t size, Reply &out, size_t &consumed);
+
 } // namespace opennova::update

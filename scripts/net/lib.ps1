@@ -752,6 +752,8 @@ function Start-OpenNovaProcess {
             throw "Pass the endpoint port through -McpPort, not --mcp-port."
         }
     }
+    # Probe launches must never update their fixture or retail data directories.
+    $GameArguments = @($GameArguments) + @('--no-update')
     if ($McpPort -gt 0) {
         if (Test-GameMcpPortOpen -Port $McpPort) {
             throw "MCP port $McpPort is already answering; another game owns it."

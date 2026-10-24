@@ -6,6 +6,7 @@
 #include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
+#include <formats/update/update_wizard.h>
 
 #include <cerrno>
 #include <cstdlib>
@@ -110,6 +111,9 @@ LaunchFlags parse_launch_flags(const std::vector<std::string> &args) {
     f.loose_override = has_flag(args, kLaunchFlagLooseOverride);
     f.expansion = expansion_after(args);
     f.game = strutil::to_lower(value_after(args, kLaunchFlagGame));
+    f.game_given = has_flag(args, kLaunchFlagGame);
+    f.no_update = has_flag(args, kLaunchFlagNoUpdate);
+    f.after_update = has_flag(args, kLaunchFlagAfterUpdate);
     f.resource_dir = value_after(args, kLaunchFlagResourceDir);
     f.resource_dir_given = has_flag(args, kLaunchFlagResourceDir);
     f.loose_mission = value_after(args, kLaunchFlagLooseMission);
@@ -180,9 +184,27 @@ std::string launch_expansion(const LaunchFlags &flags, const std::string &fallba
 }
 
 std::string launch_game(const LaunchFlags &flags, const std::string &fallback) {
-    if (!flags.game.empty()) return flags.game;
+    if (!flags.game.empty()) return flags.game == "opennova" ? "jo" : flags.game;
     const std::string fb = strutil::to_lower(strutil::trim(fallback));
-    return fb.empty() ? std::string("jo") : fb;
+    return fb.empty() || fb == "opennova" ? std::string("jo") : fb;
+}
+
+std::string folder_product(const std::string &dir) {
+    std::string text;
+    if (!vfs_update_wizard_text(dir, text)) return {};
+    const std::string product = update::wizard_product(update::read_update_wizard(text).cmd);
+    return product.empty() ? std::string(kForeignFolder) : product;
+}
+
+std::string launch_product(const LaunchFlags &flags, const std::string &folder) {
+    if (flags.game_given) return flags.game;
+    if (folder.empty()) return "opennova";
+    return folder == kForeignFolder ? std::string() : folder;
+}
+
+bool launch_product_supported(const LaunchFlags &flags, const std::string &folder) {
+    const std::string product = launch_product(flags, folder);
+    return product == "opennova" || product == "jo" || product == "dfx2";
 }
 
 std::string boot_path_join(const std::string &dir, const std::string &name) {

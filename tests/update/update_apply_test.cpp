@@ -228,6 +228,23 @@ int test_refusals(const test_temp::TempDir &dir) {
 	TEST_EXPECT(!update::is_safe_row_name("a/b") && !update::is_safe_row_name("a\\b") &&
 			!update::is_safe_row_name(".") && !update::is_safe_row_name("") &&
 			update::is_safe_row_name("version.txt") && update::is_safe_row_name("jox01L.pff"));
+
+	// A bad target/row combination must be rejected before the earlier loose row writes.
+	update::SfsSection bad_order = package.sections[0];
+	const auto original = update::read_command_file(std::string(
+			bad_order.entries[0].data.begin(), bad_order.entries[0].data.end()));
+	TEST_EXPECT(original.has_value());
+	update::CommandFile invalid = *original;
+	invalid.rows.push_back({"UPD", update::CommandType::Loose, "new.txt", 0, 5, std::nullopt});
+	const std::string bad_text = update::write_command_file(invalid);
+	bad_order.entries[0].data.assign(bad_text.begin(), bad_text.end());
+	TEST_EXPECT(!update::apply_section(bad_order, "SYNPTR.CMD", io::os_path(tree), report, error));
+	TEST_EXPECT(read_text(tree + "/version.txt") == "Synthetic Product, V1.0.0.0; English");
+	TEST_EXPECT(error.find("archive target") != std::string::npos);
+	invalid.rows.back() = {"TARGET", update::CommandType::Target, ".", 0, 0, std::nullopt};
+	TEST_EXPECT(update::validate_commands(invalid, error));
+	TEST_EXPECT(!update::is_safe_row_name("NUL") && !update::is_safe_row_name("con.txt") &&
+			!update::is_safe_row_name("file.") && !update::is_safe_row_name("file "));
 	return 0;
 }
 
