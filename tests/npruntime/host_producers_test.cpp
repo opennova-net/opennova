@@ -2067,7 +2067,7 @@ bool check_radio_call_split_slots() {
 // [orig: Server_SetNetworkDelay @0x50CBC0 - the gates @0x50CBF0, SendFiltered(0x1B, 1)
 //  @0x50CC28, the text @0x50CC5A, SendFiltered(0x14, 1) @0x50CC9D;
 //  Server_ForceRoundEndAndClearState @0x5175A0 - the clears @0x5175AA / @0x5175B4 / @0x5175BE;
-//  Server_NotifyPlayerKicked @0x5082D0 - the gates @0x508316, the list @0x50838E..0x5083B5,
+//  Server_BanPlayerSlot @0x5082D0 - the gates @0x508316, the list @0x50838E..0x5083B5,
 //  CNapiNPConnection_QueueDisconnectEvent called @0x5083EE, sprintf @0x508411,
 //  Chat_AddMessageChannel2 called @0x508427, the dirty word @0x50842F]
 bool check_server_rows() {

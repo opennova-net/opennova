@@ -66,7 +66,7 @@ void ClientRuntime::mission_start_receive_pump(std::vector<std::vector<uint8_t>>
 //  @0x525495..0x525762 with their updates @0x525405..0x52571F, the receive @0x525784, the update
 //  @0x52578E, g_LocalTeam @0x525793, the first 0x2F @0x525836, the update @0x525889,
 //  NetClient_FlushAndSync @0x5258A2, the update @0x5258BC, @0x5258EA, the updates @0x525962 /
-//  @0x5259E7, @0x5259F1, the update @0x525A57, @0x525A61 (ahead of the model freeze @0x525A6E)]
+//  @0x5259E7, @0x5259F1, the update @0x525A57, @0x525A61 (ahead of Render_InitMissionTextures @0x525A6E, the model freeze inside it)]
 bool ClientRuntime::mission_start_first_leg(std::vector<std::vector<uint8_t>> &outbound,
 		const MissionStartPumpLegs &legs) {
 	if (joiner_ == nullptr || !joiner_->mission_start_first_loadout_owed()) return false;

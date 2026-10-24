@@ -1788,7 +1788,7 @@ void JoinerRole::sync_wire_collision_proxy_live(const replication::ClientEntityS
 // [orig: Physics_RaycastAgainstProximityList @0x4E4A30 (the test @0x4E4C33);
 //  Projectile_RaycastProximitySlots @0x4E5340 (the test @0x4E5767);
 //  Entity_BuildProximityLists_Pool01 @0x4B9340 (the bit-0 skips @0x4B9382 / @0x4B93E4);
-//  Entity_InitHardpoints @0x4417D0 (the mark @0x441A23)]
+//  Minefield_InitEntity @0x4417D0 (the mark @0x441A23)]
 uint32_t JoinerRole::wire_proxy_live_flags(const replication::ClientEntityState &row) {
 	uint32_t flags = row.state_flags_known ? (row.state_flags & world::kEntityFlagCarried) : 0u;
 	if (wire_handle::pool(row.handle) == wire_handle::kPoolItem)

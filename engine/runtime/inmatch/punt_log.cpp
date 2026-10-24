@@ -182,7 +182,7 @@ void ConnectLog::disable_at_server_connection() {
 }
 
 void ConnectLog::disable_at_client_session_key() {
-	// [orig: NapiNPClientMsg_HandleSessionKey @0x4297C0 - `cmp g_ConnectLogEnabled, 0`
+	// [orig: NapiNPClientMsg_HandleTickSeed @0x4297C0 - `cmp g_ConnectLogEnabled, 0`
 	//  @0x4297F1, "%s : NET CLIENT DISABLING CONNECTLOG BECAUSE WE DON'T NEED IT ANYMORE."
 	//  @0x7C5398 (the sprintf @0x42981F), the append @0x429831, g_ConnectLogEnabled = 0
 	//  @0x42983E; NapiLib_SetManagerCallbacks @0x429848 resets the manager's packet

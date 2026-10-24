@@ -18,7 +18,7 @@ extends Node
 ##  g_RoundOver && is_in_session from HUD_DrawOverlayPanels @0x5c0072): first pass
 ##  Game_CloseInGameScreens (ex Server_ResetBalanceCounters) + Game_InitRespawnState +
 ##  Overlay_ComputeStatFieldColumnLayout(40, 984); every pass
-##  UI_TeardownScene (ex sub_54E650) (the UI scene teardown) then HUD_DrawEndRoundStatsOverlay
+##  UI_ProcessMenuScreenFrame (ex sub_54E650) (the menu-screen pass, which closes the screen) then HUD_DrawEndRoundStatsOverlay
 ##  @0x5b7cd0; UI_OpenMenuScreen("stat.mnu", "STAT") once; the STAT show
 ##  callback StatScreen_ShowCallback (ex sub_562840) (populate + tab visibility); StatScreen_StatFilterTabHandler
 ##  @0x562140]
@@ -64,7 +64,7 @@ func setup(view: WorldView, ui_parent: Node, hud_presenter: GameHudPresenter) ->
 
 
 ## The shell seam: the announcement edge closes the deploy/armory screens (the
-## UI scene teardown every transition pass runs [orig: UI_TeardownScene @0x5b8674]);
+## UI scene teardown every transition pass runs [orig: UI_ProcessMenuScreenFrame @0x5b8674]);
 ## `opened`/`closed` report the STAT screen's cursor ownership through the two
 ## callables (the overlay phase is not a UI state: the world keeps the cursor).
 func connect_shell(deploy_presenter: DeployScreenPresenter, armory_presenter,
@@ -87,7 +87,7 @@ static func install(parent: Node, view: WorldView, ui_parent: Node,
 	return presenter
 
 
-# The UI scene teardown at the announcement [orig: UI_TeardownScene @0x5b8674].
+# The UI scene teardown at the announcement [orig: UI_ProcessMenuScreenFrame @0x5b8674].
 func _tear_down_screens() -> void:
 	if _deploy_presenter != null and _deploy_presenter.is_open():
 		_deploy_presenter.close()

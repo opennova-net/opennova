@@ -72,7 +72,7 @@ bool death_piece_draw(const DeathPiece &piece, const DeathPieceModel &model,
 //  (@ 0x57b5b4..0x57b5de, `jg` skips), the view depth against radius + fog
 //  (Math_FixedPointTransformPoint22 @ 0x57b5ef, `jge` @ 0x57b607), the
 //  viewport clip (Viewport_TransformAndClipPoint @ 0x57b614, 1 = culled) and
-//  the recorded projected radius dword_A784F0 @ 0x57b627; then
+//  the recorded projected radius g_MainViewportProjectedRadiusQ16 @ 0x57b627; then
 //  DeathPiece_RenderVisible @ 0x57b830 walks the rows at the frame's detail
 //  level]
 void OcclusionWorld::collect_death_piece_draws(const World &world,

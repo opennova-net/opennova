@@ -368,7 +368,7 @@ func test_the_menu_pumps_once_a_frame_after_the_events() -> void:
 # head (MainGame._process -> pump_screen_pass), ahead of the frame's net frame, so
 # the menu's own update pumps nothing: a press held over its frames and let go
 # clicks nothing until the screen pass runs [orig: Game_ProcessMainFrame
-# @ 0x5263f0 - UI_TeardownScene @ 0x52667b ahead of Client_ProcessNetworkFrame
+# @ 0x5263f0 - UI_ProcessMenuScreenFrame @ 0x52667b ahead of Client_ProcessNetworkFrame
 # @ 0x526692; Menu_UpdateFrame @ 0x5528a0 in the menus].
 func test_the_in_game_screens_pump_in_the_game_loops_screen_pass() -> void:
 	var dir := _make_dir()

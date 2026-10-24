@@ -1053,13 +1053,13 @@ void JoinerRole::run_tick(const TickInput &) {
 		}
 	}
 	// A link the connection lost with no exit reason (the silence reap, a record outside the
-	// description class) leaves only g_LoadingTimeoutFlag; the HUD's overlay pass then runs
+	// description class) leaves only g_NetDisconnectedFlag; the HUD's overlay pass then runs
 	// input action 3 once the round-over gate is up: exit reason 1 and the action's Exit
 	// Mission tone (its disconnect finds no connection). The frame's session leg plays the
 	// tone on the terminal frame (inmatch/mission_exit.h kExitMissionSoundset).
-	// [orig: HUD_DrawOverlayPanels @0x5C0060 - `cmp g_LoadingTimeoutFlag, 0` @0x5C00FC, `cmp g_RoundOver,
+	// [orig: HUD_DrawOverlayPanels @0x5C0060 - `cmp g_NetDisconnectedFlag, 0` @0x5C00FC, `cmp g_RoundOver,
 	//  0` @0x5C0105, Input_HandleActionBinding(3) @0x5C0118; CNapiNetwork_OnDisconnectedFromServer
-	//  @0x4C63D0 - g_LoadingTimeoutFlag = 1 @0x4C64A4, the description-class gate @0x4C6563;
+	//  @0x4C63D0 - g_NetDisconnectedFlag = 1 @0x4C64A4, the description-class gate @0x4C6563;
 	//  Input_HandleActionBinding @0x49AD40 - case 3: reason 1 @0x49AF26, the tone @0x49AF30]
 	if (runtime->session_lost() && runtime->mission_exit_reason() == kMissionExitNone &&
 			runtime->state().spawn_success_gate) {

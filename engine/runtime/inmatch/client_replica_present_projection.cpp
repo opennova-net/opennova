@@ -166,7 +166,7 @@ void project_client_replica_present_row(
 				entity, state, seat_specs, inputs, &blocking_seat))
 		return;
 	// The collapsed right-hand row: a blocking seat without the Player bit.
-	// [orig: Entity_BuildBoneTransformMatrices special row @0x4b1290]
+	// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - the special row @0x4B1F84..0x4B1F92]
 	const bool collapse_right_hand = entity.cls == EntityClass::Infantry && blocking_seat;
 
 	// An armed row presents the same simulation-owned primary channel whose

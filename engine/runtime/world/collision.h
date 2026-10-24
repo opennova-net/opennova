@@ -881,7 +881,7 @@ struct WirePersonCollisionProxy {
     // [orig: Physics_RaycastAgainstProximityList @0x4E4A30 (g_PersonProxEntity @0x4E4C2C,
     //  `test [eax+24h], 2000001h` @0x4E4C33); Projectile_RaycastProximitySlots @0x4E5340
     //  (g_DynProxEntity @0x4E5760, the test @0x4E5767); Entity_BuildProximityLists_Pool01
-    //  @0x4B9340 (the bit-0 skips @0x4B9382 / @0x4B93E4); Entity_InitHardpoints @0x4417D0,
+    //  @0x4B9340 (the bit-0 skips @0x4B9382 / @0x4B93E4); Minefield_InitEntity @0x4417D0,
     //  the lndm row's init (g_EntityClassEventCallbackTable @0x813000, the row @0x813198) -
     //  `or [esi+24h], 2000000h` @0x441A23]
     uint32_t live_flags = 0;
@@ -938,7 +938,7 @@ struct WireDynamicCollisionProxy {
     // [orig: Physics_RaycastAgainstProximityList @0x4E4A30 (g_PersonProxEntity @0x4E4C2C,
     //  `test [eax+24h], 2000001h` @0x4E4C33); Projectile_RaycastProximitySlots @0x4E5340
     //  (g_DynProxEntity @0x4E5760, the test @0x4E5767); Entity_BuildProximityLists_Pool01
-    //  @0x4B9340 (the bit-0 skips @0x4B9382 / @0x4B93E4); Entity_InitHardpoints @0x4417D0,
+    //  @0x4B9340 (the bit-0 skips @0x4B9382 / @0x4B93E4); Minefield_InitEntity @0x4417D0,
     //  the lndm row's init (g_EntityClassEventCallbackTable @0x813000, the row @0x813198) -
     //  `or [esi+24h], 2000000h` @0x441A23]
     uint32_t live_flags = 0;

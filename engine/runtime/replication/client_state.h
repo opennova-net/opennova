@@ -1431,7 +1431,7 @@ struct ClientState {
 	uint32_t session_rules_flags = 0;
 	// The session's KOTH time limit in minutes, the 0x08 record's second rule
 	// dword — a joiner's GAMEINFO team timers read this copy where the
-	// authority reads its own g_TimeLimitMinutes [orig: dword_A821C0, stored
+	// authority reads its own g_KothLimitMinutes [orig: dword_A821C0, stored
 	// @0x428218; read by HUD_DrawGameTimerOverlay @0x59CCEB, and by the Tab
 	// board's KOTH countdowns @0x423281 / @0x423a58].
 	int32_t session_time_limit_minutes = 0;

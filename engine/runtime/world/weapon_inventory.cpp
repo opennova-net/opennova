@@ -596,7 +596,7 @@ WeaponAmmoSeat entity_ammo_seat(const World &world, const Entity &entity) {
 
 int32_t weapon_seat_pool(const WeaponAmmoSeat &seat, int class_id, int32_t own) {
     // The infinite-ammo cheat's bit first: the class's carry cap, ahead of every seat leg
-    // (Server_ToggleDedicatedFlag @0x4DC9C5 from action 121 sets it) [orig:
+    // (Cheat_ToggleInfiniteAmmo @0x4DC9C5 from action 121 sets it) [orig:
     //  Entity_GetScoreValueBySlotType @0x5406E0 - `test g_DebugCheatFlags, 100h` @0x5406E3,
     //  `jz` @0x5406ED, `mov eax, g_AmmoClassMaxCarry[eax*4]` @0x5406F4]
     if (seat.cheat_carry_caps != nullptr) {

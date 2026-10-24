@@ -678,7 +678,7 @@ public:
 	// mission start (stage AwaitMissionStart); the embedder's load runs after the release and
 	// ends with push_mission_start_end.
 	// [orig: Game_StartMission @0x524360 - NapiClient_WaitForGameStart @0x524e29, the
-	//  loads @0x525495..0x525762, the first 0x2F @0x525836, the freeze @0x525a6e,
+	//  loads @0x525495..0x525762, the first 0x2F @0x525836, Render_InitMissionTextures (the freeze) @0x525a6e,
 	//  Player_InitPlayer @0x525bbc, the second 0x2F @0x525c2e, the 0x0B
 	//  @0x52620e..0x52624b, CNapiNetwork_PumpClientProtocolSend @0x526255]
 	bool mission_start_released() const {
@@ -702,7 +702,7 @@ public:
 	// render init and the model freeze (ClientRuntime::push_mission_start_first_loadout).
 	// False when the mission start is not released or the first was taken already.
 	// [orig: Game_StartMission @0x524360 - the loads @0x525495..0x525762, the first 0x2F
-	//  @0x525836, the freeze @0x525a6e]
+	//  @0x525836, Render_InitMissionTextures (the freeze) @0x525a6e]
 	bool take_mission_start_first_loadout(ProtocolMessage &out);
 	// Whether that take would run: the first leg's receive precedes the build, whose words it
 	// reads past that receive (D-NET-NEW-L2-54) [orig: Game_StartMission @0x524360 - the receive

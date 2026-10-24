@@ -4989,7 +4989,7 @@ bool run_a_console_action_dispatches_by_code() {
 // description class stores no exit reason; once the round-over gate is up the HUD's overlay
 // runs input action 3: exit reason 1 and its Exit Mission tone. With the gate down nothing is
 // stored by the joiner's tick.
-// [orig: HUD_DrawOverlayPanels @0x5C0060 - g_LoadingTimeoutFlag @0x5C00FC, g_RoundOver @0x5C0105,
+// [orig: HUD_DrawOverlayPanels @0x5C0060 - g_NetDisconnectedFlag @0x5C00FC, g_RoundOver @0x5C0105,
 //  Input_HandleActionBinding(3) @0x5C0118; CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 -
 //  @0x4C64A4, the description-class gate @0x4C6563]
 bool run_a_lost_link_at_round_over_runs_input_action_3() {

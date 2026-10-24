@@ -158,7 +158,7 @@ struct SimulationNetState {
 	// the model-list readout's (an instrument).
 	std::vector<opennova::inmatch::LoadedModelListEntry> mission_start_model_entries;
 	// The joiner's network type (JoinTarget::network_type; retail's
-	// g_NapiNPCtx.transport_mode on the client). Retained across rebuilds.
+	// g_NapiNPCtx.network_type on the client). Retained across rebuilds.
 	opennova::inmatch::NetworkType join_network_type = opennova::inmatch::NetworkType::Lan;
 	// The CD identity cookie (packed PUB* blob) for the 0x00 JOIN (codes 23/24/25).
 	// Empty for LAN. Retained across direct-load runtime rebuilds.

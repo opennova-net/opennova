@@ -14,7 +14,7 @@
 // restriction) needs is_in_session; ours reads the session fact off the socket mode at the
 // create (BuildFlags) and off the world at the join (the 0x0F), as the join's other reads do.
 // [orig: CNapiServerConfig_BuildFlags @0x4C4DC0 (`if (this->is_in_session)` @0x4C4DC4),
-//  reached through Server_SendInitialGameStateToPlayer @0x51BF95 -> ServerConfig_SerializeToPacket
+//  reached through Server_SendPlayerSlotStateFrame @0x51BF95 -> ServerConfig_SerializeToPacket
 //  @0x505D29; NetPacket_WriteWorldStateLoad0x0F `cmp g_RespawnRequiresTeamDead, 0` @0x502DB2,
 //  `cmp g_NapiNPCtx.is_in_session, 0` @0x502DBB, `or bl, 2` @0x502DC4, sent by
 //  Server_OnPlayerJoin @0x51A869]

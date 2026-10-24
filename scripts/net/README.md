@@ -868,7 +868,7 @@ OO, whose USE never seated).
 A session-level disconnect prints as `kind=disconnect` (full tag 0x103, the
 connection-description record), with `class`, `reason` (DPC, the code the
 client's exit-reason switch reads) and the two strings in hex. A host sends it to
-the player it kicks, reason 33 (`Server_NotifyPlayerKicked` ->
+the player it kicks, reason 33 (`Server_BanPlayerSlot` ->
 `CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0`). That is what a kick scenario
 expects.
 

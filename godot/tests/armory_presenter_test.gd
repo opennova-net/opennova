@@ -461,7 +461,7 @@ func test_multiplayer_open_uses_retail_server_class_allow_mask() -> void:
 	var host_options := HostSessionOptions.new()
 	host_options.game_type = 0x30020
 	# The host dialog's class words: only class 9 ALWAYS, so the mask is 1 << 9 (rifleman
-	# disallowed; engineer is next allowed). [orig: HostDialog_OnWeaponRestrictionListClick
+	# disallowed; engineer is next allowed). [orig: HostDialog_OnClassAvailabilityListClick
 	#  @0x55781A..0x557839]
 	host_options.class_availability = PackedInt32Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
 	sim.configure_host_session(host_options)

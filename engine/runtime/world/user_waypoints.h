@@ -55,7 +55,7 @@ void destroy_pool_row(World &world, EntityHandle handle);
 // destroyed row reads zeroed (0, 0, 0, ""), and a row the allocator re-took
 // reads its new occupant. The table itself never learns of a wipe, so the
 // entry keeps its slot, counts toward the 16 and still sends its C2S 0x4F.
-// [orig: Server_BroadcastChatToAllPlayers @0x549200 (entity +4 / +8 / +12 /
+// [orig: CMap_SendUserWaypoints @0x549200 (entity +4 / +8 / +12 /
 //  +244 through NetPacket_WriteTypeNameAndPosition @0x42b160),
 //  CMapWindow_HandleEvent @0x549dd7 / @0x549ba0 (entity +4); the only
 //  table writers are the append, the delete compaction and the clear;

@@ -139,7 +139,7 @@ std::string listing_failure(int code, int32_t networkconnecttype, const std::str
 // display memory (the device creation's). Off Windows read_display_adapter has no Direct3D, so
 // the description is retail's no-device "(null)" and the display memory 0; a failed DxDiag query
 // is 0 too (the device keeps the query's result only when it is not negative).
-// [orig: Game_ParseCommandLineAndInit @0x4A7310 - g_VideoMemoryMB stored @0x4A7E15;
+// [orig: Game_ParseCommandLineAndInit @0x4A7310 - g_TotalPhysMemoryMB stored @0x4A7E15;
 //  Game_InitSubsystems @0x4A6CD0 - Renderer_Init called @0x4A70F2, the serve-only test @0x4A710C
 //  skipping only Game_RunVideoTestDialog, Renderer_SetDisplayModeWithFallback called @0x4A722A;
 //  CGfxDevice_CreateDevice @0x67E5D0 - the query called @0x67EBEC, kept @0x67EBFD or 0 @0x67EC25]

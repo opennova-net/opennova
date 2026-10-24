@@ -666,7 +666,7 @@ void LobbyHttpFlow::merge_response_cookies(int code, const std::vector<std::stri
 //    Language and TimeZoneBias; then MyInstalledExpBits, always (D-NET-NEW-L9-32);
 //  - the connection-up's six, NWUID .. NWHWI (the live nwuid for the empty NWUID entry).
 // [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the junction word's test @0x4CF71B,
-//  CUIBrowser_AddFormField USEJUNCTION ("%ld" of 1) @0x4CF74E, JUNCTIONCODE "" @0x4CF76E, the
+//  CUIBrowser_SetCookie USEJUNCTION ("%ld" of 1) @0x4CF74E, JUNCTIONCODE "" @0x4CF76E, the
 //  +0x33C test @0x4CF773, CountryName @0x4CF796, Language @0x4CF7AB, TimeZoneBias @0x4CF7DE,
 //  MyInstalledExpBits @0x4CF811; CNapiGameSession_OnNovaWorldConnected @0x4D1570 - NWUID (the call
 //  @0x4D16A9), NWCDKIID @0x4D16ED, NWCDKIIDEXP1 @0x4D1702, NWPSSK @0x4D1724, NWUSID @0x4D1746,
@@ -895,7 +895,7 @@ LoginResult LobbyHttpFlow::login_remembered() {
 // See http_flow.h. The cookie is found as the browser's getter finds it (the jar walked, the name
 // compared case-insensitively) and copied to at most 0x1FF bytes, its NUL included where it fits.
 // [orig: UI_LoadPersistentLoginCredentials @0x557330 - @0x557344, 0x1FF pushed @0x557357,
-//  CEffect_IncludeHandler_Open called @0x557366, NapiNP_DecodeEncryptedKeyValue called @0x55738F
+//  CUIBrowser_GetCookieValue called @0x557366, NapiNP_DecodeEncryptedKeyValue called @0x55738F
 //  with 0x200-byte rooms (@0x557370 / @0x55737D), the NAME edit's text @0x5573C5, the
 //  REMEMBERLOGINDATA edit's text @0x557413; CookieJar_GetValueByName @0x64EA90]
 void LobbyHttpFlow::fill_remembered_login() {
@@ -917,7 +917,7 @@ void LobbyHttpFlow::fill_remembered_login() {
 	// cookie (the browser's form-field write, which updates the jar entry of that name in place)
 	// and shows no placeholder and no rememberlogindata (D-NET-NEW-L9-55).
 	// [orig: UI_LoadPersistentLoginCredentials @0x557330 - g_LoginButtonPressed tested @0x5573C7,
-	//  CUIBrowser_AddFormField(PERSISTENTREMEMBERLOGINDATA, "") called @0x557421, the jar's
+	//  CUIBrowser_SetCookie(PERSISTENTREMEMBERLOGINDATA, "") called @0x557421, the jar's
 	//  store (CookieJar::update) taking it]
 	if (browser_->login_button_pressed) {
 		jar().set("PERSISTENTREMEMBERLOGINDATA", std::string());
@@ -1379,7 +1379,7 @@ HostKeyResult LobbyHttpFlow::host_get(const std::string &url) {
 }
 
 // See http_flow.h: the Host's two jar entries, then the @HOST_URL@ open.
-// [orig: UI_HandleHostSessionStart @0x556D00 - CUIBrowser_AddFormField called @0x556F21 /
+// [orig: UI_HandleHostSessionStart @0x556D00 - CUIBrowser_SetCookie called @0x556F21 /
 //  @0x556F36, ahead of CUIScene_FindNamedValue called @0x556F46]
 HostKeyResult LobbyHttpFlow::host(const std::string &expansion) {
 	if (host_active()) return host_fail("host already in flight");

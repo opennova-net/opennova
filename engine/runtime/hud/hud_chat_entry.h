@@ -87,7 +87,7 @@ struct ChatEntryFacts {
 	// — NapiNPClientMsg_GameReset @0x42284e, NapiNPClientMsg_0x00F @0x42e396].
 	bool reset_hold = false;
 	bool team_game = false;          // [orig: g_GameType & 0x10000]
-	// The NovaWorld network type [orig: g_NapiNPCtx.transport_mode == 1].
+	// The NovaWorld network type [orig: g_NapiNPCtx.network_type == 1].
 	bool novaworld = false;
 	bool authority = false;          // [orig: g_NapiNPCtx.is_authority]
 	bool mp_session_peer = false;    // [orig: g_NapiNPCtx.is_mp_session_peer]

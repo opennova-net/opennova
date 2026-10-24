@@ -267,7 +267,7 @@ void test_a_dynamic_proxy_gates_on_the_copy_and_poses_the_live_mover() {
 // [orig: Physics_RaycastAgainstProximityList @0x4E4A30 (`test [eax+24h], 2000001h`
 //  @0x4E4C33); Projectile_RaycastProximitySlots @0x4E5340 (the test @0x4E5767);
 //  Entity_BuildProximityLists_Pool01 @0x4B9340 (the bit-0 skips @0x4B9382 / @0x4B93E4);
-//  Entity_InitHardpoints @0x4417D0 (`or [esi+24h], 2000000h` @0x441A23)]
+//  Minefield_InitEntity @0x4417D0 (`or [esi+24h], 2000000h` @0x441A23)]
 void test_a_row_flagged_since_the_build_is_passed_over() {
     {
         // A remote person on the rounds' path, carried since the build.

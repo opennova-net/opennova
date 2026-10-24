@@ -75,7 +75,7 @@ bool build_credentials_post_body(
 // one as ""). The browser's form-field write makes an entry of a name and a value, the rest null.
 // [orig: HttpCookie_Parse @0x658F60 - the six slots cleared @0x658F67..0x658F7C, the name [0]
 //  @0x658FB9, the value [1] @0x658FF8, the EXPIRES copy [2] @0x659090, PATH [3] @0x659111,
-//  DOMAIN [4] @0x659175, SECURE's 1 [5] @0x65919D; CUIBrowser_AddFormField @0x63A5D0 - the
+//  DOMAIN [4] @0x659175, SECURE's 1 [5] @0x65919D; CUIBrowser_SetCookie @0x63A5D0 - the
 //  slots past the value cleared @0x63A5E7..0x63A5F3]
 struct CookieEntry {
 	std::string name;
@@ -200,7 +200,7 @@ bool joi_endpoint_usable(const std::string &host_ip, long port);
 //  CUIBrowser_SendHTTPRequest @0x658A34 / GopherWebWidget_SendHttpPost @0x658C57 into
 //  CookieJar_GetEntriesForHost @0x64EA40; the by-name read CookieJar_GetValueByName @0x64EA90; the jar file's save
 //  CookieJar_SaveToFile @0x64EE60 (node+0 written @0x64EF16) and load
-//  CUIStringTable_LoadFromFile @0x64F290 (node+0 set @0x64F547)]
+//  CookieJar_LoadFromFile @0x64F290 (node+0 set @0x64F547)]
 std::string subnet_key(const std::string &host);
 
 // The menu browser's cookie jar: one list of entries (CookieEntry) for every host, every entry
@@ -210,7 +210,7 @@ std::string subnet_key(const std::string &host);
 class CookieJar {
 public:
 	// The browser's form-field write: an entry of `name` and `value`, the rest null, through the
-	// store. [orig: CUIBrowser_AddFormField @0x63A5D0 - CookieJar_UpdateFromURL called @0x63A689
+	// store. [orig: CUIBrowser_SetCookie @0x63A5D0 - CookieJar_UpdateFromURL called @0x63A689
 	//  with one entry]
 	void set(const std::string &name, const std::string &value);
 	// The store. A jar with no entry takes the batch whole, in order, duplicates and all (the
@@ -244,7 +244,7 @@ public:
 	//  @0x63C4A7]
 	void clear() { entries_.clear(); }
 	// A record of the jar file, appended as the loader appends it: no store, no match.
-	// [orig: CUIStringTable_LoadFromFile @0x64F290 - the node's entries grown by one and the
+	// [orig: CookieJar_LoadFromFile @0x64F290 - the node's entries grown by one and the
 	//  record copied in @0x64F5A7..0x64F5FF]
 	void append_loaded(CookieEntry entry) { entries_.push_back(std::move(entry)); }
 	// Concatenate every cookie whose name starts with `prefix` as [name\0][value\0]
@@ -270,7 +270,7 @@ private:
 // [orig: Game_ApplySessionSettingsToGlobals @0x551500 - the profile's name into
 //  g_LocalProfileName (Napi_CopyString called @0x551695), the NovaWorld transport test
 //  @0x551A53 / @0x551A6B and the menu test @0x551A79, the CHAR read through
-//  CEffect_IncludeHandler_Open (the browser's cookie getter) called @0x551A96 with the size 31
+//  CUIBrowser_GetCookieValue (the browser's cookie getter) called @0x551A96 with the size 31
 //  pushed @0x551A7F, the copy over g_LocalProfileName @0x551AB0..0x551AC1;
 //  CookieJar_GetValueByName @0x64EA90 - String_CompareNoCase over each entry's name, the copy
 //  of min(length + 1, 31) @0x64EB2E..0x64EB59; UI_JoinSelectedSession @0x5699D0 - the apply

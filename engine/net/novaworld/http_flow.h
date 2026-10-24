@@ -325,7 +325,7 @@ public:
 	//  sets g_UIFocusWnd @0x649C50]
 	// [orig: UI_LoadPersistentLoginCredentials @0x557330 (the ENABLE_BACK_BUTTON callback
 	//  UI_RegisterNWMultiplayerCallbacks registers @0x559844; the sign-in template's ACTIVATE) -
-	//  the rememberLogin_4D4 test @0x557344, the cookie's read (CEffect_IncludeHandler_Open called
+	//  the rememberLogin_4D4 test @0x557344, the cookie's read (CUIBrowser_GetCookieValue called
 	//  @0x557366, 0x1FF bytes), the decode called @0x55738F, the NAME edit's text (the call
 	//  @0x5573C5), STATIC_NW_PASSWORD_HIDDEN shown (CWnd_SetShown called @0x5573EA), the
 	//  REMEMBERLOGINDATA edit's text the cookie (the call @0x557413), the one-shot re-armed
@@ -407,9 +407,9 @@ public:
 	// global (NeedRequest), or Failed when no page set one (log in first: the login lands on the
 	// main page).
 	// [orig: UI_HandleHostSessionStart @0x556D00 - the NovaWorld connect type's branch
-	//  @0x556E3B..0x556E47, the menu's test @0x556F13, CUIBrowser_AddFormField "PLoad" g_EmptyStr
+	//  @0x556E3B..0x556E47, the menu's test @0x556F13, CUIBrowser_SetCookie "PLoad" g_EmptyStr
 	//  called @0x556F21 and "EXP" g_ExpansionName called @0x556F36, CUIScene_FindNamedValue
-	//  ("@HOST_URL@") called @0x556F46, UIScene_OpenUrl called @0x556F98; CUIBrowser_AddFormField
+	//  ("@HOST_URL@") called @0x556F46, UIScene_OpenUrl called @0x556F98; CUIBrowser_SetCookie
 	//  @0x63A5D0 - CookieJar_UpdateFromURL called @0x63A689 with one entry;
 	//  CookieJar_UpdateFromURL @0x64E630 - a same-named entry's value replaced @0x64E7FF, else
 	//  the entry appended @0x64E8F7..0x64E91C]

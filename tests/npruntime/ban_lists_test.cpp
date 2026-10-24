@@ -6,7 +6,7 @@
 // [orig: BanList_InitFromMission @0x5098F0; Server_InitNewRoundState @0x51CB25..0x51CB3B;
 //  BanList_SaveToFile @0x4FDD70; Server_HandleBanPuntCommand @0x50B380;
 //  Server_ValidatePlayerJoinRequest @0x512737 (29), @0x512771..0x512890 (30), @0x512A6C (31);
-//  CNapiServer_DisconnectPendingSpawnBans @0x4C9290]
+//  CNapiServer_KickDuplicatePcids @0x4C9290]
 
 #include <formats/banlist/address_ban_list.h>
 #include <formats/banlist/pcid_ban_list.h>
@@ -266,7 +266,7 @@ uint32_t session_join_punt_code(inmatch::NapiNPServerCtx &ctx, size_t index,
 // {1, 2, 0, 0, "N.C:SPTWNTBP[<its PCID>]", 0, ""} and marks it for teardown. The word off, or
 // a joiner whose cookie gave no PCID (retail refuses it 25 first, not ported), skips the leg.
 // [orig: Server_ValidatePlayerJoinRequest @0x512771..0x512890; NapiSession_CountPlayersByName
-//  @0x4C5E90; CNapiServer_DisconnectPendingSpawnBans @0x4C9290]
+//  @0x4C5E90; CNapiServer_KickDuplicatePcids @0x4C9290]
 void test_duplicate_pcid_refusal_and_kick() {
 	auto session = [](inmatch::NapiNPServerCtx &ctx, int32_t word) {
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);

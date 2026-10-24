@@ -385,7 +385,7 @@ void test_waypoint_wipe_is_exact() {
 // zeroed row until the allocator re-takes it. The squad-join push sends one
 // C2S 0x17 per non-null entry with the row's exact dwords, the wiped one
 // empty at the origin.
-// [orig: Server_BroadcastChatToAllPlayers @0x549200 ->
+// [orig: CMap_SendUserWaypoints @0x549200 ->
 //  NetPacket_WriteTypeNameAndPosition @0x42b160]
 void test_member_join_pushes_each_entry() {
 	Client c(true);

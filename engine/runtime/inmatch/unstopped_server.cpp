@@ -137,11 +137,11 @@ void teardown_unstopped_node(const NapiNPConnection &conn, const ServerLogs &log
 //  @0x4C9D7D; CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the line @0x6253D2, the
 //  state-5 burst @0x6254BF..0x6254D3, the client callback @0x6254E7;
 //  CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - the connect log's test ahead of
-//  @0x4C6486, active_connection_id @0x4C6495, g_LoadingTimeoutFlag @0x4C64A4, the strings
+//  @0x4C6486, active_connection_id @0x4C6495, g_NetDisconnectedFlag @0x4C64A4, the strings
 //  @0x4C64AE..0x4C6521, the latch @0x4C6535..0x4C6559, the switch's `dc == 2` @0x4C6563 and
 //  reason test @0x4C6571, its stores @0x4C65A2..0x4C677C and Input_QueueEvent called @0x4C67A4
 //  (36 from code 34's arm @0x4C6594..0x4C6596, else 3);
-//  CNapiGameSession_CreateServerConnection - g_LoadingTimeoutFlag 0 @0x4C9DF8;
+//  CNapiGameSession_CreateServerConnection - g_NetDisconnectedFlag 0 @0x4C9DF8;
 //  Session_ResetForStart - the exit reason cleared @0x5202CF; Game_StartMission - the exit
 //  reason cleared @0x525B16, Input_ResetAllState called @0x525C66; Input_ProcessFrame @0x49D520
 //  (the queue's one reader, Input_DequeueEvent called @0x49D5BA) - called by
@@ -194,7 +194,7 @@ UnstoppedNode *find_unstopped_node(UnstoppedServer &server, const PeerAddr &from
 //  @0x625D90..0x625DA2, has_pending_out @0x625DFF, DispatchMessage called @0x625EF1;
 //  CNapiNPConnection_DispatchMessage @0x622570 - the pre-handler +0x2E8 @0x6226B1 (unset by
 //  CNapiNetwork_Init @0x4CA4A0, @0x4CA902..0x4CA9CD), the handler called @0x6226EF, the unknown-tag
-//  callback +0x2EC @0x622703 (byte_4C4670, nop / retn); g_NPMsgInfoServer @0x82B5D8 (each
+//  callback +0x2EC @0x622703 (NapiNPServer_OnUnknownMessageStub, nop / retn); g_NPMsgInfoServer @0x82B5D8 (each
 //  handler's `cmp g_NapiNPCtx.is_authority, 0` at its head, e.g. NapiNPServerMsg_UpdateAck
 //  @0x5024B0, NapiNPServerMsg_0x00C @0x501C30; Server_ProcessClientRequestRespawn @0x519AF0 -
 //  g_RoundOver @0x519B00, is_authority @0x519B0C); PostMenu_RouteMissionExit @0x568460 -

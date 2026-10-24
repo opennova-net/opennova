@@ -914,7 +914,7 @@ struct HudSessionState {
 	int remaining_count = 0;             // g_ScoreboardDeadRowCount (the live count)
 	int row_count = 0;                   // g_ScoreboardRowCount
 	int spectator_count = 0;             // g_ScoreboardSpectatorCount
-	// T: g_TimeLimitMinutes on the authority, the S2C 0x64 copy dword_A821C0
+	// T: g_KothLimitMinutes on the authority, the S2C 0x64 copy dword_A821C0
 	// on a joiner [orig: HUD_DrawGameTimerOverlay @0x59CCDB..0x59CCEB].
 	int32_t time_limit_minutes = 0;
 	// Teams 1 and 2 of the 0x16 team table: score1 (movsx) and the KOTH hold

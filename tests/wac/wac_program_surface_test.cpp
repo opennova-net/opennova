@@ -240,7 +240,7 @@ static void test_direct_system_tick_uses_mutable_clock_and_restore_publishes_it(
 // whole, flips it on the authority (0 to 1, nonzero to 0); a VAR of that name, a partial
 // name, or a non-authority takes nothing.
 // [orig: Script_Compile @0x4F3927..0x4F3956 (the type 0x19 for CHEAT, the address
-//  0xC6B640 + 4 * i); WacScript_ToggleOverlayByName @0x4EE750 - @0x4EE757, the walk
+//  0xC6B640 + 4 * i); WacScript_ToggleCheatByName @0x4EE750 - @0x4EE757, the walk
 //  @0x4EE76D..0x4EE792, the flip @0x4EE7AE]
 static void test_console_toggles_a_cheat_by_name() {
     CompileEnv env;

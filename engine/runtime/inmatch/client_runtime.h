@@ -1016,7 +1016,7 @@ public:
 	// send), running the first leg too when the embedder did not (D-NET-NEW-L2-35).
 	// [orig: Game_StartMission @0x524360 - NetClient_FlushAndSync @0x5253EF, the loads
 	//  @0x525495..0x525762, the receive @0x525784, the first 0x2F @0x525836, the pumps
-	//  @0x5258A2 / @0x5258EA / @0x5259F1 / @0x525A61, the freeze @0x525A6E, the pump
+	//  @0x5258A2 / @0x5258EA / @0x5259F1 / @0x525A61, Render_InitMissionTextures @0x525A6E (the freeze), the pump
 	//  @0x525ACA, the zero @0x525B9F, the receive @0x525BD9, the second 0x2F @0x525C2E, the
 	//  0x0B @0x52624B, the send @0x526255]
 	// The legs are the role's and the embedder's, each at its point between the 0x1A's load

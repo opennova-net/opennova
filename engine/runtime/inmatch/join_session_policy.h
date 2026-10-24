@@ -32,7 +32,7 @@
 //  @0x56A59C / @0x56A67F, GetTickCount only @0x56A4E8 (the gate ping) and @0x56A7A2
 //  (the queue line's WAITTIMEDISPLAY); NapiClient_WaitForGameStart @0x42CC10 - its
 //  GetTickCount results @0x42CC4A / @0x42CC5D discarded, the returns on g_RoundOver
-//  @0x42CCA7, g_LoadingTimeoutFlag @0x42CCA9 (the disconnect's flag,
+//  @0x42CCA7, g_NetDisconnectedFlag @0x42CCA9 (the disconnect's flag,
 //  CNapiNetwork_OnDisconnectedFromServer @0x4C64A4), g_LoadingCancelFlag @0x42CCB1 and ESC
 //  @0x42CC77; Game_StartMission @0x524360 - the final wait @0x526295..0x5262E7 leaves on the
 //  world state @0x5262DF, the cancel flag @0x526295, ESC @0x5262AB or the disconnect flag

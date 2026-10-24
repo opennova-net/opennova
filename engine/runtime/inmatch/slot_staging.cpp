@@ -17,7 +17,7 @@ SlotStagingResult stage_slot_position(NapiNPServerCtx &ctx, int slot, double x, 
 		return out;
 	}
 	// The slot's row: an added player in that slot (the in-use byte +4).
-	// [orig: Server_NotifyPlayerKicked @0x508304..0x508332]
+	// [orig: Server_BanPlayerSlot @0x508304..0x508332]
 	const NapiNPConnection *holder = nullptr;
 	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (player_slot_active(conn) && static_cast<int>(conn.reply.player_slot) == slot) {

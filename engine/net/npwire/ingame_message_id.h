@@ -240,7 +240,7 @@ inline constexpr uint8_t WAYPOINT_SHARE = 0x17;
 // on every body that sender writes on a process's first mission; an opennova
 // host leaves it unhandled
 // (world/powerup-re.md "The weapon2 -pwrup family").
-// [orig: NapiNPServerMsg_HandleWeaponSpawn @0x51A020 (a misnomer); sender
+// [orig: NapiNPServerMsg_HandleWeaponDrop @0x51A020 (a misnomer); sender
 //  Entity_SpawnVehicleAtEntity @0x4DD920 (a misnomer)]
 inline constexpr uint8_t WEAPON_DROP = 0x18;
 inline constexpr uint8_t ENTITY_REMOVE_REQUEST = 0x19;

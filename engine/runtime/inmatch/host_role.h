@@ -189,7 +189,7 @@ public:
 	// [orig: Render_InitMissionTextures @0x587120 -
 	//  the dedicated test @0x58713C -> @0x58727A: PolyTrn_InitTextures @0x58727A,
 	//  CEffectWorld_ResolveMaterialsAndRebuildChallengeList @0x58728C; Game_StartMission - the
-	//  render arm's test @0x5259B4, the freeze's call @0x525A6E].
+	//  render arm's test @0x5259B4, the freeze's call, Render_InitMissionTextures @0x525A6E].
 	// [orig: Game_StartMission - the dedicated test (in session, the authority, no own client)
 	//  @0x524958..0x524979, CEffectSystem_Init @0x524980, CEffectManager_RegisterAllMaterials
 	//  @0x52499E, CEffectSystem_BuildTextureAtlases @0x5249B9, Precipitation_Reset @0x5249D4, all

@@ -173,7 +173,7 @@ struct DeathMapView {
 	// dead code, not ported.
 	// [orig: DeathScreen_UpdateShroudReveal @0x554730 — @0x554784..0x5547b4,
 	//  the dead zoom ease @0x5547ad..0x5547d8; per frame from
-	//  UI_TeardownScene @0x54e67c]
+	//  UI_ProcessMenuScreenFrame @0x54e67c]
 	void ease_frame();
 	// Event 1: stamp the window and hand back the view the pass draws.
 	// [orig: CMap_OverlayInputHandler @0x554332..0x5543b7]

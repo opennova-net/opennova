@@ -177,7 +177,7 @@ void test_an_armory_only_entry_needs_the_zone() {
 // The first mission's tables on the wire: the joiner's player-sync tail carries the S2C 0x66
 // (count, then each (index, value)) and the 0x76 (the class mask, u16 LE).
 // [orig: NetPacket_SerializeWeaponRestrictionTable @0x5102C0; NetPacket_WriteClassAllowMask
-//  @0x510350; Server_SendInitialGameStateToPlayer @0x51BBA0]
+//  @0x510350; Server_SendPlayerSlotStateFrame @0x51BBA0]
 bool tail_bodies(inmatch::NapiNPServerCtx &ctx, w::World &world, std::vector<uint8_t> &table,
 		std::vector<uint8_t> &mask) {
 	inmatch::NapiNPConnection &joiner = ctx.np_protocol.connection_list.emplace_back();

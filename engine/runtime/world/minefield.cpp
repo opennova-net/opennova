@@ -37,7 +37,7 @@ void fire(World &world, Entity &field, FixedVec3 p, uint8_t ammo_index) {
 
 } // namespace
 
-// [orig: Entity_InitHardpoints @ 0x4417D0]
+// [orig: Minefield_InitEntity @ 0x4417D0]
 void MinefieldSystem::initialize(World &world, Entity &entity, bool think_enabled,
         bool render_enabled, bool has_graphic, uint32_t small_ammo, uint32_t large_ammo,
         const std::string &small_marker, const std::string &large_marker,

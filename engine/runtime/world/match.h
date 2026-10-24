@@ -38,7 +38,7 @@ struct MatchRules {
     uint32_t game_time_minutes =
         0;                    // SET GameTime / g_RoundTimeLimitMinutes, despite the old host-field name
     uint32_t score_limit = 0; // SET KillLimit / g_ScoreLimit
-    uint32_t hill_limit_minutes = 0; // cfg koth_limit / g_TimeLimitMinutes
+    uint32_t hill_limit_minutes = 0; // cfg koth_limit / g_KothLimitMinutes
     uint32_t hill_delta = 5;         // cfg koth_delta / dword_24D2148
     uint32_t max_score = 0;          // SET MaxScore / g_KillLimit
     uint32_t flag_return_ticks = 210;
@@ -375,7 +375,7 @@ class Match {
     // MaxScore, KOTHLimit, ChangeTeamDelay and GameTime store the rule globals the round reads,
     // and GameTime restarts the round clock at `3720 * value` (a zero ends a timed round at its
     // next check). [orig: CAdminServer_HandleSetCommand @0x405A60 -- g_ScoreLimit, g_KillLimit,
-    // g_TimeLimitMinutes, g_CaptureDuration, g_RoundTimeLimitMinutes and g_RoundTimeRemaining]
+    // g_KothLimitMinutes, g_CaptureDuration, g_RoundTimeLimitMinutes and g_RoundTimeRemaining]
     MatchRules &live_rules() { return rules_; }
     void set_remaining_ticks(int32_t ticks) { remaining_ticks_ = ticks; }
     const MatchOutcome &outcome() const { return outcome_; }

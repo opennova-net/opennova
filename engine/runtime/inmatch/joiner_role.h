@@ -180,7 +180,7 @@ public:
 	//  the flag test @0x42CCB9..0x42CCBF, the return @0x42CCC1; Game_StartMission @0x524360 -
 	//  the call @0x524E29, the return-code tests @0x524E54..0x524E63, DialogSystem_Init
 	//  @0x525463, Game_ReloadEntityModelsAndCallbacks @0x52550E, Entity_InitAllFromModels
-	//  @0x52567F, the first 0x2F @0x525836, the freeze @0x525A6E, the 0x0B @0x52624B, the
+	//  @0x52567F, the first 0x2F @0x525836, Render_InitMissionTextures (the freeze) @0x525A6E, the 0x0B @0x52624B, the
 	//  send @0x526255, the final wait @0x526295..0x5262E5]
 	struct MissionStartLegs {
 		std::function<bool()> after_pass;

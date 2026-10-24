@@ -52,7 +52,7 @@ constexpr GUID kIidDxDiagProvider = {
 
 // DxDiag's display memory for the display device whose szDeviceIdentifier names `device`: its
 // szDisplayMemoryEnglish's leading number, truncated; 0 with no such device or no number.
-// [orig: CGfxDevice_QueryVideoDriverVersion @0x67C820 - CoCreateInstance called @0x67C890,
+// [orig: CGfxDevice_QueryDxDiagDisplayMemory @0x67C820 - CoCreateInstance called @0x67C890,
 //  Initialize {16, 111, FALSE} called @0x67C8D3, GetRootContainer called @0x67C8EC,
 //  GetChildContainer("DxDiag_DisplayDevices") called @0x67C90A, GetNumberOfChildContainers called
 //  @0x67C927; per child EnumChildContainerNames called @0x67C965 (256 characters),
@@ -193,7 +193,7 @@ bool read_retail_machine_inputs(RetailMachineInputs &out) {
 }
 
 // [orig: CGfxDevice_GetAdapterDescription @0x67C590 - the adapter count test @0x67C59F,
-//  GetAdapterIdentifier called @0x67C5B8; CGfxDevice_QueryVideoDriverVersion @0x67C820 - the
+//  GetAdapterIdentifier called @0x67C5B8; CGfxDevice_QueryDxDiagDisplayMemory @0x67C820 - the
 //  rendering adapter's identifier, GetAdapterIdentifier called @0x67C87C; CGfxDevice_CreateDevice
 //  @0x67E5D0 - CoInitialize called @0x67EBE3, CoUninitialize called @0x67EBF3]
 bool read_display_adapter(uint32_t adapter, HardwareIdentity &out) {

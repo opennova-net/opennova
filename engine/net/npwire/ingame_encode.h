@@ -73,6 +73,7 @@ inline bool compress_folds_to_zero(int32_t value) {
 // compress call writes a zero word whose shift bits come from that address.
 // [orig: Server_SendEntityStateToPlayer @0x517BA0 - the writer's base @0x517C2C;
 //  g_NapiMsgPayloadBuf @0xB5BBB0]
+// Only the address's low nibble reaches the wire (the zero word's shift bits).
 inline constexpr uint32_t kNapiMsgPayloadBufAddress = 0x00B5BBB0u;
 
 // Encode a S2C 0x20 bulk pool-3 sync body (§5.12) — the exact bytes

@@ -495,7 +495,7 @@ void ObjectModel::apply_presentation_layer_below(Node *p_root) {
 
 // The composed avatar is ONE retail entity submission: the head and the body
 // draw inside the same Terrain_RenderSectorEntitiesBySide iteration (the head
-// submit @0x5c7ffc, the body submit @0x5c8020) under the lighting block the
+// submit @0x5c7ffc, the body submit @0x5c8039) under the lighting block the
 // frame set once around that wave (CTerrainRenderer_BuildLightingShaderConstants(1)
 // @0x5c9511 / @0x5c95f8), so the wave lane stamped here reaches every linked
 // part; add_presentation_link seeds a part linked after the flag was set.

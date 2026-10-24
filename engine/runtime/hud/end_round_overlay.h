@@ -12,7 +12,7 @@
 //  while g_RoundOver && is_in_session from HUD_DrawOverlayPanels @0x5c0072):
 //  first pass Game_CloseInGameScreens (ex Server_ResetBalanceCounters) + Game_InitRespawnState +
 //  Overlay_ComputeStatFieldColumnLayout(40, 984) + g_EndRoundOverlayFirstPass = 1; every
-//  pass UI_TeardownScene (ex sub_54E650) (the UI scene teardown) then HUD_DrawEndRoundStatsOverlay
+//  pass UI_ProcessMenuScreenFrame (ex sub_54E650) (the menu-screen pass, which closes the screen) then HUD_DrawEndRoundStatsOverlay
 //  @0x5b7cd0; once g_ScoreboardDirty && now - t0 >= 6000 ms ->
 //  UI_OpenMenuScreen("stat.mnu", "STAT") once (g_EndRoundStatScreenOpened)]
 
@@ -136,7 +136,7 @@ inline constexpr int kEndRoundStatScreenDelayMsec = 6000;
 //  (g_EndRoundTransitionStartMs) is stamped by the 0x1D handler NapiNPClientMsg_0x01D
 //  @0x430a4b (Server_ProcessRoundEnd @0x516912 on the host) and the
 //  first pass here stamps g_EndRoundOverlayFirstPass; every PRE-STAT pass tears the UI scene
-//  down (UI_TeardownScene @0x5b8674) and draws the overlay; g_ScoreboardDirty
+//  down (UI_ProcessMenuScreenFrame @0x5b8674) and draws the overlay; g_ScoreboardDirty
 //  && now - t0 >= 6000 ms opens stat.mnu once (g_EndRoundStatScreenOpened, one more
 //  teardown on the open pass @0x5b862a); once that byte is set the transition
 //  returns immediately each frame (the locret @0x5b864a) — no teardown, no

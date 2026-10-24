@@ -12,7 +12,7 @@ namespace opennova {
 // (the decoder also handles a variable-size header mode activated when the
 // first dword is zero, with header size stored at byte offset +9. The port does
 // not emit that form, but the decoder accepts it and retains retail's four-byte
-// fallback. The retail Jointops.exe twin of this envelope is not yet located.)
+// fallback. The retail Jointops.exe twin of the encoder is [orig: NapiSocket_EncodePacket @0x62C8F0].)
 //
 // Wire format (4-byte header mode):
 //   offset size   meaning

@@ -24,7 +24,7 @@ extends GutTest
 # RESOLVABLE non-zero type id so they survive the present's `type_id != 0` filter — with the old
 # item_id 0 they were invisible by construction, which is why the joiner only ever saw the host
 # player. The witnessed initial-state burst streams EVERY entity pool to the joiner at world-load
-# [orig: Server_SendInitialGameStateToPlayer @0x51bba0]: pool-2 statics (0x10), pool-1 (0x0D, omitted
+# [orig: Server_SendPlayerSlotStateFrame @0x51bba0]: pool-2 statics (0x10), pool-1 (0x0D, omitted
 # by our host — D-NET-97), pool-0 dynamics (0x0C), pool-3 markers (0x20). Terrain/environment/tile
 # resources are resolved from the exact 0x0B header and optional 0x45 overlay; every allocated
 # entity-pool row is streamed rather than reconstructed from a local BMS body.
@@ -456,7 +456,7 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 	host_options.max_players = 4
 	# The host dialog's class words, not a mask: ALWAYS (1) for classes 0, 2, 4, 6 and 8,
 	# NEVER (0) for the rest; the session's first mission builds the S2C 0x76 mask 0x0155.
-	# [orig: HostDialog_OnWeaponRestrictionListClick @0x55781A..0x557839;
+	# [orig: HostDialog_OnClassAvailabilityListClick @0x55781A..0x557839;
 	#  Game_ApplySessionSettingsToGlobals @0x551882..0x551996]
 	host_options.class_availability = PackedInt32Array([1, 0, 1, 0, 1, 0, 1, 0, 1, 0])
 	host.configure_host_session(host_options)
@@ -912,7 +912,7 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 			"the real joiner name-match path binds local L's body ADM")
 
 	# JOINER sees the host's full ENTITY world: the witnessed initial-state burst streams EVERY entity
-	# pool to a joining player [orig: Server_SendInitialGameStateToPlayer @0x51bba0, sync-state 4] —
+	# pool to a joining player [orig: Server_SendPlayerSlotStateFrame @0x51bba0, sync-state 4] —
 	# phase 1 pool-2 statics under S2C 0x10, phase 2 pool-1 under 0x0D, phase 3 pool-0 dynamics (AI +
 	# players) under 0x0C, phase 4 pool-3 markers under 0x20 (each bounded by Pool_GetUsedCount(idx)).
 	# So the joiner's present carries the host AI organics AND the pool-2 building. What is not an

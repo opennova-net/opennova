@@ -394,7 +394,7 @@ std::vector<Entry> window_entries() {
 	out.push_back(part_toggle<&mnu::Window::join_button, mnu::WindowType::Button>("join_button"));
 	out.push_back(part_toggle<&mnu::Window::search_button, mnu::WindowType::Button>("search_button"));
 	// The GLB_TABLE's own elements [orig: CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dac0; the widgets of
-	// CLanWnd_Construct @ 0x65ec30].
+	// CGLBTableWnd_Construct @ 0x65ec30].
 	out.push_back(flag("glb_playerlist", [](void *r) { return &W(r).glb_playerlist; }));
 	out.push_back(part_toggle<&mnu::Window::glb_table, mnu::WindowType::Table>("glb_table"));
 	out.push_back(part_toggle<&mnu::Window::glb_info_player_details, mnu::WindowType::Table>("glb_info_player_details"));

@@ -1050,7 +1050,7 @@ uint32_t ammo_id(const world::World &world, const char *name) {
 }
 }
 
-// [orig: Entity_InitHardpoints @ 0x4417D0]
+// [orig: Minefield_InitEntity @ 0x4417D0]
 // lndm's bone callback is BoneCallback_Identity @ 0x4E20A0. Its model-global
 // userpoints therefore retain the authored rest position through the bone walk.
 void resolve_minefields(world::World &world, const def::DefItemsFile &items,
@@ -1065,7 +1065,7 @@ void resolve_minefields(world::World &world, const def::DefItemsFile &items,
         // ignoring case; the render is the lndm bone row, bound by the render
         // tag. [orig: EntityDef_LookupClassCallbacks stricmp @0x407DD8, row
         // 'lndm' @0x813198 -> Entity_LandmineThink @0x441A40 /
-        // Entity_InitHardpoints @0x4417D0; row 'lndm' @0x82CFC0]
+        // Minefield_InitEntity @0x4417D0; row 'lndm' @0x82CFC0]
         const bool think = strutil::iequals(def.ai_function, "lndm");
         const bool render = mission::uses_submodel_renderer(def.render_function);
         if (!think && !render) return;

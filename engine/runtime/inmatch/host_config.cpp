@@ -229,7 +229,7 @@ void apply_block_session_settings(GameConfig &config, const gamecfg::GameCfg &cf
 	config.auto_balance_trigger_difference = cfg.autobalance_on_recycle_diff_max; // @0x551BEB
 
 	// The rule globals [orig: Game_ApplySessionSettingsToGlobals]: g_RoundTimeLimitMinutes
-	// from `time_limit` @0x551CD2, g_TimeLimitMinutes from `koth_limit`
+	// from `time_limit` @0x551CD2, g_KothLimitMinutes from `koth_limit`
 	// @0x551CD8..0x551CDF, g_ReplayEnabled @0x551CBA, g_MaxTeamLives @0x551B67,
 	// g_ScoreLimit from `max_kills` and g_KillLimit from `max_score`
 	// @0x551B6D..0x551B8C, g_KothDelta @0x551CF4, g_FlagReturnTime2 @0x551CFE,

@@ -591,7 +591,7 @@ public:
 	// UI_DispatchMouseEvent @ 0x63ab00], and the pump (hover, the click, the window sounds) runs once
 	// a frame after them over the last message's point and button (pump_mouse) [orig:
 	// Menu_UpdateFrame @ 0x5528a0, Game_PumpWindowMessages @ 0x5528d3 then CUIScene_EndFrame
-	// @ 0x5528de; in a match Game_ProcessMainFrame @ 0x526608 then UI_TeardownScene @ 0x54e668; the
+	// @ 0x5528de; in a match Game_ProcessMainFrame @ 0x526608 then UI_ProcessMenuScreenFrame @ 0x54e668; the
 	// join screen's MultiPlayer_JoinSessionStateMachine @ 0x56a342].
 	//
 	// A move: the point and the left button the pump reads [orig: g_MouseState, and input_mask, the

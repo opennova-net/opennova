@@ -58,7 +58,7 @@ int client_binding_by_crc(int32_t crc);
 // Client_ProcessLocalCommand's seams: what its arms reach outside the line.
 struct ClientLocalCommandSeams {
 	bool in_session = false; // g_NapiNPCtx.is_in_session: the binding CRC arm runs out of one
-	// WacScript_ToggleOverlayByName: true when a CHEAT the line names flipped (the authority's
+	// WacScript_ToggleCheatByName: true when a CHEAT the line names flipped (the authority's
 	// alone, wac::WacSystem::toggle_cheat); unset: no toggle takes a line.
 	std::function<bool(const std::string &line)> toggle_overlay;
 	// KeyBinding_DumpAllToFile (keylist.key, deleted then opened "a+t": the whole text);

@@ -1533,7 +1533,7 @@ int main() {
 	// refused on the frame the seed lands (tick == floor), then admitted; a
 	// disarm opens the 3-period grace, then refuses; a zero seed parks the
 	// clock and refuses. Single player has no gate.
-	// [orig: NapiNPClientMsg_HandleSessionKey @0x4297c0;
+	// [orig: NapiNPClientMsg_HandleTickSeed @0x4297c0;
 	//  Entity_FireWeaponAndSendPacket @0x42be12..0x42be44 -> PlayerSlot_IsActive
 	//  @0x4FC760; Server_SendRandomSeedToPlayer @0x5101A0]
 	{

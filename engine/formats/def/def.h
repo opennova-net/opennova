@@ -811,7 +811,7 @@ typedef struct DefItemDef {
     /* 'input_function <class>': the input class row -- null / troop / tank. Its
        first callback is the key handler, its second the mounted first-person
        camera the carrier leg calls. [orig: ItemDef_ParseProperty @0x49F650 ->
-       def+0x168; rows @0x829DA8, resolved by Entity_LookupPhysicsCallbacks
+       def+0x168; rows @0x829DA8, resolved by EntityDef_LookupInputCallbacks
        @0x497910 into def+0x170 / def+0x174] */
     char input_function[16];
     /* 'virtualdisplay <model> <userpoint>': the cockpit model the `tank` render

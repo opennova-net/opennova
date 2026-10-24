@@ -419,7 +419,7 @@ struct PersonalWeaponSlot : WeaponSlotState {
 };
 
 // The lndm entity overlay. Zero-filled, unauthored slots still participate.
-// [orig: Entity_InitHardpoints @ 0x4417D0; Entity_LandmineThink @ 0x441A40]
+// [orig: Minefield_InitEntity @ 0x4417D0; Entity_LandmineThink @ 0x441A40]
 struct MinefieldState {
     static constexpr int kSlots = 14;
     bool initialized = false;

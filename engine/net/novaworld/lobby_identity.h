@@ -39,7 +39,7 @@ bool read_retail_machine_inputs(RetailMachineInputs &out);
 // DeviceIdentifier, its szDisplayMemoryEnglish's leading number, between CoInitialize and
 // CoUninitialize. False, leaving `out` alone, where the platform has no Direct3D 9.
 // [orig: CGfxDevice_GetAdapterDescription @0x67C590; CGfxDevice_CreateDevice @0x67E5D0 -
-//  CoInitialize called @0x67EBE3, CGfxDevice_QueryVideoDriverVersion called @0x67EBEC (the adapter
+//  CoInitialize called @0x67EBE3, CGfxDevice_QueryDxDiagDisplayMemory called @0x67EBEC (the adapter
 //  the cfg's hw3d_deviceno, dword_B4C22C: Renderer_SetDisplayModeWithFallback @0x587370 loads it
 //  @0x5873FB and pushes it @0x58741E), CoUninitialize called @0x67EBF3]
 bool read_display_adapter(uint32_t adapter, HardwareIdentity &out);

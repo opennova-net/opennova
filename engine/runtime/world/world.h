@@ -740,7 +740,7 @@ struct SessionRules {
     // cheat row 114's input action 121 toggles it (inmatch::Role::dispatch_record), out of a
     // session only; a fresh mission's world starts clear, as Game_StartMission's store of the
     // word leaves it.
-    // [orig: Server_ToggleDedicatedFlag @0x4DC9C0 - `xor g_DebugCheatFlags, 100h` @0x4DC9C5;
+    // [orig: Cheat_ToggleInfiniteAmmo @0x4DC9C0 - `xor g_DebugCheatFlags, 100h` @0x4DC9C5;
     //  Entity_GetScoreValueBySlotType @0x5406E0 - the test @0x5406E3, g_AmmoClassMaxCarry
     //  @0x5406F4; WeaponSlot_CanFire @0x541BA0 - the test @0x541CCF; Game_StartMission
     //  @0x525B25]

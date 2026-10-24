@@ -11,7 +11,7 @@
 namespace opennova::replication {
 
 // The witnessed transport mode a connection carries [orig: CGameSession_SetConnectionMode
-// @0x4c49f0 -> g_NapiNPCtx.transport_mode +0x50; CNapiNetwork_SetTransportMode @0x4c8750
+// @0x4c49f0 -> g_NapiNPCtx.network_type +0x50; CNapiNetwork_SetTransportMode @0x4c8750
 // opens a socket only for 2/3/4 — mode 1 is in-process]. A connection's mode IS the
 // original's mode, not an invented type (ADR 0011).
 enum class TransportMode : uint8_t {

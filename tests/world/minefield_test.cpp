@@ -1,4 +1,4 @@
-// [orig: Entity_InitHardpoints @ 0x4417D0; Entity_LandmineThink @ 0x441A40]
+// [orig: Minefield_InitEntity @ 0x4417D0; Entity_LandmineThink @ 0x441A40]
 #include <base/io/rotating_prng.h>
 #include <base/resource_index/resource_index.h>
 #include <runtime/mission/item_traits.h>

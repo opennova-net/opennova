@@ -193,7 +193,7 @@ inline int attachment_lod_index(int parent_lod_index, int lod_count) {
 // the frame-scaled LOD input — is under 2 px (Q16.16 0x20000).
 // [orig: BoneCallback_org0_World @ 0x4e3cf6..0x4e3d4b — the state test
 //  @ 0x4e3cfe, Viewport_TransformAndClipPoint @ 0x4e3d39 with the radius
-//  @ 0x4e3d2b, `cmp dword_A784F0, 20000h` @ 0x4e3d41]
+//  @ 0x4e3d2b, `cmp g_MainViewportProjectedRadiusQ16, 20000h` @ 0x4e3d41]
 // The gate runs in every subscene that draws the person, through that
 // subscene's own projection: the callback projects through
 // g_ViewportViewMatrixFixed and g_MainViewport, which each

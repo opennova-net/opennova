@@ -389,7 +389,7 @@ func test_host_spectator_options_and_live_f3_transition() -> void:
 
 # The host dialog writes the cfg's ten class words (0 NEVER, 1 ALWAYS, 2 MISSION), never a
 # mask; the mask is what the session's first mission builds from them, a MISSION word
-# enabled under the mission entry's 0x3FF. [orig: HostDialog_OnWeaponRestrictionListClick
+# enabled under the mission entry's 0x3FF. [orig: HostDialog_OnClassAvailabilityListClick
 #  @0x55781A..0x557839; Game_ApplySessionSettingsToGlobals @0x551882..0x551996]
 func test_host_class_words_roundtrip_to_the_ui_seam() -> void:
 	var sim := Simulation.new()

@@ -90,7 +90,7 @@ uint32_t Server_ValidateJoinAccount(NapiNPServerCtx &ctx, NapiNPConnection &conn
 // boundary, `quality_boundary` false): each flagged remote connection latches {DS its role, DC 2,
 // 0, 0, "N.C:SPTWNTBP[<its PCID>]", DPC 0, ""} when no record is latched yet and is marked for the
 // next protocol pump's teardown. A misnomer in the IDB: no spawn or ban is involved. [orig:
-// CNapiServer_DisconnectPendingSpawnBans @0x4C9290 — the walk over ctx+0x24
+// CNapiServer_KickDuplicatePcids @0x4C9290 — the walk over ctx+0x24
 //  @0x4C92CB..0x4C93F3, the flag @0x4C92F5, the connection and not-local tests
 //  @0x4C92FE..0x4C930F, sprintf("N.C:SPTWNTBP[%s]", node+0x250) @0x4C9333..0x4C9340, the role
 //  @0x4C9355..0x4C9375, DC 2 @0x4C938B, the latch-if-!valid @0x4C93BB..0x4C93D5,
@@ -103,7 +103,7 @@ void Server_KickDuplicatePcids(NapiNPServerCtx &ctx, bool quality_boundary);
 // host's own is punted, reason 33 with Server/STRSRV18 as its detail; then the host's SYSTEM
 // ring gets "<STRSRV18> <name>" in palette[0] white, and the dirty word is set for the
 // shutdown's save. False when the gates refuse or the slot is not active.
-// [orig: Input_HandleActionBinding @0x49AD40 - case 107 @0x49BBA5; Server_NotifyPlayerKicked
+// [orig: Input_HandleActionBinding @0x49AD40 - case 107 @0x49BBA5; Server_BanPlayerSlot
 //  @0x5082D0 - the gates @0x5082D9..0x508316, the row @0x508322, +4 @0x50832E, the address
 //  +0x1C -> +0xC4 @0x508338..0x508349, the append @0x508358..0x5083B5 (the 512 shift
 //  @0x50835E..0x50838A), STRSRV18 @0x5083C6, +5 @0x5083CE, +0x178E1 @0x5083D4 (no writer on

@@ -94,7 +94,7 @@ inline constexpr int kReflectionRttSize = 512;
 // [orig: Terrain_RenderSectorEntities hands Render_SectorEntity the list entry's
 //  stored radius (@0x5C7C99 / @0x5C7D13), which the sub-pixel floor
 //  (@0x5C42D8) and Model_SelectRlodLevel (@0x5C42EB) read; the collectors store
-//  dword_A784F0 per entry (@0x5C71C5..0x5C71D8, @0x5C903B..0x5C904E);
+//  g_MainViewportProjectedRadiusQ16 per entry (@0x5C71C5..0x5C71D8, @0x5C903B..0x5C904E);
 //  Render_MainScene sets the viewport to the target (Render_SetViewport
 //  @0x5C1614) ahead of the collect's Viewport_BuildProjectionMatrix @0x5C16E8 over
 //  the live block; Terrain_CollectVisibleEntitiesForReflection @0x5C90A0 writes

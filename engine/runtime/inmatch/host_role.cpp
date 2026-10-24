@@ -300,7 +300,7 @@ GameConfig singleplayer_game_config(uint32_t game_type,
 	// mp_difficulty, host_config.cpp). Our SP stream queues at the bring-up,
 	// ahead of the mission start [orig: Game_StartMission @0x525CDD / @0x525CFA;
 	// ServerConfig_SerializeToPacket's live read @0x505D1C, from
-	// Server_SendInitialGameStateToPlayer @0x51BF95 in Server_TickUpdate].
+	// Server_SendPlayerSlotStateFrame @0x51BF95 in Server_TickUpdate].
 	config.config_bytes[6] = static_cast<uint8_t>(world::mission_start_difficulty(game_type));
 	if (profile != nullptr) {
 		// Outside a session the restriction words come from the current

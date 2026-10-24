@@ -306,7 +306,7 @@ uint32_t session_point_limit(int32_t cfg_limit) {
 
 uint32_t session_koth_limit_minutes(int32_t cfg_limit) {
     // [orig: Game_ApplySessionSettingsToGlobals @0x551CD2..0x551CDF
-    // (g_TimeLimitMinutes from kothLimit_474)]
+    // (g_KothLimitMinutes from kothLimit_474)]
     return cfg_limit <= 0 ? kSessionNoKothLimitMinutes : static_cast<uint32_t>(cfg_limit);
 }
 

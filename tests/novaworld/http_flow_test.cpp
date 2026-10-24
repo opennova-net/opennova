@@ -237,7 +237,7 @@ static bool test_login_success_concrete() {
 	// D-NET-NEW-L9-26: the identity set is in the jar before the web lobby's first request, which
 	// carries it in its order (the live nwuid for the empty NWUID), and every cookie a page sets
 	// follows it in the later Cookie lists, the UDP statements' var-list included.
-	// [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1570 - CUIBrowser_AddFormField @0x4D16A9..
+	// [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1570 - CUIBrowser_SetCookie @0x4D16A9..
 	//  @0x4D17AA; CNapiSession_ReadLocaleInfo @0x4CE390 - the jar's walk @0x4CE3E5]
 	// The cookie lines follow the menu browser's four GET headers (D-NET-NEW-L9-31).
 	// [orig: CUIBrowser_SendHTTPRequest @0x658840 - @0x658969, @0x658979, @0x658989, @0x6589D5]
@@ -812,7 +812,7 @@ static bool test_browser_request_host() {
 // end "PERSISTENTREMEMBERLOGINDATA, PLoad, EXP", their ClientHostRequest Cookie lists carry
 // PERSISTENTREMEMBERLOGINDATA, PLoad "" and EXP "" at vars 30..32 and then the host leg's 15, and
 // no response sets either. A second host leg updates both in place.
-// [orig: UI_HandleHostSessionStart @0x556D00 - CUIBrowser_AddFormField called @0x556F21 /
+// [orig: UI_HandleHostSessionStart @0x556D00 - CUIBrowser_SetCookie called @0x556F21 /
 //  @0x556F36, ahead of CUIScene_FindNamedValue called @0x556F46; CookieJar_UpdateFromURL
 //  @0x64E630 - the in-place value @0x64E7FF, the append @0x64E8F7..0x64E91C]
 static bool test_host_leg_cookies() {

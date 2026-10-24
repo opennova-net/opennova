@@ -306,7 +306,7 @@ int64_t wow64_display_memory_mb(int64_t display_memory_mb) {
 	return display_memory_mb > kWow64DisplayMemoryCapMb ? kWow64DisplayMemoryCapMb : display_memory_mb;
 }
 
-// [orig: CGfxDevice_QueryVideoDriverVersion @0x67C820 - `shl eax, 14h` @0x67CA5C;
+// [orig: CGfxDevice_QueryDxDiagDisplayMemory @0x67C820 - `shl eax, 14h` @0x67CA5C;
 //  CGfxDevice_CreateDevice @0x67E5D0 - @0x67EBFB / @0x67EBFD / @0x67EC25;
 //  CNapiGameSession_OnNovaWorldConnected @0x4D1570 - `shr eax, 14h` @0x4D1771]
 uint32_t nwhwi_display_memory_mb(int64_t display_memory_mb) {

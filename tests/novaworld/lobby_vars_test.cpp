@@ -409,7 +409,7 @@ int main() {
 	// ((min(total, 0x7FFFFFFF) + 0xC0000) >> 20 in 32 bits), game.cfg's display mode and the
 	// renderer's desktop. Values derived from the cited arithmetic.
 	// [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1570 - sprintf called @0x4D178F, `shr`
-	//  @0x4D1771; CGfxDevice_QueryVideoDriverVersion @0x67C820 - `shl` @0x67CA5C;
+	//  @0x4D1771; CGfxDevice_QueryDxDiagDisplayMemory @0x67C820 - `shl` @0x67CA5C;
 	//  CGfxDevice_CreateDevice @0x67E5D0 - @0x67EBFB..0x67EC25; Game_ParseCommandLineAndInit
 	//  @0x4A7310 - @0x4A7DF2..0x4A7E15]
 	{

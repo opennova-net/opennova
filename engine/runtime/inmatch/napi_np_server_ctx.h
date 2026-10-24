@@ -171,7 +171,7 @@ struct ServerTextTable {
 	// Server_InitNewRoundState @0x51C9CD; CNapiGameSession_BuildAndCreateSession @0x5696EE].
 	std::string host_name;
 	// STRSRV18: the in-game ban's kick text, its punt's detail and the head of its SYSTEM
-	// line [orig: Server_NotifyPlayerKicked @0x5082D0 - GameText_GetString("Server",
+	// line [orig: Server_BanPlayerSlot @0x5082D0 - GameText_GetString("Server",
 	//  "STRSRV18") @0x5083C6 / @0x5083FE].
 	std::string kicked;
 };

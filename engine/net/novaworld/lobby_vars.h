@@ -283,29 +283,29 @@ int64_t wow64_display_memory_mb(int64_t display_memory_mb);
 // NWHWI's second field: the query's number shifted into bytes in 32 bits, which the device keeps
 // only when it is not negative (else 0), shifted back logically; so a size whose bit 11 is set
 // prints 0 and every other prints its low 11 bits.
-// [orig: CGfxDevice_QueryVideoDriverVersion @0x67C820 - wcstod called @0x67CA45, _ftol2_sse
+// [orig: CGfxDevice_QueryDxDiagDisplayMemory @0x67C820 - wcstod called @0x67CA45, _ftol2_sse
 //  called @0x67CA57, `shl eax, 14h` @0x67CA5C; CGfxDevice_CreateDevice @0x67E5D0 - the query
 //  called @0x67EBEC, a negative result `jl` @0x67EBFB to the 0 store @0x67EC25, else stored
 //  @0x67EBFD; CNapiGameSession_OnNovaWorldConnected @0x4D1570 - the read @0x4D176A, `shr eax,
 //  14h` @0x4D1771]
 uint32_t nwhwi_display_memory_mb(int64_t display_memory_mb);
 
-// NWHWI's third field (g_VideoMemoryMB, which holds physical memory): GlobalMemoryStatus's
+// NWHWI's third field (g_TotalPhysMemoryMB, which holds physical memory): GlobalMemoryStatus's
 // dwTotalPhys, which Windows caps at 0x7FFFFFFF for an image without IMAGE_FILE_LARGE_ADDRESS_AWARE
 // (Jointops.exe's FileHeader.Characteristics are 0x103), plus 0xC0000, shifted right by 20, all in
 // 32 bits: 2048 on every machine with 2 GiB or more.
 // [orig: System_GetCPUAndOSInfo @0x53CD30 - GlobalMemoryStatus called @0x53CF0E, dwTotalPhys read
 //  @0x53CF17 into info+0x64 @0x53CF25; Game_ParseCommandLineAndInit @0x4A7310 - `add ecx,
-//  0C0000h` @0x4A7DF2, `shr ecx, 14h` @0x4A7E05, stored to g_VideoMemoryMB @0x4A7E15]
+//  0C0000h` @0x4A7DF2, `shr ecx, 14h` @0x4A7E05, stored to g_TotalPhysMemoryMB @0x4A7E15]
 uint32_t nwhwi_physical_memory_mb(uint64_t total_phys_bytes);
 
 // The NWHWI cookie value: "%s$%ld$%ld$%ldx%ld$%ldx%ld" over adapter 0's description, the display
 // memory field, the physical memory field, game.cfg's display width x height and the renderer's
 // desktop width x height.
 // [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1570 - g_RendererDesktopHeight / Width read
-//  @0x4D174B / @0x4D1751, g_VideoMemoryMB @0x4D1756, g_GameConfigState +0x60 / +0x64 @0x4D175D /
+//  @0x4D174B / @0x4D1751, g_TotalPhysMemoryMB @0x4D1756, g_GameConfigState +0x60 / +0x64 @0x4D175D /
 //  @0x4D1764, CGfxDevice_GetAdapterDescription(0) called @0x4D177C, sprintf called @0x4D178F,
-//  CUIBrowser_AddFormField "NWHWI" called @0x4D17AA]
+//  CUIBrowser_SetCookie "NWHWI" called @0x4D17AA]
 std::string make_nwhwi(const HardwareIdentity &hw);
 
 // The wire-load-bearing NWPSSK/NWUSID token lengths: retail's stable-machine

@@ -7,7 +7,7 @@
 //  @0x64E630; CookieJar_GetValueByName @0x64EA90; String_CompareNoCase @0x650000;
 //  CDKey_GenerateVolumeFingerprint @0x651ED0; Crypto_EncryptBuffer @0x437510;
 //  CUIScene_SaveCookieJarFile @0x63BA60; CookieJar_SaveToFile @0x64EE60;
-//  CUIStringTable_OpenAndLoad @0x63A500; CUIStringTable_LoadFromFile @0x64F290]
+//  CookieJar_OpenAndLoadFile @0x63A500; CookieJar_LoadFromFile @0x64F290]
 
 #include <net/novaworld/cookie_jar_file.h>
 #include <net/novaworld/http_flow.h>

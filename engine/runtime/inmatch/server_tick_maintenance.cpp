@@ -990,7 +990,7 @@ void update_periodic_slot_walk(NapiNPServerCtx &ctx, world::World &world) {
 // instant waits for the next boundary and never receives a per-peer catch-up.
 // The duplicate-PCID kick follows.
 // [orig: Server_TickUpdate - the countdown @0x51E1B2..0x51E1C5, the send
-//  @0x51E1C7..0x51E202, CNapiServer_DisconnectPendingSpawnBans @0x4C9290 (the call @0x51E20C), is_in_session
+//  @0x51E1C7..0x51E202, CNapiServer_KickDuplicatePcids @0x4C9290 (the call @0x51E20C), is_in_session
 //  @0x51E211]
 void emit_network_quality_boundary(NapiNPServerCtx &ctx) {
 	bool network_quality_boundary = ctx.network_quality_broadcast_countdown == 0;

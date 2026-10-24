@@ -4,7 +4,7 @@
 // and its brain; an empty slot, a bodiless player and a joiner refuse. On the
 // authority the staged body then holds against its player's uplinks from the old
 // spot only past the chase's 2-unit drop, as on a retail host.
-// [orig: Server_NotifyPlayerKicked @0x508304..0x508332 (the slot walk);
+// [orig: Server_BanPlayerSlot @0x508304..0x508332 (the slot walk);
 //  Server_PositionPlayerForSpawn @0x50CFBE / @0x50CFCA / @0x50CFD0 (the Position
 //  words); Entity_UpdateInfantryPlayerBody @0x4B431F..0x4B4386 (the drop)]
 

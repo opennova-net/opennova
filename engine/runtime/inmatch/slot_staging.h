@@ -9,7 +9,7 @@
 // RR / RR-aa frames show a staged retail body's heading byte 64 for a frame
 // (ours kept the body's own, 14); on the authority a staged pose holds against
 // the player's own uplinks only past the chase's 2-unit drop (D-NET-NEW-LP-2).
-// [orig: the slot walk Server_NotifyPlayerKicked @0x5082D0 - the capacity test
+// [orig: the slot walk Server_BanPlayerSlot @0x5082D0 - the capacity test
 //  @0x508304..0x508316, the row g_PlayerSlots + index * 0x188E8 @0x50831C..0x508322,
 //  the in-use byte +4 @0x50832E..0x508332; the Person's Position words, as the
 //  spawn placement writes them: Server_PositionPlayerForSpawn @0x50CF60 - Person = [slot+0]

@@ -895,7 +895,7 @@ public:
 	// CK; a NovaWorld host validates it (reject code 9). Empty/"0" is the LAN
 	// default. Retained across runtime rebuilds like the character data.
 	void set_app_id(const String &p_token);
-	// The joiner's network type (JoinTarget::NetworkType; retail's g_NapiNPCtx.transport_mode).
+	// The joiner's network type (JoinTarget::NetworkType; retail's g_NapiNPCtx.network_type).
 	void set_join_network_type(int p_type);
 	// The CD identity cookie (packed PUB* blob) for the C2S 0x00 JOIN — the
 	// NovaWorld-issued NAMEINFO/PCID/SQUADINFO/JOINTICKET the host validates

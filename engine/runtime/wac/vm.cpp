@@ -606,7 +606,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         // recovered executable has no producer that sets the Gold bit.
         // [orig: WacCmd_PlayerIsGold @0x4F0AF0;
         // NapiNPPlayer_Create @0x4C7850;
-        // CNapiNetwork_ParseServerVarList @0x4C4310, clear @0x4C4387]
+        // NapiNPPlayer_ParseServerVarList @0x4C4310, clear @0x4C4387]
         return 0;
     }
     if (strutil::iequals(n, "piskills")) {

@@ -89,7 +89,7 @@ inline std::array<int32_t, 255> filled_weapon_availability(int32_t value) {
 // its bit (MISSION; every entry's scan stores 0x3FF), any other word disables it (NEVER).
 // The host dialog's class list cycles each word 0 -> 1 -> 2 -> 0; it writes no mask.
 // [orig: Game_ApplySessionSettingsToGlobals @0x551500 (the words @0x551882..0x551990,
-//  the store @0x551996); HostDialog_OnWeaponRestrictionListClick (the cycle
+//  the store @0x551996); HostDialog_OnClassAvailabilityListClick (the cycle
 //  @0x55781A..0x557839); the entry mask MissionList_ScanAndBuildFromFiles @0x563170 (the
 //  store @0x56334A), Mission_BuildMapListFromPFF @0x562910 (the store @0x562B12)]
 inline uint16_t class_allow_mask_from_words(
@@ -370,7 +370,7 @@ struct GameConfig {
 	// its Config_ParseSettingsLine @0x54f740 setting-name compare (via Game_ApplySessionSettingsToGlobals
 	// @0x551500, which copies the parsed cfg global into the live rule global).
 	uint32_t round_time_limit_minutes = 0; // [orig: g_RoundTimeLimitMinutes @0x24D2140] dword[0]; SET `GameTime`
-	uint32_t time_limit_minutes = 0;  // [orig: g_TimeLimitMinutes @0x24D2144] dword[1]; SET `KOTHLimit`
+	uint32_t time_limit_minutes = 0;  // [orig: g_KothLimitMinutes @0x24D2144] dword[1]; SET `KOTHLimit`
 	uint32_t replay_enabled = 0;      // [orig: g_ReplayEnabled @0x24D2120 <- g_GameConfigState.unknownModeOption_46C @0x2550B24, cfg `replay`]      dword[2]
 	// Retail carries this setting through cfg/global/S2C 0x08 but never reads
 	// the live global in gameplay (whole-image xrefs: serializer + settings

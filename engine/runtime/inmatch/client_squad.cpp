@@ -192,7 +192,7 @@ void ClientRuntime::apply_squad_event(world::World &world,
 		// Every placed waypoint goes to the new member: one C2S 0x17 per
 		// non-null table entry, the member's own slot the target, the row's
 		// name and its exact x / y / z dwords (a wiped row's zeros).
-		// [orig: Server_BroadcastChatToAllPlayers @0x549200 (a misnomer: the
+		// [orig: CMap_SendUserWaypoints @0x549200 (a misnomer: the
 		//  push) — NetPacket_SendUserWaypointCreate(joiner+0x154, entry) per non-null
 		//  entry @0x549210..0x54921f]
 		for (const world::UserWaypointTable::Entry &entry : world.user_waypoints.entries) {

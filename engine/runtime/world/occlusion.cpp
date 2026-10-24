@@ -1680,7 +1680,7 @@ int32_t OcclusionWorld::person_collector_radius(int32_t bound_radius_q16,
 
 // [orig: Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60, the person leg: the
 // |view depth| < fog + radius cull @ 0x5c8e26..0x5c8e3c, the viewport clip
-// @ 0x5c8e4d, the sub-pixel floor `cmp dword_A784F0,0C000h; jle` @ 0x5c8e5e
+// @ 0x5c8e4d, the sub-pixel floor `cmp g_MainViewportProjectedRadiusQ16,0C000h; jle` @ 0x5c8e5e
 // BEFORE the latch, then the latch @ 0x5c8e7b..0x5c8eab with the probe aimed
 // at the entity position (`push ebx` = entity+4 @ 0x5c8e91)]
 bool OcclusionWorld::person_render_visible(const CollisionWorld &collision,

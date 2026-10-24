@@ -1008,7 +1008,7 @@ int32_t ClientRuntime::mission_exit_reason() const {
 		return joiner_->teardown_exit_reason();
 	// A reload wait that loses its link returns into the Post Menu with exit
 	// 1, which takes the main menu [orig: Game_StartMission
-	// @0x524E87..0x524ECD; g_LoadingTimeoutFlag, set by
+	// @0x524E87..0x524ECD; g_NetDisconnectedFlag, set by
 	// CNapiNetwork_OnDisconnectedFromServer @0x4C64A4].
 	if (joiner_ != nullptr && joiner_->reloading() && joiner_->session_lost())
 		return kMissionExitQuit;
@@ -1521,14 +1521,14 @@ bool ClientRuntime::client_receive_pass(std::vector<std::vector<uint8_t>> &outbo
 		// The host's tick seed anchors our whole network-role clock. A seed of ZERO is a
 		// real, witnessed value (the round-end disarm form), so it is applied like any
 		// other — it parks the tick, which is exactly what retail does.
-		// [orig: NapiNPClientMsg_HandleSessionKey @0x4297c0 — both globals take the seed
+		// [orig: NapiNPClientMsg_HandleTickSeed @0x4297c0 — both globals take the seed
 		//  @0x4297f8/@0x4297fd; the disarm sender Server_SendRandomSeedToPlayer(ctx, 0)
 		//  @0x510237]
 		if (pr.tick_seed_set) {
 			current_tick_ = pr.tick_seed;
 			last_keepalive_tick_ = pr.tick_seed;
 			// The same handler closes the connect log [orig:
-			// NapiNPClientMsg_HandleSessionKey @0x4297C0 - @0x4297F1..0x42983E].
+			// NapiNPClientMsg_HandleTickSeed @0x4297C0 - @0x4297F1..0x42983E].
 			if (connect_log_ != nullptr) connect_log_->disable_at_client_session_key();
 		}
 		// The mission start's globals reset follows the whole receive pass
@@ -1782,7 +1782,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				if (datagram.tag == s2c::CLIENT_CONSOLE_COMMAND) run_console_echo(datagram.body);
 				// The host's own client takes its looped-back tick seed like any
 				// client: the clock its own fire is admitted against. A short body
-				// reads 0. [orig: NapiNPClientMsg_HandleSessionKey @0x4297c0 --
+				// reads 0. [orig: NapiNPClientMsg_HandleTickSeed @0x4297c0 --
 				//  no role gate; g_ClientCurrentTick / g_LastKeepaliveTick
 				//  @0x4297f8/@0x4297fd]
 				if (datagram.tag == s2c::TICK_SEED) {

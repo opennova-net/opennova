@@ -111,7 +111,7 @@ int32_t session_player_cap(int32_t player_limit, int title);
 // read and for the game.cfg apply (host_config.h): a cfg point limit of 500
 // is the 65000 no-limit sentinel, and a nonpositive KOTH limit is 0x2222222
 // minutes. [orig: Game_ApplySessionSettingsToGlobals @0x551B67..0x551B8C
-// (g_ScoreLimit, g_KillLimit), @0x551CD2..0x551CDF (g_TimeLimitMinutes)]
+// (g_ScoreLimit, g_KillLimit), @0x551CD2..0x551CDF (g_KothLimitMinutes)]
 inline constexpr uint32_t kSessionNoPointLimit = 65000u;
 inline constexpr uint32_t kSessionNoKothLimitMinutes = 0x2222222u;
 uint32_t session_point_limit(int32_t cfg_limit);

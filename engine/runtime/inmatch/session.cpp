@@ -477,7 +477,7 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	//   posts Misc STRMISC_INFAMMO to the SYSTEM ring in white;
 	// - row 115's 122 stores 0x4000 in its health word.
 	// [orig: Input_HandleActionBinding_0 @0x4E0420 - g_LocalPlayerEntity @0x4E0434; case 120
-	//  Entity_UpdateWeaponOverlayFrameState called @0x4E0737; case 121 Server_ToggleDedicatedFlag
+	//  Entity_UpdateWeaponOverlayFrameState called @0x4E0737; case 121 Cheat_ToggleInfiniteAmmo
 	//  called @0x4E0746 (`xor g_DebugCheatFlags, 100h` @0x4DC9C5,
 	//  Entity_UpdateWeaponOverlayFrameState called @0x4DC9D0), `test g_DebugCheatFlags, 100h`
 	//  @0x4E074B, GameText_GetString("Misc", "STRMISC_INFAMMO") @0x4E076C,
@@ -677,7 +677,7 @@ bool Role::dispatch_server_record(const controls::InputEventRecord &record) {
 		return true;
 	}
 	// Ban: the record's first argument, the slot, gated inside (Server_BanPlayerSlot)
-	// [orig: Input_HandleActionBinding @0x49AD40 - case 107, Server_NotifyPlayerKicked called
+	// [orig: Input_HandleActionBinding @0x49AD40 - case 107, Server_BanPlayerSlot called
 	//  @0x49BBA5]
 	if (is(kBanRow)) {
 		if (ctx != nullptr) (void)Server_BanPlayerSlot(*ctx, record.p1);

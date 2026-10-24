@@ -600,7 +600,7 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	// The Recent Messages window draws from the frame drawer, not the overlay
 	// pass: after every HUD element and BEFORE the Tab board
 	// [orig: Server_DrawStatusScreen @0x50a2d0 — HUD_DrawMessageLog @0x50b21f,
-	//  then HUD_DrawClassRosterOverlay @0x50b23d and HUD_DrawPlayerScoreList
+	//  then HUD_DrawConsoleMessagesOverlay @0x50b23d and HUD_DrawPlayerScoreList
 	//  @0x50b281].
 	// The stats panel precedes the message log in the frame drawer
 	// [orig: HUD_DrawOverlayPanels @0x5c0083 (stats) then @0x5c009a (message log)].

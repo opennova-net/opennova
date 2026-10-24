@@ -60,7 +60,7 @@ inline constexpr int32_t kNetLinkErrorBandFrames = 62;
 
 // What the NovaWorld N icon reads besides the object: the network type, the
 // NovaWorld UDP (NWU) session being in use, and that session's state flags.
-// [orig: g_NapiNPCtx.transport_mode == NetworkType_NovaWorld (1);
+// [orig: g_NapiNPCtx.network_type == NetworkType_NovaWorld (1);
 //  dword_B5FD2C = `dword_B5F928 > 0 || dword_B4C71C > 0` (gate-response or
 //  command-line NWU gate addresses; CNapiGateManager_ProcessResponse
 //  @0x4cf525..0x4cf541); byte_B60100 = the NWU game session's flags

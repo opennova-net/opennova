@@ -164,7 +164,7 @@ bool HudFrameCompiler::compile_server_status_page(const HudFrameState &state,
 	// The message log, else the class roster of the console capture
 	// [orig: @0x50b218..0x50b23d]. The console capture (g_InputCaptureMode 1
 	// with dword_B3E318) is input action 20's command entry (hud_chat_entry.h
-	// kChatDispatchConsole); HUD_DrawClassRosterOverlay @0x5b9f30, its draw
+	// kChatDispatchConsole); HUD_DrawConsoleMessagesOverlay @0x5b9f30, its draw
 	// here, is not ported yet.
 	element_message_log(state, w, h);
 	mark_order_break();

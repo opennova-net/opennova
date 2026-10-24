@@ -106,7 +106,7 @@ std::vector<uint8_t> write_cookie_jar(const CookieJar &jar, bool remember_login_
 	return out;
 }
 
-// [orig: CUIStringTable_LoadFromFile @0x64F290 - the magic @0x64F30B, the bounds from @0x64F33A,
+// [orig: CookieJar_LoadFromFile @0x64F290 - the magic @0x64F30B, the bounds from @0x64F33A,
 //  Crypto_DecryptBuffer called @0x64F373, the record's word @0x64F49F, its node @0x64F4D0]
 void read_cookie_jar(const uint8_t *data, size_t size, std::string_view key, CookieJar &jar) {
 	if (data == nullptr || size < 8) return;
@@ -152,7 +152,7 @@ void read_cookie_jar(const uint8_t *data, size_t size, std::string_view key, Coo
 }
 
 // [orig: Menu_InitShellResources @0x552500 - CUIManager_Create called @0x5525D8,
-//  CUIStringTable_OpenAndLoad called @0x552630]
+//  CookieJar_OpenAndLoadFile called @0x552630]
 void MenuBrowserState::create(std::string path, std::string jar_key) {
 	remember_login_checked.reset();
 	jar.clear();

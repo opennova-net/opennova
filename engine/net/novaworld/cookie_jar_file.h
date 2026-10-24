@@ -26,7 +26,7 @@ inline constexpr char kCookieJarFileName[] = "nw_cdata.coo";
 // of 0 and no bytes), then the entry's word. Everything is little-endian.
 // [orig: CookieJar_SaveToFile @0x64EE60 - the magic stored @0x64EE8F, written @0x64EE97; the node
 //  word written @0x64EF16, the strings from @0x64EF1B, the entry's word written @0x64F23B;
-//  CUIStringTable_LoadFromFile @0x64F290 - the magic's test @0x64F30B]
+//  CookieJar_LoadFromFile @0x64F290 - the magic's test @0x64F30B]
 inline constexpr uint32_t kCookieJarFileMagic = 0x434F4F32u;
 
 // The 16 bytes retail makes of the current directory's volume (GetVolumeInformationA on a null
@@ -44,7 +44,7 @@ std::array<uint8_t, 16> volume_fingerprint(const RetailMachineInputs &volume);
 // zero byte (byte 16 is set to 0). So a file written on one volume does not decrypt on another,
 // on another machine or after the volume's serial changes: its strings come back as other bytes.
 // [orig: CookieJar_SaveToFile @0x64EE60 - CDKey_GenerateVolumeFingerprint called @0x64EE7B, the
-//  key's byte 16 cleared @0x64EE8A; CUIStringTable_LoadFromFile @0x64F290 - called @0x64F2FB,
+//  key's byte 16 cleared @0x64EE8A; CookieJar_LoadFromFile @0x64F290 - called @0x64F2FB,
 //  cleared @0x64F300; Crypto_EncryptBuffer @0x437510 - the key's strlen]
 std::string cookie_jar_key(const RetailMachineInputs &volume);
 
@@ -70,9 +70,9 @@ std::vector<uint8_t> write_cookie_jar(const CookieJar &jar, bool remember_login_
 // record dropped (retail reads its buffer's slack there, or past it). A record under a node word
 // other than 0 is skipped: retail keeps it in a node no jar access reads, and no retail save writes
 // one.
-// [orig: CUIStringTable_OpenAndLoad @0x63A500 - fopen "rb" called @0x63A50B, the leading word read
-//  and dropped (fread called @0x63A52D), CUIStringTable_LoadFromFile called @0x63A533;
-//  CUIStringTable_LoadFromFile @0x64F290 - fewer than 4 bytes past the word @0x64F2CD, the magic
+// [orig: CookieJar_OpenAndLoadFile @0x63A500 - fopen "rb" called @0x63A50B, the leading word read
+//  and dropped (fread called @0x63A52D), CookieJar_LoadFromFile called @0x63A533;
+//  CookieJar_LoadFromFile @0x64F290 - fewer than 4 bytes past the word @0x64F2CD, the magic
 //  @0x64F30B, the first record's test @0x64F323, each length's bound @0x64F33A.., the bytes copied
 //  and Crypto_DecryptBuffer called @0x64F373 for the first string, the record's word @0x64F49F,
 //  the node by the word's low byte @0x64F4AC and the word @0x64F4D0, the entries grown by one
@@ -85,7 +85,7 @@ void read_cookie_jar(const uint8_t *data, size_t size, std::string_view key, Coo
 // in between all use it.
 // [orig: Menu_InitShellResources @0x552500 - g_GameMenu made only while null (@0x5525A6,
 //  CUIManager_Create called @0x5525D8, which empties the jar's table: CookieJar_ClearTable
-//  @0x64E500 called @0x64AF6D), CUIStringTable_OpenAndLoad("nw_cdata.coo") called @0x552630;
+//  @0x64E500 called @0x64AF6D), CookieJar_OpenAndLoadFile("nw_cdata.coo") called @0x552630;
 //  CGameMenu_Destructor @0x63E100 - CUIScene_DestroyAllContent called @0x63E137]
 struct MenuBrowserState {
 	CookieJar jar;
