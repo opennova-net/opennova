@@ -184,6 +184,8 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
 					opennova::env::kReflectionRttSize, fog, water_z, p_forces_indoors,
 					p_object_detail);
 	main_water_label_ = blink_water_word_.label(blink_letters_, mirror_ran, mirror_verdict);
+	apply_mirror_view(Simulation::MIRROR_MAIN, mirror_ran,
+			p_camera_xform.origin.y < water_z);
 	const bool stats_on = frame_stats_.is_valid() && frame_stats_->is_capture_active();
 	const bool timing = probe_timing_ || stats_on;
 	const int64_t native_start = timing ? ticks_usec() : 0;
@@ -417,6 +419,8 @@ void OcclusionFrame::apply_inset_frame(Camera3D *p_camera, float p_viewport_widt
 					request.water_z_units, p_forces_indoors, p_object_detail);
 	const bool inset_water_label =
 			blink_water_word_.label(blink_letters_, mirror_ran, mirror_verdict);
+	apply_mirror_view(Simulation::MIRROR_INSET, mirror_ran,
+			mirror_ran && p_mirror_block->origin.y < request.water_z_units);
 	const InsetOcclusionView &inset = s->run_inset_occlusion(request);
 	inset_active_ = true;
 	inset_foliage_mask_anchors_ = inset.foliage_mask_anchors;
@@ -493,7 +497,76 @@ void OcclusionFrame::apply_inset_frame(Camera3D *p_camera, float p_viewport_widt
 	}
 }
 
+void OcclusionFrame::apply_mirror_view(int p_view, bool p_ran, bool p_below_water) {
+	Simulation *s = sim();
+	EntityIndex *registry = entity_index();
+	if (!p_ran || s == nullptr || registry == nullptr) {
+		release_mirror(p_view);
+		return;
+	}
+	mirror_active_[p_view] = true;
+	ObjectModel::set_mirror_view_state(p_view, true, p_below_water);
+	const MirrorOcclusionView &view = s->mirror_occlusion(static_cast<Simulation::MirrorView>(p_view));
+	// Its building verdicts, as changes (the main leg's triple form): its raw
+	// section mask and batch/TOC visibility.
+	const PackedInt64Array &changes = view.building_changes;
+	for (int64_t i = 0; i + 2 < changes.size(); i += 3) {
+		if (ObjectModel *node = occlusion_node(registry, changes[i])) {
+			node->set_mirror_occlusion_section_mask(p_view,
+					Simulation::building_visibility_mask(changes[i + 1]), changes[i + 2]);
+			node->set_mirror_occlusion_hidden(p_view,
+					!Simulation::building_visibility_visible(changes[i + 1]));
+		}
+	}
+	// Its entity render gates, as changes.
+	const PackedInt32Array &culled = view.culled_changes;
+	if (culled.size() >= 2) {
+		const int64_t added = culled[0];
+		for (int64_t i = 1; i < 1 + added; ++i) {
+			if (ObjectModel *node = occlusion_node(registry, culled[i])) {
+				node->set_mirror_occlusion_hidden(p_view, true);
+			}
+		}
+		for (int64_t i = 2 + added; i < culled.size(); ++i) {
+			if (ObjectModel *node = occlusion_node(registry, culled[i])) {
+				node->set_mirror_occlusion_hidden(p_view, false);
+			}
+		}
+	}
+	// The same collect over the rows the wire walk draws, keyed by handle, and
+	// the subscene's own death-piece draws.
+	if (EntityPresenter *presenter = entities()) {
+		presenter->present_death_piece_draws_mirror(p_view, view.death_piece_draws);
+		presenter->set_wire_mirror_view(p_view, true);
+		const PackedInt32Array &wire = view.culled_wire_changes;
+		if (wire.size() >= 2) {
+			const int64_t added = wire[0];
+			for (int64_t i = 1; i < 1 + added; ++i) {
+				presenter->set_render_culled_mirror(p_view, wire[i], true);
+			}
+			for (int64_t i = 2 + added; i < wire.size(); ++i) {
+				presenter->set_render_culled_mirror(p_view, wire[i], false);
+			}
+		}
+	}
+}
+
+void OcclusionFrame::release_mirror(int p_view) {
+	if (!mirror_active_[p_view]) {
+		return;
+	}
+	mirror_active_[p_view] = false;
+	ObjectModel::set_mirror_view_state(p_view, false, false);
+	if (EntityPresenter *presenter = entities()) {
+		presenter->set_wire_mirror_view(p_view, false);
+	}
+	if (Simulation *s = sim()) {
+		s->release_mirror_occlusion(static_cast<Simulation::MirrorView>(p_view));
+	}
+}
+
 void OcclusionFrame::release_inset() {
+	release_mirror(Simulation::MIRROR_INSET);
 	if (!inset_active_) {
 		return;
 	}
@@ -551,6 +624,7 @@ ObjectModel *OcclusionFrame::occlusion_node(EntityIndex *p_registry, int64_t p_b
 }
 
 void OcclusionFrame::release_overrides(bool /*p_reset_semantics*/) {
+	release_mirror(Simulation::MIRROR_MAIN);
 	release_inset();
 	for (const KeyValue<int64_t, ObjectID> &entry : occlusion_node_cache_) {
 		ObjectModel *node = occlusion_hidden_release_node(entry.key);

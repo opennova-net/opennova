@@ -204,6 +204,27 @@ void EntityPresenter::set_wire_inset_view(bool p_active) {
 	}
 }
 
+void EntityPresenter::set_render_culled_mirror(int p_view, int p_handle, bool p_culled) {
+	if (p_view < 0 || p_view > 1) {
+		return;
+	}
+	if (p_culled) {
+		wire_render_culled_mirror_[p_view][p_handle] = true;
+	} else {
+		wire_render_culled_mirror_[p_view].erase(p_handle);
+	}
+}
+
+void EntityPresenter::set_wire_mirror_view(int p_view, bool p_active) {
+	if (p_view < 0 || p_view > 1) {
+		return;
+	}
+	wire_mirror_view_[p_view] = p_active;
+	if (!p_active) {
+		wire_render_culled_mirror_[p_view].clear();
+	}
+}
+
 void EntityPresenter::set_cold_spawn_budget(int p_budget) {
 	cold_spawn_budget_ = MAX(1, p_budget);
 }
@@ -822,6 +843,8 @@ void EntityPresenter::reset_wire_plan_state() {
 	wire_deferred_ids_.clear();
 	wire_render_culled_.clear();
 	wire_render_culled_inset_.clear();
+	wire_render_culled_mirror_[0].clear();
+	wire_render_culled_mirror_[1].clear();
 	wire_remote_body_.clear();
 	wire_foot_cursor_.clear();
 	wire_respawn_revisions_.clear();
@@ -878,7 +901,11 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 	const bool main_culled = wire_render_culled_.has(row.handle);
 	const bool inset_culled =
 			!wire_inset_view_ || wire_render_culled_inset_.has(row.handle);
-	if (main_culled && inset_culled) {
+	// Each water mirror's own collect decides its view too.
+	const bool mirrors_culled =
+			(!wire_mirror_view_[0] || wire_render_culled_mirror_[0].has(row.handle)) &&
+			(!wire_mirror_view_[1] || wire_render_culled_mirror_[1].has(row.handle));
+	if (main_culled && inset_culled && mirrors_culled) {
 		if (model->is_visible()) {
 			model->set_visible(false);
 		}
@@ -888,8 +915,8 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 		// [see RenderSlot_RenderEntityAndChildren in the engine's witness map]).
 		update_wire_held_weapon(row, model, snap, false);
 		update_wire_person_overlays(row, model, snap, false);
-		// Neither view's twin may outlive the verdict either.
-		if (wire_inset_view_) {
+		// No view's twin may outlive the verdict either.
+		if (wire_inset_view_ || wire_mirror_view_[0] || wire_mirror_view_[1]) {
 			apply_wire_row_views(row, model, model->is_present_visible(), true, true);
 		}
 		// A pending remote body blend is entity-update work, not draw work
@@ -1077,6 +1104,11 @@ void EntityPresenter::apply_wire_row_views(const WireRow &row, ObjectModel *mode
 		if (wire_inset_view_) {
 			p_model->set_inset_occlusion_hidden(p_inset_culled);
 		}
+		for (int m = 0; m < 2; ++m) {
+			if (wire_mirror_view_[m]) {
+				p_model->set_mirror_occlusion_hidden(m, wire_render_culled_mirror_[m].has(row.handle));
+			}
+		}
 	};
 	apply(model, p_present_visible);
 	if (const ObjectID *weapon_id = wire_held_weapon_ids_.getptr(row.handle)) {
@@ -1105,6 +1137,12 @@ void EntityPresenter::apply_wire_row_views(const WireRow &row, ObjectModel *mode
 				}
 				if (wire_inset_view_) {
 					overlay->set_inset_occlusion_hidden(p_inset_culled);
+				}
+				for (int m = 0; m < 2; ++m) {
+					if (wire_mirror_view_[m]) {
+						overlay->set_mirror_occlusion_hidden(m,
+								wire_render_culled_mirror_[m].has(row.handle));
+					}
 				}
 			}
 		}

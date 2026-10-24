@@ -69,6 +69,8 @@ public:
 		VISUAL_LAYER_TERRAIN_FLAT_FALLBACK = visual_layers::TERRAIN_FLAT_FALLBACK,
 		VISUAL_LAYER_SHADOW_CASTER_MASK = visual_layers::SHADOW_CASTER_MASK,
 		REFLECTION_CULL_MASK = visual_layers::REFLECTION_CULL_MASK,
+		VISUAL_LAYER_MIRROR_VIEW = visual_layers::MIRROR_VIEW,
+		VISUAL_LAYER_INSET_MIRROR_VIEW = visual_layers::INSET_MIRROR_VIEW,
 	};
 
 	void set_environment_path(const NodePath &p_path);
@@ -272,6 +274,9 @@ private:
 	void _release_mirror_rig(MirrorRig &r_rig);
 	void _update_reflection_camera(Camera3D *p_cam, const Projection &p_projection,
 			bool p_frame_perspective);
+	// The mirror's own bit: MIRROR_VIEW for the main scene's, INSET_MIRROR_VIEW for the
+	// Inset's (render/visual_layers.h).
+	uint32_t _mirror_own_layer(const MirrorRig &p_rig) const;
 	// Installs p_source's mirror into r_rig: the camera, its cull mask, its
 	// node-side frame p_source_frame and the served raster.
 	void _install_mirror_view(MirrorRig &r_rig, const opennova::env::MirrorSourceView &p_source,

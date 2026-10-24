@@ -115,6 +115,10 @@ public:
 	// The weapon Inset pass's own piece draws (its collect's; the models'
 	// Inset state, drawn by twins where the views differ).
 	void apply_piece_draws_inset(const std::vector<opennova::world::DeathPieceDraw> &p_draws);
+	// A water mirror's own piece draws (view 0 the main scene's mirror, 1 the
+	// Inset's: the models' mirror state, drawn by twins where it differs).
+	void apply_piece_draws_mirror(int p_view,
+			const std::vector<opennova::world::DeathPieceDraw> &p_draws);
 	// A piece slot's model (null when the slot presents none).
 	ObjectModel *piece_model(int p_slot) const;
 	// The section draw's matrix in Godot space: the piece pose (the BAM

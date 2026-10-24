@@ -704,6 +704,40 @@ void DestructionPresenter::apply_piece_draws_inset(
 	}
 }
 
+// A water mirror's own piece draws: the reflected subscene collects the pieces
+// again over the view it draws from (engine inmatch/occlusion_collect.h
+// MirrorViewLists), with their own level. A piece the mirror draws takes that
+// level as the model's mirror state, drawn by its twin where the node's
+// differs; a piece it does not draw is hidden there.
+void DestructionPresenter::apply_piece_draws_mirror(int p_view,
+		const std::vector<opennova::world::DeathPieceDraw> &p_draws) {
+	HashSet<int> drawn;
+	for (const opennova::world::DeathPieceDraw &draw : p_draws) {
+		const int64_t *generation = piece_generation_.getptr(draw.slot);
+		if (generation == nullptr || *generation != static_cast<int64_t>(draw.generation)) {
+			continue;
+		}
+		ObjectModel *model = piece_model(draw.slot);
+		if (model == nullptr) {
+			continue;
+		}
+		model->set_destroyed_section_mask(draw.hidden_mask);
+		model->set_transform(piece_draw_transform(draw));
+		model->set_present_visible(true);
+		model->set_mirror_view_lod(p_view, draw.lod_level);
+		model->set_mirror_occlusion_hidden(p_view, false);
+		drawn.insert(draw.slot);
+	}
+	for (const KeyValue<int, ObjectID> &kv : piece_models_) {
+		if (drawn.has(kv.key)) {
+			continue;
+		}
+		if (ObjectModel *model = piece_model(kv.key)) {
+			model->set_mirror_occlusion_hidden(p_view, true);
+		}
+	}
+}
+
 void DestructionPresenter::unregister_piece_anchor(int p_slot) {
 	unregister_effect_anchor(piece_owner_key(p_slot));
 }

@@ -78,8 +78,9 @@ func test_the_inset_mirrors_its_view_block_square_at_its_fov() -> void:
 	assert_almost_eq(mirror.fov, 9.5, 0.001)
 	assert_eq(mirror.keep_aspect, Camera3D.KEEP_WIDTH)
 	assert_eq(target.size_2d_override, Vector2i(512, 512))
-	# Its population is the main mirror's (the main view's verdicts).
-	assert_eq(mirror.cull_mask, Water.REFLECTION_CULL_MASK)
+	# Its population: the world layers by the water side, plus its own twins' bit
+	# (its own collect's verdicts where they differ).
+	assert_eq(mirror.cull_mask, Water.REFLECTION_CULL_MASK | Water.VISUAL_LAYER_INSET_MIRROR_VIEW)
 	water.release_runtime_renderer_resources()
 
 

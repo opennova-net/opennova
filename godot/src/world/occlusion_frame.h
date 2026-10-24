@@ -160,6 +160,14 @@ public:
 	// The Inset stopped rendering (or the world unloads): every Inset verdict
 	// releases onto the main view's and the sim forgets the Inset baselines.
 	void release_inset();
+	// A water mirror's own collect lands on what its reflected subscene draws
+	// (engine inmatch/occlusion_collect.h MirrorViewLists): its verdicts as
+	// changes on the models (ObjectModel::set_mirror_occlusion_*) and the wire
+	// rows (EntityPresenter::set_render_culled_mirror), for view 0 (the main
+	// scene's mirror) or 1 (the weapon Inset's), whose eye is below the water
+	// or not. A mirror that did not render this frame releases instead.
+	void apply_mirror_view(int p_view, bool p_ran, bool p_below_water);
+	void release_mirror(int p_view);
 	// The last Inset collect's MODEL foliage anchors (Godot space; the main
 	// collect's are Simulation::get_foliage_mask_anchor_positions), empty
 	// while the Inset is closed.
@@ -290,6 +298,8 @@ private:
 	// release walk's set), and whether an Inset collect ran since then.
 	HashMap<uint64_t, ObjectID> inset_nodes_;
 	bool inset_active_ = false;
+	// Whether each water mirror's verdicts are applied (apply_mirror_view).
+	bool mirror_active_[2] = { false, false };
 	PackedVector3Array inset_foliage_mask_anchors_;
 	// The two apply_frame halves, valid while probe/stats timing runs: the
 	// native run_occlusion_frame call and the node application.

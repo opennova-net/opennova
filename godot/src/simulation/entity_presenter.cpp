@@ -140,6 +140,10 @@ void EntityPresenter::_bind_methods() {
 			&EntityPresenter::set_render_culled_inset);
 	ClassDB::bind_method(D_METHOD("set_wire_inset_view", "active"),
 			&EntityPresenter::set_wire_inset_view);
+	ClassDB::bind_method(D_METHOD("set_render_culled_mirror", "view", "wire_handle", "culled"),
+			&EntityPresenter::set_render_culled_mirror);
+	ClassDB::bind_method(D_METHOD("set_wire_mirror_view", "view", "active"),
+			&EntityPresenter::set_wire_mirror_view);
 	ClassDB::bind_method(D_METHOD("get_wire_stats_record"),
 			&EntityPresenter::get_wire_stats_record);
 	ClassDB::bind_method(D_METHOD("resolve_wire_handle", "wire_handle"),
@@ -481,6 +485,11 @@ void EntityPresenter::present_death_piece_draws_native(
 void EntityPresenter::present_death_piece_draws_inset(
 		const std::vector<opennova::world::DeathPieceDraw> &p_draws) {
 	destruction_->apply_piece_draws_inset(p_draws);
+}
+
+void EntityPresenter::present_death_piece_draws_mirror(int p_view,
+		const std::vector<opennova::world::DeathPieceDraw> &p_draws) {
+	destruction_->apply_piece_draws_mirror(p_view, p_draws);
 }
 
 void EntityPresenter::present_death_piece_draws(const TypedArray<DeathPieceDraw> &p_draws) {

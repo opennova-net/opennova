@@ -18,6 +18,7 @@
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/templates/local_vector.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 
 #include <base/io/hash.h>
 #include <runtime/renderer/object_lod.h>
@@ -30,6 +31,9 @@ namespace godot {
 
 HashSet<ObjectModel *> ObjectModel::inset_view_models_;
 bool ObjectModel::inset_view_open_ = false;
+HashSet<ObjectModel *> ObjectModel::mirror_view_models_;
+bool ObjectModel::mirror_view_open_[2] = { false, false };
+bool ObjectModel::mirror_view_below_[2] = { false, false };
 
 namespace {
 
@@ -337,6 +341,7 @@ void ObjectModel::set_inset_view_open(bool p_open) {
 }
 
 void ObjectModel::refresh_inset_views() {
+	refresh_mirror_views();
 	if (inset_view_models_.is_empty()) {
 		return;
 	}
@@ -398,35 +403,70 @@ bool ObjectModel::inset_section_part_visible(int64_t p_mask, int p_section) cons
 // level draws its level and sections on the Inset bit. A world model only
 // (the viewmodel and the hidden first-person body never reach the Inset).
 void ObjectModel::refresh_view_split() {
+	const bool world_model = is_inside_tree() &&
+			(presentation_layer_ == PRESENTATION_LAYER_WORLD ||
+					presentation_layer_ == PRESENTATION_LAYER_LOCAL_BODY);
+	const Node3D *parent = get_parent_node_3d();
+	const bool ancestors = parent == nullptr || parent->is_visible_in_tree();
+	const bool main_draws = world_model && ancestors && is_visible() && !camera_pixel_culled_;
 	bool split = false;
 	bool inset_draws = false;
 	int inset_level = active_lod_;
 	int64_t inset_mask = occlusion_section_mask_;
-	if (inset_view_open_ && is_inside_tree() &&
-			(presentation_layer_ == PRESENTATION_LAYER_WORLD ||
-					presentation_layer_ == PRESENTATION_LAYER_LOCAL_BODY)) {
-		const Node3D *parent = get_parent_node_3d();
-		const bool ancestors = parent == nullptr || parent->is_visible_in_tree();
+	if (inset_view_open_ && world_model) {
 		inset_level = (inset_own_ & kInsetOwnLod) != 0 ? inset_lod_ : active_lod_;
 		inset_mask = get_inset_view_section_mask();
-		const bool main_draws = ancestors && is_visible() && !camera_pixel_culled_;
 		inset_draws = inset_view_draws();
 		split = main_draws != inset_draws ||
 				(inset_draws && (inset_level != active_lod_ ||
 										inset_mask != occlusion_section_mask_));
 	}
-	if (split != view_split_) {
+	// The water mirrors: a marked model's mirror verdict against what its node
+	// draws in that mirror by its layers.
+	bool mirror_split[2] = { false, false };
+	bool mirror_draws[2] = { false, false };
+	int64_t mirror_mask[2] = { occlusion_section_mask_, occlusion_section_mask_ };
+	int mirror_level[2] = { active_lod_, active_lod_ };
+	const bool marked = mirror_view_models_.has(this);
+	for (int m = 0; m < 2; ++m) {
+		if (!marked || !mirror_view_open_[m] || !world_model) {
+			continue;
+		}
+		mirror_draws[m] = mirror_view_draws(m);
+		mirror_mask[m] = (mirror_[m].own & kInsetOwnSections) != 0 ? mirror_[m].section_mask
+																   : occlusion_section_mask_;
+		mirror_level[m] = (mirror_[m].own & kInsetOwnLod) != 0 ? mirror_[m].lod : active_lod_;
+		const bool node_seen = main_draws && mirror_admits_base(m);
+		mirror_split[m] = mirror_draws[m] != node_seen ||
+				(mirror_draws[m] && (mirror_mask[m] != occlusion_section_mask_ ||
+											mirror_level[m] != active_lod_));
+	}
+	if (split != view_split_ || mirror_split[0] != mirror_[0].split ||
+			mirror_split[1] != mirror_[1].split) {
 		view_split_ = split;
+		mirror_[0].split = mirror_split[0];
+		mirror_[1].split = mirror_split[1];
 		apply_view_split_layers();
 	}
+	TwinSet &inset = twin_sets_[kTwinInset];
 	if (!split || !inset_draws || !geometry_visible_) {
-		free_view_twins();
-	} else if (view_twins_.empty() || view_twin_lod_ != inset_level ||
-			view_twin_mask_ != inset_mask || view_twin_serial_ != scene_build_serial_ ||
-			view_twin_destroyed_ != destroyed_section_mask_) {
-		build_view_twins(inset_level, inset_mask);
+		free_view_twins(inset);
+	} else if (inset.twins.empty() || inset.lod != inset_level || inset.mask != inset_mask ||
+			inset.serial != scene_build_serial_ || inset.destroyed != destroyed_section_mask_) {
+		build_view_twins(inset, inset_level, inset_mask, LAYER_INSET_VIEW);
 	}
-	if (!view_split_ && view_twins_.empty() && (!inset_view_open_ || inset_own_ == 0)) {
+	// A mirror's twins draw its level (its own where it gave one, else the node's).
+	for (int m = 0; m < 2; ++m) {
+		TwinSet &set = twin_sets_[kTwinMirror + m];
+		if (!mirror_split[m] || !mirror_draws[m] || !geometry_visible_) {
+			free_view_twins(set);
+		} else if (set.twins.empty() || set.lod != mirror_level[m] || set.mask != mirror_mask[m] ||
+				set.serial != scene_build_serial_ || set.destroyed != destroyed_section_mask_) {
+			build_view_twins(set, mirror_level[m], mirror_mask[m],
+					m == 0 ? LAYER_MIRROR_VIEW : LAYER_INSET_MIRROR_VIEW);
+		}
+	}
+	if (!view_split_ && inset.twins.empty() && (!inset_view_open_ || inset_own_ == 0)) {
 		inset_view_models_.erase(this);
 	}
 }
@@ -461,20 +501,205 @@ bool ObjectModel::inset_view_draws() const {
 			!inset_subpixel && !inset_pixel;
 }
 
+// The water mirror's camera admits the node's own layer: WORLD always,
+// WORLD_NO_MIRROR below the water (render/visual_layers.h), never a layer no
+// mirror mask carries.
+bool ObjectModel::mirror_admits_base(int p_view) const {
+	if (camera_pixel_culled_) {
+		return false;
+	}
+	switch (presentation_layer_) {
+		case PRESENTATION_LAYER_WORLD:
+			return mirror_reflected_ || mirror_view_below_[p_view];
+		case PRESENTATION_LAYER_LOCAL_BODY:
+			return true;
+		default:
+			return false;
+	}
+}
+
+// The mirror's draw verdict for the node: its own collect's where it gave one
+// (which carries the water side's Flags match), else the main view's by the
+// water side, under ancestors that draw there (a part under a body the main
+// view hid follows the body's mirror verdict, as retail draws it inside the
+// body's submit).
+bool ObjectModel::mirror_view_draws(int p_view) const {
+	if (!mirror_view_open_[p_view] || !is_inside_tree() ||
+			(presentation_layer_ != PRESENTATION_LAYER_WORLD &&
+					presentation_layer_ != PRESENTATION_LAYER_LOCAL_BODY)) {
+		return false;
+	}
+	const Node3D *parent = get_parent_node_3d();
+	bool ancestors = parent == nullptr || parent->is_visible_in_tree();
+	if (!ancestors) {
+		const ObjectModel *owner = Object::cast_to<ObjectModel>(parent);
+		ancestors = owner != nullptr && owner->mirror_view_draws(p_view);
+	}
+	const bool main_verdicts = present_visible_ && !occlusion_hidden_ && !subpixel_hidden_;
+	const bool external_hidden = !is_visible() && main_verdicts;
+	const bool own = (mirror_[p_view].own & kInsetOwnOcclusion) != 0;
+	const bool hidden = own ? mirror_[p_view].occlusion_hidden : occlusion_hidden_;
+	return ancestors && !external_hidden && present_visible_ && !hidden && !subpixel_hidden_ &&
+			!camera_pixel_culled_ && (own || mirror_admits_base(p_view));
+}
+
+// The model and its model descendants (its parts draw inside its submit).
+void ObjectModel::mark_mirror_view(int /*p_view*/) {
+	mirror_view_models_.insert(this);
+	const TypedArray<Node> parts = find_children("*", "ObjectModel", true, false);
+	for (int64_t i = 0; i < parts.size(); ++i) {
+		if (ObjectModel *part = Object::cast_to<ObjectModel>(parts[i])) {
+			mirror_view_models_.insert(part);
+		}
+	}
+}
+
+void ObjectModel::refresh_mirror_views() {
+	if (mirror_view_models_.is_empty()) {
+		return;
+	}
+	static LocalVector<ObjectModel *> &models = *memnew(LocalVector<ObjectModel *>);
+	models.clear();
+	for (ObjectModel *model : mirror_view_models_) {
+		models.push_back(model);
+	}
+	for (ObjectModel *model : models) {
+		if (mirror_view_models_.has(model)) {
+			model->refresh_view_split();
+		}
+	}
+}
+
+void ObjectModel::set_mirror_occlusion_hidden(int p_view, bool p_hidden) {
+	if (p_view < 0 || p_view > 1) {
+		return;
+	}
+	if ((mirror_[p_view].own & kInsetOwnOcclusion) != 0 &&
+			mirror_[p_view].occlusion_hidden == p_hidden && mirror_view_models_.has(this)) {
+		return;
+	}
+	mirror_[p_view].occlusion_hidden = p_hidden;
+	mirror_[p_view].own |= kInsetOwnOcclusion;
+	mark_mirror_view(p_view);
+}
+
+void ObjectModel::set_mirror_occlusion_section_mask(int p_view, int64_t p_raw_mask,
+		int64_t /*p_forced_mask: the def's, shared with the main view*/) {
+	if (p_view < 0 || p_view > 1) {
+		return;
+	}
+	if ((mirror_[p_view].own & kInsetOwnSections) != 0 &&
+			mirror_[p_view].section_mask == p_raw_mask && mirror_view_models_.has(this)) {
+		return;
+	}
+	mirror_[p_view].section_mask = p_raw_mask;
+	mirror_[p_view].own |= kInsetOwnSections;
+	mark_mirror_view(p_view);
+}
+
+void ObjectModel::set_mirror_view_lod(int p_view, int p_lod_index) {
+	if (p_view < 0 || p_view > 1) {
+		return;
+	}
+	const int level = exact_owner_lod_ ? p_lod_index : clamp_lod_index(p_lod_index);
+	if ((mirror_[p_view].own & kInsetOwnLod) != 0 && mirror_[p_view].lod == level &&
+			mirror_view_models_.has(this)) {
+		return;
+	}
+	mirror_[p_view].lod = level;
+	mirror_[p_view].own |= kInsetOwnLod;
+	mark_mirror_view(p_view);
+}
+
+void ObjectModel::clear_mirror_occlusion(int p_view) {
+	if (p_view < 0 || p_view > 1) {
+		return;
+	}
+	mirror_[p_view].own = 0;
+	mirror_[p_view].occlusion_hidden = false;
+	mirror_[p_view].section_mask = -1;
+	mirror_[p_view].lod = 0;
+	if (mirror_view_models_.has(this)) {
+		refresh_view_split();
+	}
+}
+
+void ObjectModel::set_mirror_view_state(int p_view, bool p_open, bool p_below_water) {
+	if (p_view < 0 || p_view > 1) {
+		return;
+	}
+	const bool open_changed = mirror_view_open_[p_view] != p_open;
+	const bool below_changed = mirror_view_below_[p_view] != p_below_water;
+	mirror_view_open_[p_view] = p_open;
+	mirror_view_below_[p_view] = p_below_water;
+	if (!open_changed && !below_changed) {
+		return;
+	}
+	LocalVector<ObjectModel *> models;
+	models.reserve(mirror_view_models_.size());
+	for (ObjectModel *model : mirror_view_models_) {
+		models.push_back(model);
+	}
+	for (ObjectModel *model : models) {
+		if (!p_open) {
+			// The mirror stopped rendering: its verdicts release onto the node's.
+			model->mirror_[p_view].own = 0;
+			model->mirror_[p_view].occlusion_hidden = false;
+			model->mirror_[p_view].section_mask = -1;
+			model->mirror_[p_view].lod = 0;
+		}
+		model->refresh_view_split();
+		// The water side decides which mirror bits a split node keeps.
+		if (model->mirror_[0].split || model->mirror_[1].split) {
+			model->apply_view_split_layers();
+		}
+	}
+	if (!mirror_view_open_[0] && !mirror_view_open_[1]) {
+		mirror_view_models_.clear();
+	}
+}
+
+bool ObjectModel::is_mirror_view_split(int p_view) const {
+	return p_view >= 0 && p_view <= 1 && mirror_[p_view].split;
+}
+
+int ObjectModel::get_mirror_view_twin_count(int p_view) const {
+	return p_view >= 0 && p_view <= 1
+			? static_cast<int>(twin_sets_[kTwinMirror + p_view].twins.size())
+			: 0;
+}
+
+bool ObjectModel::has_view_twins() const {
+	for (const TwinSet &set : twin_sets_) {
+		if (!set.twins.empty()) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void ObjectModel::free_all_view_twins() {
+	for (TwinSet &set : twin_sets_) {
+		free_view_twins(set);
+	}
+}
+
 Variant ObjectModel::get_view_twin_shader_parameter(int p_index, const StringName &p_name) const {
+	const TwinSet &inset = twin_sets_[kTwinInset];
 	RenderingServer *rs = RenderingServer::get_singleton();
-	if (rs == nullptr || p_index < 0 || static_cast<std::size_t>(p_index) >= view_twins_.size()) {
+	if (rs == nullptr || p_index < 0 || static_cast<std::size_t>(p_index) >= inset.twins.size()) {
 		return Variant();
 	}
 	return rs->instance_geometry_get_shader_parameter(
-			view_twins_[static_cast<std::size_t>(p_index)].instance, p_name);
+			inset.twins[static_cast<std::size_t>(p_index)].instance, p_name);
 }
 
 bool ObjectModel::is_inset_view_drawn() const {
+	const TwinSet &inset = twin_sets_[kTwinInset];
 	if (!inset_view_open_ || !is_inside_tree()) {
 		return false;
 	}
-	return view_split_ ? !view_twins_.empty() : is_visible_in_tree() && !camera_pixel_culled_;
+	return view_split_ ? !inset.twins.empty() : is_visible_in_tree() && !camera_pixel_culled_;
 }
 
 int64_t ObjectModel::get_inset_view_section_mask() const {
@@ -482,17 +707,19 @@ int64_t ObjectModel::get_inset_view_section_mask() const {
 }
 
 bool ObjectModel::is_inset_view_level_skinned() const {
-	const int level = view_twin_lod_ >= 0 ? view_twin_lod_ : active_lod_;
+	const TwinSet &inset = twin_sets_[kTwinInset];
+	const int level = inset.lod >= 0 ? inset.lod : active_lod_;
 	return object_data_.is_valid() && object_data_->is_skinned(level);
 }
 
 void ObjectModel::collect_inset_point_light_draw_parts(std::vector<int32_t> &r_robjs) const {
+	const TwinSet &inset = twin_sets_[kTwinInset];
 	r_robjs.clear();
-	if (view_twin_lod_ < 0 || static_cast<std::size_t>(view_twin_lod_) >= level_surfaces_.size()) {
+	if (inset.lod < 0 || static_cast<std::size_t>(inset.lod) >= level_surfaces_.size()) {
 		return;
 	}
-	const std::vector<LevelSurface> &level = level_surfaces_[static_cast<std::size_t>(view_twin_lod_)];
-	for (const ViewTwin &twin : view_twins_) {
+	const std::vector<LevelSurface> &level = level_surfaces_[static_cast<std::size_t>(inset.lod)];
+	for (const ViewTwin &twin : inset.twins) {
 		if (twin.surface < 0 || static_cast<std::size_t>(twin.surface) >= level.size()) {
 			continue;
 		}
@@ -517,9 +744,10 @@ void ObjectModel::apply_inset_point_light_selection_to_robj(int p_robj_index, in
 
 void ObjectModel::write_twin_point_lights(bool p_all, int p_robj_index, int p_count,
 		const Vector4 *p_posr, const Vector4 *p_color) {
+	TwinSet &inset = twin_sets_[kTwinInset];
 	RenderingServer *rs = RenderingServer::get_singleton();
-	if (rs == nullptr || view_twin_lod_ < 0 ||
-			static_cast<std::size_t>(view_twin_lod_) >= level_surfaces_.size()) {
+	if (rs == nullptr || inset.lod < 0 ||
+			static_cast<std::size_t>(inset.lod) >= level_surfaces_.size()) {
 		return;
 	}
 	// The node's packed form (apply_point_light_selection_to_robj): the
@@ -536,8 +764,8 @@ void ObjectModel::write_twin_point_lights(bool p_all, int p_robj_index, int p_co
 	}
 	// twin_uniform_names(): 1 the count, 2..5 the posr, 6..9 the colours.
 	const StringName *names = twin_uniform_names();
-	const std::vector<LevelSurface> &level = level_surfaces_[static_cast<std::size_t>(view_twin_lod_)];
-	for (ViewTwin &twin : view_twins_) {
+	const std::vector<LevelSurface> &level = level_surfaces_[static_cast<std::size_t>(inset.lod)];
+	for (ViewTwin &twin : inset.twins) {
 		if (twin.surface < 0 || static_cast<std::size_t>(twin.surface) >= level.size()) {
 			continue;
 		}
@@ -576,8 +804,9 @@ void ObjectModel::apply_view_split_layers() {
 	}
 }
 
-void ObjectModel::build_view_twins(int p_level, int64_t p_mask) {
-	free_view_twins();
+void ObjectModel::build_view_twins(TwinSet &r_set, int p_level, int64_t p_mask,
+		uint32_t p_layer) {
+	free_view_twins(r_set);
 	if (p_level < 0 || static_cast<std::size_t>(p_level) >= level_surfaces_.size() ||
 			!is_inside_tree()) {
 		return;
@@ -605,9 +834,9 @@ void ObjectModel::build_view_twins(int p_level, int64_t p_mask) {
 		// strip's twin reads the same material palette and takes its posed
 		// box (object_model_skin_palette.cpp).
 		const bool godot_skinned = surface.is_skinned && !surface.skin_palette;
-		if (godot_skinned && skeleton_ != nullptr && view_twin_skin_.is_null() &&
+		if (godot_skinned && skeleton_ != nullptr && r_set.skin.is_null() &&
 				skeleton_skin_.is_valid()) {
-			view_twin_skin_ = skeleton_->register_skin(skeleton_skin_);
+			r_set.skin = skeleton_->register_skin(skeleton_skin_);
 		}
 		for (int pass = 0; pass < 2; ++pass) {
 			const Ref<ShaderMaterial> &material =
@@ -621,30 +850,30 @@ void ObjectModel::build_view_twins(int p_level, int64_t p_mask) {
 			twin.instance = rs->instance_create();
 			rs->instance_set_base(twin.instance, surface.mesh->get_rid());
 			rs->instance_set_scenario(twin.instance, scenario);
-			rs->instance_set_layer_mask(twin.instance, LAYER_INSET_VIEW);
+			rs->instance_set_layer_mask(twin.instance, p_layer);
 			rs->instance_geometry_set_cast_shadows_setting(
 					twin.instance, RenderingServer::SHADOW_CASTING_SETTING_OFF);
 			if (material.is_valid()) {
 				rs->instance_geometry_set_material_override(twin.instance, material->get_rid());
 			}
-			if (godot_skinned && view_twin_skin_.is_valid()) {
-				rs->instance_attach_skeleton(twin.instance, view_twin_skin_->get_skeleton());
+			if (godot_skinned && r_set.skin.is_valid()) {
+				rs->instance_attach_skeleton(twin.instance, r_set.skin->get_skeleton());
 			} else if (surface.skin_palette) {
 				rs->instance_set_custom_aabb(twin.instance, skin_posed_bounds_);
 			}
-			view_twins_.push_back(twin);
+			r_set.twins.push_back(twin);
 			++live_geometry_instance_count_;
 		}
 		rigid = rigid || !surface.is_skinned;
 	}
-	view_twin_lod_ = p_level;
-	view_twin_mask_ = p_mask;
-	view_twin_serial_ = scene_build_serial_;
-	view_twin_destroyed_ = destroyed_section_mask_;
+	r_set.lod = p_level;
+	r_set.mask = p_mask;
+	r_set.serial = scene_build_serial_;
+	r_set.destroyed = destroyed_section_mask_;
 	// The twin level's dynamic materials the node's level does not push (its
 	// alpha-strip duplicates, rows only that level uses): classified like the
 	// node's own (classify_materials) and pushed by sync_view_twin.
-	for (const ViewTwin &twin : view_twins_) {
+	for (const ViewTwin &twin : r_set.twins) {
 		if (twin.auxiliary) {
 			continue;
 		}
@@ -657,7 +886,7 @@ void ObjectModel::build_view_twins(int p_level, int64_t p_mask) {
 			node_pushes = surface_materials_[i] == surface.material;
 		}
 		bool listed = false;
-		for (const TwinDynamicMaterial &row : view_twin_dynamic_) {
+		for (const TwinDynamicMaterial &row : r_set.dynamic) {
 			listed = listed || row.material == surface.material;
 		}
 		if (node_pushes || listed) {
@@ -672,7 +901,7 @@ void ObjectModel::build_view_twins(int p_level, int64_t p_mask) {
 		row.material = surface.material;
 		row.material_index = surface.material_index;
 		row.needs_eval = needs_eval;
-		view_twin_dynamic_.push_back(row);
+		r_set.dynamic.push_back(row);
 	}
 	// A level the node does not show poses its parts on nodes of its own
 	// (outside the tree), written through the same per-graphic PANM cache
@@ -685,12 +914,14 @@ void ObjectModel::build_view_twins(int p_level, int64_t p_mask) {
 				? model.lods[p_level].render_object_count
 				: 0;
 		for (std::size_t i = 0; i < parts; ++i) {
-			view_twin_pose_nodes_.push_back(memnew(Node3D));
+			r_set.pose_nodes.push_back(memnew(Node3D));
 		}
-		view_twin_pose_revision_ = 0;
+		r_set.pose_revision = 0;
 	}
-	sync_view_twin();
-	sync_inset_section_twins(!view_twins_.empty());
+	sync_view_twin(r_set);
+	if (&r_set == &twin_sets_[kTwinInset]) {
+		sync_inset_section_twins(!r_set.twins.empty());
+	}
 }
 
 void ObjectModel::attach_inset_section_twin(const RID &p_instance, int p_section) {
@@ -710,7 +941,7 @@ void ObjectModel::attach_inset_section_twin(const RID &p_instance, int p_section
 		twin.section = p_section;
 		inset_section_twins_.push_back(twin);
 	}
-	sync_inset_section_twins(!view_twins_.empty());
+	sync_inset_section_twins(!twin_sets_[kTwinInset].twins.empty());
 }
 
 void ObjectModel::detach_inset_section_twin(const RID &p_instance) {
@@ -727,6 +958,7 @@ void ObjectModel::detach_inset_section_twin(const RID &p_instance) {
 // node's pose where the twin shows the node's level, else the twin level's
 // own pose nodes; a section the Inset does not draw hides them.
 void ObjectModel::sync_inset_section_twins(bool p_drawn) {
+	const TwinSet &inset = twin_sets_[kTwinInset];
 	if (inset_section_twins_.empty()) {
 		return;
 	}
@@ -734,11 +966,11 @@ void ObjectModel::sync_inset_section_twins(bool p_drawn) {
 	if (rs == nullptr) {
 		return;
 	}
-	const bool node_pose = view_twin_lod_ == active_lod_ || rigid_parts_;
+	const bool node_pose = inset.lod == active_lod_ || rigid_parts_;
 	const Transform3D model_xform = is_inside_tree() ? get_global_transform() : Transform3D();
 	for (const InsetSectionTwin &twin : inset_section_twins_) {
 		const bool drawn = p_drawn && is_inside_tree() &&
-				inset_section_part_visible(view_twin_mask_, twin.section);
+				inset_section_part_visible(inset.mask, twin.section);
 		rs->instance_set_visible(twin.instance, drawn);
 		if (!drawn) {
 			continue;
@@ -750,9 +982,9 @@ void ObjectModel::sync_inset_section_twins(bool p_drawn) {
 					xform = (*part)->get_global_transform();
 				}
 			}
-		} else if (twin.section >= 0 && twin.section < view_twin_pose_nodes_.size()) {
+		} else if (twin.section >= 0 && twin.section < inset.pose_nodes.size()) {
 			if (const Node3D *pose = Object::cast_to<Node3D>(
-						static_cast<Object *>(view_twin_pose_nodes_[twin.section]))) {
+						static_cast<Object *>(inset.pose_nodes[twin.section]))) {
 				xform = model_xform * pose->get_transform();
 			}
 		}
@@ -760,31 +992,33 @@ void ObjectModel::sync_inset_section_twins(bool p_drawn) {
 	}
 }
 
-void ObjectModel::free_view_twins() {
-	sync_inset_section_twins(false);
-	if (view_twins_.empty() && view_twin_pose_nodes_.is_empty() && view_twin_skin_.is_null() &&
-			view_twin_dynamic_.empty()) {
+void ObjectModel::free_view_twins(TwinSet &r_set) {
+	if (&r_set == &twin_sets_[kTwinInset]) {
+		sync_inset_section_twins(false);
+	}
+	if (r_set.twins.empty() && r_set.pose_nodes.is_empty() && r_set.skin.is_null() &&
+			r_set.dynamic.empty()) {
 		return;
 	}
 	RenderingServer *rs = RenderingServer::get_singleton();
-	for (const ViewTwin &twin : view_twins_) {
+	for (const ViewTwin &twin : r_set.twins) {
 		if (rs != nullptr && twin.instance.is_valid()) {
 			rs->free_rid(twin.instance);
 		}
 	}
-	live_geometry_instance_count_ -= static_cast<int64_t>(view_twins_.size());
-	view_twins_.clear();
-	for (int64_t i = 0; i < view_twin_pose_nodes_.size(); ++i) {
-		Node3D *pose = Object::cast_to<Node3D>(static_cast<Object *>(view_twin_pose_nodes_[i]));
+	live_geometry_instance_count_ -= static_cast<int64_t>(r_set.twins.size());
+	r_set.twins.clear();
+	for (int64_t i = 0; i < r_set.pose_nodes.size(); ++i) {
+		Node3D *pose = Object::cast_to<Node3D>(static_cast<Object *>(r_set.pose_nodes[i]));
 		if (pose != nullptr) {
 			memdelete(pose);
 		}
 	}
-	view_twin_pose_nodes_ = Array();
-	view_twin_pose_revision_ = 0;
-	view_twin_skin_.unref();
-	view_twin_dynamic_.clear();
-	view_twin_lod_ = -1;
+	r_set.pose_nodes = Array();
+	r_set.pose_revision = 0;
+	r_set.skin.unref();
+	r_set.dynamic.clear();
+	r_set.lod = -1;
 }
 
 // One model's twins follow its final pose: the model transform through the
@@ -792,9 +1026,9 @@ void ObjectModel::free_view_twins() {
 // the node's), the instance uniforms of the node instance drawing the same
 // part, and the blended strips' water-side rung (renderer/render_order), which
 // the node's refresh_render_order sets only for the level it shows.
-void ObjectModel::sync_view_twin() {
-	if (view_twins_.empty() || !is_inside_tree() || view_twin_lod_ < 0 ||
-			static_cast<std::size_t>(view_twin_lod_) >= level_surfaces_.size()) {
+void ObjectModel::sync_view_twin(TwinSet &r_set) {
+	if (r_set.twins.empty() || !is_inside_tree() || r_set.lod < 0 ||
+			static_cast<std::size_t>(r_set.lod) >= level_surfaces_.size()) {
 		return;
 	}
 	RenderingServer *rs = RenderingServer::get_singleton();
@@ -802,16 +1036,16 @@ void ObjectModel::sync_view_twin() {
 		return;
 	}
 	const Transform3D model_xform = get_global_transform();
-	const bool node_pose = view_twin_lod_ == active_lod_;
-	if (!node_pose && !rigid_parts_ && !view_twin_pose_nodes_.is_empty() &&
+	const bool node_pose = r_set.lod == active_lod_;
+	if (!node_pose && !rigid_parts_ && !r_set.pose_nodes.is_empty() &&
 			object_data_.is_valid()) {
-		view_twin_pose_revision_ = object_data_->apply_panm_to_nodes_table(view_twin_lod_,
-				anim_time_ms_, runtime_ctrl_values(), view_twin_pose_nodes_,
-				view_twin_pose_revision_);
+		r_set.pose_revision = object_data_->apply_panm_to_nodes_table(r_set.lod,
+				anim_time_ms_, runtime_ctrl_values(), r_set.pose_nodes,
+				r_set.pose_revision);
 	}
-	if (!view_twin_dynamic_.empty() && object_data_.is_valid()) {
+	if (!r_set.dynamic.empty() && object_data_.is_valid()) {
 		const opennova::renderer::ControlRegisterValues ctrl = runtime_ctrl_values();
-		for (TwinDynamicMaterial &row : view_twin_dynamic_) {
+		for (TwinDynamicMaterial &row : r_set.dynamic) {
 			apply_dynamic_material(row.material, row.material_index, row.needs_eval, row.stamp,
 					ctrl);
 		}
@@ -819,8 +1053,8 @@ void ObjectModel::sync_view_twin() {
 	const StringName *names = twin_uniform_names();
 	ObjectShaderCache *shader_cache = ObjectShaderCache::get_singleton();
 	const std::vector<LevelSurface> &level =
-			level_surfaces_[static_cast<std::size_t>(view_twin_lod_)];
-	for (const ViewTwin &twin : view_twins_) {
+			level_surfaces_[static_cast<std::size_t>(r_set.lod)];
+	for (const ViewTwin &twin : r_set.twins) {
 		if (twin.surface < 0 || static_cast<std::size_t>(twin.surface) >= level.size()) {
 			continue;
 		}
@@ -838,9 +1072,9 @@ void ObjectModel::sync_view_twin() {
 					xform = parent->get_global_transform();
 				}
 			} else if (surface.robj_index >= 0 &&
-					surface.robj_index < view_twin_pose_nodes_.size()) {
+					surface.robj_index < r_set.pose_nodes.size()) {
 				const Node3D *pose = Object::cast_to<Node3D>(
-						static_cast<Object *>(view_twin_pose_nodes_[surface.robj_index]));
+						static_cast<Object *>(r_set.pose_nodes[surface.robj_index]));
 				if (pose != nullptr) {
 					xform = model_xform * pose->get_transform();
 				}
@@ -892,9 +1126,18 @@ void ObjectModel::sync_view_twin() {
 
 void ObjectModel::sync_view_twins() {
 	for (ObjectModel *model : inset_view_models_) {
-		if (!model->view_twins_.empty()) {
-			model->sync_view_twin();
+		TwinSet &inset = model->twin_sets_[kTwinInset];
+		if (!inset.twins.empty()) {
+			model->sync_view_twin(inset);
 			model->sync_inset_section_twins(true);
+		}
+	}
+	for (ObjectModel *model : mirror_view_models_) {
+		for (int m = 0; m < 2; ++m) {
+			TwinSet &set = model->twin_sets_[kTwinMirror + m];
+			if (!set.twins.empty()) {
+				model->sync_view_twin(set);
+			}
 		}
 	}
 }

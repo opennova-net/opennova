@@ -163,8 +163,9 @@ ObjectModel::~ObjectModel() {
 	foliage_mask_models_.erase(this);
 	authored_lod_models_.erase(this);
 	pixel_cull_models_.erase(this);
-	free_view_twins();
+	free_all_view_twins();
 	inset_view_models_.erase(this);
+	mirror_view_models_.erase(this);
 	retire_geometry_instances();
 }
 
@@ -410,10 +411,24 @@ uint32_t ObjectModel::presentation_layer_mask(bool p_auxiliary) const {
 	if (camera_pixel_culled_ && presentation_layer_ != PRESENTATION_LAYER_VIEWMODEL) {
 		base = LAYER_FP_BODY_SHADOW_ONLY;
 	}
-	// While the weapon Inset's verdicts differ the node draws the main view's
-	// only: the world bits swap for the main-view bits the Inset camera lacks
-	// (a twin draws the Inset's, object_model_views.cpp).
-	if (view_split_) {
+	// While a water mirror's verdict differs the node leaves that mirror: the
+	// world bits swap for the scene-view bits no mirror admits (beauty and
+	// Inset, or beauty alone while the Inset differs too) plus the private bit
+	// of each mirror that still sees the node by its water side (a twin draws
+	// a differing mirror's, object_model_views.cpp).
+	if ((mirror_[0].split || mirror_[1].split) &&
+			(base == LAYER_WORLD || base == LAYER_WORLD_NO_MIRROR)) {
+		uint32_t views = view_split_ ? LAYER_MAIN_VIEW_NO_REFLECTION : LAYER_SCENE_VIEW_NO_REFLECTION;
+		for (int m = 0; m < 2; ++m) {
+			if (!mirror_[m].split && mirror_admits_base(m)) {
+				views |= m == 0 ? LAYER_MIRROR_VIEW : LAYER_INSET_MIRROR_VIEW;
+			}
+		}
+		base = views;
+	} else if (view_split_) {
+		// While the weapon Inset's verdicts differ the node draws the main
+		// view's only: the world bits swap for the main-view bits the Inset
+		// camera lacks (a twin draws the Inset's).
 		base = base == LAYER_WORLD ? LAYER_MAIN_VIEW
 				: base == LAYER_WORLD_NO_MIRROR ? LAYER_MAIN_VIEW_NO_MIRROR
 				: base;
@@ -1395,12 +1410,13 @@ void ObjectModel::_notification(int p_what) {
 		point_light_draw_parts_dirty_ = true;
 		wake_runtime_frame();
 		// An ancestor's edge reaches the Inset twins too (they are no nodes).
-		if (inset_view_open_ && inset_view_models_.has(this)) {
+		if ((inset_view_open_ && inset_view_models_.has(this)) ||
+				mirror_view_models_.has(this)) {
 			refresh_view_split();
 		}
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
 		// The twins live in the world's scenario, not under this node.
-		free_view_twins();
+		free_all_view_twins();
 	} else if (p_what == NOTIFICATION_TRANSFORM_CHANGED) {
 		// Models with blended strips or their own mirror CLIP arming enable
 		// this notification: a moved model re-classifies its strips against
@@ -1424,8 +1440,9 @@ void ObjectModel::_notification(int p_what) {
 		}
 		alpha_strip_models_.erase(this);
 		water_mirror_clip_models_.erase(this);
-		free_view_twins();
+		free_all_view_twins();
 		inset_view_models_.erase(this);
+		mirror_view_models_.erase(this);
 		retire_geometry_instances();
 	}
 }
@@ -1461,7 +1478,7 @@ void ObjectModel::advance_runtime_frame_profiled(double p_delta,
 	// materials advance for the twins (object_model_views.cpp).
 	// A frame that skips its world submits no model (set_world_skipped).
 	const bool renderable = !world_skipped_ &&
-			((is_visible_in_tree() && on_screen_) || !view_twins_.empty());
+			((is_visible_in_tree() && on_screen_) || has_view_twins());
 	if (p_profile != nullptr && renderable) {
 		++p_profile->renderable_models;
 	}
@@ -1804,7 +1821,7 @@ void ObjectModel::set_on_screen(bool p_value) {
 // draw parts dirty + the runtime wake) fires exactly on the product's edges.
 void ObjectModel::apply_node_visibility() {
 	set_visible(present_visible_ && !occlusion_hidden_ && !subpixel_hidden_);
-	if (inset_view_open_ && inset_view_models_.has(this)) {
+	if ((inset_view_open_ && inset_view_models_.has(this)) || mirror_view_models_.has(this)) {
 		refresh_view_split();
 	}
 }
@@ -2038,6 +2055,20 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_inset_view_drawn"), &ObjectModel::is_inset_view_drawn);
 	ClassDB::bind_method(D_METHOD("get_inset_view_section_mask"),
 			&ObjectModel::get_inset_view_section_mask);
+	ClassDB::bind_method(D_METHOD("set_mirror_occlusion_hidden", "view", "hidden"),
+			&ObjectModel::set_mirror_occlusion_hidden);
+	ClassDB::bind_method(D_METHOD("set_mirror_occlusion_section_mask", "view", "raw_mask",
+								 "forced_mask"),
+			&ObjectModel::set_mirror_occlusion_section_mask);
+	ClassDB::bind_method(D_METHOD("clear_mirror_occlusion", "view"),
+			&ObjectModel::clear_mirror_occlusion);
+	ClassDB::bind_static_method("ObjectModel",
+			D_METHOD("set_mirror_view_state", "view", "open", "below_water"),
+			&ObjectModel::set_mirror_view_state);
+	ClassDB::bind_method(D_METHOD("is_mirror_view_split", "view"),
+			&ObjectModel::is_mirror_view_split);
+	ClassDB::bind_method(D_METHOD("get_mirror_view_twin_count", "view"),
+			&ObjectModel::get_mirror_view_twin_count);
 	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("get_live_geometry_instance_count"),
 			&ObjectModel::get_live_geometry_instance_count);

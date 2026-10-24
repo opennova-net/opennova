@@ -1213,7 +1213,8 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 	// the Inset's twins never reach it.
 	constexpr std::uint32_t kObjectPassLayers = visual_layers::WORLD |
 			visual_layers::WORLD_NO_MIRROR | visual_layers::MAIN_VIEW |
-			visual_layers::MAIN_VIEW_NO_MIRROR | visual_layers::VIEWMODEL;
+			visual_layers::MAIN_VIEW_NO_MIRROR | visual_layers::SCENE_VIEW_NO_REFLECTION |
+			visual_layers::MAIN_VIEW_NO_REFLECTION | visual_layers::VIEWMODEL;
 	std::vector<Transform3D> &emitted_transforms = impl_->emitted_transforms;
 	const std::vector<Q3SourceRecord *> &live = Q3SourceRegistry::live_records();
 	for (std::size_t index = 0; index < live.size(); ++index) {

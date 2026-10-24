@@ -64,6 +64,14 @@ enum : uint32_t {
 	// state takes a bit no mirror mask carries (env/water.h
 	// set_blink_water_views).
 	MAIN_VIEW_WATER = 1u << 23,
+	// The water mirrors' own bits, code-only: each reflected subscene draws its
+	// own collect's lists (engine inmatch/occlusion_collect.h MirrorViewLists),
+	// so where a mirror's verdict for a model differs from what its node shows
+	// that mirror, a twin draws the mirror's on the bit only that mirror camera
+	// admits (object/object_model.h): the main scene's mirror, the weapon
+	// Inset's.
+	MIRROR_VIEW = 1u << 24,
+	INSET_MIRROR_VIEW = 1u << 25,
 	// What the scene views draw and no mirror does: the beauty and the Inset
 	// cameras admit SCENE_VIEW_NO_REFLECTION, the beauty camera alone
 	// MAIN_VIEW_NO_REFLECTION, and no mirror mask carries either above or below

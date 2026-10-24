@@ -152,6 +152,10 @@ void Water::_bind_methods() {
 			"VISUAL_LAYER_SHADOW_CASTER_MASK", VISUAL_LAYER_SHADOW_CASTER_MASK);
 	ClassDB::bind_integer_constant(get_class_static(), "",
 			"REFLECTION_CULL_MASK", REFLECTION_CULL_MASK);
+	ClassDB::bind_integer_constant(get_class_static(), "",
+			"VISUAL_LAYER_MIRROR_VIEW", VISUAL_LAYER_MIRROR_VIEW);
+	ClassDB::bind_integer_constant(get_class_static(), "",
+			"VISUAL_LAYER_INSET_MIRROR_VIEW", VISUAL_LAYER_INSET_MIRROR_VIEW);
 }
 
 void Water::set_environment_path(const NodePath &p_path) {
@@ -732,8 +736,9 @@ void Water::_build_mirror_rig(MirrorRig &r_rig, const String &p_viewport_name,
 		// mission has water; this mirror only renders for a nonzero height,
 		// see docs/terrain/terrain-re.md "Empty-sector flat fallback").
 		// _update_reflection_camera re-adds WORLD_NO_MIRROR below water,
-		// where the retail collectors run unfiltered.
-		r_rig.camera->set_cull_mask(REFLECTION_CULL_MASK);
+		// where the retail collectors run unfiltered. Each mirror admits its
+		// own bit too, the twins drawing its own collect's verdicts.
+		r_rig.camera->set_cull_mask(REFLECTION_CULL_MASK | _mirror_own_layer(r_rig));
 		r_rig.viewport->add_child(r_rig.camera);
 		r_rig.camera->make_current();
 		// The witnessed post-scene dim and the sun/moon/glow redraw after it
@@ -1153,6 +1158,11 @@ void Water::_update_reflection_camera(Camera3D *p_cam, const Projection &p_proje
 			p_cam->get_h_offset(), Vector2i(source_size));
 }
 
+uint32_t Water::_mirror_own_layer(const MirrorRig &p_rig) const {
+	return &p_rig == &inset_mirror_ ? uint32_t(visual_layers::INSET_MIRROR_VIEW)
+									: uint32_t(visual_layers::MIRROR_VIEW);
+}
+
 void Water::_install_mirror_view(MirrorRig &r_rig, const opennova::env::MirrorSourceView &p_source,
 		double p_near, double p_far, real_t p_h_offset, const Vector2i &p_source_frame) {
 	Camera3D *mirror = r_rig.camera;
@@ -1167,9 +1177,9 @@ void Water::_install_mirror_view(MirrorRig &r_rig, const opennova::env::MirrorSo
 	mirror->set_global_transform(Transform3D(
 			Basis(to_v3(view.basis_x), to_v3(view.basis_y), to_v3(view.basis_z)),
 			to_v3(view.origin)));
-	mirror->set_cull_mask(view.below_water
+	mirror->set_cull_mask((view.below_water
 					? (REFLECTION_CULL_MASK | VISUAL_LAYER_WORLD_NO_MIRROR | visual_layers::MAIN_VIEW_NO_MIRROR)
-					: REFLECTION_CULL_MASK);
+					: REFLECTION_CULL_MASK) | _mirror_own_layer(r_rig));
 	mirror->set_keep_aspect_mode(view.keep_aspect_height ?
 					Camera3D::KEEP_HEIGHT : Camera3D::KEEP_WIDTH);
 	switch (view.projection) {

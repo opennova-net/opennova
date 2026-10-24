@@ -199,6 +199,14 @@ public:
 	// object/object_model.h).
 	void set_render_culled_inset(int p_handle, bool p_culled);
 	void set_wire_inset_view(bool p_active);
+	// A water mirror's own collector verdicts for the wire rows (view 0 the
+	// main scene's mirror, 1 the weapon Inset's), live while that mirror
+	// renders: the reflected subscene draws its own collect's lists, so a row
+	// a mirror draws runs its legs and the body, its held gun and its overlays
+	// take that mirror's verdict (drawn by an ObjectModel twin where it
+	// differs, object/object_model.h).
+	void set_render_culled_mirror(int p_view, int p_handle, bool p_culled);
+	void set_wire_mirror_view(int p_view, bool p_active);
 
 	// Cold rows the budget deferred on the last presented frame.
 	int pending_spawn_count() const { return pending_spawn_count_; }
@@ -365,6 +373,8 @@ public:
 	void present_death_piece_draws(const TypedArray<DeathPieceDraw> &p_draws);
 	// The weapon Inset pass's own piece draws (OcclusionFrame::apply_inset_frame).
 	void present_death_piece_draws_inset(
+			const std::vector<opennova::world::DeathPieceDraw> &p_draws);
+	void present_death_piece_draws_mirror(int p_view,
 			const std::vector<opennova::world::DeathPieceDraw> &p_draws);
 	// A death-piece slot's model (null when none) — the draw leg's read seam.
 	ObjectModel *death_piece_model(int p_slot) const;
@@ -705,6 +715,8 @@ private:
 	HashMap<int32_t, bool> wire_render_culled_;
 	HashMap<int32_t, bool> wire_render_culled_inset_;
 	bool wire_inset_view_ = false;
+	HashMap<int32_t, bool> wire_render_culled_mirror_[2];
+	bool wire_mirror_view_[2] = { false, false };
 	HashMap<int32_t, int32_t> wire_held_weapon_adm_;
 	HashMap<int32_t, ObjectID> wire_held_weapon_ids_;
 	// Placed person rows holding a third-person gun: handle -> the placed walk

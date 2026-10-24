@@ -957,7 +957,8 @@ func test_reflected_scene_mirrors_above_the_plane_and_keeps_the_live_eye_below()
 			"above the plane the eye reflects about the water")
 	assert_almost_eq(mirror.global_basis.z.y, -cam.global_basis.z.y, 0.0001,
 			"the mirrored forward flips its vertical component")
-	assert_eq(mirror.cull_mask, Water.REFLECTION_CULL_MASK)
+	assert_eq(mirror.cull_mask, Water.REFLECTION_CULL_MASK | Water.VISUAL_LAYER_MIRROR_VIEW,
+			"the mirror admits its own twins' bit")
 
 	cam.global_position = Vector3(100.3, 1.0, -33.7)
 	water.advance_frame(TICK)
@@ -966,7 +967,8 @@ func test_reflected_scene_mirrors_above_the_plane_and_keeps_the_live_eye_below()
 	assert_true(mirror.global_basis.is_equal_approx(cam.global_basis),
 			"below the plane the reflected scene keeps the live orientation")
 	assert_eq(mirror.cull_mask,
-			Water.REFLECTION_CULL_MASK | Water.VISUAL_LAYER_WORLD_NO_MIRROR | (1 << 22),
+			Water.REFLECTION_CULL_MASK | Water.VISUAL_LAYER_WORLD_NO_MIRROR | (1 << 22)
+					| Water.VISUAL_LAYER_MIRROR_VIEW,
 			"below the plane the reflected collectors run unfiltered")
 	assert_eq(mirror.cull_mask & Water.VISUAL_LAYER_WATER, 0,
 			"the reflected pass never draws the water layer on either side")

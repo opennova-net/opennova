@@ -191,6 +191,10 @@ public:
 		LAYER_MAIN_VIEW = 1 << 20,
 		LAYER_INSET_VIEW = 1 << 21,
 		LAYER_MAIN_VIEW_NO_MIRROR = 1 << 22,
+		LAYER_MIRROR_VIEW = 1 << 24,
+		LAYER_INSET_MIRROR_VIEW = 1 << 25,
+		LAYER_SCENE_VIEW_NO_REFLECTION = 1 << 26,
+		LAYER_MAIN_VIEW_NO_REFLECTION = 1 << 27,
 		LAYER_SHADOW_CASTER_MASK =
 				LAYER_STATIC_SHADOW_CASTER | LAYER_DYNAMIC_SHADOW_CASTER,
 	};
@@ -465,16 +469,6 @@ private:
 		uint64_t lights_hash = 0;
 	};
 	bool view_split_ = false;
-	std::vector<ViewTwin> view_twins_;
-	int view_twin_lod_ = -1;
-	int64_t view_twin_mask_ = -1;
-	uint32_t view_twin_destroyed_ = 0;
-	uint32_t view_twin_serial_ = 0;
-	// The part poses of a twin level the node does not show (Node3D objects
-	// outside the tree, written through the per-graphic PANM cache).
-	Array view_twin_pose_nodes_;
-	int64_t view_twin_pose_revision_ = 0;
-	Ref<SkinReference> view_twin_skin_;
 	// Section-bound instances another owner minted for the Inset view (the
 	// scar presenter's section-local scar twins): posed like this model's
 	// twins, shown only while a twin draws their section.
@@ -499,9 +493,42 @@ private:
 	// (p_all), else the twins of ROBJ p_robj_index (-1: the skinned ones).
 	void write_twin_point_lights(bool p_all, int p_robj_index, int p_count,
 			const Vector4 *p_posr, const Vector4 *p_color);
-	void build_view_twins(int p_level, int64_t p_mask);
-	void free_view_twins();
-	void sync_view_twin();
+	// One alternate view's twin set (twin_sets_): the Inset's, the main scene
+	// water mirror's, the Inset's water mirror's.
+	struct TwinSet;
+	void build_view_twins(TwinSet &r_set, int p_level, int64_t p_mask, uint32_t p_layer);
+	void free_view_twins(TwinSet &r_set);
+	void free_all_view_twins();
+	void sync_view_twin(TwinSet &r_set);
+	bool has_view_twins() const;
+	// --- the water mirrors' views (object_model_views.cpp) ---
+	// A water mirror's reflected subscene draws its own collect's lists (engine
+	// inmatch/occlusion_collect.h MirrorViewLists): where a mirror's own verdict
+	// for the node differs from what the node draws there by its layers, the
+	// node leaves that mirror (its world bits swap for the scene-view bits no
+	// mirror admits, plus the private bit of every mirror that agrees) and a
+	// twin set draws the mirror's on that mirror's private bit. A model with no
+	// verdict of its own takes its owner's, as retail draws a part inside its
+	// owner's submit; one no mirror view marked follows its node.
+	struct MirrorState {
+		uint8_t own = 0; // kInsetOwnOcclusion / kInsetOwnSections / kInsetOwnLod
+		bool occlusion_hidden = false;
+		int64_t section_mask = -1;
+		int lod = 0;
+		bool split = false;
+	};
+	MirrorState mirror_[2];
+	static HashSet<ObjectModel *> mirror_view_models_;
+	static bool mirror_view_open_[2];
+	static bool mirror_view_below_[2];
+	void mark_mirror_view(int p_view);
+	static void refresh_mirror_views();
+	// Whether the mirror camera of view `p_view` admits the node's own layer
+	// by its water side (WORLD always, WORLD_NO_MIRROR below the water).
+	bool mirror_admits_base(int p_view) const;
+	// The mirror's draw verdict for the model (its own, else its owner's while
+	// the main view hides the owner, else the main view's by the water side).
+	bool mirror_view_draws(int p_view) const;
 	bool authored_occluders_enabled_ = false;
 	std::vector<int32_t> authored_lod_thresholds_q16_;
 	std::vector<bool> authored_lod_available_;
@@ -709,7 +736,26 @@ private:
 		bool needs_eval = false;
 		MaterialRuntimeStamp stamp;
 	};
-	std::vector<TwinDynamicMaterial> view_twin_dynamic_;
+	// One alternate view's twin set: an instance per drawn surface of its
+	// level, the part poses of a level the node does not show (Node3D objects
+	// outside the tree, written through the per-graphic PANM cache), the twin
+	// skeleton skin and the level's own dynamic materials.
+	struct TwinSet {
+		std::vector<ViewTwin> twins;
+		int lod = -1;
+		int64_t mask = -1;
+		uint32_t destroyed = 0;
+		uint32_t serial = 0;
+		Array pose_nodes;
+		int64_t pose_revision = 0;
+		Ref<SkinReference> skin;
+		std::vector<TwinDynamicMaterial> dynamic;
+	};
+	// [0] the weapon Inset's, [1] the main scene's water mirror's, [2] the
+	// Inset's water mirror's.
+	static constexpr int kTwinInset = 0;
+	static constexpr int kTwinMirror = 1;
+	TwinSet twin_sets_[3];
 	// Set by an EntityPresenter row plan that retains this model by pointer and
 	// cleared when that plan drops the row; only planned models advance
 	// lifetime_generation_ when they die.
@@ -1062,6 +1108,21 @@ public:
 	void set_inset_occlusion_hidden(bool p_hidden);
 	void set_inset_occlusion_section_mask(int64_t p_raw_mask, int64_t p_forced_mask);
 	void clear_inset_occlusion();
+	// A water mirror's collect verdicts (OcclusionFrame; view 0 the main
+	// scene's mirror, 1 the weapon Inset's): its hide and its raw section mask
+	// (the def's forced sections are shared), marking the model and its model
+	// descendants; clear releases both onto the node's.
+	void set_mirror_occlusion_hidden(int p_view, bool p_hidden);
+	void set_mirror_occlusion_section_mask(int p_view, int64_t p_raw_mask, int64_t p_forced_mask);
+	void clear_mirror_occlusion(int p_view);
+	// A presenter-driven model's level in a mirror (the death pieces' own level
+	// walk, run per collect): the set_active_lod of that mirror's view.
+	void set_mirror_view_lod(int p_view, int p_lod_index);
+	// Whether mirror view `p_view` renders this frame and its eye is below the
+	// water; a closing view releases every verdict and converges every model.
+	static void set_mirror_view_state(int p_view, bool p_open, bool p_below_water);
+	bool is_mirror_view_split(int p_view) const;
+	int get_mirror_view_twin_count(int p_view) const;
 	// A presenter-driven model's Inset level (the death pieces' own level
 	// walk, run per collect): the set_active_lod of the Inset view.
 	void set_inset_view_lod(int p_lod_index);
@@ -1076,7 +1137,7 @@ public:
 	int get_inset_view_lod() const;
 	bool is_inset_view_subpixel_hidden() const;
 	bool is_view_split() const { return view_split_; }
-	int get_view_twin_count() const { return static_cast<int>(view_twins_.size()); }
+	int get_view_twin_count() const { return static_cast<int>(twin_sets_[kTwinInset].twins.size()); }
 	// One twin's instance uniform as the RenderingServer holds it (the typed
 	// read-back of what the Inset draws with; nil past the count).
 	Variant get_view_twin_shader_parameter(int p_index, const StringName &p_name) const;
