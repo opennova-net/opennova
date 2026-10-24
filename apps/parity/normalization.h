@@ -584,8 +584,9 @@ inline constexpr Normalization kNormalizations[] = {
 	{ "uplink.carrier", MaskKind::Field, 'C', 0x00C, "carrier", 0,
 			"the ground entity handle is session-local: compared as none/bound, and as the "
 			"count of its changes between consecutive uplinks. The word is the body's ground "
-			"link +0x28 (NetPacket_SerializePlayerState @0x4C09C0: the read @0x4C142B, the "
-			"handle word @0x4C1950) and the position goes out relative to its pose "
+			"link +0x28 (NetPacket_SerializePlayerState @0x4C09C0: the read @0x4C141D, held in "
+			"a local @0x4C142B, the handle word @0x4C1950) and the position goes out relative "
+			"to its pose "
 			"(Entity_TransformWorldToLocal @0x4C1961, the store @0x4C197C; the host's apply "
 			"back to world @0x4C1DE1), so each change is a change of the position's frame of "
 			"reference: x7's fragrespawn RR, RR-aa and OR change it once (none to the hut "
