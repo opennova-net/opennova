@@ -159,10 +159,10 @@ func _init() -> void:
 
 
 func _on_player_options_changed(state: PlayerOptions.State) -> void:
-	# update() applied the device-global audio once already; only the running
-	# Simulation's view settings are this listener's to push.
-	var sim: Simulation = _world.get_sim() if _world != null else null
-	_player_options.apply_view(sim)
+	# update() applied the device-global audio once already. The aspect mode
+	# never reaches a running mission: the view and the HUD take it at the next
+	# mission start (_on_world_loaded), as retail's projection takes only the
+	# session copy its start applies (PlayerOptions.apply carries the witness).
 	# The world copies the object detail at its next mission start; the
 	# texture filter reaches the model effects at once and the terrain's
 	# device filter at the next mission start.
@@ -182,7 +182,6 @@ func _on_player_options_changed(state: PlayerOptions.State) -> void:
 		_hud_presenter.set_crosshair_style(state.crosshair_style)
 		_hud_presenter.set_crosshair_color(state.crosshair_color)
 		_hud_presenter.set_crosshair_spread_enabled(state.crosshair_spread)
-		_hud_presenter.set_aspect_mode(state.aspect_mode)
 		_hud_presenter.set_tip_options(state.keyboard_tips, state.gameplay_tips)
 
 
@@ -1459,9 +1458,12 @@ func _on_world_loaded() -> void:
 	_player_options.apply(sim)
 	# Every mission start re-seeds the live HUD declutter level from the
 	# persisted config value (retail's session-settings apply), so a death
-	# screen's forced blank HUD ends with the mission it happened in.
+	# screen's forced blank HUD ends with the mission it happened in. The same
+	# start's aspect mode reaches the HUD's sights and scope geometry, which
+	# draw at it until the next mission start (PlayerOptions.apply).
 	if _hud_presenter != null:
 		_hud_presenter.reapply_persisted_hud_detail()
+		_hud_presenter.set_aspect_mode(_player_options.current().aspect_mode)
 	# The F3 engine-fact windows read and mutate through this Simulation from
 	# here until unload (ADR 0042 d6): DevTools holds it in C++ (the stats-board
 	# pattern) and does the record push / request drain with no GDScript relay.
