@@ -5,6 +5,7 @@
 #include "render/rd_fullscreen.h"
 #include "render/rd_timestamp_span.h"
 #include "render/rd_uniforms.h"
+#include "render/target_projection_xr_interface.h"
 #include "render/world_environment_lookup.h"
 #include "util/string_convert.h"
 
@@ -1959,7 +1960,10 @@ void FrameFxCompositorEffect::_render_callback(
 				"callback_mismatch");
 		return;
 	}
+	// The post-load targets lines' draw split (an instrument, --verbose alone).
+	TargetProjectionXrInterface::stamp_effect(true);
 	impl_->render(p_render_data);
+	TargetProjectionXrInterface::stamp_effect(false);
 }
 
 FrameFx::FrameFx() = default;

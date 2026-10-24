@@ -7,6 +7,7 @@
 #include <godot_cpp/classes/xr_interface_extension.hpp>
 #include <godot_cpp/variant/packed_float64_array.hpp>
 #include <godot_cpp/variant/projection.hpp>
+#include <godot_cpp/variant/rect2.hpp>
 #include <godot_cpp/variant/rid.hpp>
 #include <godot_cpp/variant/string_name.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
@@ -74,6 +75,17 @@ public:
 	PackedFloat64Array _get_projection_for_view(uint32_t p_view, double p_aspect,
 			double p_z_near, double p_z_far) override;
 	bool _pre_draw_viewport(const RID &p_render_target) override;
+	void _post_draw_viewport(const RID &p_render_target, const Rect2 &p_screen_rect) override;
+
+	// The post-load targets lines' draw split (an instrument, --verbose alone, switched on by
+	// those lines): each served target's last draw stamped at the renderer's pre-draw call, at
+	// the entry and the exit of the FrameFX callback it runs (its decode, the terminal effect a
+	// served target's camera carries) and at the post-draw call, so a target's draw reads as
+	// [pre-draw -> callback, the callback, callback -> post-draw] in microseconds (-1 where the
+	// draw ran no callback). FrameFxCompositorEffect::_render_callback calls stamp_effect.
+	static void set_draw_stamping(bool p_enabled);
+	static void stamp_effect(bool p_entering);
+	static bool draw_split_us(SubViewport *p_target, int64_t r_split[3]);
 
 protected:
 	static void _bind_methods();
@@ -85,6 +97,11 @@ private:
 		RID render_target;
 		Transform3D transform;
 		Projection projection;
+		// The last draw's stamps (ticks usec, 0 when not taken).
+		uint64_t stamp_pre = 0;
+		uint64_t stamp_effect_in = 0;
+		uint64_t stamp_effect_out = 0;
+		uint64_t stamp_post = 0;
 	};
 
 	static TargetProjectionXrInterface *live();
@@ -96,6 +113,8 @@ private:
 
 	mutable std::mutex mutex_;
 	std::vector<Entry> entries_;
+	// The render target the renderer is drawing between its pre- and post-draw calls.
+	RID drawing_target_;
 	// The entry the renderer is drawing (selected by _pre_draw_viewport).
 	Transform3D drawing_transform_;
 	Projection drawing_projection_;

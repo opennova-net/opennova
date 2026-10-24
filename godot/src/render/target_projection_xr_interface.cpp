@@ -2,6 +2,7 @@
 
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
+#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/xr_server.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/object.hpp>
@@ -15,6 +16,8 @@ namespace {
 // and the primary slot), so the extension keeps only the ObjectID.
 ObjectID g_live_interface;
 bool g_warned_foreign_primary = false;
+// The draw split's switch (an instrument: the post-load targets lines, --verbose alone).
+bool g_draw_stamping = false;
 
 } // namespace
 
@@ -271,14 +274,82 @@ PackedFloat64Array TargetProjectionXrInterface::_get_projection_for_view(uint32_
 // its draw (there is no projection to give it).
 bool TargetProjectionXrInterface::_pre_draw_viewport(const RID &p_render_target) {
 	std::lock_guard<std::mutex> lock(mutex_);
-	for (const Entry &entry : entries_) {
+	for (Entry &entry : entries_) {
 		if (entry.render_target == p_render_target) {
 			drawing_transform_ = entry.transform;
 			drawing_projection_ = entry.projection;
+			if (g_draw_stamping) {
+				entry.stamp_pre = Time::get_singleton()->get_ticks_usec();
+				entry.stamp_effect_in = 0;
+				entry.stamp_effect_out = 0;
+				entry.stamp_post = 0;
+				drawing_target_ = p_render_target;
+			}
 			return true;
 		}
 	}
 	return false;
+}
+
+void TargetProjectionXrInterface::_post_draw_viewport(const RID &p_render_target, const Rect2 &) {
+	if (!g_draw_stamping) {
+		return;
+	}
+	std::lock_guard<std::mutex> lock(mutex_);
+	for (Entry &entry : entries_) {
+		if (entry.render_target == p_render_target) {
+			entry.stamp_post = Time::get_singleton()->get_ticks_usec();
+		}
+	}
+	drawing_target_ = RID();
+}
+
+void TargetProjectionXrInterface::set_draw_stamping(bool p_enabled) {
+	g_draw_stamping = p_enabled;
+}
+
+void TargetProjectionXrInterface::stamp_effect(bool p_entering) {
+	if (!g_draw_stamping) {
+		return;
+	}
+	TargetProjectionXrInterface *xr = live();
+	if (xr == nullptr) {
+		return;
+	}
+	std::lock_guard<std::mutex> lock(xr->mutex_);
+	if (!xr->drawing_target_.is_valid()) {
+		return;
+	}
+	for (Entry &entry : xr->entries_) {
+		if (entry.render_target != xr->drawing_target_) {
+			continue;
+		}
+		const uint64_t now = Time::get_singleton()->get_ticks_usec();
+		if (p_entering) {
+			entry.stamp_effect_in = now;
+		} else {
+			entry.stamp_effect_out = now;
+		}
+	}
+}
+
+bool TargetProjectionXrInterface::draw_split_us(SubViewport *p_target, int64_t r_split[3]) {
+	TargetProjectionXrInterface *xr = live();
+	if (xr == nullptr || p_target == nullptr) {
+		return false;
+	}
+	std::lock_guard<std::mutex> lock(xr->mutex_);
+	const Entry *entry = xr->find_by_viewport(p_target->get_viewport_rid());
+	if (entry == nullptr || entry->stamp_pre == 0 || entry->stamp_post < entry->stamp_pre) {
+		return false;
+	}
+	const bool effect = entry->stamp_effect_in >= entry->stamp_pre &&
+			entry->stamp_effect_out >= entry->stamp_effect_in && entry->stamp_post >= entry->stamp_effect_out;
+	r_split[0] = effect ? int64_t(entry->stamp_effect_in - entry->stamp_pre) : -1;
+	r_split[1] = effect ? int64_t(entry->stamp_effect_out - entry->stamp_effect_in) : -1;
+	r_split[2] = effect ? int64_t(entry->stamp_post - entry->stamp_effect_out)
+						: int64_t(entry->stamp_post - entry->stamp_pre);
+	return true;
 }
 
 } // namespace godot

@@ -37,6 +37,7 @@
 
 #include "env/celestial_overlay.h"
 #include "hud/hud_inset_scope.h"
+#include "render/target_projection_xr_interface.h"
 #include "lights/light_scene.h"
 #include "object/object_shader_cache.h"
 #include "particle/effect_distortion_drawer.h"
@@ -82,6 +83,9 @@ void print_post_load_counts(Node *p_world, const ResourceRoot *p_root, const Str
 	// together (LF-s18).
 	const bool load_end = p_label == String("load_end");
 	PackedStringArray targets;
+	// Each served (XR-projected) target's last draw split at its FrameFX callback: the renderer's
+	// scene passes ahead of the callback, the callback, the rest of the draw (LF-s19, row 2a).
+	TargetProjectionXrInterface::set_draw_stamping(true);
 	{
 		const RID root_rid = p_world->get_tree()->get_root()->get_viewport_rid();
 		rs->viewport_set_measure_render_time(root_rid, true);
@@ -105,6 +109,11 @@ void print_post_load_counts(Node *p_world, const ResourceRoot *p_root, const Str
 				target->get_name(), target->get_size().x, target->get_size().y, mode, draws,
 				rs->viewport_get_measured_render_time_gpu(rid),
 				rs->viewport_get_measured_render_time_cpu(rid)));
+		int64_t split[3] = { -1, -1, -1 };
+		if (TargetProjectionXrInterface::draw_split_us(target, split)) {
+			targets.push_back(vformat("%s split pre-fx %.1f fx %.1f fx-post %.1f ms", target->get_name(),
+					split[0] / 1000.0, split[1] / 1000.0, split[2] / 1000.0));
+		}
 	}
 	UtilityFunctions::print_verbose(vformat("Post-load targets %s: [%s]", p_label,
 			String(", ").join(targets)));
