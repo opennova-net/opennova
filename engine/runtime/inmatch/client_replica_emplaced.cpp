@@ -12,23 +12,22 @@ world::TurretWindow replica_window(const replication::ClientEntityState &mount,
 		const replication::ClientState &state, const std::vector<mission::ItemSeatSpec> &specs,
 		const mission::ItemSeatSpec &spec) {
 	const mission::ItemEmplacementAttachmentSpec *arc = nullptr;
-	if (mount.carrier_handle != world::EntityHandle::kInvalid) {
-		for (const replication::ClientEntityState &carrier : state.entities) {
-			if (carrier.handle != mount.carrier_handle)
-				continue;
-			if (const mission::ItemSeatSpec *carrier_spec =
-							mission::item_seat_spec_for_type(specs, carrier.type_id)) {
-				for (const mission::ItemEmplacementAttachmentSpec &candidate :
-						carrier_spec->emplacement_attachments) {
-					if (candidate.anchor_found && candidate.anchor.bone_index == mount.mount_bone &&
-							(candidate.down_limit_bam | candidate.up_limit_bam |
-									candidate.right_limit_bam | candidate.left_limit_bam) != 0) {
-						arc = &candidate;
-						break;
-					}
+	// The carrier's row by its handle (ClientState::find's per-handle row, D-NET-NEW-LF-26).
+	const replication::ClientEntityState *carrier =
+			mount.carrier_handle != world::EntityHandle::kInvalid ? state.find(mount.carrier_handle)
+																	 : nullptr;
+	if (carrier != nullptr) {
+		if (const mission::ItemSeatSpec *carrier_spec =
+						mission::item_seat_spec_for_type(specs, carrier->type_id)) {
+			for (const mission::ItemEmplacementAttachmentSpec &candidate :
+					carrier_spec->emplacement_attachments) {
+				if (candidate.anchor_found && candidate.anchor.bone_index == mount.mount_bone &&
+						(candidate.down_limit_bam | candidate.up_limit_bam |
+								candidate.right_limit_bam | candidate.left_limit_bam) != 0) {
+					arc = &candidate;
+					break;
 				}
 			}
-			break;
 		}
 	}
 	const world::TurretWindow window = world::select_turret_window_bam(

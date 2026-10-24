@@ -1345,6 +1345,24 @@ void fold_server_config_strings(const std::vector<uint8_t> &body, ClientServerCo
 std::string server_config_first_text(const ClientServerConfigStrings &strings);
 std::string server_config_second_text(const ClientServerConfigStrings &strings);
 
+// ClientState::find's row per handle, a cache checked on every use: a lookup takes the row
+// it names while that row still holds the handle, else walks the rows and keeps the row the
+// walk found. The rows stay the one truth (callers clear, erase and append them freely), and a
+// lookup returns the walk's row, the first holding the handle (handles are unique rows). A copy
+// or a move of the state starts with an empty cache (D-NET-NEW-LF-26). Retail's client reaches a
+// handle's entity in one step, its slot by pool base and stride [orig: NapiNPClientMsg_EntityDeath
+// @0x42EB50 - the resolve @0x42EBA4..0x42EBC6].
+struct ClientRowIndexCache {
+	static constexpr uint16_t kNoRow = 0xFFFF;
+	ClientRowIndexCache() = default;
+	ClientRowIndexCache(const ClientRowIndexCache &) {}
+	ClientRowIndexCache &operator=(const ClientRowIndexCache &) {
+		rows.clear();
+		return *this;
+	}
+	mutable std::vector<uint16_t> rows; // indexed by handle; kNoRow, or empty until a lookup hits
+};
+
 struct ClientState {
 	// Monotonic decoded-state edges. topology_revision changes only when the
 	// ordered (handle,type) row layout changes; revision also covers field updates.
@@ -1671,6 +1689,7 @@ struct ClientState {
 	//  @0x43EA7F; read by Entity_UpdateTransformAndTurret @0x440D2A]
 	std::vector<uint16_t> destroyed_marks;
 	std::uint32_t frames_applied = 0;
+	ClientRowIndexCache row_index;
 
 	ClientEntityState *find(uint16_t handle);
 	const ClientEntityState *find(uint16_t handle) const;

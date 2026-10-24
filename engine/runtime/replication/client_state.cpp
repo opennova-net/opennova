@@ -13,22 +13,40 @@ namespace opennova::replication {
 
 // ---- ClientState lookup -----------------------------------------------------
 
-ClientEntityState *ClientState::find(uint16_t handle) {
-	// `entities` is intentionally public decoded state. Callers may clear,
-	// reorder, append, or edit it directly, so a separate handle-to-index cache
-	// cannot remain valid without changing that API. Keep lookup derived from
-	// the authoritative vector.
-	for (ClientEntityState &entity : entities) {
-		if (entity.handle == handle) return &entity;
+namespace {
+
+// The row holding `handle`: the cached row while it still holds the handle, else the first
+// row a walk finds, kept for the next lookup. `entities` stays the public decoded state its
+// callers clear, erase and append directly; the cache is checked against it on every use
+// (ClientRowIndexCache, D-NET-NEW-LF-26).
+size_t find_row(const std::vector<ClientEntityState> &entities,
+		const ClientRowIndexCache &cache, uint16_t handle) {
+	std::vector<uint16_t> &rows = cache.rows;
+	if (!rows.empty()) {
+		const uint16_t cached = rows[handle];
+		if (cached < entities.size() && entities[cached].handle == handle) return cached;
 	}
-	return nullptr;
+	for (size_t i = 0; i < entities.size(); ++i) {
+		if (entities[i].handle != handle) continue;
+		if (i < ClientRowIndexCache::kNoRow) {
+			if (rows.empty()) rows.assign(size_t{1} << 16, ClientRowIndexCache::kNoRow);
+			rows[handle] = static_cast<uint16_t>(i);
+		}
+		return i;
+	}
+	return entities.size();
+}
+
+} // namespace
+
+ClientEntityState *ClientState::find(uint16_t handle) {
+	const size_t row = find_row(entities, row_index, handle);
+	return row < entities.size() ? &entities[row] : nullptr;
 }
 
 const ClientEntityState *ClientState::find(uint16_t handle) const {
-	for (const ClientEntityState &entity : entities) {
-		if (entity.handle == handle) return &entity;
-	}
-	return nullptr;
+	const size_t row = find_row(entities, row_index, handle);
+	return row < entities.size() ? &entities[row] : nullptr;
 }
 
 ClientEntityState &ClientState::upsert(uint16_t handle) {

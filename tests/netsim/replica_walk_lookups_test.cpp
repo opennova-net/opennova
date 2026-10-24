@@ -126,11 +126,50 @@ void test_parked_pool0_rows_visit_at_their_halves() {
 			"the rows past the own slot visit in the after-self leg, found though they moved");
 }
 
+// ClientState::find's per-handle row (D-NET-NEW-LF-26, LF-s18): a lookup returns the row the
+// walk over the decoded rows finds, through every edit a caller makes to the public rows: an
+// erase ahead of it moves it, a clear empties it, a re-add puts it back elsewhere, and a copy of
+// the state finds its own rows.
+void test_find_takes_the_row_holding_the_handle_through_every_edit() {
+	auto state = std::make_unique<ns::ClientState>();
+	for (const uint16_t handle : {0x1001, 0x1002, 0x0003, 0x2004})
+		state->upsert(handle).type_id = static_cast<uint16_t>(handle + 1);
+	const auto walk = [&state](uint16_t handle) -> const ns::ClientEntityState * {
+		for (const ns::ClientEntityState &row : state->entities)
+			if (row.handle == handle) return &row;
+		return nullptr;
+	};
+	for (const uint16_t handle : {0x1001, 0x1002, 0x0003, 0x2004, 0x0042})
+		expect(state->find(handle) == walk(handle), "a lookup returns the walk's row");
+	// An erase ahead of a looked-up row moves it: the lookup follows.
+	state->entities.erase(state->entities.begin());
+	expect(state->find(0x1001) == nullptr, "an erased row is not found");
+	expect(state->find(0x0003) == walk(0x0003) && state->find(0x0003)->type_id == 0x0004,
+			"a row that moved is found where it now stands");
+	// A swap of two rows' places (a caller reordering the public rows).
+	std::swap(state->entities[0], state->entities[2]);
+	expect(state->find(0x1002) == walk(0x1002) && state->find(0x2004) == walk(0x2004),
+			"reordered rows are found at their new places");
+	// A clear, then the handle again at another place.
+	state->entities.clear();
+	expect(state->find(0x0003) == nullptr, "a cleared state finds nothing");
+	state->upsert(0x0042);
+	state->upsert(0x0003).type_id = 0x0099;
+	expect(state->find(0x0003) == &state->entities[1] && state->find(0x0003)->type_id == 0x0099,
+			"a re-added handle is found at its new row");
+	// A copy finds its own rows, never the original's.
+	const auto copy = std::make_unique<ns::ClientState>(*state);
+	expect(copy->find(0x0003) == &copy->entities[1], "a copy's lookup reads the copy's rows");
+	const ns::ClientState &const_copy = *copy;
+	expect(const_copy.find(0x0042) == &copy->entities[0], "the const lookup agrees");
+}
+
 } // namespace
 
 int main() {
 	test_pool1_rows_take_their_visits_at_their_slots();
 	test_parked_pool0_rows_visit_at_their_halves();
+	test_find_takes_the_row_holding_the_handle_through_every_edit();
 	if (failures != 0) {
 		std::printf("%d check(s) failed\n", failures);
 		return 1;
