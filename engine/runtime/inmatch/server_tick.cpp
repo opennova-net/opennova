@@ -549,6 +549,14 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	//  @0x52654F..0x52655B, CNetQuality_UpdateMetrics @0x52658B, ahead of the
 	//  Server_TickUpdate call @0x5266B6]
 	Server_SampleHostNetQuality(ctx);
+	// The round clock's step, the main frame's ahead of the server tick under the
+	// call's own authority and pause gates, so every reader in this tick reads the
+	// stepped clock: a round's first server-info refresh carries 3720 x limit - 1
+	// ticks, TimeLeft one minute under the limit (D-NET-NEW-L1-55).
+	// [orig: Game_ProcessMainFrame - the step @0x5265DA..0x526602 ahead of the
+	//  Server_TickUpdate call @0x5266B6 (gates @0x5266A6 / @0x5266AE); the refresh's
+	//  Lobby_UpdateServerInfo call @0x51D943 reads it @0x4FED57]
+	world.match.step_round_clock(world);
 	// The phases lap onto the SIM_SERVER_* / SIM_MATCH / SIM_REPLICATION_*
 	// rows of the world's profile (ADR 0043 d5); the script and entity passes
 	// attribute their own SIM_WORLD_* / SIM_UPDATE_* rows.
@@ -684,10 +692,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list)
 		world.match.set_player_slot_in_game(
 				conn.link.owned_entity, conn.slot_state == PlayerSlotState::Joined);
-	world.match.advance_tick(
-			world,
-			preround_active ? world::TickPhase::PreRound
-			                : world::TickPhase::Gameplay);
+	world.match.advance_tick(world);
 	lap.mark(devtools::Slot::SIM_MATCH);
 	// Retail produces capture requests from exact Change Team Box contacts in
 	// the movement resolver, then drains that collision-owned stream here. The

@@ -1861,7 +1861,22 @@ void Match::update_flag_objectives(World &world) {
     }
 }
 
-void Match::advance_tick(World &world, TickPhase phase) {
+void Match::step_round_clock(const World &world) {
+    // The round clock has no round-over latch: its decrement is gated on the
+    // authority and the pause (the caller's, Server_TickUpdate's head), the
+    // epilog screen and the pre-round timer only, so it keeps counting through
+    // the post-round linger. The pre-round word is the one the last server
+    // tick's periodic block left, as the server tick's own admission reads it.
+    // [orig: Game_ProcessMainFrame @0x5263F0 - `cmp g_EpilogScreenActive`
+    //  @0x5265EA, `cmp g_PreRoundDelayTimer` @0x5265F2, `cmp
+    //  g_RoundTimeRemaining` @0x5265FA / `jle` @0x526600, the `sub` @0x526602]
+    if (world.epilog_screen_active() || world.preround_delay_seconds != 0)
+        return;
+    if (remaining_ticks_ > 0)
+        --remaining_ticks_;
+}
+
+void Match::advance_tick(World &world) {
     // The shared periodic service starts armed at zero, executes immediately,
     // then reloads 62 and decrements-before-testing on later simulation ticks.
     // KOTH accumulation and host-side 1 Hz services read this frame's verdict.
@@ -1885,13 +1900,6 @@ void Match::advance_tick(World &world, TickPhase phase) {
         //  Server_UpdateCaptureZoneProximity @0x5086A3]
         if (periodic_second_fired_)
             accumulate_team_scores(world);
-        // The round clock has no round-over latch: its decrement is gated on
-        // the authority, the epilog screen and the pre-round timer only, so it
-        // keeps counting through the post-round linger.
-        // [orig: Game_ProcessMainFrame @0x5265DA..0x526602]
-        if (phase == TickPhase::Gameplay && !world.epilog_screen_active() &&
-            remaining_ticks_ > 0)
-            --remaining_ticks_;
         return;
     }
     ensure_objective_census(world);
@@ -1899,10 +1907,6 @@ void Match::advance_tick(World &world, TickPhase phase) {
         update_objective_proximity(world);
         accumulate_team_scores(world);
     }
-    if (phase != TickPhase::Gameplay)
-        return;
-    if (remaining_ticks_ > 0)
-        --remaining_ticks_;
 }
 
 void Match::process_movement_contacts(World &world) {

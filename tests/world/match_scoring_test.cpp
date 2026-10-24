@@ -413,8 +413,12 @@ void test_points_share_with_the_link() {
     CHECK(world->registry.get(hull)->primary_occupant == driver);
 }
 
-// The round clock keeps counting after the round ends (no round-over latch),
-// in the gameplay phase only. [orig: Game_ProcessMainFrame @0x5265DA..0x526602]
+// The round clock is the main frame's step, not the server tick's match
+// service: it keeps counting after the round ends (no round-over latch), and
+// holds while the pre-round countdown runs and under the epilog screen
+// (D-NET-NEW-L1-55). [orig: Game_ProcessMainFrame - g_EpilogScreenActive
+// @0x5265EA, g_PreRoundDelayTimer @0x5265F2, `jle` @0x526600, the `sub`
+// @0x526602, ahead of the Server_TickUpdate call @0x5266B6]
 void test_round_clock_runs_through_the_linger() {
     MatchRules timed = rules(gt::kTeamDeathmatch);
     timed.game_time_minutes = 1;
@@ -423,14 +427,27 @@ void test_round_clock_runs_through_the_linger() {
     world->match.configure(timed);
     world->rules.mp_session = true;
     player(*world, 0, 1);
+    CHECK(world->match.remaining_ticks() == 3720);
+    // The server tick's match service steps no clock.
     world->match.advance_tick(*world);
+    CHECK(world->match.remaining_ticks() == 3720);
+    world->match.step_round_clock(*world);
+    CHECK(world->match.remaining_ticks() == 3719);
     world->process_round_end(1);
-    const int32_t at_end = world->match.remaining_ticks();
     for (int tick = 0; tick < 10; ++tick)
-        world->match.advance_tick(*world);
-    CHECK(world->match.remaining_ticks() == at_end - 10);
-    world->match.advance_tick(*world, TickPhase::PreRound);
-    CHECK(world->match.remaining_ticks() == at_end - 10);
+        world->match.step_round_clock(*world);
+    CHECK(world->match.remaining_ticks() == 3709);
+    world->preround_delay_seconds = 1;
+    world->match.step_round_clock(*world);
+    CHECK(world->match.remaining_ticks() == 3709);
+    world->preround_delay_seconds = 0;
+    world->epilog.screen_active = true;
+    world->match.step_round_clock(*world);
+    CHECK(world->match.remaining_ticks() == 3709);
+    world->epilog.screen_active = false;
+    world->match.set_remaining_ticks(0);
+    world->match.step_round_clock(*world);
+    CHECK(world->match.remaining_ticks() == 0);
 }
 
 // The pre-board winner pass is a team-game pass (the team bit), refuses a

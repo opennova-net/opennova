@@ -499,12 +499,25 @@ class Match {
     // @0x500DC5]
     void record_psp_takeover(const World &world, EntityHandle capturer);
 
-    // Called once per authoritative 62.5 Hz logic tick after the pre-round gate.
-    // Advance the server-owned match services for one frame. The periodic
-    // proximity/score pass remains live during PreRound, as it does after the
-    // retail countdown block; carried-objective motion and round time do not.
-    void advance_tick(World &world,
-                      TickPhase phase = TickPhase::Gameplay);
+    // The main frame's round-clock step, once per authoritative frame ahead of
+    // the server tick (Server_TickUpdate's head runs it, under that call's
+    // authority and pause gates): no step through the epilog screen or a
+    // running pre-round countdown, none at or below zero, and no round-over
+    // latch, so the clock keeps counting through the post-round linger. Every
+    // reader inside the server tick (the server-info refresh, the 0x0A, the
+    // capture delta, the win check) reads the stepped clock.
+    // [orig: Game_ProcessMainFrame @0x5263F0 - `cmp is_authority` @0x5265DA,
+    //  the pause word @0x5265E2, g_EpilogScreenActive @0x5265EA,
+    //  g_PreRoundDelayTimer @0x5265F2, `cmp g_RoundTimeRemaining` @0x5265FA /
+    //  `jle` @0x526600, the `sub` @0x526602; the Server_TickUpdate call
+    //  @0x5266B6 under the same two gates @0x5266A6 / @0x5266AE]
+    void step_round_clock(const World &world);
+
+    // Called once per authoritative 62.5 Hz logic tick inside the server tick.
+    // Advance the server-owned match services for one frame: the shared
+    // one-second countdown and its proximity/score pass, which remains live
+    // during PreRound, as it does after the retail countdown block.
+    void advance_tick(World &world);
 
     // The movement callbacks the frame's entity update left in the collision
     // stream (a player touching a flag or a bay): retail runs them inline in

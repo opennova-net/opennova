@@ -199,9 +199,15 @@ EntityHandle demolition_target(World &world, uint8_t team) {
     return world.registry.spawn(1, entity);
 }
 
+// A one-minute round's authority frames: the main frame's clock step, then the
+// server tick's match service (D-NET-NEW-L1-55).
+// [orig: Game_ProcessMainFrame - the step @0x526602 ahead of the
+//  Server_TickUpdate call @0x5266B6]
 void tick_to_zero(World &world) {
-    for (int i = 0; i < 60 * 62; ++i)
+    for (int i = 0; i < 60 * 62; ++i) {
+        world.match.step_round_clock(world);
         world.match.advance_tick(world);
+    }
 }
 
 void advance_initial_periodic_passes(World &world, int passes) {
@@ -214,13 +220,14 @@ void advance_initial_periodic_passes(World &world, int passes) {
     }
 }
 
-// One authority frame as the match sees it: the server tick's match service,
-// then the entity update, whose tail consumes the flag and bay touches its
-// movement resolves recorded.
-// [orig: Game_ProcessMainFrame -- the Server_TickUpdate call @0x5266B6
-//  precedes the Entity_UpdateAllEntities call @0x52674B; the resolver's
-//  Entity_ProcessWaypointInteraction call @0x4B2FF5]
+// One authority frame as the match sees it: the round clock's step, the server
+// tick's match service, then the entity update, whose tail consumes the flag
+// and bay touches its movement resolves recorded.
+// [orig: Game_ProcessMainFrame -- the clock step @0x526602 and the
+//  Server_TickUpdate call @0x5266B6 precede the Entity_UpdateAllEntities call
+//  @0x52674B; the resolver's Entity_ProcessWaypointInteraction call @0x4B2FF5]
 void run_match_frame(World &world) {
+    world.match.step_round_clock(world);
     world.match.advance_tick(world);
     world.match.process_movement_contacts(world);
 }
@@ -415,8 +422,7 @@ void test_tdm_limit_and_clock_decisions() {
     world->match.upsert_player({blue, 0, "Blue"});
     world->match.upsert_player({red, 1, "Red"});
     world->match.record_death(*world, red, blue);
-    for (int i = 0; i < 60 * 62; ++i)
-        world->match.advance_tick(*world);
+    tick_to_zero(*world);
     const auto clock_winner = world->match.winner_if_finished(*world);
     CHECK(clock_winner.has_value() && *clock_winner == 1);
 
@@ -425,16 +431,14 @@ void test_tdm_limit_and_clock_decisions() {
     world->match.upsert_player({red, 1, "Red"});
     world->match.record_death(*world, red, blue);
     world->match.record_death(*world, blue, red);
-    for (int i = 0; i < 60 * 62; ++i)
-        world->match.advance_tick(*world);
+    tick_to_zero(*world);
     const auto draw = world->match.winner_if_finished(*world);
     CHECK(draw.has_value() && *draw == 0);
 
     // Retail returns from the entire TDM arm when score_limit is zero, even at t=0.
     // [orig: Server_CheckWinConditions @0x51AE34..0x51AE3B]
     world->match.configure(rules(kTdm, 1, 0));
-    for (int i = 0; i < 60 * 62; ++i)
-        world->match.advance_tick(*world);
+    tick_to_zero(*world);
     CHECK(!world->match.winner_if_finished(*world).has_value());
 }
 
@@ -1340,8 +1344,7 @@ void test_aas_capture_scoring_and_outcomes() {
     CHECK(all_owned.has_value() && *all_owned == 1);
 
     world->registry.get(z2)->team = 2;
-    for (int i = 0; i < 60 * 62; ++i)
-        world->match.advance_tick(*world);
+    tick_to_zero(*world);
     const auto tied_zones = world->match.winner_if_finished(*world);
     CHECK(tied_zones.has_value() && *tied_zones == 0);
 

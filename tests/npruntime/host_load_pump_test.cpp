@@ -29,7 +29,9 @@
 //     session's first mission-start update in the same process reads the first session's last
 //     clock, and a map change's reads the old round's; the menus' remote admin reads that
 //     clock and its SET GameTime writes it, so the next session's update reads the SET
-//     (D-NET-NEW-L1-54);
+//     (D-NET-NEW-L1-54); the main frame steps it ahead of the server tick, so the round's first
+//     server-info refresh reads the stepped clock (TimeLeft one minute under the limit,
+//     D-NET-NEW-L1-55);
 //   - a first load's second chat clear past the stage pumps drops a line taken during the
 //     load; a single player's restart runs no second clear, so the line stands;
 //   - the reset's 0x25 to a kept remote leaves at the load pump its send countdown's
@@ -41,6 +43,7 @@
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
+#include <net/novaworld/lobby_vars.h> // the Host list's TimeLeft (D-NET-NEW-L1-55)
 #include <net/npwire/idatagram_socket.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
@@ -58,6 +61,7 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/remote_admin.h> // RemoteAdminConsoles (the menus console)
 #include <runtime/inmatch/server_console.h> // server_console_add (a line during the load)
+#include <runtime/inmatch/server_info.h> // read_session_listing_columns (D-NET-NEW-L1-55)
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/session.h>
@@ -840,9 +844,45 @@ void test_a_menus_game_time_reaches_the_next_session() {
 	}
 }
 
+// The round clock steps in the main frame ahead of the server tick, so a round's first server-info
+// refresh (the round init cleared its countdown, so the round's first server tick runs it) reads
+// the stepped clock: a 30-minute round lists 3720 x 30 - 1 ticks, TimeLeft "29", and the frame's
+// later readers read that same value, the step running once a frame (D-NET-NEW-L1-55; LN-s6 S3:
+// retail's post-load update read "29" where ours read "30").
+// [orig: Game_ProcessMainFrame - the `sub` @0x526602 ahead of the Server_TickUpdate call
+//  @0x5266B6; Server_TickUpdate - the refresh countdown @0x51D91D..0x51D92C, the
+//  Lobby_UpdateServerInfo call @0x51D943; Lobby_UpdateServerInfo's read @0x4FED57, "%i" of
+//  / 3720]
+void test_the_first_refresh_reads_the_stepped_clock() {
+	auto host = std::make_unique<Host>();
+	host->round_minutes = 30;
+	host->role.set_socket(&host->socket);
+	host->role.set_rotation(&host->rotation);
+	inmatch::seed_rotation_from_host_screen(host->rotation, host->catalog, {0, 1}, {0, 0});
+	CHECK(host->boot_current(/*next_mission=*/false));
+	CHECK(host->kernel->world.match.remaining_ticks() == 30 * 3720);
+	std::vector<int32_t> refresh_ticks;
+	std::vector<std::string> refresh_time_left;
+	host->ctx().on_update_server_info = [&] {
+		HostRegistration r;
+		inmatch::read_session_listing_columns(r, host->ctx(), hud::GameTextLookup{});
+		refresh_ticks.push_back(r.round_time_remaining_ticks);
+		for (const ClientVar &v : make_host_var_list(r, HostLobbyText{}, /*full=*/true))
+			if (v.fnum == 0 && v.name == "TimeLeft") refresh_time_left.push_back(v.value);
+	};
+	// One authority frame: the round's first server tick.
+	host->role.run_tick(inmatch::TickInput{});
+	CHECK(refresh_ticks.size() == 1 && refresh_ticks[0] == 30 * 3720 - 1);
+	CHECK(refresh_time_left.size() == 1 && refresh_time_left[0] == "29");
+	CHECK(host->kernel->world.match.remaining_ticks() == 30 * 3720 - 1);
+	host->ctx().on_update_server_info = nullptr;
+	(void)host->session.close();
+}
+
 int main() {
 	test_handlers_drop_under_the_load_gate();
 	test_fresh_load_pumps_its_session();
+	test_the_first_refresh_reads_the_stepped_clock();
 	test_the_round_clock_outlives_its_session();
 	test_a_restart_keeps_the_lines_its_load_took();
 	test_a_menus_game_time_reaches_the_next_session();
