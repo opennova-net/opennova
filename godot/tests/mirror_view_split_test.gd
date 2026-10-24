@@ -12,6 +12,7 @@ const WORLD := 1 << 0
 const WORLD_NO_MIRROR := 1 << 16
 const MIRROR_VIEW := 1 << 24
 const INSET_MIRROR_VIEW := 1 << 25
+const MAIN_VIEW_NO_MIRROR := 1 << 22
 const SCENE_VIEW_NO_REFLECTION := 1 << 26
 
 
@@ -46,6 +47,49 @@ func _surface_layers(model: ObjectModel) -> int:
 			if child is GeometryInstance3D:
 				return (child as GeometryInstance3D).layers
 	return -1
+
+
+func _all_layers(model: ObjectModel) -> int:
+	var layers := 0
+	for node in model.find_children("*", "MeshInstance3D", true, false):
+		layers |= (node as MeshInstance3D).layers
+	return layers
+
+
+# Above the water both mirrors keep the flag-0x400 population alone (vehicles by
+# item type, records authored Reflective): a model that carries the flag is on
+# both mirror cameras, a person's model (no person carries it) on neither; below
+# the water the collect runs unfiltered and both are on.
+# [orig: Terrain_CollectVisibleEntitiesForReflection @0x5c90a0 - the filter word
+# @0x5c9109..0x5c911f; Entity_InitFromModel @0x40e20a]
+func test_above_the_water_the_mirrors_draw_the_flagged_model_alone() -> void:
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var person := _fixture_model(container)
+	assert_not_null(person)
+	var vehicle := ObjectModel.new()
+	vehicle.set_authored_lod_enabled(true)
+	vehicle.set_mirror_reflected(true)
+	container.add_child(vehicle)
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(MODEL_3DI)), OK)
+	vehicle.set_object_data(data)
+	if person == null:
+		return
+	assert_ne(_all_layers(vehicle), 0, "the flagged model carries visual instances")
+	var mirrors: Array[int] = [Water.REFLECTION_CULL_MASK | MIRROR_VIEW,
+			Water.REFLECTION_CULL_MASK | INSET_MIRROR_VIEW]
+	for m in mirrors.size():
+		var above := mirrors[m]
+		var below := above | WORLD_NO_MIRROR | MAIN_VIEW_NO_MIRROR
+		assert_eq(_all_layers(person) & above, 0,
+				"mirror %d: a person's model is off it above the water" % m)
+		assert_ne(_all_layers(vehicle) & above, 0,
+				"mirror %d: the flagged model is on it above the water" % m)
+		assert_ne(_all_layers(person) & below, 0,
+				"mirror %d: below the water the person's model is on it" % m)
+		assert_ne(_all_layers(vehicle) & below, 0,
+				"mirror %d: and the flagged model stays on it" % m)
 
 
 func test_a_node_the_main_view_hides_draws_in_the_mirror_on_a_twin() -> void:

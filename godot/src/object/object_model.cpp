@@ -411,7 +411,12 @@ uint32_t ObjectModel::presentation_layer_mask(bool p_auxiliary) const {
 			markers = !p_auxiliary;
 			break;
 		case PRESENTATION_LAYER_LOCAL_BODY:
-			base = LAYER_WORLD;
+			// The drawn local body is a person entity like any other: the
+			// mirrors take it by the same Flags rule (engine
+			// mission/placement_traits.h item_is_mirror_reflected; no person
+			// carries the Reflective bit), so above the water it is off both
+			// mirrors and below it they collect it unfiltered.
+			base = mirror_reflected_ ? LAYER_WORLD : LAYER_WORLD_NO_MIRROR;
 			break;
 		case PRESENTATION_LAYER_LOCAL_BODY_HIDDEN:
 			base = LAYER_FP_BODY_SHADOW_ONLY;

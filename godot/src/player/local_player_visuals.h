@@ -95,8 +95,9 @@ public:
 	// no BMS placement of its own). The caller (LocalPlayerPresenter)
 	// positions it and swaps its visual/shadow policy per first/third person.
 	// In first person the body remains a live SHADOWS_ONLY source, but
-	// neither the gameplay beauty camera nor the water mirror renders it:
-	// retail's reflected entity collector has no player/person leg (engine: runtime/environment/water_mirror.h). Null when the
+	// neither the gameplay beauty camera nor the water mirror renders it; drawn
+	// in third person it reflects as any person does, below the water alone
+	// (engine: runtime/environment/water_mirror.h). Null when the
 	// resource root / item graphic is unavailable. `p_type_id` is the local
 	// body's own type word (local_player_type_id()): its def is the one the
 	// item model comes from, as for every body [net-re §5.2b; D-NET-348].

@@ -42,6 +42,8 @@ const PERSON_FIXTURE := "res://../fixtures/threedi/synth/person.3di"
 const SOLDIER_ADM_FIXTURE := "res://../fixtures/anim/soldier.adm"
 const IDLE_BAD_FIXTURE := "res://../fixtures/anim/idle.bad"
 const WALK_BAD_FIXTURE := "res://../fixtures/anim/walk.bad"
+# The main view's no-mirror bit (render/visual_layers.h MAIN_VIEW_NO_MIRROR).
+const MAIN_VIEW_NO_MIRROR := 1 << 22
 
 var _shared_root := ""
 # The binding model each presenter of the case reads (its keyboard pass's scan).
@@ -796,13 +798,15 @@ func test_local_avatar_overlays_follow_the_first_person_rule() -> void:
 		fp_mask |= (vi as VisualInstance3D).layers
 	assert_ne(fp_mask & Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY, 0,
 			"first person hides the goggles from the camera by layer")
-	assert_eq(fp_mask & Water.VISUAL_LAYER_WORLD, 0, "and keeps them off the world layer")
+	assert_eq(fp_mask & (Water.VISUAL_LAYER_WORLD | Water.VISUAL_LAYER_WORLD_NO_MIRROR), 0,
+			"and keeps them off the world layers")
 	presenter.set_debug_third_person(true)
 	_frame(world, presenter, camera, 2)
 	var tp_mask := 0
 	for vi in _visual_instances(nvg):
 		tp_mask |= (vi as VisualInstance3D).layers
-	assert_ne(tp_mask & Water.VISUAL_LAYER_WORLD, 0, "third person draws the goggles")
+	assert_ne(tp_mask & Water.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
+			"third person draws the goggles, on the person's no-mirror world layer")
 	_tap_row(world, presenter, camera, KEY_N)
 	_frame(world, presenter, camera, 1)
 	assert_false(nvg.visible, "removed goggles hide")
@@ -1390,16 +1394,16 @@ func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_mode
 	_frame(world, presenter, camera, 1)
 	for vi in _visual_instances(avatar):
 		assert_eq(vi.layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
-				Water.VISUAL_LAYER_WORLD,
-				"third person: the body returns to the normal world layer")
+				Water.VISUAL_LAYER_WORLD_NO_MIRROR,
+				"third person: the body returns to a person's world layer")
 		if vi is GeometryInstance3D:
 			assert_eq(vi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
 					"third person: body geometry renders and casts normally")
 	if held_weapon != null:
 		for vi in _visual_instances(held_weapon):
 			assert_eq(vi.layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
-					Water.VISUAL_LAYER_WORLD,
-					"third person: the held weapon returns to the normal world layer")
+					Water.VISUAL_LAYER_WORLD_NO_MIRROR,
+					"third person: the held weapon returns to a person's world layer")
 			if vi is GeometryInstance3D:
 				assert_eq(vi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
 						"third person: held-weapon geometry renders and casts normally")
@@ -1418,8 +1422,8 @@ func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_mode
 	_frame(world, presenter, camera, 1)
 	for vi in _visual_instances(avatar):
 		assert_eq(vi.layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
-				Water.VISUAL_LAYER_WORLD,
-				"the debug first-person body uses the visible world layer")
+				Water.VISUAL_LAYER_WORLD_NO_MIRROR,
+				"the debug first-person body uses a person's visible world layer")
 		if vi is GeometryInstance3D:
 			assert_eq(vi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
 					"the debug first-person body renders and casts normally")
@@ -1464,7 +1468,7 @@ func test_every_avatar_part_takes_the_first_person_layer_on_the_tp_fp_edge() -> 
 	presenter.set_debug_third_person(true)
 	_frame(world, presenter, camera, 1)
 	_rewrite_own_layers(parts)
-	_assert_avatar_layer(parts, Water.VISUAL_LAYER_WORLD, "third person")
+	_assert_avatar_layer(parts, Water.VISUAL_LAYER_WORLD_NO_MIRROR, "third person")
 	presenter.set_debug_third_person(false)
 	_frame(world, presenter, camera, 1)
 	_rewrite_own_layers(parts)
@@ -1476,6 +1480,77 @@ func test_every_avatar_part_takes_the_first_person_layer_on_the_tp_fp_edge() -> 
 						GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
 						"back in first person every part stays a slot caster (hidden by layer)")
 	presenter.teardown()
+
+
+# Retail's water mirrors (the main scene's and the weapon Inset's, both through
+# Render_MainScene's reflected collect) draw only what that collect listed, and
+# above the water it keeps only the entities whose Flags carry 0x400: vehicles by
+# item type and records authored Reflective. No person carries it, the local
+# player included, so above the water no drawn part of the local person (the body
+# and its head, the held weapon, the worn goggles) is on either mirror camera;
+# below the water the collect runs unfiltered and the person waves draw the drawn
+# body there like any person's. The first-person body is on neither on either
+# side: its submit is gated in every pass.
+# [orig: Terrain_CollectVisibleEntitiesForReflection @0x5c90a0 - the filter word
+# @0x5c9109..0x5c911f, handed to pools 0 / 1 @0x5c9145 / @0x5c914e; Render_MainScene
+# @0x5c1240 - the below-water word @0x5c16f2..0x5c16f8, the collect @0x5c16fc;
+# Entity_InitFromModel @0x40e20a; Water_RenderReflectedWorldScene @0x5c8510 - the
+# person waves @0x5c8590 / @0x5c8599; BoneCallback_org0_World @0x4e3940 - the body
+# gate @0x4e3ab3..0x4e3aca]
+func test_no_drawn_local_person_part_is_on_a_water_mirror_above_the_water() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	_frame(world, presenter, camera, 2)
+	var water := world.get_node_or_null("Water") as Water
+	assert_not_null(water, "the packaged world ships the water node")
+	var avatar := _local_avatar(world)
+	assert_not_null(avatar, "the shared presenter built the real 3P avatar")
+	if water == null or avatar == null:
+		return
+	var above: Array[int] = [int(water.get_reflection_camera().cull_mask),
+			int(water.get_inset_reflection_camera().cull_mask)]
+	var below: Array[int] = []
+	for mask in above:
+		assert_eq(mask & Water.VISUAL_LAYER_WORLD_NO_MIRROR, 0, "the mirrors stand above the water")
+		# What Water installs on a mirror whose eye is below the water.
+		below.append(mask | Water.VISUAL_LAYER_WORLD_NO_MIRROR | MAIN_VIEW_NO_MIRROR)
+	_tap_row(world, presenter, camera, KEY_N)
+	_frame(world, presenter, camera, 1)
+	var parts: Array = [avatar]
+	parts.append_array(avatar.find_children("*", "ObjectModel", true, false))
+	var held: ObjectModel = presenter.held_weapon()
+	assert_not_null(held, "the kit's held weapon is built")
+	if held != null:
+		parts.append(held)
+	var nvg := presenter.person_overlays().get_node(PersonOverlayModels.KIND_NVG,
+			PersonOverlayModels.PASS_FIRST) as ObjectModel
+	assert_not_null(nvg, "worn goggles build their item model")
+	if nvg != null:
+		parts.append(nvg)
+	_assert_on_mirrors(parts, above, false, "first person, above the water")
+	_assert_on_mirrors(parts, below, false, "first person, below the water")
+	presenter.set_debug_third_person(true)
+	_frame(world, presenter, camera, 2)
+	_assert_on_mirrors(parts, above, false, "third person, above the water")
+	_assert_on_mirrors(parts, below, true, "third person, below the water")
+	presenter.teardown()
+
+
+func _assert_on_mirrors(parts: Array, masks: Array[int], drawn: bool, label: String) -> void:
+	for part in parts:
+		var layers := 0
+		for vi in _visual_instances(part as Node):
+			layers |= (vi as VisualInstance3D).layers
+		for m in masks.size():
+			if drawn:
+				assert_ne(layers & masks[m], 0,
+						"%s: mirror %d draws %s" % [label, m, (part as Node).name])
+			else:
+				assert_eq(layers & masks[m], 0,
+						"%s: mirror %d leaves %s" % [label, m, (part as Node).name])
 
 
 # Each part's own layer write, the body's first so a part's own write lands last

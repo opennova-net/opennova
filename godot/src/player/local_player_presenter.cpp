@@ -223,9 +223,9 @@ void LocalPlayerPresenter::setup(Node *p_world, Camera3D *p_camera, GameplayCame
 	camera_saved_projection_ = p_camera != nullptr ? static_cast<int>(p_camera->get_projection()) : -1;
 	camera_saved_cull_mask_ = p_camera != nullptr ? static_cast<int64_t>(p_camera->get_cull_mask()) : -1;
 	// The player camera never draws the FP body layer: retail renders no local
-	// body in first person, and the water mirror never draws persons either
-	// (its reflected entity waves collect only vehicles above water and it has
-	// no player-render leg [orig: Terrain_CollectVisibleEntitiesForReflection
+	// body in first person, in any pass, so the water mirrors never draw it
+	// either (above the water their reflected collect keeps only the
+	// Reflective-flagged vehicles [orig: Terrain_CollectVisibleEntitiesForReflection
 	// @ 0x5c90a0]) -- the body stays a silhouette source only. The viewmodel
 	// layer stays ADMITTED: the FP arms/weapon draw inside the beauty pass
 	// through their shader-side renderfov projection + depth band (retail's
@@ -813,8 +813,9 @@ void LocalPlayerPresenter::update_held_weapon(const Ref<PlayerAimOverlay> &p_ove
 	}
 	weapon->set_visible(true);
 	// Same layer rule as the body: first person hides it from every camera by
-	// LAYER while keeping it a shadow source (the witnessed mirror never draws
-	// persons or their held weapons -- the reflection collects vehicles only
+	// LAYER while keeping it a shadow source; drawn, it takes the person's
+	// mirror rule, so above the water neither mirror draws it (the reflected
+	// collect keeps the Reflective-flagged vehicles alone
 	// [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0]). The
 	// model stores the decision and rewrites its instances on the edge only.
 	const bool draw_held_weapon = third_person_ || debug_body_in_first_person_;
@@ -1365,10 +1366,12 @@ void LocalPlayerPresenter::update_avatar(const Vector3 &p_pos) {
 	}
 	// The body renders only in third person; first person hides it from every
 	// camera by LAYER, not by visible = false, so it stays a live shadow
-	// source. The 2026-08-05 witness corrected the earlier mirror-visible
-	// reading: retail's reflected entity waves collect only vehicles above
-	// water, and the reflected world has no player-render leg, so no person --
-	// the local body included -- ever enters the mirror [orig:
+	// source. The drawn body is a person like any other in the water mirrors:
+	// above the water the reflected collect keeps only the Reflective-flagged
+	// population (vehicles by item type), which no person carries, so the
+	// body is in neither mirror; below the water the collect runs unfiltered
+	// and the person waves draw it there (ObjectModel's LOCAL_BODY layer is
+	// the person's mirror-policy world layer) [orig:
 	// Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0 filterMask 0x400;
 	// Entity_InitFromModel @ 0x40e20a; the viewmodel pass stays
 	// Player_RenderFirstPersonViewModel @ 0x4ded60]. Retail's "not drawn" is a

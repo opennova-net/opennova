@@ -485,7 +485,8 @@ ObjectModel *MissionObjectPlacer::build_animated_model(int p_item_id,
 	model->set_name(vformat("PlayerAvatar_%s", graphic));
 	model->set_graphic_name(graphic);
 	// Wire-streamed and avatar builds share this chain: vehicles reflect in
-	// the water mirror, persons and everything else never do (env #30).
+	// the water mirror above the water, persons and everything else only
+	// below it, where the collect runs unfiltered (env #30).
 	model->set_mirror_reflected(_item_is_mirror_reflected(p_item_id));
 	_configure_item_scale(model, p_item_id);
 	p_parent->add_child(model);

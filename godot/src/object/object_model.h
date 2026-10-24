@@ -222,8 +222,9 @@ public:
 		// shadow-caster markers; casts when it carries a marker.
 		PRESENTATION_LAYER_WORLD = 0,
 		// The local player's body/held gun as a drawn entity (third person,
-		// the debug body): the world layer, markers kept, always casting so
-		// the render-slot capture cameras photograph it.
+		// the debug body): the same mirror-policy world layer as any person,
+		// markers kept, always casting so the render-slot capture cameras
+		// photograph it.
 		PRESENTATION_LAYER_LOCAL_BODY = 1,
 		// The same models while first person hides them from every camera by
 		// LAYER (the hidden FP layer), still casting for the slot capture.

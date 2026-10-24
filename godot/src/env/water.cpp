@@ -763,13 +763,14 @@ void Water::_build_mirror_rig(MirrorRig &r_rig, const String &p_viewport_name,
 		_install_reflection_decode(r_rig);
 		// The witnessed mirror scene: sky/terrain/celestials plus the
 		// flag-0x400 world population — vehicles by item type and records
-		// whose BMS attribute authors Reflective. It has no water surface, FP
-		// overlay, player/person render leg, foliage blanket, or empty-sector
-		// flat terrain (the prerender view skips empty sectors whenever the
-		// mission has water; this mirror only renders for a nonzero height,
-		// see docs/terrain/terrain-re.md "Empty-sector flat fallback").
-		// _update_reflection_camera re-adds WORLD_NO_MIRROR below water,
-		// where the retail collectors run unfiltered. Each mirror admits its
+		// whose BMS attribute authors Reflective, which no person carries (the
+		// drawn local body included). It has no water surface, FP overlay,
+		// foliage blanket, or empty-sector flat terrain (the prerender view
+		// skips empty sectors whenever the mission has water; this mirror only
+		// renders for a nonzero height, see docs/terrain/terrain-re.md
+		// "Empty-sector flat fallback"). _install_mirror_view re-adds
+		// WORLD_NO_MIRROR below water, where the retail collectors run
+		// unfiltered and its person waves draw the persons. Each mirror admits its
 		// own bit too, the twins drawing its own collect's verdicts.
 		r_rig.camera->set_cull_mask(REFLECTION_CULL_MASK | _mirror_own_layer(r_rig));
 		r_rig.viewport->add_child(r_rig.camera);

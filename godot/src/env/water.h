@@ -52,8 +52,9 @@ public:
 	// (render/visual_layers.h); these names are the GDScript-visible aliases
 	// the reflection contract (env #30) exposes on the water node: above
 	// water the mirror renders only the flag-0x400 population (vehicles by
-	// item type + authored-Reflective records); below water it is unfiltered.
-	// It never renders the water surface, FP overlay, or a player/person leg.
+	// item type + authored-Reflective records; no person); below water it is
+	// unfiltered, persons included. It never renders the water surface or the
+	// FP overlay.
 	// The witness lives with the mirror view (environment/water_mirror.h).
 	enum {
 		VISUAL_LAYER_WORLD = visual_layers::WORLD,
