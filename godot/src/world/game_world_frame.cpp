@@ -130,6 +130,26 @@ String target_draw_sections(SubViewport *p_target) {
 	return vformat("rd frame %d: %s", int64_t(rd->get_captured_timestamps_frame()), String("; ").join(out));
 }
 
+// The whole frame by the renderer's sections (the same instrument): every captured mark of the
+// frame the device last read back whose CPU to the next mark is at least 1 ms, in order, so a
+// first frame's draw shows which step outside the viewports' own passes took it.
+String frame_draw_sections() {
+	RenderingDevice *rd = RenderingServer::get_singleton()->get_rendering_device();
+	if (rd == nullptr) return String();
+	const uint32_t count = rd->get_captured_timestamps_count();
+	PackedStringArray out;
+	for (uint32_t i = 0; i + 1 < count; ++i) {
+		const double cpu_ms = double(rd->get_captured_timestamp_cpu_time(i + 1) -
+									  rd->get_captured_timestamp_cpu_time(i)) / 1000.0;
+		if (cpu_ms >= 1.0) out.push_back(vformat("%s %.1f", rd->get_captured_timestamp_name(i), cpu_ms));
+	}
+	if (count < 2) return String();
+	return vformat("rd frame %d, %d marks, %.1f ms: %s", int64_t(rd->get_captured_timestamps_frame()),
+			int64_t(count),
+			double(rd->get_captured_timestamp_cpu_time(count - 1) - rd->get_captured_timestamp_cpu_time(0)) / 1000.0,
+			String("; ").join(out));
+}
+
 // The process's object counts at the load's end and at each post-load frame's start (an
 // instrument, --verbose only): a flush that frees or builds in bulk between two frames shows as
 // the difference of two lines.
@@ -204,7 +224,12 @@ void print_post_load_counts(Node *p_world, const ResourceRoot *p_root, const Str
 					target_draw_census(target)));
 		}
 	}
-	// The served targets' draws by the renderer's sections (--gpu-profile beside --verbose).
+	// The served targets' draws by the renderer's sections (--gpu-profile beside --verbose), after
+	// the whole frame's.
+	const String frame_sections = frame_draw_sections();
+	if (!frame_sections.is_empty()) {
+		UtilityFunctions::print_verbose(vformat("Post-load frame sections %s: [%s]", p_label, frame_sections));
+	}
 	for (int64_t i = 0; i < found.size(); ++i) {
 		SubViewport *target = Object::cast_to<SubViewport>(found[i]);
 		if (target == nullptr || !target->is_using_xr()) continue;
