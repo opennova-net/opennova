@@ -1020,6 +1020,32 @@ static bool test_enter_seeds_identity_once() {
 	r = f.enter();
 	const std::string *junction = f.cookies().find("USEJUNCTION");
 	expect(junction != nullptr && *junction == "0", "a later entry keeps the page's USEJUNCTION");
+
+	// The LN S1b retail joiner's gate form (the junction word 0, the extended metrics on): its first
+	// request, the first entry's nwprepare, carries the locale three, MyInstalledExpBits and the
+	// connect's six, in that order, with no junction pair.
+	// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the junction word's test @0x4CF71B, the
+	//  +0x33C test @0x4CF773, CountryName @0x4CF796, MyInstalledExpBits @0x4CF811]
+	{
+		nw::LobbyHttpContext s = templated_ctx();
+		s.use_junction = 0;
+		s.extended_metrics = true;
+		s.identity_vars = nw::make_lobby_identity_vars(nw::LobbyIdentityParams{});
+		s.server_nwuid = "ABCDEF0123456789";
+		nw::LobbyHttpFlow g;
+		g.set_context(s);
+		const nw::EnterResult first = g.enter();
+		std::vector<std::string> names;
+		for (std::size_t i = 4; i < first.request.headers.size(); ++i) {
+			const std::string &line = first.request.headers[i];
+			const std::size_t eq = line.find('=');
+			names.push_back(line.substr(8, eq == std::string::npos ? std::string::npos : eq - 8));
+		}
+		expect(names == std::vector<std::string>{"CountryName", "Language", "TimeZoneBias",
+		                        "MyInstalledExpBits", "NWUID", "NWCDKIID", "NWCDKIIDEXP1", "NWPSSK",
+		                        "NWUSID", "NWHWI"},
+		       "S1b's form: the locale three first, no junction pair");
+	}
 	nw::process_browser_cache().clear();
 	return g_fail == 0;
 }
