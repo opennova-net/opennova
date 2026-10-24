@@ -842,6 +842,11 @@ void GameWorld::unload() {
 	// loading present ahead of the next load's head draws the mirror: a present draws the screen
 	// alone (engine hud/loading_screen.h carries the witness, D-NET-NEW-L3-37).
 	set_water_world_rendering_enabled(false);
+	// The celestial bodies go with their mission, ahead of the next start's loads
+	// (Celestial::release_bodies).
+	if (celestial_ != nullptr) {
+		celestial_->release_bodies();
+	}
 	if (env_ != nullptr) {
 		env_->set_underwater_view(false);
 		env_->set_underwater_overlay_view(false);

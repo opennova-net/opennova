@@ -338,6 +338,30 @@ func test_the_star_model_and_upl_load_as_data_and_never_build() -> void:
 	TestFs.remove_dir_recursive(dir)
 
 
+# Retail destroys the departing mission's model defs at the next start, ahead of
+# loading them again (engine environment/celestial_frame.h kCelestialUplModel carries
+# the witness): the world's unload releases the bodies and the defs, so none waits
+# through the next load to be freed in its first frames.
+func test_release_bodies_frees_the_bodies_and_the_model_defs() -> void:
+	var fixture := _make_fixture()
+	var celestial: Celestial = fixture.celestial
+	var sun := celestial.get_node_or_null("Celestial_sun")
+	assert_not_null(sun, "the fixture builds a sun")
+	assert_true(bool(celestial.get_diagnostics().get("star_loaded", false)))
+	celestial.release_bodies()
+	assert_eq(celestial.get_child_count(), 0, "no body is left under the node")
+	if sun != null:
+		assert_true(sun.is_queued_for_deletion(), "the departing sun is freed")
+	var diag := celestial.get_diagnostics()
+	assert_false(bool(diag.get("built", true)))
+	assert_false(bool(diag.get("star_loaded", true)), "the model defs go too")
+	# The next start's leg loads and builds them again.
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(MODEL_FIXTURE_ROOT)), OK)
+	celestial.set_resource_root(root)
+	assert_not_null(celestial.get_node_or_null("Celestial_sun"), "the next leg builds the sun")
+
+
 func test_glare_submits_only_a_positive_alpha() -> void:
 	# The glow's beauty submit is skipped at a non-positive alpha
 	# [orig: Render_SkyboxSunGlow @ 0x5ad0ae]; the view dot is the MAIN

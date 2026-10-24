@@ -72,6 +72,7 @@ void Celestial::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "terrain_data",
 						 PROPERTY_HINT_RESOURCE_TYPE, "TerrainData"),
 			"set_terrain_data", "get_terrain_data");
+	ClassDB::bind_method(D_METHOD("release_bodies"), &Celestial::release_bodies);
 	ClassDB::bind_method(D_METHOD("set_resource_root", "root"),
 			&Celestial::set_resource_root);
 	ClassDB::bind_method(D_METHOD("set_environment_capture_layer_mask", "mask"),
@@ -118,6 +119,18 @@ void Celestial::set_environment_path(const NodePath &p_path) {
 
 void Celestial::set_terrain_data(const Ref<TerrainData> &p_data) {
 	terrain_data_ = p_data;
+}
+
+void Celestial::release_bodies() {
+	for (int i = get_child_count() - 1; i >= 0; --i) {
+		Node *child = get_child(i);
+		remove_child(child);
+		child->queue_free();
+	}
+	bodies_.clear();
+	loaded_names_.clear();
+	star_data_.unref();
+	upl_data_.unref();
 }
 
 void Celestial::set_resource_root(const Ref<ResourceRoot> &p_root) {
@@ -223,14 +236,8 @@ void Celestial::_rebuild_if_needed() {
 			return;
 		}
 	}
+	release_bodies();
 	loaded_names_ = signature;
-
-	for (int i = get_child_count() - 1; i >= 0; --i) {
-		Node *child = get_child(i);
-		remove_child(child);
-		child->queue_free();
-	}
-	bodies_.clear();
 
 	for (const Spec &spec : wanted) {
 		if (spec.name.strip_edges().is_empty()) {

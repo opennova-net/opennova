@@ -63,6 +63,11 @@ public:
 	void set_entities_clear(EntitiesClear p_clear) { entities_clear_ = std::move(p_clear); }
 	Ref<TerrainData> get_terrain_data() const { return terrain_data_; }
 	void set_resource_root(const Ref<ResourceRoot> &p_root);
+	// The departing mission's bodies and model defs go ahead of the next start's loads, as
+	// retail destroys the model defs at that start ahead of loading them again (engine
+	// environment/celestial_frame.h kCelestialUplModel carries the witness): the world's
+	// unload, so none waits through the load to be freed in the next mission's first frames.
+	void release_bodies();
 	// Whether the bodies build their draw objects (C++ only; true unless told): false loads each
 	// named model's data and builds no node, a dedicated host's mission start (engine
 	// environment/celestial_frame.h builds_celestial_draws carries the witness). Takes effect at the
