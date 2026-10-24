@@ -581,6 +581,12 @@ void check_server_rows_reach_their_arms(std::map<std::string, std::string> &file
 		dispatch(38, 0);
 		CHECK(!role.process_state()->save_scores && lines.size() == 1 &&
 				lines[0].text == "Save Scores: Off");
+		// PuntCRC (row 85, code 47): the process's eight counters in one SYSTEM line
+		// (D-NET-NEW-LI-37) [orig: Debug_PrintScoreCounters @0x4FD6A0 - @0x4FD6F3, @0x4FD704].
+		role.process_state()->punt_crc_counters = {0, 3, 1, 0, 0, 0, 0, 0};
+		dispatch(47, 0);
+		CHECK(lines.size() == 1 && lines[0].text == "1:0 2:3 3:1 4:0 5:0 6:0 7:0 8:0" &&
+				lines[0].system_ring && lines[0].argb == 0xFFFFFFFFu);
 		// netdelay (row 89, code 103): the remote slot takes S2C 0x1B [2], then the chat line.
 		replication::Datagram sent;
 		while (transport->pop_outbound(sent)) {}

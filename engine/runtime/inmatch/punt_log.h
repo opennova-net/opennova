@@ -201,6 +201,11 @@ const char *punt_reason_name(int type);
 // row's time (crt_asctime_text in production).
 std::string punt_log_dump_text(const std::vector<PuntRecord> &rows,
 		const std::function<std::string(std::time_t)> &asctime_text);
+// Server_DumpPuntLogToFile over `rows`: punt.log rewritten whole in `files` (fopen "w"
+// truncates; a file that does not open writes nothing) [orig: Server_DumpPuntLogToFile
+// @0x500260 - fopen("punt.log", "w") called @0x50026B, the row walk @0x50027A..0x5002EA].
+void write_punt_log_dump(ServerFileSink &files, const std::vector<PuntRecord> &rows,
+		const std::function<std::string(std::time_t)> &asctime_text = crt_asctime_text);
 
 class PuntLog {
 public:

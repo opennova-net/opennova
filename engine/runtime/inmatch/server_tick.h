@@ -30,6 +30,17 @@ bool Server_StageHostDisconnect(
 		NapiNPConnection &connection, const DisconnectEvent &event);
 bool Server_StageHostPunt(
 		NapiNPConnection &connection, uint32_t mismatch_type);
+// The CRC-mismatch punt's record, the first leg of Server_LogCRCMismatchPunt ahead of its
+// punt: for a slot in the table whose player is active and that is not the host's own, a
+// type-9 punt (HMCRC) steps the process's second PuntCRC counter and a type-10 one (CMCRC) its
+// third (ctx.punt_crc_counters; none bound, nothing counts). The other types step counters
+// nothing reads, and the record's server-log line goes to a log nothing turns on.
+// [orig: Server_LogCRCMismatchPunt @0x517ED0 - Server_PlayerPuntCRCMisMatch called @0x517EF4;
+//  Server_PlayerPuntCRCMisMatch @0x50F380 - the range @0x50F3AA, +4 / +5 / +96481 @0x50F3D6,
+//  the switch on type - 1 @0x50F470..0x50F47B, case 9 dword_C94770 @0x50F4A8, case 10
+//  dword_C94774 @0x50F4CA, ServerLog_BufferAndFlush called @0x50F54F]
+void Server_CountCRCMismatchPunt(NapiNPServerCtx &ctx, const NapiNPConnection &connection,
+		uint32_t mismatch_type);
 
 // Re-roll one player's retained fire-freshness/tick anchor and return its
 // exact 4-byte S2C 0x61 body. Join, revive, and deployment call this one

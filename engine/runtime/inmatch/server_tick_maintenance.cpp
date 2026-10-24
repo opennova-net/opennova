@@ -1066,6 +1066,15 @@ bool Server_StageHostPunt(
 	return stage_host_punt(connection, mismatch_type);
 }
 
+void Server_CountCRCMismatchPunt(NapiNPServerCtx &ctx, const NapiNPConnection &connection,
+		uint32_t mismatch_type) {
+	if (ctx.punt_crc_counters == nullptr) return;
+	if (connection.reply.player_slot >= ctx.config.total_player_slot_capacity()) return;
+	if (!player_slot_active(connection) || slot_is_local(connection)) return;
+	if (mismatch_type == 9) ++(*ctx.punt_crc_counters)[1];
+	else if (mismatch_type == 10) ++(*ctx.punt_crc_counters)[2];
+}
+
 void Server_RearmMinimapInitialScan(NapiNPServerCtx &ctx) {
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		conn.reply.minimap_initial_scan_pending = true;

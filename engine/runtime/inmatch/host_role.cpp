@@ -115,6 +115,7 @@ void HostRole::reset_session(bool serve_and_play) {
 	ctx.client_disconnect_latch = &client_process_->disconnect_latch;
 	ctx.nwu_player_removed = &client_process_->nwu_player_removed;
 	ctx.file_transfer_session = &client_process_->file_transfer_session;
+	ctx.punt_crc_counters = &client_process_->punt_crc_counters;
 	map_change = HostMapChange{};
 }
 
@@ -530,6 +531,7 @@ void HostRole::begin_next_mission_load(HostBringup head) {
 	ctx.file_transfer_session = &client_process_->file_transfer_session;
 	ctx.client_disconnect_latch = &client_process_->disconnect_latch;
 	ctx.nwu_player_removed = &client_process_->nwu_player_removed;
+	ctx.punt_crc_counters = &client_process_->punt_crc_counters;
 	// The report clocks loading, just ahead of the add (D-NET-NEW-L9-22) [orig: Game_StartMission
 	//  - CServerTick_SetState(1) @0x5244A4 / @0x5244AF].
 	ctx.tick_count_ms = inmatch::host_clock_ms(state.host_owner);

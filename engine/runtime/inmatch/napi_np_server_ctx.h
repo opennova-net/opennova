@@ -341,6 +341,10 @@ struct NapiNPServerCtx {
 	// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - Server_InitNewRoundState called
 	//  @0x5695B3 ahead of the Game Loop's Game_StartMission (GameLoop_Init's call @0x526377)]
 	io::CrtRand *process_crt_rand = nullptr;
+	// The process's PuntCRC counters (ClientProcessState::punt_crc_counters), which the
+	// CRC-mismatch punt's record steps (Server_CountCRCMismatchPunt); null on a context no host
+	// role brought up (nothing counts).
+	std::array<int32_t, 8> *punt_crc_counters = nullptr;
 	// ctx+0xE60 past the own client's leave: retail's own type-2 connection stays allocated in
 	// state 6 (its pump state machine has no state-6 arm and nothing destroys it before the
 	// session reset), holding the record its leave latched, which the post-mission router's

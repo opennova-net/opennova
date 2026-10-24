@@ -68,6 +68,10 @@ void ServerLogDevices::arm(const LogSwitches &switches, const ConnectLogHeader &
 	if (switches.connect_log) connect_.start(connect_header);
 }
 
+void ServerLogDevices::dump_punt_log() {
+	write_punt_log_dump(files_, punt_ != nullptr ? punt_->records() : std::vector<PuntRecord>{});
+}
+
 ServerLogs ServerLogDevices::logs() {
 	ServerLogs logs;
 	logs.profile = profile_.get();

@@ -66,6 +66,11 @@ public:
 		inout_.shutdown(now_ms);
 		net_.shutdown(now_ms);
 	}
+	// The PuntLog row (catalog row 86, code 48, no gate, any role): punt.log rewritten from the
+	// punt table, which no producer fills, so an empty punt.log, whether or not a switch armed
+	// the punt logs (PuntLog::records) [orig: Input_HandleActionBinding @0x49AD40 - case 48,
+	// Server_DumpPuntLogToFile called @0x49B833].
+	void dump_punt_log();
 	// The devices for the host context (null = off).
 	ServerLogs logs();
 	ServerLogRecorder *profile() { return profile_.get(); }

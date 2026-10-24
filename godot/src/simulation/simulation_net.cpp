@@ -540,6 +540,12 @@ bool Simulation::dispatch_action_record(int32_t p_code, int32_t p_param) {
 			inmatch::validated_punt(*ctx, p_param, 33, "ComIdPunt");
 		return true;
 	}
+	// The PuntLog row's case 48 (row 86): punt.log in the working directory, any role's
+	// (engine inmatch/server_log_devices.h ServerLogDevices::dump_punt_log carries the witness).
+	if (p_code == 48) {
+		if (net_.log_devices != nullptr) net_.log_devices->dump_punt_log();
+		return true;
+	}
 	return false;
 }
 

@@ -291,10 +291,15 @@ void PuntLog::clear_records() {
 	records_.assign(static_cast<size_t>(kPuntRecordCount), PuntRecord{});
 }
 
-void PuntLog::dump(const std::function<std::string(std::time_t)> &asctime_text) {
+void write_punt_log_dump(ServerFileSink &files, const std::vector<PuntRecord> &rows,
+		const std::function<std::string(std::time_t)> &asctime_text) {
 	// fopen("punt.log", "w") truncates; a file that does not open writes nothing
 	// [orig: @0x50026b..0x500277].
-	files_.write(kPuntDumpFile, punt_log_dump_text(records_, asctime_text), /*append=*/false);
+	files.write(kPuntDumpFile, punt_log_dump_text(rows, asctime_text), /*append=*/false);
+}
+
+void PuntLog::dump(const std::function<std::string(std::time_t)> &asctime_text) {
+	write_punt_log_dump(files_, records_, asctime_text);
 }
 
 } // namespace opennova::inmatch

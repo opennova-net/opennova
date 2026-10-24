@@ -1101,6 +1101,7 @@ void Server_HandlePlayerJoinRequest(NapiNPServerCtx *ctx, NapiNPConnection &conn
 			// The punt-log line, then the description [orig: Server_OnPlayerJoin @0x51A8E1 ahead of
 			//  @0x51A8F2; @0x51A922 ahead of @0x51A933].
 			server_logs_punt(ctx->logs, conn, m.host_punt_reason);
+			Server_CountCRCMismatchPunt(*ctx, conn, m.host_punt);
 			(void)Server_StageHostPunt(conn, m.host_punt);
 			continue;
 		}

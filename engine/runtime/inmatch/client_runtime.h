@@ -126,6 +126,14 @@ struct ClientProcessState {
 	//  @0x424780, both arming dword_A85B78 (@0x4321E4, @0x42479B), whose one other access
 	//  is ZoneTimers_ResetState's clear @0x4244A7; Game_ParseCommandLineAndInit @0x4A78C3]
 	bool save_scores = false;
+	// The eight counters the PuntCRC row prints (Role::dispatch_server_record). Only two have a
+	// writer, the CRC-mismatch punt's record (Server_CountCRCMismatchPunt): [1] steps for a
+	// type-9 punt (HMCRC, "Elev"), [2] for a type-10 one (CMCRC, "Detail"); the rest stay 0. They
+	// live for the process: no session or mission start clears them.
+	// [orig: dword_C9476C..dword_C94788, read only by Debug_PrintScoreCounters @0x4FD6A0
+	//  (@0x4FD6B4..0x4FD6E0); written only by Server_PlayerPuntCRCMisMatch @0x50F380 (dword_C94770
+	//  @0x50F4A8, dword_C94774 @0x50F4CA)]
+	std::array<int32_t, 8> punt_crc_counters{};
 	// g_LoadoutWeaponNameList (world/weapon_inventory.h): the image's initializer until an
 	// armory ACCEPT or a 0x5A apply writes it; no session or mission start touches it. The
 	// host role binds its worlds to it (World::loadout_weapon_names).

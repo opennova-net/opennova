@@ -175,6 +175,28 @@ void run_the_inout_line() {
 	fs::remove_all(off, ec);
 }
 
+// The PuntLog row (code 48, no gate): punt.log rewritten from the punt table, which no producer
+// fills, so an existing punt.log is truncated to nothing, with the punt logs armed or not
+// (D-NET-NEW-LI-37). [orig: Input_HandleActionBinding @0x49AD40 - case 48 @0x49B833;
+// Server_DumpPuntLogToFile @0x500260 - fopen("punt.log", "w") @0x50026B]
+void run_the_punt_log_row() {
+	for (const bool armed : {false, true}) {
+		const fs::path dir = fresh_dir();
+		std::ofstream(dir / "punt.log") << "stale";
+		{
+			inmatch::ServerLogDevices devices(dir.string());
+			opennova::LogSwitches sw;
+			sw.punt_log = armed;
+			devices.arm(sw);
+			devices.dump_punt_log();
+		}
+		expect(fs::is_regular_file(dir / "punt.log") && fs::file_size(dir / "punt.log") == 0,
+		       "the PuntLog row truncates punt.log to the empty table's text");
+		std::error_code ec;
+		fs::remove_all(dir, ec);
+	}
+}
+
 } // namespace
 
 int main() {
@@ -182,6 +204,7 @@ int main() {
 	run_the_devices_write_in_the_working_directory();
 	run_the_connect_log();
 	run_the_inout_line();
+	run_the_punt_log_row();
 	if (failures == 0) std::printf("npruntime_server_log_devices: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

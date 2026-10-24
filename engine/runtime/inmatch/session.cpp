@@ -16,7 +16,9 @@
 #include <runtime/inmatch/spectator_session.h>
 #include <runtime/mission/mission_kernel.h>
 
+#include <array>
 #include <chrono>
+#include <cstdio>
 #include <thread>
 #include <utility>
 
@@ -539,6 +541,7 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 
 bool Role::dispatch_server_record(const controls::InputEventRecord &record) {
 	constexpr int kNextFlagRow = 52;   // code 32, flags 0x0C000801
+	constexpr int kPuntCrcRow = 85;    // code 47, flags 0x04000000
 	constexpr int kSaveScoresRow = 88; // code 38, flags 0x04000000
 	constexpr int kNetDelayRow = 89;   // code 103, flags 0x04000000
 	constexpr int kResetGamesRow = 92; // code 106, flags 0x04000000
@@ -548,8 +551,9 @@ bool Role::dispatch_server_record(const controls::InputEventRecord &record) {
 	constexpr int kTodRateRow = 96;    // code 497, flags 0
 	const int32_t code = record.code;
 	const auto is = [code](int row) { return code == controls::action_code(row); };
-	if (!is(kNextFlagRow) && !is(kSaveScoresRow) && !is(kNetDelayRow) && !is(kResetGamesRow) &&
-			!is(kBanRow) && !is(kLastGameRow) && !is(kTodRow) && !is(kTodRateRow))
+	if (!is(kNextFlagRow) && !is(kPuntCrcRow) && !is(kSaveScoresRow) && !is(kNetDelayRow) &&
+			!is(kResetGamesRow) && !is(kBanRow) && !is(kLastGameRow) && !is(kTodRow) &&
+			!is(kTodRateRow))
 		return false;
 	if (!action_head_admits(code)) return true;
 	world::World &world = kernel_->world;
@@ -584,6 +588,25 @@ bool Role::dispatch_server_record(const controls::InputEventRecord &record) {
 		line.argb = 0xFFFFFFFFu;
 		line.system_ring = true;
 		line.text = process->save_scores ? "Save Scores: On" : "Save Scores: Off";
+		world.out.hud_chat_lines.push_back(std::move(line));
+		return true;
+	}
+	// PuntCRC: the process's eight counters (ClientProcessState::punt_crc_counters) in one
+	// literal SYSTEM line in white, no gate.
+	// [orig: Input_HandleActionBinding @0x49AD40 - case 47, Debug_PrintScoreCounters called
+	//  @0x49B829; Debug_PrintScoreCounters @0x4FD6A0 - "1:%i 2:%i 3:%i 4:%i 5:%i 6:%i 7:%i 8:%i"
+	//  @0x4FD6F3, Chat_AddMessageChannel2(.., -1, 930) called @0x4FD704]
+	if (is(kPuntCrcRow)) {
+		const ClientProcessState *process = process_state();
+		if (process == nullptr) return true;
+		const std::array<int32_t, 8> &n = process->punt_crc_counters;
+		char text[128];
+		std::snprintf(text, sizeof(text), "1:%i 2:%i 3:%i 4:%i 5:%i 6:%i 7:%i 8:%i", n[0], n[1],
+				n[2], n[3], n[4], n[5], n[6], n[7]);
+		world::HudChatLine line;
+		line.argb = 0xFFFFFFFFu;
+		line.system_ring = true;
+		line.text = text;
 		world.out.hud_chat_lines.push_back(std::move(line));
 		return true;
 	}

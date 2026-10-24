@@ -54,6 +54,7 @@
 #include <runtime/world/world.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <map>
 #include <memory>
@@ -653,6 +654,8 @@ bool run_join_punts_a_map_checksum_mismatch() {
 	};
 	{
 		JoinFixture f(/*with_existing=*/false);
+		std::array<int32_t, 8> counters{};
+		f.ctx->punt_crc_counters = &counters;
 		MemoryFiles files;
 		inmatch::PuntLog punt_log(files);
 		punt_log.set_time_text([] { return std::string("T"); });
@@ -685,16 +688,28 @@ bool run_join_punts_a_map_checksum_mismatch() {
 				"T" + slot_name + "CMCRC : \r\n";
 		if (!expect(files.files["_PUNT.TXT"] == expected,
 		            "both checksums mismatched: _PUNT.TXT takes HMCRC then CMCRC")) return false;
+		// Each leg's record steps its PuntCRC counter, the second leg's too (D-NET-NEW-LI-37)
+		// [orig: Server_LogCRCMismatchPunt @0x517ED0 - Server_PlayerPuntCRCMisMatch called
+		//  @0x517EF4; Server_PlayerPuntCRCMisMatch @0x50F380 - case 9 @0x50F4A8, case 10
+		//  @0x50F4CA].
+		if (!expect(counters == std::array<int32_t, 8>{0, 1, 1, 0, 0, 0, 0, 0},
+		            "both checksums mismatched: the HMCRC and CMCRC counters step once each"))
+			return false;
 	}
 	{
 		JoinFixture f(/*with_existing=*/false);
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1 &&
 		                    f.drive_to_await_join(),
 		            "the joiner reaches slot state 5")) return false;
+		std::array<int32_t, 8> counters{};
+		f.ctx->punt_crc_counters = &counters;
 		std::vector<std::string> dstr;
 		std::size_t at = 0;
 		punts(f.join(body(0, 0x5678u)), dstr, at);
 		if (!expect(dstr == std::vector<std::string>{"t10"}, "a mismatched CMCRC alone punts t10"))
+			return false;
+		if (!expect(counters == std::array<int32_t, 8>{0, 0, 1, 0, 0, 0, 0, 0},
+		            "a mismatched CMCRC alone steps the third counter"))
 			return false;
 	}
 	for (const std::vector<uint8_t> &clean : {body(0, 0), std::vector<uint8_t>{0x00}}) {
