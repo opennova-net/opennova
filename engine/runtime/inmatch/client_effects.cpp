@@ -249,6 +249,21 @@ void ClientRuntime::apply_received_effects(world::World &world) {
     for (const WeaponLoadout &list : pending_own_weapon_loadouts_)
         apply_weapon_loadout_name_list(world, list);
     pending_own_weapon_loadouts_.clear();
+    // The own client's 0x49 echoes: one naming a person other than the local player dips that
+    // person's arms for 80 ticks on the host's world, the dip its body tick then runs down; the
+    // local player's arm and a non-person's arm refill, which the authority already did (the
+    // walk's immediate refill, the request handler's for a remote requester), so they add nothing.
+    // A row with no def takes neither arm (D-NET-NEW-L4-33).
+    // [orig: NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 - the local test @0x42C0F2..0x42C0F8,
+    //  the itemDef test @0x42C0FE..0x42C103, `cmp [ecx+5Ch], 3` @0x42C105, the stamp @0x42C10B]
+    for (const WeaponReload &reload : pending_own_reload_echoes_) {
+        const world::EntityHandle handle{reload.entity_handle};
+        if (handle == world.cached.local_player) continue;
+        const world::Entity *entity = world.registry.get(handle);
+        if (entity == nullptr || !entity->has_item_def || entity->item_type != 3) continue;
+        if (world::AiEntity *body = world.ai.for_handle(handle)) body->inf.arms_dip_ticks = 80;
+    }
+    pending_own_reload_echoes_.clear();
     for (const auto &request : view_.drain_effect_commands()) {
         if (const auto *squad = std::get_if<replication::ClientSquadEvent>(&request)) {
             apply_squad_event(world, *squad);

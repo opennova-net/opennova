@@ -1546,6 +1546,11 @@ private:
 	//  CNapiNetwork_PumpClientProtocolRecv @0x42C228 -> NapiNPClientMsg_HandleWeaponLoadoutSync
 	//  @0x4290E0, ahead of Server_TickUpdate @0x5266B6]
 	std::vector<WeaponLoadout> pending_own_weapon_loadouts_;
+	// The S2C 0x49 echoes the listen host's own client received this frame, in receive order:
+	// apply_received_effects runs the handler's person arm of each on the host's world (the
+	// +0x371 arms dip), at the same fold as the loadout lists above.
+	// [orig: NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 - the person arm @0x42C105..0x42C113]
+	std::vector<WeaponReload> pending_own_reload_echoes_;
 	std::array<int32_t, kWorldStateAmmoPoolCount> authoritative_ammo_pools_{};
 	// The HostClient's kit (set_loadout_kit).
 	JoinerConnection::LoadoutKit host_loadout_kit_;

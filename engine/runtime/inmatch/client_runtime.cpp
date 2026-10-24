@@ -1814,7 +1814,15 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		// events (the header-only loopback 0x0A carries no round events at all).
 		// Deaths too: the authority's own damage pass ran the death chain
 		// (and its 0x13 broadcast skips the loopback — mask 0x90 NOT_HOST).
-		view_.drain_weapon_reloads();
+		// The reload echoes' refills are the authority's too, but the relay reaches the own
+		// connection like any (masks 0xC0 / 0x20, no NOT_HOST bit), so each echo's person arm
+		// still runs on the host's world (apply_received_effects).
+		// [orig: NapiNPServerMsg_HandleReloadRequest @0x514DF0 - the masks @0x514EAD / @0x514ED3,
+		//  the relays called @0x514EBD / @0x514EE3; NapiNPServer_SendFiltered @0x4C87E0 - the
+		//  0x10 test @0x4C88F1..0x4C88FA]
+		std::vector<WeaponReload> echoes = view_.drain_weapon_reloads();
+		pending_own_reload_echoes_.insert(
+				pending_own_reload_echoes_.end(), echoes.begin(), echoes.end());
 	} else {
 		if (!client_receive_pass(outbound)) return outbound;
 		// The frame's entity update follows its receive: the local body's death edge.

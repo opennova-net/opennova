@@ -5318,6 +5318,11 @@ target_link_libraries(weapon_slot_class_init_test
     PRIVATE opennova_net opennova_runtime opennova_formats opennova_base)
 target_include_directories(weapon_slot_class_init_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME weapon_slot_class_init COMMAND weapon_slot_class_init_test)
+# The listen host's own client runs each relayed S2C 0x49's person arm on the host's world: a
+# named person other than the local player dips its arms for 80 ticks (D-NET-NEW-L4-33).
+add_executable(npruntime_host_reload_echo_test npruntime/host_reload_echo_test.cpp)
+target_link_libraries(npruntime_host_reload_echo_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_host_reload_echo COMMAND npruntime_host_reload_echo_test)
 
 # --- parity lane L5 (client replica) ---
 # The joiner's own player record Flags folded into L under 0xE1 and echoed by the same
