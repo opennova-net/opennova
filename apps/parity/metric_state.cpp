@@ -1113,6 +1113,43 @@ void compare_entities(
 	constexpr size_t kMotionWindowFrames = size_t(kFrameFlags2RouteMask) + 1;
 	const bool short_window = steady_frames(rr).size() < kMotionWindowFrames ||
 			steady_frames(other).size() < kMotionWindowFrames;
+	// A handle is a pool slot, (pool << 12) | index [orig: Server_BuildEntityPriorityList
+	// @0x50E590 (the handle @0x50E7A6..0x50E7B4)], and the next mission's load fills the
+	// pools afresh: after a rotation's teardown (S2C 0x25) the next mission's first S2C 0x0F
+	// starts a mission whose handles name other entities (the final's tdh-i3a-tdm-round:
+	// 0x1000 V:1213, then V:74). So a handle's motion sequence ends there, and the records
+	// from it open new ones (entity.mission_split).
+	static_assert(has_normalization("entity.mission_split"));
+	auto mission_starts = [](const RunFacts &run) {
+		std::vector<uint64_t> starts;
+		bool torn = false;
+		for (const wire::ParityPacket &p : run.trace.packets) {
+			if (p.dir != 'S')
+				continue;
+			for (const uint16_t tag : p.tags) {
+				if (tag == 0x025) {
+					torn = true;
+				} else if (tag == 0x00F && torn) {
+					starts.push_back(p.ts_ns);
+					torn = false;
+				}
+			}
+		}
+		return starts;
+	};
+	const std::vector<uint64_t> starts_a = mission_starts(rr), starts_b = mission_starts(other);
+	auto sequence_of = [](const std::vector<uint64_t> &starts) {
+		return std::function<std::string(const E &)>([starts = &starts](const E &e) {
+			size_t mission = 0;
+			for (const uint64_t at : *starts)
+				mission += at <= e.ts_ns ? 1 : 0;
+			return std::to_string(e.handle) +
+					(e.carrier_local ? "@" + std::to_string(e.carrier) : std::string()) +
+					(mission != 0 ? "#" + std::to_string(mission) : std::string());
+		});
+	};
+	const std::function<std::string(const E &)> sequence_a = sequence_of(starts_a);
+	const std::function<std::string(const E &)> sequence_b = sequence_of(starts_b);
 	for (const char cls : { 'P', 'V', 'I' }) {
 		std::vector<const E *> ca, cb;
 		for (const E *e : a)
@@ -1124,17 +1161,13 @@ void compare_entities(
 		if (ca.empty() && cb.empty())
 			continue;
 		const std::string key(1, cls);
-		const std::function<std::string(const E &)> sequence = [](const E &e) {
-			return std::to_string(e.handle) +
-					(e.carrier_local ? "@" + std::to_string(e.carrier) : std::string());
-		};
 		const std::function<std::string(const E &)> position = [](const E &e) {
 			return std::to_string(e.world_x) + "," + std::to_string(e.world_y) + "," +
 					std::to_string(e.world_z);
 		};
 		fill_metric(out, 'S', "entity_motion", "FRAME_ENTITY_CONSTANT",
-				changing_handles(ca, sequence, position) > 0,
-				changing_handles(cb, sequence, position) > 0, key);
+				changing_handles(ca, sequence_a, position) > 0,
+				changing_handles(cb, sequence_b, position) > 0, key);
 		// A sequence under 16 records in the window holds a slice of its entity's motion, as
 		// a window under 16 frames does, and which slice is the window's phase. Either the
 		// priority list sends the entity only when its age byte wins the budget [orig:
@@ -1150,8 +1183,9 @@ void compare_entities(
 		// change is the window's mission tick, not the host's rule. Such a sequence leaves
 		// the dynamic rows, the same 16 the window itself needs (entity.sparse_sequence).
 		static_assert(has_normalization("entity.sparse_sequence"));
-		auto samples = [&sequence, min_records = kMotionWindowFrames](
-							   const std::vector<const E *> &entities, bool orientation) {
+		auto samples = [min_records = kMotionWindowFrames](const std::vector<const E *> &entities,
+							   const std::function<std::string(const E &)> &sequence,
+							   bool orientation) {
 			std::map<std::string, size_t> records;
 			for (const E *e : entities)
 				++records[sequence(*e)];
@@ -1184,10 +1218,10 @@ void compare_entities(
 		};
 		const double modulus = cls == 'V' ? 65536.0 : 256.0;
 		const size_t first_dynamic = out.size();
-		dynamic_metrics(out, 'S', std::string("entity_") + cls + "_position", samples(ca, false),
-				samples(cb, false), 0.0, false);
-		dynamic_metrics(out, 'S', std::string("entity_") + cls + "_orientation", samples(ca, true),
-				samples(cb, true), modulus, false);
+		dynamic_metrics(out, 'S', std::string("entity_") + cls + "_position",
+				samples(ca, sequence_a, false), samples(cb, sequence_b, false), 0.0, false);
+		dynamic_metrics(out, 'S', std::string("entity_") + cls + "_orientation",
+				samples(ca, sequence_a, true), samples(cb, sequence_b, true), modulus, false);
 		if (short_window)
 			for (size_t i = first_dynamic; i < out.size(); ++i) {
 				out[i].comparable = false;

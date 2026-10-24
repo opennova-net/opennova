@@ -3726,6 +3726,112 @@ void test_entity_sparse_sequence() {
 			'S', "entity_I_orientation_range_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
 }
 
+// The S2C message `identity` riding the first S2C packet at or after `at`.
+void add_tag_at(wire::ParityTrace &trace, uint64_t at, uint16_t identity) {
+	for (wire::ParityPacket &p : trace.packets) {
+		if (p.dir != 'S' || p.ts_ns < at)
+			continue;
+		p.tags.push_back(identity);
+		wire::ParityWireRecord record;
+		record.full_tag = identity;
+		record.raw_flags = 0x20;
+		record.encoded_length = 1;
+		p.records.push_back(record);
+		wire::ParityEvent e;
+		e.frame = p.frame;
+		e.ts_ns = p.ts_ns;
+		e.dir = 'S';
+		e.session = kClientPort;
+		e.participant = 1;
+		e.full_tag = identity;
+		e.length = 1;
+		e.material = true;
+		e.body = bytes({ 0 });
+		trace.events.push_back(e);
+		return;
+	}
+}
+
+// The final's tdh-i3a-tdm-round (LX-s37): after the rotation's teardown (S2C 0x25) the next
+// mission's first S2C 0x0F refills the pools, so handle 0x1000 named V:1213, then V:74, and
+// one sequence per handle read a cross-mission step of hundreds of units (RO's V step p90
+// 38253919 against RR's 512). A handle's motion sequence ends at that 0x0F
+// (entity.mission_split).
+void test_entity_mission_split() {
+	// Every run: the scripted vehicle dropped, a boat 0x1003 heaving one unit a frame, and a
+	// still vehicle 0x1000 at x `before` until `moved` and at `after` from then (its type
+	// V:1213 until 12 s, V:74 from then); `marks` are S2C tags at their times.
+	auto run = [](uint32_t seed, int32_t before, int32_t after, uint64_t moved,
+					   const std::vector<std::pair<uint64_t, uint16_t>> &marks) {
+		wire::ParityTrace trace = scripted(seed);
+		std::vector<wire::ParityEntity> kept;
+		for (const wire::ParityEntity &e : trace.entities)
+			if (e.cls != 'V')
+				kept.push_back(e);
+		trace.entities = std::move(kept);
+		const int heave[] = { 0, 1, 2, 3, 2, 1 };
+		size_t k = 0;
+		std::vector<wire::ParityEntity> added;
+		for (const wire::ParityFrameState &f : trace.frames) {
+			if (f.ts_ns < kSteadyStart || f.ts_ns > kSteadyStart + uint64_t(kSteadySeconds * 1e9))
+				continue;
+			wire::ParityEntity e;
+			e.frame = f.frame;
+			e.ts_ns = f.ts_ns;
+			e.session = kClientPort;
+			e.cls = 'V';
+			e.orient_a = 64;
+			e.vital = 3000;
+			e.handle = 0x1003;
+			e.type_id = 1293;
+			e.pos_x = network_compress_fixedpoint(900 * 65536 - f.anchor_x);
+			e.pos_y = network_compress_fixedpoint(2050 * 65536 - f.anchor_y);
+			e.pos_z = network_compress_fixedpoint(5 * 65536 + heave[k++ % 6] * 128);
+			place(e, f);
+			added.push_back(e);
+			e.handle = 0x1000;
+			e.type_id = f.ts_ns >= 12 * kSec ? 74 : 1213;
+			e.pos_x = network_compress_fixedpoint(
+					(f.ts_ns >= moved ? after : before) * 65536 - f.anchor_x);
+			e.pos_z = network_compress_fixedpoint(0);
+			place(e, f);
+			added.push_back(e);
+		}
+		trace.entities.insert(trace.entities.end(), added.begin(), added.end());
+		std::stable_sort(trace.entities.begin(), trace.entities.end(),
+				[](const wire::ParityEntity &x, const wire::ParityEntity &y) {
+					return x.ts_ns < y.ts_ns;
+				});
+		for (const auto &mark : marks)
+			add_tag_at(trace, mark.first, mark.second);
+		return trace;
+	};
+	const std::vector<std::pair<uint64_t, uint16_t>> rotation = { { 10 * kSec, 0x025 },
+		{ 12 * kSec, 0x00F } };
+	const std::vector<std::pair<uint64_t, uint16_t>> no_teardown = { { 12 * kSec, 0x00F } };
+	{
+		// The subject's handle names another entity 500 units off in the next mission; RR's
+		// stands where its last one stood. Without the split the subject's one sequence
+		// ranges 500 units against RR's boat heave, the final's red.
+		const Case c = judge_case(run(1, 950, 950, 12 * kSec, rotation),
+				run(2, 950, 950, 12 * kSec, rotation), run(3, 950, 1450, 12 * kSec, rotation),
+				"RO");
+		expect_row(c, 'S', "entity_V_position_range_p90", "", "pass");
+		expect_row(c, 'S', "entity_motion", "V", "pass");
+	}
+	// A 0x0F with no 0x25 before it starts no mission: one sequence, still failing.
+	expect_row(judge_case(run(1, 950, 950, 12 * kSec, no_teardown),
+					   run(2, 950, 950, 12 * kSec, no_teardown),
+					   run(3, 950, 1450, 12 * kSec, no_teardown), "RO"),
+			'S', "entity_V_position_range_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
+	// A move inside one mission is untouched: the subject's vehicle jumps at 8 s, before the
+	// rotation's 0x0F, and still fails.
+	expect_row(judge_case(run(1, 950, 950, 8 * kSec, rotation),
+					   run(2, 950, 950, 8 * kSec, rotation),
+					   run(3, 950, 1450, 8 * kSec, rotation), "RO"),
+			'S', "entity_V_position_range_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
+}
+
 // The final's tdh-i3a-tdm-chat (LX-s37): the moored boats heave under two quanta a frame,
 // and RR's send grid rounded ten frames to two mantissa units (one proven quantum, step p90
 // 128) where RO, OR and OO rounded none (0). A run proving no step against RR's one quantum
@@ -4186,6 +4292,7 @@ int main() {
 	test_entity_capture_singleton();
 	test_tick_seed_form();
 	test_sub_quantum_step();
+	test_entity_mission_split();
 	test_round_target();
 	if (g_failures) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);

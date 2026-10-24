@@ -882,6 +882,21 @@ inline constexpr Normalization kNormalizations[] = {
 			"compares. The A/A row skips nothing, so its floor keeps retail's measured variance "
 			"(x11's 01tr-coop-aikill: RR and RR-aa sent V:2010 once each, RO, a retail host, "
 			"twice; skipped in the A/A row too, RO would fail)" },
+	{ "entity.mission_split", MaskKind::Field, 'S', 0x00A, "entity motion across a mission change",
+			0,
+			"a handle is a pool slot, (pool << 12) | index (Server_BuildEntityPriorityList "
+			"@0x50E590: idiv stride @0x50E7A6, shl 0Ch @0x50E7AC, and 0FFFh @0x50E7AF, or "
+			"@0x50E7B4), and the next mission's load fills the pools afresh, so after a "
+			"rotation's teardown (S2C 0x25) the next mission's first S2C 0x0F starts a mission "
+			"whose handles name other entities: the final's tdh-i3a-tdm-round window held 48 s "
+			"of TDH_G11A, its handle 0x1000 V:1213 then V:74, 0x1004 V:1293 then V:114, about 30 "
+			"vehicles, and one sequence per handle made a cross-mission step of up to 2900 "
+			"units, RO's V position step p90 38253919 against RR's 512 (x9..x11's A/A 16.19 the "
+			"same draw on RR-aa). A handle's motion sequence ends at each such 0x0F and the "
+			"records from it open new ones, for every entity dynamic row and entity_motion; a "
+			"0x0F with no 0x25 before it, and a run without a rotation, keep one sequence. Over "
+			"every stored round row (LX-s37 model3): 3 fail -> pass, 1 fail -> absent, 59 pass "
+			"-> absent (orientation rows whose only motion crossed missions), none to fail" },
 	{ "round.target", MaskKind::Field, 'S', 0x00A, "round event flags / target", 0,
 			"a S2C 0x0A round event carries flag 0x40 and its target word when the shooter's AI "
 			"slot word (+0x68 -> +0xC) names a target at the send, the target's pool handle or "
