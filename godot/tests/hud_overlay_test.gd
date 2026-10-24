@@ -1548,10 +1548,12 @@ func test_sighted_m4_builds_all_authored_sight_card_rows() -> void:
 	assert_almost_eq(card.row_rect(2).size.x, reticle_authored.size.x * 0.75, 2.0,
 		"The default sight-scale index draws the red-dot row at three quarters width")
 	var reticle_row := card.get_child(2) as Control
-	var reticle_material := reticle_row.material as CanvasItemMaterial
+	# The additive program, preloaded (D-NET-NEW-LF-28): the program a BLEND_MODE_ADD
+	# CanvasItemMaterial makes, made as the card's script loads.
+	var reticle_material := reticle_row.material as ShaderMaterial
 	assert_not_null(reticle_material, "The red-dot row gets a canvas material")
 	if reticle_material != null:
-		assert_eq(reticle_material.blend_mode, CanvasItemMaterial.BLEND_MODE_ADD,
+		assert_true(reticle_material.shader.code.contains("render_mode blend_add;"),
 			"The M4 red-dot layer renders additively")
 	# The presenter folds the binocular suppression into the card switch.
 	card.set_card_up(false)

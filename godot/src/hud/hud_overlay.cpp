@@ -1980,10 +1980,7 @@ void HudOverlay::ensure_additive_item_() {
 	if (additive_item_.is_valid()) {
 		return;
 	}
-	if (additive_material_.is_null()) {
-		additive_material_.instantiate();
-		additive_material_->set_blend_mode(CanvasItemMaterial::BLEND_MODE_ADD);
-	}
+	ensure_additive_material_();
 	RenderingServer *rs = RenderingServer::get_singleton();
 	additive_item_ = rs->canvas_item_create();
 	rs->canvas_item_set_parent(additive_item_, get_canvas_item());

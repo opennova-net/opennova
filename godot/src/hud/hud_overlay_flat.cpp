@@ -12,6 +12,8 @@
 #include "util/texture_path_resolver.h"
 
 #include <godot_cpp/classes/rendering_server.hpp>
+#include <godot_cpp/classes/resource_loader.hpp>
+#include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
@@ -29,6 +31,9 @@ namespace {
 
 using opennova::hud::HudDrawList;
 using opennova::renderer::MaterialColorStage;
+
+// The additive program the additive rows draw through (ensure_additive_material_).
+constexpr const char *kCanvasBlendAddShader = "res://shaders/canvas_blend_add.gdshader";
 
 // The map pass's top-layer shader. A sprite whose texture's material word is
 // colour family 0x600 (every textured map sprite: the TSDicon strip, the
@@ -262,11 +267,17 @@ void HudOverlay::ensure_flat_material_() {
 	flat_material_->set_shader(flat_shader_);
 }
 
+// The additive rows' material: the preloaded additive program (canvas_blend_add.gdshader, the
+// program a BLEND_MODE_ADD CanvasItemMaterial makes), so the program is made here, in the HUD's
+// load leg, and not at the reveal frame's idle material flush (D-NET-NEW-LF-28).
+void HudOverlay::ensure_additive_material_() {
+	if (additive_material_.is_valid()) return;
+	additive_material_.instantiate();
+	additive_material_->set_shader(ResourceLoader::get_singleton()->load(kCanvasBlendAddShader));
+}
+
 void HudOverlay::ensure_map_materials_() {
-	if (additive_material_.is_null()) {
-		additive_material_.instantiate();
-		additive_material_->set_blend_mode(CanvasItemMaterial::BLEND_MODE_ADD);
-	}
+	ensure_additive_material_();
 	ensure_minimap_water_material_();
 	if (map_modulate2x_material_.is_null()) {
 		map_modulate2x_shader_.instantiate();

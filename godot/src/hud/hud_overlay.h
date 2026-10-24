@@ -1,6 +1,5 @@
 #pragma once
 
-#include <godot_cpp/classes/canvas_item_material.hpp>
 #include <godot_cpp/classes/control.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
@@ -611,8 +610,8 @@ private:
 	// slot (reloaded on change).
 	String vehicle_panel_sid_;
 	// Additive rows cannot share this item's blend mode: they render through a
-	// child RenderingServer canvas item carrying a BLEND_MODE_ADD material.
-	Ref<CanvasItemMaterial> additive_material_;
+	// child RenderingServer canvas item carrying the additive program (ensure_additive_material_).
+	Ref<ShaderMaterial> additive_material_;
 	RID additive_item_;
 	// Retail thresholds the linearly sampled depthspin height field against
 	// the water plane. This material keeps that comparison in the raster pass.
@@ -700,6 +699,7 @@ private:
 	void ensure_minimap_water_material_();
 	void ensure_flat_material_();
 	void ensure_map_materials_();
+	void ensure_additive_material_();
 	// The map pass shader's TSDicon chain bound (icon_max_lod).
 	void apply_map_icon_sampling_();
 	void render_list_(const opennova::hud::HudDrawList &p_list);
