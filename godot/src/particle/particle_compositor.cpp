@@ -966,7 +966,7 @@ RID ParticleCompositorEffect::Impl::scene_snapshot_pipeline_for(
 	blend.instantiate();
 	blend->set_attachments(attachments);
 
-	RID pipeline = rd->render_pipeline_create(scene_snapshot_shader,
+	RID pipeline = create_rd_render_pipeline(rd, scene_snapshot_shader,
 			framebuffer_format, RenderingDevice::INVALID_FORMAT_ID,
 			RenderingDevice::RENDER_PRIMITIVE_TRIANGLES,
 			raster, multisample, depth, blend);
@@ -1108,7 +1108,7 @@ RID ParticleCompositorEffect::Impl::pipeline_for(
 	blend.instantiate();
 	blend->set_attachments(attachments);
 
-	RID pipeline = rd->render_pipeline_create(shader, framebuffer_format,
+	RID pipeline = create_rd_render_pipeline(rd, shader, framebuffer_format,
 			vertex_format, RenderingDevice::RENDER_PRIMITIVE_TRIANGLES,
 			raster, multisample, depth, blend);
 	if (!pipeline.is_valid() || !rd->render_pipeline_is_valid(pipeline)) {

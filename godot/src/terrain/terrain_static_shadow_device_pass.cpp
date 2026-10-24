@@ -421,7 +421,7 @@ bool TerrainStaticShadowDevicePass::build_pipelines() {
 			raster->set_front_face(RenderingDevice::POLYGON_FRONT_FACE_CLOCKWISE);
 			raster->set_cull_mode(cull == 0 ? RenderingDevice::POLYGON_CULL_BACK
 											: RenderingDevice::POLYGON_CULL_DISABLED);
-			caster_pipelines_[group][cull] = rd_->render_pipeline_create(caster_shader_,
+			caster_pipelines_[group][cull] = create_rd_render_pipeline(rd_, caster_shader_,
 					framebuffer_format, vertex_format_, RenderingDevice::RENDER_PRIMITIVE_TRIANGLES,
 					raster, multisample, depth, blend);
 			if (!caster_pipelines_[group][cull].is_valid()) {
@@ -429,8 +429,8 @@ bool TerrainStaticShadowDevicePass::build_pipelines() {
 			}
 		}
 	}
-	fill_pipeline_ = rd_->compute_pipeline_create(fill_shader_);
-	resolve_pipeline_ = rd_->compute_pipeline_create(resolve_shader_);
+	fill_pipeline_ = create_rd_compute_pipeline(rd_, fill_shader_);
+	resolve_pipeline_ = create_rd_compute_pipeline(rd_, resolve_shader_);
 	if (!fill_pipeline_.is_valid() || !resolve_pipeline_.is_valid()) {
 		return fail("the device refused a compute pipeline");
 	}

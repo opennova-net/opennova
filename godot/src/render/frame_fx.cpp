@@ -897,7 +897,7 @@ bool FrameFxCompositorEffect::Impl::ensure_decode_compute() {
 			spirv->get_stage_compile_error(RenderingDevice::SHADER_STAGE_COMPUTE).is_empty())
 		decode_shader = rd->shader_create_from_spirv(spirv, "OpenNova FrameFX decode");
 	if (decode_shader.is_valid())
-		decode_pipeline = rd->compute_pipeline_create(decode_shader);
+		decode_pipeline = create_rd_compute_pipeline(rd, decode_shader);
 	if (!decode_pipeline.is_valid()) {
 		release_rid(decode_shader);
 		decode_compute_failed = true;
@@ -1184,7 +1184,7 @@ RID FrameFxCompositorEffect::Impl::pipeline_for(
 	TypedArray<Ref<RDPipelineColorBlendStateAttachment>> attachments;
 	attachments.push_back(attachment);
 	color_blend->set_attachments(attachments);
-	RID pipeline = rd->render_pipeline_create(shader, framebuffer_format,
+	RID pipeline = create_rd_render_pipeline(rd, shader, framebuffer_format,
 			RenderingDevice::INVALID_FORMAT_ID,
 			RenderingDevice::RENDER_PRIMITIVE_TRIANGLES, raster, multisample,
 			depth, color_blend);

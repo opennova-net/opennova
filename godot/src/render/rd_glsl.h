@@ -52,6 +52,42 @@ inline Ref<RDShaderSPIRV> compile_rd_glsl_source(RenderingDevice *p_rd,
 	return spirv;
 }
 
+// The process's RenderingDevice pipeline creates so far, render and compute, their count and
+// their microseconds (an instrument beside the GLSL compiles: the device passes make their
+// pipelines at their first use, which Godot's own pipeline counters do not see;
+// FrameStats::rd_pipeline_create_totals reads them).
+inline RdGlslCompileTotals &rd_pipeline_create_totals() {
+	static RdGlslCompileTotals totals;
+	return totals;
+}
+
+inline void count_rd_pipeline_create(std::chrono::steady_clock::time_point p_start) {
+	const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+			std::chrono::steady_clock::now() - p_start);
+	RdGlslCompileTotals &totals = rd_pipeline_create_totals();
+	totals.count.fetch_add(1, std::memory_order_relaxed);
+	totals.usec.fetch_add(static_cast<int64_t>(elapsed.count()), std::memory_order_relaxed);
+}
+
+// RenderingDevice::render_pipeline_create on p_rd, counted and timed into
+// rd_pipeline_create_totals.
+template <typename... Args>
+inline RID create_rd_render_pipeline(RenderingDevice *p_rd, Args &&...p_args) {
+	const auto start = std::chrono::steady_clock::now();
+	const RID pipeline = p_rd->render_pipeline_create(std::forward<Args>(p_args)...);
+	count_rd_pipeline_create(start);
+	return pipeline;
+}
+
+// RenderingDevice::compute_pipeline_create on p_rd, counted and timed the same way.
+template <typename... Args>
+inline RID create_rd_compute_pipeline(RenderingDevice *p_rd, Args &&...p_args) {
+	const auto start = std::chrono::steady_clock::now();
+	const RID pipeline = p_rd->compute_pipeline_create(std::forward<Args>(p_args)...);
+	count_rd_pipeline_create(start);
+	return pipeline;
+}
+
 // A GLSL float literal for an engine constant: %.9g round-trips every float,
 // and a trailing ".0" keeps integral values typed as floats.
 inline std::string glsl_float(float p_value) {

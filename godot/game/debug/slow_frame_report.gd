@@ -8,17 +8,19 @@ extends Node
 ## LoadTimeline and JoinWindow lines, where every heavy frame of the join went (the frames
 ## after the S2C 0x0F included); unix_ms lines it up with the capture. The open dev tools
 ## own the board: no drain while they are up. Beside it, a PipelineCompiles line names each
-## frame whose read found pipelines compiled since the previous read (Godot's, by source, and
-## our RenderingDevice GLSL compiles): the frames that pay a first draw's compiles. While the
-## world times its first frames past a load (GameWorld.is_post_load_frames_open: a joiner's run
-## on to its first C2S 0x0C), every window under SLOW_FRAME_US prints too, as a PostLoadFrame
-## line: the S2C 0x0F's first-send window, frame by frame.
+## frame whose read found pipelines compiled since the previous read (Godot's, by source, our
+## RenderingDevice GLSL compiles and our RenderingDevice pipeline creates): the frames that pay a
+## first draw's compiles. While the world times its first frames past a load
+## (GameWorld.is_post_load_frames_open: a joiner's run on to its first C2S 0x0C), every window
+## under SLOW_FRAME_US prints too, as a PostLoadFrame line: the S2C 0x0F's first-send window,
+## frame by frame.
 
 const SLOW_FRAME_US := 100_000
 const TOP_SLOTS := 10
 const MIN_SLOT_US := 1_000
 ## Godot's pipeline compilation sources (RenderingServer.get_rendering_info), in compile_totals'
-## order; our RenderingDevice GLSL compiles (count, microseconds) follow them.
+## order; our RenderingDevice GLSL compiles (count, microseconds), then our RenderingDevice
+## pipeline creates (count, microseconds), follow them.
 const PIPELINE_SOURCES: Array[String] = ["canvas", "mesh", "surface", "draw", "specialization"]
 ## The label of a post-load frame's line under SLOW_FRAME_US.
 const POST_LOAD_LABEL := "PostLoadFrame"
@@ -78,7 +80,8 @@ static func time_slots() -> PackedInt32Array:
 
 
 ## The process's compile totals so far: Godot's pipeline compilations by source
-## (PIPELINE_SOURCES' order), then our RenderingDevice GLSL compiles' count and microseconds.
+## (PIPELINE_SOURCES' order), then our RenderingDevice GLSL compiles' count and microseconds,
+## then our RenderingDevice pipeline creates' count and microseconds.
 static func compile_totals() -> PackedInt64Array:
 	var totals := PackedInt64Array()
 	for info in [RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_CANVAS,
@@ -88,16 +91,17 @@ static func compile_totals() -> PackedInt64Array:
 			RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_SPECIALIZATION]:
 		totals.append(RenderingServer.get_rendering_info(info))
 	totals.append_array(FrameStats.rd_glsl_compile_totals())
+	totals.append_array(FrameStats.rd_pipeline_create_totals())
 	return totals
 
 
 ## One frame's compile line, or "" when nothing compiled since `previous` (a first read, whose
 ## `previous` is empty, prints nothing): each Godot source that compiled, with its count, then
-## our GLSL compiles with their count and milliseconds.
+## our GLSL compiles and our pipeline creates, each with its count and milliseconds.
 static func compile_line(previous: PackedInt64Array, current: PackedInt64Array, frame: int,
 		unix_ms: int) -> String:
 	var sources := PIPELINE_SOURCES.size()
-	if previous.size() != sources + 2 or current.size() != sources + 2:
+	if previous.size() != sources + 4 or current.size() != sources + 4:
 		return ""
 	var parts := PackedStringArray()
 	for i in sources:
@@ -108,6 +112,10 @@ static func compile_line(previous: PackedInt64Array, current: PackedInt64Array, 
 	if glsl > 0:
 		parts.append("rd_glsl %d (%d ms)" % [glsl,
 				(current[sources + 1] - previous[sources + 1]) / 1000])
+	var pipelines := current[sources + 2] - previous[sources + 2]
+	if pipelines > 0:
+		parts.append("rd_pipelines %d (%d ms)" % [pipelines,
+				(current[sources + 3] - previous[sources + 3]) / 1000])
 	if parts.is_empty():
 		return ""
 	return "PipelineCompiles: frame=%d unix_ms=%d: %s" % [frame, unix_ms, ", ".join(parts)]

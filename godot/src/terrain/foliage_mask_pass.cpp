@@ -447,7 +447,7 @@ public:
 		Ref<RDPipelineColorBlendState> blend;
 		blend.instantiate();
 		blend->set_attachments(attachments);
-		RID pipeline = rd->render_pipeline_create(shader, p_format, vertex_format,
+		RID pipeline = create_rd_render_pipeline(rd, shader, p_format, vertex_format,
 				RenderingDevice::RENDER_PRIMITIVE_TRIANGLES, raster, multisample,
 				depth_state, blend);
 		if (pipeline.is_valid()) {

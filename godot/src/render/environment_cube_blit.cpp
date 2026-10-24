@@ -191,7 +191,7 @@ bool EnvironmentCubeBlit::ensure_pipeline(RenderingDevice *rd) {
 	color_blend->set_attachments(attachments);
 	const int64_t framebuffer_format =
 			rd->framebuffer_get_format(layer_framebuffers_[0]);
-	pipeline_ = rd->render_pipeline_create(shader_, framebuffer_format,
+	pipeline_ = create_rd_render_pipeline(rd, shader_, framebuffer_format,
 			RenderingDevice::INVALID_FORMAT_ID,
 			RenderingDevice::RENDER_PRIMITIVE_TRIANGLES, raster, multisample,
 			depth, color_blend);

@@ -890,7 +890,7 @@ RID Q3FrameAdapter::Impl::pipeline_for(int64_t p_framebuffer_format,
 	TypedArray<Ref<RDPipelineColorBlendStateAttachment>> attachments;
 	attachments.push_back(attachment);
 	color_blend->set_attachments(attachments);
-	RID pipeline = rd->render_pipeline_create(shader, p_framebuffer_format,
+	RID pipeline = create_rd_render_pipeline(rd, shader, p_framebuffer_format,
 			vertex_format, RenderingDevice::RENDER_PRIMITIVE_TRIANGLES, raster,
 			multisample, depth, color_blend);
 	if (!pipeline.is_valid())

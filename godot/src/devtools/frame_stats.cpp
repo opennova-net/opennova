@@ -68,6 +68,14 @@ PackedInt64Array FrameStats::rd_glsl_compile_totals() {
 	return out;
 }
 
+PackedInt64Array FrameStats::rd_pipeline_create_totals() {
+	const RdGlslCompileTotals &totals = godot::rd_pipeline_create_totals();
+	PackedInt64Array out;
+	out.push_back(totals.count.load(std::memory_order_relaxed));
+	out.push_back(totals.usec.load(std::memory_order_relaxed));
+	return out;
+}
+
 void FrameStats::sync_capture_signal() {
 	const bool active = board_.is_capture_active();
 	if (active == last_signaled_) {
@@ -87,6 +95,8 @@ void FrameStats::_bind_methods() {
 			&FrameStats::slot_description);
 	ClassDB::bind_static_method("FrameStats", D_METHOD("rd_glsl_compile_totals"),
 			&FrameStats::rd_glsl_compile_totals);
+	ClassDB::bind_static_method("FrameStats", D_METHOD("rd_pipeline_create_totals"),
+			&FrameStats::rd_pipeline_create_totals);
 	ADD_SIGNAL(MethodInfo("capture_changed", PropertyInfo(Variant::BOOL, "active")));
 
 #define OPENNOVA_FRAME_STATS_BIND_SLOT(name, description) BIND_ENUM_CONSTANT(name);

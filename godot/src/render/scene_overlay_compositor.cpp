@@ -674,7 +674,7 @@ RID SceneOverlayCompositorEffect::Impl::pipeline_for(int64_t p_framebuffer_forma
 	Ref<RDPipelineColorBlendState> blend;
 	blend.instantiate();
 	blend->set_attachments(attachments);
-	const RID pipeline = rd->render_pipeline_create(shader, p_framebuffer_format, vertex_format,
+	const RID pipeline = create_rd_render_pipeline(rd, shader, p_framebuffer_format, vertex_format,
 			RenderingDevice::RENDER_PRIMITIVE_TRIANGLES, raster, multisample, depth, blend);
 	if (!pipeline.is_valid()) {
 		set_status("pipeline_create_failed", "RenderingDevice rejected an overlay pipeline");
