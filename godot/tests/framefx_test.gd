@@ -15,7 +15,7 @@ render_mode unshaded, depth_draw_opaque, cull_disabled;
 uniform vec3 u_beauty;
 
 void fragment() {
-	if (CAMERA_VISIBLE_LAYERS == 14126081u) {
+	if (CAMERA_VISIBLE_LAYERS == 215452673u) {
 		ALBEDO = u_beauty;
 	} else {
 		discard;
@@ -116,7 +116,7 @@ func _q3_lum_view(use_q3: bool) -> Dictionary:
 
 	var camera := Camera3D.new()
 	camera.current = true
-	camera.cull_mask = 14126081
+	camera.cull_mask = 215452673
 	camera.position = Vector3(0.0, 0.0, 10.0)
 	viewport.add_child(camera)
 	camera.look_at(Vector3.ZERO, Vector3.UP)
@@ -233,7 +233,7 @@ func test_world_frame_module_owns_beauty_depth_q3_and_the_terminal_effect() -> v
 		await get_tree().process_frame
 
 	var report := renderer.get_backend_report()
-	assert_eq(int(report.get("beauty_camera_mask", -1)), 14126081,
+	assert_eq(int(report.get("beauty_camera_mask", -1)), 0x0CD78C01,
 			"the beauty signature admits the first-person viewmodel layer")
 	assert_false(bool(report.get("q3_auxiliary_view", true)))
 	assert_false(bool(report.get("q3_camera_mask", true)))
@@ -256,7 +256,7 @@ func test_world_frame_module_owns_beauty_depth_q3_and_the_terminal_effect() -> v
 	assert_eq(int(report.get("q3_submitted_commands", -1)), 0,
 			"unregistered beauty geometry is not a Q3 producer")
 	assert_true(bool(report.get("terminal_compositor_installed", false)))
-	assert_eq(camera.cull_mask, 14126081,
+	assert_eq(camera.cull_mask, 215452673,
 			"the module selects the one supported beauty camera signature")
 	assert_false(report.has("far_alpha_stage"),
 			"no auxiliary far-alpha view exists: pass A rides PRE_TRANSPARENT")
@@ -316,7 +316,7 @@ func test_explicit_shutdown_detaches_terminal_effect_and_is_idempotent() -> void
 	var renderer := FrameFx.new()
 	viewport.add_child(renderer)
 	assert_not_null(environment.compositor)
-	assert_eq(camera.cull_mask, 14126081)
+	assert_eq(camera.cull_mask, 215452673)
 
 	renderer.shutdown()
 	var report := renderer.get_backend_report()
@@ -470,7 +470,7 @@ func test_framefx_reentry_recreates_released_terminal_effect() -> void:
 			as FrameFxCompositorEffect
 	assert_not_null(first_effect)
 	assert_true(first_effect.enabled)
-	assert_eq(camera.cull_mask, 14126081)
+	assert_eq(camera.cull_mask, 215452673)
 
 	viewport.remove_child(renderer)
 	assert_null(environment.compositor,
@@ -493,7 +493,7 @@ func test_framefx_reentry_recreates_released_terminal_effect() -> void:
 			"re-entry uses a fresh effect after the prior device owner shut down")
 	assert_false(bool(renderer.get_backend_report().get("shutdown", true)),
 			"re-entry clears the shutdown latch")
-	assert_eq(camera.cull_mask, 14126081,
+	assert_eq(camera.cull_mask, 215452673,
 			"re-entry re-applies the beauty camera signature")
 
 	viewport.remove_child(renderer)

@@ -24,6 +24,16 @@ struct CollisionMatrix;
 
 namespace opennova::renderer {
 
+// The batches draw in a scene's own draw alone, never in a water mirror's
+// reflected subscene: the drawer's one caller is the scene draw, and the scene's
+// collect, not the mirror's, refills them, so an embedder keeps every scar
+// (world batches and entity rings alike) off its mirror cameras.
+// [orig: Scar_DrawBatches @0x5CCD10, called by Terrain_RenderWorldScene @0x5C9658
+//  only; Water_RenderReflectedWorldScene @0x5C8510 has no scar draw;
+//  Terrain_CollectVisibleEntitiesForReflection @0x5C90A0 never calls
+//  Scar_RenderAllCaches]
+inline constexpr bool kScarBatchesReflect = false;
+
 // No occlusion instance is a host-side all-visible fallback, represented by
 // nullopt. Missing owners are rejected before any mask lookup.
 //

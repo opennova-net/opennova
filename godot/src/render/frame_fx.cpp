@@ -82,7 +82,7 @@ using opennova::renderer::FrameFxTaps;
 // than the world fov moves the copy off the gun (runtime/renderer/q3_frame.h
 // q3_object_source_admitted). That gives shaders a collision-free exact-mask signature
 // without admitting caster or slot-capture geometry anywhere.
-constexpr std::uint32_t kBeautyCameraMask = 0x00D78C01u; // + MAIN_VIEW bits 20/22/23 (visual_layers.h)
+constexpr std::uint32_t kBeautyCameraMask = 0x0CD78C01u; // + MAIN_VIEW bits 20/22/23, the no-reflection bits 26/27 (visual_layers.h)
 // FrameFX's 256-square work targets. Focused Q3 is rendered at beauty
 // resolution into the compositor's color attachment with resolved beauty
 // depth attached; this size applies from the capture's downsample on.

@@ -14,10 +14,10 @@ const WORLD_BITS := (1 << 0) | (1 << 16)
 const MAIN_VIEW_BITS := (1 << 20) | (1 << 22)
 const INSET_VIEW := 1 << 21
 # The beauty camera (FrameFx kBeautyCameraMask) and the Inset camera it
-# derives (HudInsetScope: minus the viewmodel, FP body, caster, main-view and
-# main-view foliage bits, plus INSET_VIEW).
-const MAIN_MASK := 0x00D78C01
-const INSET_MASK := 0x00258401
+# derives (HudInsetScope: minus the viewmodel, FP body, caster, main-view,
+# main-view-no-reflection and main-view foliage bits, plus INSET_VIEW).
+const MAIN_MASK := 0x0CD78C01
+const INSET_MASK := 0x04258401
 
 
 func before_all() -> void:

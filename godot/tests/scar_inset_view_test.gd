@@ -11,6 +11,10 @@ const MODEL_GRAPHIC := "armory"
 const MODEL_3DI := "res://../fixtures/threedi/synth/armory.3di"
 const OWNER_A := 0x1004
 const WORLD := 1 << 0
+# The scene-view bits no mirror admits (render/visual_layers.h): the scars ride
+# them, as retail draws scar batches in the scene's own draw alone.
+const SCENE_VIEW_NO_REFLECTION := 1 << 26
+const MAIN_VIEW_NO_REFLECTION := 1 << 27
 const MAIN_VIEW := 1 << 20
 const INSET_VIEW := 1 << 21
 
@@ -96,12 +100,14 @@ func test_world_batches_draw_per_view_while_the_inset_renders() -> void:
 	assert_not_null(world)
 	if world == null:
 		return
-	assert_eq(world.layers, WORLD, "no Inset: the one world mesh on the world layer")
+	assert_eq(world.layers, SCENE_VIEW_NO_REFLECTION,
+			"no Inset: the one world mesh on the scene views' layer, no mirror's")
 	var inset := _draw_list()
 	_batch(inset, 0xFFFF, 0, false, 1)
 	presenter.set_inset_view(true, Vector3.ZERO)
 	presenter.present_inset(inset, {})
-	assert_eq(world.layers, MAIN_VIEW, "the main list draws for the main view alone")
+	assert_eq(world.layers, MAIN_VIEW_NO_REFLECTION,
+			"the main list draws for the main view alone, not its mirror")
 	var inset_world := presenter.get_node_or_null("ScarWorldInset") as MeshInstance3D
 	assert_not_null(inset_world)
 	if inset_world != null:
@@ -110,7 +116,8 @@ func test_world_batches_draw_per_view_while_the_inset_renders() -> void:
 		assert_eq(inset_world.mesh.surface_get_array_len(0), 6, "the Inset list's own batch")
 	assert_eq(presenter.get_inset_world_surface_count(), 1)
 	presenter.set_inset_view(false, Vector3.ZERO)
-	assert_eq(world.layers, WORLD, "the Inset closes: the world layer again")
+	assert_eq(world.layers, SCENE_VIEW_NO_REFLECTION,
+			"the Inset closes: the scene views' layer again")
 	if inset_world != null:
 		assert_false(inset_world.visible)
 
@@ -150,7 +157,8 @@ func test_a_split_owners_entity_ring_takes_an_inset_twin() -> void:
 		# The armory is a no-mirror model: its node takes MAIN_VIEW_NO_MIRROR.
 		assert_eq(ring.layers & (WORLD | (1 << 16)), 0,
 				"a split owner's node ring leaves the world layers")
-		assert_ne(ring.layers & (MAIN_VIEW | (1 << 22)), 0, "and draws for the main view")
+		assert_eq(ring.layers & (MAIN_VIEW | (1 << 22)), 0, "nor a mirror's main-view bits")
+		assert_ne(ring.layers & MAIN_VIEW_NO_REFLECTION, 0, "and draws for the main view alone")
 	presenter.set_inset_view(true, Vector3.ZERO)
 	presenter.present_inset(main, {OWNER_A: model})
 	assert_eq(presenter.get_inset_entity_twin_count(), 1, "the Inset draws it on a twin")

@@ -354,8 +354,8 @@ func test_equipped_inset_flag_drives_the_aimed_reticle_through_presenter() -> vo
 			assert_not_null(inset_camera)
 			assert_eq(camera.cull_mask & second_view_excluded, second_view_excluded,
 					"the source camera of this fixture admits every excluded layer")
-			assert_eq(inset_camera.cull_mask, (camera.cull_mask & ~(second_view_excluded | (1 << 20) | (1 << 22) | (1 << 23))) | (1 << 21),
-					"the Inset camera takes the source mask without the viewmodel/body/caster and main-view layers, plus the Inset's own")
+			assert_eq(inset_camera.cull_mask, (camera.cull_mask & ~(second_view_excluded | (1 << 20) | (1 << 22) | (1 << 23) | (1 << 27))) | (1 << 21),
+					"the Inset camera takes the source mask without the viewmodel/body/caster, main-view and main-view-no-reflection layers, plus the Inset's own")
 			# While the pass renders, the particle renderer holds its camera and
 			# compiles the world's particles for it as a view group of its own.
 			assert_eq(inset_view.get_active_render_camera(), inset_camera)

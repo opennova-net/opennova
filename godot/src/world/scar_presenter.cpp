@@ -35,6 +35,7 @@
 #include "simulation/entity_presenter.h"
 #include "simulation/simulation.h"
 #include "util/texture_path_resolver.h"
+#include "render/visual_layers.h"
 
 namespace godot {
 
@@ -44,6 +45,27 @@ namespace {
 constexpr const char *kScarShaderScorchPath = "res://shaders/scar_quad.gdshader";
 constexpr const char *kScarShaderHolePath = "res://shaders/scar_quad_hole.gdshader";
 constexpr const char *kWorldMeshName = "ScarWorld";
+
+// A scar's layers: a scene view's own and no mirror's (engine
+// renderer/scar_draw_list.h kScarBatchesReflect). The world bits a mirror
+// admits swap for the scene-view bits no mirror mask carries (beauty and
+// Inset, or beauty alone while the owner's views differ); every other bit
+// (the casters', the slot capture's, the Inset's) is kept.
+uint32_t scar_layer_mask(uint32_t p_layer) {
+	if (opennova::renderer::kScarBatchesReflect) {
+		return p_layer;
+	}
+	constexpr uint32_t kScene = visual_layers::WORLD | visual_layers::WORLD_NO_MIRROR;
+	constexpr uint32_t kMain = visual_layers::MAIN_VIEW | visual_layers::MAIN_VIEW_NO_MIRROR;
+	uint32_t out = p_layer;
+	if ((out & kScene) != 0) {
+		out = (out & ~kScene) | visual_layers::SCENE_VIEW_NO_REFLECTION;
+	}
+	if ((out & kMain) != 0) {
+		out = (out & ~kMain) | visual_layers::MAIN_VIEW_NO_REFLECTION;
+	}
+	return out;
+}
 
 // One batch row of the draw-list dictionary (Simulation::get_scar_draw_list).
 struct BatchRow {
@@ -232,6 +254,7 @@ MeshInstance3D *ScarPresenter::ensure_world_mesh_() {
 	instance->set_name(kWorldMeshName);
 	// Shared-ring vertices are world space whatever this node's parent does.
 	instance->set_as_top_level(true);
+	instance->set_layer_mask(scar_layer_mask(visual_layers::WORLD));
 	add_child(instance);
 	world_mesh_id_ = instance->get_instance_id();
 	return instance;
@@ -412,17 +435,18 @@ void ScarPresenter::present(const Ref<ScarDrawList> &p_draw_list, const Dictiona
 					"_s" + String::num_int64(group.section));
 			mount->add_child(instance);
 		}
-		// The ring renders wherever its section renders: it takes the section
-		// mesh's layer stamps (mirror policy, the slot-capture bit SlotShadow
+		// The ring renders wherever its section renders in a scene view: it
+		// takes the section mesh's layer stamps (the slot-capture bit SlotShadow
 		// stamps once per scene build, the main-view bits while the owner's
 		// views differ) from a sibling, every frame, so a split owner's ring
-		// follows its node.
+		// follows its node, with no mirror's bits (scar_layer_mask).
 		for (int i = 0; i < mount->get_child_count(); ++i) {
 			VisualInstance3D *sibling = Object::cast_to<VisualInstance3D>(mount->get_child(i));
 			if (sibling != nullptr && sibling != instance &&
 					!String(sibling->get_name()).begins_with("Scars_")) {
-				if (instance->get_layer_mask() != sibling->get_layer_mask()) {
-					instance->set_layer_mask(sibling->get_layer_mask());
+				const uint32_t layer = scar_layer_mask(sibling->get_layer_mask());
+				if (instance->get_layer_mask() != layer) {
+					instance->set_layer_mask(layer);
 				}
 				break;
 			}
@@ -514,8 +538,8 @@ void ScarPresenter::present_inset_draw_list(const Ref<ScarDrawList> &p_draw_list
 
 void ScarPresenter::apply_world_mesh_view_(bool p_split) {
 	MeshInstance3D *world_instance = ensure_world_mesh_();
-	const uint32_t layer = p_split ? uint32_t(ObjectModel::LAYER_MAIN_VIEW)
-								   : uint32_t(ObjectModel::LAYER_WORLD);
+	const uint32_t layer = scar_layer_mask(p_split ? uint32_t(visual_layers::MAIN_VIEW)
+												   : uint32_t(visual_layers::WORLD));
 	if (world_instance->get_layer_mask() != layer) {
 		world_instance->set_layer_mask(layer);
 	}
@@ -681,8 +705,9 @@ void ScarPresenter::release_inset_() {
 	if (world_mesh_id_.is_valid()) {
 		if (MeshInstance3D *world_instance = Object::cast_to<MeshInstance3D>(
 					ObjectDB::get_instance(world_mesh_id_))) {
-			if (world_instance->get_layer_mask() != uint32_t(ObjectModel::LAYER_WORLD)) {
-				world_instance->set_layer_mask(ObjectModel::LAYER_WORLD);
+			const uint32_t layer = scar_layer_mask(visual_layers::WORLD);
+			if (world_instance->get_layer_mask() != layer) {
+				world_instance->set_layer_mask(layer);
 			}
 		}
 	}

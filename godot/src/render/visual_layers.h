@@ -64,6 +64,15 @@ enum : uint32_t {
 	// state takes a bit no mirror mask carries (env/water.h
 	// set_blink_water_views).
 	MAIN_VIEW_WATER = 1u << 23,
+	// What the scene views draw and no mirror does: the beauty and the Inset
+	// cameras admit SCENE_VIEW_NO_REFLECTION, the beauty camera alone
+	// MAIN_VIEW_NO_REFLECTION, and no mirror mask carries either above or below
+	// the water (the below-water masks admit WORLD_NO_MIRROR and
+	// MAIN_VIEW_NO_MIRROR, so neither can exclude). The scars ride them: retail
+	// draws their batches in the scene's own draw alone (engine
+	// renderer/scar_draw_list.h kScarBatchesReflect carries the witness).
+	SCENE_VIEW_NO_REFLECTION = 1u << 26,
+	MAIN_VIEW_NO_REFLECTION = 1u << 27,
 	SHADOW_CASTER_MASK = STATIC_SHADOW_CASTER | DYNAMIC_SHADOW_CASTER,
 	// The mirror camera's above-water mask; a below-water view adds
 	// WORLD_NO_MIRROR back (retail collects unfiltered there). The mirror is
@@ -87,8 +96,8 @@ enum : uint32_t {
 	// compiles its own foliage and terrain, drawn on INSET_VIEW
 	// (terrain/foliage_dispatcher and terrain/terrain render_inset_frame).
 	SECOND_SCENE_VIEW_EXCLUDED = VIEWMODEL | FP_BODY_SHADOW_ONLY | SHADOW_CASTER_MASK |
-			MAIN_VIEW | MAIN_VIEW_NO_MIRROR | MAIN_VIEW_WATER | TERRAIN_FOLIAGE |
-			TERRAIN_FLAT_FALLBACK,
+			MAIN_VIEW | MAIN_VIEW_NO_MIRROR | MAIN_VIEW_WATER | MAIN_VIEW_NO_REFLECTION |
+			TERRAIN_FOLIAGE | TERRAIN_FLAT_FALLBACK,
 };
 } // namespace visual_layers
 

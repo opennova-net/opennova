@@ -17,7 +17,7 @@ render_mode unshaded, depth_draw_opaque, cull_disabled;
 uniform vec3 u_beauty;
 
 void fragment() {
-	if (CAMERA_VISIBLE_LAYERS == 14126081u) {
+	if (CAMERA_VISIBLE_LAYERS == 215452673u) {
 		ALBEDO = u_beauty;
 	} else {
 		discard;
