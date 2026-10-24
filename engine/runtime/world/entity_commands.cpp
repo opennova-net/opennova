@@ -426,6 +426,7 @@ bool EntityCommands::remove_ssn(EntityTarget ssn) {
     for (EntityHandle occupant : occupants) world_.vehicles.detach(occupant);
     world_.ai.release(h);
     if (world_.collision) world_.collision->remove_entity_instance(h);
+    world_.vehicles.release_despawned_slot_owner(h);
     world_.registry.despawn(h);
     return true;
 }

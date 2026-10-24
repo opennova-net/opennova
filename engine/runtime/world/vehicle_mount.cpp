@@ -265,6 +265,13 @@ void VehicleSystem::bind_use_gun_slot(Entity &occupant, Entity &vehicle) {
     vehicle.primary_weapon_owner = occupant.handle;
 }
 
+void VehicleSystem::release_despawned_slot_owner(EntityHandle gone) {
+    world_.registry.for_each([&](const Entity &row) {
+        if (row.primary_weapon_owner == gone)
+            world_.registry.get(row.handle)->primary_weapon_owner = EntityHandle{};
+    });
+}
+
 const WeaponSlotState *VehicleSystem::resolve_mounted_ammo_slot(const Entity &mount) const {
     const World &world = world_;
     // Retail proves the item definition and the EWeap attrib before resolving
@@ -342,9 +349,13 @@ bool VehicleSystem::reload_weapon_slot(Entity &mount) {
     return true;
 }
 
-void vehicle_release_equipped_slot(Entity &occupant, Entity *vehicle, bool is_local) {
-    if (vehicle != nullptr && vehicle->primary_weapon_owner == occupant.handle)
-        vehicle->primary_weapon_owner = EntityHandle{};
+void vehicle_release_equipped_slot(Entity &occupant, bool is_local) {
+    // The vehicle's MountSlot keeps its owner (+0x24): the detach writes the counter and the
+    // EquippedSlot words, never the owner, so the gun's own pump runs its handlers for the
+    // gunner who left it (VehicleSystem::release_despawned_slot_owner drops it only with the
+    // gunner's entity). [orig: Entity_DetachFromVehicle @0x4355F0 - the slot's stores
+    //  @0x4356FF / @0x435772 alone; WeaponAction_ProcessFrame @0x540E60 - the handler calls
+    //  with slot->owner @0x5413FF / @0x54142A / @0x541482 / @0x5414A2]
     const bool is_player =
             ((occupant.flags | occupant.engine_flags) & 0x100u) != 0;
     // No AdmDef byte is restored: the detach writes it only below, for a

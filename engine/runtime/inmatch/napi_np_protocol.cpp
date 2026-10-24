@@ -427,6 +427,7 @@ void remove_connection_player(NapiNPServerCtx &ctx, NapiNPConnection &leaving) {
 			// The player's brain (player_spawn attaches one) is freed with the row so
 			// the next pool-0 spawn into this slot starts brainless.
 			ctx.world->ai.release(owned_entity);
+			ctx.world->vehicles.release_despawned_slot_owner(owned_entity);
 			ctx.world->registry.despawn(owned_entity);
 		}
 		// The leaver's squad breaks up after its entity is gone and before its

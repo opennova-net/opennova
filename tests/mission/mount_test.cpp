@@ -169,7 +169,9 @@ static void test_mount_config_lifecycle() {
     CHECK((w.registry.get(sh)->engine_flags & 0x40u) == 0);
     CHECK(w.registry.get(sh)->equipped_adm_index == 7);
     CHECK(!w.registry.get(sh)->use_gun_slot_swapped);
-    CHECK(!w.registry.get(gh)->primary_weapon_owner.valid());
+    // The gun's MountSlot keeps its owner through the detach [orig: Entity_DetachFromVehicle
+    // @0x4355F0 - no +0x24 store].
+    CHECK(w.registry.get(gh)->primary_weapon_owner == sh);
 
     w.restore(*occupied);
     CHECK(w.registry.get(sh)->mounted);

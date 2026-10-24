@@ -272,7 +272,9 @@ static void tags_and_pilot(const std::string &root) {
     }
     CHECK(personal_draw);
     CHECK(player->equipped_adm_index == personal_adm);
-    CHECK(!heli->primary_weapon_owner.valid());
+    // The carrier's MountSlot keeps its owner through the detach [orig:
+    // Entity_DetachFromVehicle @0x4355F0 - no +0x24 store].
+    CHECK(heli->primary_weapon_owner == player_handle);
     CHECK(rig->local.inventory.equipped_combo == inventory.equipped_combo);
     CHECK(rig->local.inventory.pools == inventory.pools);
     CHECK(rig->local.inventory.shared_clips == inventory.shared_clips);

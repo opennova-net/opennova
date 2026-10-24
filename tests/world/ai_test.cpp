@@ -6,6 +6,7 @@
 #include <cstring>
 #include <vector>
 
+#include <base/io/bam.h>
 #include <formats/def/def.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <runtime/terrain_query/height_field.h>
@@ -2241,6 +2242,92 @@ static void test_weapon_walk_visits_pool0_in_slot_order() {
     CHECK(w->out.rounds.records[1].shooter_handle == late.packed);
 }
 
+// The gun's MountSlot keeps its owner through the detach, and the walk's pool-1 leg runs
+// the hot gun's handlers for that gunner: a FIRE the gunner had latched leaves as its
+// round, from its own eye along its look now that it stands on foot, and the kick's
+// trail-off sounds at the gunner who left (the emplaced minigun's GS_MINITAIL).
+// [orig: Entity_DetachFromVehicle @0x4355F0 (no +0x24 store); WeaponAction_ProcessFrame
+//  @0x540E60 - the owner's trail-off @0x541281..0x54129B, the transition's handler call
+//  with slot->owner @0x5413FF; WeaponAction_Fire @0x542B10 - the owner test @0x542B24,
+//  the send @0x542C5E; Entity_CalcWeaponFirePosition @0x4DC750 - no parent
+//  @0x4DC847..0x4DC880]
+static void test_weapon_walk_runs_a_hot_gun_for_its_last_gunner() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 8);
+    w->registry.configure_pool(1, 8);
+    seed_test_rifle_ammo(*w);
+    w->tables.weapons.entries.resize(2);
+    WeaponTableEntry &weapon = w->tables.weapons.entries[1];
+    weapon.name.assign(1, 'x');
+    weapon.ammo_index = 1;
+    weapon.valid = true;
+    configure_test_emplacement_weapon(weapon);
+    std::strcpy(weapon.action_fsm.soundtrailoff, "MINI_TAIL");
+    w->out.fire_sounds.set_listener({0.0f, 0.0f, 10.0f});
+    AiSystem &ai = w->ai;
+    ai.is_authority = true;
+    Entity gun{};
+    gun.kind = EntityKind::Item;
+    gun.position = {0.0f, 0.0f, 10.0f};
+    gun.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
+    gun.has_item_def = true; // seats need the def (D-NET-422)
+    gun.has_graphic_model = true;
+    gun.item_attrib = kItemAttribEweap;
+    gun.team = 1;
+    gun.net_id = 0x31;
+    gun.heading = placed_heading_bam(90);
+    gun.primary_weapon.assign(1, 'x');
+    Seat seat{};
+    seat.type = SeatType::Gunner;
+    gun.seats.push_back(seat);
+    const EntityHandle gun_h = w->registry.spawn(1, gun);
+    Entity seed{};
+    seed.kind = EntityKind::Organic;
+    seed.position = {2.0f, 0.0f, 10.0f};
+    seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
+    seed.team = 1;
+    seed.health = 100;
+    seed.net_id = 0x11;
+    const EntityHandle npc_h = w->registry.spawn(0, seed);
+    AiEntity &npc = *ai.at(ai.attach(npc_h));
+    configure_rifleman(npc, 0x11, 1);
+    bind_test_gun_slots(*w);
+    CHECK(w->commands.mount(0x11, 0x31));
+    CHECK(w->vehicles.detach(npc_h));
+    Entity &gun_live = *w->registry.get(gun_h);
+    CHECK(gun_live.primary_weapon_owner == npc_h);
+    CHECK(!gun_live.primary_occupant.valid());
+    // The gun's last shot left its heat window open and a FIRE latched.
+    gun_live.primary_weapon_slot.heat_window_end_tick = 50;
+    gun_live.primary_weapon_slot.next = weapon_action::kFire;
+    w->logic_tick = 1;
+    w->pump_weapon_actions();
+    CHECK(w->out.rounds.count == 1);
+    if (w->out.rounds.count == 1) {
+        const RoundEvent &round = w->out.rounds.records[0];
+        CHECK(round.shooter_handle == npc_h.packed);
+        CHECK(round.origin_x ==
+                opennova::io::bam_add(npc.self->position.x.q16, npc.inf.eye_offset_x));
+        CHECK(round.origin_y ==
+                opennova::io::bam_add(npc.self->position.y.q16, npc.inf.eye_offset_y));
+        CHECK(round.origin_z ==
+                opennova::io::bam_add(npc.self->position.z.q16, npc.inf.eye_offset_z));
+        CHECK(round.dir_yaw == npc.heading);
+    }
+    const Vec3 gunner_at = w->registry.get(npc_h)->position;
+    bool tail_at_gunner = false;
+    for (uint32_t tick = 2; tick < 40 && !tail_at_gunner; ++tick) {
+        w->logic_tick = tick;
+        w->pump_weapon_actions();
+        for (const ReadyFireSound &sound : w->out.fire_sounds.drain())
+            if (sound.set_name == "MINI_TAIL" && sound.pos.x == gunner_at.x &&
+                    sound.pos.y == gunner_at.y && sound.pos.z == gunner_at.z)
+                tail_at_gunner = true;
+    }
+    CHECK(tail_at_gunner);
+    CHECK(w->out.rounds.count == 1);
+}
+
 // T8: past the four-tick cadence and the spatial stagger the mounted request
 // copies the parent's AdmDef byte into the rider's; an off-cadence pass leaves
 // the rider's byte alone. [orig: Entity_UpdateInfantryAI @0x4BF4F4..0x4BF4FA,
@@ -2633,7 +2720,9 @@ static void test_mounted_gunner_dismounts_into_death_animation() {
     //  @0x43569C]
     CHECK(w->registry.get(npc_h)->equipped_adm_index == 0);
     CHECK(!w->registry.get(npc_h)->use_gun_slot_swapped);
-    CHECK(!w->registry.get(gun_h)->primary_weapon_owner.valid());
+    // The gun's MountSlot keeps the dead gunner as its owner [orig: Entity_DetachFromVehicle
+    //  @0x4355F0 - no +0x24 store].
+    CHECK(w->registry.get(gun_h)->primary_weapon_owner == npc_h);
     CHECK(npc.inf.anim_state == kSelectedDeath);
     CHECK(w->registry.get(npc_h)->death_anim_state == 0);
     CHECK(w->registry.get(npc_h)->corpse_timer == 123);
@@ -5052,6 +5141,7 @@ int main() {
     test_infantry_floats_and_splashes_once();
     test_mounted_fire_uses_retail_range_and_spatial_stagger();
     test_weapon_walk_visits_pool0_in_slot_order();
+    test_weapon_walk_runs_a_hot_gun_for_its_last_gunner();
     test_weapon_walk_pumps_hot_unoccupied_guns();
     test_mounted_request_copies_the_parent_adm_byte();
     test_mounted_gunner_runs_the_anim_event_fire_block();

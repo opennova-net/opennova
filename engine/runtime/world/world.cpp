@@ -712,17 +712,25 @@ void World::run_entity_pass(const TickContext &ctx) {
 }
 
 // An unoccupied EWEAP row whose MountSlot is still hot keeps its own pump
-// until the heat window closes: the window, the kick and the action clocks
-// run on, but with no owner the fire handler returns before any round and the
-// owner-keyed cues stay silent.
+// until the heat window closes. Its handlers run for the slot's owner, the
+// gunner who last attached (the detach keeps it): the owner-keyed cues (the
+// kick's trail-off, the fire loop) sound at that gunner, and a FIRE the gunner
+// had latched fires for it, a dismounted owner's round from its own eye along
+// its look. Only a slot no one owns runs ownerless.
 // [orig: WeaponAction_ProcessAllEntities @0x5426E9..0x542716 ->
 //  WeaponAction_ProcessFrame @0x540E60 (the def test @0x540E74, the heat
-//  window @0x540FED..0x541262); WeaponAction_Fire's owner test @0x542B24]
+//  window @0x540FED..0x541262, the owner's trail-off @0x541281..0x54129B and
+//  loop @0x5412B3..0x54132A, the handler calls with slot->owner @0x5413FF /
+//  @0x54142A / @0x541482 / @0x5414A2); WeaponAction_Fire @0x542B10 (the owner
+//  test @0x542B24, the Entity_CalcWeaponFirePosition call @0x542BF7, the send
+//  @0x542C5E); Entity_CalcWeaponFirePosition @0x4DC750 (no parent: Position +
+//  CameraOffset, Yaw, Pitch + pitchBlend @0x4DC847..0x4DC880)]
 static void pump_unoccupied_weapon_slot(World &world, Entity &row, uint32_t frame_tick) {
     const WeaponTableEntry *weapon = world.tables.weapons.by_index(row.primary_weapon_slot_adm);
     if (weapon == nullptr) return;
+    const Entity *owner = world.registry.get(row.primary_weapon_owner);
     WeaponFsmInputs inputs;
-    inputs.owner_present = false;
+    inputs.owner_present = owner != nullptr;
     inputs.is_local = false;
     inputs.is_authority = world.ai.is_authority;
     inputs.auto_reload = world.rules.auto_reload; // [orig: g_AutoReloadEnabled @ 0x24D2118]
@@ -734,12 +742,31 @@ static void pump_unoccupied_weapon_slot(World &world, Entity &row, uint32_t fram
     //  @0x5426E9..0x542716); WeaponAction_Reload @0x5430B0 (@0x5430CA..0x543103);
     //  NetPacket_SendReloadRequest @0x432930 (@0x43296C..0x432974)]
     inputs.reload_refills = reload_echo_refills(world, row);
-    weapon_fire_environment_inputs(world, row, inputs);
+    // The fire gate reads the owner (its carrier chain, its head, its drowning bit); the
+    // heat window's water gate reads the walked gun's body.
+    // [orig: WeaponSlot_CanFire @0x541BA0 - the owner +0x24 @0x541BBA; WeaponAction_ProcessFrame
+    //  - the walked entity's Z @0x541004..0x54100D]
+    weapon_fire_environment_inputs(world, owner != nullptr ? *owner : row, inputs);
+    inputs.submerged = row.position.z.q16 <= world.env.water_z;
     WeaponFsmEvents events;
     weapon_fsm_tick(weapon->action_fsm, row.primary_weapon_slot, inputs, events);
-    weapon_sound_publish(world, row, weapon->action_fsm, events);
+    weapon_sound_publish(world, owner != nullptr ? *owner : row, weapon->action_fsm, events);
     if (events.reload_requested && world.ai.is_authority)
         queue_walk_reload(world, row, *weapon);
+    // The latched shot leaves as the owner's round, on foot from its eye.
+    if (!events.fired || !world.ai.is_authority || owner == nullptr || owner->mounted) return;
+    AiEntity *shooter = world.ai.for_handle(owner->handle);
+    if (shooter == nullptr) return;
+    const int32_t fire[3] = {
+        io::bam_add(shooter->self->position.x.q16, shooter->inf.eye_offset_x),
+        io::bam_add(shooter->self->position.y.q16, shooter->inf.eye_offset_y),
+        io::bam_add(shooter->self->position.z.q16, shooter->inf.eye_offset_z),
+    };
+    // [orig: WeaponAction_Fire - the mode byte @0x542C11, the adm @0x542C1C..0x542C2F]
+    const int32_t fire_mode = ((events.fired_clip_before_consume & 3) << 4) | 2;
+    (void)world.ai.fire_ai_round(world, *shooter, fire, shooter->heading,
+            io::bam_add(shooter->pitch, shooter->inf.recoil_pitch), weapon->ammo_index, fire_mode,
+            row.primary_weapon_slot_adm);
 }
 
 void World::pump_weapon_actions() {
@@ -794,7 +821,6 @@ void World::pump_weapon_actions() {
     for (size_t slot = 0; slot < pool1; ++slot) {
         Entity *row = registry.get(EntityHandle::make(1, static_cast<int>(slot)));
         if (row == nullptr) continue;
-        ai.release_stale_gunner_link(*this, *row);
         // [orig: WeaponAction_ProcessAllEntities @0x542690 (the ItemTypeIndex test
         //  @0x5426F2)]
         if (row->primary_occupant.valid() || row->item_type_index == 0 || !row->has_item_def ||

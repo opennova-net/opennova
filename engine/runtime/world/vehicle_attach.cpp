@@ -920,7 +920,7 @@ bool VehicleSystem::detach(EntityHandle player) {
             if (s.occupant == player) s.occupant = EntityHandle{}; // [orig: -> 0xFFFF]
         }
     }
-    vehicle_release_equipped_slot(*occ, veh, slot_pair_is_local(world, player));
+    vehicle_release_equipped_slot(*occ, slot_pair_is_local(world, player));
     // The local player's detach fades a showing tip [orig: @0x4356b0..0x4356bf
     // — CTipSystem_HandleEvent(6) for g_LocalPlayerEntity].
     if (player == world.cached.local_player)

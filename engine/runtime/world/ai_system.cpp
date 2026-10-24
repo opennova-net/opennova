@@ -1239,20 +1239,6 @@ static bool seat_borrows_mount_slot(const Entity &owner, const Entity &mount) {
             (mount.item_attrib & kItemAttribEweap) != 0);
 }
 
-// A borrower's link holds while it lives, stays seated in a borrowing seat and
-// still names the mount that names it.
-static bool gunner_holds_mount(const Entity &owner, const Entity &mount) {
-    return owner.health > 0 && owner.mounted && seat_borrows_mount_slot(owner, mount) &&
-           owner.mount_target == mount.handle;
-}
-
-void AiSystem::release_stale_gunner_link(World &world, Entity &mount) {
-    if (!mount.primary_weapon_owner.valid()) return;
-    const Entity *owner = world.registry.get(mount.primary_weapon_owner);
-    if (owner == nullptr || !gunner_holds_mount(*owner, mount))
-        mount.primary_weapon_owner = EntityHandle{};
-}
-
 // A remote player's own slot, the row of its table its EquippedSlot names, pumped
 // with no input: the authority's arm of each accepted C2S 0x06 runs its FIRE, then
 // the walk runs RECOIL and, an empty clip with rounds left, RELOAD, whose request
@@ -1304,17 +1290,17 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
     if (owner.equipped_slot.kind != WeaponSlotRef::kMount) return;
     Entity *mount = world.registry.get(owner.equipped_slot.mount);
     if (mount == nullptr) return;
-    // The seated borrower's mount->gunner link is the port's (a stale one drops),
-    // and only it fires: no fire request reaches a slot held on foot (the
-    // infantry request writes FIRE from a seat alone, and a remote player's
+    // The slot's owner (its +0x24, the attach's store) fires from its borrowing seat,
+    // alive or not: the fire action tests the owner alone, so a gunner killed on the seat
+    // still fires a FIRE it had latched, from the gun. No fire request reaches a slot held
+    // on foot (the infantry request writes FIRE from a seat alone, and a remote player's
     // accepted fire re-points to its personal slot first, Server_ClientFiredRound
     // @0x50C1D4..0x50C28D).
-    bool seated = owner.mounted && owner.mount_target == mount->handle &&
+    // [orig: WeaponAction_Fire @0x542B10 - the owner test @0x542B24..0x542B2E;
+    //  Entity_CalcWeaponFirePosition @0x4DC750 - the parentSlot 3 test @0x4DC7A7]
+    const bool seated = owner.mounted && owner.mount_target == mount->handle &&
+            seat_borrows_mount_slot(owner, *mount) &&
             mount->primary_weapon_owner == owner.handle;
-    if (seated && !gunner_holds_mount(owner, *mount)) {
-        mount->primary_weapon_owner = EntityHandle{};
-        seated = false;
-    }
     {
         AiEntity *gunner = for_handle(owner.handle);
         if (gunner == nullptr || mount->primary_weapon_slot_adm == 0xFF) return;

@@ -117,13 +117,13 @@ inline bool mount_collapses_right_hand_row(const Entity &entity) {
             (entity.engine_flags & kEntityFlagPlayer) == 0;
 }
 
-// Clear parent ownership; point a non-local entity's EquippedSlot at its +0x308
-// on a seat-2/3 detach (borrowed or not), restore a player's AdmDef byte after a
-// UseGun ride, and clear any NPC's, whatever its seat, matching the
-// post-restore retail player-classifier branch.
+// Point a non-local entity's EquippedSlot at its +0x308 on a seat-2/3 detach
+// (borrowed or not) and clear any NPC's, whatever its seat, matching the
+// post-restore retail player-classifier branch. The vehicle's MountSlot keeps
+// its owner.
 // [orig: Entity_DetachFromVehicle restore @0x435671-0x435687,
 //  NPC clear @0x435694-0x4356aa]
-void vehicle_release_equipped_slot(Entity &occupant, Entity *vehicle, bool is_local);
+void vehicle_release_equipped_slot(Entity &occupant, bool is_local);
 
 
 

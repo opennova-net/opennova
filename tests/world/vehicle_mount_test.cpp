@@ -2670,6 +2670,11 @@ void test_bms_mount_predicates() {
     CHECK(r.w.vehicles.detach(r.player_h));
     CHECK(r.player().equipped_adm_index == 7);
     CHECK(!r.player().use_gun_slot_swapped);
+    // The detach leaves the gun's MountSlot owner standing; only the gunner's own
+    // destroy takes it (the port's dead-handle twin of retail's dangling word).
+    // [orig: Entity_DetachFromVehicle @0x4355F0 - no +0x24 store; Entity_Destroy @0x43E810]
+    CHECK(r.w.registry.get(gh)->primary_weapon_owner == r.player_h);
+    r.w.vehicles.release_despawned_slot_owner(r.player_h);
     CHECK(!r.w.registry.get(gh)->primary_weapon_owner.valid());
 }
 

@@ -224,6 +224,15 @@ public:
     // bound: the attach stores its owner and touches nothing else in it.
     // [orig: Entity_AttachToUseGunSlot @0x546b80..0x546c73 (the owner store @0x546c73)]
     void bind_use_gun_slot(Entity &occupant, Entity &vehicle);
+    // A slot owner's entity leaving the world takes the owner word off every MountSlot that
+    // names it. Retail's word outlives the entity as a pointer into its destroyed pool slot
+    // (Entity_ClearAllReferences clears the AI words alone, then the entity's head is zeroed);
+    // ours
+    // resolves a dead handle to no owner, so this changes nothing a pump reads.
+    // [orig: Entity_Destroy @0x43E810 - the Entity_ClearAllReferences call @0x43E921, the
+    //  memset @0x43EA70; Entity_ClearAllReferences @0x465670; WeaponAction_ProcessFrame
+    //  @0x540E60 - the slot->owner read @0x540E95]
+    void release_despawned_slot_owner(EntityHandle gone);
     // The entity's embedded MountSlot cleared, then bound to the weapon its def's
     // primary_weapon names and seeded from that weapon: the scope words, the clip word
     // (the def's clipsize), the reserve word (raw startrounds when either word is 0xFFFF,
