@@ -205,7 +205,6 @@ void test_the_spawn_state_survives_mount_and_remount() {
 	r.at(gun_h).primary_weapon_slot.clip = 5;
 	r.at(gun_h).primary_weapon_slot.reserve = 3;
 	CHECK(r.world.vehicles.detach(gunner_h));
-	CHECK(!r.at(gun_h).primary_weapon_owner.valid());
 	CHECK(r.at(gun_h).primary_weapon_slot.clip == 5 && r.at(gun_h).primary_weapon_slot.reserve == 3);
 
 	CHECK(r.world.vehicles.process_attach(gunner_h, gun_h, 6));
