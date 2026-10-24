@@ -734,7 +734,25 @@ struct SessionRules {
     // change. [orig: dword_A87050; Input_HandleActionBinding @0x49AD40 (`test ecx,
     //  ecx` @0x49ADDD, `cmp dword_A87050, 0` @0x49ADE1)]
     bool pause_word = false;
-    bool ignore_weapon_ammo_cost = false; // g_DebugCheatFlags bit 0x100
+    // The local cheat word's 0x100 bit (g_DebugCheatFlags), the infinite-ammo cheat: every
+    // ammo pool read returns its class's carry cap (weapon_seat_pool, through the seat
+    // entity_ammo_seat builds) and a clipless weapon's per-shot cost test is skipped. The
+    // cheat row 114's input action 121 toggles it (inmatch::Role::dispatch_record), out of a
+    // session only; a fresh mission's world starts clear, as Game_StartMission's store of the
+    // word leaves it.
+    // [orig: Server_ToggleDedicatedFlag @0x4DC9C0 - `xor g_DebugCheatFlags, 100h` @0x4DC9C5;
+    //  Entity_GetScoreValueBySlotType @0x5406E0 - the test @0x5406E3, g_AmmoClassMaxCarry
+    //  @0x5406F4; WeaponSlot_CanFire @0x541BA0 - the test @0x541CCF; Game_StartMission
+    //  @0x525B25]
+    bool ignore_weapon_ammo_cost = false;
+    // The local cheat word's 0x400 bit, the frame-rate overlay: HUD_DrawGameplayOverlays
+    // draws "FR %2i  MN %2i MX %2i CPU %d" while it is up. The Debug
+    // row 118's action 74 toggles it, in a session or out of one (its flags are 0); a fresh
+    // mission's world starts clear.
+    // [orig: Input_HandleActionBinding @0x49AD40 - case 74 `xor g_DebugCheatFlags, 400h`
+    //  @0x49B937; HUD_DrawGameplayOverlays - the test @0x5BDEB5, HUD_DrawFrameRateOverlay
+    //  @0x5BAE20 called @0x5BDEC2; Game_StartMission @0x525B25]
+    bool frame_rate_overlay = false;
     bool cease_fire = false; // g_InCeaseFire @ 0x24C196C
     // The player profile's auto-reload word as the mission start's session copy
     // leaves it (profile::session_input): one process global the weapon action
@@ -854,11 +872,13 @@ struct WeaponReloadRequest {
 	uint16_t reload_param = 0;
 };
 
-// One CHAT-ring line by its game-text key (WorldOutbox::hud_chat_lines).
+// One CHAT-ring line by its game-text key (WorldOutbox::hud_chat_lines); `system_ring`
+// posts it to the SYSTEM ring instead (Chat_AddMessageChannel2's, the cheat toggle's line).
 struct HudChatLine {
     const char *section = "";
     const char *key = "";
     uint32_t argb = 0;
+    bool system_ring = false;
 };
 
 struct HudRelay {

@@ -578,6 +578,8 @@ void weapon_inventory_apply_authority_pools(const WeaponTable &table, WeaponInve
 
 WeaponAmmoSeat entity_ammo_seat(const World &world, const Entity &entity) {
     WeaponAmmoSeat seat;
+    if (world.rules.ignore_weapon_ammo_cost)
+        seat.cheat_carry_caps = &world.tables.weapons.ammo_class_caps;
     if (!entity.mounted) return seat;
     seat.parent_slot = static_cast<int32_t>(entity.mount_type);
     const Entity *carrier = world.registry.get(entity.mount_target);
@@ -593,10 +595,16 @@ WeaponAmmoSeat entity_ammo_seat(const World &world, const Entity &entity) {
 }
 
 int32_t weapon_seat_pool(const WeaponAmmoSeat &seat, int class_id, int32_t own) {
-    // [orig: Entity_GetScoreValueBySlotType @0x5406E0 - its g_DebugCheatFlags & 0x100 cap
-    //  leg @0x5406E3 is the infinite-ammo cheat's bit (Server_ToggleDedicatedFlag
-    //  @0x4DC9C5 from action 121), which the port's cheat bindings do not set (its
-    //  World::rules.ignore_weapon_ammo_cost mirror stays clear)]
+    // The infinite-ammo cheat's bit first: the class's carry cap, ahead of every seat leg
+    // (Server_ToggleDedicatedFlag @0x4DC9C5 from action 121 sets it) [orig:
+    //  Entity_GetScoreValueBySlotType @0x5406E0 - `test g_DebugCheatFlags, 100h` @0x5406E3,
+    //  `jz` @0x5406ED, `mov eax, g_AmmoClassMaxCarry[eax*4]` @0x5406F4]
+    if (seat.cheat_carry_caps != nullptr) {
+        const std::vector<int32_t> &caps = *seat.cheat_carry_caps;
+        return class_id >= 0 && static_cast<size_t>(class_id) < caps.size()
+                ? caps[static_cast<size_t>(class_id)]
+                : 0;
+    }
     const bool carrier_reads = (seat.carrier && seat.parent_slot == 3) ||
             (seat.parent_slot == 2 && seat.carrier_eweap); // @0x540707..0x540739
     if (class_id == 1) {                                     // @0x54073F..0x540763
@@ -660,6 +668,19 @@ void weapon_inventory_recalc_clips(const WeaponTable &table, WeaponInventory &in
         // A controller seat writes no bucket [orig: WeaponSlot_SetSharedLoadedRounds @0x540684..0x540692].
         if (!bucket || weapon_seat_writes_buckets(seat))
             weapon_inventory_set_loaded_rounds(table, inv, combo, clamped / units);
+    }
+}
+
+void weapon_inventory_clear_loaded_rounds(const WeaponTable &table, WeaponInventory &inv,
+                                          const WeaponAmmoSeat &seat) {
+    if (seat.parent_slot == 3) return; // [orig: @0x5423C5..0x5423CC]
+    for (int32_t combo = 0; combo < weapon_combo::kSlotCount; ++combo) {
+        const WeaponInventorySlot *slot = inv.slot(combo);
+        if (slot == nullptr || slot->adm_index < 0) continue;
+        const WeaponTableEntry *def = table.by_index(static_cast<uint8_t>(slot->adm_index));
+        if (def == nullptr || def->ammo_class_count == 0) continue; // [orig: @0x5423E6]
+        if (def->ammo_bucket != 0 && !weapon_seat_writes_buckets(seat)) continue;
+        weapon_inventory_set_loaded_rounds(table, inv, combo, 0);
     }
 }
 

@@ -1294,6 +1294,120 @@ void test_the_cheat_row_flips_the_ai_skip_bit_out_of_a_session_only() {
 			"a session's record is taken and flips nothing");
 }
 
+// D-NET-NEW-LI-28 (LI-s25 row 1, LI-s24 FOUND 2): the sibling cheat rows 113..115 and 117
+// (codes 120, 121, 122, 40) take row 116's shape (no key, flags 0x10, mode 1, class 9, the
+// token field its 4-byte command CRC), and the Debug row 118 is "fps" (code 74, flags 0,
+// modes 3, class 11). Past the head, out of a session: 121 flips the infinite-ammo bit and
+// posts Misc STRMISC_INFAMMO to the SYSTEM ring in white when it comes up, 122 stores 0x4000
+// in the local player's health word, 40 goes on to the embedder's weapon-screen toggle; 74
+// flips the frame-rate overlay bit in a session too (flags 0), and the head drops every 0x10
+// row in one.
+// [orig: rows 113 @0x818954, 114 @0x8189C0, 115 @0x818A2C, 117 @0x818B04, 118 @0x818B70;
+//  Input_HandleActionBinding @0x49AD40 - the 0x10 test @0x49AE1C..0x49AE23, case 40
+//  @0x49B7E7, case 74 @0x49B937; Input_HandleActionBinding_0 @0x4E0420 - case 121
+//  @0x4E0746..0x4E077A, case 122 @0x4E0784]
+void test_the_sibling_cheat_and_debug_rows_take_their_arms() {
+	using opennova::controls::ActionClass;
+	using opennova::controls::ActionDef;
+	using opennova::controls::InputEventOrigin;
+	using opennova::controls::InputEventQueue;
+	using opennova::controls::InputEventRecord;
+	struct Cheat {
+		int32_t code;
+		int row;
+		uint32_t token;
+	};
+	const Cheat cheats[] = {{120, 113, 0x520BEC55u}, {121, 114, 0xD2990EA1u},
+			{122, 115, 0x7C1E3767u}, {40, 117, 0xCE42F6BDu}};
+	for (const Cheat &c : cheats) {
+		const ActionDef *row = opennova::controls::action_for_code(c.code);
+		CHECK(row != nullptr && row->id == c.row && row->flags == 0x10u && row->modes == 1u &&
+						row->cls == ActionClass::Cheat && row->default_key == 0 &&
+						row->default_key2 == 0 && row->default_mouse == 0 && row->default_joy == 0,
+				"the cheat record is its static row: flags 0x10, mode 1, class 9, no key");
+		uint32_t token = 0;
+		for (int i = 0; row != nullptr && i < 4 && row->token[i] != '\0'; ++i)
+			token |= static_cast<uint32_t>(static_cast<uint8_t>(row->token[i])) << (8 * i);
+		CHECK(token == c.token, "its token field's first dword is the command CRC");
+		CHECK(client_binding_by_crc(static_cast<int32_t>(c.token)) == c.code,
+				"the CRC walk finds the record");
+	}
+	const ActionDef *fps = opennova::controls::action_for_code(74);
+	CHECK(fps != nullptr && fps->id == 118 && std::string(fps->token) == "fps" &&
+					fps->flags == 0u && fps->modes == 3u && fps->cls == ActionClass::Debug &&
+					fps->default_key == 0,
+			"record 74 is the Debug row 118, \"fps\", flags 0");
+	CHECK(client_binding_by_token("FPS") == 74, "the console's name walk finds it");
+	CHECK(opennova::controls::action_for_code(36) == nullptr,
+			"row 66 (code 36, an empty token) stays out: nothing reaches it");
+
+	struct ScreenDevice final : TickInputSource {
+		std::vector<int32_t> codes;
+		std::vector<int32_t> dispatched;
+		InputPacket sample_tick(uint32_t) override { return {}; }
+		void queue_records(InputEventQueue &records) override {
+			for (const int32_t code : codes)
+				(void)records.push({code, 0, 0, 0, false, InputEventOrigin::Device});
+			codes.clear();
+		}
+		void dispatch_record(const InputEventRecord &record) override {
+			dispatched.push_back(record.code);
+		}
+	};
+	auto role = std::make_unique<TickRecorder>();
+	spawn_local_player(*role);
+	opennova::world::World &world = role->kernel.world;
+	Session session(*role);
+	CHECK(load(session), "the session runs");
+	ScreenDevice device;
+	FrameInput three;
+	three.delta_seconds = TickAccumulator::kTickDt * 3.0;
+	three.tick_source = &device;
+	const auto console = [&role](int32_t code) {
+		return role->input_events().push({code, 0, 0, 0, false, InputEventOrigin::Console});
+	};
+	CHECK(console(121), "a record 121");
+	(void)session.advance(three);
+	CHECK(world.rules.ignore_weapon_ammo_cost && world.out.hud_chat_lines.size() == 1,
+			"121 raises the infinite-ammo bit and posts one line");
+	if (world.out.hud_chat_lines.size() == 1) {
+		const opennova::world::HudChatLine &line = world.out.hud_chat_lines[0];
+		CHECK(std::string(line.section) == "Misc" && std::string(line.key) == "STRMISC_INFAMMO" &&
+						line.argb == 0xFFFFFFFFu && line.system_ring,
+				"Misc STRMISC_INFAMMO on the SYSTEM ring in white");
+	}
+	world.out.hud_chat_lines.clear();
+	CHECK(console(121), "a second record 121");
+	(void)session.advance(three);
+	CHECK(!world.rules.ignore_weapon_ammo_cost && world.out.hud_chat_lines.empty(),
+			"the next 121 drops the bit and posts nothing");
+	opennova::world::Entity *player = world.registry.get(world.cached.local_player);
+	CHECK(player != nullptr, "the local player");
+	if (player != nullptr) player->health = 37;
+	CHECK(console(122) && console(120), "records 122 and 120");
+	(void)session.advance(three);
+	CHECK(player != nullptr && player->health == 0x4000,
+			"122 stores 0x4000 in the health word (120 has no tables to refresh here)");
+	device.codes = {40};
+	(void)session.advance(three);
+	CHECK(device.dispatched == std::vector<int32_t>({40}),
+			"out of a session, with a local player, 40 goes on to the embedder");
+	CHECK(console(74), "a record 74");
+	(void)session.advance(three);
+	CHECK(world.rules.frame_rate_overlay, "74 raises the frame-rate overlay bit");
+	world.rules.mp_session = true;
+	device.dispatched.clear();
+	device.codes = {40};
+	CHECK(console(74) && console(121) && console(122), "records 74, 121 and 122 in a session");
+	if (player != nullptr) player->health = 37;
+	(void)session.advance(three);
+	CHECK(!world.rules.frame_rate_overlay,
+			"74 has no head gate: it drops the bit in a session too");
+	CHECK(!world.rules.ignore_weapon_ammo_cost && player != nullptr && player->health == 37,
+			"in a session the head drops the 0x10 rows");
+	CHECK(device.dispatched.empty(), "and the weapon screen's");
+}
+
 int main() {
 	test_steps_land_on_their_ticks_inside_a_six_tick_frame();
 	test_a_frame_sample_alone_quantizes_to_the_frame();
@@ -1315,6 +1429,7 @@ int main() {
 	test_the_hud_toggle_rows_take_the_whole_head();
 	test_a_reset_ahead_drops_the_use_record_and_the_tail_follows_the_drain();
 	test_the_cheat_row_flips_the_ai_skip_bit_out_of_a_session_only();
+	test_the_sibling_cheat_and_debug_rows_take_their_arms();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
 		return 1;

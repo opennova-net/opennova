@@ -421,6 +421,28 @@ bool LocalPlayer::request_reload() {
 			inventory_valid ? &inventory : nullptr);
 }
 
+void LocalPlayer::refresh_weapon_overlay() {
+	if (!inventory_valid) return;
+	const Entity *player = world_.registry.get(world_.cached.local_player);
+	if (player == nullptr) return;
+	const WeaponTable &table = world_.tables.weapons;
+	// The three calls, in order, through the player's seat (the redraw and the clear read
+	// its +0x168) [orig: Entity_UpdateWeaponOverlayFrameState @0x4DC340 - @0x4DC373 /
+	//  @0x4DC387 / @0x4DC38F on the authority, @0x4DC3B1 / @0x4DC3CF / @0x4DC3E1 for the local
+	//  player without a slot]
+	const WeaponAmmoSeat seat = entity_ammo_seat(world_, *player);
+	weapon_inventory_clear_loaded_rounds(table, inventory, seat);
+	weapon_inventory_seed_pools(table, inventory, player->player_class);
+	weapon_inventory_recalc_clips(table, inventory, seat);
+	// Retail's slot table IS the running weapon's magazine (slot+16); here the held weapon's
+	// FSM carries its own copy, which the next pump mirrors back into the inventory, so the
+	// redrawn clip has to reach it now [orig: the same slot word @0x542375 that
+	//  WeaponAction_* read; player_weapon.cpp mirrors the FSM clip].
+	if (inventory.equipped_combo >= 0)
+		weapon.slot.clip = weapon_inventory_loaded_rounds(table, inventory,
+				inventory.equipped_combo);
+}
+
 void LocalPlayer::clear_deferred_input() {
 	deferred_events.clear();
 }

@@ -394,11 +394,18 @@ struct WeaponAmmoSeat {
     int32_t carrier_reserve = 0;  // Entity_GetMountSlotReserve: its MountSlot reserve word
     int32_t carrier_clip = 0;     // Entity_GetMountSlotClip: its MountSlot clip word
     int32_t carrier_class1 = 0;   // its +0x120 word
+    // While the infinite-ammo cheat's bit is up (World::rules.ignore_weapon_ammo_cost), the
+    // class carry caps every pool read returns ahead of the seat legs, whatever the owner;
+    // null while it is down.
+    const std::vector<int32_t> *cheat_carry_caps = nullptr;
 };
-// The entity's seat, read off its mount [orig: entity+0x168 / +0x16C].
+// The entity's seat, read off its mount, with the cheat's caps while its bit is up
+// [orig: entity+0x168 / +0x16C].
 WeaponAmmoSeat entity_ammo_seat(const World &world, const Entity &entity);
-// A pool read through the seat; `own` is the owner's own pool for the class.
-// [orig: Entity_GetScoreValueBySlotType @0x5406E0]
+// A pool read through the seat; `own` is the owner's own pool for the class. Under the
+// infinite-ammo cheat it is the class's carry cap (0 past the table).
+// [orig: Entity_GetScoreValueBySlotType @0x5406E0 - `test g_DebugCheatFlags, 100h` @0x5406E3,
+//  g_AmmoClassMaxCarry[class] @0x5406F4]
 int32_t weapon_seat_pool(const WeaponAmmoSeat &seat, int class_id, int32_t own);
 // A loaded-round bucket read through the seat; `own` is the owner's own bucket.
 // [orig: WeaponSlot_GetSharedLoadedRounds @0x5405F0]
@@ -407,6 +414,14 @@ int32_t weapon_seat_bucket(const WeaponAmmoSeat &seat, int32_t own);
 bool weapon_seat_writes_buckets(const WeaponAmmoSeat &seat);
 void weapon_inventory_recalc_clips(const WeaponTable &table, WeaponInventory &inv,
                                    const WeaponAmmoSeat &seat);
+// Every populated slot whose def draws pool units has its loaded rounds zeroed (the slot
+// word, or its def's bucket, which a controller seat does not write), unless the owner sits
+// a UseGun seat (+0x168 3).
+// [orig: WeaponSlots_ClearLoadedRounds @0x5423C0 - the seat test @0x5423C5, the def[56]
+//  gate @0x5423E6, WeaponSlot_SetSharedLoadedRounds(bucket, 0) @0x542430 (its seat test
+//  @0x540684..0x540692) or slot+16 = 0 @0x54243A]
+void weapon_inventory_clear_loaded_rounds(const WeaponTable &table, WeaponInventory &inv,
+                                          const WeaponAmmoSeat &seat);
 // The total clips and the loadout weight with the owner's seat (the seatless forms are
 // the unseated owner) [orig: WeaponSlot_GetTotalClips @0x5425F0 - the pool
 //  @0x542638, the bucket @0x542651; Server_RecalculateAllPlayerScores @0x501546 /

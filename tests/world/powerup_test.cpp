@@ -551,13 +551,16 @@ void test_allammo_refuses_full_kit() {
     inv.pools[11] = 59;
     powerup_pickup(rig.world, ammo, rig.picker, rig.ctx(true));
     CHECK(rig.get(ammo) == nullptr);
-    // seed 90, the 30 loaded rounds return (120, the cap), a clip is drawn (90)
-    CHECK(inv.pools[11] == 90 && inv.slots[kRifleCombo].clip == 30);
+    // the 30 loaded rounds cleared, seed 90, a clip is drawn (60)
+    CHECK(inv.pools[11] == 60 && inv.slots[kRifleCombo].clip == 30);
 }
 
-// `allammo` on a populated local slot: the class pool re-seeds from the def,
-// the magazine returns and redraws, and the held weapon's FSM takes the redrawn
-// clip now (the next pump mirrors the FSM clip back into the inventory).
+// `allammo` on a populated local slot: the magazine is cleared, the class pool re-seeds
+// from the def and a clip is drawn, and the held weapon's FSM takes the redrawn clip now
+// (the next pump mirrors the FSM clip back into the inventory).
+// [orig: Entity_UpdateWeaponOverlayFrameState @0x4DC340 - WeaponSlots_ClearLoadedRounds
+//  called @0x4DC373 (@0x4DC3B1 for the local player without a slot), the seed @0x4DC387,
+//  the redraw @0x4DC38F]
 void test_allammo_refills_populated_slot() {
     Rig rig;
     const EntityHandle ammo = rig.spawn_powerup(3);
@@ -569,11 +572,44 @@ void test_allammo_refills_populated_slot() {
     inv.pools[11] = 0;
     rig.local->weapon.slot.clip = 3;
     powerup_pickup(rig.world, ammo, rig.picker, rig.ctx(true));
-    // seed 90, the 3 loaded rounds return (93), a 30-round clip is drawn (63)
-    CHECK(inv.pools[11] == 63);
+    // the 3 loaded rounds cleared, seed 90, a 30-round clip is drawn (60)
+    CHECK(inv.pools[11] == 60);
     CHECK(inv.slots[kRifleCombo].clip == 30);
     CHECK(rig.local->weapon.slot.clip == 30);
     CHECK(rig.world.out.powerup_grants.empty());
+}
+
+// D-NET-NEW-LI-28 (LI-s25 row 1): Entity_UpdateWeaponOverlayFrameState over the local player,
+// which the cheat rows' codes 120 and 121 run as the allammo pickup does: every loaded round
+// cleared, the pools seeded from the defs, every clip redrawn and the FSM taking the clip. And
+// under the infinite-ammo bit every pool read through the seat is the class's carry cap,
+// ahead of the class-1 leg; a class past the cap table reads 0.
+// [orig: Entity_UpdateWeaponOverlayFrameState @0x4DC340 - WeaponSlots_ClearLoadedRounds
+//  @0x4DC3B1, WeaponSlots_SeedAmmoPoolsFromDefs @0x4DC3CF, WeaponSlots_RecalculateAmmoFromCapacity
+//  @0x4DC3E1; Entity_GetScoreValueBySlotType @0x5406E0 - `test g_DebugCheatFlags, 100h`
+//  @0x5406E3, g_AmmoClassMaxCarry @0x5406F4, the class-1 leg after it @0x540742]
+void test_weapon_overlay_refresh_and_the_cheat_caps() {
+    Rig rig;
+    WeaponInventory &inv = rig.local->inventory;
+    inv.slots[kRifleCombo].adm_index = 4;
+    inv.slots[kRifleCombo].clip = 3;
+    inv.equipped_combo = kRifleCombo;
+    inv.pools[11] = 7;
+    rig.local->weapon.slot.clip = 3;
+    rig.local->refresh_weapon_overlay();
+    // the 3 loaded rounds cleared, seed 90, a 30-round clip drawn (60)
+    CHECK(inv.pools[11] == 60 && inv.slots[kRifleCombo].clip == 30);
+    CHECK(rig.local->weapon.slot.clip == 30);
+    const Entity &player = *rig.get(rig.picker);
+    const WeaponAmmoSeat plain = entity_ammo_seat(rig.world, player);
+    CHECK(plain.cheat_carry_caps == nullptr);
+    CHECK(weapon_seat_pool(plain, 11, 5) == 5 && weapon_seat_pool(plain, 1, 5) == 5);
+    rig.world.rules.ignore_weapon_ammo_cost = true;
+    const WeaponAmmoSeat cheat = entity_ammo_seat(rig.world, player);
+    CHECK(cheat.cheat_carry_caps != nullptr);
+    CHECK(weapon_seat_pool(cheat, 11, 5) == 120 && weapon_seat_pool(cheat, 12, 5) == 90);
+    CHECK(weapon_seat_pool(cheat, 1, 5) == 6);
+    CHECK(weapon_seat_pool(cheat, 200, 5) == 0);
 }
 
 // A row that refills AND heals, touched at full health by a remote player: the
@@ -630,9 +666,10 @@ void test_server_applies_remote_grants() {
 
     im::Server_ApplyPowerupGrants(server.np_protocol.connection_list, rig.world);
     CHECK(rig.world.out.powerup_grants.empty());
-    // allammo: seed 90 + the 3 returned rounds - the 30-round redraw = 63,
-    // then the class grant adds 30 (cap 120)
-    CHECK(conn.reply.ammo_pools[11] == 93);
+    // allammo: the 3 loaded rounds cleared, seed 90, the 30-round redraw = 60, then the
+    // class grant adds 30 (cap 120) [orig: Entity_UpdateWeaponOverlayFrameState @0x4DC340 -
+    //  WeaponSlots_ClearLoadedRounds called @0x4DC373 ahead of the seed @0x4DC387]
+    CHECK(conn.reply.ammo_pools[11] == 90);
     CHECK(rig.get(remote)->weapon_slots[static_cast<uint16_t>(kRifleCombo)].clip == 30);
     CHECK(conn.reply.ammo_pools[13] == 4);
     CHECK(bystander.reply.ammo_pools[11] == 7);
@@ -982,6 +1019,7 @@ int main() {
     test_allammo_local();
     test_allammo_refuses_full_kit();
     test_allammo_refills_populated_slot();
+    test_weapon_overlay_refresh_and_the_cheat_caps();
     test_full_health_keeps_staged_grant();
     test_server_applies_remote_grants();
     test_placeholder_row_runs_nothing();

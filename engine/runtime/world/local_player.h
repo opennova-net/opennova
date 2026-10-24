@@ -214,6 +214,18 @@ public:
     void left_button_down();
     // The reload row's arm at its record's dispatch (world::local_weapon_request_reload).
     bool request_reload();
+    // Entity_UpdateWeaponOverlayFrameState over the local player, whose tables on the
+    // authority are its slot's (g_WeaponSlotArrayBase points there) and on a client its own:
+    // every loaded round cleared, the class pools seeded from the defs for its class, every
+    // clip redrawn through its seat. The held weapon's FSM carries its own copy of the
+    // magazine, which takes the redrawn clip. Its callers: the `allammo` pickup (powerup.h)
+    // and the cheat rows' codes 120 and 121 (inmatch::Role::dispatch_record). No local player
+    // or no inventory: nothing.
+    // [orig: Entity_UpdateWeaponOverlayFrameState @0x4DC340 - the authority's slot leg
+    //  @0x4DC354..0x4DC38F, the local leg @0x4DC39C..0x4DC3E1 / @0x4DC3EC..0x4DC433:
+    //  WeaponSlots_ClearLoadedRounds @0x5423C0, WeaponSlots_SeedAmmoPoolsFromDefs @0x541690,
+    //  WeaponSlots_RecalculateAmmoFromCapacity @0x542280]
+    void refresh_weapon_overlay();
     // The fire row's press leg at its record's dispatch (world::local_weapon_press_fire).
     bool press_fire();
     // The fire row's record past the dispatcher's head and the cease fire (case 0x95): with

@@ -194,26 +194,6 @@ void seed_and_recalc(const world::WeaponTable &table, world::WeaponInventory &in
 	world::weapon_inventory_recalc_clips(table, inv, seat);
 }
 
-// Every populated slot whose def draws pool units has its loaded rounds zeroed (the
-// slot word, or its def's bucket, which a controller seat does not write), unless the
-// entity sits a UseGun seat (+0x168 3).
-// [orig: WeaponSlots_ClearLoadedRounds @0x5423C0 (ex WeaponSlots_ClearLoadedRounds) - the seat test
-//  @0x5423C5, the def[56] gate @0x5423E6, WeaponSlot_SetSharedLoadedRounds(bucket, 0) (its seat test
-//  @0x540684..0x540692) or slot+16 = 0]
-void clear_loaded_rounds(const world::WeaponTable &table, world::WeaponInventory &inv,
-                         const world::WeaponAmmoSeat &seat) {
-	if (seat.parent_slot == 3) return;
-	for (int32_t combo = 0; combo < world::weapon_combo::kSlotCount; ++combo) {
-		const world::WeaponInventorySlot *slot = inv.slot(combo);
-		if (slot == nullptr || slot->adm_index < 0) continue;
-		const world::WeaponTableEntry *def =
-				table.by_index(static_cast<uint8_t>(slot->adm_index));
-		if (def == nullptr || def->ammo_class_count == 0) continue;
-		if (def->ammo_bucket != 0 && !world::weapon_seat_writes_buckets(seat)) continue;
-		world::weapon_inventory_set_loaded_rounds(table, inv, combo, 0);
-	}
-}
-
 // Each entry's pool set from its count, in entry order: min(count, maxclips) clips,
 // else its start rounds; then each sub-variant of another ammo class its pool from the
 // second count the same way. A negative second count takes the sub-variant's start
@@ -392,7 +372,7 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 		display = slot_name_table(*table, inv);
 		reinit_listed_slots(*table, inv, display, cls, seat, allow_zoom);
 		seed_and_recalc(*table, inv, cls, conn.reply.revive_pose_valid, seat);
-		clear_loaded_rounds(*table, inv, seat);
+		world::weapon_inventory_clear_loaded_rounds(*table, inv, seat);
 		for (const KitEntry &e : entries) {
 			// The entity's carry bits from the accepted entries alone: the fills' own
 			// were cleared @0x515DF6 [orig: @0x515E2C..0x515E54].
@@ -536,7 +516,7 @@ void PlayerSlot_InitWeaponsFromLoadout(NapiNPConnection &conn, world::World &wor
 	display = slot_name_table(table, inv);
 	reinit_listed_slots(table, inv, display, cls, seat, allow_zoom);
 	seed_and_recalc(table, inv, cls, conn.reply.revive_pose_valid, seat);
-	clear_loaded_rounds(table, inv, seat);
+	world::weapon_inventory_clear_loaded_rounds(table, inv, seat);
 	for (const KitEntry &e : entries) set_kit_pools(table, inv, e, /*accept=*/false);
 	world::weapon_inventory_recalc_clips(table, inv, seat);
 	GrantedWeaponLoadout grant;

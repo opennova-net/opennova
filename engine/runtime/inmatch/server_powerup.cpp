@@ -100,8 +100,8 @@ bool ServerRemoteWeaponTables::remote_ammo(const world::World &world, world::Ent
 // slots the host has seeded take the re-seed (D-PWR-4, docs/world/powerup-re.md).
 // [orig: WeaponSlot_AddAmmo @0x540A20 -- Entity_ValidatePtr @0x540AC5, the pool
 //  add and cap clamp @0x540AD8..0x540AF1; Entity_UpdateWeaponOverlayFrameState
-//  @0x4DC340 -- WeaponSlots_SeedAmmoPoolsFromDefs @0x4DC373 then
-//  WeaponSlots_RecalculateAmmoFromCapacity @0x4DC38F over the slot tables]
+//  @0x4DC340 -- WeaponSlots_ClearLoadedRounds @0x4DC373, WeaponSlots_SeedAmmoPoolsFromDefs
+//  @0x4DC387, then WeaponSlots_RecalculateAmmoFromCapacity @0x4DC38F over the slot tables]
 void Server_ApplyPowerupGrants(std::vector<NapiNPConnection> &roster, world::World &world) {
 	if (world.out.powerup_grants.empty()) return;
 	const world::WeaponTable &table = world.tables.weapons;
@@ -112,10 +112,13 @@ void Server_ApplyPowerupGrants(std::vector<NapiNPConnection> &roster, world::Wor
 		world::Entity *body = world.registry.get(grant.picker);
 		world::WeaponInventory inventory = conn_weapon_inventory(*conn, body, table);
 		if (grant.allammo) {
+			const world::WeaponAmmoSeat seat = body != nullptr
+					? world::entity_ammo_seat(world, *body)
+					: world::WeaponAmmoSeat{};
+			world::weapon_inventory_clear_loaded_rounds(table, inventory, seat);
 			world::weapon_inventory_seed_pools(
 					table, inventory, body != nullptr ? body->player_class : 0);
-			world::weapon_inventory_recalc_clips(table, inventory,
-					body != nullptr ? world::entity_ammo_seat(world, *body) : world::WeaponAmmoSeat{});
+			world::weapon_inventory_recalc_clips(table, inventory, seat);
 		}
 		for (const auto &[class_id, amount] : grant.ammo_adds)
 			world::weapon_pool_add(table, inventory, class_id, amount);

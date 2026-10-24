@@ -206,12 +206,14 @@ void Simulation::drain_feed_posts(const opennova::hud::GameTextLookup &p_gametex
 		bool p_mp_verbose, std::vector<opennova::hud::FeedPost> &r_posts) {
 	r_posts.clear();
 	// The sim's own CHAT-ring lines (WorldOutbox::hud_chat_lines), raised in the entity update
-	// after the frame's receive: each resolves in its section, a miss reading "".
+	// after the frame's receive: each resolves in its section, a miss reading "". A line the
+	// sim marks for the SYSTEM ring (a cheat toggle's) goes there.
 	std::vector<opennova::world::HudChatLine> sim_lines;
 	if (kernel_) sim_lines.swap(kernel_->world.out.hud_chat_lines);
 	if (!runtime_) return;
 	for (const opennova::world::HudChatLine &line : sim_lines) {
-		r_posts.push_back({runtime_->view().claim_feed_order(), opennova::hud::ChatSink::Chat,
+		r_posts.push_back({runtime_->view().claim_feed_order(),
+				line.system_ring ? opennova::hud::ChatSink::System : opennova::hud::ChatSink::Chat,
 				line.argb, opennova::hud::game_text(p_gametext, line.section, line.key, ""), false});
 	}
 	opennova::replication::ClientState &cs = runtime_->state();

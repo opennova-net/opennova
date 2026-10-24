@@ -453,6 +453,75 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 		}
 		return;
 	}
+	// The sibling cheat rows past the same head (flags 0x10, out of a session only), each
+	// case of the troop class callback over the local player (D-NET-NEW-LI-28):
+	// - row 113's 120 refreshes its weapon tables (LocalPlayer::refresh_weapon_overlay);
+	// - row 114's 121 flips the cheat word's 0x100 bit, the infinite ammo
+	//   (World::rules.ignore_weapon_ammo_cost), refreshes the tables, and while the bit is up
+	//   posts Misc STRMISC_INFAMMO to the SYSTEM ring in white;
+	// - row 115's 122 stores 0x4000 in its health word.
+	// [orig: Input_HandleActionBinding_0 @0x4E0420 - g_LocalPlayerEntity @0x4E0434; case 120
+	//  Entity_UpdateWeaponOverlayFrameState called @0x4E0737; case 121 Server_ToggleDedicatedFlag
+	//  called @0x4E0746 (`xor g_DebugCheatFlags, 100h` @0x4DC9C5,
+	//  Entity_UpdateWeaponOverlayFrameState called @0x4DC9D0), `test g_DebugCheatFlags, 100h`
+	//  @0x4E074B, GameText_GetString("Misc", "STRMISC_INFAMMO") @0x4E076C,
+	//  Chat_AddMessageChannel2(text, -1, 930) @0x4E0775; case 122 `mov word ptr [eax+11Eh],
+	//  4000h` @0x4E0784]
+	constexpr int kWeaponRefreshCheatRow = 113;
+	constexpr int kInfiniteAmmoCheatRow = 114;
+	constexpr int kHealthCheatRow = 115;
+	if (code == controls::action_code(kWeaponRefreshCheatRow)) {
+		if (action_head_admits(code)) kernel_->local.refresh_weapon_overlay();
+		return;
+	}
+	if (code == controls::action_code(kInfiniteAmmoCheatRow)) {
+		if (action_head_admits(code)) {
+			world::World &world = kernel_->world;
+			world.rules.ignore_weapon_ammo_cost = !world.rules.ignore_weapon_ammo_cost;
+			kernel_->local.refresh_weapon_overlay();
+			if (world.rules.ignore_weapon_ammo_cost)
+				world.out.hud_chat_lines.push_back({"Misc", "STRMISC_INFAMMO", 0xFFFFFFFFu, true});
+		}
+		return;
+	}
+	if (code == controls::action_code(kHealthCheatRow)) {
+		if (action_head_admits(code)) {
+			world::World &world = kernel_->world;
+			// The one health word, which the port keeps on the registry row and the AI
+			// motor's mirror of entity+286 (the scripted Tele's store writes both).
+			if (world::Entity *player = world.registry.get(world.cached.local_player)) {
+				player->health = 0x4000;
+				if (world::AiEntity *body = world.ai.for_handle(player->handle))
+					body->health = 0x4000;
+			}
+		}
+		return;
+	}
+	// The Debug row 118's 74 (flags 0: no head gate, so a session's echo walk reaches it too)
+	// flips the cheat word's 0x400 bit, the frame-rate overlay (World::rules.frame_rate_overlay).
+	// [orig: Input_HandleActionBinding @0x49AD40 - case 74 `xor g_DebugCheatFlags, 400h`
+	//  @0x49B937]
+	constexpr int kFrameRateRow = 118;
+	if (code == controls::action_code(kFrameRateRow)) {
+		if (action_head_admits(code)) {
+			world::World &world = kernel_->world;
+			world.rules.frame_rate_overlay = !world.rules.frame_rate_overlay;
+		}
+		return;
+	}
+	// The cheat row 117's 40 opens the single player's weapon screen: out of a session, with a
+	// local player, the embedder's toggle (a menu screen up closes, else weapon.mnu's WEAPON
+	// opens), so the record goes on to the embedder past those gates.
+	// [orig: Input_HandleActionBinding @0x49AD40 - case 40 UI_OpenWeaponScreenSinglePlayer
+	//  called @0x49B7E7; UI_OpenWeaponScreenSinglePlayer @0x424390 - `cmp is_in_session, 0`
+	//  @0x424390, the tail @0x4DDCE0 (g_LocalPlayerEntity), UI_IsMenuScreenOpen @0x4DDCE9,
+	//  UI_CloseMenuScreen @0x4DDCF2, UI_OpenMenuScreen("weapon.mnu", "WEAPON") @0x4DDD03,
+	//  g_WeaponScreenOpen = 1 @0x4DDD0B]
+	constexpr int kWeaponScreenCheatRow = 117;
+	if (code == controls::action_code(kWeaponScreenCheatRow) &&
+			(!action_head_admits(code) || kernel_->world.rules.mp_session ||
+					!kernel_->world.cached.local_player.valid()))
+		return;
 	if (record.origin == controls::InputEventOrigin::Device) {
 		if (source != nullptr) source->dispatch_record(record);
 		return;
