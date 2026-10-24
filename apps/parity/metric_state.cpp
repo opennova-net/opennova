@@ -127,18 +127,24 @@ std::pair<size_t, size_t> sequence_span(const std::vector<T> &seq, Same same) {
 	return { begin, end };
 }
 
-// Two samples' delta on one axis. A compact record carries its offset from the anchor
-// rounded to the nearest step of 16 << shift [orig: Network_CompressFixedPoint @0x4C2780 (the
-// rounding add of 8 << shift @0x4C2790..0x4C27B3, the 12-bit mantissa @0x4C27C6)], so it
-// decodes to within half its step of the position it carried, and a delta within the two
-// samples' half steps is none (state.position_quantum).
+// Two samples' delta on one axis: the least motion they prove. A compact record carries its
+// offset from the anchor rounded to the nearest step of 16 << shift [orig:
+// Network_CompressFixedPoint @0x4C2780 (the rounding add of 8 << shift @0x4C2790..0x4C27B3, the
+// 12-bit mantissa @0x4C27C6)] and decodes as the mantissa shifted back [orig:
+// Network_DecompressFixedPoint @0x4C27E0 (the shift @0x4C27EE..0x4C27F8, the mantissa
+// @0x4C27F1, shifted @0x4C27FE)], so it lands within half its step of the position it carried,
+// and two records' positions differ by their delta less up to the sum of their half steps: a
+// delta within that sum is none, and one beyond it counts only what exceeds it
+// (state.position_quantum).
 double axis_delta(const Sample &x, const Sample &y, size_t a, double modulus) {
 	static_assert(has_normalization("state.position_quantum"));
 	const double delta = wrapped(x.axes[a] - y.axes[a], modulus);
-	if (!x.quantum.empty() && !y.quantum.empty() &&
-			std::fabs(delta) <= (x.quantum[a] + y.quantum[a]) / 2.0)
+	if (x.quantum.empty() || y.quantum.empty())
+		return delta;
+	const double band = (x.quantum[a] + y.quantum[a]) / 2.0;
+	if (std::fabs(delta) <= band)
 		return 0.0;
-	return delta;
+	return std::copysign(std::fabs(delta) - band, delta);
 }
 
 bool same_sample(const Sample &x, const Sample &y, double modulus) {
@@ -1075,8 +1081,16 @@ void compare_entities(const RunFacts &rr, const RunFacts &other, std::vector<Met
 					sample.axes = { double(e->orient_a), double(e->orient_b) };
 				} else {
 					// Each axis's step: 16 << ((code & 0x0E) | 1) [orig: Network_CompressFixedPoint
-					// @0x4C2780 (the shift @0x4C27A0..0x4C27AC, stored & 0x0E @0x4C27B5)].
-					auto step = [](uint32_t code) { return double(16u << ((code & 0x0Eu) | 1u)); };
+					// @0x4C2780 (the shift @0x4C27A0..0x4C27AC, stored & 0x0E @0x4C27B5)]. A
+					// value's shift is its magnitude's, 1 under 2^17, so a zero mantissa under
+					// nonzero shift bits is a value that folded to a zero magnitude, 0 or -1, whose
+					// `bsr` (@0x4C279D) left the call site's ECX as the shift bits: it carries its
+					// value exactly.
+					auto step = [](uint32_t code) {
+						if ((code & 0xFFF0u) == 0 && (code & 0x0Eu) != 0)
+							return 0.0;
+						return double(16u << ((code & 0x0Eu) | 1u));
+					};
 					sample.axes = { double(e->world_x), double(e->world_y), double(e->world_z) };
 					sample.quantum = { step(e->pos_x), step(e->pos_y), step(e->pos_z) };
 				}

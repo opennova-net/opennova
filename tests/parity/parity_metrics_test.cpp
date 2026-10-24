@@ -3403,6 +3403,52 @@ void test_position_quantum() {
 			check(find_row(parked.verdict.rows, 'S', row) == nullptr,
 					std::string("a parked vehicle has no ") + row);
 	}
+	// The vehicle record at a fixed anchor-relative y and z (both anchors are still), its x
+	// word `x_word` against the moving anchor, y moving `hop` at 12 s.
+	auto placed = [](uint32_t seed, uint16_t x_word, int32_t hop) {
+		wire::ParityTrace trace = scripted(seed);
+		std::map<int, const wire::ParityFrameState *> frames;
+		for (const wire::ParityFrameState &f : trace.frames)
+			frames[f.frame] = &f;
+		for (wire::ParityEntity &e : trace.entities) {
+			if (e.cls != 'V')
+				continue;
+			const wire::ParityFrameState &f = *frames.at(e.frame);
+			e.pos_x = x_word != 0 ? x_word : network_compress_fixedpoint(4000 * 65536 - f.anchor_x);
+			e.pos_y = network_compress_fixedpoint(100 * 65536 + (e.ts_ns >= 12 * kSec ? hop : 0));
+			e.pos_z = network_compress_fixedpoint(0);
+			place(e, f);
+		}
+		return trace;
+	};
+	{
+		// Two records prove their delta less their two half steps: at 100 units the step is
+		// 1/32 unit (16 << 7, exact here), so a 1-unit move counts 65536 - 2048, and the x
+		// word's wobble within its 2-unit steps none (x11 01tr-coop OO's downed pilot: a
+		// first record a 0.5-unit flip off counted its later sway whole, 0.64 units).
+		const Case hop =
+				judge_case(placed(1, 0, 65536), placed(2, 0, 65536), placed(3, 0, 65536), "OO");
+		for (const char *name : { "entity_V_position_range_p90",
+					 "entity_V_position_displacement_p90", "entity_V_position_step_p90" }) {
+			const VerdictRow *row = find_row(hop.verdict.rows, 'S', name);
+			check(row && row->value.reference == "63488" && row->value.subject == "63488",
+					std::string(name) + " counts the move less the two half steps (" +
+							(row ? row->value.reference : std::string("no row")) + ")");
+		}
+		// A zero word under nonzero shift bits is a value of 0 or -1 whose `bsr` left the call
+		// site's ECX as its shift bits, so it is exact: x8 RR's own record 93 wrote its x, the
+		// anchor's own, as 0x0002, and the host's body 92 standing on that x as 0x000A. A
+		// vehicle on 0x000A rides the anchor, 0.25 units a record, all of it motion (the
+		// word's 0.5-unit step would hide every record of it).
+		const uint16_t zero_word = network_compress_fixedpoint(0, 25);
+		check(zero_word == 0x000A, "a zero x with ECX 25 is the word 0x000A");
+		const Case ride = judge_case(
+				placed(1, zero_word, 0), placed(2, zero_word, 0), placed(3, zero_word, 0), "OO");
+		const VerdictRow *step = find_row(ride.verdict.rows, 'S', "entity_V_position_step_p90");
+		check(step && step->value.reference == "16384",
+				"a zero word's record steps with the anchor (" +
+						(step ? step->value.reference : std::string("no row")) + ")");
+	}
 	constexpr int32_t kDrive = 8 * 65536; // 8 units a record, beyond the 2-unit step
 	expect_row(judge_case(vehicle(1, kDrive), vehicle(2, kDrive), vehicle(3, kDrive), "OO"), 'S',
 			"entity_V_position_displacement_p90", "", "pass");

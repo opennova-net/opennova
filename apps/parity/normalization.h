@@ -903,11 +903,24 @@ inline constexpr Normalization kNormalizations[] = {
 			"position (the anchor plus that offset) of a still entity moves as the "
 			"recipient's anchor moves against the grid: two of its records differ by up to "
 			"half of each one's step. An entity position delta within the two records' half "
-			"steps is no motion. x8's 01tr-coop: the static vehicles' records (V4097..V4116, "
+			"steps is no motion, and one beyond them counts only what exceeds them, the least "
+			"motion the two records prove (the word decodes as its mantissa shifted back, "
+			"Network_DecompressFixedPoint @0x4C27E0: the shift @0x4C27EE..0x4C27F8, the "
+			"mantissa @0x4C27F1, shifted @0x4C27FE). A value's shift is its magnitude's, 1 "
+			"under 2^17, so a zero mantissa under nonzero shift bits is a value that folded to "
+			"a zero magnitude, 0 or -1, whose bsr (@0x4C279D) left the call site's ECX as the "
+			"shift bits: that word is exact, step 0 (the own record's x, the anchor's own; "
+			"15035 of the 66797 P records decoded for LX-s32 carry such an x word). x8's "
+			"01tr-coop: the static vehicles' records (V4097..V4116, "
 			"orientation and state constant) stepped once as the joiner walked off its spawn "
 			"and then held, V4097's x code 0x42BA (shift 11, a half-unit step) by +26508 on RR "
 			"and -1157 on OO, and the V displacement p90s (RR 15633, RR-aa 26786, OR 5147, RO "
-			"5778, OO 1446) were those sub-step moves, OO's 3.43 octaves under RR's" },
+			"5778, OO 1446) were those sub-step moves, OO's 3.43 octaves under RR's. x11's "
+			"01tr-coop OO: the downed pilot's window opened on a record a 0.5-unit x step off "
+			"its later ones, which counted whole, 0.54..0.70 units, and made the I displacement "
+			"p90 42037 against RR's 5419; counted past the half steps it reads 9269 against "
+			"3521. Over LX-s32's 43 subjects all 234 position rows move and none changes "
+			"status" },
 	{ "integrity.key", MaskKind::Field, '*', 0, "challenge key", 0,
 			"each integrity challenge's key is random per request: CRCs compare with the "
 			"key XORed out" },
