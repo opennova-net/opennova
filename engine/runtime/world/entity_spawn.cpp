@@ -48,7 +48,11 @@ void entity_reset_to_spawn_state(Entity &e, int32_t health_ceiling) {
     e.alive = e.health > 0;
     e.mana = e.mana_max;
     e.section_mask = 0;
-    e.last_attacker = {};
+    // No kill-credit attacker store (+0x178): the respawned body keeps its killer, whom the
+    // death edge's unstaged leg clears and a staged hit's stamp replaces; a blast fills only an
+    // empty word. [orig: Entity_ResetToSpawnState @0x4B9610..0x4B9900 (no +0x178 store);
+    //  Entity_UpdateInfantryAI @0x4B9CEB, its player-body twin @0x4B4C72..0x4B4C8D;
+    //  Projectile_ProcessExplosionQueue @0x4EB319]
     e.dragger = {};
     e.dragger_spawn_id = 0;
     e.roll_bam = 0;

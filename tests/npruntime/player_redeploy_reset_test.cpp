@@ -230,6 +230,15 @@ bool run_the_reset_leaves_the_local_players_revive_word() {
 	return expect(local.entity().medic_reviving, "revive word: the reset leaves the local player's");
 }
 
+// The reset stores no kill-credit attacker (+0x178): the respawned body keeps its killer.
+// [orig: Entity_ResetToSpawnState @0x4B9610..0x4B9900 (no +0x178 store)]
+bool run_the_reset_keeps_the_kill_credit_attacker() {
+	Rig r(/*dead=*/true);
+	r.entity().last_attacker = r.wall; // any live row stands for the killer
+	w::entity_reset_to_spawn_state(*r.world, r.world->ai, r.entity());
+	return expect(r.entity().last_attacker == r.wall, "attacker: the reset keeps the body's killer");
+}
+
 // A pool-2 ladder: one CL (type-4) box, x -1..1, y -1..0.25, z -2..1.5 off the entity's
 // origin, its first plane the +Y face (the ladder's facing).
 w::CollisionModel ladder_model() {
@@ -508,6 +517,7 @@ int main() {
 	ok &= run_the_reset_resolve_enters_a_ladder();
 	ok &= run_the_reset_resolve_gates_a_non_climber_off_a_ladder();
 	ok &= run_the_reset_leaves_the_local_players_revive_word();
+	ok &= run_the_reset_keeps_the_kill_credit_attacker();
 	ok &= run_the_deploy_pushes_the_body_out_of_a_wall();
 	ok &= run_a_joiner_bodys_death_edge_reads_its_flags();
 	if (!ok) return 1;
