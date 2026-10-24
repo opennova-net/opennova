@@ -681,7 +681,13 @@ void FoliageMaskCompositorEffect::_render_callback(int32_t p_effect_callback_typ
 			frame = view_frame;
 		}
 	}
-	if (!frame) {
+	// A view with no MODEL mask to draw runs no pass: retail draws a mask only
+	// inside the wave of a crouched or prone person it anchors (the header
+	// carries the witness), and the person shaders sample the target only
+	// while the view's flag is up, which FoliageMaskPass raises with draws
+	// alone; so no frame clears the full-surface target and its depth for
+	// nothing.
+	if (!frame || frame->draws.empty()) {
 		return;
 	}
 	impl_->draw(*frame, p_render_data);
