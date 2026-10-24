@@ -21,6 +21,34 @@
 
 namespace godot {
 
+namespace {
+
+// The per-frame uniforms (SkyDome::FrameParam's order): the name and the passes it reaches.
+struct FrameParamDef {
+	const char *name;
+	bool sky;
+	bool cloud;
+};
+constexpr FrameParamDef kFrameParams[] = {
+	{ "u_flat_pass", true, false },
+	{ "u_flat_color", true, false },
+	{ "u_sky_base", true, true },
+	{ "u_sky_bright", true, true },
+	{ "u_sky_highlight", true, true },
+	{ "u_cloud_base", true, true },
+	{ "u_cloud_highlight", true, true },
+	{ "u_cloud_edge", true, true },
+	{ "u_sun_dir", true, true },
+	{ "u_light_dir", true, true },
+	{ "u_fog_color", true, true },
+	{ "u_fog_end", true, true },
+	{ "u_sky_height", true, true },
+	{ "u_scroll_offset1", false, true },
+	{ "u_scroll_offset2", false, true },
+};
+
+} // namespace
+
 void SkyDome::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_environment_path", "path"),
 			&SkyDome::set_environment_path);
@@ -56,6 +84,8 @@ void SkyDome::_bind_methods() {
 			&SkyDome::is_beauty_pass_drawn);
 	ClassDB::bind_method(D_METHOD("is_mirror_pass_drawn"),
 			&SkyDome::is_mirror_pass_drawn);
+	ClassDB::bind_method(D_METHOD("get_frame_parameter_pushes"),
+			&SkyDome::get_frame_parameter_pushes);
 	// The externally-callable render-frame drive: the
 	// test harness drives frames here; the engine's virtual delegates in.
 	ClassDB::bind_method(D_METHOD("advance_frame", "delta"),
@@ -98,6 +128,13 @@ void SkyDome::build() {
 		mesh_instance_ = nullptr;
 	}
 	built_ = false;
+	// New materials hold none of the frame uniforms: the next frame pushes each.
+	static_assert(sizeof(kFrameParams) / sizeof(kFrameParams[0]) == FRAME_PARAM_COUNT,
+			"one definition per frame uniform");
+	for (int i = 0; i < FRAME_PARAM_COUNT; ++i) {
+		if (frame_param_names_[i].is_empty()) frame_param_names_[i] = StringName(kFrameParams[i].name);
+		frame_param_pushed_[i] = false;
+	}
 	bound_cloud_tex1_.unref();
 	bound_cloud_tex2_.unref();
 
@@ -177,36 +214,32 @@ void SkyDome::advance_frame(double p_delta) {
 	if (frame.loaded) {
 		flat_pass_ = frame.flat_pass;
 		if (frame.flat_pass) {
-			sky_material_->set_shader_parameter("u_flat_pass", true);
-			sky_material_->set_shader_parameter("u_flat_color",
-					to_vector3(frame.flat_color));
+			_set_frame_parameter(FRAME_FLAT_PASS, true);
+			_set_frame_parameter(FRAME_FLAT_COLOR, to_vector3(frame.flat_color));
 		} else {
-			sky_material_->set_shader_parameter("u_flat_pass", false);
-			_set_dome_parameter("u_sky_base", to_vector3(frame.sky_base));
-			_set_dome_parameter("u_sky_bright", to_vector3(frame.sky_bright));
-			_set_dome_parameter("u_sky_highlight",
-					to_vector3(frame.sky_highlight));
-			_set_dome_parameter("u_cloud_base", to_vector3(frame.cloud_base));
-			_set_dome_parameter("u_cloud_highlight",
-					to_vector3(frame.cloud_highlight));
-			_set_dome_parameter("u_cloud_edge", to_vector3(frame.cloud_edge));
+			_set_frame_parameter(FRAME_FLAT_PASS, false);
+			_set_frame_parameter(FRAME_SKY_BASE, to_vector3(frame.sky_base));
+			_set_frame_parameter(FRAME_SKY_BRIGHT, to_vector3(frame.sky_bright));
+			_set_frame_parameter(FRAME_SKY_HIGHLIGHT, to_vector3(frame.sky_highlight));
+			_set_frame_parameter(FRAME_CLOUD_BASE, to_vector3(frame.cloud_base));
+			_set_frame_parameter(FRAME_CLOUD_HIGHLIGHT, to_vector3(frame.cloud_highlight));
+			_set_frame_parameter(FRAME_CLOUD_EDGE, to_vector3(frame.cloud_edge));
 		}
 		// The dome mesh reaches the Godot world through the util/axes.h swap
 		// (EnvFile::build_sky_dome_arrays), so its shader dots GODOT-world
 		// sun/light vectors: route the render-float tuples through the same
 		// swap (2026-08-20 — the identity mapping put the sun-proximity
 		// highlight 90 degrees off in yaw, the 03tr-sun-sky dome half).
-		_set_dome_parameter("u_sun_dir", render_float_to_godot(frame.sun_dir));
-		_set_dome_parameter("u_light_dir",
-				render_float_to_godot(frame.light_dir));
-		_set_dome_parameter("u_fog_color", to_vector3(frame.skyfog_color));
+		_set_frame_parameter(FRAME_SUN_DIR, render_float_to_godot(frame.sun_dir));
+		_set_frame_parameter(FRAME_LIGHT_DIR, render_float_to_godot(frame.light_dir));
+		_set_frame_parameter(FRAME_FOG_COLOR, to_vector3(frame.skyfog_color));
 		// The sky wrapper keeps its dedicated skyfog color and its own fog end
 		// on both sides of the water plane: the engine frame's fog_end is the
 		// raw smoothed distance the dome VS constant c9.x carries unconditionally
 		// (sky_frame.cpp cites Render_Skybox @ 0x5792c2); the murk-derived
 		// world end is the object/terrain passes' alone.
-		_set_dome_parameter("u_fog_end", frame.fog_end);
-		_set_dome_parameter("u_sky_height", frame.sky_height);
+		_set_frame_parameter(FRAME_FOG_END, frame.fog_end);
+		_set_frame_parameter(FRAME_SKY_HEIGHT, frame.sky_height);
 	}
 
 	_update_cloud_textures(env);
@@ -226,9 +259,9 @@ void SkyDome::advance_frame(double p_delta) {
 	}
 	Weather *weather = _weather_node();
 	if (weather != nullptr) {
-		cloud_material_->set_shader_parameter("u_scroll_offset1",
+		_set_frame_parameter(FRAME_SCROLL_OFFSET1,
 				weather->get_cloud_uv_offset1(cam_render_x, cam_render_z));
-		cloud_material_->set_shader_parameter("u_scroll_offset2",
+		_set_frame_parameter(FRAME_SCROLL_OFFSET2,
 				weather->get_cloud_uv_offset2(cam_render_x, cam_render_z));
 	} else {
 		fallback_scroll_.advance(p_delta, frame.sky_speed);
@@ -236,10 +269,8 @@ void SkyDome::advance_frame(double p_delta) {
 				opennova::env::cloud_scroll_uv_offsets(
 						fallback_scroll_.core.cloud_scroll,
 						cam_render_x, cam_render_z);
-		cloud_material_->set_shader_parameter("u_scroll_offset1",
-				Vector2(offsets.u1, offsets.v1));
-		cloud_material_->set_shader_parameter("u_scroll_offset2",
-				Vector2(offsets.u2, offsets.v2));
+		_set_frame_parameter(FRAME_SCROLL_OFFSET1, Vector2(offsets.u1, offsets.v1));
+		_set_frame_parameter(FRAME_SCROLL_OFFSET2, Vector2(offsets.u2, offsets.v2));
 	}
 	_apply_cloud_pass(has_clouds_ && !flat_pass_);
 }
@@ -262,6 +293,22 @@ void SkyDome::_set_dome_parameter(const StringName &p_name,
 	}
 	if (cloud_material_.is_valid()) {
 		cloud_material_->set_shader_parameter(p_name, p_value);
+	}
+}
+
+void SkyDome::_set_frame_parameter(FrameParam p_param, const Variant &p_value) {
+	if (frame_param_pushed_[p_param] && frame_param_written_[p_param] == p_value) {
+		return;
+	}
+	frame_param_written_[p_param] = p_value;
+	frame_param_pushed_[p_param] = true;
+	++frame_param_pushes_;
+	const FrameParamDef &def = kFrameParams[p_param];
+	if (def.sky && sky_material_.is_valid()) {
+		sky_material_->set_shader_parameter(frame_param_names_[p_param], p_value);
+	}
+	if (def.cloud && cloud_material_.is_valid()) {
+		cloud_material_->set_shader_parameter(frame_param_names_[p_param], p_value);
 	}
 }
 
