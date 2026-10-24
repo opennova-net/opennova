@@ -162,7 +162,15 @@ func _bind_scene_ui() -> void:
 	_target_option.item_selected.connect(_on_target_selected)
 	_close_button.pressed.connect(_on_close_pressed)
 	_login_button.pressed.connect(_on_login_pressed)
-	_password_edit.text_submitted.connect(func(_text: String) -> void: _on_login_pressed())
+	# Enter in a sign-in field lets the keyboard go, then runs the page's VK_RETURN hotkey (each
+	# page's submit carries one: JO's ACCEPT, DFX2's LOGIN), which presses the submit when it is
+	# shown and enabled; with no field holding the keyboard, Enter runs the same hotkey
+	# (_unhandled_key_input). So one Enter submits, from either field or from neither. The page's
+	# edits take the keys as the menu's do (engine: MenuRuntime::commit_edit_ and handle_key, the
+	# edit's Enter and the focus-gated hotkey scan, D-NET-NEW-L9-56); the commit event an edit's
+	# Enter emits has no taker on the sign-in page.
+	for edit: LineEdit in [_username_edit, _password_edit]:
+		edit.text_submitted.connect(_on_sign_in_field_submitted.bind(edit))
 	# The sign-in fields as the page's edits take input (engine: LobbyHttpFlow's remembered
 	# login): a click (a press and its release over the field) clears the remembered fill, a
 	# keystroke does not; a field takes the keyboard only from its own click or from its
@@ -1099,6 +1107,35 @@ func _on_sign_in_field_input(field: LineEdit, partner: LineEdit, event: InputEve
 	if key != null and key.pressed and key.keycode == KEY_TAB:
 		partner.grab_focus()
 		field.accept_event()
+
+
+# Enter in a sign-in field (see the wiring in _bind_scene_ui): the field lets the keyboard go,
+# then the page's VK_RETURN hotkey.
+func _on_sign_in_field_submitted(_text: String, field: LineEdit) -> void:
+	field.release_focus()
+	_press_sign_in_submit()
+
+
+# The sign-in page's VK_RETURN hotkey: the submit pressed when the page shows and the submit is
+# enabled (DFX2's LOGIN gate, a sign-in in flight, no session: disabled).
+func _press_sign_in_submit() -> void:
+	if _screen != Screen.LOGIN or not login_enabled():
+		return
+	_on_login_pressed()
+
+
+# Enter with no sign-in field holding the keyboard (a focused field takes its own Enter): the
+# page's VK_RETURN hotkey.
+func _unhandled_key_input(event: InputEvent) -> void:
+	var key := event as InputEventKey
+	if key == null or not key.pressed:
+		return
+	if key.keycode != KEY_ENTER and key.keycode != KEY_KP_ENTER:
+		return
+	if _screen != Screen.LOGIN or not is_visible_in_tree():
+		return
+	get_viewport().set_input_as_handled()
+	_press_sign_in_submit()
 
 
 ## A match that ended with an error text shows it in the NovaWorld error dialog

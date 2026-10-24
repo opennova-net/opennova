@@ -345,6 +345,56 @@ func test_disconnect_at_sign_in_disarms_login() -> void:
 	assert_eq(panel.status_text(), status, "Enter after the disconnect starts no sign-in")
 
 
+# Enter on the sign-in page runs the page's VK_RETURN hotkey: in either field, which lets the
+# keyboard go first, or in neither, one Enter presses the submit while it is enabled. (The
+# unstarted session fails the sign-in at once, so a press shows the message screen.)
+# [orig: CEditWnd_HandleKeyEvent @0x6623A0 case 0xD - g_UIFocusWnd = 0 @0x66249F, the VK_RETURN
+#  scan called @0x6624EF; UI_DispatchKeyboardEventToChildren @0x63AD10 - the WM_KEYDOWN focus
+#  test @0x63ADDA; CWnd_IsVisibleInHierarchy @0x646290]
+func test_enter_on_sign_in_runs_the_submit_hotkey() -> void:
+	var form := "Center/Shell/Margin/RootVBox/Pages/LoginView/LoginCard/LoginMargin/LoginForm/"
+	var pressed := "The matchmaking service is still connecting."
+	var enter := InputEventKey.new()
+	enter.keycode = KEY_ENTER
+	enter.pressed = true
+	for field_name in ["UsernameEdit", "PasswordEdit"]:
+		var panel := _make_panel(PackedStringArray())
+		panel.client_for_test().emit_signal("connected")
+		(panel.get_node(form + "UsernameEdit") as LineEdit).text = "ljim"
+		var field := panel.get_node(form + field_name) as LineEdit
+		field.grab_focus()
+		assert_true(field.has_focus(), "%s holds the keyboard" % field_name)
+		field.text_submitted.emit(field.text)
+		assert_false(field.has_focus(), "Enter in %s lets the keyboard go" % field_name)
+		assert_eq(panel.current_screen(), NovaWorldPanel.Screen.MESSAGE,
+				"one Enter in %s presses the submit" % field_name)
+		assert_eq(panel.message_text(), pressed)
+
+	var bare := _make_panel(PackedStringArray())
+	bare.client_for_test().emit_signal("connected")
+	(bare.get_node(form + "UsernameEdit") as LineEdit).text = "ljim"
+	assert_null(bare.get_viewport().gui_get_focus_owner(), "the page opens with no focus")
+	bare.get_viewport().push_input(enter)
+	assert_eq(bare.current_screen(), NovaWorldPanel.Screen.MESSAGE,
+			"Enter with no field holding the keyboard presses the submit")
+	assert_eq(bare.message_text(), pressed)
+
+	# A submit that is not enabled (DFX2's LOGIN gate closed, a sign-in in flight) is skipped:
+	# the field still lets the keyboard go.
+	var closed := _make_panel(PackedStringArray())
+	closed.client_for_test().emit_signal("connected")
+	(closed.get_node(form + "LoginButton") as Button).disabled = true
+	var user := closed.get_node(form + "UsernameEdit") as LineEdit
+	user.text = "ljim"
+	user.grab_focus()
+	var status := closed.status_text()
+	user.text_submitted.emit(user.text)
+	closed.get_viewport().push_input(enter)
+	assert_false(user.has_focus(), "Enter lets the keyboard go with the submit disabled")
+	assert_eq(closed.current_screen(), NovaWorldPanel.Screen.LOGIN, "and presses nothing")
+	assert_eq(closed.status_text(), status)
+
+
 # A live Join goes with the session that armed it.
 func test_error_in_the_lobby_disarms_join() -> void:
 	var panel := _make_panel(PackedStringArray())
