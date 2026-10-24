@@ -109,11 +109,15 @@ public:
 	// and a row's host page: "http://", the host, ":" and the port only when it
 	// is not HTTP's 80, "/" and the page (see host_url).
 	static std::string host_url_for(const std::string &web_host, uint16_t port,
-	                                const std::string &host_page);
+	                                const std::string &host_page) {
+		return web_root_for(web_host, port) + "/" + host_page;
+	}
 	// The service's own root as its pages name it: "http://", the web host and ":" and the
 	// port only when it is not 80, no trailing '/' (a directly fetched page's {{WEB_ROOT}}: JO's
 	// sign-in template's image lines, the live "http://<web-ip>/nonbhdx2.tga"; D-NET-NEW-L9-52).
-	static std::string web_root_for(const std::string &web_host, uint16_t port);
+	static std::string web_root_for(const std::string &web_host, uint16_t port) {
+		return "http://" + web_host + (port == 80 ? std::string() : ":" + std::to_string(port));
+	}
 
 	// Optional unknown-message tracker. When set, the catch-all 404 path
 	// records "http" sightings ("<METHOD> /<path>"); /api/unknowns reads the

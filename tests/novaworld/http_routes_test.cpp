@@ -4989,25 +4989,19 @@ int test_served_pages_live_bytes(Harness &h) {
 	const std::string base = "http://127.0.0.1:" + std::to_string(h.secure_port);
 	const auto crlf_only = [](const std::string &page) {
 		for (std::size_t i = 0; i < page.size(); ++i) {
-			if (page[i] == '
-' && (i == 0 || page[i - 1] != '
-')) return false;
-			if (page[i] == '
-' && (i + 1 == page.size() || page[i + 1] != '
-')) return false;
+			if (page[i] == '\n' && (i == 0 || page[i - 1] != '\r')) return false;
+			if (page[i] == '\r' && (i + 1 == page.size() || page[i + 1] != '\n')) return false;
 		}
 		return true;
 	};
 	const auto ends_crlf = [](const std::string &page) {
-		return page.size() >= 2 && page.compare(page.size() - 2, 2, "
-") == 0;
+		return page.size() >= 2 && page.compare(page.size() - 2, 2, "\r\n") == 0;
 	};
 	// A failed GET reads empty, which no size below matches.
 	const auto get = [&h](const std::string &path) {
 		const auto reply = h.send_to(h.secure_port, "GET", path);
 		if (!reply.transport_ok || reply.code != 200) {
-			std::fprintf(stderr, "  GET %s: %s
-", path.c_str(), describe(reply).c_str());
+			std::fprintf(stderr, "  GET %s: %s\n", path.c_str(), describe(reply).c_str());
 			return std::string();
 		}
 		return body_text(reply);
@@ -5018,8 +5012,7 @@ int test_served_pages_live_bytes(Harness &h) {
 				 { "/jop_2_host3.htm", 369 }, { "/jop_2_jend.htm", 400 } }) {
 		const std::string page = get(path);
 		if (page.size() != size)
-			std::fprintf(stderr, "  %s: %zu B, live %zu B
-", path.c_str(), page.size(), size);
+			std::fprintf(stderr, "  %s: %zu B, live %zu B\n", path.c_str(), page.size(), size);
 		TEST_EXPECT(page.size() == size && crlf_only(page) && ends_crlf(page));
 	}
 	const std::string relay_mnx = get("/jop_2_relay.mnx");
@@ -5033,8 +5026,7 @@ int test_served_pages_live_bytes(Harness &h) {
 	TEST_EXPECT(stat_rows == 2 &&
 			main_mnx.find("<SUBST column=\"6\" URL>@PROD_ICON_JOX0@</SUBST>") != std::string::npos);
 	const std::string login_mnx = get("/jop_2_login.mnx");
-	const std::string image = "URL>" + base + "/nonbhdx2.tga</SUBST>
-";
+	const std::string image = "URL>" + base + "/nonbhdx2.tga</SUBST>\r\n";
 	TEST_EXPECT(login_mnx.size() == 12802 - 2 * 15 + 2 * base.substr(7).size() &&
 			crlf_only(login_mnx) && ends_crlf(login_mnx));
 	const std::size_t first_image = login_mnx.find(image);
@@ -5047,14 +5039,11 @@ int test_served_pages_live_bytes(Harness &h) {
 		const std::string page =
 				test_io::read_file_text((h.retail_root / "templates" / name).string());
 		if (page.size() != size)
-			std::fprintf(stderr, "  %s: %zu B, want %zu B
-", name.c_str(), page.size(), size);
+			std::fprintf(stderr, "  %s: %zu B, want %zu B\n", name.c_str(), page.size(), size);
 		TEST_EXPECT(page.size() == size && crlf_only(page) && ends_crlf(page));
 	}
 	TEST_EXPECT(test_io::read_file_text((h.retail_root / "templates" / "jop_2_host2.htm").string())
-					.find("<TITLE>
-[HOSTKEY={{HOSTKEY}}&]
-</TITLE>") != std::string::npos);
+					.find("<TITLE>\r\n[HOSTKEY={{HOSTKEY}}&]\r\n</TITLE>") != std::string::npos);
 	return 0;
 }
 
