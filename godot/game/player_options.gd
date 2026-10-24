@@ -217,9 +217,11 @@ static func fresh_profile_aspect_mode(desktop: Vector2i) -> int:
 	return Simulation.fresh_profile_aspect_mode(desktop.x, desktop.y)
 
 
-## The primary desktop's size: retail's SM_CXSCREEN / SM_CYSCREEN sample.
+## The primary desktop's size: retail's SM_CXSCREEN / SM_CYSCREEN sample, read as its DPI-unaware
+## process reads it (the logical size of a scaled desktop) on Windows; the display server's primary
+## screen elsewhere (GameConfigBlock.primary_desktop_size).
 static func desktop_size() -> Vector2i:
-	return DisplayServer.screen_get_size(DisplayServer.SCREEN_PRIMARY)
+	return GameConfigBlock.primary_desktop_size()
 
 
 func _load_state() -> State:

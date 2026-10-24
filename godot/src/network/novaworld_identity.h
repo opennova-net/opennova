@@ -5,7 +5,16 @@
 #include <formats/gamecfg/game_cfg.h>
 #include <net/novaworld/lobby_vars.h>
 
+#include <godot_cpp/variant/vector2i.hpp>
+
 namespace godot {
+
+// The primary desktop as retail samples it (engine: read_primary_screen_size, the logical size of
+// a scaled desktop, as retail's DPI-unaware process reads it) on Windows; elsewhere, or where it
+// reads nothing, the display server's primary screen stands in ((0, 0) with no display server).
+// The first launch's video test (GameConfigBlock.primary_desktop_size, the menu's entry) and
+// NWHWI's renderer desktop both take it.
+Vector2i primary_desktop_size();
 
 // Samples the device facts the NWHWI cookie prints (engine HardwareIdentity: the adapter, its
 // display memory, the physical memory, the primary desktop) once per process, as retail's boot

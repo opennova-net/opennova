@@ -3,7 +3,7 @@
 #include "mnu/menu_driver.h"
 #include "mnu/mnu_document.h"
 #include "network/join_target.h"
-#include "network/novaworld_identity.h" // sample_device_identity (the boot's NWHWI facts)
+#include "network/novaworld_identity.h" // sample_device_identity, primary_desktop_size
 #include "resource_index/launch_flags.h"
 #include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
@@ -64,6 +64,8 @@ void GameConfigBlock::_bind_methods() {
 			&GameConfigBlock::enter_main_menu);
 	ClassDB::bind_method(D_METHOD("reload_main_menu", "root", "gametext", "desktop"),
 			&GameConfigBlock::reload_main_menu);
+	ClassDB::bind_static_method("GameConfigBlock", D_METHOD("primary_desktop_size"),
+			&GameConfigBlock::primary_desktop_size);
 	ClassDB::bind_method(D_METHOD("switch_expansion", "root"), &GameConfigBlock::switch_expansion);
 	ClassDB::bind_method(D_METHOD("is_file_read"), &GameConfigBlock::is_file_read);
 	ClassDB::bind_method(D_METHOD("is_version_reset"), &GameConfigBlock::is_version_reset);
@@ -113,6 +115,10 @@ bool GameConfigBlock::enter_main_menu(const Ref<ResourceRoot> &p_root,
 	// facts are sampled there, once (network/novaworld_identity.h).
 	sample_device_identity(block_.cfg());
 	return kept;
+}
+
+Vector2i GameConfigBlock::primary_desktop_size() {
+	return godot::primary_desktop_size();
 }
 
 bool GameConfigBlock::reload_main_menu(const Ref<ResourceRoot> &p_root,

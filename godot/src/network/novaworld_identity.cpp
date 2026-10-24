@@ -77,17 +77,22 @@ opennova::HardwareIdentity read_device_identity(const opennova::gamecfg::GameCfg
 		}
 	}
 	opennova::read_total_physical_memory(hw.total_phys_bytes);
-	if (!opennova::read_primary_screen_size(hw.desktop_width, hw.desktop_height)) {
-		if (DisplayServer *display = DisplayServer::get_singleton()) {
-			const Vector2i size = display->screen_get_size(DisplayServer::SCREEN_PRIMARY);
-			hw.desktop_width = size.x;
-			hw.desktop_height = size.y;
-		}
-	}
+	const Vector2i desktop = primary_desktop_size();
+	hw.desktop_width = desktop.x;
+	hw.desktop_height = desktop.y;
 	return hw;
 }
 
 } // namespace
+
+Vector2i primary_desktop_size() {
+	int32_t width = 0;
+	int32_t height = 0;
+	if (opennova::read_primary_screen_size(width, height)) return Vector2i(width, height);
+	if (DisplayServer *display = DisplayServer::get_singleton())
+		return display->screen_get_size(DisplayServer::SCREEN_PRIMARY);
+	return Vector2i();
+}
 
 void sample_device_identity(const opennova::gamecfg::GameCfg &cfg) {
 	std::optional<opennova::HardwareIdentity> &sample = device_identity();

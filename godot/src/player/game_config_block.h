@@ -52,6 +52,9 @@ public:
 			const Vector2i &p_desktop);
 	bool reload_main_menu(const Ref<ResourceRoot> &p_root, const Ref<RtxtStringFile> &p_gametext,
 			const Vector2i &p_desktop);
+	// The primary desktop the entry's `p_desktop` takes, as retail's video test samples it (the
+	// DPI-unaware logical size on Windows: network/novaworld_identity.h primary_desktop_size).
+	static Vector2i primary_desktop_size();
 	// A join's switch of `p_root` to the host's expansion: its weapon.def table
 	// for the reads and saves after, reading and saving nothing (the engine's
 	// GameConfigBlock::switch_expansion).
