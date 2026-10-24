@@ -208,15 +208,17 @@ func present(force := false) -> void:
 			RenderingServer.viewport_set_measure_render_time(viewport.get_viewport_rid(), true)
 		var texture_bytes := -1
 		var buffer_bytes := -1
+		var compiles_before := []
 		if OS.is_stdout_verbose():
 			texture_bytes = RenderingServer.get_rendering_info(
 					RenderingServer.RENDERING_INFO_TEXTURE_MEM_USED)
 			buffer_bytes = RenderingServer.get_rendering_info(
 					RenderingServer.RENDERING_INFO_BUFFER_MEM_USED)
+			compiles_before = _pipeline_compiles()
 		var draw_start := Time.get_ticks_usec()
 		RenderingServer.force_draw(true, 0.0)
 		_note_slow_present(Time.get_ticks_usec() - draw_start, now, viewport, held,
-				texture_bytes, buffer_bytes)
+				texture_bytes, buffer_bytes, compiles_before)
 		_present_texture_bytes = texture_bytes
 		_present_buffer_bytes = buffer_bytes
 		release_offscreen_targets(held)
@@ -257,10 +259,12 @@ static func release_offscreen_targets(held: Array) -> void:
 ## An instrument (--verbose only): a present whose forced draw ran 50 ms or more names
 ## its split (the forced draw's frame setup, the scene and canvas updates ahead of the
 ## draws), the root's and the screen viewport's last measured draws, the offscreen
-## targets it held, and the texture and buffer memory the load made on the device since
-## the previous present (the uploads this forced draw's frame carries).
+## targets it held, the texture and buffer memory the load made on the device since
+## the previous present (the uploads this forced draw's frame carries), and what the
+## forced draw drew on the screen viewport: its canvas draw calls and items, each canvas
+## layer with visible canvas items there, and the pipelines the forced draw compiled.
 func _note_slow_present(draw_usec: int, present_start_ms: int, screen_viewport: Viewport,
-		held: Array, texture_bytes: int, buffer_bytes: int) -> void:
+		held: Array, texture_bytes: int, buffer_bytes: int, compiles_before: Array) -> void:
 	if draw_usec < 50000 or not OS.is_stdout_verbose():
 		return
 	var held_names := PackedStringArray()
@@ -281,6 +285,45 @@ func _note_slow_present(draw_usec: int, present_start_ms: int, screen_viewport: 
 		print_verbose("LoadingScreen: since the previous present: textures %+d MB, buffers %+d MB" % [
 				(texture_bytes - _present_texture_bytes) >> 20,
 				(buffer_bytes - _present_buffer_bytes) >> 20])
+	var layers := {}
+	for node in screen_viewport.find_children("*", "CanvasItem", true, false):
+		var item := node as CanvasItem
+		if item.get_viewport() != screen_viewport or not item.is_visible_in_tree():
+			continue
+		var layer := item.get_canvas_layer_node()
+		if layer != null and not layer.visible:
+			continue
+		var key := "(canvas)" if layer == null else "%s %d" % [layer.name, layer.layer]
+		layers[key] = int(layers.get(key, 0)) + 1
+	var layer_rows := PackedStringArray()
+	for key in layers:
+		layer_rows.append("%s items %d" % [key, layers[key]])
+	var compiles := _pipeline_compiles()
+	var compiled := PackedStringArray()
+	for i in range(mini(compiles.size(), compiles_before.size())):
+		compiled.append(str(compiles[i] - compiles_before[i]))
+	print_verbose("LoadingScreen: the forced draw on %s: canvas %d draws over %d items; the visible layers [%s]; pipelines compiled (canvas, mesh, surface, draw, specialization) [%s]" % [
+			screen_viewport.name,
+			RenderingServer.viewport_get_render_info(screen_viewport.get_viewport_rid(),
+					RenderingServer.VIEWPORT_RENDER_INFO_TYPE_CANVAS,
+					RenderingServer.VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME),
+			RenderingServer.viewport_get_render_info(screen_viewport.get_viewport_rid(),
+					RenderingServer.VIEWPORT_RENDER_INFO_TYPE_CANVAS,
+					RenderingServer.VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME),
+			", ".join(layer_rows), ", ".join(compiled)])
+
+
+## The process's pipeline compilations so far, by kind (canvas, mesh, surface, draw,
+## specialization), for the slow-present instrument.
+static func _pipeline_compiles() -> Array:
+	var counts := []
+	for info in [RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_CANVAS,
+			RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_MESH,
+			RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_SURFACE,
+			RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_DRAW,
+			RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_SPECIALIZATION]:
+		counts.append(RenderingServer.get_rendering_info(info))
+	return counts
 
 
 ## Give a newly mounted Control one complete SceneTree frame to receive layout
