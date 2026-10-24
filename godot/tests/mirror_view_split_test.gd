@@ -8,6 +8,8 @@ extends GutTest
 
 const MODEL_GRAPHIC := "armory"
 const MODEL_3DI := "res://../fixtures/threedi/synth/armory.3di"
+# A model with several authored RLODs: the authored-LOD walk registers it.
+const LOD_3DI := "res://../fixtures/threedi/synth/pump.3di"
 const WORLD := 1 << 0
 const WORLD_NO_MIRROR := 1 << 16
 const MIRROR_VIEW := 1 << 24
@@ -183,6 +185,35 @@ func test_a_model_the_reflected_collect_never_walks_is_on_no_mirror_either_side(
 	# Collected again: back on the world layer the below-water mirrors admit.
 	round_model.mirror_collected = true
 	assert_ne(_all_layers(round_model) & WORLD_NO_MIRROR, 0)
+
+
+# The authored-LOD walk gives a mirror its level and sub-pixel verdict only for
+# the models that mirror's collect can list: a flying round's model, which no
+# reflected collect walks, takes none and stays out of the views' walk while the
+# mirror renders below the water, where a collected neighbour is walked. Its
+# node draws as before: on no mirror's bit, no split, no twin.
+func test_the_lod_walk_gives_no_mirror_verdict_to_a_model_no_mirror_collects() -> void:
+	var models: Array[ObjectModel] = []
+	for _i in 2:
+		var data := ObjectData.new()
+		assert_eq(data.open_file(ProjectSettings.globalize_path(LOD_3DI)), OK)
+		var model := ObjectModel.new()
+		add_child_autofree(model)
+		model.set_authored_lod_enabled(true)
+		model.set_object_data(data)
+		models.append(model)
+	var round_model := models[0]
+	round_model.mirror_collected = false
+	var main_camera := _view_camera(Vector2i(640, 480), 90.0)
+	ObjectModel.set_mirror_view_state(0, true, true)
+	ObjectModel.update_authored_lods_for_mirror_view(main_camera, 640.0,
+			main_camera.global_transform)
+	assert_eq(ObjectModel.get_view_marked_count(), 1,
+			"the mirror's walk holds the collected neighbour alone")
+	assert_false(round_model.is_mirror_view_split(0))
+	assert_eq(round_model.get_mirror_view_twin_count(0), 0)
+	assert_eq(_all_layers(round_model) & (WORLD | WORLD_NO_MIRROR | MIRROR_VIEW), 0,
+			"the round's model stays off the mirror")
 
 
 func test_a_node_the_main_view_hides_draws_in_the_mirror_on_a_twin() -> void:

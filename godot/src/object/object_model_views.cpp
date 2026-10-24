@@ -271,6 +271,13 @@ int ObjectModel::update_authored_lod_views(const ObjectLodFrame *p_frames,
 			if (!source->lod_projection_visible_[v]) {
 				continue;
 			}
+			// A water mirror's walk runs while it renders, and only over models
+			// its collect can list: never a model no reflected collect walks (a
+			// flying round's, set_mirror_collected), which no mirror draws.
+			if (v >= kMirrorView &&
+					(!mirror_view_open_[v - kMirrorView] || !model->mirror_collected_)) {
+				continue;
+			}
 			const int32_t projected_q16 = source->lod_projected_radius_q16_[v];
 			const bool above_floor = !opennova::renderer::object_subpixel_culled(projected_q16);
 			int lod_index = -1;
@@ -292,9 +299,6 @@ int ObjectModel::update_authored_lod_views(const ObjectLodFrame *p_frames,
 			if (v >= kMirrorView) {
 				// A water mirror's own walk: its level and sub-pixel verdict.
 				const int m = v - kMirrorView;
-				if (!mirror_view_open_[m]) {
-					continue;
-				}
 				const int mirror_level = lod_index >= 0 ? lod_index
 						: (model->mirror_[m].own & kInsetOwnLod) != 0 ? model->mirror_[m].lod
 																		: model->active_lod_;
