@@ -1954,8 +1954,16 @@ void test_slice_cadence_and_invuln() {
     CHECK(cw.candidate_count(soldier) == 1);
 
     // Spawn/restore can invalidate an already-authoritative mission-init pool
-    // snapshot before the first candidate epoch. Refresh must publish the new
-    // pool membership immediately without spending one of those 16 logic ticks.
+    // snapshot before the first candidate epoch. A spawn's refresh publishes the
+    // pool-0 / pool-1 tables and the slices at once, the statics standing as the
+    // last Pool2 call left them; the restore's reload is a Pool2 call, so it
+    // lists a static placed since and builds every slice over it, without
+    // spending one of those 16 logic ticks.
+    // [orig: Entity_BuildProximityLists_Pool2 @0x4B9430, called from
+    //  Entity_BuildAllProximityLists @0x4C20F0 (Entity_InitAllFromModels @0x40E5A1,
+    //  Game_StartMission @0x525C90) and the three teleports alone;
+    //  Entity_BuildAllProximityLists - Pool2, Pool01, then
+    //  Entity_BuildProximityListsFromPools]
     {
         World refresh_world;
         CollisionWorld refresh_cw;
@@ -1979,24 +1987,34 @@ void test_slice_cadence_and_invuln() {
         const int32_t blocker_model =
                 refresh_cw.add_model(box_model(1, 0, 1.0, 1.0, 2.0));
         refresh_cw.assign_entity(blocker, blocker_model);
+        // A spawn's refresh is no Pool2 call: the late static is in no table, so
+        // the slices it builds at once hold none of it.
         refresh_cw.refresh_after_registry_change(refresh_world);
+        CHECK(refresh_cw.static_count() == 0);
+        CHECK(refresh_cw.candidate_count(source) == 0);
+        // The restore's reload lists it and builds the source's slice over it.
+        refresh_cw.build_all_tables(refresh_world);
         CHECK(refresh_cw.static_count() == 1);
+        CHECK(refresh_cw.candidate_count(source) == 1);
 
         const int32_t ray_a[3] = {0, 0, fx(1.0)};
         const int32_t ray_b[3] = {fx(10.0), 0, fx(1.0)};
         CHECK(!refresh_cw.raycast_clear(refresh_world, ray_a, ray_b,
                                         EntityHandle{}, EntityHandle{}));
-        // The spawn/restore refresh forces the cadence gate: the NEXT logic
-        // tick publishes the new slices (retail's spawn/teleport paths call
-        // the @0x4b8eb0 builder; our refresh arms the rebuild for the tick).
+        // The next logic tick is a cadence skip: it keeps the slice the reload built.
         refresh_cw.build_tick_tables(refresh_world);
         CHECK(refresh_cw.candidate_count(source) == 1);
     }
 
-    // The statics table is NOT a per-tick product: retail builds it at mission
-    // start and on teleport (Entity_BuildAllProximityLists @0x4c20f0), so a
-    // pool-2 row that moves between ticks keeps its start-of-mission slot
-    // until a registry/instance edge republishes the table.
+    // The statics table is NOT a per-tick product: retail builds it at the
+    // mission start's two calls and the three teleports alone, so a pool-2 row
+    // that moves keeps its slot through every tick build, every spawn's refresh
+    // and a late collision instance, until the next Pool2 call republishes it.
+    // [orig: Entity_BuildProximityLists_Pool2 @0x4B9430 - its callers
+    //  Entity_BuildAllProximityLists @0x4C20F0 (from Entity_InitAllFromModels
+    //  @0x40E5A1 and Game_StartMission @0x525C90), Entity_TeleportTeamToSpawn
+    //  @0x43D4F8, EventAction_TeleportEntityToSpawn @0x43E1F2, WacCmd_TeleSsn
+    //  @0x4F7F3E; the tick's Entity_BuildProximityLists_Pool01 @0x4C240A alone]
     {
         World static_world;
         CollisionWorld static_cw;
@@ -2014,12 +2032,18 @@ void test_slice_cadence_and_invuln() {
         for (int i = 0; i < 17; ++i) static_cw.build_tick_tables(static_world);
         CHECK(static_slot_coord_units(static_cw.static_slot(0).x) == 20);
         static_cw.refresh_after_registry_change(static_world);
+        CHECK(static_slot_coord_units(static_cw.static_slot(0).x) == 20);
+        // A teleport's Pool2 call republishes it.
+        static_cw.rebuild_statics(static_world);
         CHECK(static_slot_coord_units(static_cw.static_slot(0).x) == 40);
-        // A late collision instance on a pool-2 row is an edge too.
+        // A late collision instance on a pool-2 row is no Pool2 call either; the
+        // mission start's is.
         const int32_t crate_model = static_cw.add_model(box_model(1, 0, 1.0, 1.0, 1.0));
         static_world.registry.get(crate)->position.x = 60.0f;
         static_cw.assign_entity(crate, crate_model);
         static_cw.build_tick_tables(static_world);
+        CHECK(static_slot_coord_units(static_cw.static_slot(0).x) == 40);
+        static_cw.build_all_tables(static_world);
         CHECK(static_slot_coord_units(static_cw.static_slot(0).x) == 60);
     }
 
@@ -2119,6 +2143,11 @@ void test_proximity_tables_use_host_bound_radius() {
     world.vehicles.traits.set(vehicle_seed.item_id, vehicle_traits);
     cw.assign_entity(vehicle, tiny_model);
     cw.assign_entity(near_static, tiny_model);
+    // The static placed after the first build reaches the statics at the next
+    // Pool2 call, the mission start's, as a placed row reaches them at its load.
+    // [orig: Entity_BuildAllProximityLists @0x4C20F0 - Entity_BuildProximityLists_Pool2
+    //  @0x4B9430; Game_StartMission @0x525C90]
+    cw.build_all_tables(world);
     for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
 
     CHECK(cw.candidate_count(vehicle) == 1);
@@ -3326,6 +3355,10 @@ void test_ground_and_resolver_prefilter_stale_candidates_before_section_matrices
     // Build a second, initially-near static into the source's 17-tick candidate
     // slice, then move it without refreshing that slice. Both queries must use
     // its live bound to reject it before asking the host for section matrices.
+    // A static placed after the first build is listed by the next Pool2 call (the
+    // mission start's), which builds the slices over it at once.
+    // [orig: Entity_BuildAllProximityLists @0x4C20F0 - Entity_BuildProximityLists_Pool2
+    //  @0x4B9430, then Entity_BuildProximityListsFromPools; Game_StartMission @0x525C90]
     Entity stale_seed;
     stale_seed.kind = EntityKind::Building;
     stale_seed.position = {10.0f, 10.0f, 0.0f};
@@ -3334,7 +3367,7 @@ void test_ground_and_resolver_prefilter_stale_candidates_before_section_matrices
     const EntityHandle stale = rig.world.registry.spawn(2, stale_seed);
     CHECK(stale.valid());
     rig.cw.assign_entity(stale, 0);
-    rig.rebuild();
+    rig.cw.build_all_tables(rig.world);
     CHECK(rig.cw.candidate_count(rig.soldier) == 2);
     Entity *stale_live = rig.world.registry.get(stale);
     CHECK(stale_live != nullptr);
