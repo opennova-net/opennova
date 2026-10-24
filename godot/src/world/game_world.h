@@ -1067,6 +1067,15 @@ private:
 	void end_post_load_frames();
 	// The frame's client net passes as spans of no length under its session leg (an instrument).
 	void mark_post_load_net_passes(LoadTimeline &r_frames);
+	// A post-load frame's deferred flush by leg under --verbose (an instrument): a marker queued
+	// ahead of the legs and one after each leg that ran fire in the flush right after the work
+	// queued ahead of them (MessageQueue is FIFO), so the time from one marker to the next is
+	// what that leg queued (deferred calls, redraws, skeleton updates): a "flush_<leg>" span of
+	// the post-load timeline when it reaches kPostLoadFlushSpanUs.
+	static constexpr int64_t kPostLoadFlushSpanUs = 1000;
+	int64_t post_load_flush_mark_us_ = 0;
+	void queue_post_load_flush_mark(int p_leg);
+	void post_load_flush_mark(int p_leg);
 	// load_mission's timeline (its mount and document spans, an instrument), which
 	// load_mission_internal goes on with.
 	Ref<LoadTimeline> entry_timeline_;

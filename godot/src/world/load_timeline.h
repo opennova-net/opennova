@@ -70,6 +70,9 @@ public:
 	void span(const String &p_name);
 	// Ends the innermost open span (no-op when none is open).
 	void end_span();
+	// A closed span the owner measured outside its own brackets (a deferred flush's share), at
+	// the current nesting depth.
+	void add_span(const String &p_name, int64_t p_start_us, int64_t p_end_us);
 	// Close any spans an early return left open plus the timeline itself, print
 	// the structured line, and return the one-line summary so callers can
 	// surface it (status bar, log).

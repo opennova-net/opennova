@@ -28,6 +28,7 @@
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/core/object.hpp>
+#include <godot_cpp/variant/callable_method_pointer.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
@@ -432,6 +433,10 @@ bool GameWorld::frame_leg_stops_frame(const String &p_name) {
 void GameWorld::run_leg_table(const FrameLeg *p_legs, int p_count, FrameContext &r_ctx, bool p_timed) {
 	const bool live_table = p_legs == kFrameLegs;
 	if (live_table) last_frame_run_mask_ = 0;
+	// A post-load frame's deferred flush by leg, under --verbose (an instrument).
+	const bool flush_marks = live_table && r_ctx.post_load_frame != nullptr &&
+			OS::get_singleton()->is_stdout_verbose();
+	if (flush_marks) queue_post_load_flush_mark(-1);
 	for (int i = 0; i < p_count; ++i) {
 		const FrameLeg &leg = p_legs[i];
 		// The status page stands in for the scene frame: its rows do not run.
@@ -464,6 +469,7 @@ void GameWorld::run_leg_table(const FrameLeg *p_legs, int p_count, FrameContext 
 			}
 			if (leg.run == &GameWorld::leg_session) mark_post_load_net_passes(*post_load);
 		}
+		if (flush_marks) queue_post_load_flush_mark(i);
 		if (result == kLegStop && (leg.flags & kStopsFrame) != 0) {
 			return;
 		}
@@ -479,6 +485,23 @@ void GameWorld::post_load_part(const char *p_name) {
 
 void GameWorld::post_load_part_end() {
 	if (post_load_leg_ != nullptr) post_load_leg_->end_span();
+}
+
+void GameWorld::queue_post_load_flush_mark(int p_leg) {
+	callable_mp(this, &GameWorld::post_load_flush_mark).bind(p_leg).call_deferred();
+}
+
+// Fires in the frame's deferred flush: the head marker (-1) sets the base, each leg's marker
+// closes what its leg queued (the timeline's last post-load frame finished ahead of its flush,
+// so that flush adds nothing).
+void GameWorld::post_load_flush_mark(int p_leg) {
+	const int64_t now = static_cast<int64_t>(Time::get_singleton()->get_ticks_usec());
+	if (p_leg >= 0 && p_leg < kFrameLegCount && post_load_flush_mark_us_ > 0 && post_load_open_ &&
+			post_load_frames_.is_valid() && now - post_load_flush_mark_us_ >= kPostLoadFlushSpanUs) {
+		post_load_frames_->add_span(vformat("flush_%s", kFrameLegs[p_leg].name),
+				post_load_flush_mark_us_, now);
+	}
+	post_load_flush_mark_us_ = now;
 }
 
 void GameWorld::tick(const Vector3 &p_camera_pos, const Transform3D &p_camera_xform, double p_delta,

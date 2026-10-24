@@ -462,6 +462,13 @@ private:
 	// periodic update, the handler writes at each receive (D-NET-NEW-L2-54).
 	ClientRuntime::MissionStartPumpLegs mission_start_pump_legs();
 	void wire_frame_providers();
+	// The decoded persons' collision seams on the replica pipeline (the movement resolver, the
+	// slope conform's ground columns, the deck ride's carrier pose), with the joiner world's
+	// collision tables live; cleared without them (joiner_role_replica_world.cpp).
+	void wire_replica_collision_seams();
+	// One timed resolver or ground-probe call's nanoseconds onto SIM_REPLICA_COLLISION (an
+	// instrument; whole microseconds land, the remainder carries).
+	void note_replica_collision_ns(int64_t ns);
 	// The S2C 0x08's sniper-zoom byte onto the world's rules: after each receive's fold and on
 	// the load's fresh world (bring_up), ahead of every slot fill.
 	void mirror_session_zoom_rule();
@@ -627,6 +634,8 @@ private:
 	// Scratch for the replica contact resolver's replication->world peer copy
 	// (cleared per call; grows once to the session's peer cap).
 	std::vector<world::CollisionWorld::ReplicaPeer> replica_peer_scratch_;
+	// note_replica_collision_ns' sub-microsecond carry.
+	int64_t replica_collision_ns_ = 0;
 };
 
 // One loading step of a mission load (the embedder's, standing for retail's), whatever the role:

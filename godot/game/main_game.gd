@@ -2365,6 +2365,9 @@ func _process(delta: float) -> void:
 	# The shell-control span closes before the early returns so every frame banks it.
 	var probe_t0 := Time.get_ticks_usec() if timing else 0
 	_frame_phase_sampler.finish_shell_control(probe_t0)
+	# The deferred flush's queuers: a marker at each gameplay leg's end (an instrument).
+	if timing:
+		_frame_phase_sampler.queue_flush_leg(FrameStats.FRAME_FLUSH_AHEAD)
 	# Only the pause menu freezes the world, and only in a SINGLE-PLAYER session. The
 	# armory runs over LIVE play: the match keeps simulating around the player while the
 	# WEAPON screen is up [orig: the useitem armory leg @0x4e0b3f has no world-stop leg;
@@ -2421,11 +2424,15 @@ func _process(delta: float) -> void:
 	# (engine inmatch::FrameInput::command_map_open).
 	frame_input.command_map_open = _state == State.COMMAND_MAP
 	var probe_t1 := Time.get_ticks_usec() if timing else 0
+	if timing:
+		_frame_phase_sampler.queue_flush_leg(FrameStats.FRAME_FLUSH_PLAYER)
 	var skip_world := probe_enabled and _perf_probe.skip_world
 	if not skip_world:
 		_world.tick(_camera.global_position, _camera.global_transform,
 				frame_elapsed, frame_input)
 	var probe_t2 := Time.get_ticks_usec() if timing else 0
+	if timing:
+		_frame_phase_sampler.queue_flush_leg(FrameStats.FRAME_FLUSH_WORLD)
 	if _player_presenter != null:
 		# The held USE row's armory and vehicle-loadout arms took their press in an update's
 		# sample (engine controls::PlayerActions, through the sim's press latch). With a menu
@@ -2448,6 +2455,8 @@ func _process(delta: float) -> void:
 	if _player_presenter != null and (skip_world or not _world.is_loaded()):
 		_player_presenter.after_world_tick()
 	var probe_t3 := Time.get_ticks_usec() if timing else 0
+	if timing:
+		_frame_phase_sampler.queue_flush_leg(FrameStats.FRAME_FLUSH_PLAYER)
 	# The shared HUD presenter rebuilds the per-frame info while the player is in-world
 	# (WORLD or the live-play ARMORY) [orig: HUD_BuildEntityInfo @0x4b8440 per frame].
 	var skip_hud := probe_enabled and _perf_probe.skip_hud
@@ -2457,6 +2466,8 @@ func _process(delta: float) -> void:
 		_hud_presenter.tick(is_gameplay_input_active() or _screen_input_frame())
 		_end_round_presenter.tick()  # the same HUD frame [orig: HUD_DrawOverlayPanels]
 	var probe_t4 := Time.get_ticks_usec() if timing else 0
+	if timing:
+		_frame_phase_sampler.queue_flush_leg(FrameStats.FRAME_FLUSH_HUD)
 	_maybe_open_death_menu()
 	if timing:
 		_frame_phase_sampler.record_shell_spans(

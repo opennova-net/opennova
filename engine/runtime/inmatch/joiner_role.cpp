@@ -1253,10 +1253,14 @@ void JoinerRole::pump() {
 	//  the +0x1C4 call @0x4B8E53; Entity_UpdateAllEntities @0x4C2100 - @0x4C2158..0x4C21E9]
 	world.before_pool0_walk = [this, &rt, &kernel, &world] {
 		const devtools::ProfileScope prewalk(world.profile, devtools::Slot::SIM_WALK_REPLICA_POOL0);
+		devtools::ProfileLap parts(world.profile); // its three parts (an instrument)
 		tick_replica_emplaced_channels(rt.state(), kernel.seat_specs, world, self_wire_handle(),
 				&materializer_, kernel.wire_header_world, ReplicaGunLeg::Pool1Walk);
+		parts.mark(devtools::Slot::SIM_WALK_REPLICA_GUNS);
 		rt.view().tick_remote_motion_through_self();
+		parts.mark(devtools::Slot::SIM_WALK_REPLICA_MIDDLE);
 		sync_wire_collision_proxies_live();
+		parts.mark(devtools::Slot::SIM_WALK_REPLICA_PROXIES);
 	};
 	// The decoded rows join the entity update's proximity build, after its pool-1 walk
 	// and its projectile pass: the World movers' poses first reach their rows, as the
@@ -1757,147 +1761,7 @@ void JoinerRole::wire_frame_providers() {
 	// names none (world::LocalPlayer::note_wire_entity_destroyed carries the witness).
 	rt.view().set_replica_destroy_observer(
 			[this](uint16_t handle) { kernel_->local.note_wire_entity_destroyed(handle); });
-	// The FULL replica contact resolver (net-re §5.38e, D-NET-196): with the
-	// joiner world's collision tables live, each armed Player/Infantry row's
-	// settle runs the ported movement collision resolver — candidate-model
-	// contacts + push-out, world-person and replica-peer repulsion, and the
-	// ground probe THROUGH candidate models — replacing the terrain-column
-	// subset. Retail runs remote organics through the ordinary org movers
-	// whose shared tail calls the resolver ungated [orig: calls @0x4B7CF4 /
-	// @0x4BF7FA; resolver @0x4B2BD0]. The per-row ResolveState persists here
-	// (replica_resolve_states_) across pumps.
-	if (world.ai.collision != nullptr) {
-		// The slope conform's ground columns, through the row's candidate slice
-		// as its resolve reads it (CollisionWorld::raycast_ground_replica)
-		// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the probes @0x4B6E41 /
-		//  @0x4B6E5D / @0x4B6E98 / @0x4B6EB3 -> Entity_RaycastGroundHeight @0x4142C0].
-		rt.view().set_replica_ground_probe(
-				[this](const replication::ClientReplicaPipeline::ReplicaGroundColumn &q)
-						-> int32_t {
-					return world_->ai.collision->raycast_ground_replica(*world_, q.pos,
-							q.source_bound_radius_q16, q.row_handle, q.entity_flags,
-							q.dx, q.dy, 0x4000, 0x20000);
-				});
-		rt.view().set_replica_contact_resolver(
-				[this](replication::ClientReplicaPipeline::ReplicaContactQuery
-								&q) -> int32_t {
-					using world::CollisionWorld;
-					CollisionWorld *col = world_->ai.collision;
-					CollisionWorld::ResolveState &st =
-							replica_resolve_states_[q.row_handle];
-					// Role-member scratch: this resolver runs per armed
-					// replica row per 62.5 Hz pump, and every row of one pump
-					// shares the same staged peer table (q.tick is the pump
-					// key), so the field-order copy between the two mirrored
-					// peer PODs happens once per tick, not once per row.
-					std::vector<CollisionWorld::ReplicaPeer> &peers =
-							replica_peer_scratch_;
-					if (replica_peer_scratch_src_ != q.peers ||
-							replica_peer_scratch_count_ != q.peer_count ||
-							replica_peer_scratch_tick_ != q.tick) {
-						peers.clear();
-						peers.reserve(static_cast<size_t>(q.peer_count));
-						for (int32_t i = 0; i < q.peer_count; ++i) {
-							CollisionWorld::ReplicaPeer p;
-							p.handle = q.peers[i].handle;
-							p.x = q.peers[i].x;
-							p.y = q.peers[i].y;
-							p.z = q.peers[i].z;
-							p.radius = q.peers[i].radius;
-							peers.push_back(p);
-						}
-						replica_peer_scratch_src_ = q.peers;
-						replica_peer_scratch_count_ = q.peer_count;
-						replica_peer_scratch_tick_ = q.tick;
-					}
-					world::EntityHandle ground;
-					const world::Vec3 resolve_pos{opennova::io::fp16_16_to_float(q.pos[0]),
-							opennova::io::fp16_16_to_float(q.pos[1]),
-							opennova::io::fp16_16_to_float(q.pos[2])};
-					const int32_t clearance = col->resolve_replica(
-							*world_, st, q.pos, q.vel_xy, q.vel_z,
-							q.capsule_bottom, q.capsule_top,
-							q.source_bound_radius_q16, q.is_player_class,
-							q.tick, q.anim_state_id, q.anim_state_flags,
-							peers.data(), static_cast<int32_t>(peers.size()),
-							q.row_handle, &q.entity_flags, &ground,
-							q.has_saved_live ? q.saved_live_pos : nullptr,
-							q.has_eye ? q.eye_offset : nullptr);
-					// A remote player's powerup contact runs the pickup on this
-					// peer's copy of the row, for a transient copy of the body at
-					// the pose the resolve read (its integrated position): the
-					// def hp until the first compact, the class byte's tier after,
-					// zero once dead. The pickup's sound plays there and the row
-					// hides or is destroyed here, as on every peer.
-					// [orig: Entity_MovementCollisionResolver @0x4B2FB8..0x4B2FCC
-					//  (no authority gate) -> PowerupAction_Pickup @0x4428A0;
-					//  Entity_InitFromItemDef @0x49E550; the dead zero @0x4C10FB]
-					const auto pickups = col->take_replica_powerup_contacts();
-					if (!pickups.empty()) {
-						const replication::ClientEntityState *row =
-								runtime->state().find(q.row_handle);
-						world::Entity picker;
-						picker.has_item_def = true;
-						picker.item_id = q.type_id;
-						picker.position = resolve_pos;
-						picker.health_max = world_->tables.player.item_hp.value_or(0);
-						picker.health = picker.health_max;
-						if (row != nullptr && row->net_health_zero) picker.health = 0;
-						else if (row != nullptr && row->net_has_compact)
-							picker.health = replication::replica_tier_health(
-									row->health_class_byte, picker.health_max);
-						world::TickContext ctx;
-						ctx.world = world_;
-						ctx.logic_tick = world_->logic_tick;
-						ctx.is_authority = false;
-						for (const auto &contact : pickups)
-							world::powerup_pickup_by(*world_, contact.target, picker, ctx);
-					}
-					q.out_ground = ground.valid() ? ground.packed
-					                              : world::EntityHandle::kInvalid;
-					return clearance;
-				});
-		// The deck-ride carrier seam: resolved_ground is the registry handle
-		// the ground probe stored; the ride reads that entity's LIVE pose
-		// against its mover-entry savedLivePose stamp — the witnessed pair
-		// [orig: the org movers read groundEntity's Position vs +0x80../body*
-		// +0x8C.. @0x4b530b../@0x4ba47f..]. One shared reader
-		// (carrier_pose_fixed) serves both sides so representations can
-		// never diverge; a never-stamped entity (static) reads zero delta.
-		rt.view().set_carrier_pose_provider(
-				[this](uint16_t handle,
-						replication::ClientReplicaPipeline::CarrierPose
-								&out) -> bool {
-					if (world_ == nullptr) return false;
-					world::EntityHandle h;
-					h.packed = handle;
-					const world::Entity *e = world_->registry.get(h);
-					if (e == nullptr) return false;
-					world::carrier_pose_fixed(
-							*e, out.pos, out.yaw, out.pitch, out.roll);
-					if (e->saved_live_valid) {
-						out.saved_pos[0] = e->saved_live_pos[0];
-						out.saved_pos[1] = e->saved_live_pos[1];
-						out.saved_pos[2] = e->saved_live_pos[2];
-						out.saved_yaw = e->saved_live_yaw;
-						out.saved_pitch = e->saved_live_pitch;
-						out.saved_roll = e->saved_live_roll;
-					} else {
-						out.saved_pos[0] = out.pos[0];
-						out.saved_pos[1] = out.pos[1];
-						out.saved_pos[2] = out.pos[2];
-						out.saved_yaw = out.yaw;
-						out.saved_pitch = out.pitch;
-						out.saved_roll = out.roll;
-					}
-					out.bound_radius = e->bound_radius.q16;
-					return true;
-				});
-	} else {
-		rt.view().set_replica_contact_resolver(nullptr);
-		rt.view().set_replica_ground_probe(nullptr);
-		rt.view().set_carrier_pose_provider(nullptr);
-	}
+	wire_replica_collision_seams();
 }
 
 // ClientHello once (Idle -> Hello) the first armed frame.

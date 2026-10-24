@@ -30,6 +30,14 @@
     /* The flush split at the deferred marker the late boundary queues (MessageQueue is FIFO): */ \
     X(FRAME_FLUSH_QUEUED, "latest idle callback -> the marker: _flush_ugc + every call_deferred / queue_redraw -> _draw the callbacks queued (HUD overlay, view effects)") \
     X(FRAME_FLUSH_TAIL, "the marker -> frame_pre_draw: draws/sorts the flush itself queued, transform notifications, timers/tweens, node frees, accessibility, RS sync") \
+    /* The queued flush split by its queuer: the shell drops a deferred marker at each boundary of */ \
+    /* its gameplay legs (RootFramePhaseSampler.queue_flush_leg), FIFO as the marker above, so each */ \
+    /* slot is what the leg ahead of its marker queued (deferred calls, redraws, skeleton updates). */ \
+    X(FRAME_FLUSH_AHEAD, "the queued flush's head: _flush_ugc and what was queued ahead of the shell's gameplay legs (input, physics, earlier nodes, the last flush's tail)") \
+    X(FRAME_FLUSH_PLAYER, "what LocalPlayerPresenter's before / after legs queued") \
+    X(FRAME_FLUSH_WORLD, "what GameWorld.tick queued (its legs' deferred calls, redraws and skeleton updates)") \
+    X(FRAME_FLUSH_HUD, "what the HUD presenters' tick queued") \
+    X(FRAME_FLUSH_REST, "what the shell's round flow and the later nodes queued, up to the late marker") \
     X(FRAME_NODES_FREED, "VALUE: SceneTree nodes gone since the previous frame (the delete-queue flush)") \
     X(FRAME_NODES_ADDED, "VALUE: SceneTree nodes added since the previous frame") \
     X(FRAME_DRAW, "frame_pre_draw -> frame_post_draw: RenderingServer.draw for every viewport (cull, draw lists, submit, present)") \
@@ -98,6 +106,10 @@
     /* A joiner's replica legs inside the World's walks (JoinerRole's World hooks, D-NET-196). */ \
     X(SIM_WALK_REPLICA_ROWS, "joiner: the decoded pool-1 rows' visits at their World slots (World::pool1_slot_leg)") \
     X(SIM_WALK_REPLICA_POOL0, "joiner: the replica guns' channels, the remote rows' motion through the own body, the proxies' live words (World::before_pool0_walk)") \
+    X(SIM_WALK_REPLICA_GUNS, "joiner: the replica guns' channels (tick_replica_emplaced_channels' pool-1 leg)") \
+    X(SIM_WALK_REPLICA_MIDDLE, "joiner: the remote rows' motion through the own body's slot (tick_remote_motion_through_self)") \
+    X(SIM_WALK_REPLICA_PROXIES, "joiner: every decoded row's proxy live words (sync_wire_collision_proxies_live)") \
+    X(SIM_REPLICA_COLLISION, "joiner: the decoded persons' movement resolver and slope-conform ground probes, wherever their visits run") \
     X(SIM_AI_INFANTRY, "infantry/player body rows") \
     X(SIM_AI_INFANTRY_COMBAT, "NPC perception, reactions, and aim") \
     X(SIM_AI_INFANTRY_ANIMATION, "weapon/body channels + root-motion sampling")     X(SIM_AI_INFANTRY_MOTION, "NPC slope pass, attachment sample, carrier ride and terrain gradient ahead of the think") \

@@ -50,6 +50,16 @@ void LoadTimeline::end_span() {
 	spans_[idx]->set_end_compiles(pipeline_compiles());
 }
 
+void LoadTimeline::add_span(const String &p_name, int64_t p_start_us, int64_t p_end_us) {
+	Ref<LoadTimelineSpan> entry;
+	entry.instantiate();
+	entry->set_name(p_name);
+	entry->set_depth(open_.size());
+	entry->set_start_us(p_start_us);
+	entry->set_end_us(p_end_us);
+	spans_.push_back(entry);
+}
+
 int64_t LoadTimeline::pipeline_compiles() {
 	if (!OS::get_singleton()->is_stdout_verbose()) {
 		return -1;
