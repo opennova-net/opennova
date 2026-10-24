@@ -1004,7 +1004,8 @@ std::vector<const wire::ParityEntity *> steady_entities(const RunFacts &run) {
 	return out;
 }
 
-void compare_entities(const RunFacts &rr, const RunFacts &other, std::vector<MetricValue> &out) {
+void compare_entities(
+		const RunFacts &rr, const RunFacts &other, bool aa, std::vector<MetricValue> &out) {
 	static_assert(has_normalization("entity.handle"));
 	const auto a = steady_entities(rr), b = steady_entities(other);
 	if (a.empty() && b.empty())
@@ -1024,9 +1025,11 @@ void compare_entities(const RunFacts &rr, const RunFacts &other, std::vector<Met
 	// OO's window opened at 19.0 s and the others' at 13.3..15.0 s. A class:type every
 	// handle of which has one record in a run's whole capture went out once, and where that
 	// record falls against the window's start is the window's phase
-	// (entity.capture_singleton). A type that is such a singleton on both runs leaves the
-	// coverage set; a type one capture lacks, or one either run sends twice, still
-	// compares.
+	// (entity.capture_singleton). In a subject's row a type that is such a singleton on RR
+	// and on the subject leaves the coverage set; a type one capture lacks, or one either
+	// run sends twice, still compares. The A/A row (`aa`) skips nothing: its floor keeps
+	// retail's measured variance, which x11's 01tr-coop-aikill RO (a retail host) needed
+	// for V:2010, sent once by RR and RR-aa each and twice by RO.
 	static_assert(has_normalization("entity.capture_singleton"));
 	auto singletons = [&type_of](const RunFacts &run) {
 		std::map<std::string, std::map<uint32_t, int>> records; // type -> handle -> records
@@ -1040,7 +1043,7 @@ void compare_entities(const RunFacts &rr, const RunFacts &other, std::vector<Met
 		return out;
 	};
 	std::set<std::string> phase;
-	{
+	if (!aa) {
 		const std::set<std::string> sa = singletons(rr), sb = singletons(other);
 		std::set_intersection(sa.begin(), sa.end(), sb.begin(), sb.end(),
 				std::inserter(phase, phase.end()));
@@ -1437,10 +1440,11 @@ void compare_rounds(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 
 } // namespace
 
-void compare_state(const RunFacts &rr, const RunFacts &other, std::vector<MetricValue> &out) {
+void compare_state(const RunFacts &rr, const RunFacts &other, const CompareOptions &options,
+		std::vector<MetricValue> &out) {
 	compare_uplinks(rr, other, out);
 	compare_frames(rr, other, out);
-	compare_entities(rr, other, out);
+	compare_entities(rr, other, options.aa, out);
 	compare_self_offset(rr, other, out);
 	compare_rounds(rr, other, out);
 }

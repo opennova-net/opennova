@@ -16,7 +16,7 @@ std::vector<MetricValue> compare_runs(
 		const RunFacts &rr, const RunFacts &other, const CompareOptions &options) {
 	std::vector<MetricValue> out;
 	compare_wire(rr, other, options, out);
-	compare_state(rr, other, out);
+	compare_state(rr, other, options, out);
 	return out;
 }
 

@@ -3879,6 +3879,18 @@ void test_entity_capture_singleton() {
 	// A lone record in the tail is the capture's one send: present.
 	expect_row(judge_case(run(1, { 9 * kSec }), run(2, { 8 * kSec }), run(3, { 21 * kSec }), "OO"),
 			'S', "entity_types", "", "pass");
+	{
+		// The A/A row skips nothing (x11's 01tr-coop-aikill RO and V:2010): RR's one record
+		// in its tail, RR-aa's one in its window, the subject's two (window and tail). The
+		// subject's row compares the type, and the unreduced A/A floor carries retail's own
+		// difference; skipped in the A/A row too, the floor would be 0 and the row fail.
+		const Case c = judge_case(run(1, { 21 * kSec }), run(2, { 9 * kSec }),
+				run(3, { 10 * kSec, 21 * kSec }), "RO");
+		expect_row(c, 'S', "entity_types", "", "pass");
+		const VerdictRow *aa = find_row(c.verdict.aa, 'S', "entity_types");
+		check(aa && aa->value.distance > 0.0 && aa->value.detail.empty(),
+				"the A/A row keeps the once-sent type RR-aa's window carries");
+	}
 }
 
 void test_steady_rules() {

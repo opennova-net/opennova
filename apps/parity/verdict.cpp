@@ -143,6 +143,7 @@ Verdict judge(const RunFacts &rr, const RunFacts &rr_aa, const std::vector<Subje
 	CompareOptions aa_options;
 	aa_options.host_rows = true;
 	aa_options.retail_host = true;
+	aa_options.aa = true;
 	// RR-aa's rows join the subjects' oracle when it ran the same corpus profile.
 	static_assert(has_normalization("integrity.oracle"));
 	const bool pool = !rr.info.integrity_profile.empty() &&

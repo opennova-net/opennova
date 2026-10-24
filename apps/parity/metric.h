@@ -57,6 +57,9 @@ struct CompareOptions {
 	// Another retail run of the same integrity profile (RR-aa) whose valid replies
 	// join RR's row->CRC oracle.
 	const RunFacts *oracle_pool = nullptr;
+	// The compare is RR against RR-aa: the A/A floor keeps retail's measured variance, so
+	// the subject-only reductions (entity.capture_singleton) skip nothing here.
+	bool aa = false;
 };
 
 // Every metric of `other` against the reference `rr`, both directions.
@@ -70,7 +73,8 @@ void compare_wire(const RunFacts &rr, const RunFacts &other, const CompareOption
 // position, as sets and as decoded records.
 void compare_initial(
 		const RunFacts &rr, const RunFacts &other, char dir, std::vector<MetricValue> &out);
-void compare_state(const RunFacts &rr, const RunFacts &other, std::vector<MetricValue> &out);
+void compare_state(const RunFacts &rr, const RunFacts &other, const CompareOptions &options,
+		std::vector<MetricValue> &out);
 
 // --- shared helpers (metric_math.cpp)
 

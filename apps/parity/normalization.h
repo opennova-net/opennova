@@ -876,9 +876,12 @@ inline constexpr Normalization kNormalizations[] = {
 			"after the game start), while the windows opened 13.3..15.0 s after it and OO's "
 			"19.0 s (its window-open wait held 4.6 s on the joiner's spawn overlap); over 13 "
 			"suites the window lacked I:2075 on 3 of 24 retail-host windows (c2's RR, x6's and "
-			"p211a's RO) and 3 of 24 of ours. A class:type every handle of which has exactly "
-			"one record in the whole capture on both runs leaves the coverage set; a type either "
-			"capture lacks, or either run sends twice, still compares" },
+			"p211a's RO) and 3 of 24 of ours. In a subject's row, a class:type every handle of "
+			"which has exactly one record in the whole capture on RR and on the subject leaves "
+			"the coverage set; a type either capture lacks, or either run sends twice, still "
+			"compares. The A/A row skips nothing, so its floor keeps retail's measured variance "
+			"(x11's 01tr-coop-aikill: RR and RR-aa sent V:2010 once each, RO, a retail host, "
+			"twice; skipped in the A/A row too, RO would fail)" },
 	{ "round.target", MaskKind::Field, 'S', 0x00A, "round event flags / target", 0,
 			"a S2C 0x0A round event carries flag 0x40 and its target word when the shooter's AI "
 			"slot word (+0x68 -> +0xC) names a target at the send, the target's pool handle or "
