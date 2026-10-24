@@ -279,7 +279,8 @@ void NovaWorldClient::start() {
 	// HTTP fetchers are child nodes. Created once and reused; each
 	// request_completed signal drives its own bound callback. browser_http_ is
 	// the GSB server browser (Phase 2); login_http_ runs the EPASK login chain
-	// (Phase 3); join_http_ runs the NWJoin handshake (Phase 5).
+	// (Phase 3); enter_http_ runs the menu entry's startup-URL leg (open_web_lobby);
+	// join_http_ runs the NWJoin handshake (Phase 5); host_http_ the NWHost leg.
 	if (browser_http_ == nullptr) {
 		browser_http_ = memnew(HTTPRequest);
 		add_child(browser_http_);

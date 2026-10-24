@@ -214,7 +214,9 @@ func test_every_http_request_has_a_finite_timeout() -> void:
 	for child in client.get_children():
 		if child is HTTPRequest:
 			requests.append(child as HTTPRequest)
-	assert_eq(requests.size(), 4, "browser, login, join, and host each own one HTTP request")
+	# The menu entry's startup-URL leg (open_web_lobby, D-NET-NEW-L9-37) owns the fifth.
+	assert_eq(requests.size(), 5,
+			"browser, login, entry, join, and host each own one HTTP request")
 	for request in requests:
 		assert_gt(request.timeout, 0.0, "no Matchmaking HTTP leg can wait forever")
 	client.stop()
