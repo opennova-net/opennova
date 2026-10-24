@@ -89,7 +89,8 @@ public:
 	void set_world_rendering_enabled(bool p_value);
 	// The mirror pass on or off, the surface drawn either way: an editor device renders its mirror
 	// only in the frames it presents (ADR 0046 S14, E13), so a picture no canvas draws this frame
-	// spends no mirror pass. On in the game, always.
+	// spends no mirror pass. In the game, off while the loading presentation holds the world's draw
+	// (GameWorld::set_presentation_held) and on otherwise.
 	void set_mirror_enabled(bool p_value);
 	bool is_mirror_enabled() const { return mirror_enabled_; }
 	// The water's process-wide globals as a process has them with no water (the

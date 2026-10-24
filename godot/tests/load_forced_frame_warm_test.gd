@@ -121,11 +121,22 @@ func test_the_forced_frame_draws_the_local_models_and_the_hud_ahead_of_the_birth
 	add_child_autofree(layer)
 	var hud: GameHudPresenter = add_child_autofree(GameHudPresenter.new())
 	hud.setup(world, null, layer)
+	# The shell's mission start: the world hidden and its draw held by the loading presentation.
+	world.visible = false
+	world.set_presentation_held(true)
+	var water: Water = world.get_water_node()
+	var frame_state := {}
 	var warm_frames: Array = []
 	# Connected after the presenter's handler, so it reads what that handler left.
 	world.hud_pipeline_warm.connect(func(drawing: bool) -> void:
 		var overlay := hud.get_game_hud()
 		warm_frames.append([drawing, overlay != null and overlay.is_inside_tree()]))
+	world.hud_pipeline_warm.connect(func(drawing: bool) -> void:
+		if drawing:
+			frame_state["visible"] = world.visible
+			frame_state["disable_3d"] = world.get_viewport().disable_3d
+			frame_state["mirror"] = water.is_mirror_enabled() if water != null else true
+	, CONNECT_ONE_SHOT)
 	var loadout := PlayerSpawnLoadout.new()
 	loadout.primary = "WPN_M4AUTO"
 	loadout.player_class = 8
@@ -170,6 +181,20 @@ func test_the_forced_frame_draws_the_local_models_and_the_hud_ahead_of_the_birth
 	if overlay != null:
 		assert_true(overlay.is_configured(), "and loaded it ahead of the frame")
 		assert_false(overlay.is_inside_tree(), "the first live frame mounts it, as before")
+	# The frame draws the world with the hold lifted for it alone, and leaves the world shown: every
+	# later frame under the screen keeps the hold, and the reveal drops it with no node shown
+	# (D-NET-NEW-LF-29).
+	assert_eq(frame_state, {"visible": true, "disable_3d": false, "mirror": true},
+			"the forced frame draws the shown world and its mirror")
+	assert_true(world.visible, "the load leaves the world shown")
+	assert_true(world.is_presentation_held())
+	assert_true(world.get_viewport().disable_3d, "and its draw held under the loading screen")
+	if water != null:
+		assert_false(water.is_mirror_enabled(), "the water draws no mirror under the hold")
+	world.set_presentation_held(false)
+	assert_false(world.get_viewport().disable_3d, "the reveal drops the hold")
+	if water != null:
+		assert_true(water.is_mirror_enabled())
 	hud.teardown()
 	world.unload()
 

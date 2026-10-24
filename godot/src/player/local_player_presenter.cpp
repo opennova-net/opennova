@@ -13,6 +13,7 @@
 #include "simulation/player_weapon_view.h"
 #include "simulation/simulation.h"
 #include "util/axes.h"
+#include "world/game_world.h"
 
 #include <godot_cpp/classes/camera_attributes.hpp>
 #include <godot_cpp/classes/canvas_layer.hpp>
@@ -1167,6 +1168,17 @@ void LocalPlayerPresenter::update_view_projection(const opennova::world::ViewPro
 		bool p_nvg_raster) {
 	Camera3D *cam = camera();
 	Viewport *surface = cam != nullptr ? cam->get_viewport() : nullptr;
+	// A frame under the loading presentation's hold draws the screen alone (a joiner's L can be born
+	// ahead of its admission): no target draws, and the surface's 3D flag is the hold's
+	// (GameWorld::set_presentation_held). The first frame past the reveal draws the held target again.
+	const GameWorld *game_world = Object::cast_to<GameWorld>(world());
+	if (game_world != nullptr && game_world->is_presentation_held()) {
+		if (projection_viewport() != nullptr) {
+			hold_view_projection();
+			if (surface != nullptr) surface->set_disable_3d(true);
+		}
+		return;
+	}
 	if (surface == nullptr || !is_inside_tree() ||
 			(!p_nvg_raster && Math::abs(p_projection.scale_y - 1.0f) < kViewProjectionUnstretched)) {
 		release_view_projection();

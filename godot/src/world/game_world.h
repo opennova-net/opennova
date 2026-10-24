@@ -498,6 +498,15 @@ public:
 	// local player's viewmodel verbs).
 	Ref<ArmoryWorldView> armory_view();
 	bool is_loaded() const { return world_ready_; }
+	// The loading presentation's hold, the shell's from a mission start to its reveal: while it holds,
+	// the world's viewport draws no 3D pass and the water no mirror pass, so a frame under the loading
+	// screen (a joiner's wait for its admission, the start-mission splash) draws the screen alone:
+	// retail's presents draw the screen alone, and its joiner's final wait inside Game_StartMission
+	// pumps the window and the session and draws no frame, its 100 % present standing. The world's
+	// nodes stay shown from the load's forced frame on, so the reveal drops a viewport flag and
+	// re-pairs no instance (D-NET-NEW-LF-29).
+	void set_presentation_held(bool p_held);
+	bool is_presentation_held() const { return presentation_held_; }
 	Color get_current_frame_clear_color() const;
 
 	// --- the frame ------------------------------------------------------------
@@ -911,6 +920,8 @@ private:
 	void apply_mission_environment_overrides(const Ref<MissionData> &p_mission);
 	void set_mission_water_height_override(float p_world_height);
 	void set_water_world_rendering_enabled(bool p_enabled);
+	// The hold's device legs (set_presentation_held), lifted alone across the load's forced frame.
+	void apply_presentation_hold_(bool p_held);
 	void set_weather_world_tick_driven(bool p_enabled);
 	void prepare_world_driven_weather();
 	void prepare_autonomous_weather();
@@ -1041,6 +1052,8 @@ private:
 	// for the mission textures stage (load_terrain_textures).
 	bool terrain_textures_pending_ = false;
 	bool world_ready_ = false;
+	// The loading presentation's hold (set_presentation_held).
+	bool presentation_held_ = false;
 	Ref<MissionData> loaded_mission_;
 	// The BMS clock the weather home is seeded with at the mission-start
 	// boundary.

@@ -490,7 +490,10 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 		if bool(observed["local_load"]) and not bool(observed["held"]):
 			# All handlers for world_loaded have now returned. The old behavior
 			# dismissed the loading screen in MainGame's handler here.
-			observed["held"] = _shell.is_world_loading() and not world.visible
+			# The loading presentation is the reveal's witness: the load's forced frame leaves
+			# the world shown, and the presentation holds its draw until the reveal
+			# (D-NET-NEW-LF-29).
+			observed["held"] = _shell.is_world_loading() and world.is_presentation_held()
 			observed["held_progress"] = _shell.loading_progress_percent()
 		if bool(observed["local_load"]) and not _shell.is_world_loading():
 			break
@@ -521,6 +524,7 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 	assert_eq(_shell.loading_progress_percent(), -1,
 			"the completed loading presentation no longer exposes a stale value")
 	assert_true(world.visible, "the admitted world is revealed")
+	assert_false(world.is_presentation_held(), "the admission drops the hold on the world's draw")
 	assert_true(world.get_sim() != null and world.get_sim().is_joined_in_match())
 	assert_eq(world.get_sim().get_join_terrain_til_state(),
 			Simulation.JOIN_TERRAIN_TIL_COMPLETE)
@@ -584,6 +588,8 @@ func test_spectator_join_is_admitted_at_the_world_state_load() -> void:
 
 	assert_true(admitted, "the spectator's join edge releases the loading screen")
 	assert_true(world.visible, "the admitted spectator's world is revealed")
+	assert_false(world.is_presentation_held(),
+			"the spectator's admission drops the hold on the world's draw")
 	assert_true(world.get_sim() != null and world.get_sim().is_local_spectator(),
 			"the admitted joiner is the host's spectator")
 
@@ -642,7 +648,8 @@ func test_join_rejects_a_truncated_terrain_stream_before_reveal() -> void:
 	for _frame in range(1200):
 		host.step()
 		await get_tree().process_frame
-		revealed = revealed or world.visible
+		# Revealed: shown with its draw no longer held by the loading presentation.
+		revealed = revealed or (world.visible and not world.is_presentation_held())
 		if not failures.is_empty() and not _shell.is_world_loading():
 			break
 
@@ -1057,6 +1064,7 @@ func _assert_loaded(world, terrain, menu_shell) -> void:
 	assert_same(world.get_resource_root(), menu_shell.get_resource_root(),
 			"menu, loading screen, and GameWorld share one mounted resource session")
 	assert_true(world.visible, "the loaded world is presented")
+	assert_false(world.is_presentation_held(), "the reveal dropped the hold on the world's draw")
 	assert_false(menu_shell.visible, "the main menu stays hidden during play")
 	assert_eq(world.get_loaded_mission_file(), "mnml.bms")
 	assert_not_null(world.get_node_or_null("MissionRoot/MissionObjects"),
@@ -1069,6 +1077,7 @@ func _assert_clean_menu(world, terrain, menu_shell, boot_clear: Color) -> void:
 	assert_false(_shell.is_world_loading(), "no loading operation leaks into the menu")
 	assert_false(world.is_loaded(), "the returned-to-menu world is unloaded")
 	assert_false(world.visible, "mission presentation is hidden behind the menu")
+	assert_false(world.is_presentation_held(), "the menu holds no world draw")
 	assert_eq(world.get_loaded_mission_file(), "", "the active mission filename is cleared")
 	assert_true(menu_shell.visible, "the main menu is visible")
 	assert_eq(menu_shell.get_current_menu_file().to_lower(), "main.mnu")

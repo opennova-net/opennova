@@ -1007,6 +1007,22 @@ void GameWorld::set_water_world_rendering_enabled(bool p_enabled) {
 	}
 }
 
+void GameWorld::set_presentation_held(bool p_held) {
+	presentation_held_ = p_held;
+	apply_presentation_hold_(p_held);
+}
+
+// An RS viewport flag and the water's mirror switch: neither hides a node, so neither unpairs or
+// re-pairs an instance, and the render buffers the viewport made stand across the hold.
+void GameWorld::apply_presentation_hold_(bool p_held) {
+	if (is_inside_tree()) {
+		get_viewport()->set_disable_3d(p_held);
+	}
+	if (water_ != nullptr) {
+		water_->set_mirror_enabled(!p_held);
+	}
+}
+
 void GameWorld::set_weather_world_tick_driven(bool p_enabled) {
 	if (weather_ != nullptr) {
 		weather_->set_world_tick_driven(p_enabled);
@@ -1765,11 +1781,15 @@ int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTim
 	// runs there, and the shipped game is what the full warm protects.
 	Node3D *person_warm = nullptr;
 	if (is_inside_tree() && !Engine::get_singleton()->is_editor_hint()) {
-		// MainGame keeps World hidden behind the opaque loading CanvasLayer.
-		// Temporarily expose it so the particle domains, tracer MeshInstance,
-		// and deterministic helper quads are actually submitted to force_draw.
-		const bool was_visible = is_visible();
+		// MainGame keeps World hidden behind the opaque loading CanvasLayer through the load. Shown
+		// here, so the particle domains, tracer MeshInstance and deterministic helper quads are
+		// submitted to force_draw, and left shown: the loading presentation's hold keeps every later
+		// frame under the screen free of the world's draw, so the reveal drops that hold and re-pairs
+		// no instance, where hiding the world again unpaired every instance here and re-paired them
+		// all in the revealed frame's draw (D-NET-NEW-LF-29). The hold is lifted across this frame
+		// alone, which draws the world under the opaque layer.
 		set_visible(true);
+		apply_presentation_hold_(false);
 		// The slot captures' casters pack their geometry here, every caster of the world, so a
 		// caster's first capture draws what the load made and not the first scene frame's pack
 		// (engine renderer/render_slot_shadow.h slot_casters_load_with_models carries the
@@ -1815,7 +1835,7 @@ int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTim
 		leg_end();
 		free_glyph_canvas_warm(glyph_warm);
 		emit_signal(kSignalHudPipelineWarm, false);
-		set_visible(was_visible);
+		apply_presentation_hold_(presentation_held_);
 	}
 	leg("warm_reset");
 	// Freed here, past the drained frame, so the frees are the load's and not a later frame's

@@ -60,6 +60,9 @@ func _init(world: GameWorld = null, camera: Camera3D = null, viewport: Viewport 
 			"loaded": bool(world.is_loaded()),
 			"mission_file": String(world.get_loaded_mission_file()),
 			"visible": bool(world.is_visible_in_tree()),
+			# Shown and its draw no longer held by the loading presentation: the reveal's
+			# witness (GameWorld.set_presentation_held).
+			"presented": bool(world.is_visible_in_tree()) and not bool(world.is_presentation_held()),
 			"clear_color": (
 					clear.environment.background_color
 					if clear != null and clear.environment != null

@@ -1161,6 +1161,8 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("world_view"), &GameWorld::world_view);
 	ClassDB::bind_method(D_METHOD("armory_view"), &GameWorld::armory_view);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &GameWorld::is_loaded);
+	ClassDB::bind_method(D_METHOD("set_presentation_held", "held"), &GameWorld::set_presentation_held);
+	ClassDB::bind_method(D_METHOD("is_presentation_held"), &GameWorld::is_presentation_held);
 	ClassDB::bind_method(D_METHOD("get_current_frame_clear_color"),
 			&GameWorld::get_current_frame_clear_color);
 

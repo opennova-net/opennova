@@ -278,12 +278,19 @@ func test_shell_presentation_session_stages_and_reveals_world_atomically() -> vo
 	assert_false(menu.visible)
 	assert_false(world.visible)
 	assert_false(hud_item.visible)
+	assert_true(world.is_presentation_held(),
+			"the loading presentation holds the world's draw until its reveal")
 	assert_true(world.world_loaded.is_connected(loaded_callback))
 	assert_true(world.load_failed.is_connected(failed_callback))
 
 	session.finish_world_load(WorldLoadCoordinator.new(), world, hud)
 	assert_true(world.visible)
 	assert_true(hud_item.visible)
+	assert_false(world.is_presentation_held(), "the reveal drops the hold")
+	# The menu hides the world and holds nothing.
+	session.enter_menu(world, hud)
+	assert_false(world.visible)
+	assert_false(world.is_presentation_held())
 
 
 # One REAL main frame of the booted in-world shell: `process_frame` fires before
