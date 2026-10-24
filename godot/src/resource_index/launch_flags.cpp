@@ -53,10 +53,13 @@ void LaunchFlags::_bind_methods() {
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("expansion", "fallback"),
 			&LaunchFlags::expansion, DEFVAL(String()));
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("game", "fallback"),
-			&LaunchFlags::game, DEFVAL(String("opennova")));
+			&LaunchFlags::game, DEFVAL(String()));
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("product"), &LaunchFlags::product);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("product_supported"), &LaunchFlags::product_supported);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("game_given"), &LaunchFlags::game_given);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("no_update"), &LaunchFlags::no_update);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("launch_directory"),
+			&LaunchFlags::launch_directory);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("resource_dir"),
 			&LaunchFlags::resource_dir);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("resource_dir_given"),
@@ -93,13 +96,38 @@ String LaunchFlags::expansion(const String &fallback) {
 	return to_gd(opennova::launch_expansion(parse(), to_std(fallback)));
 }
 
+namespace {
+std::string launch_dir_of(const opennova::LaunchFlags &flags) {
+	return flags.resource_dir.empty() ? to_std(OS::get_singleton()->get_executable_path().get_base_dir())
+									  : flags.resource_dir;
+}
+std::string folder_of(const opennova::LaunchFlags &flags) {
+	return opennova::folder_product(launch_dir_of(flags));
+}
+} // namespace
+
 String LaunchFlags::game(const String &fallback) {
-	return to_gd(opennova::launch_game(parse(), to_std(fallback)));
+	const opennova::LaunchFlags flags = parse();
+	const std::string chosen = fallback.is_empty()
+			? opennova::launch_product(flags, folder_of(flags))
+			: to_std(fallback);
+	return to_gd(opennova::launch_game(flags, chosen));
 }
 
-String LaunchFlags::product() { return to_gd(opennova::launch_product(parse())); }
-bool LaunchFlags::product_supported() { return opennova::launch_product_supported(parse()); }
+String LaunchFlags::product() {
+	const opennova::LaunchFlags flags = parse();
+	return to_gd(opennova::launch_product(flags, folder_of(flags)));
+}
+
+bool LaunchFlags::product_supported() {
+	const opennova::LaunchFlags flags = parse();
+	return opennova::launch_product_supported(flags, folder_of(flags));
+}
+
+bool LaunchFlags::game_given() { return parse().game_given; }
 bool LaunchFlags::no_update() { return parse().no_update; }
+
+String LaunchFlags::launch_directory() { return to_gd(launch_dir_of(parse())); }
 
 String LaunchFlags::resource_dir() {
 	return to_gd(parse().resource_dir);

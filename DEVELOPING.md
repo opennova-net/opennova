@@ -146,8 +146,12 @@ The updater work separates the engine distribution from the authored game. The
 runtime package contains the engine, its native dependencies, `update.exe`, and
 `revupdat.exe`. A standalone installation downloads OpenNova content on first run.
 
-The game product is selected explicitly: `/game opennova` (the default), `/game jo`,
-or `/game dfx2`. OpenNova's product uses the JO engine profile. The selected product
+The game product is `/game opennova`, `/game jo` or `/game dfx2`. Without `/game`,
+the launch folder's `UPDATE.WIZ` names it by its `CMD` (`JOPTR.CMD`, `DFX2.CMD`,
+`OPENNOVA.CMD`); a folder with no wizard is OpenNova's, and one whose wizard names
+another game is refused (ADR 0067). OpenNova's product uses the JO engine profile. The
+updater refuses a product the folder's wizard does not name, and installs OpenNova
+content only into OpenNova's own folder or an empty one. The selected product
 and its installed expansions update independently of the OpenNova runtime. A retail
 selection requires existing game data; it does not download OpenNova's game into a
 retail installation. `--resource-dir` selects the content directory; otherwise an

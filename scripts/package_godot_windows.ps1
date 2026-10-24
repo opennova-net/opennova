@@ -582,7 +582,9 @@ Run opennova.exe. The first launch downloads OpenNova's content and registered
 expansions. Later launches play offline and show UPDATE only when an update exists.
 Keep update.exe and revupdat.exe beside opennova.exe.
 
-Game selection is explicit; without /game the product is OpenNova:
+To play Joint Operations or Delta Force Xtreme 2, put these files in that
+game's folder and run opennova.exe; the folder's UPDATE.WIZ says which game
+it holds. To choose a game and folder yourself:
   opennova.exe -- /game jo --resource-dir "C:\Games\Joint Operations"
   opennova.exe -- /game dfx2 --resource-dir "C:\Games\Delta Force Xtreme 2"
 With no --resource-dir, game data is read from the executable's folder.

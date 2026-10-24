@@ -19,7 +19,8 @@ func after_each() -> void:
 
 ## Run the game binary with `args` after `--`; `verbose` turns on Godot's
 ## --verbose log so print_verbose boot markers reach the captured output.
-func _launch(args: PackedStringArray, expected_exit: int, verbose := false) -> String:
+func _launch(args: PackedStringArray, expected_exit: int, verbose := false,
+		default_game := true) -> String:
 	var output: Array = []
 	var command := PackedStringArray([
 		"--headless", "--path", ProjectSettings.globalize_path("res://"),
@@ -29,7 +30,7 @@ func _launch(args: PackedStringArray, expected_exit: int, verbose := false) -> S
 		command.append("--verbose")
 	command.append("--")
 	command.append("--no-update")
-	if not args.has("/game"):
+	if default_game and not args.has("/game"):
 		command.append_array(PackedStringArray(["/game", "jo"]))
 	command.append_array(args)
 	var status := OS.execute(OS.get_executable_path(), command, output, true)
@@ -46,6 +47,22 @@ func test_empty_opennova_install_reaches_bootstrap_without_game_data() -> void:
 	var log_text := _launch(["/game", "opennova", "--resource-dir", dir], 1, true)
 	assert_string_contains(log_text, "OpenNova: content installation required")
 	assert_false(log_text.contains("no menu found in resource dir"), log_text)
+
+
+# ADR 0067 d2: without /game the folder's UPDATE.WIZ names the product. A wizard
+# naming a game OpenNova does not play stops the launch before anything mounts; a
+# JO wizard selects JO, which never offers OpenNova's content bootstrap.
+func test_a_folder_wizard_selects_or_refuses_the_product_without_game() -> void:
+	var foreign := TestFs.cache_dir(self, "foreign_wizard")
+	_dirs.append(foreign)
+	TestFs.write_text(self, foreign.path_join("UPDATE.WIZ"), "[HEADER]\r\nCMD=DFBHD.CMD\r\n")
+	assert_string_contains(_launch(["--resource-dir", foreign], 2, false, false),
+			"holds a game OpenNova does not play")
+	var jo := TestFs.cache_dir(self, "jo_wizard")
+	_dirs.append(jo)
+	TestFs.write_text(self, jo.path_join("UPDATE.WIZ"), "[HEADER]\r\nCMD=JOPTR.CMD\r\n")
+	var log_text := _launch(["--resource-dir", jo], 1, true, false)
+	assert_false(log_text.contains("content installation required"), log_text)
 
 
 func test_unknown_or_missing_game_selection_is_a_usage_error() -> void:

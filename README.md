@@ -6,7 +6,7 @@ runtime, native format readers, NovaWorld-compatible services, and the project
 web portal. The minimal runtime downloads OpenNova's own game on first run:
 "Indigo Shore", a mission for single player and Co-op over LAN, and its
 "Indigo Storm" expansion. The same `opennova.exe` can run against an existing
-Joint Operations or Delta Force Xtreme 2 install with an explicit `/game` selection.
+Joint Operations or Delta Force Xtreme 2 install: put it in that game's folder and run it.
 
 This is a pre-1.0 project. Implemented systems and known differences from the
 retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
@@ -93,21 +93,23 @@ $GODOT_BIN --headless --path godot --import   # once; retry it if a cold cache c
 $GODOT_BIN --path godot -- /game jo --resource-dir "C:/Games/Joint Operations" --no-update
 ```
 
-The packaged runtime defaults to `/game opennova`. Its first launch offers to
-download OpenNova's content through the adjacent `update.exe`. Existing content
+In its own folder the packaged runtime plays OpenNova's game, and its first launch
+downloads OpenNova's content through the adjacent `update.exe`. Existing content
 starts normally while an update check runs in the background; **UPDATE** appears
 in the main menu when a newer package is available. Installed content works offline.
 
-To use a retail install, extract the runtime beside the retail executable and
-select its game, or supply a separate content directory:
+To play a retail install, extract the runtime into the retail game's folder and run
+`opennova.exe`: without `/game`, the folder's `UPDATE.WIZ` says which game it holds
+(Joint Operations or Delta Force Xtreme 2; a folder without one is OpenNova's). A
+folder whose wizard names another game is refused. `/game` chooses explicitly, also
+for a separate content directory:
 
 ```bash
-opennova.exe -- /game jo
 opennova.exe -- /game dfx2 --resource-dir "C:/Games/Delta Force Xtreme 2"
 ```
 
 For loose data without boot archives, add `--loose-root /d`. `/game <code>`
-selects `opennova` (the default), `jo`, or `dfx2`; `/exp <name>` selects an expansion. A
+selects `opennova`, `jo`, or `dfx2`; `/exp <name>` selects an expansion. A
 `--resource-dir` directory is never saved. An empty `--resource-dir` prints
 usage and exits with code 2. Use `--no-update` for development runs; Editor Play
 sets it automatically. Source checkouts use exported content from the assets

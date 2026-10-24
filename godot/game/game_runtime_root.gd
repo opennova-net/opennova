@@ -33,8 +33,11 @@ func _ready() -> void:
 		get_tree().quit(0)
 		return
 	if not LaunchFlags.product_supported():
-		push_error("OpenNova: unknown /game product: %s" % LaunchFlags.product())
-		get_tree().quit(2)
+		if LaunchFlags.game_given():
+			push_error("OpenNova: unknown /game product: %s" % LaunchFlags.product())
+			get_tree().quit(2)
+		else:
+			_show_foreign_folder()
 		return
 	if LaunchFlags.resource_dir_given() and LaunchFlags.resource_dir().is_empty():
 		push_error("OpenNova: --resource-dir needs a path.")
@@ -79,6 +82,34 @@ func _show_bootstrap() -> void:
 		push_error("OpenNova content is missing. Run update.exe to install it.")
 		get_tree().quit(1)
 		return
+	var column := _message_column("Install OpenNova's game content to start playing.")
+	var install := Button.new()
+	install.text = "Download and play"
+	install.disabled = not RuntimeUpdates.is_enabled()
+	install.pressed.connect(_install_content)
+	column.add_child(install)
+	column.add_child(_exit_button())
+	if not RuntimeUpdates.is_enabled():
+		_bootstrap_status.text = "Game content is missing. Updates are disabled for this launch."
+	else:
+		_install_content.call_deferred()
+
+
+## A launch without /game in a folder whose UPDATE.WIZ names a game OpenNova
+## does not play (boot_policy.h folder_product): nothing is mounted or updated.
+func _show_foreign_folder() -> void:
+	print_verbose("OpenNova: foreign game folder %s" % BootRootMount.launch_directory())
+	if is_headless():
+		push_error(("OpenNova: %s holds a game OpenNova does not play (its UPDATE.WIZ names another game). "
+				+ "Pass /game to choose one.") % BootRootMount.launch_directory())
+		get_tree().quit(2)
+		return
+	var column := _message_column("This folder holds a game OpenNova does not play. Put OpenNova in "
+			+ "a Joint Operations or Delta Force Xtreme 2 folder, or in a folder of its own.")
+	column.add_child(_exit_button())
+
+
+func _message_column(text: String) -> VBoxContainer:
 	var canvas := Control.new()
 	canvas.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(canvas)
@@ -94,22 +125,17 @@ func _show_bootstrap() -> void:
 	title.add_theme_font_size_override("font_size", 32)
 	column.add_child(title)
 	_bootstrap_status = Label.new()
-	_bootstrap_status.text = "Install OpenNova's game content to start playing."
+	_bootstrap_status.text = text
 	_bootstrap_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	column.add_child(_bootstrap_status)
-	var install := Button.new()
-	install.text = "Download and play"
-	install.disabled = not RuntimeUpdates.is_enabled()
-	install.pressed.connect(_install_content)
-	column.add_child(install)
+	return column
+
+
+func _exit_button() -> Button:
 	var quit := Button.new()
 	quit.text = "Exit"
 	quit.pressed.connect(func() -> void: get_tree().quit())
-	column.add_child(quit)
-	if not RuntimeUpdates.is_enabled():
-		_bootstrap_status.text = "Game content is missing. Updates are disabled for this launch."
-	else:
-		_install_content.call_deferred()
+	return quit
 
 
 func _install_content() -> void:

@@ -363,4 +363,9 @@ int32_t vfs_expansion_version_checksum(const std::string &game_root,
 // CNapiServerInfo_SerializeToSession @ 0x4c385a] (D-NET-296).
 std::string vfs_country_code(const std::string &game_root);
 
+// The game directory's UPDATE.WIZ text (the file found case-insensitively, as the game finds a
+// loose file); false when the directory has none or it cannot be read. A launch without /game
+// takes its product from the wizard's CMD (base/resource_index/boot_policy.h folder_product).
+bool vfs_update_wizard_text(const std::string &game_root, std::string &out);
+
 } // namespace opennova

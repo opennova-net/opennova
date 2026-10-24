@@ -4,8 +4,7 @@ extends RefCounted
 ## --loose-root permits an authoring directory without packed archives.
 
 static func launch_directory() -> String:
-	var explicit := LaunchFlags.resource_dir()
-	return explicit if not explicit.is_empty() else OS.get_executable_path().get_base_dir()
+	return LaunchFlags.launch_directory()
 
 
 static func mount(dir: String, allow_loose_root: bool) -> ResourceRoot:

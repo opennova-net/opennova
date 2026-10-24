@@ -24,11 +24,19 @@ public:
 	static bool loose_override_enabled();
 	// `/exp <name>` (or `/mod`, the last one), else `fallback` ("" the base game).
 	static String expansion(const String &fallback);
-	// Engine profile for `/game <product>`; OpenNova uses JO's compatibility.
+	// The engine profile: `/game`'s, else `fallback`'s, an empty fallback meaning the
+	// launch's product (product()); OpenNova uses JO's compatibility.
 	static String game(const String &fallback);
+	// The distribution product: `/game` when given, else the launch directory's
+	// UPDATE.WIZ (boot_policy.h folder_product), a folder with no wizard OpenNova's;
+	// "" for a folder whose wizard names another game.
 	static String product();
 	static bool product_supported();
+	// True when `/game` was passed, even without a value.
+	static bool game_given();
 	static bool no_update();
+	// The directory the launch reads: `--resource-dir`, else the executable's.
+	static String launch_directory();
 	// `--resource-dir <path>` (process-local, never persisted), or "".
 	static String resource_dir();
 	// True when `--resource-dir` was passed, even without a value.

@@ -6,6 +6,8 @@
 #include <base/io/file_time.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
+#include <base/resource_index/boot_policy.h>
+#include <base/vfs/vfs.h>
 #include <formats/pff/pff.h>
 #include <formats/update/apply.h>
 #include <formats/update/nlz.h>
@@ -313,10 +315,37 @@ bool discover_products(const Options &o, std::vector<Product> &out, std::string 
 		}
 		out.push_back(std::move(runtime));
 	}
-	// Double-clicking our updater in a retail install keeps its stock content wizard.
-	// The bootstrap passes /game explicitly; it never guesses from an empty directory.
-	bool native_content = o.game == "opennova" && !o.legacy &&
-			(o.game_explicit || !fs::is_regular_file(named_file(o.resource_dir, "UPDATE.WIZ"), ec));
+	// The folder's own UPDATE.WIZ names what it holds (boot_policy.h folder_product, ADR 0067
+	// d2). A launch without /game takes that product, and a product the folder does not hold
+	// is refused, so OpenNova content never lands over another game's data. A legacy launch
+	// (the retail game's own call) keeps the stock wizard.
+	bool native_content = false;
+	if (!o.legacy) {
+		const std::string folder = folder_product(io::utf8_path(o.resource_dir));
+		if (folder == kForeignFolder) {
+			error = "This folder's UPDATE.WIZ names a game OpenNova does not update.";
+			return false;
+		}
+		const std::string product = o.game_explicit ? o.game : (folder.empty() ? std::string("opennova") : folder);
+		if (product == "opennova") {
+			if (!folder.empty() && folder != "opennova") {
+				error = "This folder holds another game (its UPDATE.WIZ). OpenNova content installs only into its own folder.";
+				return false;
+			}
+			// No wizard: a fresh folder, never one already holding game archives (a DFX
+			// install ships none). OpenNova's own content writes its wizard first (its
+			// loose rows precede the archives), so an interrupted install resumes.
+			const auto slots = vfs_boot_archive_slots(io::utf8_path(o.resource_dir));
+			if (folder.empty() && std::any_of(slots.begin(), slots.end(), [](const std::string &n) { return !n.empty(); })) {
+				error = "This folder holds game data without OpenNova's UPDATE.WIZ. OpenNova content installs only into its own folder.";
+				return false;
+			}
+			native_content = true;
+		} else if (folder != product) {
+			error = "This folder's UPDATE.WIZ does not name /game " + product + ".";
+			return false;
+		}
+	}
 	if (native_content) {
 		out.push_back({o.resource_dir, "OPENNOVA", "OPENNOVA.CMD", {"update.opennova.net"}, true});
 	} else {

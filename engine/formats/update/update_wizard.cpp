@@ -70,6 +70,17 @@ std::string write_update_wizard(const UpdateWizard &wizard) {
 	return out;
 }
 
+std::string wizard_product(std::string_view cmd) {
+	const std::string name = strutil::trim(cmd);
+	if (strutil::iequals(name, kJoCommandFile))
+		return "jo";
+	if (strutil::iequals(name, kDfx2CommandFile))
+		return "dfx2";
+	if (strutil::iequals(name, kOpenNovaCommandFile))
+		return "opennova";
+	return {};
+}
+
 Territory territory_from_cc_bin(const uint8_t *data, size_t size) {
 	Territory territory;
 	for (size_t i = 0; i < 2 && i < size; ++i)

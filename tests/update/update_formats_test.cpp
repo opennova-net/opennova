@@ -82,6 +82,13 @@ int test_wizard() {
 	TEST_EXPECT(wizard.url2.empty());
 	TEST_EXPECT(wizard.product_login == "JOTRqq");
 	TEST_EXPECT(wizard.dir == "/pub/updates/JOTR/qq");
+	// The product a stock wizard's CMD names: JO:CA's, the Steam DFX2's and OpenNova
+	// content's; any other (BHD's, an expansion's) none.
+	TEST_EXPECT(wizard_product(wizard.cmd) == "jo");
+	TEST_EXPECT(wizard_product(" dfx2.cmd ") == "dfx2");
+	TEST_EXPECT(wizard_product("OPENNOVA.CMD") == "opennova");
+	TEST_EXPECT(wizard_product("DFBHD.CMD").empty() && wizard_product("JOEPTR.CMD").empty() &&
+			wizard_product("").empty());
 
 	// cc.bin "usqq0409us": territory "us" over placeholder "qq".
 	const std::vector<uint8_t> cc = bytes("usqq0409us");

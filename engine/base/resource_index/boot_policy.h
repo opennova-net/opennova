@@ -8,8 +8,9 @@
 //                 entries. Without it the runtime reads from PFFs exclusively.
 //   /exp <name>   mount the expansion <name> (e.g. "jox01") over the base game.
 //   /mod <name>   the same flag (retail reads the two spellings in one arm).
-//   /game <code>  the product, default "opennova"; "jo" and "dfx2" select
-//                 installed retail data. OpenNova uses JO's engine profile.
+//   /game <code>  the product: "opennova", "jo" or "dfx2". Without it the launch
+//                 folder's UPDATE.WIZ names it (folder_product below); a folder
+//                 with no wizard is OpenNova's. OpenNova uses JO's engine profile.
 //   --no-update  disable update checks and installation (editor Play and tests).
 //   /LAN          every game.cfg read forces mpnovaworldhostlanonly on: a
 //                 NovaWorld host advertises LAN only.
@@ -225,13 +226,24 @@ bool launch_token_breaks_at(char c);
 std::string launch_expansion_name(const std::string &token);
 // A launch flag always wins over a persisted (possibly stale) fallback.
 std::string launch_expansion(const LaunchFlags &flags, const std::string &fallback);
-// The engine compatibility profile: OpenNova uses JO. The explicit fallback
-// is for format/tool callers; runtime product selection uses launch_product.
+// The engine compatibility profile: OpenNova uses JO. The runtime passes the
+// launch's product (launch_product) as the fallback; format/tool callers pass
+// their own.
 std::string launch_game(const LaunchFlags &flags, const std::string &fallback);
-// The selected distribution product. OpenNova uses the JO compatibility profile, but
-// keeps its own updater product; absence never inherits a previous retail selection.
-std::string launch_product(const LaunchFlags &flags);
-bool launch_product_supported(const LaunchFlags &flags);
+// The product a game folder holds, from its UPDATE.WIZ's CMD (the file found
+// case-insensitively; formats/update/update_wizard.h wizard_product): "jo",
+// "dfx2" or "opennova"; "" for a folder with no wizard (a fresh download, an
+// authoring export, a test root); kForeignFolder for a wizard naming another
+// game (BHD's DFBHD.CMD). ADR 0067 d2.
+inline constexpr const char *kForeignFolder = "foreign";
+std::string folder_product(const std::string &dir);
+// The selected distribution product: `/game` when given, else the folder's
+// (folder_product of the launch directory), a folder with no wizard being
+// OpenNova's; "" for a foreign folder. Nothing persisted ever selects it.
+std::string launch_product(const LaunchFlags &flags, const std::string &folder);
+// Whether the launch can run: a known `/game`, or no `/game` and a folder that
+// is not foreign.
+bool launch_product_supported(const LaunchFlags &flags, const std::string &folder);
 // `dir/name`, with an empty dir yielding the bare name and a trailing
 // separator not doubled.
 std::string boot_path_join(const std::string &dir, const std::string &name);

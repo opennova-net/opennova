@@ -6,6 +6,7 @@
 #include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
+#include <formats/update/update_wizard.h>
 
 #include <cerrno>
 #include <cstdlib>
@@ -187,13 +188,21 @@ std::string launch_game(const LaunchFlags &flags, const std::string &fallback) {
     return fb.empty() || fb == "opennova" ? std::string("jo") : fb;
 }
 
-std::string launch_product(const LaunchFlags &flags) {
-    return flags.game.empty() ? std::string("opennova") : flags.game;
+std::string folder_product(const std::string &dir) {
+    std::string text;
+    if (!vfs_update_wizard_text(dir, text)) return {};
+    const std::string product = update::wizard_product(update::read_update_wizard(text).cmd);
+    return product.empty() ? std::string(kForeignFolder) : product;
 }
 
-bool launch_product_supported(const LaunchFlags &flags) {
-    if (flags.game_given && flags.game.empty()) return false;
-    const std::string product = launch_product(flags);
+std::string launch_product(const LaunchFlags &flags, const std::string &folder) {
+    if (flags.game_given) return flags.game;
+    if (folder.empty()) return "opennova";
+    return folder == kForeignFolder ? std::string() : folder;
+}
+
+bool launch_product_supported(const LaunchFlags &flags, const std::string &folder) {
+    const std::string product = launch_product(flags, folder);
     return product == "opennova" || product == "jo" || product == "dfx2";
 }
 

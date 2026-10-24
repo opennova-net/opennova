@@ -164,24 +164,45 @@ int test_options_and_discovery(const test_temp::TempDir &temp) {
 	TEST_EXPECT(!updater::parse_options({"--unknown"}, temp.path / "update.exe", options, error));
 	TEST_EXPECT(updater::parse_options({"0", "/DIR", temp.file("retail"), "/RUN"}, temp.path / "update.exe", options, error));
 	TEST_EXPECT(options.legacy && options.no_runtime);
+	// A JO-shaped install: JO:CA's wizard (no cc.bin: the US territory over QQ).
 	TEST_EXPECT(synthetic_trees::write_text(temp.file("retail/UPDATE.WIZ"),
-			"[HEADER]\r\nCMD=TEST.CMD\r\nPRODUCT_LOGIN=TEST\r\nURL=127.0.0.1\r\n"));
+			"[HEADER]\r\nCMD=JOPTR.CMD\r\nPRODUCT_LOGIN=JOTRqq\r\nURL=127.0.0.1\r\n"));
 	std::vector<updater::Product> products;
 	TEST_EXPECT(updater::discover_products(options, products, error));
-	TEST_EXPECT(products.size() == 1 && products[0].login == "TEST" && !products[0].native);
-	// A wizard registers native content for bootstrap. Retail expansions still need
-	// their installed archive, so copying a wizard alone cannot install a retail expansion.
+	TEST_EXPECT(products.size() == 1 && products[0].login == "JOTRus" && !products[0].native);
+	// Retail expansions still need their installed archive, so copying a wizard alone
+	// cannot install a retail expansion.
 	TEST_EXPECT(synthetic_trees::write_text(temp.file("retail/expansion/testexp/UPDATE.WIZ"),
 			"[HEADER]\r\nCMD=EXP.CMD\r\nPRODUCT_LOGIN=EXP\r\nURL=127.0.0.1\r\n"));
 	TEST_EXPECT(updater::discover_products(options, products, error) && products.size() == 1);
+	// OpenNova content never lands in a folder whose wizard names another game, even when
+	// /game asks for it; nor does another product the wizard does not name.
 	TEST_EXPECT(updater::parse_options({"/game", "opennova", "--resource-dir", temp.file("retail")},
 			temp.path / "update.exe", options, error));
-	TEST_EXPECT(updater::discover_products(options, products, error) && products.size() == 3);
-	TEST_EXPECT(products[0].login == "ONRUNTIME" && products[1].login == "OPENNOVA" &&
-			products[2].login == "EXP" && products[2].native);
+	TEST_EXPECT(!updater::discover_products(options, products, error) && error.find("UPDATE.WIZ") != std::string::npos);
+	TEST_EXPECT(updater::parse_options({"/game", "dfx2", "--resource-dir", temp.file("retail")},
+			temp.path / "update.exe", options, error));
+	TEST_EXPECT(!updater::discover_products(options, products, error));
+	// A bare launch there updates the game its wizard names, as /game jo does.
 	TEST_EXPECT(updater::parse_options({}, temp.path / "retail/update.exe", options, error));
 	TEST_EXPECT(updater::discover_products(options, products, error) && products.size() == 2);
-	TEST_EXPECT(products[0].login == "ONRUNTIME" && products[1].login == "TEST" && !products[1].native);
+	TEST_EXPECT(products[0].login == "ONRUNTIME" && products[1].login == "JOTRus" && !products[1].native);
+	TEST_EXPECT(updater::parse_options({"/game", "JO"}, temp.path / "retail/update.exe", options, error));
+	TEST_EXPECT(updater::discover_products(options, products, error) && products.size() == 2);
+	// A wizard naming a game OpenNova does not update (BHD's) is refused outright.
+	TEST_EXPECT(synthetic_trees::write_text(temp.file("bhd/UPDATE.WIZ"), "[HEADER]\r\nCMD=DFBHD.CMD\r\n"));
+	TEST_EXPECT(updater::parse_options({}, temp.path / "bhd/update.exe", options, error));
+	TEST_EXPECT(!updater::discover_products(options, products, error));
+	// A folder with no wizard takes OpenNova content only while it holds no game archive (a
+	// DFX install ships no wizard); an empty one is the first install.
+	TEST_EXPECT(synthetic_trees::write_text(temp.file("wizardless/resource.pff"), "archive"));
+	TEST_EXPECT(updater::parse_options({"/game", "opennova"}, temp.path / "wizardless/update.exe", options, error));
+	TEST_EXPECT(!updater::discover_products(options, products, error));
+	std::error_code made;
+	fs::create_directories(temp.path / "fresh", made);
+	TEST_EXPECT(updater::parse_options({}, temp.path / "fresh/update.exe", options, error));
+	TEST_EXPECT(updater::discover_products(options, products, error) && products.size() == 2);
+	TEST_EXPECT(products[0].login == "ONRUNTIME" && products[1].login == "OPENNOVA" && products[1].native);
 	// A completed native install also has UPDATE.WIZ. Bare launch must retain
 	// full native rows and recognize its registered expansion without an archive.
 	TEST_EXPECT(synthetic_trees::write_text(temp.file("native/UPDATE.WIZ"),
