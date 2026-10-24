@@ -1481,12 +1481,15 @@ static bool test_remembered_login() {
 //   unclicked Login posts the fill through the start page when no page is shown.
 // - A page whose submit is LOGIN (DFX2's) has it enabled only with a NAME and a PASSWORD or the
 //   fill's placeholder; JO's ACCEPT is never gated.
-// - A LOGIN press marks the flag for good: the next fill fills the name alone and blanks the jar's
-//   cookie (so later Cookie var-lists carry it empty); JO's ACCEPT marks nothing.
+// - A LOGIN press marks the flag until the home page shows: a fill before it (the page shown again
+//   after a failed login) fills the name alone and blanks the jar's cookie (so later Cookie
+//   var-lists carry it empty); the main page a login's success lands on, or an entry's lobby
+//   page, clears it, so the sign-in page shown after it fills in full. JO's ACCEPT marks nothing.
 // [orig: UI_ProcessScriptBuffer @0x63CBE0 - the ACTIVATE event called @0x63D3B9;
 //  UI_LoadPersistentLoginCredentials @0x557330 - @0x5573C7, AddFormField called @0x557421;
 //  UI_ValidateLoginFields @0x557230 - @0x5572EC, @0x557300, @0x557304;
-//  UI_MarkLoginButtonPressed @0x557520]
+//  UI_MarkLoginButtonPressed @0x557520; UI_SaveCookieJarOnHomeTabs @0x557530 (ENABLE_HOME_TABS,
+//  registered @0x559873) - g_LoginButtonPressed = 0 @0x557540]
 static bool test_sign_in_refill_gate_login_flag() {
 	nw::process_browser_cache().clear();
 	const std::string account = "ACCT";
@@ -1582,6 +1585,46 @@ static bool test_sign_in_refill_gate_login_flag() {
 	d.reshow_sign_in();
 	expect(d.remembered_login_name().empty() && !d.has_remembered_login(),
 	       "the blanked cookie decodes to nothing at the fill after");
+
+	// DFX2: a LOGIN press whose login succeeds lands on the main page, whose ENABLE_HOME_TABS
+	// clears the mark: a later entry's sign-in page fills in full and the jar keeps the cookie.
+	nw::LobbyHttpFlow s;
+	s.set_context(dfx2);
+	if (!expect(enter_sign_in(s, kDfx2SignInPage), "home: the entry lands on the sign-in page"))
+		return false;
+	r = s.login("ACCT", "pw");
+	r = s.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t1"), relay_to("NWLogin.dll"));
+	r = s.on_login_response(true, 200, {"Set-Cookie: NWHANDLE=ACCT", "Set-Cookie: PCID=42"},
+			bytes("<HTML></HTML>"));
+	if (!expect(r.kind == nw::LoginResult::Kind::Succeeded, "the LOGIN press's login succeeds"))
+		return false;
+	if (!expect(enter_sign_in(s, kDfx2SignInPage), "a later entry lands on the sign-in page"))
+		return false;
+	expect(s.has_remembered_login() && s.remembered_login_name() == account,
+	       "the success's main page cleared the mark: the fill is the full fill");
+	expect(jar_value(s, "PERSISTENTREMEMBERLOGINDATA") == cookie, "and the jar keeps the cookie");
+	expect(s.sign_in_submit_enabled("ACCT", ""), "the placeholder shows: a NAME enables LOGIN");
+
+	// DFX2: a failed LOGIN press, then an entry the service answers with its lobby page: the lobby
+	// clears the mark too.
+	const std::string lobby_page =
+			"<HTML><IB3_SUBST name=\"@GSB_SERVER@\">http://gs.novaworld.net/dfx2_0.gsb</IB3_SUBST></HTML>";
+	nw::LobbyHttpFlow l;
+	l.set_context(dfx2);
+	if (!expect(enter_sign_in(l, kDfx2SignInPage), "lobby: the entry lands on the sign-in page"))
+		return false;
+	l.login("ACCT", "wrong");
+	l.on_login_response(true, 200, {},
+			bytes("<IB3_SUBST name=\"@GENERIC@\">The password is incorrect.</IB3_SUBST>"));
+	l.enter();
+	l.on_enter_response(true, 200, set_cookie("NWHANDLE=ACCT"), bytes(kStartPage));
+	if (!expect(l.on_enter_response(true, 200, {}, bytes(lobby_page)).kind ==
+	                    nw::EnterResult::Kind::Lobby,
+	            "the next entry lands on the lobby"))
+		return false;
+	enter_sign_in(l, kDfx2SignInPage);
+	expect(l.has_remembered_login() && jar_value(l, "PERSISTENTREMEMBERLOGINDATA") == cookie,
+	       "the lobby page cleared the mark: the sign-in page after it fills in full");
 	nw::process_browser_cache().clear();
 	return g_fail == 0;
 }

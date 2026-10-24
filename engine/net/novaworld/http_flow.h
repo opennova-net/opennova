@@ -303,7 +303,8 @@ public:
 	// nothing was typed) and rememberlogindata, each EPASK-encrypted (login_remembered). LN-s6's S3
 	// re-login: NAME, PASSWORD empty, rememberlogindata 1152 A-P characters decrypting to the
 	// cookie's 144. A Login press on a page whose submit is the LOGIN control (DFX2's) marks the
-	// LOGIN flag for the process: every later fill fills the name only and blanks the jar's
+	// LOGIN flag: every fill until the home page next shows (a login's success, an entry landing on
+	// the lobby: show_home_page) fills the name only and blanks the jar's
 	// PERSISTENTREMEMBERLOGINDATA (D-NET-NEW-L9-55).
 	// [orig: CWnd_EmitEventToNamedHandlerAndCallbacks @0x646970 - a callback runs when its mask
 	//  holds 1 << (type >> 24) @0x6469B8; CWnd_ProcessMouseEvent @0x647A00 - a press and its
@@ -458,6 +459,14 @@ private:
 	bool sign_in_submit_is_login() const;
 	// The sign-in page's activation: the remembered login's fill (remembered_login_name).
 	void fill_remembered_login();
+	// The home page shown (the main page, its template's ACTIVATE on ENABLE_HOME_TABS): a login's
+	// success, an entry that lands on the lobby. The LOGIN press's mark is cleared. Retail saves
+	// the jar to nw_cdata.coo there first; this flow keeps the jar in memory.
+	// [orig: UI_SaveCookieJarOnHomeTabs @0x557530 (registered on ENABLE_HOME_TABS for every event
+	//  class, mask -1, by UI_RegisterNWMultiplayerCallbacks @0x559800, the call @0x559873) -
+	//  CUIScene_SaveCookieJarFile("nw_cdata.coo") called @0x55753B, g_LoginButtonPressed = 0
+	//  @0x557540]
+	void show_home_page();
 	// The jar's EPASK bundle read into epask_, as the sign-in page's submit encrypts under it; the
 	// failure's reason when the jar holds none or the modexp gate rejects it.
 	std::string take_epask(const std::vector<uint8_t> &page);
@@ -487,9 +496,10 @@ private:
 	// The shown sign-in page's remembered fill: the NAME edit's decoded account name and the
 	// rememberlogindata edit's value (the cookie), the latter empty once a field was clicked.
 	std::string remembered_name_, remember_fill_;
-	// A LOGIN control was pressed (g_LoginButtonPressed: set by the press, never cleared; reset()
-	// keeps it, as the process global outlives a session).
-	// [orig: UI_MarkLoginButtonPressed @0x557520 (LOGIN's event-8 callback, registered @0x559963)]
+	// A LOGIN control was pressed (g_LoginButtonPressed: set by the press, cleared when the home
+	// page shows (show_home_page); reset() keeps it, as the process global outlives a session).
+	// [orig: UI_MarkLoginButtonPressed @0x557520 (LOGIN's event-8 callback, registered @0x559963);
+	//  UI_SaveCookieJarOnHomeTabs @0x557530 - the clear @0x557540]
 	bool login_button_pressed_ = false;
 	// The connect's identity set is in the jar (seed_identity_cookies: once per session).
 	bool identity_seeded_ = false;

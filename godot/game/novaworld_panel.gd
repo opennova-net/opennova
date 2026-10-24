@@ -1038,7 +1038,8 @@ func _on_web_lobby_opened(signed_in: bool, nwhandle: String) -> void:
 
 # The sign-in page's remembered login (engine: LobbyHttpFlow::remembered_login_name): the name
 # fills the account box, and while the fill stands the password box shows the masked placeholder
-# until a field is clicked (after a LOGIN press the name alone); then the submit gate.
+# until a field is clicked (after a LOGIN press, until the home page shows, the name alone); then
+# the submit gate.
 func _apply_remembered_login() -> void:
 	if _client == null or _username_edit == null or _password_edit == null:
 		return

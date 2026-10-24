@@ -783,6 +783,7 @@ EnterResult LobbyHttpFlow::on_enter_response(bool transport_ok, int code,
 		enter_step_ = EnterStep::Idle;
 		switch (start_page_kind(to_string_body(body))) {
 			case StartPageKind::Lobby: {
+				show_home_page();
 				EnterResult r;
 				r.kind = EnterResult::Kind::Lobby;
 				const std::string *nh = jar_.find("NWHANDLE");
@@ -915,9 +916,9 @@ void LobbyHttpFlow::fill_remembered_login() {
 	if (!decode_key_value(cookie, kRememberedLoginKeyChain, account, second, kDecodedRoom, kDecodedRoom))
 		return;
 	remembered_name_ = account;
-	// After a LOGIN press the fill blanks the jar's cookie (the browser's form-field write, which
-	// updates the jar entry of that name in place) and shows no placeholder and no
-	// rememberlogindata (D-NET-NEW-L9-55).
+	// After a LOGIN press, until the home page shows (show_home_page), the fill blanks the jar's
+	// cookie (the browser's form-field write, which updates the jar entry of that name in place)
+	// and shows no placeholder and no rememberlogindata (D-NET-NEW-L9-55).
 	// [orig: UI_LoadPersistentLoginCredentials @0x557330 - g_LoginButtonPressed tested @0x5573C7,
 	//  CUIBrowser_AddFormField(PERSISTENTREMEMBERLOGINDATA, "") called @0x557421;
 	//  CookieJar_UpdateFromURL @0x64E630 - the entry whose name String_CompareNoCase matches
@@ -927,6 +928,11 @@ void LobbyHttpFlow::fill_remembered_login() {
 		return;
 	}
 	remember_fill_ = cookie;
+}
+
+// See http_flow.h.
+void LobbyHttpFlow::show_home_page() {
+	login_button_pressed_ = false;
 }
 
 // The jar's EPASK bundle, which the sign-in page's submit encrypts its fields under, with the
@@ -1080,6 +1086,7 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 				const std::string *pc = jar_.find("PCID");
 				if (nh && !nh->empty()) {
 					login_step_ = LoginStep::Idle;
+					show_home_page();
 					LoginResult r;
 					r.kind = LoginResult::Kind::Succeeded;
 					r.nwhandle = *nh;
