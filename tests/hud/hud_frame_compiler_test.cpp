@@ -3464,6 +3464,65 @@ void test_compiler_frame_rate_overlay(const fnt_font_t *font) {
 			"level 3 skips the overlay and the breath bar");
 }
 
+// D-NET-NEW-LI-42: the connection status line ("%s (%i)" at CONNECTSTATUS by its alignment, the
+// bold slot, half-bright white) and the start timer (the STARTTIMER box, "%s %i:%02i" and the
+// footer centred in the large slot, half-bright active), both after the breath bar inside the
+// level-3 skip.
+// [orig: HUD_DrawGameplayOverlays @0x5BDE60 - HUD_DrawPingDisplay called @0x5BDED8,
+//  HUD_DrawTimerOverlay called @0x5BDEDD; HUD_DrawPingDisplay @0x59D9D0 - sprintf @0x59DA4C;
+//  HUD_DrawTimerOverlay @0x59DAF0 - sprintf @0x59DBEE, the lines @0x59DC28 / @0x59DC6E]
+void test_compiler_connect_status_and_start_timer(const fnt_font_t *font) {
+	using namespace opennova::hud;
+	HudConnectStatus status;
+	status.label = "Lag";
+	status.seconds = 5;
+	CHECK(connect_status_text(status) == "Lag (5)", "the original's \"%s (%i)\"");
+	HudStartTimer timer;
+	timer.seconds = 125;
+	timer.label = "Start";
+	timer.footer = "Wait";
+	CHECK(start_timer_text(timer) == "Start 2:05", "the original's \"%s %i:%02i\"");
+	HudLayout layout;
+	layout.connect_status = {1012, 10, 0, 1, true};
+	layout.start_timer = {262, 180, 500, 80};
+	HudFrameCompiler compiler;
+	compiler.configure(layout, font);
+	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
+	HudFrameState state;
+	state.hud_color_index = 0; // white: the twin's seed 0xFFFFFFFF
+	const auto page_glyphs = [&](const HudDrawList &list, int slot) {
+		const uint32_t page = static_cast<uint32_t>(slot) * FNT_MAX_PAGES;
+		std::vector<GameFontQuad> out;
+		for (const GameFontQuad &g : list.glyphs)
+			if (g.page == page) out.push_back(g);
+		return out;
+	};
+	HudDrawList list = compiler.compile(state, 1024, 768);
+	CHECK(page_glyphs(list, kHudFontSlotLabelBold).empty() &&
+					page_glyphs(list, kHudFontSlotLabelLarge).empty(),
+			"neither draws by default");
+	state.connect_status = status;
+	state.connect_status.shown = true;
+	std::vector<GameFontQuad> line = page_glyphs(compiler.compile(state, 1024, 768),
+			kHudFontSlotLabelBold);
+	CHECK(line.size() == 7 && line[0].color == 0xFF7F7F7Fu,
+			"one bold glyph per character, half-bright white");
+	CHECK(!line.empty() && line.back().x_top_right < 1013.0f && line[0].x_top_left < 1000.0f,
+			"right-aligned: the line ends at CONNECTSTATUS x");
+	state.connect_status.shown = false;
+	state.start_timer = timer;
+	line = page_glyphs(compiler.compile(state, 1024, 768), kHudFontSlotLabelLarge);
+	CHECK(line.size() == 14 && line[0].color == 0xFF7F7F7Fu,
+			"the timer line and its footer in the large slot, half-bright");
+	CHECK(line.size() == 14 && line[0].y_top < line[10].y_top, "the footer one line lower");
+	state.connect_status.shown = true;
+	state.hud_detail_level = 3;
+	list = compiler.compile(state, 1024, 768);
+	CHECK(page_glyphs(list, kHudFontSlotLabelBold).empty() &&
+					page_glyphs(list, kHudFontSlotLabelLarge).empty(),
+			"level 3 skips both");
+}
+
 // The mounted dispatch in HUD_RenderOverlays is intentionally asymmetric:
 // pilots/drivers use category > 9, passengers retain their stance/panel, and
 // gunners follow WPNGRP. XHAIRS remains a separate gate in every seat.
@@ -3595,6 +3654,7 @@ int main() {
 	test_death_arm_skips_the_dispatcher(&font);
 	test_compiler_breath_bar(&font);
 	test_compiler_frame_rate_overlay(&font);
+	test_compiler_connect_status_and_start_timer(&font);
 	test_scope_details(&font);
 	test_optical_distance_long_format(&font);
 	test_kill_announcement(&font);

@@ -541,6 +541,12 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 			element_(HudElement::FrameRateOverlay,
 					[&] { element_frame_rate_overlay(state, surface_w, surface_h); });
 			element_(HudElement::BreathBar, [&] { element_breath_bar(state, surface_w, surface_h); });
+			// The connection status line and the start timer follow the bar, past its round-over
+			// gate (D-NET-NEW-LI-42) [orig: HUD_DrawGameplayOverlays - HUD_DrawPingDisplay called
+			//  @0x5BDED8, HUD_DrawTimerOverlay called @0x5BDEDD].
+			element_(HudElement::ConnectStatus,
+					[&] { element_connect_status(state, surface_w, surface_h); });
+			element_(HudElement::StartTimer, [&] { element_start_timer(state, surface_w, surface_h); });
 		}
 		element_(HudElement::ServicePrompt, [&] { element_service_prompt(state, surface_w, surface_h); });
 	}
@@ -1697,6 +1703,62 @@ void HudFrameCompiler::element_frame_rate_overlay(const HudFrameState &state, fl
 	const std::string line = frame_rate_overlay_text(state.frame_rate);
 	emit_slot_text(label_font_bold_, label_scale_, line.c_str(), sx(10.0f, w), sy(80.0f, h),
 			half_bright_argb(hud_colors_active_), 0u);
+	++draw_list_.elements_drawn;
+}
+
+std::string connect_status_text(const HudConnectStatus &status) {
+	char line[160];
+	std::snprintf(line, sizeof(line), "%s (%i)", status.label.c_str(), status.seconds);
+	return line;
+}
+
+std::string start_timer_text(const HudStartTimer &timer) {
+	char line[160];
+	std::snprintf(line, sizeof(line), "%s %i:%02i", timer.label.c_str(), timer.seconds / 60,
+			timer.seconds % 60);
+	return line;
+}
+
+void HudFrameCompiler::element_connect_status(const HudFrameState &state, float w, float h) {
+	// The witness is at hud_frame.h HudConnectStatus.
+	if (!state.connect_status.shown) return;
+	const std::string line = connect_status_text(state.connect_status);
+	const HudPosRecord &pos = layout_.connect_status;
+	const uint32_t align =
+			pos.align == 1 ? kFontAlignRight : (pos.align == 2 ? kFontAlignCenter : 0u);
+	emit_slot_text(label_font_bold_, label_scale_, line.c_str(), sx(static_cast<float>(pos.x), w),
+			sy(static_cast<float>(pos.y), h), half_bright_argb(0xFFFFFFFFu), align);
+	++draw_list_.elements_drawn;
+}
+
+void HudFrameCompiler::element_start_timer(const HudFrameState &state, float w, float h) {
+	// The witness is at hud_frame.h HudStartTimer.
+	if (state.start_timer.seconds == 0) return;
+	const std::array<int, 4> &box = layout_.start_timer;
+	emit_label_box(static_cast<float>(box[0]), static_cast<float>(box[1]),
+			static_cast<float>(box[0] + box[2]), static_cast<float>(box[1] + box[3]), std::string(),
+			0xFFFFFFFFu, w, h);
+	// The box's corner and its size each through Viewport_ScaleToVirtualCoords.
+	const int x = static_cast<int>(sx(static_cast<float>(box[0]), w));
+	int y = static_cast<int>(sy(static_cast<float>(box[1]), h));
+	const int box_w = static_cast<int>(sx(static_cast<float>(box[2]), w));
+	const int box_h = static_cast<int>(sy(static_cast<float>(box[3]), h));
+	const bool have_large = label_font_large_.font() != nullptr;
+	const GameFont &large = have_large ? label_font_large_ : font_;
+	// The fallback the slot's draws take (emit_slot_text): the HUD slot at its own scale.
+	const float scale = have_large ? label_large_scale_ : hud_font_scale_;
+	int zero_w = 0;
+	int zero_h = 0;
+	large.measure("0", scale, scale, &zero_w, &zero_h);
+	const uint32_t color = half_bright_argb(hud_colors_active_);
+	const float column = static_cast<float>(x + box_w / 2);
+	y += box_h / 2 - zero_h;
+	const std::string line = start_timer_text(state.start_timer);
+	emit_slot_text(label_font_large_, label_large_scale_, line.c_str(), column,
+			static_cast<float>(y), color, kFontAlignCenter);
+	y += zero_h;
+	emit_slot_text(label_font_large_, label_large_scale_, state.start_timer.footer.c_str(), column,
+			static_cast<float>(y), color, kFontAlignCenter);
 	++draw_list_.elements_drawn;
 }
 

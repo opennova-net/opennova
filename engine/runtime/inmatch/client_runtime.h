@@ -700,6 +700,15 @@ public:
 	// display state this client keeps, stepped once per client frame while in
 	// a session, read by the HUD role facts.
 	const hud::NetQualityIndicators &net_quality_indicators() const { return net_indicators_; }
+	// CNapiNetwork_GetSecondsSinceLastReceive over the own connection: a joiner's connection's
+	// whole seconds since its last admitted receive (unsigned, as retail's divide); 0 with none.
+	// [orig: CNapiNetwork_GetSecondsSinceLastReceive @0x4C6ED0 - the connection +0xE60
+	//  @0x4C6ED1, (GetTickCount() - conn+0x5E8) / 1000 @0x4C6EDF..0x4C6EF6]
+	uint32_t seconds_since_last_receive() const {
+		return joiner_ != nullptr
+				? static_cast<uint32_t>(joiner_->milliseconds_since_last_receive() / 1000u)
+				: 0u;
+	}
 	// The authority's level: the host's server tick samples its send window
 	// and the host role stores the bucketed level here ahead of this client
 	// frame [orig: CNetQuality_UpdateMetrics @0x4c52c0 -> CNetQuality_SetLevel

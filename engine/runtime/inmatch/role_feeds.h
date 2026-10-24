@@ -257,6 +257,13 @@ struct HudRoleFacts {
 	//  HUD_DrawFrameRateOverlay @0x5BAE20 - g_StatsCpuPercent @0x5BAE2E, g_StatsMaxFps
 	//  @0x5BAE33, g_StatsMinFps @0x5BAE39, g_StatsAvgFps @0x5BAE40]
 	hud::HudFrameRateOverlay frame_rate;
+	// The connection status line (hud::HudConnectStatus carries the witness): on a joiner in a
+	// session, its round not over, the own connection's whole seconds since its last receive,
+	// shown past two (the signed `cmp eax, 2; jle`); and the start timer's seconds, the local
+	// client's pre-round timer g_ClientPreRoundTimer (a joiner's replica copy, the listen host's
+	// own client's; Role::action_head_admits reads the same) (D-NET-NEW-LI-42).
+	hud::HudConnectStatus connect_status;
+	int32_t start_timer_seconds = 0;
 };
 // `voice_menus`: bit 0 asks for the emotes menu, bit 1 for the radio menu.
 inline constexpr uint32_t kHudVoiceMenuEmotes = 1u;

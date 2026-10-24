@@ -1642,6 +1642,13 @@ void HudOverlay::set_role_facts(const Ref<Simulation> &p_sim,
 	state_.squad_orders = facts.squad_orders;
 	state_.net_quality = facts.net_quality;
 	state_.frame_rate = facts.frame_rate;
+	// The connection status line and the start timer with their Overlays texts (engine
+	// hud/hud_frame.h HudConnectStatus / HudStartTimer carry the witness).
+	state_.connect_status = facts.connect_status;
+	state_.connect_status.label = opennova::to_std(overlay_text(p_gametext, "STROVER54", ""));
+	state_.start_timer.seconds = facts.start_timer_seconds;
+	state_.start_timer.label = opennova::to_std(overlay_text(p_gametext, "STROVER59", ""));
+	state_.start_timer.footer = opennova::to_std(overlay_text(p_gametext, "STROVER63", ""));
 	inset_target_name_ = facts.inset_target_name;
 	opennova::hud::hud_session_text(game_text_lookup(p_gametext), state_.session.text);
 	for (size_t c = 0; c < state_.slot_bar.size(); ++c) {

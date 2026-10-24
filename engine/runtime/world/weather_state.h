@@ -286,7 +286,7 @@ struct WeatherState {
     // update render all six faces (time_set_resets).
     // [orig: Terrain_ResetTileCache @0x605FB0 (keys -1, flags 0 @0x605FC0..0x605FC5);
     //  EnvCube_ForceFullRefresh @0x610680 (g_EnvCubeFacesRendered = 0); EnvCube_Update
-    //  @0x6106A0 - `g_EnvCubeFacesRendered < 6` takes six faces @0x6106EB, the add @0x6107BC]
+    //  @0x6106A0 - `cmp g_EnvCubeFacesRendered, 6` @0x6106D3 / `jl` @0x6106DA takes six faces, the add @0x6107BC]
     void reset_time_caches() { ++time_set_resets; }
     // The dev-tool scrub (MCP rows, GameWorld's debug seam): the exact
     // minute on the 8.24 clock. Not a witnessed handler — the WAC `tod`

@@ -353,6 +353,17 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 	out.frame_rate.cpu_percent = view.frame_rate.cpu_percent;
 	if (view.kernel == nullptr) return out;
 	out.frame_rate.shown = view.kernel->world.rules.frame_rate_overlay;
+	// [orig: HUD_DrawPingDisplay @0x59D9D0 - is_in_session @0x59D9F4, is_authority @0x59DA01,
+	//  g_RoundOver @0x59DA0E, CNapiNetwork_GetSecondsSinceLastReceive called @0x59DA20, `cmp
+	//  eax, 2; jle` @0x59DA25; HUD_DrawTimerOverlay @0x59DAF0 - g_ClientPreRoundTimer @0x59DB27]
+	if (view.joiner && view.runtime != nullptr && view.kernel->world.rules.mp_session &&
+			!view.runtime->state().spawn_success_gate) {
+		out.connect_status.seconds = static_cast<int32_t>(view.runtime->seconds_since_last_receive());
+		out.connect_status.shown = out.connect_status.seconds > 2;
+	}
+	out.start_timer_seconds = static_cast<int32_t>(view.joiner
+					? view.kernel->world.preround_delay_seconds
+					: view.kernel->world.cached.client_preround_timer);
 	// The drawer's session gate, the same session bit as the MP lines below
 	// [orig: `cmp is_in_session, 0` @0x4c3210].
 	out.net_quality.in_session = view.kernel->world.rules.mp_session;

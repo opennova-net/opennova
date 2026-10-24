@@ -384,6 +384,11 @@ struct HudLayout {
 	// @0x59FB3B..0x59FB84 -> dword_2723810/14/18 (atof, atof,
 	// HUD_ParseTextAlignment)].
 	HudPosRecord breath_time;
+	// CONNECTSTATUS — the connection status line's anchor: x, y and the alignment word, three
+	// fields (def.h DefHudPosDef::connect_status carries the witness). STARTTIMER — the start
+	// timer box, x, y, w, h (HudStartTimer). Unauthored, both keep the BSS zero.
+	HudPosRecord connect_status;
+	std::array<int, 4> start_timer{};
 	// The Tab board's atlases (hud_scoreboard.h). The stdbox piece size is
 	// derived from the border atlas's own width (a 4x4 cell grid, so one cell
 	// is a quarter of it), the same texture-derived rule the icon strips use.
@@ -974,6 +979,49 @@ struct HudFrameRateOverlay {
 //  @0x5BAE52].
 std::string frame_rate_overlay_text(const HudFrameRateOverlay &overlay);
 
+// THE CONNECTION STATUS LINE: on a joiner in a session, the round not over, that has heard
+// nothing from its server for more than two whole seconds, "<STROVER54> (<seconds>)" at the
+// hudpos CONNECTSTATUS anchor, by its alignment word (1 right, 2 centred, else left), in the
+// bold label slot, half-bright white (HudFrameCompiler::element_connect_status;
+// D-NET-NEW-LI-42). The 999 arm of g_DebugCheatFlags 0x8000000 is dead: nothing sets the bit.
+// [orig: HUD_DrawPingDisplay @0x59D9D0 - the dead cheat test @0x59D9E4, is_in_session
+//  @0x59D9F4, is_authority @0x59DA01, g_RoundOver @0x59DA0E,
+//  CNapiNetwork_GetSecondsSinceLastReceive called @0x59DA20, `cmp eax, 2; jle` @0x59DA25,
+//  GameText_GetString("Overlays", "STROVER54") called @0x59DA39, sprintf("%s (%i)") called
+//  @0x59DA4C, the alignment dword_272380C @0x59DA51, flags 1 @0x59DA62, colour -1 @0x59DA64,
+//  g_HUDLabelFontBold @0x59DA77, HUD_DrawTextLeftScaled called @0x59DA7E,
+//  HUD_DrawTextCenteredScaled called @0x59DAA2, the right leg @0x59DABF..0x59DACA;
+//  CNapiNetwork_GetSecondsSinceLastReceive @0x4C6ED0 - (GetTickCount() - conn+0x5E8) / 1000;
+//  HUD_DrawTextRightAlignedScaled @0x580BC0, HUD_DrawTextCenteredScaled @0x580B80 (each
+//  Viewport_ScaleToVirtualCoords, then the half-bright drawer)]
+struct HudConnectStatus {
+	bool shown = false;
+	int32_t seconds = 0; // the joiner connection's whole seconds since its last receive
+	std::string label;   // Overlays/STROVER54
+};
+std::string connect_status_text(const HudConnectStatus &status);
+
+// THE START TIMER: while the local client's pre-round timer runs, the hudpos STARTTIMER box
+// (x, y, w, h: the label box over (x, y)..(x + w, y + h), no title), then "<STROVER59> m:ss"
+// and STROVER63 one line lower, both centred at the box's middle column in the large label
+// slot, half-bright in g_HUDColors.active; the first line's top is the box's middle less the
+// height of "0" in that slot (HudFrameCompiler::element_start_timer; D-NET-NEW-LI-42). The
+// 999 arm of g_DebugCheatFlags 0x8000000 is dead.
+// [orig: HUD_DrawTimerOverlay @0x59DAF0 - the box words dword_272381C..dword_2723828
+//  @0x59DB0E..0x59DB40, the dead cheat test @0x59DB44, g_ClientPreRoundTimer @0x59DB27 /
+//  @0x59DB4F, HUD_DrawLabelBox called @0x59DB66, Viewport_ScaleToVirtualCoords called
+//  @0x59DB7A / @0x59DB8E, HUD_MeasureTextWH("0", g_HUDLabelFontLarge) called @0x59DBA7,
+//  STROVER59 @0x59DBDB, sprintf("%s %i:%02i") called @0x59DBEE, y += h / 2 - height
+//  @0x59DC0B, HUD_DrawTextCentered_HalfBright at x + w / 2 @0x59DC28, y += height @0x59DC34,
+//  STROVER63 @0x59DC45, the second line @0x59DC6E; HUD_ParseHudposToken @0x59FB8D..0x59FBE7
+//  (STARTTIMER: four atof fields)]
+struct HudStartTimer {
+	int32_t seconds = 0;  // g_ClientPreRoundTimer; 0 = not drawn
+	std::string label;    // Overlays/STROVER59
+	std::string footer;   // Overlays/STROVER63
+};
+std::string start_timer_text(const HudStartTimer &timer);
+
 // The /NOHUD overlay master word: the .data init 3, cleared to 0 by the
 // launch flag [orig: dword_840B18 (static 3); Game_ParseCommandLineAndInit
 // @0x4a7310 -> sub_58FF20(0) @0x4A7A09, its only writer].
@@ -998,6 +1046,8 @@ struct HudFrameState {
 	// HUD_DrawGameplayOverlays [orig: `cmp dword_840B18, 0` @0x5BDE9B].
 	uint32_t overlay_master = kHudOverlayMasterDefault;
 	HudFrameRateOverlay frame_rate; // element_frame_rate_overlay
+	HudConnectStatus connect_status; // element_connect_status
+	HudStartTimer start_timer;       // element_start_timer
 	// An in-game .mnu screen is open (the in-game menu, the armory, the
 	// deploy screen, the end-round board, the command map): the preround
 	// armory line yields to it (element_service_prompt). [orig: dword_255110C,
@@ -1583,6 +1633,8 @@ private:
 	void element_heat(const HudFrameState &state, float w, float h);
 	void element_power(const HudFrameState &state, float w, float h);
 	void element_frame_rate_overlay(const HudFrameState &state, float w, float h);
+	void element_connect_status(const HudFrameState &state, float w, float h);
+	void element_start_timer(const HudFrameState &state, float w, float h);
 	void element_breath_bar(const HudFrameState &state, float w, float h);
 	void element_waypoint(const HudFrameState &state, float w, float h);
 	void element_spinmap(const HudFrameState &state, float w, float h);
