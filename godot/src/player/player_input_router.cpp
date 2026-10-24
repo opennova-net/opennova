@@ -3,6 +3,7 @@
 #include "player/key_lock_device.h"
 #include "player/local_player_presenter.h"
 #include "simulation/simulation.h"
+#include "world/game_world.h"
 
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/input.hpp>
@@ -231,8 +232,13 @@ void PlayerInputRouter::teardown() {
 
 // The sim, re-resolved per use: mission reloads free the runtime and its sim,
 // so a cached reference would go stale (the presenter follows the same rule).
+// The game's world answers through its own accessor (no script call, no name
+// built per use); only another world node (a test's) goes through the call.
 Ref<Simulation> PlayerInputRouter::sim() const {
-	Node *world = Object::cast_to<Node>(ObjectDB::get_instance(world_id_));
+	Object *world = ObjectDB::get_instance(world_id_);
+	if (GameWorld *game_world = Object::cast_to<GameWorld>(world)) {
+		return game_world->get_sim();
+	}
 	if (world == nullptr) {
 		return Ref<Simulation>();
 	}
