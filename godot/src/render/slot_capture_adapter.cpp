@@ -461,7 +461,13 @@ public:
 	TypedArray<RID> vertex_buffers;
 	PackedInt64Array vertex_offsets;
 	std::map<PipelineKey, RID> pipelines;
-	std::vector<RID> transient_uniforms;
+	// Each texture pair's uniform set, kept across frames by the two RD textures it binds:
+	// a draw binds its caster's textures as the game's device draw sets them, with no set
+	// made and freed per draw per frame (the device lets a set go with a texture it binds,
+	// so a kept set is checked before it is bound; D-NET-NEW-LF-22 LF-s18).
+	std::map<std::pair<std::uint64_t, std::uint64_t>, RID> texture_uniforms;
+	// The draws' push block, one buffer reused for every draw.
+	PackedByteArray push_bytes;
 	std::array<Target, kSlotCaptureCount> targets{};
 	PackedColorArray clear_white;
 
@@ -521,7 +527,8 @@ public:
 	}
 
 	void discard_device_state() {
-		transient_uniforms.clear();
+		texture_uniforms.clear();
+		push_bytes = PackedByteArray();
 		pipelines.clear();
 		device_geometry.clear();
 		for (Target &target : targets)
@@ -570,8 +577,8 @@ public:
 			return;
 		}
 		rd = p_rd;
-		for (RID &uniform : transient_uniforms)
-			release_uniform_rid(uniform);
+		for (auto &entry : texture_uniforms)
+			release_uniform_rid(entry.second);
 		release_uniform_rid(bone_uniform);
 		for (auto &entry : pipelines)
 			release_pipeline_rid(entry.second);
@@ -595,7 +602,7 @@ public:
 			bool p_blend_coverage);
 	bool upload_stream(const Q3PackedStream &p_stream);
 	bool upload_bones(const std::vector<Transform3D> &p_bones);
-	RID make_uniform(const DeviceCommand &p_command);
+	RID uniform_for(const DeviceCommand &p_command);
 	bool draw(const DeviceFrame &p_frame);
 	Dictionary report() const;
 };
@@ -856,17 +863,23 @@ bool SlotCaptureAdapter::Impl::upload_bones(const std::vector<Transform3D> &p_bo
 	return true;
 }
 
-RID SlotCaptureAdapter::Impl::make_uniform(const DeviceCommand &p_command) {
+RID SlotCaptureAdapter::Impl::uniform_for(const DeviceCommand &p_command) {
 	RenderingServer *server = RenderingServer::get_singleton();
 	auto resolve = [&](const RID &p_server_rid) {
 		const RID result = server != nullptr && p_server_rid.is_valid() ?
 				server->texture_get_rd_texture(p_server_rid, false) : RID();
 		return result.is_valid() ? result : fallback_texture;
 	};
+	const RID diffuse = resolve(p_command.diffuse);
+	const RID detail = resolve(p_command.detail);
+	RID &kept = texture_uniforms[{diffuse.get_id(), detail.get_id()}];
+	if (kept.is_valid() && rd->uniform_set_is_valid(kept))
+		return kept;
 	TypedArray<Ref<RDUniform>> uniforms;
-	uniforms.push_back(sampled_texture_uniform(0, sampler, resolve(p_command.diffuse)));
-	uniforms.push_back(sampled_texture_uniform(1, sampler, resolve(p_command.detail)));
-	return rd->uniform_set_create(uniforms, shader, 0);
+	uniforms.push_back(sampled_texture_uniform(0, sampler, diffuse));
+	uniforms.push_back(sampled_texture_uniform(1, sampler, detail));
+	kept = rd->uniform_set_create(uniforms, shader, 0);
+	return kept;
 }
 
 bool SlotCaptureAdapter::Impl::draw(const DeviceFrame &p_frame) {
@@ -882,9 +895,8 @@ bool SlotCaptureAdapter::Impl::draw(const DeviceFrame &p_frame) {
 	publish_device_buffer_count();
 	if (!upload_bones(p_frame.bones))
 		return false;
-	for (RID &uniform : transient_uniforms)
-		release_uniform_rid(uniform);
-	transient_uniforms.clear();
+	if (push_bytes.size() != static_cast<int64_t>(kPushConstantBytes))
+		push_bytes.resize(kPushConstantBytes);
 	int captures_drawn = 0;
 	int draw_calls = 0;
 	// The effects' filter code the frame draws under (the device leg's).
@@ -912,13 +924,12 @@ bool SlotCaptureAdapter::Impl::draw(const DeviceFrame &p_frame) {
 			return false;
 		}
 		for (const DeviceCommand &command : capture.commands) {
-			RID uniform = make_uniform(command);
+			const RID uniform = uniform_for(command);
 			if (!uniform.is_valid()) {
 				rd->draw_list_end();
 				set_failure("RenderingDevice could not bind slot capture textures");
 				return false;
 			}
-			transient_uniforms.push_back(uniform);
 			const RID pipeline = pipeline_for(framebuffer_format, command.two_sided,
 					command.blend_coverage);
 			rd->draw_list_bind_render_pipeline(draw_list, pipeline);
@@ -943,8 +954,6 @@ bool SlotCaptureAdapter::Impl::draw(const DeviceFrame &p_frame) {
 						static_cast<float>(command.first_bone)};
 				push.max_lods = {command.diffuse_max_lod, command.detail_max_lod,
 						static_cast<float>(effect_filter_code), 0.0f};
-				PackedByteArray push_bytes;
-				push_bytes.resize(kPushConstantBytes);
 				std::memcpy(push_bytes.ptrw(), &push, sizeof(push));
 				rd->draw_list_set_push_constant(draw_list, push_bytes,
 						kPushConstantBytes);
