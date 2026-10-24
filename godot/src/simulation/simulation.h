@@ -337,6 +337,8 @@ private:
 	// One opt-in gate for every native runtime timer/counter. Retail play keeps
 	// this false; F3 Stats and the manual probe share the public ownership seam.
 	bool runtime_profiling_enabled_ = false;
+	// The last tick's projectile traces (take_projectile_trace_profile).
+	opennova::world::CollisionWorld::TraceProfile last_trace_profile_;
 	// The FollowOwner effect-pose index (inmatch/effect_pose_index.h, held in
 	// present_; simulation_present.cpp maps its poses to Godot space).
 	void invalidate_present_effect_pose_cache() const;
@@ -1693,8 +1695,9 @@ public:
 	bool is_runtime_profiling_enabled() const {
 		return runtime_profiling_enabled_;
 	}
-	// Allocation-free trace sampling for the F3 hot path: the traces since the
-	// last clear, which the board's per-tick feed makes after its read (engine
+	// Allocation-free trace sampling for the F3 hot path: the last tick's traces, as
+	// the tick's sink took them (take_projectile_trace_profile: the profile since the
+	// previous take, the collision world's own then cleared, engine
 	// CollisionWorld::clear_trace_profile). Vector lanes are
 	// times=(terrain, static, dynamic, person),
 	// counts=(calls, static survivors, dynamic survivors, person survivors),
@@ -1702,7 +1705,7 @@ public:
 	Vector4i get_last_projectile_trace_times_us() const;
 	Vector4i get_last_projectile_trace_counts() const;
 	Vector2i get_last_projectile_trace_faces() const;
-	void clear_projectile_trace_profile();
+	void take_projectile_trace_profile();
 	// Allocation-free int forms of the same last-frame counters, for per-frame
 	// sampling by the F3 frame-stats board (a Dictionary per frame would churn).
 	int64_t get_last_present_snapshot_us() const {

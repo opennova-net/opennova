@@ -921,11 +921,13 @@ void MissionRoot::feed_projectile_trace_stats() {
 	if (sim_.is_null()) {
 		return;
 	}
-	// Three value-type native reads take each logic tick's traces without
-	// allocating a Dictionary on the capture hot path. In a catch-up render
-	// frame the board folds each tick into one complete-frame peak. The sink
-	// then clears the profile, so the next tick reads its own traces, never a
-	// running sum (a host alone builds no tick tables).
+	// The sink takes the tick's traces (the profile since the previous take, then
+	// cleared), so every tick reads its own traces, never a running sum (a host
+	// alone builds no tick tables); the perf counters read the same take. Three
+	// value-type native reads bank them without allocating a Dictionary on the
+	// capture hot path. In a catch-up render frame the board folds each tick into
+	// one complete-frame peak.
+	sim_->take_projectile_trace_profile();
 	if (frame_stats_.is_valid() && frame_stats_->is_capture_active() &&
 			has_trace_stats_sampling_) {
 		const Vector4i counts = sim_->get_last_projectile_trace_counts();
@@ -944,7 +946,6 @@ void MissionRoot::feed_projectile_trace_stats() {
 			frame_stats_->add(FrameStats::TRACE_DYNAMIC_FACES, faces.y);
 		}
 	}
-	sim_->clear_projectile_trace_profile();
 }
 
 Ref<MissionFrameOutcome> MissionRoot::advance_session_frame(

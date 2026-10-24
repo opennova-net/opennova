@@ -921,6 +921,7 @@ bool Simulation::compile_and_set_wac(const PackedStringArray &p_sources) {
 void Simulation::set_runtime_profiling_enabled(bool p_enabled) {
 	if (runtime_profiling_enabled_ == p_enabled) return;
 	runtime_profiling_enabled_ = p_enabled;
+	last_trace_profile_ = opennova::world::CollisionWorld::TraceProfile{};
 	last_sim_tick_us_ = 0;
 	last_net_tick_us_ = 0;
 	present_.last_snapshot_us = 0;
@@ -936,8 +937,7 @@ void Simulation::set_runtime_profiling_enabled(bool p_enabled) {
 }
 
 Vector4i Simulation::get_last_projectile_trace_times_us() const {
-	const opennova::world::CollisionWorld::TraceProfile &tp =
-			kernel_->collision.trace_profile();
+	const opennova::world::CollisionWorld::TraceProfile &tp = last_trace_profile_;
 	return Vector4i(trace_profile_lane(tp.terrain_us),
 			trace_profile_lane(tp.static_us),
 			trace_profile_lane(tp.dynamic_us),
@@ -945,21 +945,21 @@ Vector4i Simulation::get_last_projectile_trace_times_us() const {
 }
 
 Vector4i Simulation::get_last_projectile_trace_counts() const {
-	const opennova::world::CollisionWorld::TraceProfile &tp =
-			kernel_->collision.trace_profile();
+	const opennova::world::CollisionWorld::TraceProfile &tp = last_trace_profile_;
 	return Vector4i(trace_profile_lane(tp.calls),
 			trace_profile_lane(tp.static_survivors),
 			trace_profile_lane(tp.dynamic_survivors),
 			trace_profile_lane(tp.person_survivors));
 }
 
-void Simulation::clear_projectile_trace_profile() {
-	if (kernel_ != nullptr) kernel_->collision.clear_trace_profile();
+void Simulation::take_projectile_trace_profile() {
+	if (kernel_ == nullptr) return;
+	last_trace_profile_ = kernel_->collision.trace_profile();
+	kernel_->collision.clear_trace_profile();
 }
 
 Vector2i Simulation::get_last_projectile_trace_faces() const {
-	const opennova::world::CollisionWorld::TraceProfile &tp =
-			kernel_->collision.trace_profile();
+	const opennova::world::CollisionWorld::TraceProfile &tp = last_trace_profile_;
 	return Vector2i(trace_profile_lane(tp.static_faces),
 			trace_profile_lane(tp.dynamic_faces));
 }
@@ -976,9 +976,9 @@ Dictionary Simulation::get_runtime_perf_counters() const {
 	out["occlusion_build_us"] = static_cast<int64_t>(present_.last_occlusion_build_us);
 	out["occlusion_probe_us"] = static_cast<int64_t>(present_.last_occlusion_probe_us);
 	out["runtime_profiling_enabled"] = runtime_profiling_enabled_;
-	// The last tick's projectile-trace attribution (collision.h TraceProfile).
-	const opennova::world::CollisionWorld::TraceProfile &tp =
-			kernel_->collision.trace_profile();
+	// The last tick's projectile-trace attribution (collision.h TraceProfile), as the
+	// tick's sink took it (take_projectile_trace_profile).
+	const opennova::world::CollisionWorld::TraceProfile &tp = last_trace_profile_;
 	out["trace_profiling_enabled"] = kernel_->collision.trace_profile_enabled();
 	out["trace_calls"] = tp.calls;
 	out["trace_terrain_us"] = tp.terrain_us;
