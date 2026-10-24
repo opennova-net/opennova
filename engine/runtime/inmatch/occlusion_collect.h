@@ -41,19 +41,58 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 		std::vector<int32_t> &r_culled_bms, std::vector<int32_t> &r_culled_wire,
 		std::vector<world::Vec3> &r_anchors);
 
+// One building row's verdict in the frame the kernel's OcclusionWorld has
+// selected: its bms id and handle, the packed visible<<32 | raw section mask
+// (world/occlusion_feed.h pack_building_visibility) and the def's forced
+// sections the part draw ORs over the raw mask.
+struct BuildingVerdict {
+	int32_t bms_id = 0;
+	uint16_t handle = 0;
+	int64_t packed = 0;
+	int64_t forced = 0;
+};
+
+// Every Building-type def row with a placed identity and an occlusion instance
+// or a collision model (every retail building batch member) and its verdict in
+// the selected frame, in registry order; the pool-2 decorations and foliage
+// take the entity collect instead (world::building_def_row carries the split).
+void collect_building_verdicts(const world::World &world, const world::CollisionWorld &collision,
+		const world::OcclusionWorld &occlusion, std::vector<BuildingVerdict> &r_out);
+
+// What a water mirror's collect leaves for its reflected subscene to draw: the
+// building verdicts over its section masks, the placed rows' and the wire rows'
+// drops (the complement of its entity and person lists), the MODEL foliage
+// anchors its person list carries (the reflected subscene's BySide waves update
+// the tiles around them), and the mask build's g_BlinkWaterVisible. The
+// subscene then collects its own death pieces over the view it draws from
+// (world::mirror_reflected_view; the embedder runs OcclusionWorld::
+// collect_death_piece_draws there at the max-quality water detail).
+// [orig: Water_RenderReflectedWorldScene @ 0x5c8510 - Terrain_RenderSectorModels
+//  @ 0x5c8576 over the collect's batch and masks, Terrain_RenderSectorEntities
+//  @ 0x5c857b, Terrain_RenderSectorEntitiesBySide @ 0x5c8590 / @ 0x5c8599 with
+//  their Foliage_UpdateModelTiles calls @ 0x5c7edb..0x5c7f11; the water detail
+//  test @ 0x5c85ad, DeathPiece_CollectVisible @ 0x5c85b7, DeathPiece_RenderVisible
+//  @ 0x5c85c1]
+struct MirrorViewLists {
+	std::vector<BuildingVerdict> buildings;
+	std::vector<int32_t> culled_bms;
+	std::vector<int32_t> culled_wire;
+	std::vector<world::Vec3> anchors;
+	bool water_visible = false;
+};
+
 // The water mirror's collect ahead of a scene's (the main scene's or the weapon
 // Inset's): the building walk and the section masks over its eye and square view
 // (OcclusionWorld::mirror_water_visible), then over those masks the same entity walk
 // as a scene's, every row through the gates under the mirror's Flags match (the
 // Reflective bit while the eye is at or above the water, none below), so each
 // collected row's latch ticks or re-arms on the shared PRNG stream as in the scene's
-// collect. Returns the mask build's g_BlinkWaterVisible; `r_culled_bms` /
-// `r_culled_wire` take the rows the mirror's walk dropped, the complement of the
-// reflected subscene's draw lists; the shared `r_wire_latch` and `r_handles` are the
-// scene collect's. [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0 - the
-// statics' walk @ 0x5c913d, pools 0 / 1's @ 0x5c9145 / @ 0x5c914e]
+// collect; the building verdicts are read while the mirror's frame words stand.
+// Returns the mask build's g_BlinkWaterVisible; the shared `r_wire_latch` and
+// `r_handles` are the scene collect's. [orig: Terrain_CollectVisibleEntitiesForReflection
+// @ 0x5c90a0 - the statics' walk @ 0x5c913d, pools 0 / 1's @ 0x5c9145 / @ 0x5c914e]
 bool collect_mirror_view(const PresentRowsContext &context, WireOcclusionLatchMap &r_wire_latch,
 		std::vector<world::EntityHandle> &r_handles, const world::OcclusionFrameCamera &cam,
-		std::vector<int32_t> &r_culled_bms, std::vector<int32_t> &r_culled_wire);
+		MirrorViewLists &r_lists);
 
 } // namespace opennova::inmatch

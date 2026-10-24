@@ -19,6 +19,7 @@
 #include <string>
 
 #include <formats/mission/bms.h>
+#include <runtime/inmatch/occlusion_collect.h> // collect_building_verdicts
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/collision.h>
@@ -1677,6 +1678,77 @@ void test_the_mirror_collect_walks_the_entities_under_its_match() {
     CHECK(rig.ow.selected_view() == OcclusionView::kMain);
 }
 
+// The water mirror's building verdicts are its own collect's: read inside its walk
+// while the mirror's frame words stand, a plain building is out of the batch at or
+// above the water (its Flags word lacks the Reflective bit) and in it below, while
+// the scene's own verdict, read after, stays the scene's.
+// [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0, the match
+//  @ 0x5c9109..0x5c911f; Terrain_CollectVisibleSectorUserpoints, the test
+//  @ 0x5c6c27..0x5c6c39; Water_RenderReflectedWorldScene @ 0x5c8510 -
+//  Terrain_RenderSectorModels @ 0x5c8576 over the mirror's batch and masks]
+void test_the_mirror_building_verdicts() {
+    Rig rig;
+    const EntityHandle building =
+        rig.add_building(20.0, 10.0, building_collision(2, 2, 3), one_room_window());
+    rig.world.registry.get(building)->bms_id = 77;
+    rig.rebuild();
+    rig.ow.init_mission(rig.world, rig.cw);
+    OcclusionFrameCamera cam = rig.camera(5.0, 10.0, 1.5);
+    cam.water_z = fx(-10.0);
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    std::vector<opennova::inmatch::BuildingVerdict> scene;
+    opennova::inmatch::collect_building_verdicts(rig.world, rig.cw, rig.ow, scene);
+    CHECK(scene.size() == 1 && scene[0].bms_id == 77 &&
+          building_visibility_visible(scene[0].packed));
+
+    std::vector<opennova::inmatch::BuildingVerdict> mirror;
+    const auto walk = [&](const OcclusionFrameCamera &) {
+        opennova::inmatch::collect_building_verdicts(rig.world, rig.cw, rig.ow, mirror);
+    };
+    CHECK(rig.ow.mirror_water_visible(rig.world, rig.cw, cam, walk));
+    CHECK(mirror.size() == 1 && !building_visibility_visible(mirror[0].packed));
+    std::vector<opennova::inmatch::BuildingVerdict> after;
+    opennova::inmatch::collect_building_verdicts(rig.world, rig.cw, rig.ow, after);
+    CHECK(after.size() == 1 && after[0].packed == scene[0].packed);
+
+    OcclusionFrameCamera below = cam;
+    below.water_z = fx(10.0);
+    CHECK(rig.ow.mirror_water_visible(rig.world, rig.cw, below, walk));
+    CHECK(mirror.size() == 1 && building_visibility_visible(mirror[0].packed));
+}
+
+// The reflected subscene draws from the eye mirrored in the water plane at or
+// above it (yaw kept, pitch and roll negated), from the live eye below it.
+// [orig: Render_MainScene @ 0x5c1240 - the side test @ 0x5c1367..0x5c1370,
+//  z' = 2wh - z @ 0x5c1379..0x5c137b, pitch / roll negated @ 0x5c138e / @ 0x5c1390,
+//  the unchanged copy @ 0x5c13f6..0x5c1414]
+void test_the_mirror_reflected_view() {
+    OcclusionViewSpec view;
+    view.eye[0] = 3.0f;
+    view.eye[1] = 5.0f;
+    view.eye[2] = -2.0f;
+    // Looking ahead and down 30 degrees, rolled a little.
+    view.forward[0] = 0.0f;
+    view.forward[1] = -0.5f;
+    view.forward[2] = -0.8660254f;
+    view.right[0] = 0.9848078f;
+    view.right[1] = 0.1736482f;
+    view.right[2] = 0.0f;
+    view.up[0] = -0.1503837f;
+    view.up[1] = 0.8528685f;
+    view.up[2] = -0.5f;
+    view.water_z_units = 1.0f;
+    const OcclusionViewSpec above = mirror_reflected_view(view);
+    CHECK(above.eye[0] == 3.0f && above.eye[1] == -3.0f && above.eye[2] == -2.0f);
+    CHECK(above.forward[0] == 0.0f && above.forward[1] == 0.5f &&
+          above.forward[2] == -0.8660254f);
+    CHECK(above.right[0] == 0.9848078f && above.right[1] == -0.1736482f);
+    CHECK(above.up[0] == 0.1503837f && above.up[1] == 0.8528685f && above.up[2] == 0.5f);
+    view.water_z_units = 6.0f;
+    const OcclusionViewSpec below = mirror_reflected_view(view);
+    CHECK(below.eye[1] == 5.0f && below.forward[1] == -0.5f && below.up[0] == -0.1503837f);
+}
+
 // A round restart never re-runs the portal register + weld: the kernel's
 // OcclusionWorld outlives MissionKernel::restore_baseline, so the weld
 // registry, the retyped shared records and the building flags stay the first
@@ -1992,6 +2064,8 @@ int main() {
     test_collector_runs_per_view();
     test_the_mirror_collect_leaves_the_scene_words();
     test_the_mirror_collect_walks_the_entities_under_its_match();
+    test_the_mirror_building_verdicts();
+    test_the_mirror_reflected_view();
     test_round_restart_keeps_the_first_weld();
     test_eye_in_front_of_a_window_keeps_the_exterior();
     test_decoration_rows_are_entity_collected();

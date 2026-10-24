@@ -182,15 +182,19 @@ void test_the_walk() {
 // The water mirror's collect (collect_mirror_view) runs the scene collect's walk over
 // the mirror's camera under its Flags match: at or above the water a placed person and
 // a bare wire row without the Reflective bit drop ahead of their latches while a
-// vehicle's latch ticks; below the water the walk is unfiltered.
-// [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0 - the calls @ 0x5c913d /
-//  @ 0x5c9145 / @ 0x5c914e, the match passed @ 0x5c913b / @ 0x5c9142 / @ 0x5c914a]
+// vehicle's latch ticks; below the water the walk is unfiltered, and the crouched
+// person it collects anchors the MODEL tier the reflected subscene's BySide waves
+// update. [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0 - the calls
+//  @ 0x5c913d / @ 0x5c9145 / @ 0x5c914e, the match passed @ 0x5c913b / @ 0x5c9142 /
+//  @ 0x5c914a; Water_RenderReflectedWorldScene @ 0x5c8510 - the BySide waves
+//  @ 0x5c8590 / @ 0x5c8599, their Foliage_UpdateModelTiles calls @ 0x5c7edb..0x5c7f11]
 void test_the_mirror_walk() {
 	auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
 	opennova::mission::MissionKernel &kernel = *kernel_heap;
 	kernel.world.registry.configure_pool(0, 16);
 	kernel.world.registry.configure_pool(1, 16);
 	w::Entity &person = row(kernel, 0, 1, w::EntityKind::Organic, 101, 20.0f, 0.0f);
+	person.net_stance_bits = 0x2u;
 	w::Entity &car = row(kernel, 1, 1, w::EntityKind::Item, 102, 20.0f, 1.0f);
 	car.item_type = 1; // a vehicle def: its init's Reflective bit
 	opennova::renderer::ObjectProjectionSphere unstamped;
@@ -205,29 +209,30 @@ void test_the_mirror_walk() {
 
 	im::WireOcclusionLatchMap latches;
 	std::vector<w::EntityHandle> scratch;
-	std::vector<int32_t> culled_bms;
-	std::vector<int32_t> culled_wire;
+	im::MirrorViewLists lists;
 	const im::PresentRowsContext context{kernel, &runtime, false};
 
 	// The eye above the water.
-	im::collect_mirror_view(context, latches, scratch, camera_down_x(), culled_bms, culled_wire);
-	expect(contains(culled_bms, 101) && person.occlusion_latch == 5,
+	im::collect_mirror_view(context, latches, scratch, camera_down_x(), lists);
+	expect(contains(lists.culled_bms, 101) && person.occlusion_latch == 5,
 			"above the water the person drops ahead of its latch");
-	expect(!contains(culled_bms, 102) && car.occlusion_latch == 4,
+	expect(!contains(lists.culled_bms, 102) && car.occlusion_latch == 4,
 			"the vehicle is collected and its latch ticks");
-	expect(contains(culled_wire, 0x1003) && latches.count(0x1003) == 0,
+	expect(contains(lists.culled_wire, 0x1003) && latches.count(0x1003) == 0,
 			"the bare row without the Reflective bit drops ahead of its latch");
+	expect(lists.anchors.empty(), "above the water no person anchors the mirror's MODEL tier");
 	expect(kernel.occlusion.selected_view() == w::OcclusionView::kMain,
 			"the scene's view stays selected");
 
 	// The eye below the water: unfiltered.
-	im::collect_mirror_view(context, latches, scratch, camera_down_x(10.0f), culled_bms,
-			culled_wire);
-	expect(!contains(culled_bms, 101) && person.occlusion_latch == 4,
+	im::collect_mirror_view(context, latches, scratch, camera_down_x(10.0f), lists);
+	expect(!contains(lists.culled_bms, 101) && person.occlusion_latch == 4,
 			"below the water the person is collected and its latch ticks");
-	expect(!contains(culled_bms, 102) && car.occlusion_latch == 3,
+	expect(lists.anchors.size() == 1 && has_anchor(lists.anchors, 20.0f, 0.0f, 2.0f),
+			"below the water the crouched person anchors the mirror's MODEL tier");
+	expect(!contains(lists.culled_bms, 102) && car.occlusion_latch == 3,
 			"the vehicle again");
-	expect(latches.count(0x1003) == 1 && contains(culled_wire, 0x1003),
+	expect(latches.count(0x1003) == 1 && contains(lists.culled_wire, 0x1003),
 			"the bare row reaches its latch, then drops for its missing model");
 }
 

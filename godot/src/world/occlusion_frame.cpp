@@ -179,7 +179,8 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
 	// collect's (renderer::SceneWaterWord).
 	const bool mirror_ran = w != nullptr && w->is_water_pass_active();
 	const bool mirror_verdict = mirror_ran &&
-			s->run_mirror_occlusion(p_camera_xform, mirror_collect_fov(fov_y, aspect),
+			s->run_mirror_occlusion(Simulation::MIRROR_MAIN, p_camera_xform,
+					mirror_collect_fov(fov_y, aspect),
 					opennova::env::kReflectionRttSize, fog, water_z, p_forces_indoors,
 					p_object_detail);
 	main_water_label_ = blink_water_word_.label(blink_letters_, mirror_ran, mirror_verdict);
@@ -410,7 +411,7 @@ void OcclusionFrame::apply_inset_frame(Camera3D *p_camera, float p_viewport_widt
 		mirror_ran = p_mirror_block != nullptr && w->is_inset_water_pass_active();
 	}
 	const bool mirror_verdict = mirror_ran &&
-			s->run_mirror_occlusion(*p_mirror_block,
+			s->run_mirror_occlusion(Simulation::MIRROR_INSET, *p_mirror_block,
 					mirror_collect_fov(request.fov_y_deg, request.aspect),
 					opennova::env::kReflectionRttSize, request.fog_dist_units,
 					request.water_z_units, p_forces_indoors, p_object_detail);

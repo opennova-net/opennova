@@ -26,7 +26,7 @@ namespace {
 // mission/render remaps, the frustum planes and the Q22 rows are the
 // engine's (runtime/world/occlusion_camera.h). No near distance: the
 // occlusion planes pass through the eye.
-opennova::world::OcclusionFrameCamera occlusion_frame_camera(const Transform3D &p_camera,
+opennova::world::OcclusionViewSpec occlusion_view_spec(const Transform3D &p_camera,
 		double p_fov_y_deg, double p_aspect, double p_viewport_width,
 		double p_fog_dist_units, double p_water_z_units, bool p_force_indoors,
 		uint32_t p_local_blink_flags, int p_object_detail) {
@@ -52,42 +52,48 @@ opennova::world::OcclusionFrameCamera occlusion_frame_camera(const Transform3D &
 	view.local_blink_flags = p_local_blink_flags;
 	view.force_indoors = p_force_indoors;
 	view.object_detail = p_object_detail;
+	return view;
+}
+
+opennova::world::OcclusionFrameCamera occlusion_frame_camera(const Transform3D &p_camera,
+		double p_fov_y_deg, double p_aspect, double p_viewport_width,
+		double p_fog_dist_units, double p_water_z_units, bool p_force_indoors,
+		uint32_t p_local_blink_flags, int p_object_detail) {
 	opennova::world::OcclusionFrameCamera cam;
-	opennova::world::occlusion_camera_from_view(view, cam);
+	opennova::world::occlusion_camera_from_view(occlusion_view_spec(p_camera, p_fov_y_deg,
+			p_aspect, p_viewport_width, p_fog_dist_units, p_water_z_units, p_force_indoors,
+			p_local_blink_flags, p_object_detail), cam);
 	return cam;
 }
 
-// The building verdict walk, emitting only triples whose packed
-// visible<<32|mask changed since `r_last` (the view's applied baseline),
-// read from the view the OcclusionWorld has selected.
-PackedInt64Array building_visibility_changes_since(opennova::mission::MissionKernel &kernel,
+// The triples [bms_id, visible<<32 | raw mask, forced mask] of the verdicts
+// whose packed word changed since `r_last` (the view's applied baseline).
+PackedInt64Array building_changes_since(
+		const std::vector<opennova::inmatch::BuildingVerdict> &p_verdicts,
 		std::unordered_map<uint32_t, int64_t> &r_last) {
 	PackedInt64Array out;
-	// Triples [bms_id, visible<<32 | raw mask, forced mask] for every building
-	// with an OCCLUSION instance or a collision model (every retail building
-	// batch member): the raw g_BuildingSectionVisMask word the other readers
-	// share, and the def's forced sections the part draw ORs over it
-	// (ObjectModel::section_part_visible). Only the Building-type defs: the
-	// pool-2 decorations and foliage take the entity verdicts below
-	// (world::building_def_row carries the split).
-	kernel.world.registry.for_each([&](const opennova::world::Entity &e) {
-		if (e.kind != opennova::world::EntityKind::Building || e.bms_id == 0) return;
-		if (!opennova::world::building_def_row(e)) return;
-		if (!kernel.occlusion.has_instance(e.handle) &&
-				kernel.collision.model_for(kernel.world, e.handle) == nullptr)
-			return;
-		const bool visible = kernel.occlusion.building_visible(e.handle);
-		const int64_t packed = opennova::world::pack_building_visibility(
-				kernel.occlusion.section_mask(e.handle), visible);
-		const uint32_t key = e.handle.packed;
-		auto it = r_last.find(key);
-		if (it != r_last.end() && it->second == packed) return;
-		r_last[key] = packed;
-		out.push_back(e.bms_id);
-		out.push_back(packed);
-		out.push_back(static_cast<int64_t>(kernel.occlusion.forced_section_mask(e.handle)));
-	});
+	for (const opennova::inmatch::BuildingVerdict &v : p_verdicts) {
+		auto it = r_last.find(v.handle);
+		if (it != r_last.end() && it->second == v.packed) continue;
+		r_last[v.handle] = v.packed;
+		out.push_back(v.bms_id);
+		out.push_back(v.packed);
+		out.push_back(v.forced);
+	}
 	return out;
+}
+
+// The building verdict walk over the view the OcclusionWorld has selected
+// (engine inmatch/occlusion_collect.h collect_building_verdicts: the raw
+// g_BuildingSectionVisMask word the other readers share, and the def's forced
+// sections the part draw ORs over it, ObjectModel::section_part_visible), as
+// changes against the view's applied baseline.
+PackedInt64Array building_visibility_changes_since(opennova::mission::MissionKernel &kernel,
+		std::unordered_map<uint32_t, int64_t> &r_last) {
+	std::vector<opennova::inmatch::BuildingVerdict> verdicts;
+	opennova::inmatch::collect_building_verdicts(kernel.world, kernel.collision, kernel.occlusion,
+			verdicts);
+	return building_changes_since(verdicts, r_last);
 }
 
 // One view's collect (engine runtime/inmatch/occlusion_collect.h), its
@@ -184,23 +190,53 @@ void Simulation::release_inset_occlusion() {
 	present_.inset_occlusion = InsetOcclusionView();
 }
 
-bool Simulation::run_mirror_occlusion(const Transform3D &p_camera, double p_fov_deg,
-		double p_viewport_width, double p_fog_dist_units, double p_water_z_units,
-		bool p_force_indoors, int p_object_detail) {
+bool Simulation::run_mirror_occlusion(MirrorView p_mirror, const Transform3D &p_camera,
+		double p_fov_deg, double p_viewport_width, double p_fog_dist_units,
+		double p_water_z_units, bool p_force_indoors, int p_object_detail) {
+	MirrorOcclusionView &view = present_.mirror_occlusion[p_mirror];
+	view.building_changes = PackedInt64Array();
+	view.culled_changes = PackedInt32Array();
+	view.culled_wire_changes = PackedInt32Array();
 	if (!kernel_) return false;
-	const opennova::world::OcclusionFrameCamera cam = occlusion_frame_camera(p_camera,
-			p_fov_deg, 1.0, p_viewport_width, p_fog_dist_units, p_water_z_units,
-			p_force_indoors, kernel_->collision.local_player_blink_flags, p_object_detail);
-	// The mirror's collect, its entity walk included (engine
+	const opennova::world::OcclusionViewSpec spec = occlusion_view_spec(p_camera, p_fov_deg,
+			1.0, p_viewport_width, p_fog_dist_units, p_water_z_units, p_force_indoors,
+			kernel_->collision.local_player_blink_flags, p_object_detail);
+	opennova::world::OcclusionFrameCamera cam;
+	opennova::world::occlusion_camera_from_view(spec, cam);
+	// The mirror's collect, its entity walk and building verdicts included (engine
 	// runtime/inmatch/occlusion_collect.h collect_mirror_view): the walk ticks the
 	// latches and draws the shared stream ahead of the scene's collect.
-	std::vector<int32_t> mirror_culled_bms;
-	std::vector<int32_t> mirror_culled_wire;
-	return opennova::inmatch::collect_mirror_view(
+	opennova::inmatch::MirrorViewLists lists;
+	const bool water_visible = opennova::inmatch::collect_mirror_view(
 			opennova::inmatch::PresentRowsContext{*kernel_, runtime_, is_joiner(), nullptr,
 					joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr},
-			present_.wire_occlusion_latch, present_.occlusion_probe_handles, cam,
-			mirror_culled_bms, mirror_culled_wire);
+			present_.wire_occlusion_latch, present_.occlusion_probe_handles, cam, lists);
+	view.culled_bms = std::move(lists.culled_bms);
+	view.culled_wire = std::move(lists.culled_wire);
+	view.foliage_mask_anchors.clear();
+	for (const opennova::world::Vec3 &a : lists.anchors)
+		view.foliage_mask_anchors.push_back(mission_to_godot(a));
+	view.building_changes = building_changes_since(lists.buildings, view.building_last);
+	view.culled_changes = culled_changes_since(view.culled_bms, view.culled_last);
+	view.culled_wire_changes = culled_changes_since(view.culled_wire, view.culled_wire_last);
+	// The reflected subscene's own death-piece collect over the view it draws
+	// from (engine world/occlusion_camera.h mirror_reflected_view and
+	// inmatch/occlusion_collect.h MirrorViewLists carry the witness; the
+	// max-quality water detail runs it, which environment/water_mirror.h fixes).
+	opennova::world::OcclusionFrameCamera reflected;
+	opennova::world::occlusion_camera_from_view(opennova::world::mirror_reflected_view(spec),
+			reflected);
+	kernel_->occlusion.collect_death_piece_draws(kernel_->world, reflected,
+			view.death_piece_draws);
+	return water_visible;
+}
+
+const MirrorOcclusionView &Simulation::mirror_occlusion(MirrorView p_mirror) const {
+	return present_.mirror_occlusion[p_mirror];
+}
+
+void Simulation::release_mirror_occlusion(MirrorView p_mirror) {
+	present_.mirror_occlusion[p_mirror] = MirrorOcclusionView();
 }
 
 int64_t Simulation::building_visibility_mask(int64_t p_packed) {
@@ -307,6 +343,11 @@ void Simulation::reset_occlusion_apply_baseline() {
 	present_.inset_occlusion.building_last.clear();
 	present_.inset_occlusion.culled_last.clear();
 	present_.inset_occlusion.culled_wire_last.clear();
+	for (MirrorOcclusionView &mirror : present_.mirror_occlusion) {
+		mirror.building_last.clear();
+		mirror.culled_last.clear();
+		mirror.culled_wire_last.clear();
+	}
 	present_.entity_lighting = opennova::inmatch::EntityLightingFeed();
 	present_.iris_interior_group_entity = opennova::world::EntityHandle{};
 	present_.iris_interior_group_section = 0;

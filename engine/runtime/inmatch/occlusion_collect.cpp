@@ -7,6 +7,7 @@
 #include <runtime/replication/client_world_materializer.h> // replica_row_entity
 #include <runtime/world/collision.h> // ResolvedCollisionShape, BlinkAccum, collision_matrix_from_euler
 #include <runtime/world/occlusion.h>
+#include <runtime/world/occlusion_feed.h> // pack_building_visibility
 #include <base/io/fixed.h> // kFp16OneD
 
 #include <algorithm>
@@ -318,16 +319,39 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 	}
 }
 
+void collect_building_verdicts(const world::World &world, const world::CollisionWorld &collision,
+		const world::OcclusionWorld &occlusion, std::vector<BuildingVerdict> &r_out) {
+	r_out.clear();
+	world.registry.for_each([&](const world::Entity &e) {
+		if (e.kind != world::EntityKind::Building || e.bms_id == 0) return;
+		if (!world::building_def_row(e)) return;
+		if (!occlusion.has_instance(e.handle) && collision.model_for(world, e.handle) == nullptr)
+			return;
+		BuildingVerdict v;
+		v.bms_id = e.bms_id;
+		v.handle = e.handle.packed;
+		v.packed = world::pack_building_visibility(occlusion.section_mask(e.handle),
+				occlusion.building_visible(e.handle));
+		v.forced = static_cast<int64_t>(occlusion.forced_section_mask(e.handle));
+		r_out.push_back(v);
+	});
+}
+
 bool collect_mirror_view(const PresentRowsContext &context, WireOcclusionLatchMap &r_wire_latch,
 		std::vector<world::EntityHandle> &r_handles, const world::OcclusionFrameCamera &cam,
-		std::vector<int32_t> &r_culled_bms, std::vector<int32_t> &r_culled_wire) {
+		MirrorViewLists &r_lists) {
 	mission::MissionKernel &kernel = context.kernel;
-	std::vector<world::Vec3> anchors;
-	return kernel.occlusion.mirror_water_visible(kernel.world, kernel.collision, cam,
-			[&](const world::OcclusionFrameCamera &mirror) {
-				collect_view_verdicts(context, r_wire_latch, r_handles, mirror, r_culled_bms,
-						r_culled_wire, anchors);
+	r_lists.water_visible = kernel.occlusion.mirror_water_visible(kernel.world, kernel.collision,
+			cam, [&](const world::OcclusionFrameCamera &mirror) {
+				collect_view_verdicts(context, r_wire_latch, r_handles, mirror, r_lists.culled_bms,
+						r_lists.culled_wire, r_lists.anchors);
+				// The reflected subscene draws the collect's own batch at its own
+				// section masks [orig: Water_RenderReflectedWorldScene @ 0x5c8510 -
+				// Terrain_RenderSectorModels @ 0x5c8576].
+				collect_building_verdicts(kernel.world, kernel.collision, kernel.occlusion,
+						r_lists.buildings);
 			});
+	return r_lists.water_visible;
 }
 
 } // namespace opennova::inmatch
