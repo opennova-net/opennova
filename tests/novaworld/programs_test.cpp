@@ -479,11 +479,10 @@ int exercise_web(const Binaries &bin, const test_temp::TempDir &temp,
 	TEST_EXPECT(logged_port(log, kHttpLine) == http_port);
 	TEST_EXPECT(!has(log, kGateLine) && !has(log, kNwUdpLine) && !has(log, kHealthLine) &&
 			!has(log, "[jobs]") && !has(log, "[fleet]"));
-	// The menus name the one web endpoint (ONNET_WEB_HOST) and the port, as the
-	// gate does.
+	// The menus name the one web endpoint (ONNET_WEB_HOST); each game's HOST_URL is its
+	// host page there (D-NET-NEW-L9-46), so the boot logs the host alone.
 	TEST_EXPECT(has(log,
-			"[http] HOST_URL=http://" + std::string(kWebHost) + ":" + std::to_string(http_port) +
-					"/nwhost.dll"));
+			"[http] web host " + std::string(kWebHost) + " (HOST_URL / GSB_SERVER per game)"));
 	TEST_EXPECT(wait_for_http(process, http_port, "/healthz"));
 	TEST_EXPECT(wait_for_http(process, http_port, "/livez"));
 	if (stop_cleanly(process, "web", database, log_path) != 0)

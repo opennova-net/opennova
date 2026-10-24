@@ -2291,7 +2291,7 @@ int test_dfx2_client_path(Harness &h) {
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	TEST_EXPECT(body_text(reply) ==
 			nws::render_template(page("dfx2_0_main.htm"),
-					{ { "HOST_URL", base + "/nwhost.dll" }, { "GSB_SERVER", base + "/dfx2_0.gsb" },
+					{ { "HOST_URL", base + "/dfx2_0_host1.htm" }, { "GSB_SERVER", base + "/dfx2_0.gsb" },
 							{ "JOINLAN_URL", kDfx2JoinLanUrl } }));
 	TEST_EXPECT(body_text(reply).find(base + "/dfx2_0.gsb</IB3_SUBST>") != std::string::npos);
 	TEST_EXPECT(set_cookie_value(reply, "EXPBITS") == "1");
@@ -4260,7 +4260,8 @@ int test_retail_templates_render(Harness &h) {
 		if (name == "leak.htm" || name == ".hidden.htm")
 			continue; // the planted ones
 		const nws::TemplateVars vars{
-			{ "HOST_URL", base + "/nwhost.dll" },
+			{ "HOST_URL",
+					base + (name.rfind("dfx2_0_", 0) == 0 ? "/dfx2_0_host1.htm" : "/jop_2_host1.htm") },
 			{ "GSB_SERVER", base + (name.rfind("dfx2_0_", 0) == 0 ? "/dfx2_0.gsb" : "/jop_2.gsb") },
 			// DFX2's games row carries the LAN-list join's link; JO's carries none.
 			{ "JOINLAN_URL", name.rfind("dfx2_0_", 0) == 0 ? kDfx2JoinLanUrl : "" },
@@ -4293,7 +4294,7 @@ int test_retail_templates_render(Harness &h) {
 			{ "Cookie: LOGOUTSESSIONTAG=" + logout_tag });
 	TEST_EXPECT(logout.transport_ok && logout.code == 200);
 	const nws::TemplateVars jo_vars{
-		{ "HOST_URL", base + "/nwhost.dll" },
+		{ "HOST_URL", base + "/jop_2_host1.htm" },
 		{ "GSB_SERVER", base + "/jop_2.gsb" },
 		{ "JOINLAN_URL", "" },
 	};
