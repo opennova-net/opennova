@@ -34,11 +34,13 @@
 
 #include <runtime/inmatch/null_datagram_socket.h>
 #include <runtime/inmatch/udp_session_transport.h>
+#include <base/io/tick_rate.h> // kTicksPerSecondInt
 
 #include "../common/boot_file_source.h"
 #include "../common/synthetic_mission.h"
 
 #include <cstdio>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <string>
@@ -466,6 +468,13 @@ void check_single_player_console_line_rides_the_loopback(
 	// embedder's reaches that arm through the one dispatcher a key's record meets. "verbose"
 	// (row 75, code 37) and "help" (row 106, code 8) are HUD rows, "exit" (row 77, code 3) the
 	// sim's exit; "magazine" (row 47, code 211) is the role's own reload arm and goes no further.
+	// The authority takes one console line a second from a slot, on the word the chat throttle
+	// shares: a line its receive meets inside the second past the last one it took is dropped,
+	// echo and all, so the second of two lines typed in one frame never queues a record. Each
+	// line here waits out the second past the previous echo (the host's clock runs
+	// kTicksPerSecondInt ticks a second, host_milliseconds_for_logic_tick).
+	// [orig: NapiNPServerMsg_HandleConsoleLine @0x5199D0 - GetTickCount @0x519A1E, the slot's
+	//  +100360 word @0x519A24, `!last || now >= last + 1000` @0x519A36, the store @0x519A3C]
 	events.reset();
 	struct Device final : inmatch::TickInputSource {
 		std::vector<int32_t> codes;
@@ -475,12 +484,23 @@ void check_single_player_console_line_rides_the_loopback(
 		}
 	};
 	Device device;
-	for (const char *line : {"verbose", "magazine", "help", "exit"})
-		CHECK(host.client_runtime->console_command(line));
-	role.run_tick(tick_input(0));
-	role.run_tick(tick_input(0));
-	CHECK(events.size() == 4 && events.at(0).code == 37 && events.at(1).code == 211 &&
-			events.at(2).code == 8 && events.at(3).code == 3);
+	const auto typed_a_second_on = [&](std::initializer_list<const char *> lines) {
+		for (int i = 0; i < io::kTicksPerSecondInt; ++i) role.run_tick(tick_input(0));
+		for (const char *line : lines) CHECK(host.client_runtime->console_command(line));
+		role.run_tick(tick_input(0)); // the client frame sends the 0x04s
+		role.run_tick(tick_input(0)); // the server's receive echoes, the client's receive walks
+	};
+	typed_a_second_on({"verbose", "magazine"}); // one frame: the throttle drops "magazine"
+	CHECK(events.size() == 1 && events.at(0).code == 37);
+	role.drain_input_events(&device, 0);
+	typed_a_second_on({"magazine"});
+	CHECK(events.size() == 1 && events.at(0).code == 211);
+	role.drain_input_events(&device, 0);
+	typed_a_second_on({"help"});
+	CHECK(events.size() == 1 && events.at(0).code == 8);
+	role.drain_input_events(&device, 0);
+	typed_a_second_on({"exit"});
+	CHECK(events.size() == 1 && events.at(0).code == 3);
 	role.drain_input_events(&device, 0);
 	CHECK(events.empty() && device.codes == std::vector<int32_t>({37, 8, 3}));
 }
