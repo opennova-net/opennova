@@ -438,6 +438,7 @@ void GameWorld::run_leg_table(const FrameLeg *p_legs, int p_count, FrameContext 
 		// One of the first frames past a load: the leg's span under the frame's (an instrument).
 		LoadTimeline *post_load = live_table ? r_ctx.post_load_frame : nullptr;
 		if (post_load != nullptr) post_load->span(leg.name);
+		post_load_leg_ = post_load;
 		LegResult result = kLegRan;
 		{
 			// The board is latched by the begin row (frame_stats_on_), so every
@@ -449,6 +450,7 @@ void GameWorld::run_leg_table(const FrameLeg *p_legs, int p_count, FrameContext 
 				scope.cancel();
 			}
 		}
+		post_load_leg_ = nullptr;
 		if (post_load != nullptr) {
 			post_load->end_span();
 			// The session's updates this frame, as a span of no length named by their count.
@@ -462,6 +464,17 @@ void GameWorld::run_leg_table(const FrameLeg *p_legs, int p_count, FrameContext 
 			return;
 		}
 	}
+}
+
+// A part of the running leg as a nested span of its post-load frame (an instrument: the first
+// frames past a load name where their scene legs' first-frame costs go); nothing on any other
+// frame.
+void GameWorld::post_load_part(const char *p_name) {
+	if (post_load_leg_ != nullptr) post_load_leg_->span(p_name);
+}
+
+void GameWorld::post_load_part_end() {
+	if (post_load_leg_ != nullptr) post_load_leg_->end_span();
 }
 
 void GameWorld::tick(const Vector3 &p_camera_pos, const Transform3D &p_camera_xform, double p_delta,
@@ -1011,6 +1024,7 @@ void GameWorld::render_foliage_frame() {
 				? water_->get_reflection_camera()
 				: nullptr;
 		Ref<Simulation> mirror_sim = runtime != nullptr ? runtime->get_sim() : Ref<Simulation>();
+		post_load_part("foliage_mirror");
 		if (mirror_camera != nullptr && mirror_sim.is_valid()) {
 			dispatcher_->render_mirror_frame(Simulation::MIRROR_MAIN,
 					mirror_camera->get_global_transform(),
@@ -1019,9 +1033,14 @@ void GameWorld::render_foliage_frame() {
 		} else {
 			dispatcher_->release_mirror_frame(Simulation::MIRROR_MAIN);
 		}
+		post_load_part_end();
+		post_load_part("foliage_view");
 		dispatcher_->render_frame(camera_xform, get_frame_clock_ms());
+		post_load_part_end();
+		post_load_part("foliage_masks");
 		ObjectModel::refresh_foliage_mask_frame(
 				static_cast<float>(camera_xform.origin.y), water_height);
+		post_load_part_end();
 		perf_foliage_us_ = now_us() - foliage_start;
 	}
 }
@@ -1121,22 +1140,36 @@ void GameWorld::render_scene_overlay_frame() {
 	std::shared_ptr<SceneOverlaySubmission> submission = std::make_shared<SceneOverlaySubmission>();
 	submission->frame_id = ++scene_overlay_frame_id_;
 	if (world_ready_) {
+		post_load_part("lasers");
 		append_nvg_laser_overlays(*submission);
+		post_load_part_end();
+		post_load_part("streaks");
 		if (precipitation_ != nullptr) {
 			precipitation_->append_overlay(*submission);
 		}
+		post_load_part_end();
+		post_load_part("coronas");
 		if (light_director_.is_valid()) {
 			light_director_->append_overlay(*submission);
 		}
+		post_load_part_end();
 		// The murk compares the eye against the waterline, a zero height
 		// included (EnvironmentState::classify_render_eye).
+		post_load_part("murk");
 		if (env_ != nullptr && is_waterline_active()) {
 			append_underwater_murk_overlay(*env_, *water_, *submission);
 		}
+		post_load_part_end();
+		post_load_part("celestial");
 		append_celestial_overlays(*submission);
+		post_load_part_end();
+		post_load_part("water_mirrors");
 		append_water_mirror_overlays(*submission);
+		post_load_part_end();
 	}
+	post_load_part("publish");
 	effect_world->publish_scene_overlay(submission);
+	post_load_part_end();
 }
 
 // The NVG laser beams, the tail's first slot (engine: runtime/world/nvg_laser.h): the local view's
@@ -1559,6 +1592,7 @@ void GameWorld::mix_audio_frame(int p_ticks_run, bool p_rendered) {
 		// ticking runtime (editor idle) free-runs the eval clock off render
 		// delta instead.
 		MissionRoot *runtime = get_runtime();
+		post_load_part("audio_ticks");
 		if (p_ticks_run > 0 && runtime != nullptr) {
 			Ref<Simulation> audio_sim = runtime->get_sim();
 			if (audio_sim.is_valid()) {
@@ -1574,6 +1608,7 @@ void GameWorld::mix_audio_frame(int p_ticks_run, bool p_rendered) {
                 audio->play_script_sounds(script_sounds, frame_camera_xform_);
 			}
 		}
+		post_load_part_end();
 		// The audio stops run whether or not a tick ran: the pausing update runs
 		// none (engine WorldOutbox::dialog_line_stop / audio_channels_shutdown).
 		if (runtime != nullptr) {
@@ -1588,8 +1623,12 @@ void GameWorld::mix_audio_frame(int p_ticks_run, bool p_rendered) {
 		// final wait runs no render callback, so it mixes nothing; the drains above are the
 		// update's, and a sound a wait pass raised plays at once, as retail's handler plays it
 		// inside the wait's receive (engine inmatch::Session::renders carries the witness).
+		post_load_part("audio_mix");
 		if (p_rendered) audio->tick(frame_camera_pos_, frame_delta_);
+		post_load_part_end();
+		post_load_part("music");
 		music_var_pump();
+		post_load_part_end();
 		perf_audio_us_ = now_us() - audio_start;
 	}
 }
@@ -1789,11 +1828,15 @@ void GameWorld::render_light_frame() {
 	if (presenter != nullptr) {
 		viewmodel_parts = presenter->vm_parts();
 	}
+	post_load_part("light_select");
 	light_director_->render_frame(viewport != nullptr ? viewport->get_camera_3d() : nullptr,
 			get_frame_clock_ms(), viewmodel_parts, frame_stats_on_);
+	post_load_part_end();
 	// The terrain leg of the same pool: the next terrain frame re-draws its
 	// patches with the pool lights they overlap.
+	post_load_part("terrain_lights");
 	render_terrain_light_leg();
+	post_load_part_end();
 	// Feed the render-slot shadow device the same point-light context (its
 	// per-slot dominant-light pick reads the shared pool) plus the local
 	// player state for the retail priority/drape gates.

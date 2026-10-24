@@ -1048,6 +1048,11 @@ private:
 	static constexpr int kPostLoadFramesMax = 120;
 	Ref<LoadTimeline> post_load_frames_;
 	bool post_load_open_ = false;
+	// The running leg's post-load frame while one of those frames runs it (null otherwise): the
+	// scene legs' parts nest under it as spans (post_load_part, an instrument).
+	LoadTimeline *post_load_leg_ = nullptr;
+	void post_load_part(const char *p_name);
+	void post_load_part_end();
 	int post_load_frame_count_ = 0;
 	bool post_load_uplink_seen_ = false;
 	uint32_t post_load_trace_seq_ = 0;
