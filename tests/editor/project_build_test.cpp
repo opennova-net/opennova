@@ -1257,6 +1257,61 @@ static int test_export() {
 	return 0;
 }
 
+static int test_export_permissions() {
+#ifndef _WIN32
+	test_temp::TempDir dir("opennova_editor_export_permissions");
+	ExportRequest request;
+	request.project_id = "permissions-project";
+	request.build_id = "permissions-build";
+	request.build_dir = dir.file("build");
+	request.runtime_dir = dir.file("runtime");
+	request.export_dir = dir.file("shipped");
+	TEST_EXPECT(test_io::write_text(request.build_dir + "/resource.pff", "data") &&
+	            test_io::write_text(request.runtime_dir + "/opennova", "runtime") &&
+	            test_io::write_text(request.runtime_dir + "/lib/runtime.so", "library"));
+	const fs::perms executable = fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec |
+	                             fs::perms::others_read;
+	const fs::perms library = fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read |
+	                          fs::perms::others_read;
+	const fs::perms data = fs::perms::owner_read | fs::perms::owner_write;
+	fs::permissions(request.runtime_dir + "/opennova", executable | fs::perms::set_uid);
+	fs::permissions(request.runtime_dir + "/lib/runtime.so", library);
+	fs::permissions(request.build_dir + "/resource.pff", data);
+	TEST_EXPECT(export_build(request).ok);
+	// Only ordinary rwx permissions are carried, never privilege bits or execute bits on data.
+	TEST_EXPECT(fs::status(request.export_dir + "/opennova").permissions() == executable &&
+	            fs::status(request.export_dir + "/lib/runtime.so").permissions() == library &&
+	            fs::status(request.export_dir + "/resource.pff").permissions() == data);
+	TEST_EXPECT(test_io::write_text(request.export_dir + "/launch.sh", "launcher"));
+	fs::permissions(request.export_dir + "/launch.sh", fs::perms::owner_all);
+	const ExportReport replaced = export_build(request);
+	TEST_EXPECT(replaced.ok && replaced.kept == std::vector<std::string>{"launch.sh"} &&
+	            fs::status(request.export_dir + "/launch.sh").permissions() == fs::perms::owner_all &&
+	            fs::status(request.export_dir + "/opennova").permissions() == executable);
+
+	// The output may disappear while a stepped copy still holds it open. Its bytes finish
+	// writing, but its mode cannot be applied: the prior export must stay untouched.
+	request.runtime_dir.clear();
+	request.build_dir = dir.file("failure-build");
+	request.export_dir = dir.file("failure-export");
+	TEST_EXPECT(test_io::write_text(request.build_dir + "/opennova", "runtime"));
+	fs::permissions(request.build_dir + "/opennova", executable);
+	TEST_EXPECT(export_build(request).ok);
+	const std::string before = editor_test::tree_digest(request.export_dir);
+	ExportRun run(request);
+	TEST_EXPECT(!run.step(1) && !run.step(64 * 1024 + 1) && run.bytes_done() == 1);
+	TEST_EXPECT(fs::remove(request.export_dir + kExportStagingSuffix + "/opennova"));
+	TEST_EXPECT(run.step(UINT64_MAX) && !run.report().ok &&
+	            count_code(run.report().diagnostics, "export.write") == 1 &&
+	            run.report().diagnostics[0].message.find("cannot copy permissions") != std::string::npos &&
+	            editor_test::tree_digest(request.export_dir) == before &&
+	            fs::status(request.export_dir + "/opennova").permissions() == executable &&
+	            !fs::exists(request.export_dir + kExportStagingSuffix) &&
+	            !fs::exists(request.export_dir + kExportPreviousSuffix));
+#endif
+	return 0;
+}
+
 // A file of `size` bytes that is no text the game reads: a loose music bank's bytes.
 static bool write_filler(const std::string &path, size_t size) {
 	std::vector<uint8_t> bytes(size);
@@ -2036,6 +2091,7 @@ int main() {
 	failures += test_expansion_layout();
 	failures += test_expansion_empty_pair();
 	failures += test_export();
+	failures += test_export_permissions();
 	failures += test_lean_packing();
 	failures += test_base_gate();
 	failures += test_expansion_table_texts();

@@ -114,9 +114,15 @@ static int test_launch_plans() {
 
 	// A packaged editor runs the runtime the release layout puts beside it; a source run
 	// drives its own binary on the checkout.
+#ifdef _WIN32
 	const PlayLauncher packaged =
-	        make_play_launcher(false, "C:/OpenNova/editor/opennova_editor.exe", "", 8123, {"--headless"});
+	        make_play_launcher(false, "C:/OpenNova/editor/opennova-editor.exe", "", 8123, {"--headless"});
 	TEST_EXPECT(!packaged.source_run && packaged.executable == "C:/OpenNova/runtime/opennova.exe");
+#else
+	const PlayLauncher packaged =
+	        make_play_launcher(false, "/opt/OpenNova/editor/opennova-editor", "", 8123, {"--headless"});
+	TEST_EXPECT(!packaged.source_run && packaged.executable == "/opt/OpenNova/runtime/opennova");
+#endif
 	TEST_EXPECT(packaged.godot_project_dir.empty() && packaged.mcp_port == 8123);
 	TEST_EXPECT(packaged.engine_args == std::vector<std::string>({"--headless"}));
 	const PlayLauncher from_source = make_play_launcher(true, "C:/tools/godot.exe", "C:/repo/godot/", 0, {});

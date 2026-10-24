@@ -188,7 +188,7 @@ adding it to this table.
   as an install's are, its menu then its mission (`--mission onjo_m1.bms`
   starts it straight away).
   - The game zip ships the editor's export of this project directly beside
-    `opennova.exe` (`scripts/package_godot_windows.ps1`: it stages the
+    `opennova.exe` on Windows or `opennova` on Linux (`scripts/package_godot.py`: it stages the
     tracked files of this folder as a project of their own, refusing an
     unpulled LFS pointer, and runs `opennova-project export` over them; the
     package jobs pull `assets/**` and build the CLI). Nothing of this folder

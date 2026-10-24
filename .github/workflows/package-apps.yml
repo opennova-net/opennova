@@ -1,0 +1,89 @@
+name: Package apps
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: Target platform (windows or linux)
+        type: string
+        required: false
+        default: windows
+    outputs:
+      artifact_id:
+        description: ID of the apps archive
+        value: ${{ jobs.package.outputs.artifact_id }}
+      artifact_url:
+        description: Download URL of the apps archive
+        value: ${{ jobs.package.outputs.artifact_url }}
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ${{ inputs.platform == 'linux' && 'ubuntu-24.04' || 'windows-latest' }}
+    permissions:
+      contents: read
+      actions: write
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      artifact_url: ${{ steps.upload.outputs.artifact-url }}
+    env:
+      CMAKE_GENERATOR: Ninja
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+      PACKAGE_PLATFORM: ${{ inputs.platform }}
+      PACKAGE_PATH: dist/opennova-apps-${{ inputs.platform }}.${{ inputs.platform == 'linux' && 'tar.gz' || 'zip' }}
+    steps:
+      # These apps do not need godot-cpp, GUT, or game data.
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate platform
+        shell: bash
+        run: |
+          case "$PACKAGE_PLATFORM" in windows|linux) ;; *) echo "Unsupported platform" >&2; exit 1 ;; esac
+
+      - name: Set up MSVC environment
+        if: inputs.platform == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Restore the compiler cache
+        uses: ./.github/actions/compiler-cache
+        with:
+          flavour: ${{ inputs.platform == 'linux' && 'linux-packages' || 'win-mt' }}
+          mode: restore
+
+      - name: Package apps
+        shell: bash
+        run: scripts/package_apps.sh "$PACKAGE_PATH"
+
+      - name: Smoke-test the packaged apps
+        shell: bash
+        run: python scripts/ci/smoke_native_package.py apps "$PACKAGE_PLATFORM" "$PACKAGE_PATH"
+
+      - name: Upload apps archive
+        id: upload
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ env.PACKAGE_PATH }}
+          archive: false
+          if-no-files-found: error
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: sccache --show-stats
+
+      - name: Save the compiler cache
+        uses: ./.github/actions/compiler-cache
+        with:
+          flavour: ${{ inputs.platform == 'linux' && 'linux-packages' || 'win-mt' }}
+          mode: save

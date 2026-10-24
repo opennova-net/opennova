@@ -8,11 +8,14 @@ experimental.
 
 ## Install
 
-Download `opennova-blender-addon-windows-v<version>.zip` from
+Download `opennova-blender-addon-windows-v<version>.zip` or
+`opennova-blender-addon-linux-v<version>.zip` from
 [releases](https://github.com/opennova-net/opennova/releases), or
-`opennova-blender-addon-windows.zip` from a PR's **OpenNova CI builds** comment.
+the matching `opennova-blender-addon-windows.zip` or
+`opennova-blender-addon-linux.zip` from a PR's **OpenNova CI builds** comment.
 In Blender 5.0 or newer: Edit > Preferences > Get Extensions > Install from Disk.
-Select the downloaded zip without unpacking it. Windows x64 only for now.
+Select the downloaded zip without unpacking it. Windows x64 and Linux x64
+(Ubuntu 24.04 or newer) are supported. Choose the zip for the system running Blender.
 
 The add-on runs the `opennova-3di` bundled with it; no setup is needed. To run
 another build, name it in the add-on's preferences (Edit > Preferences >
@@ -24,7 +27,7 @@ the CLI and the installable zip (default `build/opennova_3di.zip`). A version
 zipped `blender_manifest.toml`, which Blender reports as the add-on's version;
 without one the zip keeps the tracked manifest's version. PRs and releases use
 the same packaging workflow and smoke-test the CLI extracted from the zip.
-The CLI links the Visual C++ runtime statically, so no separate runtime
+On Windows the CLI links the Visual C++ runtime statically, so no separate runtime
 installation is needed. Its dedicated build directory is `build/blender-addon`.
 
 ## Importing

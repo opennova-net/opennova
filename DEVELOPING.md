@@ -108,7 +108,7 @@ The entry point is `main.cpp`. `apps/3di` is the one spelling exception: an iden
 cannot start with a digit and `opennova::threedi` is the format library, so its namespace
 is `opennova::threedi_cli`. `scripts/package_apps.sh` lists only the directories and
 derives the rest, so a new app ships by adding its directory there and its exe to the
-`package-apps-windows.yml` smoke list.
+the shared `scripts/ci/smoke_native_package.py` smoke list.
 
 ## Build the GDExtension
 
@@ -126,10 +126,31 @@ the Godot editor and source/debug runs of the game; they differ only
 in compiler flags. Build `DebugFull` when you need to step through native code;
 expect roughly 1.5x whole-frame cost in-game while it is installed, so never profile
 against it. The `template_release` DLL that a release export loads is not produced by
-this script at all: build it with `scripts/package_godot_windows.ps1`
-(`-ExportMode release`, without `-SkipBuild`) locally, or rely on CI's
-`build-gdextension-windows` `template_release` leg (master and editor-trunk pushes, and
-manual runs).
+this script at all: build it with `python scripts/package_godot.py --platform windows`
+(or `--platform linux`) locally, or rely on CI's platform-specific
+`build-gdextension-*` `template_release` leg (master pushes and manual runs).
+
+### Package desktop downloads
+
+Run the packager on its target OS, using Python 3.11+ and the prerequisites above:
+
+```bash
+python scripts/package_godot.py --platform linux
+python scripts/package_godot.py --platform windows
+```
+
+The default export mode is `release`; `--export-mode debug` matches PR packages.
+`--skip-build` uses matching prebuilt GDExtensions in `godot/bin/` (the debug
+editor extension is needed even for release exports). `--project-cli <path>`
+uses an existing `opennova-project` instead of building one. The packager downloads
+pinned Godot binaries/templates, exports the base game and expansions, and tests
+the extracted game/editor archives with isolated profiles before accepting them.
+
+`scripts/package_apps.sh` packages the native tools, and
+`scripts/package_blender_addon.sh` packages the Blender extension. They detect the
+native OS. Windows produces ZIPs; Linux produces tar.gz archives except for
+Blender's installable ZIP. Linux shipping builds use Ubuntu 24.04 x86-64; building
+on a newer distribution can raise the minimum runtime library versions.
 
 The artifacts land in `godot/bin/` alongside `godot/bin/opennova.gdextension`. **After a
 rebuild, fully restart the Godot editor.** GDExtension class registration does not

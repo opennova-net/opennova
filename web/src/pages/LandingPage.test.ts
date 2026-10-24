@@ -127,9 +127,17 @@ describe('LandingPage', () => {
       'opennova-switcher-windows',
       'opennova-blender-addon-windows',
       'opennova-apps-windows',
+      'opennova-game-linux',
+      'opennova-editor-linux',
+      'opennova-blender-addon-linux',
+      'opennova-apps-linux',
     ]) {
       expect(text).toContain(file);
     }
+    expect(text).toContain('Linux x64 (Ubuntu 24.04+)');
+    expect(text).toContain('tar.gz');
+    expect(text).toContain('The Switcher is Windows-only.');
+    expect(text).not.toContain('opennova-switcher-linux');
     const links = hrefs(wrapper);
     expect(links).toContain('https://github.com/opennova-net/opennova/releases/latest');
     expect(links).toContain('/register');

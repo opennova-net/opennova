@@ -17,6 +17,13 @@ out="${1:-$root/build/opennova_3di.zip}"
 version="${2:-}"
 version="${version#v}"
 build="$root/build/blender-addon"
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) platform=windows-x64; suffix=.exe ;;
+    Linux)
+        [ "$(uname -m)" = x86_64 ] || { echo "Linux packages require x86_64" >&2; exit 1; }
+        platform=linux-x64; suffix= ;;
+    *) echo "Unsupported packaging platform: $(uname -s)" >&2; exit 1 ;;
+esac
 
 # Keep the package's static MSVC runtime separate from development builds.
 # The installed add-on must not require a separately installed VC++ runtime.
@@ -27,13 +34,13 @@ cmake -S "$root" -B "$build" -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DOPENNOVA_DEVTOOLS=OFF -DOPENNOVA_EDITOR=OFF > /dev/null
 cmake --build "$build" --config Release --target opennova_3di
 
-exe="$build/apps/3di/Release/opennova-3di.exe"
-[ -f "$exe" ] || exe="$build/apps/3di/opennova-3di.exe"
+exe="$build/apps/3di/Release/opennova-3di$suffix"
+[ -f "$exe" ] || exe="$build/apps/3di/opennova-3di$suffix"
 [ -f "$exe" ] || { echo "opennova-3di was not built" >&2; exit 1; }
 
-python - "$root/tools/blender/opennova_3di" "$exe" "$out" "$version" <<'EOF'
+python - "$root/tools/blender/opennova_3di" "$exe" "$out" "$version" "$platform" <<'EOF'
 import os, re, sys, zipfile
-src, exe, out, version = sys.argv[1:5]
+src, exe, out, version, platform = sys.argv[1:6]
 # Blender's own manifest check (bl_pkg/cli/blender_ext.py RE_MANIFEST_SEMVER).
 semver = re.compile(
     r'^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)'
@@ -47,15 +54,19 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         path = os.path.join(src, name)
         if not os.path.isfile(path):
             continue
-        if name == "blender_manifest.toml" and version:
+        if name == "blender_manifest.toml":
             with open(path, encoding="utf-8") as f:
                 text = f.read()
-            text, n = re.subn(r'(?m)^version = "[^"]*"$', f'version = "{version}"', text)
+            text, n = re.subn(r'(?m)^platforms = \[[^\n]*\]$', f'platforms = ["{platform}"]', text)
             if n != 1:
-                sys.exit(f"{path}: expected one version line, found {n}")
+                sys.exit(f"{path}: expected one platforms line, found {n}")
+            if version:
+                text, n = re.subn(r'(?m)^version = "[^"]*"$', f'version = "{version}"', text)
+                if n != 1:
+                    sys.exit(f"{path}: expected one version line, found {n}")
             z.writestr("opennova_3di/" + name, text)
         elif name.endswith(".py") or name.endswith(".toml"):
             z.write(path, "opennova_3di/" + name)
-    z.write(exe, "opennova_3di/bin/opennova-3di.exe")
+    z.write(exe, "opennova_3di/bin/" + os.path.basename(exe))
 print("wrote", out, f"(version {version})" if version else "")
 EOF

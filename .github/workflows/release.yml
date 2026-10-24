@@ -73,76 +73,29 @@ jobs:
   # OpenNova's own game beside the executable, and no retail data.
   package-godot-windows:
     needs: gate
-    runs-on: windows-latest
-    outputs:
-      artifact_id: ${{ steps.upload_game.outputs.artifact-id }}
-      editor_artifact_id: ${{ steps.upload_editor.outputs.artifact-id }}
-    env:
-      GODOT_VERSION: 4.6.1-stable
-      GODOT_VERSION_PLAIN: 4.6.1
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          lfs: false   # scoped below: the package reads assets/ and expansions/ only
-          submodules: recursive
+    uses: ./.github/workflows/package-godot.yml
+    with:
+      platform: windows
 
-      # The models, clips and textures in assets/ ride LFS. Their objects are
-      # cached by the pointer set, so a run restores them instead of
-      # spending LFS bandwidth on every package.
-      - name: Key the bundled LFS assets
-        id: assets-lfs
-        shell: bash
-        run: echo "key=assets-lfs-$(git lfs ls-files -l -I 'assets/**,expansions/**' | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache the bundled LFS assets
-        uses: actions/cache@v4
-        with:
-          path: .git/lfs/objects
-          key: ${{ steps.assets-lfs.outputs.key }}
-
-      - name: Pull Git LFS assets (assets/ and expansions/ only)
-        shell: bash
-        run: |
-          git lfs install --local
-          git lfs pull --include="assets/**,expansions/**"
-
-      - name: Cache Godot binary
-        uses: actions/cache@v4
-        with:
-          path: .godot-bin
-          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
-
-      - name: Cache Godot export templates
-        uses: actions/cache@v4
-        with:
-          path: ~\AppData\Roaming\Godot\export_templates\${{ env.GODOT_VERSION_PLAIN }}.stable
-          key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
-
-      - name: Package Godot Windows apps
-        shell: pwsh
-        run: scripts/package_godot_windows.ps1
-
-      - name: Upload OpenNova Windows game zip
-        id: upload_game
-        uses: actions/upload-artifact@v7
-        with:
-          path: dist/opennova-game-windows-v*.zip
-          archive: false
-          if-no-files-found: error
-
-      - name: Upload OpenNova Windows editor zip
-        id: upload_editor
-        uses: actions/upload-artifact@v7
-        with:
-          path: dist/opennova-editor-windows-v*.zip
-          archive: false
-          if-no-files-found: error
+  package-godot-linux:
+    needs: gate
+    uses: ./.github/workflows/package-godot.yml
+    with:
+      platform: linux
 
   package-blender-windows:
     needs: gate
-    uses: ./.github/workflows/package-blender-windows.yml
+    uses: ./.github/workflows/package-blender.yml
     with:
+      platform: windows
       # Blender reports the zipped manifest's version: stamp the tag into it.
+      version: ${{ github.ref_name }}
+
+  package-blender-linux:
+    needs: gate
+    uses: ./.github/workflows/package-blender.yml
+    with:
+      platform: linux
       version: ${{ github.ref_name }}
 
   package-apps-windows:
@@ -152,7 +105,18 @@ jobs:
     permissions:
       contents: read
       actions: write
-    uses: ./.github/workflows/package-apps-windows.yml
+    uses: ./.github/workflows/package-apps.yml
+    with:
+      platform: windows
+
+  package-apps-linux:
+    needs: gate
+    permissions:
+      contents: read
+      actions: write
+    uses: ./.github/workflows/package-apps.yml
+    with:
+      platform: linux
 
   package-switcher-windows:
     needs: gate
@@ -163,7 +127,7 @@ jobs:
 
   release:
     runs-on: ubuntu-latest
-    needs: [gate, package-godot-windows, package-blender-windows, package-apps-windows, package-switcher-windows]
+    needs: [gate, package-godot-windows, package-godot-linux, package-blender-windows, package-blender-linux, package-apps-windows, package-apps-linux, package-switcher-windows]
     permissions:
       contents: write
     steps:
@@ -173,7 +137,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: dist
-          artifact-ids: ${{ needs.package-godot-windows.outputs.artifact_id }},${{ needs.package-godot-windows.outputs.editor_artifact_id }},${{ needs.package-blender-windows.outputs.artifact_id }},${{ needs.package-apps-windows.outputs.artifact_id }},${{ needs.package-switcher-windows.outputs.artifact_id }}
+          artifact-ids: ${{ needs.package-godot-linux.outputs.artifact_id }},${{ needs.package-godot-linux.outputs.editor_artifact_id }},${{ needs.package-blender-linux.outputs.artifact_id }},${{ needs.package-apps-linux.outputs.artifact_id }},${{ needs.package-godot-windows.outputs.artifact_id }},${{ needs.package-godot-windows.outputs.editor_artifact_id }},${{ needs.package-blender-windows.outputs.artifact_id }},${{ needs.package-apps-windows.outputs.artifact_id }},${{ needs.package-switcher-windows.outputs.artifact_id }}
           merge-multiple: true
           # The package jobs upload with `archive: false` (raw blob, no archive
           # wrapper), so the .zip deliverables are stored as the bare .zip. Without
@@ -185,19 +149,23 @@ jobs:
         shell: bash
         run: |
           shopt -s nullglob
-          for product in game editor; do
-            zips=(dist/opennova-${product}-windows-v*.zip)
-            if [[ ${#zips[@]} -ne 1 ]]; then
-              echo "::error::Expected exactly one ${product} zip, found ${#zips[@]}"
-              exit 1
-            fi
-            release_zip="dist/opennova-${product}-windows-${GITHUB_REF_NAME}.zip"
-            if [[ "${zips[0]}" != "$release_zip" ]]; then
-              mv -- "${zips[0]}" "$release_zip"
-            fi
+          for platform in windows linux; do
+            suffix=zip
+            if [[ "$platform" == linux ]]; then suffix=tar.gz; fi
+            for product in game editor; do
+              archives=(dist/opennova-${product}-${platform}-v*.${suffix})
+              if [[ ${#archives[@]} -ne 1 ]]; then
+                echo "::error::Expected exactly one ${platform} ${product} archive, found ${#archives[@]}"
+                exit 1
+              fi
+              release_archive="dist/opennova-${product}-${platform}-${GITHUB_REF_NAME}.${suffix}"
+              if [[ "${archives[0]}" != "$release_archive" ]]; then
+                mv -- "${archives[0]}" "$release_archive"
+              fi
+            done
+            mv -- "dist/opennova-blender-addon-${platform}.zip" "dist/opennova-blender-addon-${platform}-${GITHUB_REF_NAME}.zip"
+            mv -- "dist/opennova-apps-${platform}.${suffix}" "dist/opennova-apps-${platform}-${GITHUB_REF_NAME}.${suffix}"
           done
-          mv -- dist/opennova-blender-addon-windows.zip "dist/opennova-blender-addon-windows-${GITHUB_REF_NAME}.zip"
-          mv -- dist/opennova-apps-windows.zip "dist/opennova-apps-windows-${GITHUB_REF_NAME}.zip"
           mv -- dist/opennova-switcher-windows.zip "dist/opennova-switcher-windows-${GITHUB_REF_NAME}.zip"
 
       # The switcher's exe is unsigned, so the release states the zip's hash for a
@@ -214,6 +182,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
+            dist/opennova-game-linux-${{ github.ref_name }}.tar.gz
+            dist/opennova-editor-linux-${{ github.ref_name }}.tar.gz
+            dist/opennova-apps-linux-${{ github.ref_name }}.tar.gz
+            dist/opennova-blender-addon-linux-${{ github.ref_name }}.zip
             dist/opennova-game-windows-${{ github.ref_name }}.zip
             dist/opennova-editor-windows-${{ github.ref_name }}.zip
             dist/opennova-blender-addon-windows-${{ github.ref_name }}.zip

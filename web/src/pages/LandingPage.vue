@@ -32,7 +32,7 @@
             <a href="#editor" class="btn-secondary">Make your own</a>
             <RouterLink to="/support" class="btn-secondary">Host a server</RouterLink>
           </div>
-          <p class="mt-3 text-sm text-ink-muted">Windows x64. Pre-1.0 and experimental.</p>
+          <p class="mt-3 text-sm text-ink-muted">Windows x64 and Linux x64 (Ubuntu 24.04+). Pre-1.0 and experimental.</p>
 
           <p class="mt-8 inline-flex items-center gap-2 rounded-full border border-border-strong bg-surface/80 px-3 py-1.5 text-sm text-ink-muted" role="status">
             <span class="h-2 w-2 shrink-0 rounded-full" :class="statusDot" aria-hidden="true"></span>
@@ -218,16 +218,21 @@
         <p class="eyebrow">Downloads</p>
         <h2 id="downloads-title" class="mt-3 text-3xl font-semibold text-ink-bright">Get OpenNova</h2>
         <p class="mt-3 max-w-2xl text-ink-muted">
-          Windows x64. Pre-1.0 and experimental. The game comes with OpenNova's own game; playing Joint Operations
+          Windows x64 and Linux x64 (Ubuntu 24.04+). Pre-1.0 and experimental. The game comes with OpenNova's own game; playing Joint Operations
           needs your own purchased copy. Each release on GitHub carries these files:
         </p>
         <ul class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <li v-for="item in downloads" :key="item.file" class="card p-5">
+          <li v-for="item in downloads" :key="item.name" class="card p-5">
             <p class="font-semibold text-ink-bright">{{ item.name }}</p>
             <p class="mt-1 text-sm text-ink-muted">{{ item.body }}</p>
-            <p class="mt-3 font-mono text-xs text-ink-muted">{{ item.file }}</p>
+            <p v-for="file in item.files" :key="file" class="mt-3 break-words font-mono text-xs text-ink-muted">{{ file }}</p>
           </li>
         </ul>
+        <p class="mt-4 text-sm text-ink-muted">
+          Windows downloads are ZIPs. Linux game, editor and tools downloads are tar.gz archives;
+          extract them with tar to preserve executable permissions. Blender uses an installable ZIP on both platforms.
+          The Switcher is Windows-only.
+        </p>
         <div class="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">
           <a :href="RELEASES_URL" target="_blank" rel="noopener" class="btn-primary">Download the latest release</a>
           <p class="text-sm text-ink-muted">
@@ -263,27 +268,27 @@ const downloads = [
   {
     name: 'OpenNova',
     body: 'The game: our own game, and a drop-in for Jointops.exe that plays the Joint Operations you own.',
-    file: 'opennova-game-windows',
+    files: ['opennova-game-windows', 'opennova-game-linux'],
   },
   {
     name: 'OpenNova Editor',
     body: 'The editor that made our game, ready to run on its own.',
-    file: 'opennova-editor-windows',
+    files: ['opennova-editor-windows', 'opennova-editor-linux'],
   },
   {
     name: 'Blender add-on',
     body: 'Imports and exports .3di models and their animations in Blender 5.',
-    file: 'opennova-blender-addon-windows',
+    files: ['opennova-blender-addon-windows', 'opennova-blender-addon-linux'],
   },
   {
     name: 'Tools and dedicated server',
     body: 'The command-line tools and opennova-serve, the server our hosted servers run. Retail and OpenNova players both join it.',
-    file: 'opennova-apps-windows',
+    files: ['opennova-apps-windows', 'opennova-apps-linux'],
   },
   {
     name: 'OpenNova Switcher',
     body: "Only for the original Jointops.exe or dfx2.exe: a tray app that points them at our NovaWorld, NovaLogic's, or an address of your own. OpenNova itself doesn't need it.",
-    file: 'opennova-switcher-windows',
+    files: ['opennova-switcher-windows'],
   },
 ];
 

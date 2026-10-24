@@ -272,7 +272,8 @@ func current_resource_root() -> ResourceRoot:
 func _ready() -> void:
 	var dir := LaunchFlags.resource_dir()
 	if dir.is_empty() and LaunchFlags.resource_dir_given():
-		push_warning("OpenNova: --resource-dir needs a path. Usage: opennova.exe [-- --resource-dir <path> [--loose-root] [/d]]")
+		var executable := "opennova.exe" if OS.get_name() == "Windows" else "opennova"
+		push_warning("OpenNova: --resource-dir needs a path. Usage: %s [-- --resource-dir <path> [--loose-root] [/d]]" % executable)
 		get_tree().quit(2)
 		return
 	# The start's read of game.cfg (GameCfgStore, the first use of the block):

@@ -823,8 +823,12 @@ void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory) {
 			picker_->set_title("Open a project folder");
 			break;
 		case PickPurpose::RuntimeExecutable:
+#ifdef _WIN32
 			picker_->set_title("Choose the game runtime (opennova.exe)");
 			filters.push_back("*.exe ; Game runtime");
+#else
+			picker_->set_title("Choose the game runtime (opennova)");
+#endif
 			break;
 		case PickPurpose::GameInstall:
 		case PickPurpose::NewProjectInstall:
