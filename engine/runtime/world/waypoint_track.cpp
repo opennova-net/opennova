@@ -335,6 +335,53 @@ void WaypointTrack::manual_cycle(bool backward, const WaypointCycleContext &ctx)
     }
 }
 
+void WaypointTrack::cycle_by_team(bool backward, const WaypointCycleContext &ctx,
+        uint8_t local_team) {
+    const int32_t count = static_cast<int32_t>(entries.size());
+    if (count <= 1) return; // [orig: @0x4dbf0a]
+    // The two legs' match: the other side's flag by its def's type (0x10004), or a target
+    // of the other team (0x90002 / 0x10002) [orig: @0x4dbf26..0x4dbf3f / @0x4dc078..0x4dc092;
+    //  the entity and def tests @0x4dbf89 / @0x4dbf90, @0x4dc0db / @0x4dc0e2, def+80
+    //  @0x4dbf95, def+84 & 0x8000 and the team byte entity+354 @0x4dc0f2].
+    bool by_type = false;
+    int32_t target = 0;
+    if (ctx.game_type == 0x10004u) {
+        if (local_team == 1) target = 4093;
+        else if (local_team == 2) target = 4091;
+        else return;
+        by_type = true;
+    } else if (ctx.game_type == 0x90002u || ctx.game_type == 0x10002u) {
+        if (local_team == 1) target = 2;
+        else if (local_team == 2) target = 1;
+        else return;
+    } else {
+        return;
+    }
+    const auto matches = [&](int32_t i) {
+        if (ctx.registry == nullptr) return false;
+        const Entity *e = ctx.registry->get(entries[static_cast<size_t>(i)].handle());
+        if (e == nullptr || !e->has_item_def) return false;
+        if (by_type) return e->item_id == target;
+        return (e->item_attrib & 0x8000u) != 0 && static_cast<int8_t>(e->team) == target;
+    };
+    // A current entry not in the list scans from 0 [orig: @0x4dbf44..0x4dbf66 /
+    //  @0x4dc097..0x4dc0b8].
+    const int32_t from = current >= 0 && current < count ? current : 0;
+    if (backward) {
+        // [orig: @0x4dbfe1..0x4dc03c / @0x4dc149..0x4dc1a7]
+        for (int32_t i = from - 1; i >= 0; --i)
+            if (matches(i)) { current = i; return; }
+        for (int32_t i = count - 1; i >= from; --i)
+            if (matches(i)) { current = i; return; }
+        return;
+    }
+    // [orig: @0x4dbf6f..0x4dbfcc / @0x4dc0cb..0x4dc130]
+    for (int32_t i = from + 1; i < count; ++i)
+        if (matches(i)) { current = i; return; }
+    for (int32_t i = 0; i < from; ++i)
+        if (matches(i)) { current = i; return; }
+}
+
 // [orig: SpawnPoint_SkipBlocked @ 0x4de310 — cycle forward past done entries
 //  until an incomplete one or a full wrap back to the start.]
 void WaypointTrack::skip_done(const WaypointCycleContext &ctx) {

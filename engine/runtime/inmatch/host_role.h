@@ -348,6 +348,8 @@ public:
 	//  ERR1 @0x4C701D, the record's DC @0x4C708B, DSTR @0x4C709C, DPC @0x4C70D4]
 	std::optional<ConnectionErrorRecord> own_client_error_record() const;
 	ClientRuntime *client_runtime() override { return state.client_runtime.get(); }
+	NapiNPServerCtx *server_ctx() override { return &state.host_owner.ctx; }
+	ClientProcessState *process_state() override { return client_process_; }
 	int64_t last_net_us() const override { return last_net_us_; }
 	// The FR counter also reaches the server context: the send window's
 	// frame-pressure term and the 0x0A server-fps byte read it.

@@ -15,6 +15,8 @@
 #include <net/novaworld/join_identity.h> // decrypt_join_cookie_field
 
 #include <base/io/strutil.h>
+#include <runtime/hud/feed_format.h> // kHudColorWhite (g_HUDColors.palette[0])
+#include <runtime/world/world.h> // HudChatLine
 
 #include <algorithm>
 #include <cstdio>
@@ -216,6 +218,37 @@ void Server_KickDuplicatePcids(NapiNPServerCtx &ctx, bool quality_boundary) {
 						role, 2, 0, 0, "N.C:SPTWNTBP[" + conn.account.pcid + "]", 0, ""));
 		conn.pending_disconnect = true;
 	}
+}
+
+bool Server_BanPlayerSlot(NapiNPServerCtx &ctx, int32_t index) {
+	if (ctx.is_authority == 0) return false;
+	// NovaWorld, LAN or both [orig: @0x5082F0..0x508300]; the port's network type is one of
+	// the two.
+	if (ctx.transport_mode != NetworkType::NovaWorld && ctx.transport_mode != NetworkType::Lan)
+		return false;
+	if (index < 0 || index >= static_cast<int32_t>(ctx.config.total_player_slot_capacity()))
+		return false;
+	NapiNPConnection *slot = slot_at(ctx, index);
+	// A Serve Only host's own slot 0 has no connection: its address reads 0 and nothing is
+	// punted (+5) [orig: the connection test @0x508338, the 0 @0x508349].
+	const bool host_row = slot == nullptr && index == 0 && ctx.host_slot.active;
+	if (slot == nullptr && !host_row) return false;
+	const std::string name = slot != nullptr ? slot->reply.player_name : ctx.host_slot.name;
+	banlist::AddressBan ban;
+	ban.address = slot != nullptr ? slot->peer.ip : 0u;
+	ban.name = name;
+	ctx.bans.addresses.entries.push_back(std::move(ban));
+	const std::string &kicked = ctx.server_text.kicked;
+	if (slot != nullptr && !slot_is_local(*slot)) punt(*slot, kicked.c_str());
+	if (ctx.world != nullptr) {
+		world::HudChatLine line;
+		line.argb = hud::kHudColorWhite;
+		line.system_ring = true;
+		line.text = kicked + " " + name;
+		ctx.world->out.hud_chat_lines.push_back(std::move(line));
+	}
+	ctx.bans.addresses_dirty = true;
+	return true;
 }
 
 bool Server_AddressBanned(const NapiNPServerCtx &ctx, uint32_t address) {

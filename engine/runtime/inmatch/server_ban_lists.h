@@ -96,6 +96,22 @@ uint32_t Server_ValidateJoinAccount(NapiNPServerCtx &ctx, NapiNPConnection &conn
 //  @0x4C9355..0x4C9375, DC 2 @0x4C938B, the latch-if-!valid @0x4C93BB..0x4C93D5,
 //  CNapiNPConnection_RequestDisconnect @0x4C93DD; called by Server_TickUpdate @0x51E20C]
 void Server_KickDuplicatePcids(NapiNPServerCtx &ctx, bool quality_boundary);
+// The Ban input row (catalog row 93, code 107; the IDB's name is a misnomer): on the authority
+// over a LAN or NovaWorld transport, the active slot `index` (0..capacity) is appended to
+// banned.txt's list, its connection's address (0 for a row with none: a Serve Only host's own
+// slot 0) and its name, the list growing past retail's 512 (D-NET-368); a slot that is not the
+// host's own is punted, reason 33 with Server/STRSRV18 as its detail; then the host's SYSTEM
+// ring gets "<STRSRV18> <name>" in palette[0] white, and the dirty word is set for the
+// shutdown's save. False when the gates refuse or the slot is not active.
+// [orig: Input_HandleActionBinding @0x49AD40 - case 107 @0x49BBA5; Server_NotifyPlayerKicked
+//  @0x5082D0 - the gates @0x5082D9..0x508316, the row @0x508322, +4 @0x50832E, the address
+//  +0x1C -> +0xC4 @0x508338..0x508349, the append @0x508358..0x5083B5 (the 512 shift
+//  @0x50835E..0x50838A), STRSRV18 @0x5083C6, +5 @0x5083CE, +0x178E1 @0x5083D4 (no writer on
+//  this host), CNapiNPConnection_QueueDisconnectEvent(conn, "", 33, text) @0x5083EE, sprintf
+//  "%s %s" @0x508411, Chat_AddMessageChannel2(.., g_HUDColors.palette[0], 930) @0x508427,
+//  dword_C8FF24 = 1 @0x50842F]
+bool Server_BanPlayerSlot(NapiNPServerCtx &ctx, int32_t index);
+
 // A source address on banned.txt, the protocol join's family-14 reason-3 refusal.
 // [orig: CNapiNetwork_ValidateJoinRequest @0x4C6203..0x4C6217]
 bool Server_AddressBanned(const NapiNPServerCtx &ctx, uint32_t address);

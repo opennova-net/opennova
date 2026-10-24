@@ -170,6 +170,10 @@ struct ServerTextTable {
 	// STRSRV19 ("Host"): a Serve Only host's own slot-0 name (HostSlotRow) [orig:
 	// Server_InitNewRoundState @0x51C9CD; CNapiGameSession_BuildAndCreateSession @0x5696EE].
 	std::string host_name;
+	// STRSRV18: the in-game ban's kick text, its punt's detail and the head of its SYSTEM
+	// line [orig: Server_NotifyPlayerKicked @0x5082D0 - GameText_GetString("Server",
+	//  "STRSRV18") @0x5083C6 / @0x5083FE].
+	std::string kicked;
 };
 
 // A Serve Only host's own player-slot row, slot 0 of retail's table: the
@@ -706,9 +710,9 @@ struct NapiNPServerCtx {
 	bool connect_log_disable_queued = false;
 	// The round tallies the status page's team block shows: every round end
 	// of Team Deathmatch, Team KOTH or CTF counts one round and one win for
-	// the winning side 1..4. Only the Reset Game action clears them
-	// (Server_ForceRoundEndAndClearState, catalog row 92 `resetgames`, code
-	// 106, which the port does not dispatch).
+	// the winning side 1..4. Only the Reset Game action clears them, team 1's,
+	// team 2's and the rounds alone (Server_ForceRoundEndAndClearState, catalog
+	// row 92 `resetgames`, code 106; Role::dispatch_record).
 	// [orig: g_TotalRoundsPlayed @0xC8FF1C, g_RoundWinsTeam1..4
 	//  @0xC8FF0C..0xC8FF18 — Server_ProcessRoundEnd @0x516883..0x5168d8; the
 	//  reset @0x5175aa..0x5175be]

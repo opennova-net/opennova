@@ -212,9 +212,17 @@ void Simulation::drain_feed_posts(const opennova::hud::GameTextLookup &p_gametex
 	if (kernel_) sim_lines.swap(kernel_->world.out.hud_chat_lines);
 	if (!runtime_) return;
 	for (const opennova::world::HudChatLine &line : sim_lines) {
+		// A keyless line posts its text; a keyed one its key's text, its $A the line's text
+		// when it carries one (engine world::HudChatLine carries the witness).
+		std::string text = line.text;
+		if (*line.key != '\0') {
+			text = opennova::hud::game_text(p_gametext, line.section, line.key, "");
+			if (!line.text.empty())
+				text = opennova::hud::chat_format_player_tokens(text, line.text.c_str());
+		}
 		r_posts.push_back({runtime_->view().claim_feed_order(),
 				line.system_ring ? opennova::hud::ChatSink::System : opennova::hud::ChatSink::Chat,
-				line.argb, opennova::hud::game_text(p_gametext, line.section, line.key, ""), false});
+				line.argb, std::move(text), false});
 	}
 	opennova::replication::ClientState &cs = runtime_->state();
 	const uint16_t self_handle =

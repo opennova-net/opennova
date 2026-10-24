@@ -8,6 +8,10 @@
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the frame lock clock)
 #include <runtime/inmatch/mission_exit.h> // kMissionExitReset (the quit row's exit)
+#include <runtime/inmatch/mission_rotation.h> // HostRotation::last_game (the LastGame row)
+#include <runtime/inmatch/napi_np_server_ctx.h> // the server rows' context
+#include <runtime/inmatch/server_admin_command.h> // the netdelay / resetgames / tod rows
+#include <runtime/inmatch/server_ban_lists.h> // Server_BanPlayerSlot (the Ban row)
 #include <runtime/inmatch/role_feeds.h> // step_hud_radar
 #include <runtime/inmatch/spectator_session.h>
 #include <runtime/mission/mission_kernel.h>
@@ -514,6 +518,7 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 		}
 		return;
 	}
+	if (dispatch_server_record(record)) return;
 	// The cheat row 117's 40 opens the single player's weapon screen: out of a session, with a
 	// local player, the embedder's toggle (a menu screen up closes, else weapon.mnu's WEAPON
 	// opens), so the record goes on to the embedder past those gates.
@@ -530,6 +535,120 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	// The embedder's one dispatch (TickInputSource::dispatch_record), a console record's and a
 	// key's alike; an update with no device (a dedicated host, a probe's direct frame) has none.
 	if (source != nullptr) source->dispatch_record(record);
+}
+
+bool Role::dispatch_server_record(const controls::InputEventRecord &record) {
+	constexpr int kNextFlagRow = 52;   // code 32, flags 0x0C000801
+	constexpr int kSaveScoresRow = 88; // code 38, flags 0x04000000
+	constexpr int kNetDelayRow = 89;   // code 103, flags 0x04000000
+	constexpr int kResetGamesRow = 92; // code 106, flags 0x04000000
+	constexpr int kBanRow = 93;        // code 107, flags 0x04000000
+	constexpr int kLastGameRow = 94;   // code 108, flags 0x04000000
+	constexpr int kTodRow = 95;        // code 438, flags 0
+	constexpr int kTodRateRow = 96;    // code 497, flags 0
+	const int32_t code = record.code;
+	const auto is = [code](int row) { return code == controls::action_code(row); };
+	if (!is(kNextFlagRow) && !is(kSaveScoresRow) && !is(kNetDelayRow) && !is(kResetGamesRow) &&
+			!is(kBanRow) && !is(kLastGameRow) && !is(kTodRow) && !is(kTodRateRow))
+		return false;
+	if (!action_head_admits(code)) return true;
+	world::World &world = kernel_->world;
+	const bool in_session = world.rules.mp_session;
+	const bool authority = world.rules.logic_authority;
+	const bool peer = world.rules.mp_session_peer;
+	NapiNPServerCtx *ctx = server_ctx();
+	// nextflag: the record's sign (Shift) steps backward, else forward, over the selection
+	// list by the local player's team (WaypointTrack::cycle_by_team carries the walk); a
+	// joiner's game type is the session's, which its replica holds.
+	// [orig: Input_HandleActionBinding @0x49AD40 - case 32 `test ebp, ebp` @0x49B6A7,
+	//  Spectator_CycleTargetByTeam(1) called @0x49B6AD, (-1) @0x49B6BC]
+	if (is(kNextFlagRow)) {
+		const world::Entity *local = kernel_->local.player();
+		if (local == nullptr) return true;
+		world::WaypointCycleContext cycle = world.waypoint_context();
+		const ClientRuntime *runtime = client_runtime();
+		if (kind() == RoleKind::Joiner && runtime != nullptr) cycle.game_type = runtime->game_type();
+		world.script.waypoints.cycle_by_team(record.sign, cycle, local->team);
+		return true;
+	}
+	// savescores: the process word flips (ClientProcessState::save_scores) and the SYSTEM
+	// ring takes the literal line in white, no gate.
+	// [orig: Input_HandleActionBinding @0x49AD40 - case 38 `xor g_SaveScores, 1` @0x49B7B3,
+	//  Chat_AddMessageChannel2("Save Scores: On", -1, 930) @0x49B7C8, ("Save Scores: Off")
+	//  @0x49B7DA]
+	if (is(kSaveScoresRow)) {
+		ClientProcessState *process = process_state();
+		if (process == nullptr) return true;
+		process->save_scores = !process->save_scores;
+		world::HudChatLine line;
+		line.argb = 0xFFFFFFFFu;
+		line.system_ring = true;
+		line.text = process->save_scores ? "Save Scores: On" : "Save Scores: Off";
+		world.out.hud_chat_lines.push_back(std::move(line));
+		return true;
+	}
+	// netdelay: the record's first argument, gated inside (Server_SetNetworkDelay)
+	// [orig: Input_HandleActionBinding @0x49AD40 - case 103, Server_SetNetworkDelay called
+	//  @0x49BB73].
+	if (is(kNetDelayRow)) {
+		if (ctx != nullptr) (void)Server_SetNetworkDelay(*ctx, record.p1);
+		return true;
+	}
+	// resetgames: in a session on the authority.
+	// [orig: Input_HandleActionBinding @0x49AD40 - case 106, the gates @0x49BB80..0x49BB94,
+	//  Server_ForceRoundEndAndClearState called @0x49BB9A]
+	if (is(kResetGamesRow)) {
+		if (in_session && authority && ctx != nullptr) Server_ForceRoundEndAndClearState(*ctx, world);
+		return true;
+	}
+	// Ban: the record's first argument, the slot, gated inside (Server_BanPlayerSlot)
+	// [orig: Input_HandleActionBinding @0x49AD40 - case 107, Server_NotifyPlayerKicked called
+	//  @0x49BBA5]
+	if (is(kBanRow)) {
+		if (ctx != nullptr) (void)Server_BanPlayerSlot(*ctx, record.p1);
+		return true;
+	}
+	// LastGame: in a session on the authority the rotation's last-game word flips, and the
+	// Misc toast STRMISC_LASTGAME_ON with the word now set, else STRMISC_LASTGAME_OFF, goes to
+	// the SYSTEM ring in white.
+	// [orig: Input_HandleActionBinding @0x49AD40 - case 108, the gates @0x49BBE4..0x49BBF8,
+	//  Server_ToggleLastGame called @0x49BBFE (`xor g_LastGameToggle, 1` @0x4FE885), the keys
+	//  pushed @0x49BC0E / @0x49BC15,
+	//  GameText_GetString("Misc", ..) @0x49BC57, Chat_AddMessageChannel2(.., -1, 930)
+	//  @0x49BC60]
+	if (is(kLastGameRow)) {
+		if (!in_session || !authority || ctx == nullptr || ctx->rotation == nullptr) return true;
+		ctx->rotation->last_game = !ctx->rotation->last_game;
+		world.out.hud_chat_lines.push_back({"Misc",
+				ctx->rotation->last_game ? "STRMISC_LASTGAME_ON" : "STRMISC_LASTGAME_OFF",
+				0xFFFFFFFFu, true});
+		return true;
+	}
+	// tod: on an authority that is not a session peer (a dedicated host, in a session or
+	// not), the record's first argument as HHMM sets the clock word, unclamped
+	// (environment_time_from_hhmm); the weather's command generation carries the lighting
+	// refresh.
+	// [orig: Input_HandleActionBinding @0x49AD40 - case 438, the gates @0x49BDAB..0x49BDBF, the
+	//  packing @0x49BDC5..0x49BE42, Environment_SetCurrentTime called @0x49BE43,
+	//  Terrain_ResetTileCache called @0x49BE4B, sub_610680 called @0x49BE50]
+	if (is(kTodRow)) {
+		if (authority && !peer) world.weather.set_current_time(environment_time_from_hhmm(record.p1));
+		return true;
+	}
+	// todrate: the same gates and a nonzero argument; the clock's advance per tick is
+	// 0x18000000 / (62 * argument), the product 32-bit and the divide signed. A product that
+	// wraps to 0 (the argument -2^31) divides by zero in retail, which ends the process; here
+	// it stores nothing.
+	// [orig: Input_HandleActionBinding @0x49AD40 - case 497, the gates @0x49BE5A..0x49BE76, the
+	//  product @0x49BE7C..0x49BE89, `idiv ecx` @0x49BE8B, the store @0x49BE8D]
+	if (is(kTodRateRow)) {
+		if (!authority || peer || record.p1 == 0) return true;
+		const auto divisor = static_cast<int32_t>(static_cast<uint32_t>(record.p1) * 62u);
+		if (divisor == 0) return true;
+		world.weather.set_tod_advance_per_tick(static_cast<uint32_t>(0x18000000 / divisor));
+		return true;
+	}
+	return true;
 }
 
 bool Role::reset_local_input() {

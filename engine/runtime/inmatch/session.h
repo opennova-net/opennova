@@ -22,6 +22,8 @@ struct HudToggleState;
 namespace opennova::inmatch {
 
 class ClientRuntime;
+struct ClientProcessState;
+struct NapiNPServerCtx;
 struct RoleView;
 
 enum class State : uint8_t {
@@ -430,6 +432,13 @@ public:
 	// The client-side replica runtime this role folds (the HostClient's or the
 	// joiner's); null for the bare local role and a dedicated host.
 	virtual ClientRuntime *client_runtime() { return nullptr; }
+	// The authority's server context (a host's, a single player's in-process listen server's
+	// alike); null for a joiner and the bare local role. The dispatcher's authority rows act
+	// on it (dispatch_record).
+	virtual NapiNPServerCtx *server_ctx() { return nullptr; }
+	// The process-lived words this role steps (ClientProcessState; the host's and the
+	// joiner's); null for the bare local role.
+	virtual ClientProcessState *process_state() { return nullptr; }
 	// The last tick's wire leg, for the shell's stats board.
 	virtual int64_t last_net_us() const { return 0; }
 	// The main loop's measured frame rate (the FR counter's g_StatsAvgFps,
@@ -555,6 +564,12 @@ public:
 	//  Input_ResetKeyQueue @0x49B53E, the word's test @0x49B543..0x49B54A ahead of
 	//  Audio_ShutdownChannelsAndDeviceTable @0x49B550]
 	void dispatch_record(const controls::InputEventRecord &record, TickInputSource *source);
+	// The dispatcher's server and process rows, each its own case past the head
+	// (action_head_admits), the session words its case tests read off World::rules
+	// (mp_session = is_in_session, logic_authority = is_authority, mp_session_peer); true
+	// when the record's code is one of them (taken, whatever its gates decided), so it goes
+	// to no embedder (dispatch_record). Their witness is at each arm (session.cpp).
+	bool dispatch_server_record(const controls::InputEventRecord &record);
 	// Player_ResetLocalInput, which the Respawn key (case 55) and the Escape key (case
 	// 18, ahead of its `!is_in_session && g_RoundOver` test; the embedder's escape runs it)
 	// run: the input reset (D-NET-560). True when it ran past its local-entity test, where its

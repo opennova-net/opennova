@@ -283,6 +283,7 @@ public:
 		if (runtime) runtime->set_mission_exit_reason(reason);
 	}
 	ClientRuntime *client_runtime() override { return runtime.get(); }
+	ClientProcessState *process_state() override { return client_process_; }
 	int64_t last_net_us() const override { return last_net_us_; }
 	// The frame statistics the C2S 0x0C's two stat bytes carry; the frame rate
 	// also reaches the replica runtime's quality window through the base.

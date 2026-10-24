@@ -19,6 +19,7 @@
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_admin_command.h>
+#include <runtime/inmatch/server_ban_lists.h> // Server_BanPlayerSlot
 #include <runtime/inmatch/server_chat.h>
 #include <runtime/inmatch/server_medic.h>
 #include <runtime/inmatch/server_message_dispatch.h>
@@ -2057,6 +2058,95 @@ bool check_radio_call_split_slots() {
 
 } // namespace
 
+// The dispatcher's server rows' engine halves (D-NET-NEW-LI-36; Role::dispatch_record routes
+// the records): netdelay, resetgames and Ban, and the clock word tod and TimeOfDay share.
+// [orig: Server_SetNetworkDelay @0x50CBC0 - the gates @0x50CBF0, SendFiltered(0x1B, 1)
+//  @0x50CC28, the text @0x50CC5A, SendFiltered(0x14, 1) @0x50CC9D;
+//  Server_ForceRoundEndAndClearState @0x5175A0 - the clears @0x5175AA / @0x5175B4 / @0x5175BE;
+//  Server_NotifyPlayerKicked @0x5082D0 - the gates @0x508316, the list @0x50838E..0x5083B5,
+//  CNapiNPConnection_QueueDisconnectEvent called @0x5083EE, sprintf @0x508411,
+//  Chat_AddMessageChannel2 called @0x508427, the dirty word @0x50842F]
+bool check_server_rows() {
+	{
+		// netdelay 5 with a send holdoff of 3: S2C 0x1B [5], then the chat [0][0xFF] with
+		// 1000 * 5 * 3 / 62 = 241 ms, to both slots; a delay past 100 (unsigned) sends nothing.
+		HostFixture f(2, 1);
+		f.ctx.is_authority = 1;
+		f.ctx.config.send_holdoff_ticks = 3u;
+		for (auto &t : f.transports) (void)drain(t);
+		if (!expect(inmatch::Server_SetNetworkDelay(f.ctx, 5), "netdelay 5 goes out")) return false;
+		const std::string text = "Delay set to 241ms";
+		std::vector<uint8_t> chat = {0, 0xFF};
+		chat.insert(chat.end(), text.begin(), text.end());
+		chat.push_back(0);
+		for (auto &t : f.transports) {
+			const std::vector<ns::Datagram> sent = drain(t);
+			if (!expect(sent.size() == 2 && sent[0].tag == s2c::NETWORK_DELAY &&
+							sent[0].body == std::vector<uint8_t>({5, 0, 0, 0}) &&
+							sent[1].tag == s2c::CHAT_BROADCAST && sent[1].body == chat,
+					"netdelay: S2C 0x1B [5] then the chat line, to every slot"))
+				return false;
+		}
+		if (!expect(!inmatch::Server_SetNetworkDelay(f.ctx, 101) &&
+						!inmatch::Server_SetNetworkDelay(f.ctx, -1) && drain(f.transports[0]).empty(),
+				"netdelay past 100 unsigned sends nothing"))
+			return false;
+		f.ctx.is_in_session = 0;
+		if (!expect(!inmatch::Server_SetNetworkDelay(f.ctx, 5), "netdelay needs a session"))
+			return false;
+	}
+	{
+		// resetgames: the round ends, then team 1's and team 2's wins and the rounds played
+		// clear; teams 3 and 4 keep theirs.
+		HostFixture f(2, 1);
+		f.ctx.is_authority = 1;
+		f.ctx.round_wins = {3, 4, 5, 6};
+		f.ctx.rounds_played = 7;
+		inmatch::Server_ForceRoundEndAndClearState(f.ctx, f.world);
+		if (!expect(f.ctx.round_wins[0] == 0 && f.ctx.round_wins[1] == 0 && f.ctx.round_wins[2] == 5 &&
+						f.ctx.round_wins[3] == 6 && f.ctx.rounds_played == 0,
+				"resetgames clears teams 1 and 2 and the rounds"))
+			return false;
+	}
+	{
+		// Ban 1: slot 1's address and name join banned.txt's list, the slot is punted with
+		// STRSRV18, the SYSTEM ring takes "<STRSRV18> <name>" in white, the list is dirty.
+		HostFixture f(2, 1);
+		f.ctx.is_authority = 1;
+		f.ctx.transport_mode = inmatch::NetworkType::Lan;
+		f.ctx.server_text.kicked = "Kicked:";
+		f.conn(0).peer.ip = 0x0A00000Bu;
+		if (!expect(inmatch::Server_BanPlayerSlot(f.ctx, 1), "Ban 1 takes slot 1")) return false;
+		const auto &bans = f.ctx.bans.addresses.entries;
+		if (!expect(bans.size() == 1 && bans[0].address == 0x0A00000Bu && bans[0].name == "P1" &&
+						f.conn(0).host_disconnect_sent && !f.conn(1).host_disconnect_sent &&
+						f.ctx.bans.addresses_dirty,
+				"Ban 1 lists and punts slot 1"))
+			return false;
+		const auto &lines = f.world.out.hud_chat_lines;
+		if (!expect(lines.size() == 1 && lines[0].text == "Kicked: P1" && lines[0].system_ring &&
+						lines[0].argb == 0xFFFFFFFFu && *lines[0].key == '\0',
+				"Ban 1's SYSTEM line"))
+			return false;
+		if (!expect(!inmatch::Server_BanPlayerSlot(f.ctx, 9) && !inmatch::Server_BanPlayerSlot(f.ctx, -1),
+				"Ban of an empty or out-of-range slot does nothing"))
+			return false;
+		f.ctx.transport_mode = static_cast<inmatch::NetworkType>(0);
+		if (!expect(!inmatch::Server_BanPlayerSlot(f.ctx, 2), "Ban needs a LAN or NovaWorld transport"))
+			return false;
+	}
+	// The clock word: hour << 24 | minute * 0x44400 from HHMM, unclamped (the tod row's), the
+	// pins clear of an exact hundred (floor(hhmm * 0.01f) there depends on the x87 precision).
+	// [orig: Input_HandleActionBinding @0x49AD40 - case 438's packing @0x49BDC5..0x49BE42]
+	if (!expect(inmatch::environment_time_from_hhmm(630) == ((6u << 24) | (30u * 0x44400u)) &&
+					inmatch::environment_time_from_hhmm(1230) == ((12u << 24) | (30u * 0x44400u)) &&
+					inmatch::environment_time_from_hhmm(45) == 45u * 0x44400u &&
+					inmatch::environment_time_from_hhmm(2550) == ((25u << 24) | (50u * 0x44400u)),
+			"the clock word from HHMM"))
+		return false;
+	return true;
+}
+
 int main() {
 	bool ok = check_ping_ring_and_strikes();
 	ok = check_ping_dispatch_return_leg() && ok;
@@ -2090,6 +2180,7 @@ int main() {
 	ok = check_radio_call_rules() && ok;
 	ok = check_radio_call_request() && ok;
 	ok = check_radio_call_split_slots() && ok;
+	ok = check_server_rows() && ok;
 	if (ok) std::printf("OK\n");
 	return ok ? 0 : 1;
 }

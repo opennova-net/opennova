@@ -400,7 +400,7 @@ inline void clamp_emplaced_gun_words_to_window(const World &world, Entity &mount
 // fifth entry, yellow, for 930 ticks).
 // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - "HUD_COM2GUN" @0x44132C, the section
 //  "HUD" @0x7C4E64 pushed @0x441331, `mov ecx, g_HUDColors+10h` @0x44134B, `push 3A2h` @0x441351]
-inline constexpr HudChatLine kEmplacedCommandCallLine{"HUD", "HUD_COM2GUN", 0xFFF0F000u};
+inline const HudChatLine kEmplacedCommandCallLine{"HUD", "HUD_COM2GUN", 0xFFF0F000u};
 
 // The window leg's tail while the occupant rides this gun: the tank-command call. With the
 // local player in a UseGun seat (attach type 3) of a gun whose ground entity (+0x28) is this

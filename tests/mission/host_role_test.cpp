@@ -34,6 +34,7 @@
 
 #include <runtime/inmatch/null_datagram_socket.h>
 #include <runtime/inmatch/udp_session_transport.h>
+#include <runtime/inmatch/mission_rotation.h> // HostRotation (the LastGame row)
 #include <base/io/tick_rate.h> // kTicksPerSecondInt
 
 #include "../common/boot_file_source.h"
@@ -503,6 +504,162 @@ void check_single_player_console_line_rides_the_loopback(
 	CHECK(events.size() == 1 && events.at(0).code == 3);
 	role.drain_input_events(&device, 0);
 	CHECK(events.empty() && device.codes == std::vector<int32_t>({37, 8, 3}));
+}
+
+// D-NET-NEW-LI-36 (LI-s28 row 0, LI-s26 FOUND 1): the dispatcher's server and process rows
+// reach their cases through the one dispatcher, whatever queued the record. On a listen host
+// in a LAN session (the authority, a session peer): savescores flips the process word and
+// posts its literal SYSTEM line; netdelay sends S2C 0x1B and the chat line to the remote
+// slot; LastGame flips the rotation's word and posts its Misc toast; tod, a non-peer
+// authority's row, sets nothing here; Ban lists, punts and posts; resetgames ends the round
+// and clears the tallies. On a Serve Only host (the authority, no peer) tod sets the clock
+// word with its tickdown and todrate the advance per tick.
+// [orig: Input_HandleActionBinding @0x49AD40 - case 38 @0x49B7B3, case 103 @0x49BB73, case 106
+//  @0x49BB9A, case 107 @0x49BBA5, case 108 @0x49BBFE, case 438 @0x49BDAB..0x49BE43, case 497
+//  @0x49BE5A..0x49BE8D]
+void check_server_rows_reach_their_arms(std::map<std::string, std::string> &files) {
+	{
+		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		auto &kernel = *kernel_storage;
+		auto role_storage = std::make_unique<inmatch::HostRole>();
+		auto &role = *role_storage;
+		role.bind(kernel);
+		inmatch::ListenHostState &host = role.state;
+		kernel.open_document(two_entity_mission(), "server_rows", source_over(&files));
+		ms::KernelBootOptions options;
+		options.mp_session = true;
+		options.game_type = mission_game_type(kernel.mission);
+		options.bringup_net_session = [&] {
+			inmatch::HostConfig cfg;
+			cfg.title = &kJo;
+			cfg.config.server_name = "server_rows";
+			cfg.config.max_players = 4;
+			cfg.config.game_type = options.game_type;
+			cfg.socket_mode = inmatch::SocketMode::Lan;
+			cfg.serve_and_play = true;
+			inmatch::HostBringup bringup;
+			bringup.host_cfg = cfg;
+			role.bring_up(bringup);
+		};
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		CHECK(host.client_runtime != nullptr && kernel.local.has_local_player());
+		if (host.client_runtime == nullptr) return;
+		opennova::inmatch::NullDatagramSocket socket;
+		role.set_socket(&socket);
+		for (int i = 0; i < 4; ++i) role.run_tick(tick_input(0));
+		inmatch::NapiNPServerCtx &ctx = host.host_owner.ctx;
+		CHECK(ctx.is_in_session != 0 && ctx.is_authority != 0 && ctx.is_mp_session_peer != 0);
+		auto transport = std::make_unique<replication::UdpSessionTransport>(
+				replication::UdpSessionTransport::Role::Host);
+		inmatch::NapiNPConnection remote;
+		remote.peer = PeerAddr{0x0100007Fu, 34100};
+		remote.type = inmatch::NapiNPConnection::kTypeServerSide;
+		remote.phase = inmatch::ConnectionPhase::InMatch;
+		remote.burst.spawned = true;
+		remote.reply.player_slot = 1;
+		remote.reply.player_name = "R1";
+		remote.link.mode = replication::TransportMode::Client;
+		remote.link.transport = transport.get();
+		ctx.np_protocol.connection_list.push_back(std::move(remote));
+		inmatch::NapiNPConnection *joined = nullptr;
+		for (inmatch::NapiNPConnection &conn : ctx.np_protocol.connection_list)
+			if (conn.peer.port == 34100) joined = &conn;
+		CHECK(joined != nullptr);
+		if (joined == nullptr) return;
+		std::vector<w::HudChatLine> &lines = kernel.world.out.hud_chat_lines;
+		const auto dispatch = [&](int32_t code, int32_t p1) {
+			lines.clear();
+			(void)role.input_events().push(controls::InputEventRecord{code, p1, 0, 0, false});
+			role.drain_input_events(nullptr, 0);
+		};
+		// savescores (row 88, code 38).
+		dispatch(38, 0);
+		CHECK(role.process_state() != nullptr && role.process_state()->save_scores);
+		CHECK(lines.size() == 1 && lines[0].text == "Save Scores: On" && lines[0].system_ring &&
+				lines[0].argb == 0xFFFFFFFFu);
+		dispatch(38, 0);
+		CHECK(!role.process_state()->save_scores && lines.size() == 1 &&
+				lines[0].text == "Save Scores: Off");
+		// netdelay (row 89, code 103): the remote slot takes S2C 0x1B [2], then the chat line.
+		replication::Datagram sent;
+		while (transport->pop_outbound(sent)) {}
+		dispatch(103, 2);
+		std::vector<uint8_t> tags;
+		while (transport->pop_outbound(sent)) tags.push_back(sent.tag);
+		CHECK(tags == std::vector<uint8_t>({s2c::NETWORK_DELAY, s2c::CHAT_BROADCAST}));
+		// LastGame (row 94, code 108).
+		inmatch::HostRotation rotation;
+		ctx.rotation = &rotation;
+		dispatch(108, 0);
+		CHECK(rotation.last_game && lines.size() == 1 &&
+				std::string(lines[0].key) == "STRMISC_LASTGAME_ON" && lines[0].system_ring);
+		dispatch(108, 0);
+		CHECK(!rotation.last_game && lines.size() == 1 &&
+				std::string(lines[0].key) == "STRMISC_LASTGAME_OFF");
+		ctx.rotation = nullptr;
+		// tod (row 95, code 438): a session peer's authority sets nothing.
+		const uint32_t tod = kernel.world.weather.tod_fixed24;
+		dispatch(438, 1230);
+		CHECK(kernel.world.weather.tod_fixed24 == tod);
+		// Ban (row 93, code 107): slot 1 is listed and punted, and the SYSTEM line posts.
+		ctx.server_text.kicked = "Kicked:";
+		dispatch(107, 1);
+		CHECK(joined->host_disconnect_sent);
+		CHECK(!ctx.bans.addresses.entries.empty() && ctx.bans.addresses.entries.back().name == "R1");
+		CHECK(lines.size() == 1 && lines[0].text == "Kicked: R1" && lines[0].system_ring);
+		// resetgames (row 92, code 106): the tallies of teams 1 and 2 and the rounds clear.
+		ctx.round_wins = {2, 3, 4, 5};
+		ctx.rounds_played = 6;
+		dispatch(106, 0);
+		CHECK(ctx.round_wins[0] == 0 && ctx.round_wins[1] == 0 && ctx.round_wins[2] == 4 &&
+				ctx.round_wins[3] == 5 && ctx.rounds_played == 0);
+	}
+	{
+		inmatch::ClientProcessState process;
+		const auto kernel_owner = std::make_unique<ms::MissionKernel>();
+		const auto role_owner = std::make_unique<inmatch::HostRole>();
+		ms::MissionKernel &kernel = *kernel_owner;
+		inmatch::HostRole &role = *role_owner;
+		role.bind(kernel);
+		kernel.open_document(two_entity_mission(), "server_rows_dedicated", source_over(&files));
+		ms::KernelBootOptions options;
+		options.playable = false;
+		options.mp_session = true;
+		options.game_type = mission_game_type(kernel.mission);
+		options.bringup_net_session = [&] {
+			inmatch::HostConfig cfg;
+			cfg.title = &kJo;
+			cfg.config.server_name = "server_rows_dedicated";
+			cfg.config.max_players = 4;
+			cfg.config.game_type = options.game_type;
+			cfg.socket_mode = inmatch::SocketMode::Lan;
+			cfg.serve_and_play = false;
+			cfg.client_process = &process;
+			inmatch::HostBringup bringup;
+			bringup.host_cfg = cfg;
+			role.bring_up(bringup);
+		};
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		opennova::inmatch::NullDatagramSocket socket;
+		role.set_socket(&socket);
+		role.run_tick(tick_input(0));
+		const auto dispatch = [&](int32_t code, int32_t p1) {
+			(void)role.input_events().push(controls::InputEventRecord{code, p1, 0, 0, false});
+			role.drain_input_events(nullptr, 0);
+		};
+		// tod 1230: 12 << 24 | 30 * 0x44400, the tickdown 10.
+		kernel.world.weather.tod_epoch_tickdown = 0;
+		dispatch(438, 1230);
+		CHECK(kernel.world.weather.tod_fixed24 == ((12u << 24) | (30u * 0x44400u)) &&
+				kernel.world.weather.tod_epoch_tickdown == 10);
+		// todrate 4: 0x18000000 / 248; todrate 0 keeps it.
+		dispatch(497, 4);
+		CHECK(kernel.world.weather.tod_advance_per_tick == 0x18000000u / 248u);
+		dispatch(497, 0);
+		CHECK(kernel.world.weather.tod_advance_per_tick == 0x18000000u / 248u);
+	}
 }
 
 // Its own frame: main's locals already fill the 1 MB test stack.
@@ -1452,6 +1609,7 @@ int main() {
 	check_listen_host_console_punts_only_through_server(files, "PUNT ALL", /*punts=*/false);
 	check_listen_host_console_punts_only_through_server(files, "SERVER PUNT ALL", /*punts=*/true);
 	check_single_player_console_line_rides_the_loopback(files);
+	check_server_rows_reach_their_arms(files);
 
 	// --- the authority's own stance rides its looped-back C2S 0x1D ----------
 	// The server handler latches the host's own player from the 0x1D its own

@@ -387,6 +387,21 @@ void test_command_entry() {
 	CHECK(std::string(chat_talk_row_token(kChatRowCommand2)) == "command2");
 	CHECK(chat_talk_row_dispatch(kChatRowCommand) == kChatDispatchCommand);
 	CHECK(chat_talk_row_dispatch(kChatRowCommand2) == kChatDispatchConsole);
+	// The host's side talks, catalog rows 90 / 91 (D-NET-NEW-LI-36): their record (a keylist
+	// key's, a typed token's) opens the side's line on a session's authority only.
+	// [orig: Input_HandleActionBinding @0x49AD40 - cases 104 / 105 @0x49BAB3..0x49BB12]
+	CHECK(std::string(chat_talk_row_token(kChatRowRed)) == "talkred");
+	CHECK(std::string(chat_talk_row_token(kChatRowBlue)) == "talkblue");
+	CHECK(chat_talk_row_dispatch(kChatRowRed) == kChatDispatchRed);
+	CHECK(chat_talk_row_dispatch(kChatRowBlue) == kChatDispatchBlue);
+	ChatEntryFacts side = live(300);
+	ChatEntry joiner_side;
+	CHECK(joiner_side.dispatch_rows(1u << kChatRowBlue, true, side, kText) == 0);
+	side.authority = true;
+	ChatEntry host_side;
+	CHECK(host_side.dispatch_rows(1u << kChatRowBlue, true, side, kText) ==
+					chat_entry_event::kBegan &&
+			host_side.open_dispatch() == kChatDispatchBlue);
 }
 
 // Every talk row past its arm's gates releases Caps Lock ahead of the debounce, so a debounced

@@ -62,7 +62,7 @@ uint32_t chat_input_line_color(int dispatch, bool mp_session_peer) {
 
 namespace {
 
-// [orig: the catalog rows 57..62 @0x8159cb — config tokens and dispatch codes]
+// [orig: the catalog rows 57..62, 71, 72, 90, 91 @0x8159cb — config tokens and dispatch codes]
 struct TalkRowSpec {
 	const char *token;
 	int dispatch;
@@ -76,6 +76,8 @@ constexpr TalkRowSpec kTalkRows[kChatTalkRowCount] = {
 	{ "ctalk", kChatDispatchCrew },
 	{ "command", kChatDispatchCommand },
 	{ "command2", kChatDispatchConsole },
+	{ "talkred", kChatDispatchRed },
+	{ "talkblue", kChatDispatchBlue },
 };
 
 } // namespace

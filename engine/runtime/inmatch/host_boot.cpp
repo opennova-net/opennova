@@ -46,6 +46,7 @@ ServerTextTable read_host_server_text(const mission::BootFileSource &files,
 	text.change_to_blue_format = get("C2Blue");
 	text.change_to_red_format = get("C2Red");
 	text.host_name = get("STRSRV19");
+	text.kicked = get("STRSRV18");
 	return text;
 }
 

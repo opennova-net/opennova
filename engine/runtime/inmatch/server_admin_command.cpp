@@ -393,4 +393,38 @@ uint32_t environment_time_from_hhmm(int32_t hhmm) {
 	return hour_word | minute_word;
 }
 
+bool Server_SetNetworkDelay(NapiNPServerCtx &ctx, int32_t delay_ticks) {
+	if (ctx.is_in_session == 0 || ctx.is_authority == 0) return false;
+	if (static_cast<uint32_t>(delay_ticks) > 100u) return false; // `ja` @0x50CBF0
+	// The sends to every in-match slot but the host's own (mask 0x90), each reliable.
+	const auto fan = [&ctx](uint8_t tag, const std::vector<uint8_t> &body) {
+		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
+			if (conn.link.mode == replication::TransportMode::Loopback) continue; // 0x10
+			conn.link.transport->host_send(tag, body);
+		}
+	};
+	std::vector<uint8_t> delay(4);
+	const uint32_t raw = static_cast<uint32_t>(delay_ticks);
+	for (int i = 0; i < 4; ++i) delay[static_cast<size_t>(i)] = static_cast<uint8_t>(raw >> (8 * i));
+	fan(s2c::NETWORK_DELAY, delay);
+	// 1000 * delay * holdoff in 32 bits, then the signed divide by 62.
+	const uint32_t holdoff = ctx.config.effective_send_holdoff_ticks();
+	const int32_t scaled = static_cast<int32_t>(holdoff * raw * 1000u);
+	const std::string text = "Delay set to " + std::to_string(scaled / 62) + "ms";
+	ChatBroadcast chat;
+	chat.channel = 0;
+	chat.sender_slot = kNoSenderSlot;
+	chat.text = text;
+	fan(s2c::CHAT_BROADCAST, encode_chat_broadcast(chat));
+	return true;
+}
+
+void Server_ForceRoundEndAndClearState(NapiNPServerCtx &ctx, world::World &world) {
+	Server_ProcessRoundEnd(ctx, world, 0);
+	ctx.round_wins[0] = 0;
+	ctx.round_wins[1] = 0;
+	ctx.rounds_played = 0;
+}
+
 } // namespace opennova::inmatch

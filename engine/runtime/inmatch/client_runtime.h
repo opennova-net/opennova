@@ -119,6 +119,13 @@ struct ClientProcessState {
 	// local_player_entity): bound by each mission start's Player_InitPlayer, never cleared.
 	// [orig: Player_InitPlayer @0x4E15F0 - the store @0x4E17EB]
 	uint16_t local_player_entity = 0xFFFFu;
+	// g_SaveScores: the savescores row's toggle (Role::dispatch_record), the command line's
+	// `/savescores` its other writer. Its readers arm a latch (dword_A85B78) that nothing
+	// reads, so the toggle's SYSTEM line is all it shows.
+	// [orig: g_SaveScores @0xB4C4D0 - its readers NapiNPClientMsg_0x056 @0x4321C9 and
+	//  @0x424780, both arming dword_A85B78 (@0x4321E4, @0x42479B), whose one other access
+	//  is ZoneTimers_ResetState's clear @0x4244A7; Game_ParseCommandLineAndInit @0x4A78C3]
+	bool save_scores = false;
 	// g_LoadoutWeaponNameList (world/weapon_inventory.h): the image's initializer until an
 	// armory ACCEPT or a 0x5A apply writes it; no session or mission start touches it. The
 	// host role binds its worlds to it (World::loadout_weapon_names).

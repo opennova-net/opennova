@@ -29,8 +29,8 @@ namespace opennova::hud {
 // [orig: the Input_HandleActionBinding jump-table cases].
 inline constexpr int kChatDispatchTeam = 100;   // row 60 Team (Y)
 inline constexpr int kChatDispatchGlobal = 101; // row 59 Global (Ctrl+T)
-inline constexpr int kChatDispatchRed = 104;    // host-only red talk (no stock row)
-inline constexpr int kChatDispatchBlue = 105;   // host-only blue talk (no stock row)
+inline constexpr int kChatDispatchRed = 104;    // row 90 talkred, the host's (no default key)
+inline constexpr int kChatDispatchBlue = 105;   // row 91 talkblue, the host's (no default key)
 inline constexpr int kChatDispatchCrew = 109;   // row 62 Crew (U)
 inline constexpr int kChatDispatchSquad = 110;  // row 61 Squad (Ctrl+Y)
 inline constexpr int kChatDispatchLocal = 111;  // row 58 Local (T)
@@ -143,7 +143,12 @@ inline constexpr uint32_t kCapsLockRelease = 0x40;
 // "talk" (Enter, dispatch 112), 58 "ltalk" (T, 111), 59 "gtalk" (Ctrl+T,
 // 101), 60 "stalk" (Y, 100), 61 "sqtalk" (Ctrl+Y, 110), 62 "ctalk" (U, 109),
 // and the command entry's 71 "command" (backquote, 1) and 72 "command2"
-// (Ctrl+backquote, 20); the scan @0x49d42f].
+// (Ctrl+backquote, 20); the scan @0x49d42f]. Then the host's two side talks, rows 90
+// "talkred" (Indonesian Talk, dispatch 104) and 91 "talkblue" (Joint Ops Talk, 105), flags
+// 0x04000000 and no default key: a keylist binding or a typed token queues their records,
+// which open the side's line on a session's authority (ChatEntry::dispatch)
+// (D-NET-NEW-LI-36) [orig: the catalog rows 90 @0x817FC3 and 91 @0x81802F;
+// Input_HandleActionBinding @0x49AD40 - cases 104 / 105 @0x49BAB3..0x49BB12].
 enum ChatTalkRow : int {
 	kChatRowTalk,
 	kChatRowLocal,
@@ -153,6 +158,8 @@ enum ChatTalkRow : int {
 	kChatRowCrew,
 	kChatRowCommand,
 	kChatRowCommand2,
+	kChatRowRed,
+	kChatRowBlue,
 	kChatTalkRowCount,
 };
 const char *chat_talk_row_token(int row);

@@ -874,11 +874,16 @@ struct WeaponReloadRequest {
 
 // One CHAT-ring line by its game-text key (WorldOutbox::hud_chat_lines); `system_ring`
 // posts it to the SYSTEM ring instead (Chat_AddMessageChannel2's, the cheat toggle's line).
+// `text`: with no key, the line as it is (a literal or a line the sim formatted); with a
+// key, the key's text with `text` as its $A token (hud::chat_format_player_tokens), as the
+// scope-scale toast's [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x31's
+// Chat_FormatPlayerTokens @0x4E05E9].
 struct HudChatLine {
     const char *section = "";
     const char *key = "";
     uint32_t argb = 0;
     bool system_ring = false;
+    std::string text;
 };
 
 struct HudRelay {

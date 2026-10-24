@@ -293,6 +293,68 @@ int main() {
         CHECK(t.current == 1);
     }
 
+    // --- the nextflag action: the other side's entry by the local team (D-NET-NEW-LI-36)
+    //     [orig: Input_HandleActionBinding @0x49AD40 - case 32 @0x49B6A7;
+    //     Spectator_CycleTargetByTeam @0x4DBF00 - the count @0x4DBF0A, the def-type leg
+    //     (0x10004) @0x4DBF26..0x4DC05F, the team leg (0x90002 / 0x10002) @0x4DC078..0x4DC1C0] ---
+    {
+        EntityRegistry reg;
+        reg.configure_pool(3, 8);
+        const auto entry = [&reg](int32_t item_id, uint32_t attrib, uint8_t team) {
+            Entity seed;
+            seed.has_item_def = true;
+            seed.item_id = item_id;
+            seed.item_attrib = attrib;
+            seed.team = team;
+            const EntityHandle h = reg.spawn(3, seed);
+            WaypointEntry e;
+            e.pool = static_cast<uint8_t>(h.pool());
+            e.node = h.slot();
+            return e;
+        };
+        const auto ctx = [&reg](uint32_t game_type) {
+            WaypointCycleContext c;
+            c.registry = &reg;
+            c.game_type = game_type;
+            return c;
+        };
+        // The def-type leg: team 1 looks for type 4093.
+        WaypointTrack t;
+        t.entries = {entry(4091, 0, 2), entry(4093, 0, 2), entry(100, 0, 2), entry(4093, 0, 2)};
+        t.current = 0;
+        t.cycle_by_team(false, ctx(0x10004u), 1);
+        CHECK(t.current == 1);
+        t.cycle_by_team(false, ctx(0x10004u), 1);
+        CHECK(t.current == 3);
+        t.cycle_by_team(false, ctx(0x10004u), 1); // past the last: from 0 up to the current
+        CHECK(t.current == 1);
+        t.cycle_by_team(true, ctx(0x10004u), 1); // below 1 nothing: from the last down to 1
+        CHECK(t.current == 3);
+        t.cycle_by_team(true, ctx(0x10004u), 1);
+        CHECK(t.current == 1);
+        t.cycle_by_team(false, ctx(0x10004u), 3); // a team past 2 steps nothing
+        CHECK(t.current == 1);
+        t.cycle_by_team(false, ctx(0x30020u), 1); // nor does another game type
+        CHECK(t.current == 1);
+        // The team leg: team 2 looks for a target (attrib 0x8000) of team 1.
+        WaypointTrack u;
+        u.entries = {entry(1, 0x8000u, 1), entry(1, 0, 1), entry(1, 0x8000u, 2),
+                entry(1, 0x8000u, 1)};
+        u.current = -1; // no selection reads as entry 0
+        u.cycle_by_team(false, ctx(0x10002u), 2);
+        CHECK(u.current == 3);
+        u.cycle_by_team(true, ctx(0x90002u), 2);
+        CHECK(u.current == 0);
+        u.cycle_by_team(true, ctx(0x90002u), 2); // the backward wrap takes the current itself last
+        CHECK(u.current == 3);
+        // One entry steps nothing.
+        WaypointTrack one;
+        one.entries = {entry(4093, 0, 2)};
+        one.current = -1;
+        one.cycle_by_team(false, ctx(0x10004u), 1);
+        CHECK(one.current == -1);
+    }
+
     // --- the show gate + clear ---
     {
         WaypointTrack t;
