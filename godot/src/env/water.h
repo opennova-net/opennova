@@ -213,6 +213,9 @@ public:
 	// water module, matching the retail data direction). Null before build().
 	Ref<Texture2D> get_noise_color_texture() const { return noise_color_tex_; }
 	MeshInstance3D *get_mesh_instance() const { return mesh_instance_; }
+	// How many frames rewrote the beauty strip's surface in place (_rewrite_strip_in_place): the
+	// device pin's read seam.
+	int64_t get_strip_surface_rewrites() const { return strip_surface_rewrites_; }
 	// The FrameFX bloom pass's nightvision redraw of the strip (the typed Q3
 	// WaterNightVision source): the same march with the nightvision row
 	// colors, drawn by no camera (layer mask 0), only by the Q3 pass.
@@ -325,6 +328,8 @@ private:
 	Array _strip_arrays() const;
 	static void _upload_strip(MeshInstance3D *p_mesh_instance, const Array &p_arrays,
 			const Ref<ShaderMaterial> &p_material);
+	bool _rewrite_strip_in_place(int p_rows);
+	void _strip_surface_rebuilt(int p_rows);
 	void _clear_strip_surfaces();
 	void _clear_night_vision_surfaces();
 	void _clear_inset_strip_surfaces();
@@ -378,6 +383,12 @@ private:
 	bool mirror_scene_outdoors_ = true;
 	bool built_ = false;
 	bool has_drawable_surface_ = false;
+	// The row count the beauty strip's surface was made with (0: none), the rewrite's byte
+	// streams, kept, and its count (an instrument).
+	int strip_surface_rows_ = 0;
+	PackedByteArray strip_vertex_bytes_;
+	PackedByteArray strip_attribute_bytes_;
+	int64_t strip_surface_rewrites_ = 0;
 	ObjectID env_node_id_;
 	ObjectID cached_cam_id_;
 	std::unique_ptr<WaterCore> water_core_;

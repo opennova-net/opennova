@@ -71,6 +71,8 @@ void Water::_bind_methods() {
 			&Water::get_noise_color_texture);
 	ClassDB::bind_method(D_METHOD("get_mesh_instance"),
 			&Water::get_mesh_instance);
+	ClassDB::bind_method(D_METHOD("get_strip_surface_rewrites"),
+			&Water::get_strip_surface_rewrites);
 	ClassDB::bind_method(D_METHOD("get_night_vision_mesh_instance"),
 			&Water::get_night_vision_mesh_instance);
 	ClassDB::bind_method(D_METHOD("get_reflection_viewport"),
@@ -876,7 +878,10 @@ void Water::advance_frame(double) {
 			_clear_strip_surfaces();
 		} else {
 			has_drawable_surface_ = true;
-			_upload_strip(mesh_instance_, _strip_arrays(), water_material_);
+			if (!_rewrite_strip_in_place(rows)) {
+				_upload_strip(mesh_instance_, _strip_arrays(), water_material_);
+				_strip_surface_rebuilt(rows);
+			}
 			// The witnessed per-side material swap: camera-above -> the blend
 			// material, underwater -> the opaque one — ported as the shader's
 			// u_underwater_view branch.
@@ -1409,8 +1414,51 @@ void Water::_upload_strip(MeshInstance3D *p_mesh_instance, const Array &p_arrays
 	mesh->surface_set_material(0, p_material);
 }
 
+// The beauty strip's surface rewritten in place, its device buffers kept, while the march keeps
+// the row count the surface was made with: the vertex and attribute streams take the march's
+// bytes (WaterCore::strip_surface_bytes, the server's own packing of the arrays a rebuild hands
+// it), the index stream stays (it is the row count's alone, env::water_strip_batches), and the
+// mesh's AABB is the march's, as a rebuild computes it. Retail writes its strip into the one
+// dynamic vertex buffer it keeps on every call (engine formats/env/env_water_render.h, the batch
+// contract, carries the witness); ours rebuilt the surface, its three buffers made and freed,
+// every frame (D-NET-NEW-LF-22). A server without a device (the headless
+// dummy) keeps no buffers to rewrite, so it takes the rebuild.
+bool Water::_rewrite_strip_in_place(int p_rows) {
+	if (p_rows != strip_surface_rows_ || mesh_instance_ == nullptr) {
+		return false;
+	}
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (rs->get_rendering_device() == nullptr) {
+		return false;
+	}
+	Ref<ArrayMesh> mesh = mesh_instance_->get_mesh();
+	if (mesh.is_null() || mesh->get_surface_count() != 1) {
+		return false;
+	}
+	AABB aabb;
+	water_core_->strip_surface_bytes(strip_vertex_bytes_, strip_attribute_bytes_, aabb);
+	mesh->surface_update_vertex_region(0, 0, strip_vertex_bytes_);
+	mesh->surface_update_attribute_region(0, 0, strip_attribute_bytes_);
+	rs->mesh_set_custom_aabb(mesh->get_rid(), aabb);
+	++strip_surface_rewrites_;
+	return true;
+}
+
+// A rebuilt surface holds its own AABB: the rewrite's stand-in goes.
+void Water::_strip_surface_rebuilt(int p_rows) {
+	strip_surface_rows_ = p_rows;
+	if (mesh_instance_ == nullptr) {
+		return;
+	}
+	Ref<ArrayMesh> mesh = mesh_instance_->get_mesh();
+	if (mesh.is_valid()) {
+		RenderingServer::get_singleton()->mesh_set_custom_aabb(mesh->get_rid(), AABB());
+	}
+}
+
 void Water::_clear_strip_surfaces() {
 	has_drawable_surface_ = false;
+	strip_surface_rows_ = 0;
 	if (mesh_instance_ == nullptr) {
 		return;
 	}
