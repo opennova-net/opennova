@@ -70,6 +70,9 @@ var _sort_column := NovaWorldServerBrowser.COLUMN_NAME
 var _sort_ascending := true
 var _can_login := false        # true once the gate reply gives us a startup_url
 var _logged_in := false
+var _signing_in := false       # a Login's post in flight
+# A left press landed on this sign-in field: its release over the field is the click.
+var _sign_in_press_field: LineEdit = null
 # Stashed at join time: the selected row's mission. joined_game carries the resolved address
 # plus the APPID join token and CD identity cookie, so we remember the mission (the joiner must
 # know the host's mission to load it) and pair them when the join resolves. The player's name is
@@ -160,9 +163,18 @@ func _bind_scene_ui() -> void:
 	_close_button.pressed.connect(_on_close_pressed)
 	_login_button.pressed.connect(_on_login_pressed)
 	_password_edit.text_submitted.connect(func(_text: String) -> void: _on_login_pressed())
-	# Typing in either sign-in field touches it: the remembered login's fill clears.
-	_username_edit.text_changed.connect(func(_text: String) -> void: _clear_remembered_login())
-	_password_edit.text_changed.connect(func(_text: String) -> void: _clear_remembered_login())
+	# The sign-in fields as the page's edits take input (engine: LobbyHttpFlow's remembered
+	# login): a click (a press and its release over the field) clears the remembered fill, a
+	# keystroke does not; a field takes the keyboard only from its own click or from its
+	# partner's Tab (the page's TAB actions), and each keystroke re-runs the submit gate. The
+	# page's edits take 16 characters (MAXCHAR="16") and have no context menu.
+	for edit: LineEdit in [_username_edit, _password_edit]:
+		edit.focus_mode = Control.FOCUS_CLICK
+		edit.max_length = 16
+		edit.context_menu_enabled = false
+		edit.text_changed.connect(func(_text: String) -> void: _refresh_sign_in_gate())
+	_username_edit.gui_input.connect(_on_username_input)
+	_password_edit.gui_input.connect(_on_password_input)
 	_filter_edit.text_changed.connect(func(_text: String) -> void: _rebuild_view())
 	_type_filter.clear()
 	_type_filter.add_item("All modes")
@@ -231,8 +243,24 @@ func _on_message_action_pressed() -> void:
 func _return_to_login() -> void:
 	_set_status("Connected. Sign in to continue.")
 	_set_screen(Screen.LOGIN)
+	# The page opens with no field holding the keyboard: one is taken by a click.
 	if _username_edit != null:
-		_username_edit.grab_focus()
+		_username_edit.release_focus()
+		_password_edit.release_focus()
+	_refresh_sign_in_gate()
+
+
+# A failed sign-in's way back: the sign-in page shown again, its fields as the page makes them
+# (empty) and its remembered fill re-run (engine: LobbyHttpFlow::reshow_sign_in).
+func _reshow_sign_in() -> void:
+	if _client != null:
+		_client.reshow_sign_in()
+	if _username_edit != null:
+		_username_edit.clear()
+		_password_edit.clear()
+		_password_edit.placeholder_text = ""
+	_return_to_login()
+	_apply_remembered_login()
 
 
 func _return_to_lobby() -> void:
@@ -367,6 +395,7 @@ func _reset_connection_state() -> void:
 		_login_button.disabled = true
 	_can_login = false
 	_logged_in = false
+	_signing_in = false
 	_rows = []
 	_view = []
 	_pings = {}
@@ -421,9 +450,7 @@ func _on_connected() -> void:
 		return # returning from a failed join; the typed failure owns the next screen
 	_can_login = true
 	_login_button.disabled = false
-	_set_status("Connected. Sign in to continue.")
-	_set_screen(Screen.LOGIN)
-	_username_edit.grab_focus()
+	_return_to_login()
 
 
 func _on_disconnected(reason: String) -> void:
@@ -695,23 +722,21 @@ func _on_login_pressed() -> void:
 		_show_message("Login is not available in this build.", "Back to Sign In",
 				Callable(self, "_return_to_login"), Screen.LOGIN)
 		return
-	if not _can_login:
-		return  # no session to sign in on (its Login is disabled; this guards Enter)
-	var user := _username_edit.text.strip_edges()
+	if not _can_login or _signing_in:
+		return  # no session, or a sign-in in flight (Login is disabled; this guards Enter)
+	var user := _username_edit.text
 	var pwd := _password_edit.text
-	# The sign-in page's remembered login, no field touched: its Login posts the remembered name,
-	# an empty password and the remembered data (engine: LobbyHttpFlow::login_remembered).
-	if pwd.is_empty() and _client.has_remembered_login():
-		_login_button.disabled = true
-		_set_status("Signing in as %s..." % user)
-		_client.login_remembered()
+	# The page's submit gate (DFX2's LOGIN; JO's ACCEPT posts whatever the fields hold).
+	if not _client.is_sign_in_submit_enabled(user, pwd):
 		return
-	if user.is_empty() or pwd.is_empty():
-		_show_message("Enter both your account name and password.", "Back to Sign In",
-				Callable(self, "_return_to_login"), Screen.LOGIN)
-		return
+	_signing_in = true
 	_login_button.disabled = true
 	_set_status("Signing in as %s..." % user)
+	# The sign-in page's remembered login, no field clicked: its Login posts the remembered name,
+	# an empty password and the remembered data (engine: LobbyHttpFlow::login_remembered).
+	if pwd.is_empty() and _client.has_remembered_login():
+		_client.login_remembered()
+		return
 	_client.login(user, pwd)
 
 
@@ -719,6 +744,7 @@ func _on_login_succeeded(nwhandle: String) -> void:
 	if not _can_login:
 		return  # the session was reset while the sign-in was in flight
 	_logged_in = true
+	_signing_in = false
 	_login_button.disabled = true
 	_password_edit.clear()
 	_host_button.disabled = _target == NovaWorldSettings.Target.REAL
@@ -737,10 +763,11 @@ func _on_login_failed(reason: String) -> void:
 	if not _can_login:
 		return  # the reset already reported the session
 	_logged_in = false
+	_signing_in = false
 	_password_edit.clear()
 	_login_button.disabled = false
 	_set_status("Sign-in failed.")
-	_show_message(reason, "Back to Sign In", Callable(self, "_return_to_login"), Screen.LOGIN)
+	_show_message(reason, "Back to Sign In", Callable(self, "_reshow_sign_in"), Screen.LOGIN)
 
 
 # --- Join (ADR 0010 Phase 5) --------------------------------------------
@@ -975,6 +1002,7 @@ func adopt_client(client: NovaWorldClient) -> void:
 		add_child(client)
 	_can_login = true
 	_logged_in = false
+	_signing_in = false
 	_wire_client(client)
 	client.stop_hosting()
 	client.stop_playing()
@@ -1009,23 +1037,67 @@ func _on_web_lobby_opened(signed_in: bool, nwhandle: String) -> void:
 
 
 # The sign-in page's remembered login (engine: LobbyHttpFlow::remembered_login_name): the name
-# fills the account box and the password box shows the masked placeholder until a field is typed in.
+# fills the account box, and while the fill stands the password box shows the masked placeholder
+# until a field is clicked (after a LOGIN press the name alone); then the submit gate.
 func _apply_remembered_login() -> void:
 	if _client == null or _username_edit == null or _password_edit == null:
 		return
-	if not _client.has_remembered_login():
-		return
-	_username_edit.text = _client.get_remembered_login_name()
-	_password_edit.placeholder_text = "********"
+	var remembered := _client.get_remembered_login_name()
+	if not remembered.is_empty():
+		_username_edit.text = remembered
+	if _client.has_remembered_login():
+		_password_edit.placeholder_text = "********"
+	_refresh_sign_in_gate()
 
 
-# A sign-in field typed in: the remembered login's fill clears (engine:
+# A sign-in field clicked: the remembered login's fill clears, then the submit gate (engine:
 # LobbyHttpFlow::clear_remembered_login).
 func _clear_remembered_login() -> void:
 	if _password_edit != null:
 		_password_edit.placeholder_text = ""
 	if _client != null:
 		_client.clear_remembered_login()
+	_refresh_sign_in_gate()
+
+
+# The page's submit gate over the fields as they stand (engine:
+# LobbyHttpFlow::sign_in_submit_enabled), on a connected session's sign-in page; a sign-in in
+# flight keeps Login disabled.
+func _refresh_sign_in_gate() -> void:
+	if _client == null or _login_button == null or not _can_login or _signing_in or _logged_in:
+		return
+	if _client.get_state() != NovaWorldClient.STATE_CONNECTED:
+		return
+	_login_button.disabled = not _client.is_sign_in_submit_enabled(
+			_username_edit.text, _password_edit.text)
+
+
+func _on_username_input(event: InputEvent) -> void:
+	_on_sign_in_field_input(_username_edit, _password_edit, event)
+
+
+func _on_password_input(event: InputEvent) -> void:
+	_on_sign_in_field_input(_password_edit, _username_edit, event)
+
+
+# A sign-in field's input as the page's edit takes it: a left press and its release over the
+# field is a click, which clears the remembered fill (a keystroke does not); Tab moves the
+# keyboard to the partner field (the page's TAB action), with no click.
+func _on_sign_in_field_input(field: LineEdit, partner: LineEdit, event: InputEvent) -> void:
+	var button := event as InputEventMouseButton
+	if button != null and button.button_index == MOUSE_BUTTON_LEFT:
+		if button.pressed:
+			_sign_in_press_field = field
+		else:
+			var over := Rect2(Vector2.ZERO, field.size).has_point(button.position)
+			if _sign_in_press_field == field and over:
+				_clear_remembered_login()
+			_sign_in_press_field = null
+		return
+	var key := event as InputEventKey
+	if key != null and key.pressed and key.keycode == KEY_TAB:
+		partner.grab_focus()
+		field.accept_event()
 
 
 ## A match that ended with an error text shows it in the NovaWorld error dialog

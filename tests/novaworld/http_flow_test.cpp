@@ -1476,6 +1476,116 @@ static bool test_remembered_login() {
 	return g_fail == 0;
 }
 
+// D-NET-NEW-L9-55: the sign-in page around the remembered login.
+// - The page shown again after a failed login re-runs the fill (the template's ACTIVATE), and its
+//   unclicked Login posts the fill through the start page when no page is shown.
+// - A page whose submit is LOGIN (DFX2's) has it enabled only with a NAME and a PASSWORD or the
+//   fill's placeholder; JO's ACCEPT is never gated.
+// - A LOGIN press marks the flag for good: the next fill fills the name alone and blanks the jar's
+//   cookie (so later Cookie var-lists carry it empty); JO's ACCEPT marks nothing.
+// [orig: UI_ProcessScriptBuffer @0x63CBE0 - the ACTIVATE event called @0x63D3B9;
+//  UI_LoadPersistentLoginCredentials @0x557330 - @0x5573C7, AddFormField called @0x557421;
+//  UI_ValidateLoginFields @0x557230 - @0x5572EC, @0x557300, @0x557304;
+//  UI_MarkLoginButtonPressed @0x557520]
+static bool test_sign_in_refill_gate_login_flag() {
+	nw::process_browser_cache().clear();
+	const std::string account = "ACCT";
+	std::vector<uint8_t> plain(account.begin(), account.end());
+	plain.push_back(0);
+	plain.push_back(static_cast<uint8_t>('x'));
+	plain.push_back(0);
+	const std::string cookie = nw::encode_key_chain(plain, nw::kRememberedLoginKeyChain);
+	const auto enter_sign_in = [&](nw::LobbyHttpFlow &f, const std::string &page) {
+		f.enter();
+		f.on_enter_response(true, 200,
+				{"Set-Cookie: EPASK=" + make_epask_cookie(),
+				 "Set-Cookie: PERSISTENTREMEMBERLOGINDATA=" + cookie},
+				bytes(kStartPage));
+		const nw::EnterResult entered = f.on_enter_response(true, 200, {}, bytes(page));
+		return entered.kind == nw::EnterResult::Kind::SignIn;
+	};
+	const auto jar_value = [](const nw::LobbyHttpFlow &f, const std::string &name) {
+		for (const auto &var : f.session_cookie_vars())
+			if (var.first == name) return var.second;
+		return std::string("<absent>");
+	};
+	nw::LobbyHttpContext jo = templated_ctx();
+	jo.remember_login = true;
+	nw::LobbyHttpContext dfx2 = jo;
+	dfx2.title = nw::title_identity(nw::gameprofile::GAME_DFX2);
+	dfx2.gate_tag = dfx2.title->gate_tag;
+	dfx2.startup_url = "http://[domainname]/nwprepare.dll?gt=[GT]&url=dfx2_0_start.htm";
+
+	// JO: the gate never closes; a failed typed login, the page shown again, the fill re-run.
+	nw::LobbyHttpFlow f;
+	f.set_context(jo);
+	if (!expect(enter_sign_in(f, jo_sign_in_page("1")), "refill: the entry lands on sign-in"))
+		return false;
+	expect(f.sign_in_submit_enabled("", ""), "JO's ACCEPT is not gated, empty fields included");
+	nw::LoginResult r = f.login("ACCT", "wrong");
+	expect(r.kind == nw::LoginResult::Kind::NeedRequest && !f.has_remembered_login(),
+	       "the typed login posts with the fill cleared");
+	r = f.on_login_response(true, 200, {},
+			bytes("<IB3_SUBST name=\"@GENERIC@\">The password is incorrect.</IB3_SUBST>"));
+	expect(r.kind == nw::LoginResult::Kind::Failed, "the post without a session tag fails");
+	f.reshow_sign_in();
+	expect(f.has_remembered_login() && f.remembered_login_name() == account,
+	       "the page shown again re-runs the fill from the jar's cookie");
+	r = f.login_remembered();
+	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest &&
+	                    r.request.method == nw::HttpMethod::Get,
+	            "with no page shown the unclicked Login opens the start page first"))
+		return false;
+	r = f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()),
+			bytes(kStartPage));
+	r = f.on_login_response(true, 200, {}, bytes(jo_sign_in_page("1")));
+	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest &&
+	                    r.request.method == nw::HttpMethod::Post,
+	            "then posts the sign-in page's form"))
+		return false;
+	expect(posted_plaintext(form_fields(r.request.body), "NAME") == account &&
+	               posted_plaintext(form_fields(r.request.body), "rememberlogindata") == cookie,
+	       "the post carries the remembered name and the cookie");
+	expect(jar_value(f, "PERSISTENTREMEMBERLOGINDATA") == cookie,
+	       "JO's ACCEPT marks no LOGIN press: the cookie stays in the jar");
+	f.reshow_sign_in();
+	expect(f.has_remembered_login(), "and a later fill is the full fill");
+
+	// DFX2: the LOGIN gate over the fields and the fill's placeholder.
+	nw::LobbyHttpFlow d;
+	d.set_context(dfx2);
+	if (!expect(enter_sign_in(d, kDfx2SignInPage), "DFX2: the entry lands on the sign-in page"))
+		return false;
+	expect(d.has_remembered_login(), "DFX2's page fills the remembered login");
+	expect(d.sign_in_submit_enabled("ACCT", ""), "a NAME with the placeholder shown enables LOGIN");
+	expect(!d.sign_in_submit_enabled("", ""), "no NAME: LOGIN disabled");
+	d.clear_remembered_login();
+	expect(!d.sign_in_submit_enabled("ACCT", ""),
+	       "the click hid the placeholder: a NAME alone leaves LOGIN disabled");
+	expect(d.sign_in_submit_enabled("ACCT", "pw") && !d.sign_in_submit_enabled("", "pw"),
+	       "a NAME and a PASSWORD enable it");
+
+	// DFX2: a LOGIN press marks the flag; the next fill fills the name and blanks the jar's cookie.
+	r = d.login("ACCT", "wrong");
+	expect(r.kind == nw::LoginResult::Kind::NeedRequest, "the LOGIN press posts");
+	expect(jar_value(d, "PERSISTENTREMEMBERLOGINDATA") == cookie,
+	       "the press itself leaves the jar alone (the flag acts at the next fill)");
+	d.on_login_response(true, 200, {},
+			bytes("<IB3_SUBST name=\"@GENERIC@\">The password is incorrect.</IB3_SUBST>"));
+	d.reshow_sign_in();
+	expect(d.remembered_login_name() == account && !d.has_remembered_login(),
+	       "after a LOGIN press the fill sets the name only: no placeholder, no rememberlogindata");
+	expect(jar_value(d, "PERSISTENTREMEMBERLOGINDATA").empty(),
+	       "and blanks the jar's PERSISTENTREMEMBERLOGINDATA: later Cookie lists carry it empty");
+	expect(!d.sign_in_submit_enabled("ACCT", ""),
+	       "with no placeholder a NAME alone keeps LOGIN disabled");
+	d.reshow_sign_in();
+	expect(d.remembered_login_name().empty() && !d.has_remembered_login(),
+	       "the blanked cookie decodes to nothing at the fill after");
+	nw::process_browser_cache().clear();
+	return g_fail == 0;
+}
+
 // NapiNP_DecodeEncryptedKeyValue: the key to the first NUL, the value past it; -1 for no value or
 // a string over its room. [orig: NapiNP_DecodeEncryptedKeyValue @0x619470 - @0x619552..0x619556,
 //  @0x61956E..0x619570, @0x619598..0x61959C]
@@ -1525,6 +1635,7 @@ int main() {
 	test_ib3_form_inputs();
 	test_sign_in_post_is_the_pages_form();
 	test_remembered_login();
+	test_sign_in_refill_gate_login_flag();
 	test_decode_key_value();
 	std::fprintf(stderr, g_fail == 0 ? "OK\n" : "FAILED (%d)\n", g_fail);
 	return g_fail == 0 ? 0 : 1;

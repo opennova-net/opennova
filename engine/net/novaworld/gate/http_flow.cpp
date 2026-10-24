@@ -827,9 +827,18 @@ LoginResult LobbyHttpFlow::login(const std::string &username, const std::string 
 	login_user_ = username;
 	login_pass_ = password;
 	login_poll_count_ = 0;
-	// Typed credentials touched the sign-in fields: any remembered fill is cleared
-	// (clear_remembered_login).
+	// Typed credentials follow a click on a sign-in field (no field holds the focus until one is
+	// clicked): any remembered fill is cleared (clear_remembered_login).
 	clear_remembered_login();
+	return submit_sign_in();
+}
+
+// [orig: UI_MarkLoginButtonPressed @0x557520 - g_LoginButtonPressed = 1 (the LOGIN press's
+//  callback; the press's FORM_POST action builds the post first, in the window's own handler,
+//  ahead of the callback chain: CWnd_EmitEventToNamedHandlerAndCallbacks @0x646970 - the handler
+//  @0x64698E, the chain from @0x6469C2)]
+LoginResult LobbyHttpFlow::submit_sign_in() {
+	if (sign_in_submit_is_login()) login_button_pressed_ = true;
 	// The sign-in page an entry landed on is the page shown: its submit posts its form under the
 	// EPASK the start page set, with no second open of the startup URL.
 	if (sign_in_page_shown_) return post_shown_sign_in();
@@ -845,6 +854,21 @@ LoginResult LobbyHttpFlow::login(const std::string &username, const std::string 
 	return login_request(std::move(req));
 }
 
+bool LobbyHttpFlow::sign_in_submit_is_login() const {
+	if (ctx_.title == nullptr || !ctx_.title->pages) return false;
+	const char *submit = ctx_.title->pages->sign_in_submit;
+	return submit != nullptr && std::string_view(submit) == "LOGIN";
+}
+
+// [orig: UI_ValidateLoginFields @0x557230 - the NAME / PASSWORD texts read @0x5572C8 / @0x5572D8,
+//  the NAME length's test @0x5572EC, the PASSWORD length's @0x557300, else CWnd_IsShown
+//  (STATIC_NW_PASSWORD_HIDDEN) called @0x557304]
+bool LobbyHttpFlow::sign_in_submit_enabled(const std::string &name,
+		const std::string &password) const {
+	if (!sign_in_submit_is_login()) return true;
+	return !name.empty() && (!password.empty() || !remember_fill_.empty());
+}
+
 LoginResult LobbyHttpFlow::post_shown_sign_in() {
 	sign_in_page_shown_ = false;
 	const std::string epask_refusal = take_epask({});
@@ -852,19 +876,18 @@ LoginResult LobbyHttpFlow::post_shown_sign_in() {
 	return login_post(sign_in_form_);
 }
 
-// See http_flow.h: the shown page's Login with no field touched posts its NAME edit (the
+// See http_flow.h: the sign-in page's Login with no field clicked posts its NAME edit (the
 // remembered name), its empty PASSWORD edit and the rememberlogindata edit (the cookie).
 LoginResult LobbyHttpFlow::login_remembered() {
 	if (login_active()) return login_fail("login already in flight");
 	if (ctx_.title == nullptr) return login_fail("no title identity to log in with");
 	const std::string refusal = title_identity_refusal(*ctx_.title, TitleIdentityPart::WebFlow);
 	if (!refusal.empty()) return login_fail(refusal);
-	if (!sign_in_page_shown_ || remember_fill_.empty())
-		return login_fail("no remembered login on the sign-in page");
+	if (remember_fill_.empty()) return login_fail("no remembered login on the sign-in page");
 	login_user_ = remembered_name_;
 	login_pass_.clear();
 	login_poll_count_ = 0;
-	return post_shown_sign_in();
+	return submit_sign_in();
 }
 
 // See http_flow.h. The cookie is found as the browser's getter finds it (the jar walked, the name
@@ -880,9 +903,11 @@ void LobbyHttpFlow::fill_remembered_login() {
 	constexpr std::size_t kCookieCopy = 0x1FF;
 	constexpr std::size_t kDecodedRoom = 0x200;
 	std::string cookie;
+	std::string cookie_name = "PERSISTENTREMEMBERLOGINDATA";
 	for (const std::string &name : jar_.names()) {
 		if (strutil::iequals(name, "PERSISTENTREMEMBERLOGINDATA")) {
 			cookie = jar_.find(name)->substr(0, kCookieCopy);
+			cookie_name = name;
 			break;
 		}
 	}
@@ -890,6 +915,17 @@ void LobbyHttpFlow::fill_remembered_login() {
 	if (!decode_key_value(cookie, kRememberedLoginKeyChain, account, second, kDecodedRoom, kDecodedRoom))
 		return;
 	remembered_name_ = account;
+	// After a LOGIN press the fill blanks the jar's cookie (the browser's form-field write, which
+	// updates the jar entry of that name in place) and shows no placeholder and no
+	// rememberlogindata (D-NET-NEW-L9-55).
+	// [orig: UI_LoadPersistentLoginCredentials @0x557330 - g_LoginButtonPressed tested @0x5573C7,
+	//  CUIBrowser_AddFormField(PERSISTENTREMEMBERLOGINDATA, "") called @0x557421;
+	//  CookieJar_UpdateFromURL @0x64E630 - the entry whose name String_CompareNoCase matches
+	//  replaced @0x64E7FF]
+	if (login_button_pressed_) {
+		jar_.set(cookie_name, std::string());
+		return;
+	}
 	remember_fill_ = cookie;
 }
 

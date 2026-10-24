@@ -295,12 +295,23 @@ public:
 	// PERSISTENTREMEMBERLOGINDATA (case-insensitively, its first 511 characters) and decodes it
 	// under kRememberedLoginKeyChain into the account name and a second string; decoded, the NAME
 	// edit takes the name, the masked password placeholder shows and the hidden rememberlogindata
-	// edit takes the cookie's value as it stands. The first touch of NAME, PASSWORD or the
-	// placeholder clears that edit and hides the placeholder (clear_remembered_login; a login with
-	// typed credentials is such a touch). The form post then sends NAME, the PASSWORD edit (empty
-	// when nothing was typed) and rememberlogindata, each EPASK-encrypted (login_remembered). LN-s6's
-	// S3 re-login: NAME, PASSWORD empty, rememberlogindata 1152 A-P characters decrypting to the
-	// cookie's 144.
+	// edit takes the cookie's value as it stands. The first click on NAME, PASSWORD or the
+	// placeholder clears that edit and hides the placeholder (clear_remembered_login): the click is
+	// the class-3 event the callbacks' mask 8 takes, where a keystroke is class 2 and a TAB action
+	// moves the focus with no event; no edit holds the focus until it is clicked, so every typed
+	// login follows such a click. The form post then sends NAME, the PASSWORD edit (empty when
+	// nothing was typed) and rememberlogindata, each EPASK-encrypted (login_remembered). LN-s6's S3
+	// re-login: NAME, PASSWORD empty, rememberlogindata 1152 A-P characters decrypting to the
+	// cookie's 144. A Login press on a page whose submit is the LOGIN control (DFX2's) marks the
+	// LOGIN flag for the process: every later fill fills the name only and blanks the jar's
+	// PERSISTENTREMEMBERLOGINDATA (D-NET-NEW-L9-55).
+	// [orig: CWnd_EmitEventToNamedHandlerAndCallbacks @0x646970 - a callback runs when its mask
+	//  holds 1 << (type >> 24) @0x6469B8; CWnd_ProcessMouseEvent @0x647A00 - a press and its
+	//  release over the window emit 0x3000001 (its vtable +0x1C called @0x647D15), the edits'
+	//  own (CEditWnd vtable 0x7E2614: +0x14 CWnd_ProcessMouseEvent, +0x1C the emitter);
+	//  CEditWnd_HandleInputEvent @0x661510 - the press 0x1000002 takes the focus @0x66161F, keys
+	//  0x2000001 / 0x2000002; CUIWidget_HandleScriptedAction @0x6497F0 - a TAB action on key 9
+	//  sets g_UIFocusWnd @0x649C50]
 	// [orig: UI_LoadPersistentLoginCredentials @0x557330 (the ENABLE_BACK_BUTTON callback
 	//  UI_RegisterNWMultiplayerCallbacks registers @0x559844; the sign-in template's ACTIVATE) -
 	//  the rememberLogin_4D4 test @0x557344, the cookie's read (CEffect_IncludeHandler_Open called
@@ -316,10 +327,29 @@ public:
 	//  STATIC_NW_PASSWORD_HIDDEN hidden (CWnd_SetShown called @0x5574A3), the REMEMBERLOGINDATA
 	//  edit's text "" (the call @0x5574CC), the flag set @0x5574D3]
 	void clear_remembered_login() { remember_fill_.clear(); }
-	// The shown sign-in page's Login with its remembered fill standing: the form posts the
-	// remembered name, an empty PASSWORD and the cookie in rememberlogindata. Failed when no
-	// sign-in page is shown or nothing is filled.
+	// The sign-in page's Login with its remembered fill standing: the form posts the remembered
+	// name, an empty PASSWORD and the cookie in rememberlogindata (through the start page when no
+	// sign-in page is shown, as login does). Failed when nothing is filled.
 	LoginResult login_remembered();
+	// The sign-in page shown again (a failed login's way back to it): the template's activation
+	// re-runs the remembered fill (D-NET-NEW-L9-55).
+	// [orig: UI_ProcessScriptBuffer @0x63CBE0 - the ACTIVATE control's 0x3000001 (its vtable +0x1C
+	//  called @0x63D3B9); UI_RegisterNWMultiplayerCallbacks @0x559800 -
+	//  UI_LoadPersistentLoginCredentials on ENABLE_BACK_BUTTON for every event class (mask -1),
+	//  registered @0x559855]
+	void reshow_sign_in() { fill_remembered_login(); }
+	// The sign-in page's submit gate. A page whose submit is the LOGIN control (TitlePages::
+	// sign_in_submit, DFX2's) has it enabled only with a NAME and a PASSWORD, or with a NAME and
+	// the remembered fill's placeholder shown; the validation runs at the fill, at the clear and at
+	// each keystroke in NAME or PASSWORD, so its state is this of the fields as they stand. A page
+	// with no LOGIN control (JO's ACCEPT) is never gated (D-NET-NEW-L9-55).
+	// [orig: UI_ValidateLoginFields @0x557230 - NAME, PASSWORD, LOGIN and STATIC_NW_PASSWORD_HIDDEN
+	//  looked up (no LOGIN: nothing set), the texts read (31 characters), 1 pushed @0x55730D or 0
+	//  @0x557311 for LOGIN's interactive state (UIWidget_SetInteractiveRecursive called @0x557315);
+	//  called from UI_LoadPersistentLoginCredentials @0x55744F and UI_ClearRememberedLoginFill
+	//  @0x5574CE, the NAME / PASSWORD event-4 callbacks registered
+	//  @0x559909 / @0x559927]
+	bool sign_in_submit_enabled(const std::string &name, const std::string &password) const;
 
 	// --- GSB server browser ---
 	// Build the GSB fetch (the title's server list, JO's jop_2.gsb?a=1) with the current cookies;
@@ -421,6 +451,11 @@ private:
 	LoginResult login_post(const std::vector<std::pair<std::string, std::string>> &form);
 	// The shown sign-in page's submit: its form posted under the start page's EPASK.
 	LoginResult post_shown_sign_in();
+	// A Login press: the shown page's submit, else the start page's open and its sign-in page's
+	// submit; on a page whose submit is LOGIN the press marks login_button_pressed_.
+	LoginResult submit_sign_in();
+	// The title's sign-in page submits with the LOGIN control (TitlePages::sign_in_submit).
+	bool sign_in_submit_is_login() const;
 	// The sign-in page's activation: the remembered login's fill (remembered_login_name).
 	void fill_remembered_login();
 	// The jar's EPASK bundle read into epask_, as the sign-in page's submit encrypts under it; the
@@ -450,8 +485,12 @@ private:
 	bool sign_in_page_shown_ = false;
 	std::vector<std::pair<std::string, std::string>> sign_in_form_;
 	// The shown sign-in page's remembered fill: the NAME edit's decoded account name and the
-	// rememberlogindata edit's value (the cookie), the latter empty once a field was touched.
+	// rememberlogindata edit's value (the cookie), the latter empty once a field was clicked.
 	std::string remembered_name_, remember_fill_;
+	// A LOGIN control was pressed (g_LoginButtonPressed: set by the press, never cleared; reset()
+	// keeps it, as the process global outlives a session).
+	// [orig: UI_MarkLoginButtonPressed @0x557520 (LOGIN's event-8 callback, registered @0x559963)]
+	bool login_button_pressed_ = false;
 	// The connect's identity set is in the jar (seed_identity_cookies: once per session).
 	bool identity_seeded_ = false;
 	// Each leg's last request's URL: the page its answer is, whose template it names.

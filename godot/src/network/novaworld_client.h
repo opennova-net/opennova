@@ -243,13 +243,16 @@ public:
 	// client carries onto every later request. Emits login_succeeded /
 	// login_failed. Session-only (nothing persisted).
 	void login(const String &username, const String &password);
-	// The shown sign-in page's remembered login (engine: LobbyHttpFlow's remembered login): its
-	// name for the account box, whether its fill stands, the clear a typed field runs, and the
-	// untouched Login's post (login_succeeded / login_failed as login's).
+	// The sign-in page's remembered login (engine: LobbyHttpFlow's remembered login): its name for
+	// the account box, whether its fill stands, the clear a click on a sign-in field runs, the
+	// unclicked Login's post (login_succeeded / login_failed as login's), the page shown again
+	// after a failed login (its fill re-run) and the page's submit gate over the fields.
 	String get_remembered_login_name() const;
 	bool has_remembered_login() const;
 	void clear_remembered_login();
 	void login_remembered();
+	void reshow_sign_in();
+	bool is_sign_in_submit_enabled(const String &name, const String &password) const;
 
 	// Join a hosted game (ADR 0010 Phase 5). Runs the NWJoin.dll HTTP handshake for
 	// the GSB row's `rid`, resolves the in-match host address, sends the

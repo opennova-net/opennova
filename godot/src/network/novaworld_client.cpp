@@ -136,6 +136,9 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_remembered_login"), &NovaWorldClient::has_remembered_login);
 	ClassDB::bind_method(D_METHOD("clear_remembered_login"), &NovaWorldClient::clear_remembered_login);
 	ClassDB::bind_method(D_METHOD("login_remembered"), &NovaWorldClient::login_remembered);
+	ClassDB::bind_method(D_METHOD("reshow_sign_in"), &NovaWorldClient::reshow_sign_in);
+	ClassDB::bind_method(D_METHOD("is_sign_in_submit_enabled", "name", "password"),
+			&NovaWorldClient::is_sign_in_submit_enabled);
 	ClassDB::bind_method(D_METHOD("join", "rid"), &NovaWorldClient::join);
 	ClassDB::bind_method(D_METHOD("start_hosting", "options"), &NovaWorldClient::start_hosting);
 	ClassDB::bind_method(D_METHOD("is_hosting"), &NovaWorldClient::is_hosting);
@@ -1228,7 +1231,19 @@ void NovaWorldClient::clear_remembered_login() {
 	flow_.clear_remembered_login();
 }
 
-// The shown sign-in page's untouched Login: the remembered fill's post (engine:
+// The sign-in page shown again after a failed login: its fill re-run (engine:
+// LobbyHttpFlow::reshow_sign_in).
+void NovaWorldClient::reshow_sign_in() {
+	sync_flow_context();
+	flow_.reshow_sign_in();
+}
+
+// The sign-in page's submit gate (engine: LobbyHttpFlow::sign_in_submit_enabled).
+bool NovaWorldClient::is_sign_in_submit_enabled(const String &name, const String &password) const {
+	return flow_.sign_in_submit_enabled(opennova::to_std(name), opennova::to_std(password));
+}
+
+// The sign-in page's unclicked Login: the remembered fill's post (engine:
 // LobbyHttpFlow::login_remembered).
 void NovaWorldClient::login_remembered() {
 	authenticated_ = false;

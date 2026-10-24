@@ -51,6 +51,10 @@ struct TitlePages {
 	const char *key_error = nullptr;         // NWJoin's needexpkey
 	const char *join = nullptr;              // NWJoin's success, the .joi
 	const char *server_list = nullptr;       // the GSB feed ("<name>?a=1")
+	// The sign-in page's submit control (its template's form-post button): the one the executable's
+	// LOGIN callbacks and its login validation name when it is "LOGIN" (LobbyHttpFlow::
+	// sign_in_submit_enabled, D-NET-NEW-L9-55).
+	const char *sign_in_submit = nullptr;
 };
 
 // The in-match code's per-title branches: the host and joiner code the JO-family executables share,

@@ -119,6 +119,8 @@ TitleIdentity jo_row() {
 	pages.key_error = "jop_2_key2err.htm";
 	pages.join = "jop_2_join.joi";
 	pages.server_list = "jop_2.gsb";
+	// jop_2_login.mnx's submit is ACCEPT: no LOGIN control.
+	pages.sign_in_submit = "ACCEPT";
 	t.pages = pages;
 	return t;
 }
@@ -252,6 +254,8 @@ TitleIdentity dfx2_row() {
 	pages.key_error = "dfx2_0_key2err.htm";
 	pages.join = "dfx2_0_join.joi";
 	pages.server_list = "dfx2_0.gsb";
+	// dfx2_0_login.mnx's submit is LOGIN (its FORM_POST to NWLogin.dll).
+	pages.sign_in_submit = "LOGIN";
 	t.pages = pages;
 	return t;
 }
