@@ -66,7 +66,31 @@ struct PoolPresentLifecycle {
 	bool dead_known = false;
 	bool dead = false;
 };
-using PoolPresentLifecycleMap = std::unordered_map<uint16_t, PoolPresentLifecycle>;
+// The records by pool slot (the packed handle): one fixed record per slot, as retail keeps a
+// row's state in its slot's own entity record, reached by pool base and stride
+// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 - the resolve @0x42EBA4..0x42EBC6], so a
+// presented row's record is an index, never a hash (D-NET-NEW-LF-22, LF-s18). A slot's record
+// exists from its row's first present; clear() forgets them all.
+class PoolPresentLifecycleMap {
+public:
+	PoolPresentLifecycle &operator[](uint16_t handle) {
+		if (slots_.empty()) slots_.resize(size_t{1} << 16);
+		Slot &slot = slots_[handle];
+		slot.used = true;
+		return slot.life;
+	}
+	const PoolPresentLifecycle *find(uint16_t handle) const {
+		return !slots_.empty() && slots_[handle].used ? &slots_[handle].life : nullptr;
+	}
+	void clear() { slots_.clear(); }
+
+private:
+	struct Slot {
+		PoolPresentLifecycle life;
+		bool used = false;
+	};
+	std::vector<Slot> slots_;
+};
 
 // The presented mission yaw of one pool row. Retail draws entity+0x10 (the
 // 32-bit engine-frame heading); the port keeps that mirror on the vehicle motor
