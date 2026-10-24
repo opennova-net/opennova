@@ -52,23 +52,12 @@ const ENGINE_SLOT_SAMPLES := {
 # Every FrameStats slot under the World tick (GameWorld.tick legs, the
 # awake-model walk, the occlusion frame, the sim step tree, traces, effects,
 # and the present rows) is sampled by prefix so one JSON carries the whole
-# world breakdown; the VALUE slots among them are counts, not spans.
-const WORLD_SLOT_PREFIXES := ["WORLD_", "MODEL_", "OCCL_", "SIM_", "TRACE_",
-		"EFFECTS_", "PRESENT_"]
-const WORLD_VALUE_SLOTS := [
-	"MODEL_AWAKE_MODELS",
-	"MODEL_RENDERABLE_MODELS",
-	"SIM_TICKS",
-	"TRACE_CALLS",
-	"TRACE_STATIC_SURVIVORS",
-	"TRACE_DYNAMIC_SURVIVORS",
-	"TRACE_PERSON_SURVIVORS",
-	"TRACE_STATIC_FACES",
-	"TRACE_DYNAMIC_FACES",
-	"PRESENT_MISSION_ROWS",
-	"PRESENT_MISSION_SUBMITTED_ROWS",
-	"PRESENT_MISSION_BODY_ROWS",
-]
+# world breakdown, and so is every slot of the frame outside it (the shell's
+# legs, the flush split by its queuer, the HUD tick's and draw's legs, the
+# render rows): the frame's whole split, inside the World tick and out. A slot
+# the board describes as a VALUE is a count (or a peak), not a span.
+const SLOT_PREFIXES := ["WORLD_", "MODEL_", "OCCL_", "SIM_", "TRACE_",
+		"EFFECTS_", "PRESENT_", "FRAME_", "HUD_", "RENDER_"]
 # Per-pass submission counts (objects), averaged per drained frame.
 const ENGINE_COUNT_SAMPLES := {
 	"nodes_freed": FrameStats.FRAME_NODES_FREED,
@@ -275,16 +264,22 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 func _index_slots() -> void:
 	_slot_samples = ENGINE_SLOT_SAMPLES.duplicate()
 	_count_samples = ENGINE_COUNT_SAMPLES.duplicate()
+	# The wall and the engine split already have their keys.
+	var keyed: Array = [FrameStats.FRAME_WALL]
+	keyed.append_array(ENGINE_SLOT_SAMPLES.values())
+	keyed.append_array(ENGINE_COUNT_SAMPLES.values())
 	for slot in range(FrameStats.SLOT_COUNT):
+		if keyed.has(slot):
+			continue
 		var slot_name := FrameStats.slot_name(slot)
 		var prefixed := false
-		for prefix in WORLD_SLOT_PREFIXES:
+		for prefix in SLOT_PREFIXES:
 			if slot_name.begins_with(prefix):
 				prefixed = true
 				break
 		if not prefixed:
 			continue
-		if WORLD_VALUE_SLOTS.has(slot_name):
+		if FrameStats.slot_description(slot).begins_with("VALUE"):
 			_count_samples[slot_name.to_lower()] = slot
 		else:
 			_slot_samples[slot_name.to_lower()] = slot
@@ -579,8 +574,8 @@ func _log_window(index: int, count: int, frames: int, summaries: Dictionary) -> 
 		if int(part["samples"]) > 0:
 			count_parts.append("%s %.1f" % [key, float(part["mean"])])
 	_ctx.log("  passes: " + " | ".join(count_parts))
-	# The world breakdown: every prefixed world span, ranked by mean, so the
-	# log alone names the heaviest rows.
+	# The frame's breakdown: every prefixed span (the World tick's and the frame's
+	# outside it), ranked by mean, so the log alone names the heaviest rows.
 	var ranked: Array = []
 	for key in _slot_samples:
 		if ENGINE_SLOT_SAMPLES.has(key):
@@ -592,7 +587,7 @@ func _log_window(index: int, count: int, frames: int, summaries: Dictionary) -> 
 	var world_parts := PackedStringArray()
 	for entry in ranked:
 		world_parts.append("%s %.3f/%.3f" % [entry[1], entry[0], entry[2]])
-	_ctx.log("  world (mean/p95 ms): " + " | ".join(world_parts))
+	_ctx.log("  slots (mean/p95 ms): " + " | ".join(world_parts))
 
 
 static func _output_path(ctx: ProbeContext, override: String, bms: String, label: String) -> String:
