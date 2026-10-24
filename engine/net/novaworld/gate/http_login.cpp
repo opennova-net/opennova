@@ -12,6 +12,9 @@
 #include <array>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
+#include <optional>
+#include <string_view>
 
 namespace opennova {
 
@@ -75,30 +78,122 @@ bool build_credentials_post_body(
 	return build_login_post_body(pub, fields, body);
 }
 
-std::vector<std::pair<std::string, std::string>>
-parse_set_cookie_values(const std::vector<std::string> &set_cookie_values) {
-	std::vector<std::pair<std::string, std::string>> out;
-	for (const auto &line : set_cookie_values) {
-		// Take the leading "name=value" pair, before the first attribute ';'.
-		const auto semi = line.find(';');
-		const std::string pair =
-		    semi == std::string::npos ? line : line.substr(0, semi);
-		const auto eq = pair.find('=');
-		if (eq == std::string::npos) continue;
-		// Trim surrounding whitespace from the name (some servers emit
-		// "Set-Cookie: NAME=..."); values are taken verbatim.
-		size_t name_begin = 0;
-		while (name_begin < eq && (pair[name_begin] == ' ' || pair[name_begin] == '\t')) {
-			++name_begin;
+namespace {
+
+// The CRT isspace of the "C" locale: space, then tab through carriage return.
+bool crt_isspace(char c) {
+	return c == ' ' || (c >= '\t' && c <= '\r');
+}
+
+// The header text as a C string: a byte at or past its end reads as its terminating NUL.
+struct CookieText {
+	std::string_view text;
+	char at(size_t p) const { return p < text.size() ? text[p] : '\0'; }
+	// The value-like run from `p` to ';', CR or NUL.
+	size_t run_end(size_t p) const {
+		while (at(p) != ';' && at(p) != '\r' && at(p) != '\0') ++p;
+		return p;
+	}
+	// String_CompareNoCaseN(text + p, word, len(word)) == 0.
+	bool starts_icase(size_t p, std::string_view word) const {
+		for (size_t i = 0; i < word.size(); ++i) {
+			if (strutil::ascii_tolower(at(p + i)) != strutil::ascii_tolower(word[i])) return false;
 		}
-		size_t name_end = eq;
-		while (name_end > name_begin &&
-		       (pair[name_end - 1] == ' ' || pair[name_end - 1] == '\t')) {
-			--name_end;
+		return true;
+	}
+	std::string slice(size_t from, size_t to) const {
+		from = std::min(from, text.size());
+		return std::string(text.substr(from, std::min(to, text.size()) - from));
+	}
+};
+
+// One cookie at `start`; false when it is refused. See parse_set_cookie_headers.
+// [orig: HttpCookie_Parse @0x658F60]
+bool parse_one_cookie(const CookieText &t, size_t start, CookieEntry &out) {
+	out = CookieEntry{};
+	size_t scan = start;
+	if (t.at(scan) != '=') {
+		char ch = t.at(scan);
+		while (ch != '\r' && ch != '\0') {
+			ch = t.at(++scan);
+			if (ch == '=') break;
 		}
-		if (name_end == name_begin) continue;
-		out.emplace_back(pair.substr(name_begin, name_end - name_begin),
-		                 pair.substr(eq + 1));
+		if (ch != '=') return false;
+	}
+	out.name = t.slice(start, scan);
+	size_t pos = scan + 1;
+	const size_t value_end = t.run_end(pos);
+	out.value = t.slice(pos, value_end);
+	pos = value_end;
+	for (;;) {
+		// A step past the terminating NUL reads past retail's buffer; the walk ends here.
+		if (pos >= t.text.size()) return true;
+		++pos;
+		while (crt_isspace(t.at(pos))) ++pos;
+		const size_t name_at = pos;
+		while (t.at(pos) != '=' && t.at(pos) != '\r' && t.at(pos) != '\0') ++pos;
+		if (t.starts_icase(name_at, "EXPIRES")) {
+			if (t.at(pos) != '=') return false;
+			// The 29 bytes from the attribute's own name; past the text its NUL ends them.
+			out.expires = t.slice(name_at, name_at + 29);
+			pos = t.run_end(pos + 1) + 29;
+		} else if (t.starts_icase(name_at, "PATH")) {
+			if (t.at(pos) != '=') return false;
+			const size_t end = t.run_end(pos + 1);
+			out.path = t.slice(pos + 1, end);
+			pos = end;
+		} else if (t.starts_icase(name_at, "DOMAIN")) {
+			if (t.at(pos) != '=') return false;
+			const size_t end = t.run_end(pos + 1);
+			out.domain = t.slice(pos + 1, end);
+			pos = end;
+		} else if (t.starts_icase(name_at, "SECURE")) {
+			out.secure = 1;
+			pos += 6;
+		}
+		if (t.at(pos) == '\r' && t.at(pos + 1) == '\n') return true;
+	}
+}
+
+// The path rule of the store: String_CompareNoCase(a, b) == 0, a null string equal only to a null
+// one. [orig: String_CompareNoCase @0x650000]
+bool same_nullable_icase(const std::optional<std::string> &a, const std::optional<std::string> &b) {
+	if (!a || !b) return !a && !b;
+	return strutil::iequals(*a, *b);
+}
+
+// String_SafeLen(s) == 0.
+bool nullable_empty(const std::optional<std::string> &s) {
+	return !s || s->empty();
+}
+
+bool is_root_path(const std::optional<std::string> &s) {
+	return s && strutil::iequals(*s, "/");
+}
+
+} // namespace
+
+std::vector<CookieEntry> parse_set_cookie_headers(const std::vector<std::string> &response_headers) {
+	std::string joined;
+	for (const std::string &line : response_headers) {
+		joined += line;
+		joined += "\r\n";
+	}
+	joined += "\r\n";
+	// The response is a C string to the browser: a NUL ends it.
+	joined.resize(std::strlen(joined.c_str()));
+	const CookieText t{joined};
+	std::vector<CookieEntry> out;
+	size_t from = 0;
+	for (;;) {
+		const size_t hit = strutil::ifind(t.text.substr(from), "SET-COOKIE");
+		if (hit == std::string_view::npos) break;
+		size_t cookie = from + hit + 12;
+		while (crt_isspace(t.at(cookie)) || t.at(cookie) == ':') ++cookie;
+		if (cookie >= t.text.size()) break;
+		from = cookie;
+		CookieEntry entry;
+		if (parse_one_cookie(t, cookie, entry)) out.push_back(std::move(entry));
 	}
 	return out;
 }
@@ -184,51 +279,58 @@ bool joi_endpoint_usable(const std::string &host_ip, long port) {
 }
 
 void CookieJar::set(const std::string &name, const std::string &value) {
-	auto it = values_.find(name);
-	if (it == values_.end()) {
-		order_.push_back(name);
-	}
-	values_[name] = value;
+	CookieEntry entry;
+	entry.name = name;
+	entry.value = value;
+	update({entry});
 }
 
-void CookieJar::merge_set_cookie_values(
-    const std::vector<std::string> &set_cookie_values) {
-	for (const auto &kv : parse_set_cookie_values(set_cookie_values)) {
-		set(kv.first, kv.second);
+void CookieJar::update(const std::vector<CookieEntry> &batch) {
+	if (batch.empty()) return;
+	if (entries_.empty()) {
+		entries_ = batch;
+		return;
+	}
+	for (const CookieEntry &entry : batch) {
+		bool matched = false;
+		for (CookieEntry &old : entries_) {
+			if (!strutil::iequals(old.name, entry.name)) continue;
+			if (!same_nullable_icase(old.path, entry.path) &&
+			    !(is_root_path(old.path) && nullable_empty(entry.path)) &&
+			    !(is_root_path(entry.path) && nullable_empty(old.path)))
+				continue;
+			old.value = entry.value;
+			matched = true;
+			break;
+		}
+		if (!matched) entries_.push_back(entry);
 	}
 }
 
 const std::string *CookieJar::find(const std::string &name) const {
-	auto it = values_.find(name);
-	return it == values_.end() ? nullptr : &it->second;
+	for (const CookieEntry &entry : entries_) {
+		if (strutil::iequals(entry.name, name)) return &entry.value;
+	}
+	return nullptr;
 }
 
 std::vector<uint8_t> CookieJar::build_prefixed_blob(const std::string &prefix) const {
 	std::vector<uint8_t> blob;
-	for (const std::string &name : order_) {
-		if (name.size() < prefix.size() ||
-		    name.compare(0, prefix.size(), prefix) != 0) {
+	for (const CookieEntry &entry : entries_) {
+		if (entry.name.size() < prefix.size() || entry.name.compare(0, prefix.size(), prefix) != 0)
 			continue;
-		}
-		const auto it = values_.find(name);
-		const std::string &value = it == values_.end() ? name : it->second;
-		blob.insert(blob.end(), name.begin(), name.end());
+		blob.insert(blob.end(), entry.name.begin(), entry.name.end());
 		blob.push_back(0);
-		blob.insert(blob.end(), value.begin(), value.end());
+		blob.insert(blob.end(), entry.value.begin(), entry.value.end());
 		blob.push_back(0);
 	}
 	return blob;
 }
 
 std::vector<std::string> CookieJar::cookie_header_lines() const {
-	// Retail emits one "Cookie: name=value;" header per cookie (trailing ';'),
-	// not a single merged line [orig: CUIBrowser_SendHTTPRequest @ 0x658840,
-	// per-entry sprintf "Cookie: %s=%s;"].
 	std::vector<std::string> lines;
-	lines.reserve(order_.size());
-	for (const auto &name : order_) {
-		lines.push_back(name + "=" + values_.at(name) + ";");
-	}
+	lines.reserve(entries_.size());
+	for (const CookieEntry &entry : entries_) lines.push_back(entry.name + "=" + entry.value + ";");
 	return lines;
 }
 
@@ -236,10 +338,8 @@ std::vector<std::string> CookieJar::cookie_header_lines() const {
 //  CookieJar_GetValueByName @0x64EA90]
 std::string novaworld_character_name(const CookieJar &jar) {
 	constexpr std::size_t kCharCopy = 31; // the getter's size, NUL included
-	for (const std::string &name : jar.names()) {
-		if (strutil::iequals(name, "CHAR")) return jar.find(name)->substr(0, kCharCopy);
-	}
-	return std::string();
+	const std::string *value = jar.find("CHAR");
+	return value != nullptr ? value->substr(0, kCharCopy) : std::string();
 }
 
 } // namespace opennova

@@ -646,15 +646,13 @@ std::vector<std::string> LobbyHttpFlow::post_headers(std::size_t content_length)
 	return h;
 }
 
-// [orig: merge_response_cookies()] — case-insensitive "set-cookie:" strip (11 chars) -> jar.
+// An answer's Set-Cookie headers as the browser stores them: parsed off the header text, then the
+// jar's store with the batch (none: no store).
+// [orig: HTTP_ResponseHandler @0x659480 - the batch built @0x65961B..0x6596CF,
+//  CookieJar_UpdateFromURL called @0x6596DD only when it holds an entry (@0x6596D1)]
 void LobbyHttpFlow::merge_response_cookies(const std::vector<std::string> &response_headers) {
-	std::vector<std::string> values;
-	for (const std::string &line : response_headers) {
-		if (begins_with(to_lower(line), "set-cookie:")) {
-			values.push_back(strip_edges(line.substr(11)));
-		}
-	}
-	if (!values.empty()) jar_.merge_set_cookie_values(values);
+	const std::vector<CookieEntry> batch = parse_set_cookie_headers(response_headers);
+	if (!batch.empty()) jar_.update(batch);
 }
 
 // The identity set as the jar takes it, ahead of every cookie a page sets. Two writers fill it
@@ -706,8 +704,8 @@ std::vector<std::pair<std::string, std::string>> LobbyHttpFlow::session_cookie_v
 		if (!cookies.find(kv.first) || is_locale_identity_var(kv.first)) cookies.set(kv.first, kv.second);
 	}
 	std::vector<std::pair<std::string, std::string>> vars;
-	vars.reserve(cookies.names().size());
-	for (const auto &name : cookies.names()) vars.emplace_back(name, *cookies.find(name));
+	vars.reserve(cookies.entries().size());
+	for (const CookieEntry &entry : cookies.entries()) vars.emplace_back(entry.name, entry.value);
 	return vars;
 }
 
@@ -904,14 +902,7 @@ void LobbyHttpFlow::fill_remembered_login() {
 	constexpr std::size_t kCookieCopy = 0x1FF;
 	constexpr std::size_t kDecodedRoom = 0x200;
 	std::string cookie;
-	std::string cookie_name = "PERSISTENTREMEMBERLOGINDATA";
-	for (const std::string &name : jar_.names()) {
-		if (strutil::iequals(name, "PERSISTENTREMEMBERLOGINDATA")) {
-			cookie = jar_.find(name)->substr(0, kCookieCopy);
-			cookie_name = name;
-			break;
-		}
-	}
+	if (const std::string *value = jar_.find("PERSISTENTREMEMBERLOGINDATA")) cookie = value->substr(0, kCookieCopy);
 	std::string account, second;
 	if (!decode_key_value(cookie, kRememberedLoginKeyChain, account, second, kDecodedRoom, kDecodedRoom))
 		return;
@@ -920,11 +911,10 @@ void LobbyHttpFlow::fill_remembered_login() {
 	// cookie (the browser's form-field write, which updates the jar entry of that name in place)
 	// and shows no placeholder and no rememberlogindata (D-NET-NEW-L9-55).
 	// [orig: UI_LoadPersistentLoginCredentials @0x557330 - g_LoginButtonPressed tested @0x5573C7,
-	//  CUIBrowser_AddFormField(PERSISTENTREMEMBERLOGINDATA, "") called @0x557421;
-	//  CookieJar_UpdateFromURL @0x64E630 - the entry whose name String_CompareNoCase matches
-	//  replaced @0x64E7FF]
+	//  CUIBrowser_AddFormField(PERSISTENTREMEMBERLOGINDATA, "") called @0x557421, the jar's
+	//  store (CookieJar::update) taking it]
 	if (login_button_pressed_) {
-		jar_.set(cookie_name, std::string());
+		jar_.set("PERSISTENTREMEMBERLOGINDATA", std::string());
 		return;
 	}
 	remember_fill_ = cookie;
@@ -1272,8 +1262,8 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 					r.cd_cookie.size(),
 					[&] {
 						size_t n = 0;
-						for (const std::string &nm : jar_.names())
-							if (nm.rfind("PUB", 0) == 0) ++n;
+						for (const CookieEntry &entry : jar_.entries())
+							if (entry.name.rfind("PUB", 0) == 0) ++n;
 						return n;
 					}());
 			return r;

@@ -5736,6 +5736,12 @@ add_test(NAME net_http_host_line COMMAND net_http_host_line_test)
 add_executable(npruntime_listing_net_quality_columns_test npruntime/listing_net_quality_columns_test.cpp)
 target_link_libraries(npruntime_listing_net_quality_columns_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_listing_net_quality_columns COMMAND npruntime_listing_net_quality_columns_test)
+# The menu browser's cookie jar as retail keeps it: the Set-Cookie parse, the store's match and the
+# by-name read (D-NET-NEW-L9-58).
+add_executable(cookie_jar_test novaworld/cookie_jar_test.cpp)
+target_link_libraries(cookie_jar_test PRIVATE opennova_net)
+target_include_directories(cookie_jar_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cookie_jar COMMAND cookie_jar_test)
 
 # --- parity lane LI (input seam) ---
 add_executable(inmatch_tick_input_source_test frame/tick_input_source_test.cpp)

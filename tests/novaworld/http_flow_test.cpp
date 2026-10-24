@@ -848,9 +848,9 @@ static bool test_host_leg_cookies() {
 			bytes("<HTML><HEAD><TITLE>[HOSTKEY=ABCDEFGHIJKLMNOP&]</TITLE></HEAD></HTML>"));
 	expect(r.kind == nw::HostKeyResult::Kind::Resolved && !f.host_active(), "cookies: the key resolves");
 
-	const std::size_t names = f.cookies().names().size();
+	const std::size_t names = f.cookies().entries().size();
 	r = f.host("EXPNAME");
-	expect(f.cookies().names().size() == names && f.cookies().names().back() == "EXP" &&
+	expect(f.cookies().entries().size() == names && f.cookies().entries().back().name == "EXP" &&
 	               *f.cookies().find("EXP") == "EXPNAME" &&
 	               r.request.headers.back() == "Cookie: EXP=EXPNAME;",
 	       "a second host leg updates both entries in place, EXP carrying the expansion's name");

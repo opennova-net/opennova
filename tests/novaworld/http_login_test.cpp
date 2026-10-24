@@ -150,35 +150,37 @@ int main() {
 
 	// ---- 2. Set-Cookie parse + jar carries identity onto later requests ----
 	{
+		// The answer's header lines as the transport hands them; the browser's parse reads them
+		// as the header text (parse_set_cookie_headers; cookie_jar_test pins its walk).
 		const std::vector<std::string> set_cookies = {
-		    "EPASK=12345:67890:1700000000000123456; Path=/",
-		    "YOURIP=203.0.113.7",
-		    "LOGINSESSIONTAG=NWServer:NWLogin.dll:SESSIONTAG:42:deadbeef; Path=/; HttpOnly",
-		    "NWHANDLE=TestPlayer; Path=/",
-		    "CHAR=TestPlayer; Path=/",
-		    "PCID=00000002; Expires=Wed, 09 Jun 2027 10:18:14 GMT",
-		    "EXPBITS=3",
+		    "Set-Cookie: EPASK=12345:67890:1700000000000123456; Path=/",
+		    "Set-Cookie: YOURIP=203.0.113.7",
+		    "Set-Cookie: LOGINSESSIONTAG=NWServer:NWLogin.dll:SESSIONTAG:42:deadbeef; Path=/; HttpOnly",
+		    "Set-Cookie: NWHANDLE=TestPlayer; Path=/",
+		    "Set-Cookie: CHAR=TestPlayer; Path=/",
+		    "Set-Cookie: EXPBITS=3",
 		};
-		const auto parsed = parse_set_cookie_values(set_cookies);
+		const std::vector<CookieEntry> parsed = parse_set_cookie_headers(set_cookies);
 		std::map<std::string, std::string> by_name;
-		for (const auto &kv : parsed) by_name[kv.first] = kv.second;
+		for (const CookieEntry &entry : parsed) by_name[entry.name] = entry.value;
 
-		check(by_name["NWHANDLE"] == "TestPlayer", "NWHANDLE parsed without attributes");
-		check(by_name["CHAR"] == "TestPlayer", "CHAR parsed without attributes");
-		check(by_name["PCID"] == "00000002", "PCID parsed, Expires attribute dropped");
+		check(parsed.size() == set_cookies.size(), "every Set-Cookie line parses");
+		check(by_name["NWHANDLE"] == "TestPlayer", "NWHANDLE's value stops at its ';'");
+		check(by_name["CHAR"] == "TestPlayer", "CHAR parsed");
 		check(by_name["LOGINSESSIONTAG"] == "NWServer:NWLogin.dll:SESSIONTAG:42:deadbeef",
-		      "LOGINSESSIONTAG keeps its colons, drops Path/HttpOnly");
+		      "LOGINSESSIONTAG keeps its colons");
 		check(by_name["EPASK"] == "12345:67890:1700000000000123456",
 		      "EPASK cookie value preserved");
+		check(parsed[0].path && *parsed[0].path == "/" && !parsed[1].path,
+		      "a Path attribute is kept, its absence a null path");
 
 		CookieJar jar;
-		jar.merge_set_cookie_values(set_cookies);
+		jar.update(parsed);
 		check(jar.find("NWHANDLE") != nullptr && *jar.find("NWHANDLE") == "TestPlayer",
 		      "jar stores NWHANDLE");
 		check(jar.find("CHAR") != nullptr && *jar.find("CHAR") == "TestPlayer",
 		      "jar stores CHAR");
-		check(jar.find("PCID") != nullptr && *jar.find("PCID") == "00000002",
-		      "jar stores PCID");
+		check(jar.find("nwhandle") != nullptr, "the by-name read ignores case");
 
 		// The per-cookie Cookie header lines the engine attaches to the
 		// subsequent GSB fetch must carry the post-login identity (resolves
@@ -193,8 +195,8 @@ int main() {
 		const std::string joined = join_lines(lines);
 		check(joined.find("NWHANDLE=TestPlayer;") != std::string::npos,
 		      "GSB-fetch cookie lines carry NWHANDLE with the trailing ';'");
-		check(joined.find("PCID=00000002;") != std::string::npos,
-		      "GSB-fetch cookie lines carry PCID with the trailing ';'");
+		check(joined.find("EXPBITS=3;") != std::string::npos,
+		      "GSB-fetch cookie lines carry EXPBITS with the trailing ';'");
 		// Each cookie is its own line, not a merged header.
 		for (const std::string &line : lines) {
 			check(line.find("; ") == std::string::npos && line.back() == ';',
