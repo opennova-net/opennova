@@ -908,15 +908,14 @@ void NovaWorldClient::sync_flow_context() {
 // HTTP/1.0.
 Error NovaWorldClient::ship_spec(HTTPRequest *http, const opennova::HttpRequestSpec &spec) {
 	PackedStringArray headers;
-	// The URL's host, with its port unless it is 80 (Godot's own Host rule).
+	// The URL's host with no port, as the menu browser writes it (engine: browser_request_host,
+	// D-NET-NEW-L9-49).
 	const std::size_t scheme = spec.url.find("://");
 	const std::size_t host_at = scheme == std::string::npos ? 0 : scheme + 3;
 	const std::size_t path_at = spec.url.find('/', host_at);
-	std::string authority = spec.url.substr(host_at,
+	const std::string authority = spec.url.substr(host_at,
 			path_at == std::string::npos ? std::string::npos : path_at - host_at);
-	if (authority.size() > 3 && authority.compare(authority.size() - 3, 3, ":80") == 0)
-		authority.resize(authority.size() - 3);
-	headers.push_back(opennova::to_gd("Host: " + authority));
+	headers.push_back(opennova::to_gd("Host: " + opennova::browser_request_host(spec.url)));
 	for (const std::string &h : spec.headers) {
 		headers.push_back(opennova::to_gd(h));
 	}

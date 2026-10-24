@@ -92,7 +92,13 @@ HttpReply http_exchange(const std::string &method, const std::string &url,
 	reply.connected = true;
 	const bool has_body = method != "GET";
 	std::string request = method + " " + path + " HTTP/1.0\r\n";
-	request += "Host: " + authority + "\r\n";
+	// A caller that names its own Host line (the NovaWorld menu browser's, which drops the URL's
+	// port: browser_request_host) gets none from the transport, its line leading the caller's.
+	bool host_given = false;
+	for (const std::string &line : headers) {
+		if (strutil::starts_with_icase(line, "Host:")) host_given = true;
+	}
+	if (!host_given) request += "Host: " + authority + "\r\n";
 	// A caller that places its own Content-Length (the NovaWorld web flow's form post, which writes
 	// it where the menu browser does) gets no second one.
 	bool length_given = false;

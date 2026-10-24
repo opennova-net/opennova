@@ -1378,4 +1378,13 @@ std::string browser_cache_bust_url(const std::string &url, uint32_t tick_ms,
 	return url + (has_query ? "&" : "?") + pair;
 }
 
+// See http_flow.h.
+std::string browser_request_host(const std::string &url) {
+	const std::string whole = url.substr(0, url.find('#'));
+	const std::size_t scheme = whole.find("://");
+	const std::size_t host_at = scheme == std::string::npos ? 0 : scheme + 3;
+	const std::size_t host_end = whole.find_first_of(":/", host_at);
+	return whole.substr(host_at, host_end == std::string::npos ? std::string::npos : host_end - host_at);
+}
+
 } // namespace opennova

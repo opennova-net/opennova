@@ -410,7 +410,11 @@ void Lister::ship(const HttpRequestSpec &spec) {
 			}
 			url = browser_cache_bust_url(url, world::frame_tick_count_ms(), server.ip);
 		}
-		return net::http_exchange(method, url, spec.headers, spec.body, kHttpTimeoutMs, resolve);
+		// The menu browser's Host line leads the flow's lines: the URL's host with no port
+		// (browser_request_host, D-NET-NEW-L9-49), where the transport would write the authority.
+		std::vector<std::string> headers{"Host: " + browser_request_host(spec.url)};
+		headers.insert(headers.end(), spec.headers.begin(), spec.headers.end());
+		return net::http_exchange(method, url, headers, spec.body, kHttpTimeoutMs, resolve);
 	});
 }
 

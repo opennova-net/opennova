@@ -62,6 +62,19 @@ struct HttpRequestSpec {
 std::string browser_cache_bust_url(const std::string &url, uint32_t tick_ms,
 		const std::array<uint8_t, 4> &server_ip);
 
+// The value of a menu-browser request's "Host:" line, which leads the lines past the request
+// line: the URL's host as the browser's URL parse cuts it, the text past its "//" up to the first
+// '/' or ':', so a port the URL names never rides it (the live login legs' URLs carry SessionInit's
+// "<ip>:80", their Host lines "<ip>"). The GET and the form post write the same field
+// (D-NET-NEW-L9-49).
+// [orig: CUIBrowser_SendHTTPRequest @0x658840 - the request's +0xC read @0x658952, "Host: %s"
+//  @0x658959 (sprintf called @0x65895F); GopherWebWidget_SendHttpPost @0x658B30 - +0xC read
+//  @0x658BA5, "Host: %s" @0x658BAE (sprintf called @0x658BB4); HTTP_RequestEnqueue @0x658460 -
+//  the URL's parsed components copied to the request's +8 @0x6584BC..0x6584C8; URL_ParseComponents
+//  @0x650140 - the fragment cut first (strchr '#' called @0x6501A7), the host's scan stopping at
+//  '/' @0x650332 or ':' @0x650336, its copy stored @0x650358, the port its own field @0x6503B6]
+std::string browser_request_host(const std::string &url);
+
 // The URL a page's META refresh names, as the menu browser's parser reads it ("" when none):
 // the last tag the element table takes as META whose HTTP-EQUIV is REFRESH, whole and
 // case-insensitively, and which has a CONTENT; in that CONTENT, "URL=" sought from its first ';',

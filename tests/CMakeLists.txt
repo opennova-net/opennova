@@ -5722,6 +5722,11 @@ add_test(NAME npruntime_host_boot_mission_start_update COMMAND npruntime_host_bo
 add_executable(npruntime_teardown_nwu_player_removed_test npruntime/teardown_nwu_player_removed_test.cpp)
 target_link_libraries(npruntime_teardown_nwu_player_removed_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_teardown_nwu_player_removed COMMAND npruntime_teardown_nwu_player_removed_test)
+# apps/common's HTTP transport writes no Host line of its own past a caller's: the serve's
+# NovaWorld legs carry the menu browser's port-less Host (D-NET-NEW-L9-49).
+add_executable(net_http_host_line_test serve/net_http_host_line_test.cpp)
+target_link_libraries(net_http_host_line_test PRIVATE opennova_app_common)
+add_test(NAME net_http_host_line COMMAND net_http_host_line_test)
 
 # --- parity lane LI (input seam) ---
 add_executable(inmatch_tick_input_source_test frame/tick_input_source_test.cpp)

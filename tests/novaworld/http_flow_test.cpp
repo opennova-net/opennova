@@ -783,6 +783,27 @@ static bool test_host_leg_origin() {
 	return g_fail == 0;
 }
 
+// D-NET-NEW-L9-49: a menu-browser request's Host line is the URL's host as the browser's URL parse
+// cuts it, past "//" to the first '/' or ':', so the port never rides it: LN-s6's S3 record shows
+// the retail client's login legs, whose URLs carry SessionInit's "<ip>:80", with "Host: <ip>".
+// [orig: CUIBrowser_SendHTTPRequest @0x658840 - +0xC read @0x658952, "Host: %s" @0x658959;
+//  GopherWebWidget_SendHttpPost @0x658B30 - @0x658BA5, @0x658BAE; URL_ParseComponents @0x650140 -
+//  @0x6501A7, @0x650332 / @0x650336, @0x650358, @0x6503B6]
+static bool test_browser_request_host() {
+	expect(nw::browser_request_host("http://198.51.100.7:80/NWLogin.dll") == "198.51.100.7",
+	       "a login leg's :80 never rides the Host line");
+	expect(nw::browser_request_host("http://198.51.100.7/jop_2_host1.htm") == "198.51.100.7",
+	       "a port-less URL's host is the whole authority");
+	expect(nw::browser_request_host("http://gs.opennova.test:8080/jop_2.gsb?a=1") ==
+	               "gs.opennova.test",
+	       "nor does any other port");
+	expect(nw::browser_request_host("http://gs.opennova.test") == "gs.opennova.test",
+	       "a URL with no path names its host");
+	expect(nw::browser_request_host("http://gs.opennova.test#frag") == "gs.opennova.test",
+	       "the fragment is cut ahead of the host's scan");
+	return g_fail == 0;
+}
+
 // D-NET-NEW-L9-48: the Host's open sets PLoad "" and EXP (the expansion's name) in the jar ahead
 // of its @HOST_URL@ lookup, appended after the login's cookies, so the host leg's requests and the
 // host request's Cookie var-list end with them: the LN S1 / S1d retail host legs' 32 cookies end
@@ -1370,6 +1391,7 @@ int main() {
 	test_login_template_legs();
 	test_host_leg_origin();
 	test_host_leg_cookies();
+	test_browser_request_host();
 	test_enter_reentry();
 	test_enter_seeds_identity_once();
 	test_ib3_form_inputs();
