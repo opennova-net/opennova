@@ -634,6 +634,23 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 		ui_kit::tooltip(!view.project.retail_directory.empty() ? "Files of the game install, copied into the project."
 		                                               : "Choose the game install folder in File > Project settings... first.");
 		if (!missions) whole_install();
+		// An expansion project imports an installed expansion's own files (list_installed_expansion_choices):
+		// one item for each expansion the game install has.
+		if (view.project.document && !view.project.document->expansion.standalone()) {
+			for (const ProjectView::InstallExpansion &installed : view.project.install_expansions) {
+				const std::string label = "The installed expansion " + installed.name + "...";
+				ImGui::BeginDisabled(!game_data);
+				if (ImGui::Selectable(label.c_str()) && game_data)
+					workspace_.request(request::import_installed_expansion(installed.name, view.project.retail_directory));
+				ImGui::EndDisabled();
+				ui_kit::tooltip("Every file of " + (installed.title.empty() ? installed.name : installed.title) +
+				                " as the game installs it, copied into the project under its expansion's name: its "
+				                "archives' files and its folder's" +
+				                (strutil::iequals(installed.name, view.project.document->expansion.name)
+				                         ? ", its version.txt too, which a joiner's game must match."
+				                         : "."));
+			}
+		}
 		const bool reimports =
 				!view.project.imports->empty() && view.allows(EditorRequestKind::Reimport);
 		ImGui::BeginDisabled(!reimports);

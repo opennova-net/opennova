@@ -131,6 +131,37 @@ std::vector<ImportChoice> list_retail_import_choices(const std::string &retail_r
 	return sources;
 }
 
+std::vector<ImportChoice> list_installed_expansion_choices(const std::string &install, const ProjectDocument &document,
+                                                          const std::string &expansion,
+                                                          std::vector<Diagnostic> &diagnostics,
+                                                          std::vector<ImportChoiceFacts> *facts) {
+	std::vector<ImportChoice> sources;
+	if (document.expansion.standalone()) {
+		diagnostics.push_back(make_finding(CoreFinding::ImportInstall, DiagnosticSeverity::Error,
+		                                   "Only an expansion project imports an installed expansion's files: give "
+		                                   "the project's expansion a name first."));
+		return sources;
+	}
+	if (install.empty()) {
+		diagnostics.push_back(make_finding(CoreFinding::ImportInstall, DiagnosticSeverity::Error,
+		                                   "Name the game install that holds the expansion " + expansion + "."));
+		return sources;
+	}
+	InstallView view;
+	std::string error;
+	if (!view.open(installed_expansion_spec(install, document, expansion), error)) {
+		diagnostics.push_back(make_finding(CoreFinding::ImportInstall, DiagnosticSeverity::Error, error));
+		return sources;
+	}
+	for (const InstallFile &file : view.files()) {
+		// The expansion's own, never the player's (its folder's gt.ssc: gameprofile/player_files.h).
+		if (file.layer != InstallFile::Layer::Expansion || gameprofile::is_player_file(file.name)) continue;
+		sources.push_back(install_choice(install, file, expansion));
+		if (facts) facts->push_back({file_kind_for_required_name(file.name, document.expansion.name), view.size(file)});
+	}
+	return sources;
+}
+
 namespace {
 
 // The names `spec`'s view of the install gives, sorted by their normalized form; none when it does
@@ -222,6 +253,7 @@ struct Output {
 	std::string staged_record;
 	std::string made_from;
 	std::vector<GraphEdge> textures;
+	ArchiveSlot archive = ArchiveSlot::None; // the install's archive it came from, as itself
 };
 
 // The folders from `dir` up that do not exist yet, the outermost first: what making `dir`
@@ -334,6 +366,9 @@ public:
 					break;
 				}
 				report_textures_left(outputs_, existing_, result_.diagnostics);
+				// The files the project holds as the install has them stay in the record whatever the
+				// publish comes to.
+				result_.archives = std::move(held_archives_);
 				phase_ = Phase::Publish;
 				break;
 			case Phase::Publish:
@@ -379,12 +414,16 @@ private:
 
 	// A source's bytes as the import reads them: the install's or an archive's file as its game
 	// loader is served it, a loose file from the disk. False, refused, when it cannot be read.
-	bool read(const ImportChoice &source, const std::string &name, std::vector<uint8_t> &bytes) {
+	bool read(const ImportChoice &source, const std::string &name, std::vector<uint8_t> &bytes,
+	          ArchiveSlot &archive) {
 		std::string io_error;
+		archive = ArchiveSlot::None;
 		if (source.install) {
-			// The install as the project imports it (its expansion's view): the file by the name the
-			// project gets, served by the member the choice names.
-			const InstallSpec spec = install_spec(source.path, document_);
+			// The install as the project imports it (its expansion's view), or the installed expansion the
+			// choice names: the file by the name the project gets, served by the member the choice names.
+			const InstallSpec spec = source.expansion.empty()
+			                                 ? install_spec(source.path, document_)
+			                                 : installed_expansion_spec(source.path, document_, source.expansion);
 			if (!install_.is_open() || install_.spec() != spec) {
 				std::string error;
 				if (!install_.open(spec, error)) {
@@ -397,6 +436,12 @@ private:
 				refuse(CoreFinding::ImportRead, "The game data has no file named " + name + ".", name);
 				return false;
 			}
+			// The archive it came from, where the project builds into that archive's set: a standalone
+			// project the base game's three, an expansion its pair (a base file an expansion imports is the
+			// base's to serve, lean packing's to leave out).
+			const bool own_layer = document_.expansion.standalone() ? file->layer == InstallFile::Layer::Base
+			                                                        : file->layer == InstallFile::Layer::Expansion;
+			archive = own_layer ? file->archive : ArchiveSlot::None;
 		} else if (source.entry.empty()) {
 			if (!io::read_file_bytes(source.path, bytes, io_error)) {
 				refuse(CoreFinding::ImportRead, io_error, name);
@@ -440,7 +485,8 @@ private:
 		// left as they are, other bytes refused unless the import replaces (below, for each file the
 		// source makes; S19, "The import a modder reads").
 		std::vector<uint8_t> bytes;
-		if (!read(source, name, bytes)) return;
+		ArchiveSlot archive = ArchiveSlot::None;
+		if (!read(source, name, bytes, archive)) return;
 		// What the source becomes: a converter's outputs (the source is not kept), or
 		// the file itself. A loose file is an author's source, and a file of the game install or an
 		// archive, or one a source marks native, the game's own, copied as the game reads it: an
@@ -521,12 +567,16 @@ private:
 			}
 			// A file the project holds with the same bytes is left as it is unless the
 			// import replaces.
+			// The install's member as itself (no converter made it) keeps the archive it came from.
+			const ArchiveSlot kept = !converter && output.name == name ? archive : ArchiveSlot::None;
 			const AssetEntry *prior = existing_.find(output.name);
 			if (prior && !replace_existing_) {
 				std::vector<uint8_t> held;
 				if (io::read_file_bytes(join_path(paths_.root, prior->relative_path), held, io_error) &&
-				    held == output.bytes)
+				    held == output.bytes) {
+					if (kept != ArchiveSlot::None) held_archives_[pff::normalized_logical_name(output.name)] = kept;
 					continue;
+				}
 				refuse(CoreFinding::ImportExists, output.name + " already exists; select Replace existing files to replace it.",
 				       output.name);
 				continue;
@@ -542,6 +592,7 @@ private:
 			planned.kind = kind;
 			planned.relative = relative;
 			planned.made_from = converter ? name : std::string();
+			planned.archive = kept;
 			// An import source's record, from the importer's defaults, is written with it (a record
 			// there stays). Where the record goes must take a file.
 			const Importer *record = nullptr;
@@ -637,6 +688,7 @@ private:
 		}
 		if (failed.empty()) {
 			result_.imported.push_back(output.relative);
+			if (output.archive != ArchiveSlot::None) result_.archives[pff::normalized_logical_name(output.name)] = output.archive;
 			published_any_ = true;
 			++next_output_;
 			return;
@@ -673,6 +725,7 @@ private:
 	bool failed_ = false;    // a write failed while staging: the import ended there
 	bool published_any_ = false;
 	std::set<std::string> selected_names_;
+	ArchiveRecord held_archives_; // the install's members the project holds with the same bytes
 	Vfs archive_;
 	std::string archive_path_;
 	InstallView install_; // the game install, as the project imports it

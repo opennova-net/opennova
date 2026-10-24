@@ -722,6 +722,11 @@ static int test_one_game_install() {
 	// Every file and a walk at once: a usage error, never a flag left unread (S14 R4).
 	TEST_EXPECT(run_usage(dir.file("err.txt"), {"import", root, "--all", "--with-dependencies"}, text) == 2 &&
 	            text.find("--with-dependencies") != std::string::npos);
+	// An installed expansion's files come with --all alone; a standalone project imports none, said.
+	TEST_EXPECT(run_usage(dir.file("err.txt"), {"import", root, "--expansion", "jox01"}, text) == 2 &&
+	            text.find("--expansion") != std::string::npos);
+	TEST_EXPECT(run_usage(dir.file("err.txt"), {"import", root, "--all", "--expansion", "jox01", "--entry", "a.bin"}, text) == 2);
+	TEST_EXPECT(run_capture(capture, {"import", root, install, "--all", "--expansion", "jox01", "--dry-run"}, text) != 0);
 	TEST_EXPECT(run_capture(capture, {"import", root, "--all", "--dry-run", "--rows"}, text) == 0);
 	TEST_EXPECT(has("take arial99.fnt (font) -> fonts/arial99.fnt, chosen, from the game install") &&
 	            has("take menumus.sbf (music_bank) -> ") && !has("game.cfg") && has("plan: 2 files to import, 0 not found"));

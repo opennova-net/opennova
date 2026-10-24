@@ -24,8 +24,9 @@ namespace opennova::editor {
 
 namespace {
 
-// The version text, which has one reader, the CRC a joiner must match: the project makes its own, so
-// the view never offers the install's, wherever it lies (S16).
+// The version text, which has one reader, the CRC a joiner must match: a project of another expansion makes
+// its own, so the view offers the install's only to a project that is that expansion (S16;
+// installed_expansion_spec).
 bool version_text(const std::string &name) {
 	const ExpansionFileRow &row = expansion_file_row(ExpansionFileRole::Version);
 	return strutil::iequals(name, expansion_file_name(row, std::string()));
@@ -52,6 +53,14 @@ std::map<std::string, std::string> renames_for(const std::string &installed, con
 InstallSpec install_spec(const std::string &root, const ProjectDocument &document) {
 	InstallSpec spec = base_install_spec(root, document);
 	spec.expansion = document.expansion.builds_on;
+	spec.project_expansion = document.expansion.name;
+	return spec;
+}
+
+InstallSpec installed_expansion_spec(const std::string &root, const ProjectDocument &document,
+                                     const std::string &expansion) {
+	InstallSpec spec = base_install_spec(root, document);
+	spec.expansion = expansion;
 	spec.project_expansion = document.expansion.name;
 	return spec;
 }
@@ -86,8 +95,10 @@ bool InstallView::open(const InstallSpec &spec, std::string &error) {
 	const std::map<std::string, std::string> renames = renames_for(spec.expansion, spec.project_expansion);
 	std::set<std::string> targets; // the names the renamed files take, which no other file of the view has
 	for (const auto &entry : renames) targets.insert(pff::normalized_logical_name(entry.second));
+	// The project is the installed expansion itself: its version text is the project's (installed_expansion_spec).
+	const bool own_version = !spec.expansion.empty() && strutil::iequals(spec.expansion, spec.project_expansion);
 	const auto add = [&](InstallFile file) {
-		if (version_text(file.member)) return;
+		if (version_text(file.member) && !own_version) return;
 		const auto renamed = renames.find(pff::normalized_logical_name(file.member));
 		if (renamed != renames.end()) file.name = renamed->second;
 		else if (targets.count(pff::normalized_logical_name(file.name))) return;
@@ -111,6 +122,12 @@ bool InstallView::open(const InstallSpec &spec, std::string &error) {
 		});
 		for (const std::string &loose : folder)
 			add({ loose, loose, InstallFile::Layer::Expansion, join_path(expansion_dir, loose) });
+		if (own_version) {
+			const std::string version = expansion_file_name(expansion_file_row(ExpansionFileRole::Version), std::string());
+			std::error_code exists;
+			if (fs::is_regular_file(system_path(join_path(expansion_dir, version)), exists))
+				add({ version, version, InstallFile::Layer::Expansion, join_path(expansion_dir, version) });
+		}
 	}
 	// The archives' files as the mount resolves them (the archives themselves left out, never the
 	// player's own files), each from the expansion's two archives or the base's.
@@ -119,12 +136,24 @@ bool InstallView::open(const InstallSpec &spec, std::string &error) {
 		return !spec.expansion.empty() && (strutil::iequals(archive, vfs_expansion_archive_name(spec.expansion, false)) ||
 		                                   strutil::iequals(archive, vfs_expansion_archive_name(spec.expansion, true)));
 	};
+	// The slot of the archive at `path` (the boot table's three, the expansion's pair), None for another.
+	const auto archive_slot_of = [&spec](const std::string &path) {
+		const std::string archive = utf8_of(path_of(path).filename());
+		if (!spec.expansion.empty()) {
+			if (strutil::iequals(archive, vfs_expansion_archive_name(spec.expansion, true))) return ArchiveSlot::Language;
+			if (strutil::iequals(archive, vfs_expansion_archive_name(spec.expansion, false))) return ArchiveSlot::Localres;
+		}
+		for (const ArchiveSlot slot : {ArchiveSlot::Language, ArchiveSlot::Localres, ArchiveSlot::Resource})
+			if (strutil::iequals(archive, archive_slot_file_name(slot))) return slot;
+		return ArchiveSlot::None;
+	};
 	for (const VfsFileLocation &location : vfs_.list_files()) {
 		if (strutil::ends_with_icase(location.logical_name, ".pff") || gameprofile::is_player_file(location.logical_name)) continue;
 		InstallFile file;
 		file.name = location.logical_name;
 		file.member = location.logical_name;
 		file.layer = expansion_archive(location.source_path) ? InstallFile::Layer::Expansion : InstallFile::Layer::Base;
+		if (location.source != VfsSource::LooseDir) file.archive = archive_slot_of(location.source_path);
 		add(std::move(file));
 	}
 	// The loose files the game reads by path from the install's folder.
@@ -184,12 +213,13 @@ std::shared_ptr<const InstallFileSource> base_game_files(const std::string &base
 	return std::make_shared<const InstallFileSource>(std::move(view));
 }
 
-ImportChoice install_choice(const std::string &root, const InstallFile &file) {
+ImportChoice install_choice(const std::string &root, const InstallFile &file, const std::string &expansion) {
 	ImportChoice choice;
 	choice.path = root;
 	choice.entry = file.member;
 	choice.install = true;
 	if (file.name != file.member) choice.as = file.name;
+	choice.expansion = expansion;
 	return choice;
 }
 

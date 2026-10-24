@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -54,6 +55,9 @@ struct BuildTarget {
 	std::string install;      // the base game the expansion plays over ("" when none is set)
 	std::string game;         // the project's target game (gameprofile code): the base's SCR key
 	std::string base_project; // the base game's project as the project file names it ("" the install's)
+	// The archive each imported game file came from (ProjectDocument::archives), which places it; null
+	// places every file by its kind.
+	std::shared_ptr<const ArchiveRecord> archives;
 	bool is_expansion() const { return !expansion.empty(); }
 };
 
@@ -126,7 +130,9 @@ struct BuildPlaceWords {
 	std::string words;
 	bool packed = false;
 };
-BuildPlaceWords build_place_words(const AssetEntry &asset, const std::string &expansion = std::string());
+// `archives`, the project's record of where its imported files came from (ProjectDocument::archives).
+BuildPlaceWords build_place_words(const AssetEntry &asset, const std::string &expansion = std::string(),
+                                  const ArchiveRecord *archives = nullptr);
 // The findings a plan is refused for (its diagnostics that block_build): what Problems marks "Blocks the
 // build", what the build_gate query lists and what a refused build names, in the plan's order.
 std::vector<Diagnostic> build_blockers(const BuildPlan &plan);

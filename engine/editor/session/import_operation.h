@@ -50,9 +50,16 @@ public:
 	const ImportResult &result() const { return result_; }
 	bool refreshed() const { return refresh_ != nullptr; }
 	ProjectRefresh &refresh() { return *refresh_; }
+	// The project file as the import left it: with the archives of the install's files it copied
+	// recorded (ProjectDocument::archives), saved before the refresh; whether that changed it.
+	const ProjectDocument &document() const { return document_; }
+	bool recorded() const { return recorded_; }
 
 private:
 	enum class Phase : uint8_t { Plan, Write, Refresh, Done };
+
+	// The result's archives merged into the project file and saved (recorded_ when that changed it).
+	void record_archives();
 
 	ProjectPaths paths_;
 	ProjectDocument document_;
@@ -67,6 +74,7 @@ private:
 	uint64_t write_done_ = 0, write_total_ = 0; // its files once it ended
 	ImportResult result_;
 	bool written_ = false;
+	bool recorded_ = false;
 	std::unique_ptr<ProjectRefresh> refresh_;
 	Phase phase_ = Phase::Plan;
 };

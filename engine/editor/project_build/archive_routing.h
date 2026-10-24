@@ -4,6 +4,7 @@
 
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/project/project_document.h>
 
 namespace opennova::editor {
 
@@ -16,7 +17,9 @@ namespace opennova::editor {
 // its outputs, named after it, landing where their own kinds' rows say; and a file of no kind the
 // game knows, which the game never asks for (S13 A8).
 ArchiveSlot route_asset(AssetKind kind);
-ArchiveSlot route_asset(const AssetEntry &asset);
+// With `record` (the project's ProjectDocument::archives), a file it names whose kind packs into an
+// archive goes into the archive it names.
+ArchiveSlot route_asset(const AssetEntry &asset, const ArchiveRecord *record = nullptr);
 
 // Where a build of the project as the expansion `<b>` (ADR 0046 S16) puts a file: an expansion is
 // the folder `expansion/<b>/` of an install, whose two archives the game opens under `/exp <b>` in
@@ -49,6 +52,10 @@ ExpansionPlace route_for_expansion(AssetKind kind);
 // loose first [orig: Expansion_ScanAndRegister @ 0x4a43d0, the search path @ 0x4a4492]; `version.txt`;
 // the music banks), and `gt.ssc`, read loose first from the folder [orig: Mission_LoadEncryptedConfig
 // @ 0x4cdcf4].
-ExpansionPlace route_for_expansion(const AssetEntry &asset, const std::string &expansion);
+// With `record`, a file it names whose kind packs into one of the two archives goes into the one it names
+// (Language <b>L.pff, the others <b>.pff), the expansion's own table too, which the rows below would copy
+// loose: the install held it there.
+ExpansionPlace route_for_expansion(const AssetEntry &asset, const std::string &expansion,
+                                   const ArchiveRecord *record = nullptr);
 
 } // namespace opennova::editor

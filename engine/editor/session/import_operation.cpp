@@ -7,6 +7,7 @@
 
 #include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
+#include <editor/project/project_document.h>
 #include <editor/session/import_controller.h>
 #include <editor/session/session_core.h>
 
@@ -41,7 +42,7 @@ bool ImportOperation::step(const StepBudget &budget) {
 		std::set<std::string> taken;
 		const auto key_of = [](const ImportChoice &source) {
 			return source.path + '\n' + source.entry + '\n' + (source.install ? '1' : '0') + (source.native ? '1' : '0') +
-			       '\n' + source.as;
+			       '\n' + source.as + '\n' + source.expansion;
 		};
 		for (const ImportPlanRow &row : new_plan_->rows)
 			if (row.state != ImportPlanRow::State::NotFound) taken.insert(key_of(row.source));
@@ -67,7 +68,8 @@ bool ImportOperation::step(const StepBudget &budget) {
 		result_ = import_->take();
 		import_.reset();
 		written_ = true;
-		if (result_.imported.empty()) {
+		record_archives();
+		if (result_.imported.empty() && !recorded_) {
 			phase_ = Phase::Done;
 			return true;
 		}
@@ -115,6 +117,27 @@ bool ImportOperation::cancellable() const {
 void ImportOperation::cancel() {
 	// What it staged goes; nothing was published (cancellable says so).
 	if (import_) import_->abandon();
+}
+
+void ImportOperation::record_archives() {
+	ProjectDocument document = document_;
+	for (const auto &[name, slot] : result_.archives) {
+		auto &held = document.archives[name];
+		if (held != slot) {
+			held = slot;
+			recorded_ = true;
+		}
+	}
+	if (!recorded_) return;
+	// Saved before the rescan, so the project the rescan reads, and the session takes, has it; one that
+	// cannot be written is said, the files kept.
+	Diagnostic error;
+	if (!save_project_document(paths_.project_file, document, error)) {
+		result_.diagnostics.push_back(error);
+		recorded_ = false;
+		return;
+	}
+	document_ = std::move(document);
 }
 
 OperationOutcome ImportOperation::finish(SessionCore &core) {

@@ -13,7 +13,7 @@
 //   opennova-project validate <dir>
 //   opennova-project create-missing <dir> [--role <token>]
 //   opennova-project import <dir> [<source>] [--entry <name>]... [--replace] [--with-dependencies]
-//                    [--all] [--dry-run [--rows]]
+//                    [--all [--expansion <name>]] [--dry-run [--rows]]
 //   opennova-project reimport <dir> [--force] [--source <path>]
 //   opennova-project new-terrain <dir> <name> --heightmap <file> --colormap <file> [--detail <file>]
 //                    [--tiles <file>] [--surface <file>] [--top <units>] [--water <units>]

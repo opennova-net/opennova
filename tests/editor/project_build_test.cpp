@@ -183,13 +183,13 @@ struct Project {
 		paths = ProjectPaths::for_root(root);
 		return true;
 	}
-	BuildPlan plan() {
+	BuildPlan plan(const BuildTarget &target = BuildTarget()) {
 		const AssetScan scan = scan_project_assets(paths, doc);
 		AssetGraph graph;
 		ValidationCache cache;
 		const std::vector<std::shared_ptr<const DocumentBase>> open;
 		return plan_build(paths, scan, evaluate_requirements(doc, scan),
-				validate_project({ paths, doc, scan, open }, graph, cache));
+				validate_project({ paths, doc, scan, open }, graph, cache), target);
 	}
 	bool fill() {
 		const AssetScan scan = scan_project_assets(paths, doc);
@@ -474,6 +474,48 @@ static int test_new_kinds_land_where_their_rows_say() {
 		if (d.code() == "build.unread" && d.asset == backup && d.severity == DiagnosticSeverity::Warning && !blocks_build(d)) ++said;
 	TEST_EXPECT(unread.ok && said == 1 && !in(unread.loose, backup.c_str()));
 	for (const BuildArchive &archive : unread.archives) TEST_EXPECT(!in(archive.entries, backup.c_str()));
+	return 0;
+}
+
+// The archive an import recorded (ProjectDocument::archives) places a file whose kind packs into one: a
+// stock install's voice line in language.pff where its kind's slot is localres.pff, an expansion's into
+// the pair's other archive, an expansion's table into the archive the install held it in (an install that
+// archives it never loads it as the override table). A loose kind keeps its place, and a file the record does
+// not name goes by its kind; the words the Files card shows, and the plan, follow it.
+static int test_recorded_archives() {
+	ArchiveRecord record;
+	record[opennova::pff::normalized_logical_name("voice.wav")] = ArchiveSlot::Language;
+	record[opennova::pff::normalized_logical_name("menumus.sbf")] = ArchiveSlot::Resource;
+	record[opennova::pff::normalized_logical_name("gametext.bin")] = ArchiveSlot::Resource;
+	record[opennova::pff::normalized_logical_name("JXM.bin")] = ArchiveSlot::Language;
+	const AssetEntry voice = entry_of("voice.wav", AssetKind::Wave);
+	TEST_EXPECT(route_asset(voice) == ArchiveSlot::Localres && route_asset(voice, &record) == ArchiveSlot::Language);
+	TEST_EXPECT(route_asset(entry_of("menumus.sbf", AssetKind::MusicBank), &record) == ArchiveSlot::Loose);
+	TEST_EXPECT(route_asset(entry_of("other.wav", AssetKind::Wave), &record) == ArchiveSlot::Localres);
+	TEST_EXPECT(route_asset(entry_of("GameText.bin", AssetKind::Strings), &record) == ArchiveSlot::Resource);
+	TEST_EXPECT(route_for_expansion(voice, "jxm") == ExpansionPlace::Archive &&
+	            route_for_expansion(voice, "jxm", &record) == ExpansionPlace::LanguageArchive);
+	TEST_EXPECT(route_for_expansion(entry_of("gametext.bin", AssetKind::Strings), "jxm", &record) == ExpansionPlace::Archive);
+	TEST_EXPECT(route_for_expansion(entry_of("JXM.bin", AssetKind::Strings), "jxm") == ExpansionPlace::Folder &&
+	            route_for_expansion(entry_of("JXM.bin", AssetKind::Strings), "jxm", &record) == ExpansionPlace::LanguageArchive);
+	TEST_EXPECT(build_place_words(voice).words == "Packed into localres.pff.");
+	TEST_EXPECT(build_place_words(voice, "", &record).words == "Packed into language.pff.");
+	TEST_EXPECT(build_place_words(voice, "jxm", &record).words == "Packed into expansion/jxm/jxmL.pff.");
+
+	Project p("opennova_editor_build_recorded_archives_test");
+	TEST_EXPECT(p.create() && p.fill());
+	TEST_EXPECT(test_io::write_text(p.root + "/sounds/voice.wav", "RIFF") && test_io::write_text(p.root + "/sounds/boom.wav", "RIFF"));
+	const auto in = [](const std::vector<BuildEntry> &entries, const char *name) {
+		for (const BuildEntry &entry : entries)
+			if (entry.logical_name == name) return true;
+		return false;
+	};
+	BuildTarget target;
+	target.archives = std::make_shared<const ArchiveRecord>(record);
+	const BuildPlan plan = p.plan(target);
+	TEST_EXPECT(plan.ok && plan.archives.size() == 3);
+	TEST_EXPECT(in(plan.archives[0].entries, "voice.wav") && !in(plan.archives[1].entries, "voice.wav"));
+	TEST_EXPECT(in(plan.archives[1].entries, "boom.wav"));
 	return 0;
 }
 
@@ -827,6 +869,19 @@ static int test_lean_packing() {
 	for (const fs::directory_entry &each : fs::directory_iterator(recased.build_dir + "/expansion", listed))
 		spelled = each.path().filename().string();
 	TEST_EXPECT(recased.ok && recased.build_id != report.build_id && spelled == "JXM");
+	// A file the install packed in the expansion's pair stays there however like the base's (the archive
+	// record, ProjectDocument::archives): the main.mnu the record names is packed, the gametext.bin it does
+	// not name still left out.
+	BuildTarget recorded = target;
+	auto record = std::make_shared<ArchiveRecord>();
+	(*record)[opennova::pff::normalized_logical_name("main.mnu")] = ArchiveSlot::Localres;
+	recorded.archives = record;
+	const BuildReport kept = run_build(plan_build(p.paths, scan_project_assets(p.paths, p.doc),
+	                                              evaluate_requirements(p.doc, scan_project_assets(p.paths, p.doc)), {},
+	                                              recorded, &base),
+	                                   p.paths.build_dir + "/recorded");
+	TEST_EXPECT(kept.ok && archive_has(kept.build_dir + "/expansion/jxm/jxm.pff", "main.mnu") &&
+	            !archive_has(kept.build_dir + "/expansion/jxm/jxmL.pff", "gametext.bin") && kept.same_as_base_files == 2);
 	// A base that does not mount fails the build.
 	BuildTarget gone = target;
 	gone.install = p.dir.file("no_install");
@@ -2033,6 +2088,7 @@ int main() {
 	failures += test_publish_waits_for_a_held_file();
 	failures += test_deep_output_root();
 	failures += test_expansion_routing();
+	failures += test_recorded_archives();
 	failures += test_expansion_layout();
 	failures += test_expansion_empty_pair();
 	failures += test_export();

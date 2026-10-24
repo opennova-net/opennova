@@ -117,6 +117,31 @@ static int test_on_disk_form_is_deterministic() {
 	Diagnostic error;
 	TEST_EXPECT(opennova::io::json_parse(with_menu, json, parse_error) && project_document_from_json(json, read, error));
 	TEST_EXPECT(read.features.mission && opennova::io::json_write(project_document_to_json(read)) == expected);
+	// The record of the archives the imported files came from: a list per archive, names normalized and in
+	// their order, written only where it names one (ProjectDocument::archives).
+	ProjectDocument recorded = doc;
+	recorded.archives["ADTV000.WAV"] = ArchiveSlot::Language;
+	recorded.archives["50CAL.TGA"] = ArchiveSlot::Localres;
+	recorded.archives["ABC.WAV"] = ArchiveSlot::Language;
+	const std::string with_archives = opennova::io::json_write(project_document_to_json(recorded));
+	TEST_EXPECT(with_archives.find("  \"archives\": {\n"
+	                               "    \"language\": [\n"
+	                               "      \"ABC.WAV\",\n"
+	                               "      \"ADTV000.WAV\"\n"
+	                               "    ],\n"
+	                               "    \"localres\": [\n"
+	                               "      \"50CAL.TGA\"\n"
+	                               "    ]\n"
+	                               "  },\n") != std::string::npos);
+	ProjectDocument back;
+	TEST_EXPECT(opennova::io::json_parse(with_archives, json, parse_error) && project_document_from_json(json, back, error) &&
+	            back.archives == recorded.archives);
+	// A name read in any case is the game's one name.
+	TEST_EXPECT(opennova::io::json_parse("{\"schema_version\": 2, \"project_id\": \"x\", \"title\": \"t\", "
+	                                     "\"archives\": {\"resource\": [\"Voice.wav\"]}}",
+	                                     json, parse_error) &&
+	            project_document_from_json(json, back, error) && back.archives.size() == 1 &&
+	            back.archives.at("VOICE.WAV") == ArchiveSlot::Resource);
 	// An expansion project's object, both keys written; a standalone one has none (above).
 	doc.expansion = { "jxm", "jox01" };
 	const std::string with = opennova::io::json_write(project_document_to_json(doc));
@@ -156,6 +181,22 @@ static int test_expansion_object() {
 	TEST_EXPECT(refused("{\"name\": \"my mod\"}", "project.field.invalid", "one word"));
 	TEST_EXPECT(refused("{\"name\": \"twelve_chars\"}", "project.field.invalid", "holds 11"));
 	TEST_EXPECT(refused("{\"name\": \"jxm\", \"builds_on\": \"a/b\"}", "project.field.invalid", "'/'"));
+	// The archives record: an object of the three lists, each of names an archive stores, a name in one.
+	const auto refused_record = [&](const std::string &object, const char *words) {
+		const std::string text = "{\"schema_version\": 2, \"project_id\": \"x\", \"title\": \"t\", \"archives\": " +
+		                         object + "}\n";
+		if (!test_io::write_text(paths.project_file, text)) return false;
+		ProjectDocument out;
+		Diagnostic why;
+		return !open_project(root, out, why) && why.code() == "project.field.invalid" &&
+		       why.message.find(words) != std::string::npos;
+	};
+	TEST_EXPECT(refused_record("[]", "must be an object"));
+	TEST_EXPECT(refused_record("{\"loose\": []}", "Unknown \"archives\" member \"loose\""));
+	TEST_EXPECT(refused_record("{\"language\": \"a.wav\"}", "must be a list of file names"));
+	TEST_EXPECT(refused_record("{\"language\": [3]}", "no name an archive stores"));
+	TEST_EXPECT(refused_record("{\"language\": [\"a_name_past_sixteen.wav\"]}", "no name an archive stores"));
+	TEST_EXPECT(refused_record("{\"language\": [\"a.wav\"], \"resource\": [\"A.WAV\"]}", "in two lists"));
 	// An installed expansion's name binds no archive name: only the mount's 31 characters.
 	TEST_EXPECT(test_io::write_text(paths.project_file,
 	        "{\"schema_version\": 2, \"project_id\": \"x\", \"title\": \"t\", \"expansion\": {\"name\": \"jxm\", "

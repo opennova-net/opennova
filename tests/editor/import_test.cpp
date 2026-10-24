@@ -862,6 +862,19 @@ static int test_install_source() {
 	TEST_EXPECT(row && row->state == RequirementState::Present);
 	std::string text, message;
 	TEST_EXPECT(view.project.scan->find("note.txt") && io::read_file_text(view.project.root + "/" + view.project.scan->find("note.txt")->relative_path, text, message) && text == "retail");
+	// The import records the archive each file came from (ProjectDocument::archives), in the project file:
+	// gametext.bin from resource.pff, where its kind's slot is language.pff, which the build follows.
+	{
+		const ArchiveRecord &record = view.project.document->archives;
+		TEST_EXPECT(record.size() == 2 && record.at("GAMETEXT.BIN") == ArchiveSlot::Resource &&
+		            record.at("NOTE.TXT") == ArchiveSlot::Resource);
+		ProjectDocument saved;
+		Diagnostic unread;
+		TEST_EXPECT(load_project_document(view.project.root + "/" + kProjectFileName, saved, unread) && saved.archives == record);
+		const AssetEntry *strings = view.project.scan->find("gametext.bin");
+		TEST_EXPECT(strings && build_place_words(*strings).words == "Packed into language.pff." &&
+		            build_place_words(*strings, std::string(), &record).words == "Packed into resource.pff.");
+	}
 	// A name the install does not have.
 	import.imports.clear();
 	source.entry = "absent.txt";
