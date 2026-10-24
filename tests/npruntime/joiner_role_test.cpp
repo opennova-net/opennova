@@ -56,6 +56,7 @@
 #include <base/io/bam.h>
 
 #include "../common/file_io.h"
+#include "../common/flat_floor.h"
 #include "../common/hull_brain.h"
 #include "../common/test_paths.h"
 
@@ -4109,6 +4110,10 @@ struct ArmClipSource final : w::IRootMotionSource {
 
 bool run_the_respawn_arm_resolves_nothing_in_the_receive() {
 	ArmClipSource clips;
+	// The terrain retail always has: the org2 update's gravity, its resolver and its fall and
+	// landing edges sit behind it (a rig with no terrain never reaches the resolver). The scene
+	// stands 10 units over it, so L is still falling through the release frame.
+	auto ground = std::make_unique<test_common::FlatFloor>();
 	Harness h;
 	auto &world = h.kernel->world;
 	world.registry.configure_pool(2, 4);
@@ -4121,9 +4126,10 @@ bool run_the_respawn_arm_resolves_nothing_in_the_receive() {
 	def::DefItemsFile items{defs, 2};
 	h.kernel->set_items_table(&items);
 	h.kernel->resolve_collision_instances();
-	// The wall at (16, 0, 0): one solid volume, its +Y face a quarter unit past the origin,
+	// The wall at (16, 0, 10): one solid volume, its +Y face a quarter unit past the origin,
 	// every other face 20 units off.
 	constexpr int32_t kOne = 65536;
+	constexpr int32_t kSceneZ = 10 * kOne;
 	w::CollisionModel model;
 	const auto plane = [&](int16_t x, int16_t y, int16_t z, int32_t dist) {
 		w::CollisionPlane p;
@@ -4151,7 +4157,7 @@ bool run_the_respawn_arm_resolves_nothing_in_the_receive() {
 	model.sections.push_back(section);
 	w::Entity building;
 	building.kind = w::EntityKind::Building;
-	building.position = {16.0f, 0.0f, 0.0f};
+	building.position = {16.0f, 0.0f, 10.0f};
 	building.heading = w::placed_heading_bam(90); // the identity rotation
 	building.bound_radius = 30.0f;
 	building.alive = true;
@@ -4166,14 +4172,14 @@ bool run_the_respawn_arm_resolves_nothing_in_the_receive() {
 	self_row.cls = EntityClass::Player;
 	self_row.type_id = w::kPlayerInfantryTypeId;
 	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
-	// Every record's sample is the frame anchor, (16, 0, 0): a quarter unit into the wall.
+	// Every record's sample is the frame anchor, (16, 0, 10): a quarter unit into the wall.
 	auto frame = [&](int16_t health, uint8_t state_flags) {
 		FrameUpdate fu;
 		fu.carried_handle = 0xFFFF;
 		fu.health = health;
 		fu.anchor_x = 16 * kOne;
 		fu.anchor_y = 0;
-		fu.anchor_z = 0;
+		fu.anchor_z = kSceneZ;
 		FrameUpdateRecord rec;
 		rec.handle = 0x0005;
 		rec.type_id = w::kPlayerInfantryTypeId;
@@ -4199,10 +4205,10 @@ bool run_the_respawn_arm_resolves_nothing_in_the_receive() {
 		return false;
 	// L's corpse 1.25 units off the +Y face, its slice built there and its savedLivePose stamped
 	// there; its hit words set.
-	local->position.set_q16({16 * kOne, kOne + kOne / 2, 0});
+	local->position.set_q16({16 * kOne, kOne + kOne / 2, kSceneZ});
 	local->saved_live_pos[0] = 16 * kOne;
 	local->saved_live_pos[1] = kOne + kOne / 2;
-	local->saved_live_pos[2] = 0;
+	local->saved_live_pos[2] = kSceneZ;
 	local->saved_live_valid = true;
 	// The bound radius L's model init stamps, which the contact force's clamp reads (a zero
 	// radius clamps every push to nothing). [orig: Entity_InitFromModel @0x40DC30 - the +0
@@ -4227,7 +4233,10 @@ bool run_the_respawn_arm_resolves_nothing_in_the_receive() {
 	local->flags |= w::kEntityFlagInAir;
 	local->engine_flags |= w::kEntityFlagInAir;
 	world.ai.root_motion = &clips;
-	// The release: the record alive again; its receive's respawn arm lands L at (16, 0, 0).
+	world.tables.terrain = &ground->field;
+	world.ai.terrain = &ground->field;
+	h.kernel->collision.terrain = &ground->field;
+	// The release: the record alive again; its receive's respawn arm lands L at (16, 0, 10).
 	h.socket.datagrams.clear();
 	frame(100, 0x00);
 	local = world.registry.get(world.cached.local_player);
