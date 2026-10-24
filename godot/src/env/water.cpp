@@ -77,6 +77,8 @@ void Water::_bind_methods() {
 			&Water::get_reflection_viewport);
 	ClassDB::bind_method(D_METHOD("get_reflection_camera"),
 			&Water::get_reflection_camera);
+	ClassDB::bind_method(D_METHOD("warm_reflection_target", "camera"),
+			&Water::warm_reflection_target);
 	ClassDB::bind_method(D_METHOD("get_night_vision_material"),
 			&Water::get_night_vision_material);
 	ClassDB::bind_method(D_METHOD("get_inset_reflection_viewport"),
@@ -693,6 +695,37 @@ void Water::build() {
 	inset_material_->set_shader_parameter("u_reflection", inset_rtt);
 	inset_material_->set_shader_parameter("u_has_reflection", false);
 	_sync_render_activity();
+}
+
+// Retail makes the reflection target and its surfaces with the mission start's render
+// subsystems, ahead of the first frame (engine mission/mission_load_plan.h carries the
+// witness, D-NET-NEW-LF-23). The rig's device objects are made at its first draw, so that draw
+// runs in the load's forced frame through the frame's own install (the world's rendering opens
+// at the load's end, so the world-active gate is not read here); UPDATE_ONCE drops back to
+// UPDATE_DISABLED past the draw, and the first real frame installs and arms the mirror as every
+// frame does.
+bool Water::warm_reflection_target(Camera3D *p_camera) {
+	if (!built_ || !mirror_enabled_ || mirror_.viewport == nullptr || mirror_.camera == nullptr ||
+			p_camera == nullptr || !p_camera->is_inside_tree() || !is_inside_tree()) {
+		return false;
+	}
+	MissionEnvironment *env = _env_node();
+	if (env != nullptr && env->is_loaded()) {
+		_apply_environment_water_height();
+	}
+	if (!is_water_active()) {
+		return false;
+	}
+	const DrawingView drawing = _drawing_view(p_camera);
+	if (drawing.camera == nullptr) {
+		return false;
+	}
+	_update_reflection_camera(drawing.camera, drawing.projection, drawing.frame_perspective);
+	if (!TargetProjectionXrInterface::is_serving(mirror_.viewport)) {
+		return false;
+	}
+	mirror_.viewport->set_update_mode(SubViewport::UPDATE_ONCE);
+	return true;
 }
 
 void Water::_build_mirror_rig(MirrorRig &r_rig, const String &p_viewport_name,

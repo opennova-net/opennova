@@ -114,6 +114,13 @@ public:
 	// ImageTextures can otherwise outlive RenderingServer/GDExtension
 	// deinitialization.
 	void release_runtime_renderer_resources();
+	// The reflection target's first render, in the load's one forced frame: the mirror view
+	// through the view p_camera draws (the frame's own install, its projection served) and
+	// the target armed for that draw alone, so its render buffers, its pass's pipelines and
+	// the projection interface's first serve are made in the load, as retail makes its
+	// reflection target and surfaces with the mission start's render subsystems. A mission
+	// with no water, a mirror switched off or no camera arms nothing. Returns whether it armed.
+	bool warm_reflection_target(Camera3D *p_camera);
 
 	// g_EnvWaterHeightFixed == 0 is retail's no-water sentinel for the water's
 	// own draws alone: the surface, the mirror (its clip arm with it) and the

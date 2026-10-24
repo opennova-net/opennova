@@ -4,7 +4,8 @@ extends GutTest
 # what the first revealed frame would otherwise build and compile: the local body and its view model
 # and the wire walk's cold identities, made, drawn and freed inside the load (D-NET-NEW-LF-15), and
 # the shell's HUD, which the load's HUD legs built and loaded, mounted for that frame alone with its
-# draw submitted at once (D-NET-NEW-LF-16). The frame runs ahead of the local player's birth on every
+# draw submitted at once (D-NET-NEW-LF-16), and the water's reflection target, armed for that frame's
+# draw (D-NET-NEW-LF-23; water_reflection_warm_test.gd pins the arming). The frame runs ahead of the local player's birth on every
 # role (a host's and a single player's Player_InitPlayer runs in the mission start past the device
 # stages, a joiner's at the push past its load), so the body and the view model warm from the
 # identity and the kit the birth will bind: the local profile's character and the staged spawn kit.
@@ -143,10 +144,11 @@ func test_the_forced_frame_draws_the_local_models_and_the_hud_ahead_of_the_birth
 		var view_model := names.find("view_model")
 		var wire := names.find("wire_identities")
 		var hud_leg := names.find("hud_pipelines")
+		var mirror := names.find("water_mirror")
 		var frame := names.find("forced_draw_1")
 		assert_true(person >= 0 and person < body and body < view_model and view_model < wire
-				and wire < hud_leg and hud_leg < frame,
-				"the body, the view model and the wire identities, then the HUD, then the one frame: %s"
+				and wire < hud_leg and hud_leg < mirror and mirror < frame,
+				"the body, the view model and the wire identities, the HUD, the water's reflection target, then the one frame: %s"
 				% [names])
 		assert_gt(names.find("mission_start"), frame,
 				"L's birth, the mission start's, runs past the frame: %s" % [names])

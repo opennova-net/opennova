@@ -1765,6 +1765,13 @@ int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTim
 		leg("hud_pipelines");
 		emit_signal(kSignalHudPipelineWarm, true);
 		leg_end();
+		// The water's reflection target draws in the same frame through the view the first frame
+		// installs, so its render buffers, its pass's pipelines and its projection's first serve
+		// are made here and not in the first frames past the reveal (engine
+		// mission/mission_load_plan.h carries the witness, D-NET-NEW-LF-23).
+		leg("water_mirror");
+		if (water_ != nullptr) water_->warm_reflection_target(cam);
+		leg_end();
 		RenderingServer *rs = RenderingServer::get_singleton();
 		leg("forced_draw_1");
 		rs->force_draw(true);

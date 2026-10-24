@@ -80,7 +80,16 @@
 //    skinned models its first revealed frame would otherwise build (the local
 //    body, its view model, one model per identity the wire walk cold-spawns),
 //    freed past it, so their meshes, rigs and pipelines are made in the load
-//    (GameWorld's person_pipelines leg, D-NET-NEW-LF-15); the frame runs ahead of
+//    (GameWorld's person_pipelines leg, D-NET-NEW-LF-15); the water's
+//    reflection target draws once in the same frame, so its render buffers, its
+//    pass's pipelines and its projection's first serve are made in the load, as
+//    retail makes the target and its surfaces with the mission start's render
+//    subsystems (GameWorld's water_mirror leg, D-NET-NEW-LF-23)
+//    [orig: Game_StartMission @0x524360 - Render_InitRenderingSubsystems called
+//    @0x5259D1; Render_InitRenderingSubsystems @0x586EE0 -
+//    Water_CreateReflectionRenderTarget called @0x586F4E;
+//    Water_CreateReflectionRenderTarget @0x5C08B0 - GTexRT_Construct called
+//    @0x5C091F, GRenderTarget_CreateSurfaces called @0x5C0937]; the frame runs ahead of
 //    L's birth on every role (a host's and a single player's Player_InitPlayer in
 //    the mission start past the device stages, a joiner's at the push past the
 //    load), so the body and view model are the identity and kit the birth will
