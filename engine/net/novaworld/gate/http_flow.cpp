@@ -1208,6 +1208,15 @@ HostKeyResult LobbyHttpFlow::on_host_response(bool transport_ok, int code,
 			template_answered(host_template_, transport_ok, code, response_headers, body))
 		return std::move(*held);
 	if (host_step_ == HostStep::Idle) return host_fail("host response with no pending step");
+	// The HOSTKEY page's refresh is the browser's page alone: its answer, or its failure, settles
+	// the leg.
+	if (host_step_ == HostStep::Page) {
+		host_step_ = HostStep::Idle;
+		if (transport_ok) merge_response_cookies(response_headers);
+		HostKeyResult settled;
+		settled.kind = HostKeyResult::Kind::Settled;
+		return settled;
+	}
 	if (!transport_ok || code != 200) {
 		host_step_ = HostStep::Idle;
 		const std::string message = extract_message(body);
@@ -1232,6 +1241,28 @@ HostKeyResult LobbyHttpFlow::on_host_response(bool transport_ok, int code,
 		HostKeyResult r;
 		r.kind = HostKeyResult::Kind::Resolved;
 		r.host_key = parsed.host_key;
+		// The HOSTKEY page refreshes (JO's to jop_2_host3.htm, "10;"), and the menu browser follows
+		// it at its next frame whatever the delay (the deadline slip D-NET-NEW-L9-31 ports for the
+		// .joi page). The page's event 7 runs the host request's wait first, inside the page's
+		// processing, so the refresh goes out once that wait has ended, its result what it may (the
+		// LN S1 / S1b / S1c / S1d retail hosts GET jop_2_host3.htm 0.25 to 6.3 s after the HOSTKEY
+		// page's answer).
+		// [orig: UI_ProcessWebResponseContent @0x63D450 - the refresh to the scene's +0x3C
+		//  @0x63D501, the title's event 7 (CUIScene_RaiseEvent called @0x63D634);
+		//  UI_DispatchScreenEvent @0x54E6A0 - case 7's CNapiGameSession_ConnectOrHost called
+		//  @0x54F33B, its wait inside; CUIScene_EndFrame @0x63E600 - `cmp eax, [esi+40h]`
+		//  @0x63E626, UIScene_OpenUrl called @0x63E635]
+		const std::string next = meta_refresh_url(html);
+		const std::string refresh = next.empty() ? std::string() : absolute_url(next);
+		if (!refresh.empty()) {
+			host_step_ = HostStep::Page;
+			r.request.valid = true;
+			r.request.method = HttpMethod::Get;
+			r.request.url = refresh;
+			r.request.headers = request_headers();
+			r.request.cache_bust = true;
+			host_page_url_ = refresh;
+		}
 		return r;
 	}
 	// A relay page refreshes to the next one, which the menu browser follows behind the page's

@@ -538,7 +538,32 @@ static bool test_host_resolves() {
 	r = f.on_host_response(true, 200, {}, bytes(host2));
 	if (!expect(r.kind == nw::HostKeyResult::Kind::Resolved, "the HOSTKEY title resolves")) return false;
 	expect(r.host_key == "ABCDEFGHIJKLMNOP", "the key is trimmed at '&' then ']'");
-	expect(!f.host_active(), "the host leg is idle once resolved");
+	// The HOSTKEY page's refresh, which the owner ships once the host request's wait ends: the LN
+	// S1 / S1b / S1c / S1d retail hosts GET jop_2_host3.htm after it whatever its "10;" delay.
+	// [orig: CUIScene_EndFrame @0x63E600 - @0x63E626, UIScene_OpenUrl called @0x63E635;
+	//  UI_DispatchScreenEvent @0x54E6A0 - ConnectOrHost called @0x54F33B]
+	expect(r.request.valid && r.request.method == nw::HttpMethod::Get && r.request.cache_bust &&
+	               r.request.url == "http://gs.opennova.test:8080/jop_2_host3.htm",
+	       "the resolve carries the HOSTKEY page's refresh GET");
+	expect(f.host_active(), "the leg waits for the refresh's answer");
+	r = f.on_host_response(true, 200, set_cookie("YOURIP=10.0.0.9"), bytes("<HTML>host3</HTML>"));
+	expect(r.kind == nw::HostKeyResult::Kind::Settled && !f.host_active(),
+	       "the refresh's answer settles the leg");
+	expect(f.cookies().find("YOURIP") != nullptr, "and its cookies merge");
+	{
+		// A HOSTKEY page with no refresh resolves with no request and an idle leg.
+		nw::LobbyHttpFlow g;
+		g.set_context(concrete_ctx());
+		g.login("player", "secret");
+		g.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
+		g.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t"), relay_to("NWLogin.dll"));
+		g.on_login_response(true, 200, {"Set-Cookie: NWHANDLE=P"}, bytes(main_page));
+		g.host();
+		const nw::HostKeyResult bare = g.on_host_response(true, 200, {},
+				bytes("<HTML><HEAD><TITLE>[HOSTKEY=QRSTUVWXYZ&]</TITLE></HEAD></HTML>"));
+		expect(bare.kind == nw::HostKeyResult::Kind::Resolved && !bare.request.valid && !g.host_active(),
+		       "a HOSTKEY page with no refresh leaves nothing to fetch");
+	}
 
 	// A message page fails with its rendered text; a refresh loop gives up.
 	r = f.host();

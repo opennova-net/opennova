@@ -282,6 +282,14 @@ void Lister::disconnect() {
 // [orig: CNapiGameSession_HandleHostVerifyResponse @0x4d5c52..0x4d5c58]
 void Lister::on_listed() {
 	phase_ = Phase::Hosting;
+	// The host request's wait ended: the menu's next frame opens the HOSTKEY page's refresh
+	// (engine: LobbyHttpFlow::on_host_response's Resolved request carries the witness). A failed
+	// request ends the lister, so only the listed one fetches it.
+	if (host_page_.valid && !http_.valid()) {
+		ship(host_page_);
+		host_page_in_flight_ = true;
+	}
+	host_page_ = HttpRequestSpec{};
 	io::logf(LogLevel::kInfo, "[host] listed: '%s', %zu player(s)",
 			registration().server_name.c_str(), role_.roster().size());
 	source_.on_host_result(true, std::string());
@@ -309,6 +317,12 @@ void Lister::on_verified() {
 
 void Lister::on_http_reply(const net::HttpReply &reply) {
 	if (!reply.transport_ok) io::logf(LogLevel::kWarn, "[http] %s", reply.error.c_str());
+	// The HOSTKEY page's refresh (on_listed): its answer settles the flow's host leg.
+	if (host_page_in_flight_) {
+		host_page_in_flight_ = false;
+		flow_.on_host_response(reply.transport_ok, reply.code, reply.headers, reply.body);
+		return;
+	}
 	if (phase_ == Phase::LoggingIn) {
 		const LoginResult r = flow_.on_login_response(reply.transport_ok, reply.code, reply.headers, reply.body);
 		if (r.kind == LoginResult::Kind::NeedRequest) {
@@ -346,6 +360,8 @@ void Lister::on_http_reply(const net::HttpReply &reply) {
 		}
 		host_key_ = r.host_key;
 		io::logf(LogLevel::kInfo, "[http] HOSTKEY %s", mask_value(host_key_, 6).c_str());
+		// The HOSTKEY page's refresh goes out once the host request's wait ends (on_listed).
+		host_page_ = r.request;
 		request_host();
 	}
 }

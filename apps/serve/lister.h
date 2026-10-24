@@ -149,6 +149,9 @@ private:
 	LobbyIdentityParams identity_;
 	std::vector<std::pair<std::string, std::string>> identity_vars_;
 	std::future<net::HttpReply> http_;
+	// The HOSTKEY page's refresh GET, held until the host request is listed, and its answer due.
+	HttpRequestSpec host_page_;
+	bool host_page_in_flight_ = false;
 	std::string host_key_;
 };
 

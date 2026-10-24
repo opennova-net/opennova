@@ -311,6 +311,8 @@ private:
 	                               const PackedByteArray &body);
 	// The hosting leg's HTTP part failed: back to the verified lobby, host_failed(reason).
 	void fail_host_leg(const String &reason);
+	// The host request's wait ended: the HOSTKEY page's refresh (pending_host_page_) goes out.
+	void ship_host_page();
 	// The NWJoin handshake resolved the host: send the ClientPlayRequest and wait for
 	// the ServerPlayResult (the start-playing poll, 60 s).
 	void start_playing(const opennova::JoinResult &resolved);
@@ -404,6 +406,9 @@ private:
 	String pending_login_user_, pending_login_pass_;
 	HTTPRequest *join_http_ = nullptr;
 	HTTPRequest *host_http_ = nullptr;
+	// The HOSTKEY page's refresh GET, held until the host request's wait ends, and its answer due.
+	opennova::HttpRequestSpec pending_host_page_;
+	bool host_page_in_flight_ = false;
 	// The lobby HTTP orchestration: the EPASK login chain, the GSB fetch, and the
 	// NWJoin handshake (URL builders + shared cookie jar + LoginStep/JoinStep). The
 	// binding ships each HttpRequestSpec and feeds (transport_ok, code, headers, body)

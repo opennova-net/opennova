@@ -194,9 +194,12 @@ inline std::string http_hosting_line(const std::string &url) {
 // The NovaWorld menu's Host leg: the hosting page the main page names answers, through its relay,
 // with a page whose <TITLE> carries [HOSTKEY=...&]; that key rides the host registration.
 struct HostKeyResult {
-	enum class Kind { NeedRequest, Resolved, Failed };
+	// Settled: the HOSTKEY page's refresh came back (its cookies merged); nothing more to do.
+	enum class Kind { NeedRequest, Resolved, Failed, Settled };
 	Kind kind = Kind::Failed;
-	HttpRequestSpec request;  // when NeedRequest
+	HttpRequestSpec request;  // when NeedRequest; when Resolved, the HOSTKEY page's refresh GET
+	                          // (invalid when the page names none), which the owner ships once
+	                          // the host request's wait ends and feeds back to on_host_response
 	std::string host_key;     // when Resolved: the HOSTKEY= value, trimmed at '&' then ']'
 	std::string reason;       // when Failed
 };
@@ -295,7 +298,7 @@ public:
 private:
 	enum class LoginStep { Idle, Prepare, NwStart, Post, Poll };
 	enum class JoinStep { Idle, First, Second, Page };
-	enum class HostStep { Idle, Fetching };
+	enum class HostStep { Idle, Fetching, Page };
 	enum class EnterStep { Idle, Prepare, Start };
 
 	// A page's IB3_TEMPLATE GET in flight on one leg, and the leg's result it holds back until the

@@ -502,6 +502,8 @@ void NovaWorldClient::stop() {
 	}
 	gsb_request_in_flight_ = false;
 	authenticated_ = false;
+	pending_host_page_ = opennova::HttpRequestSpec{};
+	host_page_in_flight_ = false;
 	pending_login_ = false;
 	pending_login_user_ = String();
 	pending_login_pass_ = String();
@@ -1391,12 +1393,14 @@ opennova::NwuHostRole::Hooks NovaWorldClient::make_host_hooks() {
 		if (state_ != STATE_HOSTING_REQUESTED) return;
 		enter_state(STATE_HOSTING);
 		emit_signal("hosting_started");
+		ship_host_page();
 	};
 	hooks.on_failed = [this](const std::string &tag) {
 		if (state_ == STATE_HOSTING_REQUESTED || state_ == STATE_HOSTING) {
 			enter_state(STATE_CONNECTED);
 		}
 		emit_signal("host_failed", opennova::to_gd(tag));
+		ship_host_page();
 	};
 	hooks.inout_line = [](const std::string &text) {
 		if (g_process_server_logs_set)
@@ -1465,6 +1469,17 @@ void NovaWorldClient::start_hosting(const Ref<HostSessionOptions> &options) {
 	}
 }
 
+// The host request's wait ended, its result what it may: the HOSTKEY page's refresh goes out, as
+// the menu's next frame opens it once ConnectOrHost returned (engine: on_host_response's Resolved
+// request carries the witness).
+void NovaWorldClient::ship_host_page() {
+	const opennova::HttpRequestSpec page = pending_host_page_;
+	pending_host_page_ = opennova::HttpRequestSpec{};
+	if (!page.valid || host_http_ == nullptr) return;
+	host_page_in_flight_ = ship_spec(host_http_, page) == OK;
+	if (!host_page_in_flight_) flow_.on_host_response(false, 0, {}, {}); // settle the flow's leg
+}
+
 void NovaWorldClient::fail_host_leg(const String &reason) {
 	if (state_ == STATE_HOSTING_REQUESTED) enter_state(STATE_CONNECTED);
 	emit_signal("host_failed", reason);
@@ -1475,6 +1490,14 @@ void NovaWorldClient::fail_host_leg(const String &reason) {
 // was left (stop_hosting, stop) is dropped.
 void NovaWorldClient::on_host_request_completed(int result, int response_code,
 		const PackedStringArray &headers, const PackedByteArray &body) {
+	// The HOSTKEY page's refresh went out once the host request's wait ended: its answer settles
+	// the flow's leg whatever the hosting's state now.
+	if (host_page_in_flight_) {
+		host_page_in_flight_ = false;
+		flow_.on_host_response(result == HTTPRequest::RESULT_SUCCESS, response_code,
+				pba_to_strvec(headers), from_pba(body));
+		return;
+	}
 	if (state_ != STATE_HOSTING_REQUESTED || !flow_.host_active()) return;
 	const opennova::HostKeyResult r = flow_.on_host_response(
 		result == HTTPRequest::RESULT_SUCCESS, response_code, pba_to_strvec(headers), from_pba(body));
@@ -1493,8 +1516,13 @@ void NovaWorldClient::on_host_request_completed(int result, int response_code,
 		for (const std::string &line : opennova::connect_or_host_check_lines(
 				     /*host_leg=*/true, refusal, set_up ? session->lobby_state() : 0))
 			lobby_.connect_log(line);
+		// The HOSTKEY page's refresh (engine: on_host_response's Resolved request) goes out once
+		// ConnectOrHost returned: at once after a refusal, else when the host request's wait ends
+		// (ship_host_page).
+		pending_host_page_ = r.request;
 		if (refusal != nullptr) {
 			fail_host_leg(String(refusal));
+			ship_host_page();
 			return;
 		}
 		opennova::HostRegistration cfg = pending_host_cfg_;
@@ -1528,6 +1556,11 @@ void NovaWorldClient::disconnect_at_exit() {
 // ClientSession statements).
 void NovaWorldClient::stop_hosting() {
 	if (host_http_ != nullptr) host_http_->cancel_request();
+	pending_host_page_ = opennova::HttpRequestSpec{};
+	if (host_page_in_flight_) {
+		host_page_in_flight_ = false;
+		flow_.on_host_response(false, 0, {}, {}); // the cancelled refresh settles the flow's leg
+	}
 	host_role_.stop();
 	if (state_ == STATE_HOSTING_REQUESTED || state_ == STATE_HOSTING) {
 		enter_state(STATE_CONNECTED);
