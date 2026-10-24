@@ -427,6 +427,28 @@ func test_each_view_selects_its_own_level_and_the_inset_draws_a_twin() -> void:
 	assert_eq(layers & MAIN_VIEW_BITS, 0)
 
 
+# A twin of a level its node does not show poses that level's five rigid parts
+# as plain transforms: retail poses a drawn model's parts into one shared
+# scratch per draw (engine renderer/model_panm_cache.h), so no node stands for
+# them and none lingers as an orphan while the twin draws.
+func test_a_twin_level_poses_its_parts_with_no_node() -> void:
+	var placer := _placer()
+	var placed := _place(placer, 106401)
+	assert_eq(placed.stats.animated, 1)
+	var model := placer.get_placed_models()[0] as ObjectModel
+	var main := _view_camera(Vector2i(640, 480), 90.0, 200.0)
+	var inset := _view_camera(Vector2i(256, 256), 10.0, 200.0)
+	var orphans := int(Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT))
+	ObjectModel.update_authored_lods_for_views(main, 640.0, inset, 256.0)
+	assert_ne(model.get_inset_view_lod(), model.get_active_lod(),
+			"the twin draws a level the node does not show")
+	assert_gt(model.get_view_twin_count(), 0)
+	assert_eq(int(Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT)), orphans,
+			"no orphan node stands for the twin level's part pose")
+	ObjectModel.update_authored_lods_for_views(main, 640.0, null, 0.0)
+	assert_eq(model.get_view_twin_count(), 0)
+
+
 func test_a_sub_pixel_model_in_the_main_view_stays_drawn_in_the_inset_only() -> void:
 	var placer := _placer()
 	var placed := _place(placer, 106401)

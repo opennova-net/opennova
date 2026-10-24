@@ -74,7 +74,8 @@ void print_post_load_counts(Node *p_world, const ResourceRoot *p_root, const Str
 	if (p_world == nullptr || !p_world->is_inside_tree()) return;
 	// The offscreen targets, each with its server-side update mode, its size, its last
 	// frame's 3D draw calls (a first 3D draw builds a target's render buffers) and its
-	// last measured GPU draw; the load's end turns on every target's timing.
+	// last measured GPU draw; each line turns on the timing of every target it lists, so
+	// a target made after the load's end reads its own draw from its next line on.
 	const bool load_end = p_label == String("load_end");
 	PackedStringArray targets;
 	TypedArray<Node> found =
@@ -83,7 +84,7 @@ void print_post_load_counts(Node *p_world, const ResourceRoot *p_root, const Str
 		SubViewport *target = Object::cast_to<SubViewport>(found[i]);
 		if (target == nullptr) continue;
 		const RID rid = target->get_viewport_rid();
-		if (load_end) rs->viewport_set_measure_render_time(rid, true);
+		rs->viewport_set_measure_render_time(rid, true);
 		const int64_t mode = static_cast<int64_t>(rs->viewport_get_update_mode(rid));
 		const int64_t draws = rs->viewport_get_render_info(rid,
 				RenderingServer::VIEWPORT_RENDER_INFO_TYPE_VISIBLE,
@@ -95,11 +96,12 @@ void print_post_load_counts(Node *p_world, const ResourceRoot *p_root, const Str
 	}
 	UtilityFunctions::print_verbose(vformat("Post-load targets %s: [%s]", p_label,
 			String(", ").join(targets)));
-	// The orphan nodes at the load's end, by class: the next flush frees them, and the
-	// device objects they hold go with them two frames on.
-	if (!load_end) return;
-	HashMap<String, int64_t> orphans;
+	// The orphan nodes by class and name: at the load's end (the next flush frees them,
+	// and the device objects they hold go with them two frames on) and on any later
+	// line that still has some.
 	const TypedArray<int> ids = Node::get_orphan_node_ids();
+	if (!load_end && ids.is_empty()) return;
+	HashMap<String, int64_t> orphans;
 	for (int64_t i = 0; i < ids.size(); ++i) {
 		const Node *orphan = Object::cast_to<Node>(ObjectDB::get_instance(ObjectID(uint64_t(int64_t(ids[i])))));
 		if (orphan == nullptr) continue;
@@ -110,7 +112,7 @@ void print_post_load_counts(Node *p_world, const ResourceRoot *p_root, const Str
 	for (const KeyValue<String, int64_t> &row : orphans) {
 		orphan_rows.push_back(vformat("%s x%d", row.key, row.value));
 	}
-	UtilityFunctions::print_verbose(vformat("Post-load orphans load_end: [%s]",
+	UtilityFunctions::print_verbose(vformat("Post-load orphans %s: [%s]", p_label,
 			String(", ").join(orphan_rows)));
 }
 

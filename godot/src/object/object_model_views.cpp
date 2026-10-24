@@ -1037,9 +1037,9 @@ void ObjectModel::build_view_twins(TwinSet &r_set, int p_level, int64_t p_mask,
 		row.needs_eval = needs_eval;
 		r_set.dynamic.push_back(row);
 	}
-	// A level the node does not show poses its parts on nodes of its own
-	// (outside the tree), written through the same per-graphic PANM cache
-	// the node's own parts read.
+	// A level the node does not show poses its parts as plain transforms of
+	// its own, written through the same per-graphic PANM cache the node's own
+	// parts read.
 	if (rigid && p_level != active_lod_ && object_data_.is_valid() &&
 			object_data_->has_document()) {
 		const opennova::threedi::Threedi3di3 &model = object_data_->native_model();
@@ -1047,9 +1047,7 @@ void ObjectModel::build_view_twins(TwinSet &r_set, int p_level, int64_t p_mask,
 						model.lods != nullptr
 				? model.lods[p_level].render_object_count
 				: 0;
-		for (std::size_t i = 0; i < parts; ++i) {
-			r_set.pose_nodes.push_back(memnew(Node3D));
-		}
+		r_set.pose_parts.assign(parts, Transform3D());
 		r_set.pose_revision = 0;
 	}
 	sync_view_twin(r_set);
@@ -1090,7 +1088,7 @@ void ObjectModel::detach_inset_section_twin(const RID &p_instance) {
 
 // The section-bound instances ride this model's Inset part poses: the part
 // node's pose where the twin shows the node's level, else the twin level's
-// own pose nodes; a section the Inset does not draw hides them.
+// own part poses; a section the Inset does not draw hides them.
 void ObjectModel::sync_inset_section_twins(bool p_drawn) {
 	const TwinSet &inset = twin_sets_[kTwinInset];
 	if (inset_section_twins_.empty()) {
@@ -1116,11 +1114,9 @@ void ObjectModel::sync_inset_section_twins(bool p_drawn) {
 					xform = (*part)->get_global_transform();
 				}
 			}
-		} else if (twin.section >= 0 && twin.section < inset.pose_nodes.size()) {
-			if (const Node3D *pose = Object::cast_to<Node3D>(
-						static_cast<Object *>(inset.pose_nodes[twin.section]))) {
-				xform = model_xform * pose->get_transform();
-			}
+		} else if (twin.section >= 0 &&
+				static_cast<std::size_t>(twin.section) < inset.pose_parts.size()) {
+			xform = model_xform * inset.pose_parts[static_cast<std::size_t>(twin.section)];
 		}
 		rs->instance_set_transform(twin.instance, xform);
 	}
@@ -1130,7 +1126,7 @@ void ObjectModel::free_view_twins(TwinSet &r_set) {
 	if (&r_set == &twin_sets_[kTwinInset]) {
 		sync_inset_section_twins(false);
 	}
-	if (r_set.twins.empty() && r_set.pose_nodes.is_empty() && r_set.skin.is_null() &&
+	if (r_set.twins.empty() && r_set.pose_parts.empty() && r_set.skin.is_null() &&
 			r_set.dynamic.empty()) {
 		return;
 	}
@@ -1142,13 +1138,7 @@ void ObjectModel::free_view_twins(TwinSet &r_set) {
 	}
 	live_geometry_instance_count_ -= static_cast<int64_t>(r_set.twins.size());
 	r_set.twins.clear();
-	for (int64_t i = 0; i < r_set.pose_nodes.size(); ++i) {
-		Node3D *pose = Object::cast_to<Node3D>(static_cast<Object *>(r_set.pose_nodes[i]));
-		if (pose != nullptr) {
-			memdelete(pose);
-		}
-	}
-	r_set.pose_nodes = Array();
+	r_set.pose_parts.clear();
 	r_set.pose_revision = 0;
 	r_set.skin.unref();
 	r_set.dynamic.clear();
@@ -1171,10 +1161,10 @@ void ObjectModel::sync_view_twin(TwinSet &r_set) {
 	}
 	const Transform3D model_xform = get_global_transform();
 	const bool node_pose = r_set.lod == active_lod_;
-	if (!node_pose && !rigid_parts_ && !r_set.pose_nodes.is_empty() &&
+	if (!node_pose && !rigid_parts_ && !r_set.pose_parts.empty() &&
 			object_data_.is_valid()) {
-		r_set.pose_revision = object_data_->apply_panm_to_nodes_table(r_set.lod,
-				anim_time_ms_, runtime_ctrl_values(), r_set.pose_nodes,
+		r_set.pose_revision = object_data_->apply_panm_to_transforms(r_set.lod,
+				anim_time_ms_, runtime_ctrl_values(), r_set.pose_parts,
 				r_set.pose_revision);
 	}
 	if (!r_set.dynamic.empty() && object_data_.is_valid()) {
@@ -1206,12 +1196,9 @@ void ObjectModel::sync_view_twin(TwinSet &r_set) {
 					xform = parent->get_global_transform();
 				}
 			} else if (surface.robj_index >= 0 &&
-					surface.robj_index < r_set.pose_nodes.size()) {
-				const Node3D *pose = Object::cast_to<Node3D>(
-						static_cast<Object *>(r_set.pose_nodes[surface.robj_index]));
-				if (pose != nullptr) {
-					xform = model_xform * pose->get_transform();
-				}
+					static_cast<std::size_t>(surface.robj_index) < r_set.pose_parts.size()) {
+				xform = model_xform *
+						r_set.pose_parts[static_cast<std::size_t>(surface.robj_index)];
 			}
 		}
 		rs->instance_set_transform(twin.instance, xform);

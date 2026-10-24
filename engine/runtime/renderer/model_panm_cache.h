@@ -26,6 +26,16 @@ private:
     std::vector<uint64_t> part_revisions_;
 };
 
+// Retail poses a drawn model's parts per submission into one shared scratch
+// the next submission overwrites, so nothing per entity or per view holds a
+// pose past its draw: an embedder's alternate view of a level its node does
+// not show keeps that level's part pose as plain transforms off this cache.
+// [orig: BoneCallback_Generic @ 0x4e26d0 - g_BoneMatrices from the entity's
+//  matrix (the call @ 0x4e2780), Model_TransformBoneMatrices over it (the call
+//  @ 0x4e27c1), back into g_BoneCallbackScratchMatrix (the call @ 0x4e27e5);
+//  BoneCallback_AnimatedBones_World @ 0x4e3180, the same scratch (the call
+//  @ 0x4e322e)]
+//
 // One per shared model document, main-thread only. Each authored LOD keeps
 // its own evaluation. Deterministic tracks reuse time/bus matches; noise
 // consumes a fresh CRT sample per submission, even at the same clock.

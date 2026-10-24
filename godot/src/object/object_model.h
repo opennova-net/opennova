@@ -755,16 +755,19 @@ private:
 		MaterialRuntimeStamp stamp;
 	};
 	// One alternate view's twin set: an instance per drawn surface of its
-	// level, the part poses of a level the node does not show (Node3D objects
-	// outside the tree, written through the per-graphic PANM cache), the twin
-	// skeleton skin and the level's own dynamic materials.
+	// level, the part poses of a level the node does not show (plain part
+	// transforms in the model's frame, written through the per-graphic PANM
+	// cache: retail poses the drawn level's parts into one shared scratch per
+	// draw, so no object stands for them; engine renderer/model_panm_cache.h
+	// carries the witness), the twin skeleton skin and the level's own
+	// dynamic materials.
 	struct TwinSet {
 		std::vector<ViewTwin> twins;
 		int lod = -1;
 		int64_t mask = -1;
 		uint32_t destroyed = 0;
 		uint32_t serial = 0;
-		Array pose_nodes;
+		std::vector<Transform3D> pose_parts;
 		int64_t pose_revision = 0;
 		Ref<SkinReference> skin;
 		std::vector<TwinDynamicMaterial> dynamic;

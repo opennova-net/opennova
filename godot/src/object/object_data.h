@@ -284,6 +284,12 @@ public:
 	int64_t apply_panm_to_nodes_table(int p_lod_index, int64_t p_time_ms,
 			const opennova::renderer::ControlRegisterValues &p_ctrl_table,
 			const Array &p_nodes, int64_t p_applied_revision) const;
+	// The same apply onto plain part transforms (index = part index; the
+	// vector's size bounds the write): a pose no node draws (an alternate
+	// view's twin level) needs no object to hold it.
+	int64_t apply_panm_to_transforms(int p_lod_index, int64_t p_time_ms,
+			const opennova::renderer::ControlRegisterValues &p_ctrl_table,
+			std::vector<Transform3D> &r_parts, int64_t p_applied_revision) const;
 	static void weather_ctrl_registers(int32_t &r_flicker, int32_t &r_swing);
 	// A PANM matrix (native row-vector frame) as a Godot transform and back:
 	// the mesh carries the (-x, y, z) conversion, so both flip X.
