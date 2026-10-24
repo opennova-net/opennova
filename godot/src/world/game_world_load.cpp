@@ -31,6 +31,7 @@
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/world2d.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/callable_method_pointer.hpp>
 #include <godot_cpp/variant/node_path.hpp>
@@ -39,6 +40,7 @@
 #include "audio/mission_audio_records.h"
 #include "env/env_file.h"
 #include "env/mission_environment_overrides.h"
+#include "hud/font_page_glyphs.h"
 #include "mission/mission_info.h"
 #include "object/avatar_database.h"
 #include "object/object_data.h"
@@ -1782,6 +1784,14 @@ int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTim
 		leg("hud_pipelines");
 		emit_signal(kSignalHudPipelineWarm, true);
 		leg_end();
+		// The menus' one glyph program draws its three command shapes in the same frame, on this
+		// viewport's own canvas under the opaque loading layer (never seen), so its device version and
+		// those pipelines are made here and not in the first frame a menu shows: the deploy screen's
+		// draw past the reveal waited on them, retail's menus draw through fixed-function state
+		// (D-NET-NEW-LF-28).
+		leg("menu_pipelines");
+		GlyphCanvasWarm glyph_warm = build_glyph_canvas_warm(get_viewport()->find_world_2d()->get_canvas());
+		leg_end();
 		// The water's reflection target draws in the same frame through the view the first frame
 		// installs, so its render buffers, its pass's pipelines and its projection's first serve
 		// are made here and not in the first frames past the reveal (engine
@@ -1798,6 +1808,7 @@ int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTim
 		leg("force_sync");
 		rs->force_sync();
 		leg_end();
+		free_glyph_canvas_warm(glyph_warm);
 		emit_signal(kSignalHudPipelineWarm, false);
 		set_visible(was_visible);
 	}

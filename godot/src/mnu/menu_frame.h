@@ -357,6 +357,9 @@ public:
 	// glyph run), and the test seam's copy of each glyph run as submitted:
 	// [{page, uvs, colors}].
 	static String glyph_shader_code();
+	// The shader the frame's items draw through: the one process-wide glyph program
+	// (hud/font_page_glyphs glyph_canvas_shader), null before its first draw.
+	Ref<Shader> get_glyph_shader() const;
 	Array get_glyph_submissions();
 	// The test seam's copy of each frame piece as submitted: [{rect, uv, color, stencil,
 	// brush, material}] (the piece's window rect, its stencil UV rect, its diffuse, its two
@@ -460,8 +463,9 @@ private:
 	RID overlay_upper_canvas_item_;
 	bool custom_slot_drawn_ = false;
 	// The material this Control's item and both overlay items draw under: a
-	// glyph run's font page runs its MODULATE2X stage (glyph_shader_code).
-	Ref<Shader> glyph_shader_;
+	// glyph run's font page runs its MODULATE2X stage (glyph_shader_code),
+	// through the one process-wide glyph program (hud/font_page_glyphs
+	// glyph_canvas_shader).
 	Ref<ShaderMaterial> glyph_material_;
 	// Set while get_glyph_submissions records the glyph runs _draw submits.
 	Array *glyph_record_ = nullptr;

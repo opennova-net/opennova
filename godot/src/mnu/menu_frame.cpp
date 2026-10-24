@@ -152,10 +152,8 @@ void MenuFrame::ensure_overlay_canvas_item_() {
 	rs->canvas_item_set_z_index(overlay_upper_canvas_item_, 3);
 	// Every item the draw list paints on runs the font pages' material on its
 	// glyph runs (the slot item is its companion's, which binds its own).
-	glyph_shader_.instantiate();
-	glyph_shader_->set_code(glyph_canvas_shader_code());
 	glyph_material_.instantiate();
-	glyph_material_->set_shader(glyph_shader_);
+	glyph_material_->set_shader(glyph_canvas_shader());
 	for (const RID &item : { get_canvas_item(), overlay_canvas_item_, overlay_upper_canvas_item_ }) {
 		rs->canvas_item_set_material(item, glyph_material_->get_rid());
 	}
@@ -163,6 +161,10 @@ void MenuFrame::ensure_overlay_canvas_item_() {
 
 String MenuFrame::glyph_shader_code() {
 	return String(glyph_canvas_shader_code());
+}
+
+Ref<Shader> MenuFrame::get_glyph_shader() const {
+	return glyph_material_.is_valid() ? glyph_material_->get_shader() : Ref<Shader>();
 }
 
 Array MenuFrame::get_glyph_submissions() {
@@ -1355,6 +1357,7 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::options_unsupported_controls);
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("glyph_shader_code"),
 			&MenuFrame::glyph_shader_code);
+	ClassDB::bind_method(D_METHOD("get_glyph_shader"), &MenuFrame::get_glyph_shader);
 	ClassDB::bind_method(D_METHOD("get_glyph_submissions"), &MenuFrame::get_glyph_submissions);
 	ClassDB::bind_method(D_METHOD("get_frame_piece_submissions"),
 			&MenuFrame::get_frame_piece_submissions);

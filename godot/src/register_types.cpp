@@ -110,6 +110,7 @@
 #include "object/skeletal_anim.h"
 #include "hud/player_hud_weapon_def.h"
 #include "hud/hud_entity_info.h"
+#include "hud/font_page_glyphs.h"
 #include "hud/loading_background.h"
 #include "hud/hud_draw_list_stats.h"
 #include "hud/hud_process_words_carry.h"
@@ -532,6 +533,7 @@ void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
 	TargetProjectionXrInterface::cleanup_statics();
 	SlotShadow::cleanup_statics();
 	Q3SourceRegistry::cleanup_statics();
+	release_glyph_canvas_shader();
 	ObjectData::clear_static_caches();
 	opennova::clear_texture_resolver_caches();
 }

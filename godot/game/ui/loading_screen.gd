@@ -600,10 +600,9 @@ func begin_start_mission_splash(root: ResourceRoot) -> bool:
 	# the glyph shader's flagged runs; every other draw keeps texel x colour
 	# (docs/interface/loading-screen-re.md D-LOADSCR-10).
 	if material == null:
-		var glyph_shader := Shader.new()
-		glyph_shader.code = HudPos.glyph_shader_code()
+		# The one process-wide glyph program (HudPos.glyph_shader), every menu's too.
 		var glyph_material := ShaderMaterial.new()
-		glyph_material.shader = glyph_shader
+		glyph_material.shader = HudPos.glyph_shader()
 		material = glyph_material
 	_splash_text = _lookup_loading_text(HudPos.loading_splash_continue_key(), "")
 	_splash_state = SplashState.ACTIVE

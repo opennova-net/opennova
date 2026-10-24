@@ -1943,7 +1943,7 @@ func test_a_dedicated_host_loads_no_effect_system() -> void:
 func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
 	var warm_legs := ["effects_warm", "effect_spawn", "present_pipelines", "slot_casters",
 			"person_pipelines",
-			"local_body", "view_model", "wire_identities", "hud_pipelines", "forced_draw_1",
+			"local_body", "view_model", "wire_identities", "hud_pipelines", "menu_pipelines", "forced_draw_1",
 			"force_sync", "warm_reset"]
 	for serve_and_play in [true, false]:
 		var world := WorldFixture.make_world(self)
