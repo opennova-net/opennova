@@ -112,6 +112,8 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("forget_gate_response"),
 			&NovaWorldClient::forget_gate_response);
 	ClassDB::bind_method(D_METHOD("get_glsvss_request"), &NovaWorldClient::get_glsvss_request);
+	ClassDB::bind_method(D_METHOD("get_session_player_name", "profile_name"),
+			&NovaWorldClient::get_session_player_name);
 	ClassDB::bind_method(D_METHOD("get_state"), &NovaWorldClient::get_state);
 	ClassDB::bind_method(D_METHOD("is_session_active"), &NovaWorldClient::is_session_active);
 	ClassDB::bind_method(D_METHOD("is_authenticated"), &NovaWorldClient::is_authenticated);
@@ -461,6 +463,13 @@ PackedByteArray NovaWorldClient::get_glsvss_request() const {
 	out.resize(static_cast<int64_t>(request.size()));
 	if (!request.empty()) std::memcpy(out.ptrw(), request.data(), request.size());
 	return out;
+}
+
+// The session apply's rule (engine: novaworld_character_name): the CHAR cookie over the profile's
+// name when it is not empty.
+String NovaWorldClient::get_session_player_name(const String &profile_name) const {
+	const std::string character = opennova::novaworld_character_name(flow_.cookies());
+	return character.empty() ? profile_name : opennova::cp1252_to_gd(character);
 }
 
 void NovaWorldClient::stop() {

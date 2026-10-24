@@ -185,4 +185,24 @@ private:
 	std::vector<std::string> order_;
 };
 
+// The menu browser's CHAR cookie as the session apply reads it, "" when the jar holds none or
+// an empty one. The apply writes the profile's name as the local player's, then, on the
+// NovaWorld transport with the menu up, writes this over it when it is not empty: the join
+// sends that name as its ClientAuth NA and a host plays under it. The cookie is found by a
+// case-insensitive walk of the jar and read with a 31-byte copy: a value of 31 characters or
+// more keeps its first 31 here, where retail's 32-byte buffer runs on into its uninitialized
+// last byte (an original bug no service name reaches).
+// [orig: Game_ApplySessionSettingsToGlobals @0x551500 - the profile's name into
+//  g_LocalProfileName (Napi_CopyString called @0x551695), the NovaWorld transport test
+//  @0x551A53 / @0x551A6B and the menu test @0x551A79, the CHAR read through
+//  CEffect_IncludeHandler_Open (the browser's cookie getter) called @0x551A96 with the size 31
+//  pushed @0x551A7F, the copy over g_LocalProfileName @0x551AB0..0x551AC1;
+//  CookieJar_GetValueByName @0x64EA90 - String_CompareNoCase over each entry's name, the copy
+//  of min(length + 1, 31) @0x64EB2E..0x64EB59; UI_JoinSelectedSession @0x5699D0 - the apply
+//  called @0x569B07, g_LocalProfileName into the net config's name (Napi_CopyString called
+//  @0x569BE6); CNapiNetwork_StartClientConnection @0x4CA160 - CNapiNPConnection_SetName called
+//  @0x4CA235; CNapiGameSession_BuildAndCreateSession - the apply called @0x5695B8;
+//  Game_StartMission - the apply called @0x524662]
+std::string novaworld_character_name(const CookieJar &jar);
+
 } // namespace opennova

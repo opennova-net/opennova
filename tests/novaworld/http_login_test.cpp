@@ -309,6 +309,34 @@ int main() {
 		      "a body with no encrypted field needs no usable params");
 	}
 
+	// ---- 5. The session's player name: the browser's CHAR cookie (D-NET-NEW-L9-43) ----
+	// The session apply writes the CHAR cookie over the profile's name when it is not empty; the
+	// join sends it as its ClientAuth NA (LN S2: retail's in-match NA is the CHAR cookie's value,
+	// not NWHANDLE's). The getter finds the name case-insensitively and copies 31 bytes.
+	// [orig: Game_ApplySessionSettingsToGlobals @0x551500 - the getter called @0x551A96 with 31
+	//  @0x551A7F, the copy @0x551AB0..0x551AC1; CookieJar_GetValueByName @0x64EA90]
+	{
+		CookieJar jar;
+		check(novaworld_character_name(jar).empty(), "a jar with no CHAR names no character");
+		jar.set("NWHANDLE", "ljim");
+		check(novaworld_character_name(jar).empty(), "NWHANDLE is not the character");
+		jar.set("CHAR", "Walker7");
+		check(novaworld_character_name(jar) == "Walker7", "the CHAR cookie names the character");
+		CookieJar lower;
+		lower.set("char", "Walker7");
+		check(novaworld_character_name(lower) == "Walker7", "the name is found case-insensitively");
+		CookieJar cleared;
+		cleared.set("CHAR", "");
+		check(novaworld_character_name(cleared).empty(), "an empty CHAR names no character");
+		CookieJar thirty;
+		thirty.set("CHAR", std::string(30, 'x'));
+		check(novaworld_character_name(thirty) == std::string(30, 'x'), "30 characters pass whole");
+		CookieJar long_name;
+		long_name.set("CHAR", std::string(31, 'y') + "zz");
+		check(novaworld_character_name(long_name) == std::string(31, 'y'),
+		      "a longer value keeps the 31 bytes the copy takes");
+	}
+
 	if (g_failures == 0) {
 		std::printf("http_login: all checks passed\n");
 		return 0;

@@ -70,15 +70,12 @@ var _sort_column := NovaWorldServerBrowser.COLUMN_NAME
 var _sort_ascending := true
 var _can_login := false        # true once the gate reply gives us a startup_url
 var _logged_in := false
-# Stashed at join time: the selected row's mission + our callsign. joined_game carries the
-# resolved address plus the APPID join token and CD identity cookie, so we remember the mission
-# (the joiner must know the host's mission to load it) and pair them when the join resolves.
+# Stashed at join time: the selected row's mission. joined_game carries the resolved address
+# plus the APPID join token and CD identity cookie, so we remember the mission (the joiner must
+# know the host's mission to load it) and pair them when the join resolves. The player's name is
+# the session's (NetSessionController: the CHAR cookie, else the profile's callsign).
 var _pending_mission := ""
-var _pending_player := ""
 var _pending_expansion := ""  # the joined row's GSB Exp: the host's expansion
-# The signed-in NovaWorld handle — the callsign every NW join uses (retail
-# parity: the service identity names the player, not the local profile).
-var _nw_callsign := ""
 # The install's expansions, listed once per server-list fill (join_block_reason
 # reads it for every row the table draws).
 var _installed_expansions := PackedStringArray()
@@ -367,7 +364,6 @@ func _reset_connection_state() -> void:
 		_login_button.disabled = true
 	_can_login = false
 	_logged_in = false
-	_nw_callsign = ""
 	_rows = []
 	_view = []
 	_pings = {}
@@ -375,7 +371,6 @@ func _reset_connection_state() -> void:
 	if _population_label != null:
 		_population_label.text = ""
 	_pending_mission = ""
-	_pending_player = ""
 	_pending_expansion = ""
 	_joining_rid = 0
 	# The host Start button is held only while a host request is in flight.
@@ -716,7 +711,6 @@ func _on_login_succeeded(nwhandle: String) -> void:
 	_logged_in = true
 	_login_button.disabled = true
 	_password_edit.clear()
-	set_signed_in_handle(nwhandle)
 	_host_button.disabled = _target == NovaWorldSettings.Target.REAL
 	_rows.clear()
 	_pings.clear()
@@ -727,22 +721,6 @@ func _on_login_succeeded(nwhandle: String) -> void:
 		_population_label.text = "Retrieving games..."
 	_set_status("Signed in as %s." % nwhandle)
 	_set_screen(Screen.LOBBY)
-
-
-# On NovaWorld the account handle IS the in-game callsign: the host rosters
-# the player under the service identity (the NAMEINFO cookie name), and a
-# stock client sends that handle as its ClientAuth NA. Wire-witnessed live
-# 2026-08-31 (stock `na="ljim"` = the host's 0x7B/0x46 roster name); a local
-# callsign would leave the joiner's name-match waiting for a roster row that
-# never exists, parked in the pre-spawn free-cam forever.
-func set_signed_in_handle(nwhandle: String) -> void:
-	if not nwhandle.strip_edges().is_empty():
-		_nw_callsign = nwhandle.strip_edges()
-
-
-# The callsign a join uses: the signed-in NW handle, else the local callsign.
-func join_callsign() -> String:
-	return _nw_callsign if not _nw_callsign.is_empty() else player_name
 
 
 func _on_login_failed(reason: String) -> void:
@@ -776,9 +754,6 @@ func _on_join_pressed() -> void:
 	_joining_rid = rid
 	_pending_mission = row.mission_name
 	_pending_expansion = row.exp.strip_edges()
-	# The NW handle when signed in (retail: your account name is your callsign
-	# in NovaWorld games — see set_signed_in_handle); the local callsign otherwise.
-	_pending_player = join_callsign()
 	_set_status("Joining %s..." % row.name)
 	_join_button.disabled = true
 	if _client != null:
@@ -818,21 +793,20 @@ static func _with_tag(text: String, tag: String) -> String:
 
 
 # The NWJoin handshake resolved the host's in-match address. Hand it (with the
-# stashed browse-time mission hint + callsign) to MainGame. The in-match runtime
+# stashed browse-time mission hint) to MainGame, which names the player from the session. The in-match runtime
 # authenticates again, then S2C 0x7B/0x0B owns the actual mission load exactly as
 # for LAN; the lobby hint is never a local-BMS requirement (D-NET-194).
 func _on_joined_game(host: String, port: int, app_id: String, cd_cookie: PackedByteArray) -> void:
 	# A join that resolves after the session was reset has no stash to enter with.
 	if not _logged_in or _suppress_client_messages:
 		return
-	_set_status("Entering %s:%d as %s..." % [host, port, _pending_player])
+	_set_status("Entering %s:%d..." % [host, port])
 	var target := JoinTarget.new()
 	# The NovaWorld connect type the menu picked (the squad talk row's gate).
 	target.network_type = JoinTarget.NETWORK_NOVAWORLD
 	target.host_ip = host
 	target.port = port
 	target.mission = _pending_mission
-	target.player_name = _pending_player
 	# The host registered its expansion as the GSB Exp; the join switches to it
 	# before it dials (the enumeration's SUS2 refines it when it answers).
 	target.expansion = _pending_expansion

@@ -6,6 +6,7 @@
 
 #include <base/io/crt_ftol.h>
 #include <base/io/log.h>
+#include <base/io/strutil.h>
 
 #include <algorithm>
 #include <array>
@@ -229,6 +230,16 @@ std::vector<std::string> CookieJar::cookie_header_lines() const {
 		lines.push_back(name + "=" + values_.at(name) + ";");
 	}
 	return lines;
+}
+
+// [orig: Game_ApplySessionSettingsToGlobals @0x551500 - @0x551A96..0x551AC1;
+//  CookieJar_GetValueByName @0x64EA90]
+std::string novaworld_character_name(const CookieJar &jar) {
+	constexpr std::size_t kCharCopy = 31; // the getter's size, NUL included
+	for (const std::string &name : jar.names()) {
+		if (strutil::iequals(name, "CHAR")) return jar.find(name)->substr(0, kCharCopy);
+	}
+	return std::string();
 }
 
 } // namespace opennova

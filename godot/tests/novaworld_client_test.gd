@@ -30,6 +30,16 @@ func test_defaults_and_property_roundtrip() -> void:
 	client.free()
 
 
+# A session's player name is its CHAR cookie, else the profile's callsign: a session whose
+# browser holds no CHAR (an unstarted one) names the callsign it is given (the engine's
+# novaworld_character_name is pinned by the http_login ctest; D-NET-NEW-L9-43).
+func test_session_player_name_without_a_character_is_the_callsign() -> void:
+	var client := NovaWorldClient.new()
+	assert_eq(client.get_session_player_name("Walker"), "Walker")
+	assert_eq(client.get_session_player_name(""), "")
+	client.free()
+
+
 func test_browser_and_join_are_rejected_before_authentication() -> void:
 	var client := NovaWorldClient.new()
 	add_child_autofree(client)

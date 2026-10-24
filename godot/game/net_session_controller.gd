@@ -581,7 +581,7 @@ func _on_novaworld_host_requested(config: HostSessionConfig) -> void:
 	_return_to_novaworld = true
 	_dismiss_novaworld_panel()
 	config.mission = mission
-	config.player_name = resolve_player_callsign()
+	config.player_name = _novaworld_player_name()
 	if config.server_name.is_empty():
 		config.server_name = "OpenNova Host"
 	_adopt_held_novaworld_client()
@@ -604,9 +604,21 @@ func _on_novaworld_join_requested(target: JoinTarget) -> void:
 	_joining_rid = _novaworld_panel.joining_rid()
 	_joining_novaworld_server = true
 	_hold_novaworld_client(_novaworld_panel.release_client())
+	target.player_name = _novaworld_player_name()
 	_return_to_novaworld = true
 	_dismiss_novaworld_panel()
 	join_lan_server(target)
+
+
+# The local player's name in the held NovaWorld session, what a join sends as its ClientAuth NA
+# and a host plays under: the session's CHAR cookie (the active character the service names),
+# else the profile's callsign (D-NET-NEW-L9-43; the retail session apply's rule, witnessed at
+# engine/net/novaworld/http_login.h novaworld_character_name, which a join and a host both run).
+func _novaworld_player_name() -> String:
+	var callsign := resolve_player_callsign()
+	if _novaworld_client == null:
+		return callsign
+	return _novaworld_client.get_session_player_name(callsign)
 
 
 ## The post-mission route's NovaWorld half, once the shell is back in the menu. A normal exit

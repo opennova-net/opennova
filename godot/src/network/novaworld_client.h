@@ -159,6 +159,10 @@ public:
 	// The gate response's GLSVSSREQUEST (its wire bytes; empty without one), which a NovaWorld
 	// join's 0x00 JOIN carries (JoinTarget.glsvss_request, D-NET-723).
 	PackedByteArray get_glsvss_request() const;
+	// The local player's name in this NovaWorld session, a join's and a host's alike: the menu
+	// browser's CHAR cookie (engine: novaworld_character_name, the session apply's read) when
+	// the jar holds a non-empty one, else `profile_name`, the profile's callsign.
+	String get_session_player_name(const String &profile_name) const;
 
 	State get_state() const { return state_; }
 	bool is_session_active() const { return state_ == STATE_CONNECTED; }

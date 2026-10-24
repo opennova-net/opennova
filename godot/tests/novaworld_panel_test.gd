@@ -263,7 +263,6 @@ func _panel_with_requests_in_flight() -> NovaWorldPanel:
 			client.connect(signal_name, connection["callable"])
 	assert_eq(panel.visible_rows().size(), 3, "the browser is populated")
 	assert_eq(panel.joining_rid(), 2, "a join to the selected row is in flight")
-	assert_eq(panel.join_callsign(), "ljim", "the signed-in handle is the callsign")
 	assert_true(panel.host_enabled(), "Host is live on the signed-in session")
 	assert_true(_host_start_button(panel).disabled, "the host Start waits on its request")
 	return panel
@@ -280,7 +279,6 @@ func _assert_connection_state_reset(panel: NovaWorldPanel, cause: String) -> voi
 	assert_eq(panel.visible_rows().size(), 0, "%s clears the rows" % cause)
 	assert_eq(panel.server_item_count(), 0, "%s empties the table" % cause)
 	assert_eq(panel.joining_rid(), 0, "%s drops the join in flight" % cause)
-	assert_eq(panel.join_callsign(), panel.player_name, "%s drops the signed-in handle" % cause)
 	assert_false(panel.host_enabled(), "%s disables Host" % cause)
 	assert_false(panel.join_enabled(), "%s disables Join" % cause)
 	assert_false(panel.login_enabled(), "%s disables Login" % cause)
@@ -311,7 +309,6 @@ func _assert_connection_state_reset(panel: NovaWorldPanel, cause: String) -> voi
 	assert_eq(panel.message_text(), message)
 	assert_false(panel.browser_visible(), "a late sign-in cannot reopen the lobby")
 	assert_false(panel.host_enabled())
-	assert_eq(panel.join_callsign(), panel.player_name, "a late sign-in names no callsign")
 	# A late ping pass reads nothing into the signed-out panel.
 	panel.set_rows_for_test(_browser_rows())
 	panel.set_pings_for_test({1: 33})
@@ -509,7 +506,6 @@ func test_web_lobby_open_lands_on_its_page() -> void:
 	session.emit_signal("web_lobby_opened", true, "ljim")
 	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.LOBBY,
 		"the lobby page lands on the lobby")
-	assert_eq(panel.join_callsign(), "ljim", "signed in as the remembered handle")
 	assert_true(panel.browser_visible(), "the games show behind the remembered login")
 	session.emit_signal("web_lobby_opened", false, "")
 	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.LOGIN,
@@ -677,24 +673,6 @@ func test_a_row_on_a_missing_expansion_is_greyed_and_unjoinable() -> void:
 			"the details pane leads with the reason")
 	panel.select_visible_row_for_test(0)
 	assert_true(panel.join_enabled(), "selecting a joinable row re-enables Join")
-
-
-# On NovaWorld the account handle IS the callsign: the host rosters the player
-# under the service identity, and a stock client's ClientAuth NA is the handle
-# (wire-witnessed live: stock na="ljim" = the 0x7B/0x46 roster name). A local
-# callsign would leave the joiner's name-match waiting forever (pre-spawn
-# free-cam). Signed out, the local callsign stands.
-func test_nw_join_callsign_is_the_signed_in_handle() -> void:
-	var panel := _make_panel(PackedStringArray())
-	panel.player_name = "Player"
-	assert_eq(panel.join_callsign(), "Player",
-			"signed out, the local callsign stands")
-	panel.set_signed_in_handle("ljim")
-	assert_eq(panel.join_callsign(), "ljim",
-			"signed in, the NW handle is the join callsign")
-	panel.set_signed_in_handle("  ")
-	assert_eq(panel.join_callsign(), "ljim",
-			"a blank handle cannot clobber the retained one")
 
 
 func test_a_server_that_refused_this_install_is_greyed_with_its_reason() -> void:
