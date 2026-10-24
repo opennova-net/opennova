@@ -33,6 +33,8 @@ const SESSION_LABEL := "SessionLeg"
 ## The wall time one SessionLeg line averages over, and the least mean a part prints at (us).
 const SESSION_WINDOW_US := 2_000_000
 const SESSION_MIN_PART_US := 10
+## The post-load frames the canvas-program census runs on.
+const CENSUS_FRAMES := 3
 const US_PER_MS := 1000.0
 ## The slot-name prefixes of the session leg's parts (the board's slot order is the tree's).
 const SESSION_PREFIXES: Array[String] = ["sim_", "present_", "effects_"]
@@ -59,6 +61,8 @@ var _compile_totals := PackedInt64Array()
 var _session_slots := PackedInt32Array()
 var _session_sums := PackedInt64Array()
 var _session_frames := 0
+# The post-load frames the canvas-program census has run on (CanvasProgramCensus, the first few).
+var _census_frames := 0
 
 
 func _init() -> void:
@@ -102,6 +106,14 @@ func _process(_delta: float) -> void:
 	_compile_totals = totals
 	if not compiles.is_empty():
 		print_verbose(compiles)
+	# The canvas programs first seen on the first frames the world times past a load: one first
+	# seen here is one the load did not make (CanvasProgramCensus; the reveal took the census first).
+	if _post_load_open.is_valid() and bool(_post_load_open.call()):
+		if _census_frames < CENSUS_FRAMES:
+			_census_frames += 1
+			CanvasProgramCensus.note(get_tree(), "frame=%d" % frame)
+	else:
+		_census_frames = 0
 
 
 ## Folds one drained window into the session window (a frame whose session leg ran); past

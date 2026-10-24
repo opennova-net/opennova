@@ -70,6 +70,9 @@ func finish_world_load(
 	# The reveal's process frame, beside the PostLoadFrame and SlowFrame lines (an instrument).
 	print_verbose("ShellPresentation: the world revealed at frame=%d unix_ms=%d" % [
 			Engine.get_process_frames(), int(Time.get_unix_time_from_system() * 1000.0)])
+	# The canvas programs the scene draws through at the reveal (an instrument, --verbose only).
+	if world.is_inside_tree():
+		CanvasProgramCensus.note(world.get_tree(), "reveal")
 
 
 ## The frozen-shell capture seam: after a fixture moves the beauty camera with
