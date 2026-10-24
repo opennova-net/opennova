@@ -76,7 +76,10 @@ struct HostRegistration {
 	// Players: the active slots, the host's own counted only when it is a peer (a listen host);
 	// NwuHostRole sets it from its roster. [orig: Lobby_UpdateServerInfo @0x4feaa6..0x4feacb]
 	int player_count = 1;
-	int mi1 = 0, mi2 = 0, mi3 = 0;            // MI1..MI3 (dword_82BEEC..F4)
+	// MI1..MI3: the host's net-quality send-window averages (g_NetQualityHostAvgBandwidth /
+	// g_NetQualityHostAvgPing / g_NetQualityHostAvgLoss), the hosted match's
+	// (inmatch::read_session_listing_columns, D-NET-NEW-L9-50).
+	int mi1 = 0, mi2 = 0, mi3 = 0;
 	bool locked = false;                      // Locked (g_ServerJoinLocked)
 	bool skins = false;                       // Skins (dword_24D218C)
 	// TimeLeft: the LIVE round clock, re-read at every refresh, / 3720 (whole

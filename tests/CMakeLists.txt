@@ -5727,6 +5727,10 @@ add_test(NAME npruntime_teardown_nwu_player_removed COMMAND npruntime_teardown_n
 add_executable(net_http_host_line_test serve/net_http_host_line_test.cpp)
 target_link_libraries(net_http_host_line_test PRIVATE opennova_app_common)
 add_test(NAME net_http_host_line COMMAND net_http_host_line_test)
+# The Host list's MI1..MI3: the host's net-quality send-window averages (D-NET-NEW-L9-50).
+add_executable(npruntime_listing_net_quality_columns_test npruntime/listing_net_quality_columns_test.cpp)
+target_link_libraries(npruntime_listing_net_quality_columns_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_listing_net_quality_columns COMMAND npruntime_listing_net_quality_columns_test)
 
 # --- parity lane LI (input seam) ---
 add_executable(inmatch_tick_input_source_test frame/tick_input_source_test.cpp)
