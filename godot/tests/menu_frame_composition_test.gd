@@ -120,6 +120,9 @@ func test_a_framed_screen_draws_its_pieces_through_their_material() -> void:
 			"the fill, the box's fill cell and its eight pieces compile")
 	var pieces := frame.get_frame_piece_submissions()
 	assert_eq(pieces.size(), 8, "the box's eight border pieces reach the server")
+	# The material is a server canvas texture: a server with a RenderingDevice makes one per
+	# texture pair, the headless dummy server none (it hands back an empty RID).
+	var has_device := RenderingServer.get_rendering_device() != null
 	var material := RID()
 	for piece in pieces:
 		var row := piece as Dictionary
@@ -127,10 +130,11 @@ func test_a_framed_screen_draws_its_pieces_through_their_material() -> void:
 		# period off its size (its height across x, its width down y).
 		assert_eq((row["stencil"] as Texture2D).get_size(), Vector2(32, 32))
 		assert_eq((row["brush"] as Texture2D).get_size(), Vector2(16, 8))
-		assert_true((row["material"] as RID).is_valid(), "each piece binds its material")
-		if material.is_valid():
-			assert_eq(row["material"], material, "the pieces share the pair's one material")
-		material = row["material"]
+		if has_device:
+			assert_true((row["material"] as RID).is_valid(), "each piece binds its material")
+			if material.is_valid():
+				assert_eq(row["material"], material, "the pieces share the pair's one material")
+			material = row["material"]
 		assert_true((row["color"] as Color).is_equal_approx(Color8(0x7F, 0x7F, 0x7F, 0xFF)),
 				"the border diffuse 0xFF7F7F7F")
 		var uv := row["uv"] as Rect2
@@ -139,7 +143,8 @@ func test_a_framed_screen_draws_its_pieces_through_their_material() -> void:
 	# A second draw makes no new material.
 	var again := frame.get_frame_piece_submissions()
 	assert_eq(again.size(), 8)
-	assert_eq((again[0] as Dictionary)["material"], material)
+	if has_device:
+		assert_eq((again[0] as Dictionary)["material"], material)
 
 
 func test_the_shader_runs_the_two_stage_border_branch() -> void:
