@@ -180,7 +180,9 @@ void EnvironmentCubeCapture::_ensure_capture_nodes() {
 		// beauty camera carries the terminal display decode. Godot's tonemap
 		// would sRGB-encode this offscreen target a second time, so keep it
 		// HDR 2D: the texture then stores exactly the numbers the shaders
-		// wrote, which is what the raw-sampling blit expects.
+		// wrote, which is what the raw-sampling blit expects. (The world
+		// environment's display decode table, FrameFx::install_display_table,
+		// clamps them to [0, 1] on the way, as the blit's own clamp does.)
 		viewport->set_use_hdr_2d(true);
 		add_child(viewport);
 

@@ -256,6 +256,33 @@ func test_world_frame_module_owns_beauty_depth_q3_and_the_terminal_effect() -> v
 	assert_eq(int(report.get("q3_submitted_commands", -1)), 0,
 			"unregistered beauty geometry is not a Q3 producer")
 	assert_true(bool(report.get("terminal_compositor_installed", false)))
+	# The world environment's tonemap takes the terminal display decode: the adjustments at
+	# unity with the decode table as their colour correction, applied after Godot's sRGB
+	# encode, so the 8-bit target gets the gamma-domain number itself.
+	assert_true(environment_resource.adjustment_enabled,
+			"the world environment carries the display decode table")
+	assert_eq(environment_resource.adjustment_brightness, 1.0)
+	assert_eq(environment_resource.adjustment_contrast, 1.0)
+	assert_eq(environment_resource.adjustment_saturation, 1.0)
+	var table := environment_resource.adjustment_color_correction as Texture2D
+	assert_not_null(table, "a 1D table (a Texture2D) is Godot's per-channel correction")
+	if table != null:
+		assert_eq(table.get_width(), 4096)
+		assert_eq(table.get_height(), 1)
+		var image := table.get_image()
+		if image != null:
+			assert_eq(image.get_format(), Image.FORMAT_RGBAF,
+					"32-bit float texels: the table adds no rounding of its own")
+			# Texel i holds the exact sRGB decode of its centre (i + 0.5) / 4096, the u at
+			# which the tonemap's linear clamped sampler reads it.
+			for texel in [0, 165, 166, 2047, 4095]:
+				var encoded := (float(texel) + 0.5) / 4096.0
+				var decoded := encoded / 12.92 if encoded < 0.04045 \
+						else pow((encoded + 0.055) / 1.055, 2.4)
+				var pixel := image.get_pixel(texel, 0)
+				assert_almost_eq(pixel.r, decoded, 0.000001)
+				assert_almost_eq(pixel.g, decoded, 0.000001)
+				assert_almost_eq(pixel.b, decoded, 0.000001)
 	assert_eq(camera.cull_mask, 215452673,
 			"the module selects the one supported beauty camera signature")
 	assert_false(report.has("far_alpha_stage"),
@@ -277,9 +304,9 @@ func test_world_frame_module_owns_beauty_depth_q3_and_the_terminal_effect() -> v
 		assert_eq(String(report.get("status", "")), "drawn_without_q3",
 				String(report.get("failure", "FrameFX terminal failed")))
 		assert_false(bool(report.get("q3_sampled", true)))
-		# The single-sampled Forward+ colour decodes in place: one compute pass,
-		# not the full-frame copy and the draw back (LF-s1, 2.1 ms at 1440p).
-		assert_eq(String(report.get("terminal_decode", "")), "compute_in_place")
+		# The view draws with the world environment, whose tonemap decodes it through the
+		# table: no decode pass of the terminal's own (L3-s32; before, one compute pass).
+		assert_eq(String(report.get("terminal_decode", "")), "tonemap_table")
 		assert_false(bool(report.get("terminal_decode_compute_failed", true)))
 		var center := viewport.get_texture().get_image().get_pixel(32, 16)
 		assert_gt(center.g, 0.65,
@@ -296,6 +323,10 @@ func test_world_frame_module_owns_beauty_depth_q3_and_the_terminal_effect() -> v
 			"teardown restores the caller's camera mask")
 	assert_null(environment.compositor,
 			"teardown restores the inherited compositor")
+	assert_false(environment_resource.adjustment_enabled,
+			"teardown restores the environment's own adjustments")
+	assert_null(environment_resource.adjustment_color_correction,
+			"and its own (absent) colour correction")
 
 
 func test_explicit_shutdown_detaches_terminal_effect_and_is_idempotent() -> void:

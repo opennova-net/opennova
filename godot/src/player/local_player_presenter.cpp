@@ -7,7 +7,6 @@
 #include "player/local_player_visuals.h"
 #include "player/player_viewmodel_def.h"
 #include "render/d3d9_raster_device.h"
-#include "render/frame_fx.h"
 #include "render/target_projection_xr_interface.h"
 #include "render/visual_layers.h"
 #include "simulation/entity_presenter.h"
@@ -20,7 +19,6 @@
 #include <godot_cpp/classes/compositor.hpp>
 #include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/os.hpp>
-#include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/skeleton3d.hpp>
 #include <godot_cpp/classes/texture_rect.hpp>
 #include <godot_cpp/classes/time.hpp>
@@ -110,14 +108,6 @@ void mirror_viewport_quality(Viewport *p_surface, SubViewport *p_target) {
 	if (p_target->get_debug_draw() != p_surface->get_debug_draw()) {
 		p_target->set_debug_draw(p_surface->get_debug_draw());
 	}
-}
-
-// The stretched target's render target in FrameFX's display-passthrough set
-// (make_view_projection_target), or out of it before the target goes.
-void set_view_projection_passthrough(SubViewport *p_target, bool p_passthrough) {
-	FrameFxCompositorEffect::set_display_passthrough_target(
-			RenderingServer::get_singleton()->viewport_get_render_target(p_target->get_viewport_rid()),
-			p_passthrough);
 }
 
 // The thermal view feed, the NVG feed's sibling: the sim's two resolved gates
@@ -1051,12 +1041,10 @@ SubViewport *LocalPlayerPresenter::make_view_projection_target() {
 	// presents it after the HUD with no encode or decode pass, the frame
 	// Render_ProcessMainSceneFrame @0x5CA0F0 draws: BeginScene, one Clear
 	// @0x5CA7BF, the scene's passes, FrameFX, the HUD, EndScene @0x5CAE9E,
-	// Present @0x5CAEA8). An HDR target keeps the scene's numbers: Godot's
-	// tonemap writes it with no sRGB encode and FrameFX runs no display decode
-	// for it (the pair cancels), and the surface's 8-bit canvas blit writes
-	// them as the bytes they are.
-	target->set_use_hdr_2d(true);
-	set_view_projection_passthrough(target, true);
+	// Present @0x5CAEA8). Its camera draws with the world's environment, whose
+	// tonemap writes those bytes into the target's 8-bit texture through
+	// FrameFx's display decode table (FrameFx::install_display_table), and the
+	// surface's 8-bit canvas blit writes them as the bytes they are.
 	add_child(target);
 	Camera3D *through = memnew(Camera3D);
 	through->set_name("ViewProjectionCamera");
@@ -1317,14 +1305,12 @@ void LocalPlayerPresenter::release_view_projection() {
 	}
 	if (SubViewport *target = projection_viewport()) {
 		TargetProjectionXrInterface::release(target);
-		set_view_projection_passthrough(target, false);
 		target->queue_free();
 	}
 	if (Node *held_blit = Object::cast_to<Node>(ObjectDB::get_instance(held_projection_blit_layer_id_))) {
 		held_blit->queue_free();
 	}
-	if (SubViewport *held = Object::cast_to<SubViewport>(ObjectDB::get_instance(held_projection_viewport_id_))) {
-		set_view_projection_passthrough(held, false);
+	if (Node *held = Object::cast_to<Node>(ObjectDB::get_instance(held_projection_viewport_id_))) {
 		held->queue_free();
 	}
 	held_projection_blit_layer_id_ = ObjectID();

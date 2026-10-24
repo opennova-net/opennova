@@ -26,8 +26,10 @@
 
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/compositor.hpp>
+#include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/rd_pipeline_color_blend_state.hpp>
 #include <godot_cpp/classes/rd_pipeline_color_blend_state_attachment.hpp>
 #include <godot_cpp/classes/rd_pipeline_depth_stencil_state.hpp>
@@ -49,6 +51,7 @@
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/classes/world_environment.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
@@ -88,12 +91,6 @@ constexpr std::uint32_t kBeautyCameraMask = 0x0CD78C01u; // + MAIN_VIEW bits 20/
 // depth attached; this size applies from the capture's downsample on.
 constexpr std::int32_t kWorkSide = opennova::renderer::kFrameFxWorkSide;
 constexpr std::uint32_t kPushConstantBytes = 64u;
-
-// FrameFxCompositorEffect::set_display_passthrough_target's registry: the
-// render targets' RID ids, written on the main thread, read by the render
-// callback.
-std::mutex g_passthrough_mutex;
-std::vector<std::uint64_t> g_passthrough_targets;
 
 // The fragment stage a draw evaluates (pc.mode_taps.x).
 enum class FramePass : std::int32_t {
@@ -491,6 +488,42 @@ std::map<std::int64_t, ObjectID> &scenario_decodes() {
 	return decodes;
 }
 
+// The display decode table's texel count (FrameFx::install_display_table).
+// The tonemap reads it through a linear, clamped sampler at u = the
+// sRGB-encoded number, so texel i holds the decode of its centre
+// (i + 0.5) / N and the read interpolates the curve between centres: at 4096
+// texels the interpolation error stays under 3e-8 and the clamped half texel
+// at each end under 0.08 of an 8-bit step, so an 8-bit source value comes
+// back to its own byte and a blended one rounds to the pair's byte but for
+// about 1 in 10,000 values at a rounding edge (the decode pass's half-float
+// store moved about 1 in 100).
+constexpr int kDisplayDecodeTableTexels = 4096;
+
+// The decode table as Godot's tonemap reads a 1D colour correction: one row,
+// each channel the transfer kGlslGammaToLinear applies (the exact sRGB
+// inverse), 32-bit float texels so the table adds no rounding of its own.
+Ref<ImageTexture> make_display_decode_table() {
+	PackedByteArray bytes;
+	bytes.resize(static_cast<int64_t>(kDisplayDecodeTableTexels) * 4 *
+			static_cast<int64_t>(sizeof(float)));
+	float *texels = reinterpret_cast<float *>(bytes.ptrw());
+	for (int i = 0; i < kDisplayDecodeTableTexels; ++i) {
+		const double encoded = (static_cast<double>(i) + 0.5) /
+				static_cast<double>(kDisplayDecodeTableTexels);
+		const double decoded = encoded < 0.04045 ?
+				encoded / 12.92 :
+				std::pow((encoded + 0.055) / 1.055, 2.4);
+		const float value = static_cast<float>(decoded);
+		texels[i * 4 + 0] = value;
+		texels[i * 4 + 1] = value;
+		texels[i * 4 + 2] = value;
+		texels[i * 4 + 3] = 1.0f;
+	}
+	const Ref<Image> image = Image::create_from_data(kDisplayDecodeTableTexels, 1,
+			false, Image::FORMAT_RGBAF, bytes);
+	return ImageTexture::create_from_image(image);
+}
+
 } // namespace
 
 class FrameFxCompositorEffect::Impl {
@@ -570,6 +603,9 @@ public:
 	std::atomic<bool> shutdown_requested{false};
 	// F3-only GPU timing (rd_timestamp_span.h carries the barrier contract).
 	std::atomic<bool> gpu_timing_enabled{false};
+	// Main thread -> render thread: the RID id of the environment FrameFx put
+	// the display decode table on (set_display_table_environment), 0 for none.
+	std::atomic<std::uint64_t> display_table_environment{0};
 
 	// Main thread -> render thread: the latest screen-effect plan and the
 	// mission's scanline texels, each behind the one publication mutex.
@@ -589,9 +625,9 @@ public:
 	RID decode_pipeline;
 	bool decode_compute_failed = false;
 	std::size_t decode_in_place_views = 0;
-	// Views of the last frame that drew into a display-passthrough target
-	// (set_display_passthrough_target): no decode ran for them.
-	std::size_t decode_passthrough_views = 0;
+	// Views of the last frame whose environment carries the display decode
+	// table (set_display_table_environment): Godot's tonemap decoded them.
+	std::size_t decode_table_views = 0;
 	RID sampler;
 	RID repeat_sampler;
 	RID scanlines;
@@ -1632,10 +1668,20 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 	nvg_sights_drawn = 0;
 	std::size_t draws = 0;
 	std::size_t in_place_views = 0;
-	// A target that keeps the gamma-domain numbers (Godot writes it with no
-	// sRGB encode) takes no decode: the pair would cancel.
-	const bool passthrough =
-			FrameFxCompositorEffect::is_display_passthrough_target(buffers->get_render_target());
+	// A view drawn with the environment FrameFx put the display decode table
+	// on (FrameFx::install_display_table) is decoded by Godot's tonemap itself:
+	// its colour-correction step reads the sRGB-encoded number through the
+	// table and writes the gamma-domain number back, so this pass runs no
+	// decode. Godot applies an environment's adjustments only to a target of
+	// at least 8 x 8 pixels (renderer_scene_render_rd.cpp, can_use_effects);
+	// a smaller one keeps this decode.
+	const Vector2i target_size = buffers->get_target_size();
+	const RID view_environment = render_data->get_environment();
+	const std::uint64_t table_environment =
+			display_table_environment.load(std::memory_order_relaxed);
+	const bool table_decoded = table_environment != 0 && view_environment.is_valid() &&
+			static_cast<std::uint64_t>(view_environment.get_id()) == table_environment &&
+			target_size.x >= 8 && target_size.y >= 8;
 	bool sampled_q3 = false;
 	bool q3_failed = false;
 	bool effects_failed = false;
@@ -1675,8 +1721,8 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 		// All 3D retail draws have blended as gamma-domain numeric values. Copy
 		// once, then apply the display-backend transfer immediately before Godot's
 		// sRGB output encoding. Canvas/viewmodel/HUD passes run afterward. A
-		// passthrough target gets neither the transfer nor the encode.
-		if (passthrough)
+		// view whose tonemap applies the decode table takes it there instead.
+		if (table_decoded)
 			continue;
 		if (gpu_timing && view == 0)
 			rd->capture_timestamp("opennova_decode_begin");
@@ -1717,7 +1763,7 @@ bool FrameFxCompositorEffect::Impl::render(RenderData *render_data) {
 		gpu_draw_calls = draws;
 		view_count = count;
 		decode_in_place_views = in_place_views;
-		decode_passthrough_views = passthrough ? count : 0;
+		decode_table_views = table_decoded ? count : 0;
 		last_size = size;
 		last_capture_size = targets.empty() ? Vector2i() :
 				targets.front().capture_size;
@@ -1741,9 +1787,10 @@ Dictionary FrameFxCompositorEffect::Impl::report() const {
 	result["blur_target_size"] = static_cast<int64_t>(kWorkSide);
 	result["framebuffer_blend_domain"] = "gamma";
 	result["terminal_transfer"] = "srgb_inverse_then_display_encode";
-	// How the last frame's views ran that transfer: in place (one compute
-	// pass per view) or copied and drawn back (two full-frame passes).
-	result["terminal_decode"] = decode_passthrough_views > 0 ? "passthrough_target" :
+	// How the last frame's views ran that transfer: in Godot's tonemap through
+	// the environment's decode table (no pass of its own), in place (one
+	// compute pass per view) or copied and drawn back (two full-frame passes).
+	result["terminal_decode"] = decode_table_views > 0 ? "tonemap_table" :
 			decode_in_place_views == 0 ? "copy_and_draw" :
 			decode_in_place_views == view_count ? "compute_in_place" : "mixed";
 	result["terminal_decode_compute_failed"] = decode_compute_failed;
@@ -1794,9 +1841,6 @@ FrameFxCompositorEffect::~FrameFxCompositorEffect() = default;
 void FrameFxCompositorEffect::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_backend_report"),
 			&FrameFxCompositorEffect::get_backend_report);
-	ClassDB::bind_static_method("FrameFxCompositorEffect",
-			D_METHOD("is_display_passthrough_target", "render_target"),
-			&FrameFxCompositorEffect::is_display_passthrough_target);
 }
 
 void FrameFxCompositorEffect::create_glow_source_device() {
@@ -1891,26 +1935,12 @@ Ref<Image> FrameFxCompositorEffect::capture_q3_target() {
 	return impl_ ? impl_->capture_q3_target() : Ref<Image>();
 }
 
-void FrameFxCompositorEffect::set_display_passthrough_target(const RID &p_render_target,
-		bool p_passthrough) {
-	if (!p_render_target.is_valid())
-		return;
-	const std::uint64_t id = static_cast<std::uint64_t>(p_render_target.get_id());
-	std::lock_guard<std::mutex> lock(g_passthrough_mutex);
-	const auto it = std::find(g_passthrough_targets.begin(), g_passthrough_targets.end(), id);
-	if (p_passthrough && it == g_passthrough_targets.end())
-		g_passthrough_targets.push_back(id);
-	else if (!p_passthrough && it != g_passthrough_targets.end())
-		g_passthrough_targets.erase(it);
-}
-
-bool FrameFxCompositorEffect::is_display_passthrough_target(const RID &p_render_target) {
-	if (!p_render_target.is_valid())
-		return false;
-	const std::uint64_t id = static_cast<std::uint64_t>(p_render_target.get_id());
-	std::lock_guard<std::mutex> lock(g_passthrough_mutex);
-	return std::find(g_passthrough_targets.begin(), g_passthrough_targets.end(), id) !=
-			g_passthrough_targets.end();
+void FrameFxCompositorEffect::set_display_table_environment(const RID &p_environment) {
+	if (impl_)
+		impl_->display_table_environment.store(p_environment.is_valid() ?
+						static_cast<std::uint64_t>(p_environment.get_id()) :
+						0,
+				std::memory_order_relaxed);
 }
 
 void FrameFxCompositorEffect::_render_callback(
@@ -2057,9 +2087,57 @@ void FrameFx::install_compositor() {
 	installed_compositor_ = compositor_with_terminal(previous_compositor_,
 			terminal_effect_);
 	world_environment->set_compositor(installed_compositor_);
+	install_display_table(world_environment->get_environment());
+}
+
+// Retail's backbuffer holds the gamma-domain bytes every draw blended and the
+// display shows them as they are (shaders/color.gdshaderinc carries the device
+// witness). Ours writes those numbers into Godot's float scene buffer, whose
+// tonemap sRGB-encodes them into an 8-bit target; the terminal effect's decode
+// pass cancelled that encode, a full-frame read and write of the scene buffer
+// per view (1.07 ms of a 1440p frame, L3-s31). Godot's tonemap applies an
+// environment's colour correction after its encode (tonemap.glsl: the
+// adjustments' encode, then the table), so with the adjustments at unity and
+// this decode table as the correction it writes the gamma number itself into
+// the 8-bit target: the bytes the decode and encode pair gave, inside the pass
+// the frame runs anyway. Every view drawn with the world's environment takes
+// it and the terminal effect runs no decode for them.
+void FrameFx::install_display_table(const Ref<Environment> &p_environment) {
+	if (p_environment.is_null() || terminal_effect_.is_null())
+		return;
+	if (display_table_.is_null())
+		display_table_ = make_display_decode_table();
+	table_environment_ = p_environment;
+	previous_adjustment_ = AdjustmentState{ p_environment->is_adjustment_enabled(),
+		p_environment->get_adjustment_brightness(),
+		p_environment->get_adjustment_contrast(),
+		p_environment->get_adjustment_saturation(),
+		p_environment->get_adjustment_color_correction() };
+	p_environment->set_adjustment_brightness(1.0f);
+	p_environment->set_adjustment_contrast(1.0f);
+	p_environment->set_adjustment_saturation(1.0f);
+	p_environment->set_adjustment_color_correction(display_table_);
+	p_environment->set_adjustment_enabled(true);
+	terminal_effect_->set_display_table_environment(p_environment->get_rid());
+}
+
+void FrameFx::uninstall_display_table() {
+	if (terminal_effect_.is_valid())
+		terminal_effect_->set_display_table_environment(RID());
+	if (table_environment_.is_valid() &&
+			table_environment_->get_adjustment_color_correction().ptr() == display_table_.ptr()) {
+		table_environment_->set_adjustment_enabled(previous_adjustment_.enabled);
+		table_environment_->set_adjustment_brightness(previous_adjustment_.brightness);
+		table_environment_->set_adjustment_contrast(previous_adjustment_.contrast);
+		table_environment_->set_adjustment_saturation(previous_adjustment_.saturation);
+		table_environment_->set_adjustment_color_correction(previous_adjustment_.color_correction);
+	}
+	table_environment_.unref();
+	previous_adjustment_ = AdjustmentState();
 }
 
 void FrameFx::uninstall_compositor() {
+	uninstall_display_table();
 	WorldEnvironment *world_environment =
 			world_environment_from_id(world_environment_id_);
 	if (world_environment != nullptr &&
