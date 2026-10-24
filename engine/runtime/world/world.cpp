@@ -735,9 +735,13 @@ static void pump_unoccupied_weapon_slot(World &world, Entity &row, uint32_t fram
     inputs.is_authority = world.ai.is_authority;
     inputs.auto_reload = world.rules.auto_reload; // [orig: g_AutoReloadEnabled @ 0x24D2118]
     inputs.current_tick = static_cast<int32_t>(frame_tick);
-    // The walked gun is the RELOAD's addressee: an authority queues its C2S 0x25
+    // Ours addresses the RELOAD to the walked gun: an authority queues its C2S 0x25
     // ([gun][FF FF], the EWeap param), which only a playing authority's own client
     // sends, and only its S2C 0x49 echo refills the gun (none on a dedicated host).
+    // Retail's handler addresses the slot's owner instead (its +0x16C parent when its
+    // +0x168 is 3); no shipped item reaches this leg's RELOAD (a heat def with a finite
+    // clip and a reserve), so that stays out of scope by the retail-player rule
+    // (D-NET-NEW-L4-30).
     // [orig: WeaponAction_ProcessAllEntities @0x542690 (the pool-1 walk
     //  @0x5426E9..0x542716); WeaponAction_Reload @0x5430B0 (@0x5430CA..0x543103);
     //  NetPacket_SendReloadRequest @0x432930 (@0x43296C..0x432974)]
