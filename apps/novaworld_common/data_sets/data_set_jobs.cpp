@@ -442,8 +442,9 @@ bool check_section(const update::SfsSection &section, const update::SfsEntry &co
 }
 
 // Each section of the package mapped to the one data set whose command file it carries: a base
-// section (no PACKAGEBREAK) to a base data set, an expansion section to an expansion of its
-// code and, when the package carries a base section, of that base. None or two refuse.
+// section (no PACKAGEBREAK) to a base data set or standalone updater, an expansion section
+// to an expansion of its code and, when the package carries a base section, of that base.
+// None or two refuse.
 bool map_sections(const update::SfsPackage &package, const std::vector<DataSetRow> &data_sets,
 		std::vector<NewReleaseSection> &out, std::string &why) {
 	out.clear();
@@ -549,13 +550,13 @@ jobs::JobResult validate(
 	std::string sha256;
 	if (!digest_file(path, size, sha256, why))
 		return release_transient(ctx, release_id, why);
+	std::optional<int64_t> other;
 	{
 		auto lease = ctx.pool.acquire();
-		const std::optional<int64_t> other = find_release_by_sha(*lease, sha256);
-		if (other && *other != release_id)
-			return invalid_release(
-					ctx, release_id, "already uploaded as release " + id_text(*other));
+		other = find_release_by_sha(*lease, sha256);
 	}
+	if (other && *other != release_id)
+		return invalid_release(ctx, release_id, "already uploaded as release " + id_text(*other));
 	std::vector<uint8_t> bytes;
 	if (!io::read_file_bytes(path, bytes, why))
 		return release_transient(ctx, release_id, why);
@@ -600,7 +601,7 @@ Outcome build_release_tree(ObjectStore &store, const std::string &scratch_root,
 		const DataSetRow &data_set, const ReleaseSection &section, const std::string &sha256,
 		const DataSetTree &baseline, int64_t tree_id, TreeReady &ready, std::string &why) {
 	const std::string from = tree_prefix(baseline.id), to = tree_prefix(tree_id);
-	if (!store.remove_prefix(to, why) || !store.copy_prefix(from, to, why))
+	if (!store.remove_prefix(to, why) || (baseline.id != 0 && !store.copy_prefix(from, to, why)))
 		return Outcome::Transient;
 	ScratchDir scratch(io::utf8_join(scratch_root, "apply-" + id_text(tree_id)));
 	if (!scratch.make(why))
@@ -758,6 +759,7 @@ jobs::JobResult apply(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 	std::optional<ReleaseSection> section;
 	std::optional<DataSetRow> data_set;
 	std::optional<DataSetTree> building; // a run again's tree
+	bool full_content = false;
 	std::string sha256;
 	{
 		auto lease = ctx.pool.acquire();
@@ -768,8 +770,13 @@ jobs::JobResult apply(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 			return jobs::JobResult::done();
 		sha256 = release->sha256;
 		data_set = find_data_set(db, data_set_id);
-		if (!data_set || data_set->published_release_id != release_id)
+		if (!data_set || data_set->kind == DataSetKind::Update ||
+				data_set->published_release_id != release_id)
 			return jobs::JobResult::done();
+		// OpenNova's own content packages are complete installs, including first launch.
+		// Build those from empty on every release; retail packages still patch a baseline.
+		const auto base = data_set->parent_id ? find_data_set(db, *data_set->parent_id) : data_set;
+		full_content = base && base->game == "opennova_0_consumer";
 		for (const ReleaseSection &s : list_sections(db, release_id))
 			if (s.data_set_id == data_set_id)
 				section = s;
@@ -789,7 +796,7 @@ jobs::JobResult apply(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 	{
 		auto lease = ctx.pool.acquire();
 		db::Database &db = *lease;
-		if (data_set->baseline_tree_id)
+		if (!full_content && data_set->baseline_tree_id)
 			baseline = find_tree(db, *data_set->baseline_tree_id);
 		if (baseline && baseline->state != TreeState::Ready)
 			baseline.reset();
@@ -804,6 +811,8 @@ jobs::JobResult apply(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 			set_section_tree(db, release_id, data_set_id, tree_id);
 			tx.commit();
 		}
+		if (!baseline && full_content)
+			baseline.emplace(); // id 0: no baseline objects to copy or read
 		if (!baseline) {
 			set_tree_state(
 					db, tree_id, TreeState::Building, TreeState::Failed, "no baseline uploaded");
@@ -885,6 +894,9 @@ int64_t enqueue_release_validate(db::Database &db, int64_t release_id) {
 }
 
 int64_t enqueue_release_apply(db::Database &db, int64_t release_id, int64_t data_set_id) {
+	const auto data_set = find_data_set(db, data_set_id);
+	if (!data_set || data_set->kind == DataSetKind::Update)
+		return 0;
 	jobs::NewJob job;
 	job.kind = kJobReleaseApply;
 	job.payload.set("release_id", io::json_number(static_cast<double>(release_id)));

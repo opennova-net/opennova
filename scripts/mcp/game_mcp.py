@@ -582,7 +582,7 @@ def cmd_launch(args: argparse.Namespace) -> int:
         if value not in (None, ""):
             argv += [flag, str(value)]
     argv += list(args.game_args or [])
-    argv += ["--mcp-port", str(port)]
+    argv += ["--no-update", "--mcp-port", str(port)]
 
     stdout_log = Path(args.stdout_log) if args.stdout_log else \
         Path(tempfile.gettempdir()) / f"opennova-game-mcp-{port}.log"

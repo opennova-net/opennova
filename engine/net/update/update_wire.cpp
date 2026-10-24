@@ -181,11 +181,12 @@ std::vector<uint8_t> encode_load_test_reply(int32_t id, uint8_t load) {
 	return bytes_of(header, &load, 1);
 }
 
-Frame decode_reply(const uint8_t *data, size_t size, Reply &out, size_t &consumed) {
+Frame decode_reply_header(const uint8_t *data, size_t size, Reply &out, size_t &consumed) {
 	const std::string_view buffer(reinterpret_cast<const char *>(data), size);
 	const size_t end = buffer.find(kEnd);
 	if (end == std::string_view::npos)
-		return Frame::NeedMore;
+		return size > kMaxRequestHeaderBytes ? Frame::Malformed : Frame::NeedMore;
+	if (end + kEnd.size() > kMaxRequestHeaderBytes) return Frame::Malformed;
 	Reply reply;
 	bool have_verb = false;
 	size_t at = 0;
@@ -229,9 +230,17 @@ Frame decode_reply(const uint8_t *data, size_t size, Reply &out, size_t &consume
 	}
 	if (!have_verb || reply.size < 0)
 		return Frame::Malformed;
-	const size_t header_length = end + kEnd.size();
-	if (size - header_length < static_cast<size_t>(reply.size))
-		return Frame::NeedMore;
+	out = std::move(reply);
+	consumed = end + kEnd.size();
+	return Frame::Complete;
+}
+
+Frame decode_reply(const uint8_t *data, size_t size, Reply &out, size_t &consumed) {
+	Reply reply;
+	size_t header_length = 0;
+	const Frame frame = decode_reply_header(data, size, reply, header_length);
+	if (frame != Frame::Complete) return frame;
+	if (size - header_length < static_cast<size_t>(reply.size)) return Frame::NeedMore;
 	reply.payload.assign(data + header_length, data + header_length + reply.size);
 	out = std::move(reply);
 	consumed = header_length + static_cast<size_t>(out.size);

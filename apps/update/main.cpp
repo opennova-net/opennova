@@ -1,0 +1,214 @@
+// The updater's device shell: native Windows presentation over the portable client worker.
+// Protocol, rows and message wording: docs/update/updater-re.md, sections 1, 3, 7, 8 and 12.
+#include "client.h"
+#include "platform.h"
+
+#include <base/io/os_path.h>
+#include <base/io/strutil.h>
+#include <formats/update/apply.h>
+
+#include <fstream>
+
+#include <atomic>
+#include <mutex>
+#include <thread>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <commctrl.h>
+#endif
+
+namespace {
+using namespace opennova;
+
+bool execute(const updater::Options &options, updater::Result &result, std::string &error,
+		const updater::ProgressSink &sink, const std::atomic_bool *cancel) {
+	if (!options.check && sink) sink({"Waiting for the game to exit...", "", 0, 0});
+	if (!options.check && !updater::wait_for_parent(options.parent_pid, options.parent_window, error, cancel))
+		return false;
+	std::vector<updater::Product> products;
+	std::ofstream log;
+	if (options.verbose && !options.check) log.open(options.runtime_dir / "update.log", std::ios::app);
+	const auto progress = [&](const updater::Progress &p) {
+		if (log) { log << p.status << " " << p.file << " " << p.bytes << "/" << p.total << '\n'; log.flush(); }
+		if (sink) sink(p);
+	};
+	return updater::discover_products(options, products, error) &&
+			updater::run(options, products, result, error, progress, cancel);
+}
+
+bool finish(const updater::Options &options, const std::vector<std::string> &original,
+		const updater::Result &result, std::string &error) {
+	if (!result.revision_pending && !options.run) return true;
+	std::error_code ec;
+	const auto launch_dir = std::filesystem::current_path(ec);
+	if (ec) { error = "Cannot determine the launch directory."; return false; }
+	if (result.revision_pending) {
+		std::vector<std::string> args{"--runtime-dir", io::utf8_path(options.runtime_dir),
+				"--parent-pid", std::to_string(updater::process_id()), "--forward-options"};
+		for (size_t i = 0; i < original.size(); ++i) {
+			if (strutil::iequals(original[i], "--parent-pid")) { ++i; continue; }
+			// A stale legacy window handle must not close a newly reused window on relaunch.
+			if (i == 0 && options.legacy && !original[i].empty() && original[i][0] >= '0' && original[i][0] <= '9') {
+				args.push_back("--update-arg"); args.push_back("0"); continue;
+			}
+			args.push_back("--update-arg"); args.push_back(original[i]);
+			const auto flag = strutil::to_lower(original[i]);
+			if (flag == "--runtime-dir" || flag == "--resource-dir" || flag == "/dir") {
+				++i;
+				args.push_back("--update-arg");
+				args.push_back(io::utf8_path(flag == "--runtime-dir" ? options.runtime_dir : options.resource_dir));
+			} else if (flag == "--run-arg" || flag == "/game" || flag == "--server" || flag == "--port") {
+				// Values forwarded to the game may themselves look like updater flags.
+				args.push_back("--update-arg"); args.push_back(original[++i]);
+			}
+		}
+		return updater::launch_detached(options.runtime_dir / "revupdat.exe", launch_dir, args, error);
+	}
+	std::filesystem::path program = options.runtime_dir / "opennova.exe";
+	if (options.legacy && !result.launch_exe.empty()) {
+		if (!update::is_safe_row_name(result.launch_exe)) { error = "Unsafe EXE in update command."; return false; }
+		program = options.resource_dir / io::os_path(result.launch_exe);
+	}
+	auto run_args = options.run_args;
+	if (!options.legacy && run_args.empty())
+		run_args = {"--", "/game", options.game, "--resource-dir", io::utf8_path(options.resource_dir)};
+	return updater::launch_detached(program, launch_dir, run_args, error);
+}
+
+#ifdef _WIN32
+struct Dialog {
+	updater::Options options;
+	updater::Result result;
+	std::vector<std::string> args;
+	std::atomic_bool cancel{false};
+	std::atomic_bool done{false};
+	std::mutex mutex;
+	updater::Progress progress;
+	std::string error;
+	bool ok = false;
+	HWND status = nullptr, file = nullptr, bar = nullptr, button = nullptr;
+	std::thread worker;
+};
+
+LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+	Dialog *dialog = reinterpret_cast<Dialog *>(GetWindowLongPtrW(window, GWLP_USERDATA));
+	if (message == WM_CREATE) {
+		dialog = static_cast<Dialog *>(reinterpret_cast<CREATESTRUCTW *>(lparam)->lpCreateParams);
+		SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialog));
+		const auto control = [&](const wchar_t *cls, const wchar_t *text, DWORD style, int x, int y, int w, int h) {
+			HWND result = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style, x, y, w, h,
+					window, nullptr, GetModuleHandleW(nullptr), nullptr);
+			SendMessageW(result, WM_SETFONT, reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE);
+			return result;
+		};
+		dialog->status = control(L"STATIC", L"Checking for update...", 0, 22, 24, 540, 36);
+		dialog->file = control(L"STATIC", L"", SS_PATHELLIPSIS, 22, 67, 540, 34);
+		dialog->bar = control(PROGRESS_CLASSW, L"", PBS_SMOOTH, 22, 110, 540, 22);
+		SendMessageW(dialog->bar, PBM_SETRANGE32, 0, 1000);
+		dialog->button = control(L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 462, 151, 100, 30);
+		SetTimer(window, 1, 100, nullptr);
+		dialog->worker = std::thread([dialog]() {
+			const auto progress = [dialog](const updater::Progress &p) {
+				std::lock_guard<std::mutex> lock(dialog->mutex); dialog->progress = p;
+			};
+			dialog->ok = execute(dialog->options, dialog->result, dialog->error, progress, &dialog->cancel);
+			dialog->done.store(true);
+		});
+		return 0;
+	}
+	if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
+	if (message == WM_TIMER) {
+		updater::Progress progress;
+		{ std::lock_guard<std::mutex> lock(dialog->mutex); progress = dialog->progress; }
+		SetWindowTextW(dialog->status, updater::wide(progress.status).c_str());
+		std::string file = progress.file;
+		if (progress.total) file += "  " + std::to_string(progress.bytes / 1024) + "/" + std::to_string(progress.total / 1024) + " KBytes";
+		SetWindowTextW(dialog->file, updater::wide(file).c_str());
+		SendMessageW(dialog->bar, PBM_SETPOS, progress.total ? WPARAM(progress.bytes * 1000 / progress.total) : 0, 0);
+		if (dialog->done.load()) {
+			KillTimer(window, 1);
+			dialog->worker.join();
+			if (dialog->ok) dialog->ok = finish(dialog->options, dialog->args, dialog->result, dialog->error);
+			if (!dialog->result.revision_pending || !dialog->ok) {
+				const std::string text = dialog->ok ? (dialog->result.applied ? "Operation completed successfully!" : "No Update Needed!") : dialog->error;
+				MessageBoxW(window, updater::wide(text).c_str(), L"OpenNova Update", MB_OK | (dialog->ok ? MB_ICONINFORMATION : MB_ICONERROR));
+			}
+			DestroyWindow(window);
+		}
+		return 0;
+	}
+	if (message == WM_CLOSE || (message == WM_COMMAND && reinterpret_cast<HWND>(lparam) == dialog->button)) {
+		dialog->cancel.store(true);
+		EnableWindow(dialog->button, FALSE);
+		return 0;
+	}
+	if (message == WM_DESTROY) { PostQuitMessage(dialog->ok ? 0 : 1); return 0; }
+	return DefWindowProcW(window, message, wparam, lparam);
+}
+
+int show_dialog(const updater::Options &options, const std::vector<std::string> &args) {
+	INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_PROGRESS_CLASS};
+	InitCommonControlsEx(&controls);
+	WNDCLASSW cls{};
+	cls.lpfnWndProc = window_proc;
+	cls.hInstance = GetModuleHandleW(nullptr);
+	cls.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
+	cls.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_BTNFACE + 1);
+	cls.lpszClassName = L"OpenNovaUpdate";
+	RegisterClassW(&cls);
+	Dialog dialog;
+	dialog.options = options;
+	dialog.args = args;
+	HWND window = CreateWindowExW(WS_EX_APPWINDOW, cls.lpszClassName, L"OpenNova Update",
+			WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, CW_USEDEFAULT, CW_USEDEFAULT,
+			600, 240, nullptr, nullptr, cls.hInstance, &dialog);
+	if (!window) return 1;
+	ShowWindow(window, SW_SHOW);
+	MSG message{};
+	while (GetMessageW(&message, nullptr, 0, 0) > 0) { TranslateMessage(&message); DispatchMessageW(&message); }
+	if (dialog.worker.joinable()) { dialog.cancel.store(true); dialog.worker.join(); }
+	return dialog.ok ? 0 : 1;
+}
+#endif
+
+int app_main(const std::vector<std::string> &args, const std::filesystem::path &executable) {
+	updater::Options options;
+	std::string error;
+	if (!updater::parse_options(args, executable, options, error)) {
+		updater::write_stdout(error + "\n" + updater::usage());
+		return 2;
+	}
+	if (options.help) { updater::write_stdout(updater::usage()); return 0; }
+	if (options.check) {
+		updater::Result result;
+		if (!execute(options, result, error, {}, nullptr)) {
+			updater::write_stdout("ERROR " + error + "\n"); return 1;
+		}
+		updater::write_stdout(result.available ? "UPDATE AVAILABLE\n" : "CURRENT\n");
+		return result.available ? 10 : 0;
+	}
+#ifdef _WIN32
+	return show_dialog(options, args);
+#else
+	updater::Result result;
+	if (!execute(options, result, error, [](const updater::Progress &p) {
+			updater::write_stdout(p.status + " " + p.file + "\n");
+		}, nullptr) || !finish(options, args, result, error)) {
+		updater::write_stdout("ERROR " + error + "\n"); return 1;
+	}
+	return 0;
+#endif
+}
+} // namespace
+
+#ifdef _WIN32
+int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
+	return app_main(opennova::updater::process_arguments(), opennova::updater::executable_path());
+}
+#else
+int main(int argc, char **argv) {
+	return app_main(opennova::updater::process_arguments(argc, argv), opennova::updater::executable_path(argv[0]));
+}
+#endif

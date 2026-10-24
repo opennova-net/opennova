@@ -43,7 +43,7 @@ void test_flags_parse_case_insensitively_with_values() {
     CHECK(parse_launch_flags({}).resource_dir.empty());
     CHECK(!parse_launch_flags({}).resource_dir_given);
     // The flag with no value is present but empty: the shell's usage error,
-    // distinct from no flag at all (the bundled assets/ boot).
+    // distinct from no flag at all (the executable directory).
     const LaunchFlags bare = parse_launch_flags({"game.exe", "--resource-dir"});
     CHECK(bare.resource_dir.empty() && bare.resource_dir_given);
     // /NOHUD: the whole token in any case; a prefix or suffix is no match
@@ -221,6 +221,15 @@ void test_flags_win_over_fallbacks_and_jo_is_the_default_game() {
     CHECK(launch_game(none, " DFX ") == "dfx");
     CHECK(launch_game(none, "") == "jo");
     CHECK(none.resource_dir.empty());
+    CHECK(launch_product(none) == "opennova" && launch_product_supported(none));
+    CHECK(launch_product(parse_launch_flags({"/game", "Jo"})) == "jo");
+    CHECK(launch_game(parse_launch_flags({"/game", "OPENNOVA"}), "dfx2") == "jo");
+    CHECK(launch_game(parse_launch_flags({"/game", "DFX2"}), "opennova") == "dfx2");
+    CHECK(!launch_product_supported(parse_launch_flags({"/game", "missing"})));
+    CHECK(!launch_product_supported(parse_launch_flags({"/game", "dfx"})));
+    CHECK(launch_game(parse_launch_flags({"/game", "dfx"}), "jo") == "dfx");
+    CHECK(!launch_product_supported(parse_launch_flags({"/game"})));
+    CHECK(parse_launch_flags({"--NO-UPDATE"}).no_update && !none.no_update);
     const LaunchFlags set = parse_launch_flags({"/exp", "jox01", "/game", "JODEMO", "--resource-dir", "E:/y"});
     CHECK(launch_expansion(set, "revx02") == "jox01");
     CHECK(launch_game(set, "dfx") == "jodemo");

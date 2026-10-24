@@ -31,10 +31,10 @@ easier to relay than to rediscover.
 - `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service
   data and deployment stack (DEPLOY.md).
 - The game projects and authoring sources live in [opennova-assets](https://github.com/opennova-net/opennova-assets),
-  with `assets/`, `expansions/`, and `art/` preserved there. Windows packaging exports
-  them from a separate, pinned checkout and bundles the resulting game data beside
-  `opennova.exe`. Source launches use `--resource-dir` to select built content or a
-  retail install. Tests use focused fixtures and generated installs.
+  with `assets/`, `expansions/`, and `art/` preserved there. The engine package ships
+  `opennova.exe`, `update.exe`, `revupdat.exe`, native dependencies and bootstrap
+  configuration. First standalone launch downloads content. `/game` selects
+  `opennova` (default), `jo`, or `dfx2`; retail installs are selected explicitly.
 - `tests/` — C++ ctest suite (separate from `godot/tests/`; different runners).
 - `tests/blender/` — the Blender add-on's Python tests: ctest registers each as a
   `blender_<name>` row when Blender 5.x is on PATH, run against the source-tree add-on;

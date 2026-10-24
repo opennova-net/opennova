@@ -10,6 +10,28 @@ func after_each() -> void:
 	LaunchFlags.clear_args_override()
 
 
+func test_product_defaults_to_opennova_with_an_explicit_compatibility_profile() -> void:
+	LaunchFlags.set_args_override(PackedStringArray([]))
+	assert_eq(LaunchFlags.product(), "opennova")
+	assert_eq(LaunchFlags.game(), "jo")
+	assert_true(LaunchFlags.product_supported())
+	assert_false(LaunchFlags.no_update())
+	LaunchFlags.set_args_override(PackedStringArray(["/game", "DFX2", "--no-update"]))
+	assert_eq(LaunchFlags.product(), "dfx2")
+	assert_eq(LaunchFlags.game(), "dfx2")
+	assert_true(LaunchFlags.no_update())
+	LaunchFlags.set_args_override(PackedStringArray(["/game", "opennova"]))
+	assert_eq(LaunchFlags.product(), "opennova")
+	assert_eq(LaunchFlags.game(), "jo")
+	LaunchFlags.set_args_override(PackedStringArray(["/game", "unknown"]))
+	assert_false(LaunchFlags.product_supported())
+	LaunchFlags.set_args_override(PackedStringArray(["/game", "dfx"]))
+	assert_false(LaunchFlags.product_supported())
+	assert_eq(LaunchFlags.game(), "dfx", "format tools can still name other engine profiles")
+	LaunchFlags.set_args_override(PackedStringArray(["/game"]))
+	assert_false(LaunchFlags.product_supported())
+
+
 func test_runtime_flags_read_through_the_override() -> void:
 	LaunchFlags.set_args_override(PackedStringArray([
 		"--mission", "00TRa.bms", "--lan-host", "ASH_I5A.BMS",
@@ -62,7 +84,7 @@ func test_absent_flags_fall_back() -> void:
 
 
 func test_resource_dir_without_a_value_is_given_but_empty() -> void:
-	# The shell's usage error, distinct from no flag (content beside the executable).
+	# The shell's usage error, distinct from no flag (the executable directory).
 	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir"]))
 	assert_eq(LaunchFlags.resource_dir(), "")
 	assert_true(LaunchFlags.resource_dir_given())

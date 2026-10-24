@@ -2,7 +2,8 @@
 
 // The hosted data sets' rows (backend/migrations/0011_data_sets.sql and 0013_releases.sql,
 // ADR 0064): the data sets an admin created (one product each: a base game, or one expansion
-// of a base), their trees (each an immutable version of the data set's files in the object
+// of a base), standalone updater products (kind update, no game tree; migration 0023),
+// their trees (each an immutable version of the data set's files in the object
 // store, core/object_store.h), the update releases (1SFS packages) and the sections each carries,
 // and the trees each hosted server is pinned to. The routes, the supervisor, the worker's
 // jobs and the update listener share it; every write that spans statements is one
@@ -21,8 +22,8 @@
 
 namespace opennova::novaworld_server::hosted {
 
-enum class DataSetKind : uint8_t { Base, Expansion };
-const char *data_set_kind_name(DataSetKind kind); // "base", "expansion"
+enum class DataSetKind : uint8_t { Base, Expansion, Update };
+const char *data_set_kind_name(DataSetKind kind); // "base", "expansion", "update" (no hosted tree)
 std::optional<DataSetKind> data_set_kind_from_name(std::string_view name);
 
 // A data_sets row.
@@ -152,7 +153,7 @@ DataSetOutcome update_data_set(db::Database &db, int64_t id, const DataSetPatch 
 DataSetOutcome delete_data_set(db::Database &db, int64_t id);
 
 std::optional<DataSetRow> find_data_set(db::Database &db, int64_t id);
-// Every row, bases first, each by id.
+// Every row: bases, expansions, then standalone updater products, each by id.
 std::vector<DataSetRow> list_data_sets(db::Database &db);
 // The expansions of base `parent_id`, by id.
 std::vector<DataSetRow> list_expansions_of(db::Database &db, int64_t parent_id);

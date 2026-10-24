@@ -365,6 +365,9 @@ int test_no_data() {
 	on_settings.missions = { "on.bms" };
 	const int64_t orphan = rig.request("gone_row_owner", on_settings);
 	TEST_EXPECT(orphan > 0);
+	// Seeded OpenNova includes ONJO1. Remove the unused child first so this
+	// fixture can exercise a missing base row without violating its parent FK.
+	rig.db.exec("DELETE FROM data_sets WHERE parent_id = $1;", { BindValue(on) });
 	rig.db.exec("DELETE FROM data_sets WHERE id = $1;", { BindValue(on) });
 	rig.tick();
 	rig.tick();

@@ -53,7 +53,10 @@ void LaunchFlags::_bind_methods() {
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("expansion", "fallback"),
 			&LaunchFlags::expansion, DEFVAL(String()));
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("game", "fallback"),
-			&LaunchFlags::game, DEFVAL(String("jo")));
+			&LaunchFlags::game, DEFVAL(String("opennova")));
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("product"), &LaunchFlags::product);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("product_supported"), &LaunchFlags::product_supported);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("no_update"), &LaunchFlags::no_update);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("resource_dir"),
 			&LaunchFlags::resource_dir);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("resource_dir_given"),
@@ -93,6 +96,10 @@ String LaunchFlags::expansion(const String &fallback) {
 String LaunchFlags::game(const String &fallback) {
 	return to_gd(opennova::launch_game(parse(), to_std(fallback)));
 }
+
+String LaunchFlags::product() { return to_gd(opennova::launch_product(parse())); }
+bool LaunchFlags::product_supported() { return opennova::launch_product_supported(parse()); }
+bool LaunchFlags::no_update() { return parse().no_update; }
 
 String LaunchFlags::resource_dir() {
 	return to_gd(parse().resource_dir);

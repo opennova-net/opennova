@@ -438,7 +438,7 @@ func _stage_impact_fixture(name: String) -> String:
 	return root_dir
 
 
-# The staged harness item for KIND_BUILDING tests. The authored items.def
+# The staged harness item for KIND_BUILDING tests. The shipped assets/items.def
 # carries only what the minimal mission places or the engine spawns by fixed id,
 # so the staged root appends its own catalogue entry for the fixture model the
 # stagers copy in as GuardTwr1.3di. CRLF: retail's .def parser stops at a bare LF.

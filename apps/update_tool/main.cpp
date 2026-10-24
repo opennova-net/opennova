@@ -38,6 +38,7 @@ const char kUsage[] =
 		"  opennova-update-tool build --from <dir> --to <dir> --out <file.sfs>\n"
 		"      --base <CMD> [--expansion <name>=<CMD>]... [--product-name <registry name>]\n"
 		"      [--exe <file>] [--exclude <path|dir/>]... [--no-remove] [--prefix <update.exe>]\n"
+		"      [--full [--previous <file.sfs>]] [--version-file <base version file>]\n"
 		"  opennova-update-tool inspect <file.sfs>\n"
 		"  opennova-update-tool serve --package <file.sfs>... --product <LOGIN>=<CMD>...\n"
 		"      [--server-host <name>]... [--port <n>]... [--loopback]\n";
@@ -69,7 +70,7 @@ bool read_package(const std::string &path, update::SfsPackage &package, std::str
 
 int run_build(int argc, char **argv) {
 	update_tool::BuildSpec spec;
-	std::string out, prefix, base_cmd, exe;
+	std::string out, prefix, base_cmd, exe, previous, version_file = "version.txt";
 	std::vector<std::pair<std::string, std::string>> expansions;
 	for (int i = 0; i < argc; ++i) {
 		const std::string arg = argv[i];
@@ -77,6 +78,8 @@ int run_build(int argc, char **argv) {
 		const char *v = nullptr;
 		if (arg == "--no-remove") {
 			spec.removes = false;
+		} else if (arg == "--full") {
+			spec.full = true;
 		} else if ((v = value()) == nullptr) {
 			return usage_error(("missing a value after " + arg).c_str());
 		} else if (arg == "--from") {
@@ -100,6 +103,10 @@ int run_build(int argc, char **argv) {
 			spec.excludes.push_back(v);
 		} else if (arg == "--prefix") {
 			prefix = v;
+		} else if (arg == "--previous") {
+			previous = v;
+		} else if (arg == "--version-file") {
+			version_file = v;
 		} else {
 			return usage_error(("unknown option " + arg).c_str());
 		}
@@ -109,13 +116,19 @@ int run_build(int argc, char **argv) {
 	if (base_cmd.empty() && expansions.empty())
 		return usage_error("build needs --base or an --expansion");
 	if (!base_cmd.empty())
-		spec.products.push_back({ "", "", base_cmd, "", "", exe });
+		spec.products.push_back({ "", "", base_cmd, "", "", exe, version_file });
 	for (const auto &[name, cmd] : expansions)
 		spec.products.push_back({ "expansion/" + name, name, cmd, "", "", "" });
 
 	update::SfsPackage package;
 	std::vector<update_tool::ProductReport> report;
 	std::string error;
+	if (!previous.empty()) {
+		spec.previous.emplace();
+		if (!read_package(previous, *spec.previous, error)) {
+			std::fprintf(stderr, "opennova-update-tool: %s\n", error.c_str()); return 1;
+		}
+	}
 	if (!update_tool::build_update_package(spec, package, report, error)) {
 		std::fprintf(stderr, "opennova-update-tool: %s\n", error.c_str());
 		return 1;

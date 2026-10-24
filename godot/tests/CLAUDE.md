@@ -10,7 +10,7 @@
   there while its open state (the Insert toggle, capture, input policy) still works and is tested.
 - Collection: files ending `_test.gd` that extend `GutTest`, subdirs included.
 - One suite, no retail data: a script's inputs are minted or authored fixtures
-  and focused menu samples under `fixtures/game/`, and `scripts/ci/test_suites.py --check-layout`
+  under `fixtures/`, and `scripts/ci/test_suites.py --check-layout`
   fails a script that names a retail root. Scripts whose every test needs a
   RenderingDevice live under `tests/windowed/`: excluded from the headless
   selection, they run only with `--windowed`, where a pending test is a failure.

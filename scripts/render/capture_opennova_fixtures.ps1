@@ -75,7 +75,7 @@ foreach ($id in $Ids) {
     if ($known -notcontains $id) { throw "unknown fixture id: $id" }
 }
 
-$dll = Join-Path $repo "godot\bin\libopennova.windows.template_debug.x86_64.dll"
+$dll = Join-Path $repo "godot\bin\opennovad.dll"
 if (-not (Test-Path $dll)) { throw "GDExtension not built: $dll (run scripts/build_godot.sh)" }
 $catalogRes = "res://../" + ($Catalog -replace "\\", "/")
 

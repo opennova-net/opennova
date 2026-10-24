@@ -39,6 +39,12 @@ bool row_content(const SfsSection &section, const CommandRow &row, std::vector<u
 		error = "the package has no file for the row " + row.name;
 		return false;
 	}
+	NlzHeader header;
+	if (nlz_read_header(entry->data.data(), entry->data.size(), header) &&
+			(row.size < 0 || header.raw_size != static_cast<uint32_t>(row.size))) {
+		error = "the file for the row " + row.name + " has the wrong inflated size";
+		return false;
+	}
 	if (nlz_decode(entry->data.data(), entry->data.size(), out) == NlzDecode::Corrupt) {
 		error = "the file for the row " + row.name + " does not inflate";
 		return false;
@@ -97,8 +103,33 @@ bool is_safe_row_name(std::string_view name) {
 	if (name == "." || name == "..")
 		return false;
 	for (const char c : name)
-		if (c == '/' || c == '\\' || c == ':' || c == '\0')
+		if (c == '/' || c == '\\' || c == ':' || static_cast<unsigned char>(c) < 32)
 			return false;
+	if (name.back() == '.' || name.back() == ' ') return false;
+	const std::string stem = strutil::to_lower(std::string(name.substr(0, name.find('.'))));
+	if (stem == "con" || stem == "prn" || stem == "aux" || stem == "nul" ||
+			(stem.size() == 4 && (stem.rfind("com", 0) == 0 || stem.rfind("lpt", 0) == 0) &&
+					stem[3] >= '1' && stem[3] <= '9')) return false;
+	return true;
+}
+
+bool validate_commands(const CommandFile &commands, std::string &error) {
+	bool archive = false;
+	for (const CommandRow &row : commands.rows) {
+		if (!(row.type == CommandType::Target && row.name == ".") && !is_safe_row_name(row.name)) {
+			error = "the row \"" + row.name + "\" does not name a file of the tree"; return false;
+		}
+		if (row.type == CommandType::Target) archive = is_archive_name(row.name);
+		if (row.type == CommandType::Copy && !archive) {
+			error = "the COPY row " + row.name + " has no archive target"; return false;
+		}
+		if (row.type == CommandType::Loose && archive) {
+			error = "the loose row " + row.name + " follows an archive target"; return false;
+		}
+		if ((row.type == CommandType::Copy || row.type == CommandType::Loose) && row.size < 0) {
+			error = "negative size for " + row.name; return false;
+		}
+	}
 	return true;
 }
 
@@ -116,15 +147,12 @@ bool apply_section(const SfsSection &section, std::string_view command_file,
 		error = "the command file " + std::string(command_file) + " does not read";
 		return false;
 	}
+	if (!validate_commands(*cmd, error)) return false;
 
 	// Every row checked before any is applied.
 	std::map<size_t, std::vector<uint8_t>> contents; // by row index
 	for (size_t i = 0; i < cmd->rows.size(); ++i) {
 		const CommandRow &row = cmd->rows[i];
-		if (!is_safe_row_name(row.name)) {
-			error = "the row \"" + row.name + "\" does not name a file of the tree";
-			return false;
-		}
 		if (row.type == CommandType::Loose || row.type == CommandType::Copy) {
 			std::vector<uint8_t> content;
 			if (!row_content(section, row, content, error))
@@ -135,6 +163,7 @@ bool apply_section(const SfsSection &section, std::string_view command_file,
 
 	std::error_code ec;
 	fs::create_directories(dir, ec);
+	if (ec) { error = "cannot create install directory: " + ec.message(); return false; }
 	std::string target = "."; // the root until a TARGET row
 	ArchiveEdits edits;
 	for (size_t i = 0; i < cmd->rows.size(); ++i) {
@@ -155,11 +184,13 @@ bool apply_section(const SfsSection &section, std::string_view command_file,
 				}
 				const fs::path parent = target == "." ? dir : dir / io::os_path(target);
 				fs::create_directories(parent, ec);
+				if (ec) { error = "cannot create target directory: " + ec.message(); return false; }
 				const fs::path path = parent / io::os_path(row.name);
 				const std::vector<uint8_t> &content = contents[i];
 				if (!io::write_file_atomic(io::utf8_path(path), content.data(), content.size(), error))
 					return false;
 				fs::last_write_time(path, file_time_from_unix(row.time), ec);
+				if (ec) { error = "cannot stamp " + row.name + ": " + ec.message(); return false; }
 				report.files_written.push_back(
 						target == "." ? row.name : target + "/" + row.name);
 				break;

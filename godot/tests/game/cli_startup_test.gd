@@ -7,8 +7,7 @@ var _config: TestFs.Snapshot
 
 
 func before_each() -> void:
-	_config = TestFs.snapshot(ResourceDirSettings.CONFIG_PATH)
-	ResourceDirSettings.set_game("jo")
+	_config = TestFs.snapshot("user://opennova.cfg")
 
 
 func after_each() -> void:
@@ -29,6 +28,9 @@ func _launch(args: PackedStringArray, expected_exit: int, verbose := false) -> S
 	if verbose:
 		command.append("--verbose")
 	command.append("--")
+	command.append("--no-update")
+	if not args.has("/game"):
+		command.append_array(PackedStringArray(["/game", "jo"]))
 	command.append_array(args)
 	var status := OS.execute(OS.get_executable_path(), command, output, true)
 	var log_text := "\n".join(output)
@@ -38,12 +40,17 @@ func _launch(args: PackedStringArray, expected_exit: int, verbose := false) -> S
 	return log_text
 
 
-func test_source_run_without_a_path_requires_external_content() -> void:
-	# Godot's executable directory has no game data. The source checkout no
-	# longer contributes a fallback menu; --resource-dir selects external data.
-	var log_text := _launch([], 1, true)
-	assert_string_contains(log_text, "no bundled game content beside the executable")
-	assert_string_contains(log_text, "--resource-dir")
+func test_empty_opennova_install_reaches_bootstrap_without_game_data() -> void:
+	var dir := TestFs.cache_dir(self, "empty_bootstrap")
+	_dirs.append(dir)
+	var log_text := _launch(["/game", "opennova", "--resource-dir", dir], 1, true)
+	assert_string_contains(log_text, "OpenNova: content installation required")
+	assert_false(log_text.contains("no menu found in resource dir"), log_text)
+
+
+func test_unknown_or_missing_game_selection_is_a_usage_error() -> void:
+	_launch(["/game", "unknown"], 2)
+	_launch(["/game"], 2)
 
 
 func test_missing_argument_value_reports_usage() -> void:
@@ -85,7 +92,7 @@ func test_game_cfg_with_mpreset_ends_the_process_at_the_start() -> void:
 	file.close()
 	var log_text := _launch(["--working-dir", dir, "--resource-dir", dir], 0, true)
 	assert_false(
-		log_text.contains("OpenNova: bundled menu up from"),
+		log_text.contains("OpenNova: menu up from"),
 		"the process ends before the menu: %s" % log_text
 	)
 	assert_eq(FileAccess.get_file_as_string(cfg_path), text, "game.cfg is left as read")
@@ -95,7 +102,7 @@ func test_game_cfg_with_mpreset_ends_the_process_at_the_start() -> void:
 	file.store_string("version = 29\r\nmpreset = 0\r\n")
 	file.close()
 	log_text = _launch(["--working-dir", dir, "--resource-dir", dir], 0, true)
-	assert_false(log_text.contains("no menu found in resource dir"), log_text)
+	assert_string_contains(log_text, "OpenNova: menu up from")
 	assert_true(
 		FileAccess.file_exists(dir.path_join("player.sav")), "the menu's start saved the profile"
 	)

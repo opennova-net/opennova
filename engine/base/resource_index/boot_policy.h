@@ -8,8 +8,9 @@
 //                 entries. Without it the runtime reads from PFFs exclusively.
 //   /exp <name>   mount the expansion <name> (e.g. "jox01") over the base game.
 //   /mod <name>   the same flag (retail reads the two spellings in one arm).
-//   /game <code>  which game the data is from (e.g. "jo", "jodemo"); selects
-//                 the SCR decode key. Defaults to "jo" when absent.
+//   /game <code>  the product, default "opennova"; "jo" and "dfx2" select
+//                 installed retail data. OpenNova uses JO's engine profile.
+//   --no-update  disable update checks and installation (editor Play and tests).
 //   /LAN          every game.cfg read forces mpnovaworldhostlanonly on: a
 //                 NovaWorld host advertises LAN only.
 //   /POSTIPADDRESS <address>, /POSTPORTNUMBER <n>
@@ -22,7 +23,7 @@
 //                 override the gate response's USEJUNCTION / CLEARJUNCTION.
 //   --resource-dir <absolute path>
 //                 the game-data directory for this process. Without the flag
-//                 the shell boots its bundled assets/ (ADR 0048); the flag
+//                 the shell uses the executable's directory; the flag
 //                 with no value is a usage error.
 //   --loose-mission <name.bms>
 //                 boot the exact top-level loose BMS from --resource-dir.
@@ -82,6 +83,7 @@ namespace opennova {
 inline constexpr const char *kLaunchFlagLooseOverride = "/d";
 inline constexpr const char *kLaunchFlagExpansion = "/exp";
 inline constexpr const char *kLaunchFlagGame = "/game";
+inline constexpr const char *kLaunchFlagNoUpdate = "--no-update";
 inline constexpr const char *kLaunchFlagResourceDir = "--resource-dir";
 inline constexpr const char *kLaunchFlagLooseMission = "--loose-mission";
 inline constexpr const char *kLaunchFlagLooseRoot = "--loose-root";
@@ -115,6 +117,8 @@ struct LaunchFlags {
     bool loose_override = false;   // /d
     std::string expansion;         // /exp or /mod <name>: the last one, its first 32 bytes
     std::string game;              // /game <code>, lowercased
+    bool game_given = false;
+    bool no_update = false;        // editor Play and tests never check or install updates
     std::string resource_dir;      // --resource-dir <path>
     bool resource_dir_given = false; // --resource-dir present, even without a value
     std::string loose_mission;     // --loose-mission <name.bms>
@@ -221,10 +225,13 @@ bool launch_token_breaks_at(char c);
 std::string launch_expansion_name(const std::string &token);
 // A launch flag always wins over a persisted (possibly stale) fallback.
 std::string launch_expansion(const LaunchFlags &flags, const std::string &fallback);
-// Lowercased; the persisted fallback next, then "jo" — the absence of any
-// choice is the JO default. An unknown code resolves to the JO default
-// downstream (gameprofile_scr_policy_for_code).
+// The engine compatibility profile: OpenNova uses JO. The explicit fallback
+// is for format/tool callers; runtime product selection uses launch_product.
 std::string launch_game(const LaunchFlags &flags, const std::string &fallback);
+// The selected distribution product. OpenNova uses the JO compatibility profile, but
+// keeps its own updater product; absence never inherits a previous retail selection.
+std::string launch_product(const LaunchFlags &flags);
+bool launch_product_supported(const LaunchFlags &flags);
 // `dir/name`, with an empty dir yielding the bare name and a trailing
 // separator not doubled.
 std::string boot_path_join(const std::string &dir, const std::string &name);

@@ -24,8 +24,11 @@ public:
 	static bool loose_override_enabled();
 	// `/exp <name>` (or `/mod`, the last one), else `fallback` ("" the base game).
 	static String expansion(const String &fallback);
-	// `/game <code>` lowercased, else the persisted fallback, else "jo".
+	// Engine profile for `/game <product>`; OpenNova uses JO's compatibility.
 	static String game(const String &fallback);
+	static String product();
+	static bool product_supported();
+	static bool no_update();
 	// `--resource-dir <path>` (process-local, never persisted), or "".
 	static String resource_dir();
 	// True when `--resource-dir` was passed, even without a value.

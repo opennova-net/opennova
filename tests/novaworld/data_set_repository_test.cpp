@@ -59,9 +59,9 @@ int64_t insert_server(Database &db, int64_t data_set_id, std::optional<int64_t> 
 int test_data_sets() {
 	TestDatabase tdb;
 	Database db = tdb.open();
-	// The seeded rows: three bases and Escalation under Joint Operations.
+	// Three base games, their two expansions, and the standalone runtime updater.
 	const std::vector<DataSetRow> all = list_data_sets(db);
-	TEST_EXPECT(all.size() == 4);
+	TEST_EXPECT(all.size() == 6);
 	const int64_t jo = seeded(db, "Joint Operations"), jox = seeded(db, "Escalation");
 	TEST_EXPECT(jo != 0 && jox != 0);
 	const auto jo_row = find_data_set(db, jo);
@@ -73,6 +73,22 @@ int test_data_sets() {
 			jox_row->expansion_code == "jox01" && jox_row->updater_login == "JOEus");
 	TEST_EXPECT(list_expansions_of(db, jo).size() == 1);
 	TEST_EXPECT(all[0].kind == DataSetKind::Base && all[3].kind == DataSetKind::Expansion);
+	const auto runtime = find_data_set(db, seeded(db, "OpenNova runtime"));
+	TEST_EXPECT(runtime && runtime->kind == DataSetKind::Update && runtime->game.empty() &&
+			runtime->title.empty() && !runtime->parent_id && !runtime->current_tree_id &&
+			runtime->updater_login == "ONRUNTIME" && runtime->command_file == "ONRUNTIME.CMD" &&
+			!runtime->retail_updater);
+	const auto native = find_data_set(db, seeded(db, "OpenNova"));
+	TEST_EXPECT(native && native->updater_login == "OPENNOVA" &&
+			native->command_file == "OPENNOVA.CMD" && !native->retail_updater);
+	const auto dfx2 = find_data_set(db, seeded(db, "Delta Force Xtreme 2"));
+	TEST_EXPECT(dfx2 && dfx2->updater_login == "DFX2" && dfx2->command_file == "DFX2.CMD" &&
+			dfx2->retail_updater);
+	const auto native_expansions = list_expansions_of(db, native->id);
+	TEST_EXPECT(native_expansions.size() == 1 && native_expansions[0].expansion_code == "onjo1" &&
+			native_expansions[0].updater_login == "ONJO1" &&
+			native_expansions[0].command_file == "ONJO1.CMD");
+	TEST_EXPECT(tree_file_rules(DataSetKind::Update, "").empty());
 
 	// A new base, a new expansion of it, and the refusals.
 	NewDataSet bhd;
@@ -368,7 +384,8 @@ int test_migration_mapping() {
 	fs::create_directories(staged);
 	for (const auto &entry : fs::directory_iterator(all)) {
 		const std::string name = entry.path().filename().string();
-		if (name.rfind("0011", 0) != 0 && name.rfind("0013", 0) != 0)
+		if (name.rfind("0011", 0) != 0 && name.rfind("0013", 0) != 0 &&
+				name.rfind("0023", 0) != 0)
 			fs::copy_file(entry.path(), staged / name);
 	}
 	db::run_migrations(db, staged);

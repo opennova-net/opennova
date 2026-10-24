@@ -88,13 +88,13 @@ static int test_launch_plans() {
 	TEST_EXPECT(play.build_dir == "C:/p/.opennova/build/play/abc" && play.working_dir == "C:/p/.opennova/run/1");
 	TEST_EXPECT(play.log_file == "C:/p/.opennova/run/1/session.log");
 	const std::vector<std::string> expected = {"--log-file", "C:/p/.opennova/run/1/session.log", "--",
-	                                           "--resource-dir", "C:/p/.opennova/build/play/abc", "/game", "jo",
+	                                           "--no-update", "--resource-dir", "C:/p/.opennova/build/play/abc", "/game", "jo",
 	                                           "--mcp-port", "8975", "--mission", "m.bms"};
 	TEST_EXPECT(play.args == expected);
 	TEST_EXPECT(launch_plan_command_line(play).find("--resource-dir C:/p/.opennova/build/play/abc") != std::string::npos);
 
 	const LaunchPlan quiet = make_play_launch_plan("opennova", "/b", "/r", "", 0);
-	TEST_EXPECT(quiet.args == std::vector<std::string>({"--log-file", "/r/session.log", "--", "--resource-dir", "/b"}));
+	TEST_EXPECT(quiet.args == std::vector<std::string>({"--log-file", "/r/session.log", "--", "--no-update", "--resource-dir", "/b"}));
 	const LaunchPlan headless = make_play_launch_plan("opennova", "/b", "/r", "", 0, "", {"--headless", "--quit-after", "3"});
 	TEST_EXPECT(headless.args[0] == "--headless" && headless.args[2] == "3" && headless.args[3] == "--log-file");
 
@@ -590,7 +590,7 @@ static int test_expansion_launch_plans() {
 	const LaunchPlan play = make_play_launch_plan("opennova.exe", "C:/p/build/abc", "C:/p/run/1", "jo", 8975, "m.bms", {},
 	                                              "jxm");
 	TEST_EXPECT(play.build_dir == "C:/p/build/abc" && play.resource_dir == "C:/p/run/1" && play.expansion == "jxm");
-	const std::vector<std::string> expected = {"--log-file", "C:/p/run/1/session.log", "--", "--resource-dir", "C:/p/run/1",
+	const std::vector<std::string> expected = {"--log-file", "C:/p/run/1/session.log", "--", "--no-update", "--resource-dir", "C:/p/run/1",
 	                                           "/exp", "jxm", "/game", "jo", "--mcp-port", "8975", "--mission", "m.bms"};
 	TEST_EXPECT(play.args == expected);
 	const LaunchPlan source = make_source_launch_plan("godot", "C:/repo/godot", "C:/p/build", "C:/p/run/2", "jo", 0, "", {},

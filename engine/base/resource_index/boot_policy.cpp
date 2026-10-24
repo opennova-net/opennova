@@ -110,6 +110,8 @@ LaunchFlags parse_launch_flags(const std::vector<std::string> &args) {
     f.loose_override = has_flag(args, kLaunchFlagLooseOverride);
     f.expansion = expansion_after(args);
     f.game = strutil::to_lower(value_after(args, kLaunchFlagGame));
+    f.game_given = has_flag(args, kLaunchFlagGame);
+    f.no_update = has_flag(args, kLaunchFlagNoUpdate);
     f.resource_dir = value_after(args, kLaunchFlagResourceDir);
     f.resource_dir_given = has_flag(args, kLaunchFlagResourceDir);
     f.loose_mission = value_after(args, kLaunchFlagLooseMission);
@@ -180,9 +182,19 @@ std::string launch_expansion(const LaunchFlags &flags, const std::string &fallba
 }
 
 std::string launch_game(const LaunchFlags &flags, const std::string &fallback) {
-    if (!flags.game.empty()) return flags.game;
+    if (!flags.game.empty()) return flags.game == "opennova" ? "jo" : flags.game;
     const std::string fb = strutil::to_lower(strutil::trim(fallback));
-    return fb.empty() ? std::string("jo") : fb;
+    return fb.empty() || fb == "opennova" ? std::string("jo") : fb;
+}
+
+std::string launch_product(const LaunchFlags &flags) {
+    return flags.game.empty() ? std::string("opennova") : flags.game;
+}
+
+bool launch_product_supported(const LaunchFlags &flags) {
+    if (flags.game_given && flags.game.empty()) return false;
+    const std::string product = launch_product(flags);
+    return product == "opennova" || product == "jo" || product == "dfx2";
 }
 
 std::string boot_path_join(const std::string &dir, const std::string &name) {

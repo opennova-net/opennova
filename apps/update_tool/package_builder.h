@@ -4,20 +4,23 @@
 // install trees, the product's baseline (`from`, the install as it shipped) and the tree to
 // update it to (`to`). Every file and PFF entry of `to` that differs from `from` becomes a row
 // of the product's command file and a 1ZLN blob beside it, every one `to` lacks a REMOVE row;
-// diffing from the baseline each time keeps a package cumulative, so a client at any older
-// version converges (docs/update/updater-re.md §6-§9).
+// Native releases use full current rows and the previous package's removal history so
+// reverted files and skipped versions converge; baseline diff mode remains available for
+// retail tooling (docs/update/updater-re.md §6-§9).
 //
 // What UPDATE.EXE can install bounds what the builder takes: a loose file only at its product's
 // root (the precheck stats a loose row's bare name, never under a TARGET), names of at most 15
 // characters (a 1SFS entry's field) and unique across a product (every blob lands in one flat
 // update directory), PFF archives at the product's root, and a loose change the precheck can see:
-// a file of the same size whose defective file CRC is unchanged never installs, and an empty file
-// is fetched again on every pass, so neither is taken. An archive `to` lacks is a REMOVE row of
+// retail diff mode refuses a same-size change whose defective file CRC is unchanged. Native
+// full mode fetches every row of a changed command. Empty files are refused in either mode
+// because retail's precheck repeatedly fetches them. An archive `to` lacks is a REMOVE row of
 // its own at the root.
 
 #include <formats/update/sfs.h>
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -30,6 +33,7 @@ struct ProductSpec {
 	std::string product; // the command file's PRODUCT; empty: from version.txt
 	std::string version; // VERSION; empty: from version.txt
 	std::string exe; // EXE, launched at DONE when /RUN; empty for none
+	std::string version_file = "version.txt"; // native runtime uses onversion.txt
 };
 
 struct BuildSpec {
@@ -39,6 +43,10 @@ struct BuildSpec {
 	std::vector<ProductSpec> products;
 	std::vector<std::string> excludes; // product-relative paths or directories ("cache/") left out
 	bool removes = true; // write REMOVE rows for what `to` lacks
+	// Native releases publish the whole current tree. The preceding package carries
+	// earlier removals, and names introduced after the original baseline, across releases.
+	bool full = false;
+	std::optional<update::SfsPackage> previous;
 };
 
 struct ProductReport {

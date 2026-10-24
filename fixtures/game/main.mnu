@@ -150,7 +150,7 @@
         <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
         <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
       </WINDOW>
-      <WINDOW type="button" name="PLAY_RETAIL">
+      <WINDOW type="button" name="UPDATE">
         <POSITION>
           <LEFT>0</LEFT>
           <TOP>184</TOP>
@@ -168,11 +168,11 @@
           <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
           <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
         </FONT>
-        <STRING justify="LEFT" vjustify="CENTER">PLAY RETAIL</STRING>
+        <STRING justify="LEFT" vjustify="CENTER">UPDATE</STRING>
         <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
         <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
       </WINDOW>
-      <WINDOW type="button" name="CHANGE_FOLDER">
+      <WINDOW type="button" name="EXIT">
         <POSITION>
           <LEFT>0</LEFT>
           <TOP>224</TOP>
@@ -190,46 +190,10 @@
           <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
           <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
         </FONT>
-        <STRING justify="LEFT" vjustify="CENTER">CHANGE FOLDER</STRING>
-        <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
-        <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
-      </WINDOW>
-      <WINDOW type="button" name="EXIT">
-        <POSITION>
-          <LEFT>0</LEFT>
-          <TOP>288</TOP>
-          <RIGHT>230</RIGHT>
-          <BOTTOM>322</BOTTOM>
-        </POSITION>
-        <APPEARANCE state="DEFAULT"></APPEARANCE>
-        <APPEARANCE state="MOUSEOVER"></APPEARANCE>
-        <APPEARANCE state="SELECTED"></APPEARANCE>
-        <APPEARANCE state="DISABLED"></APPEARANCE>
-        <FONT>
-          <NAME>%DEF_FONTNAME_LG%</NAME>
-          <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
-          <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
-          <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
-          <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
-        </FONT>
         <STRING justify="LEFT" vjustify="CENTER">EXIT</STRING>
         <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
         <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
       </WINDOW>
-    </WINDOW>
-    <WINDOW type="static" name="RETAIL_NOTE">
-      <POSITION>
-        <LEFT>42</LEFT>
-        <TOP>560</TOP>
-        <RIGHT>500</RIGHT>
-        <BOTTOM>584</BOTTOM>
-      </POSITION>
-      <APPEARANCE state="DEFAULT"></APPEARANCE>
-      <FONT>
-        <NAME>%DEF_FONTNAME%</NAME>
-        <DEFAULT_FG>%DEF_TEXT_DISABLED_FG%</DEFAULT_FG>
-      </FONT>
-      <STRING justify="LEFT" vjustify="CENTER">PLAY RETAIL plays Joint Operations from your own install.</STRING>
     </WINDOW>
   </WINDOW>
 </SCREEN>

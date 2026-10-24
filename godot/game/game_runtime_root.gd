@@ -14,6 +14,7 @@ var _game_viewport: SubViewport = null
 var _embedded_game_view := false
 var _tools_open := false
 var _runtime_window: Window = null
+var _bootstrap_status: Label = null
 
 
 static func should_embed_game_view(
@@ -28,10 +29,94 @@ static func is_headless() -> bool:
 
 
 func _ready() -> void:
+	if GameCfgStore.block().is_reset_exit():
+		get_tree().quit(0)
+		return
+	if not LaunchFlags.product_supported():
+		push_error("OpenNova: unknown /game product: %s" % LaunchFlags.product())
+		get_tree().quit(2)
+		return
+	if LaunchFlags.resource_dir_given() and LaunchFlags.resource_dir().is_empty():
+		push_error("OpenNova: --resource-dir needs a path.")
+		get_tree().quit(2)
+		return
+	var runtime_dir := OS.get_executable_path().get_base_dir()
+	var resource_dir := BootRootMount.launch_directory()
+	var run_args := OS.get_cmdline_args()
+	var user_args := OS.get_cmdline_user_args()
+	if not user_args.is_empty():
+		run_args.append("--")
+		run_args.append_array(user_args)
+	RuntimeUpdates.configure(LaunchFlags.product(), runtime_dir, resource_dir,
+			run_args, not LaunchFlags.no_update() and OS.get_name() == "Windows")
+	if LaunchFlags.product() == "opennova" and not has_content(resource_dir,
+			LaunchFlags.loose_override_enabled(), LaunchFlags.loose_root_allowed()):
+		_show_bootstrap()
+		return
+	RuntimeUpdates.begin_check()
 	if _can_embed_game_view():
 		_start_embedded_game()
 	else:
 		_start_direct_game.call_deferred()
+
+
+static func has_content(directory: String, loose_override := false, allow_loose_root := false) -> bool:
+	# Content is packed by the project exporter. A missing or interrupted first
+	# install must reach the updater without constructing data-dependent menus.
+	var root := ResourceRoot.new()
+	var err := root.mount_runtime(directory, "", loose_override, "jo")
+	if err != OK:
+		if err != ERR_FILE_NOT_FOUND or not allow_loose_root or root.set_root_dir(directory) != OK:
+			return false
+	var missing := root.list_missing_boot_resources()
+	root.clear()
+	return missing.is_empty()
+
+
+func _show_bootstrap() -> void:
+	print_verbose("OpenNova: content installation required")
+	if is_headless():
+		push_error("OpenNova content is missing. Run update.exe to install it.")
+		get_tree().quit(1)
+		return
+	var canvas := Control.new()
+	canvas.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(canvas)
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	canvas.add_child(center)
+	var column := VBoxContainer.new()
+	column.custom_minimum_size = Vector2(420, 0)
+	column.add_theme_constant_override("separation", 16)
+	center.add_child(column)
+	var title := Label.new()
+	title.text = "OpenNova"
+	title.add_theme_font_size_override("font_size", 32)
+	column.add_child(title)
+	_bootstrap_status = Label.new()
+	_bootstrap_status.text = "Install OpenNova's game content to start playing."
+	_bootstrap_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	column.add_child(_bootstrap_status)
+	var install := Button.new()
+	install.text = "Download and play"
+	install.disabled = not RuntimeUpdates.is_enabled()
+	install.pressed.connect(_install_content)
+	column.add_child(install)
+	var quit := Button.new()
+	quit.text = "Exit"
+	quit.pressed.connect(func() -> void: get_tree().quit())
+	column.add_child(quit)
+	if not RuntimeUpdates.is_enabled():
+		_bootstrap_status.text = "Game content is missing. Updates are disabled for this launch."
+	else:
+		_install_content.call_deferred()
+
+
+func _install_content() -> void:
+	if RuntimeUpdates.launch_update():
+		get_tree().quit()
+	else:
+		_bootstrap_status.text = RuntimeUpdates.last_error
 
 
 func _exit_tree() -> void:

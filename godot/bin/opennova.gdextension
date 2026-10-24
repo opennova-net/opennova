@@ -13,12 +13,12 @@ reloadable = true
 ; export scanning: no custom feature) loads the editor-enabled debug library, the
 ; superset, so the authoring classes are always present there. Nothing ships from
 ; a source run.
-windows.debug.x86_64 = "res://bin/libopennova_editor.windows.template_debug.x86_64.dll"
-windows.release.x86_64 = "res://bin/libopennova.windows.template_release.x86_64.dll"
-windows.debug.x86_64.opennova_runtime = "res://bin/libopennova.windows.template_debug.x86_64.dll"
-windows.release.x86_64.opennova_runtime = "res://bin/libopennova.windows.template_release.x86_64.dll"
-windows.debug.x86_64.opennova_editor = "res://bin/libopennova_editor.windows.template_debug.x86_64.dll"
-windows.release.x86_64.opennova_editor = "res://bin/libopennova_editor.windows.template_release.x86_64.dll"
+windows.debug.x86_64 = "res://bin/oneditord.dll"
+windows.release.x86_64 = "res://bin/opennova.dll"
+windows.debug.x86_64.opennova_runtime = "res://bin/opennovad.dll"
+windows.release.x86_64.opennova_runtime = "res://bin/opennova.dll"
+windows.debug.x86_64.opennova_editor = "res://bin/oneditord.dll"
+windows.release.x86_64.opennova_editor = "res://bin/oneditor.dll"
 linux.debug.x86_64 = "res://bin/libopennova_editor.linux.template_debug.x86_64.so"
 linux.release.x86_64 = "res://bin/libopennova.linux.template_release.x86_64.so"
 linux.debug.x86_64.opennova_runtime = "res://bin/libopennova.linux.template_debug.x86_64.so"

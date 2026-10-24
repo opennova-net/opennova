@@ -55,9 +55,9 @@ A slice that moves the `docs/` pointer must name a commit already on docs `maste
 - CI gate: require the applicable jobs in `.github/workflows/ci.yml` green.
   PRs build the `template_debug` GDExtension; master and manual runs also build
   `template_release`. Packaging publishes three Windows zips (`package-godot-windows`,
-  `package-blender-windows`, `package-apps-windows`): the game runtime with its bundled
-  game from `opennova-assets` (ADR 0048; retail data comes through `--resource-dir` or PLAY
-  RETAIL), the Blender add-on (that workflow also runs `tests/blender/*_test.py` under
+  `package-blender-windows`, `package-apps-windows`): the minimal game runtime with
+  its content updater (ADR 0067; retail data is selected with `/game` and
+  `--resource-dir`), the Blender add-on (that workflow also runs `tests/blender/*_test.py` under
   Blender against the packaged add-on), and the native apps. PRs package debug-mode exports.
 
 ## 5. Advance the train

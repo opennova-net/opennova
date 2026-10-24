@@ -1,12 +1,17 @@
 class_name BootRootMount
 extends RefCounted
-## Mount the CLI-supplied or picked game directory (--loose-root permits a
-## loose-only root), or OpenNova's own bundled game (ADR 0048).
+## Mount explicit game data, otherwise the executable's directory.
+## --loose-root permits an authoring directory without packed archives.
+
+static func launch_directory() -> String:
+	var explicit := LaunchFlags.resource_dir()
+	return explicit if not explicit.is_empty() else OS.get_executable_path().get_base_dir()
+
 
 static func mount(dir: String, allow_loose_root: bool) -> ResourceRoot:
 	var root := ResourceRoot.new()
 	var expansion := LaunchFlags.expansion()
-	var game := LaunchFlags.game(ResourceDirSettings.get_game())
+	var game := LaunchFlags.game()
 	var err: int = root.mount_runtime(
 			dir, expansion, LaunchFlags.loose_override_enabled(), game)
 	if err != OK:
@@ -19,38 +24,6 @@ static func mount(dir: String, allow_loose_root: bool) -> ResourceRoot:
 		push_warning("BootRootMount: %s" % root.get_last_error())
 		return null
 	report_missing_boot_resources(root)
-	return root
-
-
-## The compatibility profile of the bundled OpenNova game.
-const BUNDLED_GAME := "jo"
-
-
-## The game ZIP carries the exported content beside its executable. Source
-## runs select an external content project or install with --resource-dir.
-static func bundled_assets_dir() -> String:
-	return OS.get_executable_path().get_base_dir()
-
-
-## Mount the bundled game: the editor's Build of the base game (its boot-table
-## archives and loose files) mounted as an install is, else, with no archive,
-## the folder as a plain loose root. It is
-## OpenNova's own data, which the Build's gate vouched for, so the retail boot
-## manifest is not reported against it. The
-## expansion it mounts over the base is chosen as for any game folder (mount):
-## `/exp` (or `/mod`) on the command line, so an expansion shipped beside the
-## base game in `expansion/<name>/` plays as it does in the original game run in
-## that folder; one the folder lacks falls back to the base game, as the
-## engine's mount does (ADR 0048 d8). The Mods list's pick lasts its run
-## (D-MNU-31).
-static func mount_bundled(dir: String) -> ResourceRoot:
-	var root := ResourceRoot.new()
-	var expansion := LaunchFlags.expansion()
-	if root.mount_runtime(dir, expansion, false, BUNDLED_GAME) == OK:
-		return root
-	if root.set_root_dir(dir) != OK:
-		push_warning("BootRootMount: bundled assets not found at %s" % dir)
-		return null
 	return root
 
 

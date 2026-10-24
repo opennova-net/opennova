@@ -1,0 +1,361 @@
+#include "client.h"
+
+#include "net_sockets.h"
+
+#include <base/io/file_io.h>
+#include <base/io/file_time.h>
+#include <base/io/os_path.h>
+#include <base/io/strutil.h>
+#include <formats/pff/pff.h>
+#include <formats/update/apply.h>
+#include <formats/update/nlz.h>
+#include <formats/update/server_list.h>
+#include <formats/update/update_crc.h>
+#include <formats/update/update_wizard.h>
+#include <net/update/update_wire.h>
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <map>
+#include <set>
+
+namespace opennova::updater {
+namespace fs = std::filesystem;
+namespace {
+using Clock = std::chrono::steady_clock;
+
+fs::path named_file(const fs::path &dir, const std::string &name) {
+	std::error_code ec;
+	const fs::path exact = dir / io::os_path(name);
+	if (fs::exists(exact, ec)) return exact;
+	for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec))
+		if (strutil::iequals(io::utf8_path(it->path().filename()), name)) return it->path();
+	return exact;
+}
+
+bool wizard_product(const fs::path &dir, const fs::path &wizard_file,
+		Product &product, std::string &error) {
+	std::string text;
+	if (!io::read_file_text(io::utf8_path(wizard_file), text, error)) return false;
+	std::vector<uint8_t> cc;
+	std::string ignored;
+	(void)io::read_file_bytes(io::utf8_path(named_file(dir, "cc.bin")), cc, ignored);
+	const update::UpdateWizard wizard = update::with_territory(update::read_update_wizard(text),
+			update::territory_from_cc_bin(cc.data(), cc.size()));
+	if (wizard.product_login.empty() || !update::is_safe_row_name(wizard.cmd)) {
+		error = "update wizard needs PRODUCT_LOGIN and a safe CMD: " + io::utf8_path(wizard_file);
+		return false;
+	}
+	if (wizard.product_login.find_first_of(" \t\r\n") != std::string::npos) {
+		error = "invalid update product login"; return false;
+	}
+	product.dir = dir;
+	product.command = wizard.cmd;
+	product.login = wizard.product_login;
+	product.native = product.native || strutil::iequals(product.login, "ONRUNTIME") ||
+			strutil::iequals(product.login, "OPENNOVA") || strutil::iequals(product.login, "ONJO1");
+	for (const std::string &host : {wizard.url, wizard.url2, wizard.url3})
+		if (!host.empty()) product.gateways.push_back(host);
+	return true;
+}
+
+struct Worker {
+	const Options &options;
+	const ProgressSink &sink;
+	const std::atomic_bool *cancel;
+	Clock::time_point deadline;
+	std::string &error;
+	bool interrupted() {
+		if (cancel && cancel->load()) { error = "Update aborted!"; return true; }
+		if (options.check && Clock::now() >= deadline) { error = "Update check timed out."; return true; }
+		return false;
+	}
+	void status(const std::string &text, const std::string &file = "", uint64_t n = 0, uint64_t total = 0) {
+		if (sink) sink({text, file, n, total});
+	}
+	int connect_timeout() const {
+		if (!options.check) return 3000;
+		const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count();
+		return static_cast<int>(std::max<int64_t>(1, std::min<int64_t>(remaining, 2000)));
+	}
+	bool connect(const std::string &host, uint16_t port, net::ScopedSocket &socket) {
+		if (interrupted()) return false;
+		for (net::Endpoint endpoint : net::resolve_ipv4_all(host)) {
+			if (interrupted()) return false;
+			endpoint.port = port;
+			socket = net::ScopedSocket(net::tcp_connect(endpoint, connect_timeout()));
+			if (socket.is_valid()) return true;
+		}
+		error = "Unable to open update server " + host + ":" + std::to_string(port);
+		return false;
+	}
+	bool receive(net::Socket &socket, uint8_t *out, size_t size, const std::string &file = "") {
+		size_t received = 0;
+		auto last = Clock::now();
+		while (received < size) {
+			if (interrupted()) return false;
+			const int ready = net::tcp_wait_readable(socket, 100);
+			if (ready < 0 || Clock::now() - last > std::chrono::seconds(90)) {
+				error = "The connection to the server has timed out."; return false;
+			}
+			if (ready == 0) continue;
+			const int count = net::tcp_recv(socket, out + received, std::min<size_t>(size - received, 65536));
+			if (count <= 0) { error = "The server closed an incomplete update reply."; return false; }
+			received += static_cast<size_t>(count);
+			last = Clock::now();
+			if (!file.empty()) status("Fetching files...", file, received, size);
+		}
+		return true;
+	}
+	bool exchange(net::Socket &socket, const std::string &request, update::Verb verb,
+			int32_t id, uint64_t limit, update::Reply &reply, const std::string &name = "") {
+		if (interrupted()) return false;
+		if (!net::tcp_send_all(socket, reinterpret_cast<const uint8_t *>(request.data()), request.size())) {
+			error = "Unable to send update request."; return false;
+		}
+		std::vector<uint8_t> header;
+		size_t consumed = 0;
+		while (true) {
+			uint8_t byte = 0;
+			if (!receive(socket, &byte, 1)) return false;
+			header.push_back(byte);
+			const update::Frame state = update::decode_reply_header(header.data(), header.size(), reply, consumed);
+			if (state == update::Frame::Malformed) { error = "Malformed update reply."; return false; }
+			if (state == update::Frame::Complete) break;
+		}
+		if (reply.verb != verb || reply.id != id || reply.result < 0 ||
+				static_cast<uint64_t>(reply.size) > limit ||
+				(verb == update::Verb::Get && (!update::is_safe_row_name(reply.name) ||
+						!strutil::iequals(reply.name, name)))) {
+			error = "Update server refused the request or returned an unexpected reply: " + name;
+			return false;
+		}
+		reply.payload.resize(static_cast<size_t>(reply.size));
+		return receive(socket, reply.payload.data(), reply.payload.size(), name);
+	}
+	bool login(net::Socket &socket, const Product &product, int32_t id) {
+		update::Reply reply;
+		return exchange(socket, update::encode_login(product.login, "", id), update::Verb::Login, id, 0, reply);
+	}
+	bool open_product(const Product &product, net::ScopedSocket &out) {
+		std::vector<std::string> hosts = options.server.empty() ? product.gateways : std::vector<std::string>{options.server};
+		if (hosts.empty()) hosts.push_back("update.opennova.net");
+		std::vector<uint16_t> ports;
+		if (options.port) ports.push_back(options.port);
+		else ports.assign(std::begin(update::kGatewayPorts), std::end(update::kGatewayPorts));
+		for (const std::string &host : hosts) for (uint16_t port : ports) {
+			if (interrupted()) return false;
+			status("Locating Gateway Server...", host);
+			net::ScopedSocket gateway;
+			if (!connect(host, port, gateway) || !login(gateway.get(), product, update::kIdGatewayLogin)) continue;
+			update::Reply list;
+			if (!exchange(gateway.get(), update::encode_get({"SERVER.LST"}, update::kIdServerList),
+						update::Verb::Get, update::kIdServerList, 65536, list, "SERVER.LST")) continue;
+			const std::vector<std::string> servers = update::read_server_list(
+					std::string(list.payload.begin(), list.payload.end()));
+			if (servers.empty() || servers.size() > 64) { error = "Unable to locate an update server."; continue; }
+			const std::string close = update::encode_close();
+			(void)net::tcp_send_all(gateway.get(), reinterpret_cast<const uint8_t *>(close.data()), close.size());
+			// Every advertised server is a failover candidate. A single-server gateway, the
+			// deployed service's form, needs no LOADTEST round trip (updater-re section 5).
+			for (const std::string &server : servers) {
+				status("Opening update server...", server);
+				if (connect(server, port, out) && login(out.get(), product, update::kIdServerLogin)) return true;
+			}
+		}
+		return false;
+	}
+};
+
+struct Precheck {
+	const Product &product;
+	explicit Precheck(const Product &p) : product(p) {}
+	pff::PffArchive archive{};
+	std::string opened;
+	bool have_archive = false;
+	void close() { if (have_archive) pff::pff_close(&archive); have_archive = false; }
+	~Precheck() { close(); }
+	bool needed(const update::CommandRow &row, const std::string &target) {
+	std::error_code ec;
+	if (strutil::ends_with_icase(target, ".pff")) {
+		if (opened != target) {
+			if (have_archive) pff::pff_close(&archive);
+			archive = {};
+			opened = target;
+			have_archive = pff::pff_open(&archive, io::utf8_path(named_file(product.dir, target)).c_str()) == 0;
+		}
+		if (!have_archive) return row.type != update::CommandType::Remove;
+		const pff::PffEntry *entry = pff::pff_find(&archive, row.name.c_str());
+		bool needed = row.type == update::CommandType::Remove ? entry != nullptr : entry == nullptr;
+		if (entry && row.type == update::CommandType::Copy)
+			needed = std::llabs(int64_t(entry->timestamp) - row.time) > 2 ||
+					(entry->checksum && row.crc && *row.crc && entry->checksum != static_cast<uint32_t>(*row.crc));
+		return needed;
+	}
+	const fs::path path = named_file(target == "." ? product.dir : product.dir / io::os_path(target), row.name);
+	const bool exists = fs::is_regular_file(path, ec);
+	if (row.type == update::CommandType::Remove) return fs::exists(path, ec);
+	if (!exists) return true;
+	const uint64_t size = fs::file_size(path, ec);
+	if (ec || size == 0 || (row.size && size != static_cast<uint64_t>(row.size))) return true;
+	if (!row.crc || *row.crc == 0) return false;
+	std::vector<uint8_t> bytes;
+	std::string error;
+	return !io::read_file_bytes(io::utf8_path(path), bytes, error) ||
+			update::file_crc(bytes.data(), bytes.size()) != static_cast<uint32_t>(*row.crc);
+	}
+};
+
+bool update_product(Worker &worker, const Product &product, Result &result) {
+	if (!update::is_safe_row_name(product.command)) { worker.error = "Unsafe command file name."; return false; }
+	net::ScopedSocket socket;
+	if (!worker.open_product(product, socket)) return false;
+	worker.status("Checking for update...", product.login);
+	update::Reply remote;
+	if (!worker.exchange(socket.get(), update::encode_crc(product.command, update::kIdCommandFile),
+				update::Verb::Crc, update::kIdCommandFile, 0, remote)) return false;
+	std::vector<uint8_t> command_bytes;
+	std::string ignored;
+	const fs::path command_path = named_file(product.dir, product.command);
+	const uint32_t remote_crc = static_cast<uint32_t>(remote.crc);
+	const bool cached = io::read_file_bytes(io::utf8_path(command_path), command_bytes, ignored) &&
+			update::command_file_crc(command_bytes.data(), command_bytes.size()) == remote_crc;
+	if (!cached) {
+		if (!worker.exchange(socket.get(), update::encode_get({product.command}, update::kIdCommandFile),
+					update::Verb::Get, update::kIdCommandFile, 1024 * 1024, remote, product.command)) return false;
+		command_bytes = std::move(remote.payload);
+		if (update::command_file_crc(command_bytes.data(), command_bytes.size()) != remote_crc) {
+			worker.error = "The command file did not match the server's CRC. Please retry."; return false;
+		}
+	}
+	const auto command = update::read_command_file(std::string(command_bytes.begin(), command_bytes.end()));
+	if (!command || !update::validate_commands(*command, worker.error)) {
+		if (!command) worker.error = "Error processing CMD file: " + product.command;
+		return false;
+	}
+	if (worker.options.legacy && result.launch_exe.empty()) result.launch_exe = command->exe;
+	update::CommandFile selected = *command;
+	selected.rows.clear();
+	std::string target = ".";
+	std::map<std::string, update::SfsEntry> blobs;
+	bool revised = false;
+	std::error_code revision_error;
+	const bool pending_revision = product.dir == worker.options.runtime_dir &&
+			fs::is_regular_file(named_file(product.dir, "update.new"), revision_error);
+	Precheck precheck{product};
+	for (size_t i = 0; i < command->rows.size(); ++i) {
+		update::CommandRow row = command->rows[i];
+		if (row.type == update::CommandType::Target) {
+			target = row.name; selected.rows.push_back(row); continue;
+		}
+		// A new native command file installs every row. This avoids treating the retail
+		// defective CRC as a full-file digest when code/PCK bytes changed beyond its prefix.
+		const bool updater_image = row.type == update::CommandType::Loose && target == "." &&
+				strutil::iequals(row.name, "update.exe") && product.dir == worker.options.runtime_dir;
+		// A failed helper launch leaves update.new behind. Retry the handoff even if
+		// the cached command and the old image's defective prefix CRC look current.
+		if (!(pending_revision && updater_image) &&
+				!(!cached && product.native && row.type != update::CommandType::Remove) &&
+				!precheck.needed(row, target)) continue;
+		result.available = true;
+		++result.files;
+		if (worker.options.check) continue;
+		if (row.type == update::CommandType::Loose || row.type == update::CommandType::Copy) {
+			if (worker.interrupted()) return false;
+			if (!blobs.count(strutil::to_lower(row.name))) {
+				update::Reply reply;
+				const uint64_t bound = uint64_t(row.size) + uint64_t(row.size) / 100 + 65536;
+				if (!worker.exchange(socket.get(), update::encode_get({row.name}, int32_t(i)),
+							update::Verb::Get, int32_t(i), bound, reply, row.name)) return false;
+				blobs[strutil::to_lower(row.name)] = {row.name, std::move(reply.payload)};
+			}
+			if (updater_image) {
+				auto &blob = blobs[strutil::to_lower(row.name)];
+				blob.name = "update.new";
+				row.name = "update.new";
+				revised = true;
+			}
+		}
+		selected.rows.push_back(row);
+	}
+	++result.products;
+	if (worker.options.check) return true;
+	if (worker.interrupted()) return false;
+	precheck.close(); // Windows must release the source archive before replacement.
+	update::SfsSection section;
+	const std::string selected_text = update::write_command_file(selected);
+	if (selected_text.empty()) { worker.error = "Cannot prepare update commands."; return false; }
+	section.entries.push_back({product.command, std::vector<uint8_t>(selected_text.begin(), selected_text.end())});
+	for (auto &[key, blob] : blobs) section.entries.push_back(std::move(blob));
+	worker.status("Integrating update...", product.login);
+	update::ApplyReport report;
+	if (!update::apply_section(section, product.command, product.dir, report, worker.error)) return false;
+	// Persist the remote command only after every selected row succeeded. An interrupted
+	// first install therefore checks/fetches again, rather than becoming a false no-op.
+	if (!io::write_file_atomic(io::utf8_path(command_path), command_bytes.data(), command_bytes.size(), worker.error))
+		return false;
+	result.applied = result.applied || !report.files_written.empty() || !report.archives_rewritten.empty() || !report.files_deleted.empty();
+	result.revision_pending = result.revision_pending || revised;
+	return true;
+}
+} // namespace
+
+bool discover_products(const Options &o, std::vector<Product> &out, std::string &error) {
+	out.clear();
+	std::error_code ec;
+	if (!o.no_runtime) {
+		Product runtime{o.runtime_dir, "ONRUNTIME", "ONRUNTIME.CMD", {"update.opennova.net"}, true};
+		const fs::path wizard = named_file(o.runtime_dir, "OPENNOVA.WIZ");
+		if (fs::exists(wizard, ec)) {
+			runtime.gateways.clear();
+			if (!wizard_product(o.runtime_dir, wizard, runtime, error)) return false;
+		}
+		out.push_back(std::move(runtime));
+	}
+	// Double-clicking our updater in a retail install keeps its stock content wizard.
+	// The bootstrap passes /game explicitly; it never guesses from an empty directory.
+	bool native_content = o.game == "opennova" && !o.legacy &&
+			(o.game_explicit || !fs::is_regular_file(named_file(o.resource_dir, "UPDATE.WIZ"), ec));
+	if (native_content) {
+		out.push_back({o.resource_dir, "OPENNOVA", "OPENNOVA.CMD", {"update.opennova.net"}, true});
+	} else {
+		Product retail;
+		if (!wizard_product(o.resource_dir, named_file(o.resource_dir, "UPDATE.WIZ"), retail, error)) return false;
+		native_content = retail.native;
+		out.push_back(std::move(retail));
+	}
+	const fs::path expansions = named_file(o.resource_dir, "expansion");
+	std::vector<fs::path> dirs;
+	for (fs::directory_iterator it(expansions, ec), end; !ec && it != end; it.increment(ec))
+		if (it->is_directory(ec)) dirs.push_back(it->path());
+	std::sort(dirs.begin(), dirs.end());
+	for (const fs::path &dir : dirs) {
+		const fs::path wizard = named_file(dir, "UPDATE.WIZ");
+		if (!fs::is_regular_file(wizard, ec)) continue;
+		if (!native_content && !fs::is_regular_file(named_file(dir, io::utf8_path(dir.filename()) + ".pff"), ec)) continue;
+		Product expansion;
+		if (!wizard_product(dir, wizard, expansion, error)) return false;
+		expansion.native = expansion.native || native_content;
+		out.push_back(std::move(expansion));
+	}
+	return true;
+}
+
+bool run(const Options &options, const std::vector<Product> &products, Result &result,
+		std::string &error, const ProgressSink &progress, const std::atomic_bool *cancel) {
+	result = {};
+	error.clear();
+	if (net::startup() != 0) { error = "Unable to initialize networking."; return false; }
+	Worker worker{options, progress, cancel, Clock::now() + std::chrono::seconds(10), error};
+	for (const Product &product : products) {
+		if (!update_product(worker, product, result)) return false;
+		// Let the helper replace this process before continuing with content. A
+		// later product failure must not strand an already staged updater revision.
+		if (result.revision_pending) break;
+	}
+	error.clear();
+	worker.status(result.available ? "Operation completed successfully!" : "No Update Needed!");
+	return true;
+}
+} // namespace opennova::updater

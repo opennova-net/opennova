@@ -5,6 +5,8 @@
 namespace opennova::novaworld_server::hosted {
 
 std::vector<TreeFileRule> tree_file_rules(DataSetKind kind, std::string_view expansion_code) {
+	if (kind == DataSetKind::Update)
+		return {};
 	if (kind == DataSetKind::Base) {
 		return { { "resource.pff", true }, { "localres.pff", true }, { "language.pff", true },
 			{ "version.txt", false }, { "score.ini", false }, { "_NSTMOUT.TXT", false },

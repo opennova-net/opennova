@@ -41,10 +41,28 @@ version_line() {
   echo "imgui-godot addon $1 at godot/addons/imgui-godot (version: $(grep '^version=' "$dst/plugin.cfg" | cut -d'"' -f2), imgui: $(tr -d '[:space:]' < "$dst/include/imgui-version.txt"))"
 }
 
+# Windows update packages use retail 1SFS filenames (at most 15 bytes). Keep
+# the upstream binaries intact and select short copies through its descriptor.
+short_windows_library_names() {
+  local mode name original short
+  for mode in debug release; do
+    name=imgui
+    [[ "$mode" != debug ]] || name=imguid
+    original="$dst/bin/libimgui-godot-native.windows.$mode.x86_64.dll"
+    short="$dst/bin/$name.dll"
+    if ! cmp -s "$original" "$short"; then cp -p "$original" "$short"; fi
+  done
+  local descriptor="$dst/imgui-godot-native.gdextension"
+  if grep -q 'libimgui-godot-native.windows.' "$descriptor"; then
+    sed -i 's/libimgui-godot-native.windows.debug.x86_64.dll/imguid.dll/g; s/libimgui-godot-native.windows.release.x86_64.dll/imgui.dll/g' "$descriptor"
+  fi
+}
+
 # The pinned zip installed here last time: skip the re-extract and re-copy,
 # whose fresh file times send the Godot editor rescanning the addon.
 stamp="$cache_dir/imgui-godot.installed"
 if [[ -f "$dst/plugin.cfg" && "$(cat "$stamp" 2>/dev/null)" == "$IMGUI_GODOT_SHA256" ]]; then
+  short_windows_library_names
   version_line "up to date"
   exit 0
 fi
@@ -79,5 +97,7 @@ mkdir -p "$dst"
 cp -r "$src/." "$dst/"
 rm -rf "$extract_dir"
 echo "$IMGUI_GODOT_SHA256" > "$stamp"
+
+short_windows_library_names
 
 version_line installed
