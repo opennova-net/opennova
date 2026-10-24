@@ -95,6 +95,11 @@ struct VectorStats {
 	size_t samples = 0;
 	std::vector<double> baseline;
 	double range_p90 = 0.0, displacement_p90 = 0.0, step_p90 = 0.0;
+	// Each nonzero step of compact records in its records' quanta (the axes' proven
+	// motion over their bands, summed), and that list's p90: 1 where the p90 step is
+	// the least a compact record proves (state.sub_quantum_step).
+	bool quantized = false;
+	double step_quanta_p90 = 0.0;
 };
 
 double wrapped(double delta, double modulus) {
@@ -163,7 +168,7 @@ VectorStats vector_stats(const std::vector<Sample> &samples, double modulus) {
 	std::map<std::string, std::vector<const Sample *>> groups;
 	for (const Sample &sample : samples)
 		groups[sample.group].push_back(&sample);
-	std::vector<double> ranges, displacements, steps;
+	std::vector<double> ranges, displacements, steps, step_quanta;
 	for (const auto &group : groups) {
 		const std::pair<size_t, size_t> span = sequence_span(group.second,
 				[modulus](const Sample *x, const Sample *y) {
@@ -178,18 +183,31 @@ VectorStats vector_stats(const std::vector<Sample> &samples, double modulus) {
 		const size_t axes = seq.front()->axes.size();
 		std::vector<double> lo(axes, 0.0), hi(axes, 0.0);
 		for (size_t i = 0; i < seq.size(); ++i) {
-			double displacement = 0.0, step = 0.0;
+			double displacement = 0.0, step = 0.0, quanta = 0.0;
+			const bool quantized =
+					i > 0 && !seq[i]->quantum.empty() && !seq[i - 1]->quantum.empty();
 			for (size_t a = 0; a < axes; ++a) {
 				const double from_origin = axis_delta(*seq[i], *seq.front(), a, modulus);
 				displacement += std::fabs(from_origin);
 				lo[a] = std::min(lo[a], from_origin);
 				hi[a] = std::max(hi[a], from_origin);
-				if (i > 0)
-					step += std::fabs(axis_delta(*seq[i], *seq[i - 1], a, modulus));
+				if (i > 0) {
+					const double moved = std::fabs(axis_delta(*seq[i], *seq[i - 1], a, modulus));
+					step += moved;
+					double band = 0.0;
+					if (quantized)
+						band = (seq[i]->quantum[a] + seq[i - 1]->quantum[a]) / 2.0;
+					if (moved > 0.0)
+						quanta += band > 0.0 ? moved / band : 2.0;
+				}
 			}
 			displacements.push_back(displacement);
-			if (step > 0.0)
+			if (step > 0.0) {
 				steps.push_back(step);
+				// A step a record pair without quanta proves counts as more than one.
+				step_quanta.push_back(quantized ? quanta : 2.0);
+				stats.quantized = stats.quantized || quantized;
+			}
 		}
 		double range = 0.0;
 		for (size_t a = 0; a < axes; ++a)
@@ -199,6 +217,7 @@ VectorStats vector_stats(const std::vector<Sample> &samples, double modulus) {
 	stats.range_p90 = p90(ranges);
 	stats.displacement_p90 = p90(displacements);
 	stats.step_p90 = p90(steps);
+	stats.step_quanta_p90 = p90(step_quanta);
 	return stats;
 }
 
@@ -253,6 +272,23 @@ void dynamic_metrics(std::vector<MetricValue> &out, char dir, const std::string 
 		value.subject = render_number(rb);
 		value.reference = render_number(ra);
 		value.detail = "|log2(subject / RR)|; 3 is the 1/8x..8x band";
+		// A compact record proves a step only past its rounding, so the least proven step is
+		// one quantum [orig: Network_CompressFixedPoint @0x4C2780 (the rounding add
+		// @0x4C2790..0x4C27B3)] [orig: Network_DecompressFixedPoint @0x4C27E0 (the mantissa
+		// @0x4C27F1)]. Motion under two quanta a frame, a moored boat's heave of about 1.26
+		// [orig: Entity_ApplyBreathingOscillation @0x463BE0 (the step @0x463BEE)], proves one
+		// quantum only on the frames the send grid's phase rounds to two: the final's
+		// tdh-i3a-tdm-chat RR and RR-aa drew ten such frames from +15 s, RO (a retail host),
+		// OR and OO none, and W1's tdh-i3a-tdm all five. So a run proving no step against RR's
+		// p90 of one quantum is that phase (state.sub_quantum_step); entity_motion still
+		// catches a still run, and the range and displacement rows the amplitude.
+		static_assert(has_normalization("state.sub_quantum_step"));
+		if (stat.field == &VectorStats::step_p90 && !(rb > 0.0) && sa.quantized &&
+				sa.step_quanta_p90 <= 1.0 && !b.empty() && !b.front().quantum.empty()) {
+			value.distance = 0.0;
+			value.detail = "sub-quantum motion's rounding phase: RR's p90 step is one quantum, "
+						   "the run proves none";
+		}
 		out.push_back(value);
 	}
 }

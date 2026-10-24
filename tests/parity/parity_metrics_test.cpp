@@ -3726,6 +3726,76 @@ void test_entity_sparse_sequence() {
 			'S', "entity_I_orientation_range_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
 }
 
+// The final's tdh-i3a-tdm-chat (LX-s37): the moored boats heave under two quanta a frame,
+// and RR's send grid rounded ten frames to two mantissa units (one proven quantum, step p90
+// 128) where RO, OR and OO rounded none (0). A run proving no step against RR's one quantum
+// is that rounding phase (state.sub_quantum_step).
+void test_sub_quantum_step() {
+	// Three boats in every steady frame (the scripted vehicle dropped), their z offset 5
+	// units plus `units` mantissa steps of 128 (shift 3), cycling.
+	auto boats = [](uint32_t seed, const std::vector<int> &units) {
+		wire::ParityTrace trace = scripted(seed);
+		std::vector<wire::ParityEntity> kept;
+		for (const wire::ParityEntity &e : trace.entities)
+			if (e.cls != 'V')
+				kept.push_back(e);
+		trace.entities = std::move(kept);
+		std::vector<wire::ParityEntity> added;
+		size_t k = 0;
+		for (const wire::ParityFrameState &f : trace.frames) {
+			if (f.ts_ns < kSteadyStart || f.ts_ns > kSteadyStart + uint64_t(kSteadySeconds * 1e9))
+				continue;
+			const int u = units[k++ % units.size()];
+			for (uint32_t h = 0; h < 3; ++h) {
+				wire::ParityEntity e;
+				e.frame = f.frame;
+				e.ts_ns = f.ts_ns;
+				e.session = kClientPort;
+				e.cls = 'V';
+				e.handle = 0x1003 + h;
+				e.type_id = 1293;
+				e.pos_x = network_compress_fixedpoint(int32_t(900 + 10 * h) * 65536 - f.anchor_x);
+				e.pos_y = network_compress_fixedpoint(2050 * 65536 - f.anchor_y);
+				e.pos_z = network_compress_fixedpoint(5 * 65536 + u * 128);
+				e.orient_a = 64;
+				e.vital = 3000;
+				place(e, f);
+				added.push_back(e);
+			}
+		}
+		trace.entities.insert(trace.entities.end(), added.begin(), added.end());
+		std::stable_sort(trace.entities.begin(), trace.entities.end(),
+				[](const wire::ParityEntity &x, const wire::ParityEntity &y) {
+					return x.ts_ns < y.ts_ns;
+				});
+		return trace;
+	};
+	// Steps of one unit (none proven), two-unit jumps (one quantum each) and three-unit
+	// jumps (two quanta each).
+	const std::vector<int> one = { 0, 1, 2, 3, 2, 1 };
+	const std::vector<int> two = { 0, 1, 3, 2, 0, 1 };
+	const std::vector<int> three = { 0, 3 };
+	{
+		// Without the rule RR's 128 against the run's 0 is d 64, the final's red.
+		const Case c = judge_case(boats(1, two), boats(2, two), boats(3, one), "OO");
+		expect_row(c, 'S', "entity_V_position_step_p90", "", "pass");
+		const VerdictRow *row = find_row(c.verdict.rows, 'S', "entity_V_position_step_p90");
+		check(row && row->value.reference == "128" && row->value.subject == "0" &&
+						row->value.detail.find("sub-quantum") != std::string::npos,
+				"one proven quantum against none is the rounding phase");
+		expect_row(c, 'S', "entity_motion", "V", "pass");
+	}
+	// Two quanta against none still fails.
+	expect_row(judge_case(boats(1, three), boats(2, three), boats(3, one), "OO"), 'S',
+			"entity_V_position_step_p90", "", "fail", "DYNAMIC_STEP_MISMATCH");
+	{
+		// A still run passes the step row but fails the motion and range rows.
+		const Case c = judge_case(boats(1, two), boats(2, two), boats(3, { 0 }), "OO");
+		expect_row(c, 'S', "entity_motion", "V", "fail", "FRAME_ENTITY_CONSTANT");
+		expect_row(c, 'S', "entity_V_position_range_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
+	}
+}
+
 // The final run's 03tr-dm OO (LX-s37): the far rows' age sweep sent the Downed Pilot 0x0039
 // (I:2075) once a capture on every cell, 17.7..19.1 s after the game start, and OO's window
 // opened 19.0 s after it where the other four opened at 13.3..15.0 s, so its one record fell
@@ -4094,6 +4164,7 @@ int main() {
 	test_entity_sparse_sequence();
 	test_entity_capture_singleton();
 	test_tick_seed_form();
+	test_sub_quantum_step();
 	test_round_target();
 	if (g_failures) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);

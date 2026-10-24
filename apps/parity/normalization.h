@@ -951,6 +951,25 @@ inline constexpr Normalization kNormalizations[] = {
 			"p90 42037 against RR's 5419; counted past the half steps it reads 9269 against "
 			"3521. Over LX-s32's 43 subjects all 234 position rows move and none changes "
 			"status" },
+	{ "state.sub_quantum_step", MaskKind::Field, 'S', 0x00A, "entity position step", 0,
+			"a compact record proves a step only past the two records' half steps "
+			"(state.position_quantum: Network_CompressFixedPoint @0x4C2780, the rounding add "
+			"@0x4C2790..0x4C27B3; Network_DecompressFixedPoint @0x4C27E0, the mantissa "
+			"@0x4C27F1), so the least step it proves is one quantum, a code that moved two "
+			"mantissa units. Motion under two quanta a frame proves one only on the frames "
+			"where the send grid's phase rounds it to two: a moored boat heaves on a sine "
+			"whose phase steps 0.0348889 a tick (Entity_ApplyBreathingOscillation @0x463BE0, "
+			"the step @0x463BEE), about 3 z mantissa units of amplitude at shift 3 on "
+			"TDH_I3A, 1.26 units a 12-tick frame at most. The final's tdh-i3a-tdm-chat: RR and "
+			"RR-aa's boats (V:1293 0x1003..0x1005, V:1299 0x100e / 0x100f, V:1303 0x1017) "
+			"drew ten two-unit frames from +15 s into the window, RO (a retail host), OR and "
+			"OO none in the capture, so the V position step p90 read 128 against 0; W1's "
+			"tdh-i3a-tdm read 128 on all five. A run proving no step against RR's p90 step of "
+			"one quantum or less (in each step's own quanta) compares as equal; entity_motion "
+			"still fails a still run, and the range and displacement rows compare the "
+			"amplitude. Of the stored verdicts' step rows whose run proves no step, the uplink, "
+			"anchor and orientation rows carry exact values (no quantum), and the ash capture "
+			"P rows (RR 23680) are absent under entity.sparse_sequence" },
 	{ "integrity.key", MaskKind::Field, '*', 0, "challenge key", 0,
 			"each integrity challenge's key is random per request: CRCs compare with the "
 			"key XORed out" },
