@@ -877,27 +877,23 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 					login_step_ = LoginStep::Idle;
 					return login_fail(refusal);
 				}
-				const bool templated =
-						!ctx_.startup_url.empty() && startup_url_is_templated(ctx_.startup_url);
-				if (templated) {
-					login_step_ = LoginStep::NwStart;
-					HttpRequestSpec req;
-					req.valid = true;
-					req.method = HttpMethod::Get;
-					const TitlePages &pages = *ctx_.title->pages;
-					const std::string act = pages.activate != nullptr
-							? std::string("&ACT=") + pages.activate
-							: std::string();
-					req.url = http_base() + "/NWStart.dll?MSGBASE=" + pages.msgbase +
-							"&IN=" + pages.main + "&OUT=" + pages.login + act +
-							"&verfile=" + pages.version_file +
-							"&newupdateavailable=" + pages.new_update +
-							"&newupdateavailablewithbypass=" + pages.new_update_bypass +
-							"&junction=" + pages.junction;
-					req.headers = request_headers();
-					return login_request(std::move(req));
-				}
-				return login_post();
+				// The start page refreshes to NWStart (JO's jop_2_start.htm, "0;"), which the menu
+				// browser follows at its next frame, as the entry's open does (enter): the page's
+				// refresh is the scene's next URL, opened once the frame's deadline test passes. A
+				// start page that names no refresh is the page shown, whose form posts at once.
+				// [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620; UI_ProcessWebResponseContent
+				//  @0x63D450 - the refresh to the scene's +0x3C @0x63D501, its delay to +0x40
+				//  @0x63D507; CUIScene_EndFrame @0x63E600 - `cmp eax, [esi+40h]` against
+				//  GetTickCount @0x63E626, UIScene_OpenUrl called @0x63E635]
+				const std::string refresh = relay_refresh_url(body);
+				if (refresh.empty()) return login_post();
+				login_step_ = LoginStep::NwStart;
+				HttpRequestSpec req;
+				req.valid = true;
+				req.method = HttpMethod::Get;
+				req.url = refresh;
+				req.headers = request_headers();
+				return login_request(std::move(req));
 			}
 			case LoginStep::NwStart: {
 				const std::string message = extract_message(body, false);

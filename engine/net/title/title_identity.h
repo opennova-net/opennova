@@ -37,19 +37,14 @@ struct TitleBuild {
 };
 
 // The NovaWorld web flow's page names. Retail's client renders the pages the gate's start page
-// leads to (the NWStart query, the login form's hidden fields, the NWJoin link, the server-list
-// feed); LobbyHttpFlow requests them by these names (docs/net/novaworld-net-re.md D-NET-31: the
-// names are the pages' markup, not C literals). A null name is one the title's pages do not
-// carry: the request leaves its field out.
+// leads to (the login form's hidden fields, the NWJoin link, the server-list feed; the NWStart
+// query is the start page's own refresh, which the flow follows); LobbyHttpFlow requests them by
+// these names (docs/net/novaworld-net-re.md D-NET-31: the names are the pages' markup, not C
+// literals). A null name is one the title's pages do not carry: the request leaves its field out.
 struct TitlePages {
-	const char *msgbase = nullptr;           // MSGBASE / msgbase
-	const char *main = nullptr;              // IN, the login's success, NWJoin's failure
-	const char *login = nullptr;             // OUT, the login's failure
-	const char *version_file = nullptr;      // verfile
-	const char *new_update = nullptr;        // newupdateavailable
-	const char *new_update_bypass = nullptr; // newupdateavailablewithbypass
-	const char *junction = nullptr;          // junction
-	const char *activate = nullptr;          // ACT, between OUT and verfile
+	const char *msgbase = nullptr;           // msgbase
+	const char *main = nullptr;              // the login's success, NWJoin's failure
+	const char *login = nullptr;             // the login's failure
 	const char *need_to_agree = nullptr;     // needtoagree
 	const char *no_db = nullptr;             // nodb
 	const char *relay = nullptr;             // relay

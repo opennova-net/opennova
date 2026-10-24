@@ -47,6 +47,22 @@ static std::vector<std::string> set_cookie(const std::string &nv) {
 static bool contains(const std::string &h, const std::string &needle) {
 	return h.find(needle) != std::string::npos;
 }
+// The service's start pages (apps/novaworld_web/templates/jop_2_start.htm, dfx2_0_start.htm): a
+// META refresh to NWStart whose query keys run in the LN S1 retail login's NWStart GET order
+// (MSGBASE, IN, OUT, verfile, newupdateavailable, newupdateavailablewithbypass, junction).
+static std::string start_page(const std::string &nwstart_query) {
+	return "<HTML>\r\n<HEAD>\r\n<META NAME=\"Author\" CONTENT=\"Eric Milota\">\r\n<TITLE></TITLE>\r\n"
+	       "<META HTTP-EQUIV=\"refresh\" CONTENT=\"0;URL=NWStart.dll?" +
+	       nwstart_query + "\">\r\n</HEAD>\r\n<BODY></BODY>\r\n</HTML>\r\n";
+}
+static const std::string kJoNwStartQuery =
+		"MSGBASE=jop_2_msg.htm&IN=jop_2_main.htm&OUT=jop_2_login.htm&verfile=jop_2.ver"
+		"&newupdateavailable=jop_2_newupdateavailable.htm"
+		"&newupdateavailablewithbypass=jop_2_newupdateavailable2.htm&junction=jop_2_junction.htm";
+static const std::string kDfx2NwStartQuery =
+		"MSGBASE=dfx2_0_msg.htm&IN=dfx2_0_main.htm&OUT=dfx2_0_login.htm&ACT=dfx2_0_actlogin.htm"
+		"&verfile=dfx2_0.ver&newupdateavailable=dfx2_0_newupdateavailable.htm"
+		"&newupdateavailablewithbypass=dfx2_0_newupdateavailable2.htm&junction=dfx2_0_junction.htm";
 
 // A valid EPASK bundle the server "issues" in the prepare Set-Cookie.
 static std::string make_epask_cookie() {
@@ -243,11 +259,16 @@ static bool test_login_templated_nwstart() {
 
 	nw::LoginResult r = f.login("p", "s");
 	expect(r.kind == nw::LoginResult::Kind::NeedRequest, "templated login() -> prepare");
-	r = f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
+	// The start page's refresh is the NWStart GET, as it stands, the browser's nocachefix pair added
+	// on the way out. [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620; UI_ProcessWebResponseContent
+	//  @0x63D450 - @0x63D501; CUIScene_EndFrame @0x63E600 - UIScene_OpenUrl called @0x63E635]
+	r = f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()),
+			bytes(start_page(kJoNwStartQuery)));
 	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest, "templated prepare -> NWSTART")) return false;
-	expect(r.request.method == nw::HttpMethod::Get, "NWSTART is a GET");
-	expect(contains(r.request.url, "/NWStart.dll?MSGBASE=jop_2_msg.htm"), "NWSTART hits the dll with the literal query");
-	expect(contains(r.request.url, "junction=jop_2_junction.htm"), "NWSTART query is byte-preserved");
+	expect(r.request.method == nw::HttpMethod::Get && r.request.cache_bust, "NWSTART is a GET");
+	if (!expect(r.request.url == "http://gs.novaworld.net/NWStart.dll?" + kJoNwStartQuery,
+	            "NWSTART follows the start page's refresh, its query byte for byte"))
+		std::fprintf(stderr, "  got: %s\n", r.request.url.c_str());
 	// NWSTART response -> POST.
 	r = f.on_login_response(true, 200, {}, {});
 	expect(r.kind == nw::LoginResult::Kind::NeedRequest && r.request.method == nw::HttpMethod::Post,
@@ -275,6 +296,24 @@ static bool test_login_templated_nwstart() {
 	            "second live-shaped poll completes login")) return false;
 	expect(r.nwhandle == "ljim" && r.pcid == "A-A02-085D18",
 	       "live-shaped poll captures account identity");
+
+	// DFX2's start page names its ACT page between OUT and verfile: the refresh carries it as the
+	// page has it.
+	{
+		nw::LobbyHttpFlow d;
+		nw::LobbyHttpContext dc;
+		dc.title = nw::title_identity(nw::gameprofile::GAME_DFX2);
+		dc.gate_tag = dc.title->gate_tag;
+		dc.startup_url = "http://[domainname]/nwprepare.dll?gt=[GT]&url=dfx2_0_start.htm";
+		dc.web_domain = "gs.novaworld.net";
+		d.set_context(dc);
+		d.login("p", "s");
+		const nw::LoginResult dr = d.on_login_response(true, 200,
+				set_cookie("EPASK=" + make_epask_cookie()), bytes(start_page(kDfx2NwStartQuery)));
+		expect(dr.kind == nw::LoginResult::Kind::NeedRequest &&
+		               dr.request.url == "http://gs.novaworld.net/NWStart.dll?" + kDfx2NwStartQuery,
+		       "DFX2's NWSTART is its start page's refresh, ACT included");
+	}
 	return g_fail == 0;
 }
 
@@ -302,7 +341,8 @@ static bool test_login_failures() {
 		c.web_domain = "gs.novaworld.net";
 		f.set_context(c);
 		f.login("p", "s");
-		f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
+		f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()),
+				bytes(start_page(kJoNwStartQuery)));
 		const std::string page =
 				"<IB3_SUBST name=\"@GENERIC@\">Matchmaking is under maintenance.</IB3_SUBST>";
 		nw::LoginResult r = f.on_login_response(true, 200, {}, bytes(page));

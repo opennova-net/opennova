@@ -27,7 +27,7 @@
 // http_base()/request_headers()/merge_response_cookies(). The URL/.dll/form-field shapes are
 // byte-preserved, their page names, pfid, version pair and product code the title's
 // (TitleIdentity::pages / pfid / ver1 / ver2 / product_code) [orig: the retail jop_2_* template +
-// NWLogin/NWStart/NWJoin query strings].
+// NWLogin/NWJoin query strings; NWStart's is the start page's refresh, followed as it stands].
 namespace opennova {
 
 struct TitleIdentity; // net/title/title_identity.h
@@ -243,7 +243,8 @@ public:
 	// Begin: returns the prepare GET (NeedRequest) or Failed (no startup_url); with the sign-in page
 	// already shown (an entry that landed on it), the page's form POST at once. [orig: login()]
 	LoginResult login(const std::string &username, const std::string &password);
-	// Feed a completed login response; advances PREPARE -> (NWSTART) -> POST -> POLL. [orig:
+	// Feed a completed login response; advances PREPARE -> (NWSTART, the start page's refresh when
+	// it names one) -> POST -> POLL. [orig:
 	// on_login_request_completed()]. `transport_ok` is the owner's "the HTTP call itself succeeded"
 	// (Godot RESULT_SUCCESS); `code` is the HTTP status (must be 200).
 	LoginResult on_login_response(bool transport_ok, int code, const std::vector<std::string> &response_headers,
