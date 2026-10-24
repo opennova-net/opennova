@@ -338,7 +338,8 @@ void Lister::on_http_reply(const net::HttpReply &reply) {
 		add_log_secret(r.nwhandle);
 		io::logf(LogLevel::kInfo, "[http] logged in");
 		sync_flow_context();
-		const HostKeyResult first = flow_.host();
+		// The Host's jar entries carry the registration's Exp (g_ExpansionName).
+		const HostKeyResult first = flow_.host(registration().expansion);
 		if (first.kind != HostKeyResult::Kind::NeedRequest) {
 			io::logf(LogLevel::kError, "[http] the hosting page failed: %s", first.reason.c_str());
 			end(kExitFailed);

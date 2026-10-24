@@ -287,11 +287,20 @@ public:
 	bool join_active() const { return join_step_ != JoinStep::Idle || join_template_.next.has_value(); }
 
 	// --- the Host leg ---
-	// Begin: the GET of the main page's @HOST_URL@ global (NeedRequest), or Failed when no page set
-	// one (log in first: the login lands on the main page). [orig: UI_HandleHostSessionStart
-	//  @0x556d00 @0x556f0d..0x556f98 — the PLoad / EXP form globals,
-	//  CUIScene_FindNamedValue @0x63B440 ("@HOST_URL@"), UIScene_OpenUrl]
-	HostKeyResult host();
+	// Begin: the jar takes PLoad "" and EXP `expansion` (the mounted expansion's name, the Host
+	// lists' Exp) as the Host's open sets them, each updating its entry in place or appended at
+	// the jar's end, so the host leg's requests and the host request's Cookie var-list carry them
+	// after the login's cookies (D-NET-NEW-L9-48); then the GET of the main page's @HOST_URL@
+	// global (NeedRequest), or Failed when no page set one (log in first: the login lands on the
+	// main page).
+	// [orig: UI_HandleHostSessionStart @0x556D00 - the NovaWorld connect type's branch
+	//  @0x556E3B..0x556E47, the menu's test @0x556F13, CUIBrowser_AddFormField "PLoad" g_EmptyStr
+	//  called @0x556F21 and "EXP" g_ExpansionName called @0x556F36, CUIScene_FindNamedValue
+	//  ("@HOST_URL@") called @0x556F46, UIScene_OpenUrl called @0x556F98; CUIBrowser_AddFormField
+	//  @0x63A5D0 - CookieJar_UpdateFromURL called @0x63A689 with one entry;
+	//  CookieJar_UpdateFromURL @0x64E630 - a same-named entry's value replaced @0x64E7FF, else
+	//  the entry appended @0x64E8F7..0x64E91C]
+	HostKeyResult host(const std::string &expansion);
 	// Feed a completed host-leg response. A page whose <TITLE> starts [HOSTKEY= resolves the key; a
 	// relay page's META refresh is followed (at most kMaxHostHops pages); any other page fails with
 	// its message. [orig: UI_ProcessWebResponseContent @0x63d450 — the title test @0x63d5bb..0x63d604

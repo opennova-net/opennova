@@ -1478,7 +1478,8 @@ void NovaWorldClient::start_hosting(const Ref<HostSessionOptions> &options) {
 	//  UI_ProcessWebResponseContent @0x63d5bb..0x63d604 -> UI_DispatchScreenEvent @0x54f2fa]
 	pending_host_cfg_ = cfg;
 	sync_flow_context();
-	const opennova::HostKeyResult first = flow_.host();
+	// The Host's jar entries, PLoad and EXP, carry the host's Exp (engine: LobbyHttpFlow::host).
+	const opennova::HostKeyResult first = flow_.host(cfg.expansion);
 	if (first.kind == opennova::HostKeyResult::Kind::NeedRequest) {
 		if (const std::string *host_url = flow_.browser_global("@HOST_URL@"))
 			lobby_.connect_log(opennova::http_hosting_line(*host_url));

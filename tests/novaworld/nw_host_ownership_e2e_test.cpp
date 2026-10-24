@@ -193,7 +193,7 @@ std::string fetch_host_key(const Service &service) {
 		std::fprintf(stderr, "  login: %s\n", login.reason.c_str());
 		return {};
 	}
-	auto host = flow.host();
+	auto host = flow.host("");
 	for (int i = 0; i < 16 && host.kind == opennova::HostKeyResult::Kind::NeedRequest; ++i) {
 		const auto reply = exchange(host.request);
 		host = flow.on_host_response(reply.transport_ok, reply.code, reply.headers, reply.body);

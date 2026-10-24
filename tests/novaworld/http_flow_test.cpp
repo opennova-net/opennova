@@ -624,7 +624,7 @@ static bool test_join_resolves() {
 static bool test_host_resolves() {
 	nw::LobbyHttpFlow none;
 	none.set_context(concrete_ctx());
-	nw::HostKeyResult early = none.host();
+	nw::HostKeyResult early = none.host("");
 	expect(early.kind == nw::HostKeyResult::Kind::Failed && !none.host_active(),
 	       "host() before any main page set @HOST_URL@ fails (log in first)");
 
@@ -645,7 +645,7 @@ static bool test_host_resolves() {
 	expect(global != nullptr && *global == "http://gs.opennova.test:8080/nwhost.dll",
 	       "the main page's @HOST_URL@ global is kept (name case-insensitive)");
 
-	nw::HostKeyResult r = f.host();
+	nw::HostKeyResult r = f.host("");
 	if (!expect(r.kind == nw::HostKeyResult::Kind::NeedRequest, "host() -> the @HOST_URL@ GET")) return false;
 	expect(r.request.method == nw::HttpMethod::Get &&
 	               r.request.url == "http://gs.opennova.test:8080/nwhost.dll",
@@ -686,7 +686,7 @@ static bool test_host_resolves() {
 		g.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
 		g.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t"), relay_to("NWLogin.dll"));
 		g.on_login_response(true, 200, {"Set-Cookie: NWHANDLE=P"}, bytes(main_page));
-		g.host();
+		g.host("");
 		const nw::HostKeyResult bare = g.on_host_response(true, 200, {},
 				bytes("<HTML><HEAD><TITLE>[HOSTKEY=QRSTUVWXYZ&]</TITLE></HEAD></HTML>"));
 		expect(bare.kind == nw::HostKeyResult::Kind::Resolved && !bare.request.valid && !g.host_active(),
@@ -694,12 +694,12 @@ static bool test_host_resolves() {
 	}
 
 	// A message page fails with its rendered text; a refresh loop gives up.
-	r = f.host();
+	r = f.host("");
 	r = f.on_host_response(true, 200, {},
 			bytes("<IB3_SUBST name=\"@GENERIC@\">You must agree first.</IB3_SUBST>"));
 	expect(r.kind == nw::HostKeyResult::Kind::Failed && r.reason == "You must agree first.",
 	       "a message page fails the host leg with its text");
-	r = f.host();
+	r = f.host("");
 	for (int hop = 0; hop < nw::LobbyHttpFlow::kMaxHostHops && r.kind == nw::HostKeyResult::Kind::NeedRequest;
 	     ++hop) {
 		r = f.on_host_response(true, 200, {}, bytes(relay));
@@ -736,7 +736,7 @@ static bool test_host_leg_origin() {
 	if (!expect(login.kind == nw::LoginResult::Kind::Succeeded, "origin: the login lands"))
 		return false;
 
-	nw::HostKeyResult r = f.host();
+	nw::HostKeyResult r = f.host("");
 	expect(r.kind == nw::HostKeyResult::Kind::NeedRequest &&
 	               r.request.url == "http://gs.opennova.test/jop_2_host1.htm",
 	       "the host leg opens @HOST_URL@ as the page names it");
@@ -773,13 +773,63 @@ static bool test_host_leg_origin() {
 
 	// A second host leg in the process finds the host origin's template held: no fetch.
 	f.on_host_response(true, 200, {}, bytes("<HTML>host3</HTML>"));
-	r = f.host();
+	r = f.host("");
 	r = f.on_host_response(true, 200, {}, bytes(host1));
 	r = f.on_host_response(true, 200, set_cookie("NWJOINSESSIONTAG=h2"), bytes(relay));
 	expect(r.kind == nw::HostKeyResult::Kind::NeedRequest &&
 	               r.request.url == "http://gs.opennova.test/NWHost.dll",
 	       "a later host leg's relay template is the cache's");
 	nw::process_browser_cache().clear();
+	return g_fail == 0;
+}
+
+// D-NET-NEW-L9-48: the Host's open sets PLoad "" and EXP (the expansion's name) in the jar ahead
+// of its @HOST_URL@ lookup, appended after the login's cookies, so the host leg's requests and the
+// host request's Cookie var-list end with them: the LN S1 / S1d retail host legs' 32 cookies end
+// "PERSISTENTREMEMBERLOGINDATA, PLoad, EXP", their ClientHostRequest Cookie lists carry PLoad ""
+// and EXP "" there, and no response sets either. A second host leg updates both in place.
+// [orig: UI_HandleHostSessionStart @0x556D00 - CUIBrowser_AddFormField called @0x556F21 /
+//  @0x556F36, ahead of CUIScene_FindNamedValue called @0x556F46; CookieJar_UpdateFromURL
+//  @0x64E630 - the in-place value @0x64E7FF, the append @0x64E8F7..0x64E91C]
+static bool test_host_leg_cookies() {
+	nw::LobbyHttpFlow f;
+	f.set_context(concrete_ctx());
+	f.login("player", "secret");
+	f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
+	f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t"), relay_to("NWLogin.dll"));
+	const std::string main_page =
+			"<HTML><IB3_GLOBAL name=\"@HOST_URL@\">http://gs.opennova.test/jop_2_host1.htm"
+			"</IB3_GLOBAL></HTML>";
+	const nw::LoginResult login = f.on_login_response(true, 200,
+			{"Set-Cookie: NWHANDLE=P", "Set-Cookie: PERSISTENTREMEMBERLOGINDATA=R"}, bytes(main_page));
+	if (!expect(login.kind == nw::LoginResult::Kind::Succeeded, "cookies: the login lands"))
+		return false;
+	expect(f.cookies().find("PLoad") == nullptr && f.cookies().find("EXP") == nullptr,
+	       "no page sets PLoad or EXP");
+
+	nw::HostKeyResult r = f.host("");
+	if (!expect(r.kind == nw::HostKeyResult::Kind::NeedRequest, "cookies: the host leg opens"))
+		return false;
+	const std::vector<std::string> &headers = r.request.headers;
+	expect(headers.size() >= 3 && headers[headers.size() - 3] == "Cookie: PERSISTENTREMEMBERLOGINDATA=R;" &&
+	               headers[headers.size() - 2] == "Cookie: PLoad=;" &&
+	               headers[headers.size() - 1] == "Cookie: EXP=;",
+	       "the host leg's first GET ends its Cookie lines with PLoad and EXP, after the login's");
+	std::vector<std::pair<std::string, std::string>> vars = f.session_cookie_vars();
+	expect(vars.size() >= 3 && vars[vars.size() - 3].first == "PERSISTENTREMEMBERLOGINDATA" &&
+	               vars[vars.size() - 2] == std::make_pair(std::string("PLoad"), std::string()) &&
+	               vars[vars.size() - 1] == std::make_pair(std::string("EXP"), std::string()),
+	       "and so does the host request's Cookie var-list");
+	r = f.on_host_response(true, 200, {},
+			bytes("<HTML><HEAD><TITLE>[HOSTKEY=ABCDEFGHIJKLMNOP&]</TITLE></HEAD></HTML>"));
+	expect(r.kind == nw::HostKeyResult::Kind::Resolved && !f.host_active(), "cookies: the key resolves");
+
+	const std::size_t names = f.cookies().names().size();
+	r = f.host("EXPNAME");
+	expect(f.cookies().names().size() == names && f.cookies().names().back() == "EXP" &&
+	               *f.cookies().find("EXP") == "EXPNAME" &&
+	               r.request.headers.back() == "Cookie: EXP=EXPNAME;",
+	       "a second host leg updates both entries in place, EXP carrying the expansion's name");
 	return g_fail == 0;
 }
 
@@ -1319,6 +1369,7 @@ int main() {
 	test_page_template_file();
 	test_login_template_legs();
 	test_host_leg_origin();
+	test_host_leg_cookies();
 	test_enter_reentry();
 	test_enter_seeds_identity_once();
 	test_ib3_form_inputs();

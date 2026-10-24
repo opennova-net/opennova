@@ -1256,8 +1256,13 @@ HostKeyResult LobbyHttpFlow::host_get(const std::string &url) {
 	return host_need(std::move(req));
 }
 
-HostKeyResult LobbyHttpFlow::host() {
+// See http_flow.h: the Host's two jar entries, then the @HOST_URL@ open.
+// [orig: UI_HandleHostSessionStart @0x556D00 - CUIBrowser_AddFormField called @0x556F21 /
+//  @0x556F36, ahead of CUIScene_FindNamedValue called @0x556F46]
+HostKeyResult LobbyHttpFlow::host(const std::string &expansion) {
 	if (host_active()) return host_fail("host already in flight");
+	jar_.set("PLoad", "");
+	jar_.set("EXP", expansion);
 	const std::string *host_url = browser_global("@HOST_URL@");
 	if (host_url == nullptr || host_url->empty())
 		return host_fail("the NovaWorld main page set no @HOST_URL@ — log in first");
