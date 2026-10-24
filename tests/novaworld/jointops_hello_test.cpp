@@ -8,6 +8,7 @@
 // (NOVAWORLDUDP) hello stays the service protocol's with the title's PV1, so the
 // per-PN identity selector cannot regress the lobby path.
 
+#include <base/io/cp1252.h>
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/lobby_identity.h>
 #include <base/gameprofile/gameprofile.h>
@@ -98,15 +99,43 @@ int main() {
 	check(jo_hello.pg != nw_hello.pg, "JO and lobby PG GUIDs differ");
 
 	// D-NET-722: the lobby hello's CO is the company constant and its AP the running executable's
-	// file name (this test's own), as the 0x42 carries them too.
+	// file name (this test's own), as the 0x42 carries them too. D-NET-NEW-L9-44: the menu reads
+	// it uppercased (the main loop's entry runs _strupr over the process command line), where
+	// the game protocol's AP, read at the boot's network init, keeps the file's case (LN S2: one
+	// retail process's lobby AP "JOINTOPS.EXE", its in-match AP "Jointops.exe").
 	// [orig: CNapiGameSession_InitNPConnection @0x4d3be0 - CO @0x4d3cae, AP Napi_GetExeBasename
-	//  @0x4d3cc3, Napi_CopyString(.., 0x40) @0x4d3cd2]
+	//  @0x4d3cc3, Napi_CopyString(.., 0x40) @0x4d3cd2; Game_Run @0x4A7FB0 - _strupr called
+	//  @0x4A7FCF; CNapiNetwork_Init called @0x4A7346 ahead of it]
 	check(nw_hello.co == "NovaLogic Inc, Calabasas CA U.S.A.", "lobby hello CO == the company constant");
 	const std::string exe = read_exe_basename();
 	// How the test was started decides what the first token holds (ctest passes a '/' path,
 	// which retail's basename keeps whole), so only its name is pinned here.
 	check(exe.find("jointops_hello_test") != std::string::npos, "the running executable's name is read");
-	check(nw_hello.ap == exe.substr(0, kLobbyApChars), "lobby hello AP == the running executable's file name");
+	check(read_menu_exe_basename() == cp1252_strupr(exe) &&
+	              read_menu_exe_basename().find("JOINTOPS_HELLO_TEST") != std::string::npos,
+	      "the menu reads the executable's name uppercased");
+	check(nw_hello.ap == cp1252_strupr(exe).substr(0, kLobbyApChars),
+	      "lobby hello AP == the running executable's file name, uppercased");
+
+	// _strupr under the ".ACP" locale on code page 1252: the 60 small letters LCMapStringA
+	// raises (a..z, 0x9A / 0x9C / 0x9E, 0xFF, 0xE0..0xFE but 0xF7), every other byte kept.
+	// [orig: _strupr @0x78E671 - _strupr_s_l called @0x78E6C5; _strupr_s_l_stat @0x78E4C2 -
+	//  __crtLCMapStringA(.., LCMAP_UPPERCASE, ..) called @0x78E5F7]
+	check(cp1252_strupr("Jointops.exe") == "JOINTOPS.EXE", "the retail file name uppercases");
+	check(cp1252_strupr("dfx2.exe /mod x") == "DFX2.EXE /MOD X", "digits, spaces and '/' are kept");
+	check(cp1252_strupr("ÿàþ") == "ÀÞ",
+	      "the high small letters raise to their capitals");
+	check(cp1252_strupr("÷ßµªº") == "÷ßµªº",
+	      "the division sign, sharp s, micro, the ordinals and f hook stay");
+	int raised = 0;
+	for (int byte = 1; byte < 256; ++byte)
+		raised += cp1252_toupper(static_cast<uint8_t>(byte)) != byte ? 1 : 0;
+	check(raised == 60, "60 bytes raise");
+	for (int byte = 1; byte < 256; ++byte) {
+		const uint8_t b = static_cast<uint8_t>(byte);
+		if (cp1252_tolower(b) != b)
+			check(cp1252_toupper(cp1252_tolower(b)) == b, "each capital is its small letter's raise");
+	}
 
 	// The command line's first token, quote-aware, from past its last backslash on; a '/' is no
 	// separator to retail's basename.

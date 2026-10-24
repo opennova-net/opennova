@@ -4,7 +4,7 @@
 #include <net/napi/session.h>
 #include <net/novaworld/gate_metrics.h>
 #include <net/novaworld/gate_probe.h>
-#include <net/novaworld/lobby_identity.h> // read_exe_basename
+#include <net/novaworld/lobby_identity.h> // read_menu_exe_basename
 #include <net/novaworld/lobby_vars.h> // parse_host_and_port
 #include <net/npwire/nw_session_framing.h> // advance_connection_index / make_random_session_u32
 #include <net/npwire/session_keys.h>      // the server-direction opcodes
@@ -1014,7 +1014,10 @@ std::vector<uint8_t> NwuLobbySession::begin_session() {
 	cfg.connection_keys = env_.connection_keys;
 	cfg.max_packet_size = env_.max_packet_size;
 	NovaWorldJoinCu cu;
-	cu.application = read_exe_basename().substr(0, kLobbyApplicationChars);
+	// The executable's file name as the menu reads it, uppercased (read_menu_exe_basename).
+	// [orig: CNapiGameSession_ConnectToNovaWorld @0x4D4640 - Napi_GetExeBasename called @0x4D4780;
+	//  Game_Run @0x4A7FB0 - _strupr called @0x4A7FCF]
+	cu.application = read_menu_exe_basename().substr(0, kLobbyApplicationChars);
 	cu.build_date_and_time = title_->lobby_bdat;
 	cu.gate_tag = cfg.na;
 	const GateResponse &gate = memory().response;

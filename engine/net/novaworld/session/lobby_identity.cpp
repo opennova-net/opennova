@@ -13,6 +13,7 @@
 #include <ipifcons.h>
 #endif
 
+#include <base/io/cp1252.h>  // cp1252_strupr (the main loop's _strupr)
 #include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
 
 #include <algorithm>
@@ -138,6 +139,11 @@ std::string read_exe_basename() {
 	const std::size_t slash = first.rfind('/');
 	return slash == std::string::npos ? first : first.substr(slash + 1);
 #endif
+}
+
+// [orig: Game_Run @0x4A7FB0 - _strupr over the process command line called @0x4A7FCF]
+std::string read_menu_exe_basename() {
+	return cp1252_strupr(read_exe_basename());
 }
 
 RetailMachineInputs fallback_machine_inputs(std::string_view stable_identity) {

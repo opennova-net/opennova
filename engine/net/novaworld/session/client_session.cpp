@@ -7,7 +7,7 @@
 #include <net/napi/envelope.h>
 #include <net/napi/tlv.h>
 #include <net/novacrypto/nwu.h>
-#include <net/novaworld/lobby_identity.h> // read_exe_basename
+#include <net/novaworld/lobby_identity.h> // read_menu_exe_basename
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/outgoing_packets.h>
 #include <net/npwire/protocol_message.h> // decode_cs_config_update
@@ -161,10 +161,12 @@ ClientSession::Config ClientSession::Config::lobby(const TitleIdentity &title,
 	c.na = std::move(gate_tag);
 	c.pv1 = title.lobby_pv1;
 	c.bdat = title.lobby_bdat;
-	// The company constant and the executable's file name, cut as Napi_CopyString(.., 0x40)
-	// cuts it. [orig: CNapiGameSession_InitNPConnection @0x4d3be0 - @0x4d3cae, @0x4d3cc3..0x4d3cd2]
+	// The company constant and the executable's file name as the menu reads it (uppercased by
+	// the main loop's entry, read_menu_exe_basename), cut as Napi_CopyString(.., 0x40) cuts it.
+	// [orig: CNapiGameSession_InitNPConnection @0x4d3be0 - @0x4d3cae, @0x4d3cc3..0x4d3cd2;
+	//  Game_Run @0x4A7FB0 - _strupr called @0x4A7FCF]
 	c.co = title.co;
-	c.ap = read_exe_basename().substr(0, kLobbyApChars);
+	c.ap = read_menu_exe_basename().substr(0, kLobbyApChars);
 	return c;
 }
 

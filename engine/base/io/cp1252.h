@@ -158,6 +158,40 @@ inline int cp1252_stricmp(std::string_view p_a, std::string_view p_b) noexcept {
 	}
 }
 
+// The CRT `_strupr` under the same ".ACP" LC_CTYPE: setlocale having run, `_strupr` takes
+// `_strupr_s_l`, which maps the whole text through the CRT's __crtLCMapStringA wrapper with
+// LCMAP_UPPERCASE under the locale's LCID (the ASCII loop runs only in the C locale). On code
+// page 1252 that raises the 60 bytes cp1252_tolower lowers, each back to its capital: a..z,
+// 0x9A / 0x9C / 0x9E (s caron, oe, z caron) to 0x8A / 0x8C / 0x8E, 0xFF (y diaeresis) to 0x9F,
+// and 0xE0..0xFE but 0xF7 (the Latin-1 small letters, the division sign left out) to the
+// byte - 0x20; any other byte is itself. Probed 2026-10-24 with LCMapStringA(0x409,
+// LCMAP_UPPERCASE) and msvcrt's _strupr after setlocale(LC_ALL, ".ACP") over bytes 1..255 on a
+// cp1252 host: the same 60 rows each. The pin to cp1252 is D-MNU-39's, as cp1252_tolower's.
+// [orig: _strupr @0x78E671 - the __locale_changed test @0x78E674, _strupr_s_l called
+//  @0x78E6C5; _strupr_s_l_stat @0x78E4C2 - the LC_CTYPE handle test @0x78E514,
+//  __crtLCMapStringA(.., LCMAP_UPPERCASE, ..) called @0x78E548 (the length) and @0x78E5F7]
+inline constexpr std::uint8_t cp1252_toupper(std::uint8_t p_byte) noexcept {
+	if ((p_byte >= 'a' && p_byte <= 'z') || (p_byte >= 0xE0 && p_byte <= 0xFE && p_byte != 0xF7)) {
+		return static_cast<std::uint8_t>(p_byte - 0x20);
+	}
+	switch (p_byte) {
+		case 0x9A: return 0x8A;
+		case 0x9C: return 0x8C;
+		case 0x9E: return 0x8E;
+		case 0xFF: return 0x9F;
+		default: return p_byte;
+	}
+}
+
+// `_strupr` over a text in the page's bytes (cp1252_toupper on each).
+inline std::string cp1252_strupr(std::string_view p_text) {
+	std::string out(p_text);
+	for (char &c : out) {
+		c = static_cast<char>(cp1252_toupper(static_cast<std::uint8_t>(c)));
+	}
+	return out;
+}
+
 // Strict UTF-8 well-formedness (no overlong forms, no surrogates, at most U+10FFFF).
 inline bool is_valid_utf8(std::string_view s) noexcept {
 	size_t i = 0;

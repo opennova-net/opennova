@@ -115,7 +115,8 @@ public:
 		//   PG   == the 16-byte protocol GUID (added in build_client_hello).
 		// CO/AP/BDAT are read but never validated. lobby() fills them as retail's lobby
 		// connection does: CO the company constant (TitleIdentity::co), AP the running
-		// executable's file name (read_exe_basename) kept to 63 characters, BDAT the title's
+		// executable's file name as the menu reads it (read_menu_exe_basename: uppercased by the
+		// main loop's entry) kept to 63 characters, BDAT the title's
 		// lobby BDAT; the title's PV1 is its lobby_pv1 (D-NET-722).
 		// [orig: CNapiGameSession_InitNPConnection @0x4d3be0 - CO @0x4d3cae, AP
 		//  Napi_GetExeBasename @0x4d3cc3 copied with Napi_CopyString(.., 0x40) @0x4d3cd2]
@@ -821,8 +822,9 @@ ClientAuth make_client_auth(const ClientSession::Config &cfg, std::string_view c
 // gate response (ProcessResponse @ 0x4ced20) and are empty against the
 // permissive OpenNova gate.
 struct NovaWorldJoinCu {
-	// Application: the running executable's file name (read_exe_basename), its 512-byte read
-	// whole. [orig: CNapiGameSession_ConnectToNovaWorld @0x4d4640 - Napi_GetExeBasename(.., 0x200)
+	// Application: the running executable's file name as the menu reads it
+	// (read_menu_exe_basename, uppercased), its 512-byte read whole.
+	// [orig: CNapiGameSession_ConnectToNovaWorld @0x4d4640 - Napi_GetExeBasename(.., 0x200)
 	//  @0x4d4780, the CU @0x4d4798]
 	std::string application;
 	// BuildDateAndTime: the title's lobby BDAT (TitleIdentity::lobby_bdat).

@@ -47,6 +47,19 @@ std::string exe_basename_from_command_line(std::string_view command_line);
 // platform gives none.
 std::string read_exe_basename();
 
+// The executable's file name as the NovaWorld menu's reads see it, the lobby connection's AP and
+// its 0x42's Application CU: the main loop's entry uppercases the process command line in place
+// (the CRT _strupr under the ".ACP" LC_CTYPE the boot set, cp1252_strupr) after the boot's
+// command-line parse and network init, so every later read of it gives "JOINTOPS.EXE", where the
+// boot's reads (the game protocol's AP the network init keeps, the connect log's EXE line) keep
+// the file's own case (read_exe_basename).
+// [orig: WinMain @0x763A80 - Game_ParseCommandLineAndInit called @0x763B5B (CNapiNetwork_Init
+//  called @0x4A7346), GetCommandLineA called @0x763BA2 and its buffer handed to Game_Run called
+//  @0x763BA9; Game_Run @0x4A7FB0 - _strupr over it called @0x4A7FCF, ahead of the main loop;
+//  System_InitTimerAndLocale @0x762A00 - setlocale(LC_ALL, ".ACP") called @0x762A6E, from WinMain
+//  ahead of Game_Run]
+std::string read_menu_exe_basename();
+
 // The lobby connection's AP keeps 63 characters (Napi_CopyString(.., 0x40)) and its 0x42's
 // Application CU 511 (the 0x200 read). [orig: CNapiGameSession_InitNPConnection @0x4d3cd2;
 //  CNapiGameSession_ConnectToNovaWorld @0x4d4780]
