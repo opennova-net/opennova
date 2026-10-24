@@ -1419,7 +1419,9 @@ void ObjectModel::_notification(int p_what) {
 			refresh_view_split();
 		}
 	} else if (p_what == NOTIFICATION_ENTER_TREE) {
-		// Back in the tree: the views reconcile the node again.
+		// Back in the tree: the views reconcile the node again, under the
+		// owner it now draws inside.
+		view_owner_cached_ = false;
 		relist_view_walks();
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
 		// The twins live in the world's scenario, not under this node.

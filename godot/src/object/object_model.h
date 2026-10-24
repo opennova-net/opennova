@@ -493,6 +493,12 @@ private:
 	// The Inset pass's draw verdict for the node (its own verdicts, else the
 	// main view's), under ancestors that draw there.
 	bool inset_view_draws() const;
+	// The model this one draws inside: the nearest model above it in its
+	// visibility chain (null at a chain without one). `r_chain_visible` is
+	// whether every node between them shows its own flag.
+	const ObjectModel *view_owner(bool &r_chain_visible) const;
+	mutable ObjectID view_owner_id_;
+	mutable bool view_owner_cached_ = false;
 	void apply_view_split_layers();
 	bool inset_section_part_visible(int64_t p_mask, int p_section) const;
 	// Write one Inset selection to the twins it covers: every twin

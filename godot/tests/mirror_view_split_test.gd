@@ -172,3 +172,35 @@ func test_a_model_the_mirror_drops_leaves_the_walk() -> void:
 	assert_eq(ObjectModel.get_view_marked_count(), 1)
 	assert_false(model.is_mirror_view_split(0))
 	assert_ne(_surface_layers(model) & WORLD_NO_MIRROR, 0)
+
+
+# A part draws inside its owner's submit (the avatar head inside the body's,
+# the held gun inside the person's bone callback): a part with no verdict of
+# its own leaves a mirror whose collect dropped its owner, and leaves the walk
+# with it.
+func test_a_part_goes_with_an_owner_the_mirror_drops() -> void:
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var body := _fixture_model(container)
+	assert_not_null(body)
+	if body == null:
+		return
+	var part := _fixture_model(body)
+	assert_not_null(part)
+	if part == null:
+		return
+	var main_camera := _view_camera(Vector2i(640, 480), 90.0)
+	ObjectModel.set_mirror_view_state(0, true, true)
+	ObjectModel.update_authored_lods_for_views(main_camera, 640.0, null, 0.0)
+	body.set_mirror_occlusion_hidden(0, true)
+	ObjectModel.update_authored_lods_for_views(main_camera, 640.0, null, 0.0)
+	assert_true(body.is_visible_in_tree())
+	assert_true(body.is_mirror_view_split(0), "the body leaves the mirror")
+	assert_true(part.is_mirror_view_split(0), "and its part with it")
+	assert_eq(_surface_layers(part) & (WORLD | WORLD_NO_MIRROR | MIRROR_VIEW), 0)
+	assert_eq(ObjectModel.get_view_marked_count(), 0, "neither is in the mirror's lists")
+	body.set_mirror_occlusion_hidden(0, false)
+	ObjectModel.update_authored_lods_for_views(main_camera, 640.0, null, 0.0)
+	assert_false(body.is_mirror_view_split(0))
+	assert_false(part.is_mirror_view_split(0))
+	assert_eq(ObjectModel.get_view_marked_count(), 2, "both walked while the mirror lists the body")

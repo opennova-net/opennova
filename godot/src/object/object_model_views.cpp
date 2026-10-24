@@ -564,10 +564,11 @@ void ObjectModel::refresh_view_split() {
 	}
 }
 
-// The Inset pass's verdicts for the node, under ancestors that draw there: a
-// part model under a body the main view hid (the avatar head) follows the
-// body's Inset verdicts, as retail draws it inside the body's own submit;
-// any other hidden ancestor hides it.
+// The Inset pass's verdicts for the node, under ancestors that draw there. A
+// part draws inside its owner's submit (the avatar head inside the body's,
+// the held gun inside the person's bone callback): under an owner the main
+// view hid, or with no Inset verdict of its own, it draws where its owner
+// does, under its own attach chain; any other hidden ancestor hides it.
 bool ObjectModel::inset_view_draws() const {
 	if (!inset_view_open_ || !is_inside_tree() ||
 			(presentation_layer_ != PRESENTATION_LAYER_WORLD &&
@@ -576,9 +577,10 @@ bool ObjectModel::inset_view_draws() const {
 	}
 	const Node3D *parent = get_parent_node_3d();
 	bool ancestors = parent == nullptr || parent->is_visible_in_tree();
-	if (!ancestors) {
-		const ObjectModel *owner = Object::cast_to<ObjectModel>(parent);
-		ancestors = owner != nullptr && owner->inset_view_draws();
+	bool chain_visible = true;
+	const ObjectModel *owner = view_owner(chain_visible);
+	if (owner != nullptr && (!ancestors || (inset_own_ & kInsetOwnOcclusion) == 0)) {
+		ancestors = chain_visible && owner->inset_view_draws();
 	}
 	// A node another owner hid directly (its own flag down while the main
 	// view's verdicts would draw it) draws in neither view.
@@ -614,9 +616,10 @@ bool ObjectModel::mirror_admits_layer(int p_view) const {
 
 // The mirror's draw verdict for the node: its own collect's where it gave one
 // (which carries the water side's Flags match), else the main view's by the
-// water side, under ancestors that draw there (a part under a body the main
-// view hid follows the body's mirror verdict, as retail draws it inside the
-// body's submit).
+// water side, under ancestors that draw there. A part draws inside its
+// owner's submit (as inset_view_draws): under an owner the main view hid, or
+// with no verdict of its own from this mirror, it draws where its owner does,
+// its owner's verdict carrying the water side's match.
 bool ObjectModel::mirror_view_draws(int p_view) const {
 	if (!mirror_view_open_[p_view] || !is_inside_tree() ||
 			(presentation_layer_ != PRESENTATION_LAYER_WORLD &&
@@ -625,13 +628,15 @@ bool ObjectModel::mirror_view_draws(int p_view) const {
 	}
 	const Node3D *parent = get_parent_node_3d();
 	bool ancestors = parent == nullptr || parent->is_visible_in_tree();
-	if (!ancestors) {
-		const ObjectModel *owner = Object::cast_to<ObjectModel>(parent);
-		ancestors = owner != nullptr && owner->mirror_view_draws(p_view);
+	const bool own = (mirror_[p_view].own & kInsetOwnOcclusion) != 0;
+	bool chain_visible = true;
+	const ObjectModel *owner = view_owner(chain_visible);
+	const bool follows_owner = owner != nullptr && !own;
+	if (owner != nullptr && (!ancestors || follows_owner)) {
+		ancestors = chain_visible && owner->mirror_view_draws(p_view);
 	}
 	const bool main_verdicts = present_visible_ && !occlusion_hidden_ && !subpixel_hidden_;
 	const bool external_hidden = !is_visible() && main_verdicts;
-	const bool own = (mirror_[p_view].own & kInsetOwnOcclusion) != 0;
 	const bool hidden = own ? mirror_[p_view].occlusion_hidden : occlusion_hidden_;
 	const bool subpixel = (mirror_[p_view].own & kInsetOwnLod) != 0
 			? mirror_[p_view].subpixel_hidden
@@ -640,7 +645,36 @@ bool ObjectModel::mirror_view_draws(int p_view) const {
 			? mirror_[p_view].pixel_culled
 			: camera_pixel_culled_;
 	return ancestors && !external_hidden && present_visible_ && !hidden && !subpixel &&
-			!pixel && (own || mirror_admits_layer(p_view));
+			!pixel && (own || follows_owner || mirror_admits_layer(p_view));
+}
+
+// The owner is found once per tree entry (view_owner_cached_ resets at
+// NOTIFICATION_ENTER_TREE: a reparent moves the whole subtree through it).
+const ObjectModel *ObjectModel::view_owner(bool &r_chain_visible) const {
+	r_chain_visible = true;
+	if (!view_owner_cached_) {
+		view_owner_cached_ = true;
+		view_owner_id_ = ObjectID();
+		for (const Node3D *node = get_parent_node_3d(); node != nullptr;
+				node = node->get_parent_node_3d()) {
+			if (Object::cast_to<ObjectModel>(node) != nullptr) {
+				view_owner_id_ = node->get_instance_id();
+				break;
+			}
+		}
+	}
+	if (view_owner_id_.is_null()) {
+		return nullptr;
+	}
+	const ObjectModel *owner = Object::cast_to<ObjectModel>(ObjectDB::get_instance(view_owner_id_));
+	if (owner == nullptr) {
+		return nullptr;
+	}
+	for (const Node3D *node = get_parent_node_3d(); node != nullptr && node != owner;
+			node = node->get_parent_node_3d()) {
+		r_chain_visible = r_chain_visible && node->is_visible();
+	}
+	return owner;
 }
 
 // The model and its model descendants (its parts draw inside its submit),
@@ -667,9 +701,15 @@ void ObjectModel::relist_view_walks() {
 }
 
 // Mirror `p_view`'s own collect dropped the model: it is in none of that
-// mirror's lists.
+// mirror's lists (a part with no verdict of its own goes with its owner,
+// whose verdict change marks it again: mark_mirror_view).
 bool ObjectModel::mirror_view_dropped(int p_view) const {
-	return (mirror_[p_view].own & kInsetOwnOcclusion) != 0 && mirror_[p_view].occlusion_hidden;
+	if ((mirror_[p_view].own & kInsetOwnOcclusion) != 0) {
+		return mirror_[p_view].occlusion_hidden;
+	}
+	bool chain_visible = true;
+	const ObjectModel *owner = view_owner(chain_visible);
+	return owner != nullptr && owner->mirror_view_dropped(p_view);
 }
 
 void ObjectModel::refresh_mirror_views() {
