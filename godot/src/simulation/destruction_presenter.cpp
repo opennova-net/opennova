@@ -215,6 +215,10 @@ void DestructionPresenter::restore_intact(const String &key) {
 }
 
 ObjectModel *DestructionPresenter::visual_model(ObjectModel *model) const {
+    // No husk is held (no swap applied this run, or every one restored): every model is its own
+    // visual, without building the identity key each present row asks it with (twice a row a
+    // frame: the destroy phases and the section mask).
+    if (husked_.is_empty()) return model;
     if (model == nullptr || model->get_entity_ref().is_null()) return model;
     const Ref<EntityRef> ref = model->get_entity_ref();
     const String key = identity_key(ref->get_bms_id(), opennova::world::spawn_origin_pack(
