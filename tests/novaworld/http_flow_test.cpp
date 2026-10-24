@@ -620,6 +620,81 @@ static bool test_host_resolves() {
 	return g_fail == 0;
 }
 
+// D-NET-NEW-L9-46: the host leg's pages combine their refreshes with their own URLs, so a leg the
+// main page's @HOST_URL@ opens under its own origin stays under it. The live service names that
+// URL with no port ("http://<web-ip>/jop_2_host1.htm") where its 0x82's web domain, the login's
+// base, writes ":80", so the host leg's relay template keys apart from the login's and is fetched
+// again: every LN S1 / S2 retail host leg refetches jop_2_relay.mnx.
+// [orig: UIScene_OpenUrl @0x63E2F0 - the scene's +0x34 pushed @0x63E3A7,
+//  CUIBrowser_AsyncFetchURLContent called @0x63E3AF; CUIBrowser_AsyncFetchURLContent @0x64DE80 -
+//  URL_CombineComponents called @0x64DE9B]
+static bool test_host_leg_origin() {
+	nw::process_browser_cache().clear();
+	// The login's relay template, held under the login's origin (its base, here with its port).
+	const std::string login_relay = "http://gs.opennova.test:8080/jop_2_relay.mnx";
+	nw::process_browser_cache().fetch(login_relay);
+	nw::process_browser_cache().complete(login_relay, true);
+
+	nw::LobbyHttpFlow f;
+	f.set_context(concrete_ctx());
+	f.login("player", "secret");
+	f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), {});
+	f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t"), relay_to("NWLogin.dll"));
+	const std::string main_page =
+			"<HTML><IB3_GLOBAL name=\"@HOST_URL@\">http://gs.opennova.test/jop_2_host1.htm"
+			"</IB3_GLOBAL></HTML>";
+	const nw::LoginResult login = f.on_login_response(true, 200, {"Set-Cookie: NWHANDLE=P"},
+			bytes(main_page));
+	if (!expect(login.kind == nw::LoginResult::Kind::Succeeded, "origin: the login lands"))
+		return false;
+
+	nw::HostKeyResult r = f.host();
+	expect(r.kind == nw::HostKeyResult::Kind::NeedRequest &&
+	               r.request.url == "http://gs.opennova.test/jop_2_host1.htm",
+	       "the host leg opens @HOST_URL@ as the page names it");
+	// The service's jop_2_host1.htm: its refresh opens NWHost.dll with the page link's query.
+	const std::string host1 =
+			"<HTML><HEAD><META HTTP-EQUIV=\"refresh\" CONTENT=\"0;URL=NWHost.dll?needexpkey="
+			"jop_2_key2err.htm&success=jop_2_host2.htm&pfid=28\"></HEAD></HTML>";
+	r = f.on_host_response(true, 200, {}, bytes(host1));
+	expect(r.kind == nw::HostKeyResult::Kind::NeedRequest &&
+	               r.request.url == "http://gs.opennova.test/NWHost.dll?needexpkey=jop_2_key2err.htm"
+	                                "&success=jop_2_host2.htm&pfid=28",
+	       "the page's refresh combines with the page's URL: no port, as the page's");
+	const std::string relay =
+			"<HTML><HEAD><META http-equiv=\"refresh\" CONTENT=0;URL=\"NWHost.dll\"></HEAD>"
+			"<IB3_TEMPLATE file=\"jop_2_relay.mnx\"></HTML>";
+	r = f.on_host_response(true, 200, set_cookie("NWJOINSESSIONTAG=h"), bytes(relay));
+	expect(nw::browser_cache_key("http://gs.opennova.test/jop_2_relay.mnx") !=
+	               nw::browser_cache_key(login_relay),
+	       "the two origins key the relay template apart");
+	expect(r.kind == nw::HostKeyResult::Kind::NeedRequest &&
+	               r.request.url == "http://gs.opennova.test/jop_2_relay.mnx" && r.request.cache_bust,
+	       "so the host leg's relay template is fetched again, ahead of the refresh");
+	r = f.on_host_response(true, 200, {}, bytes("<IB3 relay mnx>"));
+	expect(r.kind == nw::HostKeyResult::Kind::NeedRequest &&
+	               r.request.url == "http://gs.opennova.test/NWHost.dll",
+	       "then the relay's refresh, under the host leg's origin");
+	const std::string host2 =
+			"<HTML><HEAD><TITLE>[HOSTKEY=ABCDEFGHIJKLMNOP&]</TITLE>"
+			"<META HTTP-EQUIV=\"refresh\" CONTENT=\"10;URL=jop_2_host3.htm\"></HEAD></HTML>";
+	r = f.on_host_response(true, 200, {}, bytes(host2));
+	expect(r.kind == nw::HostKeyResult::Kind::Resolved &&
+	               r.request.url == "http://gs.opennova.test/jop_2_host3.htm",
+	       "and the HOSTKEY page's refresh");
+
+	// A second host leg in the process finds the host origin's template held: no fetch.
+	f.on_host_response(true, 200, {}, bytes("<HTML>host3</HTML>"));
+	r = f.host();
+	r = f.on_host_response(true, 200, {}, bytes(host1));
+	r = f.on_host_response(true, 200, set_cookie("NWJOINSESSIONTAG=h2"), bytes(relay));
+	expect(r.kind == nw::HostKeyResult::Kind::NeedRequest &&
+	               r.request.url == "http://gs.opennova.test/NWHost.dll",
+	       "a later host leg's relay template is the cache's");
+	nw::process_browser_cache().clear();
+	return g_fail == 0;
+}
+
 // D-NET-NEW-L9-31: a menu-browser GET's nocachefix pair, "%d%d" of the tick and the resolved
 // server's IPv4 address read as one little-endian int ('?' or '&' by the URL's query; none with no
 // path), and which requests carry it: every GET, no form post. The LN S1 / S1b records' pairs have
@@ -1065,6 +1140,7 @@ int main() {
 	test_browser_cache_rule();
 	test_page_template_file();
 	test_login_template_legs();
+	test_host_leg_origin();
 	test_enter_reentry();
 	test_enter_seeds_identity_once();
 	std::fprintf(stderr, g_fail == 0 ? "OK\n" : "FAILED (%d)\n", g_fail);

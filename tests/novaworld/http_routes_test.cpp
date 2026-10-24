@@ -2011,12 +2011,18 @@ int test_joiner_routes_admin_only(Harness &h) {
 
 // GET /nwprepare.dll renders the page it names with HOST_URL and GSB_SERVER
 // on the public host and the port Crow serves: the OS's pick here, where the
-// config's port is 0.
+// config's port is 0. HOST_URL is the game's host page, the port written only
+// when it is not 80: the live main page's "http://<web-ip>/jop_2_host1.htm"
+// beside its 0x82's "<web-ip>:80" (LN S2, D-NET-NEW-L9-46).
 int test_menu_urls_name_bound_port(Harness &h) {
+	TEST_EXPECT(nws::HttpListener::host_url_for("198.51.100.7", 80, "jop_2_host1.htm") ==
+			"http://198.51.100.7/jop_2_host1.htm");
+	TEST_EXPECT(nws::HttpListener::host_url_for("198.51.100.7", 8080, "dfx2_0_host1.htm") ==
+			"http://198.51.100.7:8080/dfx2_0_host1.htm");
 	const auto reply = h.send("GET", std::string("/nwprepare.dll?url=") + kUrlsTemplate);
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	const std::string base = "http://127.0.0.1:" + std::to_string(h.port);
-	const std::string want = base + "/nwhost.dll|" + base + "/jop_2.gsb";
+	const std::string want = base + "/jop_2_host1.htm|" + base + "/jop_2.gsb";
 	const std::string body = body_text(reply);
 	if (body != want) std::fprintf(stderr, "  the menu URLs: %s\n", body.c_str());
 	TEST_EXPECT(body == want);
@@ -2098,7 +2104,11 @@ int test_lobby_per_title(Harness &h) {
 
 	// The menu URL page as each client's game fills it.
 	const std::string base = "http://127.0.0.1:" + std::to_string(h.port);
-	const auto urls = [&base](const char *gsb) { return base + "/nwhost.dll|" + base + gsb; };
+	// HOST_URL names the game's host page (DFX2's its own, the OpenNova row JO's).
+	const auto urls = [&base](const char *gsb) {
+		const bool dfx2 = std::string(gsb).rfind("/dfx2_0", 0) == 0;
+		return base + (dfx2 ? "/dfx2_0_host1.htm|" : "/jop_2_host1.htm|") + base + gsb;
+	};
 	struct Prepared {
 		const char *gt;
 		const char *gsb;

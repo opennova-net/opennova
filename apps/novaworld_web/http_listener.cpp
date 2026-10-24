@@ -445,7 +445,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	const std::string public_host   = config.public_host;
 	impl_->access.configure(config);
 
-	web_host_ = config.web_host; // host_url() / gsb_url(), with the port Crow binds
+	web_host_ = config.web_host; // host_url(game) / gsb_url(game), with the port Crow binds
 	public_host_ = public_host;
 	site_url_ = config.site_url; // the welcome mail's link
 
@@ -566,7 +566,7 @@ bool HttpListener::start(const ServerConfig &config) {
 		return false;
 	}
 	running_.store(true);
-	std::printf("[http] HOST_URL=%s\n", host_url().c_str());
+	std::printf("[http] web host %s (HOST_URL / GSB_SERVER per game)\n", web_host_.c_str());
 	std::printf("[http] listening on :%u\n", static_cast<unsigned>(bound_port_));
 	return true;
 }
@@ -626,8 +626,14 @@ std::optional<UserRecord> HttpListener::retail_login_user(
 	return std::nullopt;
 }
 
-std::string HttpListener::host_url() const {
-	return "http://" + web_host_ + ":" + std::to_string(impl_->app.port()) + "/nwhost.dll";
+std::string HttpListener::host_url_for(const std::string &web_host, uint16_t port,
+                                       const std::string &host_page) {
+	return "http://" + web_host + (port == 80 ? std::string() : ":" + std::to_string(port)) + "/" +
+	       host_page;
+}
+
+std::string HttpListener::host_url(const catalog::GameRow &game) const {
+	return host_url_for(web_host_, impl_->app.port(), game.host_page);
 }
 
 std::string HttpListener::gsb_url(const catalog::GameRow &game) const {
@@ -1116,7 +1122,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 				cookie_summary(request_cookie_header(req)).c_str());
 
 		TemplateVars vars{
-			{"HOST_URL",     host_url()},
+			{"HOST_URL",     host_url(game)},
 			{"GSB_SERVER",   gsb_url(game)},
 			{"JOINLAN_URL",  game.join_lan_url},
 		};
@@ -1181,7 +1187,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			{"IN",          in_p},
 			{"OUT",         out_p},
 			{"MSGBASE",     msgbase},
-			{"HOST_URL",    host_url()},
+			{"HOST_URL",    host_url(game)},
 			{"GSB_SERVER",  gsb_url(game)},
 			{"JOINLAN_URL", game.join_lan_url},
 		};
@@ -1265,7 +1271,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			const std::string fail_tpl = field_or("failure", game.page("main.htm"));
 			const std::string msg_tpl  = field_or("msgbase", game.page("msg.htm"));
 			return render_legacy_message(templates_dir, message, fail_tpl, msg_tpl,
-			                             req.remote_ip_address, host_url(), gsb_url(game));
+			                             req.remote_ip_address, host_url(game), gsb_url(game));
 		};
 
 		const auto server_status = get_server_status(*db_conn);
@@ -1457,7 +1463,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		TemplateVars vars{
 			{"MESSAGE",          "Contacting login databases..."},
 			{"REFRESH_ENDPOINT", "NWLogin.dll"},
-			{"HOST_URL",         host_url()},
+			{"HOST_URL",         host_url(game)},
 			{"GSB_SERVER",       gsb_url(game)},
 			{"JOINLAN_URL",      game.join_lan_url},
 		};
@@ -1534,7 +1540,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			{"IN",           session->success},
 			{"OUT",          session->failure},
 			{"MSGBASE",      session->msgbase},
-			{"HOST_URL",     host_url()},
+			{"HOST_URL",     host_url(game)},
 			{"GSB_SERVER",   gsb_url(game)},
 			{"JOINLAN_URL",  game.join_lan_url},
 		};
@@ -1614,7 +1620,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			TemplateVars vars{
 				{"MESSAGE",          "Logging out..."},
 				{"REFRESH_ENDPOINT", "NWLogout.dll"},
-				{"HOST_URL",         host_url()},
+				{"HOST_URL",         host_url(game)},
 				{"GSB_SERVER",       gsb_url(game)},
 				{"JOINLAN_URL",      game.join_lan_url},
 			};
@@ -1661,7 +1667,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 				loggable(success_tpl).c_str());
 
 		TemplateVars vars{
-			{"HOST_URL",    host_url()},
+			{"HOST_URL",    host_url(game)},
 			{"GSB_SERVER",  gsb_url(game)},
 			{"JOINLAN_URL", game.join_lan_url},
 		};
@@ -1726,7 +1732,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			return res;
 		}
 		TemplateVars vars{
-			{"HOST_URL",    host_url()},
+			{"HOST_URL",    host_url(game)},
 			{"GSB_SERVER",  gsb_url(game)},
 			{"JOINLAN_URL", game.join_lan_url},
 			{"NWHANDLE",    user ? user->nwhandle : std::string()},
@@ -1880,7 +1886,7 @@ void HttpListener::register_legacy_host_join_routes(
 			TemplateVars vars{
 				{"MESSAGE",          "Contacting game server...."},
 				{"REFRESH_ENDPOINT", "NWJoin.dll"},
-				{"HOST_URL",         host_url()},
+				{"HOST_URL",         host_url(game)},
 				{"GSB_SERVER",       gsb_url(game)},
 				{"JOINLAN_URL",      game.join_lan_url},
 			};
@@ -1960,7 +1966,7 @@ void HttpListener::register_legacy_host_join_routes(
 			return render_legacy_message(templates_dir, kLanGameGoneMessage,
 					session->failure.empty() ? game.page("main.htm") : session->failure,
 					session->msgbase.empty() ? game.page("msg.htm") : session->msgbase,
-					req.remote_ip_address, host_url(), gsb_url(game));
+					req.remote_ip_address, host_url(game), gsb_url(game));
 		}
 		if (!host_row) {
 			std::fprintf(stderr, "[http] /NWJoin.dll RID %u not in active_hosts\n",
@@ -2021,7 +2027,7 @@ void HttpListener::register_legacy_host_join_routes(
 			{"BK",          lan_join ? std::string() : std::string(BK_VALUE)},
 			{"LAN",         lan_join ? "LN=1&" : ""},
 			{"SERVER_NAME", host.server_name.empty() ? std::string("OpenNova Server") : host.server_name},
-			{"HOST_URL",    host_url()},
+			{"HOST_URL",    host_url(game)},
 			{"GSB_SERVER",  gsb_url(game)},
 			{"JOINLAN_URL", game.join_lan_url},
 		};
@@ -2071,7 +2077,7 @@ void HttpListener::register_legacy_host_join_routes(
 						joiner->account_status == "banned"
 								? "This NovaWorld account has been banned. NWEC11"
 								: "This NovaWorld account is restricted. NWEC12",
-						fail_tpl, msg_tpl, req.remote_ip_address, host_url(), gsb_url(game));
+						fail_tpl, msg_tpl, req.remote_ip_address, host_url(game), gsb_url(game));
 			}
 			if (joiner) {
 				joiner_user_id = joiner->id;
@@ -2096,7 +2102,7 @@ void HttpListener::register_legacy_host_join_routes(
 					return render_legacy_message(templates_dir,
 							"This NovaWorld account does not have the required expansion key.",
 							session->needexpkey.empty() ? fail_tpl : session->needexpkey, msg_tpl,
-							req.remote_ip_address, host_url(), gsb_url(game));
+							req.remote_ip_address, host_url(game), gsb_url(game));
 				}
 			}
 			if (host_pcid_key.empty()) {
@@ -2275,7 +2281,7 @@ void HttpListener::register_legacy_host_join_routes(
 			TemplateVars vars{
 				{"MESSAGE",          "Contacting NovaWorld...."},
 				{"REFRESH_ENDPOINT", "NWHost.dll"},
-				{"HOST_URL",         host_url()},
+				{"HOST_URL",         host_url(game)},
 				{"GSB_SERVER",       gsb_url(game)},
 				{"JOINLAN_URL",      game.join_lan_url},
 			};
@@ -2309,7 +2315,7 @@ void HttpListener::register_legacy_host_join_routes(
 				client_game(impl_->games, req, cookies, session->pfid, session->success);
 		TemplateVars vars{
 			{"HOSTKEY",     session->host_key},
-			{"HOST_URL",    host_url()},
+			{"HOST_URL",    host_url(game)},
 			{"GSB_SERVER",  gsb_url(game)},
 			{"JOINLAN_URL", game.join_lan_url},
 		};

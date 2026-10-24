@@ -1254,8 +1254,10 @@ HostKeyResult LobbyHttpFlow::on_host_response(bool transport_ok, int code,
 		//  UI_DispatchScreenEvent @0x54E6A0 - case 7's CNapiGameSession_ConnectOrHost called
 		//  @0x54F33B, its wait inside; CUIScene_EndFrame @0x63E600 - `cmp eax, [esi+40h]`
 		//  @0x63E626, UIScene_OpenUrl called @0x63E635]
+		// The refresh combines with the page's own URL, as every page the browser opens does.
 		const std::string next = meta_refresh_url(html);
-		const std::string refresh = next.empty() ? std::string() : absolute_url(next);
+		const std::string refresh =
+				next.empty() ? std::string() : browser_combine_url(host_page_url_, next);
 		if (!refresh.empty()) {
 			host_step_ = HostStep::Page;
 			r.request.valid = true;
@@ -1272,10 +1274,20 @@ HostKeyResult LobbyHttpFlow::on_host_response(bool transport_ok, int code,
 	// after the NWHost relay page and ahead of its refresh). The HOSTKEY page resolves at once: its
 	// title raises the host's event ahead of any template fetch (CUIScene_RaiseEvent called @0x63D634
 	// with event 7, ahead of the fetch called @0x63D6D1).
+	// The refresh is combined with the page's own URL (the scene's current URL, the base the
+	// browser opens every URL against), so a leg the main page's @HOST_URL@ opened under its own
+	// origin (the live service's names no port, its 0x82's web domain ":80") stays under it, and
+	// the pages' templates key apart from the login's: the LN S1 / S2 retail host legs refetch
+	// jop_2_relay.mnx (D-NET-NEW-L9-46).
+	// [orig: CUIScene_EndFrame @0x63E600 - UIScene_OpenUrl called @0x63E635; UIScene_OpenUrl
+	//  @0x63E2F0 - the scene's +0x34 pushed @0x63E3A7, CUIBrowser_AsyncFetchURLContent called
+	//  @0x63E3AF; CUIBrowser_AsyncFetchURLContent @0x64DE80 - URL_CombineComponents called
+	//  @0x64DE9B]
 	const std::string page_url = host_page_url_;
 	const std::string next = meta_refresh_url(html);
 	if (!next.empty() && ++host_hops_ < kMaxHostHops)
-		return behind_template(host_template_, page_url, body, host_get(next));
+		return behind_template(host_template_, page_url, body,
+				host_get(browser_combine_url(page_url, next)));
 	host_step_ = HostStep::Idle;
 	const std::string message = extract_message(body);
 	if (!message.empty()) return behind_template(host_template_, page_url, body, host_fail(message));
