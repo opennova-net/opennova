@@ -91,10 +91,12 @@ struct MenuBrowserState {
 	CookieJar jar;
 	// The sign-in page's REMEMBER_LOGIN checkbox as the scene holds it (the checkbox is GLOBAL_VAR:
 	// each state write sets the scene property of its name, "CHECKED" or "UNCHECKED"): unset until
-	// a sign-in page's activation sets the checkbox, then the checkbox's state.
+	// a sign-in page's activation sets the checkbox (or a click sets it: LobbyHttpFlow::
+	// store_remember_login), then the checkbox's state.
 	// [orig: CCheckWnd_SetCheckedState @0x64AC70 - the property's write (CUIScene_SetNamedValue called
-	//  @0x64AC9B) when the checkbox has its scene (+0xF8 @0x64AC77); CCheckWnd_GetStateString
-	//  @0x64AD40]
+	//  @0x64AC9B) when the checkbox is GLOBAL_VAR (+0xF8 read @0x64AC77, set by
+	//  CUIElement_ParseXMLDefinition @0x648335); CCheckboxWnd_HandleNamedEvent @0x64AB80 - a click's
+	//  write called @0x64AC18; CCheckWnd_GetStateString @0x64AD40]
 	std::optional<bool> remember_login_checked;
 	// A LOGIN control was pressed (g_LoginButtonPressed: set by the press, cleared when the home
 	// page shows). A process global, not the scene's: the menu's re-creation keeps it.

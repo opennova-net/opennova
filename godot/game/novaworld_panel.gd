@@ -53,6 +53,7 @@ var _target_option: OptionButton
 var _username_edit: LineEdit
 var _password_edit: LineEdit
 var _login_button: Button
+var _remember_login_check: CheckBox
 var _filter_edit: LineEdit
 var _type_filter: OptionButton
 var _hide_full_check: CheckBox
@@ -136,6 +137,8 @@ func _bind_scene_ui() -> void:
 	_username_edit = get_node(pages + "LoginView/LoginCard/LoginMargin/LoginForm/UsernameEdit")
 	_password_edit = get_node(pages + "LoginView/LoginCard/LoginMargin/LoginForm/PasswordEdit")
 	_login_button = get_node(pages + "LoginView/LoginCard/LoginMargin/LoginForm/LoginButton")
+	_remember_login_check = get_node(
+			pages + "LoginView/LoginCard/LoginMargin/LoginForm/RememberLoginCheck")
 	_filter_edit = get_node(pages + "LobbyView/Toolbar/SearchEdit")
 	_type_filter = get_node(pages + "LobbyView/Toolbar/TypeFilter")
 	_refresh_button = get_node(pages + "LobbyView/Toolbar/RefreshButton")
@@ -162,6 +165,10 @@ func _bind_scene_ui() -> void:
 	_target_option.item_selected.connect(_on_target_selected)
 	_close_button.pressed.connect(_on_close_pressed)
 	_login_button.pressed.connect(_on_login_pressed)
+	# The sign-in page's REMEMBER_LOGIN checkbox (JO's and DFX2's templates' "Remember my login
+	# information."): a click flips it and stores its state (_on_remember_login_toggled); it takes
+	# no keyboard, as the page's checkbox takes only clicks.
+	_remember_login_check.toggled.connect(_on_remember_login_toggled)
 	# Enter in a sign-in field lets the keyboard go, then runs the page's VK_RETURN hotkey (each
 	# page's submit carries one: JO's ACCEPT, DFX2's LOGIN), which presses the submit when it is
 	# shown and enabled; with no field holding the keyboard, Enter runs the same hotkey
@@ -1046,17 +1053,27 @@ func _on_web_lobby_opened(signed_in: bool, nwhandle: String) -> void:
 
 # The sign-in page's remembered login (engine: LobbyHttpFlow::remembered_login_name): the name
 # fills the account box, and while the fill stands the password box shows the masked placeholder
-# until a field is clicked (after a LOGIN press, until the home page shows, the name alone); then
-# the submit gate.
+# until a field is clicked (after a LOGIN press, until the home page shows, the name alone); the
+# REMEMBER_LOGIN checkbox shows the state the page's activation set from game.cfg's
+# rememberlogin; then the submit gate.
 func _apply_remembered_login() -> void:
 	if _client == null or _username_edit == null or _password_edit == null:
 		return
+	_remember_login_check.set_pressed_no_signal(_client.is_remember_login_checked())
 	var remembered := _client.get_remembered_login_name()
 	if not remembered.is_empty():
 		_username_edit.text = remembered
 	if _client.has_remembered_login():
 		_password_edit.placeholder_text = "********"
 	_refresh_sign_in_gate()
+
+
+# The REMEMBER_LOGIN checkbox clicked, `checked` its state after the click: the browser state's
+# property and game.cfg's rememberlogin take it (engine: LobbyHttpFlow::store_remember_login); the
+# shell's game.cfg save points write it, and the next sign-in page's fill reads it.
+func _on_remember_login_toggled(checked: bool) -> void:
+	if _client != null:
+		_client.store_remember_login(checked)
 
 
 # A sign-in field clicked: the remembered login's fill clears, then the submit gate (engine:

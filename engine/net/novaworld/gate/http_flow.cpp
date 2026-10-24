@@ -922,6 +922,16 @@ void LobbyHttpFlow::fill_remembered_login() {
 	remember_fill_ = cookie;
 }
 
+// See http_flow.h. The click's state is the checkbox's own word, 1 or 0 after any click (the
+// flip clears an UNDEF 2), so the property is "CHECKED" or "UNCHECKED" and the cfg word 1 or 0.
+// [orig: CCheckboxWnd_HandleNamedEvent @0x64AB80 - CUIScene_SetNamedValue called @0x64AC18;
+//  UI_StoreRememberLoginCheckbox @0x5574F0 - the store @0x55750D]
+int32_t LobbyHttpFlow::store_remember_login(bool checked) {
+	browser_->remember_login_checked = checked;
+	ctx_.remember_login = checked;
+	return checked ? 1 : 0;
+}
+
 // See http_flow.h.
 void LobbyHttpFlow::show_home_page() {
 	save_jar_file();

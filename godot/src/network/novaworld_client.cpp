@@ -148,6 +148,10 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("reshow_sign_in"), &NovaWorldClient::reshow_sign_in);
 	ClassDB::bind_method(D_METHOD("is_sign_in_submit_enabled", "name", "password"),
 			&NovaWorldClient::is_sign_in_submit_enabled);
+	ClassDB::bind_method(D_METHOD("is_remember_login_checked"),
+			&NovaWorldClient::is_remember_login_checked);
+	ClassDB::bind_method(D_METHOD("store_remember_login", "checked"),
+			&NovaWorldClient::store_remember_login);
 	ClassDB::bind_method(D_METHOD("join", "rid"), &NovaWorldClient::join);
 	ClassDB::bind_method(D_METHOD("start_hosting", "options"), &NovaWorldClient::start_hosting);
 	ClassDB::bind_method(D_METHOD("is_hosting"), &NovaWorldClient::is_hosting);
@@ -1266,6 +1270,19 @@ void NovaWorldClient::reshow_sign_in() {
 // The sign-in page's submit gate (engine: LobbyHttpFlow::sign_in_submit_enabled).
 bool NovaWorldClient::is_sign_in_submit_enabled(const String &name, const String &password) const {
 	return flow_.sign_in_submit_enabled(opennova::to_std(name), opennova::to_std(password));
+}
+
+// The REMEMBER_LOGIN checkbox's state: the browser state's property (engine:
+// MenuBrowserState::remember_login_checked).
+bool NovaWorldClient::is_remember_login_checked() const {
+	return flow_.browser().remember_login_checked.value_or(false);
+}
+
+// A REMEMBER_LOGIN click: the property and the cfg block's rememberlogin take the state (engine:
+// LobbyHttpFlow::store_remember_login); the click saves nothing.
+void NovaWorldClient::store_remember_login(bool p_checked) {
+	const int32_t word = flow_.store_remember_login(p_checked);
+	if (game_config_.is_valid()) game_config_->native().cfg().rememberlogin = word;
 }
 
 // The sign-in page's unclicked Login: the remembered fill's post (engine:

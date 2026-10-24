@@ -13,6 +13,7 @@
 #include <net/novaworld/http_flow.h>
 #include <net/novaworld/http_login.h>
 #include <net/novacrypto/epask.h>
+#include <net/novacrypto/pubcrypto.h>
 #include <net/novacrypto/url_cipher.h>
 #include <net/title/title_identity.h>
 
@@ -368,6 +369,64 @@ int test_flow_save_sites() {
 	return 0;
 }
 
+// The sign-in page's REMEMBER_LOGIN checkbox clicked (D-NET-NEW-L9-62): its state after the click
+// is the scene's property, which the next save reads (unchecked: the leading word 0 and no
+// PERSISTENTEXPRESSLOGINDATA), and game.cfg's rememberlogin, the word returned, which the next
+// activation's fill reads and sets the checkbox from.
+// [orig: CCheckboxWnd_HandleNamedEvent @0x64AB80 - the flip @0x64ABE2..0x64ABF2, the property's
+//  write called @0x64AC18; UI_StoreRememberLoginCheckbox @0x5574F0 - the store @0x55750D;
+//  CUIScene_SaveCookieJarFile @0x63BA60 - the flag 0 only for "UNCHECKED" (_stricmp @0x63BA75);
+//  UI_LoadPersistentLoginCredentials @0x557330 - the rememberLogin_4D4 test @0x557344, the checkbox
+//  set (CCheckWnd_SetCheckedState called @0x55744A)]
+int test_remember_login_click() {
+	test_temp::TempDir dir("cookie_jar_remember");
+	const std::string path = dir.file("nw_cdata.coo");
+	const std::string key = opennova::cookie_jar_key(chosen_volume());
+	opennova::MenuBrowserState state;
+	state.create(path, key);
+	std::vector<uint8_t> plain = {'A', 'C', 'C', 'T', 0, 'x', 0};
+	const std::string remembered = opennova::encode_key_chain(plain, opennova::kRememberedLoginKeyChain);
+	state.jar.update({entry("PERSISTENTREMEMBERLOGINDATA", remembered, std::string("/")),
+			entry("PERSISTENTEXPRESSLOGINDATA", "E", std::string("/"))});
+	opennova::LobbyHttpContext ctx;
+	ctx.remember_login = true;
+	opennova::LobbyHttpFlow flow;
+	flow.share_browser(state);
+	flow.set_context(ctx);
+
+	// The activation with rememberlogin set: checked, the remembered login filled.
+	flow.reshow_sign_in();
+	TEST_EXPECT(state.remember_login_checked && *state.remember_login_checked);
+	TEST_EXPECT(flow.has_remembered_login() && flow.remembered_login_name() == "ACCT");
+
+	// A click clears it: rememberlogin 0; the save drops the express cookie under the word 0.
+	TEST_EXPECT(flow.store_remember_login(false) == 0);
+	TEST_EXPECT(state.remember_login_checked && !*state.remember_login_checked);
+	TEST_EXPECT(!flow.context().remember_login);
+	std::string error;
+	TEST_EXPECT(state.save(error));
+	std::vector<uint8_t> bytes;
+	TEST_EXPECT(opennova::io::read_file_bytes(path, bytes, error));
+	TEST_EXPECT(bytes == opennova::write_cookie_jar(state.jar, true, key) && bytes[0] == 0);
+	CookieJar file = saved_at(path, key);
+	TEST_EXPECT(file.entries().size() == 1 && file.find("PERSISTENTEXPRESSLOGINDATA") == nullptr);
+	// The next activation reads it: unchecked, no fill.
+	flow.reshow_sign_in();
+	TEST_EXPECT(state.remember_login_checked && !*state.remember_login_checked);
+	TEST_EXPECT(!flow.has_remembered_login() && flow.remembered_login_name().empty());
+
+	// A click checks it again: rememberlogin 1, the express cookie saved under the word 1.
+	TEST_EXPECT(flow.store_remember_login(true) == 1);
+	TEST_EXPECT(state.remember_login_checked && *state.remember_login_checked);
+	TEST_EXPECT(state.save(error));
+	TEST_EXPECT(opennova::io::read_file_bytes(path, bytes, error) && bytes[0] == 1);
+	file = saved_at(path, key);
+	TEST_EXPECT(file.entries().size() == 2 && *file.find("PERSISTENTEXPRESSLOGINDATA") == "E");
+	flow.reshow_sign_in();
+	TEST_EXPECT(flow.has_remembered_login() && flow.remembered_login_name() == "ACCT");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -380,6 +439,7 @@ int main() {
 	if (test_reader() != 0) return 1;
 	if (test_menu_browser_state() != 0) return 1;
 	if (test_flow_save_sites() != 0) return 1;
+	if (test_remember_login_click() != 0) return 1;
 	std::printf("cookie_jar: all checks passed\n");
 	return 0;
 }

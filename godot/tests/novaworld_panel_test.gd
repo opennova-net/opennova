@@ -395,6 +395,56 @@ func test_enter_on_sign_in_runs_the_submit_hotkey() -> void:
 	assert_eq(closed.status_text(), status)
 
 
+# The sign-in page's REMEMBER_LOGIN checkbox ("Remember my login information.", the GLOBAL_VAR
+# checkbox of JO's and DFX2's sign-in templates): the page's activation shows the state it sets
+# from game.cfg's rememberlogin; a click flips it and stores the new state as the browser state's
+# property (which the next nw_cdata.coo save reads) and as rememberlogin, writing no file (the
+# shell's game.cfg save points write the word). The checkbox takes clicks only. (engine:
+# LobbyHttpFlow::store_remember_login, fill_remembered_login.)
+func test_remember_login_checkbox_stores_rememberlogin() -> void:
+	var run_dir := OS.get_cache_dir().path_join("opennova_nw_panel_rl_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(run_dir), OK)
+	_root_dirs.append(run_dir)
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", run_dir]))
+	GameCfgStore.reset()
+	var block := GameCfgStore.block()
+	block.set_word("rememberlogin", 0)
+	var panel := _make_panel(PackedStringArray())
+	var client := panel.client_for_test()
+	client.emit_signal("connected")
+	var form := "Center/Shell/Margin/RootVBox/Pages/LoginView/LoginCard/LoginMargin/LoginForm/"
+	var check := panel.get_node(form + "RememberLoginCheck") as CheckBox
+	assert_eq(check.text, "Remember my login information.")
+	assert_eq(check.focus_mode, Control.FOCUS_NONE, "the checkbox takes no keyboard")
+
+	# The sign-in page's activation with rememberlogin 0: unchecked.
+	check.set_pressed_no_signal(true)
+	client.reshow_sign_in()
+	client.emit_signal("web_lobby_opened", false, "")
+	assert_false(check.button_pressed, "the activation shows rememberlogin 0")
+	assert_false(client.is_remember_login_checked())
+
+	# A click checks it: the property and rememberlogin take it; no file is written.
+	check.button_pressed = true
+	assert_true(client.is_remember_login_checked(), "the click sets the property")
+	assert_eq(block.get_word("rememberlogin"), 1, "and stores rememberlogin")
+	assert_false(FileAccess.file_exists(run_dir.path_join(GameCfgStore.FILE_NAME)),
+		"the click saves nothing")
+	# The next click clears both.
+	check.button_pressed = false
+	assert_false(client.is_remember_login_checked())
+	assert_eq(block.get_word("rememberlogin"), 0)
+
+	# The next activation shows rememberlogin as it stands (1 here).
+	block.set_word("rememberlogin", 1)
+	client.reshow_sign_in()
+	client.emit_signal("web_lobby_opened", false, "")
+	assert_true(check.button_pressed, "the activation shows rememberlogin 1")
+	assert_true(client.is_remember_login_checked())
+	assert_eq(block.get_word("rememberlogin"), 1, "the activation stores nothing")
+	GameCfgStore.reset()
+
+
 # A live Join goes with the session that armed it.
 func test_error_in_the_lobby_disarms_join() -> void:
 	var panel := _make_panel(PackedStringArray())

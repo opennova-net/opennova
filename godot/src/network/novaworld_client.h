@@ -262,6 +262,12 @@ public:
 	void login_remembered();
 	void reshow_sign_in();
 	bool is_sign_in_submit_enabled(const String &name, const String &password) const;
+	// The sign-in page's REMEMBER_LOGIN checkbox (engine: LobbyHttpFlow::store_remember_login): its
+	// state as the page's activation or a click left it (false before either), and a click's store,
+	// `checked` the state after the click, into the browser state's property and the cfg block's
+	// rememberlogin, which the shell's game.cfg save points write.
+	bool is_remember_login_checked() const;
+	void store_remember_login(bool checked);
 
 	// Join a hosted game (ADR 0010 Phase 5). Runs the NWJoin.dll HTTP handshake for
 	// the GSB row's `rid`, resolves the in-match host address, sends the

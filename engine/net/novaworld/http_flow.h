@@ -259,6 +259,7 @@ public:
 	// The flow works on `state` from now on (the game's: process_menu_browser()).
 	void share_browser(MenuBrowserState &state) { browser_ = &state; }
 	MenuBrowserState &browser() { return *browser_; }
+	const MenuBrowserState &browser() const { return *browser_; }
 
 	// The derived base "http://host[:port]" for the lobby HTTP endpoint (empty until the gate replies).
 	// (see godot/src/network/novaworld_client.cpp http_base())
@@ -348,6 +349,24 @@ public:
 	//  UI_LoadPersistentLoginCredentials on ENABLE_BACK_BUTTON for every event class (mask -1),
 	//  registered @0x559855]
 	void reshow_sign_in() { fill_remembered_login(); }
+	// The sign-in page's REMEMBER_LOGIN checkbox ("Remember my login information.", the same
+	// GLOBAL_VAR checkbox in JO's and DFX2's sign-in templates) clicked, `checked` its state after
+	// the click: the click flips the state (checked to unchecked, any other to checked) and, the
+	// checkbox being GLOBAL_VAR, writes the scene's property of its name, which the next jar save
+	// reads; then the click's callback stores the state as game.cfg's rememberlogin, which the next
+	// activation's fill reads and sets the checkbox from. Returns that word (1 or 0) for the
+	// owner's cfg block, which retail's game.cfg save points write (the click saves nothing); the
+	// flow's context takes it too.
+	// [orig: CWnd_EmitEventToNamedHandlerAndCallbacks @0x646970 - the window's own handler called
+	//  @0x64698E, then each callback whose mask holds 1 << (type >> 24) (@0x6469B8: 8 for the click
+	//  0x3000001) called @0x6469D1; CCheckboxWnd_HandleNamedEvent @0x64AB80 - the click's state
+	//  incremented @0x64ABE2, past 1 cleared @0x64ABF2, the property written under GLOBAL_VAR
+	//  (+0xF8 tested @0x64ABF8, CUIScene_SetNamedValue called @0x64AC18);
+	//  UI_RegisterNWMultiplayerCallbacks @0x559800 - UI_StoreRememberLoginCheckbox on
+	//  REMEMBER_LOGIN, mask 8 (pushed @0x559934, CUIScene_RegisterControlCallback called
+	//  @0x559945); UI_StoreRememberLoginCheckbox @0x5574F0 - the
+	//  state read (CCheckWnd_GetCheckedState called @0x557508) into rememberLogin_4D4 @0x55750D]
+	int32_t store_remember_login(bool checked);
 	// The sign-in page's submit gate. A page whose submit is the LOGIN control (TitlePages::
 	// sign_in_submit, DFX2's) has it enabled only with a NAME and a PASSWORD, or with a NAME and
 	// the remembered fill's placeholder shown; the validation runs at the fill, at the clear and at
