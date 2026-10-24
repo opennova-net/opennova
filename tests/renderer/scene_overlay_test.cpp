@@ -34,14 +34,21 @@ void test_the_main_scene_order_and_the_mirror_subset() {
 	CHECK(kSceneOverlayOrder[3] == SceneOverlaySlot::WaterGlint);
 	CHECK(kSceneOverlayOrder[4] == SceneOverlaySlot::UnderwaterMurk);
 	CHECK(kSceneOverlayOrder[5] == SceneOverlaySlot::SunGlare);
-	// The mirror draws the coronas (@ 0x5c85fd), then Render_MainScene's dim
+	// The mirror draws its tracer ribbons (@ 0x5c85f6) after its two particle
+	// passes, then the coronas (@ 0x5c85fd), then Render_MainScene's dim
 	// (@ 0x5c186c) and the far-band sun/moon and glow redraw (@ 0x5c18fb,
-	// @ 0x5c1904).
-	CHECK(kMirrorOverlayOrder.size() == 4);
-	CHECK(kMirrorOverlayOrder[0] == SceneOverlaySlot::LightCoronas);
-	CHECK(kMirrorOverlayOrder[1] == SceneOverlaySlot::MirrorDim);
-	CHECK(kMirrorOverlayOrder[2] == SceneOverlaySlot::MirrorCelestialBodies);
-	CHECK(kMirrorOverlayOrder[3] == SceneOverlaySlot::MirrorSunGlow);
+	// @ 0x5c1904). The Inset's mirror runs the same subscene with its own
+	// ribbons.
+	CHECK(kMirrorOverlayOrder.size() == 5);
+	CHECK(kMirrorOverlayOrder[0] == SceneOverlaySlot::MirrorTracerRibbons);
+	CHECK(kMirrorOverlayOrder[1] == SceneOverlaySlot::LightCoronas);
+	CHECK(kMirrorOverlayOrder[2] == SceneOverlaySlot::MirrorDim);
+	CHECK(kMirrorOverlayOrder[3] == SceneOverlaySlot::MirrorCelestialBodies);
+	CHECK(kMirrorOverlayOrder[4] == SceneOverlaySlot::MirrorSunGlow);
+	CHECK(kInsetMirrorOverlayOrder.size() == 5);
+	CHECK(kInsetMirrorOverlayOrder[0] == SceneOverlaySlot::InsetMirrorTracerRibbons);
+	for (std::size_t i = 1; i < kMirrorOverlayOrder.size(); ++i)
+		CHECK(kInsetMirrorOverlayOrder[i] == kMirrorOverlayOrder[i]);
 
 	// Submitted out of order, compiled in the witnessed order; within a slot
 	// the submission order holds.
@@ -359,6 +366,196 @@ void test_the_nvg_laser_beam_overlay() {
 	CHECK(list.empty());
 }
 
+// A stdred channel (the stock material, fogged to black) and a rocket channel
+// (the smoke material, fogged to the pass colour), built against one view.
+TracerRibbonFrame stock_and_smoke_ribbons() {
+	static const float stock_points[16] = {
+		0.0f, 1.0f, 0.0f, 1.0f,
+		2.0f, 1.0f, 0.0f, 1.0f,
+		4.0f, 1.0f, 0.0f, 1.0f,
+		6.0f, 1.0f, 0.0f, 1.0f,
+	};
+	static const float smoke_points[12] = {
+		0.0f, 2.0f, 0.0f, 1.0f,
+		2.0f, 2.0f, 0.0f, 1.02f,
+		4.0f, 2.0f, 0.0f, 0.98f,
+	};
+	TracerChannelInput channels[2];
+	channels[0].style_id = 1;
+	channels[0].age = 1;
+	channels[0].count = 4;
+	channels[0].points = stock_points;
+	channels[1].style_id = 3;
+	channels[1].age = 1;
+	channels[1].count = 3;
+	channels[1].points = smoke_points;
+	TracerView view;
+	view.camera = {0.0f, 5.0f, 10.0f};
+	view.forward = {0.0f, 0.0f, -1.0f};
+	view.projection_x_scale = 1.0f;
+	view.tick_ms = 1000;
+	TracerRibbonFrame ribbons;
+	compile_tracer_ribbons(channels, 2, view, TracerPass::Main, ribbons);
+	return ribbons;
+}
+
+// The reflected subscene draws its particle pair, the tracer pool's main pass,
+// then its coronas [orig: Water_RenderReflectedWorldScene @ 0x5c85db, @ 0x5c85e5,
+// @ 0x5c85f6, @ 0x5c85fd]: each mirror's ribbons lead its own overlay pass (the
+// pair precede the pass), one batch per channel in pool order, ahead of the
+// coronas, and no other view draws them.
+void test_a_mirror_draws_its_ribbons_ahead_of_its_coronas() {
+	const TracerRibbonFrame ribbons = stock_and_smoke_ribbons();
+	CHECK(ribbons.draws.size() == 2);
+	SceneOverlayFrame frame;
+	std::vector<LightCoronaQuad> quads(1);
+	quads[0].half_size = 0.5f;
+	append_corona_overlay(quads, 3, frame);
+	const SceneOverlayFog fog;
+	append_tracer_ribbon_overlay(ribbons, 5, fog, frame, SceneOverlaySlot::InsetMirrorTracerRibbons);
+	append_tracer_ribbon_overlay(ribbons, 5, fog, frame, SceneOverlaySlot::MirrorTracerRibbons);
+	append_mirror_dim_overlay(64.0f / 255.0f, frame);
+	std::vector<SceneOverlayBatch> list;
+	compile_scene_overlay(frame, kMirrorOverlayOrder.data(), kMirrorOverlayOrder.size(), list);
+	CHECK(list.size() == 4);
+	if (list.size() == 4) {
+		CHECK(list[0].slot == SceneOverlaySlot::MirrorTracerRibbons);
+		CHECK(list[0].shading == SceneOverlayShading::RibbonStock);
+		CHECK(list[1].slot == SceneOverlaySlot::MirrorTracerRibbons);
+		CHECK(list[1].shading == SceneOverlayShading::RibbonSmoke);
+		CHECK(list[2].slot == SceneOverlaySlot::LightCoronas);
+		CHECK(list[3].slot == SceneOverlaySlot::MirrorDim);
+	}
+	compile_scene_overlay(frame, kInsetMirrorOverlayOrder.data(), kInsetMirrorOverlayOrder.size(),
+			list);
+	CHECK(list.size() == 4);
+	if (list.size() == 4) {
+		CHECK(list[0].slot == SceneOverlaySlot::InsetMirrorTracerRibbons);
+		CHECK(list[1].slot == SceneOverlaySlot::InsetMirrorTracerRibbons);
+		CHECK(list[2].slot == SceneOverlaySlot::LightCoronas);
+	}
+	// The scene views keep their own ribbons (a mesh on their own bits).
+	compile_scene_overlay(frame, kSceneOverlayOrder.data(), kSceneOverlayOrder.size(), list);
+	CHECK(list.size() == 1 && list[0].slot == SceneOverlaySlot::LightCoronas);
+	compile_scene_overlay(frame, kInsetOverlayOrder.data(), kInsetOverlayOrder.size(), list);
+	CHECK(list.empty());
+}
+
+// The ribbon combines: the stock slot 6 (mode word 0x222: colour = alpha =
+// DIFFUSE, untextured, ONE / ONE) [orig: CEffectChannel_Init @ 0x5db130 - the
+// CD3DDevice_GetRenderStateByIndex(6) call @ 0x5db1d6; CGfxDevice_CreateDefaultRenderStates
+// @ 0x6780a0 - the GfxShader_CreateForTexture(0x222) call @ 0x67810e] and pool+0x3004
+// (smoktest.pcx on both stages, SRCALPHA / INVSRCALPHA: the words 5 / 6 @ 0x5dc999 /
+// @ 0x5dc9a1) [orig: CEffectEmitterPool_CreateShaders @ 0x5dc8f0 - the
+// GfxShader_Create2TexDesc call @ 0x5dc9a9], depth-tested without writes (pass flags
+// 0x10520000, the GfxShader_ApplyPassChecked call @ 0x5dc877), the diffuse unfogged and
+// the fog per vertex: the linear modes' vertex range fog, table EXP fog's signed
+// exponent [orig: CD3DDevice_SetFogParameters @ 0x677960 - @ 0x677a50..0x677aa7,
+// @ 0x6779be, @ 0x6779e4..0x677a10], toward black for a style whose +0 word fogs to
+// black, else the pass colour [orig: CEffectChannel_RenderRibbon @ 0x5db8a0 -
+// @ 0x5dc84f..0x5dc860].
+void test_the_ribbon_combines_and_their_fog() {
+	const TracerRibbonFrame ribbons = stock_and_smoke_ribbons();
+	CHECK(ribbons.draws.size() == 2);
+	if (ribbons.draws.size() != 2) {
+		return;
+	}
+	CHECK(ribbons.draws[0].shader == TracerShader::Stock && ribbons.draws[0].fog_black);
+	CHECK(ribbons.draws[1].shader == TracerShader::Smoke && !ribbons.draws[1].fog_black);
+	SceneOverlayFog fog;
+	fog.eye[0] = 0.0f;
+	fog.eye[1] = 5.0f;
+	fog.eye[2] = 10.0f;
+	fog.forward[0] = 0.0f;
+	fog.forward[1] = 0.0f;
+	fog.forward[2] = -1.0f;
+	fog.start = 2.0f;
+	fog.end = 40.0f;
+	fog.type = 1;
+	fog.enabled = true;
+	fog.color[0] = 0.25f;
+	fog.color[1] = 0.5f;
+	fog.color[2] = 0.75f;
+	SceneOverlayFrame frame;
+	append_tracer_ribbon_overlay(ribbons, 7, fog, frame, SceneOverlaySlot::MirrorTracerRibbons);
+	CHECK(frame.batches.size() == 2);
+	if (frame.batches.size() != 2) {
+		return;
+	}
+	const SceneOverlayBatch &stock = frame.batches[0];
+	CHECK(stock.shading == SceneOverlayShading::RibbonStock);
+	CHECK(stock.texture == kSceneOverlayNoTexture);
+	CHECK(stock.depth == SceneOverlayDepth::TestNoWrite);
+	CHECK(stock.geometry == SceneOverlayGeometry::World);
+	CHECK(stock.fog_term == SceneOverlayFogTerm::Factor);
+	CHECK(stock.fog_color[0] == 0.0f && stock.fog_color[1] == 0.0f && stock.fog_color[2] == 0.0f);
+	CHECK(stock.vertex_count == ribbons.draws[0].index_count);
+	const SceneOverlayBatch &smoke = frame.batches[1];
+	CHECK(smoke.shading == SceneOverlayShading::RibbonSmoke);
+	CHECK(smoke.texture == 7);
+	CHECK(smoke.stage == TextureStage::TracerSmoke);
+	CHECK(smoke.depth == SceneOverlayDepth::TestNoWrite);
+	CHECK(smoke.fog_color[0] == 0.25f && smoke.fog_color[1] == 0.5f &&
+			smoke.fog_color[2] == 0.75f);
+	CHECK(smoke.vertex_count == ribbons.draws[1].index_count);
+	for (const SceneOverlayBatch *batch : {&stock, &smoke}) {
+		const TracerDraw &draw = ribbons.draws[batch == &stock ? 0 : 1];
+		for (uint32_t k = 0; k < batch->vertex_count; ++k) {
+			const TracerVertex &src = ribbons.vertices[ribbons.indices[draw.first_index + k]];
+			const SceneOverlayVertex &v = frame.vertices[batch->first_vertex + k];
+			CHECK(v.position[0] == src.x && v.position[1] == src.y && v.position[2] == src.z);
+			CHECK(v.uv[0] == src.u0 && v.uv[1] == src.v0);
+			CHECK(v.corner[0] == src.u1 && v.corner[1] == src.v1);
+			// The diffuse stays unfogged; the factor is the vertex's own.
+			CHECK(v.color[0] == static_cast<float>((src.argb >> 16) & 0xFFu) / 255.0f);
+			CHECK(v.color[3] == static_cast<float>(src.argb >> 24) / 255.0f);
+			const float dx = src.x, dy = src.y - 5.0f, dz = src.z - 10.0f;
+			const float radial = std::sqrt(dx * dx + dy * dy + dz * dz);
+			CHECK(std::abs(v.fog - (40.0f - radial) / 38.0f) < 1.0e-5f);
+		}
+	}
+
+	// Exponential fog: table fog's term, the signed eye depth x ln(64) / end.
+	fog.type = 0;
+	SceneOverlayFrame exp_frame;
+	append_tracer_ribbon_overlay(ribbons, 7, fog, exp_frame, SceneOverlaySlot::MirrorTracerRibbons);
+	CHECK(exp_frame.batches.size() == 2);
+	if (exp_frame.batches.size() == 2) {
+		CHECK(exp_frame.batches[0].fog_term == SceneOverlayFogTerm::Exponent);
+		const TracerVertex &src = ribbons.vertices[ribbons.indices[ribbons.draws[0].first_index]];
+		const float depth = 10.0f - src.z;
+		CHECK(std::abs(exp_frame.vertices[0].fog - depth * (4.1588830833596715f / 40.0f)) <
+				1.0e-5f);
+	}
+	// No fog: every vertex unfogged.
+	fog.enabled = false;
+	SceneOverlayFrame clear_frame;
+	append_tracer_ribbon_overlay(ribbons, 7, fog, clear_frame,
+			SceneOverlaySlot::MirrorTracerRibbons);
+	CHECK(!clear_frame.batches.empty() &&
+			clear_frame.batches[0].fog_term == SceneOverlayFogTerm::Factor);
+	for (const SceneOverlayVertex &v : clear_frame.vertices)
+		CHECK(v.fog == 1.0f);
+}
+
+// The SRCBLEND / DESTBLEND words each combine draws with.
+void test_the_combines_blend_words() {
+	const auto words = [](SceneOverlayShading shading, int source, int dest) {
+		const SceneOverlayBlend blend = scene_overlay_blend(shading);
+		return static_cast<int>(blend.source) == source && static_cast<int>(blend.dest) == dest;
+	};
+	// D3DBLEND: ZERO 1, ONE 2, SRCALPHA 5, INVSRCALPHA 6, DESTCOLOR 9.
+	CHECK(words(SceneOverlayShading::RibbonStock, 2, 2));    // slot 6, 0x222
+	CHECK(words(SceneOverlayShading::RibbonSmoke, 5, 6));    // pool+0x3004
+	CHECK(words(SceneOverlayShading::RibbonNvgLaser, 5, 2)); // pool+0x3008
+	CHECK(words(SceneOverlayShading::NvgLaser, 5, 2));
+	CHECK(words(SceneOverlayShading::Modulate2xBlend, 5, 6)); // the drops' 0x651
+	CHECK(words(SceneOverlayShading::AdditiveModulate, 2, 2)); // the coronas
+	CHECK(words(SceneOverlayShading::SelfLumAdditive, 2, 2));
+	CHECK(words(SceneOverlayShading::FlatBlend, 5, 6));   // the murk
+	CHECK(words(SceneOverlayShading::DimMultiply, 9, 1)); // the mirror dim
+}
+
 } // namespace
 
 int main() {
@@ -368,6 +565,9 @@ int main() {
 	test_the_murk_gate_includes_the_waterline();
 	test_the_builders_carry_the_pass_states();
 	test_the_nvg_laser_beam_overlay();
+	test_a_mirror_draws_its_ribbons_ahead_of_its_coronas();
+	test_the_ribbon_combines_and_their_fog();
+	test_the_combines_blend_words();
 	if (failures != 0) {
 		std::printf("renderer_scene_overlay: %d failure(s)\n", failures);
 		return 1;

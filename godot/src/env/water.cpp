@@ -779,7 +779,7 @@ void Water::_build_mirror_rig(MirrorRig &r_rig, const String &p_viewport_name,
 		r_rig.camera->make_current();
 		// The witnessed post-scene dim and the sun/moon/glow redraw after it
 		// close the mirror target in its overlay pass, after the mirror's
-		// particles and coronas (runtime/renderer/scene_overlay.h
+		// particles, tracer ribbons and coronas (runtime/renderer/scene_overlay.h
 		// kMirrorOverlayOrder; GameWorld's scene_overlay leg). The second
 		// fullscreen quad retail draws after the far band
 		// (g_WaterShaderAdditiveFlat, ONE/ONE of 0xFF000000, Render_MainScene

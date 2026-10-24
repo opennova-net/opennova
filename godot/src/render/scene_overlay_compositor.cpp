@@ -51,16 +51,18 @@ using namespace godot;
 namespace {
 
 using opennova::renderer::SceneOverlayBatch;
+using opennova::renderer::SceneOverlayBlendFactor;
 using opennova::renderer::SceneOverlayDepth;
+using opennova::renderer::SceneOverlayFogTerm;
 using opennova::renderer::SceneOverlayGeometry;
 using opennova::renderer::SceneOverlayShading;
 using opennova::renderer::SceneOverlayVertex;
 
 constexpr std::uint32_t kVertexStride =
 		static_cast<std::uint32_t>(sizeof(SceneOverlayVertex));
-static_assert(sizeof(SceneOverlayVertex) == 44,
+static_assert(sizeof(SceneOverlayVertex) == 48,
 		"the RD vertex format below is the engine vertex, verbatim");
-constexpr std::uint32_t kPushConstantBytes = 112;
+constexpr std::uint32_t kPushConstantBytes = 128;
 constexpr std::uint32_t kMinimumVertexCapacity = 4096 * kVertexStride;
 
 // The far depth band's two constants (runtime/renderer/q3_frame.h
@@ -70,16 +72,19 @@ layout(location = 0) in vec3 a_position;
 layout(location = 1) in vec2 a_uv;
 layout(location = 2) in vec4 a_color;
 layout(location = 3) in vec2 a_corner;
+layout(location = 4) in float a_fog;
 
 layout(location = 0) out vec2 v_uv;
 layout(location = 1) out vec4 v_color;
 layout(location = 2) out vec2 v_uv1;
+layout(location = 3) out float v_fog;
 
 layout(push_constant, std430) uniform OverlayPush {
 	mat4 view_projection;
 	vec4 view_right;
 	vec4 view_up;
 	uvec4 mode; // x = shading, y = geometry, z = the far depth band, w = the sampling
+	vec4 fog;   // a ribbon's fog colour, w = 1 when its term is table fog's exponent
 } pc;
 
 void main() {
@@ -87,6 +92,7 @@ void main() {
 	v_color = a_color;
 	// World geometry carries its second texture coordinate set in the corner.
 	v_uv1 = a_corner;
+	v_fog = a_fog;
 	if (pc.mode.y == 2u) {
 		// A viewport quad: the positions are normalized device xy already.
 		gl_Position = vec4(a_position.xy, 0.0, 1.0);
@@ -126,6 +132,7 @@ const char *kFragmentShaderTemplate = R"GLSL(#version 450
 layout(location = 0) in vec2 v_uv;
 layout(location = 1) in vec4 v_color;
 layout(location = 2) in vec2 v_uv1;
+layout(location = 3) in float v_fog;
 
 layout(set = 0, binding = 0) uniform sampler2D overlay_texture;
 
@@ -134,6 +141,7 @@ layout(push_constant, std430) uniform OverlayPush {
 	vec4 view_right;
 	vec4 view_up;
 	uvec4 mode;
+	vec4 fog;
 } pc;
 
 layout(location = 0) out vec4 frag_color;
@@ -167,6 +175,24 @@ void main() {
 		// SRCALPHA / ONE blends it.
 		float t1 = rd_sample_effect_stage(overlay_texture, v_uv1, max_lod, filter_code).a;
 		frag_color = vec4(v_color.rgb, v_color.a * (1.0 - texel.a) * (1.0 - t1));
+	} else if (shading >= 6u && shading <= 8u) {
+		// The tracer pool's ribbons, fogged as the device fogs them: the
+		// interpolated vertex factor, or table fog's exponent at this pixel;
+		// the colour toward the batch's fog colour, the alpha never.
+		float visibility = pc.fog.w > 0.5 ? exp(-max(v_fog, 0.0)) : clamp(v_fog, 0.0, 1.0);
+		vec3 rgb = mix(pc.fog.rgb, v_color.rgb, visibility);
+		if (shading == 6u) {
+			// The stock slot 6: colour = alpha = DIFFUSE, untextured; ONE / ONE.
+			frag_color = vec4(rgb, v_color.a);
+		} else {
+			float t1 = rd_sample_effect_stage(overlay_texture, v_uv1, max_lod, filter_code).a;
+			// pool+0x3004: alpha = sat(sat(DIFFUSE.a - T0.a) - T1.a), SRCALPHA /
+			// INVSRCALPHA; pool+0x3008: the NVG laser's alpha, SRCALPHA / ONE.
+			float alpha = shading == 7u ?
+					clamp(clamp(v_color.a - texel.a, 0.0, 1.0) - t1, 0.0, 1.0) :
+					v_color.a * (1.0 - texel.a) * (1.0 - t1);
+			frag_color = vec4(rgb, alpha);
+		}
 	} else {
 		frag_color = v_color;
 	}
@@ -190,9 +216,28 @@ std::uint32_t sampling_word(const SceneOverlayBatch &p_batch, const SceneOverlay
 	return filter_code | (last_level << 8);
 }
 
-bool additive(SceneOverlayShading p_shading) {
-	return p_shading == SceneOverlayShading::AdditiveModulate ||
-			p_shading == SceneOverlayShading::SelfLumAdditive;
+RenderingDevice::BlendFactor blend_factor(SceneOverlayBlendFactor p_factor) {
+	switch (p_factor) {
+		case SceneOverlayBlendFactor::Zero:
+			return RenderingDevice::BLEND_FACTOR_ZERO;
+		case SceneOverlayBlendFactor::One:
+			return RenderingDevice::BLEND_FACTOR_ONE;
+		case SceneOverlayBlendFactor::SrcAlpha:
+			return RenderingDevice::BLEND_FACTOR_SRC_ALPHA;
+		case SceneOverlayBlendFactor::InvSrcAlpha:
+			return RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		case SceneOverlayBlendFactor::DestColor:
+			return RenderingDevice::BLEND_FACTOR_DST_COLOR;
+	}
+	return RenderingDevice::BLEND_FACTOR_ONE;
+}
+
+// The textured stages that address past 1 (the ribbons' two coordinate sets)
+// take the device default WRAP.
+bool wraps(SceneOverlayShading p_shading) {
+	return p_shading == SceneOverlayShading::NvgLaser ||
+			p_shading == SceneOverlayShading::RibbonSmoke ||
+			p_shading == SceneOverlayShading::RibbonNvgLaser;
 }
 
 } // namespace
@@ -557,6 +602,8 @@ bool SceneOverlayCompositorEffect::Impl::initialize_rd() {
 			static_cast<std::uint32_t>(offsetof(SceneOverlayVertex, color)));
 	attribute(3, RenderingDevice::DATA_FORMAT_R32G32_SFLOAT,
 			static_cast<std::uint32_t>(offsetof(SceneOverlayVertex, corner)));
+	attribute(4, RenderingDevice::DATA_FORMAT_R32_SFLOAT,
+			static_cast<std::uint32_t>(offsetof(SceneOverlayVertex, fog)));
 	vertex_format = rd->vertex_format_create(attributes);
 	if (vertex_format == RenderingDevice::INVALID_FORMAT_ID) {
 		set_status("vertex_format_failed", "RenderingDevice rejected the overlay vertex format");
@@ -660,28 +707,20 @@ RID SceneOverlayCompositorEffect::Impl::pipeline_for(int64_t p_framebuffer_forma
 	Ref<RDPipelineColorBlendStateAttachment> attachment;
 	attachment.instantiate();
 	attachment->set_enable_blend(true);
-	if (p_batch.shading == SceneOverlayShading::DimMultiply) {
-		attachment->set_src_color_blend_factor(RenderingDevice::BLEND_FACTOR_DST_COLOR);
-		attachment->set_dst_color_blend_factor(RenderingDevice::BLEND_FACTOR_ZERO);
-		attachment->set_src_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_ZERO);
-		attachment->set_dst_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
-	} else if (additive(p_batch.shading)) {
-		attachment->set_src_color_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
-		attachment->set_dst_color_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
-		attachment->set_src_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_ZERO);
-		attachment->set_dst_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
-	} else if (p_batch.shading == SceneOverlayShading::NvgLaser) {
-		// SRCALPHA / ONE (retail's 0x3008 descriptor words 1/2).
-		attachment->set_src_color_blend_factor(RenderingDevice::BLEND_FACTOR_SRC_ALPHA);
-		attachment->set_dst_color_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
-		attachment->set_src_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_ZERO);
-		attachment->set_dst_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
-	} else {
-		attachment->set_src_color_blend_factor(RenderingDevice::BLEND_FACTOR_SRC_ALPHA);
-		attachment->set_dst_color_blend_factor(RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
-		attachment->set_src_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_SRC_ALPHA);
-		attachment->set_dst_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
-	}
+	// The combine's witnessed SRCBLEND / DESTBLEND (renderer::scene_overlay_blend)
+	// on the colour; the alpha blends the same way under SRCALPHA / INVSRCALPHA
+	// and keeps the target's otherwise.
+	const opennova::renderer::SceneOverlayBlend blend_words =
+			opennova::renderer::scene_overlay_blend(p_batch.shading);
+	attachment->set_src_color_blend_factor(blend_factor(blend_words.source));
+	attachment->set_dst_color_blend_factor(blend_factor(blend_words.dest));
+	const bool source_over = blend_words.source == SceneOverlayBlendFactor::SrcAlpha &&
+			blend_words.dest == SceneOverlayBlendFactor::InvSrcAlpha;
+	attachment->set_src_alpha_blend_factor(source_over ? RenderingDevice::BLEND_FACTOR_SRC_ALPHA
+													   : RenderingDevice::BLEND_FACTOR_ZERO);
+	attachment->set_dst_alpha_blend_factor(source_over
+					? RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+					: RenderingDevice::BLEND_FACTOR_ONE);
 	attachment->set_color_blend_op(RenderingDevice::BLEND_OP_ADD);
 	attachment->set_alpha_blend_op(RenderingDevice::BLEND_OP_ADD);
 	TypedArray<Ref<RDPipelineColorBlendStateAttachment>> attachments;
@@ -737,6 +776,10 @@ void SceneOverlayCompositorEffect::Impl::draw(const SceneOverlaySubmission &p_su
 		opennova::renderer::compile_scene_overlay(p_submission.frame,
 				opennova::renderer::kMirrorOverlayOrder.data(),
 				opennova::renderer::kMirrorOverlayOrder.size(), draw_list);
+	} else if (kind == VIEW_INSET_MIRROR) {
+		opennova::renderer::compile_scene_overlay(p_submission.frame,
+				opennova::renderer::kInsetMirrorOverlayOrder.data(),
+				opennova::renderer::kInsetMirrorOverlayOrder.size(), draw_list);
 	} else if (kind == VIEW_INSET) {
 		opennova::renderer::compile_scene_overlay(p_submission.frame,
 				opennova::renderer::kInsetOverlayOrder.data(),
@@ -795,8 +838,7 @@ void SceneOverlayCompositorEffect::Impl::draw(const SceneOverlaySubmission &p_su
 			const RID pipeline = pipeline_for(format, batch);
 			const RID texture = batch.texture < p_submission.textures.size() ?
 					p_submission.textures[batch.texture] : RID();
-			const RID uniform_set = uniform_set_for(texture,
-					batch.shading == SceneOverlayShading::NvgLaser);
+			const RID uniform_set = uniform_set_for(texture, wraps(batch.shading));
 			if (!pipeline.is_valid() || !uniform_set.is_valid())
 				continue;
 			write_u32(push_constants, 96, static_cast<std::uint32_t>(batch.shading));
@@ -804,6 +846,11 @@ void SceneOverlayCompositorEffect::Impl::draw(const SceneOverlaySubmission &p_su
 			write_u32(push_constants, 104,
 					batch.depth == SceneOverlayDepth::FarBand ? 1u : 0u);
 			write_u32(push_constants, 108, sampling_word(batch, p_submission));
+			write_f32(push_constants, 112, batch.fog_color[0]);
+			write_f32(push_constants, 116, batch.fog_color[1]);
+			write_f32(push_constants, 120, batch.fog_color[2]);
+			write_f32(push_constants, 124,
+					batch.fog_term == SceneOverlayFogTerm::Exponent ? 1.0f : 0.0f);
 			vertex_offsets[0] = static_cast<int64_t>(batch.first_vertex) * kVertexStride;
 			rd->draw_list_bind_render_pipeline(list, pipeline);
 			rd->draw_list_bind_uniform_set(list, uniform_set, 0);
@@ -893,8 +940,9 @@ void SceneOverlayCompositorEffect::write_backend_report(Dictionary &result) cons
 	result["callback"] = "post_transparent";
 	const int kind = impl_->view_kind.load(std::memory_order_acquire);
 	result["view_kind"] = kind == VIEW_MIRROR ? String("mirror")
-			: kind == VIEW_INSET ? String("inset")
-								: String("scene");
+			: kind == VIEW_INSET_MIRROR       ? String("inset_mirror")
+			: kind == VIEW_INSET              ? String("inset")
+											  : String("scene");
 	result["status"] = opennova::to_gd(d.status);
 	result["failure"] = opennova::to_gd(d.failure);
 	result["shutdown"] = impl_->shutdown_requested.load(std::memory_order_acquire);

@@ -194,8 +194,10 @@ void EntityPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("fire_ribbon_mesh"), &EntityPresenter::fire_ribbon_mesh);
 	ClassDB::bind_method(D_METHOD("set_tracer_mirror_cameras", "mirror", "inset_mirror"),
 			&EntityPresenter::set_tracer_mirror_cameras);
-	ClassDB::bind_method(D_METHOD("fire_mirror_ribbon_mesh", "mirror"),
-			&EntityPresenter::fire_mirror_ribbon_mesh);
+	ClassDB::bind_method(D_METHOD("fire_mirror_ribbon_vertices", "mirror"),
+			&EntityPresenter::fire_mirror_ribbon_vertices);
+	ClassDB::bind_method(D_METHOD("fire_mirror_ribbon_shadings", "slot"),
+			&EntityPresenter::fire_mirror_ribbon_shadings);
 	ClassDB::bind_method(D_METHOD("fire_inset_ribbon_mesh"),
 			&EntityPresenter::fire_inset_ribbon_mesh);
 	ClassDB::bind_method(D_METHOD("draw_frame_tracers"), &EntityPresenter::draw_frame_tracers);
@@ -440,8 +442,20 @@ void EntityPresenter::set_tracer_mirror_cameras(Camera3D *p_mirror, Camera3D *p_
 	fire_->set_mirror_cameras(p_mirror, p_inset_mirror);
 }
 
-Ref<ArrayMesh> EntityPresenter::fire_mirror_ribbon_mesh(int p_mirror) const {
-	return fire_->mirror_ribbon_mesh(p_mirror);
+PackedVector3Array EntityPresenter::fire_mirror_ribbon_vertices(int p_mirror) const {
+	return fire_->mirror_ribbon_vertices(p_mirror);
+}
+
+PackedInt32Array EntityPresenter::fire_mirror_ribbon_shadings(int p_slot) {
+	SceneOverlaySubmission submission;
+	fire_->append_mirror_ribbons(opennova::renderer::SceneOverlayFog(), submission);
+	PackedInt32Array shadings;
+	for (const opennova::renderer::SceneOverlayBatch &batch : submission.frame.batches) {
+		if (static_cast<int>(batch.slot) == p_slot) {
+			shadings.push_back(static_cast<int32_t>(batch.shading));
+		}
+	}
+	return shadings;
 }
 
 Ref<ArrayMesh> EntityPresenter::fire_inset_ribbon_mesh() const {
@@ -532,6 +546,12 @@ int EntityPresenter::append_nvg_laser_beams(Simulation *p_sim, const NvgLaserVie
 	std::vector<NvgLaserSource> sources;
 	p_sim->nvg_laser_sources(sources);
 	return fire_->append_nvg_laser_beams(sources, p_view, r_submission);
+}
+
+int EntityPresenter::append_mirror_tracer_ribbons(
+		const opennova::renderer::SceneOverlayFog &p_pass_fog,
+		SceneOverlaySubmission &r_submission) {
+	return fire_->append_mirror_ribbons(p_pass_fog, r_submission);
 }
 
 int EntityPresenter::nvg_laser_beam_batches(int p_handle, int p_attach_bone,

@@ -602,8 +602,9 @@ func test_reflection_camera_receives_two_ordered_camera_correct_submissions() ->
 	assert_true(reflection_camera.compositor.get_compositor_effects()[2]
 			is SceneOverlayCompositorEffect)
 	var report := renderer.get_debug_draw_list_report()
-	# The mirror's reflected scene draws only its coronas after its particle
-	# passes [orig: Water_RenderReflectedWorldScene @ 0x5c85fd].
+	# The mirror's reflected scene draws its tracer ribbons, then its coronas,
+	# after its particle passes [orig: Water_RenderReflectedWorldScene @ 0x5c85f6,
+	# @ 0x5c85fd].
 	assert_eq(String(_slot(report, "reflection_overlay_backend").get("view_kind", "")),
 			"mirror")
 	assert_eq(String(_slot(report, "world_overlay_backend").get("view_kind", "")),
@@ -1257,6 +1258,17 @@ func test_the_inset_mirror_compiles_its_own_pair_while_it_renders() -> void:
 	var report := renderer.get_debug_draw_list_report()
 	assert_eq(renderer.get_inset_mirror_camera(), inset_mirror)
 	assert_true(bool(report.get("inset_mirror_compositor_attached", false)))
+	# Its overlay pass follows its pair and leads with its own tracer ribbons, then
+	# the mirror's tail (engine renderer/scene_overlay.h kInsetMirrorOverlayOrder).
+	assert_not_null(inset_mirror.compositor)
+	var effects: Array = []
+	if inset_mirror.compositor != null:
+		effects = inset_mirror.compositor.get_compositor_effects()
+	assert_eq(effects.size(), 3, "the Inset mirror's pair, then its overlay pass")
+	if effects.size() == 3:
+		assert_true(effects[2] is SceneOverlayCompositorEffect)
+	assert_eq(String(_slot(report, "inset_mirror_overlay_backend").get("view_kind", "")),
+			"inset_mirror")
 	assert_eq(int(_slot(report, "inset_mirror_camera_side").get("selected_emitters", -1)), 1,
 			"the Inset mirror's own eye sees the emitter")
 	assert_true(_slot(report, "reflection_camera_side").is_empty(), "no main mirror this frame")

@@ -566,11 +566,13 @@ public:
 		for_each_overlay([](Ref<SceneOverlayCompositorEffect> &overlay) {
 			overlay.instantiate();
 		});
-		// The mirror's reflected scene draws only its coronas after its
-		// particle passes; the Inset pass's own mirror closes its target the
-		// same way.
+		// The mirror's reflected scene draws its tracer ribbons, then its
+		// coronas, after its particle passes; the Inset pass's own mirror draws
+		// its own ribbons and closes its target the same way
+		// (runtime/renderer/scene_overlay.h kMirrorOverlayOrder,
+		// kInsetMirrorOverlayOrder).
 		reflection_overlay->set_view_kind(SceneOverlayCompositorEffect::VIEW_MIRROR);
-		inset_mirror_overlay->set_view_kind(SceneOverlayCompositorEffect::VIEW_MIRROR);
+		inset_mirror_overlay->set_view_kind(SceneOverlayCompositorEffect::VIEW_INSET_MIRROR);
 		// The second scene view is the weapon Inset pass: its tail draws its
 		// own corona walk and no glare (runtime/renderer/scene_overlay.h
 		// kInsetOverlayOrder).
@@ -1721,6 +1723,9 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 	Dictionary second_scene_overlay;
 	impl_->second_scene_overlay->write_backend_report(second_scene_overlay);
 	result["second_scene_overlay_backend"] = second_scene_overlay;
+	Dictionary inset_mirror_overlay;
+	impl_->inset_mirror_overlay->write_backend_report(inset_mirror_overlay);
+	result["inset_mirror_overlay_backend"] = inset_mirror_overlay;
 	result["first_person_backend"] = "array_mesh_fallback_tool_only";
 	result["world_compositor_attached"] =
 			impl_->attached_world_camera.is_valid();

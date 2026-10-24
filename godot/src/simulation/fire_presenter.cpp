@@ -58,6 +58,20 @@ ObjectID add_ribbon_instance(Node3D *p_container, const char *p_name, const Ref<
 	return ObjectID(instance->get_instance_id());
 }
 
+// A view's camera while its target updates (hud/hud_inset_scope.h: the Inset's
+// scene while its pass renders; env/water.h: the main scene's mirror while its
+// water pass runs, the Inset's while the Inset pass renders it), else null.
+Camera3D *while_rendering(Camera3D *p_camera) {
+	if (p_camera == nullptr || !p_camera->is_inside_tree()) {
+		return nullptr;
+	}
+	const SubViewport *target = Object::cast_to<SubViewport>(p_camera->get_viewport());
+	if (target != nullptr && target->get_update_mode() == SubViewport::UPDATE_DISABLED) {
+		return nullptr;
+	}
+	return p_camera;
+}
+
 } // namespace
 
 FirePresenter::FirePresenter(EntityPresenter *p_owner) :
@@ -105,39 +119,28 @@ void FirePresenter::free_mesh_instance() {
 	};
 	free_instance(mesh_instance_id_);
 	mesh_.unref();
-	for (ViewRibbons &view : views_) {
-		free_instance(view.mesh_instance_id);
-		view.mesh.unref();
+	free_instance(inset_mesh_instance_id_);
+	inset_mesh_.unref();
+	for (MirrorRibbons &mirror : mirrors_) {
+		mirror.frame.clear();
 	}
 }
 
 void FirePresenter::set_mirror_cameras(Camera3D *p_mirror, Camera3D *p_inset_mirror) {
-	views_[kViewMirror].camera_id =
-			p_mirror != nullptr ? p_mirror->get_instance_id() : ObjectID();
-	views_[kViewMirror + 1].camera_id =
+	mirrors_[0].camera_id = p_mirror != nullptr ? p_mirror->get_instance_id() : ObjectID();
+	mirrors_[1].camera_id =
 			p_inset_mirror != nullptr ? p_inset_mirror->get_instance_id() : ObjectID();
 }
 
-// A view renders while its target updates (hud/hud_inset_scope.h: the Inset's
-// scene while its pass renders; env/water.h: the main scene's mirror while its
-// water pass runs, the Inset's while the Inset pass renders it).
-Camera3D *FirePresenter::rendering_view_camera(size_t p_view) const {
-	Camera3D *camera = nullptr;
-	if (p_view == kViewInset) {
-		const EffectWorld *fx_world = fx();
-		camera = fx_world != nullptr ? fx_world->get_second_scene_camera() : nullptr;
-	} else {
-		const ObjectID id = views_[p_view].camera_id;
-		camera = id.is_valid() ? Object::cast_to<Camera3D>(ObjectDB::get_instance(id)) : nullptr;
-	}
-	if (camera == nullptr || !camera->is_inside_tree()) {
-		return nullptr;
-	}
-	const SubViewport *target = Object::cast_to<SubViewport>(camera->get_viewport());
-	if (target != nullptr && target->get_update_mode() == SubViewport::UPDATE_DISABLED) {
-		return nullptr;
-	}
-	return camera;
+Camera3D *FirePresenter::rendering_inset_camera() const {
+	const EffectWorld *fx_world = fx();
+	return while_rendering(fx_world != nullptr ? fx_world->get_second_scene_camera() : nullptr);
+}
+
+Camera3D *FirePresenter::rendering_mirror_camera(size_t p_mirror) const {
+	const ObjectID id = mirrors_[p_mirror].camera_id;
+	return while_rendering(
+			id.is_valid() ? Object::cast_to<Camera3D>(ObjectDB::get_instance(id)) : nullptr);
 }
 
 void FirePresenter::set_main_ribbon_layer(uint32_t p_layer) {
@@ -149,10 +152,16 @@ void FirePresenter::set_main_ribbon_layer(uint32_t p_layer) {
 	}
 }
 
-Ref<ArrayMesh> FirePresenter::mirror_ribbon_mesh(int p_mirror) const {
-	return p_mirror == 0 || p_mirror == 1
-			? views_[kViewMirror + static_cast<size_t>(p_mirror)].mesh
-			: Ref<ArrayMesh>();
+PackedVector3Array FirePresenter::mirror_ribbon_vertices(int p_mirror) const {
+	PackedVector3Array vertices;
+	if (p_mirror != 0 && p_mirror != 1) {
+		return vertices;
+	}
+	for (const opennova::renderer::TracerVertex &v :
+			mirrors_[static_cast<size_t>(p_mirror)].frame.vertices) {
+		vertices.push_back(Vector3(v.x, v.y, v.z));
+	}
+	return vertices;
 }
 
 void FirePresenter::setup(Simulation *p_sim, Node3D *p_container, MissionAudio *p_audio,
@@ -167,20 +176,15 @@ void FirePresenter::setup(Simulation *p_sim, Node3D *p_container, MissionAudio *
 	// A re-setup replaces the previous tracer geometry instead of stranding it.
 	free_mesh_instance();
 	if (p_container != nullptr) {
-		// The main view's ribbons on the bit the beauty camera alone admits, each
-		// other view's on its own.
+		// The main view's ribbons on the bit the beauty camera alone admits, the
+		// weapon Inset scene's on its own; the mirrors' draw in their overlay
+		// passes (append_mirror_ribbons).
 		mesh_.instantiate();
 		mesh_instance_id_ = add_ribbon_instance(
 				p_container, "FireTracers", mesh_, visual_layers::MAIN_VIEW_NO_REFLECTION);
-		static constexpr const char *kViewNames[kViewCount] = { "FireTracersInset",
-			"FireTracersMirror", "FireTracersInsetMirror" };
-		static constexpr uint32_t kViewLayers[kViewCount] = { visual_layers::INSET_VIEW,
-			visual_layers::MIRROR_VIEW, visual_layers::INSET_MIRROR_VIEW };
-		for (size_t v = 0; v < kViewCount; ++v) {
-			views_[v].mesh.instantiate();
-			views_[v].mesh_instance_id = add_ribbon_instance(
-					p_container, kViewNames[v], views_[v].mesh, kViewLayers[v]);
-		}
+		inset_mesh_.instantiate();
+		inset_mesh_instance_id_ = add_ribbon_instance(
+				p_container, "FireTracersInset", inset_mesh_, visual_layers::INSET_VIEW);
 	}
 }
 
@@ -348,10 +352,11 @@ void FirePresenter::draw_tracer_rows(const PackedFloat32Array &p_rows) {
 		mesh_->clear_surfaces();
 	}
 	set_main_ribbon_layer(visual_layers::MAIN_VIEW_NO_REFLECTION);
-	for (ViewRibbons &other : views_) {
-		if (other.mesh.is_valid() && other.mesh->get_surface_count() > 0) {
-			other.mesh->clear_surfaces();
-		}
+	if (inset_mesh_.is_valid() && inset_mesh_->get_surface_count() > 0) {
+		inset_mesh_->clear_surfaces();
+	}
+	for (MirrorRibbons &mirror : mirrors_) {
+		mirror.frame.clear();
 	}
 	EffectWorld *fx_world = fx();
 	const std::shared_ptr<EffectDistortionDrawer> distortion =
@@ -409,18 +414,60 @@ void FirePresenter::draw_tracer_rows(const PackedFloat32Array &p_rows) {
 	// The weapon Inset's scene and each rendering water mirror's reflected
 	// subscene run the pool's main pass again under their own views (engine
 	// renderer/tracer_frame.h TracerView carries the witness): the same rows,
-	// built against that view's camera, on the bit only it admits. The shared
-	// materials keep the frame's rung.
-	for (size_t v = 0; v < kViewCount; ++v) {
-		Camera3D *other = rendering_view_camera(v);
-		if (other == nullptr || views_[v].mesh.is_null()) {
+	// built against that view's camera. The Inset's ride the bit only its camera
+	// admits on the shared materials, at the frame's rung; each mirror's wait for
+	// that mirror's overlay pass, which draws them after both of its particle
+	// passes and ahead of its coronas (append_mirror_ribbons).
+	if (Camera3D *inset = rendering_inset_camera()) {
+		if (inset_mesh_.is_valid()) {
+			opennova::renderer::compile_tracer_ribbons(channels_.data(), channels_.size(),
+					tracer_view_from_camera(*inset, view.tick_ms),
+					opennova::renderer::TracerPass::Main, inset_frame_);
+			ribbons_.emit(inset_frame_, inset_mesh_, rung);
+		}
+	}
+	for (size_t m = 0; m < kMirrorCount; ++m) {
+		if (Camera3D *camera = rendering_mirror_camera(m)) {
+			mirrors_[m].view = tracer_view_from_camera(*camera, view.tick_ms);
+			opennova::renderer::compile_tracer_ribbons(channels_.data(), channels_.size(),
+					mirrors_[m].view, opennova::renderer::TracerPass::Main, mirrors_[m].frame);
+		}
+	}
+}
+
+// Each mirror's ribbons in its own overlay slot, which its overlay pass draws first, after
+// the mirror's particle pair and ahead of its coronas (engine renderer/scene_overlay.h
+// kMirrorOverlayOrder and kInsetMirrorOverlayOrder carry the witness).
+int FirePresenter::append_mirror_ribbons(const opennova::renderer::SceneOverlayFog &p_pass_fog,
+		SceneOverlaySubmission &r_submission) {
+	static constexpr opennova::renderer::SceneOverlaySlot kSlots[kMirrorCount] = {
+		opennova::renderer::SceneOverlaySlot::MirrorTracerRibbons,
+		opennova::renderer::SceneOverlaySlot::InsetMirrorTracerRibbons,
+	};
+	const std::size_t before = r_submission.frame.batches.size();
+	for (size_t m = 0; m < kMirrorCount; ++m) {
+		const MirrorRibbons &mirror = mirrors_[m];
+		if (mirror.frame.draws.empty()) {
 			continue;
 		}
-		opennova::renderer::compile_tracer_ribbons(channels_.data(), channels_.size(),
-				tracer_view_from_camera(*other, view.tick_ms),
-				opennova::renderer::TracerPass::Main, view_frame_);
-		ribbons_.emit(view_frame_, views_[v].mesh, rung);
+		// The fog's distances run from the mirror's own eye along its own view.
+		opennova::renderer::SceneOverlayFog fog = p_pass_fog;
+		const Vector3 forward =
+				Vector3(mirror.view.forward.x, mirror.view.forward.y, mirror.view.forward.z)
+						.normalized();
+		fog.eye[0] = mirror.view.camera.x;
+		fog.eye[1] = mirror.view.camera.y;
+		fog.eye[2] = mirror.view.camera.z;
+		fog.forward[0] = static_cast<float>(forward.x);
+		fog.forward[1] = static_cast<float>(forward.y);
+		fog.forward[2] = static_cast<float>(forward.z);
+		opennova::renderer::append_tracer_ribbon_overlay(mirror.frame,
+				r_submission.texture_index(ribbons_.smoke_texture(),
+						opennova::renderer::texture_stage_flags(
+								opennova::renderer::TextureStage::TracerSmoke)),
+				fog, r_submission.frame, kSlots[m]);
 	}
+	return static_cast<int>(r_submission.frame.batches.size() - before);
 }
 
 // retail Render_NVGLaserBeamsForVisiblePersons @ 0x5c63b0 walks the frame's visible persons (the drawn

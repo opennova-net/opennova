@@ -34,6 +34,24 @@ void compile_scene_overlay(const SceneOverlayFrame &frame, const SceneOverlaySlo
 	}
 }
 
+SceneOverlayBlend scene_overlay_blend(SceneOverlayShading shading) {
+	using F = SceneOverlayBlendFactor;
+	switch (shading) {
+		case SceneOverlayShading::AdditiveModulate:
+		case SceneOverlayShading::SelfLumAdditive:
+		case SceneOverlayShading::RibbonStock:
+			return {F::One, F::One};
+		case SceneOverlayShading::DimMultiply:
+			return {F::DestColor, F::Zero};
+		case SceneOverlayShading::NvgLaser:
+		case SceneOverlayShading::RibbonNvgLaser:
+			return {F::SrcAlpha, F::One};
+		default:
+			// Modulate2xBlend, FlatBlend, RibbonSmoke.
+			return {F::SrcAlpha, F::InvSrcAlpha};
+	}
+}
+
 bool scene_overlay_view_draws(const SceneOverlayBatch &batch, float eye_height) {
 	// [orig: @ 0x5c96ca cmp [eye+0Ch], g_EnvWaterHeightFixed; @ 0x5c96d1 jg
 	//  skips only a strictly-higher eye]
@@ -226,6 +244,65 @@ void append_nvg_laser_overlay(const TracerRibbonFrame &ribbons, uint32_t texture
 			}
 			set_color(v, rgb[0], rgb[1], rgb[2],
 					static_cast<float>((src.argb >> 24) & 0xFFu) / 255.0f);
+			out.vertices.push_back(v);
+		}
+		batch.vertex_count = count;
+		out.batches.push_back(batch);
+	}
+}
+
+void append_tracer_ribbon_overlay(const TracerRibbonFrame &ribbons, uint32_t smoke_texture,
+		const SceneOverlayFog &fog, SceneOverlayFrame &out, SceneOverlaySlot slot) {
+	// The primary fog state's two arms (CD3DDevice_SetFogParameters): table EXP
+	// fog by the eye depth, else vertex LINEAR fog by the range.
+	const bool exponent = fog.enabled && fog.type == 0;
+	const float density = kDeviceFogLn64 / std::max(fog.end, 1.0f);
+	for (const TracerDraw &draw : ribbons.draws) {
+		if (draw.index_count < 3) {
+			continue;
+		}
+		SceneOverlayBatch batch;
+		batch.slot = slot;
+		batch.shading = draw.shader == TracerShader::Smoke ? SceneOverlayShading::RibbonSmoke
+				: draw.shader == TracerShader::NvgLaser    ? SceneOverlayShading::RibbonNvgLaser
+														   : SceneOverlayShading::RibbonStock;
+		batch.depth = SceneOverlayDepth::TestNoWrite;
+		batch.geometry = SceneOverlayGeometry::World;
+		if (batch.shading != SceneOverlayShading::RibbonStock) {
+			batch.stage = TextureStage::TracerSmoke;
+			batch.texture = smoke_texture;
+		}
+		batch.fog_term = exponent ? SceneOverlayFogTerm::Exponent : SceneOverlayFogTerm::Factor;
+		for (int c = 0; c < 3; ++c) {
+			batch.fog_color[c] = draw.fog_black ? 0.0f : fog.color[c];
+		}
+		batch.first_vertex = vertex_index(out);
+		const uint32_t count = draw.index_count - draw.index_count % 3;
+		for (uint32_t k = 0; k < count; ++k) {
+			const TracerVertex &src = ribbons.vertices[ribbons.indices[draw.first_index + k]];
+			SceneOverlayVertex v;
+			v.position[0] = src.x;
+			v.position[1] = src.y;
+			v.position[2] = src.z;
+			v.uv[0] = src.u0;
+			v.uv[1] = src.v0;
+			v.corner[0] = src.u1;
+			v.corner[1] = src.v1;
+			set_color(v, static_cast<float>((src.argb >> 16) & 0xFFu) / 255.0f,
+					static_cast<float>((src.argb >> 8) & 0xFFu) / 255.0f,
+					static_cast<float>(src.argb & 0xFFu) / 255.0f,
+					static_cast<float>((src.argb >> 24) & 0xFFu) / 255.0f);
+			const float dx = src.x - fog.eye[0];
+			const float dy = src.y - fog.eye[1];
+			const float dz = src.z - fog.eye[2];
+			if (exponent) {
+				// The signed eye depth: the pixel clamps it, so a strip that
+				// passes beside the eye interpolates its true depth.
+				v.fog = (dx * fog.forward[0] + dy * fog.forward[1] + dz * fog.forward[2]) * density;
+			} else {
+				v.fog = device_fog_visibility(std::sqrt(dx * dx + dy * dy + dz * dz), fog.start,
+						fog.end, fog.type, fog.enabled);
+			}
 			out.vertices.push_back(v);
 		}
 		batch.vertex_count = count;

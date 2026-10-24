@@ -45,6 +45,10 @@ enum class SceneOverlaySlot : uint8_t {
 	InsetNvgLaserBeams = 10,
 	InsetPrecipitation = 11,
 	InsetWaterGlint = 12,
+	// Each water mirror's tracer ribbons, built against that mirror's own view
+	// (kMirrorOverlayOrder, kInsetMirrorOverlayOrder).
+	MirrorTracerRibbons = 13,
+	InsetMirrorTracerRibbons = 14,
 };
 
 // The main scene's tail, in draw order. The scope's aperture view runs the
@@ -99,11 +103,16 @@ inline constexpr std::array<SceneOverlaySlot, 5> kInsetOverlayOrder = {
 	SceneOverlaySlot::UnderwaterMurk,
 };
 
-// The water mirror's reflected scene draws only the coronas after its two
-// particle passes and its tracer pass [orig: Water_RenderReflectedWorldScene
-// @ 0x5c8510 — EffectWorld_RenderLightCoronas(1) @ 0x5c85fd]; the
-// precipitation drawer's one caller is the main scene core
-// [orig: Render_WeatherTrailParticles <- @ 0x5c96a6]. Render_MainScene
+// The water mirror's reflected scene closes with its two particle passes, the
+// tracer pool's main pass under the mirror's own view, then the coronas
+// [orig: Water_RenderReflectedWorldScene @ 0x5c8510 — EffectWorld_RenderParticlePass
+// the calls @ 0x5c85db (A) and @ 0x5c85e5 (B), CEffectEmitterPool_RenderMainPass(1, 0)
+// on g_TracerEmitterPool the call @ 0x5c85f6, EffectWorld_RenderLightCoronas(1)
+// the call @ 0x5c85fd; all four behind the g_WaterDetailLevel >= 2 test
+// @ 0x5c85ad..0x5c85b4, which the locked profile passes]. The mirror's particle
+// pair are its overlay pass's two predecessors, so its ribbons lead the pass,
+// ahead of its coronas; the precipitation drawer's one caller is the main scene
+// core [orig: Render_WeatherTrailParticles <- @ 0x5c96a6]. Render_MainScene
 // then closes the mirror target: at water detail >= 2 the fullscreen dim
 // (DESTCOLOR / ZERO under 0xFF404040 [orig: Render_MainScene @ 0x5c1727
 // gate, @ 0x5c1856..0x5c189e]), and at FrameFX quality >= 3 the far depth
@@ -111,7 +120,22 @@ inline constexpr std::array<SceneOverlaySlot, 5> kInsetOverlayOrder = {
 // @ 0x5c18c6 FrameFX_QualityAtLeast3 test, @ 0x5c18f4 Render_SetViewportFarDepth,
 // @ 0x5c18fb Render_CelestialBodies(0), @ 0x5c1904 Render_SkyboxSunGlow(0, 0)].
 // The locked profile runs both.
-inline constexpr std::array<SceneOverlaySlot, 4> kMirrorOverlayOrder = {
+inline constexpr std::array<SceneOverlaySlot, 5> kMirrorOverlayOrder = {
+	SceneOverlaySlot::MirrorTracerRibbons, // @ 0x5c85f6
+	SceneOverlaySlot::LightCoronas,        // @ 0x5c85fd
+	SceneOverlaySlot::MirrorDim,
+	SceneOverlaySlot::MirrorCelestialBodies,
+	SceneOverlaySlot::MirrorSunGlow,
+};
+
+// The weapon Inset's mirror runs the same reflected subscene under its own
+// mirrored view [orig: Render_WeaponInsetScene @ 0x5c9740 - the Render_TerrainScene
+// call @ 0x5c99b7; Render_TerrainScene @ 0x610c80 - the Water_ReflectionPrerender
+// call @ 0x610ce0; Water_ReflectionPrerender @ 0x5c2780 - the Render_MainScene call
+// @ 0x5c27c6], so its pass leads with its own ribbons, built against its own
+// camera; the rest of its tail is the main mirror's.
+inline constexpr std::array<SceneOverlaySlot, 5> kInsetMirrorOverlayOrder = {
+	SceneOverlaySlot::InsetMirrorTracerRibbons,
 	SceneOverlaySlot::LightCoronas,
 	SceneOverlaySlot::MirrorDim,
 	SceneOverlaySlot::MirrorCelestialBodies,
@@ -143,6 +167,58 @@ enum class SceneOverlayShading : uint8_t {
 	//  0x3008 shader); the render-state layout RenderState_ApplyToDevice
 	//  @ 0x681920]
 	NvgLaser = 5,
+	// The tracer pool's ribbon materials (renderer/tracer_frame.h TracerShader),
+	// each fogged per pixel by the device fog (SceneOverlayFogTerm, the batch's
+	// fog colour) over its combine:
+	// - the device's stock slot 6, mode word 0x222: colour = alpha = DIFFUSE,
+	//   untextured, ONE / ONE [orig: CEffectChannel_Init @ 0x5db130 -
+	//   CD3DDevice_GetRenderStateByIndex(6) the call @ 0x5db1d6; the slot built by
+	//   CGfxDevice_CreateDefaultRenderStates @ 0x6780a0 - GfxShader_CreateForTexture
+	//   (0x222) the call @ 0x67810e];
+	RibbonStock = 6,
+	// - pool+0x3004 (rocket/at4/grenade): smoktest.pcx on both stages, the
+	//   second on the second coordinate set; colour = DIFFUSE, alpha =
+	//   sat(sat(DIFFUSE.a - T0.a) - T1.a), SRCALPHA / INVSRCALPHA (the blend words
+	//   5 / 6 @ 0x5dc999 / @ 0x5dc9a1) [orig: CEffectEmitterPool_CreateShaders
+	//   @ 0x5dc8f0 - GfxShader_Create2TexDesc the call @ 0x5dc9a9, the store
+	//   @ 0x5dc9b5];
+	RibbonSmoke = 7,
+	// - pool+0x3008 on a pool channel of the NVG style: the NvgLaser combine.
+	RibbonNvgLaser = 8,
+};
+
+// The framebuffer blend factors of a combine, as the device's D3DBLEND words.
+enum class SceneOverlayBlendFactor : uint8_t {
+	Zero = 1,
+	One = 2,
+	SrcAlpha = 5,
+	InvSrcAlpha = 6,
+	DestColor = 9,
+};
+
+struct SceneOverlayBlend {
+	SceneOverlayBlendFactor source = SceneOverlayBlendFactor::One;
+	SceneOverlayBlendFactor dest = SceneOverlayBlendFactor::Zero;
+};
+
+// The SRCBLEND / DESTBLEND pair each combine draws with (the shading
+// comments above carry each one's witness).
+SceneOverlayBlend scene_overlay_blend(SceneOverlayShading shading);
+
+// How a ribbon batch's per-vertex fog term reads (SceneOverlayVertex::fog).
+// The pass fog the device runs [orig: CD3DDevice_SetFogParameters @ 0x677960;
+// CD3DDevice_SetFogAndBlendMode @ 0x677740, the primary fog state's case 0]:
+// the linear modes are vertex fog by the range (FOGTABLEMODE NONE, FOGVERTEXMODE
+// LINEAR, RANGEFOGENABLE on: @ 0x677a50..0x677aa7), the factor computed and
+// clamped at each vertex and interpolated; the exponential mode is table fog by
+// the eye depth on a device whose +0x8C flag is set (the test @ 0x6779be;
+// FOGTABLEMODE EXP at density ln(64) / end, @ 0x6779e4..0x677a10), evaluated at
+// each pixel, as the scene's other fogged effect draws take it
+// (godot/shaders/effect_fog.gdshaderinc). Either way the pixel's colour becomes
+// f x colour + (1 - f) x the fog colour; the alpha is never fogged.
+enum class SceneOverlayFogTerm : uint8_t {
+	Factor = 0,   // the interpolated vertex fog factor (1 = unfogged)
+	Exponent = 1, // density x eye depth; the pixel takes exp(-max(term, 0))
 };
 
 enum class SceneOverlayDepth : uint8_t {
@@ -164,12 +240,15 @@ inline constexpr uint32_t kSceneOverlayNoTexture = 0xFFFFFFFFu;
 // One vertex; positions are in the RENDER (Godot) frame: mission (x, y, z)
 // maps to (x, z, -y). Colours are gamma-domain. `corner` is the billboard
 // corner offset for Billboard geometry and the second texture coordinate set
-// for World geometry (the ribbon's TEX2 vertex).
+// for World geometry (the ribbon's TEX2 vertex). `fog` is a ribbon batch's
+// per-vertex fog term (SceneOverlayFogTerm); the other combines carry their
+// fog in the diffuse and never read it.
 struct SceneOverlayVertex {
 	float position[3] = {0.0f, 0.0f, 0.0f};
 	float uv[2] = {0.0f, 0.0f};
 	float color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
 	float corner[2] = {0.0f, 0.0f};
+	float fog = 1.0f;
 };
 
 // One draw: a triangle list over the frame's vertices.
@@ -191,6 +270,11 @@ struct SceneOverlayBatch {
 	// includes equality).
 	bool eye_at_or_below_water_gate = false;
 	float water_height = 0.0f;
+	// A ribbon batch's fog: how its vertices' term reads and the colour it fogs
+	// toward (black for a style whose +0 word fogs to black, else the pass fog
+	// colour).
+	SceneOverlayFogTerm fog_term = SceneOverlayFogTerm::Factor;
+	float fog_color[3] = {0.0f, 0.0f, 0.0f};
 };
 
 // One frame's overlay geometry, in submission order.
@@ -285,6 +369,22 @@ struct SceneOverlayFog {
 void append_nvg_laser_overlay(const TracerRibbonFrame &ribbons, uint32_t texture,
 		const SceneOverlayFog &fog, SceneOverlayFrame &out,
 		SceneOverlaySlot slot = SceneOverlaySlot::NvgLaserBeams);
+
+// A water mirror's tracer ribbons: every draw of `ribbons` (the pool's main
+// pass, compile_tracer_ribbons against the mirror's own view) as one
+// world-space triangle list in `slot` (MirrorTracerRibbons or
+// InsetMirrorTracerRibbons), in pool order, on its material's combine
+// (RibbonStock / RibbonSmoke / RibbonNvgLaser; the textured two sample
+// `smoke_texture`, the pool's smoktest.pcx), depth-tested without writes, its
+// diffuse unfogged and its fog term per vertex under `fog`, the mirror pass's
+// fog seen from the mirror's eye; a style whose +0 word fogs to black fogs
+// toward black, else toward the pass colour [orig: CEffectChannel_RenderRibbon
+// @ 0x5db8a0 - CD3DDevice_SetFogAndBlendMode(2 or 0) the call @ 0x5dc860 on the
+// style's +0 word @ 0x5dc84f, GfxShader_ApplyPassChecked(channel material,
+// 0x10520000: fog on, z-write off, z-test on) the call @ 0x5dc877, one
+// Render_DrawDynamicIndexedPrimitive per channel the call @ 0x5dc8b6].
+void append_tracer_ribbon_overlay(const TracerRibbonFrame &ribbons, uint32_t smoke_texture,
+		const SceneOverlayFog &fog, SceneOverlayFrame &out, SceneOverlaySlot slot);
 
 // The mirror's dim: one viewport quad whose flat diffuse (`factor` on every
 // channel, the 0xFF404040 vertex colour) multiplies the finished mirror

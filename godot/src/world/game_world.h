@@ -1109,6 +1109,9 @@ private:
 	uint64_t scene_overlay_frame_id_ = 0;
 	SceneOverlayModelSurfaces scene_overlay_bodies_;
 	void append_water_mirror_overlays(SceneOverlaySubmission &r_submission);
+	// Each rendering water mirror's tracer ribbons, under the reflected scene's
+	// pass fog (EntityPresenter::append_mirror_tracer_ribbons).
+	void append_mirror_tracer_overlays(SceneOverlaySubmission &r_submission);
 	// The frame's light values (null with no environment or light state),
 	// shared by the overlay legs.
 	Ref<EnvLightValues> frame_light_values() const;

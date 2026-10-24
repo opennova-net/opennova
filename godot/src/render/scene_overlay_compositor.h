@@ -106,11 +106,16 @@ class SceneOverlayCompositorEffect : public CompositorEffect {
 
 public:
 	enum ViewKind {
-		VIEW_SCENE = 0,  // the main view and the scope aperture: the full tail
-		VIEW_MIRROR = 1, // the water mirror: the coronas, the dim and the sky redraw
+		VIEW_SCENE = 0, // the main view and the scope aperture: the full tail
+		// The main scene's water mirror: its tracer ribbons, the coronas, the dim
+		// and the sky redraw (runtime/renderer/scene_overlay.h kMirrorOverlayOrder).
+		VIEW_MIRROR = 1,
 		// The weapon Inset pass: the tail without the glare, its own coronas
 		// (runtime/renderer/scene_overlay.h kInsetOverlayOrder).
 		VIEW_INSET = 2,
+		// The weapon Inset's water mirror: its own tracer ribbons, then the main
+		// mirror's tail (kInsetMirrorOverlayOrder).
+		VIEW_INSET_MIRROR = 3,
 	};
 
 	SceneOverlayCompositorEffect();

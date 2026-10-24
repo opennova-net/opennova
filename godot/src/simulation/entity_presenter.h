@@ -384,10 +384,13 @@ public:
 	Ref<ArrayMesh> fire_ribbon_mesh() const;
 	// The water mirrors' cameras the fire pass builds each mirror's tracer
 	// ribbons against (FirePresenter::set_mirror_cameras), mirror `p_mirror`'s
-	// ribbons (0 the main scene's mirror, 1 the Inset's) and the weapon Inset
-	// scene's.
+	// ribbon vertices of this drawn frame (0 the main scene's mirror, 1 the
+	// Inset's), the shadings of the batches this frame's mirror ribbons submit
+	// in overlay slot `p_slot` (FirePresenter::append_mirror_ribbons into a
+	// throwaway frame) and the weapon Inset scene's ribbons.
 	void set_tracer_mirror_cameras(Camera3D *p_mirror, Camera3D *p_inset_mirror);
-	Ref<ArrayMesh> fire_mirror_ribbon_mesh(int p_mirror) const;
+	PackedVector3Array fire_mirror_ribbon_vertices(int p_mirror) const;
+	PackedInt32Array fire_mirror_ribbon_shadings(int p_slot);
 	Ref<ArrayMesh> fire_inset_ribbon_mesh() const;
 	// The owned "Scars" child (the device read seam: its ScarWorld mesh).
 	ScarPresenter *scar_presenter() const;
@@ -415,6 +418,11 @@ public:
 	// The frame's NVG laser beams into the overlay tail (FirePresenter::
 	// append_nvg_laser_beams over Simulation::nvg_laser_sources).
 	int append_nvg_laser_beams(Simulation *p_sim, const NvgLaserView &p_view,
+			SceneOverlaySubmission &r_submission);
+	// Each rendering water mirror's tracer ribbons of this drawn frame into its
+	// own overlay slot under the reflected scene's pass fog
+	// (FirePresenter::append_mirror_ribbons).
+	int append_mirror_tracer_ribbons(const opennova::renderer::SceneOverlayFog &p_pass_fog,
 			SceneOverlaySubmission &r_submission);
 	// The data leg: one candidate row through the same beam path into a
 	// throwaway frame; returns the batches it drew in the view's slot

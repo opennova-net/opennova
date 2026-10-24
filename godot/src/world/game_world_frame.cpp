@@ -1365,6 +1365,7 @@ void GameWorld::render_scene_overlay_frame() {
 		post_load_part_end();
 		post_load_part("water_mirrors");
 		append_water_mirror_overlays(*submission);
+		append_mirror_tracer_overlays(*submission);
 		post_load_part_end();
 	}
 	post_load_part("publish");
@@ -1475,6 +1476,32 @@ void GameWorld::append_water_mirror_overlays(SceneOverlaySubmission &r_submissio
 		return;
 	}
 	::godot::append_water_mirror_overlays(scene_overlay_bodies_, celestial_, env_, *water_, r_submission);
+}
+
+// The water mirrors' tracer ribbons, built this drawn frame against each rendering
+// mirror's camera (the particles leg's FirePresenter::draw_tracer_rows), into each
+// mirror's own overlay slot: its pass draws them after its particle pair and ahead of its
+// coronas (engine renderer/scene_overlay.h kMirrorOverlayOrder). They fog as the
+// reflected scene fogs, the dry pass whatever side the main eye is on
+// (EnvironmentState::build_water_mirror_fog), toward black or that fog's colour per the
+// style.
+void GameWorld::append_mirror_tracer_overlays(SceneOverlaySubmission &r_submission) {
+	MissionRoot *runtime = get_runtime();
+	EntityPresenter *entities = runtime != nullptr ? runtime->get_entity_presenter() : nullptr;
+	if (entities == nullptr || env_ == nullptr) {
+		return;
+	}
+	const Ref<EnvLightValues> light = frame_light_values();
+	const opennova::env::SceneFogValues mirror_fog = env_->state().build_water_mirror_fog();
+	opennova::renderer::SceneOverlayFog fog;
+	fog.start = mirror_fog.start;
+	fog.end = mirror_fog.end;
+	fog.type = mirror_fog.type;
+	fog.enabled = light.is_valid() && light->fog_enabled;
+	fog.color[0] = mirror_fog.color.r;
+	fog.color[1] = mirror_fog.color.g;
+	fog.color[2] = mirror_fog.color.b;
+	entities->append_mirror_tracer_ribbons(fog, r_submission);
 }
 
 void GameWorld::apply_blink_frame() {
