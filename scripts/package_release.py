@@ -155,6 +155,21 @@ def pristine_export(tool: Path, product: Product, install: Path, work: Path) -> 
     return export(tool, exp_dir, work / "pristine-export")
 
 
+def write_wizard(tree: Path, product: Product) -> None:
+    """Our own product's UPDATE.WIZ in its tree, which marks the folder it installs into as that
+    product's: the updater installs OpenNova content only into a folder with no game data or one its
+    wizard names (apps/update client.cpp, ADR 0067 d2). A retail product's players keep their stock one."""
+    folder = tree / "expansion" / product.expansion if product.expansion else tree
+    folder.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "[HEADER]",
+        f"CMD={product.command_file}",
+        "URL=update.opennova.net",
+        f"PRODUCT_LOGIN={product.login}",
+    ]
+    (folder / "UPDATE.WIZ").write_bytes(("\r\n".join(lines) + "\r\n").encode("ascii"))
+
+
 def build(args) -> Path:
     product = PRODUCTS[args.product]
     project = args.project.resolve()
@@ -176,6 +191,8 @@ def build(args) -> Path:
             # The expansion's base game, exported where the expansion's build reads it.
             quiet([project_tool, "export", base_project_of(project)])
         edited = export(project_tool, project, work / "export")
+        if not product.retail:
+            write_wizard(edited, product)
         if product.retail:
             source = pristine_export(project_tool, product, args.install.resolve(), work)
         else:

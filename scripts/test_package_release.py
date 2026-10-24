@@ -16,6 +16,7 @@ class PackageReleaseTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.calls = []
+        self.wizards = {}
 
     def tearDown(self):
         self.temp.cleanup()
@@ -37,6 +38,9 @@ class PackageReleaseTest(unittest.TestCase):
             Path(args[args.index("--out") + 1]).mkdir(parents=True, exist_ok=True)
         if "build" in args:
             Path(args[args.index("--out") + 1]).write_bytes(b"1SFS")
+            tree = Path(args[args.index("--to") + 1])
+            for wizard in tree.rglob("UPDATE.WIZ"):
+                self.wizards[wizard] = wizard.read_text(encoding="ascii")
         return subprocess.CompletedProcess(args, 0, b"product: stand-in\n", b"")
 
     def package(self, **options):
@@ -75,6 +79,7 @@ class PackageReleaseTest(unittest.TestCase):
         self.assertEqual(build[build.index("--version") + 1], "1.7.5.8")
         self.assertEqual(build[build.index("--product") + 1], "Joint Operations")
         self.assertNotIn("--full", build)
+        self.assertEqual(self.wizards, {})  # a retail player keeps the stock wizard
 
     def test_retail_expansion_stands_on_a_pristine_base(self):
         project = self.project("JOX01", expansion="jox01")
@@ -100,6 +105,9 @@ class PackageReleaseTest(unittest.TestCase):
         self.assertIn("--full", build)
         self.assertEqual(Path(build[build.index("--previous") + 1]), previous.resolve())
         self.assertEqual(build[build.index("--base") + 1], "OPENNOVA.CMD")
+        # Its wizard rides the package, marking the folder it installs into as OpenNova's.
+        tree = Path(build[build.index("--to") + 1])
+        self.assertIn("CMD=OPENNOVA.CMD", self.wizards[tree / "UPDATE.WIZ"])
 
     def test_native_expansion_exports_its_base_first(self):
         project = self.project("ONJO1", expansion="onjo1")
