@@ -298,6 +298,7 @@ func _client_handlers() -> Dictionary:
 		"server_pings_updated": _on_server_pings_updated,
 		"login_succeeded": _on_login_succeeded,
 		"login_failed": _on_login_failed,
+		"web_lobby_opened": _on_web_lobby_opened,
 		"join_failed": _on_join_failed,
 		"joined_game": _on_joined_game,
 		"hosting_started": _on_hosting_started,
@@ -969,10 +970,12 @@ func release_client() -> NovaWorldClient:
 
 
 ## The NovaWorld menu's re-entry after a match: the session comes back still
-## verified, leaves its hosting and its play (each statement only from its own
-## states), and the player lands back in the logged-in lobby with the list
-## refreshed -- no reconnect, no sign-in (UI_EnterNovaWorldMenu's chain short-circuits
-## on a live session; docs/net/novaworld-net-re.md).
+## verified and leaves its hosting and its play (each statement only from its own
+## states), with no reconnect (the connect chain returns at once on a live session),
+## and the menu opens its web lobby again as every entry does: the startup URL, whose
+## pages land on the lobby for a login the service remembers, its list loading, or on
+## the sign-in page (the engine's LobbyHttpFlow::enter carries the witness;
+## docs/net/novaworld-net-re.md). A session that is not verified lands on sign-in.
 func adopt_client(client: NovaWorldClient) -> void:
 	if client == null:
 		return
@@ -987,22 +990,35 @@ func adopt_client(client: NovaWorldClient) -> void:
 			client.get_parent().remove_child(client)
 		add_child(client)
 	_can_login = true
-	_logged_in = client.is_authenticated()
+	_logged_in = false
 	_wire_client(client)
 	client.stop_hosting()
 	client.stop_playing()
-	_host_button.disabled = not _logged_in or _target == NovaWorldSettings.Target.REAL
+	_host_button.disabled = true
 	_rows.clear()
 	_pings.clear()
-	_browser_loading = _logged_in
+	_browser_loading = false
 	_rebuild_type_filter()
 	_rebuild_view()
-	if not _logged_in:
+	if client.get_state() != NovaWorldClient.STATE_CONNECTED:
 		_return_to_login()
 		return
-	_set_status("Signed in.")
-	_set_screen(Screen.LOBBY)
-	client.refresh_servers()
+	_set_status("Opening NovaWorld...")
+	_set_screen(Screen.CONNECTING)
+	client.open_web_lobby()
+
+
+# The entry's page: the lobby (a login the service remembers; the list loads
+# behind it) or the sign-in page, whose Login posts its form.
+func _on_web_lobby_opened(signed_in: bool, nwhandle: String) -> void:
+	if not _can_login:
+		return  # the session was reset while the entry was in flight
+	if signed_in:
+		_on_login_succeeded(nwhandle)
+		return
+	_logged_in = false
+	_login_button.disabled = false
+	_return_to_login()
 
 
 ## A match that ended with an error text shows it in the NovaWorld error dialog

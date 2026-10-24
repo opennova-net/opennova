@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -68,6 +69,18 @@ std::string browser_cache_bust_url(const std::string &url, uint32_t tick_ms,
 // [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620; XML_ParseAttributes @0x655410;
 //  CUIHTMLParser_ParseTag @0x655E20]
 std::string meta_refresh_url(const std::string &page);
+
+// The template a page names, as the menu browser's parser reads it (none when it names none): the
+// FILE of the last tag the element table takes as IB3_TEMPLATE that has one, its value as the
+// attribute parser reads it (an empty one included). The browser fetches it, combined with the
+// page's URL, through its cache (browser_cache.h) once the page is processed.
+// [orig: the IB3_TEMPLATE handler @0x6558C0 (the table row @0x84C148 + 3 * 12) - a closing tag
+//  passed over @0x6558C0..0x6558C5, the FILE lookup (sub_6555C0 called @0x6558DD), the old copy
+//  freed @0x6558E6..0x6558F6 and the value's copy to the parser's +8 @0x655902..0x65592C;
+//  CUIHTMLParser_BuildContentNodeFromHTML @0x656080 - the copy to the node's +0xC @0x6563F1;
+//  UI_ProcessWebResponseContent @0x63D450 - the test @0x63D63C, CUIBrowser_AsyncFetchURLContent
+//  called @0x63D6D1 over the page's URL (the scene's +0x34, set @0x63D599)]
+std::optional<std::string> page_template_file(const std::string &page);
 
 // The lobby context the HTTP machines read — filled by the owner from the gate response + the NWU
 // session leg (the UDP side stays in the binding/ClientSession; here we only consume its outputs).
@@ -139,6 +152,20 @@ struct JoinResult {
 	std::string reason;       // when Failed
 };
 
+// --- the NovaWorld menu's entry: its web lobby's open ---
+// Every entry of the NovaWorld menu (a re-entry after a match included) opens the gate's startup
+// URL, and the pages drive the rest: the start page refreshes to NWStart, which answers the lobby
+// page for a login the service remembers or the sign-in page otherwise. In OpenNova's page model
+// (D-NET-NEW-L9-18) the lobby page is the panel's lobby, whose list load follows, and the sign-in
+// page its sign-in screen, whose Login then posts that page's form.
+struct EnterResult {
+	enum class Kind { NeedRequest, Lobby, SignIn, Failed };
+	Kind kind = Kind::Failed;
+	HttpRequestSpec request;  // when NeedRequest
+	std::string nwhandle;     // when Lobby: the jar's NWHANDLE (may be empty)
+	std::string reason;       // when Failed
+};
+
 // The proxy-assisted join's install from a resolved .joi: node = inet_addr(NI) /
 // atol(NP), cookie = atol(BK), relay = inet_addr of the NK-decoded host / the NK port,
 // each atol the CRT's (io::retail_atol; D-NET-384). A field that does not parse stays 0,
@@ -190,15 +217,34 @@ public:
 	// [orig: Mission_DeobfuscateDescription @0x4cdaa0 (a misnomer: the URL token substituter)]
 	std::string resolve_startup_url() const;
 
+	// --- the NovaWorld menu's entry (EnterResult) ---
+	// Begin: the startup URL's GET (NeedRequest), or Failed with no title or startup URL. The jar
+	// is kept: a re-entry carries the login the service may remember.
+	// [orig: UI_EnterNovaWorldMenu @0x5588F0 - g_StartupURL cleared @0x5588FF, the connect state 1
+	//  @0x558949; UI_ProcessLANSessionStateMachine @0x558DE0 - state 1 stops hosting and playing
+	//  on a live session (CGameSession_StopHosting called @0x558E76, CGameSession_StopPlaying
+	//  @0x558E80) and the chain returns at once for it; state 9 (@0x559262):
+	//  CMissionInfo_ProcessDescription called @0x559291 over the startup URL, UIScene_OpenUrl
+	//  called @0x5592ED over g_NovaWorldWebURL]
+	EnterResult enter();
+	// Feed a completed entry response: the start page's META refresh is followed to NWStart, whose
+	// page is the lobby (it sets @GSB_SERVER@, the address the lobby page's list load reads) or the
+	// sign-in page (its form posts to NWLogin.dll); any other page fails with its message.
+	EnterResult on_enter_response(bool transport_ok, int code,
+	                              const std::vector<std::string> &response_headers,
+	                              const std::vector<uint8_t> &body);
+	bool enter_active() const { return enter_step_ != EnterStep::Idle || enter_template_.next.has_value(); }
+
 	// --- EPASK login chain ---
-	// Begin: returns the prepare GET (NeedRequest) or Failed (no startup_url). [orig: login()]
+	// Begin: returns the prepare GET (NeedRequest) or Failed (no startup_url); with the sign-in page
+	// already shown (an entry that landed on it), the page's form POST at once. [orig: login()]
 	LoginResult login(const std::string &username, const std::string &password);
 	// Feed a completed login response; advances PREPARE -> (NWSTART) -> POST -> POLL. [orig:
 	// on_login_request_completed()]. `transport_ok` is the owner's "the HTTP call itself succeeded"
 	// (Godot RESULT_SUCCESS); `code` is the HTTP status (must be 200).
 	LoginResult on_login_response(bool transport_ok, int code, const std::vector<std::string> &response_headers,
 	                              const std::vector<uint8_t> &body);
-	bool login_active() const { return login_step_ != LoginStep::Idle; }
+	bool login_active() const { return login_step_ != LoginStep::Idle || login_template_.next.has_value(); }
 
 	// --- GSB server browser ---
 	// Build the GSB fetch (the title's server list, JO's jop_2.gsb?a=1) with the current cookies;
@@ -217,7 +263,7 @@ public:
 	// parses the .joi -> {host, port}. [orig: on_join_request_completed()]
 	JoinResult on_join_response(bool transport_ok, int code, const std::vector<std::string> &response_headers,
 	                            const std::vector<uint8_t> &body);
-	bool join_active() const { return join_step_ != JoinStep::Idle; }
+	bool join_active() const { return join_step_ != JoinStep::Idle || join_template_.next.has_value(); }
 
 	// --- the Host leg ---
 	// Begin: the GET of the main page's @HOST_URL@ global (NeedRequest), or Failed when no page set
@@ -233,7 +279,7 @@ public:
 	HostKeyResult on_host_response(bool transport_ok, int code,
 	                               const std::vector<std::string> &response_headers,
 	                               const std::vector<uint8_t> &body);
-	bool host_active() const { return host_step_ != HostStep::Idle; }
+	bool host_active() const { return host_step_ != HostStep::Idle || host_template_.next.has_value(); }
 	static constexpr int kMaxHostHops = 8;
 
 	// The menu browser's page globals (<IB3_GLOBAL name="@NAME@">value</IB3_GLOBAL>) the pages this
@@ -250,6 +296,32 @@ private:
 	enum class LoginStep { Idle, Prepare, NwStart, Post, Poll };
 	enum class JoinStep { Idle, First, Second, Page };
 	enum class HostStep { Idle, Fetching };
+	enum class EnterStep { Idle, Prepare, Start };
+
+	// A page's IB3_TEMPLATE GET in flight on one leg, and the leg's result it holds back until the
+	// template's answer: the browser runs its page requests one at a time in their order, the
+	// template's (queued while the page is processed) ahead of the page's next (a refresh queued at
+	// a later frame, a list load the template's own action starts).
+	// [orig: CGopherWnd_PumpRequests @0x659740 (the gopher window's request pump) - a request whose
+	//  +0x70 word is set marks the pass @0x6599A3..0x6599A8 and every later such request waits
+	//  @0x65976C..0x659775; the template's fetch passes that word as 1 (UI_ProcessWebResponseContent
+	//  @0x63D450, `push 1` @0x63D6C7), as UIScene_OpenUrl's page fetch does (@0x63E3AF)]
+	template <typename Result>
+	struct TemplateHold {
+		std::string url;            // the template GET's URL
+		std::optional<Result> next; // the leg's result, held until the template's answer
+	};
+	// The leg's result behind the page's template GET when the process's browser cache does not
+	// serve the template (browser_cache.h); `next` itself otherwise.
+	template <typename Result>
+	Result behind_template(TemplateHold<Result> &hold, const std::string &page_url,
+	                       const std::vector<uint8_t> &page, Result next);
+	// The held result once the answer fed in is the template's (its cookies merged, its end filed in
+	// the cache); none when no template is in flight on the leg.
+	template <typename Result>
+	std::optional<Result> template_answered(TemplateHold<Result> &hold, bool transport_ok, int code,
+	                                        const std::vector<std::string> &response_headers,
+	                                        const std::vector<uint8_t> &body);
 
 	// The menu browser's GET headers and its form post's (each past the request line and Host).
 	std::vector<std::string> request_headers() const;
@@ -260,6 +332,11 @@ private:
 	// the live nwuid for the empty NWUID entry.
 	std::vector<std::pair<std::string, std::string>> identity_seed() const;
 	LoginResult login_post();                 // the /NWLogin.dll POST (the 13-field form), or Failed
+	// The jar's EPASK bundle read into epask_, as the sign-in page's submit encrypts under it; the
+	// failure's reason when the jar holds none or the modexp gate rejects it.
+	std::string take_epask(const std::vector<uint8_t> &page);
+	LoginResult login_request(HttpRequestSpec req); // a login leg's request, its URL the page URL
+	EnterResult enter_request(HttpRequestSpec req); // an entry leg's request, likewise
 	std::string gsb_url() const;
 	// A relay page's META refresh as an absolute URL ("" when it names none).
 	std::string relay_refresh_url(const std::vector<uint8_t> &body) const;
@@ -276,6 +353,15 @@ private:
 	JoinStep join_step_ = JoinStep::Idle;
 	HostStep host_step_ = HostStep::Idle;
 	int host_hops_ = 0;
+	EnterStep enter_step_ = EnterStep::Idle;
+	// The sign-in page is the one shown (an entry landed on it): Login posts its form.
+	bool sign_in_page_shown_ = false;
+	// Each leg's last request's URL: the page its answer is, whose template it names.
+	std::string login_page_url_, join_page_url_, host_page_url_, enter_page_url_;
+	TemplateHold<LoginResult> login_template_;
+	TemplateHold<JoinResult> join_template_;
+	TemplateHold<HostKeyResult> host_template_;
+	TemplateHold<EnterResult> enter_template_;
 	std::map<std::string, std::string> globals_; // upper-cased name -> value
 };
 

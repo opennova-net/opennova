@@ -3,6 +3,7 @@
 // LoginStep/JoinStep machines, and the cookie glue against synthetic server responses.
 
 #include <net/novaworld/http_flow.h>
+#include <net/novaworld/browser_cache.h>
 #include <net/title/title_identity.h>
 #include <base/gameprofile/gameprofile.h>
 
@@ -707,6 +708,227 @@ static bool test_gate_reply_jar_fields() {
 	return g_fail == 0;
 }
 
+// The menu browser's content cache (browser_cache.h): a page's relative reference combined with the
+// page's URL as URL_CombineComponents combines them, the cache key AsyncFetchURLContent files a
+// download under, and the process's list: a key requested once, joined while in flight, served
+// once stored, requested again after an end with nothing stored.
+// [orig: URL_CombineComponents @0x650BC0; URL_ParseComponents @0x650140;
+//  CUIBrowser_AsyncFetchURLContent @0x64DE80; HTTP_DownloadCompletionCallback @0x64DB20]
+static bool test_browser_cache_rule() {
+	// A relative path replaces the base's whole path and query; the base's host and port stay.
+	expect(nw::browser_combine_url("http://gs.novaworld.net/NWLogin.dll", "jop_2_relay.mnx") ==
+	               "http://gs.novaworld.net/jop_2_relay.mnx",
+	       "a template joins the page's host");
+	expect(nw::browser_combine_url("http://gs.opennova.test:8080/NWStart.dll?MSGBASE=jop_2_msg.htm",
+	               "jop_2_login.mnx") == "http://gs.opennova.test:8080/jop_2_login.mnx",
+	       "the base's port stays, its query goes");
+	expect(nw::browser_combine_url("http://h/dir/page.htm", "t.mnx") == "http://h/t.mnx",
+	       "no directory of the base's is kept");
+	expect(nw::browser_combine_url("http://h/page.htm", "t.mnx?v=2") == "http://h/t.mnx?v=2",
+	       "the reference's query rides along");
+	expect(nw::browser_combine_url("http://h/page.htm", "HTTP://other:81/t.mnx") ==
+	               "HTTP://other:81/t.mnx",
+	       "a reference with a scheme is taken whole");
+	// An absolute path is no relative one: the base's path and query come back (the combine's
+	// last branch), as retail combines it.
+	expect(nw::browser_combine_url("http://h/a.htm?q=1", "/t.mnx") == "http://h/a.htm?q=1",
+	       "an absolute path keeps the base's path and query");
+
+	// The key: "cache\" and the URL to its '?', every byte but an alphanumeric or '.' as '_'.
+	expect(nw::browser_cache_key("http://gs.opennova.test:8080/jop_2_relay.mnx?nocachefix=1") ==
+	               "cache\\http___gs.opennova.test_8080_jop_2_relay.mnx",
+	       "the cache key");
+	expect(nw::browser_cache_key("http://h:80/x.mnx") != nw::browser_cache_key("http://h/x.mnx"),
+	       "a port spelled out is another key");
+
+	nw::BrowserCache cache;
+	const std::string url = "http://gs.novaworld.net/jop_2_main.mnx";
+	expect(cache.fetch(url), "a key's first fetch is requested");
+	expect(!cache.fetch(url), "a fetch of a key in flight joins it");
+	cache.complete(url, true);
+	expect(cache.holds(url), "a stored download is held");
+	expect(!cache.fetch("HTTP://GS.NOVAWORLD.NET/JOP_2_MAIN.MNX?a=1"),
+	       "a held key serves any URL of that key, its case and query apart");
+	const std::string relay = "http://gs.novaworld.net/jop_2_relay.mnx";
+	expect(cache.fetch(relay), "another key is requested");
+	cache.complete(relay, false);
+	expect(!cache.holds(relay) && cache.fetch(relay), "an end with nothing stored is requested again");
+	cache.clear();
+	expect(cache.fetch(url), "the list's free forgets every key");
+	return g_fail == 0;
+}
+
+// A page's IB3_TEMPLATE as the menu browser's parser reads it.
+// [orig: the IB3_TEMPLATE handler @0x6558C0; CUIHTMLParser_ParseTag @0x655E20]
+static bool test_page_template_file() {
+	expect(!nw::page_template_file("<HTML><HEAD></HEAD></HTML>").has_value(), "no template");
+	expect(nw::page_template_file("<IB3_TEMPLATE file=\"jop_2_login.mnx\">").value_or("") ==
+	               "jop_2_login.mnx",
+	       "the FILE attribute, case-insensitively");
+	expect(nw::page_template_file("<IB3_TEMPLATE FILE=a.mnx><IB3_TEMPLATE><ib3_template file='b.mnx'>")
+	                       .value_or("") == "b.mnx",
+	       "the last template with a FILE wins; one without leaves it");
+	expect(nw::page_template_file("<IB3_TEMPLATE file=\"a.mnx\"></IB3_TEMPLATE>").value_or("") ==
+	               "a.mnx",
+	       "a closing tag changes nothing");
+	expect(nw::page_template_file("<IB3_TEMPLATE file>").value_or("x").empty(),
+	       "a FILE with no value names the empty reference");
+	return g_fail == 0;
+}
+
+static nw::LobbyHttpContext templated_ctx() {
+	nw::LobbyHttpContext c;
+	c.title = &kJo;
+	c.gate_tag = c.title->gate_tag;
+	c.startup_url = "http://[domainname]/nwprepare.dll?ver1=[VER1]&gt=[GT]&url=jop_2_start.htm";
+	c.web_domain = "gs.novaworld.net";
+	c.locale = "en_US";
+	return c;
+}
+
+// The service's pages (apps/novaworld_web/templates): the start page's refresh to NWStart, the
+// login page's form and template, the relay page's, the main page's @GSB_SERVER@ and template.
+static const std::string kStartPage =
+		"<HTML><HEAD><META HTTP-EQUIV=\"refresh\" CONTENT=\"0;URL=NWStart.dll?MSGBASE=jop_2_msg.htm"
+		"&IN=jop_2_main.htm&OUT=jop_2_login.htm\"></HEAD></HTML>";
+static const std::string kLoginPage =
+		"<HTML><BODY><FORM ACTION=\"NWLogin.dll\" METHOD=\"POST\"></FORM>"
+		"<IB3_TEMPLATE file=\"jop_2_login.mnx\"></BODY></HTML>";
+static const std::string kRelayPage =
+		"<HTML><HEAD><META http-equiv=\"refresh\" CONTENT=0;URL=\"NWLogin.dll\"></HEAD>"
+		"<IB3_TEMPLATE file=\"jop_2_relay.mnx\"></HTML>";
+static const std::string kMainPage =
+		"<HTML><IB3_GLOBAL name=\"@HOST_URL@\">http://gs.novaworld.net/nwhost.dll</IB3_GLOBAL>"
+		"<IB3_SUBST name=\"@GSB_SERVER@\">http://gs.novaworld.net/jop_2.gsb</IB3_SUBST>"
+		"<IB3_TEMPLATE file=\"jop_2_main.mnx\"></HTML>";
+
+// The login's template legs, per process: each page's template is requested ahead of the leg's
+// next request, and only the first time the process meets it (the LN S1 / S1b / S1c / S1d retail
+// logins: login.mnx after NWStart's answer, relay.mnx after the POST's and ahead of the first poll,
+// none after the second relay page, main.mnx after the last poll's and ahead of the GSB).
+static bool test_login_template_legs() {
+	nw::process_browser_cache().clear();
+	nw::LobbyHttpFlow f;
+	f.set_context(templated_ctx());
+	nw::LoginResult r = f.login("p", "s");
+	r = f.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), bytes(kStartPage));
+	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest && contains(r.request.url, "/NWStart.dll?"),
+	            "prepare -> NWStart"))
+		return false;
+	r = f.on_login_response(true, 200, set_cookie("USEJUNCTION=0"), bytes(kLoginPage));
+	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest &&
+	                    r.request.method == nw::HttpMethod::Get &&
+	                    r.request.url == "http://gs.novaworld.net/jop_2_login.mnx" && r.request.cache_bust,
+	            "the login page's template goes ahead of the post, with its nocachefix pair"))
+		return false;
+	r = f.on_login_response(true, 200, set_cookie("YOURIP=10.0.0.9"), bytes("<IB3 mnx>"));
+	expect(f.cookies().find("YOURIP") != nullptr, "the template's answer sets its cookies");
+	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest && r.request.method == nw::HttpMethod::Post,
+	            "the template's answer releases the post"))
+		return false;
+	r = f.on_login_response(true, 200, set_cookie("LOGINSESSIONTAG=t1"), bytes(kRelayPage));
+	expect(r.kind == nw::LoginResult::Kind::NeedRequest &&
+	               r.request.url == "http://gs.novaworld.net/jop_2_relay.mnx",
+	       "the relay page's template goes ahead of its refresh");
+	r = f.on_login_response(true, 200, {}, bytes("<IB3 relay mnx>"));
+	expect(r.kind == nw::LoginResult::Kind::NeedRequest &&
+	               r.request.url == "http://gs.novaworld.net/NWLogin.dll",
+	       "then the refresh");
+	r = f.on_login_response(true, 200, {}, bytes(kRelayPage));
+	expect(r.kind == nw::LoginResult::Kind::NeedRequest &&
+	               r.request.url == "http://gs.novaworld.net/NWLogin.dll",
+	       "the second relay page's template is the cache's: the refresh goes at once");
+	r = f.on_login_response(true, 200, {"Set-Cookie: NWHANDLE=ljim", "Set-Cookie: PCID=42"},
+			bytes(kMainPage));
+	expect(r.kind == nw::LoginResult::Kind::NeedRequest &&
+	               r.request.url == "http://gs.novaworld.net/jop_2_main.mnx" && f.login_active(),
+	       "the main page's template goes ahead of the login's success");
+	r = f.on_login_response(true, 200, {}, bytes("<IB3 main mnx>"));
+	if (!expect(r.kind == nw::LoginResult::Kind::Succeeded && r.nwhandle == "ljim" && !f.login_active(),
+	            "the template's answer releases the success"))
+		return false;
+
+	// A later login in the process: every template is the cache's.
+	nw::LobbyHttpFlow g;
+	g.set_context(templated_ctx());
+	g.login("p", "s");
+	g.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), bytes(kStartPage));
+	r = g.on_login_response(true, 200, {}, bytes(kLoginPage));
+	expect(r.kind == nw::LoginResult::Kind::NeedRequest && r.request.method == nw::HttpMethod::Post,
+	       "a stored login template: NWStart's answer -> the post at once");
+
+	// A template whose answer stored nothing is requested again by the next page naming it.
+	nw::process_browser_cache().clear();
+	nw::LobbyHttpFlow k;
+	k.set_context(templated_ctx());
+	k.login("p", "s");
+	k.on_login_response(true, 200, set_cookie("EPASK=" + make_epask_cookie()), bytes(kStartPage));
+	k.on_login_response(true, 200, {}, bytes(kLoginPage));
+	r = k.on_login_response(true, 404, {}, {});
+	expect(r.kind == nw::LoginResult::Kind::NeedRequest && r.request.method == nw::HttpMethod::Post,
+	       "a failed template answer still releases the post");
+	expect(!nw::process_browser_cache().holds("http://gs.novaworld.net/jop_2_login.mnx"),
+	       "and leaves nothing held");
+	nw::process_browser_cache().clear();
+	return g_fail == 0;
+}
+
+// The NovaWorld menu's re-entry (LobbyHttpFlow::enter): the startup URL, the start page's refresh to
+// NWStart, whose page is the lobby (a remembered login; its template the process holds, so no
+// request) or the sign-in page, whose Login then posts its form at once. The LN S1 / S1b / S1d
+// retail re-entries: nwprepare, NWStart answering the main page, no main.mnx, the GSB.
+// [orig: UI_EnterNovaWorldMenu @0x5588F0; UI_ProcessLANSessionStateMachine @0x558DE0 - state 9,
+//  UIScene_OpenUrl called @0x5592ED]
+static bool test_enter_reentry() {
+	nw::process_browser_cache().clear();
+	nw::process_browser_cache().fetch("http://gs.novaworld.net/jop_2_main.mnx");
+	nw::process_browser_cache().complete("http://gs.novaworld.net/jop_2_main.mnx", true);
+	nw::LobbyHttpFlow f;
+	f.set_context(templated_ctx());
+	nw::EnterResult r = f.enter();
+	if (!expect(r.kind == nw::EnterResult::Kind::NeedRequest && r.request.cache_bust &&
+	                    r.request.url ==
+	                            "http://gs.novaworld.net/nwprepare.dll?ver1=3&gt=jop:cus2&url=jop_2_start.htm",
+	            "enter() opens the resolved startup URL"))
+		return false;
+	expect(f.enter().kind == nw::EnterResult::Kind::Failed, "one entry at a time");
+	r = f.on_enter_response(true, 200,
+			{"Set-Cookie: EPASK=" + make_epask_cookie(), "Set-Cookie: NWHANDLE=ljim"}, bytes(kStartPage));
+	if (!expect(r.kind == nw::EnterResult::Kind::NeedRequest &&
+	                    r.request.url == "http://gs.novaworld.net/NWStart.dll?MSGBASE=jop_2_msg.htm"
+	                                     "&IN=jop_2_main.htm&OUT=jop_2_login.htm",
+	            "the start page's refresh to NWStart"))
+		return false;
+	r = f.on_enter_response(true, 200, set_cookie("USEJUNCTION=0"), bytes(kMainPage));
+	expect(r.kind == nw::EnterResult::Kind::Lobby && r.nwhandle == "ljim" && !f.enter_active(),
+	       "NWStart's lobby page, its template the process's: the lobby at once");
+	expect(f.browser_global("@HOST_URL@") != nullptr, "the lobby page's globals are kept");
+
+	// The service remembers no login: the sign-in page, its template requested first.
+	r = f.enter();
+	r = f.on_enter_response(true, 200, {}, bytes(kStartPage));
+	r = f.on_enter_response(true, 200, {}, bytes(kLoginPage));
+	expect(r.kind == nw::EnterResult::Kind::NeedRequest &&
+	               r.request.url == "http://gs.novaworld.net/jop_2_login.mnx",
+	       "the sign-in page's template goes first");
+	r = f.on_enter_response(true, 200, {}, bytes("<IB3 login mnx>"));
+	if (!expect(r.kind == nw::EnterResult::Kind::SignIn, "then the sign-in page")) return false;
+	const nw::LoginResult post = f.login("p", "s");
+	expect(post.kind == nw::LoginResult::Kind::NeedRequest && post.request.method == nw::HttpMethod::Post &&
+	               post.request.url == "http://gs.novaworld.net/NWLogin.dll",
+	       "the sign-in page's Login posts its form, with no second open");
+
+	// A page that is neither fails with its message.
+	r = f.enter();
+	r = f.on_enter_response(true, 200, {}, bytes(kStartPage));
+	r = f.on_enter_response(true, 200, {},
+			bytes("<IB3_SUBST name=\"@GENERIC@\">NovaWorld is down for maintenance.</IB3_SUBST>"));
+	expect(r.kind == nw::EnterResult::Kind::Failed && r.reason == "NovaWorld is down for maintenance.",
+	       "a message page fails the entry with its text");
+	nw::process_browser_cache().clear();
+	return g_fail == 0;
+}
+
 int main() {
 	test_gate_reply_jar_fields();
 	test_meta_refresh_walk();
@@ -719,6 +941,10 @@ int main() {
 	test_login_failures();
 	test_gsb_request_and_parse();
 	test_join_resolves();
+	test_browser_cache_rule();
+	test_page_template_file();
+	test_login_template_legs();
+	test_enter_reentry();
 	std::fprintf(stderr, g_fail == 0 ? "OK\n" : "FAILED (%d)\n", g_fail);
 	return g_fail == 0 ? 0 : 1;
 }

@@ -127,6 +127,7 @@ void NovaWorldClient::_bind_methods() {
 	                     &NovaWorldClient::apply_ping_reply);
 	ClassDB::bind_method(D_METHOD("_apply_ping_results", "results", "generation"),
 	                     &NovaWorldClient::apply_ping_results);
+	ClassDB::bind_method(D_METHOD("open_web_lobby"), &NovaWorldClient::open_web_lobby);
 	ClassDB::bind_method(D_METHOD("login", "username", "password"), &NovaWorldClient::login);
 	ClassDB::bind_method(D_METHOD("join", "rid"), &NovaWorldClient::join);
 	ClassDB::bind_method(D_METHOD("start_hosting", "options"), &NovaWorldClient::start_hosting);
@@ -141,6 +142,9 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(
 		D_METHOD("on_gsb_request_completed", "result", "response_code", "headers", "body"),
 		&NovaWorldClient::on_gsb_request_completed);
+	ClassDB::bind_method(
+		D_METHOD("on_enter_request_completed", "result", "response_code", "headers", "body"),
+		&NovaWorldClient::on_enter_request_completed);
 	ClassDB::bind_method(
 		D_METHOD("on_login_request_completed", "result", "response_code", "headers", "body"),
 		&NovaWorldClient::on_login_request_completed);
@@ -168,6 +172,10 @@ void NovaWorldClient::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("error_occurred", PropertyInfo(Variant::STRING, "message")));
 	ADD_SIGNAL(MethodInfo("state_changed", PropertyInfo(Variant::INT, "state")));
 	ADD_SIGNAL(MethodInfo("login_succeeded", PropertyInfo(Variant::STRING, "nwhandle")));
+	// The menu entry's page (open_web_lobby): the lobby (signed_in, the jar's NWHANDLE) or the
+	// sign-in page.
+	ADD_SIGNAL(MethodInfo("web_lobby_opened", PropertyInfo(Variant::BOOL, "signed_in"),
+			PropertyInfo(Variant::STRING, "nwhandle")));
 	ADD_SIGNAL(MethodInfo("login_failed", PropertyInfo(Variant::STRING, "reason")));
 	ADD_SIGNAL(MethodInfo("join_failed", PropertyInfo(Variant::STRING, "reason")));
 	ADD_SIGNAL(MethodInfo("joined_game", PropertyInfo(Variant::STRING, "host"),
@@ -285,6 +293,13 @@ void NovaWorldClient::start() {
 		login_http_->set_timeout(10.0);
 		login_http_->connect("request_completed",
 		                     Callable(this, "on_login_request_completed"));
+	}
+	if (enter_http_ == nullptr) {
+		enter_http_ = memnew(HTTPRequest);
+		add_child(enter_http_);
+		enter_http_->set_timeout(10.0);
+		enter_http_->connect("request_completed",
+		                     Callable(this, "on_enter_request_completed"));
 	}
 	if (join_http_ == nullptr) {
 		join_http_ = memnew(HTTPRequest);
@@ -475,6 +490,9 @@ void NovaWorldClient::stop() {
 	}
 	if (login_http_ != nullptr) {
 		login_http_->cancel_request();
+	}
+	if (enter_http_ != nullptr) {
+		enter_http_->cancel_request();
 	}
 	if (join_http_ != nullptr) {
 		join_http_->cancel_request();
@@ -1042,6 +1060,66 @@ void NovaWorldClient::apply_ping_results(const Dictionary &results, int64_t gene
 	for (int i = 0; i < rids.size(); ++i)
 		server_pings_[rids[i]] = results[rids[i]];
 	emit_signal("server_pings_updated");
+}
+
+// ---- The NovaWorld menu's entry: its web lobby's open ---------------------
+
+// The engine owns the leg (LobbyHttpFlow::enter: the startup URL, the start page's refresh to
+// NWStart, the lobby or sign-in page, each page's template through the browser cache); this ships
+// its requests on enter_http_ and maps its outcome onto the session's sign-in and the list load.
+void NovaWorldClient::open_web_lobby() {
+	if (state_ != STATE_CONNECTED) {
+		emit_signal("login_failed", String("The matchmaking service is still connecting."));
+		return;
+	}
+	if (enter_http_ == nullptr) {
+		emit_signal("login_failed", String("The matchmaking client is unavailable."));
+		return;
+	}
+	if (flow_.enter_active()) return; // the entry's open is already in flight
+	sync_flow_context();
+	const opennova::EnterResult r = flow_.enter();
+	if (r.kind != opennova::EnterResult::Kind::NeedRequest) {
+		emit_signal("login_failed", opennova::to_gd(r.reason));
+		return;
+	}
+	lobby_.connect_log(opennova::http_getting_line(r.request.url));
+	if (ship_spec(enter_http_, r.request) != OK) {
+		flow_.on_enter_response(false, 0, {}, {}); // drive the machine back to Idle
+		emit_signal("login_failed", String("Could not open the NovaWorld lobby."));
+	}
+}
+
+void NovaWorldClient::on_enter_request_completed(int result, int response_code,
+                                                 const PackedStringArray &headers,
+                                                 const PackedByteArray &body) {
+	if (state_ != STATE_CONNECTED || !flow_.enter_active()) {
+		return; // cancelled by stop/reconnect, or superseded by another lifecycle
+	}
+	const opennova::EnterResult r = flow_.on_enter_response(
+		result == HTTPRequest::RESULT_SUCCESS, response_code, pba_to_strvec(headers), from_pba(body));
+	switch (r.kind) {
+	case opennova::EnterResult::Kind::NeedRequest:
+		if (ship_spec(enter_http_, r.request) != OK) {
+			flow_.on_enter_response(false, 0, {}, {});
+			emit_signal("login_failed", String("Could not open the NovaWorld lobby."));
+		}
+		break;
+	case opennova::EnterResult::Kind::Lobby:
+		// The service remembered the login: the lobby page, whose list load follows.
+		authenticated_ = true;
+		emit_signal("web_lobby_opened", true, opennova::cp1252_to_gd(r.nwhandle));
+		trigger_gsb();
+		break;
+	case opennova::EnterResult::Kind::SignIn:
+		authenticated_ = false;
+		emit_signal("web_lobby_opened", false, String());
+		break;
+	case opennova::EnterResult::Kind::Failed:
+		authenticated_ = false;
+		emit_signal("login_failed", opennova::to_gd(r.reason));
+		break;
+	}
 }
 
 // ---- Account login (EPASK) — ADR 0010 Phase 3 --------------------------

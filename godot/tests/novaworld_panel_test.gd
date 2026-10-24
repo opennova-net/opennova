@@ -496,7 +496,25 @@ func test_adopted_session_lands_in_the_lobby_or_sign_in() -> void:
 	assert_eq(panel.client_for_test(), session, "the panel holds the returned session")
 	assert_eq(session.get_parent(), panel)
 	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.LOGIN,
-		"an unauthenticated session lands on the sign-in screen")
+		"an unverified session lands on the sign-in screen")
+
+
+# The re-entry's web lobby open (the engine's LobbyHttpFlow::enter): its page
+# lands the panel on the lobby for a login the service remembers, else on the
+# sign-in screen.
+func test_web_lobby_open_lands_on_its_page() -> void:
+	var panel := _make_panel(PackedStringArray())
+	var session := NovaWorldClient.new()
+	panel.adopt_client(session)
+	session.emit_signal("web_lobby_opened", true, "ljim")
+	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.LOBBY,
+		"the lobby page lands on the lobby")
+	assert_eq(panel.join_callsign(), "ljim", "signed in as the remembered handle")
+	assert_true(panel.browser_visible(), "the games show behind the remembered login")
+	session.emit_signal("web_lobby_opened", false, "")
+	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.LOGIN,
+		"the sign-in page lands on sign-in")
+	assert_false(panel.browser_visible(), "and hides the games")
 
 
 # A match that ended with an error text shows it first; Back re-enters

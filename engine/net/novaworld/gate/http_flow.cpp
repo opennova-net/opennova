@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -11,6 +12,7 @@
 #include <base/io/crt_ftol.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
+#include <net/novaworld/browser_cache.h>
 #include <net/novaworld/registration_url.h>
 #include <net/title/title_identity.h>
 
@@ -223,23 +225,26 @@ constexpr const char *kHtmlElements[] = {"meta", "TITLE", "FORM", "IB3_TEMPLATE"
 
 } // namespace
 
-// See http_flow.h.
-std::string meta_refresh_url(const std::string &page) {
-	// The browser reads the page as a C string: nothing past a NUL.
+namespace {
+
+// The browser's tag walk over a page: each tag the element table takes, `on_tag` given the
+// element's table name and, for an opening tag, its attributes (a closing tag's handler does
+// nothing). The page is read as a C string: nothing past a NUL.
+// [orig: CUIHTMLParser_ParseTag @0x655E20 - the white space past '<' @0x655E40..0x655E50,
+//  '/' @0x655E5C, the name's end at '>', '!' or white space @0x655E83..0x655E9B, the table
+//  compare (String_CompareNoCaseN called @0x655EC4: strnicmp over the name's length, so a
+//  name that prefixes an element's, the empty one included, is that element),
+//  XML_ParseAttributes called @0x655EFC, the handler called @0x655F8B, the skip to the next
+//  '>' @0x655FFC..0x65600F and past it @0x65601B]
+template <typename OnTag>
+void walk_page_tags(const std::string &page, OnTag &&on_tag) {
 	const std::string html = page.substr(0, page.find('\0'));
-	std::string url;
 	std::size_t cur = 0;
 	while (cur < html.size()) {
 		if (html[cur] != '<') {
 			++cur;
 			continue;
 		}
-		// [orig: CUIHTMLParser_ParseTag @0x655E20 - the white space past '<' @0x655E40..0x655E50,
-		//  '/' @0x655E5C, the name's end at '>', '!' or white space @0x655E83..0x655E9B, the table
-		//  compare (String_CompareNoCaseN called @0x655EC4: strnicmp over the name's length, so a
-		//  name that prefixes an element's, the empty one included, is that element),
-		//  XML_ParseAttributes called @0x655EFC, the handler called @0x655F8B, the skip to the next
-		//  '>' @0x655FFC..0x65600F and past it @0x65601B]
 		++cur;
 		while (html_space(html[cur])) ++cur;
 		const bool closing = html[cur] == '/';
@@ -262,46 +267,102 @@ std::string meta_refresh_url(const std::string &page) {
 		}
 		if (element != nullptr) {
 			cur = name_end;
-			if (!closing) {
-				const auto attributes = html_tag_attributes(html, cur);
-				// META's handler: an HTTP-EQUIV of REFRESH, whole, and a CONTENT. The URL is
-				// sought from the CONTENT's first ';' as "URL=", one leading quote is skipped, and
-				// the copy runs to a quote or the end; each such tag overwrites the last. With no
-				// ';' or no "URL=", retail copies its uninitialized buffer (a retail bug): none here.
-				// [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620 - the HTTP-EQUIV lookup called
-				//  @0x65565F, String_CompareNoCase against "REFRESH" called @0x655676, the CONTENT
-				//  lookup called @0x655693, the ';' scan @0x6556B0..0x6556BC, String_CompareNoCaseN
-				//  against "URL=" called @0x6556CD, one quote skipped @0x6556EE..0x6556F6, the copy
-				//  to a quote or the end @0x655701..0x655717, the uninitialized buffer's copy on the
-				//  other paths @0x655733]
-				const std::string *equiv = html_attribute(attributes, "HTTP-EQUIV");
-				const std::string *content = html_attribute(attributes, "CONTENT");
-				if (element == kHtmlElements[0] && equiv != nullptr && strutil::iequals(*equiv, "REFRESH") &&
-						content != nullptr) {
-					url.clear();
-					const std::size_t semicolon = content->find(';');
-					std::size_t u = semicolon == std::string::npos ? content->size() : semicolon;
-					while (u < content->size() &&
-					       !strutil::starts_with_icase(std::string_view(*content).substr(u), "URL="))
-						++u;
-					if (u < content->size()) {
-						std::size_t begin = u + 4;
-						if (begin < content->size() && ((*content)[begin] == '"' || (*content)[begin] == '\''))
-							++begin;
-						std::size_t end = begin;
-						while (end < content->size() && (*content)[end] != '"' && (*content)[end] != '\'') ++end;
-						url = content->substr(begin, end - begin);
-					}
-				}
-			}
+			if (!closing) on_tag(element, html_tag_attributes(html, cur));
 		}
 		while (cur < html.size() && html[cur] != '>') ++cur;
 		if (cur < html.size()) ++cur;
 	}
+}
+
+// The element table's rows by name.
+const char *const kMetaElement = kHtmlElements[0];
+const char *const kFormElement = kHtmlElements[2];
+const char *const kTemplateElement = kHtmlElements[3];
+const char *const kSubstElement = kHtmlElements[4];
+
+} // namespace
+
+// See http_flow.h.
+std::string meta_refresh_url(const std::string &page) {
+	std::string url;
+	walk_page_tags(page, [&url](const char *element,
+			const std::vector<std::pair<std::string, std::string>> &attributes) {
+		// META's handler: an HTTP-EQUIV of REFRESH, whole, and a CONTENT. The URL is sought from
+		// the CONTENT's first ';' as "URL=", one leading quote is skipped, and the copy runs to a
+		// quote or the end; each such tag overwrites the last. With no ';' or no "URL=", retail
+		// copies its uninitialized buffer (a retail bug): none here.
+		// [orig: CUIHTMLParser_ParseMetaRefreshTag @0x655620 - the HTTP-EQUIV lookup called
+		//  @0x65565F, String_CompareNoCase against "REFRESH" called @0x655676, the CONTENT
+		//  lookup called @0x655693, the ';' scan @0x6556B0..0x6556BC, String_CompareNoCaseN
+		//  against "URL=" called @0x6556CD, one quote skipped @0x6556EE..0x6556F6, the copy
+		//  to a quote or the end @0x655701..0x655717, the uninitialized buffer's copy on the
+		//  other paths @0x655733]
+		if (element != kMetaElement) return;
+		const std::string *equiv = html_attribute(attributes, "HTTP-EQUIV");
+		const std::string *content = html_attribute(attributes, "CONTENT");
+		if (equiv == nullptr || !strutil::iequals(*equiv, "REFRESH") || content == nullptr) return;
+		url.clear();
+		const std::size_t semicolon = content->find(';');
+		std::size_t u = semicolon == std::string::npos ? content->size() : semicolon;
+		while (u < content->size() &&
+		       !strutil::starts_with_icase(std::string_view(*content).substr(u), "URL="))
+			++u;
+		if (u < content->size()) {
+			std::size_t begin = u + 4;
+			if (begin < content->size() && ((*content)[begin] == '"' || (*content)[begin] == '\''))
+				++begin;
+			std::size_t end = begin;
+			while (end < content->size() && (*content)[end] != '"' && (*content)[end] != '\'') ++end;
+			url = content->substr(begin, end - begin);
+		}
+	});
 	return url;
 }
 
+// See http_flow.h.
+std::optional<std::string> page_template_file(const std::string &page) {
+	std::optional<std::string> file;
+	walk_page_tags(page, [&file](const char *element,
+			const std::vector<std::pair<std::string, std::string>> &attributes) {
+		if (element != kTemplateElement) return;
+		if (const std::string *value = html_attribute(attributes, "FILE")) file = *value;
+	});
+	return file;
+}
+
 namespace {
+
+// The page NWStart answered as OpenNova's panel shows it (D-NET-NEW-L9-18's page model): the lobby
+// page sets @GSB_SERVER@ (an IB3_SUBST, the address its template's GLB_LOADANDPING action loads
+// the list from), the sign-in page carries the form whose ACTION is NWLogin.dll; any other page
+// (a message, the update or junction pages) is neither.
+enum class StartPageKind { Lobby, SignIn, Other };
+StartPageKind start_page_kind(const std::string &page) {
+	bool lobby = false;
+	bool sign_in = false;
+	walk_page_tags(page, [&](const char *element,
+			const std::vector<std::pair<std::string, std::string>> &attributes) {
+		if (element == kSubstElement) {
+			const std::string *name = html_attribute(attributes, "NAME");
+			if (name != nullptr && strutil::iequals(*name, "@GSB_SERVER@")) lobby = true;
+		} else if (element == kFormElement) {
+			const std::string *action = html_attribute(attributes, "ACTION");
+			if (action == nullptr) return;
+			const std::string path = action->substr(0, action->find('?'));
+			const std::size_t slash = path.rfind('/');
+			if (strutil::iequals(slash == std::string::npos ? path : path.substr(slash + 1), "NWLogin.dll"))
+				sign_in = true;
+		}
+	});
+	return lobby ? StartPageKind::Lobby : sign_in ? StartPageKind::SignIn : StartPageKind::Other;
+}
+
+EnterResult enter_fail(std::string reason) {
+	EnterResult r;
+	r.kind = EnterResult::Kind::Failed;
+	r.reason = std::move(reason);
+	return r;
+}
 
 LoginResult login_need(HttpRequestSpec req) {
 	req.cache_bust = req.method == HttpMethod::Get;
@@ -370,6 +431,66 @@ void LobbyHttpFlow::reset() {
 	login_user_.clear();
 	login_pass_.clear();
 	join_step_ = JoinStep::Idle;
+	enter_step_ = EnterStep::Idle;
+	sign_in_page_shown_ = false;
+	login_page_url_.clear();
+	join_page_url_.clear();
+	host_page_url_.clear();
+	enter_page_url_.clear();
+	// A template GET the reset cancels ends with nothing stored: the next fetch requests it again.
+	for (const std::string *url : {&login_template_.url, &join_template_.url, &host_template_.url,
+			&enter_template_.url}) {
+		if (!url->empty()) process_browser_cache().complete(*url, false);
+	}
+	login_template_ = {};
+	join_template_ = {};
+	host_template_ = {};
+	enter_template_ = {};
+}
+
+// A processed page's template goes through the process's browser cache: a template the cache
+// holds is served with no request, and the leg's next goes out at once; any other is requested
+// first, with the page's own URL as its base, and the leg's next waits for its answer.
+// [orig: UI_ProcessWebResponseContent @0x63D450 - the template test @0x63D63C,
+//  CUIBrowser_AsyncFetchURLContent called @0x63D6D1 over the scene's +0x34 (the page's URL, copied
+//  @0x63D599) and the node's +0xC (the FILE, read @0x63D6BE)]
+template <typename Result>
+Result LobbyHttpFlow::behind_template(TemplateHold<Result> &hold, const std::string &page_url,
+		const std::vector<uint8_t> &page, Result next) {
+	const std::optional<std::string> file = page_template_file(to_string_body(page));
+	if (!file || page_url.empty()) return next;
+	const std::string url = browser_combine_url(page_url, *file);
+	if (!process_browser_cache().fetch(url)) return next;
+	hold.url = url;
+	hold.next = std::move(next);
+	HttpRequestSpec req;
+	req.valid = true;
+	req.method = HttpMethod::Get;
+	req.url = url;
+	req.headers = request_headers();
+	req.cache_bust = true;
+	Result r;
+	r.kind = Result::Kind::NeedRequest;
+	r.request = std::move(req);
+	return r;
+}
+
+// The template's answer: its Set-Cookie lines go to the jar as every answer's do, and the cache
+// files its end, a stored body (a 2xx with bytes, the window the browser writes its file in) held
+// for the process.
+// [orig: HTTP_ResponseHandler @0x659480 - the SET-COOKIE scan @0x65961B, called for every answer
+//  by the pump @0x6599F3; HTTP_DownloadCompletionCallback @0x64DB20 - the 2xx window
+//  @0x64DB8D..0x64DBB3, the body's tests @0x64DBC1 / @0x64DBCA]
+template <typename Result>
+std::optional<Result> LobbyHttpFlow::template_answered(TemplateHold<Result> &hold, bool transport_ok,
+		int code, const std::vector<std::string> &response_headers, const std::vector<uint8_t> &body) {
+	if (!hold.next) return std::nullopt;
+	if (transport_ok) merge_response_cookies(response_headers);
+	const bool window = (code >= 200 && code <= 206) || code == 100 || code == 101;
+	process_browser_cache().complete(hold.url, transport_ok && window && !body.empty());
+	std::optional<Result> next = std::move(hold.next);
+	hold = {};
+	return next;
 }
 
 // (see godot/src/network/novaworld_client.cpp http_base()) — three derivation tiers.
@@ -424,11 +545,15 @@ std::string LobbyHttpFlow::resolve_startup_url() const {
 // The menu browser's GET headers past the transport's request line and Host, in its order: the
 // image-first Accept, Accept-Language, the IBrowse User-Agent, Pragma, then ONE "Cookie:" header
 // per jar entry (each cookie its own "Cookie: name=value;" line, not a merged header). No
-// If-Modified-Since: the browser writes it only for a page it holds a date for, and the flow
-// caches none (D-NET-NEW-L9-31).
+// If-Modified-Since: the browser writes it only from a request's date word, which its cache sets
+// only on the path that serves a stored download with no request, so no request carries one
+// (D-NET-NEW-L9-31; browser_cache.h).
 // [orig: CUIBrowser_SendHTTPRequest @0x658840 - "Host: %s" @0x658959, the Accept @0x658969,
 //  Accept-Language @0x658979, User-Agent @0x658989, the If-Modified-Since date test
-//  @0x658994..0x65899C, Pragma @0x6589D5, the Cookie lines @0x658A44..0x658AC0]
+//  @0x658994..0x65899C, Pragma @0x6589D5, the Cookie lines @0x658A44..0x658AC0;
+//  CUIBrowser_AsyncFetchURLContent @0x64DE80 - a new entry's date word zeroed @0x64E0A6 and handed
+//  to HTTP_RequestEnqueue (`mov eax, [esi+10h]` @0x64E105), the stored file's date read into it
+//  @0x64E1B5 on the served path]
 std::vector<std::string> LobbyHttpFlow::request_headers() const {
 	std::vector<std::string> h{"Accept: image/jpeg, image/x-pcx, image/pcx, image/png, text/html",
 			"Accept-Language: en", "User-Agent: NovaLogic IBrowse 2.0", "Pragma: no-cache"};
@@ -516,26 +641,154 @@ std::vector<std::pair<std::string, std::string>> LobbyHttpFlow::session_cookie_v
 	return vars;
 }
 
+// =============================== the menu's entry ===============================
+
+EnterResult LobbyHttpFlow::enter_request(HttpRequestSpec req) {
+	req.cache_bust = true;
+	enter_page_url_ = req.url;
+	EnterResult r;
+	r.kind = EnterResult::Kind::NeedRequest;
+	r.request = std::move(req);
+	return r;
+}
+
+// The NovaWorld menu's entry opens the gate's startup URL, its tokens filled, whatever the session
+// is: a re-entry after a match with the session still verified opens it as the first entry did.
+// The jar stays as the session's connect and pages left it.
+// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - state 9: CMissionInfo_ProcessDescription
+//  called @0x559291 (the startup URL's tokens into g_NovaWorldWebURL), UIScene_OpenUrl called
+//  @0x5592ED]
+EnterResult LobbyHttpFlow::enter() {
+	if (enter_active()) return enter_fail("the NovaWorld lobby is already opening");
+	if (ctx_.title == nullptr) return enter_fail("no title identity to open the NovaWorld lobby with");
+	const std::string url = resolve_startup_url();
+	if (url.empty()) return enter_fail("no gate startup_url yet — connect first");
+	sign_in_page_shown_ = false;
+	enter_step_ = EnterStep::Prepare;
+	HttpRequestSpec req;
+	req.valid = true;
+	req.method = HttpMethod::Get;
+	req.url = url;
+	req.headers = request_headers();
+	return enter_request(std::move(req));
+}
+
+EnterResult LobbyHttpFlow::on_enter_response(bool transport_ok, int code,
+                                             const std::vector<std::string> &response_headers,
+                                             const std::vector<uint8_t> &body) {
+	if (std::optional<EnterResult> held =
+			template_answered(enter_template_, transport_ok, code, response_headers, body))
+		return std::move(*held);
+	const EnterStep step = enter_step_;
+	if (step == EnterStep::Idle) return enter_fail("entry response with no pending step");
+	if (!transport_ok || code != 200) {
+		enter_step_ = EnterStep::Idle;
+		const std::string message = extract_message(body);
+		if (!message.empty()) return enter_fail(message);
+		return enter_fail("the NovaWorld lobby did not open (code " + std::to_string(code) + ")");
+	}
+	merge_response_cookies(response_headers);
+	capture_globals(body);
+	const std::string page_url = enter_page_url_;
+
+	EnterResult next = [&]() -> EnterResult {
+		if (step == EnterStep::Prepare) {
+			// The start page refreshes to NWStart, which the browser follows (relay_refresh_url).
+			const std::string refresh = relay_refresh_url(body);
+			if (refresh.empty()) {
+				enter_step_ = EnterStep::Idle;
+				const std::string message = extract_message(body);
+				return enter_fail(message.empty() ? std::string("the start page names no next page")
+				                                  : message);
+			}
+			enter_step_ = EnterStep::Start;
+			HttpRequestSpec req;
+			req.valid = true;
+			req.method = HttpMethod::Get;
+			req.url = refresh;
+			req.headers = request_headers();
+			return enter_request(std::move(req));
+		}
+		enter_step_ = EnterStep::Idle;
+		switch (start_page_kind(to_string_body(body))) {
+			case StartPageKind::Lobby: {
+				EnterResult r;
+				r.kind = EnterResult::Kind::Lobby;
+				const std::string *nh = jar_.find("NWHANDLE");
+				r.nwhandle = nh != nullptr ? *nh : std::string();
+				return r;
+			}
+			case StartPageKind::SignIn: {
+				sign_in_page_shown_ = true;
+				EnterResult r;
+				r.kind = EnterResult::Kind::SignIn;
+				return r;
+			}
+			case StartPageKind::Other:
+			default: {
+				const std::string message = extract_message(body);
+				return enter_fail(message.empty()
+						? std::string("NovaWorld answered neither its lobby nor its sign-in page")
+						: message);
+			}
+		}
+	}();
+	// The page's template ahead of what follows it: the lobby page's ahead of the list load (the LN
+	// S1 / S1b / S1d retail re-entries fetch no main.mnx: the login earlier in the process stored
+	// it), the sign-in page's ahead of the panel's sign-in.
+	return behind_template(enter_template_, page_url, body, std::move(next));
+}
+
 // =============================== EPASK login ===============================
 
+LoginResult LobbyHttpFlow::login_request(HttpRequestSpec req) {
+	login_page_url_ = req.url;
+	return login_need(std::move(req));
+}
+
 LoginResult LobbyHttpFlow::login(const std::string &username, const std::string &password) {
-	if (login_step_ != LoginStep::Idle) return login_fail("login already in flight");
+	if (login_active()) return login_fail("login already in flight");
 	if (ctx_.title == nullptr) return login_fail("no title identity to log in with");
 	const std::string refusal = title_identity_refusal(*ctx_.title, TitleIdentityPart::WebFlow);
 	if (!refusal.empty()) return login_fail(refusal);
+	login_user_ = username;
+	login_pass_ = password;
+	login_poll_count_ = 0;
+	// The sign-in page an entry landed on is the page shown: its submit posts its form under the
+	// EPASK the start page set, with no second open of the startup URL.
+	if (sign_in_page_shown_) {
+		sign_in_page_shown_ = false;
+		const std::string epask_refusal = take_epask({});
+		if (!epask_refusal.empty()) return login_fail(epask_refusal);
+		return login_post();
+	}
 	const std::string prepare_url = resolve_startup_url();
 	if (prepare_url.empty()) return login_fail("no gate startup_url yet — connect first");
 	seed_identity_cookies();
-	login_user_ = username;
-	login_pass_ = password;
 	login_step_ = LoginStep::Prepare;
-	login_poll_count_ = 0;
 	HttpRequestSpec req;
 	req.valid = true;
 	req.method = HttpMethod::Get;
 	req.url = prepare_url;
 	req.headers = request_headers();
-	return login_need(std::move(req));
+	return login_request(std::move(req));
+}
+
+// The jar's EPASK bundle, which the sign-in page's submit encrypts its fields under, with the
+// modexp gate retail applies at that submit (EPASK_ModexpEncrypt @0x66668a returns -1 for modulus
+// <= 258 or a non-positive exponent): refused here, before any request, rather than at the
+// post's body.
+std::string LobbyHttpFlow::take_epask(const std::vector<uint8_t> &page) {
+	const std::string *epask = jar_.find("EPASK");
+	if (epask == nullptr || epask->empty()) {
+		const std::string message = extract_message(page);
+		return message.empty() ? std::string("server issued no EPASK cookie") : message;
+	}
+	std::string epask_error;
+	if (!epask_from_string(*epask, epask_, &epask_error)) return "bad EPASK bundle: " + epask_error;
+	if (epask_.modulus <= 258u || epask_.exponent == 0u)
+		return "bad EPASK bundle: params rejected (modulus <= 258 or exponent 0)";
+	return std::string();
 }
 
 // [orig: send_login_post()] — the 13-field LoginFormField list, byte-preserved. A body
@@ -577,7 +830,7 @@ LoginResult LobbyHttpFlow::login_post() {
 	req.url = http_base() + "/NWLogin.dll";
 	req.headers = post_headers(body.size());
 	req.body = std::move(body);
-	return login_need(std::move(req));
+	return login_request(std::move(req));
 }
 
 // A relay page's next request: the menu browser follows the page's META refresh to the URL it
@@ -595,6 +848,9 @@ std::string LobbyHttpFlow::relay_refresh_url(const std::vector<uint8_t> &body) c
 LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
                                              const std::vector<std::string> &response_headers,
                                              const std::vector<uint8_t> &body) {
+	if (std::optional<LoginResult> held =
+			template_answered(login_template_, transport_ok, code, response_headers, body))
+		return std::move(*held);
 	const LoginStep step = login_step_;
 	if (!transport_ok || code != 200) {
 		login_step_ = LoginStep::Idle;
@@ -602,118 +858,111 @@ LoginResult LobbyHttpFlow::on_login_response(bool transport_ok, int code,
 		if (!message.empty()) return login_fail(message);
 		return login_fail("login HTTP failed (code " + std::to_string(code) + ")");
 	}
+	if (step == LoginStep::Idle) return login_fail("login response with no pending step");
 	merge_response_cookies(response_headers); // store Set-Cookie BEFORE branching
 	capture_globals(body);
+	const std::string page_url = login_page_url_;
 
-	switch (step) {
-		case LoginStep::Prepare: {
-			const std::string *epask = jar_.find("EPASK");
-			if (epask == nullptr || epask->empty()) {
-				login_step_ = LoginStep::Idle;
-				const std::string message = extract_message(body);
-				if (!message.empty()) return login_fail(message);
-				return login_fail("server issued no EPASK cookie");
+	LoginResult next = [&]() -> LoginResult {
+		switch (step) {
+			case LoginStep::Prepare: {
+				const std::string refusal = take_epask(body);
+				if (!refusal.empty()) {
+					login_step_ = LoginStep::Idle;
+					return login_fail(refusal);
+				}
+				const bool templated =
+						!ctx_.startup_url.empty() && startup_url_is_templated(ctx_.startup_url);
+				if (templated) {
+					login_step_ = LoginStep::NwStart;
+					HttpRequestSpec req;
+					req.valid = true;
+					req.method = HttpMethod::Get;
+					const TitlePages &pages = *ctx_.title->pages;
+					const std::string act = pages.activate != nullptr
+							? std::string("&ACT=") + pages.activate
+							: std::string();
+					req.url = http_base() + "/NWStart.dll?MSGBASE=" + pages.msgbase +
+							"&IN=" + pages.main + "&OUT=" + pages.login + act +
+							"&verfile=" + pages.version_file +
+							"&newupdateavailable=" + pages.new_update +
+							"&newupdateavailablewithbypass=" + pages.new_update_bypass +
+							"&junction=" + pages.junction;
+					req.headers = request_headers();
+					return login_request(std::move(req));
+				}
+				return login_post();
 			}
-			std::string epask_error;
-			if (!epask_from_string(*epask, epask_, &epask_error)) {
-				login_step_ = LoginStep::Idle;
-				return login_fail("bad EPASK bundle: " + epask_error);
+			case LoginStep::NwStart: {
+				const std::string message = extract_message(body, false);
+				if (!message.empty()) {
+					login_step_ = LoginStep::Idle;
+					return login_fail(message);
+				}
+				return login_post();
 			}
-			// The modexp gate retail applies at the form submit (EPASK_ModexpEncrypt
-			// @0x66668a returns -1 for modulus <= 258 or a non-positive exponent):
-			// fail here, before NWStart, rather than at the post's body.
-			if (epask_.modulus <= 258u || epask_.exponent == 0u) {
-				login_step_ = LoginStep::Idle;
-				return login_fail("bad EPASK bundle: params rejected (modulus <= 258 or exponent 0)");
-			}
-			const bool templated =
-					!ctx_.startup_url.empty() && startup_url_is_templated(ctx_.startup_url);
-			if (templated) {
-				login_step_ = LoginStep::NwStart;
+			case LoginStep::Post: {
+				const std::string *tag = jar_.find("LOGINSESSIONTAG");
+				if (tag == nullptr || tag->empty()) {
+					login_step_ = LoginStep::Idle;
+					const std::string message = extract_message(body);
+					if (!message.empty()) return login_fail(message);
+					return login_fail("login rejected (no session tag)");
+				}
+				const std::string refresh = relay_refresh_url(body);
+				if (refresh.empty()) {
+					login_step_ = LoginStep::Idle;
+					return login_fail("login: the answer is no relay page");
+				}
+				login_step_ = LoginStep::Poll;
+				login_poll_count_ = 0;
 				HttpRequestSpec req;
 				req.valid = true;
 				req.method = HttpMethod::Get;
-				const TitlePages &pages = *ctx_.title->pages;
-				const std::string act = pages.activate != nullptr
-						? std::string("&ACT=") + pages.activate
-						: std::string();
-				req.url = http_base() + "/NWStart.dll?MSGBASE=" + pages.msgbase +
-						"&IN=" + pages.main + "&OUT=" + pages.login + act +
-						"&verfile=" + pages.version_file +
-						"&newupdateavailable=" + pages.new_update +
-						"&newupdateavailablewithbypass=" + pages.new_update_bypass +
-						"&junction=" + pages.junction;
+				req.url = refresh;
 				req.headers = request_headers();
-				return login_need(std::move(req));
+				return login_request(std::move(req));
 			}
-			return login_post();
+			case LoginStep::Poll:
+			default: {
+				const std::string *nh = jar_.find("NWHANDLE");
+				const std::string *pc = jar_.find("PCID");
+				if (nh && !nh->empty()) {
+					login_step_ = LoginStep::Idle;
+					LoginResult r;
+					r.kind = LoginResult::Kind::Succeeded;
+					r.nwhandle = *nh;
+					r.pcid = (pc && !pc->empty()) ? *pc : std::string();
+					return r;
+				}
+				// The relay page's @MESSAGE@ text is progress, not rejection.
+				// Live .204 returns it while login is pending and needs another poll.
+				const std::string message = extract_message(body, false);
+				if (!message.empty()) {
+					login_step_ = LoginStep::Idle;
+					return login_fail(message);
+				}
+				constexpr int kMaxLoginPolls = 10;
+				const std::string refresh = relay_refresh_url(body);
+				if (refresh.empty() || ++login_poll_count_ >= kMaxLoginPolls) {
+					login_step_ = LoginStep::Idle;
+					return login_fail("login did not complete (no account handle)");
+				}
+				HttpRequestSpec req;
+				req.valid = true;
+				req.method = HttpMethod::Get;
+				req.url = refresh;
+				req.headers = request_headers();
+				return login_request(std::move(req));
+			}
 		}
-		case LoginStep::NwStart: {
-			const std::string message = extract_message(body, false);
-			if (!message.empty()) {
-				login_step_ = LoginStep::Idle;
-				return login_fail(message);
-			}
-			return login_post();
-		}
-		case LoginStep::Post: {
-			const std::string *tag = jar_.find("LOGINSESSIONTAG");
-			if (tag == nullptr || tag->empty()) {
-				login_step_ = LoginStep::Idle;
-				const std::string message = extract_message(body);
-				if (!message.empty()) return login_fail(message);
-				return login_fail("login rejected (no session tag)");
-			}
-			const std::string next = relay_refresh_url(body);
-			if (next.empty()) {
-				login_step_ = LoginStep::Idle;
-				return login_fail("login: the answer is no relay page");
-			}
-			login_step_ = LoginStep::Poll;
-			login_poll_count_ = 0;
-			HttpRequestSpec req;
-			req.valid = true;
-			req.method = HttpMethod::Get;
-			req.url = next;
-			req.headers = request_headers();
-			return login_need(std::move(req));
-		}
-		case LoginStep::Poll: {
-			const std::string *nh = jar_.find("NWHANDLE");
-			const std::string *pc = jar_.find("PCID");
-			if (nh && !nh->empty()) {
-				login_step_ = LoginStep::Idle;
-				LoginResult r;
-				r.kind = LoginResult::Kind::Succeeded;
-				r.nwhandle = *nh;
-				r.pcid = (pc && !pc->empty()) ? *pc : std::string();
-				return r;
-			}
-			// The relay page's @MESSAGE@ text is progress, not rejection.
-			// Live .204 returns it while login is pending and needs another poll.
-			const std::string message = extract_message(body, false);
-			if (!message.empty()) {
-				login_step_ = LoginStep::Idle;
-				return login_fail(message);
-			}
-			constexpr int kMaxLoginPolls = 10;
-			const std::string next = relay_refresh_url(body);
-			if (next.empty() || ++login_poll_count_ >= kMaxLoginPolls) {
-				login_step_ = LoginStep::Idle;
-				return login_fail("login did not complete (no account handle)");
-			}
-			HttpRequestSpec req;
-			req.valid = true;
-			req.method = HttpMethod::Get;
-			req.url = next;
-			req.headers = request_headers();
-			return login_need(std::move(req));
-		}
-		case LoginStep::Idle:
-		default:
-			login_step_ = LoginStep::Idle;
-			return login_fail("login response with no pending step");
-	}
+	}();
+	// The page's template is fetched ahead of the leg's next: the sign-in page's ahead of the post,
+	// the relay page's ahead of its refresh, the lobby page's ahead of the list load the login's
+	// success starts (the LN S1 / S1b / S1c / S1d retail logins: login.mnx after NWStart, relay.mnx
+	// after the POST's answer and ahead of the first poll, main.mnx after the last poll's answer and
+	// ahead of the GSB).
+	return behind_template(login_template_, page_url, body, std::move(next));
 }
 
 // =============================== GSB browser ===============================
@@ -766,6 +1015,7 @@ JoinResult LobbyHttpFlow::join(uint32_t rid) {
 			"&msgbase=" + pages.msgbase + "&nodb=" + pages.no_db +
 			"&pfid=" + std::to_string(*ctx_.title->pfid) + "&mode=Login&rid=" + std::to_string(rid);
 	req.headers = request_headers();
+	join_page_url_ = req.url;
 	return join_need(std::move(req));
 }
 
@@ -773,6 +1023,9 @@ JoinResult LobbyHttpFlow::join(uint32_t rid) {
 JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
                                            const std::vector<std::string> &response_headers,
                                            const std::vector<uint8_t> &body) {
+	if (std::optional<JoinResult> held =
+			template_answered(join_template_, transport_ok, code, response_headers, body))
+		return std::move(*held);
 	const JoinStep step = join_step_;
 	if (!transport_ok || code != 200) {
 		join_step_ = JoinStep::Idle;
@@ -790,13 +1043,18 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 
 	switch (step) {
 		case JoinStep::First: {
-			// The relay page refreshes to the second leg (relay_refresh_url).
+			// The relay page refreshes to the second leg (relay_refresh_url), behind the page's
+			// template (behind_template; the relay template a login's relay page fetched earlier in
+			// the process is served from the cache: the LN S1b / S1d retail joiners fetch none here).
+			const std::string page_url = join_page_url_;
 			const std::string next = relay_refresh_url(body);
 			if (next.empty()) {
 				join_step_ = JoinStep::Idle;
 				const std::string message = extract_message(body);
-				if (!message.empty()) return join_fail(message);
-				return join_fail("join: the answer is no relay page");
+				if (!message.empty())
+					return behind_template(join_template_, page_url, body, join_fail(message));
+				return behind_template(join_template_, page_url, body,
+						join_fail("join: the answer is no relay page"));
 			}
 			join_step_ = JoinStep::Second;
 			HttpRequestSpec req;
@@ -804,8 +1062,11 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 			req.method = HttpMethod::Get;
 			req.url = next;
 			req.headers = request_headers();
-			return join_need(std::move(req));
+			join_page_url_ = req.url;
+			return behind_template(join_template_, page_url, body, join_need(std::move(req)));
 		}
+		// The .joi page and its refresh's page name no template on any witnessed service (the LN
+		// records fetch none after them), so their answers settle here.
 		case JoinStep::Second: {
 			join_step_ = JoinStep::Idle;
 			const JoiConnection conn = parse_joi_connection_string(to_string_body(body));
@@ -927,11 +1188,12 @@ HostKeyResult LobbyHttpFlow::host_get(const std::string &url) {
 	req.method = HttpMethod::Get;
 	req.url = absolute;
 	req.headers = request_headers();
+	host_page_url_ = req.url;
 	return host_need(std::move(req));
 }
 
 HostKeyResult LobbyHttpFlow::host() {
-	if (host_step_ != HostStep::Idle) return host_fail("host already in flight");
+	if (host_active()) return host_fail("host already in flight");
 	const std::string *host_url = browser_global("@HOST_URL@");
 	if (host_url == nullptr || host_url->empty())
 		return host_fail("the NovaWorld main page set no @HOST_URL@ — log in first");
@@ -942,6 +1204,9 @@ HostKeyResult LobbyHttpFlow::host() {
 HostKeyResult LobbyHttpFlow::on_host_response(bool transport_ok, int code,
                                               const std::vector<std::string> &response_headers,
                                               const std::vector<uint8_t> &body) {
+	if (std::optional<HostKeyResult> held =
+			template_answered(host_template_, transport_ok, code, response_headers, body))
+		return std::move(*held);
 	if (host_step_ == HostStep::Idle) return host_fail("host response with no pending step");
 	if (!transport_ok || code != 200) {
 		host_step_ = HostStep::Idle;
@@ -969,13 +1234,19 @@ HostKeyResult LobbyHttpFlow::on_host_response(bool transport_ok, int code,
 		r.host_key = parsed.host_key;
 		return r;
 	}
-	// A relay page refreshes to the next one; the menu browser follows it.
+	// A relay page refreshes to the next one, which the menu browser follows behind the page's
+	// template (behind_template: the LN S1 / S1b / S1c / S1d retail hosts fetch the relay template
+	// after the NWHost relay page and ahead of its refresh). The HOSTKEY page resolves at once: its
+	// title raises the host's event ahead of any template fetch (CUIScene_RaiseEvent called @0x63D634
+	// with event 7, ahead of the fetch called @0x63D6D1).
+	const std::string page_url = host_page_url_;
 	const std::string next = meta_refresh_url(html);
-	if (!next.empty() && ++host_hops_ < kMaxHostHops) return host_get(next);
+	if (!next.empty() && ++host_hops_ < kMaxHostHops)
+		return behind_template(host_template_, page_url, body, host_get(next));
 	host_step_ = HostStep::Idle;
 	const std::string message = extract_message(body);
-	if (!message.empty()) return host_fail(message);
-	return host_fail("host: no HOSTKEY page");
+	if (!message.empty()) return behind_template(host_template_, page_url, body, host_fail(message));
+	return behind_template(host_template_, page_url, body, host_fail("host: no HOSTKEY page"));
 }
 
 // See http_flow.h.

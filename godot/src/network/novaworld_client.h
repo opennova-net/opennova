@@ -225,6 +225,12 @@ public:
 	PackedInt64Array get_server_ping_rids() const;
 	PackedInt32Array get_server_ping_values() const;
 
+	// The NovaWorld menu's entry on a verified session (engine: LobbyHttpFlow::enter): the gate's
+	// startup URL opened, its start page followed to NWStart, whose page is the lobby (a login the
+	// service remembers: web_lobby_opened(true, nwhandle), then the list load) or the sign-in page
+	// (web_lobby_opened(false, ""), whose Login posts that page's form); a failure is login_failed.
+	void open_web_lobby();
+
 	// Account login (ADR 0010 Phase 3). Runs the EPASK HTTP login chain
 	// (prepare GET -> login POST -> relay GET) and fills the cookie jar the
 	// client carries onto every later request. Emits login_succeeded /
@@ -284,6 +290,10 @@ private:
 	                              const PackedStringArray &headers,
 	                              const PackedByteArray &body);
 
+	// The menu entry's HTTP chain (open_web_lobby) — sequenced by LobbyHttpFlow::on_enter_response.
+	void on_enter_request_completed(int result, int response_code,
+	                                const PackedStringArray &headers,
+	                                const PackedByteArray &body);
 	// Account login HTTP chain (ADR 0010 Phase 3) — sequenced by LobbyHttpFlow.
 	void on_login_request_completed(int result, int response_code,
 	                                const PackedStringArray &headers,
@@ -385,6 +395,7 @@ private:
 	// the multi-leg login/join sequences don't race the GSB fetch. The protocol/
 	// sequencing/cookie-jar all live in flow_ (engine/net/novaworld); these are pure pumps.
 	HTTPRequest *login_http_ = nullptr;
+	HTTPRequest *enter_http_ = nullptr; // the menu entry's startup-URL leg (open_web_lobby)
 	HTTPRequest *join_http_ = nullptr;
 	HTTPRequest *host_http_ = nullptr;
 	// The lobby HTTP orchestration: the EPASK login chain, the GSB fetch, and the
