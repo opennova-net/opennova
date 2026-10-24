@@ -3766,6 +3766,60 @@ int test_admin_lobbies(Harness &h) {
 	return 0;
 }
 
+// The NovaWorld menu's re-entry: /NWStart.dll answers IN, the lobby page, for a login the service
+// remembers (the request's LOGINSESSIONTAG with an active session) and OUT, the login page,
+// otherwise, each with YOURIP and USEJUNCTION as its only cookies; /nwprepare.dll sets EPASK only
+// for a client that holds none. The LN S1 / S1b / S1d retail records (2026-10-23): a re-entry's
+// nwprepare (its request carrying EPASK and the login) sets YOURIP, VER1, VER2, GT and CC, and its
+// NWStart answers the main page; a first entry's sets EPASK too, and its NWStart answers the login
+// page.
+int test_nwstart_remembers_the_login(Harness &h) {
+	const std::string start = "/NWStart.dll?MSGBASE=jop_2_msg.htm&IN=jop_2_main.htm&OUT=jop_2_login.htm";
+	// The names a reply sets, in name order (the header map keeps no order among them).
+	const auto names = [](const net::HttpReply &r) {
+		std::vector<std::string> n = set_cookie_names(r);
+		std::sort(n.begin(), n.end());
+		return n;
+	};
+	const std::vector<std::string> start_cookies = { "USEJUNCTION", "YOURIP" };
+	const auto lobby_page = [](const net::HttpReply &r) {
+		return body_text(r).find("@GSB_SERVER@") != std::string::npos;
+	};
+	const auto login_page = [](const net::HttpReply &r) {
+		return body_text(r).find("ACTION=\"NWLogin.dll\"") != std::string::npos;
+	};
+
+	// A first entry: the start page sets EPASK; NWStart answers the login page.
+	const auto prepare = h.send_to(h.fresh_port, "GET", "/nwprepare.dll?url=jop_2_start.htm");
+	const std::string epask = set_cookie_value(prepare, "EPASK");
+	TEST_EXPECT(prepare.code == 200 && !epask.empty());
+	auto out = h.send_to(h.fresh_port, "GET", start, { "Cookie: EPASK=" + epask });
+	TEST_EXPECT(out.code == 200 && login_page(out) && !lobby_page(out));
+	TEST_EXPECT(names(out) == start_cookies);
+
+	// A login, then the re-entry: its start page sets no EPASK, its NWStart answers the lobby.
+	TEST_EXPECT(make_account(h, "reentry_ada", "pw-reentry_ada") > 0);
+	const auto login = nwlogin_to(h, h.fresh_port, "reentry_ada", "pw-reentry_ada");
+	const std::string tag = set_cookie_value(login, "LOGINSESSIONTAG");
+	TEST_EXPECT(!tag.empty());
+	const std::string jar = "Cookie: EPASK=" + epask + "; LOGINSESSIONTAG=" + tag;
+	const auto again = h.send_to(h.fresh_port, "GET", "/nwprepare.dll?url=jop_2_start.htm", { jar });
+	TEST_EXPECT(again.code == 200 && set_cookie_value(again, "EPASK").empty());
+	TEST_EXPECT(names(again) == (std::vector<std::string>{ "GT", "VER1", "VER2", "YOURIP" }));
+	auto in = h.send_to(h.fresh_port, "GET", start, { jar });
+	TEST_EXPECT(in.code == 200 && lobby_page(in) && !login_page(in));
+	TEST_EXPECT(names(in) == start_cookies);
+
+	// A tag the service holds no login for, and the tag after its logout, get the login page.
+	out = h.send_to(h.fresh_port, "GET", start,
+			{ "Cookie: EPASK=" + epask + "; LOGINSESSIONTAG=nope" });
+	TEST_EXPECT(out.code == 200 && login_page(out));
+	TEST_EXPECT(h.send_to(h.fresh_port, "GET", "/NWLogout.dll", { jar }).code == 200);
+	out = h.send_to(h.fresh_port, "GET", start, { jar });
+	TEST_EXPECT(out.code == 200 && login_page(out) && !lobby_page(out));
+	return 0;
+}
+
 // GET /api/lobbies/<rid>'s roster is who plays on the server now: the joiners /NWJoin.dll
 // recorded, one per account (two joining from one address are two), each gone once its lobby
 // session, signed in as that account, stops playing there (its ClientStopPlaying) or ends (its
@@ -8731,6 +8785,7 @@ int run(Harness &h, const char *part) {
 		{ "lobby", "admin_end_session", test_admin_end_session },
 		{ "lobby", "admin_lobbies", test_admin_lobbies },
 		{ "lobby", "join_roster", test_join_roster },
+		{ "lobby", "nwstart_remembers_the_login", test_nwstart_remembers_the_login },
 		{ "hosted", "hosted_server_routes", test_hosted_server_routes },
 		{ "hosted", "hosted_listing_owner", test_hosted_listing_owner },
 		{ "hosted", "hosted_console_routes", test_hosted_console_routes },

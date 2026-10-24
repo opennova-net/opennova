@@ -1100,9 +1100,9 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 	auto handle_prepare = [this, templates_dir](const crow::request &req) {
 		const std::string url_param = req.url_params.get("url") ? req.url_params.get("url") : "";
 		const char *pfid_param = req.url_params.get("pfid");
+		const auto cookies = parse_cookie_header(request_cookie_header(req));
 		const catalog::GameRow &game =
-				client_game(impl_->games, req, parse_cookie_header(request_cookie_header(req)),
-						pfid_param ? pfid_param : "", url_param);
+				client_game(impl_->games, req, cookies, pfid_param ? pfid_param : "", url_param);
 		const std::string url   = url_param.empty() ? game.start_page : url_param;
 		const std::string ver1  = req.url_params.get("ver1") ? req.url_params.get("ver1") : "";
 		const std::string ver2  = req.url_params.get("ver2") ? req.url_params.get("ver2") : "";
@@ -1128,8 +1128,13 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		add_cookie(res, "VER1",   ver1);
 		add_cookie(res, "VER2",   ver2);
 		add_cookie(res, "GT",     gt);
-		add_cookie(res, "EPASK",  epask);
 		if (!cc.empty()) add_cookie(res, "CC", cc);
+		// The EPASK bundle goes to a client that holds none: the live service's answer to a
+		// re-entry, whose request carries the bundle the first entry set (and the login), sets
+		// YOURIP, VER1, VER2, GT and CC alone (the LN S1 / S1b / S1d records, 2026-10-23: every
+		// nwprepare request without an EPASK cookie is answered with one, every one with it gets
+		// none).
+		if (cookies.find("EPASK") == cookies.end()) add_cookie(res, "EPASK", epask);
 		return res;
 	};
 	CROW_ROUTE(app, "/nwprepare.dll").methods("GET"_method)(handle_prepare);
@@ -1146,17 +1151,32 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		const std::string in_p   = req.url_params.get("IN")      ? req.url_params.get("IN")      : game.page("main.htm");
 		const std::string out_p  = req.url_params.get("OUT")     ? req.url_params.get("OUT")     : game.page("login.htm");
 		const std::string msgbase = req.url_params.get("MSGBASE")? req.url_params.get("MSGBASE") : game.page("msg.htm");
-		const auto epask = cookies.count("EPASK") ? cookies.at("EPASK") : opennova::epask_to_string(epask_params_);
-		// Every client gets OUT, the plain login, whatever its NWCDKIID: the start page's ACT
-		// (DFX2's activation login) is never chosen. A DFX2 client whose NWCDKIID is no wire
-		// key is handed its key silently at the login's completion instead
+		// A login the service remembers is answered with IN, the lobby page, else OUT, the login
+		// page: the live service's NWStart answers a re-entry carrying the login it remembers
+		// with the main page (11041 B, the size of the login's last poll answer) and a first entry
+		// with the login page (4634 B), each with YOURIP and USEJUNCTION as its only cookies (the
+		// LN S1 / S1b / S1d records, 2026-10-23). The remembered login is the request's own
+		// (retail_login_user: its LOGINSESSIONTAG's active session, else its
+		// PERSISTENTEXPRESSLOGINDATA pin), an active account only. Neither page is the start
+		// page's ACT (DFX2's activation login): a DFX2 client whose NWCDKIID is no wire key is
+		// handed its key silently at the login's completion instead
 		// (CdKeyRoutes::login_activation; D-NET-725, the service's policy).
+		std::optional<UserRecord> user;
+		try {
+			const char *how = "";
+			user = retail_login_user(cookies, *db_pool_.acquire(), how);
+		} catch (const db::Error &e) {
+			std::fprintf(stderr, "[http] WARN retail login lookup failed: %s\n", e.what());
+		}
+		if (user && user->account_status != "active") user.reset();
+		const std::string &page = user ? in_p : out_p;
 
-		std::printf("[http] GET %s IN=%s OUT=%s MSGBASE=%s cookies=[%s]\n",
+		std::printf("[http] GET %s IN=%s OUT=%s MSGBASE=%s -> %s cookies=[%s]\n",
 				loggable(req.url).c_str(), loggable(in_p).c_str(), loggable(out_p).c_str(),
-				loggable(msgbase).c_str(), cookie_summary(request_cookie_header(req)).c_str());
+				loggable(msgbase).c_str(), user ? "IN" : "OUT",
+				cookie_summary(request_cookie_header(req)).c_str());
 
-		// Hardcoded version-OK; render OUT (the login page).
+		// Hardcoded version-OK.
 		TemplateVars vars{
 			{"IN",          in_p},
 			{"OUT",         out_p},
@@ -1166,12 +1186,11 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			{"JOINLAN_URL", game.join_lan_url},
 		};
 		crow::response res(200);
-		res.body = render_template_file(templates_dir, out_p, vars);
+		res.body = render_template_file(templates_dir, page, vars);
 		res.set_header("Content-Type", "text/html");
 		add_standard_headers(res);
 		add_cookie(res, "YOURIP",      req.remote_ip_address);
 		add_cookie(res, "USEJUNCTION", "0");
-		add_cookie(res, "EPASK",       epask);
 		return res;
 	};
 	CROW_ROUTE(app, "/nwstart.dll").methods("GET"_method)(handle_start);
@@ -1433,8 +1452,8 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		// cookie drop the capture shows the real client does NOT have on the
 		// bare URL) re-routed the completion GET so retail never stored the
 		// identity cookies — they never reached /NWJoin.dll, leaving PUBPCID
-		// empty ("login information is absent (GDC024)"). The handler still
-		// falls back to the LOGINSESSIONTAG cookie to recover the tag.
+		// empty ("login information is absent (GDC024)"). The handler reads the
+		// tag from the LOGINSESSIONTAG cookie alone.
 		TemplateVars vars{
 			{"MESSAGE",          "Contacting login databases..."},
 			{"REFRESH_ENDPOINT", "NWLogin.dll"},
