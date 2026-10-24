@@ -243,6 +243,13 @@ public:
 	// client carries onto every later request. Emits login_succeeded /
 	// login_failed. Session-only (nothing persisted).
 	void login(const String &username, const String &password);
+	// The shown sign-in page's remembered login (engine: LobbyHttpFlow's remembered login): its
+	// name for the account box, whether its fill stands, the clear a typed field runs, and the
+	// untouched Login's post (login_succeeded / login_failed as login's).
+	String get_remembered_login_name() const;
+	bool has_remembered_login() const;
+	void clear_remembered_login();
+	void login_remembered();
 
 	// Join a hosted game (ADR 0010 Phase 5). Runs the NWJoin.dll HTTP handshake for
 	// the GSB row's `rid`, resolves the in-match host address, sends the
@@ -302,6 +309,8 @@ private:
 	                                const PackedStringArray &headers,
 	                                const PackedByteArray &body);
 	// Account login HTTP chain (ADR 0010 Phase 3) — sequenced by LobbyHttpFlow.
+	// A login's first step out of the flow (login, login_remembered): ship it or report it.
+	void begin_login(const opennova::LoginResult &r);
 	void on_login_request_completed(int result, int response_code,
 	                                const PackedStringArray &headers,
 	                                const PackedByteArray &body);

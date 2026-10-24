@@ -256,4 +256,27 @@ bool decode_key_chain(const std::string &encoded, const std::string &key_chain,
 	return true;
 }
 
+// See pubcrypto.h. The payload's tail past its decoded length reads as NUL (the original's buffer
+// is zeroed ahead of the decode), so a string runs at most to the payload's end.
+bool decode_key_value(const std::string &encoded, const std::string &key_chain, std::string &key,
+                      std::string &value, std::size_t key_room, std::size_t value_room) {
+	key.clear();
+	value.clear();
+	std::vector<uint8_t> payload;
+	if (!decode_key_chain(encoded, key_chain, payload, 0x8000)) return false;
+	const auto c_string = [&payload](std::size_t at) {
+		std::string text;
+		for (; at < payload.size() && payload[at] != 0; ++at) text.push_back(static_cast<char>(payload[at]));
+		return text;
+	};
+	const std::string decoded_key = c_string(0);
+	const std::size_t value_at = decoded_key.size() + 1;
+	if (value_at >= payload.size()) return false;
+	const std::string decoded_value = c_string(value_at);
+	if (decoded_key.size() + 1 > key_room || decoded_value.size() + 1 > value_room) return false;
+	key = decoded_key;
+	value = decoded_value;
+	return true;
+}
+
 } // namespace opennova

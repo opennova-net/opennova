@@ -160,6 +160,9 @@ func _bind_scene_ui() -> void:
 	_close_button.pressed.connect(_on_close_pressed)
 	_login_button.pressed.connect(_on_login_pressed)
 	_password_edit.text_submitted.connect(func(_text: String) -> void: _on_login_pressed())
+	# Typing in either sign-in field touches it: the remembered login's fill clears.
+	_username_edit.text_changed.connect(func(_text: String) -> void: _clear_remembered_login())
+	_password_edit.text_changed.connect(func(_text: String) -> void: _clear_remembered_login())
 	_filter_edit.text_changed.connect(func(_text: String) -> void: _rebuild_view())
 	_type_filter.clear()
 	_type_filter.add_item("All modes")
@@ -696,6 +699,13 @@ func _on_login_pressed() -> void:
 		return  # no session to sign in on (its Login is disabled; this guards Enter)
 	var user := _username_edit.text.strip_edges()
 	var pwd := _password_edit.text
+	# The sign-in page's remembered login, no field touched: its Login posts the remembered name,
+	# an empty password and the remembered data (engine: LobbyHttpFlow::login_remembered).
+	if pwd.is_empty() and _client.has_remembered_login():
+		_login_button.disabled = true
+		_set_status("Signing in as %s..." % user)
+		_client.login_remembered()
+		return
 	if user.is_empty() or pwd.is_empty():
 		_show_message("Enter both your account name and password.", "Back to Sign In",
 				Callable(self, "_return_to_login"), Screen.LOGIN)
@@ -995,6 +1005,27 @@ func _on_web_lobby_opened(signed_in: bool, nwhandle: String) -> void:
 	_login_button.disabled = false
 	if _screen != Screen.LOGIN:
 		_return_to_login()
+	_apply_remembered_login()
+
+
+# The sign-in page's remembered login (engine: LobbyHttpFlow::remembered_login_name): the name
+# fills the account box and the password box shows the masked placeholder until a field is typed in.
+func _apply_remembered_login() -> void:
+	if _client == null or _username_edit == null or _password_edit == null:
+		return
+	if not _client.has_remembered_login():
+		return
+	_username_edit.text = _client.get_remembered_login_name()
+	_password_edit.placeholder_text = "********"
+
+
+# A sign-in field typed in: the remembered login's fill clears (engine:
+# LobbyHttpFlow::clear_remembered_login).
+func _clear_remembered_login() -> void:
+	if _password_edit != null:
+		_password_edit.placeholder_text = ""
+	if _client != null:
+		_client.clear_remembered_login()
 
 
 ## A match that ended with an error text shows it in the NovaWorld error dialog

@@ -9,6 +9,7 @@
 
 #include <net/novaworld/gsb.h>
 #include <net/novacrypto/epask.h>
+#include <net/novacrypto/pubcrypto.h> // encode_key_chain / decode_key_value
 #include <net/novacrypto/url_cipher.h>
 #include <net/novaworld/lobby_vars.h> // make_lobby_identity_vars
 
@@ -1374,6 +1375,131 @@ static bool test_sign_in_post_is_the_pages_form() {
 	return g_fail == 0;
 }
 
+// D-NET-NEW-L9-51: the remembered login. With game.cfg's rememberlogin set, the sign-in page's
+// activation decodes the jar's PERSISTENTREMEMBERLOGINDATA under the client's key chain into the
+// account name and a second string, fills NAME with the name and the hidden rememberlogindata edit
+// with the cookie as it stands; an untouched Login posts NAME, an empty PASSWORD and
+// rememberlogindata, each EPASK-encrypted (LN-s6's S3 re-login: PASSWORD 0 characters,
+// rememberlogindata 1152 A-P characters decrypting to the cookie's 144). A touched field clears
+// the fill, so typed credentials post an empty rememberlogindata.
+// [orig: UI_LoadPersistentLoginCredentials @0x557330 - @0x557344, @0x557366, @0x55738F,
+//  @0x5573C5, @0x557413; UI_ClearRememberedLoginFill @0x557480 - @0x5574CC;
+//  NapiNP_DecodeEncryptedKeyValue @0x619470; CWnd_BuildFormFieldQueryString @0x657760 - the
+//  value's EPASK_EncryptField called @0x657980]
+static bool test_remembered_login() {
+	nw::process_browser_cache().clear();
+	const std::string account = "ACCT";
+	std::vector<uint8_t> plain(account.begin(), account.end());
+	plain.push_back(0);
+	for (char c : std::string("second-string")) plain.push_back(static_cast<uint8_t>(c));
+	plain.push_back(0);
+	const std::string cookie = nw::encode_key_chain(plain, nw::kRememberedLoginKeyChain);
+
+	const auto signed_in_page = [&](nw::LobbyHttpFlow &f, const std::string &remembered) {
+		f.enter();
+		std::vector<std::string> set = {"Set-Cookie: EPASK=" + make_epask_cookie()};
+		if (!remembered.empty()) set.push_back("Set-Cookie: persistentrememberlogindata=" + remembered);
+		f.on_enter_response(true, 200, set, bytes(kStartPage));
+		return f.on_enter_response(true, 200, {}, bytes(jo_sign_in_page("1"))).kind ==
+				nw::EnterResult::Kind::SignIn;
+	};
+	nw::LobbyHttpContext ctx = templated_ctx();
+	ctx.remember_login = true;
+
+	// The fill, then an untouched Login.
+	nw::LobbyHttpFlow f;
+	f.set_context(ctx);
+	if (!expect(signed_in_page(f, cookie), "remembered: the entry lands on the sign-in page")) return false;
+	expect(f.remembered_login_name() == account && f.has_remembered_login(),
+	       "the activation decodes the cookie (found case-insensitively): the NAME edit's name, the fill");
+	nw::LoginResult r = f.login_remembered();
+	if (!expect(r.kind == nw::LoginResult::Kind::NeedRequest && r.request.method == nw::HttpMethod::Post,
+	            "the untouched Login posts the form"))
+		return false;
+	const auto fields = form_fields(r.request.body);
+	expect(field_names(fields) ==
+	               std::vector<std::string>{"EPASK", "NAME", "PASSWORD", "rememberlogindata",
+	                       "rememberlogin", "pfid", "needtoagree", "nodb", "relay", "msgbase",
+	                       "enterkey", "failure", "success"},
+	       "the remembered post keeps the form's field order");
+	std::string password_cipher;
+	for (const auto &field : fields)
+		if (field.first == "PASSWORD") password_cipher = field.second;
+	expect(posted_plaintext(fields, "NAME") == account && password_cipher.empty(),
+	       "NAME is the remembered name and PASSWORD is empty (0 characters)");
+	expect(posted_plaintext(fields, "rememberlogindata") == cookie,
+	       "rememberlogindata is the cookie, EPASK-encrypted (8 A-P characters a byte)");
+	for (const auto &field : fields)
+		if (field.first == "rememberlogindata")
+			expect(field.second.size() == 8 * cookie.size(), "8 A-P characters per cookie byte");
+
+	// A touched field clears the fill: typed credentials post an empty rememberlogindata.
+	nw::LobbyHttpFlow t;
+	t.set_context(ctx);
+	signed_in_page(t, cookie);
+	t.clear_remembered_login();
+	expect(!t.has_remembered_login() && t.remembered_login_name() == account,
+	       "the touch clears the rememberlogindata edit, the NAME edit keeps its name");
+	expect(t.login_remembered().kind == nw::LoginResult::Kind::Failed,
+	       "with the fill cleared there is no remembered Login");
+	nw::LobbyHttpFlow typed;
+	typed.set_context(ctx);
+	signed_in_page(typed, cookie);
+	r = typed.login("ACCT", "pw");
+	std::string typed_fill = "<absent>";
+	for (const auto &field : form_fields(r.request.body))
+		if (field.first == "rememberlogindata") typed_fill = field.second;
+	expect(r.kind == nw::LoginResult::Kind::NeedRequest && typed_fill.empty() &&
+	               posted_plaintext(form_fields(r.request.body), "PASSWORD") == "pw",
+	       "typed credentials touched the fields: rememberlogindata posts empty");
+
+	// No fill: rememberlogin clear, a cookie that does not decode, no cookie.
+	nw::LobbyHttpContext off = templated_ctx();
+	nw::LobbyHttpFlow n1;
+	n1.set_context(off);
+	signed_in_page(n1, cookie);
+	expect(!n1.has_remembered_login() && n1.remembered_login_name().empty(),
+	       "rememberlogin clear: no fill");
+	nw::LobbyHttpFlow n2;
+	n2.set_context(ctx);
+	signed_in_page(n2, nw::encode_key_chain(plain, "OTHER:KEYS"));
+	expect(!n2.has_remembered_login(), "a cookie that does not decode under the chain: no fill");
+	nw::LobbyHttpFlow n3;
+	n3.set_context(ctx);
+	signed_in_page(n3, "");
+	expect(!n3.has_remembered_login() &&
+	               n3.login_remembered().kind == nw::LoginResult::Kind::Failed,
+	       "no cookie: no fill, no remembered Login");
+	nw::process_browser_cache().clear();
+	return g_fail == 0;
+}
+
+// NapiNP_DecodeEncryptedKeyValue: the key to the first NUL, the value past it; -1 for no value or
+// a string over its room. [orig: NapiNP_DecodeEncryptedKeyValue @0x619470 - @0x619552..0x619556,
+//  @0x61956E..0x619570, @0x619598..0x61959C]
+static bool test_decode_key_value() {
+	const std::string chain = nw::kRememberedLoginKeyChain;
+	const auto encoded = [&](const std::string &text) {
+		return nw::encode_key_chain(std::vector<uint8_t>(text.begin(), text.end()), chain);
+	};
+	std::string key, value;
+	expect(nw::decode_key_value(encoded(std::string("name\0value\0", 11)), chain, key, value, 512, 512) &&
+	               key == "name" && value == "value",
+	       "the key to its NUL, the value past it");
+	expect(!nw::decode_key_value(encoded(std::string("name\0", 5)), chain, key, value, 512, 512) &&
+	               key.empty() && value.empty(),
+	       "the key's NUL the payload's last byte: no value, -1");
+	expect(nw::decode_key_value(encoded(std::string("name\0value", 10)), chain, key, value, 512, 512) &&
+	               value == "value",
+	       "a value running to the payload's end reads to it");
+	expect(!nw::decode_key_value(encoded(std::string("name\0value\0", 11)), chain, key, value, 4, 512),
+	       "a key over its room (NUL included): -1");
+	expect(!nw::decode_key_value(encoded(std::string("name\0value\0", 11)), chain, key, value, 512, 5),
+	       "a value over its room: -1");
+	expect(!nw::decode_key_value("ABCQ", chain, key, value, 512, 512), "a decode failure: -1");
+	return g_fail == 0;
+}
+
 int main() {
 	test_gate_reply_jar_fields();
 	test_meta_refresh_walk();
@@ -1396,6 +1522,8 @@ int main() {
 	test_enter_seeds_identity_once();
 	test_ib3_form_inputs();
 	test_sign_in_post_is_the_pages_form();
+	test_remembered_login();
+	test_decode_key_value();
 	std::fprintf(stderr, g_fail == 0 ? "OK\n" : "FAILED (%d)\n", g_fail);
 	return g_fail == 0 ? 0 : 1;
 }

@@ -131,6 +131,11 @@ void NovaWorldClient::_bind_methods() {
 	                     &NovaWorldClient::apply_ping_results);
 	ClassDB::bind_method(D_METHOD("open_web_lobby"), &NovaWorldClient::open_web_lobby);
 	ClassDB::bind_method(D_METHOD("login", "username", "password"), &NovaWorldClient::login);
+	ClassDB::bind_method(D_METHOD("get_remembered_login_name"),
+			&NovaWorldClient::get_remembered_login_name);
+	ClassDB::bind_method(D_METHOD("has_remembered_login"), &NovaWorldClient::has_remembered_login);
+	ClassDB::bind_method(D_METHOD("clear_remembered_login"), &NovaWorldClient::clear_remembered_login);
+	ClassDB::bind_method(D_METHOD("login_remembered"), &NovaWorldClient::login_remembered);
 	ClassDB::bind_method(D_METHOD("join", "rid"), &NovaWorldClient::join);
 	ClassDB::bind_method(D_METHOD("start_hosting", "options"), &NovaWorldClient::start_hosting);
 	ClassDB::bind_method(D_METHOD("is_hosting"), &NovaWorldClient::is_hosting);
@@ -897,6 +902,11 @@ void NovaWorldClient::sync_flow_context() {
 	ctx.extended_metrics = (game_config_.is_valid() ? game_config_->native().cfg()
 	                                                : opennova::gamecfg::defaults())
 	                               .mp_extract_extended_metric_information != 0;
+	// game.cfg's rememberlogin: the sign-in page's remembered login (engine: LobbyHttpContext,
+	// D-NET-NEW-L9-51).
+	ctx.remember_login = (game_config_.is_valid() ? game_config_->native().cfg()
+	                                              : opennova::gamecfg::defaults())
+	                             .rememberlogin != 0;
 	flow_.set_context(std::move(ctx));
 }
 
@@ -1182,8 +1192,11 @@ void NovaWorldClient::login(const String &username, const String &password) {
 		return;
 	}
 	sync_flow_context();
-	const opennova::LoginResult r = flow_.login(
-		opennova::to_std(username), opennova::to_std(password));
+	begin_login(flow_.login(opennova::to_std(username), opennova::to_std(password)));
+}
+
+// A login's first step out of the flow: its first request shipped, or its failure reported.
+void NovaWorldClient::begin_login(const opennova::LoginResult &r) {
 	switch (r.kind) {
 	case opennova::LoginResult::Kind::NeedRequest:
 		// Prepare GET: sets the EPASK cookie (the bundle credentials encrypt under).
@@ -1199,6 +1212,30 @@ void NovaWorldClient::login(const String &username, const String &password) {
 	default:
 		break;  // Succeeded is impossible synchronously
 	}
+}
+
+String NovaWorldClient::get_remembered_login_name() const {
+	return opennova::to_gd(flow_.remembered_login_name());
+}
+
+bool NovaWorldClient::has_remembered_login() const {
+	return flow_.has_remembered_login();
+}
+
+void NovaWorldClient::clear_remembered_login() {
+	flow_.clear_remembered_login();
+}
+
+// The shown sign-in page's untouched Login: the remembered fill's post (engine:
+// LobbyHttpFlow::login_remembered).
+void NovaWorldClient::login_remembered() {
+	authenticated_ = false;
+	if (state_ != STATE_CONNECTED || login_http_ == nullptr || flow_.login_active()) {
+		emit_signal("login_failed", String("The matchmaking service is still connecting."));
+		return;
+	}
+	sync_flow_context();
+	begin_login(flow_.login_remembered());
 }
 
 void NovaWorldClient::on_login_request_completed(int result, int response_code,

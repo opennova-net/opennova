@@ -14,6 +14,7 @@
 #include <base/io/crt_ftol.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
+#include <net/novacrypto/pubcrypto.h> // decode_key_value (the remembered login)
 #include <net/novaworld/browser_cache.h>
 #include <net/novaworld/registration_url.h>
 #include <net/title/title_identity.h>
@@ -495,6 +496,8 @@ void LobbyHttpFlow::reset() {
 	enter_step_ = EnterStep::Idle;
 	sign_in_page_shown_ = false;
 	sign_in_form_.clear();
+	remembered_name_.clear();
+	remember_fill_.clear();
 	identity_seeded_ = false;
 	login_page_url_.clear();
 	join_page_url_.clear();
@@ -789,6 +792,7 @@ EnterResult LobbyHttpFlow::on_enter_response(bool transport_ok, int code,
 			case StartPageKind::SignIn: {
 				sign_in_page_shown_ = true;
 				sign_in_form_ = ib3_form_inputs(to_string_body(body), kSignInForm);
+				fill_remembered_login();
 				EnterResult r;
 				r.kind = EnterResult::Kind::SignIn;
 				return r;
@@ -823,14 +827,12 @@ LoginResult LobbyHttpFlow::login(const std::string &username, const std::string 
 	login_user_ = username;
 	login_pass_ = password;
 	login_poll_count_ = 0;
+	// Typed credentials touched the sign-in fields: any remembered fill is cleared
+	// (clear_remembered_login).
+	clear_remembered_login();
 	// The sign-in page an entry landed on is the page shown: its submit posts its form under the
 	// EPASK the start page set, with no second open of the startup URL.
-	if (sign_in_page_shown_) {
-		sign_in_page_shown_ = false;
-		const std::string epask_refusal = take_epask({});
-		if (!epask_refusal.empty()) return login_fail(epask_refusal);
-		return login_post(sign_in_form_);
-	}
+	if (sign_in_page_shown_) return post_shown_sign_in();
 	const std::string prepare_url = resolve_startup_url();
 	if (prepare_url.empty()) return login_fail("no gate startup_url yet — connect first");
 	seed_identity_cookies();
@@ -841,6 +843,54 @@ LoginResult LobbyHttpFlow::login(const std::string &username, const std::string 
 	req.url = prepare_url;
 	req.headers = request_headers();
 	return login_request(std::move(req));
+}
+
+LoginResult LobbyHttpFlow::post_shown_sign_in() {
+	sign_in_page_shown_ = false;
+	const std::string epask_refusal = take_epask({});
+	if (!epask_refusal.empty()) return login_fail(epask_refusal);
+	return login_post(sign_in_form_);
+}
+
+// See http_flow.h: the shown page's Login with no field touched posts its NAME edit (the
+// remembered name), its empty PASSWORD edit and the rememberlogindata edit (the cookie).
+LoginResult LobbyHttpFlow::login_remembered() {
+	if (login_active()) return login_fail("login already in flight");
+	if (ctx_.title == nullptr) return login_fail("no title identity to log in with");
+	const std::string refusal = title_identity_refusal(*ctx_.title, TitleIdentityPart::WebFlow);
+	if (!refusal.empty()) return login_fail(refusal);
+	if (!sign_in_page_shown_ || remember_fill_.empty())
+		return login_fail("no remembered login on the sign-in page");
+	login_user_ = remembered_name_;
+	login_pass_.clear();
+	login_poll_count_ = 0;
+	return post_shown_sign_in();
+}
+
+// See http_flow.h. The cookie is found as the browser's getter finds it (the jar walked, the name
+// compared case-insensitively) and copied to at most 0x1FF bytes, its NUL included where it fits.
+// [orig: UI_LoadPersistentLoginCredentials @0x557330 - @0x557344, 0x1FF pushed @0x557357,
+//  CEffect_IncludeHandler_Open called @0x557366, NapiNP_DecodeEncryptedKeyValue called @0x55738F
+//  with 0x200-byte rooms (@0x557370 / @0x55737D), the NAME edit's text @0x5573C5, the
+//  REMEMBERLOGINDATA edit's text @0x557413; CookieJar_GetValueByName @0x64EA90]
+void LobbyHttpFlow::fill_remembered_login() {
+	remembered_name_.clear();
+	remember_fill_.clear();
+	if (!ctx_.remember_login) return;
+	constexpr std::size_t kCookieCopy = 0x1FF;
+	constexpr std::size_t kDecodedRoom = 0x200;
+	std::string cookie;
+	for (const std::string &name : jar_.names()) {
+		if (strutil::iequals(name, "PERSISTENTREMEMBERLOGINDATA")) {
+			cookie = jar_.find(name)->substr(0, kCookieCopy);
+			break;
+		}
+	}
+	std::string account, second;
+	if (!decode_key_value(cookie, kRememberedLoginKeyChain, account, second, kDecodedRoom, kDecodedRoom))
+		return;
+	remembered_name_ = account;
+	remember_fill_ = cookie;
 }
 
 // The jar's EPASK bundle, which the sign-in page's submit encrypts its fields under, with the
@@ -862,7 +912,8 @@ std::string LobbyHttpFlow::take_epask(const std::vector<uint8_t> &page) {
 
 // The sign-in page's form post: the echoed EPASK bundle (plaintext), then the controls of the
 // template's form 1 in its order, each value EPASK-encrypted: the template's NAME, PASSWORD and
-// rememberlogindata edits (the last empty: no remembered login fills it), then, at its
+// rememberlogindata edits (the last the remembered login's cookie while its fill stands, else
+// empty: D-NET-NEW-L9-51), then, at its
 // @IB3_FORM_1@, the page's own IB3_FORM 1 inputs as the browser posts them (ib3_form_inputs). So
 // each hidden value is the page's, the live page's rememberlogin "1" included, never a constant
 // (D-NET-NEW-L9-45): no code writes that control (the REMEMBER_LOGIN checkbox stores game.cfg's
@@ -882,7 +933,7 @@ LoginResult LobbyHttpFlow::login_post(
 		{"EPASK", epask_to_string(epask_), false}, // echoed bundle, PLAINTEXT
 		{"NAME", login_user_, true},
 		{"PASSWORD", login_pass_, true},
-		{"rememberlogindata", "", false},
+		{"rememberlogindata", remember_fill_, true},
 	};
 	for (const auto &input : form) fields.push_back({input.first, input.second, true});
 	std::string body;

@@ -133,7 +133,17 @@ struct LobbyHttpContext {
 	// game.cfg's mpextractextendedmetricinformation (cfg +0x33C, default 1): clear, neither the jar
 	// nor the Cookie var-lists carry CountryName / Language / TimeZoneBias.
 	bool extended_metrics = true;
+	// game.cfg's rememberlogin (cfg +0x4D4, which the sign-in page's REMEMBER_LOGIN checkbox
+	// stores): set, the sign-in page's activation fills the remembered login from the jar
+	// (LobbyHttpFlow::remembered_login_name, D-NET-NEW-L9-51).
+	bool remember_login = false;
 };
+
+// The remembered login's cookie decodes under this chain into the account name and a second
+// string the client never reads [orig: UI_LoadPersistentLoginCredentials @0x557330 - the chain
+//  pushed @0x55736B for NapiNP_DecodeEncryptedKeyValue, called @0x55738F].
+inline constexpr const char *kRememberedLoginKeyChain =
+		"SLHALI289SZ79210987ZS:OCV789YHK2QJ3HSKDJHVS978THYG23";
 
 // --- login ---
 struct LoginResult {
@@ -280,6 +290,37 @@ public:
 	                              const std::vector<uint8_t> &body);
 	bool login_active() const { return login_step_ != LoginStep::Idle || login_template_.next.has_value(); }
 
+	// --- the remembered login (D-NET-NEW-L9-51) ---
+	// The sign-in page's activation, with game.cfg's rememberlogin set, reads the jar's
+	// PERSISTENTREMEMBERLOGINDATA (case-insensitively, its first 511 characters) and decodes it
+	// under kRememberedLoginKeyChain into the account name and a second string; decoded, the NAME
+	// edit takes the name, the masked password placeholder shows and the hidden rememberlogindata
+	// edit takes the cookie's value as it stands. The first touch of NAME, PASSWORD or the
+	// placeholder clears that edit and hides the placeholder (clear_remembered_login; a login with
+	// typed credentials is such a touch). The form post then sends NAME, the PASSWORD edit (empty
+	// when nothing was typed) and rememberlogindata, each EPASK-encrypted (login_remembered). LN-s6's
+	// S3 re-login: NAME, PASSWORD empty, rememberlogindata 1152 A-P characters decrypting to the
+	// cookie's 144.
+	// [orig: UI_LoadPersistentLoginCredentials @0x557330 (the ENABLE_BACK_BUTTON callback
+	//  UI_RegisterNWMultiplayerCallbacks registers @0x559844; the sign-in template's ACTIVATE) -
+	//  the rememberLogin_4D4 test @0x557344, the cookie's read (CEffect_IncludeHandler_Open called
+	//  @0x557366, 0x1FF bytes), the decode called @0x55738F, the NAME edit's text (the call
+	//  @0x5573C5), STATIC_NW_PASSWORD_HIDDEN shown (CWnd_SetShown called @0x5573EA), the
+	//  REMEMBERLOGINDATA edit's text the cookie (the call @0x557413), the one-shot re-armed
+	//  @0x55745D; UI_ClearRememberedLoginFill @0x557480 (the NAME / PASSWORD /
+	//  STATIC_NW_PASSWORD_HIDDEN event-8 callback, registered @0x55989E / @0x5598BC / @0x5598DA)]
+	const std::string &remembered_login_name() const { return remembered_name_; }
+	bool has_remembered_login() const { return !remember_fill_.empty(); }
+	// A sign-in field touched: the rememberlogindata edit cleared, the placeholder hidden.
+	// [orig: UI_ClearRememberedLoginFill @0x557480 - the one-shot test @0x557480..0x557487,
+	//  STATIC_NW_PASSWORD_HIDDEN hidden (CWnd_SetShown called @0x5574A3), the REMEMBERLOGINDATA
+	//  edit's text "" (the call @0x5574CC), the flag set @0x5574D3]
+	void clear_remembered_login() { remember_fill_.clear(); }
+	// The shown sign-in page's Login with its remembered fill standing: the form posts the
+	// remembered name, an empty PASSWORD and the cookie in rememberlogindata. Failed when no
+	// sign-in page is shown or nothing is filled.
+	LoginResult login_remembered();
+
 	// --- GSB server browser ---
 	// Build the GSB fetch (the title's server list, JO's jop_2.gsb?a=1) with the current cookies;
 	// invalid when no base URL or no title yet.
@@ -378,6 +419,10 @@ private:
 	// The /NWLogin.dll POST of the sign-in page's form, its IB3_FORM 1 inputs `form`
 	// (ib3_form_inputs), or Failed.
 	LoginResult login_post(const std::vector<std::pair<std::string, std::string>> &form);
+	// The shown sign-in page's submit: its form posted under the start page's EPASK.
+	LoginResult post_shown_sign_in();
+	// The sign-in page's activation: the remembered login's fill (remembered_login_name).
+	void fill_remembered_login();
 	// The jar's EPASK bundle read into epask_, as the sign-in page's submit encrypts under it; the
 	// failure's reason when the jar holds none or the modexp gate rejects it.
 	std::string take_epask(const std::vector<uint8_t> &page);
@@ -404,6 +449,9 @@ private:
 	// IB3_FORM 1 inputs kept with it.
 	bool sign_in_page_shown_ = false;
 	std::vector<std::pair<std::string, std::string>> sign_in_form_;
+	// The shown sign-in page's remembered fill: the NAME edit's decoded account name and the
+	// rememberlogindata edit's value (the cookie), the latter empty once a field was touched.
+	std::string remembered_name_, remember_fill_;
 	// The connect's identity set is in the jar (seed_identity_cookies: once per session).
 	bool identity_seeded_ = false;
 	// Each leg's last request's URL: the page its answer is, whose template it names.
