@@ -366,20 +366,12 @@ void ClientReplicaPipeline::refresh_minimap_live_markers() {
 	// Regular markers render from the live entity; refresh the decoded pose
 	// and the known/alive gate each tick (retail reads the pool slot at draw
 	// time — O(1) pool arithmetic there, so the per-slot lookup here rides
-	// a handle index built once per tick instead of a per-slot linear scan).
+	// the state's kept per-handle row, ClientState::find, never a per-tick index).
 	// [orig: Render_MinimapSlotBlip @0x5be4ac..0x5be515]
-	std::unordered_map<uint16_t, const ClientEntityState *> entity_index;
-	entity_index.reserve(state_.entities.size());
-	for (const ClientEntityState &entity : state_.entities) {
-		entity_index.emplace(entity.handle, &entity);
-	}
 	auto refresh_live = [&](auto &bank) {
 		for (ClientMinimapOverlaySlot &slot : bank) {
 			if (!slot.active || (slot.flags & 0x40u) != 0) continue;
-			const auto entity_it = entity_index.find(slot.handle);
-			const ClientEntityState *entity =
-					entity_it != entity_index.end() ? entity_it->second
-													: nullptr;
+			const ClientEntityState *entity = state_.find(slot.handle);
 			const bool known = entity != nullptr;
 			if (known != slot.entity_known) {
 				slot.entity_known = known;
