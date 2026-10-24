@@ -133,8 +133,8 @@ bool serves(const nws::update_service::ReleaseCatalog &catalog, const std::set<s
 }
 
 // A retail product answered current: the gateway's SERVER.LST names ftp.novaworld.com, and
-// the update server's command file (whose CRC it reports) reads with no rows.
-bool answers_current(uint16_t port, const char *login, const char *command_file) {
+// the update server's command file (whose CRC it reports) reads with no rows and names `exe`.
+bool answers_current(uint16_t port, const char *login, const char *command_file, const char *exe) {
 	std::vector<update::Reply> r;
 	net::Socket gateway = connect_to(port);
 	bool ok = gateway.is_valid() &&
@@ -162,7 +162,7 @@ bool answers_current(uint16_t port, const char *login, const char *command_file)
 							update::command_file_crc(r[2].payload.data(), r[2].payload.size()));
 	close_after(server);
 	const auto command = ok ? update::read_command_file(text_of(r[2].payload)) : std::nullopt;
-	return command && command->rows.empty();
+	return command && command->rows.empty() && command->exe == exe;
 }
 
 // A release of `sha` (its package at updates/<sha>.sfs already) with `sections`, published.
@@ -309,8 +309,9 @@ int run(const test_temp::TempDir &dir) {
 	}
 	// A seeded retail product no release serves answers current (JO:CA's JOPTR.CMD, the
 	// Steam DFX2's DFX2.CMD); a login no data set names is refused.
-	TEST_EXPECT(answers_current(port, "JOTRus", "JOPTR.CMD"));
-	TEST_EXPECT(answers_current(port, "DFX2", "DFX2.CMD"));
+	TEST_EXPECT(answers_current(port, "JOTRus", "JOPTR.CMD", "Jointops.exe"));
+	TEST_EXPECT(answers_current(port, "DFX2", "DFX2.CMD", "dfx2.exe"));
+	TEST_EXPECT(answers_current(port, "JOEus", "JOEPTR.CMD", ""));
 	TEST_EXPECT(login_result(port, "NOPEus") < 0);
 	// A login is matched without case, as retail's catalog matched products.
 	TEST_EXPECT(login_result(port, "synus") == 0);
@@ -323,7 +324,7 @@ int run(const test_temp::TempDir &dir) {
 	listener.refresh_now();
 	TEST_EXPECT(serves(listener.catalog(), { "SYNEus", "JOTRus", "JOEus", "DFX2" }));
 	TEST_EXPECT(login_result(port, "SYNus") < 0);
-	TEST_EXPECT(answers_current(port, "SYNEus", "SYNEPTR.CMD"));
+	TEST_EXPECT(answers_current(port, "SYNEus", "SYNEPTR.CMD", ""));
 	TEST_EXPECT(!fs::exists(io::os_path(io::utf8_join(cache, sha + ".sfs"))));
 	TEST_EXPECT(!fs::exists(io::os_path(io::utf8_join(cache, sha))));
 
@@ -338,7 +339,7 @@ int run(const test_temp::TempDir &dir) {
 	}
 	listener.refresh_now();
 	TEST_EXPECT(serves(listener.catalog(), { "SYNus", "SYNEus", "JOTRus", "JOEus", "DFX2" }));
-	TEST_EXPECT(login_result(port, "SYNus") == 0 && answers_current(port, "SYNEus", "SYNEPTR.CMD"));
+	TEST_EXPECT(login_result(port, "SYNus") == 0 && answers_current(port, "SYNEus", "SYNEPTR.CMD", ""));
 	TEST_EXPECT(fs::is_regular_file(io::os_path(io::utf8_join(cache, sha2 + "/0/SYNPTR.CMD"))));
 	TEST_EXPECT(!fs::exists(io::os_path(io::utf8_join(cache, sha2 + "/1"))));
 	listener.stop();

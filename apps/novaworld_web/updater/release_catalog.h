@@ -15,7 +15,8 @@
 // one host, so UPDATE.EXE never load-tests: ftp.novaworld.com for a data set served
 // through the Switcher's hosts block (retail_updater), else the deployment's update host
 // (ONNET_UPDATE_HOST). A retail updater product (retail_updater) with no published release
-// is served as current: a package of one section holding its command file with no rows,
+// is served as current: a package of one section holding its command file with no rows (its
+// EXE the title's executable, so a stock /RUN still restarts the game),
 // written into the cache under its sha, so a check finds nothing to fetch until a release is
 // published (ADR 0067). Service policy, not a port.
 

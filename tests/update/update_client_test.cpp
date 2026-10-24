@@ -132,8 +132,14 @@ int test_check_goes_past_a_failing_product(const test_temp::TempDir &temp) {
 	updater::Result result;
 	TEST_EXPECT(updater::run(options, products, result, error) && result.available && result.products == 1);
 	options.check = false;
-	TEST_EXPECT(!updater::run(options, products, result, error)); // an install stops at the first
-	TEST_EXPECT(updater::run(options, {products[1]}, result, error) && result.applied);
+	TEST_EXPECT(!updater::run(options, products, result, error)); // a failing game stops an install
+	// A failing expansion does not: it is recorded and the install goes on, as retail's nested
+	// expansion runs do.
+	updater::Product unpublished_expansion = products[0];
+	unpublished_expansion.expansion = true;
+	TEST_EXPECT(updater::run(options, {products[1], unpublished_expansion}, result, error) && result.applied &&
+			result.expansion_failures.size() == 1 && result.expansion_failures[0].dir == products[0].dir &&
+			!result.expansion_failures[0].error.empty());
 	options.check = true;
 	TEST_EXPECT(!updater::run(options, products, result, error) && !result.available && !error.empty());
 	return 0;
@@ -205,6 +211,11 @@ int test_options_and_discovery(const test_temp::TempDir &temp) {
 	TEST_EXPECT(options.check && options.game == "dfx2" && options.run && options.run_args == std::vector<std::string>({"--resource-dir", "a b"}));
 	TEST_EXPECT(!updater::parse_options({"--port", "0"}, temp.path / "update.exe", options, error));
 	TEST_EXPECT(!updater::parse_options({"--unknown"}, temp.path / "update.exe", options, error));
+	// The game's window handle implies /RUN; a zero one (revupdat's stand-in) does not.
+	TEST_EXPECT(updater::parse_options({"1234", "/force", "/log"}, temp.path / "update.exe", options, error));
+	TEST_EXPECT(options.legacy && options.run && options.parent_window == 1234);
+	TEST_EXPECT(updater::parse_options({"0", "/DIR", temp.file("retail")}, temp.path / "update.exe", options, error));
+	TEST_EXPECT(options.legacy && !options.run);
 	TEST_EXPECT(updater::parse_options({"0", "/DIR", temp.file("retail"), "/RUN"}, temp.path / "update.exe", options, error));
 	TEST_EXPECT(options.legacy && options.no_runtime);
 	// A JO-shaped install: JO:CA's wizard (no cc.bin: the US territory over QQ).

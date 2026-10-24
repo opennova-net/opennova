@@ -37,8 +37,12 @@ bool parse_options(const std::vector<std::string> &args,
 		const std::string a = strutil::to_lower(args[i]);
 		uint64_t n = 0;
 		if (i == 0 && number(args[i], n)) {
+			// The game's window handle: a nonzero one also means /RUN.
+			// [orig: Cupdate2App_InitInstance @ 0x404820 (UPDATE.EXE), the atol @0x4048d6,
+			//  Cupdate2Dlg_SetRunWhenDone @0x404966]
 			o.parent_window = static_cast<uintptr_t>(n);
 			o.legacy = true;
+			if (n) o.run = true;
 		} else if (a == "--check") o.check = true;
 		else if (a == "--no-runtime") o.no_runtime = true;
 		else if (a == "/run") o.run = true;

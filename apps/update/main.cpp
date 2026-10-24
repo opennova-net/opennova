@@ -3,10 +3,13 @@
 #include "client.h"
 #include "platform.h"
 
+#include <base/io/file_io.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <formats/update/apply.h>
+#include <formats/update/update_crc.h>
 
+#include <ctime>
 #include <fstream>
 
 #include <atomic>
@@ -22,6 +25,34 @@
 namespace {
 using namespace opennova;
 
+constexpr const char *kSucceeded = "Operation completed successfully!";
+
+// version.txt as the result box reads it: its command-file CRC, or none when it does not open.
+struct VersionMark {
+	bool present = false;
+	uint32_t crc = 0;
+};
+
+VersionMark version_mark(const std::filesystem::path &dir) {
+	std::vector<uint8_t> bytes;
+	std::string ignored;
+	if (!io::read_file_bytes(io::utf8_path(dir / "version.txt"), bytes, ignored)) return {};
+	return {true, update::command_file_crc(bytes.data(), bytes.size())};
+}
+
+// The result box's text as retail composes it: the result line, then "No Update Needed!" when a
+// successful run left version.txt as it found it, else "Current Version:" and the file's text;
+// nothing more when version.txt does not open. [orig: Cupdate2Dlg_ReportResult @ 0x405140 (UPDATE.EXE)]
+std::string result_text(const std::string &line, bool ok, const std::filesystem::path &dir,
+		const VersionMark &start) {
+	std::vector<uint8_t> bytes;
+	std::string ignored;
+	if (!io::read_file_bytes(io::utf8_path(dir / "version.txt"), bytes, ignored)) return line;
+	if (ok && start.present && update::command_file_crc(bytes.data(), bytes.size()) == start.crc)
+		return line + "\r\nNo Update Needed!\r\n";
+	return bytes.empty() ? line : line + "\r\nCurrent Version:\r\n" + std::string(bytes.begin(), bytes.end());
+}
+
 bool execute(const updater::Options &options, updater::Result &result, std::string &error,
 		const updater::ProgressSink &sink, const std::atomic_bool *cancel) {
 	if (!options.check && sink) sink({"Waiting for the game to exit...", "", 0, 0});
@@ -29,7 +60,13 @@ bool execute(const updater::Options &options, updater::Result &result, std::stri
 		return false;
 	std::vector<updater::Product> products;
 	std::ofstream log;
-	if (options.verbose && !options.check) log.open(options.runtime_dir / "update.log", std::ios::app);
+	if (options.verbose && !options.check) {
+		// update.log truncated in the install's directory, headed by the time.
+		// [orig: UpdateLog_Open @ 0x4040b0 (UPDATE.EXE)]
+		log.open(options.resource_dir / "update.log", std::ios::trunc);
+		const std::time_t now = std::time(nullptr);
+		if (log) log << "Update log : " << std::asctime(std::localtime(&now)) << '\n';
+	}
 	const auto progress = [&](const updater::Progress &p) {
 		if (log) { log << p.status << " " << p.file << " " << p.bytes << "/" << p.total << '\n'; log.flush(); }
 		if (sink) sink(p);
@@ -38,6 +75,9 @@ bool execute(const updater::Options &options, updater::Result &result, std::stri
 			updater::run(options, products, result, error, progress, cancel);
 }
 
+// After a run: revupdat replaces a staged update.new and relaunches the updater (retail hands
+// over after every loose pass, D-UPD-4), else /RUN starts the command file's EXE (legacy) or
+// opennova.exe. [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE), US_RUN_REVUPDAT and US_DONE]
 bool finish(const updater::Options &options, const std::vector<std::string> &original,
 		const updater::Result &result, std::string &error) {
 	if (!result.revision_pending && !options.run) return true;
@@ -80,6 +120,7 @@ bool finish(const updater::Options &options, const std::vector<std::string> &ori
 #ifdef _WIN32
 struct Dialog {
 	updater::Options options;
+	VersionMark start;
 	updater::Result result;
 	std::vector<std::string> args;
 	std::atomic_bool cancel{false};
@@ -130,10 +171,21 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
 		if (dialog->done.load()) {
 			KillTimer(window, 1);
 			dialog->worker.join();
-			if (dialog->ok) dialog->ok = finish(dialog->options, dialog->args, dialog->result, dialog->error);
-			if (!dialog->result.revision_pending || !dialog->ok) {
-				const std::string text = dialog->ok ? (dialog->result.applied ? "Operation completed successfully!" : "No Update Needed!") : dialog->error;
-				MessageBoxW(window, updater::wide(text).c_str(), L"OpenNova Update", MB_OK | (dialog->ok ? MB_ICONINFORMATION : MB_ICONERROR));
+			// Retail's DONE: each failed expansion's own box (its nested run's), the result box (titled
+			// "OpenNova Update", D-UPD-11), then the launch. A revision hands over to revupdat with
+			// no box.
+			if (!dialog->ok || !dialog->result.revision_pending) {
+				for (const updater::Result::Failure &failure : dialog->result.expansion_failures)
+					MessageBoxW(window, updater::wide(result_text(failure.error, false, failure.dir, {})).c_str(),
+							L"OpenNova Update", MB_OK | MB_ICONERROR);
+				const std::string text = result_text(dialog->ok ? kSucceeded : dialog->error, dialog->ok,
+						dialog->options.resource_dir, dialog->start);
+				MessageBoxW(window, updater::wide(text).c_str(), L"OpenNova Update",
+						MB_OK | (dialog->ok ? MB_ICONINFORMATION : MB_ICONERROR));
+			}
+			if (dialog->ok && !finish(dialog->options, dialog->args, dialog->result, dialog->error)) {
+				dialog->ok = false;
+				MessageBoxW(window, updater::wide(dialog->error).c_str(), L"OpenNova Update", MB_OK | MB_ICONERROR);
 			}
 			DestroyWindow(window);
 		}
@@ -148,7 +200,7 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
 	return DefWindowProcW(window, message, wparam, lparam);
 }
 
-int show_dialog(const updater::Options &options, const std::vector<std::string> &args) {
+int show_dialog(const updater::Options &options, const VersionMark &start, const std::vector<std::string> &args) {
 	INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_PROGRESS_CLASS};
 	InitCommonControlsEx(&controls);
 	WNDCLASSW cls{};
@@ -160,6 +212,7 @@ int show_dialog(const updater::Options &options, const std::vector<std::string> 
 	RegisterClassW(&cls);
 	Dialog dialog;
 	dialog.options = options;
+	dialog.start = start;
 	dialog.args = args;
 	HWND window = CreateWindowExW(WS_EX_APPWINDOW, cls.lpszClassName, L"OpenNova Update",
 			WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, CW_USEDEFAULT, CW_USEDEFAULT,
@@ -189,14 +242,24 @@ int app_main(const std::vector<std::string> &args, const std::filesystem::path &
 		updater::write_stdout(result.available ? "UPDATE AVAILABLE\n" : "CURRENT\n");
 		return result.available ? 10 : 0;
 	}
+	const VersionMark start = version_mark(options.resource_dir);
 #ifdef _WIN32
-	return show_dialog(options, args);
+	return show_dialog(options, start, args);
 #else
 	updater::Result result;
 	if (!execute(options, result, error, [](const updater::Progress &p) {
 			updater::write_stdout(p.status + " " + p.file + "\n");
-		}, nullptr) || !finish(options, args, result, error)) {
-		updater::write_stdout("ERROR " + error + "\n"); return 1;
+		}, nullptr)) {
+		updater::write_stdout("ERROR " + result_text(error, false, options.resource_dir, start) + "\n");
+		return 1;
+	}
+	for (const updater::Result::Failure &failure : result.expansion_failures)
+		updater::write_stdout("ERROR " + result_text(failure.error, false, failure.dir, {}) + "\n");
+	if (!result.revision_pending)
+		updater::write_stdout(result_text(kSucceeded, true, options.resource_dir, start) + "\n");
+	if (!finish(options, args, result, error)) {
+		updater::write_stdout("ERROR " + error + "\n");
+		return 1;
 	}
 	return 0;
 #endif

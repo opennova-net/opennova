@@ -70,6 +70,8 @@ uint64_t process_id() {
 #endif
 }
 
+// The game closed: WM_CLOSE posted to its window, then its process awaited, where retail polls
+// IsWindow (D-UPD-10). [orig: Cupdate2App_InitInstance @ 0x404820 (UPDATE.EXE), @0x4048ef..0x40495a]
 bool wait_for_parent(uint64_t pid, uintptr_t window, std::string &error, const std::atomic_bool *cancel) {
 #ifdef _WIN32
 	if (window) {

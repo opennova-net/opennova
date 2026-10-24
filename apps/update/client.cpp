@@ -38,6 +38,8 @@ fs::path named_file(const fs::path &dir, const std::string &name) {
 	return exact;
 }
 
+// The wizard's CMD and PRODUCT_LOGIN after cc.bin's territory substitution.
+// [orig: Cupdate2Dlg_ReadWizard @ 0x404c90 (UPDATE.EXE); Cupdate2Dlg_SubstituteTerritory @ 0x404be0 (UPDATE.EXE)]
 bool wizard_product(const fs::path &dir, const fs::path &wizard_file,
 		Product &product, std::string &error) {
 	std::string text;
@@ -108,6 +110,7 @@ struct Worker {
 		const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count();
 		return static_cast<int>(std::max<int64_t>(1, std::min<int64_t>(remaining, 2000)));
 	}
+	// [orig: UpdateSocket_Connect @ 0x403570 (UPDATE.EXE)]: a failed host or port is passed over.
 	bool connect(const std::string &host, uint16_t port, net::ScopedSocket &socket) {
 		if (interrupted()) return false;
 		for (net::Endpoint endpoint : net::resolve_ipv4_all(host)) {
@@ -119,6 +122,8 @@ struct Worker {
 		error = "Unable to open update server " + host + ":" + std::to_string(port);
 		return false;
 	}
+	// A reply's bytes. The 90 s silence limit restarts whenever bytes arrive.
+	// [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE), US_WAIT_REPLY's 0x15F90 ms and US_FETCH_WAIT]
 	bool receive(net::Socket &socket, uint8_t *out, size_t size, const std::string &file = "") {
 		size_t received = 0;
 		auto last = Clock::now();
@@ -137,6 +142,9 @@ struct Worker {
 		}
 		return true;
 	}
+	// One request and its reply, which must echo the request's verb and id; a GET reply must
+	// name the file asked for (D-UPD-3). [orig: NLUpdateProtocol_ParseReplyHeader @ 0x4011d0
+	// (UPDATE.EXE); NLUpdateProtocol_DispatchReply @ 0x4017a0 (UPDATE.EXE)]
 	bool exchange(net::Socket &socket, const std::string &request, update::Verb verb,
 			int32_t id, uint64_t limit, update::Reply &reply, const std::string &name = "") {
 		if (interrupted()) return false;
@@ -167,6 +175,10 @@ struct Worker {
 		update::Reply reply;
 		return exchange(socket, update::encode_login(product.login, "", id), update::Verb::Login, id, 0, reply);
 	}
+	// The gateway's LOGIN (id -4) and SERVER.LST (id -3), then the update server's LOGIN (id -2)
+	// on the gateway's port. Every listed server is a failover candidate, with no LOADTEST
+	// ranking (D-UPD-8). [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE), states 1-10;
+	// Cupdate2Dlg_ReadServerList @ 0x408070 (UPDATE.EXE)]
 	bool open_product(const Product &product, net::ScopedSocket &out) {
 		std::vector<std::string> hosts = options.server.empty() ? product.gateways : std::vector<std::string>{options.server};
 		if (hosts.empty()) hosts.push_back(kServiceHost);
@@ -198,6 +210,10 @@ struct Worker {
 	}
 };
 
+// Whether a command row still has work: a loose file missing, empty, of another size (row
+// size 0 skips) or another file CRC (row crc 0 skips); an archive entry missing, more than 2 s
+// from the row's time, or of another checksum when both are set; a REMOVE whose file or entry
+// is there. [orig: Cupdate2Dlg_PrecheckCommands @ 0x407820 (UPDATE.EXE)]
 struct Precheck {
 	const Product &product;
 	explicit Precheck(const Product &p) : product(p) {}
@@ -237,6 +253,11 @@ struct Precheck {
 	}
 };
 
+// One product: the command file's CRC against the local copy's (equal: keep it, else GET it),
+// the rows the precheck finds, fetched, then installed in one pass, update.exe landing as
+// update.new for revupdat (D-UPD-4). The command file is written only once every row is in
+// (D-UPD-5). [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE), states 11-16;
+// Cupdate2Dlg_InstallLooseRows @ 0x406860 (UPDATE.EXE)]
 bool update_product(Worker &worker, const Product &product, Result &result) {
 	if (!update::is_safe_row_name(product.command)) { worker.error = "Unsafe command file name."; return false; }
 	net::ScopedSocket socket;
@@ -279,7 +300,7 @@ bool update_product(Worker &worker, const Product &product, Result &result) {
 		if (row.type == update::CommandType::Target) {
 			target = row.name; selected.rows.push_back(row); continue;
 		}
-		// A new native command file installs every row. This avoids treating the retail
+		// A new native command file installs every row (D-UPD-6). This avoids treating the retail
 		// defective CRC as a full-file digest when code/PCK bytes changed beyond its prefix.
 		const bool updater_image = row.type == update::CommandType::Loose && target == "." &&
 				strutil::iequals(row.name, "update.exe") && product.dir == worker.options.runtime_dir;
@@ -331,6 +352,9 @@ bool update_product(Worker &worker, const Product &product, Result &result) {
 }
 } // namespace
 
+// The runtime, the selected game and every expansion/<name>/ with an UPDATE.WIZ, each a product
+// of its own. [orig: Cupdate2Dlg_RunExpansionUpdates @ 0x407f10 (UPDATE.EXE);
+// Cupdate2Dlg_RunWizardsIn @ 0x406290 (UPDATE.EXE)]
 bool discover_products(const Options &o, std::vector<Product> &out, std::string &error) {
 	out.clear();
 	std::error_code ec;
@@ -387,11 +411,14 @@ bool discover_products(const Options &o, std::vector<Product> &out, std::string 
 	for (const fs::path &dir : dirs) {
 		const fs::path wizard = named_file(dir, "UPDATE.WIZ");
 		if (!fs::is_regular_file(wizard, ec)) continue;
+		// A retail game's expansion needs its archive installed, where retail needs only the wizard
+		// (D-UPD-9); a native content's registers by its wizard alone.
 		if (!native_content && !fs::is_regular_file(named_file(dir, io::utf8_path(dir.filename()) + ".pff"), ec)) continue;
-		Product expansion;
-		if (!wizard_product(dir, wizard, expansion, error)) return false;
-		expansion.native = expansion.native || native_content;
-		out.push_back(std::move(expansion));
+		Product registered;
+		if (!wizard_product(dir, wizard, registered, error)) return false;
+		registered.native = registered.native || native_content;
+		registered.expansion = true;
+		out.push_back(std::move(registered));
 	}
 	const std::vector<std::string> gateways = service_gateways(o.runtime_dir);
 	for (Product &product : out) product.gateways = gateways;
@@ -407,10 +434,19 @@ bool run(const Options &options, const std::vector<Product> &products, Result &r
 	std::string failure;
 	for (const Product &product : products) {
 		if (!update_product(worker, product, result)) {
-			// An install stops at its first failure. A check goes on: one dead or unpublished
-			// product (a registered expansion's) must not hide another product's update.
-			if (!options.check) return false;
-			if (failure.empty()) failure = error;
+			// A check (D-UPD-7) goes on: one dead or unpublished product (a registered expansion's) must
+			// not hide another product's update.
+			if (options.check) {
+				if (failure.empty()) failure = error;
+				continue;
+			}
+			// An install stops at a failing runtime or game. An expansion's failure is its own (D-UPD-12):
+			// retail runs each as a nested updater whose exit it ignores, and goes on to the next
+			// and to the relaunch. [orig: Cupdate2Dlg_RunWizardsIn @ 0x406290 (UPDATE.EXE), the
+			// exit code dropped @0x40633b; Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE), US_DONE]
+			if (!product.expansion) return false;
+			result.expansion_failures.push_back({product.dir, error});
+			error.clear();
 			continue;
 		}
 		// Let the helper replace this process before continuing with content. A

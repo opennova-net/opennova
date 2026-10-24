@@ -51,6 +51,21 @@ bool list_section_files(
 	return true;
 }
 
+// The executable a retail title's update starts at its end with /RUN, the command file's EXE:
+// JO:CA's Jointops.exe and the Steam DFX2's dfx2.exe. The game's Options UPDATE runs the updater
+// with /run and exits, so a command without it leaves the game closed. Retail's own command
+// files are not witnessed (the installs ship none); an expansion's nested run takes no /RUN.
+// [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE), US_DONE: the EXE launched when /RUN]
+const char *title_executable(const hosted::DataSetRow &row) {
+	if (row.kind != hosted::DataSetKind::Base)
+		return "";
+	if (row.title == "jo")
+		return "Jointops.exe";
+	if (row.title == "dfx2")
+		return "dfx2.exe";
+	return "";
+}
+
 } // namespace
 
 ReleaseCatalog::ReleaseCatalog(std::string cache_dir, std::string update_host) :
@@ -130,6 +145,7 @@ bool ReleaseCatalog::refresh(db::Database &db, ObjectStore &store, std::string &
 bool ReleaseCatalog::current_section(
 		const hosted::DataSetRow &row, hosted::PublishedSection &section, std::string &why) {
 	update::CommandFile command;
+	command.exe = title_executable(row);
 	command.product = row.display_name;
 	const std::string text = update::write_command_file(command);
 	if (text.empty()) {
