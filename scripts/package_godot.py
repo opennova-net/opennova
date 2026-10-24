@@ -77,11 +77,17 @@ class Target:
 
 def run(command, *, cwd=ROOT, capture=False, env=None, expected=0, timeout=None):
     """Wait for native GUI executables too; preserve argv containing spaces."""
+    # CreateProcess searches System32 before PATH for a bare executable name.
+    # In particular, "bash" can otherwise launch WSL instead of Git Bash even
+    # when Git Bash is first on PATH (as it is in Windows CI's bash shell).
+    executable = shutil.which(str(command[0]))
+    if not executable:
+        raise PackageError(f"Executable not found: {command[0]}")
     kwargs = {}
     if os.name == "nt":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     result = subprocess.run(
-        [str(arg) for arg in command], cwd=cwd, env=env, timeout=timeout,
+        [executable, *[str(arg) for arg in command[1:]]], cwd=cwd, env=env, timeout=timeout,
         stdout=subprocess.PIPE if capture else None,
         stderr=subprocess.STDOUT if capture else None,
         text=True, encoding="utf-8", errors="replace", **kwargs,
@@ -97,6 +103,20 @@ def require_file(path: Path) -> Path:
     if not path.is_file():
         raise PackageError(f"Required file missing: {path}")
     return path
+
+
+def bootstrap_shell(target: Target) -> str:
+    if target.name == "linux":
+        return "bash"
+    # PowerShell's PATH need not contain Git's bin directory. Locate the native
+    # shell from Git itself, covering cmd/, bin/ and mingw64/bin/ installations.
+    git = shutil.which("git")
+    if git:
+        for parent in list(Path(git).parents)[:3]:
+            candidate = parent / "bin/bash.exe"
+            if candidate.is_file():
+                return str(candidate)
+    raise PackageError("Windows packaging needs Git for Windows with Git Bash installed")
 
 
 def download(url: str, destination: Path):
@@ -475,7 +495,9 @@ def main(argv=None) -> int:
         raise PackageError(f"Package {target.name} on a native x86_64 {target.name} host")
     version = version_of(ROOT)
     print(f"Packaging {target.name} v{version} ({args.export_mode})", flush=True)
-    run(["bash", "scripts/bootstrap_imgui_godot.sh"])
+    shell = bootstrap_shell(target)
+    print(f"Bootstrap shell: {shutil.which(shell)}", flush=True)
+    print(run([shell, "scripts/bootstrap_imgui_godot.sh"], capture=True), end="", flush=True)
     godot = install_godot(target)
     build_extensions(target, args.export_mode, args.skip_build)
     cli = project_cli(target, args.project_cli)

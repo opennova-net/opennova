@@ -32,6 +32,22 @@ class PackageChecks(unittest.TestCase):
         path.write_bytes(data)
         return path
 
+    def test_subprocess_uses_path_result_instead_of_windows_system_search(self):
+        native = str(self.root / "Git/bin/bash.exe")
+        with patch.object(package.shutil, "which", return_value=native), \
+                patch.object(package.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "native")) as call:
+            self.assertEqual(package.run(["bash", "script with spaces.sh"], capture=True), "native")
+        self.assertEqual(call.call_args.args[0], [native, "script with spaces.sh"])
+
+    def test_windows_bootstrap_uses_git_installation(self):
+        native = self.write("Git/bin/bash.exe")
+        for directory in ("cmd", "bin", "mingw64/bin"):
+            with self.subTest(directory=directory), \
+                    patch.object(package.shutil, "which", return_value=str(self.root / "Git" / directory / "git.exe")):
+                self.assertEqual(package.bootstrap_shell(package.Target("windows")), str(native))
+        with patch.object(package.shutil, "which", return_value=None), self.assertRaises(package.PackageError):
+            package.bootstrap_shell(package.Target("windows"))
+
     def test_only_tracked_files_are_copied_and_lfs_pointers_fail(self):
         repo = self.root / "repo"
         tracked = self.write("repo/assets/model with spaces.3di")
