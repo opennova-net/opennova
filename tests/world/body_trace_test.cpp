@@ -85,6 +85,7 @@ static void test_the_tick_records_each_watched_handle() {
     CHECK(rows[0].capsule_bottom == 6790 && rows[0].airborne);
     CHECK(rows[0].resolve_push[0] == 0 && rows[0].resolve_push[1] == -270);
     CHECK(rows[0].contact_item == 1203);
+    CHECK(rows[0].bound_radius == 0); // the rig's person carries no model stamp
     CHECK(rows[0].health == 90);
     CHECK(!rows[0].mounted && rows[0].mount_target == 0xFFFFu);
     CHECK(rows[0].ground_target == 0xFFFFu);

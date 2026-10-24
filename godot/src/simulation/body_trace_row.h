@@ -64,6 +64,7 @@ public:
 	bool get_airborne() const { return value_.airborne; }
 	PackedInt32Array get_resolve_push() const;
 	int get_contact_item() const { return value_.contact_item; }
+	int get_bound_radius() const { return value_.bound_radius; }
 
 	Dictionary to_json_value() const;
 };

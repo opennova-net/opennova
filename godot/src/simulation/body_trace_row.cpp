@@ -74,6 +74,7 @@ Dictionary BodyTraceRow::to_json_value() const {
 	out["airborne"] = get_airborne();
 	out["resolve_push"] = get_resolve_push();
 	out["contact_item"] = get_contact_item();
+	out["bound_radius"] = get_bound_radius();
 	return out;
 }
 
@@ -116,5 +117,6 @@ void BodyTraceRow::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::BOOL, airborne)
 	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::PACKED_INT32_ARRAY, resolve_push)
 	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::INT, contact_item)
+	OPENNOVA_RECORD_READ_ONLY(BodyTraceRow, Variant::INT, bound_radius)
 	ClassDB::bind_method(D_METHOD("to_json_value"), &BodyTraceRow::to_json_value);
 }

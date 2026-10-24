@@ -107,6 +107,8 @@ struct BodyTraceRecord {
     bool airborne = false;
     int32_t resolve_push[2] = {};
     int32_t contact_item = 0;
+    // kTick: the entity's boundRadius (+0x0, 16.16), the word the contact force's clamp reads.
+    int32_t bound_radius = 0;
 };
 
 // The watched handles and the last kCapacity records; seq counts every record appended.

@@ -20,7 +20,8 @@ extends GameProbe
 ##   none yet), its body channel (`anim_state`, `anim_playing`, `anim_prev`,
 ##   `anim_blend_milli`, `clip_phase`) and the capsule bottom it last sampled
 ##   (`capsule_bottom`), its `airborne` latch, and the last resolve's horizontal correction
-##   (`resolve_push`) and the item type of its last contact (`contact_item`).
+##   (`resolve_push`) and the item type of its last contact (`contact_item`); and its
+##   boundRadius (`bound_radius`, 16.16), the word the contact force's clamp reads.
 ## and, as they happen:
 ## - `ground_probe`: the movement resolver's settle-tail probe on it: the probe's start
 ##   (`pos`), the height it returned (`probe_z`), the entity it hit (`ground_target`, the word

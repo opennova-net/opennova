@@ -79,6 +79,7 @@ void body_trace_tick(World &world) {
             record.mount_bone = e->mount_bone;
             record.ground_target = handle_word(e->ground_target);
             record.collision_model = collision_model_of(world, h);
+            record.bound_radius = e->bound_radius.q16;
             record.think_clock = e->spawn_phase;
             if (const AiEntity *brain = world.ai.for_handle(h);
                     brain != nullptr && !brain->inf.active && brain->brain.f[AiBrain::kOwner] != 0) {
