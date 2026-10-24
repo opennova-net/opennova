@@ -226,9 +226,10 @@ public:
     void bind_use_gun_slot(Entity &occupant, Entity &vehicle);
     // A slot owner's entity leaving the world takes the owner word off every MountSlot that
     // names it. Retail's word outlives the entity as a pointer into its destroyed pool slot
-    // (Entity_ClearAllReferences clears the AI words alone, then the entity's head is zeroed);
-    // ours
-    // resolves a dead handle to no owner, so this changes nothing a pump reads.
+    // (Entity_ClearAllReferences clears the AI words alone, then the entity's head is zeroed),
+    // so its pump reads whatever that slot holds next. An EntityHandle carries no generation
+    // either: a kept handle would resolve to the slot's next occupant. This clear is what
+    // keeps a pump from running its handlers for that occupant (a port-only clear).
     // [orig: Entity_Destroy @0x43E810 - the Entity_ClearAllReferences call @0x43E921, the
     //  memset @0x43EA70; Entity_ClearAllReferences @0x465670; WeaponAction_ProcessFrame
     //  @0x540E60 - the slot->owner read @0x540E95]

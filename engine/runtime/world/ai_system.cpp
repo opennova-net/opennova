@@ -1297,7 +1297,7 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
     // accepted fire re-points to its personal slot first, Server_ClientFiredRound
     // @0x50C1D4..0x50C28D).
     // [orig: WeaponAction_Fire @0x542B10 - the owner test @0x542B24..0x542B2E;
-    //  Entity_CalcWeaponFirePosition @0x4DC750 - the parentSlot 3 test @0x4DC7A7]
+    //  Entity_CalcWeaponFirePosition @0x4DC750 - the parentSlot 3 test @0x4DC7A0]
     const bool seated = owner.mounted && owner.mount_target == mount->handle &&
             seat_borrows_mount_slot(owner, *mount) &&
             mount->primary_weapon_owner == owner.handle;
