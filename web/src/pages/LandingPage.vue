@@ -112,8 +112,8 @@
       <h2 id="retail-title" class="mt-3 text-3xl font-semibold text-ink-bright">Your Joint Operations, too</h2>
       <div class="mt-3 max-w-2xl space-y-3 text-ink-muted">
         <p>
-          OpenNova runs in place of Jointops.exe. Extract the runtime into your Joint Operations folder and launch
-          <code>opennova.exe -- /game jo</code> to play its maps, missions, models and sounds. It ships no retail files.
+          OpenNova runs in place of Jointops.exe. Put it in your Joint Operations folder and run it to play its maps,
+          missions, models and sounds. It ships no retail files.
         </p>
         <p>
           The aim is parity with the game as it shipped, not a remake. OpenNova is pre-1.0, so expect differences,
