@@ -292,6 +292,7 @@ bool run_interest_person_los_passes_a_decoration() {
 		wall.kind = w::EntityKind::Building; // every pool-2 row's record family
 		wall.alive = true;
 		wall.has_item_def = true;
+		wall.item_type_index = 1; // a loaded row's def ordinal (+0x1C), the static prox list's gate
 		wall.item_type = def_type;
 		wall.heading = w::placed_heading_bam(90);
 		wall.position = w::Vec3{2.0f, 0.0f, 0.0f};

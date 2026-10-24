@@ -5422,6 +5422,7 @@ void test_slope_probes_include_candidate_models() {
  solid.kind = EntityKind::Building;
  solid.item_id = 164;
  solid.has_item_def = true;
+ solid.item_type_index = 1; // a loaded row's def ordinal (+0x1C), the static prox list's gate
  solid.item_type = 1;
  solid.bound_radius = 4.0f;
  solid.position = {10,10,0};

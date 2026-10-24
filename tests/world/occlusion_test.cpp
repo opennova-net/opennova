@@ -1862,6 +1862,7 @@ void test_decoration_rows_are_entity_collected() {
         rig.add_building(20.0, 10.0, building_collision(2, 2, 3), one_room_window());
     if (Entity *b = rig.world.registry.get(building)) {
         b->has_item_def = true;
+        b->item_type_index = 1; // a loaded row's def ordinal (+0x1C), the static prox list's gate
         b->item_type = kItemDefTypeBuilding;
     }
     // A crate stack inside the room: a pool-2 row (the BMS building record
@@ -1905,6 +1906,7 @@ void test_decoration_rows_are_entity_collected() {
     c.heading = placed_heading_bam(90);
     c.alive = true;
     c.has_item_def = true;
+    c.item_type_index = 1; // a loaded row's def ordinal (+0x1C), the static prox list's gate
     c.item_type = 2;
     c.bound_radius = 0.9f;
     const EntityHandle crate = rig.world.registry.spawn(2, c);

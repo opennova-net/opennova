@@ -2818,6 +2818,7 @@ void test_bullet_building_material_is_plain_plus_four() {
     Entity building;
     building.kind = EntityKind::Building;
     building.has_item_def = true;
+    building.item_type_index = 1; // a loaded row's def ordinal (+0x1C), the static prox list's gate
     building.item_type = 3;
     building.position = {4.0f, 0.0f, 0.0f};
     building.health = 1000;
@@ -3034,6 +3035,7 @@ void test_material_15_breaks_the_building_glass_section() {
         Entity building;
         building.kind = EntityKind::Building;
         building.has_item_def = true;
+        building.item_type_index = 1; // a loaded row's def ordinal (+0x1C), the static prox list's gate
         building.item_type = c.item_type;
         building.engine_flags = c.engine_flags;
         building.position = {4.0f, 0.0f, 0.0f};
@@ -3100,6 +3102,7 @@ void test_material_15_breaks_the_building_glass_section() {
     Entity building;
     building.kind = EntityKind::Building;
     building.has_item_def = true;
+    building.item_type_index = 1; // a loaded row's def ordinal (+0x1C), the static prox list's gate
     building.item_type = 5;
     building.position = {4.0f, 0.0f, 0.0f};
     building.health = 1000;
@@ -3251,6 +3254,7 @@ void test_item_callbacks_receive_geometric_section_on_both_peers() {
         const auto owner = world.registry.spawn(0, shooter);
         Entity seed; seed.kind = EntityKind::Building; seed.item_type = 5;
         seed.item_id = 812; seed.has_item_def = true; seed.health = 500;
+        seed.item_type_index = 1; // a loaded row's def ordinal (+0x1C), the static prox list's gate
         seed.position = {4,0,0}; seed.heading = placed_heading_bam(90);
         const auto h = world.registry.spawn(2, seed);
         auto &target = *world.registry.get(h);

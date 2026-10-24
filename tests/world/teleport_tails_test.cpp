@@ -73,13 +73,13 @@ struct Rig {
 		return world->registry.spawn(1, e);
 	}
 
-	// A pool-2 decoration the statics table takes.
+	// A pool-2 decoration the statics table takes: a loaded row, its def ordinal (+0x1C) set.
 	w::EntityHandle spawn_static(uint16_t ssn = 0, int group = 0) {
 		w::Entity e;
 		e.kind = w::EntityKind::Building;
 		e.has_item_def = true;
 		e.item_type = 2;
-		e.item_type_index = ssn != 0 || group != 0 ? 4 : 0;
+		e.item_type_index = 4;
 		e.net_id = ssn;
 		e.group_id = static_cast<uint8_t>(group);
 		e.bound_radius = 1;
@@ -184,6 +184,35 @@ bool run_tele_ssn_rebuilds_the_statics_for_a_building_marker_alone() {
 	              "teleSSN: a building marker rebuilds the statics");
 }
 
+// The statics table lists every pool-2 row with an item type (+0x1C) and a def, Building-type
+// first, whatever its collision instance or radius (a def'd row with no collision block lists at
+// the pad's one unit), and no def'd row without +0x1C; a def-less row is a synthetic world's,
+// listed only with an instance or a radius.
+// [orig: Entity_BuildProximityLists_Pool2 @0x4B9430 - the +0x1C and def tests @0x4B945D /
+//  @0x4B9466 (pass 1, Building) and @0x4B94F1 / @0x4B94FA (pass 2), the radius pad @0x4B947B]
+bool run_the_statics_list_every_typed_defd_row() {
+	Rig r; // one def'd decoration with +0x1C and a radius
+	w::Entity bare; // def'd, +0x1C, no instance, no radius
+	bare.kind = w::EntityKind::Building;
+	bare.has_item_def = true;
+	bare.item_type = w::kItemDefTypeBuilding;
+	bare.item_type_index = 4;
+	const w::EntityHandle bare_h = r.world->registry.spawn(2, bare);
+	w::Entity untyped = bare; // def'd, no +0x1C
+	untyped.item_type_index = 0;
+	untyped.bound_radius = 1;
+	r.world->registry.spawn(2, untyped);
+	w::Entity defless; // no def, no instance, no radius
+	defless.kind = w::EntityKind::Building;
+	r.world->registry.spawn(2, defless);
+	r.build();
+	if (!expect(r.collision->static_building_count() == 1 && r.collision->static_count() == 2,
+	            "statics: the typed def'd rows list, Building first")) return false;
+	const w::CollisionWorld::StaticSlotView first = r.collision->static_slot(0);
+	return expect(first.h == bare_h && first.radius == 1,
+	              "statics: a row with no collision block lists at the pad's one unit");
+}
+
 } // namespace
 
 int main() {
@@ -192,6 +221,7 @@ int main() {
 	ok &= run_a_pool2_target_rebuilds_the_statics_first();
 	ok &= run_the_group_rebuilds_every_table_then_each_members_list();
 	ok &= run_tele_ssn_rebuilds_the_statics_for_a_building_marker_alone();
+	ok &= run_the_statics_list_every_typed_defd_row();
 	if (!ok) return 1;
 	std::printf("teleport_tails_test: OK\n");
 	return 0;

@@ -160,6 +160,7 @@ struct Rig {
 		s.kind = w::EntityKind::Building;
 		s.item_id = 2281;
 		s.has_item_def = true;
+		s.item_type_index = 1; // a loaded row's def ordinal (+0x1C), the static prox list's gate
 		s.position.set_q16({-52391220, 50084402, 2857984});
 		s.heading = 23855104;
 		s.bound_radius.q16 = 171338;

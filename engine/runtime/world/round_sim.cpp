@@ -836,7 +836,7 @@ void person_class_round_legs(World &world, Entity &victim, const HitRecord &reco
                                       record.section, victim.death_anim_state,
                                       /*was_alive=*/true);
     // Then the fire death, after the cut (a clone keeps the section's clip)
-    // [orig: @0x4076D3..0x4076D5; the plyr twin @0x407A72..0x407A7C].
+    // [orig: @0x4076D3..0x4076D5; the plyr twin @0x407A7A..0x407A7C].
     if (hit_emitter) victim.death_anim_state = anim_state::kDeathFire;
 }
 

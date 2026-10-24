@@ -821,16 +821,26 @@ void CollisionWorld::build_statics(World &world) {
         auto it = instances_.find(e.handle.packed);
         const CollisionModel *attached =
             it != instances_.end() ? model(it->second.model_id) : nullptr;
-        // The proximity table keeps a bounded entry whose graphic could not
-        // resolve a collision instance, as retail's slot tables keep every
-        // entity; the face walk then misses it, as it misses every model-less
-        // entity (CollisionWorld::trace_projectile_impl).
-        if (attached == nullptr && e.bound_radius <= 0.0f) return;
+        // Every row with an item type (+0x1C) and a def is listed, whatever its
+        // collision instance or radius: a def'd row with no collision block holds a
+        // zero bound radius (the CDTA gate) and lists at the pad's one unit, and every
+        // reader's model test then passes it over (CollisionWorld::target_view). A row
+        // with no def is ours alone (a synthetic world's building; retail lists none):
+        // it lists only with an instance or a radius.
+        // [orig: Entity_BuildProximityLists_Pool2 @0x4B9430 - the +0x1C and def tests
+        //  @0x4B945D / @0x4B9466 and @0x4B94F1 / @0x4B94FA, the radius pad @0x4B947B /
+        //  @0x4B950F; Entity_InitFromModel @0x40DC30 - the CDTA gate @0x40DE8F]
+        if (e.has_item_def ? !static_prox_listed(e)
+                           : attached == nullptr && e.bound_radius <= 0.0f)
+            return;
         StaticSlot s;
         int32_t p[3];
         entity_pos_fixed(e, p);
-        const int32_t radius =
-            entity_proximity_radius(*this, e, attached) + 111876;
+        // The radius is the row's bound word: a def'd row with no instance takes its
+        // own (zero without a collision block), never the model fallback.
+        const int32_t radius = (e.has_item_def && attached == nullptr
+                ? e.bound_radius.q16
+                : entity_proximity_radius(*this, e, attached)) + 111876;
         s.x = static_cast<uint16_t>((static_cast<uint32_t>(p[0]) + 0x8000u) >> 16);
         s.y = static_cast<uint16_t>((static_cast<uint32_t>(p[1]) + 0x8000u) >> 16);
         s.z = static_cast<uint16_t>((static_cast<uint32_t>(p[2]) + 0x8000u) >> 16);
@@ -838,8 +848,7 @@ void CollisionWorld::build_statics(World &world) {
         s.h = e.handle;
         statics_.push_back(s);
     };
-    // [orig: pass 1 = itemDef type == Building; pass 2 = everything else with a
-    // def — our instance map plays the "has a collision model" role.]
+    // [orig: pass 1 = itemDef type == Building; pass 2 = every other listed row]
     // The split key is the items.def TYPE, not the record family: every
     // pool-2 row is a BMS "building" record, but only the Building-type
     // defs form the prefix; the decorations and foliage follow it.
