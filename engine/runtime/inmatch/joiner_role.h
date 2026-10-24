@@ -202,6 +202,17 @@ public:
 	//  NapiNPClientMsg_0x010 @0x433400 - Pool_UpdateMaxUsed called @0x433771;
 	//  Game_StartMission @0x524360 - Entity_InitAllFromModels called @0x52567F]
 	void materialize_world_stream();
+	// The header-only load's slot leg: once the load has installed the streamed types' seat
+	// table and swept their traits, every streamed row takes its class init's slot leg (an
+	// ewep row's, an EWeap CHel / cpln row's), as retail's mission start initializes every
+	// pool's rows after the def reload has given each its weapon name. The rows' materialize
+	// ran ahead of that table, so their own leg bound nothing; a 0x18 row keeps its leg at its
+	// record (on_replica_world_changed). The embedder runs it once per load, at that point; it
+	// does nothing on a document join, whose rows took the leg as the armory landed.
+	// [orig: Game_StartMission @0x524360 - Game_ReloadEntityModelsAndCallbacks called
+	//  @0x52550E, Entity_InitAllFromModels called @0x52567F; WeaponSlot_InitFromEntityDef
+	//  @0x5466C0 - the def's weapon name, def+0x54B @0x5466D8]
+	void run_streamed_weapon_slot_class_inits();
 	// The mission start's model reload, its pool-0 leg: each decoded pool-0 player row (the
 	// client's own included) re-typed to its class's camouflage item (D-NET-NEW-L2-57), and each
 	// person row's channel from its row, the .adm loaded and registered in the load, ahead of

@@ -965,6 +965,9 @@ public:
 	// The streamed pools into the World ahead of the settle's placement (engine:
 	// inmatch::JoinerRole::materialize_world_stream, D-NET-NEW-L2-38).
 	void materialize_join_world_stream();
+	// The header-only load's slot leg, past its seat table and traits (engine:
+	// inmatch::JoinerRole::run_streamed_weapon_slot_class_inits, D-NET-NEW-L4-29).
+	void run_join_streamed_weapon_slot_class_inits();
 	// The mission start's model reload's pool-0 animation maps, at the reload's place in the
 	// load (engine: inmatch::JoinerRole::reload_pool0_row_channels, D-NET-NEW-L2-56).
 	void reload_join_pool0_row_channels();

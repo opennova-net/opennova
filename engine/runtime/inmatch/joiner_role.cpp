@@ -792,9 +792,11 @@ void JoinerRole::on_replica_world_changed(const replication::ClientWorldSyncResu
 		}
 		// The same class init's slot leg: an ewep row, or an EWeap CHel / cpln row, binds and
 		// seeds its MountSlot from its def's weapon, with the row's traits and model in place
-		// (the resweep above), as the mission start's pass or the 0x18's own call does.
-		// [orig: Entity_InitAllFromModels the pool-1 class init @0x40E5D3;
-		//  NapiNPClientMsg_FullEntitySpawn the class init @0x433E82 ->
+		// (the resweep above), as the 0x18's own call does. A header-only load's streamed row
+		// has no weapon name here yet (its seat table lands later in the load), so the load's
+		// own leg binds it (run_streamed_weapon_slot_class_inits).
+		// [orig: Entity_InitAllFromModels @0x40E460 - the pool-1 class init @0x40E5D3;
+		//  NapiNPClientMsg_FullEntitySpawn @0x433780 - the class init @0x433E82 ->
 		//  Entity_InitBoneReferences @0x441470 / Entity_InitHelicopterAIFromDef @0x4683C0]
 		kernel.world.vehicles.run_weapon_slot_class_init(*row);
 	}

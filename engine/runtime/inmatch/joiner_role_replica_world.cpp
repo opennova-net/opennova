@@ -225,6 +225,13 @@ void JoinerRole::materialize_world_stream() {
 	materialize_replica_world();
 }
 
+void JoinerRole::run_streamed_weapon_slot_class_inits() {
+	if (kernel_ == nullptr || !kernel_->wire_header_world) return;
+	// [orig: Entity_InitAllFromModels @0x40E460 - the def+0x148 calls over pool 2 @0x40E55B,
+	//  pool 3 @0x40E59A, pool 1 @0x40E5D3 and pool 0 @0x40E60B]
+	kernel_->world.vehicles.run_weapon_slot_class_inits();
+}
+
 void JoinerRole::materialize_replica_world() {
 	mission::MissionKernel &kernel = *kernel_;
 	world::World &world = kernel.world;

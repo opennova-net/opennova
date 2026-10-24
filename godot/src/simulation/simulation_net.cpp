@@ -1047,6 +1047,10 @@ void Simulation::materialize_join_world_stream() {
 	if (joiner_role_ != nullptr) joiner_role_->materialize_world_stream();
 }
 
+void Simulation::run_join_streamed_weapon_slot_class_inits() {
+	if (joiner_role_ != nullptr) joiner_role_->run_streamed_weapon_slot_class_inits();
+}
+
 void Simulation::reload_join_pool0_row_channels() {
 	if (joiner_role_ != nullptr) joiner_role_->reload_pool0_row_channels();
 }

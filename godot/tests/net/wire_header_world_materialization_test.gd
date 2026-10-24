@@ -471,6 +471,10 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	# root is wired (local_player_visuals.cpp): a row's graphic model is its
 	# load's result, which the rootless sweeps at the stream could not make.
 	joiner.resolve_item_traits(db)
+	# Then the rows' class init slot leg, as the shell's load runs it there: the
+	# B50 child's MountSlot binds from its def's weapon now that its weapon
+	# name and model are in (the stream's own leg ran ahead of both).
+	joiner.run_join_streamed_weapon_slot_class_inits()
 
 	# The zone pick is the DEATH flow now (the initial join deploys with no
 	# C2S 0x0E — retail sends none): kill on the authority, wait out the
@@ -646,23 +650,21 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 
 	assert_true(joiner.request_local_player_scope_toggle(),
 			"header-only child recovered designated-G action-6 capability")
-	# Let the authority consume action 6 and prepare the parent slot before
-	# stamping the non-default phase-8 witness; first-time preparation seeds the
-	# weapon.def defaults and would intentionally replace an earlier debug value.
-	# The C2S rides the joiner's next uplink pump, so wait for the authority's
-	# preparation itself (the parent's slot leaves its unprepared zero words)
-	# rather than for a fixed number of steps.
-	var parent_prepared := false
+	# The toggle binds no slot: a MountSlot binds only in its row's class init,
+	# and a cveh's init binds none, so the vehicle parent's slot stays unbound
+	# (its words zero) however long the authority runs. The phase-8 words ride
+	# the routed slot's words whatever its weapon, so the witness below arrives
+	# only once the authority has taken action 6's route.
+	# [orig: NapiNPServerMsg_HandleWeaponToggle @0x511A70 (the set @0x511B2C);
+	#  WeaponSlot_InitFromEntityDef @0x5466C0, called only by the ewep and the
+	#  CHel / cpln inits @0x441482 / @0x49017B]
 	for _tick in range(120):
 		joiner.step()
 		host.step()
 		NativeModelFixture.apply_weapon_switch_events(joiner, weapon_defs)
-		if host.entity_card_by_net_id(parent_bms_id).get_primary_weapon_clip() != 0:
-			parent_prepared = true
-			break
 		OS.delay_msec(1)
-	assert_true(parent_prepared,
-			"the authority consumed action 6 and prepared the parent MountSlot")
+	assert_eq(host.entity_card_by_net_id(parent_bms_id).get_primary_weapon_clip(), 0,
+			"the toggle binds no MountSlot on the vehicle parent")
 	assert_eq(host.debug_set_world_entity_weapon_ammo(
 			parent_bms_id, 7, 19), OK)
 	var parent_ammo_applied := false

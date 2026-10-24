@@ -231,6 +231,9 @@ PackedStringArray LocalPlayerVisuals::prewarm_loaded_model_challenge_definitions
 				}
 				challenge_sim->install_seat_specs_for_type_ids(item_db, warmed_order);
 				challenge_sim->resolve_item_traits(item_db);
+				// The rows' class init slot leg, now that their weapon names and models are in
+				// (engine: inmatch::JoinerRole::run_streamed_weapon_slot_class_inits).
+				challenge_sim->run_join_streamed_weapon_slot_class_inits();
 				challenge_sim->resolve_collision_instances(item_db);
 				challenge_sim->occlusion_init_mission();
 			}

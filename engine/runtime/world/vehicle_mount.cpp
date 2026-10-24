@@ -260,7 +260,7 @@ void VehicleSystem::bind_use_gun_slot(Entity &occupant, Entity &vehicle) {
     // The borrow writes no AdmDef byte (Entity::use_gun_slot_swapped) and nothing in the
     // slot but its owner: the slot is the one the gun's class init bound.
     // [orig: Entity_AttachToUseGunSlot @0x546B80 (the owner store @0x546C73);
-    //  Entity_AttachToVehicleSlot @0x4946D0 (the owner store @0x494840 / @0x494883)]
+    //  Entity_AttachToVehicleSlot @0x4946D0 (the owner stores @0x494840 / @0x494883 / @0x494898)]
     occupant.use_gun_slot_swapped = true;
     vehicle.primary_weapon_owner = occupant.handle;
 }

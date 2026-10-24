@@ -5789,6 +5789,81 @@ bool run_the_settle_materializes_the_world_stream() {
 			"settle stream: the next update keeps the one placed row and its identity");
 }
 
+// D-NET-NEW-L4-29 (V-ROLL-BU D1): a header-only joiner's streamed gun takes its class init's
+// slot leg once the load has installed the streamed types' seat table and swept their traits.
+// The row's materialize ran ahead of both and bound nothing; the load's own leg binds the def's
+// weapon and seeds the init's words (no model here, so no split), as retail's mission start
+// initializes every pool's rows after the def reload.
+// [orig: Game_StartMission @0x524360 - Game_ReloadEntityModelsAndCallbacks called @0x52550E,
+//  Entity_InitAllFromModels called @0x52567F; Entity_InitBoneReferences @0x441470 -
+//  WeaponSlot_InitFromEntityDef called @0x441482; WeaponSlot_InitFromEntityDef @0x5466C0 - the
+//  words @0x54670F..0x546733]
+bool run_the_header_load_binds_the_streamed_guns() {
+	constexpr uint16_t kGunType = 4093;
+	Harness h;
+	w::World &world = h.kernel->world;
+	h.kernel->wire_header_world = true;
+	world.registry.configure_pool(1, 16);
+	for (const char *name : {"WPN_KNIFE", "WPN_TESTGUN"}) {
+		w::WeaponTableEntry def;
+		def.name = name;
+		def.valid = true;
+		def.clipsize = 12;
+		def.startrounds = 41;
+		world.tables.weapons.entries.push_back(def);
+	}
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	def::DefItemDef defs[2]{};
+	defs[0].id = w::kPlayerInfantryTypeId + mission::kItemIdOffset;
+	defs[0].type = 3;
+	defs[0].hp = 100;
+	defs[1].id = kGunType + mission::kItemIdOffset;
+	defs[1].type = 6;
+	defs[1].hp = 100;
+	defs[1].attrib = w::kItemAttribEweap;
+	std::strcpy(defs[1].ai_function, "ewep");
+	std::strcpy(defs[1].primary_weapon, "WPN_TESTGUN");
+	def::DefItemsFile items{defs, 2};
+	h.kernel->set_items_table(&items);
+	const w::EntityHandle gun_h{0x1003};
+	PoolSpawnBatch batch;
+	PoolSpawnRecord spawn;
+	spawn.slot_id = gun_h.packed;
+	spawn.item_type_id = kGunType;
+	spawn.pos_x = 10 << 16;
+	spawn.pos_y = -20 << 16;
+	batch.records.push_back(spawn);
+	h.role.runtime->view().apply(s2c::POOL_SPAWN, encode_pool_spawn_batch(batch));
+	h.role.run_tick(h.input);
+	w::Entity *gun = world.registry.get(gun_h);
+	bool ok = expect(gun != nullptr && gun->primary_weapon_slot_adm == w::kAdmSlotNone,
+			"header load: the streamed gun's materialize binds no slot");
+	if (gun == nullptr) {
+		h.kernel->set_items_table(nullptr);
+		return false;
+	}
+	// The load's seat table over the streamed type, then its trait sweep (the shell's
+	// install_seat_specs_for_type_ids and resolve_item_traits).
+	mission::ItemSeatSpec spec;
+	spec.type_id = kGunType;
+	spec.primary_weapon = "WPN_TESTGUN";
+	h.kernel->seat_specs = {spec};
+	mission::refresh_item_seat_spec(world, h.kernel->seat_specs, *gun, true);
+	h.kernel->resolve_item_traits([](int) { return uint8_t{0}; });
+	ok &= expect(gun->has_item_def && gun->primary_weapon == "WPN_TESTGUN" &&
+					gun->primary_weapon_slot_adm == w::kAdmSlotNone,
+			"header load: the table and the sweep alone bind nothing");
+	h.role.run_streamed_weapon_slot_class_inits();
+	ok &= expect(gun->primary_weapon_slot_adm == 1 && gun->primary_weapon_slot.clip == 12 &&
+					gun->primary_weapon_slot.reserve == 29,
+			"header load: the load's slot leg binds the def's weapon and seeds its words");
+	h.kernel->set_items_table(nullptr);
+	return ok;
+}
+
 // A 0x18 row of a type the mission start's install never saw loads its def as the record
 // lands: the type's seat table joins the installed one and the row takes its seats, the
 // ones the def load's userpoint walk gives the type.
@@ -6427,6 +6502,7 @@ int main() {
 	ok &= run_a_first_grants_fill_reads_the_session_zoom_byte();
 	ok &= run_role_runtimes_step_the_process_report_count();
 	ok &= run_the_settle_materializes_the_world_stream();
+	ok &= run_the_header_load_binds_the_streamed_guns();
 	ok &= run_a_full_spawn_row_loads_its_def();
 	ok &= run_the_ewep_stale_ground_asks_leave_as_0x0f();
 	if (!ok) return 1;
