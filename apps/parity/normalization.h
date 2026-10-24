@@ -596,23 +596,30 @@ inline constexpr Normalization kNormalizations[] = {
 			"spans a frame change: "
 			"x8's fragrespawn RR-aa and OR ranked the respawn's jump into the hut's frame as "
 			"their p90 step (3885822, 3895546) against RR's motion step (102143)" },
-	{ "uplink.echo_frame_carrier", MaskKind::Field, 'C', 0x00C, "carrier (seated echo)", 0,
-			"a seated joiner's uplink sent in the net frame that received a S2C 0x0A names its "
-			"vehicle's own ground link, 0xFFFF on open ground, where every other seated uplink "
-			"names the vehicle: the receive's fold of the joiner's own record sets a mounted "
-			"body's link to its mount's (NetPacket_SerializePlayerState @0x4C09C0, "
-			"@0x4C1346..0x4C1358) and the uplink built later in the same frame reads it "
+	{ "uplink.echo_frame_carrier", MaskKind::Field, 'C', 0x00C, "carrier (echo frame)", 0,
+			"a mounted joiner's uplink sent in the net frame that received a S2C 0x0A names its "
+			"mount's own ground link, where every other uplink names the mount: the joiner's "
+			"own record names the mount and its attach bone, else the ground link and bone 0 "
+			"(NetPacket_SerializePlayerState @0x4C09C0, @0x4C0A00..0x4C0A08, @0x4C0A1A); the "
+			"receive mounts the body only on a nonzero bone and a carrier "
+			"(Entity_TryAttachOrDetach @0x436610, @0x436618 / @0x436626; called @0x4C1317), "
+			"its fold sets a mounted body's link to its mount's (@0x4C1346..0x4C1353), the uplink "
+			"reads the link (@0x4C141D) when built later in the same frame "
 			"(Client_ProcessNetworkFrame @0x42C180: the recv called @0x42C228, the build called "
-			"@0x42C482); a seat sets Flags 0x40, the uplink's state byte "
-			"(Entity_AttachToVehicleSlot @0x4946D0, @0x494760). Whether a run holds such uplinks "
+			"@0x42C482), and the next frame's body update puts the mount back "
+			"(Entity_UpdateInfantryPlayerBody @0x4B40E0, @0x4B41A2..0x4B41B4). A buggy seat's "
+			"echo names none on open ground; the gun 0x102E's names the buggy 0x1002 at state "
+			"byte 0, the gun streaming no record of its own. Whether a run holds such uplinks "
 			"turns on the per-run phase of the host's 0x0A against the joiner's 0x0C, on retail's "
-			"pairs as on ours. x8's drive OR, a retail joiner on our host, sent the six seated "
-			"uplinks that left 0.4..1.0 ms after their 0x0A with 0xFFFF and every other seated "
-			"uplink, 46 ms or more after its 0x0A, with 0x1002 (13 changes against RR's 3). The "
-			"judge cannot see which frame received a 0x0A, so before uplink_carrier_changes "
-			"counts, a run of carrier-none uplinks is dropped when every uplink in it is seated "
-			"and the uplinks on both sides are seated and name the same carrier: x8 OR 13 -> 3, "
-			"x11 OO 5 -> 3, x10 OO 22 -> 6; RR, RR-aa, RO and every other run unchanged" },
+			"pairs as on ours: x8's drive OR, a retail joiner on our host, sent six seat echoes "
+			"0.4..1.0 ms after their 0x0A, p253's OR two gun echoes 0.4 and 0.6 ms after, and x7's "
+			"OR one at the seat edge, its left neighbour standing on the buggy. The judge cannot "
+			"see which frame received a 0x0A, so before uplink_carrier_changes counts, an uplink "
+			"whose carrier is not the mount named by the latest own record at or before it (a "
+			"nonzero bone and a carrier) is dropped. The drive runs that mount fall to RR's 3 from "
+			"the seated rule this replaces (x7 OR 5, x9 OO / RO 7 / 5, x10 OO 6, p236bdw / p236dv "
+			"OO 5 / 6, p253 OR 5), except p253 OO's 5, whose 2 over are a flap after its unseat "
+			"record; RR, RR-aa and the runs that never mount are unchanged" },
 	{ "uplink.priority_handle", MaskKind::Field, 'C', 0x00C, "priority_handle", 0,
 			"priority handles are session-local: compared as occupied/empty" },
 	{ "uplink.priority_score", MaskKind::Field, 'C', 0x00C, "priority_score", 0,
