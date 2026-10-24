@@ -952,6 +952,9 @@ void ObjectModel::set_ctrl_override_native(
 
 void ObjectModel::clear_ctrl_override_native(const std::string &p_owner, int p_ordinal) {
 	if (p_ordinal < 0 || p_ordinal >= opennova::threedi::THREEDI_CTRL_REGISTER_COUNT) return;
+	// Nothing held and nothing linked: nothing to clear (the per-frame zero stamps of every
+	// placed row, EntityPresenter::stamp_destroy_phases, take this path).
+	if (presentation_links_.is_empty() && !controls_.has(p_ordinal)) return;
 	for (int i = 0, count = presentation_links_.size(); i < count; ++i) {
 		const PresentationLink link = presentation_links_[i];
 		if (link.part_local_registers[static_cast<size_t>(p_ordinal)]) continue;
