@@ -11,7 +11,6 @@
 #include <base/io/fixed.h> // kFp16OneD
 
 #include <algorithm>
-#include <unordered_set>
 
 namespace opennova::inmatch {
 
@@ -213,14 +212,13 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 	if (runtime != nullptr) {
 		// A latch belongs to one row lifetime: drop the counters of handles
 		// that left the state so a reused handle starts fresh (retail memsets
-		// the destroyed entity, latch included).
-		std::unordered_set<uint16_t> live_handles;
-		for (const replication::ClientEntityState &es :
-				runtime->state().entities)
-			live_handles.insert(es.handle);
+		// the destroyed entity, latch included). Each latch's row is found by
+		// its handle (ClientState::find's per-handle row), with no set built
+		// over every row each frame (D-NET-NEW-LF-22, LF-s18).
+		const replication::ClientState &state = runtime->state();
 		for (auto it = r_wire_latch.begin();
 				it != r_wire_latch.end();) {
-			if (live_handles.count(it->first) == 0)
+			if (state.find(it->first) == nullptr)
 				it = r_wire_latch.erase(it);
 			else
 				++it;
@@ -273,16 +271,23 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 		uint16_t slot;
 		Leg leg;
 		uint32_t index;
+		uint32_t order; // the visit's place in the lists below: a slot's visits keep it
 	};
-	std::vector<Visit> visits;
+	// The visit list is the walk's own scratch, kept across calls (every view
+	// of every frame walks it), so a frame's walk allocates nothing; the walks
+	// run one at a time on the frame's thread (D-NET-NEW-LF-22, LF-s18).
+	static thread_local std::vector<Visit> visits;
+	visits.clear();
 	for (const int pool : {0, 1})
 		kernel.world.registry.for_each_in_pool(pool, [&](const world::Entity &e) {
-			if (placed_row(e)) visits.push_back({e.handle.packed, Leg::Placed, e.handle.packed});
+			if (placed_row(e))
+				visits.push_back({e.handle.packed, Leg::Placed, e.handle.packed,
+						static_cast<uint32_t>(visits.size())});
 		});
 	if (runtime != nullptr) {
 		const std::vector<replication::ClientEntityState> &rows = runtime->state().entities;
 		for (uint32_t i = 0; i < rows.size(); ++i)
-			visits.push_back({rows[i].handle, Leg::Wire, i});
+			visits.push_back({rows[i].handle, Leg::Wire, i, static_cast<uint32_t>(visits.size())});
 	}
 	// The local player's body is presented outside the walks above (the local
 	// view presenter), but retail's pool walk collects it like any other
@@ -297,9 +302,12 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 		visits.push_back({joiner && self_handle != world::EntityHandle::kInvalid
 						? self_handle
 						: local_handle.packed,
-				Leg::Local, 0});
-	std::stable_sort(visits.begin(), visits.end(),
-			[](const Visit &a, const Visit &b) { return a.slot < b.slot; });
+				Leg::Local, 0, static_cast<uint32_t>(visits.size())});
+	// Slot order, a slot's visits in their list order (the order a stable sort
+	// keeps), sorted in place.
+	std::sort(visits.begin(), visits.end(), [](const Visit &a, const Visit &b) {
+		return a.slot != b.slot ? a.slot < b.slot : a.order < b.order;
+	});
 	for (const Visit &v : visits) {
 		switch (v.leg) {
 			case Leg::Placed:
