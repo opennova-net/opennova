@@ -84,7 +84,7 @@ layout(push_constant, std430) uniform OverlayPush {
 	vec4 view_right;
 	vec4 view_up;
 	uvec4 mode; // x = shading, y = geometry, z = the far depth band, w = the sampling
-	vec4 fog;   // a ribbon's fog colour, w = 1 when its term is table fog's exponent
+	vec4 fog;   // a tracer-pool batch's fog colour, w = 1 when its term is table fog's exponent
 } pc;
 
 void main() {
@@ -169,16 +169,11 @@ void main() {
 	} else if (shading == 4u) {
 		// The flat diffuse the DESTCOLOR / ZERO blend multiplies in.
 		frag_color = vec4(v_color.rgb, 1.0);
-	} else if (shading == 5u) {
-		// The NVG laser (the tracer pool's 0x3008 material): COLOR = DIFFUSE,
-		// ALPHA = DIFFUSE.a x (1 - T0.a) x (1 - T1.a), T1 on the second set;
-		// SRCALPHA / ONE blends it.
-		float t1 = rd_sample_effect_stage(overlay_texture, v_uv1, max_lod, filter_code).a;
-		frag_color = vec4(v_color.rgb, v_color.a * (1.0 - texel.a) * (1.0 - t1));
-	} else if (shading >= 6u && shading <= 8u) {
-		// The tracer pool's ribbons, fogged as the device fogs them: the
-		// interpolated vertex factor, or table fog's exponent at this pixel;
-		// the colour toward the batch's fog colour, the alpha never.
+	} else if (shading >= 5u && shading <= 7u) {
+		// The tracer pool's materials (the NVG laser beams and the ribbons),
+		// fogged as the device fogs them: the interpolated vertex factor, or
+		// table fog's exponent at this pixel; the colour toward the batch's fog
+		// colour, the alpha never.
 		float visibility = pc.fog.w > 0.5 ? exp(-max(v_fog, 0.0)) : clamp(v_fog, 0.0, 1.0);
 		vec3 rgb = mix(pc.fog.rgb, v_color.rgb, visibility);
 		if (shading == 6u) {
@@ -187,7 +182,8 @@ void main() {
 		} else {
 			float t1 = rd_sample_effect_stage(overlay_texture, v_uv1, max_lod, filter_code).a;
 			// pool+0x3004: alpha = sat(sat(DIFFUSE.a - T0.a) - T1.a), SRCALPHA /
-			// INVSRCALPHA; pool+0x3008: the NVG laser's alpha, SRCALPHA / ONE.
+			// INVSRCALPHA; pool+0x3008 (the NVG laser): COLOR = DIFFUSE, ALPHA =
+			// DIFFUSE.a x (1 - T0.a) x (1 - T1.a), T1 on the second set; SRCALPHA / ONE.
 			float alpha = shading == 7u ?
 					clamp(clamp(v_color.a - texel.a, 0.0, 1.0) - t1, 0.0, 1.0) :
 					v_color.a * (1.0 - texel.a) * (1.0 - t1);
@@ -236,8 +232,7 @@ RenderingDevice::BlendFactor blend_factor(SceneOverlayBlendFactor p_factor) {
 // take the device default WRAP.
 bool wraps(SceneOverlayShading p_shading) {
 	return p_shading == SceneOverlayShading::NvgLaser ||
-			p_shading == SceneOverlayShading::RibbonSmoke ||
-			p_shading == SceneOverlayShading::RibbonNvgLaser;
+			p_shading == SceneOverlayShading::RibbonSmoke;
 }
 
 } // namespace

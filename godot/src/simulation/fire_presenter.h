@@ -47,7 +47,7 @@ struct NvgLaserSource {
 };
 
 // The frame the beams draw for: the eye (Godot space), the projection's _11,
-// the millisecond clock, the scene fog the beams fold, and the local view's
+// the millisecond clock, the scene fog the beams draw under, and the local view's
 // g_NVGActive and g_CameraMode.
 struct NvgLaserView {
 	Transform3D eye;

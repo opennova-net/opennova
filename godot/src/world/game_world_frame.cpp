@@ -1376,8 +1376,8 @@ void GameWorld::render_scene_overlay_frame() {
 // The NVG laser beams, the tail's first slot (engine: runtime/world/nvg_laser.h): the local view's
 // g_NVGActive and g_CameraMode gate
 // every beam (the defaults with no local player or for a spectator), the
-// frame's render camera builds the ribbons and the frame's scene fog folds
-// into them; the entity presenter's third-person guns carry the action
+// frame's render camera builds the ribbons and they fog per vertex under the
+// frame's scene fog; the entity presenter's third-person guns carry the action
 // points (FirePresenter::append_nvg_laser_beams). The weapon Inset pass walks
 // again: the persons its own collect drew, ribbons built at its camera under
 // its own pass fog (renderer/scene_overlay.h kInsetOverlayOrder).

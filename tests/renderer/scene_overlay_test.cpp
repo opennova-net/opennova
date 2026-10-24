@@ -302,10 +302,15 @@ void test_the_mirror_closes_with_the_dim_and_the_far_band_redraw() {
 
 // The NVG laser beams: the ribbon build's draw as the NvgLaserBeams slot's
 // world-space triangles, the pool+0x3008 combine, depth-tested without
-// writes, both coordinate sets kept (uv1 rides `corner`), each vertex's
-// diffuse fogged to black at its own distance, its alpha untouched.
+// writes, both coordinate sets kept (uv1 rides `corner`), the diffuse
+// unfogged and the device fog per vertex as the ribbons take it: the linear
+// modes' vertex range factor, table EXP fog's signed exponent, toward black
+// for the style's black-fog word.
 // [orig: Entity_RenderNVGLaserBeam @ 0x5c6399 -> Render_DrawTrailOrBeamSegments
-//  @ 0x5dcb80; CEffectEmitterPool_CreateShaders @ 0x5dc8f0]
+//  @ 0x5dcb80 - CD3DDevice_SetFogAndBlendMode the call @ 0x5ddb72,
+//  GfxShader_ApplyPassChecked(0x10520000) the call @ 0x5ddb86;
+//  CD3DDevice_SetFogParameters @ 0x677960 - @ 0x677a50..0x677aa7, @ 0x6779be;
+//  CEffectEmitterPool_CreateShaders @ 0x5dc8f0]
 void test_the_nvg_laser_beam_overlay() {
 	const float points[12] = {
 		0.0f, 1.0f, 0.0f, 1.0f,
@@ -345,18 +350,34 @@ void test_the_nvg_laser_beam_overlay() {
 	CHECK(beam.geometry == SceneOverlayGeometry::World);
 	CHECK(beam.texture == 9);
 	CHECK(beam.vertex_count == ribbons.draws[0].index_count);
+	CHECK(ribbons.draws[0].fog_black);
+	CHECK(beam.fog_term == SceneOverlayFogTerm::Factor);
+	CHECK(beam.fog_color[0] == 0.0f && beam.fog_color[1] == 0.0f && beam.fog_color[2] == 0.0f);
 	for (uint32_t k = 0; k < beam.vertex_count; ++k) {
 		const TracerVertex &src = ribbons.vertices[ribbons.indices[ribbons.draws[0].first_index + k]];
 		const SceneOverlayVertex &v = frame.vertices[beam.first_vertex + k];
 		CHECK(v.position[0] == src.x && v.position[1] == src.y && v.position[2] == src.z);
 		CHECK(v.uv[0] == src.u0 && v.uv[1] == src.v0);
 		CHECK(v.corner[0] == src.u1 && v.corner[1] == src.v1);
-		const float dx = src.x, dy = src.y - 1.0f, dz = src.z - 2.0f;
-		const float visibility = (4.0f - std::sqrt(dx * dx + dy * dy + dz * dz)) / 4.0f;
-		const float red = static_cast<float>((src.argb >> 16) & 0xFFu) / 255.0f;
-		CHECK(std::abs(v.color[0] - red * visibility) < 1.0e-5f);
+		// The diffuse stays unfogged; the factor is the vertex's own, by the range.
+		CHECK(v.color[0] == static_cast<float>((src.argb >> 16) & 0xFFu) / 255.0f);
 		CHECK(v.color[3] == static_cast<float>(src.argb >> 24) / 255.0f);
+		const float dx = src.x, dy = src.y - 1.0f, dz = src.z - 2.0f;
+		CHECK(std::abs(v.fog - (4.0f - std::sqrt(dx * dx + dy * dy + dz * dz)) / 4.0f) < 1.0e-5f);
 	}
+	// Exponential fog: table fog's term at the pixel, the signed eye depth x
+	// ln(64) / end.
+	fog.type = 0;
+	SceneOverlayFrame exp_frame;
+	append_nvg_laser_overlay(ribbons, 9, fog, exp_frame);
+	CHECK(exp_frame.batches.size() == 1);
+	if (exp_frame.batches.size() == 1) {
+		CHECK(exp_frame.batches[0].fog_term == SceneOverlayFogTerm::Exponent);
+		const TracerVertex &src = ribbons.vertices[ribbons.indices[ribbons.draws[0].first_index]];
+		CHECK(std::abs(exp_frame.vertices[0].fog - (2.0f - src.z) * (4.1588830833596715f / 4.0f)) <
+				1.0e-5f);
+	}
+	fog.type = 1;
 	// Compiled in the main scene's first slot.
 	std::vector<SceneOverlayBatch> list;
 	compile_scene_overlay(frame, kSceneOverlayOrder.data(), kSceneOverlayOrder.size(), list);
@@ -547,8 +568,7 @@ void test_the_combines_blend_words() {
 	// D3DBLEND: ZERO 1, ONE 2, SRCALPHA 5, INVSRCALPHA 6, DESTCOLOR 9.
 	CHECK(words(SceneOverlayShading::RibbonStock, 2, 2));    // slot 6, 0x222
 	CHECK(words(SceneOverlayShading::RibbonSmoke, 5, 6));    // pool+0x3004
-	CHECK(words(SceneOverlayShading::RibbonNvgLaser, 5, 2)); // pool+0x3008
-	CHECK(words(SceneOverlayShading::NvgLaser, 5, 2));
+	CHECK(words(SceneOverlayShading::NvgLaser, 5, 2));       // pool+0x3008
 	CHECK(words(SceneOverlayShading::Modulate2xBlend, 5, 6)); // the drops' 0x651
 	CHECK(words(SceneOverlayShading::AdditiveModulate, 2, 2)); // the coronas
 	CHECK(words(SceneOverlayShading::SelfLumAdditive, 2, 2));
