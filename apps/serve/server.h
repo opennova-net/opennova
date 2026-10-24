@@ -76,6 +76,9 @@ class Lister;
 // does, where a width of 0 would pick Arial12b, whose narrow glyphs split chat lines retail's
 // do not. A platform equivalent, not a witnessed value (D-NET-720, platform class).
 inline constexpr int32_t kHeadlessDesktopWidth = 1024;
+// Its height, the 4:3 desktop that width names (the defaults' display height and NWHWI's desktop
+// field); the same platform class (D-NET-720).
+inline constexpr int32_t kHeadlessDesktopHeight = 768;
 
 struct ServeOptions {
 	std::string resource_dir; // --resource-dir
@@ -108,11 +111,13 @@ struct ServeOptions {
 	bool status_page = true;
 	std::string stats_file;
 	std::string exit_file;
-	// The primary desktop's width, the display width game.cfg's defaults take ahead of its
-	// video_res line [orig: Config_SetDefaults @0x54D0F3..0x54D0F6 (GetSystemMetrics
-	// (SM_CXSCREEN) into outWidth)]. main() samples it on Windows; a platform that reports
-	// none keeps kHeadlessDesktopWidth.
+	// The primary desktop's width and height, the display size game.cfg's defaults take ahead of
+	// its video_res line and the renderer's desktop NWHWI prints [orig: Config_SetDefaults
+	// @0x54D030 - GetSystemMetrics(SM_CXSCREEN) called @0x54D0F3 into outWidth @0x54D0F6;
+	// Renderer_Init @0x586350 - @0x58635C / @0x586363]. main() samples them on Windows
+	// (read_primary_screen_size); a platform that reports none keeps the headless pair.
 	int32_t desktop_width = kHeadlessDesktopWidth;
+	int32_t desktop_height = kHeadlessDesktopHeight;
 };
 
 // Parses the command line (argv[1..]). Returns 0 when the options parsed, 1 on

@@ -450,6 +450,18 @@ std::string format_fixed(double value, int precision);
 //  @0x551303 into outWidth @0x2550718 / outHeight]
 bool parse_resolution_dimensions(const std::string &text, int32_t &width, int32_t &height);
 
+// The display mode's width and height as the block holds them (+0x60 / +0x64): the defaults'
+// primary desktop size, replaced by a video_res that parses. The boot then opens the renderer at
+// that mode and writes back the mode it set, the same one when the device opens (no fallback in a
+// port with no Direct3D device).
+// [orig: Config_SetDefaults @0x54D030 - GetSystemMetrics(SM_CXSCREEN) called @0x54D0F3 into
+//  outWidth @0x54D0F6, SM_CYSCREEN @0x54D0FB into outHeight @0x54D10A; Config_ParseSettingsLine
+//  @0x54F740 - String_ParseResolutionDimensions called @0x551303; Game_InitSubsystems @0x4A6CD0 -
+//  Renderer_SetDisplayModeWithFallback called @0x4A722A, VideoConfig_GetResolution called
+//  @0x4A724B]
+void display_size(const GameCfg &cfg, int32_t desktop_width, int32_t desktop_height, int32_t &width,
+		int32_t &height);
+
 // activesrvr.txt: the directory-lock marker the host-file path writes in the
 // working directory before it hosts and Game_Run deletes at every orderly exit.
 // Nothing reads it. [orig: Game_HostMultiplayerSession @0x4A65C1..0x4A65F6:

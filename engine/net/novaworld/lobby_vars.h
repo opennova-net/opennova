@@ -229,8 +229,59 @@ struct LobbyIdentityParams {
 	std::string my_installed_exp_bits = "0";
 	std::string nwpssk;
 	std::string nwusid;
-	std::string nwhwi = "OpenNova$0$2048$1920x1080$1920x1080";
+	std::string nwhwi; // make_nwhwi over the embedder's HardwareIdentity
 };
+
+// The device facts the NWHWI cookie prints, as the embedder reads them: on Windows the reads retail
+// makes (lobby_identity.h: read_display_adapter, read_total_physical_memory,
+// read_primary_screen_size), elsewhere the platform's equivalents; the display mode is game.cfg's
+// (gamecfg::display_size over the same desktop).
+struct HardwareIdentity {
+	// Display adapter 0's description; with no display device retail's %s prints the CRT's
+	// "(null)". [orig: CGfxDevice_GetAdapterDescription @0x67C590 - 0 with no Direct3D object
+	//  @0x67C596, IDirect3D9 slot 5 (GetAdapterIdentifier) called @0x67C5B8, "%s" over the
+	//  identifier's Description sprintf'd @0x67C5D0]
+	bool has_adapter = false;
+	std::string adapter_description;
+	// The rendering adapter's display memory in MB: the leading number of DxDiag's
+	// szDisplayMemoryEnglish, truncated; 0 when the query finds none.
+	int64_t display_memory_mb = 0;
+	// The machine's physical memory in bytes.
+	uint64_t total_phys_bytes = 0;
+	// game.cfg's display mode, and the primary desktop's size at the renderer's start.
+	int32_t display_width = 0;
+	int32_t display_height = 0;
+	int32_t desktop_width = 0;
+	int32_t desktop_height = 0;
+};
+
+// NWHWI's second field: the query's number shifted into bytes in 32 bits, which the device keeps
+// only when it is not negative (else 0), shifted back logically; so a size whose bit 11 is set
+// prints 0 and every other prints its low 11 bits.
+// [orig: CGfxDevice_QueryVideoDriverVersion @0x67C820 - wcstod called @0x67CA45, _ftol2_sse
+//  called @0x67CA57, `shl eax, 14h` @0x67CA5C; CGfxDevice_CreateDevice @0x67E5D0 - the query
+//  called @0x67EBEC, a negative result `jl` @0x67EBFB to the 0 store @0x67EC25, else stored
+//  @0x67EBFD; CNapiGameSession_OnNovaWorldConnected @0x4D1570 - the read @0x4D176A, `shr eax,
+//  14h` @0x4D1771]
+uint32_t nwhwi_display_memory_mb(int64_t display_memory_mb);
+
+// NWHWI's third field (g_VideoMemoryMB, which holds physical memory): GlobalMemoryStatus's
+// dwTotalPhys, which Windows caps at 0x7FFFFFFF for an image without IMAGE_FILE_LARGE_ADDRESS_AWARE
+// (Jointops.exe's FileHeader.Characteristics are 0x103), plus 0xC0000, shifted right by 20, all in
+// 32 bits: 2048 on every machine with 2 GiB or more.
+// [orig: System_GetCPUAndOSInfo @0x53CD30 - GlobalMemoryStatus called @0x53CF0E, dwTotalPhys read
+//  @0x53CF17 into info+0x64 @0x53CF25; Game_ParseCommandLineAndInit @0x4A7310 - `add ecx,
+//  0C0000h` @0x4A7DF2, `shr ecx, 14h` @0x4A7E05, stored to g_VideoMemoryMB @0x4A7E15]
+uint32_t nwhwi_physical_memory_mb(uint64_t total_phys_bytes);
+
+// The NWHWI cookie value: "%s$%ld$%ld$%ldx%ld$%ldx%ld" over adapter 0's description, the display
+// memory field, the physical memory field, game.cfg's display width x height and the renderer's
+// desktop width x height.
+// [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1570 - g_RendererDesktopHeight / Width read
+//  @0x4D174B / @0x4D1751, g_VideoMemoryMB @0x4D1756, g_GameConfigState +0x60 / +0x64 @0x4D175D /
+//  @0x4D1764, CGfxDevice_GetAdapterDescription(0) called @0x4D177C, sprintf called @0x4D178F,
+//  CUIBrowser_AddFormField "NWHWI" called @0x4D17AA]
+std::string make_nwhwi(const HardwareIdentity &hw);
 
 // The wire-load-bearing NWPSSK/NWUSID token lengths: retail's stable-machine
 // token encoders always emit exactly these many letters (NWPSSK's position-banded

@@ -469,6 +469,7 @@ std::vector<std::pair<std::string, std::string>> Lister::cookie_vars() {
 		if (read_retail_machine_inputs(machine)) tokens = make_retail_machine_tokens(machine);
 		identity_.nwpssk = tokens.nwpssk;
 		identity_.nwusid = tokens.nwusid;
+		identity_.nwhwi = options_.hardware_identity;
 		identity_vars_ = make_lobby_identity_vars(identity_);
 	}
 	sync_flow_context();

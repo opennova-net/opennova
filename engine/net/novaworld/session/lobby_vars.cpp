@@ -301,6 +301,33 @@ std::vector<std::pair<std::string, std::string>> make_lobby_identity_vars(const 
 	};
 }
 
+// [orig: CGfxDevice_QueryVideoDriverVersion @0x67C820 - `shl eax, 14h` @0x67CA5C;
+//  CGfxDevice_CreateDevice @0x67E5D0 - @0x67EBFB / @0x67EBFD / @0x67EC25;
+//  CNapiGameSession_OnNovaWorldConnected @0x4D1570 - `shr eax, 14h` @0x4D1771]
+uint32_t nwhwi_display_memory_mb(int64_t display_memory_mb) {
+	const uint32_t bytes = static_cast<uint32_t>(display_memory_mb) << 20u;
+	const uint32_t kept = (bytes & 0x80000000u) != 0 ? 0u : bytes;
+	return kept >> 20u;
+}
+
+// [orig: System_GetCPUAndOSInfo @0x53CD30 - @0x53CF17; Game_ParseCommandLineAndInit @0x4A7310 -
+//  @0x4A7DF2, @0x4A7E05]
+uint32_t nwhwi_physical_memory_mb(uint64_t total_phys_bytes) {
+	const uint32_t total_phys =
+			static_cast<uint32_t>(std::min<uint64_t>(total_phys_bytes, 0x7FFFFFFFu));
+	return (total_phys + 0xC0000u) >> 20u;
+}
+
+// [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1570 - sprintf called @0x4D178F]
+std::string make_nwhwi(const HardwareIdentity &hw) {
+	std::string out = hw.has_adapter ? hw.adapter_description : std::string("(null)");
+	out += '$' + std::to_string(nwhwi_display_memory_mb(hw.display_memory_mb));
+	out += '$' + std::to_string(nwhwi_physical_memory_mb(hw.total_phys_bytes));
+	out += '$' + std::to_string(hw.display_width) + 'x' + std::to_string(hw.display_height);
+	out += '$' + std::to_string(hw.desktop_width) + 'x' + std::to_string(hw.desktop_height);
+	return out;
+}
+
 // [orig: Network_ParseHostAndPort @0x62E200 - strlen > 511 fails @0x62E260; Napi_CopyString
 //  into the 512-byte buffer @0x62E288; Napi_StrStr(":") @0x62E297, the colon zeroed and
 //  NapiScript_ParseLiteralValue on the rest @0x62E2B1, else port 0 @0x62E2BD]

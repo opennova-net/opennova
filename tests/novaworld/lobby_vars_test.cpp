@@ -403,6 +403,50 @@ int main() {
 		       "parse_host_and_port fails past 511 bytes, writing nothing");
 	}
 
+	// 9. D-NET-NEW-L9-54: NWHWI is "%s$%ld$%ld$%ldx%ld$%ldx%ld" over adapter 0's description (the
+	// CRT's "(null)" with none), the display memory field (the MB count shifted into bytes in 32
+	// bits, kept only when not negative, shifted back), the physical memory field
+	// ((min(total, 0x7FFFFFFF) + 0xC0000) >> 20 in 32 bits), game.cfg's display mode and the
+	// renderer's desktop. Values derived from the cited arithmetic.
+	// [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1570 - sprintf called @0x4D178F, `shr`
+	//  @0x4D1771; CGfxDevice_QueryVideoDriverVersion @0x67C820 - `shl` @0x67CA5C;
+	//  CGfxDevice_CreateDevice @0x67E5D0 - @0x67EBFB..0x67EC25; Game_ParseCommandLineAndInit
+	//  @0x4A7310 - @0x4A7DF2..0x4A7E15]
+	{
+		expect(nw::nwhwi_display_memory_mb(0) == 0, "display memory 0 prints 0");
+		expect(nw::nwhwi_display_memory_mb(512) == 512, "display memory 512 MB prints 512");
+		expect(nw::nwhwi_display_memory_mb(2047) == 2047, "2047 MB stays positive in 32 bits");
+		expect(nw::nwhwi_display_memory_mb(2048) == 0,
+		       "2048 MB is negative in 32 bits: the device keeps 0");
+		expect(nw::nwhwi_display_memory_mb(4096) == 0, "4096 MB shifts out to 0");
+		expect(nw::nwhwi_display_memory_mb(4608) == 512, "4608 MB keeps its low 11 bits, 512");
+		expect(nw::nwhwi_display_memory_mb(8704) == 512, "8704 MB keeps its low 11 bits, 512");
+		expect(nw::nwhwi_display_memory_mb(16271) == 0, "16271 MB has bit 11 set: 0");
+		expect(nw::nwhwi_display_memory_mb(-1) == 0, "a failed query's -1 is negative: 0");
+
+		expect(nw::nwhwi_physical_memory_mb(0) == 0, "no memory prints 0");
+		expect(nw::nwhwi_physical_memory_mb(0x20000000u) == 512, "512 MiB prints 512");
+		expect(nw::nwhwi_physical_memory_mb(0x3FF3FFFFu) == 1023, "under 1023.25 MiB rounds down");
+		expect(nw::nwhwi_physical_memory_mb(0x3FF40000u) == 1024, "from 1023.25 MiB rounds up");
+		expect(nw::nwhwi_physical_memory_mb(0x7FFFFFFFu) == 2048, "2 GiB less a byte prints 2048");
+		expect(nw::nwhwi_physical_memory_mb(0x400000000ull) == 2048,
+		       "16 GiB is capped at 0x7FFFFFFF for the non-LAA image: 2048");
+
+		nw::HardwareIdentity hw;
+		hw.has_adapter = true;
+		hw.adapter_description = "Fixture $Adapter";
+		hw.display_memory_mb = 256;
+		hw.total_phys_bytes = 0x10000000u;
+		hw.display_width = 1024;
+		hw.display_height = 768;
+		hw.desktop_width = 1920;
+		hw.desktop_height = 1080;
+		expect(nw::make_nwhwi(hw) == "Fixture $Adapter$256$256$1024x768$1920x1080",
+		       "NWHWI prints the five fields in order, the description as it is");
+		nw::HardwareIdentity none;
+		expect(nw::make_nwhwi(none) == "(null)$0$0$0x0$0x0", "no adapter prints the CRT's (null)");
+	}
+
 	if (g_fail == 0) {
 		std::printf("lobby_vars_test: all checks passed\n");
 	}

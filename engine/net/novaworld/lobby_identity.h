@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -31,6 +32,32 @@ bool read_gate_metrics_locale(GateMetricsLocale &out);
 // [orig: CDKey_GenerateHardwareFingerprint @0x4a4a00 / _0 @0x4a4d00 — GetVolumeInformationA on the
 //  current drive, GetAdaptersInfo's first MIB_IF_TYPE_ETHERNET address]
 bool read_retail_machine_inputs(RetailMachineInputs &out);
+
+// The NWHWI device reads (HardwareIdentity). Display adapter 0's description and adapter
+// `adapter`'s display memory, as retail's renderer reads them: Direct3D 9's adapter identifiers,
+// then DxDiag's DxDiag_DisplayDevices child whose szDeviceIdentifier names the rendering adapter's
+// DeviceIdentifier, its szDisplayMemoryEnglish's leading number, between CoInitialize and
+// CoUninitialize. False, leaving `out` alone, where the platform has no Direct3D 9.
+// [orig: CGfxDevice_GetAdapterDescription @0x67C590; CGfxDevice_CreateDevice @0x67E5D0 -
+//  CoInitialize called @0x67EBE3, CGfxDevice_QueryVideoDriverVersion called @0x67EBEC (the adapter
+//  the cfg's hw3d_deviceno, dword_B4C22C: Renderer_SetDisplayModeWithFallback @0x587370 loads it
+//  @0x5873FB and pushes it @0x58741E), CoUninitialize called @0x67EBF3]
+bool read_display_adapter(uint32_t adapter, HardwareIdentity &out);
+
+// The machine's physical memory in bytes: GlobalMemoryStatusEx's on Windows (the 32-bit cap
+// GlobalMemoryStatus applies for retail's image is nwhwi_physical_memory_mb's), sysconf's physical
+// pages elsewhere. False where neither answers.
+// [orig: System_GetCPUAndOSInfo @0x53CD30 - GlobalMemoryStatus called @0x53CF0E]
+bool read_total_physical_memory(uint64_t &bytes);
+
+// The primary display's width and height as retail reads them: GetSystemMetrics SM_CXSCREEN /
+// SM_CYSCREEN in a DPI-unaware process (Jointops.exe's manifest declares no DPI awareness), so on
+// a scaled desktop the logical size; the calling thread is switched to the unaware context for the
+// two calls. False off Windows, or when either reads 0.
+// [orig: Renderer_Init @0x586350 - GetSystemMetrics(0) called @0x58635C into
+//  g_RendererDesktopWidth @0x586360, GetSystemMetrics(1) called @0x586363 into
+//  g_RendererDesktopHeight @0x586365; Config_SetDefaults @0x54D030 - @0x54D0F3 / @0x54D0FB]
+bool read_primary_screen_size(int32_t &width, int32_t &height);
 
 // The executable's file name as retail reads it off its process command line: the first token
 // of the quote-aware tokenizer, from past its last backslash on (a '/' is kept); "" for a line with

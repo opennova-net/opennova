@@ -470,6 +470,15 @@ bool parse_resolution_dimensions(const std::string &text, int32_t &width, int32_
 	return true;
 }
 
+// [orig: Config_SetDefaults @0x54D030 - @0x54D0F6 / @0x54D10A; Config_ParseSettingsLine @0x54F740
+//  - @0x551303]
+void display_size(const GameCfg &cfg, int32_t desktop_width, int32_t desktop_height, int32_t &width,
+		int32_t &height) {
+	width = desktop_width;
+	height = desktop_height;
+	parse_resolution_dimensions(cfg.video_res, width, height);
+}
+
 GameCfg defaults(const DefaultTexts &texts, int32_t player_index, int32_t hw3d_deviceno,
 		ConfigTable table) {
 	// The block is zeroed, keeping its first word [orig: Config_SetDefaults

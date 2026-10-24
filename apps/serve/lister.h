@@ -52,6 +52,8 @@ struct ListerOptions {
 	// The process block's mpextractextendedmetricinformation (+0x33C, the shipped default 1): clear,
 	// the jar and the Cookie var-lists carry no locale three (LobbyHttpContext::extended_metrics).
 	bool extended_metrics = gamecfg::defaults().mp_extract_extended_metric_information != 0;
+	// The verify Cookie's NWHWI, the server's make_nwhwi over this machine and its game.cfg.
+	std::string hardware_identity;
 };
 
 // opennova-serve's NovaWorld listing kept up: the engine's NWU driver and host role, the account
