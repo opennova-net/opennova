@@ -293,12 +293,15 @@ func test_fps_raises_the_frame_rate_overlay() -> void:
 	var shape := RegEx.create_from_string("^FR [ 0-9]{2,}  MN [ 0-9]{2,} MX [ 0-9]{2,} CPU [0-9]+$")
 	assert_not_null(shape.search(line), "the line keeps the original's format: '%s'" % line)
 	# The authority takes one console line a second from a slot (the word the chat throttle
-	# shares), so a second line its receive meets inside that second is dropped: wait out
-	# one second of the session's clock (62 logic ticks) past the first line's echo
-	# (engine inmatch/server_console.h Server_HandleConsoleCommandMessage carries the witness).
+	# shares), so a second line its receive meets inside that second is dropped: wait out a
+	# second past the first line's echo on both clocks the host may read, the process clock
+	# (GetTickCount's, 1.1 s of it) and the logic ticks (62), so a tick bank catching up
+	# cannot land the line inside it (engine inmatch/server_console.h
+	# Server_HandleConsoleCommandMessage carries the witness).
 	var sim: Simulation = shell.get_world().get_sim()
 	var echoed := int(sim.get_logic_tick())
-	var a_second_on := func() -> bool: return int(sim.get_logic_tick()) >= echoed + 62
+	var echoed_ms := Time.get_ticks_msec()
+	var a_second_on := func() -> bool: return int(sim.get_logic_tick()) >= echoed + 62 and Time.get_ticks_msec() >= echoed_ms + 1100
 	assert_true(await _await_true(a_second_on), "a second of the session's clock passes")
 	assert_true(await _type_console_line("fps"), "the command line takes the second line")
 	var lowered := func() -> bool: return hud.get_frame_rate_overlay_text() == ""
