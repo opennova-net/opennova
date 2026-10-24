@@ -1281,8 +1281,9 @@ void infantry_weapon_switch_stamp(InfantryState &inf, uint64_t category_serial);
 // Consumer gate for the secondary channel. Equal primary/secondary state ids do NOT
 // disable composition: their playheads are independent. mount_blocks_channel is true
 // for controller/gunner/driver seats; passenger seats retain the on-foot composition.
+// player_bit is Flags & 0x100, the Player bit (not a weapon-in-hands flag).
 // [orig: Flags&0x100 + mount-class tests + PRIMARY state flag 0x40 @0x4b14a7]
-bool infantry_weapon_channel_visible(const InfantryState &inf, bool weapon_in_hands,
+bool infantry_weapon_channel_visible(const InfantryState &inf, bool player_bit,
                                      bool mount_blocks_channel);
 
 // The upper-body hold-pose ladder: which secondary anim state a player body should be

@@ -161,10 +161,13 @@ void project_client_replica_present_row(
 		write_present_emplaced_controls(row, emplaced);
 
 	anim::AimOverlayInputs inputs;
-	bool collapse_right_hand = false;
+	bool blocking_seat = false;
 	if (!aim_overlay_inputs_for_client(
-				entity, state, seat_specs, inputs, &collapse_right_hand))
+				entity, state, seat_specs, inputs, &blocking_seat))
 		return;
+	// The collapsed right-hand row: a blocking seat without the Player bit.
+	// [orig: Entity_BuildBoneTransformMatrices special row @0x4b1290]
+	const bool collapse_right_hand = entity.cls == EntityClass::Infantry && blocking_seat;
 
 	// An armed row presents the same simulation-owned primary channel whose
 	// root delta moves the replica, a corpse's death clip included (the mover's
@@ -244,7 +247,10 @@ void project_client_replica_present_row(
 		// An armed row's channel holds the +0x2C8 target the hand-frame
 		// selector reads (write_present_held_weapon).
 		if (entity.wpn_playing >= 0) weapon_hold_state = entity.wpn_state;
-		if (!collapse_right_hand &&
+		// The splice: the Player bit, no blocking seat, flag 0x40 on the requested state
+		// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - @0x4B14A7 / @0x4B14B9 /
+		//  @0x4B14C9].
+		if (!blocking_seat &&
 				(world::infantry_anim_flags(entity.anim_state_id) &
 				 0x40u) != 0) {
 			if (entity.wpn_playing >= 0) {
@@ -310,11 +316,11 @@ bool skeletal_pose_inputs_for_client(
 	static const std::vector<mission::ItemSeatSpec> kNoSeatSpecs;
 	const auto &seat_specs = context.item_seat_specs != nullptr
 			? *context.item_seat_specs : kNoSeatSpecs;
-	bool collapse_right_hand = false;
+	bool blocking_seat = false;
 	if (!aim_overlay_inputs_for_client(
-				entity, state, seat_specs, out.overlay, &collapse_right_hand))
+				entity, state, seat_specs, out.overlay, &blocking_seat))
 		return false;
-	out.collapse_right_hand = collapse_right_hand;
+	out.collapse_right_hand = entity.cls == EntityClass::Infantry && blocking_seat;
 	// The projection's armed branch: the row's own primary channel, current,
 	// playhead, served ring entry, armed park and the blending source pair; a
 	// seated player row's included (D-NET-330).
@@ -331,8 +337,10 @@ bool skeletal_pose_inputs_for_client(
 		out.source_variant = entity.rm_prev_variant;
 		out.blend_weight = entity.rm_blend_weight;
 	}
-	// A player row's secondary channel, where the projection presents one.
-	if (entity.cls != EntityClass::Player || collapse_right_hand ||
+	// A player row's secondary channel, where the projection presents one: the Player
+	// bit, no blocking seat, flag 0x40 on the requested state [orig:
+	// Entity_BuildBoneTransformMatrices @0x4B1290 - @0x4B14A7 / @0x4B14B9 / @0x4B14C9].
+	if (entity.cls != EntityClass::Player || blocking_seat ||
 			(world::infantry_anim_flags(entity.anim_state_id) & 0x40u) == 0)
 		return true;
 	out.weapon = true;

@@ -237,7 +237,7 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 	// The 3P body's weapon channel (the entity's secondary AnimMap channel): the clip key
 	// + its own playhead for the shell's mask-bone override. The key remains populated
 	// when the state id matches the primary because the two playheads are independent.
-	// Empty means the override gate is off (weapon in hands + allowed mount class +
+	// Empty means the override gate is off (the Player bit + allowed mount class +
 	// primary state flag 0x40).
 	// [orig: gate @ 0x4b14a7; producer @ 0x4b5dad; world-wac-ai-re.md §14.8].
 	v.body_anim_key = std::string();
@@ -260,7 +260,11 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 		const AiEntity *p = world.ai.for_handle(world.cached.local_player);
 		const Entity *entity = world.registry.get(world.cached.local_player);
 		const bool blocked_mount = entity != nullptr && mount_blocks_weapon_channel(*entity);
-		if (p && entity && infantry_weapon_channel_visible(p->inf, w.active, blocked_mount)) {
+		// The Player bit, as every body's gate tests it, armed or not.
+		// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - @0x4B14A7]
+		if (p && entity &&
+				infantry_weapon_channel_visible(p->inf,
+						(entity->engine_flags & kEntityFlagPlayer) != 0, blocked_mount)) {
 			v.body_anim_key = infantry_anim_key(p->inf.weapon_clip_state());
 			v.body_anim_phase = p->inf.wpn_clip_phase;
 			v.body_anim_variant = p->inf.wpn_variant;

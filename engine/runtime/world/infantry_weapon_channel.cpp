@@ -301,9 +301,9 @@ void infantry_weapon_switch_stamp(InfantryState &inf, uint64_t category_serial) 
     inf.arms_dip_ticks = 20;
 }
 
-bool infantry_weapon_channel_visible(const InfantryState &inf, bool weapon_in_hands,
+bool infantry_weapon_channel_visible(const InfantryState &inf, bool player_bit,
                                      bool mount_blocks_channel) {
-    return inf.active && weapon_in_hands && !mount_blocks_channel &&
+    return inf.active && player_bit && !mount_blocks_channel &&
            (infantry_anim_flags(inf.anim_state) & 0x40u) != 0;
 }
 

@@ -75,8 +75,8 @@ inline bool aim_overlay_inputs_for_client(
 		const replication::ClientState &state,
 		const std::vector<mission::ItemSeatSpec> &specs,
 		anim::AimOverlayInputs &out,
-		bool *r_collapse_right_hand = nullptr) {
-	if (r_collapse_right_hand != nullptr) *r_collapse_right_hand = false;
+		bool *r_blocking_seat = nullptr) {
+	if (r_blocking_seat != nullptr) *r_blocking_seat = false;
 	if (entity.cls != EntityClass::Player &&
 			entity.cls != EntityClass::Infantry)
 		return false;
@@ -171,15 +171,14 @@ inline bool aim_overlay_inputs_for_client(
 		out.leg_yaw_l = out.body_yaw;
 		return true;
 	}
-	if (r_collapse_right_hand != nullptr) {
-		// The compact organic class is the decoded form of the relevant Flags
-		// distinction: Player rows carry 0x100; Infantry rows do not. Derive the
-		// presentation verdict from existing wire fields rather than adding a
-		// transport-only boolean.
-		*r_collapse_right_hand =
-				entity.cls == EntityClass::Infantry &&
-				world::seat_type_blocks_weapon_channel(seat->type);
-	}
+	// The bone build's seat local: a control / gunner / driver seat. Its two consumers
+	// split on the Flags 0x100 the compact class decodes (Player rows carry it, Infantry
+	// rows do not): the collapsed right-hand row takes the seat without the bit, the
+	// weapon-channel splice the bit without the seat (client_replica_present_projection.cpp).
+	// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - the seat local
+	//  @0x4B12A2..0x4B1347, the splice's test @0x4B14B9]
+	if (r_blocking_seat != nullptr)
+		*r_blocking_seat = world::seat_type_blocks_weapon_channel(seat->type);
 
 	out.mount_mode = world::mount_mode_for_seat_type(seat->type);
 	if (out.mount_mode == anim::MountMode::OnFoot) return true;

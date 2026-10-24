@@ -1582,7 +1582,6 @@ bool MissionKernel::build_wire_person_section_matrices(w::World &p_world, uint16
 bool MissionKernel::build_section_matrices(w::World &p_world, w::EntityHandle entity,
 		int32_t model_id, const w::CollisionMatrix &entity_world, const w::CollisionModel &model,
 		std::vector<w::CollisionMatrix> &out) {
-	collision_pose.weapon_active = local.weapon.active;
 	collision_pose.panm_time_override_ms = panm_time_override_ms;
 	++collision_queries;
 	if (collision_pose.build_section_matrices(p_world, entity, model_id, entity_world, model, out))

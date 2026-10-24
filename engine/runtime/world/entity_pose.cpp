@@ -596,11 +596,17 @@ bool EntityPoseProvider::eval_entity_pose(world::World &world,
 	in.source_variant = r_ai->inf.anim_prev_variant;
 	in.blend_weight = r_ai->inf.anim_blend_weight;
 	in.overlay = aim_overlay_inputs_for(*r_ai, *r_entity);
-	if (world.cached.local_player.valid() &&
-			entity.packed == world.cached.local_player.packed &&
-			world::infantry_weapon_channel_visible(
-					r_ai->inf, weapon_active,
-					mount_blocks_weapon_channel(*r_entity))) {
+	// Every body splices its own secondary channel's mask bones when it carries the
+	// Player bit, sits in no control / gunner / driver seat and its requested state has
+	// flag 0x40: a host's remote players and the local body alike, armed or not.
+	// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - the seat local
+	//  @0x4B12A2..0x4B1347, `test dword ptr [ebp+24h], 100h` @0x4B14A7, the seat test
+	//  @0x4B14B9, `test byte ptr g_AnimStateFlagsTable[edx*4], 40h` on +0x2BC @0x4B14C9;
+	//  the body's own +0x18C channel @0x4B134E posed by AnimChannel_ComputeBoneMatrices
+	//  @0x4B16A7]
+	if (world::infantry_weapon_channel_visible(r_ai->inf,
+				(r_entity->engine_flags & world::kEntityFlagPlayer) != 0,
+				mount_blocks_weapon_channel(*r_entity))) {
 		in.weapon = true;
 		in.weapon_state = r_ai->inf.weapon_clip_state();
 		in.weapon_phase = r_ai->inf.wpn_clip_phase;

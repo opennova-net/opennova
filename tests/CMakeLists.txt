@@ -5420,6 +5420,13 @@ add_test(NAME teleport_tails COMMAND teleport_tails_test)
 add_executable(fragment_spawn_tail_test world/fragment_spawn_tail_test.cpp)
 target_link_libraries(fragment_spawn_tail_test PRIVATE opennova_runtime)
 add_test(NAME fragment_spawn_tail COMMAND fragment_spawn_tail_test)
+# L5-s39 FOUND (L5-s40): every player body's collision / anchor pose splices its own weapon channel
+# under the Player bit, the seat test and flag 0x40 (a host's remote players included, armed or
+# not), and a joiner's seated player row takes the same seat test; over the minted 19-bone rig.
+add_executable(collision_pose_splice_test world/collision_pose_splice_test.cpp)
+target_link_libraries(collision_pose_splice_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(collision_pose_splice_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME collision_pose_splice COMMAND collision_pose_splice_test)
 
 # --- parity lane L6 (stream/16.16) ---
 # D-NET-507: the entity position is retail's 16.16 words from the BMS spawn through a

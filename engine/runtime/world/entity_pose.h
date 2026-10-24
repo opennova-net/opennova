@@ -139,10 +139,8 @@ public:
 		return it == skeletal_sources_.end() ? nullptr : it->second.rig.get();
 	}
 
-	// Per-query sim state the embedder syncs before dispatch: the local
-	// player's weapon-in-hands flag (the weapon-channel visibility gate) and
-	// the debug PANM clock override (-1 = the logic-tick clock).
-	bool weapon_active = false;
+	// Per-query sim state the embedder syncs before dispatch: the debug PANM
+	// clock override (-1 = the logic-tick clock).
 	int64_t panm_time_override_ms = -1;
 
 	// Late attachment stays with the embedder's collision sweep.
