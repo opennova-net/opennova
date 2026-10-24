@@ -6,13 +6,15 @@
 -- A data set. kind 'base' speaks a title (the gameprofile code opennova-serve's /game takes:
 -- 'jo', 'dfx2') and lists in a lobby (game: the games row's slug); kind 'expansion' is one
 -- expansion of its parent base (expansion_code: the /exp code and the expansion/<code>/
--- directory, 'jox01'). current_tree_id is the tree new starts take (the newest ready one).
+-- directory, 'jox01'); kind 'update' is a standalone updater product with no game tree, no
+-- lobby and no parent (OpenNova's runtime, ADR 0067; its shape is 0013's, beside its updater
+-- columns). current_tree_id is the tree new starts take (the newest ready one).
 -- The four seeded rows below are what the deployment ran as the fixed catalog; they hold no
 -- tree until an admin uploads one.
 CREATE TABLE data_sets (
     id                   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     display_name         text NOT NULL CHECK (display_name <> ''),
-    kind                 text NOT NULL CHECK (kind IN ('base', 'expansion')),
+    kind                 text NOT NULL CHECK (kind IN ('base', 'expansion', 'update')),
     parent_id            bigint REFERENCES data_sets(id) ON DELETE RESTRICT,
     expansion_code       text NOT NULL DEFAULT '',
     title                text NOT NULL DEFAULT '',

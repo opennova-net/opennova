@@ -2,7 +2,7 @@
 
 // The hosted data sets' rows (backend/migrations/0011_data_sets.sql and 0013_releases.sql,
 // ADR 0064): the data sets an admin created (one product each: a base game, or one expansion
-// of a base), standalone updater products (kind update, no game tree; migration 0023),
+// of a base), standalone updater products (kind update, no game tree; 0013's data_sets_update_check),
 // their trees (each an immutable version of the data set's files in the object
 // store, core/object_store.h), the update releases (1SFS packages) and the sections each carries,
 // and the trees each hosted server is pinned to. The routes, the supervisor, the worker's
