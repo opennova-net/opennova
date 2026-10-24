@@ -1017,10 +1017,18 @@ func test_player_view_effects_damage_feedback_quads() -> void:
 			"and the red vignette before the revive tint.")
 	assert_false(white.show_behind_parent,
 			"The quads follow the binocular/NVG draw, not precede it.")
-	var tint_material := revive.material as CanvasItemMaterial
+	# The multiply rides a preloaded program (made as the script loads), not a
+	# CanvasItemMaterial, whose program waits for the first idle frame: past a
+	# mission load, the reveal (D-NET-NEW-LF-28).
+	var tint_material := revive.material as ShaderMaterial
 	assert_not_null(tint_material,
 			"The revive tint multiplies the frame rather than covering it.")
-	assert_eq(tint_material.blend_mode, CanvasItemMaterial.BLEND_MODE_MUL)
+	if tint_material != null:
+		assert_not_null(tint_material.shader)
+		assert_true(tint_material.shader.code.contains("render_mode blend_mul;"),
+				"the multiply blend, the default texel x colour")
+		assert_false(tint_material.shader.code.contains("void fragment"),
+				"nothing else: the program a BLEND_MODE_MUL CanvasItemMaterial makes")
 
 	# A full white flash: opaque white, no texture involved.
 	effects.update_damage_feedback(255, 0, 0, 255)
