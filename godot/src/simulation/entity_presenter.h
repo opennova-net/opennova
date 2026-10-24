@@ -379,6 +379,11 @@ public:
 	int warm_wire_spawn_pipelines(const PackedFloat32Array &p_snap, int p_stride, Node3D *p_parent,
 			PackedStringArray &r_graphics);
 	Ref<ArrayMesh> fire_ribbon_mesh() const;
+	// The water mirrors' cameras the fire pass builds each mirror's tracer
+	// ribbons against (FirePresenter::set_mirror_cameras), and mirror
+	// `p_mirror`'s ribbons (0 the main scene's mirror, 1 the Inset's).
+	void set_tracer_mirror_cameras(Camera3D *p_mirror, Camera3D *p_inset_mirror);
+	Ref<ArrayMesh> fire_mirror_ribbon_mesh(int p_mirror) const;
 	// The owned "Scars" child (the device read seam: its ScarWorld mesh).
 	ScarPresenter *scar_presenter() const;
 	// The data legs (the present_snapshot precedent): production

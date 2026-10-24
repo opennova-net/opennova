@@ -98,6 +98,25 @@ struct TracerVec3 {
 // The camera terms of one ribbon build. Coordinates are any right-handed frame
 // that is a rotation of the mission frame (mission or Godot); see
 // compile_tracer_ribbons for the one handedness-dependent step.
+// The terms are the drawing pass's own view: the build reads the scene pass's
+// viewport block, its eye and its float view matrix [orig: CEffectChannel_RenderRibbon
+// @0x5DB8A0 - g_MainViewport+4 (byte_A78364, the push @0x5DC111), the view's third
+// column g_MainViewport+0xFC (g_ViewportViewMatrixFloat) @0x5DC120 / @0x5DC131 /
+// @0x5DC143; Viewport_BuildProjectionMatrix @0x410FB0 copies a block's eye to +4
+// (@0x41113B..0x411147) and builds the float view at +0xFC (@0x41134E..0x411391)].
+// A water mirror's reflected subscene runs the pool's main pass under the mirror's
+// own block: the main scene rebuilds that block from the mirrored camera (the live
+// one below the water) right ahead of the subscene, which then draws the pool
+// [orig: Render_MainScene @0x5C1240 - the mirror @0x5C1376..0x5C13A0, the live block
+// below the water @0x5C13F6..0x5C1414, Viewport_BuildProjectionMatrix(&g_MainViewport,
+// the mirrored block) the call @0x5C170B, Water_RenderReflectedWorldScene the call
+// @0x5C171F; Water_RenderReflectedWorldScene @0x5C8510 - CEffectEmitterPool_RenderMainPass
+// (1, 0) on g_TracerEmitterPool, the call @0x5C85F6]. The weapon Inset's mirror runs the
+// same subscene under its own mirrored block [orig: Render_WeaponInsetScene @0x5C9740 -
+// the Render_TerrainScene call @0x5C99B7; Render_TerrainScene @0x610C80 - the
+// Water_ReflectionPrerender call @0x610CE0; Water_ReflectionPrerender @0x5C2780 - the
+// Render_MainScene call @0x5C27C6]. So each view that draws the pool builds its own
+// frame against its own eye: the scene's and each rendering mirror's.
 struct TracerView {
 	TracerVec3 camera;                  // the eye [orig: byte_A78364]
 	// The view matrix's third column: the look direction, either sign

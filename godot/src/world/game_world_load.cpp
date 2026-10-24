@@ -2078,4 +2078,10 @@ void GameWorld::start_effect_world() {
 	if (wire_runtime != nullptr) {
 		wire_runtime->setup_passes(get_mission_audio(), effect_world, light_director_.ptr(), env_, item_fx_.ptr());
 	}
+	// The fire pass's tracer ribbons, built again per rendering water mirror
+	// against that mirror's camera (FirePresenter::set_mirror_cameras).
+	if (presenter != nullptr && water_ != nullptr) {
+		presenter->set_tracer_mirror_cameras(
+				water_->get_reflection_camera(), water_->get_inset_reflection_camera());
+	}
 }

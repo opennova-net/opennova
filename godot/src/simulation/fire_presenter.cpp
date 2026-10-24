@@ -6,6 +6,7 @@
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/shader.hpp>
+#include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/color.hpp>
@@ -29,6 +30,7 @@
 #include "particle/effect_distortion_drawer.h"
 #include "particle/effect_world.h"
 #include "render/scene_overlay_compositor.h"
+#include "render/visual_layers.h"
 #include "simulation/entity_presenter.h"
 #include "simulation/simulation.h"
 #include "util/axes.h"
@@ -42,6 +44,19 @@ namespace godot {
 namespace {
 
 using opennova::renderer::TracerShader;
+
+// One ribbon mesh's instance under `p_container`, drawn by the cameras that
+// admit `p_layer` alone.
+ObjectID add_ribbon_instance(Node3D *p_container, const char *p_name, const Ref<ArrayMesh> &p_mesh,
+		uint32_t p_layer) {
+	MeshInstance3D *instance = memnew(MeshInstance3D);
+	instance->set_name(p_name);
+	instance->set_mesh(p_mesh);
+	instance->set_layer_mask(p_layer);
+	instance->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+	p_container->add_child(instance);
+	return ObjectID(instance->get_instance_id());
+}
 
 } // namespace
 
@@ -79,14 +94,57 @@ MissionEnvironment *FirePresenter::environment() const {
 }
 
 void FirePresenter::free_mesh_instance() {
-	if (mesh_instance_id_.is_valid()) {
-		Node *instance = Object::cast_to<Node>(ObjectDB::get_instance(mesh_instance_id_));
-		if (instance != nullptr) {
-			instance->queue_free();
+	const auto free_instance = [](ObjectID &r_id) {
+		if (r_id.is_valid()) {
+			Node *instance = Object::cast_to<Node>(ObjectDB::get_instance(r_id));
+			if (instance != nullptr) {
+				instance->queue_free();
+			}
 		}
-	}
-	mesh_instance_id_ = ObjectID();
+		r_id = ObjectID();
+	};
+	free_instance(mesh_instance_id_);
 	mesh_.unref();
+	for (MirrorRibbons &mirror : mirrors_) {
+		free_instance(mirror.mesh_instance_id);
+		mirror.mesh.unref();
+	}
+}
+
+void FirePresenter::set_mirror_cameras(Camera3D *p_mirror, Camera3D *p_inset_mirror) {
+	mirrors_[0].camera_id = p_mirror != nullptr ? p_mirror->get_instance_id() : ObjectID();
+	mirrors_[1].camera_id =
+			p_inset_mirror != nullptr ? p_inset_mirror->get_instance_id() : ObjectID();
+}
+
+// A mirror renders while its target updates (env/water.h: the main scene's
+// mirror while its water pass runs, the Inset's while the Inset pass renders it).
+Camera3D *FirePresenter::rendering_mirror_camera(int p_mirror) const {
+	const ObjectID id = mirrors_[static_cast<size_t>(p_mirror)].camera_id;
+	Camera3D *camera = id.is_valid() ? Object::cast_to<Camera3D>(ObjectDB::get_instance(id))
+									 : nullptr;
+	if (camera == nullptr || !camera->is_inside_tree()) {
+		return nullptr;
+	}
+	const SubViewport *target = Object::cast_to<SubViewport>(camera->get_viewport());
+	if (target != nullptr && target->get_update_mode() == SubViewport::UPDATE_DISABLED) {
+		return nullptr;
+	}
+	return camera;
+}
+
+void FirePresenter::set_main_ribbon_layer(uint32_t p_layer) {
+	MeshInstance3D *instance = mesh_instance_id_.is_valid()
+			? Object::cast_to<MeshInstance3D>(ObjectDB::get_instance(mesh_instance_id_))
+			: nullptr;
+	if (instance != nullptr && instance->get_layer_mask() != p_layer) {
+		instance->set_layer_mask(p_layer);
+	}
+}
+
+Ref<ArrayMesh> FirePresenter::mirror_ribbon_mesh(int p_mirror) const {
+	return p_mirror == 0 || p_mirror == 1 ? mirrors_[static_cast<size_t>(p_mirror)].mesh
+										  : Ref<ArrayMesh>();
 }
 
 void FirePresenter::setup(Simulation *p_sim, Node3D *p_container, MissionAudio *p_audio,
@@ -101,13 +159,20 @@ void FirePresenter::setup(Simulation *p_sim, Node3D *p_container, MissionAudio *
 	// A re-setup replaces the previous tracer geometry instead of stranding it.
 	free_mesh_instance();
 	if (p_container != nullptr) {
+		// The scene views' ribbons (the beauty camera's and the weapon Inset's)
+		// on the bit no mirror admits, each mirror's on its own.
 		mesh_.instantiate();
-		MeshInstance3D *instance = memnew(MeshInstance3D);
-		instance->set_name("FireTracers");
-		instance->set_mesh(mesh_);
-		instance->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
-		p_container->add_child(instance);
-		mesh_instance_id_ = instance->get_instance_id();
+		mesh_instance_id_ = add_ribbon_instance(
+				p_container, "FireTracers", mesh_, visual_layers::SCENE_VIEW_NO_REFLECTION);
+		static constexpr const char *kMirrorNames[2] = { "FireTracersMirror",
+			"FireTracersInsetMirror" };
+		static constexpr uint32_t kMirrorLayers[2] = { visual_layers::MIRROR_VIEW,
+			visual_layers::INSET_MIRROR_VIEW };
+		for (size_t m = 0; m < mirrors_.size(); ++m) {
+			mirrors_[m].mesh.instantiate();
+			mirrors_[m].mesh_instance_id = add_ribbon_instance(
+					p_container, kMirrorNames[m], mirrors_[m].mesh, kMirrorLayers[m]);
+		}
 	}
 }
 
@@ -264,6 +329,12 @@ void FirePresenter::draw_tracer_rows(const PackedFloat32Array &p_rows) {
 		return;
 	}
 	mesh_->clear_surfaces();
+	set_main_ribbon_layer(visual_layers::SCENE_VIEW_NO_REFLECTION);
+	for (MirrorRibbons &mirror : mirrors_) {
+		if (mirror.mesh.is_valid()) {
+			mirror.mesh->clear_surfaces();
+		}
+	}
 	EffectWorld *fx_world = fx();
 	const std::shared_ptr<EffectDistortionDrawer> distortion =
 			fx_world != nullptr ? fx_world->distortion_drawer() : nullptr;
@@ -317,6 +388,20 @@ void FirePresenter::draw_tracer_rows(const PackedFloat32Array &p_rows) {
 	const MissionEnvironment *env = environment();
 	const int rung = opennova::renderer::tracer_rung(env == nullptr || !env->is_underwater_view());
 	ribbons_.emit(frame_, mesh_, rung);
+	// Each rendering water mirror's reflected subscene runs the pool's main pass
+	// again under its own view (engine renderer/tracer_frame.h TracerView carries
+	// the witness): the same rows, built against that mirror's camera, on the bit
+	// only it admits. The shared materials keep the frame's rung.
+	for (size_t m = 0; m < mirrors_.size(); ++m) {
+		Camera3D *mirror = rendering_mirror_camera(static_cast<int>(m));
+		if (mirror == nullptr || mirrors_[m].mesh.is_null()) {
+			continue;
+		}
+		opennova::renderer::compile_tracer_ribbons(channels_.data(), channels_.size(),
+				tracer_view_from_camera(*mirror, view.tick_ms),
+				opennova::renderer::TracerPass::Main, mirror_frame_);
+		ribbons_.emit(mirror_frame_, mirrors_[m].mesh, rung);
+	}
 }
 
 // retail Render_NVGLaserBeamsForVisiblePersons @ 0x5c63b0 walks the frame's visible persons (the drawn
@@ -418,6 +503,11 @@ void FirePresenter::warm_pipelines(const Vector3 &p_position) {
 		return;
 	}
 	mesh_->clear_surfaces();
+	// The load's forced frame can draw before FrameFx gives the beauty camera
+	// the scene views' bit (it does so in a frame's own leg), so the warm
+	// surfaces ride the world layer every camera mask admits; the next build
+	// puts the instance back (draw_tracer_rows).
+	set_main_ribbon_layer(visual_layers::WORLD);
 	// One zero-area triangle per normal-pass material.
 	const std::pair<TracerShader, bool> materials[] = {{TracerShader::Stock, true},
 			{TracerShader::Smoke, false}, {TracerShader::NvgLaser, true}};
