@@ -64,6 +64,11 @@ func test_a_joiners_streamed_casters_resolve_in_its_load() -> void:
 	host_options.max_players = 4
 	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
+	# The host's item table ahead of its boot, as the game's load installs it: the mission's rows
+	# are admitted against it, so the house exists to stream (an empty table spawns no row).
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load(_root.path_join("items.def")), OK)
+	host.resolve_item_traits(item_db)
 	assert_true(host.load_from_mission_data(mission))
 	# Read at the load's end, in world_loaded's own call: no frame has drawn the terrain yet.
 	var observed := {"loaded": false, "shadow": {}}
