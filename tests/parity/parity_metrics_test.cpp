@@ -3694,6 +3694,82 @@ void test_entity_sparse_sequence() {
 			'S', "entity_I_orientation_range_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
 }
 
+// The final run's 03tr-dm OO (LX-s37): the far rows' age sweep sent the Downed Pilot 0x0039
+// (I:2075) once a capture on every cell, 17.7..19.1 s after the game start, and OO's window
+// opened 19.0 s after it where the other four opened at 13.3..15.0 s, so its one record fell
+// 1.35 s before the window. A type sent once a handle through each window end on both runs
+// compares on presence (entity.capture_singleton).
+void test_entity_capture_singleton() {
+	// The camp AI's dense I records on every run, and the pilot's records at `at` (one
+	// record at each time, from the first 0x0A frame at or after it).
+	auto run = [](uint32_t seed, std::vector<uint64_t> at) {
+		wire::ParityTrace trace = scripted(seed);
+		add_camp_ai(trace, 0, 3);
+		std::vector<wire::ParityEntity> added;
+		for (uint64_t t : at)
+			for (const wire::ParityFrameState &f : trace.frames) {
+				if (f.ts_ns < t)
+					continue;
+				wire::ParityEntity e;
+				e.frame = f.frame;
+				e.ts_ns = f.ts_ns;
+				e.session = kClientPort;
+				e.cls = 'I';
+				e.handle = 0x0039;
+				e.type_id = 2075;
+				e.pos_x = 4100;
+				e.pos_y = 4000;
+				e.pos_z = 100;
+				e.orient_a = 210;
+				e.orient_b = 210;
+				place(e, f);
+				added.push_back(e);
+				break;
+			}
+		trace.entities.insert(trace.entities.end(), added.begin(), added.end());
+		std::stable_sort(trace.entities.begin(), trace.entities.end(),
+				[](const wire::ParityEntity &x, const wire::ParityEntity &y) {
+					return x.ts_ns < y.ts_ns;
+				});
+		return trace;
+	};
+	auto every_frame = [](uint64_t from, uint64_t to) {
+		std::vector<uint64_t> out;
+		for (uint64_t t = from; t < to; t += kTick)
+			out.push_back(t);
+		return out;
+	};
+	{
+		// RR and RR-aa's one record lands in the window, the subject's before it: the same
+		// one send, so the coverage matches (window sets alone: {I:1799,I:2075,...} against
+		// {I:1799,...}, the final's 03tr-dm OO red).
+		const Case c = judge_case(run(1, { 9 * kSec }), run(2, { 8 * kSec }), run(3, { 4 * kSec }),
+				"OO");
+		expect_row(c, 'S', "entity_types", "", "pass");
+		const VerdictRow *row = find_row(c.verdict.rows, 'S', "entity_types");
+		check(row && row->value.distance == 0.0 &&
+						row->value.detail.find("I:2075") != std::string::npos,
+				"the once-sent I:2075 compares on presence and is named");
+	}
+	// RR's one record fell before its window (x6 / c2's retail windows) and the subject's
+	// inside: the same.
+	expect_row(judge_case(run(1, { 4 * kSec }), run(2, { 3 * kSec }), run(3, { 9 * kSec }), "RO"),
+			'S', "entity_types", "", "pass");
+	// A type the subject never sends still fails.
+	expect_row(judge_case(run(1, { 9 * kSec }), run(2, { 8 * kSec }), run(3, {}), "OO"), 'S',
+			"entity_types", "", "fail", "FRAME_ENTITY_TYPES_MISMATCH");
+	// A type RR streams that the subject sends once and then drops still fails: RR's
+	// handle is no singleton.
+	expect_row(judge_case(run(1, every_frame(3 * kSec, 21 * kSec)),
+					   run(2, every_frame(3 * kSec, 21 * kSec)), run(3, { 4 * kSec }), "OO"),
+			'S', "entity_types", "", "fail", "FRAME_ENTITY_TYPES_MISMATCH");
+	// Two records of the handle on the subject's side before the window: streamed there,
+	// so it compares, and its window lacks the type.
+	expect_row(judge_case(run(1, { 9 * kSec }), run(2, { 8 * kSec }),
+					   run(3, { 3 * kSec, 4 * kSec }), "OO"),
+			'S', "entity_types", "", "fail", "FRAME_ENTITY_TYPES_MISMATCH");
+}
+
 void test_steady_rules() {
 	{
 		// A steady packet groups as its record multiset, without the RTT replies its
@@ -3984,6 +4060,7 @@ int main() {
 	test_position_quantum();
 	test_entity_carrier();
 	test_entity_sparse_sequence();
+	test_entity_capture_singleton();
 	test_round_target();
 	if (g_failures) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);

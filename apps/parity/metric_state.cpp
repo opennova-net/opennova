@@ -974,13 +974,58 @@ void compare_entities(const RunFacts &rr, const RunFacts &other, std::vector<Met
 	if (a.empty() && b.empty())
 		return;
 	using E = wire::ParityEntity;
-	auto types = [](const std::vector<const E *> &entities) {
+	auto type_of = [](const E &e) {
+		return std::string(1, e.cls) + ":" + std::to_string(e.type_id);
+	};
+	// A row past 1124 tiles with no prior priority joins the list only at age 50, the ages
+	// climbing one a build [orig: Server_BuildEntityPriorityList @0x50E590 (the age read
+	// @0x50E8E3, the tests @0x50E90D..0x50E921, the skip @0x50E925, the age adds
+	// @0x50E62B..0x50E634)], and the send resets its row's [orig:
+	// NetPacket_SerializeEntityStatesToPacket @0x50F070 (the age reset @0x50F168)]. So
+	// every far row goes out once in a sweep 50 builds after the recipient's ages start,
+	// and an idle one's low key rarely wins again: the final's 03tr-dm pilot 0x0039 at
+	// 17.7..19.1 s after the game start on all five cells, while OO's window opened at
+	// 19.0 s and the others' at 13.3..15.0 s. A class:type every handle of which streams
+	// one record through a run's window end went out once, and where that record falls
+	// against the window's start is the window's phase (entity.capture_singleton). A type
+	// that is such a singleton on both runs leaves the coverage set; a type one capture
+	// lacks, or one either run streams, still compares.
+	static_assert(has_normalization("entity.capture_singleton"));
+	auto singletons = [&type_of](const RunFacts &run) {
+		std::map<std::string, std::map<uint32_t, int>> records; // type -> handle -> records
+		for (const E &e : run.trace.entities)
+			if (run.in_comparison(e.ts_ns))
+				++records[type_of(e)][e.handle];
 		std::set<std::string> out;
-		for (const E *e : entities)
-			out.insert(std::string(1, e->cls) + ":" + std::to_string(e->type_id));
+		for (const auto &[type, handles] : records)
+			if (std::all_of(handles.begin(), handles.end(),
+						[](const auto &handle) { return handle.second == 1; }))
+				out.insert(type);
 		return out;
 	};
-	set_metric(out, 'S', "entity_types", "FRAME_ENTITY_TYPES_MISMATCH", types(a), types(b));
+	std::set<std::string> phase;
+	{
+		const std::set<std::string> sa = singletons(rr), sb = singletons(other);
+		std::set_intersection(sa.begin(), sa.end(), sb.begin(), sb.end(),
+				std::inserter(phase, phase.end()));
+	}
+	std::set<std::string> touched; // the singletons either window carries
+	auto types = [&](const std::vector<const E *> &entities) {
+		std::set<std::string> out;
+		for (const E *e : entities) {
+			const std::string type = type_of(*e);
+			if (phase.count(type))
+				touched.insert(type);
+			else
+				out.insert(type);
+		}
+		return out;
+	};
+	const std::set<std::string> types_a = types(a), types_b = types(b);
+	set_metric(out, 'S', "entity_types", "FRAME_ENTITY_TYPES_MISMATCH", types_a, types_b);
+	if (!touched.empty())
+		out.back().detail = "sent once a handle through each window end, compared on presence: " +
+				render_set(touched);
 
 	// diff_0a's per-class field population: a field RR ever fills that the run never does.
 	auto populated = [](const std::vector<const E *> &entities) {

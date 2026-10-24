@@ -847,6 +847,25 @@ inline constexpr Normalization kNormalizations[] = {
 			"03tr-dm entities whose draws follow the players' paths). Every sequence of 16..23 "
 			"records there was a draw, a median gap of 0.55 s or more over 29 s or more, none an "
 			"every-frame stay shorter than the 256-tick look cycle" },
+	{ "entity.capture_singleton", MaskKind::Field, 'S', 0x00A, "entity type sent once a capture",
+			0,
+			"a row past 1124 tiles of the recipient with no prior priority joins the priority "
+			"list only once its age byte reaches 50 (Server_BuildEntityPriorityList @0x50E590: "
+			"the age read @0x50E8E3, the tests @0x50E90D / @0x50E91B / @0x50E921, the skip "
+			"@0x50E925); the ages climb one a build and saturate (the adds @0x50E62B..0x50E634) "
+			"and the send resets its row's (NetPacket_SerializeEntityStatesToPacket @0x50F070, "
+			"@0x50F168), and the key is age + score + (age x score >> 8) (@0x50EB94..0x50EBA6). "
+			"So 50 builds after the recipient's ages start every far row is admitted at once and "
+			"the budget sends each in key order, a sweep a far idle row's low key rarely wins "
+			"again inside a capture. Where its one record falls against the window's start is "
+			"the window's phase: the final run's 03tr-dm swept from 0x0A index 49 on all five "
+			"cells in one order, the Downed Pilot 0x0039 (I:2075) at 93..100 (17.7..19.1 s "
+			"after the game start), while the windows opened 13.3..15.0 s after it and OO's "
+			"19.0 s (its window-open wait held 4.6 s on the joiner's spawn overlap); over 13 "
+			"suites the window lacked I:2075 on 3 of 24 retail-host windows (c2's RR, x6's and "
+			"p211a's RO) and 3 of 24 of ours. A class:type every handle of which streams "
+			"exactly one record through the window's end on both runs leaves the coverage set; "
+			"a type either capture lacks, or either run streams, still compares" },
 	{ "round.target", MaskKind::Field, 'S', 0x00A, "round event flags / target", 0,
 			"a S2C 0x0A round event carries flag 0x40 and its target word when the shooter's AI "
 			"slot word (+0x68 -> +0xC) names a target at the send, the target's pool handle or "
