@@ -1010,6 +1010,12 @@ void GameWorld::set_water_world_rendering_enabled(bool p_enabled) {
 void GameWorld::set_presentation_held(bool p_held) {
 	presentation_held_ = p_held;
 	apply_presentation_hold_(p_held);
+	// The reveal can land inside a frame whose local view already ran under the hold (a joiner's
+	// admission fires in the network leg, past it): a stretched view draws through its target again
+	// at once, so the revealed frame is the stretched picture.
+	if (!p_held) {
+		if (LocalPlayerPresenter *presenter = local_view_presenter()) presenter->resume_view_projection();
+	}
 }
 
 // An RS viewport flag and the water's mirror switch: neither hides a node, so neither unpairs or

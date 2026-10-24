@@ -1170,15 +1170,20 @@ void LocalPlayerPresenter::update_view_projection(const opennova::world::ViewPro
 	Viewport *surface = cam != nullptr ? cam->get_viewport() : nullptr;
 	// A frame under the loading presentation's hold draws the screen alone (a joiner's L can be born
 	// ahead of its admission): no target draws, and the surface's 3D flag is the hold's
-	// (GameWorld::set_presentation_held). The first frame past the reveal draws the held target again.
+	// (GameWorld::set_presentation_held). The projection asked for is kept: the reveal draws it
+	// at once (resume_view_projection), so the revealed frame is already the stretched picture.
 	const GameWorld *game_world = Object::cast_to<GameWorld>(world());
 	if (game_world != nullptr && game_world->is_presentation_held()) {
 		if (projection_viewport() != nullptr) {
 			hold_view_projection();
 			if (surface != nullptr) surface->set_disable_3d(true);
 		}
+		held_frame_projection_ = p_projection;
+		held_frame_nvg_raster_ = p_nvg_raster;
+		held_frame_pending_ = true;
 		return;
 	}
+	held_frame_pending_ = false;
 	if (surface == nullptr || !is_inside_tree() ||
 			(!p_nvg_raster && Math::abs(p_projection.scale_y - 1.0f) < kViewProjectionUnstretched)) {
 		release_view_projection();
@@ -1280,7 +1285,17 @@ void LocalPlayerPresenter::_notification(int p_what) {
 	}
 }
 
+void LocalPlayerPresenter::resume_view_projection() {
+	if (!held_frame_pending_) {
+		return;
+	}
+	held_frame_pending_ = false;
+	update_view_projection(held_frame_projection_, held_frame_nvg_raster_);
+}
+
 void LocalPlayerPresenter::hold_view_projection() {
+	// A held or released target owes the reveal nothing (a teardown holds it: no resume into a menu).
+	held_frame_pending_ = false;
 	SubViewport *target = projection_viewport();
 	CanvasLayer *blit_layer =
 			Object::cast_to<CanvasLayer>(ObjectDB::get_instance(projection_blit_layer_id_));
@@ -1309,6 +1324,7 @@ void LocalPlayerPresenter::hold_view_projection() {
 }
 
 void LocalPlayerPresenter::release_view_projection() {
+	held_frame_pending_ = false;
 	if (Viewport *surface = Object::cast_to<Viewport>(ObjectDB::get_instance(projection_surface_id_))) {
 		surface->set_disable_3d(false);
 	}

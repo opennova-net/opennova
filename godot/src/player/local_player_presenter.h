@@ -225,6 +225,11 @@ public:
 	// arm's square frustum), the surface's own 3D pass off -- one world render
 	// a frame.
 	bool is_nvg_raster_active() const { return nvg_raster_active_; }
+	// The reveal's edge (GameWorld::set_presentation_held(false)): a stretched view this frame's local
+	// view held under the loading presentation draws through its target again at once, at the pose
+	// that step placed, so the revealed frame is the stretched picture. A joiner's admission drops
+	// the hold in the network leg, past the local view.
+	void resume_view_projection();
 	// The FP viewmodel owner (tests and probes inspect the projection feed and
 	// sweep the placement tunables through it).
 	Ref<PlayerViewmodelRig> viewmodel_rig() const { return viewmodel_rig_; }
@@ -416,6 +421,11 @@ private:
 	ObjectID held_projection_blit_layer_id_;
 	float projection_scale_y_ = 1.0f;
 	bool nvg_raster_active_ = false;
+	// The projection this frame's local view asked for while the loading presentation held the
+	// world's draw (stretched or the NVG raster), for the reveal's resume_view_projection.
+	opennova::world::ViewProjection held_frame_projection_;
+	bool held_frame_nvg_raster_ = false;
+	bool held_frame_pending_ = false;
 	// The NVG raster's frame frustum as served to TargetProjectionXrInterface
 	// (the matrix the target draws with while nvg_raster_served_).
 	Projection nvg_raster_projection_;

@@ -259,6 +259,14 @@ func test_an_unchanged_frame_pushes_no_frame_uniform() -> void:
 	ctx.sky.advance_frame(TICK * 2.0)
 	assert_eq(ctx.sky.get_frame_parameter_pushes() - first, 2, "the moved scroll offsets alone")
 	assert_ne(ctx.sky.get_cloud_material().get_shader_parameter("u_scroll_offset1"), offset1)
+	# A rebuild makes new materials, which hold none of the frame uniforms: its next frame pushes the
+	# path's every uniform again, as the first frame did.
+	var before_build: int = ctx.sky.get_frame_parameter_pushes()
+	ctx.sky.build()
+	ctx.sky.advance_frame(0.0)
+	assert_eq(ctx.sky.get_frame_parameter_pushes() - before_build, first,
+			"the rebuilt dome's first frame pushes every uniform of its path")
+	assert_eq(ctx.sky.get_sky_material().get_shader_parameter("u_sky_base"), base)
 
 
 func test_cloud_texture_axes_follow_the_render_basis() -> void:

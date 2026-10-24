@@ -1198,6 +1198,42 @@ func test_a_teardown_holds_the_stretched_target_for_the_next_live_frame() -> voi
 			"the surface's own 3D draw yields to the target again")
 
 
+# A joiner's admission drops the loading presentation's hold in the network leg, past the frame's
+# local view, which drew no target under the hold: the stretched target draws again at the drop, at
+# the pose that local view placed, so the revealed frame is the stretched picture (D-NET-NEW-LF-29).
+func test_the_reveal_draws_the_held_stretched_target_in_its_own_frame() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	var sim := world.get_sim()
+	var size := camera.get_viewport().get_visible_rect().size
+	if size.x <= 0.0 or size.y <= 0.0:
+		pending("the headless viewport reports no size, so no target can be pinned")
+		return
+	var surface_ratio := size.y / size.x
+	var mode := 0 if absf(surface_ratio - 0.75) > 0.001 else 2
+	sim.set_local_player_aspect_mode(mode)
+	_frame(world, presenter, camera, 2)
+	var target: SubViewport = presenter.projection_viewport()
+	assert_not_null(target, "a mode off the surface ratio draws through a target")
+	if target == null:
+		return
+	world.set_presentation_held(true)
+	_frame(world, presenter, camera, 1)
+	assert_null(presenter.projection_viewport(), "under the hold the target is held")
+	assert_eq(target.render_target_update_mode, SubViewport.UPDATE_DISABLED, "and draws nothing")
+	assert_true(camera.get_viewport().disable_3d, "the surface's 3D flag is the hold's")
+	# The drop lands past this frame's local view, as a joiner's admission does.
+	world.set_presentation_held(false)
+	assert_true(presenter.projection_viewport() == target,
+			"the reveal draws through the same target in its own frame")
+	assert_eq(target.render_target_update_mode, SubViewport.UPDATE_ALWAYS)
+	assert_true(camera.get_viewport().disable_3d,
+			"the surface's own 3D draw yields to the target, not to the dropped hold")
+
+
 # Retail's mission start selects the session's aspect mode ahead of its loads, over the
 # backbuffer its device made at init (engine world/player_view.h ViewProjection carries the
 # witness), so no live frame makes a surface: the start makes the stretched target, held, and
