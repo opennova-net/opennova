@@ -28,6 +28,21 @@ bool answered_by_service(const net::HttpReply &reply) {
 	return reply.transport_ok && (reply.code == 200 || (reply.code >= 400 && reply.code < 500));
 }
 
+// The operator's gloss on the host request's NWEC tags: the service's MsgCode names
+// [orig: the NWUSERVERMSGCODE_ name table, {code, name} pairs from @0x7CB960; ConnectOrHost's
+// MsgCode switch @0x4D5207 picks the tag], or the listing's own fault.
+const char *host_tag_meaning(const std::string &tag) {
+	if (tag == "NWEC51") return "the request was not queued";
+	if (tag == "NWEC52") return "the service did not answer within 60 s";
+	if (tag == "NWEC53") return "the service wants a server name (MISSINGSERVERNAME)";
+	if (tag == "NWEC54") return "the service rejected the hosting options (REJECTEDHOSTINGINFO)";
+	if (tag == "NWEC55") return "the service rejected the server name (BADSERVERNAME)";
+	if (tag == "NWEC56") return "the service counts too many servers running (TOOMANYSERVERSRUNNING)";
+	if (tag == "NWEC57") return "the service did not accept the server name (SERVERNAMENOTACCEPTED)";
+	if (tag == "NWEC60") return "the service did not accept the server message (MSGNOTACCEPTED)";
+	return "another refusal, or the session left before the service answered";
+}
+
 // The operator's gloss on the connect's NWEC tags this driver reports (the game shows menutxt's
 // text; these lines are the lister's own).
 const char *connect_tag_meaning(const std::string &tag) {
@@ -154,8 +169,8 @@ Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *se
 					inmatch::server_logs_inout_line(*options_.server_logs, text);
 			};
 			hooks.on_failed = [this](const std::string &tag) {
-				io::logf(LogLevel::kError, "%s[host] the host request failed: %s", who(),
-					tag.c_str());
+				io::logf(LogLevel::kError, "%s[host] the host request failed: %s (%s)", who(),
+					tag.c_str(), host_tag_meaning(tag));
 				source_.on_host_result(false, tag);
 				// NWEC53..58 and NWEC60 are the service's MsgCode refusals (too many servers, the
 				// name not accepted, ...; NWEC58 one outside the table). NWEC51 (not queued), NWEC52
