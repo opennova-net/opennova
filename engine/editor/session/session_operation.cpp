@@ -35,12 +35,12 @@ constexpr OperationKindRow kOperationKindRows[] = {
 	 {K::CancelImport}, "Importing", "the import"},
 	{OperationKind::RenameApply, "rename_apply", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {}, {},
 	 "Renaming", "the rename"},
-	// A check and a push read the files (a save waits), a bind reads nothing of the project's (its binding is the
-	// machine's, .opennova/content/), and a pull writes the files and the documents read again, as an import's
-	// write; each gives way to content_cancel.
+	// A check and a push read the files (a save waits), a bind reads which project is open (its binding goes into
+	// the project's .opennova/content/, so a close waits or cancels it), and a pull writes the files and the
+	// documents read again, as an import's write; each gives way to content_cancel.
 	{OperationKind::ContentCheck, "content_check", HoldsFiles, HoldsSlot, {}, {K::ContentCancel}, "Checking",
 	 "the content check"},
-	{OperationKind::ContentBind, "content_bind", HoldsNothing, HoldsSlot, {}, {K::ContentCancel}, "Binding",
+	{OperationKind::ContentBind, "content_bind", HoldsProject, HoldsSlot, {}, {K::ContentCancel}, "Binding",
 	 "the binding"},
 	{OperationKind::ContentPull, "content_pull", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {},
 	 {K::ContentCancel}, "Pulling", "the pull"},

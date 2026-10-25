@@ -30,6 +30,7 @@
 
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/project_asset_source.h>
+#include <editor/content_store/content_account.h>
 #include <editor/preview/texture_thumbnails.h>
 #include <editor/preview/viewport_device_cache.h>
 #include <editor/preview/viewports.h>
@@ -79,6 +80,16 @@ constexpr const char *kProjectFlag = "--project";
 // The editor's MCP transport, loaded by path: the game products never ship
 // res://editor/, and the shell names no GDScript class (ADR 0043 d12's pattern).
 constexpr const char *kMcpServicePath = "res://editor/mcp/editor_mcp_service.gd";
+// The content store a fresh editor reaches (ADR 0069; DEPLOY.md's deployments): a debug build
+// staging's, a release build the live service's. Each keeps its own account beside the settings, so
+// a staging session never signs a release editor in.
+#ifdef DEBUG_ENABLED
+constexpr const char *kContentServer = "https://staging.opennova.net";
+constexpr const char *kContentAccountFile = "content_account_staging.json";
+#else
+constexpr const char *kContentServer = "https://opennova.net";
+constexpr const char *kContentAccountFile = "content_account.json";
+#endif
 
 } // namespace
 
@@ -164,6 +175,14 @@ void EditorApp::ensure_session() {
 	const String settings = ProjectSettings::get_singleton()->globalize_path(settings_path_);
 	preferences_ = std::make_unique<opennova::editor::FilePreferencesStore>(opennova::to_std(settings));
 	session_ = std::make_unique<ProjectSession>(*platform_, *preferences_);
+	// The content store's account is kept beside the settings, so whatever moves the settings (a
+	// test's own path) moves it too.
+	content_accounts_ = std::make_unique<opennova::editor::FileContentAccountStore>(
+			opennova::to_std(settings.get_base_dir().path_join(kContentAccountFile)),
+			kContentServer);
+	content_http_ = std::make_unique<ContentHttp>();
+	session_->set_content_accounts(content_accounts_.get());
+	session_->set_content_transport(content_http_.get());
 	// What Play launches: asked when the game is spawned, once its build lands, so the port of the
 	// game's MCP endpoint is a fresh one then, never one held while the build packs.
 	session_->set_launcher_source([this](bool p_with_mcp_port) {

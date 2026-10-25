@@ -402,6 +402,7 @@ if(OPENNOVA_EDITOR)
         register_types.cpp
         devtools/imgui_pass_node.cpp
         authoring/child_process.cpp
+        authoring/content_http.cpp
         authoring/definition_viewport_applier.cpp
         authoring/editor_app.cpp
         authoring/environment_viewport_applier.cpp

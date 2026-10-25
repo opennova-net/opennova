@@ -4,9 +4,9 @@
 // website session a sign-in got there (its cookie, as the service names it: `opennova_session`, or
 // `__Host-opennova_session` on a secure deployment, apps/novaworld_common/accounts/web_session.h),
 // with the account's name and role. Signed out, it is the address alone, which reads the public
-// projects. Kept by the Shell in the editor's own user folder (`user://content_account.json`),
-// never in a project, through the store seam here: a file, or memory for the tests and the
-// command line.
+// projects. Kept by the Shell in the editor's own user folder (`user://content_account.json`, a
+// debug build's `content_account_staging.json`), never in a project, through the store seam here:
+// a file, or memory for the tests and the command line.
 
 #include <string>
 #include <utility>
@@ -48,15 +48,19 @@ private:
 };
 
 // The account in a JSON file of its own (the Shell's `user://content_account.json`), written
-// atomically; a file that is missing or unreadable is no account.
+// atomically; a file that is missing or unreadable is no account. With no account kept, it is the
+// address `default_server` alone: the service the build reaches (the Shell's: a debug build
+// staging's, a release build the live one's).
 class FileContentAccountStore : public ContentAccountStore {
 public:
-	explicit FileContentAccountStore(std::string path) : path_(std::move(path)) {}
+	FileContentAccountStore(std::string path, std::string default_server) :
+			path_(std::move(path)), default_server_(content_server(default_server)) {}
 	ContentAccount load() override;
 	bool save(const ContentAccount &account, std::string &error) override;
 
 private:
 	std::string path_;
+	std::string default_server_;
 };
 
 } // namespace opennova::editor

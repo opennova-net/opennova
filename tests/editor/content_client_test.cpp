@@ -21,6 +21,7 @@
 #include <base/io/file_io.h>
 #include <base/io/json.h>
 #include <base/io/sha256.h>
+#include <editor/content_store/content_account.h>
 #include <editor/content_store/content_api.h>
 #include <editor/content_store/content_jobs.h>
 #include <editor/content_store/content_state.h>
@@ -202,7 +203,16 @@ static int test_accounts() {
 			expired.error().find("sign in again") != std::string::npos);
 	const editor::ContentAccountUpdate ended = expired.take_account();
 	TEST_EXPECT(ended.changed && !ended.account.signed_in() && ended.account.server == kServer);
-	std::printf("accounts: a player refused, a renewed session kept, an ended one signed out\n");
+
+	// The kept account's file: with none kept, the build's service alone; once kept, the account.
+	editor::FileContentAccountStore store(dir.file("content_account.json"), "staging.test/");
+	TEST_EXPECT(store.load().server == "https://staging.test" && !store.load().signed_in());
+	TEST_EXPECT(store.save(update.account, error));
+	const editor::ContentAccount kept = store.load();
+	TEST_EXPECT(kept.server == kServer && kept.cookie == kRenewedCookie &&
+			kept.username == update.account.username);
+	std::printf("accounts: a player refused, a renewed session kept, an ended one signed out, the "
+				"account's file\n");
 	return 0;
 }
 

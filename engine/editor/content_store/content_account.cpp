@@ -32,6 +32,7 @@ std::string content_server(const std::string &server) {
 
 ContentAccount FileContentAccountStore::load() {
 	ContentAccount account;
+	account.server = default_server_;
 	std::string text, error;
 	std::error_code ec;
 	io::JsonValue json;
@@ -39,7 +40,9 @@ ContentAccount FileContentAccountStore::load() {
 			!io::json_parse(text, json, error) || !json.is_object() ||
 			json.get_number("schema_version", 0) != kAccountSchemaVersion)
 		return account;
-	account.server = content_server(json.get_string("server", ""));
+	const std::string kept = content_server(json.get_string("server", ""));
+	if (!kept.empty())
+		account.server = kept;
 	account.username = json.get_string("username", "");
 	account.role = json.get_string("role", "");
 	account.cookie = json.get_string("cookie", "");

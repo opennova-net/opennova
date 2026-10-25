@@ -244,6 +244,7 @@ own, change these on your fork:
 | `web/src/utils/links.ts`, `web/index.html` | the site's links to OpenNova's repository and gate (`nw.opennova.net`), its `og:` tags | your own |
 | `web/src/pages/legal/*.vue` | the terms, privacy and refunds pages: drafts with placeholders and a draft banner | your text, before Stripe's live mode (its activation needs them) |
 | the game and the Switcher | OpenNova's NovaWorld (`nw.opennova.net`, `https://opennova.net`) | players reach yours with `opennova.exe -- --novaworld-host nw.<domain>`, or the Switcher's **Custom address...** (your gate's address) for the original exes; a self-run `opennova-serve` lists with `--master-host nw.<domain>` |
+| `godot/src/authoring/editor_app.cpp` | the content store the OpenNova Editor reaches with no account kept (ADR 0069): `https://staging.opennova.net` in a debug build, `https://opennova.net` in a release build | `staging.<domain>` and `<domain>`, your deployment's |
 | `apps/update/client.cpp`, `scripts/package_godot_windows.ps1`, `scripts/package_release.py` | OpenNova's update service, `update.opennova.net`: the gateway OpenNova's `update.exe` dials when no `OPENNOVA.WIZ` names one, and the `URL=` of the `OPENNOVA.WIZ` and `UPDATE.WIZ` files the packages write | `update.<domain>`, your deployment's ("The update service") |
 
 ## Rebuilding from the vault

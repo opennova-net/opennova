@@ -6,7 +6,8 @@
 // them over Godot's HTTPClient on a worker thread (godot/src/authoring/content_http.h); a test
 // over a fake, or over apps/common's HTTP client against the service's own routes. A request may
 // send a file's bytes as its body (an upload) and write its reply's body to a file (a download), so
-// no file a pull or a push moves is held in memory whole.
+// no file a pull moves is held in memory whole (the Shell's transport reads an upload's file whole,
+// HTTPClient sending a body in one piece).
 
 #include <cstddef>
 #include <cstdint>
@@ -23,7 +24,8 @@ struct ContentRequest {
 	std::string body;
 	// A file whose bytes are the body in place of `body` (an upload), "" for none.
 	std::string body_file;
-	// Where the reply's body goes in place of ContentResponse::body (a download), "" to keep it.
+	// Where a successful (2xx) reply's body goes in place of ContentResponse::body (a download), ""
+	// to keep it; any other reply's body is kept, so its refusal reads.
 	std::string response_file;
 };
 
