@@ -7,9 +7,12 @@ Godot, configured by a host file, retail's own dedicated-server format, over the
 (`engine/runtime/inmatch/host_boot.h`, the same two phases the game's hosts run), binds
 `game.cfg`'s LAN port range (or, given a NovaWorld gate, its NovaWorld one, listing itself there),
 answers LAN browsers and admits joiners, and takes retail's remote admin when `game.cfg`
-names its port. A stock retail client has joined it as DFX2 (`/game dfx2`: a retail `dfx2.exe`
-on LAN and through OpenNova's NovaWorld, 2026-10-14, `docs/titles/dfx2-vs-jo-re.md` §7.13); a stock
-`Jointops.exe` join is not yet recorded. Pre-1.0 and experimental.
+names its port. Stock retail clients have joined it: a stock JO:CA 1.7.5.7 `Jointops.exe`
+through NovaLogic's live NovaWorld, with the server listed there (2026-10-24, the net parity
+program's S3 leg, `docs/net/lan-parity-verdict.md` "NovaWorld live legs"), retail joiners on LAN
+(that verdict's `01tr-coop-serve` and `ash-i5a-aas-serve` cells), and a retail `dfx2.exe` as
+DFX2 (`/game dfx2`, on LAN and through OpenNova's NovaWorld, 2026-10-14,
+`docs/titles/dfx2-vs-jo-re.md` §7.13). Pre-1.0 and experimental.
 
 ## Usage
 
@@ -124,27 +127,36 @@ The second listing:
 - **Rides the game socket.** Its NovaWorld session shares the one socket with the first's
   and with the game, so its service lists the server at the address joiners reach.
 - **Lists the same match.** It carries the same columns and players and the same cookie-key
-  ring, so a joiner from either service is admitted the same way. It publishes its first
-  full Host list the moment it hosts, and every mission start's after that.
-- **Runs its service's commands on the match.** A rename or message change from either
-  service renames the server on both. A `PuntPlayer` at the server's own slot from the
-  second service ends only the second listing.
-- **Is stopped by its own service only.** That service's `ServerStopHosting` or punt
-  delists the server there and nowhere else: the match and the first listing go on, and
-  the second listing is not tried again until the server restarts.
-- **Is retried when it does not host.** A gate that does not answer or resolve, a failed
-  login, a refused host request or re-host, or a listing still not hosting 3 minutes after
-  its start is tried again after a minute, then after twice as long each time, up to 15
-  minutes.
+  ring. It publishes its first full Host list the moment it hosts, and every mission
+  start's after that.
+- **Registers under an AppId of its own,** as every retail host request mints one. Each
+  service hands its joiners its own registration's AppId, so the match knows which service
+  sent each joiner: it admits either AppId, holds a joiner to its own service's join-ticket
+  rule, and sends that joiner's `ClientPlayerEnterRequest` to that service. NovaLogic's
+  service asks for join tickets (the S3 leg's hosts sent it enter requests); OpenNova's
+  does not.
+- **Runs its service's commands on the match,** as a stock host listed there does: a rename
+  or message change from either service renames the server on both. A `PuntPlayer` at the
+  server's own slot from the second service ends only the second listing.
+- **Takes its service's decisions as final.** That service's `ServerStopHosting`, its
+  punt, a refused login, a refused host request (too many servers, the name not accepted,
+  ...) or a refused re-host delists the server there and nowhere else: the match and the
+  first listing go on, and the second listing is not tried again until the server
+  restarts, as a stock host's listing that does not host ends.
+- **Retries only faults.** A gate that does not answer or resolve, a request that never
+  reached the service, or a listing still not hosting 3 minutes after its start is tried
+  again after a minute, then after twice as long each time up to 15 minutes, at most 5
+  tries in a run.
+- **Deregisters as a stock host does.** Whatever stops the server, a second listing still
+  hosting sends `ClientStopHosting` and then the goodbye.
 - **Never holds up the match.** Its gate's name is looked up on a worker thread, and a try
   that ends with a web request still out leaves it to finish on its own.
 
-What stays the first listing's: the match's GSID (the LAN reply's `SUS1`), its join tickets
-(a second service that asks for them is logged, and its joiners are admitted without them),
-its METPROTOCOL gate reports after the first mission's `ID` report, and the `_connectlog.txt`
-and `_inout.txt` lines. The second listing's console lines start with `(second listing)`.
-Both services see every player in the PlayerList, with the PCID that player's own service
-gave it.
+What stays the first listing's: the match's GSID (the LAN reply's `SUS1`), its METPROTOCOL
+gate reports after the first mission's `ID` report, and the `_connectlog.txt` and
+`_inout.txt` lines. The second listing's console lines start with `(second listing)`. Both
+services see every player in the PlayerList, with the PCID that player's own service gave
+it.
 
 ## The host file
 

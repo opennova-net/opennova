@@ -1336,14 +1336,20 @@ An owner can have a hosted server listed on NovaLogic's NovaWorld (`gs.novaworld
 well as this service's, so a retail player who never switched NovaWorld sees it too. The
 switch is on by default (`novalogic_listing`, the maintainer's decision of 2026-10-25), but no
 server lists there until the project's NovaLogic account is in the vault. NovaLogic's service
-is a live shared service OpenNova does not run.
+is a live shared service OpenNova does not run; each listed server sends it what a stock host
+does, its players' names and addresses among them (the site's privacy notice says so).
 
 The server lists there under one project-owned NovaLogic account. NovaLogic's service hands
-out a HOSTKEY only after a login, so without the account no server lists there. The listing
-is opennova-serve's second listing (`--also-master-host`, `apps/serve/README.md` "Two
-listings"). It starts once the server's first map is up and never stops the server: a
-listing NovaLogic refuses is tried again after a backoff, and one NovaLogic stops stays off
-until that server's next start.
+out a HOSTKEY only after a login, so without the account no server lists there. Only Joint
+Operations servers can: NovaLogic's DFX2 NovaWorld is down, and Acid Gambit's lobby is ours
+alone, so the form shows the box for Joint Operations data sets and a start of any other
+that asks is refused. The listing is opennova-serve's second listing (`--also-master-host`,
+`apps/serve/README.md` "Two listings"). It starts once the server's first map is up and
+never stops the server. Anything NovaLogic refuses or stops stays off until that server's
+next start; only faults on the way (no answer, a request that never arrived) are tried
+again, at most 5 times. Whether one account may hold several listings at once is not yet
+witnessed; a refusal (MsgCode 1008, too many servers) would show as the extra servers' second
+listings ending, in each server's log.
 
 **The switch** is `novalogic_listing` in the var-file, `true` unless a deployment sets it.
 With it on, web, the fleet and the worker read `ONNET_NOVALOGIC_LISTING=1` (`infra apply`,
@@ -1366,7 +1372,8 @@ NovaLogic's NovaWorld, even with the box ticked. To put the real account in:
    NovaWorld (gs.novaworld.net)`, and its other lines from that listing start with
    `(second listing)`.
 
-**Turning it off:** `novalogic_listing = false` and `infra apply`. The box goes, and a start
+**Turning it off:** `novalogic_listing = false`, `infra apply`, then `app converge` (the
+services keep their task definitions' revision until a deploy). The box goes, and a start
 that asks for the listing is refused. A running server keeps its NovaLogic listing until it
 next starts, so to take every one down at once, also stop all from the admin fleet view
 and let the owners start again. Setting the account back to `REPLACE_ME` (or removing the
