@@ -95,6 +95,63 @@ func get_menu_driver() -> MenuDriver:
 	return _driver
 
 
+# --- MCP menu-driving seam (the game_menu tool while the armory is up) -----------
+# MenuShell's seam shape over this surface (MenuFrameSurface's ops); a closed armory
+# answers nothing.
+
+
+func menu_snapshot(include_widgets: bool = true) -> Dictionary:
+	if not is_open():
+		return {}
+	var snapshot := {
+		"visible": true,
+		"surface": "armory",
+		"file": MENU_FILE,
+		"screen": _driver.get_current_screen(),
+		"screens": _driver.get_screen_names(),
+		"in_game": true,
+		"stack_depth": _driver.get_screen_history_depth(),
+	}
+	if include_widgets:
+		snapshot["widgets"] = MenuFrameSurface.widget_rows(_driver, _frame)
+	return snapshot
+
+
+func menu_press(widget_name: String) -> bool:
+	return is_open() and MenuFrameSurface.press_widget(_driver, _frame, widget_name)
+
+
+func menu_move_at(design_pos: Vector2, down: bool) -> int:
+	return MenuFrameSurface.pump_at(_driver, _frame, design_pos, down) if is_open() else -1
+
+
+func menu_press_at(design_pos: Vector2) -> int:
+	return MenuFrameSurface.press_at(_driver, _frame, design_pos) if is_open() else -1
+
+
+func menu_click_at(design_pos: Vector2) -> bool:
+	if not is_open():
+		return false
+	MenuFrameSurface.click_at(_frame, design_pos)
+	return true
+
+
+# One key press as the screen takes it: the useitem key is the ACCEPT accelerator,
+# the press latch permitting (_unhandled_key_input); the screen takes no other key.
+func menu_key(keycode: int, unicode: int = 0) -> bool:
+	if not is_open():
+		return false
+	var ev := InputEventKey.new()
+	ev.keycode = keycode as Key
+	ev.physical_keycode = keycode as Key
+	ev.unicode = unicode
+	ev.pressed = true
+	if not is_accept_hotkey(bound_key_of(ev)) or not can_dismiss():
+		return false
+	_armory.trigger_accept()
+	return true
+
+
 ## Whether the WEAPON screen's ACCEPT and CANCEL act: neither does while the
 ## engine's armory press latch is held (Simulation.is_armory_press_latched;
 ## engine LocalPlayer::armory_press_latched carries the witness).

@@ -961,6 +961,7 @@ func menu_snapshot(include_widgets: bool = true) -> Dictionary:
 		return {}
 	var snapshot := {
 		"visible": is_visible_in_tree(),
+		"surface": "shell",
 		"file": _current_file,
 		"screen": _driver.get_current_screen(),
 		"screens": _driver.get_screen_names(),
@@ -974,65 +975,24 @@ func menu_snapshot(include_widgets: bool = true) -> Dictionary:
 		},
 	}
 	if include_widgets:
-		var rows: Array[Dictionary] = []
-		for i in _frame.widget_count():
-			var rect := _frame.widget_rect(i)
-			var widget_name := _frame.widget_name(i)
-			var item_count := _frame.item_count(i)
-			var row := {
-				"index": i,
-				"name": widget_name,
-				"kind": _frame.widget_kind(i),
-				"disabled": _frame.is_widget_disabled(i),
-				"rect": [rect.position.x, rect.position.y, rect.size.x, rect.size.y],
-				"text": _frame.get_widget_text(i),
-				"items": item_count,
-			}
-			# A list's rows and its selected row (-1 none), by its NAME.
-			var id := _driver.widget_id(widget_name)
-			if item_count > 0 and id >= 0:
-				var texts := PackedStringArray()
-				for item in _driver.item_count(id):
-					texts.append(_driver.item_text(id, item))
-				row.merge({"rows": texts, "selected": _driver.selected_row(id)})
-			rows.append(row)
-		snapshot["widgets"] = rows
+		snapshot["widgets"] = MenuFrameSurface.widget_rows(_driver, _frame)
 	return snapshot
 
 
-func _design_to_local(design_pos: Vector2) -> Vector2:
-	var size := _frame.get_size()
-	return Vector2(design_pos.x * size.x / MenuFrame.DESIGN_WIDTH,
-			design_pos.y * size.y / MenuFrame.DESIGN_HEIGHT)
-
-
-# Press+release through the real pump at the widget's design-rect center;
-# click activation follows the pump's claim rules exactly. Resolution is
-# frame-side (pre-order index) — the driver's doc-id space is a DIFFERENT
-# addressing and must not index frame rects.
+# Press+release through the real pump at the widget's design-rect center
+# (MenuFrameSurface.press_widget): resolution is frame-side (pre-order index).
 func menu_press(widget_name: String) -> bool:
 	if _driver == null or _frame == null or not is_visible_in_tree():
 		return false
-	for i in _frame.widget_count():
-		if _frame.widget_name(i) != widget_name or _frame.is_widget_disabled(i):
-			continue
-		var local := _design_to_local(_frame.widget_rect(i).get_center())
-		_driver.process_mouse(local, true)
-		_driver.process_mouse(local, false)
-		return true
-	return false
+	return MenuFrameSurface.press_widget(_driver, _frame, widget_name)
 
 
 # One raw pump sample at design coords with the button held or not, as a
-# motion is: the claim's hover and the window sounds it plays. Returns the hit
-# widget index (-1 for none).
+# motion is. Returns the hit widget index (-1 for none).
 func menu_move_at(design_pos: Vector2, down: bool) -> int:
 	if _driver == null or _frame == null or not is_visible_in_tree():
 		return -1
-	var local := _design_to_local(design_pos)
-	var hit := _frame.hit_test(local)
-	_driver.process_mouse(local, down)
-	return hit
+	return MenuFrameSurface.pump_at(_driver, _frame, design_pos, down)
 
 
 # Raw pump press+release at design coords (list rows, combo popups, spin
@@ -1040,29 +1000,17 @@ func menu_move_at(design_pos: Vector2, down: bool) -> int:
 func menu_press_at(design_pos: Vector2) -> int:
 	if _driver == null or _frame == null or not is_visible_in_tree():
 		return -1
-	var local := _design_to_local(design_pos)
-	var hit := _frame.hit_test(local)
-	_driver.process_mouse(local, true)
-	_driver.process_mouse(local, false)
-	return hit
+	return MenuFrameSurface.press_at(_driver, _frame, design_pos)
 
 
-# A REAL left click at design coords: press + release fed through Godot's input
-# dispatch (mouse filters, companion mounts, GUI focus all apply), unlike the
-# pump-direct press ops -- the seam that observes whether a mounted Control
-# steals a click from the frame. The events are buffered and land on the next
-# frame; callers re-read the menu state after a frame.
+# A REAL left click at design coords through Godot's input dispatch
+# (MenuFrameSurface.click_at) -- the seam that observes whether a mounted
+# Control steals a click from the frame. The events land on the next frame;
+# callers re-read the menu state after a frame.
 func menu_click_at(design_pos: Vector2) -> bool:
 	if _driver == null or _frame == null or not is_visible_in_tree():
 		return false
-	var window_pos := get_global_transform_with_canvas() * _design_to_local(design_pos)
-	for pressed in [true, false]:
-		var click := InputEventMouseButton.new()
-		click.button_index = MOUSE_BUTTON_LEFT
-		click.pressed = pressed
-		click.position = window_pos
-		click.global_position = window_pos
-		Input.parse_input_event(click)
+	MenuFrameSurface.click_at(_frame, design_pos)
 	return true
 
 

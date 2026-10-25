@@ -432,6 +432,81 @@ func test_open_populates_the_authored_grenade_combo_from_weapon_def() -> void:
 			"the ArmoryPresenter ACCEPT rebuild keeps %s equipped in the slot pool" % grenade_name)
 
 
+# A shell whose one live surface is the in-world armory (no shell menu): what
+# GameDebugAdapter.mcp_game_menu drives while the armory is up.
+class ArmoryOnlyShell:
+	extends GameShell
+	var armory: ArmoryPresenter
+
+	func get_armory_presenter() -> ArmoryPresenter:
+		return armory
+
+
+# game_menu drives the open armory through the shell menu's seams: its state says the
+# surface, lists the PRIMARY combo's rows (NONE, then the class's primaries), press_at
+# hits a widget, key takes only the useitem ACCEPT accelerator, and screen and open
+# stay the shell's; a closed armory leaves game_menu the shell's menu again.
+func test_game_menu_drives_the_open_armory() -> void:
+	var simulation := _real_sim(2)
+	var weapons := _make_weapons()
+	var primary_rows: Array[WeaponDef] = weapons.get_slot_weapons(
+			WeaponDatabase.SLOT_PRIMARY, 8, 1)
+	assert_gt(primary_rows.size(), 0, "the fixture weapon.def has a selectable primary")
+	var kit: Array[WeaponKitEntry] = [WeaponKitEntry.make(primary_rows[0].name)]
+	assert_true(simulation.apply_local_player_loadout(kit, 8))
+	var overlay := Control.new()
+	overlay.size = Vector2(MenuFrame.DESIGN_WIDTH, MenuFrame.DESIGN_HEIGHT) # design coords map 1:1
+	add_child_autofree(overlay)
+	var presenter := ArmoryPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(_make_world(simulation, weapons), null, overlay)
+	var shell := ArmoryOnlyShell.new()
+	autofree(shell)
+	shell.armory = presenter
+	var adapter: GameDebugAdapter = add_child_autofree(GameDebugAdapter.new())
+	adapter.configure(shell)
+
+	assert_eq(adapter.mcp_game_menu({"op": "state"}), {"error": "no menu shell"},
+		"a closed armory is no menu")
+	assert_true(presenter.open())
+	var state: Dictionary = adapter.mcp_game_menu({"op": "state"})
+	assert_eq(state.get("surface"), "armory")
+	assert_eq(state.get("file"), "weapon.mnu")
+	assert_eq(state.get("screen"), "WEAPON")
+	var primary := {}
+	for row: Dictionary in state.get("widgets", []):
+		if row["name"] == "PRIMARY":
+			primary = row
+	assert_false(primary.is_empty(), "the state lists the PRIMARY combo")
+	var driver := presenter.get_menu_driver()
+	var rows: PackedStringArray = primary.get("rows", PackedStringArray())
+	assert_eq(rows.size(), driver.item_count(driver.widget_id("PRIMARY")),
+		"the combo's rows are the driver's")
+	assert_has(rows, _weapon_display_text(primary_rows[0]),
+		"the class's primary is a row of the combo")
+
+	var rect: Array = primary["rect"]
+	var center := Vector2(float(rect[0]) + float(rect[2]) / 2.0,
+			float(rect[1]) + float(rect[3]) / 2.0)
+	var pressed: Dictionary = adapter.mcp_game_menu(
+			{"op": "press_at", "x": center.x, "y": center.y})
+	assert_eq(pressed.get("hit_index"), primary["index"], "press_at hits the PRIMARY combo")
+
+	assert_false(bool(adapter.mcp_game_menu({"op": "key", "keycode": KEY_A}).get("handled")),
+		"the screen takes no key but the ACCEPT accelerator")
+	assert_string_contains(String(adapter.mcp_game_menu({"op": "screen", "name": "WEAPON"})
+			.get("error", "")), "armory", "screen stays the shell menu's")
+	assert_string_contains(String(adapter.mcp_game_menu({"op": "open", "file": "main.mnu"})
+			.get("error", "")), "armory", "open stays the shell menu's")
+
+	var use_keys := ControlsBindings.model().godot_keys_for_token("useitem")
+	assert_false(use_keys.is_empty(), "the useitem row has a key")
+	var accepted: Dictionary = adapter.mcp_game_menu(
+			{"op": "key", "keycode": int(use_keys[0])})
+	assert_true(bool(accepted.get("handled")), "the useitem key is the ACCEPT accelerator")
+	adapter.release_shell()
+
+
 func test_multiplayer_open_is_live() -> void:
 	# The 0x2F loadout service exists now: a joiner's ACCEPT re-submits from the
 	# applied kit (the sim's in-match queue leg) and the listen presenter applies
