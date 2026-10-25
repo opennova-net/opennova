@@ -1003,6 +1003,136 @@ func test_retained_husk_pick_retries_and_updates_only_the_husk_section_mask() ->
 	presenter.teardown()
 
 
+# The destroyed sections are the entity's one word, which retail applies to
+# whichever model it draws: the husk while the entity is husked, the graphic
+# once the respawn zeroes the word. The swap hands the word to the husk at the
+# graft and back to the intact model at the restore. The pins below run each
+# frame in production order (the row walk, then the destruction drain), as
+# MissionRoot.present_frame does.
+func _sectioned_intact(container: Node3D) -> ObjectModel:
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(HUSK_MODEL_3DI)), OK)
+	var intact := ObjectModel.new()
+	container.add_child(intact)
+	intact.set_object_data(data)
+	return intact
+
+
+func _assert_every_part_visible(model: ObjectModel, why: String) -> void:
+	var parts := model.get_render_part_nodes()
+	assert_gt(parts.size(), 1, 'the fixture model draws more than one section')
+	for section in parts:
+		assert_true((parts[section] as Node3D).visible, '%s (section %d)' % [why, section])
+
+
+# The placed walk (a mission vehicle: the 00TRA Little Bird): the death's tick
+# sets the husk flag and the death-piece mask together, so the death frame's
+# row hides the flown-off section on the intact model before the drain grafts
+# the husk.
+func test_placed_wreck_hides_the_flown_off_section_and_the_respawn_draws_every_part() -> void:
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var intact := _sectioned_intact(container)
+	var presenter := _make_presenter(null, container, _index_of([_entry(intact, 41)]),
+			_husk_placer(), _item_db, ItemEffectDirector.new(), null)
+	var row := PackedFloat32Array()
+	row.resize(Simulation.PF_STRIDE)
+	row[Simulation.PF_TYPE_ID] = BUGGY_ITEM_ID
+	row[Simulation.PF_BMS_ID] = 41
+	row[Simulation.PF_KIND] = -1
+	row[Simulation.PF_INDEX] = -1
+	row[Simulation.PF_BODY_ANIM_SLOT] = -1
+	row[Simulation.PF_ANIM_STATE] = -1
+	row[Simulation.PF_ANIM_SOURCE_STATE] = -1
+	row[Simulation.PF_ANIM_SOURCE_PHASE_TICKS] = -1
+	row[Simulation.PF_ANIM_BLEND_WEIGHT] = 1
+	row[Simulation.PF_WPN_ANIM_STATE] = -1
+	row[Simulation.PF_SECTION_MASK_VALID] = 1
+	# The death frame: section 1 flew off as a piece.
+	row[Simulation.PF_HUSK] = 1
+	row[Simulation.PF_SECTION_MASK_LO] = 2
+	presenter.present_snapshot(row, Simulation.PF_STRIDE, 1)
+	presenter.present_destruction_drained(DestructionDrain.make([
+			HuskSwapEvent.make(41, BUGGY_ITEM_ID)]), [])
+	var husks := _husk_models(container)
+	assert_eq(husks.size(), 1, 'the death grafts the husk')
+	if husks.size() == 1:
+		var husk_parts := (husks[0] as ObjectModel).get_render_part_nodes()
+		assert_true((husk_parts[0] as Node3D).visible)
+		assert_false((husk_parts[1] as Node3D).visible,
+				'the wreck hides the section that flew off from the death frame on')
+		presenter.present_snapshot(row, Simulation.PF_STRIDE, 1)
+		assert_false((husk_parts[1] as Node3D).visible, 'and keeps it hidden while dead')
+	# The respawn frame: the word is zeroed and the husk flag cleared.
+	row[Simulation.PF_HUSK] = 0
+	row[Simulation.PF_SECTION_MASK_LO] = 0
+	presenter.present_snapshot(row, Simulation.PF_STRIDE, 1)
+	presenter.present_destruction_drained(DestructionDrain.make([
+			HuskSwapEvent.make(41, BUGGY_ITEM_ID, Simulation.SPAWN_ORIGIN_NONE, 65535, true)]), [])
+	_assert_every_part_visible(intact, 'the respawned model draws every part')
+	presenter.present_snapshot(row, Simulation.PF_STRIDE, 1)
+	_assert_every_part_visible(intact, 'and keeps drawing them on the next frame')
+	presenter.teardown()
+
+
+# The wire walk (a runtime-only vehicle): its row's retained PF_HUSK pick
+# grafts ahead of the row's own stamp, so the word reaches the intact model
+# first only when it was set while the vehicle lived (a blast breaks a
+# section, entity+0x134).
+func test_wire_wreck_keeps_the_broken_section_and_the_respawn_draws_every_part() -> void:
+	var sim := Simulation.new()
+	var placer := _husk_placer()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var index := EntityIndex.new()
+	var presenter := _make_presenter(sim, container, index, placer, _item_db,
+			ItemEffectDirector.new(), null)
+	presenter.setup_wire(sim, placer, container, index)
+	var intact := _sectioned_intact(container)
+	var ref := EntityRef.make(2, 16777215, 0, BUGGY_ITEM_ID + 100000, 0x2001)
+	ref.origin_kind = 255
+	ref.runtime_type_id = BUGGY_ITEM_ID
+	intact.entity_ref = ref
+	presenter.register_wire_node(0x2001, intact)
+	var row := PackedFloat32Array()
+	row.resize(Simulation.PF_STRIDE)
+	row[Simulation.PF_TYPE_ID] = BUGGY_ITEM_ID
+	row[Simulation.PF_WIRE_HANDLE] = 0x2001
+	row[Simulation.PF_KIND] = 255
+	row[Simulation.PF_INDEX] = 16777215
+	row[Simulation.PF_ANIM_STATE] = -1
+	row[Simulation.PF_WPN_ANIM_STATE] = -1
+	row[Simulation.PF_SECTION_MASK_VALID] = 1
+	# A blast breaks section 1 while the vehicle lives.
+	row[Simulation.PF_SECTION_MASK_LO] = 2
+	presenter.present_wire_snapshot(row, Simulation.PF_STRIDE, 1)
+	var parts := intact.get_render_part_nodes()
+	assert_false((parts[1] as Node3D).visible, 'the live model hides the broken section')
+	# The death frame.
+	row[Simulation.PF_HUSK] = 1
+	presenter.present_wire_snapshot(row, Simulation.PF_STRIDE, 1)
+	presenter.present_destruction_drained(DestructionDrain.make([
+			HuskSwapEvent.make(0, BUGGY_ITEM_ID, Simulation.SPAWN_ORIGIN_NONE, 0x2001)]), [])
+	var husks := _husk_models(container)
+	assert_eq(husks.size(), 1, 'the death grafts the husk')
+	if husks.size() == 1:
+		var husk_parts := (husks[0] as ObjectModel).get_render_part_nodes()
+		assert_true((husk_parts[0] as Node3D).visible)
+		assert_false((husk_parts[1] as Node3D).visible, 'the wreck keeps the broken section hidden')
+		presenter.present_wire_snapshot(row, Simulation.PF_STRIDE, 1)
+		assert_false((husk_parts[1] as Node3D).visible, 'and keeps it hidden while dead')
+	# The respawn frame.
+	row[Simulation.PF_HUSK] = 0
+	row[Simulation.PF_SECTION_MASK_LO] = 0
+	presenter.present_wire_snapshot(row, Simulation.PF_STRIDE, 1)
+	presenter.present_destruction_drained(DestructionDrain.make([
+			HuskSwapEvent.make(0, BUGGY_ITEM_ID, Simulation.SPAWN_ORIGIN_NONE, 0x2001, true)]), [])
+	_assert_every_part_visible(intact, 'the respawned model draws every part')
+	presenter.present_wire_snapshot(row, Simulation.PF_STRIDE, 1)
+	_assert_every_part_visible(intact, 'and keeps drawing them on the next frame')
+	presenter.teardown()
+
+
 func test_static_husk_carries_entity_light_cube_and_static_owner() -> void:
 	var temp_root := WorldFixture.stage_minimal_root("static_husk_light", false, {
 		"items.def": """begin "Light query shell"

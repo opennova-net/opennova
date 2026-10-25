@@ -1258,6 +1258,9 @@ public:
 	// The entity's destroyed sections (the sim's hidden-section mask, 0 =
 	// none): hidden whatever the occlusion verdict says.
 	void set_destroyed_section_mask(int64_t p_hidden_mask);
+	// The destroyed sections last applied (0 = none). Read by the husk swap,
+	// which hands them to the model it draws next (simulation/husk_swap.h).
+	int64_t get_destroyed_section_mask() const { return destroyed_section_mask_; }
 	PackedInt32Array get_surface_material_indices() const { return surface_material_indices_; }
 	Array get_surface_materials() const;
 	bool is_playing() const { return is_playing_; }
