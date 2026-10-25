@@ -185,8 +185,7 @@ int test_collapse_rows() {
 	anim::collapse_bone_rows(parents, joints, 1u << 2, leaf);
 	TEST_EXPECT(zero_rows(leaf[2]) && same_point(leaf[2].origin, joint_of(deformations, 2)));
 	for (size_t i : {size_t(0), size_t(1), size_t(3)}) TEST_EXPECT(same_rest(leaf[i], deformations[i]));
-	std::printf("collapse_bone_rows: a bone folds to its joint, its children keep turning on the fold point
-");
+	std::printf("collapse_bone_rows: a bone folds to its joint, its children keep turning on the fold point\n");
 	return 0;
 }
 
