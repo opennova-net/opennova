@@ -775,6 +775,7 @@ void compare_steady(
 
 struct Envelope {
 	size_t packets = 0, header_only = 0;
+	size_t idle_acks = 0; // the S acks that rode a non-gameplay record (session.header_only_acks)
 	std::set<std::string> header_flags;
 	Distribution shapes;
 };
@@ -783,15 +784,15 @@ struct Envelope {
 // [orig: CNapiNPConnection_ParseMessages @0x625BC0 (has_pending_out set @0x625DFF)]: the
 // boundary build runs when records are queued or the ack is owed, and the packet is
 // header-only exactly when nothing was queued [orig: CNapiNPConnection_PumpEnumeratorAndSend
-// @0x629240 (the open boundary @0x62927B, the queue test @0x62929A, the owed test
+// @0x6290C0 (the open boundary @0x62927B, the queue test @0x62929A, the owed test
 // @0x6292A9, the build @0x6292B4)] [orig: CNapiNPConnection_BuildOutgoingPackets (the clear
 // @0x628629)]. In gameplay every boundary carries the 0x0A, so no ack stands alone; in an idle
 // stretch (a round end's linger, a mission load) whether a reliable message is queued at the
 // ack's boundary is the phase of the joiner's sends against the host's: the final's
 // tdh-i3a-tdm-round OO, whose joiner's 5 s 0x4C fell just before the linger's 0x16 boundary,
-// had two acks ride the 0x16. So the S header-only count also takes each steady S packet
+// had two acks ride the 0x16. So the S header-only CADENCE also counts each steady S packet
 // that carries no 0x0A and is the first to ack a C2S packet with records
-// (session.header_only_acks).
+// (session.header_only_acks); the class's presence row keeps the header-only packets.
 Envelope envelope(const RunFacts &run, char dir) {
 	static_assert(has_normalization("session.header_only_acks"));
 	Envelope e;
@@ -823,18 +824,21 @@ Envelope envelope(const RunFacts &run, char dir) {
 			if (first_ack && run.in_steady(packet.ts_ns) &&
 					std::find(packet.tags.begin(), packet.tags.end(), uint16_t(0x00A)) ==
 							packet.tags.end())
-				++e.header_only;
+				++e.idle_acks;
 		}
 	}
 	return e;
 }
 
+// The class's presence from `rr_present` / `other_present` (its packets), its cadence from
+// `rr_count` / `other_count`.
 void cadence_metric(std::vector<MetricValue> &out, char dir, const char *name, size_t rr_count,
-		double rr_ms, size_t other_count, double other_ms) {
+		double rr_ms, size_t other_count, double other_ms, size_t rr_present,
+		size_t other_present) {
 	MetricValue presence = metric(dir, "packet_class_presence", name, "SESSION_PACKET_CADENCE");
-	presence.distance = (rr_count == 0) != (other_count == 0) ? 1.0 : 0.0;
-	presence.subject = other_count ? "present" : "absent";
-	presence.reference = rr_count ? "present" : "absent";
+	presence.distance = (rr_present == 0) != (other_present == 0) ? 1.0 : 0.0;
+	presence.subject = other_present ? "present" : "absent";
+	presence.reference = rr_present ? "present" : "absent";
 	presence.detail = "presence versus absence of a packet class is structural";
 	out.push_back(presence);
 	MetricValue cadence = metric(dir, "packet_cadence", name, "SESSION_PACKET_CADENCE");
@@ -856,10 +860,10 @@ void cadence_metric(std::vector<MetricValue> &out, char dir, const char *name, s
 void compare_envelope(
 		const RunFacts &rr, const RunFacts &other, char dir, std::vector<MetricValue> &out) {
 	const Envelope a = envelope(rr, dir), b = envelope(other, dir);
-	cadence_metric(
-			out, dir, "session", a.packets, rr.comparison_ms, b.packets, other.comparison_ms);
-	cadence_metric(out, dir, "header_only", a.header_only, rr.comparison_ms, b.header_only,
-			other.comparison_ms);
+	cadence_metric(out, dir, "session", a.packets, rr.comparison_ms, b.packets, other.comparison_ms,
+			a.packets, b.packets);
+	cadence_metric(out, dir, "header_only", a.header_only + a.idle_acks, rr.comparison_ms,
+			b.header_only + b.idle_acks, other.comparison_ms, a.header_only, b.header_only);
 	MetricValue flags = metric(dir, "header_only_flags", "", "SESSION_PACKET_HEADER_FLAGS");
 	flags.distance = jaccard_distance(a.header_flags, b.header_flags);
 	flags.subject = render_set(b.header_flags);

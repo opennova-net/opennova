@@ -3838,6 +3838,21 @@ void test_header_only_acks() {
 	expect_row(judge_case(idle(1, 2 * kSec, none), idle(2, 2 * kSec, none),
 					   idle(3, 2 * kSec, two), "OO"),
 			'S', "packet_cadence", "header_only", "fail", "SESSION_PACKET_CADENCE");
+	{
+		// The class's presence keeps the header-only packets alone: RR's one ack riding a
+		// 0x16 is no header-only packet, so against a run whose ack rode a 0x0A both read
+		// absent (V-ROLL-CA: the final's kick RR 0 -> 1 against RO 0 failed presence when the
+		// ack count fed it).
+		const std::vector<bool> one = { true };
+		const Case c = judge_case(idle(1, 10 * kSec, one), idle(2, 10 * kSec, one),
+				idle(3, 10 * kSec, one, 0x00A), "RO");
+		expect_row(c, 'S', "packet_class_presence", "header_only", "pass");
+		const VerdictRow *row =
+				find_row(c.verdict.rows, 'S', "packet_class_presence", "header_only");
+		check(row && row->value.reference == "absent" && row->value.subject == "absent",
+				"an ack riding a reliable record leaves the presence row");
+		expect_row(c, 'S', "packet_cadence", "header_only", "pass");
+	}
 }
 
 // The final's tdh-i3a-tdm-round (LX-s37): after the rotation's teardown (S2C 0x25) the next
