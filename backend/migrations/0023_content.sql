@@ -94,7 +94,7 @@ ALTER TABLE releases
 
 -- A data set's updater product as its packages name it (the release build's): the command
 -- file's PRODUCT and the executable its DONE
--- runs ('' for an expansion). Each by its login, as the seeds above find our own.
+-- runs ('' for an expansion): the retail games' by their logins.
 ALTER TABLE data_sets
     ADD COLUMN product_name text NOT NULL DEFAULT '',
     ADD COLUMN product_exe  text NOT NULL DEFAULT '';
@@ -103,6 +103,9 @@ WHERE updater_login = 'JOTRus';
 UPDATE data_sets SET product_name = 'Joint Operations: Escalation' WHERE updater_login = 'JOEus';
 UPDATE data_sets SET product_name = 'Delta Force Xtreme 2', product_exe = 'dfx2.exe'
 WHERE updater_login = 'DFX2';
-UPDATE data_sets SET product_name = 'OpenNova', product_exe = 'opennova.exe'
-WHERE updater_login = 'OPENNOVA';
-UPDATE data_sets SET product_name = 'Indigo Storm' WHERE updater_login = 'ONJO1';
+-- Our own game and its expansion are named as their data sets are (whatever their logins), the
+-- game run by the runtime's executable.
+UPDATE data_sets SET product_name = display_name, product_exe = 'opennova.exe'
+WHERE kind = 'base' AND updater_login <> '' AND NOT retail_updater;
+UPDATE data_sets SET product_name = display_name
+WHERE kind = 'expansion' AND updater_login <> '' AND NOT retail_updater;

@@ -141,6 +141,25 @@ struct Rig {
 				: 0;
 	}
 
+	// Our own game's project as the seeds key it (its updater product's login) with its data set's
+	// command file and name, whatever the game is called.
+	struct OwnGame {
+		std::string key, command_file, name;
+	};
+	OwnGame own_game() {
+		const auto rows = db.query(
+				"SELECT p.key, d.command_file, d.display_name FROM content_projects p "
+				"JOIN data_sets d ON d.id = p.data_set_id "
+				"WHERE d.kind = 'base' AND d.updater_login <> '' AND NOT d.retail_updater;");
+		OwnGame own;
+		if (rows.size() == 1) {
+			own.key = rows.front().as_text(0).value_or("");
+			own.command_file = rows.front().as_text(1).value_or("");
+			own.name = rows.front().as_text(2).value_or("");
+		}
+		return own;
+	}
+
 	// A release built from revision `revision` of `key`, its build queued: its id.
 	int64_t release(const std::string &key, int64_t revision, const char *version) {
 		const auto project = content::find_project(db, key);
@@ -237,11 +256,13 @@ static int test_retail_patch() {
 // Our own game's first revision: a full package, its tree's UPDATE.WIZ naming the product.
 static int test_own_full() {
 	Rig rig("opennova_release_build_own");
-	const std::string project = rig.temp.file("OPENNOVA");
+	const Rig::OwnGame own = rig.own_game();
+	TEST_EXPECT(!own.key.empty() && !own.command_file.empty() && !own.name.empty());
+	const std::string project = rig.temp.file("Own");
 	TEST_EXPECT(rig.project({ "new", project, "--title", "Own" }) == 0);
 	TEST_EXPECT(rig.project({ "create-missing", project }) == 0);
-	TEST_EXPECT(rig.push("OPENNOVA", project, 0, "first") == 1);
-	const int64_t id = rig.release("OPENNOVA", 1, "0.1.0");
+	TEST_EXPECT(rig.push(own.key, project, 0, "first") == 1);
+	const int64_t id = rig.release(own.key, 1, "0.1.0");
 	rig.run_jobs();
 	const auto release = hosted::find_release(rig.db, id);
 	TEST_EXPECT(release && release->status == hosted::ReleaseStatus::Draft);
@@ -251,10 +272,11 @@ static int test_own_full() {
 		return 1;
 	}
 	update::SfsPackage package;
-	TEST_EXPECT(rig.package(*release, package) && package.product == "OpenNova" &&
+	TEST_EXPECT(rig.package(*release, package) && package.product == own.name &&
 			package.sections.size() == 1);
-	const update::SfsEntry *command =
-			package.sections.empty() ? nullptr : entry_named(package.sections[0], "OPENNOVA.CMD");
+	const update::SfsEntry *command = package.sections.empty()
+			? nullptr
+			: entry_named(package.sections[0], own.command_file.c_str());
 	TEST_EXPECT(command != nullptr);
 	if (!command)
 		return 1;
@@ -265,7 +287,7 @@ static int test_own_full() {
 	for (const update::CommandRow &row : cmd ? cmd->rows : std::vector<update::CommandRow>{})
 		wizard = wizard || strutil::iequals(row.name, "UPDATE.WIZ");
 	TEST_EXPECT(wizard);
-	std::printf("own game: OPENNOVA r1 packed whole, its UPDATE.WIZ among its rows\n");
+	std::printf("own game: %s r1 packed whole, its UPDATE.WIZ among its rows\n", own.key.c_str());
 	return 0;
 }
 
@@ -285,15 +307,16 @@ static int test_refusals() {
 			io::write_file_atomic(notes + "/README.txt", std::string("no project here\n"), error));
 	TEST_EXPECT(rig.push("LOOSE", notes, 0, "notes") == 1);
 	const int64_t no_set = rig.release("LOOSE", 1, "1.0");
-	TEST_EXPECT(rig.push("OPENNOVA", notes, 0, "notes") == 1);
-	const int64_t no_project = rig.release("OPENNOVA", 1, "1.0");
+	const Rig::OwnGame own = rig.own_game();
+	TEST_EXPECT(rig.push(own.key, notes, 0, "notes") == 1);
+	const int64_t no_project = rig.release(own.key, 1, "1.0");
 	rig.run_jobs();
 	const auto first = hosted::find_release(rig.db, no_set);
 	TEST_EXPECT(first && first->status == hosted::ReleaseStatus::Invalid &&
 			first->error.find("updates no data set") != std::string::npos);
 	const auto second = hosted::find_release(rig.db, no_project);
 	TEST_EXPECT(second && second->status == hosted::ReleaseStatus::Invalid &&
-			second->error.find("the export of OPENNOVA r1") != std::string::npos &&
+			second->error.find("the export of " + own.key + " r1") != std::string::npos &&
 			second->build_log.find("$ ") != std::string::npos);
 	if (second && second->status == hosted::ReleaseStatus::Invalid)
 		std::printf("refusals: no data set; a revision that is no project (%s)\n",

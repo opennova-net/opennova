@@ -246,10 +246,25 @@ _Avoid_: consumer, executor
 
 **Data program**:
 The program (`apps/novaworld_data`) that runs the data sets' jobs (a tree's finalize, a
-release's validate and apply, the trees' prune) over the game data's store, and schedules
-their prune; one task, its own disk for the files a job passes through. An admin's upload
-never queues a machine launch behind it.
+release's build, validate and apply, the trees' prune) over the game data's store, and
+schedules their prune; one task, its own disk for the files a job passes through. An admin's
+upload never queues a machine launch behind it.
 _Avoid_: data worker, uploader
+
+**Content store**:
+The NovaWorld service's keeping of every product's raw content (ADR 0069): a **content
+project** per product (`OPENNOVA`, `JO`, `JOX01`, ...), its history a line of revisions, each
+a manifest of the project's files by path, SHA-256 and size, every file stored once by its
+SHA-256. Public projects are anyone's to get; private ones (the retail games') an admin's.
+Admins push; a push is not a release. The editor's Content window is its client, the web
+admin's Content page its management.
+_Avoid_: repository, git, depot, asset server
+
+**Working copy**:
+A folder on a disk that holds a content project's files at a revision (its base), bound to the
+project by `.opennova/content/`: what it changed since its base is its push, what others pushed
+since its pull. Every OpenNova Editor project of a product is one.
+_Avoid_: checkout, clone, mirror
 
 **Job**:
 One piece of background work in the `jobs` table (a machine launch, describe or terminate,
@@ -522,8 +537,8 @@ Godot editor is always "the Godot editor".
 _Avoid_: ONED (the retired product), mod tools, modtools, terrain editor
 
 **OpenNova content**:
-OpenNova's own game data, authored from scratch as OpenNova Editor projects kept outside the
-repository and released as update packages: the
+OpenNova's own game data, authored from scratch as OpenNova Editor projects kept in the
+**content store** (never in a repository) and released as update packages: the
 "Indigo Shore" mission (single player and Co-op over LAN) and its "Indigo Storm"
 expansion. The minimal runtime downloads it on first launch. `/game opennova`
 is the default; `/game jo` or `/game dfx2` selects an existing retail installation
