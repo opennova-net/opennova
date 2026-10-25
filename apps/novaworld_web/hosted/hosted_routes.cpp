@@ -71,6 +71,7 @@ crow::json::wvalue settings_json(const HostedSettings &s) {
 	out["start_delay"] = s.start_delay;
 	out["team_ff"] = s.team_ff;
 	out["missions"] = text_list(s.missions);
+	out["list_on_novalogic"] = s.list_on_novalogic;
 	return out;
 }
 
@@ -188,6 +189,9 @@ crow::json::wvalue offered_data_set_json(const OfferedDataSet &d) {
 	out["display_name"] = d.display_name;
 	out["title"] = d.title;
 	out["version"] = d.version;
+	// Whether a server on it may also list on NovaLogic's NovaWorld (Joint Operations' lobby
+	// alone; the list's novalogic_listing says whether the service offers it at all).
+	out["novalogic_listing"] = novalogic_lists(d);
 	out["missions"] = missions_json(d.missions);
 	const HostLimits &limits = host_limits_for_title(d.title);
 	crow::json::wvalue ranges;
@@ -418,7 +422,8 @@ void HostedRoutes::register_routes(WebApp &app) {
 
 // GET /api/me/servers — the logged-in account's hosted servers: {"enabled" (this
 // service runs hosted servers: a machine driver and at least one offered data
-// set), "full" (a start now would be refused at_capacity: every place under
+// set), "novalogic_listing" (enabled, and a start may also list its server on
+// NovaLogic's NovaWorld: ONNET_NOVALOGIC_LISTING), "full" (a start now would be refused at_capacity: every place under
 // ONNET_HOSTED_CAP is taken, or the account has a free place in a pool and
 // the fleet has no room in any pool it has one in: a shared server while
 // shared_used < shared_servers, one on a dedicated machine while own_used <
@@ -472,6 +477,7 @@ crow::response HostedRoutes::me_servers(const crow::request &req) {
 		const std::vector<OfferedDataSet> offered = hosting_on_ ? offered_data_sets(*db_conn) : std::vector<OfferedDataSet>();
 		const bool enabled = hosting_on_ && !offered.empty();
 		out["enabled"] = enabled;
+		out["novalogic_listing"] = enabled && novalogic_listing_;
 		const billing::Entitlement entitlement = billing::entitlement_of(*db_conn, owner, billing::unix_now());
 		const int shared_used = count_shared_live_of(*db_conn, owner);
 		const int own_used = count_own_live_of(*db_conn, owner);
@@ -556,7 +562,8 @@ crow::response HostedRoutes::me_server(const crow::request &req, uint64_t id) {
 // "time_limit", "kill_limit", "max_score", "respawn", "start_delay" (integers),
 // "team_ff" (true/false), "missions" (a list of .bms names among the data set's
 // and the expansion's, the first the starting map; absent: every mission of
-// the base, then the expansion's), "own_machine" (true: on one of the
+// the base, then the expansion's), "list_on_novalogic" (true/false: also listed on
+// NovaLogic's NovaWorld; true only while the service offers it), "own_machine" (true: on one of the
 // account's dedicated machines, a paid one or an admin's; absent: false, a shared
 // machine), "address_id" (with own_machine: one of the account's ready static addresses,
 // which its machine carries, so it lists at the same address on every start;
@@ -621,6 +628,7 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 	number("respawn", settings.respawn);
 	number("start_delay", settings.start_delay);
 	if (auto v = body->flag("team_ff")) settings.team_ff = *v;
+	if (auto v = body->flag("list_on_novalogic")) settings.list_on_novalogic = *v;
 	if (auto v = body->text_list("missions")) {
 		settings.missions = *v;
 	} else if (const OfferedDataSet *base = find_offered(offered, settings.data_set_id)) {
@@ -635,7 +643,11 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 	if (body->wrong_type()) return json_error(400, "invalid_field");
 	if (address_id && !own_machine)
 		return json_error(400, "invalid_field", "address_id needs own_machine (a static address is a dedicated machine's)");
-	if (const auto refused = check_settings(settings, offered)) {
+	std::optional<SettingsRefusal> refused = check_settings(settings, offered);
+	if (!refused && settings.list_on_novalogic && !novalogic_listing_)
+		refused = SettingsRefusal{ "list_on_novalogic",
+			"this service does not list servers on NovaLogic's NovaWorld" };
+	if (refused) {
 		crow::json::wvalue out;
 		out["error"] = "invalid_settings";
 		out["field"] = refused->field;

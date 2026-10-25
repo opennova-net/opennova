@@ -94,6 +94,10 @@ public:
 	// The play zone the static addresses are named in (the servers' address
 	// hostname); before register_routes().
 	void set_address_zone(std::string zone) { address_zone_ = std::move(zone); }
+	// Whether a start may also list its server on NovaLogic's NovaWorld (fleet_config.h
+	// ONNET_NOVALOGIC_LISTING): the list's `novalogic_listing`, and a start asking for it
+	// without it is refused; before register_routes().
+	void set_novalogic_listing(bool offered) { novalogic_listing_ = offered; }
 	void register_routes(WebApp &app);
 
 	// What configure decided (the fleet routes report them): a driver, its
@@ -118,6 +122,7 @@ private:
 	int cap_ = 24;
 	PlacementPolicy fleet_;
 	std::string address_zone_;
+	bool novalogic_listing_ = false;
 	RateLimiter start_stop_per_user_;
 };
 

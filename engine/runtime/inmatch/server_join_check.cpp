@@ -59,12 +59,25 @@ uint32_t validate_join_environment(const ClientGameEnvironment &env, const Title
 // DFX2's CD-key leg): in a NovaWorld session a joiner whose ClientAuth APPID differs from the
 // session's own AppId (ctx+0x1194) is refused, an absent APPID reading 0. A LAN session runs none
 // of it.
+// A match listed on a second service too (NapiNPServerCtx::novaworld_second_app_id, D-NET-1385,
+// none of retail's) takes the second listing's AppId as well, and tags the joiner with the listing
+// whose AppId it carried: each service hands its joiners its own registration's AppId in the .joi,
+// so the tag names the service that sent the joiner, whose ticket rules it then follows.
 // [orig: Server_ValidatePlayerJoinRequest @0x512100 - is_in_session @0x5122A3, transport_mode
 //  NovaWorld @0x5122AB, the joiner's +0x10C @0x5122B3, CNapiNPCtx_GetAppId @0x5122BE, the compare
 //  @0x5122C3, the refusal 9 @0x5122C7..0x5122DD]
-uint32_t validate_novaworld_app_id(const NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
+uint32_t validate_novaworld_app_id(const NapiNPServerCtx &ctx, NapiNPConnection &conn) {
 	if (ctx.is_in_session == 0 || ctx.transport_mode != NetworkType::NovaWorld) return 0;
-	return static_cast<uint32_t>(conn.join_environment.app_id) == ctx.novaworld_app_id ? 0 : 9;
+	const uint32_t app_id = static_cast<uint32_t>(conn.join_environment.app_id);
+	if (app_id == ctx.novaworld_app_id) {
+		conn.novaworld_listing = 0;
+		return 0;
+	}
+	if (ctx.novaworld_second_app_id != 0 && app_id == ctx.novaworld_second_app_id) {
+		conn.novaworld_listing = 1;
+		return 0;
+	}
+	return 9;
 }
 
 // The CD-key leg of DFX2's rewritten check, after the app id (code 9), in a LAN session only

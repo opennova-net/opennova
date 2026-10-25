@@ -1331,6 +1331,55 @@ off prod), an unproxied CNAME to the balancer the deployment's apply makes with 
 packages are the published releases of the Game data page; web fetches one from the store
 the first time the updater asks for it, into its task's storage.
 
+### Listing on NovaLogic's NovaWorld
+
+An owner can have a hosted server listed on NovaLogic's NovaWorld (`gs.novaworld.net`) as
+well as this service's, so a retail player who never switched NovaWorld sees it too. The
+switch is on by default (`novalogic_listing`, the maintainer's decision of 2026-10-25), but no
+server lists there until the project's NovaLogic account is in the vault. NovaLogic's service
+is a live shared service OpenNova does not run; each listed server sends it what a stock host
+does, its players' names and addresses among them (the site's privacy notice says so).
+
+The server lists there under one project-owned NovaLogic account. NovaLogic's service hands
+out a HOSTKEY only after a login, so without the account no server lists there. Only Joint
+Operations servers can: NovaLogic's DFX2 NovaWorld is down, and OP: Acid Gambit's lobby is ours
+alone, so the form shows the box for Joint Operations data sets and a start of any other
+that asks is refused. The listing is opennova-serve's second listing (`--also-master-host`,
+`apps/serve/README.md` "Two listings"). It starts once the server's first map is up and
+never stops the server. Anything NovaLogic refuses or stops stays off until that server's
+next start; only faults on the way (no answer, a request that never arrived) are tried
+again, at most 5 times. Whether one account may hold several listings at once is not yet
+witnessed; a refusal (MsgCode 1008, too many servers) would show as the extra servers' second
+listings ending, in each server's log.
+
+**The switch** is `novalogic_listing` in the var-file, `true` unless a deployment sets it.
+With it on, web, the fleet and the worker read `ONNET_NOVALOGIC_LISTING=1` (`infra apply`,
+then `app converge`), and the start form shows the box.
+
+**The account.** The deployment's app item (`app-<deployment>`) holds `novalogic_user` and
+`novalogic_pass`. Both are `REPLACE_ME` until the real account goes in. They are optional
+secrets (`deploy/env/runtime.env.tpl`), synced only while the fields exist, and only the
+fleet reads them. While either is unset or `REPLACE_ME`, the fleet lists no server on
+NovaLogic's NovaWorld, even with the box ticked. To put the real account in:
+
+1. Write the account's name and password into the two fields in the vault, then run
+   `secrets sync`.
+2. Run `app converge`.
+3. **Check it.** The fleet's boot logs `[hosted] supervisor: a server whose owner asks also
+   lists on NovaLogic's NovaWorld (gs.novaworld.net:7597)`. If it instead logs `WARNING
+   ONNET_NOVALOGIC_LISTING is on but ONNET_NOVALOGIC_USER or ONNET_NOVALOGIC_PASS is unset
+   or still the vault's placeholder`, the account did not reach it: the box shows, but no
+   server lists there. A server that lists there logs `opennova-serve: also listed on
+   NovaWorld (gs.novaworld.net)`, and its other lines from that listing start with
+   `(second listing)`.
+
+**Turning it off:** `novalogic_listing = false`, `infra apply`, then `app converge` (the
+services keep their task definitions' revision until a deploy). The box goes, and a start
+that asks for the listing is refused. A running server keeps its NovaLogic listing until it
+next starts, so to take every one down at once, also stop all from the admin fleet view
+and let the owners start again. Setting the account back to `REPLACE_ME` (or removing the
+fields, then `secrets sync --prune`) and `app converge` also stops new listings there.
+
 ### Fleet commands
 
 ```bash
@@ -1921,6 +1970,13 @@ Every command here takes the deployment it reads or changes: `--deployment stagi
 - **Changing a secret.** Edit the deployment's vault item, `secrets sync`, `app converge`. A new
   `database_password` takes `db bootstrap` (it sets the role's password) between the sync
   and the converge.
+- **NovaLogic's servers on the Lobbies page.** On by default (`novalogic_lobbies`, web's
+  `ONNET_NOVALOGIC_LOBBIES`): each web task fetches the Joint Operations list from NovaLogic's
+  live NovaWorld, with no login, at most once every 5 minutes while the page is open
+  somewhere, and keeps the last good list through a failure (web's log names each failed
+  fetch). `novalogic_lobbies = false` in the var-file, `infra apply` and `app converge`
+  turn it off: no section, no fetch (apps/novaworld_common/README.md, "NovaLogic's servers
+  on the Lobbies page").
 
 ### Cost
 

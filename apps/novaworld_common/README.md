@@ -433,6 +433,29 @@ expansion.
   pages, so only the tag tells them apart. The HTTP listener also reads the table once in
   `start()`, where it registers the `.gsb` routes.
 
+### NovaLogic's servers on the Lobbies page
+
+`GET /api/lobbies/novalogic` (public, read-only) answers the Joint Operations servers listed
+on NovaLogic's own NovaWorld, as a stock client's browser lists them:
+`{"enabled", "servers": [{"id", "serverName", "mission", "gameType", "players",
+"maxPlayers", "locked"}], "fetchedAt", "ageSeconds", "failing"}`, the text UTF-8 and no
+host's address or player names ([`novalogic_lobbies.h`](../novaworld_web/novalogic_lobbies.h)).
+Web reads them the way the stock client does, with no login and no cookie: one GET of JO's
+GSB feed on NovaLogic's web host, `http://207.178.209.204/jop_2.gsb?a=1` (the lobby
+SessionInit's web domain and the list load the record's live capture shows,
+`docs/net/novaworld-net-re.md` §7 Wave 4), parsed with `gsb_parse_response`. DFX2's feed
+there is unwitnessed, so only JO's is read. The list is a cache in each web process: a
+request answers what it holds and never waits on NovaLogic; a request that finds it older
+than 5 minutes (or none) starts one fetch in the background, so a process fetches at most
+once every 5 minutes however many visitors look, and not at all while nobody does. A fetch
+that fails (no answer within 5 s a step, a status other than 200, bytes that are no server
+list) keeps the last good list and its time (`failing` true), and the next waits its 5
+minutes too. `ONNET_NOVALOGIC_LOBBIES=1` turns it on (web's, read at boot); unset or `0`
+(the default, so no test, dev stack or CI run contacts NovaLogic), the route answers
+`enabled` false and nothing is fetched. A deployment sets it from `novalogic_lobbies`
+(`infra/aws`, on by default). The route harness's `novalogic_lobbies_route` case and the
+`novalogic_lobbies` ctest pin it over a feed minted by `gsb_build_response`.
+
 ## Connection lifecycle
 
 A connection is created on `ClientHello`/`ClientAuth` and dropped for one of four
@@ -1104,6 +1127,9 @@ for a docker bridge or NAT (leave unset in production): `ONNET_CLIENT_REFLECT_IP
 `ONNET_CLIENT_REFLECT_{GATE,NOVAWORLD}_PORT`. The listing policy:
 `ONNET_REQUIRE_HOST_KEY=1` lists no host whose HostKey names no account (default off:
 listed with no owner; "Listed servers and owners" above).
+`ONNET_NOVALOGIC_LOBBIES=1` has web list the servers on NovaLogic's NovaWorld on the
+Lobbies page (default off: nothing is fetched from NovaLogic; "NovaLogic's servers on the
+Lobbies page" above).
 `ONNET_CD_KEY_AUTO_MINT=0` stops minting a DFX2 account's first CD key at its first
 activation (default on; "CD keys (DFX2 activation)" above).
 `ONNET_EMBEDDED_JO_HOST=1` runs an in-match JO host in the service process on a UDP

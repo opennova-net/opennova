@@ -619,6 +619,9 @@ locals {
     ONNET_FLEET_IDLE_MINUTES  = tostring(var.fleet_idle_minutes)
     # The live servers the service takes: what the fleet holds at its most.
     ONNET_HOSTED_CAP = tostring(var.fleet_max_shared * var.shared_slots + var.fleet_max_own)
+    # Whether an owner may list a server on NovaLogic's NovaWorld too: the site's box (web)
+    # and the second listing a start renders (the fleet, with its optional account secrets).
+    ONNET_NOVALOGIC_LISTING = var.novalogic_listing ? "1" : "0"
   }
 
   # The game data's store: the trees the machines fetch (the fleet program

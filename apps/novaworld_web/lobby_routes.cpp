@@ -68,9 +68,17 @@ crow::json::wvalue card_of(const hostdb::HostRow &h, const ExpansionNames &names
 
 } // namespace
 
-void LobbyRoutes::register_routes(WebApp &app) {
+void LobbyRoutes::register_routes(WebApp &app, NovaLogicLobbies *novalogic) {
+	novalogic_ = novalogic;
 	CROW_ROUTE(app, "/api/lobbies")([this]() { return list(); });
 	CROW_ROUTE(app, "/api/lobbies/<uint>")([this](uint64_t rid) { return one(rid); });
+	// GET /api/lobbies/novalogic: novalogic_lobbies_json's body, from the list as it
+	// stands (its read never waits on NovaLogic; a due fetch runs on its own).
+	CROW_ROUTE(app, "/api/lobbies/novalogic")([this]() {
+		if (novalogic_ == nullptr) return json_reply(200, novalogic_lobbies_json(nullptr));
+		const NovaLogicList list = novalogic_->read();
+		return json_reply(200, novalogic_lobbies_json(&list));
+	});
 }
 
 // GET /api/lobbies — {"games": [{"slug", "displayName", "hosts": [cards]}]}:

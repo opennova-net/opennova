@@ -415,6 +415,7 @@ function parseDataSet(value: unknown): HostedDataSet | null {
     missions: parseMissions(v.missions),
     limits,
     expansions: expansions as HostedExpansionOption[],
+    novalogic_listing: v.novalogic_listing === true,
   };
 }
 
@@ -440,7 +441,14 @@ export async function fetchMyServers(signal?: AbortSignal): Promise<HostedResult
       : [];
     return {
       ok: true,
-      value: { enabled: data.enabled, full: data.full, entitlement, data_sets: dataSets, servers: servers as HostedServer[] },
+      value: {
+        enabled: data.enabled,
+        full: data.full,
+        entitlement,
+        data_sets: dataSets,
+        novalogic_listing: data.novalogic_listing === true,
+        servers: servers as HostedServer[],
+      },
     };
   } catch (err) {
     return { ok: false, error: describeHostedError(err) };

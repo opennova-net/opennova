@@ -45,3 +45,28 @@ export interface LobbyGroup {
 export interface LobbyResponse {
   games: LobbyGroup[];
 }
+
+// One Joint Operations server on NovaLogic's NovaWorld, as GET /api/lobbies/novalogic
+// lists it (no address: it is joined from the game's own browser there).
+export interface NovaLogicServer {
+  id: number;
+  serverName: string;
+  mission: string;
+  gameType: string;
+  players: number;
+  maxPlayers: number;
+  // A game password guards it.
+  locked: boolean;
+}
+
+// GET /api/lobbies/novalogic: NovaLogic's list as the service last fetched it.
+export interface NovaLogicLobbies {
+  // The service lists NovaLogic's servers at all.
+  enabled: boolean;
+  servers: NovaLogicServer[];
+  // When the list was fetched (ISO 8601 UTC) and how long ago; null before the first.
+  fetchedAt: string | null;
+  ageSeconds: number | null;
+  // The last fetch failed: the list is the one before it, or none.
+  failing: boolean;
+}

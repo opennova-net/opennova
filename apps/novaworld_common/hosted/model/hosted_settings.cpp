@@ -55,6 +55,9 @@ std::optional<SettingsRefusal> check_settings(
 		const HostedSettings &s, const std::vector<OfferedDataSet> &offered) {
 	const OfferedDataSet *data_set = find_offered(offered, s.data_set_id);
 	if (!data_set) return SettingsRefusal{ "data_set_id", "is no data set this service offers" };
+	if (s.list_on_novalogic && !novalogic_lists(*data_set))
+		return SettingsRefusal{ "list_on_novalogic",
+			"NovaLogic's NovaWorld lists Joint Operations servers only" };
 	{
 		std::string bytes;
 		if (has_control_byte(s.game_name) || has_c1_control(s.game_name))
@@ -190,13 +193,21 @@ LaunchSpec render_launch(const HostedSettings &settings, std::string_view title,
 	spec.files.push_back({ kAdminCfgFileName, render_admin_cfg(in.plan, in.admin_password), true });
 	spec.files.push_back({ kCredentialsFileName,
 			render_credentials(in.service_username, in.service_password), true });
-	spec.serve_args =
-			render_serve_args(settings, title, expansion_code, in.master_host, in.master_gate_port);
+	if (lists_on_novalogic(settings, in.novalogic))
+		spec.files.push_back({ kNovaLogicCredentialsFileName,
+				render_credentials(in.novalogic.username, in.novalogic.password), true });
+	spec.serve_args = render_serve_args(
+			settings, title, expansion_code, in.master_host, in.master_gate_port, in.novalogic);
 	return spec;
 }
 
-std::vector<std::string> render_serve_args(const HostedSettings &, std::string_view title,
-		std::string_view expansion_code, const std::string &master_host, uint16_t master_gate_port) {
+bool lists_on_novalogic(const HostedSettings &settings, const NovaLogicListing &novalogic) {
+	return settings.list_on_novalogic && novalogic.offered();
+}
+
+std::vector<std::string> render_serve_args(const HostedSettings &settings, std::string_view title,
+		std::string_view expansion_code, const std::string &master_host, uint16_t master_gate_port,
+		const NovaLogicListing &novalogic) {
 	// A supervised server's: no status page (its lines would ride the server's
 	// log stream every 200 ms), its tick health and its exit's line for the
 	// agent (hosted/protocol/slots.h).
@@ -207,6 +218,11 @@ std::vector<std::string> render_serve_args(const HostedSettings &, std::string_v
 	if (!expansion_code.empty()) {
 		args.push_back("/exp");
 		args.emplace_back(expansion_code);
+	}
+	if (lists_on_novalogic(settings, novalogic)) {
+		args.insert(args.end(), { "--also-master-host", novalogic.gate_host,
+				"--also-master-gate-port", std::to_string(novalogic.gate_port), "--also-credentials",
+				kNovaLogicCredentialsFileName, "--allow-public" });
 	}
 	return args;
 }

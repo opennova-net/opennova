@@ -58,6 +58,7 @@
 #include "jobs/worker_pool.h"
 #include "net_http.h"
 #include "net_sockets.h"
+#include "novalogic_lobbies.h"
 #include "novaworld/billing_fake_stripe.h"
 #include "novaworld/fake_mailer.h"
 #include "nw_udp_listener.h"
@@ -4011,6 +4012,85 @@ int test_server_info(Harness &h) {
 	return 0;
 }
 
+// GET /api/lobbies/novalogic, the Lobbies page's list of the servers on NovaLogic's
+// NovaWorld: with ONNET_NOVALOGIC_LOBBIES off (the harness listener, as every listener
+// given no list) enabled false, no servers and nothing fetched. A listener of its own
+// given a list over a scripted feed (minted by gsb_build_response, never the network)
+// answers its first read at once with no list yet, starting the one fetch, and once it
+// ran the feed's servers, UTF-8, with no host address; /api/lobbies and
+// /api/lobbies/<rid> beside it answer as ever.
+int test_novalogic_lobbies_route(Harness &h) {
+	auto reply = h.send("GET", "/api/lobbies/novalogic");
+	if (reply.code != 200) std::fprintf(stderr, "  off: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	TEST_EXPECT(header_value(reply, "Content-Type") == "application/json");
+	auto json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && !json["enabled"].b() && !json["failing"].b());
+	TEST_EXPECT(json["servers"].size() == 0);
+	TEST_EXPECT(json["fetchedAt"].t() == crow::json::type::Null);
+	TEST_EXPECT(json["ageSeconds"].t() == crow::json::type::Null);
+
+	opennova::GsbServerEntry row;
+	row.rid = 0x0A0027A0;
+	row.ip = "203.0.113.7";
+	row.server_name = "Caf\xE9 Ops";
+	row.mission_name = "AS - Kombang Valley";
+	row.game_type = "AAS";
+	row.players = 5;
+	row.max_players = 32;
+	row.password = "Y";
+	const std::vector<uint8_t> feed = opennova::gsb_build_response({ row });
+	std::atomic<int> fetches{ 0 };
+	nws::NovaLogicLobbies list([&]() {
+		++fetches;
+		net::HttpReply answer;
+		answer.transport_ok = true;
+		answer.connected = true;
+		answer.code = 200;
+		answer.body = feed;
+		return answer;
+	});
+	nws::ServerConfig config;
+	config.http_port = 0;
+	config.web_dist_dir = h.temp_root / "web_dist";
+	config.templates_dir = h.temp_root / "templates";
+	config.static_dir = h.temp_root / "static";
+	test_redis::TestRedis redis;
+	nws::HttpListener listener(h.pool, redis.pool());
+	listener.set_novalogic_lobbies(&list);
+	TEST_EXPECT(listener.start(config));
+
+	reply = h.send_to(listener.bound_port(), "GET", "/api/lobbies/novalogic");
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && json["enabled"].b() && json["servers"].size() == 0);
+	TEST_EXPECT(json["fetchedAt"].t() == crow::json::type::Null);
+	list.settle();
+	reply = h.send_to(listener.bound_port(), "GET", "/api/lobbies/novalogic");
+	const std::string body = body_text(reply);
+	json = crow::json::load(body);
+	if (!json || json["servers"].size() != 1) std::fprintf(stderr, "  on: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.transport_ok && reply.code == 200 && json);
+	TEST_EXPECT(json["enabled"].b() && !json["failing"].b());
+	TEST_EXPECT(json["fetchedAt"].t() == crow::json::type::String && json["ageSeconds"].i() == 0);
+	TEST_EXPECT(json["servers"].size() == 1);
+	TEST_EXPECT(json["servers"][0]["id"].i() == 0x0A0027A0);
+	TEST_EXPECT(str(json["servers"][0]["serverName"]) == "Caf\xC3\xA9 Ops");
+	TEST_EXPECT(str(json["servers"][0]["mission"]) == "AS - Kombang Valley");
+	TEST_EXPECT(str(json["servers"][0]["gameType"]) == "AAS");
+	TEST_EXPECT(json["servers"][0]["players"].i() == 5 && json["servers"][0]["maxPlayers"].i() == 32);
+	TEST_EXPECT(json["servers"][0]["locked"].b());
+	TEST_EXPECT(body.find("203.0.113.7") == std::string::npos);
+	TEST_EXPECT(fetches == 1);
+
+	TEST_EXPECT(h.send_to(listener.bound_port(), "GET", "/api/lobbies").code == 200);
+	reply = h.send_to(listener.bound_port(), "GET", "/api/lobbies/4242");
+	TEST_EXPECT(reply.code == 404 && str(crow::json::load(body_text(reply))["error"]) == "not_found");
+	listener.stop();
+	TEST_EXPECT(fetches == 1);
+	return 0;
+}
+
 // ---- Request-named files and response header values ----
 
 // What the planted secret files hold; no reply may carry it.
@@ -5532,13 +5612,16 @@ int test_hosted_server_routes(Harness &h) {
 	const Owner eve = owner("hosted_eve", "10.51.0.5");
 	const Owner fay = owner("hosted_fay", "10.51.0.6");
 	const Owner gus = owner("hosted_gus", "10.51.0.7");
-	for (const Owner *o : { &ana, &ben, &cy, &dee, &eve, &fay, &gus }) TEST_EXPECT(o->id > 0 && !o->session.empty());
+	const Owner hal = owner("hosted_hal", "10.51.0.8");
+	for (const Owner *o : { &ana, &ben, &cy, &dee, &eve, &fay, &gus, &hal })
+		TEST_EXPECT(o->id > 0 && !o->session.empty());
 	// The start / stop bucket (HostedRoutes::kStartStopPerUser) is 6 per account,
 	// then one every 20 s, and a request refused before it (logged out, no CSRF
 	// header) draws nothing. Ana draws exactly six below (three starts, three
 	// stops), Dee six (the refused settings, then not_entitled), Eve four and Gus
 	// four (the data set refusals, then an expansion start with no entitlement),
-	// the others fewer: add a draw to one of them and it must move to a new account.
+	// Hal two (the NovaLogic listing's refusals), the others fewer: add a draw to
+	// one of them and it must move to a new account.
 
 	auto start = [&h](const Owner &o, const std::string &body, bool csrf = true) {
 		std::vector<std::string> headers = { kJson, with_session(o.session) };
@@ -5615,6 +5698,8 @@ int test_hosted_server_routes(Harness &h) {
 		TEST_EXPECT(dfx2["limits"]["max_players"]["max"].i() == 100);
 	}
 	TEST_EXPECT(!json.has("default_missions"));
+	// Listing on NovaLogic's NovaWorld is off unless the service offers it (ONNET_NOVALOGIC_LISTING).
+	TEST_EXPECT(json.has("novalogic_listing") && !json["novalogic_listing"].b());
 	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
 
 	// Settings the backend refuses (hosted_supervisor has every rule): a field and why,
@@ -5640,6 +5725,13 @@ int test_hosted_server_routes(Harness &h) {
 		TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == r.error);
 		if (*r.field) TEST_EXPECT(json && str(json["field"]) == r.field && json.has("message"));
 	}
+	// A NovaLogic listing this service does not offer, and a mistyped one (Hal's two draws).
+	reply = start(hal, "{\"game_name\":\"x\",\"missions\":[\"a.bms\"],\"list_on_novalogic\":true}");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_settings" && json &&
+			str(json["field"]) == "list_on_novalogic" && json.has("message"));
+	reply = start(hal, "{\"game_name\":\"x\",\"list_on_novalogic\":\"yes\"}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
 	// A valid start with no entitlement.
 	reply = start(dee, settings);
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_entitled");
@@ -5716,6 +5808,8 @@ int test_hosted_server_routes(Harness &h) {
 	const int64_t ana_first = json["server"]["id"].i();
 	TEST_EXPECT(json["server"]["live"].b() && !json["server"]["own_machine"].b());
 	TEST_EXPECT(str(json["server"]["settings"]["game_name"]) == "Ana's Server");
+	TEST_EXPECT(json["server"]["settings"].has("list_on_novalogic") &&
+			!json["server"]["settings"]["list_on_novalogic"].b());
 	// No data set named: the first offered, with its names; no expansion (null is
 	// the base game alone, as the start form sends it); not started yet, so no data
 	// and nothing newer.
@@ -8905,6 +8999,7 @@ int run(Harness &h, const char *part) {
 		{ "titles", "dfx2_activation", test_dfx2_activation },
 		{ "titles", "unknown_path_404", test_unknown_path_404 },
 		{ "titles", "server_info", test_server_info },
+		{ "titles", "novalogic_lobbies_route", test_novalogic_lobbies_route },
 		{ "titles", "healthz", test_healthz },
 		{ "lobby", "admin_host_push", test_admin_host_push },
 		{ "owner_push", "owner_host_push", test_owner_host_push },

@@ -174,14 +174,23 @@ int main(int argc, char **argv) {
 			io::logf(io::LogLevel::kWarn, "opennova-serve: --exit-file: %s", why.c_str());
 		return code;
 	};
-	if (!options.credentials_path.empty()) {
-		if (!serve::load_credentials(options.credentials_path, options.credentials, error)) {
-			io::logf(io::LogLevel::kError, "opennova-serve: --credentials: %s", error.c_str());
-			return exit_with(2, "--credentials: " + error);
+	// The first listing's account (--credentials) and the second's (--also-credentials).
+	const auto load_account = [&error](const char *flag, const std::string &path,
+			serve::Credentials &out) {
+		if (path.empty()) return true;
+		if (!serve::load_credentials(path, out, error)) {
+			error = std::string(flag) + ": " + error;
+			return false;
 		}
-		const serve::Credentials &c = options.credentials;
-		for (const std::string *secret : { &c.user, &c.pass })
+		for (const std::string *secret : { &out.user, &out.pass })
 			serve::add_log_secret(*secret);
+		return true;
+	};
+	if (!load_account("--credentials", options.credentials_path, options.credentials) ||
+			!load_account("--also-credentials", options.also_credentials_path,
+					options.also_credentials)) {
+		io::logf(io::LogLevel::kError, "opennova-serve: %s", error.c_str());
+		return exit_with(2, error);
 	}
 	// Installed before the boot, so a stop during a long load or the
 	// NovaWorld hosting stops cleanly.

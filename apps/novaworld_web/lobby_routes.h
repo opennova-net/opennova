@@ -1,11 +1,13 @@
 #pragma once
 
-// The lobby browser's public routes: GET /api/lobbies (every listing, by game)
-// and GET /api/lobbies/<rid> (one listing: its game info, the players its host's
+// The lobby browser's public routes: GET /api/lobbies (every listing, by game),
+// GET /api/lobbies/<rid> (one listing: its game info, the players its host's
 // status reports name, and a hosted server's scoreboard read over its admin
-// link). Neither names a joiner's address or an owner. Service policy, not a
-// port.
+// link) and GET /api/lobbies/novalogic (the servers on NovaLogic's NovaWorld,
+// from the list web keeps of NovaLogic's feed: novalogic_lobbies.h). None names
+// a joiner's address or an owner. Service policy, not a port.
 
+#include "novalogic_lobbies.h"
 #include "web_access.h"
 
 #include <net/novaworld/db/database.h>
@@ -34,7 +36,10 @@ public:
 	LobbyRoutes(const LobbyRoutes &) = delete;
 	LobbyRoutes &operator=(const LobbyRoutes &) = delete;
 
-	void register_routes(WebApp &app);
+	// `novalogic` is the list of NovaLogic's servers (it must outlive the
+	// routes), or null with ONNET_NOVALOGIC_LOBBIES off: the route then answers
+	// enabled false and fetches nothing.
+	void register_routes(WebApp &app, NovaLogicLobbies *novalogic = nullptr);
 
 private:
 	struct ScoreRow {
@@ -57,6 +62,7 @@ private:
 	std::optional<std::vector<ScoreRow>> scoreboard_of(int64_t server_id);
 
 	db::ConnectionPool &pool_;
+	NovaLogicLobbies *novalogic_ = nullptr;
 	std::mutex mu_;
 	std::map<int64_t, Scoreboard> scoreboards_;
 };

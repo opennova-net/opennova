@@ -38,6 +38,10 @@ export interface HostedSettings {
   respawn: number;
   start_delay: number;
   team_ff: boolean;
+  // The server is also listed on NovaLogic's NovaWorld, not only on
+  // OpenNova's; a start may ask for it only while the service offers it
+  // (HostedServersResponse.novalogic_listing).
+  list_on_novalogic: boolean;
   // The rotation in play order: the first is the map the server starts on.
   missions: string[];
 }
@@ -100,6 +104,9 @@ export interface HostedDataSet {
   // The host screen's ranges, per setting.
   limits: Record<HostedIntField, SettingRange>;
   expansions: HostedExpansionOption[];
+  // Whether a server on it may also list on NovaLogic's NovaWorld (Joint
+  // Operations alone). A reply that leaves it out reads as false.
+  novalogic_listing?: boolean;
 }
 
 // A data set a server runs, as its row names it.
@@ -315,6 +322,10 @@ export interface HostedServersResponse {
   // The data sets a start may pick, in the service's order (the first is a
   // start's default); only the ones this deployment configured.
   data_sets: HostedDataSet[];
+  // The service offers listing a server on NovaLogic's NovaWorld too
+  // (HostedSettings.list_on_novalogic): the operator's switch, on by default
+  // in a deployment. A reply that leaves it out reads as false.
+  novalogic_listing: boolean;
   // The live servers by id, oldest first, then the newest 10 ended ones,
   // newest first; without their events.
   servers: HostedServer[];
