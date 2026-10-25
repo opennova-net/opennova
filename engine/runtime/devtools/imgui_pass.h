@@ -328,6 +328,11 @@ private:
 	std::vector<std::string> layout_focus_;
 	std::string layout_focus_first_;
 	bool layout_focus_armed_ = false;
+	// Each window's `open` as the last frame left it (registration order): a window opened again
+	// since (the Windows menu's tick, a client's ask) joins layout_focus_, so its tab is selected in a
+	// node it shares (one that does not focus on appearing is otherwise left behind the tab that
+	// took its place) without taking the keyboard.
+	std::vector<char> open_before_;
 	bool attached_ = false;
 	bool platform_windows_enabled_ = true;
 	bool mouse_focused_ = true;
