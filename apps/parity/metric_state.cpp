@@ -1088,8 +1088,8 @@ void compare_entities(
 	std::set<std::string> phase;
 	if (!aa) {
 		const std::set<std::string> sa = singletons(rr), sb = singletons(other);
-		std::set_intersection(sa.begin(), sa.end(), sb.begin(), sb.end(),
-				std::inserter(phase, phase.end()));
+		std::set_intersection(
+				sa.begin(), sa.end(), sb.begin(), sb.end(), std::inserter(phase, phase.end()));
 	}
 	std::set<std::string> touched; // the singletons either window carries
 	auto types = [&](const std::vector<const E *> &entities) {
@@ -1106,8 +1106,8 @@ void compare_entities(
 	const std::set<std::string> types_a = types(a), types_b = types(b);
 	set_metric(out, 'S', "entity_types", "FRAME_ENTITY_TYPES_MISMATCH", types_a, types_b);
 	if (!touched.empty())
-		out.back().detail = "sent once a handle in each capture, compared on presence: " +
-				render_set(touched);
+		out.back().detail =
+				"sent once a handle in each capture, compared on presence: " + render_set(touched);
 
 	// diff_0a's per-class field population: a field RR ever fills that the run never does.
 	auto populated = [](const std::vector<const E *> &entities) {

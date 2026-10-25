@@ -3771,8 +3771,8 @@ void test_initial_0x22_grouping() {
 		return trace;
 	};
 	// One more 0x22: without the rule the grouping is one record off RR's.
-	expect_row(judge_case(run(1, 0, 0), run(2, 0, 0), run(3, 1, 0), "OO"), 'C',
-			"initial_grouping", "", "pass");
+	expect_row(judge_case(run(1, 0, 0), run(2, 0, 0), run(3, 1, 0), "OO"), 'C', "initial_grouping",
+			"", "pass");
 	// Another record still moves the grouping.
 	expect_row(judge_case(run(1, 0, 0), run(2, 0, 0), run(3, 0, 0x033), "OO"), 'C',
 			"initial_grouping", "", "fail", "INITIAL_PACKET_GROUPING");
@@ -3892,8 +3892,8 @@ void test_header_only_acks() {
 			kept.push_back(packet(at + 150 * kMs, 'S', s_seq + k, c_seq + k, 900001 + int(k) * 3,
 					rides[k] ? std::vector<uint16_t>{ ride } : std::vector<uint16_t>{}));
 			if (again)
-				kept.push_back(packet(at + 300 * kMs, 'S', s_seq + k, c_seq + k,
-						900002 + int(k) * 3, { 0x016 }));
+				kept.push_back(packet(
+						at + 300 * kMs, 'S', s_seq + k, c_seq + k, 900002 + int(k) * 3, { 0x016 }));
 		}
 		std::stable_sort(kept.begin(), kept.end(),
 				[](const wire::ParityPacket &x, const wire::ParityPacket &y) {
@@ -3906,8 +3906,8 @@ void test_header_only_acks() {
 	const std::vector<bool> two = { false, false, true, true };
 	{
 		// Without the rule the subject's 2 against RR's 4 is beyond the floor of 1.
-		const Case c = judge_case(idle(1, 10 * kSec, none), idle(2, 10 * kSec, none),
-				idle(3, 10 * kSec, two), "OO");
+		const Case c = judge_case(
+				idle(1, 10 * kSec, none), idle(2, 10 * kSec, none), idle(3, 10 * kSec, two), "OO");
 		expect_row(c, 'S', "packet_cadence", "header_only", "pass");
 		const VerdictRow *row = find_row(c.verdict.rows, 'S', "packet_cadence", "header_only");
 		check(row && row->value.subject == "4" && row->value.reference == "4",
@@ -3925,8 +3925,8 @@ void test_header_only_acks() {
 		check(row && row->value.subject == "4", "one count per acked C2S packet");
 	}
 	// Before the window (steady from 5 s) only the header-only packets count, as before.
-	expect_row(judge_case(idle(1, 2 * kSec, none), idle(2, 2 * kSec, none),
-					   idle(3, 2 * kSec, two), "OO"),
+	expect_row(judge_case(idle(1, 2 * kSec, none), idle(2, 2 * kSec, none), idle(3, 2 * kSec, two),
+					   "OO"),
 			'S', "packet_cadence", "header_only", "fail", "SESSION_PACKET_CADENCE");
 	{
 		// The class's presence keeps the header-only packets alone: RR's one ack riding a
@@ -4019,9 +4019,9 @@ void test_entity_mission_split() {
 			'S', "entity_V_position_range_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
 	// A move inside one mission is untouched: the subject's vehicle jumps at 8 s, before the
 	// rotation's 0x0F, and still fails.
-	expect_row(judge_case(run(1, 950, 950, 8 * kSec, rotation),
-					   run(2, 950, 950, 8 * kSec, rotation),
-					   run(3, 950, 1450, 8 * kSec, rotation), "RO"),
+	expect_row(
+			judge_case(run(1, 950, 950, 8 * kSec, rotation), run(2, 950, 950, 8 * kSec, rotation),
+					run(3, 950, 1450, 8 * kSec, rotation), "RO"),
 			'S', "entity_V_position_range_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
 }
 
@@ -4205,8 +4205,8 @@ void test_entity_capture_singleton() {
 		// RR and RR-aa's one record lands in the window, the subject's before it: the same
 		// one send, so the coverage matches (window sets alone: {I:1799,I:2075,...} against
 		// {I:1799,...}, the final's 03tr-dm OO red).
-		const Case c = judge_case(run(1, { 9 * kSec }), run(2, { 8 * kSec }), run(3, { 4 * kSec }),
-				"OO");
+		const Case c =
+				judge_case(run(1, { 9 * kSec }), run(2, { 8 * kSec }), run(3, { 4 * kSec }), "OO");
 		expect_row(c, 'S', "entity_types", "", "pass");
 		const VerdictRow *row = find_row(c.verdict.rows, 'S', "entity_types");
 		check(row && row->value.distance == 0.0 &&

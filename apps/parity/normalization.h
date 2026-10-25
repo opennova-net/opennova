@@ -904,8 +904,7 @@ inline constexpr Normalization kNormalizations[] = {
 			"03tr-dm entities whose draws follow the players' paths). Every sequence of 16..23 "
 			"records there was a draw, a median gap of 0.55 s or more over 29 s or more, none an "
 			"every-frame stay shorter than the 256-tick look cycle" },
-	{ "entity.capture_singleton", MaskKind::Field, 'S', 0x00A, "entity type sent once a capture",
-			0,
+	{ "entity.capture_singleton", MaskKind::Field, 'S', 0x00A, "entity type sent once a capture", 0,
 			"a row past 1124 tiles of the recipient with no prior priority joins the priority "
 			"list only once its age byte reaches 50 (Server_BuildEntityPriorityList @0x50E590: "
 			"the age read @0x50E8E3, the tests @0x50E90D / @0x50E91B / @0x50E921, the skip "
