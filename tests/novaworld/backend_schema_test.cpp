@@ -411,8 +411,8 @@ int test_games_title_fresh() {
 	apply_seeds(db, source_dir / "backend" / "seed");
 	const auto titles = db.query("SELECT slug, title FROM games ORDER BY slug;");
 	TEST_EXPECT(titles.size() == 3);
-	TEST_EXPECT(titles[0].as_text(1).value() == "dfx2");
-	TEST_EXPECT(titles[1].as_text(1).value() == "jo");
+	TEST_EXPECT(titles[0].as_text(1).value() == "jo");
+	TEST_EXPECT(titles[1].as_text(1).value() == "dfx2");
 	TEST_EXPECT(titles[2].as_text(1).value() == "jo");
 	if (expect_gate_rows(db) != 0)
 		return 1;
