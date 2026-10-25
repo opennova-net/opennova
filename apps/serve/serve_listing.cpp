@@ -177,9 +177,9 @@ std::vector<HostPlayerSlot> ServeListing::wanted_roster(const std::map<int, Host
 //  CNapiGameSession_DispatchServerStatement @0x4D18A0 (no state test, the name table
 //  @0x82C0C8); Game_HostMultiplayerSession's SetConnectionMode(1) @0x4A661F ahead of its hosting
 //  wait @0x4A6725..0x4A6735]
-void ServeListing::on_command(const ServerCommand &command) { run_command(command, lister_); }
+void ServeListing::on_command(const ServerCommand &command) { (void)run_command(command, lister_); }
 
-void ServeListing::run_command(const ServerCommand &command, Lister *issuer) {
+bool ServeListing::run_command(const ServerCommand &command, Lister *issuer) {
 	const bool bound = role_ != nullptr && kernel_ != nullptr;
 	const inmatch::ServerCommandOutcome outcome =
 			inmatch::run_host_server_command(bound ? &role_->state.host_owner.ctx : nullptr,
@@ -189,12 +189,14 @@ void ServeListing::run_command(const ServerCommand &command, Lister *issuer) {
 	if (!outcome.handled) {
 		io::logf(LogLevel::kInfo, "[host] ServerCommand %s was not executed%s", command.command.c_str(),
 		         bound ? "" : " (no session yet)");
-		return;
+		return false;
 	}
 	io::logf(LogLevel::kInfo, "[host] ServerCommand %s", command.command.c_str());
 	if (outcome.config_changed && seams_.save_config)
 		seams_.save_config();
-	if (outcome.stop_hosting && issuer != nullptr) issuer->host_role().stop();
+	if (!outcome.stop_hosting || issuer == nullptr) return false;
+	issuer->host_role().stop();
+	return true;
 }
 
 // [orig: CNapiGameSession_HandlePlayEnterResponse @0x4D1940]

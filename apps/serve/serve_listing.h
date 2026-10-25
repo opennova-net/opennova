@@ -79,8 +79,8 @@ public:
 	void on_command(const ServerCommand &command) override;
 	void on_player_enter_result(const ClientSession::PlayerEnterResult &result) override;
 	// A ServerCommand from `issuer`'s service, run on the match; a stop it asks for (PuntPlayer at
-	// the server's own slot) leaves `issuer`'s hosting.
-	void run_command(const ServerCommand &command, Lister *issuer);
+	// the server's own slot) leaves `issuer`'s hosting, and returns true.
+	bool run_command(const ServerCommand &command, Lister *issuer);
 
 private:
 	// `lister`'s host role reads the match's columns at each server-info update.
@@ -101,8 +101,15 @@ private:
 class SecondListing final : public ListingSource {
 public:
 	explicit SecondListing(ServeListing &first) : first_(first) {}
-	// The lister this source lists for, a stop's target (null: none). It outlives the setting.
-	void set_lister(Lister *lister) { lister_ = lister; }
+	// The lister this source lists for, a stop's target (null: none). It outlives the setting,
+	// and a new one starts with no command stop.
+	void set_lister(Lister *lister) {
+		lister_ = lister;
+		command_stopped_ = false;
+	}
+	// A ServerCommand of its service's stopped this lister's hosting (its service's decision, as
+	// a ServerStopHosting is, where a refused re-host is not).
+	bool command_stopped() const { return command_stopped_; }
 
 	bool start(int &exit_code) override {
 		(void)exit_code;
@@ -113,11 +120,14 @@ public:
 	std::vector<HostPlayerSlot> wanted_roster(const std::map<int, HostPlayerSlot> &current) const override {
 		return first_.wanted_roster(current);
 	}
-	void on_command(const ServerCommand &command) override { first_.run_command(command, lister_); }
+	void on_command(const ServerCommand &command) override {
+		if (first_.run_command(command, lister_)) command_stopped_ = true;
+	}
 
 private:
 	ServeListing &first_;
 	Lister *lister_ = nullptr;
+	bool command_stopped_ = false;
 };
 
 } // namespace opennova::serve

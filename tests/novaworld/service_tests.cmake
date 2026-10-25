@@ -729,7 +729,7 @@ if(BUILD_NOVAWORLD_HTTP)
     # A row per case (99-112 s as one row), each on databases of its own.
     opennova_add_pg_test(hosted_supervisor COMMAND hosted_supervisor_test PARTS
         settings_rules renders data_sets no_data pins_and_updates service_accounts requests fleet_room
-        lifecycle_and_stop two_servers_one_machine own_machine own_restart_at_cap static_address
+        novalogic_listing lifecycle_and_stop two_servers_one_machine own_machine own_restart_at_cap static_address
         static_address_brake comp_address_lapse stop_paths exits_and_crash_restarts last_good_pass
         launch_failure launch_refused_mid_pass restart_window timeouts_and_health listing_lost
         machine_lost_replaces

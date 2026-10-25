@@ -189,9 +189,10 @@ int main() {
 	CHECK(started);
 	if (!started) return 1;
 	serve::Server &server = *holder;
-	// The first listing hosted inside the start; the second started with the session.
+	// The first listing hosted inside the start; the second's first try started with the session
+	// (its gate lookup on a worker: its lister comes in a frame once that lands).
 	CHECK(server.lister() != nullptr && server.lister()->hosting());
-	CHECK(server.second_lister() != nullptr);
+	CHECK(!server.second_listing_stopped());
 
 	// --- The second hosts on the game socket and publishes its first full lists at once.
 	std::optional<LobbyState> a;
@@ -205,7 +206,7 @@ int main() {
 	}
 	CHECK(server.second_lister() != nullptr && server.second_lister()->hosting());
 	CHECK(a.has_value() && b.has_value());
-	if (!a || !b) return 1;
+	if (!a || !b || server.second_lister() == nullptr) return 1;
 	CHECK(a->host_ip == "127.0.0.1" && b->host_ip == "127.0.0.1");
 	CHECK(a->host_port == server.bound_port());
 	CHECK(b->host_port == server.bound_port());
@@ -362,6 +363,54 @@ int main() {
 	}
 	holder.reset();
 
+	// --- A re-host the second service refuses (its ServerHostResult refusing the hosting that
+	// stood, as after its session's reconnect) is no stop of that service's: the second listing
+	// goes, the next try is scheduled, and the first listing and the match go on.
+	{
+		const fs::path work_rehost = serve_test::fresh_dir("second_listing_rehost_cwd");
+		serve_test::ScopedCwd rehost_cwd(work_rehost);
+		serve::ServeOptions rehost_options;
+		std::string rehost_error;
+		CHECK(serve::parse_serve_options(
+				{"--resource-dir", dir.string(), "/HOST", (dir / "test.host").string(),
+						"--loose-root", "--lan-port", "0", "--master-host", "127.0.0.1",
+						"--master-gate-port", std::to_string(first.gate_port),
+						"--also-master-host", "127.0.0.1", "--also-master-gate-port",
+						std::to_string(second.gate_port)},
+				rehost_options, rehost_error) == 0);
+		auto rehost = std::make_unique<serve::Server>(rehost_options);
+		const bool rehost_started = rehost->start(rehost_error);
+		if (!rehost_started) std::printf("start: %s\n", rehost_error.c_str());
+		CHECK(rehost_started);
+		if (rehost_started) {
+			bool hosting = false;
+			for (int f = 0; f < 1500 && !hosting; ++f) {
+				CHECK(rehost->frame(kFrame));
+				std::this_thread::sleep_for(2ms);
+				hosting = rehost->second_lister() != nullptr && rehost->second_lister()->hosting();
+			}
+			CHECK(hosting);
+			if (hosting) {
+				ClientSession::Notice refused;
+				refused.kind = ClientSession::Notice::Kind::HostResult;
+				refused.fields.success = 0;
+				CHECK(rehost->second_lister()->host_role().handle_notice(refused));
+				CHECK(!rehost->second_lister()->hosting());
+				CHECK(rehost->frame(kFrame));
+				CHECK(rehost->second_lister() == nullptr);
+				CHECK(!rehost->second_listing_stopped());
+				CHECK(rehost->second_listing_retry_at_ms() != 0);
+				CHECK(rehost->running());
+				CHECK(rehost->lister() != nullptr && rehost->lister()->hosting());
+			}
+			rehost->stop();
+		}
+		rehost.reset();
+		rehost_cwd.restore();
+		std::error_code ec;
+		fs::remove_all(work_rehost, ec);
+	}
+
 	// --- A second listing whose gate names no session server: it does not host, the server
 	// serves on its first listing, and the next try waits out the backoff.
 	{
@@ -385,7 +434,8 @@ int main() {
 		if (!bare_started) std::printf("start: %s\n", bare_error.c_str());
 		CHECK(bare_started);
 		if (bare_started) {
-			for (int f = 0; f < 500 && bare->second_lister() != nullptr; ++f) {
+			// Its gate lookup, its lister, the gate's reply, then the failed try's schedule.
+			for (int f = 0; f < 500 && bare->second_listing_retry_at_ms() == 0; ++f) {
 				CHECK(bare->frame(kFrame));
 				std::this_thread::sleep_for(2ms);
 			}

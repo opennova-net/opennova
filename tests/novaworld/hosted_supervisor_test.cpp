@@ -838,6 +838,51 @@ int test_fleet_room() {
 	return 0;
 }
 
+// --- the NovaLogic listing -----------------------------------------------------
+
+// A server whose owner asked to be listed on NovaLogic's NovaWorld too, on a service that offers
+// it (the gate and the project's account): its row keeps the ask, and its start hands the agent
+// the second listing's arguments and the account's file. A server that did not ask gets neither.
+int test_novalogic_listing() {
+	Rig rig("hosted_novalogic");
+	rig.config.novalogic.gate_host = "gs.novaworld.net";
+	rig.config.novalogic.gate_port = 7597;
+	rig.config.novalogic.username = "opennova-project";
+	rig.config.novalogic.password = "nlpass";
+	rig.make_supervisor();
+	hosted::HostedSettings asked = rig.settings();
+	asked.list_on_novalogic = true;
+	const int64_t id = rig.request("novalogic_owner", asked);
+	const int64_t plain = rig.request("plain_owner", rig.settings());
+	TEST_EXPECT(id > 0 && plain > 0);
+	// The ask round-trips through its row.
+	TEST_EXPECT(rig.server(id) && rig.server(id)->settings.list_on_novalogic);
+	TEST_EXPECT(rig.server(plain) && !rig.server(plain)->settings.list_on_novalogic);
+	for (int i = 0; i < 8 && (!rig.running_container(id) || !rig.running_container(plain)); ++i) {
+		rig.tick();
+		rig.sync_all();
+	}
+	const FakeAgent::Container *asked_c = rig.running_container(id);
+	const FakeAgent::Container *plain_c = rig.running_container(plain);
+	TEST_EXPECT(asked_c != nullptr && plain_c != nullptr);
+	if (!asked_c || !plain_c) return 1;
+	const auto tail = [](const std::vector<std::string> &args, size_t n) {
+		return args.size() < n ? std::vector<std::string>() : std::vector<std::string>(args.end() - n, args.end());
+	};
+	const std::vector<std::string> second = { "--also-master-host", "gs.novaworld.net",
+		"--also-master-gate-port", "7597", "--also-credentials", "novalogic.txt", "--allow-public" };
+	TEST_EXPECT(tail(asked_c->desired.args, second.size()) == second);
+	TEST_EXPECT(std::find(plain_c->desired.args.begin(), plain_c->desired.args.end(),
+			"--also-master-host") == plain_c->desired.args.end());
+	const std::string account = file_of(rig, id, "novalogic.txt");
+	TEST_EXPECT(credential(account, "NOVAWORLD_USER") == "opennova-project");
+	TEST_EXPECT(credential(account, "NOVAWORLD_PASS") == "nlpass");
+	TEST_EXPECT(file_of(rig, plain, "novalogic.txt").empty());
+	// The server's own account stays its service account's.
+	TEST_EXPECT(credential(file_of(rig, id, "credentials.txt"), "NOVAWORLD_USER") == "srv-" + std::to_string(id));
+	return 0;
+}
+
 // --- the lifecycle -------------------------------------------------------------
 
 int test_lifecycle_and_stop() {
@@ -2782,6 +2827,7 @@ int main(int argc, char **argv) {
 		{ "service_accounts", { test_service_accounts } },
 		{ "requests", { test_requests } },
 		{ "fleet_room", { test_fleet_room } },
+		{ "novalogic_listing", { test_novalogic_listing } },
 		{ "lifecycle_and_stop", { test_lifecycle_and_stop } },
 		{ "two_servers_one_machine", { test_two_servers_one_machine } },
 		{ "own_machine", { test_own_machine } },

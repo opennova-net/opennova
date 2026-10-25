@@ -1,5 +1,6 @@
 #include "server.h"
 
+#include "destination_policy.h" // resolve_destination (the second listing's gate lookup)
 #include "lister.h"
 #include "profile_name.h"
 #include "serve_listing.h"
@@ -157,6 +158,26 @@ HardwareIdentity sample_device_identity(const gamecfg::GameCfg &cfg, const Serve
 	hw.desktop_height = options.desktop_height;
 	read_display_adapter(static_cast<uint32_t>(cfg.hw3d_deviceno), hw);
 	return hw;
+}
+
+// Whether `from` is `lobby`'s server: the 0x81 sender it took, or one of its probe targets.
+bool from_lobby_server(const NwuLobbySession &lobby, const PeerAddr &from) {
+	if (from == lobby.nw_peer()) return true;
+	for (const NwuLobbySession::Target &target : lobby.targets())
+		if (target.ip == from.ip && static_cast<uint16_t>(target.port) == from.port) return true;
+	return false;
+}
+
+// A session lane's claim (DatagramDemux::Claim): its lister's session's (NwuLobbySession::
+// claims), and while the socket carries a second listing (D-NET-1385), less a datagram from the
+// other listing's server that is not its own's too. Both connections have CI 1, so a 0x81 either
+// would take by its CI from any sender (retail's rule for its one session) could be the other's
+// server answering the other's probe. A lane whose lister is gone takes nothing.
+bool lane_claims(const Lister *own, const Lister *other, const PeerAddr &from, const uint8_t *data,
+		std::size_t len) {
+	if (own == nullptr || !own->lobby().claims(from, data, len)) return false;
+	return other == nullptr || !from_lobby_server(other->lobby(), from) ||
+			from_lobby_server(own->lobby(), from);
 }
 
 } // namespace
@@ -349,8 +370,8 @@ bool Server::start_session(std::string &error) {
 	}
 	if (listing_ != nullptr) bind_listing();
 	running_ = true;
-	// The second listing starts beside the bound match, its hosting pumped by the frames.
-	if (second_listing_wanted()) start_second_listing();
+	// The second listing's first try starts beside the bound match, pumped by the frames.
+	if (second_listing_wanted()) begin_second_try();
 	return true;
 }
 
@@ -930,9 +951,8 @@ bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *canc
 	lister_options.server_logs = &server_logs_;
 	last_lister_exit_ = -1;
 	lister_ = std::make_unique<Lister>(lister_options, *listing_, &demux_->session());
-	const NwuLobbySession &lobby = lister_->lobby();
-	demux_->set_session_claim([&lobby](const PeerAddr &from, const uint8_t *data, std::size_t len) {
-		return lobby.claims(from, data, len);
+	demux_->set_session_claim([this](const PeerAddr &from, const uint8_t *data, std::size_t len) {
+		return lane_claims(lister_.get(), second_lister_.get(), from, data, len);
 	});
 	// Each player's teardown sends its ClientHostPlayerRemoved on the hosting session itself
 	// (inmatch::NapiNPServerCtx::nwu_player_removed, D-NET-NEW-L9-29), and on the second
@@ -994,25 +1014,44 @@ void Server::set_lobby_text(Lister &lister) {
 
 // The socket's second session lane. OpenNova's own composition, none of retail's: a stock host
 // lists on the one service its gate names (D-NET-1385, ADR 0068). Everything below is the
-// second listing's policy: it
-// waits for the starting map (the first listing's hosting holds the boot, retail's order; the
-// second never does), publishes its first full lists the moment it hosts, as a mission start
-// would, and its service's stop delists it there alone for the rest of the run (no retry, out of
-// respect for that service's decision), while a listing that did not host is tried again after
-// kSecondListingRetryFirstMs, doubling up to kSecondListingRetryMaxMs.
+// second listing's policy:
+// - it waits for the starting map (the first listing's hosting holds the boot, retail's order;
+//   the second never does), and nothing of it blocks the frame thread: its gate's DNS lookup
+//   runs on a worker, and a torn-down try's web exchange is left to land on its own;
+// - it publishes its first full lists the moment it hosts, as a mission start would;
+// - its service's stop (ServerStopHosting, its punt, a ServerCommand's stop) delists it there
+//   alone for the rest of the run: no retry, out of respect for that service's decision;
+// - anything else that leaves it not hosting (a gate that does not answer or resolve, a failed
+//   login, a refused host request or re-host, no hosting by kSecondListingHostDeadlineMs) is
+//   tried again after kSecondListingRetryFirstMs, doubling up to kSecondListingRetryMaxMs.
 constexpr std::size_t kSecondListingLane = 1;
 
 bool Server::second_listing_wanted() const {
 	return novaworld_ && !options_.also_master_host.empty();
 }
 
-void Server::start_second_listing() {
+void Server::begin_second_try() {
+	if (second_resolve_.valid() || second_lister_ != nullptr || second_stopped_) return;
+	// The destination rule by name, as the listing's own lookups apply it (destination_policy.h);
+	// the try then probes the dotted address, which the rule passes.
+	second_resolve_ = std::async(std::launch::async,
+			[host = options_.also_master_host,
+					allow_public = options_.allow_public]() -> std::optional<std::string> {
+				net::Endpoint gate{};
+				if (!resolve_destination(host, gate, allow_public, "the second listing's gate"))
+					return std::nullopt;
+				return std::to_string(gate.ip[0]) + "." + std::to_string(gate.ip[1]) + "." +
+						std::to_string(gate.ip[2]) + "." + std::to_string(gate.ip[3]);
+			});
+}
+
+void Server::start_second_listing(const std::string &gate_address, uint32_t now_ms) {
 	if (listing_ == nullptr || lister_ == nullptr || demux_ == nullptr || second_lister_ != nullptr ||
 			second_stopped_)
 		return;
 	if (second_source_ == nullptr) second_source_ = std::make_unique<SecondListing>(*listing_);
 	ListerOptions options = base_lister_options();
-	options.master_host = options_.also_master_host;
+	options.master_host = gate_address;
 	options.master_gate_port = options_.also_master_gate_port;
 	options.credentials = options_.also_credentials;
 	// The match's AppId, the first registration's: a joiner from either service carries it as its
@@ -1025,27 +1064,50 @@ void Server::start_second_listing() {
 			&demux_->session(kSecondListingLane));
 	second_source_->set_lister(second_lister_.get());
 	second_published_ = false;
-	const NwuLobbySession &lobby = second_lister_->lobby();
-	demux_->set_session_claim([&lobby](const PeerAddr &from, const uint8_t *data, std::size_t len) {
-		return lobby.claims(from, data, len);
+	second_started_ms_ = now_ms;
+	// Each lane's claim reads the listers as they stand when a datagram lands, so neither holds a
+	// lister that went.
+	demux_->set_session_claim([this](const PeerAddr &from, const uint8_t *data, std::size_t len) {
+		return lane_claims(second_lister_.get(), lister_.get(), from, data, len);
 	}, kSecondListingLane);
 	set_lobby_text(*second_lister_);
 	listing_->set_second(second_lister_.get());
 	if (!second_lister_->start()) {
 		end_second_listing(/*stop_hosting=*/false);
-		second_backoff_ms_ = kSecondListingRetryFirstMs;
-		second_retry_at_ms_ = wall_ms() + second_backoff_ms_;
-		io::logf(io::LogLevel::kWarn,
-				"opennova-serve: the second listing (%s) did not start; trying again in %u s",
-				options_.also_master_host.c_str(), second_backoff_ms_ / 1000u);
+		schedule_second_retry(now_ms, "its sockets did not open");
 	}
 }
 
+void Server::schedule_second_retry(uint32_t now_ms, const char *why) {
+	second_backoff_ms_ = second_backoff_ms_ == 0
+			? kSecondListingRetryFirstMs
+			: std::min(second_backoff_ms_ * 2u, kSecondListingRetryMaxMs);
+	second_retry_at_ms_ = now_ms + second_backoff_ms_;
+	io::logf(io::LogLevel::kWarn,
+			"opennova-serve: the second listing (%s) did not host (%s); trying again in %u s",
+			options_.also_master_host.c_str(), why, second_backoff_ms_ / 1000u);
+}
+
 void Server::tick_second_listing() {
-	if (!second_listing_wanted() || second_stopped_ || listing_ == nullptr) return;
+	if (!second_listing_wanted() || listing_ == nullptr) return;
+	// The torn-down tries' web exchanges that landed go.
+	second_http_left_.erase(std::remove_if(second_http_left_.begin(), second_http_left_.end(),
+			[](const std::future<net::HttpReply> &left) {
+				return left.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+			}), second_http_left_.end());
+	if (second_stopped_) return;
 	const uint32_t now = wall_ms();
 	if (second_lister_ == nullptr) {
-		if (static_cast<int32_t>(now - second_retry_at_ms_) >= 0) start_second_listing();
+		if (second_resolve_.valid()) {
+			if (second_resolve_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+			const std::optional<std::string> address = second_resolve_.get();
+			if (address)
+				start_second_listing(*address, now);
+			else
+				schedule_second_retry(now, "its gate did not resolve or was refused");
+		} else if (static_cast<int32_t>(now - second_retry_at_ms_) >= 0) {
+			begin_second_try();
+		}
 		return;
 	}
 	if (!second_lister_->finished()) (void)second_lister_->tick(now);
@@ -1069,11 +1131,11 @@ void Server::tick_second_listing() {
 	}
 	// Not hosting. Its service stopped it: ServerStopHosting (the session left up, as a stock
 	// host's is until its match's NovaWorld exit), its punt (ServerLeaveNovaWorld, the session
-	// ended), or a ServerCommand's stop after it listed (the hosting left with ClientStopHosting).
+	// ended), or a ServerCommand's stop (the hosting left with ClientStopHosting).
 	const bool punted = second_lister_->finished() &&
 			second_lister_->exit_code() == kExitStoppedByService;
 	if (second_lister_->stopped_by_service() || punted ||
-			(second_published_ && !second_lister_->finished())) {
+			(second_source_ != nullptr && second_source_->command_stopped())) {
 		io::logf(io::LogLevel::kWarn,
 				"opennova-serve: the second listing's service (%s) stopped it; it is not tried again "
 				"this run",
@@ -1082,17 +1144,24 @@ void Server::tick_second_listing() {
 		end_second_listing(/*stop_hosting=*/false);
 		return;
 	}
-	// Still on its way: the gate, the session, the login and the HOSTKEY, the host request.
-	if (!second_lister_->finished()) return;
-	// It did not host, or its session ended: tried again after the backoff.
+	if (!second_lister_->finished()) {
+		// It left the hosting with no stop of its service's: a re-host refused after its session's
+		// reconnect (NwuHostRole's handle_host_result), which a fresh try may mend.
+		if (second_published_) {
+			end_second_listing(/*stop_hosting=*/false);
+			schedule_second_retry(now, "its service refused the re-host");
+			return;
+		}
+		// Still on its way (the gate, the session, the login and the HOSTKEY, the host request),
+		// within the deadline.
+		if (now - second_started_ms_ <= kSecondListingHostDeadlineMs) return;
+		end_second_listing(/*stop_hosting=*/false);
+		schedule_second_retry(now, "it was not hosting within its deadline");
+		return;
+	}
+	// It did not host, or its session ended.
 	end_second_listing(/*stop_hosting=*/false);
-	second_backoff_ms_ = second_backoff_ms_ == 0
-			? kSecondListingRetryFirstMs
-			: std::min(second_backoff_ms_ * 2u, kSecondListingRetryMaxMs);
-	second_retry_at_ms_ = now + second_backoff_ms_;
-	io::logf(io::LogLevel::kWarn,
-			"opennova-serve: the second listing (%s) did not host; trying again in %u s",
-			options_.also_master_host.c_str(), second_backoff_ms_ / 1000u);
+	schedule_second_retry(now, "its session ended");
 }
 
 void Server::end_second_listing(bool stop_hosting) {
@@ -1104,6 +1173,9 @@ void Server::end_second_listing(bool stop_hosting) {
 	else
 		second_lister_->disconnect();
 	if (demux_ != nullptr) demux_->set_session_claim(nullptr, kSecondListingLane);
+	// A web exchange still out lands on its own: the lister goes without waiting on it.
+	std::future<net::HttpReply> left = second_lister_->release_http();
+	if (left.valid()) second_http_left_.push_back(std::move(left));
 	second_lister_.reset();
 	second_published_ = false;
 }
@@ -1229,9 +1301,12 @@ void Server::stop() {
 	//  CNapiNPConnection_Destroy -> SendDisconnectPacket @0x61F2A0 -> sendto;
 	//  CAdminServer_Construct's WSAStartup @0x402C22 (slot 0x7C0554), its
 	//  WSACleanup @0x406DE2 from the destructor registered @0x79377A].
-	// The second listing goes the same way as the first, ahead of it.
+	// The second listing goes the same way as the first, ahead of it; a try's gate lookup and the
+	// torn-down tries' web exchanges still out are waited out here, at the exit.
 	end_second_listing(/*stop_hosting=*/!reset_exit_);
 	second_source_.reset();
+	second_resolve_ = {};
+	second_http_left_.clear();
 	if (lister_) {
 		if (reset_exit_)
 			lister_->disconnect();

@@ -5532,13 +5532,16 @@ int test_hosted_server_routes(Harness &h) {
 	const Owner eve = owner("hosted_eve", "10.51.0.5");
 	const Owner fay = owner("hosted_fay", "10.51.0.6");
 	const Owner gus = owner("hosted_gus", "10.51.0.7");
-	for (const Owner *o : { &ana, &ben, &cy, &dee, &eve, &fay, &gus }) TEST_EXPECT(o->id > 0 && !o->session.empty());
+	const Owner hal = owner("hosted_hal", "10.51.0.8");
+	for (const Owner *o : { &ana, &ben, &cy, &dee, &eve, &fay, &gus, &hal })
+		TEST_EXPECT(o->id > 0 && !o->session.empty());
 	// The start / stop bucket (HostedRoutes::kStartStopPerUser) is 6 per account,
 	// then one every 20 s, and a request refused before it (logged out, no CSRF
 	// header) draws nothing. Ana draws exactly six below (three starts, three
 	// stops), Dee six (the refused settings, then not_entitled), Eve four and Gus
 	// four (the data set refusals, then an expansion start with no entitlement),
-	// the others fewer: add a draw to one of them and it must move to a new account.
+	// Hal two (the NovaLogic listing's refusals), the others fewer: add a draw to
+	// one of them and it must move to a new account.
 
 	auto start = [&h](const Owner &o, const std::string &body, bool csrf = true) {
 		std::vector<std::string> headers = { kJson, with_session(o.session) };
@@ -5631,10 +5634,6 @@ int test_hosted_server_routes(Harness &h) {
 		{ "{\"game_name\":\"x\",\"max_players\":99,\"missions\":[\"a.bms\"]}", "invalid_settings",
 				"max_players" },
 		{ "{\"game_name\":\"x\",\"missions\":[\"../a.bms\"]}", "invalid_settings", "missions" },
-		// A NovaLogic listing this service does not offer.
-		{ "{\"game_name\":\"x\",\"missions\":[\"a.bms\"],\"list_on_novalogic\":true}", "invalid_settings",
-				"list_on_novalogic" },
-		{ "{\"game_name\":\"x\",\"list_on_novalogic\":\"yes\"}", "invalid_field", "" },
 		{ "{\"game_name\":\"x\",\"max_players\":\"16\"}", "invalid_field", "" },
 		{ "not json", "invalid_json", "" },
 	};
@@ -5646,6 +5645,13 @@ int test_hosted_server_routes(Harness &h) {
 		TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == r.error);
 		if (*r.field) TEST_EXPECT(json && str(json["field"]) == r.field && json.has("message"));
 	}
+	// A NovaLogic listing this service does not offer, and a mistyped one (Hal's two draws).
+	reply = start(hal, "{\"game_name\":\"x\",\"missions\":[\"a.bms\"],\"list_on_novalogic\":true}");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_settings" && json &&
+			str(json["field"]) == "list_on_novalogic" && json.has("message"));
+	reply = start(hal, "{\"game_name\":\"x\",\"list_on_novalogic\":\"yes\"}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
 	// A valid start with no entitlement.
 	reply = start(dee, settings);
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_entitled");

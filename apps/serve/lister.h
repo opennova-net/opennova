@@ -109,6 +109,9 @@ public:
 	// The service's ServerStopHosting stopped the hosting (the session stays up until the embedder
 	// ends it, as a stock host's stays up until its match's NovaWorld exit).
 	bool stopped_by_service() const { return stopped_by_service_; }
+	// The web exchange still out (invalid when none), handed over so a finished lister can go
+	// without its destructor waiting on it; the exchange's worker reads nothing of the lister's.
+	std::future<net::HttpReply> release_http() { return std::move(http_); }
 	// The session and its host leg, for the source behind a live server (the GSID, the join
 	// tickets, the match facts) and the shared socket's claim.
 	NwuLobbySession &lobby() { return lobby_; }

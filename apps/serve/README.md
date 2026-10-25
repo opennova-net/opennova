@@ -132,9 +132,12 @@ The second listing:
 - **Is stopped by its own service only.** That service's `ServerStopHosting` or punt
   delists the server there and nowhere else: the match and the first listing go on, and
   the second listing is not tried again until the server restarts.
-- **Is retried when it does not host.** A gate that does not answer, a failed login or a
-  refused host request is tried again after a minute, then after twice as long each time,
-  up to 15 minutes.
+- **Is retried when it does not host.** A gate that does not answer or resolve, a failed
+  login, a refused host request or re-host, or a listing still not hosting 3 minutes after
+  its start is tried again after a minute, then after twice as long each time, up to 15
+  minutes.
+- **Never holds up the match.** Its gate's name is looked up on a worker thread, and a try
+  that ends with a web request still out leaves it to finish on its own.
 
 What stays the first listing's: the match's GSID (the LAN reply's `SUS1`), its join tickets
 (a second service that asks for them is logged, and its joiners are admitted without them),

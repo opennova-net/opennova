@@ -56,10 +56,12 @@
 #include "admin_tcp_server.h"
 #include "credentials.h"
 #include "net_datagram_socket.h"
+#include "net_http.h"
 #include "net_sockets.h"
 
 #include <atomic>
 #include <cstdint>
+#include <future>
 #include <memory>
 #include <optional>
 #include <string>
@@ -144,6 +146,11 @@ class SecondListing;
 // further failure up to the longest. OpenNova policy, none of retail's (a stock host lists once).
 inline constexpr uint32_t kSecondListingRetryFirstMs = 60u * 1000u;
 inline constexpr uint32_t kSecondListingRetryMaxMs = 15u * 60u * 1000u;
+// How long a second listing may take from its start to hosting (the gate, the session's verify,
+// the login and the HOSTKEY, the host request) before it counts as one that did not host: a
+// dedicated host waits on its host request with no timeout (NwuHostRole::poll_request's
+// command-line host), which the first listing's pre-boot wait keeps and the second must not.
+inline constexpr uint32_t kSecondListingHostDeadlineMs = 3u * 60u * 1000u;
 
 class Server {
 public:
@@ -275,12 +282,15 @@ private:
 	ListerOptions base_lister_options() const;
 	void set_lobby_text(Lister &lister);
 	// The second listing (ServeOptions::also_master_host) on the socket's second session lane:
-	// whether the run has one, its start, its pass each frame (the publish once it hosts, the
-	// retry once it did not, the teardown once its service stopped it), and its teardown, with
+	// whether the run has one; a try's gate lookup, off the frame thread; its start at the address
+	// that lookup found; its pass each frame (the publish once it hosts, the retry once it did not,
+	// the teardown once its service stopped it); the next try's schedule; and its teardown, with
 	// ClientStopHosting or the goodbye burst alone, as the first listing's.
 	bool second_listing_wanted() const;
-	void start_second_listing();
+	void begin_second_try();
+	void start_second_listing(const std::string &gate_address, uint32_t now_ms);
 	void tick_second_listing();
+	void schedule_second_retry(uint32_t now_ms, const char *why);
 	void end_second_listing(bool stop_hosting);
 	// The mission start's server-info update inside the host boot (HostBootRequest::
 	// mission_start_update), ahead of the load: the starting map's or the next one's columns as
@@ -351,6 +361,13 @@ private:
 	bool second_stopped_ = false;
 	uint32_t second_retry_at_ms_ = 0;
 	uint32_t second_backoff_ms_ = 0;
+	uint32_t second_started_ms_ = 0; // the running try's start (its hosting deadline's)
+	// A try's gate lookup (the gate's dotted address, or none when it did not resolve), which
+	// runs off the frame thread: the name's DNS lookup could hold the match up for seconds.
+	std::future<std::optional<std::string>> second_resolve_;
+	// The web exchanges of torn-down tries still out, kept until each lands so no teardown on the
+	// frame thread waited on one (Lister::release_http).
+	std::vector<std::future<net::HttpReply>> second_http_left_;
 	uint16_t bound_port_ = 0;
 	bool running_ = false;
 	bool begun_ = false;
