@@ -4699,9 +4699,8 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 			* skeleton.get_bone_global_pose(14)
 			* skeleton.get_bone_global_rest(14).affine_inverse())
 	var rendered_head_center: Vector3 = rendered_head_matrix * head_center_model
-	var rendered_hand_matrix := (skeleton.global_transform
-			* skeleton.get_bone_global_pose(16)
-			* skeleton.get_bone_global_rest(16).affine_inverse())
+	# The skin as drawn: BN17's fold lives in the skin's binds, not the pose.
+	var rendered_hand_matrix: Transform3D = skeleton.global_transform * model.get_bone_skin_transform(16)
 	assert_true(rendered_hand_matrix.basis.x.is_zero_approx()
 			and rendered_hand_matrix.basis.y.is_zero_approx()
 			and rendered_hand_matrix.basis.z.is_zero_approx(),

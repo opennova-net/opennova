@@ -735,6 +735,7 @@ private:
 	bool aim_overlay_valid_ = false;
 	PackedInt32Array aim_overlay_classes_;
 	bool collapse_right_hand_ = false;
+	uint32_t cut_sections_ = 0;
 	String wpn_key_;
 	int wpn_phase_ticks_ = 0;
 	// The secondary channel's outgoing clip + cross-fade weight (the sim's
@@ -909,15 +910,24 @@ private:
 	void clear_skin_palette();
 	void build_skin_palette();
 	void publish_skin_palette();
+	// The Skeleton3D's settled pose (skeleton_updated): the binds re-solve over it, then the
+	// palette republishes.
+	void settle_skeleton_pose();
 	void apply_skin_palette_bounds();
 	// The current palette (pose x bind per bone), empty without a rig.
 	void compute_skin_palette(std::vector<Transform3D> &r_palette) const;
-	// The clip-posed parts' PANM layer: each bone's rest bind (the skin as
-	// built), and the pass that lands the part tracks composed over the clip
-	// pose as the skin's binds (threedi_panm_pose_parts_over).
+	// The skin's binds over the clip pose: each bone's rest bind (the skin as built), and the
+	// pass that lands the clip-posed parts' PANM layer (threedi_panm_pose_parts_over) and then
+	// the collapsed bones (collapse_bone_rows) as the skin's binds.
 	std::vector<Transform3D> skin_rest_binds_;
 	bool skin_binds_layered_ = false;
-	void apply_skeletal_panm();
+	bool skin_binds_collapsed_ = false;
+	uint32_t collapsed_bones() const;
+	// Whether the binds stray from the rest binds, or are about to (the pass must run).
+	bool skeletal_binds_live() const;
+	// True when a bind changed (the caller republishes the palette).
+	bool apply_skeletal_binds();
+	void land_collapsed_bones();
 
 	// --- retained-scene construction (object_model_scene.cpp) ---
 	void rebuild_scene();
@@ -1478,8 +1488,16 @@ public:
 	void set_aim_overlay(const Array &p_deltas);
 	Array get_aim_overlay() const;
 
+	// The person bone walk's collapsed bones, folded in the skin (apply_skeletal_binds over
+	// collapse_bone_rows): the mounted right hand's (bone 16) and the person's cut sections
+	// (the +0x134 section word, bone i for bit i). The pose itself is never collapsed.
 	void set_right_hand_collapsed(bool p_collapsed);
 	bool is_right_hand_collapsed() const { return collapse_right_hand_; }
+	void set_cut_sections(int64_t p_mask);
+	int64_t get_cut_sections() const { return cut_sections_; }
+	// Bone `p_bone`'s skin matrix as drawn: its global pose times the skin's bind, in the
+	// skeleton's space (identity for no such bone).
+	Transform3D get_bone_skin_transform(int p_bone) const;
 	// The active two-channel blend — presentation-state read-back: whether a
 	// second channel is blending (a single channel poses the body otherwise),
 	// its source clip key, its playhead in seconds, the blend weight and its

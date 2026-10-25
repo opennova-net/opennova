@@ -1,8 +1,10 @@
 // The parent-local FK a skin poses by (runtime/anim/skeletal_clips.h pose_globals): each bone's local
 // (its pose rotation as rows, its pose origin) on its parent's global, a root its own; the collapsed
 // bone's rows zeroed with its origin kept, standing alone while its children chain on it [orig: special
-// row @0x4b1290]; the count clamped to the pose and the parents. And a point or a direction carried by a
-// transform (rest_transform_point / rest_transform_direction).
+// row @0x4b1290]; the count clamped to the pose and the parents. A point or a direction carried by a
+// transform (rest_transform_point / rest_transform_direction). And the person bone walk's collapsed rows
+// over the skin deformations (collapse_bone_rows) [orig: Entity_BuildBoneTransformMatrices @0x4B1290,
+// @0x4B1F10..0x4B1F31, @0x4B201E..0x4B20C3].
 #include <runtime/anim/skeletal_clips.h>
 #include <runtime/anim/skeletal_pose.h>
 
@@ -110,11 +112,90 @@ int test_carry() {
 	return 0;
 }
 
+bool same_point(const anim::Vec3 &a, const anim::Vec3 &b) {
+	return near(a.x, b.x) && near(a.y, b.y) && near(a.z, b.z);
+}
+
+bool same_rows(const Rest &a, const Rest &b) {
+	for (int i = 0; i < 9; ++i)
+		if (a.rows[i] != b.rows[i]) return false;
+	return true;
+}
+
+bool zero_rows(const Rest &a) {
+	for (int i = 0; i < 9; ++i)
+		if (a.rows[i] != 0.0f) return false;
+	return true;
+}
+
+int test_collapse_rows() {
+	// A spine of three (0 the root, 1 on it, 2 on 1) and a limb on the root (3), every joint a unit
+	// apart at rest, each turned in the pose.
+	const std::vector<int> parents = {-1, 0, 1, 0};
+	const std::vector<anim::PoseBone> rest = {
+		{anim::Quat{}, {0.0f, 0.0f, 0.0f}},
+		{anim::Quat{}, {0.0f, 1.0f, 0.0f}},
+		{anim::Quat{}, {0.0f, 1.0f, 0.0f}},
+		{anim::Quat{}, {1.0f, 0.0f, 0.0f}},
+	};
+	std::vector<anim::PoseBone> pose = rest;
+	pose[0].rotation = about_z(0.3);
+	pose[0].origin = {4.0f, 0.0f, 0.0f};
+	pose[1].rotation = about_z(0.5);
+	pose[2].rotation = about_z(-0.4);
+	pose[3].rotation = about_z(1.1);
+	std::vector<Rest> rest_globals, posed_globals;
+	anim::pose_globals(rest, parents, rest.size(), -1, rest_globals);
+	anim::pose_globals(pose, parents, pose.size(), -1, posed_globals);
+	std::vector<Rest> deformations;
+	std::vector<anim::Vec3> joints;
+	for (size_t i = 0; i < rest.size(); ++i) {
+		deformations.push_back(anim::rest_mul(posed_globals[i], anim::rest_affine_inverse(rest_globals[i])));
+		joints.push_back(rest_globals[i].origin);
+	}
+	const auto joint_of = [&](const std::vector<Rest> &rows, size_t i) {
+		return anim::rest_transform_point(rows[i], joints[i]);
+	};
+
+	// No bit set: the rows as posed.
+	std::vector<Rest> none = deformations;
+	anim::collapse_bone_rows(parents, joints, 0u, none);
+	for (size_t i = 0; i < none.size(); ++i) TEST_EXPECT(same_rest(none[i], deformations[i]));
+
+	// The middle spine bone: it folds to its joint; its child keeps turning as it did, its joint on the
+	// fold point; the root and the limb on it untouched.
+	std::vector<Rest> mid = deformations;
+	anim::collapse_bone_rows(parents, joints, 1u << 1, mid);
+	TEST_EXPECT(zero_rows(mid[1]) && same_point(mid[1].origin, joint_of(deformations, 1)));
+	TEST_EXPECT(same_rows(mid[2], deformations[2]));
+	TEST_EXPECT(same_point(joint_of(mid, 2), joint_of(deformations, 1)));
+	TEST_EXPECT(same_rest(mid[0], deformations[0]) && same_rest(mid[3], deformations[3]));
+
+	// The root and the bone on it (a cut clone's hidden hips): the visible bone above keeps turning,
+	// its joint on the root's fold point, as does the limb on the root.
+	std::vector<Rest> hips = deformations;
+	anim::collapse_bone_rows(parents, joints, (1u << 0) | (1u << 1), hips);
+	TEST_EXPECT(zero_rows(hips[0]) && zero_rows(hips[1]));
+	TEST_EXPECT(same_point(hips[1].origin, joint_of(deformations, 0)));
+	TEST_EXPECT(same_rows(hips[2], deformations[2]) && same_point(joint_of(hips, 2), joint_of(deformations, 0)));
+	TEST_EXPECT(same_rows(hips[3], deformations[3]) && same_point(joint_of(hips, 3), joint_of(deformations, 0)));
+
+	// A leaf: it alone folds, at its joint.
+	std::vector<Rest> leaf = deformations;
+	anim::collapse_bone_rows(parents, joints, 1u << 2, leaf);
+	TEST_EXPECT(zero_rows(leaf[2]) && same_point(leaf[2].origin, joint_of(deformations, 2)));
+	for (size_t i : {size_t(0), size_t(1), size_t(3)}) TEST_EXPECT(same_rest(leaf[i], deformations[i]));
+	std::printf("collapse_bone_rows: a bone folds to its joint, its children keep turning on the fold point
+");
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	if (test_chain() != 0) return 1;
 	if (test_collapse() != 0) return 1;
 	if (test_carry() != 0) return 1;
+	if (test_collapse_rows() != 0) return 1;
 	return 0;
 }

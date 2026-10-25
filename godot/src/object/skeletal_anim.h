@@ -54,12 +54,11 @@ private:
 	Array apply_pose_overlay(std::vector<opennova::anim::PoseBone> p_pose,
 			const PackedInt32Array &p_classes, const Basis *p_deltas,
 			const String &p_wpn_key, double p_wpn_playhead_seconds,
-			bool p_collapse_right_hand, const String &p_wpn_prev_key = String(),
+			const String &p_wpn_prev_key = String(),
 			double p_wpn_prev_playhead_seconds = 0.0,
 			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
 			int p_wpn_prev_variant = 0, size_t p_person_clip_bones = kNotPerson) const;
-	void write_pose_to_skeleton(Skeleton3D *p_skeleton, const Array &p_pose,
-			bool p_collapse_right_hand) const;
+	void write_pose_to_skeleton(Skeleton3D *p_skeleton, const Array &p_pose) const;
 
 protected:
 	static void _bind_methods();
@@ -170,16 +169,13 @@ public:
 	// p_wpn_key (optional): the weapon channel's clip, spliced onto the mask bones at
 	// p_wpn_playhead BEFORE the overlay composes — the witnessed order (primary sample →
 	// mask override → overlay multiply). Empty = single channel.
-	// collapse_right_hand emits a terminal zero-scale BN17 pose at its sampled
-	// local joint even when overlay inputs are unavailable and this falls back to
-	// the sampled pose. Collision adapts that verdict to its final-row convention.
-	// (engine: runtime/anim/skeletal_clips.h)
+	// The mounted right hand's collapse is not part of the pose: ObjectModel folds
+	// the bone in the skin (collapse_bone_rows, runtime/anim/skeletal_clips.h).
 	// p_variant / p_source_variant / p_target_variant: the primary channels'
 	// served ring entries.
 	Array eval_pose_overlay_deltas(const String &p_key, double p_playhead_seconds,
 			const PackedInt32Array &p_classes, const Basis *p_deltas,
 			const String &p_wpn_key = String(), double p_wpn_playhead_seconds = 0.0,
-			bool p_collapse_right_hand = false,
 			const String &p_wpn_prev_key = String(),
 			double p_wpn_prev_playhead_seconds = 0.0,
 			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
@@ -190,7 +186,6 @@ public:
 			const PackedInt32Array &p_classes, const Basis *p_deltas,
 			const String &p_wpn_key = String(),
 			double p_wpn_playhead_seconds = 0.0,
-			bool p_collapse_right_hand = false,
 			const String &p_wpn_prev_key = String(),
 			double p_wpn_prev_playhead_seconds = 0.0,
 			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
@@ -199,8 +194,8 @@ public:
 
 	// The whole per-frame body-pose write in one call: evaluate the pose
 	// (eval_pose_overlay when classes+deltas are non-empty, eval_pose otherwise)
-	// and write every bone's position/rotation/scale onto p_skeleton, including
-	// the BN17 zero-scale collapse branch. Exactly the loop ObjectModel ran
+	// and write every bone's position/rotation/scale onto p_skeleton. Exactly the
+	// loop ObjectModel ran
 	// in GDScript — moved native because it executes per animated model per
 	// render frame (bone-count boxed Transform3Ds + 3 cross-boundary calls per
 	// bone from script dominated the present pass).
@@ -211,7 +206,6 @@ public:
 			double p_playhead_seconds, int p_variant,
 			const PackedInt32Array &p_classes, const Basis *p_deltas,
 			const String &p_wpn_key = String(), double p_wpn_playhead_seconds = 0.0,
-			bool p_collapse_right_hand = false,
 			const String &p_wpn_prev_key = String(),
 			double p_wpn_prev_playhead_seconds = 0.0,
 			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
@@ -223,7 +217,6 @@ public:
 	Array eval_pose_overlay(const String &p_key, double p_playhead_seconds,
 			const PackedInt32Array &p_classes, const Array &p_deltas,
 			const String &p_wpn_key = String(), double p_wpn_playhead_seconds = 0.0,
-			bool p_collapse_right_hand = false,
 			const String &p_wpn_prev_key = String(),
 			double p_wpn_prev_playhead_seconds = 0.0,
 			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
@@ -234,7 +227,6 @@ public:
 			const PackedInt32Array &p_classes, const Array &p_deltas,
 			const String &p_wpn_key = String(),
 			double p_wpn_playhead_seconds = 0.0,
-			bool p_collapse_right_hand = false,
 			const String &p_wpn_prev_key = String(),
 			double p_wpn_prev_playhead_seconds = 0.0,
 			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
@@ -243,7 +235,6 @@ public:
 			double p_playhead_seconds, int p_variant,
 			const PackedInt32Array &p_classes, const Array &p_deltas,
 			const String &p_wpn_key = String(), double p_wpn_playhead_seconds = 0.0,
-			bool p_collapse_right_hand = false,
 			const String &p_wpn_prev_key = String(),
 			double p_wpn_prev_playhead_seconds = 0.0,
 			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
@@ -254,7 +245,6 @@ public:
 			float p_weight, const PackedInt32Array &p_classes,
 			const Basis *p_deltas, const String &p_wpn_key = String(),
 			double p_wpn_playhead_seconds = 0.0,
-			bool p_collapse_right_hand = false,
 			const String &p_wpn_prev_key = String(),
 			double p_wpn_prev_playhead_seconds = 0.0,
 			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,

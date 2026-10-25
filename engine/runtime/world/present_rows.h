@@ -301,6 +301,13 @@ enum PresentField : int {
 	// [orig: AnimChannel_AdvancePlayback's armed wrap @0x40B19E..0x40B1B1]
 	PF_ANIM_PHASE_PARKED,
 	PF_WPN_PHASE_PARKED,
+	// A person's cut sections: the +0x134 section word a dismemberment cut sets, in two
+	// exact u16 halves, 0 for every other row. Its bone walk folds those bones (the
+	// presenter hands the word to ObjectModel::set_cut_sections; anim::collapse_bone_rows);
+	// no part's strips hide for it (item_hidden_sections, PF_SECTION_MASK).
+	// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 (the test @0x4B1F1D)]
+	PF_CUT_SECTIONS_LO,
+	PF_CUT_SECTIONS_HI,
 	PF_STRIDE
 };
 

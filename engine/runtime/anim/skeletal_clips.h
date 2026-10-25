@@ -298,4 +298,21 @@ void pose_globals(const std::vector<anim::PoseBone> &pose,
 		const std::vector<int> &parents, size_t count, int collapse_bone,
 		std::vector<SkeletalClips::RestTransform> &globals);
 
+// The person bone walk's collapsed rows over a pose's skin deformations
+// (`deformations[i]` carries a rest point riding bone i to the pose; `rest_joints[i]`
+// is bone i's rest joint, the pivot its row turns about). A bone whose bit is set in
+// `collapse_mask` folds to its joint; every other bone keeps its rotation, and its
+// joint moves with its parent's row, so the child of a collapsed bone keeps turning as
+// it did while its joint lands on that bone's fold point. An unaffected chain is left
+// exactly as it was. Retail zeroes a set bit's row, keeping only [15] = 1, before the
+// row's base matrix, which is fixed per bone and never the parent's row, and then
+// places every row's pivot through its parent's final row.
+// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - the test of 1 << bone against
+//  the +0x134 section word @0x4B1F10..0x4B1F23, the zeroed row @0x4B1F25..0x4B1F31 (its
+//  memset @0x4B1F2A), the base matrices by bone @0x4B1F37..0x4B1FE7, the pivot through
+//  the parent's final row @0x4B201E..0x4B20C3 and its store @0x4B2162]
+void collapse_bone_rows(const std::vector<int> &parents,
+		const std::vector<anim::Vec3> &rest_joints, uint32_t collapse_mask,
+		std::vector<SkeletalClips::RestTransform> &deformations);
+
 } // namespace opennova::anim

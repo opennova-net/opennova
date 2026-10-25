@@ -188,6 +188,13 @@ inline void write_present_section_mask(float *row, uint32_t hidden_mask) {
 	row[PF_SECTION_MASK_HI] = static_cast<float>((hidden_mask >> 16) & 0xFFFFu);
 }
 
+// A person's cut sections, its bone walk's fold word (PF_CUT_SECTIONS; 0 for any other row).
+inline void write_present_cut_sections(float *row, const Entity &entity) {
+	const uint32_t cut = entity.kind == EntityKind::Organic ? entity.section_mask : 0u;
+	row[PF_CUT_SECTIONS_LO] = static_cast<float>(cut & 0xFFFFu);
+	row[PF_CUT_SECTIONS_HI] = static_cast<float>((cut >> 16) & 0xFFFFu);
+}
+
 inline void write_present_world_model_heat_glow(float *record, const World &world,
 		const Entity &entity) {
 	int32_t heat_glow = 0;
@@ -450,6 +457,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 					((ent->flags | ent->engine_flags) & kEntityFlagParachute) != 0 ? 1.0f : 0.0f;
 			write_present_slot_march(r, *ent);
 			write_present_section_mask(r, item_hidden_sections(*ent));
+			write_present_cut_sections(r, *ent);
 			write_present_doors(r, i, kernel.world, *ent, door_phases);
 			r[PF_RIGHT_HAND_COLLAPSED] =
 					world::mount_collapses_right_hand_row(*ent) ? 1.0f : 0.0f;
@@ -842,6 +850,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 			((e.flags | e.engine_flags) & kEntityFlagParachute) != 0 ? 1.0f : 0.0f;
 	write_present_slot_march(r, e);
 	write_present_section_mask(r, item_hidden_sections(e));
+	write_present_cut_sections(r, e);
 	write_present_doors(r, row_index, w, e, door_phases);
 	r[PF_RIGHT_HAND_COLLAPSED] =
 			world::mount_collapses_right_hand_row(e) ? 1.0f : 0.0f;
