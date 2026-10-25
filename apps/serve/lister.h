@@ -57,9 +57,9 @@ struct ListerOptions {
 	// What every console line of this listing starts with, so a server's second listing
 	// (ServeOptions::also_master_host) is told apart from its first ("": nothing, the first's).
 	std::string label;
-	// The AppId the host request registers under (NwuHostRole::request): a second listing's is
-	// the match's, the first listing's (0: the request mints its own, as retail's does).
-	uint32_t match_app_id = 0;
+	// An AppId the host request's own mint must avoid (NwuHostRole::request): a second listing's
+	// is the first listing's, so the two registrations' AppIds tell their joiners apart (0: none).
+	uint32_t taken_app_id = 0;
 };
 
 // opennova-serve's NovaWorld listing kept up: the engine's NWU driver and host role, the account
@@ -109,6 +109,12 @@ public:
 	// The service's ServerStopHosting stopped the hosting (the session stays up until the embedder
 	// ends it, as a stock host's stays up until its match's NovaWorld exit).
 	bool stopped_by_service() const { return stopped_by_service_; }
+	// The lister finished on the service's refusal, its decision rather than a fault on the way:
+	// a login or HOSTKEY page it answered and refused, a host request refused with a MsgCode
+	// (NWEC53..60), a refused session join (NWEC43), or an account or lobby the leg cannot use.
+	// A gate or session that did not answer, a request that never reached it or a 60 s host poll
+	// is not one.
+	bool refused() const { return refused_; }
 	// The web exchange still out (invalid when none), handed over so a finished lister can go
 	// without its destructor waiting on it; the exchange's worker reads nothing of the lister's.
 	std::future<net::HttpReply> release_http() { return std::move(http_); }
@@ -132,7 +138,8 @@ private:
 	HostRegistration registration() const;
 	void sync_roster();
 	// Record the outcome; the teardown runs at the end of the tick, outside the driver's hooks.
-	void end(int code);
+	// `refused`: the service's refusal ended it (refused()).
+	void end(int code, bool refused = false);
 	// `stop_hosting`: ClientStopHosting ahead of the goodbye burst (stop), or the burst alone
 	// (disconnect).
 	void teardown(bool stop_hosting);
@@ -148,6 +155,7 @@ private:
 	// The service's ServerStopHosting stopped the hosting: whatever ends the lister after it
 	// (the embedder's stop at the match's NovaWorld exit) finishes with kExitStoppedByService.
 	bool stopped_by_service_ = false;
+	bool refused_ = false; // end()'s, refused()
 	int exit_code_ = kExitStopped;
 	uint32_t now_ms_ = 0;      // the session's clock: the embedder's, from the first pass
 	uint32_t clock_origin_ = 0;

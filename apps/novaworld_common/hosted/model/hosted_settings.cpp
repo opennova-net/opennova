@@ -55,6 +55,9 @@ std::optional<SettingsRefusal> check_settings(
 		const HostedSettings &s, const std::vector<OfferedDataSet> &offered) {
 	const OfferedDataSet *data_set = find_offered(offered, s.data_set_id);
 	if (!data_set) return SettingsRefusal{ "data_set_id", "is no data set this service offers" };
+	if (s.list_on_novalogic && !novalogic_lists(*data_set))
+		return SettingsRefusal{ "list_on_novalogic",
+			"NovaLogic's NovaWorld lists Joint Operations servers only" };
 	{
 		std::string bytes;
 		if (has_control_byte(s.game_name) || has_c1_control(s.game_name))

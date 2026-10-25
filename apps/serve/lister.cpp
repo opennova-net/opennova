@@ -100,7 +100,9 @@ Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *se
 									"%s[session] the 0x82 refused: JFC %u JFP %u JFS \"%s\"", who(),
 									session->join_fail_code(), session->join_fail_param(),
 									session->join_fail_string().c_str());
-						end(kExitFailed);
+						// The session server's refusal is its decision; the other tags are a
+						// gate or a session that did not answer.
+						end(kExitFailed, /*refused=*/message == "NWEC43");
 					};
 					hooks.on_soft_error = [this](const std::string &message) {
 						io::logf(LogLevel::kDebug, "%s[gate] %s", who(), message.c_str());
@@ -147,7 +149,9 @@ Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *se
 				io::logf(LogLevel::kError, "%s[host] the host request failed: %s", who(),
 					tag.c_str());
 				source_.on_host_result(false, tag);
-				end(kExitFailed);
+				// NWEC53..60 are the service's MsgCode refusals (too many servers, the name not
+				// accepted, ...); NWEC51 (not queued) and NWEC52 (no reply in 60 s) are not.
+				end(kExitFailed, /*refused=*/tag != "NWEC51" && tag != "NWEC52");
 			};
 			// ServerStopHosting drops the session to verified and sends nothing; the session
 			// stays up, pumped, until the match's NovaWorld exit (12) over the dropped word
@@ -313,7 +317,7 @@ void Lister::on_verified() {
 	const LoginResult first = flow_.login(options_.credentials.user, options_.credentials.pass);
 	if (first.kind != LoginResult::Kind::NeedRequest) {
 		io::logf(LogLevel::kError, "%s[http] login failed: %s", who(), first.reason.c_str());
-		end(kExitFailed);
+		end(kExitFailed, /*refused=*/true); // nothing a later try would change
 		return;
 	}
 	phase_ = Phase::LoggingIn;
@@ -336,7 +340,9 @@ void Lister::on_http_reply(const net::HttpReply &reply) {
 		}
 		if (r.kind == LoginResult::Kind::Failed) {
 			io::logf(LogLevel::kError, "%s[http] login failed: %s", who(), r.reason.c_str());
-			end(kExitFailed);
+			// A login the service answered and refused is its decision; a request that never
+			// reached it is not.
+			end(kExitFailed, /*refused=*/reply.transport_ok);
 			return;
 		}
 		add_log_secret(r.nwhandle);
@@ -347,7 +353,7 @@ void Lister::on_http_reply(const net::HttpReply &reply) {
 		if (first.kind != HostKeyResult::Kind::NeedRequest) {
 			io::logf(LogLevel::kError, "%s[http] the hosting page failed: %s", who(),
 					first.reason.c_str());
-			end(kExitFailed);
+			end(kExitFailed, /*refused=*/true);
 			return;
 		}
 		phase_ = Phase::FetchingHostKey;
@@ -363,7 +369,7 @@ void Lister::on_http_reply(const net::HttpReply &reply) {
 		if (r.kind == HostKeyResult::Kind::Failed) {
 			io::logf(LogLevel::kError, "%s[http] the hosting page failed: %s", who(),
 					r.reason.c_str());
-			end(kExitFailed);
+			end(kExitFailed, /*refused=*/reply.transport_ok);
 			return;
 		}
 		host_key_ = r.host_key;
@@ -434,12 +440,12 @@ void Lister::request_host() {
 	                                       true, gate.lobby_name);
 	if (refusal != nullptr) {
 		io::logf(LogLevel::kError, "%s[host] cannot host: %s", who(), refusal);
-		end(kExitFailed);
+		end(kExitFailed, /*refused=*/true); // the gate's reply names no lobby to host in
 		return;
 	}
 	phase_ = Phase::Requesting;
 	refresh_listing(true);
-	if (!role_.request(registration(), options_.match_app_id)) return; // on_failed finished it
+	if (!role_.request(registration(), options_.taken_app_id)) return; // on_failed finished it
 	sync_roster();
 	io::logf(LogLevel::kInfo, "%s[host] ClientHostRequest for '%s' on %s", who(),
 	         registration().server_name.c_str(), gate.lobby_name.c_str());
@@ -514,9 +520,10 @@ void Lister::sync_roster() {
 	role_.sync_roster(source_.wanted_roster(role_.roster()));
 }
 
-void Lister::end(int code) {
+void Lister::end(int code, bool refused) {
 	if (ending_ || phase_ == Phase::Done) return;
 	ending_ = true;
+	refused_ = refused;
 	exit_code_ = stopped_by_service_ ? kExitStoppedByService : code;
 }
 

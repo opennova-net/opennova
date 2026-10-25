@@ -38,6 +38,8 @@ export const JO: HostedDataSet = {
       missions: [{ file: 'jox_one.bms', title: 'Escalation Point' }],
     },
   ],
+  // NovaLogic's NovaWorld lists Joint Operations servers.
+  novalogic_listing: true,
 };
 
 export const DFX2: HostedDataSet = {
@@ -55,6 +57,8 @@ export const DFX2: HostedDataSet = {
     start_delay: { min: 0, max: 60 },
   },
   expansions: [],
+  // NovaLogic's DFX2 NovaWorld is down: no listing there.
+  novalogic_listing: false,
 };
 
 export function settings(overrides: Partial<HostedSettings> = {}): HostedSettings {

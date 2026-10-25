@@ -189,6 +189,9 @@ crow::json::wvalue offered_data_set_json(const OfferedDataSet &d) {
 	out["display_name"] = d.display_name;
 	out["title"] = d.title;
 	out["version"] = d.version;
+	// Whether a server on it may also list on NovaLogic's NovaWorld (Joint Operations' lobby
+	// alone; the list's novalogic_listing says whether the service offers it at all).
+	out["novalogic_listing"] = novalogic_lists(d);
 	out["missions"] = missions_json(d.missions);
 	const HostLimits &limits = host_limits_for_title(d.title);
 	crow::json::wvalue ranges;

@@ -311,6 +311,12 @@ describe('HostedSettingsForm', () => {
     expect((again.get('#hosted-settings-list_on_novalogic').element as HTMLInputElement).checked).toBe(true);
   });
 
+  it("shows the NovaLogic box only for a game NovaLogic's NovaWorld lists", () => {
+    // Delta Force Xtreme 2 alone: offered by the service, but its game takes none.
+    const dfx2 = mountForm([DFX2], null, { novalogicListing: true });
+    expect(dfx2.find('#hosted-settings-list_on_novalogic').exists()).toBe(false);
+  });
+
   it("marks the box when the backend refuses the listing on NovaLogic's NovaWorld", async () => {
     start.mockResolvedValue({
       ok: false,

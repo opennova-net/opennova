@@ -415,6 +415,7 @@ function parseDataSet(value: unknown): HostedDataSet | null {
     missions: parseMissions(v.missions),
     limits,
     expansions: expansions as HostedExpansionOption[],
+    novalogic_listing: v.novalogic_listing === true,
   };
 }
 

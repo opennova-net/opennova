@@ -1019,11 +1019,13 @@ void Server::set_lobby_text(Lister &lister) {
 //   the second never does), and nothing of it blocks the frame thread: its gate's DNS lookup
 //   runs on a worker, and a torn-down try's web exchange is left to land on its own;
 // - it publishes its first full lists the moment it hosts, as a mission start would;
-// - its service's stop (ServerStopHosting, its punt, a ServerCommand's stop) delists it there
-//   alone for the rest of the run: no retry, out of respect for that service's decision;
-// - anything else that leaves it not hosting (a gate that does not answer or resolve, a failed
-//   login, a refused host request or re-host, no hosting by kSecondListingHostDeadlineMs) is
-//   tried again after kSecondListingRetryFirstMs, doubling up to kSecondListingRetryMaxMs.
+// - its service's decision (ServerStopHosting, its punt, a ServerCommand's stop, a refused
+//   login, host request or re-host) ends it there alone for the rest of the run, as a stock
+//   host's listing that does not host ends: no retry against that service;
+// - a fault on the way (a gate that does not answer or resolve, a request that never reached
+//   the service, no hosting by kSecondListingHostDeadlineMs) is tried again after
+//   kSecondListingRetryFirstMs, doubling up to kSecondListingRetryMaxMs, at most
+//   kSecondListingTriesMax tries.
 constexpr std::size_t kSecondListingLane = 1;
 
 bool Server::second_listing_wanted() const {
@@ -1054,9 +1056,10 @@ void Server::start_second_listing(const std::string &gate_address, uint32_t now_
 	options.master_host = gate_address;
 	options.master_gate_port = options_.also_master_gate_port;
 	options.credentials = options_.also_credentials;
-	// The match's AppId, the first registration's: a joiner from either service carries it as its
-	// APPID, which the match's join check compares with its own (code 9).
-	options.match_app_id = static_cast<uint32_t>(lister_->host_role().app_id());
+	// Its own AppId, apart from the first registration's: each service's .joi hands its joiners
+	// its own registration's, so the match's join check knows which listing sent each (code 9,
+	// NapiNPConnection::novaworld_listing) and routes its ticket to that listing's service.
+	options.taken_app_id = static_cast<uint32_t>(lister_->host_role().app_id());
 	// The process's _connectlog.txt and _inout.txt are retail's lines of its one listing: the
 	// second listing writes neither, only its console lines, which its label marks.
 	options.label = "(second listing)";
@@ -1079,6 +1082,14 @@ void Server::start_second_listing(const std::string &gate_address, uint32_t now_
 }
 
 void Server::schedule_second_retry(uint32_t now_ms, const char *why) {
+	if (++second_faults_ >= kSecondListingTriesMax) {
+		second_stopped_ = true;
+		io::logf(io::LogLevel::kWarn,
+				"opennova-serve: the second listing (%s) did not host (%s); %d tries, not tried "
+				"again this run",
+				options_.also_master_host.c_str(), why, second_faults_);
+		return;
+	}
 	second_backoff_ms_ = second_backoff_ms_ == 0
 			? kSecondListingRetryFirstMs
 			: std::min(second_backoff_ms_ * 2u, kSecondListingRetryMaxMs);
@@ -1115,43 +1126,39 @@ void Server::tick_second_listing() {
 		if (second_published_) return;
 		second_published_ = true;
 		second_backoff_ms_ = 0;
+		second_faults_ = 0;
 		// Its first full Host list and PlayerList, its HostKey among them, as the mission start's
 		// update sends a fresh host's (its host result published nothing, D-NET-465).
 		second_lister_->publish_server_info(rotation_.round_count);
-		io::logf(io::LogLevel::kInfo, "opennova-serve: also listed on NovaWorld (%s)",
-				options_.also_master_host.c_str());
-		// The match's joiners carry the first service's tickets, if any: it announces none here.
-		if (second_lister_->host_role().requires_join_ticket())
-			io::logf(io::LogLevel::kWarn,
-					"opennova-serve: the second listing's service (%s) asks for join tickets, which "
-					"the server sends only to the first listing's; its joiners are admitted without "
-					"them",
-					options_.also_master_host.c_str());
+		io::logf(io::LogLevel::kInfo, "opennova-serve: also listed on NovaWorld (%s)%s",
+				options_.also_master_host.c_str(),
+				second_lister_->host_role().requires_join_ticket()
+						? "; its joiners' tickets go to it"
+						: "");
 		return;
 	}
-	// Not hosting. Its service stopped it: ServerStopHosting (the session left up, as a stock
-	// host's is until its match's NovaWorld exit), its punt (ServerLeaveNovaWorld, the session
-	// ended), or a ServerCommand's stop (the hosting left with ClientStopHosting).
-	const bool punted = second_lister_->finished() &&
-			second_lister_->exit_code() == kExitStoppedByService;
+	// Not hosting. Its service's decision, final for the run as a stock host's listing that does
+	// not host ends: ServerStopHosting (the session left up, as a stock host's is until its
+	// match's NovaWorld exit), its punt (ServerLeaveNovaWorld, the session ended), a
+	// ServerCommand's stop (the hosting left with ClientStopHosting), a re-host refused after its
+	// session's reconnect (the hosting left with none of those: NwuHostRole's
+	// handle_host_result), or a refusal that ended the try (a login, a HOSTKEY page or a host
+	// request refused: Lister::refused).
+	const bool finished = second_lister_->finished();
+	const bool punted = finished && second_lister_->exit_code() == kExitStoppedByService;
+	const bool rehost_refused = second_published_ && !finished;
 	if (second_lister_->stopped_by_service() || punted ||
-			(second_source_ != nullptr && second_source_->command_stopped())) {
+			(second_source_ != nullptr && second_source_->command_stopped()) || rehost_refused ||
+			(finished && second_lister_->refused())) {
 		io::logf(io::LogLevel::kWarn,
-				"opennova-serve: the second listing's service (%s) stopped it; it is not tried again "
-				"this run",
+				"opennova-serve: the second listing's service (%s) stopped or refused it; it is not "
+				"tried again this run",
 				options_.also_master_host.c_str());
 		second_stopped_ = true;
 		end_second_listing(/*stop_hosting=*/false);
 		return;
 	}
-	if (!second_lister_->finished()) {
-		// It left the hosting with no stop of its service's: a re-host refused after its session's
-		// reconnect (NwuHostRole's handle_host_result), which a fresh try may mend.
-		if (second_published_) {
-			end_second_listing(/*stop_hosting=*/false);
-			schedule_second_retry(now, "its service refused the re-host");
-			return;
-		}
+	if (!finished) {
 		// Still on its way (the gate, the session, the login and the HOSTKEY, the host request),
 		// within the deadline.
 		if (now - second_started_ms_ <= kSecondListingHostDeadlineMs) return;
@@ -1159,9 +1166,10 @@ void Server::tick_second_listing() {
 		schedule_second_retry(now, "it was not hosting within its deadline");
 		return;
 	}
-	// It did not host, or its session ended.
+	// A fault on the way: a gate or a session that did not answer, a request that never reached
+	// the service.
 	end_second_listing(/*stop_hosting=*/false);
-	schedule_second_retry(now, "its session ended");
+	schedule_second_retry(now, "its gate or its session did not answer");
 }
 
 void Server::end_second_listing(bool stop_hosting) {
@@ -1255,7 +1263,9 @@ void Server::stop() {
 	const inmatch::PostMissionRoute exit_route = inmatch::route_mission_exit(
 			role_ ? role_->state.host_owner.ctx.mission_exit_reason : 0, /*novaworld=*/true);
 	if (lister_ && role_ && exit_route.error != inmatch::PostMissionError::None) {
-		end_second_listing(/*stop_hosting=*/false); // the second listing the same way, first
+		// The first listing's service ended its hosting (the NovaWorld exit), so its burst goes
+		// alone; the second's still hosts, so it deregisters as a stock host does, first.
+		end_second_listing(/*stop_hosting=*/true);
 		lister_->disconnect();
 	}
 	// The game socket's teardown line, once, while the _connectlog.txt log is still on (no

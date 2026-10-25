@@ -155,8 +155,8 @@
         <p :id="hintId('team_ff')" class="text-xs text-ink-muted">Teammates can hurt each other.</p>
       </div>
 
-      <!-- Listed on NovaLogic's NovaWorld too: shown while the service offers it. -->
-      <div v-if="novalogicListing" class="min-w-0 space-y-1 sm:col-span-2">
+      <!-- Listed on NovaLogic's NovaWorld too: shown while the service offers it and the game takes it. -->
+      <div v-if="showNovaLogic" class="min-w-0 space-y-1 sm:col-span-2">
         <label class="flex items-center gap-3 text-sm text-ink">
           <input
             :id="fieldId('list_on_novalogic')"
@@ -358,6 +358,7 @@ import {
   GAME_PASSWORD_MAX,
   initialDataSet,
   initialRotation,
+  offersNovaLogicListing,
   type IntField,
   type SettingsErrors,
   type SettingsField,
@@ -481,6 +482,8 @@ const firstForm = formFrom(props.previous, findDataSet(props.dataSets, firstData
 firstForm.missions = rotationFor(firstDataSet, firstForm.expansion_id).missions;
 const form = reactive(firstForm);
 const dataSet = computed(() => findDataSet(props.dataSets, form.data_set_id));
+// The NovaLogic box: the service offers it and the picked game takes it (Joint Operations alone).
+const showNovaLogic = computed(() => offersNovaLogicListing(dataSet.value, props.novalogicListing));
 const expansions = computed<HostedExpansionOption[]>(() => dataSet.value?.expansions ?? []);
 const missions = computed(() => availableMissions(dataSet.value, form.expansion_id));
 // The picked expansion's version; players need it installed to join.

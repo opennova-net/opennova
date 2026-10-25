@@ -12,6 +12,7 @@ import {
   initialRotation,
   MISSIONS_MAX,
   missionLabel,
+  offersNovaLogicListing,
   type SettingsForm,
 } from './hostedSettings';
 
@@ -94,6 +95,21 @@ describe('checkSettings', () => {
     expect(unoffered.errors).toEqual({});
     expect(unoffered.settings?.list_on_novalogic).toBe(false);
     expect(checkSettings(form({ list_on_novalogic: true }), BOTH).settings?.list_on_novalogic).toBe(false);
+  });
+
+  it("sends the listing on NovaLogic's NovaWorld only for a game it lists", () => {
+    // Delta Force Xtreme 2 takes none: it goes off, whatever the form holds.
+    const dfx2 = checkSettings(
+      form({ data_set_id: DFX2.id, missions: ['dfx_one.bms'], expansion_id: null, list_on_novalogic: true }),
+      BOTH,
+      true,
+    );
+    expect(dfx2.errors).toEqual({});
+    expect(dfx2.settings?.list_on_novalogic).toBe(false);
+    expect(offersNovaLogicListing(JO, true)).toBe(true);
+    expect(offersNovaLogicListing(DFX2, true)).toBe(false);
+    expect(offersNovaLogicListing(JO, false)).toBe(false);
+    expect(offersNovaLogicListing(null, true)).toBe(false);
   });
 });
 

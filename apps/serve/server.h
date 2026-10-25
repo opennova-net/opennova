@@ -142,10 +142,14 @@ const char *serve_usage();
 class ServeListing;
 class SecondListing;
 
-// The second listing's retry after a listing that did not host: the first wait, doubled at each
-// further failure up to the longest. OpenNova policy, none of retail's (a stock host lists once).
+// The second listing's retry after a try that did not host for a fault on the way (a gate or
+// session that did not answer, a request that never reached the service): the first wait,
+// doubled at each further fault up to the longest, and no more than kSecondListingTriesMax tries
+// in a run. A refusal of its service's is never retried, as a stock host's listing that does not
+// host ends (ADR 0051 d6). OpenNova policy, none of retail's (a stock host lists once).
 inline constexpr uint32_t kSecondListingRetryFirstMs = 60u * 1000u;
 inline constexpr uint32_t kSecondListingRetryMaxMs = 15u * 60u * 1000u;
+inline constexpr int kSecondListingTriesMax = 5;
 // How long a second listing may take from its start to hosting (the gate, the session's verify,
 // the login and the HOSTKEY, the host request) before it counts as one that did not host: a
 // dedicated host waits on its host request with no timeout (NwuHostRole::poll_request's
@@ -234,8 +238,9 @@ public:
 	// The second listing's lister (ServeOptions::also_master_host): null when there is none, before
 	// the starting map is up, between a failed try and the next, and once its service stopped it.
 	Lister *second_lister() { return second_lister_.get(); }
-	// The second listing's service stopped it (ServerStopHosting, its punt, or a ServerCommand's
-	// stop): it is not tried again this run.
+	// The second listing is over for this run: its service stopped or refused it (ServerStopHosting,
+	// its punt, a ServerCommand's stop, a refused login, host request or re-host), or its tries ran
+	// out (kSecondListingTriesMax).
 	bool second_listing_stopped() const { return second_stopped_; }
 	// When the next try of a second listing that did not host starts (wall_ms; 0: none waiting).
 	uint32_t second_listing_retry_at_ms() const { return second_lister_ ? 0u : second_retry_at_ms_; }
@@ -362,6 +367,7 @@ private:
 	uint32_t second_retry_at_ms_ = 0;
 	uint32_t second_backoff_ms_ = 0;
 	uint32_t second_started_ms_ = 0; // the running try's start (its hosting deadline's)
+	int second_faults_ = 0;          // the tries that ended on a fault since it last hosted
 	// A try's gate lookup (the gate's dotted address, or none when it did not resolve), which
 	// runs off the frame thread: the name's DNS lookup could hold the match up for seconds.
 	std::future<std::optional<std::string>> second_resolve_;

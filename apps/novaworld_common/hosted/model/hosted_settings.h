@@ -123,6 +123,17 @@ struct LaunchSpec {
 	std::vector<std::string> serve_args;
 };
 
+// The one lobby of NovaLogic's NovaWorld a hosted server may also list in: Joint Operations'
+// (its gate tag jop:cus2 names it, backend/seed/0001_games.sql). NovaLogic's DFX2 NovaWorld is
+// down (its login answers NWNODB01, ADR 0055), and OpenNova's own data (Acid Gambit) speaks a
+// gate tag only OpenNova's service has.
+inline constexpr const char *kNovaLogicListedGame = "jop_2_consumer";
+// Whether a server on `data_set` may also list on NovaLogic's NovaWorld (check_settings refuses
+// list_on_novalogic for one that may not).
+inline bool novalogic_lists(const OfferedDataSet &data_set) {
+	return data_set.game == kNovaLogicListedGame;
+}
+
 // The value the vault's NovaLogic account fields hold until the real account goes in
 // (deploy/env/runtime.env.tpl: an optional field must exist with a value to sync). An account
 // holding it is unset, so a deployment whose switch is on never logs in to NovaLogic's live

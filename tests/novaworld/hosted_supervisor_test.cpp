@@ -126,6 +126,22 @@ int test_settings_rules() {
 		change(c);
 		return c;
 	};
+	// The NovaLogic listing: Joint Operations' lobby alone (DFX2's NovaLogic NovaWorld is down,
+	// and OpenNova's own data's lobby is only OpenNova's).
+	TEST_EXPECT(!check(with([](auto &c) { c.list_on_novalogic = true; })));
+	{
+		const std::vector<std::string> dfx2_rotation = { "servetst.bms" };
+		hosted::HostedSettings dfx2 = valid_settings(3);
+		dfx2.missions = dfx2_rotation;
+		TEST_EXPECT(!check(dfx2));
+		dfx2.list_on_novalogic = true;
+		TEST_EXPECT(refused(dfx2, "list_on_novalogic"));
+		hosted::HostedSettings own = valid_settings(4);
+		own.missions = dfx2_rotation;
+		TEST_EXPECT(!check(own));
+		own.list_on_novalogic = true;
+		TEST_EXPECT(refused(own, "list_on_novalogic"));
+	}
 	TEST_EXPECT(refused(with([](auto &c) { c.game_name = ""; }), "game_name"));
 	TEST_EXPECT(refused(with([](auto &c) { c.game_name = "   "; }), "game_name"));
 	TEST_EXPECT(refused(with([](auto &c) { c.game_name = std::string(32, 'n'); }), "game_name"));

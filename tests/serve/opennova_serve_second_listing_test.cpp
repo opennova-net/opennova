@@ -234,13 +234,15 @@ int main() {
 		}
 		CHECK(both);
 	}
-	// The match's own NovaWorld facts stay the first listing's, and both registrations carry the
-	// match's AppId, which a joiner's APPID must match whichever service sent it.
+	// The match's own NovaWorld facts stay the first listing's. Each registration carries an AppId
+	// of its own, as each retail host request mints one, and the match holds both: a joiner's
+	// APPID says which service sent it.
 	CHECK(ctx.novaworld_gsid == server.lister()->host_role().gsid());
 	CHECK(ctx.nwu_session_role == ClientSession::kSessionRoleHosting);
-	CHECK(server.second_lister()->host_role().app_id() == server.lister()->host_role().app_id());
+	CHECK(server.second_lister()->host_role().app_id() != server.lister()->host_role().app_id());
 	CHECK(a->app_id == std::to_string(ctx.novaworld_app_id));
-	CHECK(b->app_id == std::to_string(ctx.novaworld_app_id));
+	CHECK(b->app_id == std::to_string(ctx.novaworld_second_app_id));
+	CHECK(ctx.novaworld_second_app_id != 0 && !ctx.novaworld_second_join_tickets_armed);
 
 	// --- A joiner the second service sent: the .joi's APPID and the CD identity cookie under the
 	// PCIDKey that service lists (each as the existing NovaWorld test builds them, /NWJoin.dll's
@@ -315,6 +317,12 @@ int main() {
 			CHECK(b->roster[0].player_name == "SecondJoiner");
 			CHECK(b->roster[0].ip_and_port == "127.0.0.1:" + std::to_string(joiner_port));
 		}
+		// The match tagged the joiner as the second listing's: its APPID was that listing's.
+		bool tagged = false;
+		for (const inmatch::NapiNPConnection &conn : ctx.np_protocol.connection_list)
+			if (conn.type == inmatch::NapiNPConnection::kTypeServerSide && conn.peer.port == joiner_port)
+				tagged = conn.novaworld_listing == 1;
+		CHECK(tagged);
 	}
 
 	// --- A ServerCommand from the second service runs on the match, saved as the first's are.
@@ -364,8 +372,9 @@ int main() {
 	holder.reset();
 
 	// --- A re-host the second service refuses (its ServerHostResult refusing the hosting that
-	// stood, as after its session's reconnect) is no stop of that service's: the second listing
-	// goes, the next try is scheduled, and the first listing and the match go on.
+	// stood, as after its session's reconnect) is that service's decision: the second listing
+	// ends for the run with no retry, as a stock host's refused listing ends, and the first
+	// listing and the match go on.
 	{
 		const fs::path work_rehost = serve_test::fresh_dir("second_listing_rehost_cwd");
 		serve_test::ScopedCwd rehost_cwd(work_rehost);
@@ -398,8 +407,7 @@ int main() {
 				CHECK(!rehost->second_lister()->hosting());
 				CHECK(rehost->frame(kFrame));
 				CHECK(rehost->second_lister() == nullptr);
-				CHECK(!rehost->second_listing_stopped());
-				CHECK(rehost->second_listing_retry_at_ms() != 0);
+				CHECK(rehost->second_listing_stopped());
 				CHECK(rehost->running());
 				CHECK(rehost->lister() != nullptr && rehost->lister()->hosting());
 			}

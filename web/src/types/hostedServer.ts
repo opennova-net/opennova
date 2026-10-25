@@ -104,6 +104,9 @@ export interface HostedDataSet {
   // The host screen's ranges, per setting.
   limits: Record<HostedIntField, SettingRange>;
   expansions: HostedExpansionOption[];
+  // Whether a server on it may also list on NovaLogic's NovaWorld (Joint
+  // Operations alone). A reply that leaves it out reads as false.
+  novalogic_listing?: boolean;
 }
 
 // A data set a server runs, as its row names it.
@@ -320,8 +323,8 @@ export interface HostedServersResponse {
   // start's default); only the ones this deployment configured.
   data_sets: HostedDataSet[];
   // The service offers listing a server on NovaLogic's NovaWorld too
-  // (HostedSettings.list_on_novalogic); an operator's switch, off by default.
-  // A reply that leaves it out reads as false.
+  // (HostedSettings.list_on_novalogic): the operator's switch, on by default
+  // in a deployment. A reply that leaves it out reads as false.
   novalogic_listing: boolean;
   // The live servers by id, oldest first, then the newest 10 ended ones,
   // newest first; without their events.
