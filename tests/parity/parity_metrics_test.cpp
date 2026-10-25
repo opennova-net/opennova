@@ -2462,9 +2462,10 @@ void test_initial_rules() {
 	{
 		// The joiner's C2S 0x22 re-requests an unbound S2C 0x16 row, so it rides the
 		// 0x16's phase (order.C.0x22.phase): with the 0x16 apart from the 0x11 (the
-		// scripted case) a 0x22 sent after the 0x0A moves no order and no group; with
-		// the 0x16 in the 0x11's packet on every run the joiner answers both in one
-		// pass, the 0x22 first, and the same move fails.
+		// scripted case) a 0x22 sent after the 0x0A moves no order; with the 0x16 in the
+		// 0x11's packet on every run the joiner answers both in one pass, the 0x22 first,
+		// and the same move fails the first order. The initial grouping leaves the 0x22
+		// out either way (initial.C.0x22.grouping).
 		auto late_request = [](wire::ParityTrace trace) {
 			for (wire::ParityPacket &p : trace.packets)
 				if (p.dir == 'C' && p.tags.size() == 2 && p.tags[0] == 0x022) {
@@ -2486,7 +2487,7 @@ void test_initial_rules() {
 		const Case rode = judge_case(riding(scripted(1)), riding(scripted(2)),
 				riding(late_request(scripted(3))));
 		expect_row(rode, 'C', "first_order", "", "fail", "FIRST_ORDER_MISMATCH");
-		expect_row(rode, 'C', "initial_grouping", "", "fail", "INITIAL_PACKET_GROUPING");
+		expect_row(rode, 'C', "initial_grouping", "", "pass");
 	}
 	{
 		// A gameplay or world-page record's length and a fragment's length leave the
@@ -3752,6 +3753,34 @@ void add_tag_at(wire::ParityTrace &trace, uint64_t at, uint16_t identity) {
 	}
 }
 
+// The joiner re-requests each S2C 0x16 row whose slot it has not bound with a C2S 0x22, and the
+// 0x16 rides the 311-tick boundary, so how many 0x22 the initial stream holds is that boundary's
+// phase against the join (the final's 01tr-coop-selfnade RR against RR-aa): the C initial
+// grouping drops them (initial.C.0x22.grouping), and the tag counts still judge them.
+void test_initial_0x22_grouping() {
+	// Each run's first S2C 0x11 packet also carries a 0x16, so the 0x22 rides no sync phase
+	// (order.C.0x22.phase) and the grouping used to count it; `extra` more 0x22 records and
+	// `other` (0: none) one more C2S record of another identity.
+	auto run = [](uint32_t seed, int extra, uint16_t other) {
+		wire::ParityTrace trace = scripted(seed);
+		add_initial(trace, 'S', 0x01C, 0x016, bytes({ 7, 7, 7 }));
+		for (int i = 0; i < extra; ++i)
+			add_initial(trace, 'C', 0x00B, 0x022, bytes({ 1, 0xF7, 0x1C }));
+		if (other != 0)
+			add_initial(trace, 'C', 0x00B, other, bytes({ 1 }));
+		return trace;
+	};
+	// One more 0x22: without the rule the grouping is one record off RR's.
+	expect_row(judge_case(run(1, 0, 0), run(2, 0, 0), run(3, 1, 0), "OO"), 'C',
+			"initial_grouping", "", "pass");
+	// Another record still moves the grouping.
+	expect_row(judge_case(run(1, 0, 0), run(2, 0, 0), run(3, 0, 0x033), "OO"), 'C',
+			"initial_grouping", "", "fail", "INITIAL_PACKET_GROUPING");
+	// The 0x22 count is still the tag count's: two more fail it.
+	expect_row(judge_case(run(1, 0, 0), run(2, 0, 0), run(3, 2, 0), "OO"), 'C', "tag_count",
+			"0x22:0", "fail");
+}
+
 // The final's 01tr-coop-aikill OO (LX-s37, L4-s40): the joiner died on the same 0x0A after the
 // staging on every cell, but OO's window opened one uplink period later, so its occupancy held
 // 7 samples against RR's 8 (medians 2800 against 2806) and the 8-sample floor failed it. Where
@@ -4459,6 +4488,7 @@ int main() {
 	test_entity_mission_split();
 	test_header_only_acks();
 	test_priority_death_slice();
+	test_initial_0x22_grouping();
 	test_round_target();
 	if (g_failures) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);

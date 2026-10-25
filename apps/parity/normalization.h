@@ -344,7 +344,19 @@ inline constexpr Normalization kNormalizations[] = {
 			"the 0x16 apart (cp04-objcoop-deploy RR 0x22 first, RR-aa 0x0A first) and send "
 			"them in one packet, the 0x22 first, every time it rode along (RR-aa on ten cases, "
 			"RR and OR on four each). A pair where either run's first 0x11 packet carries no "
-			"0x16 leaves the 0x22 out of the C2S first-occurrence order and initial grouping" },
+			"0x16 leaves the 0x22 out of the C2S first-occurrence order (the initial grouping "
+			"leaves it out always: initial.C.0x22.grouping)" },
+	{ "initial.C.0x22.grouping", MaskKind::Field, 'C', 0x022, "PLAYER_SYNC_REQUEST", 0,
+			"the joiner re-requests each S2C 0x16 row whose slot its table has not bound with a "
+			"C2S 0x22 {slot, 0xF7, 0x1C} (NapiNPClientMsg_PlayerList @0x42FAE0: the unbound-slot "
+			"test @0x42FC05, the queue call @0x42FC35), and the host broadcasts the 0x16 every "
+			"311 ticks (Server_TickUpdate @0x51D7E0: the compare @0x51D901, the scoreboard call "
+			"@0x51D90D), so how many lists land before the slot binds, and so how many 0x22 the "
+			"initial C2S stream holds, is that boundary's phase against the join: the final's "
+			"01tr-coop-selfnade RR against RR-aa (one more 0x22, the grouping d 1), and every "
+			"stored d 1 C initial-grouping A/A (drive, aikill, selfnade, cp04; 21 cases "
+			"widened). The C initial grouping drops the 0x22 records; the tag counts and the "
+			"first order (order.C.0x22.phase) still judge them" },
 
 	// --- packet grouping keys
 	{ "group.S.0x0a.length", MaskKind::GroupLength, 'S', 0x00A, "PER_FRAME_UPDATE", 0,

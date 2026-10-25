@@ -52,10 +52,9 @@ bool spawn_pump_add_at(const std::vector<wire::ParityWireRecord> &records, size_
 // identity (a FirstOrder exclusion) leaves the key, and a packet left with no
 // record drops out. A boundary-tolerant direction yields one element per record,
 // its packet's flags with its framing, so a merged or split packet costs nothing.
-// With `sync_phase` the C2S 0x22 re-requests leave too (order.C.0x22.phase); the
-// S2C 0x10 pages leave the key and the stream stands as one element at its first
-// page (group.S.0x10.run).
-std::vector<std::string> initial_groups(const RunFacts &run, char dir, bool sync_phase) {
+// The C2S 0x22 re-requests leave too (initial.C.0x22.grouping); the S2C 0x10 pages leave
+// the key and the stream stands as one element at its first page (group.S.0x10.run).
+std::vector<std::string> initial_groups(const RunFacts &run, char dir) {
 	static_assert(has_normalization("packet.sid_seq_ack"));
 	static_assert(has_normalization("order.S.0x16"));
 	static_assert(has_normalization("initial.C.pump_boundary"));
@@ -104,7 +103,17 @@ std::vector<std::string> initial_groups(const RunFacts &run, char dir, bool sync
 				++loadout_replies;
 				continue;
 			}
-			if (dir == 'C' && sync_phase && record.full_tag == 0x022)
+			// The joiner re-requests each S2C 0x16 row whose slot its table has not bound with a
+			// C2S 0x22 [orig: NapiNPClientMsg_PlayerList @0x42FAE0 (the unbound-slot test
+			// @0x42FC05, the queue call @0x42FC35)], and the host broadcasts the 0x16 every 311
+			// ticks [orig: Server_TickUpdate @0x51D7E0 (the compare @0x51D901, the scoreboard
+			// call @0x51D90D)]: how many lists land before the slot binds, and so how many 0x22
+			// the initial stream holds, is that boundary's phase against the join (the final's
+			// 01tr-coop-selfnade RR against RR-aa, one more 0x22). The tag counts and the first
+			// order (order.C.0x22.phase) judge the 0x22; the grouping compares the rest
+			// (initial.C.0x22.grouping).
+			static_assert(has_normalization("initial.C.0x22.grouping"));
+			if (dir == 'C' && record.full_tag == 0x022)
 				continue;
 			if (!first_order_excluded(dir, record.full_tag)) {
 				kept.records.push_back(record);
@@ -447,10 +456,7 @@ MetricValue compare_records(char dir, uint16_t identity, const std::vector<std::
 
 void compare_initial(
 		const RunFacts &rr, const RunFacts &other, char dir, std::vector<MetricValue> &out) {
-	const bool sync_phase =
-			dir == 'C' && (sync_request_phase_bound(rr) || sync_request_phase_bound(other));
-	const std::vector<std::string> ga = initial_groups(rr, dir, sync_phase),
-								   gb = initial_groups(other, dir, sync_phase);
+	const std::vector<std::string> ga = initial_groups(rr, dir), gb = initial_groups(other, dir);
 	const char *unit = group_boundary_tolerant(dir) ? " records" : " groups";
 	MetricValue grouping = make_metric(dir, "initial_grouping", "", "INITIAL_PACKET_GROUPING");
 	grouping.distance = double(edit_distance(ga, gb));
