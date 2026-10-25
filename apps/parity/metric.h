@@ -58,7 +58,8 @@ struct CompareOptions {
 	// join RR's row->CRC oracle.
 	const RunFacts *oracle_pool = nullptr;
 	// The compare is RR against RR-aa: the A/A floor keeps retail's measured variance, so
-	// the subject-only reductions (entity.capture_singleton) skip nothing here.
+	// the subject-only reductions (entity.capture_singleton, uplink.priority_death_slice)
+	// skip nothing here.
 	bool aa = false;
 };
 

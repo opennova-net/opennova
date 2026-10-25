@@ -562,8 +562,7 @@ void compare_uplinks(
 	// Retail's own window-to-death spans part by more than the witnessed one period (x5's
 	// 01tr-coop-aikill: RR 11, RR-aa 7 samples), and a death-cut A/A made comparable would
 	// take that excuse from a subject two short (x5's OO, 6).
-	const bool death_slice =
-			!aa && occupancy_ends_at_death(rr) && occupancy_ends_at_death(other);
+	const bool death_slice = !aa && occupancy_ends_at_death(rr) && occupancy_ends_at_death(other);
 	for (int slot = 0; slot < 4; ++slot) {
 		auto scores = [&occupied, slot](const std::vector<const U *> &states) {
 			std::vector<double> out;
