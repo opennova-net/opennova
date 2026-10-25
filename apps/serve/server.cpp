@@ -993,7 +993,8 @@ void Server::set_lobby_text(Lister &lister) {
 }
 
 // The socket's second session lane. OpenNova's own composition, none of retail's: a stock host
-// lists on the one service its gate names. Everything below is the second listing's policy: it
+// lists on the one service its gate names (D-NET-1385, ADR 0068). Everything below is the
+// second listing's policy: it
 // waits for the starting map (the first listing's hosting holds the boot, retail's order; the
 // second never does), publishes its first full lists the moment it hosts, as a mission start
 // would, and its service's stop delists it there alone for the rest of the run (no retry, out of

@@ -15,7 +15,7 @@
 // (on_command).
 //
 // A server listed on a second service as well (ServeOptions::also_master_host,
-// none of retail's: a stock host lists on one) lists the same match there through
+// none of retail's: a stock host lists on one; D-NET-1385, ADR 0068) lists the same match there through
 // SecondListing: the second lister's host role reads the same columns and runs
 // the same server-info refresh (set_second), and its ServerCommands run on the
 // match. The match's own NovaWorld facts stay the first listing's: its GSID is
