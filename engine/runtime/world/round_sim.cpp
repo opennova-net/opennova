@@ -2055,11 +2055,13 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // misnomer: its transformed min/max bone points and the extent product
         // it computes are dead locals, and its one observable effect is the
         // full-volume positional play of the GLASS_SMASH trigger set at the hit
-        // point. NOTHING recomputes collision bounds, in retail or here: the bit
-        // removes the section from the DRAW (`item_hidden_sections` ->
-        // inmatch/present_rows.cpp) and from the person bone-sphere walks
-        // (collision_query.cpp `collision_raycast_person_sections`,
-        // collision_trace.cpp), while the item CFAC face walk consults only the
+        // point. NOTHING recomputes collision bounds, in retail or here, and the
+        // pane stays DRAWN: the bldg world callback collapses only +0x138 and the
+        // occlusion word, and only the person bone walk reads this bit for a draw
+        // (`item_hidden_sections`) [orig: BoneCallback_bldg_World @0x4E21A0 (the
+        // read @0x4E22CF); Entity_BuildBoneTransformMatrices @0x4B1290 (the test
+        // @0x4B1F1D)]. The person bone-sphere walks skip it (collision_query.cpp,
+        // collision_trace.cpp); the item CFAC face walk consults only the
         // matrix-disabled bit, so a shot-out pane stays ray-visible; whether a
         // round continues is the material-energy decision above.
         // [orig: the face walk's only per-section gate is `(boneMatrix+60) & 3`

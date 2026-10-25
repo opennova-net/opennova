@@ -953,8 +953,9 @@ int test_class_scoring_and_explosion_draws() {
 // +0x894 / +0x895 and 5 / 6 at +0x896 / +0x897: a stopped rotor hides 2, 4 and
 // 6, a rotor faster than 0x28F5C27 hides 1 and 3, a slower one 2 and 4,
 // exactly 0x28F5C27 neither pair, and Flags 0x2000 adds 5. The hides OR with
-// the section and husk piece masks; a row under another render tag (no bytes)
-// hides nothing by them.
+// the husk piece mask, while a +0x134 section stays drawn (the callback reads
+// +0x138 alone); a row under another render tag (no bytes) hides nothing by
+// them.
 // [orig: Entity_BuildAndApplyBoneMatrices @0x48F210 (the collapse test
 //  @0x48F39D; Flags & 0x2000 @0x48F3B2..0x48F3CE; +0x460 == 0
 //  @0x48F3D4..0x48F3F0; above @0x48F3F6..0x48F416 / @0x48F43D..0x48F458;
@@ -983,7 +984,7 @@ int test_chel_rotor_hidden_sections() {
     e.section_mask = 1u << 9;
     e.engine_flags |= kEntityFlagHusk;
     e.spawned_piece_mask = 1u << 8;
-    CHECK(item_hidden_sections(e) == ((1u << 1) | (1u << 3) | (1u << 8) | (1u << 9)));
+    CHECK(item_hidden_sections(e) == ((1u << 1) | (1u << 3) | (1u << 8)));
     // A zero byte hides nothing.
     e.chel_section_bytes = {1, 0, 0, 0, 0, 0, 0, 0};
     e.section_mask = e.spawned_piece_mask = 0;
@@ -997,8 +998,36 @@ int test_chel_rotor_hidden_sections() {
     return 0;
 }
 
+// Only the person bone walk drops a +0x134 section from the draw: a building's
+// shot-out or blast-broken section and a vehicle's stay drawn (their world
+// callbacks collapse the +0x138 piece word alone), while a person's hides.
+// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 (the test @0x4B1F1D);
+//  BoneCallback_bldg_World @0x4E21A0 (the read @0x4E22CF);
+//  Entity_BuildDeathSectionTransforms @0x492AF0 (the test @0x492C8D)]
+int test_section_mask_draws_only_on_persons() {
+    Entity building;
+    building.kind = EntityKind::Building;
+    building.bldg_section_pivot = true;
+    building.section_mask = 1u << 3; // a pane broken by a round or a blast
+    CHECK(item_hidden_sections(building) == 0);
+    building.engine_flags |= kEntityFlagHusk;
+    building.spawned_piece_mask = 1u << 2;
+    CHECK(item_hidden_sections(building) == (1u << 2));
+    Entity vehicle;
+    vehicle.kind = EntityKind::Item;
+    vehicle.death_section_pivot = true;
+    vehicle.section_mask = 1u << 4;
+    CHECK(item_hidden_sections(vehicle) == 0);
+    Entity person;
+    person.kind = EntityKind::Organic;
+    person.section_mask = 0x00010002u;
+    CHECK(item_hidden_sections(person) == 0x00010002u);
+    return 0;
+}
+
 int main() {
     if (test_chel_rotor_hidden_sections() != 0) return 1;
+    if (test_section_mask_draws_only_on_persons() != 0) return 1;
     if (test_destroy_fade_phases() || test_destroy_phases_and_ambient() ||
             test_class_scoring_and_explosion_draws()) return 1;
     if (test_tower_sections() != 0) return 1;

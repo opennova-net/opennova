@@ -1076,7 +1076,9 @@ struct Entity {
     //  @0x54274A]
     uint8_t powerup_weapon = 0;
     // Hidden/dismembered skeletal sections (entity+0x134): a set bit removes
-    // the matching ordinal bone from person collision and presentation.
+    // the matching ordinal bone from person collision and presentation. A
+    // building's or vehicle's broken glass sets it too, but no other row's
+    // draw reads it (item_hidden_sections), so the pane stays drawn.
     // Distinct from spawned_piece_mask at +0x138.
     uint32_t section_mask = 0;
     // Host-local marker for the pool-0 corpse clone created by the person

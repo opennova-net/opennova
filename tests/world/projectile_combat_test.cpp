@@ -3077,6 +3077,11 @@ void test_material_15_breaks_the_building_glass_section() {
         const Entity *struck = world.registry.get(bh);
         CHECK(struck != nullptr);
         if (struck != nullptr) CHECK(struck->section_mask == c.expect_mask);
+        // The broken pane stays drawn: the bldg world callback collapses
+        // +0x138 alone, and only the person bone walk hides a +0x134 section.
+        // [orig: BoneCallback_bldg_World @0x4E21A0 (the read @0x4E22CF);
+        //  Entity_BuildBoneTransformMatrices @0x4B1290 (the test @0x4B1F1D)]
+        if (struck != nullptr) CHECK(item_hidden_sections(*struck) == 0u);
         bool smashed = false;
         for (const ReadyFireSound &sound : world.out.fire_sounds.drain())
             if (sound.set_name == "GLASS_SMASH") smashed = true;

@@ -410,7 +410,21 @@ uint32_t item_hidden_sections(const Entity &entity) {
     // The psec / cesp world callback hides the sector builder's sections and
     // nothing else [orig: BoneCallback_psec_World @ 0x53C130].
     if (entity.palm_sections) return palm_sector_hidden_sections(entity);
-    uint32_t mask = entity.section_mask;
+    // Only the person bone walk drops a +0x134 section from the draw. Every
+    // vehicle, building and item world callback collapses the +0x138 word
+    // alone (beside the occlusion word), so a shot-out or blast-broken
+    // section stays drawn there: its break only plays the sound, and the
+    // person ray walks read +0x134 off the entity, not from here.
+    // [orig: Entity_BuildBoneTransformMatrices @0x4B1290 (the test @0x4B1F1D),
+    //  reached from BoneCallback_org0_World @0x4E3940 (the call @0x4E3980), the
+    //  world column of rows 'org0' @0x82CF40 and 'bone' @0x82CF80;
+    //  BoneCallback_gnrc_World @0x4E2860 (the read @0x4E2972);
+    //  BoneCallback_bldg_World @0x4E21A0 (the read @0x4E22CF);
+    //  Entity_BuildDeathSectionTransforms @0x492AF0 (the test @0x492C8D);
+    //  Entity_BuildAndApplyBoneMatrices @0x48F210 (the test @0x48F39D);
+    //  Render_DestroyedSections @0x449EF0 (the test @0x44A0CD);
+    //  BoneCallback_cpln_World @0x48FE90 (the test @0x48FFFF)]
+    uint32_t mask = entity.kind == EntityKind::Organic ? entity.section_mask : 0;
     if (entity.engine_flags & kEntityFlagHusk)
         mask |= entity.spawned_piece_mask;
     return mask | chel_rotor_hidden_sections(entity);

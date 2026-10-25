@@ -23,9 +23,10 @@ bool tick_item_section_motion(World &world, Entity &entity);
 void update_physics_step(World &world, Entity &entity, int32_t &vel_x, int32_t &vel_y,
         int32_t &slide_z);
 // The draw's hidden sections and origin: the sector builder's for a psec /
-// cesp render tag (palm_sections), else the section and piece masks (with the
-// rotor / aux sections the chel render tag hides by rotor speed and the
-// airborne flag, chel_rotor_hidden_sections) and a tower clone's husk pivot
+// cesp render tag (palm_sections), else the piece mask, a person's section
+// mask (no other row's draw reads it) and the rotor / aux sections the chel
+// render tag hides by rotor speed and the airborne flag
+// (chel_rotor_hidden_sections); and a tower clone's husk pivot
 // under the cveh / chel / tank / cpln render tag (death_section_pivot) or the
 // section offset under the bldg render tag (bldg_section_pivot).
 uint32_t chel_rotor_hidden_sections(const Entity &entity);

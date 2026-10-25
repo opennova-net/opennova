@@ -1028,7 +1028,11 @@ int main() {
 			CHECK(!fragment->palm_sections && fragment->palm_fragment);
 			Entity *palm = w.registry.get(psec_palm_h);
 			palm->palm_state = 0;
-			CHECK(item_hidden_sections(*palm) == palm->section_mask);
+			// The gnrc callback collapses +0x138 alone: a +0x134 break stays
+			// drawn [orig: BoneCallback_gnrc_World @0x4E2860 (the read @0x4E2972)].
+			palm->section_mask = 0x4;
+			CHECK(item_hidden_sections(*palm) == 0);
+			palm->section_mask = 0;
 			std::snprintf(psec_def->render_function, sizeof(psec_def->render_function), "psec");
 			std::snprintf(gnrc_def->render_function, sizeof(gnrc_def->render_function), "gnrc");
 			fragment->palm_fragment = false;

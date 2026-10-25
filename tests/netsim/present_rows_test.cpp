@@ -111,9 +111,21 @@ bool test_world_rows_carry_the_authoritative_record() {
 					static_cast<int>(r[w::PF_BMS_ID]) == 4242 && static_cast<int>(r[w::PF_NET_ID]) == 99,
 			"the placed identity rides kind/index/bms/net") && ok;
 	ok = expect(static_cast<int>(r[w::PF_STANCE_BITS]) == 2, "the stance latch is masked to its two bits") && ok;
-	ok = expect(r[w::PF_SECTION_MASK_VALID] == 1.0f && static_cast<int>(r[w::PF_SECTION_MASK_LO]) == 2 &&
-					static_cast<int>(r[w::PF_SECTION_MASK_HI]) == 1,
-			"the section mask splits into its two 16-bit words") && ok;
+	// Only the person bone walk hides a +0x134 section: this item row's
+	// section mask stays drawn, an organic's splits into its two 16-bit words.
+	// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 (the test @0x4B1F1D)]
+	ok = expect(r[w::PF_SECTION_MASK_VALID] == 1.0f && static_cast<int>(r[w::PF_SECTION_MASK_LO]) == 0 &&
+					static_cast<int>(r[w::PF_SECTION_MASK_HI]) == 0,
+			"an item row's +0x134 sections stay drawn") && ok;
+	e->kind = w::EntityKind::Organic;
+	im::build_world_present_rows(context, lifecycle, rows, doors);
+	ok = expect(row_at(rows, 0)[w::PF_SECTION_MASK_VALID] == 1.0f &&
+					static_cast<int>(row_at(rows, 0)[w::PF_SECTION_MASK_LO]) == 2 &&
+					static_cast<int>(row_at(rows, 0)[w::PF_SECTION_MASK_HI]) == 1,
+			"a person's section mask splits into its two 16-bit words") && ok;
+	e->kind = w::EntityKind::Item;
+	im::build_world_present_rows(context, lifecycle, rows, doors);
+	r = row_at(rows, 0);
 	ok = expect(r[w::PF_ALIVE] == 1.0f && r[w::PF_HIDDEN] == 0.0f, "alive/hidden mirror the record") && ok;
 	ok = expect(r[w::PF_CARRIER_HANDLE] == -1.0f, "a free-standing row publishes the -1 carrier sentinel") && ok;
 	ok = expect(r[w::PF_LOCAL_VIEW_SUPPRESSED] == 0.0f, "no local mount: nothing is culled") && ok;
