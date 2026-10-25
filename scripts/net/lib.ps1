@@ -40,6 +40,30 @@ function Get-NetHarnessBytesSha256 {
 # alive after S2C 0x13 and returns to the player-paced deployment state; it does
 # not automatically emit another C2S 0x0E. The post-death class is opt-in so an
 # initial join can never satisfy in-match readiness before it has entered play.
+#
+# The post-death state is the DEATH screen with the pick owed, and a medic's
+# revive window changes nothing in it. Retail opens death.mnu DEATH for a
+# dead player in a session [orig: Render_ProcessMainSceneFrame @0x5CA0F0 -
+# is_in_session @0x5CAB2B, entity+0x24 bit 2 @0x5CAB54, UI_OpenMenuScreen
+# called @0x5CAB83]. It shows the spawn list, Default Spawn row first, for
+# any dead player [orig: UI_UpdateDeathScreenContent @0x5536A0 - the gate
+# @0x5538C6..0x5538D1, CWnd_SetShown called @0x553AA0, UIList_AddRow called
+# @0x553B4E]. The revive window adds only the medic statics, which hide once
+# S2C 0x3A sets the being-revived latch [orig: UI_UpdateDeathScreenContent
+# @0x5536A0 - @0x553EBA..0x553EDF; NapiNPClientMsg_0x03A @0x422680]. The
+# revive's S2C 0x1E event 38 is a feed line [orig: NetPacket_HandleGameEvent
+# @0x426270 - Chat_AddMessageChannel2 called @0x426438]. The pick stays the
+# player's own, revived or not [orig: DeathScreen_OnSpawnListSelect @0x553630
+# - Input_QueueEvent(12) called @0x55364D; Input_HandleActionBinding
+# @0x49AD40 - case 12 @0x49B024].
+#
+# The stage "awaiting the player's deployment pick" alone proves that no pick
+# has gone out since the death: the death resets it, and a pick moves it to
+# the release stage (JoinerConnection::begin_redeployment and
+# prepare_deployment_pick). The witness's deployment_pick_sent is a different
+# fact: it records the join-time auto pick parity_joiner_ready sent once in
+# this process. A spawn-zone mission's join sends that pick
+# (cp04-objcoop-revive), so the class does not read it.
 function Get-OpenNovaJoinerReadinessClass {
     param(
         [Parameter(Mandatory = $true)] $State,
@@ -110,7 +134,6 @@ function Get-OpenNovaJoinerReadinessClass {
             [bool] $State.local_player -and
             -not [bool] $State.deploy_hold_ready -and
             [bool] $State.deployment_pick_pending -and
-            -not [bool] $State.deployment_pick_sent -and
             [bool] $State.deploy_presented -and
             [int] $State.joiner_phase -eq 3 -and
             [string] $State.join_admission_stage -ceq
@@ -178,6 +201,34 @@ function ConvertTo-OpenNovaJoinerReadinessSnapshot {
         deploy_presented = [bool] $State.deploy_presented
         motion_complete = [bool] $State.motion_complete
     }
+}
+
+# One line naming the witness fields a refused readiness state turns on, as
+# observed (a missing field reads <missing>), for the runner's refusal note and
+# throw.
+function Format-OpenNovaJoinerReadinessFields {
+    param($State)
+
+    if ($null -eq $State) { return 'state=<none>' }
+    $names = @(
+        'in_match', 'local_player', 'deploy_presented', 'deploy_hold_ready',
+        'deployment_pick_pending', 'deployment_pick_sent', 'joiner_phase',
+        'join_admission_stage', 'self_handle', 'session_lost', 'join_error',
+        'motion_complete', 'ticks_msec'
+    )
+    $parts = foreach ($name in $names) {
+        $property = $State.PSObject.Properties[$name]
+        if ($null -eq $property) {
+            "$name=<missing>"
+        }
+        elseif ($name -in @('join_admission_stage', 'join_error')) {
+            "$name='$([string] $property.Value)'"
+        }
+        else {
+            "$name=$([string] $property.Value)"
+        }
+    }
+    return ($parts -join ' ')
 }
 
 # Return the exact 616-byte BMS header and its authoritative printable mission

@@ -435,9 +435,15 @@ so the default suite is unchanged. An extension case may add:
   `onhook_host_lan`): SPACE until a local player stands, the screen's auto team
   pick (`Input_HandleSpecialKeys @0x49CA06..0x49CA14`, event 12 with 0xFFFE).
   An OpenNova joiner's `auto_deploy` sends the same pick
-  (`parity_joiner_ready`). onHook's `deploy` defaults off for JO, so without
-  the key a retail joiner never stands and the `in_match` wait times out (x5's
-  `cp04-objcoop-revive` RR and RR-aa; `cp04-objcoop-deploy` holds on purpose).
+  (`parity_joiner_ready`). That join-time pick stays the witness's
+  `deployment_pick_sent` for the rest of the process. So the closing check's
+  post-death class does not read that flag: it reads the stage, which says
+  whether a pick has gone out since the death (`lib.ps1`). This is the class
+  for a joiner that dies and is revived and still owes its pick on the DEATH
+  screen (`cp04-objcoop-revive` RO). onHook's `deploy` defaults off for JO, so
+  without the key a retail joiner never stands and the `in_match` wait times
+  out (x5's `cp04-objcoop-revive` RR and RR-aa; `cp04-objcoop-deploy` holds on
+  purpose).
   The summary records it (`deploy_zones`).
 - `serve_only`: the host serves only (`-ServeOnly`; the summary's `host_kind`
   is `serve_only`). A retail host runs as retail's Serve Only server

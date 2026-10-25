@@ -4050,6 +4050,15 @@ function Wait-OpenNovaJoinerAfterRotation {
     }
 }
 
+# A refused joiner readiness state names the witness fields it turned on, in a
+# PARITY_RUN_NOTE and in the text the caller throws.
+function Write-JoinerReadinessRefusal {
+    param([Parameter(Mandatory = $true)] [string] $Reason, $State)
+    $message = "$Reason ($(Format-OpenNovaJoinerReadinessFields -State $State))"
+    Write-Host "PARITY_RUN_NOTE joiner readiness refused: $message"
+    return $message
+}
+
 function Wait-OpenNovaJoinerReady {
     param(
         [int] $TimeoutSeconds = 240,
@@ -4104,7 +4113,8 @@ function Wait-OpenNovaJoinerReady {
             -AllowPostDeathRedeploy:$AllowPostDeathRedeploy `
             -AllowScenarioDeploy:$AllowScenarioDeploy
         if ($readinessClass -eq 'invalid') {
-            throw "OpenNova joiner witness reports an invalid admission/liveness state"
+            throw (Write-JoinerReadinessRefusal -State $ready `
+                -Reason "OpenNova joiner witness reports an invalid admission/liveness state")
         }
         $ticksMsec = [long] $ready.ticks_msec
         if ($ticksMsec -gt $MinimumTicksMsec -and
@@ -4349,7 +4359,8 @@ try {
                         -Initial $initialJoinerAcceptance -Final $joinerAcceptance `
                         -ReadinessMode $ReadinessMode `
                         -AllowScenarioDeploy:([bool] $script:ScenarioSpec))) {
-                    throw "OpenNova joiner deploy-hold heartbeat transition is invalid"
+                    throw (Write-JoinerReadinessRefusal -State $joinerAcceptance `
+                        -Reason "OpenNova joiner deploy-hold heartbeat transition is invalid")
                 }
                 $script:Acceptance = [pscustomobject]@{
                     retail_host = [pscustomobject]@{
@@ -4422,7 +4433,8 @@ try {
                         -Initial $initialJoinerAcceptance -Final $joinerAcceptance `
                         -ReadinessMode $ReadinessMode -AllowPostDeathRedeploy `
                         -RequireMotionComplete)) {
-                    throw "OpenNova joiner in-match/post-death heartbeat transition is invalid"
+                    throw (Write-JoinerReadinessRefusal -State $joinerAcceptance `
+                        -Reason "OpenNova joiner in-match/post-death heartbeat transition is invalid")
                 }
             }
             $script:Acceptance = [pscustomobject]@{
@@ -4630,7 +4642,8 @@ try {
                     -AllowPostDeathRedeploy:($ReadinessMode -eq 'in_match') `
                     -AllowScenarioDeploy:([bool] $script:ScenarioSpec) `
                     -RequireMotionComplete)) {
-                throw "OpenNova joiner steady-window heartbeat transition is invalid"
+                throw (Write-JoinerReadinessRefusal -State $joinerAcceptance `
+                    -Reason "OpenNova joiner steady-window heartbeat transition is invalid")
             }
             $script:Acceptance = [pscustomobject]@{
                 host_pid = $script:OpenNovaHost.Id
