@@ -58,6 +58,7 @@
 #include "jobs/worker_pool.h"
 #include "net_http.h"
 #include "net_sockets.h"
+#include "novalogic_lobbies.h"
 #include "novaworld/billing_fake_stripe.h"
 #include "novaworld/fake_mailer.h"
 #include "nw_udp_listener.h"
@@ -4008,6 +4009,85 @@ int test_server_info(Harness &h) {
 		TEST_EXPECT(refused.transport_ok && refused.code == 503);
 		TEST_EXPECT(body_text(refused) == "{\"error\":\"no_public_ipv4\"}");
 	}
+	return 0;
+}
+
+// GET /api/lobbies/novalogic, the Lobbies page's list of the servers on NovaLogic's
+// NovaWorld: with ONNET_NOVALOGIC_LOBBIES off (the harness listener, as every listener
+// given no list) enabled false, no servers and nothing fetched. A listener of its own
+// given a list over a scripted feed (minted by gsb_build_response, never the network)
+// answers its first read at once with no list yet, starting the one fetch, and once it
+// ran the feed's servers, UTF-8, with no host address; /api/lobbies and
+// /api/lobbies/<rid> beside it answer as ever.
+int test_novalogic_lobbies_route(Harness &h) {
+	auto reply = h.send("GET", "/api/lobbies/novalogic");
+	if (reply.code != 200) std::fprintf(stderr, "  off: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	TEST_EXPECT(header_value(reply, "Content-Type") == "application/json");
+	auto json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && !json["enabled"].b() && !json["failing"].b());
+	TEST_EXPECT(json["servers"].size() == 0);
+	TEST_EXPECT(json["fetchedAt"].t() == crow::json::type::Null);
+	TEST_EXPECT(json["ageSeconds"].t() == crow::json::type::Null);
+
+	opennova::GsbServerEntry row;
+	row.rid = 0x0A0027A0;
+	row.ip = "203.0.113.7";
+	row.server_name = "Caf\xE9 Ops";
+	row.mission_name = "AS - Kombang Valley";
+	row.game_type = "AAS";
+	row.players = 5;
+	row.max_players = 32;
+	row.password = "Y";
+	const std::vector<uint8_t> feed = opennova::gsb_build_response({ row });
+	std::atomic<int> fetches{ 0 };
+	nws::NovaLogicLobbies list([&]() {
+		++fetches;
+		net::HttpReply answer;
+		answer.transport_ok = true;
+		answer.connected = true;
+		answer.code = 200;
+		answer.body = feed;
+		return answer;
+	});
+	nws::ServerConfig config;
+	config.http_port = 0;
+	config.web_dist_dir = h.temp_root / "web_dist";
+	config.templates_dir = h.temp_root / "templates";
+	config.static_dir = h.temp_root / "static";
+	test_redis::TestRedis redis;
+	nws::HttpListener listener(h.pool, redis.pool());
+	listener.set_novalogic_lobbies(&list);
+	TEST_EXPECT(listener.start(config));
+
+	reply = h.send_to(listener.bound_port(), "GET", "/api/lobbies/novalogic");
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && json["enabled"].b() && json["servers"].size() == 0);
+	TEST_EXPECT(json["fetchedAt"].t() == crow::json::type::Null);
+	list.settle();
+	reply = h.send_to(listener.bound_port(), "GET", "/api/lobbies/novalogic");
+	const std::string body = body_text(reply);
+	json = crow::json::load(body);
+	if (!json || json["servers"].size() != 1) std::fprintf(stderr, "  on: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.transport_ok && reply.code == 200 && json);
+	TEST_EXPECT(json["enabled"].b() && !json["failing"].b());
+	TEST_EXPECT(json["fetchedAt"].t() == crow::json::type::String && json["ageSeconds"].i() == 0);
+	TEST_EXPECT(json["servers"].size() == 1);
+	TEST_EXPECT(json["servers"][0]["id"].i() == 0x0A0027A0);
+	TEST_EXPECT(str(json["servers"][0]["serverName"]) == "Caf\xC3\xA9 Ops");
+	TEST_EXPECT(str(json["servers"][0]["mission"]) == "AS - Kombang Valley");
+	TEST_EXPECT(str(json["servers"][0]["gameType"]) == "AAS");
+	TEST_EXPECT(json["servers"][0]["players"].i() == 5 && json["servers"][0]["maxPlayers"].i() == 32);
+	TEST_EXPECT(json["servers"][0]["locked"].b());
+	TEST_EXPECT(body.find("203.0.113.7") == std::string::npos);
+	TEST_EXPECT(fetches == 1);
+
+	TEST_EXPECT(h.send_to(listener.bound_port(), "GET", "/api/lobbies").code == 200);
+	reply = h.send_to(listener.bound_port(), "GET", "/api/lobbies/4242");
+	TEST_EXPECT(reply.code == 404 && str(crow::json::load(body_text(reply))["error"]) == "not_found");
+	listener.stop();
+	TEST_EXPECT(fetches == 1);
 	return 0;
 }
 
@@ -8919,6 +8999,7 @@ int run(Harness &h, const char *part) {
 		{ "titles", "dfx2_activation", test_dfx2_activation },
 		{ "titles", "unknown_path_404", test_unknown_path_404 },
 		{ "titles", "server_info", test_server_info },
+		{ "titles", "novalogic_lobbies_route", test_novalogic_lobbies_route },
 		{ "titles", "healthz", test_healthz },
 		{ "lobby", "admin_host_push", test_admin_host_push },
 		{ "owner_push", "owner_host_push", test_owner_host_push },

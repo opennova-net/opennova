@@ -91,6 +91,7 @@ ServerConfig ServerConfig::from_env() {
 	if (auto v = getenv_safe("ONNET_RETAIL_PROXY")) c.retail_proxy = v;
 	if (auto v = getenv_safe("ONNET_BOOTSTRAP_ADMIN")) c.bootstrap_admin = v;
 	c.require_host_key = getenv_bool("ONNET_REQUIRE_HOST_KEY", c.require_host_key);
+	c.novalogic_lobbies = getenv_bool("ONNET_NOVALOGIC_LOBBIES", c.novalogic_lobbies);
 	c.cd_key_auto_mint = getenv_bool("ONNET_CD_KEY_AUTO_MINT", c.cd_key_auto_mint);
 	c.embedded_jo_host = getenv_bool("ONNET_EMBEDDED_JO_HOST", c.embedded_jo_host);
 	if (auto v = getenv_safe("ONNET_SITE_URL")) {

@@ -35,6 +35,7 @@ struct ServerConfig;
 class RedisPool;
 class Watchdog;
 class ObjectStore;
+class NovaLogicLobbies;
 
 namespace billing { class Billing; }
 namespace catalog { struct GameRow; }
@@ -216,6 +217,12 @@ public:
 	// each mail is logged as not sent.
 	void set_mail_enabled(bool on) { mail_on_ = on; }
 
+	// The list of the servers on NovaLogic's NovaWorld that GET
+	// /api/lobbies/novalogic answers from (novalogic_lobbies.h): web's while
+	// ONNET_NOVALOGIC_LOBBIES is on. Set before start(); it must outlive the
+	// listener. Null (the default): the route answers enabled false.
+	void set_novalogic_lobbies(NovaLogicLobbies *list) { novalogic_lobbies_ = list; }
+
 	HttpListener(const HttpListener &) = delete;
 	HttpListener &operator=(const HttpListener &) = delete;
 
@@ -364,6 +371,8 @@ private:
 	bool novalogic_listing_ = false;
 	// The outbound mail (set_mail_enabled).
 	bool mail_on_ = false;
+	// NovaLogic's servers for the Lobbies page (set_novalogic_lobbies).
+	NovaLogicLobbies *novalogic_lobbies_ = nullptr;
 	// config.web_host, set in start() before Crow runs (host_url(game) /
 	// gsb_url(game)), and config.public_host (the switcher's /api/server-info).
 	std::string web_host_;

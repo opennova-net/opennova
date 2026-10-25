@@ -210,6 +210,13 @@ struct ServerConfig {
 	// (LobbySession::set_require_host_key).
 	bool require_host_key = false;
 
+	// ONNET_NOVALOGIC_LOBBIES=1: web's Lobbies page also lists the servers on
+	// NovaLogic's NovaWorld, fetched from NovaLogic's live service at most once
+	// per a few minutes (apps/novaworld_web/novalogic_lobbies.h). Off by
+	// default, so no test, dev stack or CI run contacts NovaLogic; a
+	// deployment turns it on (infra/aws var.novalogic_lobbies). Web's alone.
+	bool novalogic_lobbies = false;
+
 	// The site's origin (ONNET_SITE_URL, its trailing '/' dropped): the links
 	// the welcome mail and the password reset mail carry (accounts/mailer.h). Billing
 	// reads the same variable for its return URLs (billing/billing_config.h).

@@ -481,7 +481,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->stats.register_routes(impl_->app);
 	impl_->console.set_handler_threads(handler_threads());
 	impl_->console.register_routes(impl_->app);
-	impl_->lobbies.register_routes(impl_->app);
+	impl_->lobbies.register_routes(impl_->app, novalogic_lobbies_);
 	impl_->cd_keys.configure(config);
 	impl_->cd_keys.register_routes(impl_->app);
 	impl_->billing.set_billing(billing_);
@@ -904,7 +904,7 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 void HttpListener::register_public_api_routes() {
 	auto &app = impl_->app;
 
-	// GET /api/lobbies and /api/lobbies/<rid> are lobby_routes.h's.
+	// GET /api/lobbies, /api/lobbies/<rid> and /api/lobbies/novalogic are lobby_routes.h's.
 
 	// Phase I.5: aggregate counts for the Vue dashboard.
 	CROW_ROUTE(app, "/api/stats")([this]() {

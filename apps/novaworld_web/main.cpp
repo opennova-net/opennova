@@ -22,6 +22,7 @@
 #include "infra/infra_status.h"
 #include "infra/log_store.h"
 #include "infra/metrics_store.h"
+#include "novalogic_lobbies.h"
 #include "program/program.h"
 #include "redis_client.h"
 #include "updater/update_listener.h"
@@ -32,6 +33,7 @@
 
 #include <cstdio>
 #include <exception>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -171,6 +173,18 @@ int run(const program::Boot &boot) {
 	else
 		std::printf("[boot] costs: none read (%s)\n", cost_store.unavailable().c_str());
 
+	// The servers on NovaLogic's NovaWorld for the Lobbies page
+	// (novalogic_lobbies.h): fetched from NovaLogic's live service only with
+	// ONNET_NOVALOGIC_LOBBIES on, at most once per a few minutes while visitors
+	// look. Declared before the HTTP listener, which it outlives.
+	std::unique_ptr<NovaLogicLobbies> novalogic_lobbies;
+	if (config.novalogic_lobbies) {
+		novalogic_lobbies = std::make_unique<NovaLogicLobbies>();
+		std::printf("[boot] lobbies: NovaLogic's server list on (%s)\n", NovaLogicLobbies::kUrl);
+	} else {
+		std::printf("[boot] lobbies: NovaLogic's server list off (ONNET_NOVALOGIC_LOBBIES)\n");
+	}
+
 	// The 404s the routes record, flushed by the main loop into
 	// unknown_messages (GET /api/unknowns reads them there).
 	UnknownTracker unknown_tracker;
@@ -188,6 +202,7 @@ int run(const program::Boot &boot) {
 	http.set_metrics_store(&metrics_store);
 	http.set_alarm_store(&alarm_store);
 	http.set_cost_store(&cost_store);
+	http.set_novalogic_lobbies(novalogic_lobbies.get());
 	// A start's at_capacity and the list's `full` ask the fleet's planner.
 	http.set_fleet_placement(hosting.fleet.placement);
 	// The images the release pins: the launch templates' (a fleet roll's

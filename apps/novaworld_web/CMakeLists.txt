@@ -12,8 +12,11 @@ add_library(opennova_novaworld_web_core STATIC
     host_routes.cpp
     # The admin's NovaWorld sessions view.
     connection_routes.cpp
-    # The lobby browser's listings and a listing's page with its scoreboard.
+    # The lobby browser's listings and a listing's page with its scoreboard,
+    # and the list of NovaLogic's servers it shows beside them
+    # (ONNET_NOVALOGIC_LOBBIES).
     lobby_routes.cpp
+    novalogic_lobbies.cpp
     # CD keys (migration 0015): the keys, the DFX2 activations, their routes.
     cd_keys.cpp
     cd_key_routes.cpp

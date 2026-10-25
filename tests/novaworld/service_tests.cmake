@@ -417,6 +417,19 @@ if(BUILD_NOVAWORLD_HTTP)
     # below ctest's 1500 s default.
     set_tests_properties(${opennova_novaworld_web_http_routes_rows} PROPERTIES TIMEOUT 120)
 
+    # The servers on NovaLogic's NovaWorld for the Lobbies page
+    # (apps/novaworld_web/novalogic_lobbies.h), no database and no network: a scripted
+    # fetch answering a feed minted through gsb_build_response, the test's clocks; the
+    # parse to the route's JSON (UTF-8 text, the lock column, no host address), the
+    # cache (one fetch per kRefreshMs however many reads, from however many threads),
+    # every failure keeping the last good list with its age, ONNET_NOVALOGIC_LOBBIES off
+    # unless set, the feed's URL.
+    add_executable(novalogic_lobbies_test novaworld/novalogic_lobbies_test.cpp)
+    target_link_libraries(novalogic_lobbies_test PRIVATE
+        opennova_novaworld_web_core opennova_novaworld_service)
+    target_include_directories(novalogic_lobbies_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME novalogic_lobbies COMMAND novalogic_lobbies_test)
+
     # The admin's background jobs routes (apps/novaworld_web/jobs/job_routes.h over
     # job_admin.h) on the in-process Crow listener over a migrated database and a Redis
     # namespace: every route refused without an admin, the overview's counts, latency,
