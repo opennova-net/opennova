@@ -58,6 +58,7 @@ inline std::string peer_addr_ip_to_string(const PeerAddr &addr) {
 }
 
 // "a.b.c.d:port" -- the peer label the connection layer keys sessions by.
+// [orig: Napi_FormatAddress @0x62DED0]
 inline std::string peer_addr_to_string(const PeerAddr &addr) {
 	return peer_addr_ip_to_string(addr) + ":" + std::to_string(addr.port);
 }

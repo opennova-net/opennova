@@ -10,8 +10,8 @@ namespace {
 // The x87 planar norm clamps before truncation. Subtractions wrap in 32 bits.
 // [orig: Spawn_BuildMarkerBudgetList @0x529D30; selector @0x529EDD]
 int32_t planar_distance(const Entity &a, const Entity &b) {
-	const double dx = io::bam_sub(to_fixed(a.position.x), to_fixed(b.position.x));
-	const double dy = io::bam_sub(to_fixed(a.position.y), to_fixed(b.position.y));
+	const double dx = io::bam_sub(a.position.x.q16, b.position.x.q16);
+	const double dy = io::bam_sub(a.position.y.q16, b.position.y.q16);
 	return static_cast<int32_t>(std::min(2147418112.0, std::sqrt(dx * dx + dy * dy)));
 }
 bool zone_definition(const Entity &e) {
@@ -99,7 +99,7 @@ void VehicleSystem::tick_spawn_markers() {
 			marker->engine_flags &= ~1u;
 			world_.registry.for_each_in_pool(1, [&](const Entity &other) {
 				if (vehicle_or_untyped(other) && ((other.flags | other.engine_flags) & 6) == 0 &&
-						planar_distance(other, *marker) < to_fixed(other.bound_radius)) {
+						planar_distance(other, *marker) < other.bound_radius.q16) {
 					marker->flags |= 1;
 					marker->engine_flags |= 1;
 				}
@@ -120,8 +120,15 @@ void VehicleSystem::tick_spawn_markers() {
 						zone->team != static_cast<uint8_t>(vehicle->vehicle_spawn_team) ||
 						((marker->flags | marker->engine_flags) & 1) != 0)
 					continue;
+				// The marker's spawn-list group ids are the list's own tokens (atol,
+				// no offset) and the hull's side is its def's type id (the def's id
+				// less 100000), the entity's item id: "1291" names the 101291 FAV.
+				// [orig: the compare @0x52A02F..0x52A037 (group itemId == the hull
+				//  def +0x50); ItemDef_ParseProperty's spawn list @0x4A0290..0x4A029A
+				//  (ItemGroup_GetOrCreateSlot @0x49DFC0 keeps the atol), its id
+				//  @0x49EC3F..0x49EC5A (`sub eax, 186A0h` into +0x50)]
 				if (std::find(marker->vehicle_spawn_ids.begin(), marker->vehicle_spawn_ids.end(),
-							int32_t(vehicle->item_id) + 100000) == marker->vehicle_spawn_ids.end())
+							int32_t(vehicle->item_id)) == marker->vehicle_spawn_ids.end())
 					continue;
 				if (best == nullptr ||
 						direction * best->vehicle_spawn_priority <
@@ -136,7 +143,7 @@ void VehicleSystem::tick_spawn_markers() {
 					return;
 				// Wrecks participate here. A blocked best marker does not retry another.
 				const int32_t radius =
-						io::bam_add(to_fixed(other.bound_radius), to_fixed(vehicle->bound_radius));
+						io::bam_add(other.bound_radius.q16, vehicle->bound_radius.q16);
 				if (planar_distance(other, *best) < radius)
 					clear = false;
 			});

@@ -170,15 +170,90 @@ int compute_death_anim_state(int bone_index, int quadrant, int cause);
 // - 0x60000000) >> 30; atan2 scale 683565275.5764316 = 2^32/2pi]
 int death_quadrant_from_round(int32_t victim_heading_bam, float round_vel_x, float round_vel_y);
 
-// The plyr class callback's non-hit events (0 = the body update's 64-tick think,
-// 2 = the blast applier's notify): a live player body clears the kill-cause bits
-// 8..11 of entity+0x2C (Entity::cause_flags) and re-arms the think cadence
-// (Entity::spawn_phase = 64); a body already flagged dead returns first. The hit
-// event (1) only re-arms — RoundSim's person leg does that inline.
-// [orig: Entity_HandleDamageAndTriggerZones @0x40772f (Flags&2 return);
-//  @0x407b4d..0x407b4f (damageType not in {4,1,3,5} -> +0x2C &= 0xFFFFF0FF);
-//  @0x407b5e / @0x407c71 (spawnPhase = 64)]
-void player_body_class_think(Entity &body);
+class World;
+// The plyr class callback, entity+0x1C8(body, event, 0), for every event: a body
+// already flagged dead returns at once; event 1 with a recorded round runs the
+// round legs, event 4 takes a mounted body off its seat on the authority; then
+// the shared tail: a body at Health <= 0 stages the default death clip when none
+// is staged, requests the staged clip on its primary channel (+0x2BC, the
+// deferred +0x2B8 cleared) and leaves a seat on the authority; an event outside
+// {1, 3, 4, 5} (0 = the body update's 64-tick think and the drowning, 2 = the
+// blast applier's notify) clears the kill-cause bits 8..11 of entity+0x2C
+// (Entity::cause_flags); the think cadence re-arms (Entity::spawn_phase = 64)
+// and the waypoint tail runs.
+// [orig: Entity_HandleDamageAndTriggerZones @0x407720 -- the Flags&2 return
+//  @0x40772F, the event-1 arm @0x40773C..0x407A86, the event-4 arm
+//  @0x407A8B..0x407AC2, the health tail @0x407AC5..0x407B33
+//  (Entity_ComputeAnimSlotIndex(e, 0, 0, 1) @0x407ADF, +0x2BC @0x407AFB, +0x2B8
+//  @0x407B01, Entity_DetachFromVehicleIfServer @0x407B20), the cause clear
+//  @0x407B3B..0x407B4F, the re-arms @0x407B5E / @0x407C71, the waypoint tail
+//  @0x407B64..0x407C6B]
+void player_body_class_event(World &world, Entity &body, int event);
+
+// That callback's health tail alone (every event it handles reaches it; the round hit's
+// plyr-row arm runs it between its round legs and the re-arm): a body at Health <= 0 stages
+// the default death clip when none is staged, requests the staged clip on its primary
+// channel (+0x2BC, the deferred +0x2B8 cleared) and leaves its seat.
+// [orig: Entity_HandleDamageAndTriggerZones @0x407720 - the health tail @0x407ACD..0x407B33
+//  (Entity_ComputeAnimSlotIndex @0x407AE7, +0x2BC @0x407AFB, +0x2B8 @0x407B01, the leave
+//  @0x407B20 / @0x407B33)]
+void player_body_health_tail(World &world, Entity &body);
+
+// A dead player record's anim byte on the body it names, the client's own included: a body its
+// death edge has not flagged dead takes the byte as its deathAnimStateId (+0x2C0), which that
+// edge then requests; one already flagged dead takes it as its requested state (+0x2BC), the
+// deferred one (+0x2B8) cleared. Both store the Health 0 the caller keeps. A 0x13 earlier in
+// the same receive ran the class callback first, so the record's byte replaces the clip that
+// callback staged.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the record's dead test `test bl, 2`
+//  @0x4C0FE1, the body's `test byte ptr [edi+24h], 2` @0x4C100B; the live leg +0x2C0
+//  @0x4C10F5, Health @0x4C10FB; the dead leg +0x2BC @0x4C1019, +0x2B8 @0x4C1021, Health
+//  @0x4C1027; the byte @0x4C0F23]
+void player_body_dead_record(World &world, Entity &body, int anim_state);
+
+// The organic class's event callback (org0 / org1): event 1 puts a body without the Player bit
+// and its trigger group on red alert (a player body's kill goes to the network kill scorer,
+// which past its round test only reaches GameEvent_ProcessScoring case 2, as the plyr arm's),
+// then runs the round legs while the hit record holds a round; event 4 zeroes the health word
+// and, with a round, restages the death clip from it; any other event re-arms the think at 62.
+// No dead return.
+// [orig: OrganicClass_HandleEvent @0x407310 - the event-1 arm @0x4073BF..0x4076D5 (the Player
+//  bit @0x4073D6, Score_ProcessNetworkKillEvent @0x407405, the alert @0x4073DB..0x4073EA, the
+//  round test @0x40740F), the event-4 arm @0x407343..0x4073B1, +0x2AC = 62 @0x40732D]
+void organic_class_event(World &world, Entity &body, int event);
+
+// A person's class event callback (entity+0x1C8), which the knife and the blast call for every
+// victim they reach and a script kill for its target: a body with the Player bit runs its bound
+// row's (player_body_row_event, D-NET-348), any other person the organic class's (org0 and org1
+// both bind OrganicClass_HandleEvent), so an NPC's blast (2) or knife (3) re-arms its think at 62.
+// [orig: g_EntityClassEventCallbackTable - org0 @0x813018 / org1 @0x813030 -> OrganicClass_HandleEvent
+//  @0x407310 (the rows' words @0x813020 / @0x813038); Entity_ApplyKnifeKillZoneDamage @0x4E6620
+//  (the call @0x4E6752); Entity_ApplyWeaponDamage @0x4E6820 (the call @0x4E6B72)]
+void person_class_event(World &world, Entity &body, int event, int32_t flags = 0);
+
+// A player body's class event callback (entity+0x1C8), by its bound row's class
+// (PlayerTemplate::body_class, D-NET-348): the plyr row's player_body_class_event, the organic
+// rows' organic_class_event, an item class row's event body (world::run_item_class_event of
+// PlayerTemplate::item_event_class: the null row's +0x2AC = 0x1000000, the barrel row's
+// authority think with its dead-body explosion and removal, every ported item row's), the one
+// +0x2AC word being the body's think countdown (Entity::spawn_phase). The player-body update's
+// think, the damage sites and the drowning call it.
+// [orig: Entity_SpawnFromAnimSlotProperty - def+0x138 into entity+0x1C8 @0x43C530..0x43C536;
+//  Entity_UpdateInfantryPlayerBody's think @0x4B4BC9..0x4B4BE0; NullClass_HandleEvent
+//  @0x406FF0; Entity_HandleDeathOnAuthority @0x407CC0]
+// `flags` is the callback's third argument (ItemHitContext::event_flags).
+void player_body_row_event(World &world, Entity &body, int event, int32_t flags = 0);
+
+// The class row whose callback a round's hit on `body` runs (D-NET-348): a person
+// (`person`, the hit's item type) with the Player bit takes its bound row's; any other
+// person the organic class's (kOrganic). The hit runs the person legs (the plyr and
+// organic callbacks' twins @0x4074BA / @0x407822) for plyr and organic rows, plyr's alone
+// re-arming 64 around its waypoint tail; an item row's is player_body_row_event's (the
+// nade row, whose event word is 0, runs nothing).
+// [orig: Projectile_ProcessDamageOnTarget @0x4E7FB0 - the event word @0x4E81FF, its null
+//  test @0x4E8205, the call (entity, 1, 0) @0x4E820E]
+enum class PlayerBodyClass : uint8_t; // world.h
+PlayerBodyClass person_hit_row_class(const World &world, const Entity &body, bool person);
 
 class World;
 // The plyr class callback's waypoint tail, run on every event it handles for a
@@ -288,6 +363,23 @@ struct RootRotationQ22 {
 };
 RootRotationQ22 root_rotation_q22(int32_t heading, bool org2_player_body);
 
+// The terrain-gradient slide's arithmetic, which both organic motors run on a body with no
+// ground entity (each motor keeps its own gates, its Flags 0x10000 writes and its side of the
+// root rotation; the joiner's replica motor runs it too). `grad_dx` / `grad_dy` are the
+// terrain's raw height gradient under the body (Terrain_GetHeightGradient); its magnitude is
+// the x87 root of the squares, saturated at 2147418112.0 and truncated. At 768 or more the
+// slide pair is the downhill push, x = -round(419392 * grad_dx / 65536) and y =
+// +round(419392 * grad_dy / 65536), each the IMUL, the 0x8000 round and the SHRD 16 keeping
+// the low dword, and the vertical velocity (+0xA0) is held at -167 or below; true. Below 768
+// nothing is written; false.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the call @0x4BA8CC, the magnitude
+//  @0x4BA8D1..0x4BA8FB, the test @0x4BA900, the pair @0x4BA907..0x4BA931, the velocity
+//  @0x4BA935..0x4BA941; Entity_UpdateInfantryPlayerBody @0x4B40E0 - the call @0x4B7A13, the
+//  magnitude @0x4B7A18..0x4B7A42, the test @0x4B7A47, the pair @0x4B7A4E..0x4B7A78, the
+//  velocity @0x4B7A80..0x4B7A8D]
+bool infantry_gradient_slide(int32_t grad_dx, int32_t grad_dy, int32_t &slide_x,
+                             int32_t &slide_y, int32_t &vel_z);
+
 // Runtime source for real .bad/.adm data, with tests providing IDA-shaped doubles.
 class IRootMotionSource {
 public:
@@ -372,6 +464,17 @@ public:
                                int32_t phase_ticks) const {
         return phase_ticks > 0 && clip_loops(adm_id, state_id, variant) &&
                clip_boundary_after(adm_id, state_id, phase_ticks - 1, variant) == phase_ticks;
+    }
+    // The served entry's channel clock at `phase_ticks` (armed_boundary as for
+    // advance_armed): its normalized time t, wrapped on a loop and parked at
+    // 0.99999 on a one-shot's end or the armed boundary, and the float step it
+    // adds a tick. False for a provider without the retail channel clock.
+    // [orig: AnimChannel_AdvancePlayback @0x40B140 - t at the sub-channel's +4,
+    //  the step at +8]
+    virtual bool clip_clock_at(int /*adm_id*/, int /*state_id*/, int /*variant*/,
+                               int32_t /*phase_ticks*/, int32_t /*armed_boundary*/,
+                               float & /*time*/, float & /*delta*/) const {
+        return false;
     }
 
 };
@@ -615,14 +718,30 @@ struct InfantryState {
     // owns identity/loadout fields (active, is_local_player, adm_id, health
     // caps, weapon-channel mirrors) and any post-reset seeding.
     void reset_for_spawn(int32_t heading) {
+        reset_body_animation(anim_state::kIdle);
+        reset_weapon_animation(anim_state::kIdle);
+        reset_motor_for_spawn(heading);
+    }
+    // The same list less the two animation channels, which the joiner's record respawn arm
+    // leaves as the corpse's: the arm's reset runs on the still-dead L, so its state requests
+    // (+0x2BC / +0x2C8) and dual updates do not run and it clears only the pending word
+    // (+0x2B8, InfantryState::anim_pending), and neither the arm nor Game_InitNewRound stores
+    // an animation word. L's first updates then run on the death state: its flag bit 2 takes
+    // the slope-conform leg (the probes, the chase, the steep-ground slide), and the 4th-tick
+    // selection, skipped while L is airborne, replaces it once L lands.
+    // [orig: Entity_ResetToSpawnState @0x4B9610 - +0x2B8 = 0 @0x4B96F1, the dead test @0x4B96ED
+    //  past the requests @0x4B9708 / @0x4B9714 / @0x4B972A; NetPacket_SerializePlayerState
+    //  @0x4C09C0 - the arm @0x4C110F..0x4C1135; Game_InitNewRound @0x422740;
+    //  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the conform test on +0x2BC's flag bit 2
+    //  @0x4B6DA2..0x4B6DB0, the selector's skip @0x4B70B8..0x4B70D3; g_AnimStateFlagsTable
+    //  @0x8139E8 (the death states' 0x82)]
+    void reset_motor_for_spawn(int32_t heading) {
         player_moving = false;
         player_move_dir_index = 0;
         move_mode = 0;
         path_state = 0;
         detour_target[0] = detour_target[1] = detour_target[2] = 0;
         target_dist = 0;
-        reset_body_animation(anim_state::kIdle);
-        reset_weapon_animation(anim_state::kIdle);
         reload_anim_ticks = 0;
         arms_dip_ticks = 0;
         pitch_kick_accum = 0;
@@ -630,10 +749,19 @@ struct InfantryState {
         weapon_weight_spread = 0;
         aimed_shot_available = false;
         idle_counter = 0;
-        lean_left = false;
-        lean_right = false;
-        lean_angle = 0;
-        torso_roll = 0;
+        // The lean keys (MoveOrder 0x40 / 0x80) are not a respawn's either: the record's respawn
+        // arm stores no MoveOrder (the host's deploy clears the stance bits alone, ahead of its
+        // reset, Server_ReleasePlayerDeployment), and the next pack rewrites them.
+        // [orig: NetPacket_SerializePlayerState @0x4C09C0 - the arm @0x4C1109..0x4C114C;
+        //  Player_PackInputStateToEntity @0x4DF450 - the MoveOrder store @0x4DF68F, 0x40
+        //  @0x4DF71F, 0x80 @0x4DF737]
+        // The lean (+0xB0) and the torso roll (+0x2DC) are not a respawn's: the joiner's record
+        // respawn arm stores neither (nor does the host's deploy, infantry_respawn_snap), so a
+        // redeployed body eases out of its corpse's words. A spawn holds both at the class
+        // init's zeros (player_class_init_animation) over a fresh attach.
+        // [orig: NetPacket_SerializePlayerState @0x4C09C0 - the respawn arm @0x4C1109..0x4C114C,
+        //  Entity_ResetToSpawnState called @0x4C113C, Game_InitNewRound called @0x4C114C;
+        //  PlayerClass_InitEntity @0x4B1060 - +0x2DC @0x4B11B2, +0xB0 @0x4B11B8]
         body_heading = heading;
         target_heading = heading;
         leg_yaw[0] = leg_yaw[1] = heading;
@@ -891,6 +1019,9 @@ struct InfantryState {
     int32_t dbg_root_dx = 0, dbg_root_dy = 0;
     int32_t dbg_res_dx = 0, dbg_res_dy = 0;
     int32_t dbg_contact_item = 0; // last resolve's contact source item type
+    // The last eye restamp's source (the body readout's tap, body_trace.h): 0 none yet, 1 the
+    // local body's head anchor, 2 the capsule legs.
+    uint8_t dbg_eye_source = 0;
     // Fire-aim instrument: how many rounds this body fired with a valid aim
     // solution vs falling back to the body heading (a live engagement showed
     // ~half of all AI shots leaving 180 deg off the target).
@@ -1095,6 +1226,16 @@ bool infantry_org1_still_think(InfantryState &inf, const IRootMotionSource *sour
 // [orig: Entity_UpdateInfantryAI @0x4BEB18..0x4BEFF0]
 void infantry_look_tick(const InfantryState &inf, int32_t &heading, int32_t &pitch,
                         bool mounted = false);
+// The on-foot form over explicit words, which a client's free-standing org1 replica runs too
+// (ClientReplicaPipeline::tick_org1_looks): the Yaw chases the aim heading (+0x2EC) and the
+// Pitch the aim pitch (+0x2D0), a clamped quarter with the aim flag (+0x360) set, else a
+// clamped eighth; then, with `hold` (no parent, or a parent whose config is none of 3, 4, 5 and
+// 7), the Yaw is held within 90 degrees of the body heading (+0x8C). A body on foot keeps a
+// parent only while dead in a seat its record still names (a client's replica).
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the look @0x4BEB18..0x4BEBE7, the parent's config
+//  gate @0x4BEF9A..0x4BEFC3, the clamp @0x4BEFC5..0x4BEFED]
+void infantry_on_foot_look(int32_t aim_heading, int32_t aim_pitch, bool aim_flag,
+                           int32_t body_heading, bool hold, int32_t &heading, int32_t &pitch);
 void infantry_recoil_tick(InfantryState &inf, int32_t &heading,
                           int32_t &pitch, int32_t random16);
 
@@ -1140,8 +1281,9 @@ void infantry_weapon_switch_stamp(InfantryState &inf, uint64_t category_serial);
 // Consumer gate for the secondary channel. Equal primary/secondary state ids do NOT
 // disable composition: their playheads are independent. mount_blocks_channel is true
 // for controller/gunner/driver seats; passenger seats retain the on-foot composition.
+// player_bit is Flags & 0x100, the Player bit (not a weapon-in-hands flag).
 // [orig: Flags&0x100 + mount-class tests + PRIMARY state flag 0x40 @0x4b14a7]
-bool infantry_weapon_channel_visible(const InfantryState &inf, bool weapon_in_hands,
+bool infantry_weapon_channel_visible(const InfantryState &inf, bool player_bit,
                                      bool mount_blocks_channel);
 
 // The upper-body hold-pose ladder: which secondary anim state a player body should be
@@ -1161,21 +1303,20 @@ int infantry_weapon_hold_state(int hold_kind, int primary_anim_state, bool scope
 
 struct AiEntity;
 
-// Snap a motor-driven infantry entity back to a deployed pose, standing and idle.
+// The player deploy's motor half, after its reset: the body standing on the pose the
+// reset left.
 //
 // The original has ONE Entity store, so its respawn writes Position/Yaw/Health once and
-// the mover reads them back. Our AiEntity motor store is a tracked split of that store
-// (see finish_infantry_tick's two-store reconciliation), and the motor is the WRITER of
-// the pair: it mirrors AiEntity.pos/heading into the registry Entity every tick. A
-// respawn that touches only the registry Entity is therefore silently reverted on the
-// next tick, leaving the body at the corpse pose. Anything that redeploys a
-// motor-simulated entity must reset BOTH stores, which is what this does for the motor
-// half — velocities, the interpolation staging, the collide cache, and the InfantryState
-// pose/stance/anim latches that would otherwise keep the death clip.
+// the mover reads them back. The position is that one store here too (the entity's words,
+// through AiEntity::self); the motor's heading/health mirrors and its latches are not, and
+// the motor writes them back into the registry Entity every tick. The shared World reset
+// (entity_reset_to_spawn_state) already reset the motor's words retail's reset stores, its
+// channels (the respawn state and the twelve dual updates) and its resolve; this resets
+// the rest of the motor half: the heading and health mirrors, the interpolation staging
+// at the reset's pose, and the InfantryState move and weapon latches (the stance bits and
+// their mirror are the deploy's own clear, ahead of the reset).
 //
-// [orig: the deploy flow places the entity, then Entity_ResetToSpawnState @ 0x4B9610
-//  re-records Position and reseeds the body-anim channel; the death-family anim latch it
-//  clears is @0x4b9714]
+// [orig: Server_DeployPlayer @0x517740 - Entity_ResetToSpawnState called @0x517899]
 void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
                            int16_t health);
 
@@ -1183,11 +1324,20 @@ class World;
 
 // Whether `victim` is an org1 (NPC) body whose own motor death edge raises its
 // death transaction (the 0x13 + scoring), so the host's damage-time death record
-// for it only feeds the SP kill tally. Player bodies and organics without a live
-// motor keep the damage-time transaction.
+// for it only feeds the SP kill tally. Organics without a live motor keep the
+// damage-time transaction.
 // [orig: Entity_UpdateInfantryAI @0x4B9D44..0x4B9D4D -> Entity_CheckAndProcessDeath
 //  @0x51B550; Score_ProcessKillEvent @0x4FD400 from the damage paths only]
 bool org1_owns_death_transaction(const World &world, EntityHandle victim);
+
+// Whether `victim` is an org2 (player) body with a live motor, whose death edge
+// raises the player-death transaction inside the entity update, so a
+// damage-time death record for it only feeds the kill tally and every other
+// writer of its Health (a C2S 0x41, the flag reset, a script) just writes it.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B4CE1..0x4B4CEA ->
+//  Entity_CheckAndProcessDeath @0x51B550; Score_ProcessKillEvent @0x4FD400 from
+//  the damage paths only]
+bool org2_owns_death_transaction(const World &world, EntityHandle victim);
 
 // A person's ride link, refreshed by both organic think blocks: the occupant
 // (+0x170) of the entity it stands on (+0x28), else of that entity's own
@@ -1197,5 +1347,26 @@ bool org1_owns_death_transaction(const World &world, EntityHandle victim);
 // infantry_board.cpp. [orig: Entity_UpdateInfantryAI @0x4BD87E..0x4BD905;
 // Entity_UpdateInfantryPlayerBody @0x4B5EA9..0x4B5F2C]
 void infantry_ride_link(World &world, Entity &self);
+
+// The player body's capsule eye (CameraOffset +0x6C / +0x70 / +0x74) for a body the
+// local player does not drive: the eye height `extent` (the capsule's, capped at
+// 0xD000 by the caller) stands on the lean's arc, x 0, y sin, z cos of -lean; the
+// vector then turns about z by the twist (Yaw - the body heading +0x8C), about x by
+// Roll (+0x18), about y by the body pitch (+0x90) and about z by the body heading,
+// each angle's sine and cosine an x87 product of the BAM word and the radians per
+// BAM, scaled by 2^22 and truncated, each product a Q22 multiply truncated to a
+// dword; the height is floored at 0x2000. An on-foot player body's pass runs it
+// ahead of its lean ramp and its slope chase, so it reads the lean decayed but
+// unramped and last tick's Roll and body pitch; a seated passenger's ramp runs
+// ahead of its eye (@0x4B66B5 / @0x4B66C3), so that eye reads the ramped lean.
+// Defined in infantry.cpp.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the extent cap
+//  @0x4B698C..0x4B6997, -lean @0x4B699F..0x4B69A7, the lean's pair
+//  @0x4B69AB..0x4B69D4, the twist @0x4B69D9..0x4B6A08, the first turn
+//  @0x4B6A0C..0x4B6A6D, Roll @0x4B6A68..0x4B6A8A, +0x90 @0x4B6A8F..0x4B6AAE,
+//  +0x8C @0x4B6AB3..0x4B6AD2, the turns @0x4B6ADB..0x4B6B96, the floor
+//  @0x4B6B98..0x4B6BA0, the stores @0x4B6BA5..0x4B6BAB]
+void player_body_capsule_eye(int32_t extent, int32_t lean, int32_t yaw, int32_t body_heading,
+                             int32_t roll, int32_t body_pitch, int32_t out[3]);
 
 } // namespace opennova::world

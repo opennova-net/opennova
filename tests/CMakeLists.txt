@@ -4264,9 +4264,9 @@ add_executable(inmatch_joiner_role_test npruntime/joiner_role_test.cpp)
 target_link_libraries(inmatch_joiner_role_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME inmatch_joiner_role COMMAND inmatch_joiner_role_test)
 
-# The joiner session-drive policy (S10b): the two 0xEA60 reachable-analog windows, the S2C 0x7B
-# promote validation, the admission/deploy/loss edge machine (frame ORDERING locked: loss > abort >
-# settle > window > edges), and the D-NET-178 expansion reconcile decision.
+# The joiner session-drive policy (S10b): the preload's failure edge (no join wait has a deadline,
+# D-NET-NEW-L2-44), the S2C 0x7B promote validation, the admission/deploy/loss edge machine (frame
+# ORDERING locked: loss > settle > join error > edges), and the D-NET-178 expansion reconcile decision.
 add_executable(npruntime_join_session_policy_test npruntime/join_session_policy_test.cpp)
 target_link_libraries(npruntime_join_session_policy_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_join_session_policy COMMAND npruntime_join_session_policy_test)
@@ -4713,7 +4713,7 @@ add_test(NAME npruntime_session_soak COMMAND npruntime_session_soak_test)
 # The joiner's admission through retail's loading loops (D-NET-254): each stage's loop calls the
 # send pump its own way (per UI frame, a busy spin, or a 50 / 100 ms wall-clock pace), and only
 # Client_ProcessNetworkFrame gates it on the holdoff countdown. [orig: SaveFile_SendAndWaitForServerAck
-# @0x5204b0; CNapiGameSession_InitRandomSeedOrRequest @0x51e8f0; NapiClient_WaitForDisconnect
+# @0x5204b0; CNapiGameSession_InitRandomSeedOrRequest @0x51e8f0; NapiClient_SendPlayerSyncAndWaitForSyncTail
 # @0x42cb20; NapiClient_WaitForGameStart @0x42cc10]
 add_executable(npruntime_client_loading_pump_test npruntime/client_loading_pump_test.cpp)
 target_link_libraries(npruntime_client_loading_pump_test PRIVATE opennova_net opennova_runtime)
@@ -5001,3 +5001,857 @@ target_link_libraries(ragdoll_person_test PRIVATE opennova_runtime)
 target_include_directories(ragdoll_person_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(ragdoll_person_test PRIVATE cxx_std_17)
 add_test(NAME ragdoll_person COMMAND ragdoll_person_test)
+
+# The net parity program's per-lane blocks: each lane adds its rows inside its own block.
+
+# --- parity lane L1 (join/host) ---
+add_executable(npruntime_join_leg_test npruntime/join_leg_test.cpp)
+target_link_libraries(npruntime_join_leg_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_join_leg_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_join_leg COMMAND npruntime_join_leg_test)
+add_executable(npruntime_host_queue_test npruntime/host_queue_test.cpp)
+target_link_libraries(npruntime_host_queue_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_host_queue_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_host_queue COMMAND npruntime_host_queue_test)
+add_executable(npruntime_server_hello_nc_test npruntime/server_hello_nc_test.cpp)
+target_link_libraries(npruntime_server_hello_nc_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_server_hello_nc_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_server_hello_nc COMMAND npruntime_server_hello_nc_test)
+add_executable(world_state_waypoints_test mission/world_state_waypoints_test.cpp)
+target_link_libraries(world_state_waypoints_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME world_state_waypoints COMMAND world_state_waypoints_test)
+# The script pass's sends at their calls: a WAC / BMS Win announces at its latch (D-NET-NEW-V3-1).
+add_executable(npruntime_script_pass_order_test npruntime/script_pass_order_test.cpp)
+target_link_libraries(npruntime_script_pass_order_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_script_pass_order_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_script_pass_order COMMAND npruntime_script_pass_order_test)
+# The single player's join places nothing; a session's join places the body again (D-NET-NEW-L1-19).
+add_executable(npruntime_sp_join_placement_test npruntime/sp_join_placement_test.cpp)
+target_link_libraries(npruntime_sp_join_placement_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_sp_join_placement_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_sp_join_placement COMMAND npruntime_sp_join_placement_test)
+# The session host's in-load server pump and the load's spawn gate (D-NET-116).
+add_executable(npruntime_host_load_pump_test npruntime/host_load_pump_test.cpp)
+target_link_libraries(npruntime_host_load_pump_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_host_load_pump_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_host_load_pump COMMAND npruntime_host_load_pump_test)
+# The _connectlog.txt packet and session lines; a host's manager-receive lines (D-NET-NEW-L8-8).
+add_executable(npruntime_connect_log_lines_test npruntime/connect_log_lines_test.cpp)
+target_link_libraries(npruntime_connect_log_lines_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_connect_log_lines_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_connect_log_lines COMMAND npruntime_connect_log_lines_test)
+# The NovaWorld host's magic-packet reflection (D-NET-NEW-L1-20): the create's key, the answer.
+add_executable(npruntime_magic_reflection_test npruntime/magic_reflection_test.cpp)
+target_link_libraries(npruntime_magic_reflection_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_magic_reflection COMMAND npruntime_magic_reflection_test)
+# D-NET-NEW-L1-21: the C2S 0x01 answers only in the form-post state; there the side passwords'
+# second test rejects a JSP matching neither with reason 17.
+add_executable(npruntime_join_form_post_gate_test npruntime/join_form_post_gate_test.cpp)
+target_link_libraries(npruntime_join_form_post_gate_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_join_form_post_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_join_form_post_gate COMMAND npruntime_join_form_post_gate_test)
+# D-NET-NEW-L8-21: input action 3 on a listen host disconnects its own client (CIDEMIS); the admin
+# exit's next receive pump removes the host's player.
+add_executable(npruntime_own_client_exit_test npruntime/own_client_exit_test.cpp)
+target_link_libraries(npruntime_own_client_exit_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_own_client_exit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_own_client_exit COMMAND npruntime_own_client_exit_test)
+# D-NET-256 (Q7-9 (a)): the send-interval legs and the receive reap measure the host's clock,
+# so a long load fires a due leg and the reap counts the load's time.
+add_executable(npruntime_host_clock_legs_test npruntime/host_clock_legs_test.cpp)
+target_link_libraries(npruntime_host_clock_legs_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_host_clock_legs COMMAND npruntime_host_clock_legs_test)
+# D-NET-NEW-L1-25 (F1b, Q7-10 (a)): the mission teardown's pump reads the destroyed rows (the 0x46
+# downed byte, the 0x4C team rule); a carrier's destroy sends its flag's 0x2F; the map change's
+# pools go before its pump.
+add_executable(npruntime_teardown_zeroed_rows_test npruntime/teardown_zeroed_rows_test.cpp)
+target_link_libraries(npruntime_teardown_zeroed_rows_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_teardown_zeroed_rows_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_teardown_zeroed_rows COMMAND npruntime_teardown_zeroed_rows_test)
+# D-NET-NEW-L1-26: the client callback's process disconnect latch maps a listen host's own leave
+# from a stale kick record; the router's error arm skips StopServer (HostRole::close).
+add_executable(npruntime_host_close_order_test npruntime/host_close_order_test.cpp)
+target_link_libraries(npruntime_host_close_order_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_host_close_order_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(npruntime_host_close_order_test PRIVATE cxx_std_17)
+add_test(NAME npruntime_host_close_order COMMAND npruntime_host_close_order_test)
+# D-NET-NEW-L1-24: the auto-balance, the A&D swap arm and the list builder's hide test take an
+# orphaned row as any active row; its net player is bound by identity, not by the re-stampable id.
+add_executable(npruntime_orphan_row_walks_test npruntime/orphan_row_walks_test.cpp)
+target_link_libraries(npruntime_orphan_row_walks_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_orphan_row_walks COMMAND npruntime_orphan_row_walks_test)
+# D-NET-503 (late join): the join's warm-up resolve reads the add's savedLivePose stamp and the
+# body's CameraOffset (0); the skip test's X leg alone reads the stamp.
+add_executable(npruntime_join_warmup_pose_test npruntime/join_warmup_pose_test.cpp)
+target_link_libraries(npruntime_join_warmup_pose_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_join_warmup_pose COMMAND npruntime_join_warmup_pose_test)
+# D-NET-NEW-L1-36: the host reads nothing from a joiner's C2S 0x48 (retail's handler a bare retn):
+# a 0x48 naming another id moves neither the connection's id nor the body's entity+0x78.
+add_executable(npruntime_host_client_ack_test npruntime/host_client_ack_test.cpp)
+target_link_libraries(npruntime_host_client_ack_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_host_client_ack COMMAND npruntime_host_client_ack_test)
+# D-NET-167's host half (D-NET-NEW-L1-38): the side-password balance hold, the JSP's side pick
+# (an empty JSP the unset side's), the 0x03's place on the pending list and its count.
+add_executable(npruntime_side_password_hold_test npruntime/side_password_hold_test.cpp)
+target_link_libraries(npruntime_side_password_hold_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_side_password_hold_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_side_password_hold COMMAND npruntime_side_password_hold_test)
+# D-NET-NEW-L1-40: the S2C 0x08's BuildFlags called live (an admin SET after the create reaches
+# it), the team test's create-time game_settings words, P1 / P2 the create's across a map change;
+# D-NET-NEW-L1-42's shell half: the listen host's map change applies the cfg block again.
+add_executable(npruntime_server_config_flags_live_test npruntime/server_config_flags_live_test.cpp)
+target_link_libraries(npruntime_server_config_flags_live_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_server_config_flags_live_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_server_config_flags_live COMMAND npruntime_server_config_flags_live_test)
+# D-NET-NEW-L1-41: the join check's side-password leg runs under BuildFlags' team-choose bit
+# (the cfg word or, in a team game, the create's copy), not the cfg word alone; D-NET-NEW-L1-44:
+# a deathmatch create clears the side passwords the leg compares.
+add_executable(npruntime_side_password_gate_test npruntime/side_password_gate_test.cpp)
+target_link_libraries(npruntime_side_password_gate_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_side_password_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_side_password_gate COMMAND npruntime_side_password_gate_test)
+# D-NET-NEW-L1-44's DIVERGENT: the team pick reads the mission start's side-password pair
+# (g_SidePasswordA / B), which neither the create's clear nor an admin SET writes; D-NET-NEW-L1-46:
+# the remote add's TDM preference test reads the cfg block's own type and side words.
+add_executable(npruntime_team_pick_side_passwords_test npruntime/team_pick_side_passwords_test.cpp)
+target_link_libraries(npruntime_team_pick_side_passwords_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_team_pick_side_passwords_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_team_pick_side_passwords COMMAND npruntime_team_pick_side_passwords_test)
+
+# --- parity lane L2 (joiner) ---
+# The joiner's mission-start submissions (D-NET-531, D-NET-NEW-R3-4): the computed C2S 0x0B
+# and the fresh profile's 0x2F kit resolved through the weapon table.
+add_executable(npruntime_joiner_mission_start_test npruntime/joiner_mission_start_test.cpp)
+target_link_libraries(npruntime_joiner_mission_start_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_joiner_mission_start COMMAND npruntime_joiner_mission_start_test)
+# The mission start's model-def list and the C2S 0x3D page it freezes (D-NET-527).
+add_executable(npruntime_loaded_model_list_test npruntime/loaded_model_list_test.cpp)
+target_link_libraries(npruntime_loaded_model_list_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_loaded_model_list COMMAND npruntime_loaded_model_list_test)
+# The client's console command walk over the S2C 0x06 echo (D-NET-710).
+add_executable(npruntime_client_console_test npruntime/client_console_test.cpp)
+target_link_libraries(npruntime_client_console_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_client_console COMMAND npruntime_client_console_test)
+# Scroll Lock, retail's auto-run: the forward event and the turn-off codes (D-NET-563).
+add_executable(controls_scroll_lock_auto_run_test controls/scroll_lock_auto_run_test.cpp)
+target_link_libraries(controls_scroll_lock_auto_run_test PRIVATE opennova_runtime)
+add_test(NAME controls_scroll_lock_auto_run COMMAND controls_scroll_lock_auto_run_test)
+# A player's NetId the joiner's avatar table lacks, restamped by the client folds
+# (D-NET-NEW-L2-27).
+add_executable(netsim_client_avatar_fallback_test netsim/client_avatar_fallback_test.cpp)
+target_link_libraries(netsim_client_avatar_fallback_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME netsim_client_avatar_fallback COMMAND netsim_client_avatar_fallback_test)
+# A joiner's session reset stops a held server after its own leave (D-NET-NEW-L1-26's joiner leg).
+add_executable(npruntime_joiner_held_server_stop_test npruntime/joiner_held_server_stop_test.cpp)
+target_link_libraries(npruntime_joiner_held_server_stop_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_joiner_held_server_stop COMMAND npruntime_joiner_held_server_stop_test)
+
+# --- parity lane L3 (host tick) ---
+# The 0x0A writer's stores on the slot's body, slot by slot (D-NET-439, 461, 462).
+add_executable(npruntime_player_state_writer_test npruntime/player_state_writer_test.cpp)
+target_link_libraries(npruntime_player_state_writer_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_player_state_writer COMMAND npruntime_player_state_writer_test)
+# The 0x0A priority list's boundRadius term and tracked-slot despawn (D-NET-530, D-NET-349).
+add_executable(netsim_priority_list_test netsim/priority_list_test.cpp)
+target_link_libraries(netsim_priority_list_test PRIVATE opennova_runtime)
+add_test(NAME netsim_priority_list COMMAND netsim_priority_list_test)
+# The map change's load order: the next mission start's pumps spread through the load,
+# the 0x25 ahead of the terrain, a reload's replies ahead of the 0x7B (L3-s8, x7 round).
+add_executable(npruntime_map_change_load_order_test npruntime/map_change_load_order_test.cpp)
+target_link_libraries(npruntime_map_change_load_order_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_map_change_load_order_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_map_change_load_order COMMAND npruntime_map_change_load_order_test)
+# The main loop's frame lock (game.cfg lock_framerate): a short frame sleeps until 16 ms
+# stand banked, the history pre-lock, the FR counter on the locked bank (L3-s9).
+add_executable(frame_lock_test world/frame_lock_test.cpp)
+target_link_libraries(frame_lock_test PRIVATE opennova_runtime)
+add_test(NAME frame_lock COMMAND frame_lock_test)
+# A remote add's send-state reset: the added slot's send boundary opens on the add's tick,
+# its phase counted from the add; a round-init re-add keeps it (L3-s10, D-NET-NEW-L3-21).
+add_executable(npruntime_add_send_phase_test npruntime/add_send_phase_test.cpp)
+target_link_libraries(npruntime_add_send_phase_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_add_send_phase_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_add_send_phase COMMAND npruntime_add_send_phase_test)
+# A dedicated host presents no entity: the passes' queues drop undrawn each ticked frame, the
+# fire ring among them (L3-s16 row 0).
+add_executable(entity_presentation_discard_test world/entity_presentation_discard_test.cpp)
+target_link_libraries(entity_presentation_discard_test PRIVATE opennova_runtime)
+add_test(NAME entity_presentation_discard COMMAND entity_presentation_discard_test)
+# The weapon Inset pass's water: the one water pass latch, the Inset's own mirror source,
+# the image the bloom's water samples, the Inset mirror's particle stride (L3-s23).
+add_executable(inset_water_mirror_test environment/inset_water_mirror_test.cpp)
+target_link_libraries(inset_water_mirror_test PRIVATE opennova_runtime)
+add_test(NAME inset_water_mirror COMMAND inset_water_mirror_test)
+
+# --- parity lane L4 (spawn/death) ---
+# The player body's death edge raising the player-death transaction in the
+# entity update (D-AI-9's org2 half).
+add_executable(npruntime_player_death_edge_test npruntime/player_death_edge_test.cpp)
+target_link_libraries(npruntime_player_death_edge_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_player_death_edge COMMAND npruntime_player_death_edge_test)
+# The player placement: the hidden body's frozen update, the markerless add and
+# deploy, the placement's warm-up (D-NET-NEW-L4-1, D-NET-431, D-NET-503).
+add_executable(npruntime_player_placement_test npruntime/player_placement_test.cpp)
+target_link_libraries(npruntime_player_placement_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_player_placement COMMAND npruntime_player_placement_test)
+# The mission start's Player_InitPlayer body leg: a held playing host's own body
+# counts as a human for the first frame's entity update (L7-s1 FOUND-1).
+add_executable(host_mission_start_test mission/host_mission_start_test.cpp)
+target_link_libraries(host_mission_start_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME host_mission_start COMMAND host_mission_start_test)
+# The movement resolver's person push: the away direction on both axes, the
+# entity+0 threshold, a joiner's remote persons in the table (D-NET-NEW-L4-2).
+add_executable(person_push_test world/person_push_test.cpp)
+target_link_libraries(person_push_test PRIVATE opennova_runtime)
+add_test(NAME person_push COMMAND person_push_test)
+# The drowning's class callback: the drown clip request, the kill-cause clear,
+# the think re-arm (D-NET-NEW-L3-2).
+add_executable(npruntime_drowning_class_event_test npruntime/drowning_class_event_test.cpp)
+target_link_libraries(npruntime_drowning_class_event_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_drowning_class_event COMMAND npruntime_drowning_class_event_test)
+# The slot's restore byte across a map change: the A-and-D swap and the mission
+# start's per-slot reset (D-NET-591).
+add_executable(npruntime_restore_team_test npruntime/restore_team_test.cpp)
+target_link_libraries(npruntime_restore_team_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_restore_team COMMAND npruntime_restore_team_test)
+# The game's fixed-point bilinear terrain height the raycasts sample: the
+# per-term rounding and the seam locks (D-NET-431's last LSB).
+add_executable(terrain_bilinear_fixed_test world/terrain_bilinear_fixed_test.cpp)
+target_link_libraries(terrain_bilinear_fixed_test PRIVATE opennova_runtime)
+add_test(NAME terrain_bilinear_fixed COMMAND terrain_bilinear_fixed_test)
+# The host's remote player body: the 0x0C read-apply's gates and hidden-body
+# snap, the authority chase (bucket 10, the 0x2AAA deadband, the 2-unit drop)
+# (D-NET-NEW-LP-2, the host side).
+add_executable(player_body_chase_test world/player_body_chase_test.cpp)
+target_link_libraries(player_body_chase_test PRIVATE opennova_runtime)
+add_test(NAME player_body_chase COMMAND player_body_chase_test)
+# The parity runner's slot staging on our host: a slot body's Position write,
+# holding against its player's uplinks only past the chase's 2-unit drop.
+add_executable(npruntime_slot_staging_test npruntime/slot_staging_test.cpp)
+target_link_libraries(npruntime_slot_staging_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_slot_staging COMMAND npruntime_slot_staging_test)
+# D-NET-348: a player's body binds its class's charattr camouflage row by the
+# mission's climate (two classes, two climates, a miss reading the first row); the
+# 0x0C / 0x0A type words follow; the loadout accept rebinds the row.
+add_executable(npruntime_player_camouflage_row_test npruntime/player_camouflage_row_test.cpp)
+target_link_libraries(npruntime_player_camouflage_row_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_player_camouflage_row COMMAND npruntime_player_camouflage_row_test)
+# D-NET-695 / D-NET-479: the authority's own slot table is the local one: the own
+# accept, the deploy's and the round init's rebuilds write LocalPlayer::inventory; the
+# list's own legs (the spawn buffer, the side class, the local select).
+add_executable(npruntime_own_slot_table_test npruntime/own_slot_table_test.cpp)
+target_link_libraries(npruntime_own_slot_table_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_own_slot_table COMMAND npruntime_own_slot_table_test)
+# D-NET-449: a removeSSN'd slot's 0x0A goes out at its entry (the zeroed body, then the
+# reused one) and its writer stores in the slot walk's order.
+add_executable(npruntime_stale_slot_alias_test npruntime/stale_slot_alias_test.cpp)
+target_link_libraries(npruntime_stale_slot_alias_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_stale_slot_alias COMMAND npruntime_stale_slot_alias_test)
+# D-NET-433: a dead player's USE press is dropped by the dispatcher's flag 0x1; the
+# mount toggle carries no dead test.
+add_executable(npruntime_use_item_dead_drop_test npruntime/use_item_dead_drop_test.cpp)
+target_link_libraries(npruntime_use_item_dead_drop_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_use_item_dead_drop COMMAND npruntime_use_item_dead_drop_test)
+# D-NET-352: a Serve Only host's own slot 0's hidden body, owned by connection 0, first in
+# pool 0 and bound as the local player; its death runs the row's transaction.
+add_executable(npruntime_host_slot_body_test npruntime/host_slot_body_test.cpp)
+target_link_libraries(npruntime_host_slot_body_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_host_slot_body COMMAND npruntime_host_slot_body_test)
+# D-NET-NEW-L4-10: the host's own pre.mnu SPECTATE word: the own slot's latch, the own
+# connection's JSR and the own slot's S2C 0x75 byte.
+add_executable(npruntime_host_spectate_test npruntime/host_spectate_test.cpp)
+target_link_libraries(npruntime_host_spectate_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_host_spectate COMMAND npruntime_host_spectate_test)
+# opennova-serve's own row's profile name: the boot's seed with no player.sav, the first
+# record named after the account through the 16-byte buffer (D-NET-352, Q7-6).
+add_executable(opennova_serve_profile_name_test serve/opennova_serve_profile_name_test.cpp)
+target_link_libraries(opennova_serve_profile_name_test PRIVATE opennova_serve_core)
+add_test(NAME opennova_serve_profile_name COMMAND opennova_serve_profile_name_test)
+# The process's loadout name list: every spawned body's equipped default, the ACCEPT's and the
+# own list's writes, the resident kit left to the host's list (D-NET-143, L4-s8 FOUND 1).
+add_executable(npruntime_loadout_name_list_test npruntime/loadout_name_list_test.cpp)
+target_link_libraries(npruntime_loadout_name_list_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_loadout_name_list COMMAND npruntime_loadout_name_list_test)
+# A player body's class-table row by its bound items.def row: the class init and the class
+# event callback (plyr, org0 / org1, null, brrl) (D-NET-348 FOUND 3).
+add_executable(npruntime_player_body_class_test npruntime/player_body_class_test.cpp)
+target_link_libraries(npruntime_player_body_class_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_player_body_class COMMAND npruntime_player_body_class_test)
+# The body readout (an instrument for the body_trace probe): the per-tick record of each watched
+# handle, the ground probe, force and blast records, nothing for an unwatched one, the ring.
+add_executable(body_trace_test world/body_trace_test.cpp)
+target_link_libraries(body_trace_test PRIVATE opennova_runtime)
+add_test(NAME body_trace COMMAND body_trace_test)
+# The infantry record's ground carrier: an unmounted body standing on an entity streams bone 0,
+# that entity and the pose local to it; on the terrain, free (D-NET-NEW-L4-20).
+add_executable(netsim_infantry_ground_carrier_test netsim/infantry_ground_carrier_test.cpp)
+target_link_libraries(netsim_infantry_ground_carrier_test PRIVATE opennova_runtime)
+add_test(NAME netsim_infantry_ground_carrier COMMAND netsim_infantry_ground_carrier_test)
+# The height mip chain's 64 x 64 level read bilinearly, the arty barrage's ground: the finest
+# cell's byte truncation, the max up the chain, the centring and the weights (D-NET-NEW-L4-23).
+add_executable(terrain_mip_max_test world/terrain_mip_max_test.cpp)
+target_link_libraries(terrain_mip_max_test PRIVATE opennova_runtime)
+add_test(NAME terrain_mip_max COMMAND terrain_mip_max_test)
+# The 0x0A player record's anim ratio byte: the playing channel's float t over its step (a
+# loop restarts it every pass, a one-shot holds it), a fade's weight over its step, 255 cap.
+add_executable(anim_wire_ratio_test anim/wire_anim_ratio_test.cpp)
+target_link_libraries(anim_wire_ratio_test PRIVATE opennova_runtime)
+target_include_directories(anim_wire_ratio_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME anim_wire_ratio COMMAND anim_wire_ratio_test)
+# The host's S2C 0x18 answer to a C2S 0x0F: a live row's record, a destroyed row's tail (the
+# 0xFFFF mount words, +0x154 0xFF, the occupant's aiState / animSlot), a cleared row's zeros,
+# and the pool / capacity / requester gates (L4-s30, x9's aikill OR handle-0 answer).
+add_executable(npruntime_entity_info_query_reply_test npruntime/entity_info_query_reply_test.cpp)
+target_link_libraries(npruntime_entity_info_query_reply_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_entity_info_query_reply COMMAND npruntime_entity_info_query_reply_test)
+# The AI rifle rounds' damage on a person: the PKM's first-tick 114 / 142 and the AK74's 75
+# after one flight tick, the aikill case's first hits (L4-s31).
+add_executable(ai_round_damage_test world/ai_round_damage_test.cpp)
+target_link_libraries(ai_round_damage_test PRIVATE opennova_runtime)
+add_test(NAME ai_round_damage COMMAND ai_round_damage_test)
+# A compressed zero's shift bits from each serializer call site's ECX: the payload addresses,
+# the word before, the Yaw, the health word (D-NET-NEW-L4-28; retail frame 252 of x8 RR).
+add_executable(netsim_compress_zero_fold_test netsim/compress_zero_fold_test.cpp)
+target_link_libraries(netsim_compress_zero_fold_test PRIVATE opennova_runtime)
+add_test(NAME netsim_compress_zero_fold COMMAND netsim_compress_zero_fold_test)
+# The class inits' MountSlot leg: an ewep's and an EWeap aircraft's slot bound and seeded at
+# the spawn (the ewep's split behind its model), kept through mount / dismount / remount, re-seeded
+# by the aircraft's respawn, refilled by a PlayerControl carrier's death, bound as the armory
+# lands (L4-s37).
+add_executable(weapon_slot_class_init_test world/weapon_slot_class_init_test.cpp)
+target_link_libraries(weapon_slot_class_init_test
+    PRIVATE opennova_net opennova_runtime opennova_formats opennova_base)
+target_include_directories(weapon_slot_class_init_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME weapon_slot_class_init COMMAND weapon_slot_class_init_test)
+# The listen host's own client runs each relayed S2C 0x49's person arm on the host's world: a
+# named person other than the local player dips its arms for 80 ticks (D-NET-NEW-L4-33).
+add_executable(npruntime_host_reload_echo_test npruntime/host_reload_echo_test.cpp)
+target_link_libraries(npruntime_host_reload_echo_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_host_reload_echo COMMAND npruntime_host_reload_echo_test)
+
+# --- parity lane L5 (client replica) ---
+# The joiner's own player record Flags folded into L under 0xE1 and echoed by the same
+# frame's C2S 0x0C (D-NET-528).
+add_executable(npruntime_joiner_record_flags_test npruntime/joiner_record_flags_test.cpp)
+target_link_libraries(npruntime_joiner_record_flags_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_joiner_record_flags COMMAND npruntime_joiner_record_flags_test)
+# The S2C census's replica consumers: 0x79 host metric, 0x70 vehicle-spawn rows, 0x2A command
+# table, and the inert tags (no unknown tag).
+add_executable(netsim_client_replica_census_test netsim/client_replica_census_test.cpp)
+target_link_libraries(netsim_client_replica_census_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME netsim_client_replica_census COMMAND netsim_client_replica_census_test)
+# The vehicle screen (D-NET-NEW-L5-5): the first open's C2S 0x42, the poll's per-frame retry
+# and 64-frame cadence, the list over the bay mask and the S2C 0x70 rows, the C2S 0x40 pick.
+add_executable(npruntime_vehicle_menu_test npruntime/vehicle_menu_test.cpp)
+target_link_libraries(npruntime_vehicle_menu_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_vehicle_menu COMMAND npruntime_vehicle_menu_test)
+# D-NET-690 in the Godot world's sequence: a remote UseGun rider's gun words pose the joiner
+# world's ewep child at the carrier's articulated anchor (coop_two_sim's attachment shape).
+add_executable(netsim_joiner_usegun_rider_compose_test netsim/joiner_usegun_rider_compose_test.cpp)
+target_link_libraries(netsim_joiner_usegun_rider_compose_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(netsim_joiner_usegun_rider_compose_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME netsim_joiner_usegun_rider_compose COMMAND netsim_joiner_usegun_rider_compose_test)
+# D-NET-133: the 0x0C / 0x18 aiState byte is entity+0x2B4's per-class word (a vehicle's steering
+# filter, a powerup's countdown, a gun's MountSlot counter, a door mask, a marker's name, 0 dead).
+add_executable(npruntime_full_entity_spawn_ai_state_test npruntime/full_entity_spawn_ai_state_test.cpp)
+target_link_libraries(npruntime_full_entity_spawn_ai_state_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_full_entity_spawn_ai_state COMMAND npruntime_full_entity_spawn_ai_state_test)
+# D-NET-196: the decoded player rows' org2 ride link (+0x170 / +0x174), which a guided round's
+# lock note reads on its target.
+add_executable(netsim_client_replica_pipeline_ride_link_test netsim/client_replica_pipeline_ride_link_test.cpp)
+target_link_libraries(netsim_client_replica_pipeline_ride_link_test PRIVATE opennova_runtime)
+add_test(NAME netsim_client_replica_pipeline_ride_link COMMAND netsim_client_replica_pipeline_ride_link_test)
+# D-NET-330: the player body's capsule eye, the four-turn leg the authority's body and a
+# joiner's decoded rows share.
+add_executable(player_body_capsule_eye_test world/player_body_capsule_eye_test.cpp)
+target_link_libraries(player_body_capsule_eye_test PRIVATE opennova_runtime)
+add_test(NAME player_body_capsule_eye COMMAND player_body_capsule_eye_test)
+# The USE readout (world/use_press_trace.h, the use_press_trace probe): the press's arm and
+# body words, the toggle gate, a joiner's seat scan and the framed 0x26 count.
+add_executable(npruntime_use_press_trace_test npruntime/use_press_trace_test.cpp)
+target_link_libraries(npruntime_use_press_trace_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_use_press_trace COMMAND npruntime_use_press_trace_test)
+# The being-revived latch clears in the self record's respawn arm, inside the receive: a 0x3A
+# after the reviving 0x0A in one pump stays latched, one ahead of it is cleared.
+add_executable(npruntime_medic_reviving_latch_test npruntime/medic_reviving_latch_test.cpp)
+target_link_libraries(npruntime_medic_reviving_latch_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_medic_reviving_latch COMMAND npruntime_medic_reviving_latch_test)
+# D-NET-196: a joiner's replica pool-0 rows through its own slot update inside the World's
+# entity pass, ahead of the own body, their person proxies taking the moved positions.
+add_executable(netsim_joiner_replica_middle_leg_test netsim/joiner_replica_middle_leg_test.cpp)
+target_link_libraries(netsim_joiner_replica_middle_leg_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME netsim_joiner_replica_middle_leg COMMAND netsim_joiner_replica_middle_leg_test)
+# D-NET-196: a parked seated rider takes its carrier at its own visit in the pool-0 walk, not
+# in ClientRuntime's leg.
+add_executable(netsim_client_replica_rider_middle_leg_test netsim/client_replica_rider_middle_leg_test.cpp)
+target_link_libraries(netsim_client_replica_rider_middle_leg_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME netsim_client_replica_rider_middle_leg COMMAND netsim_client_replica_rider_middle_leg_test)
+# D-NET-196: a joiner's decoded rows join the proximity tables at the entity update's own
+# build, so its projectile pass reads the previous build; a pool-1 mover's proxy gates on the
+# table's copy and poses the live mover.
+add_executable(wire_proxy_table_age_test world/wire_proxy_table_age_test.cpp)
+target_link_libraries(wire_proxy_table_age_test PRIVATE opennova_runtime)
+add_test(NAME wire_proxy_table_age COMMAND wire_proxy_table_age_test)
+# D-NET-196 design (c): a joiner's decoded pool-1 rows take their visits at their own slots
+# of the World's pool-1 walk, interleaved with the World's movers in slot order.
+add_executable(netsim_joiner_pool1_interleave_test netsim/joiner_pool1_interleave_test.cpp)
+target_link_libraries(netsim_joiner_pool1_interleave_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME netsim_joiner_pool1_interleave COMMAND netsim_joiner_pool1_interleave_test)
+# D-NET-NEW-L5-18: a joiner's own body takes its spawn record's +0x154 slot byte, so its DcbId
+# reads 10000 + slot after a 0x0C (the mission start's re-init) or a 0x18.
+add_executable(npruntime_joiner_local_dcb_id_test npruntime/joiner_local_dcb_id_test.cpp)
+target_link_libraries(npruntime_joiner_local_dcb_id_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_joiner_local_dcb_id COMMAND npruntime_joiner_local_dcb_id_test)
+# D-NET-NEW-L5-22: the ewep update's tank-command call (HUD_COM2GUN and the occupant's
+# TANK_COMAND composite) behind the window leg, its 125-tick stamp and the local seat gates.
+add_executable(emplaced_command_call_test world/emplaced_command_call_test.cpp)
+target_link_libraries(emplaced_command_call_test PRIVATE opennova_runtime)
+add_test(NAME emplaced_command_call COMMAND emplaced_command_call_test)
+# D-NET-892 (d): a joiner's pool-0 walk runs a decoded person's bound move row (the ewep row's
+# update over the row's words, nothing for the other non-org rows); the reset's words at a
+# record's dead -> alive edge.
+add_executable(npruntime_replica_person_ewep_test npruntime/replica_person_ewep_test.cpp)
+target_link_libraries(npruntime_replica_person_ewep_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_replica_person_ewep COMMAND npruntime_replica_person_ewep_test)
+# D-NET-NEW-L5-25: the organic body updates' exits ahead of their legs (bit 0, no channel, the
+# starved chase), a seated body's chase count and starve, the authority's rows never starving.
+add_executable(netsim_client_replica_pipeline_body_exits_test
+    netsim/client_replica_pipeline_body_exits_test.cpp)
+target_link_libraries(netsim_client_replica_pipeline_body_exits_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME netsim_client_replica_pipeline_body_exits
+    COMMAND netsim_client_replica_pipeline_body_exits_test)
+# D-NET-NEW-L5-47..50: the player body's view phase both bodies share, and the authority's seated
+# body running it (the skip branch's legs, the seat Yaw clamp and its skips, the crashed mount's
+# pitch skip, the prone local's mount clear, the chase camera's halved driver Pitch).
+add_executable(infantry_org2_view_test world/infantry_org2_view_test.cpp)
+target_link_libraries(infantry_org2_view_test PRIVATE opennova_runtime)
+add_test(NAME infantry_org2_view COMMAND infantry_org2_view_test)
+# D-AI-9's player leg (D-NET-NEW-L5-65): the player redeploys reset through the shared World reset,
+# its resolve and lift running on a live body (the deploy's) and not on a dead one (the joiner's
+# record arm), the resolver's skip count zeroed at its head, its tail the slices and the body's list;
+# a player body's death edge gated on its flags on every peer (D-NET-NEW-L5-66).
+add_executable(npruntime_player_redeploy_reset_test npruntime/player_redeploy_reset_test.cpp)
+target_link_libraries(npruntime_player_redeploy_reset_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_player_redeploy_reset COMMAND npruntime_player_redeploy_reset_test)
+# D-COL-23's remainder (L5-s35): each teleport action's own proximity tail (the single action's
+# per-pool tail, the group's tables and member lists, teleSSN's statics for a decoration or
+# building marker alone).
+add_executable(teleport_tails_test world/teleport_tails_test.cpp)
+target_link_libraries(teleport_tails_test PRIVATE opennova_runtime)
+add_test(NAME teleport_tails COMMAND teleport_tails_test)
+# V-ROLL-BH's FOUND on D-NET-NEW-L5-72 (L5-s36): an item piece's spawn publishes no table and keeps
+# the slice phase; a palm fragment builds its own list, a section piece none.
+add_executable(fragment_spawn_tail_test world/fragment_spawn_tail_test.cpp)
+target_link_libraries(fragment_spawn_tail_test PRIVATE opennova_runtime)
+add_test(NAME fragment_spawn_tail COMMAND fragment_spawn_tail_test)
+# L5-s39 FOUND (L5-s40): every player body's collision / anchor pose splices its own weapon channel
+# under the Player bit, the seat test and flag 0x40 (a host's remote players included, armed or
+# not), and a joiner's seated player row takes the same seat test; over the minted 19-bone rig.
+add_executable(collision_pose_splice_test world/collision_pose_splice_test.cpp)
+target_link_libraries(collision_pose_splice_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(collision_pose_splice_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME collision_pose_splice COMMAND collision_pose_splice_test)
+
+# --- parity lane L6 (stream/16.16) ---
+# D-NET-507: the entity position is retail's 16.16 words from the BMS spawn through a
+# placement and every load-stream serializer (0x0C / 0x0D + trailer / 0x0F / 0x10 / 0x20).
+add_executable(npruntime_entity_position_words_test npruntime/entity_position_words_test.cpp)
+target_link_libraries(npruntime_entity_position_words_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_entity_position_words COMMAND npruntime_entity_position_words_test)
+# The load-stream rows' fields as retail's serializers write them (D-NET-512, ...).
+add_executable(npruntime_load_stream_rows_test npruntime/load_stream_rows_test.cpp)
+target_link_libraries(npruntime_load_stream_rows_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_load_stream_rows COMMAND npruntime_load_stream_rows_test)
+# D-NET-NEW-L6-2: the entity's Yaw word (+0x10) from the BMS spawn through the reset, every load
+# stream and the fire origin's carrier test.
+add_executable(npruntime_entity_yaw_word_test npruntime/entity_yaw_word_test.cpp)
+target_link_libraries(npruntime_entity_yaw_word_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_entity_yaw_word COMMAND npruntime_entity_yaw_word_test)
+# D-NET-NEW-L6-6 (FX-1): a kill zone queues on every peer that flies the round; a peer's
+# drain pushes its own body and damages nothing.
+add_executable(explosion_push_test world/explosion_push_test.cpp)
+target_link_libraries(explosion_push_test PRIVATE opennova_runtime)
+add_test(NAME explosion_push COMMAND explosion_push_test)
+# D-INF-35 (the vehicle-carrier half): a vehicle's seat bone is the userpoint through the
+# carrier's own Q22 matrix (BoneCallback_Simple), the heading an fpatan of the rotated direction.
+add_executable(seat_bone_pose_test world/seat_bone_pose_test.cpp)
+target_link_libraries(seat_bone_pose_test PRIVATE opennova_runtime)
+add_test(NAME seat_bone_pose COMMAND seat_bone_pose_test)
+# D-NET-515: the mission start runs at the zeroed frame tick, the pool-1 settle's mover call
+# included (its every-64-tick health key), and leaves the first frame's tick 1.
+add_executable(mission_start_tick_test mission/mission_start_tick_test.cpp)
+target_link_libraries(mission_start_tick_test PRIVATE opennova_test_rig)
+target_include_directories(mission_start_tick_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_start_tick COMMAND mission_start_tick_test)
+# D-ITEM-6: the bullet GLASS leg: the surface-material rows' userpoints ahead of the ring scar,
+# the first-hit rule, and the shared stream's words and the effects CRT's reseeds per hit.
+add_executable(glass_leg_test world/glass_leg_test.cpp)
+target_link_libraries(glass_leg_test PRIVATE opennova_runtime)
+add_test(NAME glass_leg COMMAND glass_leg_test)
+# D-NET-515: the suspension's x87 products (the travel's locked share, half an impulse, the flip
+# bound) at the FPU's length, pinned clear of the 24-bit edge (Q3-11).
+add_executable(suspension_precision_test world/suspension_precision_test.cpp)
+target_link_libraries(suspension_precision_test PRIVATE opennova_runtime)
+add_test(NAME suspension_precision COMMAND suspension_precision_test)
+# D-NET-507: the precipitation pool's terrain floor is the bilinear sampler over the slot's words.
+add_executable(precipitation_floor_test mission/precipitation_floor_test.cpp)
+target_link_libraries(precipitation_floor_test PRIVATE opennova_runtime)
+add_test(NAME precipitation_floor COMMAND precipitation_floor_test)
+# D-NET-515: the aircraft, platform and physics-0 solves' force pass skips every probe clear of
+# the terrain by its radius; the ground family's pass never skips its four wheel probes.
+add_executable(probe_force_pass_test world/probe_force_pass_test.cpp)
+target_link_libraries(probe_force_pass_test PRIVATE opennova_runtime)
+add_test(NAME probe_force_pass COMMAND probe_force_pass_test)
+# D-NET-NEW-L6-10 / D-NET-515: the class-C settle against a placed static: a parked Chinook
+# pushed off a pure-yaw static over the settle and the first ticks, on retail's words.
+add_executable(settle_static_contact_test world/settle_static_contact_test.cpp)
+target_link_libraries(settle_static_contact_test PRIVATE opennova_runtime)
+add_test(NAME settle_static_contact COMMAND settle_static_contact_test)
+# D-NET-NEW-L6-11: the aircraft solve's per-pad spring legs (the pad compression words on the
+# probes, the extend loop, the stability byte).
+add_executable(aircraft_spring_legs_test world/aircraft_spring_legs_test.cpp)
+target_link_libraries(aircraft_spring_legs_test PRIVATE opennova_runtime)
+add_test(NAME aircraft_spring_legs COMMAND aircraft_spring_legs_test)
+# D-NET-NEW-L6-13: the tracked solve's +0x2F2 byte reads the latch bytes before the crash state.
+add_executable(contact_stability_byte_test world/contact_stability_byte_test.cpp)
+target_link_libraries(contact_stability_byte_test PRIVATE opennova_runtime)
+add_test(NAME contact_stability_byte COMMAND contact_stability_byte_test)
+# D-NET-NEW-L6-11 / -15 / -21 / -22 / -23: the contact solves' force records and contact copy, the tank's hull
+# word, the bike's wall leg.
+add_executable(contact_depth_views_test world/contact_depth_views_test.cpp)
+target_link_libraries(contact_depth_views_test PRIVATE opennova_runtime)
+add_test(NAME contact_depth_views COMMAND contact_depth_views_test)
+# D-NET-NEW-L6-16 / -17 / -18 / -19 / -20: the tracked solve's extend-loop and respawn legs, the crash-state
+# latch, the no-pad arm, the grounded arm's crashed block, the tail legs.
+add_executable(tracked_contact_legs_test world/tracked_contact_legs_test.cpp)
+target_link_libraries(tracked_contact_legs_test PRIVATE opennova_runtime)
+add_test(NAME tracked_contact_legs COMMAND tracked_contact_legs_test)
+# D-NET-NEW-L6-38 (D-NET-515): the gnrc / gnrl / gnl2 rows' class init caches the entity under
+# them as their ground link (Entity_CacheGroundEntityBelow @0x407D60, Physics_RaycastNearestEntity);
+# D-NET-NEW-L6-39 / -40: the deployable spawn, the powerup walk and a joiner's records run it too.
+add_executable(ground_cache_test world/ground_cache_test.cpp)
+target_link_libraries(ground_cache_test PRIVATE opennova_runtime)
+add_test(NAME ground_cache COMMAND ground_cache_test)
+
+# --- parity lane L7 (vehicles/weapons) ---
+# D-NET-515 / D-NET-514 / D-NET-513: a parked hull's AI trailer keeps the model init's words across the
+# settle, the contact wake compares the candidate's own def mass, an addeweap child composes.
+add_executable(parked_hull_load_test world/parked_hull_load_test.cpp)
+target_link_libraries(parked_hull_load_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME parked_hull_load COMMAND parked_hull_load_test)
+# D-WPN-48: entity+0x308, the last selected weapon slot, and the unarmed seat's detach mount.
+add_executable(selected_slot_test world/selected_slot_test.cpp)
+target_link_libraries(selected_slot_test PRIVATE opennova_runtime)
+add_test(NAME selected_slot COMMAND selected_slot_test)
+# D-NET-NEW-L7-1: a round_type naming ammo.def's first row is an unknown round.
+add_executable(round_type_index_test world/round_type_index_test.cpp)
+target_link_libraries(round_type_index_test PRIVATE opennova_runtime)
+add_test(NAME round_type_index COMMAND round_type_index_test)
+# The local player's mounted fire path across a seat switch: the attach's mount replaces the
+# detach's pending personal slot, and the gun fires.
+add_executable(mounted_fire_path_test world/mounted_fire_path_test.cpp)
+target_link_libraries(mounted_fire_path_test PRIVATE opennova_runtime)
+add_test(NAME mounted_fire_path COMMAND mounted_fire_path_test)
+# D-NET-420 / FOUND-4: the UseGun attach's +368 refusal leaves the gun's slot held on foot
+# (the walk, the busy gate), a client's forced claim, and the seat-2/3 detach's +0x308 store.
+add_executable(usegun_refusal_test world/usegun_refusal_test.cpp)
+target_link_libraries(usegun_refusal_test PRIVATE opennova_runtime)
+add_test(NAME usegun_refusal COMMAND usegun_refusal_test)
+# L7-s23 FOUND: the weapon view's lower / raise interp gates a same-category mount's SWITCHRANK;
+# the mount queues at once (no SWITCHTO deferral); a pending Emplaced word holds the draw (-901).
+add_executable(weapon_lower_raise_test world/weapon_lower_raise_test.cpp)
+target_link_libraries(weapon_lower_raise_test PRIVATE opennova_runtime)
+add_test(NAME weapon_lower_raise COMMAND weapon_lower_raise_test)
+# D-NET-336: the host's walk pumps a remote player's own slot the accepted C2S 0x06 armed,
+# and its reload cycles, a request each cycle, until the player's own C2S 0x25 refills it.
+add_executable(npruntime_remote_slot_pump_test npruntime/remote_slot_pump_test.cpp)
+target_link_libraries(npruntime_remote_slot_pump_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_remote_slot_pump COMMAND npruntime_remote_slot_pump_test)
+# D-NET-693: the C2S 0x2F accept's availability gate (the host's weapon table, the armory zone).
+add_executable(npruntime_loadout_availability_test npruntime/loadout_availability_test.cpp)
+target_link_libraries(npruntime_loadout_availability_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_loadout_availability COMMAND npruntime_loadout_availability_test)
+# D-NET-691: the local player's damage-class bytes: the spawn rebuild writes none, the
+# out-of-session armory apply stores the raw fourth values, an in-session apply none.
+add_executable(damage_class_bytes_test world/damage_class_bytes_test.cpp)
+target_link_libraries(damage_class_bytes_test PRIVATE opennova_runtime)
+add_test(NAME damage_class_bytes COMMAND damage_class_bytes_test)
+# D-NET-NEW-L7-8: the local fire cadence: a held trigger's deferred refire needs the binding at
+# its dispatch; the round event's mode byte reads the slot's own word (0x02 for a bucket weapon).
+add_executable(fire_cadence_test world/fire_cadence_test.cpp)
+target_link_libraries(fire_cadence_test PRIVATE opennova_runtime)
+add_test(NAME fire_cadence COMMAND fire_cadence_test)
+# D-NET-161 (b): the mission start's deck pass: a player spawn marker on a carrier takes it as its
+# ground link and its words in the carrier's frame.
+add_executable(deck_spawn_markers_test world/deck_spawn_markers_test.cpp)
+target_link_libraries(deck_spawn_markers_test PRIVATE opennova_runtime)
+add_test(NAME deck_spawn_markers COMMAND deck_spawn_markers_test)
+# D-NET-332: a vehicle bay's deployable (the C2S 0x40 handler's block and attach; the kernel's spawner).
+add_executable(deployable_spawn_test mission/deployable_spawn_test.cpp)
+target_link_libraries(deployable_spawn_test PRIVATE opennova_test_rig)
+target_include_directories(deployable_spawn_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME deployable_spawn COMMAND deployable_spawn_test)
+# D-NET-64: the flare rounds' motor and inits, and the projectile target ring.
+add_executable(flare_motor_test world/flare_motor_test.cpp)
+target_link_libraries(flare_motor_test PRIVATE opennova_runtime)
+add_test(NAME flare_motor COMMAND flare_motor_test)
+# D-NET-433: a model-less hull's contact solves return after their prologue; no mover stand-in.
+add_executable(model_less_hull_test world/model_less_hull_test.cpp)
+target_link_libraries(model_less_hull_test PRIVATE opennova_runtime)
+add_test(NAME model_less_hull COMMAND model_less_hull_test)
+# D-NET-445: the attach process's bone typing, its detach-first refusal and the off-table bones.
+add_executable(bone_slot_attach_test world/bone_slot_attach_test.cpp)
+target_link_libraries(bone_slot_attach_test PRIVATE opennova_runtime)
+add_test(NAME bone_slot_attach COMMAND bone_slot_attach_test)
+# The mission start's authority rebuild of the pool-0/1 tables and the slices after the WAC run.
+add_executable(mission_start_slices_test mission/mission_start_slices_test.cpp)
+target_link_libraries(mission_start_slices_test PRIVATE opennova_test_rig)
+target_include_directories(mission_start_slices_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_start_slices COMMAND mission_start_slices_test)
+# A round's TrcrID class: the spin-init rows alone spin it, the clym init, the rokt one-shot motor
+# (run in the ballistic leg, its bound +452 skipping the tail's gravity and drag).
+add_executable(round_class_init_test world/round_class_init_test.cpp)
+target_link_libraries(round_class_init_test PRIVATE opennova_runtime)
+add_test(NAME round_class_init COMMAND round_class_init_test)
+# The arti row's motor, the mortar shell (drag, advance, gravity; the water and terrain arms).
+add_executable(mortar_motor_test world/mortar_motor_test.cpp)
+target_link_libraries(mortar_motor_test PRIVATE opennova_runtime)
+add_test(NAME mortar_motor COMMAND mortar_motor_test)
+
+# --- parity lane L8 (round/info/serve) ---
+# The host dispatch's remaining C2S cases (D-NET-218): the 0x34 keepalive's high-water, the
+# 0x4E squad registry walk, the 0x24 ban and punt line's sender authorization and replies.
+add_executable(npruntime_dispatch_remainder_test npruntime/dispatch_remainder_test.cpp)
+target_link_libraries(npruntime_dispatch_remainder_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_dispatch_remainder COMMAND npruntime_dispatch_remainder_test)
+# The /INOUT file (D-NET-356): the protocol's _inout.txt NapiLog and opennova-serve's switch.
+add_executable(npruntime_inout_log_test npruntime/inout_log_test.cpp)
+target_link_libraries(npruntime_inout_log_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_inout_log COMMAND npruntime_inout_log_test)
+add_executable(opennova_serve_inout_switch_test serve/inout_switch_test.cpp)
+target_link_libraries(opennova_serve_inout_switch_test PRIVATE opennova_serve_core)
+target_include_directories(opennova_serve_inout_switch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME opennova_serve_inout_switch COMMAND opennova_serve_inout_switch_test)
+# The map rotation's process words across two host sessions (D-NET-353).
+add_executable(npruntime_rotation_process_words_test npruntime/rotation_process_words_test.cpp)
+target_link_libraries(npruntime_rotation_process_words_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_rotation_process_words COMMAND npruntime_rotation_process_words_test)
+# The host's NovaWorld squad registry (D-NET-NEW-L8-2): the add's fill and its 0x6A / 0x32 sends,
+# the leave's, the map change's survival and the chat and board readers.
+add_executable(npruntime_squad_registry_test npruntime/squad_registry_test.cpp)
+target_link_libraries(npruntime_squad_registry_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_squad_registry COMMAND npruntime_squad_registry_test)
+# The host CNetQuality send window's level arithmetic and its round-over hold (F6).
+add_executable(npruntime_net_quality_gates_test npruntime/net_quality_gates_test.cpp)
+target_link_libraries(npruntime_net_quality_gates_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_net_quality_gates COMMAND npruntime_net_quality_gates_test)
+# opennova-serve's S2C 0x68 cursor wrap: the mission start's frozen model-def list's count.
+add_executable(opennova_serve_model_page_test serve/opennova_serve_model_page_test.cpp)
+target_link_libraries(opennova_serve_model_page_test PRIVATE opennova_serve_core)
+target_include_directories(opennova_serve_model_page_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME opennova_serve_model_page COMMAND opennova_serve_model_page_test)
+# The server log switches the game's launch walk reads and the devices they arm (FOUND 5).
+add_executable(npruntime_server_log_devices_test npruntime/server_log_devices_test.cpp)
+target_link_libraries(npruntime_server_log_devices_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_server_log_devices COMMAND npruntime_server_log_devices_test)
+# opennova-serve's host switches: /maxplayers over the host file's MaxPlayers, the random bind start.
+add_executable(opennova_serve_host_switches_test serve/opennova_serve_host_switches_test.cpp)
+target_link_libraries(opennova_serve_host_switches_test PRIVATE opennova_serve_core)
+target_include_directories(opennova_serve_host_switches_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME opennova_serve_host_switches COMMAND opennova_serve_host_switches_test)
+# The process's remote-admin half (NEW-L8-11): the 16-bit port, the log line, the console
+# session-less in the menus and over a host's context (the game's and opennova-serve's).
+add_executable(remote_admin_test admin/remote_admin_test.cpp)
+target_link_libraries(remote_admin_test PRIVATE opennova_runtime)
+target_include_directories(remote_admin_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME remote_admin COMMAND remote_admin_test)
+# D-NET-652: the slot's own readers (the squad break-up's member test, the play-tick walk, the
+# breath sampler) keep a punted slot in state 6 until the teardown.
+add_executable(npruntime_punt_slot_readers_test npruntime/punt_slot_readers_test.cpp)
+target_link_libraries(npruntime_punt_slot_readers_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_punt_slot_readers_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_punt_slot_readers COMMAND npruntime_punt_slot_readers_test)
+# D-NET-670: the mask-128 0x34 carries the resolved set's own spelling (the water-crossing fan).
+add_executable(npruntime_overlay_set_spelling_test npruntime/overlay_set_spelling_test.cpp)
+target_link_libraries(npruntime_overlay_set_spelling_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_overlay_set_spelling_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_overlay_set_spelling COMMAND npruntime_overlay_set_spelling_test)
+# NEW-L8-12: under the join-ticket gate the 0x01 holds the probe; the enter result sends it.
+add_executable(npruntime_ticket_probe_timing_test npruntime/ticket_probe_timing_test.cpp)
+target_link_libraries(npruntime_ticket_probe_timing_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_ticket_probe_timing_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_ticket_probe_timing COMMAND npruntime_ticket_probe_timing_test)
+# D-NET-NEW-L9-5 (V-L9-s3's F2, the lister's site): opennova-serve's gate socket binds the first free
+# port of the block's mpgateserverlocalport scan on every interface.
+add_executable(opennova_serve_lister_gate_bind_test serve/opennova_serve_lister_gate_bind_test.cpp)
+target_link_libraries(opennova_serve_lister_gate_bind_test PRIVATE opennova_serve_core)
+target_include_directories(opennova_serve_lister_gate_bind_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME opennova_serve_lister_gate_bind COMMAND opennova_serve_lister_gate_bind_test)
+# D-NET-NEW-L8-16: the session title g_SessionTitle (the mission start's rule, SetServerName, the
+# Co-op 0x7B and MISSIONNAME).
+add_executable(npruntime_session_title_test npruntime/session_title_test.cpp)
+target_link_libraries(npruntime_session_title_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_session_title_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_session_title COMMAND npruntime_session_title_test)
+# D-NET-NEW-L8-20: the S2C 0x02 probe's words and padding, and the process's file-transfer session
+# id every authority mission start steps.
+add_executable(npruntime_join_probe_words_test npruntime/join_probe_words_test.cpp)
+target_link_libraries(npruntime_join_probe_words_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_join_probe_words_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_join_probe_words COMMAND npruntime_join_probe_words_test)
+# The host's GetTickCount readers on the process clock across a held logic tick (D-NET-NEW-L8-29..).
+add_executable(npruntime_host_process_clock_test npruntime/host_process_clock_test.cpp)
+target_link_libraries(npruntime_host_process_clock_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_host_process_clock_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_host_process_clock COMMAND npruntime_host_process_clock_test)
+# D-NET-NEW-L8-44 (/sstga): the Screen Shot action's run-length TGA, its packets byte for byte.
+add_executable(screenshot_tga_test tga/screenshot_tga_test.cpp)
+target_link_libraries(screenshot_tga_test PRIVATE opennova_formats)
+target_include_directories(screenshot_tga_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME screenshot_tga COMMAND screenshot_tga_test)
+# D-NET-NEW-L8-46: the gameplay overlay pass's head (the round-over latch, the white hit flash).
+add_executable(hud_overlay_pass_head_test hud/hud_overlay_pass_head_test.cpp)
+target_link_libraries(hud_overlay_pass_head_test PRIVATE opennova_runtime)
+target_include_directories(hud_overlay_pass_head_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_overlay_pass_head COMMAND hud_overlay_pass_head_test)
+
+# --- parity lane L9 (NovaWorld) ---
+add_executable(npruntime_listing_baffle_key_test npruntime/listing_baffle_key_test.cpp)
+target_link_libraries(npruntime_listing_baffle_key_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_listing_baffle_key_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_listing_baffle_key COMMAND npruntime_listing_baffle_key_test)
+# The six METPROTOCOL reporters' encoders and CServerTick (D-NET-NEW-L9-22).
+add_executable(gate_metrics_encode_test novaworld/gate_metrics_encode_test.cpp)
+target_link_libraries(gate_metrics_encode_test PRIVATE opennova_net)
+add_test(NAME gate_metrics_encode COMMAND gate_metrics_encode_test)
+# The METPROTOCOL report clocks' writers and the SERVER / PLAYER / SERVERMISSION /
+# PLAYERMISSION senders on the host context (D-NET-NEW-L9-22).
+add_executable(gate_metrics_reports_test npruntime/gate_metrics_reports_test.cpp)
+target_link_libraries(gate_metrics_reports_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(gate_metrics_reports_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME gate_metrics_reports COMMAND gate_metrics_reports_test)
+# The joiner's METPROTOCOL PING at its join's connect, over the process's ping manager
+# (D-NET-NEW-L9-22).
+add_executable(npruntime_join_gate_ping_test npruntime/join_gate_ping_test.cpp)
+target_link_libraries(npruntime_join_gate_ping_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_join_gate_ping COMMAND npruntime_join_gate_ping_test)
+# The mission start's server-info update inside the host boot: past a map change's head, ahead
+# of the load window's first pump, the next kernel and its terrain.
+add_executable(npruntime_host_boot_mission_start_update_test npruntime/host_boot_mission_start_update_test.cpp)
+target_link_libraries(npruntime_host_boot_mission_start_update_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_host_boot_mission_start_update_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_host_boot_mission_start_update COMMAND npruntime_host_boot_mission_start_update_test)
+# A player's teardown runs the NovaWorld session's ClientHostPlayerRemoved leg first, the listen
+# host's own at its leave included (D-NET-NEW-L9-29).
+add_executable(npruntime_teardown_nwu_player_removed_test npruntime/teardown_nwu_player_removed_test.cpp)
+target_link_libraries(npruntime_teardown_nwu_player_removed_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_teardown_nwu_player_removed COMMAND npruntime_teardown_nwu_player_removed_test)
+# apps/common's HTTP transport writes no Host line of its own past a caller's: the serve's
+# NovaWorld legs carry the menu browser's port-less Host (D-NET-NEW-L9-49).
+add_executable(net_http_host_line_test serve/net_http_host_line_test.cpp)
+target_link_libraries(net_http_host_line_test PRIVATE opennova_app_common)
+add_test(NAME net_http_host_line COMMAND net_http_host_line_test)
+# The Host list's MI1..MI3: the host's net-quality send-window averages (D-NET-NEW-L9-50).
+add_executable(npruntime_listing_net_quality_columns_test npruntime/listing_net_quality_columns_test.cpp)
+target_link_libraries(npruntime_listing_net_quality_columns_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_listing_net_quality_columns COMMAND npruntime_listing_net_quality_columns_test)
+# The menu browser's cookie jar as retail keeps it: the Set-Cookie parse, the store's match and the
+# by-name read (D-NET-NEW-L9-58).
+add_executable(cookie_jar_test novaworld/cookie_jar_test.cpp)
+target_link_libraries(cookie_jar_test PRIVATE opennova_net)
+target_include_directories(cookie_jar_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cookie_jar COMMAND cookie_jar_test)
+
+# --- parity lane LI (input seam) ---
+add_executable(inmatch_tick_input_source_test frame/tick_input_source_test.cpp)
+target_link_libraries(inmatch_tick_input_source_test PRIVATE opennova_runtime)
+add_test(NAME inmatch_tick_input_source COMMAND inmatch_tick_input_source_test)
+add_executable(controls_key_event_queue_test controls/key_event_queue_test.cpp)
+target_link_libraries(controls_key_event_queue_test PRIVATE opennova_runtime)
+add_test(NAME controls_key_event_queue COMMAND controls_key_event_queue_test)
+add_executable(controls_input_event_queue_test controls/input_event_queue_test.cpp)
+target_link_libraries(controls_input_event_queue_test PRIVATE opennova_runtime)
+add_test(NAME controls_input_event_queue COMMAND controls_input_event_queue_test)
+add_executable(power_throw_windup_test world/power_throw_windup_test.cpp)
+target_link_libraries(power_throw_windup_test PRIVATE opennova_runtime)
+add_test(NAME power_throw_windup COMMAND power_throw_windup_test)
+add_executable(reload_at_dispatch_test world/reload_at_dispatch_test.cpp)
+target_link_libraries(reload_at_dispatch_test PRIVATE opennova_runtime)
+add_test(NAME reload_at_dispatch COMMAND reload_at_dispatch_test)
+add_executable(fire_press_leg_test world/fire_press_leg_test.cpp)
+target_link_libraries(fire_press_leg_test PRIVATE opennova_runtime)
+add_test(NAME fire_press_leg COMMAND fire_press_leg_test)
+add_executable(fire_send_cease_fire_test world/fire_send_cease_fire_test.cpp)
+target_link_libraries(fire_send_cease_fire_test PRIVATE opennova_runtime)
+add_test(NAME fire_send_cease_fire COMMAND fire_send_cease_fire_test)
+add_executable(fire_face_test world/fire_face_test.cpp)
+target_link_libraries(fire_face_test PRIVATE opennova_runtime)
+target_include_directories(fire_face_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME fire_face COMMAND fire_face_test)
+add_executable(commit_mount_test world/commit_mount_test.cpp)
+target_link_libraries(commit_mount_test PRIVATE opennova_runtime)
+add_test(NAME commit_mount COMMAND commit_mount_test)
+
+# --- parity lane R3L (R3-lite replay) ---
+# R3-lite: the retail capture run_20260426_120859's S2C stream replayed into a seeded joiner
+# ClientRuntime at its own timing (every tag decodes and dispatches; pools, frames, board; the
+# C2S replies body for body; the timer sends by rate), and its host twin: the capture's C2S
+# stream into a socketless host (every record reaches a named handler but 0x48's; the replies).
+add_executable(npruntime_retail_s2c_replay_test npruntime/retail_s2c_replay_test.cpp)
+target_link_libraries(npruntime_retail_s2c_replay_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_retail_s2c_replay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(npruntime_retail_s2c_replay_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld")
+add_test(NAME npruntime_retail_s2c_replay COMMAND npruntime_retail_s2c_replay_test)
+
+# --- parity lane LP (proof) ---
+
+# --- parity lane LX (cases/judge) ---
+add_executable(npwire_capture_goodbye_test npwire/capture_goodbye_test.cpp)
+target_link_libraries(npwire_capture_goodbye_test PRIVATE opennova_net opennova_base)
+add_test(NAME npwire_capture_goodbye COMMAND npwire_capture_goodbye_test)
+
+# --- parity lane LH (HUD zone status) ---
+# The zone HUD's client feeds: the regular overlay slot a zone's capture bits ride
+# (MapOverlay_FindRegularSlotByEntity), the A&S radio context over it, the zone status
+# panel's rows and the takeover dialog's nearest entry.
+add_executable(zone_hud_feed_test netsim/zone_hud_feed_test.cpp)
+target_link_libraries(zone_hud_feed_test PRIVATE opennova_runtime opennova_net)
+target_compile_features(zone_hud_feed_test PRIVATE cxx_std_17)
+add_test(NAME zone_hud_feed COMMAND zone_hud_feed_test)
+# The takeover status dialog (HUD_DrawTakeoverStatus): its composition, the scaled line's
+# clip, its element off the death screen.
+add_executable(hud_takeover_status_test hud/hud_takeover_status_test.cpp)
+target_link_libraries(hud_takeover_status_test PRIVATE opennova_runtime)
+target_include_directories(hud_takeover_status_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_takeover_status COMMAND hud_takeover_status_test)
+
+# --- parity lane LF (performance) ---
+# The two legs of a mission start's terrain load (runtime/terrain/terrain_load_legs.h,
+# D-NET-NEW-L2-46): the connect leg ahead of the joiner's C2S 0x0A, the textures at the
+# mission textures stage.
+add_executable(terrain_load_legs_test terrain/terrain_load_legs_test.cpp)
+target_link_libraries(terrain_load_legs_test PRIVATE opennova_runtime)
+target_compile_features(terrain_load_legs_test PRIVATE cxx_std_17)
+add_test(NAME terrain_load_legs COMMAND terrain_load_legs_test)
+# The main loop's clock (runtime/world/tick_count_clock.h, D-NET-NEW-LF-2): GetTickCount's
+# system-timer steps, and the bank and frame lock stepping with them.
+add_executable(tick_count_clock_test world/tick_count_clock_test.cpp)
+target_link_libraries(tick_count_clock_test PRIVATE opennova_runtime)
+target_compile_features(tick_count_clock_test PRIVATE cxx_std_17)
+add_test(NAME tick_count_clock COMMAND tick_count_clock_test)
+# A rig's clip keys sampled at their first read (runtime/anim/anim_sample.h ClipSampler,
+# Clip::key; D-NET-NEW-LF-14): sample_clip bit-identical to the former whole-table sampler on
+# every minted .bad and mode, a rig's load sampling no key, each key and pose the old table's.
+add_executable(clip_keys_test anim/clip_keys_test.cpp)
+target_link_libraries(clip_keys_test PRIVATE opennova_runtime)
+target_include_directories(clip_keys_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(clip_keys_test PRIVATE cxx_std_17)
+add_test(NAME clip_keys COMMAND clip_keys_test)
+# The joiner's parked replica rows at their own entries (runtime/replication
+# client_replica_pipeline.h ParkedRow, the pool-1 slot table; D-NET-NEW-LF-26): each slot's
+# visit once, a row that moved since it parked found by its handle, the unreached rows in walk
+# order, the pool-0 halves.
+add_executable(netsim_replica_walk_lookups_test netsim/replica_walk_lookups_test.cpp)
+target_link_libraries(netsim_replica_walk_lookups_test PRIVATE opennova_net opennova_runtime)
+target_compile_features(netsim_replica_walk_lookups_test PRIVATE cxx_std_17)
+add_test(NAME netsim_replica_walk_lookups COMMAND netsim_replica_walk_lookups_test)

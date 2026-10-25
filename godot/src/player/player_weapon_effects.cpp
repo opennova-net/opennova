@@ -106,7 +106,8 @@ void PlayerWeaponEffects::on_viewmodel_refresh() {
 // @ 0x4dc9e0]. Redundant reinstalls (the installed def already IS the target
 // and its viewmodel exists) are skipped so the queued SWITCHTO draw-in
 // survives.
-bool PlayerWeaponEffects::apply_weapon_switch(const String &p_weapon_name, bool p_preserve_slot_state) {
+bool PlayerWeaponEffects::apply_weapon_switch(const String &p_weapon_name,
+		bool p_preserve_slot_state, bool p_installed) {
 	const Ref<LocalPlayerVisuals> world_visuals = visuals();
 	LocalPlayerPresenter *owner = presenter();
 	if (world() == nullptr || world_visuals.is_null() || owner == nullptr) {
@@ -116,7 +117,11 @@ bool PlayerWeaponEffects::apply_weapon_switch(const String &p_weapon_name, bool 
 			owner->viewmodel() != nullptr) {
 		return true;
 	}
-	const bool switched = world_visuals->set_local_player_weapon_by_name(p_weapon_name, p_preserve_slot_state);
+	// A switch the sim's commit mounted is device work here: the viewmodel follows the
+	// def the commit installed (world::WeaponPresentationEvent::installed).
+	const bool switched = p_installed
+			? world_visuals->present_local_player_weapon(p_weapon_name)
+			: world_visuals->set_local_player_weapon_by_name(p_weapon_name, p_preserve_slot_state);
 	if (switched) {
 		owner->refresh_viewmodel();
 	}
@@ -202,7 +207,8 @@ void PlayerWeaponEffects::consume(const Ref<PlayerWeaponView> &p_view,
 				apply_weapon_clear();
 				break;
 			case opennova::world::WeaponPresentOp::kSwitchWeapon:
-				apply_weapon_switch(event->get_switch_to_weapon(), event->get_preserve_slot_state());
+				apply_weapon_switch(event->get_switch_to_weapon(), event->get_preserve_slot_state(),
+						event->get_installed());
 				break;
 			case opennova::world::WeaponPresentOp::kSwitchDenied:
 				play_switch_deny_sound();

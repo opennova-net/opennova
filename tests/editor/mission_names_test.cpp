@@ -1613,7 +1613,8 @@ int test_names_base_heights() {
 	terrain.wrap_y = config.wrap_y != 0;
 	// Four places on the island (about the origin) inside their texels, so each blends four, each at a height of its
 	// own, and each where the original editor's blend and the game's column (world::terrain_column_height) round
-	// apart: the same atlas, bilinear both, a few 16.16 units apart in about a quarter of the island's places.
+	// apart: the same atlas, bilinear both, the editor's product chopped where the game rounds each tap (its
+	// Terrain_SampleHeightBilinear @ 0x6067b0), a 16.16 unit apart at each of the four.
 	std::vector<std::pair<int32_t, int32_t>> spots;
 	std::vector<int32_t> seen;
 	for (double y = -300.61; y <= 300.0 && spots.size() < 4; y += 25.0)
@@ -1672,8 +1673,9 @@ int test_names_base_heights() {
 	heights_of(text, zs, bases);
 	TEST_EXPECT(zs.size() == 4 && bases.size() == 4 && text.find("height_lock") == std::string::npos);
 	if (zs.size() != 4 || bases.size() != 4) return 1;
-	// Pinned: the original editor's blend over Tmap there (its sampler's, not the game's column).
-	const int64_t pinned[4] = {5079735, 6308535, 4977335, 6206135};
+	// Pinned: the original editor's blend over Tmap there (its sampler's, not the game's column), at (-300.37,
+	// -300.61), (24.63, -300.61), (49.63, -300.61) and (74.63, -300.61); the game's column is one more at each.
+	const int64_t pinned[4] = {3590594, 3792363, 3997163, 4114882};
 	for (size_t i = 0; i < 4; ++i) {
 		const int64_t under = int64_t(bms::to_fixed_16_16(1.0)) - zs[i];
 		if (under != pinned[i]) std::printf("  entity %zu: the terrain's height %lld\n", i, static_cast<long long>(under));

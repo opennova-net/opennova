@@ -12,9 +12,13 @@
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/vehicle_part_anim.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
+
+#include "../common/hull_brain.h"
 
 #include <cstdio>
 #include <cmath>
+#include <memory>
 
 using namespace opennova::world;
 
@@ -145,7 +149,7 @@ struct Rig {
 		// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
 		veh.item_attrib = kItemAttribPlayerControl;
 		veh.position = {100.0f, 200.0f, 10.0f};
-		veh.yaw = 0;
+		veh.heading = placed_heading_bam(0);
 		veh.health = 3000;
 		veh.health_max = 3000;
 		veh.alive = true;
@@ -155,6 +159,9 @@ struct Rig {
 		ctrl.source_name = "ctrlx00";
 		veh.seats.push_back(ctrl);
 		veh_h = w.registry.spawn(1, veh);
+		// The buggy row's class init gives the hull its GROUND-profile brain;
+		// without one every mover stops at its head.
+		test_common::brain_hull(w, veh_h);
 
 		Entity drv;
 		drv.kind = EntityKind::Organic;
@@ -168,6 +175,7 @@ struct Rig {
 	}
 	Entity &veh() { return *w.registry.get(veh_h); }
 	Entity &drv() { return *w.registry.get(drv_h); }
+	AiEntity &brain() { return *w.ai.for_handle(veh_h); }
 	void mount() { CHECK(w.vehicles.process_attach(drv_h, veh_h, 1), "mount"); }
 	void tick(int n, const VehicleTraits &t) {
 		for (int i = 0; i < n; ++i) w.vehicles.tick_motor(veh(), t);
@@ -324,6 +332,7 @@ void test_helo_family_decays_at_the_helo_rate() {
 	Rig r;
 	VehicleTraits t = buggy_traits(true);
 	t.family = VehicleFamily::Helicopter;
+	r.w.ai.release(r.veh_h); // a row with no brain: its family stands in
 	r.mount();
 	for (int i = 0; i < 3; ++i) r.w.vehicles.part_anim_tick(r.veh(), t);
 	CHECK(r.veh().veh.part_spin.speed == 3 * kRotorRateFull,
@@ -336,6 +345,32 @@ void test_helo_family_decays_at_the_helo_rate() {
 	r.w.vehicles.part_anim_tick(r.veh(), g);
 	CHECK(r.veh().veh.part_spin.speed == 3 * kRotorRateFull - kRotorDecayHelo - kRotorDecayGround,
 			"a ground-family row decays at the ground rate");
+}
+
+// A predicted aircraft row skips the mover but still runs its tail's rotor call,
+// under the mover's own gate: a live (Health > 0), shown (Flags bit 0 clear) hull.
+// [orig: Entity_UpdateAircraftPhysics @0x490310 - `cmp word ptr [esi+11Eh], 0; jle`
+//  @0x490592..0x49059A, `test byte ptr [esi+24h], 1; jnz` @0x49059C..0x4905A0, the
+//  call @0x4905A6]
+void test_predicted_aircraft_rotor_keeps_the_movers_gate() {
+	auto r = std::make_unique<Rig>();
+	VehicleTraits t = buggy_traits(true);
+	t.family = VehicleFamily::Helicopter;
+	r->brain().profile.type = test_common::hull_profile_type(t.family);
+	r->w.vehicles.traits.set(r->veh().item_id, t);
+	r->mount();
+	r->veh().veh.net_predicted = true;
+	r->veh().health = 0;
+	r->w.vehicles.update_motor(r->veh(), /*is_authority=*/true);
+	CHECK(r->veh().veh.part_spin.speed == 0, "a zero-Health predicted aircraft's rotor stays");
+	r->veh().health = 3000;
+	r->veh().flags |= 1u;
+	r->w.vehicles.update_motor(r->veh(), /*is_authority=*/true);
+	CHECK(r->veh().veh.part_spin.speed == 0, "a hidden predicted aircraft's rotor stays");
+	r->veh().flags &= ~1u;
+	r->w.vehicles.update_motor(r->veh(), /*is_authority=*/true);
+	CHECK(r->veh().veh.part_spin.speed == kRotorRateFull,
+			"a live shown predicted aircraft spins up one tick");
 }
 
 } // namespace
@@ -361,7 +396,7 @@ void test_watercraft_runs_no_rotor_machine() {
 	// The authority boat tick runs the part-anim exactly once.
 	t.physics = 1;
 	veh.veh.wheel_phase = 0;
-	r.w.vehicles.tick_watercraft_motor(veh, t, nullptr);
+	r.w.vehicles.tick_watercraft_motor(veh, t);
 	CHECK(veh.veh.wheel_phase == (veh.veh.cmd_speed << 13),
 			"one authority tick advances the phase by one step");
 }
@@ -373,7 +408,7 @@ void test_watercraft_runs_no_rotor_machine() {
 // no PRNG draw, spins up 186413/tick to the cap, decays 186413/tick after the
 // dismount, and never touches the wheel phase there (the mover's own
 // command-driven step does). The claimant start/stop sound edge sits in the
-// same block. [orig: Entity_ProcessAirVehiclePhysics @0x46FA00 gate @0x47004B,
+// same block. [orig: Vehicle_ProcessSelectorZeroBoat @0x46FA00 gate @0x47004B,
 //  claimant edge @0x470055..0x4700EB, Entity_UpdatePartSpinAccumulator
 //  @0x4700F5; Entity_DispatchPhysics_cbot @0x48EFAC;
 //  Entity_DispatchPhysicsUpdate @0x48F035]
@@ -392,7 +427,7 @@ void test_selector_zero_boat_runs_the_ground_machine() {
 			veh.flags |= 0x8000u;
 		}
 		r.w.vehicles.traits.set(veh.item_id, t);
-		auto &brain = *r.w.ai.at(r.w.ai.attach(r.veh_h));
+		auto &brain = r.brain();
 		brain.profile.type = 2; // d_lcac: `type GROUND`
 		const uint32_t prng0 = r.w.prng16_state;
 		r.tick(2, t);
@@ -425,7 +460,7 @@ void test_selector_zero_boat_runs_the_ground_machine() {
 		t.water_speed = t.player_speed;
 		r.w.vehicles.traits.set(r.veh().item_id, t);
 		r.mount();
-		for (int i = 0; i < 3; ++i) r.w.vehicles.tick_watercraft_motor(r.veh(), t, nullptr);
+		for (int i = 0; i < 3; ++i) r.w.vehicles.tick_watercraft_motor(r.veh(), t);
 		CHECK(r.veh().veh.part_spin.rate == 0 && r.veh().veh.part_spin.speed == 0,
 				"the full watercraft mover runs no rotor machine");
 	}
@@ -452,6 +487,7 @@ void test_suspension_registers_and_rotor_threshold_tick() {
 	VehicleTraits t = buggy_traits(true);
 	t.family = VehicleFamily::Helicopter;
 	t.climb_speed = 1000;
+	r.brain().profile.type = test_common::hull_profile_type(t.family);
 	r.mount();
 	r.veh().veh.part_spin.speed = kRotorSpeedMax - kRotorRateFull;
 	r.veh().veh.part_spin.rate = kRotorRateFull;
@@ -471,7 +507,7 @@ void test_tracks_and_turret_motor_commit() {
 		Rig r;
 		auto t = buggy_traits(true);
 		t.family = VehicleFamily::Helicopter;
-		AiEntity &ai = *r.w.ai.at(r.w.ai.attach(r.veh_h));
+		AiEntity &ai = r.brain();
 		ai.profile.type = 2;
 		r.veh().veh.part_spin.speed = 123;
 		r.veh().veh.part_spin.rate = 456;
@@ -495,7 +531,7 @@ void test_tracks_and_turret_motor_commit() {
 		Rig r;
 		auto t = buggy_traits(true);
 		t.family = family;
-		AiEntity &ai = *r.w.ai.at(r.w.ai.attach(r.veh_h));
+		AiEntity &ai = r.brain();
 		ai.profile.type = 2;
 		for (int i = 0; i < 6; ++i)
 			ai.brain.f[AiBrain::kStagingBlock + i] = 10 + i;
@@ -558,7 +594,7 @@ void test_rotor_wash_particles_and_lifetime() {
 	Entity seed;
 	seed.kind = EntityKind::Item;
 	seed.position = { 0, 0, 6 };
-	seed.yaw = 90;
+	seed.heading = placed_heading_bam(90);
 	seed.health = seed.health_max = 1000;
 	const auto h = world.registry.spawn(1, seed);
 	Entity &helo = *world.registry.get(h);
@@ -880,6 +916,7 @@ int main() {
 	test_register_projection_through_the_mover();
 	test_rotor_machines_by_profile_type();
 	test_helo_family_decays_at_the_helo_rate();
+	test_predicted_aircraft_rotor_keeps_the_movers_gate();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

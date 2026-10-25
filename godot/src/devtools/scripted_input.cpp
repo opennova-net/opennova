@@ -41,7 +41,7 @@ bool number(const Variant &p_value, double &r_out) {
 
 // The step's shape, or the refusal naming what is wrong with it.
 String marshal_step(const Dictionary &p_step, Step &r_out) {
-	static const char *const kActions[] = {"down", "up", "press", "look_px", "end"};
+	static const char *const kActions[] = {"down", "up", "press", "look_px", "char", "end"};
 	if (!p_step.has("tick") || !integral(p_step["tick"], r_out.tick)) {
 		return "\"tick\" must be an integer";
 	}
@@ -49,7 +49,7 @@ String marshal_step(const Dictionary &p_step, Step &r_out) {
 	for (const char *key : kActions) {
 		if (p_step.has(key)) ++actions;
 	}
-	if (actions != 1) return "needs exactly one of down / up / press / look_px / end";
+	if (actions != 1) return "needs exactly one of down / up / press / look_px / char / end";
 	if (p_step.has("look_px")) {
 		const Variant look = p_step["look_px"];
 		const Array pair = look.get_type() == Variant::ARRAY ? Array(look) : Array();
@@ -57,6 +57,16 @@ String marshal_step(const Dictionary &p_step, Step &r_out) {
 			return "\"look_px\" must be [dx, dy] numbers";
 		}
 		r_out.kind = Step::Kind::Look;
+		return String();
+	}
+	if (p_step.has("char")) {
+		// One character as a one-character string; the engine refuses one no
+		// char step types.
+		const Variant typed = p_step["char"];
+		const String text = typed.get_type() == Variant::STRING ? String(typed) : String();
+		if (text.length() != 1 || text[0] > 0xFF) return "\"char\" must be one character";
+		r_out.character = static_cast<uint8_t>(text[0]);
+		r_out.kind = Step::Kind::Char;
 		return String();
 	}
 	if (p_step.has("end")) {

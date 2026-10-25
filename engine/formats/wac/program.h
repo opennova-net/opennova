@@ -153,6 +153,16 @@ struct Program {
     std::vector<uint16_t> event_depths;
     uint32_t loop_count = 0;
     std::vector<std::string> source_names;
+    // The declared names, in declaration order: VAR's (type 1) and CHEAT's (type 0x19);
+    // declaration i is mission variable 256 + i. The console's overlay toggle walks the
+    // CHEAT ones by name. [orig: byte_C68218 (24-byte rows: the name, +0x13 the type,
+    //  +0x14 the variable's address 0xC6B640 + 4 * i), count dword_C60E14; Script_Compile
+    //  @0x4F3927..0x4F3956]
+    struct Declared {
+        std::string name;
+        uint8_t type = 1;
+    };
+    std::vector<Declared> declarations;
     std::vector<InstructionSource> instruction_sources;
     std::vector<Diagnostic> diagnostics;
 

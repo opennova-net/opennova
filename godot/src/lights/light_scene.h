@@ -222,6 +222,18 @@ public:
 			const PackedInt64Array &p_owner_entities,
 			const Ref<EnvLightValues> &p_fog,
 			std::vector<opennova::renderer::LightCoronaQuad> &r_quads);
+	// A water mirror's own corona walk (renderer/scene_overlay.h kMirrorOverlayOrder carries the
+	// witness) into r_quads: the same walk over mirror view `p_mirror_view`'s camera (0 the main
+	// scene's mirror, 1 the weapon Inset's), its phase and its fog, each owner gated on the section
+	// mask that mirror's own collect wrote (ObjectModel::get_mirror_view_section_mask). Returns the
+	// quad count.
+	int collect_mirror_corona_rows(int p_mirror_view, const Vector3 &p_camera_pos,
+			const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
+			int p_time_ms, int p_frame_index, Weather *p_weather,
+			const TypedArray<Node3D> &p_models,
+			const PackedInt64Array &p_owner_entities,
+			const Ref<EnvLightValues> &p_fog,
+			std::vector<opennova::renderer::LightCoronaQuad> &r_quads);
 	// Test seam: the last collect as kCoronaRowFloats per row (the Godot-world
 	// centre xyz, the half size, the colour rgb).
 	static constexpr int kCoronaRowFloats = 7;
@@ -295,15 +307,18 @@ private:
 		// skipped row's inputs are unchanged, so its count carries over).
 		size_t last_count = 0;
 	};
+	// The view a corona walk gates its owned coronas for: the section masks of
+	// that view's own collect.
+	enum class CoronaView : uint8_t { Main, Inset, Mirror, InsetMirror };
 	// The corona frame-input build behind collect_corona_rows (owner masks
-	// live in the caller's vector for the call); `p_inset_view` reads each
-	// owner's Inset section mask instead of the main view's.
+	// live in the caller's vector for the call); `p_view` picks whose section
+	// masks each owner reads.
 	void build_corona_inputs(const Vector3 &p_camera_pos,
 			const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
 			int p_time_ms, int p_frame_index, Weather *p_weather,
 			const TypedArray<Node3D> &p_models,
 			const PackedInt64Array &p_owner_entities,
-			const Ref<EnvLightValues> &p_fog, bool p_inset_view,
+			const Ref<EnvLightValues> &p_fog, CoronaView p_view,
 			std::vector<opennova::renderer::LightCoronaOwnerMask> &r_owner_masks,
 			opennova::renderer::LightCoronaFrameInputs &r_inputs) const;
 	// render_model_frame and render_inset_model_frame: one pass over one view.

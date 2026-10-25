@@ -98,6 +98,7 @@ begin "Player #1, Single player"
   hp 150
   sound_profile SP_JO_SP_PlayerM1
   sound_profileFemale SP_JO_SP_PlayerF1
+  move_function org2
 end
 
 begin "Generic Soldier"
@@ -108,6 +109,7 @@ begin "Generic Soldier"
   anim_def US02
   hp 100
   sound_profile SP_JO_SP_SoldierM1
+  move_function org1
 end
 
 begin "Helicopter"

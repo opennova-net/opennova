@@ -74,9 +74,9 @@ int main() {
         ai.at(organic_ai)->team = 1;
         ai.at(organic_ai)->net_id = 101;
         ai.at(vaporized_ai)->net_id = 103;
-        ai.at(vaporized_ai)->pos[0] = 2 << 16;
-        ai.at(vaporized_ai)->pos[1] = 2 << 16;
-        ai.at(vaporized_ai)->pos[2] = 2 << 16;
+        ai.at(vaporized_ai)->self->position.x.q16 = 2 << 16;
+        ai.at(vaporized_ai)->self->position.y.q16 = 2 << 16;
+        ai.at(vaporized_ai)->self->position.z.q16 = 2 << 16;
         world.registry.despawn(vaporized);
 
         const auto rows = inspect::entity_directory(world, /*with_brains=*/true);
@@ -187,9 +187,9 @@ int main() {
         CHECK(world.commands.set_entity_position(h, Vec3{6.0f, 5.0f, 7.0f}));
         CHECK(std::fabs(world.registry.get(h)->position.x - 6.0f) < 1e-6f);
         CHECK(std::fabs(world.registry.get(h)->position.y - 5.0f) < 1e-6f);
-        CHECK(ai.at(ai_index)->pos[0] == 6 << 16);
-        CHECK(ai.at(ai_index)->pos[1] == 5 << 16);
-        CHECK(ai.at(ai_index)->pos[2] == 7 << 16);
+        CHECK(ai.at(ai_index)->self->position.x.q16 == 6 << 16);
+        CHECK(ai.at(ai_index)->self->position.y.q16 == 5 << 16);
+        CHECK(ai.at(ai_index)->self->position.z.q16 == 7 << 16);
 
         // Round-trip through the card: both mirrors show the write.
         const inspect::EntityCard card = inspect::build_entity_card(world, /*with_brains=*/true, h);
@@ -281,8 +281,8 @@ int main() {
         // A routed SM brain targeting the idler (packed+1 rebase).
         const int router_ai = ai.attach(router);
         AiEntity *ra = ai.at(router_ai);
-        ra->pos[0] = 10 << 16;
-        ra->pos[1] = 20 << 16;
+        ra->self->position.x.q16 = 10 << 16;
+        ra->self->position.y.q16 = 20 << 16;
         ra->brain.f[AiBrain::kCurState] = 16; // GROUND_FOLLOWWP
         ra->brain.f[AiBrain::kWpChannel] = 1;
         ra->brain.f[AiBrain::kWpNode] = 2;
@@ -326,8 +326,8 @@ int main() {
 
         // A quiet brain: no target -> the muzzle resolve must skip it.
         const int idle_ai = ai.attach(idle);
-        ai.at(idle_ai)->pos[0] = 3 << 16;
-        ai.at(idle_ai)->pos[1] = 3 << 16;
+        ai.at(idle_ai)->self->position.x.q16 = 3 << 16;
+        ai.at(idle_ai)->self->position.y.q16 = 3 << 16;
 
         // Group + counters state.
         world.script.relations.group(5).alert = TriggerRelations::kAlertRed;

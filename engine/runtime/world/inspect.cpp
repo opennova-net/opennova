@@ -10,11 +10,18 @@
 #include <runtime/world/world.h>
 
 #include <algorithm>
+#include <array>
 #include <unordered_map>
 
 namespace opennova::world::inspect {
 
 namespace {
+
+// A slot's position words: its entity's (AiEntity::self). A freed slot (owner
+// word 0) belongs to no entity and reads the zeroed words it holds.
+std::array<int32_t, 3> slot_words(const AiEntity &e) {
+	return e.self != nullptr ? e.self->position.words() : std::array<int32_t, 3>{};
+}
 
 Vec3 mission_from_fixed3(const int32_t pos[3]) {
 	return Vec3{io::fp16_16_to_float(pos[0]), io::fp16_16_to_float(pos[1]),
@@ -90,7 +97,7 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 	d.wire_handle = static_cast<int32_t>(e.handle.packed);
 	d.team = static_cast<int32_t>(e.team);
 	d.ai_health = static_cast<int32_t>(e.health);
-	d.mission_position = mission_from_fixed3(e.pos);
+	d.mission_position = mission_from_fixed3(slot_words(e).data());
 	d.yaw_deg = mission_yaw_deg_from_bam_heading(e.heading);
 	const int32_t state = e.brain.f[AiBrain::kCurState];
 	d.state = state;
@@ -176,8 +183,8 @@ void fill_ai_detail(World &world, const AiEntity &e, AiDetail &d,
 		// Motor-internal taps for the convoy-pace hunt (AI-PARITY-CONCEPT
 		// 6.12g): the integrated speed vs the command names which stage loses
 		// the pace.
-		d.vp = ve->pitch;
-		d.vr = ve->roll;
+		d.vp = static_cast<int32_t>(std::lround(degrees_from_angle_bam(ve->pitch_bam)));
+		d.vr = static_cast<int32_t>(std::lround(degrees_from_angle_bam(ve->roll_bam)));
 		d.mspd = ve->veh.speed;
 		d.pose_bam[0] = ve->veh.yaw_bam;
 		d.pose_bam[1] = ve->veh.air_pitch_bam;
@@ -325,9 +332,9 @@ void fill_world_detail(const World &world, const Entity &ent, WorldDetail &d) {
 		}
 	}
 	d.mission_position = ent.position;
-	d.yaw = ent.yaw;
-	d.pitch = ent.pitch;
-	d.roll = ent.roll;
+	d.yaw = mission_yaw_whole_deg(ent.heading);
+	d.pitch = static_cast<int32_t>(std::lround(degrees_from_angle_bam(ent.pitch_bam)));
+	d.roll = static_cast<int32_t>(std::lround(degrees_from_angle_bam(ent.roll_bam)));
 	d.primary_weapon_clip = ent.primary_weapon_slot.clip;
 	d.primary_weapon_reserve = ent.primary_weapon_slot.reserve;
 	d.seats.reserve(ent.seats.size());
@@ -443,7 +450,7 @@ std::vector<EntityRow> entity_directory(const World &world, bool with_brains) {
 			row.team = static_cast<int32_t>(e->team);
 			row.alive = ent ? ent->alive : false;
 			row.hidden = ent ? ent->hidden : false;
-			row.mission_position = mission_from_fixed3(e->pos);
+			row.mission_position = mission_from_fixed3(slot_words(*e).data());
 			out.push_back(std::move(row));
 		}
 	}
@@ -522,7 +529,7 @@ AiDebugReport ai_debug_report(World &world) {
 		row.group_id = ent ? static_cast<int32_t>(ent->group_id) : 0;
 		row.alive = ent ? ent->alive : e->health > 0;
 		row.infantry = e->inf.active;
-		for (int c = 0; c < 3; ++c) row.pos[c] = e->pos[c];
+		for (int c = 0; c < 3; ++c) row.pos[c] = slot_words(*e)[size_t(c)];
 		row.state = e->brain.f[AiBrain::kCurState];
 		row.state_name = ai_state_name(row.state);
 		row.alert = e->slot.bytes()[AiSlot::kAlertByte];
@@ -545,11 +552,11 @@ AiDebugReport ai_debug_report(World &world) {
 			row.target_valid = true;
 			row.target_handle = target.packed;
 			if (const AiEntity *te = ai.for_handle(target)) {
-				for (int c = 0; c < 3; ++c) row.target_pos[c] = te->pos[c];
+				for (int c = 0; c < 3; ++c) row.target_pos[c] = slot_words(*te)[size_t(c)];
 			} else if (const Entity *tw = world.registry.get(target)) {
-				row.target_pos[0] = io::float_to_fp16_16(tw->position.x);
-				row.target_pos[1] = io::float_to_fp16_16(tw->position.y);
-				row.target_pos[2] = io::float_to_fp16_16(tw->position.z);
+				row.target_pos[0] = tw->position.x.q16;
+				row.target_pos[1] = tw->position.y.q16;
+				row.target_pos[2] = tw->position.z.q16;
 			}
 			if (const Entity *tw = world.registry.get(target))
 				row.target_name = tw->name;

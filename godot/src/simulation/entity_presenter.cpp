@@ -140,6 +140,10 @@ void EntityPresenter::_bind_methods() {
 			&EntityPresenter::set_render_culled_inset);
 	ClassDB::bind_method(D_METHOD("set_wire_inset_view", "active"),
 			&EntityPresenter::set_wire_inset_view);
+	ClassDB::bind_method(D_METHOD("set_render_culled_mirror", "view", "wire_handle", "culled"),
+			&EntityPresenter::set_render_culled_mirror);
+	ClassDB::bind_method(D_METHOD("set_wire_mirror_view", "view", "active"),
+			&EntityPresenter::set_wire_mirror_view);
 	ClassDB::bind_method(D_METHOD("get_wire_stats_record"),
 			&EntityPresenter::get_wire_stats_record);
 	ClassDB::bind_method(D_METHOD("resolve_wire_handle", "wire_handle"),
@@ -188,6 +192,15 @@ void EntityPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_active_wreck_fire", "owner_key"),
 			&EntityPresenter::has_active_wreck_fire);
 	ClassDB::bind_method(D_METHOD("fire_ribbon_mesh"), &EntityPresenter::fire_ribbon_mesh);
+	ClassDB::bind_method(D_METHOD("set_tracer_mirror_cameras", "mirror", "inset_mirror"),
+			&EntityPresenter::set_tracer_mirror_cameras);
+	ClassDB::bind_method(D_METHOD("fire_mirror_ribbon_vertices", "mirror"),
+			&EntityPresenter::fire_mirror_ribbon_vertices);
+	ClassDB::bind_method(D_METHOD("fire_mirror_ribbon_shadings", "slot"),
+			&EntityPresenter::fire_mirror_ribbon_shadings);
+	ClassDB::bind_method(D_METHOD("fire_inset_ribbon_mesh"),
+			&EntityPresenter::fire_inset_ribbon_mesh);
+	ClassDB::bind_method(D_METHOD("draw_frame_tracers"), &EntityPresenter::draw_frame_tracers);
 	ClassDB::bind_method(D_METHOD("scar_presenter"), &EntityPresenter::scar_presenter);
 	ClassDB::bind_method(D_METHOD("present_fires", "events"),
 			&EntityPresenter::present_fires);
@@ -355,7 +368,6 @@ void EntityPresenter::present_scars() {
 
 void EntityPresenter::present_passes() {
 	present_minefields();
-	if (Simulation *simulation = sim()) simulation->advance_facial_presentation(listener_position_);
 	fire_->present();
 	destruction_->present();
 	throwable_->present();
@@ -366,7 +378,6 @@ void EntityPresenter::present_passes() {
 
 PackedInt64Array EntityPresenter::profile_present_passes() {
 	present_minefields();
-	if (Simulation *simulation = sim()) simulation->advance_facial_presentation(listener_position_);
 	PackedInt64Array spans;
 	spans.resize(PASS_PROFILE_SLOT_COUNT);
 	Time *clock = Time::get_singleton();
@@ -427,6 +438,34 @@ Ref<ArrayMesh> EntityPresenter::fire_ribbon_mesh() const {
 	return fire_->ribbon_mesh();
 }
 
+void EntityPresenter::set_tracer_mirror_cameras(Camera3D *p_mirror, Camera3D *p_inset_mirror) {
+	fire_->set_mirror_cameras(p_mirror, p_inset_mirror);
+}
+
+PackedVector3Array EntityPresenter::fire_mirror_ribbon_vertices(int p_mirror) const {
+	return fire_->mirror_ribbon_vertices(p_mirror);
+}
+
+PackedInt32Array EntityPresenter::fire_mirror_ribbon_shadings(int p_slot) {
+	SceneOverlaySubmission submission;
+	fire_->append_mirror_ribbons(opennova::renderer::SceneOverlayFog(), submission);
+	PackedInt32Array shadings;
+	for (const opennova::renderer::SceneOverlayBatch &batch : submission.frame.batches) {
+		if (static_cast<int>(batch.slot) == p_slot) {
+			shadings.push_back(static_cast<int32_t>(batch.shading));
+		}
+	}
+	return shadings;
+}
+
+Ref<ArrayMesh> EntityPresenter::fire_inset_ribbon_mesh() const {
+	return fire_->inset_ribbon_mesh();
+}
+
+void EntityPresenter::draw_frame_tracers() {
+	fire_->draw_frame_tracers();
+}
+
 ScarPresenter *EntityPresenter::scar_presenter() const {
 	return scars();
 }
@@ -485,6 +524,11 @@ void EntityPresenter::present_death_piece_draws_inset(
 	destruction_->apply_piece_draws_inset(p_draws);
 }
 
+void EntityPresenter::present_death_piece_draws_mirror(int p_view,
+		const std::vector<opennova::world::DeathPieceDraw> &p_draws) {
+	destruction_->apply_piece_draws_mirror(p_view, p_draws);
+}
+
 void EntityPresenter::present_death_piece_draws(const TypedArray<DeathPieceDraw> &p_draws) {
 	destruction_->apply_piece_draws(
 			unwrap_rows<opennova::world::DeathPieceDraw, DeathPieceDraw>(p_draws));
@@ -502,6 +546,12 @@ int EntityPresenter::append_nvg_laser_beams(Simulation *p_sim, const NvgLaserVie
 	std::vector<NvgLaserSource> sources;
 	p_sim->nvg_laser_sources(sources);
 	return fire_->append_nvg_laser_beams(sources, p_view, r_submission);
+}
+
+int EntityPresenter::append_mirror_tracer_ribbons(
+		const opennova::renderer::SceneOverlayFog &p_pass_fog,
+		SceneOverlaySubmission &r_submission) {
+	return fire_->append_mirror_ribbons(p_pass_fog, r_submission);
 }
 
 int EntityPresenter::nvg_laser_beam_batches(int p_handle, int p_attach_bone,
@@ -1551,7 +1601,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			// the sim despawns via PF_HIDDEN); the local first-person UseGun
 			// parent's own world model is presentation-suppressed.
 			// [orig: Entity_RenderVehicleModel @ 0x4407d0 cull/submit;
-			// Flags&4 husk pick @ 0x413086].
+			// Render_SectorEntity @ 0x5C4190 (the Flags&4 husk pick @ 0x5C41A0)].
 			// Two-bit visibility ownership: this walk owns the model's
 			// present bit (the sim's intent), the render-occlusion frame owns
 			// its occlusion-hidden bit, and the node's visible flag is their

@@ -1,4 +1,4 @@
-// [orig: Entity_InitHardpoints @ 0x4417D0; Entity_LandmineThink @ 0x441A40]
+// [orig: Minefield_InitEntity @ 0x4417D0; Entity_LandmineThink @ 0x441A40]
 #include <base/io/rotating_prng.h>
 #include <base/resource_index/resource_index.h>
 #include <runtime/mission/item_traits.h>
@@ -6,6 +6,7 @@
 #include "common/test_paths.h"
 #include <runtime/world/world.h>
 #include <runtime/terrain_query/height_field.h>
+#include <runtime/world/angle.h>
 
 #include <cstdio>
 #include <cstring>
@@ -38,7 +39,7 @@ struct Rig {
         Entity seed;
         seed.item_id = 1896;
         seed.bound_radius = 128;
-        seed.yaw = 90; // identity placement
+        seed.heading = placed_heading_bam(90); // identity placement
         const EntityHandle h = world.registry.spawn(pool, seed);
         std::vector<MinefieldPoint> points;
         for (int i = 0; i < 14; ++i)
@@ -50,6 +51,7 @@ struct Rig {
     EntityHandle actor(float x, float z, uint8_t stance = 0) {
         Entity seed;
         seed.item_id = 1;
+        seed.item_type_index = 1; // the sweep's +0x1C ItemTypeIndex gate
         seed.position = {x, 0, z};
         seed.net_stance_bits = stance;
         return world.registry.spawn(0, seed);
@@ -114,7 +116,7 @@ void peer_and_ceasefire() {
         w.rules.projectile_authority = mode != 1;
         w.rules.mp_session = mode == 1;
         w.rules.cease_fire = mode == 2;
-        const auto before = w.out.rounds.last_stat();
+        const auto before = w.out.rounds.count;
         w.minefields.think(w, *w.registry.get(h));
         CHECK(w.registry.get(h)->section_mask == 1);
         CHECK(w.registry.get(h)->minefield.age == (mode == 1 ? 1 : 3));
@@ -122,7 +124,7 @@ void peer_and_ceasefire() {
         CHECK(w.round_sim.fired[0].ammo_index == 2);
         CHECK(w.round_sim.active_count == 0); // instantkillzone
         CHECK(w.explosions.queue.size() == (mode == 0 ? 1u : 0u));
-        CHECK(w.out.rounds.last_stat() == before + (mode == 0 ? 1 : 0));
+        CHECK(w.out.rounds.count == before + (mode == 0 ? 1 : 0));
     }
 }
 
@@ -152,7 +154,7 @@ void quantization_rng_and_reset() {
 
     Entity seed;
     seed.item_id = 1896;
-    seed.yaw = 90;
+    seed.heading = placed_heading_bam(90);
     const auto q = w.registry.spawn(2, seed);
     const std::vector<MinefieldPoint> points = {
         {1, {-1, 0x800000, -257}}, {3, {65536, 0, 0}}, {0, {}}
@@ -224,7 +226,7 @@ void empty_slots_and_markers() {
     Entity seed;
     seed.item_id = 1;
     seed.bound_radius = 10;
-    seed.yaw = 90;
+    seed.heading = placed_heading_bam(90);
     const auto h = w.registry.spawn(2, seed);
     auto *field = w.registry.get(h);
     w.minefields.initialize(w, *field, true, true, true, 1, 2, "s", "l",
@@ -278,7 +280,7 @@ void vehicle_ground_query() {
     Entity deck;
     deck.kind = EntityKind::Item;
     deck.item_id = 42;
-    deck.yaw = 90;
+    deck.heading = placed_heading_bam(90);
     deck.position = {0, 0, 2};
     deck.bound_radius = 4;
     const auto h = w.registry.spawn(1, deck);
@@ -351,7 +353,7 @@ void authored_binding() {
         Entity field;
         field.item_id = 1896;
         field.position = {12, 34, 56};
-        field.yaw = yaw;
+        field.heading = placed_heading_bam(yaw);
         field.uniform_scale_q16 = 0x20000;
         const auto handle = w.registry.spawn(2, field);
         mission::resolve_minefields(w, definitions, models);
@@ -376,7 +378,7 @@ void authored_binding() {
 // The think binds the ai_function's lndm event row by whole name, ignoring
 // case; the render binds the render_function's lndm bone row by its first four
 // characters, case kept.
-// [orig: Entity_LookupRenderCallbacks stricmp @0x407dd8, row 'lndm' @0x813198;
+// [orig: EntityDef_LookupClassCallbacks stricmp @0x407dd8, row 'lndm' @0x813198;
 //  EntityDef_InitAllCallbacks @0x4a5ab8..0x4a5af1 -> BoneCallback_LookupByTag
 //  @0x4e32c6, row 'lndm' @0x82cfc0]
 void binding_names() {

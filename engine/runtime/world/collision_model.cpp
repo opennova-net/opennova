@@ -196,7 +196,7 @@ void collision_matrix_to_euler(const CollisionMatrix &matrix, int32_t out[3]) {
 	const int32_t neg_y = io::bam_sub(0, m[4]);
 	const int32_t neg_up_y = io::bam_sub(0, m[6]);
 	// Negative scale is deliberate, including signed-zero quadrant behavior.
-	// [orig: dbl_7C57B8 = -683565275.5764316 @0x613352]
+	// [orig: g_NegBamPerRadian = -683565275.5764316 @0x613352]
 	const int32_t yaw =
 			io::retail_ftol_sse2(std::atan2(double(neg_y), double(m[0])) * -io::kBamPerRadian);
 	const int32_t sy = io::retail_ftol_sse2(std::sin(double(yaw) * radians) * 4194304.0);
@@ -252,45 +252,33 @@ void entity_live_euler_bam(const Entity &e, int32_t out[3]) {
     // has run, else the whole-degree mission yaw every other row carries.
     out[0] = e.veh.yaw_seeded
             ? e.veh.yaw_bam
-            : bam_heading_from_mission_yaw_deg(static_cast<double>(e.yaw));
+            : e.heading;
     out[1] = e.veh.yaw_seeded ? e.veh.air_pitch_bam
-                              : bam_from_degrees_wrapped(static_cast<double>(e.pitch));
+                              : e.pitch_bam;
     out[2] = e.veh.yaw_seeded ? e.veh.air_roll_bam
-                              : bam_from_degrees_wrapped(static_cast<double>(e.roll));
+                              : e.roll_bam;
 }
 
 CollisionMatrix entity_placement_matrix(const Entity &e) {
     const int32_t position[3] = {
-        static_cast<int32_t>(e.position.x * 65536.0f),
-        static_cast<int32_t>(e.position.y * 65536.0f),
-        static_cast<int32_t>(e.position.z * 65536.0f),
+        e.position.x.q16,
+        e.position.y.q16,
+        e.position.z.q16,
     };
     int32_t euler[3];
     entity_live_euler_bam(e, euler);
-	CollisionMatrix m = collision_matrix_from_euler(euler[0], euler[1], euler[2], position);
-	collision_matrix_scale_rotation(m, e.uniform_scale_q16);
-	return m;
+	return collision_matrix_from_euler_scaled(euler[0], euler[1], euler[2], position,
+			e.uniform_scale_q16);
 }
 
-void collision_matrix_scale_rotation(CollisionMatrix &m, int32_t scale_q16) {
-    if (scale_q16 == 0) return;
-    constexpr int rotation_indices[] = {0, 1, 2, 4, 5, 6, 8, 9, 10};
-    for (int index : rotation_indices) {
-        m.m[index] = static_cast<int32_t>(
-                (static_cast<int64_t>(m.m[index]) * scale_q16) >> 16);
-    }
-}
-
-CollisionMatrix collision_matrix_from_placement(double yaw_deg, double pitch_deg,
-                                                double roll_deg, const int32_t pos[3],
+CollisionMatrix collision_matrix_from_placement(int32_t heading, int32_t pitch_bam,
+                                                int32_t roll_bam, const int32_t pos[3],
                                                 int32_t scale_q16) {
-    const int32_t heading = bam_heading_from_mission_yaw_deg(yaw_deg);
-    CollisionMatrix m = (pitch_deg != 0.0 || roll_deg != 0.0)
-            ? collision_matrix_from_euler(heading, bam_from_degrees_wrapped(pitch_deg),
-                                          bam_from_degrees_wrapped(roll_deg), pos)
-            : collision_matrix_from_heading(heading, pos);
-    collision_matrix_scale_rotation(m, scale_q16);
-    return m;
+    // [orig: BoneCallback_Simple @0x4E2600 -> Math_BuildFixedPointMatrixFromEulerAngles
+    //  @0x613F40 (the call @0x4E2662), pure yaw included (D-NET-NEW-L6-10); a scaled entity
+    //  (+0x158, else its def's +0x1B8) -> Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale
+    //  @0x614210 (the calls @0x4E2626 / @0x4E264D)]
+    return collision_matrix_from_euler_scaled(heading, pitch_bam, roll_bam, pos, scale_q16);
 }
 
 void collision_matrix_box_bounds(const CollisionMatrix &matrix, const int32_t local_box[6],
@@ -311,6 +299,90 @@ void collision_matrix_box_bounds(const CollisionMatrix &matrix, const int32_t lo
     }
 }
 
+namespace {
+
+// Fixed mission matrix -> row-vector render float, including the
+// (-mission-y, mission-z, mission-x) axis map.
+// [orig: Math_FixedPointToFloatMatrix4x4_Swizzled @ 0x611080]
+void fixed_to_render_float(const CollisionMatrix &fixed, float entity[16]) {
+    constexpr float kInvQ22 = 1.0f / 4194304.0f;
+    constexpr float kInv16 = io::kInvFp16One;
+    for (int i = 0; i < 16; ++i) entity[i] = 0.0f;
+    entity[0] = fixed.m[5] * kInvQ22;
+    entity[1] = -fixed.m[9] * kInvQ22;
+    entity[2] = -fixed.m[1] * kInvQ22;
+    entity[4] = -fixed.m[6] * kInvQ22;
+    entity[5] = fixed.m[10] * kInvQ22;
+    entity[6] = fixed.m[2] * kInvQ22;
+    entity[8] = -fixed.m[4] * kInvQ22;
+    entity[9] = fixed.m[8] * kInvQ22;
+    entity[10] = fixed.m[0] * kInvQ22;
+    entity[12] = -fixed.m[7] * kInv16;
+    entity[13] = fixed.m[11] * kInv16;
+    entity[14] = fixed.m[3] * kInv16;
+    entity[15] = 1.0f;
+}
+
+// Render float -> fixed mission matrix, the exact inverse swizzle; only the
+// final float matrix is quantized. [orig: Math_FloatMatrixToFixedPoint22 @ 0x611140]
+bool render_float_to_fixed(const float final[16], CollisionMatrix &out) {
+    constexpr double kQ22 = io::kQ22One;
+    constexpr double kFixed16 = io::kFp16OneD;
+    const auto ftol_checked = [](double v, int32_t &dst) {
+        if (!std::isfinite(v) ||
+            v < static_cast<double>(INT32_MIN) ||
+            v > static_cast<double>(INT32_MAX))
+            return false;
+        dst = static_cast<int32_t>(v); // trunc toward zero [orig: _ftol2_sse]
+        return true;
+    };
+    CollisionMatrix converted;
+    if (!ftol_checked(final[10] * kQ22, converted.m[0]) ||
+        !ftol_checked(-final[2] * kQ22, converted.m[1]) ||
+        !ftol_checked(final[6] * kQ22, converted.m[2]) ||
+        !ftol_checked(final[14] * kFixed16, converted.m[3]) ||
+        !ftol_checked(-final[8] * kQ22, converted.m[4]) ||
+        !ftol_checked(final[0] * kQ22, converted.m[5]) ||
+        !ftol_checked(-final[4] * kQ22, converted.m[6]) ||
+        !ftol_checked(-final[12] * kFixed16, converted.m[7]) ||
+        !ftol_checked(final[9] * kQ22, converted.m[8]) ||
+        !ftol_checked(-final[1] * kQ22, converted.m[9]) ||
+        !ftol_checked(final[5] * kQ22, converted.m[10]) ||
+        !ftol_checked(final[13] * kFixed16, converted.m[11]))
+        return false;
+    converted.m[12] = converted.m[13] = converted.m[14] = converted.m[15] = 0;
+    out = converted;
+    return true;
+}
+
+// The rotation block of A x B in row-vector order, each entry's products
+// summed in the original's operand order at the x87's 53-bit precision and
+// stored once as binary32; the translation row is the caller's.
+// [orig: Math_MultiplyMatrix4x4_Float @ 0x611750]
+void render_float_rotation_mul(const float a[16], const float b[16], float out[16]) {
+    out[0] = retail_x87_mul3(a[1], b[4], a[0], b[0], a[2], b[8]);
+    out[1] = retail_x87_mul3(a[2], b[9], a[1], b[5], a[0], b[1]);
+    out[2] = retail_x87_mul3(a[0], b[2], a[2], b[10], a[1], b[6]);
+    out[4] = retail_x87_mul3(a[4], b[0], a[6], b[8], a[5], b[4]);
+    out[5] = retail_x87_mul3(a[6], b[9], a[5], b[5], a[4], b[1]);
+    out[6] = retail_x87_mul3(a[4], b[2], a[6], b[10], a[5], b[6]);
+    out[8] = retail_x87_mul3(a[8], b[0], a[10], b[8], a[9], b[4]);
+    out[9] = retail_x87_mul3(a[10], b[9], a[9], b[5], a[8], b[1]);
+    out[10] = retail_x87_mul3(a[8], b[2], a[10], b[10], a[9], b[6]);
+    out[3] = out[7] = out[11] = 0.0f;
+    out[15] = 1.0f;
+}
+
+} // namespace
+
+void collision_matrix_to_render_float(const CollisionMatrix &fixed, float out_row_major[16]) {
+    fixed_to_render_float(fixed, out_row_major);
+}
+
+bool collision_matrix_from_render_float(const float in_row_major[16], CollisionMatrix &out) {
+    return render_float_to_fixed(in_row_major, out);
+}
+
 bool collision_matrix_apply_render_pose(const CollisionMatrix &entity_world,
                                         const float pose[16],
                                         CollisionMatrix &out) {
@@ -318,25 +390,8 @@ bool collision_matrix_apply_render_pose(const CollisionMatrix &entity_world,
     for (int i = 0; i < 16; ++i)
         if (!std::isfinite(pose[i])) return false;
 
-    constexpr float kInvQ22 = 1.0f / 4194304.0f;
-    constexpr float kInv16 = io::kInvFp16One;
-    // Fixed mission matrix -> row-vector render float, including the
-    // (-mission-y, mission-z, mission-x) axis map.
-    // [orig: Math_FixedPointToFloatMatrix4x4_Swizzled @ 0x611080]
-    float entity[16] = {};
-    entity[0] = entity_world.m[5] * kInvQ22;
-    entity[1] = -entity_world.m[9] * kInvQ22;
-    entity[2] = -entity_world.m[1] * kInvQ22;
-    entity[4] = -entity_world.m[6] * kInvQ22;
-    entity[5] = entity_world.m[10] * kInvQ22;
-    entity[6] = entity_world.m[2] * kInvQ22;
-    entity[8] = -entity_world.m[4] * kInvQ22;
-    entity[9] = entity_world.m[8] * kInvQ22;
-    entity[10] = entity_world.m[0] * kInvQ22;
-    entity[12] = -entity_world.m[7] * kInv16;
-    entity[13] = entity_world.m[11] * kInv16;
-    entity[14] = entity_world.m[3] * kInv16;
-    entity[15] = 1.0f;
+    float entity[16];
+    fixed_to_render_float(entity_world, entity);
 
     // Row vectors: model point * PANM pose * entity world. Retail performs the
     // adds in this operand order with x87 precision-control set to 53-bit, then
@@ -373,37 +428,127 @@ bool collision_matrix_apply_render_pose(const CollisionMatrix &entity_world,
     for (float v : final)
         if (!std::isfinite(v)) return false;
 
-    constexpr double kQ22 = io::kQ22One;
-    constexpr double kFixed16 = io::kFp16OneD;
-    const auto ftol_checked = [](double v, int32_t &dst) {
-        if (!std::isfinite(v) ||
-            v < static_cast<double>(INT32_MIN) ||
-            v > static_cast<double>(INT32_MAX))
-            return false;
-        dst = static_cast<int32_t>(v); // trunc toward zero [orig: _ftol2_sse]
-        return true;
-    };
+    // Render float -> fixed mission matrix. Only the FINAL float matrix is
+    // quantized, like BoneCallback_Generic.
+    return render_float_to_fixed(final, out);
+}
 
-    CollisionMatrix converted;
-    // Render float -> fixed mission matrix, the exact inverse swizzle. Only the
-    // FINAL float matrix is quantized, like BoneCallback_Generic.
-    // [orig: Math_FloatMatrixToFixedPoint22 @ 0x611140]
-    if (!ftol_checked(final[10] * kQ22, converted.m[0]) ||
-        !ftol_checked(-final[2] * kQ22, converted.m[1]) ||
-        !ftol_checked(final[6] * kQ22, converted.m[2]) ||
-        !ftol_checked(final[14] * kFixed16, converted.m[3]) ||
-        !ftol_checked(-final[8] * kQ22, converted.m[4]) ||
-        !ftol_checked(final[0] * kQ22, converted.m[5]) ||
-        !ftol_checked(-final[4] * kQ22, converted.m[6]) ||
-        !ftol_checked(-final[12] * kFixed16, converted.m[7]) ||
-        !ftol_checked(final[9] * kQ22, converted.m[8]) ||
-        !ftol_checked(-final[1] * kQ22, converted.m[9]) ||
-        !ftol_checked(final[5] * kQ22, converted.m[10]) ||
-        !ftol_checked(final[13] * kFixed16, converted.m[11]))
-        return false;
-    converted.m[12] = converted.m[13] = converted.m[14] = converted.m[15] = 0;
-    out = converted;
-    return true;
+namespace {
+
+// The userpoint's look-at frame: forward the normalized direction, right from
+// (forward.z, 0, -forward.x), up their cross product, normalized; a zero
+// length leaves that row zero. The x87 keeps each value in a 53-bit register
+// and stores it to binary32 where the original does; forward.y's cross term
+// and the up row's y and z normalize the STORED floats.
+// [orig: Math_BuildDirectionLookAtMatrix @ 0x612C90 - the forward stores
+//  @0x612CE2 / @0x612CEB / @0x612CF5, the zero arm @0x612CFB, right
+//  @0x612D35..0x612D4D (zero arm @0x612D53), up @0x612D71..0x612DAB (the
+//  stored forward.y @0x612DA3), its normalize @0x612DD4..0x612DF0 (zero arm
+//  @0x612DF6), the matrix @0x612E06..0x612E75]
+void retail_look_at(const float dir[3], float out[16]) {
+    const double dx = dir[0], dy = dir[1], dz = dir[2];
+    volatile double sum = dy * dy;
+    sum = sum + dx * dx;
+    sum = sum + dz * dz;
+    const double len = std::sqrt(static_cast<double>(sum));
+    double fx = 0.0, fy = 0.0, fz = 0.0;
+    if (len != 0.0) {
+        const double inv = 1.0 / len;
+        fx = dx * inv;
+        fy = dy * inv;
+        fz = dz * inv;
+    }
+    const float fx_f = static_cast<float>(fx);
+    const float fy_f = static_cast<float>(fy);
+    const float fz_f = static_cast<float>(fz);
+    const double nfx = -fx;
+    volatile double hsum = nfx * nfx;
+    hsum = hsum + fz * fz;
+    const double h = std::sqrt(static_cast<double>(hsum));
+    double rx = 0.0, ry = 0.0, rz = 0.0;
+    if (h != 0.0) {
+        const double ih = 1.0 / h;
+        rx = ih * fz;
+        ry = ih * 0.0;
+        rz = nfx * ih;
+    }
+    const double ux = fy * rz - ry * fz;
+    const double uy = fz * rx - rz * fx;
+    const double uz = ry * fx - rx * static_cast<double>(fy_f);
+    const float uy_f = static_cast<float>(uy);
+    const float uz_f = static_cast<float>(uz);
+    volatile double usum = uz * uz;
+    usum = usum + uy * uy;
+    usum = usum + ux * ux;
+    const double ul = std::sqrt(static_cast<double>(usum));
+    float ux_n = 0.0f, uy_n = 0.0f, uz_n = 0.0f;
+    if (ul != 0.0) {
+        const double iu = 1.0 / ul;
+        ux_n = static_cast<float>(ux * iu);
+        uy_n = static_cast<float>(static_cast<double>(uy_f) * iu);
+        uz_n = static_cast<float>(iu * static_cast<double>(uz_f));
+    }
+    for (int i = 0; i < 16; ++i) out[i] = 0.0f;
+    out[0] = static_cast<float>(rx);
+    out[4] = static_cast<float>(ry);
+    out[8] = static_cast<float>(rz);
+    out[1] = ux_n;
+    out[5] = uy_n;
+    out[9] = uz_n;
+    out[2] = fx_f;
+    out[6] = fy_f;
+    out[10] = fz_f;
+    out[15] = 1.0f;
+}
+
+} // namespace
+
+bool collision_matrix_attach_userpoint(const CollisionMatrix &carrier, const int32_t point[3],
+                                       const int32_t look[3], CollisionMatrix &out) {
+    // The carrier's fixed matrix as the render float the bone pass starts
+    // from; a root-part anchor's bone matrix is that matrix.
+    // [orig: Bone_BuildAttachmentMatrix @0x56C630 - the swizzle @0x56C694, the
+    //  bone pass Model_TransformBoneMatrices @0x56C708]
+    float entity[16];
+    fixed_to_render_float(carrier, entity);
+    // The userpoint's position and direction as render floats (x87 integer
+    // loads scaled by 1/65536 and stored): position (-y, z, x), direction
+    // (y, z, x). [orig: @0x56C70D..0x56C746 (the position), @0x56C74F..0x56C779
+    //  (the direction)]
+    constexpr double kInv16 = 1.0 / io::kFp16OneD;
+    const float p[3] = {static_cast<float>(-static_cast<double>(point[1]) * kInv16),
+                        static_cast<float>(static_cast<double>(point[2]) * kInv16),
+                        static_cast<float>(static_cast<double>(point[0]) * kInv16)};
+    const float d[3] = {static_cast<float>(static_cast<double>(look[1]) * kInv16),
+                        static_cast<float>(static_cast<double>(look[2]) * kInv16),
+                        static_cast<float>(static_cast<double>(look[0]) * kInv16)};
+    // The bone matrix transforms the position, row vector times matrix plus
+    // its translation, in the original's operand order.
+    // [orig: Math_TransformPointByMatrix4x4 @0x40CF20 (the call @0x56C74A)]
+    volatile double tx = static_cast<double>(entity[8]) * p[2];
+    tx = tx + static_cast<double>(entity[4]) * p[1];
+    tx = tx + static_cast<double>(entity[0]) * p[0];
+    tx = tx + entity[12];
+    volatile double ty = static_cast<double>(entity[9]) * p[2];
+    ty = ty + static_cast<double>(entity[1]) * p[0];
+    ty = ty + static_cast<double>(entity[5]) * p[1];
+    ty = ty + entity[13];
+    volatile double tz = static_cast<double>(entity[10]) * p[2];
+    tz = tz + static_cast<double>(entity[2]) * p[0];
+    tz = tz + static_cast<double>(entity[6]) * p[1];
+    tz = tz + entity[14];
+    // The look-at frame times the bone matrix, the transformed position its
+    // translation. [orig: @0x56C77D..0x56C7A6]
+    float look_at[16];
+    retail_look_at(d, look_at);
+    float final[16];
+    render_float_rotation_mul(look_at, entity, final);
+    final[12] = static_cast<float>(static_cast<double>(tx));
+    final[13] = static_cast<float>(static_cast<double>(ty));
+    final[14] = static_cast<float>(static_cast<double>(tz));
+    // [orig: Bone_BuildAttachmentMatrix @0x56C630 (the Math_FloatMatrixToFixedPoint22
+    //  call @0x56C7A9)]
+    return render_float_to_fixed(final, out);
 }
 
 // [orig: Matrix_Transpose3x3WithNegateCol3 @ 0x6136d0]
@@ -459,15 +604,15 @@ CollisionMatrix collision_matrix_from_heading(int32_t heading_bam, const int32_t
     return out;
 }
 
-// The full placement matrix — Rz(heading)·Ry(-pitch)·Rx(roll), Q22 rows composed
-// with the original's per-product >>22 truncations and exact-zero stage skips.
-// [orig: Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40, fed by the spawn
-// euler pack {[3] = (90 − yaw) BAM, [4] = pitch BAM, [5] = roll BAM}
-// (Entity_SpawnFromBMSRecord @ 0x40eb66); the entity's collision/bone matrices
-// carry this same orientation, so a rolled rock's collision shell leans WITH
-// its visual — the 00TRg through-shot root cause once statics kept yaw only.]
-CollisionMatrix collision_matrix_from_euler(int32_t heading_bam, int32_t pitch_bam,
-                                            int32_t roll_bam, const int32_t pos[3]) {
+namespace {
+
+// Both builders' three stages over a diagonal: 2^22 for the unscaled builder, the scale << 6
+// for the scaled one, which multiplies its stages through the scaled diagonal, so a scale nests
+// inside each stage's truncations [orig: Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale
+// @0x614210 - the diagonal `shl eax, 6` @0x614273 / @0x6142CC, the roll stage
+// @0x61427A..0x6142C0, the pitch stage's t0 products @0x614346 / @0x6143FB].
+CollisionMatrix euler_build(int32_t heading_bam, int32_t pitch_bam, int32_t roll_bam,
+		const int32_t pos[3], int32_t diag) {
     // [orig: `fld dbl_7C3608` @0x613F5D]
     static constexpr double kRadPerBam = io::kRadiansPerBamX87;
     static constexpr double kQ22 = io::kQ22One;
@@ -482,11 +627,11 @@ CollisionMatrix collision_matrix_from_euler(int32_t heading_bam, int32_t pitch_b
     if (roll_bam != 0) {
         int32_t sr, cr;
         trig(roll_bam, sr, cr);
-        t[0] = 1 << 22;
-        t[5] = cr; t[6] = -sr;
-        t[9] = sr; t[10] = cr;
+        t[0] = diag;
+        t[5] = q(static_cast<int64_t>(diag) * cr); t[6] = q(static_cast<int64_t>(diag) * -sr);
+        t[9] = q(static_cast<int64_t>(diag) * sr); t[10] = t[5];
     } else {
-        t[0] = t[5] = t[10] = 1 << 22;
+        t[0] = t[5] = t[10] = diag;
     }
 
     int32_t p2[12]; // stage 2: RotY(pitch) applied [orig: @ 0x613fd7-0x614099]
@@ -494,12 +639,12 @@ CollisionMatrix collision_matrix_from_euler(int32_t heading_bam, int32_t pitch_b
     if (pitch_bam != 0) {
         int32_t sp, cp;
         trig(pitch_bam, sp, cp);
-        p2[0] = cp;
+        p2[0] = q(static_cast<int64_t>(t[0]) * cp);
         p2[1] = q(static_cast<int64_t>(t[9]) * -sp);
         p2[2] = q(static_cast<int64_t>(t[10]) * -sp);
         p2[3] = 0;
         p2[4] = t[4]; p2[5] = t[5]; p2[6] = t[6]; p2[7] = 0;
-        p2[8] = sp;
+        p2[8] = q(static_cast<int64_t>(t[0]) * sp);
         p2[9] = q(static_cast<int64_t>(t[9]) * cp);
         p2[10] = q(static_cast<int64_t>(t[10]) * cp);
         p2[11] = 0;
@@ -525,6 +670,28 @@ CollisionMatrix collision_matrix_from_euler(int32_t heading_bam, int32_t pitch_b
     out.m[3] = pos[0]; out.m[7] = pos[1]; out.m[11] = pos[2];
     out.m[12] = out.m[13] = out.m[14] = out.m[15] = 0;
     return out;
+}
+
+} // namespace
+
+// The full placement matrix — Rz(heading)·Ry(-pitch)·Rx(roll), Q22 rows composed
+// with the original's per-product >>22 truncations and exact-zero stage skips.
+// [orig: Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40, fed by the spawn
+// euler pack {[3] = (90 − yaw) BAM, [4] = pitch BAM, [5] = roll BAM}
+// (Entity_SpawnFromBMSRecord @ 0x40eb66); the entity's collision/bone matrices
+// carry this same orientation, so a rolled rock's collision shell leans WITH
+// its visual — the 00TRg through-shot root cause once statics kept yaw only.]
+CollisionMatrix collision_matrix_from_euler(int32_t heading_bam, int32_t pitch_bam,
+                                            int32_t roll_bam, const int32_t pos[3]) {
+    return euler_build(heading_bam, pitch_bam, roll_bam, pos, 1 << 22);
+}
+
+CollisionMatrix collision_matrix_from_euler_scaled(int32_t heading_bam, int32_t pitch_bam,
+		int32_t roll_bam, const int32_t pos[3], int32_t scale_q16) {
+    if (scale_q16 == 0)
+        return collision_matrix_from_euler(heading_bam, pitch_bam, roll_bam, pos);
+    return euler_build(heading_bam, pitch_bam, roll_bam, pos,
+            static_cast<int32_t>(static_cast<uint32_t>(scale_q16) << 6));
 }
 
 } // namespace opennova::world

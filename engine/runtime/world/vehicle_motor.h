@@ -16,6 +16,15 @@
 
 namespace opennova::world {
 
+// A PlayerControl hull's input block parks it on its Flags 0x10000002: the dead
+// bit or a script's disable (WacCmd_DisableSsn), whatever the occupant.
+// [orig: Entity_UpdateVehiclePhysics @0x48B980..0x48B987; the tank twin
+//  @0x489559..0x489560; the bike twin @0x484AA6..0x484AAD;
+//  Entity_UpdateAircraftPhysics @0x490F1E..0x490F25]
+inline bool vehicle_hull_parked(const Entity &veh) {
+    return ((veh.flags | veh.engine_flags) & 0x10000002u) != 0;
+}
+
 class World;
 struct AiEntity;
 
@@ -105,7 +114,7 @@ enum class VehicleRenderFamily : uint8_t { None, Ground, Tank, Helicopter, Plane
 // ai_function names no vehicle class (the tick then falls back to the mover
 // family). [orig: g_EntityClassEventCallbackTable @0x813000, rows @0x8132a0
 // CHel / @0x813378 cveh / @0x813390 cbot / @0x8133a8 cpln / @0x8133c0 ctrn;
-// EntityDef_InitAllCallbacks @0x4a5aae -> Entity_LookupRenderCallbacks @0x407dc0]
+// EntityDef_InitAllCallbacks @0x4a5aae -> EntityDef_LookupClassCallbacks @0x407dc0]
 enum class VehicleBrainClass : uint8_t { Unset, Air, Ground };
 
 enum VehicleControlMask : uint16_t {
@@ -243,9 +252,9 @@ private:
 
 // The AI-driver command block, computed by the AI system from the vehicle's brain (the
 // witnessed leg lives inside the vehicle physics; our brain state is AiSystem-owned, so
-// the math runs there and the motor consumes the result — a structural seam, not a
-// behavioral one). [orig: Entity_UpdateVehiclePhysics @0x48af00 — parked stamp
-// @0x48c002-0x48c02d, AI-driver leg @0x48bc12-0x48c034]
+// the math runs there, called by each mover in place at its occupant block, which writes
+// the result into its registers). [orig: Entity_UpdateVehiclePhysics @0x48af00 — parked
+// stamp @0x48c002-0x48c02d, AI-driver leg @0x48bc12-0x48c034]
 struct VehicleDriveCmd {
     bool ai_drive = false;        // an AI controller is seated: consume the fields below
     int32_t steer_target_bam = 0; // [orig: aiComp[132] = Yaw + delta + (delta >> 3)]
@@ -293,6 +302,14 @@ uint32_t vehicle_trail_magnitude_q16(int32_t signed_speed) noexcept;
 // live values can never diverge in representation.
 void carrier_pose_fixed(const Entity &e, int32_t pos[3], int32_t &yaw,
                         int32_t &pitch, int32_t &roll);
+
+// A pose held in a reference's frame turned into world space, in place: the position rotated by
+// the reference's Roll (about X), then Pitch (about Y), then Yaw (about Z) in 22-bit fixed point
+// (each sine / cosine the x87's of the word through dbl_7C3608, times 2^22, truncated; each
+// product floored by its own >> 22), then the reference's position added; the Yaw word gains the
+// reference's, the Pitch / Roll words stay the pose's. `ref` is the reference's position and its
+// Yaw / Pitch / Roll words. [orig: Entity_TransformLocalToWorld @0x43BD00]
+void entity_transform_local_to_world(const int32_t ref[6], int32_t pose[6]);
 
 // Stamp the mover-entry savedLivePose from the same reader [orig: the
 // per-mover prologue stamps of +0x80..+0x94].

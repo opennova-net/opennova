@@ -24,6 +24,7 @@
 #include <godot_cpp/classes/quad_mesh.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
+#include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/classes/world_environment.hpp>
@@ -55,6 +56,7 @@
 #include "particle/particle_first_person_batch.h"
 #include "particle/particle_material_cache.h"
 #include "render/frame_fx.h"
+#include "render/rd_glsl.h" // call_device_create
 #include "render/scene_overlay_compositor.h"
 #include "render/world_environment_lookup.h"
 #include "util/string_convert.h"
@@ -78,7 +80,10 @@ enum ParticleDrawSlot : std::size_t {
 	kFirstPerson = 6,
 	// The post-scene distortion pass (class-7 emitters, main view).
 	kDistortion = 7,
-	kParticleDrawSlotCount = 8,
+	// The weapon Inset pass's own water mirror.
+	kInsetMirrorFarSide = 8,
+	kInsetMirrorCameraSide = 9,
+	kParticleDrawSlotCount = 10,
 };
 
 using ParticleEffectPair = std::array<Ref<ParticleCompositorEffect>, 2>;
@@ -131,6 +136,9 @@ struct ParticleCameraFrame {
 	Basis view_basis{};
 	std::array<float, 16> projection{};
 	bool projection_valid = false;
+	// The eye's six planes: the render submit's clip state (renderer::ParticleViewInput
+	// frustum carries the witness).
+	opennova::particle::ParticleViewFrustum frustum{};
 };
 
 // The manager camera matrix retail folds into view space per frame
@@ -163,7 +171,32 @@ ParticleCameraFrame particle_camera_frame(Camera3D *camera) {
 		}
 	}
 	result.projection_valid = true;
+	// A point just past the near plane reads inside every plane (EffectWorld's
+	// NOVISNOUPDATE state takes its probe the same way).
+	result.frustum = particle_view_frustum(camera->get_frustum(),
+			transform.origin - transform.basis.get_column(2) * (camera->get_near() + 1.0f));
 	return result;
+}
+
+// A water mirror's submit clip state: its own eye over a square at its
+// horizontal fov, whatever field its image projects (renderer::ParticleViewInput
+// frustum carries the witness). The node's projection carries the horizontal
+// fov in its first column, its frustum form (the RTT's half texel) included.
+opennova::particle::ParticleViewFrustum mirror_cull_frustum(Camera3D *camera) {
+	const Projection projection = camera->get_camera_projection();
+	const double focal_x = static_cast<double>(projection.columns[0][0]);
+	if (!(focal_x > 0.0))
+		return {};
+	const double fov_h = 2.0 * std::atan(1.0 / focal_x) * 180.0 / 3.14159265358979323846;
+	const Projection square = Projection::create_perspective(static_cast<real_t>(fov_h), 1.0f,
+			camera->get_near(), camera->get_far(), true);
+	const Transform3D transform = camera->get_camera_transform();
+	const Vector<Plane> planes = square.get_projection_planes(transform);
+	TypedArray<Plane> plane_array;
+	for (int index = 0; index < planes.size(); ++index)
+		plane_array.push_back(planes[index]);
+	return particle_view_frustum(plane_array,
+			transform.origin - transform.basis.get_column(2) * (camera->get_near() + 1.0f));
 }
 
 // One comparable value for "what this slot draws": FNV-1a over the compiled
@@ -197,6 +230,9 @@ Dictionary draw_list_report(const opennova::renderer::ParticleDrawList &draw_lis
 			static_cast<int64_t>(debug.water_filtered_emitters);
 	result["water_filtered_particles"] =
 			static_cast<int64_t>(debug.water_filtered_particles);
+	result["empty_emitters"] = static_cast<int64_t>(debug.empty_emitters);
+	result["frustum_culled_emitters"] = static_cast<int64_t>(debug.frustum_culled_emitters);
+	result["frustum_culled_particles"] = static_cast<int64_t>(debug.frustum_culled_particles);
 	result["invisible_particles"] = static_cast<int64_t>(debug.invisible_particles);
 	result["lod_skipped_particles"] = static_cast<int64_t>(debug.lod_skipped_particles);
 	result["truncated_particles"] = static_cast<int64_t>(debug.truncated_particles);
@@ -442,11 +478,13 @@ public:
 	ParticleEffectPair world_effects;
 	ParticleEffectPair reflection_effects;
 	ParticleEffectPair second_scene_effects;
+	ParticleEffectPair inset_mirror_effects;
 	// The post-particle overlay pass of each view, composed right after the
 	// view's pair (runtime/renderer/scene_overlay.h).
 	Ref<SceneOverlayCompositorEffect> world_overlay;
 	Ref<SceneOverlayCompositorEffect> reflection_overlay;
 	Ref<SceneOverlayCompositorEffect> second_scene_overlay;
+	Ref<SceneOverlayCompositorEffect> inset_mirror_overlay;
 	// FrameFX's type-0 row: the distortion subset's effect (attached to no
 	// camera) and the drawer FrameFX calls; the drawer outlives effect sets.
 	Ref<ParticleCompositorEffect> distortion_effect;
@@ -455,9 +493,11 @@ public:
 	ObjectID attached_world_camera;
 	ObjectID attached_reflection_camera;
 	ObjectID attached_second_scene_camera;
+	ObjectID attached_inset_mirror_camera;
 	bool inherited_world_compositor = false;
 	bool inherited_reflection_compositor = false;
 	bool inherited_second_scene_compositor = false;
+	bool inherited_inset_mirror_compositor = false;
 	// The stride the frame's last scene pass left, which the next frame's
 	// water mirror draws in (renderer::particle_frame_strides); the effect
 	// world's scale starts at kParticleDensityScaleInitial.
@@ -491,8 +531,8 @@ public:
 	// no lifecycle path (hide, warm, shutdown, re-entry) can skip a view.
 	template <typename Visitor>
 	void for_each_effect(Visitor &&visit) {
-		for (ParticleEffectPair *pair :
-				{&world_effects, &reflection_effects, &second_scene_effects}) {
+		for (ParticleEffectPair *pair : {&world_effects, &reflection_effects,
+					 &second_scene_effects, &inset_mirror_effects}) {
 			for (Ref<ParticleCompositorEffect> &effect : *pair)
 				visit(effect);
 		}
@@ -501,8 +541,8 @@ public:
 
 	template <typename Visitor>
 	void for_each_overlay(Visitor &&visit) {
-		for (Ref<SceneOverlayCompositorEffect> *overlay :
-				{&world_overlay, &reflection_overlay, &second_scene_overlay}) {
+		for (Ref<SceneOverlayCompositorEffect> *overlay : {&world_overlay, &reflection_overlay,
+					 &second_scene_overlay, &inset_mirror_overlay}) {
 			visit(*overlay);
 		}
 	}
@@ -526,9 +566,19 @@ public:
 		for_each_overlay([](Ref<SceneOverlayCompositorEffect> &overlay) {
 			overlay.instantiate();
 		});
-		// The mirror's reflected scene draws only its coronas after its
-		// particle passes.
+		// One device set for every view's overlay pass: a pipeline made for a
+		// framebuffer format serves every view of that format.
+		for (Ref<SceneOverlayCompositorEffect> *overlay :
+				{&reflection_overlay, &second_scene_overlay, &inset_mirror_overlay}) {
+			(*overlay)->share_device(world_overlay);
+		}
+		// The mirror's reflected scene draws its tracer ribbons, then its
+		// coronas, after its particle passes; the Inset pass's own mirror draws
+		// its own ribbons and closes its target the same way
+		// (runtime/renderer/scene_overlay.h kMirrorOverlayOrder,
+		// kInsetMirrorOverlayOrder).
 		reflection_overlay->set_view_kind(SceneOverlayCompositorEffect::VIEW_MIRROR);
+		inset_mirror_overlay->set_view_kind(SceneOverlayCompositorEffect::VIEW_INSET_MIRROR);
 		// The second scene view is the weapon Inset pass: its tail draws its
 		// own corona walk and no glare (runtime/renderer/scene_overlay.h
 		// kInsetOverlayOrder).
@@ -671,6 +721,9 @@ public:
 		detach_compositor_group(attached_second_scene_camera,
 				view_group(second_scene_effects, second_scene_overlay),
 				inherited_second_scene_compositor);
+		detach_compositor_group(attached_inset_mirror_camera,
+				view_group(inset_mirror_effects, inset_mirror_overlay),
+				inherited_inset_mirror_compositor);
 	}
 
 	void attach_compositor_group(Camera3D *camera, Viewport *viewport,
@@ -742,9 +795,10 @@ public:
 	void rebuild_catalog(
 			const ParticleAtlasDevice::Definitions &definitions,
 			const Callable &provider, const String &texture_dir,
-			bool procedural_fallback, std::uint32_t page_flags) {
+			bool procedural_fallback, std::uint32_t page_flags, const Callable &present) {
 		materials.clear_materials();
-		atlas.rebuild(definitions, provider, texture_dir, procedural_fallback, page_flags);
+		atlas.rebuild(definitions, provider, texture_dir, procedural_fallback, page_flags,
+				present);
 	}
 
 	// The distortion commands of a far-side list, for the compositor far
@@ -945,7 +999,8 @@ public:
 					camera_forward[static_cast<int>(component)];
 		}
 		const bool water_mirror = effect == reflection_effects[0] ||
-				effect == reflection_effects[1];
+				effect == reflection_effects[1] || effect == inset_mirror_effects[0] ||
+				effect == inset_mirror_effects[1];
 		submission->fog_color = water_mirror ? mirror_fog_color : fog_color;
 		submission->fog_start = water_mirror ? mirror_fog_start : fog_start;
 		submission->fog_end = water_mirror ? mirror_fog_end : fog_end;
@@ -1015,10 +1070,10 @@ void ParticleRenderer::_bind_methods() {
 			&ParticleRenderer::set_scene);
 	ClassDB::bind_method(D_METHOD("get_scene"),
 			&ParticleRenderer::get_scene);
-	ClassDB::bind_method(D_METHOD("set_texture_provider", "provider"),
-			&ParticleRenderer::set_texture_provider);
-	ClassDB::bind_method(D_METHOD("get_texture_provider"),
-			&ParticleRenderer::get_texture_provider);
+	ClassDB::bind_method(D_METHOD("set_image_provider", "provider"),
+			&ParticleRenderer::set_image_provider);
+	ClassDB::bind_method(D_METHOD("get_image_provider"),
+			&ParticleRenderer::get_image_provider);
 	ClassDB::bind_method(D_METHOD("set_environment_source", "source"),
 			&ParticleRenderer::set_environment_source);
 	ClassDB::bind_method(D_METHOD("get_environment_source"),
@@ -1034,6 +1089,10 @@ void ParticleRenderer::_bind_methods() {
 			&ParticleRenderer::set_main_view_nvg_scene);
 	ClassDB::bind_method(D_METHOD("get_second_scene_camera"),
 			&ParticleRenderer::get_second_scene_camera);
+	ClassDB::bind_method(D_METHOD("set_inset_mirror_camera", "camera"),
+			&ParticleRenderer::set_inset_mirror_camera);
+	ClassDB::bind_method(D_METHOD("get_inset_mirror_camera"),
+			&ParticleRenderer::get_inset_mirror_camera);
 	ClassDB::bind_method(D_METHOD("set_hidden", "hidden"),
 			&ParticleRenderer::set_hidden);
 	ClassDB::bind_method(D_METHOD("get_hidden"),
@@ -1044,6 +1103,8 @@ void ParticleRenderer::_bind_methods() {
 			&ParticleRenderer::get_procedural_fallback_enabled);
 	ClassDB::bind_method(D_METHOD("render_now", "time_ms"),
 			&ParticleRenderer::render_now);
+	ClassDB::bind_method(D_METHOD("build_catalog", "present"),
+			&ParticleRenderer::build_catalog, DEFVAL(Callable()));
 	ClassDB::bind_method(D_METHOD("shutdown"), &ParticleRenderer::shutdown);
 	ClassDB::bind_method(D_METHOD("attach_distortion_row", "frame_fx"),
 			&ParticleRenderer::attach_distortion_row);
@@ -1053,6 +1114,8 @@ void ParticleRenderer::_bind_methods() {
 			&ParticleRenderer::get_draw_command_count);
 	ClassDB::bind_method(D_METHOD("get_debug_draw_list_report"),
 			&ParticleRenderer::get_debug_draw_list_report);
+	ClassDB::bind_method(D_METHOD("get_scene_overlay_slot_positions", "slot"),
+			&ParticleRenderer::get_scene_overlay_slot_positions);
 	ClassDB::bind_method(D_METHOD("get_debug_emitter_bounds"),
 			&ParticleRenderer::get_debug_emitter_bounds);
 	ClassDB::bind_method(D_METHOD("get_unresolved_texture_names"),
@@ -1060,8 +1123,8 @@ void ParticleRenderer::_bind_methods() {
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "scene"),
 			"set_scene", "get_scene");
-	ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "texture_provider"),
-			"set_texture_provider", "get_texture_provider");
+	ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "image_provider"),
+			"set_image_provider", "get_image_provider");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "environment_source",
 			PROPERTY_HINT_NODE_TYPE, "Node"),
 			"set_environment_source", "get_environment_source");
@@ -1122,13 +1185,13 @@ Ref<EffectScene> ParticleRenderer::get_scene() const {
 	return scene_;
 }
 
-void ParticleRenderer::set_texture_provider(const Callable &p_provider) {
-	texture_provider_ = p_provider;
+void ParticleRenderer::set_image_provider(const Callable &p_provider) {
+	image_provider_ = p_provider;
 	_invalidate_catalog();
 }
 
-Callable ParticleRenderer::get_texture_provider() const {
-	return texture_provider_;
+Callable ParticleRenderer::get_image_provider() const {
+	return image_provider_;
 }
 
 void ParticleRenderer::set_texture_dir(const String &p_texture_dir) {
@@ -1184,12 +1247,30 @@ Camera3D *ParticleRenderer::get_second_scene_camera() const {
 			static_cast<std::uint64_t>(second_scene_camera_)));
 }
 
+void ParticleRenderer::set_inset_mirror_camera(Camera3D *p_camera) {
+	inset_mirror_camera_ = p_camera != nullptr ?
+			ObjectID(p_camera->get_instance_id()) : ObjectID();
+}
+
+Camera3D *ParticleRenderer::get_inset_mirror_camera() const {
+	if (!inset_mirror_camera_.is_valid())
+		return nullptr;
+	return Object::cast_to<Camera3D>(ObjectDB::get_instance(
+			static_cast<std::uint64_t>(inset_mirror_camera_)));
+}
+
 void ParticleRenderer::warm_pipelines(const Vector3 &p_position) {
 	clear_warm_pipelines();
 	if (!impl_)
 		return;
 	impl_->for_each_effect([](Ref<ParticleCompositorEffect> &effect) {
 		effect->request_pipeline_warm();
+	});
+	// Every overlay combine's pipeline, made in the same frame for each view format that frame
+	// draws (D-NET-NEW-L3-73; renderer/scene_overlay.h kSceneOverlayPipelineStates carries the
+	// witness).
+	impl_->for_each_overlay([](Ref<SceneOverlayCompositorEffect> &overlay) {
+		overlay->request_pipeline_warm();
 	});
 	Ref<QuadMesh> quad;
 	quad.instantiate();
@@ -1217,12 +1298,20 @@ void ParticleRenderer::clear_warm_pipelines() {
 		impl_->for_each_effect([](Ref<ParticleCompositorEffect> &effect) {
 			effect->cancel_pipeline_warm();
 		});
+		impl_->for_each_overlay([](Ref<SceneOverlayCompositorEffect> &overlay) {
+			overlay->cancel_pipeline_warm();
+		});
 	}
 	for (Node *node : warm_nodes_) {
 		if (node != nullptr)
 			node->queue_free();
 	}
 	warm_nodes_.clear();
+}
+
+void ParticleRenderer::clear_draws() {
+	if (impl_)
+		impl_->clear_draws();
 }
 
 void ParticleRenderer::shutdown() {
@@ -1241,6 +1330,7 @@ void ParticleRenderer::shutdown() {
 		overlay->set_enabled(false);
 		overlay->clear_submission();
 	});
+	scene_overlay_submission_.reset();
 	impl_->detach_compositors();
 
 	// Detaching affects the next render setup. Drain a callback already queued
@@ -1266,13 +1356,55 @@ void ParticleRenderer::attach_distortion_row(Node *p_frame_fx) {
 		frame_fx->set_distortion_drawer(distortion_drawer());
 }
 
+void ParticleRenderer::create_particle_devices() {
+	if (shutdown_ || !impl_)
+		return;
+	impl_->for_each_effect([](Ref<ParticleCompositorEffect> &effect) {
+		effect->create_device();
+	});
+}
+
+void ParticleRenderer::create_tracer_pool_devices() {
+	if (shutdown_ || !impl_)
+		return;
+	call_device_create(callable_mp(this, &ParticleRenderer::_create_ribbon_device_on_render_thread));
+	impl_->for_each_overlay([](Ref<SceneOverlayCompositorEffect> &overlay) {
+		overlay->create_device();
+	});
+}
+
+void ParticleRenderer::_create_ribbon_device_on_render_thread() {
+	RenderingServer *server = RenderingServer::get_singleton();
+	if (!shutdown_ && impl_ && server != nullptr)
+		impl_->distortion_drawer->create_device(server->get_rendering_device());
+}
+
 void ParticleRenderer::publish_scene_overlay(
 		const std::shared_ptr<const SceneOverlaySubmission> &p_submission) {
 	if (shutdown_ || !impl_)
 		return;
+	scene_overlay_submission_ = p_submission;
 	impl_->for_each_overlay([&p_submission](Ref<SceneOverlayCompositorEffect> &overlay) {
 		overlay->publish(p_submission);
 	});
+}
+
+PackedVector3Array ParticleRenderer::get_scene_overlay_slot_positions(int p_slot) const {
+	PackedVector3Array positions;
+	if (!scene_overlay_submission_) {
+		return positions;
+	}
+	const opennova::renderer::SceneOverlayFrame &frame = scene_overlay_submission_->frame;
+	for (const opennova::renderer::SceneOverlayBatch &batch : frame.batches) {
+		if (static_cast<int>(batch.slot) != p_slot) {
+			continue;
+		}
+		for (uint32_t i = 0; i < batch.vertex_count; ++i) {
+			const opennova::renderer::SceneOverlayVertex &v = frame.vertices[batch.first_vertex + i];
+			positions.push_back(Vector3(v.position[0], v.position[1], v.position[2]));
+		}
+	}
+	return positions;
 }
 
 void ParticleRenderer::set_hidden(bool p_hidden) {
@@ -1308,6 +1440,19 @@ bool ParticleRenderer::get_procedural_fallback_enabled() const {
 	return procedural_fallback_enabled_;
 }
 
+void ParticleRenderer::build_catalog(const Callable &p_present) {
+	if (shutdown_ || !impl_ || scene_.is_null())
+		return;
+	const opennova::particle::ParticleFrameSnapshot &frame =
+			scene_->native_frame_snapshot();
+	const std::uint32_t page_flags = opennova::renderer::particle_atlas_page_creation_flags(
+			session_texcompression_level_, session_particle_density_);
+	if (impl_->atlas.needs_rebuild(frame.definitions, page_flags)) {
+		impl_->rebuild_catalog(frame.definitions, image_provider_, texture_dir_,
+				procedural_fallback_enabled_, page_flags, p_present);
+	}
+}
+
 void ParticleRenderer::render_now(int64_t p_time_ms) {
 	if (shutdown_ || !impl_)
 		return;
@@ -1326,6 +1471,12 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 			second_scene_camera == reflection_camera ||
 			!second_scene_camera->is_inside_tree()))
 		second_scene_camera = nullptr;
+	Camera3D *inset_mirror_camera = get_inset_mirror_camera();
+	if (inset_mirror_camera != nullptr && (inset_mirror_camera == camera ||
+			inset_mirror_camera == reflection_camera ||
+			inset_mirror_camera == second_scene_camera ||
+			!inset_mirror_camera->is_inside_tree()))
+		inset_mirror_camera = nullptr;
 	// Attached even while the particles are hidden: the hidden particle passes
 	// are disabled, and each view's overlay pass (not particles) still draws.
 	impl_->attach_compositor_group(camera, viewport,
@@ -1343,6 +1494,11 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 			impl_->attached_second_scene_camera,
 			Impl::view_group(impl_->second_scene_effects, impl_->second_scene_overlay),
 			impl_->inherited_second_scene_compositor);
+	impl_->attach_compositor_group(inset_mirror_camera,
+			inset_mirror_camera != nullptr ? inset_mirror_camera->get_viewport() : nullptr,
+			impl_->attached_inset_mirror_camera,
+			Impl::view_group(impl_->inset_mirror_effects, impl_->inset_mirror_overlay),
+			impl_->inherited_inset_mirror_compositor);
 	if (hidden_)
 		return;
 	if (scene_.is_null()) {
@@ -1350,14 +1506,9 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 		return;
 	}
 
+	build_catalog();
 	const opennova::particle::ParticleFrameSnapshot &frame =
 			scene_->native_frame_snapshot();
-	const std::uint32_t page_flags = opennova::renderer::particle_atlas_page_creation_flags(
-			session_texcompression_level_, session_particle_density_);
-	if (impl_->atlas.needs_rebuild(frame.definitions, page_flags)) {
-		impl_->rebuild_catalog(frame.definitions, texture_provider_, texture_dir_,
-				procedural_fallback_enabled_, page_flags);
-	}
 	// Each view's particle stride from the session's density (D-RMAT-24;
 	// renderer::particle_frame_strides).
 	const opennova::renderer::ParticleFrameStrides strides = opennova::renderer::particle_frame_strides(
@@ -1392,6 +1543,8 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 				view.projection);
 		view.projection_valid = view_camera.projection_valid;
 		view.projection_near_is_one = true;
+		// Each world view's own eye: an emitter out of it never submits.
+		view.frustum = view_camera.frustum;
 		const opennova::renderer::ParticleDrawList &draw_list =
 				impl_->compilers[slot].compile(impl_->render_snapshot, view);
 		impl_->slot_present[slot] = true;
@@ -1429,11 +1582,17 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 	// main eye and drawn by FrameFX's type-0 row through the drawer (retail
 	// FrameFX_DistortionPass @ 0x5838F8). The row's content gate reads the
 	// live class-7 emitters (EffectWorld_HasDistortionParticles
-	// @ 0x5F6640); the pass fog rides along for the tracer distortion ribbons.
+	// @ 0x5F6640): every class-7 child of a visible group, ahead of the
+	// render submit's live-count and view tests, so the pass's emitters the
+	// submit left out count too; the pass fog rides along for the tracer
+	// distortion ribbons.
 	compile_world(kDistortion, opennova::renderer::ParticleWaterSubset::Distortion,
 			world_camera, impl_->distortion_effect, thermal, world_divisor);
-	impl_->distortion_drawer->set_particles_present(
-			impl_->compilers[kDistortion].draw_list().debug.selected_emitters > 0);
+	const opennova::renderer::ParticleFrameDebugCounters &distortion =
+			impl_->compilers[kDistortion].draw_list().debug;
+	const std::size_t distortion_children = distortion.selected_emitters +
+			distortion.empty_emitters + distortion.frustum_culled_emitters;
+	impl_->distortion_drawer->set_particles_present(distortion_children > 0);
 	impl_->distortion_drawer->set_pass_fog(impl_->fog_color, impl_->fog_start,
 			impl_->fog_end, impl_->fog_type);
 
@@ -1449,6 +1608,10 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 	first_person_view.projection_valid = world_camera.projection_valid;
 	first_person_view.projection_near_is_one = true;
 	first_person_view.lod_divisor = world_divisor;
+	// Retail draws every particle in the scene's world passes, against the scene's one viewport:
+	// no pass of its own culls a first-person particle by another eye
+	// (renderer::ParticleViewInput::frustum carries the witness).
+	first_person_view.frustum = world_camera.frustum;
 	const opennova::renderer::ParticleDrawList &first_person_draw =
 			impl_->compilers[kFirstPerson].compile(impl_->render_snapshot,
 					first_person_view);
@@ -1474,17 +1637,31 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 				view_camera, effects[1], false, lod_divisor);
 	};
 
-	if (reflection_camera != nullptr) {
-		// The reflected pass selects its water subsets by the main camera's
-		// side (Water_RenderReflectedWorldScene passes the prerender's
-		// below-water flag), whether its eye is mirrored or not.
-		compile_secondary_pair(particle_camera_frame(reflection_camera),
-				camera_above_water, kReflectionFarSide, kReflectionCameraSide,
-				impl_->reflection_effects, strides.mirror);
-	} else {
-		impl_->retire_view_pair(impl_->reflection_effects, kReflectionFarSide,
-				kReflectionCameraSide);
-	}
+	// A mirror's passes compile only on a frame whose water renders that mirror: its viewport left
+	// disabled, the reflected scene runs none (renderer::compiles_mirror_particles carries the
+	// witness, D-NET-NEW-L3-39). The reflected pass selects its water subsets by the prerender's
+	// below-water flag, the main eye's side, whether its eye is mirrored or not, and culls by
+	// its own eye over a square at its horizontal fov (renderer::ParticleViewInput::frustum
+	// carries the witness). The weapon Inset pass's own mirror runs the same pair after the
+	// main scene's passes, in the main scene's stride (renderer::ParticleFrameStrides).
+	auto compile_mirror_pair = [&](Camera3D *mirror, ParticleDrawSlot far_slot,
+			ParticleDrawSlot camera_slot, ParticleEffectPair &effects,
+			std::uint32_t lod_divisor) {
+		const SubViewport *mirror_viewport = mirror != nullptr ?
+				Object::cast_to<SubViewport>(mirror->get_viewport()) : nullptr;
+		const bool mirror_rendered = mirror_viewport == nullptr ||
+				mirror_viewport->get_update_mode() != SubViewport::UPDATE_DISABLED;
+		if (mirror != nullptr && opennova::renderer::compiles_mirror_particles(mirror_rendered)) {
+			ParticleCameraFrame mirror_camera = particle_camera_frame(mirror);
+			mirror_camera.frustum = mirror_cull_frustum(mirror);
+			compile_secondary_pair(mirror_camera, camera_above_water, far_slot, camera_slot,
+					effects, lod_divisor);
+		} else {
+			impl_->retire_view_pair(effects, far_slot, camera_slot);
+		}
+	};
+	compile_mirror_pair(reflection_camera, kReflectionFarSide, kReflectionCameraSide,
+			impl_->reflection_effects, strides.mirror);
 
 	if (second_scene_camera != nullptr) {
 		// The original runs its one scene routine again for this camera, so the
@@ -1500,6 +1677,8 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 		impl_->retire_view_pair(impl_->second_scene_effects, kSecondSceneFarSide,
 				kSecondSceneCameraSide);
 	}
+	compile_mirror_pair(inset_mirror_camera, kInsetMirrorFarSide, kInsetMirrorCameraSide,
+			impl_->inset_mirror_effects, strides.inset_mirror);
 }
 
 int64_t ParticleRenderer::get_rendered_quad_count() const {
@@ -1546,6 +1725,8 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 	result["reflection_camera_side"] = slot_report(kReflectionCameraSide);
 	result["second_scene_far_side"] = slot_report(kSecondSceneFarSide);
 	result["second_scene_camera_side"] = slot_report(kSecondSceneCameraSide);
+	result["inset_mirror_far_side"] = slot_report(kInsetMirrorFarSide);
+	result["inset_mirror_camera_side"] = slot_report(kInsetMirrorCameraSide);
 	result["first_person"] = slot_report(kFirstPerson);
 	result["distortion"] = slot_report(kDistortion);
 	result["distortion_backend"] = impl_->distortion_effect->get_backend_report();
@@ -1566,6 +1747,10 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 			impl_->second_scene_effects[0]->get_backend_report();
 	result["second_scene_camera_backend"] =
 			impl_->second_scene_effects[1]->get_backend_report();
+	result["inset_mirror_far_backend"] =
+			impl_->inset_mirror_effects[0]->get_backend_report();
+	result["inset_mirror_camera_backend"] =
+			impl_->inset_mirror_effects[1]->get_backend_report();
 	Dictionary world_overlay;
 	impl_->world_overlay->write_backend_report(world_overlay);
 	result["world_overlay_backend"] = world_overlay;
@@ -1575,6 +1760,9 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 	Dictionary second_scene_overlay;
 	impl_->second_scene_overlay->write_backend_report(second_scene_overlay);
 	result["second_scene_overlay_backend"] = second_scene_overlay;
+	Dictionary inset_mirror_overlay;
+	impl_->inset_mirror_overlay->write_backend_report(inset_mirror_overlay);
+	result["inset_mirror_overlay_backend"] = inset_mirror_overlay;
 	result["first_person_backend"] = "array_mesh_fallback_tool_only";
 	result["world_compositor_attached"] =
 			impl_->attached_world_camera.is_valid();
@@ -1582,6 +1770,8 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 			impl_->attached_reflection_camera.is_valid();
 	result["second_scene_compositor_attached"] =
 			impl_->attached_second_scene_camera.is_valid();
+	result["inset_mirror_compositor_attached"] =
+			impl_->attached_inset_mirror_camera.is_valid();
 	result["world_compositor_inherited_effects"] =
 			impl_->inherited_world_compositor;
 	result["reflection_compositor_inherited_effects"] =
@@ -1601,6 +1791,7 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 	const std::vector<ParticleAtlasDevice::Page> &pages = impl_->atlas.pages();
 	const std::vector<opennova::renderer::ParticleAtlasEntry> &entries = impl_->atlas.entries();
 	result["atlas_page_count"] = static_cast<int64_t>(pages.size());
+	result["atlas_generation"] = static_cast<int64_t>(impl_->atlas.generation());
 	result["atlas_entry_count"] = static_cast<int64_t>(entries.size());
 	std::size_t resolved_entries = 0;
 	for (const opennova::renderer::ParticleAtlasEntry &entry : entries) {

@@ -96,7 +96,58 @@ func test_load_from_resource_root_scans_every_ptl() -> void:
 	# synth_smallest is table-only.
 	assert_eq(count, 9, "all effects across the mounts register")
 	assert_gt(world.effect_count(), 0)
-	assert_true(world.get_texture_provider().is_valid(), "textures route through the mounted root")
+	assert_true(world.get_image_provider().is_valid(), "textures route through the mounted root")
+
+
+# The mission start's effect system builds the catalog's texture atlases at its init, each
+# frame's file decoded into its page and freed, a device texture made per page and none per
+# frame, so the load's first draw builds no atlas again (engine renderer/particle_atlas.h
+# carries the witness, D-NET-NEW-L3-26): the build leaves the mount's decoded textures
+# empty, and a draw after it keeps the atlas it built.
+func test_the_atlas_builds_once_from_decoded_frames() -> void:
+	# synth_minimal_effect's graphic1 is spark.tga.
+	TestFs.write_bytes(self, _root_dir.path_join("spark.tga"), TestFs.tga_bytes(Vector2i(8, 8)))
+	var root := _make_root()
+	var world := _make_world()
+	world.load_from_resource_root(root)
+	var before := int(world.get_debug_draw_list_report().get("atlas_generation", 0))
+	world.build_texture_atlases()
+	var report := world.get_debug_draw_list_report()
+	assert_eq(int(report.get("atlas_generation", 0)), before + 1, "the init builds the atlas once")
+	assert_gt(int(report.get("atlas_resolved_entry_count", 0)), 0, "spark.tga is on a page")
+	assert_eq(root.get_decoded_texture_count(), 0, "no device texture is made for a frame")
+	world.render_now(0)
+	assert_eq(int(world.get_debug_draw_list_report().get("atlas_generation", 0)), before + 1,
+			"the first draw builds no atlas again")
+
+
+# The game's effect loaders present the loading screen at its stored checkpoint as they go,
+# so a long load keeps the screen live through the screen's 100 ms rule: the effect system's
+# load past each loose file it parses and once past the archive walk, the atlas build at its
+# start, past each frame it decodes and past its walk (engine runtime/hud/loading_screen.h
+# carries the witness).
+# [orig: CEffectSystem_Init @0x5f6070 - LoadingScreen_PresentStoredProgress called @0x5f630b
+#  (each loose .ptl), @0x5f6451 (each loose gore file), @0x5f6582 (past the archive walk);
+#  CParticleManager_BuildTextureAtlases
+#  @0x5e8db0 - the calls @0x5e8dfb, @0x5e8e0c, @0x5e8ef5]
+func test_the_effect_loaders_present_the_stored_checkpoint_as_they_go() -> void:
+	# synth_minimal_effect's graphic1 is spark.tga.
+	TestFs.write_bytes(self, _root_dir.path_join("spark.tga"), TestFs.tga_bytes(Vector2i(8, 8)))
+	var world := _make_world()
+	var load_presents := [0]
+	world.load_from_resource_root(_make_root(), func() -> void: load_presents[0] += 1)
+	assert_eq(world.file_count(), 4, "the fixture root's four loose effect files parse")
+	assert_eq(load_presents[0], 5, "one present past each loose file and one past the walk")
+	var atlas_presents := [0]
+	world.build_texture_atlases(func() -> void: atlas_presents[0] += 1)
+	var entries := int(world.get_debug_draw_list_report().get("atlas_entry_count", 0))
+	assert_gt(entries, 0, "spark.tga decodes into the build")
+	assert_eq(atlas_presents[0], entries + 2,
+			"one present at the start, one past each decoded frame and one past the walk")
+	# Without a present, the loaders present nothing and load the same.
+	var quiet := _make_world()
+	quiet.load_from_resource_root(_make_root())
+	assert_eq(quiet.file_count(), 4)
 
 
 # Retail's effect loader walks every mounted archive's directory and skips an
@@ -597,6 +648,46 @@ func test_render_now_submits_a_freshly_advanced_warm_snapshot() -> void:
 	world.advance_fixed_tick(Simulation.tick_dt())
 	assert_gt(world.render_now(GameWorld.current_frame_clock_ms()), 0,
 			"the public warm facade synchronously submits non-empty material runs")
+
+
+# A load's warm ends in the reset: its last submission leaves the camera's compositor with the
+# warm's spawns, so a join's waits and loading presents (whose frames run no render_now) draw
+# no particle; retail's presents draw the loading screen alone (engine
+# runtime/hud/loading_screen.h carries the witness, D-NET-NEW-L2-45).
+func test_a_reset_retires_the_published_particle_submission() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(64, 64)
+	viewport.own_world_3d = true
+	add_child_autofree(viewport)
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 0.0, 5.0)
+	camera.current = true
+	viewport.add_child(camera)
+	var world := EffectWorld.new()
+	viewport.add_child(world)
+	world.load_particle_file(_make_renderable_effect_file())
+	assert_gt(world.spawn_effect("puff", Vector3.ZERO), 0)
+	world.advance_fixed_tick(Simulation.tick_dt())
+	assert_gt(world.render_now(GameWorld.current_frame_clock_ms()), 0)
+	var drawn := world.get_debug_draw_list_report()
+	assert_true(bool(drawn.get("world_compositor_attached", false)))
+	var published := int((drawn.get("world_camera_backend", {}) as Dictionary).get(
+			"submitted_commands", 0)) + int(drawn.get("world_far_render_runs", 0))
+	assert_gt(published, 0, "the render publishes the warm spawn to the camera's view")
+
+	world.reset_runtime_state()
+	var reset := world.get_debug_draw_list_report()
+	assert_true((reset.get("world_camera_side", {}) as Dictionary).is_empty())
+	assert_true((reset.get("world_far_side", {}) as Dictionary).is_empty())
+	assert_eq(int(reset.get("world_far_render_runs", -1)), 0)
+	for key in ["world_far_backend", "world_camera_backend"]:
+		assert_eq(int((reset.get(key, {}) as Dictionary).get("submitted_commands", -1)), 0,
+				"%s draws nothing after the reset" % key)
+	# The next render publishes the reset scene: still nothing.
+	world.render_now(GameWorld.current_frame_clock_ms())
+	var next := world.get_debug_draw_list_report()
+	assert_eq(int((next.get("world_camera_backend", {}) as Dictionary).get(
+			"submitted_commands", -1)), 0)
 
 
 func test_runtime_renderer_release_is_explicit_and_idempotent() -> void:

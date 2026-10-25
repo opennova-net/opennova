@@ -1,7 +1,7 @@
 // THE SERVER-STATUS PAGE compile (hud_server_status.h), the quit dialog it
 // shares with the scene frame's gameplay overlays, the console lines and the
 // player score list.
-// [orig: Server_DrawStatusScreen @0x50a2d0; UI_DrawDisconnectReasonDialog
+// [orig: Server_DrawStatusScreen @0x50a2d0; UI_DrawQuitConfirmDialog
 //  @0x5b8eb0; HUD_DrawServerConsoleLines (ex
 //  Vehicle_ComputeSuspensionBoneTransforms) @0x5ba0a0;
 //  HUD_DrawPlayerScoreList @0x500300]
@@ -23,7 +23,9 @@ constexpr uint32_t kPageWhite = 0xFFFFFFFFu;
 void HudFrameCompiler::element_quit_dialog(const HudFrameState &state, float w, float h) {
 	if (!state.quit_dialog_open) return;
 	// The untitled stdbox, then the text centred in the Impact38 slot in
-	// g_HUDColors.active [orig: HUD_DrawLabelBox(ctx, 280, 340, 744, 428, 0,
+	// g_HUDColors.active, the snapshot twin (a dedicated host's seed draws it
+	// black) [orig: `mov esi, g_HUDColors.active` @0x5b8eb5;
+	//  HUD_DrawLabelBox(ctx, 280, 340, 744, 428, 0,
 	//  -1) @0x5b8ed4; the key pick @0x5b8edc..0x5b8eff; HUD_DrawTextCenteredScaled
 	//  (&g_HUDLabelFontImpact38, 512, 364, text, active, 1) @0x5b8f21 — the
 	//  Viewport_ScaleToVirtualCoords pair @0x580b80 then the centred
@@ -35,7 +37,7 @@ void HudFrameCompiler::element_quit_dialog(const HudFrameState &state, float w, 
 			: have_large ? label_font_large_ : label_font_bold_;
 	const float ls = (have_impact || have_large) ? label_large_scale_ : label_scale_;
 	emit_text_at_virtual_pos(lf.font() != nullptr ? lf : font_, lf.font() != nullptr ? ls : 1.0f,
-			state.quit_dialog_text.c_str(), 512, 364, w, h, active_color(state), 2);
+			state.quit_dialog_text.c_str(), 512, 364, w, h, hud_colors_active_, 2);
 	++draw_list_.elements_drawn;
 }
 
@@ -100,6 +102,10 @@ bool HudFrameCompiler::compile_server_status_page(const HudFrameState &state,
 		const ServerStatusPageState &page, uint32_t now_ms, bool window_active, float surface_w,
 		float surface_h) {
 	if (!server_status_page_due(&status_last_draw_ms_, now_ms, window_active)) return false;
+	// The snapshot twin the quit dialog and the end-round overlay read: a
+	// dedicated host compiles no scene frame, so this seeds it and nothing
+	// restamps it (sync_hud_colors_active).
+	sync_hud_colors_active(state);
 	const float w = surface_w;
 	const float h = surface_h;
 	draw_list_ = HudDrawList{};
@@ -157,9 +163,9 @@ bool HudFrameCompiler::compile_server_status_page(const HudFrameState &state,
 	mark_order_break();
 	// The message log, else the class roster of the console capture
 	// [orig: @0x50b218..0x50b23d]. The console capture (g_InputCaptureMode 1
-	// with dword_B3E318) has no caller that opens it (hud_chat_entry.h
-	// kChatDispatchConsole), so HUD_DrawClassRosterOverlay @0x5b9f30 never
-	// draws here; not ported.
+	// with dword_B3E318) is input action 20's command entry (hud_chat_entry.h
+	// kChatDispatchConsole); HUD_DrawConsoleMessagesOverlay @0x5b9f30, its draw
+	// here, is not ported yet.
 	element_message_log(state, w, h);
 	mark_order_break();
 	// The chat input line at (50, 480) while a capture is open

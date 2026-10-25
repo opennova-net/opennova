@@ -264,8 +264,8 @@ int test_infantry_14_bytes() {
 		0x50, 0x60,             // posZ
 		0x80,                   // yaw_byte
 		0x02,                   // flags_byte
-		0x10,                   // pitch_byte
-		0x40,                   // aim_yaw_byte
+		0x10,                   // aim_heading_byte
+		0x40,                   // aim_pitch_byte
 		0x07,                   // anim_byte
 		0xFF,                   // trailing
 	};

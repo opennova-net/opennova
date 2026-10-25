@@ -50,13 +50,14 @@ void vehicle_simple_contact(
 		spine_radius };
 	int32_t points[7][3];
 	const auto basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
-	place_probes(basis, model, x, y, z, points);
+	place_probes(basis.q22, model, x, y, z, points);
 	for (int i = 0; i < 4; ++i)
 		points[i][2] = io::bam_add(points[i][2], m.wheel_comp[i]);
 	PlatProbeForce first[7], second[7];
 	const int32_t soft = cos22_of_bam_x87(t.max_slope), hard = cos22_of_bam_x87(t.slip_slope);
 	EntityHandle hit;
-	const int severity = plat_probe_pass(world, e, points, radii, soft, hard, first, x, y, z, &hit);
+	const int severity = plat_probe_pass(world, e, ProbeForcePass::ComputeCollisionForces, points,
+			radii, soft, hard, first, x, y, z, &hit);
 	vehicle_contact_impact(world, e, t, severity, hit, x, y, z);
 	if (severity != 0)
 		m.speed = io::bam_sub(m.speed, m.speed >> ((t.torque + (severity == 2 ? 1 : 2)) & 31));
@@ -72,15 +73,21 @@ void vehicle_simple_contact(
 			}
 		}
 		const int32_t dx = io::bam_sub(points[best][0], x), dy = io::bam_sub(points[best][1], y);
-		// This contact uses the NEGATIVE atan scale dbl_7C57B8.
+		// This contact uses the NEGATIVE atan scale g_NegBamPerRadian.
 		int32_t impulse = io::bam_sub(
 				bam_of_atan2(io::bam_add(dy, first[best].fy), io::bam_add(dx, first[best].fx)),
 				bam_of_atan2(dy, dx));
 		const Entity *other = world.registry.get(hit);
 		const VehicleTraits *ot =
 				other != nullptr ? world.vehicles.traits.get(other->item_id) : nullptr;
-		if (ot != nullptr && ot->player_control && ot->mass < int64_t(t.mass) * 2 &&
-				other->bound_radius < e.bound_radius * 2 && int64_t(ot->mass) + t.mass != 0)
+		// The other's def mass against twice ours and its bound word against twice
+		// ours, each doubled by a wrapping add, signed compares (D-NET-507).
+		// [orig: Entity_ProcessVehicleSuspension @0x463C60 - `lea edi, [ecx+ecx]; cmp edx,
+		//  edi` @0x4645F5..0x4645FA, `mov edi, [esi]; add edi, edi; cmp [ebx], edi`
+		//  @0x4645FC..0x464602]
+		if (ot != nullptr && ot->player_control && ot->mass < io::bam_add(t.mass, t.mass) &&
+				other->bound_radius.q16 < io::bam_add(e.bound_radius.q16, e.bound_radius.q16) &&
+				int64_t(ot->mass) + t.mass != 0)
 			impulse = int32_t(int64_t(impulse) * ot->mass / (int64_t(ot->mass) + t.mass));
 		m.wheel_rate_bam = io::bam_add(m.wheel_rate_bam, impulse >> 2);
 	}
@@ -94,7 +101,8 @@ void vehicle_simple_contact(
 		point[0] = io::bam_add(point[0], push_x);
 		point[1] = io::bam_add(point[1], push_y);
 	}
-	if (plat_probe_pass(world, e, points, radii, soft, hard, second, x, y, z) != 0) {
+	if (plat_probe_pass(world, e, ProbeForcePass::ComputeCollisionForces, points, radii, soft, hard,
+				second, x, y, z) != 0) {
 		int32_t second_x = 0, second_y = 0;
 		for (int i = 0; i < 7; ++i) {
 			second_x = io::bam_add(second_x, second[i].fx);

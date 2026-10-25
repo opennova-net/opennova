@@ -171,6 +171,8 @@ std::vector<uint8_t> join_with_cookie(const std::string &key) {
 		CHECK(encode_pub_value(plain, key, out));
 		return out;
 	};
+	// A stock cookie leads with the name the validator renames by (D-NET-702).
+	pair("PUBNAMEINFO", pub(std::vector<uint8_t>{'J', 'o', 'i', 'n', 'e', 'r', 0}));
 	pair("PUBPCID", pub(std::vector<uint8_t>(pcid.begin(), pcid.end())));
 	pair("PUBSQUADINFO", pub(squad));
 	pair("PUBJOINTICKET", "TICKET");

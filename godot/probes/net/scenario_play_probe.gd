@@ -8,15 +8,32 @@ extends GameProbe
 ##
 ## The scenario: {"setup": {"pose": {"position_bms": [x, y, z], "yaw": deg,
 ## "pitch": deg}}, "steps": [{"tick": t, then one of "down": code | "up":
-## code | "press": code | "look_px": [dx, dy] | "end": true}]}, codes being
-## retail action codes. The setup pose lands first: a host or single player
-## takes teleport_local_player, a joiner the ApplyPose write on its own L
-## (Simulation.debug_apply_local_pose), which its next C2S 0x0C uplink carries.
+## code | "press": code | "look_px": [dx, dy] | "char": "c" | "end": true}]},
+## codes being retail action codes and a char one typed character (backspace,
+## return or printable ASCII; the seam replays it as a keystroke, which an
+## open chat or command line takes). The setup pose lands first, on every role as
+## the onHook bridge's ApplyPose write on the local player's L
+## (Simulation.debug_apply_local_pose): Position, heading and pitch, the air velocity
+## zeroed, the resolver's idle-skip counter kept (retail's +0x373 survives
+## ApplyPose, so a host posed above its floor settles as retail's does); a joiner's
+## next C2S 0x0C uplink carries it.
 ## Then the script arms, the next device sample latches its start logic tick,
 ## and the verdict reports {start_logic_tick, end_logic_tick, steps: [{index,
 ## applied_logic_tick[, release_logic_tick]}], setup}. `wait` false returns as
 ## soon as the start latched and leaves the script playing; a later run with
 ## neither `scenario` nor `path` collects that script's record. Role-agnostic.
+##
+## `aim_read` (a pool-0 handle, alone) reads instead of playing: the runner's
+## aim_at step (run_parity_topology.ps1 Resolve-ScenarioAim, whose look
+## scripts/net/scenario_aim.py computes) takes the local player's heading BAM,
+## its and the handle's mission positions and the session's mouse sensitivity
+## word, the onhook_pool_entities read's counterparts.
+##
+## `place_read` (true, alone) reads the local player's mission position and
+## heading BAM at this logic tick: the runner's wait for the setup's bodies at
+## rest before the steady window (run_parity_topology.ps1
+## Wait-ScenarioBodiesAtRest), the counterpart of onhook_pool_entities' read
+## of a retail player's own body.
 
 const LOCAL_PLAYER_TIMEOUT_MS := 60_000
 ## A start that no device sample latches means the world is not ticking.
@@ -32,6 +49,13 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	var scenario: Dictionary = ctx.args.get("scenario", {})
 	var path := String(ctx.args.get("path", ""))
 	var wait := bool(ctx.args.get("wait", true))
+	var aim_read := int(ctx.args.get("aim_read", -1))
+	var place_read := bool(ctx.args.get("place_read", false))
+	if aim_read >= 0 or place_read:
+		if not scenario.is_empty() or not path.is_empty() or (aim_read >= 0 and place_read):
+			return ProbeVerdict.failed("`aim_read` and `place_read` each read alone, with no "
+					+ "`scenario`, `path` or other read")
+		return _place_read() if place_read else _aim_read(aim_read)
 	var controls := ControlsBindings.model()
 	if scenario.is_empty() and path.is_empty():
 		return await _collect(controls, wait)
@@ -151,15 +175,9 @@ func _apply_setup(setup_value: Variant) -> Dictionary:
 		"pitch": float(pitch),
 		"logic_tick": sim.get_logic_tick(),
 	}
-	var write_error: Error
-	if sim.is_joiner():
-		out.write = "apply_local_pose"
-		write_error = sim.debug_apply_local_pose(position[0], position[1], position[2],
-				float(yaw), float(pitch))
-	else:
-		out.write = "teleport_local_player"
-		write_error = sim.debug_teleport_local_player(
-				Vector3(position[0], position[1], position[2]), float(yaw), float(pitch))
+	out.write = "apply_local_pose"
+	var write_error: Error = sim.debug_apply_local_pose(position[0], position[1], position[2],
+			float(yaw), float(pitch))
 	out.role = _role(sim)
 	if write_error != OK:
 		out.error = "the %s write refused the setup pose (error %d)" % [out.write, write_error]
@@ -185,6 +203,51 @@ func _record(driver: ScriptedInput, setup: Dictionary) -> Dictionary:
 		"setup": setup,
 		"cancel_reason": driver.get_cancel_reason(),
 	}
+
+
+## The aim_at reads on this side: the local player's +0x10 heading, its and the
+## target's mission positions, and the session's copy of the profile's mouse
+## sensitivity word (g_MouseSensitivity's).
+func _aim_read(handle: int) -> ProbeVerdict:
+	var sim := _ctx.sim()
+	if sim == null or not sim.has_local_player():
+		return ProbeVerdict.failed("no local player to aim")
+	var target: EntityCard = sim.entity_card(handle)
+	if target == null or not (target.has_ai() or target.has_world()):
+		return ProbeVerdict.failed("no entity 0x%04x to aim at" % handle)
+	var target_position := target.get_mission_position()
+	return ProbeVerdict.passed("aim read 0x%04x" % handle, {
+		"logic_tick": sim.get_logic_tick(),
+		"heading_bam": sim.get_local_player_heading_bam(),
+		"position_bms": _own_mission_position(sim),
+		"target": {
+			"handle": handle,
+			"position_bms": [target_position.x, target_position.y, target_position.z],
+		},
+		"mouse_sensitivity": sim.get_session_mouse_sensitivity(),
+	})
+
+
+## The window-open wait's read: the local player's mission position (its own
+## L, which its next C2S 0x0C uplink carries) and heading at this logic tick.
+func _place_read() -> ProbeVerdict:
+	var sim := _ctx.sim()
+	if sim == null or not sim.has_local_player():
+		return ProbeVerdict.failed("no local player to read")
+	return ProbeVerdict.passed("place read", {
+		"logic_tick": sim.get_logic_tick(),
+		"heading_bam": sim.get_local_player_heading_bam(),
+		"position_bms": _own_mission_position(sim),
+	})
+
+
+## The local player's own body L as mission (x, y, z). On a joiner the wire
+## handle (get_local_player_wire_handle) is H, the host-assigned identity, which
+## names no body in the joiner's own pool, so the read takes L's position
+## directly: Godot (x, y up, z) -> mission (x, -z, y).
+func _own_mission_position(sim: Simulation) -> Array:
+	var godot_position: Vector3 = sim.get_local_player_position()
+	return [godot_position.x, -godot_position.z, godot_position.y]
 
 
 func _read_scenario(path: String) -> Dictionary:

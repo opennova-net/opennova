@@ -93,6 +93,9 @@ private:
 	bool frame_bounds_live = false;
 	// The Inset's own frame compiled since it opened (release_inset_frame).
 	bool inset_draw_list_live = false;
+	// The Inset frame's tracked visible-terrain bounds (render_inset_frame).
+	opennova::VisibleBounds inset_frame_bounds;
+	bool inset_frame_bounds_live = false;
 
 	// One view's light rows: one RGBAF row per pool slot, two texels per light
 	// — (position.xyz Godot world, inv_scale) then (c0, the patch's count).
@@ -107,6 +110,8 @@ private:
 		// uploads only when they differ (a full RGBAF texture update otherwise).
 		PackedByteArray uploaded;
 		int enabled_written = -1; // -1 unset, else the bool last pushed
+		// The light rows the bytes the texture holds carry (0: every row zero, as made).
+		size_t total_written = 0;
 	};
 
 	// Lightweight RenderingServer instance pool for one view's visible
@@ -139,6 +144,8 @@ private:
 	// One id per page sweep: each traversal (main or Inset) is its own
 	// PolyTrn frame of the shared page cache.
 	uint64_t page_sweep_id = 0;
+	// The weather's time-set reset count this cache last answered (WeatherState::time_set_resets).
+	uint32_t seen_time_set_resets = 0;
 	void _create_pool_instances(PatchPool &r_pool, const RID &p_material);
 	void _free_pool_instances(PatchPool &r_pool);
 	void _hide_pool(PatchPool &r_pool);
@@ -170,6 +177,11 @@ private:
 	// tallies its tiles add to.
 	static constexpr int kBuildTailUnits = 6;
 	bool building_ = false;
+	// Whether the build in flight builds the LOD cache (build_begin's `p_lod_cache`).
+	bool build_lod_cache_ = true;
+	// Whether the last build made the tile cache's page array (build_begin's
+	// `p_tile_cache_targets`); the cache's later rebuilds keep that choice.
+	bool build_tile_cache_targets_ = true;
 	int build_done_ = 0;
 	int build_total_ = 0;
 	int build_total_verts_ = 0;
@@ -279,12 +291,16 @@ public:
 		static_shadow_rasterizer.set_reports_caster_changes(p_on);
 	}
 	void set_tile_cache_capture_diagnostics(bool p_enabled);
+	// The windowed device checks' seams (TerrainTileCacheDevice::set_device_shadow_enabled,
+	// read_device_layer).
+	void set_tile_cache_device_shadow(bool p_enabled);
+	PackedByteArray get_tile_cache_layer_bytes(int p_layer) const;
 	void set_suppressed_static_shadow_bms_ids(
 			const PackedInt32Array &p_bms_ids);
 	PackedInt32Array get_suppressed_static_shadow_bms_ids() const;
 	Ref<TerrainSurfaceInputs> get_surface_inputs() const;
 	Ref<Texture2D> get_heightfield_normal_texture() const;
-	Ref<Texture2DArray> get_tile_cache_texture() const;
+	Ref<TextureLayered> get_tile_cache_texture() const;
 	Dictionary get_tile_cache_diagnostics() const;
 	bool append_terrain_scorch(int64_t p_texture_index,
 			int64_t p_minimum_x_q16, int64_t p_minimum_z_q16,
@@ -365,15 +381,23 @@ public:
 	int get_light_patches_lit() const { return light_patches_lit; }
 	int get_light_rows_total() const { return light_rows_total; }
 
-	void build();
+	// `p_lod_cache` false: the build without the LOD cache, the device geometry the patches draw
+	// from (each tile's LOD meshes and the patch pool); `p_tile_cache_targets` false: the tile
+	// cache's sources load and no page array is made. Both are a dedicated host's mission start,
+	// which jumps over the render subsystems; the textures, the material and the scene snapshot
+	// build either way (engine terrain/terrain_load_legs.h builds_lod_cache, D-NET-NEW-L3-32;
+	// builds_tile_cache_targets, D-NET-NEW-L3-33). Such a terrain draws nothing.
+	void build(bool p_lod_cache = true, bool p_tile_cache_targets = true);
 	// The same build a unit at a time (the OpenNova Editor's mission device builds a terrain over
 	// its frames): build_begin drops what was built and plans the units (the scene snapshot and
 	// the material, a unit per tile's meshes, the patch pool, the surface inputs' heightfield,
-	// blend and detail textures, the tile cache's pages, the lights); build_step runs the next and
-	// says whether more are left, the terrain is built or the build failed (no valid baked
-	// terrain). build() is build_begin and every step. The node must be in the tree, as for
-	// build(): its patch pool binds the scenario. False from build_begin: no loaded terrain data.
-	bool build_begin();
+	// blend and detail textures, the tile cache's pages, the lights; the tiles' meshes and the
+	// pool only with `p_lod_cache`, the page array only with `p_tile_cache_targets`); build_step
+	// runs the next and says whether more are left, the terrain is built or the build failed (no
+	// valid baked terrain). build() is build_begin and every step. The node must be in the tree,
+	// as for build(): its patch pool binds the scenario. False from build_begin: no loaded
+	// terrain data.
+	bool build_begin(bool p_lod_cache = true, bool p_tile_cache_targets = true);
 	BuildStep build_step();
 	bool is_built() const { return built; }
 	// The terrain shown again over regions of its heights (the OpenNova Editor's sculpt, ADR 0046 S25), after
@@ -441,6 +465,12 @@ public:
 	bool has_visible_terrain_bounds() const;
 	float get_visible_terrain_min_height() const;
 	float get_visible_terrain_max_height() const;
+	// The same for the weapon Inset pass's own frame (its water-active input),
+	// tracked whether or not the Inset patches draw; false while the Inset
+	// frame is down.
+	bool has_inset_visible_terrain_bounds() const;
+	float get_inset_visible_terrain_min_height() const;
+	float get_inset_visible_terrain_max_height() const;
 
 	// Debug API
 	// The last compile's counters (native; the F3 Render window) and whether

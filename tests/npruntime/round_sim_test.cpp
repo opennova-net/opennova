@@ -25,6 +25,7 @@
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_idle_timers.h>
+#include <runtime/inmatch/server_entity_state.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_tick.h>
 
@@ -58,6 +59,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <map>
 #include <cstring>
 #include <memory>
 #include <vector>
@@ -72,6 +74,13 @@ using namespace opennova;
 namespace inmatch = opennova::inmatch;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
+
+// The player entity's own weapon table (world::Entity::weapon_slots), the host's
+// per-player slot rows since D-NET-336's move.
+std::map<uint16_t, w::PersonalWeaponSlot> &slots_of(w::World &world,
+		const inmatch::NapiNPConnection &conn) {
+	return world.registry.get(conn.link.owned_entity)->weapon_slots;
+}
 using conn_fixture::make_seeded_conn;
 
 bool expect(bool cond, const char *msg) {
@@ -506,10 +515,14 @@ bool run_death_feed_classifier_matrix() {
 	}
 
 	// The same +460 counter is produced by the authority every 32 host ticks.
-	// At the first sample beyond 4*20, the eye-under-water predicate kills the
-	// player with the drown animation and routes the same no-killer transaction.
-	// [orig: Server_UpdatePlayerBreathTimers @0x50D770, call gate @0x51D8C4;
-	// GameEvent_PlayerDeath @0x5172EC..0x51734D]
+	// At the first sample beyond 4*20, the eye-under-water predicate drowns the
+	// player: the drown selection and Health -1, which the body's death edge
+	// raises in the entity update as the same no-killer transaction. This
+	// fixture's bodies are rowless (no edge), so the edge's record is routed
+	// in its place, as in the cases above.
+	// [orig: Server_UpdatePlayerBreathTimers @0x50D770, call gate @0x51D8C4,
+	//  Health -1 @0x50D819; Entity_UpdateInfantryPlayerBody @0x4B4CEA;
+	//  GameEvent_PlayerDeath @0x5172EC..0x51734D]
 	reset();
 	world.logic_tick = 32;
 	world.env.water_z = 1 << 16;
@@ -525,13 +538,21 @@ bool run_death_feed_classifier_matrix() {
 	{
 		const Drained host_out = drain_all(host);
 		drain_all(victim_wire);
-		const auto feed = host_out.tag(0x1E);
-		if (!expect(feed.size() == 1 && feed[0].size() == 8 && feed[0][0] == 26 &&
-		                    submerged->health <= 0 && submerged->death_anim_state == 175,
-		            "the 32-tick authority breath sample produces a drowned player death"))
+		if (!expect(host_out.tag(0x1E).empty() && submerged->health <= 0 &&
+		                    submerged->death_anim_state == 175,
+		            "the 32-tick authority breath sample drowns the player"))
 			return false;
 		if (!expect(!submerged->last_attacker.valid(),
 		            "the drowning clears the attacker slot"))
+			return false;
+		const auto feed = route(death(w::EntityHandle{}));
+		if (!expect(feed.size() == 1 && feed[0].size() == 8 && feed[0][0] == 26,
+		            "the drowned body's death reports event 26"))
+			return false;
+		// The killer-less death then names the victim its own last attacker.
+		// [orig: GameEvent_PlayerDeath `mov [esi+178h], esi` @0x5172E6]
+		if (!expect(submerged->last_attacker == victim,
+		            "the killer-less death names the victim its own last attacker"))
 			return false;
 	}
 
@@ -570,12 +591,13 @@ bool run_death_feed_classifier_matrix() {
 	roster[1].link.underwater_breath_samples = 16;
 	inmatch::Server_TickUpdate(ctx);
 	{
-		const Drained host_out = drain_all(host);
+		drain_all(host);
 		drain_all(victim_wire);
-		const auto feed = host_out.tag(0x1E);
-		if (!expect(feed.size() == 1 && feed[0].size() == 8 && feed[0][0] == 26 &&
-		                    submerged->health <= 0,
-		            "breathtime 4 drowns at sample 17"))
+		if (!expect(submerged->health <= 0, "breathtime 4 drowns at sample 17"))
+			return false;
+		const auto feed = route(death(w::EntityHandle{}));
+		if (!expect(feed.size() == 1 && feed[0].size() == 8 && feed[0][0] == 26,
+		            "the breathtime-4 drowning reports event 26"))
 			return false;
 	}
 	world.script.wac_values.breathtime = 20;
@@ -774,7 +796,7 @@ bool test_spawn_spread_then_recoil() {
 	world.round_sim.reset();
 	body->inf.recoil_pitch = 0;
 	ammo.flags = 0;
-	body->pos[2] = 1 << 16;
+	body->self->position.z.q16 = 1 << 16;
 	world.env.water_z = 2 << 16;
 	const int submerged = world.round_sim.spawn(world, params);
 	if (!expect(submerged >= 0 && body->inf.recoil_pitch == (3 << 20),
@@ -1093,6 +1115,74 @@ bool test_spread_limit_keys_on_the_raw_prone_bit() {
 	              "the prone and hip limits draw apart");
 }
 
+// The recoil (+0x380 >> 8) and weight (+0x384 >> 7) accumulators join the
+// weapon ERROR only when the shooter's own def is a person (type 3); a player
+// with a weapon row and any other def, or none, takes the ERROR alone. Here
+// the ERROR row is zero, so that shooter's round flies on the descriptor's
+// angles. [orig: RoundData_SpawnRound @0x4EC0D0 - the def-type test
+// @0x4EC3F1..0x4EC3F8 skips the adds @0x4EC3FA..0x4EC40E]
+bool test_spread_adds_ride_the_person_def() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	world.rules.mpattrib = 0x4204u; // the out-of-session rules word: spread on
+	w::PlayerSpawn seed;
+	seed.net_id = 47;
+	seed.equipped_adm_index = 1;
+	const w::EntityHandle shooter = w::spawn_player(world, seed);
+	w::AiEntity *body = world.ai.for_handle(shooter);
+	w::Entity *entity = world.registry.get(shooter);
+	if (!expect(shooter.valid() && body != nullptr && entity != nullptr &&
+	                    entity->has_item_def && entity->item_type == 3,
+	            "def-gate player spawned with its person def"))
+		return false;
+	world.tables.ammo.entries.resize(1);
+	w::AmmoTableEntry &ammo = world.tables.ammo.entries[0];
+	ammo.valid = true;
+	ammo.velocity = 620;
+	ammo.max_age_ticks = 100;
+	world.tables.weapons.entries.resize(2);
+	w::WeaponTableEntry &weapon = world.tables.weapons.entries[1];
+	weapon.valid = true; // every ERROR row and both limits zero
+	w::RoundSpawnParams params;
+	params.owner = shooter;
+	params.shooter_handle = shooter.packed;
+	params.ammo_index = 0;
+	params.adm_index = 1;
+	params.shot_seq = 13;
+	const int32_t kRecoil = 0x400000;  // >> 8 = 0x4000
+	const int32_t kWeight = 0x200000;  // >> 7 = 0x4000
+	auto fire = [&]() -> const w::LiveRound * {
+		world.round_sim.reset();
+		body->inf.recoil_pitch = kRecoil;
+		body->inf.weapon_weight_spread = kWeight;
+		const int slot = world.round_sim.spawn(world, params);
+		return slot >= 0 ? &world.round_sim.rounds[static_cast<size_t>(slot)] : nullptr;
+	};
+
+	const w::RandomSpreadOffset want =
+			w::weapon_calc_random_spread_offset(0x8000, 13, 0, false);
+	if (!expect(want.yaw_bam != 0 || want.pitch_bam != 0,
+	            "the summed accumulators draw a nonzero offset"))
+		return false;
+	const w::LiveRound *person = fire();
+	if (!expect(person != nullptr && person->yaw_bam == want.yaw_bam &&
+	                    person->pitch_bam == want.pitch_bam,
+	            "a person-def shooter's spread is ERROR + recoil >> 8 + weight >> 7"))
+		return false;
+
+	entity->item_type = 2;
+	const w::LiveRound *other = fire();
+	if (!expect(other != nullptr && other->yaw_bam == 0 && other->pitch_bam == 0,
+	            "a non-person def takes the ERROR alone: the descriptor's angles"))
+		return false;
+
+	entity->has_item_def = false;
+	entity->item_type = 3;
+	const w::LiveRound *defless = fire();
+	return expect(defless != nullptr && defless->yaw_bam == 0 && defless->pitch_bam == 0,
+	              "a def-less body takes the ERROR alone: the descriptor's angles");
+}
+
 struct DismembermentRig {
 	w::World world;
 	w::AiSystem &ai = world.ai;
@@ -1117,6 +1207,7 @@ struct DismembermentRig {
 		victim_seed.kind = w::EntityKind::Organic;
 		victim_seed.item_id = 1419;
 		victim_seed.has_item_def = true;
+		victim_seed.item_type_index = 1; // the trait sweep's row (D-NET-487)
 		victim_seed.item_type = 3;
 		victim_seed.item_attrib = victim_attrib;
 		// The items.def *_function class stamp the host's item-traits sweep
@@ -1126,7 +1217,7 @@ struct DismembermentRig {
 				static_cast<uint8_t>(EntityClass::Infantry);
 		victim_seed.position = {5.0f, 0.0f, 0.0f};
 		victim_seed.spawn_position = victim_seed.position;
-		victim_seed.yaw = 90; // engine heading 0; a +X round is rear quadrant 2
+		victim_seed.heading = w::placed_heading_bam(90); // engine heading 0; a +X round is rear quadrant 2
 		victim_seed.health = 10;
 		victim_seed.health_max = 20;
 		// A pre-hidden bit OUTSIDE every bone mask, so the "already hidden
@@ -1136,7 +1227,7 @@ struct DismembermentRig {
 
 		const int body_index = ai.attach(victim);
 		w::AiEntity *body = ai.at(body_index);
-		body->pos[0] = 5 * 65536;
+		body->self->position.x.q16 = 5 * 65536;
 		body->heading = 0;
 		body->health = 10;
 		body->inf.active = true;
@@ -1351,13 +1442,15 @@ bool test_dismemberment_damage_path() {
 
 		const w::AiEntity *victim_body = rig.ai.for_handle(rig.victim);
 		const w::AiEntity *piece_body = rig.ai.for_handle(piece->handle);
-		// bodyRoll (entity+0x94 -> AiEntity::roll), rear quadrant 2 negative;
-		// the clone memcpy-inherits the freshly written roll. The torso
-		// overlay channel (+0x2DC) is not the death roll's store.
+		// The savedLivePose roll word (+0x94, Entity::saved_live_roll), rear
+		// quadrant 2 negative; the clone memcpy-inherits the freshly written
+		// word. Neither the body's Roll (+0x18) nor the torso overlay channel
+		// (+0x2DC) is the hit roll's store.
 		// [orig: @0x407575; clone copy @0x4398dc]
 		if (!expect(victim_body != nullptr && piece_body != nullptr &&
-					victim_body->roll == -0x05B05B00 &&
-					piece_body->roll == -0x05B05B00 &&
+					victim->saved_live_roll == -0x05B05B00 &&
+					piece->saved_live_roll == -0x05B05B00 &&
+					victim_body->roll == 0 && piece_body->roll == 0 &&
 					victim_body->inf.torso_roll == 0 &&
 					piece_body->inf.torso_roll == 0,
 				"torso death takes the exact rear-quadrant body roll on both halves"))
@@ -1418,7 +1511,8 @@ bool test_dismemberment_damage_path() {
 }
 
 // Every projectile hit on a person runs the class callback's presentation
-// legs — the +0x2C0 selection, the torso-stack body roll, the +0x178 attacker
+// legs — the +0x2C0 selection, the torso-stack hit roll (the +0x94 word, never
+// the body's Roll +0x18 that its eye reads), the +0x178 attacker
 // stamp — lethal or not, damage 0 included; only the killing hit's lethal
 // tail (dismemberment, the death record) stays behind the health test.
 // [orig: OrganicClass_HandleEvent @0x407483 select, @0x40755e..0x407575
@@ -1426,13 +1520,13 @@ bool test_dismemberment_damage_path() {
 //  callback(entity, 1, 0) @0x4e820e after the authority-gated subtraction]
 bool test_person_hit_presentation_legs_run_on_every_hit() {
 	struct Case {
-		int16_t yaw;          // victim Entity yaw (mission deg); the round flies +X
+		int16_t yaw;          // the victim's placed mission yaw (deg); the round flies +X
 		int32_t expected_roll;
 		const char *label;
 	};
 	const Case cases[] = {
-		{90, -0x05B05B00, "rear quadrant 2 tips a living body backward"},
-		{-90, 0x05B05B00, "front quadrant 0 tips a living body forward"},
+		{90, -0x05B05B00, "rear quadrant 2 stores the backward hit roll, the Roll level"},
+		{-90, 0x05B05B00, "front quadrant 0 stores the forward hit roll, the Roll level"},
 		{180, 0, "side quadrant 1 leaves the roll"},
 		{0, 0, "side quadrant 3 leaves the roll"},
 	};
@@ -1442,15 +1536,16 @@ bool test_person_hit_presentation_legs_run_on_every_hit() {
 		w::AiEntity *body = rig.ai.for_handle(rig.victim);
 		victim->health = 100;
 		body->health = 100;
-		victim->yaw = c.yaw;
+		victim->heading = w::placed_heading_bam(c.yaw);
 		rig.fire();
 		if (!expect(victim->health == 90 && rig.world.round_sim.deaths.empty() &&
 		                    rig.piece() == nullptr,
 		            "a non-lethal torso hit takes damage without a death or a clone"))
 			return false;
-		if (!expect(body->roll == c.expected_roll, c.label)) return false;
+		if (!expect(victim->saved_live_roll == c.expected_roll && body->roll == 0, c.label))
+			return false;
 		const int quadrant = w::death_quadrant_from_round(
-				w::bam_heading_from_mission_yaw_deg(c.yaw), 1.0f, 0.0f);
+				w::placed_heading_bam(c.yaw), 1.0f, 0.0f);
 		if (!expect(victim->death_anim_state ==
 		                    w::compute_death_anim_state(3, quadrant, w::death_cause::kBullet),
 		            "a non-lethal hit stages the bone/quadrant bullet death in +0x2C0"))
@@ -1467,7 +1562,7 @@ bool test_person_hit_presentation_legs_run_on_every_hit() {
 		victim->health = 100;
 		body->health = 100;
 		rig.fire();
-		if (!expect(victim->health == 90 && body->roll == 0 &&
+		if (!expect(victim->health == 90 && body->roll == 0 && victim->saved_live_roll == 0 &&
 		                    victim->death_anim_state ==
 		                            w::compute_death_anim_state(6, 2, w::death_cause::kBullet) &&
 		                    victim->last_attacker == rig.shooter,
@@ -1490,7 +1585,7 @@ bool test_person_hit_presentation_legs_run_on_every_hit() {
 		                    rig.world.round_sim.deaths.empty(),
 		            "a damage-state-gated hit applies no damage"))
 			return false;
-		if (!expect(body->roll == -0x05B05B00 &&
+		if (!expect(victim->saved_live_roll == -0x05B05B00 && body->roll == 0 &&
 		                    victim->death_anim_state ==
 		                            w::compute_death_anim_state(3, 2, w::death_cause::kBullet) &&
 		                    victim->last_attacker == rig.shooter,
@@ -1498,7 +1593,12 @@ bool test_person_hit_presentation_legs_run_on_every_hit() {
 			return false;
 	}
 	{
-		// A body already flagged dead takes nothing (the callback's first return).
+		// An NPC (the org callback) already flagged dead: the callback has no dead return, so
+		// its select restages the bone / quadrant death; only the roll tests the dead bit (the
+		// plyr callback's first return is a player body's alone, npruntime_player_body_class).
+		// [orig: OrganicClass_HandleEvent @0x407310 - the event-1 arm @0x4073BF, the select's
+		//  store @0x407483 with no dead test ahead of it, the roll's `test byte [esi+24h], 2`
+		//  @0x40755A..0x40755E]
 		DismembermentRig rig(3);
 		w::Entity *victim = rig.world.registry.get(rig.victim);
 		w::AiEntity *body = rig.ai.for_handle(rig.victim);
@@ -1507,8 +1607,10 @@ bool test_person_hit_presentation_legs_run_on_every_hit() {
 		victim->flags |= w::kEntityFlagDead;
 		victim->engine_flags |= w::kEntityFlagDead;
 		rig.fire();
-		if (!expect(body->roll == 0 && victim->death_anim_state == 0,
-		            "a dead body neither rolls nor re-stages [orig: @0x40772f]"))
+		if (!expect(body->roll == 0 && victim->saved_live_roll == 0 &&
+		                    victim->death_anim_state ==
+		                            w::compute_death_anim_state(3, 2, w::death_cause::kBullet),
+		            "a dead NPC does not roll but restages its death [orig: @0x407483, @0x40755E]"))
 			return false;
 	}
 	return true;
@@ -1517,9 +1619,9 @@ bool test_person_hit_presentation_legs_run_on_every_hit() {
 } // namespace
 
 // The round ids come from the pool's one counter: a fresh word mints (local slot << 9)
-// | counter, any other word is the id as it stands; the allocation precedes every leg
-// that flies nothing here (no velocity, a kill-zone kztype, hasitem, an unheld row),
-// and a spawn that allocates nothing (instantkillzone) hands the ring pool slot 0's.
+// | counter, any other word is the id as it stands; the allocation precedes the round
+// whatever it carries (hasitem, no velocity) and an unheld row's empty return, and a
+// spawn that allocates nothing (instantkillzone) hands the ring pool slot 0's.
 // [orig: CEntityManager_AllocateSlot @0x4EAAD0 - the 0xFFFF test @0x4EAAE6, the counter
 //  @0x4EAAE8..0x4EAB04; RoundData_SpawnRound - the null return @0x4EC230, the
 //  allocation @0x4EC388; RoundData_AddRound ring+28 @0x4FDCF5; the slotless ammo-arm
@@ -1564,8 +1666,8 @@ bool test_round_ids_share_the_pool_counter() {
 	ok &= expect(fire(0, w::RoundSim::kFreshRoundWord) == ((2u << 9) | 5u),
 			"round ids: a held word leaves the counter where it was");
 	ok &= expect(fire(3, w::RoundSim::kFreshRoundWord) == rs.rounds[0].shot_seq &&
-					rs.rounds[0].shot_seq == ((2u << 9) | 1u),
-			"round ids: an instantkillzone spawn hands the ring pool slot 0's id");
+					rs.rounds[0].shot_seq == 0,
+			"round ids: an instantkillzone spawn hands the ring pool slot 0's id, which the pool's first round never took");
 	ok &= expect(fire(0, w::RoundSim::kFreshRoundWord) == ((2u << 9) | 6u),
 			"round ids: the kill zone allocated nothing");
 	// A fan mints one id per pellet and hands the ring its last pellet's
@@ -1590,6 +1692,105 @@ bool test_round_ids_share_the_pool_counter() {
 		ok &= expect(joiner.round_sim.spawned_round_word() == uint16_t(0x0200u | n),
 				"round ids: a slot-1 joiner's shots are 0x0201, 0x0202, 0x0203");
 	}
+	return ok;
+}
+
+// The pool allocates the slot after its cursor, which starts at 0 and no reset
+// moves: a process's first round takes slot 1, a released slot keeps its words
+// until the cursor comes back to it, and a full pool releases the next slot's
+// round unless its Priority bit holds it, the walk then moving on.
+// [orig: CEntityManager_AllocateSlot @0x4EAAD0 - @0x4EAADB..0x4EAB37, the
+//  Priority test @0x4EAB4E, the release @0x4EAB70, the memset @0x4EABC8;
+//  Projectile_ReleaseEffects @0x4E8280 (@0x4E8317 / @0x4E831E);
+//  Projectile_InitDragTable @0x4E78D0 (no cursor store)]
+bool test_round_pool_allocates_after_its_cursor() {
+	auto world = std::make_unique<w::World>();
+	world->tables.ammo.entries.resize(2);
+	w::AmmoTableEntry &bullet = world->tables.ammo.entries[0];
+	bullet.valid = true;
+	bullet.velocity = 620;
+	bullet.max_age_ticks = 100;
+	w::AmmoTableEntry &held = world->tables.ammo.entries[1];
+	held = bullet;
+	held.flags = opennova::def::DEF_AMMO_FLAG_PRIORITY;
+	w::RoundSim &rs = world->round_sim;
+	const auto fire = [&](int32_t ammo) {
+		w::RoundSpawnParams p;
+		p.ammo_index = ammo;
+		p.no_weapon = true;
+		p.shot_seq = w::RoundSim::kFreshRoundWord;
+		return rs.spawn(*world, p);
+	};
+	bool ok = true;
+	const int first = fire(1);
+	const int second = fire(0);
+	ok &= expect(first == 1 && second == 2 && rs.rounds[1].priority && !rs.rounds[2].priority,
+			"round pool: the first round takes slot 1, the next slot 2");
+	const uint16_t second_id = rs.rounds[2].shot_seq;
+	rs.retire_round(rs.rounds[2]);
+	ok &= expect(fire(0) == 3 && !rs.rounds[2].active && rs.rounds[2].shot_seq == second_id &&
+					rs.rounds[2].ammo_index == 0,
+			"round pool: a released slot waits for the cursor, its words kept");
+	for (int n = 0; n < 508; ++n) fire(0); // slots 4..511
+	ok &= expect(fire(0) == 0, "round pool: the cursor wraps to slot 0");
+	ok &= expect(fire(0) == 2 && rs.rounds[1].active && rs.rounds[1].priority,
+			"round pool: the Priority round holds slot 1; the walk takes the free slot 2");
+	ok &= expect(rs.active_count == w::RoundSim::kCapacity,
+			"round pool: every slot holds a live round");
+	const uint64_t evicted = rs.rounds[3].presentation_generation;
+	ok &= expect(fire(0) == 3 && rs.active_count == w::RoundSim::kCapacity &&
+					rs.rounds[3].presentation_generation != evicted && rs.rounds[1].active,
+			"round pool: a full pool releases the next slot's round; the Priority round stays");
+	rs.reset();
+	ok &= expect(fire(0) == 4, "round pool: a reset leaves the cursor where it stood");
+	return ok;
+}
+
+// Past the allocation every round flies: a zero velocity, a Knife or Medic kztype outside
+// instantkillzone and a hasitem ammo each take a live slot and present their fire, and the
+// zero velocity's round launches at speed 0.
+// [orig: RoundData_SpawnRound @0x4EC0D0 - the kztype test @0x4EC21B inside the 0x400 leg,
+//  the allocation @0x4EC388, the speed (v << 16) / 62 @0x4EC58E..0x4EC5AB, the velocity
+//  stores @0x4EC5DD..0x4EC60D]
+bool test_every_allocated_round_flies() {
+	auto world = std::make_unique<w::World>();
+	std::vector<w::AmmoTableEntry> &rows = world->tables.ammo.entries;
+	rows.resize(4);
+	w::AmmoTableEntry &still = rows[0];
+	still.valid = true;
+	still.velocity = 0;
+	still.max_age_ticks = 100;
+	w::AmmoTableEntry &knife = rows[1];
+	knife = still;
+	knife.velocity = 620;
+	knife.kztype = w::ammo_kz::kKnife;
+	w::AmmoTableEntry &medic = rows[2];
+	medic = knife;
+	medic.kztype = w::ammo_kz::kMedic;
+	w::AmmoTableEntry &item = rows[3];
+	item = knife;
+	item.kztype = 0;
+	item.flags = w::kAmmoFlagHasItem;
+	w::RoundSim &rs = world->round_sim;
+	bool ok = true;
+	for (int32_t ammo = 0; ammo < 4; ++ammo) {
+		w::RoundSpawnParams p;
+		p.ammo_index = ammo;
+		p.no_weapon = true;
+		p.shot_seq = w::RoundSim::kFreshRoundWord;
+		p.origin = {10.0f, 20.0f, 30.0f};
+		const size_t fired_before = rs.fired.size();
+		const int slot = rs.spawn(*world, p);
+		ok &= expect(slot == ammo + 1 && rs.rounds[size_t(slot)].active &&
+						rs.rounds[size_t(slot)].ammo_index == ammo &&
+						rs.fired.size() == fired_before + 1,
+				"every allocated round flies and presents its fire");
+	}
+	const w::LiveRound &still_round = rs.rounds[1];
+	ok &= expect(still_round.vel.x.q16 == 0 && still_round.vel.y.q16 == 0 &&
+					still_round.vel.z.q16 == 0,
+			"a zero velocity launches at speed 0");
+	ok &= expect(rs.active_count == 4, "four live rounds");
 	return ok;
 }
 
@@ -1632,6 +1833,8 @@ bool test_ammo_arm_word_follows_the_slot() {
 int main() {
 	if (!test_respawned_vehicle_takes_projectile_damage()) return 1;
 	if (!test_round_ids_share_the_pool_counter()) return 1;
+	if (!test_round_pool_allocates_after_its_cursor()) return 1;
+	if (!test_every_allocated_round_flies()) return 1;
 	if (!test_ammo_arm_word_follows_the_slot()) return 1;
 	if (!test_retail_random_spread_vectors()) return 1;
 	if (!test_spawn_spread_then_recoil()) return 1;
@@ -1639,12 +1842,14 @@ int main() {
 	if (!test_unauthored_recoil_kicks_a_flying_round_only()) return 1;
 	if (!test_stance_row_forced_standing_mask()) return 1;
 	if (!test_spread_limit_keys_on_the_raw_prone_bit()) return 1;
+	if (!test_spread_adds_ride_the_person_def()) return 1;
 	if (!test_spawn_aimed_row_and_zero_elevation()) return 1;
 	if (!test_dismemberment_damage_path()) return 1;
 	if (!test_person_hit_presentation_legs_run_on_every_hit()) return 1;
 	if (!run_death_feed_classifier_matrix()) return 1;
 	w::World world;
 	world.registry.configure_pool(0, 16);
+	world.registry.configure_pool(3, 4); // the deathmatch start markers (section 4)
 	w::AiSystem &ai = world.ai;
 	DeathAnimSource death_clips;
 	ai.is_authority = true;
@@ -1793,17 +1998,15 @@ int main() {
 	roster.push_back(make_seeded_conn(3, 1, &udp_b, ns::TransportMode::Client, hb, true));
 	roster.push_back(make_seeded_conn(4, 1, &udp_c, ns::TransportMode::Client, hc, true));
 	// The rifle slot B's loadout grant left: the 0x06 fires only through a held slot.
-	roster[1].weapon_slots[uint16_t(3 * 65 + 2)] = inmatch::WeaponSlotState{5, 30};
+	slots_of(world, roster[1])[uint16_t(3 * 65 + 2)] = w::PersonalWeaponSlot{5, 30};
 	// Distinct roster slot indexes (playerSlot+20): the chat sender byte and the
 	// C2S 0x22 slot pull below address players by this index.
 	for (size_t i = 0; i < roster.size(); ++i)
 		roster[i].reply.player_slot = static_cast<uint8_t>(i);
-	// These fixture players predate the measured 620-tick recent-spawn window.
-	// Individual sub-cases below stamp a fresh deploy when they exercise that arm.
-	for (inmatch::NapiNPConnection &conn : roster) {
-		conn.link.last_deploy_tick = world.logic_tick - 620u;
-		conn.link.last_deploy_tick_valid = true;
-	}
+	// These fixture players' seed arms predate the 620-frame recent-spawn window.
+	// Individual sub-cases below stamp a fresh arm when they exercise that arm.
+	for (inmatch::NapiNPConnection &conn : roster)
+		conn.seed_armed_clock = world.out.rounds.frame_clock - 620u;
 	// Only the shooter is a Medic. Retail's send mask 0x580 is the conjunction of
 	// slot state 6/7 (in-match) + same team byte + the charattr Medic bit — no
 	// entity health/dead test [orig:
@@ -1871,7 +2074,7 @@ int main() {
 	dispatch_fire(roster[1], roster, world, fire_body(roster[1].fire_tick_floor + 1u, hb.packed, 5, 0, 0, muzzle_z, 0, 0));
 	if (!expect(world.round_sim.active_count == 1, "one live round after the fire")) return 1;
 	{
-		const w::LiveRound &r = world.round_sim.rounds[0];
+		const w::LiveRound &r = world.round_sim.rounds[1];
 		if (!expect(r.active && r.ammo_index == 1, "round bound to the resolved ammo"))
 			return 1;
 		const float speed = std::sqrt(r.vel.x * r.vel.x + r.vel.y * r.vel.y + r.vel.z * r.vel.z);
@@ -2023,17 +2226,21 @@ int main() {
 		world.tables.ammo.entries[1].impact_effects[5].sound = saved_sound;
 	}
 
-	// The processed hit also writes the sticky SHOT relations (players carry
-	// group 0, so only the single rows land; rows outside the retail < 0x80
-	// guard are no-ops) [orig: Projectile_ProcessDamageOnTarget
-	// @ 0x4e80ae..0x4e80ef; guard e.g. EntityMatrix_SetProximityBit @ 0x452b60].
+	// The processed hit also writes the sticky SHOT relations, keyed on the DcbIds
+	// (+0x7C, entity_dcb_id): a player's is 10000 + its slot, outside the retail
+	// < 0x80 guard, so no single row of two players lands [orig:
+	// Projectile_ProcessDamageOnTarget @ 0x4e80ae..0x4e80ef (shooter +0x7C @0x4E80C0 /
+	// @0x4E80EA, target @0x4E80D0 / @0x4E80E1); guard e.g. SeesMatrix_SetGroupSingleBit
+	// @ 0x452b60].
 	{
 		const w::Entity *sh = world.registry.get(hb);
 		const w::Entity *vic = world.registry.get(hc);
-		const bool in_range = sh->net_id < 128 && vic->net_id < 128;
-		if (!expect(world.script.relations.single_single(w::TriggerRelations::kShot,
-		            sh->net_id, vic->net_id) == in_range,
-		            "shot S->S written on processed damage iff rows pass the <0x80 guard"))
+		const int32_t ss = w::entity_dcb_id(world, *sh);
+		const int32_t vs = w::entity_dcb_id(world, *vic);
+		if (!expect(ss >= 10000 && vs >= 10000 &&
+		                    !world.script.relations.single_single(
+		                            w::TriggerRelations::kShot, ss, vs),
+		            "shot S->S keys the players' DcbIds, which fail the <0x80 guard"))
 			return 1;
 	}
 
@@ -2258,15 +2465,25 @@ int main() {
 		const std::vector<ProtocolMessage> own = send_medic_request(roster[2]);
 		const Drained medic = drain_all(udp_b);
 		const Drained host_side = drain_all(loop);
+		const Drained requester = drain_all(udp_c);
 		if (!expect(medic.tag(0x54).size() == 1 && medic.tag(0x54)[0] == victim_window,
 		            "the medic receives the live revive window without bit 7"))
 			return 1;
 		if (!expect(medic.tag(0x14).size() == 1 && medic.tag(0x14)[0] == chat_line,
 		            "the medic receives STRSRV_MEDREQ as chat channel 2 from the victim's slot"))
 			return 1;
-		if (!expect(own.size() == 1 && own[0].tag == s2c::CHAT_BROADCAST &&
-		                    own[0].payload == chat_line,
-		            "the requester receives the chat line alone (mask 0x20), never a 0x54"))
+		// The requester's copy is queued at its call (mask 0x20 @0x51550B), ahead of
+		// the help call's 0x34 it hears too (@0x51552F), not returned as a reply.
+		std::size_t chat_at = requester.raw.size(), help_at = requester.raw.size();
+		for (std::size_t i = 0; i < requester.raw.size(); ++i) {
+			if (requester.raw[i][0] == s2c::CHAT_BROADCAST && chat_at == requester.raw.size())
+				chat_at = i;
+			if (requester.raw[i][0] == 0x34 && help_at == requester.raw.size()) help_at = i;
+		}
+		if (!expect(own.empty() && requester.tag(0x14).size() == 1 &&
+		                    requester.tag(0x14)[0] == chat_line && chat_at < help_at &&
+		                    help_at < requester.raw.size(),
+		            "the requester receives the chat line alone (mask 0x20), never a 0x54, ahead of the 0x34"))
 			return 1;
 		if (!expect(host_side.tag(0x54).empty() && host_side.tag(0x14).empty(),
 		            "a same-team non-medic receives neither the window nor the chat"))
@@ -2284,7 +2501,7 @@ int main() {
 			return 1;
 		if (!expect(roster[2].link.medic_request_active, "the once-only latch closes"))
 			return 1;
-		if (!expect(drain_all(udp_c).tag(0x54).empty(),
+		if (!expect(requester.tag(0x54).empty(),
 		            "the requester's transport carries no 0x54 for its own call"))
 			return 1;
 
@@ -2295,7 +2512,7 @@ int main() {
 		if (!expect(medic_again.tag(0x54).empty() &&
 		                    medic_again.tag(0x14).size() == 1 &&
 		                    medic_again.tag(0x34).size() == 1 &&
-		                    again.size() == 1 && again[0].tag == s2c::CHAT_BROADCAST,
+		                    again.empty() && drain_all(udp_c).tag(0x14).size() == 1,
 		            "a repeat call re-sends the chat and sound but the latch hides the 0x54"))
 			return 1;
 		// The latched state now folds bit 7 into every later 0x54 / 0x46.
@@ -2377,7 +2594,7 @@ int main() {
 	const std::vector<ProtocolMessage> client_release = request_client_respawn();
 	if (!expect(client_release.size() >= 2 &&
 	                    world.registry.get(hc)->health == 150 &&
-	                    roster[2].link.last_deploy_tick == world.logic_tick &&
+	                    roster[2].seed_armed_clock == world.out.rounds.frame_clock &&
 	                    roster[2].link.downed_revive_seconds == 0,
 	            "the first post-expiry pick runs the shared deployment release"))
 		return 1;
@@ -2392,8 +2609,7 @@ int main() {
 	// lane before the separate host-player kill scenario below; the focused
 	// projectile_combat test pins corpse interception itself.
 	world.registry.get(hc)->position.y = 20.0f;
-	roster[0].link.last_deploy_tick = world.logic_tick;
-	roster[0].link.last_deploy_tick_valid = true;
+	roster[0].seed_armed_clock = world.out.rounds.frame_clock;
 	drain_all(udp_b);
 	for (int shot = 0; shot < 3; ++shot) {
 		dispatch_fire(roster[1], roster, world,
@@ -2432,8 +2648,10 @@ int main() {
 		const std::vector<uint8_t> host_line = encode_chat_broadcast(
 				ChatBroadcast{2, roster[0].reply.player_slot,
 						world.registry.get(ha)->name + " needs a medic!"});
-		if (!expect(host_call.size() == 1 && host_call[0].tag == s2c::CHAT_BROADCAST &&
-		                    host_call[0].payload == host_line,
+		// Its own copy rides its loopback at the call (@0x51550B), not a reply.
+		const Drained host_own = drain_all(loop);
+		if (!expect(host_call.empty() && host_own.tag(0x14).size() == 1 &&
+		                    host_own.tag(0x14)[0] == host_line,
 		            "the loopback host's own call returns its chat line"))
 			return 1;
 		const Drained medic_side = drain_all(udp_b);
@@ -2461,7 +2679,7 @@ int main() {
 		w::AiEntity *host_ae = ai.for_handle(ha);
 		if (!expect(host_ae != nullptr && host_ae->inf.active,
 		            "the host player is motor-simulated")) return 1;
-		host_ae->pos[0] = w::to_fixed(12.0);
+		host_ae->self->position.x.q16 = w::to_fixed(12.0);
 		host_ae->inf.stance = w::InfantryState::Stance::kProne;
 		advance_second_boundaries(2);
 		if (!expect(roster[0].link.respawn_delay_seconds == 1 && host->health == 0,
@@ -2476,6 +2694,16 @@ int main() {
 		if (!expect(host->health == 0,
 		            "the host's own player waits for its pick: nothing deploys it on expiry"))
 			return 1;
+		// The deathmatch start markers at the spawn point: a placement that
+		// finds none leaves the body where it died [orig: Entity_FindBestSpawnPoint
+		// @0x50CD20], so the snap needs one of each family.
+		for (const int32_t marker_type : {6095, 6002}) {
+			w::Entity start;
+			start.kind = w::EntityKind::Marker;
+			start.item_id = marker_type;
+			start.position = {60.0f, 0.0f, 10.0f};
+			world.registry.spawn(3, start);
+		}
 		// Its Default Spawn pick rides its loopback as the ordinary C2S 0x0E
 		// [orig: Input_HandleActionBinding case 12 @0x49b17b, no authority test].
 		(void)inmatch::dispatch_session_replies(
@@ -2489,7 +2717,7 @@ int main() {
 		host_ae = ai.for_handle(ha);
 		if (!expect(host_ae != nullptr, "the respawned host player kept its motor entity"))
 			return 1;
-		if (!expect(host_ae->pos[0] == w::to_fixed(60.0),
+		if (!expect(host_ae->self->position.x.q16 == w::to_fixed(60.0),
 		            "respawn snaps the MOTOR store too, so the mirror cannot revert it"))
 			return 1;
 		if (!expect(host_ae->health == 150, "the motor health store respawns with it"))
@@ -2580,7 +2808,14 @@ int main() {
 		if (!expect(conn.link.spawn_target_hold_seconds == 2,
 		            "the Default Spawn deploy leaves the +364 hold")) return 1;
 		je = world.registry.get(jb);
-		if (!expect((je->flags & 1u) == 0, "deploy clears the hidden bit")) return 1;
+		// The deploy stores nothing to the hidden bit; the slot's next 0x0A
+		// clears it. [orig: Server_DeployPlayer @0x51787A; NetPacket_WritePlayerState
+		//  @0x4FF6D7]
+		if (!expect((je->flags & 1u) != 0, "the deploy leaves the hidden bit")) return 1;
+		std::vector<uint8_t> frame;
+		(void)inmatch::Server_SendEntityStateToPlayer(ctx, world, conn, frame);
+		if (!expect((je->flags & 1u) == 0, "the slot's next 0x0A clears the hidden bit"))
+			return 1;
 		if (!expect(je->health > 0, "deploy restores health")) return 1;
 
 		// An alive DEPLOYED player's 0x0E is a no-op (the dead-or-pending gate @0x519cc7):
@@ -2682,7 +2917,15 @@ int main() {
 						.presentation_generation;
 		lifetime_sim.rounds[size_t(first_lifetime_slot)].active = false;
 		--lifetime_sim.active_count;
-		const int second_lifetime_slot = lifetime_sim.spawn(world, rp);
+		// The allocator's cursor comes back to a slot 512 allocations later
+		// [orig: CEntityManager_AllocateSlot @0x4EAB1C].
+		int second_lifetime_slot = -1;
+		for (int n = 0; n < w::RoundSim::kCapacity; ++n) {
+			second_lifetime_slot = lifetime_sim.spawn(world, rp);
+			if (n + 1 == w::RoundSim::kCapacity) break;
+			lifetime_sim.rounds[size_t(second_lifetime_slot)].active = false;
+			--lifetime_sim.active_count;
+		}
 		if (!expect(second_lifetime_slot == first_lifetime_slot &&
 		                    lifetime_sim.rounds[size_t(second_lifetime_slot)]
 		                                    .presentation_generation !=

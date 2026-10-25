@@ -2,6 +2,7 @@
 
 #include <base/io/strutil.h>
 #include <formats/def/def.h>
+#include <runtime/world/destruction.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/local_player.h>
 #include <runtime/world/player_weapon.h>
@@ -198,18 +199,12 @@ void action_pickup(World &world, const PowerupDef &def, const PowerupAction &act
     }
     if (def.allammo) {
         if (inv != nullptr) {
-            weapon_inventory_seed_pools(table, *inv, picker.player_class);
-            // The redraw reads through the picker's seat [orig:
-            //  WeaponSlots_RecalculateAmmoFromCapacity @0x54228D, the call @0x4DC38F].
-            weapon_inventory_recalc_clips(table, *inv, entity_ammo_seat(world, picker));
-            // Retail's slot table IS the running weapon's magazine (slot+16);
-            // here the held weapon's FSM carries its own copy, which the next
-            // pump mirrors back into the inventory, so the redrawn clip has to
-            // reach it now [orig: the same slot word @0x542375 that
-            //  WeaponAction_* read; player_weapon.cpp mirrors the FSM clip].
-            if (inv->equipped_combo >= 0)
-                lp->weapon.slot.clip = weapon_inventory_loaded_rounds(
-                        table, *inv, inv->equipped_combo);
+            // The local player's: every loaded round cleared first, then the pools seeded
+            // and every clip redrawn through the picker's seat (LocalPlayer::
+            // refresh_weapon_overlay) [orig: WeaponSlots_ClearLoadedRounds @0x5423C0, the
+            //  call @0x4DC373; WeaponSlots_RecalculateAmmoFromCapacity @0x54228D, the call
+            //  @0x4DC38F].
+            lp->refresh_weapon_overlay();
         } else if (remote_pools) {
             grant.allammo = true;
             grant_needed = true;
@@ -413,6 +408,10 @@ void powerup_bind_entities(World &world, const def::DefItemsFile &items) {
         // [orig: @0x442D60..0x442E18]: no shipped Powerup item authors
         // particlefx, and the userpoint's one reader overwrites it unread
         // (D-PWR-3).
+        // Then the row's def+0x148 class init, a gnrc / gnrl / gnl2 row's being its ground
+        // cache (D-NET-NEW-L6-39) [orig: Powerup_InitAllEntities @0x4432A0 - the def+0x148
+        //  load @0x4432DE and call @0x4432E9 (pool 1), @0x44332A / @0x443335 (pool 2)].
+        run_ground_cache_class_init(world, *e);
     }
 }
 

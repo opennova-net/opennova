@@ -7,7 +7,7 @@
 // [orig: CMap_PopulateTeamList @0x547a50; CMap_PopulateTeamList_0 @0x548d80;
 //  CMap_EntityWidgetHandler @0x548380; CMap_UpdatePlayerListUI @0x547e00;
 //  CMap_HandlePlayerListCallback @0x5486b0;
-//  CCommandMap_SendWeaponActionToTeammates @0x548cb0; CMap_OnOpenPopulate
+//  CMap_SendFireteamAssign @0x548cb0; CMap_OnOpenPopulate
 //  @0x5492a0; CMap_BuildAndSendOrderCommand @0x5472d0;
 //  CCommandMap_HandleOrderAction @0x548990]
 // Witness record: docs/interface/hud-re.md "The windowed map views".

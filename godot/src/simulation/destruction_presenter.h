@@ -41,8 +41,8 @@ class Simulation;
 // destruction_present_pass.gd, ADR 0043 d9), an owned member of
 // EntityPresenter: presents the sim's item destruction on the viewing peer —
 // the husk model swap on destroyed items, the death-piece debris (trail
-// effects riding the sim's piece pool), resolved section-triangle debris and
-// glass userpoint effects, the death/fire/other wreck effect families with
+// effects riding the sim's piece pool), resolved section-triangle debris,
+// the death/fire/other wreck effect families with
 // the random fire crackle, and the destruction sounds. Drains
 // Simulation.drain_destruction_events() + get_death_pieces() once per
 // present, the fire pass precedent. Joiners run it too: their world raises
@@ -54,8 +54,10 @@ class Simulation;
 //
 // [orig map — docs/world/world-wac-ai-re.md §24:
 //  husk swap: Flags & 4 switches render + collision to the def husk model
-//    (Entity_RaycastCollisionModel @ 0x413086 pick; no husk -> the graphic keeps
-//    standing, the witnessed fallback);
+//    (render: Render_SectorEntity @ 0x5C4190 (the Flags & 4 test @ 0x5C41A0);
+//    collision: Entity_RaycastCollisionModel @ 0x413060 (the Flags & 4 pick
+//    @ 0x41307B..0x413088); no husk -> the graphic keeps standing, the
+//    witnessed fallback);
 //  pieces: Entity_SpawnDeathPieces @ 0x493400 -> the 256-slot pool ticked by
 //    DeathPiece_TickAll @ 0x57b900 (each piece renders ONE husk section with a
 //    per-type trail effect from g_DeathPieceTypes @ 0x8404f0); the draw is
@@ -71,7 +73,7 @@ class Simulation;
 //
 // Remaining stand-ins (tracked in the §24 record + D-ITEM ledger rows): effect
 // anchors ride the entity origin, not the husk Dead/Fire/Other user points.
-// Section debris and glass already arrive as resolved transient effect rows
+// Section debris already arrives as resolved transient effect rows
 // from the simulation.
 //
 // The husk render pick, the presentation identity key and the settle tilt
@@ -115,6 +117,10 @@ public:
 	// The weapon Inset pass's own piece draws (its collect's; the models'
 	// Inset state, drawn by twins where the views differ).
 	void apply_piece_draws_inset(const std::vector<opennova::world::DeathPieceDraw> &p_draws);
+	// A water mirror's own piece draws (view 0 the main scene's mirror, 1 the
+	// Inset's: the models' mirror state, drawn by twins where it differs).
+	void apply_piece_draws_mirror(int p_view,
+			const std::vector<opennova::world::DeathPieceDraw> &p_draws);
 	// A piece slot's model (null when the slot presents none).
 	ObjectModel *piece_model(int p_slot) const;
 	// The section draw's matrix in Godot space: the piece pose (the BAM
@@ -201,7 +207,6 @@ private:
 	int64_t stat_debris_triangles_ = 0;
 	int64_t stat_effects_ = 0;
 	int64_t stat_sounds_ = 0;
-	int64_t stat_glass_points_ = 0;
 	int64_t stat_crackles_ = 0;
 };
 

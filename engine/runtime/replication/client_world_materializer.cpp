@@ -50,17 +50,11 @@ world::Entity seed_from(const ClientEntityState &row) {
 	seed.item_id = row.type_id;
 	seed.net_id = row.net_id;
 	seed.display_name = row.display_name; // entity+0xF4
-	seed.position = {
-			static_cast<float>(row.x) / 65536.0f,
-			static_cast<float>(row.y) / 65536.0f,
-			static_cast<float>(row.z) / 65536.0f};
+	seed.position.set_q16({row.x, row.y, row.z});
 	seed.spawn_position = seed.position;
-	seed.yaw = static_cast<int16_t>(std::lround(
-			world::mission_yaw_deg_from_bam_heading(row.heading_bam)));
-	seed.pitch = static_cast<int16_t>(std::lround(
-			static_cast<double>(row.pitch_bam) * world::kDegreesPerBam));
-	seed.roll = static_cast<int16_t>(std::lround(
-			static_cast<double>(row.roll_bam) * world::kDegreesPerBam));
+	seed.heading = row.heading_bam;
+	seed.pitch_bam = row.pitch_bam;
+	seed.roll_bam = row.roll_bam;
 	seed.team = row.team_known ? row.team : 0;
 	// The streamed dword is the host's one Flags word, which the port splits;
 	// each bit lands in the half whose clears own it, as the host homes them:
@@ -75,8 +69,10 @@ world::Entity seed_from(const ClientEntityState &row) {
 			0x80u | 0x20u | 0x10u | 0x08u;
 	seed.flags = row.spawn_entity_flags & ~world::kEntityFlagMatrixBuilt;
 	seed.engine_flags = row.spawn_entity_flags & ~kMoverRuntimeBits;
+	seed.ammo_word_noage = row.spawn_ammo_word_noage;
 	seed.section_mask = row.spawn_section_mask;
 	seed.ammo_count = static_cast<uint8_t>(row.spawn_ammo_count & 0xFFu);
+	seed.location_index = row.spawn_location_index;
 	seed.ref_num = row.spawn_ref_num;
 	seed.sub_type = row.spawn_sub_type;
 	seed.owner_connection_id = row.spawn_owner_connection_id;
@@ -87,8 +83,7 @@ world::Entity seed_from(const ClientEntityState &row) {
 	}
 	seed.zone_number = static_cast<uint8_t>(row.zone_number_rank & 0x1Fu);
 	seed.zone_radius = row.zone_radius;
-	seed.bound_radius = static_cast<float>(row.spawn_bound_radius_q16) /
-			65536.0f;
+	seed.bound_radius.q16 = row.spawn_bound_radius_q16; // the wire's word (D-NET-507)
 	seed.spawn_origin = world::kSpawnOriginNone;
 	return seed;
 }
@@ -96,16 +91,18 @@ world::Entity seed_from(const ClientEntityState &row) {
 bool update_live_row_state(
 		const ClientEntityState &row, world::Entity &entity) {
 	const world::Entity seed = seed_from(row);
-	const bool changed = entity.position.x != seed.position.x ||
-			entity.position.y != seed.position.y ||
-			entity.position.z != seed.position.z || entity.yaw != seed.yaw ||
-			entity.pitch != seed.pitch || entity.roll != seed.roll ||
+	// The change test compares the words (D-NET-507): a float view hides a move
+	// of a few words far from the origin.
+	const bool changed = entity.position.x.q16 != seed.position.x.q16 ||
+			entity.position.y.q16 != seed.position.y.q16 ||
+			entity.position.z.q16 != seed.position.z.q16 || entity.heading != seed.heading ||
+			entity.pitch_bam != seed.pitch_bam || entity.roll_bam != seed.roll_bam ||
 			entity.team != seed.team;
 	if (!changed) return false;
 	entity.position = seed.position;
-	entity.yaw = seed.yaw;
-	entity.pitch = seed.pitch;
-	entity.roll = seed.roll;
+	entity.heading = seed.heading;
+	entity.pitch_bam = seed.pitch_bam;
+	entity.roll_bam = seed.roll_bam;
 	entity.team = seed.team;
 	return true;
 }
@@ -139,8 +136,7 @@ bool drop_carrier_pose_for(const ClientState &state, const world::World &world,
 	} else {
 		return false;
 	}
-	out.position = {static_cast<float>(x) / 65536.0f, static_cast<float>(y) / 65536.0f,
-			static_cast<float>(z) / 65536.0f};
+	out.position.set_q16({x, y, z});
 	return true;
 }
 
@@ -260,7 +256,7 @@ world::Entity *ClientWorldMaterializer::replica_world_entity(world::World &world
 	// with their spawn origins, and each carrier's addeweap children, which
 	// carry none but ride their carrier's attachment row. A row of neither is
 	// the joiner's own (a player, a piece) and no decoded row's.
-	// [orig: Entity_SpawnWeaponOverlays @0x40F300 - the child's pool-1 slot
+	// [orig: Entity_SpawnAddEWeapChildren @0x40F300 - the child's pool-1 slot
 	//  Pool_AllocEntry @0x40F393, its spawn @0x40F3FF; the joiner keys a
 	//  decoded row on that slot alone, NapiNPClientMsg_EntityDeath @0x42EBC6]
 	world::Entity *entity = world.registry.get(handle);
@@ -321,6 +317,27 @@ world::Entity *ClientWorldMaterializer::resolve_carrier(
 	return nullptr;
 }
 
+// A record's ground word as a client handler stores it at +0x28: 0xFFFF, a pool past 4 or a
+// slot past its pool's capacity stores the null; any other word stores the slot's address,
+// which names the slot whatever lives there then or later (an empty slot, a row a later
+// record builds), never one occupant's lifetime. A pool-1..3 slot is the native slot of the
+// same handle; a pool-0 slot names the client's own player only through its own wire handle
+// (a remote person lives in the replica only); a pool-4 slot names no wire row.
+// [orig: NapiNPClientMsg_0x00D @0x432C40 - the walk @0x433282..0x4332CF, the store @0x4332D7;
+//  NapiNPClientMsg_FullEntitySpawn @0x433780 - the walk @0x433C89..0x433CD3, the store
+//  @0x433CDD; NapiNPClientMsg_0x02F @0x430E10 - the walk @0x430F63..0x430FB3, the store
+//  @0x430FBD]
+world::EntityHandle ClientWorldMaterializer::ground_slot(uint16_t packed) const {
+	const world::EntityHandle handle{packed};
+	if (!handle.valid() || handle.pool() >= world::kEntityPoolCount ||
+			static_cast<std::size_t>(handle.slot()) >=
+					world::retail_pool_capacity(handle.pool()))
+		return {};
+	if (handle.pool() >= 1 && handle.pool() <= 3) return handle;
+	if (packed == local_wire_handle_) return local_player_;
+	return {};
+}
+
 void ClientWorldMaterializer::apply_objective_state(const ClientState &state,
 		world::World &world, uint16_t packed, const ClientEntityState &row,
 		world::Entity &child) {
@@ -342,8 +359,7 @@ void ClientWorldMaterializer::apply_objective_state(const ClientState &state,
 			child.position.y != position.y || child.position.z != position.z;
 	child.flags = (child.flags & 0xFFFFFF00u) | (row.spawn_entity_flags & 0xFFu);
 	child.position = position;
-	const world::Entity *ground = resolve(row.target_handle);
-	child.ground_target = ground != nullptr ? ground->handle : world::EntityHandle{};
+	child.ground_target = ground_slot(row.target_handle);
 
 	const uint16_t previous = tracked.objective_parent;
 	const uint16_t next = row.parent_handle;
@@ -473,6 +489,17 @@ ClientWorldSyncResult ClientWorldMaterializer::sync(
 
 		if (world.registry.spawn_at(handle, seed_from(*row)) != handle) continue;
 		world::Entity *spawned = world.registry.get(handle);
+		// The record stores +0x28 once, as it builds the row, a word naming none storing the
+		// slot memset's null; a 0x10 record stores none at all. After it the slot's +0x28 is
+		// the row's own (the class inits, the movers' and the falling-death probes), which no
+		// later fold of any row rewrites (D-NET-NEW-L6-40, D-NET-NEW-L6-42).
+		// [orig: NapiNPClientMsg_0x00D @0x432C40 - the store @0x4332D7;
+		//  NapiNPClientMsg_FullEntitySpawn @0x433780 - the store @0x433CDD;
+		//  NapiNPClientMsg_0x010 @0x433400 - the slot memset @0x43348C, no +0x28 store;
+		//  Entity_SpawnOrUpdateFromSlotPacket @0x546770 (the 0x59 device) - the parent's slot
+		//  @0x5467C7..0x5467EF, stored through the round's copy @0x546857 / @0x546871 or
+		//  @0x546A41]
+		if (spawned != nullptr) spawned->ground_target = ground_slot(row->target_handle);
 		MaterializedRow &claimed = materialized_rows_[packed];
 		// A same-type re-spawn of a stamped slot (a new wire generation at
 		// the same handle) is the same placed object to the shell: carry the
@@ -496,8 +523,9 @@ ClientWorldSyncResult ClientWorldMaterializer::sync(
 	// The 0x0D parent and target are TWO relationship pointers: parent is the
 	// occupant/driver back-ref for an occupied mount (+368), target is the
 	// structural carrier the child rides (groundEntity/+40) — an occupied boat
-	// gun's target is the DRIVING hull. Resolve both only after every row in
-	// this fold has had a chance to occupy its exact slot.
+	// gun's target is the DRIVING hull. The target's +0x28 landed with the row
+	// (ground_slot, above); the attachment carrier resolves here, only after
+	// every row in this fold has had a chance to occupy its exact slot.
 	// [orig: NapiNPClientMsg_0x00D @0x432C40 — parent → occupantEntity store
 	//  @0x433289, target → groundEntity resolve @0x4332bc, store @0x4332d7; both
 	//  resolved via the pool<<12|slot walk with 0xFFFF / pool<5 / capacity
@@ -512,7 +540,6 @@ ClientWorldSyncResult ClientWorldMaterializer::sync(
 		}
 		child->emplacement_parent = world::EntityHandle{};
 		child->emplacement_parent_spawn_id = 0;
-		child->ground_target = world::EntityHandle{};
 		// Only materialized pool-1..3 lifetimes resolve. A pool-0 handle is a wire
 		// identity with no native row here: the joiner's own body L need not sit
 		// at its wire slot, and a remote slot equal to L's handle must not name
@@ -523,8 +550,6 @@ ClientWorldSyncResult ClientWorldMaterializer::sync(
 				return nullptr;
 			return owned(world, handle); // generation-safe: a foreign reuse stays clear
 		};
-		if (const world::Entity *target = resolve(row->target_handle))
-			child->ground_target = target->handle;
 		// The structural carrier a child rides is its TARGET; a parent names it
 		// only when no target is streamed and it is not the pool-0 occupant
 		// back-ref. Classes with their own compact motion never take one (the

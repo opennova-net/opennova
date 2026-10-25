@@ -1,5 +1,5 @@
 // Mission-owned facial slots and GRM texture animation.
-// [orig: CScarDecal_Init @0x57F900; FaceAnim_AllocEntitySlot; CScarDecal_Update @0x57FA50]
+// [orig: FaceAnim_InitSlot @0x57F900; FaceAnim_AllocEntitySlot; FaceAnim_UpdateSlot @0x57FA50]
 #pragma once
 
 #include <formats/grm/grm.h>
@@ -17,6 +17,7 @@ namespace opennova::def { struct DefItemsFile; }
 namespace opennova::world {
 
 class World;
+struct LocalPlayerViewFrame;
 
 inline constexpr const char *kFacialExpressions[9] = {
 	"NORMAL", "HAPPY", "SAD", "SMIRK", "ANGRY", "SURPRISE", "DISGUST", "FEAR", "AGGRESSIVE"
@@ -42,7 +43,7 @@ struct FacialSlot {
 // The gaze pair is gated on the display counter, so it draws from the
 // thread-local render/effects CRT stream (base/crt/crt_rng.h), never from the
 // session-seeded World::crt_rand (D-NET-115).
-// [orig: CScarDecal_Update @0x57FA50, caller @0x4C21FB]
+// [orig: FaceAnim_UpdateSlot @0x57FA50, caller @0x4C21FB]
 void step_facial_animation(FacialSlot &slot, bool dead, uint32_t display_frame,
 		uint32_t wall_time_ms);
 
@@ -79,16 +80,43 @@ public:
 	void override_expression(const Entity &entity, int32_t expression, int32_t transitions = 80);
 	void automatic_expression(const Entity &entity, int32_t expression);
 
-	// Stable nearest-first sort; only three visible slots have live targets.
-	// [orig: Scar_SortSlotsByDistance @0x57FE60; FaceAnim_RenderAllSlots; Render_ScarSlot @0x580170]
+	// One pass: the counter step, then the stable nearest-first sort from the pass's eye;
+	// only three visible slots have live targets.
+	// [orig: FaceAnim_RenderAllSlots @0x580360 (++dword_26C7768 @0x580367; its reader
+	//  FaceAnim_UpdateSlot @0x57FA50, the read @0x57FA60); Scar_SortSlotsByDistance
+	//  @0x57FE60; Render_ScarSlot @0x580170]
 	void compile_draws(World &world, int32_t camera_x, int32_t camera_y,
 			bool first_person, std::vector<FacialDraw> &out);
+
+	// The scene frame's passes, once per drawn scene frame whether or not the frame ran an
+	// update (the embedder's scene row, so a frame the status page stands in for steps no
+	// counter): the main scene's, from the eye of the frame's camera compose, then the
+	// weapon Inset scene's own when that pass runs, from its own compose's eye. An Inset
+	// frame steps the counter twice, which moves the update's 64-frame look cadence. A
+	// frame with no local player draws no scene, and a frame that skips its world (a cine
+	// plays, or the command map is the open menu screen) runs neither pass.
+	// [orig: Game_MainLoop @0x52B630 (the render callback every iteration, the call
+	//  @0x52BAC6, after the update drain); Render_ProcessMainSceneFrame @0x5CA137 (no local
+	//  player: no scene frame), @0x5CA171..0x5CA190 (the world-skip word: the skips
+	//  @0x5CA4EA..0x5CA4EC and @0x5CA620..0x5CA640),
+	//  @0x5CA50C -> FaceAnim_RenderAllSlots, the Inset gate @0x5CA937..0x5CA945 and call
+	//  @0x5CA949 -> Render_WeaponInsetScene @0x5C9740 -> FaceAnim_RenderAllSlots @0x5C99BC;
+	//  each pass's eye the viewport its own Viewport_BuildProjectionMatrix built
+	//  (@0x5CA4F8 / @0x5C999B), read by Scar_SortSlotsByDistance @0x57FE72..0x57FE78]
+	void render_scene_passes(World &world, const LocalPlayerViewFrame &view,
+			std::vector<FacialDraw> &out);
+
+	// One row's model init: a person row with no live slot takes the next append-only slot
+	// (the tick's initialize runs it over every row; a 0x18 that rebuilds the joiner's own body
+	// runs it at the record's model init).
+	// [orig: Entity_InitFromModel @0x40DC30 - FaceAnim_AllocEntitySlot @0x57FDF0 (the call
+	//  @0x40E22E, the +0x1B8 store @0x40E236)]
+	void initialize_entity(World &world, Entity &entity);
 
 	const std::vector<FacialSlot> &slots() const { return slots_; }
 	uint32_t display_frame() const { return display_frame_; }
 
 private:
-	void initialize_entity(World &world, Entity &entity);
 	const ResourceIndex *index_ = nullptr;
 	std::unordered_map<int32_t, std::string> model_names_;
 	std::vector<std::pair<std::string, std::shared_ptr<const grm::File>>> models_;

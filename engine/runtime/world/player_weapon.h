@@ -36,6 +36,8 @@ enum : int32_t {
     kNoClipsNoDraw = 0x00000010,
     kBurst = 0x00000020,
     kAuto = 0x00000100,
+    kOnlyFireScoped = 0x00004000,
+    kOnlyFireLocked = 0x10000000,
     kPowerThrow = static_cast<int32_t>(0x80000000u),
 };
 } // namespace weapon_flag
@@ -64,6 +66,11 @@ struct WeaponPresentationEvent {
     std::string switch_to_weapon;
     bool clear_weapon = false;
     bool preserve_slot_state = false;
+    // The switch's own commit (or EquippedSlot store) already mounted switch_to_weapon's def
+    // on the sim (local_weapon_install_by_name), so the presenter's leg is device work alone
+    // (the viewmodel); false leaves the mount to the presenter (a world with no weapon.def
+    // parse, the joiner spawn's and the restore's replays).
+    bool installed = false;
     bool switch_denied = false;
 };
 
@@ -114,26 +121,52 @@ inline constexpr size_t kWeaponTraceCapacity = 1024;
 // The local player's whole equipped-weapon state — the moved binding members,
 // one aggregate the embedder holds beside the world.
 struct LocalPlayerWeapon {
+    // The EquippedSlot's def: a switch's commit and an EquippedSlot store mount it at once
+    // (local_weapon_install_by_name), so the walk's FSM, the PowerThrow branch, the press and
+    // release legs read the committed slot's def from the commit on, every tick after it in
+    // the frame included. [orig: WeaponAction_ProcessFrame @0x540E60 - weaponSlot->Def
+    //  @0x540E71; Input_HandleActionBinding_0 @0x4E0420 - the EquippedSlot @0x4E08E2, its
+    //  def @0x4E08F2, the PowerThrow sign bit @0x4E08FD]
     WeaponFsmDef def{};
     std::string def_name;
     WeaponSlotState slot{};
 
     LocalUseGunSwitch usegun_switch = LocalUseGunSwitch::kNone;
     bool usegun_slot_active = false;
+    // The borrowed slot is held on foot: a refused UseGun attach pointed the
+    // EquippedSlot at the gun's slot with no seat (local_weapon_direct_borrow).
+    bool usegun_on_foot = false;
     EntityHandle usegun_mount{};
     EntityHandle usegun_pending_mount{};
     uint8_t usegun_weapon_adm = 0xFF;
     uint8_t usegun_pending_weapon_adm = 0xFF;
     uint8_t usegun_saved_adm = 0xFF;
     int32_t usegun_switch_action = -1;
+    // The pending borrow is a seat-2/3 detach's mount of a gun's slot entity+0x308
+    // saved: its completion leaves the slot held on foot (D-WPN-48).
+    bool usegun_pending_on_foot = false;
     uint8_t first_person_model_adm = 0xFF;
 
     bool active = false;
     bool fire_held = false;
     bool fire_pressed = false;    // latched until the pump consumes the edge
     bool reload_pressed = false;
+    // The PowerThrow windup's start, g_FireChargeStartTick: the input phase's tick
+    // (local_weapon_input_tick) its left-down or key press stored, 0 for none. Only the input
+    // legs, the walk (local_weapon_walk_clears_windup) and the round's init write it: the
+    // weapon walk and a mount leave it, so it rides a mount no walk runs.
     uint32_t power_throw_start_tick = 0;
     uint8_t pending_throw_charge = 0;
+    // The fire row's release leg took the windup at its record (local_weapon_release_fire):
+    // the pump requests fire on the slot with the charge byte, whatever its def (a PowerThrow
+    // def's throw, or the slot a windup rode onto); consumed with the press latch.
+    bool power_throw_released = false;
+    // The latched press passed case 0x95's press-leg gates at its record
+    // (local_weapon_press_fire): the pump requests it with no WAC gate of its own; and
+    // whether an accepted request becomes the dry click (OnlyFireLocked with no lock).
+    // Both are consumed with the press latch.
+    bool fire_press_dispatched = false;
+    bool fire_press_dry = false;
 
     uint32_t play_serial = 0;
     // The FP animadm channel (WeaponDef+0x174), in retail's two halves. The
@@ -284,7 +317,7 @@ struct LocalWeaponReloadWire {
 // The C2S 0x25 body a local reload request ships: the addressed entity (the
 // UseGun seat's parentEntity, else the actor named by `actor_wire_handle`)
 // and the reload parameter. [orig: WeaponAction_Reload @0x5430DB..0x543103;
-//  NetPacket_SendEntityDeathNotification @0x432930]
+//  NetPacket_SendReloadRequest @0x432930]
 LocalWeaponReloadWire local_reload_request_wire(const World &world,
 		uint16_t actor_wire_handle, uint16_t param);
 
@@ -307,6 +340,12 @@ struct LocalWeaponPumpIO {
     std::function<uint16_t()> carrier_exclusion;
     LocalWeaponFiredWire fired;
     LocalWeaponReloadWire reload;
+    // The slot queued a deferred fire record this tick (its refire_queued: the recoil
+    // window's re-queue or a mid-FIRE request's): the caller queues it on the local
+    // player's deferred input queue (LocalPlayer::queue_deferred_event).
+    // [orig: WeaponAction_Recoil @0x542E9D; WeaponSlot_RequestFire @0x53EFFD ->
+    //  Input_QueueDeferredEvent @0x4993E0]
+    bool fire_deferred = false;
 };
 
 // The active slot: the borrowed UseGun parent slot when engaged, else the
@@ -315,6 +354,33 @@ struct LocalWeaponPumpIO {
 WeaponSlotState *active_local_weapon_slot(World &world, LocalPlayerWeapon &w);
 const WeaponSlotState *active_local_weapon_slot(const World &world,
                                                const LocalPlayerWeapon &w);
+
+// The def of the EquippedSlot (active_local_weapon_slot): under a borrow the borrowed
+// slot's def, its table row's descriptors (null for a row the table lacks); else the
+// personal slot's installed def (LocalPlayerWeapon::def), which the commit mounts. The
+// commit stores the EquippedSlot, and its readers take that slot's def.
+// [orig: WeaponAction_SwitchFrom @0x5433B0 - the store
+// @0x543475; WeaponAction_SwitchRank @0x543500 - the store @0x543539;
+// HUD_DrawPowerThrowChargeBar @0x59986C, WeaponSlot_HasAmmoAvailable @0x541B39]
+const WeaponFsmDef *local_equipped_slot_def(const World &world, const LocalPlayerWeapon &w);
+
+// The adm byte a local fire names (the round's adm and the C2S 0x06 off7): the
+// firing slot's def by name, the shooter's AdmDef byte (+0x2B0) for a slot with no
+// def. [orig: WeaponAction_Fire @0x542B10 - @0x542C1C..0x542C3F]
+uint8_t local_weapon_fire_adm(World &world, const LocalPlayerWeapon &w, const Entity &shooter);
+
+// The def whose first-person model the view draws: the EquippedSlot's. Under a borrow
+// that is the borrowed slot's def, which a route store or a borrowing attach never
+// stamps into the AdmDef byte; on the personal slot it is the def the byte names.
+// [orig: Player_RenderFirstPersonViewModel @0x4DED60 - the EquippedSlot @0x4DEDAA, its
+//  Def @0x4DEDBC and the Def's fpModel test]
+uint8_t local_first_person_model_def_adm(const LocalPlayerWeapon &w, const Entity &player);
+
+// A designated-G route leg's EquippedSlot store for the local player (each record seating L
+// on `gun`): the borrow holds the gun's routed slot at once, cutting off a switch-out the
+// record's attach staged; the AdmDef byte is left as it was.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - @0x4C139D / @0x4C13F8]
+void local_usegun_store_equipped_slot(World &world, LocalPlayerWeapon &w, Entity &gun);
 
 // g_LocalPlayerEntity->Pitch = 0, shared by the AbsorbPitch mount stamp and
 // the scope-up leg. [orig: @0x4DFAB7; @0x4DF314]
@@ -374,25 +440,67 @@ WeaponSwitchGates local_weapon_switch_gates(const World &world,
 
 // UseGun borrow staging/commit + the emplaced instant-switch predicate.
 bool local_usegun_switch_is_instant(const World &world,
-                                    const LocalPlayerWeapon &w);
+                                    const LocalPlayerWeapon &w,
+                                    const WeaponInventory *inventory);
 void queue_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w,
                                       bool same_category);
 void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w);
 void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w);
+// A refused UseGun attach points the local player's EquippedSlot at the gun's
+// slot directly, with no switch and no +0x2B0 stamp: the body stays on foot
+// holding it, and the weapon walk pumps it, until a mount replaces it (a weapon
+// key's commit, the next borrowing attach, a seat-2/3 detach's mount). A gun
+// with no resolvable slot or def leaves the EquippedSlot alone. (D-NET-420)
+// [orig: Entity_AttachToUseGunSlot @0x546C42..0x546C4E, reached for the local
+//  player whenever the attach did not succeed (@0x546C17..0x546C25)]
+void local_weapon_direct_borrow(World &world, LocalPlayerWeapon &w, Entity &gun);
 // The local player's seat-2 / seat-3 detach mounts entity+0x308 (a borrowed
-// seat's saved personal slot, else the last selected one) or, without a def of
-// category < 11 there, the current slot, and the mount, past its early-outs (a
-// target def, an equipped slot and def), clears the NVG scope restore latch.
-// Only the latch is modelled for every such detach; the rest of that mount for
-// an unborrowed control seat, and +0x308 itself, are D-WPN-48.
+// seat's saved slot: the personal one, or a gun's the EquippedSlot was at the
+// attach; else the last selected one) or, without a def of category < 11 there,
+// the current slot, and the mount, past its early-outs (a target def, an equipped
+// slot and def), clears the NVG scope restore latch. A saved gun's slot is staged
+// here as a borrow whose completion holds it on foot; a borrowed seat's target
+// slot is stored as the pending slot (g_PendingWeaponSlot) and its def as the one
+// the UseGun transition's switch-out restores; an unborrowed seat's
+// personal mount runs here (D-WPN-48). A borrowed seat whose target holds no def
+// (the direct leg's, which saved no slot) mounts nothing and keeps the borrow,
+// held on foot (D-WPN-52).
 // [orig: Entity_DetachFromVehicle @0x43562a..0x43565f, the fallback
 //  @0x43564e..0x435658; Player_MountWeaponSlot @0x4dfa4d..0x4dfa74, @0x4dfb75]
 void local_weapon_detach_mount(World &world, LocalPlayerWeapon &w,
-                               const WeaponInventory *inventory);
+                               WeaponInventory *inventory, PlayerViewState &view);
 
-// The pending -> equipped commit and the shared switch-outcome routing.
-void commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
-                                  WeaponInventory *inventory);
+// How commit_pending_weapon_switch stores the pending slot. A switch action's completion
+// (or a store no action runs) writes none of the mount's view words: its mount request
+// wrote them. A select writes none either (Player_SelectWeaponSlot stores the slot, stamps
+// it and clears the NVG latch alone): a loadout apply's select is followed by the mount
+// request on the slot it stored, which writes them as a same-slot mount does; the spawn's
+// (Player_InitPlayer's) by its walk, whose camera reset rebinds an optic and writes the fov
+// (local_loadout_rebuild).
+// [orig: Player_SelectWeaponSlot @0x4DD680 (the stores @0x4DD704 / @0x4DD727, the latch
+//  @0x4DD730); NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (the select @0x4296E3, the
+//  mount @0x4296E8..0x4296F4); WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x566285,
+//  @0x56628A..0x566297); Player_InitPlayer @0x4E15F0 (the select @0x4E1995, the walk
+//  @0x4E19A1)]
+enum class PendingCommit : uint8_t {
+	kSwitch,
+	kSelect,
+};
+
+// The pending -> equipped commit and the shared switch-outcome routing. The commit
+// mounts the committed slot's def at once (local_weapon_install_by_name): a switch
+// action's completion draws it (SWITCHTO), a SWITCHRANK's and a select's do not.
+// True when it stored the pending slot (one with a weapon). The routing's mount
+// stores the word and queues the EquippedSlot's switch-out at once: a same-category
+// mount SWITCHRANK unless the weapon view's lower / raise interp runs, a
+// cross-category one SWITCHFROM (refused over a running SWITCHTO / SWITCHFROM), whose
+// queue lowers the weapon view (player_view_start_weapon_lower).
+// [orig: WeaponAction_SwitchFrom @0x5433B0 - the store @0x543475,
+//  WeaponSlot_TryQueueSwitchTo @0x5434A3; WeaponAction_SwitchRank @0x543500 - the store
+//  @0x543539, no SWITCHTO; Player_SelectWeaponSlot @0x4DD680 - the store @0x4DD704;
+//  Player_MountWeaponSlot @0x4DFA40 - @0x4DFB7B..0x4DFBC5]
+bool commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
+                                  WeaponInventory *inventory, PendingCommit kind);
 void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
                                   WeaponInventory *inventory,
                                   const WeaponSwitchOutcome &out, PlayerViewState &view);
@@ -448,6 +556,29 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
                           bool preserve_slot_state,
                           bool allow_same_weapon_rebake,
                           WeaponInventory *inventory, PlayerViewState &view);
+// The mount by name over the weapon.def parse the table was built from
+// (MissionTables::weapon_defs): the row a name's last block holds, mounted with the
+// descriptors the weapon table baked as it loaded; a same-weapon re-bake (the dev tools'
+// live ACTION edits) bakes the retained row as edited instead. False with no parse or no
+// row of that name. [orig: Player_MountWeaponSlot @0x4DFA40; Anim_InitActions @0x541FA0 at
+// the def's END]
+bool local_weapon_install_by_name(World &world, LocalPlayerWeapon &w, const std::string &name,
+                                  bool preserve_slot_state, bool allow_same_weapon_rebake,
+                                  WeaponInventory *inventory, PlayerViewState &view);
+// The spawn's mount by name (the embedder's sync of the EquippedSlot the spawn settled, a
+// fresh slot): local_weapon_install_by_name's install with none of the mount's view words,
+// as retail's spawn writes none: Player_InitPlayer's select stores the slot with no view
+// word, and its walk mounts nothing on a body born hidden, so no AbsorbPitch level, no
+// ForceScoped scope byte or range seed, no fov target, no bias clear or bind. False with no
+// parse or no row of that name.
+// [orig: Player_InitPlayer @0x4E15F0 - Player_SelectWeaponSlot (the call @0x4E1995), the walk
+//  Player_SwitchToWeaponByHandle (the call @0x4E19A1); Player_SwitchToWeaponByHandle
+//  @0x4E0170 - the Flags test @0x4E0265 / @0x4E0269; Player_MountWeaponSlot @0x4DFA40 - the
+//  view words @0x4DFA7A..0x4DFABE, @0x4DFB23..0x4DFB66, the bias clear @0x4DFBCF..0x4DFBE8,
+//  the bind @0x4DFC35..0x4DFC9A]
+bool local_weapon_install_spawn_by_name(World &world, LocalPlayerWeapon &w,
+                                        const std::string &name, WeaponInventory *inventory,
+                                        PlayerViewState &view);
 // A zoom step on the personal slot lands in its inventory entry, the storage
 // the next mount reads back: retail's EquippedSlot IS that slot-table entry,
 // so the step's store is the entry's own zoom [orig: Player_AdjustWeaponElevation
@@ -476,6 +607,94 @@ bool local_held_weapon_visible(const World &world, const Entity &entity,
 void local_weapon_set_input(LocalPlayerWeapon &w, const PlayerViewState &view,
                             bool fire_held, bool fire_pressed,
                             bool reload_pressed);
+// The game's tick as the update's input phase reads it (its message pump, its input frame's
+// records): retail steps g_CurrentTick at the update's head, ahead of both, and the weapon
+// walk reads the same value; ours steps World::logic_tick inside the world tick, behind the
+// input frame, so the input phase's tick is the one the step leaves (a paused update steps
+// neither, and ours lags the pausing update's step by one, which the +1 still matches).
+// [orig: Game_ProcessMainFrame @0x5263F0 - ++g_CurrentTick @0x5265B4, Game_PumpWindowMessages
+//  @0x526608, Input_ProcessFrame @0x52661D, WeaponAction_ProcessAllEntities @0x526786]
+uint32_t local_weapon_input_tick(const World &world);
+// The left mouse button's down (the message's event 2; a double click's 1024 runs none),
+// at the update's message pump ahead of its input frame, whatever row the button binds:
+// with the binocular view down, a local entity, an equipped weapon and a seat that is no
+// Controller or Driver seat, a PowerThrow def whose slot can fire with ammo restarts the
+// windup at the input phase's tick; any other clears it (a def without the PowerThrow flag
+// too). The fire row's press leg starts a windup only from the keyboard and only when none
+// runs (local_weapon_power_throw_press).
+// [orig: Input_ProcessBindings @0x4DDA50 - the event-2 leg @0x4DDA88..0x4DDAFE (the
+//  binocular test @0x4DDA90, g_LocalPlayerEntity @0x4DDA99, the EquippedSlot @0x4DDAA3,
+//  parentSlot 2 / 5 @0x4DDAB3, the def @0x4DDABA, its sign bit @0x4DDABF,
+//  WeaponSlot_CanFireInCurrentState and WeaponSlot_HasAmmoAvailable, the stores
+//  @0x4DDAF6 / @0x4DDAFE); Input_DispatchMouseEvent @0x761470]
+void local_weapon_left_button_down(World &world, LocalPlayerWeapon &w,
+                                   const PlayerViewState &view);
+// The fire row's press leg for a PowerThrow def at its record (inmatch::Role::dispatch_record,
+// the binding held by a key: Input_IsBindingActive's device 1): with an equipped weapon and
+// no windup running, the windup starts at the input phase's tick on a slot that can fire with
+// ammo, else stays 0. It requests no fire. True = a windup started.
+// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x95's press leg: the EquippedSlot
+//  @0x4E08DC..0x4E08EC, the PowerThrow sign bit @0x4E08FD, the device test @0x4E090B, the
+//  start test @0x4E0915, the store @0x4E0947, the clear @0x4E0954]
+bool local_weapon_power_throw_press(World &world, LocalPlayerWeapon &w);
+// The walk's windup clear: Player_SwitchToWeaponByHandle clears a running PowerThrow windup at
+// its head, past its seat gate (a Controller, Gunner or Driver seat walks nothing), whatever
+// the walk then finds. The weapon walk, the dead body and a UseGun switch clear none
+// (local_weapon_pump_tick).
+// [orig: Player_SwitchToWeaponByHandle @0x4E0170 - entity+0x168 3 / 2 / 5 @0x4E017D..0x4E0192,
+//  g_FireChargeStartTick = 0 @0x4E019B]
+void local_weapon_walk_clears_windup(const World &world, LocalPlayerWeapon &w);
+// The fire row's release leg at its record (inmatch::Role::dispatch_record, the binding up,
+// past the head, the binocular view and the cease fire): a running windup ends, its held
+// ticks (the input phase's tick less its start) become the charge byte
+// (power_throw_charge_from_hold), and the pump requests the throw with it
+// (LocalPlayerWeapon::power_throw_released). Any def: the leg reads the windup alone. A
+// release with no windup does nothing. True = a throw requested. A request the slot takes
+// (weapon_fsm_fire_request_taken) sets the fire face, as the press leg's does
+// (local_weapon_press_fire; @0x4E0877..0x4E08D2).
+// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x95's release leg @0x4E07E9..0x4E0879
+//  (the start test @0x4E07EF, held @0x4E07F7..0x4E07FC, the clear @0x4E0801, the charge
+//  @0x4E07FE..0x4E085A, WeaponSlot_RequestFire(EquippedSlot, 0x96, charge) @0x4E086F)]
+bool local_weapon_release_fire(World &world, LocalPlayerWeapon &w);
+// The reload row's arm at its record's dispatch (inmatch::Role::dispatch_record), on the
+// slot equipped then: with the binocular view down and an equipped weapon (under the pump's
+// own input block but its seat leg: the case has no seat test, and a Driver's or an unarmed
+// Controller's EquippedSlot is its own weapon's), a magazine short of its capacity and a pool
+// that is not 0 (read through the player's seat as the pump reads them) request the reload, which takes the slot's next
+// action only from IDLE, EMPTYIDLE or OVERHEATED (weapon_fsm_request_reload). So a reload
+// ahead of a switch or a fire in the same drain queues RELOAD before they queue theirs.
+// True = requested. A sourceless frame's reload latch stays the pump's (reload_pressed).
+// [orig: Input_HandleActionBinding_0 case 0xD3 @0x4E1278..0x4E12F3 (the binocular test
+//  @0x4E1278, the EquippedSlot @0x4E128B, its def @0x4E1296, the pool @0x4E12A7, the shared
+//  loaded rounds @0x4E12C6, the capacity test @0x4E12D7, the pool test @0x4E12E0,
+//  WeaponSlot_RequestReload @0x4E12E9); WeaponSlot_RequestReload @0x53F110]
+bool local_weapon_request_reload(World &world, LocalPlayerWeapon &w,
+                                 const PlayerViewState &view, WeaponInventory *inventory);
+// The fire row's press leg at its record's dispatch (inmatch::Role::dispatch_record) for a
+// def without the PowerThrow flag, in the case's order, with an equipped weapon:
+// - the mission script's latch for the EquippedSlot def's type (WAC weaponfired) is set,
+//   and a type the script blocks (BlockFire) refuses the press;
+// - an OnlyFireScoped def refuses unless the optical view is visible in first person;
+// - an OnlyFireLocked def with no lock (the player's aim runtime's +8 bit 0) turns an
+//   accepted request into the dry click (WeaponFsmInputs::fire_dry);
+// - a Driver seat, or a Controller seat on a carrier that is no EWeap, refuses (the pump's
+//   input block, LocalWeaponInputBlock).
+// Passing them latches the press, which the pump requests (WeaponSlot_RequestFire, which
+// takes the slot by its current action whatever the order against a reload) with no WAC
+// gate of its own; a sourceless frame's press keeps the pump's gate. True = latched.
+// So the script's same-update pass sees the press, and a BlockFire it sets there refuses
+// no press dispatched ahead of it. A request the slot takes (weapon_fsm_fire_request_taken,
+// read here at the record as retail's call returns it) sets the local player's fire face
+// (its facial slot's expression 4 for 15 transitions, its gaze ahead for 15 steps).
+// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x95's press leg: the EquippedSlot
+//  @0x4E08DC..0x4E08EC, the WAC latch dword_C6EA44[type] @0x4E0961..0x4E0968 and the
+//  BlockFire test dword_C6EA6C @0x4E096F..0x4E0976, OnlyFireScoped (0x4000) @0x4E097C..0x4E098B
+//  -> Player_IsOpticalViewVisible @0x4E098D, g_CameraMode @0x4E099A, OnlyFireLocked
+//  (0x10000000) @0x4E09AC..0x4E09BB, the aim runtime's lock bit @0x4E09BD..0x4E09C9, the
+//  seats @0x4E09CB..0x4E09FF (Driver @0x4E09DE, Controller's EWeap @0x4E09F5),
+//  Player_RequestPrimaryFire @0x4E0A06, nextAction = 5 @0x4E0A1E; Player_RequestPrimaryFire
+//  @0x5414C0 -> WeaponSlot_RequestFire(slot, 149, 0) @0x5414CC]
+bool local_weapon_press_fire(World &world, LocalPlayerWeapon &w, const PlayerViewState &view);
 
 // Why the pump would drop this tick's weapon input, if it would. The pump's
 // own gate (dead, a pending UseGun switch, a Controller/Driver seat) evaluated
@@ -488,7 +707,8 @@ enum class LocalWeaponInputBlock : uint8_t {
     kInactive,      // no weapon installed
     kDead,
     kUseGunSwitch,  // a UseGun attach/swap/detach is staged
-    kSeat,          // the occupied seat blocks firing
+    kSeat,          // the occupied seat blocks firing (not a reload, nor a PowerThrow
+                    // windup or its throw: those legs test no seat)
 };
 LocalWeaponInputBlock local_weapon_input_block(const World &world,
                                                const LocalPlayerWeapon &w);

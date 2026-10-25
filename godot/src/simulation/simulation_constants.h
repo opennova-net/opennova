@@ -264,6 +264,7 @@ struct SimulationConstants {
 		USE_ITEM_ARM_ARMORY = static_cast<int>(opennova::world::UseItemArm::kArmory),
 		USE_ITEM_ARM_ARMORY_REFUSED = static_cast<int>(opennova::world::UseItemArm::kArmoryRefused),
 		USE_ITEM_ARM_VEHICLE_LOADOUT = static_cast<int>(opennova::world::UseItemArm::kVehicleLoadout),
+		USE_ITEM_ARM_DROPPED = static_cast<int>(opennova::world::UseItemArm::kDropped),
 	};
 
 	// Collision-face flag bits (world/collision.h kFaceFlag* carries the

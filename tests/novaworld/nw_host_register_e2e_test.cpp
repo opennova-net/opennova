@@ -28,6 +28,8 @@
 #include <net/npwire/session_keys.h>
 
 #include "net_sockets.h"
+#include "../npruntime/enumerated_join.h"
+#include "../npruntime/joiner_mission_start.h" // the harness's end of a released mission start
 
 #include <chrono>
 #include <cstdint>
@@ -50,6 +52,25 @@ void expect(bool cond, const char *what) {
 		std::fprintf(stderr, "FAIL: %s\n", what);
 		++g_failures;
 	}
+}
+
+// The 0x81 `data` taken one millisecond ahead of a session's clock 0 (the clock wraps as
+// GetTickCount does), then a pump at 0: the connection enters its connect state and sends nothing,
+// and its 0x42 goes at the first pump past the 0x81's tick, so the rest of a handshake runs at 0.
+// `out` gets the pump's datagrams (the 0x42); false when the 0x81 was refused or its own frame
+// sent anything.
+// [orig: CNapiNPConnection_InitFromSession @0x626320 - @0x626490..0x626499;
+//  CNapiNPConnection_PumpStateMachine @0x6292E0 case 3 @0x629580..0x62958F]
+bool take_hello_at_zero(opennova::ClientSession &session, const uint8_t *data, size_t size,
+                        std::vector<std::vector<uint8_t>> &out) {
+	const size_t before = out.size();
+	session.set_clock_ms(0xFFFFFFFFu);
+	const bool taken = session.handle_datagram(data, size, out);
+	if (out.size() != before)
+		return false;
+	session.set_clock_ms(0);
+	session.pump(out);
+	return taken;
 }
 
 opennova::net::Endpoint loopback_ep(uint16_t port) {
@@ -82,7 +103,8 @@ int main() {
 	opennova::novaworld_server::ServerConfig config;
 	config.nw_udp_port = 0;
 	// The JO loss probe below drives the listener's in-match JO host, which is
-	// opt-in (ONNET_EMBEDDED_JO_HOST, off by default).
+	// opt-in (ONNET_EMBEDDED_JO_HOST, off by default) and listens on a UDP port of
+	// its own, apart from the lobby's (D-NET-717).
 	config.embedded_jo_host = true;
 	if (!listener.start(config)) {
 		std::fprintf(stderr, "FAIL: listener.start\n");
@@ -115,6 +137,10 @@ int main() {
 	auto client = opennova::net::udp_bind(0, &client_port);
 	expect(client.is_valid(), "client UDP socket bound");
 	const auto server_ep = loopback_ep(test_nw_port);
+	const uint16_t jo_host_port = listener.embedded_jo_host_port();
+	expect(jo_host_port != 0 && jo_host_port != test_nw_port,
+	       "the JO host listens on a UDP port of its own");
+	const auto jo_ep = loopback_ep(jo_host_port);
 
 	// ClientAuth is not a stateless entry point for the lobby route. A peer
 	// must first own the exact Handshaking row created by its ClientHello;
@@ -129,11 +155,10 @@ int main() {
 
 		opennova::ClientSession::Config direct_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		direct_cfg.client_index = 0x44495245u;
-		direct_cfg.client_key = 0x43544155u;
 		direct_cfg.na = "direct:auth";
 		const opennova::ClientAuth direct_auth =
 				opennova::make_client_auth(
-						direct_cfg, direct_cfg.co, 0x12345678u,
+						direct_cfg, direct_cfg.co, 0x12345678u, 0x43544155u,
 						opennova::make_dev_scrk());
 		const std::vector<uint8_t> direct_datagram =
 				opennova::nw_encode_outbound(
@@ -191,7 +216,7 @@ int main() {
 
 		opennova::ClientSession::Config old_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		old_cfg.client_index = 0x4F4C4441u;
-		old_cfg.client_key = 0x4F4C444Bu;
+		old_cfg.connection_keys = [] { return opennova::ConnectionKeys{ 0x4F4C444Bu, opennova::make_dev_scrk() }; };
 		old_cfg.na = "reordered:old";
 		opennova::ClientSession old_session(old_cfg);
 		send_reordered(old_session.start());
@@ -201,8 +226,7 @@ int main() {
 				receive_reordered(inbound, 1000);
 		expect(got_old_hello, "old lobby Hello receives ServerHello");
 		if (got_old_hello) {
-			expect(old_session.handle_datagram(
-					       inbound.data(), inbound.size(), old_out) &&
+			expect(take_hello_at_zero(old_session, inbound.data(), inbound.size(), old_out) &&
 			               old_out.size() == 1,
 			       "old ServerHello produces delayed ClientAuth");
 		}
@@ -211,7 +235,7 @@ int main() {
 
 		opennova::ClientSession::Config fresh_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		fresh_cfg.client_index = 0x4E455741u;
-		fresh_cfg.client_key = 0x4E45574Bu;
+		fresh_cfg.connection_keys = [] { return opennova::ConnectionKeys{ 0x4E45574Bu, opennova::make_dev_scrk() }; };
 		fresh_cfg.na = "reordered:fresh";
 		opennova::ClientSession fresh_session(fresh_cfg);
 		send_reordered(fresh_session.start());
@@ -222,8 +246,7 @@ int main() {
 		expect(got_fresh_hello,
 		       "replacement lobby Hello receives ServerHello");
 		if (got_fresh_hello) {
-			expect(fresh_session.handle_datagram(
-					       inbound.data(), inbound.size(), fresh_out) &&
+			expect(take_hello_at_zero(fresh_session, inbound.data(), inbound.size(), fresh_out) &&
 			               fresh_out.size() == 1,
 			       "replacement ServerHello produces matching ClientAuth");
 		}
@@ -299,7 +322,6 @@ int main() {
 
 		opennova::ClientSession::Config keyless_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		keyless_cfg.client_index = 0x4B4C4553u;
-		keyless_cfg.client_key = 0x4B4C454Bu;
 		keyless_cfg.na = "keyless:lobby";
 		send_keyless(opennova::nw_encode_outbound(
 				opennova::SESSION_OPCODE_CLIENT_HELLO,
@@ -312,7 +334,7 @@ int main() {
 				               keyless_body.data(), keyless_body.size(), keyless_hello),
 		       "SCRK-less lobby Hello receives ServerHello");
 		const opennova::ClientAuth keyless_auth = opennova::make_client_auth(
-				keyless_cfg, keyless_cfg.co, keyless_hello.hk, /*client_scrk=*/"");
+				keyless_cfg, keyless_cfg.co, keyless_hello.hk, 0x4B4C454Bu, /*client_scrk=*/"");
 		send_keyless(opennova::nw_encode_outbound(
 				opennova::SESSION_OPCODE_CLIENT_AUTH,
 				opennova::client_auth_to_bytes(keyless_auth)));
@@ -381,6 +403,7 @@ int main() {
 	uint8_t rx[4096];
 	bool verified = false;
 	for (int i = 0; i < 40 && !verified; ++i) {
+		session.set_clock_ms(static_cast<uint32_t>(i + 1)); // one millisecond a turn: a 0x81's 0x42 goes at the first pump past it
 		opennova::net::Endpoint from;
 		const int n = opennova::net::udp_recv_from(client, rx, sizeof rx, from, 200);
 		std::vector<std::vector<uint8_t>> out;
@@ -468,6 +491,24 @@ int main() {
 			return seen;
 		};
 		service_session(200); // the update's ACK
+
+		// A full JO in-match Hello from the lobby session's own address to the lobby's port is
+		// the lobby's ordinary Hello, never the game host's, which listens on its own port
+		// (D-NET-717): the session's next statement is still the lobby's to serve.
+		{
+			opennova::inmatch::JoinerConnection stray("E2EStrayJoHello");
+			stray.set_title(&kJo);
+			send(stray.start());
+			service_session(200); // the lobby's 0x81 to it, which the session does not take
+			session.queue_statement(opennova::make_client_host_update(
+			    /*Host*/      {{0, "Players", "3"}}, true,
+			    /*PlayerList*/{{0, "PlayerName", "Host"}, {1, "PlayerName", "Joiner"},
+			                   {2, "PlayerName", "Third"}}, true));
+			flush_session();
+			expect(wait_players(3) == 3,
+			       "a JO Hello to the lobby's port leaves the session's traffic on the lobby");
+			service_session(200); // that update's ACK
+		}
 		const auto gap_datagram = built(opennova::make_client_host_update(
 		    /*Host*/      {{0, "Players", "4"}}, true,
 		    /*PlayerList*/{}, true));
@@ -477,8 +518,9 @@ int main() {
 		send(future_datagram);
 		std::this_thread::sleep_for(100ms);
 		{
+			// The count stays the stray-Hello leg's last served update's (Players 3).
 			const auto snap = listener.snapshot_hosted();
-			expect(!snap.empty() && snap[0].lobby.player_count == 2,
+			expect(!snap.empty() && snap[0].lobby.player_count == 3,
 			       "a lobby packet past a gap is held, not dispatched");
 		}
 		send(gap_datagram);
@@ -528,16 +570,22 @@ int main() {
 		};
 		opennova::ClientSession::Config rcfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		rcfg.client_index = 0x5245434Eu;
-		rcfg.client_key = 0x52454331u;
 		rcfg.na = "reconnect:host";
 		rcfg.cookie_vars = []() {
 			return std::vector<std::pair<std::string, std::string>>{{"NWUID", ""}};
 		};
-		rcfg.next_client_key = []() { return 0x52454332u; };
+		// The 0x81s' draws (D-NET-704): the connect's CK, then the re-join's.
+		rcfg.connection_keys = [draws = 0]() mutable {
+			return opennova::ConnectionKeys{ draws++ == 0 ? 0x52454331u : 0x52454332u,
+				opennova::make_dev_scrk() };
+		};
 		opennova::ClientSession recon(rcfg);
-		// Receive, dispatch and answer until `done` holds (the session clock stays put).
+		// Receive, dispatch and answer until `done` holds, the session clock one millisecond on
+		// each round (a 0x81's 0x42 goes at the first pump past it).
+		uint32_t recon_clock = 0;
 		auto drive = [&](auto done, int rounds) {
 			for (int i = 0; i < rounds && !done(); ++i) {
+				recon.set_clock_ms(++recon_clock);
 				uint8_t buf[4096];
 				opennova::net::Endpoint from;
 				const int n = recon_client.is_valid()
@@ -577,8 +625,11 @@ int main() {
 		for (int i = 0; i < 50 && !hosted_row(rid_before); ++i) std::this_thread::sleep_for(20ms);
 		expect(hosting && rid_before != 0 && !gsid.empty(), "reconnect: the host row is listed");
 
-		// The session's own reap: its 0x46 burst drops the listener's connection.
-		recon.set_clock_ms(240001);
+		// The session's own reap: its 0x46 burst drops the listener's connection. The drive's
+		// rounds moved the clock and its last receive with it, so the silence is counted from
+		// there.
+		recon_clock += 240001;
+		recon.set_clock_ms(recon_clock);
 		std::vector<std::vector<uint8_t>> burst;
 		recon.pump(burst);
 		expect(recon.reconnecting() && burst.size() == 4, "reconnect: the reap sends the 0x46 burst");
@@ -593,7 +644,9 @@ int main() {
 
 		// The re-probe: past the 1000 ms first delay the window opens and the 0x41 goes out.
 		bool probed = false;
-		for (uint32_t t = 240002; t < 250000 && !probed; ++t) {
+		const uint32_t reaped_at = recon_clock;
+		for (uint32_t t = reaped_at + 1; t < reaped_at + 10000 && !probed; ++t) {
+			recon_clock = t;
 			recon.set_clock_ms(t);
 			std::vector<std::vector<uint8_t>> pumped;
 			recon.pump(pumped);
@@ -650,7 +703,7 @@ int main() {
 
 		opennova::ClientSession::Config collision_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		collision_cfg.client_index = 1;
-		collision_cfg.client_key = 0x76543210u;
+		collision_cfg.connection_keys = [] { return opennova::ConnectionKeys{ 0x76543210u, opennova::make_dev_scrk() }; };
 		collision_cfg.na = "collision:second-peer";
 		opennova::ClientSession collision(collision_cfg);
 		const std::vector<uint8_t> repeated_hello = collision.start();
@@ -661,8 +714,7 @@ int main() {
 		const bool got_hello = receive_collision(inbound);
 		expect(got_hello, "CI-collision peer receives ServerHello");
 		if (got_hello) {
-			expect(collision.handle_datagram(
-					       inbound.data(), inbound.size(), out) &&
+			expect(take_hello_at_zero(collision, inbound.data(), inbound.size(), out) &&
 			               out.size() == 1,
 			       "CI-collision ServerHello produces ClientAuth");
 		}
@@ -741,7 +793,7 @@ int main() {
 
 		opennova::ClientSession::Config retry_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		retry_cfg.client_index = 0x13572468u;
-		retry_cfg.client_key = 0x24681357u;
+		retry_cfg.connection_keys = [] { return opennova::ConnectionKeys{ 0x24681357u, opennova::make_dev_scrk() }; };
 		retry_cfg.na = "retry:stable-auth";
 		opennova::ClientSession retry_session(retry_cfg);
 
@@ -751,8 +803,7 @@ int main() {
 		const bool got_retry_hello = receive_retry(inbound);
 		expect(got_retry_hello, "ClientAuth retry receives ServerHello");
 		if (got_retry_hello) {
-			expect(retry_session.handle_datagram(
-					       inbound.data(), inbound.size(), out) &&
+			expect(take_hello_at_zero(retry_session, inbound.data(), inbound.size(), out) &&
 			               out.size() == 1,
 			       "ClientAuth retry ServerHello produces one ClientAuth");
 		}
@@ -784,11 +835,23 @@ int main() {
 
 		// Re-send the byte-identical ClientAuth after sequence one was admitted,
 		// while retaining the first verify reply for delayed delivery.
+		// D-NET-716: the replay is a send alone; it stamps no receive clock, so the
+		// connection's last-seen stays the admitted packet's. [orig:
+		//  NapiNPProtocol_HandleClientJoin @0x62B750 - CNapiNPConnection_SendSessionInit
+		//  (the call @0x62BEE9); CNapiNPConnection_SendSessionInit @0x620EF0 - the
+		//  last-send stamp @0x621314]
+		const opennova::PeerAddr retry_peer{0x0100007Fu, retry_client_port};
+		const auto seen_before = manager.registry().find_by_addr(retry_peer);
+		std::this_thread::sleep_for(30ms);
 		send_retry(client_auth);
 		std::vector<uint8_t> replayed_server_auth;
 		const bool got_replayed_server_auth = receive_retry(replayed_server_auth);
 		expect(got_replayed_server_auth,
 		       "identical ClientAuth retry receives cached ServerAuth");
+		const auto seen_after = manager.registry().find_by_addr(retry_peer);
+		expect(seen_before && seen_after &&
+		               seen_after->last_seen_ms == seen_before->last_seen_ms,
+		       "the cached ServerAuth replay leaves the receive clock alone (D-NET-716)");
 		expect(got_replayed_server_auth &&
 		               replayed_server_auth == first_server_auth,
 		       "identical ClientAuth retry replays byte-identical session material");
@@ -820,7 +883,7 @@ int main() {
 		// retransmission. Its fresh sequence-one exchange must succeed.
 		opennova::ClientSession::Config replacement_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		replacement_cfg.client_index = 0x89ABCDEFu;
-		replacement_cfg.client_key = 0x10293847u;
+		replacement_cfg.connection_keys = [] { return opennova::ConnectionKeys{ 0x10293847u, opennova::make_dev_scrk() }; };
 		replacement_cfg.na = "retry:new-auth";
 		opennova::ClientSession replacement(replacement_cfg);
 		send_retry(replacement.start());
@@ -829,10 +892,9 @@ int main() {
 		const bool got_replacement_hello = receive_retry(inbound);
 		expect(got_replacement_hello, "replacement auth receives ServerHello");
 		if (got_replacement_hello) {
-			expect(replacement.handle_datagram(
-					       inbound.data(), inbound.size(), out) &&
+			expect(take_hello_at_zero(replacement, inbound.data(), inbound.size(), out) &&
 			               out.size() == 1,
-			       "replacement ServerHello produces distinct ClientAuth");
+			       "replacement ServerHello produces distinct ClientAuth (at the next pump)");
 		}
 		if (out.size() == 1) send_retry(out.front());
 		std::vector<uint8_t> replacement_server_auth;
@@ -892,7 +954,7 @@ int main() {
 		// [orig: NapiNPProtocol_HandleClientJoin @0x62beba..0x62bf06 (FindConnection,
 		//  the same-CI/CK SendSessionInit retransmit, else Destroy + Create)]
 		opennova::ClientSession::Config restarted_cfg = replacement_cfg;
-		restarted_cfg.client_key = 0x5EB007EDu;
+		restarted_cfg.connection_keys = [] { return opennova::ConnectionKeys{ 0x5EB007EDu, opennova::make_dev_scrk() }; };
 		opennova::ClientSession restarted(restarted_cfg);
 		send_retry(restarted.start());
 		inbound.clear();
@@ -900,9 +962,9 @@ int main() {
 		const bool got_restarted_hello = receive_retry(inbound);
 		expect(got_restarted_hello, "restarted same-CI client receives ServerHello");
 		if (got_restarted_hello) {
-			expect(restarted.handle_datagram(inbound.data(), inbound.size(), out) &&
+			expect(take_hello_at_zero(restarted, inbound.data(), inbound.size(), out) &&
 			               out.size() == 1,
-			       "restarted ServerHello produces a fresh-CK ClientAuth");
+			       "restarted ServerHello produces a fresh-CK ClientAuth (at the next pump)");
 		}
 		if (out.size() == 1) send_retry(out.front());
 		std::vector<uint8_t> restarted_server_auth;
@@ -938,7 +1000,7 @@ int main() {
 		auto send_jo = [&](const std::vector<uint8_t> &dg) {
 			if (!dg.empty()) {
 				opennova::net::udp_send_to(
-						jo_client, server_ep, dg.data(), dg.size());
+						jo_client, jo_ep, dg.data(), dg.size());
 			}
 		};
 		auto receive_jo = [&](std::vector<uint8_t> &dg) {
@@ -966,11 +1028,15 @@ int main() {
 			               server_hello.hk != 0,
 			       "standalone JO ServerHello advertises a nonzero production host key");
 			first_jo_host_key = server_hello.hk;
-			auto hello = joiner.handle_datagram(inbound.data(), inbound.size());
-			const bool has_client_auth = hello.outbound.size() == 1;
+			(void)joiner.handle_datagram(inbound.data(), inbound.size());
+			// The 0x42 leaves at the first pump past the connect state's start
+			// (D-NET-NEW-L2-25).
+			const std::vector<uint8_t> client_auth =
+					opennova::inmatch::test::enumerated_join_auth(joiner);
+			const bool has_client_auth = !client_auth.empty();
 			expect(has_client_auth, "JO ServerHello produces ClientAuth");
 			if (has_client_auth) {
-				send_jo(hello.outbound[0]);
+				send_jo(client_auth);
 			}
 		}
 		inbound.clear();
@@ -1003,8 +1069,8 @@ int main() {
 		       "JO loss probe frames dropped sequence one and delivered sequence two");
 
 		// A delayed goodbye from a prior occupant of this endpoint is rejected
-		// by the JO session verifier. The socket owner must keep its JO route
-		// and spawn bookkeeping unless that verifier surfaces PeerGoodbye.
+		// by the JO session verifier. The JO host must keep the session and its
+		// spawn bookkeeping unless that verifier surfaces PeerGoodbye.
 		const std::vector<uint8_t> stale_jo_goodbye =
 				opennova::nw_encode_outbound(
 						opennova::SESSION_OPCODE_CLIENT_GOODBYE,
@@ -1074,7 +1140,7 @@ int main() {
 		auto send_live = [&](const std::vector<uint8_t> &dg) {
 			if (!dg.empty()) {
 				opennova::net::udp_send_to(
-						live_client, server_ep, dg.data(), dg.size());
+						live_client, jo_ep, dg.data(), dg.size());
 			}
 		};
 		send_live(live_joiner.start());
@@ -1093,6 +1159,7 @@ int main() {
 			     live_joiner.Client_ProcessNetworkFrame(live_tick)) {
 				send_live(dg);
 			}
+			push_released_mission_start(live_joiner, send_live);
 		}
 		expect(live_joiner.has_self_handle(),
 		       "standalone JO host streams a named pool-0 spawn for self discovery");
@@ -1115,6 +1182,7 @@ int main() {
 			     live_joiner.Client_ProcessNetworkFrame(live_tick)) {
 				send_live(dg);
 			}
+			push_released_mission_start(live_joiner, send_live);
 			self_kept = self_kept && live_joiner.has_self_handle();
 		}
 		expect(live_joiner.in_match() && self_kept,
@@ -1175,7 +1243,7 @@ int main() {
 	expect(hello_only_client.is_valid(), "Hello-only lobby UDP socket bound");
 	opennova::ClientSession::Config hello_only_cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	hello_only_cfg.client_index = 0x48454C4Fu;
-	hello_only_cfg.client_key = 0x4F4E4C59u;
+	hello_only_cfg.connection_keys = [] { return opennova::ConnectionKeys{ 0x4F4E4C59u, opennova::make_dev_scrk() }; };
 	hello_only_cfg.na = "restart:hello-only";
 	opennova::ClientSession hello_only_session(hello_only_cfg);
 	const std::vector<uint8_t> hello_only_datagram =
@@ -1247,7 +1315,7 @@ int main() {
 
 	// Restart the same listener and reuse the prior JO endpoint. A new
 	// production host must rotate HK and accept a fresh handshake; retaining
-	// jo_ctx/route/auth state would either replay the fixed key or reject this
+	// the JO host's connection or auth state would either replay the fixed key or reject this
 	// new ClientAuth as belonging to the old run.
 	uint16_t rebound_port = 0;
 	auto restart_client =
@@ -1280,11 +1348,14 @@ int main() {
 		       "listener restart preserves the shared manager's unrelated peer");
 	}
 	if (restarted && restart_client.is_valid()) {
+		// The restarted JO host's own socket, a port of its own again.
+		const auto restarted_jo_ep = loopback_ep(listener.embedded_jo_host_port());
+		expect(listener.embedded_jo_host_port() != 0, "the restarted JO host has its own port");
 		opennova::inmatch::JoinerConnection restart_joiner("E2ERestartProbe");
 		restart_joiner.set_title(&kJo);
 		const auto restart_hello = restart_joiner.start();
 		opennova::net::udp_send_to(
-				restart_client, server_ep,
+				restart_client, restarted_jo_ep,
 				restart_hello.data(), restart_hello.size());
 
 		opennova::net::Endpoint from;
@@ -1306,15 +1377,17 @@ int main() {
 			               hello.hk != first_jo_host_key,
 			       "listener restart rotates the production JO host key");
 
-			auto handled = restart_joiner.handle_datagram(
+			(void)restart_joiner.handle_datagram(
 					rx, static_cast<size_t>(hello_size));
-			expect(handled.outbound.size() == 1,
+			const std::vector<uint8_t> restart_auth =
+					opennova::inmatch::test::enumerated_join_auth(restart_joiner);
+			expect(!restart_auth.empty(),
 			       "restarted JO ServerHello produces fresh ClientAuth");
-			if (handled.outbound.size() == 1) {
+			if (!restart_auth.empty()) {
 				opennova::net::udp_send_to(
-						restart_client, server_ep,
-						handled.outbound[0].data(),
-						handled.outbound[0].size());
+						restart_client, restarted_jo_ep,
+						restart_auth.data(),
+						restart_auth.size());
 				const int auth_size = opennova::net::udp_recv_from(
 						restart_client, rx, sizeof rx, from, 1000);
 				expect(auth_size > 0,

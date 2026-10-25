@@ -118,7 +118,8 @@ struct MissionShotSpawn {
 // An item the run destroyed, its death as the game runs it (DI-10, preview/model_damage): its row and item, the
 // clock's tick it died on, the item's death facts and the plan (its husk, the swap's tick, the sections the pieces
 // leave, the destroy fade), which the mission's device draws (S23 C: the husk swapped in, as the game's presenter
-// swaps it where Flags & 4 lands [orig: world-wac-ai-re §24, Entity_RaycastCollisionModel @ 0x413086's pick]).
+// swaps it where Flags & 4 lands [orig: world-wac-ai-re §24, Render_SectorEntity @ 0x5C4190 (the Flags & 4
+// test @ 0x5C41A0)]).
 struct MissionShotDeath {
 	NodeId row = 0;
 	int64_t item = 0;

@@ -251,6 +251,20 @@ int64_t ObjectData::apply_panm_to_nodes_table(int p_lod_index, int64_t p_time_ms
 	return static_cast<int64_t>(pose->revision());
 }
 
+int64_t ObjectData::apply_panm_to_transforms(int p_lod_index, int64_t p_time_ms,
+		const opennova::renderer::ControlRegisterValues &p_ctrl_table,
+		std::vector<Transform3D> &r_parts, int64_t p_applied_revision) const {
+	if (!source_model_) return 0;
+	const auto *pose = panm_cache_.evaluate(native_model(), p_lod_index, p_time_ms, p_ctrl_table);
+	if (pose == nullptr) return 0;
+	const size_t count = std::min(pose->part_count(), r_parts.size());
+	for (size_t i = 0; i < count; ++i) {
+		const auto *matrix = pose->changed_part(i, p_applied_revision);
+		if (matrix != nullptr) r_parts[i] = panm_transform(*matrix);
+	}
+	return static_cast<int64_t>(pose->revision());
+}
+
 int64_t ObjectData::get_panm_evaluation_serial() const {
 	return static_cast<int64_t>(panm_cache_.evaluation_serial());
 }

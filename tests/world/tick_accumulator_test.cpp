@@ -83,6 +83,62 @@ int check_bank() {
         TEST_EXPECT(ticks == 64);
     }
 
+    // A 300 ms frame inside a steady 16 ms stream keeps its time: the EMA pays it
+    // back over the following frames, 17 ticks beyond what a 16 ms frame runs,
+    // where the same frame's time capped at 8/60 s (Godot's process step under
+    // its default max_physics_steps_per_frame, which the shell no longer banks:
+    // it hands the session the frame's measured elapsed, D-NET-NEW-LI-6) adds 6
+    // [orig: Game_MainLoop @0x52B630 -- the elapsed @0x52B798..0x52B7A4, the add
+    // @0x52B7B2, the EMA in place @0x52B845..0x52B85B].
+    {
+        const auto catchup = [](double long_frame) {
+            TickAccumulator acc;
+            for (int i = 0; i < 60; ++i) acc.bank(TickAccumulator::kTickDt);
+            int ticks = acc.bank(long_frame);
+            for (int i = 0; i < 120; ++i) ticks += acc.bank(TickAccumulator::kTickDt);
+            return ticks;
+        };
+        const int stream = catchup(TickAccumulator::kTickDt);
+        TEST_EXPECT(catchup(0.300) - stream == 17);
+        TEST_EXPECT(catchup(8.0 / 60.0) - stream == 6);
+    }
+
+    // The lose cine's edit fade scales the smoothing history, not the bank:
+    // the frame that scaled it keeps its ticks and the next frame banks against
+    // the scaled word. A 16 ms frame banks 272 units (1 tick, 16 left); x1.66f
+    // truncates the history to 451; the next 16 ms frame smooths to
+    // (7 * 451 + 272 + 4) >> 3 = 429 units, 6 quanta from phase 4 = 2 ticks
+    // (45 left); x0.60240966f truncates 429 to 258; the next frame smooths to
+    // (7 * 258 + 301 + 4) >> 3 = 263 units, 4 quanta from phase 10 = 1 tick.
+    // Unscaled, every one of those frames runs 1 tick. The products sit clear
+    // of an integer, so x87's 24-bit device precision truncates them the same.
+    // [orig: Game_ScaleSmoothedFrameTime @0x52B5D0; CCineEventEditFade_Start
+    //  @0x5726C9 (flt_7D6858); CCineEventEditFade_Finish @0x572775 (flt_7D685C);
+    //  Game_MainLoop's EMA read @0x52B845]
+    {
+        const float kStart = 1.66f;      // 0x3FD47AE1
+        const float kFinish = 0.60240966f; // 0x3F1A3785
+        TickAccumulator acc;
+        TEST_EXPECT(acc.bank(TickAccumulator::kTickDt) == 1);
+        acc.scale_smoothing_history(kStart);
+        TEST_EXPECT(std::abs(acc.banked() - kMs) < 1e-9); // the bank itself is untouched
+        TEST_EXPECT(acc.bank(TickAccumulator::kTickDt) == 2);
+        TEST_EXPECT(std::abs(acc.banked() - 45.0 / 16000.0) < 1e-9);
+        acc.scale_smoothing_history(kFinish);
+        TEST_EXPECT(acc.bank(TickAccumulator::kTickDt) == 1);
+        TEST_EXPECT(std::abs(acc.banked() - 7.0 / 16000.0) < 1e-9);
+
+        TickAccumulator twin;
+        TEST_EXPECT(twin.bank(TickAccumulator::kTickDt) == 1);
+        TEST_EXPECT(twin.bank(TickAccumulator::kTickDt) == 1);
+        TEST_EXPECT(twin.bank(TickAccumulator::kTickDt) == 1);
+
+        // An empty history stays empty: the next frame banks unsmoothed.
+        TickAccumulator cold;
+        cold.scale_smoothing_history(kStart);
+        TEST_EXPECT(cold.bank(TickAccumulator::kTickDt) == 1);
+    }
+
     // reset() discards the bank, the smoothing history and the phase: the
     // frame after it banks from the 1 ms seed, unsmoothed.
     {
@@ -158,10 +214,53 @@ int check_cpu_percent() {
     return 0;
 }
 
+// The window's extrema (D-NET-NEW-LI-32, the frame-rate overlay's MN / MX) [orig: Game_MainLoop
+// @0x52B630 - the longest @0x52B8F6..0x52B902, the shortest @0x52B90E..0x52B914, the restarts
+// @0x52B97B / @0x52B985, g_StatsMaxFps @0x52B99D, g_StatsMinFps @0x52B9A9, the mode-init reset
+// @0x52B739 / @0x52B73F; the statics @0x83016C = 2000, @0x830170 = 1]: every counted frame's
+// smoothed bank raises the longest and lowers the shortest; the window publishes 16000 /
+// longest as the minimum rate and 16000 / shortest as the maximum, then restarts them at
+// 32000 units and 1. The mode-init reset zeroes the published rates alone.
+int check_frame_rate_extrema() {
+    // A steady 200 ms stream banks 3216 units a frame (the 1 ms residual re-counted) and
+    // closes the window on the 10th (32160): the process's first window starts from the
+    // 125 ms static, so its maximum reads 16000 / 2000 = 8 though no frame was that short,
+    // and its minimum 16000 / 3216 = 4.
+    {
+        TickAccumulator acc;
+        for (int i = 0; i < 9; ++i) acc.bank(0.2);
+        TickAccumulator::FrameRateStats s = acc.frame_rate_stats();
+        TEST_EXPECT(s.min_fps == 0 && s.max_fps == 0);
+        acc.bank(0.2);
+        s = acc.frame_rate_stats();
+        TEST_EXPECT(s.average_fps == 4 && s.min_fps == 4 && s.max_fps == 8);
+        // The restart's 2000 ms: the next window's maximum is its own frames', 4.
+        for (int i = 0; i < 10; ++i) acc.bank(0.2);
+        s = acc.frame_rate_stats();
+        TEST_EXPECT(s.average_fps == 4 && s.min_fps == 4 && s.max_fps == 4);
+    }
+    // The mode-init reset keeps the extrema: five 200 ms frames, the reset, then a 16 ms
+    // stream (272 units a frame) whose window closes on its 118th frame with the 3216-unit
+    // frame from before the reset still its longest: the minimum reads 16000 / 3216 = 4,
+    // the maximum 16000 / 272 = 58.
+    {
+        TickAccumulator acc;
+        for (int i = 0; i < 5; ++i) acc.bank(0.2);
+        acc.reset();
+        TickAccumulator::FrameRateStats s = acc.frame_rate_stats();
+        TEST_EXPECT(s.average_fps == 0 && s.min_fps == 0 && s.max_fps == 0 && s.cpu_percent == 0);
+        for (int i = 0; i < 118; ++i) acc.bank(TickAccumulator::kTickDt);
+        s = acc.frame_rate_stats();
+        TEST_EXPECT(s.average_fps == 58 && s.max_fps == 58 && s.min_fps == 4);
+    }
+    return 0;
+}
+
 } // namespace
 
 int main() {
     if (int rc = check_bank()) return rc;
     if (int rc = check_cpu_percent()) return rc;
+    if (int rc = check_frame_rate_extrema()) return rc;
     return check_frame_rate();
 }

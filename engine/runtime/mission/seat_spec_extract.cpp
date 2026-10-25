@@ -67,7 +67,8 @@ int seat_pose_index_for_user_point(const std::string &name) {
 bool item_has_runtime_metadata(const mission::ItemSeatSpec &spec) {
 	return spec.mount_config_valid || !spec.seats.empty() ||
 			!spec.armory_points.empty() || !spec.primary_weapon.empty() ||
-			!spec.emplacement_attachments.empty();
+			!spec.emplacement_attachments.empty() ||
+			spec.slot_userpoints != std::array<uint8_t, 4>{};
 }
 
 // graphic -> "<basename>.3di" is assets::AssetStore's own name rule; the extractor
@@ -127,7 +128,7 @@ int seat_yaw_offset_from_user_point(const ThreediUserPoint &point) {
 namespace {
 
 void extract_seats(const Threedi3di3 &model,
-		std::vector<world::Seat> &r_seats) {
+		std::vector<world::Seat> &r_seats, std::vector<world::Seat> &r_off_table) {
 	// The load-time resolve binds one userpoint row (1-based) to each of the
 	// ten occupant slots: sitex rows fill 0..7 in order and a ninth writes
 	// slot 8 and ends the scan; ctrlx and drvrx share slot 8 and UseGun takes
@@ -137,7 +138,9 @@ void extract_seats(const Threedi3di3 &model,
 	//  seatBoneIndex/controlBone/useGunBone +0x25D..+0x266 walk
 	//  @ 0x43A47B..0x43A5CD, the scan end `cmp ebp, 8; jg` @ 0x43A5AF;
 	//  the slot consumers Entity_FindNearestSeatOrArmory @ 0x435F37 and
-	//  Entity_FindAvailableSeat @ 0x436835]
+	//  Entity_FindAvailableSeat @ 0x436835]. A typed row the table does not hold
+	// still types its bone for the attach process (Entity::off_table_seats)
+	// [orig: Entity_GetBoneSlotType @0x434ED0].
 	std::array<size_t, 10> row_for_slot{}; // userpoint index + 1, 0 = none
 	int passengers = 0;
 	for (size_t i = 0; model.user_points != nullptr &&
@@ -159,12 +162,13 @@ void extract_seats(const Threedi3di3 &model,
 		size_t retail_slot = row_for_slot.size();
 		for (size_t slot = 0; slot < row_for_slot.size(); ++slot)
 			if (row_for_slot[slot] == i + 1) retail_slot = slot;
-		if (retail_slot == row_for_slot.size()) continue;
 		const ThreediUserPoint &up = model.user_points[i];
 		const std::string name = user_point_name(up);
 		world::Seat seat;
 		seat.type = seat_type_for_user_point(name);
-		seat.retail_slot = static_cast<uint8_t>(retail_slot);
+		const bool on_table = retail_slot != row_for_slot.size();
+		if (!on_table && seat.type == world::SeatType::None) continue;
+		seat.retail_slot = on_table ? static_cast<uint8_t>(retail_slot) : uint8_t{0xFF};
 		seat.bone_index = static_cast<uint8_t>(
 				std::clamp(static_cast<int>(i) + 1, 0, 255));
 		seat.pose_index = static_cast<uint8_t>(
@@ -175,7 +179,17 @@ void extract_seats(const Threedi3di3 &model,
 				seat_yaw_offset_from_user_point(up),
 				std::numeric_limits<int16_t>::min(),
 				std::numeric_limits<int16_t>::max()));
-		r_seats.push_back(seat);
+		// The bone record's own words, which the seat bone pose transforms
+		// (world::seat_bone_pose_on_carrier_matrix). [orig:
+		// Entity_GetBoneTransformAndOrientation @0x4B0C50 - bone+0 @0x4B0D29..0x4B0D34,
+		// bone+0xC @0x4B0D5A]
+		seat.bone_point[0] = up.x;
+		seat.bone_point[1] = up.y;
+		seat.bone_point[2] = up.z;
+		seat.bone_direction[0] = up.rot_x;
+		seat.bone_direction[1] = up.rot_y;
+		seat.bone_direction[2] = up.rot_z;
+		(on_table ? r_seats : r_off_table).push_back(seat);
 	}
 }
 
@@ -282,8 +296,24 @@ void extract_item_seat_specs(const DefItemsFile &items,
 		// Authored attachment rows survive a missing model (parent-root
 		// anchors); seats and armory locals need the model userpoints.
 		extract_attachments(*def, model, spec.emplacement_attachments);
+		// The def's slot table: each authored slot's userpoint, by name, first match, as a
+		// 1-based index into the model's userpoints, else 0; every slot with a name, an item
+		// id of 0 included [orig: Entity_InitFromModel @0x40DC30 - the names def+0x1C3 + 16 * i
+		// @0x40DE30..0x40DE42, ModelGPM_FindUserpointByName @0x40DE46, def+0x214 + i
+		// @0x40DE52..0x40DE70, 0 @0x40DE7C].
+		for (size_t i = 0; i < def->emplacement_attachments_count && i < 4 &&
+				def->emplacement_attachments != nullptr; ++i) {
+			const std::string wanted = trimmed(def->emplacement_attachments[i].userpoint);
+			if (wanted.empty() || model == nullptr || model->user_points == nullptr) continue;
+			for (size_t u = 0; u < model->user_point_count; ++u) {
+				if (!strutil::iequals(trimmed(model->user_points[u].name), wanted)) continue;
+				spec.slot_userpoints[i] =
+						static_cast<uint8_t>(std::clamp(static_cast<int>(u) + 1, 0, 255));
+				break;
+			}
+		}
 		if (model != nullptr) {
-			extract_seats(*model, spec.seats);
+			extract_seats(*model, spec.seats, spec.off_table_seats);
 			// "armory*" userpoints label/scan only on Armory-attrib items —
 			// the same attrib gate the original applies before its walk
 			// [orig: itemDef->attrib & 0x80000 @ 0x4361ee/@ 0x5a36f5].
@@ -353,7 +383,7 @@ void refresh_item_seat_spec(world::World &world,
 	// subType (field 0x80, the slot index the spawn stamped; absent = slot 0),
 	// which is the key the ewep class init reads the carrier def's slot anchor
 	// by, on every peer at mission start.
-	// [orig: Entity_SpawnWeaponOverlays subType = slot @0x40F40E;
+	// [orig: Entity_SpawnAddEWeapChildren subType = slot @0x40F40E;
 	//  Entity_InitBoneReferences @0x4415E1..0x4415FF; Game_StartMission ->
 	//  Entity_InitAllFromModels @0x52567F]
 	// Clear first so a later definition refresh cannot leave stale pose/capability
@@ -455,6 +485,7 @@ void refresh_item_seat_spec(world::World &world,
 	p_entity.armory_points.clear();
 	p_entity.primary_weapon.clear();
 	p_entity.seats.clear();
+	p_entity.off_table_seats.clear();
 	if (spec == nullptr) return;
 
 	p_entity.emplaced_config_valid = spec->mount_config_valid;
@@ -465,6 +496,7 @@ void refresh_item_seat_spec(world::World &world,
 	// The item-definition traits (has_item_def, item_attrib) come only from
 	// the items.def sweep; a seat spec never stands in for a definition row.
 	p_entity.seats = spec->seats;
+	p_entity.off_table_seats = spec->off_table_seats;
 	for (size_t seat_index = 0; seat_index < p_entity.seats.size();
 			++seat_index) {
 		world::Seat &seat = p_entity.seats[seat_index];

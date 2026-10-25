@@ -280,7 +280,7 @@ int main() {
 	std::printf("rock: spawn pos=(%.2f, %.2f, %.2f) yaw=%.2f eye=(%.2f, %.2f, %.2f)\n", player_pos.x, player_pos.y,
 			player_pos.z, yaw_deg, eye.x, eye.y, eye.z);
 	std::printf("rock: target pos=(%.2f, %.2f, %.2f) handle=%u attached=%d faces=%d/%d visual_aabb=(%.2f,%.2f,%.2f)..(%.2f,%.2f,%.2f)\n",
-			target->position.x, target->position.y, target->position.z, unsigned(target_handle), rig.collision_attached,
+			float(target->position.x), float(target->position.y), float(target->position.z), unsigned(target_handle), rig.collision_attached,
 			emitted_faces, target_box->face_total, vmin.x, vmin.y, vmin.z, vmax.x, vmax.y, vmax.z);
 	std::printf("rock: collision_to_render_vertex_error collision=%zu render=%zu mean=%.6f max=%.6f\n",
 			unique_collision.size(), render.points.size(),

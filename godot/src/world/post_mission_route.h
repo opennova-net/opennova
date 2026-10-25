@@ -27,6 +27,9 @@ public:
 	void set_error_key(const String &p_value) { error_key_ = p_value; }
 	String get_error_text() const { return error_text_; }
 	void set_error_text(const String &p_value) { error_text_ = p_value; }
+	// The route ends the game (engine inmatch::PostMissionRoute::exits_game).
+	bool get_exits_game() const { return exits_game_; }
+	void set_exits_game(bool p_value) { exits_game_ = p_value; }
 	Ref<ConnectionError> get_connection_error() const { return connection_error_; }
 	void set_connection_error(const Ref<ConnectionError> &p_value) { connection_error_ = p_value; }
 
@@ -35,6 +38,7 @@ protected:
 
 private:
 	bool keep_session_ = false;
+	bool exits_game_ = false;
 	bool error_ = false;
 	String error_key_;
 	String error_text_;

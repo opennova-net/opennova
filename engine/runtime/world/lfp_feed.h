@@ -39,10 +39,14 @@ struct LfpZoneTimer {
 };
 // Returns true and fills `out` when the zone has a timer entry.
 using LfpZoneTimerLookup = std::function<bool(EntityHandle, LfpZoneTimer &)>;
-// The transient minimap slot's flag byte for the zone (+4), whose 0xC0 bits
-// gate the marker [orig: the word_28E5620 walk @0x5a2517..0x5a256e]; the
-// embedder reads its minimap state. Absent slot -> 0.
+// The source byte (+4) of the zone's first regular overlay slot, whose 0xC0
+// bits gate the marker [orig: the word_28E5620 walk @0x5a2517..0x5a256e, the
+// inlined MapOverlay_FindRegularSlotByEntity @0x5BE870]; the embedder reads
+// its minimap state. Absent slot -> 0.
 using LfpCaptureFlagsLookup = std::function<uint8_t(EntityHandle)>;
+// The zone's Team byte (+0x162) as this client holds it, signed (a joiner's
+// replica row once a team store lands); empty reads the entity's own byte.
+using LfpZoneTeamLookup = std::function<int(const Entity &)>;
 
 // Fill `out` with one row per registry entry, in list order. `local` is the
 // viewer (its position feeds the distance/cylinder tests, its team the
@@ -51,6 +55,7 @@ void build_lfp_zones(const World &world, const SpawnZoneRegistry &registry,
                      const Entity &local, int local_team,
                      const LfpZoneTimerLookup &timer,
                      const LfpCaptureFlagsLookup &capture_flags,
+                     const LfpZoneTeamLookup &team_byte,
                      std::vector<hud::HudLfpZone> &out);
 
 } // namespace opennova::world

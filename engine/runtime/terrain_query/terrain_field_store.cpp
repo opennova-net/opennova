@@ -91,7 +91,6 @@ void TerrainFieldStore::build(const uint16_t *heightmap, size_t heightmap_count,
 	// The water plane arrives separately (set_water_plane, fed from the
 	// world's environment): a rebuilt field starts without one.
 	field_.water_y = 0;
-	field_.has_water = false;
 
 	// The charmap surface raster for the footstep surface pick (owned copy like
 	// the depth buffer; shares the sector grid + origins)
@@ -168,6 +167,26 @@ void terrain_field_store_build(TerrainFieldStore &store, const CptFile &cpt,
 	if (store.valid())
 		store.set_trn_facts(trn.water_height != 0 ? static_cast<float>(trn.water_height) * env::kWaterHeightUnit : 0.0f,
 				trn.tilestrip);
+}
+
+std::vector<std::string> terrain_foliage_graphics(
+		const std::function<bool(const std::string &name, std::vector<uint8_t> &out)> &read_file,
+		const std::string &terrain_name, const std::string &environment) {
+	std::vector<std::string> graphics;
+	if (!read_file || terrain_name.empty()) return graphics;
+	const TrnTextReader read_text = [&read_file](const std::string &name, std::string &text) {
+		std::vector<uint8_t> bytes;
+		if (!read_file(name, bytes)) return false;
+		text.assign(bytes.begin(), bytes.end());
+		return true;
+	};
+	TrnConfig trn;
+	std::string error;
+	if (!read_mission_trn(read_text, terrain_name + ".trn",
+				environment.empty() ? std::string() : environment + ".env", trn, error))
+		return graphics;
+	for (const FoliageDef &def : trn.foliage_defs) graphics.push_back(def.graphic);
+	return graphics;
 }
 
 std::string terrain_tileinfo_name(const std::string &tileinfo) {

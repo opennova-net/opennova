@@ -99,10 +99,15 @@ std::vector<DialogLineRef> dialog_line_refs(const dbf::Group &group, const lwf::
 // of the line's sequence (none where it holds no '_'); "" for none.
 // [orig: Dialog_LoadAudioClip @ 0x44ddcd..0x44de3c; IniSection_GetEntryByIndex
 //  @ 0x75d130]
-std::string dialog_line_text(const rtxt::File *mission_text, const dbf::Line &line);
+// The section lookup searches `text_override` (the expansion's override table,
+// null for none) first; the by-index fallback reads the mission table alone.
+// [orig: TextResource_FindEntryBySectionAndKey @0x75D250 (the override hit @0x75D27B),
+//  D-NET-675]
+std::string dialog_line_text(const rtxt::File *text_override, const rtxt::File *mission_text,
+		const dbf::Line &line);
 
 // A co-op dialog line a client plays on S2C 0x28 (the effect pass's
-// "dialog_line" record): the dialog by its exact name in the loaded bank's
+// world::DialogLineOrder): the dialog by its exact name in the loaded bank's
 // order, then the line's wave, its "<class><name>" variant first (the class
 // is the local player's, the "%d%s" prefix) and its bare name next, and its
 // subtitle (dialog_line_text). Retail plays the clip at once on a dialog
@@ -126,8 +131,8 @@ struct DialogLinePlayback {
 	std::string text;        // the subtitle; empty when none resolves
 };
 DialogLinePlayback resolve_dialog_line(const dbf::File *dialog_bank, const lwf::File *dialog_sounds,
-		const rtxt::File *mission_text, const std::string &dialog_name, int line,
-		int player_class);
+		const rtxt::File *text_override, const rtxt::File *mission_text,
+		const std::string &dialog_name, int line, int player_class);
 
 // The dialog clock: Dialog_UpdatePlayback runs once a logic tick and its rate
 // word is 62 [orig: Game_ProcessMainFrame @ 0x5265af; DialogSystem_Init
@@ -179,9 +184,10 @@ public:
 		uint32_t timer = 0;
 		bool counting = false;
 	};
-	// The device's half of Dialog_LoadAudioClip: start the line's wave on a new
-	// voice of the dialog channel and say what loaded.
-	using LoadLine = std::function<DialogClip(const DialogLineRef &)>;
+	// The device's half of Dialog_LoadAudioClip: load the line's wave and say what
+	// loaded (the hold reads it whatever the gate), and when `play` start it on a new
+	// voice of the dialog channel; with `play` false nothing starts (voice 0).
+	using LoadLine = std::function<DialogClip(const DialogLineRef &, bool play)>;
 	// AudioChannel_ValidateHandle: the voice still plays.
 	using VoicePlaying = std::function<bool(uint64_t)>;
 
@@ -199,7 +205,10 @@ public:
 	bool enqueue(const std::string &dialog, std::vector<DialogLineRef> lines);
 	// One Dialog_UpdatePlayback tick. `frame_rendered`: a frame has rendered
 	// since the tick before, which starts a fresh hold's countdown.
-	void tick(bool frame_rendered, const LoadLine &load, const VoicePlaying &playing);
+	// `dialogue_volume`: the process's g_DialogueVolume (the cfg's DialogueLevel),
+	// whose 0 loads a line without playing it (D-NET-285).
+	void tick(bool frame_rendered, int32_t dialogue_volume, const LoadLine &load,
+			const VoicePlaying &playing);
 	// The PLYRDIALOG readers, keyed by the trigger's number, whose name is
 	// "dlg%.3d" of it. active: a slot holds the dialog (trigger sub 34
 	// PlayerDialogDone is its negation) [orig: Dialog_ExistsByIndex

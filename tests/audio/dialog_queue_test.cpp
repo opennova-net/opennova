@@ -91,13 +91,14 @@ struct Device {
 	uint64_t next_voice = 1;
 
 	DialogQueue::LoadLine load() {
-		return [this](const DialogLineRef &line) {
+		return [this](const DialogLineRef &line, bool play) {
 			loads.push_back(line.dialog_name + ":" + std::to_string(line.line));
 			DialogClip clip;
 			if (line.file.empty()) return clip;
 			clip.loaded = true;
 			clip.samples = 8320;
 			clip.pitch_q16 = 32768;
+			if (!play) return clip;
 			clip.voice = next_voice++;
 			live.insert(clip.voice);
 			return clip;
@@ -109,9 +110,14 @@ struct Device {
 	void stop(uint64_t voice) { live.erase(voice); }
 };
 
+// The shipped DialogueLevel (Config_SetDefaults' 192): the lines play.
+constexpr int32_t kDialogueLevel = 192;
+
 // `ticks` playback ticks, a frame rendered before each unless told otherwise.
-void run(DialogQueue &queue, Device &device, int ticks, bool rendered = true) {
-	for (int i = 0; i < ticks; ++i) queue.tick(rendered, device.load(), device.playing());
+void run(DialogQueue &queue, Device &device, int ticks, bool rendered = true,
+		int32_t dialogue_volume = kDialogueLevel) {
+	for (int i = 0; i < ticks; ++i)
+		queue.tick(rendered, dialogue_volume, device.load(), device.playing());
 }
 
 std::vector<std::string> names(std::initializer_list<const char *> list) {
@@ -298,6 +304,32 @@ int test_dialogs_interleave_in_slot_order() {
 	device.stop(3);
 	run(queue, device, 1);
 	TEST_EXPECT(queue.slots().size() == 1 && queue.slots()[0].dialog == "dlgA");
+	return 0;
+}
+
+// At a dialogue volume of 0 the play hook refuses: a line still holds its wave's
+// length, but no voice starts and no handle goes on the channel's stack, so the
+// next dialog's line does not wait for it and loads on the same tick (D-NET-285)
+// [orig: Dialog_LoadAudioClip @0x44dcc0 - the hold @0x44dd87..0x44ddbf, the hook
+// @0x44de50, its refusal @0x44de5b skipping the play and the stack @0x44de5d..0x44deaf;
+// Dialog_ApplyDialogueVolumeAndPlayFactor @0x527560 (@0x527567)].
+int test_a_muted_line_holds_and_stacks_no_voice() {
+	DialogQueue queue;
+	Device device;
+	queue.enqueue("dlgA", { ref("a0.wav", "dlgA", 0), ref("a1.wav", "dlgA", 1) });
+	queue.enqueue("dlgB", { ref("b0.wav", "dlgB", 0) });
+	run(queue, device, 1, true, 0);
+	TEST_EXPECT(device.loads == names({ "dlgA:0", "dlgB:0" }));
+	TEST_EXPECT(queue.voices().empty() && device.live.empty());
+	TEST_EXPECT(queue.slots().size() == 2 && queue.slots()[0].timer == 48 &&
+			queue.slots()[1].timer == 48);
+	// Played, the same two dialogs load one at a time over the channel.
+	DialogQueue played;
+	Device voiced;
+	played.enqueue("dlgA", { ref("a0.wav", "dlgA", 0), ref("a1.wav", "dlgA", 1) });
+	played.enqueue("dlgB", { ref("b0.wav", "dlgB", 0) });
+	run(played, voiced, 1);
+	TEST_EXPECT(voiced.loads == names({ "dlgA:0" }) && played.voices().size() == 1);
 	return 0;
 }
 
@@ -510,31 +542,49 @@ int test_client_line_resolution() {
 	text.entries = { e0, e1, e2 };
 
 	// Class 3: the "3SynR101" variant wins; the subtitle is the wave name's.
-	DialogLinePlayback line = resolve_dialog_line(&dialogs, &sounds, &text, "dlg001", 2, 3);
+	DialogLinePlayback line = resolve_dialog_line(&dialogs, &sounds, nullptr, &text, "dlg001", 2, 3);
 	TEST_EXPECT(line.line_found && line.wave == "SynR101");
 	TEST_EXPECT(line.played == "3SynR101" && line.file == "3SynR101.wav" && line.volume == 200 &&
 			line.text == "Move out!");
 	// Class 1 has no variant: the bare wave.
-	line = resolve_dialog_line(&dialogs, &sounds, &text, "dlg001", 2, 1);
+	line = resolve_dialog_line(&dialogs, &sounds, nullptr, &text, "dlg001", 2, 1);
 	TEST_EXPECT(line.played == "SynR101" && line.file == "SynR101.wav");
 	// No [Mission Dialog] entry: the flat entry the sequence suffix names.
-	line = resolve_dialog_line(&dialogs, &sounds, &text, "dlg001", 0, 1);
+	line = resolve_dialog_line(&dialogs, &sounds, nullptr, &text, "dlg001", 0, 1);
 	TEST_EXPECT(line.file == "SynR100.wav" && line.text == "Mission title");
 	// A line whose wave the sounds lack resolves its subtitle but no clip; a suffix
 	// past the table names no entry.
-	line = resolve_dialog_line(&dialogs, &sounds, &text, "dlg001", 1, 1);
+	line = resolve_dialog_line(&dialogs, &sounds, nullptr, &text, "dlg001", 1, 1);
 	TEST_EXPECT(line.line_found && line.file.empty() && line.text.empty());
 	// The name is matched exactly, and a line past the table resolves nothing.
-	TEST_EXPECT(!resolve_dialog_line(&dialogs, &sounds, &text, "DLG001", 0, 1).line_found);
-	TEST_EXPECT(!resolve_dialog_line(&dialogs, &sounds, &text, "dlg001", 3, 1).line_found);
-	TEST_EXPECT(!resolve_dialog_line(nullptr, &sounds, &text, "dlg001", 0, 1).line_found);
+	TEST_EXPECT(!resolve_dialog_line(&dialogs, &sounds, nullptr, &text, "DLG001", 0, 1).line_found);
+	TEST_EXPECT(!resolve_dialog_line(&dialogs, &sounds, nullptr, &text, "dlg001", 3, 1).line_found);
+	TEST_EXPECT(!resolve_dialog_line(nullptr, &sounds, nullptr, &text, "dlg001", 0, 1).line_found);
 	// No mission text: the clip alone.
-	line = resolve_dialog_line(&dialogs, &sounds, nullptr, "dlg001", 2, 3);
+	line = resolve_dialog_line(&dialogs, &sounds, nullptr, nullptr, "dlg001", 2, 3);
 	TEST_EXPECT(line.file == "3SynR101.wav" && line.text.empty());
 	// The subtitle alone, as the line's own words say it.
-	TEST_EXPECT(dialog_line_text(&text, dialogs.groups[0].lines[2]) == "Move out!");
-	TEST_EXPECT(dialog_line_text(&text, dialogs.groups[0].lines[0]) == "Mission title");
-	TEST_EXPECT(dialog_line_text(nullptr, dialogs.groups[0].lines[0]).empty());
+	TEST_EXPECT(dialog_line_text(nullptr, &text, dialogs.groups[0].lines[2]) == "Move out!");
+	TEST_EXPECT(dialog_line_text(nullptr, &text, dialogs.groups[0].lines[0]) == "Mission title");
+	TEST_EXPECT(dialog_line_text(nullptr, nullptr, dialogs.groups[0].lines[0]).empty());
+	// The expansion's override table answers the [Mission Dialog] lookup first;
+	// with no mission table there is no subtitle at all, and the by-index
+	// fallback reads the mission table alone (D-NET-675).
+	// [orig: Dialog_LoadAudioClip -- `test g_TextMission` @0x44DDCB..0x44DDCD,
+	//  TextResource_FindEntryBySectionAndKey @0x44DDD6 -> the override test @0x75D27B]
+	rtxt::File override_table;
+	override_table.sections.push_back(rtxt::Section{"Mission Dialog", 1});
+	rtxt::Entry o0;
+	o0.key = "SynR101";
+	o0.text = "Expansion line";
+	override_table.entries = { o0 };
+	TEST_EXPECT(dialog_line_text(&override_table, &text, dialogs.groups[0].lines[2]) ==
+			"Expansion line");
+	TEST_EXPECT(dialog_line_text(&override_table, nullptr, dialogs.groups[0].lines[2]).empty());
+	TEST_EXPECT(dialog_line_text(&override_table, &text, dialogs.groups[0].lines[0]) ==
+			"Mission title");
+	line = resolve_dialog_line(&dialogs, &sounds, &override_table, &text, "dlg001", 2, 3);
+	TEST_EXPECT(line.text == "Expansion line");
 	return 0;
 }
 
@@ -549,6 +599,7 @@ int main() {
 	failed |= test_the_hold_starts_after_a_rendered_frame();
 	failed |= test_a_missing_wave_holds_twelve_ticks();
 	failed |= test_dialogs_interleave_in_slot_order();
+	failed |= test_a_muted_line_holds_and_stacks_no_voice();
 	failed |= test_the_delay_ignores_the_channel();
 	failed |= test_sixteen_slots_and_the_free();
 	failed |= test_reset_and_clear();

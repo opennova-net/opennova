@@ -373,6 +373,15 @@ bool rung_contract() {
 			"the tracer rungs follow each side's alpha flush");
 }
 
+bool pool_shaders_contract() {
+	// The pool's three materials create at the mission textures stage's full arm alone
+	// (D-NET-NEW-LF-13) [orig: Render_InitMissionTextures @0x587120 - the full arm's call
+	// @0x587240, the reduced arm @0x58727A..0x58728C].
+	return check(r::creates_tracer_pool_shaders(/*dedicated_host=*/false) &&
+			!r::creates_tracer_pool_shaders(/*dedicated_host=*/true),
+			"the tracer pool's shaders create on the full arm alone");
+}
+
 } // namespace
 
 int main() {
@@ -385,6 +394,7 @@ int main() {
 	if (!beam_contract()) return 1;
 	if (!per_channel_draw_contract()) return 1;
 	if (!rung_contract()) return 1;
+	if (!pool_shaders_contract()) return 1;
 	std::puts("renderer_tracer_frame_test ok");
 	return 0;
 }

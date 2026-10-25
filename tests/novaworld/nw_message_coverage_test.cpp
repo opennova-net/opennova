@@ -265,7 +265,7 @@ int check_S_1E_game_event() {
 // S2C 0x61 — the per-player TICK SEED (not an SCRK exchange). Four LE bytes, and a body
 // shorter than that seeds ZERO rather than failing: zero is itself the witnessed round-end
 // disarm value, so the decode always succeeds and the caller applies whatever it yields.
-// [orig: NapiNPClientMsg_HandleSessionKey @0x4297c0 — the four-byte guard @0x4297eb;
+// [orig: NapiNPClientMsg_HandleTickSeed @0x4297c0 — the four-byte guard @0x4297eb;
 //  the sender Server_SendRandomSeedToPlayer @0x5101a0 rolls ((rand() & 0xFE) + 1) << 16]
 int check_S_61_tick_seed() {
 	LE w;
@@ -775,7 +775,7 @@ int check_S_6A_clan_roster() {
 }
 
 // C2S 0x4E — the clan-roster walk [u32 afterNetId]: {0} kick, {netId} continuation.
-// [orig: NapiNPServerMsg_HandleMinimapSlotRequest @0x511210]
+// [orig: NapiNPServerMsg_HandleSquadRegistryWalk @0x511210]
 int check_C_4E_clan_roster_walk() {
 	ClanRosterWalkRequest kick;
 	const std::vector<uint8_t> wire = encode_clan_roster_walk_request(kick);
@@ -798,7 +798,7 @@ int check_C_4E_clan_roster_walk() {
 
 // S2C 0x70 — vehicle-spawn availability: [u8 3] + rows [u16 typeId][u8 avail][u8 max]
 // + u16 0. Byte fixture pinned against the retail serializer's write order.
-// [orig: NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0; NapiNPClientMsg_HandleWeaponLoadoutList @0x429a30]
+// [orig: NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0; NapiNPClientMsg_HandleVehicleSpawnAvailability @0x429a30]
 int check_S_70_vehicle_spawn_availability() {
 	VehicleSpawnAvailabilityList list;
 	list.rows.push_back({1300, 1, 3});                                            // (1300,1,3): one left of the allotment

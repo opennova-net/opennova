@@ -6,47 +6,22 @@
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
 
+#include <base/io/bam.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_index.h>
 #include <formats/mission/mission.h> // kItemIdOffset
 #include <runtime/anim/adm_fallback.h>
 #include <runtime/mission/seat_spec_extract.h> // the userpoint names
-#include <runtime/world/player_spawn.h> // kPlayerInfantryTypeId
 #include <runtime/world/person_overlays.h> // kParachuteItemTypeId
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 using namespace opennova::def;
 using namespace opennova::threedi;
 
 namespace opennova::mission {
-
-namespace {
-
-const char *glass_userpoint_for_graphic(const std::string &graphic) {
-	struct GlassSurfaceRow {
-		const char *graphic;
-		const char *userpoint;
-	};
-	// Retail's complete Joint Operations table. Projectile_ProcessExplosionQueue
-	// requests GLASS1..GLASS4; Terrain_SpawnEffectsAtUserPoint resolves those
-	// keys through this exact model-name mapping before walking the USRP bank.
-	// GLASS3 and GLASS4 have no shipped rows.
-	// [orig: static rows consumed by Terrain_SpawnEffectsAtUserPoint @0x5cee20]
-	static constexpr GlassSurfaceRow kRows[] = {
-			{"eurhr2", "GLASS"}, {"eurhr2a", "GLASS"},
-			{"eurhr2b", "GLASS"}, {"eurhr1", "GLASS02"},
-			{"eurhr1b", "GLASS02"}, {"eurhr1c", "GLASS02"},
-			{"eurhr3", "GLASS02"}, {"eurhr3b", "GLASS02"},
-			{"eurhr3c", "GLASS02"}, {"atrm2a", "GLASS1"},
-	};
-	for (const GlassSurfaceRow &row : kRows)
-		if (strutil::iequals(graphic.c_str(), row.graphic)) return row.userpoint;
-	return nullptr;
-}
-
-} // namespace
 
 void CollisionResolveState::clear() {
 	model_by_graphic.clear();
@@ -57,7 +32,6 @@ void CollisionResolveState::clear() {
 	center_by_graphic.clear();
 	husk_kz_points_by_graphic.clear();
 	husk_dead_points_by_graphic.clear();
-	glass_points_by_graphic.clear();
 	husk_pieces_by_graphic.clear();
 	resolution_attempted.clear();
 }
@@ -78,16 +52,6 @@ std::unordered_map<int, const DefItemDef *> item_defs_by_id(const DefItemsFile &
 	for (size_t i = 0; i < items.count; ++i) rows.emplace(items.entries[i].id, &items.entries[i]);
 	return rows;
 }
-
-int visual_item_id_for_runtime_type(int item_id, const DefItemsFile &items) {
-	// The policy lives in mission/placement_traits.h; this overload only
-	// answers the catalog probe against the retained DefItemsFile.
-	return mission::visual_item_id_for_runtime_type(item_id,
-			find_item_def(items, kPlayerVisualItemId) != nullptr);
-}
-// The mission-side policy keys on the SAME runtime player type the world
-// names; a drift would silently break the visual resolve.
-static_assert(mission::kPlayerRuntimeTypeId == world::kPlayerInfantryTypeId);
 
 int32_t collision_model_for_graphic(CollisionResolveState &state,
 		const CollisionResolveDeps &deps, const std::string &graphic_key) {
@@ -173,6 +137,58 @@ static uint8_t userpoint_index_by_name(const Threedi3di3 &model, const char *nam
 	return found >= 0 && found < 255 ? static_cast<uint8_t>(found + 1) : 0;
 }
 
+// A loaded model's userpoint records as the runtime model keeps them (every
+// record, raw 16.16 position and direction, the name cut at its NUL)
+// [orig: the model's +0xBC count and +0xC0 48-byte records the GLASS leg walks,
+//  Terrain_SpawnSurfaceEffectsAtUserPoints @0x5CEB43..0x5CEB49].
+static void model_user_points(const Threedi3di3 &model, std::vector<world::ModelUserPoint> &out) {
+	out.clear();
+	if (model.user_points == nullptr) return;
+	out.reserve(model.user_point_count);
+	for (size_t i = 0; i < model.user_point_count; ++i) {
+		const ThreediUserPoint &p = model.user_points[i];
+		world::ModelUserPoint point;
+		point.name = std::string(threedi_user_point_name(p));
+		point.pos_q16[0] = p.x;
+		point.pos_q16[1] = p.y;
+		point.pos_q16[2] = p.z;
+		point.dir_q16[0] = p.rot_x;
+		point.dir_q16[1] = p.rot_y;
+		point.dir_q16[2] = p.rot_z;
+		out.push_back(std::move(point));
+	}
+}
+
+// Whether the GLASS leg's decal gate refuses a loaded model: its LOD-0 render model (the
+// runtime model's +0x20) is absent, which a GHDR LOD count of none leaves, or carries +0x10
+// bit 0, which every render LOD of a skinned model (GHDR mesh type 2) carries.
+// [orig: ThreediGp_LoadModel @0x5B6160 returns def+4 (@0x5B6273), so +0x20 is def+0x24;
+//  ThreediGp_LoadFromFile @0x5B5780 - the GHDR LOD count to def+0x14 @0x5B597B, none skips the
+//  loads @0x5B5B82 and zeroes the slots @0x5B5BC6, LOD 0's render model stored to def+0x24 (the
+//  lea @0x5B5B84, the store @0x5B5B94); mesh type 2 -> def+0xF0 = 3 @0x5B5903..0x5B5922;
+//  GPM_LoadRenderModel @0x5B5000 sets the render model's +0x10 bit 0 under def+0xF0 == 3
+//  @0x5B50BA..0x5B50C3. A model with no RLOD does not load here.]
+static bool lod0_refuses_decal(const Threedi3di3 &model) {
+	return model.header.lod_count_decl <= 0 || model.header.mesh_type == THREEDI_MESH_SKINNED;
+}
+
+// Whether a loaded model's scar-cache bone callback returns no matrix array. The model load
+// binds the runtime model's +0xAC from LOD 0's RMDL tag (the RMDL chunk's first word, copied to
+// def+0x64) through the bone table's third column, row 0's on a miss, so it is never null; of
+// the table's 19 rows only the 'pwp0' row's third column returns null, every other one
+// g_BoneCallbackScratchMatrix. The row's packed word is stored as the bytes "0pwp".
+// [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 - the graphic model's lookup @0x43A03C and
+//  +0xAC store @0x43A047, a husk model's @0x43A10D / @0x43A11B; BoneCallbackTable_LookupByTag
+//  @0x4E3310 (row 0's on a miss @0x4E3334); GPM_LoadRenderModel @0x5B5000 - the RMDL word to the
+//  render model's +0 @0x5B50A9; ThreediGp_LoadFromFile @0x5B5780 - to def+0x64 @0x5B5BDC;
+//  g_BoneCallbackTable @0x82CF00, 19 rows (@0x82D030), row 'pwp0' @0x82CF50, its third column
+//  @0x82CF5C -> BoneCallback_pwp0_Bone @0x4E29E0 (xor eax, eax)]
+static bool scar_bones_null(const Threedi3di3 &model) {
+	static constexpr char kPwp0[4] = {'0', 'p', 'w', 'p'};
+	return model.lods != nullptr && model.lod_count > 0 &&
+			std::memcmp(model.lods[0].model_type, kPwp0, sizeof(kPwp0)) == 0;
+}
+
 static void resolve_weapon_userpoint_bytes(const DefItemDef &def,
 		const Threedi3di3 &model, world::Entity &e) {
 	static constexpr int kSlotDefBase[4] = {3, 0, 9, 6};
@@ -225,7 +241,7 @@ world::ResolvedCollisionShape collision_shape_for_runtime_type(
 		int runtime_item_id, const DefItemsFile &items,
 		CollisionResolveState &state, const CollisionResolveDeps &deps) {
 	world::ResolvedCollisionShape shape;
-	const int visual_item_id = visual_item_id_for_runtime_type(runtime_item_id, items);
+	const int visual_item_id = mission::visual_item_id_for_runtime_type(runtime_item_id);
 	const DefItemDef *def = find_item_def(items, visual_item_id);
 	if (def == nullptr) return shape;
 	shape.pool1_candidate_source_eligible =
@@ -308,9 +324,8 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 		}
 		state.resolution_attempted[h.packed] = e->registry_spawn_id;
 		const bool is_organic = e->kind == world::EntityKind::Organic;
-		const int def_id = is_organic
-				? visual_item_id_for_runtime_type(e->item_id, items)
-				: static_cast<int>(e->item_id) + mission::kItemIdOffset;
+		// Every body's def is the row its type word names, an organic's included.
+		const int def_id = mission::visual_item_id_for_runtime_type(e->item_id);
 		const DefItemDef *def = find_item_def(items, def_id);
 		// The collectors' render model: every entity whose graphic loads carries
 		// its CMDL sphere (the entity-init form, radius 0 without a collision
@@ -329,7 +344,16 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 		// row's type index takes its visual item; EntityDef_LoadModelsAndCallbacks
 		// - the store @0x439FDC; the persistent-bank gate
 		// MapOverlay_RenderAllByLayer @0x5BE6C4].
-		if (def != nullptr) e->has_graphic_model = render_model != nullptr;
+		if (def != nullptr) {
+			e->has_graphic_model = render_model != nullptr;
+			e->graphic_model_userpoints = render_model != nullptr
+					? static_cast<uint32_t>(render_model->user_point_count) : 0;
+			e->graphic_model_collision_objects = render_model != nullptr &&
+							render_model->collision != nullptr &&
+							render_model->collision->model_data.num_objects > 0
+					? static_cast<uint32_t>(render_model->collision->model_data.num_objects)
+					: 0;
+		}
 		if (render_model != nullptr) {
 			deps.occlusion.assign_render_model(h, world::collision_projection_sphere_from_3di(
 					*render_model, 0, 0, world::item_def_zero_bbox_center(def->type, def->attrib)));
@@ -357,6 +381,10 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 					break;
 				}
 				traits->graphic_name = model->header.name;
+				model_user_points(*model, traits->graphic_userpoints);
+				traits->graphic_lod0_refuses_decal = lod0_refuses_decal(*model);
+				traits->graphic_no_collision_block = model->collision == nullptr;
+				traits->graphic_scar_bones_null = scar_bones_null(*model);
 				traits->model_radius_q16 = world::model_bound_radius_q16_from_3di(*model);
 				// GPM+24/+28 remain zero in the retail 3DI3 load path. These
 				// legacy fields are distinct from CMDL's XY/Z radii.
@@ -403,38 +431,6 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				}
 			}
 		}
-		// The blast window path resolves from the INTACT graphic. Cache even a
-		// miss so repeated attachment sweeps never reopen or rewalk the model.
-		auto glass_it = state.glass_points_by_graphic.find(key);
-		if (glass_it == state.glass_points_by_graphic.end()) {
-			std::vector<world::GlassPointTrait> points;
-			const char *userpoint_name = glass_userpoint_for_graphic(key);
-			const Threedi3di3 *glass_model =
-					userpoint_name != nullptr && deps.models.has_source()
-					? deps.models.model(key).get()
-					: nullptr;
-			// Terrain's exact userpoint lookup returns the first match.
-			const int up_index = glass_model != nullptr
-					? threedi_3di3_find_user_point(glass_model, userpoint_name)
-					: -1;
-			if (up_index >= 0) {
-				const ThreediUserPoint &point = glass_model->user_points[up_index];
-				float up_pos[3];
-				float up_dir[3];
-				threedi_user_point_position(&point, up_pos);
-				threedi_user_point_direction(&point, up_dir);
-				points.push_back(world::GlassPointTrait{
-						world::Vec3{up_pos[2], -up_pos[0], up_pos[1]},
-						world::Vec3{up_dir[2], -up_dir[0], up_dir[1]}});
-			}
-			glass_it = state.glass_points_by_graphic.emplace(
-					key, std::move(points)).first;
-		}
-		if (world::ItemDeathTraits *traits =
-					world.tables.item_death_traits.get_mutable(e->item_id);
-				traits != nullptr && traits->glass_points.empty() &&
-				!glass_it->second.empty())
-			traits->glass_points = glass_it->second;
 		// The bound-sphere radius (entity+0 boundRadius) comes from the exact
 		// GHDR model carrier, but the entire stamp is gated by the model's
 		// collision block. Raised to the FIRST husk model's unscaled bound below,
@@ -651,6 +647,18 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 			if (world::ItemDeathTraits *t =
 						world.tables.item_death_traits.get_mutable(e->item_id)) {
 				t->primary_husk_loaded = first_husk_m3 != nullptr;
+				// The primary husk's name and userpoints, the GLASS leg's model
+				// under Flags & 4 [orig: Terrain_SpawnSurfaceEffectsAtUserPoints
+				//  @0x5CEABC..0x5CEAD5 (entity+0x34)].
+				t->husk_name = first_husk_m3 != nullptr ? std::string(first_husk_m3->header.name) : std::string();
+				t->husk_userpoints.clear();
+				if (first_husk_m3 != nullptr) model_user_points(*first_husk_m3, t->husk_userpoints);
+				t->husk_lod0_refuses_decal =
+						first_husk_m3 != nullptr && lod0_refuses_decal(*first_husk_m3);
+				t->husk_no_collision_block =
+						first_husk_m3 != nullptr && first_husk_m3->collision == nullptr;
+				t->husk_scar_bones_null =
+						first_husk_m3 != nullptr && scar_bones_null(*first_husk_m3);
 				t->husk_model_loaded =
 						first_husk_m3 != nullptr || final_husk_m3 != nullptr;
 				// The PIECE model — huskFinal first [orig: @ 0x4934af
@@ -685,7 +693,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 			if (!first_husk_name.empty()) {
 				auto kz_it = state.husk_kz_points_by_graphic.find(husk_key);
 				if (kz_it == state.husk_kz_points_by_graphic.end()) {
-					std::vector<world::Vec3> kz_points;
+					std::vector<world::FixedVec3> kz_points;
 					if (husk_m3 != nullptr) {
 						const Threedi3di3 &hmodel3di = *husk_m3;
 						for (size_t up_index = 0;
@@ -694,14 +702,11 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 							const ThreediUserPoint &point = hmodel3di.user_points[up_index];
 							if (!strutil::iequals(point.name, "KZ"))
 								continue;
-							// Decoded model space is (-source y, source z, source x);
-							// destruction's placement math consumes mission-local (x, y, z).
-							float up_pos[3];
-							threedi_user_point_position(&point, up_pos);
-							kz_points.push_back(world::Vec3{
-									up_pos[2],
-									-up_pos[0],
-									up_pos[1]});
+							// The user point's own words, which are mission-local (x, y, z)
+							// as the blast reads them. [orig: Entity_QueueKzBlastAtUserPoints
+							//  @0x4EABF0 - `mov edx, [edi]` @0x4EAC93, `mov eax, [edi+4]`
+							//  @0x4EAC99, `mov ecx, [edi+8]` @0x4EACA0]
+							kz_points.push_back(world::FixedVec3{point.x, point.y, point.z});
 						}
 					}
 					kz_it = state.husk_kz_points_by_graphic.emplace(
@@ -747,8 +752,8 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 			// model [orig: @ 0x4934af..0x4934c3 huskFinalModel ?: huskModel] —
 			// the opposite preference from the collision husk pick above. Its
 			// LOD-0 part table feeds the death-piece loop bound [orig:
-			// renderObj[8]+52 @ 0x49361a] and section 0's z extents (the wreck
-			// ground-rest offset [orig: @ 0x461e23-0x461e4b]); its level table,
+			// renderObj[8]+52 @ 0x49361a], its collision section 0's z words the
+			// wreck's ground rest (below); its level table,
 			// COBJ centres and bound radius feed the piece spawn and draw
 			// (world::DeathPieceModel). Its own cache, independent of the
 			// collision cache: a husk graphic can double as some entity's main
@@ -783,26 +788,22 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 						}
 					}
 					info.model.radius_q16 = world::model_bound_radius_q16_from_3di(*piece_m3);
-					// Section 0 owns the first opaque+alpha strip run (strips are
-					// stored sequentially per render object).
-					if (lod.render_objects != nullptr && lod.render_object_count > 0 &&
-					    lod.strips != nullptr) {
-						const ThreediRenderObject &p0 = lod.render_objects[0];
-						const int32_t p0_strip_count = p0.num_strips + p0.num_alpha_strips;
-						bool any = false;
-						for (int32_t pr = 0; pr < p0_strip_count; ++pr) {
-							const size_t idx = static_cast<size_t>(pr);
-							if (idx >= lod.strip_count) break;
-							const ThreediTriangleStrip &prim = lod.strips[idx];
-							info.rest_min_z =
-									any ? std::min(info.rest_min_z, prim.min[2])
-									    : prim.min[2];
-							info.rest_max_z =
-									any ? std::max(info.rest_max_z, prim.max[2])
-									    : prim.max[2];
-							any = true;
-						}
-					}
+				}
+				// The wreck's rest extents are the collision block's section-0 row: the
+				// loader copies each COBJ record's min / max words into a 108-byte row,
+				// z min at +0x54 and z max at +0x58 (the model's +0xB0 is the block, its
+				// +0x6C the row array), which both falling-death legs and the class
+				// init's husk floor read. Words in the model's own (mission) axes, z up.
+				// [orig: Threedi_BuildCollisionModelFromChunks @0x5B3BF0 - the row
+				//  stores @0x5B4021..0x5B4027 / @0x5B403F..0x5B4045, the block at the
+				//  loader's +0xB4 = model+0xB0 (ThreediGp_LoadFromFile @0x5B5B65,
+				//  ThreediGp_LoadModel returns the def +4 @0x5B6273);
+				//  Entity_ProcessFallingDeathPhysics @0x461E25..0x461E4B]
+				if (piece_m3 != nullptr && piece_m3->collision != nullptr &&
+				    piece_m3->collision->objects != nullptr &&
+				    piece_m3->collision->object_count > 0) {
+					info.rest_z_lo_q16 = piece_m3->collision->objects[0].min[2];
+					info.rest_z_hi_q16 = piece_m3->collision->objects[0].max[2];
 				}
 				hs = state.husk_pieces_by_graphic.emplace(
 						piece_key, std::move(info)).first;
@@ -840,8 +841,8 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				}
 				if (!t->piece_model.loaded() && info.model.loaded())
 					t->piece_model = info.model;
-				t->husk_rest_min_z = info.rest_min_z;
-				t->husk_rest_max_z = info.rest_max_z;
+				t->husk_rest_z_lo_q16 = info.rest_z_lo_q16;
+				t->husk_rest_z_hi_q16 = info.rest_z_hi_q16;
 				// brain[12] is the husk floor's absolute value, read from the
 				// husk (the final one when it loaded, else the first) by the class
 				// init under brain[11]'s gate: the helicopter family always, the
@@ -857,7 +858,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 								(husk_vt->brain_class == world::VehicleBrainClass::Ground &&
 										husk_ai->profile.subtype != 1)))
 					husk_ai->brain.f[world::AiBrain::kHuskFloor] =
-							world::to_fixed(std::abs(t->husk_rest_min_z));
+							io::bam_abs(t->husk_rest_z_lo_q16);
 			}
 			// Only entity+52's FIRST husk model joins this signed max. A
 			// huskFinal-only definition has no substitute operand here.
@@ -869,8 +870,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 			}
 		}
 		if (has_collision_block && e->bound_radius <= 0.0f)
-			e->bound_radius = static_cast<float>(world::entity_bound_radius_q16(bound)) /
-					65536.0f;
+			e->bound_radius.q16 = world::entity_bound_radius_q16(bound); // the word (D-NET-507)
 		const int32_t occ_id = state.occlusion_by_graphic[key];
 		// Entity_ClassifyForMinimap's ordinary-Building branch checks the
 		// live graphic model's +0xE0 portal/occlusion pointer. The parsed .3di

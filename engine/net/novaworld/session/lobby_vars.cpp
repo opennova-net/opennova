@@ -200,19 +200,6 @@ NapiMessage make_host_request(const HostRegistration &cfg, const std::vector<Cli
 	                                make_host_var_list(cfg, text, /*full=*/false), {});
 }
 
-// [orig: NovaWorldClient::az_fingerprint]
-std::string az_fingerprint(uint32_t seed, int len) {
-	static const char kAlpha[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-	uint32_t x = seed ? seed : 0x12345678u;
-	std::string s;
-	s.reserve(static_cast<size_t>(len < 0 ? 0 : len));
-	for (int i = 0; i < len; ++i) {
-		x = x * 1664525u + 1013904223u;
-		s.push_back(kAlpha[(x >> 24) % 26u]);
-	}
-	return s;
-}
-
 namespace {
 
 void xor_u32_le(std::array<uint8_t, 16> &bytes, std::size_t offset, uint32_t value) {
@@ -308,10 +295,42 @@ std::vector<std::pair<std::string, std::string>> make_lobby_identity_vars(const 
 		{"NWUID", ""},        // echoed from the ServerSessionInit at use
 		{"NWCDKIID", ""},     // empty in retail; verify is not CD-key-gated
 		{"NWCDKIIDEXP1", ""},
-		{"NWPSSK", p.nwpssk.empty() ? az_fingerprint(p.client_index ^ 0x5053534Bu, kNwpsskLen) : p.nwpssk},
-		{"NWUSID", p.nwusid.empty() ? az_fingerprint(p.client_key ^ 0x55534944u, kNwusidLen) : p.nwusid},
+		{"NWPSSK", p.nwpssk},
+		{"NWUSID", p.nwusid},
 		{"NWHWI", p.nwhwi},
 	};
+}
+
+// The platform's 32-bit view (lobby_vars.h): no Jointops.exe witness.
+int64_t wow64_display_memory_mb(int64_t display_memory_mb) {
+	return display_memory_mb > kWow64DisplayMemoryCapMb ? kWow64DisplayMemoryCapMb : display_memory_mb;
+}
+
+// [orig: CGfxDevice_QueryDxDiagDisplayMemory @0x67C820 - `shl eax, 14h` @0x67CA5C;
+//  CGfxDevice_CreateDevice @0x67E5D0 - @0x67EBFB / @0x67EBFD / @0x67EC25;
+//  CNapiGameSession_OnNovaWorldConnected @0x4D1570 - `shr eax, 14h` @0x4D1771]
+uint32_t nwhwi_display_memory_mb(int64_t display_memory_mb) {
+	const uint32_t bytes = static_cast<uint32_t>(display_memory_mb) << 20u;
+	const uint32_t kept = (bytes & 0x80000000u) != 0 ? 0u : bytes;
+	return kept >> 20u;
+}
+
+// [orig: System_GetCPUAndOSInfo @0x53CD30 - @0x53CF17; Game_ParseCommandLineAndInit @0x4A7310 -
+//  @0x4A7DF2, @0x4A7E05]
+uint32_t nwhwi_physical_memory_mb(uint64_t total_phys_bytes) {
+	const uint32_t total_phys =
+			static_cast<uint32_t>(std::min<uint64_t>(total_phys_bytes, 0x7FFFFFFFu));
+	return (total_phys + 0xC0000u) >> 20u;
+}
+
+// [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1570 - sprintf called @0x4D178F]
+std::string make_nwhwi(const HardwareIdentity &hw) {
+	std::string out = hw.has_adapter ? hw.adapter_description : std::string("(null)");
+	out += '$' + std::to_string(nwhwi_display_memory_mb(hw.display_memory_mb));
+	out += '$' + std::to_string(nwhwi_physical_memory_mb(hw.total_phys_bytes));
+	out += '$' + std::to_string(hw.display_width) + 'x' + std::to_string(hw.display_height);
+	out += '$' + std::to_string(hw.desktop_width) + 'x' + std::to_string(hw.desktop_height);
+	return out;
 }
 
 // [orig: Network_ParseHostAndPort @0x62E200 - strlen > 511 fails @0x62E260; Napi_CopyString
@@ -399,6 +418,11 @@ uint32_t resolve_address_without_dns(const std::string &host) {
 	if (strutil::iequals(host, "255.255.255.255")) return 0xFFFFFFFFu;
 	const uint32_t address = platform_inet_addr(host);
 	return address == 0xFFFFFFFFu ? 0u : address;
+}
+
+std::string in_addr_text(uint32_t address) {
+	return std::to_string(address & 0xFFu) + "." + std::to_string((address >> 8) & 0xFFu) + "." +
+	       std::to_string((address >> 16) & 0xFFu) + "." + std::to_string((address >> 24) & 0xFFu);
 }
 
 } // namespace opennova

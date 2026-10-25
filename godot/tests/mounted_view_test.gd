@@ -38,6 +38,20 @@ func _frame(world: GameWorld, camera: Camera3D, ticks: int = 1) -> void:
 		world.tick(camera.global_position, camera.global_transform, Simulation.tick_dt(), frame_input)
 
 
+# One shell frame whose trigger is the test's: a headless display captures no
+# mouse, so no router sample can hold the trigger. The presenter's frame head runs
+# as the shell's does, and the world ticks over a frame input of the test's, which
+# names no per-update source: every update the session drains then reads its
+# trigger bits (the router's own sample, which every update takes, would replace
+# them; engine inmatch::TickInputSource carries the witness).
+func _trigger_frame(world: GameWorld, fire_held: bool, fire_pressed: bool) -> void:
+	_presenter.before_world_tick(Simulation.tick_dt(), false, true)
+	var frame_input := MissionFrameInput.new()
+	frame_input.delta_seconds = Simulation.tick_dt()
+	frame_input.set_weapon_input(fire_held, fire_pressed, false)
+	world.tick(_camera.global_position, _camera.global_transform, Simulation.tick_dt(), frame_input)
+
+
 # The mounts' placements beside the spawn (mission x, y, yaw), each on the
 # ground of the Tmap relief.
 const PLACEMENTS := {
@@ -210,11 +224,9 @@ func test_little_bird_pilot_fires_the_carrier_weapon() -> void:
 	assert_eq(player.get_mount_type(), 2, "the Little Bird pilot is a controller")
 	var fired_before := sim.get_local_player_weapon_state().fired_serial
 	for tick in 96:
-		var frame_input := _presenter.before_world_tick(Simulation.tick_dt(), false, true)
-		frame_input.set_weapon_input(true, tick == 0, false)
-		world.tick(_camera.global_position, _camera.global_transform, Simulation.tick_dt(), frame_input)
+		_trigger_frame(world, true, tick == 0)
 	assert_gt(sim.get_local_player_weapon_state().fired_serial, fired_before,
-			"pilot input reaches the carrier weapon through the real presenter")
+			"pilot input reaches the carrier weapon through the real session")
 	_frame(world, _camera, 96)
 	var released := sim.get_local_player_weapon_state().fired_serial
 	_frame(world, _camera, 32)
@@ -334,9 +346,7 @@ func test_minigun_barrel_rotates_while_firing() -> void:
 	var greatest_turn := 0.0
 	var fired_before := sim.get_local_player_weapon_state().fired_serial
 	for tick in 96:
-		var frame_input := _presenter.before_world_tick(Simulation.tick_dt(), false, true)
-		frame_input.set_weapon_input(true, tick == 0, false)
-		world.tick(_camera.global_position, _camera.global_transform, Simulation.tick_dt(), frame_input)
+		_trigger_frame(world, true, tick == 0)
 		clock.set_time_ms_for_test((tick + 1) * 16)
 		gun.advance_runtime_frame(Simulation.tick_dt())
 		# Remove the live yaw/pitch contribution: only the barrel's authored
@@ -422,9 +432,7 @@ func test_minigun_flash_follows_the_mounted_muzzle() -> void:
 	var fired_before := sim.get_local_player_weapon_state().fired_serial
 	var flash_id := -1
 	for tick in 16:
-		var frame_input := _presenter.before_world_tick(Simulation.tick_dt(), false, true)
-		frame_input.set_weapon_input(true, tick == 0, false)
-		world.tick(_camera.global_position, _camera.global_transform, Simulation.tick_dt(), frame_input)
+		_trigger_frame(world, true, tick == 0)
 		for group in effects.get_debug_group_report():
 			if group.name == "Effect_MiniMuz":
 				flash_id = group.id

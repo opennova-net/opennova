@@ -298,8 +298,9 @@ int main(int argc, char **argv) {
 			reply = owner_push(service, owner_session, rid, "stop");
 			expect(reply.transport_ok && reply.code == 202, "the owner's stop is queued");
 			int lister_exit = -1;
-			// The lister can finish in the very frame whose mission exit stops the server, which
-			// tears the lister down; the server keeps the code it finished with.
+			// The lister holds its session, verified, until the match's NovaWorld exit stops the
+			// server, whose stop finishes it (D-NET-NEW-L9-20); the server keeps the code it
+			// finished with.
 			frame_until(
 					[&] {
 						if (server.lister() != nullptr && server.lister()->finished())

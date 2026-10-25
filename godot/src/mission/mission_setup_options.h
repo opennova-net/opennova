@@ -8,6 +8,7 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include <net/npwire/net_ports.h>
+#include <runtime/inmatch/client_runtime.h> // ClientProcessState
 
 #include "mission/mission_object_placer.h"
 #include "network/host_session_options.h"
@@ -87,6 +88,27 @@ public:
 	// Null = none: the session config's own mpreset word stands.
 	Ref<GameConfigBlock> get_game_config() const { return game_config_; }
 	void set_game_config(const Ref<GameConfigBlock> &p_value) { game_config_ = p_value; }
+	// The process's map-rotation words (Simulation.use_host_rotation), C++ only.
+	// Null = the sim keeps its own.
+	opennova::inmatch::HostRotation *get_host_rotation() const { return host_rotation_; }
+	void set_host_rotation(opennova::inmatch::HostRotation *p_value) { host_rotation_ = p_value; }
+	// The process's client words (Simulation.use_client_process), C++ only. Null = none.
+	opennova::inmatch::ClientProcessState *get_client_process() const { return client_process_; }
+	void set_client_process(opennova::inmatch::ClientProcessState *p_value) { client_process_ = p_value; }
+	// The single player's restart (Simulation.set_restart_boot), C++ only.
+	bool get_restart_boot() const { return restart_boot_; }
+	void set_restart_boot(bool p_value) { restart_boot_ = p_value; }
+	// The simulation already stands staged with its session created (the world load ran
+	// MissionRoot::stage_simulation and Simulation::create_host_session at its start), so the
+	// root's setup adopts it as is, C++ only.
+	bool get_session_staged() const { return session_staged_; }
+	void set_session_staged(bool p_value) { session_staged_ = p_value; }
+	// The process's server log devices (Simulation.use_log_devices), C++ only. Null = none.
+	opennova::inmatch::ServerLogDevices *get_log_devices() const { return log_devices_; }
+	void set_log_devices(opennova::inmatch::ServerLogDevices *p_value) { log_devices_ = p_value; }
+	// The shell's live binding table (Simulation.set_controls_model), C++ only. Null = none.
+	Ref<ControlsModel> get_controls_model() const { return controls_model_; }
+	void set_controls_model(const Ref<ControlsModel> &p_value) { controls_model_ = p_value; }
 	// The joiner's profile-to-wire projection (Simulation.set_join_character_profile).
 	// Null = none staged.
 	Ref<CharacterJoinProfile> get_join_character_profile() const {
@@ -163,6 +185,12 @@ private:
 	Ref<CharacterJoinProfile> local_character_profile_;
 	Ref<PlayerProfiles> player_profiles_;
 	Ref<GameConfigBlock> game_config_;
+	opennova::inmatch::HostRotation *host_rotation_ = nullptr;
+	opennova::inmatch::ClientProcessState *client_process_ = nullptr;
+	bool restart_boot_ = false;
+	bool session_staged_ = false;
+	opennova::inmatch::ServerLogDevices *log_devices_ = nullptr;
+	Ref<ControlsModel> controls_model_;
 	Ref<CharacterJoinProfile> join_character_profile_;
 	PackedStringArray spawn_names_;
 	Ref<ResourceRoot> resource_root_;

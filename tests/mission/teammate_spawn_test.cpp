@@ -101,10 +101,52 @@ void test_flyover_helicopter_keeps_its_spawn_heading() {
     CHECK(hull->veh.yaw_bam == 2147483520);
     CHECK(hull->veh.air_pitch_bam == 0 && hull->veh.air_roll_bam == 0);
 }
+// A teammate helicopter whose def carries an addeweap row spawns alone: the
+// factory clones a refNum-0 template and never runs the child spawner, which
+// only the load and a deployable call.
+// [orig: Entity_SpawnHelicopter @0x4521A0 (refNum 0 @0x45227C, the clone @0x4522E1);
+//  Entity_SpawnAddEWeapChildren @0x40F300, called from Mission_LoadBMSFile
+//  @0x40FD69 / @0x40FD8E and Entity_SpawnDeployable @0x51C49A alone]
+void test_teammate_helicopter_spawns_no_addeweap_children() {
+    std::array<def::DefItemDef, 2> rows{};
+    rows[0].id = mission::kItemIdOffset + 1281;
+    rows[0].type = 1;
+    rows[0].attrib = w::kItemAttribAIData;
+    rows[0].hp = 100;
+    std::strcpy(rows[0].ai_function, "CHel");
+    def::DefItemEmplacementAttachment gun{};
+    std::strcpy(gun.userpoint, "ewep01");
+    gun.item_id = mission::kItemIdOffset + 1419;
+    rows[0].emplacement_attachments = &gun;
+    rows[0].emplacement_attachments_count = 1;
+    rows[1].id = mission::kItemIdOffset + 1419;
+    rows[1].hp = 10;
+    def::DefItemsFile items{rows.data(), rows.size()};
+    auto kernel = std::make_unique<mission::MissionKernel>();
+    kernel->set_items_table(&items);
+    kernel->world.registry.configure_pool(0, 8);
+    kernel->world.registry.configure_pool(1, 8);
+    static const char kProfile[] = "type HELO\r\n";
+    kernel->ai_profiles.push_back({"h_bhawkn",
+            aip::parse_profile(reinterpret_cast<const uint8_t *>(kProfile),
+                    sizeof(kProfile) - 1)});
+    w::TeammateSpawn request;
+    request.item_type = 1281;
+    request.ssn = 11000;
+    request.helicopter = true;
+    const w::EntityHandle heli = kernel->spawn_teammate(request);
+    CHECK(heli.valid());
+    int children = 0;
+    kernel->world.registry.for_each([&](const w::Entity &e) {
+        if (e.emplacement_parent == heli) ++children;
+    });
+    CHECK(children == 0);
+}
 }
 int main() {
     test_helicopter_ammo_seed_needs_a_resolved_byte();
     test_flyover_helicopter_keeps_its_spawn_heading();
+    test_teammate_helicopter_spawns_no_addeweap_children();
     if (failures) {
         std::printf("teammate factory: FAIL\n");
         return 1;
@@ -166,7 +208,7 @@ int main() {
         CHECK(rig.world.registry.get(slot.first)->spawn_phase == 63);
         CHECK(rig.world.registry.get(slot.helicopter)->spawn_origin == w::kSpawnOriginNone);
         CHECK(rig.world.vehicles.traits.get(1281) != nullptr);
-        const int32_t initial_x = heli->pos[0];
+        const int32_t initial_x = heli->self->position.x.q16;
         rig.tick(125);
         heli = rig.world.ai.for_handle(slot.helicopter.handle);
         // The authored helicopter has no PlayerControl: its initial queued
@@ -201,7 +243,7 @@ int main() {
         CHECK(rig.world.teammates.count() == 1);
         CHECK(rig.world.registry.live_count() == baseline_count);
         CHECK(rig.world.script.heli_lift_active_count == 1);
-        CHECK(rig.world.ai.for_handle(slot.helicopter.handle)->pos[0] == initial_x);
+        CHECK(rig.world.ai.for_handle(slot.helicopter.handle)->self->position.x.q16 == initial_x);
     }
     for (const auto &gap : rig.world.diagnostics.gaps())
         CHECK(gap.origin.kind != w::RuntimeGapKind::BmsAction || gap.origin.code != 39);

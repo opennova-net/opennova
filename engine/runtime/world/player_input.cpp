@@ -101,7 +101,8 @@ void apply_player_body_input(AiEntity &e, const PlayerBodyInput &body) {
 
     // The local player writes look yaw/pitch directly into the entity inputs.
     // [orig: Input_ProcessMouseAxisBindings @0x499680 /
-    // Input_HandleActionBinding_0 @0x4e1330]
+    // Input_HandleActionBinding_0 @0x4E0420
+    //  (the Pitch stores @0x4E0D39..0x4E0D5C, @0x4E0F50, @0x4E111C)]
     inf.target_heading = body.look_heading;
     inf.look_pitch = body.look_pitch;
 

@@ -84,10 +84,21 @@ constexpr const char *kRowTokens[kHudToggleRowCount] = {
 	"ToggleServer", "flipmouse", "mousescale", "lockgame",
 };
 
+// The rows' static catalog rows, in HudToggleRow order (each row's token is the
+// catalog row's).
+constexpr int kRowCatalogRows[kHudToggleRowCount] = {
+	50, 76, 27, 38, 55, 107, 108, 109, 63, 56, 99, 100, 106, 73, 54, 75, 53, 70, 101, 102,
+	83, 79, 82, 84,
+};
+
 } // namespace
 
 const char *hud_toggle_row_token(int row) {
 	return row >= 0 && row < kHudToggleRowCount ? kRowTokens[row] : "";
+}
+
+int hud_toggle_row_catalog_row(int row) {
+	return row >= 0 && row < kHudToggleRowCount ? kRowCatalogRows[row] : -1;
 }
 
 void hud_key_poll_set_rows(HudKeyPoll &k, uint32_t rows) {
@@ -118,20 +129,61 @@ void hud_key_poll_set_rows(HudKeyPoll &k, uint32_t rows) {
 	k.lockgame = down(kRowLockGame);
 }
 
+namespace {
+
+// Every HUD row's held-state latch (the poll's).
+constexpr HudKeyEdge HudToggleState::*kKeyEdges[] = {
+	&HudToggleState::huddetail, &HudToggleState::hudcolor, &HudToggleState::showhud,
+	&HudToggleState::dotsize, &HudToggleState::goals, &HudToggleState::view1st,
+	&HudToggleState::viewwithgun, &HudToggleState::viewchase, &HudToggleState::playerlist,
+	&HudToggleState::old_messages, &HudToggleState::show_score,
+	&HudToggleState::friendly_tags, &HudToggleState::help, &HudToggleState::helpmap,
+	&HudToggleState::briefing, &HudToggleState::verbose, &HudToggleState::commander,
+	&HudToggleState::pause, &HudToggleState::audio_emote, &HudToggleState::radio_macro,
+	&HudToggleState::toggle_server, &HudToggleState::flipmouse, &HudToggleState::mousescale,
+	&HudToggleState::lockgame,
+};
+
+void reset_key_edges(HudToggleState &s) {
+	for (HudKeyEdge HudToggleState::*edge : kKeyEdges) (s.*edge).reset();
+}
+
+} // namespace
+
+uint32_t hud_toggles_dispatch(HudToggleState &s, const HudKeyPoll &fired) {
+	// A cleared latch passes its row's fire: each set row is one event.
+	reset_key_edges(s);
+	const uint32_t events = hud_toggles_poll(s, fired);
+	reset_key_edges(s);
+	return events;
+}
+
 uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	using namespace hud_toggle_event;
 	uint32_t events = 0;
 	// A row whose binding flags carry bit 0 is dropped while the pause word
 	// is set [orig: Input_HandleActionBinding @0x49addd..0x49ade8 — `test
 	// ecx, ecx` (flags & 1), `cmp dword_A87050, 0`]: dotsize, ShowFriendly,
-	// view1st, viewwithgun (0x0C0008xx / 0x0C000Cxx), commander_menu
-	// (0x04000801), AudioEmote and RadioMacro (0x0C000C01).
+	// AudioEmote and RadioMacro (0x0C000C01), view1st and viewwithgun
+	// (0x0C000801), commander_menu (0x04000801).
 	const bool bit0_active = k.active && !s.paused;
+	// Those rows read the dead bit through the head's whole operand: the constant 2
+	// on a dedicated host in a session (an authority that is no session peer), else the
+	// local player's dead bit (D-NET-433) [orig: Input_HandleActionBinding - is_in_session
+	//  @0x49AD52, is_authority @0x49AD5D, is_mp_session_peer @0x49AD66, `mov eax, 2`
+	//  @0x49AD6F, Flags & 2 @0x49AD76..0x49AD7E].
+	const bool bit0_operand_clear =
+			!(k.in_session && k.authority && !k.mp_session_peer) && k.local_alive;
+	// Each row's queued event passes the dispatcher's head by its row's flags
+	// before its case runs; the embedder hands in the rows the head drops
+	// (HudKeyPoll::head_drops). The edge latch steps either way, as the key scan
+	// queues the event whatever the head then does with it.
+	const auto admitted = [&k](HudToggleRow row) { return (k.head_drops & (1u << row)) == 0u; };
 	// A key both rows carry reaches one of them: the key scan's first match
 	// (controls::BindingSet::pressed_key, the sampler) gives it to hudcolor
 	// (code 10) before huddetail (19) [orig: the first-match key scan
 	// @0x49d42f / @0x49d488].
-	if (s.huddetail.step(k.huddetail, k.active)) {
+	if (s.huddetail.step(k.huddetail, k.active) && admitted(kRowHudDetail)) {
 		// The huddetail cycle: level + 1, wrapping past 3 to 0, on the LIVE
 		// level only (game.cfg keeps the config value) [orig:
 		// Input_HandleActionBinding_0 @0x4E0601..0x4E0624 ->
@@ -139,22 +191,23 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 		s.hud_detail_level = next_hud_detail_level(s.hud_detail_level);
 		events |= kHudDetailCycled;
 	}
-	if (s.hudcolor.step(k.hudcolor, k.active)) {
+	if (s.hudcolor.step(k.hudcolor, k.active) && admitted(kRowHudColor)) {
 		// The color-scheme cycle 0..5 with wrap; deliberately NO toast — the
 		// retail case only cycles and restamps the color [orig: the `hudcolor`
 		// action, dispatch code 10 @0x49afc7 — idx+1, >5 wraps to 0]
 		s.hud_color_index = next_hud_color_index(s.hud_color_index);
 		events |= kHudColorCycled;
 	}
-	if (s.showhud.step(k.showhud, k.active)) {
+	if (s.showhud.step(k.showhud, k.active) && admitted(kRowShowHud)) {
 		// flags = (flags + 1) & 3: bit 1 the corner spinmap block, bit 0 the FP
 		// gun [orig: g_FpWeaponViewFlags cycle @0x4E0561; bit0 @0x4DEDEA; bit1
 		// @0x5A8635]
 		s.showhud_flags = next_showhud_flags(s.showhud_flags);
 		events |= kShowHudCycled;
 	}
-	if (s.dotsize.step(k.dotsize, bit0_active)) events |= kDotsizeCycled;
-	if (s.goals.step(k.goals, k.active)) {
+	if (s.dotsize.step(k.dotsize, bit0_active && bit0_operand_clear) && admitted(kRowDotsize))
+		events |= kDotsizeCycled;
+	if (s.goals.step(k.goals, k.active) && admitted(kRowGoals)) {
 		if (!k.in_session || k.objective_game) {
 			// The objectives panel toggle, then the respawn init keeping it
 			// [orig: case 31 @0x49b65f; dword_24C18CC ^= 0xFF @0x49b68b; the
@@ -168,7 +221,8 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 			events |= toggle_briefing(s, k.in_session);
 		}
 	}
-	if (s.briefing.step(k.briefing, k.active)) events |= toggle_briefing(s, k.in_session);
+	if (s.briefing.step(k.briefing, k.active) && admitted(kRowBriefing))
+		events |= toggle_briefing(s, k.in_session);
 	// The view-action rows (catalog 107/108/109 = view1st F2, viewwithgun F3,
 	// viewchase F4): first person clears the FP-gun bit, gun view sets it, and
 	// both select first person; chase selects the chase preference. Each row
@@ -182,18 +236,21 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// sub-mode dispatches them (world player_view_chase_action, [orig:
 	// DeathScreen_FilterInputAction @0x52ad50]). [orig: Input_HandleActionBinding cases 400
 	// @0x49c073, 401 @0x49c0d9, 402 @0x49c0f6..0x49c107; the records @0x8186CC /
-	// @0x818738 / @0x8187A4 (keys F2/F3/F4) — their row flag gates (0x1 /
-	// 0x40 / 0x400 / 0x8000000) ride the unported binding layer, D-CTRL-3;
+	// @0x818738 / @0x8187A4 (keys F2/F3/F4) — their row flag gates (0x1 with the
+	// operand, the pause word and the round-over gate, 0x8000000) pass through
+	// bit0_operand_clear, bit0_active and HudKeyPoll::head_drops;
 	// g_FpWeaponViewFlags bit 0 cleared @0x49c073, set @0x49c0d9]
-	if (s.view1st.step(k.view1st, bit0_active)) {
+	if (s.view1st.step(k.view1st, bit0_active && bit0_operand_clear) && admitted(kRowView1st)) {
 		s.showhud_flags &= ~kShowHudFlagGun;
 		events |= kGunBitChanged | kFirstPersonSelected;
 	}
-	if (s.viewwithgun.step(k.viewwithgun, bit0_active)) {
+	if (s.viewwithgun.step(k.viewwithgun, bit0_active && bit0_operand_clear) &&
+			admitted(kRowViewWithGun)) {
 		s.showhud_flags |= kShowHudFlagGun;
 		events |= kGunBitChanged | kGunViewSelected;
 	}
-	if (s.viewchase.step(k.viewchase, k.active)) events |= kThirdPersonSelected;
+	if (s.viewchase.step(k.viewchase, k.active) && admitted(kRowViewChase))
+		events |= kThirdPersonSelected;
 	// The playerlist action (case 102) does nothing out of a session. In one,
 	// the authority's status page takes it — a dedicated host always, a
 	// listen host while its view is up — and flips the page's score list;
@@ -205,7 +262,7 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	//  Server_ToggleStatusScoreList @0x500580; Scoreboard_TogglePlayerList
 	//  @0x4244c0 from @0x49bb68; Game_InitRespawnState @0x4244df on the 0 -> 1
 	//  edge, then page = 0 @0x4244e4]
-	if (s.playerlist.step(k.playerlist, k.active) && k.in_session) {
+	if (s.playerlist.step(k.playerlist, k.active) && admitted(kRowPlayerList) && k.in_session) {
 		const bool status_page = k.mp_session_peer ? (k.authority && s.server_status_view)
 												   : k.authority;
 		if (status_page) {
@@ -221,7 +278,7 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	}
 	// The Recent Messages window, then the respawn init keeping it [orig:
 	// `xor g_ShowMessageLog, 1` @0x49b55a; the wrapper call @0x49b566]
-	if (s.old_messages.step(k.old_messages, k.active)) {
+	if (s.old_messages.step(k.old_messages, k.active) && admitted(kRowOldMessages)) {
 		s.message_log_open = !s.message_log_open;
 		events |= kMessageLogToggled | respawn_init_keeping(s, &s.message_log_open, k.in_session);
 	}
@@ -229,19 +286,20 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// the respawn-init wrapper, which clears the other overlay windows and
 	// keeps this one [orig: case 422 @0x49bd29 (the !is_in_session gate) ->
 	// Game_InitRespawnStateKeepingToggle @0x4993c0 @0x49bd4b]
-	if (s.show_score.step(k.show_score, k.active && !k.in_session)) {
+	if (s.show_score.step(k.show_score, k.active && !k.in_session) && admitted(kRowShowScore)) {
 		s.end_round_stats_open = !s.end_round_stats_open;
 		events |= kShowScoreToggled | respawn_init_keeping(s, &s.end_round_stats_open, false);
 	}
 	// The friendly-tags cycle [orig: case 30 @0x49b573; catalog row 100
 	// ShowFriendly, default K]; the embedder posts the toast.
-	if (s.friendly_tags.step(k.friendly_tags, bit0_active)) {
+	if (s.friendly_tags.step(k.friendly_tags, bit0_active && bit0_operand_clear) &&
+			admitted(kRowFriendlyTags)) {
 		s.friendly_tag_mode = next_friendly_tag_mode(s.friendly_tag_mode);
 		events |= kFriendlyTagsCycled;
 	}
 	// The F1 key-binding help, then the keeping init [orig: case 8
-	// `xor dword_24C18B0, 1` @0x49af73; the wrapper @0x49af7f]
-	if (s.help.step(k.help, k.active)) {
+	// `xor g_HelpScreenOpen, 1` @0x49af73; the wrapper @0x49af7f]
+	if (s.help.step(k.help, k.active) && admitted(kRowHelp)) {
 		s.help_open = !s.help_open;
 		events |= kHelpToggled | respawn_init_keeping(s, &s.help_open, k.in_session);
 	}
@@ -249,14 +307,14 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// server-status view is up [orig: case 234 @0x49af8c -- is_authority &&
 	// dword_24C1914 skips @0x49af95; `xor dword_24C18B4, 1` @0x49afa2; the
 	// wrapper @0x49afae]
-	if (s.helpmap.step(k.helpmap, k.active) &&
+	if (s.helpmap.step(k.helpmap, k.active) && admitted(kRowHelpMap) &&
 			!(k.authority && s.server_status_view)) {
 		s.map_legend_open = !s.map_legend_open;
 		events |= kMapLegendToggled | respawn_init_keeping(s, &s.map_legend_open, k.in_session);
 	}
 	// The verbose flip; the embedder posts the toast [orig: case 37
 	// `g_MpVerbose2 ^= 1` @0x49b78f -> Chat_AddMessageChannel2(text, -1, 930)]
-	if (s.verbose.step(k.verbose, k.active)) {
+	if (s.verbose.step(k.verbose, k.active) && admitted(kRowVerbose)) {
 		s.mp_verbose = !s.mp_verbose;
 		events |= kVerboseToggled;
 	}
@@ -268,7 +326,8 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	//  @0x49b8fa — UI_IsMenuScreenOpen @0x49b902 (dword_255110C), Game_InitRespawnState
 	//  @0x49b90f, UI_OpenMenuScreen("cmap.mnu", "CMAP", 0) @0x49b920,
 	//  g_CmapScreenOpen = 1 @0x49b928]
-	if (s.commander.step(k.commander_menu, bit0_active && k.local_alive))
+	if (s.commander.step(k.commander_menu, bit0_active && bit0_operand_clear) &&
+			admitted(kRowCommanderMenu))
 		events |= kCommandMapOpened | respawn_init(s, k.in_session);
 	// The single-player pause: out of a session the word flips and the quit
 	// dialog closes; the embedder applies the word to the session and stops
@@ -278,7 +337,7 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	//  dword_A87050, 1` @0x49b52d, g_QuitDialogOpen = 0 @0x49b534,
 	//  Input_ResetKeyQueue @0x49b53e, Audio_ShutdownChannelsAndDeviceTable
 	//  @0x49b550]
-	if (s.pause.step(k.pause, k.active) && !k.in_session) {
+	if (s.pause.step(k.pause, k.active) && admitted(kRowPause) && !k.in_session) {
 		s.paused = !s.paused;
 		s.quit_dialog_open = false;
 		events |= kPauseToggled;
@@ -288,11 +347,13 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// [orig: case 33 `xor dword_24C18D4, 1` @0x49b6c9 + the wrapper @0x49b6d5;
 	//  case 54 `xor dword_24C18D8, 1` @0x49b6e2 + the wrapper @0x49b6ee; the
 	//  row flag test @0x49ad8a..0x49ada0]
-	if (s.audio_emote.step(k.audio_emote, bit0_active && k.local_alive)) {
+	if (s.audio_emote.step(k.audio_emote, bit0_active && bit0_operand_clear) &&
+			admitted(kRowAudioEmote)) {
 		s.emotes_menu_open = !s.emotes_menu_open;
 		events |= respawn_init_keeping(s, &s.emotes_menu_open, k.in_session);
 	}
-	if (s.radio_macro.step(k.radio_macro, bit0_active && k.local_alive)) {
+	if (s.radio_macro.step(k.radio_macro, bit0_active && bit0_operand_clear) &&
+			admitted(kRowRadioMacro)) {
 		s.radio_menu_open = !s.radio_menu_open;
 		events |= respawn_init_keeping(s, &s.radio_menu_open, k.in_session);
 	}
@@ -301,7 +362,8 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// [orig: case 11 @0x49aff1 — is_in_session @0x49aff1, is_authority
 	//  @0x49affe, is_mp_session_peer @0x49b00b, `xor dword_24C1914, 1`
 	//  @0x49b018; catalog row 83, default VK 0xDC]
-	if (s.toggle_server.step(k.toggle_server, k.active) && k.in_session &&
+	if (s.toggle_server.step(k.toggle_server, k.active) && admitted(kRowToggleServer) &&
+			k.in_session &&
 			k.authority && k.mp_session_peer) {
 		s.server_status_view = !s.server_status_view;
 		events |= kServerStatusViewToggled;
@@ -313,8 +375,9 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// step's sign.
 	// [orig: case 9 `xor g_MouseInvertY, 1` @0x49afbb; case 17
 	//  @0x49b185..0x49b1fe; catalog rows 79 @0x817AFC / 82 @0x817C40]
-	if (s.flipmouse.step(k.flipmouse, k.active)) events |= kMouseFlipped;
-	if (s.mousescale.step(k.mousescale, k.active))
+	if (s.flipmouse.step(k.flipmouse, k.active) && admitted(kRowFlipMouse))
+		events |= kMouseFlipped;
+	if (s.mousescale.step(k.mousescale, k.active) && admitted(kRowMouseScale))
 		events |= kMouseScaleStepped | (k.mouse_scale_negative ? kMouseScaleNegative : 0u);
 	// lockgame: an authority in a session, a listen host or a dedicated one, toggles its join
 	// lock. The row ships unbound (flags 0x04000000: no gate bit, mode 3, alive or dead), and
@@ -323,7 +386,8 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	//  Server_ToggleJoinLock @0x49BC36; catalog row 84; the filters @0x52AD50 (codes
 	//  151..167 @0x52AD91 / @0x52AE9F, 405..410 @0x52AEBF), @0x4A3E50 (none), @0x56FC30 (the
 	//  cine editor's table, 119 its pass-through entry @0x56FCF5)]
-	if (s.lockgame.step(k.lockgame, k.active) && k.in_session && k.authority)
+	if (s.lockgame.step(k.lockgame, k.active) && admitted(kRowLockGame) && k.in_session &&
+			k.authority)
 		events |= kJoinLockToggled;
 	return events;
 }
@@ -420,10 +484,16 @@ uint32_t hud_round_over_key(const HudRoundOverKeyInput &in) {
 	// [orig: @0x49c7d5..0x49c7fd — out of a session, or the co-op game type
 	//  0x10020 (bit 0x20000 masked) without bit 0x20000]
 	const bool coop = (in.game_type & 0xFFFDFFFFu) == 0x10020u && (in.game_type & 0x20000u) == 0;
-	if (in.in_session && !coop) return 0;
-	if (in.vk == in.restart_vk) return kConsumed | kRestart; // [orig: @0x49c871]
-	if (in.vk == 27) return kConsumed | kExit;                // [orig: @0x49c8da / @0x49c8e2]
-	return kConsumed;                                         // [orig: @0x49c8d5]
+	if (in.in_session && !coop) {
+		// The end-of-round board's arm: PgUp / PgDn scroll it and are taken;
+		// ADVANCED flips its word and goes on, as every other key does
+		// [orig: @0x49c802 / @0x49c82c; @0x49c859 -> the tail @0x49c9c9].
+		if (in.vk == 0x21 || in.vk == 0x22) return kArm | kConsumed;
+		return kArm;
+	}
+	if (in.vk == in.restart_vk) return kArm | kConsumed | kRestart; // [orig: @0x49c871]
+	if (in.vk == 27) return kArm | kConsumed | kExit;               // [orig: @0x49c8da / @0x49c8e2]
+	return kArm | kConsumed;                                        // [orig: @0x49c8d5]
 }
 
 uint32_t hud_toggles_cine_start(HudToggleState &s, bool in_session) {

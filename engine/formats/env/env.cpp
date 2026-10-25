@@ -433,6 +433,7 @@ void parse_tod_pass(const std::string &text, Config &out, TodParse &parse) {
 			out.name = value;
 		} else if (key == "timeofday") {
 			out.timeofday = value;
+			out.time_of_day_enum = env_time_of_day_class(value);
 		} else if (key == "envscale") {
 			out.envscale = static_cast<float>(io::retail_atof(value));
 		} else if (key == "curtime") {
@@ -856,6 +857,13 @@ bool read_mission_env(const EnvTextReader &read, const std::string &terrain_file
 	if (read(kOvercastFile, overcast)) texts.overcast = &overcast;
 	if (!environment_file.empty() && read(environment_file, environment)) texts.environment = &environment;
 	return load_mission_env(texts, out);
+}
+
+int32_t env_time_of_day_class(const std::string &value) {
+	// [orig: TimeOfDay_ParseProperty @0x57CDD5 stricmp(value, "dawn"); nonzero -> 1 @0x57CDE2]
+	if (!strutil::iequals(value, "dawn")) return 1;
+	// [orig: @0x57CDF9 stricmp(value, "day"), nonzero for "dawn" -> 2 @0x57CE06]
+	return 2;
 }
 
 bool load_mission_env_config(const EnvTextReader &read, const std::string &terrain,

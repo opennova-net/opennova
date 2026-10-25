@@ -25,6 +25,7 @@
 #include <runtime/world/infantry.h>
 #include <runtime/world/pose_provider.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 using namespace opennova::world;
 namespace io = opennova::io;
@@ -66,7 +67,7 @@ struct Muzzle : IPoseProvider {
     bool resolve_organic_attachment(World &, EntityHandle h, uint8_t, int32_t out[3]) override {
         if (h != body || ai == nullptr) return false;
         const AiEntity *e = ai->for_handle(h);
-        for (int axis = 0; axis < 3; ++axis) out[axis] = e->pos[axis] + offset[axis];
+        for (int axis = 0; axis < 3; ++axis) out[axis] = e->self->position.word(axis) + offset[axis];
         return true;
     }
 };
@@ -127,9 +128,9 @@ struct Rig {
         e->health = 150;
         e->inf.max_health = 150;
         e->inf.adm_id = 1;
-        e->pos[0] = x;
-        e->pos[1] = y;
-        e->pos[2] = z;
+        e->self->position.x.q16 = x;
+        e->self->position.y.q16 = y;
+        e->self->position.z.q16 = z;
         e->slot.f[15] = 8 * 65536;  // attack range
         e->slot.f[16] = 32768;      // min engagement
         e->slot.f[17] = 40 * 65536; // sight
@@ -631,7 +632,7 @@ static void test_route_reads_the_raw_node_word() {
         Rig r(fx(60), 0, 0);
         r.route(0, fx(20));
         r.w.ai.nav.channels[1].entries[0] = 7; // no marker filled pool-3 slot 7
-        r.blue().pos[0] = fx(10);
+        r.blue().self->position.x.q16 = fx(10);
         r.w.ai.infantry_think(r.blue(), r.w);
         CHECK(r.blue().slot.f[35] == 1);
         CHECK(r.blue().inf.move_mode == 3 && r.blue().inf.target_dist == fx(10));
@@ -641,7 +642,7 @@ static void test_route_reads_the_raw_node_word() {
     {
         Rig r(fx(60), 0, 0);
         r.route(fx(10), 0); // blue arrives on node 0 ...
-        r.blue().pos[0] = fx(10);
+        r.blue().self->position.x.q16 = fx(10);
         r.w.ai.nav.channels[1].count = 2;
         r.w.ai.nav.channels[1].entries[1] = 7; // ... and node 1 names an unfilled slot
         r.w.ai.infantry_think(r.blue(), r.w);
@@ -902,7 +903,7 @@ static void test_idle_facing_probes_turn_away_from_a_wall() {
     Entity wall{};
     wall.kind = EntityKind::Building;
     wall.alive = true;
-    wall.yaw = 90;
+    wall.heading = placed_heading_bam(90);
     wall.position = {1.5f, 0.0f, 0.0f};
     const EntityHandle wall_h = r.w.registry.spawn(2, wall);
     auto collision = std::make_unique<CollisionWorld>();
@@ -950,7 +951,7 @@ static void test_idle_facing_folds_each_blocked_fan_probe() {
     Entity wall{};
     wall.kind = EntityKind::Building;
     wall.alive = true;
-    wall.yaw = 90;
+    wall.heading = placed_heading_bam(90);
     wall.position = {1.5f, 0.0f, 0.0f};
     const EntityHandle east_h = r.w.registry.spawn(2, wall);
     wall.position = {-1.5f, 0.0f, 0.0f};
@@ -1131,7 +1132,7 @@ static void test_scan_skips_a_threat_behind_a_wall() {
     Entity wall{};
     wall.kind = EntityKind::Building;
     wall.alive = true;
-    wall.yaw = 90;
+    wall.heading = placed_heading_bam(90);
     wall.position = {0.0f, 3.0f, 0.0f};
     wall.item_type_index = 1; // the def row's ordinal: the +0x1C slice gate
     wall.has_item_def = true;

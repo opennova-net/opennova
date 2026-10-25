@@ -7,6 +7,7 @@
 #include <formats/env/env.h>
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/runtime_boot.h>
+#include <runtime/renderer/frame_fx_effects.h> // creates_frame_fx_pixel_shaders, builds_frame_fx_scanline_texture
 
 #include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/world_environment.hpp>
@@ -283,6 +284,31 @@ void WorldScene::wire_() const {
 
 // --- the load --------------------------------------------------------------------
 
+void WorldScene::load_sky_maps(bool p_dedicated_host) const {
+	if (nodes_.environment == nullptr) {
+		return;
+	}
+	const Ref<EnvFile> env = nodes_.environment->get_environment_data();
+	if (env.is_valid()) {
+		env->load_mission_sky_maps(p_dedicated_host);
+	}
+}
+
+// FrameFX's pixel shaders, then the scanline texture, whose texels draw from the render CRT stream
+// (engine renderer/frame_fx_effects.h creates_frame_fx_pixel_shaders and
+// builds_frame_fx_scanline_texture carry the witness).
+void WorldScene::init_frame_fx_mission_textures(bool p_dedicated_host) const {
+	if (nodes_.framefx == nullptr) {
+		return;
+	}
+	if (opennova::renderer::creates_frame_fx_pixel_shaders(p_dedicated_host)) {
+		nodes_.framefx->create_pixel_shaders();
+	}
+	if (opennova::renderer::builds_frame_fx_scanline_texture(p_dedicated_host)) {
+		nodes_.framefx->init_mission_textures();
+	}
+}
+
 WorldEnvironmentLoad WorldScene::load_environment(
 		const Ref<ResourceRoot> &p_root, const String &p_trn_path, const String &p_env_path) const {
 	WorldEnvironmentLoad report;
@@ -314,21 +340,20 @@ WorldEnvironmentLoad WorldScene::load_environment(
 	if (nodes_.weather != nullptr) {
 		nodes_.weather->resync_colors();
 	}
-	if (nodes_.celestial != nullptr) {
-		nodes_.celestial->set_resource_root(p_root);
-	}
 	if (nodes_.precipitation != nullptr) {
 		nodes_.precipitation->set_resource_root(p_root);
-	}
-	// FrameFX's mission texture (the "ffscan" scanlines) draws from the render
-	// CRT stream here, as Render_InitMissionTextures does.
-	if (nodes_.framefx != nullptr) {
-		nodes_.framefx->init_mission_textures();
 	}
 	if (nodes_.environment_cube != nullptr) {
 		nodes_.environment_cube->force_capture();
 	}
 	return report;
+}
+
+void WorldScene::load_celestial_models(const Ref<ResourceRoot> &p_root, bool p_draws) const {
+	if (nodes_.celestial != nullptr) {
+		nodes_.celestial->set_draws_bodies(p_draws);
+		nodes_.celestial->set_resource_root(p_root);
+	}
 }
 
 void WorldScene::apply_mission_overrides(

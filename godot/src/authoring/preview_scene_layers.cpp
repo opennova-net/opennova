@@ -1,7 +1,9 @@
 #include "authoring/preview_scene_layers.h"
 #include "authoring/preview_godot.h"
 
+#include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/environment.hpp>
+#include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/classes/world_environment.hpp>
 #include <godot_cpp/core/object.hpp>
@@ -390,10 +392,14 @@ void PreviewSceneLayers::run_environment_() {
 	// As the game's load reads it (WorldScene::load_environment): the terrain's .trn, overcast.def
 	// (the overcast table), then the .env over them, a .env that is not there skipped with the
 	// earlier passes standing over the engine's own environment (env-tod-re.md #38, #43); the
-	// weather's colours snapped, the bodies and the drops read through the project's files,
-	// FrameFX's mission texture, the cube captured again. What the load lacks is a note, as the
-	// game's load reports it.
+	// weather's colours snapped, the bodies and the drops read through the project's files, the
+	// cube captured again. What the load lacks is a note, as the game's load reports it.
 	const WorldEnvironmentLoad load = scene_.load_environment(root_files_, trn, environment);
+	// The device draws, as the game's full arm does: the environment's celestial bodies, its sky
+	// maps and FrameFX's mission texture load with it.
+	scene_.load_celestial_models(root_files_, /*p_draws=*/true);
+	scene_.load_sky_maps(/*p_dedicated_host=*/false);
+	scene_.init_frame_fx_mission_textures(/*p_dedicated_host=*/false);
 	if (load.environment_missing)
 		note_missing(kEnvironment, source_.environment);
 	if (load.overcast_missing)
@@ -654,7 +660,7 @@ void PreviewSceneLayers::present_frame(double dt, int64_t clock_ms) {
 	present_sun_veil();
 	present_particles(clock_ms);
 	present_drops();
-	present_overlay(nullptr);
+	present_overlay(nullptr, 0);
 	present_frame_effects();
 	present_clear_and_cube();
 	end_frame();
@@ -754,19 +760,26 @@ void PreviewSceneLayers::present_drops() {
 	}
 }
 
-void PreviewSceneLayers::present_overlay(EffectLightDirector *lights) {
+void PreviewSceneLayers::present_overlay(EffectLightDirector *lights, int64_t clock_ms) {
 	ParticleRenderer *renderer = effects_->renderer();
 	if (renderer == nullptr)
 		return;
 	const WorldSceneNodes &n = nodes();
-	// GameWorld::render_scene_overlay_frame's tail: the drops, the coronas, the murk, the glint and
-	// the glare, the mirror's closing draws (env/celestial_overlay, renderer/scene_overlay.h).
+	// GameWorld::render_scene_overlay_frame's tail: the drops, the coronas (the mirror's own walk
+	// among them), the murk, the glint and the glare, the mirror's closing draws
+	// (env/celestial_overlay, renderer/scene_overlay.h).
 	auto submission = std::make_shared<SceneOverlaySubmission>();
 	submission->frame_id = ++overlay_frame_id_;
 	n.precipitation->append_overlay(*submission);
-	if (lights != nullptr)
-		lights->append_overlay(*submission);
 	const bool water_renders = n.water->is_water_render_active() && shown_.water;
+	if (lights != nullptr) {
+		Camera3D *mirror = n.water->get_reflection_camera();
+		const SubViewport *target = n.water->get_reflection_viewport();
+		const bool mirror_renders = water_renders && mirror != nullptr && mirror->is_inside_tree() &&
+				target != nullptr && target->get_update_mode() != SubViewport::UPDATE_DISABLED;
+		lights->render_mirror_coronas(mirror_renders ? mirror : nullptr, nullptr, clock_ms);
+		lights->append_overlay(*submission);
+	}
 	if (water_renders)
 		append_underwater_murk_overlay(*n.environment, *n.water, *submission);
 	if (shown_.sky) {

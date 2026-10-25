@@ -479,7 +479,7 @@ void mus_vm_resume(MusVM *vm);
 int mus_vm_tick(MusVM *vm, uint32_t dt_ms);
 
 /* The restart frame [orig: AudioVM_RunContext @ 0x672e95..0x672ec1 -- the step the
-   per-update pump (sub_672EE0) and MusicCtx_SelectEndTrack @ 0x672fd0 share]:
+   per-update pump (AudioVM_RunInstance) and MusicCtx_SelectEndTrack @ 0x672fd0 share]:
    the step starts both stacks at their bases; when the context's restart
    byte (ctx+32) is set it clears it, pushes the current IP on the return
    stack, pushes (byte, 0) on the data stack, sets IP = the chunk's +0x40

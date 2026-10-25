@@ -26,14 +26,19 @@
 //                (its only data references are that clear and the dump), so
 //                the file retail writes is always empty. The dump runs from the
 //                Server-class `PuntLog` action (catalog row 86, code 48, no
-//                default key) and from the shutdown, behind the error-log flag
-//                whose setter has no direct reference; the port's servers have
-//                neither trigger (D-NET-357) [orig: Input_HandleActionBinding
-//                case 48 @0x49b833; Game_ShutdownSubsystems @0x4a53f9 ->
-//                Server_DumpPuntLogIfErrorLogEnabled @0x53c770 gated on dword_24E5DD8].
+//                default key) and from the shutdown, behind the error-log flag,
+//                whose one writer (0x53c750, outside any function) nothing
+//                references, so a stock run never sets it and never writes the
+//                shutdown's punt.log nor _errlog.txt; the port's servers have
+//                neither trigger [orig: Input_HandleActionBinding case 48
+//                @0x49b833; Game_ShutdownSubsystems @0x4a53f9 ->
+//                Server_DumpPuntLogIfErrorLogEnabled @0x53c770 gated on
+//                g_ErrorLogEnabled; its store @0x53c761; ErrorLog_WriteTimestamped
+//                @0x53c6d3].
 //
 // Every write goes through the embedder's file seam (server_files.h).
 
+#include <net/npwire/peer_addr.h>
 #include <runtime/inmatch/server_files.h>
 
 #include <array>
@@ -56,6 +61,103 @@ std::string crt_asctime_text(std::time_t t);
 // The line ending NapiFile_AppendLine adds after every line [orig:
 // g_NapiFileLineEnding @0x849d38 -> "\r\n" @0x7c1310].
 inline constexpr const char *kNapiLineEnding = "\r\n";
+
+// The _connectlog.txt debug log: off unless `/CONNECTLOG` armed it, every
+// line `"<time> : <text>"` through NapiFile_AppendLine while it is on
+// [orig: g_ConnectLogEnabled @0xB4C720; its 82 readers each test it, then
+// Napi_GetTimeString, sprintf("%s : ...") and NapiFile_AppendLine("_connectlog.txt")].
+inline constexpr const char *kConnectLogFile = "_connectlog.txt";
+struct ConnectLogHeader {
+	std::string exe;     // the running executable's basename [orig: Napi_GetExeBasename]
+	std::string version; // the build's "V1.7.5.7" text [orig: g_VersionText @0x4A7D81]
+	std::string title;   // the game's title [orig: g_TitleText @0x4A7D37, off_8154D8]
+	std::string ver1;    // the version pair's strings [orig: "3" @0x7C9730]
+	std::string ver2;    // [orig: "2345" @0x7C9714]
+};
+class ConnectLog {
+public:
+	explicit ConnectLog(ServerFileSink &files);
+	// The start, once the command line is read: the file deleted, then the
+	// STARTED line and the EXE, VERSION, TITLE, VER1 and VER2 lines [orig:
+	// Game_ParseCommandLineAndInit @0x4A7E37..0x4A7F8A].
+	void start(const ConnectLogHeader &header);
+	bool enabled() const { return enabled_; }
+	// One `"<time> : <text>"` line while the log is on.
+	void line(const std::string &text);
+	// The server's first new connection: its disabling line, then off for the
+	// process [orig: NapiNPServer_HandleNewConnection @0x4C8040 (@0x4C8054..0x4C80AF)].
+	void disable_at_server_connection();
+	// A client's S2C 0x61 (the session key): its disabling line while the log is on,
+	// then off for the process [orig: NapiNPClientMsg_HandleTickSeed @0x4297C0 -
+	// @0x4297F1..0x42983E].
+	void disable_at_client_session_key();
+	// The clock tests stub (Napi_GetTimeString's text).
+	void set_clock(std::function<std::string()> now) { now_ = std::move(now); }
+
+private:
+	ServerFileSink &files_;
+	std::function<std::string()> now_;
+	bool enabled_ = false;
+};
+
+// The _connectlog.txt packet and session lines' texts, each written as
+// ConnectLog::line's `"<time> : <text>"` while the log is on. An address is
+// Napi_FormatAddress's "a.b.c.d:port" (peer_addr_to_string: inet_ntoa, then
+// the host-order port as %ld) [orig: Napi_FormatAddress @0x62DED0 - inet_ntoa
+// @0x62DF05, sprintf("%s:%ld") @0x62DF22; the port host-ordered by
+// CNapiUdpSocket_RecvFromWithFilter @0x62D189].
+//
+// The NAPI manager's five packet callbacks' texts and the protocol's NET GOT are the wire
+// layer's: the LAN browse writes them too (net/npwire/nw_session_framing.h napi_got_raw_text
+// .. napi_tossed_text, net_got_text).
+//
+// The protocol's client-side callbacks (proto +0x26C / +0x270 / +0x274 / +0x27C /
+// +0x280 / +0x284); a host writes none of these: the server side's slots +0x2DC /
+// +0x2E0 / +0x2E4 / +0x2EC are empty stubs and +0x2F0 (byte_4C4680) only sets the
+// net-quality error bit 2 and code 0x9B past its tick threshold, with no line.
+// [orig: CNapiNetwork_Init @0x4CA908..0x4CA9CD; NapiLog_OnRecv @0x4C46B0 ("NET GOT",
+//  the opcode as two hex digits), NapiLog_OnSend @0x4C4760 ("NET SENDING", the
+//  opcode and p#), NapiLog_OnProcess @0x4C67D0, Network_LogUnknownNETMessage
+//  @0x4C4810, Network_LogIncomingPacketError @0x4C4890,
+//  Network_LogOutgoingPacketError @0x4C4920; the side tests
+//  CNapiNPConnection_SendSessionPacket @0x61EFCA..0x61EFE8 and
+//  CNapiNPConnection_ParseMessages @0x625D06..0x625D1A]
+std::string net_sending_text(int32_t bytes, const PeerAddr &to, uint32_t opcode, int32_t packet);
+std::string net_processing_text(int32_t bytes, const PeerAddr &from);
+std::string net_unknown_message_text(uint32_t message, int32_t bytes);
+std::string net_incoming_packet_error_text();
+std::string net_outgoing_packet_error_text();
+// The socket's teardown [orig: CNapiNetwork_TearDownSocket @0x4C4C90, the line
+// @0x4C4CBE..0x4C4CE7 ahead of NapiNPManager_CloseSocket @0x4C4CF5].
+std::string net_tearing_down_socket_text();
+// The session destroy's transport teardown, after its leave and its session reset: a join off
+// NovaWorld with a socket open writes NET TEARING DOWN SOCKET to `log` (null: none; the line only
+// while the log is on), and the embedder then closes the socket (true). A join on NovaWorld (the
+// menu's connect type 1) keeps its transport, and with no socket open there is nothing to tear
+// down (false, nothing written). A join's destroy runs it with the join's socket open, after its
+// session reset's held-server stop (ClientRuntime::tear_down_transport). The join machine's
+// state 9 ahead of a dial (a refused row, the choice's BACK or Cancel, the enumerate's ABORT)
+// runs the same destroy over the process's transport, with no connection of the join's own to
+// leave (the connection is not active): its session reset drains the enumerator's records (their
+// REMOVED lines), then stops a held server (stop_unstopped_server, over the still-open socket),
+// then this teardown.
+// [orig: CNapiGameSession_FullDestroy @0x4C96A0 - `networkConnectType_480 != 1` @0x4C9722, the
+//  transport mode @0x4C974E, CNapiNetwork_TearDownSocket (the calls @0x4C9763 / @0x4C976F);
+//  CNapiNetwork_TearDownSocket @0x4C4C90 - the manager test, the line @0x4C4CBE..0x4C4CE7 ahead
+//  of NapiNPManager_CloseSocket @0x4C4CF5; MultiPlayer_JoinSessionStateMachine @0x56A320 -
+//  state 9's CNapiGameSession_FullDestroy(-1) @0x56A3E3; CNapiNetwork_DisconnectActiveConnection
+//  @0x4C9140 - the active-connection test @0x4C918F; CNapiGameSession_ResetActiveSession
+//  @0x4C8A70 - CNapiNPConnection_Destroy called @0x4C8A93, NapiNPProtocol_StopServer called
+//  @0x4C8AA1]
+bool tear_down_session_transport(bool novaworld_join, bool socket_open, ConnectLog *log);
+// The client's session callbacks [orig: CNapiNetwork_OnConnectedToServer @0x4C62E0
+//  (@0x4C6348 / @0x4C6362); CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 (the
+//  record's ds, dc, dp1, dp2, dstr, dpc, ddstr, @0x4C6421)]. The enumerator's two
+//  session-record lines are the wire layer's (net/npwire/lan_discovery.h
+//  net_session_removed_text / net_session_discovered_text).
+std::string net_connected_to_server_text(const PeerAddr &server, const PeerAddr &yours);
+std::string net_disconnecting_from_server_text(const PeerAddr &server, int32_t ds, int32_t dc,
+		int32_t dp1, int32_t dp2, const std::string &dstr, int32_t dpc, const std::string &ddstr);
 
 // One _PUNT.TXT line, line ending excluded: with a slot
 // `"<time> : NN : \"<name>\" : <reason> : <details>"`, without one
@@ -99,6 +201,11 @@ const char *punt_reason_name(int type);
 // row's time (crt_asctime_text in production).
 std::string punt_log_dump_text(const std::vector<PuntRecord> &rows,
 		const std::function<std::string(std::time_t)> &asctime_text);
+// Server_DumpPuntLogToFile over `rows`: punt.log rewritten whole in `files` (fopen "w"
+// truncates; a file that does not open writes nothing) [orig: Server_DumpPuntLogToFile
+// @0x500260 - fopen("punt.log", "w") called @0x50026B, the row walk @0x50027A..0x5002EA].
+void write_punt_log_dump(ServerFileSink &files, const std::vector<PuntRecord> &rows,
+		const std::function<std::string(std::time_t)> &asctime_text = crt_asctime_text);
 
 class PuntLog {
 public:

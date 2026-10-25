@@ -93,6 +93,10 @@ void Terrain::_bind_methods() {
 	ClassDB::bind_method(
 		D_METHOD("set_tile_cache_capture_diagnostics", "enabled"),
 		&Terrain::set_tile_cache_capture_diagnostics);
+	ClassDB::bind_method(D_METHOD("set_tile_cache_device_shadow", "enabled"),
+		&Terrain::set_tile_cache_device_shadow);
+	ClassDB::bind_method(D_METHOD("get_tile_cache_layer_bytes", "layer"),
+		&Terrain::get_tile_cache_layer_bytes);
 	ClassDB::bind_method(D_METHOD("set_static_shadow_placer", "placer"),
 		&Terrain::set_static_shadow_placer);
 	ClassDB::bind_method(D_METHOD("set_static_terrain_shadow_enabled", "enabled"),
@@ -104,7 +108,8 @@ void Terrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_suppressed_static_shadow_bms_ids"),
 		&Terrain::get_suppressed_static_shadow_bms_ids);
 
-	ClassDB::bind_method(D_METHOD("build"), &Terrain::build);
+	ClassDB::bind_method(D_METHOD("build", "lod_cache", "tile_cache_targets"), &Terrain::build,
+			DEFVAL(true), DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("refresh_region", "rects", "tiles", "foliage"), &Terrain::refresh_region_rects, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("get_refresh_us"), &Terrain::get_refresh_us);
 	ClassDB::bind_method(D_METHOD("get_heightfield_normal_bytes"), &Terrain::get_heightfield_normal_bytes);
@@ -114,7 +119,8 @@ void Terrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_refresh_pages_retired"), &Terrain::get_refresh_pages_retired);
 	ClassDB::bind_method(D_METHOD("get_tile_lod_mesh", "tile", "lod", "flat"), &Terrain::get_tile_lod_mesh);
 	ClassDB::bind_method(D_METHOD("get_heightfield_normal_texture"), &Terrain::get_heightfield_normal_texture);
-	ClassDB::bind_method(D_METHOD("build_begin"), &Terrain::build_begin);
+	ClassDB::bind_method(D_METHOD("build_begin", "lod_cache", "tile_cache_targets"),
+			&Terrain::build_begin, DEFVAL(true), DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("build_step"), &Terrain::build_step);
 	ClassDB::bind_method(D_METHOD("get_build_step_count"), &Terrain::get_build_step_count);
 	ClassDB::bind_method(D_METHOD("get_build_steps_done"), &Terrain::get_build_steps_done);
@@ -132,6 +138,8 @@ void Terrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_patches_active"), &Terrain::get_patches_active);
 	ClassDB::bind_method(D_METHOD("has_visible_terrain_bounds"),
 			&Terrain::has_visible_terrain_bounds);
+	ClassDB::bind_method(D_METHOD("has_inset_visible_terrain_bounds"),
+			&Terrain::has_inset_visible_terrain_bounds);
 
 	ClassDB::bind_method(D_METHOD("set_debug_no_frustum", "enabled"), &Terrain::set_debug_no_frustum);
 	ClassDB::bind_method(D_METHOD("get_debug_no_frustum"), &Terrain::get_debug_no_frustum);
@@ -271,12 +279,20 @@ Ref<Texture2D> Terrain::get_heightfield_normal_texture() const {
 	return surface_inputs->get_heightfield_normal_texture();
 }
 
-Ref<Texture2DArray> Terrain::get_tile_cache_texture() const {
+Ref<TextureLayered> Terrain::get_tile_cache_texture() const {
 	return tile_cache_device.get_texture();
 }
 
 void Terrain::set_tile_cache_capture_diagnostics(bool p_enabled) {
 	tile_cache_device.set_capture_diagnostics(p_enabled);
+}
+
+void Terrain::set_tile_cache_device_shadow(bool p_enabled) {
+	tile_cache_device.set_device_shadow_enabled(p_enabled);
+}
+
+PackedByteArray Terrain::get_tile_cache_layer_bytes(int p_layer) const {
+	return tile_cache_device.read_device_layer(p_layer);
 }
 
 Dictionary Terrain::get_tile_cache_diagnostics() const {
@@ -627,11 +643,21 @@ void Terrain::render_inset_frame(Camera3D *p_camera) {
 	if (!is_visible_in_tree() || !built || terrain_material.is_null() ||
 			p_camera == nullptr || !p_camera->is_inside_tree()) {
 		release_inset_frame();
+		// A hidden terrain draws no Inset patches, but the Inset's bounds walk
+		// still feeds its water-active test, as the main frame's does
+		// (opennova::track_terrain_visible_bounds).
+		if (built && p_camera != nullptr && p_camera->is_inside_tree()) {
+			inset_frame_bounds = opennova::track_terrain_visible_bounds(scene_snapshot,
+					_view_input_for(p_camera));
+			inset_frame_bounds_live = true;
+		}
 		return;
 	}
 	const opennova::TerrainDrawList &draw_list =
 			inset_frame_compiler.compile(scene_snapshot, _view_input_for(p_camera));
 	inset_draw_list_live = true;
+	inset_frame_bounds = draw_list.visible_bounds;
+	inset_frame_bounds_live = true;
 	_sync_inset_material();
 	if (!inset_pool.instances[0].is_valid()) {
 		_create_pool_instances(inset_pool, inset_material->get_rid());
@@ -646,6 +672,7 @@ void Terrain::render_inset_frame(Camera3D *p_camera) {
 
 void Terrain::release_inset_frame() {
 	inset_draw_list_live = false;
+	inset_frame_bounds_live = false;
 	_set_pool_world_layer(main_pool, visual_layers::WORLD);
 	if (inset_pool.instances[0].is_valid()) {
 		_free_pool_instances(inset_pool);
@@ -811,8 +838,10 @@ const std::vector<opennova::TerrainTilePageBinding> &Terrain::_compose_pages(
 				cached_env_node->get_light_direction_render_tuple();
 	}
 	if (p_display_frame_start) {
+		// The casters' material clock is GetTickCount's DWORD (the frame clock): an int
+		// past 2^31 ms of uptime is that DWORD's high half, never a time before zero.
 		static_shadow_rasterizer.begin_frame(page_light_direction,
-				light_time_ms < 0 ? 0u : static_cast<uint32_t>(light_time_ms));
+				static_cast<uint32_t>(light_time_ms));
 		// The pages a changed caster's shadow touched or touches, composed
 		// again below (only while the casters are followed: the editor's
 		// mission device). Mission (x, y) is Godot (x, -z).
@@ -829,6 +858,16 @@ const std::vector<opennova::TerrainTilePageBinding> &Terrain::_compose_pages(
 					cached_env_node->state().weather() != nullptr
 			? cached_env_node->state().weather()->tod_epoch
 			: 0u;
+	// A time set's tile-cache reset empties every page (engine world::WeatherState::
+	// reset_time_caches carries the witness).
+	const uint32_t time_set_resets = cached_env_node != nullptr &&
+					cached_env_node->state().weather() != nullptr
+			? cached_env_node->state().weather()->time_set_resets
+			: 0u;
+	if (time_set_resets != seen_time_set_resets) {
+		seen_time_set_resets = time_set_resets;
+		tile_cache_device.invalidate_all_pages();
+	}
 	tile_cache_device.begin_frame(++page_sweep_id, tod_epoch);
 	// Every missing visible page composes before the patches draw.
 	return tile_cache_device.compose_frame(draw_list, page_tile_tint, page_light_direction);
@@ -981,6 +1020,7 @@ void Terrain::_ensure_light_rows(LightRows &r_rows) {
 	r_rows.texture = ImageTexture::create_from_image(r_rows.image);
 	r_rows.uploaded = r_rows.bytes.duplicate();
 	r_rows.enabled_written = -1;
+	r_rows.total_written = 0;
 }
 
 void Terrain::_bind_light_textures() {
@@ -1078,9 +1118,20 @@ int Terrain::_render_light_rows(const opennova::TerrainDrawList &draw_list, Ligh
 			light_time_ms, cached_weather_node, recip_packed,
 			light_patch_rows.data());
 	r_total = static_cast<int>(total);
-	// Rewrite the whole rows image: a slot that lost its lights reads count 0.
-	r_rows.bytes.fill(0);
+	// No light reaches a patch and the rows the texture holds carry none (all zero): the
+	// rewrite would rebuild the same zero bytes, so it and its compare are skipped.
+	if (total == 0 && r_rows.total_written == 0) {
+		if (r_rows.enabled_written != 0) {
+			p_material->set_shader_parameter("u_terrain_light_enabled", false);
+			r_rows.enabled_written = 0;
+		}
+		return 0;
+	}
+	// Rewrite the whole rows image: a slot that lost its lights reads count 0. One memset over
+	// the bytes, not the engine's PackedByteArray::fill builtin, a per-frame cost the in-world
+	// profile showed (D-NET-NEW-LF-22).
 	float *texels = reinterpret_cast<float *>(r_rows.bytes.ptrw());
+	std::memset(texels, 0, static_cast<size_t>(r_rows.bytes.size()));
 	for (int i = 0; i < count; i++) {
 		const opennova::renderer::TerrainLightPatchRows &rows = light_patch_rows[i];
 		if (rows.count > 0) {
@@ -1116,6 +1167,7 @@ int Terrain::_render_light_rows(const opennova::TerrainDrawList &draw_list, Ligh
 		std::memcpy(r_rows.uploaded.ptrw(), r_rows.bytes.ptr(),
 				static_cast<size_t>(byte_count));
 	}
+	r_rows.total_written = total;
 	const int enabled = r_total > 0 ? 1 : 0;
 	if (enabled != r_rows.enabled_written) {
 		p_material->set_shader_parameter("u_terrain_light_enabled", enabled != 0);
@@ -1183,7 +1235,8 @@ void Terrain::_load_textures() {
 	}
 	surface_inputs->rebuild(terrain_data, tile_info_override);
 	surface_inputs->apply_to_material(terrain_material);
-	tile_cache_device.rebuild(terrain_data, surface_inputs, tile_info_override);
+	tile_cache_device.rebuild(terrain_data, surface_inputs, tile_info_override,
+			build_tile_cache_targets_);
 	terrain_material->set_shader_parameter(
 			"u_tile_cache", tile_cache_device.get_texture());
 	terrain_material->set_shader_parameter(
@@ -1196,7 +1249,8 @@ void Terrain::_rebuild_tile_overlay_pages() {
 	}
 	surface_inputs->set_terrain_data(terrain_data);
 	surface_inputs->set_tile_info_override(tile_info_override);
-	tile_cache_device.rebuild(terrain_data, surface_inputs, tile_info_override);
+	tile_cache_device.rebuild(terrain_data, surface_inputs, tile_info_override,
+			build_tile_cache_targets_);
 	terrain_material->set_shader_parameter(
 			"u_tile_cache", tile_cache_device.get_texture());
 	terrain_material->set_shader_parameter(
@@ -1338,20 +1392,22 @@ void Terrain::_clear_terrain() {
 	building_ = false;
 }
 
-void Terrain::build() {
-	if (!build_begin()) {
+void Terrain::build(bool p_lod_cache, bool p_tile_cache_targets) {
+	if (!build_begin(p_lod_cache, p_tile_cache_targets)) {
 		return;
 	}
 	while (build_step() == BUILD_STEP_MORE) {
 	}
 }
 
-bool Terrain::build_begin() {
+bool Terrain::build_begin(bool p_lod_cache, bool p_tile_cache_targets) {
 	_clear_terrain();
+	build_lod_cache_ = p_lod_cache;
+	build_tile_cache_targets_ = p_tile_cache_targets;
 	build_done_ = 0;
 	build_total_ = 0;
 	if (terrain_data.is_null() || !terrain_data->is_loaded()) {
-		UtilityFunctions::push_warning("Terrain::build() — terrain_data not loaded");
+		UtilityFunctions::push_warning("Terrain::build(): terrain_data not loaded");
 		return false;
 	}
 	// The prepare unit, a unit per tile, then the pool, the surface inputs' three
@@ -1383,7 +1439,9 @@ Terrain::BuildStep Terrain::build_step() {
 		// A terrain with no tile is refused by the prepare; the count stands.
 		build_total_ = static_cast<int>(tile_infos.size()) + kBuildTailUnits + 1;
 	} else if (build_done_ <= tiles) {
-		if (!_build_terrain_tile(static_cast<size_t>(build_done_ - 1))) {
+		// The tiles' LOD meshes are the LOD cache's geometry: a build without it makes none
+		// (engine terrain/terrain_load_legs.h builds_lod_cache carries the witness).
+		if (build_lod_cache_ && !_build_terrain_tile(static_cast<size_t>(build_done_ - 1))) {
 			return failed();
 		}
 	} else {
@@ -1392,8 +1450,9 @@ Terrain::BuildStep Terrain::build_step() {
 				UtilityFunctions::print_verbose("Terrain: ", build_total_verts_, " verts, ",
 						build_total_indices_, " indices across ", tiles, " tiles");
 				// Create lightweight RenderingServer instances for the main view's pool
-				// (the Inset's is created when it first renders).
-				_create_pool_instances(main_pool, terrain_material->get_rid());
+				// (the Inset's is created when it first renders); a build without the LOD
+				// cache has nothing for them to draw.
+				if (build_lod_cache_) _create_pool_instances(main_pool, terrain_material->get_rid());
 				break;
 			case 2:
 				if (terrain_material.is_valid()) {
@@ -1415,7 +1474,10 @@ Terrain::BuildStep Terrain::build_step() {
 				break;
 			case 5:
 				if (terrain_material.is_valid()) {
-					tile_cache_device.rebuild(terrain_data, surface_inputs, tile_info_override);
+					// The page array is the render subsystems' targets; a build without them loads the
+					// sources alone (engine terrain/terrain_load_legs.h builds_tile_cache_targets).
+					tile_cache_device.rebuild(terrain_data, surface_inputs, tile_info_override,
+							build_tile_cache_targets_);
 					terrain_material->set_shader_parameter(
 							"u_tile_cache", tile_cache_device.get_texture());
 					terrain_material->set_shader_parameter(
@@ -1705,6 +1767,18 @@ float Terrain::get_visible_terrain_min_height() const {
 
 float Terrain::get_visible_terrain_max_height() const {
 	return has_visible_terrain_bounds() ? frame_bounds.max[1] : 0.0f;
+}
+
+bool Terrain::has_inset_visible_terrain_bounds() const {
+	return inset_frame_bounds_live && inset_frame_bounds.valid;
+}
+
+float Terrain::get_inset_visible_terrain_min_height() const {
+	return has_inset_visible_terrain_bounds() ? inset_frame_bounds.min[1] : 0.0f;
+}
+
+float Terrain::get_inset_visible_terrain_max_height() const {
+	return has_inset_visible_terrain_bounds() ? inset_frame_bounds.max[1] : 0.0f;
 }
 
 int Terrain::get_patches_active() const {

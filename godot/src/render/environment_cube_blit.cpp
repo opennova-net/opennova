@@ -65,8 +65,17 @@ void main() {
 
 } // namespace
 
-void EnvironmentCubeBlit::set_request(const Request &p_request) {
+void EnvironmentCubeBlit::arm(const Request &p_request) {
 	request_ = p_request;
+	armed_requests_.fetch_add(1, std::memory_order_acq_rel);
+}
+
+bool EnvironmentCubeBlit::publish_armed() {
+	if (armed_requests_.load(std::memory_order_acquire) <=
+			completed_requests_.load(std::memory_order_acquire))
+		return false;
+	publish();
+	return true;
 }
 
 String EnvironmentCubeBlit::failure() const {
@@ -191,7 +200,7 @@ bool EnvironmentCubeBlit::ensure_pipeline(RenderingDevice *rd) {
 	color_blend->set_attachments(attachments);
 	const int64_t framebuffer_format =
 			rd->framebuffer_get_format(layer_framebuffers_[0]);
-	pipeline_ = rd->render_pipeline_create(shader_, framebuffer_format,
+	pipeline_ = create_rd_render_pipeline(rd, shader_, framebuffer_format,
 			RenderingDevice::INVALID_FORMAT_ID,
 			RenderingDevice::RENDER_PRIMITIVE_TRIANGLES, raster, multisample,
 			depth, color_blend);
@@ -249,6 +258,14 @@ bool EnvironmentCubeBlit::draw_layer(RenderingDevice *rd, int layer,
 	rd->draw_list_draw(draw_list, false, 1, 3);
 	rd->draw_list_end();
 	return true;
+}
+
+void EnvironmentCubeBlit::create_device(RenderingDevice *p_rd) {
+	if (p_rd == nullptr || device_failed_.load(std::memory_order_acquire))
+		return;
+	rd_ = p_rd;
+	if (!ensure_shader(p_rd) || !ensure_cube(p_rd) || !ensure_pipeline(p_rd))
+		device_failed_.store(true, std::memory_order_release);
 }
 
 void EnvironmentCubeBlit::publish() {
@@ -338,4 +355,20 @@ void EnvironmentCubeBlit::release() {
 	last_request_ok_.store(false, std::memory_order_release);
 	published_cubes_.store(0, std::memory_order_release);
 	completed_requests_.store(0, std::memory_order_release);
+	armed_requests_.store(0, std::memory_order_release);
+}
+
+EnvironmentCubeCompositorEffect::EnvironmentCubeCompositorEffect() {
+	set_effect_callback_type(EFFECT_CALLBACK_TYPE_PRE_OPAQUE);
+	set_enabled(true);
+}
+
+void EnvironmentCubeCompositorEffect::_bind_methods() {}
+
+void EnvironmentCubeCompositorEffect::_render_callback(int32_t p_effect_callback_type,
+		RenderData *p_render_data) {
+	if (p_effect_callback_type != EFFECT_CALLBACK_TYPE_PRE_OPAQUE)
+		return;
+	if (EnvironmentCubeBlit *blit = blit_.load(std::memory_order_acquire))
+		blit->publish_armed();
 }

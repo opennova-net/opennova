@@ -23,6 +23,7 @@ GameRow row_to_game(const opennova::db::Row &r) {
 	g.glsvss_request = r.as_text(14).value_or("");
 	g.glsvss_rims    = r.as_int(15).value_or(0);
 	g.glsvss_agrms   = r.as_int(16).value_or(0);
+	g.join_lan_url   = r.as_text(17).value_or("");
 	return g;
 }
 
@@ -41,7 +42,7 @@ std::vector<GameRow> list_games(opennova::db::Database &db) {
 	auto rows = db.query(
 			"SELECT id, slug, display_name, lobby_name, gate_tag, title, start_page, host_page, "
 			"gsb_path, ver1, ver2, exp_bits, pfid, startup_query, glsvss_request, glsvss_rims, "
-			"glsvss_agrms "
+			"glsvss_agrms, join_lan_url "
 			"FROM games ORDER BY slug;");
 	std::vector<GameRow> out;
 	out.reserve(rows.size());

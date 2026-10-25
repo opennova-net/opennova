@@ -297,11 +297,11 @@ struct WeaponSlotState {
     // rescope when it completes (a ForceScoped def never rescopes).
     // [orig: g_RescopeAfterReload @ 0xB7647C; write @ 0x54312f, consume @ 0x54139e]
     bool rescope_after_reload = false;
-    // The deferred fire re-queue — the port's slot for the original's
-    // Input_QueueDeferredEvent(149, current_tick) events: set by the recoil window's
-    // refire and by a mid-FIRE fire request, consumed as a fire request by the NEXT
-    // tick's input stage (the deferred dispatch runs before the pump).
-    // [orig: Input_QueueDeferredEvent @ 0x4993e0; writers @ 0x542e9d / @ 0x53effd]
+    // The deferred fire re-queue: the tick's Input_QueueDeferredEvent(149) output, set
+    // by the recoil window's refire and by a mid-FIRE fire request, cleared at the next
+    // tick's head. The local pump hands it to the local player's deferred input queue
+    // (LocalWeaponPumpIO::fire_deferred), whose next input frame dispatches it as a fire
+    // record. [orig: Input_QueueDeferredEvent @ 0x4993e0; writers @ 0x542e9d / @ 0x53effd]
     bool refire_queued = false;
     // Retail MountSlot+0x5E bit 8: when this slot belongs to an attached
     // designated-G EWeap, route ammo/FSM state through groundEntity's vehicle
@@ -373,9 +373,24 @@ struct WeaponFsmInputs {
                                 // chain, never a per-tick re-request
                                 // [orig: Input_IsBindingActive(149) @ 0x542e7f]
     bool reload_pressed = false; // the reload-key edge (case 0xD3 gates applied by caller)
+    // An OnlyFireLocked press with no lock: an accepted fire request becomes the dry click
+    // (the next action EMPTY) [orig: Input_HandleActionBinding_0 case 0x95 - nextAction = 5
+    // @0x4E0A1E behind Player_RequestPrimaryFire @0x4E0A06].
+    bool fire_dry = false;
     bool owner_present = true; // MountSlot+36; ownerless embedded slots still cool down
     bool is_local = true;        // owner == g_LocalPlayerEntity paths
     bool is_authority = true;    // listen-host/SP: reload requests apply immediately
+    // The authority's immediate refill stands for the refill its own S2C 0x49 echo
+    // runs, which only the local player and an entity with a non-person def take: a
+    // person row's reload (a remote player's own slot, a borrower addressed as
+    // itself) is refilled only by its own client's C2S 0x25 at the host
+    // (D-NET-336), and a dedicated host, which has no client of its own to carry
+    // the request, refills nothing. [orig: NapiNPClientMsg_WeaponReload_0x049
+    // @0x42C0A0 (the local test @0x42C0F8, the def test @0x42C103, the person arm
+    // @0x42C109..0x42C113); NapiNPServerMsg_HandleReloadRequest @0x514DF0 (the
+    // sender gate @0x514EFA); CNapiNetwork_QueueReliableMessage @0x4C4FA0
+    // (@0x4C4FA6..0x4C4FA8)]
+    bool reload_refills = true;
     bool auto_reload = true;     // [orig: g_AutoReloadEnabled @ 0x24D2118]
     bool scope_active = false;   // g_WeaponScopeActive, the promoted byte, at the pump
     WeaponFsmScope *scope = nullptr; // the local owner's scope (null: no scope legs run)
@@ -384,6 +399,11 @@ struct WeaponFsmInputs {
     // computes this because the standalone slot does not know its target def.
     // [orig: WeaponAction_SwitchFrom @0x543417..0x54344a]
     bool instant_emplaced_switch = false;
+    // The local player's pending slot names an Emplaced def (Flags 0x80): its
+    // SWITCHTO holds the draw at the -901 sentinel, 30 back to -871 on every call,
+    // for as long as the word does. The pending-slot owner computes it.
+    // [orig: WeaponAction_SwitchTo @0x5431D0 - @0x54321E..0x543240]
+    bool pending_emplaced = false;
     // The logic tick, needed because the heat level is derived from a deadline
     // rather than stored. [orig: current_tick @ 0x24C1968]
     int32_t current_tick = 0;
@@ -453,7 +473,9 @@ struct WeaponFsmEvents {
     int32_t fireloop_lifetime_ticks = 0; // signed kick byte, sign-extended by the original
     bool fired = false;            // Entity_FireWeaponAndSendPacket seam [orig: @ 0x542c5e]
     int32_t fired_clip_before_consume = 0; // MountSlot+0x10 low u16 sampled for the
-                                           // fire-mode high bits BEFORE ammo consume
+                                           // fire-mode high bits BEFORE ammo consume:
+                                           // 0 for a bucket weapon (shared_clip), whose
+                                           // word nothing writes
                                            // [orig: @ 0x542c11, consume @ 0x542c75]
     bool dry_fired = false;        // the EMPTY one-shot entered
     bool reload_requested = false; // C2S 0x25 seam [orig: @ 0x5430ff; net-re §5.58]
@@ -484,8 +506,30 @@ bool weapon_fsm_can_fire(const WeaponFsmDef &def, WeaponSlotState &slot,
 // [orig: WeaponSlot_RequestFire @ 0x53efa0] AUTO (Flags&0x100): current {0,3,9,10} ->
 // next=FIRE, {1} -> next=EMPTY, {2} -> re-queues the deferred fire event (the
 // refire_queued latch [orig: @ 0x53effd]); SEMI: {0} -> FIRE, {1} -> EMPTY. Returns
-// true when a fire was queued.
+// the call's return (weapon_fsm_fire_request_taken).
 bool weapon_fsm_request_fire(const WeaponFsmDef &def, WeaponSlotState &slot);
+// WeaponSlot_RequestFire's return for the slot as it stands, which its callers read (case
+// 0x95's dry click and fire face): 1 for an automatic def in IDLE, RECOIL, SCOPEUP or SCOPEDOWN
+// (FIRE queued) and in FIRE (the deferral), and for a semi def in IDLE (FIRE queued) and in
+// EMPTYIDLE (EMPTY queued: the state's own 1 left in eax); 0 otherwise, an automatic def's
+// EMPTYIDLE (EMPTY queued) included. It reads the def's automatic flag and the current
+// action alone.
+// [orig: WeaponSlot_RequestFire @0x53EFA0 - mov eax, 1 @0x53EFE5 / @0x53F005, the state in
+//  eax @0x53F020..0x53F028, xor eax, eax @0x53F013]
+bool weapon_fsm_fire_request_taken(const WeaponFsmDef &def, const WeaponSlotState &slot);
+// WeaponSlot_CanFireInCurrentState: the slot's current action alone. An automatic def (Flags
+// 0x100) can fire in IDLE, FIRE, RECOIL, SCOPEUP and SCOPEDOWN, any other def in IDLE only. It
+// reads neither the queued action nor a switch.
+// [orig: WeaponSlot_CanFireInCurrentState @0x53F0B0 - Flags & 0x100 @0x53F0C2..0x53F0CE, the
+//  current action +0x2C's switch @0x53F0D0..0x53F0DF (cases 0, 2, 3, 9, 10 -> 1 @0x53F0E6), the
+//  IDLE test @0x53F0EE..0x53F0F1]
+bool weapon_fsm_can_fire_in_current_state(const WeaponFsmDef &def, const WeaponSlotState &slot);
+// WeaponSlot_HasAmmoAvailable: a clipless def (no clip size) by its pool alone; any other by its
+// loaded rounds (the shared bucket's, which the slot mirrors, else its own), then its pool.
+// [orig: WeaponSlot_HasAmmoAvailable @0x541B30 - def+0x58 == -1 @0x541B47 -> the pool
+//  @0x541B85; the bucket @0x541B55 / the slot word @0x541B5F, nonzero -> 1 @0x541B65; the pool
+//  @0x541B76, nonzero -> 1 @0x541B8F]
+bool weapon_fsm_has_ammo_available(const WeaponFsmDef &def, const WeaponSlotState &slot);
 // [orig: WeaponSlot_RequestReload @ 0x53f110] next {0,1,11} and no reload pending
 // (phase sign bit) -> next = RELOAD.
 void weapon_fsm_request_reload(WeaponSlotState &slot);
@@ -497,8 +541,10 @@ void weapon_fsm_queue_scope_down(WeaponSlotState &slot);
 // WeaponSlot_TryQueueSwitchRank @ 0x53f1c0]: queue SWITCHFROM (cross-category holster)
 // or SWITCHRANK (same-category flip) on the OUTGOING weapon's slot when its phase is
 // complete ({0, 4, 0x40}); an in-flight action forces idle instead. The caller commits
-// pending -> equipped when the queued action's active phase finishes.
-void weapon_fsm_queue_switch_from(WeaponSlotState &slot);
+// pending -> equipped when the queued action's active phase finishes. The SWITCHFROM
+// writer returns false when a running SWITCHFROM or SWITCHTO refuses it, else true
+// (Player_MountWeaponSlot's lower tests it).
+bool weapon_fsm_queue_switch_from(WeaponSlotState &slot);
 void weapon_fsm_queue_switch_rank(WeaponSlotState &slot);
 // Queue SWITCHTO on a newly committed target only when it is not already drawing
 // and its phase is DONE/NONE; a busy target is allowed to settle to IDLE. READY
@@ -519,5 +565,17 @@ bool weapon_fsm_scope_toggle_allowed(const WeaponFsmDef &def, const WeaponSlotSt
 // One 62.5 Hz tick of the pump + the current action's handler.
 void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,
                      const WeaponFsmInputs &in, WeaponFsmEvents &out);
+
+// The authority's arm of an accepted C2S 0x06 on the slot it fires through (a
+// player's own row or a borrowed carrier slot): the counter cleared, the held
+// phase, FIRE current, then the fire action's state legs, whose shot and spend the
+// 0x06 handler has already run: the burst cycle, next = RECOIL, the kick sized by
+// the recoil row, the finish. The weapon walk pumps the slot on from there.
+// [orig: Server_ClientFiredRound @0x50BAA0 - +0 = 0 @0x50C2B0, +90 = 64 @0x50C2C4,
+//  +44 = 2 @0x50C2F0, the fire action @0x50C30D -> WeaponAction_Fire @0x542B10
+//  (the burst @0x542C8A..0x542C9B, next @0x542C9E, the kick @0x542CF1..0x542D0F,
+//  the finish @0x542D1A)]
+void weapon_fsm_arm_network_fire(const WeaponFsmDef &def, WeaponSlotState &slot,
+                                 const WeaponFsmInputs &in, WeaponFsmEvents &out);
 
 } // namespace opennova::world

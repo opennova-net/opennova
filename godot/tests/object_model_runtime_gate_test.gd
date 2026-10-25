@@ -778,3 +778,46 @@ func test_a_model_drops_its_weather_sample_once_no_rings_stand() -> void:
 	model.set_ctrl_value("FLICKER", 0x2000)
 	model.advance_runtime_frame(0.016)
 	assert_eq(model.get_ctrl_values().get("FLICKER"), 0x2000, "a value written since stands")
+
+
+# The scene builds' phase split (an instrument the mission load's placement prints under
+# --verbose): one set_object_data is one build, its phases are no longer than the build's wall
+# time, and a take zeroes the profile.
+func test_a_scene_build_counts_on_the_build_profile() -> void:
+	ObjectModel.take_build_profile()
+	var started := Time.get_ticks_usec()
+	_spy_model()
+	var elapsed := Time.get_ticks_usec() - started
+	var profile: PackedInt64Array = ObjectModel.take_build_profile()
+	assert_eq(profile.size(), int(ObjectModel.BUILD_PROFILE_SLOT_COUNT))
+	if profile.size() != int(ObjectModel.BUILD_PROFILE_SLOT_COUNT):
+		return
+	assert_eq(profile[ObjectModel.BUILD_PROFILE_BUILDS], 1, "one set_object_data, one build")
+	var phases := 0
+	for slot in range(ObjectModel.BUILD_PROFILE_SKELETON_US, ObjectModel.BUILD_PROFILE_SLOT_COUNT):
+		assert_true(profile[slot] >= 0, "phase %d is a duration" % slot)
+		phases += profile[slot]
+	assert_true(phases <= elapsed,
+			"the phases (%d us) lie inside the build (%d us)" % [phases, elapsed])
+	assert_eq(ObjectModel.take_build_profile()[ObjectModel.BUILD_PROFILE_BUILDS], 0,
+			"a take zeroes the profile")
+
+
+# A material with no normal-map stage binds the one flat normal, made once: house.3di's three
+# FF_ST_OP materials carry none, and two builds' six surfaces bind the same 1x1 texture, never a
+# texture of their own per material.
+func test_materials_without_a_normal_map_share_one_flat_normal() -> void:
+	var flat := {}
+	var bindings := 0
+	for _build in 2:
+		var model := _spy_model()
+		for node in model.find_children("*", "MeshInstance3D", true, false):
+			var material := (node as MeshInstance3D).material_override as ShaderMaterial
+			if material == null:
+				continue
+			var normal: Texture2D = material.get_shader_parameter("u_normal_map")
+			if normal != null and normal.get_width() == 1 and normal.get_height() == 1:
+				flat[normal.get_instance_id()] = true
+				bindings += 1
+	assert_gte(bindings, 6, "both builds bind the flat normal on every house surface")
+	assert_eq(flat.size(), 1, "every flat-normal binding is the one texture")

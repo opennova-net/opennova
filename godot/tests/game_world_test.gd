@@ -51,6 +51,57 @@ func test_mission_load_reports_only_real_stage_checkpoints() -> void:
 		"the real load pipeline reports exact stage starts through world ready")
 
 
+# The minimap's depthspin water mask is made with the terrain's textures, ahead of the
+# freeze and the HUD's textures, not at the load's end (engine
+# mission/mission_load_plan.h carries the witness, D-NET-NEW-L3-37): the textures leg
+# finds it made.
+func test_the_water_mask_is_made_with_the_terrains_textures() -> void:
+	var world := WorldFixture.make_world(self)
+	var order := []
+	world.minimap_water_changed.connect(func(_mask: ImageTexture) -> void:
+			order.append("water_mask"))
+	world.hud_textures_load.connect(func(_full_arm: bool) -> void:
+			order.append("hud_textures"))
+	assert_eq(WorldFixture.load_mission(
+			world, _minimal_assets_dir(), WorldFixture.MINIMAL_MISSION), OK)
+	assert_eq(order, ["water_mask", "hud_textures"],
+			"one mask, made ahead of the HUD's textures")
+	var timeline: LoadTimeline = world.last_load_timeline()
+	assert_not_null(timeline)
+	if timeline != null:
+		var names := Array(timeline.span_names())
+		assert_true(names.find("terrain_textures") < names.find("model_materials")
+				and names.find("model_materials") < names.find("hud_textures"),
+				"the terrain's textures, the freeze, then the HUD's: %s" % [names])
+
+
+# Retail's load draws no world frame: its presents draw the loading screen alone (engine
+# hud/loading_screen.h carries the witness). The effect warm's one forced frame is the
+# device's pipeline warm, and no second frame follows it (D-NET-NEW-L3-47).
+func test_the_effect_warm_forces_one_frame() -> void:
+	var root_dir := _staged(WorldFixture.stage_minimal_root("warm_one_frame"))
+	assert_gt(WorldFixture.stage_effects(root_dir).size(), 0, "a catalog to warm")
+	var world := WorldFixture.make_world(self)
+	assert_eq(WorldFixture.load_mission(world, root_dir), OK)
+	var timeline: LoadTimeline = world.last_load_timeline()
+	assert_not_null(timeline)
+	if timeline != null:
+		var names := Array(timeline.span_names())
+		assert_true(names.has("effect_spawn") and names.has("forced_draw_1"),
+				"the warm spawns the catalog and forces its frame: %s" % [names])
+		assert_false(names.has("forced_draw_2"), "no second forced frame: %s" % [names])
+		assert_true(names.find("force_sync") > names.find("forced_draw_1"),
+				"the drain follows the one frame: %s" % [names])
+		# The skinned models the first revealed frame would build draw in that one frame
+		# (D-NET-NEW-LF-15): their leg runs ahead of it, and nothing of it outlives the warm.
+		var person := names.find("person_pipelines")
+		assert_true(person >= 0 and person < names.find("forced_draw_1"),
+				"the person warm runs ahead of the forced frame: %s" % [names])
+	assert_null(world.get_node_or_null("PersonPipelineWarm"),
+			"the person warm's models are freed inside the load")
+	world.unload()
+
+
 # The object detail (game.cfg's object_polydetail; engine renderer/object_lod.h):
 # the shell's options word reaches the frames only through the copy each
 # mission start takes, so a change made mid-mission waits for the next one.
@@ -240,9 +291,12 @@ func _fx_gun_anchor_info() -> ModelUserPoint:
 # .def parser stops at a bare LF.
 func _fx_item_row(row: Dictionary) -> String:
 	var id := int(row.get("id", 0))
-	var text := "\r\nbegin \"fx item %d\"\r\n  id %d\r\n  type %s\r\n  graphic %s\r\n" % [
-			id, id, String(row.get("type", "object")),
-			String(row.get("graphic", FX_MOUNT_GRAPHIC))]
+	var text := "\r\nbegin \"fx item %d\"\r\n  id %d\r\n  type %s\r\n" % [
+			id, id, String(row.get("type", "object"))]
+	# An empty "graphic" authors no graphic line (a model-less def).
+	var graphic := String(row.get("graphic", FX_MOUNT_GRAPHIC))
+	if not graphic.is_empty():
+		text += "  graphic %s\r\n" % graphic
 	var anim_def := String(row.get("anim_def", ""))
 	if not anim_def.is_empty():
 		text += "  anim_def %s\r\n" % anim_def
@@ -518,6 +572,42 @@ func test_env_presenters_are_pipeline_clocked_not_self_clocked() -> void:
 					"%s must be pipeline-clocked, never self-clocked" % presenter_name)
 			assert_false(presenter.is_physics_processing(),
 					"%s must not self-clock on the physics tick either" % presenter_name)
+
+
+# The shell hands the session the frame's measured elapsed wall time in whole
+# milliseconds, uncapped: a 150 ms stall reads past Godot's 8/60 s process-step
+# cap, as retail's bank takes GetTickCount's difference (GameWorld.
+# take_frame_elapsed_seconds; engine world::TickAccumulator::bank carries the
+# witness, D-NET-NEW-LI-6). GetTickCount steps on the system timer's 15 and 16 ms
+# (engine world/tick_count_clock.h, D-NET-NEW-LF-2), so a 150 ms stall crosses nine
+# or ten steps: 140 ms at least.
+func test_the_frame_elapsed_is_the_measured_wall_time() -> void:
+	var world := WorldFixture.make_world(self)
+	assert_eq(world.take_frame_elapsed_seconds(), 0.0, "the first sample only stamps the clock")
+	OS.delay_msec(150)
+	var elapsed: float = world.take_frame_elapsed_seconds()
+	assert_gte(elapsed, 0.140, "the stall's time, in the system timer's steps")
+	assert_gt(elapsed, 8.0 / 60.0, "past the process step's cap")
+	assert_almost_eq(elapsed * 1000.0, roundf(elapsed * 1000.0), 0.000001,
+			"in whole milliseconds")
+
+
+# A mission's unload restarts the frame clock: the next mission's first sampled
+# frame only stamps it, as retail's main loop re-reads its clock after the game
+# mode's initialize (the mission start), so the presentation legs never take the
+# gap since the previous mission's last frame (GameWorld.unload; engine
+# world::TickAccumulator::bank carries the witness, D-NET-NEW-LI-6).
+func test_an_unload_restarts_the_frame_clock() -> void:
+	var world := WorldFixture.make_world(self)
+	world.take_frame_elapsed_seconds()
+	OS.delay_msec(30)
+	world.unload()
+	assert_eq(world.take_frame_elapsed_seconds(), 0.0,
+			"the first sample after an unload only stamps the clock")
+	# The clock moves in the system timer's steps (15.6 ms where the timer is coarse): a
+	# 30 ms stall can cross a single step (16 ms), a 50 ms stall crosses three or four.
+	OS.delay_msec(50)
+	assert_gte(world.take_frame_elapsed_seconds(), 0.030, "the clock runs again")
 
 
 func test_manual_perf_probe_routes_through_the_public_runtime_gate() -> void:
@@ -1027,6 +1117,22 @@ func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 	water.set_world_rendering_enabled(false)
 
 
+# The water goes dormant with its mission: a loading present ahead of the next
+# load's head draws no mirror (a present draws the screen alone, D-NET-NEW-L3-37).
+func test_unload_puts_the_water_to_sleep() -> void:
+	var world := WorldFixture.make_world(self)
+	assert_eq(WorldFixture.load_mission(
+			world, _minimal_assets_dir(), WorldFixture.MINIMAL_MISSION), OK)
+	var water: Water = world.get_node("Water")
+	water.water_height = 10.0
+	water.set_world_rendering_enabled(true)
+	assert_true(world.is_water_render_active(), "the precondition: a live water pass")
+	world.unload()
+	assert_false(world.is_water_render_active(), "the teardown stops the water's rendering")
+	assert_eq(water.get_reflection_viewport().render_target_update_mode,
+			SubViewport.UPDATE_DISABLED, "and its mirror's target")
+
+
 func test_unload_synchronously_retires_effect_light_state() -> void:
 	var root_dir := _stage_lit_building_fixture("effect_light_unload")
 	var world := WorldFixture.make_world(self)
@@ -1298,6 +1404,26 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 	assert_true(object_values.get_fog_color().is_equal_approx(underwater_color),
 			"showing the underwater world restores the pass payload before drawing")
 	world.tick(camera.global_position, camera.get_global_transform())
+	# A zero height is the no-water sentinel of the water's own draws alone: the
+	# eye's side still compares against 0.0, so an eye under it fogs underwater,
+	# keeps the lit clear and the murk, and the transparents split about it
+	# (engine environment_state.h classify_render_eye) [orig:
+	# Render_ProcessMainSceneFrame @ 0x5ca1af..0x5ca1bd, @ 0x5ca77f..0x5ca792,
+	# @ 0x5ca82e..0x5ca841; Terrain_RenderWorldScene @ 0x5c93e2..0x5c93ef].
+	water.set_mission_water_height_override(0.0)
+	camera.position.y = 0.25
+	camera.v_offset = -1.0
+	world.tick(camera.global_position, camera.get_global_transform())
+	assert_false(water.is_water_render_active(), "a zero height draws no water")
+	assert_true(env.is_underwater_view(), "an eye under a zero waterline fogs underwater")
+	assert_true(env.is_underwater_overlay_view())
+	assert_eq(world.get_current_frame_clear_color(), lit.linear_to_srgb(),
+			"and clears to the lit water colour")
+	var shader_cache := ObjectShaderCache.get_singleton()
+	assert_true(shader_cache.has_water_plane(), "the split stands at 0.0")
+	assert_eq(shader_cache.alpha_rung_for_height(1.0),
+			ObjectShaderCache.RENDER_RUNG_ALPHA_FAR_SIDE,
+			"the eye below 0.0 ranks a strip above it on the far side")
 	camera.v_offset = 0.0
 	camera.position.y = 71.0
 	water.set_mission_water_height_override(NAN)
@@ -1540,6 +1666,10 @@ func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
 	mission.set_header_int("minutes_per_day", 60)
 
 	assert_eq(world.load_mission_data(mission, "mnml.bms"), OK)
+	# The load's mission start (phase B, past the device stages) leaves the
+	# single-player session paused; the world plays it after that start.
+	assert_true(world.get_runtime().is_playing(),
+			"the load ends with the single-player session running")
 	var audio := world.get_mission_audio()
 	assert_not_null(audio)
 	if audio == null:
@@ -1575,9 +1705,34 @@ func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
 			env.get_sun_light_target()))
 	assert_true(weather.get_smooth_fog().is_equal_approx(
 			env.get_fog_color_target()))
+	# The paused frame steps the main-frame counter once per drained quantum
+	# (the session's paused leg runs the counters and the weather tick per
+	# quantum), so the counter's step is that frame's drained count.
+	var sim := world.get_runtime().get_sim()
+	var main_frames_before := int(sim.get_main_frame_counter())
+	var scrubbed := env.time_of_day
 	world.tick(Vector3.ZERO, Transform3D(), 0.25)
-	assert_almost_eq(env.time_of_day, 2207.0, 0.001,
-			"a paused host keeps the scrubbed clock and rendered weather")
+	var drained := int(sim.get_main_frame_counter()) - main_frames_before
+	# The paused frame still drains its banked quanta through the weather tick:
+	# retail's main frame calls Environment_UpdateWeatherTick ahead of its pause
+	# test (Game_ProcessMainFrame @ 0x5263F0: the call @ 0x526774, the test
+	# @ 0x526779; D-NET-NEW-L5-7), so the scrubbed clock moves on under the
+	# pause by exactly the quanta the accumulator drained for that frame (its
+	# smoothed bank: a 0.25 s frame drains at least one and at most 30 ticks,
+	# 0.192 minutes of this 24x clock; the 500 ms clamp alone would allow 32).
+	assert_gt(drained, 0, "the paused frame drains banked quanta (D-NET-NEW-L5-7)")
+	assert_lte(drained, 30, "the paused 0.25 s frame drains no more than its own bank's 30 ticks")
+	# One quantum of this 24x clock, from the same clock model the first half
+	# checks against (0.0064 minutes): the paused frame moves the clock by its
+	# drained count of them, clear of a neighbouring count by half a quantum.
+	var quantum_clock := MissionEnvironment.new()
+	quantum_clock.configure_mission_clock(0x0540, 60)
+	var quantum_start := quantum_clock.time_of_day
+	quantum_clock.advance_mission_clock(1)
+	var quantum := quantum_clock.time_of_day - quantum_start
+	quantum_clock.free()
+	assert_almost_eq(env.time_of_day, scrubbed + drained * quantum, quantum * 0.25,
+			"a paused host's weather tick advances the scrubbed clock once per drained quantum")
 	world.unload()
 
 
@@ -1742,6 +1897,270 @@ func test_lan_host_threads_truthful_base_metadata_into_the_native_session() -> v
 	world.unload()
 
 
+# Retail's mission start loads its effect system at the head on every load but a dedicated
+# host's (the test in session on the authority with no client of its own; engine
+# inmatch/host_role.h open_mission_load_window carries the witness): a listen host's world
+# builds it ahead of its environment, a Serve Only host's has none and still loads.
+func test_a_dedicated_host_loads_no_effect_system() -> void:
+	for serve_and_play in [true, false]:
+		var world := WorldFixture.make_world(self)
+		await get_tree().process_frame
+		world.set_playable(false)
+		var root := ResourceRoot.new()
+		assert_eq(root.set_root_dir(
+				ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
+		world.set_resource_root(root)
+		var options := _lan_host_config("mnml.bms", 0)
+		options.serve_and_play = serve_and_play
+		assert_eq(world.load_mission_as_host(options), OK)
+		var timeline: LoadTimeline = world.last_load_timeline()
+		assert_not_null(timeline)
+		if serve_and_play:
+			assert_not_null(world.get_effect_world(), "a listen host's world has its effect system")
+			if timeline != null:
+				var names := Array(timeline.span_names())
+				var effect_system := names.find("effect_system")
+				# Its texture atlases build inside it, at its init, so the warm's first draw
+				# builds none (engine renderer/particle_atlas.h carries the witness,
+				# D-NET-NEW-L3-26).
+				assert_true(effect_system >= 0 and names.find("texture_atlases") == effect_system + 1
+						and names.find("environment") == effect_system + 2,
+						"the effect system and its atlases lead the environment: %s" % [names])
+		else:
+			assert_null(world.get_effect_world(), "a dedicated host's world loads none")
+			if timeline != null:
+				assert_false(Array(timeline.span_names()).has("effect_system"),
+						"no effect system at the dedicated host's head")
+		world.unload()
+
+
+# Retail's mission textures stage runs its reduced arm on a dedicated host: the terrain's textures
+# and the model list's material resolve, none of the full arm's other device inits (engine
+# inmatch/loaded_model_list.h LoadedModelList::model_files carries the witness): a Serve Only
+# host's load resolves its listed models' materials and runs none of the warm's legs (no effect
+# spawn, no pipeline warm, no forced frame); a listen host's runs the same freeze, then the warm.
+# Neither builds a listed model at the freeze (D-NET-NEW-L3-25, D-NET-NEW-L3-31).
+func test_a_dedicated_hosts_mission_textures_run_the_reduced_arm() -> void:
+	var warm_legs := ["effects_warm", "effect_spawn", "present_pipelines", "slot_casters",
+			"person_pipelines",
+			"local_body", "view_model", "wire_identities", "hud_pipelines", "menu_pipelines", "forced_draw_1",
+			"force_sync", "warm_reset"]
+	for serve_and_play in [true, false]:
+		var world := WorldFixture.make_world(self)
+		await get_tree().process_frame
+		world.set_playable(false)
+		var root := ResourceRoot.new()
+		assert_eq(root.set_root_dir(
+				ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
+		world.set_resource_root(root)
+		var options := _lan_host_config("mnml.bms", 0)
+		options.serve_and_play = serve_and_play
+		assert_eq(world.load_mission_as_host(options), OK)
+		var timeline: LoadTimeline = world.last_load_timeline()
+		assert_not_null(timeline)
+		if timeline != null:
+			var names := Array(timeline.span_names())
+			# Both arms load the terrain's textures first, the head having read its configuration
+			# and heights alone (D-NET-NEW-L2-46; engine terrain/terrain_load_legs.h carries the
+			# witness).
+			var terrain_textures := names.find("terrain_textures")
+			assert_true(names.find("terrain") >= 0 and names.find("objects") > names.find("terrain")
+					and terrain_textures > names.find("objects"),
+					"the head reads the terrain, the mission textures stage loads its textures: %s" % [names])
+			var freeze := names.find("model_materials")
+			assert_true(terrain_textures >= 0 and freeze > terrain_textures,
+					"the terrain's textures open the stage, then the freeze: %s" % [names])
+			# The sky maps' leg sits between them on both arms; it loads the cloud layers on the
+			# full arm alone (D-NET-NEW-L3-34; engine environment/sky_frame.h
+			# loads_mission_sky_maps carries the witness).
+			var sky_maps := names.find("sky_maps")
+			assert_true(sky_maps > terrain_textures and freeze > sky_maps,
+					"the sky maps load past the terrain's textures, ahead of the freeze: %s" % [names])
+			assert_false(names.has("model_warm"), "no arm builds a listed model: %s" % [names])
+			# The celestial bodies' models load past the rows' init, ahead of the HUD's overlay
+			# init, on both arms (D-NET-NEW-L3-38; engine environment/celestial_frame.h
+			# builds_celestial_draws carries the witness).
+			var celestial := names.find("celestial")
+			assert_true(celestial > names.find("objects") and celestial < names.find("hud_init"),
+					"the bodies load past the objects, ahead of the HUD: %s" % [names])
+			# FrameFX's mission texture follows the HUD's, past the freeze, on both arms; it makes
+			# the scanlines on the full arm alone (D-NET-NEW-L3-35; engine
+			# renderer/frame_fx_effects.h builds_frame_fx_scanline_texture carries the witness).
+			var hud_textures := names.find("hud_textures")
+			var frame_fx_textures := names.find("frame_fx_textures")
+			assert_true(hud_textures > freeze and frame_fx_textures > hud_textures,
+					"FrameFX's texture follows the HUD's, past the freeze: %s" % [names])
+			if serve_and_play:
+				for leg in ["effects_warm", "effect_spawn"]:
+					assert_true(names.has(leg), "a listen host's warm runs %s: %s" % [leg, names])
+				assert_true(names.find("effects_warm") > frame_fx_textures,
+						"the full arm's device warm follows its textures: %s" % [names])
+			else:
+				for leg in warm_legs:
+					assert_false(names.has(leg), "no %s on a dedicated host: %s" % [leg, names])
+		assert_null(world.get_node_or_null("MissionStartModelWarm"),
+				"no listed model stands under the world past its load")
+		var frame_fx: FrameFx = world.get_frame_fx()
+		assert_not_null(frame_fx)
+		if frame_fx != null:
+			assert_eq(frame_fx.has_mission_textures(), serve_and_play,
+					"the scanlines are the full arm's mission texture alone")
+		# The foliage's definitions load with the render subsystems, which a dedicated host's start
+		# jumps over (Game_StartMission's dedicated arm skips Render_InitTerrainSubsystems): its
+		# dispatcher stays unconfigured, a listen host's takes the terrain.
+		var dispatcher: FoliageDispatcher = world.get_foliage_dispatcher()
+		assert_not_null(dispatcher)
+		if dispatcher != null:
+			assert_eq(dispatcher.get_terrain_data() != null, serve_and_play,
+					"the foliage configures on a listen host's start alone")
+			# The definitions' load creates the tiers' shaders and materials with the foliage's
+			# vertex shaders, inside the load: no frame has drawn foliage yet (D-NET-NEW-LF-19).
+			assert_eq(bool(dispatcher.get_backend_report().get("tier_shaders", false)), serve_and_play,
+					"the foliage tiers' shaders are made by a listen host's load alone")
+		# The terrain's LOD cache (its tiles' meshes) builds in the same terrain leg, which a
+		# dedicated host's start jumps over; its textures build on both arms (D-NET-NEW-L3-32;
+		# engine terrain/terrain_load_legs.h builds_lod_cache carries the witness).
+		var terrain: Terrain = world.get_terrain_node()
+		assert_not_null(terrain)
+		if terrain != null:
+			assert_true(terrain.is_built(), "the mission textures stage builds the terrain")
+			var meshes := 0
+			for lod in 8:
+				if terrain.get_tile_lod_mesh(0, lod, false) != null:
+					meshes += 1
+			assert_eq(meshes > 0, serve_and_play, "the tiles' LOD meshes build on a listen host alone")
+			# Its tile cache's page targets are the render subsystems' too (D-NET-NEW-L3-33; the
+			# same header's builds_tile_cache_targets).
+			if not serve_and_play:
+				assert_null(terrain.get_tile_cache_texture(),
+						"a dedicated host makes no tile cache page array")
+		# The status page stands in for the scene frame: a dedicated host's always, a listen
+		# host's while its status view is up (engine hud_server_status.h main_frame_draws_scene).
+		world.tick(Vector3.ZERO, Transform3D.IDENTITY, 1.0 / 62.0, null)
+		var legs := Array(world.get_last_frame_legs())
+		assert_true(legs.has("scene_gate") and legs.has("audio") and legs.has("finish"),
+				"the gate, the audio and the finish run on every frame: %s" % [legs])
+		assert_eq(legs.has("terrain"), serve_and_play,
+				"the scene's rows run on a listen host's frame alone: %s" % [legs])
+		assert_eq(world.get_last_frame_scene_drawn(), serve_and_play,
+				"the shell's scene legs read the same verdict")
+		if serve_and_play:
+			var view_up := HudToggles.new()
+			view_up.session_init(true, false) # the status view stands up
+			assert_true(view_up.is_server_status_view())
+			var paged := MissionFrameInput.new()
+			paged.set_hud_toggles(view_up)
+			world.tick(Vector3.ZERO, Transform3D.IDENTITY, 1.0 / 62.0, paged)
+			legs = Array(world.get_last_frame_legs())
+			assert_false(legs.has("terrain") or legs.has("particles") or legs.has("local_view")
+					or legs.has("script_voice") or legs.has("facial"),
+					"a listen host's status view stands in for the scene's rows: %s" % [legs])
+			assert_true(legs.has("audio"), "its audio still runs: %s" % [legs])
+			assert_false(world.get_last_frame_scene_drawn(),
+					"the shell's scene legs (the death.mnu latch) stand down under the page")
+			assert_false(world.get_last_frame_world_drawn(), "no world under the page")
+			assert_false(world.get_last_frame_hud_pass_called(),
+					"no HUD pass under the page (engine inmatch::FrameOutcome::hud_pass_called)")
+			# The command map over the menu: the scene frame draws, its world block does not,
+			# so the death.mnu latch's legs stand down (engine inmatch::FrameOutcome::
+			# world_skipped) [orig: Render_ProcessMainSceneFrame @0x5CA171..0x5CA190,
+			# @0x5CA620..0x5CA640].
+			var mapped := MissionFrameInput.new()
+			mapped.command_map_open = true
+			world.tick(Vector3.ZERO, Transform3D.IDENTITY, 1.0 / 62.0, mapped)
+			assert_true(world.get_last_frame_scene_drawn(), "the command map's frame draws the scene")
+			assert_false(world.get_last_frame_world_drawn(), "but not its world")
+			assert_false(world.get_last_frame_hud_pass_called(),
+					"nor its HUD pass, which sits in the world block")
+			legs = Array(world.get_last_frame_legs())
+			assert_true(legs.has("local_view") and not legs.has("terrain")
+					and not legs.has("sun_veil"),
+					"the camera compose runs, the world block's rows do not: %s" % [legs])
+			world.tick(Vector3.ZERO, Transform3D.IDENTITY, 1.0 / 62.0, MissionFrameInput.new())
+			assert_true(world.get_last_frame_world_drawn(), "the map closed, the world draws again")
+		world.unload()
+
+
+# A dedicated host's load builds no placed entity's draw object: a model's load fills memory
+# alone, and the scene arm a placed entity is drawn in never runs there (engine
+# mission::builds_placement_draws carries the witness, D-NET-NEW-L3-30). The sim's words stand
+# on both roles: the building's entity and its collision instance. A listen host is the control.
+func test_a_dedicated_hosts_load_places_no_draw_object() -> void:
+	var root_dir := _stage_building_fixture("dedicated_placement")
+	var mission := MissionData.new()
+	assert_eq(mission.open_file(root_dir.path_join("mnml.bms")), OK)
+	var placed := mission.add_entity(
+			MissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO)
+	assert_not_null(placed)
+	if placed == null:
+		return
+	assert_eq(mission.save_as(root_dir.path_join("mnml.bms")), OK)
+	for serve_and_play in [true, false]:
+		var world := WorldFixture.make_world(self)
+		await get_tree().process_frame
+		world.set_playable(false)
+		var root := ResourceRoot.new()
+		assert_eq(root.set_root_dir(root_dir), OK)
+		world.set_resource_root(root)
+		var options := _lan_host_config("mnml.bms", 0)
+		options.serve_and_play = serve_and_play
+		assert_eq(world.load_mission_as_host(options), OK)
+		var sim: Simulation = world.get_sim()
+		assert_not_null(sim)
+		if sim == null:
+			world.unload()
+			continue
+		assert_eq(sim.session_role(), Simulation.ROLE_LISTEN_HOST if serve_and_play
+				else Simulation.ROLE_DEDICATED_HOST)
+		var stats: MissionPlacementStats = world.get_mission_stats()
+		assert_not_null(stats)
+		if stats != null:
+			assert_eq(stats.placed > 0, serve_and_play,
+					"the placement builds the building's draw on a listen host alone")
+		var runtime: MissionRoot = world.get_runtime()
+		assert_eq(runtime.get_node_or_null(NodePath("MissionObjects")) != null, serve_and_play,
+				"the placed objects' container exists on a listen host alone")
+		assert_eq(runtime.get_entity_index().resolve_single(placed.bms_id) != null,
+				serve_and_play, "the building's node exists on a listen host alone")
+		assert_true(sim.has_collision_instance(placed.bms_id),
+				"the sim's collision world holds the building on either role")
+		world.unload()
+
+
+# The first frames past a mission load ride a timeline of their own (an instrument): a span per
+# frame, the legs that ran nested in it, the session's updates as an updates_<n> span; it stops
+# at its last frame.
+func test_the_first_frames_past_a_load_are_timed() -> void:
+	var world := WorldFixture.make_world(self)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
+	world.set_resource_root(root)
+	assert_eq(world.load_mission_as_host(_lan_host_config("mnml.bms", 0)), OK)
+	var frames: LoadTimeline = world.last_post_load_frames()
+	assert_not_null(frames, "the load opened its post-load timeline")
+	if frames == null:
+		world.unload()
+		return
+	assert_true(frames.span_names().is_empty(), "no frame ran yet")
+	for _frame in 10:
+		world.tick(Vector3.ZERO, Transform3D.IDENTITY, 1.0 / 62.0, null)
+	var names := Array(frames.span_names())
+	assert_true(names.has("frame_1") and names.has("frame_8") and not names.has("frame_9"),
+			"the first eight frames, no more: %s" % [names])
+	var first := names.find("frame_1")
+	assert_true(first >= 0 and first + 1 < names.size() and names[first + 1] == "begin",
+			"a frame's legs nest under its span, the begin row first: %s" % [names])
+	var depths := {}
+	for span: LoadTimelineSpan in frames.spans():
+		depths[span.name] = span.depth
+	assert_eq(int(depths.get("frame_1", -1)), 0, "a frame is a top-level span")
+	assert_eq(int(depths.get("begin", -1)), 1, "a leg is nested in its frame")
+	world.unload()
+
+
 func test_lan_host_bind_failure_is_reported_instead_of_falling_back_socketless() -> void:
 	# Reserve an OS-chosen endpoint, then request that exact port through the
 	# production GameWorld host path. The old behavior silently started an SP
@@ -1878,10 +2297,21 @@ func test_join_wire_asset_failure_is_edge_gated_per_session() -> void:
 			"unload rearms the latch for the next join")
 
 
-func test_escape_aborts_the_joiner_admission_wait() -> void:
-	# ESC during the SECOND interruptible joiner wait: a real host drives the
-	# wire-header preload through local world load, then this test stops pumping it
-	# before admission so cancel_join_admission owns the remaining wait.
+# ESC in the joiner's GAME-START wait, before the host releases the S2C 0x1A: retail's wait
+# reads the key queue at the head of every pass and returns 3 on ESC, and its mission start
+# leaves with exit reason 1 for the Post Menu ("Mission loading aborted")
+# [orig: NapiClient_WaitForGameStart @0x42CC10 - Input_DequeueKeyEvent @0x42CC6C, the ESC test
+# @0x42CC77, return 3 @0x42CCCD; Game_StartMission @0x524360 - the ret-3 test @0x524E59..0x524E5C,
+# g_MissionExitReason @0x524E87, the Post Menu push @0x524E8D]. That is the last joiner wait
+# ahead of the load: the 0x1A's pass runs the load, the settle, the push and the final wait's
+# first pass in one call (D-NET-NEW-L2-35), so no frame shows a wait between the load and the
+# final wait, whose ESC is test_escape_in_the_final_wait_leaves_it_for_the_game_loop's. A real
+# host drives the join to its S2C 0x11; the test then stops stepping it, so the host stays
+# parked in slot state 3 short of the C2S 0x0A's world stream and never releases the 0x1A.
+# Nothing is loaded and no admission watch is armed, so the admission leg declines the ESC and
+# the preload's takes it (the shell offers it the preload's first, main_game.gd
+# _on_camera_escape).
+func test_escape_aborts_the_joiner_game_start_wait() -> void:
 	var world := WorldFixture.make_world(self)
 	await get_tree().process_frame
 	world.set_playable(false)
@@ -1893,7 +2323,7 @@ func test_escape_aborts_the_joiner_admission_wait() -> void:
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
 	var host := Simulation.new()
 	var host_options := HostSessionOptions.new()
-	host_options.server_name = "Abort Admission Host"
+	host_options.server_name = "Abort Game Start Host"
 	host_options.mission_name = mission.get_mission_name()
 	host_options.mission_file = "mnml.bms"
 	host_options.expansion = ""
@@ -1904,11 +2334,75 @@ func test_escape_aborts_the_joiner_admission_wait() -> void:
 	assert_true(host.load_from_mission_data(mission))
 	var failures: Array[String] = []
 	world.load_failed.connect(func(reason: String): failures.append(reason))
-	var observed := {"local_load": false}
+	var observed := {"identified": false, "local_load": false}
+	world.join_session_identified.connect(
+			func(_info: LoadingScreenInfo): observed["identified"] = true, CONNECT_ONE_SHOT)
 	world.world_loaded.connect(
 			func(): observed["local_load"] = true, CONNECT_ONE_SHOT)
 
-	assert_false(world.cancel_join_admission(), "no armed admission wait is a no-op")
+	assert_false(world.cancel_join_admission(), "no join: the admission leg is a no-op")
+	assert_eq(world.load_mission_as_joiner(
+			_join_target("127.0.0.1", host.get_host_listen_port(), "mnml")), OK)
+	for _frame in range(600):
+		host.step()
+		await get_tree().process_frame
+		if bool(observed["identified"]):
+			break
+	assert_true(bool(observed["identified"]), "the real host's S2C 0x11 identified the join")
+	# The game-start wait's passes; the parked host releases no 0x1A.
+	for _frame in range(3):
+		await get_tree().process_frame
+	assert_false(bool(observed["local_load"]), "no S2C 0x1A: the mission start's load has not run")
+	assert_null(world.get_runtime(), "no mission root lives in the game-start wait")
+	assert_eq(failures.size(), 0)
+	assert_false(world.cancel_join_admission(),
+			"no final wait and no admission watch: the admission leg declines the ESC")
+	assert_true(world.cancel_join_preload(), "the game-start wait takes the ESC")
+	assert_eq(failures.size(), 1)
+	if failures.size() == 1:
+		assert_string_contains(failures[0], "aborted")
+	assert_false(world.is_loaded())
+	await get_tree().process_frame
+	assert_eq(failures.size(), 1, "the aborted wait does not double-report")
+	assert_false(world.cancel_join_preload(), "the wait is gone after the abort")
+	assert_false(bool(observed["local_load"]), "the aborted join never loads")
+	world.unload()
+
+
+# ESC in the mission start's FINAL wait for the S2C 0x0F: retail stores
+# g_LoadingCancelFlag and leaves the wait for the game loop, and nothing else: no
+# exit reason, no teardown, no goodbye; the 0x0F still applies when it comes
+# [orig: Game_StartMission @0x524360 - the final wait's ESC @0x5262AB ->
+# g_LoadingCancelFlag = 1 @0x5262E9 -> out of the wait @0x5262F3]. The host is held
+# after the local load so its 0x0F cannot arrive before the ESC.
+func test_escape_in_the_final_wait_leaves_it_for_the_game_loop() -> void:
+	var world := WorldFixture.make_world(self)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
+	world.set_resource_root(root)
+	var mission := MissionData.new()
+	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
+	var host := Simulation.new()
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Final Wait Host"
+	host_options.mission_name = mission.get_mission_name()
+	host_options.mission_file = "mnml.bms"
+	host_options.expansion = ""
+	host_options.game_type = 0x30020
+	host_options.max_players = 4
+	host.configure_host_session(host_options)
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	var failures: Array[String] = []
+	world.load_failed.connect(func(reason: String): failures.append(reason))
+	var lost: Array[String] = []
+	world.session_lost.connect(func(reason: String): lost.append(reason))
+	var observed := {"local_load": false}
+	world.world_loaded.connect(
+			func(): observed["local_load"] = true, CONNECT_ONE_SHOT)
 	assert_eq(world.load_mission_as_joiner(
 			_join_target("127.0.0.1", host.get_host_listen_port(), "mnml")), OK)
 	for _frame in range(600):
@@ -1916,20 +2410,326 @@ func test_escape_aborts_the_joiner_admission_wait() -> void:
 		await get_tree().process_frame
 		if bool(observed["local_load"]):
 			break
-	assert_true(bool(observed["local_load"]),
-			"the real wire-header preload reached the admission wait")
-	assert_true(world.cancel_join_admission(), "an armed admission wait accepts the abort")
-	# GameWorld is externally ticked by MainGame in production. This bare-world
-	# fixture drives the same frame observer once so it consumes the abort.
+	assert_true(bool(observed["local_load"]), "the join reached its local load")
+	var sim: Simulation = world.get_sim()
+	assert_not_null(sim)
+	if sim == null:
+		world.unload()
+		return
+	const FINAL_WAIT := "awaiting the world state (S2C 0x0F)"
+	for _frame in range(120):
+		world.tick(Vector3.ZERO)
+		await get_tree().process_frame
+		if sim.get_join_admission_stage() == FINAL_WAIT:
+			break
+	assert_eq(sim.get_join_admission_stage(), FINAL_WAIT,
+			"the load pushed its submissions: the joiner sits in the final wait")
+	assert_true(world.cancel_join_admission(), "the final wait takes the ESC")
 	world.tick(Vector3.ZERO)
 	await get_tree().process_frame
-	assert_eq(failures.size(), 1)
-	if failures.size() == 1:
-		assert_string_contains(failures[0], "aborted")
-	await get_tree().process_frame
-	assert_eq(failures.size(), 1, "the aborted watchdog does not double-report")
-	assert_false(world.cancel_join_admission(), "the wait is disarmed after the abort")
+	assert_eq(failures.size(), 0, "the final wait's ESC aborts nothing")
+	assert_eq(lost.size(), 0, "the final wait's ESC tears nothing down")
+	assert_ne(sim.get_joiner_phase(), 5, "the session stays")
+	assert_false(world.cancel_join_admission(), "the wait is over: a second ESC finds no wait")
+	# The host answers now: its 0x0F still reaches the joiner and completes the admission.
+	for _frame in range(600):
+		host.step()
+		world.tick(Vector3.ZERO)
+		await get_tree().process_frame
+		if sim.get_join_admission_stage() != FINAL_WAIT:
+			break
+	assert_ne(sim.get_join_admission_stage(), FINAL_WAIT, "the later 0x0F still applies")
+	assert_eq(failures.size(), 0)
 	world.unload()
+
+
+# ESC after the S2C 0x0F ended the final wait: retail is out of the mission start ("Mission
+# loading complete") and in its game loop, so the ESC is the game loop's and aborts nothing,
+# whatever presentation hold the shell still shows (D-NET-NEW-L2-39)
+# [orig: Game_StartMission @0x524360 - out of the final wait @0x5262F3, "Mission loading
+# complete" @0x5262FD].
+func test_escape_after_the_world_state_aborts_nothing() -> void:
+	var world := WorldFixture.make_world(self)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
+	world.set_resource_root(root)
+	var mission := MissionData.new()
+	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
+	var host := Simulation.new()
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Game Loop Escape Host"
+	host_options.mission_name = mission.get_mission_name()
+	host_options.mission_file = "mnml.bms"
+	host_options.expansion = ""
+	host_options.game_type = 0x30020
+	host_options.max_players = 4
+	host.configure_host_session(host_options)
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	var failures: Array[String] = []
+	world.load_failed.connect(func(reason: String): failures.append(reason))
+	var lost: Array[String] = []
+	world.session_lost.connect(func(reason: String): lost.append(reason))
+	var observed := {"local_load": false}
+	world.world_loaded.connect(
+			func(): observed["local_load"] = true, CONNECT_ONE_SHOT)
+	assert_eq(world.load_mission_as_joiner(
+			_join_target("127.0.0.1", host.get_host_listen_port(), "mnml")), OK)
+	for _frame in range(600):
+		host.step()
+		await get_tree().process_frame
+		if bool(observed["local_load"]):
+			break
+	assert_true(bool(observed["local_load"]), "the join reached its local load")
+	var sim: Simulation = world.get_sim()
+	assert_not_null(sim)
+	if sim == null:
+		world.unload()
+		return
+	# The host answers the submissions: its 0x0F ends the final wait.
+	const PAST_THE_WAIT := ["awaiting the player's deployment pick",
+			"awaiting the deployment release", "complete"]
+	for _frame in range(600):
+		host.step()
+		world.tick(Vector3.ZERO)
+		await get_tree().process_frame
+		if PAST_THE_WAIT.has(sim.get_join_admission_stage()):
+			break
+	assert_true(PAST_THE_WAIT.has(sim.get_join_admission_stage()),
+			"the host's 0x0F ended the final wait")
+	assert_false(world.cancel_join_admission(), "the game loop's ESC is no admission abort")
+	for _frame in range(3):
+		host.step()
+		world.tick(Vector3.ZERO)
+		await get_tree().process_frame
+	assert_eq(failures.size(), 0, "nothing fails the join after the 0x0F")
+	assert_eq(lost.size(), 0, "nothing tears the session down")
+	assert_ne(sim.get_joiner_phase(), 5, "the session stays")
+	assert_true(world.is_loaded(), "the world stays loaded")
+	world.unload()
+
+
+# A join's S2C 0x11 runs the 0x0B header's environment and terrain load ahead of the game-start
+# wait's C2S 0x0A, as retail's joiner arm loads between its sync-tail wait and
+# NapiClient_WaitForGameStart, and the S2C 0x1A's mission start goes on from the objects
+# (D-NET-NEW-L2-19; engine inmatch/joiner_connection.h set_sync_tail_loading carries the
+# witness). No mission root lives under the 0x11's load.
+func test_a_join_loads_its_terrain_at_the_sync_tail_and_the_rest_at_the_mission_start() -> void:
+	var world := WorldFixture.make_world(self)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
+	world.set_resource_root(root)
+	var mission := MissionData.new()
+	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
+	var host := Simulation.new()
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Sync Tail Host"
+	host_options.mission_name = mission.get_mission_name()
+	host_options.mission_file = "mnml.bms"
+	host_options.expansion = ""
+	host_options.game_type = 0x30020
+	host_options.max_players = 4
+	host.configure_host_session(host_options)
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	var failures: Array[String] = []
+	world.load_failed.connect(func(reason: String): failures.append(reason))
+	var observed := {"identified": false, "root_at_identify": true, "local_load": false}
+	world.join_session_identified.connect(func(_info: LoadingScreenInfo) -> void:
+		observed["identified"] = true
+		observed["root_at_identify"] = world.get_runtime() != null
+	, CONNECT_ONE_SHOT)
+	world.world_loaded.connect(
+			func(): observed["local_load"] = true, CONNECT_ONE_SHOT)
+	assert_eq(world.load_mission_as_joiner(
+			_join_target("127.0.0.1", host.get_host_listen_port(), "mnml")), OK)
+	for _frame in range(600):
+		host.step()
+		await get_tree().process_frame
+		if bool(observed["identified"]):
+			break
+	assert_true(bool(observed["identified"]), "the join reached its S2C 0x11")
+	assert_false(bool(observed["root_at_identify"]), "no mission root lives under the 0x11's load")
+	assert_false(bool(observed["local_load"]), "the mission start's load waits for the S2C 0x1A")
+	var sync_tail_load: LoadTimeline = world.last_load_timeline()
+	assert_not_null(sync_tail_load, "the 0x11's load ran in the identification's frame")
+	if sync_tail_load != null:
+		var stages := []
+		for span in sync_tail_load.spans():
+			stages.append(span.name)
+		assert_eq(stages, ["environment", "terrain", "avatars"],
+				"the 0x11 loads the environment, the terrain and the avatar combos' models")
+	# The 0x11's terrain is the connect leg's alone: the configuration, the heights and the maps;
+	# the texture slots and the terrain's build wait for the mission textures stage
+	# (D-NET-NEW-L2-46; engine terrain/terrain_load_legs.h carries the witness).
+	var terrain: Terrain = world.get_terrain_node()
+	var terrain_data: TerrainData = world.get_terrain_data()
+	assert_not_null(terrain)
+	assert_true(terrain_data != null and terrain_data.is_loaded(),
+			"the 0x11 read the terrain's configuration and heights")
+	if terrain_data != null:
+		assert_null(terrain_data.get_colormap(), "no texture slot loads at the 0x11")
+	if terrain != null:
+		assert_false(terrain.is_built(), "the terrain builds at the mission textures stage")
+	for _frame in range(600):
+		host.step()
+		await get_tree().process_frame
+		if bool(observed["local_load"]):
+			break
+	assert_true(bool(observed["local_load"]), "the S2C 0x1A's mission start loaded the world")
+	assert_eq(failures.size(), 0)
+	if terrain != null:
+		assert_true(terrain.is_built(), "the mission start built the terrain")
+	if terrain_data != null:
+		assert_not_null(terrain_data.get_colormap(), "its texture slots loaded")
+	var mission_start_load: LoadTimeline = world.last_load_timeline()
+	assert_not_null(mission_start_load)
+	if mission_start_load != null and not mission_start_load.spans().is_empty():
+		assert_eq(mission_start_load.spans()[0].name, "objects",
+				"the S2C 0x1A's load goes on from the objects; the 0x11 ran the head")
+		# The mission start's sound banks and its streamed world's init run ahead of the first
+		# 0x2F, the effect builds after it (D-NET-NEW-L2-42; engine inmatch/joiner_role.h
+		# MissionStartLegs carries the witness).
+		var top := []
+		for span: LoadTimelineSpan in mission_start_load.spans():
+			if span.depth == 0:
+				top.append(span.name)
+		var audio := top.find("audio")
+		var streamed := top.find("streamed_world")
+		var pool0_channels := top.find("pool0_channels")
+		var first_leg := top.find("first_leg")
+		var effects := top.find("effects")
+		var terrain_textures := top.find("terrain_textures")
+		var effects_warm := top.find("effects_warm")
+		assert_true(audio >= 0 and streamed > audio, "the streamed world follows the audio: %s" % [top])
+		# The reload's pool-0 animation maps sit between them (D-NET-NEW-L2-56).
+		assert_true(pool0_channels > audio and streamed > pool0_channels,
+				"the reload's pool-0 channels follow the audio and lead the streamed world: %s" % [top])
+		assert_true(first_leg > streamed, "the first leg follows the streamed world: %s" % [top])
+		assert_true(effects > first_leg, "the effect builds follow the first leg: %s" % [top])
+		assert_true(terrain_textures > effects and effects_warm > terrain_textures,
+				"the terrain's textures open the mission textures stage: %s" % [top])
+	world.unload()
+
+
+# A joiner's reload for the host's next map runs the same 0x11 load as its first join: every
+# Game_StartMission(0) of a joiner runs the joiner arm's terrain load between its sync-tail wait
+# and its game-start wait, a reload's included, and the shell's round-end route unloaded the old
+# world before reload_joiner, so no mission root lives under the reload's 0x11 and the 0x11
+# loads the next map's environment and terrain alone (D-NET-NEW-L2-19; engine
+# inmatch/joiner_connection.h set_sync_tail_loading carries the witness). The host is a GameWorld
+# through its own map change (net/host_map_change_test.gd); its slot reset's S2C 0x25 ends the
+# joiner's round, exit 4, which the shell routes to the Game Loop (main_game.gd
+# _route_round_end).
+func test_a_joiner_reload_loads_the_next_maps_terrain_at_its_sync_tail() -> void:
+	var host_world := WorldFixture.make_world(self)
+	var world := WorldFixture.make_world(self)
+	await get_tree().process_frame
+	host_world.set_playable(false)
+	world.set_playable(false)
+	var host_root := ResourceRoot.new()
+	assert_eq(host_root.set_root_dir(
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
+	host_world.set_resource_root(host_root)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
+	world.set_resource_root(root)
+	# REPLAY on a one-entry rotation: the map change names the same map again.
+	var config := HostSessionConfig.new()
+	config.mission = "mnml.bms"
+	config.missions.assign(["mnml.bms"])
+	config.mission_launch_options.assign([0])
+	config.bind_port = 0
+	config.game_type = HostSessionConfig.GAME_TYPE_COOP
+	var options := config.to_session_options()
+	options.replay_enabled = 1
+	assert_eq(host_world.load_mission_as_host(options), OK)
+	var host: Simulation = host_world.get_sim()
+	assert_not_null(host)
+	if host == null:
+		return
+	var failures: Array[String] = []
+	world.load_failed.connect(func(reason: String): failures.append(reason))
+	var lost: Array[String] = []
+	world.session_lost.connect(func(reason: String): lost.append(reason))
+	var observed := {"local_load": false}
+	world.world_loaded.connect(
+			func(): observed["local_load"] = true, CONNECT_ONE_SHOT)
+	assert_eq(world.load_mission_as_joiner(
+			_join_target("127.0.0.1", host.get_host_listen_port(), "mnml")), OK)
+	for _frame in range(600):
+		host_world.tick(Vector3.ZERO)
+		await get_tree().process_frame
+		if bool(observed["local_load"]):
+			break
+	assert_true(bool(observed["local_load"]), "the first join loaded its world")
+	var sim: Simulation = world.get_sim()
+	assert_not_null(sim)
+	if sim == null:
+		world.unload()
+		host_world.unload()
+		return
+	for _frame in range(600):
+		host_world.tick(Vector3.ZERO)
+		world.tick(Vector3.ZERO)
+		await get_tree().process_frame
+		if sim.is_joined_in_match():
+			break
+	assert_true(sim.is_joined_in_match(), "the joiner reached the match")
+
+	var next_map: String = host_world.begin_map_change()
+	assert_eq(next_map.to_lower(), "mnml.bms", "the rotation names the next map")
+	host_world.unload()
+	assert_eq(host_world.load_next_mission(next_map), OK)
+	for _frame in range(600):
+		host_world.tick(Vector3.ZERO)
+		world.tick(Vector3.ZERO)
+		await get_tree().process_frame
+		if not lost.is_empty():
+			break
+	assert_eq(lost.size(), 1, "the host's slot reset ended the joiner's round")
+	assert_eq(sim.get_mission_exit_reason(), GameWorld.MISSION_EXIT_ROUND_OVER)
+	assert_eq(world.main_frame_exit(GameWorld.MISSION_EXIT_ROUND_OVER),
+			GameWorld.MAIN_FRAME_EXIT_GAME_LOOP, "a joiner's round over is the Game Loop")
+
+	var reload := {"identified": false, "root_at_identify": true, "local_load": false}
+	world.join_session_identified.connect(func(_info: LoadingScreenInfo) -> void:
+		reload["identified"] = true
+		reload["root_at_identify"] = world.get_runtime() != null
+	, CONNECT_ONE_SHOT)
+	world.world_loaded.connect(
+			func(): reload["local_load"] = true, CONNECT_ONE_SHOT)
+	# The shell's round-end route: the kept session, the old world down, then the reload.
+	assert_true(world.begin_joiner_reload(), "the joiner keeps its session for the next map")
+	world.unload()
+	assert_eq(world.reload_joiner(), OK)
+	for _frame in range(600):
+		host_world.tick(Vector3.ZERO)
+		await get_tree().process_frame
+		if bool(reload["identified"]):
+			break
+	assert_true(bool(reload["identified"]), "the reload reached the next map's S2C 0x11")
+	assert_false(bool(reload["root_at_identify"]),
+			"no mission root lives under the reload's 0x11 load")
+	assert_false(bool(reload["local_load"]), "the reload's mission start waits for the S2C 0x1A")
+	var sync_tail_load: LoadTimeline = world.last_load_timeline()
+	assert_not_null(sync_tail_load, "the reload's 0x11 load ran in the identification's frame")
+	if sync_tail_load != null:
+		var stages := []
+		for span in sync_tail_load.spans():
+			stages.append(span.name)
+		assert_eq(stages, ["environment", "terrain", "avatars"],
+				"the reload's 0x11 loads the environment, the terrain and the avatar combos' models")
+	assert_eq(failures.size(), 0)
+	world.unload()
+	host_world.unload()
 
 
 func test_failed_join_load_does_not_make_the_next_mission_wire_only() -> void:
@@ -2006,7 +2806,10 @@ func test_a_mission_whose_environment_does_not_load_starts_on_the_engine_default
 		var timeline: LoadTimeline = world.last_load_timeline()
 		assert_not_null(timeline)
 		if timeline != null:
-			assert_eq(timeline.spans()[0].name, "environment", "the environment stage ran")
+			# The mission start's effect system, its texture atlases nested in it, leads its head
+			# (load_mission_internal).
+			assert_eq(timeline.spans()[1].name, "texture_atlases", "the effect system built its atlases")
+			assert_eq(timeline.spans()[2].name, "environment", "the environment stage ran")
 		world.unload()
 
 
@@ -2039,11 +2842,21 @@ func test_terrain_load_failure_finishes_its_perf_timeline() -> void:
 		return
 	assert_eq(timeline.label, "Mission load %s" % bms_name)
 	var spans := timeline.spans()
-	assert_eq(spans.size(), 2)
-	if spans.size() == 2:
-		assert_eq(spans[0].name, "environment")
-		assert_eq(spans[1].name, "terrain")
-		assert_gt(spans[1].end_us, 0,
+	# The entry's mount and document, then the mission start's effect system ahead of its
+	# terrain, as retail's loads it past the head's per-slot reset (CEffectSystem_Init @0x524980
+	# ahead of Game_LoadTerrainDuringConnect @0x524F7C; engine inmatch/host_role.h
+	# open_mission_load_window carries the witness), its texture atlases built inside it
+	# (engine renderer/particle_atlas.h, D-NET-NEW-L3-26).
+	assert_eq(spans.size(), 6)
+	if spans.size() == 6:
+		assert_eq(spans[0].name, "mount")
+		assert_eq(spans[1].name, "document")
+		assert_eq(spans[2].name, "effect_system")
+		assert_eq(spans[3].name, "texture_atlases")
+		assert_eq(spans[3].depth, 1, "the atlases nest in the effect system")
+		assert_eq(spans[4].name, "environment")
+		assert_eq(spans[5].name, "terrain")
+		assert_gt(spans[5].end_us, 0,
 			"finish closes the terrain span left open by the early return")
 
 
@@ -2617,7 +3430,8 @@ func test_joiner_challenge_prewarm_loads_player_and_current_viewmodels_before_fr
 	var root_dir := _stage_viewmodel_fixture("challenge_prewarm", true)
 	var world := WorldFixture.boot_minimal(self, root_dir)
 	assert_true(world.set_local_player_weapon_by_name("WPN_TEST"))
-	var body := world.get_item_db().get_graphic(MissionObjectPlacer.PLAYER_VISUAL_ITEM_ID)
+	# The local body's type word names its row (0x14B9 -> 105305, D-NET-348).
+	var body := world.get_item_db().get_graphic(0x14B9 + MissionData.ITEM_ID_OFFSET)
 	assert_false(body.is_empty(), "the player body graphic resolves from the staged catalog")
 
 	var resolved := world.prewarm_challenge_models()
@@ -2697,6 +3511,24 @@ func test_hide_foliage_toggles_dispatcher_visibility() -> void:
 	world.set_foliage_hidden(false)
 	assert_false(world.is_foliage_hidden())
 	assert_true(disp.visible, "showing foliage restores the dispatcher")
+
+
+# The three drawn frames past a mission start present black: retail's scene frame clears its
+# target past every pass it drew, presents that, then counts the start down (engine
+# inmatch::FrameOutcome::start_blank carries the witness). The fourth presents its scene, and an
+# unload leaves no cover up.
+func test_the_three_frames_past_a_mission_start_present_black() -> void:
+	var world := WorldFixture.boot_minimal(self)
+	var frames: Array = []
+	for _frame in 4:
+		world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
+		var cover := world.get_node_or_null("StartBlankCover") as CanvasLayer
+		frames.append([world.get_last_frame_start_blank(), cover != null and cover.visible])
+	assert_eq(frames, [[true, true], [true, true], [true, true], [false, false]],
+			"three black frames, then the scene")
+	world.unload()
+	var after := world.get_node_or_null("StartBlankCover") as CanvasLayer
+	assert_true(after == null or not after.visible, "no cover past the unload")
 
 
 func test_tick_feeds_dispatcher_silhouette_anchors_from_the_sim() -> void:
@@ -3177,6 +4009,34 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 	world.set_particles_hidden(false)
 	assert_eq(_fx_unowned_rows(world).size(), 2,
 			"revisiting the same descriptor index cannot duplicate its persistent effect")
+
+
+func test_a_model_less_effect_item_spawns_its_effect_at_its_origin() -> void:
+	# A def with no graphic that names a particle effect (jox01's FX_FireFlies_20m and
+	# FX_Moths_1m rows): nothing draws, but the mission start still spawns the effect, once at
+	# the entity's position and basis (StaticEffectSource::model_less carries the witness).
+	var root_dir := _stage_item_fx_fixture("model_less", [
+		{"id": 108010, "type": "effect", "graphic": "", "effect": FX_FALLBACK_EFFECT},
+	])
+	var world := WorldFixture.make_world(self)
+	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
+			func(mission: MissionData) -> void:
+				mission.add_entity(
+						MissionData.KIND_ITEM, 108010, Vector3(-5, 6, 7), Vector3(0, 45, 0))), OK)
+	assert_eq(world.get_mission_stats().unresolved, 1,
+			"a def with no graphic has nothing to draw")
+	var rows := _fx_unowned_rows(world, FX_FALLBACK_EFFECT)
+	assert_eq(rows.size(), 1, "one emitter, at the entity's origin")
+	if rows.size() == 1:
+		var row: EffectGroupReport = rows[0]
+		assert_eq(row.binding, EffectScene.BINDING_WORLD)
+		assert_true(row.transform.is_equal_approx(MissionObjectPlacer.entity_transform(
+				Vector3(-5, 6, 7), Vector3(0, 45, 0))),
+				"the emitter stands at the entity's position and basis")
+	world.set_particles_hidden(true)
+	world.set_particles_hidden(false)
+	assert_eq(_fx_unowned_rows(world, FX_FALLBACK_EFFECT).size(), 1,
+			"the registered descriptor is never revisited")
 
 
 func test_live_item_effect_owner_uses_each_fixed_ticks_value_pose() -> void:

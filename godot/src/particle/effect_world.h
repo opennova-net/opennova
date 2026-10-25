@@ -83,7 +83,9 @@ public:
 	int interned_count() const;
 	void set_particles_hidden(bool p_hidden);
 	bool are_particles_hidden() const;
-	Callable get_texture_provider() const;
+	// What the atlas reads a particle frame's decoded Image through (the
+	// mounted root's particle loader once load_from_resource_root ran).
+	Callable get_image_provider() const;
 	// C++ siblings only (not bound): the root load_from_resource_root mounted,
 	// for an effect device whose texture loads through another retail loader
 	// than the particle graphics' TGA reader (the water wake).
@@ -93,6 +95,9 @@ public:
 	// the cached basis) or null (the owner is gone: its groups detach).
 	void set_owner_position_provider(const Callable &p_provider);
 	void set_water_plane(float p_value, Camera3D *p_reflection_camera);
+	// The weapon Inset pass's own water mirror camera
+	// (ParticleRenderer::set_inset_mirror_camera); clear_world() drops it.
+	void set_inset_mirror_camera(Camera3D *p_camera);
 	// The camera of a second view of this world's scene (the weapon Inset pass),
 	// or null while none renders: the renderer compiles the world's particles
 	// for it too (ParticleRenderer::set_second_scene_camera). The device owner
@@ -133,7 +138,11 @@ public:
 	// before it resolves ANY effectdef, so cross-file pdefs resolve
 	// regardless of file order; order only picks which duplicate id wins
 	// (first registration), so the walk's order is retail's (D-PTL-24).
-	int load_from_resource_root(const Ref<ResourceRoot> &p_root);
+	// A valid `p_present` presents the loading screen at its stored checkpoint
+	// past each loose file the walk parses and once past the archive walk
+	// (engine hud/loading_screen.h carries the witness).
+	int load_from_resource_root(const Ref<ResourceRoot> &p_root,
+			const Callable &p_present = Callable());
 	// The in-memory entry (the GUT fixtures author documents directly).
 	void load_particle_file(const Ref<ParticleFile> &p_file);
 	void clear_world();
@@ -175,6 +184,21 @@ public:
 	// values are in the submitted draw list immediately. Returns the number
 	// of material runs.
 	int64_t render_now(int64_t p_time_ms);
+	// The catalog's texture atlases built now from the loaded effect files, each
+	// frame's file decoded into its page: the mission start's effect system
+	// builds them once at its init, ahead of the load window and the terrain, so
+	// the load's first draw builds none (engine renderer/particle_atlas.h carries
+	// the witness, D-NET-NEW-L3-26). The particle materials create as the pages build, so
+	// every particle pass's device shaders create with them (ParticleRenderer::
+	// create_particle_devices; the same header carries the witness, D-NET-NEW-LF-13).
+	// The build presents the loading screen through `p_present` as the game's does
+	// (ParticleAtlasDevice::rebuild).
+	void build_texture_atlases(const Callable &p_present = Callable());
+	// The tracer pool's materials at the mission textures stage: the distortion ribbons' and
+	// the overlay stages' device objects (ParticleRenderer::create_tracer_pool_devices;
+	// engine renderer/tracer_frame.h creates_tracer_pool_shaders carries the witness,
+	// D-NET-NEW-LF-13).
+	void create_tracer_pool_devices();
 	// The renderer's full draw-list diagnostics (world + first-person lists,
 	// backends, atlas pages/entries) for the F3 Particles page — the one
 	// Dictionary report this facade keeps (the allowlisted transport edge).
@@ -294,13 +318,14 @@ private:
 	Ref<EffectScene> scene_;
 	ObjectID renderer_id_;
 	Ref<ResourceRoot> root_;
-	Callable texture_provider_;
+	Callable image_provider_;
 	String texture_dir_;
 	ObjectID environment_source_id_;
 	Callable owner_position_provider_;
 	float water_height_ = 0.0f;
 	ObjectID reflection_camera_id_;
 	ObjectID second_scene_camera_id_;
+	ObjectID inset_mirror_camera_id_;
 	int session_texcompression_level_ = 1;
 	int session_particle_density_ = 2;
 	bool main_view_nvg_scene_ = false;

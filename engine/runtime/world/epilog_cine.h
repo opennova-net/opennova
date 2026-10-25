@@ -79,8 +79,8 @@ struct CineEvent {
 	// CacheCamera: the cached pose, the start and end keyframes alike (the
 	// local player's Position, Yaw and Pitch at the round end).
 	Vec3 camera_position;
-	int16_t camera_yaw = 0;
-	int16_t camera_pitch = 0;
+	int32_t camera_heading = 0; // the Yaw word (D-NET-NEW-L6-2)
+	int32_t camera_pitch = 0; // the Pitch word (D-NET-NEW-L6-3)
 	// Letterbox (+0x24): 1 fades the bars in over the node, 2 fades them out.
 	int32_t letterbox_mode = 0;
 	// ImageFade: the image, the fade, the frames the fade waits, the source.
@@ -155,6 +155,12 @@ inline constexpr int32_t kEpilogWinLetterboxFrames = 62;
 // [orig: Cine_StartPlayback @0x5778B3 (100) / @0x5778E0 (1)].
 inline constexpr int32_t kEpilogLoseLetterboxFrames = 100;
 inline constexpr int32_t kEpilogLoseEditFadeFrames = 1;
+// The edit fade's start and finish scale the main loop's frame-time smoothing
+// history while the cine runs (WorldOutbox::frame_time_scales)
+// [orig: CCineEventEditFade_Start @0x5726B0 — flt_7D6858 (0x3FD47AE1) @0x5726BF;
+//  CCineEventEditFade_Finish @0x572750 — flt_7D685C (0x3F1A3785) @0x57276B].
+inline constexpr float kEpilogEditFadeStartScale = 1.66f;
+inline constexpr float kEpilogEditFadeFinishScale = 0.60240966f;
 // The lose screen starts 249 frames past its build frame; the win screen 1
 // [orig: Cinematic_EpilogUpdate @0x574512 `add esi, 249`;
 //  Cine_EpilogStateMachineUpdate @0x5764F6 (+1)].
@@ -224,7 +230,7 @@ enum class EpilogCineMode : int32_t { None = 0, Win = 1, Lose = 2 };
 
 struct EpilogCine {
 	// The cine runs: the entity update steps it while set, the render pass
-	// clears it once the timeline passes its last event [orig: dword_26970FC].
+	// clears it once the timeline passes its last event [orig: g_CinePlaying].
 	bool active = false;
 	// The timeline frame, advanced once per dispatch [orig: dword_2697100;
 	//  Cine_AdvanceTimelineFrame @0x56FF52].
@@ -287,6 +293,12 @@ struct EpilogCine {
 	// last event draws a cine frame, else the cine stops
 	// [orig: Cine_RenderOrEndPlayback @0x575A50 -> Cine_RenderOverlays @0x570BB0].
 	void render_pass();
+	// Whether a cine plays: one whose timeline is before its last event plays; one past it
+	// stops here (the render callback asks first, from the listener update, then the scene
+	// frame's head, whose world-skip word it raises)
+	// [orig: Cine_IsPlaybackActive @0x575960 - the running gate @0x575960, the time-range
+	//  recalc @0x57596C, past the end the stop @0x57598A].
+	bool playback_active();
 	// The timeline's last frame: the largest start + duration, 0 for an empty
 	// list [orig: CineNode_RecalcTimeRange @0x5701C0].
 	int32_t end_frame() const;
@@ -297,9 +309,9 @@ private:
 	// on its start frame, updates, and ends on its last frame, in list order
 	// [orig: Cine_AdvanceTimelineFrame @0x56FF40].
 	void step_timeline(World &world);
-	void activate_event(CineEvent &e);
+	void activate_event(CineEvent &e, World &world);
 	void update_event(CineEvent &e, World &world);
-	void end_event(const CineEvent &e);
+	void end_event(const CineEvent &e, World &world);
 	void update_lose(World &world);
 	void update_win(World &world);
 	void build_lose_screen();

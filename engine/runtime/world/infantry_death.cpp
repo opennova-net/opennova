@@ -1,9 +1,11 @@
 // The infantry death edge: once per life a dead body takes its death clip, seeds
-// its corpse timer, screams, drops its mount and latches the dead bit; an org1
-// (NPC) body on the authority then raises its own death transaction.
+// its corpse timer, screams, drops its mount and latches the dead bit; on the
+// authority an org1 (NPC) body then raises its own death transaction, and a
+// player (org2) body the host session's player-death transaction.
 // [orig: Entity_UpdateInfantryAI @0x4B9C40..0x4B9D55; the player-body twin in
 //  Entity_UpdateInfantryPlayerBody @0x4B4C4A..0x4B4CEA]
 #include <runtime/world/infantry_internal.h>
+#include <runtime/world/round_sim.h> // person_class_round_legs
 #include <runtime/world/world.h>
 
 namespace opennova::world {
@@ -11,14 +13,52 @@ namespace opennova::world {
 // An org1 body's death transaction is its motor edge's: retail raises
 // Entity_CheckAndProcessDeath from the edge [orig: Entity_UpdateInfantryAI
 // @0x4B9D44..0x4B9D4D -> Entity_CheckAndProcessDeath @0x51B550], never from the
-// damage that dropped the health. Player bodies (org2) and organics without a
-// motor keep the damage-time transaction.
+// damage that dropped the health. Organics without a motor keep the
+// damage-time transaction.
 bool org1_owns_death_transaction(const World &world, EntityHandle victim) {
     const Entity *ent = world.registry.get(victim);
     const AiEntity *body = world.ai.for_handle(victim);
     return ent != nullptr && body != nullptr && body->inf.active &&
            !body->inf.is_local_player && !body->net_is_remote_peer &&
            ((ent->flags | ent->engine_flags) & kEntityFlagPlayer) == 0;
+}
+
+// The org2 twin: a player body's transaction is its edge's, inside the entity
+// update [orig: Entity_UpdateInfantryPlayerBody @0x4B4CE1..0x4B4CEA ->
+// Entity_CheckAndProcessDeath @0x51B550].
+bool org2_owns_death_transaction(const World &world, EntityHandle victim) {
+    const Entity *ent = world.registry.get(victim);
+    const AiEntity *body = world.ai.for_handle(victim);
+    return ent != nullptr && body != nullptr && body->inf.active &&
+           (body->inf.is_local_player || body->net_is_remote_peer ||
+            ((ent->flags | ent->engine_flags) & kEntityFlagPlayer) != 0);
+}
+
+// The dead bit is the edge's own latch on every peer (a joiner's own body too: its 0x0A tail
+// stores Health alone and its record's flag fold masks bit 1 out), so the gate is retail's on
+// both: an unhidden body whose dead bit is clear. It never reads the animation state: a joiner's
+// redeployed body runs its first ticks on the corpse's death state with its dead bit clear
+// (JoinerRole::land_local_respawn_arm), and a death then still takes the edge. A rowless test
+// body has no flags word, so it keys the edge on the posed death clip instead.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the head's hidden-bit return
+//  @0x4B411E..0x4B4127, Health <= 0 @0x4B4BF1..0x4B4BF8 (the caller's), the dead bit
+//  @0x4B4BFE..0x4B4C02; NetPacket_SerializePlayerState @0x4C09C0 - the local fold's
+//  `and ebx, 0E1h` @0x4C12FF]
+bool player_body_death_edge_open(const AiSystem &, const AiEntity &e, const Entity *ent) {
+    if (ent == nullptr) return infantry_anim_flags(e.inf.anim_state) != 0x82u;
+    return ((ent->flags | ent->engine_flags) & (kEntityFlagCarried | kEntityFlagDead)) == 0;
+}
+
+// The edge's tail on the authority: Entity_CheckAndProcessDeath, which for a
+// player body is GameEvent_PlayerDeath (the 0x13, the 0x61 disarm, the 0x52,
+// the 0x1E, the 0x54 and the re-armed holds), raised at the body's turn in the
+// pool-0 walk. The edge has latched the dead bit; `alive` is the port's mirror
+// of it. [orig: Entity_UpdateInfantryPlayerBody -- the latch @0x4B4CB5..0x4B4CB8,
+//  `cmp is_authority` @0x4B4CE1, the Entity_CheckAndProcessDeath call @0x4B4CEA]
+void raise_player_body_death(const AiSystem &ai, World &world, Entity &ent) {
+    ent.alive = false;
+    if (ai.is_authority && world.entity_update_transactions != nullptr)
+        world.entity_update_transactions->player_death(world, ent);
 }
 
 // The death scream, played by the edge of whichever pass runs the body.
@@ -45,9 +85,9 @@ void infantry_death_scream(AiSystem &ai, const AiEntity &e, World &world, const 
     if (player_body) {
         SoundSlotEvent scream;
         scream.source_handle = e.handle.packed;
-        scream.pos[0] = e.pos[0];
-        scream.pos[1] = e.pos[1];
-        scream.pos[2] = e.pos[2];
+        scream.pos[0] = e.self->position.x.q16;
+        scream.pos[1] = e.self->position.y.q16;
+        scream.pos[2] = e.self->position.z.q16;
         scream.slot = static_cast<uint8_t>(
                 night_death ? audio::kSlotNightDeath : audio::kSlotDeath);
         audio::compose_entity_sound_set(
@@ -59,18 +99,20 @@ void infantry_death_scream(AiSystem &ai, const AiEntity &e, World &world, const 
     } else {
         ai.emit_slot_sound(world, e,
                            night_death ? audio::kSlotNightDeath : audio::kSlotDeath,
-                           e.pos);
+                           e.self->position.words().data());
     }
 }
 
 void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, bool org1,
                          uint32_t logic_tick) {
     InfantryState &inf = e.inf;
-    // A mounted body detaches so the corpse falls with the world, not the seat.
+    // A mounted body detaches so the corpse falls with the world, not the seat, on the
+    // authority alone: a client's body keeps its seat until the record detaches it.
     // [orig: Entity_UpdateInfantryAI @0x4B9910 (the +0x16C test @0x4B9C57, the
     //  Entity_DetachFromVehicleIfServer call @0x4B9C60); the player-body twin
-    //  @0x4B4C08..0x4B4C11]
-    if (ent != nullptr && ent->mounted)
+    //  @0x4B4C08..0x4B4C11; Entity_DetachFromVehicleIfServer @0x4359D0 (the
+    //  is_authority test @0x4359D7)]
+    if (ai.is_authority && ent != nullptr && ent->mounted)
         world.vehicles.detach(e.handle);
     // [orig: @0x4B9C68] Section bit 0 forces silent, shortened cleanup
     // even for LeaveCorpse items and cancels scripted respawns.
@@ -86,7 +128,8 @@ void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, b
     // cleared, so a death nothing stamped (script/WAC) reports as
     // unattributed while one that follows a non-lethal hit keeps that
     // hit's clip and shooter [orig: @0x4b9cc9 fallback, @0x4b9ceb
-    // lastAttacker = 0; the player-body edge's twin @0x4b4c72..0x4b4c8d;
+    // lastAttacker = 0; the player-body edge's twin @0x4b4c72..0x4b4c8d (its
+    // Entity_ComputeAnimSlotIndex(0, 0, 4) call @0x4B4C7F);
     // consumed +0x2C0 clears @0x4b9d38].
     if (ent != nullptr && ent->death_anim_state == 0) {
         ent->last_attacker = EntityHandle{};
@@ -135,14 +178,18 @@ void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, b
     // [orig: Entity_UpdateInfantryAI `or eax,2` @0x4B9D18 / store @0x4B9D1B,
     //  death tick @0x4B9D24..0x4B9D2F, `and eax,0FFFFFF3Fh` @0x4B9D2A,
     //  +0x184 = 0 @0x4B9D3E; the player-body twin
-    //  Entity_UpdateInfantryPlayerBody @0x4B4CB5..0x4B4CDB]
+    //  Entity_UpdateInfantryPlayerBody @0x4B4CB5..0x4B4CDB: the death tick
+    //  g_CurrentTick @0x4B4CC1 into +0x1AC @0x4B4CCC, `and eax,0FFFFFF3Fh` @0x4B4CC7]
     ent->flags |= kEntityFlagDead;
     ent->engine_flags |= kEntityFlagDead;
     ent->attach_parent = {};
     ent->flags &= ~(kEntityFlagMounted | kEntityFlagAiClimb);
     ent->engine_flags &= ~(kEntityFlagMounted | kEntityFlagAiClimb);
     ent->death_tick = logic_tick;
-    if (!org1) return;
+    if (!org1) {
+        raise_player_body_death(ai, world, *ent);
+        return;
+    }
     // The authority raises the body's death transaction from here: the host's
     // death routing sends the 0x13 and scores it against the victim's
     // lastAttacker (+0x178). A damage-time record for this body only fed the
@@ -158,6 +205,82 @@ void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, b
         d.motor_edge = true;
         world.round_sim.deaths.push_back(d);
     }
+}
+
+// The callback's seat leave: a host that is not a session peer (dedicated)
+// detaches the body itself; anywhere else (a listen host, a client) the leave
+// is Entity_SendDetachPacket, which queues the C2S 0x27 only for the local
+// player's own body with a parent and does nothing for any other body. A
+// listen host's own 0x27 lands on its own server leg, applied here directly as
+// the mount toggle's is (vehicle_attach.cpp); a client's goes to its send queue.
+// [orig: Entity_HandleDamageAndTriggerZones -- `cmp is_mp_session_peer`
+//  @0x407AA0 / @0x407B16, Entity_DetachFromVehicleIfServer @0x407AAA /
+//  @0x407B20, Entity_SendDetachPacket @0x407ABD / @0x407B33;
+//  Entity_SendDetachPacket @0x435510 (the target and local-player gates
+//  @0x435518 / @0x43552A, the reliable 0x27 @0x435596..0x4355A2)]
+static void class_event_seat_leave(World &world, Entity &body) {
+    if (world.ai.is_authority && !world.rules.mp_session_peer) {
+        world.commands.dismount(body.handle);
+        return;
+    }
+    if (body.handle != world.cached.local_player || !body.mount_target.valid()) return;
+    if (world.ai.is_authority)
+        world.commands.dismount(body.handle);
+    else
+        world.out.detach_requests.push_back(body.mount_target.packed);
+}
+
+// See the infantry.h contract.
+void player_body_health_tail(World &world, Entity &body) {
+    if (retail_signed_i16(body.health) > 0) return;
+    if (body.death_anim_state == 0)
+        body.death_anim_state = compute_death_anim_state(0, 0, death_cause::kBullet);
+    // The staged clip becomes the primary channel's request, the deferred
+    // one cleared [orig: +0x2BC @0x407AFB, +0x2B8 @0x407B01].
+    if (AiEntity *motor = world.ai.for_handle(body.handle)) {
+        motor->inf.anim_state = body.death_anim_state;
+        motor->inf.anim_pending = 0;
+    }
+    // Every peer's arm [orig: the parent @0x407AED / @0x407B0B, the leave
+    //  @0x407B0D..0x407B33]
+    if (body.mounted) class_event_seat_leave(world, body);
+}
+
+// See the infantry.h contract.
+void player_body_dead_record(World &world, Entity &body, int anim_state) {
+    // [orig: NetPacket_SerializePlayerState @0x4C09C0 - `test byte ptr [edi+24h], 2` @0x4C100B]
+    if (((body.flags | body.engine_flags) & kEntityFlagDead) == 0) {
+        body.death_anim_state = anim_state; // [orig: @0x4C10F5]
+        return;
+    }
+    if (AiEntity *motor = world.ai.for_handle(body.handle)) {
+        motor->inf.anim_state = anim_state; // +0x2BC [orig: @0x4C1019]
+        motor->inf.anim_pending = 0;        // +0x2B8 [orig: @0x4C1021]
+    }
+}
+
+// See the infantry.h contract.
+void player_body_class_event(World &world, Entity &body, int event) {
+    // [orig: the dead return @0x40772A..0x40772F]
+    if (((body.flags | body.engine_flags) & kEntityFlagDead) != 0) return;
+    if (event == 1) {
+        // A recorded round's legs (its network kill scorer only reaches
+        // GameEvent_ProcessScoring case 2, which the port does not model, live
+        // hits included); with none the scorer returns at once [orig: the
+        //  round test @0x4078D8..0x4078DA, the legs @0x407777..0x407A7C;
+        //  Score_ProcessNetworkKillEvent @0x4FD49B..0x4FD49D;
+        //  GameEvent_ProcessScoring case 2 @0x52FC22].
+        const HitRecord &record = world.round_sim.hit_record;
+        if (record.has_round) person_class_round_legs(world, body, record);
+    } else if (event == 4) {
+        // The authority's arm alone [orig: `cmp is_authority` @0x407A8D..0x407A94,
+        //  the parent @0x407A96, the leave @0x407AA0..0x407ABD]
+        if (world.ai.is_authority && body.mounted) class_event_seat_leave(world, body);
+    }
+    player_body_health_tail(world, body);
+    if (event != 4 && event != 1 && event != 3 && event != 5) body.cause_flags &= ~0xF00u;
+    body.spawn_phase = 64;
+    player_body_waypoint_visits(world, body);
 }
 
 } // namespace opennova::world

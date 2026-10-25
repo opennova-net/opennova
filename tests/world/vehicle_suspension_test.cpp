@@ -341,14 +341,26 @@ void test_bike_crash_test_and_eject() {
 	Entity &veh = *w.registry.get(bh);
 	CHECK(veh.primary_occupant == dh, "the rider claims the bike");
 
-	vehicle_suspension_bike_crash_test(veh, false, false, true);
+	// The test reads the contact copy's slots 2, 3 and 5; slot 4 is not read
+	// [orig: @0x47B351..0x47B363] (D-NET-NEW-L6-24).
+	const int32_t spine2[6] = { 0, 0, 9, 0, 0, 0 };
+	const int32_t front_and_spine[6] = { 9, 0, 9, 0, 0, 0 };
+	const int32_t none[6] = { 0, 0, 0, 0, 0, 0 };
+	const int32_t slot4[6] = { 0, 0, 0, 0, 9, 0 };
+	const int32_t slot5[6] = { 0, 0, 0, 0, 0, 9 };
+	vehicle_suspension_bike_crash_test(veh, spine2);
 	CHECK(veh.veh.crash_request == 0, "a never-driven bike does not request");
 	veh.veh.wheelie_active = 1;
-	vehicle_suspension_bike_crash_test(veh, true, false, true);
+	vehicle_suspension_bike_crash_test(veh, front_and_spine);
 	CHECK(veh.veh.crash_request == 0, "a wheel on the ground: no request");
-	vehicle_suspension_bike_crash_test(veh, false, false, false);
+	vehicle_suspension_bike_crash_test(veh, none);
 	CHECK(veh.veh.crash_request == 0, "no spine contact: no request");
-	vehicle_suspension_bike_crash_test(veh, false, false, true);
+	vehicle_suspension_bike_crash_test(veh, slot4);
+	CHECK(veh.veh.crash_request == 0, "copy slot 4 alone: no request (retail never reads it)");
+	vehicle_suspension_bike_crash_test(veh, slot5);
+	CHECK(veh.veh.crash_request == 1, "copy slot 5 alone: request");
+	veh.veh.crash_request = 0;
+	vehicle_suspension_bike_crash_test(veh, spine2);
 	CHECK(veh.veh.crash_request == 1,
 			"both wheels off, driven, a spine probe touching: request");
 	CHECK(w.vehicles.suspension_arm(veh, /*eject_occupants=*/true), "the bike seed arms");
@@ -510,6 +522,95 @@ void test_airborne_loop_full_step_and_catch_up() {
 	}
 }
 
+// The aircraft's grounded loop (D-NET-NEW-L6-11): the tracked loop's settle term and compress
+// arm with no crashed gate; its catch-up runs only past one growth step, skips a crashed hull
+// that still moves, and a diagonal pair in contact clears the hard-landing marker.
+// [orig: Entity_ProcessAircraftContactPhysics @0x47EF10, the loop @0x4811A2..0x481447]
+void test_air_grounded_loop() {
+	const VehicleTraits t = sprung_traits();
+	{
+		// A crashed hull still compresses its deep pad.
+		auto w_heap = make_world(true);
+		World &w = *w_heap;
+		EntityHandle h;
+		Entity &veh = spawn_veh(w, h);
+		veh.veh.crashed = 1;
+		int32_t depth[4] = {4096, 0, 0, 0};
+		const bool contact[4] = {true, false, false, false};
+		int32_t adj[4] = {0, 0, 0, 0};
+		w.vehicles.suspension_air_grounded_loop(veh, t, depth, contact, 187, adj);
+		CHECK(veh.veh.wheel_comp[0] == kSpringStepCap && depth[0] == 4096 - kSpringStepCap,
+				"air grounded: the deep pad compresses by the capped step, crashed or not");
+	}
+	{
+		// The catch-up: a crashed hull moving at 32 or more keeps its corner; under 32 the
+		// free pad drops by its sink beyond one growth step; a sink within one step adds nothing.
+		for (const int32_t speed : {32, 31}) {
+			auto w_heap = make_world(true);
+			World &w = *w_heap;
+			EntityHandle h;
+			Entity &veh = spawn_veh(w, h);
+			veh.veh.crashed = 1;
+			veh.veh.speed = speed;
+			veh.veh.plat_acc[1] = 1000;
+			veh.veh.plat_acc[2] = 187;
+			int32_t depth[4] = {0, 0, 0, 0};
+			const bool contact[4] = {false, false, false, false};
+			int32_t adj[4] = {0, 0, 0, 0};
+			w.vehicles.suspension_air_grounded_loop(veh, t, depth, contact, 187, adj);
+			CHECK(adj[1] == (speed >= 32 ? 0 : -(1000 - 187)),
+					"air grounded: the catch-up skips a crashed hull still moving");
+			CHECK(adj[2] == 0, "air grounded: a sink within one growth step adds nothing");
+		}
+	}
+	{
+		// A diagonal pair in contact clears the marker a hard drop would raise.
+		auto w_heap = make_world(true);
+		World &w = *w_heap;
+		EntityHandle h;
+		Entity &veh = spawn_veh(w, h);
+		veh.veh.plat_acc[1] = 6000;
+		veh.veh.slide_z = -1;
+		veh.veh.landing_2ee = 1;
+		int32_t depth[4] = {4096, 0, 0, 4096};
+		const bool contact[4] = {true, false, false, true};
+		int32_t adj[4] = {0, 0, 0, 0};
+		w.vehicles.suspension_air_grounded_loop(veh, t, depth, contact, 187, adj);
+		CHECK(adj[1] == -(6000 - 187) && veh.veh.landing_2ee == 0,
+				"air grounded: the 0/3 pair clears the hard-landing marker");
+	}
+	{
+		auto w_heap = make_world(true);
+		World &w = *w_heap;
+		EntityHandle h;
+		Entity &veh = spawn_veh(w, h);
+		VehicleTraits unsprung = t;
+		unsprung.spring = 0;
+		veh.veh.plat_acc[1] = 1000;
+		int32_t depth[4] = {4096, 0, 0, 0};
+		const bool contact[4] = {true, false, false, false};
+		int32_t adj[4] = {0, 0, 0, 0};
+		w.vehicles.suspension_air_grounded_loop(veh, unsprung, depth, contact, 187, adj);
+		CHECK(veh.veh.wheel_comp[0] == 0 && depth[0] == 4096 && adj[1] == 0,
+				"air grounded: spring 0 runs no part of the loop");
+	}
+	{
+		// The aircraft's airborne twin has no +0x2F0 or crash gate.
+		auto w_heap = make_world(true);
+		World &w = *w_heap;
+		EntityHandle h;
+		Entity &veh = spawn_veh(w, h);
+		veh.veh.settle_2f0 = 1;
+		veh.veh.crashed = 1;
+		veh.veh.wheel_osc[0].energy = 1000;
+		veh.veh.plat_acc[0] = 1000;
+		int32_t adj[4] = {0, 0, 0, 0};
+		w.vehicles.suspension_airborne_loop(veh, t, 4, 187, adj, /*latch_gated=*/false);
+		CHECK(veh.veh.wheel_comp[0] == kSpringStepCap && adj[0] == -(1000 - 187),
+				"air airborne: no latch gate on the step or the catch-up");
+	}
+}
+
 // The post-contact sink reset and the tick tail.
 void test_post_contact_and_tail() {
 	const VehicleTraits t = sprung_traits();
@@ -525,36 +626,29 @@ void test_post_contact_and_tail() {
 	reseed();
 	// A pad in contact zeroes ITS sink; nothing else moves.
 	const bool one[4] = {true, false, false, false};
-	vehicle_suspension_post_contact(veh, one, 4, 60000);
+	vehicle_suspension_post_contact(veh, one, 60000);
 	CHECK(veh.veh.plat_acc[0] == 0 && veh.veh.plat_acc[1] == 5 && veh.veh.plat_acc[3] == 5,
 			"a pad in contact zeroes its own sink only");
 	CHECK(veh.veh.landing_2ee == 1 && veh.veh.byte_2ef == 1, "and clears no latch");
 	// An ADJACENT pair is not the gate.
 	reseed();
 	const bool adjacent[4] = {true, true, false, false};
-	vehicle_suspension_post_contact(veh, adjacent, 4, 60000);
+	vehicle_suspension_post_contact(veh, adjacent, 60000);
 	CHECK(veh.veh.plat_acc[2] == 5 && veh.veh.plat_acc[3] == 5 && veh.veh.landing_2ee == 1,
 			"an adjacent pair is not a diagonal: no clear");
 	// A DIAGONAL pair clears — on an upright, uncrashed hull.
 	reseed();
 	const bool diagonal[4] = {false, true, false, true};
-	vehicle_suspension_post_contact(veh, diagonal, 4, -60000);
+	vehicle_suspension_post_contact(veh, diagonal, -60000);
 	CHECK(veh.veh.plat_acc[0] == 5 && veh.veh.landing_2ee == 1, "inverted: no clear");
 	veh.veh.crashed = 1;
-	vehicle_suspension_post_contact(veh, diagonal, 4, 60000);
+	vehicle_suspension_post_contact(veh, diagonal, 60000);
 	CHECK(veh.veh.plat_acc[0] == 5 && veh.veh.landing_2ee == 1, "crashed: no clear");
 	veh.veh.crashed = 0;
-	vehicle_suspension_post_contact(veh, diagonal, 4, 60000);
+	vehicle_suspension_post_contact(veh, diagonal, 60000);
 	CHECK(veh.veh.plat_acc[0] == 0 && veh.veh.plat_acc[2] == 0 &&
 					veh.veh.landing_2ee == 0 && veh.veh.byte_2ef == 0,
 			"a diagonal pair on an upright hull clears every sink, the landing marker and +0x2EF");
-	// A two-wheel row pairs its two wheels.
-	reseed();
-	vehicle_suspension_post_contact(veh, one, 2, 60000);
-	CHECK(veh.veh.plat_acc[1] == 5, "one wheel of two: no clear");
-	vehicle_suspension_post_contact(veh, adjacent, 2, 60000);
-	CHECK(veh.veh.plat_acc[1] == 0 && veh.veh.plat_acc[3] == 0 && veh.veh.landing_2ee == 0,
-			"both wheels down: the clear");
 
 	veh.veh.crash_request = 1;
 	veh.veh.spring_energy = 7;
@@ -671,7 +765,9 @@ void test_fit_seed_skips_latched_arms() {
 	int32_t corners[4][3] = { { 65536, 65536, 0 }, { 65536, -65536, 0 },
 		{ -65536, -65536, 0 }, { -65536, 65536, 0 } };
 	detail::PlatFit fit;
-	CHECK(detail::vehicle_suspension_fit(w, v, corners, nullptr, fit, 0, 0, 0, true),
+	const CollisionMatrix occupant =
+			detail::vehicle_occupant_matrix(detail::vehicle_solve_matrix(v));
+	CHECK(detail::vehicle_suspension_fit(w, v, occupant, corners, nullptr, fit, 0, 0, 0, true),
 			"an unlatched client seed still fits on the ground");
 	CHECK(v.veh.crashed == 0, "and the client stays unlatched");
 }
@@ -699,7 +795,9 @@ void test_crash_arm_quad_uses_the_box() {
 	v.veh.air_roll_bam = int32_t(0x80000000u); // inverted: the slow arm, not the settle
 	int32_t corners[4][3] = {};
 	detail::PlatFit fit;
-	detail::vehicle_suspension_fit(w, v, corners, nullptr, fit, 0, 0, 0, true);
+	const CollisionMatrix occupant =
+			detail::vehicle_occupant_matrix(detail::vehicle_solve_matrix(v));
+	detail::vehicle_suspension_fit(w, v, occupant, corners, nullptr, fit, 0, 0, 0, true);
 	CHECK(std::abs(corners[0][0] - 131072) <= 2 && std::abs(std::abs(corners[0][1]) - 65536) <= 2,
 			"the crash quad spans the box");
 }
@@ -934,6 +1032,7 @@ int main() {
 	test_sink_growth_and_gates();
 	test_grounded_loop_settle_and_impulse();
 	test_airborne_loop_full_step_and_catch_up();
+	test_air_grounded_loop();
 	test_post_contact_and_tail();
 	test_shock_clamps_the_table_entry_in_place();
 	test_tank_wheel_suspension_forces();

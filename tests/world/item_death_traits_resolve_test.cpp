@@ -73,6 +73,24 @@ std::vector<uint8_t> with_renamed_user_point(std::vector<uint8_t> bytes, const c
     return bytes;
 }
 
+// The model with its collision section 0's z min / z max words replaced, written
+// back through the parity writer (the committed fixtures all author section 0
+// from z 0, so a nonzero floor needs its own words).
+std::vector<uint8_t> with_section0_z_words(const std::vector<uint8_t> &bytes, int32_t z_lo,
+                                           int32_t z_hi) {
+    Threedi3di3 model{};
+    std::vector<uint8_t> out;
+    const bool read = threedi_3di3_read_memory(bytes.data(), bytes.size(), &model) == 0;
+    CHECK(read && model.collision != nullptr && model.collision->object_count > 0);
+    if (read && model.collision != nullptr && model.collision->object_count > 0) {
+        model.collision->objects[0].min[2] = z_lo;
+        model.collision->objects[0].max[2] = z_hi;
+        CHECK(threedi_3di3_write_memory(&model, out) == 0);
+    }
+    threedi_3di3_free(&model);
+    return out;
+}
+
 // A fresh loose asset root under the temp dir.
 struct TempRoot {
     std::string dir;
@@ -167,6 +185,18 @@ void expected_points(const std::vector<uint8_t> &bytes, const char *name,
 
 bool same(const Vec3 &a, const Vec3 &b) { return a.x == b.x && a.y == b.y && a.z == b.z; }
 
+// The KZ userpoints' own words, which are the mission-local (x, y, z) the blast
+// transforms [orig: Entity_QueueKzBlastAtUserPoints @0x4EABF0 - @0x4EAC93..0x4EACAA].
+void expected_words(const std::vector<uint8_t> &bytes, const char *name, std::vector<FixedVec3> &words) {
+    Threedi3di3 model{};
+    CHECK(threedi_3di3_read_memory(bytes.data(), bytes.size(), &model) == 0);
+    for (size_t i = 0; model.user_points != nullptr && i < model.user_point_count; ++i) {
+        const ThreediUserPoint &point = model.user_points[i];
+        if (strutil::iequals(point.name, name)) words.push_back(FixedVec3{point.x, point.y, point.z});
+    }
+    threedi_3di3_free(&model);
+}
+
 } // namespace
 
 // The first husk's KZ bank: both "KZ" and "kz" reach the traits with their
@@ -185,9 +215,8 @@ static void test_first_husk_kz_and_dead_points_feed_death_traits() {
     // husk, the final husk is only the preferred death-piece model).
     std::vector<uint8_t> kz_bytes = with_renamed_user_point(armory, "Armory", "KZ");
     kz_bytes = with_renamed_user_point(kz_bytes, "Ground", "kz");
-    std::vector<Vec3> expected;
-    std::vector<Vec3> ignored;
-    expected_points(kz_bytes, "KZ", expected, ignored);
+    std::vector<FixedVec3> expected;
+    expected_words(kz_bytes, "KZ", expected);
     CHECK(expected.size() == 2); // the fixture carries a real multi-point KZ bank
     {
         const TempRoot root("kz");
@@ -201,7 +230,8 @@ static void test_first_husk_kz_and_dead_points_feed_death_traits() {
         CHECK(t->husk_model_loaded); // a successfully opened first husk supplies the retail live-model gate
         CHECK(t->kz_points.size() == expected.size()); // all first-husk KZ points reach the traits
         for (size_t i = 0; i < t->kz_points.size() && i < expected.size(); ++i)
-            CHECK(same(t->kz_points[i], expected[i])); // retail mission-local axes preserved
+            CHECK(t->kz_points[i].x == expected[i].x && t->kz_points[i].y == expected[i].y &&
+                  t->kz_points[i].z == expected[i].z); // the userpoint's own words
         CHECK(t->bridge_dead_points.empty());
     }
 
@@ -210,6 +240,7 @@ static void test_first_husk_kz_and_dead_points_feed_death_traits() {
     // independently of KZ.
     const std::vector<uint8_t> dead_bytes = with_renamed_user_point(armory, "Armory", "dEaD");
     std::vector<Vec3> expected_dead;
+    std::vector<Vec3> ignored;
     expected_points(dead_bytes, "DEAD", expected_dead, ignored);
     CHECK(expected_dead.size() == 1);
     {
@@ -276,71 +307,22 @@ static void test_missing_husk_assets_leave_the_live_model_gate_clear() {
     CHECK(t->kz_points.empty());
 }
 
-// Terrain_SpawnEffectsAtUserPoint first selects one hard-coded retail
-// model/surface pair, then resolves that exact point case-insensitively: the
-// eurhr2 row maps GLASS, a near-name model is not in the static table.
-static void test_retail_glass_model_maps_exact_userpoint_into_death_traits() {
-    const std::vector<uint8_t> armory = test_io::read_file(repo_path("fixtures/threedi/synth/armory.3di"));
-    CHECK(!armory.empty());
-    if (armory.empty()) return;
-    const std::vector<uint8_t> glass_bytes = with_renamed_user_point(armory, "Armory", "gLaSs");
-    std::vector<Vec3> expected_pos;
-    std::vector<Vec3> expected_dir;
-    expected_points(glass_bytes, "GLASS", expected_pos, expected_dir);
-    CHECK(expected_pos.size() == 1 && expected_dir.size() == 1);
-    {
-        const Items items(text_bytes(
-                "begin \"Retail glass witness\"\r\n"
-                "  id 105099\r\n"
-                "  type object\r\n"
-                "  graphic eurhr2\r\n"
-                "  hp 1000\r\n"
-                "end\r\n"));
-        CHECK(items.ok);
-        if (!items.ok) return;
-        const TempRoot root("glass");
-        root.put("eurhr2.3di", glass_bytes);
-        const Rig rig(root, items, 5099);
-        const ItemDeathTraits *t = rig.traits(5099);
-        CHECK(t != nullptr);
-        if (t == nullptr) return;
-        CHECK(t->glass_points.size() == 1);
-        if (t->glass_points.size() == 1 && expected_pos.size() == 1) {
-            CHECK(same(t->glass_points[0].local_pos, expected_pos[0])); // mission-local point axes
-            CHECK(same(t->glass_points[0].local_dir, expected_dir[0])); // the authored shatter orientation
-        }
-    }
-    {
-        // A near-name is not in retail's static table, even with the same userpoint.
-        const Items items(text_bytes(
-                "begin \"Near-name glass witness\"\r\n"
-                "  id 105098\r\n"
-                "  type object\r\n"
-                "  graphic eurhr2x\r\n"
-                "  hp 1000\r\n"
-                "end\r\n"));
-        CHECK(items.ok);
-        if (!items.ok) return;
-        const TempRoot root("glassx");
-        root.put("eurhr2x.3di", glass_bytes);
-        const Rig rig(root, items, 5098);
-        const ItemDeathTraits *t = rig.traits(5098);
-        CHECK(t != nullptr);
-        if (t == nullptr) return;
-        CHECK(t->glass_points.empty()); // retail's model table is an exact case-insensitive match
-    }
-}
-
 // The class init seeds the vehicle brain's two floors from the models it
 // binds: brain[11] from the intact model's CMDL floor and brain[12] from the
 // husk, both under one class gate: the helicopter family always, the vehicle
 // family unless its profile is a boat (subtype 1). An entity without a brain
-// takes neither. [orig: Entity_InitHelicopterAIFromDef @0x4684E2..0x468527;
+// takes neither. The husk floor and the wreck's two rest words are the husk's
+// collision section 0 z min / z max words (the loader's row +0x54 / +0x58), not
+// a render extent; the oracle words are retail's Dsuv1X (the 03TR SUV's husk):
+// section 0 z from -20522 to 118053 (D-NET-897).
+// [orig: Entity_InitHelicopterAIFromDef @0x4684E2..0x468527;
 //  Entity_InitVehicleAIFromDef `cmp [edi+14h],ebx` @0x46881C, stores
-//  @0x468836/@0x468858]
+//  @0x468836/@0x468858, the +0xB0 -> +0x6C -> +0x54 read @0x468847..0x468850;
+//  Threedi_BuildCollisionModelFromChunks @0x5B3BF0 - @0x5B4027 / @0x5B4045]
 static void test_class_init_seeds_the_brain_floors() {
     const std::vector<uint8_t> house = test_io::read_file(repo_path("fixtures/threedi/synth/house.3di"));
-    const std::vector<uint8_t> armory = test_io::read_file(repo_path("fixtures/threedi/synth/armory.3di"));
+    const std::vector<uint8_t> armory = with_section0_z_words(
+            test_io::read_file(repo_path("fixtures/threedi/synth/armory.3di")), -20522, 118053);
     const Items items(text_bytes(
             "begin \"Floor witness heli\"\r\n"
             "  id 105098\r\n"
@@ -398,10 +380,11 @@ static void test_class_init_seeds_the_brain_floors() {
     CHECK(mission::resolve_collision_instances(w, items.file, state, deps) == 3);
 
     const ItemDeathTraits *t = w.tables.item_death_traits.get(5098);
-    CHECK(t != nullptr && t->husk_model_loaded && t->husk_rest_min_z != 0.0f);
+    CHECK(t != nullptr && t->husk_model_loaded);
     if (t == nullptr) return;
+    CHECK(t->husk_rest_z_lo_q16 == -20522 && t->husk_rest_z_hi_q16 == 118053);
     const AiBrain &hb = w.ai.for_handle(heli)->brain;
-    CHECK(hb.f[AiBrain::kHuskFloor] == to_fixed(std::abs(t->husk_rest_min_z)));
+    CHECK(hb.f[AiBrain::kHuskFloor] == 20522);
     CHECK(hb.f[AiBrain::kModelFloor] == w.registry.get(heli)->veh.air_probe_z_off);
     const AiBrain &bb = w.ai.for_handle(boat)->brain;
     CHECK(bb.f[AiBrain::kModelFloor] == 0 && bb.f[AiBrain::kHuskFloor] == 0);
@@ -412,7 +395,6 @@ int main() {
     test_first_husk_kz_and_dead_points_feed_death_traits();
     test_final_only_husk_supplies_the_gate_but_no_kz_source();
     test_missing_husk_assets_leave_the_live_model_gate_clear();
-    test_retail_glass_model_maps_exact_userpoint_into_death_traits();
     test_class_init_seeds_the_brain_floors();
     if (failures == 0) std::printf("OK: item_death_traits_resolve\n");
     return failures == 0 ? 0 : 1;

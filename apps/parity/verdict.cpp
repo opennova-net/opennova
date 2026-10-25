@@ -89,6 +89,7 @@ io::JsonValue run_json(const RunFacts &run) {
 	counts.set("uplinks", io::json_number(double(run.trace.uplinks.size())));
 	counts.set("frames", io::json_number(double(run.trace.frames.size())));
 	counts.set("entities", io::json_number(double(run.trace.entities.size())));
+	counts.set("rounds", io::json_number(double(run.trace.rounds.size())));
 	json.set("records", std::move(counts));
 	return json;
 }
@@ -142,6 +143,7 @@ Verdict judge(const RunFacts &rr, const RunFacts &rr_aa, const std::vector<Subje
 	CompareOptions aa_options;
 	aa_options.host_rows = true;
 	aa_options.retail_host = true;
+	aa_options.aa = true;
 	// RR-aa's rows join the subjects' oracle when it ran the same corpus profile.
 	static_assert(has_normalization("integrity.oracle"));
 	const bool pool = !rr.info.integrity_profile.empty() &&

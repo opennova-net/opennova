@@ -104,12 +104,11 @@ void DestructionDrain::assign(const opennova::world::DestructionEvents &p_value)
 	value_.items_destroyed = p_value.items_destroyed;
 	value_.crackles = p_value.crackles;
 	value_.debris_triangles = p_value.debris_triangles;
-	value_.glass_points = p_value.glass_points;
 }
 
 Ref<DestructionDrain> DestructionDrain::make(const TypedArray<HuskSwapEvent> &p_husk_swaps,
 		const TypedArray<DestructionEffectEvent> &p_effects, int p_debris_triangles,
-		int p_glass_points, int p_crackles, const PackedVector3Array &p_death_light_positions,
+		int p_crackles, const PackedVector3Array &p_death_light_positions,
 		const PackedFloat32Array &p_death_light_radii) {
 	Ref<DestructionDrain> out;
 	out.instantiate();
@@ -129,7 +128,6 @@ Ref<DestructionDrain> DestructionDrain::make(const TypedArray<HuskSwapEvent> &p_
 		out->value_.death_lights.push_back(light);
 	}
 	out->value_.debris_triangles = p_debris_triangles;
-	out->value_.glass_points = p_glass_points;
 	out->value_.crackles = p_crackles;
 	return out;
 }
@@ -185,15 +183,14 @@ TypedArray<HuskSwapEvent> DestructionDrain::get_husk_swaps() const {
 
 void DestructionDrain::_bind_methods() {
 	ClassDB::bind_static_method("DestructionDrain",
-			D_METHOD("make", "husk_swaps", "effects", "debris_triangles", "glass_points", "crackles",
+			D_METHOD("make", "husk_swaps", "effects", "debris_triangles", "crackles",
 					"death_light_positions", "death_light_radii"),
 			&DestructionDrain::make, DEFVAL(TypedArray<DestructionEffectEvent>()), DEFVAL(0),
-			DEFVAL(0), DEFVAL(0), DEFVAL(PackedVector3Array()), DEFVAL(PackedFloat32Array()));
+			DEFVAL(0), DEFVAL(PackedVector3Array()), DEFVAL(PackedFloat32Array()));
 	OPENNOVA_RECORD_READ_ONLY(DestructionDrain, Variant::INT, explosions_processed)
 	OPENNOVA_RECORD_READ_ONLY(DestructionDrain, Variant::INT, items_destroyed)
 	OPENNOVA_RECORD_READ_ONLY(DestructionDrain, Variant::INT, crackles)
 	OPENNOVA_RECORD_READ_ONLY(DestructionDrain, Variant::INT, debris_triangles)
-	OPENNOVA_RECORD_READ_ONLY(DestructionDrain, Variant::INT, glass_points)
 	OPENNOVA_RECORD_READ_ONLY(DestructionDrain, Variant::PACKED_STRING_ARRAY, sound_names)
 	OPENNOVA_RECORD_READ_ONLY(DestructionDrain, Variant::PACKED_VECTOR3_ARRAY, sound_positions)
 	OPENNOVA_RECORD_READ_ONLY(DestructionDrain, Variant::PACKED_VECTOR3_ARRAY, death_light_positions)

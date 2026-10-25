@@ -9,11 +9,13 @@
 
 #include <formats/banlist/address_ban_list.h>
 #include <formats/banlist/pcid_ban_list.h>
+#include <net/npwire/protocol_message.h> // ProtocolMessage (the 0x24 sender's replies)
 
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace opennova::inmatch {
 
@@ -22,8 +24,8 @@ struct NapiNPConnection;
 
 struct ServerBanLists {
 	// The directory both files live in: retail's working directory, which the embedder names
-	// (opennova-serve its own). Unset, the lists still load (empty) and work, and no file is
-	// read or written: the game's hosts and the tests (D-NET-295's residual).
+	// (opennova-serve its own, the game's hosts the game's --working-dir). Unset, the lists
+	// still load (empty) and work, and no file is read or written: the tests.
 	std::optional<std::string> directory;
 	// g_BannedPcidList @0xC867A0: absent off a NovaWorld authority session, where BAN and
 	// UNBAN do nothing and a PLAYER BAN is a punt.
@@ -61,44 +63,70 @@ bool Server_PcidBanned(const NapiNPServerCtx &ctx, std::string_view pcid);
 // A joiner's name on banned.txt, compared exactly (strcmp), the code-31 refusal.
 // [orig: Server_ValidatePlayerJoinRequest @0x512989..0x5129CB, the refusal @0x512A6C]
 bool Server_NameBanned(const NapiNPServerCtx &ctx, std::string_view name);
-// The game-layer join's ban and duplicate legs, past the cookie's NAMEINFO / PCID decrypt
-// legs (codes 23 / 24 / 25, not ported): on a NovaWorld session (the host has a local
-// address), a joiner whose decrypted PCID is listed is refused 29; then, with game.cfg's
-// mphostpuntplayerswithsamepcids set and the joiner's PCID decrypted (`pcid_decrypted`, the
-// cookie load's answer: retail's walk reaches the leg only past its own decrypt), a PCID
-// that more than one of the session's connections holds (case-insensitively, the joiner
-// counted) flags every OTHER remote connection holding it for the next 0x79 boundary's kick
-// (Server_KickDuplicatePcids), writes the _inout.txt REJECTING line for every holder, and
-// refuses the joiner 30; in a session, a listed name is refused 31. 0 admits.
-// [orig: Server_ValidatePlayerJoinRequest — the local-address block @0x5125F2..0x512956,
-//  LinkedList_FindByName @0x512737 -> code 29 @0x512751; the duplicate leg: the cfg word
+// The game-layer join's account legs. On a NovaWorld session (the host has a local address,
+// "PUB"): a JOIN with no CD cookie (none, or one of no length) is refused 23; a cookie whose
+// <local>NAMEINFO does not decrypt 24; the decrypted name, cut to 16 characters, renames the
+// connection where it differs; a <local>PCID that does not decrypt 25; a listed PCID 29; then,
+// with game.cfg's mphostpuntplayerswithsamepcids set, a PCID that more than one of the
+// session's connections holds (case-insensitively, the joiner counted) flags every OTHER
+// remote connection holding it for the next 0x79 boundary's kick (Server_KickDuplicatePcids),
+// writes the _inout.txt REJECTING line for every holder, and refuses the joiner 30; with join
+// tickets required, a cookie naming no <local>JOINTICKET (by key, case-insensitively) 28. In a
+// session, a listed name (the renamed one) is refused 31. 0 admits.
+// [orig: Server_ValidatePlayerJoinRequest — the local-address block @0x5125EA..0x512956:
+//  the cookie test @0x5125F2..0x512605 -> code 23 @0x51295B..0x512969; NAMEINFO
+//  NapiPacket_DecryptAndVerify @0x512648 -> code 24 @0x512654..0x512662; the 16-character cut
+//  @0x51268B..0x512690, String_ExactMatch @0x5126A6, CNapiNPConnection_SetName @0x5126BC; PCID
+//  @0x5126FE -> code 25 @0x51270A..0x512718; LinkedList_FindByName @0x512737 -> code 29
+//  @0x512751; the duplicate leg: the cfg word
 //  @0x512771..0x512778, NapiSession_CountPlayersByName(ctx, 1, pcid) @0x51278D (> 1
 //  @0x512795), the walk over ctx+0x24 @0x51279E..0x51287C (Napi_StrCaseEqual @0x5127CF, not
 //  the joiner @0x5127DF, a connection that is not the local one @0x5127E3..0x5127F1, the flag
-//  @0x5127F3, the /INOUT line @0x5127F7..0x512865), code 30 @0x512890; the session test
-//  @0x51297D, the name walk @0x512989..0x5129CB -> code 31 @0x512A6C]
-uint32_t Server_ValidateJoinBans(NapiNPServerCtx &ctx, NapiNPConnection &conn, bool pcid_decrypted);
+//  @0x5127F3, the /INOUT line @0x5127F7..0x512865), code 30 @0x512890; the ticket leg
+//  @0x5128E9..0x51294E (KeyValueBuffer_FindValue @0x512934, code 28 @0x51294E); the session
+//  test @0x51297D, the name walk @0x512989..0x5129CB -> code 31 @0x512A6C]
+uint32_t Server_ValidateJoinAccount(NapiNPServerCtx &ctx, NapiNPConnection &conn);
 // The S2C 0x79 boundary's kick of the connections the join validator flagged (nothing off the
 // boundary, `quality_boundary` false): each flagged remote connection latches {DS its role, DC 2,
 // 0, 0, "N.C:SPTWNTBP[<its PCID>]", DPC 0, ""} when no record is latched yet and is marked for the
 // next protocol pump's teardown. A misnomer in the IDB: no spawn or ban is involved. [orig:
-// CNapiServer_DisconnectPendingSpawnBans @0x4C9290 — the walk over ctx+0x24
+// CNapiServer_KickDuplicatePcids @0x4C9290 — the walk over ctx+0x24
 //  @0x4C92CB..0x4C93F3, the flag @0x4C92F5, the connection and not-local tests
 //  @0x4C92FE..0x4C930F, sprintf("N.C:SPTWNTBP[%s]", node+0x250) @0x4C9333..0x4C9340, the role
 //  @0x4C9355..0x4C9375, DC 2 @0x4C938B, the latch-if-!valid @0x4C93BB..0x4C93D5,
 //  CNapiNPConnection_RequestDisconnect @0x4C93DD; called by Server_TickUpdate @0x51E20C]
 void Server_KickDuplicatePcids(NapiNPServerCtx &ctx, bool quality_boundary);
+// The Ban input row (catalog row 93, code 107; the IDB's name is a misnomer): on the authority
+// over a LAN or NovaWorld transport, the active slot `index` (0..capacity) is appended to
+// banned.txt's list, its connection's address (0 for a row with none: a Serve Only host's own
+// slot 0) and its name, the list growing past retail's 512 (D-NET-368); a slot that is not the
+// host's own is punted, reason 33 with Server/STRSRV18 as its detail; then the host's SYSTEM
+// ring gets "<STRSRV18> <name>" in palette[0] white, and the dirty word is set for the
+// shutdown's save. False when the gates refuse or the slot is not active.
+// [orig: Input_HandleActionBinding @0x49AD40 - case 107 @0x49BBA5; Server_BanPlayerSlot
+//  @0x5082D0 - the gates @0x5082D9..0x508316, the row @0x508322, +4 @0x50832E, the address
+//  +0x1C -> +0xC4 @0x508338..0x508349, the append @0x508358..0x5083B5 (the 512 shift
+//  @0x50835E..0x50838A), STRSRV18 @0x5083C6, +5 @0x5083CE, +0x178E1 @0x5083D4 (no writer on
+//  this host), CNapiNPConnection_QueueDisconnectEvent(conn, "", 33, text) @0x5083EE, sprintf
+//  "%s %s" @0x508411, Chat_AddMessageChannel2(.., g_HUDColors.palette[0], 930) @0x508427,
+//  dword_C8FF24 = 1 @0x50842F]
+bool Server_BanPlayerSlot(NapiNPServerCtx &ctx, int32_t index);
+
 // A source address on banned.txt, the protocol join's family-14 reason-3 refusal.
 // [orig: CNapiNetwork_ValidateJoinRequest @0x4C6203..0x4C6217]
 bool Server_AddressBanned(const NapiNPServerCtx &ctx, uint32_t address);
 
-// The authority console's ban and punt line with no sender (authorized, and no chat back):
-// `BAN <#>` and `UNBAN <#>` over the PCID list (a connected slot's PCID; the host's own slot
-// refused), `PUNT <#|ALL>` (reason 33, `S.C:SP#` / `S.C:SPA`), `BANDWIDTH [n]` (the entity
-// send budget n / 5 clamped to 100..1600, 600 with no value). True when the line was one of
-// them (the caller's chain stops); a BAN or UNBAN with no list is still handled.
-// [orig: Server_HandleBanPuntCommand(line, 0) @0x50B380, from Client_ProcessConsoleCommand
-//  @0x520E80]
-bool Server_HandleBanPuntCommand(NapiNPServerCtx &ctx, std::string_view line);
+// The ban and punt line, the authority console's (no sender) or a slot's C2S 0x24: `BAN <#>`
+// and `UNBAN <#>` over the PCID list (a connected slot's PCID; the host's own slot refused),
+// `PUNT <#|ALL>` (reason 33, `S.C:SP#` / `S.C:SPA`), `BANDWIDTH [n]` (the entity send budget
+// n / 5 clamped to 100..1600, 600 with no value). A sender is authorized only as the local
+// slot: a remote one's BAN / UNBAN are handled with no effect and its PUNT / BANDWIDTH are
+// not handled. With a sender, BAN / UNBAN answer in S2C 0x14 channel-3 lines (the sender's
+// own into `sender_replies`; the "Banned Player" line to the banned slot). True when the line
+// was one of them (the caller's chain stops); a BAN or UNBAN with no list is still handled.
+// [orig: Server_HandleBanPuntCommand @0x50B380, from Client_ProcessConsoleCommand @0x520E80
+//  (sender 0) and NapiNPServerMsg_0x024 @0x514DC0 (the slot)]
+bool Server_HandleBanPuntCommand(NapiNPServerCtx &ctx, std::string_view line,
+		NapiNPConnection *sender = nullptr, std::vector<ProtocolMessage> *sender_replies = nullptr);
 
 } // namespace opennova::inmatch

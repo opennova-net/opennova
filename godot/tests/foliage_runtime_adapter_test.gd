@@ -358,6 +358,42 @@ func test_inset_frame_draws_its_own_anchors_on_the_inset_layer() -> void:
 	assert_eq(_backend_draws("detail").size(), main_detail)
 
 
+# A water mirror's reflected subscene draws the MODEL masks around the persons
+# its own collect listed, from the view it draws from, with no detail blanket,
+# on its own bit (engine inmatch/occlusion_collect.h MirrorViewLists);
+# releasing the mirror hides its draws alone.
+func test_mirror_frame_draws_its_own_anchors_on_the_mirror_layer() -> void:
+	var eye := _staged_xform()
+	await _stage(eye)
+	_foliage_index = 1
+	_dispatcher.silhouette_anchors = PackedVector3Array()
+	_frame(eye, 1000)
+	var main_detail := _backend_draws("detail").size()
+	assert_false(_dispatcher.is_mirror_frame_live(0))
+	_dispatcher.render_mirror_frame(0, eye, PackedVector3Array([_anchor(eye, 64.0)]), 1000)
+	assert_true(_dispatcher.is_mirror_frame_live(0))
+	var mirrors: Array = _dispatcher.get_backend_report().get("mirrors", [])
+	assert_eq(mirrors.size(), 2)
+	if mirrors.size() < 2:
+		return
+	var mirror: Dictionary = mirrors[0]
+	var mirror_models := 0
+	for row_value in mirror.get("draws", []):
+		var row := row_value as Dictionary
+		assert_eq(int(row.get("layer_mask", 0)), 1 << 24, "the main mirror's masks ride its own bit")
+		if bool(row.get("visible", false)):
+			assert_eq(String(row.get("tier", "")), "silhouette", "no detail blanket in the mirror")
+			mirror_models += 1
+	assert_gt(mirror_models, 0, "the mirror draws its own collector's masks")
+	assert_false(bool((mirrors[1] as Dictionary).get("live", true)), "the Inset's mirror rendered none")
+	assert_eq(_backend_draws("detail").size(), main_detail, "the main view's set is untouched")
+	_dispatcher.release_mirror_frame(0)
+	assert_false(_dispatcher.is_mirror_frame_live(0))
+	var released: Array = _dispatcher.get_backend_report().get("mirrors", [])
+	assert_eq(int((released[0] as Dictionary).get("visible_draws", -1)), 0,
+			"releasing hides the mirror's draws alone")
+
+
 func test_backend_recreates_retained_instances_after_world_exit() -> void:
 	var eye := _staged_xform()
 	await _stage(eye)

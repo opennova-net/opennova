@@ -88,10 +88,15 @@ std::vector<DialogLineRef> resolve_dialog_lines(const dbf::File *dialog_bank,
 	return group != nullptr ? dialog_line_refs(*group, dialog_sounds) : std::vector<DialogLineRef>();
 }
 
-std::string dialog_line_text(const rtxt::File *mission_text, const dbf::Line &line) {
+std::string dialog_line_text(const rtxt::File *text_override, const rtxt::File *mission_text,
+		const dbf::Line &line) {
+	// No mission table, no subtitle [orig: `test g_TextMission` @0x44DDCB..0x44DDCD].
 	if (mission_text == nullptr) return std::string();
-	// [Mission Dialog] by the wave's name [orig: @0x44ddd6..0x44dde4].
-	if (const rtxt::Entry *text = mission_text->find_in_section("Mission Dialog", line.def_id_name))
+	// [Mission Dialog] by the wave's name, the override table first
+	// [orig: @0x44ddd6..0x44dde4 -> TextResource_FindEntryBySectionAndKey @0x75D250 (the
+	//  override hit @0x75D27B)].
+	if (const rtxt::Entry *text = rtxt::find_with_override(text_override, *mission_text,
+				"Mission Dialog", line.def_id_name))
 		return text->text;
 	// Else the flat entry the sequence's suffix after its last '_' names: the walk tests the
 	// character before the cursor from the string's last character back [orig: @0x44ddec..0x44de3c;
@@ -109,8 +114,8 @@ std::string dialog_line_text(const rtxt::File *mission_text, const dbf::Line &li
 }
 
 DialogLinePlayback resolve_dialog_line(const dbf::File *dialog_bank, const lwf::File *dialog_sounds,
-		const rtxt::File *mission_text, const std::string &dialog_name, int line,
-		int player_class) {
+		const rtxt::File *text_override, const rtxt::File *mission_text,
+		const std::string &dialog_name, int line, int player_class) {
 	DialogLinePlayback out;
 	if (dialog_bank == nullptr) return out;
 	// The loaded list in load order, the first exact (strcmp) name match.
@@ -129,7 +134,7 @@ DialogLinePlayback resolve_dialog_line(const dbf::File *dialog_bank, const lwf::
 		out.file = wave->path;
 		out.volume = dialog_wave_volume(*wave);
 	}
-	out.text = dialog_line_text(mission_text, entry);
+	out.text = dialog_line_text(text_override, mission_text, entry);
 	return out;
 }
 
@@ -174,7 +179,8 @@ bool DialogQueue::enqueue(const std::string &dialog, std::vector<DialogLineRef> 
 }
 
 // [orig: Dialog_UpdatePlayback @ 0x44e470, the slot walk @ 0x44e4d8..0x44e634]
-void DialogQueue::tick(bool frame_rendered, const LoadLine &load, const VoicePlaying &playing) {
+void DialogQueue::tick(bool frame_rendered, int32_t dialogue_volume, const LoadLine &load,
+		const VoicePlaying &playing) {
 	constexpr uint32_t kDelayBit = 0x80000000u;
 	constexpr uint32_t kCount = 0x7FFFFFFFu;
 	size_t s = 0;
@@ -228,8 +234,15 @@ void DialogQueue::tick(bool frame_rendered, const LoadLine &load, const VoicePla
 		// Load the line (its wave on a new voice of the channel, which the shell
 		// reports to the co-op broadcast), then hold it [orig: @ 0x44e58b..0x44e5bf;
 		// Dialog_LoadAudioClip @ 0x44dcc0, the voice onto the stack @ 0x44de90..0x44deaf].
+		// The hold is the wave's whatever the gate; the play hook then refuses at a
+		// dialogue volume of 0, which starts no voice and stacks no handle, so the
+		// channel holds no other slot's next line (D-NET-285) [orig: Dialog_LoadAudioClip
+		// @ 0x44dcc0 - the hold @ 0x44dd87..0x44ddbf, the hook dword_A8A23C @ 0x44de50,
+		// its refusal @ 0x44de5b skipping @ 0x44de5d..0x44deaf;
+		// Dialog_ApplyDialogueVolumeAndPlayFactor @ 0x527560 (0 at g_DialogueVolume == 0
+		// @ 0x527567)].
 		const DialogLineRef line = slot.lines[slot.index];
-		const DialogClip clip = load(line);
+		const DialogClip clip = load(line, dialogue_volume != 0);
 		if (clip.voice != 0) voices_.push_back(clip.voice);
 		Slot &loaded = slots_[s];
 		loaded.index += 1;

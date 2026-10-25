@@ -437,10 +437,12 @@ int test_finalize_baseline() {
 	}
 	TEST_EXPECT(tree->bytes == bytes && tree->version_text == kBaseVersion);
 	// The catalog's multiplayer rows, titled from language.pff, in its order; the
-	// single-player one left out.
+	// single-player one left out. An archived mission lists by its directory name, which
+	// PFF_Open's sort uppercased [orig: PFF_SortEntries @0x768280 (_strupr @0x7682A1);
+	// Mission_BuildMapListFromPFF @0x562910 (@0x562AEA)].
 	TEST_EXPECT(tree->missions.size() == 2);
-	TEST_EXPECT(tree->missions.size() == 2 && tree->missions[0].file == "alpha.bms" &&
-			tree->missions[0].title == "Alpha Strike" && tree->missions[1].file == "bravo.bms" &&
+	TEST_EXPECT(tree->missions.size() == 2 && tree->missions[0].file == "ALPHA.BMS" &&
+			tree->missions[0].title == "Alpha Strike" && tree->missions[1].file == "BRAVO.BMS" &&
 			tree->missions[1].title == "Bravo Hold");
 	if (int rc = expect_manifest_matches_store(rig, *tree))
 		return rc;
@@ -510,7 +512,7 @@ int test_finalize_expansion() {
 	TEST_EXPECT(tree->files.size() == 3 && tree->files[0].name == "jox01.pff" &&
 			tree->files[1].name == "jox01L.pff" && tree->files[2].name == "version.txt");
 	TEST_EXPECT(tree->version_text == kExpVersion);
-	TEST_EXPECT(tree->missions.size() == 1 && tree->missions[0].file == "exp.bms" &&
+	TEST_EXPECT(tree->missions.size() == 1 && tree->missions[0].file == "EXP.BMS" &&
 			tree->missions[0].title == "Expansion Op");
 	TEST_EXPECT(find_data_set(rig.db, jox)->current_tree_id == id);
 	if (int rc = expect_manifest_matches_store(rig, *tree))
@@ -725,8 +727,8 @@ int test_apply() {
 	// The release's version, its command file's (no version file read for a release, ADR 0067).
 	TEST_EXPECT(tree->version_text == "1.0.0.10");
 	TEST_EXPECT(tree->missions.size() == 3);
-	TEST_EXPECT(tree->missions.size() == 3 && tree->missions[0].file == "alpha.bms" &&
-			tree->missions[1].file == "bravo.bms" && tree->missions[2].file == "charlie.bms" &&
+	TEST_EXPECT(tree->missions.size() == 3 && tree->missions[0].file == "ALPHA.BMS" &&
+			tree->missions[1].file == "BRAVO.BMS" && tree->missions[2].file == "CHARLIE.BMS" &&
 			tree->missions[2].title == "Charlie Flag");
 	// The data set's current tree is the release's, its baseline the upload's.
 	TEST_EXPECT(find_data_set(rig.db, base)->current_tree_id == building &&
@@ -745,8 +747,8 @@ int test_apply() {
 		return 1;
 	}
 	TEST_EXPECT(tree->files.size() == 3 && tree->version_text == "1.0.0.11");
-	TEST_EXPECT(tree->missions.size() == 2 && tree->missions[0].file == "delta.bms" &&
-			tree->missions[0].title == "Delta Op" && tree->missions[1].file == "exp.bms");
+	TEST_EXPECT(tree->missions.size() == 2 && tree->missions[0].file == "DELTA.BMS" &&
+			tree->missions[0].title == "Delta Op" && tree->missions[1].file == "EXP.BMS");
 	for (const char *archive : { "jox01.pff", "jox01L.pff" }) {
 		const std::string fetched = rig.temp.file((std::string("fetched-") + archive).c_str());
 		std::string error;

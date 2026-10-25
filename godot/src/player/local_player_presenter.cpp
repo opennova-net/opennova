@@ -13,19 +13,23 @@
 #include "simulation/player_weapon_view.h"
 #include "simulation/simulation.h"
 #include "util/axes.h"
+#include "world/game_world.h"
 
 #include <godot_cpp/classes/camera_attributes.hpp>
 #include <godot_cpp/classes/canvas_layer.hpp>
 #include <godot_cpp/classes/compositor.hpp>
 #include <godot_cpp/classes/environment.hpp>
+#include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/skeleton3d.hpp>
 #include <godot_cpp/classes/texture_rect.hpp>
+#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/classes/viewport_texture.hpp>
 #include <godot_cpp/core/math.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/basis.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 #include <cmath>
 
@@ -46,6 +50,9 @@ const Vector2 kNoProjection(INFINITY, INFINITY);
 constexpr int kViewProjectionBlitLayer = -1;
 // Ratios within this of the surface's own draw the surface directly.
 constexpr float kViewProjectionUnstretched = 0.0001f;
+// GameWorld's edges around the load's one forced frame: true ahead of its draw,
+// false once it drained.
+constexpr const char *kForcedFrameSignal = "hud_pipeline_warm";
 
 // The target renders the world the surface used to: mirror the surface's 3D
 // quality settings onto it (a runtime SubViewport starts from the project
@@ -192,7 +199,14 @@ void LocalPlayerPresenter::set_fp_gun_visible(bool p_visible) {
 
 void LocalPlayerPresenter::setup(Node *p_world, Camera3D *p_camera, GameplayCamera *p_fly_camera,
 		const Ref<ControlsModel> &p_controls) {
+	disconnect_forced_frame();
 	world_id_ = p_world != nullptr ? ObjectID(p_world->get_instance_id()) : ObjectID();
+	// The load's one forced frame draws through the held stretched target
+	// (draw_held_view_projection).
+	if (p_world != nullptr && p_world->has_signal(kForcedFrameSignal)) {
+		p_world->connect(kForcedFrameSignal,
+				callable_mp(this, &LocalPlayerPresenter::draw_held_view_projection));
+	}
 	camera_id_ = p_camera != nullptr ? ObjectID(p_camera->get_instance_id()) : ObjectID();
 	fly_camera_id_ = p_fly_camera != nullptr ? ObjectID(p_fly_camera->get_instance_id()) : ObjectID();
 	visuals_.unref();
@@ -210,9 +224,9 @@ void LocalPlayerPresenter::setup(Node *p_world, Camera3D *p_camera, GameplayCame
 	camera_saved_projection_ = p_camera != nullptr ? static_cast<int>(p_camera->get_projection()) : -1;
 	camera_saved_cull_mask_ = p_camera != nullptr ? static_cast<int64_t>(p_camera->get_cull_mask()) : -1;
 	// The player camera never draws the FP body layer: retail renders no local
-	// body in first person, and the water mirror never draws persons either
-	// (its reflected entity waves collect only vehicles above water and it has
-	// no player-render leg [orig: Terrain_CollectVisibleEntitiesForReflection
+	// body in first person, in any pass, so the water mirrors never draw it
+	// either (above the water their reflected collect keeps only the
+	// Reflective-flagged vehicles [orig: Terrain_CollectVisibleEntitiesForReflection
 	// @ 0x5c90a0]) -- the body stays a silhouette source only. The viewmodel
 	// layer stays ADMITTED: the FP arms/weapon draw inside the beauty pass
 	// through their shader-side renderfov projection + depth band (retail's
@@ -243,7 +257,17 @@ void LocalPlayerPresenter::setup(Node *p_world, Camera3D *p_camera, GameplayCame
 	}
 }
 
+void LocalPlayerPresenter::disconnect_forced_frame() {
+	Node *node = world();
+	const Callable forced_frame = callable_mp(this, &LocalPlayerPresenter::draw_held_view_projection);
+	if (node != nullptr && node->has_signal(kForcedFrameSignal) &&
+			node->is_connected(kForcedFrameSignal, forced_frame)) {
+		node->disconnect(kForcedFrameSignal, forced_frame);
+	}
+}
+
 void LocalPlayerPresenter::teardown() {
+	disconnect_forced_frame();
 	if (Node *node = world()) {
 		// Release the world-to-presenter fixed-tick seam (only when it is
 		// still ours).
@@ -441,13 +465,50 @@ bool LocalPlayerPresenter::take_use_item_armory_request() {
 	return input_router_.take_armory_request();
 }
 
+bool LocalPlayerPresenter::take_use_item_vehicle_menu_request() {
+	return input_router_.take_vehicle_menu_request();
+}
+
 void LocalPlayerPresenter::reset_input_state() {
 	input_router_.reset_input_state();
+}
+
+void LocalPlayerPresenter::close_pass_through_screen() {
+	input_router_.close_pass_through_screen();
+}
+
+void LocalPlayerPresenter::release_capture_for_screen() {
+	input_router_.release_capture_for_screen();
+}
+
+void LocalPlayerPresenter::start_process_num_lock() {
+	PlayerInputRouter::start_process_num_lock();
+}
+
+void LocalPlayerPresenter::start_process_scroll_lock() {
+	PlayerInputRouter::start_process_scroll_lock();
+}
+
+void LocalPlayerPresenter::exit_process_key_locks() {
+	PlayerInputRouter::exit_process_key_locks();
+}
+
+void LocalPlayerPresenter::owe_scroll_lock_turn_off() {
+	input_router_.owe_scroll_lock_turn_off();
 }
 
 
 void LocalPlayerPresenter::set_hud_toggles(const Ref<HudToggles> &p_toggles) {
 	input_router_.set_hud_toggles(p_toggles);
+}
+
+PackedInt64Array LocalPlayerPresenter::take_hud_toggle_events() {
+	return input_router_.take_hud_toggle_events();
+}
+
+void LocalPlayerPresenter::set_hud_chat(const Ref<HudChatEntry> &p_chat,
+		const Ref<RtxtStringFile> &p_gametext) {
+	input_router_.set_hud_chat(p_chat, p_gametext);
 }
 
 bool LocalPlayerPresenter::handle_input(const Ref<InputEvent> &p_event, bool p_active) {
@@ -501,14 +562,58 @@ void LocalPlayerPresenter::ensure_models() {
 	if (world() == nullptr || visuals_.is_null()) {
 		return;
 	}
-	if (avatar() == nullptr) {
-		ObjectModel *built = visuals_->build_local_player_avatar();
-		avatar_id_ = built != nullptr ? ObjectID(built->get_instance_id()) : ObjectID();
+	// The local body draws the def its type word binds, so a re-picked body (a
+	// joiner's own record rebinding its def by the class's camouflage item)
+	// draws its new def's model: the avatar built for the old type goes, with
+	// the held gun and overlays it carried, and the new one builds (D-NET-348;
+	// the witness is engine/runtime/mission/placement_traits.h's).
+	const int type_id = visuals_->local_player_type_id();
+	if (avatar() != nullptr && type_id != avatar_type_id_) {
+		release_avatar();
 	}
+	// The builds' wall time, each with its scene and load profiles (an instrument, --verbose: a
+	// line only for a frame that built either).
+	const bool avatar_owed = avatar() == nullptr;
+	const bool viewmodel_owed = viewmodel() == nullptr;
+	const bool profile = (avatar_owed || viewmodel_owed) && OS::get_singleton()->is_stdout_verbose();
+	const auto take_profile = [this]() {
+		const MissionObjectPlacer::LoadProfile loads = visuals_->take_placer_load_profile();
+		return vformat("model files %d read %d ms, animation maps %d read %d ms; scene %s",
+				loads.data_loads, static_cast<int>(loads.data_us / 1000), loads.rig_loads,
+				static_cast<int>(loads.rig_us / 1000),
+				ObjectModel::format_build_profile(ObjectModel::take_build_profile()));
+	};
+	if (profile) {
+		(void)take_profile();
+	}
+	const uint64_t avatar_start = profile ? Time::get_singleton()->get_ticks_usec() : 0;
+	String avatar_line;
+	if (avatar_owed) {
+		ObjectModel *built = visuals_->build_local_player_avatar(type_id);
+		avatar_id_ = built != nullptr ? ObjectID(built->get_instance_id()) : ObjectID();
+		avatar_type_id_ = type_id;
+		if (profile) {
+			avatar_line = vformat("avatar %s %d ms (%s)",
+					built != nullptr ? built->get_graphic_name() : String("(none)"),
+					static_cast<int>((Time::get_singleton()->get_ticks_usec() - avatar_start) / 1000),
+					take_profile());
+		}
+	}
+	const uint64_t viewmodel_start = profile ? Time::get_singleton()->get_ticks_usec() : 0;
 	viewmodel_rig_->ensure_viewmodel();
+	if (profile && (avatar_owed || viewmodel() != nullptr)) {
+		const String viewmodel_line = viewmodel_owed
+				? vformat("view model %s %d ms (%s)", viewmodel() != nullptr ? "built" : "none",
+						  static_cast<int>(
+								  (Time::get_singleton()->get_ticks_usec() - viewmodel_start) / 1000),
+						  take_profile())
+				: String("view model kept");
+		UtilityFunctions::print_verbose(vformat("LocalPlayerPresenter: models: %s; %s",
+				avatar_owed ? avatar_line : String("avatar kept"), viewmodel_line));
+	}
 }
 
-void LocalPlayerPresenter::clear_models() {
+void LocalPlayerPresenter::release_avatar() {
 	if (ObjectModel *weapon = held_weapon()) {
 		weapon->queue_free();
 	}
@@ -519,11 +624,15 @@ void LocalPlayerPresenter::clear_models() {
 		body->queue_free();
 	}
 	avatar_id_ = ObjectID();
+}
+
+void LocalPlayerPresenter::clear_models() {
+	release_avatar();
 	viewmodel_rig_->clear_viewmodel();
 	// Every exit from live play (no player, a spectator, teardown) also ends
-	// the vehicle's first-person display.
+	// the vehicle's first-person display, and holds the stretched target.
 	feed_virtual_display(false);
-	release_view_projection();
+	hold_view_projection();
 	Camera3D *cam = camera();
 	if (cam != nullptr && camera_saved_fov_ > 0.0f) {
 		cam->set_fov(camera_saved_fov_);
@@ -705,8 +814,9 @@ void LocalPlayerPresenter::update_held_weapon(const Ref<PlayerAimOverlay> &p_ove
 	}
 	weapon->set_visible(true);
 	// Same layer rule as the body: first person hides it from every camera by
-	// LAYER while keeping it a shadow source (the witnessed mirror never draws
-	// persons or their held weapons -- the reflection collects vehicles only
+	// LAYER while keeping it a shadow source; drawn, it takes the person's
+	// mirror rule, so above the water neither mirror draws it (the reflected
+	// collect keeps the Reflective-flagged vehicles alone
 	// [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0]). The
 	// model stores the decision and rewrites its instances on the edge only.
 	const bool draw_held_weapon = third_person_ || debug_body_in_first_person_;
@@ -758,6 +868,17 @@ void LocalPlayerPresenter::stamp_camera_pose() {
 				view_->get_camera_yaw_deg(), view_->get_camera_pitch_deg(),
 				view_->get_camera_roll_deg()));
 	}
+}
+
+bool LocalPlayerPresenter::get_view_block_transform(Transform3D &r_out) const {
+	if (!view_.is_valid() || !view_->get_camera_pose_valid()) {
+		return false;
+	}
+	// Stamped as the camera is (stamp_camera_pose).
+	const auto &block = view_->native_frame().view_block;
+	r_out = mission_view_transform(
+			mission_to_godot(block.eye), block.yaw_deg, block.pitch_deg, block.roll_deg);
+	return true;
 }
 
 // The local player's lighting contexts: the body/held gun take the entity's
@@ -906,13 +1027,163 @@ void LocalPlayerPresenter::update_scope_camera() {
 // surface's World3D, its own camera mirroring the gameplay camera at the
 // mode-invariant horizontal fov, and a CanvasLayer beneath the root canvas
 // blitting the target over the whole surface (whose own 3D draw is switched
-// off meanwhile). Built on the first stretched frame, sized and mirrored
-// every frame, released when the mode returns to the surface's ratio or the
-// player goes away.
+// off meanwhile). Made, held, by the mission start that selects the mode
+// (prepare_view_projection), else on the first stretched frame; sized and
+// mirrored every frame, released when the mode returns to the surface's ratio
+// or the player goes away.
+SubViewport *LocalPlayerPresenter::make_view_projection_target() {
+	release_view_projection();
+	SubViewport *target = memnew(SubViewport);
+	target->set_name("ViewProjectionTarget");
+	target->set_update_mode(SubViewport::UPDATE_ALWAYS);
+	target->set_clear_mode(SubViewport::CLEAR_MODE_ALWAYS);
+	target->set_disable_input(true);
+	// The target stands for retail's backbuffer, which holds the frame's
+	// gamma-domain bytes as they are (shaders/color.gdshaderinc; retail
+	// presents it after the HUD with no encode or decode pass, the frame
+	// Render_ProcessMainSceneFrame @0x5CA0F0 draws: BeginScene, one Clear
+	// @0x5CA7BF, the scene's passes, FrameFX, the HUD, EndScene @0x5CAE9E,
+	// Present @0x5CAEA8). Its camera draws with the world's environment, whose
+	// tonemap writes those bytes into the target's 8-bit texture through
+	// FrameFx's display decode table (FrameFx::install_display_table), and the
+	// surface's 8-bit canvas blit writes them as the bytes they are.
+	add_child(target);
+	Camera3D *through = memnew(Camera3D);
+	through->set_name("ViewProjectionCamera");
+	through->set_keep_aspect_mode(Camera3D::KEEP_WIDTH);
+	target->add_child(through);
+	through->make_current();
+	CanvasLayer *blit_layer = memnew(CanvasLayer);
+	blit_layer->set_name("ViewProjectionBlit");
+	blit_layer->set_layer(kViewProjectionBlitLayer);
+	add_child(blit_layer);
+	TextureRect *blit = memnew(TextureRect);
+	blit->set_name("ViewProjectionImage");
+	blit->set_texture(target->get_texture());
+	blit->set_expand_mode(TextureRect::EXPAND_IGNORE_SIZE);
+	blit->set_stretch_mode(TextureRect::STRETCH_SCALE);
+	blit->set_texture_filter(CanvasItem::TEXTURE_FILTER_LINEAR);
+	blit->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+	blit->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
+	blit_layer->add_child(blit);
+	projection_viewport_id_ = ObjectID(target->get_instance_id());
+	projection_camera_id_ = ObjectID(through->get_instance_id());
+	projection_blit_layer_id_ = ObjectID(blit_layer->get_instance_id());
+	return target;
+}
+
+// The mission start's selection of the stretched mode: retail's frame draws through
+// the projection the start sets (Render_SetAspectRatioMode over the session's mode,
+// ahead of the start's loads) onto the backbuffer its device made at the game's init,
+// so no first frame makes a surface (engine world/player_view.h ViewProjection carries
+// both witnesses). The target stands for that backbuffer: the start makes it for the
+// mode it selects and holds it (drawing nothing, its blit hidden, the surface's own
+// 3D untouched), so the first live frame only draws into it; a held target of another
+// size is resized, and a mode at the surface's ratio drops it. A live target is the
+// frame's and stays as it is.
+void LocalPlayerPresenter::prepare_view_projection(int p_aspect_mode) {
+	Camera3D *cam = camera();
+	Viewport *surface = cam != nullptr ? cam->get_viewport() : nullptr;
+	if (surface == nullptr || !is_inside_tree() || projection_viewport() != nullptr) {
+		return;
+	}
+	const Vector2 size = surface->get_visible_rect().size;
+	if (size.x <= 0.0f || size.y <= 0.0f) {
+		return;
+	}
+	const opennova::world::ViewProjection projection = opennova::world::view_projection(
+			cam->get_fov(), p_aspect_mode, static_cast<int>(size.x), static_cast<int>(size.y));
+	if (Math::abs(projection.scale_y - 1.0f) < kViewProjectionUnstretched) {
+		release_view_projection();
+		return;
+	}
+	SubViewport *target = Object::cast_to<SubViewport>(ObjectDB::get_instance(held_projection_viewport_id_));
+	const bool held = target != nullptr &&
+			ObjectDB::get_instance(held_projection_camera_id_) != nullptr &&
+			ObjectDB::get_instance(held_projection_blit_layer_id_) != nullptr;
+	if (!held) {
+		target = make_view_projection_target();
+	}
+	const Vector2i target_size(projection.target_w, projection.target_h);
+	if (target->get_size() != target_size) {
+		target->set_size(target_size);
+	}
+	mirror_viewport_quality(surface, target);
+	if (!held) {
+		hold_view_projection();
+	}
+}
+
+// The load's one forced frame (GameWorld's edges: `p_drawing` true ahead of its draw,
+// false once it drained) draws the scene through the held target, as the first live
+// frame will: retail's first scene draw lands on the one backbuffer its device made at
+// init (engine world/player_view.h ViewProjection carries the witness), so the target's
+// render buffers and first draw are the load's, and the surface draws no 3D of its own
+// meanwhile. The target stays held: no reader sees it and its blit stays hidden. The
+// load camera's pose and frustum, at its horizontal fov, are the frame's. Returns
+// whether a held target took the frame.
+bool LocalPlayerPresenter::draw_held_view_projection(bool p_drawing) {
+	SubViewport *target = Object::cast_to<SubViewport>(ObjectDB::get_instance(held_projection_viewport_id_));
+	Camera3D *through = Object::cast_to<Camera3D>(ObjectDB::get_instance(held_projection_camera_id_));
+	Camera3D *cam = camera();
+	Viewport *surface = cam != nullptr ? cam->get_viewport() : nullptr;
+	if (target == nullptr || through == nullptr || surface == nullptr) {
+		return false;
+	}
+	if (!p_drawing) {
+		target->set_update_mode(SubViewport::UPDATE_DISABLED);
+		surface->set_disable_3d(false);
+		return true;
+	}
+	const Vector2 size = surface->get_visible_rect().size;
+	if (size.x <= 0.0f || size.y <= 0.0f) {
+		return false;
+	}
+	double fov_h = cam->get_fov();
+	if (cam->get_keep_aspect_mode() == Camera3D::KEEP_HEIGHT) {
+		fov_h = Math::rad_to_deg(2.0 * Math::atan(Math::tan(Math::deg_to_rad(fov_h) * 0.5) *
+				static_cast<double>(size.x) / static_cast<double>(size.y)));
+	}
+	mirror_viewport_quality(surface, target);
+	through->set_global_transform(cam->get_global_transform());
+	through->set_fov(fov_h);
+	through->set_near(cam->get_near());
+	through->set_far(cam->get_far());
+	through->set_cull_mask(cam->get_cull_mask());
+	if (through->get_environment() != cam->get_environment()) {
+		through->set_environment(cam->get_environment());
+	}
+	if (through->get_attributes() != cam->get_attributes()) {
+		through->set_attributes(cam->get_attributes());
+	}
+	if (through->get_compositor() != cam->get_compositor()) {
+		through->set_compositor(cam->get_compositor());
+	}
+	target->set_update_mode(SubViewport::UPDATE_ALWAYS);
+	surface->set_disable_3d(true);
+	return true;
+}
+
 void LocalPlayerPresenter::update_view_projection(const opennova::world::ViewProjection &p_projection,
 		bool p_nvg_raster) {
 	Camera3D *cam = camera();
 	Viewport *surface = cam != nullptr ? cam->get_viewport() : nullptr;
+	// A frame under the loading presentation's hold draws the screen alone (a joiner's L can be born
+	// ahead of its admission): no target draws, and the surface's 3D flag is the hold's
+	// (GameWorld::set_presentation_held). The projection asked for is kept: the reveal draws it
+	// at once (resume_view_projection), so the revealed frame is already the stretched picture.
+	const GameWorld *game_world = Object::cast_to<GameWorld>(world());
+	if (game_world != nullptr && game_world->is_presentation_held()) {
+		if (projection_viewport() != nullptr) {
+			hold_view_projection();
+			if (surface != nullptr) surface->set_disable_3d(true);
+		}
+		held_frame_projection_ = p_projection;
+		held_frame_nvg_raster_ = p_nvg_raster;
+		held_frame_pending_ = true;
+		return;
+	}
+	held_frame_pending_ = false;
 	if (surface == nullptr || !is_inside_tree() ||
 			(!p_nvg_raster && Math::abs(p_projection.scale_y - 1.0f) < kViewProjectionUnstretched)) {
 		release_view_projection();
@@ -920,35 +1191,29 @@ void LocalPlayerPresenter::update_view_projection(const opennova::world::ViewPro
 	}
 	SubViewport *target = projection_viewport();
 	Camera3D *through = projection_camera();
+	if (target == nullptr && through == nullptr) {
+		// The held target draws again (hold_view_projection).
+		SubViewport *held = Object::cast_to<SubViewport>(
+				ObjectDB::get_instance(held_projection_viewport_id_));
+		CanvasLayer *held_blit = Object::cast_to<CanvasLayer>(
+				ObjectDB::get_instance(held_projection_blit_layer_id_));
+		if (held != nullptr && held_blit != nullptr &&
+				ObjectDB::get_instance(held_projection_camera_id_) != nullptr) {
+			held->set_update_mode(SubViewport::UPDATE_ALWAYS);
+			held_blit->set_visible(true);
+			projection_viewport_id_ = held_projection_viewport_id_;
+			projection_camera_id_ = held_projection_camera_id_;
+			projection_blit_layer_id_ = held_projection_blit_layer_id_;
+			held_projection_viewport_id_ = ObjectID();
+			held_projection_camera_id_ = ObjectID();
+			held_projection_blit_layer_id_ = ObjectID();
+			target = projection_viewport();
+			through = projection_camera();
+		}
+	}
 	if (target == nullptr || through == nullptr) {
-		release_view_projection();
-		target = memnew(SubViewport);
-		target->set_name("ViewProjectionTarget");
-		target->set_update_mode(SubViewport::UPDATE_ALWAYS);
-		target->set_clear_mode(SubViewport::CLEAR_MODE_ALWAYS);
-		target->set_disable_input(true);
-		add_child(target);
-		through = memnew(Camera3D);
-		through->set_name("ViewProjectionCamera");
-		through->set_keep_aspect_mode(Camera3D::KEEP_WIDTH);
-		target->add_child(through);
-		through->make_current();
-		CanvasLayer *blit_layer = memnew(CanvasLayer);
-		blit_layer->set_name("ViewProjectionBlit");
-		blit_layer->set_layer(kViewProjectionBlitLayer);
-		add_child(blit_layer);
-		TextureRect *blit = memnew(TextureRect);
-		blit->set_name("ViewProjectionImage");
-		blit->set_texture(target->get_texture());
-		blit->set_expand_mode(TextureRect::EXPAND_IGNORE_SIZE);
-		blit->set_stretch_mode(TextureRect::STRETCH_SCALE);
-		blit->set_texture_filter(CanvasItem::TEXTURE_FILTER_LINEAR);
-		blit->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
-		blit->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
-		blit_layer->add_child(blit);
-		projection_viewport_id_ = ObjectID(target->get_instance_id());
-		projection_camera_id_ = ObjectID(through->get_instance_id());
-		projection_blit_layer_id_ = ObjectID(blit_layer->get_instance_id());
+		target = make_view_projection_target();
+		through = projection_camera();
 	}
 	// The NVG raster is retail's 512 square at the frame's frustum, its texels
 	// non-square: a projection the camera cannot draw on a square target, so
@@ -1020,7 +1285,46 @@ void LocalPlayerPresenter::_notification(int p_what) {
 	}
 }
 
+void LocalPlayerPresenter::resume_view_projection() {
+	if (!held_frame_pending_) {
+		return;
+	}
+	held_frame_pending_ = false;
+	update_view_projection(held_frame_projection_, held_frame_nvg_raster_);
+}
+
+void LocalPlayerPresenter::hold_view_projection() {
+	// A held or released target owes the reveal nothing (a teardown holds it: no resume into a menu).
+	held_frame_pending_ = false;
+	SubViewport *target = projection_viewport();
+	CanvasLayer *blit_layer =
+			Object::cast_to<CanvasLayer>(ObjectDB::get_instance(projection_blit_layer_id_));
+	if (target == nullptr || blit_layer == nullptr || projection_camera() == nullptr) {
+		if (target != nullptr || blit_layer != nullptr) {
+			release_view_projection();
+		}
+		return;
+	}
+	if (Viewport *surface = Object::cast_to<Viewport>(ObjectDB::get_instance(projection_surface_id_))) {
+		surface->set_disable_3d(false);
+	}
+	projection_surface_id_ = ObjectID();
+	TargetProjectionXrInterface::release(target);
+	target->set_update_mode(SubViewport::UPDATE_DISABLED);
+	blit_layer->set_visible(false);
+	held_projection_viewport_id_ = projection_viewport_id_;
+	held_projection_camera_id_ = projection_camera_id_;
+	held_projection_blit_layer_id_ = projection_blit_layer_id_;
+	projection_viewport_id_ = ObjectID();
+	projection_camera_id_ = ObjectID();
+	projection_blit_layer_id_ = ObjectID();
+	projection_scale_y_ = 1.0f;
+	nvg_raster_active_ = false;
+	nvg_raster_served_ = false;
+}
+
 void LocalPlayerPresenter::release_view_projection() {
+	held_frame_pending_ = false;
 	if (Viewport *surface = Object::cast_to<Viewport>(ObjectDB::get_instance(projection_surface_id_))) {
 		surface->set_disable_3d(false);
 	}
@@ -1032,6 +1336,15 @@ void LocalPlayerPresenter::release_view_projection() {
 		TargetProjectionXrInterface::release(target);
 		target->queue_free();
 	}
+	if (Node *held_blit = Object::cast_to<Node>(ObjectDB::get_instance(held_projection_blit_layer_id_))) {
+		held_blit->queue_free();
+	}
+	if (Node *held = Object::cast_to<Node>(ObjectDB::get_instance(held_projection_viewport_id_))) {
+		held->queue_free();
+	}
+	held_projection_blit_layer_id_ = ObjectID();
+	held_projection_viewport_id_ = ObjectID();
+	held_projection_camera_id_ = ObjectID();
 	projection_blit_layer_id_ = ObjectID();
 	projection_viewport_id_ = ObjectID();
 	projection_camera_id_ = ObjectID();
@@ -1081,10 +1394,12 @@ void LocalPlayerPresenter::update_avatar(const Vector3 &p_pos) {
 	}
 	// The body renders only in third person; first person hides it from every
 	// camera by LAYER, not by visible = false, so it stays a live shadow
-	// source. The 2026-08-05 witness corrected the earlier mirror-visible
-	// reading: retail's reflected entity waves collect only vehicles above
-	// water, and the reflected world has no player-render leg, so no person --
-	// the local body included -- ever enters the mirror [orig:
+	// source. The drawn body is a person like any other in the water mirrors:
+	// above the water the reflected collect keeps only the Reflective-flagged
+	// population (vehicles by item type), which no person carries, so the
+	// body is in neither mirror; below the water the collect runs unfiltered
+	// and the person waves draw it there (ObjectModel's LOCAL_BODY layer is
+	// the person's mirror-policy world layer) [orig:
 	// Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0 filterMask 0x400;
 	// Entity_InitFromModel @ 0x40e20a; the viewmodel pass stays
 	// Player_RenderFirstPersonViewModel @ 0x4ded60]. Retail's "not drawn" is a
@@ -1163,10 +1478,16 @@ void LocalPlayerPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("setup", "world", "camera", "fly_camera", "controls"),
 			&LocalPlayerPresenter::setup, DEFVAL(Variant()), DEFVAL(Variant()));
 	ClassDB::bind_method(D_METHOD("teardown"), &LocalPlayerPresenter::teardown);
+	ClassDB::bind_method(D_METHOD("prepare_view_projection", "aspect_mode"),
+			&LocalPlayerPresenter::prepare_view_projection);
 	ClassDB::bind_method(D_METHOD("refresh_viewmodel"), &LocalPlayerPresenter::refresh_viewmodel);
 	ClassDB::bind_method(D_METHOD("viewmodel_generation"), &LocalPlayerPresenter::viewmodel_generation);
 	ClassDB::bind_method(D_METHOD("set_input_override", "intent"), &LocalPlayerPresenter::set_input_override);
 	ClassDB::bind_method(D_METHOD("set_hud_toggles", "toggles"), &LocalPlayerPresenter::set_hud_toggles);
+	ClassDB::bind_method(D_METHOD("take_hud_toggle_events"),
+			&LocalPlayerPresenter::take_hud_toggle_events);
+	ClassDB::bind_method(D_METHOD("set_hud_chat", "chat", "gametext"),
+			&LocalPlayerPresenter::set_hud_chat);
 	ClassDB::bind_method(D_METHOD("apply_view_action", "action"),
 			&LocalPlayerPresenter::apply_view_action);
 	ClassDB::bind_method(D_METHOD("set_debug_third_person", "enabled"),
@@ -1213,9 +1534,38 @@ void LocalPlayerPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("fixed_weapon_batches_consumed"),
 			&LocalPlayerPresenter::fixed_weapon_batches_consumed);
 	ClassDB::bind_method(D_METHOD("consume_use_hold"), &LocalPlayerPresenter::consume_use_hold);
+	ClassDB::bind_method(D_METHOD("is_use_held"), &LocalPlayerPresenter::is_use_held);
+	ClassDB::bind_method(D_METHOD("chain_digit_key", "vk"), &LocalPlayerPresenter::chain_digit_key);
+	ClassDB::bind_method(D_METHOD("queue_pick_event", "param"), &LocalPlayerPresenter::queue_pick_event);
+	ClassDB::bind_method(D_METHOD("set_record_leg", "leg"), &LocalPlayerPresenter::set_record_leg);
 	ClassDB::bind_method(D_METHOD("take_use_item_armory_request"),
 			&LocalPlayerPresenter::take_use_item_armory_request);
+	ClassDB::bind_method(D_METHOD("take_use_item_vehicle_menu_request"),
+			&LocalPlayerPresenter::take_use_item_vehicle_menu_request);
 	ClassDB::bind_method(D_METHOD("reset_input_state"), &LocalPlayerPresenter::reset_input_state);
+	ClassDB::bind_method(D_METHOD("get_key_events"), &LocalPlayerPresenter::get_key_events);
+	ClassDB::bind_method(
+			D_METHOD("push_key_event", "event"), &LocalPlayerPresenter::push_key_event);
+	ClassDB::bind_method(D_METHOD("queue_row_event", "code", "signed", "key"),
+			&LocalPlayerPresenter::queue_row_event);
+	ClassDB::bind_method(D_METHOD("run_key_release_pass"),
+			&LocalPlayerPresenter::run_key_release_pass);
+	ClassDB::bind_method(D_METHOD("set_keyboard_pass", "pass"),
+			&LocalPlayerPresenter::set_keyboard_pass);
+	ClassDB::bind_method(D_METHOD("set_menu_screen_probe", "probe"),
+			&LocalPlayerPresenter::set_menu_screen_probe);
+	ClassDB::bind_method(D_METHOD("close_pass_through_screen"),
+			&LocalPlayerPresenter::close_pass_through_screen);
+	ClassDB::bind_method(D_METHOD("release_capture_for_screen"),
+			&LocalPlayerPresenter::release_capture_for_screen);
+	ClassDB::bind_static_method("LocalPlayerPresenter", D_METHOD("start_process_num_lock"),
+			&LocalPlayerPresenter::start_process_num_lock);
+	ClassDB::bind_static_method("LocalPlayerPresenter", D_METHOD("start_process_scroll_lock"),
+			&LocalPlayerPresenter::start_process_scroll_lock);
+	ClassDB::bind_static_method("LocalPlayerPresenter", D_METHOD("exit_process_key_locks"),
+			&LocalPlayerPresenter::exit_process_key_locks);
+	ClassDB::bind_method(D_METHOD("owe_scroll_lock_turn_off"),
+			&LocalPlayerPresenter::owe_scroll_lock_turn_off);
 	ClassDB::bind_method(D_METHOD("handle_input", "event", "active"), &LocalPlayerPresenter::handle_input);
 	ClassDB::bind_method(D_METHOD("has_player"), &LocalPlayerPresenter::has_player);
 	ClassDB::bind_method(D_METHOD("is_local_spectator"), &LocalPlayerPresenter::is_local_spectator);

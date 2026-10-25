@@ -17,6 +17,7 @@
 #include <runtime/world/present_rows.h>
 #include <runtime/world/player_weapon.h> // weapon_flag::kNoClipsNoDraw
 #include <runtime/world/vehicle_motor.h>
+#include <runtime/world/vehicle_part_anim.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
@@ -24,6 +25,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 namespace w = opennova::world;
@@ -46,6 +48,17 @@ const float *row_at(const std::vector<float> &rows, size_t i) {
 	return rows.data() + i * w::PF_STRIDE;
 }
 
+// The joiner's two replica gun legs in its frame's order: the pool-1 walk's, then the one after
+// the own body's update (im::ReplicaGunLeg).
+void tick_replica_guns(opennova::replication::ClientState &state,
+		const std::vector<opennova::mission::ItemSeatSpec> &specs, w::World &world,
+		const opennova::replication::ClientWorldMaterializer *materializer, bool wire_header_world) {
+	im::tick_replica_emplaced_channels(state, specs, world, 0xFFFF, materializer,
+			wire_header_world, im::ReplicaGunLeg::Pool1Walk);
+	im::tick_replica_emplaced_channels(state, specs, world, 0xFFFF, materializer,
+			wire_header_world, im::ReplicaGunLeg::AfterOwnBody);
+}
+
 // One organic spawned into pool 0 of a bare kernel's registry at a known slot.
 w::Entity *spawn_pool_row(opennova::mission::MissionKernel &kernel, int pool, int slot,
 		int32_t item_id) {
@@ -54,9 +67,9 @@ w::Entity *spawn_pool_row(opennova::mission::MissionKernel &kernel, int pool, in
 	seed.item_id = item_id;
 	seed.alive = true;
 	seed.position = {10.0f, 20.0f, 3.0f};
-	seed.yaw = 45;
-	seed.pitch = 2;
-	seed.roll = -3;
+	seed.heading = w::placed_heading_bam(45);
+	seed.pitch_bam = w::spawn_angle_bam(2);
+	seed.roll_bam = w::spawn_angle_bam(-3);
 	seed.net_stance_bits = 0x02u; // the MoveOrder stance latch bit 9
 	seed.section_mask = 0x00010002u;
 	seed.spawn_origin = (1u << 24) | 7u; // placed identity: kind 1, index 7
@@ -87,16 +100,32 @@ bool test_world_rows_carry_the_authoritative_record() {
 			"PF_WIRE_HANDLE is the packed registry handle") && ok;
 	ok = expect(r[w::PF_POS_X] == 10.0f && r[w::PF_POS_Y] == 3.0f && r[w::PF_POS_Z] == -20.0f,
 			"the mission (x, y, z) triple presents as (x, z, -y)") && ok;
-	ok = expect(static_cast<int>(r[w::PF_YAW_DEG]) == 45 && static_cast<int>(r[w::PF_PITCH_DEG]) == 2 &&
-					static_cast<int>(r[w::PF_ROLL_DEG]) == -3,
-			"a plain row presents its whole-degree mission eulers") && ok;
+	// The row presents its Pitch / Roll words' exact degrees: the spawn form of
+	// 2 is (2 << 16) / 360 = 364 shifted up, 364 * 360 / 65536 = 1.99951171875
+	// degrees; of -3, -546 (truncated) shifted up, -2.999267578125 degrees
+	// (D-NET-NEW-L6-3). [orig: Entity_SpawnFromBMSRecord @0x40EB69..0x40EBA6]
+	ok = expect(static_cast<int>(r[w::PF_YAW_DEG]) == 45 && r[w::PF_PITCH_DEG] == 1.99951171875f &&
+					r[w::PF_ROLL_DEG] == -2.999267578125f,
+			"a plain row presents its Pitch / Roll words' degrees") && ok;
 	ok = expect(static_cast<int>(r[w::PF_KIND]) == 1 && static_cast<int>(r[w::PF_INDEX]) == 7 &&
 					static_cast<int>(r[w::PF_BMS_ID]) == 4242 && static_cast<int>(r[w::PF_NET_ID]) == 99,
 			"the placed identity rides kind/index/bms/net") && ok;
 	ok = expect(static_cast<int>(r[w::PF_STANCE_BITS]) == 2, "the stance latch is masked to its two bits") && ok;
-	ok = expect(r[w::PF_SECTION_MASK_VALID] == 1.0f && static_cast<int>(r[w::PF_SECTION_MASK_LO]) == 2 &&
-					static_cast<int>(r[w::PF_SECTION_MASK_HI]) == 1,
-			"the section mask splits into its two 16-bit words") && ok;
+	// Only the person bone walk hides a +0x134 section: this item row's
+	// section mask stays drawn, an organic's splits into its two 16-bit words.
+	// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 (the test @0x4B1F1D)]
+	ok = expect(r[w::PF_SECTION_MASK_VALID] == 1.0f && static_cast<int>(r[w::PF_SECTION_MASK_LO]) == 0 &&
+					static_cast<int>(r[w::PF_SECTION_MASK_HI]) == 0,
+			"an item row's +0x134 sections stay drawn") && ok;
+	e->kind = w::EntityKind::Organic;
+	im::build_world_present_rows(context, lifecycle, rows, doors);
+	ok = expect(row_at(rows, 0)[w::PF_SECTION_MASK_VALID] == 1.0f &&
+					static_cast<int>(row_at(rows, 0)[w::PF_SECTION_MASK_LO]) == 2 &&
+					static_cast<int>(row_at(rows, 0)[w::PF_SECTION_MASK_HI]) == 1,
+			"a person's section mask splits into its two 16-bit words") && ok;
+	e->kind = w::EntityKind::Item;
+	im::build_world_present_rows(context, lifecycle, rows, doors);
+	r = row_at(rows, 0);
 	ok = expect(r[w::PF_ALIVE] == 1.0f && r[w::PF_HIDDEN] == 0.0f, "alive/hidden mirror the record") && ok;
 	ok = expect(r[w::PF_CARRIER_HANDLE] == -1.0f, "a free-standing row publishes the -1 carrier sentinel") && ok;
 	ok = expect(r[w::PF_LOCAL_VIEW_SUPPRESSED] == 0.0f, "no local mount: nothing is culled") && ok;
@@ -273,6 +302,131 @@ bool test_replica_rows_project_the_decoded_state_and_keep_the_pulses() {
 	return ok;
 }
 
+// D-NET-621: every non-person replica row draws from its full euler, a pitched
+// or rolled building or object included; a person's pitch is its look and stays
+// off the root. [orig: BoneCallback_bldg_World @0x4E21A0 - @0x4E21BA..0x4E220C]
+bool test_replica_statics_present_their_pitch_and_roll() {
+	opennova::replication::ClientState state;
+	opennova::replication::ClientEntityState building;
+	building.handle = 0x2005;
+	building.cls = nw::EntityClass::Unknown;
+	building.pitch_bam = 0x10000000; // 22.5 degrees
+	building.roll_bam = -0x08000000; // -11.25 degrees
+	opennova::replication::ClientEntityState gun = building;
+	gun.handle = 0x1006;
+	gun.cls = nw::EntityClass::NoNetworkCallback;
+	opennova::replication::ClientEntityState person = building;
+	person.handle = 0x0007;
+	person.cls = nw::EntityClass::Player;
+	const im::ClientReplicaPresentContext context{nullptr, nullptr, false, nullptr};
+	float rows[3][w::PF_STRIDE];
+	const opennova::replication::ClientEntityState *sources[3] = {&building, &gun, &person};
+	for (int i = 0; i < 3; ++i) {
+		im::initialize_client_replica_present_row(rows[i]);
+		im::project_client_replica_present_row(rows[i], *sources[i], state, context);
+	}
+	bool ok = expect(rows[0][w::PF_PITCH_DEG] == 22.5f && rows[0][w::PF_ROLL_DEG] == -11.25f,
+			"a static row presents its pitch and roll");
+	ok = expect(rows[1][w::PF_PITCH_DEG] == 22.5f && rows[1][w::PF_ROLL_DEG] == -11.25f,
+			"a callback-less row presents its pitch and roll") && ok;
+	ok = expect(rows[2][w::PF_PITCH_DEG] == 0.0f && rows[2][w::PF_ROLL_DEG] == 0.0f,
+			"a person's look pitch stays off its root") && ok;
+	return ok;
+}
+
+// D-NET-196: a decoded person row presents the ring entries its channels serve,
+// each half's own, and the armed park, as an authoritative body does
+// (write_present_body): the boundary tick of a channel holding a deferred state
+// samples the parked clip end; the promotion tick after it does not.
+// [orig: AnimMap_UpdateEntity @0x40B737..0x40B778 (slot+0x44 = the served node
+//  @0x40B76F); AnimChannel_AdvancePlayback @0x40B140 (the armed wrap @0x40B19E..0x40B1B1)]
+bool test_replica_rows_present_the_served_ring_entries() {
+	opennova::replication::ClientState state;
+	opennova::replication::ClientEntityState person;
+	person.handle = 0x0007;
+	person.cls = nw::EntityClass::Player;
+	person.rm_adm_id = 0;
+	person.rm_state = 43;
+	person.rm_phase = 3;
+	person.rm_variant = 2;
+	person.rm_prev_state = 43;
+	person.rm_prev_phase = 11;
+	person.rm_prev_variant = 1;
+	person.rm_blend_weight = 0.25f;
+	const im::ClientReplicaPresentContext context{nullptr, nullptr, true, nullptr};
+	float row[w::PF_STRIDE];
+	im::initialize_client_replica_present_row(row);
+	im::project_client_replica_present_row(row, person, state, context);
+	bool ok = expect(row[w::PF_ANIM_VARIANT] == 2.0f && row[w::PF_ANIM_SOURCE_VARIANT] == 1.0f &&
+					row[w::PF_ANIM_PHASE_PARKED] == 0.0f,
+			"a wrap fade presents the incoming entry over the outgoing one");
+	w::SkeletalPoseInputs inputs;
+	ok = expect(im::skeletal_pose_inputs_for_client(person, state, context, inputs) &&
+					inputs.primary_variant == 2 && inputs.source_variant == 1 &&
+					!inputs.primary_parked,
+			"the pose inputs carry both halves' entries") && ok;
+
+	opennova::replication::ClientEntityState parked = person;
+	parked.rm_blend_weight = 1.0f;
+	parked.net_anim_pending = 44;
+	parked.net_anim_pending_boundary = 22;
+	parked.rm_phase = 22;
+	im::initialize_client_replica_present_row(row);
+	im::project_client_replica_present_row(row, parked, state, context);
+	ok = expect(row[w::PF_ANIM_PHASE_PARKED] == 1.0f && row[w::PF_ANIM_VARIANT] == 2.0f,
+			"the armed boundary tick presents the parked clip end") && ok;
+	ok = expect(im::skeletal_pose_inputs_for_client(parked, state, context, inputs) &&
+					inputs.primary_parked,
+			"...in the pose inputs too") && ok;
+	parked.net_anim_pending = 0; // the promotion tick cleared the pending
+	im::initialize_client_replica_present_row(row);
+	im::project_client_replica_present_row(row, parked, state, context);
+	ok = expect(row[w::PF_ANIM_PHASE_PARKED] == 0.0f, "an unarmed channel never parks") && ok;
+	return ok;
+}
+
+// D-NET-330: a seated player row presents the channel its pass runs, as an
+// authoritative body does: the bone build samples the body's primary channel,
+// seated or not. A carried row the fold disarmed falls back to the wire byte.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the dual update @0x4B41DF ahead of
+//  the mounted site @0x4B637C..0x4B638F; Entity_BuildBoneTransformMatrices @0x4B1290 -
+//  AnimChannel_ComputeBoneMatrices called @0x4B1388]
+bool test_seated_replica_row_presents_its_channel() {
+	opennova::replication::ClientState state;
+	opennova::replication::ClientEntityState seated;
+	seated.handle = 0x0008;
+	seated.cls = nw::EntityClass::Player;
+	seated.carrier_handle = 0x1010;
+	seated.mount_bone = 3;
+	seated.anim_state_id = 24;
+	seated.rm_adm_id = 0;
+	seated.rm_state = 107;
+	seated.rm_phase = 5;
+	seated.rm_variant = 0;
+	seated.rm_blend_weight = 1.0f;
+	const im::ClientReplicaPresentContext context{nullptr, nullptr, true, nullptr};
+	float row[w::PF_STRIDE];
+	im::initialize_client_replica_present_row(row);
+	im::project_client_replica_present_row(row, seated, state, context);
+	bool ok = expect(row[w::PF_ANIM_STATE] == 107.0f && row[w::PF_ANIM_REMOTE_REQUEST] == 0.0f &&
+					row[w::PF_ANIM_PHASE_TICKS] == 5.0f,
+			"a seated row presents its channel's state and playhead");
+	w::SkeletalPoseInputs inputs;
+	ok = expect(im::skeletal_pose_inputs_for_client(seated, state, context, inputs) &&
+					inputs.primary_state == 107 && inputs.primary_phase == 5,
+			"...and poses from it") && ok;
+
+	opennova::replication::ClientEntityState disarmed = seated;
+	disarmed.rm_state = -1; // the fold disarmed it (a carried row that is not seated)
+	im::initialize_client_replica_present_row(row);
+	im::project_client_replica_present_row(row, disarmed, state, context);
+	ok = expect(row[w::PF_ANIM_STATE] == 24.0f && row[w::PF_ANIM_REMOTE_REQUEST] == 1.0f,
+			"a disarmed carried row presents the wire byte") && ok;
+	ok = expect(!im::skeletal_pose_inputs_for_client(disarmed, state, context, inputs),
+			"...and has no channel pose") && ok;
+	return ok;
+}
+
 } // namespace
 
 bool test_vehicle_suspension_reaches_present_rows() {
@@ -327,22 +481,26 @@ bool test_vehicle_rows_publish_the_motor_attitude_unrounded() {
 	w::Entity *e = spawn_pool_row(kernel, 1, 3, 1291);
 	if (!expect(e != nullptr, "vehicle row exists"))
 		return false;
-	// Unseeded: the whole-degree mission mirrors are all a row carries.
-	e->pitch = 3;
-	e->roll = -2;
+	// Unseeded: the row's own Pitch / Roll words, here the spawn form of 3 and
+	// -2: (3 << 16) / 360 = 546 shifted up, 546 * 360 / 65536 = 2.999267578125
+	// degrees; (-2 << 16) / 360 truncates to -364, -1.99951171875 degrees
+	// (D-NET-NEW-L6-3). [orig: Entity_SpawnFromBMSRecord @0x40EB69..0x40EBA6]
+	e->pitch_bam = w::spawn_angle_bam(3);
+	e->roll_bam = w::spawn_angle_bam(-2);
 	im::PoolPresentLifecycleMap lifecycle;
 	std::vector<float> rows;
 	im::DoorPhaseTable doors;
 	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
-	bool ok = expect(rows[w::PF_PITCH_DEG] == 3.0f && rows[w::PF_ROLL_DEG] == -2.0f,
-			"an unseeded row publishes the mission mirrors");
+	bool ok = expect(rows[w::PF_PITCH_DEG] == 2.999267578125f &&
+					rows[w::PF_ROLL_DEG] == -1.99951171875f,
+			"an unseeded row publishes its Pitch / Roll words' degrees");
 	// Seeded: 2.49 / -1.51 degrees round to 2 / -2 in the mirrors.
 	const double bam_per_degree = 4294967296.0 / 360.0;
 	e->veh.yaw_seeded = true;
 	e->veh.air_pitch_bam = static_cast<int32_t>(2.49 * bam_per_degree);
 	e->veh.air_roll_bam = static_cast<int32_t>(-1.51 * bam_per_degree);
-	e->pitch = 2;
-	e->roll = -2;
+	e->pitch_bam = w::spawn_angle_bam(2);
+	e->roll_bam = w::spawn_angle_bam(-2);
 	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
 	ok = expect(std::abs(rows[w::PF_PITCH_DEG] - 2.49f) < 1e-4f &&
 					 std::abs(rows[w::PF_ROLL_DEG] + 1.51f) < 1e-4f,
@@ -371,7 +529,7 @@ bool test_attached_rows_retain_subdegree_frame() {
     gun->veh.yaw_bam = w::bam_heading_from_mission_yaw_deg(33.125);
     gun->veh.air_pitch_bam = w::bam_from_degrees_wrapped(2.49);
     gun->veh.air_roll_bam = w::bam_from_degrees_wrapped(-1.51);
-    gun->yaw = 33; gun->pitch = 2; gun->roll = -2;
+    gun->heading = w::placed_heading_bam(33); gun->pitch_bam = w::spawn_angle_bam(2); gun->roll_bam = w::spawn_angle_bam(-2);
     im::PoolPresentLifecycleMap lifecycle;
     std::vector<float> rows;
     im::DoorPhaseTable doors;
@@ -534,7 +692,7 @@ bool test_joiner_bldg_section_offset_reaches_present_rows() {
 	if (!expect(e != nullptr, "joiner bldg row spawns")) return false;
 	e->kind = w::EntityKind::Building;
 	e->position = {10.0f, 20.0f, 11.0f};
-	e->yaw = 90; e->pitch = 0; e->roll = 0;
+	e->heading = w::placed_heading_bam(90); e->pitch_bam = 0; e->roll_bam = 0;
 	e->bldg_section_pivot = true;
 	e->death_anim_state = 0x0100;
 	w::ItemDeathTraits traits;
@@ -712,7 +870,7 @@ bool test_joiner_native_reads_take_the_owned_lifetime() {
 // rides its carrier's attachment row) as the decoded slot's own entity, so a
 // destroyable child's husk (the 0x13 kill's land_class_husk) reaches its row;
 // a row with no origin and no attachment (the joiner's own spawn) lends none.
-// [orig: NapiNPClientMsg_EntityDeath @0x42EBC6; Entity_SpawnWeaponOverlays: the
+// [orig: NapiNPClientMsg_EntityDeath @0x42EBC6; Entity_SpawnAddEWeapChildren: the
 //  child's pool-1 slot, the Pool_AllocEntry call @0x40F393, its spawn @0x40F3FF]
 bool test_full_bms_child_husk_reaches_its_row() {
 	opennova::mission::MissionKernel kernel;
@@ -782,8 +940,8 @@ bool test_emplaced_channels_take_the_owned_lifetime() {
 		return false;
 	mine->emplaced_spin_phase = 77;
 	mine->emplaced_ctrl_publisher = true;
-	im::tick_replica_emplaced_channels(runtime.state(), kernel.seat_specs, kernel.world, 0xFFFF,
-			&materializer, kernel.wire_header_world);
+	tick_replica_guns(runtime.state(), kernel.seat_specs, kernel.world, &materializer,
+			kernel.wire_header_world);
 	const opennova::replication::ClientEntityState *row = runtime.state().find(decoded.handle);
 	bool ok = expect(row != nullptr && row->emplaced_spin_phase == 77 && row->emplaced_controls_valid,
 			"the owned mount's spin phase and publisher reach its row");
@@ -795,8 +953,8 @@ bool test_emplaced_channels_take_the_owned_lifetime() {
 	newcomer.emplaced_ctrl_publisher = true;
 	if (!expect(kernel.world.registry.spawn_at(h, newcomer) == h, "a same-type newcomer spawns"))
 		return false;
-	im::tick_replica_emplaced_channels(runtime.state(), kernel.seat_specs, kernel.world, 0xFFFF,
-			&materializer, kernel.wire_header_world);
+	tick_replica_guns(runtime.state(), kernel.seat_specs, kernel.world, &materializer,
+			kernel.wire_header_world);
 	row = runtime.state().find(decoded.handle);
 	ok = expect(row != nullptr && row->emplaced_spin_phase == 0 && !row->emplaced_controls_valid,
 			"the newcomer forwards neither its phase nor its publisher") && ok;
@@ -804,8 +962,9 @@ bool test_emplaced_channels_take_the_owned_lifetime() {
 }
 
 // The callback turns the translation with the entity's one matrix: on a
-// joiner the row renders the decoded heading (here 90.45 degrees, where the
-// materialized row keeps a whole-degree 90), so the offset turns with it.
+// joiner the entity carries the decoded Yaw word (here a 90.45-degree heading,
+// which the materializer's seed stores), so the offset turns with it.
+// [orig: NapiNPClientMsg_0x010 @0x43351C]
 // [orig: BoneCallback_bldg_World @0x4E21A0 - the translate @0x4E2247 onto the
 //  entity matrix]
 bool test_joiner_bldg_offset_turns_with_the_rendered_heading() {
@@ -815,7 +974,7 @@ bool test_joiner_bldg_offset_turns_with_the_rendered_heading() {
 	w::Entity *e = spawn_pool_row(kernel, 2, 0, 1116);
 	if (!expect(e != nullptr, "joiner bldg row spawns")) return false;
 	e->position = {10.0f, 20.0f, 11.0f};
-	e->yaw = 90; e->pitch = 0; e->roll = 0;
+	e->heading = w::placed_heading_bam(90); e->pitch_bam = 0; e->roll_bam = 0;
 	e->bldg_section_pivot = true;
 	e->death_anim_state = 0x0100;
 	w::ItemDeathTraits traits;
@@ -829,6 +988,7 @@ bool test_joiner_bldg_offset_turns_with_the_rendered_heading() {
 	decoded.y = 20 * 65536;
 	decoded.z = 11 * 65536;
 	decoded.heading_bam = w::bam_heading_from_mission_yaw_deg(90.45);
+	e->heading = decoded.heading_bam; // the materialized row's Yaw word
 	runtime.state().upsert(decoded.handle) = decoded;
 	const im::PresentRowsContext context{kernel, &runtime, true};
 	im::PoolPresentLifecycleMap lifecycle;
@@ -854,7 +1014,7 @@ bool test_joiner_palm_source_and_local_fragment() {
     auto *source = spawn_pool_row(kernel, 2, 0, 812);
     source->kind = w::EntityKind::Building;
     source->palm_sections = true; source->palm_state = 2; source->section_mask = 0;
-    source->pitch = source->roll = 0; source->yaw = 90;
+    source->pitch_bam = source->roll_bam = 0; source->heading = w::placed_heading_bam(90);
     opennova::replication::ClientEntityState decoded;
     decoded.handle = source->handle.packed;
     decoded.type_id = 812;
@@ -862,7 +1022,7 @@ bool test_joiner_palm_source_and_local_fragment() {
     runtime.state().upsert(decoded.handle) = decoded;
     w::Entity piece;
     piece.kind = w::EntityKind::Building; piece.item_id = 900;
-    piece.position = {10, 20, 7}; piece.yaw = 90;
+    piece.position = {10, 20, 7}; piece.heading = w::placed_heading_bam(90);
     // An item 900 whose render tag is the psec row: the fragment draws its palm
     // state through it (its collision callback, palm_fragment, plays no part here).
     piece.palm_sections = true; piece.item_section_piece = true; piece.palm_state = 17;
@@ -885,8 +1045,8 @@ bool test_joiner_palm_source_and_local_fragment() {
             "a psec-drawn fragment keeps its CXLT pivot and one visible section") && ok;
     // Only the fragment rides the pool-row writer: the decoded source keeps
     // its wire lifecycle and never enters the shared pool lifecycle map.
-    ok = expect(lifecycle.find(h.packed) != lifecycle.end() &&
-            lifecycle.find(source->handle.packed) == lifecycle.end() &&
+    ok = expect(lifecycle.find(h.packed) != nullptr &&
+            lifecycle.find(source->handle.packed) == nullptr &&
             doors.empty(),
             "joiner fragment append touches only the fragment's lifecycle entry") && ok;
     source->palm_sections = false;
@@ -932,6 +1092,13 @@ bool test_joiner_hull_gun_words_follow_the_turret_child() {
 	kernel.world.tables.weapons.entries.resize(1);
 	kernel.world.tables.weapons.entries[0].valid = true;
 	kernel.world.tables.weapons.entries[0].name = "WPN_TURRET";
+	// The turret's class init bound its slot at the spawn (the joiner's mission start
+	// pass); the class update's Def gate reads that slot [orig:
+	//  WeaponSlot_InitFromEntityDef @0x5466C0; Entity_UpdateTransformAndTurret
+	//  @0x440E8C..0x440EA0].
+	if (!expect(kernel.world.vehicles.init_weapon_slot_from_entity_def(*turret),
+			"the turret's slot binds"))
+		return false;
 	w::VehicleTraits traits;
 	traits.render_family = w::VehicleRenderFamily::Tank;
 	traits.family = w::VehicleFamily::Tank;
@@ -959,8 +1126,7 @@ bool test_joiner_hull_gun_words_follow_the_turret_child() {
 	turret_row.parent_handle = 0x0000;
 	turret_row.emplaced_gun_yaw_word = 0x1234;
 	runtime.state().upsert(turret_row.handle) = turret_row;
-	im::tick_replica_emplaced_channels(runtime.state(), kernel.seat_specs, kernel.world, 0xFFFF,
-			nullptr, false);
+	tick_replica_guns(runtime.state(), kernel.seat_specs, kernel.world, nullptr, false);
 	const im::PresentRowsContext context{ kernel, &runtime, true };
 	im::PoolPresentLifecycleMap lifecycle;
 	std::vector<float> rows;
@@ -974,8 +1140,7 @@ bool test_joiner_hull_gun_words_follow_the_turret_child() {
 					hull_present[w::PF_VEHICLE_GUN_YAW] == static_cast<float>(0x1234),
 			"the turret's yaw word drives the joiner hull's VEHICLE_GUNYAW");
 	runtime.state().find(turret_row.handle)->target_handle = w::EntityHandle::kInvalid;
-	im::tick_replica_emplaced_channels(runtime.state(), kernel.seat_specs, kernel.world, 0xFFFF,
-			nullptr, false);
+	tick_replica_guns(runtime.state(), kernel.seat_specs, kernel.world, nullptr, false);
 	im::build_client_replica_present_rows(context, lifecycle, rows, doors);
 	ok = expect(row_at(rows, 0)[w::PF_VEHICLE_GUN_YAW] == static_cast<float>(0x1234),
 			"the hull keeps the last published word, like the brain") && ok;
@@ -987,6 +1152,9 @@ bool test_joiner_hull_gun_words_follow_the_turret_child() {
 	w::Entity *plain_child = spawn_pool_row(plain, 1, 1, 701);
 	plain_child->primary_weapon = "WPN_TURRET";
 	plain.world.tables.weapons.entries = kernel.world.tables.weapons.entries;
+	if (!expect(plain.world.vehicles.init_weapon_slot_from_entity_def(*plain_child),
+			"the plain child's slot binds"))
+		return false;
 	plain.world.vehicles.traits.set(700, traits);
 	plain.seat_specs.push_back(spec);
 	hull_row.handle = plain_hull->handle.packed;
@@ -994,8 +1162,7 @@ bool test_joiner_hull_gun_words_follow_the_turret_child() {
 	turret_row.target_handle = hull_row.handle;
 	plain_runtime.state().upsert(hull_row.handle) = hull_row;
 	plain_runtime.state().upsert(turret_row.handle) = turret_row;
-	im::tick_replica_emplaced_channels(plain_runtime.state(), plain.seat_specs, plain.world, 0xFFFF,
-			nullptr, false);
+	tick_replica_guns(plain_runtime.state(), plain.seat_specs, plain.world, nullptr, false);
 	const im::PresentRowsContext plain_context{ plain, &plain_runtime, true };
 	im::PoolPresentLifecycleMap plain_lifecycle;
 	im::build_client_replica_present_rows(plain_context, plain_lifecycle, rows, doors);
@@ -1297,9 +1464,9 @@ bool test_rows_carry_the_slot_march_start() {
 	kernel.world.registry.configure_pool(1, 64);
 	w::Entity *e = spawn_pool_row(kernel, 1, 3, 1291);
 	if (!expect(e != nullptr, "the bare registry spawns a pool-1 row")) return false;
-	e->yaw = 0;
-	e->pitch = 0;
-	e->roll = 0;
+	e->heading = w::placed_heading_bam(0);
+	e->pitch_bam = 0;
+	e->roll_bam = 0;
 	e->item_type = 3;
 	e->bbox_center = {1.0f, 2.0f, 1.5f};
 	const im::PresentRowsContext context{kernel, nullptr, false};
@@ -1380,10 +1547,10 @@ bool test_host_rows_apply_the_remote_held_weapon_ammo_leg() {
 	im::NapiNPConnection &conn = server.np_protocol.connection_list.back();
 	conn.link.owned_entity = body_handle;
 	const uint16_t grenade_combo = 5 * 65 + 1;
-	conn.weapon_slots[grenade_combo].adm_index = 4;
-	conn.weapon_slots[grenade_combo].clip = 0;
-	conn.equipped_slot.kind = im::NapiNPConnection::EquippedSlotRef::kPersonal;
-	conn.equipped_slot.combo = grenade_combo;
+	kernel.world.registry.get(body_handle)->weapon_slots[grenade_combo].adm_index = 4;
+	kernel.world.registry.get(body_handle)->weapon_slots[grenade_combo].clip = 0;
+	body->equipped_slot.kind = w::WeaponSlotRef::kPersonal;
+	body->equipped_slot.combo = grenade_combo;
 
 	std::vector<float> rows;
 	im::PoolPresentLifecycleMap lifecycle;
@@ -1398,13 +1565,13 @@ bool test_host_rows_apply_the_remote_held_weapon_ammo_leg() {
 	conn.reply.ammo_pools[3] = 2;
 	ok = expect(held(&server) == 5, "a stocked pool draws it") && ok;
 	conn.reply.ammo_pools[3] = 0;
-	conn.weapon_slots[grenade_combo].clip = 1;
+	kernel.world.registry.get(body_handle)->weapon_slots[grenade_combo].clip = 1;
 	ok = expect(held(&server) == 5, "the one-round clip counts toward the ammo") && ok;
-	conn.weapon_slots[grenade_combo].clip = 0;
-	conn.equipped_slot = {};
+	kernel.world.registry.get(body_handle)->weapon_slots[grenade_combo].clip = 0;
+	kernel.world.registry.get(body_handle)->equipped_slot = {};
 	ok = expect(held(&server) == 5, "no EquippedSlot: nothing to test") && ok;
-	conn.equipped_slot.kind = im::NapiNPConnection::EquippedSlotRef::kPersonal;
-	conn.equipped_slot.combo = grenade_combo;
+	kernel.world.registry.get(body_handle)->equipped_slot.kind = w::WeaponSlotRef::kPersonal;
+	kernel.world.registry.get(body_handle)->equipped_slot.combo = grenade_combo;
 	kernel.world.cached.local_player = body_handle;
 	ok = expect(held(&server) == 5, "the local player takes its own branch") && ok;
 	return ok;
@@ -1493,6 +1660,73 @@ bool test_host_rows_draw_the_mounted_rider_weapon() {
 	return ok;
 }
 
+// The chel row's rotor / aux hides ride PF_SECTION_MASK on every role: the
+// host / SP collector's row and a joiner's own replica row, since the cveh /
+// chel / tank / cpln world callbacks run on every peer (each with its +0x138
+// collapse). A joiner row under no such render tag leaves the channel
+// unpublished. Sections as rotor_parts 1 2 3 4 and aux_parts 5 6 name them.
+// [orig: Entity_BuildAndApplyBoneMatrices @0x48F210 (the test @0x48F39D, the
+//  hides @0x48F3B2..0x48F479); Entity_BuildDeathSectionTransforms @0x492AF0
+//  (the test @0x492C8D)]
+bool test_rotor_hides_reach_world_and_joiner_rows() {
+	auto kernel = std::make_unique<opennova::mission::MissionKernel>();
+	kernel->world.registry.configure_pool(1, 4);
+	w::Entity *helo = spawn_pool_row(*kernel, 1, 0, 1292);
+	w::Entity *crate = spawn_pool_row(*kernel, 1, 1, 1293);
+	if (!expect(helo != nullptr && crate != nullptr, "the rotor rows spawn")) return false;
+	helo->section_mask = 0;
+	helo->death_section_pivot = true;
+	helo->chel_section_bytes = {1, 2, 0, 0, 3, 4, 5, 6}; // def+0x890..+0x897
+	helo->veh.part_spin.speed = w::kRotorSpeedMax;
+	crate->section_mask = 0;
+	const auto row_for = [](const std::vector<float> &rows, const w::Entity *e) -> const float * {
+		for (size_t i = 0; i * w::PF_STRIDE < rows.size(); ++i)
+			if (static_cast<int>(row_at(rows, i)[w::PF_WIRE_HANDLE]) == e->handle.packed)
+				return row_at(rows, i);
+		return nullptr;
+	};
+	const auto lo = [](const float *row) { return static_cast<int>(row[w::PF_SECTION_MASK_LO]); };
+	im::PoolPresentLifecycleMap lifecycle;
+	std::vector<float> rows;
+	im::DoorPhaseTable doors;
+	im::build_world_present_rows({*kernel, nullptr, false}, lifecycle, rows, doors);
+	const float *row = row_for(rows, helo);
+	if (!expect(row != nullptr, "the world helicopter row")) return false;
+	bool ok = expect(row[w::PF_SECTION_MASK_VALID] == 1.0f && lo(row) == 0x0A,
+			"a spun-up rotor hides the world row's sections 1 and 3");
+	helo->veh.part_spin.speed = 0;
+	helo->flags |= w::kEntityFlagInAir;
+	im::build_world_present_rows({*kernel, nullptr, false}, lifecycle, rows, doors);
+	row = row_for(rows, helo);
+	ok = expect(row != nullptr && lo(row) == 0x74,
+			"a stopped rotor in the air hides the world row's sections 2, 4, 5 and 6") && ok;
+
+	im::ClientRuntime runtime("RotorRows");
+	for (const w::Entity *e : {helo, crate}) {
+		opennova::replication::ClientEntityState decoded;
+		decoded.handle = e->handle.packed;
+		decoded.type_id = static_cast<uint16_t>(e->item_id);
+		decoded.cls = opennova::EntityClass::Vehicle;
+		runtime.state().upsert(decoded.handle) = decoded;
+	}
+	helo->flags &= ~w::kEntityFlagInAir;
+	helo->veh.part_spin.speed = w::kRotorSpeedMax;
+	helo->engine_flags |= w::kEntityFlagHusk;
+	helo->spawned_piece_mask = 1u << 8;
+	crate->engine_flags |= w::kEntityFlagHusk;
+	crate->spawned_piece_mask = 1u << 8;
+	im::PoolPresentLifecycleMap joiner_lifecycle;
+	im::build_client_replica_present_rows({*kernel, &runtime, true}, joiner_lifecycle, rows, doors);
+	row = row_for(rows, helo);
+	ok = expect(row != nullptr && row[w::PF_SECTION_MASK_VALID] == 1.0f && lo(row) == 0x10A,
+			"a joiner's helicopter row hides its flown-off section 8 and its rotor sections 1 and 3") &&
+			ok;
+	row = row_for(rows, crate);
+	ok = expect(row != nullptr && row[w::PF_SECTION_MASK_VALID] == 0.0f,
+			"a joiner row under no death-section render tag publishes no section mask") && ok;
+	return ok;
+}
+
 int main() {
     test_attached_rows_retain_subdegree_frame();
     test_joiner_bldg_section_offset_reaches_present_rows();
@@ -1522,6 +1756,10 @@ int main() {
 	ok = test_host_rows_apply_the_remote_held_weapon_ammo_leg() && ok;
 	ok = test_host_rows_draw_the_mounted_rider_weapon() && ok;
 	ok = test_rows_carry_the_slot_march_start() && ok;
+	ok = test_replica_statics_present_their_pitch_and_roll() && ok;
+	ok = test_replica_rows_present_the_served_ring_entries() && ok;
+	ok = test_seated_replica_row_presents_its_channel() && ok;
+	ok = test_rotor_hides_reach_world_and_joiner_rows() && ok;
 	if (!ok || failures != 0) {
 		std::printf("present_rows_test: %d failure(s)\n", failures);
 		return 1;

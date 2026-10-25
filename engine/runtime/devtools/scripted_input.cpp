@@ -90,6 +90,16 @@ bool ScriptedInput::load(const std::vector<ScriptStep> &steps, std::string &erro
 				e.dy_px = s.dy_px;
 				events.push_back(e);
 				break;
+			case ScriptStep::Kind::Char:
+				if (!script_char_typeable(s.character)) {
+					error = step_label(i) + ": char " + std::to_string(s.character) +
+							" is not backspace, return or printable ASCII";
+					return false;
+				}
+				e.op = Op::Char;
+				e.character = s.character;
+				events.push_back(e);
+				break;
 			case ScriptStep::Kind::End:
 				if (have_end) {
 					error = step_label(i) + ": the script has a second end step";
@@ -132,6 +142,7 @@ void ScriptedInput::cancel() {
 	if (state_ == State::Armed || state_ == State::Running) stop(State::Cancelled, "cancelled");
 	held_.clear();
 	look_dx_ = look_dy_ = 0.0;
+	chars_.clear();
 }
 
 void ScriptedInput::advance(int64_t logic_tick) {
@@ -144,6 +155,7 @@ void ScriptedInput::advance(int64_t logic_tick) {
 	if (logic_tick < last_tick_) {
 		stop(State::Cancelled, "the logic clock ran backwards (a reloaded mission)");
 		look_dx_ = look_dy_ = 0.0;
+		chars_.clear();
 		return;
 	}
 	last_tick_ = logic_tick;
@@ -184,6 +196,9 @@ bool ScriptedInput::apply(const Event &e, std::vector<const char *> &changed) {
 			look_dx_ += e.dx_px;
 			look_dy_ += e.dy_px;
 			return true;
+		case Op::Char:
+			chars_.push_back(e.character);
+			return true;
 		case Op::End:
 			for (const Held &h : held_)
 				if (flipped(h.token)) return false; // a press this sample still gets its sample
@@ -206,6 +221,7 @@ void ScriptedInput::reset() {
 	state_ = State::Idle;
 	start_tick_ = end_tick_ = last_tick_ = -1;
 	look_dx_ = look_dy_ = 0.0;
+	chars_.clear();
 	cancel_reason_.clear();
 }
 
@@ -219,6 +235,12 @@ void ScriptedInput::take_look(double &r_dx_px, double &r_dy_px) {
 	r_dx_px = look_dx_;
 	r_dy_px = look_dy_;
 	look_dx_ = look_dy_ = 0.0;
+}
+
+std::vector<uint8_t> ScriptedInput::take_chars() {
+	std::vector<uint8_t> out;
+	out.swap(chars_);
+	return out;
 }
 
 std::vector<int> ScriptedInput::held_codes() const {

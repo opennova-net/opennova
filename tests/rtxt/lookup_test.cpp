@@ -26,6 +26,23 @@ int main() {
   fresh.entries = f.entries;
   if (!expect(fresh.get("btn_quit") == "Quit", "linear fallback should find the key before build_lookup")) return 1;
 
+  // The section lookup searches the override table first, unless it is the
+  // table asked (D-NET-675) [orig: TextResource_FindEntryBySectionAndKey
+  // @0x75D250, the override test @0x75D27B].
+  File over;
+  over.sections = {{"menu_main", 1}};
+  over.entries = {{"BTN_QUIT", "Leave", {0, 0}, 0}};
+  over.build_lookup();
+  const Entry *hit = find_with_override(&over, f, "menu_main", "btn_quit");
+  if (!expect(hit != nullptr && hit->text == "Leave", "the override table answers first")) return 1;
+  hit = find_with_override(&over, f, "menu_main", "BTN_NEW_GAME");
+  if (!expect(hit != nullptr && hit->text == "{hot}New Game", "a key the override lacks reads the table")) return 1;
+  hit = find_with_override(nullptr, f, "menu_main", "BTN_QUIT");
+  if (!expect(hit != nullptr && hit->text == "Quit", "no override table reads the table")) return 1;
+  if (!expect(find_with_override(&over, f, "hud", "MISSING") == nullptr, "a miss in both is none")) return 1;
+  hit = find_with_override(&over, over, "menu_main", "BTN_QUIT");
+  if (!expect(hit != nullptr && hit->text == "Leave", "the override asked for itself is searched once")) return 1;
+
   std::printf("OK: rtxt lookup is case-insensitive with a linear fallback\n");
   return 0;
 }

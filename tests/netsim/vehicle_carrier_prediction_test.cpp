@@ -29,6 +29,8 @@
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/world.h>
 
+#include "../common/hull_brain.h"
+
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -102,6 +104,9 @@ w::Entity hull_seed(w::Vec3 pos, uint8_t team) {
 	v.position = pos;
 	v.health = v.health_max = 3000;
 	v.team = team;
+	// A settled hull: its contact byte as its last solve left it (a spawn holds 0 and a
+	// model-less hull's solve never writes it, D-NET-433).
+	v.veh.grounded = true;
 	return v;
 }
 
@@ -117,7 +122,7 @@ replication::ClientEntityState &seed_row(replication::ClientState &state,
 	row.y = fixed_of(e.position.y);
 	row.z = fixed_of(e.position.z);
 	row.heading_known = true;
-	row.heading_bam = w::bam_heading_from_mission_yaw_deg(e.yaw);
+	row.heading_bam = e.heading;
 	return row;
 }
 
@@ -182,7 +187,7 @@ bool run_carried_vehicles_predict_and_ride_their_carrier() {
 	const int32_t rider_lx = fixed_of(2.0f), rider_ly = 0, rider_lz = fixed_of(1.0f);
 	const WorldPose rider_seat = network_transform_local_to_world(rider_lx, rider_ly, rider_lz,
 			fixed_of(deck.position.x), fixed_of(deck.position.y), fixed_of(deck.position.z),
-			uint32_t(w::bam_heading_from_mission_yaw_deg(deck.yaw)), 0u, 0u);
+			uint32_t(deck.heading), 0u, 0u);
 	const w::Entity rider = hull_seed({float(rider_seat.x) / 65536.0f,
 	                                          float(rider_seat.y) / 65536.0f,
 	                                          float(rider_seat.z) / 65536.0f}, team);
@@ -201,6 +206,9 @@ bool run_carried_vehicles_predict_and_ride_their_carrier() {
 		return false;
 	if (!expect(bridge_h.pool() == 2 && deck_h.pool() == 1, "carrier pools as intended"))
 		return false;
+	// Each hull row's class init brained it: its client mover runs past its head.
+	for (const w::EntityHandle hull : {deck_h, rider_h, parked_h, bridged_h})
+		test_common::brain_hull(world, hull);
 
 	replication::ClientState &state = h.role.runtime->state();
 	seed_row(state, deck_h, deck, EntityClass::Vehicle);

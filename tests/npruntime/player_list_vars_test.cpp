@@ -99,47 +99,59 @@ void in_match_writers() {
 	conn.char_vars.char_class[1] = 6; // side B
 	inmatch::Server_InitNewRoundState(ctx);
 	inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
+	// The own add binds no body; the mission start's round init spawns it (D-NET-NEW-L7-39).
+	expect(conn.phase == inmatch::ConnectionPhase::PlayerAdded && !conn.link.owned_entity.valid(),
+	       "the own add binds no body");
+	inmatch::init_all_player_entities_for_round(ctx);
 	const w::Entity *player = world.registry.get(conn.link.owned_entity);
-	expect(conn.phase == inmatch::ConnectionPhase::PlayerAdded && player != nullptr &&
-	               player->team == 1 && player->player_class == 8,
-	       "the add bound the host's player on team 1, side A's class 8");
+	expect(player != nullptr && player->team == 1 && player->player_class == 8,
+	       "the round init spawned the host's player on team 1, side A's class 8");
 	if (player == nullptr) return;
 
-	// The add: the entity's team and class.
-	expect(conn.player_list_team == 1 && conn.player_list_type == 8,
-	       "the add stamps the entity's team and class");
+	// The own add: the bodyless arm, the slot's team and its class as the add finds it,
+	// zeroed: the create's profile init stores the class (side B's, 6, the side
+	// requirement being -1) only after the add (D-NET-659, D-NET-695).
+	// [orig: Server_PlayerAdd @0x51D398..0x51D3B5; Server_AllocatePlayerSlotTable's memset
+	//  @0x51C1CB; CNapiGameSession_CreateSession @0x4C9952..0x4C996C, @0x4C9CCE]
+	expect(conn.player_list_team == 1 && conn.player_list_type == 0,
+	       "the own add stamps the slot's team and its zeroed class");
+	expect(conn.slot_class == 6, "the create's profile init stores side B's class");
 
 	// A team change: PlayerTeam alone.
 	inmatch::Server_ChangeEntityTeam(ctx, world, conn.link.owned_entity, 2);
-	expect(conn.player_list_team == 2 && conn.player_list_type == 8,
+	expect(conn.player_list_team == 2 && conn.player_list_type == 0,
 	       "a team change rewrites PlayerTeam alone");
 
 	// A map change: the teardown frees the entity and swaps the kept slot's
 	// side (2 -> 1), then the round init re-adds it with side A's class, now 5.
 	// Neither writes the PlayerList: the slot keeps the previous mission's
-	// PlayerTeam 2 and PlayerType 8. Between the two, with no entity, an
+	// PlayerTeam 2 and PlayerType 0. Between the two, with no entity, an
 	// envelope abort draws nothing and writes nothing.
 	world.registry.despawn(conn.link.owned_entity);
 	conn.link.owned_entity = {};
 	conn.assigned_team = 1;
 	conn.char_vars.char_class[0] = 5;
 	expect(!submit_loadout(ctx, conn, world, /*team=*/0, /*class=*/0, 100) &&
-	               conn.player_list_type == 8,
+	               conn.player_list_type == 0,
 	       "with no entity an envelope abort draws no 0x5A and keeps PlayerType");
 	(void)submit_loadout(ctx, conn, world, /*team=*/1, /*class=*/9, 100);
-	expect(conn.player_list_type == 8, "with no entity an accepted 0x2F keeps PlayerType");
-	inmatch::init_all_player_entities_for_round(*role_storage);
+	expect(conn.player_list_type == 0, "with no entity an accepted 0x2F keeps PlayerType");
+	inmatch::init_all_player_entities_for_round(ctx);
 	player = world.registry.get(conn.link.owned_entity);
 	expect(player != nullptr && player->team == 1 && player->player_class == 5,
 	       "the round init re-adds the kept slot on team 1 with class 5");
 	if (player == nullptr) return;
-	expect(conn.player_list_team == 2 && conn.player_list_type == 8,
+	expect(conn.player_list_team == 2 && conn.player_list_type == 0,
 	       "the round init's re-add writes neither PlayerTeam nor PlayerType");
 
-	// An abort's weapon-slot list: the slot's live class.
+	// An abort's weapon-slot list: the slot's class (the create's 6), never the entity's
+	// (5); the own slot's list also stores it as its team's side class (side A for team 1).
+	// [orig: Server_SendWeaponSlotListToPlayer @0x5025A8, @0x502629..0x50264B]
 	expect(submit_loadout(ctx, conn, world, /*team=*/0, /*class=*/0, 101) &&
-	               conn.player_list_type == 5 && conn.player_list_team == 2,
-	       "a weapon-slot list re-send stamps the slot's live class");
+	               conn.player_list_type == 6 && conn.player_list_team == 2,
+	       "a weapon-slot list re-send stamps the slot's class");
+	expect(conn.char_vars.char_class[0] == 6 && conn.char_vars.char_class[1] == 6,
+	       "the own slot's list stores its class as its team's side class");
 
 	// The accept: the accepted class.
 	(void)submit_loadout(ctx, conn, world, /*team=*/1, /*class=*/7, 102);
@@ -179,7 +191,7 @@ void remote_slot_class_at_round_init() {
 	for (uint32_t i = 0; i < 2; ++i) {
 		inmatch::NapiNPConnection joining;
 		joining.type = inmatch::NapiNPConnection::kTypeServerSide;
-		joining.connection_id = inmatch::kFirstJoinerDcb + i;
+		joining.connection_id = opennova::next_connection_index(); // a create's (D-NET-713)
 		joining.self_id_seen = true;
 		joining.phase = inmatch::ConnectionPhase::Joined;
 		joining.char_vars.char_class[0] = 8;
@@ -210,7 +222,7 @@ void remote_slot_class_at_round_init() {
 		world.registry.despawn(c->link.owned_entity);
 		c->link.owned_entity = {};
 	}
-	inmatch::init_all_player_entities_for_round(*role_storage);
+	inmatch::init_all_player_entities_for_round(ctx);
 	body = world.registry.get(accepted.link.owned_entity);
 	expect(body != nullptr && body->player_class == 7 && accepted.slot_class == 7,
 	       "the round init spawns the accepted slot with its class 7, not the join's 8");
@@ -236,40 +248,39 @@ void roster_sync() {
 	current[1] = slot(1, "Joiner", "1", "8");
 	current[2] = slot(2, "Leaver", "2", "8");
 
-	// Slot 0's team and slot 1's type change; slot 2 leaves; slot 3 arrives.
+	// Slot 0's team and slot 1's type change; slot 2 leaves; slot 3 arrives. A leave is its
+	// teardown's removal, not the sync's (D-NET-NEW-L9-29).
+	// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - the removal called @0x51B5F3]
 	const opennova::RosterSync sync = opennova::plan_roster_sync(current,
 			{slot(0, "Host", "2", "8"), slot(1, "Joiner", "1", "5"), slot(3, "New", "1", "8")});
-	expect(sync.removed == std::vector<int>{2}, "only the gone slot is removed");
 	expect(sync.added.size() == 1 && sync.added[0].slot == 3, "only the new slot is added");
 	expect(sync.vars.size() == 2 && sync.vars[0].slot == 0 && sync.vars[0].team == "2" &&
 	               sync.vars[1].slot == 1 && sync.vars[1].type == "5",
 	       "a kept player's team or type change is its vars alone");
 
-	// A slot now another player's: removed, then added.
+	// A slot now another player's: an add (the previous player's teardown removed it).
 	const opennova::RosterSync swap =
 			opennova::plan_roster_sync(current, {slot(0, "Host", "1", "8"), slot(1, "Other", "1", "8"),
 			                                     slot(2, "Leaver", "2", "8")});
-	expect(swap.removed == std::vector<int>{1} && swap.added.size() == 1 &&
-	               swap.added[0].player_name == "Other" && swap.vars.empty(),
-	       "a slot's new player is a removal and an add");
+	expect(swap.added.size() == 1 && swap.added[0].player_name == "Other" && swap.vars.empty(),
+	       "a slot's new player is an add");
 
 	// A leave and a re-join of the same player into the same slot between two syncs (same name,
-	// address and PCID): the re-join is a new connection, so a removal and an add, as retail's
-	// remove and add each send theirs (D-NET-659).
+	// address and PCID): the re-join is a new connection, so an add, its leave's removal sent at
+	// that teardown, as retail's remove and add each send theirs (D-NET-659).
 	// [orig: Server_HandlePlayerDisconnect @0x51B5C0 (the removal @0x51b5f3); Server_PlayerAdd
 	//  @0x51cbc0 (the add @0x51d4b5)]
 	HostPlayerSlot rejoined = current[1];
 	rejoined.connection_id = 7;
 	const opennova::RosterSync rejoin =
 			opennova::plan_roster_sync(current, { current[0], rejoined, current[2] });
-	expect(rejoin.removed == std::vector<int>{ 1 } && rejoin.added.size() == 1 &&
-					rejoin.added[0].connection_id == 7 && rejoin.vars.empty(),
-			"a slot's re-joined player is a removal and an add");
+	expect(rejoin.added.size() == 1 && rejoin.added[0].connection_id == 7 && rejoin.vars.empty(),
+			"a slot's re-joined player is an add");
 
 	// Nothing changed: nothing to do.
 	const opennova::RosterSync same = opennova::plan_roster_sync(current,
 			{current[0], current[1], current[2]});
-	expect(same.removed.empty() && same.added.empty() && same.vars.empty(), "an unchanged roster is left alone");
+	expect(same.added.empty() && same.vars.empty(), "an unchanged roster is left alone");
 }
 
 // B-14: the one roster both embedders sync. Every connection past its player add, at its

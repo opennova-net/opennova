@@ -110,7 +110,15 @@ inline float menu_text_anchor(int design, float scale) {
 // STENCIL and BRUSH handles with mode 0x651 / two stages; CUIElement_DrawFrame
 // @ 0x64a392.. -> CUIElement_DrawTexturedQuad @ 0x649e80]. A frame piece's corners are
 // floats, so the device covers what Direct3D 9 does: the pixels whose centres lie
-// in [x0, x1) x [y0, y1).
+// in [x0, x1) x [y0, y1). The game composes a piece on the device as it draws it,
+// every frame: the window's draw binds border_material and submits the pieces
+// [orig: CUIElement_DrawFrame @ 0x64a210 - CTextureManager_ApplyMaterial (the call
+// @ 0x64a2c6), CUIElement_DrawTexturedQuad (the first call @ 0x64a392);
+// CUIElement_DrawTexturedQuad @ 0x649e80 - the brush texcoords (pos + 0.5) / period
+// per vertex @ 0x649f7f..0x649fe3, GDynamicVB_DrawPrimitive (the call
+// @ 0x649fea)], so a piece first shown (death.mnu's MAP and shroud at its reveal)
+// costs that frame no composition of its own (D-NET-NEW-LF-25); the shell draws
+// each piece's quad the same way, its two textures bound in one material (LF-s18).
 struct MenuQuad {
 	float x0 = 0.0f;
 	float y0 = 0.0f;
@@ -571,6 +579,11 @@ public:
 	// -> CUIStringTable_LookupString @ 0x6527c0 over CWnd_GetInheritedTextRsrc @ 0x646AB0;
 	// the Mods list's base row, Options_PopulateModList @ 0x559fe2].
 	std::string widget_string(int index, const std::string &key) const;
+	// The text the string table `table` names gives a key the game's code names, whatever
+	// table a widget inherits, the key itself on a miss [orig: UIStringTable_LookupAndDup
+	// @ 0x63b290 -> CUIStringTable_LookupString @ 0x6527c0 with the table's file name, the
+	// key's copy on a miss @ 0x63b2f0; the host screen's MAX_PLAYERS @ 0x5561bc].
+	std::string table_string(const std::string &table, const std::string &key) const;
 	// Authored-or-runtime effective disabled (the pump's state-1 test).
 	bool widget_disabled(int index, const MenuFrameState &state) const;
 	// The parsed window a document widget compiles (null for a part or out of range): what an

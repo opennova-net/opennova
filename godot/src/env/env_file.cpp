@@ -17,6 +17,7 @@
 #include <formats/env/env_celestial.h>
 #include <formats/env/tod_clock.h>
 #include <formats/env/env_weather.h>
+#include <runtime/environment/sky_frame.h> // loads_mission_sky_maps
 
 #include <algorithm>
 #include <sstream>
@@ -36,6 +37,10 @@ void EnvFile::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("load"), &EnvFile::load);
 	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "name"), &EnvFile::load_from_resource_root);
+	ClassDB::bind_method(D_METHOD("load_mission_environment", "resource_root", "terrain", "name", "overcast"),
+			&EnvFile::load_mission_environment);
+	ClassDB::bind_method(D_METHOD("load_mission_sky_maps", "dedicated_host"), &EnvFile::load_mission_sky_maps,
+			DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("save_to_path", "path"), &EnvFile::save_to_path);
 	ClassDB::bind_method(D_METHOD("reset_to_default"), &EnvFile::reset_to_default);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &EnvFile::is_loaded);
@@ -352,6 +357,15 @@ Error EnvFile::load() {
 	return OK;
 }
 
+void EnvFile::load_mission_sky_maps(bool p_dedicated_host) {
+	if (opennova::env::loads_mission_sky_maps(p_dedicated_host, env.advanced_clouds)) {
+		_load_sky_textures();
+		return;
+	}
+	sky_map1_tex.unref();
+	sky_map2_tex.unref();
+}
+
 Error EnvFile::load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name) {
 	loaded = false;
 	mission_overrides_active = false;
@@ -407,7 +421,9 @@ bool EnvFile::load_mission_environment(const Ref<ResourceRoot> &p_resource_root,
 	source_path = parsed ? file : String();
 	resource_root = p_resource_root;
 	_sync_properties_from_env();
-	_load_sky_textures();
+	// The sky maps load at the mission textures stage, the full arm's alone (load_mission_sky_maps).
+	sky_map1_tex.unref();
+	sky_map2_tex.unref();
 	loaded = true;
 	_notify_environment_changed();
 	if (p_overcast.is_valid()) {

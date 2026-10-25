@@ -45,10 +45,15 @@ void bind_regional_sounds(world::World &world, const DefItemDef &def,
         shot.base_ticks = def.shot_delay_ticks[region][0];
         shot.range_ticks = def.shot_delay_ticks[region][1];
     }
+    traits.door_open_set.clear();
     for (const char *profile_name : {def.sound_profile, def.sound_profile_female}) {
         if (*profile_name == 0) continue;
         const auto *profile = world.tables.sound_profiles.find(profile_name);
         if (profile == nullptr || sets == nullptr) continue;
+        // def+0x848 from the profile's slot 9 [orig: ItemDef_ResolveAllResources @0x49E5F0 -
+        //  @0x49E62D / @0x49E74A]
+        if (sets->has(profile->set_names[audio::kSlotDoorOpen]))
+            traits.door_open_set = profile->set_names[audio::kSlotDoorOpen];
         for (int region = 0; region < 4; ++region) {
             if (sets->has(profile->set_names[region]))
                 traits.regional_loops[region] = profile->set_names[region];
@@ -69,6 +74,10 @@ void bind_regional_sounds(world::World &world, const DefItemDef &def,
         traits.regional_sounds[region].name =
                 sets != nullptr && sets->has(names[region]) ? names[region] : "";
     }
+    // The def's door_open_sound name over the profile's [orig: @0x49E883..0x49E89A].
+    if (def.door_open_sound[0])
+        traits.door_open_set = sets != nullptr && sets->has(def.door_open_sound) ?
+                def.door_open_sound : "";
 }
 
 // The by-id view over the parsed file: an id resolves to its FIRST row in
@@ -106,11 +115,121 @@ bool graphic_model_loads(const DefItemDef *def, const assets::AssetStore *models
             models->has_source() && models->model(std::string(def->graphic)) != nullptr;
 }
 
+// The userpoint count of the model that load returned (the model's +0xBC), 0
+// when none loaded.
+uint32_t graphic_model_userpoints(const DefItemDef *def, const assets::AssetStore *models) {
+    if (!graphic_model_loads(def, models)) return 0;
+    const assets::Model model = models->model(std::string(def->graphic));
+    return static_cast<uint32_t>(model->user_point_count);
+}
+
+// That model's collision object count (the CMDL header's, the collision block's
+// +0x68), 0 when none loaded or it carries no collision block.
+// [orig: Threedi_BuildCollisionModelFromChunks @0x5B3BF0 (the +0x68 store @0x5B3D3C)]
+uint32_t graphic_model_collision_objects(const DefItemDef *def, const assets::AssetStore *models) {
+    if (!graphic_model_loads(def, models)) return 0;
+    const assets::Model model = models->model(std::string(def->graphic));
+    if (model->collision == nullptr || model->collision->model_data.num_objects <= 0) return 0;
+    return static_cast<uint32_t>(model->collision->model_data.num_objects);
+}
+
+// That model's first "boat" userpoint, else its first "helo" one, as the
+// model-space words a vehicle bay's spawn transforms; false with neither.
+// [orig: NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C4C0 (the
+//  ModelGPM_FindUserpointByName calls @0x51C63D / @0x51C654 on +0x30);
+//  ModelGPM_FindUserpointByName @0x5B2170]
+bool graphic_model_deploy_point(const DefItemDef *def, const assets::AssetStore *models,
+                                int32_t out[3]) {
+    if (!graphic_model_loads(def, models)) return false;
+    const assets::Model model = models->model(std::string(def->graphic));
+    int row = threedi::threedi_3di3_find_user_point(model.get(), "boat");
+    if (row < 0) row = threedi::threedi_3di3_find_user_point(model.get(), "helo");
+    if (row < 0) return false;
+    const threedi::ThreediUserPoint &point = model->user_points[row];
+    out[0] = point.x;
+    out[1] = point.y;
+    out[2] = point.z;
+    return true;
+}
+
+// That model's first "psp" userpoint, as the model-space words a deploy onto the
+// entity (Server_PositionPlayerForSpawn's target arm, its objective Co-op arm)
+// transforms; false with none (D-NET-NEW-L1-39).
+// [orig: Server_PositionPlayerForSpawn @0x50CF60 - ModelGPM_FindUserpointByName
+//  (+0x30, aPsp @0x7CF9C4) called @0x50CFEE / @0x50D533; ModelGPM_FindUserpointByName
+//  @0x5B2170]
+bool graphic_model_spawn_point(const DefItemDef *def, const assets::AssetStore *models,
+                               int32_t out[3]) {
+    if (!graphic_model_loads(def, models)) return false;
+    const assets::Model model = models->model(std::string(def->graphic));
+    const int row = threedi::threedi_3di3_find_user_point(model.get(), "psp");
+    if (row < 0) return false;
+    const threedi::ThreediUserPoint &point = model->user_points[row];
+    out[0] = point.x;
+    out[1] = point.y;
+    out[2] = point.z;
+    return true;
+}
+
+// One row's spawn traits (world::PlayerTemplate) from its def; a missing row
+// (null) reads none and keeps the seed's type id. The model slot is what the
+// row's graphic load returned, which a spawn copies into +0x30.
+// [orig: Entity_InitFromItemDef @0x49E550 - the +0x30 store @0x49E598]
+void fill_spawn_row(world::PlayerTemplate &row, const DefItemDef *def,
+                    const assets::AssetStore *models) {
+    row.has_item_def = def != nullptr;
+    if (def != nullptr) row.type_id = def->id - mission::kItemIdOffset;
+    row.has_graphic_model = graphic_model_loads(def, models);
+    row.item_hp = world::retail_signed_i16(def != nullptr ? def->hp : 0);
+    row.critical_hp = world::retail_signed_i16(def != nullptr ? def->critical_hp : 0);
+    row.item_type = static_cast<uint8_t>(def != nullptr ? def->type : 0);
+    row.item_attrib = def != nullptr ? def->attrib : 0u;
+    row.armor_impact = world::retail_signed_i16(def != nullptr ? def->armor_impact : 0);
+    row.armor_kz = world::retail_signed_i16(def != nullptr ? def->armor_kz : 0);
+    row.damage_reduc_pp = def != nullptr ? def->damage_reduc_pp : 0.0f;
+    row.damage_reduc_max = def != nullptr ? def->damage_reduc_max : 0.0f;
+    row.radar_sig = def != nullptr ? (def->radar_sig & 0xFFFF) : 0;
+    row.heat_sig = def != nullptr ? (def->heat_sig & 0xFFFF) : 0;
+    // The row's class by its ai_function (D-NET-348) [orig: EntityDef_InitAllCallbacks
+    //  @0x4A5A70 -> EntityDef_LookupClassCallbacks @0x407DC0].
+    if (def != nullptr) {
+        row.body_class = world::player_body_class_from_tag(def->ai_function);
+        row.item_event_class = world::item_death_class_from_tag(def->ai_function);
+        // The row's def+0x164 by the same whole-name lookup: the guided serializer for the
+        // five missile rows [orig: EntityDef_LookupClassCallbacks @0x407DC0 - the stricmp call
+        //  @0x407DD8, def+0x164 = the row's +0x14 @0x407E4A; the rows @0x8132B8..0x813318].
+        bool guided_record = false;
+        for (const char *guided : {"rokt", "stng", "hlfr", "jvln", "arty"})
+            guided_record = guided_record || strutil::iequals(def->ai_function, guided);
+        row.guided_record = guided_record;
+        // And its def+0x148, the item rows' inits a body runs (world::ItemClassInit)
+        // [orig: EntityDef_LookupClassCallbacks @0x407DC0 - @0x407E33..0x407E36; the rows
+        //  @0x813318 / @0x813330 / @0x813348: ArtyClass_InitFromDef @0x443430,
+        //  AflrClass_InitFromDef @0x4434B0, GflrClass_InitFromDef @0x443510].
+        row.class_init = strutil::iequals(def->ai_function, "arty")   ? world::ItemClassInit::kArty
+                : strutil::iequals(def->ai_function, "aflr") ? world::ItemClassInit::kAirFlare
+                : strutil::iequals(def->ai_function, "gflr") ? world::ItemClassInit::kGroundFlare
+                                                             : world::ItemClassInit::kNone;
+        const world::ThrowClass think = world::throw_class_from_tag(def->ai_function);
+        if (think == world::ThrowClass::kSatchel || think == world::ThrowClass::kClaymore ||
+                think == world::ThrowClass::kAVMine)
+            row.device_think = think;
+        // The row's move function's physics row, the update its bodies run (D-NET-NEW-L4-14)
+        // [orig: EntityDef_InitAllCallbacks @0x4A5A70 - EntityDef_LookupPhysicsCallback
+        //  called @0x4A5B41].
+        row.move_row = world::physics_class_from_move_function(def->move_function);
+    }
+}
+
 } // namespace
 
 world::ItemDeathTraits item_death_traits_from_def(const DefItemDef &def) {
     world::ItemDeathTraits t;
     t.death_class = world::item_death_class_from_tag(def.ai_function);
+    // The CHel / cpln rows' init, by the same whole-tag stricmp [orig: CHel @0x8132A0 and
+    //  cpln @0x8133A8, the init dword +12; EntityDef_LookupClassCallbacks @0x407DC0]
+    t.air_class_init = strutil::iequals(def.ai_function, "chel") ||
+            strutil::iequals(def.ai_function, "cpln");
     std::copy(std::begin(def.destroy_timing_ticks), std::end(def.destroy_timing_ticks),
             std::begin(t.destroy_timing_ticks));
     t.physics = def.physics;
@@ -191,29 +310,15 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             waypoint_def != nullptr ? static_cast<int32_t>(waypoint_def - items.entries) : 0;
     world.tables.user_waypoint_item_type =
             static_cast<uint8_t>(waypoint_def != nullptr ? waypoint_def->type : 0);
-    world.tables.player.has_item_def = player_def != nullptr;
+    fill_spawn_row(world.tables.player, player_def, models);
     world.tables.player.item_type_index =
             player_def != nullptr ? static_cast<int32_t>(player_def - items.entries) : 0;
-    // The Player row's model slot, which a later spawn copies into +0x30.
-    // [orig: Entity_InitFromItemDef @0x49E550 - the +0x30 store @0x49E598]
-    world.tables.player.has_graphic_model = graphic_model_loads(player_def, models);
-    world.tables.player.item_hp =
-            world::retail_signed_i16(player_def != nullptr ? player_def->hp : 0);
-    world.tables.player.critical_hp =
-            world::retail_signed_i16(player_def != nullptr ? player_def->critical_hp : 0);
-    world.tables.player.item_type =
-            static_cast<uint8_t>(player_def != nullptr ? player_def->type : 0);
-    world.tables.player.item_attrib = player_def != nullptr ? player_def->attrib : 0u;
-    world.tables.player.armor_impact = world::retail_signed_i16(
-            player_def != nullptr ? player_def->armor_impact : 0);
-    world.tables.player.armor_kz = world::retail_signed_i16(
-            player_def != nullptr ? player_def->armor_kz : 0);
-    world.tables.player.damage_reduc_pp =
-            player_def != nullptr ? player_def->damage_reduc_pp : 0.0f;
-    world.tables.player.damage_reduc_max =
-            player_def != nullptr ? player_def->damage_reduc_max : 0.0f;
-    world.tables.player.radar_sig = player_def != nullptr ? (player_def->radar_sig & 0xFFFF) : 0;
-    world.tables.player.heat_sig = player_def != nullptr ? (player_def->heat_sig & 0xFFFF) : 0;
+    // Every row's spawn traits in load order, the rows a player's camouflage item
+    // is found among (D-NET-348) [orig: g_ItemDefs; ItemList_FindIndexByTypeId
+    //  @0x49E100; the binding Entity_SpawnFromAnimSlotProperty @0x43C3CF..0x43C3D9].
+    world.tables.item_rows.assign(items.count, world::PlayerTemplate{});
+    for (size_t i = 0; i < items.count; ++i)
+        fill_spawn_row(world.tables.item_rows[i], &items.entries[i], models);
     std::vector<world::EntityHandle> handles;
     world.registry.for_each(
             [&](const world::Entity &e) {
@@ -253,12 +358,15 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 					e->vehicle_spawn_groups.push_back(static_cast<uint8_t>(group));
 					// A bay ORs each spawn group's flags, taken from the
 					// group item's unitType (an unresolved id reads the
-					// Null row, whose unitType sets none).
-					// [orig: ItemDefs_LoadAndValidate @0x4a1fa7..0x4a1fcf,
+					// Null row, whose unitType sets none). The group's item
+					// is the first row whose type id (its id less 100000) is
+					// the list's token.
+					// [orig: ItemDefs_LoadAndValidate @0x4a1f66..0x4a1f86 (the
+					//  row scan against def +0x50), @0x4a1fa7..0x4a1fcf,
 					//  @0x4a2010..0x4a2058]
 					if ((def->attrib2 & 1u) == 0) continue;
-					const DefItemDef *member =
-							find_item(by_id, items.vehicle_spawn_ids[group]);
+					const DefItemDef *member = find_item(by_id,
+							items.vehicle_spawn_ids[group] + mission::kItemIdOffset);
 					const int unit = member != nullptr ? member->unit_type : 0;
 					if (unit == 1 || unit == 2 || unit == 12) e->vehicle_bay_flags |= 1u;
 					else if (unit == 3 || unit == 4) e->vehicle_bay_flags |= 2u;
@@ -266,6 +374,9 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 				}
 		}
 		e->item_type = static_cast<uint8_t>(def != nullptr ? def->type : 0);
+		// The def's +0x908 mass, for every def type [orig: ItemDef_ParsePhysicsProperty
+		//  @0x49DC76; the allocator's 5, ItemDef_AllocateWithDefaults @0x49E3B0].
+		e->def_mass = def != nullptr ? def->mass : 0;
 		// entity+0x30: the def's graphic model as its load returned it, which
 		// every mission start loads and stores from the def for pools 1, 2 and
 		// 0 alone, so a marker (pool 3) carries none. A player's is its visual
@@ -277,6 +388,14 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 		//  persistent-bank gate MapOverlay_RenderAllByLayer @0x5BE6C4]
 		e->has_graphic_model = graphic_model_loads(def, models) &&
 				e->kind != world::EntityKind::Marker;
+		e->graphic_model_userpoints =
+				e->has_graphic_model ? graphic_model_userpoints(def, models) : 0;
+		e->graphic_model_collision_objects =
+				e->has_graphic_model ? graphic_model_collision_objects(def, models) : 0;
+		e->deploy_point_valid = e->has_graphic_model &&
+				graphic_model_deploy_point(def, models, e->deploy_point);
+		e->spawn_point_valid = e->has_graphic_model &&
+				graphic_model_spawn_point(def, models, e->spawn_point);
 		// The physics callback table's ewep row selects the gun update. A
 		// section clone's template pins its update callback (the floating
 		// physics) whatever its def, on every resolve.
@@ -365,7 +484,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             // any id below 2^24; 0xFF when that id sits under 100000), neither a
             // userpoint index, so the child rides its carrier's root with no
             // anchor offset, and no C/G designation slot matches it.
-            // [orig: Entity_SpawnWeaponOverlays @0x40F40E then Entity_InitFromModel
+            // [orig: Entity_SpawnAddEWeapChildren @0x40F40E then Entity_InitFromModel
             //  @0x40F414 (subType = -1 @0x40DCAF) then the init callback @0x40F43E;
             //  Entity_InitBoneReferences @0x4415F1..0x44164A; ItemDef_ParseProperty
             //  addeweap type - 100000 @0x4A1BA3..0x4A1BAD]
@@ -457,7 +576,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             // The +0x160/+0x26C/+0x2B0/+0x2C8 init is the ai_function class
             // row's second slot, run through def+0x148 whatever the move
             // function [orig: Entity_InitSquibFromDef @0x448CE0, row @0x813120 +12;
-            //  Entity_LookupRenderCallbacks stores it @0x407E36].
+            //  EntityDef_LookupClassCallbacks stores it @0x407E36].
             if (strutil::iequals(def->ai_function, "squib")) {
                 e->equipped_adm_index = 0;
                 e->squib.spread_q16 = static_cast<int32_t>(def->door_type);
@@ -517,6 +636,22 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // (D-ITEMDEF-18); the `bldg` row pivots by its own rule, below.
         e->death_section_pivot =
                 render == "cveh" || render == "chel" || render == "tank" || render == "cpln";
+        // The chel row's world callback also hides sections by the rotor speed
+        // and the airborne flag, each section named by one byte of the def's
+        // +0x890..+0x897 run (the deathtime / door dword and the clipsize dword
+        // the rotor_parts / aux_parts keys write, low byte first).
+        // [orig: Entity_BuildAndApplyBoneMatrices @0x48F210 (the reads
+        //  @0x48F3BE / @0x48F3E0 / @0x48F406 / @0x48F427 / @0x48F448 / @0x48F469)]
+        e->chel_section_bytes = {};
+        if (render == "chel") {
+            for (int i = 0; i < 4; ++i) {
+                const unsigned shift = static_cast<unsigned>(i) * 8u;
+                e->chel_section_bytes[i] = static_cast<uint8_t>(
+                        static_cast<uint32_t>(def->deathtime_ticks) >> shift);
+                e->chel_section_bytes[4 + i] = static_cast<uint8_t>(
+                        static_cast<uint32_t>(def->clipsize) >> shift);
+            }
+        }
         // The `bldg` row's world callback translates the draw of whatever it
         // draws by the negated origin, in the graphic model's COBJ, of the
         // section the byte +0x2C1 names; section 0 draws in place. A section
@@ -537,12 +672,17 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // section clone's template pins its event and update callbacks, so
         // neither door row reaches it on any resolve; a palm fragment takes
         // item 900's own pair.
-        // [orig: Entity_LookupRenderCallbacks @0x407dc0, stricmp @0x407de2;
+        // [orig: EntityDef_LookupClassCallbacks @0x407dc0, the stricmp call @0x407DD8;
         //  Entity_SpawnSectionEntity @0x440365 / @0x440370;
         //  Palm_SpawnFragment @0x53C35D / @0x53C36F]
         e->door_event = !e->section_clone && def != nullptr &&
                 strutil::iequals(def->ai_function, "door");
         e->door_motion = !e->section_clone && move_row == world::PhysicsClass::Door;
+        // An item's ele0 mover (a pool-0 body runs its row through person_item_mover).
+        // [orig: g_EntityClassPhysicsTable @0x82ABC8 - the ele0 row @0x82ABEC ->
+        //  Entity_UpdateFallAndLandState @0x4A20E0]
+        e->elevator_motion = !e->section_clone && e->handle.pool() != 0 &&
+                move_row == world::PhysicsClass::Ele0;
         // Every def carries its two +0x6F3/+0x70B sound names; the door
         // commands play them, and so does the drop of a carried object off
         // its carrier (world::drop_object_from_carrier).
@@ -586,7 +726,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // the particledeath family +0x412..; the event/death callback row
         // def+0x138 resolved from the ai_function tag by the whole-string
         // stricmp walk of g_EntityClassEventCallbackTable @0x813000
-        // (Entity_LookupRenderCallbacks @0x407dc0 via EntityDef_InitAllCallbacks
+        // (EntityDef_LookupClassCallbacks @0x407dc0 via EntityDef_InitAllCallbacks
         // @0x4a5aa9, "Null" for an empty tag)]
 		e->hud_image = def != nullptr ? def->hud_image : "";
         e->item_unit_type = def != nullptr ? def->unit_type : 0;
@@ -715,8 +855,8 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 				// @0x4581b0 (the air machine); cveh @0x813378, cbot @0x813390 and
 				// ctrn @0x8133c0 -> EntityAI_ProcessGroundStateMachine @0x4583c0.
 				// [orig: g_EntityClassEventCallbackTable @0x813000 resolved by
-				// EntityDef_InitAllCallbacks @0x4a5aae -> Entity_LookupRenderCallbacks
-				// @0x407dc0, the whole name stricmp'd @0x407de2]
+				// EntityDef_InitAllCallbacks @0x4a5aae -> EntityDef_LookupClassCallbacks
+				// @0x407dc0, the whole name stricmp'd @0x407DD8]
 				const auto brain_is = [def](const char *row) {
 					return strutil::iequals(def->ai_function, row);
 				};
@@ -752,14 +892,22 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 world::throw_class_from_tag(def->ai_function);
         const world::ThrowClass motor =
                 world::throw_motor_from_move_function(def->move_function);
-        if (think == world::ThrowClass::kNone &&
-                motor == world::ThrowClass::kNone)
+        // A round's +452 is its TrcrID def's physics row (def+0x158): a rokt def lands
+        // too (the ballistic leg's one-shot latch), and an arti def (the mortar shell's
+        // motor) [orig: Entity_InitFromItemDef @0x49E550 (@0x49E586..0x49E58C); the rokt
+        // row @0x82AD18 -> Entity_UpdateRocketFlag @0x443DD0; the arti row @0x82AC7C ->
+        // Entity_UpdateArtiShell @0x445500].
+        const world::PhysicsClass move_row =
+                world::physics_class_from_move_function(def->move_function);
+        if (think == world::ThrowClass::kNone && motor == world::ThrowClass::kNone &&
+                move_row != world::PhysicsClass::Rokt && move_row != world::PhysicsClass::Arti)
             continue;
         world::ThrowableClassRow row;
         row.item_id = def_id - mission::kItemIdOffset;
         row.item_type_index = static_cast<int32_t>(def - items.entries);
         row.think = think;
         row.motor = motor;
+        row.move_row = move_row;
         row.health_max = world::retail_signed_i16(def->hp);
         row.armor_impact = world::retail_signed_i16(def->armor_impact);
         row.armor_kz = world::retail_signed_i16(def->armor_kz);
@@ -922,7 +1070,7 @@ uint32_t ammo_id(const world::World &world, const char *name) {
 }
 }
 
-// [orig: Entity_InitHardpoints @ 0x4417D0]
+// [orig: Minefield_InitEntity @ 0x4417D0]
 // lndm's bone callback is BoneCallback_Identity @ 0x4E20A0. Its model-global
 // userpoints therefore retain the authored rest position through the bone walk.
 void resolve_minefields(world::World &world, const def::DefItemsFile &items,
@@ -935,9 +1083,9 @@ void resolve_minefields(world::World &world, const def::DefItemsFile &items,
         const auto &def = *it->second;
         // The think is the ai_function's lndm event row, bound by whole name
         // ignoring case; the render is the lndm bone row, bound by the render
-        // tag. [orig: Entity_LookupRenderCallbacks stricmp @0x407DD8, row
+        // tag. [orig: EntityDef_LookupClassCallbacks stricmp @0x407DD8, row
         // 'lndm' @0x813198 -> Entity_LandmineThink @0x441A40 /
-        // Entity_InitHardpoints @0x4417D0; row 'lndm' @0x82CFC0]
+        // Minefield_InitEntity @0x4417D0; row 'lndm' @0x82CFC0]
         const bool think = strutil::iequals(def.ai_function, "lndm");
         const bool render = mission::uses_submodel_renderer(def.render_function);
         if (!think && !render) return;
@@ -967,10 +1115,9 @@ void resolve_minefields(world::World &world, const def::DefItemsFile &items,
                     transformed[axis] = static_cast<int32_t>(
                             static_cast<float>(value) * io::kFp16One);
                 }
-                transformed[2] = world.tables.terrain ? static_cast<int32_t>(
-                        terrain::height_field_height_mission_bilinear(*world.tables.terrain,
-                            transformed[0] * io::kInvFp16One,
-                            transformed[1] * io::kInvFp16One) * io::kFp16One) : 0;
+                transformed[2] = world.tables.terrain
+                        ? terrain::height_field_height_bilinear_fixed(*world.tables.terrain,
+                            transformed[0], transformed[1]) : 0;
                 points.push_back({type, {transformed[0], transformed[1], transformed[2]}});
             }
         }

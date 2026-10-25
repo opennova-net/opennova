@@ -168,6 +168,7 @@ struct ReferenceRule {
 const ReferenceRule kReferences[] = {
 	{{kAnyKind, "graphic"}, DefReference::Model}, {{kAnyKind, "graphic_enemy"}, DefReference::Model},
 	{{kAnyKind, "husk"}, DefReference::Model}, {{kAnyKind, "huskfinal"}, DefReference::Model},
+	{{kItem, "huskshadow"}, DefReference::Model},
 	{{kAnyKind, "gfx1"}, DefReference::Model}, {{kAnyKind, "gfx1a"}, DefReference::Model},
 	{{kAnyKind, "gfx1b"}, DefReference::Model}, {{kAnyKind, "gfx3"}, DefReference::Model},
 	{{kAnyKind, "anim_def"}, DefReference::AnimationMap}, {{kAnyKind, "animadm"}, DefReference::AnimationMap},
@@ -330,7 +331,7 @@ std::vector<DefChoice> physics() { return {{"0", 0, "Its class's motor"}, {"1", 
 // Entity_ClassifyForMinimap @ 0x50fa70; VMacros_BuildShaderPassName @ 0x5bf613;
 // Entity_DispatchDeathCallback's table @ 0x815410]; 3 a helicopter, whose spinning rotor strikes [orig:
 // Entity_MovementCollisionResolver @ 0x4b30c3]; 7 and 8 burning with the medium and the large fire
-// [orig: Entity_ProcessAirVehiclePhysics @ 0x46fba1]; 9 its own score tally [orig:
+// [orig: Vehicle_ProcessSelectorZeroBoat @ 0x46fba1]; 9 its own score tally [orig:
 // Score_ClassifyEntityForCounts @ 0x4fd0b1]; 11 a bridge. Any other byte takes every default.
 std::vector<DefChoice> unit_types() {
 	return {{"1", 1, "Land vehicle"},      {"2", 2, "Land vehicle, TN voice set"},

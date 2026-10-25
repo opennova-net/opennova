@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
 
 #include <formats/rtxt/rtxt.h>
@@ -25,6 +26,14 @@ void set_key_strings(rtxt::File table);
 void clear_key_strings();
 
 bool has_key_strings();
+
+// The process's text-override table (retail's g_TextOverrideTable, the active
+// expansion's text bin): every lookup below searches it before the "Keys"
+// table, as every section lookup does [orig: KeyHelp_GetStringWithFallback
+// @0x51ED40, the call @0x51ED6C -> TextResource_FindEntryBySectionAndKey
+// @0x75D250, the override first @0x75D27B]. Null forgets it. The shell
+// installs the table it installs for every game-text lookup.
+void set_key_strings_override(std::shared_ptr<const rtxt::File> table);
 
 // The "Keys" lookup: the entry text when the installed table's section
 // "Keys" carries `key` (case-insensitive, first match), else the fallback

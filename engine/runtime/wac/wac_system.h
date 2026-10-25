@@ -70,6 +70,14 @@ public:
     void restore_runtime_state(opennova::world::World &world, const RuntimeState &state);
 
     const Program &program() const { return prog_; }
+    // WacScript_ToggleCheatByName over a console line: on the authority, the first
+    // CHEAT declaration (type 0x19) whose name equals the whole line, case-insensitively,
+    // flips its variable (0 to 1, any other value to 0); true when one did. The console's
+    // local command tries it after the `pb_` lines (D-NET-371).
+    // [orig: WacScript_ToggleCheatByName @0x4EE750 - the authority test @0x4EE757, the
+    //  walk @0x4EE76D..0x4EE792 (type 25 at +0x13, stricmp), the flip @0x4EE7AE; called by
+    //  Client_ProcessLocalCommand @0x520CF1]
+    bool toggle_cheat(std::string_view line, bool authority, opennova::world::World &world) const;
     WacVm &vm() { return vm_; }
     const WacVm &vm() const { return vm_; }
 

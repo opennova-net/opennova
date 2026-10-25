@@ -656,13 +656,13 @@ void print_vehicle_compact_record(const FrameUpdate *fu, const VehicleCompactRec
 void print_infantry_compact_record(const FrameUpdate *fu, const InfantryCompactRecord &r) {
 	std::printf("            infantry: seatBone=%u vehHdl=%s "
 	            "pos=(0x%04x,0x%04x,0x%04x) yaw=0x%02x flags=0x%02x "
-	            "pitch=0x%02x aimYaw=0x%02x anim=0x%02x%s\n",
+	            "aimHeading=0x%02x aimPitch=0x%02x anim=0x%02x%s\n",
 	            unsigned(r.seat_bone_idx),
 	            handle_str(r.vehicle_slot_handle).c_str(),
 	            unsigned(r.pos_x_compressed), unsigned(r.pos_y_compressed),
 	            unsigned(r.pos_z_compressed),
 	            unsigned(r.yaw_byte), unsigned(r.flags_byte),
-	            unsigned(r.pitch_byte), unsigned(r.aim_yaw_byte),
+	            unsigned(r.aim_heading_byte), unsigned(r.aim_pitch_byte),
 	            unsigned(r.anim_byte),
 	            abs_pos_str(fu, r.pos_x_compressed, r.pos_y_compressed,
 	                        r.pos_z_compressed, r.vehicle_slot_handle).c_str());
@@ -1039,7 +1039,7 @@ void print_tag_0f(const std::vector<uint8_t> &body) {
 	            ws.session_tick, fp16(ws.pos_x), fp16(ws.pos_y), fp16(ws.pos_z),
 	            int(ws.yaw), int(ws.pitch), int(ws.roll), unsigned(ws.game_flags),
 	            nonzero, unsigned(ws.waypoint_count), unsigned(ws.team_name_count),
-	            clean ? "" : " (DECODE INCOMPLETE)");
+	            !clean ? " (DECODE INCOMPLETE)" : ws.unread_bytes != 0 ? " (bytes unread)" : "");
 	for (std::size_t i = 0; i < ws.ammo_pools.size(); ++i) {
 		if (ws.ammo_pools[i] != 0)
 			std::printf("            score[%zu]=%d\n", i, ws.ammo_pools[i]);
@@ -1890,7 +1890,7 @@ int main(int argc, char *argv[]) {
 		             "frame=.. dir=.. session=.. sid=.. seq=.. ack=.. flags=.. "
 		             "records=.. tags=..' line per decrypted 0x43/0x83 datagram\n"
 		             "       --parity-events emits stable PARITY_DATAGRAM, PARITY_PACKET, and "
-		             "PARITY_EVENT/STATE/ENTITY lines with capture timestamps, "
+		             "PARITY_EVENT/STATE/ENTITY/ROUND lines with capture timestamps, "
 		             "ordered raw/LEN/SKIP/fragment record framing, semantic order, "
 		             "decoded gameplay state, and full non-gameplay bodies\n"
 		             "       --scenario-events emits one decoded SCENARIO_EVENT line per "

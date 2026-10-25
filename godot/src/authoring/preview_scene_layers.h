@@ -191,7 +191,9 @@ public:
 	// effects), partitioned by the water's plane, at `clock_ms`.
 	void present_particles(int64_t clock_ms);
 	void present_drops();
-	void present_overlay(EffectLightDirector *lights);
+	// The post-particle overlay tail; `lights` (null with the lights layer off) walks the mirror's own
+	// coronas at `clock_ms` before its billboards join the tail.
+	void present_overlay(EffectLightDirector *lights, int64_t clock_ms);
 	void present_frame_effects();
 	void present_clear_and_cube();
 	void end_frame();

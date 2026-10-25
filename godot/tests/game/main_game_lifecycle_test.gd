@@ -261,8 +261,12 @@ func test_shutdown_settlement_releases_join_target_awaited_by_loading_barrier() 
 	target.host_ip = "127.0.0.1"
 	target.port = 9
 	target.server_name = "shutdown barrier probe"
-	# This fixture exercises shutdown during an already-decided player join;
-	# unknown direct targets now perform spectator discovery before loading.
+	# This fixture exercises shutdown during an already-decided player join: a
+	# browse row's target (its flag word known, no passwords). A target without
+	# the flag word enumerates its endpoint before any load, whatever its role
+	# (D-NET-703); with no browse socket handed over, the join binds its own.
+	target.server_flags = 0
+	target.discovered_session = true
 	target.role_explicit = true
 	var weak_target: WeakRef = weakref(target)
 	_shell.join_lan_server(target)
@@ -461,11 +465,17 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 	assert_true(host.enable_host_listen(0))
 	var streamed_til := TilFixture.bytes_for_cell(4)
 	host.set_terrain_til_data(streamed_til)
+	# A retail host always holds its items table: the S2C 0x0C streams a pool-0
+	# body (here the host's own player) only with an ItemTypeIndex, a def and an
+	# AI slot (D-NET-487), and the "Null" row leads as in the shipped table.
+	host.resolve_item_traits(ItemDbFixture.load_with(self, "lifecycle_host_items.def",
+			ItemDbFixture.NULL_ROW, ItemDbFixture.fixture_text(self)))
 	assert_true(host.load_from_mission_data(mission))
 
-	var observed := {"local_load": false, "held": false, "held_progress": -1}
+	var observed := {"local_load": false, "held": false, "held_progress": -1, "hud_at_load": null}
 	world.world_loaded.connect(func() -> void:
 		observed["local_load"] = true
+		observed["hud_at_load"] = _shell.get_hud_presenter().get_game_hud()
 	, CONNECT_ONE_SHOT)
 	var target := JoinTarget.new()
 	target.host_ip = "127.0.0.1"
@@ -479,21 +489,41 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 		if bool(observed["local_load"]) and not bool(observed["held"]):
 			# All handlers for world_loaded have now returned. The old behavior
 			# dismissed the loading screen in MainGame's handler here.
-			observed["held"] = _shell.is_world_loading() and not world.visible
+			# The loading presentation is the reveal's witness: the load's forced frame leaves
+			# the world shown, and the presentation holds its draw until the reveal
+			# (D-NET-NEW-LF-29).
+			observed["held"] = _shell.is_world_loading() and world.is_presentation_held()
 			observed["held_progress"] = _shell.loading_progress_percent()
 		if bool(observed["local_load"]) and not _shell.is_world_loading():
 			break
 
 	assert_true(bool(observed["local_load"]), "the joiner completed its wire-header world load")
+	# The joiner's HUD builds inside its mission start's load, its overlay init ahead of its
+	# first 0x2F's leg, not on its first frame with a player of its own (D-NET-NEW-L8-40)
+	# [orig: Game_StartMission @0x524360 - HUD_InitOverlaySystem @0x525733, the first 0x2F
+	# @0x525836].
+	assert_not_null(observed["hud_at_load"], "the joiner's load built its HUD")
+	var load_timeline: LoadTimeline = world.last_load_timeline()
+	assert_not_null(load_timeline)
+	if load_timeline != null:
+		var spans := Array(load_timeline.span_names())
+		assert_true(spans.find("hud_init") >= 0 and spans.find("hud_init") < spans.find("first_leg"),
+				"the HUD's overlay init ran ahead of the first 0x2F's leg: %s" % [spans])
 	assert_true(bool(observed["held"]),
 			"local world_loaded cannot reveal the joiner before host admission")
-	assert_eq(int(observed["held_progress"]), MissionData.LOAD_PROGRESS_WORLD_READY,
-			"the held joiner reports local-world readiness, not false completion")
+	# The joiner's mission start presents 100 % itself, past its second 0x2F and ahead of its
+	# 0x0B and the final wait, so the held joiner shows 100 while it awaits its admission
+	# (R-L2-s38-1, D-NET-NEW-L8-41; this flips the old "never claims complete" premise)
+	# [orig: Game_StartMission @0x524360 - `push 64h` @0x525D22, LoadingScreen_UpdateAndPresent
+	# @0x525D29, the 0x0B @0x52624B, the final wait @0x526295].
+	assert_eq(int(observed["held_progress"]), MissionData.LOAD_PROGRESS_COMPLETE,
+			"the held joiner shows the mission start's 100 % while it awaits admission")
 	assert_false(_shell.is_world_loading(),
 			"the loading screen releases after the authoritative join edge")
 	assert_eq(_shell.loading_progress_percent(), -1,
 			"the completed loading presentation no longer exposes a stale value")
 	assert_true(world.visible, "the admitted world is revealed")
+	assert_false(world.is_presentation_held(), "the admission drops the hold on the world's draw")
 	assert_true(world.get_sim() != null and world.get_sim().is_joined_in_match())
 	assert_eq(world.get_sim().get_join_terrain_til_state(),
 			Simulation.JOIN_TERRAIN_TIL_COMPLETE)
@@ -557,6 +587,8 @@ func test_spectator_join_is_admitted_at_the_world_state_load() -> void:
 
 	assert_true(admitted, "the spectator's join edge releases the loading screen")
 	assert_true(world.visible, "the admitted spectator's world is revealed")
+	assert_false(world.is_presentation_held(),
+			"the spectator's admission drops the hold on the world's draw")
 	assert_true(world.get_sim() != null and world.get_sim().is_local_spectator(),
 			"the admitted joiner is the host's spectator")
 
@@ -594,10 +626,19 @@ func test_join_rejects_a_truncated_terrain_stream_before_reveal() -> void:
 
 	var failures: Array[String] = []
 	var revealed := false
-	var observed_receiving := false
 	world.load_failed.connect(func(reason: String) -> void:
 		failures.append(reason)
 	)
+	# The 0x1A's mission start runs the load and the settle in one call with no receive
+	# between (D-NET-NEW-L2-35; engine inmatch::JoinerRole::poll_mission_start), so no frame
+	# shows the loaded sim; the load's world_loaded is its last act, and the TIL state read
+	# there is the one the settle reads next.
+	var observed := {"settle_til_state": -1}
+	world.world_loaded.connect(func() -> void:
+		var join_sim: Simulation = world.get_sim()
+		if join_sim != null and join_sim.is_joiner():
+			observed["settle_til_state"] = join_sim.get_join_terrain_til_state()
+	, CONNECT_ONE_SHOT)
 	var target := JoinTarget.new()
 	target.host_ip = "127.0.0.1"
 	target.port = host.get_host_listen_port()
@@ -606,19 +647,15 @@ func test_join_rejects_a_truncated_terrain_stream_before_reveal() -> void:
 	for _frame in range(1200):
 		host.step()
 		await get_tree().process_frame
-		revealed = revealed or world.visible
-		var join_sim: Simulation = world.get_sim()
-		if join_sim != null and join_sim.is_joiner():
-			observed_receiving = observed_receiving or \
-					join_sim.get_join_terrain_til_state() == \
-					Simulation.JOIN_TERRAIN_TIL_RECEIVING
+		# Revealed: shown with its draw no longer held by the loading presentation.
+		revealed = revealed or (world.visible and not world.is_presentation_held())
 		if not failures.is_empty() and not _shell.is_world_loading():
 			break
 
 	assert_eq(failures.size(), 1,
 			"one fail-closed edge owns the incomplete terrain stream")
-	assert_true(observed_receiving,
-			"the admitted join exposed a begun but incomplete 0x45 stream")
+	assert_eq(int(observed["settle_til_state"]), Simulation.JOIN_TERRAIN_TIL_RECEIVING,
+			"the settle saw a begun but incomplete 0x45 stream")
 	if not failures.is_empty():
 		assert_string_contains(failures[0], "streamed mission assets")
 	assert_false(revealed,
@@ -1026,6 +1063,7 @@ func _assert_loaded(world, terrain, menu_shell) -> void:
 	assert_same(world.get_resource_root(), menu_shell.get_resource_root(),
 			"menu, loading screen, and GameWorld share one mounted resource session")
 	assert_true(world.visible, "the loaded world is presented")
+	assert_false(world.is_presentation_held(), "the reveal dropped the hold on the world's draw")
 	assert_false(menu_shell.visible, "the main menu stays hidden during play")
 	assert_eq(world.get_loaded_mission_file(), "mnml.bms")
 	assert_not_null(world.get_node_or_null("MissionRoot/MissionObjects"),
@@ -1038,6 +1076,7 @@ func _assert_clean_menu(world, terrain, menu_shell, boot_clear: Color) -> void:
 	assert_false(_shell.is_world_loading(), "no loading operation leaks into the menu")
 	assert_false(world.is_loaded(), "the returned-to-menu world is unloaded")
 	assert_false(world.visible, "mission presentation is hidden behind the menu")
+	assert_false(world.is_presentation_held(), "the menu holds no world draw")
 	assert_eq(world.get_loaded_mission_file(), "", "the active mission filename is cleared")
 	assert_true(menu_shell.visible, "the main menu is visible")
 	assert_eq(menu_shell.get_current_menu_file().to_lower(), "main.mnu")
@@ -1188,6 +1227,10 @@ func test_mcp_screen_verbs_reach_pause_and_armory_over_a_loaded_world() -> void:
 	menu_shell.start_requested.emit("mnml.bms")
 	await _wait_for_world_load(world)
 	assert_true(world.is_loaded(), "the minimal mission loaded through the full shell")
+	# Leave the start-mission splash (it holds the world un-ticked) so the frames below
+	# run the world frame.
+	_shell.dismiss_start_mission_splash()
+	await get_tree().create_timer(1.0).timeout
 
 	# The ESC-pause leg through the MCP verb: game.mnu over the kept world.
 	assert_eq(adapter.mcp_game_control("open_ingame_menu"), OK)
@@ -1204,6 +1247,18 @@ func test_mcp_screen_verbs_reach_pause_and_armory_over_a_loaded_world() -> void:
 			"the overlay is the in-game menu file")
 	assert_true(bool(snapshot["in_game"]),
 			"the shell marks the overlay as the in-game menu")
+	# The pause menu's frames still run the session's paused branch: the main-frame
+	# counter steps on every banked frame while the pause holds the session counter
+	# (engine inmatch::Session::run_paused_update_legs carries the witness, the
+	# weather tick beside it, D-NET-NEW-L5-7).
+	var paused_sim: Simulation = world.get_sim()
+	var menu_main0: int = paused_sim.get_main_frame_counter()
+	var menu_session0: int = paused_sim.get_session_frame_counter()
+	await get_tree().create_timer(0.25).timeout
+	assert_gt(paused_sim.get_main_frame_counter(), menu_main0,
+			"the in-game menu's frames step the main-frame counter")
+	assert_eq(paused_sim.get_session_frame_counter(), menu_session0,
+			"the in-game menu's pause holds the session counter")
 	assert_eq(adapter.mcp_game_control("open_ingame_menu"), OK,
 			"open is idempotent while already paused")
 	assert_eq(adapter.mcp_game_control("open_armory"), ERR_UNAVAILABLE,
@@ -1230,6 +1285,21 @@ func test_mcp_screen_verbs_reach_pause_and_armory_over_a_loaded_world() -> void:
 	state = adapter.get_mcp_game_state()
 	assert_eq(String(state["shell"]["state"]), "world",
 			"resume closes the armory and hands play back")
+
+	# The debug pause row pauses the session under the WORLD shell state: the same
+	# paused branch runs on its frames.
+	assert_eq(adapter.mcp_game_control("pause"), OK)
+	assert_eq(String(adapter.get_mcp_game_state()["shell"]["state"]), "world",
+			"the pause row keeps the shell in the world")
+	var row_sim: Simulation = world.get_sim()
+	var row_main0: int = row_sim.get_main_frame_counter()
+	var row_session0: int = row_sim.get_session_frame_counter()
+	await get_tree().create_timer(0.25).timeout
+	assert_gt(row_sim.get_main_frame_counter(), row_main0,
+			"the pause row's frames step the main-frame counter")
+	assert_eq(row_sim.get_session_frame_counter(), row_session0,
+			"the pause row holds the session counter")
+	assert_eq(adapter.mcp_game_control("resume"), OK)
 
 	# F3's Resume is the debug-control table's runtime_transport row: it takes
 	# the same shell resume leg, so a pause overlay left up closes too.

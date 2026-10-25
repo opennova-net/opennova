@@ -34,12 +34,12 @@ bool Server_VehicleSpawnAllowed(NapiNPServerCtx &ctx, const world::World &world,
 // C2S 0x40: the spawner's admission in retail order — authority, a live
 // non-spectator sender, a real source handle, the type index inside the
 // source def's pcvehicle_spawnlist mask, a team-neutral or same-team source,
-// the limit check (consumed), the spawn position (the source's "boat"/"helo"
-// userpoint, else its position raised 2.0: models are not reachable here so
-// the raised position stands), the deployable spawn through the embedder's
-// spawner seam, the team stamp, the S2C 0x18 fan (mask 0x90) and the
-// requester's attach. The pool-1 sibling fan on entity+533 is unmodeled.
-// Returns true when a vehicle was spawned.
+// the limit check (consumed), the spawn block (the source's attitude words and its
+// "boat", else "helo", userpoint through its euler placement, Entity::deploy_point,
+// else its position raised 2.0), the deployable spawn through the embedder's spawner
+// seam, the team stamp, the S2C 0x18 fan (mask 0x90) for the vehicle and then each
+// other pool-1 row of its reference group (entity+533), and the requester's attach at
+// the vehicle def's control bone. Returns true when a vehicle was spawned.
 // [orig: NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C4C0 — gates
 //  @0x51C4F2..0x51C5F6, position @0x51C60C..0x51C682, spawn @0x51C69E, team
 //  @0x51C6BD, 0x18 @0x51C6CD..0x51C6F1, siblings @0x51C6F6..0x51C76F, attach

@@ -364,6 +364,45 @@ func test_the_menu_pumps_once_a_frame_after_the_events() -> void:
 	_cleanup(dir)
 
 
+# Over a running mission the game loop's frame pumps the in-game screens at its
+# head (MainGame._process -> pump_screen_pass), ahead of the frame's net frame, so
+# the menu's own update pumps nothing: a press held over its frames and let go
+# clicks nothing until the screen pass runs [orig: Game_ProcessMainFrame
+# @ 0x5263f0 - UI_ProcessMenuScreenFrame @ 0x52667b ahead of Client_ProcessNetworkFrame
+# @ 0x526692; Menu_UpdateFrame @ 0x5528a0 in the menus].
+func test_the_in_game_screens_pump_in_the_game_loops_screen_pass() -> void:
+	var dir := _make_dir()
+	var shell = _make_shell(dir)
+	if shell == null:
+		pending("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	watch_signals(shell)
+	var driver: MenuDriver = shell.get_driver()
+	var shell_control: Control = shell
+	var on_exit := shell_control.get_global_transform_with_canvas() \
+			* driver.widget_frame_rect(driver.widget_id("EXIT")).get_center()
+	# The in-game overlay over the main menu's screen (no game.mnu in the fixture: the
+	# open fails soft and keeps EXIT up).
+	shell.open_ingame_menu()
+	assert_true(shell.is_in_game())
+	_send_left(on_exit, true)
+	await _frames(2)
+	_send_left(on_exit, false)
+	await _frames(2)
+	assert_signal_not_emitted(shell, "exit_to_desktop_requested",
+			"over a mission the menu's own update pumps nothing")
+	_send_left(on_exit, true)
+	await _frames(2)
+	shell.pump_screen_pass()
+	_send_left(on_exit, false)
+	await _frames(2)
+	shell.pump_screen_pass()
+	assert_signal_emitted(shell, "exit_to_desktop_requested",
+			"the game loop's screen pass runs the click")
+	_cleanup(dir)
+
+
 func _frames(count: int) -> void:
 	for i in count:
 		await get_tree().process_frame

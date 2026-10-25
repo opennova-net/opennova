@@ -74,7 +74,7 @@ const Row kRows[] = {
 	HUD_ROW("HUDWPDINFO", PosAlign4, wpd_info, 1),
 	HUD_ROW("ZONEINFO", PosAlign3, zone_info, 1),
 	HUD_ROW("EXPPOINTS", PosAlign4, exp_points, 1),
-	HUD_ROW("CONNECTSTATUS", PosAlign4, connect_status, 1),
+	HUD_ROW("CONNECTSTATUS", PosAlign3, connect_status, 1),
 	HUD_ROW("HUDTEAMXY", PosAlign4, team_xy, 1),
 	HUD_ROW("HUDPLAYERCOUNT", PosAlign4, player_count, 1),
 	HUD_ROW("AMMOCOUNTPOS", PosAlign4, ammo_count_pos, 1),

@@ -7,6 +7,23 @@ fixtures/** filter=lfs diff=lfs merge=lfs -text -eol
 # Binary game assets.
 apps/novaworld_web/static/** -text -eol
 
+# The service's sign-in page is the live one byte for byte: NWStart serves it as stored, and the
+# live page's lines end in CRLF (LN's S2 record, 4634 B). Git must not normalise it.
+apps/novaworld_web/templates/jop_2_login.htm -text -eol whitespace=cr-at-eol
+# JO's other served pages are the live ones byte for byte too (LN-s6's S3 record): every line
+# CRLF, jop_2_relay.mnx and jop_2_main.mnx with no final line ending.
+apps/novaworld_web/templates/jop_2_start.htm -text -eol whitespace=cr-at-eol
+apps/novaworld_web/templates/jop_2_login.mnx -text -eol whitespace=cr-at-eol
+apps/novaworld_web/templates/jop_2_relay.htm -text -eol whitespace=cr-at-eol
+apps/novaworld_web/templates/jop_2_relay.mnx -text -eol whitespace=cr-at-eol
+apps/novaworld_web/templates/jop_2_main.htm -text -eol whitespace=cr-at-eol
+apps/novaworld_web/templates/jop_2_main.mnx -text -eol whitespace=cr-at-eol
+apps/novaworld_web/templates/jop_2_host1.htm -text -eol whitespace=cr-at-eol
+apps/novaworld_web/templates/jop_2_host2.htm -text -eol whitespace=cr-at-eol
+apps/novaworld_web/templates/jop_2_host3.htm -text -eol whitespace=cr-at-eol
+apps/novaworld_web/templates/jop_2_join.joi -text -eol whitespace=cr-at-eol
+apps/novaworld_web/templates/jop_2_jend.htm -text -eol whitespace=cr-at-eol
+
 # Tracked Markdown docs under fixtures/ are plain text, not LFS binaries —
 # last-match precedence pulls them back out of the fixtures/** LFS rule above.
 fixtures/**/*.md text eol=lf filter= diff= merge=

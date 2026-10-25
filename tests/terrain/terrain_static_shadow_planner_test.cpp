@@ -477,6 +477,47 @@ int main() {
 		return 1;
 	}
 
+	// The device job: the page's casters as the device draws them, one submit and flush per
+	// caster. The walk lists the box's one surface with its caster's transform and ground and
+	// the material state at the planner's tick (frame one's alpha pyramid at 100 ms), and the
+	// job evaluated on the CPU rasterizes the planner's own bytes.
+	// [orig: Terrain_CollectAndRenderTileModels @0x60D250 - Render_SubmitEntity (the call
+	//  @0x60D971, its flags argument 2), CRenderBatchQueue_SortAndFlush (the call @0x60D97D)]
+	{
+		TerrainStaticShadowDeviceJob device_job;
+		if (!expect(animated_planner.build_device_job(page, device_job) &&
+						device_job.draws.size() == 1 && device_job.triangle_count == 1,
+				"the device job lists the box's one surface")) {
+			return 1;
+		}
+		const TerrainStaticShadowDeviceDraw &draw = device_job.draws[0];
+		if (!expect(draw.geometry != nullptr && draw.lod_index == 0 &&
+						draw.surface_index == 0 && draw.triangle_count == 1 &&
+						draw.world_transform == caster(0).world_transform &&
+						draw.ground_y == 0.0f && draw.alpha_test_enabled &&
+						!draw.alpha_test_inverted && draw.alpha_ref == 127 &&
+						draw.transforms_uv &&
+						draw.alpha_texture ==
+								draw.geometry->materials[0].diffuse_alpha_frames[1].get(),
+				"the box's draw carries its caster and its material state at the tick")) {
+			return 1;
+		}
+		TerrainStaticShadowAlphaPage device_page = rejected_page;
+		if (!expect(rasterize_terrain_static_shadow_device_job(device_job, device_page, 1) &&
+						device_page.alpha == admitted_page.alpha,
+				"the device job on the CPU rasterizes the planner's bytes")) {
+			return 1;
+		}
+		TerrainStaticShadowPlanner disabled_planner;
+		disabled_planner.set_enabled(false);
+		TerrainStaticShadowDeviceJob disabled_job;
+		if (!expect(!disabled_planner.build_device_job(page, disabled_job) &&
+						disabled_job.draws.empty(),
+				"a disabled planner builds no device job")) {
+			return 1;
+		}
+	}
+
 	// A continuously scrolling alpha cutout: the silhouette consumes the full
 	// evaluated UV transform, so no stamp rule can make the phase a snapshot
 	// property without changing output. The revision and page identity hold

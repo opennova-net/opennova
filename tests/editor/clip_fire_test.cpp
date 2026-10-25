@@ -499,14 +499,14 @@ int test_the_shot_is_the_games_npc_shot() {
 	game.ai.is_authority = true;
 	world::AiEntity &body = *game.ai.for_handle(soldier);
 	body.inf.active = true;
-	body.pos[2] = 10 << 16; // over the water plane, as the range stands its soldier
+	body.self->position.z.q16 = 10 << 16; // over the water plane, as the range stands its soldier
 	body.profile.organic = fire.weapons();
 	body.inf.magazine = 5;
 	// The launch point as the clip posed it, in the mission frame (the preview's (y, z, x)), over the body.
 	LaunchPoint point;
 	point.at[0] = int32_t(std::lround(double(easy.at.z) * 65536.0));
 	point.at[1] = int32_t(std::lround(double(easy.at.x) * 65536.0));
-	point.at[2] = int32_t(std::lround(double(easy.at.y) * 65536.0)) + body.pos[2];
+	point.at[2] = int32_t(std::lround(double(easy.at.y) * 65536.0)) + body.self->position.z.q16;
 	game.pose_provider = &point;
 	game.out.fire_sounds.set_listener(world::Vec3{0.0f, 0.0f, 10.0f});
 	body.inf.last_events = anim::kAnimEventFireSecondary;

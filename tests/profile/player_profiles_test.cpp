@@ -408,6 +408,11 @@ int test_controls_words() {
     TEST_EXPECT(s.invert_mouse && s.mouse_sensitivity == 300 && !s.auto_reload);
     r.auto_reload = 1;
     TEST_EXPECT(!profile::session_input(r, true).auto_reload);  // `/noreload`
+    // The scopescale word: +1480 plus 0x80 (D-NET-NEW-LI-38) [orig:
+    // Game_ApplySessionSettingsToGlobals @0x551500 - @0x551624..0x551630].
+    TEST_EXPECT(s.scope_scale == 0x80 + r.word_1480);
+    r.word_1480 = 50;
+    TEST_EXPECT(profile::session_input(r, false).scope_scale == 0xB2);
     // The in-game Accept writes the two mouse words at once and leaves the
     // auto-reload global to the next session copy [orig: @0x55525e, @0x555271].
     profile::SessionInput held;

@@ -11,9 +11,50 @@
 #include <runtime/world/local_player.h>
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/pose_provider.h>
+#include <runtime/world/round_sim.h>
 #include <runtime/world/world.h>
 
 namespace opennova::world {
+namespace {
+// The HUD target cursor's entity as a HUD reader takes it at its read: a registry entity the
+// record names (none once destroyed, hud_target_cursor_entity), else, on a joiner, the decoded
+// remote person the record names through its row (World::wire_person), as retail's client
+// reads the pool-0 entity it built for that person: its team byte and the type of the def its
+// record's type word indexes (none at index 0). A round lock names no pool entity.
+// [orig: NapiNPClientMsg_0x00C @0x42E730 - ItemList_FindIndexByTypeId @0x42E84A,
+//  Entity_InitFromItemDef called @0x42E84D; Entity_InitFromItemDef @0x49E550 - the zero test
+//  @0x49E559]
+struct CursorSubject {
+	bool pool0 = false;
+	uint8_t team = 0;
+	uint8_t item_type = 0; // the ItemDef's type, 0 with no def
+};
+CursorSubject cursor_subject(const World &world, const HudTargetCursor &cursor) {
+	CursorSubject out;
+	if (const Entity *e = hud_target_cursor_entity(world, cursor)) {
+		out.pool0 = e->handle.pool() == 0;
+		out.team = e->team;
+		out.item_type = e->has_item_def ? e->item_type : 0;
+		return out;
+	}
+	World::WirePerson person;
+	if (cursor.wire_person != 0xFFFF && world.wire_person &&
+			world.wire_person(cursor.wire_person, person)) {
+		out.pool0 = EntityHandle{cursor.wire_person}.pool() == 0;
+		out.team = person.team;
+		const int32_t index = item_index_by_type_id(world, person.type_id);
+		out.item_type = index != 0 ? world.tables.item_rows[static_cast<size_t>(index)].item_type : 0;
+	}
+	return out;
+}
+// The friendly test the crosshair and the inset share: the cursor's team is the local
+// player's, or neither team 1 nor team 2 [orig: HUD_DrawCrosshair @0x592692..0x5926B4;
+//  Render_WeaponInsetScene @0x5C9F84..0x5C9FAA].
+bool cursor_team_admitted(uint8_t cursor_team, uint8_t local_team) {
+	return cursor_team == local_team || (cursor_team != 1 && cursor_team != 2);
+}
+} // namespace
+
 void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerViewFrame &view,
 		LocalPlayerViewTracker &tracker, bool can_fire) {
 	const auto &service = tracker.hud_service;
@@ -23,8 +64,8 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 	out.local_valid = player != nullptr;
 	if (!player)
 		return;
-	out.local_position = { to_fixed(player->position.x), to_fixed(player->position.y),
-		to_fixed(player->position.z) };
+	out.local_position = { player->position.x.q16, player->position.y.q16,
+		player->position.z.q16 };
 	out.local_team = player->team;
 	const AiEntity *body = world.ai.for_handle(player->handle);
 	const Entity *mount = world.registry.get(player->mount_target);
@@ -43,46 +84,77 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 		out.custom_texture = def->crosshair;
 		out.commander_texture = def->commanders_x;
 	}
-	// Combat target takes priority over the ordinary aim-ray fallback. Only
-	// the combat target sets HUD+8 and therefore admits the cursor sprite.
-	// [orig: HUD_BuildEntityInfo @0x4B87DA..0x4B882D]
-	const Entity *target = body ? world.registry.get(body->inf.combat_target) : nullptr;
-	s.target_cursor = target != nullptr && weapon.active;
+	// The cursor the crosshair reads is this pass's record (tracker.hud_cursor): the lock word
+	// (an entity, or a round when the heat lock took a flare, D-NET-64), else, under a zero
+	// word only, the head-look target, on a joiner perhaps a decoded remote person. Only a
+	// nonzero word sets the cursor flag HUD+8, so the cursor quad draws only for a lock: at the
+	// word's fire origin (a round's Position) tinted by the word's team byte (+0x162, a round's
+	// own). The friendly brackets need the cursor's pool-0 index (a round has none) and a
+	// person def. [orig: HUD_BuildEntityInfo @0x4B8440 - the slot word into +0x168
+	//  @0x4B87ED..0x4B87F3, the zero test @0x4B8816..0x4B881D, the head-look fallback
+	//  @0x4B881F..0x4B8825, +8 = 1 @0x4B882D; HUD_DrawCrosshair - the cursor
+	//  @0x592776..0x592790, the team compare @0x5927AA..0x5927BD,
+	//  Entity_ComputeWeaponFireOrigin @0x592803; the pool test (the call @0x592675), the team
+	//  read @0x592692; the bracket gate's def type @0x592CE8..0x592CF3]
+	// On a joiner the word may name a decoded remote person (the heat lock's pool-0 leg): the
+	// quad sits at the client-built entity's fire origin, tinted by its team byte.
+	const HudTargetCursor &cursor = tracker.hud_cursor;
+	const Entity *target = hud_target_cursor_entity(world, cursor);
+	const bool round_cursor = cursor.lock.round >= 0 &&
+			static_cast<size_t>(cursor.lock.round) < world.round_sim.rounds.size();
+	World::WirePerson wire_lock;
+	const bool wire_cursor = cursor.lock.wire_person != 0xFFFF && world.wire_person &&
+			world.wire_person(cursor.lock.wire_person, wire_lock);
+	s.target_cursor = cursor.lock.valid() && (target != nullptr || round_cursor || wire_cursor) &&
+			weapon.active;
 	s.target_locked = body && (body->slot.f[2] & 1);
-	if (!target && body)
-		target = world.registry.get(body->inf.head_look_target);
-	if (target) {
+	if (round_cursor) {
+		s.target_friendly =
+				world.round_sim.rounds[static_cast<size_t>(cursor.lock.round)].team == player->team;
+		round_target_origin(world, cursor.lock.round, out.target.data());
+		out.target_valid = true;
+	} else if (wire_cursor) {
+		s.target_friendly = wire_lock.team == player->team;
+		wire_person_target_origin(world, cursor.lock.wire_person, out.target.data());
+		out.target_valid = true;
+	} else if (target) {
 		s.target_friendly = target->team == player->team;
 		world.ai.weapon_aim_origin(world, *target, out.target.data());
 		out.target_valid = true;
-		// These are mpattrib option bits, not a time-based animation. The
-		// selector is the is_client bit, which connection modes 2 AND 3 set:
-		// every instance that owns a local player (single player, the listen
-		// host, a joiner) tests bit 3. The >> 8 leg belongs to a dedicated
-		// host, which draws no HUD.
-		// [orig: HUD_DrawCrosshair -- g_RulesFlags @0x59265F,
-		//  is_mp_session_peer @0x5926D4, shr 3 @0x5926DC / shr 8 @0x5926E1;
-		//  CGameSession_SetConnectionMode @0x4C49F0]
-		const bool client = world.cached.local_player.valid();
-		const bool admitted = ((world.rules.mpattrib >> (client ? 3 : 8)) & 1u) == 0;
-		const bool team = s.target_friendly || (target->team != 1 && target->team != 2);
-		// Outside a session every target is a teammate candidate; inside one
-		// only a team game type admits them. Single player is outside.
-		// [orig: HUD_DrawCrosshair -- `cmp g_NapiNPCtx.is_in_session`
-		//  @0x5926C0, `test g_GameType,10000h` @0x5926C4, the clear @0x5926D0]
-		const bool team_mode =
-				!world.rules.mp_session || (world.match.rules().game_type & 0x10000u);
-		s.inset_friendly = target->handle.pool() == 0 && admitted && team && team_mode &&
-				!(mount &&
-						(player->mount_type == SeatType::Controller ||
-								player->mount_type == SeatType::Driver));
-		s.target_name = target->display_name;
-		s.target_brackets = target->handle.pool() == 0 && target->has_item_def &&
-				target->item_type == 3 && admitted && team && team_mode &&
-				!(mount &&
-						(player->mount_type == SeatType::Controller ||
-								player->mount_type == SeatType::Driver));
 	}
+	// These are mpattrib option bits, not a time-based animation. The
+	// selector is the is_client bit, which connection modes 2 AND 3 set:
+	// every instance that owns a local player (single player, the listen
+	// host, a joiner) tests bit 3. The >> 8 leg belongs to a dedicated
+	// host, which draws no HUD.
+	// [orig: HUD_DrawCrosshair -- g_RulesFlags @0x59265F,
+	//  is_mp_session_peer @0x5926D4, shr 3 @0x5926DC / shr 8 @0x5926E1;
+	//  CGameSession_SetConnectionMode @0x4C49F0]
+	const bool client = world.cached.local_player.valid();
+	const bool admitted = ((world.rules.mpattrib >> (client ? 3 : 8)) & 1u) == 0;
+	// Outside a session every target is a teammate candidate; inside one
+	// only a team game type admits them. Single player is outside.
+	// [orig: HUD_DrawCrosshair -- `cmp g_NapiNPCtx.is_in_session`
+	//  @0x5926C0, `test g_GameType,10000h` @0x5926C4, the clear @0x5926D0]
+	const bool team_mode =
+			!world.rules.mp_session || (world.match.rules().game_type & 0x10000u);
+	const bool driving = mount &&
+			(player->mount_type == SeatType::Controller || player->mount_type == SeatType::Driver);
+	const CursorSubject crosshair = cursor_subject(world, cursor);
+	s.target_brackets = crosshair.pool0 && crosshair.item_type == 3 && admitted &&
+			cursor_team_admitted(crosshair.team, player->team) && team_mode && !driving;
+	// The weapon inset reads the cursor ahead of this frame's pass, as the scene frame found
+	// it: the last pass's record (tracker.hud_cursor_at_scene). Its brackets and friendly
+	// marker take the same pool-0, team, session and seat tests over that record, with no def
+	// test. [orig: Render_ProcessMainSceneFrame @0x5CA0F0 - the Render_WeaponInsetScene call
+	//  @0x5CA949 ahead of the HUD_RenderAllOverlays calls @0x5CACE3 / @0x5CAD04;
+	//  Render_WeaponInsetScene @0x5C9740 - g_HUDTargetCursorEntity @0x5C9F5D, the pool test
+	//  (the call @0x5C9F6D), the team compare @0x5C9F84..0x5C9F98, the session clear
+	//  @0x5C9FAF..0x5C9FC4, the rules bit @0x5C9FC6..0x5C9FDE, the seat test
+	//  @0x5C9FE1..0x5C9FFC, the gate @0x5CA002..0x5CA00C]
+	const CursorSubject inset = cursor_subject(world, tracker.hud_cursor_at_scene);
+	s.inset_friendly = inset.pool0 && admitted && cursor_team_admitted(inset.team, player->team) &&
+			team_mode && !driving;
 	// OnlyScoped is the admission gate for the impact flags, independently
 	// of the ordinary CanFire/Sighted/Scoped reticle predicates. Neither the
 	// preview nor its two cues tests the dead bit or the death screen.
@@ -132,8 +204,8 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 			tracker.hud_impact_distance_q16 = impact.distance_q16;
 		s.impact_distance_m = uint16_t(uint32_t(tracker.hud_impact_distance_q16) >> 16);
 		if (world.ai.terrain) {
-			const int32_t start[] = { to_fixed(player->position.x),
-				to_fixed(player->position.y) + 0x20000, to_fixed(player->position.z) };
+			const int32_t start[] = { player->position.x.q16,
+				player->position.y.q16 + 0x20000, player->position.z.q16 };
 			const int32_t end[] = { impact.position[0], impact.position[1] + 0x20000,
 				impact.position[2] };
 			s.designator_color =
@@ -185,8 +257,8 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 				// clip and action pair select; the raw gun position otherwise.
 				// [orig: Entity_ComputeUserpointWorldTransform @0x59E680, the
 				//  occupant's slot +0x118 @0x59E66A]
-				int32_t origin[6] = { to_fixed(gun.position.x), to_fixed(gun.position.y),
-					to_fixed(gun.position.z), 0, 0, 0 };
+				int32_t origin[6] = { gun.position.x.q16, gun.position.y.q16,
+					gun.position.z.q16, 0, 0, 0 };
 				const WeaponSlotState &slot = gun.primary_weapon_slot;
 				carrier_weapon_userpoint(world, gun,
 						world.tables.weapons.by_index(gun.primary_weapon_slot_adm), slot.clip,
@@ -198,8 +270,8 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 				int32_t end[3];
 				collision_matrix_from_euler(aim_body
 								? aim_body->heading
-								: bam_heading_from_mission_yaw_deg(occupant->yaw),
-						aim_body ? aim_body->pitch : bam_from_degrees_wrapped(occupant->pitch), 0,
+								: occupant->heading,
+						aim_body ? aim_body->pitch : occupant->pitch_bam, 0,
 						camera)
 						.transform_point(forward, end);
 				ProjectileTrace ray;
@@ -216,11 +288,18 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 	s.vehicle_controls = mount && mount->has_item_def &&
 			(player->mount_type == SeatType::Controller || player->mount_type == SeatType::Driver);
 	if (s.vehicle_controls) {
-		s.vehicle_identity = mount->registry_spawn_id;
+		// The silhouette's key is the record's root entity, the mount's pool-slot pointer: the
+		// pools are allocated once per process, so a slot keeps its address across spawns and
+		// missions, and the key is the slot's handle here.
+		// [orig: HUD_BuildEntityInfo - the root entity +0x234 @0x4B8655;
+		//  HUD_DrawTargetEntityOverlay - g_HUDRootEntity @0x59A5E9, the key compare @0x59A5F7,
+		//  its store @0x59A604; EntityPool_Allocate @0x442130 (its one malloc, the call
+		//  @0x44214C), called once, by Game_Run (the call @0x4A7FC5)]
+		s.vehicle_identity = mount->handle.packed;
 		out.vehicle_texture = mount->hud_image;
 		s.gear = (player->net_stance_bits & 2) ? 0 : 2 - ((player->net_stance_bits & 1) != 0);
 		if (mount->item_unit_type == 3) {
-			s.altitude_q16 = to_fixed(mount->position.z);
+			s.altitude_q16 = mount->position.z.q16;
 			s.altitude_agl_q16 = int32_t(std::clamp(int64_t(s.altitude_q16) -
 							(mount->veh.ground_cache == INT32_MIN ? 0 : mount->veh.ground_cache),
 					int64_t(0), int64_t(INT32_MAX)));
@@ -260,8 +339,8 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 	{
 		int32_t best = 0x40000000;
 		const Entity *nearest = nullptr;
-		const int32_t px = to_fixed(player->position.x);
-		const int32_t py = to_fixed(player->position.y);
+		const int32_t px = player->position.x.q16;
+		const int32_t py = player->position.y.q16;
 		world.registry.for_each([&](const Entity &e) {
 			const int pool = e.handle.pool();
 			if (pool != 1 && pool != 2) return;
@@ -270,9 +349,9 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 					((1u << (e.zone_number & 31u)) & service.owned_zone_mask) == 0)
 				return;
 			const double dx = static_cast<double>(static_cast<int32_t>(
-					static_cast<uint32_t>(to_fixed(e.position.x)) - static_cast<uint32_t>(px)));
+					static_cast<uint32_t>(e.position.x.q16) - static_cast<uint32_t>(px)));
 			const double dy = static_cast<double>(static_cast<int32_t>(
-					static_cast<uint32_t>(to_fixed(e.position.y)) - static_cast<uint32_t>(py)));
+					static_cast<uint32_t>(e.position.y.q16) - static_cast<uint32_t>(py)));
 			const int32_t dist = static_cast<int32_t>(
 					std::min(std::sqrt(dx * dx + dy * dy), 2147418112.0));
 			if (dist < best) {
@@ -282,8 +361,8 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 		});
 		if (nearest != nullptr) {
 			s.farp_present = true;
-			s.farp_x_q16 = to_fixed(nearest->position.x);
-			s.farp_y_q16 = to_fixed(nearest->position.y);
+			s.farp_x_q16 = nearest->position.x.q16;
+			s.farp_y_q16 = nearest->position.y.q16;
 		}
 	}
 	fill_hud_vehicle_sights(world, weapon, view);

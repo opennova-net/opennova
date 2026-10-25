@@ -23,6 +23,7 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -106,6 +107,17 @@ std::vector<uint8_t> server_hello_to(const std::vector<uint8_t> &hello_dg, uint3
 	return nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(reply));
 }
 
+// The gate reply's frame at `at` and the NovaWorld menu's frames after it, one a tick: state 3
+// at + 1, state 4 at + 2, the connect at + 3, and the first announce at the next frame's pump,
+// at + 4 (a kept response's entry connects at + 2, its announce at + 3).
+// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - 3 set @0x559094, 4 set @0x559131,
+//  CNapiGameSession_ConnectToNovaWorld (the call @0x559156), the pump @0x558DFA]
+void gate_frames(NwuLobbySession &lobby, uint32_t at) {
+	for (uint32_t t = at; t <= at + 4; ++t)
+		lobby.tick(t);
+}
+constexpr uint32_t kFirstAnnounceAt = 14; // gate_frames(lobby, 10)'s
+
 PeerAddr at(uint8_t a, uint8_t b, uint8_t c, uint8_t d, uint16_t port) {
 	return peer_addr_from_octets({a, b, c, d}, port);
 }
@@ -174,7 +186,7 @@ int main() {
 		std::vector<uint8_t> inner(body.begin(), body.end());
 		nwu_decrypt(inner.data(), inner.size(), GATE_NWU_KEY);
 		gate.inbound.push_back({PeerAddr{0x0100007Fu, GATE_DEFAULT_PORT}, enveloped(inner)});
-		lobby.tick(10);
+		gate_frames(lobby, 10);
 		CHECK(lobby.session() != nullptr);
 		CHECK(!raw.sent.empty() && raw.sent.back().first == server);
 
@@ -277,7 +289,7 @@ int main() {
 		                                   "VAR \"UDPNOVAWORLD\" \"127.0.0.2:0\"\r\n"
 		                                   "VAR \"UDPNOVAWORLD\" \"255.255.255.255:9\"\r\n"
 		                                   "VAR \"UDPNOVAWORLD\" \"127.0.0.3:65537\"\r\n")});
-		lobby.tick(10);
+		gate_frames(lobby, 10);
 		CHECK(fatals.empty());
 		CHECK(lobby.session() != nullptr);
 		const std::vector<std::pair<uint32_t, uint32_t>> want = {
@@ -312,7 +324,7 @@ int main() {
 		CHECK(session.sent.size() == sent_to.size());
 		check_announces(0);
 		// The re-announce goes to every target again, each its own announce once more.
-		lobby.tick(10 + SESSION_CONNECT_RETRANSMIT_MS + 1);
+		lobby.tick(kFirstAnnounceAt + SESSION_CONNECT_RETRANSMIT_MS + 1);
 		CHECK(session.sent.size() == 2 * sent_to.size());
 		CHECK(session.sent.back().first == sent_to.back());
 		if (session.sent.size() == 2 * sent_to.size())
@@ -330,9 +342,14 @@ int main() {
 		CHECK(lobby.claims(second, reply.data(), reply.size()));
 		session.inbound.push_back({second, reply});
 		session.sent.clear();
-		lobby.tick(10 + SESSION_CONNECT_RETRANSMIT_MS + 2);
+		lobby.tick(kFirstAnnounceAt + SESSION_CONNECT_RETRANSMIT_MS + 2);
 		CHECK(lobby.session()->state() == ClientSession::State::Auth);
 		CHECK(lobby.nw_peer() == second);
+		// The 0x81's frame sends nothing; the 0x42 goes at the first pump past it.
+		// [orig: CNapiNPConnection_InitFromSession @0x626320 - @0x626490..0x626499;
+		//  CNapiNPConnection_PumpStateMachine @0x6292E0 case 3 @0x629580..0x62958F]
+		CHECK(session.sent.empty());
+		lobby.tick(kFirstAnnounceAt + SESSION_CONNECT_RETRANSMIT_MS + 3);
 		CHECK(session.sent.size() == 1);
 		CHECK(!session.sent.empty() && session.sent[0].first == second &&
 		      opcode_of(session.sent[0].second) == SESSION_OPCODE_CLIENT_AUTH);
@@ -348,7 +365,11 @@ int main() {
 	// UDPNOVAWORLD needs the POST address and port: without either the gate fails (state -9, the
 	// menu's NWEC25), with both the connect goes on with no NWU session (on_sessionless, no
 	// session, the in-use word clear). The command line's POST pair stands in for the gate's.
-	// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the in-use word @0x4CF525..0x4CF541,
+	// D-NET-708: a reply whose parse counts no field (no VAR line, or VAR lines of no key the
+	// parse knows) fails the gate the same way, ahead of the in-use word, so a /UDPNOVAWORLD
+	// switch does not save it.
+	// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the count test @0x4CF4ED..0x4CF4EF and
+	//  its -9 (the switch @0x4CF51E), the in-use word @0x4CF525..0x4CF541,
 	//  the command line's POST pair @0x4CF54B..0x4CF562, the in-use test @0x4CF599..0x4CF5A0,
 	//  the address @0x4CF5A6, the port @0x4CF627, -9 @0x4CF6AC;
 	//  UI_ProcessLANSessionStateMachine @0x558DE0 - NWEC25 @0x5590FD]
@@ -365,6 +386,10 @@ int main() {
 		post_switches.post_port_number = 7000;
 		NwuLobbySession::CommandLine unresolved_post = post_switches;
 		unresolved_post.post_ip_address = "nowhere.example";
+		NwuLobbySession::CommandLine udp_switch;
+		udp_switch.udp_novaworld = { "127.0.0.5:7001" };
+		const std::string no_var = "GATEPROTOCOL \"1.0\"\r\n";
+		const std::string unknown_key = "VAR \"TimeOnGateServer\" \"Wed Oct 14 07:50:11 2026\"\r\n";
 		const std::string post_ip = "VAR \"POSTIPADDRESS\" \"192.168.0.5\"\r\n";
 		const std::string post_port = "VAR \"POSTIPPORT\" \"7598\"\r\n";
 		const std::string lobby_name = "VAR \"LOBBYNAME\" \"jop_2_consumer\"\r\n";
@@ -378,6 +403,8 @@ int main() {
 			{ lobby_name + post_ip + post_port, { none, false, true, nullptr } },
 			{ lobby_name, { post_switches, false, true, nullptr } },
 			{ lobby_name + post_port, { unresolved_post, false, false, "NWEC25" } },
+			{ no_var, { none, false, false, "NWEC25" } },
+			{ unknown_key, { udp_switch, false, false, "NWEC25" } },
 		};
 		for (const auto &[body, want] : cases) {
 			MemorySocket gate;
@@ -395,7 +422,7 @@ int main() {
 			lobby.open(gate, session);
 			lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
 			gate.inbound.push_back({PeerAddr{0x0100007Fu, GATE_DEFAULT_PORT}, gate_reply(body)});
-			lobby.tick(10);
+			gate_frames(lobby, 10);
 			CHECK(lobby.targets().empty());
 			CHECK(session.sent.empty());
 			CHECK((lobby.session() != nullptr) == want.session);
@@ -410,6 +437,54 @@ int main() {
 				CHECK((seen.post_ip == std::array<uint8_t, 4>{ 10, 1, 2, 3 }) &&
 						seen.post_port == 7000u);
 			}
+			lobby.close();
+		}
+	}
+
+	// D-NET-707: a GLSVSS switch given on the command line stands in for the gate's value, 0
+	// included, whatever the gate sent; one not given leaves the gate's. The session the connect
+	// starts takes the result (begin_session reads the response).
+	// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - under dword_B4C69C dword_B4C6A0 into
+	//  dword_B5FF40 @0x4CF567..0x4CF575, under dword_B4C6A4 dword_B4C6A8 into dword_B5FF44
+	//  @0x4CF57A..0x4CF589]
+	{
+		const std::string body = "VAR \"UDPNOVAWORLD\" \"127.0.0.1:64206\"\r\n"
+								 "VAR \"GLSVSSREQUEST\" \"[dfx2]kills\"\r\n"
+								 "VAR \"GLSVSSRIMS\" \"3600000\"\r\n"
+								 "VAR \"GLSVSSAGRMS\" \"45000\"\r\n";
+		struct Case {
+			std::optional<int32_t> rims;
+			std::optional<int32_t> agrms;
+			int32_t want_rims;
+			int32_t want_agrms;
+		};
+		const std::vector<Case> cases = {
+			{ std::nullopt, std::nullopt, 3600000, 45000 },
+			{ 0, std::nullopt, 0, 45000 },
+			{ std::nullopt, 7000, 3600000, 7000 },
+			{ 1000, -5, 1000, -5 },
+		};
+		for (const Case &c : cases) {
+			MemorySocket gate;
+			MemorySocket session;
+			GateResponse seen;
+			NwuLobbySession::Hooks hooks;
+			hooks.on_gate_response = [&seen](const GateResponse &response) { seen = response; };
+			NwuLobbySession lobby(hooks, NwuLobbySession::Environment{});
+			lobby.set_title(&kJo, kJo.gate_tag);
+			NwuLobbySession::CommandLine switches;
+			switches.glsvss_rims = c.rims;
+			switches.glsvss_agrms = c.agrms;
+			lobby.set_command_line(switches);
+			lobby.open(gate, session);
+			lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
+			gate.inbound.push_back({ PeerAddr{ 0x0100007Fu, GATE_DEFAULT_PORT }, gate_reply(body) });
+			gate_frames(lobby, 10);
+			CHECK(lobby.session() != nullptr);
+			CHECK(lobby.gate_response().glsvss_rims == c.want_rims);
+			CHECK(lobby.gate_response().glsvss_agrms == c.want_agrms);
+			CHECK(seen.glsvss_rims == c.want_rims && seen.glsvss_agrms == c.want_agrms);
+			CHECK(lobby.gate_response().glsvss_request == "[dfx2]kills");
 			lobby.close();
 		}
 	}
@@ -447,7 +522,7 @@ int main() {
 			lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
 			gate.inbound.push_back(
 					{ PeerAddr{ 0x0100007Fu, GATE_DEFAULT_PORT }, gate_reply(body) });
-			lobby.tick(10);
+			gate_frames(lobby, 10);
 			for (const auto &target : lobby.targets())
 				out.targets.push_back({ target.ip, target.port });
 			for (const auto &dg : session.sent) {
@@ -552,6 +627,105 @@ int main() {
 				lobby.close();
 			}
 		}
+	}
+
+	// D-NET-706: a gate response that went through is kept for the NovaWorld menu's next entry
+	// (the gate memory several drivers share, as the game shell's start()s do): that entry sends
+	// no probe and connects at once from the kept response, which is not processed again; a
+	// sessionless response's entry goes sessionless again; a response that failed is not kept;
+	// another gate probes; the menu's teardown (forget()) ends the keeping and empties
+	// JUNCTIONCODE while the in-use word stands.
+	// [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - dword_B5FF48 @0x4CE6CF, the gate state 2
+	//  @0x4CE6F3, 0 returned @0x4CE6FA, else CMissionInfo_Init @0x4CE719 and the probe;
+	//  UI_ProcessLANSessionStateMachine @0x558DE0 - state 2 @0x559072..0x559094;
+	//  CNapiGateManager_ProcessResponse @0x4CED20 - dword_B5FF48 = 1 @0x4CF81D;
+	//  Menu_TeardownShellAndCloseBinkVideos @0x54E430 - dword_B5FF48 = 0 @0x54E4C8]
+	{
+		const std::string gate_entry = "VAR \"UDPNOVAWORLD\" \"127.0.0.1:64206\"\r\n"
+									   "VAR \"UDPCODE1\" \"code-one\"\r\n";
+		const std::string post_pair = "VAR \"POSTIPADDRESS\" \"192.168.0.5\"\r\n"
+									  "VAR \"POSTIPPORT\" \"7598\"\r\n";
+		const std::string no_var = "GATEPROTOCOL \"1.0\"\r\n";
+		struct Entry {
+			std::size_t probes = 0;
+			std::size_t hellos = 0;
+			std::vector<GateResponse> responses;
+			int sessionless = 0;
+			std::vector<std::string> fatals;
+			bool session = false;
+			bool in_use = false;
+		};
+		// One menu entry: a new driver over `memory` opens, probes `host`, takes `reply` from
+		// the gate when one is given, and runs the menu's gate frames.
+		auto enter = [](NwuLobbySession::GateMemory &memory, const std::string &host,
+				const std::optional<std::string> &reply) {
+			MemorySocket gate;
+			MemorySocket session;
+			Entry out;
+			NwuLobbySession::Hooks hooks;
+			hooks.on_gate_response = [&out](const GateResponse &r) { out.responses.push_back(r); };
+			hooks.on_sessionless = [&out]() { ++out.sessionless; };
+			hooks.on_fatal = [&out](const std::string &m) { out.fatals.push_back(m); };
+			NwuLobbySession lobby(hooks, NwuLobbySession::Environment{});
+			lobby.set_title(&kJo, kJo.gate_tag);
+			lobby.set_gate_memory(&memory);
+			lobby.open(gate, session);
+			lobby.probe(host, GATE_DEFAULT_PORT);
+			if (reply)
+				gate.inbound.push_back(
+						{ PeerAddr{ 0x0100007Fu, GATE_DEFAULT_PORT }, gate_reply(*reply) });
+			gate_frames(lobby, 10);
+			out.probes = gate.sent.size();
+			for (const auto &dg : session.sent) {
+				if (opcode_of(dg.second) == SESSION_OPCODE_CLIENT_HELLO) ++out.hellos;
+			}
+			out.session = lobby.session() != nullptr;
+			out.in_use = lobby.match_facts().in_use;
+			lobby.close();
+			return out;
+		};
+
+		// The first entry probes; the response goes through and is kept.
+		NwuLobbySession::GateMemory memory;
+		const Entry first = enter(memory, "127.0.0.1", gate_entry);
+		CHECK(first.probes == 1 && first.session && first.in_use && first.hellos == 1);
+		CHECK(first.responses.size() == 1 && first.responses[0].udp_code1 == "code-one");
+		CHECK(memory.response_kept && memory.response.udp_code1 == "code-one");
+		// The next entry sends no probe and connects from the kept response (no gate reply
+		// needed) the menu's frames after, the hook handed the kept one.
+		const Entry again = enter(memory, "127.0.0.1", std::nullopt);
+		CHECK(again.probes == 0 && again.session && again.in_use && again.hellos == 1);
+		CHECK(again.fatals.empty());
+		CHECK(again.responses.size() == 1 && again.responses[0].udp_code1 == "code-one");
+		// Another gate is not the one the response came from: it probes, the response no longer
+		// kept.
+		const Entry other = enter(memory, "127.0.0.2", std::nullopt);
+		CHECK(other.probes == 1 && !other.session && other.responses.empty());
+		CHECK(!memory.response_kept);
+
+		// The menu's teardown: the next entry probes again; JUNCTIONCODE goes with the menu's
+		// form, the in-use word stays.
+		NwuLobbySession::GateMemory torn;
+		CHECK(enter(torn, "127.0.0.1", gate_entry).session);
+		torn.junction_code = "127.0.0.9:7009";
+		torn.forget();
+		CHECK(!torn.response_kept && torn.junction_code.empty() && torn.in_use);
+		const Entry after = enter(torn, "127.0.0.1", std::nullopt);
+		CHECK(after.probes == 1 && !after.session && after.responses.empty());
+
+		// A sessionless response (the POST pair, no NWU address) is kept too: its next entry
+		// goes sessionless again with no probe.
+		NwuLobbySession::GateMemory post;
+		const Entry post_first = enter(post, "127.0.0.1", post_pair);
+		CHECK(post_first.sessionless == 1 && !post_first.session && post.response_kept);
+		const Entry post_again = enter(post, "127.0.0.1", std::nullopt);
+		CHECK(post_again.probes == 0 && post_again.sessionless == 1 && !post_again.session);
+
+		// A response that fails the gate (NWEC25) is not kept: the next entry probes.
+		NwuLobbySession::GateMemory failed;
+		const Entry fail_first = enter(failed, "127.0.0.1", no_var);
+		CHECK(fail_first.fatals == std::vector<std::string>{ "NWEC25" } && !failed.response_kept);
+		CHECK(enter(failed, "127.0.0.1", std::nullopt).probes == 1);
 	}
 
 	if (failures != 0) {

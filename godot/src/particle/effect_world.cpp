@@ -10,6 +10,8 @@
 #include "util/string_convert.h"
 
 #include <base/io/fixed.h>
+#include <base/resource_index/resource_index.h>
+#include <base/vfs/vfs.h>
 #include <formats/particle/parser.h>
 
 #include <array>
@@ -65,10 +67,12 @@ ParticleRenderer *EffectWorld::_ensure_renderer() {
 	add_child(renderer);
 	renderer_id_ = renderer->get_instance_id();
 	renderer->set_scene(scene_);
-	renderer->set_texture_provider(texture_provider_);
+	renderer->set_image_provider(image_provider_);
 	renderer->set_texture_dir(texture_dir_);
 	renderer->set_environment_source(_environment_source());
 	renderer->set_water_plane(water_height_, _reflection_camera());
+	renderer->set_inset_mirror_camera(Object::cast_to<Camera3D>(
+			ObjectDB::get_instance(inset_mirror_camera_id_)));
 	renderer->set_second_scene_camera(get_second_scene_camera());
 	renderer->set_session_render_settings(session_texcompression_level_, session_particle_density_);
 	renderer->set_main_view_nvg_scene(main_view_nvg_scene_);
@@ -127,8 +131,8 @@ bool EffectWorld::are_particles_hidden() const {
 	return particles_disabled_;
 }
 
-Callable EffectWorld::get_texture_provider() const {
-	return texture_provider_;
+Callable EffectWorld::get_image_provider() const {
+	return image_provider_;
 }
 
 void EffectWorld::set_owner_position_provider(const Callable &p_provider) {
@@ -141,6 +145,13 @@ void EffectWorld::set_water_plane(float p_value, Camera3D *p_reflection_camera) 
 			? ObjectID(p_reflection_camera->get_instance_id())
 			: ObjectID();
 	_ensure_renderer()->set_water_plane(p_value, p_reflection_camera);
+}
+
+void EffectWorld::set_inset_mirror_camera(Camera3D *p_camera) {
+	inset_mirror_camera_id_ = p_camera != nullptr
+			? ObjectID(p_camera->get_instance_id())
+			: ObjectID();
+	_ensure_renderer()->set_inset_mirror_camera(p_camera);
 }
 
 void EffectWorld::set_second_scene_camera(Camera3D *p_camera) {
@@ -172,16 +183,36 @@ void EffectWorld::set_main_view_nvg_scene(bool p_nvg_scene) {
 	_ensure_renderer()->set_main_view_nvg_scene(p_nvg_scene);
 }
 
-int EffectWorld::load_from_resource_root(const Ref<ResourceRoot> &p_root) {
+int EffectWorld::load_from_resource_root(const Ref<ResourceRoot> &p_root,
+		const Callable &p_present) {
 	clear_world();
 	if (p_root.is_null()) {
 		return 0;
 	}
+	// The loading screen at its stored checkpoint, where the game's effect load presents it:
+	// past each loose file's parse and once past the archive walk (engine hud/loading_screen.h
+	// carries the witness). A loose file is one no archive slot carries: the walk lists those
+	// ahead of the archives' (ResourceIndex::effect_files).
+	const auto present = [&p_present]() {
+		if (p_present.is_valid())
+			p_present.call();
+	};
+	const opennova::ResourceIndex &index = p_root->engine_index();
+	const auto loose = [&index](const String &p_name) {
+		const std::string name = p_name.utf8().get_data();
+		for (int slot = 0; slot < opennova::kArchiveSlotCount; ++slot) {
+			if (index.archive_slot_has_file(slot, name))
+				return false;
+		}
+		return true;
+	};
 	root_ = p_root;
 	// A particle graphic loads through the particle manager's reader: the loose
-	// tga folder first, then the mounted name (renderer::TextureLoader::Particle).
-	texture_provider_ = Callable(p_root.ptr(), "load_texture").bind(ResourceRoot::TEXTURE_LOADER_PARTICLE);
-	_ensure_renderer()->set_texture_provider(texture_provider_);
+	// tga folder first, then the mounted name (renderer::TextureLoader::Particle),
+	// decoded to an image the atlas copies into its page, never a device texture
+	// of its own (engine renderer/particle_atlas.h carries the witness).
+	image_provider_ = Callable(p_root.ptr(), "load_image").bind(ResourceRoot::TEXTURE_LOADER_PARTICLE);
+	_ensure_renderer()->set_image_provider(image_provider_);
 	// The effect files in the archive walk's order, `.ptl` and the gore set
 	// interleaved, less what it skips (ResourceIndex::effect_files, D-VFS-13).
 	const PackedStringArray names = p_root->effect_files();
@@ -198,12 +229,17 @@ int EffectWorld::load_from_resource_root(const Ref<ResourceRoot> &p_root) {
 		}
 		Ref<ParticleFile> file;
 		file.instantiate();
-		if (file->load_from_buffer_after(bytes, logical_name, read_state) != OK) {
+		const bool parsed = file->load_from_buffer_after(bytes, logical_name, read_state) == OK;
+		if (p_present.is_valid() && loose(logical_name)) {
+			present();
+		}
+		if (!parsed) {
 			UtilityFunctions::push_warning(vformat("effect world: failed to parse %s", logical_name));
 			continue;
 		}
 		files_.push_back(file);
 	}
+	present();
 	_open_files();
 	return effect_count();
 }
@@ -225,7 +261,7 @@ void EffectWorld::_open_files() {
     scene_->shared_native_scene()->set_spawn_enabled(!particles_disabled_);
 	ParticleRenderer *renderer = _ensure_renderer();
 	renderer->set_scene(scene_);
-	renderer->set_texture_provider(texture_provider_);
+	renderer->set_image_provider(image_provider_);
 	renderer->set_texture_dir(texture_dir_);
 }
 
@@ -237,22 +273,24 @@ void EffectWorld::clear_world() {
 	owner_pose_cache_.clear();
 	next_token_ = 1;
 	root_.unref();
-	texture_provider_ = Callable();
+	image_provider_ = Callable();
 	texture_dir_ = String();
 	owner_position_provider_ = Callable();
 	water_height_ = 0.0f;
 	reflection_camera_id_ = ObjectID();
 	second_scene_camera_id_ = ObjectID();
+	inset_mirror_camera_id_ = ObjectID();
 	if (ParticleRenderer *renderer = _renderer()) {
 		renderer->set_water_plane(0.0f, nullptr);
 		renderer->set_second_scene_camera(nullptr);
+		renderer->set_inset_mirror_camera(nullptr);
 	}
 	scene_.instantiate();
 	load_report_ = scene_->open(TypedArray<ParticleFile>());
     scene_->shared_native_scene()->set_spawn_enabled(!particles_disabled_);
 	ParticleRenderer *renderer = _ensure_renderer();
 	renderer->set_scene(scene_);
-	renderer->set_texture_provider(texture_provider_);
+	renderer->set_image_provider(image_provider_);
 	renderer->set_texture_dir(String());
 }
 
@@ -264,6 +302,11 @@ void EffectWorld::reset_runtime_state() {
 	next_token_ = 1;
 	if (ParticleRenderer *renderer = _renderer()) {
 		renderer->clear_warm_pipelines();
+		// The reset scene draws nothing until the next render_now. A load's warm ends here,
+		// and a join's waits and loading presents run no particle frame after it: the warm's
+		// last submission must not stay on the camera's compositor through them (engine
+		// runtime/hud/loading_screen.h carries the witness, D-NET-NEW-L2-45).
+		renderer->clear_draws();
 	}
 	scene_->reset_runtime_state();
 }
@@ -468,6 +511,16 @@ int EffectWorld::warm_all_effects(const Vector3 &p_position) {
 		renderer->clear_warm_pipelines();
 	}
 	return spawned;
+}
+
+void EffectWorld::build_texture_atlases(const Callable &p_present) {
+	ParticleRenderer *renderer = _ensure_renderer();
+	renderer->build_catalog(p_present);
+	renderer->create_particle_devices();
+}
+
+void EffectWorld::create_tracer_pool_devices() {
+	_ensure_renderer()->create_tracer_pool_devices();
 }
 
 int64_t EffectWorld::render_now(int64_t p_time_ms) {
@@ -828,11 +881,13 @@ void EffectWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_particles_hidden", "hidden"),
 			&EffectWorld::set_particles_hidden);
 	ClassDB::bind_method(D_METHOD("are_particles_hidden"), &EffectWorld::are_particles_hidden);
-	ClassDB::bind_method(D_METHOD("get_texture_provider"), &EffectWorld::get_texture_provider);
+	ClassDB::bind_method(D_METHOD("get_image_provider"), &EffectWorld::get_image_provider);
 	ClassDB::bind_method(D_METHOD("set_owner_position_provider", "provider"),
 			&EffectWorld::set_owner_position_provider);
 	ClassDB::bind_method(D_METHOD("set_water_plane", "value", "reflection_camera"),
 			&EffectWorld::set_water_plane);
+	ClassDB::bind_method(D_METHOD("set_inset_mirror_camera", "camera"),
+			&EffectWorld::set_inset_mirror_camera);
 	ClassDB::bind_method(D_METHOD("set_second_scene_camera", "camera"),
 			&EffectWorld::set_second_scene_camera);
 	ClassDB::bind_method(D_METHOD("get_second_scene_camera"),
@@ -842,8 +897,8 @@ void EffectWorld::_bind_methods() {
 			&EffectWorld::set_session_render_settings);
 	ClassDB::bind_method(D_METHOD("set_main_view_nvg_scene", "nvg_scene"),
 			&EffectWorld::set_main_view_nvg_scene);
-	ClassDB::bind_method(D_METHOD("load_from_resource_root", "root"),
-			&EffectWorld::load_from_resource_root);
+	ClassDB::bind_method(D_METHOD("load_from_resource_root", "root", "present"),
+			&EffectWorld::load_from_resource_root, DEFVAL(Callable()));
 	ClassDB::bind_method(D_METHOD("load_particle_file", "file"), &EffectWorld::load_particle_file);
 	ClassDB::bind_method(D_METHOD("clear_world"), &EffectWorld::clear_world);
 	ClassDB::bind_method(D_METHOD("reset_runtime_state"), &EffectWorld::reset_runtime_state);
@@ -858,6 +913,8 @@ void EffectWorld::_bind_methods() {
 			&EffectWorld::spawn_effect_request, DEFVAL(Variant()));
 	ClassDB::bind_method(D_METHOD("warm_all_effects", "position"), &EffectWorld::warm_all_effects);
 	ClassDB::bind_method(D_METHOD("render_now", "time_ms"), &EffectWorld::render_now);
+	ClassDB::bind_method(D_METHOD("build_texture_atlases", "present"),
+			&EffectWorld::build_texture_atlases, DEFVAL(Callable()));
 	ClassDB::bind_method(D_METHOD("attach_distortion_row", "frame_fx"),
 			&EffectWorld::attach_distortion_row);
 	ClassDB::bind_method(D_METHOD("get_debug_draw_list_report"),

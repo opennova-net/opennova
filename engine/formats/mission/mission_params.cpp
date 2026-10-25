@@ -519,7 +519,7 @@ uint8_t trigger_ssn_pools(const bms::Trigger &trigger) {
 uint8_t action_ssn_pools(const bms::Action &action) {
 	switch (action.action_type) {
 	// [orig: Entity_HandleAlertStateEvent @0x43DEE0, pools 0, 1, 2; Entity_FindByDCBAndSetFlag @0x43DB30;
-	// Entity_SetNetIdByParentRef @0x43D6C0; EventAction_TeleportEntityToSpawn @0x43DFC0]
+	// Entity_SetCommandGroupByDcbId @0x43D6C0; EventAction_TeleportEntityToSpawn @0x43DFC0]
 	case A::ChangeSingleAI:
 	case A::ChangeSteamAction:
 	case A::SingleChangeGroup:

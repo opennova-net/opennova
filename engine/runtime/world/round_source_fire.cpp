@@ -9,7 +9,7 @@ RoundSpawnParams ammo_fire_params(EntityHandle owner, FixedVec3 p,
     RoundSpawnParams params;
     params.owner = owner;
     params.shooter_handle = owner.packed;
-    params.origin = {p.x * io::kInvFp16One, p.y * io::kInvFp16One, p.z * io::kInvFp16One};
+    params.origin.set_q16(p); // the source's words (D-NET-507)
     params.dir_yaw_bam = yaw;
     params.dir_pitch_bam = pitch;
     params.ammo_index = ammo_index;

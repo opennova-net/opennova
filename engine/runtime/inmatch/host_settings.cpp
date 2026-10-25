@@ -1,10 +1,15 @@
 #include "host_settings.h"
 
 #include <base/io/crt_ftol.h>
+#include <formats/mnu/mnu.h>
+#include <runtime/menu/menu_flow.h>
+#include <runtime/menu/menu_runtime.h>
+#include <runtime/hud/hud_game_text.h> // hud_sprintf (the CRT sprintf over a localized format)
 
 #include <algorithm>
 #include <cstdlib>
 #include <limits>
+#include <memory>
 
 namespace opennova::inmatch {
 namespace {
@@ -43,116 +48,254 @@ const std::vector<std::string_view>& host_dialog_controls() {
     return controls;
 }
 
-bool apply_host_dialog_text(GameConfig& config, std::string_view control,
-                            const std::string& value) {
-    // The edit capacities are literal byte counts (no invented -1).
-    // [orig: HostDialog_ReadSettings @ 0x555940;
-    // CStaticWnd_GetLabelText @ 0x657570]
-    if (control == "GAME_NAME") config.server_name = value.substr(0, 32);
-    else if (control == "SERVER_PASSWORD") config.server_password = value.substr(0, 17);
-    else if (control == "SERVER_MESSAGE") config.custom_text = value.substr(0, 128);
-    else if (control == "BLUE_PW") config.side_a_password = value.substr(0, 17);
-    else if (control == "RED_PW") config.side_b_password = value.substr(0, 17);
-    else if (control == "SPECTATOR_PW") config.spectator_password = value.substr(0, 17);
-    else if (control == "GAME_LOCATION") config.country = value.substr(0, 3);
-    else return false;
-    return true;
+namespace {
+
+// The title the block's table runs: dfx2.exe's carries the one row
+// Jointops.exe's lacks (gamecfg::config_var_rows).
+int block_title(const gamecfg::GameCfg& cfg) {
+    return cfg.table == gamecfg::ConfigTable::Dfx2 ? gameprofile::GAME_DFX2 : gameprofile::GAME_JO;
 }
 
-bool apply_host_dialog_number(GameConfig& config, int32_t& player_limit,
-                              bool& serve_and_play, std::string_view control,
-                              int32_t number) {
-    for (const FlagControl& flag : kFlagControls) {
-        if (control != flag.control) continue;
-        if ((number != 0) != flag.inverted) config.mp_attributes |= flag.bit;
-        else config.mp_attributes &= ~flag.bit;
+} // namespace
+
+bool apply_host_dialog_control(gamecfg::GameCfg& cfg, std::string_view control,
+                               const std::string& value) {
+    // The text edits by their capacities, literal byte counts (no invented -1)
+    // [orig: HostDialog_ReadSettings @0x555940 - GAME_NAME @0x555967 (32),
+    //  SERVER_PASSWORD @0x555990 (17), SERVER_MESSAGE @0x5559BC (128), BLUE_PW
+    //  @0x555E7F, RED_PW @0x555EA8, SPECTATOR_PW @0x555ED1 (17 each);
+    //  CStaticWnd_GetLabelText @0x657570]; the location's item, its length clamped into 1..3
+    // [orig: strncpy(country_3C5, item, count) @0x555A72]. A label shorter than its cap copies
+    // whole with its NUL; one of the cap or longer copies its first cap bytes with none
+    // [orig: CStaticWnd_GetLabelText - the strlen + 1 against the cap @0x657597, strncpy
+    // @0x6575BF], where retail's field reads on into the next one (GAME_NAME's 32 into
+    // country_3C5, the unbounded-copy class of D-GAMECFG-1): the block holds the 32.
+    if (control == "GAME_NAME") { cfg.game_name = value.substr(0, 32); return true; }
+    if (control == "SERVER_PASSWORD") { cfg.mp_host_game_password = value.substr(0, 17); return true; }
+    if (control == "SERVER_MESSAGE") { cfg.servermsg = value.substr(0, 128); return true; }
+    if (control == "BLUE_PW") { cfg.mp_host_side_password_a = value.substr(0, 17); return true; }
+    if (control == "RED_PW") { cfg.mp_host_side_password_b = value.substr(0, 17); return true; }
+    if (control == "SPECTATOR_PW") { cfg.mp_host_spectator_password = value.substr(0, 17); return true; }
+    if (control == "GAME_LOCATION") {
+        // strncpy with the item's length clamped into 1..3 as the count: a 1..3 character item's
+        // bytes over the word's with no NUL, so a shorter item keeps the old word's tail ("DE"
+        // over "USA" reads "DEA"); an empty item copies its NUL alone, so the word reads "".
+        // [orig: HostDialog_ReadSettings @0x555A1B..0x555A72 - the length against 3 @0x555A1B,
+        //  against 1 @0x555A30, `mov ecx, 1` @0x555A35, `mov ecx, 3` @0x555A51, the length
+        //  @0x555A58..0x555A69, strncpy(country_3C5, item, count) @0x555A72]
+        const size_t count = std::clamp<size_t>(value.size(), 1, 3);
+        const size_t copied = std::min(count, value.size());
+        if (cfg.country.size() < copied) cfg.country.resize(copied);
+        cfg.country.replace(0, copied, value, 0, copied);
+        // strncpy pads with NULs up to the count: an item shorter than the count ends the word.
+        if (copied < count) cfg.country.resize(copied);
         return true;
     }
-    if (control == "SERVERTYPE") serve_and_play = number == 0;
-    else if (control == "SERVER_PUNKBUSTER") config.server_punkbuster = number;
-    else if (control == "SERVER_LANONLY") config.server_lan_only = number;
-    else if (control == "CONNECTIONSPEED") config.connection_speed = number;
-    else if (control == "REPLAY") config.replay_enabled = static_cast<uint32_t>(number);
-    else if (control == "DELAY") config.start_delay = static_cast<uint32_t>(number);
-    else if (control == "RESPAWN") config.respawn_timeout = static_cast<uint32_t>(number);
-    else if (control == "TIME") config.respawn_time = static_cast<uint32_t>(number);
-    // Config's 500-point limits and nonpositive KOTH limit have distinct
-    // runtime sentinels; TIME has no such substitution.
-    // [orig: Game_ApplySessionSettingsToGlobals @ 0x551500]
-    else if (control == "KILL_LIMIT") config.score_limit = session_point_limit(number);
-    else if (control == "MAX_SCORE") config.max_score = session_point_limit(number);
-    else if (control == "MAX_KOTH") config.time_limit_minutes = session_koth_limit_minutes(number);
-    // The dialog read clamps its edit to the title's screen cap, 64 or 100
-    // (TitlePlayerCaps::host_screen) [orig: HostDialog_ReadSettings
-    // @ 0x555c25..0x555c2d] [orig: @0x553dd0 (dfx2.exe)].
+    const int32_t number = edit_integer(value);
+    // The six attribute spins onto their mpattrib bits, four of them inverted
+    // [orig: @0x555CBC..0x555DE8].
+    for (const FlagControl& flag : kFlagControls) {
+        if (control != flag.control) continue;
+        if ((number != 0) != flag.inverted) cfg.mpattrib = static_cast<int32_t>(static_cast<uint32_t>(cfg.mpattrib) | flag.bit);
+        else cfg.mpattrib = static_cast<int32_t>(static_cast<uint32_t>(cfg.mpattrib) & ~flag.bit);
+        return true;
+    }
+    // [orig: SERVERTYPE dedicatedServer_400 @0x5559DE, SERVER_PUNKBUSTER @0x555A9B,
+    //  SERVER_LANONLY hostLanOnly_340 @0x555AC0, CONNECTIONSPEED nwiSpType_540
+    //  @0x555AE5, REPLAY @0x555B0A, DELAY startDelay_410 @0x555B31, RESPAWN
+    //  respawnTimeout_47C @0x555B58, TIME timeLimit_470 @0x555B7F, KILL_LIMIT
+    //  maxKills_408 @0x555BA6, MAX_SCORE maxScore_40C @0x555BCD, MAX_KOTH
+    //  kothLimit_474 @0x555BF4, MAX_PLAYERS maxPlayers_3F4 @0x555C1B with the
+    //  screen cap @0x555C25..0x555C2D (dfx2.exe's 100 @0x553dd0), MAX_FF_KILLS
+    //  @0x555C54, TAKEOVER_TIME teamChangeTime_4C0 @0x555C7B, LFP_TAKEOVER
+    //  @0x555CA0, ALLOW_SPECTATORS @0x555E0A..0x555E23, ALLOW_AI enableAi_A14
+    //  @0x555E53, TOD_CONTINUITY @0x555EF3]
+    if (control == "SERVERTYPE") cfg.dedicated = number;
+    else if (control == "SERVER_PUNKBUSTER") cfg.sv_punkbuster = number;
+    else if (control == "SERVER_LANONLY") cfg.mp_novaworld_host_lan_only = number;
+    else if (control == "CONNECTIONSPEED") cfg.nwisptype = number;
+    else if (control == "REPLAY") cfg.replay = number;
+    else if (control == "DELAY") cfg.startdelay = number;
+    else if (control == "RESPAWN") cfg.timeout = number;
+    else if (control == "TIME") cfg.time_limit = number;
+    else if (control == "KILL_LIMIT") cfg.max_kills = number;
+    else if (control == "MAX_SCORE") cfg.max_score = number;
+    else if (control == "MAX_KOTH") cfg.koth_limit = number;
     else if (control == "MAX_PLAYERS")
-        player_limit = std::min(number, title_player_caps(config.title).host_screen);
-    else if (control == "MAX_FF_KILLS") config.max_friendly_kills = number;
-    else if (control == "TAKEOVER_TIME") config.capture_duration_seconds = number;
-    else if (control == "LFP_TAKEOVER") config.capture_speed_setting = number;
+        cfg.mp_max_players = std::min(number, title_player_caps(block_title(cfg)).host_screen);
+    else if (control == "MAX_FF_KILLS") cfg.numallowablefriendlykills = number;
+    else if (control == "TAKEOVER_TIME") cfg.teamchange_time = number;
+    else if (control == "LFP_TAKEOVER") cfg.mp_lfp_takeoverspeed = number;
     else if (control == "ALLOW_SPECTATORS") {
-        if (number == 0) config.spectator_slots = 0;
-        else if (config.spectator_slots == 0) config.spectator_slots = -1;
-    } else if (control == "ALLOW_AI") config.allow_ai = number != 0;
-    else if (control == "TOD_CONTINUITY") config.time_of_day_continuity = number;
+        if (number == 0) cfg.mp_num_spectators_max = 0;
+        else if (cfg.mp_num_spectators_max == 0) cfg.mp_num_spectators_max = -1;
+    } else if (control == "ALLOW_AI") cfg.enable_ai = number != 0 ? 1 : 0;
+    else if (control == "TOD_CONTINUITY") cfg.mp_tod_continuity = number;
     else return false;
     return true;
 }
 
-bool apply_host_dialog_control(GameConfig& config, int32_t& player_limit,
-                               bool& serve_and_play, std::string_view control,
-                               const std::string& value) {
-    if (apply_host_dialog_text(config, control, value)) return true;
-    return apply_host_dialog_number(config, player_limit, serve_and_play, control,
-            edit_integer(value));
+void populate_host_dialog(gamecfg::GameCfg& cfg) {
+    // [orig: UI_PopulateHostSettingsFromConfig @0x556328..0x55632A, g_HostScreenMaxPlayers]
+    // [orig: @0x5544cd (dfx2.exe)]
+    cfg.mp_max_players = std::min(cfg.mp_max_players, title_player_caps(block_title(cfg)).host_screen);
 }
 
-std::string host_dialog_value(const GameConfig& config, int32_t player_limit,
-                              bool serve_and_play, std::string_view control) {
-    // The populate step that seeds the MULTI_PLAYER_HOST screen from the
-    // config before it shows: text edits by SetText, numeric edits by
-    // SetIntValue, spins by SelectItemByValue. MAX_PLAYERS is clamped to the
-    // title's screen cap (64; dfx2.exe's 100 [orig: @0x5544cd (dfx2.exe)])
-    // first; the four inverted flag spins show the bit CLEAR as 1; the 500-point
-    // and nonpositive-KOTH sentinels map back to their dialog numbers (the read
-    // side folds the apply's substitution into the config, see above).
-    // [orig: UI_PopulateHostSettingsFromConfig @0x555fe0 -- GAME_NAME @0x556015,
-    // SERVERTYPE @0x55608b, GAME_LOCATION strnicmp(country, item, 3) @0x5560fc,
-    // CONNECTIONSPEED @0x556187, MAX_PLAYERS clamp @0x556328 + SetIntValue
-    // @0x556358, TEAM_FF (flags & 0x200) == 0 @0x5563e1, ALLOW_SPECTATORS
-    // maxSpectators != 0 @0x55651a, TOD_CONTINUITY @0x5565e3]
-    if (control == "GAME_NAME") return config.server_name;
-    if (control == "SERVER_PASSWORD") return config.server_password;
-    if (control == "SERVER_MESSAGE") return config.custom_text;
-    if (control == "BLUE_PW") return config.side_a_password;
-    if (control == "RED_PW") return config.side_b_password;
-    if (control == "SPECTATOR_PW") return config.spectator_password;
-    if (control == "GAME_LOCATION") return config.country;
+std::string host_dialog_value(const gamecfg::GameCfg& cfg, std::string_view control) {
+    // Text edits by SetText, numeric edits by SetIntValue, spins by
+    // SelectItemByValue; the four inverted flag spins show the bit CLEAR as 1.
+    // [orig: UI_PopulateHostSettingsFromConfig @0x555FE0 - GAME_NAME @0x556015,
+    //  SERVERTYPE @0x55608B, SERVER_LANONLY @0x5560B2, GAME_LOCATION strnicmp(country,
+    //  item, 3) @0x5560FC, SERVER_PUNKBUSTER @0x55614E, CONNECTIONSPEED @0x556187,
+    //  REPLAY @0x556222, DELAY @0x55624E, TIME @0x5562A0, MAX_SCORE @0x5562F2,
+    //  MAX_PLAYERS @0x556358, LFP_TAKEOVER @0x5563B2, TEAM_FF (flags & 0x200) == 0
+    //  @0x5563E1, FRIENDLY_TAG @0x556439, FF_WARNING @0x556468, TRACERS @0x5564EE,
+    //  ALLOW_SPECTATORS maxSpectators != 0 @0x55651A, ALLOW_AI @0x556541,
+    //  TOD_CONTINUITY @0x5565E3]
+    if (control == "GAME_NAME") return cfg.game_name;
+    if (control == "SERVER_PASSWORD") return cfg.mp_host_game_password;
+    if (control == "SERVER_MESSAGE") return cfg.servermsg;
+    if (control == "BLUE_PW") return cfg.mp_host_side_password_a;
+    if (control == "RED_PW") return cfg.mp_host_side_password_b;
+    if (control == "SPECTATOR_PW") return cfg.mp_host_spectator_password;
+    if (control == "GAME_LOCATION") return cfg.country;
     const auto number = [](int64_t value) { return std::to_string(value); };
     for (const FlagControl& flag : kFlagControls) {
         if (control != flag.control) continue;
-        return number(((config.mp_attributes & flag.bit) != 0) != flag.inverted ? 1 : 0);
+        return number(((static_cast<uint32_t>(cfg.mpattrib) & flag.bit) != 0) != flag.inverted ? 1 : 0);
     }
-    if (control == "SERVERTYPE") return number(serve_and_play ? 0 : 1);
-    if (control == "SERVER_PUNKBUSTER") return number(config.server_punkbuster);
-    if (control == "SERVER_LANONLY") return number(config.server_lan_only);
-    if (control == "CONNECTIONSPEED") return number(config.connection_speed);
-    if (control == "REPLAY") return number(config.replay_enabled);
-    if (control == "DELAY") return number(config.start_delay);
-    if (control == "RESPAWN") return number(config.respawn_timeout);
-    if (control == "TIME") return number(config.respawn_time);
-    if (control == "KILL_LIMIT") return number(config.score_limit == kSessionNoPointLimit ? 500 : config.score_limit);
-    if (control == "MAX_SCORE") return number(config.max_score == kSessionNoPointLimit ? 500 : config.max_score);
-    if (control == "MAX_KOTH") return number(config.time_limit_minutes == kSessionNoKothLimitMinutes ? 0 : config.time_limit_minutes);
-    if (control == "MAX_PLAYERS")
-        return number(std::min(player_limit, title_player_caps(config.title).host_screen));
-    if (control == "MAX_FF_KILLS") return number(config.max_friendly_kills);
-    if (control == "TAKEOVER_TIME") return number(config.capture_duration_seconds);
-    if (control == "LFP_TAKEOVER") return number(config.capture_speed_setting);
-    if (control == "ALLOW_SPECTATORS") return number(config.spectator_slots != 0 ? 1 : 0);
-    if (control == "ALLOW_AI") return number(config.allow_ai ? 1 : 0);
-    if (control == "TOD_CONTINUITY") return number(config.time_of_day_continuity);
+    if (control == "SERVERTYPE") return number(cfg.dedicated);
+    if (control == "SERVER_PUNKBUSTER") return number(cfg.sv_punkbuster);
+    if (control == "SERVER_LANONLY") return number(cfg.mp_novaworld_host_lan_only);
+    if (control == "CONNECTIONSPEED") return number(cfg.nwisptype);
+    if (control == "REPLAY") return number(cfg.replay);
+    if (control == "DELAY") return number(cfg.startdelay);
+    if (control == "RESPAWN") return number(cfg.timeout);
+    if (control == "TIME") return number(cfg.time_limit);
+    if (control == "KILL_LIMIT") return number(cfg.max_kills);
+    if (control == "MAX_SCORE") return number(cfg.max_score);
+    if (control == "MAX_KOTH") return number(cfg.koth_limit);
+    if (control == "MAX_PLAYERS") return number(cfg.mp_max_players);
+    if (control == "MAX_FF_KILLS") return number(cfg.numallowablefriendlykills);
+    if (control == "TAKEOVER_TIME") return number(cfg.teamchange_time);
+    if (control == "LFP_TAKEOVER") return number(cfg.mp_lfp_takeoverspeed);
+    if (control == "ALLOW_SPECTATORS") return number(cfg.mp_num_spectators_max != 0 ? 1 : 0);
+    if (control == "ALLOW_AI") return number(cfg.enable_ai);
+    if (control == "TOD_CONTINUITY") return number(cfg.mp_tod_continuity);
     return std::string();
+}
+
+namespace {
+
+// A control as both walks find it, -1 when the screen lacks it (the walk
+// skips it). [orig: UI_FindScreenControl @0x63AE80]
+int host_screen_control(const menu::MenuRuntime& screen, std::string_view control) {
+    return screen.find_screen_control(std::string(kHostDialogScreen), std::string(control));
+}
+
+mnu::WindowType host_control_kind(const menu::MenuRuntime& screen, int id) {
+    return static_cast<mnu::WindowType>(screen.widget_kind_of(id));
+}
+
+} // namespace
+
+void populate_host_screen(menu::MenuRuntime& screen, gamecfg::GameCfg& cfg) {
+    // The clamp lands in the block ahead of MAX_PLAYERS' show, the one word it moves.
+    populate_host_dialog(cfg);
+    for (std::string_view control : host_dialog_controls()) {
+        const int id = host_screen_control(screen, control);
+        if (id < 0) continue;
+        std::string value = host_dialog_value(cfg, control);
+        if (control == "SERVER_PUNKBUSTER") {
+            // No pb\pbcl.dll: the row of value 0, and the spin made inert.
+            // [orig: UI_PopulateHostSettingsFromConfig @0x555FE0 (the File_CheckExists
+            //  ("pb\\pbcl.dll") call @0x55613A, SpinList_SelectItemByValue(0) @0x556157,
+            //  UIWidget_SetInteractiveRecursive(0) @0x556160)]
+            value = "0";
+            screen.set_widget_disabled(id, true);
+        }
+        switch (host_control_kind(screen, id)) {
+            case mnu::WindowType::SpinList:
+                // [orig: SpinList_SelectItemByValue @0x64BA50 (row 0 on a miss @0x64BA82);
+                //  GAME_LOCATION: UI_PopulateHostSettingsFromConfig @0x555FE0 (the
+                //  CSpinListWnd_GetItemCount call @0x5560D7, each row's name by the
+                //  CSpinListWnd_GetItemNameByIndex call @0x5560E7 against the country by
+                //  _strnicmp(country_3C5, name, 3) @0x5560FC, the first match selected by the
+                //  CSpinListWnd_SetSelectedIndex call @0x556114, none: the row stays)]
+                if (control == "GAME_LOCATION") menu::HostDialog::select_location(screen, id, value);
+                else screen.select_row_by_value(id, value, false);
+                break;
+            case mnu::WindowType::CheckBox:
+                screen.set_widget_checked(id, value != "0");
+                break;
+            default:
+                // The edits' text set, SetIntValue's "%d" through it for the numeric ones
+                // [orig: UI_PopulateHostSettingsFromConfig @0x555FE0 (GAME_NAME's vtable+0x4C
+                //  call @0x556015); CEditWnd_SetText @0x661900 (CButtonWnd_SetLabel, the {hot}
+                //  cut, @0x661912); CEditWnd_SetIntValue @0x657520 (sprintf "%d" @0x657540, the
+                //  set @0x657558)].
+                screen.set_widget_text(id, value);
+                break;
+        }
+    }
+    // The recommendation label past CONNECTIONSPEED: menutxt.bin's MAX_PLAYERS (the key on
+    // a miss) as the sprintf format of the connection speed's player count, set as the
+    // label's text. It reads only nwisptype, which no other control's show moves.
+    // [orig: UI_PopulateHostSettingsFromConfig @0x555FE0 - UI_FindScreenControl
+    //  ("STATIC_MAXPLAYERS_RECOMMENDATION") @0x55619C, UIStringTable_LookupAndDup("menutxt.bin",
+    //  "MAX_PLAYERS") @0x5561BC, UI_MapSliderIndexToMaxPlayers(nwiSpType_540) @0x5561CF, sprintf
+    //  @0x5561DB, the SetText vtable+0x4C call @0x5561F1, the free @0x5561F8]
+    const int label = host_screen_control(screen, "STATIC_MAXPLAYERS_RECOMMENDATION");
+    if (label >= 0) {
+        const std::string format = screen.table_string("menutxt.bin", "MAX_PLAYERS");
+        screen.set_widget_text(label, hud::hud_sprintf(format,
+                map_slider_index_to_max_players(cfg.nwisptype,
+                        title_player_caps(block_title(cfg)).host_screen)));
+    }
+}
+
+int32_t map_slider_index_to_max_players(int32_t slider_index, int32_t host_screen_cap) {
+    // [orig: UI_MapSliderIndexToMaxPlayers @0x555F00 - the switch @0x555F0B, the cap test
+    //  @0x555F1F, row 18 the cap @0x555F86]
+    static constexpr int32_t kRowPlayers[18] = {1, 2, 2, 2, 3, 3, 4, 5, 6, 8, 9, 11, 14, 16,
+                                                21, 23, 26, 32};
+    if (slider_index == 18) return host_screen_cap;
+    const int32_t players = slider_index >= 0 && slider_index < 18 ? kRowPlayers[slider_index] : 0;
+    return players > host_screen_cap ? host_screen_cap : players;
+}
+
+void read_host_screen(const menu::MenuRuntime& screen, gamecfg::GameCfg& cfg) {
+    for (std::string_view control : host_dialog_controls()) {
+        const int id = host_screen_control(screen, control);
+        if (id < 0) continue;
+        std::string value = screen.get_widget_text(id);
+        switch (host_control_kind(screen, id)) {
+            case mnu::WindowType::SpinList: {
+                // The selected row's value, 0 out of range (item_value's ""), GAME_LOCATION's
+                // its name [orig: CSpinListWnd_GetSelectedValue @0x64BAF0 (item+4 @0x64BB11);
+                // CSpinListWnd_GetSelectedName @0x64BB20; HostDialog_ReadSettings @0x555940
+                // (the SERVERTYPE read @0x5559DE and each spin's after it, the GAME_LOCATION
+                // name call @0x5559FF)]
+                const int row = screen.selected_row(id);
+                value = control == "GAME_LOCATION" ? screen.item_text(id, row) : screen.item_value(id, row);
+                break;
+            }
+            case mnu::WindowType::CheckBox:
+                value = screen.is_widget_checked(id) ? "1" : "0";
+                break;
+            default:
+                break;
+        }
+        apply_host_dialog_control(cfg, control, value);
+    }
+}
+
+void read_untouched_host_dialog(gamecfg::GameCfg& cfg, const mnu::Document* doc) {
+    // A fresh runtime (frameless): every control starts as the document authors it.
+    auto screen = std::make_unique<menu::MenuRuntime>();
+    if (doc != nullptr) screen->open_document(doc, std::string(), std::string(kHostDialogScreen));
+    populate_host_screen(*screen, cfg);
+    read_host_screen(*screen, cfg);
 }
 
 uint32_t session_point_limit(int32_t cfg_limit) {
@@ -163,7 +306,7 @@ uint32_t session_point_limit(int32_t cfg_limit) {
 
 uint32_t session_koth_limit_minutes(int32_t cfg_limit) {
     // [orig: Game_ApplySessionSettingsToGlobals @0x551CD2..0x551CDF
-    // (g_TimeLimitMinutes from kothLimit_474)]
+    // (g_KothLimitMinutes from kothLimit_474)]
     return cfg_limit <= 0 ? kSessionNoKothLimitMinutes : static_cast<uint32_t>(cfg_limit);
 }
 
@@ -172,7 +315,7 @@ TitlePlayerCaps title_player_caps(int title) {
     if (title == gameprofile::GAME_DFX2) {
         caps.session = kMaxPlayersCapDfx2;
         // [orig: dfx2.exe g_HostMaxPlayersCap @0x835f0c = 100], against Jointops.exe's 64
-        // [orig: dword_83C79C @0x83C79C]
+        // [orig: g_HostScreenMaxPlayers @0x83C79C]
         caps.host_screen = 100;
     }
     return caps;
@@ -212,6 +355,21 @@ int32_t session_player_cap(int32_t player_limit, int title) {
     const int32_t session_cap = static_cast<int32_t>(title_player_caps(title).session);
     if (player_limit < 1) return 1;
     return player_limit > session_cap ? session_cap : player_limit;
+}
+
+std::string mission_session_title(const rtxt::File *text_override, const std::string &map_file) {
+    // [orig: Game_ApplySessionSettingsToGlobals @0x552112..0x55219E]
+    const size_t dot = map_file.rfind('.');
+    if (text_override != nullptr && dot != std::string::npos) {
+        static const rtxt::File kNoTable;
+        if (const rtxt::Entry *entry =
+                rtxt::find_with_override(text_override, kNoTable, "TITLE", map_file.substr(0, dot))) {
+            const size_t cr = entry->text.find('\r');
+            const size_t count = cr == std::string::npos || cr > 31 ? 31 : cr;
+            return entry->text.substr(0, count);
+        }
+    }
+    return map_file.substr(0, 31);
 }
 
 } // namespace opennova::inmatch

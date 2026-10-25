@@ -19,6 +19,7 @@
 #include <string>
 
 #include <formats/mission/bms.h>
+#include <runtime/inmatch/occlusion_collect.h> // collect_building_verdicts
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/collision.h>
@@ -311,7 +312,7 @@ struct Rig {
         b.kind = EntityKind::Building;
         b.net_id = next_net_id++;
         b.position = {static_cast<float>(x), static_cast<float>(y), 0.0f};
-        b.yaw = 90; // mission yaw 90 -> engine heading 0 (identity rotation)
+        b.heading = placed_heading_bam(90); // mission yaw 90 -> engine heading 0 (identity rotation)
         b.alive = true;
         const EntityHandle h = world.registry.spawn(2, b);
         const int32_t cid = cw.add_model(std::move(cm));
@@ -441,13 +442,17 @@ void test_render_math() {
     // live fields consumed by every float-space portal and TOC transform.
     Entity e;
     e.position = {3.0f, 5.0f, 7.0f};
-    e.yaw = 90;
-    e.pitch = 45;
-    e.roll = -30;
+    e.heading = placed_heading_bam(90);
+    e.pitch_bam = spawn_angle_bam(45);
+    e.roll_bam = spawn_angle_bam(-30);
     const RenderMatrix from_entity = render_matrix_from_entity_pose(e);
+    // The entity's words: the spawn form of pitch 45 ((45 << 16) / 360 = 8192,
+    // shifted up) and roll -30 ((-30 << 16) / 360 truncates to -5461, shifted
+    // up) (D-NET-NEW-L6-3). [orig: Entity_SpawnFromBMSRecord @0x40EB69..0x40EB86
+    // (Pitch), @0x40EB89..0x40EBA6 (Roll)]
     const RenderMatrix expected =
         render_matrix_from_pose(p, 0, static_cast<int32_t>(0x20000000u),
-                                static_cast<int32_t>(0xEAAAAAAAu));
+                                static_cast<int32_t>(0xEAAB0000u));
     for (int i = 0; i < 16; ++i)
         CHECK(std::fabs(from_entity.m[i] - expected.m[i]) < 1e-6f);
 }
@@ -573,7 +578,7 @@ void test_tilted_pose_weld() {
     CHECK(tilted != nullptr);
     if (tilted != nullptr) {
         tilted->position.z = 3.5f;
-        tilted->pitch = 180;
+        tilted->pitch_bam = spawn_angle_bam(180);
     }
     rig.rebuild();
     rig.ow.init_mission(rig.world, rig.cw);
@@ -1360,7 +1365,7 @@ void test_collector_center_uses_full_euler_pose() {
         Entity *e = rig.world.registry.get(h);
         CHECK(e != nullptr);
         if (e == nullptr) return;
-        e->pitch = pitched ? 180.0f : 0.0f;
+        e->pitch_bam = pitched ? spawn_angle_bam(180) : 0;
         e->occlusion_latch = 200;
         rig.rebuild();
         rig.ow.init_mission(rig.world, rig.cw);
@@ -1437,7 +1442,7 @@ void test_model_leg_render_model_sphere() {
         e.kind = EntityKind::Item;
         e.net_id = rig.next_net_id++;
         e.position = {static_cast<float>(x), 10.0f, 1.0f};
-        e.yaw = 90; // identity heading
+        e.heading = placed_heading_bam(90); // identity heading
         e.alive = true;
         return rig.world.registry.spawn(2, e);
     };
@@ -1544,6 +1549,206 @@ void test_collector_runs_per_view() {
     rig.ow.select_view(OcclusionView::kMain);
 }
 
+// The water mirror's collect: the same building walk and mask build over the
+// unmirrored eye, keeping only Reflective statics while that eye is at or above
+// the water, in a scratch frame, so the selected view's words stand; the
+// building latch ticks as in any collect.
+// [orig: Render_MainScene @ 0x5c16fc -> Terrain_CollectVisibleEntitiesForReflection
+//  @ 0x5c90a0, the match @ 0x5c9109..0x5c911f; Terrain_CollectVisibleSectorUserpoints
+//  the test @ 0x5c6c27..0x5c6c39]
+void test_the_mirror_collect_leaves_the_scene_words() {
+    Rig rig;
+    const EntityHandle building =
+        rig.add_building(20.0, 10.0, building_collision(2, 2, 3), one_room_window());
+    rig.rebuild();
+    rig.ow.init_mission(rig.world, rig.cw);
+    OcclusionFrameCamera cam = rig.camera(5.0, 10.0, 1.5);
+    cam.water_z = fx(-10.0);
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    CHECK(rig.ow.building_batched(building));
+    const uint32_t main_mask = rig.ow.section_mask(building);
+    CHECK(main_mask == 0xFFFFFFFu);
+    Entity *b = rig.world.registry.get(building);
+    CHECK(b != nullptr);
+    if (b == nullptr) return;
+    const uint8_t armed = b->occlusion_latch;
+    CHECK(armed >= 16 && armed <= 23);
+
+    // The eye above the water: the plain building is not Reflective, so the
+    // walk skips it ahead of its latch; outdoors the word is set.
+    CHECK(rig.ow.mirror_water_visible(rig.world, rig.cw, cam, {}));
+    CHECK(b->occlusion_latch == armed);
+    // The eye below the water: the walk is unfiltered and ticks it.
+    OcclusionFrameCamera below = cam;
+    below.water_z = fx(10.0);
+    CHECK(rig.ow.mirror_water_visible(rig.world, rig.cw, below, {}));
+    CHECK(b->occlusion_latch == armed - 1);
+    // A Reflective static enters the walk above the water too.
+    b->engine_flags |= kEntityFlagReflective;
+    CHECK(rig.ow.mirror_water_visible(rig.world, rig.cw, cam, {}));
+    CHECK(b->occlusion_latch == armed - 2);
+
+    // The scene's own words stand.
+    CHECK(rig.ow.selected_view() == OcclusionView::kMain);
+    CHECK(rig.ow.building_batched(building));
+    CHECK(rig.ow.section_mask(building) == main_mask);
+    CHECK(rig.ow.exterior_visible() && rig.ow.water_visible());
+}
+
+// The water mirror's entity collectors: past its section masks and ahead of the
+// scene's words coming back, the statics' and pools 0 / 1's walks run over the
+// mirror's camera with its match. At or above the water a person is skipped ahead
+// of its latch while a vehicle (its init's Reflective bit) is collected and its
+// latch re-arms on the shared PRNG stream; below the water the walk is unfiltered.
+// [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0 - the calls
+//  @ 0x5c913d / @ 0x5c9145 / @ 0x5c914e, the match passed @ 0x5c913b / @ 0x5c9142 /
+//  @ 0x5c914a; the collectors' tests @ 0x5c6ff2..0x5c7001 / @ 0x5c8d01..0x5c8d10;
+//  Entity_InitFromModel @ 0x40e204..0x40e20a; PRNG_Next16_C @ 0x6131b0]
+void test_the_mirror_collect_walks_the_entities_under_its_match() {
+    Rig rig;
+    rig.world.registry.configure_pool(1, 4); // the vehicle's pool (the rig configures 0 and 2)
+    Entity npc;
+    npc.kind = EntityKind::Organic;
+    npc.net_id = rig.next_net_id++;
+    npc.position = {60.0f, 10.0f, 0.0f};
+    npc.bound_radius = 1.5625f;
+    npc.alive = true;
+    const EntityHandle nh = rig.world.registry.spawn(0, npc);
+    Entity car;
+    car.kind = EntityKind::Item;
+    car.item_type = 1; // a vehicle def
+    car.net_id = rig.next_net_id++;
+    car.position = {60.0f, 12.0f, 1.0f};
+    car.heading = placed_heading_bam(90);
+    car.alive = true;
+    const EntityHandle vh = rig.world.registry.spawn(1, car);
+    rig.rebuild();
+    opennova::renderer::ObjectProjectionSphere unstamped;
+    unstamped.valid = true;
+    rig.ow.assign_render_model(vh, unstamped);
+    uint32_t stream = 0x00C0FFEEu;
+    rig.ow.bind_focal_wind_random(&stream);
+    // PRNG_Next16_C's step, the oracle for one draw.
+    const auto next16 = [](uint32_t &s) {
+        const auto rol = [](uint32_t v, int k) { return (v << k) | (v >> (32 - k)); };
+        const uint32_t rotated = rol(s + rol(s, 11), 4);
+        s = rotated ^ 1u;
+        return static_cast<uint16_t>((rotated & 0xFFFFu) ^ 1u);
+    };
+
+    OcclusionFrameCamera cam = rig.camera(5.0, 10.0, 1.5);
+    cam.water_z = fx(-10.0);
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    Entity *n = rig.world.registry.get(nh);
+    Entity *v = rig.world.registry.get(vh);
+    CHECK(n != nullptr && v != nullptr);
+    if (n == nullptr || v == nullptr) return;
+    int walks = 0;
+    uint32_t match = 0xFFFFFFFFu;
+    bool person = false;
+    bool vehicle = false;
+    const auto walk = [&](const OcclusionFrameCamera &mirror) {
+        ++walks;
+        match = mirror.collect_flag_match;
+        person = rig.ow.entity_render_visible(rig.world, rig.cw, *n, mirror);
+        vehicle = rig.ow.entity_render_visible(rig.world, rig.cw, *v, mirror);
+    };
+
+    // The eye above the water: the person stays out ahead of its latch, the vehicle's
+    // latch re-arms with exactly one draw of the shared stream.
+    uint32_t expected = stream;
+    const uint16_t draw = next16(expected);
+    CHECK(rig.ow.mirror_water_visible(rig.world, rig.cw, cam, walk));
+    CHECK(walks == 1 && match == kEntityFlagReflective);
+    CHECK(!person && n->occlusion_latch == 0);
+    CHECK(vehicle && v->occlusion_latch == static_cast<uint8_t>((draw & 7) + 16));
+    CHECK(stream == expected);
+    // The scene's collect then ticks the vehicle's latch the mirror armed.
+    const uint8_t armed = v->occlusion_latch;
+    CHECK(rig.ow.entity_render_visible(rig.world, rig.cw, *v, cam));
+    CHECK(v->occlusion_latch == armed - 1);
+
+    // The eye below the water: unfiltered, the person's latch arms too.
+    OcclusionFrameCamera below = cam;
+    below.water_z = fx(10.0);
+    CHECK(rig.ow.mirror_water_visible(rig.world, rig.cw, below, walk));
+    CHECK(walks == 2 && match == 0u);
+    CHECK(person && n->occlusion_latch >= 16 && n->occlusion_latch <= 23);
+    CHECK(vehicle && v->occlusion_latch == armed - 2);
+    CHECK(rig.ow.selected_view() == OcclusionView::kMain);
+}
+
+// The water mirror's building verdicts are its own collect's: read inside its walk
+// while the mirror's frame words stand, a plain building is out of the batch at or
+// above the water (its Flags word lacks the Reflective bit) and in it below, while
+// the scene's own verdict, read after, stays the scene's.
+// [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0, the match
+//  @ 0x5c9109..0x5c911f; Terrain_CollectVisibleSectorUserpoints, the test
+//  @ 0x5c6c27..0x5c6c39; Water_RenderReflectedWorldScene @ 0x5c8510 -
+//  Terrain_RenderSectorModels @ 0x5c8576 over the mirror's batch and masks]
+void test_the_mirror_building_verdicts() {
+    Rig rig;
+    const EntityHandle building =
+        rig.add_building(20.0, 10.0, building_collision(2, 2, 3), one_room_window());
+    rig.world.registry.get(building)->bms_id = 77;
+    rig.rebuild();
+    rig.ow.init_mission(rig.world, rig.cw);
+    OcclusionFrameCamera cam = rig.camera(5.0, 10.0, 1.5);
+    cam.water_z = fx(-10.0);
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    std::vector<opennova::inmatch::BuildingVerdict> scene;
+    opennova::inmatch::collect_building_verdicts(rig.world, rig.cw, rig.ow, scene);
+    CHECK(scene.size() == 1 && scene[0].bms_id == 77 &&
+          building_visibility_visible(scene[0].packed));
+
+    std::vector<opennova::inmatch::BuildingVerdict> mirror;
+    const auto walk = [&](const OcclusionFrameCamera &) {
+        opennova::inmatch::collect_building_verdicts(rig.world, rig.cw, rig.ow, mirror);
+    };
+    CHECK(rig.ow.mirror_water_visible(rig.world, rig.cw, cam, walk));
+    CHECK(mirror.size() == 1 && !building_visibility_visible(mirror[0].packed));
+    std::vector<opennova::inmatch::BuildingVerdict> after;
+    opennova::inmatch::collect_building_verdicts(rig.world, rig.cw, rig.ow, after);
+    CHECK(after.size() == 1 && after[0].packed == scene[0].packed);
+
+    OcclusionFrameCamera below = cam;
+    below.water_z = fx(10.0);
+    CHECK(rig.ow.mirror_water_visible(rig.world, rig.cw, below, walk));
+    CHECK(mirror.size() == 1 && building_visibility_visible(mirror[0].packed));
+}
+
+// The reflected subscene draws from the eye mirrored in the water plane at or
+// above it (yaw kept, pitch and roll negated), from the live eye below it.
+// [orig: Render_MainScene @ 0x5c1240 - the side test @ 0x5c1367..0x5c1370,
+//  z' = 2wh - z @ 0x5c1379..0x5c137b, pitch / roll negated @ 0x5c138e / @ 0x5c1390,
+//  the unchanged copy @ 0x5c13f6..0x5c1414]
+void test_the_mirror_reflected_view() {
+    OcclusionViewSpec view;
+    view.eye[0] = 3.0f;
+    view.eye[1] = 5.0f;
+    view.eye[2] = -2.0f;
+    // Looking ahead and down 30 degrees, rolled a little.
+    view.forward[0] = 0.0f;
+    view.forward[1] = -0.5f;
+    view.forward[2] = -0.8660254f;
+    view.right[0] = 0.9848078f;
+    view.right[1] = 0.1736482f;
+    view.right[2] = 0.0f;
+    view.up[0] = -0.1503837f;
+    view.up[1] = 0.8528685f;
+    view.up[2] = -0.5f;
+    view.water_z_units = 1.0f;
+    const OcclusionViewSpec above = mirror_reflected_view(view);
+    CHECK(above.eye[0] == 3.0f && above.eye[1] == -3.0f && above.eye[2] == -2.0f);
+    CHECK(above.forward[0] == 0.0f && above.forward[1] == 0.5f &&
+          above.forward[2] == -0.8660254f);
+    CHECK(above.right[0] == 0.9848078f && above.right[1] == -0.1736482f);
+    CHECK(above.up[0] == 0.1503837f && above.up[1] == 0.8528685f && above.up[2] == 0.5f);
+    view.water_z_units = 6.0f;
+    const OcclusionViewSpec below = mirror_reflected_view(view);
+    CHECK(below.eye[1] == 5.0f && below.forward[1] == -0.5f && below.up[0] == -0.1503837f);
+}
+
 // A round restart never re-runs the portal register + weld: the kernel's
 // OcclusionWorld outlives MissionKernel::restore_baseline, so the weld
 // registry, the retyped shared records and the building flags stay the first
@@ -1573,8 +1778,8 @@ void test_round_restart_keeps_the_first_weld() {
     // The test_weld_and_flags pair: A's +X window 0.1 u from B's -X window.
     a->position = {10.0f, 10.0f, 0.0f};
     b->position = {14.1f, 10.0f, 0.0f};
-    a->yaw = b->yaw = 90.0f; // identity heading
-    a->pitch = b->pitch = a->roll = b->roll = 0.0f;
+    a->heading = b->heading = placed_heading_bam(90); // identity heading
+    a->pitch_bam = b->pitch_bam = a->roll_bam = b->roll_bam = 0;
     QuadSpec qb;
     qb.type = kOccRecWindow;
     qb.section_a = 1;
@@ -1729,6 +1934,7 @@ void test_decoration_rows_are_entity_collected() {
         rig.add_building(20.0, 10.0, building_collision(2, 2, 3), one_room_window());
     if (Entity *b = rig.world.registry.get(building)) {
         b->has_item_def = true;
+        b->item_type_index = 1; // a loaded row's def ordinal (+0x1C), the static prox list's gate
         b->item_type = kItemDefTypeBuilding;
     }
     // A crate stack inside the room: a pool-2 row (the BMS building record
@@ -1769,9 +1975,10 @@ void test_decoration_rows_are_entity_collected() {
     c.kind = EntityKind::Building;
     c.net_id = rig.next_net_id++;
     c.position = {19.0f, 10.0f, 0.5f};
-    c.yaw = 90;
+    c.heading = placed_heading_bam(90);
     c.alive = true;
     c.has_item_def = true;
+    c.item_type_index = 1; // a loaded row's def ordinal (+0x1C), the static prox list's gate
     c.item_type = 2;
     c.bound_radius = 0.9f;
     const EntityHandle crate = rig.world.registry.spawn(2, c);
@@ -1855,6 +2062,10 @@ int main() {
     test_building_visibility_feed_word();
     test_model_leg_render_model_sphere();
     test_collector_runs_per_view();
+    test_the_mirror_collect_leaves_the_scene_words();
+    test_the_mirror_collect_walks_the_entities_under_its_match();
+    test_the_mirror_building_verdicts();
+    test_the_mirror_reflected_view();
     test_round_restart_keeps_the_first_weld();
     test_eye_in_front_of_a_window_keeps_the_exterior();
     test_decoration_rows_are_entity_collected();

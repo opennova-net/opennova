@@ -48,6 +48,38 @@
 
 namespace opennova::env {
 
+// Where a mission start loads the celestial bodies' models, and on which arm it builds their draw
+// objects. The start loads them on every arm past the rows' init and ahead of the HUD's overlay
+// init, the joiner's included: inside its S2C 0x1A load, never in its S2C 0x11 connect leg. Each
+// load is a model def with no device object; a model's device buffers are made at its first
+// submit, and a dedicated host's frames draw no scene, so a dedicated host's start builds none of
+// the bodies' draw objects (D-NET-NEW-L3-38).
+// [orig: Game_StartMission @0x524360 - Entity_InitAllFromModels (the call @0x52567F),
+//  EffectWorld_LoadCelestialModels @0x5ADC50 (the call @0x525724), HUD_InitOverlaySystem (the
+//  call @0x525733); EffectWorld_LoadCelestialModels - ThreediGp_LoadModel @0x5B6160 (the calls
+//  @0x5ADC6C / @0x5ADC94 / @0x5ADCC9 / @0x5ADCFE / @0x5ADD2A); Render_SubmitEntity @0x5DAD80 ->
+//  CEffectWorld_AllocateLODGPUBuffers @0x5B2610 (the call @0x5DADD7); GameLoop_RenderFrame
+//  @0x521310 - is_mp_session_peer @0x52134E, jz @0x521355 to Server_DrawStatusScreen @0x521CEF
+//  past Render_ProcessMainSceneFrame @0x521CE8]
+constexpr bool builds_celestial_draws(bool dedicated_host) noexcept {
+	return !dedicated_host;
+}
+
+// The same leg loads two models no frame draws: the star model the environment names (when it
+// names one) and upl.3di (always), past the glare. Their only reader is the star-field renderer,
+// which has no caller (env_celestial.h), so each is a loaded model def and nothing more. Every
+// load is skipped while its model global is set; the teardown clears all five, and every
+// multiplayer start (GameLoop_Init's Game_StartMission(0)) destroys the model defs ahead of the
+// loads, so each mission start loads all five again (D-NET-NEW-L3-41).
+// [orig: EffectWorld_LoadCelestialModels @0x5ADC50 - the star's ThreediGp_LoadModel call @0x5ADCFE
+//  behind its name test, upl.3di's @0x5ADD2A ("upl.3di" @0x7DA0C8), then Star_GenerateInstanceTable
+//  @0x5AC850 (the call @0x5ADD40); g_CelestialStarModel / g_CelestialUplModel read only by
+//  Star_RenderField_Unused @0x5AD9C0 besides the load and the reset; Game_TeardownMission @0x522350 -
+//  EffectWorld_ResetCelestialModels @0x5ABFF0 (the call @0x52270E); GameLoop_Init @0x526370 -
+//  Game_StartMission(0) (the call @0x526377); Game_StartMission - EffectWorld_DestroyAllAndInitDeviceCaps
+//  @0x5B5710 (the call @0x524A6F, on a start that is not a restart)]
+inline constexpr const char *kCelestialUplModel = "upl.3di";
+
 // One call of the water-glint leg [orig: Environment_UpdateSunGlare @ 0x5ad130, once
 // per scene pass from Terrain_RenderWorldScene @ 0x5c96c0: the main scene's,
 // then the weapon Inset pass's at its own camera and view, on the same
@@ -160,6 +192,10 @@ inline SunVeil sun_veil_frame(const EnvironmentState &state, bool sun_model,
 	const float view_dot = forward_m.x * sun_m.x + forward_m.z * sun_m.z + forward_m.y * sun_m.y;
 	SunVeil veil = sun_veil_from_dot(io::float_to_fp16_16(view_dot), occlusion_brightness,
 			sun_dim, overcast);
+	// The water-reflected secondary runs only on a nonzero plane: retail's own
+	// zero test of the word [orig: Environment_ApplySunVeilAndExposureStopdown
+	// @0x5AD8B0, `cmp g_EnvWaterHeightFixed, 0` / `jz` @0x5AD8D5..0x5AD8DC]
+	// (water_height() is 0 with no plane authored).
 	if (!state.has_water_height() || state.water_height() == 0.0f) return veil;
 	Vec3 point_m;
 	// A rejected reflection (camera at or below the plane) adds no secondary

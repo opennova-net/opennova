@@ -348,6 +348,29 @@ int resolution_dimensions() {
 	return 0;
 }
 
+// The block's display mode (+0x60 / +0x64): the defaults' desktop size, replaced by a video_res
+// that parses; one that does not leaves the desktop's (NWHWI's fourth field, D-NET-NEW-L9-54).
+// [orig: Config_SetDefaults @0x54D030 - @0x54D0F6 / @0x54D10A; Config_ParseSettingsLine
+//  @0x54F740 - String_ParseResolutionDimensions called @0x551303]
+int display_mode() {
+	GameCfg cfg = defaults();
+	int32_t w = -1;
+	int32_t h = -1;
+	cfg.video_res = "1280x1024";
+	display_size(cfg, 1920, 1080, w, h);
+	TEST_EXPECT(w == 1280 && h == 1024);
+	cfg.video_res = " 800 X 600";
+	display_size(cfg, 1920, 1080, w, h);
+	TEST_EXPECT(w == 800 && h == 600);
+	cfg.video_res = "";
+	display_size(cfg, 1920, 1080, w, h);
+	TEST_EXPECT(w == 1920 && h == 1080);
+	cfg.video_res = "1024x0";
+	display_size(cfg, 1707, 960, w, h);
+	TEST_EXPECT(w == 1707 && h == 960);
+	return 0;
+}
+
 // dfx2.exe's cfg table: JO's rows with mpdfxcategory between mpnovaworldhostlanonly and mpreset
 // (DFX2-7), read and written only under that table; JO's table ignores the key and never writes it.
 int dfx2_table_row() {
@@ -440,6 +463,7 @@ int main() {
 	if (duplicates_and_floats() != 0) return 1;
 	if (crt_fixed_print() != 0) return 1;
 	if (resolution_dimensions() != 0) return 1;
+	if (display_mode() != 0) return 1;
 	std::printf("OK: gamecfg parse\n");
 	return 0;
 }

@@ -606,7 +606,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         // recovered executable has no producer that sets the Gold bit.
         // [orig: WacCmd_PlayerIsGold @0x4F0AF0;
         // NapiNPPlayer_Create @0x4C7850;
-        // CNapiNetwork_ParseServerVarList @0x4C4310, clear @0x4C4387]
+        // NapiNPPlayer_ParseServerVarList @0x4C4310, clear @0x4C4387]
         return 0;
     }
     if (strutil::iequals(n, "piskills")) {
@@ -820,6 +820,10 @@ int32_t WacVm::replicate(opennova::world::World &w, int cmd, const CommandDef &d
     const std::vector<world::ScriptRemoteArg> resolved = record.args;
     clear_soundset_operands(def, record.args);
     w.out.script_remote_commands.push_back(std::move(record));
+    // The 0x23 is queued before the local call runs, so it leads whatever that
+    // call raises (D-NET-NEW-V3-1). [orig: WacScript_ExecuteBytecode @0x4F58B0
+    //  (SendFiltered(0x23) @0x4F5ED1, the call switch @0x4F5EF6)]
+    w.send_script_pass_records();
     return finish(run_remote_command(w, cmd, resolved, names));
 }
 
@@ -1030,6 +1034,11 @@ void WacVm::execute(opennova::world::World &w) {
                 }
                 const uint32_t *args = (argc > 0) ? &code[ip + 1] : nullptr;
                 int32_t result = dispatch(w, cmd, args, argc, static_cast<uint32_t>(ip));
+                // Each command's sends are queued at its call, ahead of the
+                // next command's (D-NET-NEW-V3-1). [orig: WacScript_ExecuteBytecode
+                // @0x4F58B0 - the targeted SendFiltered(0x23) @0x4F5E74, the broadcast
+                // @0x4F5ED1 and the handlers' own sends inside the call switch @0x4F5EF6]
+                w.send_script_pass_records();
                 if (negate) result = (result == 0) ? 1 : 0;
                 apply_fold(op, result);
                 ip += 1 + static_cast<size_t>(argc);

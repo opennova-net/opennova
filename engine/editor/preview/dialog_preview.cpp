@@ -10,6 +10,7 @@
 #include <base/io/strutil.h>
 #include <base/io/tick_rate.h>
 #include <base/vfs/file_source.h>
+#include <formats/gamecfg/game_cfg.h>
 #include <formats/lwf/wav_pcm.h>
 #include <runtime/audio/dialog_queue.h>
 #include <runtime/mission/mission_sidecars.h>
@@ -99,8 +100,9 @@ bool DialogChannel::enqueue(const std::string &dialog, std::vector<audio::Dialog
 
 void DialogChannel::tick(int32_t tick, const WaveOf &wave_of, std::vector<Loaded> &out) {
 	// The device's half of Dialog_LoadAudioClip: the line's wave loaded and its voice started on the channel, a
-	// wave that does not load no voice (audio::DialogQueue::LoadLine).
-	const auto load = [&](const audio::DialogLineRef &line) {
+	// wave that does not load no voice (audio::DialogQueue::LoadLine). The preview plays at the shipped
+	// DialogueLevel, so the gate always lets a line play.
+	const auto load = [&](const audio::DialogLineRef &line, bool play) {
 		Loaded loaded;
 		loaded.tick = tick;
 		loaded.line = line;
@@ -109,7 +111,7 @@ void DialogChannel::tick(int32_t tick, const WaveOf &wave_of, std::vector<Loaded
 		clip.loaded = loaded.wave.loaded;
 		clip.samples = loaded.wave.samples;
 		clip.pitch_q16 = loaded.wave.pitch_q16;
-		if (clip.loaded) {
+		if (clip.loaded && play) {
 			clip.voice = next_voice_++;
 			const int32_t length = std::max(1, int32_t(std::ceil(loaded.wave.seconds * io::kTickHz)));
 			voices_.push_back({clip.voice, tick + length});
@@ -125,7 +127,8 @@ void DialogChannel::tick(int32_t tick, const WaveOf &wave_of, std::vector<Loaded
 		return false;
 	};
 	// A frame drawn before every tick: a fresh hold counts from the tick after it loaded.
-	queue_.tick(true, load, playing);
+	static const int32_t kDialogueLevel = gamecfg::defaults().dialogue_level;
+	queue_.tick(true, kDialogueLevel, load, playing);
 	const std::vector<uint64_t> &kept = queue_.voices();
 	voices_.erase(std::remove_if(voices_.begin(), voices_.end(),
 	                             [&](const std::pair<uint64_t, int32_t> &voice) {
@@ -179,7 +182,7 @@ DialogPlay plan_dialog_play(const DialogSources &sources, const std::string &dia
 		played.wave = each.line.wave;
 		played.file = each.line.file;
 		played.volume = each.line.volume;
-		played.text = audio::dialog_line_text(text, entry);
+		played.text = audio::dialog_line_text(nullptr, text, entry);
 		played.wait_s = (line < 0 && each.line.line > 0) ? double(each.line.delay) / 10.0 : 0.0;
 		played.start_tick = each.tick;
 		played.start_s = double(each.tick) / io::kTickHz;

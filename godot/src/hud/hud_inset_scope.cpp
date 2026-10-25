@@ -16,6 +16,8 @@ void HudInsetScope::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("get_active_render_camera"), &HudInsetScope::get_active_render_camera);
 	ClassDB::bind_method(D_METHOD("get_render_bounds"), &HudInsetScope::get_render_bounds);
+	ClassDB::bind_method(
+			D_METHOD("get_view_block_transform"), &HudInsetScope::get_view_block_transform);
 }
 Camera3D *HudInsetScope::get_active_render_camera() const {
 	// update_view and the visibility notification keep the target's update mode
@@ -100,6 +102,9 @@ void HudInsetScope::update_view(const Ref<PlayerLocalView> &view, Camera3D *sour
 	const auto &pose = v.inset_camera;
 	camera_->set_global_transform(mission_view_transform(
 			mission_to_godot(pose.eye), pose.yaw_deg, pose.pitch_deg, pose.roll_deg));
+	const auto &block = v.inset_view_block;
+	view_block_ = mission_view_transform(
+			mission_to_godot(block.eye), block.yaw_deg, block.pitch_deg, block.roll_deg);
 	target_->set_update_mode(
 			is_visible_in_tree() ? SubViewport::UPDATE_ALWAYS : SubViewport::UPDATE_DISABLED);
 	queue_redraw();

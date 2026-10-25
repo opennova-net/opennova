@@ -447,7 +447,7 @@ public:
 		Ref<RDPipelineColorBlendState> blend;
 		blend.instantiate();
 		blend->set_attachments(attachments);
-		RID pipeline = rd->render_pipeline_create(shader, p_format, vertex_format,
+		RID pipeline = create_rd_render_pipeline(rd, shader, p_format, vertex_format,
 				RenderingDevice::RENDER_PRIMITIVE_TRIANGLES, raster, multisample,
 				depth_state, blend);
 		if (pipeline.is_valid()) {
@@ -597,6 +597,19 @@ FoliageMaskCompositorEffect::~FoliageMaskCompositorEffect() = default;
 
 void FoliageMaskCompositorEffect::_bind_methods() {}
 
+void FoliageMaskCompositorEffect::create_device() {
+	if (!shutdown_requested_.load(std::memory_order_acquire)) {
+		call_device_create(callable_mp(this,
+				&FoliageMaskCompositorEffect::create_device_on_render_thread));
+	}
+}
+
+void FoliageMaskCompositorEffect::create_device_on_render_thread() {
+	if (!shutdown_requested_.load(std::memory_order_acquire)) {
+		impl_->initialize();
+	}
+}
+
 void FoliageMaskCompositorEffect::publish(
 		const std::shared_ptr<const FoliageMaskFrame> &p_frame) {
 	if (shutdown_requested_.load(std::memory_order_acquire)) {
@@ -658,6 +671,17 @@ void FoliageMaskCompositorEffect::_render_callback(int32_t p_effect_callback_typ
 		frame = impl_->frame;
 		view_frame = impl_->view_frame;
 	}
+	// A frame whose views have no MODEL mask to draw runs no pass: retail draws
+	// a mask only inside the wave of a crouched or prone person it anchors (the
+	// header carries the witness), and the person shaders sample the target
+	// only while a view's flag is up, which FoliageMaskPass raises with draws
+	// alone; so no frame clears the full-surface target and its depth for
+	// nothing. While either view has draws, each view's pass runs, an empty
+	// one too: the two views share the target and both flags gate on the same
+	// eye (the weapon Inset's is the main view's), so a view's pass must clear
+	// the other view's masks before its own opaque pass samples the target.
+	const bool any_draws = (frame && !frame->draws.empty()) ||
+			(view_frame && !view_frame->draws.empty());
 	// Each scene pass draws its own view's masks: the weapon Inset's render
 	// (its camera the one the Inset frame was compiled for) takes the Inset
 	// frame, every other view the main one.
@@ -668,7 +692,7 @@ void FoliageMaskCompositorEffect::_render_callback(int32_t p_effect_callback_typ
 			frame = view_frame;
 		}
 	}
-	if (!frame) {
+	if (!frame || !any_draws) {
 		return;
 	}
 	impl_->draw(*frame, p_render_data);
@@ -684,6 +708,13 @@ FoliageMaskPass::~FoliageMaskPass() {
 	effect_.unref();
 	installed_into_.unref();
 	target_texture_.unref();
+}
+
+void FoliageMaskPass::create_device() {
+	if (effect_.is_null()) {
+		effect_.instantiate();
+	}
+	effect_->create_device();
 }
 
 void FoliageMaskPass::_install(Node *p_scope) {

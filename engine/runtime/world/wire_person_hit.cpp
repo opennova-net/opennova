@@ -104,7 +104,7 @@ void wire_person_round_legs(World &world, WirePersonBody &body, const HitRecord 
 	const int32_t xy[2] = {body.pos[0], body.pos[1]};
 	collision_force_body(xy, body.heading_bam, body.flags,
 			owner.known ? &owner.group : nullptr, body.command_group,
-			ammo->secondary_anim, ammo->kz_physics, record.round_pos,
+			ammo->secondary_anim, ammo->kz_physics, record.round_pos.q16(),
 			body.hit_type, body.move_timer, body.move_timer, body.vel);
 	if (!effect.empty())
 		spawn_wire_person_hit_emitter(body, effect, world.out.destruction);

@@ -11,6 +11,7 @@
 #include "terrain/terrain_data.h"
 #include "terrain/terrain_tile_info.h"
 #include "terrain/terrain_foliage_def.h"
+#include "world/load_timeline.h"
 #include "util/string_convert.h"
 
 #include <godot_cpp/classes/base_material3d.hpp>
@@ -131,6 +132,9 @@ FoliageDispatcher::FoliageDispatcher() {
   // the Inset pass's own compile rides INSET_VIEW, which only it admits.
   main_set_.layer_mask = visual_layers::TERRAIN_FOLIAGE;
   inset_set_.layer_mask = visual_layers::INSET_VIEW;
+  // Each water mirror's own MODEL masks ride its own bit.
+  mirror_set_[0].layer_mask = visual_layers::MIRROR_VIEW;
+  mirror_set_[1].layer_mask = visual_layers::INSET_MIRROR_VIEW;
 }
 FoliageDispatcher::~FoliageDispatcher() {
   _release_draw_pools();
@@ -210,6 +214,13 @@ void FoliageDispatcher::_bind_methods() {
                        &FoliageDispatcher::release_inset_frame);
   ClassDB::bind_method(D_METHOD("is_inset_frame_live"),
                        &FoliageDispatcher::is_inset_frame_live);
+  ClassDB::bind_method(
+      D_METHOD("render_mirror_frame", "view", "eye_xform", "anchors", "time_ms"),
+      &FoliageDispatcher::render_mirror_frame);
+  ClassDB::bind_method(D_METHOD("release_mirror_frame", "view"),
+                       &FoliageDispatcher::release_mirror_frame);
+  ClassDB::bind_method(D_METHOD("is_mirror_frame_live", "view"),
+                       &FoliageDispatcher::is_mirror_frame_live);
   ClassDB::bind_method(D_METHOD("reset"), &FoliageDispatcher::reset);
   ClassDB::bind_method(D_METHOD("invalidate_cells", "rect"), &FoliageDispatcher::invalidate_cells);
   ClassDB::bind_method(D_METHOD("get_total_instances"),
@@ -772,15 +783,6 @@ Ref<Mesh> FoliageDispatcher::load_mesh(const Ref<ResourceRoot> &p_resource_root,
   }
   const String mesh_key = _asset_cache_key(key, basename);
   if (asset_mesh_cache_.has(mesh_key)) {
-    // Game_StartMission resets the logical renderer-definition registry, but
-    // MainGame deliberately retains this expensive geometry cache with its
-    // mounted root. A cache hit in the new mission is still a loaded shared
-    // model-def node, so recreate retail's sticky foliage bit without parsing
-    // or rebuilding the .3DI.
-    const String cached_model_path = asset_model_path_cache_.has(mesh_key)
-                                         ? asset_model_path_cache_[mesh_key]
-                                         : basename + String(".3di");
-    ObjectData::mark_cached_network_challenge_foliage_model(cached_model_path);
     return asset_mesh_cache_[mesh_key];
   }
 
@@ -791,10 +793,7 @@ Ref<Mesh> FoliageDispatcher::load_mesh(const Ref<ResourceRoot> &p_resource_root,
 
   Ref<ObjectData> data;
   data.instantiate();
-  // Retail marks foliage model-def nodes before it freezes the C2S 0x3D
-  // renderer-definition snapshot; they remain renderable but are excluded from
-  // that network page. [orig: CEffectWorld_MarkModelsDirty @0x5b2220 writes node+0x3D4 before CEffectWorld_RebuildAllModelBuffers @0x5b3a80]
-  if (data->open_from_resource_root(p_resource_root, model_path, false) != OK) {
+  if (data->open_from_resource_root(p_resource_root, model_path) != OK) {
     return Ref<Mesh>();
   }
   const Array submeshes = data->build_lod_submeshes(0);
@@ -1087,7 +1086,7 @@ void FoliageDispatcher::_update_materials() {
   }
   const bool has_colormap = colormap.is_valid();
   Ref<Texture2D> heightfield_normal;
-  Ref<Texture2DArray> tile_cache;
+  Ref<TextureLayered> tile_cache;
   if (terrain_ != nullptr) {
     heightfield_normal = terrain_->get_heightfield_normal_texture();
     tile_cache = terrain_->get_tile_cache_texture();
@@ -1270,7 +1269,7 @@ bool FoliageDispatcher::_bind_current_scenario() {
       ++frame_stats_.backend_scenario_writes;
     }
   };
-  for (DrawSet *set : {&main_set_, &inset_set_}) {
+  for (DrawSet *set : {&main_set_, &inset_set_, &mirror_set_[0], &mirror_set_[1]}) {
     rebind(set->detail_pool);
     rebind(set->model_pool);
   }
@@ -1297,7 +1296,7 @@ void FoliageDispatcher::_set_draw_pool_visibility(bool p_visible) {
       stamp.visible = visible;
     }
   };
-  for (DrawSet *set : {&main_set_, &inset_set_}) {
+  for (DrawSet *set : {&main_set_, &inset_set_, &mirror_set_[0], &mirror_set_[1]}) {
     update(set->detail_pool, set->detail_stamps);
     update(set->model_pool, set->model_stamps);
   }
@@ -1325,6 +1324,10 @@ void FoliageDispatcher::_release_draw_pools() {
   _release_draw_set(server, main_set_);
   _release_draw_set(server, inset_set_);
   inset_live_ = false;
+  for (int view = 0; view < 2; ++view) {
+    _release_draw_set(server, mirror_set_[view]);
+    mirror_live_[view] = false;
+  }
   draw_scenario_ = RID();
 }
 
@@ -1424,6 +1427,9 @@ Dictionary FoliageDispatcher::get_backend_report() const {
   Dictionary result;
   result["backend"] = "rendering_server_rid";
   result["scenario_bound"] = draw_scenario_.is_valid();
+  result["tier_shaders"] = detail_high_shader_.is_valid() &&
+                           detail_low_shader_.is_valid() &&
+                           silhouette_shader_.is_valid();
   result["detail_pool_size"] =
       static_cast<int64_t>(main_set_.detail_pool.size());
   result["model_pool_size"] =
@@ -1502,6 +1508,25 @@ Dictionary FoliageDispatcher::get_backend_report() const {
   inset["visible_draws"] = inset_visible;
   inset["draws"] = inset_draws;
   result["inset"] = inset;
+  Array mirrors;
+  for (int view = 0; view < 2; ++view) {
+    Array mirror_draws;
+    int64_t mirror_active = 0;
+    int64_t mirror_visible = 0;
+    append_rows(mirror_draws, mirror_active, mirror_visible, mirror_set_[view].detail_pool,
+                mirror_set_[view].detail_stamps, StringName("detail"),
+                mirror_set_[view].layer_mask);
+    append_rows(mirror_draws, mirror_active, mirror_visible, mirror_set_[view].model_pool,
+                mirror_set_[view].model_stamps, pass_name_silhouette(),
+                mirror_set_[view].layer_mask);
+    Dictionary mirror;
+    mirror["live"] = mirror_live_[view];
+    mirror["active_draws"] = mirror_active;
+    mirror["visible_draws"] = mirror_visible;
+    mirror["draws"] = mirror_draws;
+    mirrors.push_back(mirror);
+  }
+  result["mirrors"] = mirrors;
 
   result["instance_creates"] = frame_stats_.backend_instance_creates;
   result["scenario_writes"] = frame_stats_.backend_scenario_writes;
@@ -1855,18 +1880,38 @@ FoliageDispatcher::_expansion_samplers() {
 
 void FoliageDispatcher::_compile_and_apply(
     const opennova::renderer::FoliageViewInput &p_view) {
+  _part("visuals");
   _ensure_visuals();
+  _part_end();
+  _part("materials");
   _update_materials();
+  _part_end();
 
+  _part("compile");
   const opennova::renderer::FoliageDrawList &draw_list =
       compiler_.compile(p_view, _world_samplers(), _expansion_samplers());
+  _part_end();
+  _part("meshes");
   _refresh_model_meshes();
+  _part_end();
+  _part("apply");
   _apply_draw_list(draw_list, main_set_, true);
+  _part_end();
+  _part("masks");
   if (is_visible_in_tree()) {
     mask_pass_.publish(this, draw_list, compiler_, fd_textures_);
   } else {
     mask_pass_.clear();
   }
+  _part_end();
+}
+
+void FoliageDispatcher::_part(const char *p_name) {
+  if (part_timeline_ != nullptr) part_timeline_->span(p_name);
+}
+
+void FoliageDispatcher::_part_end() {
+  if (part_timeline_ != nullptr) part_timeline_->end_span();
 }
 
 void FoliageDispatcher::render_inset_frame(Camera3D *p_camera,
@@ -1912,6 +1957,42 @@ void FoliageDispatcher::render_inset_frame(Camera3D *p_camera,
   } else {
     mask_pass_.clear_view();
   }
+}
+
+void FoliageDispatcher::render_mirror_frame(int p_view, const Transform3D &p_eye,
+                                            const PackedVector3Array &p_anchors,
+                                            int64_t p_time_ms) {
+  if (p_view < 0 || p_view > 1) {
+    return;
+  }
+  // The mirror's input: the view its subscene draws from and its own
+  // collector's MODEL anchors; no detail cells.
+  opennova::renderer::FoliageViewInput view = _view_input(p_eye, p_time_ms);
+  view.silhouette_anchors.clear();
+  view.silhouette_anchors.reserve(p_anchors.size());
+  for (int index = 0; index < p_anchors.size(); ++index) {
+    const Vector3 anchor = p_anchors[index];
+    view.silhouette_anchors.push_back({static_cast<float>(anchor.x),
+                                       static_cast<float>(anchor.y),
+                                       static_cast<float>(anchor.z)});
+  }
+  view.detail_cells.clear();
+  _ensure_visuals();
+  _update_materials();
+  const opennova::renderer::FoliageDrawList &draw_list =
+      compiler_.compile(view, _world_samplers(), _expansion_samplers());
+  _refresh_model_meshes();
+  _apply_draw_list(draw_list, mirror_set_[p_view], false);
+  mirror_live_[p_view] = true;
+}
+
+void FoliageDispatcher::release_mirror_frame(int p_view) {
+  if (p_view < 0 || p_view > 1 || !mirror_live_[p_view]) {
+    return;
+  }
+  mirror_live_[p_view] = false;
+  _hide_pool_tail(mirror_set_[p_view].detail_pool, mirror_set_[p_view].detail_stamps, 0, false);
+  _hide_pool_tail(mirror_set_[p_view].model_pool, mirror_set_[p_view].model_stamps, 0, true);
 }
 
 void FoliageDispatcher::release_inset_frame() {

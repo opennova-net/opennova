@@ -103,7 +103,7 @@ std::string item_label(testrig::MissionRig &rig, const w::Entity &e) {
 	const def::DefItemsFile *items = rig.items_table();
 	if (items == nullptr) return "?";
 	const def::DefItemDef *d = mission::find_item_def(
-			*items, mission::visual_item_id_for_runtime_type(e.item_id, *items));
+			*items, mission::visual_item_id_for_runtime_type(e.item_id));
 	if (d == nullptr) return "?";
 	return std::string(d->sid) + "/" + d->graphic;
 }
@@ -180,8 +180,8 @@ void list_buildings(testrig::MissionRig &rig) {
 		int counts[8] = {};
 		for (const DoorRecord &d : recs) counts[std::min(d.type, 7)]++;
 		std::printf("bldg bms=%d slot=%d %s pos (%.1f, %.1f, %.1f) yaw %d dist %.0f  recs t0=%d t1=%d t2=%d t3=%d t5=%d  win=%d open=%d link=%d\n",
-				e.bms_id, e.handle.slot(), item_label(rig, e).c_str(), e.position.x, e.position.y,
-				e.position.z, static_cast<int>(e.yaw), testrig::planar_distance(e.position, spawn),
+				e.bms_id, e.handle.slot(), item_label(rig, e).c_str(), float(e.position.x), float(e.position.y),
+				float(e.position.z), static_cast<int>(w::mission_yaw_whole_deg(e.heading)), testrig::planar_distance(e.position, spawn),
 				counts[0], counts[1], counts[2], counts[3], counts[5], fl.has_windows, fl.has_open,
 				fl.has_links);
 		for (const DoorRecord &d : recs) {
@@ -750,7 +750,7 @@ int main(int argc, char **argv) {
 		const w::Vec3 sp = rig.local.player_position();
 		const w::Entity *pl = rig.local.player();
 		std::printf("spawn: pos (%.2f, %.2f, %.2f) yaw %d letters 0x%02X plhit %s %s\n", sp.x, sp.y, sp.z,
-				pl != nullptr ? static_cast<int>(pl->yaw) : 0, rig.collision.local_player_blink_flags,
+				pl != nullptr ? static_cast<int>(w::mission_yaw_whole_deg(pl->heading)) : 0, rig.collision.local_player_blink_flags,
 				hit_str(pl != nullptr ? pl->blink_hits[0] : 0).c_str(),
 				hit_str(pl != nullptr ? pl->blink_hits[1] : 0).c_str());
 		w::EntityHandle nearest;
@@ -764,8 +764,8 @@ int main(int argc, char **argv) {
 			int counts[8] = {};
 			for (const DoorRecord &dr : portal_records(rig, e)) counts[std::min(dr.type, 7)]++;
 			std::printf("spawn-bldg bms=%d slot=%d %s d=%.1f pos (%.2f, %.2f, %.2f) yaw %d occ=%d recs t0=%d t1=%d t2=%d t3=%d t5=%d win=%d forced=0x%X\n",
-					e.bms_id, e.handle.slot(), item_label(rig, e).c_str(), d, e.position.x, e.position.y,
-					e.position.z, static_cast<int>(e.yaw), occ, counts[0], counts[1], counts[2], counts[3],
+					e.bms_id, e.handle.slot(), item_label(rig, e).c_str(), d, float(e.position.x), float(e.position.y),
+					float(e.position.z), static_cast<int>(w::mission_yaw_whole_deg(e.heading)), occ, counts[0], counts[1], counts[2], counts[3],
 					counts[5], fl.has_windows, rig.occlusion.forced_section_mask(e.handle));
 			if (const w::CollisionModel *cm = rig.collision.model_for(rig.world, e.handle)) {
 				for (size_t si = 0; si < cm->sections.size(); ++si) {
@@ -795,8 +795,8 @@ int main(int argc, char **argv) {
 			if (testrig::planar_distance(e.position, sp) > opt.radius) return;
 			std::printf("spawn-ent bms=%d h=%u %s kind %d d=%.1f pos (%.2f, %.2f, %.2f) hits %s %s flags&1=%u\n",
 					e.bms_id, static_cast<unsigned>(e.handle.packed), item_label(rig, e).c_str(),
-					static_cast<int>(e.kind), testrig::planar_distance(e.position, sp), e.position.x,
-					e.position.y, e.position.z, hit_str(e.blink_hits[0]).c_str(),
+					static_cast<int>(e.kind), testrig::planar_distance(e.position, sp), float(e.position.x),
+					float(e.position.y), float(e.position.z), hit_str(e.blink_hits[0]).c_str(),
 					hit_str(e.blink_hits[1]).c_str(), static_cast<unsigned>(e.flags & 1u));
 		});
 		const w::Entity *nb = rig.world.registry.get(nearest);
@@ -830,7 +830,7 @@ int main(int argc, char **argv) {
 			// (Math_BuildFixedPointMatrixFromEulerAngles + TransformPoint22), and
 			// copied unchanged into viewport+4 (byte_A78364) before the collect
 			// @0x5ca352..0x5ca37b -> Viewport_BuildProjectionMatrix @0x411136.
-			const double yaw0 = pl != nullptr ? static_cast<double>(pl->yaw) : 270.0;
+			const double yaw0 = pl != nullptr ? static_cast<double>(w::mission_yaw_whole_deg(pl->heading)) : 270.0;
 			for (const int pitch : {-20, 0, 20}) {
 				rig.local.teleport_local_player(sp, yaw0, static_cast<double>(pitch));
 				rig.tick(12);
@@ -838,8 +838,8 @@ int main(int argc, char **argv) {
 				const w::AiEntity *pa = rig.local.player_ai();
 				const w::LocalPlayerViewFrame vf = rig.local.view_frame();
 				if (pe == nullptr || pa == nullptr || !vf.camera_pose_valid) continue;
-				const int32_t eye0[3] = {pa->pos[0] + pe->eye_offset_x, pa->pos[1] + pe->eye_offset_y,
-						pa->pos[2] + pe->eye_offset_z};
+				const int32_t eye0[3] = {pa->self->position.x.q16 + pe->eye_offset_x, pa->self->position.y.q16 + pe->eye_offset_y,
+						pa->self->position.z.q16 + pe->eye_offset_z};
 				const int32_t hb = w::bam_heading_from_mission_yaw_deg(static_cast<double>(vf.camera.yaw_deg));
 				const int32_t pb = static_cast<int32_t>(std::lround(vf.camera.pitch_deg / w::kDegreesPerBam));
 				const int32_t rb = static_cast<int32_t>(std::lround(vf.camera.roll_deg / w::kDegreesPerBam));
@@ -853,10 +853,10 @@ int main(int argc, char **argv) {
 				const float px[3] = {vf.camera.eye[0], vf.camera.eye[1], vf.camera.eye[2]};
 				const w::BlinkAccum q = point_query(rig, px);
 				std::printf("eye: pitch %+3d | pos (%.4f, %.4f, %.4f) CameraOffset (%.4f, %.4f, %.4f) head-pos (%.4f, %.4f, %.4f)%s\n",
-						pitch, pa->pos[0] / 65536.0, pa->pos[1] / 65536.0, pa->pos[2] / 65536.0,
+						pitch, pa->self->position.x.q16 / 65536.0, pa->self->position.y.q16 / 65536.0, pa->self->position.z.q16 / 65536.0,
 						pe->eye_offset_x / 65536.0, pe->eye_offset_y / 65536.0, pe->eye_offset_z / 65536.0,
-						(head[0] - pa->pos[0]) / 65536.0, (head[1] - pa->pos[1]) / 65536.0,
-						(head[2] - pa->pos[2]) / 65536.0, have_head ? "" : " (no head anchor)");
+						(head[0] - pa->self->position.x.q16) / 65536.0, (head[1] - pa->self->position.y.q16) / 65536.0,
+						(head[2] - pa->self->position.z.q16) / 65536.0, have_head ? "" : " (no head anchor)");
 				std::printf("eye: pitch %+3d | view yaw %.3f pitch %.3f roll %.3f | port eye (%.4f, %.4f, %.4f) retail-chain eye (%.4f, %.4f, %.4f) | diff %.5f u | camera query %s\n",
 						pitch, vf.camera.yaw_deg, vf.camera.pitch_deg, vf.camera.roll_deg, px[0], px[1], px[2],
 						retail_eye[0] / 65536.0, retail_eye[1] / 65536.0, retail_eye[2] / 65536.0,
@@ -873,7 +873,7 @@ int main(int argc, char **argv) {
 			// non-building entity within range, its blink quad, the
 			// collector's blink-hits gate, the frustum sphere, and the final
 			// verdict (the render wave's render_TOC runs only on an empty quad).
-			rig.local.teleport_local_player(sp, pl != nullptr ? static_cast<double>(pl->yaw) : 0.0, 0.0);
+			rig.local.teleport_local_player(sp, pl != nullptr ? static_cast<double>(w::mission_yaw_whole_deg(pl->heading)) : 0.0, 0.0);
 			rig.tick(2);
 			Frame fr;
 			run_frame(rig, *nb, none, fwd, fr);
@@ -890,7 +890,7 @@ int main(int argc, char **argv) {
 				bool in_view = true;
 				for (int32_t p = 0; p < cam.frustum_count; ++p)
 					if (pos[0] * cam.frustum[p][0] + pos[1] * cam.frustum[p][1] + pos[2] * cam.frustum[p][2] +
-									cam.frustum[p][3] < -std::max(e.bound_radius, 1.0f))
+									cam.frustum[p][3] < -std::max(float(e.bound_radius), 1.0f))
 						in_view = false;
 				const bool gate = rig.occlusion.blink_hits_render_active(e.blink_hits);
 				std::printf("why: bms=%d h=%u %s d=%.1f hits %s gate=%d view~%d culled=%d\n", e.bms_id,
@@ -953,7 +953,7 @@ int main(int argc, char **argv) {
 					expect(drawn, msg);
 				}
 			}
-			rig.local.teleport_local_player(sp, pl != nullptr ? static_cast<double>(pl->yaw) : 0.0, 0.0);
+			rig.local.teleport_local_player(sp, pl != nullptr ? static_cast<double>(w::mission_yaw_whole_deg(pl->heading)) : 0.0, 0.0);
 			rig.tick(2);
 		}
 		std::vector<Frame> frames;
@@ -986,8 +986,8 @@ int main(int argc, char **argv) {
 			if (e.blink_hits[0] == 0) ++stale;
 			std::printf("scan: bms=%d h=%u pool=%d %s kind %d pos (%.2f, %.2f, %.2f) hits %s query %s%s\n",
 					e.bms_id, static_cast<unsigned>(e.handle.packed), e.handle.pool(),
-					item_label(rig, e).c_str(), static_cast<int>(e.kind), e.position.x, e.position.y,
-					e.position.z, hit_str(e.blink_hits[0]).c_str(), hit_str(q.hits[0]).c_str(),
+					item_label(rig, e).c_str(), static_cast<int>(e.kind), float(e.position.x), float(e.position.y),
+					float(e.position.z), hit_str(e.blink_hits[0]).c_str(), hit_str(q.hits[0]).c_str(),
 					e.blink_hits[0] == 0 ? "  <- EMPTY QUAD INSIDE A BOX" : "");
 		});
 		std::printf("scan: %d entities carry a blink quad; %d sit in a box with an empty quad\n",
@@ -1026,8 +1026,8 @@ int main(int argc, char **argv) {
 	const w::Entity *bldg = rig.world.registry.get(bldg_handle);
 	if (!expect(bldg != nullptr, "a building with a floor-level exterior (type-2) record")) return 1;
 	std::printf("walk: building bms=%d slot=%d %s pos (%.2f, %.2f, %.2f) yaw %d; door rec %d A=%d B=%d at (%.2f, %.2f, %.2f) z %.2f..%.2f n (%.2f, %.2f, %.2f)\n",
-			bldg->bms_id, bldg->handle.slot(), item_label(rig, *bldg).c_str(), bldg->position.x,
-			bldg->position.y, bldg->position.z, static_cast<int>(bldg->yaw), door.index,
+			bldg->bms_id, bldg->handle.slot(), item_label(rig, *bldg).c_str(), float(bldg->position.x),
+			float(bldg->position.y), float(bldg->position.z), static_cast<int>(w::mission_yaw_whole_deg(bldg->heading)), door.index,
 			door.section_a, door.section_b, door.center[0], door.center[1], door.center[2],
 			door.min_z, door.max_z, door.normal[0], door.normal[1], door.normal[2]);
 
@@ -1064,8 +1064,8 @@ int main(int argc, char **argv) {
 			if ((e.kind == w::EntityKind::Building && w::building_def_row(e)) || e.kind == w::EntityKind::Marker) return;
 			if (testrig::planar_distance(e.position, dc) > 25.0f) return;
 			std::printf("near: bms=%d %s kind %d pos (%.2f, %.2f, %.2f) hits %s %s %s flags&1=%u\n",
-					e.bms_id, item_label(rig, e).c_str(), static_cast<int>(e.kind), e.position.x,
-					e.position.y, e.position.z, hit_str(e.blink_hits[0]).c_str(),
+					e.bms_id, item_label(rig, e).c_str(), static_cast<int>(e.kind), float(e.position.x),
+					float(e.position.y), float(e.position.z), hit_str(e.blink_hits[0]).c_str(),
 					hit_str(e.blink_hits[1]).c_str(), hit_str(e.blink_hits[2]).c_str(),
 					static_cast<unsigned>(e.flags & 1u));
 		});

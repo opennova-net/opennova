@@ -327,6 +327,17 @@ void emitter_advance(Emitter &e, float dt, const EmitterEnvironment &env = {},
 // [orig: CParticleEmitter_IsAliveOrEmitting @ 0x5e2640].
 bool emitter_alive(const Emitter &e) noexcept;
 
+// Retail's sphere-in-viewport test over an AABB: its center and half-diagonal (a zero
+// extent becomes 0.01) against the view's clip state. The NOVISNOUPDATE gate tests an
+// emitter's live bounds with it, and the render submit tests the same bounds before the
+// emitter joins the frame's render list (renderer/particle_frame.h).
+// [orig: BoundingBox_IsVisibleInFrustum @ 0x5e45b0 -> Viewport_IsSphereVisible @ 0x5f6ca0 ->
+//  Viewport_TransformAndClipPoint @ 0x4115e0 against the current g_MainViewport]. The port
+// tests the sphere against the six camera planes instead of retail's fixed-point viewport
+// projection.
+bool bounds_visible_in_frustum(Vec3 minimum, Vec3 maximum,
+		const ParticleViewFrustum &frustum) noexcept;
+
 // Spawn one particle immediately (bypasses the emission schedule). Returns
 // false if the particle pool is at max_particles and no slot can be reclaimed.
 // Test helper; production code should use emitter_advance. `forces` answers

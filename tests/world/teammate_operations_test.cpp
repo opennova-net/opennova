@@ -25,13 +25,17 @@ struct Factory : ITeammateSpawner {
         if (int(requests.size()) == fail_request) return {};
         Entity seed; seed.kind = r.helicopter ? EntityKind::Item : EntityKind::Organic;
         seed.item_id = r.item_type; seed.net_id = r.ssn; seed.team = 1; seed.has_item_def = true;
-        seed.position = {r.pos[0] / 65536.0f, r.pos[1] / 65536.0f, r.pos[2] / 65536.0f};
-        seed.yaw = float(mission_yaw_deg_from_bam_heading(r.heading));
+        seed.position.set_q16({r.pos[0], r.pos[1], r.pos[2]});
+        seed.heading = placed_heading_bam(float(mission_yaw_deg_from_bam_heading(r.heading)));
         seed.spawn_origin = kSpawnOriginNone;
-        const EntityHandle h = world.registry.spawn(r.helicopter ? 1 : 0, seed);
+        // Both clones allocate includeInUse 0, as the production spawner does
+        // [orig: Entity_CloneFromTemplate `push 0` @0x439750;
+        //  Entity_CloneFromTemplateWithAI `push 0` @0x4397D0].
+        const EntityHandle h = world.registry.spawn(r.helicopter ? 1 : 0, seed,
+                EntityRegistry::Reuse::Fresh);
         if (!h.valid()) return h;
         AiEntity &ai = *world.ai.at(world.ai.attach(h));
-        std::copy_n(r.pos, 3, ai.pos); ai.heading = r.heading; ai.net_id = r.ssn;
+        ai.heading = r.heading; ai.net_id = r.ssn;
         ai.inf.active = !r.helicopter;
         return h;
     }
@@ -51,9 +55,9 @@ struct Fixture {
         seed.position = {10, 20, 3};
         patient = world.registry.spawn(0, seed);
         AiEntity &ai = *world.ai.at(world.ai.attach(patient));
-        ai.pos[0] = 10 * 65536; ai.pos[1] = 20 * 65536; ai.pos[2] = 3 * 65536;
+        ai.self->position.x.q16 = 10 * 65536; ai.self->position.y.q16 = 20 * 65536; ai.self->position.z.q16 = 3 * 65536;
         seed.kind = EntityKind::Marker; seed.item_id = 6088; seed.net_id = 500; seed.wp_number = 9;
-        seed.has_item_def = true; seed.yaw = 90;
+        seed.has_item_def = true; seed.heading = placed_heading_bam(90);
         marker = world.registry.spawn(3, seed);
     }
     void action(int sub = 2, int patient_id = 73, int point = 9) {
@@ -67,7 +71,7 @@ struct Fixture {
     Entity &first() { return *world.registry.get(slot().first); }
     Entity &second() { return *world.registry.get(slot().second); }
     void move(EntityHandle h, int32_t x, int32_t y, int32_t z) {
-        AiEntity &ai = *world.ai.for_handle(h); ai.pos[0] = x; ai.pos[1] = y; ai.pos[2] = z;
+        AiEntity &ai = *world.ai.for_handle(h); ai.self->position.x.q16 = x; ai.self->position.y.q16 = y; ai.self->position.z.q16 = z;
         world.registry.get(h)->position = {x / 65536.0f, y / 65536.0f, z / 65536.0f};
     }
     bool active_trigger(int sub) {
@@ -118,9 +122,9 @@ void test_complete_sequence_and_boundaries() {
     CHECK(f.air().brain.f[19] == 3 * 65536 && f.world.ai.events.at(3).f[3] == 0);
     auto slot = f.slot();
     Entity *heli = f.world.registry.get(slot.helicopter);
-    heli->saved_live_pos[2] = f.air().pos[2] - 1;
+    heli->saved_live_pos[2] = f.air().self->position.z.q16 - 1;
     f.tick(); CHECK(f.slot().state == State::Land);
-    heli->saved_live_pos[2] = f.air().pos[2];
+    heli->saved_live_pos[2] = f.air().self->position.z.q16;
     f.tick(); CHECK(f.slot().state == State::ApproachPatient);
     AiEntity *medic = f.world.ai.for_handle(slot.first.handle);
     CHECK(medic->slot.f[37] == 125 && medic->slot.f[38] == 73);
@@ -136,7 +140,7 @@ void test_complete_sequence_and_boundaries() {
     CHECK(f.world.registry.get(f.patient)->dragger == slot.first.handle);
     CHECK(f.world.registry.get(f.patient)->dragger_spawn_id == f.first().registry_spawn_id);
     CHECK((f.first().flags & 0x40) == 0 && medic->slot.f[38] == 11000);
-    const auto hx = f.air().pos[0], hy = f.air().pos[1], hz = f.air().pos[2];
+    const auto hx = f.air().self->position.x.q16, hy = f.air().self->position.y.q16, hz = f.air().self->position.z.q16;
     f.move(slot.first.handle, hx + 3 * 65536, hy, hz);
     f.move(slot.second.handle, hx + 65536, hy, hz);
     f.tick(); CHECK(f.slot().state == State::Return); // second alone cannot lead departure
@@ -172,7 +176,7 @@ void test_pickup_and_invalid_helicopter_boundary() {
     // placement's spawn form: yaw 1 -> ((89 << 16) / 360) << 16. [orig:
     //  HeliLift_SpawnPickup @0x45262E (lea ebp,[eax+4]; the Entity_SpawnFromItemDef
     //  calls @0x452650/@0x4526A5); Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
-    Fixture f; f.world.registry.get(f.marker)->yaw = 1; f.action(1);
+    Fixture f; f.world.registry.get(f.marker)->heading = placed_heading_bam(1); f.action(1);
     CHECK(f.factory.requests.size() == 2);
     CHECK(f.factory.requests[0].heading == 1061748736);
     CHECK(f.factory.requests[1].heading == 1061748736);
@@ -308,8 +312,57 @@ void test_flyover_with_a_destroyed_helicopter_stalls() {
         CHECK(f.world.registry.get(f.patient) != nullptr);
     }
 }
+// Retail's departure destroys the two medic clones and the helicopter and
+// clears their +0x219 after each Entity_Destroy (the patient keeps it), so the
+// next lift's includeInUse-0 clones take the same rows instead of growing the
+// pools [orig: HeliLift_UpdateSlotState @0x451730 - state 8, the clears
+// @0x451B49 / @0x451B65 (no brain) and @0x451BB8 / @0x451BD4 / @0x451BF0
+// (landed); Pool_AllocEntry @0x442230 - the +0x219 test @0x442266].
+void run_lift_to_finished(Fixture &f) {
+    f.world.logic_tick = 16;
+    f.air().brain.f[22] = 0; f.tick();
+    f.air().brain.f[22] = 40 * 65536 - 1; f.tick();
+    f.air().brain.f[22] = 5 * 65536 - 1; f.tick();
+    auto slot = f.slot();
+    f.world.registry.get(slot.helicopter)->saved_live_pos[2] = f.air().self->position.z.q16;
+    f.tick();
+    f.move(slot.first.handle, f.world.registry.get(f.slot().patient)->position.x.q16,
+           f.world.registry.get(f.slot().patient)->position.y.q16,
+           f.world.registry.get(f.slot().patient)->position.z.q16);
+    f.tick(); f.tick();
+    f.world.logic_tick = uint32_t(f.slot().deadline);
+    f.tick(); f.tick();
+    const auto hx = f.air().self->position.x.q16, hy = f.air().self->position.y.q16,
+               hz = f.air().self->position.z.q16;
+    f.move(slot.first.handle, hx + 3 * 65536, hy, hz);
+    f.move(slot.second.handle, hx + 65536, hy, hz);
+    f.tick();
+    f.first().flags |= 2;
+    f.tick(); f.tick();
+    f.move(slot.helicopter.handle, hx, hy, 38 * 65536);
+    f.tick(); f.tick();
+    f.air().brain.f[22] = 30 * 65536 - 1;
+    f.tick();
+}
+void test_departure_frees_the_clone_rows_for_the_next_lift() {
+    Fixture f; f.action();
+    const auto lift = f.slot();
+    run_lift_to_finished(f);
+    CHECK(f.slot().state == State::Finished);
+    f.tick(); CHECK(f.world.teammates.count() == 0);
+    Entity seed; seed.kind = EntityKind::Organic; seed.item_id = 111; seed.net_id = 74;
+    seed.position = {10, 20, 3};
+    const EntityHandle patient = f.world.registry.spawn(0, seed);
+    f.world.ai.attach(patient);
+    f.action(2, 74);
+    CHECK(f.world.teammates.count() == 1);
+    CHECK(f.slot().first.handle == lift.first.handle);
+    CHECK(f.slot().second.handle == lift.second.handle);
+    CHECK(f.slot().helicopter.handle == lift.helicopter.handle);
+}
 } // namespace
 int main() {
+    test_departure_frees_the_clone_rows_for_the_next_lift();
     test_dispatch_and_spawn();
     test_complete_sequence_and_boundaries();
     test_same_tick_hover_fallthrough();

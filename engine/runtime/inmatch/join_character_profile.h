@@ -9,7 +9,7 @@
 // first combo of its alignment, else entry 0 (an Avatars.def with no combo of
 // that side's), class 8 (rifleman).
 // [orig: PlayerProfile_InitDefaults @0x54BB40 (the fresh profile),
-//  EntitySlot_LookupAndPackEntry @0x57AD40 (the per-side default),
+//  CAvatarDefs_PackFirstComboOfAlignment @0x57AD40 (the per-side default),
 //  Avatars_ResolveSelectionIndex @0x57AE60,
 //  CNapiServerInfo_SerializeToSession @0x4C3650 <- the profile's two 0x8006
 //  side blocks; a saved id the registry no longer resolves is reallocated to
@@ -32,6 +32,13 @@ inline constexpr int kJoinDefaultAvatar = 1;
 
 struct JoinSideSelection {
 	bool present = false;
+	// The record's packed character word as the side block holds it, whatever the
+	// avatar table resolves (-1: the selection names its tree indices instead). The
+	// session apply copies it raw into g_CharIdTeams and the join's CI0 / CI1 carry it
+	// as it is [orig: Game_ApplySessionSettingsToGlobals @0x551500 - the reads
+	// @0x551F85 / @0x551F8C, the stores @0x551FA4 / @0x551FB1; UI_JoinSelectedSession
+	// @0x5699D0 - @0x569C06..0x569C14 / @0x569C0D..0x569C31].
+	int character_id = -1;
 	int nationality_index = -1;
 	int division_index = -1;
 	int combo_index = -1;
@@ -101,7 +108,7 @@ inline JoinCharacterProfile join_character_profile(
 		// The retail default: the first combo of the side's alignment, else
 		// entry 0 whatever its side (an Avatars.def with no combo of this
 		// side's alignment packs the other side's first entry), so the id
-		// resolves with no side filter [orig: EntitySlot_LookupAndPackEntry
+		// resolves with no side filter [orig: CAvatarDefs_PackFirstComboOfAlignment
 		// @0x57ad40 - the side loop @0x57ad6b..0x57ad80, the entry-0 fallback
 		// @0x57ad84..0x57adda].
 		const CharacterEntry *first = registry.find_by_packed_id(
@@ -110,7 +117,19 @@ inline JoinCharacterProfile join_character_profile(
 			profile.character_ids[side] = first->packed_id;
 			profile.avatars[side] = first->head_voice;
 		}
-		if (saved[side].present) {
+		if (saved[side].present && saved[side].character_id >= 0) {
+			// The record's word, raw, whether or not the table resolves it; its avatar
+			// byte is the combo's the word names (the word's own side bit, no side
+			// filter), a miss giving 1 (D-PLAYERINFO-33).
+			// [orig: Game_ApplySessionSettingsToGlobals @0x551500 - @0x551F7A..0x551FB1,
+			//  the resolves @0x551752 / @0x55178B; Avatars_ResolveSelectionIndex @0x57AE60 -
+			//  CAvatarDefs_FindComboByPackedId @0x57AE6F, the miss @0x57AE85;
+			//  CAvatarDefs_FindComboByPackedId @0x57A270 - bit 15 @0x57A2A3 / @0x57A2AD]
+			const uint16_t raw = static_cast<uint16_t>(saved[side].character_id);
+			profile.character_ids[side] = raw;
+			const CharacterEntry *named = registry.find_by_packed_id(raw);
+			profile.avatars[side] = named != nullptr ? named->head_voice : kJoinDefaultAvatar;
+		} else if (saved[side].present) {
 			uint16_t packed = 0;
 			int avatar = 0;
 			if (join_side_character(registry, side, saved[side].nationality_index,
@@ -119,6 +138,8 @@ inline JoinCharacterProfile join_character_profile(
 				profile.character_ids[side] = packed;
 				profile.avatars[side] = avatar;
 			}
+		}
+		if (saved[side].present) {
 			const uint8_t cls = static_cast<uint8_t>(saved[side].player_class);
 			if (in_session)
 				profile.player_classes[side] = cls < kJoinPlayerClassMin ? kJoinPlayerClassMin
@@ -169,6 +190,22 @@ inline inmatch::CharacterJoinVars character_join_vars(const JoinCharacterProfile
 	// [orig: UI_JoinSelectedSession @0x569bff / @0x569c23]
 	vars.team_request = static_cast<uint8_t>(kJoinSideRequirement);
 	return vars;
+}
+
+// A fresh profile's tag block over an Avatars.def registry: no side saved, so each side
+// takes its alignment's first combo and that combo's head voice, class 8 and the automatic
+// side request; over the empty registry (no Avatars.def) the ids are 0 and both avatar
+// bytes 1. What an embedder that installs no selection carries: the host boot computes
+// it over the mounted file for the host's own slot, and a joiner starts from the
+// no-table form until its shell installs the mounted selection. The stock Avatars.def
+// gives {0x0200, 0x8207}, class 8 / 8, avatars 1 / 10 (the oracle in the tests).
+// [orig: PlayerProfile_InitDefaults @0x54BB40 - class 8 @0x54bbe0 / @0x54bbe3, the
+//  packs CAvatarDefs_PackFirstComboOfAlignment @0x57AD40 (calls @0x54bbea / @0x54bc0f), the
+//  voice overrides zeroed @0x54bc1e / @0x54bc24; Avatars_ResolveSelectionIndex
+//  @0x57AE60] (D-NET-NEW-L2-7)
+inline CharacterJoinVars fresh_profile_character_vars(const CharacterRegistry &registry) {
+	const JoinSideSelection none[2] = {};
+	return character_join_vars(join_character_profile(registry, none, /*in_session=*/true));
 }
 
 } // namespace opennova::inmatch

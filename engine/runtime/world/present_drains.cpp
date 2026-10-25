@@ -28,7 +28,7 @@ void fill_throwable_visual_rows(const World &world, std::vector<ThrowableVisualR
 	const double kDegPerBam = kDegreesPerBam;
 	auto push_entry = [&](int64_t key, int item_id, const Vec3 &pos,
 			int32_t yaw_bam, int32_t pitch_bam, int32_t roll_bam,
-			const char *move_effect, bool move_effect_live) {
+			const char *move_effect, bool move_effect_live, bool mirror_collected) {
 		ThrowableVisualRow d;
 		d.key = key;
 		d.item_id = item_id;
@@ -50,6 +50,7 @@ void fill_throwable_visual_rows(const World &world, std::vector<ThrowableVisualR
 		// Projectile_UpdatePhysics @0x4ea019..0x4ea03e, the lazy spawn
 		// @0x4e9f58..0x4e9f94; see docs/world/world-wac-ai-re.md].
 		d.move_effect_live = move_effect_live;
+		d.mirror_collected = mirror_collected;
 		r_rows.push_back(std::move(d));
 	};
 	for (int i = 0; i < RoundSim::kCapacity; ++i) {
@@ -71,8 +72,10 @@ void fill_throwable_visual_rows(const World &world, std::vector<ThrowableVisualR
 				r.presentation_generation != 0 ? r.presentation_generation : 1;
 		const int64_t presentation_key =
 				static_cast<int64_t>((generation << 10) | static_cast<uint64_t>(i));
+		// The RoundPool: no water mirror's collect walks it [orig:
+		// Terrain_CollectVisibleEntitiesForReflection @0x5C90A0].
 		push_entry(presentation_key, visible_item, r.pos, r.yaw_bam, r.pitch_bam, r.roll_bam,
-				move_effect, r.move_effect_live);
+				move_effect, r.move_effect_live, false);
 	}
 	uint8_t viewer_team = 0xFF;
 	if (const Entity *lp = world.registry.get(world.cached.local_player))
@@ -84,7 +87,9 @@ void fill_throwable_visual_rows(const World &world, std::vector<ThrowableVisualR
 		const int item = throwable_item_for_viewer(d.item_friendly, d.item_enemy, d.team, viewer_team);
 		if (item == 0) continue;
 		const int64_t device_key = 0x4000000000000000LL | static_cast<int64_t>(d.entity.packed);
-		push_entry(device_key, item, d.pos, d.yaw_bam, d.pitch_bam, d.roll_bam, "", false);
+		// A pool-1 entity: the reflected collect's pool-1 walk takes it [orig:
+		// Terrain_CollectVisibleEntitiesForReflection @0x5C90A0, the call @0x5C914E].
+		push_entry(device_key, item, d.pos, d.yaw_bam, d.pitch_bam, d.roll_bam, "", false, true);
 	}
 }
 
@@ -249,10 +254,11 @@ void fill_death_pieces(const World &world, std::vector<DeathPieceRow> &r_pieces)
 		// @ 0x8404f0 +0x2C]; "" = no trail authored.
 		d.type_index = static_cast<int32_t>(p.type_index);
 		d.scale = p.render_scale;
+		// The presentation view of the piece's words (D-NET-507).
 		d.pos = p.pos;
-		d.heading = p.heading;
-		d.pitch = p.pitch;
-		d.roll = p.roll;
+		d.heading = static_cast<float>(degrees_from_angle_bam(p.heading));
+		d.pitch = static_cast<float>(degrees_from_angle_bam(p.pitch));
+		d.roll = static_cast<float>(degrees_from_angle_bam(p.roll));
 		d.settled = p.settled;
 		d.trail = p.trail;
 		r_pieces.push_back(std::move(d));
@@ -275,6 +281,18 @@ void fill_round_glows(const World &world, std::vector<RoundGlowRow> &r_rows) {
 		d.color_rgb24 = ammo->light_move_color;
 		r_rows.push_back(std::move(d));
 	}
+}
+
+// A host that presents no entity drops what the passes would have drained (the header
+// carries the witness) [orig: GameLoop_RenderFrame @0x521310 - the jz @0x521355 past the scene
+// arm].
+void discard_entity_presentation(World &world) {
+	world.round_sim.fired.clear();
+	(void)world.out.fire_sounds.drain();
+	world.out.slot_sounds.clear();
+	world.out.sound_emitters.clear();
+	world.out.destruction.clear();
+	world.out.vehicle_effects.clear();
 }
 
 } // namespace opennova::world

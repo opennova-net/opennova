@@ -21,9 +21,9 @@ using namespace opennova::world;
 static int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #c); ++failures; } } while (0)
 
-// The shell consumes switch requests through MissionKernel::install_weapon.
-// Exercise that public boundary here as well; advancing the host alone leaves
-// presentation-requested weapon definitions uninstalled in a headless rig.
+// The shell consumes switch requests through MissionKernel::install_weapon, except
+// the ones the switch's own commit already mounted (WeaponPresentationEvent::installed,
+// a viewmodel-only leg). Exercise that public boundary here as well.
 static void advance(testrig::MissionRig &rig, int count = 1) {
     for (int tick = 0; tick < count; ++tick) {
         // FireEvent is an embedder-drained presentation queue, not a per-tick
@@ -33,7 +33,7 @@ static void advance(testrig::MissionRig &rig, int count = 1) {
         std::vector<WeaponPresentationEvent> events;
         events.swap(rig.local.weapon.events);
         for (const auto &event : events) {
-            if (!event.switch_to_weapon.empty())
+            if (!event.switch_to_weapon.empty() && !event.installed)
                 CHECK(rig.install_weapon(event.switch_to_weapon, event.preserve_slot_state));
             else if (event.clear_weapon)
                 local_weapon_clear(rig.local.weapon, rig.local.view);
@@ -272,7 +272,9 @@ static void tags_and_pilot(const std::string &root) {
     }
     CHECK(personal_draw);
     CHECK(player->equipped_adm_index == personal_adm);
-    CHECK(!heli->primary_weapon_owner.valid());
+    // The carrier's MountSlot keeps its owner through the detach [orig:
+    // Entity_DetachFromVehicle @0x4355F0 - no +0x24 store].
+    CHECK(heli->primary_weapon_owner == player_handle);
     CHECK(rig->local.inventory.equipped_combo == inventory.equipped_combo);
     CHECK(rig->local.inventory.pools == inventory.pools);
     CHECK(rig->local.inventory.shared_clips == inventory.shared_clips);

@@ -100,6 +100,53 @@ func test_drape_binds_the_twelve_capture_textures_once() -> void:
 	assert_null(SlotShadow.get_capture_texture(12), "no texture past the chain")
 
 
+func test_the_mission_start_makes_the_whole_chain_ahead_of_the_first_capture() -> void:
+	# Retail makes the twelve RTs with the mission start's render subsystems (engine
+	# renderer/render_slot_shadow.h creates_slot_texture_chain, D-NET-NEW-LF-24): every
+	# order's target stands at the chain's size before any capture arms; without a
+	# RenderingDevice none is made.
+	var shadow := SlotShadow.new()
+	add_child_autofree(shadow)
+	shadow.set_shadow_detail(3)
+	shadow.create_capture_targets()
+	var sizes := [512, 512, 256, 256, 128, 128, 64, 64, 32, 32, 32, 32]
+	var device := RenderingServer.get_rendering_device() != null
+	for order in range(12):
+		assert_eq(shadow.get_capture_target_size(order), int(sizes[order]) if device else 0,
+				"order %d's target (device: %s)" % [order, device])
+	assert_eq(shadow.get_armed_capture_mask(), 0, "no capture armed by the making")
+
+
+func test_the_load_packs_every_casters_geometry_ahead_of_its_first_capture() -> void:
+	# Retail's capture draws each caster through the model the mission start loaded (engine
+	# renderer/render_slot_shadow.h slot_casters_load_with_models, D-NET-NEW-LF-27): the load's
+	# warm packs the crate's admitted surfaces, and its first capture packs nothing more. With
+	# the chain off nothing is packed.
+	var scope := _scope_with_world_environment()
+	var environment := _environment()
+	var camera := Camera3D.new()
+	camera.current = true
+	scope.add_child(camera)
+	camera.look_at_from_position(Vector3(0, 2, 10), Vector3.ZERO, Vector3.UP)
+	var shadow := SlotShadow.new()
+	scope.add_child(shadow)
+	shadow.set_environment_node(environment)
+	var crate := _crate_caster(scope, Vector3.ZERO)
+	crate.advance_runtime_frame(1.0 / 62.0)
+	shadow.set_shadow_detail(0)
+	assert_eq(shadow.warm_caster_streams(), 0, "the chain off: no caster packs")
+	shadow.set_shadow_detail(3)
+	var warmed: int = shadow.warm_caster_streams()
+	shadow.advance_frame()
+	var report: Dictionary = shadow.get_report()
+	assert_gte(warmed, int(report["slot_surfaces_compiled"]),
+			"the warm packed every surface the first capture draws")
+	assert_eq(int(report["slot_packed_vertices"]), 0,
+			"the first capture packs nothing the load packed")
+	crate.set_shadow_caster_enabled(false)
+	shadow.advance_frame()
+
+
 func test_admitted_caster_publishes_one_capture_request() -> void:
 	var environment := _environment()
 	var camera := _camera()

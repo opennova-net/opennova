@@ -14,6 +14,8 @@
 
 namespace godot {
 
+class GameConfigBlock;
+
 // The hosted-session request as the Simulation takes it
 // (Simulation.configure_host_session, which copies the whole config) and
 // reports it back (Simulation.get_host_session_config): the engine's
@@ -85,8 +87,21 @@ public:
 	// The g_GameType code word (NetProtocol.GAME_TYPE_*).
 	HOST_SESSION_INT(game_type, game_type)
 	HOST_SESSION_INT(mp_attributes, mp_attributes)
-	HOST_SESSION_INT(class_allow_mask, class_allow_mask)
-	HOST_SESSION_INT(respawn_time, respawn_time)
+	// The cfg's ten class words (0 NEVER, 1 ALWAYS, 2 MISSION), what retail's host
+	// dialog writes; the session's first mission builds the S2C 0x76 mask from them
+	// (inmatch::class_allow_mask_from_words carries the witnesses).
+	PackedInt32Array get_class_availability() const {
+		PackedInt32Array out;
+		for (const int32_t word : config_.class_availability)
+			out.push_back(word);
+		return out;
+	}
+	void set_class_availability(const PackedInt32Array &p_words) {
+		for (size_t i = 0; i < config_.class_availability.size(); ++i)
+			config_.class_availability[i] =
+					static_cast<int64_t>(i) < p_words.size() ? p_words[static_cast<int64_t>(i)] : 0;
+	}
+	HOST_SESSION_INT(round_time_limit_minutes, round_time_limit_minutes)
 	HOST_SESSION_INT(time_limit_minutes, time_limit_minutes)
 	HOST_SESSION_INT(replay_enabled, replay_enabled)
 	HOST_SESSION_INT(max_team_lives, max_team_lives)
@@ -183,11 +198,10 @@ public:
 	// The MCP status boundary's JSON shape (one key per live-session field;
 	// the request-only fields above stay out of it).
 	Dictionary to_json_value() const;
-	static PackedStringArray dialog_controls();
-	bool apply_dialog_control(const String &p_control, const String &p_value);
-	// The populate inverse: what the host screen shows for a control from this
-	// request (engine host_dialog_value).
-	String dialog_value(const String &p_control) const;
+	// The request the session create makes of the process's cfg block
+	// (inmatch::host_screen_from_block): every session word, the cap, the
+	// server type, and the LAN authority's first bind port (mplanserverportmin).
+	void seed_from_block(const Ref<GameConfigBlock> &p_block);
 	Ref<HostSessionOptions> duplicate_options() const;
 };
 

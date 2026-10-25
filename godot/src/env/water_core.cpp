@@ -2,6 +2,7 @@
 #include "util/axes.h"
 #include "util/color_convert.h"
 
+#include <cstring>
 #include <cmath>
 #include <base/io/fixed.h>
 
@@ -251,4 +252,48 @@ PackedInt32Array WaterCore::strip_indices() const {
 		}
 	}
 	return out;
+}
+
+void WaterCore::strip_surface_bytes(PackedByteArray &r_vertices, PackedByteArray &r_attributes,
+		AABB &r_aabb) const {
+	// The values the arrays above hand the server, laid out as its surface packing lays them
+	// (RenderingServer::_surface_set_data over mesh_surface_make_offsets_from_format: VERTEX in
+	// the vertex stream, then COLOR, TEX_UV, CUSTOM0..2 in that order in the attribute stream).
+	const int count = strip_row_count * 3;
+	r_vertices.resize(static_cast<int64_t>(count) * kStripVertexStride);
+	r_attributes.resize(static_cast<int64_t>(count) * kStripAttributeStride);
+	uint8_t *vertices = r_vertices.ptrw();
+	uint8_t *attributes = r_attributes.ptrw();
+	Vector3 lo;
+	Vector3 hi;
+	for (int i = 0; i < count; ++i) {
+		const Vector3 position = render_float_to_godot(opennova::env::Vec3{
+				strip_rows.uv0[i * 2] * 32.0f, strip_plane_height,
+				strip_rows.uv0[i * 2 + 1] * 32.0f});
+		const float xyz[3] = { static_cast<float>(position.x), static_cast<float>(position.y),
+			static_cast<float>(position.z) };
+		std::memcpy(vertices + static_cast<size_t>(i) * kStripVertexStride, xyz, sizeof(xyz));
+		lo = i == 0 ? position : lo.min(position);
+		hi = i == 0 ? position : hi.max(position);
+		uint8_t *record = attributes + static_cast<size_t>(i) * kStripAttributeStride;
+		const Color diffuse = opennova::color_from_argb(strip_rows.diffuse[i]);
+		const uint8_t color8[4] = { uint8_t(CLAMP(diffuse.r * 255.0, 0.0, 255.0)),
+			uint8_t(CLAMP(diffuse.g * 255.0, 0.0, 255.0)), uint8_t(CLAMP(diffuse.b * 255.0, 0.0, 255.0)),
+			uint8_t(CLAMP(diffuse.a * 255.0, 0.0, 255.0)) };
+		std::memcpy(record, color8, sizeof(color8));
+		const float uv[2] = { strip_rows.uv0[i * 2], strip_rows.uv0[i * 2 + 1] };
+		std::memcpy(record + 4, uv, sizeof(uv));
+		const float custom0[4] = { strip_rows.depth[i], strip_rows.rhw[i], strip_rows.t1[i * 3 + 2],
+			strip_rows.t2[i * 3 + 2] };
+		std::memcpy(record + 12, custom0, sizeof(custom0));
+		const Color specular = opennova::color_from_argb(strip_rows.specular[i]);
+		const float custom1[4] = { specular.r, specular.g, specular.b, specular.a };
+		std::memcpy(record + 28, custom1, sizeof(custom1));
+		const float custom2[4] = { strip_rows.t1[i * 3 + 0], strip_rows.t1[i * 3 + 1],
+			strip_rows.t2[i * 3 + 0], strip_rows.t2[i * 3 + 1] };
+		std::memcpy(record + 44, custom2, sizeof(custom2));
+	}
+	// The server's AABB over the positions, its size at least CMP_EPSILON a side (SMALL_VEC3).
+	r_aabb = count > 0 ? AABB(lo, (hi - lo).max(Vector3(CMP_EPSILON, CMP_EPSILON, CMP_EPSILON)))
+					   : AABB();
 }

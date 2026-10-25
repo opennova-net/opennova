@@ -73,7 +73,8 @@ void weapon_inventory_set_loaded_rounds(const WeaponTable &table,
 
 void weapon_availability_apply_pairs(
         WeaponAvailability &avail, const WeaponTable &table,
-        const std::vector<std::pair<std::string, int32_t>> &pairs) {
+        const std::vector<std::pair<std::string, int32_t>> &pairs,
+        int32_t mission_allowed) {
     // The name-list mode of WeaponDef_BuildItemRestrictionTable @ 0x54DDB0: default 1,
     // matched names take the pair value (-1 -> 3), sub-entries inherit the parent's
     // value through the loadout_subclasses skip walk.
@@ -94,11 +95,33 @@ void weapon_availability_apply_pairs(
                     if (opennova::strutil::iequals(p.first.c_str(),
                                                    entry->name.c_str())) {
                         value = p.second;
-                        if (value == -1) value = weapon_availability_value::kMissionAllowed;
+                        if (value == -1) value = mission_allowed;
                         break; // [orig: first stricmp match @ 0x54de0c]
                     }
                 }
             }
+        }
+        avail.values[i] = value;
+    }
+}
+
+void weapon_availability_apply_template(
+        WeaponAvailability &avail, const WeaponTable &table,
+        const std::array<int32_t, 255> &words, int32_t mission_allowed) {
+    // The template mode of WeaponDef_BuildItemRestrictionTable @0x54DDB0: a word per
+    // entry, -1 mapped (@0x54DEAA..0x54DEAC); while a parent's sub-entry count runs
+    // (entry+36), each entry keeps the value last written (@0x54DEA2..0x54DEB7).
+    int32_t value = weapon_availability_value::kAllowed;
+    int skip_count = 0;
+    for (size_t i = 0; i < avail.values.size(); ++i) {
+        if (skip_count > 0) {
+            --skip_count;
+        } else {
+            value = words[i];
+            if (value == -1) value = mission_allowed;
+            skip_count = (i < table.entries.size() && table.entries[i].valid)
+                    ? table.entries[i].loadout_subclasses
+                    : 0;
         }
         avail.values[i] = value;
     }
@@ -155,20 +178,18 @@ std::vector<WeaponKitEntry> weapon_kit_filter_by_availability(
     return out;
 }
 
-void weapon_kit_build_damage_classes(const std::vector<WeaponKitEntry> &kit,
+void weapon_kit_store_damage_classes(const std::vector<WeaponKitEntry> &kit,
                                      const WeaponTable &table, size_t ammo_count,
                                      std::vector<uint8_t> &out) {
-    out.assign(ammo_count, 0);
+    if (out.size() < ammo_count) out.resize(ammo_count, 0);
     for (const WeaponKitEntry &entry : kit) {
         const int adm = table.index_of(entry.name.c_str());
         if (adm < 0) continue;
         const WeaponTableEntry *weapon = table.by_index(static_cast<uint8_t>(adm));
         if (weapon == nullptr || weapon->ammo_index < 0) continue;
         const size_t ammo_index = static_cast<size_t>(weapon->ammo_index);
-        if (ammo_index < out.size()) {
-            const uint8_t raw = static_cast<uint8_t>(entry.flags);
-            out[ammo_index] = (raw == 1 || raw == 2) ? raw : 0;
-        }
+        // The low byte of the atol'd fourth value, raw [orig: @0x565F3D, @0x56618C].
+        if (ammo_index < out.size()) out[ammo_index] = static_cast<uint8_t>(entry.flags);
     }
 }
 
@@ -557,6 +578,8 @@ void weapon_inventory_apply_authority_pools(const WeaponTable &table, WeaponInve
 
 WeaponAmmoSeat entity_ammo_seat(const World &world, const Entity &entity) {
     WeaponAmmoSeat seat;
+    if (world.rules.ignore_weapon_ammo_cost)
+        seat.cheat_carry_caps = &world.tables.weapons.ammo_class_caps;
     if (!entity.mounted) return seat;
     seat.parent_slot = static_cast<int32_t>(entity.mount_type);
     const Entity *carrier = world.registry.get(entity.mount_target);
@@ -572,10 +595,16 @@ WeaponAmmoSeat entity_ammo_seat(const World &world, const Entity &entity) {
 }
 
 int32_t weapon_seat_pool(const WeaponAmmoSeat &seat, int class_id, int32_t own) {
-    // [orig: Entity_GetScoreValueBySlotType @0x5406E0 - its dword_24C1930 & 0x100 cap
-    //  leg @0x5406E3 is the infinite-ammo cheat's bit (Server_ToggleDedicatedFlag
-    //  @0x4DC9C5 from action 121), which the port's cheat bindings do not set (its
-    //  World::rules.ignore_weapon_ammo_cost mirror stays clear)]
+    // The infinite-ammo cheat's bit first: the class's carry cap, ahead of every seat leg
+    // (Cheat_ToggleInfiniteAmmo @0x4DC9C5 from action 121 sets it) [orig:
+    //  Entity_GetScoreValueBySlotType @0x5406E0 - `test g_DebugCheatFlags, 100h` @0x5406E3,
+    //  `jz` @0x5406ED, `mov eax, g_AmmoClassMaxCarry[eax*4]` @0x5406F4]
+    if (seat.cheat_carry_caps != nullptr) {
+        const std::vector<int32_t> &caps = *seat.cheat_carry_caps;
+        return class_id >= 0 && static_cast<size_t>(class_id) < caps.size()
+                ? caps[static_cast<size_t>(class_id)]
+                : 0;
+    }
     const bool carrier_reads = (seat.carrier && seat.parent_slot == 3) ||
             (seat.parent_slot == 2 && seat.carrier_eweap); // @0x540707..0x540739
     if (class_id == 1) {                                     // @0x54073F..0x540763
@@ -639,6 +668,19 @@ void weapon_inventory_recalc_clips(const WeaponTable &table, WeaponInventory &in
         // A controller seat writes no bucket [orig: WeaponSlot_SetSharedLoadedRounds @0x540684..0x540692].
         if (!bucket || weapon_seat_writes_buckets(seat))
             weapon_inventory_set_loaded_rounds(table, inv, combo, clamped / units);
+    }
+}
+
+void weapon_inventory_clear_loaded_rounds(const WeaponTable &table, WeaponInventory &inv,
+                                          const WeaponAmmoSeat &seat) {
+    if (seat.parent_slot == 3) return; // [orig: @0x5423C5..0x5423CC]
+    for (int32_t combo = 0; combo < weapon_combo::kSlotCount; ++combo) {
+        const WeaponInventorySlot *slot = inv.slot(combo);
+        if (slot == nullptr || slot->adm_index < 0) continue;
+        const WeaponTableEntry *def = table.by_index(static_cast<uint8_t>(slot->adm_index));
+        if (def == nullptr || def->ammo_class_count == 0) continue; // [orig: @0x5423E6]
+        if (def->ammo_bucket != 0 && !weapon_seat_writes_buckets(seat)) continue;
+        weapon_inventory_set_loaded_rounds(table, inv, combo, 0);
     }
 }
 
@@ -720,9 +762,10 @@ bool weapon_select_slot(const WeaponTable &table, WeaponInventory &inv, int32_t 
                         bool commit_equip) {
     // [orig: Player_SelectWeaponSlot @ 0x4DD680]
     auto stage = [&](int32_t c) {
-        inv.pending_combo = c; // [orig: entity+0x308 @ 0x4dd6da/0x4dd7a8]
-        if (commit_equip) inv.equipped_combo = c; // [orig: EquippedSlot @ 0x4dd704,
-                                                  //  gated on the seat state]
+        inv.selected_combo = c; // [orig: entity+0x308 @ 0x4dd6da / 0x4dd7a8 / 0x4dd81c]
+        inv.selected_mount = 0xFFFF; // the store replaces a saved gun's slot
+        if (commit_equip) inv.equipped_combo = c; // [orig: EquippedSlot @ 0x4dd704 /
+                                                  //  0x4dd7d2, gated on the seat state]
     };
     if (combo != -1) {
         int32_t group_base =
@@ -772,25 +815,35 @@ bool switch_eligible(const WeaponTable &table, const WeaponInventory &inv,
 
 } // namespace
 
+bool weapon_switch_walk_resets_view(const WeaponTable &table, const WeaponInventory &inv,
+                                    int32_t handle, const WeaponSwitchGates &gates) {
+    // [orig: Player_SwitchToWeaponByHandle @0x4E0170; the declaration carries the gates]
+    if (gates.seat_blocked) return false; // [orig: parentSlot 2/3/5 @ 0x4e0192]
+    const int32_t group = handle / weapon_combo::kRanksPerCategory;
+    const WeaponTableEntry *eq = gates.borrowed_def != nullptr
+            ? gates.borrowed_def
+            : entry_at(table, inv, inv.equipped_combo);
+    if (eq != nullptr && gates.equipped_valid) {
+        // The FSM gate: blocked while firing; reload blocks same-category presses;
+        // recoil blocks cross-category presses [orig: @ 0x4e0192..0x4e0223].
+        const int32_t a = gates.equipped_action;
+        const bool blocked = (a == 4 && eq->category == group) || a == 2 ||
+                             (a == 3 && eq->category != group);
+        if (blocked) return false;
+    }
+    return true;
+}
+
 WeaponSwitchOutcome weapon_switch_to_handle(const WeaponTable &table,
                                             WeaponInventory &inv, int32_t handle,
                                             const WeaponSwitchGates &gates) {
     // [orig: Player_SwitchToWeaponByHandle @ 0x4E0170]
     WeaponSwitchOutcome out;
-    if (gates.seat_blocked) return out; // [orig: parentSlot 2/3/5 @ 0x4e0192]
-    if (handle < 0) return out;
-    int32_t group = handle / weapon_combo::kRanksPerCategory;
-    int32_t rank = handle % weapon_combo::kRanksPerCategory;
-    (void)rank;
-    const WeaponTableEntry *eq = entry_at(table, inv, inv.equipped_combo);
-    if (eq != nullptr && gates.equipped_valid) {
-        // The FSM gate: blocked while firing; reload blocks same-category presses;
-        // recoil blocks cross-category presses [orig: @ 0x4e0192..0x4e0223].
-        int32_t a = gates.equipped_action;
-        bool blocked = (a == 4 && eq->category == group) || a == 2 ||
-                       (a == 3 && eq->category != group);
-        if (blocked) return out;
-    }
+    if (handle < 0 || !weapon_switch_walk_resets_view(table, inv, handle, gates)) return out;
+    const int32_t group = handle / weapon_combo::kRanksPerCategory;
+    const WeaponTableEntry *eq = gates.borrowed_def != nullptr
+            ? gates.borrowed_def
+            : entry_at(table, inv, inv.equipped_combo);
     out.reset_view = true; // reset precedes selection, even on a later deny @0x4E0223
     if (eq == nullptr) {
         if (!weapon_select_slot(table, inv, handle, /*commit_equip=*/true) &&
@@ -808,6 +861,9 @@ WeaponSwitchOutcome weapon_switch_to_handle(const WeaponTable &table,
             out.kind = WeaponSwitchOutcome::kMount;
             out.combo = handle;
             out.same_category = false;
+            // The current slot word [orig: Player_SwitchToWeaponByHandle @0x4E0170 (the
+            //  g_CurrentWeaponSlot store @0x4E035C)].
+            inv.current_slot = handle;
             inv.pending_combo = handle; // [orig: MountWeaponSlot g_PendingWeaponSlot]
             return out;
         }
@@ -821,6 +877,8 @@ WeaponSwitchOutcome weapon_switch_to_handle(const WeaponTable &table,
             out.kind = WeaponSwitchOutcome::kMount;
             out.combo = c;
             out.same_category = (eq->category == group);
+            // [orig: Player_SwitchToWeaponByHandle @0x4E0170 (the store @0x4E0359..0x4E035C)]
+            inv.current_slot = c;
             inv.pending_combo = c;
             return out;
         }
@@ -837,7 +895,9 @@ WeaponSwitchOutcome weapon_cycle_slot(const WeaponTable &table, WeaponInventory 
     // [orig: Player_CycleWeaponSlot @ 0x4DFE70]
     WeaponSwitchOutcome out;
     if (gates.seat_blocked) return out; // [orig: parentSlot 2/3/5 @ 0x4dfe91]
-    const WeaponTableEntry *eq = entry_at(table, inv, inv.equipped_combo);
+    const WeaponTableEntry *eq = gates.borrowed_def != nullptr
+            ? gates.borrowed_def
+            : entry_at(table, inv, inv.equipped_combo);
     if (eq == nullptr || !gates.equipped_valid) return out; // [orig: @ 0x4dfe9f]
     int32_t step;
     if (direction > 0) step = 1;
@@ -869,6 +929,9 @@ WeaponSwitchOutcome weapon_cycle_slot(const WeaponTable &table, WeaponInventory 
                 out.combo = idx;
                 out.same_category =
                         (def != nullptr && def->category == eq->category);
+                // The current slot word [orig: Player_CycleWeaponSlot @0x4DFE70 (the
+                //  g_CurrentWeaponSlot store @0x4DFF4A, past `cmp edi, ebx` @0x4DFF45)].
+                inv.current_slot = idx;
                 inv.pending_combo = idx;
             }
             return out; // reaching start again returns silently [orig: @ 0x4dff47]
@@ -884,7 +947,7 @@ std::array<WeaponSlotBarCategory, 10> weapon_inventory_slot_bar_scan(const Weapo
     //  step 65 (one category), the 1..5 skip @0x599D24, the def pointer
     //  slot+0x20 @0x599D36, the first-hit record + `i += def[940/4]`
     //  @0x599D40..0x599D4D, the count @0x599D51]. The debug fill under
-    //  dword_24C1930 & 0x8000000 @0x599D75 is dead: nothing sets the bit.
+    //  g_DebugCheatFlags & 0x8000000 @0x599D75 is dead: nothing sets the bit.
     std::array<WeaponSlotBarCategory, 10> out{};
     for (int category = 0; category < 10; ++category) {
         if (category >= 1 && category <= 5) continue;

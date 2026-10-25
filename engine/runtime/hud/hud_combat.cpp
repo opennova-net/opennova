@@ -222,7 +222,7 @@ void HudFrameCompiler::element_instruments(const HudFrameState &s, float w, floa
 	// Timer 1's tail only resets a device state word, not a draw.
 	// [orig: HUD_DrawAltitudeBar @0x59F168..0x59F176 (to @0x59F340); timer 1
 	//  @0x59F340..0x59F356]
-	if (!hud_item_flash_shown(s.item_flash[0]))
+	if (!hud_item_flash_shown(item_flash_.timer(0)))
 		return;
 	const int altitude = c.altitude_agl_q16 / 21501;
 	const int limited = std::min(altitude, 500);

@@ -19,12 +19,19 @@
 
 #include <cstdint>
 
+#include <runtime/inmatch/mission_rotation.h> // HostRotation (the process's rotation words)
+#include <runtime/inmatch/client_runtime.h> // ClientProcessState (the process's client words)
+#include <runtime/inmatch/remote_admin.h> // RemoteAdminConsoles (the remote admin)
+#include <runtime/inmatch/server_log_devices.h> // ServerLogDevices (the server log switches)
+
+#include <memory>
 #include <runtime/renderer/object_lod.h> // the object detail rungs
 #include <runtime/renderer/particle_density.h> // the particle_density rungs
 #include <runtime/renderer/device_texture.h> // the terrain_texdetail word
 #include <runtime/renderer/texture_compression.h> // the texcompression_level word
 #include <runtime/renderer/texture_filter.h> // the texfilter rungs
 
+#include "network/admin_tcp_pump.h"
 #include "audio/mission_audio.h"
 #include "devtools/frame_stats.h"
 #include "env/celestial.h"
@@ -86,6 +93,7 @@
 namespace godot {
 
 class HudInsetScope;
+class HudOverlay;
 
 // Loads a playable world (terrain + environment + vegetation + foliage) from
 // ONE resource root and wires it onto the engine nodes it contains (Terrain,
@@ -128,12 +136,35 @@ public:
 	struct FrameContext {
 		Ref<MissionFrameInput> input;
 		Ref<MissionFrameOutcome> outcome;
+		// The render gate's verdict (leg_scene_gate, engine inmatch::Session::renders): false
+		// while a joiner's mission start is in its final wait for the S2C 0x0F, when no kSceneLeg
+		// row runs (scene_drawn is false with it) and the audio row runs its drains alone, its
+		// listener and emitter mix (the render callback's head) standing down.
+		bool rendered = true;
+		// The scene gate's verdict (leg_scene_gate): false while the status page stands in for
+		// the scene frame, when no kSceneLeg row runs.
+		bool scene_drawn = true;
+		// The drawn scene frame skips its world (engine inmatch::FrameOutcome::world_skipped):
+		// no kWorldLeg row runs.
+		bool world_skipped = false;
+		// One of the first frames past a mission load: its legs nest as spans under the frame's
+		// span of the post-load timeline (an instrument; null on every other frame).
+		LoadTimeline *post_load_frame = nullptr;
 	};
 	enum FrameLegFlags : uint32_t {
 		kLegNone = 0,
 		// A kLegStop return from this leg STOPS the frame: the later legs (the
 		// finish included) do not run.
 		kStopsFrame = 1u << 0,
+		// The row draws the scene (retail's Render_ProcessMainSceneFrame): it does not run while
+		// the status page stands in for the scene frame (engine hud_server_status.h
+		// main_frame_draws_scene carries the witness).
+		kSceneLeg = 1u << 1,
+		// The row is the scene frame's world block, whose state legs a frame that skips its
+		// world (a cine playing, the command map over the menu) does not run: the terrain
+		// frame's composes, the water pass, the collect, the foliage and the sun veil's
+		// stop-down target (engine inmatch::FrameOutcome::world_skipped carries the witness).
+		kWorldLeg = 1u << 2,
 	};
 	// What a leg body reports back to the loop: it ran (its LegScope banks
 	// the span), it did not run this frame (nothing is banked -- a skipped
@@ -195,6 +226,11 @@ public:
 	// clamp are the engine's, re-exported for the shell's options owner.
 	void set_object_polydetail(int p_level) { object_polydetail_ = p_level; }
 	int get_object_polydetail() const { return object_polydetail_; }
+	// The options' aspect mode (renderer/aspect_ratio.h): the shell hands it over
+	// whenever it changes, and each mission start selects it for the local view
+	// ahead of the start's loads (LocalPlayerPresenter::prepare_view_projection).
+	void set_aspect_mode(int p_mode) { aspect_mode_ = p_mode; }
+	int get_aspect_mode() const { return aspect_mode_; }
 	int get_object_detail() const { return object_detail_; }
 	static int object_detail_fresh_profile();
 	static int clamp_object_detail(int p_level);
@@ -281,6 +317,10 @@ public:
 	// (SessionDrive::switch_join_expansion). Returns the failure text, empty on
 	// success; the post-auth reconcile remains the authoritative check.
 	String mount_join_expansion(const String &p_expansion);
+	// The return to the main menu's restore of the expansion a join's switch left
+	// (SessionDrive::restore_kept_expansion; D-NET-622): the shell runs it ahead of the
+	// menu's entry over its live mount.
+	void restore_join_expansion(const Ref<ResourceRoot> &p_root);
 	// The NovaWorld session (a NovaWorldClient), handed over by the shell with
 	// a NovaWorld join or host: the world keeps it playing or hosting through
 	// the match (SessionDrive::adopt_nw_client). A normal exit back to the
@@ -288,8 +328,23 @@ public:
 	// otherwise it goes down with the world.
 	void adopt_novaworld_client(Node *p_client);
 	Node *release_novaworld_client();
-	// The post-mission route for an exit reason (SessionDrive::post_mission_route).
-	Ref<PostMissionRoute> post_mission_route(int p_reason) const;
+	// The post-mission route for an exit reason (SessionDrive::post_mission_route): the
+	// shell's Post Menu router, called once where it routes the session's final exit to the
+	// menus, so its destroy arm also destroys the session's process globals (the remote
+	// admin's game type, inmatch::RemoteAdminConsoles::route_mission_exit).
+	Ref<PostMissionRoute> post_mission_route(int p_reason);
+	// The mission's session closes ahead of the Post Menu router, which reads the exit the
+	// teardown left: the own client's teardown can remap it through the process latch (a stale
+	// kick turns a listen host's quit into 7 or 9..19, D-NET-NEW-L1-26). Returns that exit, the
+	// requested one when the session stored none (or there is none). The witness is the
+	// engine's (inmatch/host_role.cpp HostRole::close, inmatch/mission_exit.h).
+	int close_session_for_route(int p_requested_reason);
+	// The pre-game menu's cancel (its ABORT_CANCEL, the join choice's BACK): the join
+	// machine's cleanup destroys the session (RemoteAdminConsoles::session_destroyed).
+	void pre_game_cancelled();
+	// The PLAYER_INFO screen's portrait drew a frame: its 16:00 becomes the process's time
+	// of day (RemoteAdminConsoles::player_preview_drawn).
+	void player_preview_drawn();
 	// What the main frame does with a stored exit reason over the loaded sim's
 	// session facts (inmatch::main_frame_exit): a MAIN_FRAME_EXIT_* value.
 	int main_frame_exit(int p_reason) const;
@@ -315,9 +370,9 @@ public:
 	// ESC/abort for the joiner's pre-load connect/session wait. Returns true
 	// when an in-flight preload was aborted (see SessionDrive::cancel_preload).
 	bool cancel_join_preload();
-	// ESC/abort for the joiner's post-load admission wait. Returns true when
-	// a live admission wait was told to abort (see
-	// SessionDrive::cancel_admission_wait).
+	// ESC in the joiner's final wait for the S2C 0x0F: it leaves the wait
+	// for the game loop and aborts nothing. Returns true when the final wait
+	// took it (see SessionDrive::cancel_admission_wait).
 	bool cancel_join_admission();
 	// True while this world is a live network session (a co-op JOINER or a
 	// LISTEN HOST). The shell uses it to keep the world ticking through the
@@ -338,6 +393,10 @@ public:
 	// (ESC, armory close, menu RESUME, the MCP resume verb) can call this
 	// safely.
 	void set_shell_paused(bool p_paused);
+	// The in-game options screen's audio shutdown on its open out of a session,
+	// run on the device MissionAudio::shutdown_audio_channels (engine
+	// WorldOutbox::audio_channels_shutdown carries the witness).
+	void shutdown_audio_channels();
 	// The missing-terrain/env reason, join-aware: a wire-header join has no
 	// local .bms -- the host streamed the mission identity -- so the reason
 	// names the stream and what is mounted/installed, making a live punt read
@@ -395,6 +454,20 @@ public:
 	Ref<WeaponDatabase> get_weapon_database();
 	// The timing of the most recent mission load (null before the first load).
 	Ref<LoadTimeline> last_load_timeline() const { return last_load_timeline_; }
+	// The first frames past the most recent mission load (null before the first load): a span per
+	// frame, the legs that ran nested in it, the session's updates counted and, on a joiner, each
+	// client net pass the frame ran (its loop, its send countdown, an open send block, a C2S 0x0C),
+	// the time between two frame spans being the device draw and the shell's own process (an
+	// instrument, printed under --verbose once its frames are in: post_load_frames_continue).
+	Ref<LoadTimeline> last_post_load_frames() const { return post_load_frames_; }
+	// Whether the post-load timeline still times frames (the slow-frame readout prints every frame's
+	// slots while it does).
+	bool is_post_load_frames_open() const { return post_load_open_; }
+	// Whether the post-load timeline times another frame past `p_frames_timed`: kPostLoadFrames at
+	// least; past them only while a joiner awaits its first C2S 0x0C past the final wait (the S2C
+	// 0x0F's first-send window, the third pong's), and never past kPostLoadFramesMax. The caller
+	// passes the wait only under --verbose, whose PostLoadFrame lines read those frames.
+	static bool post_load_frames_continue(int p_frames_timed, bool p_awaits_uplink);
 	MissionRoot *get_runtime() const;
 	Ref<MissionPlacementStats> get_mission_stats() const { return mission_stats_; }
 	// The placer's static populations that currently carry at least one live
@@ -409,6 +482,9 @@ public:
 	// height cannot leak into frame clear/occlusion while a load is absent or
 	// in progress.
 	bool is_water_render_active() const;
+	// The waterline the scene's eye side and transparent split compare against,
+	// a zero height included (Water::is_waterline_active).
+	bool is_waterline_active() const;
 	Ref<TerrainData> get_terrain_data() const { return terrain_data_; }
 	Ref<ResourceRoot> get_resource_root() const { return resource_root_; }
 	// The world's FrameFX node (the shell's SIGHTS card feeds the NVG Sighted
@@ -422,6 +498,15 @@ public:
 	// local player's viewmodel verbs).
 	Ref<ArmoryWorldView> armory_view();
 	bool is_loaded() const { return world_ready_; }
+	// The loading presentation's hold, the shell's from a mission start to its reveal: while it holds,
+	// the world's viewport draws no 3D pass and the water no mirror pass, so a frame under the loading
+	// screen (a joiner's wait for its admission, the start-mission splash) draws the screen alone:
+	// retail's presents draw the screen alone, and its joiner's final wait inside Game_StartMission
+	// pumps the window and the session and draws no frame, its 100 % present standing. The world's
+	// nodes stay shown from the load's forced frame on, so the reveal drops a viewport flag and
+	// re-pairs no instance (D-NET-NEW-LF-29).
+	void set_presentation_held(bool p_held);
+	bool is_presentation_held() const { return presentation_held_; }
 	Color get_current_frame_clear_color() const;
 
 	// --- the frame ------------------------------------------------------------
@@ -436,6 +521,17 @@ public:
 	// reads its mpreset word at the session create, and a NovaWorld
 	// ServerCommand's config change lands in it and is saved. Null = none.
 	void set_game_config(const Ref<GameConfigBlock> &p_block) { game_config_ = p_block; }
+	// The shell's live binding table (ControlsBindings' model): every session's
+	// Simulation takes it for the console's SAVEKEYS (Simulation::set_controls_model).
+	void set_controls_model(const Ref<ControlsModel> &p_model) { controls_model_ = p_model; }
+	// The shell's in-game menu screen state (true while one is up), read live by the remote
+	// admin's GOTO MENUSTATE (AdminConsole::Seams::menu_screen_open; engine inmatch/remote_admin.h
+	// ExitSite::AdminOverMenuScreen carries the witness). Unset: none up.
+	void set_menu_screen_probe(const Callable &p_probe) { menu_screen_probe_ = p_probe; }
+	// The next load is the single player's restart (Game_RestartRoundSP's Game_StartMission(1)):
+	// its sim boots with the engine's restart flag (KernelBootOptions::restart). The load
+	// consumes it.
+	void set_restart_boot(bool p_restart) { restart_boot_ = p_restart; }
 	Ref<GameConfigBlock> get_game_config() const { return game_config_; }
 	void set_frame_stats(const Ref<FrameStats> &p_board);
 	bool is_water_render_stats_measured() const;
@@ -471,15 +567,45 @@ public:
 	Ref<MissionFrameOutcome> advance_frame(const Vector3 &p_camera_pos,
 			const Transform3D &p_camera_xform, double p_delta,
 			const Ref<MissionFrameInput> &p_input);
-	// Main-thread display clock, shared by every world and menu. The first
-	// reader samples once per Engine process frame, including menu-only frames.
+	// Main-thread display clock, shared by every world and menu: the process's one
+	// clock (engine world::frame_tick_count_ms, GetTickCount's DWORD), which every
+	// render-time reader retail has takes; the first reader samples it once per Engine
+	// process frame, including menu-only frames, so the frame's readers agree.
 	static int64_t current_frame_clock_ms();
 	int64_t get_frame_clock_ms() const { return current_frame_clock_ms(); }
+	// The same clock read now, unlatched: for a reader that runs outside the frame's
+	// sample, the loading screen, which presents inside a blocking load.
+	static int64_t tick_count_ms();
 	// The leg table as literal names, in order (the frame-order pin).
 	static PackedStringArray frame_leg_names();
 	static PackedStringArray frozen_pose_leg_names();
 	// Whether the named live leg stops the frame on a false return.
 	static bool frame_leg_stops_frame(const String &p_name);
+	// Whether the live table's row `p_name` draws the scene (kSceneLeg).
+	static bool frame_leg_draws_scene(const String &p_name);
+	// Whether the live table's row `p_name` is the world block's (kWorldLeg).
+	static bool frame_leg_in_world(const String &p_name);
+	// The live table's rows whose bodies the last frame ran, in table order (a structural seam:
+	// the scene gate's skip is visible here).
+	PackedStringArray get_last_frame_legs() const;
+	// The last frame's scene gate verdict (FrameContext::scene_drawn): the shell's own scene
+	// legs after the world frame (the death.mnu latch) run on it.
+	bool get_last_frame_scene_drawn() const { return last_frame_scene_drawn_; }
+	// The last frame drew its world: the scene frame, with its world-skip word down (a cine
+	// playing or the command map over the menu skips the world block). The death.mnu latch's
+	// open and close legs sit in that block.
+	bool get_last_frame_world_drawn() const {
+		return last_frame_scene_drawn_ && !last_frame_world_skipped_;
+	}
+	// The last frame's scene frame called its HUD pass (engine inmatch::FrameOutcome::
+	// hud_pass_called): the HUD presenter's gameplay overlay pass compiles on it
+	// (HudOverlay::set_overlay_pass_called). A frame the session did not advance leaves the
+	// HUD's own gates (true).
+	bool get_last_frame_hud_pass_called() const { return last_frame_hud_pass_called_; }
+	// The last frame was one of the three drawn past a mission start, which present black
+	// (engine inmatch::FrameOutcome::start_blank): the StartBlankCover layer showed over the
+	// frame's every layer.
+	bool get_last_frame_start_blank() const { return last_frame_start_blank_; }
 	// Re-evaluates only camera-dependent production render state for an
 	// exact-pose visual capture (the settle contract and the frozen-pose leg
 	// order live with the replay table in game_world_frame.cpp).
@@ -498,6 +624,7 @@ public:
 	void render_environment_nodes_frame();
 	void render_terrain_frame();
 	void render_water_frame();
+	void render_inset_water_frame();
 	void render_foliage_frame();
 	bool drive_network_frame();
 	void apply_blink_frame();
@@ -514,7 +641,7 @@ public:
 	void render_scene_overlay_frame();
 	void append_celestial_overlays(SceneOverlaySubmission &r_submission);
 	void append_nvg_laser_overlays(SceneOverlaySubmission &r_submission);
-	void mix_audio_frame(int p_ticks_run);
+	void mix_audio_frame(int p_ticks_run, bool p_rendered);
 	void update_clear_frame();
 	void render_environment_cube_frame();
 	void finish_device_frame();
@@ -589,6 +716,9 @@ public:
 	// one): the vegetation asset caches live on it for the world's whole life
 	// (the shell's exit empties them through clear_asset_cache).
 	FoliageDispatcher *get_foliage_dispatcher() const { return dispatcher_; }
+	// The meshes whose surfaces the overlay tail's cache holds (a read seam: the load's celestial
+	// leg reads the sky bodies', D-NET-NEW-LF-20).
+	int get_scene_overlay_cached_meshes() const { return scene_overlay_bodies_.cached_meshes(); }
 	// The mounted item database (null before a mission), for the F3 snapshot
 	// writer's display-name/graphic enrichment.
 	Ref<ItemDatabase> get_item_db() const;
@@ -619,14 +749,20 @@ public:
 	// The bound signal targets.
 	void on_runtime_effects(const Array &p_effects);
 	void on_runtime_fixed_tick(int p_logic_tick);
-	// RenderingServer frame_post_draw: stamps when the frame finished
-	// rendering, the clock a mission-start frame re-bases to.
+	// RenderingServer frame_post_draw: stamps when the frame finished rendering on the main
+	// loop's clock, the clock a mission-start frame re-bases to.
 	void on_frame_post_draw();
-	// Seconds since the last frame finished rendering (negative before the
-	// first). The shell's frame loop hands it to the session on each frame
-	// (MissionFrameInput.since_render_seconds); a synthetic driver stepping
-	// tick() leaves it unsampled and banks its own delta.
+	// Seconds since the last frame finished rendering on the main loop's clock, in its steps
+	// (negative before the first). The shell's frame loop hands it to the session on each
+	// frame (MissionFrameInput.since_render_seconds); a synthetic driver stepping tick() leaves
+	// it unsampled and banks its own delta.
 	double get_seconds_since_render() const;
+	// The frame's elapsed wall time since this method's previous call, in whole
+	// milliseconds of the process's monotonic clock (0 on the first call): what
+	// the shell's frame loop hands the session as the frame's delta, as retail's
+	// main loop banks GetTickCount's difference; Godot's process step is capped
+	// (D-NET-NEW-LI-6). A synthetic driver stepping tick() banks its own delta.
+	double take_frame_elapsed_seconds();
 	void on_runtime_simulation_restarted();
 	void on_wire_node_spawned(ObjectModel *p_node, int p_kind, int p_item_id);
 	void on_frame_stats_capture_changed(bool p_active);
@@ -661,7 +797,11 @@ private:
 	void run_leg_table(const FrameLeg *p_legs, int p_count, FrameContext &r_ctx, bool p_timed);
 	LegResult leg_begin(FrameContext &r_ctx);
 	LegResult leg_session(FrameContext &r_ctx);
+	LegResult leg_remote_admin(FrameContext &r_ctx);
+	LegResult leg_scene_gate(FrameContext &r_ctx);
+	LegResult leg_script_voice(FrameContext &r_ctx);
 	LegResult leg_local_view(FrameContext &r_ctx);
+	LegResult leg_facial(FrameContext &r_ctx);
 	LegResult leg_scene_environment(FrameContext &r_ctx);
 	LegResult leg_environment_nodes(FrameContext &r_ctx);
 	LegResult leg_terrain(FrameContext &r_ctx);
@@ -675,6 +815,7 @@ private:
 	LegResult leg_lights(FrameContext &r_ctx);
 	LegResult leg_ragdolls(FrameContext &r_ctx);
 	LegResult leg_materials(FrameContext &r_ctx);
+	LegResult leg_inset_water(FrameContext &r_ctx);
 	LegResult leg_framefx(FrameContext &r_ctx);
 	LegResult leg_slot_shadows(FrameContext &r_ctx);
 	LegResult leg_particles(FrameContext &r_ctx);
@@ -706,6 +847,10 @@ private:
 	// local-view leg's hand-over), else null.
 	Camera3D *inset_pass_camera() const;
 	Transform3D render_camera_xform() const;
+	// The eye the main scene's water mirror collects from: the view block the
+	// frame's compose left (LocalPlayerPresenter::get_view_block_transform)
+	// while the local view's camera draws the frame, else render_camera_xform().
+	Transform3D main_mirror_collect_eye() const;
 	void stamp_iris_samples(const Transform3D &p_camera_xform);
 	void render_terrain_light_leg();
 	void sample_auxiliary_render_stats(bool p_stats_on);
@@ -724,21 +869,59 @@ private:
 	Ref<ResourceRoot> mount_runtime_root(const String &p_dir);
 	String resolver_expansion();
 	String resolver_game();
+	// load_mission past its mount: the document from `p_root` (archive-only) and the one mission
+	// path. `p_timeline` is the entry's timeline (null: the load begins its own). A host's map
+	// change loads the next map on the session's mount this way (SessionDrive).
+	int load_mission_on_root(const String &p_bms_name, const Ref<ResourceRoot> &p_root,
+			const Ref<LoadTimeline> &p_timeline);
 	// The ONE mission path -- the file entry (load_mission) and the in-memory
 	// entry (load_mission_data) converge here.
 	int load_mission_internal(const Ref<MissionData> &p_mission, const String &p_bms_name,
 			const Ref<ResourceRoot> &p_resource_root);
+	// A join's effect system at its final S2C 0x64, ahead of the 0x09: a fresh effect world
+	// with every mounted .ptl parsed and its catalog warmed, which the S2C 0x1A's load adopts
+	// (start_effect_world) (engine: inmatch/joiner_connection.h set_mission_data_loading,
+	// D-NET-NEW-L2-43). An earlier one (an abandoned mission start's) is freed first.
+	void load_join_effect_system(const Ref<ResourceRoot> &p_resource_root);
+	// A join's S2C 0x11 load (SessionDrive::step_preload): the mission start's head and its
+	// terrain off the host's 0x0B header; its S2C 0x1A load_mission_internal goes on from the
+	// objects.
+	int load_join_terrain(const Ref<MissionData> &p_mission, const String &p_bms_name,
+			const Ref<ResourceRoot> &p_resource_root);
+	// The mission start's copies of the options (the object detail, the texfilter,
+	// texcompression and particle-density words, the ragdoll bit), ahead of its effect system
+	// and its head.
+	void copy_mission_start_options();
+	// The mission start's head through its terrain past the copies (the tile info, the
+	// environment, the terrain); `r_timeline` takes the load's timeline, begun here when the
+	// caller began none.
+	int load_mission_head(const Ref<MissionData> &p_mission, const String &p_bms_name,
+			const Ref<ResourceRoot> &p_resource_root, Ref<LoadTimeline> &r_timeline);
 	void start_mission_root();
 	void place_mission_objects(const Ref<MissionData> &p_mission);
-	// The placer's per-model progress pulse (the load plan's per-model pulse
-	// witness): the loading screen at the object stage's constant value.
-	void pulse_object_stage_progress();
+	// One load-progress present at `p_percent` (the loading screen's due rule gates it): the
+	// placer's per-model pulse at the object stage's constant value (the load plan's per-model
+	// pulse witness) and the freeze's per-file present, each at its stored checkpoint.
+	void pulse_load_progress(int p_percent);
+	// One loading-screen present at the checkpoint it stored last (its due rule gates it),
+	// from inside a loader: the effect system's load and its atlas build (engine
+	// hud/loading_screen.h carries the witness).
+	void present_stored_load_progress();
+	// A loading step of a join's declared loads (the S2C 0x11's terrain, the final 0x64's
+	// effects, the 0x1A's stage emits): the NovaWorld session's periodic update on the join's
+	// simulation, the drive's until the runtime adopts it (engine
+	// inmatch::JoinerRole::pump_mission_start_periodic_update, D-NET-NEW-L2-54); on any other load
+	// (a NovaWorld host's) the held session's half alone (engine: inmatch::run_loading_step,
+	// D-NET-NEW-L9-25); nothing without a NovaWorld session.
+	void pump_join_load_step();
 	// The terrain's .trn, overcast.def and the named .env over the engine
 	// defaults, as the time-of-day load reads them; never fails.
 	void load_environment(const String &p_trn_path, const String &p_env_path);
 	void apply_mission_environment_overrides(const Ref<MissionData> &p_mission);
 	void set_mission_water_height_override(float p_world_height);
 	void set_water_world_rendering_enabled(bool p_enabled);
+	// The hold's device legs (set_presentation_held), lifted alone across the load's forced frame.
+	void apply_presentation_hold_(bool p_held);
 	void set_weather_world_tick_driven(bool p_enabled);
 	void prepare_world_driven_weather();
 	void prepare_autonomous_weather();
@@ -747,24 +930,86 @@ private:
 			const Ref<ResourceRoot> &p_resource_root, const PackedByteArray &p_wire_til_bytes,
 			bool p_wire_is_authoritative);
 	bool apply_join_wire_til_if_ready();
-	void place_streamed_mission_objects(const Ref<Simulation> &p_sim);
+	bool place_join_wire_world(const Ref<Simulation> &p_sim, const Ref<LoadTimeline> &p_timeline);
+	// `p_timeline` (may be null) takes the placement's legs as nested spans (an instrument).
+	void place_streamed_mission_objects(const Ref<Simulation> &p_sim,
+			const Ref<LoadTimeline> &p_timeline = Ref<LoadTimeline>());
 	void clear_mission_tile_info();
-	// The terrain's load: the .trn, then overcast.def and the mission's .env (`p_environment`, its
-	// name without the extension; empty: none) through the terrain's parser (D-TERRAIN-18), with
-	// the mission's tile set over its tilestrip.
+	// The terrain's connect leg (engine terrain/terrain_load_legs.h carries the witness):
+	// the .trn, then overcast.def and the mission's .env (`p_environment`, its name without the
+	// extension; empty: none) through the terrain's parser (D-TERRAIN-18), with the mission's tile
+	// set over its tilestrip, the height data and the char and foliage maps, bound to every row
+	// that reads the terrain; the terrain node left unbuilt for the mission textures stage.
 	bool load_terrain(
 			const String &p_trn_path, const String &p_tile_set, const String &p_environment);
+	// The mission textures stage's terrain, every arm's (D-NET-NEW-L2-46): the texture slots and
+	// the tile set's atlas the connect leg held and the terrain node's build over them, then the
+	// foliage's. A dedicated host's start (`p_dedicated_host`), which jumps over the render
+	// subsystems, builds no LOD cache (the node's tile meshes and patch pool), no tile cache page
+	// array, and configures no foliage (engine terrain/terrain_load_legs.h builds_lod_cache,
+	// builds_tile_cache_targets and loads_foliage_definitions, D-NET-NEW-L3-32, D-NET-NEW-L3-33,
+	// D-NET-NEW-LF-3). `p_timeline` takes it as one span. Nothing when no connect leg is pending.
+	void load_terrain_textures(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host);
+	// The same stage's sky maps past the terrain's: the full arm loads the environment's cloud
+	// layers (WorldScene::load_sky_maps), a dedicated host's reduced arm none (D-NET-NEW-L3-34).
+	// `p_timeline` takes it as the span sky_maps on either arm.
+	void load_sky_maps(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host);
+	// The same stage's view effects, tracer pool and FrameFX past the HUD's textures: the full
+	// arm creates the NVG view's device objects (FrameFx::init_view_effects), the tracer pool's
+	// (EffectWorld::create_tracer_pool_devices) and FrameFX's pixel shaders with its "ffscan"
+	// scanlines (WorldScene::init_frame_fx_mission_textures), a dedicated host's reduced arm
+	// none (D-NET-NEW-L3-35, D-NET-NEW-LF-13). `p_timeline` takes it as the span
+	// frame_fx_textures on either arm.
+	void load_frame_fx_textures(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host);
 	void configure_foliage();
 	int start_runtime(const Ref<MissionData> &p_mission, const String &p_bms_name);
+	// The runtime's options the load knows at its start: the mission's names, the process's words
+	// and profiles, the playable gate and the session request the drive stages (start_runtime adds
+	// the terrain, the item table, the .til and the placer once the load built them).
+	Ref<MissionSetupOptions> make_runtime_options(const Ref<MissionData> &p_mission,
+			const String &p_bms_name);
+	// A fresh host's or single player's session at the load's start, ahead of the head's terrain
+	// and the objects: the runtime's options, the simulation staged over them
+	// (MissionRoot::stage_simulation: its role, its record, its bound socket) and its session
+	// created (Simulation::create_host_session), kept for start_runtime. Emits load_failed (or
+	// process_exit_requested for the create's mpreset exit) and returns the error on a failure.
+	int create_fresh_session(const Ref<MissionData> &p_mission, const String &p_bms_name,
+			const Ref<ResourceRoot> &p_resource_root);
+	// The local player's character profile (local_character_profile_) from Avatars.def's table
+	// (null: the empty table's projection) over the spawn loadout, in session or out. The fresh
+	// session's create reads it at the load's start, the placement again over the placer's table.
+	void project_local_character_profile(const Ref<AvatarDatabase> &p_avatar_db);
+	void run_mission_start();
 	void load_player_weapon_profile();
 	void start_mission_audio(const Ref<MissionData> &p_mission, const String &p_bms_name);
-	int warm_effect_world_catalog();
+	// `p_spawn_effects` false: the catalog was warmed already (a join's effect system load), so
+	// only the presenters' fire pipelines draw in the forced frames.
+	// `p_timeline` (may be null) takes the warm's legs as nested spans (an instrument).
+	int warm_effect_world_catalog(bool p_spawn_effects = true,
+			const Ref<LoadTimeline> &p_timeline = Ref<LoadTimeline>());
+	// The forced frame's warm of the skinned models the first revealed frame would make: the
+	// local body and its first-person view model (when the local player's type is known), and one
+	// model per visual identity the wire walk would cold-spawn, under a container at `p_position`.
+	// The caller draws the frame and frees the container (null when nothing was built).
+	// `p_timeline` (may be null) takes the builds as nested spans and their count as the
+	// zero-length span person_models_<n> (an instrument).
+	Node3D *build_person_pipeline_warm(const Vector3 &p_position, const Ref<LoadTimeline> &p_timeline);
+	// A new effect world under this world with every mounted .ptl of `p_resource_root` parsed
+	// at the session's words and its texture atlases built (the mission start's head's,
+	// load_join_effect_system's and start_effect_world's for a load that built none; a
+	// dedicated host's builds none). `p_timeline` (may be null) takes the atlas build as a
+	// nested span (an instrument).
+	EffectWorld *create_effect_world(const Ref<ResourceRoot> &p_resource_root,
+			const Ref<LoadTimeline> &p_timeline = Ref<LoadTimeline>());
+	void free_join_effect_world();
+	void free_head_effect_world();
 	void start_effect_world();
 	void apply_occlusion_culling_policy();
 
 	// --- the effect fan-out (game_world_effects.cpp) ---
 	void route_round_impacts();
     void route_script_effects();
+	void route_dialog_lines();
 	void route_terrain_scorches();
 	void resync_weather_after_restore();
 
@@ -775,6 +1020,8 @@ private:
 	MissionEnvironment *env_ = nullptr;
 	Water *water_ = nullptr;
 	EnvironmentCubeCapture *environment_cube_ = nullptr;
+	// The weather's time-set reset count the cube last answered (render_environment_cube_frame).
+	uint32_t cube_time_set_resets_ = 0;
 	FrameFx *framefx_ = nullptr;
 	Weather *weather_ = nullptr;
 	Precipitation *precipitation_ = nullptr;
@@ -798,7 +1045,15 @@ private:
 	bool join_wire_til_applied_ = false;
 	bool join_wire_assets_failed_ = false;
 	bool join_wire_asset_failure_emitted_ = false;
+	// A join's S2C 0x11 ran the mission start's head (load_join_terrain), which its S2C 0x1A load
+	// skips.
+	bool join_terrain_preloaded_ = false;
+	// The connect leg loaded the terrain's configuration and heights; its textures and build wait
+	// for the mission textures stage (load_terrain_textures).
+	bool terrain_textures_pending_ = false;
 	bool world_ready_ = false;
+	// The loading presentation's hold (set_presentation_held).
+	bool presentation_held_ = false;
 	Ref<MissionData> loaded_mission_;
 	// The BMS clock the weather home is seeded with at the mission-start
 	// boundary.
@@ -815,10 +1070,50 @@ private:
 	Ref<MissionPlacementStats> mission_stats_;
 	Ref<MissionObjectPlacer> placer_; // kept so mission audio reuses its item database
 	Ref<LoadTimeline> last_load_timeline_; // the most recent load_mission timing
+	// The first frames past the most recent mission load (last_post_load_frames): whether it still
+	// times frames, the frames timed, whether a joiner's first C2S 0x0C past the final wait has left,
+	// and the joiner net readout's next unread record.
+	static constexpr int kPostLoadFrames = 8;
+	static constexpr int kPostLoadFramesMax = 120;
+	Ref<LoadTimeline> post_load_frames_;
+	bool post_load_open_ = false;
+	// The running leg's post-load frame while one of those frames runs it (null otherwise): the
+	// scene legs' parts nest under it as spans (post_load_part, an instrument).
+	LoadTimeline *post_load_leg_ = nullptr;
+	void post_load_part(const char *p_name);
+	void post_load_part_end();
+	int post_load_frame_count_ = 0;
+	bool post_load_uplink_seen_ = false;
+	uint32_t post_load_trace_seq_ = 0;
+	void begin_post_load_frames(const String &p_bms_name);
+	void end_post_load_frames();
+	// The frame's client net passes as spans of no length under its session leg (an instrument).
+	void mark_post_load_net_passes(LoadTimeline &r_frames);
+	// A post-load frame's deferred flush by leg under --verbose (an instrument): a marker queued
+	// ahead of the legs and one after each leg that ran fire in the flush right after the work
+	// queued ahead of them (MessageQueue is FIFO), so the time from one marker to the next is
+	// what that leg queued (deferred calls, redraws, skeleton updates): a "flush_<leg>" span of
+	// the post-load timeline when it reaches kPostLoadFlushSpanUs.
+	static constexpr int64_t kPostLoadFlushSpanUs = 1000;
+	int64_t post_load_flush_mark_us_ = 0;
+	void queue_post_load_flush_mark(int p_leg);
+	void post_load_flush_mark(int p_leg);
+	// load_mission's timeline (its mount and document spans, an instrument), which
+	// load_mission_internal goes on with.
+	Ref<LoadTimeline> entry_timeline_;
+	// The runtime's options create_fresh_session staged with their created session, which
+	// start_runtime consumes (unload drops them).
+	Ref<MissionSetupOptions> staged_runtime_options_;
 	Ref<WeaponDatabase> weapon_db_; // weapon.def, lazy per mounted root (FP viewmodel)
 	ObjectID music_director_id_;
 	ObjectID mission_audio_id_;
 	ObjectID effect_world_id_; // the runtime .ptl effect world (render-only, per mission)
+	// The effect world a join's mission-data load built ahead of its 0x09, until the S2C 0x1A's
+	// load adopts it (load_join_effect_system).
+	ObjectID join_effect_world_id_;
+	// The effect world the mission start's head built ahead of its terrain (a host's with its
+	// own client, a single player's), until start_effect_world binds it (load_mission_internal).
+	ObjectID head_effect_world_id_;
 	// Frame-clear cache (divergence #21): recompute only when the env
 	// generation moves or the camera crosses the water plane.
 	int64_t clear_env_generation_ = -1;
@@ -827,6 +1122,9 @@ private:
 	uint64_t scene_overlay_frame_id_ = 0;
 	SceneOverlayModelSurfaces scene_overlay_bodies_;
 	void append_water_mirror_overlays(SceneOverlaySubmission &r_submission);
+	// Each rendering water mirror's tracer ribbons, under the reflected scene's
+	// pass fog (EntityPresenter::append_mirror_tracer_ribbons).
+	void append_mirror_tracer_overlays(SceneOverlaySubmission &r_submission);
 	// The frame's light values (null with no environment or light state),
 	// shared by the overlay legs.
 	Ref<EnvLightValues> frame_light_values() const;
@@ -862,6 +1160,8 @@ private:
 	// the LOD frames and the occlusion frame's death pieces read.
 	int object_polydetail_ = opennova::renderer::kObjectLodDetailFreshProfile;
 	int object_detail_ = opennova::renderer::kObjectLodDetailFreshProfile;
+	// The options' aspect mode (set_aspect_mode); -1 selects the surface's own ratio.
+	int aspect_mode_ = -1;
 	// The options' texfilter_level (set_texfilter_level) and the session's copy
 	// of it taken at each mission start; publish_texfilter_state hands both to
 	// the device leg (render/texture_filter_device).
@@ -902,6 +1202,45 @@ private:
 	Ref<CharacterJoinProfile> local_character_profile_;
 	Ref<PlayerProfiles> player_profiles_;
 	Ref<GameConfigBlock> game_config_;
+	Ref<ControlsModel> controls_model_; // set_controls_model
+	Callable menu_screen_probe_;        // set_menu_screen_probe
+	bool restart_boot_ = false;          // set_restart_boot, consumed by the next load
+	// The process's map-rotation words, one for the world's whole run: retail's are
+	// process globals no session start resets, so a session that ended mid-map
+	// hands its half toggle, SETNEXT latch and side-to-team map to the next
+	// (Simulation.use_host_rotation; inmatch/mission_rotation.h).
+	opennova::inmatch::HostRotation host_rotation_;
+	// The process's client words (the 0x4C report's count), which every hosted session's own
+	// client runtime steps on (Simulation.use_client_process; inmatch/client_runtime.h
+	// ClientProcessState).
+	opennova::inmatch::ClientProcessState client_process_;
+	// The server log devices the process's command-line switches arm (/PROFILE, /PUNTLOG,
+	// /PUNT.TXT, /CHEATLOG, /NETLOG, /INOUT), alive for the world's run as retail's globals
+	// are for the process's, every hosted session writing them
+	// (Simulation.use_log_devices; inmatch/server_log_devices.h). Armed at _ready, closed at
+	// the exit from the tree.
+	std::unique_ptr<opennova::inmatch::ServerLogDevices> log_devices_;
+	// The process's remote admin (engine inmatch/remote_admin.h): admin.cfg and the listener
+	// once the process block is known, the console bound over the running session (its host
+	// context, else a joiner's own client, else session-less; any change of the binding
+	// rebinds), the CRT stream its challenge draws from outside a mission, and the TCP device.
+	// Pumped by the remote_admin leg in a ticked mission frame and by the internal process step
+	// on the frames remote_admin_idle_scene names (the menus, a paused single player, whose
+	// stored exit reason leaves the mission instead: remote_admin_idle_frame_exits).
+	opennova::inmatch::RemoteAdminConsoles admin_consoles_;
+	opennova::io::CrtRand admin_rand_;
+	std::unique_ptr<opennova::AdminServer> admin_server_;
+	std::unique_ptr<AdminTcpPump> admin_pump_;
+	bool admin_opened_ = false;
+	// Open on the first pump with a process block; false until then.
+	bool open_remote_admin();
+	// One frame's pump in `p_scene` over the running session (none: session-less).
+	void pump_remote_admin(opennova::inmatch::AdminScene p_scene);
+	// The console's seams over `p_binding` (the session's, else the process block's).
+	opennova::inmatch::AdminConsole::Seams remote_admin_seams(const Ref<Simulation> &p_sim,
+			const opennova::inmatch::RemoteAdminBinding &p_binding);
+	// The HUD the console's CHAT window and echo reach (its group); null with none.
+	HudOverlay *admin_hud_overlay() const;
 	// The last frame's world-tick leg counters (RuntimePerfCounters).
 	int64_t perf_tick_us_ = 0;
 	int64_t perf_foliage_us_ = 0;
@@ -937,13 +1276,25 @@ private:
 	Vector3 frame_camera_pos_;
 	Transform3D frame_camera_xform_;
 	double frame_delta_ = 0.0;
-	// Time::get_ticks_usec() at the last frame_post_draw (0: none yet).
-	uint64_t last_post_draw_usec_ = 0;
+	// world::frame_tick_count_ms() at the last frame_post_draw (0: none yet).
+	uint32_t last_post_draw_ms_ = 0;
+	// world::frame_tick_count_ms() at the last take_frame_elapsed_seconds (0: none).
+	uint32_t frame_clock_ms_ = 0;
 	bool frame_probe_enabled_ = false;
 	bool frame_stats_on_ = false;
 	bool frame_timing_ = false;
 	bool frame_skip_occlusion_ = false;
 	int64_t device_frame_start_us_ = 0;
+	// Bit i: the live table's row i ran its body in the last frame (get_last_frame_legs).
+	uint64_t last_frame_run_mask_ = 0;
+	bool last_frame_scene_drawn_ = true;
+	bool last_frame_world_skipped_ = false;
+	bool last_frame_hud_pass_called_ = true;
+	bool last_frame_start_blank_ = false;
+	// The black cover the three drawn frames past a mission start present (present_start_blank),
+	// made at the first of them.
+	ObjectID start_blank_cover_id_;
+	void present_start_blank(bool p_blank);
 	// Identity latch for measured render time on the water reflection RTT.
 	ObjectID stats_water_vp_id_;
 	// Edge latch for the compositor passes' RD GPU timestamps (F3 capture

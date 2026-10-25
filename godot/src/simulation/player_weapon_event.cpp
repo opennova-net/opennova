@@ -55,6 +55,7 @@ void PlayerWeaponEvent::_bind_methods() {
 	PLAYER_WEAPON_EVENT_FIELD(Variant::STRING, switch_to_weapon)
 	PLAYER_WEAPON_EVENT_FIELD(Variant::BOOL, clear_weapon)
 	PLAYER_WEAPON_EVENT_FIELD(Variant::BOOL, preserve_slot_state)
+	PLAYER_WEAPON_EVENT_FIELD(Variant::BOOL, installed)
 	PLAYER_WEAPON_EVENT_FIELD(Variant::BOOL, switch_denied)
 #undef PLAYER_WEAPON_EVENT_FIELD
 }

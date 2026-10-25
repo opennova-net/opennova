@@ -121,8 +121,8 @@ particle::Vec3 effect_axes(const int32_t xyz[3]) {
 particle::EffectPose emitter_owner_pose(const Entity &entity) {
     const int32_t origin[3] = {};
     const auto matrix = collision_matrix_from_euler(
-            bam_heading_from_mission_yaw_deg(entity.yaw),
-            bam_from_degrees_wrapped(entity.pitch), bam_from_degrees_wrapped(entity.roll), origin);
+            entity.heading,
+            entity.pitch_bam, entity.roll_bam, origin);
     particle::EffectPose pose;
     pose.position = {entity.position.x, entity.position.z, -entity.position.y};
     const int32_t scale = entity.uniform_scale_q16 != 0 ? entity.uniform_scale_q16 : 65536;
@@ -226,11 +226,15 @@ void spawn_item_explosion(World &world, const Entity *source, const FixedVec3 &p
     const Vec3 pos{position.x/65536.0f,position.y/65536.0f,position.z/65536.0f};
     world.out.destruction.effects.push_back({kItemExplosionEffect,pos,{}});
     const int index=world.tables.ammo.index_of(kItemExplosionAmmo);
-    if (world.rules.logic_authority) if (const auto *ammo=world.tables.ammo.by_index(index)) {
+    if (const auto *ammo=world.tables.ammo.by_index(index)) {
         ExplosionEntry blast;
-        blast.pos=pos; blast.ammo_index=index; blast.type=ammo->kztype; blast.hit_word=1;
+        blast.pos.set_q16(position); // the words (D-NET-507)
+        blast.ammo_index=index; blast.type=ammo->kztype; blast.hit_word=1;
         if (source) blast.owner=source->handle;
-        world.explosions.queue_explosion(world,blast);
+        // The gated entry: off the authority nothing queues [orig:
+        //  Entity_SpawnExplosionEffects @0x439A06 -> WeaponEffect_QueueExplosion
+        //  @0x4E8330 (@0x4E8333..0x4E8339)].
+        world.explosions.queue_explosion_on_authority(world,blast);
     }
     // AmmoDef_GetExplosionRadius is a misleading IDB name: the tag-5 row's
     // sound, not a radius. It seeds the result from dword_A2EB80 — ammo def

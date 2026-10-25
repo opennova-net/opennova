@@ -23,6 +23,20 @@ inline float aspect_height_over_width(int mode, float width, float height) {
 // viewportScaleY, so one scale stretches every frustum of the frame.
 // [orig: Render_SetAspectRatioMode @0x58d8a7 (modes 0..3) / @0x58d8d9 (native);
 //  Render_SetViewProjectionWithDefaults @0x58f6b0; Player_RenderViewModelIfAlive @0x4e0154]
+//
+// The mode a frame projects at is the session's: the options write only the
+// cfg word display_16x9, and only the front-end options do (the 16x9DISPLAY
+// widget is theirs alone), each mission start copies the video block into the
+// session globals and applies the copy, and nothing else writes the frame's
+// aspect globals but the front end's two preview inits, which read the cfg
+// word for their own view. A change made while a mission runs reaches its
+// projection, sights and scope geometry at the next mission start.
+// [orig: Options_HandleAcceptOrBack @0x55A710 (the widget read @0x55A89D);
+//  Game_ApplySessionSettingsToGlobals @0x551500 (the rep movsd @0x551574:
+//  g_SessionAspectMode @0x24D2060 = display_16x9 @0x25507E4); Game_StartMission
+//  @0x524360 (the session word's only read @0x52472B, this function called
+//  @0x524732); UI_ItemDatabase_InitViewer @0x5529D0 (the call @0x5529EB);
+//  PlayerInfo_InitPreviewModel @0x5600D0 (the call @0x5600DF)]
 inline float aspect_viewport_scale_y(int mode, float width, float height) {
     if (mode < 0 || mode > 3 || width <= 0.0f || height <= 0.0f) return 1.0f;
     return aspect_height_over_width(mode, width, height) / (height / width);

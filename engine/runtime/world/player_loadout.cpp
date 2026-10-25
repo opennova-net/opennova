@@ -7,6 +7,7 @@
 #include <base/io/strutil.h>
 
 #include <runtime/world/entity.h>
+#include <runtime/world/local_player.h>
 #include <runtime/world/world.h>
 
 using namespace opennova::def;
@@ -50,8 +51,8 @@ void local_loadout_set_spawn_kit(World &world, LocalPlayerLoadout &loadout,
         kit = weapon_kit_filter_by_availability(kit, world.tables.weapons,
                                                 loadout.availability);
     }
-    loadout.spawn_kit_set = !kit.empty();
-    loadout.spawn_kit = std::move(kit);
+    loadout.mission_kit_promoted = !kit.empty();
+    loadout.spawn_kit() = std::move(kit);
 }
 
 void local_loadout_apply_availability_pairs(
@@ -76,12 +77,13 @@ bool local_loadout_promote_mission_rules(
     if (kit_rows.empty()) return false;
     local_loadout_set_spawn_kit(world, loadout, std::move(kit_rows),
             /*filter_by_availability=*/true);
-    return loadout.spawn_kit_set;
+    return loadout.mission_kit_promoted;
 }
 
 std::vector<WeaponKitEntry> local_loadout_kit(const World &world,
                                               const LocalPlayerLoadout &loadout) {
-    return loadout.spawn_kit_set ? loadout.spawn_kit : weapon_kit_default(world.rules.title);
+    (void)world;
+    return loadout.spawn_kit();
 }
 
 bool local_loadout_set_player_class(World &world, LocalPlayerLoadout &loadout,
@@ -96,24 +98,77 @@ bool local_loadout_set_player_class(World &world, LocalPlayerLoadout &loadout,
     return true;
 }
 
-void local_loadout_sync_damage_classes(World &world,
-                                       const LocalPlayerLoadout &loadout) {
-    Entity *e = world.registry.get(world.cached.local_player);
-    if (e == nullptr) return;
-    e->ammo_damage_class.assign(world.tables.ammo.entries.size(), 0);
-    const std::vector<WeaponKitEntry> kit = local_loadout_kit(world, loadout);
-    weapon_kit_build_damage_classes(kit, world.tables.weapons,
-            world.tables.ammo.entries.size(), e->ammo_damage_class);
+namespace {
+
+// The select of the current slot word and the mount of what it selected, the tail
+// Player_InitPlayer and both loadout applies share: Player_SelectWeaponSlot(word), then
+// the EquippedSlot's mount [orig: Player_InitPlayer @0x4E15F0 (the select @0x4E1995, its
+//  read of the word @0x4E198E); NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (the
+//  select @0x4296E3, Player_MountWeaponSlot @0x4296E8..0x4296F4); WeaponLoadout_ApplyFromBuffer
+//  @0x565CD0 (the select @0x566285, the mount @0x56628A..0x566297)].
+void select_current_slot(World &world, LocalPlayerWeapon &weapon, WeaponInventory &inventory,
+                         bool mount) {
+    // No walk here: both loadout applies end on the select and the mount alone, so a running
+    // PowerThrow windup survives them; the walk that clears it is Player_InitPlayer's
+    // (local_loadout_rebuild) [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x566285,
+    //  @0x566297); NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (@0x4296E3, @0x4296F4)].
+    const WeaponTable &table = world.tables.weapons;
+    const WeaponSwitchGates gates =
+            local_weapon_switch_gates(world, weapon, &inventory);
+    // An empty table (an empty buffer, the armory all-NONE kit) selects nothing, and
+    // the body keeps its equipped byte: the no-slot arm stores no +0x2B0 [orig:
+    // Player_SelectWeaponSlot @0x4DD680 - the global walk's return 0 @0x4DD794..0x4DD79C;
+    // Player_SwitchToWeaponByHandle @0x4E0170 stores none].
+    if (!weapon_select_slot(table, inventory, inventory.current_slot,
+                !gates.equip_blocked))
+        return;
+    // The select cleared the NVG scope restore latch [orig:
+    // Player_SelectWeaponSlot @0x4dd730 / @0x4dd7fe, every successful select;
+    // called @0x4e1995 (Player_InitPlayer), @0x566285
+    // (WeaponLoadout_ApplyFromBuffer), @0x4296e3 (the 0x5A apply)].
+    weapon.nvg_scope_restore = false;
+    inventory.pending_combo = inventory.equipped_combo;
+    // A select writes none of the mount's view words: the loadout applies' mount request
+    // below writes them, Player_InitPlayer's walk its camera reset's (local_loadout_rebuild)
+    // [orig: Player_SelectWeaponSlot @0x4DD680].
+    commit_pending_weapon_switch(world, weapon, &inventory, PendingCommit::kSelect);
+    if (!mount) return;
+    // The loadout applies then mount the EquippedSlot the select stored, through the mount's
+    // own leg: its def's category is its own, so the queue is SWITCHRANK on that slot (none
+    // while the lower / raise interp runs), the six view-bias words clear, and the
+    // completion stores the same slot again (commit_pending_weapon_switch): no draw, no
+    // raise (D-WPN-21's select plays none). With no local body (a joiner's grant ahead of
+    // L) there is no EquippedSlot to mount [orig: Player_MountWeaponSlot @0x4DFA40 - the
+    // EquippedSlot test @0x4DFA63..0x4DFA71].
+    // [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (the select @0x4296E3, the
+    //  mount of g_LocalPlayerEntity->EquippedSlot @0x4296E8..0x4296F4);
+    //  WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x566285, @0x56628A..0x566297);
+    //  Player_MountWeaponSlot @0x4DFA40 (the store @0x4DFB16, the compare @0x4DFB8B,
+    //  WeaponSlot_TryQueueSwitchRank @0x4DFB96, the bias clear @0x4DFBCF..0x4DFBE8)]
+    LocalPlayer *local = world.local_player_state;
+    if (local == nullptr || &local->weapon != &weapon || !weapon.active ||
+            weapon.presentation_pending)
+        return;
+    local_player_mount_weapon_slot(world, weapon, inventory, local->view, inventory.equipped_combo);
 }
+
+} // namespace
 
 void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
                            LocalPlayerWeapon &weapon, WeaponInventory &inventory,
                            bool &inventory_valid, bool select_spawn_default) {
     // [orig: Player_InitPlayer @ 0x4e15f0 — the full leg sequence in the
-    //  header note.] Entity-optional: a joiner rebuilds before L spawns.
+    //  header note.] Entity-optional: a joiner rebuilds before L spawns. It writes
+    //  none of the slot's damage-class bytes: their writers are the 0x2F accept
+    //  and the out-of-session armory apply alone (D-NET-691) [orig: the four
+    //  +0x15E58 sites: Weapon_CalcImpactDamage @0x4ECA24, Server_SendWeaponSlotListToPlayer
+    //  @0x502871, the accept @0x515E92, WeaponLoadout_ApplyFromBuffer @0x56618C].
     Entity *e = world.registry.get(world.cached.local_player);
+    // The current slot word starts every Player_InitPlayer at 195, whatever the
+    // select below finds [orig: Player_InitPlayer @0x4E15F0 (g_CurrentWeaponSlot = 195
+    //  @0x4E17FF)].
+    inventory.current_slot = weapon_combo::kDefaultSpawnCombo;
     const WeaponTable &table = world.tables.weapons;
-    local_loadout_sync_damage_classes(world, loadout);
     if (table.empty()) return;
     const std::vector<WeaponKitEntry> kit = local_loadout_kit(world, loadout);
     inventory.reset(table);
@@ -121,7 +176,7 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
             weapon_kit_expand_display_list(kit, table);
     // The local player owns every slot the fill seeds: its class feeds the
     // zoom seed's sniper lock. The permission is the fill's value: the
-    // session byte (byte_A821F0) on an in-session peer, else the config's own
+    // session byte (g_SessionAllowSniperScopeZoom) on an in-session peer, else the config's own
     // allowSniperScopeZoom (World::rules.sniper_zoom_fill) [orig:
     //  WeaponSlot_InitFromDef @ 0x53EF07..0x53EF25; Config_SetDefaults
     //  @ 0x54D364].
@@ -144,29 +199,80 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     weapon.switch_in_flight = false;
     weapon.switch_deferred_action = -1;
     if (!select_spawn_default) return;
-    const WeaponSwitchGates gates =
-            local_weapon_switch_gates(world, weapon, &inventory);
-    if (!weapon_select_slot(table, inventory, weapon_combo::kDefaultSpawnCombo,
-                !gates.equip_blocked)) {
-        // An empty table (the armory all-NONE kit) equips nothing.
-        if (e != nullptr) e->equipped_adm_index = 0xFF;
+    // Player_InitPlayer's own view and weapon words start cleared: its memset of the
+    // local-player block and its two interps' clears precede its weapon leg; the loadout
+    // applies run no Player_InitPlayer [orig: Player_InitPlayer @0x4E15F0 (the memset
+    //  @0x4E1602, the interps @0x4E1609..0x4E1722); local_player_init_player_clears].
+    LocalPlayer *local = world.local_player_state;
+    PlayerViewState *view =
+            local != nullptr && &local->weapon == &weapon ? &local->view : nullptr;
+    if (view != nullptr) local_player_init_player_clears(weapon, *view);
+    // The select of the word [orig: Player_InitPlayer @0x4E15F0 (the
+    //  Player_SelectWeaponSlot(g_CurrentWeaponSlot) read @0x4E198E, the call @0x4E1995)].
+    select_current_slot(world, weapon, inventory, /*mount=*/false);
+    // Then its walk on the word, whatever the select found: past its seat gate it clears a
+    // running PowerThrow windup, and past the EquippedSlot's action gate it resets the camera
+    // (the scope interp cleared, hipfire, an optic EquippedSlot bound, the fov target 80, the
+    // binocular clears, the NVG latch).
+    // [orig: Player_InitPlayer @0x4E15F0 - Player_SwitchToWeaponByHandle @0x4E19A1 (the windup
+    //  clear @0x4E019B, the gates @0x4E017D..0x4E01F6, Player_ResetCameraAndMovementState
+    //  @0x4E01FC); local_weapon_walk_clears_windup; weapon_switch_walk_resets_view]
+    local_weapon_walk_clears_windup(world, weapon);
+    if (view == nullptr ||
+            !weapon_switch_walk_resets_view(table, inventory, inventory.current_slot,
+                    local_weapon_switch_gates(world, weapon, &inventory)))
         return;
-    }
-    // Player_InitPlayer follows the select with SwitchToWeaponByHandle(195)
-    // [orig: @ 0x4e1995/@ 0x4e19a1], but the switch's mount walk rides the
-    // entity's AI-slot binding gate [orig: entity+0x68 test @ 0x4e023a; writer
-    // Entity_AllocateAISlot @ 0x40d2f4] — modeled here as not-yet-bound during
-    // the spawn rebuild (the motor/presentation bind after load), so the spawn
-    // equips exactly the selected slot and plays no switch actions. The gate's
-    // init-time value is an open question (D-WPN-21, docs/divergence-ledger.md).
-    // The select cleared the NVG scope restore latch [orig:
-    // Player_SelectWeaponSlot @0x4dd730 / @0x4dd7fe, every successful select;
-    // called @0x4e1995 (Player_InitPlayer), @0x566285
-    // (WeaponLoadout_ApplyFromBuffer), @0x4296e3 (the 0x5A apply)].
-    weapon.nvg_scope_restore = false;
-    inventory.pending_combo = inventory.equipped_combo;
-    commit_pending_weapon_switch(world, weapon, &inventory);
-    weapon.start_in_switchto = false;
+    local_player_camera_reset(&world, weapon, *view);
+    // Past the reset the walk binds the interp again, as the reset did, under the body's AI
+    // slot (+0x68, which every body's spawn allocates), and mounts only a body whose Flags &
+    // 3 is clear. Player_InitPlayer clears the body's hidden bit only after its walk, and the
+    // mission start's round init spawns every player body hidden (a joiner's body takes its
+    // 0x0C record's Flags, the host's hidden body's), so the mission start's walk mounts
+    // nothing: the spawn equips the selected slot and plays no switch action. A remote
+    // joiner's team assign re-runs Player_InitPlayer on a body in play (D-WPN-21).
+    // [orig: Player_SwitchToWeaponByHandle @0x4E0170 - the +0x68 test @0x4E023A, the rebind
+    //  @0x4E024D..0x4E025F, the Flags test @0x4E0265 / @0x4E0269, the mount @0x4E0362;
+    //  Player_InitPlayer @0x4E15F0 - the clear @0x4E19C2; Game_StartMission @0x524360 -
+    //  Server_InitAllPlayerEntitiesForRound @0x525BAF ahead of Player_InitPlayer @0x525BBC;
+    //  Server_InitAllPlayerEntitiesForRound @0x516AA0 - Entity_SpawnFromAnimSlotProperty
+    //  @0x516B67; Entity_SpawnFromAnimSlotProperty @0x43C390 - Entity_AllocateAISlot @0x43C48C,
+    //  Flags |= 0x101 @0x43C508; Entity_AllocateAISlot @0x40D2C0 - the +0x68 store @0x40D2F4;
+    //  NapiNPClientMsg_0x00C @0x42E730 - Entity_AllocateAISlot @0x42E81E, Flags @0x42E91A;
+    //  NapiNPClientMsg_TeamAssign @0x431910 - Player_InitPlayer(1) @0x431B14]
+}
+
+void local_loadout_rebuild_on_team_assign(World &world, LocalPlayerLoadout &loadout,
+                                          LocalPlayerWeapon &weapon, WeaponInventory &inventory,
+                                          bool &inventory_valid) {
+    // [orig: NapiNPClientMsg_TeamAssign @0x431910 - Player_InitPlayer(1) @0x431B14; the
+    //  declaration carries the walk]
+    local_loadout_rebuild(world, loadout, weapon, inventory, inventory_valid,
+            /*select_spawn_default=*/true);
+    LocalPlayer *local = world.local_player_state;
+    if (local == nullptr || &local->weapon != &weapon) return;
+    // The walk past its reset: the body's AI slot, then its hidden and dead bits
+    // [orig: Player_SwitchToWeaponByHandle @0x4E0170 - @0x4E023A, @0x4E0265 / @0x4E0269].
+    const Entity *body = world.registry.get(world.cached.local_player);
+    if (body == nullptr || world.ai.for_handle(body->handle) == nullptr) return;
+    if (((body->flags | body->engine_flags) & (kEntityFlagCarried | kEntityFlagDead)) != 0)
+        return;
+    // Its rank cycle and mount (or deny), the weapon key's walk past the same gates, the
+    // camera reset already run [orig: @0x4E026F..0x4E0362].
+    WeaponSwitchOutcome out = weapon_switch_to_handle(world.tables.weapons, inventory,
+            inventory.current_slot, local_weapon_switch_gates(world, weapon, &inventory));
+    out.reset_view = false;
+    handle_weapon_switch_outcome(world, weapon, &inventory, out, local->view);
+}
+
+void local_loadout_rebuild_after_start(World &world, LocalPlayerLoadout &loadout,
+                                       LocalPlayerWeapon &weapon, WeaponInventory &inventory,
+                                       bool &inventory_valid) {
+    // [orig: Game_StartMission @0x524360; the declaration carries the order]
+    int32_t &fov = world.weather.core.scalar_channels.camera_fov_target_fp;
+    const int32_t started = fov;
+    local_loadout_rebuild(world, loadout, weapon, inventory, inventory_valid,
+            /*select_spawn_default=*/true);
+    fov = started;
 }
 
 bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
@@ -178,6 +284,16 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     // [orig: WeaponLoadout_ApplyFromBuffer @ 0x565cd0 offline leg.] A joiner
     // applies its kit before L exists; the inventory is sim-side state and the
     // entity stamps (class + equipped adm) defer to the joiner spawn block.
+    // The armory ACCEPT (validate_banned; the 0x5A grant's apply passes false and its
+    // rebuild is inmatch::apply_weapon_loadout_name_list's) copies the whole selection,
+    // unfiltered, into the process's loadout name list ahead of its session test, so an
+    // out-of-session ACCEPT writes it too: every body the process spawns later takes its
+    // first weapon (D-NET-143) [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (the class
+    //  buffer copy @0x565D27..0x565D4B ahead of `cmp is_in_session` @0x565D3A's jz @0x565D4D)].
+    if (validate_banned && world.loadout_weapon_names != nullptr) {
+        world.loadout_weapon_names->entries = kit;
+        world.loadout_weapon_names->set = true;
+    }
     loadout_stamp_class(world, loadout, player_class);
     std::vector<WeaponKitEntry> accepted;
     for (const WeaponKitEntry &entry : kit) {
@@ -196,10 +312,26 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     // The accepted loadout becomes the respawn kit [orig: the S2C 0x5A apply
     // writes restrictionData @ 0x4293e4; SP shares the buffer]. An explicit
     // empty kit stays empty (the armory all-NONE accept leaves the table bare).
-    loadout.spawn_kit_set = true;
-    loadout.spawn_kit = std::move(accepted);
+    loadout.spawn_kit() = std::move(accepted);
+    // The apply runs no Player_InitPlayer: the current slot word keeps its value
+    // through the rebuild's stamp, the rebuild selects nothing, and the held weapon (the
+    // body's AdmDef index) decides the word ahead of the apply's own select below.
+    const Entity *holder = world.registry.get(world.cached.local_player);
+    const uint8_t held_adm = holder != nullptr ? holder->equipped_adm_index : kAdmSlotNone;
+    const int32_t current_slot = inventory.current_slot;
     local_loadout_rebuild(world, loadout, weapon, inventory, inventory_valid,
-            /*select_spawn_default=*/true);
+            /*select_spawn_default=*/false);
+    inventory.current_slot = current_slot;
+    // Out of a session the apply stores each entry's fourth value, raw, into the
+    // local slot's damage-class bytes, clearing nothing; in a session it sends the
+    // 0x2F instead and the accept stores (D-NET-691). [orig: WeaponLoadout_ApplyFromBuffer
+    //  @0x565CD0 - is_in_session @0x565D3A (its jz @0x565D4D; the send @0x565D94), the local entity
+    //  @0x565DA8, the store @0x566182..0x56618C]
+    if (!world.rules.mp_session) {
+        if (Entity *local = world.registry.get(world.cached.local_player))
+            weapon_kit_store_damage_classes(loadout.spawn_kit(), world.tables.weapons,
+                    world.tables.ammo.entries.size(), local->ammo_damage_class);
+    }
     // The ACCEPT leg applies the REQUESTED ammo over the default seed: pool =
     // min(req, maxclips) * clipsize when requested, else startrounds RAW on
     // the main leg; every sub-variant of another ammo class takes ammo_secondary
@@ -207,7 +339,7 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     // WeaponSlot_SetAmmoCount @ 0x540b50; the walk over every sub-variant
     // @ 0x56621D..0x566233].
     const WeaponTable &table = world.tables.weapons;
-    for (const WeaponKitEntry &entry : loadout.spawn_kit) {
+    for (const WeaponKitEntry &entry : loadout.spawn_kit()) {
         const int adm = table.index_of(entry.name.c_str());
         if (adm < 0) continue;
         const WeaponTableEntry *def = table.by_index(static_cast<uint8_t>(adm));
@@ -249,6 +381,15 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     // entity's +0x37C (the run-promotion band) [orig:
     // NapiNPClientMsg_HandleWeaponLoadoutSync @0x4296f9 -> @0x425220].
     loadout.weight_fp16 = weapon_inventory_loadout_weight_fp16(table, inventory, seat);
+    // The apply's select target: the held weapon's combo (its AdmDef's rank + 65 *
+    // category), stored into the current slot word; a body holding no weapon leaves the
+    // word, which the select then reads. [orig: NapiNPClientMsg_HandleWeaponLoadoutSync
+    //  @0x4290E0 (AdmDef_GetEntryByIndex(+0x2B0) @0x4296B4..0x4296BC, the store
+    //  @0x4296C8..0x4296D4, the word's read @0x4296DC); WeaponLoadout_ApplyFromBuffer
+    //  @0x565CD0 (@0x566250..0x566276, the word's read @0x56627E)]
+    if (const WeaponTableEntry *held = table.by_index(held_adm))
+        inventory.current_slot = held->category * weapon_combo::kRanksPerCategory + held->rank;
+    select_current_slot(world, weapon, inventory, /*mount=*/true);
     return true;
 }
 

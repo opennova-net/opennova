@@ -1259,7 +1259,7 @@ static int test_vm_push_below_stack_base(void) {
 
 /* `push_me` pushes the running context's pointer, the one instance's address &g_AudioVmInstance = 0x3245AE8, and
    GFB's `method` pushes GFB's own address, 0x672150 [orig: AudioVM_Op_PushSelf @ 0x6728F0; AudioVM_RunContext
-   @ 0x672E56 from sub_672EE0 @ 0x672EE0; AudioVM_Intrinsic_GFB @ 0x672150] (D-MUS-26): `Var00 = Me` is that
+   @ 0x672E56 from AudioVM_RunInstance @ 0x672EE0; AudioVM_Intrinsic_GFB @ 0x672150] (D-MUS-26): `Var00 = Me` is that
    word, `if (Me)` takes its branch and `SV(Me)` clamps it to the loudest volume. */
 static int test_vm_self_word_is_the_instance(void) {
     const char *src =

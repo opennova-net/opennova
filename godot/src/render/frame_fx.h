@@ -30,9 +30,12 @@ namespace godot {
 
 class Camera3D;
 class Compositor;
+class Environment;
 class GeometryInstance3D;
+class ImageTexture;
 class Material;
 class Skeleton3D;
+class Texture;
 class Texture2D;
 class Viewport;
 class WorldEnvironment;
@@ -54,7 +57,8 @@ struct FrameFxScreenFrame {
 
 // The frame's terminal compositor effect: the post-transparent device leg
 // that runs retail's FrameFX over the finished scene and performs the sole
-// display decode. It executes the planner's DrawPass rows in dispatch order
+// display decode (for a view whose environment carries FrameFx's decode
+// table, Godot's tonemap performs it instead). It executes the planner's DrawPass rows in dispatch order
 // (distortion, death or damage blur, the bloom, thermal and monitor) or, in
 // the first-person NVG view, the NVG scene/glow/composite chain in their
 // place (Render_ProcessMainSceneFrame @0x5ca8f6..0x5caad5 / @0x5ca6ab; the
@@ -70,6 +74,10 @@ private:
 	class Impl;
 	std::unique_ptr<Impl> impl_;
 
+	void create_glow_source_device_on_render_thread();
+	void create_view_effects_device_on_render_thread();
+	void create_frame_fx_device_on_render_thread();
+
 protected:
 	static void _bind_methods();
 
@@ -77,6 +85,14 @@ public:
 	FrameFxCompositorEffect();
 	~FrameFxCompositorEffect() override;
 
+	// The device objects the renderer creates ahead of the first frame, each queued on the
+	// render thread (rd_glsl.h call_device_create); the render callback's own creates then
+	// find them. The Q3 glow source's (the effect set's GLOW passes) at the renderer's start;
+	// the NVG view's (the view effects') and FrameFX's own shaders and samplers (its pixel
+	// shaders') at the mission textures stage.
+	void create_glow_source_device();
+	void create_view_effects_device();
+	void create_frame_fx_device();
 	void compile_q3_frame(Node *p_scope, Viewport *p_viewport,
 			Camera3D *p_camera);
 	void clear_q3_frame();
@@ -96,6 +112,10 @@ public:
 	// RenderingServer.force_sync(); an empty Ref means no target exists (no
 	// RenderingDevice, no frame yet, or an unmapped attachment format).
 	Ref<Image> capture_q3_target();
+	// Main thread: the environment whose views Godot's tonemap decodes through
+	// FrameFx's display decode table (FrameFx::install_display_table); a view
+	// drawn with it runs no terminal decode here. An invalid RID clears it.
+	void set_display_table_environment(const RID &p_environment);
 
 	void _render_callback(int32_t p_effect_callback_type,
 			RenderData *p_render_data) override;
@@ -114,6 +134,18 @@ private:
 	Ref<FrameFxCompositorEffect> terminal_effect_;
 	Ref<Compositor> previous_compositor_;
 	Ref<Compositor> installed_compositor_;
+	// The display decode table on the world's environment
+	// (install_display_table) and the adjustments it replaced there.
+	struct AdjustmentState {
+		bool enabled = false;
+		float brightness = 1.0f;
+		float contrast = 1.0f;
+		float saturation = 1.0f;
+		Ref<Texture> color_correction;
+	};
+	Ref<ImageTexture> display_table_;
+	Ref<Environment> table_environment_;
+	AdjustmentState previous_adjustment_;
 	ObjectID synced_camera_id_;
 	uint32_t synced_camera_original_mask_ = 0;
 	bool has_synced_camera_mask_ = false;
@@ -135,6 +167,10 @@ private:
 	void build_compositor();
 	void install_compositor();
 	void uninstall_compositor();
+	// The world environment's tonemap takes the terminal display decode: its
+	// adjustments at unity with the decode table as their colour correction.
+	void install_display_table(const Ref<Environment> &p_environment);
+	void uninstall_display_table();
 	void restore_synced_camera_mask();
 
 protected:
@@ -230,10 +266,24 @@ public:
 	// and publish the plan to the terminal effect (with the NVG lens over this
 	// node's viewport, the surface, on the lens arm).
 	void advance_screen_effects();
+	// The renderer's start: the Q3 glow source's device shader, as the effect set's GLOW
+	// passes load (engine renderer/object_shader_template.h carries the witness,
+	// D-NET-NEW-LF-13).
+	void create_glow_source_device();
+	// The mission textures stage's view effects: the NVG view's device objects (engine
+	// renderer/frame_fx_effects.h creates_view_effect_shaders carries the witness,
+	// D-NET-NEW-LF-13).
+	void init_view_effects();
+	// The same stage's FrameFX pixel shaders: the terminal effect's shaders and samplers
+	// (engine renderer/frame_fx_effects.h creates_frame_fx_pixel_shaders carries the witness,
+	// D-NET-NEW-LF-13).
+	void create_pixel_shaders();
 	// The mission-texture init: the "ffscan" scanline texture, 2048 draws from
 	// the render CRT stream (retail CFrameFX_CreatePixelShaders @0x58289f, from
 	// Render_InitMissionTextures @0x587261).
 	void init_mission_textures();
+	// Whether the node holds a mission's "ffscan" texels (init_mission_textures ran).
+	bool has_mission_textures() const { return !scanline_texels_.empty(); }
 	// Process-exit boundary: stop render callbacks and release compositor-owned
 	// device resources while RenderingServer and RenderingDevice are still live.
 	void shutdown();

@@ -53,7 +53,11 @@ struct Row {
 // with no table the BMS header's embedded mission_name stands in. The pairs
 // read the archive slots mount_game fills under RetailTable discovery
 // (vfs.h kArchiveSlotCount), so a loose-only or ScanAll mount lists its loose
-// files alone.
+// files alone. Each TITLE / BRIEFING lookup searches `text_override` (the
+// mount's override table, null for none) first, as every section lookup does
+// [orig: MissionList_ScanAndBuildFromFiles @0x563170 (the calls @0x563496 / @0x5634E8),
+//  Mission_BuildMapListFromPFF @0x562910 (the calls @0x562C62 / @0x562CB8) ->
+//  TextResource_FindEntryBySectionAndKey @0x75D250].
 // [orig: MissionList_ScanAndBuildFromFiles @ 0x563170 — the loose walk, then
 //  Mission_BuildMapListFromPFF @ 0x562910 over (slot 1, slot 0) and (slot 3,
 //  slot 2) @ 0x5635a5..0x5635d8, the qsort @ 0x5635f0]
@@ -61,14 +65,16 @@ struct Row {
 // archive walk matches a .npj or .npz entry as it does a .bms, and the
 // shipped localres.pff carries ASP_G7.npz and the JOX jox01.pff nine more,
 // which retail lists and OpenNova cannot load.
-std::vector<Row> build(const ResourceIndex &index);
+std::vector<Row> build(const ResourceIndex &index, const rtxt::File *text_override);
 
 // One row of the loose leg as build() makes it, from what an embedder read itself (the editor's
 // project, whose files are its own): `file` the `.bms` name, `bms` its bytes (its header read only
 // when they open as a BMS the scan takes, else zeroed), `text` its table when one lies loose beside
-// it (null: none, the header's embedded mission_name titling it), flagged loose.
+// it (null: none, the header's embedded mission_name titling it), flagged loose; `text_override` as
+// build() takes it.
 // [orig: MissionList_ScanAndBuildFromFiles @ 0x563170, the loose walk]
-Row loose_row(const std::string &file, const std::vector<uint8_t> &bms, const rtxt::File *text);
+Row loose_row(const std::string &file, const std::vector<uint8_t> &bms, const rtxt::File *text,
+		const rtxt::File *text_override);
 // The loose leg's rows as build() makes them, from what an embedder reads itself: each `.bms` among
 // `names` (the others passed over, in `names`' order), its bytes from `read_bms` (a failed read: none,
 // the header zeroed), titled by the text table `read_text` loads for its text_table_name (false: none;
@@ -77,14 +83,15 @@ Row loose_row(const std::string &file, const std::vector<uint8_t> &bms, const rt
 using ReadBms = std::function<bool(const std::string &name, std::vector<uint8_t> &out)>;
 using ReadText = std::function<bool(const std::string &bin, rtxt::File &out)>;
 std::vector<Row> loose_rows(const std::vector<std::string> &names, const ReadBms &read_bms,
-		const ReadText &read_text);
+		const ReadText &read_text, const rtxt::File *text_override);
 // One archive pair as build() walks it, over archives an embedder opened itself (a data set's
 // expansion pair with no base install mounted beside it: the hosted fleet's trees, ADR 0064):
 // every `.bms` entry of `missions` (lists_as_mission, the map projects passed over), its header
 // read from that archive, titled only when `texts` (null: none) holds its `.bin`, which then
 // reads as any table; flagged archived. In walk order: the caller sorts (sort_rows).
 // [orig: Mission_BuildMapListFromPFF @ 0x562910, the entry walk @ 0x56295f..0x562d51]
-std::vector<Row> archive_rows(const pff::PffArchive &missions, const pff::PffArchive *texts);
+std::vector<Row> archive_rows(const pff::PffArchive &missions, const pff::PffArchive *texts,
+		const rtxt::File *text_override);
 // The catalog's order: by file name without case, rows of the same name in the order they came.
 // [orig: qsort(list, count, 0x11E8, Mission_CompareMapNames) @ 0x5635f0 -- Mission_CompareMapNames
 //  @ 0x5628e0, stricmp on entry+0; build() says why the port's sort is stable]

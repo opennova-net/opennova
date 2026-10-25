@@ -18,6 +18,16 @@ void fill_server_status_page(hud::ServerStatusPageState &page, const NapiNPServe
 	page.capacity = capacity;
 	page.slot_limit = capacity;
 	page.slots.assign(static_cast<size_t>(capacity), hud::ServerStatusSlot{});
+	// A Serve Only host's own slot 0 (HostSlotRow) holds no connection, but its round init
+	// keeps it active and local, so the score list skips it and the current logins leave it
+	// out, as they do a listen host's loopback row.
+	// [orig: Server_InitNewRoundState @0x51C8E0 (+4 @0x51CA31, +5 @0x51CA35 on g_LocalNetPlayer);
+	//  HUD_DrawPlayerScoreList @0x500300 (the +5 skip @0x500370); Server_DrawStatusScreen
+	//  @0x50A2D0 (the current logins' `+4 && !+5` @0x50B148)]
+	if (ctx.host_slot.active && capacity > 0) {
+		page.slots[0].active = true;
+		page.slots[0].local = true;
+	}
 	for (const NapiNPConnection &c : ctx.np_protocol.connection_list) {
 		// The slot's active byte (+4) [orig: Server_PlayerAdd @0x51CBC0].
 		if (!player_slot_active(c) || c.reply.player_slot >= capacity) continue;
@@ -25,12 +35,17 @@ void fill_server_status_page(hud::ServerStatusPageState &page, const NapiNPServe
 		slot.active = true;
 		// +5: the host's own slot, the loopback connection
 		slot.local = c.link.mode == replication::TransportMode::Loopback;
-		// +0x20 == 6: the port's completed initial-state burst is the slot's
-		// in-game state (napi_np_connection.h is_in_match). +0x188E3 is never
+		// +0x20 == 6: the slot's own state word, joined. The round end moves
+		// every joined slot to 7, so through the linger the roster draws each
+		// one grey; a punt writes no slot word, so a punted slot keeps its
+		// colour until the teardown erases its row. +0x188E3 is never
 		// set in JO (its stores write 0), so `loading` stays clear and no
 		// spectator row takes the loading colour (D-NET-505) [orig:
-		//  HUD_DrawPlayerScoreList @0x500448; Server_PlayerAdd @0x51CD5D].
-		slot.in_game = is_in_match(c);
+		//  Server_DrawStatusScreen @0x50A2D0 (`cmp dword ptr [ebx+20h], 6`
+		//  @0x50A66C, 0xFFA0A0A0 @0x50A672); Server_ProcessRoundEnd @0x5164F0
+		//  (the 6 -> 7 store @0x51685E); HUD_DrawPlayerScoreList @0x500448;
+		//  Server_PlayerAdd @0x51CD5D].
+		slot.in_game = c.slot_state == PlayerSlotState::Joined;
 		slot.spectator = c.link.spectator; // +0x188D7
 		slot.name = c.reply.player_name;   // +0x28
 		// The seconds since the connection last parsed a session packet; the
@@ -38,14 +53,14 @@ void fill_server_status_page(hud::ServerStatusPageState &page, const NapiNPServe
 		// -> +0x5E8 @0x50a525..0x50a561; the clock napi_np_connection.h
 		// receive_inactive_ms].
 		slot.idle_seconds = slot.local ? 0 : static_cast<int32_t>(c.receive_inactive_ms / 1000u);
+		// The slot's own team byte, not its body's (D-NET-593) [orig:
+		//  `movzx eax, byte ptr [ebx+1A0h]` @0x50A565, the colour switch @0x50A571].
 		slot.team = c.assigned_team_valid ? c.assigned_team : uint8_t{0};
 		if (world == nullptr) continue;
 		if (const world::Entity *e = world->registry.get(c.link.owned_entity)) {
-			// The team byte and the class word through the bound entity
-			// (D-NET-132; the medic gate reads the class the same way), the
-			// dead test on its signed health [orig: `*(__int16 *)(entity + 286)
-			// <= 0` @0x50a674..0x50a68e].
-			slot.team = e->team;
+			// The class word through the bound entity (D-NET-132; the medic
+			// gate reads the class the same way), the dead test on its signed
+			// health [orig: `*(__int16 *)(entity + 286) <= 0` @0x50a674..0x50a68e].
 			slot.class_word = e->player_class;
 			slot.entity_dead = e->health <= 0;
 		}

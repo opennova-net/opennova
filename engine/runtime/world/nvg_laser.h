@@ -5,7 +5,7 @@
 // beam path in the tracer NVG style.
 //
 // [orig: Render_NVGLaserBeamsForVisiblePersons @ 0x5c63b0 (the walk over the visible-person list
-//  dword_2984890, count dword_2984888) from Terrain_RenderWorldScene
+//  g_SectorPersonList, count g_SectorPersonCount) from Terrain_RenderWorldScene
 //  @ 0x5c9695 -> Entity_RenderNVGLaserBeam @ 0x5c6090 ->
 //  Render_DrawTrailOrBeamSegments @ 0x5dcb80 (style 8, the NVG laser block
 //  g_TracerStyleNVGLaser); the draw is renderer::append_tracer_beam and the

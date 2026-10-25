@@ -180,7 +180,10 @@ void ImGuiPassNode::_process(double p_delta) {
 		return;
 	}
 	pass->set_platform_windows_enabled(platform_windows_allowed_ && window_allows_platform_windows());
-	feed_mouse_place(*pass);
+	// The mouse's place is read by the open pass's draw alone (ImGuiPass::draw_frame's
+	// gate_mouse): a closed pass asks the OS nothing (the window-under-cursor query cost
+	// the closed tools ~2 % of every frame, D-NET-NEW-LF-22 LF-s18).
+	if (pass->is_open()) feed_mouse_place(*pass);
 	const uint64_t frame = Engine::get_singleton()->get_process_frames();
 	before_layout(p_delta);
 	const int64_t t0 = Time::get_singleton()->get_ticks_usec();

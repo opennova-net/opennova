@@ -6,9 +6,13 @@
 
 namespace opennova::world {
 
-// The Flags & 4 swap shows the def's `husk`, falling back to `huskfinal`
-// [orig: Entity_RaycastCollisionModel @ 0x413086 — the render + collision
-// pick; the collision-model pick @ 0x538720 shares the husk-first order].
+// The Flags & 4 swap shows the def's `husk`, falling back to `huskfinal`.
+// Retail's render pick takes the husk model (+0x34) or the graphic [orig:
+// Render_SectorEntity @ 0x5C4190 (the Flags & 4 test @ 0x5C41A0)]; the
+// collision picks take the same +0x34 [orig: Entity_RaycastCollisionModel
+// @ 0x413060 (the pick @ 0x41307B..0x413088); Physics_RaycastAgainstEntityPool
+// @ 0x538720 (the pick @ 0x538A15)]. The `huskfinal` fallback has no such
+// witness (present_passes.h).
 // The death-piece model is the OTHER way round (huskfinal first,
 // destruction.h [orig: @ 0x4934af]); the two picks are kept apart.
 std::string husk_render_graphic(const std::string &husk, const std::string &huskfinal) {

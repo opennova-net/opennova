@@ -9,7 +9,8 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_ban_lists.h>
 #include <runtime/inmatch/server_spawn.h> // Server_ChangeEntityTeam
-#include <runtime/inmatch/server_tick.h>  // Server_ProcessPlayerDeath / Server_StageHostDisconnect
+#include <runtime/inmatch/server_player_death.h> // Server_RunPlayerDeath
+#include <runtime/inmatch/server_tick.h>  // Server_StageHostDisconnect
 #include <runtime/world/ai.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/world.h>
@@ -105,6 +106,8 @@ std::string slot_row(const NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
 			static_cast<int>(conn.reply.rtt_ms));
 }
 
+} // namespace
+
 // Server_SendValidatedChatToPlayer (a misnomer: the punt): on the authority an in-range active
 // slot that is neither local nor dropping (+96481, which nothing sets on this host) gets the
 // disconnect description, reason `code`, extra info `detail`.
@@ -126,6 +129,8 @@ void validated_punt(NapiNPServerCtx &ctx, int32_t index, uint32_t code, const ch
 	}
 }
 
+namespace {
+
 // GameEvent_PlayerDeath on the slot's entity, scored against its last attacker (+0x178) as it
 // stands, then Flags |= 2; health is not touched. [orig: CAdminServer_HandlePlayer
 //  @0x404253..0x40425E -> GameEvent_PlayerDeath @0x516DD0 (the killer the victim's +0x178)]
@@ -133,13 +138,7 @@ void kill_entity(NapiNPServerCtx &ctx, world::EntityHandle handle) {
 	world::World &world = *ctx.world;
 	world::Entity *entity = world.registry.get(handle);
 	if (entity == nullptr) return;
-	world::RoundDeath death;
-	death.victim = handle;
-	death.victim_handle = handle.packed;
-	death.killer = entity->last_attacker;
-	death.killer_handle = entity->last_attacker.packed;
-	death.event_flags = entity->cause_flags & 0xF00u;
-	Server_ProcessPlayerDeath(ctx, world, death);
+	Server_RunPlayerDeath(ctx, world, handle);
 	if ((entity = world.registry.get(handle)) != nullptr) entity->flags |= 2u;
 }
 
@@ -167,6 +166,9 @@ void swap_host_team(NapiNPServerCtx &ctx) {
 	if (!host.active || ctx.is_authority == 0) return;
 	zero_stats(host.stats);
 	host.team = host.team == 2 ? uint8_t{1} : uint8_t{2};
+	// The row's body takes the entity legs (its team byte, the S2C 0x50) (D-NET-352)
+	// [orig: Server_ChangeEntityTeam @0x518D70 over the row's entity].
+	if (ctx.world != nullptr) Server_ChangeEntityTeam(ctx, *ctx.world, host.body, host.team);
 }
 
 void swap_team(NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
@@ -284,10 +286,14 @@ void AdminConsole::handle_player(const Args &args, std::vector<std::string> &rep
 		//  @0x404284..0x404291]
 		if (ctx_.world != nullptr) {
 			if (all) {
+				// Slot 0 first: the host row's hidden body (D-NET-352).
+				if (ctx_.host_slot.active) kill_entity(ctx_, ctx_.host_slot.body);
 				for (NapiNPConnection *slot : active_slots(ctx_))
 					if (slot_entity(ctx_, *slot) != nullptr) kill_entity(ctx_, slot->link.owned_entity);
 			} else if (target != nullptr) {
 				kill_entity(ctx_, target->link.owned_entity);
+			} else if (host_target) {
+				kill_entity(ctx_, ctx_.host_slot.body);
 			}
 		}
 		replies.emplace_back(all ? "OK - All Players Killed." : "OK - Player Killed.");
@@ -433,7 +439,7 @@ void AdminConsole::handle_fun(const Args &args, std::vector<std::string> &replie
 // The plaintext QUERY's report: the session header (CR LF lines), PLAYER LIST's table, and
 // the map queue in MISSION LIST's format with empty fillers (LF lines); built unbounded where
 // retail writes a 16 KB report and a 2 KB queue (D-NET-363).
-// [orig: CAdminServer_HandleStatus @0x402E30 — SERVER: the session name dword_24D1FA4
+// [orig: CAdminServer_HandleStatus @0x402E30 — SERVER: the session name g_SessionTitle
 //  @0x402E83; UP-TIME `%ld %2.2ld:%2.2ld:%2.2ld` of CSessionTimer_GetElapsedMS; CURRENT TOD the
 //  signed high word of g_EnvCurTimeFixed24 @0x402F6F; the active-slot count; g_MapFileName;
 //  GameType_GetAbbreviation(g_GameType, NULL); the table @0x40314D..0x403182; MAP QUEUE in the
@@ -444,24 +450,31 @@ std::string AdminConsole::status_report() {
 	const bool host = ctx_.host_slot.active;
 	std::string out;
 	char line[96];
-	// dword_24D1FA4 is the session's copy of the cfg name; SET ServerName does not reach it,
-	// the ServerCommand's SetServerName does (server_admin_command.cpp).
-	out += "SERVER: " + ctx_.config.server_name + "\r\n";
-	// The session clock the 0x58 status block reports (session_status.h).
-	const uint32_t seconds = ctx_.np_protocol.host_run_duration_ms / 1000u;
+	// The process's session title, g_MapFileName and g_GameType (AdminProcessMission). The
+	// title, g_SessionTitle, is the map file (or an override [TITLE] entry) from the mission
+	// start, and a ServerCommand's SetServerName afterwards; SET ServerName does not reach it.
+	// [orig: CAdminServer_HandleStatus @0x402E83, @0x402FF6, @0x403052]
+	const AdminProcessMission own{ctx_.session_title, ctx_.config.mission_file,
+			world != nullptr ? world->match.rules().game_type : ctx_.config.game_type,
+			session_uptime_ms(ctx_), world != nullptr ? world->weather.tod_fixed24 : 0u};
+	const AdminProcessMission &mission = seams_.process_mission != nullptr ? *seams_.process_mission : own;
+	out += "SERVER: " + mission.session_title + "\r\n";
+	// The session clock: the authority's own status block's (session_status.h), a joiner's
+	// last S2C 0x58's (ClientRuntime::session_elapsed_ms).
+	const uint32_t seconds = mission.session_elapsed_ms / 1000u;
 	std::snprintf(line, sizeof(line), "UP-TIME: %ld %2.2ld:%2.2ld:%2.2ld\r\n", static_cast<long>(seconds / 86400u),
 			static_cast<long>(seconds / 3600u % 24u), static_cast<long>(seconds / 60u % 60u),
 			static_cast<long>(seconds % 60u));
 	out += line;
-	const int16_t tod_high = world != nullptr ? static_cast<int16_t>(world->weather.tod_fixed24 >> 16) : int16_t{0};
+	const int16_t tod_high = static_cast<int16_t>(mission.tod_fixed24 >> 16);
 	out += "CURRENT TOD: " + std::to_string(tod_high) + "\r\n";
 	// Every active slot, a Serve Only host's own slot 0 included.
 	out += "CURRENT # PLAYERS: " + std::to_string(slots.size() + (host ? 1u : 0u)) + "\r\n";
-	out += "CURRENT MAP: " + ctx_.config.mission_file + "\r\n";
+	out += "CURRENT MAP: " + mission.map_file + "\r\n";
 	// The NULL arm's Overlays key; the waypoint family's "&" rides the debug word
-	// dword_24C1930's 0x10000 (an input-binding toggle), clear on a server.
+	// g_DebugCheatFlags's 0x10000 (an input-binding toggle), clear on a server.
 	// [orig: GameType_GetAbbreviation @0x520FD0]
-	const uint32_t game_type = world != nullptr ? world->match.rules().game_type : ctx_.config.game_type;
+	const uint32_t game_type = mission.game_type;
 	const char *key = game_type::abbreviation_overlay_key(game_type);
 	std::string abbreviation;
 	if (key[0] != '\0' && seams_.game_text) abbreviation = seams_.game_text("Overlays", key);

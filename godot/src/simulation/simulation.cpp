@@ -17,6 +17,8 @@
 #include <base/gameprofile/game_type.h> // game_type::for_mission_attribs
 
 #include <runtime/inmatch/host_settings.h> // host_player_slot_limit (the BMS admission limit)
+#include <runtime/inmatch/slot_staging.h> // stage_slot_position (the parity runner's slot staging)
+#include <runtime/mission/mission_sidecars.h> // mission_base_name
 #include <runtime/mission/runtime_boot.h> // the S9 boot order + file-resolution policy
 #include <runtime/terrain_query/terrain_field_build.h> // the ONE cpt/trn(+charmap) field builder (ADR 0042 d4)
 
@@ -178,10 +180,10 @@ void Simulation::reset_world() {
 			assets_.root.is_valid() ? &assets_.root->native_assets() : nullptr);
 	kernel_->collision.set_trace_profile_enabled(runtime_profiling_enabled_);
 	kernel_->profile.set_active(runtime_profiling_enabled_);
-	// Mission-scoped, while player_.weapon_profile is player-scoped and outlives every
-	// load [orig: PlayerProfile_LoadAllFromDisk @0x54f4d0 runs from the startup
-	// path, not Game_StartMission]: the RESIDENT BUFFER is rebuilt per mission,
-	// so the next session must re-copy its side's page.
+	// player_.weapon_profile is player-scoped and outlives every load [orig:
+	// PlayerProfile_LoadAllFromDisk @0x54f4d0 runs from the startup path, not
+	// Game_StartMission], as the spawn buffer is process-scoped (the role binds the
+	// ClientProcessState's); every peer's mission start re-copies its side's page.
 	player_.weapon_profile_seeded_side = -1;
 	// Round init clears the map mode and the zooms return to the spawn
 	// defaults (witness at hud::HudMapControl — Game_InitNewRound /
@@ -283,6 +285,15 @@ bool Simulation::start_mission(opennova::env::WeatherRuntime *p_weather,
 	return true;
 }
 
+void Simulation::pump_host_render_arm_ahead_of_textures() {
+	if (host_role_ != nullptr && host_boot_.kernel == kernel_.get())
+		host_role_->pump_render_arm_ahead_of_textures();
+}
+
+void Simulation::end_host_mission_load() {
+	if (host_boot_.kernel == kernel_.get()) opennova::inmatch::end_host_mission_load(host_boot_);
+}
+
 const opennova::renderer::PrecipitationDrawFrame &Simulation::compile_precipitation_frame(
 		const Vector3 &p_camera, const Vector3 &p_camera_right, const Vector3 &p_camera_up,
 		int p_terrain_light_rgb, int p_camera_mode) {
@@ -319,6 +330,18 @@ void Simulation::drain_script_sounds(std::vector<opennova::world::ScriptSoundEve
 	r_events.clear();
 	if (!world_installed_ || kernel_ == nullptr) return;
 	r_events.swap(kernel_->world.out.script_sounds);
+}
+
+bool Simulation::take_audio_stops(bool &r_dialog_line, bool &r_channels) {
+	r_dialog_line = false;
+	r_channels = false;
+	if (!world_installed_ || kernel_ == nullptr) return false;
+	opennova::world::WorldOutbox &out = kernel_->world.out;
+	r_dialog_line = out.dialog_line_stop;
+	r_channels = out.audio_channels_shutdown;
+	out.dialog_line_stop = false;
+	out.audio_channels_shutdown = false;
+	return r_dialog_line || r_channels;
 }
 
 Ref<EnvironmentSnapshot> Simulation::get_environment_snapshot() const {
@@ -544,8 +567,10 @@ void Simulation::finish_kernel_boot() {
 }
 
 // The kernel boot's bringup_net_session hook: the active role's own bring-up
-// (the listen host stands its inmatch session up between the world wiring
-// and the system registration (engine: runtime/inmatch/host_role.cpp);
+// (the listen host binds the mission's World under its inmatch session between
+// the world wiring and the system registration, its session created ahead of the
+// load by the host boot, or here for a kernel-direct load (engine:
+// runtime/inmatch/host_role.cpp HostRole::create_session);
 // a joiner (re)builds its non-authority ClientRuntime at the same point; the
 // bare no-net world installs nothing), then the binding's tail: the live
 // runtime pointer, the retained join inputs on a fresh joiner runtime, the
@@ -559,11 +584,13 @@ std::function<void()> Simulation::role_bringup_hook() {
 std::function<void(bool)> Simulation::role_bringup_tail() {
 	return [this](bool fresh_joiner_runtime) {
 		runtime_ = active_role().client_runtime();
+		install_console_seams();
 		if (fresh_joiner_runtime) {
 			install_charattr_table();
 			install_character_join_vars();
 			install_auto_medic_preference();
 			install_expansion_version_root();
+			install_join_mission_start();
 		}
 		if (is_joiner()) {
 			net_.joiner_applied_loadout_revision = 0;
@@ -575,6 +602,7 @@ std::function<void(bool)> Simulation::role_bringup_tail() {
 			push_joiner_loadout_kit();
 		}
 		install_item_catalog();
+		install_character_registry();
 	};
 }
 
@@ -612,7 +640,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 		const Ref<ItemDatabase> &p_item_db,
 		const Ref<TerrainData> &p_terrain,
 		const PackedByteArray &p_terrain_til, const String &p_wac_basename,
-		const String &p_infantry_adm, const String &p_mission_file_basename,
+		const String &p_infantry_adm, const String &p_mission_file,
 		bool p_playable) {
 	namespace ms = opennova::mission;
 	namespace inmatch = opennova::inmatch;
@@ -628,7 +656,9 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	const opennova::bms::File &document = p_mission->native_file();
 	inmatch::HostBootRequest request;
 	request.mission = document;
-	request.mission_basename = opennova::to_std(p_mission_file_basename);
+	// The by-name readers' base: the mission file's name cut at its first '.'.
+	const std::string mission_file = opennova::to_std(p_mission_file);
+	request.mission_basename = ms::mission_base_name(mission_file);
 	if (p_resource_root.is_valid()) {
 		request.files = ms::boot_files_from_index(p_resource_root->native_index());
 		// The mount's expansion text-override table (the mission text's
@@ -645,24 +675,19 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	request.session = &session_;
 	request.role = &active_role();
 	request.host = host_role_;
+	request.render_arm_deferred = render_arm_deferred_;
 	const uint32_t mission_game_type = opennova::game_type::for_mission_attribs(document.header.attrib_flags);
 	const bool next_mission = net_.map_change_pending && host_role_ != nullptr;
 	if (host_role_ != nullptr && is_host_listening()) {
 		if (next_mission) {
-			// The map change's next map: the session keeps its config, the
-			// rotation names the map and its mode (Game_StartMission's
-			// authority arm, inmatch/map_change.h).
-			net_.host_session_config.mission_file = net_.rotation.list.map_file;
-			net_.host_session_config.game_type = net_.rotation.list.map_game_type;
-			net_.host_session_config.mission_name = document.get_mission_name();
-			net_.host_session_config.spawn_names.clear();
-		} else {
+			stage_next_mission_session_config(document);
+		} else if (!host_role_->create_ran()) {
 			seed_host_rotation(net_, p_resource_root);
 		}
-		host_role_->set_rotation(&net_.rotation);
+		host_role_->set_rotation(&net_.rotation());
 	}
 	if (host_role_ != nullptr) {
-		request.host_cfg = host_session_cfg(mission_game_type);
+		request.host_cfg = host_session_cfg(mission_game_type, mission_file);
 		request.session_score_ini = is_host_listening();
 		request.next_mission = next_mission;
 	}
@@ -677,6 +702,10 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	options.playable = p_playable;
 	options.joiner = is_joiner();
 	options.mp_session = is_host_listening() || is_joiner();
+	// The single player's restart: Game_StartMission(1), which skips the fresh start's
+	// profile word and intro cine and keeps the first start's UP-TIME stamp (D-PWR-8; the
+	// engine's KernelBootOptions::restart carries the witness).
+	options.restart = restart_boot_ && !options.mp_session;
 	// The shell owns the terrain field's parsed-document entry (the store the
 	// seam below builds, or none): the kernel never loads one from files here.
 	options.terrain = false;
@@ -732,6 +761,33 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	return OK;
 }
 
+// The world load's session create (engine inmatch/host_boot.h create_host_session carries the
+// witness): the session record boot_mission builds, the rotation seeded first on a listening host,
+// as boot_mission seeds it for a create it runs itself.
+int64_t Simulation::create_host_session(const Ref<MissionData> &p_mission,
+		const Ref<ResourceRoot> &p_resource_root, const String &p_mission_file) {
+	namespace inmatch = opennova::inmatch;
+	if (host_role_ == nullptr || net_.map_change_pending || p_mission.is_null() ||
+			p_resource_root.is_null())
+		return OK;
+	const opennova::bms::File &document = p_mission->native_file();
+	const std::string mission_file = opennova::to_std(p_mission_file);
+	if (is_host_listening()) {
+		seed_host_rotation(net_, p_resource_root);
+		host_role_->set_rotation(&net_.rotation());
+	}
+	const PackedByteArray table = p_resource_root->get_expansion_override_table();
+	inmatch::HostConfig cfg = host_session_cfg(
+			opennova::game_type::for_mission_attribs(document.header.attrib_flags), mission_file);
+	cfg.mission_type = static_cast<uint8_t>(document.header.mission_type);
+	const inmatch::CreateSessionResult created = inmatch::create_host_session(*host_role_,
+			opennova::mission::boot_files_from_index(p_resource_root->native_index()),
+			opennova::mission::mission_base_name(mission_file),
+			std::vector<uint8_t>(table.ptr(), table.ptr() + table.size()), std::move(cfg),
+			/*session_score_ini=*/is_host_listening());
+	return created == inmatch::CreateSessionResult::ProcessExit ? ERR_CANT_CREATE : OK;
+}
+
 bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 	if (p_mission.is_null()) return false;
 	if (!begin_session_load()) return false;
@@ -755,7 +811,7 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 	}
 	opennova::mission::KernelBootOptions options;
 	options.music_globals = wac_music_globals();
-	options.playable = false; // callers spawn explicitly (or the listen bring-up auto-spawns)
+	options.playable = false; // callers spawn explicitly (or a host role's round init spawns)
 	options.joiner = is_joiner();
 	options.mp_session = is_host_listening() || is_joiner();
 	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
@@ -807,6 +863,7 @@ void Simulation::build_demo_mission() {
 void Simulation::restore_world_baseline() {
 	if (!world_installed_) return;
 	runtime_ = active_role().client_runtime();
+	install_console_seams();
 	// The host role rebuilt its score-feedback revision stream; joiners retain
 	// theirs. Consume the current baseline so old cursor values cannot hide a
 	// new equal-numbered notification (or replay an old joiner notification).
@@ -864,6 +921,7 @@ bool Simulation::compile_and_set_wac(const PackedStringArray &p_sources) {
 void Simulation::set_runtime_profiling_enabled(bool p_enabled) {
 	if (runtime_profiling_enabled_ == p_enabled) return;
 	runtime_profiling_enabled_ = p_enabled;
+	last_trace_profile_ = opennova::world::CollisionWorld::TraceProfile{};
 	last_sim_tick_us_ = 0;
 	last_net_tick_us_ = 0;
 	present_.last_snapshot_us = 0;
@@ -879,8 +937,7 @@ void Simulation::set_runtime_profiling_enabled(bool p_enabled) {
 }
 
 Vector4i Simulation::get_last_projectile_trace_times_us() const {
-	const opennova::world::CollisionWorld::TraceProfile &tp =
-			kernel_->collision.trace_profile();
+	const opennova::world::CollisionWorld::TraceProfile &tp = last_trace_profile_;
 	return Vector4i(trace_profile_lane(tp.terrain_us),
 			trace_profile_lane(tp.static_us),
 			trace_profile_lane(tp.dynamic_us),
@@ -888,17 +945,21 @@ Vector4i Simulation::get_last_projectile_trace_times_us() const {
 }
 
 Vector4i Simulation::get_last_projectile_trace_counts() const {
-	const opennova::world::CollisionWorld::TraceProfile &tp =
-			kernel_->collision.trace_profile();
+	const opennova::world::CollisionWorld::TraceProfile &tp = last_trace_profile_;
 	return Vector4i(trace_profile_lane(tp.calls),
 			trace_profile_lane(tp.static_survivors),
 			trace_profile_lane(tp.dynamic_survivors),
 			trace_profile_lane(tp.person_survivors));
 }
 
+void Simulation::take_projectile_trace_profile() {
+	if (kernel_ == nullptr) return;
+	last_trace_profile_ = kernel_->collision.trace_profile();
+	kernel_->collision.clear_trace_profile();
+}
+
 Vector2i Simulation::get_last_projectile_trace_faces() const {
-	const opennova::world::CollisionWorld::TraceProfile &tp =
-			kernel_->collision.trace_profile();
+	const opennova::world::CollisionWorld::TraceProfile &tp = last_trace_profile_;
 	return Vector2i(trace_profile_lane(tp.static_faces),
 			trace_profile_lane(tp.dynamic_faces));
 }
@@ -915,9 +976,9 @@ Dictionary Simulation::get_runtime_perf_counters() const {
 	out["occlusion_build_us"] = static_cast<int64_t>(present_.last_occlusion_build_us);
 	out["occlusion_probe_us"] = static_cast<int64_t>(present_.last_occlusion_probe_us);
 	out["runtime_profiling_enabled"] = runtime_profiling_enabled_;
-	// The last tick's projectile-trace attribution (collision.h TraceProfile).
-	const opennova::world::CollisionWorld::TraceProfile &tp =
-			kernel_->collision.trace_profile();
+	// The last tick's projectile-trace attribution (collision.h TraceProfile), as the
+	// tick's sink took it (take_projectile_trace_profile).
+	const opennova::world::CollisionWorld::TraceProfile &tp = last_trace_profile_;
 	out["trace_profiling_enabled"] = kernel_->collision.trace_profile_enabled();
 	out["trace_calls"] = tp.calls;
 	out["trace_terrain_us"] = tp.terrain_us;
@@ -997,7 +1058,9 @@ Error Simulation::debug_crew_local_player(int p_vehicle_ssn) {
 	const opennova::world::Entity *lp =
 			kernel_->world.registry.get(kernel_->world.cached.local_player);
 	if (lp == nullptr) return ERR_UNAVAILABLE;
-	return kernel_->world.commands.mount(static_cast<uint16_t>(lp->net_id),
+	// The local body by its handle: its script SSN is its DcbId (world::entity_dcb_id), never
+	// its record word.
+	return kernel_->world.commands.mount(opennova::world::EntityTarget(lp->handle),
 	                              static_cast<uint16_t>(p_vehicle_ssn))
 			? OK
 			: ERR_INVALID_PARAMETER;
@@ -1059,14 +1122,17 @@ Error Simulation::debug_teleport_local_player(const Vector3 &p_mission_pos,
 	return OK;
 }
 
-// The scenario driver's joiner setup: teleport_local_player is the authority's
-// write (HOST_ONLY in the debug table), while a joiner's own L is client-owned
-// state its C2S 0x0C uplink reports, so the joiner takes the retail bridge's
-// ApplyPose write on L instead. The pose arrives as doubles so the Q16/BAM
-// words match the retail driver's conversion of the same script.
+// The scenario driver's setup pose on every role: the retail bridge's ApplyPose
+// write on the local player's L (Position, Rotation X / Y, AirVelocity zeroed),
+// which the onHook driver gives a retail actor on any role. It leaves the
+// resolver's idle-skip counter alone, as ApplyPose leaves retail's +0x373, so a
+// body posed above its floor settles as retail's does; teleport_local_player
+// (the dev F3 tool) zeroes it. On a joiner its next C2S 0x0C uplink carries the
+// pose. The pose arrives as doubles so the Q16/BAM words match the retail
+// driver's conversion of the same script.
 Error Simulation::debug_apply_local_pose(double p_x, double p_y, double p_z, double p_yaw_deg,
 		double p_pitch_deg) {
-	if (!kernel_ || !is_joiner() || !kernel_->world.cached.local_player.valid()) {
+	if (!kernel_ || !kernel_->world.cached.local_player.valid()) {
 		return ERR_UNAVAILABLE;
 	}
 	opennova::devtools::ScriptPose pose;
@@ -1078,6 +1144,24 @@ Error Simulation::debug_apply_local_pose(double p_x, double p_y, double p_z, dou
 	return kernel_->local.apply_pose(pose.position_q16, pose.heading_bam, pose.pitch_bam)
 			? OK
 			: ERR_UNAVAILABLE;
+}
+
+// The parity runner's slot staging (godot/probes/net/stage_slot_probe.gd): the
+// engine owns the slot walk and the Position write (inmatch::stage_slot_position);
+// the binding maps its refusals onto Error codes.
+Error Simulation::debug_stage_slot(int p_slot, double p_x, double p_y, double p_z) {
+	opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
+	if (ctx == nullptr) return ERR_UNAVAILABLE;
+	const opennova::inmatch::SlotStagingResult staged =
+			opennova::inmatch::stage_slot_position(*ctx, p_slot, p_x, p_y, p_z);
+	switch (staged.status) {
+		case opennova::inmatch::SlotStagingStatus::Staged: return OK;
+		case opennova::inmatch::SlotStagingStatus::NotAuthority: return ERR_UNAVAILABLE;
+		case opennova::inmatch::SlotStagingStatus::NoPlayer: return ERR_DOES_NOT_EXIST;
+		case opennova::inmatch::SlotStagingStatus::NoBody: return ERR_UNCONFIGURED;
+		case opennova::inmatch::SlotStagingStatus::OutOfRange: return ERR_INVALID_PARAMETER;
+	}
+	return FAILED;
 }
 
 // The by-net-id sibling of debug_set_entity_position: the net-id resolve is

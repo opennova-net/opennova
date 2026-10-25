@@ -4,6 +4,7 @@
 #include <base/io/log.h>
 #include <runtime/audio/oneshot_play.h> // listener view flags
 #include <runtime/world/angle.h>
+#include <runtime/world/collision.h> // the USE readout's watch: the pool-1 table and the slice
 #include <runtime/world/infantry.h>
 #include <runtime/world/mount_controls.h>
 #include <runtime/world/player_present.h>
@@ -76,6 +77,16 @@ void LocalPlayer::set_movement_keys(bool forward, bool back, bool left,
 	input.lean_left = lean_left;
 	input.lean_right = lean_right;
 	input.jump = jump;
+	// The held forward and back rows' cases write the X axis word beside their bits. Their
+	// events queue behind the frame's records (the console's first, then the key scan's), so a
+	// held key's write lands last, back's row after forward's in the analog list's row order.
+	// [orig: Input_ProcessPlayerFrame @0x49D4C0 - Input_ProcessAnalogBindings called @0x49D50C
+	//  (Input_QueueEvent(code, 0, 0, 0) called @0x499660); Input_HandleActionBinding_0 - case
+	//  152 `mov g_InputAxisX, 0FC01h` @0x4E0CC5, case 151 `mov g_InputAxisX, 3FFh` @0x4E0C75;
+	//  rows 2 / 3 of the binding table @0x8159A8 enter g_InputAnalogBindingIndices in row order
+	//  (Input_InitBindingSystem @0x499B6A..0x499BA5)]
+	if (forward) axis_words.x = -1023;
+	if (back) axis_words.x = 1023;
 	// Stance comes from the sim-owned SELECT latches (latch_stance — the
 	// C2S 0x1D apply semantics [orig: @0x501c60]).
 	input.crouch = stance_latch_ == 1;
@@ -87,19 +98,74 @@ void LocalPlayer::set_movement_keys(bool forward, bool back, bool left,
 	//  `test byte ptr g_InputFlags, 1Eh` @0x4de3ae, ahead of the pack]
 	// The press latch's freeze leaves that word empty.
 	view.movement_input = !armory_press_latched &&
-			(input_flags.folded(w::player_input_flags(input, false)) & w::kInputFlagDirectionMask) != 0;
+			(input_flags.folded(w::player_input_flags(input, false) | record_input_bits) &
+					w::kInputFlagDirectionMask) != 0;
 	w::local_player_view_refresh(&world, view);
 }
 
 UseItemArm LocalPlayer::take_use_item_press() {
+	// The held USE row (code 0xB1) carries the dispatcher's flag 0x1, which drops it ahead of
+	// its handler on a nonzero operand: the constant 2 on a dedicated host in a session (an
+	// authority that is no session peer, whatever its body), else the local player's dead
+	// bit. A dropped press arms nothing and latches no hold, so no release toggles a mount
+	// (D-NET-433). The mount toggle and the seat pick themselves carry no dead test.
+	// [orig: Input_HandleActionBinding @0x49AD40 - is_in_session @0x49AD52..0x49AD5B,
+	//  is_authority @0x49AD5D..0x49AD64, is_mp_session_peer @0x49AD66..0x49AD6D, `mov eax, 2`
+	//  @0x49AD6F; else the local player's Flags & 2 @0x49AD76..0x49AD7E; the row's flag 0x1
+	//  @0x49AD8A..0x49ADA0 (the catalog @0x8159A8, the code-0xB1 row's flags 0x0C000805
+	//  before KeyBinding_SortBySequentialId); the hold Input_HandleActionBinding_0
+	//  @0x4E0B5E..0x4E0B71; Entity_ToggleVehicleMount @0x436950, Entity_FindAvailableSeat
+	//  @0x436790: no dead test]
+	if (action_dispatch_drops()) return note_use_press(UseItemArm::kDropped);
 	const UseItemArm arm = w::local_player_use_item_arm(world_, view_session_inputs);
-	if (arm != UseItemArm::kArmory && arm != UseItemArm::kArmoryRefused) return arm;
+	if (arm != UseItemArm::kArmory && arm != UseItemArm::kArmoryRefused)
+		return note_use_press(arm);
 	// A latched press does nothing; an unlatched one latches before the
 	// countdown test. [orig: Input_HandleActionBinding_0 the latch test
 	// @0x4E0B12..0x4E0B19 (to done), the set @0x4E0B21]
-	if (armory_press_latched) return UseItemArm::kArmoryRefused;
+	if (armory_press_latched) return note_use_press(UseItemArm::kArmoryRefused);
 	armory_press_latched = true;
+	return note_use_press(arm);
+}
+
+w::UsePressRecord LocalPlayer::use_press_record(w::UsePressEvent event) const {
+	w::UsePressRecord record;
+	record.event = event;
+	record.logic_tick = world_.logic_tick;
+	w::use_press_fill_body(record, player(), w::active_local_weapon_slot(world_, weapon));
+	record.watch = use_trace.watch;
+	if (record.watch == 0xFFFFu) return record;
+	const w::EntityHandle watched{record.watch};
+	if (const w::Entity *e = world_.registry.get(watched)) {
+		record.watch_present = true;
+		record.watch_flags = e->flags;
+		record.watch_engine_flags = e->engine_flags;
+	}
+	if (world_.collision != nullptr) {
+		record.watch_in_table =
+				world_.collision->dynamic_table_radius_q16(watched, record.watch_table_radius_q16);
+		int32_t count = 0;
+		const w::EntityHandle *slice =
+				world_.collision->candidate_slice(world_.cached.local_player, count);
+		record.slice_count = slice != nullptr ? count : -1;
+		for (int32_t i = 0; slice != nullptr && i < count; ++i)
+			if (slice[i] == watched) record.watch_in_slice = true;
+	}
+	return record;
+}
+
+UseItemArm LocalPlayer::note_use_press(UseItemArm arm) {
+	w::UsePressRecord record = use_press_record(w::UsePressEvent::kPress);
+	record.arm = arm;
+	use_trace.append(record);
 	return arm;
+}
+
+bool LocalPlayer::note_use_toggle_gate(bool allowed) {
+	w::UsePressRecord record = use_press_record(w::UsePressEvent::kToggleGate);
+	record.allowed = allowed;
+	use_trace.append(record);
+	return allowed;
 }
 
 void LocalPlayer::release_use_item_key(bool system_key_up) {
@@ -204,10 +270,11 @@ void LocalPlayer::clear_stance_latches() {
 	if (w::AiEntity *p = player_ai()) p->inf.stance = w::InfantryState::Stance::kStand;
 }
 
-// Mouse pixels onto the look angles through the witnessed integer pipeline
-// [orig: Input_ProcessMouseAxisBindings @0x499680]. The float accumulator is
-// the device-input fold over retail's integer remainder pump [orig:
-// Game_ProcessMainFrame @0x526481..0x5264a9, dword_24E0E78].
+// Mouse axis input onto the look angles through the witnessed integer pipeline
+// [orig: Input_ProcessMouseAxisBindings @0x499680]. The session's tick hands it
+// the main frame's mouse-pump sum in whole units (MouseAxisPump, player_look.h);
+// the float accumulator carries only a direct feed's fractions
+// (Simulation::add_local_player_look).
 void LocalPlayer::look(float dx_px, float dy_px) {
 	World &world = world_;
 	int32_t scoped_zoom = 0;
@@ -261,17 +328,17 @@ void LocalPlayer::place_on_composed_view() {
 	w::PlayerCameraPose pose;
 	bool mounted_camera = false;
 	if (!w::local_player_camera_compose(world, view, view_tracker, pose, mounted_camera)) return;
-	// [orig: @0x52b087..0x52b0b7 — g_ViewPos less CameraOffset (+0x6C..+0x74)]
+	// The view words, copied as they are (D-NET-507 (5)): g_ViewPos less
+	// CameraOffset (+0x6C..+0x74) [orig: Spectator_CycleMode
+	// @0x52b087..0x52b0b7, after its compose @0x52B082].
 	const int32_t offset[3] = {e->eye_offset_x, e->eye_offset_y, e->eye_offset_z};
 	for (int axis = 0; axis < 3; ++axis)
-		p->pos[axis] = io::bam_sub(w::to_fixed(pose.eye[axis]), offset[axis]);
-	// [orig: @0x52b0ba..0x52b0ee — Yaw and g_LocalPlayerLookYaw = g_ViewRotYaw,
-	//  Pitch, Roll]. The port's view words are the composed mission angles.
-	const int32_t heading = w::bam_heading_from_mission_yaw_deg(pose.yaw_deg);
-	const int32_t pitch = static_cast<int32_t>(
-			std::lround(static_cast<double>(pose.pitch_deg) / w::kDegreesPerBam));
-	const int32_t roll = static_cast<int32_t>(
-			std::lround(static_cast<double>(pose.roll_deg) / w::kDegreesPerBam));
+		p->self->position.word(axis) = io::bam_sub(pose.pos_q16[axis], offset[axis]);
+	// [orig: Spectator_CycleMode @0x52b0ba..0x52b0ee: Yaw and g_LocalPlayerLookYaw =
+	//  g_ViewRotYaw, Pitch = g_ViewRotPitch, Roll = g_ViewRotRoll]
+	const int32_t heading = pose.yaw_bam;
+	const int32_t pitch = pose.pitch_bam;
+	const int32_t roll = pose.roll_bam;
 	p->heading = heading;
 	p->pitch = pitch;
 	p->roll = roll;
@@ -279,11 +346,12 @@ void LocalPlayer::place_on_composed_view() {
 	p->inf.look_pitch = pitch;
 	input.look_heading = heading;
 	input.look_pitch = pitch;
-	e->position = {static_cast<float>(w::from_fixed(p->pos[0])),
-			static_cast<float>(w::from_fixed(p->pos[1])),
-			static_cast<float>(w::from_fixed(p->pos[2]))};
-	e->yaw = static_cast<int16_t>(std::lround(
-			w::normalize_mission_yaw_deg(w::mission_yaw_deg_from_bam_heading(heading))));
+	e->heading = heading;
+	// The entity's Pitch and Roll words take the view's too (D-NET-NEW-L6-3)
+	// [orig: Spectator_CycleMode - `mov [edx+14h], eax` @0x52B0DF,
+	//  `mov [ecx+18h], edx` @0x52B0EE].
+	e->pitch_bam = pitch;
+	e->roll_bam = roll;
 }
 
 void LocalPlayer::aim_at(const w::Vec3 &eye, const w::Vec3 &target) {
@@ -302,9 +370,6 @@ void LocalPlayer::teleport_local_player(const w::Vec3 &mission_pos, double yaw_d
 	w::AiEntity *p = player_ai();
 	if (e == nullptr || p == nullptr) return;
 	e->position = mission_pos;
-	p->pos[0] = w::to_fixed(mission_pos.x);
-	p->pos[1] = w::to_fixed(mission_pos.y);
-	p->pos[2] = w::to_fixed(mission_pos.z);
 	p->heading = w::bam_heading_from_mission_yaw_deg(yaw_deg);
 	p->pitch = static_cast<int32_t>(pitch_deg / w::kDegreesPerBam);
 	// The input-owned view mirrors, or the next pre-tick snaps the view back.
@@ -328,13 +393,10 @@ bool LocalPlayer::apply_pose(const int32_t (&position_q16)[3], int32_t heading_b
 	// The bridge's person writes: Position, Rotation.X/Y, AirVelocity
 	// (onhook/src/debug/debug_bridge.c ApplyPose; GamePerson +0x04 / +0x10 /
 	// +0x98, the organic's InfantryState::vel triple).
-	for (int axis = 0; axis < 3; ++axis) p->pos[axis] = position_q16[axis];
+	for (int axis = 0; axis < 3; ++axis) p->self->position.word(axis) = position_q16[axis];
 	p->heading = heading_bam;
 	p->pitch = pitch_bam;
 	p->inf.vel[0] = p->inf.vel[1] = p->inf.vel[2] = 0;
-	e->position = {static_cast<float>(w::from_fixed(p->pos[0])),
-			static_cast<float>(w::from_fixed(p->pos[1])),
-			static_cast<float>(w::from_fixed(p->pos[2]))};
 	p->inf.target_heading = heading_bam;
 	p->inf.look_pitch = pitch_bam;
 	input.look_heading = heading_bam;
@@ -346,35 +408,78 @@ void LocalPlayer::set_weapon_input(bool fire_held, bool fire_pressed, bool reloa
 	w::local_weapon_set_input(weapon, view, fire_held, fire_pressed, reload_pressed);
 }
 
-void LocalPlayer::clear_deferred_input() {
-	to_special_queued = 0;
+void LocalPlayer::left_button_down() {
+	w::local_weapon_left_button_down(world_, weapon, view);
 }
 
-void LocalPlayer::queue_to_special() {
-	if (to_special_queued < 32) ++to_special_queued; // [orig: @0x4993E8]
+bool LocalPlayer::press_fire() {
+	return w::local_weapon_press_fire(world_, weapon, view);
+}
+
+bool LocalPlayer::fire_record(bool binding_held, bool from_keyboard) {
+	// [orig: Input_HandleActionBinding_0 case 0x95 @0x4E07B5..0x4E0A1E; the declaration
+	//  carries the legs]
+	if (view.binoculars_view_active) return false;
+	if (!binding_held) return w::local_weapon_release_fire(world_, weapon);
+	// The press leg's sign bit is the EquippedSlot def's, which the commit that stored the
+	// slot mounted (LocalPlayerWeapon::def) [orig: @0x4E08E2 / @0x4E08F2 / @0x4E08FD].
+	if ((weapon.def.flags & w::weapon_flag::kPowerThrow) == 0) return press_fire();
+	return from_keyboard && w::local_weapon_power_throw_press(world_, weapon);
+}
+
+bool LocalPlayer::request_reload() {
+	return w::local_weapon_request_reload(world_, weapon, view,
+			inventory_valid ? &inventory : nullptr);
+}
+
+void LocalPlayer::refresh_weapon_overlay() {
+	if (!inventory_valid) return;
+	const Entity *player = world_.registry.get(world_.cached.local_player);
+	if (player == nullptr) return;
+	const WeaponTable &table = world_.tables.weapons;
+	// The three calls, in order, through the player's seat (the redraw and the clear read
+	// its +0x168) [orig: Entity_UpdateWeaponOverlayFrameState @0x4DC340 - @0x4DC373 /
+	//  @0x4DC387 / @0x4DC38F on the authority, @0x4DC3B1 / @0x4DC3CF / @0x4DC3E1 for the local
+	//  player without a slot]
+	const WeaponAmmoSeat seat = entity_ammo_seat(world_, *player);
+	weapon_inventory_clear_loaded_rounds(table, inventory, seat);
+	weapon_inventory_seed_pools(table, inventory, player->player_class);
+	weapon_inventory_recalc_clips(table, inventory, seat);
+	// Retail's slot table IS the running weapon's magazine (slot+16); here the held weapon's
+	// FSM carries its own copy, which the next pump mirrors back into the inventory, so the
+	// redrawn clip has to reach it now [orig: the same slot word @0x542375 that
+	//  WeaponAction_* read; player_weapon.cpp mirrors the FSM clip].
+	if (inventory.equipped_combo >= 0)
+		weapon.slot.clip = weapon_inventory_loaded_rounds(table, inventory,
+				inventory.equipped_combo);
+}
+
+void LocalPlayer::clear_deferred_input() {
+	deferred_events.clear();
+}
+
+void LocalPlayer::queue_deferred_event(int32_t code, int32_t p1, int32_t p2) {
+	// [orig: Input_QueueDeferredEvent @0x4993E0; the declaration carries the witness]
+	if (deferred_events.size() < 32) deferred_events.push_back({code, p1, p2}); // @0x4993E8
 }
 
 void LocalPlayer::dispatch_to_special(bool keys_held) {
-	if (!inventory_valid) {
-		to_special_queued = 0;
-		return;
-	}
-	while (to_special_queued > 0) {
-		if (w::local_player_to_special(world_, weapon, inventory, view, keys_held) ==
-				w::ToSpecialResult::kDeferred)
-			return; // re-dispatched next frame [orig: Input_FlushDeferredEvents @0x497AC0]
-		--to_special_queued;
-	}
+	if (!inventory_valid) return;
+	if (w::local_player_to_special(world_, weapon, inventory, view, keys_held) ==
+			w::ToSpecialResult::kDeferred)
+		queue_deferred_event(kToSpecialCode); // [orig: @0x4E1211]
 }
 
 bool LocalPlayer::mount_toggle_allowed() {
 	World &world = world_;
+	// No dead test: the press's dispatcher dropped a dead player's (take_use_item_press)
+	// [orig: Entity_ToggleVehicleMount @0x436950].
 	const w::Entity *toggle_player = player();
-	if (toggle_player == nullptr || !toggle_player->alive || toggle_player->health <= 0) return false;
+	if (toggle_player == nullptr) return note_use_toggle_gate(false);
 	w::sync_local_usegun_weapon_transition(world, weapon);
 	const w::WeaponSlotState *active_slot = w::active_local_weapon_slot(world, weapon);
-	return active_slot == nullptr ||
-			w::weapon_state_allows_mount_toggle(active_slot->current, active_slot->next);
+	return note_use_toggle_gate(active_slot == nullptr ||
+			w::weapon_state_allows_mount_toggle(active_slot->current, active_slot->next));
 }
 
 bool LocalPlayer::toggle_mount() {
@@ -403,8 +508,9 @@ bool LocalPlayer::toggle_mount() {
 bool LocalPlayer::find_numbered_seat(int index, VehicleSeatSelection &out,
 		const VehicleOccupancySource *source) {
 	out = {};
+	// No dead test (the press that holds USE carries the dispatcher's).
 	const w::Entity *local = player();
-	if (local == nullptr || !local->alive || local->health <= 0) return false;
+	if (local == nullptr) return false;
 	w::sync_local_usegun_weapon_transition(world_, weapon);
 	const w::WeaponSlotState *slot = w::active_local_weapon_slot(world_, weapon);
 	// This is currentAction == 11, not the USE toggle's pending-action gate.
@@ -430,8 +536,9 @@ bool LocalPlayer::select_numbered_seat(int index) {
 
 namespace {
 
-// The main scene's camera zero, after camera composition. Input, body aim
-// and the unadjusted targeting query retain their own frames.
+// The main scene's camera zero, after camera composition, in its local camera
+// only: f.view_block keeps the compose (world/local_player_view.h). Input, body
+// aim and the unadjusted targeting query retain their own frames.
 // [orig: Render_ProcessMainSceneFrame @ 0x5ca0f0,
 // Sighted @0x5ca452..0x5ca465; Scoped @0x5ca494..0x5ca4a0]
 void apply_main_scene_optics(World &world, LocalPlayerWeapon &weapon,
@@ -493,6 +600,13 @@ bool LocalPlayer::local_player_dead() const {
 	if (!world.cached.local_player.valid()) return false;
 	const w::Entity *e = world.registry.get(world.cached.local_player);
 	return e != nullptr && ((e->flags | e->engine_flags) & w::kEntityFlagDead) != 0;
+}
+
+bool LocalPlayer::action_dispatch_drops() const {
+	const World &world = world_;
+	if (world.rules.mp_session && world.rules.logic_authority && !world.rules.mp_session_peer)
+		return true; // the operand 2 [orig: @0x49AD52..0x49AD6F]
+	return local_player_dead(); // [orig: @0x49AD76..0x49AD7E]
 }
 
 void LocalPlayer::stamp_medic_request() {
@@ -580,33 +694,76 @@ void LocalPlayer::apply_scoped_aim_drift(AiEntity &body, uint32_t logic_tick) {
 void LocalPlayer::carry_process_globals_from(const LocalPlayer &previous) {
 	scope_yaw_ = previous.scope_yaw_;
 	scope_pitch_ = previous.scope_pitch_;
+	axis_words = previous.axis_words;
 	analog_pack_ = previous.analog_pack_;
 	armory_press_latched = previous.armory_press_latched;
 }
 
-void LocalPlayer::pack_analog_axes(w::Entity &entity, bool moving, bool x_frozen) {
+uint32_t LocalPlayer::movement_case_bit(int32_t code) {
+	// [orig: Input_HandleActionBinding_0 @0x4E0420 - 147 `or g_InputFlags, 4000h` @0x4E10C8;
+	//  148 2000h @0x4E10F1; 151 4 @0x4E0C6E; 152 2 @0x4E0CBE; 153 1000h @0x4E0D66; 154 40h
+	//  @0x4E0EB5; 155 20h @0x4E0F83; 156 8 @0x4E1041; 157 10h @0x4E1066; 158 100h @0x4E108C;
+	//  159 200h @0x4E10B7; 176 8000h @0x4E0CD5]
+	switch (code) {
+	case 147: return w::kInputFlagLeanRight;
+	case 148: return w::kInputFlagLeanLeft;
+	case 151: return w::kInputFlagBack;
+	case 152: return w::kInputFlagForward;
+	case 153: return w::kInputFlagJump;
+	case 154: return w::kInputFlagLookDown;
+	case 155: return w::kInputFlagLookUp;
+	case 156: return w::kInputFlagLeft;
+	case 157: return w::kInputFlagRight;
+	case 158: return w::kInputFlagTurnLeft;
+	case 159: return w::kInputFlagTurnRight;
+	case 176: return w::kInputFlagFreeLook;
+	default: return 0;
+	}
+}
+
+void LocalPlayer::apply_movement_case(int32_t code, int32_t p1) {
+	// The argument forms: a nonzero first argument stores its low word into the row's axis
+	// word and sets no bit (forward X, strafe-left Y, turn-left Z, lean-left the throttle's
+	// low word). [orig: Input_HandleActionBinding_0 @0x4E0420 - 152: the argument's test
+	//  @0x4E0CAD, `mov g_InputAxisX, ax` @0x4E0CB1; 156: @0x4E1030 / `jz` @0x4E1032,
+	//  `mov g_InputAxisY, ax` @0x4E1034; 158: @0x4E107B / @0x4E107D, `mov g_InputAxisZ, ax`
+	//  @0x4E107F; 148: @0x4E10E0 / @0x4E10E2, `mov word ptr g_InputAxisThrottle, ax` @0x4E10E4]
+	int16_t *axis = code == 152 ? &axis_words.x : code == 156 ? &axis_words.y :
+			code == 158 ? &axis_words.z : code == 148 ? &axis_words.throttle : nullptr;
+	if (axis != nullptr && p1 != 0) {
+		*axis = static_cast<int16_t>(static_cast<uint16_t>(p1));
+		return;
+	}
+	// The bit forms: the case's bit, which the fold carries beside the held keys'; back and
+	// forward write X too (+1023 / -1023). [orig: 151 `or g_InputFlags, 4` @0x4E0C6E,
+	//  `mov g_InputAxisX, 3FFh` @0x4E0C75; 152 `or g_InputFlags, 2` @0x4E0CBE,
+	//  `mov g_InputAxisX, 0FC01h` @0x4E0CC5]
+	record_input_bits |= movement_case_bit(code);
+	if (code == 151) axis_words.x = 1023;
+	if (code == 152) axis_words.x = -1023;
+}
+
+void LocalPlayer::zero_axis_words() {
+	// [orig: Input_ProcessFrame @0x49D520 - g_InputAxisX @0x49D54E, g_InputAxisY @0x49D555,
+	//  g_InputAxisZ @0x49D56A, g_InputAxisThrottle's high word @0x49D571; Game_ProcessMainFrame
+	//  - the armory freeze's @0x52663E, @0x526645, @0x52665A, @0x526661]
+	axis_words.x = 0;
+	axis_words.y = 0;
+	axis_words.z = 0;
+}
+
+void LocalPlayer::pack_analog_axes(w::Entity &entity, bool moving) {
 	AnalogPackState &a = analog_pack_;
-	// The axis words, shifted to bytes. The keyboard's only writers are the
-	// forward and back handlers on the X word (-1023 / +1023); back's binding
-	// row follows forward's in the analog dispatch list, so it lands last when
-	// both are held. Y and Z have joystick writers only.
-	// [orig: Input_HandleActionBinding_0 case 151 `word_B3B750 = 1023`
-	//  @0x4e0c75, case 152 `= -1023` @0x4e0cc5; rows 2/3 of the binding table
-	//  @0x8159A8 enter g_InputAnalogBindingIndices in row order
-	//  (Input_InitBindingSystem @0x499b6a..); the shifts @0x4df79a..0x4df7cd]
-	// The press latch's freeze zeroes the X word (and the joystick-only Y and
-	// Z words) after the handlers wrote it; the throttle's word survives (the
-	// pack reads dword_B3B75C's low word, the freeze clears its high word).
-	// [orig: Game_ProcessMainFrame word_B3B750 @0x52663E, word_B3B752
-	//  @0x526645, word_B3B75A @0x52665A, dword_B3B75C+2 @0x526661; the
-	//  throttle read @0x4df7a0]
-	const int16_t word_x = x_frozen ? int16_t(0)
-			: input.back ? int16_t(1023) : (input.forward ? int16_t(-1023) : int16_t(0));
-	const int8_t x = static_cast<int8_t>(word_x >> 3);
-	const int8_t y = 0;
-	const int8_t z = 0;
+	// The axis words, shifted to bytes: X off the dword at g_InputAxisX (its low word's bits
+	// 3..10), Y, Z and the throttle off their words.
+	// [orig: Player_PackInputStateToEntity - g_InputAxisY @0x4DF79A, g_InputAxisThrottle
+	//  @0x4DF7A0, g_InputAxisX @0x4DF7A6, g_InputAxisZ @0x4DF7B4; the shifts @0x4DF7AC,
+	//  @0x4DF7BA, @0x4DF7C2, @0x4DF7CD]
+	const int8_t x = static_cast<int8_t>(axis_words.x >> 3);
+	const int8_t y = static_cast<int8_t>(axis_words.y >> 3);
+	const int8_t z = static_cast<int8_t>(axis_words.z >> 3);
 	// The throttle byte, zeroed inside its 0x14 deadzone [orig: @0x4df7c2..0x4df7d5].
-	int8_t throttle = input.analog_throttle;
+	int8_t throttle = static_cast<int8_t>(axis_words.throttle >> 3);
 	if (std::abs(static_cast<int32_t>(throttle)) < 0x14) throttle = 0;
 	// A change of more than 32 from the last stored value latches each group
 	// on; a moving pack latches both off. [orig: @0x4df7d7..0x4df84e]
@@ -645,7 +802,7 @@ void LocalPlayer::pack_analog_axes(w::Entity &entity, bool moving, bool x_frozen
 	}
 }
 
-void LocalPlayer::pack_input_word(bool x_frozen) {
+void LocalPlayer::pack_input_word() {
 	World &world = world_;
 	// The pack: the accumulated word onto MoveOrder, then the word is
 	// saved as the previous pack's and cleared. The analog throttle is
@@ -681,7 +838,7 @@ void LocalPlayer::pack_input_word(bool x_frozen) {
 			w::weapon_fsm_queue_scope_down(*w::active_local_weapon_slot(world, weapon));
 	}
 	if (w::Entity *entity = world.registry.get(world.cached.local_player))
-		pack_analog_axes(*entity, move_order.moving, x_frozen);
+		pack_analog_axes(*entity, move_order.moving);
 	input_flags.clear_after_pack();
 }
 
@@ -693,6 +850,7 @@ void LocalPlayer::reset_key_input() {
 	const w::Entity *local = player();
 	if (local == nullptr || !local->has_item_def) return;
 	input_flags.flags = 0; // [orig: `mov g_InputFlags, 0` @0x4B2B9E]
+	record_input_bits = 0;
 	pack_input_word();     // [orig: Player_PackInputStateToEntity @0x4B2BA8]
 	// A moving state drops to the idle at once [orig: `test
 	// g_AnimStateFlagsTable[animStateId*4], 1` @0x4B2BB8, `mov [eax+2BCh], 2Bh`
@@ -704,6 +862,8 @@ void LocalPlayer::reset_key_input() {
 
 void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 	World &world = world_;
+	const uint32_t records = record_input_bits;
+	record_input_bits = 0;
 	if (!world.cached.local_player.valid()) return;
 	// The per-tick shake decay, ahead of the entity update's arms and the
 	// weather tick's quake hard-set: retail decays in Player_UpdatePerFrame
@@ -727,21 +887,35 @@ void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 	// bit the last pack did not report stays set until the next pack.
 	// [orig: Input_ProcessFrame @0x49d541, then the handler dispatch
 	//  Input_HandleActionBinding_0 @0x4e0420]
-	input_flags.fold(w::player_input_flags(input, absorb));
+	// The drained records' bits fold with them, the look rows' under the same AbsorbPitch
+	// refusal their cases run [orig: Input_HandleActionBinding_0 - cases 154 / 155 @0x4E0EA5 /
+	//  @0x4E0F73].
+	const uint32_t record_bits = absorb
+			? records & ~(w::kInputFlagLookUp | w::kInputFlagLookDown)
+			: records;
+	input_flags.fold(w::player_input_flags(input, absorb) | record_bits);
 	// The armory press latch freezes the frame's input after the fold: the
-	// word clears and MoveOrder keeps only its stance bits (the X axis word's
-	// clear rides the pack below). A menu screen open skips the input pass and
-	// this freeze with it, and the STAT and DEATH (deploy) screens run the
-	// pass without the freeze; the shell feeds no keys behind any of them, so
-	// the ungated freeze leaves the same empty word.
+	// word and the X, Y and Z axis words clear (the throttle's low word
+	// survives) and MoveOrder keeps only its stance bits. A menu screen open
+	// skips the input pass and this freeze with it, and the STAT and DEATH
+	// (deploy) screens run the pass without the freeze. The freeze here is
+	// ungated: under those two screens the shell feeds the frame's keys, but
+	// the action head drops every movement and look row there (the dead
+	// operand, the deploy overlay, the round-over gate), and the death screen's
+	// spectator, alive and with neither up, latches nothing there: the latch is
+	// a live body's USE press in an armory volume, which the key's release
+	// clears, and the death screen's binding scan never admits that row. So the
+	// word the freeze would clear is empty there.
 	// [orig: Game_ProcessMainFrame -- the menu test @0x52660D..0x526614,
 	//  Input_ProcessFrame @0x52661D, the block @0x526625..0x526679: the latch
-	//  test @0x526625, g_InputFlags = 0 @0x526632, MoveOrder (entity+0x12C)
-	//  &= 0x300 @0x52666F; UI_TeardownScene's pass @0x54E68D..0x54E695 under
-	//  sub_54B980's flag from StatScreen_ShowCallback @0x56287D and
-	//  DeathScreen_UpdateUI @0x55316E]
+	//  test @0x526625, g_InputFlags = 0 @0x526632, g_InputAxisX @0x52663E, g_InputAxisY
+	//  @0x526645, g_InputAxisZ @0x52665A, g_InputAxisThrottle's high word @0x526661,
+	//  MoveOrder (entity+0x12C) &= 0x300 @0x52666F; UI_ProcessMenuScreenFrame's pass
+	//  @0x54E68D..0x54E695 under sub_54B980's flag from StatScreen_ShowCallback
+	//  @0x56287D and DeathScreen_UpdateUI @0x55316E]
 	if (armory_press_latched) {
 		input_flags.flags = 0;
+		zero_axis_words();
 		w::PlayerBodyInput held;
 		held.stance = move_order.stance;
 		held.look_heading = move_order.look_heading;
@@ -753,7 +927,7 @@ void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 	// `test byte ptr g_InputFlags, 1Eh` @0x4de3ae; the pack follows @0x42c3e9].
 	view.movement_input = (input_flags.flags & w::kInputFlagDirectionMask) != 0;
 	w::local_player_view_refresh(&world, view);
-	if (pack_input) pack_input_word(armory_press_latched);
+	if (pack_input) pack_input_word();
     // The keyboard turn/look rotation reads the MoveOrder bits the last pack
     // wrote; the prone halving reads its stance bit. Both pitch limits follow
     // body slope. [orig: Entity_ApplyFreeLookRotation @0x4ae090 -- MoveOrder
@@ -828,6 +1002,10 @@ void LocalPlayer::run_local_view_tick() {
 	tick_view();
 }
 
+void LocalPlayer::run_paused_camera_update() {
+	w::local_player_camera_update(world_, view, view_tracker);
+}
+
 void LocalPlayer::pump_local_weapon() {
 	World &world = world_;
 	w::LocalWeaponPumpIO io;
@@ -836,6 +1014,7 @@ void LocalPlayer::pump_local_weapon() {
 	io.is_authority = true;
 	io.authority_fire_admitted = authority_fire_admitted;
 	w::local_weapon_pump_tick(world, weapon, io);
+	if (io.fire_deferred) queue_deferred_event(kDeferredFireCode);
 	hud_map_control.weapon_command(io.map_command);
 	// The wire-facing outcome for the embedder's relay leg (the local reload
 	// producer the listen drain consumes).
@@ -859,11 +1038,22 @@ void LocalPlayer::tick_view() {
 }
 
 void LocalPlayer::respawn_init(bool rebuild_kit) {
-    if (rebuild_kit)
-        local_loadout_rebuild(world_, loadout, weapon, inventory, inventory_valid,
-                              /*select_spawn_default=*/true);
+    // The view effects reset ahead of the weapon leg, Player_InitPlayer's head clears ahead of
+    // its walk, so a mount the walk runs on a body in play keeps its view words [orig:
+    // Player_InitPlayer @0x4E15F0 - the memset @0x4E1602, g_NVGActive @0x4E17D4, the walk
+    // @0x4E19A1; NapiNPClientMsg_TeamAssign @0x431910 - Player_InitPlayer(1) @0x431B14].
     local_player_view_reset(&world_, weapon, view, view_tracker);
+    if (rebuild_kit)
+        local_loadout_rebuild_on_team_assign(world_, loadout, weapon, inventory, inventory_valid);
     hud_map_control.reset_spawn();
+}
+
+void LocalPlayer::round_end_view_clear() {
+    // [orig: Server_ProcessRoundEnd @0x5168EA..0x5168FC]
+    view.binoculars_view_active = false; // g_BinocularsViewActive
+    view.binoculars_requested = false;   // g_BinocularsToggle
+    hud_map_control.mode = 0;            // g_MapOverlayMode
+    w::player_view_clear_scope_promoted(view); // g_WeaponScopeActive, the bare write
 }
 
 void LocalPlayer::reset_for_new_round() {
@@ -877,6 +1067,9 @@ void LocalPlayer::reset_for_new_round() {
     w::radar_reset(radar);
     Entity *local = player();
     if (local == nullptr) return;
+    // The local player's being-revived word, which the spawn-state reset leaves on it
+    // [orig: Game_InitNewRound @0x422740 - `mov [eax+1E0h], ebx` @0x4227D4].
+    local->medic_reviving = false;
     // [orig: Game_InitNewRound @0x422740; Camera_ResetToLocalPlayer @0x4a3d30]
     view.binoculars_requested = false;
     view.binoculars_raised = false;
@@ -902,12 +1095,13 @@ void LocalPlayer::reset_for_new_round() {
     view.chase_distance_q16 = w::kTpDistanceQ16;
     view.chase_orbit_yaw = 0;
     view.chase_orbit_pitch = 0;
+    // The new track's anchor takes the entity's Position words as they are
+    // (D-NET-507) [orig: Camera_ResetToLocalPlayer @0x4A3D30 (the call @0x4A3D42)
+    // -> Camera_SetTrackedEntity @0x4391D0 (the anchor stores @0x439227..0x43923B)].
     view.tp_anchor_valid = true;
     for (int axis = 0; axis < 3; ++axis) {
-        const float pos = axis == 0 ? local->position.x :
-                axis == 1 ? local->position.y : local->position.z;
-        view.tp_anchor[axis] = pos;
-        view.tp_anchor_q16[axis] = to_fixed(pos);
+        view.tp_anchor_q16[axis] = local->position.word(axis);
+        view.tp_anchor[axis] = static_cast<float>(from_fixed(view.tp_anchor_q16[axis]));
         view.lookahead_q16[axis] = 0;
     }
     world_.cached.sound_listener_view_flags = audio::kListenerViewFirstPerson;
@@ -918,7 +1112,7 @@ void LocalPlayer::reset_for_new_round() {
     // [orig: Game_InitNewRound @0x4227DA..0x4227E3].
     const w::AiEntity *motor = player_ai();
     input.look_heading = motor != nullptr ? motor->heading
-                                          : bam_heading_from_mission_yaw_deg(local->yaw);
+                                          : local->heading;
     // The HUD buffers belong to the presenting device; one ordered effect
     // carries the reset without discarding unrelated mission events.
     Effect reset;

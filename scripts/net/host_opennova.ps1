@@ -2,7 +2,8 @@
 #
 # The host is configured entirely by launch flags (`--lan-host <mission>
 # --lan-port <port> --callsign <name> --lan-mode <1..4> --lan-max-players
-# <1..64> [--lan-gametype <n>] [--resource-dir <dir>] [/exp <name>]`,
+# <1..64> [--lan-gametype <n>] [--lan-rotation <a.bms[,b.bms...]>]
+# [--resource-dir <dir>] [--working-dir <dir>] [/exp <name>]`,
 # docs/dev-env-vars.md) and drives through its opennova-game MCP endpoint
 # (`--mcp-port`, docs/mcp.md). Readiness is the
 # JO LAN discovery answer (opennova-lan-probe) AND the endpoint's game_state
@@ -23,7 +24,14 @@ param(
     [ValidateRange(10, 60000)] [int] $ReadyProbeIntervalMs = 1000,
     [ValidateRange(1, 600)] [int] $McpReadyTimeoutSeconds = 240,
     [string] $GameType = "auto",
+    # The rotation's missions after -Mission, .BMS basenames in play order (a
+    # comma-separated list is accepted): --lan-rotation, which the host
+    # appends as the host screen's START appends its selected rows.
+    [string[]] $Rotation = @(),
     [string] $ResourceDir = "",
+    # The directory the game runs in (--working-dir): where it reads and saves
+    # game.cfg and player.sav, as retail's Jointops.exe does in its install.
+    [string] $WorkingDir = "",
     [string] $Expansion = "",
     [string] $LogFile = "",
     [string] $Resolution = "",
@@ -45,12 +53,24 @@ if (-not $normalizedGameType.Equals("auto", [System.StringComparison]::OrdinalIg
         -not [uint32]::TryParse($normalizedGameType, [ref] $parsedGameType)) {
     throw "-GameType must be 'auto' or an unsigned 32-bit integer."
 }
+# The host leaves out a rotation entry its mission catalog does not list, so
+# a malformed one is refused here rather than dropped there.
+$rotationList = @($Rotation | ForEach-Object { "$_".Split(',') } |
+    ForEach-Object { $_.Trim() } | Where-Object { $_ })
+foreach ($entry in $rotationList) {
+    if ($entry -notmatch '^[^\\/:*?"<>|,\x00-\x1f]+\.[Bb][Mm][Ss]$') {
+        throw "-Rotation entry '$entry' is not a .BMS basename."
+    }
+}
 $normalizedResolution = ""
 if (-not [string]::IsNullOrWhiteSpace($Resolution)) {
     $normalizedResolution = ConvertTo-OpenNovaResolution -Value $Resolution
 }
 if (-not [string]::IsNullOrWhiteSpace($ResourceDir)) {
     $ResourceDir = (Resolve-Path -LiteralPath $ResourceDir -ErrorAction Stop).Path
+}
+if (-not [string]::IsNullOrWhiteSpace($WorkingDir)) {
+    $WorkingDir = (Resolve-Path -LiteralPath $WorkingDir -ErrorAction Stop).Path
 }
 if (-not [string]::IsNullOrWhiteSpace($LogFile)) {
     $LogFile = [System.IO.Path]::GetFullPath($LogFile)
@@ -78,8 +98,14 @@ $gameArguments = @(
 if (-not $normalizedGameType.Equals("auto", [System.StringComparison]::OrdinalIgnoreCase)) {
     $gameArguments += @("--lan-gametype", [string] $parsedGameType)
 }
+if ($rotationList.Count -gt 0) {
+    $gameArguments += @("--lan-rotation", ($rotationList -join ","))
+}
 if (-not [string]::IsNullOrWhiteSpace($ResourceDir)) {
     $gameArguments += @("--resource-dir", $ResourceDir)
+}
+if (-not [string]::IsNullOrWhiteSpace($WorkingDir)) {
+    $gameArguments += @("--working-dir", $WorkingDir)
 }
 if (-not [string]::IsNullOrWhiteSpace($Expansion)) {
     $gameArguments += @("/exp", $Expansion.Trim())
@@ -98,11 +124,17 @@ Write-Host "OPENNOVA_HOST_MCP=$(Get-GameMcpUrl -Port $McpPort)"
 Write-Host "OPENNOVA_HOST_LAN_MODE=$LanMode"
 Write-Host "OPENNOVA_HOST_MAX_PLAYERS=$MaxPlayers"
 Write-Host "OPENNOVA_HOST_GAME_TYPE=$normalizedGameType"
+if ($rotationList.Count -gt 0) {
+    Write-Host "OPENNOVA_HOST_ROTATION=$($rotationList -join ',')"
+}
 Write-Host "OPENNOVA_HOST_RESOLUTION=$(if ($normalizedResolution) { $normalizedResolution } else { 'project-default' })"
 if (-not [string]::IsNullOrWhiteSpace($ResourceDir)) {
     Write-Host "OPENNOVA_HOST_RESOURCE_DIR=$ResourceDir"
 } else {
     Write-Host "OpenNova must already have a Joint Operations resource directory selected."
+}
+if (-not [string]::IsNullOrWhiteSpace($WorkingDir)) {
+    Write-Host "OPENNOVA_HOST_WORKING_DIR=$WorkingDir"
 }
 if (-not [string]::IsNullOrWhiteSpace($Expansion)) {
     Write-Host "OPENNOVA_HOST_EXPANSION=$($Expansion.Trim())"

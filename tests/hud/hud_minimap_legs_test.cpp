@@ -516,28 +516,31 @@ void test_farp_chevron() {
 }
 
 // bit20 — the WPIndctr altitude nub passes the raw half-bright state colour
-// (blue below, orange above, green level): the strip's material 0x300631
-// doubles it on the device, so the compile never folds it (D-HUD-49).
-// [orig: HUD_UpdateWaypointAltitudeColor @0x590970; the bit20 leg
-//  @0x5a79b1..0x5a7a10]
+// (blue below, orange above, green level) the gameplay pass last set, in the
+// band's frame: the strip's material 0x300631 doubles it on the device, so the
+// compile never folds it (D-HUD-49). The pass's refresh is the HUD compiler's
+// (hud_overlay_pass_head).
+// [orig: g_WaypointAltitudeColor / g_WaypointAltitudeBand from
+//  HUD_UpdateWaypointAltitudeColor @0x590970; the bit20 leg @0x5a79b1..0x5a7a10]
 void test_waypoint_nub_raw_state_colour() {
 	struct Case {
-		int32_t dz;
+		int band;
 		uint32_t color;
 	};
-	for (const Case c : {Case{-(3 << 16), 0xFF20407Fu}, Case{3 << 16, 0xFF7F5000u},
-				 Case{0, 0xFF007000u}}) {
+	for (const Case c : {Case{1, 0xFF20407Fu}, Case{0, 0xFF7F5000u}, Case{2, 0xFF007000u}}) {
 		HudMinimapInput in = corner();
 		in.flags |= 0x100000u;
 		in.waypoint_present = true;
 		in.waypoint_x = 300 << 16;
-		in.waypoint_z = c.dz;
+		in.waypoint_altitude_color = c.color;
+		in.waypoint_altitude_band = c.band;
 		HudMinimapCompiler compiler;
 		const HudMapSprite *nub = nullptr;
 		for (const HudMapSprite &s : compiler.compile(in).sprites)
 			if (s.texture == 3) nub = &s;
-		CHECK(nub != nullptr && nub->color == c.color,
-				"the nub passes the raw state colour");
+		CHECK(nub != nullptr && nub->color == c.color &&
+				nub->v0 == static_cast<float>(c.band) / 4.0f,
+				"the nub passes the raw state colour in the band's frame");
 	}
 }
 

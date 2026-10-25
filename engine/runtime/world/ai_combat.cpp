@@ -51,7 +51,7 @@ void AiSystem::queue_death_event(const World *world, AiEntity &e) {
 bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out, bool variant_a) {
     scan_candidates_.clear();
     // Entry gates [orig: 0x466f60 head]. The round-end latch nulls acquisition outright
-    // [orig: g_SpawnSuccessGate @0x24C1928 nonzero -> return null @0x466fba]; the
+    // [orig: g_RoundOver @0x24C1928 nonzero -> return null @0x466fba]; the
     // teamless gate is mirrored in the scoring core (it is part of @0x466f60) — here it
     // only skips the wasted pool walk.
     if (world.match.outcome().ended) return false;
@@ -87,7 +87,7 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out, bool var
                     // The class-0 pool-0 leg: Player-flagged only; the LOCAL player is
                     // excluded while the local cheat word's 0x800 bit is up [orig:
                     // `test ebx,100h` @0x46712D; candidate == g_LocalPlayerEntity
-                    // @0x467139 && `test dword_24C1930,800h` @0x467141].
+                    // @0x467139 && `test g_DebugCheatFlags,800h` @0x467141].
                     if ((c->engine_flags & kEntityFlagPlayer) == 0) continue;
                     if (h == world.cached.local_player && world.rules.ai_rules_skip_local_player)
                         continue;
@@ -104,9 +104,9 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out, bool var
             }
             AiCandidate cand;
             cand.handle = h;
-            cand.pos[0] = static_cast<int32_t>(c->position.x * io::kFp16One);
-            cand.pos[1] = static_cast<int32_t>(c->position.y * io::kFp16One);
-            cand.pos[2] = static_cast<int32_t>(c->position.z * io::kFp16One);
+            cand.pos[0] = c->position.x.q16;
+            cand.pos[1] = c->position.y.q16;
+            cand.pos[2] = c->position.z.q16;
             cand.team = c->team;
             cand.flags = static_cast<int32_t>(c->engine_flags); // &2/&0x8000000 skip, &0x4000 prio x6
             cand.health = static_cast<int16_t>(std::min<int32_t>(c->health, INT16_MAX));
@@ -118,7 +118,10 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out, bool var
             cand.range_primary = c->radar_sig;
             cand.range_secondary = c->heat_sig;
             cand.relmat_id = c->group_id;                  // group key (+0x11C commandGroup)
-            cand.net_id = c->net_id;                       // single key (+0x7C SSN)
+            // The single key, the DcbId (+0x7C; a player's 10000 + slot, entity_dcb_id) the
+            // engage's relations read [orig: AI_HandleEvent_HelicopterCombatD - @0x4677C9,
+            //  @0x4677DA, @0x467899, @0x4678AA].
+            cand.net_id = entity_dcb_id(world, *c);
             // The engage keys its jitter on the target's SM brain pointer
             // (entity+0x64); a person's body carries none [orig:
             // AI_HandleEvent_HelicopterCombatD `cmp [ebx+64h],ebp` @0x4677EA].
@@ -232,10 +235,10 @@ bool AiSystem::acquire_target_from(AiEntity &e, const std::vector<AiCandidate> &
         bool team_ok = (c.team != 0 || see_all) && (c.team != e.team || see_all);
         if (!team_ok) continue;
 
-        int32_t bearing = bearing_bam(c.pos[1] - e.pos[1], c.pos[0] - e.pos[0]);
+        int32_t bearing = bearing_bam(c.pos[1] - e.self->position.y.q16, c.pos[0] - e.self->position.x.q16);
         int angle_diff = static_cast<int>(static_cast<uint32_t>(bearing - e.heading) >> 24);
         if (angle_diff >= 0x80) angle_diff = 256 - angle_diff;    // fold to [0,128]
-        int dist = dist3d_units(c.pos, e.pos);
+        int dist = dist3d_units(c.pos, e.self->position.words().data());
 
         // [orig: 0x46722e..0x467291] FOV/range gate FIRST. A candidate outside both gates jumps to
         // the next-candidate skip @0x467097 and never reaches the priority bypass (0x467350) or the best-of
@@ -265,16 +268,20 @@ bool AiSystem::acquire_target_from(AiEntity &e, const std::vector<AiCandidate> &
 }
 
 // The acquisition/fire relation quads, APPLIED (D-AI-3 closed 2026-07-16). Keys:
-// group = commandGroup (entity+0x11C -> Entity::group_id), single = the authored SSN
-// (entity+0x7C DcbId -> Entity::net_id). Witnessed order + arg orientation from the raw
-// call block: sees {GG[selfG][tgtG], SG[selfSsn][tgtG], GS[tgtSsn][selfG] (transposed),
-// SS[selfSsn][tgtSsn]} then targeted the same; setter->matrix identity pinned via the
-// g_SeesMatrix*/g_TargetedMatrix* bases. [orig: @0x4677b3..0x4678b2 / @0x4b0a6f..0x4b0ae2;
-// world-wac-ai-re §16.4/§17.2; matrix map docs/mission/bms-event-runtime-re.md §3a]
+// group = commandGroup (entity+0x11C -> Entity::group_id), single = the DcbId (entity+0x7C:
+// a record's SSN, a player body's 10000 + slot, entity_dcb_id). Witnessed order + arg
+// orientation from the raw call block: sees {GG[selfG][tgtG], SG[selfSsn][tgtG],
+// GS[tgtSsn][selfG] (transposed), SS[selfSsn][tgtSsn]} then targeted the same;
+// setter->matrix identity pinned via the g_SeesMatrix*/g_TargetedMatrix* bases.
+// [orig: @0x4677b3..0x4678b2 (self +0x7C @0x4677BF / @0x4677DD / @0x46788F / @0x4678AD,
+//  target @0x4677C9 / @0x4677DA / @0x467899 / @0x4678AA) / @0x4b0a6f..0x4b0ae2 (self
+//  @0x4B0A7B / @0x4B0A99 / @0x4B0ABF / @0x4B0ADD, target @0x4B0A85 / @0x4B0A96 /
+//  @0x4B0AC9 / @0x4B0ADA); world-wac-ai-re §16.4/§17.2; matrix map
+//  docs/mission/bms-event-runtime-re.md §3a]
 void AiSystem::apply_engage_relations(World &world, const Entity &self, const Entity &target) {
     TriggerRelations &rel = world.script.relations;
-    const int sg = self.group_id, ss = self.net_id;
-    const int tg = target.group_id, ts = target.net_id;
+    const int sg = self.group_id, ss = entity_dcb_id(world, self);
+    const int tg = target.group_id, ts = entity_dcb_id(world, target);
     rel.set_group_group(TriggerRelations::kSees, sg, tg);       // [orig: @0x452a40 GG]
     rel.set_single_group(TriggerRelations::kSees, ss, tg);      // [orig: @0x452ad0 SG]
     rel.set_group_single(TriggerRelations::kSees, sg, ts);      // [orig: @0x452b60 GS]
@@ -346,15 +353,15 @@ void AiSystem::clear_entity_references(World &world, EntityHandle removed) {
 // [orig: Entity_GetAttachmentWorldPosition @0x4b2670: the raw copy
 //  @0x4b2767..0x4b278e when index 0 / no graphicModel / no table]
 void AiSystem::weapon_fire_origin(const AiEntity &e, int32_t out[3]) {
-    out[0] = e.pos[0];
-    out[1] = e.pos[1];
-    out[2] = e.pos[2];
+    out[0] = e.self->position.x.q16;
+    out[1] = e.self->position.y.q16;
+    out[2] = e.self->position.z.q16;
 }
 
 void AiSystem::weapon_fire_origin(const Entity &e, int32_t out[3]) {
-    out[0] = static_cast<int32_t>(e.position.x * io::kFp16One);
-    out[1] = static_cast<int32_t>(e.position.y * io::kFp16One);
-    out[2] = static_cast<int32_t>(e.position.z * io::kFp16One);
+    out[0] = e.position.x.q16;
+    out[1] = e.position.y.q16;
+    out[2] = e.position.z.q16;
 }
 
 // The live-pose seam shared by both World& forms: the world's native muzzle
@@ -391,9 +398,9 @@ bool AiSystem::usegun_gun_point(World &world, const Entity &gunner, int32_t out[
         out[3] = parent_body->heading; out[4] = parent_body->pitch; out[5] = parent_body->roll;
     } else {
         weapon_fire_origin(*parent, out);
-        out[3] = bam_heading_from_mission_yaw_deg(parent->yaw);
-        out[4] = bam_from_degrees_wrapped(parent->pitch);
-        out[5] = bam_from_degrees_wrapped(parent->roll);
+        out[3] = parent->heading;
+        out[4] = parent->pitch_bam;
+        out[5] = parent->roll_bam;
     }
     return true;
 }
@@ -434,9 +441,9 @@ int AiSystem::weapon_fire_position(World &world, const AiEntity &e, int32_t out[
         }
         // Any other person: position plus CameraOffset, no phase and no
         // jitter, quality 1 [orig: @0x43B68F..0x43B6B6].
-        out[0] = io::bam_add(e.pos[0], e.inf.eye_offset_x);
-        out[1] = io::bam_add(e.pos[1], e.inf.eye_offset_y);
-        out[2] = io::bam_add(e.pos[2], e.inf.eye_offset_z);
+        out[0] = io::bam_add(e.self->position.x.q16, e.inf.eye_offset_x);
+        out[1] = io::bam_add(e.self->position.y.q16, e.inf.eye_offset_y);
+        out[2] = io::bam_add(e.self->position.z.q16, e.inf.eye_offset_z);
         return 1;
     }
     // No graphic model: the raw position, quality 3 [orig: @0x43B6B7..0x43B6EC].
@@ -461,14 +468,15 @@ int AiSystem::weapon_fire_position(World &world, const AiEntity &e, int32_t out[
 void AiSystem::weapon_aim_origin(World &world, const Entity &e, int32_t out[3]) const {
     // The person target point is its CameraOffset, with a time/identity
     // phase selecting the height and small XY jitter. The assembly loads
-    // tick's VALUE, not its address. [orig: @0x43B4C2..0x43B523]
+    // tick's VALUE, not its address; the identity is the DcbId (+0x7C,
+    // entity_dcb_id), a player's 10000 + slot. [orig: @0x43B4C2..0x43B523]
     if (e.has_item_def && e.item_type == 3) {
         const AiEntity *body = for_handle(e.handle);
         if (body) weapon_fire_origin(*body, out); else weapon_fire_origin(e, out);
         const int32_t eye[3] = {body ? body->inf.eye_offset_x : e.eye_offset_x,
                                 body ? body->inf.eye_offset_y : e.eye_offset_y,
                                 body ? body->inf.eye_offset_z : e.eye_offset_z};
-        const uint32_t phase = world.logic_tick + 36u * uint32_t(e.net_id);
+        const uint32_t phase = world.logic_tick + 36u * uint32_t(entity_dcb_id(world, e));
         const bool low = (phase & 0x80u) != 0;
         const int32_t jitter = int32_t(phase & 0x60u);
         out[0] = io::bam_add(out[0], io::bam_add(io::bam_sar(eye[0], low ? 2 : 1),
@@ -561,6 +569,25 @@ bool AiSystem::line_of_sight_clear_impl(World &world, const int32_t a[3],
     return !los_terrain_blocked(*terrain, a, b);
 }
 
+// See the ai.h declaration.
+bool AiSystem::line_of_sight_clear_to_person(World &world, const int32_t a[3],
+                                             const int32_t b[3], EntityHandle from,
+                                             EntityHandle person_seat,
+                                             uint32_t person_flags) const {
+    if (terrain == nullptr || !terrain->valid()) return true;
+    if (collision != nullptr) {
+        const CollisionWorld::RayDebugScope ray_scope(collision,
+                                                      CollisionWorld::RayDebugCategory::kAiLos);
+        CollisionWorld::LosWireEndpoint person;
+        person.indoors = (person_flags & kEntityFlagIndoors) != 0;
+        person.parent = person_seat;
+        return collision->raycast_clear_to_person(world, a, b, from,
+                                                  los_walker_parent(world.registry.get(from)),
+                                                  person);
+    }
+    return !los_terrain_blocked(*terrain, a, b);
+}
+
 // The retail argument is unused: the radius is always 100 world units.
 // Only pool 1 is visited, and a qualifying ally makes the caller's controller
 // red even if that ally has no brain. [orig: Entity_AlertNearbyAllies @0x4654B0]
@@ -572,9 +599,9 @@ void AiSystem::alert_nearby_allies(World &world, AiEntity &e, int32_t /*radius*/
         if (ally == nullptr || ally->item_id == 0 || h == e.handle ||
                 ally->team != e.team || ally->health <= 0 ||
                 ((ally->flags | ally->engine_flags) & (2u | kEntityFlagPlayer)) != 0) continue;
-        const double dx = io::bam_sub(int32_t(ally->position.x * io::kFp16One), e.pos[0]);
-        const double dy = io::bam_sub(int32_t(ally->position.y * io::kFp16One), e.pos[1]);
-        const double dz = io::bam_sub(int32_t(ally->position.z * io::kFp16One), e.pos[2]);
+        const double dx = io::bam_sub(ally->position.x.q16, e.self->position.x.q16);
+        const double dy = io::bam_sub(ally->position.y.q16, e.self->position.y.q16);
+        const double dz = io::bam_sub(ally->position.z.q16, e.self->position.z.q16);
         if (std::sqrt(dx * dx + dy * dy + dz * dz) >= 6553601.0) continue;
         e.slot.bytes()[AiSlot::kAlertByte] = 2;
         if (AiEntity *brain = for_handle(h)) brain->brain.f[AiBrain::kAlert] = 2;
@@ -592,6 +619,12 @@ bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
                              int32_t yaw_bam, int32_t pitch_bam, int32_t ammo_index,
                              int32_t fire_mode, uint8_t fire_adm) {
     if (world.tables.ammo.by_index(ammo_index) == nullptr) return false;
+    // The send refuses every shot under a cease fire at its head: no round, no ring
+    // record. The slot's fire action ran all the same (it ignores the send's return), so
+    // the caller's fire legs stand. [orig: Entity_FireWeaponAndSendPacket @0x42BD80 -
+    //  g_InCeaseFire @0x42BDB3, the exit @0x42BDC5 -> @0x42C07A; WeaponAction_Fire's call
+    //  @0x542C5E]
+    if (world.rules.cease_fire) return true;
 
     RoundEvent ev;
     ev.shooter_handle = e.handle.packed;
@@ -608,9 +641,7 @@ bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
     RoundSpawnParams rp;
     rp.owner = e.handle;
     rp.shooter_handle = e.handle.packed;
-    rp.origin.x = static_cast<float>(origin[0]) / io::kFp16One;
-    rp.origin.y = static_cast<float>(origin[1]) / io::kFp16One;
-    rp.origin.z = static_cast<float>(origin[2]) / io::kFp16One;
+    rp.origin.set_q16({origin[0], origin[1], origin[2]}); // the muzzle words (D-NET-507)
     rp.dir_yaw_bam = yaw_bam;
     rp.dir_pitch_bam = pitch_bam;
     rp.ammo_index = ammo_index;
@@ -678,14 +709,16 @@ bool AiSystem::weapon_target_metrics(World &world, AiEntity &e, const Entity &ta
 		return false;
 	// A Player target is out while the local cheat word's 0x800 bit is up
 	// (World::rules.ai_rules_skip_local_player) and once the round has
-	// ended [orig: `test dword_24C1930,800h` @0x53A46E..0x53A478;
-	// g_SpawnSuccessGate @0x53A482..0x53A489].
+	// ended [orig: `test g_DebugCheatFlags,800h` @0x53A46E..0x53A478;
+	// g_RoundOver @0x53A482..0x53A489].
 	if ((target_flags & kEntityFlagPlayer) != 0 &&
 			(world.rules.ai_rules_skip_local_player || world.match.outcome().ended))
 		return false;
+    // The exclusive SSN word matches the target's DcbId (entity_dcb_id).
     const Entity *shooter = world.registry.get(e.handle);
-    if (shooter != nullptr && !shooter->target_selectors.allows(target.net_id, target.group_id))
-        return false; // [orig: Entity_ValidateWeaponTarget @0x53A400]
+    if (shooter != nullptr &&
+            !shooter->target_selectors.allows(entity_dcb_id(world, target), target.group_id))
+        return false; // [orig: Entity_ValidateWeaponTarget @0x53A400 - +0x7C @0x53A4C0]
 	int32_t aim[3];
 	weapon_aim_origin(world, target, aim);
 	if (aim_offset != 0) {
@@ -737,9 +770,9 @@ bool AiSystem::solve_weapon_fire_transform(World &world, AiEntity &e, const Enti
     // AIEntity_ProcessWeaponFire @0x472F1D..0x472F4B, @0x473821]; an unseeded
     // caller gets the common copy.
     if (!seeded) {
-        out[0] = e.pos[0];
-        out[1] = e.pos[1];
-        out[2] = e.pos[2];
+        out[0] = e.self->position.x.q16;
+        out[1] = e.self->position.y.q16;
+        out[2] = e.self->position.z.q16;
         out[3] = e.heading;
         out[4] = e.pitch;
         out[5] = e.roll;
@@ -893,11 +926,16 @@ void AiSystem::engage_target(World &world, AiEntity &e, const AiTarget &t, bool 
 	const int32_t self_rm = static_cast<int32_t>(static_cast<int16_t>(e.relmat_id)); // movsx entity+284
     const int32_t tgt_rm = static_cast<int32_t>(static_cast<int16_t>(t.relmat_id));  // movsx target+284
 
+    // The singles are DcbIds: the self's (body_dcb_id) and the target's, as the candidate
+    // fill read it (entity_dcb_id) [orig: AI_HandleEvent_HelicopterCombatD @0x467730 -
+    //  self @0x4677BF / @0x4677DD / @0x46788F / @0x4678AD, target @0x4677C9 / @0x4677DA /
+    //  @0x467899 / @0x4678AA].
+    const int32_t self_dcb_id = body_dcb_id(world, e, world.registry.get(e.handle));
     // [orig: 0x4677b3..0x4677e2] the sees quad before the controller branch.
     rel_ops.push_back({kRelEventSpecial, self_rm, tgt_rm});
-    rel_ops.push_back({kRelSharedMem, e.net_id, tgt_rm});
+    rel_ops.push_back({kRelSharedMem, self_dcb_id, tgt_rm});
     rel_ops.push_back({kRelProximity, self_rm, t.net_id});
-    rel_ops.push_back({kRelEnemy, e.net_id, t.net_id});
+    rel_ops.push_back({kRelEnemy, self_dcb_id, t.net_id});
     {
         const Entity *se = world.registry.get(e.handle);
         const Entity *te = t.handle.valid() ? world.registry.get(t.handle) : nullptr;
@@ -923,9 +961,9 @@ void AiSystem::engage_target(World &world, AiEntity &e, const AiTarget &t, bool 
 
 	// [orig: 0x467883..0x4678b2] the targeted quad after pending = 17.
 	rel_ops.push_back({kRelAllied, self_rm, tgt_rm});
-    rel_ops.push_back({kRel452B30, e.net_id, tgt_rm});
+    rel_ops.push_back({kRel452B30, self_dcb_id, tgt_rm});
     rel_ops.push_back({kRelDamaged, self_rm, t.net_id});
-    rel_ops.push_back({kRelSpotted, e.net_id, t.net_id});
+    rel_ops.push_back({kRelSpotted, self_dcb_id, t.net_id});
 }
 
 // [orig: AI_HandleCommand @0x465770] Queued ChangeAI dispatcher. Alert, authored

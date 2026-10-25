@@ -154,6 +154,44 @@ int main() {
         CHECK(!s.invert_y); // the step never touches the invert
     }
 
+    // --- the scopescale row (dispatch 49, the troop class callback): an argument sets the
+    //     word, else +-16 by the sign, then 512 and above clamp to 511, 128 and below to 128
+    //     (D-NET-NEW-LI-38) [orig: Input_HandleActionBinding_0 @0x4E0420 - case 49
+    //     @0x4E0574..0x4E05AE] ---
+    {
+        PlayerLookSettings s; // the word's static 0
+        CHECK(player_look_scope_scale(s, 0, false) == 0x80 && s.scope_scale == 0x80); // 16 clamps up
+        CHECK(player_look_scope_scale(s, 0, false) == 0x90);
+        CHECK(player_look_scope_scale(s, 0, true) == 0x80);
+        CHECK(player_look_scope_scale(s, 0, true) == 0x80);  // 112 clamps up
+        CHECK(player_look_scope_scale(s, 300, true) == 300); // a typed value, the sign unread
+        s.scope_scale = 0x1F0;
+        CHECK(player_look_scope_scale(s, 0, false) == 0x1FF); // 0x200 itself clamps
+        CHECK(player_look_scope_scale(s, 1000, false) == 0x1FF);
+        CHECK(player_look_scope_scale(s, 0x81, false) == 0x81); // 129 is kept
+        CHECK(s.sensitivity == kMouseSensitivityDefault);    // the mouse word untouched
+    }
+
+    // --- a pass-through screen's close (DEATH, STAT): the re-centre writes the
+    //     cursor's client offset from (0x140, 0xF0) into the axis words and the
+    //     close's input frame reads it whole, one update's axis input with no
+    //     4x share: 200 px right and 100 px above the centre at setting 128 turn
+    //     (200 * (128 << 11) + 0x8000) >> 16 = 800 units right, 4.39453125 deg,
+    //     and look up. [orig: Input_PumpAndCenterCursor @0x7616D0 (@0x761718..
+    //     0x76172A); UI_ProcessMenuScreenFrame @0x54E650 (@0x54E659, @0x54E686, @0x54E695)]
+    {
+        int32_t axis[2] = {};
+        pass_through_close_axis(520, 140, axis);
+        CHECK(axis[0] == 200 && axis[1] == -100);
+        PlayerLookSettings s;
+        int32_t yaw = 0, pitch = 0;
+        player_look_apply(yaw, pitch, s, axis[0], axis[1], 0, false);
+        CHECK(yaw == -(800 << 16));
+        CHECK(pitch > 0);
+        pass_through_close_axis(kCursorCentreX, kCursorCentreY, axis);
+        CHECK(axis[0] == 0 && axis[1] == 0); // a cursor left at the centre owes nothing
+    }
+
     if (failures == 0) std::printf("player_look_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

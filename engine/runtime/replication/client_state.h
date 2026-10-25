@@ -317,6 +317,12 @@ struct ClientEntityState {
 	// [orig: NapiNPClientMsg_0x00C @0x42E867..0x42E8EA; NapiNPClientMsg_0x00D
 	//  @0x433320..0x43334A; NapiNPClientMsg_FullEntitySpawn @0x433D37..0x433D61]
 	std::string display_name;
+	// The AI slot's +156 profile name a 0x0D AI trailer carries (an AIData def's
+	// slot, which the record allocates); the class init at the mission start
+	// loads the brain's profile by it. A 0x18 leaves the zeroed slot's empty
+	// name. [orig: NapiNPClientMsg_0x00D @0x433363..0x43337C;
+	//  Entity_InitVehicleAIFromDef @0x46879E]
+	std::string spawn_ai_name;
 	uint16_t net_id = 0xFFFF;
 	uint8_t spawn_tag = 0;
 	int32_t x = 0;                                // world i32 16.16 (decompressed
@@ -338,14 +344,22 @@ struct ClientEntityState {
 	int32_t roll_bam = 0;
 	// Normalized raw bytes retained from the class-specific compact organic record.
 	// carrier_handle is PlayerCompactRecord::carrier_handle for players and
-	// InfantryCompactRecord::vehicle_slot_handle for infantry. For players it can
-	// also name a standing-on ground entity; mount_bone distinguishes an actual
-	// seat mount (retail detaches player bone 0). No new wire fields are introduced.
+	// InfantryCompactRecord::vehicle_slot_handle for infantry, kept for a seat
+	// (mount_bone != 0) alone: a bone-0 carrier is the standing-on ground entity
+	// (D-NET-224), which the compact apply lands in resolved_ground. No new wire
+	// fields are introduced.
 	uint16_t carrier_handle = 0xFFFF;
+	// A player record's carrier word as its read takes it, whatever the bone: the
+	// local player's fold resolves it into L's ground link (JoinerRole::fold_local_record).
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the word @0x4C0E05..0x4C0E08,
+	//  its resolve @0x4C0F9C..0x4C106D (ebp, 0 @0x4C0FAB for 0xFFFF)]
+	uint16_t record_carrier = 0xFFFF;
 	uint8_t mount_bone = 0;                       // player vehicle_bone / infantry seat_bone_idx
 	uint8_t seat_type = 0;                        // player-only seat attribute; 0 for infantry
-	uint8_t pitch_byte = 0;                       // class-specific witnessed compact byte
-	uint8_t aim_yaw_byte = 0;                     // infantry-only entity+720 byte
+	// The class-specific compact byte: a player record's pitch (entity+0x14), an infantry
+	// record's aim heading (entity+0x2EC).
+	uint8_t pitch_byte = 0;
+	uint8_t aim_pitch_byte = 0;                   // infantry-only: the aim pitch (entity+0x2D0)
 	uint8_t anim_state_id = 0;                    // player anim_state_id / infantry anim_byte
 	uint8_t anim_channel_ratio = 0;               // player-only; 0 for infantry
 	// A body-anim state that was applied and then OVERWRITTEN by a later record
@@ -381,6 +395,11 @@ struct ClientEntityState {
 	// Entity_UpdateInfantryAI @0x4b9c51..0x4b9d3e].
 	int16_t net_death_anim = 0;
 	bool net_health_zero = false;
+	// +0x1AC, the death edge's stamp of the tick it ran on (the replica clock, the walk's
+	// key); a record's slot memset leaves 0. The heat query's 16-tick window over a dead body
+	// reads it (world::World::WirePerson::death_age). [orig: Entity_UpdateInfantryPlayerBody
+	//  @0x4B4CC1 / @0x4B4CCC; Entity_UpdateInfantryAI @0x4B9D24 / @0x4B9D2F]
+	uint32_t death_tick = 0;
 	// The corpse timer (moveTimer) the death edge seeds from the def's
 	// deathtime and the dead tail counts down; at 186 the def's decay effect
 	// spawns, and an org1 corpse is destroyed at 0 on a session client
@@ -434,8 +453,15 @@ struct ClientEntityState {
 	// separate from the live compact state_flags byte: the 0x0D/0x10 dword is
 	// entity+36 in full, and truncating it loses Building/NoShadow/etc.
 	uint32_t spawn_entity_flags = 0;
+	// A 0x59 device copied from a round of this client's own pool takes that
+	// round's +0x114 noage bit (Entity::ammo_word_noage) [orig:
+	// Entity_SpawnOrUpdateFromSlotPacket @0x546871].
+	bool spawn_ammo_word_noage = false;
 	uint32_t spawn_section_mask = 0;
 	uint16_t spawn_ammo_count = 0;
+	// entity+0x280, a 2044's location index from the 0x20 record's 0x10 field
+	// [orig: NapiNPClientMsg_0x020 @0x425C00 - the store @0x425D7E].
+	int16_t spawn_location_index = 0;
 	uint8_t spawn_ref_num = 0;
 	uint8_t spawn_sub_type = 0;
 	// The full 0x18 repair carries these fields in addition to pool-load data.
@@ -488,6 +514,13 @@ struct ClientEntityState {
 	// stance-indexed ammo impulse after calculating that shot's spread; the
 	// client body pass decays it later in the same frame.
 	int32_t recoil_pitch = 0;
+	// A remote player's torso roll (entity+0x2DC), which its body update chases
+	// toward its Roll word every tick (ClientReplicaPipeline::tick_arms_dip), and its
+	// eye (CameraOffset, entity+0x6C..+0x74), which the update's non-local arm
+	// restamps from the clip's capsule (the replica mover). The death screen's first
+	// person composes a spectated row from both with its lean and recoil (D-NET-330).
+	int32_t torso_roll = 0;
+	int32_t eye_offset[3] = {0, 0, 0};
 	// Client-owned +0x322/+0x324 gun channel, advanced by the joiner tick.
 	int16_t emplaced_gun_yaw_word = 0;
 	int16_t emplaced_gun_pitch_word = 0;
@@ -504,10 +537,12 @@ struct ClientEntityState {
 	// Pool-1 0x0D entity+368 relationship. The spawn positions are absolute;
 	// ClientReplicaPipeline captures this row's rigid carrier-local pose after the
 	// whole batch is present, then recomposes it from the followed carrier's live
-	// pose each tick. This is the retail path for NoNetworkCallback addeweap
-	// children; the followed carrier is target_handle (groundEntity) when set,
-	// else this parent (non-pool-0 only, D-NET-195). The parent_local_* cluster
-	// below stores the captured pose for whichever carrier is followed.
+	// pose each tick, for a NoNetworkCallback row whose class update no world runs
+	// (world_class_update None below: a row a joiner's world does not hold; with
+	// one, the world runs the ewep or genx update, D-NET-690). The followed carrier
+	// is target_handle (groundEntity) when set, else this parent (non-pool-0 only,
+	// D-NET-195). The parent_local_* cluster below stores the captured pose for
+	// whichever carrier is followed.
 	uint16_t parent_handle = 0xFFFF;
 	int32_t parent_local_x = 0;
 	int32_t parent_local_y = 0;
@@ -519,6 +554,24 @@ struct ClientEntityState {
 	int32_t parent_local_pitch_bam = 0;
 	int32_t parent_local_roll_bam = 0;
 	bool parent_pose_valid = false;
+	// The class update a joiner's world runs for this row (D-NET-690). A row
+	// no compact writes takes the def's move function as its update at its
+	// 0x0D, and the pool-1 update calls it every frame on a joiner too: the
+	// ewep update composes an addeweap child from its carrier's posed model
+	// at the anchor its subType names (and owns the dead-carrier hide), the
+	// genx update rides the ground entity and falls when it dies. Where the
+	// joiner's world holds such a row it runs that update itself, so the
+	// recompose above skips the row (an ewep row keeps the update's
+	// stale-carrier sweep) and JoinerRole::mirror_mission_entities seeds the
+	// world row from the 0x0D once per spawn, then reads the world's pose
+	// back. Not a wire field.
+	// [orig: NapiNPClientMsg_0x00D def+0x158 -> +0x1C4 @0x43331A;
+	//  Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53 (no role gate); the ewep row
+	//  @0x82ABE0 -> Entity_UpdateTransformAndTurret @0x440CA0, the genx row
+	//  @0x82AC10 -> Entity_UpdateParentTransform @0x4A88B0]
+	enum class WorldClassUpdate : uint8_t { None, Ewep, Genx };
+	WorldClassUpdate world_class_update = WorldClassUpdate::None;
+	uint32_t world_seeded_spawn_revision = 0;
 	// The 0x0D record's separate TARGET relationship: the STRUCTURAL carrier a
 	// pool-1 mounted child rides (retail groundEntity, entity+40) — an occupied
 	// boat gun's target is the DRIVING hull while parent_handle above carries
@@ -569,7 +622,7 @@ struct ClientEntityState {
 	// moveTimer (net_corpse_timer, +0x148) [orig: org1 @0x4BBF8F, org2
 	// @0x4B70D9]; a replica row runs no selection of its own.
 	uint8_t hit_type = 0;
-	// bodyRoll (+0x94), the hit-time tilt toward the shot
+	// savedLiveRoll (+0x94), the hit-time tilt toward the shot
 	// [orig: OrganicClass_HandleEvent @0x407564 / @0x407575].
 	int32_t rm_body_roll = 0;
 	// Entity_OnDamageReceived's tail: wasHit (+0x36B), damageTimer (+0x2F8)
@@ -581,17 +634,17 @@ struct ClientEntityState {
 	// spawnPhase, the think cadence the plyr callback re-arms
 	// [orig: Entity_HandleDamageAndTriggerZones @0x407B5E / @0x407C71].
 	int32_t spawn_phase = 0;
-	// The pure-client stale-carrier sweep's run length: consecutive mover
-	// ticks this no-callback child's persistent carrier stayed unresolvable.
-	// At 128 the sweep queues C2S 0x0F for the carrier AND the child, then
-	// locally destroys the child pending the authority re-spawn — retail keys
-	// the same 128-tick cadence on `tick & 0x7F == 127` with the carrier's
-	// staleness marker; the per-child run is this transport layer's
-	// structural translation of that pair (our unresolvable-carrier state IS
-	// the staleness the marker tracks).
-	// [orig: Entity_UpdateTransformAndTurret @0x440ca0, the sweep
-	//  @0x440d41..0x440e2f]
-	int32_t carrier_missing_ticks = 0;
+	// The spawn reset's words a person's later update reads: +0x2D4 (the Yaw it stored) and
+	// the spawn backup +0x318 / +0x31C / +0x320 (the Position it stored). A joiner's spawns
+	// (0x0C, 0x18) run no reset, so they hold the spawn's clear until a record's dead -> alive
+	// edge runs it over the snapped pose (land_compact_pose). The ewep row's update over a
+	// person reads them (ClientReplicaPipeline::set_person_ewep_mover).
+	// [orig: Entity_ResetToSpawnState @0x4B9610 - the backup @0x4B9632..0x4B9644, +0x2D4
+	//  @0x4B96AA; its record callers NetPacket_SerializePlayerState @0x4C113C and
+	//  NetPacket_SerializeInfantryEntityState @0x4C05EC; NapiNPClientMsg_0x00C @0x42E730 and
+	//  NapiNPClientMsg_FullEntitySpawn @0x433780 call none]
+	int32_t reset_yaw = 0;
+	int32_t spawn_backup[3] = {};
 	// Replica-row vertical velocity — the caller-owned gravity channel of the
 	// org movers, integrated before the contact resolve and zeroed on landing
 	// [orig: org2 vel_z -= 208 then pos += vel @0x4B7CE0..0x4B7CEF; org1
@@ -613,6 +666,15 @@ struct ClientEntityState {
 	// [orig: Entity_RaycastGroundHeightAndObject @0x414370]. The deck-ride
 	// consumes it: the row follows the hit entity's per-tick pose delta.
 	uint16_t resolved_ground = 0xFFFF;
+	// A player row's ride link (retail +0x170 on a person) and its hold
+	// (+0x174): the same-team occupant of the entity it stands on, or of that
+	// entity's own ground entity, refreshed by the body pass every tick, held
+	// +4 per finding tick up to 0xF0 and spent one per missing tick before
+	// it clears. A guided missile's lock note reads it on its target (D-NET-196).
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B5EA9..0x4B5F2C;
+	//  Entity_UpdateGuidedMissile_0 @0x446060 - @0x4465DB..0x4465F5]
+	uint16_t ride_occupant = 0xFFFF;
+	int32_t ride_link_hold = 0;
 	// The row's persistent retail entity-Flags mirror — the caller-owned word
 	// the resolver's latch sites and the mover flag channels read and write on
 	// a registry entity (InAir 0x2000, Drowning/float 0x8000, LadderContact
@@ -650,6 +712,11 @@ struct ClientEntityState {
 	// vector at staging time, exactly like retail [orig: entity+0x234/238/23C,
 	// step re-store @0x4b9b2e (org1) / @0x4B459F (org2) / watercraft @0x48D480].
 	int32_t net_smooth_target[3] = {};
+	// The last record's world sample as its read staged it, before any chase reuses
+	// the staged words: the joiner's own record stages its body L from this, and the
+	// mount edge snaps L to it (JoinerRole::fold_local_record).
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the stage @0x4C0FE4..0x4C0FF0]
+	int32_t record_sample[3] = {};
 	// Recaptured from the live pose at the top of every mover tick
 	// [orig: entity+0x80/84/88 recapture @0x4b9a5f and each family head].
 	int32_t net_saved_live_pose[3] = {};
@@ -664,6 +731,20 @@ struct ClientEntityState {
 	// Chase bookkeeping [orig: entity+0x27C / entity+0x27E].
 	int16_t net_interp_progress = 0;
 	int16_t net_interp_steps = 0;
+	// This tick's starved exit of an organic body's update: its chase found the progress
+	// at the 512 cap ahead of the tick's count. The row's visit latches it for the legs that
+	// run after it (ClientReplicaPipeline::body_update_ended).
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `cmp ax, 200h; jge`
+	//  @0x4B4431..0x4B4435; Entity_UpdateInfantryAI @0x4B9910 - @0x4B9C09..0x4B9C0D]
+	bool rm_starved = false;
+	// This tick's visit of an org1 row reached its look: a live seated row's seat branch
+	// (rm_look_seated), or a free-standing row's body chase. The look runs after the tick's gun
+	// channels and the recoil (ClientReplicaPipeline::tick_org1_looks).
+	// [orig: Entity_UpdateInfantryAI @0x4B9910 - the seat test @0x4B9960..0x4B9985, the
+	//  branch @0x4BE8F7, the seated look @0x4BEF57..0x4BEF97, the free-standing look
+	//  @0x4BEB18..0x4BEBE7]
+	bool rm_look_due = false;
+	bool rm_look_seated = false;
 	// Vehicle speed register mirror (retail vehicleData[177]) — the DECOMPRESSED
 	// 16.16 wire value [orig: the mode-2 read decompresses weaponAimY before the
 	// store]. Gates the fast-vehicle snap threshold (>= 293 ~ 0.28 m/s ->
@@ -727,11 +808,23 @@ struct ClientEntityState {
 	int32_t rm_prev_phase = 0;
 	float rm_blend_weight = 1.0f; // += 0.1/tick, or 1/15 when the target state
 	float rm_blend_step = 0.0f;   // carries flag 0x400 [orig: @0x410640]
+	// The served ring entries of the playing target and the outgoing half
+	// (world::AnimVariantRings, the heads every body of the .adm shares, the
+	// client's own World body included): a re-init serves the played state's
+	// head, an unarmed loop wrap serves it again and fades the next entry in
+	// over eight ticks [orig: AnimMap_UpdateEntity @0x40B737..0x40B778;
+	// AnimMap_AdvanceToNextAnim @0x40BDF0].
+	int32_t rm_variant = 0;
+	int32_t rm_prev_variant = 0;
 	// org2 leg-chain state: the LEGS chase the wire yaw (quarter-step clamp
 	// ±0x3000000, twist ±0x30000000, staggered idle re-plant windows) and the
 	// body heading is their midpoint — the root delta rotates by THIS, not the
-	// view yaw [orig: @0x4b4945..0x4b4ac1; midpoint @0x4b4ab5]. org1 rows
-	// rotate by heading_bam (retail pins body == render heading for org1).
+	// view yaw [orig: @0x4b4945..0x4b4ac1; midpoint @0x4b4ab5]. An org1 row's
+	// body heading (+0x8C) is its own: the body chase steps it and the Yaw
+	// together, and the root delta rotates by it [orig: Entity_UpdateInfantryAI
+	// @0x4B9910 - the chase @0x4BE8FD..0x4BE931, the rotation @0x4BF001]. Its legs are its
+	// leg chase's (row_org1_legs): rm_leg_yaw[0] / [1] are +0x2D4 / +0x2D8, rm_leg_target[0] /
+	// [1] their re-plant targets +0x2E4 / +0x2E8 [orig: @0x4BE934..0x4BEB12].
 	// The witnessed vertical: dz is REPLACED by the capsule-bottom history
 	// delta while the prev-bottom slot is live; climbs 32..35 and grenade
 	// deaths 176..179 reset the slot every update [orig: AnimMap_UpdateEntity
@@ -744,14 +837,51 @@ struct ClientEntityState {
 	int32_t rm_leg_yaw[2] = {};
 	int32_t rm_leg_target[2] = {};
 	int32_t rm_body_heading = 0;
+	// savedLivePitch (+0x90), the player body's slope conform's pitch word (its Roll
+	// is roll_bam, +0x18): the aim overlay's body and leg chains and the eye's
+	// third turn read both [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 -
+	// the decay @0x4B6DBD, the chase @0x4B6FC1; Entity_BuildBoneTransformMatrices
+	// @0x4B1290 (the body build @0x4B182E)].
+	int32_t rm_body_pitch = 0;
+	// The aim pitch word +0x2D0. A player body's dead in-air tumble aims the pitch at it
+	// (a + b every fourth tick; the pitch chases it every tick); no other leg of the
+	// player body pass writes it. An org1 row's record writes it (its aim pitch byte
+	// << 24), a deck ride adds the carrier's pitch delta, and its look chases the Pitch
+	// toward it [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the store @0x4B6D44,
+	// the read @0x4B6D5B; NetPacket_SerializeInfantryEntityState @0x4C0320 - the store
+	// @0x4C0672; Entity_UpdateInfantryAI @0x4B9910 - the ride's add @0x4BA852].
+	int32_t rm_aim_word = 0;
+	// A player row's pitch lag +0x2E0: its deck ride adds the carrier's turned pitch delta, and a
+	// thirty-second of it steps into the Pitch every pass unless its ground is a crashed vehicle
+	// (world::infantry_org2_pitch_lag_step). A 0x0C spawn clears it with the whole entity.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the ride's add @0x4B5715, the step
+	//  @0x4B57B0..0x4B57E5; NapiNPClientMsg_0x00C @0x42E730 - the memset @0x42E7E9..0x42E7F1]
+	int32_t rm_pitch_lag = 0;
+	// An org1 row's aim heading word +0x2EC: its record writes it (the aim heading byte
+	// << 24), a deck ride adds the carrier's yaw delta, and its look chases the Yaw
+	// toward it. A 0x0C spawn clears it with the whole entity.
+	// [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 - the store @0x4C066C;
+	//  Entity_UpdateInfantryAI @0x4B9910 - the ride's add @0x4BA84C; NapiNPClientMsg_0x00C
+	//  @0x42E730 - the memset @0x42E7E9..0x42E7F1]
+	int32_t rm_aim_heading_word = 0;
+	// Whether a player row's leg words hold retail's stamps: its spawn's class init
+	// (seed_player_init_words), its respawn record's reset or its seated site's. A row none
+	// stamped (no row in play: every row arrives by a 0x0C or a 0x18) takes the stamp at its
+	// first view phase (row_org2_view_phase).
 	bool rm_leg_seeded = false;
+	// Parked by the body walk past the own body's slot: the row's visit, its
+	// selection and its lean ramp wait for the after-self leg
+	// (ClientReplicaPipeline::tick_remote_motion_after_self, D-NET-196).
+	bool rm_parked = false;
 	// --- The secondary (upper-body weapon) AnimMap channel, advanced locally
 	// for every armed player row, as retail's client runs it for every player
 	// body: the wire carries no secondary state. The 16-tick selection with
 	// its locked / emote commit (the hold ladder off the wire ADM index and
 	// Flags byte), the clip-end deferred promotion, the playhead and the blend,
-	// on the replica's variant-0 track (D-NET-196). The S2C 0x2D emote stamps
-	// the target. wpn_state < 0 = unarmed (no root-motion source).
+	// each half on its served ring entry (wpn_variant / wpn_prev_variant, the
+	// heads shared with the primary and every body of the .adm, D-NET-196). The
+	// S2C 0x2D emote stamps the target. wpn_state < 0 = unarmed (no root-motion
+	// source).
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4b5d71..0x4b5ea3 (selection +
 	//  commit); AnimMap_UpdateDualChannels @0x40b8c0 (advance);
 	//  NapiNPClientMsg_HandleEmote @0x427f12..0x427f18 (the stamp)]
@@ -764,6 +894,8 @@ struct ClientEntityState {
 	int32_t wpn_deferred_boundary = -1;
 	float wpn_blend_weight = 1.0f;
 	float wpn_blend_step = 0.0f;
+	int32_t wpn_variant = 0;
+	int32_t wpn_prev_variant = 0;
 	int32_t net_seat_local[3] = {};
 	// The record's carrier-LOCAL heading (BAM32): the player/infantry yaw byte
 	// widened (<< 24), the vehicle euler_z high half (<< 16). Every carried class
@@ -773,6 +905,45 @@ struct ClientEntityState {
 	int32_t net_seat_local_heading_bam = 0;
 	bool net_seat_valid = false;
 };
+
+// An org1 row's class init over its Yaw, which runs after the spawn's Yaw store: the aim heading
+// (+0x2EC), the four leg words (+0x2D4 / +0x2D8 and their re-plant targets +0x2E4 / +0x2E8) take
+// the Yaw; the Pitch, Roll and savedLivePitch (+0x90) are 0. The callers stamp the body heading
+// (+0x8C) and the target (+0x1A8), which the init stamps with the Yaw too.
+// [orig: Entity_InitOrganicAI @0x4BFCC0 (the org1 class row's init @0x81303C) - +0x1A8 @0x4BFD53,
+//  +0x2EC @0x4BFD59, +0x2E4 / +0x2E8 @0x4BFD5F / @0x4BFD65, +0x2D4 / +0x2D8 @0x4BFD6B / @0x4BFD71,
+//  +0x8C @0x4BFD77, Roll @0x4BFD99, Pitch @0x4BFDA2, +0x90 @0x4BFDA5]
+inline void seed_org1_init_words(ClientEntityState &row, int32_t yaw) {
+	row.rm_aim_heading_word = yaw;
+	row.rm_leg_yaw[0] = row.rm_leg_yaw[1] = yaw;
+	row.rm_leg_target[0] = row.rm_leg_target[1] = yaw;
+	row.pitch_bam = 0;
+	row.roll_bam = 0;
+	row.rm_body_pitch = 0;
+}
+
+// A player row's class init over its Yaw, which runs after the spawn's Yaw store: the four leg
+// words (+0x2D4 / +0x2D8 and their re-plant targets +0x2E4 / +0x2E8) and the body heading
+// (+0x8C) take the Yaw; the arms dip (+0x371), the torso roll (+0x2DC), the lean (+0xB0),
+// savedLiveRoll (+0x94), Roll, savedLivePitch (+0x90) and the Pitch are 0. The bone build reads
+// the body heading and the leg words for a player as for any body.
+// [orig: PlayerClass_InitEntity @0x4B1060 (the plyr class row's init @0x813054, def+0x148 by
+//  EntityDef_LookupClassCallbacks @0x407E04) - +0x371 @0x4B117C, +0x2E4 / +0x2E8 @0x4B118E /
+//  @0x4B1194, +0x2D4 / +0x2D8 @0x4B119A / @0x4B11A0, +0x8C @0x4B11AC, +0x2DC @0x4B11B2, +0xB0
+//  @0x4B11B8, +0x94 @0x4B11BE, Roll @0x4B11C4, +0x90 @0x4B11C7, Pitch @0x4B11CD]
+inline void seed_player_init_words(ClientEntityState &row, int32_t yaw) {
+	row.arms_dip_ticks = 0;
+	row.rm_leg_target[0] = row.rm_leg_target[1] = yaw;
+	row.rm_leg_yaw[0] = row.rm_leg_yaw[1] = yaw;
+	row.rm_body_heading = yaw;
+	row.torso_roll = 0;
+	row.lean_angle = 0;
+	row.rm_body_roll = 0;
+	row.roll_bam = 0;
+	row.rm_body_pitch = 0;
+	row.pitch_bam = 0;
+	row.rm_leg_seeded = true;
+}
 
 // The Health a client keeps for a remote player from its compact's
 // health/class byte: the tier midpoint of two rounded products of the def hp
@@ -953,6 +1124,25 @@ struct ClientMinimapState {
 	std::uint64_t revision = 0;
 };
 
+// The first REGULAR overlay slot naming `handle`: the 1160 slots in address
+// order (transient, persistent, special), skipping a free handle and a special
+// (flags 0x40) slot; null when none. The zone HUD reads the found slot's source
+// byte (+4), whose 0xC0 bits are the host's capture bits for this recipient.
+// [orig: MapOverlay_FindRegularSlotByEntity @0x5BE870 -- the 0x488-slot walk from
+//  word_28E5620, `cmp cx, 0FFFFh` @0x5BE883, `test byte [eax+3], 40h` @0x5BE88A;
+//  inlined twice in HUD_DrawZoneStatusPanel @0x5A2517 / @0x5A269B]
+inline const ClientMinimapOverlaySlot *find_regular_overlay_slot(
+		const ClientMinimapState &map, uint16_t handle) {
+	const auto search = [handle](const auto &bank) -> const ClientMinimapOverlaySlot * {
+		for (const ClientMinimapOverlaySlot &slot : bank)
+			if (slot.active && slot.handle == handle && (slot.flags & 0x40u) == 0) return &slot;
+		return nullptr;
+	};
+	if (const ClientMinimapOverlaySlot *slot = search(map.transient)) return slot;
+	if (const ClientMinimapOverlaySlot *slot = search(map.persistent)) return slot;
+	return search(map.special);
+}
+
 // The decoded world the client holds after pumping the loopback. Positions are
 // post-compression (lossy, ~|v|>>11 quantization) — exactly what the original
 // client renders for its decoded peers. Callers must NOT "correct" them toward the
@@ -1062,7 +1252,49 @@ struct ClientNetQuality {
 	std::uint32_t ping_ms = 0;
 	std::uint32_t average_ping_ms = 0;
 	std::uint8_t level = 0;
+	// The host's quality metric (CNetQuality +0x0C): the last S2C 0x79 byte, 0
+	// for an empty body; a client's quality update never recomputes it and takes
+	// the larger of it and its own receive metric for the level. Zero at the
+	// mission start and the connection start.
+	// [orig: NapiNPClientMsg_NetworkQuality @0x429B00 - the read @0x429B15, the
+	//  empty-body zero @0x429B11, the store @0x429B32; CNetQuality_UpdateMetrics
+	//  @0x4C52C0 - the combine @0x4C585A..0x4C5867; CNetStats_Reset @0x4C2FF0
+	//  (Game_StartMission's call @0x5243AA), CNetStats_ClearAll @0x4C71F0]
+	std::uint8_t host_metric = 0;
 };
+
+// The vehicle-spawn availability table a client keeps from S2C 0x70, the reply
+// to its C2S 0x42: each row in wire order up to the type-0 terminator or the
+// body end (an absent byte reads 0), and the received flag, raised on every
+// reply, which the vehicle-spawn screen clears when it opens and asks again.
+// [orig: NapiNPClientMsg_HandleVehicleSpawnAvailability @0x429A30 (a misnomer) - the
+//  rows @0x429A60..0x429AB9 (stride 12 from 0xA81BB8), the count
+//  g_VehicleSpawnAvailabilityCount @0x429AC8 / @0x429AE2, the flag
+//  g_VehicleSpawnAvailabilityReceived @0x429ACE / @0x429AE7; read by
+//  UI_PopulateVehicleWeaponSlotList @0x5638A0; the flag cleared by VehicleMenu_Open
+//  @0x564240 (@0x56425D)]
+struct ClientVehicleSpawnAvailability {
+	bool received = false;
+	std::vector<VehicleSpawnAvailabilityRow> rows;
+};
+
+// The client's server-command table S2C 0x2A fills: 16 ten-byte entries
+// [u8 id][u8 length][8 bytes of name, each XOR 0xFE]; an entry lands in the
+// first slot whose length byte is 0 or whose id is the entry's, and an entry
+// with neither is dropped. The console's command lookup reads it (D-NET-710's
+// console). A stock host sends its six static entries, each id 0 "NULL", so the
+// table holds one.
+// [orig: NapiNPClientMsg_0x02A @0x425BA0 - the non-authority gate @0x425BB9, the
+//  10-byte read @0x425BC6..0x425BD8 (a short body leaves the stack entry
+//  unread); ServerCommandTable_AddEntry @0x422920 (a misnomer) - the slot walk
+//  @0x422927..0x422947, the copy @0x422957..0x422963; read by
+//  NapiClientCmd_HandleServerCommandTable @0x42CCE0 (@0x42CD00, @0x42CD6F); the host's table
+//  byte_82F1DC sent by Server_SendPlayerSlotStateFrame @0x51BBA0 (@0x51BFF6)]
+inline constexpr std::size_t kServerCommandSlots = 16;
+inline constexpr std::size_t kServerCommandEntryBytes = 10;
+using ServerCommandEntry = std::array<uint8_t, kServerCommandEntryBytes>;
+using ClientServerCommandTable = std::array<ServerCommandEntry, kServerCommandSlots>;
+void fold_server_command_entry(ClientServerCommandTable &table, const ServerCommandEntry &entry);
 
 // The session status a client keeps from S2C 0x58 (the authority builds the
 // same record from its own report): the CMAP RULES text's source. The fold
@@ -1113,6 +1345,24 @@ void fold_server_config_strings(const std::vector<uint8_t> &body, ClientServerCo
 std::string server_config_first_text(const ClientServerConfigStrings &strings);
 std::string server_config_second_text(const ClientServerConfigStrings &strings);
 
+// ClientState::find's row per handle, a cache checked on every use: a lookup takes the row
+// it names while that row still holds the handle, else walks the rows and keeps the row the
+// walk found. The rows stay the one truth (callers clear, erase and append them freely), and a
+// lookup returns the walk's row, the first holding the handle (handles are unique rows). A copy
+// or a move of the state starts with an empty cache (D-NET-NEW-LF-26). Retail's client reaches a
+// handle's entity in one step, its slot by pool base and stride [orig: NapiNPClientMsg_EntityDeath
+// @0x42EB50 - the resolve @0x42EBA4..0x42EBC6].
+struct ClientRowIndexCache {
+	static constexpr uint16_t kNoRow = 0xFFFF;
+	ClientRowIndexCache() = default;
+	ClientRowIndexCache(const ClientRowIndexCache &) {}
+	ClientRowIndexCache &operator=(const ClientRowIndexCache &) {
+		rows.clear();
+		return *this;
+	}
+	mutable std::vector<uint16_t> rows; // indexed by handle; kNoRow, or empty until a lookup hits
+};
+
 struct ClientState {
 	// Monotonic decoded-state edges. topology_revision changes only when the
 	// ordered (handle,type) row layout changes; revision also covers field updates.
@@ -1134,6 +1384,11 @@ struct ClientState {
 	// [orig: NapiNPClientMsg_0x00A -- the read @0x430442, the store
 	//  g_LocalPlayerEntity->Armor @0x4305EB]
 	int16_t local_armor = 0;
+	// The recipient's carried-object word off the same tail (the host's entity
+	// +0x268, 0xFFFF none), which the joiner lands on L
+	// (JoinerRole::apply_local_carried_object) [orig: NapiNPClientMsg_0x00A
+	// @0x4305F2].
+	uint16_t local_carried_handle = 0xFFFF;
 	// The 0x0A header tail's state byte: the authority's copy of this client's
 	// own stance, bit 0 prone and bit 1 crouch (MoveOrder bits 8/9 >> 8). The
 	// client re-latches its stance from it on every frame that carries the tail
@@ -1163,7 +1418,7 @@ struct ClientState {
 	// Tab board's " [..]" suffix; a session start clears it
 	// [orig: g_ScoreboardStatusSuffixEnabled @0xA85B49 — the store
 	//  NapiNPClientMsg_HandleTextCommand @0x429f71, the parse gate @0x42fbfb,
-	//  the drawer test @0x423ef8, the reset Client_ResetDisconnectState
+	//  the drawer test @0x423ef8, the reset Session_ResetForStart
 	//  @0x5202d9].
 	uint8_t scoreboard_status_suffix = 0;
 	hud::KillAnnouncement kill_announcement;
@@ -1176,7 +1431,7 @@ struct ClientState {
 	uint32_t session_rules_flags = 0;
 	// The session's KOTH time limit in minutes, the 0x08 record's second rule
 	// dword — a joiner's GAMEINFO team timers read this copy where the
-	// authority reads its own g_TimeLimitMinutes [orig: dword_A821C0, stored
+	// authority reads its own g_KothLimitMinutes [orig: dword_A821C0, stored
 	// @0x428218; read by HUD_DrawGameTimerOverlay @0x59CCEB, and by the Tab
 	// board's KOTH countdowns @0x423281 / @0x423a58].
 	int32_t session_time_limit_minutes = 0;
@@ -1192,7 +1447,7 @@ struct ClientState {
 	// @0x42284e, NapiNPClientMsg_0x00F @0x42e396; read by the talk arms
 	// @0x49b9ad].
 	bool round_reset_hold = false;
-	// The round-over latch (g_SpawnSuccessGate): a client raises it on the
+	// The round-over latch (g_RoundOver): a client raises it on the
 	// 0x1D header ahead of its parse and on S2C 0x25; the authority's own
 	// round end raises it beside the 0x1D it broadcasts; only a mission start
 	// lowers it (ClientReplicaPipeline::begin_mission). The talk keys, the
@@ -1214,7 +1469,7 @@ struct ClientState {
 	// ladder's game-time line and timed/untimed arm picks (D-HUD-25).
 	// [orig: g_RoundTimeRemaining @0x24C1958 — the store
 	//  NapiNPClientMsg_0x00A @0x430219..0x430235; mission-start seed -1
-	//  @0x524A89]
+	//  @0x524A5D]
 	std::int32_t round_time_remaining_ticks = -1;
 	// The authority's breath seconds and fall-damage tolerance, the two WAC
 	// named values the same sub-block-1 timer state carries, zero-extended
@@ -1266,8 +1521,6 @@ struct ClientState {
 	// @0x422680 store; Game_InitNewRound @0x422740 clear; the statics test
 	// `!entity+0x1E0` @0x553ec5].
 	bool local_medic_reviving = false;
-	// The self row's respawn_revision the latch clear last consumed.
-	std::uint32_t local_respawn_revision_seen = 0;
 	bool enemy_tags_visible = false;
 	// The deploy-map OVERLAY (retail g_DeployScreenActive @0xA860DC): armed by
 	// the S2C 0x0F game_flags bit0 unless the death screen is already up, then
@@ -1293,7 +1546,20 @@ struct ClientState {
 	// The frame loop's open decision, once per frame: true exactly once per
 	// arming while no other menu is up (UI_IsMenuScreenOpen @0x5cab67), the latch
 	// stamped whether or not the shell's open succeeds; untriggered, the latch
-	// clears.
+	// clears. Both legs are the scene frame's: a frame the status page stands in
+	// for takes no decision (the shell asks on the scene gate's verdict alone)
+	// [orig: Render_ProcessMainSceneFrame @0x5CAB83 / @0x5CAB8B, the clear's
+	//  Game_CloseInGameScreens call @0x5CAC9C; the scene arm GameLoop_RenderFrame
+	//  @0x521CE8].
+	// The screen's close on the clear (the deploy presenter's) is the scene frame's
+	// too, and the page can stand over the open screen: the screen's pass-through
+	// runs the input frame, whose ToggleServer row (both binding modes, no gate bit)
+	// reaches its case on a listen host, so a clear under the page waits for the next
+	// drawn frame [orig: UI_ProcessMenuScreenFrame @0x54E650 - the pass-through test
+	//  @0x54E686, Input_ProcessFrame @0x54E695; the catalog row 83 @0x817CAC (code 11,
+	//  flags 0x04000000, modes 3; Input_IsBindingActiveForMode @0x497EA0);
+	//  Input_HandleActionBinding case 11 @0x49AFF1..0x49B018 (in session, authority,
+	//  peer, `xor g_ServerStatusViewActive, 1`); the close's branch @0x5CAC81..0x5CAC9C].
 	bool take_death_menu_open(bool triggered, bool menu_open) {
 		if (!triggered) {
 			death_menu_open_latch = false;
@@ -1338,6 +1604,9 @@ struct ClientState {
 	//  @0x431b10..0x431b2d -> Entity_BuildMapPoiLists @0x42de40].
 	std::uint32_t local_team_assigns = 0;
 	ClientNetQuality net;
+	// S2C 0x2A (the console's server-command table). The S2C 0x70 rows are
+	// process-lived (ClientReplicaPipeline::vehicle_spawn_availability).
+	ClientServerCommandTable server_commands{};
 
 	// The Tab board's two folded lanes: the 0x16 scoreboard and the 0x46
 	// connection-slot roster it joins names from.
@@ -1411,7 +1680,16 @@ struct ClientState {
 		uint32_t serial = 0;
 	} tracked_target;
 	std::vector<ClientEntityState> entities;
+	// The handles whose row the shared destroy removed and no record has
+	// rewritten since: retail's Entity_Destroy zeroes the slot and then marks
+	// it destroyed (+0x219 = 1), and every record that rewrites the slot
+	// clears it with its memset, so a missing row's handle carries the mark
+	// only when a destroy removed it. The stale-carrier sweep reads it.
+	// [orig: Entity_Destroy @0x43E810 - the memset @0x43EA70, the mark
+	//  @0x43EA7F; read by Entity_UpdateTransformAndTurret @0x440D2A]
+	std::vector<uint16_t> destroyed_marks;
 	std::uint32_t frames_applied = 0;
+	ClientRowIndexCache row_index;
 
 	ClientEntityState *find(uint16_t handle);
 	const ClientEntityState *find(uint16_t handle) const;

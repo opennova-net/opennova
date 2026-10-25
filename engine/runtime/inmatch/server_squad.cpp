@@ -37,7 +37,8 @@ NapiNPConnection *slot_connection(NapiNPServerCtx &ctx, uint8_t index) {
 //  `+0x20 == 6`, !+0x178E3; Server_ProcessRoundEnd — the 6 -> 7 store
 //  @0x51685e]
 bool slot_state_6(const NapiNPServerCtx &ctx, const NapiNPConnection &c) {
-	if (!player_slot_active(c) || !is_in_match(c)) return false;
+	// The slot's own words: a punted slot is still state 6 here (slot_in_match, D-NET-652).
+	if (!player_slot_active(c) || !slot_in_match(c)) return false;
 	return ctx.world == nullptr || !ctx.world->match.outcome().ended;
 }
 

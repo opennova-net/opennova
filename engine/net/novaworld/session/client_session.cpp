@@ -7,6 +7,7 @@
 #include <net/napi/envelope.h>
 #include <net/napi/tlv.h>
 #include <net/novacrypto/nwu.h>
+#include <net/novaworld/lobby_identity.h> // read_menu_exe_basename
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/outgoing_packets.h>
 #include <net/npwire/protocol_message.h> // decode_cs_config_update
@@ -160,6 +161,12 @@ ClientSession::Config ClientSession::Config::lobby(const TitleIdentity &title,
 	c.na = std::move(gate_tag);
 	c.pv1 = title.lobby_pv1;
 	c.bdat = title.lobby_bdat;
+	// The company constant and the executable's file name as the menu reads it (uppercased by
+	// the main loop's entry, read_menu_exe_basename), cut as Napi_CopyString(.., 0x40) cuts it.
+	// [orig: CNapiGameSession_InitNPConnection @0x4d3be0 - @0x4d3cae, @0x4d3cc3..0x4d3cd2;
+	//  Game_Run @0x4A7FB0 - _strupr called @0x4A7FCF]
+	c.co = title.co;
+	c.ap = read_menu_exe_basename().substr(0, kLobbyApChars);
 	return c;
 }
 
@@ -179,12 +186,16 @@ ClientSession::Config ClientSession::Config::game_protocol(const TitleIdentity &
 
 ClientSession::ClientSession() : ClientSession(Config{}) {}
 
-// The per-session SCRK in the 63-draw generator's shape, from the CSPRNG (make_dev_scrk);
-// retail draws it from the manager's LCG (generate_tx_key), which this lobby leg has not
-// moved to yet (D-NET-524's residual). [orig: CNapiNPConnection_GenerateTxKey @0x61dfe0]
-ClientSession::ClientSession(Config config)
-	: cfg_(std::move(config)),
-	  client_scrk_(make_dev_scrk()) {}
+ClientSession::ClientSession(Config config) : cfg_(std::move(config)) {}
+
+// InitFromSession's draws: the CK, then the SCRK, from the configured source or the process's
+// one manager LCG. [orig: CNapiNPConnection_InitFromSession @0x626320 - NapiNP_GenerateSessionKey
+//  @0x6263F4 (the CK, stored @0x6263FB), CNapiNPConnection_GenerateTxKey @0x626401]
+void ClientSession::draw_connection_keys() {
+	const ConnectionKeys keys = cfg_.connection_keys ? cfg_.connection_keys() : manager_connection_keys();
+	client_key_ = keys.key;
+	client_scrk_ = keys.scrk;
+}
 
 std::vector<uint8_t> ClientSession::start() {
 	state_ = State::Hello;
@@ -196,6 +207,9 @@ std::vector<uint8_t> ClientSession::start() {
 	lobby_state_ = 0;
 	session_flags_ = 0;
 	session_role_ = kSessionRoleNone;
+	// The MsgCode word starts each connection at 0 [orig: CNapiGameSession_InitNPConnection
+	//  @0x4D3BE0 - +0x130 = 0 @0x4D40D9].
+	server_msg_code_ = 0;
 	set_lobby_state(1);
 	// The first probe runs from here (InitPlayerConnection's NapiTimer_Start) until its 0x81 or a
 	// give-up stops it. [orig: CNapiGameSession_InitPlayerConnection - NapiTimer_Start @0x4D43C2]
@@ -230,6 +244,9 @@ std::vector<uint8_t> ClientSession::start() {
 	// [orig: CNapiGameSession_InitNPConnection @0x4d3f70 -> CNapiNPConnection_Create @0x62acb0].
 	send_queue_.clear();
 	ack_pending_ = false;
+	// No key until the 0x81's InitFromSession draws one (the create zeroes the local key).
+	client_key_ = 0;
+	client_scrk_.clear();
 	last_recv_activity_ms_ = 0;
 	sent_client_connected_ = false;
 	reassembly_ = ProtocolReassemblyState{};
@@ -253,20 +270,14 @@ std::vector<uint8_t> ClientSession::start() {
 	return build_client_hello();
 }
 
-std::vector<uint8_t> ClientSession::retransmit_stage_datagram() {
-	// A reconnect's 0x41 / 0x42 ride the session's own pump (pump()).
+std::vector<uint8_t> ClientSession::reannounce_datagram() {
+	// A reconnect's 0x41 rides the session's own pump (pump()).
 	if (reconnecting()) return {};
-	switch (state_) {
-		// The re-announce is the enumerator's, which a give-up's NapiTimer_Stop ends.
-		// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 - the timer gate
-		// @0x6290E0..0x629170]
-		case State::Hello:
-			return first_probe_stopped_ ? std::vector<uint8_t>{} : build_client_hello();
-		case State::Auth:
-			return build_client_auth();
-		default:
-			return {};
-	}
+	// The re-announce is the enumerator's, which a give-up's NapiTimer_Stop ends.
+	// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 - the timer gate
+	// @0x6290E0..0x629170]
+	if (state_ != State::Hello || first_probe_stopped_) return {};
+	return build_client_hello();
 }
 
 // The shared identity struct-fill (declared in client_session.h) — used by ClientSession below AND by
@@ -294,7 +305,7 @@ ClientHello make_client_hello(const ClientSession::Config &cfg, std::string_view
 }
 
 ClientAuth make_client_auth(const ClientSession::Config &cfg, std::string_view co, uint32_t server_hk,
-                            std::string_view client_scrk) {
+                            uint32_t client_key, std::string_view client_scrk) {
 	ClientAuth auth;
 	// Identity block — the real server re-validates NVS/PN/PG/PV1 (+PV2 in its is_server branch) on the
 	// 0x42 join exactly as on the 0x41 hello (HandleClientJoin @0x62B750); without it real NW silently
@@ -311,7 +322,7 @@ ClientAuth make_client_auth(const ClientSession::Config &cfg, std::string_view c
 	auth.pv2  = cfg.pv2;
 	auth.ci   = cfg.client_index;
 	auth.hk   = server_hk;        // echo ServerHello.hk
-	auth.ck   = cfg.client_key;
+	auth.ck   = client_key;
 	auth.na   = cfg.na;
 	auth.scrk = std::string(client_scrk);
 	// CU chunks (NW-S3) — the gate-issued session-auth codes + client env the live NW server validates.
@@ -320,7 +331,8 @@ ClientAuth make_client_auth(const ClientSession::Config &cfg, std::string_view c
 	for (const auto &v : cfg.cu_vars) {
 		auth.cu.push_back(make_client_cu_chunk(v.type, v.name, v.value));
 	}
-	// sip/spn stay 0 (retail omits the tag when 0).
+	// SIP / SPN are the connection's peer (ClientSession::build_client_auth); 0 here, and a 0 is
+	// not written.
 	return auth;
 }
 
@@ -340,11 +352,16 @@ std::vector<uint8_t> ClientSession::build_announce(uint32_t eip, uint32_t epn) {
 
 std::vector<uint8_t> ClientSession::build_client_auth() {
 	last_framed_send_ms_ = clock_ms_;
-	ClientAuth auth = make_client_auth(cfg_, cfg_.co, server_hk_, client_scrk_);
+	ClientAuth auth = make_client_auth(cfg_, cfg_.co, server_hk_, client_key_, client_scrk_);
 	// A re-join carries the counted disconnects and the last 0x82's RCNT (each only when
 	// nonzero, so a first join is unchanged) [orig: SendClientJoin @0x62033d..0x62037f].
 	auth.dcnt = dcnt_;
 	auth.rcnt = rcnt_;
+	// The connection's peer, the 0x81's sender, as SIP / SPN.
+	// [orig: CNapiNPConnection_SendClientJoin @0x61FE20 - SIP @0x6201AE..0x6201C5, SPN
+	//  @0x6201D2..0x6201E9; CNapiNPConnection_InitFromSession @0x6263B4 / @0x6263B7]
+	auth.sip = peer_ip_;
+	auth.spn = peer_port_;
 	return nw_encode_outbound(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
 }
 
@@ -501,32 +518,42 @@ void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
 	//  @0x6200F2]
 	if (!server_hello_is_ours(sh)) return;
 	++server_hellos_taken_;
+	server_hello_name_ = sh.sn;
 	if (reconnecting()) {
 		// The re-join: the probe stops and InitFromSession re-keys the connection (a fresh CK
 		// and SCRK, this hello's HK, the peer's keys and the CS template reset) into the 0x42
-		// leg, DCNT/RCNT kept across it; the schedule's next check waits out the join. The CK is
-		// drawn until nonzero (NapiNP_GenerateSessionKey's jz @0x61EAC3).
-		// [orig: Nwu_HandleServerHello @0x627e62..0x627eb3; CNapiNPConnection_InitFromSession
-		//  @0x626320 — the keys @0x6263fb/@0x626401, the cs_dir copies @0x626449/@0x62645c,
-		//  state 3 @0x626496]
+		// leg, DCNT/RCNT kept across it; the schedule's next check waits out the join.
+		// [orig: Nwu_HandleServerHello @0x627e62..0x627eb3, InitFromSession @0x627E8C;
+		//  CNapiNPConnection_InitFromSession @0x626320 - the CK @0x6263F4 (stored @0x6263FB),
+		//  the SCRK @0x626401, the cs_dir copies @0x626449/@0x62645c, state 3 @0x626496]
 		reconnect_.probing = false;
 		connection_down_ = false;
-		cfg_.client_key = make_session_key(cfg_.next_client_key);
-		client_scrk_ = cfg_.next_scrk ? cfg_.next_scrk() : make_dev_scrk();
+		draw_connection_keys();
 		server_hk_ = sh.hk;
 		server_sk_ = 0;
 		server_scrk_.clear();
 		cs_ = novaworld_service_cs_config(cfg_.max_packet_size);
-		state_ = State::Auth;
-		reconnect_.join_started_ms = clock_ms_;
-		reconnect_.join_last_send_ms = clock_ms_;
+		enter_connect_state();
 		reconnect_.next_ms = clock_ms_ + SESSION_RECONNECT_FIRST_DELAY_MS + SESSION_JOIN_TIMEOUT_MS;
-		out.push_back(build_client_auth());
 		return;
 	}
+	// The first connect's InitFromSession draws the CK and the SCRK the 0x42 carries.
+	// [orig: Nwu_HandleServerHello @0x627EBE..0x627EE5 -> CNapiNPConnection_InitFromSession]
+	draw_connection_keys();
 	server_hk_ = sh.hk;       // [Phase 1] the value we must echo in ClientAuth
+	enter_connect_state();
+	(void)out;
+}
+
+// The connect state's entry: nothing goes out here, the 0x42 is the state machine's, at the
+// first pump past the entry (pump_join).
+// [orig: CNapiNPConnection_InitFromSession @0x626320 - +0x5E0 = now @0x62648A, +0x5E4 = now -
+//  +0x5B0 @0x626490..0x626499, state 3 @0x626496; CNapiNPConnection_SendClientJoin @0x61FE20's
+//  one caller is PumpStateMachine case 3 @0x629595]
+void ClientSession::enter_connect_state() {
 	state_ = State::Auth;
-	out.push_back(build_client_auth());
+	join_started_ms_ = clock_ms_;
+	join_last_send_ms_ = clock_ms_ - SESSION_CONNECT_RETRANSMIT_MS;
 }
 
 void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
@@ -540,7 +567,7 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
 	// splits it: any nonzero CR accepts, zero rejects.
 	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the CI / CK match
 	//  @0x629CAC..0x629CBF, the CR split @0x629CD2..0x629CD6]
-	if (sa.ci != cfg_.client_index || sa.ck != cfg_.client_key) return;
+	if (sa.ci != cfg_.client_index || sa.ck != client_key_) return;
 	// A zero CR rejects: the connection keeps its JFC, JFP and JFS (64 bytes) and drops straight
 	// to its down state, with no teardown and no state-change callback; RCNT is not read. A first
 	// connect's periodic update then gives the connect up (NwuLobbySession), and a re-join's
@@ -575,7 +602,11 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
 		if (kv.first == "NWUID") server_nwuid_ = kv.second;
 		else if (kv.first == "NovaworldWebDomainNameAndPortNumber")
 			server_web_domain_ = kv.second;
+		else if (kv.first == "NovaworldName")
+			server_novaworld_name_ = napi_copy_string(kv.second, 64); // @0x4D15DC
 	}
+	server_rip_ = sa.rip; // [orig: @0x629D8F]
+	server_rpn_ = sa.rpn; // [orig: @0x629D92]
 	// The host's CS block overlays this connection's client-direction template (cs_dir0): each
 	// CLIENT-direction (byte 1) entry stores its slot raw (the reap window, the send intervals,
 	// the queue and pool bounds, the packet ceiling and budget); fields the 0x82 omits keep the
@@ -603,7 +634,11 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
 	reassembly_ = ProtocolReassemblyState{};
 	reconnect_.was_connected = false;
 	reconnect_.next_ms = 0;
-	// OnNovaWorldConnected marks every var list for a whole resend. [orig: @0x4d1570]
+	// The state-5 callback, OnNovaWorldConnected: its connect-log line, then the session's state 2,
+	// which marks every var list for a whole resend. [orig: CNapiNPConnection_OnStateChange
+	//  @0x626060 - the state-5 call @0x62622A; CNapiGameSession_OnNovaWorldConnected @0x4D1570 -
+	//  the line @0x4D1871, SetState(2) @0x4D187D]
+	if (cfg_.on_connection_up) cfg_.on_connection_up();
 	set_lobby_state(2);
 }
 
@@ -613,7 +648,7 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
 //  @0x6240c4]
 void ClientSession::on_server_goodbye(const std::vector<uint8_t> &body,
                                       std::vector<std::vector<uint8_t>> &out) {
-	if (body.size() < 4 || opennova::io::read_u32_le(body.data()) != cfg_.client_key) return;
+	if (body.size() < 4 || opennova::io::read_u32_le(body.data()) != client_key_) return;
 	DisconnectEvent event;
 	if (!parse_disconnect_event(body.data() + 4, body.size() - 4, event)) return;
 	last_receive_ms_ = clock_ms_;
@@ -644,6 +679,13 @@ void ClientSession::teardown_connection(std::vector<std::vector<uint8_t>> &out) 
 				disconnect_latched_ ? client_goodbye_to_bytes(server_sk_, disconnect_event_)
 				                    : client_goodbye_to_bytes(server_sk_));
 		for (size_t i = 0; i < disconnect_burst_count(); ++i) out.push_back(goodbye);
+		// The state-5 leg's callback after the burst, OnDisconnect: its connect-log line composed
+		// ahead of the session's reset (the driver writes it once the burst in `out` has gone
+		// out, NwuLobbySession::log_connection_down).
+		// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 -
+		//  @0x6254E7; CNapiGameSession_OnDisconnect @0x4CFAA0 - the line @0x4CFB5C, SetState(0)
+		//  @0x4CFB68]
+		if (cfg_.on_connection_down) cfg_.on_connection_down();
 	}
 	on_disconnected();
 	if (connected) {
@@ -679,6 +721,7 @@ void ClientSession::abort_connect(std::vector<std::vector<uint8_t>> &out) {
 	request_disconnect(out);
 	first_probe_stopped_ = true;
 	reconnect_.probing = false;
+	++enumerator_drains_; // [orig: CNapiGameSession_PumpConnection - the call @0x4D0A84]
 	// A down connection leaves its state 4: the periodic update's leg moves it to 2 before its
 	// abort. [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - SetState(2) @0x4D4477]
 	connection_down_ = false;
@@ -697,6 +740,7 @@ void ClientSession::on_disconnected() {
 	host_state_ = HostState::Idle;
 	play_state_ = PlayState::Idle;
 	server_web_domain_ = "???";
+	server_novaworld_name_ = "???"; // [orig: CNapiGameSession_OnDisconnect @0x4CFB7B]
 	server_nwuid_.clear();
 	host_gsid_.clear();
 }
@@ -787,7 +831,10 @@ void ClientSession::process_periodic_update() {
 //  PumpStateMachine @0x6292e0 case 5 @0x6295a2..0x62961c]
 void ClientSession::pump(std::vector<std::vector<uint8_t>> &out) {
 	if (!receive_clock_armed_ || (state_ != State::Verifying && state_ != State::Verified)) {
-		pump_reconnect(out);
+		if (reconnecting())
+			pump_reconnect(out);
+		else
+			pump_join(out); // the first connect's 0x42 leg
 		return;
 	}
 	// The send leg: with the NOVAWORLDUDP template's zero holdoff and zero send interval, the
@@ -889,8 +936,10 @@ void ClientSession::build_outgoing_packets(std::vector<std::vector<uint8_t>> &ou
 void ClientSession::on_server_resend_list(const std::vector<uint8_t> &body,
                                           std::vector<std::vector<uint8_t>> &out) {
 	std::vector<uint32_t> requested;
-	if (!decode_session_resend_list(body.data(), body.size(), cfg_.client_key, requested)) return;
+	if (!decode_session_resend_list(body.data(), body.size(), client_key_, requested)) return;
+	bool named = false;
 	for (uint32_t requested_sequence : requested) {
+		if (requested_sequence != 0) named = true;
 		const uint32_t sequence = requested_sequence == 0 ? seq_.next_outbound_seq : requested_sequence;
 		std::vector<uint8_t> body_out;
 		if (!frame_session_packet_for_sequence(seq_, SessionCrypto{client_scrk_, {}, server_sk_},
@@ -899,6 +948,7 @@ void ClientSession::on_server_resend_list(const std::vector<uint8_t> &body,
 		}
 		out.push_back(nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(body_out)));
 	}
+	if (named) ++resend_lists_named_;
 }
 
 void ClientSession::finish_receive_batch(std::vector<std::vector<uint8_t>> &out) {
@@ -933,6 +983,26 @@ void ClientSession::reset_sequencing() {
 // state machine's 0x42 leg and its schedule tail.
 // [orig: CNapiNPConnection_PumpFlags @0x629780 — PumpEnumeratorAndSend @0x6297b7 ahead of
 //  PumpStateMachine @0x6297c3]
+// Case 3: the join's timeout from the state's entry, which drops back to the down state with no
+// teardown (the connection never came up), else the 0x42 re-sent each time more than the interval
+// passed since the last. [orig: PumpStateMachine @0x629508..0x629595, the timeout
+//  @0x629525..0x629564]
+void ClientSession::pump_join(std::vector<std::vector<uint8_t>> &out) {
+	if (state_ != State::Auth) return;
+	if (clock_ms_ - join_started_ms_ > SESSION_JOIN_TIMEOUT_MS) {
+		// The give-up keeps JFC 2, JFP 0 and an empty JFS on the connection.
+		// [orig: @0x629525..0x629539; the state switch to 4 @0x629556..0x629564]
+		jfc_ = 2;
+		jfp_ = 0;
+		jfs_.clear();
+		state_ = State::Closed;
+		connection_down_ = true;
+	} else if (clock_ms_ - join_last_send_ms_ > SESSION_CONNECT_RETRANSMIT_MS) {
+		join_last_send_ms_ = clock_ms_;
+		out.push_back(build_client_auth());
+	}
+}
+
 void ClientSession::pump_reconnect(std::vector<std::vector<uint8_t>> &out) {
 	if (!reconnecting()) return;
 	// The probe: the same-CI 0x41 at once and then every SESSION_CONNECT_RETRANSMIT_MS while
@@ -945,24 +1015,8 @@ void ClientSession::pump_reconnect(std::vector<std::vector<uint8_t>> &out) {
 		reconnect_.last_probe_ms = clock_ms_;
 		out.push_back(build_client_hello());
 	}
-	// Case 3, the re-join: the 0x42 re-sent every SESSION_CONNECT_RETRANSMIT_MS until
-	// SESSION_JOIN_TIMEOUT_MS from the state-3 entry, which drops back to the down state with
-	// no teardown (the connection never came up). [orig: PumpStateMachine @0x629508..0x629595,
-	//  the timeout @0x629525..0x629564]
-	if (state_ == State::Auth) {
-		if (clock_ms_ - reconnect_.join_started_ms > SESSION_JOIN_TIMEOUT_MS) {
-			// The give-up keeps JFC 2, JFP 0 and an empty JFS on the connection.
-			// [orig: @0x629525..0x629539; the state switch to 4 @0x629556..0x629564]
-			jfc_ = 2;
-			jfp_ = 0;
-			jfs_.clear();
-			state_ = State::Closed;
-			connection_down_ = true;
-		} else if (clock_ms_ - reconnect_.join_last_send_ms > SESSION_CONNECT_RETRANSMIT_MS) {
-			reconnect_.join_last_send_ms = clock_ms_;
-			out.push_back(build_client_auth());
-		}
-	}
+	// Case 3, the re-join's 0x42 leg.
+	pump_join(out);
 	// The schedule tail: past `next`, a re-join in flight pushes the check out by the gap plus
 	// the join timeout; a down connection opens a SESSION_RECONNECT_PROBE_WINDOW_MS probe
 	// window, and a window that ran out closes and waits the gap, which grows each time.
@@ -982,6 +1036,9 @@ void ClientSession::pump_reconnect(std::vector<std::vector<uint8_t>> &out) {
 		grow_reconnect_gap();
 		return;
 	}
+	// The window's open drains the enumerator's records and restarts its timer.
+	// [orig: PumpStateMachine - the drain (the call @0x629646), the start @0x62965B..0x629667]
+	++enumerator_drains_;
 	reconnect_.probing = true;
 	reconnect_.window_start_ms = clock_ms_;
 	reconnect_.probe_sent = false;
@@ -1016,12 +1073,15 @@ void ClientSession::on_server_protocol_message(const std::vector<uint8_t> &body,
 	SessionDeframeAdmission admission;
 	// Lobby recv: decrypt inbound 0x83 with the server's SCRK. The ordered gate admits only the
 	// next sequence: a later packet is held (and latches the missing-sequence request for the
-	// receive tail), and the packets a closing gap releases drain in order.
-	// [orig: NapiNPProtocol_HandleSessionPacket @0x626a00 — the receiver key @0x626b72, the gate
-	//  and queue @0x626be0..0x626c3a]
-	if (!deframe_session_packet(seq_, SessionCrypto{{}, server_scrk_, 0, cfg_.client_key},
+	// receive tail), and the packets a closing gap releases drain in order. No packet ends the
+	// connection: one too short for its header is read with its missing fields 0 (deframe), and
+	// one the deframe cannot read is passed over (D-NET-719).
+	// [orig: NapiNPProtocol_HandleSessionPacket @0x626a00 - the receiver key @0x626b72, the gate
+	//  and queue @0x626be0..0x626c3a, no leg touching the connection's state;
+	//  CNapiNPConnection_ParseMessages @0x625BC0 - no failure leg past its entry guards
+	//  @0x625C34..0x625C5B, return 1 @0x625F21]
+	if (!deframe_session_packet(seq_, SessionCrypto{{}, server_scrk_, 0, client_key_},
 	                            body.data(), body.size(), hdr, messages, &admission)) {
-		fail("bad 0x83 protocol packet");
 		return;
 	}
 	if (!admission.admitted) return;
@@ -1034,6 +1094,7 @@ void ClientSession::on_server_protocol_message(const std::vector<uint8_t> &body,
 
 	bool had_messages = false;
 	for (const SessionDeframeAdmission::Packet &packet : admission.packets) {
+		if (cfg_.on_packet_processed) cfg_.on_packet_processed(packet.body_bytes + 1);
 		if (!packet.messages.empty()) had_messages = true;
 		for (const ProtocolMessage &pm : packet.messages) {
 			// The ONE settings-flagged record that is not connection tuning: the connection
@@ -1058,13 +1119,19 @@ void ClientSession::on_server_protocol_message(const std::vector<uint8_t> &body,
 					apply_cs_config_update(pm);
 				continue;
 			}
-			if (pm.full_tag != 0) continue;           // only layer-4 lobby containers
-
 			// FIRST/MID/FINAL records fold into one statement before dispatch (a long
-			// ClientRequestVerifyResult reply spans several packets).
-			// [orig: CNapiNPConnection_DispatchMessage @0x622570]
+			// ClientRequestVerifyResult reply spans several packets); the fold runs ahead of the
+			// tag's lookup, and the client registers tag 0 alone (the layer-4 lobby container):
+			// any other tag, once whole, is an unknown message.
+			// [orig: CNapiNPConnection_DispatchMessage @0x622570 - the split buffer
+			//  @0x6225C7..0x62266B, NapiNPProtocol_FindMsgInfo (the call @0x622691), the unknown
+			//  leg @0x6226FB..0x62272A]
 			std::vector<uint8_t> assembled;
 			if (!reassemble_protocol_payload(reassembly_, pm, assembled)) continue;
+			if (pm.full_tag != 0) {
+				if (cfg_.on_unknown_message) cfg_.on_unknown_message(pm.tag, assembled.size());
+				continue;
+			}
 			if (assembled.empty()) continue;          // ack-only
 
 			std::vector<NapiMessage> containers;
@@ -1182,6 +1249,8 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 			if (session_role_ >= kSessionRoleNone && session_role_ <= kSessionRolePlaying)
 				session_role_ = kSessionRoleHosting;
 		} else {
+			// The refusal's MsgCode into the session's word [orig: @0x4D5AE1].
+			server_msg_code_ = host_result_.msg_code;
 			host_state_ = HostState::Failed;
 			set_lobby_state(4);
 			// [orig: @0x4d5ae7..0x4d5b27 — any word 0..3 becomes 1]
@@ -1203,6 +1272,8 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 			// [orig: @0x4d1f35..0x4d1f53 — an unsigned word <= 2 becomes 3]
 			if (static_cast<uint32_t>(session_role_) <= 2u) session_role_ = kSessionRolePlaying;
 		} else {
+			// The refusal's MsgCode into the session's word [orig: @0x4D1EDC].
+			server_msg_code_ = play_result_.msg_code;
 			play_state_ = PlayState::Failed;
 			set_lobby_state(4);
 			// [orig: @0x4d1eee..0x4d1f13 — any word 0..3 becomes 1]
@@ -1220,6 +1291,7 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 		notice.fields = parse_server_result_fields(container);
 		notice.msg_key = novaworld_server_msg_code_key(notice.fields.msg_code);
 		host_result_ = notice.fields;
+		server_msg_code_ = notice.fields.msg_code; // [orig: @0x4D1D17]
 		host_state_ = HostState::Idle;
 		set_lobby_state(4);
 		// [orig: @0x4d1d29..0x4d1d4f — any word 0..3 becomes 1]
@@ -1235,6 +1307,7 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 		notice.kind = Notice::Kind::StopPlaying;
 		notice.fields = parse_server_result_fields(container);
 		play_result_ = notice.fields;
+		server_msg_code_ = notice.fields.msg_code; // [orig: @0x4D2041]
 		play_state_ = PlayState::Idle;
 		set_lobby_state(4);
 		// [orig: @0x4d2057..0x4d207c — any word 0..3 becomes 1]
@@ -1250,6 +1323,7 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 		Notice notice;
 		notice.kind = Notice::Kind::LeaveNovaWorld;
 		notice.fields = parse_server_result_fields(container);
+		server_msg_code_ = notice.fields.msg_code; // [orig: @0x4D2177]
 		host_state_ = HostState::Idle;
 		play_state_ = PlayState::Idle;
 		set_lobby_state(0);
@@ -1257,9 +1331,12 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 		session_role_ = kSessionRoleNone;
 		mission_exit_reason_ = 12;
 		disconnected_by_peer_ = true;
-		// RequestDisconnect: the teardown's burst and disconnect callback.
-		// [orig: HandlePuntNotification @0x4d20b0 -> CNapiNPConnection_RequestDisconnect]
+		// RequestDisconnect: the teardown's burst and disconnect callback, then the enumerator's
+		// records drained.
+		// [orig: HandlePuntNotification @0x4d20b0 -> CNapiNPConnection_RequestDisconnect
+		//  (the call @0x4D21A4), NapiNPEnumerator_DrainTimerList (the call @0x4D21C8)]
 		teardown_connection(out);
+		++enumerator_drains_;
 		notices_.push_back(std::move(notice));
 		return;
 	}
@@ -1415,7 +1492,7 @@ bool ClientSession::send_host_player_added(const HostPlayerSlot &player) {
 }
 
 // [orig: the slot's vars dropped (NapiLinkedList_RemoveByUserData @0x630810), then the
-//  state-6 wrapper @0x4d0e40]
+//  state-6 wrapper CNapiGameSession_SendPlayerRemovedIfHosting @0x4d0e40]
 bool ClientSession::send_host_player_removed(int player_number) {
 	if (remove_slot_vars(player_list_, player_number)) player_list_changed_ = true;
 	if (host_state_ != HostState::Established) return false;
@@ -1464,6 +1541,8 @@ bool ClientSession::send_play_request(int currently_playing) {
 	play_state_ = PlayState::Requested;
 	play_result_ = ServerResultFields{};
 	set_lobby_state(7);
+	// [orig: CNapiGameSession_StartPlayingSession @0x4D45E0 (@0x4D460D, after its SetState(7))]
+	server_msg_code_ = 0;
 	if (queue_lobby_record(make_client_play_request(currently_playing, cookie_vars(), play_setup_)))
 		return true;
 	play_state_ = previous;
@@ -1502,6 +1581,7 @@ std::vector<uint8_t> ClientSession::build_goodbye() {
 	// The reset drops the hosting/playing word to 0 (the reconnect disarmed with it), and the
 	// connection's teardown runs the disconnect callback. [orig: @0x4d08fc..0x4d0927]
 	session_role_ = kSessionRoleNone;
+	server_msg_code_ = 0; // [orig: CNapiGameSession_ResetToDisconnected @0x4D0890 (@0x4D08EA)]
 	on_disconnected();
 	receive_clock_armed_ = false;
 	// The connection is destroyed and its enumerator with it, so a probe window open at the

@@ -146,11 +146,12 @@ void BmsEventSystem::resolve_zone_refs(World &w) {
                 // [orig: EventTrigger_ResolveZoneActionRefs @0x453100 — the
                 //  index @0x453183, x_min @0x45318d, y_min @0x453197, x_max
                 //  @0x4531a1, y_max @0x4531ab]
-                const world::Aabb &box = w.registry.area(idx)->bounds;
-                a.param1 = world::to_fixed(box.min.x);
-                a.param3 = world::to_fixed(box.min.y);
-                a.param4 = world::to_fixed(box.max.x);
-                a.reserved1 = world::to_fixed(box.max.y);
+                // The record's own words, raw (D-NET-507).
+                const std::array<int32_t, 4> &box = w.registry.area(idx)->record_xy_q16;
+                a.param1 = box[0];
+                a.param3 = box[2];
+                a.param4 = box[1];
+                a.reserved1 = box[3];
             }
         }
     }
@@ -432,7 +433,7 @@ int32_t BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                     return input_bit(1u << ((static_cast<uint32_t>(static_cast<uint8_t>(t.param1)) + 15u) & 31u));
                 case bms::PlayerTriggerType::PlayerLookByteBit0Clear:
                     // `(byte_27234FC & 1) == 0`: the byte is hudInfo
-                    // (dword_2723388) +0x174, whose only store in the image
+                    // (g_HUDEntityInfo) +0x174, whose only store in the image
                     // writes 0, beside the struct memsets and the per-frame
                     // save/restore copy, so bit 0 never sets: sub 26 is always
                     // true and sub 27 always false. The byte's other readers
@@ -477,7 +478,7 @@ int32_t BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                         if (e == nullptr || e->registry_spawn_id != d.entity_spawn_id) continue;
                         const world::AmmoTableEntry *ammo = w.tables.ammo.by_index(d.ammo_index);
                         if (ammo == nullptr || !strutil::iequals(ammo->name, "satchel")) continue;
-                        if (area->bounds.contains(e->position)) return true;
+                        if (area->trigger_contains(e->position)) return true; // the words (D-NET-507)
                     }
                     return false;
                 }
@@ -599,7 +600,7 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             cmds.set_ssn_team(static_cast<uint16_t>(a.param1), a.param2);
             break;
         case bms::ActionType::SingleChangeGroup:
-            // [orig: Entity_SetNetIdByParentRef @0x43D6C0]
+            // [orig: Entity_SetCommandGroupByDcbId @0x43D6C0]
             cmds.set_ssn_group(static_cast<uint16_t>(a.param1), a.param2);
             break;
         case bms::ActionType::SingleTeleportAction:
@@ -631,7 +632,7 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
         case bms::ActionType::KillSingle: cmds.kill_ssn(static_cast<uint16_t>(a.param1)); break;
         case bms::ActionType::VaporizeSingle:
             // [orig: EventAction_Dispatch case 22 @0x454828 ->
-            //  Entity_FindByParentAndDispatch @0x43E210]
+            //  Entity_RemoveByDcbId @0x43E210]
             cmds.remove_bms_ref(a.param1);
             break;
         case bms::ActionType::KillGroup: cmds.kill_group(a.param1); break;
@@ -679,7 +680,7 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             // triggers later in this pass already see it, and a skipped play
             // never reaches it. The effect stays as the presentation log.
             // [orig: EventAction_Dispatch @0x4542E0 case 7 — the is_mp_session_peer
-            //  test @0x45443d, param2 == 1 @0x45444a, the g_SpawnSuccessGate test
+            //  test @0x45443d, param2 == 1 @0x45444a, the g_RoundOver test
             //  @0x454450, the Dialog_PlayByIndex call @0x454461]
             if (w.rules.mp_session_peer && (a.param2 == 1 || !w.match.outcome().ended)) {
                 w.script.dialog.play(w.tables.dialog_bank, w.tables.dialog_sounds, a.param1);
@@ -730,7 +731,7 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
         // The three win actions end the round in-engine [orig: EventAction_Dispatch
         // @0x4542E0 (the Server_ProcessRoundEnd(1/2/0) calls @0x45447b/@0x454495/
         // @0x4544af)]; the round-over gate sits inside the callee [orig:
-        // Server_ProcessRoundEnd @0x5164F6, `cmp g_SpawnSuccessGate, ebx`],
+        // Server_ProcessRoundEnd @0x5164F6, `cmp g_RoundOver, ebx`],
         // which process_round_end's own latch ports. The "win" effect stays as
         // the presentation signal.
         case bms::ActionType::BlueWin:
@@ -919,8 +920,14 @@ void BmsEventSystem::fire(World &w, size_t index) {
     // [orig: immediate @0x454C92/@0x454CAB; delayed @0x454D01/@0x454D13]
     const int action_count = se.event.action_count < 128
             ? se.event.action_count : static_cast<int>(se.event.action_count) - 256;
-    for (int a = 0; a < action_count && static_cast<size_t>(a) < se.actions.size(); ++a)
+    // Each action's sends go out at its dispatch, ahead of the next action's
+    // (a Win's round end at its own latch, process_round_end) (D-NET-NEW-V3-1)
+    // [orig: EventTrigger_UpdateEntry @0x454C30 - the EventAction_Dispatch calls
+    //  @0x454CA6 / @0x454D0E].
+    for (int a = 0; a < action_count && static_cast<size_t>(a) < se.actions.size(); ++a) {
         dispatch_action(w, se.actions[static_cast<size_t>(a)], event, se.event.action_index + a);
+        w.send_script_pass_records();
+    }
     // The waypoint completion hook: a fired event completes every route marker
     // linked to its index (the original computes the index from the record's
     // position in g_Events; events_ mirrors that array order).

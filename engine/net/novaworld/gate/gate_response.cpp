@@ -2,6 +2,7 @@
 
 #include <net/napi/literal.h>
 #include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
+#include <net/napi/tlv.h>     // napi_copy_string (Napi_CopyString)
 
 #include <cstdint>
 #include <string>
@@ -73,6 +74,13 @@ bool parse_ipv4_octets(const std::string &text, std::array<uint8_t, 4> &out) {
 // post-ip/port requirement.
 bool gate_response_parse(std::string_view body, GateResponse &out) {
 	out = GateResponse{};
+	// The parse ends at the first NUL: the line reader stops a line there, and a read that
+	// starts on it fails, which ends the loop. The live gate's reply ends with one.
+	// [orig: Napi_ReadLineFromBuffer @0x616CC0 - a NUL where a line starts @0x616CEE returns -2
+	//  @0x616D01, a line's copy stops at a NUL @0x616D17 and the next read is left on it
+	//  @0x616D49..0x616D52; CNapiFileReader_ReadAndTokenizeLine @0x6336E0 - -1 @0x633737;
+	//  CNapiGateManager_ProcessResponse @0x4CED20 - the loop's test @0x4CF4E7]
+	body = body.substr(0, body.find('\0'));
 
 	size_t i = 0;
 	while (i < body.size()) {
@@ -112,20 +120,25 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 			uint32_t parsed = 0;
 			if (napi_parse_literal_value(value, parsed)) out.post_port = parsed;
 		} else if (strutil::iequals(key, "LOBBYNAME")) {
-			out.lobby_name = std::string(value);
+			// [orig: CAITask_SetName @0x402BD0 (the call @0x4CF1D8) - Napi_CopyString(.., 0x20)
+			//  @0x402BDB]
+			out.lobby_name = napi_copy_string(value, kGateNameBytes);
 		} else if (strutil::iequals(key, "METIPADDRESS")) {
-			out.met_ip = std::string(value);
+			// [orig: CMissionInfo_SetSceneName @0x4CD930 (the call @0x4CF202) - 0x20 @0x4CD93B]
+			out.met_ip = napi_copy_string(value, kGateNameBytes);
 		} else if (strutil::iequals(key, "METIPPORT")) {
 			uint32_t parsed = 0;
 			if (napi_parse_literal_value(value, parsed)) out.met_port = parsed;
 		} else if (strutil::iequals(key, "METLABEL")) {
-			out.met_label = std::string(value);
+			// [orig: CMissionInfo_SetTargetName @0x4CD950 (the call @0x4CF26D) - 0x20 @0x4CD95B]
+			out.met_label = napi_copy_string(value, kGateNameBytes);
 		} else if (strutil::iequals(key, "METPING")) {
 			out.met_ping = io::retail_atol(value.c_str());
 		} else if (strutil::iequals(key, "METEXT")) {
 			out.met_ext = io::retail_atol(value.c_str());
 		} else if (strutil::iequals(key, "STARTUPURL")) {
-			out.startup_url = std::string(value);
+			// [orig: CMissionInfo_SetDescription @0x4CD970 (the call @0x4CF2EB) - 0x200 @0x4CD981]
+			out.startup_url = napi_copy_string(value, kGateTextBytes);
 		} else if (strutil::iequals(key, "UDPNOVAWORLD")) {
 			// Each line is kept, in order: Napi_CopyString into the next 64-byte entry (to the
 			// value's first NUL, at most 63 characters) while fewer than 16 are kept; a 17th
@@ -138,9 +151,11 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 				out.udp_novaworld.push_back(entry.substr(0, kGateUdpNovaWorldChars));
 			}
 		} else if (strutil::iequals(key, "UDPCODE1")) {
-			out.udp_code1 = std::string(value);
+			// [orig: CMissionInfo_SetGateTag @0x4CD990 (the call @0x4CF33F) - 0x20 @0x4CD99E]
+			out.udp_code1 = napi_copy_string(value, kGateNameBytes);
 		} else if (strutil::iequals(key, "UDPCODE2")) {
-			out.udp_code2 = std::string(value);
+			// [orig: CMissionInfo_SetMetTag @0x4CD9B0 (the call @0x4CF369) - 0x20 @0x4CD9BE]
+			out.udp_code2 = napi_copy_string(value, kGateNameBytes);
 		} else if (strutil::iequals(key, "REFLECTEDIPADDRESS")) {
 			parse_ipv4_octets(value, out.reflected_ip);
 		} else if (strutil::iequals(key, "REFLECTEDPORTNUMBER")) {
@@ -151,23 +166,54 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 		} else if (strutil::iequals(key, "CLEARJUNCTION")) {
 			out.clear_junction = io::retail_atol(value.c_str());
 		} else if (strutil::iequals(key, "GLSVSSREQUEST")) {
-			out.glsvss_request = std::string(value);
+			// [orig: CMissionInfo_SetBriefingOutput @0x4CDA40 (the call @0x4CF465) - 0x200
+			//  @0x4CDA51]
+			out.glsvss_request = napi_copy_string(value, kGateTextBytes);
 		} else if (strutil::iequals(key, "GLSVSSRIMS")) {
 			out.glsvss_rims = io::retail_atol(value.c_str());
 		} else if (strutil::iequals(key, "GLSVSSAGRMS")) {
 			out.glsvss_agrms = io::retail_atol(value.c_str());
-		} else if (strutil::iequals(key, "CUS")) {
-			// Phantom key: counted for read-result parity but not retained.
-		} else if (strutil::iequals(key, "PVT")) {
-			// Phantom key: counted for read-result parity but not retained.
 		} else {
 			matched = false;
 		}
+		// Only the nineteen keys above count; any other VAR key is passed over uncounted.
+		// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - an unmatched key's jump to the next
+		//  line @0x4CF4A7, the count @0x4CF4BB]
 		if (matched) {
 			++out.var_count;
 		}
 	}
+	// False when no field counted: the gate's parse then fails the gate (state -9).
+	// [orig: ProcessResponse @0x4CF4ED..0x4CF4EF]
 	return out.var_count > 0;
+}
+
+std::vector<std::string> gate_response_lines(std::string_view body) {
+	// The buffer is the reply's bytes and a NUL (SetResponseBuffer's), read 0x8000 at a time.
+	// [orig: CNapiGateManager_SetResponseBuffer @0x633650 - the NUL @0x6336BC]
+	constexpr std::size_t kReadBuffer = 0x8000;
+	const auto at = [&](std::size_t i) { return i < body.size() ? body[i] : '\0'; };
+	std::vector<std::string> lines;
+	std::size_t pos = 0;
+	while (pos < body.size() && at(pos) != '\0') {
+		std::string line;
+		std::size_t src = pos;
+		std::size_t count = 0;
+		for (std::size_t remaining = kReadBuffer; remaining > 1; ++count) {
+			const char c = at(src);
+			if (c == '\0' || c == '\n') break;
+			if (c == '\r') {
+				if (at(src + 1) == '\n') ++count;
+				break;
+			}
+			line.push_back(c);
+			++src;
+			--remaining;
+		}
+		lines.push_back(std::move(line));
+		pos += at(src) == '\0' ? count : count + 1;
+	}
+	return lines;
 }
 
 } // namespace opennova

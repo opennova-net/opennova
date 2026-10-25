@@ -12,6 +12,8 @@
 #include <runtime/world/fire_sound.h>
 #include <runtime/world/world.h>
 
+#include <runtime/audio/sound_profile.h>
+
 #include <formats/def/def.h>
 
 #include <base/io/bam.h>
@@ -66,7 +68,11 @@ inline int32_t emplaced_slot_heat_glow(const World &world, const Entity &gun) {
 // the seat.
 // [orig: Entity_AttachToBoneAndUpdateTransform userpoint gate
 //  @0x546424..0x54643F, the call @0x546517..0x546518]
+// On a joiner the rider may be a remote person the world does not hold; the
+// replica's gun channel marks its carrier (Entity::replica_usegun_rider).
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B63A5..0x4B63C7]
 inline bool usegun_rider_writes_carrier(const World &world, const Entity &carrier) {
+	if (carrier.replica_usegun_rider) return true;
 	if (!carrier.primary_weapon_owner.valid()) return false;
 	const Entity *rider = world.registry.get(carrier.primary_weapon_owner);
 	if (rider == nullptr || !rider->alive || rider->health <= 0 ||
@@ -211,12 +217,12 @@ inline bool emplaced_clamp_turret_bam(int32_t &value, int32_t upper,
 inline int32_t emplaced_gun_frame_heading(const Entity &mount) {
 	return mount.veh.yaw_seeded
 			? mount.veh.yaw_bam
-			: spawn_angle_bam(90 - mount.yaw);
+			: mount.heading;
 }
 
 inline int32_t emplaced_gun_frame_pitch(const Entity &mount) {
 	return mount.veh.yaw_seeded ? mount.veh.air_pitch_bam
-			: spawn_angle_bam(mount.pitch);
+			: mount.pitch_bam;
 }
 
 // A stored word back to the BAM32 the IsTurret leg integrates: the raw 16
@@ -390,6 +396,45 @@ inline void clamp_emplaced_gun_words_to_window(const World &world, Entity &mount
  }
 }
 
+// The game text the tank-command leg posts (Chat_AddMessageChannel1 in g_HUDColors'
+// fifth entry, yellow, for 930 ticks).
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - "HUD_COM2GUN" @0x44132C, the section
+//  "HUD" @0x7C4E64 pushed @0x441331, `mov ecx, g_HUDColors+10h` @0x44134B, `push 3A2h` @0x441351]
+inline const HudChatLine kEmplacedCommandCallLine{"HUD", "HUD_COM2GUN", 0xFFF0F000u};
+
+// The window leg's tail while the occupant rides this gun: the tank-command call. With the
+// local player in a UseGun seat (attach type 3) of a gun whose ground entity (+0x28) is this
+// gun's own (two guns with none match), an occupant holding the packed jump bit (MoveOrder
+// 0x20) more than 124 ticks past the gun's last call (+0x31C, a signed difference) re-stamps
+// it; an occupant other than the local player then plays its TANK_COMAND composite on the
+// interface channel and posts HUD_COM2GUN to the CHAT ring.
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - g_LocalPlayerEntity @0x4412B6..0x4412BD,
+//  `cmp dword ptr [eax+168h], 3` @0x4412C3, its +0x16C @0x4412D0, `cmp eax, [ebp+28h]`
+//  @0x4412DE..0x4412E1, `test byte ptr [eax+12Ch], 20h` @0x4412F0, the tick test
+//  @0x4412FD..0x44130E, the stamp @0x441310, the local test @0x441316, SoundProfile_FindByEntityAndType
+//  (occupant, 8) @0x441321, Sound_PlayInterfaceTriggerSet @0x441327, GameText_GetString @0x441336,
+//  Chat_AddMessageChannel1 @0x44135C]
+// `ground` and `stamp` are the updated entity's +0x28 and +0x31C: an item gun's ground_target and
+// emplaced_command_stamp, a person body's ground_target and its spawn backup's Y word.
+inline void emplaced_command_call(World &world, EntityHandle ground, uint32_t &stamp,
+		bool occupant_is_local, uint8_t occupant_move_order, int occupant_anim_slot) {
+	const Entity *local = world.registry.get(world.cached.local_player);
+	if (local == nullptr || !local->mounted || local->mount_type != SeatType::Gunner) return;
+	const Entity *local_gun = world.registry.get(local->mount_target);
+	if (local_gun == nullptr || local_gun->ground_target != ground) return;
+	if ((occupant_move_order & Entity::kMoveOrderJump) == 0) return;
+	if (static_cast<int32_t>(world.logic_tick - stamp) <= 124) return;
+	stamp = world.logic_tick;
+	if (occupant_is_local) return;
+	char name[64];
+	ScriptSoundEvent call;
+	call.kind = ScriptSoundEvent::Kind::Interface;
+	call.name = audio::compose_entity_sound_set(occupant_anim_slot, audio::kEntitySoundTankCommand,
+			name, sizeof(name));
+	if (!call.name.empty()) world.out.script_sounds.push_back(std::move(call));
+	world.out.hud_chat_lines.push_back(kEmplacedCommandCallLine);
+}
+
 // The parent-brain publication: an addeweap child whose anchor userpoint
 // rides the parent ROOT hands its gun words to the parent's AI brain turret
 // channel — the live/staged yaw (and, for a helicopter parent, the pitch) the
@@ -411,8 +456,9 @@ inline void clamp_emplaced_gun_words_to_window(const World &world, Entity &mount
 // [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53 (the class update, no
 //  age or occupant gate); Entity_UpdateTransformAndTurret Def gate
 //  @0x440E8C..0x440EA0]
-// That aircraft slot is initialized from the parent's authored primary_weapon,
-// the same field used for an ewep's +0x2B4 slot. Resolve that existing table row.
+// That aircraft slot is the one the parent's class init bound from its authored
+// primary_weapon, the field an ewep's +0x2B4 slot binds from: its Def is the
+// parent's primary_weapon_slot_adm row.
 // [orig: Entity_InitInfantryBoneData @0x490160, call @0x49017b;
 // WeaponSlot_InitFromEntityDef @0x5466c0, primary_weapon @0x5466d8]
 // [orig: Entity_UpdateTransformAndTurret @0x440ca0: parent @0x440cbf,
@@ -423,18 +469,13 @@ inline void clamp_emplaced_gun_words_to_window(const World &world, Entity &mount
 //  slot-1 def [edi+494h] @0x440fbc, Math_ClampAngleToBounds yaw (+0x144,
 //  -0x144) @0x440fea and pitch (+0x13C, +0x140) @0x440ffa, stores
 //  @0x441007/@0x44100d (yaw) and @0x44101a/@0x441020 (pitch)]
-// The gun's inline slot Def. Retail binds it at spawn from the def's
-// primary weapon name; the port binds the slot on its first use, so an
-// unbound gun resolves the same name.
+// The gun's inline slot Def (+0x2D4): the weapon its class init bound from the def's
+// primary weapon name at the spawn (VehicleSystem::run_weapon_slot_class_init), null
+// for a gun whose name bound none.
 // [orig: WeaponSlot_InitFromEntityDef @0x5466C0 (name lookup @0x5466E8,
-//  the slot Def @0x546709..0x54670A)]
+//  the slot Def @0x546709..0x54670A), from Entity_InitBoneReferences @0x441482]
 inline const WeaponTableEntry *emplaced_slot_def(const World &world, const Entity &gun) {
-	if (gun.primary_weapon_slot_adm != kAdmSlotNone)
-		return world.tables.weapons.by_index(gun.primary_weapon_slot_adm);
-	const int index = world.tables.weapons.index_of(gun.primary_weapon.c_str());
-	return index >= 0 && index <= 0xFF
-			? world.tables.weapons.by_index(static_cast<uint8_t>(index))
-			: nullptr;
+	return world.tables.weapons.by_index(gun.primary_weapon_slot_adm);
 }
 
 // The publication's value leg, by the parent brain's profile type: GROUND
@@ -459,9 +500,9 @@ inline EmplacedParentGunWords emplaced_parent_gun_words(const World &world,
 		return out;
 	}
 	if (profile_type != 1 || (parent.item_attrib & kItemAttribEweap) == 0) return out;
-	const int weapon_index = world.tables.weapons.index_of(parent.primary_weapon.c_str());
-	if (weapon_index < 0) return out;
-	const WeaponTableEntry &parent_weapon = world.tables.weapons.entries[weapon_index];
+	const WeaponTableEntry *bound = world.tables.weapons.by_index(parent.primary_weapon_slot_adm);
+	if (bound == nullptr) return out;
+	const WeaponTableEntry &parent_weapon = *bound;
 	out.pitch_bam = emplaced_word_bam(pitch_word);
 	const int32_t yaw_range = turret_window_limit_bam(parent_weapon.turret_yaw_range_deg);
 	emplaced_clamp_turret_bam(out.yaw_bam, yaw_range, opennova::io::bam_sub(0, yaw_range));
@@ -473,21 +514,21 @@ inline EmplacedParentGunWords emplaced_parent_gun_words(const World &world,
 	return out;
 }
 
-inline void publish_emplaced_gun_words_to_parent(World &world,
-		const Entity &mount) {
-	if (!mount.emplaced_update || !mount.emplacement_parent.valid()) return;
-	if (emplaced_slot_def(world, mount) == nullptr) return;
-	// A child promoted onto an authored userpoint (index > 0) that rides the
-	// parent root; an unstamped subobject (-1) keeps the leg off.
-	if (mount.emplacement_bone == 0 || mount.emplacement_anchor_subobject != 0)
-		return;
-	AiEntity *parent_ai = world.ai.for_handle(mount.emplacement_parent);
+// The publication's write: the parent's brain (its +0x64; ours the parent's AiEntity, live
+// while its owner word is set) takes the two words by its profile type. The ewep class update
+// runs it over an addeweap child's gun words and over a person body's +0x322 / +0x324 words
+// alike (person_ewep_anchored_attach).
+// [orig: Entity_UpdateTransformAndTurret @0x440ca0 - brain [edi+64h] @0x440f5a, the stores
+//  @0x440f7a / @0x440f8a, @0x441007 / @0x44100d and @0x44101a / @0x441020]
+inline void publish_gun_words_to_brain(World &world, EntityHandle parent_handle,
+		int16_t yaw_word, int16_t pitch_word) {
+	AiEntity *parent_ai = world.ai.for_handle(parent_handle);
 	if (parent_ai == nullptr || parent_ai->brain.f[AiBrain::kOwner] == 0)
 		return;
-	const Entity *parent = world.registry.get(mount.emplacement_parent);
+	const Entity *parent = world.registry.get(parent_handle);
 	if (parent == nullptr) return;
 	const EmplacedParentGunWords words = emplaced_parent_gun_words(world, *parent,
-			parent_ai->profile.type, mount.emplaced_gun_yaw_word, mount.emplaced_gun_pitch_word);
+			parent_ai->profile.type, yaw_word, pitch_word);
 	if (words.yaw) {
 		parent_ai->brain.f[AiBrain::kActiveYaw] = words.yaw_bam;
 		parent_ai->brain.f[AiBrain::kStagingBlock + 3] = words.yaw_bam;
@@ -496,6 +537,18 @@ inline void publish_emplaced_gun_words_to_parent(World &world,
 		parent_ai->brain.f[AiBrain::kActivePitch] = words.pitch_bam;
 		parent_ai->brain.f[AiBrain::kStagingBlock + 4] = words.pitch_bam;
 	}
+}
+
+inline void publish_emplaced_gun_words_to_parent(World &world,
+		const Entity &mount) {
+	if (!mount.emplaced_update || !mount.emplacement_parent.valid()) return;
+	if (emplaced_slot_def(world, mount) == nullptr) return;
+	// A child promoted onto an authored userpoint (index > 0) that rides the
+	// parent root; an unstamped subobject (-1) keeps the leg off.
+	if (mount.emplacement_bone == 0 || mount.emplacement_anchor_subobject != 0)
+		return;
+	publish_gun_words_to_brain(world, mount.emplacement_parent, mount.emplaced_gun_yaw_word,
+			mount.emplaced_gun_pitch_word);
 }
 
 // The ewep class update's first gate: a carrier (groundEntity +0x28, the
@@ -533,7 +586,17 @@ inline void tick_emplaced_weapon_channel(World &world, Entity &mount,
 			emplaced_carrier_is_dead_hull(world.registry.get(mount.emplacement_parent)))
 		return;
 	publish_emplaced_gun_words_to_parent(world, mount);
+	// The ewep update's window leg and the tank-command call behind it sit behind its slot Def
+	// (+0x2D4): a gun with none ends its update ahead of both, with a ground or without one.
+	// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the slot Def read @0x440E8E, `jz` with a
+	//  ground @0x440EA0, the gate without one @0x4411C9..0x4411CB]
+	if (mount.emplaced_update && emplaced_slot_def(world, mount) == nullptr) return;
 	clamp_emplaced_gun_words_to_window(world, mount, gunner);
+	// The window leg's tail: the tank-command call over the occupant's packed MoveOrder byte.
+	if (mount.emplaced_update)
+		emplaced_command_call(world, mount.ground_target, mount.emplaced_command_stamp,
+				occupant.handle == world.cached.local_player, occupant.net_move_input,
+				occupant.anim_slot);
 }
 
 // The ewep class update's every-tick legs outside the occupied channel, in
@@ -609,9 +672,9 @@ inline void tick_emplaced_weapon_class_update(World &world, Entity &mount) {
 		//  def test @0x440EA6..0x440EAB, root copy @0x4410EA..0x4411BC]
 		if (emplaced_slot_def(world, mount) == nullptr) return;
 		mount.position = Vec3{};
-		mount.yaw = 90; // engine heading 0
-		mount.pitch = 0;
-		mount.roll = 0;
+		mount.heading = 0; // the memset Yaw word
+		mount.pitch_bam = 0;
+		mount.roll_bam = 0;
 		if (mount.veh.yaw_seeded) {
 			mount.veh.yaw_bam = 0;
 			mount.veh.air_pitch_bam = 0;

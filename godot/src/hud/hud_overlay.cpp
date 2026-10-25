@@ -21,6 +21,7 @@
 
 #include <formats/def/def.h> // DefVehicleHudBlock (the VEHICLE_HUD block the panel feed reads)
 #include <formats/def/def_hudpos_write.h> // hudpos_unauthored (the layout of a file with no key)
+#include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the status page's GetTickCount)
 #include <runtime/hud/feed_format.h> // kGameTextLineColor (the 0x32 join/leave lines)
 #include <runtime/hud/hud_combat.h> // frustum_clip_mask (the label projector's clip rule)
 #include <runtime/hud/hud_lfp_panel.h> // lfp_under_attack_text / lfp_ready_text (D-25)
@@ -139,8 +140,10 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_hud_detail_level", "level"), &HudOverlay::next_hud_detail_level);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("sight_scale_index_default"), &HudOverlay::sight_scale_index_default);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("next_friendly_tag_mode", "mode"), &HudOverlay::next_friendly_tag_mode);
-	ClassDB::bind_method(D_METHOD("configure", "hudpos", "root"), &HudOverlay::configure);
+	ClassDB::bind_method(D_METHOD("configure", "hudpos", "root", "full_arm"), &HudOverlay::configure,
+			DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("is_configured"), &HudOverlay::is_configured);
+	ClassDB::bind_method(D_METHOD("get_additive_material"), &HudOverlay::get_additive_material);
 	ClassDB::bind_method(D_METHOD("set_crosshair_style", "style"), &HudOverlay::set_crosshair_style);
 	ClassDB::bind_method(D_METHOD("get_crosshair_style"), &HudOverlay::get_crosshair_style);
 	ClassDB::bind_method(D_METHOD("set_crosshair_color", "rgb"), &HudOverlay::set_crosshair_color);
@@ -227,6 +230,8 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_attach_label_text", "index"),
 			&HudOverlay::get_attach_label_text);
 	ClassDB::bind_method(D_METHOD("get_scoreboard_header_text"), &HudOverlay::get_scoreboard_header_text);
+	ClassDB::bind_method(D_METHOD("get_frame_rate_overlay_text"),
+			&HudOverlay::get_frame_rate_overlay_text);
 	ClassDB::bind_method(D_METHOD("get_attach_label_position", "index"),
 			&HudOverlay::get_attach_label_position);
 	ClassDB::bind_method(D_METHOD("set_friendly_tags", "shown", "camera_xform",
@@ -252,6 +257,8 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_weapon_ammo_key);
 	ClassDB::bind_method(D_METHOD("set_no_hud", "no_hud"), &HudOverlay::set_no_hud);
 	ClassDB::bind_method(D_METHOD("set_menu_screen_open", "open"), &HudOverlay::set_menu_screen_open);
+	ClassDB::bind_method(D_METHOD("set_overlay_pass_called", "called"),
+			&HudOverlay::set_overlay_pass_called);
 	ClassDB::bind_method(D_METHOD("set_end_round_overlay", "shown", "top", "bottom",
 								  "texts", "ys"),
 			&HudOverlay::set_end_round_overlay);
@@ -269,6 +276,10 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::get_hud_detail_level);
 	ClassDB::bind_method(D_METHOD("set_item_flash", "index", "value"),
 			&HudOverlay::set_item_flash);
+	ClassDB::bind_method(D_METHOD("get_item_flash_timers"), &HudOverlay::get_item_flash_timers);
+	ClassDB::bind_method(D_METHOD("get_process_words"), &HudOverlay::get_process_words);
+	ClassDB::bind_method(D_METHOD("carry_process_words", "words"),
+			&HudOverlay::carry_process_words);
 	ClassDB::bind_method(D_METHOD("set_showhud_flags", "flags"),
 			&HudOverlay::set_showhud_flags);
     ClassDB::bind_method(D_METHOD("set_aspect_mode", "mode"), &HudOverlay::set_aspect_mode);
@@ -314,6 +325,7 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_draw_timing_enabled);
 	ClassDB::bind_method(D_METHOD("consume_draw_timing_us"),
 			&HudOverlay::consume_draw_timing_us);
+	ClassDB::bind_method(D_METHOD("submit_draw_now"), &HudOverlay::submit_draw_now);
 
 	BIND_CONSTANT(MIN_CROSSHAIR_STYLE);
 	BIND_CONSTANT(MAX_CROSSHAIR_STYLE);
@@ -526,7 +538,8 @@ void HudOverlay::load_crosshair_texture_() {
 	layout_.crosshair_tex_h = tex.is_valid() ? tex->get_height() : 0;
 }
 
-void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> &p_root) {
+void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> &p_root,
+		bool p_full_arm) {
 	root_ = p_root;
 	layout_ = HudLayout{};
 	textures_ = {};
@@ -568,7 +581,11 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	// resolves the names it hands back and stamps the texture-derived fields.
 	opennova::hud::HudLayoutAssets assets;
 	opennova::hud::hud_layout_from_hudpos(file, layout_, assets);
-	configure_combat_(assets);
+	// A dedicated host's mission textures stage runs the reduced arm: none of the HUD's own art
+	// (the texture load, the tip system), only the box styles, the connection icons and the
+	// fonts its status page draws with (engine mission/mission_load_plan.h carries the witness,
+	// D-NET-NEW-L8-40).
+	if (p_full_arm) configure_combat_(assets);
 
 	// The HUDDECLUT mask table the file authors: the engine's
 	// declutter_from_hudpos, from retail's zeroed table whatever the file
@@ -590,7 +607,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	// (runtime/hud/hud_texture_materials.h); the draws combine through it.
 	// The static HUD frame background the engine picked (the last authored
 	// StaticFrame line, hud_static_frame_index); absent, nothing is loaded.
-	if (layout_.frame_pos.present) {
+	if (p_full_arm && layout_.frame_pos.present) {
 		const Ref<Texture2D> tex = load_hud_texture_(opennova::to_gd(assets.static_frame),
 				ResourceRoot::loader_of(opennova::hud::HudLayoutAssets::kStaticFrameRole));
 		textures_[opennova::hud::kHudTexFrame] = tex;
@@ -607,8 +624,31 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		// secondary texture (the combined material rec+0x30 gates the whole
 		// drawer) [orig: the combine @0x56af3c, the null gate @0x56b71f,
 		// see docs/interface/hud-re.md].
-		const Ref<Texture2D> border = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexBoxBorder), ResourceRoot::TEXTURE_LOADER_TGA, false,
-				opennova::hud::kBoxMaterialWord);
+		// The style lifts the atlas's interior brush cell (3,0) into its own
+		// texture under the same box material and zeroes it out of the atlas; the
+		// fill's one wrap-addressed quad samples it (hud_frame.h kHudTexBoxFill
+		// carries the witness).
+		const String border_name(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexBoxBorder));
+		const Ref<Image> atlas = root_.is_valid()
+				? root_->load_texture_image(border_name, ResourceRoot::TEXTURE_LOADER_TGA)
+				: Ref<Image>();
+		Ref<Texture2D> border;
+		Ref<Texture2D> fill;
+		if (atlas.is_valid()) {
+			const int32_t cell_w = atlas->get_width() >> 2;
+			const int32_t cell_h = atlas->get_height() >> 2;
+			if (cell_w > 0 && cell_h > 0) {
+				const Rect2i brush(3 * cell_w, 0, cell_w, cell_h);
+				fill = ImageTexture::create_from_image(atlas->get_region(brush));
+				atlas->fill_rect(brush, Color(0.0f, 0.0f, 0.0f, 0.0f));
+			}
+			border = ImageTexture::create_from_image(atlas);
+			for (const Ref<Texture2D> &made : { border, fill })
+				if (made.is_valid())
+					texture_material_words_[made->get_instance_id()] = opennova::hud::kBoxMaterialWord;
+			named_material_words_[opennova::to_std(border_name.to_lower())] =
+					opennova::hud::kBoxMaterialWord;
+		}
 		const Ref<Texture2D> brush = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexBoxTile), ResourceRoot::TEXTURE_LOADER_TGA);
 		// The camo's own dims divide the pieces' screen-anchored second UV
 		// (HudLayout::box_tile_w/h carries the witness).
@@ -618,6 +658,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 				opennova::hud::kNetIconMaterialWord);
 		textures_[opennova::hud::kHudTexBoxBorder] = border;
 		textures_[opennova::hud::kHudTexBoxTile] = brush;
+		textures_[opennova::hud::kHudTexBoxFill] = fill;
 		textures_[opennova::hud::kHudTexNetIcon] = icon;
 		layout_.box_texture_valid = border.is_valid() && brush.is_valid();
 		// The piece size comes off the border atlas's own width, not a
@@ -636,122 +677,133 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		textures_[opennova::hud::kHudTexNetNovaWorldIcon] = novaworld_icon;
 		layout_.net_link_icon_texture_valid = link_icon.is_valid();
 		layout_.net_novaworld_icon_texture_valid = novaworld_icon.is_valid();
-		// The tip panel's own box atlas (no second stage) and its two icons.
-		const Ref<Texture2D> tip_box = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexTipBox), ResourceRoot::TEXTURE_LOADER_TGA, false,
-				opennova::hud::kBoxMaterialWord);
-		const Ref<Texture2D> tip_keyboard = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexTipKeyboard), ResourceRoot::TEXTURE_LOADER_STAGE, false,
-				opennova::hud::kTipIconMaterialWord);
-		const Ref<Texture2D> tip_gameplay = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexTipGameplay), ResourceRoot::TEXTURE_LOADER_STAGE, false,
-				opennova::hud::kTipIconMaterialWord);
-		textures_[opennova::hud::kHudTexTipBox] = tip_box;
-		textures_[opennova::hud::kHudTexTipKeyboard] = tip_keyboard;
-		textures_[opennova::hud::kHudTexTipGameplay] = tip_gameplay;
-		layout_.tip_box_texture_valid = tip_box.is_valid();
-		layout_.tip_box_tex_w = tip_box.is_valid() ? tip_box->get_width() : 0;
-		layout_.tip_box_tex_h = tip_box.is_valid() ? tip_box->get_height() : 0;
-		layout_.tip_keyboard_texture_valid = tip_keyboard.is_valid();
-		layout_.tip_gameplay_texture_valid = tip_gameplay.is_valid();
+		// The tip panel's own box atlas (no second stage) and its two icons: the full arm's.
+		if (p_full_arm) {
+			const Ref<Texture2D> tip_box = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexTipBox), ResourceRoot::TEXTURE_LOADER_TGA, false,
+					opennova::hud::kBoxMaterialWord);
+			const Ref<Texture2D> tip_keyboard = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexTipKeyboard), ResourceRoot::TEXTURE_LOADER_STAGE, false,
+					opennova::hud::kTipIconMaterialWord);
+			const Ref<Texture2D> tip_gameplay = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexTipGameplay), ResourceRoot::TEXTURE_LOADER_STAGE, false,
+					opennova::hud::kTipIconMaterialWord);
+			textures_[opennova::hud::kHudTexTipBox] = tip_box;
+			textures_[opennova::hud::kHudTexTipKeyboard] = tip_keyboard;
+			textures_[opennova::hud::kHudTexTipGameplay] = tip_gameplay;
+			layout_.tip_box_texture_valid = tip_box.is_valid();
+			layout_.tip_box_tex_w = tip_box.is_valid() ? tip_box->get_width() : 0;
+			layout_.tip_box_tex_h = tip_box.is_valid() ? tip_box->get_height() : 0;
+			layout_.tip_keyboard_texture_valid = tip_keyboard.is_valid();
+			layout_.tip_gameplay_texture_valid = tip_gameplay.is_valid();
+		}
 	}
-	{
-		// The AAS zone status panel's three team-icon atlases and the two
-		// tiles [orig: HUD_LoadAllTextures @0x59dda0 — JO_LFP.tga team 1,
-		// R_LFP.tga team 2, N_LFP.tga neutral; lfp_alf.tga the tile for
-		// everyone else's zones -> 0x27239C0 @0x59e104/@0x59e10e, lfp_dlf.tga
-		// the tile for the viewer's OWN zones -> 0x27239D0 (textureId +4 =
-		// 0x27239D4) @0x59e11a/@0x59e11f, see docs/interface/hud-re.md].
-		const Ref<Texture2D> team1 = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTeam1), ResourceRoot::TEXTURE_LOADER_FILE, false,
-				opennova::hud::kLfpIconMaterialWord);
-		const Ref<Texture2D> team2 = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTeam2), ResourceRoot::TEXTURE_LOADER_FILE, false,
-				opennova::hud::kLfpIconMaterialWord);
-		const Ref<Texture2D> neutral = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpNeutral), ResourceRoot::TEXTURE_LOADER_FILE, false,
-				opennova::hud::kLfpIconMaterialWord);
-		const Ref<Texture2D> tile_own = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTileOwn), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
-		const Ref<Texture2D> tile_other = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTileOther), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
-		textures_[opennova::hud::kHudTexLfpTeam1] = team1;
-		textures_[opennova::hud::kHudTexLfpTeam2] = team2;
-		textures_[opennova::hud::kHudTexLfpNeutral] = neutral;
-		textures_[opennova::hud::kHudTexLfpTileOwn] = tile_own;
-		textures_[opennova::hud::kHudTexLfpTileOther] = tile_other;
-		layout_.lfp_icon_texture_valid[0] = team1.is_valid();
-		layout_.lfp_icon_texture_valid[1] = team2.is_valid();
-		layout_.lfp_icon_texture_valid[2] = neutral.is_valid();
-		layout_.lfp_tile_own_texture_valid = tile_own.is_valid();
-		layout_.lfp_tile_other_texture_valid = tile_other.is_valid();
-	}
+	// The rest is the HUD texture load's and the tip system's, the full arm's alone.
+	if (p_full_arm) {
+		{
+			// The AAS zone status panel's three team-icon atlases and the two
+			// tiles [orig: HUD_LoadAllTextures @0x59dda0 — JO_LFP.tga team 1,
+			// R_LFP.tga team 2, N_LFP.tga neutral; lfp_alf.tga the tile for
+			// everyone else's zones -> 0x27239C0 @0x59e104/@0x59e10e, lfp_dlf.tga
+			// the tile for the viewer's OWN zones -> 0x27239D0 (textureId +4 =
+			// 0x27239D4) @0x59e11a/@0x59e11f, see docs/interface/hud-re.md].
+			const Ref<Texture2D> team1 = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTeam1), ResourceRoot::TEXTURE_LOADER_FILE, false,
+					opennova::hud::kLfpIconMaterialWord);
+			const Ref<Texture2D> team2 = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTeam2), ResourceRoot::TEXTURE_LOADER_FILE, false,
+					opennova::hud::kLfpIconMaterialWord);
+			const Ref<Texture2D> neutral = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpNeutral), ResourceRoot::TEXTURE_LOADER_FILE, false,
+					opennova::hud::kLfpIconMaterialWord);
+			const Ref<Texture2D> tile_own = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTileOwn), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
+			const Ref<Texture2D> tile_other = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTileOther), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
+			textures_[opennova::hud::kHudTexLfpTeam1] = team1;
+			textures_[opennova::hud::kHudTexLfpTeam2] = team2;
+			textures_[opennova::hud::kHudTexLfpNeutral] = neutral;
+			textures_[opennova::hud::kHudTexLfpTileOwn] = tile_own;
+			textures_[opennova::hud::kHudTexLfpTileOther] = tile_other;
+			layout_.lfp_icon_texture_valid[0] = team1.is_valid();
+			layout_.lfp_icon_texture_valid[1] = team2.is_valid();
+			layout_.lfp_icon_texture_valid[2] = neutral.is_valid();
+			layout_.lfp_tile_own_texture_valid = tile_own.is_valid();
+			layout_.lfp_tile_other_texture_valid = tile_other.is_valid();
+		}
 
-	{
-		// The HUDLS bar's bracket and more-available marker, named by hudpos.
-		const Ref<Texture2D> bracket = load_hud_texture_(opennova::to_gd(assets.hudls_bracket),
-				ResourceRoot::loader_of(opennova::hud::HudLayoutAssets::kHudlsRole));
-		const Ref<Texture2D> moreav = load_hud_texture_(opennova::to_gd(assets.hudls_moreav),
-				ResourceRoot::loader_of(opennova::hud::HudLayoutAssets::kHudlsRole));
-		textures_[opennova::hud::kHudTexSlotBarBracket] = bracket;
-		textures_[opennova::hud::kHudTexSlotBarMoreAv] = moreav;
-		layout_.hudls.bracket_texture_valid = bracket.is_valid();
-		layout_.hudls.bracket_tex_w = bracket.is_valid() ? bracket->get_width() : 0;
-		layout_.hudls.bracket_tex_h = bracket.is_valid() ? bracket->get_height() : 0;
-		layout_.hudls.moreav_texture_valid = moreav.is_valid();
-		layout_.hudls.moreav_tex_w = moreav.is_valid() ? moreav->get_width() : 0;
-		layout_.hudls.moreav_tex_h = moreav.is_valid() ? moreav->get_height() : 0;
-	}
+		{
+			// The HUDLS bar's bracket and more-available marker, named by hudpos.
+			const Ref<Texture2D> bracket = load_hud_texture_(opennova::to_gd(assets.hudls_bracket),
+					ResourceRoot::loader_of(opennova::hud::HudLayoutAssets::kHudlsRole));
+			const Ref<Texture2D> moreav = load_hud_texture_(opennova::to_gd(assets.hudls_moreav),
+					ResourceRoot::loader_of(opennova::hud::HudLayoutAssets::kHudlsRole));
+			textures_[opennova::hud::kHudTexSlotBarBracket] = bracket;
+			textures_[opennova::hud::kHudTexSlotBarMoreAv] = moreav;
+			layout_.hudls.bracket_texture_valid = bracket.is_valid();
+			layout_.hudls.bracket_tex_w = bracket.is_valid() ? bracket->get_width() : 0;
+			layout_.hudls.bracket_tex_h = bracket.is_valid() ? bracket->get_height() : 0;
+			layout_.hudls.moreav_texture_valid = moreav.is_valid();
+			layout_.hudls.moreav_tex_w = moreav.is_valid() ? moreav->get_width() : 0;
+			layout_.hudls.moreav_tex_h = moreav.is_valid() ? moreav->get_height() : 0;
+		}
 
-	// The eight HUDSTANCE records' textures by slot (the six stance frames,
-	// then the team tiles; the engine resolved the ids and offsets), each with
-	// its image's own size.
-	for (int i = 0; i < opennova::hud::kHudStanceRecords; ++i) {
-		const size_t r = static_cast<size_t>(i);
-		const Ref<Texture2D> tex = load_hud_texture_(opennova::to_gd(assets.stance_textures[r]),
-				ResourceRoot::loader_of(opennova::hud::HudLayoutAssets::kStanceRole));
-		textures_[opennova::hud::kHudTexStance0 + i] = tex;
-		layout_.stance_texture_valid[r] = tex.is_valid();
-		layout_.stance_frame_w[r] = tex.is_valid() ? tex->get_width() : 0;
-		layout_.stance_frame_h[r] = tex.is_valid() ? tex->get_height() : 0;
-	}
+		// The eight HUDSTANCE records' textures by slot (the six stance frames,
+		// then the team tiles; the engine resolved the ids and offsets), each with
+		// its image's own size.
+		for (int i = 0; i < opennova::hud::kHudStanceRecords; ++i) {
+			const size_t r = static_cast<size_t>(i);
+			const Ref<Texture2D> tex = load_hud_texture_(opennova::to_gd(assets.stance_textures[r]),
+					ResourceRoot::loader_of(opennova::hud::HudLayoutAssets::kStanceRole));
+			textures_[opennova::hud::kHudTexStance0 + i] = tex;
+			layout_.stance_texture_valid[r] = tex.is_valid();
+			layout_.stance_frame_w[r] = tex.is_valid() ? tex->get_width() : 0;
+			layout_.stance_frame_h[r] = tex.is_valid() ? tex->get_height() : 0;
+		}
 
-	load_crosshair_texture_();
-	apply_crosshair_options_();
-	// Retail uploads the strip at its authored resolution with its full
-	// box-filtered mip chain; the default spinmap badges then sample near the
-	// 16px level. A mipless upload aliases the source into a visibly broken
-	// armory "A". The compiler's half-texel cell insets ride the PHYSICAL
-	// dimensions of whatever strip this install mounts (stock 16x480,
-	// RevX02 64x1920), so stamp the measured size.
-	const Ref<Texture2D> map_icons = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapIcons), ResourceRoot::TEXTURE_LOADER_FILE, true,
-			opennova::hud::kTsdIconMaterialWord);
-	textures_[opennova::hud::kHudTexMapIcons] = map_icons;
-	apply_map_icon_sampling_();
-	if (map_icons.is_valid()) {
-		state_.minimap.icon_strip_w_px =
-				static_cast<float>(map_icons->get_width());
-		state_.minimap.icon_strip_h_px =
-				static_cast<float>(map_icons->get_height());
-	} else {
-		state_.minimap.icon_strip_w_px =
-				opennova::hud::HudMinimapInput{}.icon_strip_w_px;
-		state_.minimap.icon_strip_h_px =
-				opennova::hud::HudMinimapInput{}.icon_strip_h_px;
+		load_crosshair_texture_();
+		apply_crosshair_options_();
+		// Retail uploads the strip at its authored resolution with its full
+		// box-filtered mip chain; the default spinmap badges then sample near the
+		// 16px level. A mipless upload aliases the source into a visibly broken
+		// armory "A". The compiler's half-texel cell insets ride the PHYSICAL
+		// dimensions of whatever strip this install mounts (stock 16x480,
+		// RevX02 64x1920), so stamp the measured size.
+		const Ref<Texture2D> map_icons = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapIcons), ResourceRoot::TEXTURE_LOADER_FILE, true,
+				opennova::hud::kTsdIconMaterialWord);
+		textures_[opennova::hud::kHudTexMapIcons] = map_icons;
+		apply_map_icon_sampling_();
+		if (map_icons.is_valid()) {
+			state_.minimap.icon_strip_w_px =
+					static_cast<float>(map_icons->get_width());
+			state_.minimap.icon_strip_h_px =
+					static_cast<float>(map_icons->get_height());
+		} else {
+			state_.minimap.icon_strip_w_px =
+					opennova::hud::HudMinimapInput{}.icon_strip_w_px;
+			state_.minimap.icon_strip_h_px =
+					opennova::hud::HudMinimapInput{}.icon_strip_h_px;
+		}
+		// The compass ring and the radar sector-slice marks are colour-mode HUD
+		// textures: like every textured map sprite their material is colour family
+		// 0x600, whose MODULATE2X stage runs on the device (map_modulate2x_material),
+		// so the textures stay raw. The marks draw only while both loaded
+		// (HudMinimapInput::radar_slices_loaded carries the witness).
+		textures_[opennova::hud::kHudTexMapCompass] =
+				load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapCompass), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
+		textures_[opennova::hud::kHudTexMapRadar] = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapRadar), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
+		textures_[opennova::hud::kHudTexMapRadarNarrow] = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapRadarNarrow), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
+		state_.minimap.radar_slices_loaded =
+				textures_[opennova::hud::kHudTexMapRadar].is_valid() &&
+				textures_[opennova::hud::kHudTexMapRadarNarrow].is_valid();
+		textures_[opennova::hud::kHudTexMapWpIndicator] =
+				load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapWpIndicator), ResourceRoot::TEXTURE_LOADER_FILE, false,
+						opennova::hud::kWpIndicatorMaterialWord);
 	}
-	// The compass ring and the radar sector-slice marks are colour-mode HUD
-	// textures: like every textured map sprite their material is colour family
-	// 0x600, whose MODULATE2X stage runs on the device (map_modulate2x_material),
-	// so the textures stay raw. The marks draw only while both loaded
-	// (HudMinimapInput::radar_slices_loaded carries the witness).
-	textures_[opennova::hud::kHudTexMapCompass] =
-			load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapCompass), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
-	textures_[opennova::hud::kHudTexMapRadar] = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapRadar), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
-	textures_[opennova::hud::kHudTexMapRadarNarrow] = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapRadarNarrow), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
-	state_.minimap.radar_slices_loaded =
-			textures_[opennova::hud::kHudTexMapRadar].is_valid() &&
-			textures_[opennova::hud::kHudTexMapRadarNarrow].is_valid();
-	textures_[opennova::hud::kHudTexMapWpIndicator] =
-			load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapWpIndicator), ResourceRoot::TEXTURE_LOADER_FILE, false,
-					opennova::hud::kWpIndicatorMaterialWord);
 
 	// The two hudpos font names; the width pick and the load ride
 	// ensure_label_fonts_, which runs on the first draw and on every width-tier
 	// change, as retail's HUD_InitAllFonts reloads them together.
 	hudpos_font_lo_ = assets.font_lo;
 	hudpos_font_hi_ = assets.font_hi;
+
+	// The HUD's render materials with its textures, not at its first draw: the box styles'
+	// load makes the flat one's on both arms, the full arm's texture load the map pass's
+	// (engine mission/mission_load_plan.h carries the witness).
+	ensure_flat_material_();
+	if (p_full_arm) ensure_map_materials_();
 
 	configured_ = true;
 	compiler_.configure(layout_, nullptr);
@@ -871,6 +923,12 @@ void HudOverlay::clear_weapon() {
 
 void HudOverlay::reset_overlay_buffers() {
     compiler_.reset_overlay_buffers();
+	// The reset rebuilds the layer table at the stored hud_detail level, so an item
+	// flash's level-0 side path ends at the round init: the embedder's half of the
+	// overlay-buffer reset, witnessed at HudFrameCompiler::reset_overlay_buffers
+	// (runtime/hud/hud_frame.h: the layer visibility call there is the embedder's).
+	declutter_.apply_level(declutter_.level());
+	apply_declutter_();
     queue_redraw();
 }
 
@@ -936,18 +994,15 @@ int HudOverlay::send_command_map_chat(const Ref<Simulation> &p_sim, bool p_all,
 void HudOverlay::set_frame_clocks(int64_t p_logic_tick, int64_t p_main_frame,
 		int64_t p_session_frame, int64_t p_hud_frame) {
 	state_.ticks = static_cast<int>(static_cast<uint32_t>(p_logic_tick));
-	// A mission start zeroes the main-frame counter; the message rings' held
-	// lines keep the frames they had left (HudFrameCompiler::rebase_message_clock).
+	// Only a mission start zeroes the main-frame counter, and that start clears the message
+	// rings (HudFrameCompiler::clear_message_rings carries the witness).
 	const uint32_t main_frame = static_cast<uint32_t>(p_main_frame);
-	if (main_frame < state_.main_frame)
-		compiler_.rebase_message_clock(static_cast<int>(main_frame - state_.main_frame));
+	if (main_frame < state_.main_frame) compiler_.clear_message_rings();
 	state_.main_frame = main_frame;
 	state_.session_frame = static_cast<uint32_t>(p_session_frame);
 	state_.hud_frame = static_cast<uint32_t>(p_hud_frame);
-	// The HUD item flash countdown runs once per HUD frame on the logic
-	// tick (hud_declutter.h HudItemFlash::tick).
-	item_flash_.tick(state_.ticks);
-	state_.item_flash = item_flash_.timers();
+	// The HUD item flash countdown is the overlay pass's own, at its head past the
+	// early-outs (HudFrameCompiler::compile_overlay_pass ticks it on state_.ticks).
 	queue_redraw();
 }
 
@@ -996,8 +1051,10 @@ void HudOverlay::set_scope_state(const Ref<PlayerLocalView> &p_view, const Ref<R
         scope.magnification = v.scope_magnification;
     }
     if (scope.active && p_gametext.is_valid()) {
+        // The override table first (game_text_lookup, D-NET-675).
+        const opennova::hud::GameTextLookup lookup = game_text_lookup(p_gametext);
         const auto text = [&](const char *section, const char *key) -> std::string {
-            return opennova::to_std(p_gametext->get_string_in_section(section, key));
+            return lookup(section, key, "");
         };
         scope.range_format = text(opennova::hud::kGameTextOverlays, "STROVER_DIST");
         scope.range_over_1km = text(opennova::hud::kGameTextOverlays, "STROVER_DIST1KM");
@@ -1030,6 +1087,12 @@ void HudOverlay::set_no_hud(bool p_no_hud) {
 void HudOverlay::set_menu_screen_open(bool p_open) {
 	if (state_.menu_screen_open == p_open) return;
 	state_.menu_screen_open = p_open;
+	queue_redraw();
+}
+
+void HudOverlay::set_overlay_pass_called(bool p_called) {
+	if (state_.overlay_pass_called == p_called) return;
+	state_.overlay_pass_called = p_called;
 	queue_redraw();
 }
 
@@ -1210,6 +1273,18 @@ void HudOverlay::push_chat_line(const String &p_text, int64_t p_argb) {
 	queue_redraw();
 }
 
+std::vector<std::string> HudOverlay::chat_window_lines() const {
+	std::vector<std::string> lines;
+	for (const opennova::hud::HudMessageLine &line : compiler_.chat_lines()) lines.push_back(line.text);
+	return lines;
+}
+
+void HudOverlay::echo_admin_chat(const std::string &p_text) {
+	compiler_.push_chat_line(p_text, opennova::hud::chat_dispatch_flood_color(opennova::hud::kChatDispatchGlobal),
+			static_cast<int>(state_.main_frame));
+	queue_redraw();
+}
+
 void HudOverlay::set_message_log_shown(bool p_shown) {
 	state_.message_log_shown = p_shown;
 	queue_redraw();
@@ -1228,17 +1303,23 @@ void HudOverlay::set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_te
 	// (set_frame_clocks), stepped once per logic tick outside the pause and
 	// the epilog screen [orig: Game_ProcessMainFrame @0x5265d5 ->
 	// Game_TickHudFrameCounters @0x434c23].
-	// The compiler's element branches on it (the unmodelled conquest arm).
+	// The compiler's element branches on it (the conquest arm, D-HUD-61).
 	lp.game_type = static_cast<uint32_t>(p_game_type);
 	const opennova::hud::GameTextLookup gametext = game_text_lookup(p_gametext);
 	lp.under_attack_text = opennova::hud::lfp_under_attack_text(gametext);
 	lp.ready_text = opennova::hud::lfp_ready_text(gametext);
+	// The takeover dialog rides the same zone push: its nearest entry, composed
+	// with the gametext and the viewer's team; the frame draws it off the death
+	// screen (engine hud_takeover_status.h carries the witness).
+	opennova::hud::HudTakeoverFacts takeover;
 	if (p_shown && p_sim.is_valid()) {
 		lp.shown = p_sim->fill_lfp_zones(p_local_team, lp.zones);
+		p_sim->fill_takeover_facts(takeover);
 	} else {
 		lp.shown = false;
 		lp.zones.clear();
 	}
+	state_.takeover_status = opennova::hud::compose_takeover_status(takeover, p_local_team, gametext);
 	queue_redraw();
 }
 
@@ -1286,11 +1367,9 @@ bool project_to_overlay(const Transform3D &p_camera, const Projection &p_project
 
 String overlay_text(const Ref<RtxtStringFile> &p_gametext, const String &p_key,
 		const String &p_fallback) {
-	if (p_gametext.is_valid() &&
-			p_gametext->has_string_in_section(opennova::hud::kGameTextOverlays, StringName(p_key))) {
-		return p_gametext->get_string_in_section(opennova::hud::kGameTextOverlays, StringName(p_key));
-	}
-	return p_fallback;
+	// The override table first (game_text_lookup, D-NET-675).
+	return opennova::to_gd(game_text_lookup(p_gametext)(opennova::hud::kGameTextOverlays,
+			opennova::to_std(p_key).c_str(), opennova::to_std(p_fallback).c_str()));
 }
 
 } // namespace
@@ -1349,6 +1428,12 @@ int HudOverlay::get_attach_label_selected() const {
 		}
 	}
 	return -1;
+}
+
+String HudOverlay::get_frame_rate_overlay_text() const {
+	return state_.frame_rate.shown
+			? opennova::to_gd(opennova::hud::frame_rate_overlay_text(state_.frame_rate))
+			: String();
 }
 
 String HudOverlay::get_attach_label_text(int p_index) const {
@@ -1463,12 +1548,33 @@ int HudOverlay::get_hud_detail_level() const {
 }
 
 void HudOverlay::set_item_flash(int p_index, int p_value) {
-	// The timer store, then the level-0 layer rebuild that leaves the stored
-	// level alone (hud_declutter.h HudItemFlash::set / apply_level).
-	item_flash_.set(p_index, p_value);
-	state_.item_flash = item_flash_.timers();
+	// The timer store (the compiler owns the timers: its pass ticks them), then the
+	// level-0 layer rebuild that leaves the stored level alone (hud_declutter.h
+	// HudItemFlash::set / HudDeclutter::apply_level).
+	compiler_.set_item_flash(p_index, p_value);
 	declutter_.apply_level(0);
 	state_.declutter_visible = declutter_.visible();
+	queue_redraw();
+}
+
+PackedInt32Array HudOverlay::get_item_flash_timers() const {
+	PackedInt32Array out;
+	out.resize(opennova::hud::HudItemFlash::kCount);
+	for (int i = 0; i < opennova::hud::HudItemFlash::kCount; ++i)
+		out.set(i, compiler_.item_flash().timer(i));
+	return out;
+}
+
+Ref<HudProcessWordsCarry> HudOverlay::get_process_words() const {
+	Ref<HudProcessWordsCarry> out;
+	out.instantiate();
+	out->words = compiler_.process_words();
+	return out;
+}
+
+void HudOverlay::carry_process_words(const Ref<HudProcessWordsCarry> &p_words) {
+	if (p_words.is_null()) return;
+	compiler_.carry_process_words(p_words->words);
 	queue_redraw();
 }
 
@@ -1536,6 +1642,15 @@ void HudOverlay::set_role_facts(const Ref<Simulation> &p_sim,
 	state_.session = facts.session;
 	state_.squad_orders = facts.squad_orders;
 	state_.net_quality = facts.net_quality;
+	state_.frame_rate = facts.frame_rate;
+	// The connection status line and the start timer with their Overlays texts (engine
+	// hud/hud_frame.h HudConnectStatus / HudStartTimer carry the witness).
+	state_.connect_status = facts.connect_status;
+	state_.connect_status.label = opennova::to_std(overlay_text(p_gametext, "STROVER54", ""));
+	state_.start_timer.seconds = facts.start_timer_seconds;
+	state_.start_timer.label = opennova::to_std(overlay_text(p_gametext, "STROVER59", ""));
+	state_.start_timer.footer = opennova::to_std(overlay_text(p_gametext, "STROVER63", ""));
+	inset_target_name_ = facts.inset_target_name;
 	opennova::hud::hud_session_text(game_text_lookup(p_gametext), state_.session.text);
 	for (size_t c = 0; c < state_.slot_bar.size(); ++c) {
 		opennova::hud::HudSlotBarSlot &slot = state_.slot_bar[c];
@@ -1596,7 +1711,7 @@ void HudOverlay::set_minimap_terrain(const Ref<TerrainData> &p_terrain,
 	// transparent shore cutout in its own texture slot.
 	Ref<Texture2D> colormap = p_terrain->get_colormap();
 	opennova::terrain::Rgba8Image source;
-	if (texture_to_rgba8(colormap, source)) {
+	if (p_terrain->texture_rgba8(colormap, source)) {
 		const opennova::terrain::Rgba8Image device =
 				opennova::terrain::terrain_colormap_device_image(source, p_texcompression_level);
 		PackedByteArray bytes;
@@ -1691,9 +1806,9 @@ void HudOverlay::set_minimap_grid_origin(const Vector2 &p_mission_position,
 }
 
 void HudOverlay::server_status_clock_(uint32_t &r_now_ms, bool &r_window_active) const {
-	// The wall clock and the window's focus the page's throttle reads
-	// (hud_server_status.h server_status_page_due).
-	r_now_ms = static_cast<uint32_t>(Time::get_singleton()->get_ticks_msec());
+	// GetTickCount (the process's one clock, engine world/tick_count_clock.h) and the
+	// window's focus the page's throttle reads (hud_server_status.h server_status_page_due).
+	r_now_ms = opennova::world::frame_tick_count_ms();
 	const Window *window = get_window();
 	r_window_active = window == nullptr || window->has_focus();
 }
@@ -1866,10 +1981,7 @@ void HudOverlay::ensure_additive_item_() {
 	if (additive_item_.is_valid()) {
 		return;
 	}
-	if (additive_material_.is_null()) {
-		additive_material_.instantiate();
-		additive_material_->set_blend_mode(CanvasItemMaterial::BLEND_MODE_ADD);
-	}
+	ensure_additive_material_();
 	RenderingServer *rs = RenderingServer::get_singleton();
 	additive_item_ = rs->canvas_item_create();
 	rs->canvas_item_set_parent(additive_item_, get_canvas_item());
@@ -1953,6 +2065,9 @@ const opennova::hud::HudFrameCompiler::MapWindowDraw *HudOverlay::compile_comman
 }
 
 void HudOverlay::_notification(int p_what) {
+	if (p_what == NOTIFICATION_ENTER_TREE) {
+		add_to_group(kAdminGroup);
+	}
 	if (p_what == NOTIFICATION_RESIZED) {
 		queue_redraw();
 	}
@@ -2056,6 +2171,15 @@ PackedInt64Array HudOverlay::consume_draw_timing_us() {
 	draw_compile_us_ = 0;
 	draw_emit_us_ = 0;
 	return out;
+}
+
+void HudOverlay::submit_draw_now() {
+	if (!is_inside_tree()) {
+		return;
+	}
+	// What the redraw does: the item cleared, then the draw.
+	RenderingServer::get_singleton()->canvas_item_clear(get_canvas_item());
+	_draw();
 }
 
 void HudOverlay::render_list_(const HudDrawList &p_list) {

@@ -131,6 +131,10 @@ void ScriptVoiceChannel::refresh(World &world) {
 
 ScriptVoiceChannel::Frame ScriptVoiceChannel::frame(World &world, Vec3 listener) {
     refresh(world);
+    return sample(world, listener);
+}
+
+ScriptVoiceChannel::Frame ScriptVoiceChannel::sample(const World &world, Vec3 listener) const {
     Frame out;
     out.serial = serial_;
     out.state = state_;

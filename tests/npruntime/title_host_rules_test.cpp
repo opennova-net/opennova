@@ -200,8 +200,7 @@ int no_revive_window_at_death() {
 			roster[i].assigned_team_valid = true;
 			roster[i].reply.player_slot = static_cast<uint8_t>(i);
 			roster[i].admission_stage = GameAdmissionStage::Complete;
-			roster[i].link.last_deploy_tick = w.logic_tick;
-			roster[i].link.last_deploy_tick_valid = true;
+			roster[i].seed_armed_clock = w.out.rounds.frame_clock;
 		}
 		Server_TickUpdate(ctx); // the first frame's one-second service
 		replication::Datagram dg;

@@ -268,7 +268,7 @@ constexpr const char *overlay_label_key(uint32_t g) {
 // QUERY report prints. It is overlay_label_key's ladder save that the unnamed type 8
 // (FlagMe here) has no rung: "" [orig: GameType_GetAbbreviation @ 0x520fd0, the
 // `!hasSecondParam` arm; the waypoint family's STROVER28, or "&" under the debug word
-// dword_24C1930's 0x10000].
+// g_DebugCheatFlags's 0x10000].
 constexpr const char *abbreviation_overlay_key(uint32_t g) {
 	if (g == kFlagMe) return "";
 	return overlay_label_key(g);
@@ -302,7 +302,7 @@ namespace opennova::game_rules {
 // the live wire fields they default live in the session GameConfig (which keeps
 // zeros so a dev host stays inert). [orig: Config_SetDefaults; the g_* rule
 // globals @ 0x24D2140.. — engine/runtime/inmatch game_config.h names each]
-inline constexpr uint32_t kDefaultRespawnTime = 30;
+inline constexpr uint32_t kDefaultRoundTimeLimitMinutes = 30;
 inline constexpr uint32_t kDefaultTimeLimitMinutes = 10;
 inline constexpr uint32_t kDefaultReplayEnabled = 1;
 inline constexpr uint32_t kDefaultMaxTeamLives = 100;

@@ -125,7 +125,7 @@ static void check_co_op_key_nine() {
 	// @0x530e71].
 	inmatch::GameConfig config;
 	config.game_type = game_type::kCoop;
-	config.respawn_time = 30;
+	config.round_time_limit_minutes = 30;
 	world::World w;
 	SessionStatusBlock block;
 	std::vector<uint8_t> body = inmatch::serialize_session_status(config, 0, true, &w);

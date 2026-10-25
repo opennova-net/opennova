@@ -10,6 +10,10 @@ extends Control
 # engine's HudPos constants/statics — the witnesses live at the engine home,
 # engine/runtime/hud hud/view_effects.h.
 const SUN_VEIL_SHADER := preload("res://shaders/sun_veil_overlay.gdshader")
+# The revive tint's multiply, a Shader rather than a CanvasItemMaterial, whose program waits for the
+# first idle frame past a mission load (the reveal); a Shader makes its device program at its first
+# get_rid(), and the load's HUD leg makes this one and the veil's (GameHudPresenter, D-NET-NEW-LF-28).
+const REVIVE_TINT_SHADER := preload("res://shaders/canvas_blend_mul.gdshader")
 
 var _root: ResourceRoot
 var _binocular_mask: Texture2D
@@ -92,6 +96,9 @@ func _build_damage_feedback_quads() -> void:
 	_red_vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_red_vignette.modulate = Color(1.0, 0.0, 0.0, 0.0)
 	_red_vignette.visible = false
+	# The texture the mission load's set_resource_root read, ahead of this node's
+	# entering the tree (the HUD loads inside the load and mounts on its first frame).
+	_red_vignette.texture = _vignette
 	add_child(_red_vignette, false, Node.INTERNAL_MODE_BACK)
 	_red_vignette.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	# 3. The medic revive tint: retail sends an OPAQUE (alpha 255) quad whose
@@ -106,8 +113,8 @@ func _build_damage_feedback_quads() -> void:
 	_revive_tint.name = "ScreenFlashReviveTint"
 	_revive_tint.color = Color.WHITE
 	_revive_tint.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var tint_material := CanvasItemMaterial.new()
-	tint_material.blend_mode = CanvasItemMaterial.BLEND_MODE_MUL
+	var tint_material := ShaderMaterial.new()
+	tint_material.shader = REVIVE_TINT_SHADER
 	_revive_tint.material = tint_material
 	_revive_tint.visible = false
 	add_child(_revive_tint, false, Node.INTERNAL_MODE_BACK)
@@ -209,6 +216,28 @@ func is_nvg_mask_visible() -> bool:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED:
 		queue_redraw()
+
+
+## The draw that shows from the first live frame, the sun veil's quad, submitted at once
+## onto the veil's own item as its next redraw would submit it: the mission load's one
+## forced frame runs while the SceneTree is blocked, so a queued redraw would reach it empty
+## (GameHudPresenter's hud_pipeline_warm handler, D-NET-NEW-LF-16).
+func submit_draw_now() -> void:
+	if _sun_veil == null or not _sun_veil.is_inside_tree():
+		return
+	var item := _sun_veil.get_canvas_item()
+	RenderingServer.canvas_item_clear(item)
+	RenderingServer.canvas_item_add_rect(item, Rect2(Vector2.ZERO, get_viewport_rect().size),
+			_sun_veil.color)
+
+
+## The forced frame's end takes that quad back off the veil's item (GameHudPresenter's
+## hud_pipeline_warm(false)): Godot clears an item at a redraw only once it drew the item itself, so
+## the first live redraw would add its quad to this one, and the static rect, which nothing redraws,
+## would blend the veil twice all mission.
+func release_warm_draw() -> void:
+	if _sun_veil != null:
+		RenderingServer.canvas_item_clear(_sun_veil.get_canvas_item())
 
 
 func _draw() -> void:

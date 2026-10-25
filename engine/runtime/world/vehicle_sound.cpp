@@ -135,9 +135,9 @@ void emit_profile_oneshot(World &world, const Entity &vehicle,
     if (set.empty()) return;
     SoundSlotEvent ev;
     ev.source_handle = vehicle.handle.packed;
-    ev.pos[0] = to_fixed(vehicle.position.x);
-    ev.pos[1] = to_fixed(vehicle.position.y);
-    ev.pos[2] = to_fixed(vehicle.position.z);
+    ev.pos[0] = vehicle.position.x.q16;
+    ev.pos[1] = vehicle.position.y.q16;
+    ev.pos[2] = vehicle.position.z.q16;
     ev.slot = static_cast<uint8_t>(slot);
     std::snprintf(ev.set_name, sizeof(ev.set_name), "%s", set.c_str());
     world.out.slot_sounds.push_back(ev);
@@ -235,7 +235,7 @@ void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &tr
     // player, while a passenger or surviving non-claimant controller does not.
     // [orig: caller gate @0x48d181..0x48d1c7; the selector-zero ground mover's
     // twin @0x46f7e2..0x46f7f7 and the selector-zero boat's @0x471533..0x471546
-    // (IDB: Entity_ProcessInfantryPhysics @0x46E100 / Entity_ProcessAirVehiclePhysics
+    // (IDB: Vehicle_ProcessSelectorZeroGround @0x46E100 / Vehicle_ProcessSelectorZeroBoat
     // @0x46FA00, both misnomers)]
     if (traits.player_control && !has_live_primary_claimant(world, vehicle)) {
         anchor_residual_lanes(world, vehicle);
@@ -306,11 +306,11 @@ void VehicleSystem::update_ground_sound(Entity &vehicle, const VehicleTraits &tr
 		int64_t speed = magnitude_i32(vehicle.veh.speed);
 		if (speed == 0 && vehicle.saved_live_valid) {
 			const double dx =
-					static_cast<double>(vehicle.saved_live_pos[0]) - to_fixed(vehicle.position.x);
+					static_cast<double>(vehicle.saved_live_pos[0]) - vehicle.position.x.q16;
 			const double dy =
-					static_cast<double>(vehicle.saved_live_pos[1]) - to_fixed(vehicle.position.y);
+					static_cast<double>(vehicle.saved_live_pos[1]) - vehicle.position.y.q16;
 			const double dz =
-					static_cast<double>(vehicle.saved_live_pos[2]) - to_fixed(vehicle.position.z);
+					static_cast<double>(vehicle.saved_live_pos[2]) - vehicle.position.z.q16;
 			// fild/square/sum/fsqrt, flt_7C19E0 clamp, then truncation.
 			// Direction still comes from the original signed speed argument.
 			// [orig: Entity_ProcessMovementSoundEffects @0x5294A0, displacement
@@ -467,9 +467,9 @@ void VehicleSystem::update_tread_sound(Entity &vehicle, const VehicleTraits &tra
 // in its tail (tick_simple_motor).
 // [orig: Entity_UpdateVehiclePhysics @0x48AF00, tail @0x48D34E..0x48D429;
 // Entity_UpdateWatercraftPhysics @0x48D480, edge @0x48DAD1..0x48DB6B;
-// Entity_ProcessInfantryPhysics @0x46E100 (IDB misnomer, the selector-zero
+// Vehicle_ProcessSelectorZeroGround @0x46E100 (IDB misnomer, the selector-zero
 // ground mover) lights @0x46F8C3..0x46F8FC, claimant edge @0x46F8FC..0x46F99C;
-// Entity_ProcessAirVehiclePhysics @0x46FA00 (the selector-zero boat) claimant
+// Vehicle_ProcessSelectorZeroBoat @0x46FA00 (the selector-zero boat) claimant
 // edge @0x470055..0x4700EB, lights @0x4714EA..0x471523]
 void VehicleSystem::update_engine_sound(Entity &vehicle, const VehicleTraits &traits) {
 	if (vehicle_family_uses_direct_air_mover(traits.family))
@@ -495,7 +495,7 @@ void VehicleSystem::update_claimant_engine_sound(Entity &vehicle, const VehicleT
 	if (occupant != nullptr) {
 		if (!vehicle.veh.engine_sound_latched) {
 			vehicle.veh.engine_sound_latched = true;
-			if (static_cast<int64_t>(to_fixed(occupant->position.z)) + occupant->eye_offset_z >
+			if (static_cast<int64_t>(occupant->position.z.q16) + occupant->eye_offset_z >
 					world_.env.water_z)
 				emit_profile_oneshot(world_, vehicle, profile, traits, audio::kSlotEngineStart);
 		}
@@ -508,7 +508,7 @@ void VehicleSystem::update_claimant_engine_sound(Entity &vehicle, const VehicleT
 		vehicle.veh.engine_sound_latched = false;
 		if (traits.family != VehicleFamily::Watercraft || traits.physics == 0)
 			clear_motion_lanes(world_, vehicle);
-		if (static_cast<int64_t>(to_fixed(vehicle.position.z)) + 0x18000 > world_.env.water_z)
+		if (static_cast<int64_t>(vehicle.position.z.q16) + 0x18000 > world_.env.water_z)
 			emit_profile_oneshot(world_, vehicle, profile, traits, audio::kSlotEngineStop);
 	}
 }
@@ -606,7 +606,7 @@ void VehicleSystem::update_rotor_sound(Entity &vehicle, const VehicleTraits &tra
 void VehicleSystem::play_rotor_start_sound(Entity &vehicle, const VehicleTraits &traits) {
 	if (!traits.player_control || vehicle.veh.part_spin.rate != 0 ||
 			vehicle.veh.part_spin.speed > 10737417 || vehicle.veh.engine_sound_latched ||
-			static_cast<int64_t>(to_fixed(vehicle.position.z)) + vehicle.eye_offset_z <=
+			static_cast<int64_t>(vehicle.position.z.q16) + vehicle.eye_offset_z <=
 					world_.env.water_z)
 		return;
 	Entity occupant_scratch;
@@ -631,7 +631,7 @@ void VehicleSystem::play_claimant_detach_sound(Entity &vehicle, const Entity *oc
     if (traits == nullptr || !traits->player_control) return;
 	clear_motion_lanes(world, vehicle);
 	if (occupant != nullptr &&
-			static_cast<int64_t>(to_fixed(occupant->position.z)) + occupant->eye_offset_z >
+			static_cast<int64_t>(occupant->position.z.q16) + occupant->eye_offset_z >
 					world.env.water_z)
 		emit_profile_oneshot(
 				world, *occupant, profile_for(world, *traits), *traits, audio::kSlotEngineStop);

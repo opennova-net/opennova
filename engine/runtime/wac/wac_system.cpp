@@ -1,5 +1,6 @@
 #include <runtime/wac/wac_system.h>
 #include <runtime/world/world.h>
+#include <base/io/strutil.h>
 
 namespace opennova::wac {
 
@@ -64,6 +65,19 @@ void WacSystem::restore_runtime_state(opennova::world::World &world,
     runs_ = state.runs;
     initial_executed_ = state.initial_executed;
     prepare_tick(world);
+}
+
+bool WacSystem::toggle_cheat(std::string_view line, bool authority,
+		opennova::world::World &world) const {
+	if (!authority) return false;
+	for (size_t i = 0; i < prog_.declarations.size(); ++i) {
+		const Program::Declared &d = prog_.declarations[i];
+		if (d.type != 0x19 || !strutil::iequals(d.name, line)) continue;
+		const int var = 256 + static_cast<int>(i);
+		world.script.vars.set_mission(var, world.script.vars.get_mission(var) == 0 ? 1 : 0);
+		return true;
+	}
+	return false;
 }
 
 } // namespace opennova::wac

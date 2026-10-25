@@ -7,6 +7,16 @@ namespace opennova::world {
 // [orig: the FP viewmodel gate g_CameraMode == 0 in
 //  Entity_ComputeActionTransform @0x40133e -- the death lerp camera (4)
 //  presents like the chase (1)]
+// The verdict is the local entity's, for every part of a composed avatar: the
+// person callback runs for the head submit and for the body submit alike, and
+// its camera-tracked gate decides each part's submit, so in first person no
+// part reaches the camera (the binding's linked parts take the body's layer,
+// ObjectModel::set_presentation_layer).
+// [orig: Terrain_RenderSectorEntitiesBySide @0x5c7d50 - the head submit call
+//  @0x5c7ffc, the body submit's call @0x5c8039; Render_SectorEntity @0x5c4190 -
+//  the def callback's call @0x5c4335; BoneCallback_org0_World @0x4e3940 - the
+//  camera-tracked gate @0x4e3ab3..0x4e3aca ahead of the part's submit call
+//  @0x4e3b3b]
 bool presents_third_person(bool third_person, int camera_mode) {
     return third_person || camera_mode == 4;
 }
@@ -176,7 +186,7 @@ bool viewmodel_def_memo_hit(const std::string &name, const std::string &memo_nam
 }
 
 SpawnLoadoutPlan spawn_loadout_plan(const SpawnLoadoutInput &input,
-                                    bool has_explicit_spawn_loadout) {
+                                    bool has_explicit_spawn_loadout, bool in_session) {
     SpawnLoadoutPlan plan;
     bool has_loadout = false;
     for (const SpawnLoadoutSlot &slot : input.slots) {
@@ -185,8 +195,13 @@ SpawnLoadoutPlan spawn_loadout_plan(const SpawnLoadoutInput &input,
             break;
         }
     }
-    plan.set_player_class = input.has_player_class;
-    plan.player_class = input.has_player_class ? input.player_class : 0;
+    // The body's class word is the mission start's Player_InitPlayer's and nothing after
+    // writes it from the profile: in a session the side word its Team names, which the
+    // session start set from the record's two class bytes, out of one the mission's word
+    // (D-PLAYERINFO-33). The profile class rides the kit apply alone, in a session.
+    // [orig: Game_ApplySessionSettingsToGlobals @0x551500 - @0x5516EE..0x5516FD,
+    //  @0x551707..0x551725; Player_InitPlayer @0x4E15F0 - @0x4E1809..0x4E1832]
+    plan.player_class = input.has_player_class && in_session ? input.player_class : 0;
     // Mission-authored kits outrank the profile selection.
     if (has_explicit_spawn_loadout) {
         plan.action = SpawnLoadoutAction::kSyncInventory;

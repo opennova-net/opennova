@@ -68,7 +68,7 @@ int32_t CollisionWorld::resolve_vehicle_probes(World &world, Entity &source,
 	q.num_points = count;
 	for (int axis = 0; axis < 3; ++axis)
 		q.prev_pos[axis] = source.saved_live_valid ? source.saved_live_pos[axis] : hull_pos[axis];
-	q.source_bound_radius = to_fixed(source.bound_radius);
+	q.source_bound_radius = source.bound_radius.q16;
 	// Low-byte bit 7 adds type-12 to the ordinary vehicle type-7/CB query.
 	// [orig: @0x462A91..0x462A9F; Entity_ComputeBoneCollisionForce @0x4AE150]
 	q.mask = (source.item_attrib2 & 0x80u) != 0 ? 24 : 8;
@@ -92,19 +92,31 @@ int32_t CollisionWorld::resolve_vehicle_probes(World &world, Entity &source,
 		}
 		bool push_other = false;
 		if ((mass_source->item_attrib & 0x40u) != 0) {
-			const VehicleTraits *other_traits = world.vehicles.traits.get(other->item_id);
+			// The wake compares the CANDIDATE's own def mass (+0x908), whatever its
+			// def type: an addeweap gun authors none and keeps the allocator's 5,
+			// so a light hull (a Dune Buggy's 3, an SUV's 5) leaves a neighbour's
+			// gun asleep. A PlayerControl mass source is a vehicle def, whose
+			// traits mass is that same word.
+			// [orig: Entity_CheckCollisionState - the source's def+0x908 @0x462E94,
+			//  the candidate's @0x462E9A..0x462EA4, the mass source's @0x462EE8]
 			const VehicleTraits *resolved_traits = world.vehicles.traits.get(mass_source->item_id);
-			const int32_t other_mass = other_traits != nullptr ? other_traits->mass : 0;
+			const int32_t other_mass = other->def_mass;
 			const int32_t resolved_mass = resolved_traits != nullptr ? resolved_traits->mass : 0;
+			// The bound words doubled by a wrapping add, signed compares.
+			// [orig: Entity_CheckCollisionState - `mov ebp, [eax]; mov edx, [edi];
+			//  add ebp, ebp; cmp edx, ebp; jle` @0x462ED6..0x462EDE; `add edx, edx;
+			//  cmp [ecx], edx; jge` @0x462EF0..0x462EF4]
 			if (int64_t(own_mass) > 2LL * other_mass ||
-					source.bound_radius > 2.0f * other->bound_radius) {
+					source.bound_radius.q16 >
+							io::bam_add(other->bound_radius.q16, other->bound_radius.q16)) {
 				other->flags |= 0x40u;
 				if (other->item_type == 1)
 					other->veh.contact_wake_tick = world.logic_tick;
 				continue;
 			}
 			push_other = can_push && int64_t(resolved_mass) < 2LL * own_mass &&
-					mass_source->bound_radius < 2.0f * source.bound_radius;
+					mass_source->bound_radius.q16 <
+							io::bam_add(source.bound_radius.q16, source.bound_radius.q16);
 		}
 		// Keep the cheap current bound ahead of section-matrix production.
 		q.points = points.data();
@@ -122,7 +134,13 @@ int32_t CollisionWorld::resolve_vehicle_probes(World &world, Entity &source,
 			q.radii = &radii[i];
 			q.num_points = 1;
 			ContactResult contact;
-			if (!collision_contact_force(*target, q, blink, ladder, contact))
+			const bool touched = collision_contact_force(*target, q, blink, ladder, contact);
+			// The query's door-touch mask lands on the target, the building's started
+			// at 0 (D-NET-133). [orig: Entity_ComputeBoneCollisionForce @0x4AE150 - the
+			//  reset @0x4AE281, the OR @0x4AEB22]
+			if (contact.door_mask_reset) other->door_touch_mask = 0;
+			other->door_touch_mask |= contact.door_sections;
+			if (!touched)
 				continue;
 			if ((contact.flags & 0x800u) != 0)
 				source.carry_flags |= 0x40u;

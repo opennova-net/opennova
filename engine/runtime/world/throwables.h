@@ -33,6 +33,7 @@
 
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
+#include <runtime/world/physics_class_table.h>
 
 namespace opennova::terrain {
 struct TerrainHeightField;
@@ -64,6 +65,12 @@ enum class ThrowClass : uint8_t {
     kAVMine,   // think only — no motor row in retail [orig fn1 @ 0x443BB0]
     kLandmine, // mission minefield item: its think is world/minefield.cpp's
                // [orig: Entity_LandmineThink @ 0x441A40]
+    // The flares: the aflr and gflr rows' init callbacks (AflrClass_InitFromDef
+    // @0x4434B0 / GflrClass_InitFromDef @0x443510, the event rows @0x813330 / @0x813348)
+    // and their one motor, Entity_UpdateShellBounce @0x443DF0 (the physics rows
+    // @0x82AD00 / @0x82AD0C, gflr's through the jump Entity_UpdateGroundFlare @0x443F40).
+    kAirFlare,
+    kGroundFlare,
 };
 
 ThrowClass throw_class_from_tag(const char *tag);
@@ -132,6 +139,9 @@ struct ThrowableClassRow {
     uint32_t attrib = 0;
     uint32_t attrib2 = 0;
     bool has_graphic_model = false;
+    // The def's physics row by its move_function, the round's +452 binding [orig:
+    // Entity_InitFromItemDef @0x49E550 (+0x1C4 = def+0x158 @0x49E586..0x49E58C)].
+    PhysicsClass move_row = PhysicsClass::Null;
 };
 
 struct ThrowableClassTable {
@@ -171,7 +181,7 @@ struct PlacedDevice {
     int32_t item_enemy = 0;       // [orig: ammo +20] foe variant; 0 -> friendly fallback
     uint8_t team = 0xFF;          // [orig: +354]
     ThrowClass think = ThrowClass::kNone;
-    Vec3 pos;                     // mission units
+    EntityPosition pos;           // the placed entity's words (D-NET-507)
     int32_t yaw_bam = 0;          // [orig: +16/+20/+24] facing (claymore cone axis)
     int32_t pitch_bam = 0;
     int32_t roll_bam = 0;
@@ -187,32 +197,24 @@ struct PlacedDevice {
 };
 
 // ----------------------------------------------------------------------------
-// Host-presentation events (drained per tick by the throwable present pass).
+// A conversion's S2C 0x59, queued at the motor's send into the entity pass's
+// call-order queue (WorldOutbox::entity_events): the satchel and claymore motors
+// send it right after the conversion, and the cap's S2C 0x12 follows it at once.
+// [orig: Entity_UpdateSatchelPhysics @0x4482A0 (the 0x59 @0x448BD5, the cap call
+//  @0x448BEC); Entity_UpdateClaymorePhysics @0x4472F0 (@0x447B56, @0x447B6D)]
 // ----------------------------------------------------------------------------
-struct ThrowableEvents {
-    struct DeviceSpawn {
-        uint16_t entity = 0xFFFF;  // packed registry handle
-        int32_t item_id = 0;       // base/fallback TrcrID (packet word 0)
-        uint16_t owner_handle = 0xFFFF;
-        int32_t item_friendly = 0; // the viewer picks by team [orig: S2C 0x59
-        int32_t item_enemy = 0;    //  carries both TrcrID words]
-        uint16_t parent_handle = 0xFFFF;
-        uint8_t team = 0xFF;
-        Vec3 pos;
-        int32_t yaw_bam = 0;
-        int32_t pitch_bam = 0;
-        int32_t roll_bam = 0;
-    };
-    struct DeviceRemove {
-        uint16_t entity = 0xFFFF;
-    };
-    std::vector<DeviceSpawn> spawns;
-    std::vector<DeviceRemove> removes;
-
-    void clear() {
-        spawns.clear();
-        removes.clear();
-    }
+struct DeviceSpawnEvent {
+    uint16_t entity = 0xFFFF;  // packed registry handle
+    int32_t item_id = 0;       // base/fallback TrcrID (packet word 0)
+    uint16_t owner_handle = 0xFFFF;
+    int32_t item_friendly = 0; // the viewer picks by team [orig: S2C 0x59
+    int32_t item_enemy = 0;    //  carries both TrcrID words]
+    uint16_t parent_handle = 0xFFFF;
+    uint8_t team = 0xFF;
+    EntityPosition pos;        // the resting round's words (S2C 0x59)
+    int32_t yaw_bam = 0;
+    int32_t pitch_bam = 0;
+    int32_t roll_bam = 0;
 };
 
 // ----------------------------------------------------------------------------
@@ -225,7 +227,6 @@ public:
     static constexpr int kCapacity = 64;
 
     std::vector<PlacedDevice> devices;
-    ThrowableEvents events;
 
     // Host-fed class bindings for the TrcrID items (ai_function/move_function).
     ThrowableClassTable classes;
@@ -258,6 +259,30 @@ public:
     bool place_from_round(World &world, const LiveRound &round,
                           const AmmoTableEntry &ammo);
 
+    // A player body bound to a satchel, claymore or AV mine row (D-NET-348) runs the
+    // device's think over itself, the class event its row's +0x1C8 names: on the authority
+    // a body at or below 0 health (a claymore's also with an enemy person in the cone of
+    // the ammo at its +0x26C word, an AV mine's with a moving enemy vehicle) spawns the
+    // device's boom rounds at its position, its +0x170 word the owner, clears that word,
+    // sends its state packet (section 0) in a session and is destroyed; off the authority
+    // the kill's event 4 alone does the same with no packet. No PlacedDevice row: the
+    // body is no device.
+    // [orig: Entity_SatchelThink @0x443670 (the authority's health test @0x443771, event 4
+    //  @0x443698), Entity_ClaymoreThink @0x4438C0 (the cone @0x443A3F, @0x4438FD),
+    //  Entity_AVMineThink @0x443BB0 (the cone @0x443CC7, @0x443BEF)]
+    void think_device_row_body(World &world, Entity &body, ThrowClass think, int event);
+
+    // A schl / clym / vmne ITEM's class event (its +0x1C8 is the device's think, which
+    // the damage sites call with their phase: 1 the round hit, 2 the blast, 4 the net
+    // kill): on the authority a placed device's think over its record (think_device: a
+    // Health <= 0 booms at the hit, the claymore's and AV mine's cones run too); an
+    // item with no record, and every item off the authority, runs the think over its
+    // own words (think_device_row_body: off the authority only the kill's event 4).
+    // [orig: Entity_SatchelThink @0x443670, Entity_ClaymoreThink @0x4438C0,
+    //  Entity_AVMineThink @0x443BB0; the round hit's call Projectile_ProcessDamageOnTarget
+    //  @0x4E8205, the blast's @0x4E6F93, the net kill's @0x42EBF5]
+    void device_class_event(World &world, Entity &item, ThrowClass think, int event);
+
     // The DETONATOR [orig: RoundData_SpawnRound ammo flag 0x20 Detonatesatchels
     // -> Entity_DetonateSatchelsByOwner @ 0x546ed0]: every placed SATCHEL-ammo
     // device owned by `owner` gets Health = -1; the next think detonates it.
@@ -265,7 +290,6 @@ public:
 
     void reset() noexcept {
         devices.clear();
-        events.clear();
         fan_prng_state = 0x2B0749C1u;
     }
 
@@ -304,5 +328,30 @@ bool throwable_motor_tick(World &world, RoundSim &sim, LiveRound &round,
                           const AmmoTableEntry &ammo, CollisionWorld *collision,
                           const terrain::TerrainHeightField *terrain,
                           bool allow_consequences = true);
+
+// The flare rounds' motor, both legs' (a ballistic flare runs it ahead of the stock
+// sweep, whose gravity and drag tail it then suppresses): drag on the horizontal words,
+// gravity on the vertical one, the move, the ring record refreshed (a lost record ends
+// the round), the heat word decayed, then the ground (the terrain under it while it
+// drifts, else its +0x88 word) and the water plane: under the water ends it; under the
+// ground puts it on the ground and, eight bounces in, ends it, else halves its drift,
+// turns and quarters its fall and counts the bounce; a round left with no fall ends.
+// Ending stores life -1, which the next pass's head releases (here: the round's age
+// reaches its lifetime). [orig: Entity_UpdateShellBounce @0x443DF0; the ballistic leg's
+// motor call Projectile_UpdatePhysics @0x4E9D70 (@0x4EA06A..0x4EA085), its tail test
+// @0x4EAA34..0x4EAA4C; the head @0x4E9DA7..0x4E9DAE]
+void flare_motor_tick(World &world, RoundSim &sim, LiveRound &round,
+                      const terrain::TerrainHeightField *terrain);
+
+// The TrcrID item's init callback at the round's spawn: a flare row's (the aflr init
+// adds the source's last move to the round's drift, the gflr init takes the source's
+// velocity words with 0x538 more fall, or that fall alone without a source; each takes
+// the item's heatsig with a source (aflr always) and the ground under the round into
+// +0x88), else the one-degree spin every other class row binds here.
+// [orig: RoundData_SpawnRound @0x4EC0D0 -> Entity_InitFromItemDef @0x49E550 (the call
+//  @0x4EC7B7, the init callback @0x49E5D5..0x49E5EA); the aflr init AflrClass_InitFromDef @0x4434B0
+//  (@0x4434B5..0x443505); the gflr init GflrClass_InitFromDef @0x443510 (@0x443515..0x44358A);
+//  Entity_InitThrowableSpin_Nade @0x4435A0]
+void throwable_round_init(World &world, LiveRound &round, const ThrowableClassRow *row);
 
 } // namespace opennova::world

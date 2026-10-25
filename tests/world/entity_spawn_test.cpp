@@ -24,7 +24,7 @@ int main() {
     {
         Entity e;
         e.position = {100.0f, 200.0f, 300.0f};
-        e.spawn_position = {};
+        e.spawn_position = Vec3{};
         entity_reset_to_spawn_state(e);
         CHECK(e.spawn_position.x == 100.0f);
         CHECK(e.spawn_position.y == 200.0f);

@@ -38,61 +38,38 @@ void MissionAudio::_stop_script_voice(bool p_report_finished) {
     }
     script_voice_id_ = ObjectID();
     script_voice_frame_ = {};
+    script_voice_released_ = false;
 }
 
 void MissionAudio::_on_script_voice_finished(int64_t p_serial, int64_t p_player_id) {
-    // Signals from interrupted/freed players cannot complete a replacement.
+    // Signals from interrupted/freed players cannot complete a replacement. The device ran
+    // its clip out, which releases the physical channel only: the busy word holds until the
+    // scene frame's validation reads the release (update_script_voice; engine
+    // world::ScriptVoiceChannel::finish carries the witness).
     if (uint64_t(p_serial) != script_voice_frame_.serial ||
             uint64_t(p_player_id) != uint64_t(script_voice_id_)) return;
-    _stop_script_voice(true);
+    script_voice_released_ = true;
 }
 
-void MissionAudio::sync_script_voice() {
+void MissionAudio::follow_script_voice() {
     const Ref<Simulation> sim = _simulation();
     if (sim.is_null() || !root_attached_) return;
-    auto frame = sim->script_voice_frame(last_camera_pos_.is_finite() ? last_camera_pos_ : Vector3());
-    if (frame.serial != script_voice_frame_.serial ||
-            frame.state.clip.get() != script_voice_frame_.state.clip.get()) {
-        _stop_script_voice(false);
-        if (AudioStreamPlayer *manual = _wac_voice_node()) manual->stop();
-        script_voice_frame_ = frame;
-        if (!frame.state.clip) return;
-        const Ref<AudioStreamWAV> stream = WavLoader::from_pcm(*frame.state.clip);
-        Node *node = nullptr;
-        if (frame.local) {
-            auto *voice = memnew(AudioStreamPlayer);
-            voice->set_stream(stream);
-            voice->set_pitch_scale(WavLoader::pitch_scale_for(stream,
-                    opennova::lwf::pitch_from_q16(frame.state.pitch_q16)));
-            node = voice;
-        } else {
-            auto *voice = memnew(AudioStreamPlayer3D);
-            voice->set_stream(stream);
-            voice->set_pitch_scale(WavLoader::pitch_scale_for(stream,
-                    opennova::lwf::pitch_from_q16(frame.state.pitch_q16)));
-            SoundBank::configure_unattenuated_3d(voice);
-            node = voice;
-        }
-        add_child(node);
-        script_voice_id_ = ObjectID(node->get_instance_id());
-        node->connect("finished", Callable(this, "_on_script_voice_finished").bind(
-                int64_t(frame.serial), int64_t(uint64_t(script_voice_id_))));
-        const StringName bus = AudioServer::get_singleton()->get_bus_index("Voice") >= 0
-                ? StringName("Voice") : StringName("Master");
-        const float volume_db = static_cast<float>(SoundBank::volume_db_from_255(frame.volume));
-        if (auto *voice = Object::cast_to<AudioStreamPlayer>(node)) {
-            voice->set_bus(bus);
-            voice->set_volume_db(volume_db);
-            voice->play();
-        } else if (auto *voice = Object::cast_to<AudioStreamPlayer3D>(node)) {
-            voice->set_bus(bus);
-            voice->set_global_position(mission_to_godot(frame.position));
-            voice->set_volume_db(volume_db);
-            voice->play();
-        }
-    }
-    // The anchor follows the entity every presentation frame. The engine's
-    // distance curve owns gain; the host only supplies spatial panning.
+    _follow_script_voice(sim->script_voice_state(
+            last_camera_pos_.is_finite() ? last_camera_pos_ : Vector3()));
+}
+
+void MissionAudio::update_script_voice() {
+    const Ref<Simulation> sim = _simulation();
+    if (sim.is_null() || !root_attached_) return;
+    // The validation: a channel the device released frees the clip and clears the word
+    // (engine world::ScriptVoiceChannel::finish); then the anchor reset and the distance gain
+    // (ScriptVoiceChannel::frame).
+    if (script_voice_released_) _stop_script_voice(true);
+    const auto frame = sim->script_voice_frame(
+            last_camera_pos_.is_finite() ? last_camera_pos_ : Vector3());
+    _follow_script_voice(frame);
+    // The anchor follows the entity on every scene frame. The engine's distance curve owns
+    // gain; the host only supplies spatial panning.
     Object *object = ObjectDB::get_instance(script_voice_id_);
     const float volume_db = static_cast<float>(SoundBank::volume_db_from_255(frame.volume));
     if (auto *voice = Object::cast_to<AudioStreamPlayer3D>(object)) {
@@ -100,5 +77,49 @@ void MissionAudio::sync_script_voice() {
         voice->set_volume_db(volume_db);
     } else if (auto *voice = Object::cast_to<AudioStreamPlayer>(object)) {
         voice->set_volume_db(volume_db);
+    }
+}
+
+void MissionAudio::_follow_script_voice(const opennova::world::ScriptVoiceChannel::Frame &p_frame) {
+    // The device follows the channel: a new generation or clip stops the old player and
+    // starts the new clip at its start gain (engine world::ScriptVoiceChannel::sample).
+    if (p_frame.serial == script_voice_frame_.serial &&
+            p_frame.state.clip.get() == script_voice_frame_.state.clip.get()) return;
+    _stop_script_voice(false);
+    if (AudioStreamPlayer *manual = _wac_voice_node()) manual->stop();
+    script_voice_frame_ = p_frame;
+    if (!p_frame.state.clip) return;
+    const Ref<AudioStreamWAV> stream = WavLoader::from_pcm(*p_frame.state.clip);
+    Node *node = nullptr;
+    if (p_frame.local) {
+        auto *voice = memnew(AudioStreamPlayer);
+        voice->set_stream(stream);
+        voice->set_pitch_scale(WavLoader::pitch_scale_for(stream,
+                opennova::lwf::pitch_from_q16(p_frame.state.pitch_q16)));
+        node = voice;
+    } else {
+        auto *voice = memnew(AudioStreamPlayer3D);
+        voice->set_stream(stream);
+        voice->set_pitch_scale(WavLoader::pitch_scale_for(stream,
+                opennova::lwf::pitch_from_q16(p_frame.state.pitch_q16)));
+        SoundBank::configure_unattenuated_3d(voice);
+        node = voice;
+    }
+    add_child(node);
+    script_voice_id_ = ObjectID(node->get_instance_id());
+    node->connect("finished", Callable(this, "_on_script_voice_finished").bind(
+            int64_t(p_frame.serial), int64_t(uint64_t(script_voice_id_))));
+    const StringName bus = AudioServer::get_singleton()->get_bus_index("Voice") >= 0
+            ? StringName("Voice") : StringName("Master");
+    const float volume_db = static_cast<float>(SoundBank::volume_db_from_255(p_frame.volume));
+    if (auto *voice = Object::cast_to<AudioStreamPlayer>(node)) {
+        voice->set_bus(bus);
+        voice->set_volume_db(volume_db);
+        voice->play();
+    } else if (auto *voice = Object::cast_to<AudioStreamPlayer3D>(node)) {
+        voice->set_bus(bus);
+        voice->set_global_position(mission_to_godot(p_frame.position));
+        voice->set_volume_db(volume_db);
+        voice->play();
     }
 }

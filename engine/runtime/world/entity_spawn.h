@@ -27,17 +27,84 @@ int32_t max_health_with_difficulty(const World &world, const Entity &e, int32_t 
 
 // [orig: Entity_ResetToSpawnState @0x4B9610] Entity-only seeding is for a
 // fresh row before its motor is attached. Live rows use the World overload:
-// it also resets the motor, clears references/mounts and refreshes collision.
+// it also resets the motor, runs the spawn-pose leg (the state request, the
+// twelve dual updates, the resolve and its lift, the spawn effect) on a body
+// whose dead bit is clear, clears references/mounts and ends in the slice
+// build and the body's list. Every live caller uses it: the NPC respawn, the
+// teleports, the player deploy (Server_ReleasePlayerDeployment, which clears
+// the dead bit first) and the joiner's record respawn arm
+// (JoinerRole::land_local_respawn_arm, on a still-dead L).
 void entity_reset_to_spawn_state(Entity &e);
 // The same with the health raise's ceiling given: the entity-only form's is the def word, the
-// World form's max_health_with_difficulty's.
+// World form's max_health_with_difficulty's unless its caller names one (the deploy's, over its
+// player row's hp).
 void entity_reset_to_spawn_state(Entity &e, int32_t health_ceiling);
 void entity_reset_to_spawn_state(World &world, Entity &e);
 void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &e);
+void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &e, int32_t health_ceiling);
 
 // Fresh NPC initialization after its ADM, definition and collision bindings.
 // [orig: Entity_InitOrganicAI @0x4BFCC0; warmup @0x4B8B20]
 void initialize_organic_ai(World &world, Entity &e);
+
+// The player placement's warm-up on a player body standing where the placement
+// left it: the organic warm-up (its dual updates on the body's channels as they
+// stand, the root rise and the ground solve) when the body holds its animation
+// channel, the result written back to the entity's words. The placement runs it
+// after the scored marker pick, for a revive and in the deploy's hold arm.
+// [orig: Entity_WarmUpOrganicAnimation @0x4B8B20; its callers
+//  Server_PositionPlayerForSpawn @0x50D572 / @0x50D62D, Server_DeployPlayer
+//  @0x517842]
+void warm_up_player_body(World &world, Entity &e);
+
+// The plyr row's class init on a player body the authority spawned, once its animation map
+// registered: the hold and body requests 43 with the pending state cleared on the channels the
+// registration started, then the warm-up's dual updates, as many as the organic warm-up's
+// arithmetic gives for the owning connection id (+0x78), their root output dropped (the body
+// does not move). A body holding no animation channel runs neither: its spawn's 43 / 43 stand
+// with nothing to update them. Another row's body (org0 / org1, an item class) runs none of it.
+// A joiner's 0x0C body takes the class init ahead of any registration; a joiner calls this for
+// its own body's 0x18 rebuild alone, after player_class_init_words.
+// [orig: PlayerClass_InitEntity @0x4B1060 - the hold @0x4B115B, the body @0x4B1161, the
+//  pending clear @0x4B1176, the channel test @0x4B116D / @0x4B11D0, the count from +0x78
+//  @0x4B11D2..0x4B11E8, the loop @0x4B11F3..0x4B1225 (AnimMap_UpdateDualChannels @0x40B8C0
+//  called @0x4B11FB into a stack buffer); Entity_SpawnFromAnimSlotProperty @0x43C390 -
+//  AnimMap_RegisterEntity called @0x43C4DF ahead of the class init @0x43C4FE;
+//  NapiNPClientMsg_0x00C @0x42E730 - Entity_InitFromItemDef called @0x42E84D, its tail
+//  call @0x49E5EA]
+void player_class_init_animation(World &world, Entity &e);
+
+// The plyr row's class init ahead of its channel test, over a player body it re-inits in place:
+// the joiner's own body a 0x18 rebuilt (JoinerRole::rebuild_local_from_full_spawn), its record's
+// words and model init already stored. The local body's camera shake and incoming-lock tone go
+// to 0; the ammo-def word takes 3 and the equipped byte the loadout list's first weapon
+// (player_spawn_equipped_default); Health rises to the ceiling and Armor takes the def's armor
+// max; then the word run: the arms dip and the reload window 0, the four leg words the Yaw, the
+// resolver's idle-skip count 0, the body heading and savedLiveYaw the Yaw, savedLiveRoll, Roll,
+// savedLivePitch and the Pitch 0 (the local body's Pitch being its look pitch). The torso roll
+// and the lean are player_class_init_animation's, which follows. The run's +0x363 byte has no
+// reader and is not modeled. The authority's spawn stores the same words inline
+// (spawn_player_entity) over its fresh attach (InfantryState::reset_for_spawn).
+// [orig: PlayerClass_InitEntity @0x4B1060 - the local test @0x4B10D0, g_CameraShakeCounter
+//  @0x4B10D8, g_LockOnMeToneTicks @0x4B10DE, +0x160 @0x4B1105, AdmDef_FindIndexByName called
+//  @0x4B110E, +0x2B0 @0x4B1116, Entity_RaiseHealthToMax @0x43C290 called @0x4B112B, Armor
+//  @0x4B1130..0x4B113D, the Yaw read @0x4B1167, +0x371 @0x4B117C, +0x372 @0x4B1182, +0x363
+//  @0x4B1188, +0x2E4 / +0x2E8 @0x4B118E / @0x4B1194, +0x2D4 / +0x2D8 @0x4B119A / @0x4B11A0,
+//  +0x373 @0x4B11A6, +0x8C @0x4B11AC, +0x94 @0x4B11BE, Roll @0x4B11C4, +0x90 @0x4B11C7, Pitch
+//  @0x4B11CD; NapiNPClientMsg_FullEntitySpawn @0x433780 - the class init called @0x433E82]
+void player_class_init_words(World &world, Entity &e);
+
+// The class init a player body's spawn calls, its bound row's (def+0x148, by the row's
+// ai_function): the plyr row's player_class_init_animation; the org0 / org1 rows'
+// Entity_InitOrganicAI over the player body, every leg initialize_organic_ai runs for a
+// placed person (the backups, the anim pick over its AI slot, the warm-up by its DcbId,
+// which the organic init leaves at the spawn's 0, the aim anchor, the respawn-zone search);
+// the other rows' inits are not person inits and none runs here. The authority's spawn calls
+// it after the registration (D-NET-NEW-L4-14).
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the init @0x43C4F0..0x43C4FE;
+//  g_EntityClassEventCallbackTable @0x813000 - org0 @0x813018, org1 @0x813030, plyr
+//  @0x813048; Entity_InitOrganicAI @0x4BFCC0; PlayerClass_InitEntity @0x4B1060]
+void player_body_class_init(World &world, Entity &e);
 
 // What the organic init reads to choose the body state a person starts in: its definition
 // callback, which both person classes run (the org0 and org1 rows of the event-callback table
@@ -65,7 +132,7 @@ struct OrganicSpawnFacts {
 // Whether an item's ai_function class runs that init: the event-callback table's org0 and org1
 // rows (found by the table walk's whole-tag stricmp) name Entity_InitOrganicAI as their second
 // function, and no other row does [orig: g_EntityClassEventCallbackTable @0x813000, its rows
-// @0x813018 / @0x813030; the lookup Entity_LookupRenderCallbacks @0x407dc0, stricmp @0x407de2].
+// @0x813018 / @0x813030; the lookup EntityDef_LookupClassCallbacks @0x407dc0, the stricmp call @0x407DD8].
 bool organic_init_class(const char *ai_function);
 
 // The facts a placed record hands the init through its spawn, before any mount, parent or rotor's
@@ -123,5 +190,16 @@ OrganicSpawnBody organic_spawn_pose(const OrganicSpawnFacts &facts, uint32_t net
 enum class NpcCorpseStep { Kept, Respawned, Removed };
 bool npc_respawn_unhide(World &world, const AiSystem &ai, Entity &e);
 NpcCorpseStep step_npc_corpse(World &world, AiSystem &ai, Entity &e);
+// The player body's corpse leg, every tick its dead bit is latched, after its dead tail: unless
+// its def has LeaveCorpse and section bit 0 is clear, the timer drops by one each tick; at 186
+// the def's decay effect spawns (not with section bit 0); at 0 or below the timer stays at 0, and
+// a body with section bit 0 is destroyed (returns true; the caller's AiEntity is gone). No
+// respawn quota, no watched-corpse hold: those are org1's.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B4D63..0x4B4E71]
+bool step_player_corpse(World &world, AiSystem &ai, Entity &e);
+// The corpse's +0x1CC emitter (the decay, or a hit's), released when the body holds one; the
+// reset does it, so every player respawn that resets the body releases it too.
+// [orig: Entity_ResetToSpawnState @0x4B9610 - @0x4B97CB..0x4B97F5]
+void release_corpse_effect(World &world, Entity &e);
 
 } // namespace opennova::world

@@ -7,6 +7,7 @@
 #include <runtime/particle/effect_catalog_names.h>
 #include <runtime/particle/script_effects.h>
 #include <runtime/mission/promote.h>
+#include <runtime/world/angle.h>
 
 using namespace opennova;
 using namespace opennova::world;
@@ -61,7 +62,7 @@ struct Fixture {
         Entity entity;
         entity.net_id = uint16_t(ssn); entity.item_id = kParticleEffectMarkerTypeId;
         entity.has_item_def = itemdef; entity.wp_number = number;
-        entity.position = {10, 20, 30}; entity.yaw = 90;
+        entity.position = {10, 20, 30}; entity.heading = placed_heading_bam(90);
         entity.health = 0; entity.alive = false; // no health or alive gate
         entity.script_effect_name = "FLASH";
         return world.registry.spawn(pool, entity);
@@ -145,7 +146,7 @@ static void test_targets_and_bms_names() {
     f.entity(3, 2, 7, false); // missing ItemDef
     const auto first = f.entity(3, 3);
     const auto second = f.entity(3, 4);
-    f.world.registry.get(first)->yaw = 0;
+    f.world.registry.get(first)->heading = placed_heading_bam(0);
     f.world.registry.get(second)->script_effect_name = "MISSING";
     f.script("fx2tgt(FLASH,7) store(v1)\ntargetfx(7) store(v2)\n"
              "fx2tgt(FLASH,99) store(v3)\nv4=0\nfx2tgt(v4,7) store(v5)\n");
@@ -181,7 +182,7 @@ static void test_rain_random_and_exact_motor_pose() {
     f.world.cached.local_player = local;
     f.world.ai.attach(local);
     auto &body = *f.world.ai.for_handle(local);
-    body.pos[0] = 10 * 65536 + 7; body.pos[1] = 20 * 65536 + 9; body.pos[2] = 30 * 65536 + 11;
+    body.self->position.x.q16 = 10 * 65536 + 7; body.self->position.y.q16 = 20 * 65536 + 9; body.self->position.z.q16 = 30 * 65536 + 11;
     body.heading = 0; body.body_pitch = int32_t(0x40000000u);
     f.script("fx2ssn(FLASH,1)\n");
     CHECK(f.world.out.script_effects[0].position[0] == 10 * 65536 + 7);

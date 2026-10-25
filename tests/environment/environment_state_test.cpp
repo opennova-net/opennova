@@ -84,6 +84,12 @@ int main() {
 
 	bool ok = true;
 
+	// --- the sky maps load at the mission textures stage's full arm, with advanced clouds ------
+	// (D-NET-NEW-L3-34; sky_frame.h loads_mission_sky_maps carries the witness)
+	ok &= expect(opennova::env::loads_mission_sky_maps(false, 1), "the full arm loads the cloud layers");
+	ok &= expect(!opennova::env::loads_mission_sky_maps(true, 1), "a dedicated host's reduced arm loads none");
+	ok &= expect(!opennova::env::loads_mission_sky_maps(false, 0), "the flat dome's environment loads none");
+
 	// --- HHMM / minute / fixed24 clock views --------------------------------
 	ok &= expect(near(EnvironmentState::hhmm_to_minute_of_day(1230.0f), 750.0f),
 			"12:30 is minute 750");
@@ -1461,6 +1467,26 @@ int main() {
 		resolved = opennova::env::resolve_water_rung(opennova::env::mission_water_rungs(none, 0.0f, false), nullptr, 7.0f);
 		ok &= expect(resolved.rung == WaterRung::None && near(resolved.height, 7.0f),
 				"with no source the current plane stands");
+	}
+
+	// The no-water sentinel is the water's own draws' alone (the surface, the mirror, the glint):
+	// the eye's side compares against a zero waterline like any other, the fog strictly, the
+	// murk and the clear inclusively [orig: Render_WaterSurface @ 0x5c32e0..0x5c32e7;
+	// Render_MainScene @ 0x5c125e..0x5c1268; Render_ProcessMainSceneFrame @ 0x5ca82e..0x5ca841
+	// and @ 0x5ca77f..0x5ca792].
+	{
+		ok &= expect(!opennova::env::water_draws_at_height(0.0f) &&
+						opennova::env::water_draws_at_height(-2.0f) &&
+						opennova::env::water_draws_at_height(7.0f),
+				"a zero height alone is the water's no-draw sentinel; signed nonzero heights draw");
+		const EnvironmentState::RenderEyeClassification under =
+				EnvironmentState::classify_render_eye(-0.75f, 0.0f, true);
+		ok &= expect(under.underwater_view && under.underwater_overlay_view,
+				"an eye under a zero waterline fogs underwater and takes the murk");
+		const EnvironmentState::RenderEyeClassification on =
+				EnvironmentState::classify_render_eye(0.0f, 0.0f, true);
+		ok &= expect(!on.underwater_view && on.underwater_overlay_view,
+				"an eye on a zero waterline: the fog dry, the murk and the clear wet");
 	}
 
 	// A mission's plane as its load leaves it (mission_water_rung): with the .env not there, the

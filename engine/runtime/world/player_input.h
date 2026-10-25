@@ -35,7 +35,6 @@ struct PlayerInput {
     bool look_down = false;
     bool turn_left = false;
     bool turn_right = false;
-	int8_t analog_throttle = 0; // signed local aircraft collective axis (+0x133)
 	int32_t look_heading = 0; // absolute facing (entity Yaw@+0x10), BAM32
 	int32_t look_pitch = 0;   // absolute look pitch (entity Pitch@+0x14), BAM32
 };

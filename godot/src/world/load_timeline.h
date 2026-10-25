@@ -23,9 +23,19 @@ public:
 	int get_depth() const { return depth_; }
 	void set_depth(int p_depth) { depth_ = p_depth; }
 	void set_start_us(int64_t p_value) { start_us_ = p_value; }
+	int64_t get_start_us() const { return start_us_; }
 	int64_t get_end_us() const { return end_us_; }
 	void set_end_us(int64_t p_value) { end_us_ = p_value; }
 	int64_t duration_us() const { return end_us_ - start_us_; }
+	// The renderer's synchronous pipeline compiles at the span's edges (an instrument, read
+	// under --verbose alone; -1 unread): LoadTimeline::pipeline_compiles.
+	void set_start_compiles(int64_t p_value) { start_compiles_ = p_value; }
+	void set_end_compiles(int64_t p_value) { end_compiles_ = p_value; }
+	int64_t compiles() const {
+		return start_compiles_ >= 0 && end_compiles_ >= start_compiles_
+				? end_compiles_ - start_compiles_
+				: 0;
+	}
 
 protected:
 	static void _bind_methods();
@@ -35,6 +45,8 @@ private:
 	int depth_ = 0;
 	int64_t start_us_ = 0;
 	int64_t end_us_ = 0;
+	int64_t start_compiles_ = -1;
+	int64_t end_compiles_ = -1;
 };
 
 // Named nested wall-clock spans for one operation (a mission load; the former
@@ -56,8 +68,16 @@ public:
 	void set_label(const String &p_label) { label_ = p_label; }
 
 	void span(const String &p_name);
+	// Under --verbose, each span() also captures a RenderingDevice timestamp named
+	// "load <span>" (an instrument): a forced draw reads back the frame drawn before it, so
+	// its timestamps split that frame's GPU work by the load span that recorded it (the
+	// LoadingScreen's slow-present line prints them). Off unless the owner asks.
+	void set_gpu_marks(bool p_enabled) { gpu_marks_ = p_enabled; }
 	// Ends the innermost open span (no-op when none is open).
 	void end_span();
+	// A closed span the owner measured outside its own brackets (a deferred flush's share), at
+	// the current nesting depth.
+	void add_span(const String &p_name, int64_t p_start_us, int64_t p_end_us);
 	// Close any spans an early return left open plus the timeline itself, print
 	// the structured line, and return the one-line summary so callers can
 	// surface it (status bar, log).
@@ -74,9 +94,19 @@ public:
 	// plus the largest top-level spans (descending, up to `top_n`). For
 	// embedding in an owner's own status message.
 	String brief(int p_top_n = 4) const;
+	// Every span in its bracketing order, nested ones too ('>' per depth), each as its
+	// start's offset from the timeline's and its length: "objects +0 24ms, runtime +24
+	// 447ms, >first_leg +471 3ms". finish() prints it under the summary line (an instrument:
+	// it shows the time no top-level span covers).
+	String detail() const;
 	// The one duration rendering every perf surface shares (the summary line
 	// and the load status agree by construction).
 	static String format_ms(double p_ms);
+	// The renderer's synchronous pipeline compiles so far (canvas, mesh, surface and draw
+	// sources; the background specializations left out), read under --verbose alone, else -1:
+	// finish() prints the spans that compiled any (an instrument: where a load's first-use
+	// pipelines land).
+	static int64_t pipeline_compiles();
 
 protected:
 	static void _bind_methods();
@@ -87,6 +117,7 @@ private:
 	Vector<int> open_; // stack of indices into spans_
 	int64_t start_us_ = 0;
 	int64_t end_us_ = 0;
+	bool gpu_marks_ = false;
 };
 
 } // namespace godot

@@ -26,6 +26,10 @@
 #include "world/scar_draw_list.h" // one frame's impact-scar draw list
 #include "simulation/player_inventory.h" // the local inventory snapshot record
 #include "simulation/weapon_kit_entry.h" // one loadout tuple record
+#include "simulation/use_press_row.h" // one USE readout record
+#include "simulation/body_trace_row.h" // one body readout record
+#include "simulation/joiner_net_trace_row.h" // one joiner net readout record
+#include "simulation/model_list_node_row.h" // one frozen model-list node
 #include "object/weapon_def.h" // the typed weapon.def row the install seams take
 
 #include <formats/threedi/threedi_3di3.h> // THREEDI_USER_POINT_SCAN_LIMIT (pin below)
@@ -98,7 +102,6 @@ void Simulation::_bind_methods() {
 	                     &Simulation::set_join_character_profile);
 	ClassDB::bind_method(D_METHOD("set_join_discovered_session", "target"),
 	                     &Simulation::set_join_discovered_session);
-	ClassDB::bind_method(D_METHOD("set_join_world_ready", "ready"), &Simulation::set_join_world_ready);
 	ClassDB::bind_method(D_METHOD("poll_join_preload"), &Simulation::poll_join_preload);
 	ClassDB::bind_method(D_METHOD("is_join_preload_ready"), &Simulation::is_join_preload_ready);
 	ClassDB::bind_method(D_METHOD("get_join_admission_stage"), &Simulation::get_join_admission_stage);
@@ -126,6 +129,10 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("ingame_restart"), &Simulation::ingame_restart);
 	ClassDB::bind_method(D_METHOD("is_joined_in_match"), &Simulation::is_joined_in_match);
 	ClassDB::bind_method(D_METHOD("take_input_reset"), &Simulation::take_input_reset);
+	ClassDB::bind_method(D_METHOD("reset_all_input_state"), &Simulation::reset_all_input_state);
+	ClassDB::bind_method(D_METHOD("escape_input_reset"), &Simulation::escape_input_reset);
+	ClassDB::bind_method(D_METHOD("input_action_exit", "menu_screen"), &Simulation::input_action_exit,
+			DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("is_joiner_network_diagnostics_enabled"),
 	                     &Simulation::is_joiner_network_diagnostics_enabled);
 	ClassDB::bind_method(D_METHOD("set_joiner_network_diagnostics_enabled", "enabled"),
@@ -185,6 +192,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("spawn_local_player", "position", "yaw_deg", "team"), &Simulation::spawn_local_player);
 	ClassDB::bind_method(D_METHOD("spawn_local_player_at_start"), &Simulation::spawn_local_player_at_start);
 	ClassDB::bind_method(D_METHOD("has_local_player"), &Simulation::has_local_player);
+	ClassDB::bind_method(D_METHOD("has_learned_self_record"), &Simulation::has_learned_self_record);
 	ClassDB::bind_method(D_METHOD("get_local_player_wire_handle"), &Simulation::get_local_player_wire_handle);
 	ClassDB::bind_method(D_METHOD("set_player_input", "forward", "back", "left", "right", "lean_left", "lean_right", "jump"), &Simulation::set_player_input);
 	ClassDB::bind_method(D_METHOD("add_local_player_look", "dx_px", "dy_px"), &Simulation::add_local_player_look);
@@ -345,6 +353,8 @@ void Simulation::_bind_methods() {
 	                     &Simulation::debug_teleport_local_player);
 	ClassDB::bind_method(D_METHOD("debug_apply_local_pose", "x", "y", "z", "yaw_deg", "pitch_deg"),
 	                     &Simulation::debug_apply_local_pose);
+	ClassDB::bind_method(D_METHOD("debug_stage_slot", "slot", "x", "y", "z"),
+	                     &Simulation::debug_stage_slot);
 	ClassDB::bind_method(D_METHOD("get_round_outcome_debug"), &Simulation::get_round_outcome_debug);
 	ClassDB::bind_static_method("Simulation", D_METHOD("ai_state_name", "state"), &Simulation::ai_state_name);
 	ClassDB::bind_static_method("Simulation", D_METHOD("infantry_anim_key", "state"), &Simulation::infantry_anim_key);
@@ -390,6 +400,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_infantry_anim_map", "resource_root", "adm_name"), &Simulation::set_infantry_anim_map);
 	ClassDB::bind_method(D_METHOD("resolve_infantry_adm_ids", "resource_root", "item_db"), &Simulation::resolve_infantry_adm_ids);
 	ClassDB::bind_method(D_METHOD("resolve_item_traits", "item_db"), &Simulation::resolve_item_traits);
+	ClassDB::bind_method(D_METHOD("run_join_streamed_weapon_slot_class_inits"),
+			&Simulation::run_join_streamed_weapon_slot_class_inits);
 	ClassDB::bind_method(D_METHOD("set_character_avatar_database", "avatar_db"),
 	                     &Simulation::set_character_avatar_database);
 	ClassDB::bind_method(D_METHOD("set_asset_root", "resource_root"),
@@ -420,8 +432,9 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_throwable_visuals"), &Simulation::get_throwable_visuals);
 	ClassDB::bind_method(D_METHOD("get_scar_draw_list", "camera_godot", "fog_distance", "terrain_light"),
 	                     &Simulation::get_scar_draw_list);
-	ClassDB::bind_method(D_METHOD("debug_spawn_round", "from_godot", "dir_godot", "ammo_name"),
-	                     &Simulation::debug_spawn_round);
+	ClassDB::bind_method(D_METHOD("debug_spawn_round", "from_godot", "dir_godot", "ammo_name",
+	                              "shooter_wire_handle"),
+	                     &Simulation::debug_spawn_round, DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("debug_pick_entity", "from_godot", "dir_godot", "max_range_units"),
 	                     &Simulation::debug_pick_entity);
 	ClassDB::bind_method(D_METHOD("get_hitbox_debug"), &Simulation::get_hitbox_debug);
@@ -436,6 +449,28 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("local_player_in_armory_zone"), &Simulation::local_player_in_armory_zone);
 	ClassDB::bind_method(D_METHOD("local_player_use_item_arm"), &Simulation::local_player_use_item_arm);
 	ClassDB::bind_method(D_METHOD("take_use_item_press"), &Simulation::take_use_item_press);
+	ClassDB::bind_method(D_METHOD("debug_use_press_trace", "from_seq"),
+			&Simulation::debug_use_press_trace);
+	ClassDB::bind_method(D_METHOD("debug_use_press_next_seq"),
+			&Simulation::debug_use_press_next_seq);
+	ClassDB::bind_method(D_METHOD("debug_attach_requests_sent"),
+			&Simulation::debug_attach_requests_sent);
+	ClassDB::bind_method(D_METHOD("debug_set_use_press_watch", "handle"),
+			&Simulation::debug_set_use_press_watch);
+	ClassDB::bind_method(D_METHOD("debug_body_trace", "from_seq"), &Simulation::debug_body_trace);
+	ClassDB::bind_method(D_METHOD("debug_mission_start_model_nodes"),
+			&Simulation::debug_mission_start_model_nodes);
+	ClassDB::bind_method(D_METHOD("debug_loaded_model_list_count"),
+			&Simulation::debug_loaded_model_list_count);
+	ClassDB::bind_method(D_METHOD("debug_joiner_net_trace", "from_seq"),
+			&Simulation::debug_joiner_net_trace);
+	ClassDB::bind_method(D_METHOD("debug_joiner_net_trace_next_seq"),
+			&Simulation::debug_joiner_net_trace_next_seq);
+	ClassDB::bind_method(D_METHOD("debug_body_trace_next_seq"),
+			&Simulation::debug_body_trace_next_seq);
+	ClassDB::bind_method(D_METHOD("debug_set_body_trace_watch", "handles"),
+			&Simulation::debug_set_body_trace_watch);
+	ClassDB::bind_method(D_METHOD("debug_local_body_handle"), &Simulation::debug_local_body_handle);
 	ClassDB::bind_method(D_METHOD("release_use_item_key", "system_key_up"),
 			&Simulation::release_use_item_key);
 	ClassDB::bind_method(D_METHOD("is_armory_press_latched"), &Simulation::is_armory_press_latched);
@@ -443,6 +478,13 @@ void Simulation::_bind_methods() {
 	                     &Simulation::local_player_in_vehicle_loadout_zone);
 	ClassDB::bind_method(D_METHOD("local_player_vehicle_zone_team_matches"),
 	                     &Simulation::local_player_vehicle_zone_team_matches);
+	ClassDB::bind_method(D_METHOD("open_vehicle_menu"), &Simulation::open_vehicle_menu);
+	ClassDB::bind_method(D_METHOD("get_vehicle_menu_rows"), &Simulation::get_vehicle_menu_rows);
+	ClassDB::bind_method(D_METHOD("get_vehicle_menu_selected_row"),
+	                     &Simulation::get_vehicle_menu_selected_row);
+	ClassDB::bind_method(D_METHOD("select_vehicle_menu_row", "row"),
+	                     &Simulation::select_vehicle_menu_row);
+	ClassDB::bind_method(D_METHOD("click_vehicle_menu", "cancel"), &Simulation::click_vehicle_menu);
 	ClassDB::bind_method(D_METHOD("local_player_toggle_mount"), &Simulation::local_player_toggle_mount);
 	ClassDB::bind_method(D_METHOD("local_player_select_seat", "index"), &Simulation::local_player_select_seat);
 	ClassDB::bind_method(D_METHOD("apply_local_player_loadout", "kit", "player_class"),
@@ -453,8 +495,8 @@ void Simulation::_bind_methods() {
 	                     &Simulation::has_explicit_spawn_loadout);
 	ClassDB::bind_method(D_METHOD("get_weapon_availability", "weapon_name"),
 	                     &Simulation::get_weapon_availability);
-	ClassDB::bind_method(D_METHOD("respawn_local_player_loadout"),
-	                     &Simulation::respawn_local_player_loadout);
+	ClassDB::bind_method(D_METHOD("reinit_local_player"),
+	                     &Simulation::reinit_local_player);
 	ClassDB::bind_method(D_METHOD("set_local_player_class", "player_class"),
 	                     &Simulation::set_local_player_class);
 	ClassDB::bind_method(D_METHOD("use_player_profile", "profiles"),
@@ -646,6 +688,7 @@ void Simulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(USE_ITEM_ARM_ARMORY);
 	BIND_ENUM_CONSTANT(USE_ITEM_ARM_ARMORY_REFUSED);
 	BIND_ENUM_CONSTANT(USE_ITEM_ARM_VEHICLE_LOADOUT);
+	BIND_ENUM_CONSTANT(USE_ITEM_ARM_DROPPED);
 	BIND_ENUM_CONSTANT(STANCE_STAND);
 	BIND_ENUM_CONSTANT(STANCE_CROUCH);
 	BIND_ENUM_CONSTANT(STANCE_PRONE);

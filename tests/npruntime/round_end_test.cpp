@@ -5,7 +5,7 @@
 // auto-lose win condition [orig: Server_CheckWinConditions @0x51ad40, SP leg
 // @0x51ad6f — dead local player without the SinglePlayerRespawn attrib (0x40)], the
 // round-end latch + host effect [orig: Server_ProcessRoundEnd @0x5164f0], and the
-// post-round respawn hold [orig: the g_SpawnSuccessGate check @0x519af6].
+// post-round respawn hold [orig: the g_RoundOver check @0x519af6].
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_message_dispatch.h>
@@ -30,12 +30,15 @@
 #include <runtime/world/world.h>
 #include <runtime/world/zone_chain.h>
 
+#include "../common/flat_floor.h"
+
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/wac_system.h>
 
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <map>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -69,12 +72,13 @@ void push_death(w::World &world, w::EntityHandle victim, w::EntityHandle killer)
 	world.round_sim.deaths.push_back(d);
 }
 
-// A death raised at a damage-pass lethal edge, the only producer of the kill
-// accounting [orig: Score_ProcessKillEvent @0x4FD400 from
-// Projectile_ProcessDamageOnTarget @0x4E8133].
+// A death raised at a damage-pass lethal edge: the edge scores the kill at its
+// site, at once, then stages the death record for the routing
+// [orig: Score_ProcessKillEvent @0x4FD400 from Entity_ApplyWeaponDamage
+// @0x4E6BFE].
 void push_kill(w::World &world, w::EntityHandle victim, w::EntityHandle killer) {
+	world.match.process_kill_event(world, killer, victim);
 	push_death(world, victim, killer);
-	world.round_sim.deaths.back().kill_event = true;
 }
 
 w::EntityHandle match_player(w::World &world, uint8_t slot, uint8_t team,
@@ -142,17 +146,25 @@ w::AiEntity *attach_remote_body(w::World &world, w::AiSystem &ai,
 	if (entity == nullptr) return nullptr;
 	w::AiEntity *body = ai.at(ai.attach(handle));
 	if (body == nullptr) return nullptr;
+	// The authority runs the remote player's whole org2 update (D-NET-NEW-LP-2):
+	// a floor at the body's own height keeps it standing where the fixture put it.
+	static std::map<int, std::unique_ptr<test_common::FlatFloor>> floors;
+	std::unique_ptr<test_common::FlatFloor> &floor =
+			floors[static_cast<int>(entity->position.z * 256.0f)];
+	if (!floor) floor = std::make_unique<test_common::FlatFloor>(entity->position.z);
+	world.tables.terrain = &floor->field;
+	ai.terrain = &floor->field;
 	body->inf.active = true;
 	body->net_is_remote_peer = true;
 	body->health = entity->health;
 	body->team = entity->team;
-	body->pos[0] = fixed(entity->position.x);
-	body->pos[1] = fixed(entity->position.y);
-	body->pos[2] = fixed(entity->position.z);
+	body->self->position.x.q16 = fixed(entity->position.x);
+	body->self->position.y.q16 = fixed(entity->position.y);
+	body->self->position.z.q16 = fixed(entity->position.z);
 	body->collide_state.prev_valid = true;
 	body->collide_state.prev_pos[0] = fixed(previous_x);
-	body->collide_state.prev_pos[1] = body->pos[1];
-	body->collide_state.prev_pos[2] = body->pos[2];
+	body->collide_state.prev_pos[1] = body->self->position.y.q16;
+	body->collide_state.prev_pos[2] = body->self->position.z.q16;
 	return body;
 }
 
@@ -162,9 +174,9 @@ void move_remote_body(w::World &world, w::AiSystem &ai,
 	w::AiEntity *body = ai.for_handle(handle);
 	if (entity == nullptr || body == nullptr) return;
 	entity->position = position;
-	body->pos[0] = fixed(position.x);
-	body->pos[1] = fixed(position.y);
-	body->pos[2] = fixed(position.z);
+	body->self->position.x.q16 = fixed(position.x);
+	body->self->position.y.q16 = fixed(position.y);
+	body->self->position.z.q16 = fixed(position.z);
 }
 
 void prime_collision_tables(w::World &world, w::CollisionWorld &collision) {
@@ -397,7 +409,7 @@ void test_tdm_round_wire_and_linger() {
 // in-game count still counted; the integrity family sends a state-7 slot
 // nothing while its toggle still flips, and the 0x79 keeps its own clock.
 // [orig: Server_TickUpdate @0x51D8F9..0x51D917, is_in_session @0x51D9A5,
-//  g_SpawnSuccessGate @0x51D9B1, the 0x79 @0x51E1B2..0x51E202;
+//  g_RoundOver @0x51D9B1, the 0x79 @0x51E1B2..0x51E202;
 //  Server_BroadcastWeaponSlotStateToPlayers - state 6 @0x508584, the toggle
 //  @0x50868E; Server_ProcessRoundEnd @0x51685E]
 void test_periodic_list_runs_through_the_linger() {
@@ -593,8 +605,10 @@ void test_dm_round_wire_kill_order_and_tie() {
 				decoded.draw == 0 && decoded.player_scores[0] == 2 &&
 				decoded.player_names[0] == "Ace",
 				"the named 0x1D form round-trips the kill order and draw byte");
+		// The rows start with field 35 at 1 (the add's seed [orig:
+		// CPlayerStats_InitWeaponTracking +0x8C = 1 @0x52C047]); the award makes it 2.
 		expect(world.match.player(ace)->stats[w::MatchStats::kRoundMarker] == 2 &&
-				world.match.player(bee)->stats[w::MatchStats::kRoundMarker] == 0,
+				world.match.player(bee)->stats[w::MatchStats::kRoundMarker] == 1,
 				"the non-team winner marker lands on the top scorer only");
 	}
 
@@ -627,9 +641,9 @@ void test_dm_round_wire_kill_order_and_tie() {
 				decoded.draw == 1 && decoded.player_index == 1 &&
 				decoded.player_scores[0] == 1 && decoded.player_scores[1] == 1,
 				"the tied 0x1D form carries draw = 1");
-		expect(world.match.player(ace)->stats[w::MatchStats::kRoundMarker] == 0 &&
-				world.match.player(bee)->stats[w::MatchStats::kRoundMarker] == 0,
-				"a tied board awards nobody");
+		expect(world.match.player(ace)->stats[w::MatchStats::kRoundMarker] == 1 &&
+				world.match.player(bee)->stats[w::MatchStats::kRoundMarker] == 1,
+				"a tied board awards nobody (both keep the add's 1)");
 	}
 }
 
@@ -1024,7 +1038,7 @@ void test_aas_capture_events_carry_zone_numbers() {
 		zone.zone_number = number;
 		zone.zone_radius = 70;
 		zone.position = {x, 0.0f, 0.0f};
-		zone.yaw = 90;
+		zone.heading = w::placed_heading_bam(90);
 		zone.is_capture_trigger = true;
 		zone.is_spawn_point = true;
 		zone.alive = true;
@@ -1153,7 +1167,7 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	red_flag.item_attrib = w::kItemAttribMoveCallback;
 	red_flag.position = flag_position;
 	red_flag.spawn_position = red_flag.position;
-	red_flag.yaw = 90;
+	red_flag.heading = w::placed_heading_bam(90);
 	const w::EntityHandle flag = world.registry.spawn(1, red_flag);
 	w::Entity blue_bay;
 	blue_bay.kind = w::EntityKind::Item;
@@ -1161,7 +1175,7 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	blue_bay.has_item_def = true;
 	blue_bay.item_attrib = w::kItemAttribMoveCallback;
 	blue_bay.position = bay_position;
-	blue_bay.yaw = 90;
+	blue_bay.heading = w::placed_heading_bam(90);
 	const w::EntityHandle bay = world.registry.spawn(1, blue_bay);
 	expect(flag.valid() && bay.valid(), "CTF objective fixtures spawn");
 	const int32_t waypoint_model = collision.add_model(contact_box(1));
@@ -1337,7 +1351,7 @@ void test_flag_timeout_wire_transaction() {
 	red_flag.item_attrib = w::kItemAttribMoveCallback;
 	red_flag.position = flag_position;
 	red_flag.spawn_position = {5.0f, 6.0f, 2.0f};
-	red_flag.yaw = 90;
+	red_flag.heading = w::placed_heading_bam(90);
 	const w::EntityHandle flag = world.registry.spawn(1, red_flag);
 	expect(flag.valid(), "FlagBall timeout fixture spawns its red flag");
 	const int32_t waypoint_model = collision.add_model(contact_box(1));
@@ -1493,8 +1507,8 @@ int entity_death_records(ns::LoopbackChannel &wire, w::EntityHandle victim) {
 }
 
 // An org1 (NPC) body's death transaction is its own motor edge's, once per
-// life. A damage-time record only feeds the SP kill tally; the edge raises the
-// one 0x13, a script health write with no record reaches it too, and a
+// life. The damage site feeds the SP kill tally and its record raises nothing;
+// the edge raises the one 0x13, a script health write with no record reaches it too, and a
 // scripted kill adds no second one. An edge record still fans after its corpse
 // leg removed the row in the same pass, and never re-latches a row it no
 // longer owns. [orig: Entity_UpdateInfantryAI @0x4B9D44..0x4B9D4D ->
@@ -1563,7 +1577,7 @@ void test_org1_death_transaction_is_the_motor_edge() {
 	run_ticks(2);
 	peer_wire.clear();
 
-	// 1. A killing hit's record tallies once; the edge's own record raises the
+	// 1. A killing hit tallies once at its site; the edge's own record raises the
 	// one 0x13 and latches the dead bit.
 	const w::EntityHandle shot = spawn_org1(300, 500);
 	world.registry.get(shot)->health = 0;
@@ -1573,7 +1587,7 @@ void test_org1_death_transaction_is_the_motor_edge() {
 	expect(entity_death_records(peer_wire, shot) == 1,
 			"org1 kill: one 0x13, raised by the motor edge");
 	expect(world.kill_stats.enemy_kills_by_player() == 1,
-			"org1 kill: the damage-time record tallies once, the edge record never");
+			"org1 kill: the site tallies once, the edge record never");
 	expect(dead_bit(shot), "org1 kill: the edge latches the dead bit");
 
 	// 2. A script health write raises no record; the edge still sends the 0x13.

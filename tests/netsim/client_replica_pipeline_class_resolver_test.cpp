@@ -50,10 +50,12 @@ bool expect(bool cond, const char *msg) {
 constexpr uint16_t kNoCallbackType = 0x0111; // a `bldg`/`ewep`-class item (header-only record)
 constexpr uint16_t kVehicleType = 0x0222;    // a `cveh`-class item (15/21-B compact)
 constexpr uint16_t kInfantryType = 0x0333;   // an `org0`-class item (14-B compact)
+constexpr uint16_t kGuidedType = 0x0444;     // a `rokt`-class item (header-only record)
 
 constexpr uint16_t kNoCallbackHandle = 0x2005; // pool-2 static
 constexpr uint16_t kVehicleHandle = 0x1002;    // pool-1 vehicle
 constexpr uint16_t kInfantryHandle = 0x0003;   // pool-0 organic
+constexpr uint16_t kGuidedHandle = 0x1007;     // pool-1 guided round
 
 // The items.def-derived classifier the Godot binding installs (Simulation::
 // resolve_item_traits builds the same shape from ItemDatabase).
@@ -62,6 +64,7 @@ nw::EntityClass items_table_classify(uint16_t type_id) {
 			{kNoCallbackType, nw::EntityClass::NoNetworkCallback},
 			{kVehicleType, nw::EntityClass::Vehicle},
 			{kInfantryType, nw::EntityClass::Infantry},
+			{kGuidedType, nw::EntityClass::Guided},
 	};
 	const auto it = table.find(type_id);
 	return it != table.end() ? it->second : nw::EntityClass::Unknown;
@@ -148,6 +151,62 @@ bool run_items_table_sizes_mixed_frame() {
 	            "infantry position/yaw decode after the header-only record"))
 		return false;
 	return true;
+}
+
+// D-NET-NEW-L1-28: a guided record is its 5-byte header alone; the frame goes on behind it and
+// the guided row stays as it stands (the serializer's mode-2 call with format 11 reads and
+// writes nothing).
+// [orig: NapiNPClientMsg_0x00A @0x42FEC0 - mode 2 @0x430804, format 11 @0x43080C, the call
+//  @0x430828, the loop @0x43082D; Entity_SerializeGuidedMissileState @0x447C50 - the mode-2
+//  group switch @0x447E6C]
+bool run_guided_record_is_header_only() {
+	const int32_t ax = 300 << 16, ay = -40 << 16, az = 7 << 16;
+	nw::FrameUpdate fu;
+	fu.anchor_x = ax;
+	fu.anchor_y = ay;
+	fu.anchor_z = az;
+	fu.flags2 = 0;
+	fu.carried_handle = 0xFFFF;
+	nw::FrameUpdateRecord rocket;
+	rocket.handle = kGuidedHandle;
+	rocket.type_id = kGuidedType;
+	rocket.cls = nw::EntityClass::Guided;
+	fu.records.push_back(rocket);
+	nw::FrameUpdateRecord soldier;
+	soldier.handle = kInfantryHandle;
+	soldier.type_id = kInfantryType;
+	soldier.cls = nw::EntityClass::Infantry;
+	soldier.infantry.pos_x_compressed = nw::network_compress_fixedpoint(-8 << 16);
+	soldier.infantry.pos_y_compressed = nw::network_compress_fixedpoint(12 << 16);
+	soldier.infantry.pos_z_compressed = nw::network_compress_fixedpoint(1 << 16);
+	soldier.infantry.yaw_byte = 0x40;
+	fu.records.push_back(soldier);
+	const std::vector<uint8_t> body = nw::encode_frame_update(fu);
+	// The event loop opens past the 14-byte header, sub-block 0's 11 bytes and the 7-byte tail.
+	constexpr std::size_t kLoop = 32;
+	if (!expect(body.size() > kLoop + 5 && body[kLoop] == 1 &&
+	                    body[kLoop + 1] == (kGuidedHandle & 0xFFu) &&
+	                    body[kLoop + 2] == (kGuidedHandle >> 8) &&
+	                    body[kLoop + 3] == (kGuidedType & 0xFFu) &&
+	                    body[kLoop + 4] == (kGuidedType >> 8) && body[kLoop + 5] == 1,
+	            "the guided record is tag 1, its handle and its type, the next tag behind"))
+		return false;
+
+	ns::ClientReplicaPipeline view;
+	view.set_item_class_resolver(&items_table_classify);
+	{
+		ns::ClientEntityState &row = view.state().upsert(kGuidedHandle);
+		row.type_id = kGuidedType;
+		row.x = 123;
+	}
+	view.state().upsert(kInfantryHandle).type_id = kInfantryType;
+	view.apply(0x0A, body);
+	const ns::ClientEntityState *guided = view.state().find(kGuidedHandle);
+	const ns::ClientEntityState *inf = view.state().find(kInfantryHandle);
+	return expect(view.frames_applied() == 1 && guided != nullptr && guided->x == 123 &&
+	                      inf != nullptr && inf->x == expected_coord(ax, -8 << 16) &&
+	                      inf->yaw_byte == 0x40,
+	              "the frame goes on past the guided header; the guided row is untouched");
 }
 
 bool run_default_view_fails_closed_on_unknown_codec() {
@@ -447,6 +506,7 @@ int main() {
 	ok &= run_recipient_health_requires_a_decoded_tail();
 	ok &= run_objectives_require_a_complete_phase3_block();
 	ok &= run_mounted_ammo_requires_a_complete_phase8_record();
+	ok &= run_guided_record_is_header_only();
 	if (ok) std::printf("client_replica_pipeline_class_resolver: OK\n");
 	return ok ? 0 : 1;
 }

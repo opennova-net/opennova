@@ -116,7 +116,9 @@ LoadingBarRects loading_bar_rects(int surface_w, int surface_h, int displayed);
 inline constexpr uint32_t kLoadingBarBorderGray = 0xC0C0C0u;
 inline constexpr uint32_t kLoadingBarFillArgb = 0xFFEB0000u;
 
-// Redraw throttle [orig: GetTickCount() - last >= 100 @ 0x586c24].
+// Redraw throttle: GetTickCount() - last >= 100, the difference read signed
+// [orig: LoadingScreen_UpdateAndPresent `sub eax, [esi+1Ch]; cmp eax, 64h; jge`
+//  @0x586C10..0x586C1A; the gate @ 0x586c24].
 inline constexpr int kLoadingPresentIntervalMs = 100;
 
 // Redraw + present when the window-pump interval elapses or a real checkpoint
@@ -127,6 +129,42 @@ inline constexpr int kLoadingPresentIntervalMs = 100;
 inline bool loading_present_due(int elapsed_ms, bool reported_changed) {
 	return elapsed_ms >= kLoadingPresentIntervalMs || reported_changed;
 }
+
+// What a present draws: the screen and its bar alone. It clears, draws the screen and the
+// bar, and presents; no world pass, no particle pass and no other render target runs in it
+// (the shell's present holds every offscreen target for its forced draw, D-NET-NEW-L3-51).
+// The join's waits draw no
+// more: the sync-tail wait's pass and the world stream's 0x0D / 0x10 records present this
+// screen at its stored checkpoint, the game-start wait's pass draws nothing. So no particle a
+// load's warm drew is drawn again until the mission's own frames: the device side retires a
+// reset effect scene's submissions (D-NET-NEW-L2-45).
+// [orig: LoadingScreen_UpdateAndPresent @0x586be0 - Clear @0x586c5a, the screen @0x586c64,
+//  the bar @0x586cd0, Present @0x586d53; LoadingScreen_PresentStoredProgress @0x586d70 (slot
+//  15 of the screen's vtable with this[8], the checkpoint the present stores @0x586c32);
+//  NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42cb20 - the call @0x42cb79;
+//  NapiNPClientMsg_0x00D @0x432c40 - the call @0x433236; NapiNPClientMsg_0x010 @0x433400 -
+//  the call @0x43342b; NapiClient_WaitForGameStart @0x42cc10 - the pass @0x42cc67..0x42ccbf]
+//
+// The loaders inside a mission start present the screen at its stored checkpoint as they go,
+// each call gated by the 100 ms rule above, so a long loader keeps the screen live: the effect
+// system's load past each loose `ptl\*.ptl` it parses, past each loose gore-set file, and once
+// past the archive walk; its atlas build at its start, past the size probe of every frame and
+// at the top of each frame's place-and-decode (the shell's effect world presents past each
+// loose file it parses and once past its walk, and its atlas device at its start, past each
+// frame it decodes into the build and past its walk, GameWorld::present_stored_load_progress).
+// [orig: CEffectSystem_Init @0x5f6070 - LoadingScreen_PresentStoredProgress @0x586d70 called
+//  @0x5f630b (the loose .ptl leg), @0x5f6451 (the loose gore leg), @0x5f6582 (past the
+//  archive walk); CParticleManager_BuildTextureAtlases @0x5e8db0 - the calls @0x5e8dfb (its
+//  start), @0x5e8e0c (past the size probes, CParticleManager_ProbeAllTextureSizes called
+//  @0x5e8e02) and @0x5e8ef5 (each
+//  frame's iteration, ahead of its CTextureData_LoadTGA call @0x5e9087);
+//  CEffectSystem_BuildTextureAtlases @0x5f65b0 <- Game_StartMission @0x524360 (the call
+//  @0x5249b9). The terrain's loaders present the same way between their steps
+//  (Terrain_Init @0x60fbe0 - @0x60fcd2 / @0x60fd23 / @0x60fd3a; PolyTrn_LoadTerrainConfig
+//  @0x60e3d0 - @0x60e5d9 / @0x60e648 / @0x60e663 / @0x60e677 / @0x60e6b8) and the model
+//  reload between its pools (Game_ReloadEntityModelsAndCallbacks @0x522830 - @0x522943 /
+//  @0x522956 / @0x522abb / @0x522c01); the shell presents there at its stage steps and per
+//  model (mission/mission_load_plan.h).]
 
 // The composited resources: the stock background when the mission has no
 // sidecar image [orig: "loadscrn.pcx" @ 0x521e20], the two text fonts

@@ -86,7 +86,7 @@ constexpr ScreenRow kScreenRows[] = {
 	// [orig: UI_InitSinglePlayerScreen @ 0x562080, run on any screen named SINGLE_PLAYER by
 	//  UI_DispatchScreenEvent @ 0x54e6a0; SinglePlayer_HandleStartEvent @ 0x561fb0, registered @ 0x5620c0]
 	{ "SINGLE_PLAYER", "ACCEPT", MenuCommand::StartMission, false },
-	// [orig: CRenderManager_FreeLoadScreen @ 0x547980 (a misnomer: the map's close), registered @ 0x54adb9]
+	// [orig: CMap_OnOk @ 0x547980 (the map's close), registered @ 0x54adb9]
 	{ "CMAP", "OK", MenuCommand::CloseMap, true },
 	// [orig: UI_RegisterIngameCallbacks @ 0x555510 — HIDDEN_BACK UI_IngameBackResumeCommand @ 0x555490
 	//  (@ 0x555583), CONFIRM_YES UI_IngameConfirmExitCommand @ 0x555460, RESTART UI_IngameRestartCommand

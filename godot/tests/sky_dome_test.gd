@@ -242,6 +242,33 @@ func test_scroll_falls_back_to_a_private_core_without_weather() -> void:
 	assert_ne(second, Vector2.ZERO, "layer 2 advances as well")
 
 
+# An unchanged frame pushes no frame uniform: a push marks the material dirty and the server rebuilds
+# a dirty material's uniform buffer at the next draw (D-NET-NEW-LF-22). A moved value is pushed again.
+func test_an_unchanged_frame_pushes_no_frame_uniform() -> void:
+	var ctx := _make()
+	ctx.sky.advance_frame(0.0)
+	var first: int = ctx.sky.get_frame_parameter_pushes()
+	assert_gt(first, 0, "the first frame pushes the frame uniforms")
+	var base: Vector3 = ctx.sky.get_sky_material().get_shader_parameter("u_sky_base")
+	ctx.sky.advance_frame(0.0)
+	assert_eq(ctx.sky.get_frame_parameter_pushes(), first, "an unchanged frame pushes none")
+	assert_eq(ctx.sky.get_sky_material().get_shader_parameter("u_sky_base"), base,
+			"and the material keeps what was pushed")
+	# Two ticks of the fallback scroll core move both layers' offsets, and nothing else.
+	var offset1: Vector2 = ctx.sky.get_cloud_material().get_shader_parameter("u_scroll_offset1")
+	ctx.sky.advance_frame(TICK * 2.0)
+	assert_eq(ctx.sky.get_frame_parameter_pushes() - first, 2, "the moved scroll offsets alone")
+	assert_ne(ctx.sky.get_cloud_material().get_shader_parameter("u_scroll_offset1"), offset1)
+	# A rebuild makes new materials, which hold none of the frame uniforms: its next frame pushes the
+	# path's every uniform again, as the first frame did.
+	var before_build: int = ctx.sky.get_frame_parameter_pushes()
+	ctx.sky.build()
+	ctx.sky.advance_frame(0.0)
+	assert_eq(ctx.sky.get_frame_parameter_pushes() - before_build, first,
+			"the rebuilt dome's first frame pushes every uniform of its path")
+	assert_eq(ctx.sky.get_sky_material().get_shader_parameter("u_sky_base"), base)
+
+
 func test_cloud_texture_axes_follow_the_render_basis() -> void:
 	# The builder's UVs are the render x/z scaled (layer 1 by 1/320, layer 2 by
 	# 3/2048) and retail draws the dome in that basis, so texture u runs along

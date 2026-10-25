@@ -178,7 +178,7 @@ void MusicDirector::_process(double p_delta) {
 	}
 	// Pace the VM the way the original engine does: AudioVM advances the script
 	// only when the current track has finished streaming -- AudioStream_Update
-	// @0x671c60 steps the VM (sub_672EE0) solely on `remaining_bytes <= 0`, never
+	// @0x671c60 steps the VM (AudioVM_RunInstance) solely on `remaining_bytes <= 0`, never
 	// once per frame. While the track the last `play` started is still sounding,
 	// leave the VM halted where that `play` stopped it. Without this gate the VM
 	// races through `play`/`setstate` every frame, restarting the SBF stream

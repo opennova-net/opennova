@@ -1,6 +1,7 @@
-// The engine-side skeletal clip set for one rig: the .adm's clip ring sampled
-// against the ONE shared skeleton (the reset/bind .bad + the model's bone
-// table), with the bind-local rests, accumulated rest globals, overlay
+// The engine-side skeletal clip set for one rig: the .adm's clip ring over
+// the ONE shared skeleton (the reset/bind .bad + the model's bone table), each
+// clip's keys sampled at their first read (anim::Clip::key), with the
+// bind-local rests, accumulated rest globals, overlay
 // classes, and the weapon-channel mask precomputed. One evaluator serves both
 // world collision poses and Godot skeletons (ADR 0044).
 //
@@ -38,8 +39,9 @@ public:
 	// Load the whole rig through `files` (the mounted store, or an embedder's own): bind it to the
 	// table's reset clip, retail's slot-0 head (the last variant that loads of
 	// the last row whose key past its first five characters is "reset", any
-	// case; a table with none does not load), sample every clip variant of a
-	// row naming one of the 252 slots in file order (a row naming none
+	// case; a table with none does not load), register every clip variant of a
+	// row naming one of the 252 slots in file order, no key of it sampled until its
+	// first read (a row naming none
 	// registers nothing; a .bad that does not load registers failsafe.bad in its
 	// place, else nothing: adm_token_clip) against that bind, and build
 	// the skeleton from the model bone table (origins = parent-relative pivots,

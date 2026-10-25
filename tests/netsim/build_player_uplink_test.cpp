@@ -27,6 +27,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <vector>
 
 namespace {
@@ -41,20 +42,8 @@ bool expect(bool cond, const char *msg) {
 	return false;
 }
 
-// An unseeded carrier's angles are its placement angles: `deg << 16`, a
-// truncating signed /360, then << 16, so the low half is zero.
-// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6]
-int32_t placement_angle_bam(int32_t degrees) {
-	const int32_t turn16 = static_cast<int32_t>(static_cast<uint32_t>(degrees) << 16) / 360;
-	return static_cast<int32_t>(static_cast<uint32_t>(turn16) << 16);
-}
-
 int32_t carrier_heading_bam(const w::Entity &carrier) {
-	return placement_angle_bam(90 - carrier.yaw);
-}
-
-int32_t carrier_axis_bam(int16_t degrees) {
-	return placement_angle_bam(degrees);
+	return carrier.heading; // the carrier's Yaw word
 }
 
 bool drain_built_uplink(w::World &host, w::EntityHandle peer,
@@ -90,16 +79,16 @@ bool run_field_mapping() {
 	// must still ride the wire unmasked (the original writes the byte whole).
 	src_e.flags = 0x10u | 0x08u | 0x20u;
 	w::AiEntity src_ae{};
-	src_ae.pos[0] = w::to_fixed(12.5);
-	src_ae.pos[1] = w::to_fixed(-34.0);
-	src_ae.pos[2] = w::to_fixed(5.25);
+	src_e.position.x.q16 = w::to_fixed(12.5);
+	src_e.position.y.q16 = w::to_fixed(-34.0);
+	src_e.position.z.q16 = w::to_fixed(5.25);
 	src_ae.heading = 0x20000000; // BAM32 with zero low-16 -> exact i16 round-trip
 	src_ae.pitch = 0x01000000;
 
 	const nw::PlayerExtendedUplink up =
 			ns::build_player_uplink(source_world, src_e, src_ae);
 	if (!expect(up.carrier_handle == 0xFFFF, "on-foot vehicle handle")) return false;
-	if (!expect(up.pos_x == src_ae.pos[0] && up.pos_y == src_ae.pos[1] && up.pos_z == src_ae.pos[2],
+	if (!expect(up.pos_x == src_e.position.x.q16 && up.pos_y == src_e.position.y.q16 && up.pos_z == src_e.position.z.q16,
 	            "pos = live AiEntity.pos (16.16)")) return false;
 	if (!expect(up.heading == static_cast<int16_t>(src_ae.heading >> 16),
 	            "heading = BAM32 high half")) return false;
@@ -136,10 +125,12 @@ bool run_field_mapping() {
 	return true;
 }
 
-// A remote person's distance is measured to its bound sphere: its decoded
-// collision proxy carries the entity+0 boundRadius the retail client's own
-// pool-0 entity holds. (100,0,0) less a 2.0 radius is 98 tiles: 1026 + 712.
-// [orig: Server_BuildEntityPriorityListForPlayer --
+// A remote person's distance is measured to its bound sphere: the entity+0
+// boundRadius the retail client's own pool-0 entity holds from its spawn, which
+// its type gives (never a proximity table's copy, which a person spawned since
+// the last build does not have yet). (100,0,0) less a 2.0 radius is 98 tiles:
+// 1026 + 712.
+// [orig: Server_BuildEntityPriorityListForPlayer -- the pool-0 cursor @0x50DFE1,
 //  `sub ebp, [esi]` (boundRadius) @0x50E087, `sar ebp, 10h` @0x50E089]
 bool run_interest_person_bound_radius() {
 	ns::ClientState replica;
@@ -154,17 +145,13 @@ bool run_interest_person_bound_radius() {
 	w::World world;
 	world.weather.core.scalar_channels.fog_dist_fp = 0; // view distance 0: the view terms off
 	w::CollisionWorld collision;
-	world.collision = &collision;
-	w::WirePersonCollisionProxy proxy;
-	proxy.wire_handle = 0x0000;
-	proxy.position_q16 = w::FixedVec3{person.x, 0, 0};
-	proxy.bound_radius_q16 = 2 << 16;
-	collision.replace_wire_collision_proxies({proxy}, {});
+	world.collision = &collision; // no proxy: the radius comes from the type
 	w::Entity self{};
 	self.team = 1;
 	w::AiEntity body{};
 	ns::UplinkClientInputs inputs;
 	inputs.replica = &replica;
+	inputs.person_bound_radius_q16 = [](uint16_t) -> int32_t { return 2 << 16; };
 	const nw::PlayerExtendedUplink up = ns::build_player_uplink(world, self, body, inputs);
 	if (!expect(up.priority_handle_0 == 0x0000 && up.priority_score_0 == 1738,
 			"a remote person's distance is to its bound sphere")) {
@@ -216,7 +203,7 @@ bool run_interest_person_los_takes_the_entity_leg() {
 		if (indoors) self.flags |= w::kEntityFlagIndoors;
 		const w::EntityHandle self_h = world.registry.spawn(0, self);
 		w::AiEntity body{};
-		body.pos[2] = w::to_fixed(5.0);
+		world.registry.get(self_h)->position.z.q16 = w::to_fixed(5.0);
 		ns::UplinkClientInputs inputs;
 		inputs.replica = &replica;
 		inputs.self_wire_handle = 0x0002;
@@ -229,6 +216,110 @@ bool run_interest_person_los_takes_the_entity_leg() {
 		if (!expect(up.priority_handle_0 == 0x0000 && up.priority_score_0 == want,
 				indoors ? "two indoor ends skip the terrain ray"
 				        : "a buried remote person is still behind the ground")) {
+			std::fprintf(stderr, "  got %04x/%u\n", up.priority_handle_0, up.priority_score_0);
+			ok = false;
+		}
+	}
+	return ok;
+}
+
+// A solid (type-1) box [(-hx,-hy,0)..(hx,hy,height)] in section-local space:
+// six outward Q14 planes, dist = -face offset.
+w::CollisionModel box_model(double hx, double hy, double height) {
+	w::CollisionModel m;
+	const auto plane = [&](int nx, int ny, int nz, double d) {
+		w::CollisionPlane p;
+		p.nx = static_cast<int16_t>(nx);
+		p.ny = static_cast<int16_t>(ny);
+		p.nz = static_cast<int16_t>(nz);
+		p.dist = w::to_fixed(d);
+		m.planes.push_back(p);
+	};
+	plane(16384, 0, 0, -hx);
+	plane(-16384, 0, 0, -hx);
+	plane(0, 16384, 0, -hy);
+	plane(0, -16384, 0, -hy);
+	plane(0, 0, 16384, -height);
+	plane(0, 0, -16384, 0.0);
+	w::CollisionVolume v;
+	v.type = 1;
+	v.min_x = w::to_fixed(-hx);
+	v.max_x = w::to_fixed(hx);
+	v.min_y = w::to_fixed(-hy);
+	v.max_y = w::to_fixed(hy);
+	v.min_z = 0;
+	v.max_z = w::to_fixed(height);
+	v.plane_start = 0;
+	v.plane_count = 6;
+	m.volumes.push_back(v);
+	w::CollisionSection s;
+	s.volume_start = 0;
+	s.volume_count = 1;
+	m.sections.push_back(s);
+	return m;
+}
+
+// The key's LOS runs Entity_CheckLineOfSightTerrainAndEntities with allTypes 0,
+// whose entity leg walks the player's candidate slice and tests a candidate
+// only when its own items.def type is Building (5). A pool-2 decoration (type 2:
+// a sandbag wall, a crate) between the player and a remote person never blocks,
+// though every pool-2 row is a BMS building record. The x8 aikill setup pose
+// stands 1.7 units from a sandbag wall on the rays to two AI (handles 6 and 25):
+// the retail joiner keeps their LOS +100. A wall 2 units ahead, a remote enemy
+// Player 10 units ahead at the same height, in view at 600: 1114 + 2 * (256 +
+// 25 * (1 + 2 * (los + 1) + 1)) + 200 = 2126 with LOS, 2026 behind a Building.
+// [orig: Server_BuildEntityPriorityListForPlayer @0x50DF20 - the LOS call
+//  @0x50E179; Entity_CheckLineOfSightTerrainAndEntities @0x53B130 - the entity
+//  leg, the call @0x53B16C; Physics_RaycastFindCollisionEntity @0x539A70 - the candidate's
+//  itemDef @0x539B7E, `cmp dword ptr [edx+5Ch], 5` @0x539B9E]
+bool run_interest_person_los_passes_a_decoration() {
+	bool ok = true;
+	for (const uint8_t def_type : {uint8_t{2}, uint8_t{5}}) {
+		auto world = std::make_unique<w::World>();
+		world->registry.configure_pool(0, 4);
+		world->registry.configure_pool(2, 4);
+		auto collision = std::make_unique<w::CollisionWorld>();
+		world->collision = collision.get();
+		world->weather.core.scalar_channels.fog_dist_fp = 600 << 16;
+		w::Entity self{};
+		self.kind = w::EntityKind::Organic;
+		self.alive = true;
+		self.team = 1;
+		self.item_type_index = 1; // a pool-0 slice source needs its +0x1C word
+		self.position = w::Vec3{0.0f, 0.0f, 1.5f};
+		const w::EntityHandle self_h = world->registry.spawn(0, self);
+		w::Entity wall{};
+		wall.kind = w::EntityKind::Building; // every pool-2 row's record family
+		wall.alive = true;
+		wall.has_item_def = true;
+		wall.item_type_index = 1; // a loaded row's def ordinal (+0x1C), the static prox list's gate
+		wall.item_type = def_type;
+		wall.heading = w::placed_heading_bam(90);
+		wall.position = w::Vec3{2.0f, 0.0f, 0.0f};
+		const w::EntityHandle wall_h = world->registry.spawn(2, wall);
+		collision->assign_entity(wall_h, collision->add_model(box_model(0.5, 0.5, 3.0)));
+		// The candidate slices rebuild on the 17th tick table build.
+		for (int i = 0; i < 17; ++i) collision->build_tick_tables(*world);
+
+		ns::ClientState replica;
+		ns::ClientEntityState person;
+		person.handle = 0x0000;
+		person.cls = nw::EntityClass::Player;
+		person.team = 2;
+		person.team_known = true;
+		person.x = w::to_fixed(10.0);
+		person.z = w::to_fixed(1.5);
+		replica.entities.push_back(person);
+		w::AiEntity body{};
+		ns::UplinkClientInputs inputs;
+		inputs.replica = &replica;
+		inputs.self_wire_handle = 0x0002;
+		const nw::PlayerExtendedUplink up =
+				ns::build_player_uplink(*world, *world->registry.get(self_h), body, inputs);
+		const uint16_t want = def_type == 5 ? 2026 : 2126;
+		if (!expect(up.priority_handle_0 == 0x0000 && up.priority_score_0 == want,
+				def_type == 5 ? "a Building-type def blocks the key's LOS"
+				              : "a decoration never blocks the key's LOS")) {
 			std::fprintf(stderr, "  got %04x/%u\n", up.priority_handle_0, up.priority_score_0);
 			ok = false;
 		}
@@ -383,7 +474,7 @@ bool run_scope_flag_reaches_host() {
 	intent.item_type_id = 0x14B9;
 	intent.state_flags =
 			ns::build_player_uplink(world, src_e, src_ae).state_flags_byte;
-	ns::apply_player_intent(world, intent);
+	ns::apply_player_intent(world, intent, true);
 	if (!expect((world.registry.get(ph)->flags & 0x10u) != 0,
 	            "the host's copy of the joiner's entity is SCOPED after the uplink"))
 		return false;
@@ -396,24 +487,28 @@ bool run_scope_flag_reaches_host() {
 	src_e.flags = 0u;
 	intent.state_flags =
 			ns::build_player_uplink(world, src_e, src_ae).state_flags_byte;
-	ns::apply_player_intent(world, intent);
+	ns::apply_player_intent(world, intent, true);
 	if (!expect((world.registry.get(ph)->flags & 0x10u) == 0,
 	            "lowering the scope clears the host's bit (a REPLACE, not an OR)"))
 		return false;
 	return true;
 }
 
-// build -> encode -> decode -> host read-apply (drain_connection_c2s): the host peer SNAPs to the source pose.
-bool run_roundtrip_to_host_snap() {
+// build -> encode -> decode -> host read-apply (drain_connection_c2s): the host stages the source pose
+// exactly as the body's chase target and stores the live heading/pitch; a visible body keeps its own
+// position, a hidden one (Flags bit 0) takes the source pose (D-NET-NEW-LP-2).
+// [orig: NetPacket_SerializePlayerState case 4 - the target @0x4C2042..0x4C205E, live Pitch/Yaw
+//  @0x4C206A / @0x4C206D, the hidden-only position stores @0x4C207E..0x4C208E]
+bool run_roundtrip_to_host_staging(bool hidden) {
 	// Source: the joiner's live local-player pose (zero low-16 heading/pitch for exact round-trip).
 	w::World source_world;
 	w::Entity src_e{};
 	src_e.body_anim_slot = -1;
 	w::AiEntity src_ae{};
 	const int32_t sx = w::to_fixed(100.0), sy = w::to_fixed(200.0), sz = w::to_fixed(-50.0);
-	src_ae.pos[0] = sx;
-	src_ae.pos[1] = sy;
-	src_ae.pos[2] = sz;
+	src_e.position.x.q16 = sx;
+	src_e.position.y.q16 = sy;
+	src_e.position.z.q16 = sz;
 	src_ae.heading = 0x20000000; // i16 high 0x2000 -> mission yaw 45
 	src_ae.pitch = 0x01000000;
 	const nw::PlayerExtendedUplink up =
@@ -427,6 +522,7 @@ bool run_roundtrip_to_host_snap() {
 	peer.kind = w::EntityKind::Organic;
 	peer.item_id = 0x14B9; // player infantry template
 	peer.position = {0.0f, 0.0f, 0.0f};
+	if (hidden) peer.flags |= w::kEntityFlagCarried;
 	const w::EntityHandle ph = world.registry.spawn(0, peer);
 	if (!expect(ph.valid(), "host peer spawned")) return false;
 	w::AiSystem &ai = world.ai;
@@ -453,15 +549,17 @@ bool run_roundtrip_to_host_snap() {
 
 	const w::Entity *pe = world.registry.get(ph);
 	if (!expect(pe != nullptr, "host peer present")) return false;
-	if (!expect(pe->position.x == static_cast<float>(w::from_fixed(sx)) &&
-	            pe->position.y == static_cast<float>(w::from_fixed(sy)) &&
-	            pe->position.z == static_cast<float>(w::from_fixed(sz)),
-	            "host peer snapped to the joiner's source position")) return false;
-	if (!expect(pe->yaw == 45, "host peer yaw = 45 (from the joiner's heading)")) return false;
+	if (!expect(hidden ? (pe->position.x.q16 == sx && pe->position.y.q16 == sy &&
+	                      pe->position.z.q16 == sz)
+	                   : (pe->position.x.q16 == 0 && pe->position.y.q16 == 0 &&
+	                      pe->position.z.q16 == 0),
+	            "a hidden peer takes the source position, a visible one keeps its own")) return false;
+	if (!expect(pe->heading == w::placed_heading_bam(45), "host peer yaw = 45 (from the joiner's heading)")) return false;
 	const w::AiEntity *ae = ai.for_handle(ph);
 	if (!expect(ae != nullptr, "host peer has an AiEntity")) return false;
-	if (!expect(ae->pos[0] == sx && ae->pos[1] == sy && ae->pos[2] == sz,
-	            "host peer AiEntity live pos = source (16.16 exact)")) return false;
+	if (!expect(ae->net_smooth_target[0] == sx && ae->net_smooth_target[1] == sy &&
+	                    ae->net_smooth_target[2] == sz,
+	            "host peer chase target = source (16.16 exact)")) return false;
 	if (!expect(ae->heading == src_ae.heading && ae->pitch == src_ae.pitch,
 	            "host peer heading/pitch round-trip exactly (zero low-16 source)")) return false;
 	if (!expect(ae->net_is_remote_peer, "host peer marked net-snapped")) return false;
@@ -499,7 +597,7 @@ bool run_mounted_moving_carrier_roundtrip() {
 	// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
 	carrier_seed.item_attrib = w::kItemAttribPlayerControl;
 	carrier_seed.position = {10.0f, 20.0f, 2.0f};
-	carrier_seed.yaw = 90;
+	carrier_seed.heading = w::placed_heading_bam(90);
 	carrier_seed.health = 3000;
 	carrier_seed.health_max = 3000;
 	w::Seat seat;
@@ -516,16 +614,16 @@ bool run_mounted_moving_carrier_roundtrip() {
 	source_body->pitch = static_cast<int32_t>(0xF4000000u);
 	if (!expect(source_ai_system.refresh_mounted_pose(*source_body, source),
 	            "initial mounted pose refreshed")) return false;
-	const int32_t initial_x = source_body->pos[0];
-	const int32_t initial_y = source_body->pos[1];
+	const int32_t initial_x = source_body->self->position.x.q16;
+	const int32_t initial_y = source_body->self->position.y.q16;
 
 	// Simulate the carrier's later mover and the joiner's final same-frame seat
 	// refresh. Non-zero pitch/roll ensure the builder and apply use one full frame.
 	w::Entity *source_carrier = source.registry.get(source_carrier_h);
 	source_carrier->position = {85.0f, -20.0f, 7.0f};
-	source_carrier->yaw = -35;
-	source_carrier->pitch = 12;
-	source_carrier->roll = -7;
+	source_carrier->heading = w::placed_heading_bam(-35);
+	source_carrier->pitch_bam = w::spawn_angle_bam(12);
+	source_carrier->roll_bam = w::spawn_angle_bam(-7);
 	source_body->heading = 0x61230000; // independent mounted LOOK
 	source_body->pitch = static_cast<int32_t>(0xF4000000u);
 	if (!expect(source_ai_system.refresh_mounted_pose(*source_body, source),
@@ -533,13 +631,13 @@ bool run_mounted_moving_carrier_roundtrip() {
 	source.registry.get(source_player_h)->net_analog_x = -64;
 	source.registry.get(source_player_h)->net_analog_y = 37;
 	source.registry.get(source_player_h)->net_analog_z = -128;
-	if (!expect(source_body->pos[0] != initial_x || source_body->pos[1] != initial_y,
+	if (!expect(source_body->self->position.x.q16 != initial_x || source_body->self->position.y.q16 != initial_y,
 	            "mounted local body followed the moving carrier")) return false;
 	const nw::PlayerExtendedUplink up = ns::build_player_uplink(
 			source, *source.registry.get(source_player_h), *source_body);
 	if (!expect(up.carrier_handle == source_carrier_h.packed,
 	            "mounted uplink carries the actual vehicle handle")) return false;
-	if (!expect(up.pos_x != source_body->pos[0] || up.pos_y != source_body->pos[1],
+	if (!expect(up.pos_x != source_body->self->position.x.q16 || up.pos_y != source_body->self->position.y.q16,
 	            "mounted uplink position is carrier-local, not world")) return false;
 	const int32_t source_carrier_yaw = carrier_heading_bam(*source_carrier);
 	const int32_t expected_local_heading = static_cast<int32_t>(
@@ -559,9 +657,9 @@ bool run_mounted_moving_carrier_roundtrip() {
 	host_ai_system.attach(host_player_h);
 	w::Entity host_carrier_seed = carrier_seed;
 	host_carrier_seed.position = source_carrier->position;
-	host_carrier_seed.yaw = source_carrier->yaw;
-	host_carrier_seed.pitch = source_carrier->pitch;
-	host_carrier_seed.roll = source_carrier->roll;
+	host_carrier_seed.heading = source_carrier->heading;
+	host_carrier_seed.pitch_bam = source_carrier->pitch_bam;
+	host_carrier_seed.roll_bam = source_carrier->roll_bam;
 	const w::EntityHandle host_carrier_h = host.registry.spawn(1, host_carrier_seed);
 	if (!expect(host_player_h.packed == source_player_h.packed &&
 	                    host_carrier_h.packed == source_carrier_h.packed,
@@ -577,20 +675,22 @@ bool run_mounted_moving_carrier_roundtrip() {
 			w::to_fixed(source_carrier->position.y),
 			w::to_fixed(source_carrier->position.z),
 			static_cast<uint32_t>(source_carrier_yaw),
-			static_cast<uint32_t>(carrier_axis_bam(source_carrier->pitch)),
-			static_cast<uint32_t>(carrier_axis_bam(source_carrier->roll)));
+			static_cast<uint32_t>(source_carrier->pitch_bam),
+			static_cast<uint32_t>(source_carrier->roll_bam));
 	const w::AiEntity *host_body = host_ai_system.for_handle(host_player_h);
 	const w::Entity *host_player = host.registry.get(host_player_h);
 	if (!expect(host_player != nullptr && host_player->net_analog_x == -64 &&
 	                    host_player->net_analog_y == 37 && host_player->net_analog_z == -128,
 	            "mounted throttle and steering reach authority through the real uplink"))
 		return false;
-	if (!expect(host_body != nullptr && host_body->pos[0] == lifted.x &&
-	                    host_body->pos[1] == lifted.y && host_body->pos[2] == lifted.z,
+	// The lifted pose is the body's staged chase target (D-NET-NEW-LP-2).
+	if (!expect(host_body != nullptr && host_body->net_smooth_target[0] == lifted.x &&
+	                    host_body->net_smooth_target[1] == lifted.y &&
+	                    host_body->net_smooth_target[2] == lifted.z,
 	            "host lifts mounted local pose through the full carrier frame")) return false;
-	if (!expect(near_fixed(host_body->pos[0], source_body->pos[0]) &&
-	                    near_fixed(host_body->pos[1], source_body->pos[1]) &&
-	                    near_fixed(host_body->pos[2], source_body->pos[2]),
+	if (!expect(near_fixed(host_body->net_smooth_target[0], source_body->self->position.x.q16) &&
+	                    near_fixed(host_body->net_smooth_target[1], source_body->self->position.y.q16) &&
+	                    near_fixed(host_body->net_smooth_target[2], source_body->self->position.z.q16),
 	            "mounted builder/apply round-trip preserves the source world pose")) return false;
 	const int32_t expected_host_heading = static_cast<int32_t>(
 			(static_cast<uint32_t>(static_cast<uint16_t>(up.heading)) << 16) +
@@ -622,9 +722,9 @@ bool run_ground_target_carrier_roundtrip() {
 	deck_seed.kind = w::EntityKind::Building;
 	deck_seed.item_id = 0x0465;
 	deck_seed.position = {-40.0f, 65.0f, 4.0f};
-	deck_seed.yaw = 25;
-	deck_seed.pitch = -6;
-	deck_seed.roll = 4;
+	deck_seed.heading = w::placed_heading_bam(25);
+	deck_seed.pitch_bam = w::spawn_angle_bam(-6);
+	deck_seed.roll_bam = w::spawn_angle_bam(4);
 	const w::EntityHandle source_deck_h = source.registry.spawn(2, deck_seed);
 	if (!expect(source_deck_h.valid(), "ground carrier spawned")) return false;
 	w::Entity *source_player = source.registry.get(source_player_h);
@@ -637,11 +737,11 @@ bool run_ground_target_carrier_roundtrip() {
 			w::to_fixed(source_deck->position.y),
 			w::to_fixed(source_deck->position.z),
 			static_cast<uint32_t>(deck_yaw),
-			static_cast<uint32_t>(carrier_axis_bam(source_deck->pitch)),
-			static_cast<uint32_t>(carrier_axis_bam(source_deck->roll)));
-	source_body->pos[0] = source_world_pose.x;
-	source_body->pos[1] = source_world_pose.y;
-	source_body->pos[2] = source_world_pose.z;
+			static_cast<uint32_t>(source_deck->pitch_bam),
+			static_cast<uint32_t>(source_deck->roll_bam));
+	source_body->self->position.x.q16 = source_world_pose.x;
+	source_body->self->position.y.q16 = source_world_pose.y;
+	source_body->self->position.z.q16 = source_world_pose.z;
 	source_body->heading = static_cast<int32_t>(
 			static_cast<uint32_t>(deck_yaw) + 0x12340000u);
 	source_body->pitch = 0x04000000;
@@ -672,18 +772,21 @@ bool run_ground_target_carrier_roundtrip() {
 			up.pos_x, up.pos_y, up.pos_z,
 			w::to_fixed(deck_seed.position.x), w::to_fixed(deck_seed.position.y),
 			w::to_fixed(deck_seed.position.z), static_cast<uint32_t>(deck_yaw),
-			static_cast<uint32_t>(carrier_axis_bam(deck_seed.pitch)),
-			static_cast<uint32_t>(carrier_axis_bam(deck_seed.roll)));
-	if (!expect(host_body != nullptr && host_body->pos[0] == lifted.x &&
-	                    host_body->pos[1] == lifted.y && host_body->pos[2] == lifted.z,
+			static_cast<uint32_t>(deck_seed.pitch_bam),
+			static_cast<uint32_t>(deck_seed.roll_bam));
+	if (!expect(host_body != nullptr && host_body->net_smooth_target[0] == lifted.x &&
+	                    host_body->net_smooth_target[1] == lifted.y &&
+	                    host_body->net_smooth_target[2] == lifted.z,
 	            "authority lifts ground-local pose through the carrier")) return false;
-	if (!expect(near_fixed(host_body->pos[0], source_body->pos[0]) &&
-	                    near_fixed(host_body->pos[1], source_body->pos[1]) &&
-	                    near_fixed(host_body->pos[2], source_body->pos[2]),
+	if (!expect(near_fixed(host_body->net_smooth_target[0], source_body->self->position.x.q16) &&
+	                    near_fixed(host_body->net_smooth_target[1], source_body->self->position.y.q16) &&
+	                    near_fixed(host_body->net_smooth_target[2], source_body->self->position.z.q16),
 	            "ground-target round-trip preserves source world pose")) return false;
+	// The read-apply stores no ground link: the host body's own resolver probe keeps it
+	// [orig: Entity_RaycastGroundHeightAndObject @0x414370].
 	return expect(host_player != nullptr && !host_player->mounted &&
-	                      host_player->ground_target == host_deck_h,
-	              "authority retains ground_target without inventing a mount");
+	                      !host_player->ground_target.valid(),
+	              "the read-apply invents neither a mount nor a ground link");
 }
 
 // The equipped-adm ingest gate (D-NET-143): a table-less world accepts the uplinked byte
@@ -707,7 +810,7 @@ bool run_equipped_adm_ingest_gate() {
 
 	// Table-less world: accepted verbatim (unit path — a live host always feeds weapon.def).
 	intent.equipped_adm_index = 0x30;
-	ns::apply_player_intent(world, intent);
+	ns::apply_player_intent(world, intent, true);
 	if (!expect(world.registry.get(ph)->equipped_adm_index == 0x30,
 	            "table-less world stores the uplinked byte verbatim")) return false;
 
@@ -721,15 +824,15 @@ bool run_equipped_adm_ingest_gate() {
 	world.tables.weapons.entries[11].category = 11;
 
 	intent.equipped_adm_index = 8;
-	ns::apply_player_intent(world, intent);
+	ns::apply_player_intent(world, intent, true);
 	if (!expect(world.registry.get(ph)->equipped_adm_index == 8,
 	            "category 3 entry passes the < 11 gate")) return false;
 	intent.equipped_adm_index = 11;
-	ns::apply_player_intent(world, intent);
+	ns::apply_player_intent(world, intent, true);
 	if (!expect(world.registry.get(ph)->equipped_adm_index == 8,
 	            "category 11 (emplaced band) is NOT stored")) return false;
 	intent.equipped_adm_index = 0xFF;
-	ns::apply_player_intent(world, intent);
+	ns::apply_player_intent(world, intent, true);
 	if (!expect(world.registry.get(ph)->equipped_adm_index == 8,
 	            "the 0xFF none sentinel / missing entry is NOT stored")) return false;
 	return true;
@@ -772,9 +875,9 @@ bool run_seeded_carrier_seat_local_is_attitude_invariant() {
 		carrier_seed.has_item_def = true; // seats need the def (D-NET-422)
 		carrier_seed.item_id = 0x1004;
 		carrier_seed.position = {85.0f, -20.0f, 7.0f};
-		carrier_seed.yaw = static_cast<int16_t>(std::lround(yaw_deg));
-		carrier_seed.pitch = static_cast<int16_t>(std::lround(pitch_deg));
-		carrier_seed.roll = static_cast<int16_t>(std::lround(roll_deg));
+		carrier_seed.heading = w::placed_heading_bam(static_cast<int16_t>(std::lround(yaw_deg)));
+		carrier_seed.pitch_bam = w::spawn_angle_bam(static_cast<int16_t>(std::lround(pitch_deg)));
+		carrier_seed.roll_bam = w::spawn_angle_bam(static_cast<int16_t>(std::lround(roll_deg)));
 		carrier_seed.health = 3000;
 		carrier_seed.health_max = 3000;
 		w::Seat seat;
@@ -837,8 +940,8 @@ bool run_seeded_carrier_seat_local_is_attitude_invariant() {
 // head-look target. A decoded remote person on the aim ray has no registry
 // entity, so the head-look target stays empty and the cursor names the aim
 // acquisition's wire row; the lock and a live head-look target win over it.
-// [orig: HUD_BuildEntityInfo @0x4B87ED..0x4B8825; Entity_UpdateInfantryPlayerBody
-//  headLookTarget @0x4b4f75 / @0x4b5036]
+// [orig: HUD_BuildEntityInfo @0x4B8440 (@0x4B87ED..0x4B8825);
+//  Entity_UpdateInfantryPlayerBody @0x4B40E0 (headLookTarget @0x4b4f75 / @0x4b5036)]
 // The uplink is written after the frame's receive: when that receive folded
 // the joiner's own record, its apply has already re-pointed the ground link
 // the writer reads. A record that seats the player names the seat's own
@@ -846,7 +949,7 @@ bool run_seeded_carrier_seat_local_is_attitude_invariant() {
 // vehicle stands on otherwise (that deck's frame). An unmounted joiner's
 // uplink is unchanged by the echo.
 // [orig: NetPacket_SerializePlayerState case 2 -- Entity_TryAttachOrDetach
-//  @0x4C1329, `groundEntity = parentEntity ? parentEntity->groundEntity :
+//  @0x436610 (the call @0x4C1317), `groundEntity = parentEntity ? parentEntity->groundEntity :
 //  carrier` @0x4C1346..0x4C1358; case 3 `mov ecx, [edi+28h]` @0x4C141D;
 //  Client_ProcessNetworkFrame -- the receive pump @0x42C228 ahead of the
 //  send block @0x42C3DD..0x42C4BC]
@@ -859,12 +962,12 @@ bool run_mounted_echo_names_the_seat_ground_link() {
 	w::Entity deck_seed;
 	deck_seed.kind = w::EntityKind::Item;
 	deck_seed.position = {500.0f, 100.0f, 0.0f};
-	deck_seed.yaw = 30;
+	deck_seed.heading = w::placed_heading_bam(30);
 	const w::EntityHandle deck = world.registry.spawn(1, deck_seed);
 	w::Entity vehicle_seed;
 	vehicle_seed.kind = w::EntityKind::Item;
 	vehicle_seed.position = {85.0f, -20.0f, 7.0f};
-	vehicle_seed.yaw = -35;
+	vehicle_seed.heading = w::placed_heading_bam(-35);
 	const w::EntityHandle vehicle = world.registry.spawn(1, vehicle_seed);
 	w::Entity self_seed;
 	self_seed.kind = w::EntityKind::Organic;
@@ -873,9 +976,10 @@ bool run_mounted_echo_names_the_seat_ground_link() {
 	self_seed.mount_type = w::SeatType::Driver;
 	const w::EntityHandle self = world.registry.spawn(0, self_seed);
 	w::AiEntity body{};
-	body.pos[0] = w::to_fixed(86.0);
-	body.pos[1] = w::to_fixed(-19.0);
-	body.pos[2] = w::to_fixed(8.0);
+	w::EntityPosition &self_pos = world.registry.get(self)->position;
+	self_pos.x.q16 = w::to_fixed(86.0);
+	self_pos.y.q16 = w::to_fixed(-19.0);
+	self_pos.z.q16 = w::to_fixed(8.0);
 	body.heading = 0x61230000;
 	ns::ClientEntityState echo;
 	echo.handle = 0x0002;
@@ -890,8 +994,8 @@ bool run_mounted_echo_names_the_seat_ground_link() {
 	inputs.self_echo = &echo;
 	const nw::PlayerExtendedUplink open_ground =
 			ns::build_player_uplink(world, *world.registry.get(self), body, inputs);
-	ok &= expect(open_ground.carrier_handle == 0xFFFF && open_ground.pos_x == body.pos[0] &&
-			open_ground.pos_y == body.pos[1] && open_ground.pos_z == body.pos[2] &&
+	ok &= expect(open_ground.carrier_handle == 0xFFFF && open_ground.pos_x == self_pos.x.q16 &&
+			open_ground.pos_y == self_pos.y.q16 && open_ground.pos_z == self_pos.z.q16 &&
 			open_ground.heading == static_cast<int16_t>(body.heading >> 16),
 			"an echo frame on open ground uplinks no carrier and the world pose");
 	// A vehicle standing on a deck: the echo names the deck, in its frame,
@@ -935,19 +1039,56 @@ bool run_hud_cursor_names_a_remote_person() {
 	w::Entity crate;
 	crate.kind = w::EntityKind::Item;
 	const w::EntityHandle crate_h = world.registry.spawn(1, crate);
-	w::AiEntity ae;
+	const auto lifetime = [&world](w::EntityHandle h) {
+		const w::Entity *e = world.registry.get(h);
+		return w::EntityLifetime{h, e != nullptr ? e->registry_spawn_id : 0};
+	};
+	// The cursor as the HUD pass built it (world::HudTargetCursor).
+	w::HudTargetCursor cursor;
 	constexpr uint16_t kSelf = 0x0002, kPerson = 0x0007;
-	ok &= expect(ns::uplink_hud_target_wire_handle(world, ae, kSelf, kPerson) == kPerson,
+	cursor.wire_person = kPerson;
+	ok &= expect(ns::uplink_hud_target_wire_handle(world, cursor, kSelf) == kPerson,
 			"an empty head-look target names the aimed-at remote person");
-	ok &= expect(ns::uplink_hud_target_wire_handle(world, ae, kSelf, 0xFFFF) == 0xFFFF,
+	cursor.wire_person = 0xFFFF;
+	ok &= expect(ns::uplink_hud_target_wire_handle(world, cursor, kSelf) == 0xFFFF,
 			"no aim-ray row, no cursor");
-	ae.inf.head_look_target = crate_h;
-	ok &= expect(ns::uplink_hud_target_wire_handle(world, ae, kSelf, kPerson) == crate_h.packed,
+	cursor.entity = lifetime(crate_h);
+	ok &= expect(ns::uplink_hud_target_wire_handle(world, cursor, kSelf) == crate_h.packed,
 			"a live head-look target wins");
-	ae.inf.head_look_target = {};
-	ae.inf.combat_target = world.cached.local_player;
-	ok &= expect(ns::uplink_hud_target_wire_handle(world, ae, kSelf, kPerson) == kSelf,
+	cursor.lock = w::TargetRef{world.cached.local_player};
+	cursor.entity = lifetime(world.cached.local_player);
+	ok &= expect(ns::uplink_hud_target_wire_handle(world, cursor, kSelf) == kSelf,
 			"the lock wins, L answering to its self handle");
+	// A lock on a round (a flare): the cursor is the round, which matches no entity, so no
+	// head-look fallback [orig: HUD_BuildEntityInfo @0x4B87ED..0x4B882D;
+	// Server_BuildEntityPriorityListForPlayer @0x50E1C6 / @0x50E42C]. (D-NET-64)
+	cursor.lock = w::TargetRef::of_round(4);
+	cursor.entity = {};
+	cursor.wire_person = kPerson;
+	ok &= expect(ns::uplink_hud_target_wire_handle(world, cursor, kSelf) == 0xFFFF,
+			"a round lock names no cursor entity");
+	// The destroy zeroes the word: an entity destroyed since the build names none, and so
+	// does a new one in its slot [orig: Entity_Destroy @0x43E810 - @0x43E89C..0x43E8A4].
+	cursor = {};
+	cursor.entity = lifetime(crate_h);
+	world.registry.despawn(crate_h);
+	ok &= expect(ns::uplink_hud_target_wire_handle(world, cursor, kSelf) == 0xFFFF,
+			"a destroyed cursor entity names none");
+	const w::EntityHandle reused = world.registry.spawn_at(crate_h, crate);
+	ok &= expect(reused == crate_h &&
+			ns::uplink_hud_target_wire_handle(world, cursor, kSelf) == 0xFFFF,
+			"a new entity in the destroyed one's slot is not the cursor");
+	// A decoded remote person's row destroyed since the build: the client's destroy clears the
+	// word for it alone, so a row later spawned in its slot gets no cursor term; another row's
+	// destroy leaves the word [orig: Entity_Destroy @0x43E810 - @0x43E89C..0x43E8A4].
+	cursor = {};
+	cursor.wire_person = kPerson;
+	w::hud_target_cursor_note_destroyed(cursor, 0x0009);
+	ok &= expect(ns::uplink_hud_target_wire_handle(world, cursor, kSelf) == kPerson,
+			"another row's destroy keeps the cursor");
+	w::hud_target_cursor_note_destroyed(cursor, kPerson);
+	ok &= expect(ns::uplink_hud_target_wire_handle(world, cursor, kSelf) == 0xFFFF,
+			"the cursor's row destroyed names none");
 	return ok;
 }
 
@@ -959,7 +1100,8 @@ int main() {
 	ok = run_interest_pairs_top4() && ok;
 	ok = run_stat_bytes() && ok;
 	ok = run_interest_person_bound_radius() && ok;
-	ok = run_roundtrip_to_host_snap() && ok;
+	ok = run_roundtrip_to_host_staging(false) &&
+	                run_roundtrip_to_host_staging(true) && ok;
 	ok = run_mounted_moving_carrier_roundtrip() && ok;
 	ok = run_seeded_carrier_seat_local_is_attitude_invariant() && ok;
 	ok = run_ground_target_carrier_roundtrip() && ok;
@@ -968,5 +1110,6 @@ int main() {
 	ok = run_hud_cursor_names_a_remote_person() && ok;
 	ok = run_mounted_echo_names_the_seat_ground_link() && ok;
 	ok = run_interest_person_los_takes_the_entity_leg() && ok;
+	ok = run_interest_person_los_passes_a_decoration() && ok;
 	return ok ? 0 : 1;
 }

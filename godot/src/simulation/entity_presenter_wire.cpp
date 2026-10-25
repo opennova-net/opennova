@@ -4,7 +4,10 @@
 #include "util/axes.h"
 
 #include <godot_cpp/classes/node3d.hpp>
+#include <godot_cpp/classes/os.hpp>
+#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/object.hpp>
+#include <godot_cpp/templates/hash_set.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <runtime/inmatch/wire_present.h>
@@ -13,6 +16,8 @@
 #include "simulation/simulation.h"
 #include "object/object_data.h"
 #include "world/scar_presenter.h"
+
+#include <chrono>
 
 // The WIRE (joiner/MP) walk: the COLD path (spawn/defer/unresolved
 // bookkeeping, the liveness prune, held-weapon builds, the spawn signal and
@@ -147,6 +152,27 @@ bool leg_inputs_unchanged(const float *p, int base, const int *fields,
 	return false;
 }
 
+// The wire walk's parts clock (profile_present_wire_rows_view, an instrument): one steady_clock
+// read in nanoseconds, so a part shorter than a microsecond still sums.
+int64_t wire_profile_now_ns() {
+	return static_cast<int64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+			std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+// Laps one row's legs onto the walk's parts; no clock read without a profile.
+struct WireLap {
+	EntityPresenter::WireProfile *profile;
+	int64_t last;
+	explicit WireLap(EntityPresenter::WireProfile *p_profile) :
+			profile(p_profile), last(p_profile != nullptr ? wire_profile_now_ns() : 0) {}
+	void mark(int p_part) {
+		if (profile == nullptr) return;
+		const int64_t now = wire_profile_now_ns();
+		profile->ns[p_part] += now - last;
+		last = now;
+	}
+};
+
 } // namespace
 
 // --- The cold path + registry ------------------------------------------------
@@ -198,6 +224,27 @@ void EntityPresenter::set_wire_inset_view(bool p_active) {
 	wire_inset_view_ = p_active;
 	if (!p_active) {
 		wire_render_culled_inset_.clear();
+	}
+}
+
+void EntityPresenter::set_render_culled_mirror(int p_view, int p_handle, bool p_culled) {
+	if (p_view < 0 || p_view > 1) {
+		return;
+	}
+	if (p_culled) {
+		wire_render_culled_mirror_[p_view][p_handle] = true;
+	} else {
+		wire_render_culled_mirror_[p_view].erase(p_handle);
+	}
+}
+
+void EntityPresenter::set_wire_mirror_view(int p_view, bool p_active) {
+	if (p_view < 0 || p_view > 1) {
+		return;
+	}
+	wire_mirror_view_[p_view] = p_active;
+	if (!p_active) {
+		wire_render_culled_mirror_[p_view].clear();
 	}
 }
 
@@ -355,6 +402,19 @@ void EntityPresenter::register_wire_held_weapon(int p_handle, ObjectModel *p_nod
 	apply_lighting_context(p_handle);
 }
 
+EntityPresenter::WireProfile EntityPresenter::profile_present_wire_rows_view(
+		PresentRowsView p_snap, int p_stride, int64_t p_layout_revision) {
+	WireProfile profile;
+	wire_profile_ = &profile;
+	const int64_t start = wire_profile_now_ns();
+	present_wire_rows_view(p_snap, p_stride, p_layout_revision);
+	const int64_t total = wire_profile_now_ns() - start;
+	wire_profile_ = nullptr;
+	// The plan is the walk's time outside its rows' walk.
+	profile.ns[WIRE_PROFILE_PLAN] = total - profile.walk_ns;
+	return profile;
+}
+
 void EntityPresenter::present_wire_snapshot(const PackedFloat32Array &p_snap,
 		int p_stride, int64_t p_layout_revision) {
 	present_wire_rows_view({p_snap.ptr(), p_snap.size()}, p_stride, p_layout_revision);
@@ -386,6 +446,7 @@ void EntityPresenter::present_wire_rows_view(PresentRowsView p_snap,
 	}
 	begin_wire_plan(p_layout_revision, p_stride, p_snap.size(),
 			index_generation, local_handle);
+	if (wire_profile_ != nullptr) ++wire_profile_->cold_plans;
 	const float *snap = p_snap.ptr();
 	const int count = int(p_snap.size() / p_stride);
 	HashMap<int32_t, bool> live;
@@ -397,6 +458,14 @@ void EntityPresenter::present_wire_rows_view(PresentRowsView p_snap,
 	LocalVector<int32_t> spawned_items;
 	int spawn_attempts = 0;
 	int pending_spawns = 0;
+	// The frame's cold spawns timed with their scene builds' phases (an instrument, read under
+	// --verbose alone: the line past the rows names what a wire row's first present costs, split
+	// into the spawns' calls, the placer's file and animation-map reads inside them, and the rows'
+	// presents, the new rows' first ones apart).
+	const bool profile_spawns = OS::get_singleton()->is_stdout_verbose();
+	uint64_t spawn_start_usec = 0;
+	uint64_t spawn_calls_usec = 0;
+	PackedStringArray spawned_graphics;
 	for (int i = 0; i < count; ++i) {
 		const int base = i * p_stride;
 		const int type_id = int(snap[base + PF_TYPE_ID]);
@@ -470,18 +539,30 @@ void EntityPresenter::present_wire_rows_view(PresentRowsView p_snap,
 				++pending_spawns;
 				continue;
 			}
+			if (spawn_attempts == 0 && profile_spawns) {
+				(void)ObjectModel::take_build_profile();
+				(void)placer_->take_load_profile();
+				wire_first_present_usec_ = 0;
+				spawn_start_usec = Time::get_singleton()->get_ticks_usec();
+			}
 			++spawn_attempts;
+			const uint64_t call_start =
+					profile_spawns ? Time::get_singleton()->get_ticks_usec() : 0;
 			// build_player_animated_model maps the player runtime type to its
 			// visual item and passes other organics through — the SAME chain
 			// the host uses for the local avatar and placed NPCs.
 			node = placer_->build_player_animated_model(
 					type_id, parent, character_id);
+			if (profile_spawns) {
+				spawn_calls_usec += Time::get_singleton()->get_ticks_usec() - call_start;
+			}
 			if (node == nullptr) {
 				unresolved_[handle] = visual_identity;
 				++stat_unresolved_;
 				continue;
 			}
 			node->set_name(vformat("Wire_%04x", handle));
+			if (profile_spawns) spawned_graphics.push_back(node->get_graphic_name());
 			Ref<EntityRef> ref;
 			ref.instantiate();
 			ref->set_kind(runtime_kind);
@@ -508,7 +589,27 @@ void EntityPresenter::present_wire_rows_view(PresentRowsView p_snap,
 			spawned_items.push_back(visual_item_id);
 		}
 	}
+	const bool profile_rows = profile_spawns && spawn_attempts > 0;
+	const uint64_t rows_start = profile_rows ? Time::get_singleton()->get_ticks_usec() : 0;
+	wire_profile_first_presents_ = profile_rows;
 	present_wire_rows(p_snap, p_stride, tick_delta);
+	wire_profile_first_presents_ = false;
+	if (profile_rows) {
+		// The spawned rows' held weapons build in the rows above, so the span runs through them.
+		const uint64_t now = Time::get_singleton()->get_ticks_usec();
+		const PackedInt64Array build_profile = ObjectModel::take_build_profile();
+		const MissionObjectPlacer::LoadProfile loads = placer_->take_load_profile();
+		UtilityFunctions::print_verbose(vformat(
+				"EntityPresenter: wire cold spawns %d (%d owed to later frames): %d ms with the rows "
+				"(%s): spawn calls %d ms (model files %d read %d ms, animation maps %d read %d ms), "
+				"rows %d ms (first presents %d ms); scene %s",
+				spawn_attempts, pending_spawns, static_cast<int>((now - spawn_start_usec) / 1000),
+				String(", ").join(spawned_graphics), static_cast<int>(spawn_calls_usec / 1000),
+				loads.data_loads, static_cast<int>(loads.data_us / 1000), loads.rig_loads,
+				static_cast<int>(loads.rig_us / 1000), static_cast<int>((now - rows_start) / 1000),
+				static_cast<int>(wire_first_present_usec_ / 1000),
+				ObjectModel::format_build_profile(build_profile)));
+	}
 	pending_spawn_count_ = pending_spawns;
 	for (uint32_t i = 0; i < spawned_nodes.size(); ++i) {
 		if (ObjectModel *node = model_for_id(spawned_nodes[i])) {
@@ -779,6 +880,8 @@ void EntityPresenter::reset_wire_plan_state() {
 	wire_deferred_ids_.clear();
 	wire_render_culled_.clear();
 	wire_render_culled_inset_.clear();
+	wire_render_culled_mirror_[0].clear();
+	wire_render_culled_mirror_[1].clear();
 	wire_remote_body_.clear();
 	wire_foot_cursor_.clear();
 	wire_respawn_revisions_.clear();
@@ -795,6 +898,7 @@ void EntityPresenter::reset_wire_plan_state() {
 void EntityPresenter::present_wire_rows(PresentRowsView snap,
 		int stride, int tick_delta) {
 	const int64_t size = snap.size();
+	const int64_t walk_start = wire_profile_ != nullptr ? wire_profile_now_ns() : 0;
 	for (WireRow &row : wire_rows_) {
 		if (row.base < 0 || row.base + stride > size) {
 			continue;
@@ -804,9 +908,18 @@ void EntityPresenter::present_wire_rows(PresentRowsView snap,
 		if (model == nullptr) {
 			continue;
 		}
-		present_one_wire_row(row, model, snap, tick_delta);
+		if (wire_profile_ != nullptr) ++wire_profile_->rows;
+		if (wire_profile_first_presents_ && row.spawned_now) {
+			// A new row's first present, timed apart (the cold walk's instrument).
+			const uint64_t start = Time::get_singleton()->get_ticks_usec();
+			present_one_wire_row(row, model, snap, tick_delta);
+			wire_first_present_usec_ += Time::get_singleton()->get_ticks_usec() - start;
+		} else {
+			present_one_wire_row(row, model, snap, tick_delta);
+		}
 		row.spawned_now = false;
 	}
+	if (wire_profile_ != nullptr) wire_profile_->walk_ns += wire_profile_now_ns() - walk_start;
 }
 
 void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
@@ -815,6 +928,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 			"ctrl leg field table must match the row cache size");
 	const float *p = snap.ptr();
 	const int base = row.base;
+	WireLap lap(wire_profile_);
 	note_ragdoll_row(model, row.handle, p, base);
 	// A row the occlusion frame's collector gate culled is not drawn: no
 	// presentation leg runs for it (the sector walk only visits collected
@@ -828,7 +942,11 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 	const bool main_culled = wire_render_culled_.has(row.handle);
 	const bool inset_culled =
 			!wire_inset_view_ || wire_render_culled_inset_.has(row.handle);
-	if (main_culled && inset_culled) {
+	// Each water mirror's own collect decides its view too.
+	const bool mirrors_culled =
+			(!wire_mirror_view_[0] || wire_render_culled_mirror_[0].has(row.handle)) &&
+			(!wire_mirror_view_[1] || wire_render_culled_mirror_[1].has(row.handle));
+	if (main_culled && inset_culled && mirrors_culled) {
 		if (model->is_visible()) {
 			model->set_visible(false);
 		}
@@ -838,8 +956,8 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 		// [see RenderSlot_RenderEntityAndChildren in the engine's witness map]).
 		update_wire_held_weapon(row, model, snap, false);
 		update_wire_person_overlays(row, model, snap, false);
-		// Neither view's twin may outlive the verdict either.
-		if (wire_inset_view_) {
+		// No view's twin may outlive the verdict either.
+		if (wire_inset_view_ || wire_mirror_view_[0] || wire_mirror_view_[1]) {
 			apply_wire_row_views(row, model, model->is_present_visible(), true, true);
 		}
 		// A pending remote body blend is entity-update work, not draw work
@@ -851,6 +969,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 			apply_wire_body_anim(row, model, snap, tick_delta);
 		}
 		present_wire_row_body_sounds(row, snap);
+		lap.mark(WIRE_PROFILE_CULLED);
 		return;
 	}
     if (wfield_i(p, base, Simulation::PF_HUSK) != 0) {
@@ -910,6 +1029,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 		}
 		row.aim_valid = aim_valid;
 	}
+	lap.mark(WIRE_PROFILE_POSE);
 	// The CTRL/PART block is input-gated as one unit: every field all four
 	// semantic writers, the focal sway and both procedural part channels
 	// consume sits in kCtrlLegFields, so an unchanged set means the node's presenter-owned
@@ -928,6 +1048,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 		wire_controls_apply(model, snap, base);
 		model->end_ctrl_update();
 	}
+	lap.mark(WIRE_PROFILE_CTRL);
 	if (respawned_since_present) {
 		model->reset_remote_body_state();
 		row.anim_state = -2; // force the next body-anim dispatch through
@@ -946,6 +1067,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 		row.foot_phase = -1;
 	}
 	apply_wire_body_anim(row, model, snap, tick_delta);
+	lap.mark(WIRE_PROFILE_BODY);
 	// The upper-body weapon channel: the hold pose this player's held weapon and
 	// scope state select. -1 means no channel this frame, which clears any pose
 	// left over from the weapon it was holding before. Dispatch is gated on the
@@ -988,7 +1110,9 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 			row.wpn_src_variant = wpn_src_variant;
 		}
 	}
+	lap.mark(WIRE_PROFILE_WEAPON);
 	present_wire_row_body_sounds(row, snap);
+	lap.mark(WIRE_PROFILE_SOUNDS);
 	const bool next_visible =
 			wfield_i(p, base, Simulation::PF_HIDDEN) == 0 &&
 			wfield_i(p, base, Simulation::PF_LOCAL_VIEW_SUPPRESSED) == 0;
@@ -997,8 +1121,10 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 	// transition releases once, and never-publishing rows leave the channel to
 	// its other writer (the occlusion frame pass on buildings).
 	stamp_section_mask(model, p, base, row.destroyed_section_mask);
+	lap.mark(WIRE_PROFILE_VIEWS);
 	update_wire_held_weapon(row, model, snap, next_visible);
 	update_wire_person_overlays(row, model, snap, next_visible);
+	lap.mark(WIRE_PROFILE_HELD);
 	wire_respawn_revisions_.insert(row.handle, respawn_revision);
 	// Each view's collector verdict on the body and its held gun (drawn
 	// inside the body's submit): the node keeps the main view's, the Inset's
@@ -1013,6 +1139,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 	if (model->is_visible() != node_visible) {
 		model->set_visible(node_visible);
 	}
+	lap.mark(WIRE_PROFILE_VIEWS);
 }
 
 void EntityPresenter::apply_wire_row_views(const WireRow &row, ObjectModel *model,
@@ -1026,6 +1153,11 @@ void EntityPresenter::apply_wire_row_views(const WireRow &row, ObjectModel *mode
 		}
 		if (wire_inset_view_) {
 			p_model->set_inset_occlusion_hidden(p_inset_culled);
+		}
+		for (int m = 0; m < 2; ++m) {
+			if (wire_mirror_view_[m]) {
+				p_model->set_mirror_occlusion_hidden(m, wire_render_culled_mirror_[m].has(row.handle));
+			}
 		}
 	};
 	apply(model, p_present_visible);
@@ -1055,6 +1187,12 @@ void EntityPresenter::apply_wire_row_views(const WireRow &row, ObjectModel *mode
 				}
 				if (wire_inset_view_) {
 					overlay->set_inset_occlusion_hidden(p_inset_culled);
+				}
+				for (int m = 0; m < 2; ++m) {
+					if (wire_mirror_view_[m]) {
+						overlay->set_mirror_occlusion_hidden(m,
+								wire_render_culled_mirror_[m].has(row.handle));
+					}
 				}
 			}
 		}
@@ -1343,6 +1481,54 @@ void EntityPresenter::update_wire_person_overlays(const WireRow &row, ObjectMode
 	}
 	(*existing)->present(overlays, body, body_visible, placer_.ptr(), container(),
 			PersonOverlayModels::PRESENT_WORLD);
+}
+
+// The rows the cold walk above builds a node for are the ones it does not skip or defer: a
+// typed row other than the local player's, a wire-only row where only those draw, and no row
+// carrying a placed .bms identity (the placed representation draws it). One build per visual
+// identity: a second row of the same identity finds its meshes, materials and rig made.
+int EntityPresenter::warm_wire_spawn_pipelines(const PackedFloat32Array &p_snap, int p_stride,
+		Node3D *p_parent, PackedStringArray &r_graphics) {
+	Simulation *s = sim();
+	if (s == nullptr || placer_.is_null() || p_parent == nullptr || p_stride < PF_STRIDE) {
+		return 0;
+	}
+	const int local_handle = s->has_local_player() ? s->get_local_player_wire_handle() : -1;
+	const float *snap = p_snap.ptr();
+	const int count = int(p_snap.size() / p_stride);
+	HashSet<int32_t> warmed;
+	int built = 0;
+	for (int i = 0; i < count; ++i) {
+		const int base = i * p_stride;
+		const int type_id = int(snap[base + PF_TYPE_ID]);
+		const int handle = int(snap[base + PF_WIRE_HANDLE]);
+		const int character_id = int(snap[base + PF_CHARACTER_ID]) & 0xffff;
+		if (type_id == 0 || handle == local_handle) {
+			continue;
+		}
+		const int d_kind = int(snap[base + PF_KIND]);
+		const int d_index = int(snap[base + PF_INDEX]);
+		if (synthetic_origin_only_ && !(d_kind == opennova::world::kSpawnOriginKindNone &&
+												 d_index == opennova::world::kSpawnOriginIndexNone)) {
+			continue;
+		}
+		if (d_kind >= 0 && d_kind <= 3 && d_index >= 0 &&
+				d_index != opennova::world::kSpawnOriginIndexNone) {
+			continue;
+		}
+		const int32_t visual_identity = int32_t((uint32_t(type_id) << 16) | uint32_t(character_id));
+		if (warmed.has(visual_identity)) {
+			continue;
+		}
+		warmed.insert(visual_identity);
+		ObjectModel *node = placer_->build_player_animated_model(type_id, p_parent, character_id);
+		if (node == nullptr) {
+			continue;
+		}
+		r_graphics.push_back(node->get_graphic_name());
+		++built;
+	}
+	return built;
 }
 
 } // namespace godot

@@ -790,7 +790,11 @@ EffectLightDirector::BlinkOwner EffectLightDirector::_local_player_interior_grou
 void EffectLightDirector::_render_coronas(Camera3D *p_camera, const Vector3 &p_gain,
 		int p_time_ms, Weather *p_weather, const TypedArray<Node3D> &p_models, const PackedInt64Array &p_owners,
 		MissionEnvironment *p_env) {
+	// The main scene's mirror walks at the phase ahead of this advance, the Inset's mirror at this
+	// one (render_mirror_coronas).
+	mirror_corona_phase_[0] = corona_frame_;
 	corona_frame_ = (corona_frame_ + 1) & 3;
+	mirror_corona_phase_[1] = corona_frame_;
 	const Transform3D camera_transform = p_camera->get_camera_transform();
 	scene()->collect_corona_rows(camera_transform.origin,
 			-camera_transform.basis.get_column(2), p_gain, p_time_ms, corona_frame_, p_weather,
@@ -806,25 +810,68 @@ Ref<EnvLightValues> EffectLightDirector::_corona_fog(MissionEnvironment *p_env) 
 	return state.is_valid() ? state->get_values() : Ref<EnvLightValues>();
 }
 
+void EffectLightDirector::render_mirror_coronas(Camera3D *p_mirror, Camera3D *p_inset_mirror,
+		int64_t p_time_ms) {
+	MissionEnvironment *env = _environment();
+	Camera3D *const mirrors[2] = { p_mirror, p_inset_mirror };
+	if (env == nullptr || (p_mirror == nullptr && p_inset_mirror == nullptr)) {
+		mirror_coronas_[0].clear();
+		mirror_coronas_[1].clear();
+		return;
+	}
+	// The reflected subscene's dry block, the primary fog the walk folds to black.
+	const Ref<EnvLightValues> light = _corona_fog(env);
+	const opennova::env::SceneFogValues fog = env->state().build_water_mirror_fog();
+	if (mirror_corona_fog_.is_null()) {
+		mirror_corona_fog_.instantiate();
+	}
+	mirror_corona_fog_->fog_enabled = light.is_valid() && light->fog_enabled;
+	mirror_corona_fog_->fog_type = fog.type;
+	mirror_corona_fog_->fog_start = fog.start;
+	mirror_corona_fog_->fog_end = fog.end;
+	const Vector3 gain = light_gain();
+	Weather *weather = _weather();
+	for (int view = 0; view < 2; ++view) {
+		Camera3D *mirror = mirrors[view];
+		if (mirror == nullptr) {
+			mirror_coronas_[view].clear();
+			continue;
+		}
+		// Over the main walk's draw list: each owner's gate reads that mirror's own masks.
+		const Transform3D eye = mirror->get_camera_transform();
+		scene()->collect_mirror_corona_rows(view, eye.origin, -eye.basis.get_column(2), gain,
+				static_cast<int>(p_time_ms), mirror_corona_phase_[view], weather, frame_models_,
+				frame_owners_, mirror_corona_fog_, mirror_coronas_[view]);
+	}
+}
+
 void EffectLightDirector::_clear_coronas() {
 	coronas_.clear();
 	inset_coronas_.clear();
+	mirror_coronas_[0].clear();
+	mirror_coronas_[1].clear();
 }
 
 void EffectLightDirector::append_overlay(SceneOverlaySubmission &r_submission) {
-	if (coronas_.empty() && inset_coronas_.empty()) {
+	if (coronas_.empty() && inset_coronas_.empty() && mirror_coronas_[0].empty() &&
+			mirror_coronas_[1].empty()) {
 		return;
 	}
-	// The coronas draw after particle pass B, in the main scene and in the
-	// mirror's reflected scene alike (retail EffectWorld_RenderLightCoronas(1)
+	// The coronas draw after particle pass B, in the main scene and in each
+	// mirror's reflected scene (retail EffectWorld_RenderLightCoronas(1)
 	// from Terrain_RenderWorldScene @ 0x5c96ad and from
 	// Water_RenderReflectedWorldScene @ 0x5c85fd); the weapon Inset pass's
-	// own walk rides its own slot (scene_overlay.h kInsetOverlayOrder).
+	// own walk and each mirror's ride their own slots (scene_overlay.h
+	// kInsetOverlayOrder, kMirrorOverlayOrder, kInsetMirrorOverlayOrder).
 	const uint32_t texture = r_submission.texture_index(_corona_texture(),
 			opennova::renderer::texture_stage_flags(opennova::renderer::TextureStage::LightCorona));
 	opennova::renderer::append_corona_overlay(coronas_, texture, r_submission.frame);
 	opennova::renderer::append_corona_overlay(inset_coronas_, texture, r_submission.frame,
 			opennova::renderer::SceneOverlaySlot::InsetLightCoronas);
+	opennova::renderer::append_corona_overlay(mirror_coronas_[0], texture, r_submission.frame,
+			opennova::renderer::SceneOverlaySlot::MirrorLightCoronas);
+	opennova::renderer::append_corona_overlay(mirror_coronas_[1], texture, r_submission.frame,
+			opennova::renderer::SceneOverlaySlot::InsetMirrorLightCoronas);
 }
 
 Ref<ImageTexture> EffectLightDirector::_corona_texture() {

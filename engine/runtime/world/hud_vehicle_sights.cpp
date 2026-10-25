@@ -15,16 +15,16 @@ void fill_hud_vehicle_sights(World &world, LocalPlayerWeapon &weapon, LocalPlaye
 	Entity *mount = player ? world.registry.get(player->mount_target) : nullptr;
 	if (!player || !mount || !mount->has_item_def || !weapon.active)
 		return;
-	const int32_t root[3] = { to_fixed(mount->position.x), to_fixed(mount->position.y),
-		to_fixed(mount->position.z) };
+	const int32_t root[3] = { mount->position.x.q16, mount->position.y.q16,
+		mount->position.z.q16 };
 	// The live BAM frame when seeded (the same one emplaced_gun_frame_pitch
 	// produces the compared word from), else the placer's degree mirrors.
 	const int32_t yaw = mount->veh.yaw_seeded ? mount->veh.yaw_bam
-											  : bam_heading_from_mission_yaw_deg(mount->yaw);
+											  : mount->heading;
 	const int32_t pitch = mount->veh.yaw_seeded ? mount->veh.air_pitch_bam
-												: bam_from_degrees_wrapped(mount->pitch),
+												: mount->pitch_bam,
 				  roll = mount->veh.yaw_seeded ? mount->veh.air_roll_bam
-											   : bam_from_degrees_wrapped(mount->roll);
+											   : mount->roll_bam;
 	if ((mount->item_attrib & kItemAttribEweap) && player->mount_type == SeatType::Controller &&
 			view.camera_mode == 0) {
 		// [orig: HUD_DrawWeaponSightCrosshair `fild [esi+45Ch]; fld dbl_7C3608`
@@ -39,8 +39,8 @@ void fill_hud_vehicle_sights(World &world, LocalPlayerWeapon &weapon, LocalPlaye
 	if (mount->item_attrib2 & 0x1000u) {
 		const auto *body = world.ai.for_handle(player->handle);
 		const int32_t player_yaw =
-				body ? body->heading : bam_heading_from_mission_yaw_deg(player->yaw);
-		const int32_t player_pitch = body ? body->pitch : bam_from_degrees_wrapped(player->pitch);
+				body ? body->heading : player->heading;
+		const int32_t player_pitch = body ? body->pitch : player->pitch_bam;
 		const uint16_t desired_yaw = uint16_t(uint32_t(io::bam_sub(yaw, player_yaw)) >> 16);
 		const uint16_t desired_pitch = uint16_t(uint32_t(io::bam_sub(pitch, player_pitch)) >> 16);
 		const int16_t dy = int16_t(desired_yaw - uint16_t(mount->emplaced_gun_yaw_word));

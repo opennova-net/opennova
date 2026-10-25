@@ -92,11 +92,12 @@ godot/exports/
 .godot-bin/
 godot/addons/gut/
 godot/addons/imgui-godot/
-# The player profile and game.cfg a source run without --working-dir saves into
-# the project (a direct GUT run; scripts/test_godot.sh names its own working directory).
+# The player profile, game.cfg and the menu's cookie jar a source run without --working-dir saves
+# into the project (a direct GUT run; scripts/test_godot.sh names its own working directory).
 godot/player.sav
 godot/weapon.sav
 godot/game.cfg
+godot/nw_cdata.coo
 godot/expansion/*/weapon.sav
 
 CLAUDE.local.md

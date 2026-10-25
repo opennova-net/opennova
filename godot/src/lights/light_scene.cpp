@@ -970,7 +970,7 @@ void LightScene::build_corona_inputs(const Vector3 &p_camera_pos,
 		int p_time_ms, int p_frame_index, Weather *p_weather,
 		const TypedArray<Node3D> &p_models,
 		const PackedInt64Array &p_owner_entities, const Ref<EnvLightValues> &p_fog,
-		bool p_inset_view,
+		CoronaView p_view,
 		std::vector<opennova::renderer::LightCoronaOwnerMask> &r_owner_masks,
 		opennova::renderer::LightCoronaFrameInputs &r_inputs) const {
 	opennova::renderer::LightCoronaFrameInputs &inputs = r_inputs;
@@ -991,9 +991,12 @@ void LightScene::build_corona_inputs(const Vector3 &p_camera_pos,
 		if (model == nullptr) {
 			continue;
 		}
-		// The Inset's walk gates on the masks the Inset's own collect wrote.
-		const int64_t mask = p_inset_view ? model->get_inset_view_section_mask()
-										  : model->get_occlusion_section_mask();
+		// The Inset's walk and each mirror's gate on the masks that view's own
+		// collect wrote.
+		const int64_t mask = p_view == CoronaView::Inset ? model->get_inset_view_section_mask()
+				: p_view == CoronaView::Mirror           ? model->get_mirror_view_section_mask(0)
+				: p_view == CoronaView::InsetMirror      ? model->get_mirror_view_section_mask(1)
+														 : model->get_occlusion_section_mask();
 		if (mask == -1) {
 			continue;
 		}
@@ -1055,7 +1058,7 @@ int LightScene::collect_corona_rows(const Vector3 &p_camera_pos,
 	opennova::renderer::LightCoronaFrameInputs inputs;
 	build_corona_inputs(p_camera_pos, p_camera_forward, p_ambient_scale,
 			p_time_ms, p_frame_index, p_weather, p_models, p_owner_entities,
-			p_fog, false, corona_masks_scratch_, inputs);
+			p_fog, CoronaView::Main, corona_masks_scratch_, inputs);
 	corona_quads_scratch_.clear();
 	scene_.collect_corona_quads(inputs, corona_quads_scratch_);
 	return static_cast<int>(corona_quads_scratch_.size());
@@ -1070,7 +1073,23 @@ int LightScene::collect_inset_corona_rows(const Vector3 &p_camera_pos,
 	opennova::renderer::LightCoronaFrameInputs inputs;
 	build_corona_inputs(p_camera_pos, p_camera_forward, p_ambient_scale,
 			p_time_ms, p_frame_index, p_weather, p_models, p_owner_entities,
-			p_fog, true, corona_masks_scratch_, inputs);
+			p_fog, CoronaView::Inset, corona_masks_scratch_, inputs);
+	r_quads.clear();
+	scene_.collect_corona_quads(inputs, r_quads);
+	return static_cast<int>(r_quads.size());
+}
+
+int LightScene::collect_mirror_corona_rows(int p_mirror_view, const Vector3 &p_camera_pos,
+		const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
+		int p_time_ms, int p_frame_index, Weather *p_weather,
+		const TypedArray<Node3D> &p_models,
+		const PackedInt64Array &p_owner_entities, const Ref<EnvLightValues> &p_fog,
+		std::vector<opennova::renderer::LightCoronaQuad> &r_quads) {
+	opennova::renderer::LightCoronaFrameInputs inputs;
+	build_corona_inputs(p_camera_pos, p_camera_forward, p_ambient_scale,
+			p_time_ms, p_frame_index, p_weather, p_models, p_owner_entities, p_fog,
+			p_mirror_view == 1 ? CoronaView::InsetMirror : CoronaView::Mirror,
+			corona_masks_scratch_, inputs);
 	r_quads.clear();
 	scene_.collect_corona_quads(inputs, r_quads);
 	return static_cast<int>(r_quads.size());

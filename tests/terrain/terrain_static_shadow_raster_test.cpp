@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 namespace {
@@ -100,25 +101,49 @@ bool test_opaque_projection_preserves_outside_and_resolves_edges() {
 }
 
 bool test_depth_and_winding_admission() {
+	// The temp's depth clear is retail's flt_7DA0B0, and the DOT3 light quad ahead of the
+	// casters writes no depth (its pass flags 0x1700000), so the casters test against the
+	// clear itself [orig: Terrain_CollectAndRenderTileModels - the clear's load @0x60D5A0, the
+	// light pass's flags @0x60D784; CGfxShader_ApplyPass @0x683221..0x683249].
+	uint32_t clear_bits = 0;
+	std::memcpy(&clear_bits, &kTerrainStaticShadowTempClearDepth, sizeof clear_bits);
+	if (!expect(clear_bits == 0x3F7FFCB9u && TerrainStaticShadowRasterInput{}.clear_depth ==
+			kTerrainStaticShadowTempClearDepth,
+			"the temp's depth clear is retail's 0.99995")) return false;
 	TerrainStaticShadowRasterInput input;
 	TerrainStaticShadowAlphaPage result = alpha_page(2, 2,
 			std::vector<uint8_t>(4, 200));
-	const auto behind = rectangle(0.0f, 0.0f, 1.0f, 1.0f, 0.75f);
+	// A caster 1500 u above its ground plane (depth 0.74995): under the clear, it shadows.
+	const float high_depth = 1500.0f * kTerrainStaticShadowDepthScale +
+			kTerrainStaticShadowDepthBias;
+	const auto high = rectangle(0.0f, 0.0f, 1.0f, 1.0f, high_depth);
+	input.triangles.assign(high.begin(), high.end());
+	if (!expect(rasterize_terrain_static_shadow_alpha(input, result) &&
+			std::all_of(result.alpha.begin(), result.alpha.end(),
+					[](uint8_t value) { return value == 0; }),
+			"a caster 1500 u up shadows under the temp's depth clear")) return false;
+
+	result = alpha_page(2, 2, std::vector<uint8_t>(4, 200));
+	const auto behind = rectangle(0.0f, 0.0f, 1.0f, 1.0f, 0.99998f);
 	input.triangles.assign(behind.begin(), behind.end());
 	if (!expect(rasterize_terrain_static_shadow_alpha(input, result),
 			"depth-rejected projection is still a valid raster job")) return false;
 	if (!expect(std::all_of(result.alpha.begin(), result.alpha.end(),
 			[](uint8_t value) { return value == 200; }),
-			"fragments behind the z=0.5 receiver quad do not shadow")) return false;
+			"fragments behind the temp's depth clear do not shadow")) return false;
 
-	// Reversed input still rasterizes when the authored material is two-sided.
+	// Reversed input still rasterizes when the authored material is two-sided; LESSEQUAL
+	// admits a fragment at the clear itself (a dyadic clear here, so every sample's
+	// interpolated depth is exactly the vertices').
+	const float at = 0.5f;
+	input.clear_depth = at;
 	input.triangles.clear();
 	input.triangles.push_back(triangle(
-			vertex(0.0f, 0.0f, 0.5f), vertex(0.0f, 1.0f, 0.5f),
-			vertex(1.0f, 1.0f, 0.5f)));
+			vertex(0.0f, 0.0f, at), vertex(0.0f, 1.0f, at),
+			vertex(1.0f, 1.0f, at)));
 	input.triangles.push_back(triangle(
-			vertex(0.0f, 0.0f, 0.5f), vertex(1.0f, 1.0f, 0.5f),
-			vertex(1.0f, 0.0f, 0.5f)));
+			vertex(0.0f, 0.0f, at), vertex(1.0f, 1.0f, at),
+			vertex(1.0f, 0.0f, at)));
 	for (TerrainStaticShadowRasterTriangle &draw : input.triangles) {
 		draw.two_sided = true;
 	}
@@ -126,7 +151,7 @@ bool test_depth_and_winding_admission() {
 			"clockwise projection rasterizes")) return false;
 	return expect(std::all_of(result.alpha.begin(), result.alpha.end(),
 			[](uint8_t value) { return value == 0; }),
-			"clockwise fragments at the receiver depth are admitted");
+			"clockwise fragments at the clear depth are admitted");
 }
 
 bool test_one_sided_cull_and_two_sided_override() {
@@ -474,6 +499,70 @@ bool test_row_stripes_reproduce_the_serial_bytes() {
 	return true;
 }
 
+// A black temp pixel stays black under every blend (opaque and multiply write
+// 0, additive keeps the destination, alpha scales it) and the resolve reads
+// the temp alone, so the pixel loop never shades a fragment over one: an 8x8
+// temp block gone wholly black costs a later triangle nothing at all, and a
+// black pixel inside a live block skips its edge, depth and texture work.
+// Without the skip a page under dense casters shaded every overlapping
+// fragment (the TOD refresh's ~20 ms pixel loop per page, LF-s1).
+bool test_black_temp_pixels_absorb_later_fragments() {
+	std::vector<uint8_t> storage;
+	std::vector<TerrainStaticShadowAlphaMipView> mips;
+	TerrainStaticShadowRasterInput input;
+	input.alpha_textures.push_back(constant_alpha_texture(255, storage, mips));
+	const auto far_opaque = rectangle(0.0f, 0.0f, 1.0f, 1.0f, 0.4f);
+	input.triangles.assign(far_opaque.begin(), far_opaque.end());
+	// Twenty nearer textured, alpha-tested, alpha-blended layers over the
+	// same page: each would pass the depth test and fetch its texture.
+	for (int layer = 0; layer < 20; ++layer) {
+		auto near_layer = rectangle(0.0f, 0.0f, 1.0f, 1.0f, 0.2f, 0, 64);
+		for (TerrainStaticShadowRasterTriangle &draw : near_layer) {
+			draw.blend = TerrainStaticShadowBlend::Alpha;
+			draw.alpha_scale = 0.5f;
+		}
+		input.triangles.insert(input.triangles.end(), near_layer.begin(),
+				near_layer.end());
+	}
+	TerrainStaticShadowRasterStats stats;
+	input.stats = &stats;
+	// 4x4 page = an 8x8 temp: one block.
+	TerrainStaticShadowAlphaPage result = alpha_page(4, 4,
+			std::vector<uint8_t>(16, 200));
+	if (!expect(rasterize_terrain_static_shadow_alpha(input, result),
+			"layered projections over a blackened page rasterize")) return false;
+	if (!expect(std::all_of(result.alpha.begin(), result.alpha.end(),
+			[](uint8_t value) { return value == 0; }),
+			"the opaque caster's black survives every later blend")) return false;
+	if (!expect(stats.fragments == 64,
+			"only the opaque caster's 64 temp fragments are shaded")) return false;
+	if (!expect(stats.absorbed_blocks == 40,
+			"each of the 40 later triangles skips the black block whole")) return false;
+
+	// A live block's black pixels: the page's top row is black before any
+	// caster (its DOT3 alpha), so a half-alpha caster over the whole page
+	// shades the other 48 temp pixels and leaves the black ones untouched;
+	// each of its two triangles walks the block's 16 black pixels.
+	input.triangles.assign(far_opaque.begin(), far_opaque.end());
+	for (TerrainStaticShadowRasterTriangle &draw : input.triangles) {
+		draw.blend = TerrainStaticShadowBlend::Alpha;
+		draw.alpha_scale = 0.5f;
+	}
+	stats = {};
+	std::vector<uint8_t> top_black(16, 200);
+	std::fill(top_black.begin(), top_black.begin() + 4, 0);
+	result = alpha_page(4, 4, top_black);
+	if (!expect(rasterize_terrain_static_shadow_alpha(input, result),
+			"a half-alpha caster over a partly black page rasterizes")) return false;
+	for (std::size_t index = 0; index < 16; ++index) {
+		if (!expect(result.alpha[index] == (index < 4 ? 0 : 100),
+				"black pixels stay black and live ones take the half-alpha blend")) return false;
+	}
+	return expect(stats.fragments == 48 && stats.absorbed_pixels == 32 &&
+			stats.absorbed_blocks == 0,
+			"the black temp pixels skip their fragments inside the live block");
+}
+
 int main() {
 	if (!test_opaque_projection_preserves_outside_and_resolves_edges()) return 1;
 	if (!test_depth_and_winding_admission()) return 1;
@@ -487,6 +576,7 @@ int main() {
 	if (!test_d3d9_pixel_centres_sit_on_integer_temp_coordinates()) return 1;
 	if (!test_retail_world_to_page_projection()) return 1;
 	if (!test_row_stripes_reproduce_the_serial_bytes()) return 1;
+	if (!test_black_temp_pixels_absorb_later_fragments()) return 1;
 	std::puts("OK: terrain static-shadow 2x projection/alpha-test raster");
 	return 0;
 }

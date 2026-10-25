@@ -50,7 +50,6 @@ private:
 	uint64_t glyphs_id_ = 0;
 	RID glyph_item_; // the glyphs' own item, a child of the Glyphs node's
 	Ref<ShaderMaterial> backdrop_material_;
-	Ref<Shader> glyph_shader_;
 	Ref<ShaderMaterial> glyph_material_;
 	std::shared_ptr<const opennova::editor::FontPicture> picture_; // the font its pages are of
 	std::vector<Ref<Texture2D>> pages_;

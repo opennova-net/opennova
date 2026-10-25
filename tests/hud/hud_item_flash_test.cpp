@@ -1,11 +1,13 @@
 // The HUD item flash BMS action 28 sub 37 arms (hud/hud_declutter.h
 // HudItemFlash) and the declutter side path it takes: the 16 timers count
-// down by the logic-tick delta between HUD frames, clamped at 0, the map
-// overlay gate draws an idle or lit-phase timer, and the level-0 rebuild
-// leaves the stored hud_detail level alone.
+// down by the logic-tick delta since the last tick that ran, clamped at 0, the
+// overlay-buffer reset zeroes that last tick, the map overlay gate draws an
+// idle or lit-phase timer, and the level-0 rebuild leaves the stored
+// hud_detail level alone. Where the tick runs (the overlay pass's head) is
+// hud_overlay_pass_head's.
 // [orig: RenderState_SetLayerVisibilityByIndex @0x5A3020 (@0x5A302A,
 //  CRenderState_SetLayerVisibility(0) @0x5A3031); HUD_TickItemFlashTimers @0x59A9E0;
-//  HUD_DrawMapOverlay @0x5A785B]
+//  HUD_ResetAllOverlayBuffers @0x59DD7D; HUD_DrawMapOverlay @0x5A785B]
 #include <runtime/hud/hud_declutter.h>
 
 #include <cstdio>
@@ -36,16 +38,48 @@ static void test_timers_count_down_by_the_tick_delta() {
 	for (int i = 0; i < HudItemFlash::kCount; ++i) CHECK(flash.timer(i) == 0);
 }
 
-static void test_a_tick_that_runs_backwards_grows_the_timer() {
-	// The last-tick static is never reset, so a clock that restarts lower (the
-	// next mission's tick 0) hands the countdown a negative delta; the signed
-	// compare keeps the timer and the subtraction grows it. [orig: HUD_TickItemFlashTimers
-	// — `sub edx, ecx` @0x59A9F0, `cmp eax, edx; jle` @0x59AA06]
+static void test_the_reset_zeroes_the_last_tick_and_keeps_the_timers() {
+	// The overlay-buffer reset (every round init and mission start) zeroes the
+	// last tick alone: the next tick's delta is the whole clock. A mission start
+	// zeroes the clock after it, so no delta runs backwards there.
+	// [orig: HUD_ResetAllOverlayBuffers - `mov g_HUDItemFlashLastTick, esi` @0x59DD7D;
+	//  HUD_TickItemFlashTimers - `sub edx, ecx` @0x59A9F0, `cmp eax, edx; jle` @0x59AA06;
+	//  Game_StartMission - HUD_InitOverlaySystem @0x525733, g_CurrentTick = 0 @0x525B9F]
 	HudItemFlash flash;
 	flash.tick(1000);
-	flash.set(2, 50);
-	flash.tick(10);
-	CHECK(flash.timer(2) == 1040);
+	flash.set(2, 1500);
+	flash.set(7, 500);
+	flash.reset_last_tick();
+	CHECK(flash.timer(2) == 1500);
+	CHECK(flash.timer(7) == 500);
+	flash.tick(1010);
+	CHECK(flash.timer(2) == 490);
+	CHECK(flash.timer(7) == 0);
+	flash.set(2, 40);
+	flash.reset_last_tick();
+	flash.tick(0);      // the restarted clock: the same tick changes nothing
+	CHECK(flash.timer(2) == 40);
+	flash.tick(5);
+	CHECK(flash.timer(2) == 35);
+}
+
+static void test_the_timers_outlive_a_mission() {
+	// The timers are process words no mission start writes: the next mission's HUD takes
+	// them as the last one left them, over its own zero last tick, so its first pass at the
+	// restarted clock's tick 30 takes the 30 ticks off.
+	// [orig: g_HUDItemFlashTimers @0x2723CF8 - the tick's walk @0x59A9F7, the arm's store
+	//  @0x5A302A; HUD_InitOverlaySystem @0x5A4620 - the HUD_ResetAllOverlayBuffers call
+	//  @0x5A4949]
+	HudItemFlash last;
+	last.tick(5000);
+	last.set(9, 0x400);
+	last.tick(5100);
+	HudItemFlash next;
+	next.carry_timers(last.timers());
+	CHECK(next.timer(9) == 0x400 - 100);
+	next.tick(30);
+	CHECK(next.timer(9) == 0x400 - 130);
+	CHECK(next.timer(8) == 0);
 }
 
 static void test_map_gate_draws_idle_or_lit_phase() {
@@ -72,7 +106,8 @@ static void test_level_zero_side_path_keeps_the_stored_level() {
 
 int main() {
 	test_timers_count_down_by_the_tick_delta();
-	test_a_tick_that_runs_backwards_grows_the_timer();
+	test_the_reset_zeroes_the_last_tick_and_keeps_the_timers();
+	test_the_timers_outlive_a_mission();
 	test_map_gate_draws_idle_or_lit_phase();
 	test_level_zero_side_path_keeps_the_stored_level();
 	if (failures) {

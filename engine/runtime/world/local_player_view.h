@@ -24,7 +24,7 @@
 
 namespace opennova::world {
 
-struct World;
+class World; // world.h's class key (MSVC mangles the key into every signature)
 struct ScopeToggleCallFlags;
 
 // The per-local-player view trackers the view cluster keeps beside the
@@ -38,6 +38,12 @@ struct LocalPlayerViewTracker {
 	// A failed impact preview resets its point, but retains the last range.
 	// [orig: Player_UpdatePerFrame @0x4DE9F2, miss @0x4DEADE..0x4DEB43]
 	int32_t hud_impact_distance_q16 = 0;
+	// The HUD target cursor (hud_combat_feed.h HudTargetCursor) as the HUD pass last built it,
+	// and as the scene frame found it ahead of its pass (LocalPlayer::build_hud_target_cursor /
+	// note_hud_scene_head): the crosshair reads the first, the weapon inset the second
+	// (fill_hud_combat_view).
+	HudTargetCursor hud_cursor;
+	HudTargetCursor hud_cursor_at_scene;
     // The binocular ACTIVATION seeds one fixed-radius random aim displacement.
     // It survives movement/death/third-person suppression and is re-seeded on
     // the next activation, not on the raw toggle: retail runs the seed from the
@@ -60,16 +66,18 @@ struct LocalPlayerViewTracker {
     // respawn does not reseed them].
     bool binocular_tip_prev = false;
     bool binocular_tip_seeded = false;
-    // The FP viewmodel motion-lead tracker (per render frame) and the local
-    // entity's per-62.5 Hz-tick movement delta it samples
+    // The FP viewmodel motion-lead tracker, stepped by the camera update on
+    // every main-frame update from the tracked entity's Position minus its
+    // mover-entry stamp, read by each rendered frame
     // [orig: the (position - entity+0x80) samples @0x437bb2/0x437b92/0x437ba2].
     PlayerViewMotionLead motion_lead;
-    float tick_delta[3] = {0.0f, 0.0f, 0.0f};
-    float tick_prev_pos[3] = {0.0f, 0.0f, 0.0f};
-    bool tick_prev_valid = false;
     // The death stamp's edge detector [orig: g_CameraLerpStartTick =
     // current_tick on the local death path @0x4b4d00 / @0x42ec0f].
     bool camera_local_dead_seen = false;
+    // The tracked entity's dead bit as the tick's arbiter read it, which the
+    // camera update's reel tests [orig: ThirdPersonCamera_Update @0x437AF0 --
+    // `test byte [tracked+24h], 2` @0x437cc0].
+    bool camera_tracked_dead = false;
     // The last composed view: retail's g_view_pos / g_view_rot, which every
     // Camera_ComputeThirdPersonView call overwrites (once per logic quantum,
     // once per rendered frame, once more for the Inset scene) and every reader
@@ -132,6 +140,19 @@ struct LocalViewSessionInputs {
 //  g_BinocularsToggle = 0 @0x4de2b3, dword_B76554 = 0 @0x4de2b9]
 void local_player_camera_reset(World *world, LocalPlayerWeapon &w, PlayerViewState &v);
 
+// Player_InitPlayer's clears of the view and weapon words its weapon leg's select, walk and
+// mount read and write: its memset of the local-player block zeroes the promoted scope byte, the
+// rangefinder word a ForceScoped mount seeds, the AbsorbPitch elevation offset, the six published
+// view-bias words and the PowerThrow windup start; then the scope camera interp clears (hipfire
+// 1, not engaged, no bound slot) and the weapon view's lower / raise interp alike (positions
+// zero, the running angles back to their velocity words, inactive).
+// [orig: Player_InitPlayer @0x4E15F0 - memset(&g_LocalPlayerEntity, 0, 0x3160) @0x4E1602
+//  (g_WeaponScopeActive @0xB76478, dword_B76808, dword_B79008, g_ViewPosBiasX..g_ViewRotBiasRoll
+//  @0xB76520..0xB76534, g_FireChargeStartTick @0xB76800), the scope interp
+//  @0x4E1609..0x4E16B9 and @0x4E16E9..0x4E16FE, the lower / raise interp @0x4E164D..0x4E16D8 and
+//  @0x4E1704..0x4E1722]
+void local_player_init_player_clears(LocalPlayerWeapon &w, PlayerViewState &v);
+
 void local_player_view_reset(World *world, LocalPlayerWeapon &w,
                              PlayerViewState &v, LocalPlayerViewTracker &t);
 
@@ -140,10 +161,13 @@ void local_player_view_reset(World *world, LocalPlayerWeapon &w,
 void local_player_view_refresh(World *world, PlayerViewState &v);
 
 // Action 6's FIRST leg: on a designated-G carried EWeap the action toggles the
-// selected MountSlot instead of the scope. `applies` = the branch matched a
-// valid route; the caller routes the selection (the joiner queues it toward
-// the authority, a serving host sends it to its own loopback, a standalone
-// world applies it at once through local_player_apply_mount_slot_select).
+// selected MountSlot instead of the scope. True = the leg owns the action (L's
+// parent is such a gun); false = the scope toggle follows. `applies` = a route
+// was selected; true with `applies` false ends the action with nothing sent and
+// no scope toggle (the parent route's groundEntity failed its gates). The caller
+// routes a selection (the joiner queues it toward the authority, a serving host
+// sends it to its own loopback, a standalone world applies it at once through
+// local_player_apply_mount_slot_select).
 // [orig: Input_HandleActionBinding_0 @0x4e0420, case 6 @0x4e0492]
 struct MountSlotSelectRequest {
     bool applies = false;
@@ -212,7 +236,7 @@ int32_t local_player_scope_zoom(const LocalPlayerWeapon &w, WeaponSlotState &slo
 // scope_max_mag [orig: WeaponDef +0x98 'scope_min_mag' (@0x544f7a; the record
 // default 2 @0x53ff73), +0 'category' (3 = Primary)]. The session bit the
 // class-6 sniper lock consults is World::rules.allow_sniper_scope_zoom
-// (byte_A821F0). Carried by the caller until LocalPlayerWeapon grows the
+// (g_SessionAllowSniperScopeZoom). Carried by the caller until LocalPlayerWeapon grows the
 // scope_min_mag field (WeaponInstallData::scope_min_mag <- DefWeaponDef::
 // scope_min_mag); `local_player_scope_zoom_limits` fills the category from
 // the weapon table by the equipped def name.
@@ -257,6 +281,14 @@ bool local_player_adjust_scope_zoom(World &world, LocalPlayerWeapon &w, const Pl
 void local_player_scope_zoom_mount_clamp(const World &world, const ScopeZoomLimits &limits,
                                          int32_t def_flags, int32_t scope_max_mag,
                                          WeaponSlotState &slot);
+
+// The weapon-category actions' dispatcher leg (cases 200-210, the keys 1..9): refused while
+// the binocular view is up or a PowerThrow windup runs (g_FireChargeStartTick), else the
+// caller walks to the category, Player_SwitchToWeaponByHandle((action - 200) * 65)
+// (weapon_switch_to_handle). [orig: Input_HandleActionBinding_0 @0x4E0420 - cases 200-210:
+//  g_BinocularsViewActive @0x4E112A, g_FireChargeStartTick @0x4E1137, the handle
+//  @0x4E1144, the walk @0x4E1152]
+bool local_player_weapon_category_admitted(const LocalPlayerWeapon &w, const PlayerViewState &v);
 
 // The weapon-cycle actions' dispatcher leg [orig: Input_HandleActionBinding_0
 // cases 0xD4 (212, cycleweaponP "Cycle Weapon Prev": +1 / +2) / 0xD6 (214,
@@ -303,7 +335,11 @@ bool local_player_in_armory_zone(const World &world);
 // vehicle-loadout arm (@0x4e0ab2..0x4e0b05), and else the mount chain. With a
 // menu screen open an armory press that passes the latch and the countdown
 // closes it instead (@0x4e0b35..0x4e0b3c), a latched or refused one closing
-// nothing. The armory arm's press latch (g_WeaponScreenOpenDebounce, set @0x4e0b21
+// nothing, and a vehicle-loadout press closes it ahead of its team test
+// (UI_IsMenuScreenOpen @0x4E0ABD, UI_CloseMenuScreen called @0x4E0AC6, the team
+// @0x4E0AEB): the embedder's shell runs both closes over the pass-through screens,
+// the only menu screens an input frame runs under, and the vehicle arm's team test
+// past them (D-NET-NEW-LI-40). The armory arm's press latch (g_WeaponScreenOpenDebounce, set @0x4e0b21
 // before the countdown test, cleared on the key's release by
 // Input_HandleMenuKeyRelease @0x4de2d0) is LocalPlayer::armory_press_latched; a
 // press takes the arm through it (LocalPlayer::take_use_item_press).
@@ -312,6 +348,9 @@ enum class UseItemArm : uint8_t {
     kArmory = 1,
     kArmoryRefused = 2,
     kVehicleLoadout = 3,
+    // The dispatcher dropped the press ahead of its handler (a dead local player's:
+    // LocalPlayer::take_use_item_press): no arm, no hold.
+    kDropped = 4,
 };
 UseItemArm local_player_use_item_arm(const World &world, const LocalViewSessionInputs &session);
 
@@ -381,6 +420,22 @@ void local_player_view_tick(World *world, PlayerViewState &v,
                             const LocalViewSessionInputs &session,
                             LocalPlayerWeapon *weapon);
 
+// The third-person camera's update: the orbit keys and the dead target's reel
+// (player_view_chase_tick), then the follow anchor (player_view_anchor_tick)
+// over the local entity's current eye and the carrier the tick last read.
+// Retail calls it on every main-frame update with a tracked entity, past the
+// entity update and ahead of the single-player pause test, so a paused update
+// runs it as a running one does (inmatch::Session's paused update); the
+// arbiter's state it reads (the mode, the carrier, the tracked dead bit) is
+// what the last running tick left, which the pause holds [orig:
+// ThirdPersonCamera_Update @0x437AF0; Game_ProcessMainFrame @0x5263F0 -- the
+// tracked-entity test @0x526767, the call @0x52676F, the pause test
+// @0x526779]. In single player the orbit bits never rise: only the death
+// screen's chase sub-mode raises 405 / 406 (DeathScreen_FilterInputAction
+// @0x52AD50), and the death screen is set only by a client receive
+// (NapiNPClientMsg_SetSpectatorMode @0x425A18, NapiNPClientMsg_0x00A @0x42FFA0).
+void local_player_camera_update(World &world, PlayerViewState &v, LocalPlayerViewTracker &t);
+
 // The motor writes CameraOffset; every later consumer re-anchors it to the
 // current position. [orig: Camera_ComputeThirdPersonView @0x437FA5..0x437FB7]
 inline Vec3 player_eye_position(const Entity &entity) {
@@ -403,7 +458,16 @@ struct LocalPlayerViewFrame {
 	// its own slot-zero offsets after the main scene has sampled its camera.
 	// [orig: Render_WeaponInsetScene @0x5C9841..0x5C9903]
 	bool inset_scope_active = false;
+	// The frame's world-skip word (PlayerViewState::world_skipped): neither facial pass
+	// runs (FacialSystem::render_scene_passes).
+	bool world_skipped = false;
 	PlayerCameraPose inset_camera;
+	// The view block the Inset pass leaves in g_ViewPos / g_ViewRot: its own compose without
+	// its slot offsets, which land in its local camera only. Its water prerender mirrors this
+	// block (environment/water_mirror.h inset_mirror_source carries the witness).
+	// [orig: Render_WeaponInsetScene @0x5C9857..0x5C9888 (the copy), @0x5C98FC / @0x5C9903
+	//  (the offsets)]
+	PlayerCameraPose inset_view_block;
 	float inset_fov_over_zoom = 0;
     bool scope_camera_zero_active = false;
     bool scope_details_active = false;
@@ -505,6 +569,18 @@ struct LocalPlayerViewFrame {
     float fp_pitch_recoil_deg = 0.0f;
     float fp_roll_deg = 0.0f;
     PlayerCameraPose camera;
+    // The view block the main scene's compose leaves in g_ViewPos / g_ViewRot: `camera`
+    // without the main scene's optics offsets (the binocular sway, the slot zero), which land
+    // in the scene's local copy only. The scene's water mirror collects from this block; the
+    // mirrored block it draws with takes the offsets as well, so its reflected view is the
+    // mirror of `camera`.
+    // [orig: Render_ProcessMainSceneFrame @0x5CA0F0 - the copy @0x5CA352..0x5CA398, the sway
+    //  @0x5CA403 / @0x5CA407, the Sighted zero @0x5CA45E / @0x5CA465, the Scoped zero
+    //  @0x5CA499 / @0x5CA4A0; Water_ReflectionPrerender @0x5C2780 (the raw words
+    //  @0x5C2783..0x5C27C2); Render_MainScene @0x5C1240 - the collect's block @0x5C168D..0x5C16E1
+    //  and its projection @0x5C16E8, the drawn block's sway @0x5C13A2 / @0x5C13A8 /
+    //  @0x5C141A / @0x5C1420 and zero @0x5C13DF / @0x5C13E6 / @0x5C1456 / @0x5C145D]
+    PlayerCameraPose view_block;
     // The carrier owns this frame's first-person view (see
     // local_player_mounted_camera).
     bool mounted_camera = false;

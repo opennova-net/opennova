@@ -68,12 +68,21 @@
 namespace opennova::mission {
 
 struct KernelBootOptions {
-	bool playable = true;   // spawn the authoritative side's own player after load
+	// The bare kernel's own player after load (no role installed a round init: a
+	// session's bodies spawn at its round init, MissionKernel::round_init).
+	bool playable = true;
 	std::shared_ptr<opennova::mus::MusGlobals> music_globals;
 	bool wac = true;        // game.wac / server.wac / <mission>.wac when present
 	// A world presenter seeds weather after boot, then completes mission start.
 	// Native boots with their weather already seeded finish here.
 	bool defer_mission_start = false;
+	// An embedder whose render device builds its mission inits after the boot (the game's
+	// effect world and warm): the boot stops ahead of the PreMission pass, which
+	// begin_mission_start runs after those inits, as retail's mission start runs its pass
+	// past its render inits and its last load pump [orig: Game_StartMission -
+	// Render_InitMissionTextures @0x525A6E, HUD_InitAllFonts @0x525A9A, the pump @0x525AC5,
+	// then the EventTrigger_UpdateAllWithFlag2 call @0x525B86]. Implies defer_mission_start.
+	bool defer_premission = false;
 	// The single-player restart's boot: the same mission started again by the
 	// SP restart (Game_StartMission(1)), whose start skips the first start's
 	// intro-cine leg [orig: Game_RestartRoundSP @0x5263DB pushes 1; the first
@@ -109,10 +118,11 @@ struct KernelBootOptions {
 	std::function<std::string(int32_t)> people_name_resolver;
 	// The net half's session bring-up (inmatch::HostRole::bring_up_singleplayer,
 	// or HostRole::bring_up for a LAN host, serve-and-play or dedicated),
-	// invoked between the world wiring and the system registration — exactly
-	// where the SP listen host stands up inside the load
-	// [orig: SinglePlayer_StartMission @0x561af0]. Null = the bare no-net
-	// kernel (the AI-path/convoy drives).
+	// invoked between the world wiring and the system registration: the
+	// mission's World under the session, which the host boot created ahead of
+	// the load (HostRole::create_session; a hook with no create ahead of it
+	// creates first) [orig: SinglePlayer_StartMission @0x561af0]. Null = the
+	// bare no-net kernel (the AI-path/convoy drives).
 	std::function<void()> bringup_net_session;
 };
 
@@ -216,11 +226,31 @@ public:
 	// parsed documents when it built the store, else the kernel's own load),
 	// then the ordered step sequence with its gates (a missing file source
 	// skips every file-fed step, a missing item db the trait/collision steps,
-	// a joiner never spawns its own player). Every step that ran lands in
-	// boot_trace, in order (the ctest-locked contract); a map change's host
-	// boot appends its round init ("round_init") after it.
+	// a joiner never spawns its own player, nor does a boot whose role runs the
+	// round init). Every step that ran lands in boot_trace, in order (the
+	// ctest-locked contract); a host's round init ("round_init") follows the
+	// PreMission pass.
 	bool boot(const KernelBootOptions &options, std::string &error);
 	std::vector<std::string> boot_trace;
+	// The boot's last legs, which KernelBootOptions::defer_premission leaves to the
+	// embedder: on the authority the PreMission pass ("premission") and the SP score
+	// block's zero, then on every peer the frame tick and the HUD's frame counters zeroed;
+	// the mission start (complete_mission_start) is then pending; last, the round init
+	// (round_init) when a role installed one. False when the boot ran them already or did
+	// not run.
+	bool begin_mission_start();
+	// The authority's round init and Player_InitPlayer, which begin_mission_start runs
+	// last, past the PreMission pass, the round counters and the HUD's frame counters. A
+	// session host's role installs it at its bring-up (inmatch::HostRole::run_round_init):
+	// every player body of the session, the host's own included, spawns there, hidden,
+	// and none in the boot, whose own spawn step stands down for it. Null = the bare
+	// kernel, whose spawn step places the local player (a joiner's L spawns on its
+	// name-match).
+	// [orig: Game_StartMission @0x524360 - the EventTrigger_UpdateAllWithFlag2 call
+	//  @0x525B86, Server_ResetRoundCounters @0x525B90, the tick @0x525B9F,
+	//  Game_ResetSessionHudState @0x525BAA, Server_InitAllPlayerEntitiesForRound
+	//  @0x525BAF, Player_InitPlayer @0x525BBC]
+	std::function<void()> round_init;
 	// This boot is the SP restart's (KernelBootOptions::restart), for the
 	// bring-up's legs its start skips.
 	bool restart_boot() const { return restart_boot_; }
@@ -262,8 +292,18 @@ public:
 	// the currents snap to the just-authored targets, the recovered clamps
 	// install, and 255 full ticks settle.
 	// Then count units, initialize authoritative vehicles and seal the restore
-	// point. Returns false if this load already completed the boundary.
+	// point, and end with the net half's mission-start end (below). Returns
+	// false if this load already completed the boundary.
 	bool complete_mission_start();
+	// The net half's mission-start end, which complete_mission_start runs last:
+	// a playing host's own client queues its C2S 0x0B there
+	// (inmatch::HostRole::send_own_mission_status, installed with its client
+	// view). Null = no session peer of its own (a dedicated host, a joiner,
+	// the bare kernel) [orig: Game_StartMission @0x526189..0x526255].
+	std::function<void()> net_mission_start_end;
+	// The net half's own state beside every baseline capture_baseline takes (a host role's own
+	// connection, which its reset_to_baseline puts back with the world). Null = none.
+	std::function<void()> baseline_captured;
 	// The precipitation pool's per-render update for a camera at (x, y, z)
 	// mission 16.16: the wrap into the camera volume and the re-floor of every
 	// wrapped drop on terrain / water / the first entity under it
@@ -294,6 +334,11 @@ public:
 	// destroyed pools. The session close runs it. The single-player restart
 	// does not: its sweep call finds the event list already freed.
 	void run_post_mission_pass(bool is_authority);
+	// Its two halves, for a session host's teardown, whose server pump runs between them: the
+	// pools' destroy (a person's carried objective drops first, Entity_Destroy's person arm),
+	// then (the authority's) PostMission sweep.
+	void destroy_mission_pools();
+	void run_post_mission_events(bool is_authority);
 	// --- the local player ----------------------------------------------------
 	// The by-name weapon install from the retained weapon.def rows. A
 	// same-name install is the MOUNT path unless `allow_same_weapon_rebake`
@@ -301,6 +346,9 @@ public:
 	// scope state (the F3 Weapon window's `auto`/ANIM edits).
 	bool install_weapon(const std::string &weapon_name,
 			bool preserve_slot_state = false, bool allow_same_weapon_rebake = false);
+	// The spawn's by-name install: a fresh slot and none of the mount's view words
+	// (world::local_weapon_install_spawn_by_name).
+	bool install_spawn_weapon(const std::string &weapon_name);
 	// Keep an F3 Weapon window edit of the mounted weapon's ACTION row for
 	// its next mount: a by-name mount copies the weapon table's descriptors,
 	// so the table entry takes the row as the live weapon now runs it.
@@ -331,7 +379,8 @@ public:
 	// model .adm from here on (D-INF-6); the boot's resolve_infantry_adm step
 	// and the shell's explicit re-arm share this body.
 	void rearm_infantry_adm(const assets::AssetStore *adm_assets = nullptr);
-	// Spawn the authoritative side's own player at the mission's player-START
+	// Spawn the bare kernel's own player (a session host's spawns at its round
+	// init, round_init) at the mission's player-START
 	// marker, selected the way the original engine does (by game type,
 	// FARTHEST from the enemy set). 1 = spawned at a real marker, 0 = origin
 	// fallback, -1 = failed. [orig: Server_PositionPlayerForSpawn @0x50cf60 ->
@@ -383,6 +432,12 @@ public:
     dbf::File dialog_bank;
     lwf::File dialog_sounds;
     rtxt::File mission_text_table;
+    // The mount's expansion text-override table (null for none), searched
+    // first by every section lookup: the boot sets it ahead of its boot and
+    // world.tables.text_override points at it (D-NET-675).
+    // [orig: g_TextOverrideTable @0x33429B0; TextResource_FindEntryBySectionAndKey
+    //  @0x75D27B]
+    std::shared_ptr<const rtxt::File> text_override_table;
     particle::EffectCatalogNames script_effect_catalog;
 	bool wac_loaded = false;
 	world::CollisionWorld collision;
@@ -407,6 +462,8 @@ public:
 	size_t text_size = 0;
 	world::World::Snapshot baseline;
 	bool have_baseline = false;
+	bool premission_pending = false;   // begin_mission_start's legs owed
+	bool premission_authority = false; // the boot was the authority's (not a joiner's)
 	bool mission_start_pending = false;
 	wac::WacSystem::RuntimeState wac_baseline;
 	bool have_wac_baseline = false;
@@ -473,6 +530,30 @@ public:
 
 	world::EntityHandle spawn_teammate(const world::TeammateSpawn &request) override;
     world::EntityHandle spawn_item_piece(const world::Entity &seed) override;
+	// A vehicle bay's deployable, the authority's C2S 0x40 spawn: the type's pool-1 row at
+	// the handler's block (x, y, z 16.16; its Yaw word, pitch and roll 0), the slot team,
+	// SSN 12000, the definition and model bound, health at its ceiling, the AI slot and the
+	// class brain for an AI-class def (its slot name the def's default_aip), the deployable
+	// bit 0x1000 and its addeweap children. Invalid when no row carries the type or pool 1
+	// is full. NapiNPServerCtx::deployable_spawner's installed body (HostRole).
+	// [orig: Entity_SpawnDeployable @0x51C2B0]
+	world::EntityHandle spawn_deployable(uint16_t item_id, uint8_t team, const int32_t position[6]);
+	// The def's class init on a pool-1 row: an AIData item whose ai_function row is one of
+	// the five brain classes (CHel, cpln, cveh, cbot, ctrn) takes its brain from the profile
+	// its AI slot's +156 name (Entity::ai_text_file) loads, else the vehicle family's def
+	// default_aip, else helo1; any other row takes none (false). The deployable's spawn and a
+	// joiner's 0x0D / 0x18 rows run it (the mission start's pool-1 init, the 0x18's own call).
+	// [orig: Entity_InitVehicleAIFromDef @0x4686C0; Entity_InitHelicopterAIFromDef @0x4683C0;
+	//  Entity_InitAllFromModels @0x40E460 (the pool-1 call @0x40E5D3);
+	//  NapiNPClientMsg_FullEntitySpawn @0x433780 (the call @0x433E82)]
+	bool init_item_class_brain(world::EntityHandle handle);
+	// Every items.def row's seat, mount and attachment table is built at the def load in
+	// retail; ours builds a placed type's at the boot (a header-only joiner's at its mission
+	// start's settle, over every streamed row's type) and any other type's at its first
+	// runtime spawn (a teammate, a deployable, a joiner's 0x18 row), merged into seat_specs
+	// in type order.
+	// [orig: EntityDef_LoadModelsAndCallbacks @0x439F50]
+	void merge_item_seat_specs(int32_t item_type);
 
 	// world::IPoseProvider: the seat leg is the kernel's own; the muzzle and
 	// userpoint legs ride collision_pose (the sim-clock skeleton / PANM pose).
@@ -480,6 +561,8 @@ public:
 			const world::Seat &seat, world::MountedPose &out) override;
 	bool resolve_seat_bone(world::World &w, const world::Entity &carrier,
 			int bone_index) override;
+	bool userpoint_subobject(world::World &w, const world::Entity &carrier,
+			int userpoint_index, int32_t &out) override;
 	bool ensure_collision_instance(world::World &w, world::EntityHandle entity) override;
 	bool build_wire_person_section_matrices(world::World &w, uint16_t wire_handle,
 			int32_t model_id, const world::CollisionMatrix &entity_world,
@@ -518,6 +601,8 @@ public:
 
 private:
 	std::function<PromoteOptions::AiProfileDefaults(int32_t)> ai_profile_defaults_fn() const;
+	// A carrier's model (its +0x30): the load of its def's graphic.
+	assets::Model carrier_model(const world::Entity &carrier);
 	bool load_mission_into_world(const KernelBootOptions &options);
 	void register_mission_systems();
 	// The live asset source: the embedder's installed index, else the kernel's
@@ -532,6 +617,10 @@ private:
 	assets::AssetStore owned_assets_{&index};
 
 	BootFileSource files_;
+	// The .aip row named `profile` (lowercase), loaded from the mission's files at its first
+	// use as AIProfile_LoadOrFind loads one; null when no file parses.
+	// [orig: AIProfile_LoadOrFind @0x45FD80]
+	const aip::Profile *find_or_load_ai_profile(const std::string &profile);
 	// The per-boot net bring-up hook (KernelBootOptions::bringup_net_session).
 	std::function<void()> bringup_net_session_;
 	// This boot is the SP restart's (KernelBootOptions::restart).

@@ -88,13 +88,14 @@ std::optional<LoginSession> login_of(const std::string &tag, const RedisReply &r
 
 std::string join_value(const JoinSession &s) {
 	std::string v;
-	for (const std::string &f : { s.success, s.failure, s.msgbase, s.needexpkey, s.pfid, s.rid })
+	for (const std::string &f :
+			{ s.success, s.failure, s.msgbase, s.needexpkey, s.pfid, s.rid, s.gsid, s.lan })
 		put_field(v, f);
 	return v;
 }
 
 std::optional<JoinSession> join_of(const std::string &tag, const RedisReply &reply) {
-	const auto f = fields_of(reply, 6);
+	const auto f = fields_of(reply, 8);
 	if (!f)
 		return std::nullopt;
 	JoinSession s;
@@ -105,6 +106,8 @@ std::optional<JoinSession> join_of(const std::string &tag, const RedisReply &rep
 	s.needexpkey = (*f)[3];
 	s.pfid = (*f)[4];
 	s.rid = (*f)[5];
+	s.gsid = (*f)[6];
+	s.lan = (*f)[7];
 	return s;
 }
 
@@ -124,6 +127,25 @@ std::optional<HostSession> host_of(const std::string &tag, const RedisReply &rep
 	s.host_key = (*f)[0];
 	s.success = (*f)[1];
 	s.pfid = (*f)[2];
+	return s;
+}
+
+std::string logout_value(const LogoutSession &s) {
+	std::string v;
+	for (const std::string &f : { s.success, s.failure, s.msgbase })
+		put_field(v, f);
+	return v;
+}
+
+std::optional<LogoutSession> logout_of(const std::string &tag, const RedisReply &reply) {
+	const auto f = fields_of(reply, 3);
+	if (!f)
+		return std::nullopt;
+	LogoutSession s;
+	s.session_tag = tag;
+	s.success = (*f)[0];
+	s.failure = (*f)[1];
+	s.msgbase = (*f)[2];
 	return s;
 }
 
@@ -173,6 +195,15 @@ std::optional<HostSession> SessionStore::get_host(const std::string &tag) {
 std::optional<HostSession> SessionStore::take_host(const std::string &tag) {
 	return host_of(
 			tag, redis_.command({ "GETDEL", redis_.key("host:" + tag) }, RedisResend::Never));
+}
+
+void SessionStore::put_logout(const std::string &tag, const LogoutSession &session) {
+	set(redis_, redis_.key("logout:" + tag), logout_value(session));
+}
+
+std::optional<LogoutSession> SessionStore::take_logout(const std::string &tag) {
+	return logout_of(
+			tag, redis_.command({ "GETDEL", redis_.key("logout:" + tag) }, RedisResend::Never));
 }
 
 } // namespace opennova::novaworld_server

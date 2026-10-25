@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <memory>
 #include <string_view>
 #include <utility>
 
@@ -224,10 +225,9 @@ void SkeletalClips::build_skeleton(const BadFile &skeleton_bf,
 				? anim::positions_from_model(skeleton_bf, model_bone_parents,
 						  model_bone_origins)
 				: std::vector<anim::Vec3>{};
-		const anim::Clip reset_clip = anim::sample_clip(
-				skeleton_bf, table_positions,
-				/*model_bind=*/false, nullptr, rig_parents);
-		bones_ = reset_clip.bones;
+		// The skeleton clip's rows alone: no key of it is sampled here.
+		bones_ = anim::ClipSampler(skeleton_bf, table_positions,
+				/*model_bind=*/false, nullptr, rig_parents).header().bones;
 		skeleton_file_bones_ = skeleton_bf.bone_count;
 		// Legacy positional override (no parents supplied): model-supplied
 		// per-bone bind positions OVERRIDE the reset .bad's — BadBone.position
@@ -323,9 +323,15 @@ bool SkeletalClips::load_clips(
 	std::vector<int> rig_parents;
 	build_skeleton(skeleton_bf, model_bone_origins, model_bone_parents, shared_rest, rig_parents);
 
-	// Pass 2: sample every clip against the SHARED skeleton rest origins (not
+	// Pass 2: every clip against the SHARED skeleton rest origins (not
 	// each clip's own) [orig: AnimMap_RegisterEntity @0x40bb60 pins the rig
-	// skeleton once; AnimMap_PlayAnimBySlot @0x40bda0 never rebuilds it]. The
+	// skeleton once; AnimMap_PlayAnimBySlot @0x40bda0 never rebuilds it]. Each clip
+	// takes its header, rows and key slots here and a sampler over its .bad; no key is
+	// sampled at the load. A key is sampled at its first read (anim::Clip::key) and kept,
+	// as retail builds a channel's bone matrices from its .bad when a bone builder reads
+	// them and keeps no per-rig table [orig: AnimChannel_ComputeBoneMatrices @0x410DA0,
+	// called by Entity_BuildBoneTransformMatrices @0x4B1290 (the call @0x4B1388) and
+	// BoneAnim_BuildWorldMatrices @0x40C400 (the call @0x40C421)]. The
 	// skeleton .bad is also the bind whose flag gates each clip's translations
 	// [orig: AnimChannel_ComputeBoneMatrices @0x410da0, @0x410de7]. A table's token
 	// whose file does not load registers failsafe.bad in its place, the clip that
@@ -341,7 +347,11 @@ bool SkeletalClips::load_clips(
 		LoadedClip lc;
 		lc.key = request.key;
 		lc.source = std::move(source);
-		lc.clip = anim::sample_clip(*file, shared_rest, false, &skeleton_bf, rig_parents);
+		auto sampler = std::make_shared<const anim::ClipSampler>(
+				file, shared_rest, false, &skeleton_bf, rig_parents);
+		lc.clip = sampler->header();
+		lc.clip.frames.resize(static_cast<size_t>(lc.clip.frame_count) + 1);
+		lc.clip.sampler = std::move(sampler);
 		clips_.push_back(std::move(lc));
 	}
 

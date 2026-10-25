@@ -1,10 +1,12 @@
 // The engine NWU driver and host role (net/novaworld/nwu_lobby_session.h, nwu_host_role.h) over
 // real loopback UDP against the real apps/novaworld_lobby NwUdpListener and an in-test gate
 // responder: the gate probe, the handshake to Verified, a duplicate gate reply ignored, the host
-// registration with no update after its result (D-NET-465), a roster change, the 1860-tick
-// refresh carrying a changed column of the live session, the mission start's update with the
-// next map's mission (D-NET-373), the NWU reconnect's re-host carrying the outage's refresh and
-// team change in its request (D-NET-659) and republishing both lists at its result, and the stop.
+// registration with no update after its result (D-NET-465), a roster change, the match's 1860-tick
+// refresh (its server tick's server-info update, which an embedder hooks to the role's
+// update_server_info: called directly here) carrying a changed column of the live session, the
+// mission start's update with the next map's mission (D-NET-373), the NWU reconnect's re-host
+// carrying the outage's refresh and team change in its request (D-NET-659) and republishing both
+// lists at its result, and the stop.
 // [orig: CNapiGateManager_ProbeThreadProc @0x6339e0; CNapiGameSession_ProcessPeriodicUpdate
 //  @0x4d4400; CNapiGameSession_ConnectOrHost @0x4d4f10; Server_TickUpdate @0x51d7e0;
 //  CNapiGameSession_HandleHostVerifyResponse @0x4d59d0; Game_StartMission @0x5248c6..0x524903]
@@ -223,7 +225,7 @@ int main() {
 	live_name = "Engine Driver Renamed";
 	for (int i = 0; i < 20; ++i) tick();
 	expect(!row("Engine Driver Renamed"), "a renamed column waits for the refresh");
-	tick(30000); // past SESSION_HOST_INFO_REFRESH_TICKS (1860 ticks, ~29.8 s)
+	role.update_server_info(); // the match's refresh (inmatch::run_server_info_refresh's hook)
 	expect(tick_until([&] { return row("Engine Driver Renamed"); }, 300),
 	       "the 1860-tick refresh carries the changed column as its delta");
 	expect(host_var("Engine Driver Renamed", "MissionName") == "ASH_G11A",
@@ -235,35 +237,29 @@ int main() {
 	//  @0x4fe989..0x4fe9d0]
 	live_name = "Engine Driver Started";
 	live_mission = "ASH_G12A";
-	role.publish_mission_start();
+	role.publish_mission_start(/*session_round_count=*/1);
 	expect(tick_until([&] { return row("Engine Driver Started"); }, 100),
 			"the mission start's update carries a changed column at once");
 	expect(host_var("Engine Driver Started", "MissionName") == "ASH_G12A",
 			"the mission start's update lists the next map's mission");
 
 	// A map change's load: the session holds no match, so the source reads nothing and the last
-	// live read stands. The refresh that lands in the load carries the role's own advanced
-	// PCIDKey and no column of the host request's registration back (its ServerName, the first
-	// map's MissionName).
+	// live read stands. An update then brings no column of the host request's registration back
+	// (its ServerName, the first map's MissionName).
 	live_session = false;
-	const std::string pcid_before = host_var("Engine Driver Started", "PCIDKey");
-	tick(30000);
-	bool load_refreshed = false;
-	for (int i = 0; i < 300 && !load_refreshed; ++i) {
-		tick();
-		const std::string pcid = host_var("Engine Driver Started", "PCIDKey");
-		load_refreshed = !pcid.empty() && pcid != pcid_before;
-	}
-	expect(load_refreshed && host_var("Engine Driver Started", "MissionName") == "ASH_G12A",
-			"a refresh with no session to read keeps the last live columns, not the "
+	role.update_server_info();
+	for (int i = 0; i < 50; ++i) tick();
+	expect(row("Engine Driver Started") &&
+					host_var("Engine Driver Started", "MissionName") == "ASH_G12A",
+			"an update with no session to read keeps the last live columns, not the "
 			"registration's");
 	live_session = true;
 
 	// The NWU reconnect's re-host: the re-verify counts ReconnectCounter up and re-sends the
 	// request with the session's kept lists, which the outage's refresh and a team change wrote,
 	// and the result republishes both lists in full. A column changed after the request left
-	// reaches the service with that republish alone: the role's own refresh is held off by driving
-	// the lobby alone from here.
+	// reaches the service with that republish alone: no refresh runs from here (the role has none
+	// of its own; the match's is called directly).
 	// [orig: CNapiGameSession_HandleConnectVerifyResponse @0x4d5800 (the count @0x4d5968);
 	//  CNapiGameSession_HandleHostVerifyResponse @0x4d59d0 (the gate @0x4d5c52..0x4d5c58, the
 	//  republish @0x4d5c5a..0x4d5c9e)]
@@ -305,7 +301,7 @@ int main() {
 	//  first SetOrCreate @0x4fe911); Server_TickUpdate's call @0x51d943; Server_ChangeEntityTeam
 	//  @0x518e22; CNapiGameSession_SendHostRequest @0x4d3700 (the PlayerList @0x4d37ec..0x4d37f6)]
 	live_name = "Engine Driver Outage";
-	role.tick(now); // the refresh period passed since the role's last tick
+	role.update_server_info(); // the match's refresh runs on through the outage (its server tick)
 	role.set_player_vars(1, "2", "0");
 	// The re-probe past its first delay, the re-join, and the re-verify, which counts
 	// ReconnectCounter up and sends the re-host's request (state 5). The request leaves in its
@@ -323,7 +319,7 @@ int main() {
 	// its notices held, so the role sees no result until they are handed over.
 	// [orig: CPlayerManager_RebuildLists @0x4d4590 (the state-6 test @0x4d4593)]
 	live_name = "Engine Driver Rehosted";
-	role.publish_mission_start();
+	role.publish_mission_start(/*session_round_count=*/1);
 	std::vector<opennova::ClientSession::Notice> held;
 	auto tick_holding = [&]() {
 		now += 10;

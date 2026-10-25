@@ -65,6 +65,13 @@ void test_flags_parse_case_insensitively_with_values() {
     CHECK(!parse_launch_flags({"game.exe", "LAN"}).lan);
     CHECK(!parse_launch_flags({"game.exe", "/LAN="}).lan);
     CHECK(!parse_launch_flags({"game.exe"}).lan);
+    // /sstga: the whole token, any case [orig: Game_ParseCommandLineAndInit
+    // `_stricmp(token, "/sstga")` @0x4A77C1..0x4A77D3].
+    CHECK(parse_launch_flags({"game.exe", "/sstga"}).screenshot_tga);
+    CHECK(parse_launch_flags({"game.exe", "/w", "/SSTGA"}).screenshot_tga);
+    CHECK(!parse_launch_flags({"game.exe", "/sstgax"}).screenshot_tga);
+    CHECK(!parse_launch_flags({"game.exe", "sstga"}).screenshot_tga);
+    CHECK(!parse_launch_flags({"game.exe"}).screenshot_tga);
 
     // D-NET-540: /POSTIPADDRESS <address> and /POSTPORTNUMBER <n>, any case, the last one
     // standing; the port is the CRT atol of its token (0 when absent, so it overrides nothing)
@@ -97,6 +104,14 @@ void test_flags_parse_case_insensitively_with_values() {
     CHECK(junction.use_junction == 0 && junction.clear_junction == 2);
     CHECK(parse_launch_flags({"game.exe"}).use_junction == -1);
     CHECK(parse_launch_flags({"game.exe", "/CLEARJUNCTION"}).clear_junction == -1);
+    // D-NET-707: /GLSVSSRIMS and /GLSVSSAGRMS, any case: the atol of the next token, the last one
+    // standing, set whatever the value (0 included); absent or with no next token, unset
+    // [orig: Game_ParseCommandLineAndInit @0x4a7310 - @0x4A753A..0x4A7569, @0x4A756F..0x4A759E].
+    const LaunchFlags glsvss = parse_launch_flags(
+            {"game.exe", "/GLSVSSRIMS", "5000", "/glsvssrims", "0", "/GlsvssAgrms", " 12x"});
+    CHECK(glsvss.glsvss_rims == 0 && glsvss.glsvss_agrms == 12);
+    CHECK(!parse_launch_flags({"game.exe"}).glsvss_rims.has_value());
+    CHECK(!parse_launch_flags({"game.exe", "/GLSVSSAGRMS"}).glsvss_agrms.has_value());
     // The one walk: a switch steps onto its value token, which the switches after it in the
     // walk's order test in place of the switch, and the walk goes on past it. So a value token
     // that names an earlier switch is only a value, one that names a later switch is that
@@ -107,6 +122,8 @@ void test_flags_parse_case_insensitively_with_values() {
     CHECK(walked.use_junction == 0 && walked.udp_novaworld.empty());
     const LaunchFlags chained = parse_launch_flags({"game.exe", "/POSTPORTNUMBER", "/USEJUNCTION", "5"});
     CHECK(chained.post_port_number == 0 && chained.use_junction == 5);
+    const LaunchFlags glsvss_walked = parse_launch_flags({"game.exe", "/GLSVSSRIMS", "/GLSVSSAGRMS", "7"});
+    CHECK(glsvss_walked.glsvss_rims == 0 && glsvss_walked.glsvss_agrms == 7);
     const LaunchFlags spaced = parse_launch_flags({"game.exe", "/UDPNOVAWORLD", " 1.2.3.4 ", "/POSTIPADDRESS", " nw "});
     CHECK((spaced.udp_novaworld == std::vector<std::string>{" 1.2.3.4 "}) && spaced.post_ip_address == " nw ");
 }
@@ -153,6 +170,11 @@ void test_runtime_launch_flags_parse() {
          " C:/p/.opennova/run/1 ", "--NovaWorld-Host", " nw.staging.opennova.net "});
     CHECK(f.mission == "00TRa.bms");
     CHECK(f.lan_host == "ASH_I5A.BMS");
+    CHECK(f.lan_rotation.empty());
+    // The rotation after --lan-host's mission, in order, the hook's comma form.
+    const LaunchFlags rotation =
+        parse_launch_flags({"--lan-host", "TDH_I3A.BMS", "--lan-rotation", "TDH_G11A.bms,,ash_i5a.bms"});
+    CHECK((rotation.lan_rotation == std::vector<std::string>{"TDH_G11A.bms", "ash_i5a.bms"}));
     CHECK(f.lan_join == "192.168.10.120:32770");
     CHECK(f.lan_port == 32768);
     CHECK(f.lan_gametype == 0x10020);
@@ -213,6 +235,17 @@ void test_lan_fallbacks_and_join_endpoint() {
     CHECK(full.ip == "192.168.10.120" && full.port == 32770);
     const LanEndpoint junk = launch_lan_join_endpoint(parse_launch_flags({"--lan-join", "10.0.0.2:zz"}), 32768);
     CHECK(junk.ip == "10.0.0.2" && junk.port == 32768);
+    CHECK(!absent.browse && !bare.browse && !full.browse && !junk.browse);
+
+    // `browse` is no address: the join searches and takes the row on the port.
+    const LanEndpoint browse = launch_lan_join_endpoint(
+        parse_launch_flags({"--lan-join", "browse:32786"}), 32768);
+    CHECK(browse.browse && browse.ip.empty() && browse.port == 32786);
+    const LanEndpoint any_row = launch_lan_join_endpoint(parse_launch_flags({"--lan-join", " Browse "}), 0);
+    CHECK(any_row.browse && any_row.ip.empty() && any_row.port == 0);
+    const LanEndpoint bad_port = launch_lan_join_endpoint(
+        parse_launch_flags({"--lan-join", "BROWSE:70000"}), 0);
+    CHECK(bad_port.browse && bad_port.ip.empty() && bad_port.port == 0);
 }
 
 void test_flags_win_over_fallbacks_and_jo_is_the_default_game() {

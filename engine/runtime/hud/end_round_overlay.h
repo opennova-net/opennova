@@ -9,12 +9,12 @@
 // table, so each line carries its KEY + fallback and the printf-style
 // arguments, and the presenter resolves them.
 // [orig: UI_ProcessEndRoundScreenTransition @0x5b8600 (called every HUD frame
-//  while g_SpawnSuccessGate && is_in_session from HUD_DrawOverlayPanels @0x5c0072):
+//  while g_RoundOver && is_in_session from HUD_DrawOverlayPanels @0x5c0072):
 //  first pass Game_CloseInGameScreens (ex Server_ResetBalanceCounters) + Game_InitRespawnState +
-//  Overlay_ComputeStatFieldColumnLayout(40, 984) + byte_28E561C = 1; every
-//  pass UI_TeardownScene (ex sub_54E650) (the UI scene teardown) then HUD_DrawEndRoundStatsOverlay
+//  Overlay_ComputeStatFieldColumnLayout(40, 984) + g_EndRoundOverlayFirstPass = 1; every
+//  pass UI_ProcessMenuScreenFrame (ex sub_54E650) (the menu-screen pass, which closes the screen) then HUD_DrawEndRoundStatsOverlay
 //  @0x5b7cd0; once g_ScoreboardDirty && now - t0 >= 6000 ms ->
-//  UI_OpenMenuScreen("stat.mnu", "STAT") once (byte_28E561D)]
+//  UI_OpenMenuScreen("stat.mnu", "STAT") once (g_EndRoundStatScreenOpened)]
 
 #include <cstdint>
 #include <functional>
@@ -133,11 +133,11 @@ inline constexpr int kEndRoundStatScreenDelayMsec = 6000;
 // teardown, the overlay element, opening stat.mnu, the cursor).
 // [orig: UI_ProcessEndRoundScreenTransition @0x5b8600 — gate g_ScoreboardDirty
 //  @0x5b8600, then `now - t0` against 0x1770 unsigned @0x5b860f..0x5b8615; t0
-//  (dword_A81B2C) is stamped by the 0x1D handler NapiNPClientMsg_0x01D
+//  (g_EndRoundTransitionStartMs) is stamped by the 0x1D handler NapiNPClientMsg_0x01D
 //  @0x430a4b (Server_ProcessRoundEnd @0x516912 on the host) and the
-//  first pass here stamps byte_28E561C; every PRE-STAT pass tears the UI scene
-//  down (UI_TeardownScene @0x5b8674) and draws the overlay; g_ScoreboardDirty
-//  && now - t0 >= 6000 ms opens stat.mnu once (byte_28E561D, one more
+//  first pass here stamps g_EndRoundOverlayFirstPass; every PRE-STAT pass tears the UI scene
+//  down (UI_ProcessMenuScreenFrame @0x5b8674) and draws the overlay; g_ScoreboardDirty
+//  && now - t0 >= 6000 ms opens stat.mnu once (g_EndRoundStatScreenOpened, one more
 //  teardown on the open pass @0x5b862a); once that byte is set the transition
 //  returns immediately each frame (the locret @0x5b864a) — no teardown, no
 //  overlay — and nothing from this path redraws until the host's round cycle

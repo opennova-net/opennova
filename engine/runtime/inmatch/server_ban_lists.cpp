@@ -4,15 +4,22 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_tick.h> // Server_StageHostDisconnect
 
-#include <runtime/inmatch/punt_log.h> // napi_time_string (the /INOUT line's stamp)
+#include <runtime/inmatch/punt_log.h> // napi_time_string (the /INOUT line's stamp), kNapiLineEnding
+#include <runtime/inmatch/server_console.h> // kInoutLogFileName
 
 #include <base/io/crt_ftol.h>
+#include <net/npwire/ingame_encode.h>     // encode_chat_broadcast (S2C 0x14)
+#include <net/npwire/ingame_message_id.h>
 #include <base/io/log.h>
 #include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
+#include <net/novaworld/join_identity.h> // decrypt_join_cookie_field
 
 #include <base/io/strutil.h>
+#include <runtime/hud/feed_format.h> // kHudColorWhite (g_HUDColors.palette[0])
+#include <runtime/world/world.h> // HudChatLine
 
 #include <algorithm>
+#include <cstdio>
 #include <ctime>
 #include <string>
 #include <vector>
@@ -20,6 +27,13 @@
 namespace opennova::inmatch {
 
 namespace {
+
+// The validator's cookie reads: each field decrypts into a 512-byte buffer, and the NAMEINFO
+// name keeps 16 characters.
+// [orig: Server_ValidatePlayerJoinRequest - `push 200h` @0x51262C / @0x5126E2, the cut
+//  `cmp eax, 10h` @0x51268B and the NUL store @0x512690]
+constexpr std::size_t kJoinCookieFieldBytes = 512;
+constexpr std::size_t kJoinCookieNameChars = 16;
 
 std::string file_path(const ServerBanLists &bans, const char *name) {
 	if (!bans.directory.has_value() || bans.directory->empty()) return name;
@@ -38,8 +52,8 @@ NapiNPConnection *slot_at(NapiNPServerCtx &ctx, int32_t index) {
 	return nullptr;
 }
 
-// CNapiNPConnection_SendChatMessage(connection, "", 33, detail): the disconnect description
-// with reason 33. [orig: CNapiNPConnection_SendChatMessage @0x4C7EF0]
+// CNapiNPConnection_QueueDisconnectEvent(connection, "", 33, detail): the disconnect description
+// with reason 33. [orig: CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0]
 void punt(NapiNPConnection &conn, const char *detail) {
 	DisconnectEvent event;
 	event.ds = 1;
@@ -47,6 +61,41 @@ void punt(NapiNPConnection &conn, const char *detail) {
 	event.dpc = 33;
 	event.ddstr = detail;
 	Server_StageHostDisconnect(conn, event);
+}
+
+// The handler's sprintf lines: one %ld (the index) and up to two strings.
+std::string format_line(const char *format, long index, const std::string &a = {},
+		const std::string &b = {}) {
+	char buffer[512];
+	std::snprintf(buffer, sizeof buffer, format, index, a.c_str(), b.c_str());
+	return buffer;
+}
+
+// Server_SendChatMessageToPlayer(slot, 3, text): nothing for an empty text, else S2C 0x14
+// [3][the slot's own index][text], reliable with its 310-flush retention, to that slot
+// alone (mask 32); the sender's own line joins its dispatch replies.
+// [orig: Server_SendChatMessageToPlayer @0x508050 — the strlen test @0x508074, mask 32
+//  @0x508080, the slot @0x50808A, its index slot+0x14 @0x50808F,
+//  NetPacket_WriteTwoBytesAndCString @0x50809D, userParam 0x136 @0x5080AB, the send @0x5080BE]
+void send_chat_to_player(NapiNPConnection &to, const std::string &text,
+		std::vector<ProtocolMessage> *replies) {
+	constexpr int8_t kPlayerChatChannel = 3;
+	constexpr uint32_t kChatRetentionFlushes = 0x136;
+	if (text.empty()) return;
+	ChatBroadcast chat;
+	chat.channel = kPlayerChatChannel;
+	chat.sender_slot = static_cast<uint8_t>(to.reply.player_slot);
+	chat.text = text;
+	std::vector<uint8_t> body = encode_chat_broadcast(chat);
+	if (replies != nullptr) {
+		ProtocolMessage message = make_protocol_message(s2c::CHAT_BROADCAST, std::move(body));
+		message.retention_flushes = kChatRetentionFlushes;
+		replies->push_back(std::move(message));
+		return;
+	}
+	if (to.link.transport != nullptr)
+		to.link.transport->host_send(s2c::CHAT_BROADCAST, std::move(body), true, 0, false,
+				kChatRetentionFlushes);
 }
 
 } // namespace
@@ -96,13 +145,24 @@ bool Server_NameBanned(const NapiNPServerCtx &ctx, std::string_view name) {
 	return false;
 }
 
-uint32_t Server_ValidateJoinBans(
-		NapiNPServerCtx &ctx, NapiNPConnection &conn, bool pcid_decrypted) {
+uint32_t Server_ValidateJoinAccount(NapiNPServerCtx &ctx, NapiNPConnection &conn) {
 	std::string local_address;
 	if (get_local_address(ctx, local_address)) {
+		// The cookie legs, each refusal a description punt (D-NET-702).
+		if (!conn.join_cookie_present) return 23;
+		std::vector<uint8_t> field;
+		if (!decrypt_join_cookie_field(conn.join_identity_pairs, local_address + "NAMEINFO",
+					ctx.cookie_key_table, kJoinCookieFieldBytes, field))
+			return 24;
+		std::string name(reinterpret_cast<const char *>(field.data()));
+		if (name.size() > kJoinCookieNameChars) name.resize(kJoinCookieNameChars);
+		if (conn.player_name != name) conn.player_name = name;
+		if (!decrypt_join_cookie_field(conn.join_identity_pairs, local_address + "PCID",
+					ctx.cookie_key_table, kJoinCookieFieldBytes, field))
+			return 25;
 		if (Server_PcidBanned(ctx, conn.account.pcid))
 			return 29;
-		if (pcid_decrypted && ctx.config.punt_duplicate_pcids != 0) {
+		if (ctx.config.punt_duplicate_pcids != 0) {
 			const std::string &pcid = conn.account.pcid;
 			uint32_t holders = 0;
 			for (const NapiNPConnection &other : ctx.np_protocol.connection_list)
@@ -115,18 +175,27 @@ uint32_t Server_ValidateJoinBans(
 						continue;
 					if (&other != &conn && !slot_is_local(other))
 						other.duplicate_pcid_kick_pending = true;
-					// The /INOUT line for every holder, the joiner and the local one too: the
-					// port writes the protocol's /INOUT lines on the diagnostic channel
-					// (D-NET-356) [orig: "%s : REJECTING connection \"%s\" because pcid
+					// The /INOUT line for every holder, the joiner and the local one too,
+					// appended straight to _inout.txt (not through the protocol's log) under
+					// the switch [orig: "%s : REJECTING connection \"%s\" because pcid
 					//  \"%s\" matches \"%s\"!" @0x7CFAE0 -> NapiFile_AppendLine("_inout.txt")
-					//  @0x512865, gated on dword_B4C688].
-					io::logf(io::LogLevel::kInfo,
-							"%s : REJECTING connection \"%s\" because pcid \"%s\" matches \"%s\"!",
-							stamp.c_str(), peer_addr_to_string(other.peer).c_str(), pcid.c_str(),
-							other.account.pcid.c_str());
+					//  @0x512865, gated on g_InoutLogEnabled @0x5127F7].
+					const std::string line = stamp + " : REJECTING connection \"" +
+							peer_addr_to_string(other.peer) + "\" because pcid \"" + pcid +
+							"\" matches \"" + other.account.pcid + "\"!";
+					io::logf(io::LogLevel::kInfo, "%s", line.c_str());
+					if (ctx.logs.inout_switch && ctx.logs.files != nullptr)
+						ctx.logs.files->write(kInoutLogFileName, line + kNapiLineEnding, /*append=*/true);
 				}
 				return 30;
 			}
+		}
+		if (join_tickets_required(ctx)) {
+			const std::string ticket = local_address + "JOINTICKET";
+			bool named = false;
+			for (const auto &pair : conn.join_identity_pairs)
+				named = named || strutil::iequals(pair.first, ticket);
+			if (!named) return 28;
 		}
 	}
 	if (ctx.is_in_session != 0 && Server_NameBanned(ctx, conn.player_name)) return 31;
@@ -151,49 +220,129 @@ void Server_KickDuplicatePcids(NapiNPServerCtx &ctx, bool quality_boundary) {
 	}
 }
 
+bool Server_BanPlayerSlot(NapiNPServerCtx &ctx, int32_t index) {
+	if (ctx.is_authority == 0) return false;
+	// NovaWorld, LAN or both [orig: @0x5082F0..0x508300]; the port's network type is one of
+	// the two.
+	if (ctx.transport_mode != NetworkType::NovaWorld && ctx.transport_mode != NetworkType::Lan)
+		return false;
+	if (index < 0 || index >= static_cast<int32_t>(ctx.config.total_player_slot_capacity()))
+		return false;
+	NapiNPConnection *slot = slot_at(ctx, index);
+	// A Serve Only host's own slot 0 has no connection: its address reads 0 and nothing is
+	// punted (+5) [orig: the connection test @0x508338, the 0 @0x508349].
+	const bool host_row = slot == nullptr && index == 0 && ctx.host_slot.active;
+	if (slot == nullptr && !host_row) return false;
+	const std::string name = slot != nullptr ? slot->reply.player_name : ctx.host_slot.name;
+	banlist::AddressBan ban;
+	ban.address = slot != nullptr ? slot->peer.ip : 0u;
+	ban.name = name;
+	ctx.bans.addresses.entries.push_back(std::move(ban));
+	const std::string &kicked = ctx.server_text.kicked;
+	if (slot != nullptr && !slot_is_local(*slot)) punt(*slot, kicked.c_str());
+	if (ctx.world != nullptr) {
+		world::HudChatLine line;
+		line.argb = hud::kHudColorWhite;
+		line.system_ring = true;
+		line.text = kicked + " " + name;
+		ctx.world->out.hud_chat_lines.push_back(std::move(line));
+	}
+	ctx.bans.addresses_dirty = true;
+	return true;
+}
+
 bool Server_AddressBanned(const NapiNPServerCtx &ctx, uint32_t address) {
 	for (const banlist::AddressBan &ban : ctx.bans.addresses.entries)
 		if (ban.address == address) return true;
 	return false;
 }
 
-// [orig: Server_HandleBanPuntCommand @0x50B380 with senderPlayer 0 — authorized, and every
-//  chat reply is gated on a sender, so none is sent. The line through
-//  String_TokenizeQuotedToArray @0x616D60; fewer than one token is not handled. With two or
+// [orig: Server_HandleBanPuntCommand @0x50B380. The sender is authorized when there is none
+//  (the console's 0) or it is the local slot (+5) @0x50B3BE..0x50B3CA; every chat reply is
+//  gated on a sender, so the console's line draws none. The line through
+//  String_TokenizeQuotedToArray @0x616D60 (the call @0x50B3DE); fewer than one token is not
+//  handled. With two or
 //  more tokens:
-//  - BAN: with the list, `atol` of token 1 range-checked 0..capacity (inclusive), the slot by
-//    index, active, not the local one, its net player's PCID nonempty -> LinkedList_AddEntry
-//    with the slot name and BanList_SaveToFileWithHeader; handled either way.
-//  - UNBAN: the same walk, then LinkedList_FindByName and LinkedList_RemoveAndFreeNode, saved.
-//  Then, when the line was neither:
+//  - BAN @0x50B41B: unauthorized or with no list, handled with nothing @0x50B43A; else `atol`
+//    of token 1 range-checked 0..capacity (inclusive, "Player number %ld out of range."
+//    @0x50B5F3), the row by index (none: "Player #%ld doesn't exist." @0x50B480; inactive:
+//    "Player #%ld not used." @0x50B493), the host's own refused ("Cannot BAN the host
+//    player." @0x50B4CE), no PCID ("Player #%ld \"%s\" doesn't have a PCID." @0x50B557), else
+//    LinkedList_AddEntry with the slot name @0x50B584, saved @0x50B59F, and "Banned Player
+//    #%ld \"%s\"." to the BANNED player @0x50B5BB..0x50B5CB.
+//  - UNBAN @0x50B60F: the same gates @0x50B62E, "Player #%ld out of range." @0x50B824, the
+//    same row tests (@0x50B67C, @0x50B493 via @0x50B696, "Cannot UNBAN the host player."
+//    @0x50B6D7, @0x50B74A), LinkedList_FindByName @0x50B77E: listed -> removed, saved
+//    @0x50B79C, "Unbanned Player #%ld \"%s\"." @0x50B7B7; else "Player #%ld \"%s\" with PCID
+//    of \"%s\" doesn't appear in your banned list." @0x50B7F0, each to the sender.
+//  Then, when the line was neither, authorized only @0x50B845:
 //  - PUNT (exactly two tokens): ALL -> every active slot not local, not a bot (+96483) and not
 //    dropping (+96481) punted reason 33 "S.C:SPA"; else `atol` 0..capacity, that slot under the
 //    same tests punted "S.C:SP#"; handled.
 //  - BANDWIDTH (two tokens: g_EntitySendBudget = clamp(atol / 5, 100, 1600); one token: 600);
-//    not handled, so the console's chain goes on.]
-bool Server_HandleBanPuntCommand(NapiNPServerCtx &ctx, std::string_view line) {
+//    not handled, so the console's chain goes on.
+//  A row with no net player ("not connected to a network.", @0x50B511 / @0x50B716) is a bot's,
+//  which this host never seats.]
+bool Server_HandleBanPuntCommand(NapiNPServerCtx &ctx, std::string_view line,
+		NapiNPConnection *sender, std::vector<ProtocolMessage> *sender_replies) {
 	const std::vector<std::string> tokens = tokenize_quoted(line);
 	if (tokens.empty()) return false;
+	const bool authorized = sender == nullptr || slot_is_local(*sender);
 	const int32_t capacity = static_cast<int32_t>(ctx.config.total_player_slot_capacity());
-	if (tokens.size() > 1 && strutil::iequals(tokens[0], "BAN")) {
-		if (!ctx.bans.pcids.has_value()) return true;
+	// Server_SendChatMessageToPlayer(slot, 3, text), sender-gated by every caller here.
+	const auto tell = [&](NapiNPConnection &to, const std::string &text) {
+		if (sender != nullptr) send_chat_to_player(to, text, &to == sender ? sender_replies : nullptr);
+	};
+	const bool ban = tokens.size() > 1 && strutil::iequals(tokens[0], "BAN");
+	const bool unban = !ban && tokens.size() > 1 && strutil::iequals(tokens[0], "UNBAN");
+	if (ban || unban) {
+		if (!authorized || !ctx.bans.pcids.has_value()) return true;
 		const int32_t index = io::retail_atol(tokens[1].c_str());
-		if (index < 0 || index > capacity) return true;
+		if (index < 0 || index > capacity) {
+			if (sender != nullptr)
+				tell(*sender, format_line(ban ? "Player number %ld out of range."
+				                              : "Player #%ld out of range.", index));
+			return true;
+		}
+		if (index == capacity) {
+			if (sender != nullptr) tell(*sender, format_line("Player #%ld doesn't exist.", index));
+			return true;
+		}
 		NapiNPConnection *slot = slot_at(ctx, index);
-		if (slot == nullptr || slot_is_local(*slot) || slot->account.pcid.empty()) return true;
-		if (banlist::add(*ctx.bans.pcids, slot->account.pcid, slot->reply.player_name))
+		if (slot == nullptr) {
+			if (sender != nullptr) tell(*sender, format_line("Player #%ld not used.", index));
+			return true;
+		}
+		const std::string &name = slot->reply.player_name;
+		if (slot_is_local(*slot)) {
+			if (sender != nullptr)
+				tell(*sender, ban ? "Cannot BAN the host player." : "Cannot UNBAN the host player.");
+			return true;
+		}
+		if (slot->account.pcid.empty()) {
+			if (sender != nullptr)
+				tell(*sender, format_line("Player #%ld \"%s\" doesn't have a PCID.", index, name));
+			return true;
+		}
+		if (ban) {
+			if (banlist::add(*ctx.bans.pcids, slot->account.pcid, name)) {
+				Server_SavePcidBanList(ctx);
+				tell(*slot, format_line("Banned Player #%ld \"%s\".", index, name));
+			}
+			return true;
+		}
+		const std::string pcid = slot->account.pcid;
+		if (banlist::remove(*ctx.bans.pcids, pcid)) {
 			Server_SavePcidBanList(ctx);
+			if (sender != nullptr) tell(*sender, format_line("Unbanned Player #%ld \"%s\".", index, name));
+		} else if (sender != nullptr) {
+			tell(*sender, format_line(
+					"Player #%ld \"%s\" with PCID of \"%s\" doesn't appear in your banned list.",
+					index, name, pcid));
+		}
 		return true;
 	}
-	if (tokens.size() > 1 && strutil::iequals(tokens[0], "UNBAN")) {
-		if (!ctx.bans.pcids.has_value()) return true;
-		const int32_t index = io::retail_atol(tokens[1].c_str());
-		if (index < 0 || index > capacity) return true;
-		NapiNPConnection *slot = slot_at(ctx, index);
-		if (slot == nullptr || slot_is_local(*slot) || slot->account.pcid.empty()) return true;
-		if (banlist::remove(*ctx.bans.pcids, slot->account.pcid)) Server_SavePcidBanList(ctx);
-		return true;
-	}
+	if (!authorized) return false;
 	if (tokens.size() == 2 && strutil::iequals(tokens[0], "BANDWIDTH")) {
 		const int32_t budget = io::retail_atol(tokens[1].c_str()) / 5;
 		ctx.config.entity_send_budget = static_cast<uint32_t>(std::min(std::max(budget, 100), 1600));

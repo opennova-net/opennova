@@ -4,55 +4,196 @@
 // infantry_ladder.cpp precedent).
 #include <runtime/replication/client_replica_pipeline.h>
 
-#include <runtime/world/entity.h> // kMoveOrderLean* (the wire move_input bits)
+#include <runtime/world/entity.h> // kMoveOrderLean* (the wire move_input bits), SeatType
+#include <net/npwire/wire_handle.h>
+#include <runtime/world/infantry.h> // anim_state (the prone idle and roll states)
 #include <base/io/bam.h>
 #include <base/io/rotating_prng.h>
 
 namespace opennova::replication {
 
-void ClientReplicaPipeline::tick_lean() {
-	for (ClientEntityState &es : state_.entities) {
-		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry)
-			continue;
-		es.lean_angle = io::bam_sub(es.lean_angle,
-				io::bam_sar(io::bam_add(es.lean_angle, 8), 4));
-		if ((es.move_input & world::Entity::kMoveOrderLeanLeft) != 0)
-			es.lean_angle = io::bam_sub(es.lean_angle, 0x3000000);
-		if ((es.move_input & world::Entity::kMoveOrderLeanRight) != 0)
-			es.lean_angle = io::bam_add(es.lean_angle, 0x3000000);
-	}
+// Both organic updates exit ahead of their per-tick legs: Flags bit 0 (a hidden body) and no
+// animation channel (+0x188 null: the type registered none, the row's rm_adm_id -1) end the
+// update ahead of its dual update; the starved chase (progress held at the 512 cap, tested
+// ahead of the tick's count) ends it after the channel and the count. So a hidden, channel-less
+// or starved row takes no lean decay, dip, torso roll, selection, mounted site, lean ramp or
+// recoil draw. The starved exit is a client's (the authority's chase runs on, and ours steps no
+// progress there); org1's epilog-screen exit is single-player (the epilog's cinematic starts
+// only out of session), so no replica row meets it. An unstamped row (rm_adm_id -2, the
+// embedder's pending stamp) is not channel-less.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `test dl, 1` @0x4B411E / `jnz` @0x4B4127,
+//  the +0x188 test @0x4B412D..0x4B4135, the dual update @0x4B41DF, `cmp ax, 200h; jge`
+//  @0x4B4431..0x4B4435, the idle force @0x4B464F..0x4B465F, `cmp is_authority, 0; jz`
+//  @0x4B4669..0x4B4670; Entity_UpdateInfantryAI @0x4B9910 - the +0x188 test
+//  @0x4B9931..0x4B993B, g_EpilogScreenActive @0x4B998C..0x4B99CD, the bit-0 test
+//  @0x4B9A03..0x4B9A07, the dual update @0x4B9A48, the authority skip @0x4B9A74..0x4B9A7A,
+//  the starved exit @0x4B9C09..0x4B9C39; AnimMap_RegisterEntity @0x40BB60 - the +0x188 store
+//  @0x40BBD5, the free @0x40BD8B; Game_StartMission @0x525DBF..0x525DC9 and
+//  Server_ProcessRoundEnd @0x51691D..0x516965, the cinematic starts out of session]
+bool ClientReplicaPipeline::body_update_exits_ahead_of_channel(const ClientEntityState &es) {
+	return (es.state_flags_known && (es.state_flags & 0x01u) != 0u) || es.rm_adm_id == -1;
+}
+
+bool ClientReplicaPipeline::body_update_ends_ahead(const ClientEntityState &es) {
+	return body_update_exits_ahead_of_channel(es) || es.net_interp_progress >= 512;
+}
+
+bool ClientReplicaPipeline::body_update_ended(const ClientEntityState &es) {
+	return body_update_exits_ahead_of_channel(es) || es.rm_starved;
+}
+
+// A row the walk will park (every pool-0 row under the own-body split) keeps its
+// lean, its kick and its torso roll until its own visit: retail runs the decay, the
+// dip and the roll inside each body's update, so the legs ahead of the pool-0 walk
+// (the projectile pass among them) see the body as its last frame left it. The
+// parked halves' visits run them ahead of the row's visit (D-NET-196).
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the Weapon_UpdateAllProjectiles call
+//  @0x4C223A ahead of the pool-0 walk @0x4C2426..0x4C2472; Entity_UpdateInfantryPlayerBody
+//  @0x4B40E0 - the decay @0x4B5C97..0x4B5CA5, the dip @0x4B5CAB..0x4B5CE7, the torso
+//  roll @0x4B5CFF..0x4B5D67]
+// A person bound to an item row runs that row's update alone, never these org2 legs, in the
+// walk's half as in the parked one (visit_parked_rows, D-NET-892).
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the +0x1C4 call @0x4C2472]
+void ClientReplicaPipeline::tick_lean_decay(uint16_t self_handle) {
+	const uint32_t park = remote_walk_park_key(self_handle);
+	for (ClientEntityState &es : state_.entities)
+		if (remote_walk_key(es.handle) < park && !person_takes_item_row(es, self_handle))
+			lean_decay_row(es);
+}
+
+void ClientReplicaPipeline::lean_decay_row(ClientEntityState &es) {
+	if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry) return;
+	if (body_update_ends_ahead(es)) return;
+	es.lean_angle = io::bam_sub(es.lean_angle,
+			io::bam_sar(io::bam_add(es.lean_angle, 8), 4));
+}
+
+void ClientReplicaPipeline::tick_lean_ramp() {
+	for (ClientEntityState &es : state_.entities)
+		if (!es.rm_parked && !person_takes_item_row(es, parked_self_)) lean_ramp_row(es);
+}
+
+void ClientReplicaPipeline::lean_ramp_row(ClientEntityState &es) {
+	// The on-foot ramp is the player body pass's (the NPC pass ramps none).
+	if (es.cls != EntityClass::Player) return;
+	// A seated body's pass ends at the mounted site, ahead of the on-foot
+	// ramp: its passenger keys ramp there, ahead of its eye
+	// (tick_seated_body) [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 -
+	// the site selector @0x4B637C..0x4B638F, the passenger ramp
+	// @0x4B6684..0x4B66C3, the eye @0x4B66D9..0x4B68FC].
+	if (es.carrier_handle != wire_handle::kInvalid && es.mount_bone != 0) return;
+	if (body_update_ended(es)) return;
+	// Its gates: a ladder contact or a chute (Flags 0x100020; a remote body's
+	// chute bit is the record's, whose low byte bar the dead bit lands on the
+	// row's Flags mirror), the prone latch with none of Flags 0x10A000 (a remote body's
+	// latch is the record's stance store, net_stance_bits bit 0), and the dead
+	// bit, which skips both keys [orig: Entity_UpdateInfantryPlayerBody
+	// @0x4B40E0 - `test eax, 100020h` @0x4B7DA2, the prone_local test
+	// @0x4B7DA9..0x4B7DAD (its derivation @0x4B416C..0x4B4183), the dead test
+	// @0x4B7DAF..0x4B7DB4; NetPacket_SerializePlayerState @0x4C09C0 - the
+	// remote Flags mask 0xFD @0x4C1307..0x4C1311, the stance stores
+	// @0x4C11FD..0x4C1242].
+	if ((es.rm_entity_flags & 0x100020u) != 0u) return;
+	if ((es.net_stance_bits & 1u) != 0u && (es.rm_entity_flags & 0x10A000u) == 0u)
+		return;
+	if ((es.rm_entity_flags & world::kEntityFlagDead) != 0u) return;
+	if ((es.move_input & world::Entity::kMoveOrderLeanLeft) != 0)
+		es.lean_angle = io::bam_sub(es.lean_angle, 0x3000000);
+	if ((es.move_input & world::Entity::kMoveOrderLeanRight) != 0)
+		es.lean_angle = io::bam_add(es.lean_angle, 0x3000000);
 }
 
 // The remote arms-dip integrator: the exact block AiSystem::infantry_weapon_channel
 // runs for authoritative bodies, applied here to wire-decoded peers. The window byte
 // decrements in BOTH branches -- twice per tick -- so an 80 stamp dips for 40 ticks.
+// That is the player body's (org2's) block; an Infantry row takes org1's (arms_dip_row).
 // [orig: @0x4b5cab..0x4b5ce7]
-void ClientReplicaPipeline::tick_arms_dip() {
-	for (ClientEntityState &es : state_.entities) {
-		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry)
-			continue;
-		if (es.arms_dip_ticks > 0) {
-			--es.arms_dip_ticks;                 // [orig: @0x4b5cb5]
-			es.pitch_kick_accum = io::bam_sub(
-					es.pitch_kick_accum, 0x2800000); // [orig: @0x4b5cb7 += 0xFD800000]
-		}
-		es.pitch_kick_accum = io::bam_sub(
-				es.pitch_kick_accum,
-				io::bam_sar(io::bam_add(es.pitch_kick_accum, 4), 3)); // [orig: @0x4b5cc7..0x4b5cd5]
-		if (es.arms_dip_ticks > 0) --es.arms_dip_ticks;         // [orig: @0x4b5cdb..0x4b5ce7]
-	}
+void ClientReplicaPipeline::tick_arms_dip(uint16_t self_handle) {
+	const uint32_t park = remote_walk_park_key(self_handle);
+	for (ClientEntityState &es : state_.entities)
+		if (remote_walk_key(es.handle) < park && !person_takes_item_row(es, self_handle))
+			arms_dip_row(es);
 }
 
+void ClientReplicaPipeline::arms_dip_row(ClientEntityState &es) {
+	if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry) return;
+	if (body_update_ends_ahead(es)) return;
+	// An Infantry row's update is org1's, whose block has no dip window: the term eases an
+	// eighth-step alone and the window byte is never read, so a 0x49 stamp stays and dips
+	// nothing. Its torso roll is org1's own: prone idle decays it a thirty-second step toward
+	// level, otherwise it chases the Roll word a sixteenth with the lag clamped to +-20 degrees
+	// (no roll states). The authority's twin is world::infantry_org1_torso_roll_tick.
+	// [orig: Entity_UpdateInfantryAI @0x4B9910 - the ease @0x4BE883..0x4BE891, `cmp dword ptr
+	//  [esi+2BCh], 30h` @0x4BE897, the decay @0x4BE8A6..0x4BE8AC, the chase @0x4BE8B0..0x4BE8BD,
+	//  the clamps @0x4BE8C8..0x4BE8EA; the window byte +0x371 is read only by
+	//  Entity_UpdateInfantryPlayerBody @0x4B5CAB / @0x4B5CDB]
+	if (es.cls == EntityClass::Infantry) {
+		es.pitch_kick_accum = io::bam_sub(es.pitch_kick_accum,
+				io::bam_sar(io::bam_add(es.pitch_kick_accum, 4), 3));
+		if (es.rm_state == world::anim_state::kIdleProne) {
+			es.torso_roll = io::bam_sub(es.torso_roll,
+					io::bam_sar(io::bam_add(es.torso_roll, 16), 5));
+			return;
+		}
+		es.torso_roll = io::bam_add(es.torso_roll,
+				io::bam_sar(io::bam_add(io::bam_sub(es.roll_bam, es.torso_roll), 8), 4));
+		const int32_t lag = io::bam_sub(es.torso_roll, es.roll_bam);
+		if (lag > 0x0E38E380) es.torso_roll = io::bam_add(es.roll_bam, 0x0E38E380);
+		if (lag < -0x0E38E380) es.torso_roll = io::bam_add(es.roll_bam, -0x0E38E380);
+		return;
+	}
+	if (es.arms_dip_ticks > 0) {
+		--es.arms_dip_ticks;                 // [orig: @0x4b5cb5]
+		es.pitch_kick_accum = io::bam_sub(
+				es.pitch_kick_accum, 0x2800000); // [orig: @0x4b5cb7 += 0xFD800000]
+	}
+	es.pitch_kick_accum = io::bam_sub(
+			es.pitch_kick_accum,
+			io::bam_sar(io::bam_add(es.pitch_kick_accum, 4), 3)); // [orig: @0x4b5cc7..0x4b5cd5]
+	if (es.arms_dip_ticks > 0) --es.arms_dip_ticks;         // [orig: @0x4b5cdb..0x4b5ce7]
+	// A remote player's torso roll, the authority's player-body rule
+	// (world::AiSystem::infantry_torso_roll_tick): prone idle decays it a sixteenth
+	// toward level, the prone rolls step it 0x4000000, otherwise it chases the Roll
+	// word a sixteenth with the lag clamped to +-20 degrees (D-NET-330).
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - prone idle 0x30 @0x4b5d05, the
+	//  chase's skip of the rolls @0x4b5d20..0x4b5d28, the chase and clamps @0x4b5d4e /
+	//  @0x4b5d61; the rolls @0x4b700e / @0x4b701d]
+	if (es.rm_state == world::anim_state::kIdleProne) {
+		es.torso_roll = io::bam_sub(es.torso_roll, io::bam_sar(io::bam_add(es.torso_roll, 8), 4));
+		return;
+	}
+	if (es.rm_state == world::anim_state::kRollLeft) {
+		es.torso_roll = io::bam_add(es.torso_roll, -0x4000000);
+		return;
+	}
+	if (es.rm_state == world::anim_state::kRollRight) {
+		es.torso_roll = io::bam_add(es.torso_roll, 0x4000000);
+		return;
+	}
+	es.torso_roll = io::bam_add(es.torso_roll,
+			io::bam_sar(io::bam_add(io::bam_sub(es.roll_bam, es.torso_roll), 8), 4));
+	const int32_t lag = io::bam_sub(es.torso_roll, es.roll_bam);
+	if (lag > 0x0E38E380) es.torso_roll = io::bam_add(es.roll_bam, 0x0E38E380);
+	if (lag < -0x0E38E380) es.torso_roll = io::bam_add(es.roll_bam, -0x0E38E380);
+}
+
+// The recoil chase and its PRNG draw are the org2 and org1 body updates' own, so a person
+// bound to an item row (person_takes_item_row) draws nothing and keeps its words (D-NET-892),
+// and a row whose update exited ahead of the block (body_update_ended) draws nothing either.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the +0x380 block @0x4B57EB..0x4B5839,
+//  PRNG_Next16 @0x4B581B; Entity_UpdateInfantryAI @0x4B9910 - @0x4BE7FD..0x4BE84B,
+//  PRNG_Next16 @0x4BE82D; Entity_UpdateAllEntities @0x4C2100 - the +0x1C4 call @0x4C2472]
 void ClientReplicaPipeline::tick_recoil() {
 	for (ClientEntityState &es : state_.entities) {
 		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry)
 			continue;
+		if (person_takes_item_row(es, parked_self_) || body_update_ended(es)) continue;
 		// [orig: PRNG_Next16 @0x6130a0, dword_31BFBB0] The low bit selects the
 		// recoil-yaw sign; prng16_ keeps the complete state because decoded rows
 		// share one stream rather than owning one generator each. Other
 		// process-global retail consumers remain outside this view's bounded
 		// call-history seam.
-		const int32_t random16 = io::rotating_prng_next16(prng16_); // unconditional [orig: body updater]
+		const int32_t random16 = io::rotating_prng_next16(prng16_); // unconditional [orig: @0x4B581B / @0x4BE82D]
 		const int32_t step = io::bam_sar(io::bam_add(es.recoil_pitch, 4), 3);
 		const int32_t half = io::bam_sar(step, 1);
 		es.recoil_pitch = io::bam_sub(es.recoil_pitch, half);

@@ -13,16 +13,16 @@ namespace {
 // [orig: Entity_ComputeUserpointWorldTransform @0x545E1F..0x545E4C;
 //  Entity_ComputeUserpointTransform @0x545C1B..0x545C41]
 void carrier_pose(const World &world, const Entity &carrier, int32_t out[6]) {
-    out[0] = to_fixed(carrier.position.x);
-    out[1] = to_fixed(carrier.position.y);
-    out[2] = to_fixed(carrier.position.z);
+    out[0] = carrier.position.x.q16;
+    out[1] = carrier.position.y.q16;
+    out[2] = carrier.position.z.q16;
     const AiEntity *body = world.ai.for_handle(carrier.handle);
     out[3] = body ? body->heading : carrier.veh.yaw_seeded ? carrier.veh.yaw_bam
-        : bam_heading_from_mission_yaw_deg(carrier.yaw);
+        : carrier.heading;
     out[4] = body ? body->pitch : carrier.veh.yaw_seeded ? carrier.veh.air_pitch_bam
-        : bam_from_degrees_wrapped(carrier.pitch);
+        : carrier.pitch_bam;
     out[5] = body ? body->roll : carrier.veh.yaw_seeded ? carrier.veh.air_roll_bam
-        : bam_from_degrees_wrapped(carrier.roll);
+        : carrier.roll_bam;
 }
 
 // The local-space helper the G-redirect arm and the controller branch share:
@@ -147,12 +147,12 @@ void local_weapon_fire_pose(World &world, const LocalPlayerWeapon &weapon,
     // On-foot position + CameraOffset and undoubled recoil pitch.
     // [orig: @0x4DC847..0x4DC880]
     const AiEntity *body = world.ai.for_handle(shooter->handle);
-    out[0] = io::bam_add(body ? body->pos[0] : to_fixed(shooter->position.x), body ? body->inf.eye_offset_x : shooter->eye_offset_x);
-    out[1] = io::bam_add(body ? body->pos[1] : to_fixed(shooter->position.y), body ? body->inf.eye_offset_y : shooter->eye_offset_y);
-    out[2] = io::bam_add(body ? body->pos[2] : to_fixed(shooter->position.z), body ? body->inf.eye_offset_z : shooter->eye_offset_z);
-    out[3] = body ? body->heading : bam_heading_from_mission_yaw_deg(shooter->yaw);
-    out[4] = body ? io::bam_add(body->pitch, body->inf.recoil_pitch) : bam_from_degrees_wrapped(shooter->pitch);
-    out[5] = body ? body->roll : bam_from_degrees_wrapped(shooter->roll);
+    out[0] = io::bam_add(body ? body->self->position.x.q16 : shooter->position.x.q16, body ? body->inf.eye_offset_x : shooter->eye_offset_x);
+    out[1] = io::bam_add(body ? body->self->position.y.q16 : shooter->position.y.q16, body ? body->inf.eye_offset_y : shooter->eye_offset_y);
+    out[2] = io::bam_add(body ? body->self->position.z.q16 : shooter->position.z.q16, body ? body->inf.eye_offset_z : shooter->eye_offset_z);
+    out[3] = body ? body->heading : shooter->heading;
+    out[4] = body ? io::bam_add(body->pitch, body->inf.recoil_pitch) : shooter->pitch_bam;
+    out[5] = body ? body->roll : shooter->roll_bam;
     // Add the minimum + local elevation offset, then the banded limit clamp.
     // [orig: seat-flag gate @0x4DC8A3; add @0x4DC8DE..0x4DC8EC;
     //  Math_ClampAngleToBounds @0x4DC8EF]

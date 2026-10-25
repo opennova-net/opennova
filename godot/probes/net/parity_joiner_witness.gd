@@ -37,6 +37,9 @@ const FIELDS: PackedStringArray = [
 	"look_samples_per_phase", "heartbeat_sequence", "ticks_msec", "process_id",
 ]
 
+## The deploy screen's SPACE pick: param 65534, the auto team pick (wire 0xFFFE).
+const DEPLOY_PICK_AUTO_TEAM := 65534
+
 ## The process-wide heartbeat count: every witness any of the three probes
 ## publishes takes the next value, so the runner's initial/final snapshots
 ## (different probe runs) still see a monotonic sequence from one process.
@@ -100,9 +103,26 @@ static func deploy_hold_ready(state: Dictionary, readiness_mode: String) -> bool
 			and bool(state.hold_ready) and bool(state.deploy_presented)
 
 
+## An auto-deploy joiner still held on the deploy screen is not ready: its
+## pick (auto_deploy_pick) releases the hold.
 static func in_match_ready(state: Dictionary, readiness_mode: String, auto_deploy: bool) -> bool:
 	return readiness_mode == "in_match" \
-			and bool(state.match_ready_auto if auto_deploy else state.match_ready)
+			and bool(state.match_ready_auto if auto_deploy else state.match_ready) \
+			and not (auto_deploy and bool(state.hold_ready))
+
+
+## The deployment pick auto_deploy owes, or -1 for none: the default pick
+## (param 0) while the post-auth pick is pending; on a mission with deploy
+## zones, whose joiner the host holds on the deploy screen past the admission
+## (the S2C 0x0A flags1 bit 1), the screen's SPACE, the auto team pick (param
+## 65534, wire 0xFFFE), as onHook's deploy presses it on a retail role (the
+## retail witnesses: scripts/net/README.md, the deploy_zones case key).
+static func auto_deploy_pick(state: Dictionary) -> int:
+	if bool(state.pick_pending):
+		return 0
+	if bool(state.hold_ready):
+		return DEPLOY_PICK_AUTO_TEAM
+	return -1
 
 
 ## The witness for one heartbeat: the raw state plus the run's configuration

@@ -96,6 +96,24 @@ func test_an_attached_model_takes_its_owners_verdict() -> void:
 	cache.clear_water_plane()
 
 
+# A zero height's plane is the transparent split alone: retail's mirror render
+# returns at a zero height, so no mirror renders and nothing arms (engine
+# environment/water_frame.h water_draws_at_height)
+# [orig: Render_MainScene @ 0x5c125e..0x5c1268].
+func test_a_zero_height_arms_nothing() -> void:
+	var cache := ObjectShaderCache.get_singleton()
+	var model := _model()
+	model.set_shadow_bound_radii(1.0, 1.0)
+	model.global_position = Vector3(0.0, -5.0, 0.0)
+	await get_tree().process_frame
+	cache.set_water_plane(0.0, true)
+	assert_false(model.is_water_mirror_clip_armed(), "z - r = -6 sits below 0.0, yet no mirror renders")
+	assert_eq(_clip_bit(model), 0.0)
+	cache.set_water_plane(-1.0, true)
+	assert_true(model.is_water_mirror_clip_armed(), "a nonzero plane above it arms")
+	cache.clear_water_plane()
+
+
 func test_a_building_arms_while_its_floor_sits_a_quarter_below_the_water() -> void:
 	var cache := ObjectShaderCache.get_singleton()
 	var model := _model()

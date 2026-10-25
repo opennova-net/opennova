@@ -41,8 +41,10 @@ struct TerrainHeightField {
 	bool wrap_x = false;
 	bool wrap_z = false;
 	SectorLayout layout;     // world->source sector remap (the *_world variants)
-	int32_t water_y = 0;     // [orig: worldY @0x26C6454] water plane, 16.16 fixed
-	bool has_water = false;
+	// The water plane, 16.16 fixed, read raw: retail keeps no dry sentinel (the
+	// word is 0 with none authored) [orig: worldY @0x26C6454; Environment_InitDefaults
+	// @0x57C010, the memset @0x57C011..0x57C01E].
+	int32_t water_y = 0;
 
 	bool valid() const { return heightmap != nullptr && dim > 0; }
 };
@@ -64,7 +66,6 @@ struct TerrainHeightFieldNoLocks {
 	int dim;
 	SectorLayout layout;
 	int32_t water_y;
-	bool has_water;
 };
 } // namespace detail
 
@@ -132,11 +133,38 @@ struct TerrainHeightGradient {
 // significant bits rounds across a texel edge.
 int32_t height_field_height_fixed(const TerrainHeightField &f, int32_t mission_x, int32_t mission_y);
 
+// The bilinear height at a fixed-point (16.16) mission position, the game's own sampler: the
+// texel the shared routing takes, its +1 taps through the quadrant's seam locks, the four
+// weights from the words' low halves (x, and -y) as rounded 16.16 products, each tap's raw16
+// shifted up by 8 times its weight, rounded, summed. 0 with no grid and on an empty cell.
+// [orig: Terrain_SampleHeightBilinear @0x6067B0 - the routing @0x6067BD..0x606807, the weights
+//  @0x606851 / @0x60686D / @0x606889 / @0x60689D, the taps @0x6068AC..0x60694E, the sum
+//  @0x606806]
+int32_t height_field_height_bilinear_fixed(const TerrainHeightField &f, int32_t mission_x,
+		int32_t mission_y);
+
 // Fixed-point mission X/Y, with retail's NEG/SAR, global wrap/clamp and
 // quadrant-local tap locks. Empty terrain/cells return zero differences, as
 // the two motor callers initialize the retail out-parameters to zero.
 // [orig: Terrain_GetHeightGradient @0x606330]
 TerrainHeightGradient height_field_gradient_fixed(
 		const TerrainHeightField &f, int32_t mission_x, int32_t mission_y);
+
+// The height mip chain's 64 x 64 level, read bilinearly at a fixed-point (16.16) mission
+// position, in 16.16: the arty barrage's ground under a shell's spawn. Each 16-unit tile of
+// the atlas holds the mip build's max byte (half units) of the tile's eight by eight finest
+// cells, each cell's byte the max raw16 of its 3 x 3 texels plus 127, shifted down by 7 and
+// stored as a byte. The position, less 16 units on x and plus 16 on y, routes through the
+// shared sector routing; the tile (the texel over 16) and its +1 neighbours wrap at 64, the
+// weights are the low eight bits of the shifted words' 4096ths, and the weighted sum of the
+// four bytes, halved, is the height. 0 with no grid and on an empty cell.
+// [orig: Terrain_SampleMipMaxHeightBilinear @0x606200 - the centring @0x60620D / @0x606219, the
+//  grid @0x606220..0x606260, the empty return @0x606264, the weights @0x606275 / @0x606280,
+//  the tiles @0x6062AF..0x6062C8, the taps and the sum @0x6062D1..0x606318, the halving @0x60631B (g_TerrainMipchainStorage
+//  +0x14 @0x6062CB); Terrain_BuildMipchain @0x6056D0 - the finest cell's rows @0x605740..
+//  0x60575D, its bytes @0x60589B..0x6058A7, the finest-first level list @0x6058EE, the
+//  stores @0x6059D0..0x6059DC (+0x14 the fourth level, 64 x 64)]
+int32_t height_field_mip_max_bilinear_fixed(const TerrainHeightField &f, int32_t mission_x,
+		int32_t mission_y);
 
 } // namespace opennova::terrain

@@ -112,6 +112,12 @@ std::string MenuFrameCompiler::widget_string(int index, const std::string &key) 
 	return text != nullptr ? *text : key;
 }
 
+std::string MenuFrameCompiler::table_string(const std::string &table, const std::string &key) const {
+	if (text_tables_ == nullptr) return key;
+	const std::string *text = text_tables_->lookup(&table, key);
+	return text != nullptr ? *text : key;
+}
+
 bool MenuFrameCompiler::widget_disabled(int index,
 		const MenuFrameState &state) const {
 	if (index < 0 || index >= static_cast<int>(nodes_.size())) {

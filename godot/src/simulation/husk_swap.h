@@ -8,8 +8,11 @@
 // has no node, so its instance is carved out of its graphic's batches and the
 // husk grafts into the container at the placed transform. Either way the husk
 // keeps what belongs to the entity, not its graphic: the static-caster role,
-// the mirror's reflect flag, the projection owner, the occlusion masks and,
-// for a carved static, the entity's light query and identity. The game's
+// the mirror's reflect flag, the projection owner, the occlusion masks, the
+// destroyed sections and, for a carved static, the entity's light query and
+// identity. The destroyed sections are the entity's one word, which retail
+// applies to whichever model it draws, so they pass to the husk at the graft
+// and back to the intact model at the restore. The game's
 // DestructionPresenter swaps through it; the OpenNova Editor's mission view
 // is its intended second caller.
 
@@ -60,7 +63,8 @@ HuskGraftResult husk_graft_static(MissionObjectPlacer &p_placer, Node3D &p_conta
 		const String &p_husk_graphic, HuskGraft &r_graft);
 // Undo a graft's changes to the intact entity: the static terrain shadow
 // replacement cleared, a carved static shown again, the hidden children back
-// at their authored visibility. The husk model itself is its owner's to free.
+// at their authored visibility, then the husk's destroyed sections handed to
+// the intact model. The husk model itself is its owner's to free, after this.
 void husk_graft_restore(MissionObjectPlacer *p_placer, const HuskGraft &p_graft);
 
 // Whether any visual under `root` casts the static terrain shadow.

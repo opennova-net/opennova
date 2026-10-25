@@ -11,6 +11,8 @@ namespace {
 // Retail's g_TextKeyHelp @0xB4C2B0: one process-wide table.
 rtxt::File g_key_strings;
 bool g_key_strings_loaded = false;
+// Retail's g_TextOverrideTable as these lookups see it (null: none).
+std::shared_ptr<const rtxt::File> g_key_strings_override;
 
 constexpr const char *kKeysSection = "Keys";
 
@@ -43,7 +45,16 @@ std::string text_marker_stripped(const char *fallback) {
   return marker_stripped(fallback);
 }
 
+// The (section, key) entry the installed tables answer: the override's first.
+const rtxt::Entry *find_key_entry(const std::string &section, const std::string &key) {
+  return rtxt::find_with_override(g_key_strings_override.get(), g_key_strings, section, key);
+}
+
 }  // namespace
+
+void set_key_strings_override(std::shared_ptr<const rtxt::File> table) {
+  g_key_strings_override = std::move(table);
+}
 
 void set_key_strings(rtxt::File table) {
   g_key_strings = std::move(table);
@@ -62,12 +73,12 @@ bool has_key_strings() {
 std::string key_string(const char *key, const char *fallback) {
   // [orig: KeyHelp_GetStringWithFallback @0x51ed40] -- no table -> fallback
   // (@0x51ed47); section/key miss -> fallback (@0x51ed76); the entry's text
-  // otherwise (@0x51ed78). The debug bit (dword_24C1930 & 0x10000 -> "&"
+  // otherwise (@0x51ed78). The debug bit (g_DebugCheatFlags & 0x10000 -> "&"
   // @0x51ed53) is a developer switch this port does not carry.
   if (!g_key_strings_loaded || key == nullptr) {
     return marker_stripped(fallback);
   }
-  const rtxt::Entry *entry = g_key_strings.find_in_section(kKeysSection, key);
+  const rtxt::Entry *entry = find_key_entry(kKeysSection, key);
   if (entry == nullptr) {
     return marker_stripped(fallback);
   }
@@ -77,7 +88,7 @@ std::string key_string(const char *key, const char *fallback) {
 std::string key_help_string_raw(const char *section, const char *key, const char *fallback) {
   // [orig: KeyHelp_GetStringWithFallback @0x51ed40] -- the fallback as written.
   const rtxt::Entry *entry = g_key_strings_loaded && section != nullptr && key != nullptr
-      ? g_key_strings.find_in_section(section, key)
+      ? find_key_entry(section, key)
       : nullptr;
   if (entry == nullptr) {
     return fallback != nullptr ? std::string(fallback) : std::string();
@@ -90,7 +101,7 @@ std::string key_help_string(const char *section, const char *key, const char *fa
   if (!g_key_strings_loaded || section == nullptr || key == nullptr) {
     return text_marker_stripped(fallback);
   }
-  const rtxt::Entry *entry = g_key_strings.find_in_section(section, key);
+  const rtxt::Entry *entry = find_key_entry(section, key);
   if (entry == nullptr) {
     return text_marker_stripped(fallback);
   }

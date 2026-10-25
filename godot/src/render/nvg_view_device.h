@@ -67,6 +67,12 @@ public:
 			const std::vector<SightsRow> &p_rows, std::size_t &r_draws,
 			std::string &r_failure);
 	void release(RenderingDevice *p_rd);
+	// The shader, the vertex buffer with the polar strips and the 64 x 16 polar
+	// target on p_rd, ahead of the first draw (the draws' own create then finds
+	// them); false with `r_failure` set when the device refused one.
+	bool create_device(RenderingDevice *p_rd, std::string &r_failure) {
+		return initialize(p_rd, r_failure);
+	}
 
 private:
 	enum class Blend : std::uint8_t {

@@ -17,6 +17,7 @@
 #include <runtime/inmatch/client_runtime.h> // queue_chat_message (the talk keys' send)
 #include <runtime/inmatch/napi_np_server_ctx.h> // NetworkType (the NovaWorld talk gate)
 #include <runtime/inmatch/server_status_feed.h> // the status page's roster and host facts
+#include <runtime/inmatch/takeover_status_feed.h> // the takeover dialog's nearest entry
 #include <runtime/world/player_present.h> // kWeaponSwitchDenySoundset (the crew key's tone)
 #include <runtime/world/script_sounds.h>
 #include <runtime/replication/client_state.h>
@@ -67,6 +68,12 @@ bool Simulation::fill_lfp_zones(int p_local_team,
 	// (inmatch/role_feeds.h collect_lfp_zones carries the witnesses).
 	return opennova::inmatch::collect_lfp_zones(role_view(), deploy_zone_registry(), p_local_team,
 			r_zones);
+}
+
+bool Simulation::fill_takeover_facts(opennova::hud::HudTakeoverFacts &r_facts) {
+	// The nearest running zone-timer entry over the role's image and map slots
+	// (inmatch/takeover_status_feed.h carries the witness).
+	return opennova::inmatch::collect_takeover_status(role_view(), deploy_zone_registry(), r_facts);
 }
 
 int64_t Simulation::get_session_game_type() const {
@@ -153,6 +160,14 @@ opennova::hud::ChatEntryFacts Simulation::chat_entry_facts(uint32_t p_frame) con
 
 opennova::hud::ChatSendResult Simulation::send_chat_line(int p_dispatch, std::string &r_text,
 		uint32_t p_frame) {
+	// The command entry's stored sender is the console command, which stamps no
+	// talk debounce (D-NET-710; engine hud_chat_entry.h kChatDispatchCommand carries
+	// the witness).
+	if (p_dispatch == opennova::hud::kChatDispatchCommand ||
+			p_dispatch == opennova::hud::kChatDispatchConsole) {
+		if (runtime_ != nullptr) (void)runtime_->console_command(r_text);
+		return opennova::hud::ChatSendResult::Refused;
+	}
 	const int channel = opennova::hud::chat_dispatch_channel(p_dispatch);
 	if (runtime_ == nullptr || channel < 0) return opennova::hud::ChatSendResult::Refused;
 	return runtime_->queue_chat_message(static_cast<uint8_t>(channel), r_text, p_frame);
@@ -190,7 +205,25 @@ void Simulation::raise_chat_denied_sound() {
 void Simulation::drain_feed_posts(const opennova::hud::GameTextLookup &p_gametext,
 		bool p_mp_verbose, std::vector<opennova::hud::FeedPost> &r_posts) {
 	r_posts.clear();
+	// The sim's own CHAT-ring lines (WorldOutbox::hud_chat_lines), raised in the entity update
+	// after the frame's receive: each resolves in its section, a miss reading "". A line the
+	// sim marks for the SYSTEM ring (a cheat toggle's) goes there.
+	std::vector<opennova::world::HudChatLine> sim_lines;
+	if (kernel_) sim_lines.swap(kernel_->world.out.hud_chat_lines);
 	if (!runtime_) return;
+	for (const opennova::world::HudChatLine &line : sim_lines) {
+		// A keyless line posts its text; a keyed one its key's text, its $A the line's text
+		// when it carries one (engine world::HudChatLine carries the witness).
+		std::string text = line.text;
+		if (*line.key != '\0') {
+			text = opennova::hud::game_text(p_gametext, line.section, line.key, "");
+			if (!line.text.empty())
+				text = opennova::hud::chat_format_player_tokens(text, line.text.c_str());
+		}
+		r_posts.push_back({runtime_->view().claim_feed_order(),
+				line.system_ring ? opennova::hud::ChatSink::System : opennova::hud::ChatSink::Chat,
+				line.argb, std::move(text), false});
+	}
 	opennova::replication::ClientState &cs = runtime_->state();
 	const uint16_t self_handle =
 			runtime_->has_self_handle() ? runtime_->self_handle() : 0xFFFF;

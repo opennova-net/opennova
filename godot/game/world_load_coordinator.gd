@@ -78,12 +78,17 @@ func finish_presentation() -> void:
 	dismiss()
 
 
-## Present the final checkpoint only at the shell's reveal/transition edge.
-## GameWorld stops at WORLD_READY so a joiner waiting for authoritative
-## admission never claims to be complete.
+## Present the final checkpoint at the shell's reveal/transition edge, which a
+## single player's or a host's load reaches inside its own call. A joiner's
+## mission start presented 100 itself, past its second 0x2F and ahead of its
+## 0x0B and the final wait (engine inmatch::ClientRuntime::push_mission_start_end
+## carries the witness, D-NET-NEW-L8-41): its admission's reveal presents
+## nothing more.
 func complete_progress() -> bool:
 	if _screen == null or not _presentation_active:
 		return false
+	if _screen.displayed_progress() == MissionData.LOAD_PROGRESS_COMPLETE:
+		return true
 	_screen.set_progress(MissionData.LOAD_PROGRESS_COMPLETE)
 	_screen.present(true)
 	return true
@@ -109,6 +114,8 @@ func dismiss() -> void:
 	if _world != null:
 		if _world.load_progress.is_connected(_on_load_progress):
 			_world.load_progress.disconnect(_on_load_progress)
+		if _world.load_present_stored.is_connected(_on_load_present_stored):
+			_world.load_present_stored.disconnect(_on_load_present_stored)
 		if _world.join_session_identified.is_connected(_on_join_session_identified):
 			_world.join_session_identified.disconnect(_on_join_session_identified)
 	if _screen != null:
@@ -272,6 +279,8 @@ func _show_screen(load_info: LoadingScreenInfo) -> void:
 	_screen.setup(_root, load_info)
 	if not _world.load_progress.is_connected(_on_load_progress):
 		_world.load_progress.connect(_on_load_progress)
+	if not _world.load_present_stored.is_connected(_on_load_present_stored):
+		_world.load_present_stored.connect(_on_load_present_stored)
 	if not _world.join_session_identified.is_connected(_on_join_session_identified):
 		_world.join_session_identified.connect(_on_join_session_identified)
 
@@ -287,4 +296,11 @@ func _on_join_session_identified(info: LoadingScreenInfo) -> void:
 func _on_load_progress(percent: int) -> void:
 	if _screen != null:
 		_screen.set_progress(percent)
+		_screen.present()
+
+
+# A loader's present at the checkpoint the screen stored last: its due rule decides whether it
+# draws (engine runtime/hud/loading_screen.h carries the witness).
+func _on_load_present_stored() -> void:
+	if _screen != null:
 		_screen.present()

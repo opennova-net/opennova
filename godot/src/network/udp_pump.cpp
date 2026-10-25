@@ -3,6 +3,7 @@
 #include "network/udp_pump_datagram_socket.h"
 #include "util/string_convert.h"
 
+#include <net/novaworld/lobby_vars.h> // in_addr_text
 #include <net/npwire/net_ports.h> // lan_client_bind_ports
 
 #include <godot_cpp/classes/ip.hpp>
@@ -51,7 +52,18 @@ uint32_t ipv4_from_string(const String &ip) {
 	return out;
 }
 
+// The claiming pump whose socket opened last, while it stays open (UdpPump::process_transport).
+UdpPump *g_process_transport = nullptr;
+
 } // namespace
+
+UdpPump *UdpPump::process_transport() {
+	return g_process_transport;
+}
+
+bool UdpPump::is_process_transport() const {
+	return g_process_transport == this;
+}
 
 UdpPump::UdpPump() {}
 UdpPump::~UdpPump() { close(); }
@@ -81,14 +93,20 @@ void UdpPump::record_(bool inbound, const String &peer_ip, int peer_port,
 }
 
 int UdpPump::bind_listen(int port) {
+	return bind_listen_at(port, 0u);
+}
+
+int UdpPump::bind_listen_at(int port, uint32_t address) {
 	close();
 	socket_.instantiate();
-	const Error err = socket_->bind(port, "0.0.0.0");
+	const Error err = socket_->bind(port, opennova::to_gd(opennova::in_addr_text(address)));
 	if (err != OK) {
 		socket_.unref();
 		return static_cast<int>(err);
 	}
 	local_port_ = static_cast<int>(socket_->get_local_port());
+	bound_address_ = address;
+	if (claims_process_transport_) g_process_transport = this;
 	capture_ = opennova::net::PcapUdpWriter::from_path(
 			opennova::to_std(capture_path_));
 	if (capture_ != nullptr) {
@@ -98,18 +116,20 @@ int UdpPump::bind_listen(int port) {
 	return static_cast<int>(OK);
 }
 
-int UdpPump::dial(const String &host, int port) {
+int UdpPump::bind_client() {
 	close();
-	const String resolved_host = IP::get_singleton()->resolve_hostname(host, IP::TYPE_IPV4);
-	if (resolved_host.is_empty()) return static_cast<int>(ERR_CANT_RESOLVE);
-
 	socket_.instantiate();
-	// The client arm of the socket open scans the authored client port range
-	// from its min, as retail's does; every bind failing leaves no transport
-	// (net_ports.h lan_client_bind_ports, D-NET-294).
+	// The client arm of the socket open scans the cfg block's client quad from the
+	// start its random word draws, on the block's address, as retail's does; every
+	// bind failing leaves no transport (engine: inmatch::transport_bind_ports,
+	// D-NET-NEW-L8-10; without a block the shipped quad, net_ports.h
+	// lan_client_bind_ports, D-NET-294).
+	const std::vector<uint16_t> ports = client_bind_scan_set_ ? client_bind_ports_
+	                                                          : opennova::lan_client_bind_ports();
+	const String address = opennova::to_gd(opennova::in_addr_text(client_bind_address_));
 	Error err = ERR_CANT_OPEN;
-	for (const uint16_t candidate : opennova::lan_client_bind_ports()) {
-		err = socket_->bind(candidate, "0.0.0.0");
+	for (const uint16_t candidate : ports) {
+		err = socket_->bind(candidate, address);
 		if (err == OK) break;
 	}
 	if (err != OK) {
@@ -117,13 +137,28 @@ int UdpPump::dial(const String &host, int port) {
 		return static_cast<int>(err);
 	}
 	local_port_ = static_cast<int>(socket_->get_local_port());
+	bound_address_ = client_bind_address_;
+	if (claims_process_transport_) g_process_transport = this;
+	capture_ = opennova::net::PcapUdpWriter::from_path(
+			opennova::to_std(capture_path_));
+	return static_cast<int>(OK);
+}
+
+void UdpPump::set_broadcast_enabled(bool p_enabled) {
+	if (socket_.is_valid()) socket_->set_broadcast_enabled(p_enabled);
+}
+
+int UdpPump::dial(const String &host, int port) {
+	close();
+	const String resolved_host = IP::get_singleton()->resolve_hostname(host, IP::TYPE_IPV4);
+	if (resolved_host.is_empty()) return static_cast<int>(ERR_CANT_RESOLVE);
+	const int bound = bind_client();
+	if (bound != static_cast<int>(OK)) return bound;
 	// Retain a numeric endpoint: packet sources are reported numerically, so
 	// names such as "localhost" can be compared when poll() admits packets.
 	dest_ip_ = resolved_host;
 	dest_port_ = port;
 	socket_->set_dest_address(dest_ip_, port);
-	capture_ = opennova::net::PcapUdpWriter::from_path(
-			opennova::to_std(capture_path_));
 	if (capture_ != nullptr) {
 		print_verbose(String("UdpPump: recording joiner traffic to ") +
 				dest_ip_ + ":" + itos(dest_port_));
@@ -137,7 +172,9 @@ void UdpPump::close() {
 	capture_.reset();
 	if (socket_.is_valid()) socket_->close();
 	socket_.unref();
+	if (g_process_transport == this) g_process_transport = nullptr;
 	local_port_ = 0;
+	bound_address_ = 0;
 	dest_ip_ = String();
 	dest_port_ = 0;
 	inbound_.clear();
@@ -219,7 +256,10 @@ int UdpPump::send_to_host(const PackedByteArray &bytes) {
 void UdpPump::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("bind_listen", "port"), &UdpPump::bind_listen);
 	ClassDB::bind_method(D_METHOD("dial", "host", "port"), &UdpPump::dial);
+	ClassDB::bind_method(D_METHOD("bind_client"), &UdpPump::bind_client);
+	ClassDB::bind_method(D_METHOD("set_broadcast_enabled", "enabled"), &UdpPump::set_broadcast_enabled);
 	ClassDB::bind_method(D_METHOD("is_open"), &UdpPump::is_open);
+	ClassDB::bind_method(D_METHOD("is_process_transport"), &UdpPump::is_process_transport);
 	ClassDB::bind_method(D_METHOD("local_port"), &UdpPump::local_port);
 	ClassDB::bind_method(D_METHOD("close"), &UdpPump::close);
 	ClassDB::bind_method(D_METHOD("poll"), &UdpPump::poll);

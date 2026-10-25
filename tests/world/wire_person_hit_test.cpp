@@ -186,6 +186,53 @@ void test_player_shooter_and_berserk_unprotect() {
     }
 }
 
+// A person whose update ran after the table was built (D-NET-196): the
+// trace's broad phase reads the table's copy, its bone walk (here the torso
+// stand-in) the live person. A copy off the round's path is passed over however
+// close the live person stands; a copy on the path whose live person moved off
+// it is missed by the narrow walk.
+// [orig: Physics_RaycastAgainstProximityList @0x4E4A30 (the coarse gate on
+//  g_PersonProxY/X/Z @0x4E4AB4..0x4E4C26, g_PersonProxEntity @0x4E4C2C into
+//  Physics_RaycastAgainstBoneSections, the call @0x4E4C59)]
+void test_trace_gates_on_the_copy_and_walks_the_live_person() {
+    {
+        // The copy 20 u off the path, the live person on it.
+        Joiner j(/*self_team=*/1);
+        j.remote(/*team=*/2);
+        WirePersonCollisionProxy proxy;
+        proxy.wire_handle = kRemoteH;
+        proxy.position_q16 = FixedVec3{5 * kQ, 20 * kQ, 0};
+        j.collision.replace_wire_collision_proxies({proxy}, {}, kSelfH);
+        j.collision.build_tick_tables(j.world);
+        j.collision.set_wire_person_proxy_live(kRemoteH, FixedVec3{5 * kQ, 0, 0},
+                                               /*dead=*/false, /*live_flags=*/0);
+        j.fire();
+        CHECK(!j.world.round_sim.hit_record.has_round);
+        CHECK(j.rows[kRemoteH].last_attacker == 0xFFFF);
+    }
+    {
+        // The copy on the path, the live person moved 20 u off it.
+        Joiner j(/*self_team=*/1);
+        j.remote(/*team=*/2);
+        j.collision.set_wire_person_proxy_live(kRemoteH, FixedVec3{5 * kQ, 20 * kQ, 0},
+                                               /*dead=*/false, /*live_flags=*/0);
+        j.fire();
+        CHECK(!j.world.round_sim.hit_record.has_round);
+        CHECK(j.rows[kRemoteH].last_attacker == 0xFFFF);
+    }
+    {
+        // Both on the path: the hit lands, as the first case's live person
+        // would if its copy were.
+        Joiner j(/*self_team=*/1);
+        j.remote(/*team=*/2);
+        j.collision.set_wire_person_proxy_live(kRemoteH, FixedVec3{5 * kQ, 0, 0},
+                                               /*dead=*/false, /*live_flags=*/0);
+        j.fire();
+        CHECK(j.world.round_sim.hit_record.has_round);
+        CHECK(j.rows[kRemoteH].last_attacker == kSelfH);
+    }
+}
+
 // The EWEAP def skips the stamp, not the record [orig: @0x4E81E3..0x4E81E7];
 // a row without a def returns at the pass's head [orig: @0x4E7FCB]; a zeroed
 // NoDie body records the clamp's -1 [orig: @0x4E8059..0x4E8076].
@@ -605,6 +652,7 @@ const NamedTest kTests[] = {
     {"test_plyr_callback_round_legs_and_restage", test_plyr_callback_round_legs_and_restage},
     {"test_plyr_callback_dead_return", test_plyr_callback_dead_return},
     {"test_plyr_callback_without_the_player_bit_alerts", test_plyr_callback_without_the_player_bit_alerts},
+    {"test_trace_gates_on_the_copy_and_walks_the_live_person", test_trace_gates_on_the_copy_and_walks_the_live_person},
 };
 
 } // namespace

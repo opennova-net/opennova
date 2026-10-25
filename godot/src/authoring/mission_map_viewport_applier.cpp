@@ -342,7 +342,7 @@ void MissionMapViewportApplier::draw_tiles_(const opennova::editor::MissionMapVi
 		tile_set_.unref();
 		tile_set_width_ = tile_set_height_ = 0;
 		opennova::terrain::Rgba8Image texels;
-		if (terrain_data_.is_valid() && texture_to_rgba8(terrain_data_->get_tilestrip_tex(), texels)) {
+		if (terrain_data_.is_valid() && terrain_data_->texture_rgba8(terrain_data_->get_tilestrip_tex(), texels)) {
 			opennova::editor::mission_map_tile_texels(texels.pixels);
 			PackedByteArray bytes;
 			bytes.resize(int64_t(texels.pixels.size()));

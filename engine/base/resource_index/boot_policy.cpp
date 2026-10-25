@@ -8,6 +8,7 @@
 #include <base/vfs/vfs.h>
 #include <formats/update/update_wizard.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdlib>
 
@@ -40,8 +41,8 @@ std::string value_after(const std::vector<std::string> &args, const char *flag) 
 // /UDPNOVAWORLD 1.2.3.4` reads "/UDPNOVAWORLD" as the junction word, atol 0, and keeps no
 // entry), and the walk goes on past it. Each value is the token as it stands (no trim); the last
 // one stands, the /UDPNOVAWORLD entries keeping the first six to 31 characters, a seventh's token
-// stepped over all the same. /GLSVSSRIMS and /GLSVSSAGRMS step over their values here, which
-// nothing keeps (D-NET-707). The switches outside this block keep the shared walk (D-GAMECFG-7).
+// stepped over all the same. /GLSVSSRIMS and /GLSVSSAGRMS keep the atol of theirs (D-NET-707).
+// The switches outside this block keep the shared walk (D-GAMECFG-7).
 // [orig: Game_ParseCommandLineAndInit @0x4a7310 - "/UDPNOVAWORLD" @0x4A74F1 (the next token
 //  @0x4A7503..0x4A750C, the count test @0x4A750E..0x4A7516, Napi_CopyString(.., 0x20)
 //  @0x4A751C..0x4A7528, the position reloaded @0x4A7536), "/GLSVSSRIMS" @0x4A753A,
@@ -57,12 +58,38 @@ void parse_novaworld_switches(const std::vector<std::string> &args, LaunchFlags 
         };
         if (takes(kLaunchFlagUdpNovaWorld) && f.udp_novaworld.size() < kLaunchUdpNovaWorldMax)
             f.udp_novaworld.push_back(args[i].substr(0, kLaunchUdpNovaWorldChars));
-        takes("/GLSVSSRIMS");
-        takes("/GLSVSSAGRMS");
+        if (takes(kLaunchFlagGlsvssRims)) f.glsvss_rims = io::retail_atol(args[i].c_str());
+        if (takes(kLaunchFlagGlsvssAgrms)) f.glsvss_agrms = io::retail_atol(args[i].c_str());
         if (takes(kLaunchFlagPostIpAddress)) f.post_ip_address = args[i];
         if (takes(kLaunchFlagPostPortNumber)) f.post_port_number = io::retail_atol(args[i].c_str());
         if (takes(kLaunchFlagUseJunction)) f.use_junction = io::retail_atol(args[i].c_str());
         if (takes(kLaunchFlagClearJunction)) f.clear_junction = io::retail_atol(args[i].c_str());
+    }
+}
+
+// The server log switches in the game's walk order: /INOUT, then /PROFILE, which steps onto its
+// value token, then /CHEATLOG, /PUNT.TXT, /PUNTLOG and /NETLOG, tested against that token when
+// /PROFILE took one, as every later test of the walk's iteration is.
+// [orig: Game_ParseCommandLineAndInit @0x4a7310 - "/INOUT" @0x4a743d; "/PROFILE" @0x4a778f,
+//  the step `add edi, ebx` @0x4a77a1 and the copy into g_ProfileLogPath @0x4a77a7..0x4a77b9,
+//  g_RunningWithProfile @0x4a77bb; "/CHEATLOG" @0x4a77fc; "/PUNT.TXT" @0x4a782d; "/PUNTLOG"
+//  @0x4a7863; "/NETLOG" @0x4a7a11]
+void parse_log_switches(const std::vector<std::string> &args, LaunchFlags &f) {
+    LogSwitches &s = f.log_switches;
+    for (std::size_t i = 0; i < args.size(); ++i) {
+        if (strutil::iequals(args[i], kLaunchFlagInout)) s.inout = true;
+        // [orig: "/CONNECTLOG" @0x4A74A3 -> 1 @0x4A74AF, else "/NOCONNECTLOG" @0x4A74BD -> 0
+        //  @0x4A74C9, ahead of /PROFILE's step]
+        if (strutil::iequals(args[i], kLaunchFlagConnectLog)) s.connect_log = true;
+        else if (strutil::iequals(args[i], kLaunchFlagNoConnectLog)) s.connect_log = false;
+        if (strutil::iequals(args[i], kLaunchFlagProfile) && i + 1 < args.size()) {
+            ++i;
+            s.profile_path = args[i];
+        }
+        if (strutil::iequals(args[i], kLaunchFlagCheatLog)) s.cheat_log = true;
+        if (strutil::iequals(args[i], kLaunchFlagPuntTxt)) s.punt_log = true;
+        if (strutil::iequals(args[i], kLaunchFlagPuntLog)) s.punt_log = true;
+        if (strutil::iequals(args[i], kLaunchFlagNetLog)) s.net_log = true;
     }
 }
 
@@ -120,6 +147,12 @@ LaunchFlags parse_launch_flags(const std::vector<std::string> &args) {
     f.loose_root = has_flag(args, kLaunchFlagLooseRoot);
     f.mission = value_after(args, kLaunchFlagMission);
     f.lan_host = value_after(args, kLaunchFlagLanHost);
+    const std::string rotation = value_after(args, kLaunchFlagLanRotation);
+    for (std::size_t at = 0; at <= rotation.size();) {
+        const std::size_t comma = std::min(rotation.find(',', at), rotation.size());
+        if (comma > at) f.lan_rotation.push_back(rotation.substr(at, comma - at));
+        at = comma + 1;
+    }
     f.lan_join = value_after(args, kLaunchFlagLanJoin);
     f.lan_port = int_after(args, kLaunchFlagLanPort, 1, 65535, 0);
     f.lan_gametype = int_after(args, kLaunchFlagLanGametype, 0, 0x7fffffffL, -1);
@@ -135,8 +168,49 @@ LaunchFlags parse_launch_flags(const std::vector<std::string> &args) {
     f.no_hud = has_flag(args, kLaunchFlagNoHud); // [orig: @0x4A79F6..0x4A7A09]
     f.no_reload = has_flag(args, kLaunchFlagNoReload); // [orig: @0x4A76D7..0x4A76E9]
     f.lan = has_flag(args, kLaunchFlagLan); // [orig: @0x4A74D9..0x4A74EB]
+    f.screenshot_tga = has_flag(args, kLaunchFlagScreenshotTga); // [orig: @0x4A77C1..0x4A77D3]
     parse_novaworld_switches(args, f);
+    parse_log_switches(args, f);
     return f;
+}
+
+int parse_log_switch(const std::vector<std::string> &args, std::size_t i, LogSwitches &out,
+        std::string &error) {
+    const std::string &a = args[i];
+    if (strutil::iequals(a, kLaunchFlagProfile)) {
+        if (i + 1 >= args.size()) {
+            error = a + " needs a value";
+            return -1;
+        }
+        out.profile_path = args[i + 1];
+        return 2;
+    }
+    if (strutil::iequals(a, kLaunchFlagPuntTxt) || strutil::iequals(a, kLaunchFlagPuntLog)) {
+        out.punt_log = true;
+        return 1;
+    }
+    if (strutil::iequals(a, kLaunchFlagCheatLog)) {
+        out.cheat_log = true;
+        return 1;
+    }
+    if (strutil::iequals(a, kLaunchFlagNetLog)) {
+        out.net_log = true;
+        return 1;
+    }
+    if (strutil::iequals(a, kLaunchFlagInout)) {
+        out.inout = true;
+        return 1;
+    }
+    // [orig: _stricmp(token, "/CONNECTLOG") @0x4A74A3, "/NOCONNECTLOG" @0x4A74BD]
+    if (strutil::iequals(a, kLaunchFlagConnectLog)) {
+        out.connect_log = true;
+        return 1;
+    }
+    if (strutil::iequals(a, kLaunchFlagNoConnectLog)) {
+        out.connect_log = false;
+        return 1;
+    }
+    return 0;
 }
 
 int launch_lan_port(const LaunchFlags &flags, int fallback) {
@@ -157,11 +231,12 @@ LanEndpoint launch_lan_join_endpoint(const LaunchFlags &flags, int default_port)
     const std::string &target = flags.lan_join;
     if (target.empty()) return endpoint;
     const std::size_t colon = target.find(':');
-    if (colon == std::string::npos) {
-        endpoint.ip = strutil::trim(target);
-        return endpoint;
+    endpoint.ip = strutil::trim(colon == std::string::npos ? target : target.substr(0, colon));
+    if (strutil::iequals(endpoint.ip, "browse")) {
+        endpoint.browse = true;
+        endpoint.ip.clear();
     }
-    endpoint.ip = strutil::trim(target.substr(0, colon));
+    if (colon == std::string::npos) return endpoint;
     const long port = parse_long(strutil::trim(target.substr(colon + 1)), 0);
     if (port >= 1 && port <= 65535) endpoint.port = static_cast<int>(port);
     return endpoint;

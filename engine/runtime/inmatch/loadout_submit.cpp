@@ -1,5 +1,6 @@
 #include <runtime/inmatch/loadout_submit.h>
 
+#include <net/title/title_identity.h> // DFX2-12, the sender's fixed class
 #include <runtime/world/weapon_table.h>
 
 #include <vector>
@@ -19,7 +20,7 @@ std::vector<LoadoutSubmitEntry> resolve_side(const world::World &world,
 	if (p == nullptr) return rows;
 	for (const playersav::KitEntry &entry : p->entries) {
 		const int adm = world.tables.weapons.index_of(entry.name.c_str());
-		if (adm < 0) continue; // [orig: the AvatarDef_FindByName gate @0x42cf0b]
+		if (adm < 0) continue; // [orig: the AdmDef_FindByName gate @0x42cf0b]
 		rows.push_back(LoadoutSubmitEntry{
 				static_cast<uint8_t>(adm),
 				static_cast<uint8_t>(entry.ammo_primary),
@@ -41,6 +42,11 @@ bool seed_session_kit_from_profile(world::World &world,
 		const playersav::Record &profile, uint8_t assigned_team,
 		world::LocalPlayerLoadout &loadout, int &seeded_side) {
 	if (world.tables.weapons.empty()) return false;
+	// A session PEER copies its side's page; a dedicated host is no peer and copies nothing,
+	// so a Serve Only row keeps the process buffer as it stands (D-NET-143, D-NET-352)
+	// [orig: Game_StartMission @0x524360 - `cmp is_in_session` @0x525767,
+	//  `cmp is_mp_session_peer` @0x525773 / jz @0x525779 past the copy call @0x525818].
+	if (!world.rules.mp_session_peer) return false;
 	const uint8_t team = loadout_side_team(world, assigned_team);
 	// An UNLATCHED team must not commit a page. The side selector is the S2C 0x04 tail
 	// byte [orig: g_LocalTeam @0x425499], and retail cannot reach this copy before it is
@@ -55,15 +61,38 @@ bool seed_session_kit_from_profile(world::World &world,
 	uint8_t player_class = side.player_class;
 	if (player_class < 5 || player_class > 9) player_class = 8;
 	const playersav::KitPage *page = side.page_for_class(player_class);
-	if (page == nullptr || page->entries.empty()) return false;
+	if (page == nullptr) return false;
+	// An empty page copies empty: the copy stores the page's terminator [orig:
+	// Buffer_CopyUntilDoubleNull @0x562F30, called @0x525818].
 	std::vector<world::WeaponKitEntry> kit;
 	kit.reserve(page->entries.size());
 	for (const playersav::KitEntry &e : page->entries)
 		kit.push_back(world::WeaponKitEntry{e.name, e.ammo_primary,
 		                                    e.ammo_secondary, e.flags});
-	loadout.spawn_kit = std::move(kit);
-	loadout.spawn_kit_set = true;
+	loadout.spawn_kit() = std::move(kit);
 	seeded_side = static_cast<int>(playersav::side_for_team(team));
+	return true;
+}
+
+bool seed_single_player_kit_from_profile(world::World &world,
+		const playersav::Record *profile, world::LocalPlayerLoadout &loadout) {
+	if (world.rules.mp_session || loadout.mission_kit_promoted) return false;
+	// The page's first byte: the page is a double-NUL list of strings whose first is the
+	// first entry's name, so a zero first byte (an empty first name, an empty page) is the
+	// copy's static-page arm [orig: Game_StartMission @0x524360 (`cmp byte_256113C[eax], bl;
+	//  jz` @0x5246A8..0x5246B9, the static page @0x5246BE); Game_ApplySessionSettingsToGlobals
+	//  @0x551500 (@0x5519C3..0x5519D5, the static page @0x5519DA, the copy @0x5519E4)].
+	if (profile == nullptr || profile->single_player.entries.empty() ||
+			profile->single_player.entries.front().name.empty()) {
+		loadout.spawn_kit() = world::weapon_kit_default(world.rules.title);
+		return true;
+	}
+	const playersav::KitPage &page = profile->single_player;
+	std::vector<world::WeaponKitEntry> kit;
+	kit.reserve(page.entries.size());
+	for (const playersav::KitEntry &e : page.entries)
+		kit.push_back(world::WeaponKitEntry{e.name, e.ammo_primary, e.ammo_secondary, e.flags});
+	loadout.spawn_kit() = std::move(kit);
 	return true;
 }
 
@@ -76,6 +105,23 @@ bool reseed_session_kit_on_side_change(world::World &world,
 		return false;
 	return seed_session_kit_from_profile(
 			world, profile, assigned_team, loadout, seeded_side);
+}
+
+bool reseed_session_kit_on_team_assign(const playersav::Record &profile, uint8_t team,
+		world::LocalPlayerLoadout &loadout, int &seeded_side) {
+	// [orig: NapiNPClientMsg_TeamAssign @0x431910 - @0x431A27..0x431A9A; the declaration
+	//  carries the legs]
+	const playersav::SideId side_id = playersav::side_for_team(team);
+	const playersav::Side &side = profile.side(side_id);
+	const playersav::KitPage *page = side.page_for_class(side.player_class);
+	if (page == nullptr) return false;
+	std::vector<world::WeaponKitEntry> kit;
+	kit.reserve(page->entries.size());
+	for (const playersav::KitEntry &e : page->entries)
+		kit.push_back(world::WeaponKitEntry{e.name, e.ammo_primary, e.ammo_secondary, e.flags});
+	loadout.spawn_kit() = std::move(kit);
+	seeded_side = static_cast<int>(side_id);
+	return true;
 }
 
 int32_t resolve_loadout_submit_combo(const world::WeaponTable &weapons,
@@ -109,9 +155,55 @@ int32_t resolve_loadout_submit_combo(const world::WeaponTable &weapons,
 	return requested_combo;
 }
 
+LoadoutSubmit armory_accept_in_session(world::World &world, world::LocalPlayer &local,
+		const std::vector<world::WeaponKitEntry> &kit, uint8_t armory_class, bool authority,
+		bms::MissionType mission_type) {
+	// The whole selection, unfiltered, on both legs, into the process's loadout name list
+	// (g_LoadoutWeaponNameList, whose first name every body the process spawns takes), not the
+	// spawn buffer: g_SpawnLoadoutBuffer (LocalPlayerLoadout::spawn_kit()) keeps its rows until the host's list reaches it (a joiner's 0x5A apply copies the rebuilt
+	// list over it, a listen host's own list send its slot's buffer) [orig: the rep movsd into
+	// g_LoadoutWeaponNameList @0x565D46..0x565D4B; NapiNPClientMsg_HandleWeaponLoadoutSync
+	// @0x4293D1..0x4293E9; Server_SendWeaponSlotListToPlayer @0x502617..0x502627].
+	if (world.loadout_weapon_names != nullptr) {
+		world.loadout_weapon_names->entries = kit;
+		world.loadout_weapon_names->set = true;
+	}
+	const world::WeaponInventory *inventory = local.inventory_valid ? &local.inventory : nullptr;
+	// The current slot word, not the EquippedSlot: 195 from Player_InitPlayer until a walk,
+	// a cycle, an equip or a 0x5A apply stores a slot, whatever the select found
+	// [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (g_CurrentWeaponSlot @0x565D73)].
+	const int32_t current_slot = local.inventory.current_slot;
+	// The slot pool's entries alone, off the authority alone: the current slot word
+	// stays for the 0x2F and its readers until the 0x5A's select.
+	// [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (the call @0x565D66) ->
+	//  WeaponSlotPool_ResetAllEntries @0x53F240]
+	if (!authority) local.inventory.reset_slot_entries();
+	LoadoutSubmit submit;
+	const world::Entity *body = world.registry.get(world.cached.local_player);
+	submit.team = body != nullptr ? body->team : uint8_t{0};
+	submit.player_class = armory_class;
+	// DFX2's sender: 8 (rifleman), or 7 (gunner) in a mission of type 2, whatever the class
+	// [orig: dfx2.exe NetPacket_SendLoadoutSubmit @0x42EB40 (@0x42EC15..0x42EC3E)].
+	if (title_in_match(title_identity(world.rules.title)).loadout_class_fixed)
+		submit.player_class = mission_type == bms::MissionType::CombatVehicleMission
+				? uint8_t{7}
+				: uint8_t{8};
+	submit.weapon_slot_index = static_cast<uint32_t>(
+			resolve_loadout_submit_combo(world.tables.weapons, inventory, submit.team, current_slot));
+	for (const world::WeaponKitEntry &entry : kit) {
+		const int adm = world.tables.weapons.index_of(entry.name.c_str());
+		if (adm < 0) continue; // [orig: the AdmDef_FindByName gate @0x42cf0b]
+		submit.entries.push_back(LoadoutSubmitEntry{static_cast<uint8_t>(adm),
+				static_cast<uint8_t>(entry.ammo_primary),
+				static_cast<uint8_t>(entry.ammo_secondary),
+				static_cast<uint8_t>(entry.flags)});
+	}
+	return submit;
+}
+
 void build_joiner_loadout_kit(const world::World &world,
 		const playersav::Record &profile, uint8_t assigned_team,
-		const world::LocalPlayerLoadout &loadout, int equipped_combo,
+		const world::LocalPlayerLoadout &loadout, int current_slot,
 		const world::WeaponInventory *inventory,
 		JoinerConnection::LoadoutKit &out) {
 	// The side selector. The host's S2C 0x04 tail byte is retail's g_LocalTeam, and
@@ -133,31 +225,32 @@ void build_joiner_loadout_kit(const world::World &world,
 	uint8_t player_class = side.player_class;
 	if (player_class < 5 || player_class > 9) player_class = 8;
 	out.player_class = player_class;
-	// The pair's SECOND submit carries the live equipped slot instead of the fixed 195.
-	// The sender re-resolves that slot against the populated local pool and the
-	// assigned side; the pre-Player_InitPlayer first submit and team-change submit
-	// retain their separate raw-195 paths because they never consume this field
-	// [orig: Game_StartMission @0x525c2e; NetPacket_SendLoadoutSubmit
-	// @0x42ce2d..0x42ce8b].
+	// The pair's SECOND submit carries the current slot word instead of the fixed 195:
+	// 195 again after a spawn whose select missed that slot, a stored slot after a walk,
+	// a cycle, an equip or a 0x5A apply. The sender re-resolves it against the populated
+	// local pool and the assigned side; the pre-Player_InitPlayer first submit and
+	// team-change submit retain their separate raw-195 paths because they never consume
+	// this field [orig: Game_StartMission @0x525c2e (g_CurrentWeaponSlot @0x525C1A);
+	// NetPacket_SendLoadoutSubmit @0x42ce2d..0x42ce8b].
 	out.equipped_combo = resolve_loadout_submit_combo(
-			world.tables.weapons, inventory, team, equipped_combo);
+			world.tables.weapons, inventory, team, current_slot);
 	// The RESIDENT rows are the resident kit buffer, not a fresh read of the profile
-	// page. Retail has exactly ONE buffer: Game_StartMission copies the profile page
-	// into restrictionData, Player_InitPlayer builds the local display list from that
-	// same restrictionData, and NetPacket_SendLoadoutSubmit serializes it — so what we
-	// hold locally and what we tell the host are the same bytes by construction. An
-	// in-session armory ACCEPT overwrites restrictionData and its re-send therefore
-	// carries the ACCEPTED kit [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 ->
-	// @0x565d94], which reading the profile back here would silently undo.
-	// `loadout.spawn_kit` is our restrictionData; `seed_session_kit_from_profile` is
+	// page: Game_StartMission copies the profile page into restrictionData
+	// (g_SpawnLoadoutBuffer), Player_InitPlayer builds the local display list from it,
+	// and every submit but the ACCEPT's serializes it (the mission start's pair, the
+	// team assign's resubmit). The in-session ACCEPT sends its own class buffer and
+	// writes the loadout name list, not restrictionData, so a resubmit between an ACCEPT
+	// and the host's list carries the pre-ACCEPT rows; the list's apply copies the grant
+	// over it [orig: NetPacket_SendLoadoutSubmit's restrictionData argument: g_SpawnLoadoutBuffer
+	// @0x52582F / @0x525C24 / @0x431AA3, the ACCEPT's class buffer @0x565D7F..0x565D85;
+	// WeaponLoadout_ApplyFromBuffer @0x565D46; NapiNPClientMsg_HandleWeaponLoadoutSync
+	// @0x4293D1..0x4293E9]. `loadout.spawn_kit()` is our restrictionData, read as it stands
+	// (empty in a fresh process until a writer fills it); `seed_session_kit_from_profile` is
 	// the Game_StartMission copy that fills it.
 	{
-		const std::vector<world::WeaponKitEntry> &resident =
-				loadout.spawn_kit_set ? loadout.spawn_kit
-				                      : world::weapon_kit_default(world.rules.title);
-		for (const world::WeaponKitEntry &entry : resident) {
+		for (const world::WeaponKitEntry &entry : loadout.spawn_kit()) {
 			const int adm = world.tables.weapons.index_of(entry.name.c_str());
-			if (adm < 0) continue; // [orig: the AvatarDef_FindByName gate @0x42cf0b]
+			if (adm < 0) continue; // [orig: the AdmDef_FindByName gate @0x42cf0b]
 			out.rows.push_back(LoadoutSubmitEntry{
 					static_cast<uint8_t>(adm),
 					static_cast<uint8_t>(entry.ammo_primary),
@@ -200,6 +293,13 @@ void kit_from_authoritative_grant(const world::WeaponTable &weapons,
 				static_cast<int8_t>(slot.ammo_alt));
 		r_kit.push_back(std::move(entry));
 	}
+}
+
+void apply_weapon_loadout_name_list(world::World &world, const WeaponLoadout &list) {
+	if (world.loadout_weapon_names == nullptr) return;
+	world::LoadoutWeaponNameList &names = *world.loadout_weapon_names;
+	kit_from_authoritative_grant(world.tables.weapons, list, names.entries);
+	names.set = true;
 }
 
 } // namespace opennova::inmatch

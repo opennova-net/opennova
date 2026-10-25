@@ -126,7 +126,11 @@ static func _eweap(name: String, id: int, graphic: String, weapon: String, attri
 ## script commands', the proximity-slice build) [orig:
 ## Entity_IsLocalPlayerOnGunOfSsn @0x4f11e0 head;
 ## Entity_BuildProximityListsFromPools @0x4B8EF9..0x4B8F00]. None of their ids
-## is one of the pack's, so the order shadows nothing.
+## is one of the pack's, so the order shadows nothing. Each drivable row carries
+## its shipped row's AIData word: with its brain-class ai_function, that is what
+## gives the hull its brain, and a brainless hull's mover jumps from its stamp to
+## its matrix-build tail [orig: Entity_UpdateVehiclePhysics @0x48AF1A / @0x48AFA6;
+## Vehicle_ProcessSelectorZeroBoat @0x46FA19 / @0x46FA64].
 static func items_text() -> String:
 	var text := """begin "Drivable M1A1 Tank"
   id 100164
@@ -339,7 +343,7 @@ begin "Drivable Attack Vehicle with 50cal"
   torque 5
   minai 1
   render_function cveh
-  attrib: PlayerControl
+  attrib: AIData PlayerControl
   unit_type 1
   addeweap ewep01 101892 17 48 180 180
 end
@@ -375,6 +379,7 @@ begin "Drivable Mark V"
   type vehicle
   unit_type 7
   graphic gunboat
+  attrib: AIData
   ai_function cbot
   move_function cbot
   render_function cveh

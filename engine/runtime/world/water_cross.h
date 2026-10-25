@@ -18,13 +18,26 @@
 
 namespace opennova::world {
 
-// One crossing. The position is the entity's horizontal position at the WATER
-// PLANE height — retail places the effect on the surface, not at the entity's
-// own Z [orig: `dest[6] = g_EnvWaterHeightFixed` in the water block].
+// One crossing: the position triple the S2C 0x34 carries, whose three words are
+// the high halves of these 16.16 values. Each site hands the sender its own
+// triple. The infantry sites pass the body's own position at the send: the AI
+// soldier its float target, stored just ahead of the splash, the player body its
+// risen z (the dive splash, under the surface line) or its clamped one (the
+// entry splash). The vehicle contact sites pass their effect's triple: the
+// submerged pad's x and y at the water plane. Only the local effect spawn puts
+// an infantry splash on the plane, and it is not this queue's.
+// [orig: NetPacket_WriteOverlayAction @0x505D50 - the triple's high words
+//  @0x505DB7 / @0x505DCB / @0x505DE1; Entity_UpdateInfantryAI - the store
+//  @0x4BFB84, `lea eax, [esi+4]` @0x4BFC2B, the send @0x4BFC40;
+//  Entity_UpdateInfantryPlayerBody - `lea ebp, [esi+4]` @0x4B7CB7 / @0x4B7CD6,
+//  the dive send @0x4B8265..0x4B8267 on the branch that skips the clamp
+//  @0x4B817D, the entry send @0x4B82EA..0x4B82FC;
+//  Entity_ProcessVehicleSuspension - the triple
+//  @0x464AC7..0x464AD5 passed @0x464B24 / @0x464B35]
 struct WaterCrossEvent {
     int32_t x = 0; // 16.16 world
     int32_t y = 0;
-    int32_t water_z = 0;
+    int32_t z = 0;
     // Which of the two authored sounds the fan should carry. The SELECTOR is
     // witnessed and is NOT hull-vs-body: every crossing site in the original —
     // wheeled, light, tracked, platform, aircraft, the player body and the AI
@@ -51,9 +64,9 @@ struct WaterCrossQueue {
 
     std::vector<WaterCrossEvent> events;
 
-    void add(int32_t x, int32_t y, int32_t water_z, bool airborne) {
+    void add(int32_t x, int32_t y, int32_t z, bool airborne) {
         if (events.size() >= kMax) return;
-        events.push_back(WaterCrossEvent{x, y, water_z, airborne});
+        events.push_back(WaterCrossEvent{x, y, z, airborne});
     }
     void clear() { events.clear(); }
 };

@@ -21,6 +21,7 @@
 #include <runtime/world/friendly_tags.h>
 #include <runtime/world/lfp_feed.h>
 #include <runtime/world/spawn_select.h>
+#include <runtime/world/tick_accumulator.h> // FrameRateStats (the frame-rate overlay)
 #include <runtime/world/weapon_inventory.h> // WeaponSlotBarCategory
 
 #include <array>
@@ -48,6 +49,7 @@ class ClientWorldMaterializer;
 namespace opennova::inmatch {
 
 class ClientRuntime;
+class Role;
 struct NapiNPServerCtx;
 
 // What a feed reads of the running role.
@@ -70,12 +72,17 @@ struct RoleView {
 	// pick, deploy_screen_status); the in-match rules word is
 	// session_rules_word's.
 	uint32_t staged_mp_attributes = 0;
+	// The session's frame-rate window (Session::frame_rate_stats), the frame-rate overlay's
+	// four words.
+	world::TickAccumulator::FrameRateStats frame_rate;
 };
 
 // The session rules word the role's HUD gates test (g_RulesFlags, the
-// mission-data block's +0x2C dword): a joiner's S2C 0x64 fixed-block word, any
-// other role's live World::rules.mpattrib (the host config's word in a session,
-// 0x4204 out of one, as an admin SET moves it); 0 with no kernel.
+// mission-data block's +0x2C dword): the role's live World::rules.mpattrib, a
+// joiner's the S2C 0x64 fixed-block word its mission data copied
+// (JoinerRole::stamp_mission_rules), any other role's the host config's word in a
+// session (0x4204 out of one); an admin SET moves it (a joiner's until the next
+// copy); 0 with no kernel.
 // [orig: g_RulesFlags @0x24D1E34 -- HUD_DrawFriendlyTagsPass @0x5A4480,
 //  Entity_GetDisplayName @0x59BF70; the FriendlyTags SET @0x405EF6 / @0x405F05]
 uint32_t session_rules_word(const RoleView &view);
@@ -85,8 +92,10 @@ uint32_t session_rules_word(const RoleView &view);
 // [orig: g_DeathScreenActive, NapiNPClientMsg_0x00A @0x42ff88..0x43002b].
 bool local_death_screen_active(const RoleView &view);
 
-// The one role-agnostic read of the local player's dead bit: the joiner's
-// replica, the authority's entity flags (the kernel).
+// The one role-agnostic read of the local player's dead bit (entity+0x24 & 2): the
+// joiner's body latch (ClientRuntime::local_player_dead; its self record's state bit
+// never folds into the entity's flags), the authority's entity flags (the kernel). The
+// scene frame's death.mnu trigger, its HUD pass gate and its map overlay clear read it.
 bool local_player_dead(const RoleView &view);
 
 // The frame loop's two triggers for death.mnu's DEATH screen, every role's
@@ -98,6 +107,15 @@ bool local_player_dead(const RoleView &view);
 // @0x5CAC81 (g_DeployScreenActive)]
 bool death_menu_triggered(const RoleView &view);
 
+// Whether the drawn scene frame calls its HUD pass (HUD_RenderAllOverlays), past its
+// world-skip word: not when a death.mnu trigger holds (the frame takes the menu's open
+// leg) nor while the open latch is left over (the close leg); in camera mode 0 or under
+// the death screen for a body without the dead bit, the F1 help shut; in the chase view
+// (mode 1) from a control seat alone; never in any other mode. The session's radar step
+// runs on it (Session::step_hud_radar_frame). [orig: Render_ProcessMainSceneFrame
+// @0x5CAB2B..0x5CACFE, the calls @0x5CACE3 / @0x5CAD04]
+bool hud_overlays_called(const RoleView &view, bool help_open);
+
 // The deploy leg of the special-key handler over this role's facts (the
 // session bit, the mission attribute, the local player's dead bit and team
 // byte, the deploy-map overlay, the spawn-zone list's team bytes); the rule
@@ -108,14 +126,22 @@ int deploy_key_pick(const RoleView &view, const world::SpawnZoneRegistry &zones,
 // The round-over leg of the special-key handler over this role (the rule and
 // its witness are hud::hud_round_over_key): behind the round-over gate, out of
 // a session, the RESTART key takes the world's restart half
-// (World::round_over_restart) and ESC its exit (World::round_over_exit).
-// Returns the hud_round_over bits (0 before the round ends); the embedder
-// runs the RESTART arm's splash re-run when the bits carry kRestart.
-uint32_t round_over_key(const RoleView &view, int vk, int restart_vk);
+// (World::round_over_restart) and ESC its exit (World::round_over_exit); in a
+// co-op session the same two keys store their exit reasons, 4 and 1, on the
+// role's g_MissionExitReason (Role::store_mission_exit: the listen host's
+// world, a joiner's runtime), which the main frame's router reads after the
+// update (main_frame_exit: a joiner's 4 is the Game Loop, the authority's the
+// Post Menu). Returns the hud_round_over bits (0 before the round ends); the
+// embedder runs the RESTART arm's splash re-run (out of a session) and queues
+// its input event 12 when the bits carry kRestart.
+// [orig: Input_HandleSpecialKeys @0x49c5c0 - Input_QueueEvent(12) @0x49c8a3,
+//  g_MissionExitReason = 4 @0x49c8ad, = 1 @0x49c8e2; Game_ProcessMainFrame
+//  @0x526822..0x526867]
+uint32_t round_over_key(const RoleView &view, Role &role, int vk, int restart_vk);
 
 // [orig: the S2C 0x1D landing NapiNPClientMsg_0x01D @0x430840 —
-//  g_SpawnSuccessGate, g_EndRoundWinnerTeam, g_ScoreTeamScore0/1,
-//  g_EndRoundDrawFlag, dword_A81B2C = GetTickCount; the 0x56 board
+//  g_RoundOver, g_EndRoundWinnerTeam, g_ScoreTeamScore0/1,
+//  g_EndRoundDrawFlag, g_EndRoundTransitionStartMs = GetTickCount; the 0x56 board
 //  completion.] Role-agnostic: every role's view folds both lanes.
 EndRoundSessionState end_round_session_state(const RoleView &view);
 
@@ -126,7 +152,7 @@ hud::EndRoundOverlayInput end_round_overlay_input(const RoleView &view);
 // entity team and class answered by the role's own entity model — the
 // authority's pools, a joiner's decoded rows), the 0x16 team table and side
 // count, the SU gate and the timed flag off the replica, the KOTH minutes
-// (the authority's own g_TimeLimitMinutes, a joiner's session-config copy),
+// (the authority's own g_KothLimitMinutes, a joiner's session-config copy),
 // the local player's team byte, and the latched flag carrier's name and team.
 // Strings (title, labels, class names) stay the embedder's.
 // [orig: HUD_DrawKillList @0x423a30 — T @0x423a4b..0x423a5e, the local team
@@ -180,7 +206,7 @@ hud::ChatEntryFacts chat_entry_facts(const RoleView &view, bool novaworld, uint3
 // 0x0A sub-block-1 copy on a joiner; the round-over latch is the folded 0x1D
 // header. [orig: HUD_DrawBreathBar @0x59D6F0 reads word_A85B7C and
 // g_WacVarBreathTime; HUD_DrawGameplayOverlays skips it while
-// g_SpawnSuccessGate @0x5BDECA..0x5BDED1; the 0x1D latch
+// g_RoundOver @0x5BDECA..0x5BDED1; the 0x1D latch
 // NapiNPClientMsg_0x01D @0x430840]
 struct BreathBarFacts {
 	int samples = 0;
@@ -210,13 +236,34 @@ struct HudRoleFacts {
 	// [orig: HUD_DrawEmotesMenu @0x5bff00 (VMacros_BuildRemappedName(buf, i, 0xC, local)
 	//  @0x5bff9e, the title @0x5bff25..0x5bff57); HUD_DrawRadioTitleMenu
 	//  @0x5bfb90 (VMacros_BuildRemappedName(buf, i, 6, local) @0x5bfc2e, the title
-	//  @0x5bfbb5..0x5bfbe7); the dword_24C1930 & 0x10000 arms are dead: no
+	//  @0x5bfbb5..0x5bfbe7); the g_DebugCheatFlags & 0x10000 arms are dead: no
 	//  writer sets that bit]
 	hud::HudVoiceMacroMenuState emotes_menu;
 	hud::HudVoiceMacroMenuState radio_menu;
 	// The connection indicators' feed (hud/net_quality_indicators.h): the
 	// session gate, the NovaWorld icon gate and the runtime's g_NetQuality.
 	hud::HudNetQualityState net_quality;
+	// The weapon inset's friendly name: Entity_GetDisplayName of the HUD target
+	// cursor (the aim lock, else the head-look target), empty when the lookup
+	// names none (entity_display_name; D-NET-655) or the lock is a round (no pool
+	// holds one: D-NET-64). The inset draws it under
+	// its friendly brackets only when it is non-empty.
+	// [orig: Render_WeaponInsetScene -- g_HUDTargetCursorEntity @0x5CA0A4, the call
+	//  @0x5CA0AB, the null test @0x5CA0B3..0x5CA0B5; HUD_BuildEntityInfo @0x4B87ED..0x4B8825]
+	std::string inset_target_name;
+	// The frame-rate overlay: shown while the local cheat word's 0x400 bit stands
+	// (World::rules.frame_rate_overlay), over the view's frame-rate window.
+	// [orig: HUD_DrawGameplayOverlays @0x5BDE60 - `test g_DebugCheatFlags, 400h` @0x5BDEB5;
+	//  HUD_DrawFrameRateOverlay @0x5BAE20 - g_StatsCpuPercent @0x5BAE2E, g_StatsMaxFps
+	//  @0x5BAE33, g_StatsMinFps @0x5BAE39, g_StatsAvgFps @0x5BAE40]
+	hud::HudFrameRateOverlay frame_rate;
+	// The connection status line (hud::HudConnectStatus carries the witness): on a joiner in a
+	// session, its round not over, the own connection's whole seconds since its last receive,
+	// shown past two (the signed `cmp eax, 2; jle`); and the start timer's seconds, the local
+	// client's pre-round timer g_ClientPreRoundTimer (a joiner's replica copy, the listen host's
+	// own client's; Role::action_head_admits reads the same) (D-NET-NEW-LI-42).
+	hud::HudConnectStatus connect_status;
+	int32_t start_timer_seconds = 0;
 };
 // `voice_menus`: bit 0 asks for the emotes menu, bit 1 for the radio menu.
 inline constexpr uint32_t kHudVoiceMenuEmotes = 1u;
@@ -331,9 +378,11 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 // (world/lfp_feed.h) with the role's zone-timer image — the client runtime's
 // 13-DWORD image of the retail shared timer list, present once a 0x6F value
 // has arrived, which is when retail's CProximityList_FindEntryById @0x537f50
-// (called from HUD_DrawZoneMarker @0x598719) finds one — and the transient / special minimap slot's flag byte (+4 &
-// 0xC0 gates the marker; retail walks the 1160-slot transient bank
-// @0x5a2517..0x5a256e; the 0x6B ring slots land in the special bank here).
+// (called from HUD_DrawZoneMarker @0x598719) finds one — the source byte (+4) of
+// the zone's first regular overlay slot (its 0xC0 capture bits gate the marker;
+// retail walks the 1160 slots in address order @0x5a2517..0x5a256e,
+// MapOverlay_FindRegularSlotByEntity @0x5BE870 inlined; a SpawnPoint row rides the
+// persistent bank) and the zone's Team byte as this client holds it.
 // False without a kernel, a replica runtime or a local player.
 bool collect_lfp_zones(const RoleView &view, const world::SpawnZoneRegistry &zones,
 		int local_team, std::vector<hud::HudLfpZone> &out);
@@ -437,5 +486,15 @@ struct EntityLightingFeed {
 //  Radar_UpdateContacts @0x59a7e0 -> MapOverlay_UpdateTimers @0x59a9ce]
 void step_hud_radar(mission::MissionKernel &kernel, ClientRuntime *runtime, bool pass_runs,
 		bool map_site, bool menu_paused, hud::HudMinimapRadar &out);
+
+// The HUD pass's head as it reaches the entity-info record: the round-over latch
+// (`round_over`), the white hit flash and a missing local player return before it; past
+// them the record is built (world::LocalPlayer::build_hud_target_cursor), ahead of the
+// level-3 return. The session runs it in its HUD step, on a frame whose scene frame calls
+// the pass, ahead of the radar legs.
+// [orig: HUD_RenderAllOverlays @0x5A8070 - g_RoundOver @0x5A8084, g_ScreenFlashWhiteHit
+//  @0x5A8098, `test ebp, ebp` @0x5A80A1 (g_LocalPlayerEntity), the HUD_BuildEntityInfo call
+//  @0x5A80BC, g_HUDDetailLevel @0x5A80C4]
+void build_hud_entity_info(mission::MissionKernel &kernel, bool round_over);
 
 } // namespace opennova::inmatch

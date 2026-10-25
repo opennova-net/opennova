@@ -77,6 +77,34 @@ enum class GameSessionChannel : uint8_t {
 	NovaWorld,
 };
 
+// A 255-word availability table with every word `value`.
+inline std::array<int32_t, 255> filled_weapon_availability(int32_t value) {
+	std::array<int32_t, 255> words;
+	words.fill(value);
+	return words;
+}
+
+// The class mask the cfg's ten class words build: a word of 1 enables its class (the
+// host dialog's ALWAYS), a word of 2 enables it while the mission-list entry's mask holds
+// its bit (MISSION; every entry's scan stores 0x3FF), any other word disables it (NEVER).
+// The host dialog's class list cycles each word 0 -> 1 -> 2 -> 0; it writes no mask.
+// [orig: Game_ApplySessionSettingsToGlobals @0x551500 (the words @0x551882..0x551990,
+//  the store @0x551996); HostDialog_OnClassAvailabilityListClick (the cycle
+//  @0x55781A..0x557839); the entry mask MissionList_ScanAndBuildFromFiles @0x563170 (the
+//  store @0x56334A), Mission_BuildMapListFromPFF @0x562910 (the store @0x562B12)]
+inline uint16_t class_allow_mask_from_words(
+		const std::array<int32_t, 10> &words, bool has_mission_entry) {
+	constexpr uint16_t kMissionEntryClassMask = 0x3FF;
+	uint16_t mask = 0;
+	for (size_t i = 0; i < words.size(); ++i) {
+		const uint16_t bit = static_cast<uint16_t>(1u << i);
+		if (words[i] == 1 ||
+				(has_mission_entry && words[i] == 2 && (kMissionEntryClassMask & bit) != 0))
+			mask = static_cast<uint16_t>(mask | bit);
+	}
+	return mask;
+}
+
 struct GameConfig {
 	// The title whose rules the session runs (gameprofile::GameId; CONTEXT.md "Title"): its player
 	// caps (title_player_caps), its built-in score table and the in-match rules the session stamps on
@@ -92,10 +120,32 @@ struct GameConfig {
 	std::string server_password;               // [orig game_settings +0x20] BuildFlags |0x8
 	std::string side_a_password;               // [orig game_settings +0x40] BuildFlags |0x20; join-reject 19
 	std::string side_b_password;               // [orig game_settings +0x60] BuildFlags |0x10; join-reject 20
+	// The team pick's own pair, g_SidePasswordA / g_SidePasswordB: every first-load mission
+	// start copies the cfg block's two side passwords into them, and nothing else writes them
+	// (not the create's clear of a game that is no team game, not an admin SET), so a create
+	// or a map change sets them from the side_a / side_b_password its config carries (the cfg
+	// block's words), apply_mission_side_passwords. Only Server_AssignPlayerTeam reads them
+	// (D-NET-NEW-L1-44's DIVERGENT). [orig: Game_ApplySessionSettingsToGlobals @0x551500 -
+	//  strncpy(g_SidePasswordA, sideAPassword_383, 0x11) @0x552043, (g_SidePasswordB,
+	//  sideBPassword_394, 0x11) @0x552054; Server_AssignPlayerTeam @0x4FE310 - @0x4FE41C..0x4FE6C9]
+	std::string mission_side_a_password;
+	std::string mission_side_b_password;
+	// The cfg block's own words the remote add's TDM preference test reads live: the block's game
+	// type (gameType_3F0, game.cfg's `mp_gametype` or a host file's GameType, which nothing in a
+	// session writes; the mission's g_GameType is game_type), mapped from the block
+	// (apply_block_session_settings), and its two side passwords as the create's or a map change's
+	// config carries them (create_session / continue_session), which an admin SET then writes at
+	// once (D-NET-NEW-L1-46). [orig: Server_PlayerAdd @0x51CC6C..0x51CC91; the game type's writers
+	//  Config_ParseSettingsLine @0x550557, ServerConfig_ApplyHostSetting @0x4A610B;
+	//  CAdminServer_HandleSetCommand @0x405A60 - strncpy(sideAPassword_383, .., 0x11) @0x406230,
+	//  (sideBPassword_394) @0x406268]
+	int32_t cfg_game_type = 0;
+	std::string cfg_side_a_password;
+	std::string cfg_side_b_password;
 	// Signed spectator limit: 0 disables spectating, -1 shares max_players, and
 	// a positive value is the game-layer join's spectator count (DPC 15); it
-	// never widens the 0x42 gate (join_capacity). Our slot table still grows by
-	// a positive count (total_player_slot_capacity, D-NET-401).
+	// never widens the 0x42 gate (join_capacity) nor the slot table: a spectator
+	// takes an ordinary row (D-NET-401).
 	// [orig: maxSpectators_26C, HostDialog_ReadSettings @0x555940;
 	//  Server_ValidatePlayerJoinRequest @0x51235C]
 	int32_t spectator_slots = 0;
@@ -147,12 +197,21 @@ struct GameConfig {
 	// game.cfg's mphostpuntplayerswithsamepcids: a NovaWorld joiner whose
 	// decrypted PCID another of the session's connections holds is refused
 	// (code 30), and every such remote connection is kicked at the next S2C
-	// 0x79 boundary (Server_ValidateJoinBans, Server_KickDuplicatePcids). Zero
+	// 0x79 boundary (Server_ValidateJoinAccount, Server_KickDuplicatePcids). Zero
 	// keeps a bare config inert; the cfg table's default is 1.
 	// [orig: g_GameConfigState.puntDuplicatePcids_330 @0x25509E8, read live by
 	//  Server_ValidatePlayerJoinRequest @0x512771..0x512778; the cfg row
 	//  @0x833350]
 	int32_t punt_duplicate_pcids = 0;
+	// The host's own pre.mnu SPECTATE choice, game.cfg's +0x428 word: on a session peer (a
+	// listen host, the single player) the create's round-state init latches the own slot's
+	// spectator byte from it, the create puts it in the own connection's JSR word, and the own
+	// slot's S2C 0x75 flag byte reads it. Zero keeps a bare config a player.
+	// [orig: g_GameConfigState.unknownHostOption_428 (0x2550AE0): Server_InitNewRoundState
+	//  @0x51CA4D..0x51CA6D, CNapiGameSession_BuildAndCreateSession @0x5697FD..0x569817,
+	//  NetPacket_SerializeHostEntityState @0x5108A1..0x5108A7; the pre.mnu commit's store
+	//  UI_PreGameMenuStateMachine @0x568BF0]
+	int32_t join_spectate = 0;
 	// The session's player cap: the cfg max the session create put into 1..65
 	// (session_player_cap), without the dedicated host's own slot. The MP TLV,
 	// the LAN discovery reply, the join gate, the spawn pump and the status
@@ -199,7 +258,7 @@ struct GameConfig {
 	static constexpr uint32_t kMpAttribClaymorePref = 0x8000;
 	// Read only by the scope-zero -1 floor [orig: `test g_RulesFlags,10000h`
 	// @0x4dbd15 in Player_AdjustWeaponZoomLevel]. No retail writer sets it:
-	// mp_allowsniperscopezoom feeds the 0x08 flags dword bit 16 (byte_A821F0,
+	// mp_allowsniperscopezoom feeds the 0x08 flags dword bit 16 (g_SessionAllowSniperScopeZoom,
 	// read by WeaponSlot_InitFromDef @0x53ef17) and never this word, so the
 	// bit is live only when a host cfg carries it in its mpattrib value.
 	static constexpr uint32_t kMpAttribAutoScopeZero = 0x10000;
@@ -218,11 +277,23 @@ struct GameConfig {
 	//  2026-09-10); the TEAM_CHOOSE spin is the shell's to set there.]
 	uint32_t mp_attributes = 14850;
 	// The host-global class availability word sent to every joining client as
-	// S2C 0x76. Retail derives its ten low bits from the per-class host settings
-	// and the selected mission-list entry; all classes enabled is the stock
-	// default. [orig: g_HostClassAllowMask @0x24D59FC;
+	// S2C 0x76. A session's first mission derives its ten low bits from
+	// class_availability and the mission-list entry (start_host_session); all
+	// classes enabled is the stock result. [orig: g_HostClassAllowMask @0x24D59FC;
 	// NetPacket_WriteClassAllowMask @0x510350]
 	uint16_t class_allow_mask = 0x03FFu;
+	// The cfg's per-weapon availability words, by weapon.def row: the title's mission value
+	// (Jointops.exe 3, dfx2.exe 2) takes the first mission's own (start_host_session builds
+	// the host's table from them). Config_SetDefaults fills 3; host_screen_from_block copies
+	// game.cfg's. [orig: g_GameConfigState.weaponAvailability_5F0; Config_SetDefaults
+	//  @0x54D030 (the memset32(3, 0xFF) @0x54D410)]
+	std::array<int32_t, 255> weapon_availability = filled_weapon_availability(3);
+	// The cfg's per-class availability words (classes 0..9), from which the authority's
+	// first mission builds class_allow_mask: 1 enables a class, 2 enables it under the
+	// mission entry's mask. Config_SetDefaults stores 1 in each; host_screen_from_block
+	// copies game.cfg's. [orig: g_GameConfigState.classAvailability_9EC; Config_SetDefaults
+	//  @0x54D030 (the stores @0x54D412..0x54D448)]
+	std::array<int32_t, 10> class_availability = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 	// Authoritative projectile game-option globals. These do not alter the
 	// advertised mp_attributes word; the host simulation consumes them directly.
 	// The rule words below hold the raw dword retail stores (the apply's `mov`,
@@ -231,8 +302,11 @@ struct GameConfig {
 	bool hit_feedback = true; // [orig: hitFeedback_198 @0x54D18B]
 	int32_t fat_bullets = 0;                    // [orig: g_FatBullets @0x24D21A0]
 	// The cfg's allowcustomskins as the session settings apply copies it, which the NovaWorld
-	// listing's Skins column reads [orig: dword_24D218C <- cfg +0x524,
-	// Game_ApplySessionSettingsToGlobals @0x551C22; Lobby_UpdateServerInfo @0x4FECD7].
+	// listing's Skins column reads, and the cfg word itself, which suppresses the control
+	// quartet's S2C 0x68 when set (each has its one writer, so they agree)
+	// [orig: dword_24D218C <- cfg +0x524, Game_ApplySessionSettingsToGlobals @0x551C22;
+	//  Lobby_UpdateServerInfo @0x4FECD7; Config_ParseSettingsLine @0x54F837;
+	//  Server_SendLoadedModelPageRequest @0x511363].
 	int32_t allow_custom_skins = 0;
 	int32_t one_shot_kill = 0;                  // [orig: g_OneShotKill @0x24D219C]
 	// game.cfg `unlimited_vehicles`, stock 1: a destroyed PlayerControl hull
@@ -291,12 +365,12 @@ struct GameConfig {
 	// --- §6.9 rule globals — the S2C 0x08 ServerConfig block [orig: ServerConfig_SerializeToPacket
 	// @0x505bd0]. dword[3] is `game_type` above; the rest are the standalone g_* rule globals in wire
 	// order. Default 0 for a dev host; a real host / the golden seeds them (retail frame 146:
-	// [respawn 30, timelimit 10, _, gametype, _, score 50, _, startdelay, _, _]).
+	// [round time 30, timelimit 10, _, gametype, _, score 50, _, startdelay, _, _]).
 	// The five formerly-UNWITNESSED words were named 2026-07-01 by tracing each 0x08-block global to
 	// its Config_ParseSettingsLine @0x54f740 setting-name compare (via Game_ApplySessionSettingsToGlobals
 	// @0x551500, which copies the parsed cfg global into the live rule global).
-	uint32_t respawn_time = 0;         // [orig: g_RespawnTime @0x24D2140]      dword[0]; SET `GameTime`
-	uint32_t time_limit_minutes = 0;  // [orig: g_TimeLimitMinutes @0x24D2144] dword[1]; SET `KOTHLimit`
+	uint32_t round_time_limit_minutes = 0; // [orig: g_RoundTimeLimitMinutes @0x24D2140] dword[0]; SET `GameTime`
+	uint32_t time_limit_minutes = 0;  // [orig: g_KothLimitMinutes @0x24D2144] dword[1]; SET `KOTHLimit`
 	uint32_t replay_enabled = 0;      // [orig: g_ReplayEnabled @0x24D2120 <- g_GameConfigState.unknownModeOption_46C @0x2550B24, cfg `replay`]      dword[2]
 	// Retail carries this setting through cfg/global/S2C 0x08 but never reads
 	// the live global in gameplay (whole-image xrefs: serializer + settings
@@ -312,7 +386,7 @@ struct GameConfig {
 	// carrier holding a flag this long drops it, the flag snaps home, and the
 	// carrier is killed. The IDB global name is a misnomer; the config field is
 	// the sibling of flagReturnTime above.
-	// [orig: g_GameConfigState.flagResetTime_420 -> g_WeaponViolationLimit
+	// [orig: g_GameConfigState.flagResetTime_420 -> g_FlagCarryLimitSeconds
 	//  @0x24D2178 via Game_ApplySessionSettingsToGlobals @0x551d0a; default
 	//  Config_SetDefaults @0x54D400; consumer Server_CheckPlayerViolations
 	//  @0x51ac75]
@@ -483,18 +557,14 @@ struct GameConfig {
 	//  Server_InitPlayerSlotSystem @0x4243B2; Entity_SpawnFromBMSRecord @0x40EA86]
 	uint32_t player_slot_limit() const;
 
-	// The fixed player-slot table: the slot limit, grown by the positive
-	// spectator count and clamped to 251 rows. Retail's table is the slot limit
-	// alone (D-NET-401), and a limit past 65 allocates none (D-NET-402); its
-	// gate admits the lineup queue past the cap (join_capacity), so it can admit
-	// more connections than it has rows, which is D-NET-401's open half.
-	// [orig: g_PlayerSlotCapacity @0x24C0CA4 = the slot limit,
-	//  Server_InitNewRoundState @0x51C976..0x51C97B]
-	uint32_t total_player_slot_capacity() const {
-		const uint64_t total = static_cast<uint64_t>(player_slot_limit()) +
-				(spectator_slots > 0 ? static_cast<uint32_t>(spectator_slots) : 0u);
-		return static_cast<uint32_t>(total < 251u ? total : 251u);
-	}
+	// The fixed player-slot table: the slot limit alone, a spectator taking an
+	// ordinary row (D-NET-401). A limit past 65, which retail's allocator refuses
+	// (its table then keeps what it held), sizes a working table here
+	// (D-NET-402, PERMANENT: a fixed retail bug).
+	// [orig: Server_InitNewRoundState - the limit @0x51C948..0x51C96B, stored
+	//  @0x51C976, Server_AllocatePlayerSlotTable(limit) @0x51C97B;
+	//  g_PlayerSlotCapacity @0x24C0CA4 = the count @0x51C1E7]
+	uint32_t total_player_slot_capacity() const { return player_slot_limit(); }
 
 	// The lineup queue counts at the join gate: on, with a positive size.
 	// [orig: CNapiNetwork_ValidateJoinRequest - `test edx, edx` over ctx+0xF2C

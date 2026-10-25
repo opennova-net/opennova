@@ -39,10 +39,11 @@ namespace opennova {
 //
 // The required-field gate (the NW-G1 finding): retail fails the gate
 // (state -> -9) unless POSTIPADDRESS and POSTIPPORT are both present, OR
-// the junction/direct-connect bypass `dword_B5FD2C` is set from command
-// line flags. Our server therefore MUST emit both, which it does
-// (apps/novaworld_gate/gate_listener.cpp). onnet's omission of them was
-// a bug; the reverted PR #37 stack adding them was the correct fix.
+// the NWU-in-use word `dword_B5FD2C` is set, which a UDPNOVAWORLD line or a
+// command-line /UDPNOVAWORLD entry sets (NwuLobbySession::poll_gate). Our
+// gate (apps/novaworld_gate/gate_listener.cpp) sends both for every title
+// but one whose live reply is witnessed without them (DFX2's, D-NET-721);
+// its udpnovaworld line leaves the pair unread.
 //
 // CUS / PVT are NOT part of retail JO:CA's ProcessResponse key set (they
 // came from a different/older witness), but live gate responses carry them;
@@ -57,6 +58,17 @@ namespace opennova {
 // [orig: CMissionInfo_AddVariable @0x4CD9D0 - the count test @0x4CD9DC, the copy @0x4CD9F7]
 inline constexpr std::size_t kGateUdpNovaWorldMax = 16;
 inline constexpr std::size_t kGateUdpNovaWorldChars = 63;
+
+// The gate response's string fields, each a Napi_CopyString into its mission-info buffer: the
+// lobby name, the MET address and label and the two UDP codes 32 bytes (31 characters kept), the
+// startup URL and GLSVSSREQUEST 0x200 bytes (511 kept), every value to its first NUL.
+// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - LOBBYNAME CAITask_SetName @0x402BD0,
+//  METIPADDRESS CMissionInfo_SetSceneName @0x4CD930, METLABEL CMissionInfo_SetTargetName
+//  @0x4CD950, UDPCODE1 CMissionInfo_SetGateTag @0x4CD990, UDPCODE2 CMissionInfo_SetMetTag
+//  @0x4CD9B0 (each 0x20); STARTUPURL CMissionInfo_SetDescription @0x4CD970, GLSVSSREQUEST
+//  CMissionInfo_SetBriefingOutput @0x4CDA40 (each 0x200); Napi_CopyString @0x617E10]
+inline constexpr std::size_t kGateNameBytes = 0x20;
+inline constexpr std::size_t kGateTextBytes = 0x200;
 
 struct GateResponse {
 	// IPv4 addresses in NETWORK byte order (0xXXYYZZWW where X.Y.Z.W).
@@ -102,7 +114,19 @@ struct GateResponse {
 // Parse a gate-server response (the plaintext, post-NWU-decrypt body).
 // Returns true if at least one VAR line was absorbed. Tolerant of blank
 // lines and unknown keys (ignored, consistent with the binary).
+// False when the body holds no VAR line of a known key (var_count 0): the NovaWorld connect
+// then fails the gate as state -9 (NwuLobbySession::poll_gate; D-NET-708).
 bool gate_response_parse(std::string_view body, GateResponse &out);
+
+// The response's lines as the gate response's reader returns them, one per read until the text
+// ends or reads empty: each runs to a LF, a CR (a CR LF taken as one break) or the text's first
+// NUL, at most 32767 characters (the 0x8000 read buffer; a cut line's next character is passed
+// over), and an empty line is a line. The connect log's "GATE LINE #nn" lines number them.
+// [orig: CNapiFileReader_ReadAndTokenizeLine @0x6336E0 - the end test @0x63371A, the read
+//  @0x633733; Napi_ReadLineFromBuffer @0x616CC0 - the NUL / LF test @0x616D1E, the CR @0x616D23
+//  and its LF @0x616D39..0x616D3B, the next position @0x616D49..0x616D55, an empty text -2
+//  @0x616D01; CNapiGateManager_ProcessResponse @0x4CED20 - the reads @0x4CF0BC / @0x4CF4E3]
+std::vector<std::string> gate_response_lines(std::string_view body);
 
 // The engine's dotted quad: four octets, each a digit at once (no white space, no sign)
 // and then digits (cp1252_isdigit, D-NET-388) accumulated in a wrapping 32-bit int, the

@@ -145,7 +145,6 @@ public:
 	// (engine menu::HostDialog::toggle_switch / selected_launch_options).
 	void toggle_host_mission_switch(int p_row) { host_dialog_.toggle_switch(runtime_, p_row); }
 	PackedInt32Array selected_host_launch_options() const;
-	void select_host_location(int p_id, const String &p_country);
 	// The Options screens over the profile's current record (engine
 	// menu::OptionsScreen): the screen's binding records built from the
 	// record's table; null profiles = the catalog defaults, no words.

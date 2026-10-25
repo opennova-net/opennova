@@ -32,16 +32,13 @@ const opennova::def::DefItemDef *find_item_def(const opennova::def::DefItemsFile
 std::unordered_map<int, const opennova::def::DefItemDef *> item_defs_by_id(
 		const opennova::def::DefItemsFile &items);
 
-// Runtime item type -> items.def id, with the player's visual stand-in.
-int visual_item_id_for_runtime_type(int item_id, const opennova::def::DefItemsFile &items);
-
 // The first-husk piece-model metadata retail derives at death time (section
-// count, per-section centers, section 0's z extents).
+// count, per-section centers, collision section 0's z words).
 struct CollisionHuskPieceInfo {
 	int32_t sections = 0;
 	world::DeathPieceModel model;
-	float rest_min_z = 0.0f;
-	float rest_max_z = 0.0f;
+	int32_t rest_z_lo_q16 = 0;
+	int32_t rest_z_hi_q16 = 0;
 };
 
 // Mission-lifetime collision graphic caches. The initial mission sweep and
@@ -70,16 +67,12 @@ struct CollisionResolveState {
 	// First-stage husk KZ points in mission-local axes. Kept independently
 	// from the collision-model cache because a husk graphic may already have
 	// been registered as another entity's main graphic.
-	std::unordered_map<std::string, std::vector<world::Vec3>>
+	std::unordered_map<std::string, std::vector<world::FixedVec3>>
 			husk_kz_points_by_graphic;
 	// First-stage husk DEAD points used only by the unitType-11 bridge water
 	// shock callback. Like KZ, huskFinal is not a source.
 	std::unordered_map<std::string, std::vector<world::Vec3>>
 			husk_dead_points_by_graphic;
-	// Exact intact-model glass surface point selected by retail's static
-	// model/GLASS1..4 table. Empty entries are cached deliberately.
-	std::unordered_map<std::string, std::vector<world::GlassPointTrait>>
-			glass_points_by_graphic;
 	std::unordered_map<std::string, CollisionHuskPieceInfo>
 			husk_pieces_by_graphic;
 	// Negative demand cache: one unresolved entity is attempted at most once

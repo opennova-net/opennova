@@ -55,6 +55,8 @@ public:
 	void set_pass_gates(bool p_beauty_drawn, bool p_mirror_drawn);
 	bool is_beauty_pass_drawn() const { return beauty_pass_drawn_; }
 	bool is_mirror_pass_drawn() const { return mirror_pass_drawn_; }
+	// The frame uniforms pushed to the materials so far: an unchanged frame pushes none (a read seam).
+	int64_t get_frame_parameter_pushes() const { return frame_param_pushes_; }
 
 	// One render-frame advance — the externally-callable
 	// drive the test harness uses; the engine's virtual delegates here.
@@ -71,6 +73,29 @@ private:
 	void _update_cloud_textures(MissionEnvironment *p_env);
 	// One uniform onto both dome passes (the shared sky.gdshaderinc stage).
 	void _set_dome_parameter(const StringName &p_name, const Variant &p_value);
+	// The per-frame uniforms, in kFrameParams' order (sky_dome.cpp): each pushed only when its value
+	// moved, as the slot shadow's drape pushes are. An unchanged push still marks the material
+	// dirty, and the server rebuilds a dirty material's uniform buffer at the next draw
+	// (D-NET-NEW-LF-22).
+	enum FrameParam {
+		FRAME_FLAT_PASS,
+		FRAME_FLAT_COLOR,
+		FRAME_SKY_BASE,
+		FRAME_SKY_BRIGHT,
+		FRAME_SKY_HIGHLIGHT,
+		FRAME_CLOUD_BASE,
+		FRAME_CLOUD_HIGHLIGHT,
+		FRAME_CLOUD_EDGE,
+		FRAME_SUN_DIR,
+		FRAME_LIGHT_DIR,
+		FRAME_FOG_COLOR,
+		FRAME_FOG_END,
+		FRAME_SKY_HEIGHT,
+		FRAME_SCROLL_OFFSET1,
+		FRAME_SCROLL_OFFSET2,
+		FRAME_PARAM_COUNT,
+	};
+	void _set_frame_parameter(FrameParam p_param, const Variant &p_value);
 	// Attach or drop the cloud pass: the shader path with a bound layer.
 	void _apply_cloud_pass(bool p_drawn);
 
@@ -93,6 +118,11 @@ private:
 	// Standalone fallback (owners with no weather node): the engine-owned
 	// private scroll core + 62 Hz credit.
 	opennova::env::ScrollFallback fallback_scroll_;
+	// The per-frame uniforms' names (made once) and the values last pushed (build() clears them).
+	StringName frame_param_names_[FRAME_PARAM_COUNT];
+	Variant frame_param_written_[FRAME_PARAM_COUNT];
+	bool frame_param_pushed_[FRAME_PARAM_COUNT] = {};
+	int64_t frame_param_pushes_ = 0;
 };
 
 } // namespace godot

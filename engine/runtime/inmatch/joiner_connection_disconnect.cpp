@@ -4,6 +4,7 @@
 // ping, the other CK-keyed outer opcode that stamps the same reap clock. Split out of
 // joiner_connection.cpp; the class header is the shared declaration.
 #include <runtime/inmatch/joiner_connection.h>
+#include <runtime/inmatch/mission_exit.h> // ProcessDisconnectLatch (the leave callback)
 
 #include <base/io/log.h>
 #include <net/npwire/nw_session_framing.h> // nw_encode_outbound (the 0x46 / 0x45 envelope)
@@ -28,20 +29,22 @@ namespace opennova::inmatch {
 // @0x61F080: opcode 0x45 for a client, `[u32 remote key][WR][MS]`) or the rtt
 // lands in session_keys.rtt_ms @0x623C9B. The pong leaves from inside the
 // receive pump: SendPing writes it straight to the socket (CNapiNPManager_SendTo
-// @0x61F261), so the host's round trip never includes our send-holdoff wait.
-void JoinerConnection::on_server_ping(const std::vector<uint8_t> &body, PollResult &out) {
+// @0x61F25A), so the host's round trip never includes our send-holdoff wait.
+bool JoinerConnection::on_server_ping(const std::vector<uint8_t> &body,
+		std::vector<std::vector<uint8_t>> &immediate_outbound) {
 	SessionPingBody ping;
-	if (!parse_session_ping_body(body.data(), body.size(), ping)) return;
-	if (ping.receiver_local_key != client_key_) return;
+	if (!parse_session_ping_body(body.data(), body.size(), ping)) return false;
+	if (ping.receiver_local_key != client_key_) return false;
 	last_receive_ms_ = monotonic_milliseconds_();
 	receive_clock_armed_ = true;
 	if (ping.wants_reply) {
-		out.immediate_outbound.push_back(nw_encode_outbound(SESSION_OPCODE_CLIENT_PING,
+		immediate_outbound.push_back(nw_encode_outbound(SESSION_OPCODE_CLIENT_PING,
 				build_session_ping_body(conn_.server_sk, /*wants_reply=*/false,
 						ping.timestamp_ms)));
-		return;
+		return true;
 	}
 	session_rtt_ms_ = monotonic_milliseconds32() - ping.timestamp_ms;
+	return true;
 }
 
 // The host closed the session on its own terms (docs/net/novaworld-net-re.md §5.64 — the punt
@@ -68,7 +71,7 @@ void JoinerConnection::on_host_disconnect(const DisconnectEvent &event) {
 	// gate answers its spectator / side-password / team failures through this same record
 	// (DPC 14..22), shown as their GDC text.
 	// [orig: the DC gate @0x4c6563 and the DPC switch @0x4c6569;
-	//  Server_ValidatePlayerJoinRequest @0x512100 via CNapiNPConnection_SendChatMessage
+	//  Server_ValidatePlayerJoinRequest @0x512100 via CNapiNPConnection_QueueDisconnectEvent
 	//  @0x4c7ef0]
 	const ConnectionErrorRecord record = connection_error_record();
 	host_disconnect_reason_ = "the host closed the session (" +
@@ -85,6 +88,13 @@ void JoinerConnection::on_host_disconnect(const DisconnectEvent &event) {
 bool JoinerConnection::session_lost() const {
 	// An explicit close is terminal at any stage, and so is a silence the reap latched.
 	if (!host_disconnect_reason_.empty() || silence_timeout_latched_) return true;
+	// A teardown that sent its goodbye burst (the user's leave inside input action 3) is
+	// terminal: the teardown clears the keys and both message queues and the leave callback
+	// zeroes the session's active connection, so no later frame sends on it.
+	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 (the connected state 5's burst
+	//  @0x6254B4..0x6254D3);
+	//  CNapiNetwork_OnDisconnectedFromServer @0x4C6495 (active_connection_id = 0)]
+	if (goodbye_sent_) return true;
 	// A self-initiated teardown (the pool-overflow MSGCRE) is terminal with its record latched.
 	return phase_ == Phase::Error && disconnect_event_set_;
 }
@@ -140,9 +150,9 @@ const char *JoinerConnection::post_auth_stage_name() const {
 	case PostAuthStage::AwaitGameStart: return "awaiting the game-start flag";
 	case PostAuthStage::AwaitServerInfo: return "awaiting the server-info transfer";
 	case PostAuthStage::AwaitMissionData: return "awaiting the mission-data transfer";
-	case PostAuthStage::AwaitPlayerList: return "awaiting the player list";
 	case PostAuthStage::AwaitInitialSyncTail: return "awaiting the pre-world sync tail";
 	case PostAuthStage::AwaitWorldStreamEnd: return "awaiting the world stream";
+	case PostAuthStage::AwaitMissionStart: return "loading the mission start";
 	case PostAuthStage::AwaitDeployment: return "awaiting the world state (S2C 0x0F)";
 	case PostAuthStage::AwaitDeployPick: return "awaiting the player's deployment pick";
 	case PostAuthStage::AwaitDeployRelease: return "awaiting the deployment release";
@@ -156,25 +166,49 @@ const char *JoinerConnection::post_auth_stage_name() const {
 // burst size is cs_dir0.recv_max_per_tick clamped to [0, 32] — 4 for the JOINTOPERATIONS
 // template. Without this leg the host's only teardown trigger never fires from our client and
 // every leave leaks an admitted peer plus its spawned player.
-// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253c0 (burst loop @0x6253ef..0x625424);
+// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253c0 - the connected state 5's arm
+//  (`cmp eax, 5` @0x625499): the count clamp @0x62549E..0x6254B2, the burst loop
+//  @0x6254B4..0x6254D3, the leave callback @0x6254D5..0x6254E7;
 //  CNapiNPConnection_SendDisconnectPacket @0x61f2a0; CNapiNetwork_Init @0x4ca4a0 stores
 //  recv_max_per_tick = 4 @0x4cab60]
-std::vector<std::vector<uint8_t>> JoinerConnection::disconnect() {
+std::vector<std::vector<uint8_t>> JoinerConnection::disconnect(std::string_view leave_tag) {
 	if (goodbye_sent_ || conn_.server_sk == 0) return {};
 	goodbye_sent_ = true;
-	// A leave with nothing latched is the user's: CNapiNetwork_DisconnectActiveConnection
-	// latches {role, DC 2, 0, 0, <caller tag>, 0, ""} — the in-match leave action's tag is
-	// "I.C:CIDEMIS". Every other producer (a host punt or goodbye, the CLNTTMOUT reap, the
-	// MSGCRE overflow) latched its record first, so the burst echoes that.
+	// A leave through CNapiNetwork_DisconnectActiveConnection latches {role, DC 2, 0, 0, <caller
+	// tag>, 0, ""} when nothing is latched: the in-match leave action's "I.C:CIDEMIS", the
+	// session destroy's "N.C:SWWAD[1]:<reason>". Every other producer (a host punt or goodbye,
+	// the CLNTTMOUT reap, the MSGCRE overflow) latched its record first, so the burst echoes
+	// that. The session reset's CNapiNPConnection_Destroy latches nothing: the burst writes the
+	// connection's record as it stands, all zeros when nothing was latched.
 	// [orig: Input_HandleActionBinding case 3 @0x49af38..0x49af42 ->
 	//  CNapiNetwork_DisconnectActiveConnection @0x4C9140 (DC=2 @0x4c91ef, DSTR=message
-	//  @0x4c91ff, latch-if-!valid @0x4c922d..0x4c923e); SendDisconnectPacket @0x61f3b1..0x61f4aa]
-	latch_disconnect_event(make_disconnect_event(2, 2, 0, 0, "I.C:CIDEMIS", 0, ""), 2);
+	//  @0x4c91ff, latch-if-!valid @0x4c922d..0x4c923e); CNapiGameSession_FullDestroy @0x4C96A0
+	//  - the "N.C:SWWAD[1]:%d" sprintf @0x4C96CC, the leave @0x4C96DB;
+	//  CNapiGameSession_ResetActiveSession @0x4C8A70 - CNapiNPConnection_Destroy @0x4C8A93;
+	//  SendDisconnectPacket @0x61F2A0 - the record's fields written unconditionally
+	//  @0x61f3b1..0x61f4aa]
+	if (!leave_tag.empty())
+		latch_disconnect_event(
+				make_disconnect_event(2, 2, 0, 0, std::string(leave_tag), 0, ""), 2);
 	std::vector<uint8_t> datagram = nw_encode_outbound(
 			SESSION_OPCODE_CLIENT_GOODBYE,
 			client_goodbye_to_bytes(conn_.server_sk, last_disconnect_event_));
-	return std::vector<std::vector<uint8_t>>(
+	std::vector<std::vector<uint8_t>> burst(
 			disconnect_burst_count(conn_.timeouts.recv_max_per_tick), std::move(datagram));
+	// The leave callback after the burst: the process latch keeps the first record (a
+	// connection with none latches zeros), and the switch over the latch stores an exit reason
+	// or queues an input action for the next input pass (teardown_input_action).
+	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the callback
+	//  @0x6254D5..0x6254E7; CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - @0x4C6535,
+	//  the copy @0x4C6545, the memset @0x4C6551, valid @0x4C6559, the switch from @0x4C655F,
+	//  Input_QueueEvent(36) @0x4C6596, Input_QueueEvent(3) @0x4C67A4]
+	if (disconnect_latch_ != nullptr) {
+		disconnect_latch_->latch(disconnect_event_set_ ? last_disconnect_event_ : DisconnectEvent{});
+		const DisconnectExit exit = disconnect_latch_->disconnect_exit();
+		teardown_exit_reason_ = exit.reason;
+		teardown_input_action_ = exit.input_action;
+	}
+	return burst;
 }
 
 // [orig: Nwu_HandleServerGoodbye @0x624310 -> Nwu_HandleDisconnect(type 2) @0x623CE0]: the
@@ -192,6 +226,12 @@ void JoinerConnection::on_server_goodbye(const std::vector<uint8_t> &body, PollR
 			(static_cast<uint32_t>(body[2]) << 16) |
 			(static_cast<uint32_t>(body[3]) << 24);
 	if (receiver_local_key != client_key_) return;
+	// (The client pump wrote the queued 0x86's NET GOT ahead of this queued leg; its burst's
+	// NET SENDING lines and the leave's NET DISCONNECTING FROM SERVER follow it at once, before
+	// the frame's later packets [orig: Nwu_HandleDisconnect @0x623CE0 - the key test @0x623E74
+	// ahead of the queue @0x624149; NapiNPProtocol_PumpRecvQueues @0x6266A0 - NapiLog_OnRecv
+	// (proto+0x26C) @0x6268AA; CNapiNPConnection_RequestDisconnect @0x61E0F0 - SetState(6)
+	// @0x61E0FA].)
 	DisconnectEvent event;
 	(void)parse_disconnect_event(body.data() + 4, body.size() - 4, event);
 	// Teardown owns this receive result, exactly like the H:0x03 description punt.

@@ -223,6 +223,30 @@ func test_a_build_stepped_is_the_build_whole() -> void:
 	assert_eq(stepped.get_patches_active(), whole.get_patches_active())
 
 
+# A mounted terrain's texture slots are made of the pixels the root decodes, which stay with the
+# data: the build's derived inputs (the surface inputs; the tile cache's colour map, tile set and
+# scorch sources) read those pixels and never a texture read back, and no texture of the
+# terrain's files is made through the root's decoded-texture cache (D-NET-NEW-L2-46). What it
+# builds is what a load from the loose directory builds, whose slots are read back.
+func test_a_mounted_terrain_builds_from_the_pixels_its_load_decoded() -> void:
+	var root := _root()
+	var mounted := _terrain_over(_loaded(root))
+	mounted.build()
+	assert_true(mounted.is_built())
+	assert_eq(root.get_decoded_texture_count(), 0,
+			"no texture of the terrain's files is made beside its slots' own")
+	var loose_data := TerrainData.new()
+	loose_data.set_trn_path(_root_dir.path_join(TestFs.TMAP_TRN))
+	assert_eq(loose_data.load(), OK)
+	var loose := _terrain_over(loose_data)
+	loose.build()
+	var diagnostics: Dictionary = mounted.get_surface_inputs().get_diagnostics()
+	assert_true(bool(diagnostics.get("detail_coefficient", false)), "the detail map's pixels were read")
+	assert_eq(diagnostics, loose.get_surface_inputs().get_diagnostics(),
+			"the same surface inputs as the loose load's")
+	assert_eq(mounted.get_tile_cache_texture() != null, loose.get_tile_cache_texture() != null)
+
+
 func test_a_build_begun_again_starts_again_and_one_with_no_data_is_refused() -> void:
 	var bare := Terrain.new()
 	add_child_autofree(bare)

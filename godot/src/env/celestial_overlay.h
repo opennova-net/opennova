@@ -37,7 +37,9 @@ void append_celestial_overlays(SceneOverlayModelSurfaces &r_bodies, Celestial &p
 // discs and the glow redrawn at the MIRROR camera inside the far depth band, fogged by the mirror's own
 // dry block (EnvironmentState::build_water_mirror_fog) under the frame's light scale. The discs keep their
 // beauty submit value (their live materials); the glow takes the mirror view's no-occlusion value
-// (Celestial::get_mirror_redraw). The caller asks it only while the water renders.
+// (Celestial::get_mirror_redraw). While the weapon Inset pass renders its own mirror, that mirror's redraw
+// follows at ITS camera in its own slots (kInsetMirrorOverlayOrder); the dim is one full-target batch both
+// mirror passes draw. The caller asks it only while the water renders.
 void append_water_mirror_overlays(SceneOverlayModelSurfaces &r_bodies, Celestial *p_celestial,
 		MissionEnvironment *p_env, Water &p_water, SceneOverlaySubmission &r_submission);
 

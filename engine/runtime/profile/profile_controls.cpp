@@ -23,6 +23,8 @@ SessionInput session_input(const playersav::ProfileRecord &record, bool no_reloa
 	SessionInput out;
 	out.invert_mouse = record.invert_mouse != 0;        // [orig: @0x551612]
 	out.mouse_sensitivity = record.mouse_sensitivity;    // [orig: @0x55161e]
+	// [orig: `add ecx, 80h` @0x55162A, the store @0x551630]
+	out.scope_scale = static_cast<int32_t>(static_cast<uint32_t>(record.word_1480) + 0x80u);
 	// [orig: g_AutoReloadEnabled = +1524 @0x551a40; `/noreload` -> 0 @0x551a48]
 	out.auto_reload = !no_reload && record.auto_reload != 0;
 	return out;

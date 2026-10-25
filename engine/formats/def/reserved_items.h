@@ -61,7 +61,7 @@ bool reserved_item_kind_matches(const ReservedItem &row, int item_type);
 inline constexpr size_t DEF_ITEMS_FALLBACK_ROW = 0;
 /* The row whose hulls the boats and the aircraft brake for: their avoid brakes compare a
  * neighbour's ItemTypeIndex with 1 [orig: Entity_UpdateWatercraftPhysics @ 0x48E5AA;
- * Entity_ProcessAirVehiclePhysics @ 0x470B08; Entity_UpdateAircraftPhysics @ 0x4919D1]. */
+ * Vehicle_ProcessSelectorZeroBoat @ 0x470B08; Entity_UpdateAircraftPhysics @ 0x4919D1]. */
 inline constexpr size_t DEF_ITEMS_BRAKE_ROW = 1;
 
 } // namespace opennova::def

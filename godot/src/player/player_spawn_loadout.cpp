@@ -40,6 +40,7 @@ Ref<PlayerSpawnLoadout> PlayerSpawnLoadout::from_profile(const Dictionary &p_pro
 		selection.combo = profile_dict_int(sd, "combo", -1);
 		selection.player_class = profile_dict_int(sd, "player_class",
 				opennova::inmatch::kJoinDefaultPlayerClass);
+		selection.character_id = profile_dict_int(sd, "avatar_packed", -1);
 	}
 	return out;
 }
@@ -82,6 +83,7 @@ void PlayerSpawnLoadout::fill_join_sides(
 		r_sides[side].division_index = sides_[side].division;
 		r_sides[side].combo_index = sides_[side].combo;
 		r_sides[side].player_class = sides_[side].player_class;
+		r_sides[side].character_id = sides_[side].character_id;
 	}
 }
 

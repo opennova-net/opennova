@@ -428,6 +428,10 @@ std::string MenuStateFrame::widget_string(int index, const std::string &key) con
 	return configured_ ? compiler_.widget_string(index, key) : key;
 }
 
+std::string MenuStateFrame::table_string(const std::string &table, const std::string &key) const {
+	return configured_ ? compiler_.table_string(table, key) : key;
+}
+
 void MenuStateFrame::set_open_popup(int index) {
 	if (state_.popup_root == index) return;
 	state_.popup_root = index;

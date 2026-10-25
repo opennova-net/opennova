@@ -137,6 +137,12 @@ inline Keyframe scratch_keyframe_defaults() {
 struct Config {
 	std::string name = "Untitled"; // authoring extension; retail JO has no enviro_name keyword
 	std::string timeofday = "Day";
+	// The time-of-day class the `timeofday` line stores (0 Unknown .. 4 Night, the NovaWorld
+	// listing's TimeOfDay index): 0 until a line sets it, as every mission start zeroes it ahead of
+	// the environment load [orig: g_EnvTimeOfDayEnum @0x24D2364; Game_StartMission @0x524662 ->
+	// Game_ApplySessionSettingsToGlobals @0x55207B (the zero)]. env_time_of_day_class is the
+	// line's rule.
+	int32_t time_of_day_enum = 0;
 	float envscale = 1.0f;
 	int curtime = 1500;
 	float fog_level = 1024.0f;
@@ -407,5 +413,14 @@ BmsEnvOverrides bms_env_overrides_from_header(uint32_t attrib_flags, int water_o
 // not. False when the .env was skipped.
 bool load_mission_env_config(const EnvTextReader &read, const std::string &terrain,
 		const std::string &environment, const BmsEnvOverrides &overrides, MissionEnv &out);
+
+// The class a `timeofday` line stores, as the parse's chain computes it: each arm is taken on its
+// stricmp's NONZERO result, so a value other than "dawn" (any case) stores 1 and "dawn" itself,
+// which then differs from "day", stores 2; the dusk and night arms are never reached. A stock
+// host lists every mission whose environment says "day", "dusk" or "night" as Dawn and one that
+// says "dawn" as Day. [orig: TimeOfDay_ParseProperty @0x57CDB3 (the key), @0x57CDD5 / @0x57CDDF
+// ("dawn", jz past the store), @0x57CDE2 (1), @0x57CDF9 / @0x57CE03 (off_7D77C4 "day"),
+// @0x57CE06 (2), @0x57CE2A (3), @0x57CE41..0x57CE51 ("night": 0, else 4)]
+int32_t env_time_of_day_class(const std::string &value);
 
 } // namespace opennova::env

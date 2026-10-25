@@ -354,6 +354,14 @@ ParticleWaterSubset particle_water_subset_for_side(bool camera_above_water,
 			ParticleWaterSubset::Below;
 }
 
+float particle_distort_theta(std::uint32_t tick_ms) {
+	constexpr double kTwoPi = 6.283185307179586;
+	// flt_7DB864, the float nearest 0.004 (the header carries the witness).
+	constexpr float kTickScale = 0.004f;
+	return static_cast<float>(
+			std::fmod(static_cast<double>(tick_ms) * static_cast<double>(kTickScale), kTwoPi));
+}
+
 ParticleThermalMaterial particle_thermal_material(ParticlePipeline pipeline, bool thermal) {
 	if (!thermal)
 		return ParticleThermalMaterial::Primary;
@@ -462,6 +470,24 @@ const ParticleDrawList &ParticleFrameCompiler::compile(
 			++debug.water_filtered_emitters;
 			debug.water_filtered_particles += particle_count;
 			continue;
+		}
+		// The child's render submit: no live particle, or bounds outside the view, and
+		// the emitter never joins the render list the partition walks
+		// (ParticleViewInput::frustum carries the witness). The test reads the bounds the
+		// registration sorts by, as retail's both read the emitter's one box.
+		if (particle_count == 0) {
+			++debug.empty_emitters;
+			continue;
+		}
+		if (view.frustum.valid) {
+			const ParticleVec3 &low = emitter.bounds.valid ? emitter.bounds.min : emitter.position;
+			const ParticleVec3 &high = emitter.bounds.valid ? emitter.bounds.max : emitter.position;
+			if (!particle::bounds_visible_in_frustum({low.x, low.y, low.z},
+						{high.x, high.y, high.z}, view.frustum)) {
+				++debug.frustum_culled_emitters;
+				debug.frustum_culled_particles += particle_count;
+				continue;
+			}
 		}
 
 		++debug.selected_emitters;

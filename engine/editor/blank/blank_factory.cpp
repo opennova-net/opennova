@@ -79,7 +79,7 @@ const BlankFactory k_factories[] = {
 	  "the menu stylesheet naming the fonts and colors the screens use", true },
 	{ "brand_style", AssetKind::MenuStyle, make_blank_brand_style,
 	  "a brand stylesheet with no variables yet, read after the menu stylesheet", false },
-	{ "nw_cdata", AssetKind::StringTableCoo, make_blank_coo, "an empty NovaWorld data table", true },
+	{ "nw_cdata", AssetKind::StringTableCoo, make_blank_coo, "an empty NovaWorld cookie jar", true },
 	{ "main_menu", AssetKind::Menu, make_blank_main_menu,
 	  "the startup screen: the project's title, an Exit button and the game's mouse pointer", false },
 	// The pointer every blank menu names (kBlankPointerRole), made with the menu.

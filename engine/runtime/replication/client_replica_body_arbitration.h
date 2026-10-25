@@ -23,10 +23,10 @@ void apply_record_body_arbitration(ClientEntityState &es, uint8_t decoded,
 
 // The organic movers' death edge on a remote row: Health is zero and Flags bit
 // 2 is not latched yet. Latches the bit (dropping the 0xC0 climb/mount bits),
-// consumes the parked deathAnimStateId and returns the body state the edge
-// commits; the caller stores it as the current state after this tick's body
-// pass, so the channel takes it on the next tick as retail's top-of-pass
-// AnimMap update does.
-int16_t replica_death_edge(ClientEntityState &es);
+// stamps `tick` (the walk's) as the death tick, consumes the parked
+// deathAnimStateId and returns the body state the edge commits; the caller
+// stores it as the current state after this tick's body pass, so the channel
+// takes it on the next tick as retail's top-of-pass AnimMap update does.
+int16_t replica_death_edge(ClientEntityState &es, uint32_t tick);
 
 } // namespace opennova::replication

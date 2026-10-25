@@ -84,6 +84,7 @@ const _ITEMS_PLAYER_ROW := """begin "Player #1, Multiplayer"
   id 105305
   type person
   hp 100
+  move_function org2
 end
 """
 
@@ -100,6 +101,14 @@ func _item_db_from_text(dir: String, text: String) -> ItemDatabase:
 	var db := ItemDatabase.new()
 	assert_eq(db.load(dir.path_join("items.def")), OK)
 	return db
+
+
+# The weapon walk pumps only a pool-0 row whose ItemTypeIndex is set, the local
+# player's included, so a default mission's body needs its items.def row before
+# its weapon runs (D-NET-NEW-L7-6) [orig: WeaponAction_ProcessAllEntities
+# @0x542690 (the ItemTypeIndex test @0x5426B9)].
+func _resolve_player_row(sim: Simulation) -> void:
+	sim.resolve_item_traits(_item_db_from_text(_native_fixture_dir(), ""))
 
 
 # Rename one 16-byte USRP name field in raw .3di bytes (whole-name match) —
@@ -370,24 +379,31 @@ func test_host_spectator_options_and_live_f3_transition() -> void:
 	assert_almost_eq(flown.y, 0.0, 0.0001, "level flight does not climb")
 	sim.set_player_input(false, false, false, false, false, false, false)
 
-	assert_true(sim.set_local_spectator(false))
-	assert_false(sim.is_local_spectator())
+	# Retail has no spectator leave (D-NET-407): the toggle-off is refused and
+	# the slot stays a spectator until the next mission start's reset.
+	assert_false(sim.set_local_spectator(false))
+	assert_true(sim.is_local_spectator())
 	assert_true(sim.has_local_player(),
-			"leaving spectator mode respawns the same playable slot")
+			"the spectator keeps its slot and hidden body")
 
 
-func test_host_class_allow_mask_roundtrips_to_the_ui_seam() -> void:
+# The host dialog writes the cfg's ten class words (0 NEVER, 1 ALWAYS, 2 MISSION), never a
+# mask; the mask is what the session's first mission builds from them, a MISSION word
+# enabled under the mission entry's 0x3FF. [orig: HostDialog_OnClassAvailabilityListClick
+#  @0x55781A..0x557839; Game_ApplySessionSettingsToGlobals @0x551882..0x551996]
+func test_host_class_words_roundtrip_to_the_ui_seam() -> void:
 	var sim := Simulation.new()
 	assert_eq(sim.get_class_allow_mask(), 0x03FF,
 			"a fresh host exposes retail's all-ten-classes default")
+	var words := PackedInt32Array([1, 0, 1, 0, 1, 0, 2, 0, 2, 0])
 	var host_options := HostSessionOptions.new()
-	host_options.class_allow_mask = 0x0155
+	host_options.class_availability = words
 	sim.configure_host_session(host_options)
 	var options := sim.get_host_session_config()
-	assert_eq(options.class_allow_mask, 0x0155,
-			"the configured writer source survives the Godot session adapter")
+	assert_eq(options.class_availability, words,
+			"the configured class words survive the Godot session adapter")
 	assert_eq(sim.get_class_allow_mask(), 0x0155,
-			"the armory-facing seam exposes the same configured host mask")
+			"the armory-facing seam exposes the mask those words build")
 
 
 func test_all_mode_rule_options_roundtrip_to_the_host() -> void:
@@ -449,9 +465,8 @@ func test_joiner_full_bms_load_admits_against_the_joined_session_player_cap() ->
 
 	var joiner := Simulation.new()
 	assert_true(joiner.enable_join("127.0.0.1", host.get_host_listen_port(), "CapJoiner"))
-	joiner.set_join_world_ready(false)
 	# Retail authenticates and drains the pre-load burst (the 0x60/0x64
-	# transfers, the player list, the terminal 0x11) before it builds a world.
+	# transfers, the C2S 0x09, the terminal 0x11) before it builds a world.
 	var preloaded := false
 	for _i in range(600):
 		joiner.poll_join_preload()
@@ -739,7 +754,7 @@ func test_start_with_nvg_reseeds_on_player_init() -> void:
 
 	assert_false(sim.request_local_player_nvg_toggle())
 	assert_eq(sim.request_local_player_nvg_gain(3), 3)
-	sim.respawn_local_player_loadout()
+	sim.reinit_local_player()
 	view = sim.get_local_player_view()
 	assert_true(view.nvg_active,
 			"Player_InitPlayer reseeds the mission's StartWithNVGOn bit")
@@ -856,6 +871,7 @@ func _aim_verdict_sim(flags: int) -> Simulation:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	_resolve_player_row(sim)
 	var def_1 := WeaponDef.new()
 	def_1.name = "WPN_AIM_VERDICT"
 	def_1.set_actions([
@@ -1065,6 +1081,12 @@ func _mounted_npc_right_hand_verdict(seat_type: int) -> int:
   type object
   graphic seatgun
   phrase_set 6
+end
+
+begin "Generic Soldier"
+  id 105311
+  type person
+  move_function org1
 end
 """)
 	var sim := Simulation.new()
@@ -1295,6 +1317,7 @@ func test_weapon_clip_variant_ring_rotates_bake_reads_and_plays() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	_resolve_player_row(sim)
 	var def := WeaponDef.new()
 	def.name = "WPN_RING"
 	def.animadm = "ring.adm"
@@ -1362,6 +1385,7 @@ func test_weapon_event_batch_preserves_three_undrained_ticks() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	_resolve_player_row(sim)
 	var def := WeaponDef.new()
 	def.name = "WPN_EVENT_BATCH"
 	# The clip lengths below stand in for this ANIMADM's rings; a def with no
@@ -1439,6 +1463,7 @@ func test_weapon_event_batch_snapshots_the_scope_settle_tick() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	_resolve_player_row(sim)
 	var def := WeaponDef.new()
 	def.name = "WPN_SCOPE_BATCH"
 	def.set_actions([
@@ -1566,6 +1591,7 @@ func test_reload_during_scope_raise_does_not_stash_an_unpromoted_scope() -> void
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	_resolve_player_row(sim)
 	var def_5 := WeaponDef.new()
 	def_5.name = "WPN_SCOPE_RELOAD"
 	def_5.set_actions([
@@ -1600,6 +1626,7 @@ func test_weapon_event_batch_does_not_cross_lifecycle_boundaries() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	_resolve_player_row(sim)
 	var def := WeaponDef.new()
 	def.name = "WPN_EVENT_LIFECYCLE"
 	def.set_actions([WeaponActionRow.make("idle", 0, 0, "anim_wpn_idle")])
@@ -1651,6 +1678,7 @@ func test_restart_clears_powerthrow_charge_and_input_latches() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	_resolve_player_row(sim)
 	var def := WeaponDef.new()
 	def.name = "WPN_RESTART_POWERTHROW"
 	def.set_actions([
@@ -1855,12 +1883,18 @@ func test_item_seat_specs_mount_command_125_spawn() -> void:
 	# extraction supplies the seat table the Dictionary seam used to fake.
 	var fixture_dir := _native_fixture_dir()
 	_copy_fixture(fixture_dir, "res://../fixtures/threedi/synth/carrier.3di", "carrier.3di")
+	# The shipped truck row's AIData cveh class init brains the hull; a brainless
+	# hull's mover stops at its head, idle fold included (D-NET-433)
+	# [orig: Entity_UpdateVehiclePhysics @0x48AF00 (`jz` @0x48AFA6 -> @0x48D43E)].
 	var item_db := _item_db_from_text(fixture_dir, """begin "Drivable Transport Truck"
   id 101294
   type vehicle
   graphic carrier
-  attrib: PlayerControl
+  attrib: AIData PlayerControl
+  ai_function cveh
+  move_function cveh
   physics 1
+  hp 3000
   player_speed 60
   acceleration 10
   deceleration 20
@@ -1872,6 +1906,7 @@ end
 begin "Driver"
   id 102072
   type person
+  move_function org1
 end
 """)
 	var sndprof_path := fixture_dir.path_join("SndProf.def")
@@ -1918,6 +1953,16 @@ end
 	assert_true(sim.load_from_mission_data(md), "loaded command-125 mission with seat specs")
 	_install_people_table(sim)
 	sim.resolve_item_traits(item_db)
+	# A map with no water leaves the water word 0. This terrain-less rig's mission-start
+	# settle seats the hull on that word (the settle's floor is the higher of the ground
+	# and the plane), where the hull's in-water test, which compares the word raw, raises
+	# its flag. The plane then drops well below the rig, so from the first tick's solve
+	# on the hull is dry; that tick's drain (two health while the flag is up) is why the
+	# truck authors its hit points.
+	# [orig: Game_StartMission @0x525F80..0x526071; Entity_ProcessTrackedVehiclePhysics
+	#  @0x47C1C0 (@0x47D516..0x47D53A); Entity_UpdateVehiclePhysics @0x48AF00 (the drain
+	#  @0x48D05A..0x48D083); Environment_InitDefaults @0x57C010 (@0x57C011..0x57C01E)]
+	sim.set_water_z(-100.0)
 	# Command-125 boarders spawn ON FOOT and attach through the infantry
 	# think's board leg; the think gate is (logic_tick + 36*net_id) & 15,
 	# so drive a few 16-tick boundaries instead of a single step.
@@ -1989,7 +2034,9 @@ end
 			Vector3.ZERO) * ctrl_point
 	assert_lt(pos.distance_to(expected_ctrl), 0.001,
 		"command-125 soldier uses the IDA-priority ctrlx seat, converted to Godot axes")
-	assert_almost_eq(sim.get_entity_yaw_deg(soldier_idx), 0.0, 0.01,
+	# The seat yaw is the bone direction's fpatan through the carrier's Q22 matrix
+	# (D-NET-448), so a forward point lands within the tolerance on either side of 0.
+	assert_almost_eq(wrapf(sim.get_entity_yaw_deg(soldier_idx), -180.0, 180.0), 0.0, 0.01,
 		"the forward-facing ctrlx13 point carries a zero yaw offset")
 	# The mounted anim state (89 = anim_sit_13) is asserted via the debug card below; the present
 	# snapshot is the listen-server ClientState now (covered by listen_server_test).
@@ -2185,6 +2232,12 @@ func test_attach_labels_hide_occupied_and_out_of_range() -> void:
   type object
   graphic ctrlgun
 end
+
+begin "Driver"
+  id 102072
+  type person
+  move_function org1
+end
 """)
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
@@ -2291,6 +2344,12 @@ func test_mounted_seat_local_matches_rotated_vehicle_userpoint() -> void:
   attrib: PlayerControl
   type vehicle
   graphic carrier
+end
+
+begin "Driver"
+  id 102072
+  type person
+  move_function org1
 end
 """)
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
@@ -2450,6 +2509,12 @@ func test_command_125_usegun_mount_renders_emplaced_pose() -> void:
   graphic mount
   phrase_set 3
 end
+
+begin "Driver"
+  id 102072
+  type person
+  move_function org1
+end
 """)
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md), "loaded command-125 UseGun mount")
@@ -2503,7 +2568,7 @@ func test_foliage_mask_anchors_track_local_player_stance() -> void:
 	assert_true(sim.load_from_mission_data(md))
 	var spawn := Vector3(24.0, 0.0, -12.0)
 	assert_true(sim.spawn_local_player(spawn, 0.0, 1))
-	# The player's visual item (105310, graphic US01) over the synthetic
+	# The player's row (105305, graphic US01, the row 0x14B9 names) over the synthetic
 	# person model gives the body its entity+0 bound radius, which the
 	# collector's person leg projects.
 	var item_db := ItemDatabase.new()
@@ -2795,7 +2860,17 @@ func test_effect_state_lookup_uses_the_live_registry_not_the_ai_pool() -> void:
 	if state.size() == Simulation.EFFECT_STATE_COUNT:
 		assert_eq(state[Simulation.EFFECT_STATE_POSITION], Vector3(3, 5, -4),
 				"effect position uses the canonical mission-to-Godot frame")
-		assert_eq(state[Simulation.EFFECT_STATE_ROTATION_DEG], Vector3(10, 20, 30),
+		# The entity keeps the placed Yaw, Pitch and Roll words, each the
+		# truncating spawn angle of its degrees (90 - yaw for the Yaw word:
+		# (70 << 16) / 360 = 12743, then << 16), and the adapter reads them back
+		# as degrees: 20.00061 for the yaw, 9.99756 for the pitch 10 and
+		# 29.99817 for the roll 30, not the authored whole degrees.
+		# [orig: Entity_SpawnFromBMSRecord @0x40E9F0 - @0x40EB42..0x40EBA6]
+		var yaw_word := int((90 - 20) * 65536 / 360.0) * 65536
+		var yaw_deg := 90.0 - float(yaw_word) * 360.0 / 4294967296.0
+		var pitch_deg := float(int(10 * 65536 / 360.0) * 65536) * 360.0 / 4294967296.0
+		var roll_deg := float(int(30 * 65536 / 360.0) * 65536) * 360.0 / 4294967296.0
+		assert_eq(state[Simulation.EFFECT_STATE_ROTATION_DEG], Vector3(pitch_deg, yaw_deg, roll_deg),
 				"effect orientation remains mission Euler degrees for the host adapter")
 	assert_true(sim.get_entity_effect_state_for_ssn(0).is_empty(), "SSN zero is invalid")
 	assert_true(sim.get_entity_effect_state_for_ssn(65536).is_empty(),
@@ -4189,6 +4264,7 @@ func test_local_fire_exports_recoil_camera_and_hud_spread() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	_resolve_player_row(sim)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(_sim_def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
@@ -4279,11 +4355,13 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 	var weapon_state := sim.get_local_player_weapon_state()
 	assert_eq(weapon_state.round_ring_count, 1,
 			"local FIRE appends exactly one tag-2 fan-out record")
-	# The fixture M4's first shot samples the pre-consume 30-round magazine, so
-	# ((30 & 3) << 4) | 2 produces 0x22, not a hard-coded 0x02 and not the
+	# The mode byte's high bits are the slot's own word +0x10's low two bits, which
+	# only a weapon without an ammo bucket writes: the fixture M4AUTO authors
+	# ammobucket 1, so its word keeps the slot init's zero and the byte is 0x02 on
+	# every shot (a retail host's M4AUTO rounds carry 0x02, D-NET-NEW-L7-8), not the
 	# unrelated category/rank weapon-slot combo.
-	# [orig: WeaponAction_Fire @ 0x542c11; net-re §5.9.1 capture cross-witness]
-	assert_eq(weapon_state.last_round_flags, 0x22)
+	# [orig: WeaponAction_Fire @ 0x542BFC..0x542C11; Weapon_ConsumeAmmo @ 0x540907..0x540913]
+	assert_eq(weapon_state.last_round_flags, 0x02)
 	assert_eq(weapon_state.last_round_subtype, 12,
 			"ordinary on-foot hip fire carries the retail default zoom subtype")
 	assert_eq(weapon_state.last_round_slot_byte, 0,
@@ -4724,7 +4802,13 @@ func test_armory_reads_and_clears_authoritative_local_loadout() -> void:
 		"the ACCEPT re-selected the accepted weapon")
 	assert_true(sim.apply_local_player_loadout([], 9), "the all-NONE kit is a valid apply")
 	assert_eq(sim.get_local_player_class(), 9, "NONE still commits the selected class")
-	assert_eq(sim.get_local_player_weapon_name(), "", "NONE clears the equipped AdmDef")
+	# The all-NONE kit's select finds no slot, and that arm stores no equipped AdmDef: the
+	# body keeps the one the previous ACCEPT selected (engine select_current_slot carries
+	# the witness: Player_SelectWeaponSlot's walk @0x4DD772..0x4DD794 returns 0 at
+	# @0x4DD796..0x4DD799 with no +0x2B0 store; WeaponLoadout_ApplyFromBuffer's select
+	# @0x566285).
+	assert_eq(sim.get_local_player_weapon_name(), "WPN_M4AUTO",
+		"NONE selects no slot, so the body keeps its equipped AdmDef")
 	assert_true(sim.get_local_player_loadout().is_empty(),
 		"an explicit all-NONE kit remains empty instead of falling back to M4")
 
@@ -4735,6 +4819,7 @@ func test_same_name_armory_accept_refills_the_live_weapon_slot() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	_resolve_player_row(sim)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(_sim_def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
@@ -4779,6 +4864,7 @@ func test_loadout_weapon_category_switch_changes_equipped_weapon() -> void:
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 2))
+	_resolve_player_row(sim)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(_sim_def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
@@ -4807,12 +4893,13 @@ func test_loadout_weapon_category_switch_changes_equipped_weapon() -> void:
 		"switching to a secondary in the accepted loadout changes the equipped weapon")
 
 
-func test_weapon_switch_requested_during_draw_commits_without_a_second_press() -> void:
+func test_weapon_switch_requested_during_draw_is_refused_until_a_second_press() -> void:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 2))
+	_resolve_player_row(sim)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(_sim_def_root()), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
@@ -4824,32 +4911,42 @@ func test_weapon_switch_requested_during_draw_commits_without_a_second_press() -
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(_sim_def_root().path_join("weapon.def")), OK)
 	var primary_index := weapons.find_weapon("WPN_M4AUTO")
-	var secondary_index := weapons.find_weapon("WPN_colt45")
 	assert_gte(primary_index, 0)
-	assert_gte(secondary_index, 0)
 	sim.set_local_player_weapon(weapons.get_weapon(primary_index), {})
 
-	# First switch normally, then mirror the LocalPlayerPresenter installing the new
-	# weapon definition. Its first tick enters SWITCHTO (the draw animation).
+	# First switch normally: its commit mounts the new weapon definition itself (no
+	# presenter install between), so the tick after it enters SWITCHTO (the draw animation).
 	sim.request_local_player_weapon_category(2)
 	for _tick in range(120):
 		sim.step()
 		if sim.get_local_player_weapon_name() == "WPN_colt45":
 			break
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_colt45")
-	sim.set_local_player_weapon(weapons.get_weapon(secondary_index), {})
 	sim.step()
 	assert_eq(sim.get_local_player_weapon_state().current_action, 6,
 		"the newly equipped secondary is drawing through SWITCHTO")
 
-	# One press during that draw must be remembered and committed after it settles.
+	# A press during that draw is refused: the mount stores the pending word, but the
+	# held slot's SWITCHFROM is never queued over a running SWITCHTO and no request is
+	# retained, so the draw runs out on the secondary [orig: Player_MountWeaponSlot
+	# @0x4DFA40 (WeaponSlot_ForceQueueSwitchFrom @0x4DFB9E); WeaponSlot_ForceQueueSwitchFrom
+	# @0x53F170 (the SWITCHFROM / SWITCHTO refusal @0x53F17A..0x53F185)].
+	sim.request_local_player_weapon_category(3)
+	for _tick in range(120):
+		sim.step()
+	assert_eq(sim.get_local_player_weapon_name(), "WPN_colt45",
+		"a switch requested during the draw is refused")
+	assert_ne(sim.get_local_player_weapon_state().current_action, 6,
+		"the secondary's draw ran out")
+
+	# A second press, over no draw, switches.
 	sim.request_local_player_weapon_category(3)
 	for _tick in range(120):
 		sim.step()
 		if sim.get_local_player_weapon_name() == "WPN_M4AUTO":
 			break
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_M4AUTO",
-		"a switch requested during draw does not require a second press")
+		"a press after the draw commits")
 
 
 func test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose() -> void:
@@ -4932,8 +5029,6 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 	assert_eq(weapons.load(_sim_def_root().path_join("weapon.def")), OK)
 	var personal: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
-	var mounted: WeaponDef = weapons.get_weapon(
-			weapons.find_weapon("WPN_EMPLCD50"))
 	sim.set_local_player_weapon(personal, {})
 	sim.drain_local_player_weapon_events()
 	sim.step() # seed the decoded listen-client present rows
@@ -4950,9 +5045,9 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 	var mount_event_found := false
 	for raw in sim.drain_local_player_weapon_events():
 		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_EMPLCD50":
-			mount_event_found = true
-	assert_true(mount_event_found)
-	sim.set_local_player_weapon(mounted, {}, true)
+			# The commit mounted the gun's def on the sim; the event is the viewmodel's.
+			mount_event_found = (raw as PlayerWeaponEvent).installed
+	assert_true(mount_event_found, "the attach's commit mounts the gun's def itself")
 	assert_eq(_present_field_for_origin(sim, MissionData.KIND_ITEM, gun_index,
 			Simulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
 			"authored gfx1 alone cannot cull when its first-person model failed to resolve")
@@ -5022,6 +5117,12 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	# Listen-host player creation rebuilds the authoritative registry. Bind the
 	# collision instance to that final registry identity, as GameWorld does.
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
+	# The heat window closes for a walked body at or below the water word, which a
+	# map with no water leaves 0 and this rig's bodies sit on: the plane goes well
+	# below them so the window's water gate is clear of its edge.
+	# [orig: WeaponAction_ProcessFrame @0x540E60 (@0x541004..0x54100D);
+	#  Environment_InitDefaults @0x57C010 (@0x57C011..0x57C01E)]
+	sim.set_water_z(-100.0)
 
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(_sim_def_root()), OK)
@@ -5031,8 +5132,6 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	assert_eq(weapons.load(_sim_def_root().path_join("weapon.def")), OK)
 	var personal: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
-	var mounted: WeaponDef = weapons.get_weapon(
-			weapons.find_weapon("WPN_EMPLCD50NA"))
 	sim.set_local_player_weapon(personal, {})
 	sim.drain_local_player_weapon_events()
 	sim.step()
@@ -5060,9 +5159,9 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 	var mounted_switch := false
 	for raw in sim.drain_local_player_weapon_events():
 		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_EMPLCD50NA":
-			mounted_switch = true
-	assert_true(mounted_switch)
-	sim.set_local_player_weapon(mounted, {}, true)
+			# The commit mounted the gun's def on the sim; the event is the viewmodel's.
+			mounted_switch = (raw as PlayerWeaponEvent).installed
+	assert_true(mounted_switch, "the attach's commit mounts the gun's def itself")
 	assert_eq(_present_field_for_origin(
 			sim, MissionData.KIND_ITEM, gun_index,
 			Simulation.PF_WORLD_HEAT_GLOW_VALID), 1)
@@ -5148,8 +5247,6 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 	assert_eq(weapons.load(_sim_def_root().path_join("weapon.def")), OK)
 	var personal: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
-	var mounted: WeaponDef = weapons.get_weapon(
-			weapons.find_weapon("WPN_EMPLCD50NA"))
 	sim.set_local_player_weapon(personal, {})
 	sim.drain_local_player_weapon_events()
 	assert_true(sim.local_player_toggle_mount())
@@ -5158,9 +5255,12 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 			0.001, "mounted player origin coincides with the authored Usegun point")
 	assert_lt(absf(wrapf(sim.get_local_player_yaw_deg(), -180.0, 180.0)),
 			0.01, 'UseGun attach pre-snaps a mismatched local look to the gun yaw')
+	var mount_installed := false
 	for raw in sim.drain_local_player_weapon_events():
 		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_EMPLCD50NA":
-			sim.set_local_player_weapon(mounted, {}, true)
+			# The commit mounted the gun's def on the sim; the event is the viewmodel's.
+			mount_installed = (raw as PlayerWeaponEvent).installed
+	assert_true(mount_installed, "the attach's commit mounts the gun's def itself")
 	sim.debug_set_panm_time_ms(0)
 	var initial_weapon_state := sim.get_local_player_weapon_state()
 	assert_true(initial_weapon_state.emplaced_controls_valid)
@@ -5251,6 +5351,17 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 		WeaponKitEntry.make("WPN_M4AUTO"),
 		WeaponKitEntry.make("WPN_M4"),
 	], 1))
+	# The apply mounts the slot its select stored, which plays SWITCHRANK on that slot
+	# (engine world/player_loadout.cpp select_current_slot carries the witness); the def
+	# object below installs over the idle slot once that has run out.
+	var apply_settled := false
+	for _settle in range(240):
+		var settling := sim.get_local_player_weapon_state()
+		if int(settling.current_action) == 0 and int(settling.next_action) == 0:
+			apply_settled = true
+			break
+		sim.step()
+	assert_true(apply_settled, "the apply's SWITCHRANK on its own slot runs out")
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(_sim_def_root().path_join("weapon.def")), OK)
 	var personal_idx := weapons.find_weapon("WPN_M4AUTO")
@@ -5260,8 +5371,10 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 	var personal_def: WeaponDef = weapons.get_weapon(personal_idx)
 	var mounted_def: WeaponDef = weapons.get_weapon(mounted_idx)
 	# Exercise the merge seam with a PowerThrow-shaped personal def while the
-	# authoritative inventory still selects WPN_M4AUTO. A UseGun handoff must
-	# cancel its windup before borrowing the parent's persistent slot.
+	# authoritative inventory still selects WPN_M4AUTO. A UseGun handoff runs no walk,
+	# so the running windup rides onto the parent's persistent slot (retail's mount
+	# writes no g_FireChargeStartTick); the gun's def draws no charge bar, and no
+	# charged personal round leaks.
 	var powerthrow_personal := personal_def.copy()
 	powerthrow_personal.flags = personal_def.flags | (1 << 31)
 	sim.set_local_player_weapon(powerthrow_personal, {})
@@ -5295,14 +5408,17 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 			"an Emplaced pending def takes retail's same-pump -901 commit")
 	assert_true(mount_event.preserve_slot_state,
 			"the host must not reset the emplacement's persistent slot")
+	assert_true(mount_event.installed,
+			"the -901 commit mounts the gun's def itself; the event is the viewmodel's")
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_AVENGER")
 	var handed_off := sim.get_local_player_weapon_state()
+	# The bar's def is the EquippedSlot's, the gun's, which its commit mounted: the
+	# PowerThrow personal def no longer reads once the slot is stored.
 	assert_false(handed_off.windup_active,
-			"UseGun input suppression cancels the outgoing PowerThrow windup")
+			"the borrowed gun's def (no PowerThrow flag) draws no charge bar")
 	assert_eq(handed_off.fired_serial, personal_fired_before)
 	assert_eq(handed_off.round_ring_count, personal_rounds_before,
 			"releasing through the handoff cannot leak a charged personal round")
-	sim.set_local_player_weapon(mounted_def, {}, true)
 	var mounted_before := sim.get_local_player_weapon_state()
 	assert_eq(mounted_before.clip,
 			mounted_def.clipsize)
@@ -5357,7 +5473,8 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 	assert_false(detach_event == null,
 			"outgoing Emplaced detach also commits on the next pump")
 	assert_true(detach_event.preserve_slot_state)
-	sim.set_local_player_weapon(personal_def, {}, true)
+	assert_true(detach_event.installed,
+			"the switch back's commit mounts the personal def itself")
 	assert_eq(sim.get_local_player_weapon_state().clip,
 			personal_clip, "the personal slot resumes with its original magazine")
 
@@ -5379,7 +5496,7 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 		if not remount_event == null:
 			break
 	assert_false(remount_event == null)
-	sim.set_local_player_weapon(mounted_def, {}, true)
+	assert_true(remount_event.installed)
 	assert_eq(sim.get_local_player_weapon_state().clip,
 			mounted_clip_after,
 			"the emplacement keeps its own clip state while nobody is attached")
@@ -5398,7 +5515,14 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 			"the mounted definition cannot pump the restored personal slot")
 
 
-func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> void:
+# A gun-to-gun move is the process's detach and then its attach: the detach's mount
+# force-queues SWITCHFROM on the old gun's slot and lowers the view, the attach's mount
+# (the same category) finds that lower and queues no SWITCHRANK, and the old slot's
+# SWITCHFROM commits the new gun and queues its draw (L7-s25)
+# [orig: Entity_ProcessVehicleAttach @0x435AA0 (@0x435BCE); Entity_DetachFromVehicle
+#  @0x4355F0 (@0x43565F); Player_MountWeaponSlot @0x4DFA40 (@0x4DFB8D..0x4DFB96);
+#  WeaponAction_SwitchFrom @0x5433B0 (@0x543475, @0x5434A3)].
+func test_local_usegun_direct_swap_commits_the_latest_parent_at_the_detach_switchfrom() -> void:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	# Three guns in a row along their +y facing, 3.5 u apart: a seated USE
@@ -5439,10 +5563,6 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 	assert_eq(weapons.load(_sim_def_root().path_join("weapon.def")), OK)
 	var personal: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
-	var first_mount: WeaponDef = weapons.get_weapon(
-			weapons.find_weapon("WPN_AVENGER"))
-	var second_mount: WeaponDef = weapons.get_weapon(
-			weapons.find_weapon("WPN_EMPLCD50"))
 	sim.set_local_player_weapon(personal, {})
 	sim.drain_local_player_weapon_events()
 	# Seed the listen-client rows and let the personal slot reach an attachable
@@ -5462,7 +5582,7 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_AVENGER":
 			first_event = raw
 	assert_false(first_event == null)
-	sim.set_local_player_weapon(first_mount, {}, true)
+	assert_true(first_event.installed, "the attach's commit mounts the gun's def itself")
 	# Even a host-side resolution report cannot manufacture fpModel on a Def that
 	# has none, and a different target Def must not inherit that model identity.
 	sim.set_local_player_first_person_model_available(true)
@@ -5483,7 +5603,7 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 	assert_true(sim.local_player_toggle_mount(),
 			"a second gun inside the seated 5 deg cone is a direct mounted-seat swap")
 	assert_eq(sim.get_local_player_weapon_name(), "WPN_AVENGER",
-			"the old parent remains equipped until the rank commit")
+			"the old parent remains equipped until the detach's SWITCHFROM commits")
 	assert_eq(_present_field_for_origin(sim, MissionData.KIND_ITEM,
 			first_gun_index, Simulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
 			"pre-commit swap restores the old parent world model")
@@ -5497,7 +5617,7 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 			swap_event = raw
 	assert_false(swap_event == null,
 			"latest pending parent commits directly with no personal interlude")
-	sim.set_local_player_weapon(second_mount, {}, true)
+	assert_true(swap_event.installed, "the swap's commit mounts the new gun's def itself")
 	assert_eq(_present_field_for_origin(sim, MissionData.KIND_ITEM,
 			first_gun_index, Simulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
 			"the committed swap leaves the old AVENGER parent visible")
@@ -5509,15 +5629,24 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 			second_gun_index, Simulation.PF_LOCAL_VIEW_SUPPRESSED), 1,
 			"the resolved EMPLCD50 replacement culls only its own world model")
 	sim.step()
-	assert_eq(sim.get_local_player_weapon_state().current_action, 0,
-			"SWITCHRANK does not queue SWITCHTO onto the target parent slot")
+	assert_eq(sim.get_local_player_weapon_state().current_action, 6,
+			"the SWITCHFROM's commit draws the target parent slot (SWITCHTO)")
 	assert_true(sim.get_local_player_weapon_state().borrowed_usegun_slot)
 
 	# The scan walks the rider's proximity slice, which refreshes every 16
 	# ticks; it was last built at the first gun's seat, 8 u from the third gun,
-	# so let it refresh before looking down the row.
+	# so let it refresh before looking down the row. The USE toggle is the
+	# weapon-busy gate's too: it swallows the press while the second gun's draw
+	# runs (currentAction SWITCHTO), so the draw runs out first [orig:
+	# Entity_ToggleVehicleMount @0x436958..0x436977].
 	for _tick in range(17):
 		sim.step()
+	for _tick in range(80):
+		if sim.get_local_player_weapon_state().current_action < 2:
+			break
+		sim.step()
+	assert_true(sim.get_local_player_weapon_state().current_action < 2,
+			"the second gun's draw ran out")
 	MountLook.face(self, sim, MountLook.local_player_mission_position(sim) + Vector3(0, 3.5, 0))
 	assert_true(sim.local_player_toggle_mount(),
 			"a third gun down the row drives a second direct mounted-seat swap")
@@ -5558,10 +5687,10 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(_sim_def_root().path_join("weapon.def")), OK)
-	var mounted_def: WeaponDef = weapons.get_weapon(
-			weapons.find_weapon("WPN_AVENGER"))
 	var personal_def: WeaponDef = weapons.get_weapon(
 			weapons.find_weapon("WPN_M4AUTO"))
+	# The kit the respawn's select rebuilds.
+	assert_true(sim.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 1))
 	sim.set_local_player_weapon(personal_def, {})
 	sim.drain_local_player_weapon_events()
 
@@ -5574,23 +5703,47 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 			mount_event = raw
 	assert_false(mount_event == null,
 			"the emplacement commits before its SWITCHTO draw")
-	sim.set_local_player_weapon(mounted_def, {}, true)
+	assert_true(mount_event.installed, "the attach's commit mounts the gun's def itself")
+	# The commit queued the gun's draw; the next pump enters it, so the death lands
+	# over a running SWITCHTO (a detach ahead of that pump would find the draw only
+	# queued, and its mount's SWITCHFROM would take the slot and commit the switch back
+	# at once) [orig: WeaponAction_SwitchFrom @0x5433B0 (WeaponSlot_TryQueueSwitchTo
+	# @0x5434A3); WeaponSlot_ForceQueueSwitchFrom @0x53F170 (@0x53F17A..0x53F185)].
+	sim.step()
+	assert_eq(sim.get_local_player_weapon_state().current_action, 6,
+			"the gun's draw runs when the death lands")
 	var fired_before := sim.get_local_player_weapon_state().fired_serial
+	# The switch back's commit mounts the personal def at once, which starts its serials
+	# over: the round ring is the witness a shot would leave across it.
+	var rounds_before := sim.get_local_player_weapon_state().round_ring_count
 	sim.set_local_player_weapon_input(true, true, false)
 	sim.debug_set_entity_health(0, 0)
+	# The death's detach mounts the personal slot over the gun's running draw: its
+	# SWITCHFROM is refused and nothing retains it, so the draw runs out and the dead
+	# gunner holds the gun's slot (L7-s25) [orig: Entity_DetachFromVehicle @0x4355F0
+	# (@0x43565F); WeaponSlot_ForceQueueSwitchFrom @0x53F170 (@0x53F17A..0x53F185)].
 	var restore_event: PlayerWeaponEvent = null
 	for _tick in range(160):
 		sim.step()
 		for raw in sim.drain_local_player_weapon_events():
 			if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_M4AUTO":
 				restore_event = raw
-		if not restore_event == null:
-			break
-	assert_false(restore_event == null,
-			"forced detach during SWITCHTO eventually restores the personal slot")
+	assert_true(restore_event == null,
+			"a forced detach during SWITCHTO commits no switch back while the player is dead")
+	assert_true(sim.get_local_player_weapon_state().borrowed_usegun_slot)
 	assert_eq(sim.get_local_player_weapon_state().fired_serial,
 			fired_before, "a dead local gunner cannot fire the emplacement")
-	sim.set_local_player_weapon(personal_def, {}, true)
+	assert_eq(sim.get_local_player_weapon_state().round_ring_count, rounds_before,
+			"no round of the dead gunner's reached the ring")
+	# The respawn's select stores the personal slot as the EquippedSlot, off any seat,
+	# which ends the borrow [orig: Player_SelectWeaponSlot @0x4DD680 (@0x4DD6E0..0x4DD704)].
+	sim.reinit_local_player()
+	for raw in sim.drain_local_player_weapon_events():
+		if (raw as PlayerWeaponEvent).switch_to_weapon == "WPN_M4AUTO":
+			restore_event = raw
+	assert_false(restore_event == null, "the respawn's select restores the personal slot")
+	if restore_event != null:
+		assert_true(restore_event.installed)
 	assert_false(sim.get_local_player_weapon_state().borrowed_usegun_slot)
 
 

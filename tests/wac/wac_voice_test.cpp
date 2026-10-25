@@ -145,6 +145,28 @@ static void test_invalid_speaker_does_not_interrupt_and_dead_anchor_stops() {
     CHECK(f.world.script.voice.ready());
 }
 
+// The anchor reset is the scene frame's voice update alone: the update's tick leaves a dead
+// anchor's voice busy (WaveReady false) until the frame runs, and the channel as it stands
+// (sample, what a start plays with and the device follows) resets nothing.
+// [orig: Audio_UpdateAmbientStream @0x4ED9C0, its one caller Render_ProcessMainSceneFrame
+//  @0x5CA348; WacCmd_WaveReady @0x4ED380]
+static void test_the_update_never_resets_the_anchor() {
+    Fixture f;
+    f.script("if SSNwave(2,\"tone.wav\",10) then inc(v1) endif\n");
+    CHECK(f.world.script.vars.get_mission(1) == 1);
+    f.world.registry.get(f.speaker)->flags |= 2u;
+    f.world.run_logic_tick(true, TickPhase::PreMission);
+    CHECK(!f.world.script.voice.ready());
+    const auto held = f.world.script.voice.sample(f.world, {});
+    CHECK(held.state.anchor == f.speaker && !f.world.script.voice.ready());
+    f.script("if waveready() then inc(v2) endif\n");
+    CHECK(f.world.script.vars.get_mission(2) == 0);
+    (void)f.world.script.voice.frame(f.world, {});
+    CHECK(f.world.script.voice.ready());
+    f.script("if waveready() then inc(v3) endif\n");
+    CHECK(f.world.script.vars.get_mission(3) == 1);
+}
+
 static void test_item_type_gate_and_playback_definition_gate_are_distinct() {
     Fixture f;
     f.world.registry.get(f.speaker)->item_id = 0;
@@ -276,6 +298,7 @@ int main() {
     test_spatial_speaker_and_radio_anchor();
     test_invalid_speaker_does_not_interrupt_and_dead_anchor_stops();
     test_item_type_gate_and_playback_definition_gate_are_distinct();
+    test_the_update_never_resets_the_anchor();
     test_retry_restarts_channel_without_accepting_old_completion();
     std::printf(failures ? "WAC voice tests FAILED (%d)\n" : "WAC voice tests passed\n", failures);
     return failures ? 1 : 0;

@@ -60,9 +60,26 @@ const MAX_PENDING_HUD_MESSAGES := 40
 # wac/remote_command.cpp, wac/vm.cpp, hud/hud_frame.h push_chat_line).
 const SCRIPT_CHAT_ARGB := -1
 
-# HudOverlay, built on the first frame a mission has a local player
-# (ensure_game_hud(); the GUT files build the real one over a staged root).
+# HudOverlay, built and loaded inside every mission start's load (the world's
+# hud_overlay_init / hud_textures_load legs) and mounted on the first frame the
+# mission has a local player (ensure_game_hud(); the GUT files build the real one
+# over a staged root).
 var _game_hud: HudOverlay = null
+# Whether the load's forced frame mounted the overlay (_on_hud_pipeline_warm), which the
+# frame's end takes off the tree again.
+var _hud_warm_mounted := false
+# Whether the forced frame's draws stand on the overlay's own item and the veil's (has_warm_draw).
+var _hud_warm_drawn := false
+# The canvas programs the load's HUD leg made (_make_canvas_programs).
+var _load_canvas_programs: Array[RID] = []
+# The HUD's process words across the per-mission overlay rebuild (the item flash timers, the
+# stance and ammo keys, the waypoint altitude colour, the silhouette keys): retail's are process
+# words no mission start resets, so each keeps its value into the next mission (engine
+# hud_frame.h HudProcessWords carries the witness).
+var _process_words: HudProcessWordsCarry = null
+# Whether the HUD's textures leg ran the full arm (false: a dedicated host's reduced
+# arm, which loads no terrain picture).
+var _hud_full_arm := true
 var _scoreboard := ScoreboardPresenterScript.new()  # the Tab player list lane
 var _vehicle_panel := VehiclePanelPresenterScript.new()  # the mounted-vehicle panel lane
 var _message_log := MessageLogPresenterScript.new()  # the Recent Messages (J) lane + chat drain
@@ -161,8 +178,10 @@ var _map_legend_title := ""
 var _map_legend_labels := PackedStringArray()
 
 # Every HUD key is a polled catalog row (HudToggles.Row: Goals G, ShowFriendly
-# K, help F1, helpmap F12, Briefing I, ...) sampled in tick(); the rows, the
-# cycles and the window toggles are the engine's (runtime/hud/hud_toggles.h).
+# K, help F1, helpmap F12, Briefing I, ...) the player input router polls in
+# each input frame and tick() applies (PlayerInputRouter::poll_hud_toggles);
+# the rows, the cycles and the window toggles are the engine's
+# (runtime/hud/hud_toggles.h).
 # Retail has NO HUD-visibility key: H is only the secondary `pause` binding
 # (SP-only), and the boot /NOHUD switch is the sole whole-overlay master
 # [orig: catalog row 70 vk2 0x48; case 25 @0x49b520; /NOHUD gates
@@ -178,6 +197,8 @@ func setup(world: GameWorld, player_presenter_in: LocalPlayerPresenter, ui_paren
 	# PlayerActions' menu arms carry the witness).
 	if _player_presenter != null:
 		_player_presenter.set_hud_toggles(_toggles)
+		# The talk rows ride the router's input frames too (its poll_talk_rows).
+		_player_presenter.set_hud_chat(_chat, Strings.get_table(Strings.TABLE_GAMETEXT))
 	# Connect before any world can tick: PreMission/WAC effects may drain on the
 	# first runtime tick, while the local-player HUD is deliberately built only
 	# after that tick (the pending queue holds them). The connect persists for the
@@ -187,6 +208,14 @@ func setup(world: GameWorld, player_presenter_in: LocalPlayerPresenter, ui_paren
 	if _world != null and not _world.minimap_water_changed.is_connected(
 			_on_minimap_water_changed):
 		_world.minimap_water_changed.connect(_on_minimap_water_changed)
+	# The HUD builds and loads inside every mission start's load, at its two HUD
+	# legs (GameWorld carries the witness, D-NET-NEW-L8-40).
+	if _world != null and not _world.hud_overlay_init.is_connected(_on_hud_overlay_init):
+		_world.hud_overlay_init.connect(_on_hud_overlay_init)
+	if _world != null and not _world.hud_textures_load.is_connected(_on_hud_textures_load):
+		_world.hud_textures_load.connect(_on_hud_textures_load)
+	if _world != null and not _world.hud_pipeline_warm.is_connected(_on_hud_pipeline_warm):
+		_world.hud_pipeline_warm.connect(_on_hud_pipeline_warm)
 
 
 ## Undo everything a mission built: the HUD node (its card/effects children go
@@ -204,8 +233,11 @@ func set_chat_presets(macros: PackedStringArray) -> void:
 func teardown(restart := false) -> void:
 	finish_hud_hidden_capture()
 	if _game_hud != null:
+		_process_words = _game_hud.get_process_words()
 		_game_hud.queue_free()
 		_game_hud = null
+	_hud_warm_mounted = false
+	_hud_warm_drawn = false
 	if _world != null:
 		_world.set_inset_scope(null)
 	_inset_scope = null
@@ -244,7 +276,11 @@ func get_ui_parent() -> Node:
 
 
 func _on_minimap_water_changed(mask: ImageTexture) -> void:
-	if _game_hud == null:
+	# A reduced arm's HUD holds no terrain picture (_load_hud_textures). The load
+	# makes the mask with the terrain's textures, ahead of the HUD's: the textures
+	# leg takes it then, so an overlay not yet loaded waits for that leg rather than
+	# making the map picture twice.
+	if _game_hud == null or not _game_hud.is_configured() or not _hud_full_arm:
 		return
 	_game_hud.set_minimap_terrain(
 			_world.get_terrain_data() if _world != null else null, mask,
@@ -342,19 +378,91 @@ func get_slot_bar_key_labels_revision() -> int:
 	return _slot_bar_key_labels_revision
 
 
-## Build the overlay if the mission has none yet (update() does it on the first
-## frame with a local player; the GUT files build it over a staged root).
-## The in-game HUD over the live runtime: built lazily the first frame a mission
-## has a local player (so net spectators, which have none, never get it), from
-## the witnessed hudpos.def layout on the world's mounted VFS; the SIGHTS card
-## and the PlayerViewEffects post stack mount as behind-parent children of the
-## overlay, the child-control stack the ported shell HUD carried.
+## Build, load and mount the overlay if the mission has none yet: the load's two
+## HUD legs (_on_hud_overlay_init, _on_hud_textures_load) build and load it inside
+## every mission start's load; the first frame with a local player (a dedicated
+## host's first frame) mounts it; the GUT files run all three here over a staged
+## root. The SIGHTS card and the PlayerViewEffects post stack ride as behind-parent
+## children of the overlay, the child-control stack the ported shell HUD carried.
 ## [orig: HUD_RenderAllOverlays @0x5a8070]
 func ensure_game_hud() -> void:
+	if _game_hud == null:
+		_init_overlay_system(_world.get_loaded_mission_file() if _world != null else "")
+	if not _game_hud.is_configured():
+		var sim: Simulation = _world.get_sim() if _world != null else null
+		_load_hud_textures(sim == null or sim.session_role() != Simulation.ROLE_DEDICATED_HOST)
+	_mount_game_hud()
+
+
+## The load's overlay-init leg (GameWorld.hud_overlay_init, every mission start and
+## every role, ahead of a joiner's first 0x2F): the overlay and its children are
+## built off the tree and the HUD's layout file, string tables and map-grid origin
+## are read, as retail's mission start inits its overlay system there whether or not
+## a player of its own will ever draw it (engine mission/mission_load_plan.h carries
+## the witness).
+func _on_hud_overlay_init(mission_file: String) -> void:
 	if _game_hud != null:
 		return
+	_init_overlay_system(mission_file)
+
+
+## The load's HUD textures leg (GameWorld.hud_textures_load, at the mission textures
+## stage past the model freeze, on every arm, `full_arm` false on a dedicated host's
+## reduced one; engine mission/mission_load_plan.h carries the witness).
+func _on_hud_textures_load(full_arm: bool) -> void:
+	if _game_hud != null and not _game_hud.is_configured():
+		_load_hud_textures(full_arm)
+
+
+## The load's one forced frame (GameWorld.hud_pipeline_warm, `drawing` true ahead of its
+## draw, false once it drained): the overlay the two legs above built and loaded mounts for
+## that frame alone and submits its draw at once (the SceneTree is blocked, so a queued
+## redraw would reach the frame empty), so its canvas pipelines compile behind the loading
+## screen, not in the first revealed frame (D-NET-NEW-LF-16). It leaves the tree again, and the
+## frame's draws leave with it: Godot clears an item at a redraw only once it drew the item itself,
+## so the real mount's first redraw would add to what the frame submitted, and the veil's static
+## rect blended its quad twice all mission. The first frame with a local player mounts it as before
+## (ensure_game_hud).
+func _on_hud_pipeline_warm(drawing: bool) -> void:
+	if drawing:
+		if _game_hud == null or not _game_hud.is_configured() or _game_hud.is_inside_tree():
+			return
+		_hud_warm_mounted = true
+		var mount: Node = _ui_parent if _ui_parent != null else self
+		mount.add_child(_game_hud)
+		_game_hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_view_effects.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_game_hud.submit_draw_now()
+		_view_effects.submit_draw_now()
+		_hud_warm_drawn = true
+		return
+	if not _hud_warm_mounted:
+		return
+	_hud_warm_mounted = false
+	if _game_hud != null:
+		RenderingServer.canvas_item_clear(_game_hud.get_canvas_item())
+		_view_effects.release_warm_draw()
+		_hud_warm_drawn = false
+		if _game_hud.is_inside_tree():
+			_game_hud.get_parent().remove_child(_game_hud)
+
+
+## Whether the load's forced frame's draws still stand on the overlay's item and the veil's (a read
+## seam for the load pins: none outlives the frame).
+func has_warm_draw() -> bool:
+	return _hud_warm_drawn
+
+
+# The overlay system's init: the overlay and its child controls, the hudpos.def
+# parse, the string tables, the map-grid origin and the toggles' per-mission
+# pushes. Nothing is mounted: the overlay draws from the first frame a mission has
+# a player of its own (_mount_game_hud).
+func _init_overlay_system(mission_file: String) -> void:
 	_game_hud = HudOverlay.new()
 	_game_hud.name = "GameHud"
+	# The process words the last mission's overlay held; the new overlay's fade stamps and item
+	# flash last tick stay zero, as the start's HUD init leaves them.
+	_game_hud.carry_process_words(_process_words)
 	# The /NOHUD launch flag clears the overlay master word for the process.
 	_game_hud.set_no_hud(LaunchFlags.no_hud())
 	# The F1 help pages rebuild from the live bindings at every mission start.
@@ -362,12 +470,6 @@ func ensure_game_hud() -> void:
 	_slot_bar_key_labels_revision = -1
 	_map_legend_labels = PackedStringArray()
 	_game_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var mount: Node = _ui_parent if _ui_parent != null else self
-	mount.add_child(_game_hud)
-	# anchors AND offsets: an anchors-only preset keeps a fresh Control's
-	# zero rect, and a clipping UI parent can then clip every HUD element to
-	# nothing.
-	_game_hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	# Internal children stay out of scene ownership; INTERNAL_MODE_BACK plus
 	# show_behind_parent keeps the post-process/masks a stable layer below the
 	# card rows and the overlay's own draw list.
@@ -376,24 +478,17 @@ func ensure_game_hud() -> void:
 	_view_effects.show_behind_parent = true
 	_view_effects.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_game_hud.add_child(_view_effects, false, Node.INTERNAL_MODE_BACK)
-	_view_effects.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_inset_scope = HudInsetScope.new()
 	_inset_scope.name = "InsetScope"
 	_inset_scope.show_behind_parent = true
 	_inset_scope.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_inset_scope.visible = false
 	_game_hud.add_child(_inset_scope)
-	_inset_scope.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	# The world's local-view leg stamps and hands over the Inset camera from the
-	# view it just composed, before every Inset leg of the frame reads it.
-	if _world != null:
-		_world.set_inset_scope(_inset_scope)
 	_sights_card = HudSightsCardScript.new()
 	_sights_card.name = "SightsCard"
 	_sights_card.show_behind_parent = true
 	_sights_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_game_hud.add_child(_sights_card)
-	_sights_card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	# The scoped-view circle mask sits AFTER the card in the overlay's child
 	# order, so the annulus covers the card's own corners -- retail submits the
 	# SIGHTS card first and the mask straight after it on the Scoped arm.
@@ -403,7 +498,6 @@ func ensure_game_hud() -> void:
 	_scope_circle_mask.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_scope_circle_mask.visible = false
 	_game_hud.add_child(_scope_circle_mask)
-	_scope_circle_mask.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_push_sight_state()
 	var hudpos := HudPos.new()
 	var root: ResourceRoot = _world.get_resource_root() \
@@ -416,19 +510,7 @@ func ensure_game_hud() -> void:
 		# Problems row (ADR 0046 DI-27).
 		if not root.has_file("hudpos.def"):
 			ResourceRoot.report_missing("file", "hudpos.def")
-	_game_hud.set_crosshair_style(_crosshair_style)
-	_game_hud.set_crosshair_color(_crosshair_color)
-	_game_hud.set_crosshair_spread_enabled(_crosshair_spread)
-	_game_hud.set_aspect_mode(_aspect_mode)
-	_game_hud.configure(hudpos, root)
 	_hud_pos = hudpos
-	# TerrainData owns the TRN 16x16 sector routing table and the colormap
-	# texture; the native overlay copies only the portable routing scalars.
-	# The raw colormap remains the sharp base; depthspin supplies water only.
-	_game_hud.set_minimap_terrain(
-			_world.get_terrain_data() if _world != null else null,
-			_world.get_minimap_water_mask() if _world != null else null,
-			_session_texcompression_level())
 	# The grid-label origin marker (mission type-2043 entity), resolved once
 	# per world. [orig: HUD_InitOverlaySystem @0x5a4999 pool scan]
 	var sim_for_origin := _world.get_sim() if _world != null else null
@@ -444,14 +526,12 @@ func ensure_game_hud() -> void:
 	else:
 		_map_grid_origin_present = false
 		_game_hud.set_minimap_grid_origin(Vector2.ZERO, false)
-	_view_effects.set_resource_root(root)
-	HudTextTables.register(root, _world)
+	HudTextTables.register(root, mission_file)
 	# The objectives-panel header, resolved once against the freshly registered
 	# gametext table. [orig: STROVER_MISSIONOBJECTIVES @0x5ba986]
-	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
-	if t != null and t.has_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_MISSIONOBJECTIVES"):
-		_game_hud.set_objectives_header(
-				t.get_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_MISSIONOBJECTIVES"))
+	if Strings.has_text(Strings.TABLE_GAMETEXT, Strings.SECTION_OVERLAYS, "STROVER_MISSIONOBJECTIVES"):
+		_game_hud.set_objectives_header(Strings.lookup_or(Strings.TABLE_GAMETEXT,
+				Strings.SECTION_OVERLAYS, "STROVER_MISSIONOBJECTIVES", ""))
 	# The presenter-held friendly-tags mode survives the per-mission rebuild
 	# like retail's process-lifetime global [orig: g_FriendlyTagsMode @0x24C18C4].
 	_game_hud.set_friendly_tag_mode(_toggles.get_friendly_tag_mode())
@@ -468,6 +548,71 @@ func ensure_game_hud() -> void:
 		_toggles.session_init(session_sim.is_mp_session(), _mp_session_peer(session_sim))
 
 
+# The HUD's textures, fonts and map pictures over the layout the init read
+# (HudOverlay.configure: the HUD loader's textures, the overlay fonts, the stdbox
+# frame), the terrain's colour map and the view effects' art. A dedicated host's
+# reduced arm loads the fonts, the stdbox and the connection icons alone: no HUD
+# art, no terrain picture, no view effects.
+func _load_hud_textures(full_arm: bool) -> void:
+	var root: ResourceRoot = _world.get_resource_root() if _world != null else null
+	_game_hud.set_crosshair_style(_crosshair_style)
+	_game_hud.set_crosshair_color(_crosshair_color)
+	_game_hud.set_crosshair_spread_enabled(_crosshair_spread)
+	_game_hud.set_aspect_mode(_aspect_mode)
+	_hud_full_arm = full_arm
+	_game_hud.configure(_hud_pos, root, full_arm)
+	if not full_arm:
+		return
+	# TerrainData owns the TRN 16x16 sector routing table and the colormap
+	# texture; the native overlay copies only the portable routing scalars.
+	# The raw colormap remains the sharp base; depthspin supplies water only.
+	_game_hud.set_minimap_terrain(
+			_world.get_terrain_data() if _world != null else null,
+			_world.get_minimap_water_mask() if _world != null else null,
+			_session_texcompression_level())
+	_view_effects.set_resource_root(root)
+	_make_canvas_programs()
+
+
+# The HUD's canvas programs, made in the load (D-NET-NEW-LF-28): a Shader makes its device program
+# (a shader-cache lookup, a compile on a fresh install) at its first get_rid(), when the first
+# material binds it, which for the SIGHTS card's rows is their first build, past a mission load the
+# reveal frame.
+func _make_canvas_programs() -> void:
+	_load_canvas_programs.clear()
+	for shader: Shader in [HudSightsCard.ADD_SHADER, HudSightsCard.BLEND_AT_SHADER,
+			HudSightsCard.ADD_AT_SHADER, HudSightsCard.MULTIPLY_SHADER,
+			PlayerViewEffects.SUN_VEIL_SHADER, PlayerViewEffects.REVIVE_TINT_SHADER]:
+		_load_canvas_programs.append(shader.get_rid())
+
+
+## The canvas programs the load's HUD leg made, in _make_canvas_programs' order (a read seam for
+## the load pins).
+func get_load_canvas_programs() -> Array[RID]:
+	return _load_canvas_programs
+
+
+# The first frame a mission has a player of its own (a dedicated host's first
+# frame) puts the loaded overlay on the HUD layer; a later frame finds it there.
+func _mount_game_hud() -> void:
+	if _game_hud.is_inside_tree():
+		return
+	var mount: Node = _ui_parent if _ui_parent != null else self
+	mount.add_child(_game_hud)
+	# anchors AND offsets: an anchors-only preset keeps a fresh Control's
+	# zero rect, and a clipping UI parent can then clip every HUD element to
+	# nothing.
+	_game_hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_view_effects.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_inset_scope.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_sights_card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_scope_circle_mask.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# The world's local-view leg stamps and hands over the Inset camera from the
+	# view it just composed, before every Inset leg of the frame reads it.
+	if _world != null:
+		_world.set_inset_scope(_inset_scope)
+
+
 # The shared F3 frame-stats board (null outside the game shell): while its
 # Stats tab captures, the tick's phase spans land there as HUD_* slots.
 var _frame_stats: FrameStats = null
@@ -476,6 +621,36 @@ var _hud_draw_timing_armed := false
 
 func set_frame_stats(board: FrameStats) -> void:
 	_frame_stats = board
+
+
+## A dedicated host has no player of ours, and its frame is the status page
+## (engine hud_server_status.h; a dedicated host's session starts on that
+## view). Its HUD rows still dispatch: the router polls them in every input
+## frame with or without a player and the role's head admits them (a Serve
+## Only host's lockgame, help and the status page's score list;
+## Role::action_head_admits carries the witness). This frame applies them and
+## draws the page with the quit dialog and the chat line over it.
+func _tick_dedicated_host(sim: Simulation) -> void:
+	ensure_game_hud()
+	if _game_hud == null:
+		return
+	_game_hud.set_frame_clocks(sim.get_logic_tick(), sim.get_main_frame_counter(),
+			sim.get_session_frame_counter(), sim.get_hud_frame_counter())
+	_game_hud.set_chat_input(_chat, sim.is_mp_session())
+	if _player_presenter != null:
+		for toggle_events in _player_presenter.take_hud_toggle_events():
+			if toggle_events & HudToggles.EVENT_OVERLAY_WINDOWS_CLEARED:
+				sim.request_hud_map_close()
+			_apply_toggle_events(toggle_events)
+	var status_gametext: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
+	# The page's riders read the frame's role facts as a listen host's do: its
+	# end-round leg the authority's round-over latch, its connection indicators
+	# the process's (engine inmatch/role_feeds.h hud_role_facts carries the witnesses).
+	_game_hud.set_role_facts(sim, status_gametext)
+	_game_hud.set_quit_dialog(_toggles.is_quit_dialog_open(), sim.is_mp_session(),
+			_authority(sim), status_gametext)
+	_game_hud.set_server_status_page(_toggles.is_server_status_view(),
+			_toggles.is_server_status_score_list_open(), status_gametext, sim)
 
 
 ## Rebuild the HUD's per-frame info from the authoritative local player, mirroring the
@@ -487,6 +662,10 @@ func tick(gameplay_input_active: bool = false) -> void:
 	if _world == null or not _world.is_loaded():
 		return
 	var sim: Simulation = _world.get_sim()
+	if sim != null and not sim.has_local_player() \
+			and sim.session_role() == Simulation.ROLE_DEDICATED_HOST:
+		_tick_dedicated_host(sim)
+		return
 	if sim == null or not sim.has_local_player():
 		if not _warned_no_player:
 			_warned_no_player = true
@@ -502,6 +681,10 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# witnesses).
 	_game_hud.set_frame_clocks(sim.get_logic_tick(), sim.get_main_frame_counter(),
 			sim.get_session_frame_counter(), sim.get_hud_frame_counter())
+	# Whether this frame's scene frame called its HUD pass: the gameplay overlay pass draws
+	# (and does its state work) only then; the scene frame's own legs draw either way (engine
+	# inmatch::FrameOutcome::hud_pass_called carries the witness).
+	_game_hud.set_overlay_pass_called(_world.get_last_frame_hud_pass_called())
 	if stats_on:
 		# HudOverlay._draw runs in Godot's deferred flush after this tick; the
 		# previous frame's compile + canvas emit land here. Timing arms only
@@ -576,8 +759,8 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# action_for_code carries the witness), formatted again only when a
 	# binding changed or the HUD was rebuilt.
 	_apply_slot_bar_key_labels()
-	# The breath bar, the MP session lines, the HUDLS scan and the open menus,
-	# from the same sim and gametext table (HudOverlay.set_role_facts
+	# The breath bar, the MP session lines, the HUDLS scan, the open menus and the
+	# frame-rate overlay, from the same sim and gametext table (HudOverlay.set_role_facts
 	# carries the witness).
 	_game_hud.set_role_facts(sim, Strings.get_table(Strings.TABLE_GAMETEXT))
 	_apply_friendly_tags()
@@ -634,46 +817,29 @@ func tick(gameplay_input_active: bool = false) -> void:
 			if footprints.size() >= 2 and footprints[1] > 0:
 				_map_footprints_fed = true
 				_game_hud.set_minimap_footprints(footprints)
-	# The HUD binding rows. hudcolor (row 76) defaults to Ctrl+F6 beside
-	# huddetail's bare F6 (row 50): the binding sampler's two passes keep them
-	# apart (Ctrl+F6 fires only hudcolor, F6 only huddetail), and its first
-	# match gives a key both rows carry to hudcolor alone (code 10 before 19;
-	# engine BindingSet::pressed_key). showhud (row 27) ships unbound. Ctrl is a
-	# binding modifier; Shift or Alt held gates nothing, as the key scan has no
-	# such gate (engine hud::HudKeyEdge carries the witness).
-	# [orig: the key scan's fire @0x49d42f (the modifier pass) and @0x49d488
-	#  (the fallback); huddetail dispatch @0x4E0601; showhud dispatch @0x4E0561]
-	# The key sampling is this presenter's (a shared key's first match is the
-	# sampler's, engine BindingSet::pressed_key); the edge latches, the cycles
-	# and the window toggles are the engine's poll.
-	# The talk rows ride the same sampler; the dispatch gates, the capture and
-	# the line editor are the engine's chat entry, its talk-key debounce and
-	# flood on the main-frame counter (engine hud/hud_chat_entry.h
-	# ChatEntryFacts::frame, inmatch/chat_flood.h).
-	var talk_rows := 0
-	for row in HudChatEntry.ROW_COUNT:
-		if ControlsBindings.pressed(HudChatEntry.row_token(row)):
-			talk_rows |= 1 << row
-	_chat.poll_rows(talk_rows, gameplay_input_active, sim,
-			Strings.get_table(Strings.TABLE_GAMETEXT), sim.get_main_frame_counter())
+	# The talk rows are the player input router's: it polls them in every
+	# input frame, the frame's own sample and each later tick's, with the
+	# current gametext for the prompts (PlayerInputRouter::poll_talk_rows
+	# carries the witness); the dispatch gates, the capture and the line
+	# editor are the engine's chat entry. This frame draws the line.
+	if _player_presenter != null:
+		_player_presenter.set_hud_chat(_chat, Strings.get_table(Strings.TABLE_GAMETEXT))
 	_game_hud.set_chat_input(_chat, sim.is_mp_session())
-	var rows_down := 0
-	for row in HudToggles.ROW_COUNT:
-		if ControlsBindings.pressed(HudToggles.row_token(row)):
-			rows_down |= 1 << row
-	# The mousescale row's step direction is its fire's sign bit (Shift on a
-	# modifier-less key or a held mouse button; engine BindingSet::fire_signed).
-	var toggle_events := _toggles.poll(rows_down,
-			gameplay_input_active, sim.is_mp_session(),
-			(sim.get_session_game_type() & NetProtocol.GAME_TYPE_OBJECTIVE_BIT) != 0,
-			not bool(sim.is_local_player_dead()), _authority(sim), _mp_session_peer(sim),
-			ControlsBindings.model().is_token_fire_signed(
-					HudToggles.row_token(HudToggles.ROW_MOUSE_SCALE)))
-	# The window actions' respawn init also closes the sim's map overlay (the
-	# witness rides hud_toggles.h kOverlayWindowsCleared).
-	if toggle_events & HudToggles.EVENT_OVERLAY_WINDOWS_CLEARED:
-		sim.request_hud_map_close()
-	_apply_toggle_events(toggle_events)
+	# The HUD binding rows' events in input-frame order: the player input
+	# router polls the rows in every input frame, the frame's own sample and
+	# each later tick's (PlayerInputRouter::poll_hud_toggles carries the
+	# witness); with no router this presenter polls the frame's sample.
+	var toggle_frames: PackedInt64Array
+	if _player_presenter != null:
+		toggle_frames = _player_presenter.take_hud_toggle_events()
+	else:
+		toggle_frames = PackedInt64Array([_poll_toggle_rows(sim, gameplay_input_active)])
+	for toggle_events in toggle_frames:
+		# The window actions' respawn init also closes the sim's map overlay (the
+		# witness rides hud_toggles.h kOverlayWindowsCleared).
+		if toggle_events & HudToggles.EVENT_OVERLAY_WINDOWS_CLEARED:
+			sim.request_hud_map_close()
+		_apply_toggle_events(toggle_events)
 	# The quit dialog and the authority's server-status page (engine
 	# hud_toggles.h / hud_server_status.h): while the page is up it stands in
 	# for the whole scene frame.
@@ -729,14 +895,10 @@ func tick(gameplay_input_active: bool = false) -> void:
 				info.nvg_mask, info.nvg_gain)
 		_view_effects.update_damage_feedback(info.flash_white, info.flash_red,
 				info.flash_revive, info.flash_revive_channel)
-	# retail: while the white hit flash burns, the whole HUD overlay pass
-	# early-returns, so a collision or explosion blanks the gameplay HUD for up
-	# to 64 ticks. The overlay's own draw list is what that pass covers; its
-	# children (this node's view effects, the SIGHTS card) belong to the scene
-	# frame and keep drawing, which is exactly what self_modulate leaves alone.
-	# The addressed witness lives in docs/interface/hud-re.md.
-	_game_hud.self_modulate = Color(1.0, 1.0, 1.0, 0.0) if info.overlays_suppressed \
-			else Color.WHITE
+	# The white hit flash's return of the gameplay overlay pass is the engine
+	# compiler's (hud_frame.h HudFrameCompiler::overlay_pass_runs): the scene
+	# frame's other legs on this node (the message log, the chat line, the kill
+	# banner) keep drawing through it.
 	var probe_t4 := Time.get_ticks_usec() if stats_on else 0
 	# Effects drain synchronously during _world.tick(), before this HUD update.
 	# Flush afterward so GameHud.push_message stamps this frame's main-frame
@@ -846,7 +1008,8 @@ func _apply_attach_labels() -> void:
 
 
 
-## The live HudOverlay node (null until the first in-world HUD frame builds it).
+## The mission's HudOverlay node: null until the load's overlay init builds it, on
+## the HUD layer from the first frame the mission has a local player.
 func get_game_hud() -> HudOverlay:
 	return _game_hud
 
@@ -1007,14 +1170,10 @@ func _update_overlay_windows(sim: Simulation) -> void:
 func _resolve_map_legend_labels() -> PackedStringArray:
 	var labels := PackedStringArray()
 	_map_legend_title = ""
-	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
-	if t != null and t.has_string_in_section("Hud", "hud_map_legend"):
-		_map_legend_title = t.get_string_in_section("Hud", "hud_map_legend")
+	if Strings.has_text(Strings.TABLE_GAMETEXT, "Hud", "hud_map_legend"):
+		_map_legend_title = Strings.lookup_or(Strings.TABLE_GAMETEXT, "Hud", "hud_map_legend", "")
 	for key in HudOverlay.map_legend_keys():
-		var label := ""
-		if t != null and t.has_string_in_section("Hud", key):
-			label = t.get_string_in_section("Hud", key)
-		labels.push_back(label)
+		labels.push_back(Strings.lookup_or(Strings.TABLE_GAMETEXT, "Hud", key, ""))
 	return labels
 
 
@@ -1038,38 +1197,81 @@ func handle_chat_key(key: InputEventKey) -> bool:
 	return true
 
 
-## One key-down over live play through the special-key chain (engine
-## hud_toggles.h): the quit dialog's keys first; unless the dialog took the
-## chain, the Tab board's page keys, then the status page's Enter / PgUp /
-## PgDn; then the help and briefing pages. A key a leg takes never reaches
-## the action rows (ControlsModel.consume_key_press); true = consumed.
-func handle_special_key(key: InputEventKey) -> bool:
+## One key-down through the special-key chain (engine hud_toggles.h), over
+## live play and in a pass-through screen's input frame: the quit dialog's keys
+## first; unless the dialog took the chain, the digit arms (the held-USE seat
+## pick, the open Emotes / Radio menu's pick: the player presenter's
+## chain_digit_key); unless the dialog took the chain or an earlier arm holds it
+## (the USE hold, an open Emotes / Radio menu: _chain_arm_holds), the round-over leg once
+## the round-over gate holds (Simulation.round_over_key: a session's end-of-round board takes
+## PgUp / PgDn, a co-op session or single player every key, its RESTART
+## queueing input event 12), else the Tab board's page keys and then the
+## status page's Enter / PgUp / PgDn; then the deploy keys: `deploy_param`
+## gives a key's event-12 parameter (the engine's rule: in a session, the
+## local player dead or the deploy overlay up; -1 when not taken) and
+## `queue_pick` queues the pick, with or without the deploy screen open; then
+## the help and briefing pages. A key a leg takes never reaches the action
+## rows (ControlsModel.consume_key_press); true = consumed. The legs' order is
+## the engine's witness (hud_toggles.h hud_round_over_key, HudDeployKeyInput;
+## world::pass_through_close_axis).
+func handle_special_key(key: InputEventKey, deploy_param := Callable(),
+		queue_pick := Callable()) -> bool:
 	var sim: Simulation = _world.get_sim() if _world != null else null
 	if sim == null:
 		return false
 	var vk := ControlsModel.vk_from_godot_key(key.physical_keycode)
 	var in_session := sim.is_mp_session()
+	var restart_vk := _key_press_vk("STRKEYPRESS_RESTART", "R")
 	var bits := _toggles.quit_dialog_key(vk, in_session, _key_press_vk("STRKEYPRESS_YES", "Y"),
-			_key_press_vk("STRKEYPRESS_NO", "N"), _key_press_vk("STRKEYPRESS_RESTART", "R"))
+			_key_press_vk("STRKEYPRESS_NO", "N"), restart_vk)
 	if bits & HudToggles.SPECIAL_KEY_QUIT_CONFIRMED:
 		quit_confirmed.emit()
 	if bits & HudToggles.SPECIAL_KEY_CONSUMED:
 		ControlsBindings.model().consume_key_press(vk)
 		return true
+	# A digit the held-USE arm or an open menu takes runs its pick at once and
+	# reaches no row (engine controls::PlayerActions::chain_digit_key).
+	if (bits & HudToggles.SPECIAL_KEY_CHAIN_TAKEN) == 0 and _player_presenter != null 			and _player_presenter.chain_digit_key(vk):
+		return true
 	var page_key := key.keycode == KEY_PAGEUP or key.keycode == KEY_PAGEDOWN
 	var taken := false
-	if (bits & HudToggles.SPECIAL_KEY_CHAIN_TAKEN) == 0:
-		if page_key and _game_hud != null and _game_hud.scoreboard_page_key(
+	if (bits & HudToggles.SPECIAL_KEY_CHAIN_TAKEN) == 0 and not _chain_arm_holds():
+		var round_over := int(sim.round_over_key(vk, restart_vk))
+		if round_over & HudToggles.ROUND_OVER_ARM:
+			# The RESTART arm queues event 12 (a session's pick); the restart's
+			# exit and ESC's are the role's, stored by the engine.
+			if (round_over & HudToggles.ROUND_OVER_RESTART) and queue_pick.is_valid():
+				queue_pick.call(0)
+			if round_over & HudToggles.ROUND_OVER_CONSUMED:
+				ControlsBindings.model().consume_key_press(vk)
+				return true
+		elif page_key and _game_hud != null and _game_hud.scoreboard_page_key(
 				key.keycode == KEY_PAGEDOWN, in_session, _toggles.is_scoreboard_open()):
 			taken = true
 		elif _toggles.server_status_page_key(vk, in_session, _authority(sim),
 				_mp_session_peer(sim)):
+			taken = true
+	if not taken and deploy_param.is_valid() and queue_pick.is_valid():
+		var param := int(deploy_param.call(key))
+		if param >= 0:
+			queue_pick.call(param)
 			taken = true
 	if not taken and page_key:
 		taken = handle_page_key(key.keycode == KEY_PAGEDOWN, false)
 	if taken:
 		ControlsBindings.model().consume_key_press(vk)
 	return taken
+
+
+## Whether an arm ahead of the round-over leg holds the special-key chain: the
+## held-USE seat arm (the USE hold the next input frame reads), then the Emotes
+## and Radio menus. Each takes a digit (chain_digit_key's seat pick and menu
+## picks) and passes every other key to the chain's tail, so the round-over,
+## Tab board and status page legs never run for it (engine
+## controls::PlayerActions::use_held carries the witness).
+func _chain_arm_holds() -> bool:
+	return (_player_presenter != null and _player_presenter.is_use_held()) \
+			or _toggles.is_emotes_menu_open() or _toggles.is_radio_menu_open()
 
 
 ## The KeyPress gametext key's code: its first character as written, the
@@ -1088,6 +1290,24 @@ func _key_press_vk(key: String, fallback: String) -> int:
 ## The connection mode's two bits by role (engine HudKeyPoll): single player
 ## and a listen host carry both, a joiner only the peer bit, a dedicated host
 ## only the authority bit.
+## One poll of the HUD binding rows over the frame's own sample, for a
+## presenter with no player input router (PlayerInputRouter::poll_hud_toggles
+## is the per-input-frame poll and carries the witness); the event bits.
+func _poll_toggle_rows(sim: Simulation, gameplay_input_active: bool) -> int:
+	var rows_down := 0
+	for row in HudToggles.ROW_COUNT:
+		if ControlsBindings.pressed(HudToggles.row_token(row)):
+			rows_down |= 1 << row
+	# The mousescale row's step direction is its fire's sign bit (Shift on a
+	# modifier-less key or a held mouse button; engine BindingSet::fire_signed).
+	return _toggles.poll(rows_down,
+			gameplay_input_active, sim.is_mp_session(),
+			(sim.get_session_game_type() & NetProtocol.GAME_TYPE_OBJECTIVE_BIT) != 0,
+			not bool(sim.is_local_player_dead()), _authority(sim), _mp_session_peer(sim),
+			ControlsBindings.model().is_token_fire_signed(
+					HudToggles.row_token(HudToggles.ROW_MOUSE_SCALE)))
+
+
 static func _authority(sim: Simulation) -> bool:
 	return sim.session_role() != Simulation.ROLE_JOINER
 
@@ -1145,10 +1365,11 @@ func begin_end_of_round_cine() -> void:
 
 ## One key-down once the round is over: the special-key chain's round-over
 ## leg (engine inmatch round_over_key; the world takes the RESTART and ESC
-## halves). Returns the HudToggles.ROUND_OVER_* bits (0 = not taken).
+## halves), unless an earlier arm holds the chain (_chain_arm_holds). Returns
+## the HudToggles.ROUND_OVER_* bits (0 = not taken).
 func handle_round_over_key(key: InputEventKey) -> int:
 	var sim: Simulation = _world.get_sim() if _world != null else null
-	if sim == null:
+	if sim == null or _chain_arm_holds():
 		return 0
 	var vk := ControlsModel.vk_from_godot_key(key.physical_keycode)
 	var bits := int(sim.round_over_key(vk, _key_press_vk("STRKEYPRESS_RESTART", "R")))
@@ -1209,8 +1430,11 @@ func _apply_toggle_events(events: int) -> void:
 	var look_sim: Simulation = _world.get_sim() if _world != null else null
 	if events & HudToggles.EVENT_MOUSE_FLIPPED and look_sim != null:
 		look_sim.flip_local_player_mouse()
+	# A typed mousescale's argument rides above the event bits and sets the word outright
+	# (engine hud_toggles.h kMouseScaleParamShift).
 	if events & HudToggles.EVENT_MOUSE_SCALE_STEPPED and look_sim != null:
-		var scale := look_sim.step_local_player_mouse_scale(0,
+		var scale := look_sim.step_local_player_mouse_scale(
+				events >> HudToggles.MOUSE_SCALE_PARAM_SHIFT,
 				(events & HudToggles.EVENT_MOUSE_SCALE_NEGATIVE) != 0)
 		var line := HudToggles.mouse_scale_toast(Strings.get_table(Strings.TABLE_GAMETEXT), scale)
 		if _game_hud != null and not line.is_empty():
@@ -1244,6 +1468,10 @@ func set_menu_pause(paused: bool) -> void:
 	if sim != null and sim.is_mp_session():
 		return
 	_toggles.set_paused(paused)
+	# The options screen's open also shuts the audio channels down, as the pause
+	# row does (engine WorldOutbox::audio_channels_shutdown carries the witness).
+	if paused and _world != null:
+		_world.shutdown_audio_channels()
 
 
 ## One hudcolor poll step over pre-sampled device state (the seam the tests
@@ -1259,19 +1487,22 @@ func cycle_hud_color() -> void:
 	_apply_toggle_events(HudToggles.EVENT_HUD_COLOR_CYCLED)
 
 
-## One flipmouse + mousescale poll step over pre-sampled device state with the
-## mousescale fire's sign (the seam the tests drive); every other row idle.
-func poll_look_rows(flip_down: bool, scale_down: bool, negative: bool, active: bool) -> void:
-	var rows_down := ((1 << HudToggles.ROW_FLIP_MOUSE) if flip_down else 0) \
-			| ((1 << HudToggles.ROW_MOUSE_SCALE) if scale_down else 0)
-	_apply_toggle_events(_toggles.poll(rows_down, active, false, false, true,
+## One input frame's flipmouse and mousescale events with the mousescale fire's
+## sign (the seam the tests drive), as the player input router dispatches the
+## rows (HudToggles.dispatch); every other row idle.
+func dispatch_look_rows(flip_fired: bool, scale_fired: bool, negative: bool,
+		active: bool) -> void:
+	var rows_fired := ((1 << HudToggles.ROW_FLIP_MOUSE) if flip_fired else 0) \
+			| ((1 << HudToggles.ROW_MOUSE_SCALE) if scale_fired else 0)
+	_apply_toggle_events(_toggles.dispatch(rows_fired, active, false, false, true,
 			false, false, negative))
 
 
-## One huddetail poll step (the seam the tests drive); every other row idle.
-func poll_hud_detail_edge(detail_down: bool, active: bool) -> void:
-	_apply_toggle_events(_toggles.poll(
-			(1 << HudToggles.ROW_HUD_DETAIL) if detail_down else 0, active,
+## One input frame's huddetail event (the seam the tests drive), as the player
+## input router dispatches the row (HudToggles.dispatch); every other row idle.
+func dispatch_hud_detail(fired: bool, active: bool) -> void:
+	_apply_toggle_events(_toggles.dispatch(
+			(1 << HudToggles.ROW_HUD_DETAIL) if fired else 0, active,
 			false, false))
 
 

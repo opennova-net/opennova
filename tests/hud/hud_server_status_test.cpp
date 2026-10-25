@@ -6,7 +6,7 @@
 // clock, the bottom row, the ticker, the console lines, the quit dialog (on
 // the page and in the scene frame's gameplay overlays) and the score list.
 // [orig: Server_DrawStatusScreen @0x50a2d0; HUD_DrawPlayerScoreList
-//  @0x500300; UI_DrawDisconnectReasonDialog @0x5b8eb0;
+//  @0x500300; UI_DrawQuitConfirmDialog @0x5b8eb0;
 //  HUD_DrawServerConsoleLines @0x5ba0a0]
 #include <runtime/hud/game_font.h>
 #include <runtime/hud/hud_frame.h>
@@ -312,6 +312,153 @@ void test_page_compile(const fnt_font_t *font) {
 	CHECK(run_at(ded, 10.0f, 680.0f) != nullptr && run_at(ded, 10.0f, 608.0f) == nullptr);
 }
 
+// A dedicated host's round end: the page's end-round leg draws the overlay's
+// lines in the snapshot twin g_HUDColors.active. No gameplay pass precedes the
+// page, so the twin keeps the HUD init's seed, table[index] | 0xFF000000 with
+// entry 2 the 0xFF010101 placeholder, and at the default index the half-bright
+// draw lays the lines black on the page's black clear: retail's Serve Only host
+// shows no banner (the twin read 0xFF010101 there through a round end while the
+// transition's first-pass latch g_EndRoundOverlayFirstPass set). The quit dialog reads the
+// same twin; a listen host's page reads the twin its scene frames restamped.
+// [orig: HUD_DrawEndRoundStatsOverlay @0x5B7CD0 (`mov ebp, g_HUDColors.active`
+//  @0x5B7CE6); UI_DrawQuitConfirmDialog @0x5B8EB0 (@0x5B8EB5);
+//  HUD_InitTeamColorTable @0x51F240 (entry 2 @0x51F24F, the twin @0x51F2DE),
+//  run by Game_StartMission's first load @0x5258C1 after HUD_InitOverlaySystem
+//  @0x525733; HUD_DrawTextCentered_HalfBright @0x580680 (@0x58068F, @0x5806AB);
+//  the restamp HUD_DrawGameTimerOverlay @0x59CCD0]
+void test_dedicated_host_twin(const fnt_font_t *font) {
+	HudLayout layout;
+	const auto make = [&](HudFrameCompiler &compiler) {
+		compiler.configure(layout, font);
+		compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f, font);
+	};
+	const auto impact_colors = [](const HudDrawList &list, uint32_t want, size_t lines) {
+		const std::vector<Run> impact = runs_on(list, kHudFontSlotImpact38);
+		bool ok = impact.size() == lines;
+		for (const Run &r : impact) ok = ok && r.color == want;
+		return ok;
+	};
+	HudFrameState state;
+	state.spawn_success_gate = true;
+	state.end_round.shown = true;
+	state.end_round.lines = {{"D", 300}, {"S", 414}};
+	ServerStatusPageState page = listen_page(4);
+	page.mp_session_peer = false;
+	page.game_type = 0x10000u;
+	CHECK(half_bright_argb(0xFF010101u) == 0xFF000000u);
+	{
+		// The default index 2: the placeholder, black.
+		HudFrameCompiler compiler;
+		make(compiler);
+		CHECK(compiler.compile_server_status_page(state, page, 10000, true, 1024.0f, 768.0f));
+		CHECK(impact_colors(compiler.server_status_page_list(), 0xFF000000u, 2));
+		// The page draws nothing to restamp it: the next due page keeps the seed.
+		CHECK(compiler.compile_server_status_page(state, page, 10200, true, 1024.0f, 768.0f));
+		CHECK(impact_colors(compiler.server_status_page_list(), 0xFF000000u, 2));
+		// The quit dialog's text, the same twin.
+		state.end_round.shown = false;
+		state.quit_dialog_open = true;
+		state.quit_dialog_text = "Q";
+		CHECK(compiler.compile_server_status_page(state, page, 10400, true, 1024.0f, 768.0f));
+		CHECK(impact_colors(compiler.server_status_page_list(), 0xFF000000u, 1));
+		state.quit_dialog_open = false;
+		state.end_round.shown = true;
+	}
+	{
+		// Another index seeds its own entry: yellow at 4.
+		HudFrameCompiler compiler;
+		make(compiler);
+		state.hud_color_index = 4;
+		CHECK(compiler.compile_server_status_page(state, page, 10000, true, 1024.0f, 768.0f));
+		CHECK(impact_colors(compiler.server_status_page_list(), half_bright_argb(0xFFF0F000u), 2));
+		state.hud_color_index = 2;
+	}
+	{
+		// The hudcolor cycle stores the palette entry as it stands (D-NET-NEW-L8-42): no
+		// gameplay pass has refreshed a dedicated host's entry 2, so the cycle round to 2
+		// stores the HUD init's placeholder, black [orig: case 10 @0x49AFC7, the store
+		// @0x49AFE7; the refresh HUD_RenderAllOverlays @0x5A810C].
+		HudFrameCompiler compiler;
+		make(compiler);
+		state.hud_color_index = 1;
+		CHECK(compiler.compile_server_status_page(state, page, 10000, true, 1024.0f, 768.0f));
+		CHECK(impact_colors(compiler.server_status_page_list(), half_bright_argb(0xFF00FF00u), 2));
+		state.hud_color_index = 2;
+		CHECK(compiler.compile_server_status_page(state, page, 10200, true, 1024.0f, 768.0f));
+		CHECK(impact_colors(compiler.server_status_page_list(), 0xFF000000u, 2));
+	}
+	{
+		// A listen host's scene frame (before the round-over latch) refreshed entry 2 from the
+		// hudpos text colour, so the same cycle stores that colour.
+		HudFrameCompiler compiler;
+		make(compiler);
+		state.hud_color_index = 1;
+		state.end_round.shown = false;
+		state.spawn_success_gate = false;
+		(void)compiler.compile(state, 1024.0f, 768.0f);
+		state.spawn_success_gate = true;
+		state.end_round.shown = true;
+		state.hud_color_index = 2;
+		page.mp_session_peer = true;
+		CHECK(compiler.compile_server_status_page(state, page, 10000, true, 1024.0f, 768.0f));
+		CHECK(impact_colors(compiler.server_status_page_list(), half_bright_argb(layout.hud_text), 2));
+		page.mp_session_peer = false;
+	}
+	{
+		// A scene frame the pass returns at its head refreshes nothing: under the round-over
+		// latch, or while the white hit flash burns, the cycle to 2 still stores the
+		// placeholder (V-ROLL-AU N1) [orig: HUD_RenderAllOverlays @0x5A8084 / @0x5A8098, both
+		// ahead of the store @0x5A810C].
+		for (int arm = 0; arm < 2; ++arm) {
+			HudFrameCompiler compiler;
+			make(compiler);
+			state.hud_color_index = 1;
+			state.end_round.shown = false;
+			state.spawn_success_gate = arm == 0;
+			state.combat.white_flash = arm == 1;
+			(void)compiler.compile(state, 1024.0f, 768.0f);
+			state.combat.white_flash = false;
+			state.spawn_success_gate = true;
+			state.end_round.shown = true;
+			state.hud_color_index = 2;
+			page.mp_session_peer = true;
+			CHECK(compiler.compile_server_status_page(state, page, 10000, true, 1024.0f, 768.0f));
+			CHECK(impact_colors(compiler.server_status_page_list(), 0xFF000000u, 2));
+			page.mp_session_peer = false;
+		}
+	}
+	{
+		// A listen host's scene frame restamped the twin from the hudpos text
+		// colour before its page went up.
+		HudFrameCompiler compiler;
+		make(compiler);
+		state.end_round.shown = false;
+		state.spawn_success_gate = false;
+		(void)compiler.compile(state, 1024.0f, 768.0f);
+		state.spawn_success_gate = true;
+		state.end_round.shown = true;
+		page.mp_session_peer = true;
+		CHECK(compiler.compile_server_status_page(state, page, 10000, true, 1024.0f, 768.0f));
+		CHECK(impact_colors(compiler.server_status_page_list(), half_bright_argb(layout.hud_text), 2));
+	}
+}
+
+// The page stands in for the whole scene frame: a dedicated host's (no session peer) always, a
+// peer's while its status view is up on the authority (GameLoop_RenderFrame @0x521355,
+// @0x521CD6..0x521CEF).
+void test_main_frame_draws_scene() {
+	using opennova::hud::main_frame_draws_scene;
+	// A dedicated host: the page whatever the view word holds.
+	CHECK(!main_frame_draws_scene(false, true, true));
+	CHECK(!main_frame_draws_scene(false, true, false));
+	// A listen host or a single player: the page while the view is up.
+	CHECK(!main_frame_draws_scene(true, true, true));
+	CHECK(main_frame_draws_scene(true, true, false));
+	// A joiner (no authority) draws the scene even with the word set.
+	CHECK(main_frame_draws_scene(true, false, true));
+	CHECK(main_frame_draws_scene(true, false, false));
+}
+
 } // namespace
 
 int main() {
@@ -320,6 +467,8 @@ int main() {
 	test_grid_cells_and_codes();
 	test_score_rows();
 	test_page_compile(&font);
+	test_dedicated_host_twin(&font);
+	test_main_frame_draws_scene();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

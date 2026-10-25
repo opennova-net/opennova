@@ -6,9 +6,15 @@
 // @ 0x40f7ae, WeaponDef_BuildItemRestrictionTable @ 0x54ddb0].
 #include <cstdio>
 #include <cstring>
+#include <memory>
 
 #include <formats/def/def.h>
+#include <net/npwire/ingame_encode.h>
+#include <runtime/inmatch/joiner_connection.h>
+#include <runtime/inmatch/loadout_submit.h>
+#include <runtime/world/entity.h>
 #include <runtime/world/local_player.h>
+#include <runtime/world/player_loadout.h>
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/weapon_inventory.h>
 #include <runtime/world/world.h>
@@ -256,12 +262,15 @@ void test_select() {
     // -1 = the global scan directly [orig: @ 0x4dd76d].
     CHECK(weapon_select_slot(f.t, inv, -1, true));
     CHECK(inv.equipped_combo == 1 * 65 + 0);
-    // Seat-deferred commit stages pending only [orig: the parentSlot 2/3 gate].
-    // No pistol is loaded here, so category 2 falls through to the global scan
-    // and stages the knife.
+    // Seated, the select stores entity+0x308 alone [orig: the parentSlot 2/3 gate
+    // @0x4dd6fc; the global scan's +0x308 store @0x4dd81c]. No pistol is loaded here, so
+    // category 2 falls through to the global scan and selects the knife; the
+    // pending slot (a mount's) is untouched.
     inv.equipped_combo = 195;
+    inv.pending_combo = -1;
     CHECK(weapon_select_slot(f.t, inv, 130, false));
-    CHECK(inv.pending_combo == 1 * 65 + 0);
+    CHECK(inv.selected_combo == 1 * 65 + 0);
+    CHECK(inv.pending_combo == -1);
     CHECK(inv.equipped_combo == 195);
     // An empty inventory selects nothing.
     WeaponInventory empty;
@@ -542,14 +551,15 @@ void test_to_special_queue_defers() {
     data.clipsize = 30;
     local_weapon_install(world, lp.weapon, data, false, false, &lp.inventory, lp.view);
     lp.weapon.slot.current = weapon_action::kReload;
-    lp.queue_to_special();
-    lp.dispatch_to_special(true);
-    CHECK(lp.to_special_queued == 1 && lp.inventory.quick_switch_stash == -1);
+    lp.dispatch_to_special(true); // a reload in progress defers it [orig: @0x4E1211]
+    CHECK(lp.deferred_events.size() == 1 && lp.deferred_events[0].code == lp.kToSpecialCode &&
+          lp.inventory.quick_switch_stash == -1);
     lp.weapon.slot.current = weapon_action::kIdle;
+    lp.deferred_events.clear(); // the next input frame's flush takes it to its record
     lp.dispatch_to_special(true);
-    CHECK(lp.to_special_queued == 0 && lp.inventory.quick_switch_stash == 3 * 65);
-    for (int i = 0; i < 40; ++i) lp.queue_to_special();
-    CHECK(lp.to_special_queued == 32);
+    CHECK(lp.deferred_events.empty() && lp.inventory.quick_switch_stash == 3 * 65);
+    for (int i = 0; i < 40; ++i) lp.queue_deferred_event(lp.kToSpecialCode);
+    CHECK(lp.deferred_events.size() == 32); // [orig: the cap @0x4993E8]
 }
 
 void test_cycle() {
@@ -607,13 +617,17 @@ void test_defaults() {
     CHECK(weapon_combo::kDefaultSpawnCombo == 195);
 }
 
+// D-NET-691: the out-of-session armory apply stores each resolved entry's fourth value,
+// its low byte raw, at the weapon's round ammo index, and clears nothing.
+// [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (the name test @0x565E41, the atol
+//  @0x565F3D, the store @0x566182..0x56618C)]
 void test_kit_damage_classes() {
     Fixture f;
     f.t.entries[static_cast<size_t>(f.pistol)].ammo_index = 2;
     f.t.entries[static_cast<size_t>(f.m4)].ammo_index = 4;
     f.t.entries[static_cast<size_t>(f.ak)].ammo_index = 7;
-    std::vector<uint8_t> classes(10, 99);
-    weapon_kit_build_damage_classes(
+    std::vector<uint8_t> classes;
+    weapon_kit_store_damage_classes(
             {{"WPN_M4AUTO", -1, -1, 1}, {"WPN_PISTOL", -1, -1, 2},
              {"WPN_NOSUCH", -1, -1, 2}},
             f.t, 10, classes);
@@ -621,10 +635,10 @@ void test_kit_damage_classes() {
     CHECK(classes[4] == 1 && classes[2] == 2);
     CHECK(classes[7] == 0 && classes[9] == 0);
 
-    // A new accepted kit clears values from the previous one before stamping.
-    weapon_kit_build_damage_classes({{"WPN_AK47AUTO", -1, -1, 2}},
+    // A later apply clears nothing; a -1 stores its low byte, 0xFF.
+    weapon_kit_store_damage_classes({{"WPN_AK47AUTO", -1, -1, -1}},
                                     f.t, 10, classes);
-    CHECK(classes[4] == 0 && classes[2] == 0 && classes[7] == 2);
+    CHECK(classes[4] == 1 && classes[2] == 2 && classes[7] == 0xFF);
 }
 
 } // namespace
@@ -1038,6 +1052,185 @@ void test_mount_slot_reload() {
     std::printf("PASS the mount slot reload\n");
 }
 
+// An in-session joiner's armory ACCEPT resets the slot pool's entries and nothing else:
+// the current slot word, the pending and selected slots and the ammo pools keep their
+// values until the 0x5A grant's select; the 0x2F carries the slot word.
+// [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (`cmp is_authority` @0x565D4F, the
+//  reset @0x565D66, g_CurrentWeaponSlot @0x565D73); WeaponSlotPool_ResetAllEntries
+//  @0x53F240 (the 780 entries @0x53F24C..0x53F284)]
+void test_an_accept_reset_keeps_the_current_slot() {
+    Fixture f;
+    auto world = std::make_unique<World>();
+    world->tables.weapons = f.t;
+    auto local = std::make_unique<LocalPlayer>(*world);
+    WeaponInventory &inv = local->inventory;
+    inv.reset(world->tables.weapons);
+    const int32_t rifle = weapon_combo::kDefaultSpawnCombo;
+    inv.slots[static_cast<size_t>(rifle)].adm_index = static_cast<int16_t>(f.m4);
+    inv.slots[static_cast<size_t>(rifle)].clip = 30;
+    inv.equipped_combo = rifle;
+    inv.pending_combo = rifle;
+    inv.selected_combo = rifle;
+    const int m4_class = f.t.entries[static_cast<size_t>(f.m4)].ammo_class_id;
+    inv.pools[static_cast<size_t>(m4_class)] = 90;
+    local->inventory_valid = true;
+    (void)opennova::inmatch::armory_accept_in_session(*world, *local,
+            {WeaponKitEntry{"WPN_PISTOL", 4, -1, -1}}, 6, /*authority=*/false,
+            opennova::bms::MissionType{});
+    CHECK(inv.equipped_combo == rifle);
+    CHECK(inv.pending_combo == rifle);
+    CHECK(inv.selected_combo == rifle);
+    CHECK(inv.slots[static_cast<size_t>(rifle)].adm_index < 0);
+    CHECK(inv.slots[static_cast<size_t>(rifle)].clip == 0);
+    CHECK(inv.pools[static_cast<size_t>(m4_class)] == 90);
+}
+
+// The current slot word, g_CurrentWeaponSlot, a word apart from the EquippedSlot:
+// Player_InitPlayer stamps 195 and its select stores no slot, so a spawn whose select
+// misses slot 195 keeps 195 while the EquippedSlot names the slot the scan found, or
+// none. The category walk, the cycle and the quick-switch equip store the slot they
+// mount (the equip its def's own combo, whatever slot holds it); an apply stores the
+// held weapon's combo, and a body holding none leaves the word as it was.
+// [orig: Player_InitPlayer @0x4E15F0 (the store @0x4E17FF, the select's read @0x4E198E);
+//  Player_SelectWeaponSlot @0x4DD680 (no store of the word); Player_SwitchToWeaponByHandle
+//  @0x4E0170 (@0x4E035C); Player_CycleWeaponSlot @0x4DFE70 (@0x4DFF4A);
+//  Player_EquipWeaponByEntity @0x4E0370 (@0x4E03A1..0x4E03B2);
+//  NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (@0x4296BC..0x4296DC)]
+void test_the_current_slot_word() {
+    Fixture f;
+    auto world = std::make_unique<World>();
+    world->tables.weapons = f.t;
+    world->registry.configure_pool(0, 1);
+    Entity seed;
+    seed.alive = true;
+    seed.health = 100;
+    world->cached.local_player = world->registry.spawn(0, seed);
+    auto local = std::make_unique<LocalPlayer>(*world);
+    WeaponInventory &inv = local->inventory;
+    auto rebuild = [&](std::vector<WeaponKitEntry> kit) {
+        local->loadout.spawn_kit() = std::move(kit);
+        local_loadout_rebuild(*world, local->loadout, local->weapon, inv,
+                              local->inventory_valid, /*select_spawn_default=*/true);
+    };
+    // No category-3 weapon: the global scan equips the knife; the word is 195.
+    inv.current_slot = 7;
+    rebuild({{"WPN_KNIFE", -1, -1, -1}, {"WPN_PISTOL", -1, -1, -1}});
+    CHECK(inv.equipped_combo == 65);
+    CHECK(inv.current_slot == 195);
+    // An empty kit: nothing equipped, the word 195.
+    rebuild({});
+    CHECK(inv.equipped_combo == -1 && inv.current_slot == 195);
+    // The AK alone (category 3, rank 1): the group scan equips 196, the word stays 195.
+    rebuild({{"WPN_AK47AUTO", -1, -1, -1}});
+    CHECK(inv.equipped_combo == 196 && inv.current_slot == 195);
+
+    // The walks store the slot they mount.
+    rebuild({{"WPN_PISTOL", -1, -1, -1}, {"WPN_M4AUTO", -1, -1, -1},
+             {"WPN_AK47AUTO", -1, -1, -1}});
+    CHECK(inv.equipped_combo == 195 && inv.current_slot == 195);
+    WeaponSwitchGates gates;
+    gates.equipped_valid = true;
+    WeaponSwitchOutcome r = weapon_switch_to_handle(f.t, inv, 2 * 65, gates);
+    CHECK(r.kind == WeaponSwitchOutcome::kMount && r.combo == 130);
+    CHECK(inv.current_slot == 130);
+    r = weapon_switch_to_handle(f.t, inv, 195, gates); // the M4's rank walk: the AK
+    CHECK(r.kind == WeaponSwitchOutcome::kMount && r.combo == 196);
+    CHECK(inv.current_slot == 196);
+    inv.equipped_combo = 196;
+    r = weapon_cycle_slot(f.t, inv, -1, gates); // down from the AK: the M4
+    CHECK(r.kind == WeaponSwitchOutcome::kMount && r.combo == 195);
+    CHECK(inv.current_slot == 195);
+    // The equip stores the def's combo (the pistol's 130), not the slot that holds it.
+    inv.slots[140] = inv.slots[130];
+    CHECK(local_player_equip_weapon_slot(*world, local->weapon, inv, local->view, 140));
+    CHECK(inv.current_slot == 130);
+    // A refused equip (no weapon there) stores nothing.
+    inv.current_slot = 196;
+    CHECK(!local_player_equip_weapon_slot(*world, local->weapon, inv, local->view, 141));
+    CHECK(inv.current_slot == 196);
+
+    // The apply: the held weapon's combo; a body holding none leaves the word. Either
+    // way the apply then selects the word and mounts what it selected, so a body holding
+    // its pistol keeps the pistol, never the rebuild's 195.
+    // [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (the word @0x4296B4..0x4296DC,
+    //  the select @0x4296E3, the mount @0x4296E8..0x4296F4); WeaponLoadout_ApplyFromBuffer
+    //  @0x565CD0 (@0x566250..0x566297)]
+    Entity &body = *world->registry.get(world->cached.local_player);
+    body.equipped_adm_index = static_cast<uint8_t>(f.pistol);
+    CHECK(local_loadout_apply_accept(*world, local->loadout, local->weapon, inv,
+            local->inventory_valid, {{"WPN_M4AUTO", -1, -1, -1}, {"WPN_PISTOL", -1, -1, -1}},
+            8, false));
+    CHECK(inv.current_slot == 130);
+    CHECK(inv.equipped_combo == 130);
+    CHECK(body.equipped_adm_index == static_cast<uint8_t>(f.pistol));
+    body.equipped_adm_index = kAdmSlotNone;
+    inv.current_slot = 130;
+    CHECK(local_loadout_apply_accept(*world, local->loadout, local->weapon, inv,
+            local->inventory_valid, {{"WPN_M4AUTO", -1, -1, -1}, {"WPN_PISTOL", -1, -1, -1}},
+            8, false));
+    CHECK(inv.current_slot == 130);
+    CHECK(inv.equipped_combo == 130);
+    body.equipped_adm_index = kAdmSlotNone;
+    inv.current_slot = 196;
+    CHECK(local_loadout_apply_accept(*world, local->loadout, local->weapon, inv,
+            local->inventory_valid, {{"WPN_M4AUTO", -1, -1, -1}}, 8, false));
+    CHECK(inv.current_slot == 196);
+}
+
+// The 0x2F's slot after a spawn whose select missed slot 195: the word, 195 (0xC3) raw,
+// as the sender's resolve finds no side-legal category-3 slot; before the word, ours
+// sent the select's slot (the knife's 65) or, for an empty kit, 0xFFFFFFFF. Both ACCEPT
+// legs (the joiner's emptied table, the authority's live one) and the mission start's
+// second submit through the joiner's seam carry it.
+// [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (g_CurrentWeaponSlot @0x565D73, the send
+//  @0x565D94); Game_StartMission @0x524360 (g_CurrentWeaponSlot @0x525C1A, the send
+//  @0x525C2E); NetPacket_SendLoadoutSubmit @0x42CDC0 (the resolve @0x42CE2D..0x42CE8B)]
+void test_a_missed_select_sends_195_raw() {
+    Fixture f;
+    for (WeaponTableEntry &e : f.t.entries) e.teamfilter = 3;
+    auto world = std::make_unique<World>();
+    world->tables.weapons = f.t;
+    world->rules.mp_session = true;
+    world->registry.configure_pool(0, 1);
+    Entity seed;
+    seed.alive = true;
+    seed.health = 100;
+    seed.team = 2;
+    world->cached.local_player = world->registry.spawn(0, seed);
+    auto local = std::make_unique<LocalPlayer>(*world);
+    auto rebuild = [&](std::vector<WeaponKitEntry> kit) {
+        local->loadout.spawn_kit() = std::move(kit);
+        local_loadout_rebuild(*world, local->loadout, local->weapon, local->inventory,
+                              local->inventory_valid, /*select_spawn_default=*/true);
+    };
+    auto accept = [&](bool authority) {
+        return opennova::inmatch::armory_accept_in_session(*world, *local,
+                {WeaponKitEntry{"WPN_PISTOL", 4, -1, -1}}, 6, authority,
+                opennova::bms::MissionType{});
+    };
+    const std::vector<WeaponKitEntry> no_primary = {{"WPN_KNIFE", -1, -1, -1},
+                                                    {"WPN_PISTOL", -1, -1, -1}};
+    rebuild(no_primary);
+    CHECK(local->inventory.equipped_combo == 65);
+    // The seam's second submit of the mission start.
+    opennova::playersav::Record profile;
+    opennova::inmatch::JoinerConnection::LoadoutKit kit;
+    opennova::inmatch::build_joiner_loadout_kit(*world, profile, 2, local->loadout,
+            local->inventory.current_slot, &local->inventory, kit);
+    CHECK(opennova::inmatch::profile_loadout_submit(kit, 2, /*alternate=*/true)
+                  .weapon_slot_index == 195u);
+    const opennova::LoadoutSubmit joiner = accept(/*authority=*/false);
+    CHECK(joiner.weapon_slot_index == 195u);
+    const std::vector<uint8_t> wire = opennova::encode_loadout_submit(joiner);
+    CHECK(wire.size() >= 6 && wire[0] == 2 && wire[1] == 6 && wire[2] == 0xC3 &&
+          wire[3] == 0 && wire[4] == 0 && wire[5] == 0);
+    rebuild(no_primary);
+    CHECK(accept(/*authority=*/true).weapon_slot_index == 195u);
+    rebuild({});
+    CHECK(local->inventory.equipped_combo == -1);
+    CHECK(accept(/*authority=*/false).weapon_slot_index == 195u);
+}
+
 // A kit name "None" resolves to the catalog's entry 0 and survives the filter, so the
 // knife fallback does not run [orig: Mission_LoadBMSFile @0x40f80e..0x40f830; the
 //  fallback @0x40f899].
@@ -1050,6 +1243,9 @@ void test_kit_filter_keeps_none() {
 }
 
 int main() {
+    test_an_accept_reset_keeps_the_current_slot();
+    test_the_current_slot_word();
+    test_a_missed_select_sends_195_raw();
     test_kit_filter_keeps_none();
     test_mount_slot_reload();
     test_recalc_seat_legs();

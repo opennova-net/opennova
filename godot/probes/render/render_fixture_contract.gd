@@ -197,7 +197,7 @@ static func capture_variant_matches_diagnostics(
 			realized_static, diagnostic_static]:
 		if not bool((normalized as Dictionary).get("valid", false)):
 			return false
-	if not bool(world.loaded) or not bool(world.visible) \
+	if not bool(world.loaded) or not bool(world.get("presented", false)) \
 			or not bool(terrain.available) \
 			or not bool(terrain.visible) \
 			or not bool(terrain.visible_in_tree) \

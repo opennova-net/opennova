@@ -61,10 +61,35 @@ void WaypointTrack::select_nearest_enemy_base(const EntityRegistry &registry,
         if (marker == nullptr || !marker->has_item_def || (marker->flags & 1u) != 0) continue;
         if ((local.team == 2 && marker->item_id != 4091) ||
                 (local.team == 1 && marker->item_id != 4093)) continue;
-        const int32_t dx = static_cast<int32_t>(static_cast<uint32_t>(to_fixed(local.position.x)) -
-                static_cast<uint32_t>(to_fixed(marker->position.x)));
-        const int32_t dy = static_cast<int32_t>(static_cast<uint32_t>(to_fixed(local.position.y)) -
-                static_cast<uint32_t>(to_fixed(marker->position.y)));
+        const int32_t dx = static_cast<int32_t>(static_cast<uint32_t>(local.position.x.q16) -
+                static_cast<uint32_t>(marker->position.x.q16));
+        const int32_t dy = static_cast<int32_t>(static_cast<uint32_t>(local.position.y.q16) -
+                static_cast<uint32_t>(marker->position.y.q16));
+        // The x87 distance caps at flt_7C19E0 (0x7fff0000), then truncates.
+        const double length = std::sqrt(double(dx) * dx + double(dy) * dy);
+        const int32_t distance = static_cast<int32_t>(std::min(length, 2147418112.0));
+        if (distance < nearest) {
+            nearest = distance;
+            current = static_cast<int32_t>(index);
+        }
+    }
+}
+
+void WaypointTrack::select_nearest_enemy_capture_point(const EntityRegistry &registry,
+        const Entity &local, uint32_t game_type) {
+    if ((game_type != 65540 && game_type != 65544) || entries.size() <= 1) return;
+    int32_t nearest = INT32_MAX;
+    for (size_t index = 0; index < entries.size(); ++index) {
+        const Entity *marker = registry.get(entries[index].handle());
+        if (marker == nullptr || !marker->has_item_def) continue;
+        if ((local.team == 2 && marker->item_id != 4100) ||
+                (local.team == 1 && marker->item_id != 4098) ||
+                (local.team == 3 && marker->item_id != 4103) ||
+                (local.team == 4 && marker->item_id != 4102)) continue;
+        const int32_t dx = static_cast<int32_t>(static_cast<uint32_t>(local.position.x.q16) -
+                static_cast<uint32_t>(marker->position.x.q16));
+        const int32_t dy = static_cast<int32_t>(static_cast<uint32_t>(local.position.y.q16) -
+                static_cast<uint32_t>(marker->position.y.q16));
         // The x87 distance caps at flt_7C19E0 (0x7fff0000), then truncates.
         const double length = std::sqrt(double(dx) * dx + double(dy) * dy);
         const int32_t distance = static_cast<int32_t>(std::min(length, 2147418112.0));
@@ -109,8 +134,8 @@ void WaypointTrack::tick_advance(const WaypointFrameInputs &in) {
         int32_t marker_x = cur->x;
         int32_t marker_y = cur->y;
         if (const Entity *marker = in.registry != nullptr ? in.registry->get(cur->handle()) : nullptr) {
-            marker_x = to_fixed(marker->position.x);
-            marker_y = to_fixed(marker->position.y);
+            marker_x = marker->position.x.q16;
+            marker_y = marker->position.y.q16;
         }
         const int32_t dx = std::abs(in.player_x - marker_x);
         const int32_t dy = std::abs(in.player_y - marker_y);
@@ -149,10 +174,10 @@ void WaypointTrack::build_map_poi_list(const EntityRegistry &registry) {
         WaypointEntry entry;
         entry.node = e.handle.slot();
         entry.pool = static_cast<uint8_t>(e.handle.pool());
-        entry.x = to_fixed(e.position.x);
-        entry.y = to_fixed(e.position.y);
-        entry.z = to_fixed(e.position.z);
-        entry.radius = to_fixed(e.bound_radius);
+        entry.x = e.position.x.q16;
+        entry.y = e.position.y.q16;
+        entry.z = e.position.z.q16;
+        entry.radius = e.bound_radius.q16;
         list.push_back(entry);
     };
     // Pool 2: the targets (def attrib 0x8000) [orig: @0x42de58..0x42de71].
@@ -188,6 +213,9 @@ void WaypointTrack::build_map_poi_list(const EntityRegistry &registry) {
     // The count store; g_CurrentWaypoint is left as it was [orig: @0x42e0d4].
     const WaypointEntry *was = current_entry();
     const EntityHandle selected = was != nullptr ? was->handle() : EntityHandle{};
+    // The route's markers keep their fields (route_markers).
+    if (!holds_poi_list_) route_markers_ = std::move(entries);
+    holds_poi_list_ = true;
     entries = std::move(list);
     current = -1;
     if (selected.valid()) {
@@ -307,6 +335,53 @@ void WaypointTrack::manual_cycle(bool backward, const WaypointCycleContext &ctx)
     }
 }
 
+void WaypointTrack::cycle_by_team(bool backward, const WaypointCycleContext &ctx,
+        uint8_t local_team) {
+    const int32_t count = static_cast<int32_t>(entries.size());
+    if (count <= 1) return; // [orig: @0x4dbf0a]
+    // The two legs' match: the other side's flag by its def's type (0x10004), or a target
+    // of the other team (0x90002 / 0x10002) [orig: @0x4dbf26..0x4dbf3f / @0x4dc078..0x4dc092;
+    //  the entity and def tests @0x4dbf89 / @0x4dbf90, @0x4dc0db / @0x4dc0e2, def+80
+    //  @0x4dbf95, def+84 & 0x8000 and the team byte entity+354 @0x4dc0f2].
+    bool by_type = false;
+    int32_t target = 0;
+    if (ctx.game_type == 0x10004u) {
+        if (local_team == 1) target = 4093;
+        else if (local_team == 2) target = 4091;
+        else return;
+        by_type = true;
+    } else if (ctx.game_type == 0x90002u || ctx.game_type == 0x10002u) {
+        if (local_team == 1) target = 2;
+        else if (local_team == 2) target = 1;
+        else return;
+    } else {
+        return;
+    }
+    const auto matches = [&](int32_t i) {
+        if (ctx.registry == nullptr) return false;
+        const Entity *e = ctx.registry->get(entries[static_cast<size_t>(i)].handle());
+        if (e == nullptr || !e->has_item_def) return false;
+        if (by_type) return e->item_id == target;
+        return (e->item_attrib & 0x8000u) != 0 && static_cast<int8_t>(e->team) == target;
+    };
+    // A current entry not in the list scans from 0 [orig: @0x4dbf44..0x4dbf66 /
+    //  @0x4dc097..0x4dc0b8].
+    const int32_t from = current >= 0 && current < count ? current : 0;
+    if (backward) {
+        // [orig: @0x4dbfe1..0x4dc03c / @0x4dc149..0x4dc1a7]
+        for (int32_t i = from - 1; i >= 0; --i)
+            if (matches(i)) { current = i; return; }
+        for (int32_t i = count - 1; i >= from; --i)
+            if (matches(i)) { current = i; return; }
+        return;
+    }
+    // [orig: @0x4dbf6f..0x4dbfcc / @0x4dc0cb..0x4dc130]
+    for (int32_t i = from + 1; i < count; ++i)
+        if (matches(i)) { current = i; return; }
+    for (int32_t i = 0; i < from; ++i)
+        if (matches(i)) { current = i; return; }
+}
+
 // [orig: SpawnPoint_SkipBlocked @ 0x4de310 — cycle forward past done entries
 //  until an incomplete one or a full wrap back to the start.]
 void WaypointTrack::skip_done(const WaypointCycleContext &ctx) {
@@ -355,9 +430,9 @@ WaypointHudView waypoint_hud_view(const WaypointTrack &track, const EntityRegist
             v.def_type = marker->has_item_def ? marker->item_id : 0;
             v.def_attrib = marker->has_item_def ? marker->item_attrib : 0u;
             v.zone_number = marker->zone_number;
-            v.entry.x = to_fixed(marker->position.x);
-            v.entry.y = to_fixed(marker->position.y);
-            v.entry.z = to_fixed(marker->position.z);
+            v.entry.x = marker->position.x.q16;
+            v.entry.y = marker->position.y.q16;
+            v.entry.z = marker->position.z.q16;
         }
     }
     return v;

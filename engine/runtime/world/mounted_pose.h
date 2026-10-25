@@ -55,25 +55,55 @@ bool evaluate_model_mounted_pose_parts(
         const opennova::threedi::Threedi3di3 &model, uint32_t time_ms,
         const int32_t *ctrl_values, MountedPosePartMatrices &out);
 
-// Resolve one seat from already evaluated rest/live part matrices.
+// Resolve one addeweap attachment frame (a Gunner seat with attachment_frame) from
+// already evaluated rest/live part matrices; any other seat is false.
 bool resolve_model_mounted_pose_from_parts(
         const opennova::threedi::Threedi3di3 &model, const world::Entity &carrier,
         const world::Seat &seat, const MountedPosePartMatrices &rest_parts,
         const MountedPosePartMatrices &live_parts, world::MountedPose &out);
 
-// Resolve the seat's live world pose from the carrier's parsed model:
-// the userpoint (seat.bone_index is the 1-based USRP row) is re-anchored into
-// its owning part's rest frame, carried by the live PANM part matrix, and
-// composed with the carrier's mission euler; an addeweap attachment frame
-// (seat.attachment_frame + an authored direction) owns the complete look-at
-// orientation, an ordinary gunner seat re-bases the part delta onto the
-// carrier baseline. ctrl_values is the 96-slot global register bus (may be
-// null); time_ms the retail PANM clock. Mirrors the binding resolver's
-// gates/fallthroughs exactly — false means "use the portable fallback".
+// The UseGun rider's seat frame (a Gunner seat without attachment_frame) as the UseGun
+// carry builds it each tick: the carrier's Q22 placement matrix as render floats in
+// every bone slot, the model's bone pass over them (threedi_panm_pose_parts_over, LOD 0),
+// the userpoint's part (its subobject index) back to Q22 / 16.16, the userpoint's
+// position words through that matrix (out.position) and that matrix's own Yaw, Pitch and
+// Roll (out.heading / pitch / roll). The userpoint's direction does not enter. False for
+// any other seat, a missing userpoint, or a part index outside the LOD's parts.
+// [orig: Entity_AttachToBoneAndUpdateTransform @0x5463D0 - Model_TransformBoneMatrices
+// @0x54652B, Math_FloatMatrixToFixedPoint22 @0x54653E, Math_FixedPointTransformPoint22
+// @0x546564, Math_FixedPointMatrixToEulerAngles @0x54656F]
+bool resolve_usegun_seat_pose(const opennova::threedi::Threedi3di3 &model,
+        const world::Entity &carrier, const world::Seat &seat,
+        const int32_t *ctrl_values, uint32_t time_ms, world::MountedPose &out);
+
+// Resolve the seat's live world pose from the carrier's parsed model. A UseGun
+// seat goes to resolve_usegun_seat_pose. For an addeweap attachment frame the
+// userpoint (seat.bone_index is the 1-based USRP row) is re-anchored into its
+// owning part's rest frame, carried by the live PANM part matrix, and composed
+// with the carrier's mission euler; an authored direction owns the complete
+// look-at orientation, a zero one re-bases the part delta onto the carrier
+// baseline. ctrl_values is the 96-slot global register bus (may be null); time_ms
+// the retail PANM clock. False means "use the portable fallback".
 bool resolve_model_mounted_pose(const opennova::threedi::Threedi3di3 &model,
                                 const world::Entity &carrier,
                                 const world::Seat &seat,
                                 const int32_t *ctrl_values, uint32_t time_ms,
                                 world::MountedPose &out);
+
+// The seat bone of a carrier whose model's bone callback hands every bone slot the
+// carrier's own orientation matrix (an ItemType_Vehicle model's BoneCallback_Simple), as
+// the sitex / ctrlx / drvrx carry and the attach request read it: the seat userpoint's
+// position words (Seat::bone_point) through the carrier's Q22 placement matrix
+// (entity_placement_matrix), the heading the fpatan of its direction words
+// (Seat::bone_direction) rotated by that matrix, truncated as the CRT's _ftol2_sse does,
+// and the pitch and roll that matrix's own eulers. No part animation reaches such a
+// seat. [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 (the vehicle's
+// BoneCallback_Simple @0x43A072); BoneCallback_Simple @0x4E2600 (the copies
+// @0x4E267E..0x4E26B7); Entity_GetBoneTransformAndOrientation @0x4B0C50 -
+// Math_FixedPointTransformPoint22 @0x4B0D42, Math_TransformPointFixedPoint22 @0x4B0D64,
+// the fpatan @0x4B0D69..0x4B0D7C and its store @0x4B0D81,
+// Math_FixedPointMatrixToEulerAngles @0x4B0DA1 (pitch @0x4B0DB1, roll @0x4B0DBB)]
+void seat_bone_pose_on_carrier_matrix(const world::Entity &carrier, const world::Seat &seat,
+                                      world::MountedPose &out);
 
 } // namespace opennova::world

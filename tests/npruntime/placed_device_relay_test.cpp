@@ -241,8 +241,8 @@ bool run_placed_device_spawn_and_remove_fanout() {
 		return false;
 
 	// Seed two more same-owner/same-item rows directly, then make the next
-	// authoritative conversion enforce the cap. Direct-place events are cleared
-	// at the next tick head; only the new 0x59 and oldest-device 0x12 should fan.
+	// authoritative conversion enforce the cap; only the new 0x59 and the
+	// oldest device's 0x12 should fan, in that order.
 	world.throwables.devices.front().think_delay_ticks = -30;
 	for (int i = 0; i < 2; ++i) {
 		w::LiveRound extra;
@@ -260,7 +260,7 @@ bool run_placed_device_spawn_and_remove_fanout() {
 		world.throwables.devices.back().think_delay_ticks = -20 + i * 10;
 	}
 	// The two seeds stand for devices already on the wire.
-	world.throwables.events.clear();
+	world.out.entity_events.clear();
 	w::RoundSpawnParams cap_params = params;
 	cap_params.origin = {14.0f, 10.0f, 1.0f / 1024.0f};
 	cap_params.shot_seq = 0x5678;
@@ -282,6 +282,17 @@ bool run_placed_device_spawn_and_remove_fanout() {
 	const std::vector<ns::Datagram> loop_remove = drain(loopback);
 	const auto owner_12 = tagged(owner_remove, s2c::ENTITY_REMOVE);
 	const auto observer_12 = tagged(observer_remove, s2c::ENTITY_REMOVE);
+	// The conversion's 0x59 leads, its cap's 0x12 follows at once, one queue in
+	// call order (D-NET-NEW-L7-14) [orig: Entity_UpdateSatchelPhysics @0x4482A0 -
+	//  the 0x59 @0x448BD5, the Server_EnforcePlacedDeviceCapByOwner call @0x448BEC].
+	std::vector<uint8_t> observer_order;
+	for (const ns::Datagram &d : observer_remove)
+		if (d.tag == s2c::DEPLOYED_ITEM || d.tag == s2c::ENTITY_REMOVE)
+			observer_order.push_back(d.tag);
+	if (!expect(observer_order ==
+			(std::vector<uint8_t>{s2c::DEPLOYED_ITEM, s2c::ENTITY_REMOVE}),
+			"the observer hears the 0x59 and then its cap's 0x12"))
+		return false;
 	if (!expect(owner_12.size() == 1 && observer_12.size() == 1 &&
 			tagged(owner_remove, s2c::DEPLOYED_ITEM).size() == 1 &&
 			tagged(observer_remove, s2c::DEPLOYED_ITEM).size() == 1 &&
@@ -333,11 +344,16 @@ std::vector<uint16_t> queued_removals(const w::World &world) {
 // The owner's death leaves its placed devices armed: the pool-1 visit reads no
 // owner. The deploy that follows removes them, each through the notifying
 // removal, unless it is a medic revive or the slot is a spectator; a leaver's
-// teardown removes them too.
+// teardown removes them too, at its call: the leaver's own 0x12, then each
+// device's, then a carried flag's drop (its 0x2F), then the slot's 0x46, with no
+// sweep (D-NET-176).
 // [orig: Entity_UpdatePool1Slot @0x4B8DD0; Server_DeployPlayer @0x517740
 //  — the revive latch test @0x5178C5, the spectator latch test @0x5178CD, the
 //  Entity_RemovePlacedDevicesByOwner call @0x5178D8; Server_HandlePlayerDisconnect
-//  @0x51B5C0 — the Server_RemoveEntityAndNotify call @0x51B82E]
+//  @0x51B5C0 — the Server_RemoveEntityAndNotify call @0x51B82E, the 0x46 @0x51B8BC;
+//  Server_RemoveEntityAndNotify @0x50A270 — the 0x12 @0x50A2AC, the sweep call
+//  @0x50A2BB, Entity_Destroy @0x50A2C4; Entity_Destroy — the Entity_DropCarriedObject
+//  call @0x43E8B8; Entity_DropCarriedObject — the 0x2F's call @0x439F34]
 bool run_owner_devices_live_until_the_deploy() {
 	w::World world;
 	world.rules.mp_session = true;
@@ -365,7 +381,7 @@ bool run_owner_devices_live_until_the_deploy() {
 		world.throwables.update_device(world, device, nullptr, nullptr);
 	world.throwables.compact();
 	if (!expect(world.throwables.devices.size() == 2 && world.registry.get(satchel) != nullptr &&
-			world.registry.get(claymore) != nullptr && world.throwables.events.removes.empty(),
+			world.registry.get(claymore) != nullptr && queued_removals(world).empty(),
 			"a dead owner's devices stay armed through their visits"))
 		return false;
 
@@ -392,27 +408,68 @@ bool run_owner_devices_live_until_the_deploy() {
 	for (w::PlacedDevice &device : world.throwables.devices)
 		world.throwables.update_device(world, device, nullptr, nullptr);
 	world.throwables.compact();
-	if (!expect(world.throwables.devices.empty() && world.throwables.events.removes.empty(),
+	if (!expect(world.throwables.devices.empty() &&
+			queued_removals(world) ==
+					(std::vector<uint16_t>{satchel.packed, claymore.packed}),
 			"the swept records release silently, with no second removal"))
 		return false;
 
-	// A leaver's teardown sweeps its devices before the row goes.
+	// A leaver's teardown sweeps its devices before the row goes, each removal's 0x12 at
+	// its call: an in-match observer hears the leaver's body, then the device, then the
+	// slot's removal record, and no 0x5D; nothing is left for the entity fan.
 	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
 	const opennova::PeerAddr leaver_peer{0x0100007Fu, 33101};
 	inmatch::NapiNPConnection leaver =
 			make_conn(7, 1, nullptr, ns::TransportMode::Client, owner, true);
 	leaver.peer = leaver_peer;
 	leaver.phase = inmatch::ConnectionPhase::PlayerAdded;
 	ctx.np_protocol.connection_list.push_back(std::move(leaver));
+	ns::UdpSessionTransport observer_wire(ns::UdpSessionTransport::Role::Host);
+	const w::EntityHandle observer =
+			w::spawn_remote_player(world, player_spawn(0xFFF2, 2));
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(8, 1, &observer_wire, ns::TransportMode::Client, observer, true));
 	const w::EntityHandle mine = place_device(world, owner, 0);
+	// The leaver carries a flag: its body's destroy drops it, whose 0x2F state leaves at the
+	// drop, after the removals and ahead of the slot's 0x46.
+	w::Entity flag_row;
+	flag_row.kind = w::EntityKind::Item;
+	flag_row.item_id = 4091;
+	flag_row.has_item_def = true;
+	flag_row.alive = true;
+	const w::EntityHandle flag = world.registry.spawn(1, flag_row);
+	world.registry.get(owner)->mounted_child = flag;
+	world.registry.get(flag)->primary_occupant = owner;
 	world.out.entity_events.clear();
+	(void)world.match.drain_gameplay_events();
 	if (!expect(inmatch::destroy_connection(ctx, leaver_peer, nullptr), "the leaver's connection drops"))
 		return false;
-	return expect(world.registry.get(mine) == nullptr && world.registry.get(owner) == nullptr &&
-			queued_removals(world) == (std::vector<uint16_t>{mine.packed}),
-			"the leaver's teardown removes its device with a 0x12 before the row");
+	if (!expect(world.registry.get(mine) == nullptr && world.registry.get(owner) == nullptr &&
+			queued_removals(world).empty(),
+			"the leaver's teardown removes its device and its row, nothing left for the fan"))
+		return false;
+	std::vector<uint8_t> order;
+	std::vector<uint16_t> removed;
+	for (const ns::Datagram &d : drain(observer_wire)) {
+		if (d.tag != s2c::ENTITY_REMOVE && d.tag != 0x46 && d.tag != s2c::EMPTY_SLOT_SWEEP &&
+				d.tag != s2c::OBJECTIVE_ENTITY_STATE)
+			continue;
+		order.push_back(d.tag);
+		EntityRemove removal;
+		size_t consumed = 0;
+		if (d.tag == s2c::ENTITY_REMOVE &&
+				decode_entity_remove(d.body.data(), d.body.size(), removal, consumed))
+			removed.push_back(removal.entity_handle);
+	}
+	return expect(order == (std::vector<uint8_t>{s2c::ENTITY_REMOVE, s2c::ENTITY_REMOVE,
+						  s2c::OBJECTIVE_ENTITY_STATE, 0x46}) &&
+			removed == (std::vector<uint16_t>{owner.packed, mine.packed}) &&
+			world.match.drain_gameplay_events().empty(),
+			"the observer hears the leaver's 0x12, its device's 0x12, the dropped flag's 0x2F, "
+			"then the 0x46, no 0x5D");
 }
 
 } // namespace

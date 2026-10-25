@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <variant>
 #include <vector>
 
 #include <runtime/terrain_query/height_field.h>
@@ -20,6 +21,7 @@
 #include <runtime/world/throwables.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;
@@ -321,6 +323,10 @@ struct Rig {
             : w_heap(std::make_unique<World>()), w(*w_heap), flat(ground_raw16) {
         seed_ammo(w);
         seed_classes(w);
+        // A water plane far below every case's motion: retail keeps no dry
+        // sentinel, so a dry map's plane is the word 0 (the cases that test
+        // water set their own plane).
+        w.env.water_z = -(1000 << 16);
         w.registry.configure_pool(0, 8);
         w.registry.configure_pool(1, 16);
         w.registry.configure_pool(2, 8);
@@ -369,6 +375,23 @@ LiveRound make_satchel_round(const Rig &rig, const Vec3 &pos,
     if (const Entity *p = rig.w.registry.get(parent))
         round.parent_spawn_id = p->registry_spawn_id;
     return round;
+}
+
+// The placed devices' S2C 0x59 records in the entity pass's call-order queue
+// (a session's; D-NET-NEW-L7-14).
+std::vector<DeviceSpawnEvent> device_spawns(const World &w) {
+    std::vector<DeviceSpawnEvent> out;
+    for (const auto &event : w.out.entity_events)
+        if (const auto *spawn = std::get_if<DeviceSpawnEvent>(&event)) out.push_back(*spawn);
+    return out;
+}
+
+// The S2C 0x12 removals in the same queue, in order.
+std::vector<uint16_t> device_removals(const World &w) {
+    std::vector<uint16_t> out;
+    for (const auto &event : w.out.entity_events)
+        if (const auto *removal = std::get_if<EntityRemoveEvent>(&event)) out.push_back(removal->handle);
+    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -445,16 +468,23 @@ void test_tracer_item_binding_fallbacks() {
     }
 }
 
-// Zero is the environment's no-water sentinel, not a plane at mission Z=0.
-// A grenade below zero in a dry mission therefore takes the above-water
-// gravity branch [orig: g_EnvWaterHeightFixed authoring gate + motor @ 0x443ffa].
-void test_zero_water_is_dry_below_altitude_zero() {
+// D-NET-507: retail keeps no dry sentinel. With no water authored the water
+// word is the memset's 0 and the motor compares Z against it raw, so a grenade
+// below zero in a dry mission takes the submerged branch (-55), not gravity.
+// [orig: Environment_InitDefaults @0x57C010 - the memset @0x57C011..0x57C01E;
+//  Entity_UpdateGrenadePhysics @0x443F50 - `cmp eax, g_EnvWaterHeightFixed; jg`
+//  @0x443FF4..0x443FFA, `add [esi+0A0h], -55` @0x443FFC, the submerged drag
+//  @0x4441AD..0x4441B5]
+void test_zero_water_is_a_plane_below_altitude_zero() {
     Rig rig;
+    rig.w.env.water_z = 0; // a dry mission
     const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, -10}, 0, 0);
     CHECK(slot >= 0);
     rig.w.round_sim.tick(rig.w, nullptr, nullptr);
     const LiveRound &round = rig.w.round_sim.rounds[size_t(slot)];
-    CHECK(to_fixed(round.vel.z) == -167);
+    // -55, then the submerged 0.95 drag: (-55 * 62259 + 0x8000) >> 16
+    // [orig: @0x4441B5].
+    CHECK(to_fixed(round.vel.z) == -52);
     for (const RoundImpact &impact : rig.w.round_sim.impacts)
         CHECK(impact.effect_tag != 11);
 }
@@ -532,7 +562,7 @@ void test_motor_sweep_ignores_non_pool_domains() {
         item.kind = EntityKind::Item;
         item.alive = true;
         item.position = Vec3{18.0f, 10.0f, -4.0f};
-        item.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+        item.heading = placed_heading_bam(90); // identity model placement [orig: entity matrix @0x613F40]
         // The grenade's gates project along its velocity over its horizontal
         // speed, which a 45-degree throw overshoots by 2x: the bound must reach
         // the projected point 11.3 u past the item for the walk to reach the
@@ -587,7 +617,7 @@ void test_grenade_item_contact_backs_off_along_the_ray() {
     item.kind = EntityKind::Item;
     item.alive = true;
     item.position = Vec3{18.0f, 10.0f, 6.0f};
-    item.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+    item.heading = placed_heading_bam(90); // identity model placement [orig: entity matrix @0x613F40]
     item.bound_radius = 12.0f; // the gates' 45-degree overshoot (above)
     const EntityHandle item_h = rig.w.registry.spawn(1, item);
     CHECK(item_h.valid());
@@ -700,7 +730,7 @@ void test_grenade_kept_pool2_hit_carries_the_pool1_record() {
         near_seed.kind = EntityKind::Building;
         near_seed.health = 100;
         near_seed.position = Vec3{14.0f, 10.0f, 10.0f};
-        near_seed.yaw = 90; // identity model placement
+        near_seed.heading = placed_heading_bam(90); // identity model placement
         near_seed.bound_radius = 12.0f;
         const EntityHandle near_h = rig.w.registry.spawn(2, near_seed);
         CollisionWorld collision;
@@ -715,7 +745,7 @@ void test_grenade_kept_pool2_hit_carries_the_pool1_record() {
             far_seed.kind = EntityKind::Item;
             far_seed.alive = true;
             far_seed.position = Vec3{18.0f, 10.0f, 6.0f};
-            far_seed.yaw = 90;
+            far_seed.heading = placed_heading_bam(90);
             far_seed.bound_radius = 12.0f;
             const EntityHandle far_h = rig.w.registry.spawn(1, far_seed);
             collision.assign_entity(
@@ -772,7 +802,7 @@ void test_motor_sweep_passes_a_model_less_entity() {
     seed.kind = EntityKind::Building;
     seed.health = 100;
     seed.position = Vec3{14.0f, 10.0f, 10.0f};
-    seed.yaw = 90;
+    seed.heading = placed_heading_bam(90);
     seed.bound_radius = 12.0f;
     rig.w.registry.spawn(2, seed);
     CollisionWorld collision;
@@ -802,7 +832,7 @@ void test_grenade_gates_project_along_the_velocity() {
         item.kind = EntityKind::Item;
         item.alive = true;
         item.position = Vec3{18.0f, 10.0f, item_z};
-        item.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+        item.heading = placed_heading_bam(90); // identity model placement [orig: entity matrix @0x613F40]
         item.bound_radius = 0.4f;
         const EntityHandle item_h = rig.w.registry.spawn(1, item);
         CHECK(item_h.valid());
@@ -832,7 +862,7 @@ void test_satchel_item_contact_restores_the_tick_start_pose() {
     item.kind = EntityKind::Item;
     item.alive = true;
     item.position = Vec3{18.0f, 10.0f, -4.0f};
-    item.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+    item.heading = placed_heading_bam(90); // identity model placement [orig: entity matrix @0x613F40]
     item.bound_radius = 0.4f;
     const EntityHandle item_h = rig.w.registry.spawn(1, item);
     CHECK(item_h.valid());
@@ -1152,9 +1182,16 @@ void test_round_slot_reuse_clears_throwable_state() {
     auto &ammo = rig.w.tables.ammo.entries[kAmmoGrenade];
     ammo.max_age_ticks = 4;
     const int thrown = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, 50}, 0, 0);
-    CHECK(thrown == 0);
+    CHECK(thrown == 1); // a fresh pool's first round: the slot after the cursor's 0
     rig.tick(6);
     CHECK(!rig.w.round_sim.rounds[size_t(thrown)].active);
+    // The allocator takes the slot after its cursor, so the released slot comes
+    // back only once the cursor has walked the pool round to the slot before it.
+    // [orig: CEntityManager_AllocateSlot @0x4EAAD0 (the cursor @0x4EAB1C..0x4EAB37)]
+    const int before = (thrown + RoundSim::kCapacity - 1) % RoundSim::kCapacity;
+    for (int n = 0; n < RoundSim::kCapacity &&
+            rig.w.round_sim.allocate_slot(rig.w, RoundSim::kFreshRoundWord) != before; ++n) {
+    }
 
     rig.w.explosions.queue.clear();
     rig.w.round_sim.impacts.clear();
@@ -1165,7 +1202,8 @@ void test_round_slot_reuse_clears_throwable_state() {
     const int ballistic = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, 50}, 0, 0);
     CHECK(ballistic == thrown);
     const LiveRound &reused = rig.w.round_sim.rounds[size_t(ballistic)];
-    CHECK(reused.item_type_id == 0);
+    // No TrcrID item: item 1 with no def [orig: RoundData_SpawnRound @0x4EC7C1 / @0x4EC7CB].
+    CHECK(reused.item_type_id == 1 && !reused.has_item_def);
     CHECK(reused.motor == ThrowClass::kNone);
     CHECK(reused.think == ThrowClass::kNone);
     CHECK(reused.spin_yaw == 0);
@@ -1181,6 +1219,7 @@ void test_round_slot_reuse_clears_throwable_state() {
 // Entity_ConvertRoundToPlacedEntity @ 0x5455B0].
 void test_satchel_places_device() {
     Rig rig(0);
+    rig.w.rules.mp_session = true; // the conversion's 0x59 is a session's send
     const int slot = rig.throw_ammo(kAmmoSatchel, Vec3{20, 20, 1.5f}, 0, 0);
     CHECK(slot >= 0);
     rig.tick(120); // the -55 Q16 gravity drop takes ~60 ticks from 1.5 u
@@ -1197,8 +1236,9 @@ void test_satchel_places_device() {
     CHECK(e->item_id == kItemSatchel);
     CHECK(e->has_item_def);
     CHECK(e->health == 5); // the class row hp
-    CHECK(rig.w.throwables.events.spawns.size() == 1);
-    CHECK(rig.w.throwables.events.spawns[0].item_enemy == 0); // foe id absent
+    const std::vector<DeviceSpawnEvent> spawns = device_spawns(rig.w);
+    CHECK(spawns.size() == 1);
+    if (!spawns.empty()) CHECK(spawns[0].item_enemy == 0); // foe id absent
 }
 
 // The conversion runs the model init on the placed entity: a NoTarget def
@@ -1236,6 +1276,69 @@ void test_placed_device_takes_the_model_init_no_target_bit() {
             CHECK((rec.entity_flags & 0x8000000u) == 0);
     }
     CHECK(streamed);
+}
+
+// The conversion's copy carries the round's +0x114 ammo-flags word, so a
+// device from a noage ammo (the satchel's here, as the shipped satchel,
+// claymore and AV_Mine author it) keeps the noage bit. The dynamic table still
+// holds it, but no slice build takes it as a candidate, for a pool-0 or a
+// pool-1 source; a device from an ammo without the flag is a candidate.
+// [orig: RoundData_SpawnRound @0x4EC0D0 - the +0x114 store @0x4EC615;
+//  Entity_ConvertRoundToPlacedEntity @0x5455B0 - the copy @0x5455D6, the
+//  round's clear @0x5455E2; Entity_BuildProximityLists_Pool01 @0x4B9340;
+//  Entity_BuildProximityListsFromPools @0x4B8EB0 - @0x4B8FCA / @0x4B920A]
+void test_a_noage_device_is_no_slice_candidate() {
+    Rig rig(0);
+    const AmmoTableEntry &noage = rig.w.tables.ammo.entries[kAmmoSatchel];
+    AmmoTableEntry aging = noage;
+    aging.flags &= ~kNoAge;
+    // Each round carries the noage bit its ammo's spawn stored at +0x114, which
+    // the conversion copies [orig: RoundData_SpawnRound @0x4EC615].
+    LiveRound kept_round = make_satchel_round(rig, Vec3{51, 50, 0});
+    kept_round.noage = (noage.flags & kNoAge) != 0;
+    LiveRound aging_round = make_satchel_round(rig, Vec3{49, 50, 0});
+    aging_round.noage = (aging.flags & kNoAge) != 0;
+    CHECK(rig.w.throwables.place_from_round(rig.w, kept_round, noage));
+    CHECK(rig.w.throwables.place_from_round(rig.w, aging_round, aging));
+    CHECK(rig.w.throwables.devices.size() == 2);
+    if (rig.w.throwables.devices.size() < 2) return;
+    const EntityHandle kept_out = rig.w.throwables.devices[0].entity;
+    const EntityHandle candidate = rig.w.throwables.devices[1].entity;
+    const Entity *kept_entity = rig.w.registry.get(kept_out);
+    const Entity *candidate_entity = rig.w.registry.get(candidate);
+    CHECK(kept_entity != nullptr && kept_entity->ammo_word_noage);
+    CHECK(candidate_entity != nullptr && !candidate_entity->ammo_word_noage);
+    // Two sources within reach of both: the thrower (pool 0, its +0x1C word
+    // set) and a typed pool-1 item with a def.
+    Entity *thrower = rig.w.registry.get(rig.thrower);
+    CHECK(thrower != nullptr);
+    if (thrower == nullptr) return;
+    thrower->item_type_index = 1;
+    Entity hull;
+    hull.kind = EntityKind::Item;
+    hull.has_item_def = true;
+    hull.item_type_index = 7;
+    hull.bound_radius = 1.0f;
+    hull.position = Vec3{50, 52, 0};
+    const EntityHandle hull_handle = rig.w.registry.spawn(1, hull);
+    CHECK(hull_handle.valid());
+    CollisionWorld collision;
+    collision.build_initial_tables(rig.w);
+    int32_t radius = 0;
+    CHECK(collision.dynamic_table_radius_q16(kept_out, radius));
+    CHECK(collision.dynamic_table_radius_q16(candidate, radius));
+    for (const EntityHandle source : {rig.thrower, hull_handle}) {
+        int32_t count = 0;
+        const EntityHandle *slice = collision.candidate_slice(source, count);
+        bool saw_kept_out = false;
+        bool saw_candidate = false;
+        for (int32_t i = 0; i < count; ++i) {
+            if (slice[i] == kept_out) saw_kept_out = true;
+            if (slice[i] == candidate) saw_candidate = true;
+        }
+        CHECK(!saw_kept_out);
+        CHECK(saw_candidate);
+    }
 }
 
 // The same init's matrix-built leg ORs Flags 0x20000 for a decoration,
@@ -1385,9 +1488,9 @@ void test_placed_device_pose_and_ballistic_damage() {
     CHECK(entity != nullptr);
     if (entity == nullptr) return;
     CHECK(entity->has_item_def);
-    CHECK(entity->yaw == 68);
-    CHECK(entity->pitch == 45);
-    CHECK(entity->roll == -90);
+    CHECK(entity->heading == 0x10000000); // the round's Yaw word
+    CHECK(entity->pitch_bam == spawn_angle_bam(45));
+    CHECK(entity->roll_bam == spawn_angle_bam(-90));
     CHECK(!entity->ground_target.valid());
     CHECK(device.entity_spawn_id == entity->registry_spawn_id);
     const Entity *owner = rig.w.registry.get(rig.thrower);
@@ -1421,16 +1524,96 @@ void test_placed_device_pose_and_ballistic_damage() {
     CHECK(saw_boom);
 }
 
+// A placed satchel ITEM's class row (schl) is its think, which the damage sites call with
+// their phase: on the authority a round that drops it to Health <= 0 booms it AT the hit
+// (the boom round queued, the item gone, before any device visit) and runs no tree body
+// (no S2C 0x26 of the tree's, no destructible death). [orig: schl @0x813150 ->
+// Entity_SatchelThink @0x443670 (the authority's Health test @0x443771, satchelboom
+// @0x4437E2, Entity_Destroy @0x44389E); the round hit's callback call
+// Projectile_ProcessDamageOnTarget @0x4E8205]
+void test_a_shot_device_item_booms_at_the_hit() {
+    Rig rig(0);
+    ItemDeathTraits traits;
+    traits.death_class = item_death_class_from_tag("schl");
+    CHECK(traits.death_class == ItemDeathClass::kSatchel);
+    rig.w.tables.item_death_traits.set(kItemSatchel, traits);
+    rig.w.rules.mp_session = true;
+    LiveRound round = make_satchel_round(rig, Vec3{20, 20, 2});
+    CHECK(rig.w.throwables.place_from_round(rig.w, round,
+                                            rig.w.tables.ammo.entries[kAmmoSatchel]));
+    if (rig.w.throwables.devices.empty()) return;
+    PlacedDevice &device = rig.w.throwables.devices[0];
+    device.think_delay_ticks = 5; // still arming: the visit's think would not run
+    const EntityHandle item = device.entity;
+    rig.w.out.entity_events.clear();
+    rig.w.explosions.queue.clear();
+    CollisionWorld collision;
+    collision.assign_entity(item, collision.add_model(projectile_wall_model(0.5)));
+    collision.build_tick_tables(rig.w);
+    RoundSpawnParams bullet;
+    bullet.owner = rig.thrower;
+    bullet.shooter_handle = rig.thrower.packed;
+    bullet.origin = Vec3{device.pos.x - 2.0f, device.pos.y, device.pos.z};
+    bullet.dir_yaw_bam = 0;
+    bullet.ammo_index = kAmmoBullet;
+    CHECK(rig.w.round_sim.spawn(rig.w, bullet) >= 0);
+    rig.w.round_sim.tick(rig.w, nullptr, &collision);
+    bool saw_boom = false;
+    for (const ExplosionEntry &entry : rig.w.explosions.queue)
+        if (entry.ammo_index == kAmmoSatchelBoom) saw_boom = true;
+    CHECK(saw_boom);
+    CHECK(rig.w.registry.get(item) == nullptr);
+    CHECK(!rig.w.throwables.devices[0].active);
+    // One kill packet, the think's (section 0, ahead of the destroy) and no S2C 0x12; the
+    // tree body would have sent its own 0x26 at the hit and left the boom to the next visit.
+    int states = 0;
+    for (const auto &event : rig.w.out.entity_events)
+        if (const auto *state = std::get_if<ItemStateEvent>(&event))
+            if (state->handle == item.packed && state->section == 0) ++states;
+    CHECK(states == 1);
+    CHECK(device_removals(rig.w).empty());
+}
+
+// Off the authority the same row runs only the net kill's event 4: the boom round from
+// the item's own words, the item destroyed; a think (phase 0) does nothing. [orig:
+// Entity_SatchelThink @0x443670 - `cmp deathType, 4` @0x443698, satchelboom @0x443709,
+// Entity_Destroy @0x443750]
+void test_a_joiners_device_item_booms_on_the_kill() {
+    Rig rig(0);
+    ItemDeathTraits traits;
+    traits.death_class = ItemDeathClass::kSatchel;
+    rig.w.tables.item_death_traits.set(kItemSatchel, traits);
+    rig.w.rules.logic_authority = false;
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.item_id = kItemSatchel;
+    seed.item_type_index = 1;
+    seed.has_item_def = true;
+    seed.health = 5;
+    seed.position = Vec3{30, 30, 1};
+    const EntityHandle item = rig.w.registry.spawn(1, seed);
+    rig.w.explosions.queue.clear();
+    destruction_notify_item_damage(rig.w, *rig.w.registry.get(item), 0);
+    CHECK(rig.w.registry.get(item) != nullptr && rig.w.explosions.queue.empty());
+    apply_item_state_event(rig.w, *rig.w.registry.get(item), 0);
+    bool saw_boom = false;
+    for (const ExplosionEntry &entry : rig.w.explosions.queue)
+        if (entry.ammo_index == kAmmoSatchelBoom) saw_boom = true;
+    CHECK(saw_boom);
+    CHECK(rig.w.registry.get(item) == nullptr);
+}
+
 void test_parented_device_follows_parent_yaw() {
     Rig rig(0);
     Entity parent_seed;
     parent_seed.kind = EntityKind::Item;
     parent_seed.position = Vec3{10, 10, 1};
-    parent_seed.yaw = 90; // mission heading zero
+    parent_seed.heading = placed_heading_bam(90); // mission heading zero
     const EntityHandle parent = rig.w.registry.spawn(1, parent_seed);
     CHECK(parent.valid());
     LiveRound round = make_satchel_round(rig, Vec3{11, 10, 2}, parent);
     round.yaw_bam = 0;
+    rig.w.rules.mp_session = true; // the conversion's 0x59 is a session's send
     CHECK(rig.w.throwables.place_from_round(rig.w, round,
                                             rig.w.tables.ammo.entries[kAmmoSatchel]));
     CHECK(rig.w.throwables.devices.size() == 1);
@@ -1441,7 +1624,7 @@ void test_parented_device_follows_parent_yaw() {
     // [orig: the +0x80..+0x94 prologue stamps every mover carries].
     stamp_saved_live_pose(*carrier);
     carrier->position = Vec3{20, 30, 3};
-    carrier->yaw = 0; // +90 degrees of mission-heading rotation
+    carrier->heading = placed_heading_bam(0); // +90 degrees of mission-heading rotation
     step_devices(rig.w, nullptr, nullptr);
     const PlacedDevice &device = rig.w.throwables.devices[0];
     CHECK(std::fabs(device.pos.x - 20.0f) < 1e-4f);
@@ -1449,12 +1632,12 @@ void test_parented_device_follows_parent_yaw() {
     CHECK(std::fabs(device.pos.z - 4.0f) < 1e-4f);
     CHECK(static_cast<uint32_t>(device.yaw_bam) == 0x40000000u);
     const Entity *entity = rig.w.registry.get(device.entity);
-    CHECK(entity != nullptr && entity->yaw == 0);
+    CHECK(entity != nullptr && entity->heading == placed_heading_bam(0));
     CHECK(entity != nullptr && entity->ground_target == parent);
-    CHECK(rig.w.throwables.events.spawns.size() == 1);
-    if (!rig.w.throwables.events.spawns.empty()) {
-        const ThrowableEvents::DeviceSpawn &spawn =
-            rig.w.throwables.events.spawns.front();
+    const std::vector<DeviceSpawnEvent> spawns = device_spawns(rig.w);
+    CHECK(spawns.size() == 1);
+    if (!spawns.empty()) {
+        const DeviceSpawnEvent &spawn = spawns.front();
         CHECK(spawn.item_id == kItemSatchel);
         CHECK(spawn.owner_handle == rig.thrower.packed);
         CHECK(spawn.parent_handle == parent.packed);
@@ -1470,7 +1653,7 @@ void test_parented_device_adopts_parent_pitch() {
     Entity parent_seed;
     parent_seed.kind = EntityKind::Item;
     parent_seed.position = Vec3{10, 10, 1};
-    parent_seed.yaw = 90; // mission heading zero
+    parent_seed.heading = placed_heading_bam(90); // mission heading zero
     const EntityHandle parent = rig.w.registry.spawn(1, parent_seed);
     LiveRound round = make_satchel_round(rig, Vec3{11, 10, 1}, parent);
     round.yaw_bam = 0;
@@ -1479,7 +1662,7 @@ void test_parented_device_adopts_parent_pitch() {
     Entity *carrier = rig.w.registry.get(parent);
     CHECK(carrier != nullptr);
     stamp_saved_live_pose(*carrier);
-    carrier->pitch = 45;
+    carrier->pitch_bam = spawn_angle_bam(45);
     step_devices(rig.w, nullptr, nullptr);
     CHECK(rig.w.throwables.devices.size() == 1);
     const PlacedDevice &device = rig.w.throwables.devices[0];
@@ -1553,7 +1736,7 @@ void test_parent_handle_reuse_detaches_device() {
     Entity parent_seed;
     parent_seed.kind = EntityKind::Item;
     parent_seed.position = Vec3{10, 10, 1};
-    parent_seed.yaw = 90;
+    parent_seed.heading = placed_heading_bam(90);
     const EntityHandle parent = rig.w.registry.spawn(1, parent_seed);
     LiveRound round = make_satchel_round(rig, Vec3{11, 10, 2}, parent);
     CHECK(rig.w.throwables.place_from_round(rig.w, round,
@@ -1561,7 +1744,7 @@ void test_parent_handle_reuse_detaches_device() {
     const Vec3 last_pos = rig.w.throwables.devices[0].pos;
     rig.w.registry.despawn(parent);
     parent_seed.position = Vec3{100, 100, 100};
-    parent_seed.yaw = 0;
+    parent_seed.heading = placed_heading_bam(0);
     const EntityHandle replacement = rig.w.registry.spawn(1, parent_seed);
     CHECK(replacement == parent);
     step_devices(rig.w, nullptr, nullptr);
@@ -1589,6 +1772,7 @@ void test_world_tick_uses_retail_device_order() {
     // has already run before the projectile pool creates it.
     {
         Rig rig(0);
+        rig.w.rules.mp_session = true; // the conversion's 0x59 is a session's send
         rig.w.tables.terrain = &rig.flat.field;
         const int slot = rig.throw_ammo(kAmmoSatchel, Vec3{20, 20, 0}, 0, 0);
         CHECK(slot >= 0);
@@ -1597,11 +1781,12 @@ void test_world_tick_uses_retail_device_order() {
         CHECK(rig.w.throwables.devices.size() == 1);
         CHECK(rig.w.throwables.devices[0].think_delay_ticks ==
               rig.w.tables.ammo.entries[kAmmoSatchel].max_age_ticks);
-        CHECK(rig.w.throwables.events.spawns.size() == 1);
+        CHECK(device_spawns(rig.w).size() == 1);
+        rig.w.out.entity_events.clear(); // the host's entity fan drains the pass
         rig.w.run_logic_tick();
         CHECK(rig.w.throwables.devices[0].think_delay_ticks ==
               rig.w.tables.ammo.entries[kAmmoSatchel].max_age_ticks - 1);
-        CHECK(rig.w.throwables.events.spawns.empty());
+        CHECK(device_spawns(rig.w).empty());
     }
 
     // A claymore fan spawned by the pool-1 think advances in the same frame's
@@ -1640,6 +1825,60 @@ void test_world_tick_uses_retail_device_order() {
     }
 }
 
+// The placed devices' records leave in the entity pass's call order
+// (D-NET-NEW-L7-14): each conversion's S2C 0x59 and then its cap's 0x12 at once,
+// round by round through the projectile walk, never every 0x59 ahead of every 0x12.
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C21E9, then
+//  Weapon_UpdateAllProjectiles @0x4C223A; Entity_UpdateSatchelPhysics @0x4482A0 - the
+//  0x59 @0x448BD5, the cap call @0x448BEC; Server_EnforcePlacedDeviceCapByOwner
+//  @0x5119E0 - Server_RemoveEntityAndNotify called @0x511A53]
+void test_device_records_keep_the_walks_call_order() {
+    Rig rig(0);
+    rig.w.rules.mp_session = true;
+    rig.w.tables.terrain = &rig.flat.field;
+    // Three armed satchels of the thrower's, oldest first: each conversion below
+    // tips the cap of three and retires the oldest armed one left.
+    std::vector<EntityHandle> armed;
+    for (int i = 0; i < 3; ++i) {
+        LiveRound round = make_satchel_round(rig, Vec3{20.0f + static_cast<float>(i), 40, 2});
+        CHECK(rig.w.throwables.place_from_round(
+                rig.w, round, rig.w.tables.ammo.entries[kAmmoSatchel]));
+        rig.w.throwables.devices.back().think_delay_ticks = -10 * (3 - i);
+        armed.push_back(rig.w.throwables.devices.back().entity);
+    }
+    rig.w.out.entity_events.clear(); // already on the wire
+    const int first = rig.throw_ammo(kAmmoSatchel, Vec3{20, 20, 0}, 0, 0);
+    const int second = rig.throw_ammo(kAmmoSatchel, Vec3{24, 20, 0}, 0, 0);
+    CHECK(first >= 0 && second > first);
+    if (first < 0 || second <= first) return;
+    rig.w.run_logic_tick();
+    CHECK(!rig.w.round_sim.rounds[size_t(first)].active);
+    CHECK(!rig.w.round_sim.rounds[size_t(second)].active);
+    // The device records in queue order (the 0x59s and the 0x12s).
+    std::vector<const WorldOutbox::EntityNetworkEvent *> records;
+    for (const auto &event : rig.w.out.entity_events)
+        if (std::holds_alternative<DeviceSpawnEvent>(event) ||
+                std::holds_alternative<EntityRemoveEvent>(event))
+            records.push_back(&event);
+    CHECK(records.size() == 4);
+    if (records.size() != 4) return;
+    const auto *spawn_a = std::get_if<DeviceSpawnEvent>(records[0]);
+    const auto *removal_a = std::get_if<EntityRemoveEvent>(records[1]);
+    const auto *spawn_b = std::get_if<DeviceSpawnEvent>(records[2]);
+    const auto *removal_b = std::get_if<EntityRemoveEvent>(records[3]);
+    CHECK(spawn_a != nullptr && float(spawn_a->pos.x) < 22.0f);
+    CHECK(removal_a != nullptr && removal_a->handle == armed[0].packed);
+    CHECK(spawn_b != nullptr && float(spawn_b->pos.x) > 22.0f);
+    CHECK(removal_b != nullptr && removal_b->handle == armed[1].packed);
+    // The two oldest are gone and the newest armed one stays (a later conversion may
+    // take a freed slot, so the count is read from the device records).
+    int live = 0;
+    for (const PlacedDevice &d : rig.w.throwables.devices)
+        if (d.active) ++live;
+    CHECK(live == 3);
+    CHECK(rig.w.registry.get(armed[2]) != nullptr);
+}
+
 void test_per_owner_same_item_device_caps() {
     auto active_count = [](const ThrowableSim &sim) {
         int count = 0;
@@ -1650,8 +1889,10 @@ void test_per_owner_same_item_device_caps() {
 
     // The fourth satchel removes the most-negative (oldest armed) row. Equal
     // ages retain pool/vector scan order through the strict comparison.
+    // The conversion's 0x59 leads, its cap's 0x12 follows at once.
     {
         Rig rig(0);
+        rig.w.rules.mp_session = true;
         EntityHandle first;
         for (int i = 0; i < 3; ++i) {
             LiveRound round = make_satchel_round(
@@ -1662,16 +1903,20 @@ void test_per_owner_same_item_device_caps() {
             d.think_delay_ticks = -10;
             if (i == 0) first = d.entity;
         }
-        rig.w.throwables.events.clear();
+        rig.w.out.entity_events.clear();
         LiveRound fourth = make_satchel_round(rig, Vec3{24, 20, 2});
         CHECK(rig.w.throwables.place_from_round(
                 rig.w, fourth, rig.w.tables.ammo.entries[kAmmoSatchel]));
         CHECK(active_count(rig.w.throwables) == 3);
         CHECK(rig.w.registry.get(first) == nullptr);
-        CHECK(rig.w.throwables.events.spawns.size() == 1);
-        CHECK(rig.w.throwables.events.removes.size() == 1);
-        if (!rig.w.throwables.events.removes.empty())
-            CHECK(rig.w.throwables.events.removes[0].entity == first.packed);
+        const auto &events = rig.w.out.entity_events;
+        CHECK(events.size() == 2);
+        if (events.size() == 2) {
+            const auto *spawn = std::get_if<DeviceSpawnEvent>(&events[0]);
+            const auto *removal = std::get_if<EntityRemoveEvent>(&events[1]);
+            CHECK(spawn != nullptr && spawn->entity == rig.w.throwables.devices.back().entity.packed);
+            CHECK(removal != nullptr && removal->handle == first.packed);
+        }
     }
 
     // Claymores use max four, so only the fifth conversion retires an armed
@@ -1708,6 +1953,7 @@ void test_per_owner_same_item_device_caps() {
     // has an armed candidate, matching the strict retail age test.
     {
         Rig rig(0);
+        rig.w.rules.mp_session = true;
         for (int i = 0; i < 4; ++i) {
             LiveRound round = make_satchel_round(
                     rig, Vec3{20.0f + static_cast<float>(i), 28, 2});
@@ -1715,7 +1961,7 @@ void test_per_owner_same_item_device_caps() {
                     rig.w, round, rig.w.tables.ammo.entries[kAmmoSatchel]));
         }
         CHECK(active_count(rig.w.throwables) == 4);
-        CHECK(rig.w.throwables.events.removes.empty());
+        CHECK(device_removals(rig.w).empty());
 
         Entity other_seed;
         other_seed.kind = EntityKind::Organic;
@@ -1754,15 +2000,47 @@ void test_detonator_chain() {
     if (rig.w.throwables.devices.empty()) return;
     // still arming: the detonator marks it, the think waits for the arm delay
     rig.throw_ammo(kAmmoDetonator, Vec3{50, 50, 1}, 0, 0);
-    const Entity *e = rig.w.registry.get(rig.w.throwables.devices[0].entity);
+    const EntityHandle placed = rig.w.throwables.devices[0].entity;
+    const Entity *e = rig.w.registry.get(placed);
     CHECK(e != nullptr && e->health == -1);
+    rig.w.rules.mp_session = true;
+    rig.w.out.entity_events.clear();
     rig.tick(80); // arm delay expires -> the think sees health <= 0
     CHECK(rig.w.throwables.devices.empty());
     bool saw_boom = false;
     for (const ExplosionEntry &q : rig.w.explosions.queue)
         if (q.ammo_index == kAmmoSatchelBoom) saw_boom = true;
     CHECK(saw_boom);
-    CHECK(rig.w.throwables.events.removes.size() == 1);
+    // The think's tail: the kill packet (S2C 0x26, section 0) in a session, then a
+    // destroy that notifies nobody (no S2C 0x12) [orig: Entity_SatchelThink
+    // @0x443891..0x443895, Entity_Destroy @0x44389E; Server_SendEntityStatePacket @0x509D70]
+    CHECK(rig.w.registry.get(placed) == nullptr);
+    CHECK(device_removals(rig.w).empty());
+    int kills = 0;
+    for (const auto &event : rig.w.out.entity_events)
+        if (const auto *state = std::get_if<ItemStateEvent>(&event))
+            if (state->handle == placed.packed && state->section == 0) ++kills;
+    CHECK(kills == 1);
+}
+
+// The detonator's mark tests no authority: a peer's visual-only spawn of the round marks
+// the firer's satchels too (only the authority's think acts on the mark).
+// [orig: RoundData_SpawnRound @0x4EC231..0x4EC237 -> Entity_DetonateSatchelsByOwner
+//  @0x546ED0, no gate; Entity_SatchelThink @0x443670 - is_authority @0x44368D]
+void test_the_detonator_marks_on_every_peer() {
+    Rig rig(0);
+    rig.throw_ammo(kAmmoSatchel, Vec3{20, 20, 1.5f}, 0, 0);
+    rig.tick(120);
+    CHECK(rig.w.throwables.devices.size() == 1);
+    if (rig.w.throwables.devices.empty()) return;
+    RoundSpawnParams p;
+    p.owner = rig.thrower;
+    p.shooter_handle = rig.thrower.packed;
+    p.origin = Vec3{50, 50, 1};
+    p.ammo_index = kAmmoDetonator;
+    CHECK(rig.w.round_sim.spawn(rig.w, p, RoundConsequenceMode::VisualOnly) == -1);
+    const Entity *e = rig.w.registry.get(rig.w.throwables.devices[0].entity);
+    CHECK(e != nullptr && e->health == -1);
 }
 
 // Placed-claymore proximity: an enemy inside kz_minradius AND the pieslice
@@ -1776,10 +2054,11 @@ void test_claymore_cone_trigger() {
     rig.tick(160); // drop + convert + the 62-tick arm delay
     CHECK(rig.w.throwables.devices.size() == 1);
     if (rig.w.throwables.devices.empty()) return;
-    // The cone axis is the device's LANDED facing — the witnessed 1 deg/tick
-    // init spin rotates the claymore during its drop [orig: the clym motor's
-    // Yaw -= spin @ 0x447377 over Entity_InitThrowableSpin_* rates], so the
-    // test derives placement from the device yaw rather than the throw yaw.
+    // The cone axis is the device's LANDED facing: the clym motor turns the
+    // claymore by its spin word during its drop [orig: Entity_UpdateClaymorePhysics
+    // @0x4472F0 (Yaw -= +0xA4 @0x4473E5..0x4473EB)], which the clym row's init
+    // zeroes [orig: Entity_InitThrowableSpin_Claymore @0x4435E0], so the test
+    // derives placement from the device yaw rather than the throw yaw.
     const PlacedDevice &placed = rig.w.throwables.devices[0];
     const double axis = double(placed.yaw_bam) * (2.0 * 3.14159265358979323846 / 4294967296.0);
     const Vec3 ahead{placed.pos.x + 8.0f * float(std::cos(axis)),
@@ -1889,7 +2168,7 @@ void test_claymore_sector_los_blocks_trigger() {
     wall_seed.health = 100;
     wall_seed.position = Vec3{(placed.pos.x + ahead.x) * 0.5f,
                               (placed.pos.y + ahead.y) * 0.5f, 0.0f};
-    wall_seed.yaw = 90; // mission yaw 90 -> identity collision basis
+    wall_seed.heading = placed_heading_bam(90); // mission yaw 90 -> identity collision basis
     const EntityHandle wall = rig.w.registry.spawn(2, wall_seed);
 
     CollisionWorld collision;
@@ -2005,7 +2284,7 @@ void test_avmine_sees_one_unit_above_the_vehicle() {
         wall_seed.kind = EntityKind::Building;
         wall_seed.health = 100;
         wall_seed.position = Vec3{mine.landed.x, mine.landed.y + 2.0f, 0.0f};
-        wall_seed.yaw = 90; // mission yaw 90 -> identity collision basis
+        wall_seed.heading = placed_heading_bam(90); // mission yaw 90 -> identity collision basis
         const EntityHandle wall = mine.rig.w.registry.spawn(2, wall_seed);
         CollisionWorld collision;
         collision.terrain = &mine.rig.flat.field;
@@ -2047,6 +2326,7 @@ void test_avmine_ignores_a_moving_wreck() {
 //  @0x546E00 from Server_DeployPlayer @0x5178D8]
 void test_owner_death_keeps_devices_armed() {
     Rig rig(0);
+    rig.w.rules.mp_session = true; // a removal's 0x12 is a session's send
     rig.throw_ammo(kAmmoSatchel, Vec3{20, 20, 1.5f}, 0, 0);
     rig.tick(160); // place + arm
     CHECK(rig.w.throwables.devices.size() == 1);
@@ -2056,7 +2336,7 @@ void test_owner_death_keeps_devices_armed() {
     rig.tick(2);
     CHECK(rig.w.throwables.devices.size() == 1);
     CHECK(rig.w.explosions.queue.empty());
-    CHECK(rig.w.throwables.events.removes.empty());
+    CHECK(device_removals(rig.w).empty());
 }
 
 // TeamTriggerClaymore host rule: same-team actors trip claymores when set
@@ -2091,6 +2371,7 @@ void test_team_trigger_claymore_rule() {
 //  0x59 send]
 void test_placed_device_cap_evicts_oldest_armed() {
     Rig rig(0);
+    rig.w.rules.mp_session = true; // the cap's 0x12 is a session's send
     auto place = [&](int extra_age_ticks) -> bool {
         LiveRound round = make_satchel_round(rig, Vec3{20, 20, 2});
         if (!rig.w.throwables.place_from_round(
@@ -2101,12 +2382,12 @@ void test_placed_device_cap_evicts_oldest_armed() {
         return true;
     };
     // Three armed satchels of falling age; the fourth conversion evicts the
-    // most negative (oldest armed) one and emits exactly one DeviceRemove.
+    // most negative (oldest armed) one and queues exactly one S2C 0x12.
     CHECK(place(-30));
     CHECK(place(-20));
     CHECK(place(-10));
     const uint16_t oldest = rig.w.throwables.devices[0].entity.packed;
-    rig.w.throwables.events.removes.clear();
+    rig.w.out.entity_events.clear();
     CHECK(place(5)); // the fourth, still arming
     int live = 0;
     bool oldest_alive = false;
@@ -2117,13 +2398,12 @@ void test_placed_device_cap_evicts_oldest_armed() {
         }
     CHECK(live == 3);
     CHECK(!oldest_alive);
-    CHECK(rig.w.throwables.events.removes.size() == 1);
-    if (!rig.w.throwables.events.removes.empty())
-        CHECK(rig.w.throwables.events.removes[0].entity == oldest);
+    CHECK(device_removals(rig.w) == std::vector<uint16_t>{oldest});
 
     // An all-arming surplus persists: no candidate has a negative age, so the
     // eviction is the retail null no-op.
     Rig arming(0);
+    arming.w.rules.mp_session = true;
     auto place_arming = [&]() -> bool {
         LiveRound round = make_satchel_round(arming, Vec3{20, 20, 2});
         return arming.w.throwables.place_from_round(
@@ -2134,12 +2414,13 @@ void test_placed_device_cap_evicts_oldest_armed() {
     for (const PlacedDevice &d : arming.w.throwables.devices)
         if (d.active) ++arming_live;
     CHECK(arming_live == 4);
-    CHECK(arming.w.throwables.events.removes.empty());
+    CHECK(device_removals(arming.w).empty());
 }
 
 // The claymore motor's cap is 4; cross-type devices never count against it.
 void test_placed_device_cap_claymore_is_four_and_type_scoped() {
     Rig rig(0);
+    rig.w.rules.mp_session = true; // the cap's 0x12 is a session's send
     auto place_clay = [&](int age) -> bool {
         LiveRound round = make_satchel_round(rig, Vec3{20, 20, 2});
         round.ammo_index = kAmmoClaymore;
@@ -2157,7 +2438,7 @@ void test_placed_device_cap_claymore_is_four_and_type_scoped() {
     LiveRound satchel = make_satchel_round(rig, Vec3{20, 20, 2});
     CHECK(rig.w.throwables.place_from_round(
             rig.w, satchel, rig.w.tables.ammo.entries[kAmmoSatchel]));
-    rig.w.throwables.events.removes.clear();
+    rig.w.out.entity_events.clear();
     int live_clay = 0;
     for (const PlacedDevice &d : rig.w.throwables.devices)
         if (d.active && d.think == ThrowClass::kClaymore) ++live_clay;
@@ -2168,7 +2449,7 @@ void test_placed_device_cap_claymore_is_four_and_type_scoped() {
     for (const PlacedDevice &d : rig.w.throwables.devices)
         if (d.active && d.think == ThrowClass::kClaymore) ++live_clay;
     CHECK(live_clay == 4);
-    CHECK(rig.w.throwables.events.removes.size() == 1);
+    CHECK(device_removals(rig.w).size() == 1);
 }
 
 // A level CFAC face 2 u square around its entity origin (the deck a dropped
@@ -2418,7 +2699,7 @@ void test_claymore_parents_to_every_contact() {
         item.kind = EntityKind::Item;
         item.alive = true;
         item.position = Vec3{18.0f, 10.0f, -4.0f};
-        item.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+        item.heading = placed_heading_bam(90); // identity model placement [orig: entity matrix @0x613F40]
         item.bound_radius = 0.4f;
         const EntityHandle item_h = rig.w.registry.spawn(1, item);
         CollisionWorld collision;
@@ -2479,7 +2760,7 @@ void test_charge_stick_reads_the_local_face_normal() {
     Entity item;
     item.kind = EntityKind::Item;
     item.position = Vec3{20, 20, 2};
-    item.yaw = 0; // a quarter turn off the identity placement (yaw 90)
+    item.heading = placed_heading_bam(0); // a quarter turn off the identity placement (yaw 90)
     item.bound_radius = 4;
     const EntityHandle item_h = rig.w.registry.spawn(1, item);
     CollisionWorld cw;
@@ -2635,7 +2916,7 @@ int main() {
     test_power_throw_charge();
     test_charge_scales_spawn_speed();
     test_tracer_item_binding_fallbacks();
-    test_zero_water_is_dry_below_altitude_zero();
+    test_zero_water_is_a_plane_below_altitude_zero();
     test_charge_stick_surface_gate();
     test_stick_pose_exact();
     test_motor_sweep_ignores_non_pool_domains();
@@ -2661,16 +2942,21 @@ int main() {
     test_round_slot_reuse_clears_throwable_state();
     test_satchel_places_device();
     test_placed_device_takes_the_model_init_no_target_bit();
+    test_a_noage_device_is_no_slice_candidate();
     test_placed_device_takes_the_model_init_matrix_and_hp0_legs();
     test_placed_device_reads_its_def_type_and_attrib_words();
     test_placed_device_pose_and_ballistic_damage();
+    test_a_shot_device_item_booms_at_the_hit();
+    test_a_joiners_device_item_booms_on_the_kill();
     test_parented_device_follows_parent_yaw();
     test_parented_device_adopts_parent_pitch();
     test_device_and_owner_handle_reuse();
     test_parent_handle_reuse_detaches_device();
     test_world_tick_uses_retail_device_order();
+    test_device_records_keep_the_walks_call_order();
     test_per_owner_same_item_device_caps();
     test_detonator_chain();
+    test_the_detonator_marks_on_every_peer();
     test_claymore_cone_trigger();
     test_claymore_sweep_skips_rowless_defless_modelless();
     test_claymore_sector_los_blocks_trigger();

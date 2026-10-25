@@ -21,6 +21,10 @@ extends MenuCompanion
 # The player chose to join the highlighted discovered LAN server. The payload is the
 # typed dial target decoded from the discovery row (JoinTarget.from_lan_row).
 signal lan_join_requested(target: JoinTarget)
+# The player chose to join a LAN row whose index names no listed session: the join
+# machine refuses it before anything is sent, with gameerr "MP Errors" CVUNABLETOCREATE
+# (`text`) on the join screen.
+signal lan_join_refused(text: String)
 # START_GAME on the host screen, with the co-op-minimal host request (see _read_host_config).
 signal lan_host_start_requested(config: HostSessionConfig)
 
@@ -71,8 +75,29 @@ func _wire(_file: String, _screen: String) -> void:
 		_driver.widget_value_changed.connect(_on_widget_value_changed)
 	if not _driver.list_activated.is_connected(_on_list_activated):
 		_driver.list_activated.connect(_on_list_activated)
+	if not _driver.screen_changed.is_connected(_on_screen_changed):
+		_driver.screen_changed.connect(_on_screen_changed)
 	_wire_lan_browser()
 	_wire_host_settings()
+	# The document opened on its screen: that screen's activation.
+	_on_screen_changed(_screen)
+
+
+# A screen's activation. The LAN screen's empties its game list and drains the
+# enumerator's session records, each writing its removed line to the process's
+# _connectlog.txt (engine: net/npwire/lan_discovery.h drain_records carries the
+# witness, D-NET-NEW-L8-8).
+func _on_screen_changed(screen_name: String) -> void:
+	if _driver == null or _driver.get_menu_file() != _wired_file:
+		return
+	if screen_name.nocasecmp_to("LAN_MULTI_PLAYER") != 0 or not _driver.has_widget("LAN_GAME_LIST"):
+		return
+	_servers = []
+	_selected_server = -1
+	_browse_error = ""
+	_refresh_lan_list()
+	if _lan_session != null:
+		_lan_session.drain_records()
 
 
 # --- LAN browser screen (LAN_MULTI_PLAYER) ------------------------------------
@@ -177,7 +202,26 @@ func _on_list_activated(id: int, row: int) -> void:
 func _on_lan_join() -> void:
 	if _selected_server < 0 or _selected_server >= _servers.size():
 		return
-	lan_join_requested.emit(JoinTarget.from_lan_row(_servers[_selected_server]))
+	# The join takes the listed session at the selected row's index, which after a
+	# replaced session is not the row's own, and is refused when the index names none
+	# (engine: net/npwire/lan_discovery.h join_session carries the witness). A
+	# session-less companion (the menu seam's harness) joins the row as listed.
+	var row: LanServerRow = _servers[_selected_server]
+	if _lan_session != null:
+		# The press hands the frame to the join machine: the LAN screen's browse pumps no
+		# more, its records and socket staying (engine: LanDiscoveryBrowser::stop carries
+		# the witness), so a refused join's screen sends and reads nothing.
+		_lan_session.stop_enumerator()
+		row = _lan_session.get_join_row(_selected_server)
+	if row == null:
+		lan_join_refused.emit(Strings.lookup(Strings.TABLE_GAMEERR, "MP Errors", "CVUNABLETOCREATE"))
+		return
+	var target := JoinTarget.from_lan_row(row)
+	# The join goes on with the search's socket (D-NET-NEW-R3-3), which stays open past
+	# the window's end.
+	if _lan_session != null:
+		target.transport = _lan_session.take_transport()
+	lan_join_requested.emit(target)
 
 
 # --- Host-settings screen (MULTI_PLAYER_HOST) ---------------------------------
@@ -204,37 +248,13 @@ func _on_host_table_cell_clicked(_id: int, widget_name: String, row: int, column
 		_driver.toggle_host_mission_switch(row)
 
 
-# The host screen opens seeded from the host configuration, the populate step
-# the retail dialog init runs before the mission pool: the engine's
-# host_dialog_value (HostSessionOptions.dialog_value) is the inverse of the
-# START read. Edits take the text, spins select the item whose authored
-# value= matches, GAME_LOCATION the item whose name shares the country's
-# first three characters, checkboxes the nonzero value. Without a persisted
-# game.cfg the seed is the record's defaults (the engine's host-screen
-# baseline, with the session name the Menu/UNTITLED gametext the retail config
-# defaults copy in). A user-cleared edit is still read verbatim at START.
+# The host screen opens showing the process's cfg block, the populate step the
+# retail dialog init runs before the mission pool (GameConfigBlock over the
+# engine's populate_host_screen, which carries the witness: the cap clamped to
+# the screen's, each control from the block, PunkBuster 0 and disabled with no
+# pb\pbcl.dll). A user-cleared edit is still read verbatim at START.
 func _seed_host_controls() -> void:
-	var defaults := HostSessionConfig.new()
-	for control in HostSessionOptions.dialog_controls():
-		var id := _id(control)
-		if id < 0:
-			continue
-		var value: String = defaults.dialog_value(control)
-		if control == "SERVER_PUNKBUSTER":
-			# No pb\pbcl.dll ships with OpenNova; the populate selects 0 and
-			# disables the spin whenever that file is absent.
-			value = "0"
-			_driver.set_widget_disabled(id, true)
-		match _driver.widget_kind_of(id):
-			MnuDocument.TYPE_SPINLIST:
-				if control == "GAME_LOCATION":
-					_driver.select_host_location(id, value)
-				else:
-					_driver.select_row_by_value(id, value, false)
-			MnuDocument.TYPE_CHECKBOX:
-				_driver.set_widget_checked(id, value != "0")
-			_:
-				_driver.set_widget_text(id, value)
+	GameCfgStore.block().populate_host_screen(_driver)
 
 
 ## The catalog comes from the mounted resource root; tests may supply catalog rows.
@@ -256,30 +276,26 @@ func _sync_start_gate() -> void:
 		_driver.set_widget_disabled(start, not _driver.can_start_host())
 
 
+# START: the screen read into the process's cfg block, the block saved, and the
+# session request made of the block, as retail's LAN start reads the dialog,
+# saves game.cfg and creates the session from the block (the witness is
+# engine runtime/inmatch/host_settings.h).
 func _on_host_start() -> void:
 	if not _driver.can_start_host():
 		return
-	lan_host_start_requested.emit(_read_host_config())
+	var config := _read_host_config()
+	GameCfgStore.save()
+	lan_host_start_requested.emit(config)
 
 
-# Read the host request off the loaded document by control name. Unread controls
-# (weapon restrictions) still render. MissionRoot
-# derives the wire game type from the selected mission; the record's Co-op value
-# remains the fallback for explicit callers that do not request auto derivation.
+# Read the screen's controls by name into the cfg block (HostDialog_ReadSettings,
+# the engine's read_host_screen), then the host request from the block.
+# Unread controls (weapon restrictions) still render. MissionRoot derives the
+# wire game type from the selected mission; the record's Co-op value remains the
+# fallback for explicit callers that do not request auto derivation.
 func _read_host_config() -> HostSessionConfig:
+	GameCfgStore.block().read_host_screen(_driver)
 	var config := HostSessionConfig.new()
-	for control in HostSessionOptions.dialog_controls():
-		var id := _id(control)
-		if id < 0:
-			continue
-		var value := _driver.get_widget_text(id)
-		match _driver.widget_kind_of(id):
-			MnuDocument.TYPE_SPINLIST:
-				value = _driver.item_text(id, _driver.selected_row(id)) \
-						if control == "GAME_LOCATION" else _driver.spin_value_attr(id)
-			MnuDocument.TYPE_CHECKBOX:
-				value = "1" if _driver.is_widget_checked(id) else "0"
-		config.apply_dialog_control(control, value)
 	config.missions.assign(_driver.selected_host_missions())
 	config.mission_launch_options.assign(_driver.selected_host_launch_options())
 	if config.missions.size() > 0:

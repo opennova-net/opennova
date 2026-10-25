@@ -83,6 +83,8 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/http_login.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/server_browser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/http_flow.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/browser_cache.cpp # the menu browser's content cache
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/cookie_jar_file.cpp # nw_cdata.coo, the jar across processes
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/gsb.cpp
 )
 
@@ -97,8 +99,9 @@ target_include_directories(opennova_net
 # and opennova_net never links opennova_runtime (link_graph_check.py).
 target_link_libraries(opennova_net PUBLIC opennova_base)
 if(WIN32)
-    # lobby_identity.cpp: GetAdaptersInfo (the retail machine tokens' adapter input).
-    target_link_libraries(opennova_net PUBLIC iphlpapi)
+    # lobby_identity.cpp: GetAdaptersInfo (the retail machine tokens' adapter input); the NWHWI
+    # reads' COM (DxDiag: ole32, oleaut32) and GetSystemMetrics (user32). d3d9.dll loads by name.
+    target_link_libraries(opennova_net PUBLIC iphlpapi ole32 oleaut32 user32)
 endif()
 
 target_compile_features(opennova_net PUBLIC cxx_std_17)

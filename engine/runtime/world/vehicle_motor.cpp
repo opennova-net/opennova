@@ -69,8 +69,8 @@ void VehicleSystem::tick_health(Entity &veh, const VehicleTraits &traits) {
 		const bool air = vehicle_family_uses_direct_air_mover(traits.family);
 		// The 0 -> PRETTY stamp sits at the mover HEAD in retail [orig: ground
 		// @0x48afac..0x48afb2, aircraft @0x490377..0x49037d], ahead of the
-		// occupant/AI-driver block; the authority pass hoists it into
-		// vehicle_system.cpp with the drive staging, so this twin only lands
+		// occupant/AI-driver block; the authority pass runs it in
+		// VehicleSystem::update_motor ahead of the mover, so this twin only lands
 		// for callers that enter the motor directly.
 		if (b.f[AiBrain::kCurState] == 0)
 			b.f[AiBrain::kCurState] = air ? 14 : 22;
@@ -242,9 +242,8 @@ Entity *VehicleSystem::resolve_controller(Entity &veh) {
 int32_t turn_pilot_view(World &world, Entity &pilot, int32_t delta) {
 	AiEntity *body = world.ai.for_handle(pilot.handle);
 	const int32_t yaw = io::bam_add(
-			body != nullptr ? body->heading : bam_heading_from_mission_yaw_deg(pilot.yaw), delta);
-	pilot.yaw = static_cast<int16_t>(
-			std::lround(normalize_mission_yaw_deg(mission_yaw_deg_from_bam_heading(yaw))));
+			body != nullptr ? body->heading : pilot.heading, delta);
+	pilot.heading = yaw;
 	if (body != nullptr) {
 		body->heading = yaw;
 		body->inf.target_heading = io::bam_add(body->inf.target_heading, delta);
@@ -303,7 +302,7 @@ void stage_player_vehicle_input(
 	// [orig: Entity_UpdateVehiclePhysics @0x48BB0B; D-VEH-3]
 	const AiEntity *driver_body = world.ai.for_handle(occ.handle);
 	int32_t driver_yaw_bam = driver_body != nullptr ? driver_body->heading
-			: bam_heading_from_mission_yaw_deg(occ.yaw);
+			: occ.heading;
 
 	// Family split at the command source: the boat player leg reads itemDef
     // waterSpeed (+0x8EC) at EVERY command site — retail cbot defs author no
@@ -433,51 +432,68 @@ void stage_player_vehicle_input(
 // player. That distinction is invisible on a listen host flying its own
 // aircraft, and decisive when a JOINER is the pilot: the host owns the mover, so
 // insisting on the host's local player left a remote pilot commanding nothing.
-// [orig: Entity_UpdateAircraftPhysics @0x490310 input gate; the ground twin is
-//  Entity_UpdateVehiclePhysics @0x48b0ff]
+// The block tests the hull, never the occupant's life: an empty seat or the hull's
+// Flags 0x10000002 (the dead bit, a script's disable) parks it, and a body that
+// dies seated has left its seat at its own death edge before the hull's update
+// (the pool-0 walk precedes pool 1). [orig: Entity_UpdateAircraftPhysics
+// @0x490310 (the input gate @0x490F00..0x490F0E, the park @0x490F16..0x490F25);
+// the ground twin Entity_UpdateVehiclePhysics @0x48AF00 (@0x48B958..0x48B987); the
+// death edge's detach Entity_UpdateInfantryAI @0x4B9910 (@0x4B9C57..0x4B9C60)]
 Entity *resolve_piloting_player(World &world, Entity &veh, const VehicleTraits &traits) {
     if (!traits.player_control) return nullptr;
+    if (vehicle_hull_parked(veh)) return nullptr;
     Entity *occ = world.vehicles.resolve_controller(veh);
-    if (occ == nullptr || occ->handle.pool() != 0 || occ->player_class == 0 ||
-        !occ->alive || occ->health <= 0)
+    if (occ == nullptr || occ->handle.pool() != 0 || occ->player_class == 0)
         return nullptr;
     const bool is_authority = world.ai.is_authority;
     if (!is_authority && occ->handle != world.cached.local_player) return nullptr;
     return occ;
 }
 
+// The predicting client's own driver: the input block runs only for the local
+// player's seat, whatever its life (above). [orig: cveh @0x48B958..0x48B96C; cbot
+// @0x48DF7F..0x48DFA2]
 static Entity *resolve_local_vehicle_controller(World &world, Entity &veh,
                                                 const VehicleTraits &traits) {
     if (!traits.player_control || !world.cached.local_player.valid()) return nullptr;
     Entity *occ = world.vehicles.resolve_controller(veh);
     if (occ == nullptr || occ->handle != world.cached.local_player ||
-        occ->handle.pool() != 0 || occ->player_class == 0 ||
-        !occ->alive || occ->health <= 0)
+        occ->handle.pool() != 0 || occ->player_class == 0)
         return nullptr;
     return occ;
+}
+
+// The parked arm the input block takes for an empty seat or a parked hull: steer
+// holds the heading, the command and the ramp zero, the lights bit clears.
+// [orig: cveh @0x48C002..0x48C02D; cbot @0x48E7EE..0x48E81E]
+static void vehicle_park_inputs(Entity &veh) {
+    Entity::VehicleMotorState &m = veh.veh;
+    m.steer_target_bam = m.yaw_bam;
+    m.cmd_speed = 0;
+    m.steer_ramp_bam = 0;
+    veh.flags &= ~0x80u;
 }
 
 // The ground/tracked contact + suspension solve — the client-executed subset
 // of Entity_ProcessTrackedVehiclePhysics [orig: @0x47C1C0] — is declared in
 // vehicle_motor_detail.h and defined in vehicle_contact_solve.cpp.
 
-void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
-		const VehicleDriveCmd *ai_cmd, bool prediction) {
+void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, bool prediction) {
 	// [orig: Entity_DispatchPhysicsUpdate @0x48F010]
 	if (traits.amphibian && (veh.flags & 0x8000u) != 0) {
 		VehicleTraits afloat = traits;
 		afloat.family = VehicleFamily::Watercraft;
-		tick_watercraft_motor(veh, afloat, ai_cmd);
+		tick_watercraft_motor(veh, afloat);
 		return;
 	}
 	World &world = world_;
 	// Selector zero dispatches the cveh row to the simple motor. The ctank and
 	// cbike rows call their movers without testing the selector.
-	// [orig: Entity_DispatchPhysics_cveh @0x48EFC7; Entity_DispatchPhysics_ctank
+	// [orig: Entity_DispatchPhysics_cveh @0x48EFC0 (@0x48EFC7); Entity_DispatchPhysics_ctank
 	//  @0x48F000..0x48F007; Entity_DispatchPhysics_cbike @0x48EFF0..0x48EFF7]
 	if (traits.physics == 0 && traits.family != VehicleFamily::Tank &&
 			traits.family != VehicleFamily::Bike) {
-		tick_simple_motor(veh, traits, ai_cmd, false);
+		tick_simple_motor(veh, traits, false);
 		return;
 	}
 
@@ -487,14 +503,14 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 		// form, which the mover's entry copy reads as they stand.
 		// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6;
 		//  Entity_UpdateVehiclePhysics @0x48AF7A..0x48AF8C]
-		m.yaw_bam = spawn_angle_bam(90 - veh.yaw);
+		m.yaw_bam = veh.heading;
         // Seed the live BAM attitude mirror from the row's authored pose: one
         // entity Pitch/Roll in the original — the same storage the contact
         // solve conforms every grounded tick [orig: entity->Pitch/Roll writes
         // @0x47EC83/@0x47EC75]. (A joiner row arms through ground_client_tick,
         // whose staging already seeded these from the wire.)
-        m.air_pitch_bam = spawn_angle_bam(veh.pitch);
-        m.air_roll_bam = spawn_angle_bam(veh.roll);
+        m.air_pitch_bam = veh.pitch_bam;
+        m.air_roll_bam = veh.roll_bam;
         m.yaw_seeded = true;
 	}
 	// The mover prologue copies the entry pose to savedLivePose (+0x80..+0x94)
@@ -505,28 +521,46 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 	if (!prediction)
 		stamp_saved_live_pose(veh);
 
+	// A hull with no brain (+0x64) jumps from the stamp to the matrix-build tail
+	// on every role: no ground probe, carrier ride, health cadence, input, motion
+	// or sound. Only the class init brains a row (an AIData def whose ai_function
+	// row is a brain class), on the authority and the client alike.
+	// [orig: cveh `mov edi, [esi+64h]` @0x48AF1A, `jz` @0x48AFA6 -> the tail
+	//  @0x48D43E..0x48D451; ctan @0x488ACA, @0x488B56 -> @0x48AEB6; cbik @0x483FFA,
+	//  @0x484086 -> @0x486A04]
+	if (world.ai.for_handle(veh.handle) == nullptr) {
+		veh.engine_flags |= kEntityFlagMatrixBuilt;
+		return;
+	}
+
 	if (!m.net_predicted) {
 		vehicle_refresh_ground_link(world, veh, traits);
 		vehicle_follow_carrier(world, veh);
 	}
 
-	// The per-family contact solve owns Z, attitude, the contact byte and
-	// the airborne/in-water flags for rows with resolved model boxes on a
-	// terrain-backed world; every other row (boxless lib-embedder rows,
-	// terrain-less unit worlds) keeps the 5-tap terrain-clamp stand-in below. Retail keys the same
-	// split on graphicModel presence [orig: the @0x47C49F bail]. The family routing is the physics
-	// table's [orig: @0x82abc8]: cveh/ctrn/catv -> the tracked solve @0x47C1C0; ctank -> the wheeled
-	// solve @0x475DE0 (call @0x48a9ef); cbike -> the light solve @0x479600 (call @0x486672).
+	// The per-family contact solve owns Z, attitude, the contact byte and the
+	// airborne/in-water flags. Each runs its sleep leg and its wake expiry, then
+	// returns at once for a hull whose graphic model (+0x30) is null, writing
+	// none of those words: a model-less hull keeps what its placement (or a
+	// last solve) left and moves by its own velocity words, gravity included.
+	// A model whose collision block holds no box extents would fault the solve,
+	// which reads the block unchecked (no stock model lacks one); ours keeps the
+	// terrain-clamp stand-in below for it (a lib embedder's rows, a unit rig).
+	// The family routing is the physics table's [orig: @0x82abc8]:
+	// cveh/ctrn/catv -> the tracked solve @0x47C1C0; ctank -> the wheeled solve
+	// @0x475DE0 (call @0x48a9ef); cbike -> the light solve @0x479600 (call
+	// @0x486672).
 	enum class ContactSolveKind : uint8_t { None, Tracked, Wheeled, Light };
 	ContactSolveKind solve_kind = ContactSolveKind::None;
 	{
-		if (traits.family == VehicleFamily::Ground && ground_contact_solve_active(traits))
+		if (traits.family == VehicleFamily::Ground &&
+				(!veh.has_graphic_model || ground_contact_solve_active(traits)))
 			solve_kind = ContactSolveKind::Tracked;
 		else if (traits.family == VehicleFamily::Tank &&
-                 ground_contact_solve_active(traits))
+				(!veh.has_graphic_model || ground_contact_solve_active(traits)))
             solve_kind = ContactSolveKind::Wheeled;
         else if (traits.family == VehicleFamily::Bike &&
-                 light_contact_solve_active(traits))
+				(!veh.has_graphic_model || light_contact_solve_active(traits)))
             solve_kind = ContactSolveKind::Light;
 	}
 	const bool wheeled_solve = solve_kind != ContactSolveKind::None;
@@ -537,6 +571,17 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 	tick_health(veh, traits);
 	const bool wrecked = veh.health <= 0;
 
+	// A DEAD hull (one that keeps this live mover: no husk, or a husk whose model
+	// did not load) skips the input block, the physics and the sound fold to the
+	// matrix-build tail, as the boat twin does; the dead bit reads both flag halves
+	// (one Flags dword in retail). [orig: cveh `test byte ptr [esi+24h], 2; jnz`
+	// @0x48B810..0x48B814 -> the tail @0x48D43C..0x48D451; ctan @0x4893E9 -> @0x48AEB4;
+	// cbik @0x484936 -> @0x486A02]
+	if (((veh.flags | veh.engine_flags) & kEntityFlagDead) != 0) {
+		veh.engine_flags |= kEntityFlagMatrixBuilt;
+		return;
+	}
+
 	// ------------------------------------------------------------------ input block
 	// [orig: Entity_UpdateVehiclePhysics @0x48af00, the `attrib & 0x40` occupant block
 	// @0x48b949-0x48c034; ctan @0x489522..0x489545.] Only this block is role-gated:
@@ -545,10 +590,9 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 	// Everything after it, including the PlayerControl tail, runs on both roles.
 	Entity *occ = traits.player_control && !prediction ? world.vehicles.resolve_controller(veh)
 													   : nullptr;
-    // A DEAD controller counts as none. The infantry death edge now detaches first;
-    // this remains the same-frame safety gate when motor/system ordering varies.
-    // [orig: infantry death detach @0x4b9c57..0x4b9c60]
-    if (occ != nullptr && (!occ->alive || occ->health <= 0)) occ = nullptr;
+    // The block reads the hull, never the occupant's life: a body that dies seated
+    // has left the seat at its own death edge, which the pool-0 walk runs ahead of
+    // this pool-1 update. [orig: Entity_UpdateInfantryAI @0x4B9910 (@0x4B9C57..0x4B9C60)]
     // "Occupant is a player" [orig: `occupant->Flags & 0x100`] — our runtime players
     // are pool-0 organics with a resolved soldier class.
     const bool player_occupant =
@@ -556,40 +600,48 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 
     if (traits.player_control && !prediction) {
         // Zero health alone does not park: the driver's leg runs until the dying
-        // state's death transforms raise the dead bit.
+        // state's death transforms raise the dead bit. Every arm runs here, after the
+        // mover's head (the health cadence, the ground probe, the carrier ride), the
+        // parked arm's stuck count and the AI leg's crew cap, waypoint refresh and
+        // avoid walk included.
         // [orig: cveh @0x48B972..0x48B987; ctan @0x48954B..0x489560;
         //  cbik @0x484A98..0x484AAD]
-        if (occ == nullptr || (veh.flags & 0x10000002u) != 0) {
-			// Without a live controller, steer holds the current heading and command speed decays
-			// through the family deceleration clamps. Parked/stuck state is handled by vehicle
-			// lifecycle.
-			// Witness sites: [orig: @0x48c002]
-			m.steer_target_bam = m.yaw_bam;
-			m.cmd_speed = 0;
-			m.steer_ramp_bam = 0;
-            veh.flags &= ~0x80u;
+        AiEntity *brain = world.ai.for_handle(veh.handle);
+        VehicleDriveCmd cmd;
+        if (occ == nullptr || vehicle_hull_parked(veh)) {
+			// The parked arm: steer holds the heading, the command and the ramp zero, the
+			// stuck escalation counts, the lights bit clears and the brain takes state 22
+			// (vehicle_ai_drive's parked arm).
+			// [orig: cveh @0x48C002..0x48C02D; ctan @0x489BCE..0x489BF9; cbik
+			//  @0x4851AE..0x4851D9]
+			vehicle_park_inputs(veh);
+			world.ai.vehicle_ai_drive(world, veh, occ, traits, cmd);
         } else if (player_occupant && !watercraft_driver_submerged(world, *occ)) {
-			// A player driver whose eye (CameraOffset.z + Z) sits at or below the
-			// water plane drops to the AI leg like the boat twin [orig: `mov
-			// eax,[ecx+74h]; add eax,[ecx+0Ch]; cmp eax, g_EnvWaterHeightFixed;
-			// jle loc_48BC12` @0x48B9A0..0x48B9AC].
+			// A player driver (the occupant's Flags 0x100, cveh @0x48B993) whose eye
+			// (CameraOffset.z + Z) sits at or below the water plane drops to the AI leg
+			// like the boat twin [orig: `mov eax,[ecx+74h]; add eax,[ecx+0Ch]; cmp eax,
+			// g_EnvWaterHeightFixed; jle loc_48BC12` @0x48B9A0..0x48B9AC; ctan
+			// @0x489579..0x489585 -> @0x4897DB; cbik @0x484AC6..0x484AD2 -> @0x484DB8].
+			// The player arm parks the brain at state 22, so the route never advances
+			// under a human driver [orig: cveh @0x48B9CB; ctan @0x4895A6; cbik @0x484AED].
+			if (brain != nullptr) brain->brain.f[AiBrain::kCurState] = 22;
 			stage_player_vehicle_input(world_, veh, *occ, traits);
-		} else if (ai_cmd != nullptr && ai_cmd->ai_drive) {
-			// An AI controller drives: consume the brain-computed command block
-            // (AiSystem::vehicle_ai_drive — the witnessed leg's steer/speed outputs).
-            // [orig: the AI-driver leg @0x48bc12-0x48c034 writes aiComp[132]/[136];
-            //  the ramp/dir state is the player path's only]
-            m.steer_target_bam = ai_cmd->steer_target_bam;
-            m.cmd_speed = ai_cmd->cmd_speed;
-            m.steer_ramp_bam = 0;
+		} else {
+			// The AI leg writes the command registers in place; it writes the ramp only
+			// in its boarders' hold.
+            // [orig: the AI-driver leg cveh @0x48BC12..0x48C000; ctan @0x4897DB..0x489BCC;
+            //  cbik @0x484DB8..0x4851AC]
+            world.ai.vehicle_ai_drive(world, veh, occ, traits, cmd);
+            if (cmd.ai_drive) {
+                m.steer_target_bam = cmd.steer_target_bam;
+                m.cmd_speed = cmd.cmd_speed;
+            }
 		}
-		// A live NON-player controller with no drive command holds the previous
-        // steer/speed targets.
         // Occupied and not parked: the driverless stuck count rests; a parked
         // hull (Flags 0x10000002) keeps counting under its occupant [orig:
         // `moveTimer = 0` after the parked test — cveh @0x48B98D, ctan @0x489566,
         // cbik @0x484AB3; the boat twin @0x48DFA8..0x48DFCD].
-        if (occ != nullptr && (veh.flags & 0x10000002u) == 0) m.stuck_ticks = 0;
+        if (occ != nullptr && !vehicle_hull_parked(veh)) m.stuck_ticks = 0;
     }
     // The handbrake stop latch and the crashed stop sit OUTSIDE the attrib-0x40
     // authority/occupant block, so a DRIVING CLIENT runs them on its predicted
@@ -707,13 +759,13 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 		// Slope factor: cos^2(pitch) in 22-bit fixed [orig: Entity_UpdateVehiclePhysics
 		// @0x48AF00 (site @0x48C1C6..0x48C1FA — off_849934 cos-table sample squared
 		// >> 22, times the command >> 22)]. Retail reads the live entity Pitch the
-		// contact solve conforms; boxless stand-in rows keep the degree-quantized
-		// row pitch (their attitude never advances past the authored pose, so it
-		// is the placement's spawn form [orig: Entity_SpawnFromBMSRecord
-		// @0x40EB69..0x40EB86]).
+		// contact solve conforms, the placement's spawn form until a solve writes
+		// it (air_pitch_bam, seeded at the first tick above); the boxless stand-in
+		// rows keep the row pitch, their attitude never advancing past the
+		// authored pose [orig: Entity_SpawnFromBMSRecord @0x40EB69..0x40EB86].
 		const int32_t pitch_bam = wheeled_solve
 				? m.air_pitch_bam
-				: spawn_angle_bam(veh.pitch);
+				: veh.pitch_bam;
 		const int32_t c = slope_cos22(pitch_bam);
         const int32_t c2 = static_cast<int32_t>((static_cast<int64_t>(c) * c) >> 22);
         target_speed = static_cast<int32_t>((static_cast<int64_t>(c2) * cmd) >> 22);
@@ -888,8 +940,8 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 				std::fill_n(m.chassis_impulse_direction, 3, 0);
 		}
 
-		const int32_t prev[3] = { to_fixed(veh.position.x), to_fixed(veh.position.y),
-			to_fixed(veh.position.z) };
+		const int32_t prev[3] = { veh.position.x.q16, veh.position.y.q16,
+			veh.position.z.q16 };
 		// The bike integrates through `2 * ftol(v * 0.5)` per axis — the odd LSB
 		// of every velocity is dropped each tick (a wire-visible 1-LSB drift on
 		// odd values) [orig: Entity_UpdateLightVehiclePhysics `fmul 0.5; ftol;
@@ -906,9 +958,9 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 		// velocity, before the yaw apply [orig: the tracked call @0x48d0b1;
 		// the wheeled call @0x48a9ef; the light call @0x486672]. Each family
 		// solve rests the hull at wheel height above terrain (pads at
-		// box_z_lo + r) and conforms attitude from per-corner lifts; rows
-		// outside their activity predicates keep the 5-tap bilinear
-		// terrain clamp for an embedder that supplies no authored model probes.
+		// box_z_lo + r) and conforms attitude from per-corner lifts; a model with
+		// no box extents keeps the 5-tap bilinear terrain clamp (a model-less
+		// hull's solve returns after its prologue: no stand-in).
 		if (solve_kind == ContactSolveKind::Tracked) {
 			ground_contact_solve(world, veh, traits, m, prev[0], prev[1], px, py, pz);
 		} else if (solve_kind == ContactSolveKind::Wheeled) {
@@ -934,7 +986,7 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 		} else {
 			m.grounded = true; // no terrain wired (unit worlds): drive on a flat plane
 			if (m.slide_z < 0) m.slide_z = 0;
-            pz = to_fixed(veh.position.z);
+            pz = veh.position.z.q16;
 		}
 
 		// Grounded steering applies the wheel yaw rate [orig: @0x48ef60
@@ -968,11 +1020,10 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 			m.yaw_bam = io::bam_add(m.yaw_bam, m.wheel_rate_bam);
 		}
 
-		veh.position.x = static_cast<float>(from_fixed(px));
-		veh.position.y = static_cast<float>(from_fixed(py));
-		veh.position.z = static_cast<float>(from_fixed(pz));
-        veh.yaw = static_cast<int16_t>(std::lround(
-                normalize_mission_yaw_deg(mission_yaw_deg_from_bam_heading(m.yaw_bam))));
+		veh.position.x.q16 = px;
+		veh.position.y.q16 = py;
+		veh.position.z.q16 = pz;
+        veh.heading = m.yaw_bam;
 	}
 
 	slew_turret(veh, 0x2108421);
@@ -1027,10 +1078,14 @@ namespace detail {
 // following tick.
 VehicleEulerBasis vehicle_euler_basis(int32_t yaw_bam, int32_t pitch_bam,
                                       int32_t roll_bam) {
-    VehicleEulerBasis out;
     const int32_t origin[3] = {};
-    out.q22 = collision_matrix_from_euler(
-            yaw_bam, pitch_bam, roll_bam, origin);
+    return vehicle_basis_from_matrix(collision_matrix_from_euler(
+            yaw_bam, pitch_bam, roll_bam, origin));
+}
+
+VehicleEulerBasis vehicle_basis_from_matrix(const CollisionMatrix &q22) {
+    VehicleEulerBasis out;
+    out.q22 = q22;
     constexpr double kInvQ22 = io::kInvQ22One;
     out.fwd[0] = double(out.q22.m[0]) * kInvQ22;
     out.fwd[1] = double(out.q22.m[4]) * kInvQ22;
@@ -1042,6 +1097,33 @@ VehicleEulerBasis vehicle_euler_basis(int32_t yaw_bam, int32_t pitch_bam,
     out.up[1] = double(out.q22.m[6]) * kInvQ22;
     out.up[2] = double(out.q22.m[10]) * kInvQ22;
     return out;
+}
+
+CollisionMatrix vehicle_solve_matrix(const Entity &veh) {
+	const auto &m = veh.veh;
+	const int32_t origin[3] = {};
+	return collision_matrix_from_euler_scaled(
+			m.yaw_bam, m.air_pitch_bam, m.air_roll_bam, origin, veh.uniform_scale_q16);
+}
+
+CollisionMatrix vehicle_occupant_matrix(const CollisionMatrix &head) {
+	CollisionMatrix out = head;
+	for (int row = 0; row < 3; ++row) {
+		const int64_t extract[3] = { head.m[row] >> 6, head.m[4 + row] >> 6, head.m[8 + row] >> 6 };
+		int32_t unit[3];
+		q16_normalize(extract, unit);
+		for (int k = 0; k < 3; ++k)
+			out.m[4 * k + row] = bam_shl_wrap(unit[k], 6);
+	}
+	return out;
+}
+
+CollisionMatrix vehicle_matrix_rows(const CollisionMatrix &head) {
+	CollisionMatrix out = head;
+	for (int row = 0; row < 3; ++row)
+		for (int k = 0; k < 3; ++k)
+			out.m[4 * k + row] = bam_shl_wrap(head.m[4 * k + row] >> 6, 6);
+	return out;
 }
 
 } // namespace detail
@@ -1103,9 +1185,9 @@ void vehicle_client_chase(Entity &veh, VehicleChaseFamily family, int32_t entry_
 		heading_free = !latched && m.wheelie_active == 0 && entry_up_z16 >= 0;
 	const bool z_step = family == VehicleChaseFamily::Plain ||
 			((veh.flags & kEntityFlagInAir) != 0 && !latched);
-	int32_t px = to_fixed(veh.position.x);
-	int32_t py = to_fixed(veh.position.y);
-    int32_t pz = to_fixed(veh.position.z);
+	int32_t px = veh.position.x.q16;
+	int32_t py = veh.position.y.q16;
+    int32_t pz = veh.position.z.q16;
     if (m.net_interp_progress == 0) {
         const int64_t dx = int64_t(m.net_smooth_target[0]) - px;
         const int64_t dy = int64_t(m.net_smooth_target[1]) - py;
@@ -1175,9 +1257,9 @@ void vehicle_client_chase(Entity &veh, VehicleChaseFamily family, int32_t entry_
         }
     }
 
-    veh.position.x = static_cast<float>(from_fixed(px));
-    veh.position.y = static_cast<float>(from_fixed(py));
-    veh.position.z = static_cast<float>(from_fixed(pz));
+    veh.position.x.q16 = px;
+    veh.position.y.q16 = py;
+    veh.position.z.q16 = pz;
 }
 
 // Boat platform contact, buoyancy, planing and wreck state. The four pads and three spine probes
@@ -1259,6 +1341,26 @@ int32_t plat_terrain_probe(const World &world, int32_t X, int32_t Y, int32_t Z, 
 
 namespace detail {
 
+// Corner k is the position plus two products, each rounded half up on its own, of a half extent
+// (ftol of the extent times -0.5f or 0.5f, truncated toward zero) and a row's extract word: row 1
+// (side) with the beam's half, row 0 (forward) with the length's. c0 (+f, -s), c1 (+f, +s),
+// c2 (-f, -s), c3 (-f, +s).
+// [orig: Entity_ProcessPlatformPhysics @0x481870 - the halves flt_7C59B0 (-0.5f) @0x482E3D and
+//  flt_7C3B94 (0.5f) @0x482EF6; c0 @0x482E57..0x482FE0, c1 @0x482FF7..0x48316B, c2
+//  @0x483176..0x4832F1, c3 @0x4832FC..0x48346D (`add eax, 8000h; adc edx, 0; shrd eax, edx, 10h`
+//  per product)]
+void vehicle_platform_corners(const CollisionMatrix &raw, int32_t beam, int32_t length,
+		int32_t px, int32_t py, int32_t pz, int32_t out[4][3]) {
+	const int32_t forward_half[4] = { length / 2, length / 2, -length / 2, -length / 2 };
+	const int32_t side_half[4] = { -beam / 2, beam / 2, -beam / 2, beam / 2 };
+	const int32_t position[3] = { px, py, pz };
+	for (int k = 0; k < 4; ++k)
+		for (int i = 0; i < 3; ++i)
+			out[k][i] = io::bam_add(position[i],
+					io::bam_add(retail_q16_mul_rhu(side_half[k], raw.m[4 * i + 1] >> 6),
+							retail_q16_mul_rhu(forward_half[k], raw.m[4 * i] >> 6)));
+}
+
 // The shared 4-normal plane fit, ported in the witnessed fixed/float mix
 // (record §4.1 "Port literally"): 16.16-quantized normalized edges, RHU
 // fixed-point cross products, the set-1/set-2 duplicated normal, integer
@@ -1287,10 +1389,21 @@ void plat_fit_corners(const int32_t c[4][3], PlatFit &out, CollisionMatrix *matr
     q16_cross(a, b, raw);   q16_normalize(raw, n2); // set 2 recomputes set 1
     q16_cross(e3, b, raw);  q16_normalize(raw, n3);
     q16_cross(e3, f4, raw); q16_normalize(raw, n4);
+    // Set 1's edge is normalized a second time after its normal, and the forward sum reads that
+    // copy beside set 2's once-normalized one [orig: Entity_ProcessWheeledVehicleSuspension
+    // @0x46B140 - the second normalize @0x46BB96..0x46BBE6, the sum's read @0x46C29D;
+    // Entity_ComputeSuspensionOrientation @0x46C8E0 @0x46CB4C..0x46CBA9 / @0x46DAFF;
+    // Entity_ComputeSuspensionAndOrientation @0x4698A0 @0x46A453..0x46A469 / @0x46AB10;
+    // Vehicle_ComputeAveragedOrientation @0x459A50 @0x459DB9..0x459E05 / @0x45A42B].
+    int32_t a2[3];
+    {
+        const int64_t once[3] = { a[0], a[1], a[2] };
+        q16_normalize(once, a2);
+    }
     int64_t up_s[3], fwd_s[3], side_s[3];
     for (int i = 0; i < 3; ++i) {
         up_s[i] = int64_t(n1[i]) + n2[i] + n3[i] + n4[i];
-        fwd_s[i] = 2 * int64_t(e3[i]) + 2 * int64_t(a[i]); // e4+e3+a+e2
+        fwd_s[i] = 2 * int64_t(e3[i]) + int64_t(a2[i]) + int64_t(a[i]); // e4+e3+a2+e2
         side_s[i] = int64_t(f4[i]) + 3 * int64_t(b[i]);    // f4+f3+b+f2
     }
     // `each *= 0.25` through the float constant, ftol'd back [orig:
@@ -1334,15 +1447,23 @@ void plat_fit_corners(const int32_t c[4][3], PlatFit &out, CollisionMatrix *matr
 void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &traits) {
     World &world = world_;
     Entity::VehicleMotorState &m = veh.veh;
-    // No resolved model boxes (lib-only embedders / unresolved graphics):
-    // the level-hull + chase-Z stand-in remains for this row.
+    // A hull with no box extents runs no platform solve: its afloat latch,
+    // contact byte and attitude stay as they stand. A model-less hull's
+    // null-model branch writes the contact byte (+0x2F2) from the stack word
+    // esp+0x2C (the row-2 Z the wake leg's extraction fills; stale on the paths
+    // past both extractions) and, on the authority, Flags 0x10 from +0x2F0:
+    // Q7-12 / Q7-33 (a), PERMANENT, the whole branch, a deliberate fix of
+    // retail's unchecked read, leaves both; a model with no boxes keeps the level
+    // hull and chase-owned Z.
+    // [orig: Entity_ProcessPlatformPhysics @0x481870 (@0x481A85..0x481AC1 ->
+    //  @0x481A06..0x481A22; the extractions @0x4819D4 / @0x481A54)]
     if (traits.box_z_hi == traits.box_z_lo || traits.box_y_hi == traits.box_y_lo)
         return;
 
     const int32_t W = world.env.water_z;
-    int32_t px = to_fixed(veh.position.x);
-    int32_t py = to_fixed(veh.position.y);
-    int32_t pz = to_fixed(veh.position.z);
+    int32_t px = veh.position.x.q16;
+    int32_t py = veh.position.y.q16;
+    int32_t pz = veh.position.z.q16;
 
 	// [orig: Entity_ProcessPlatformPhysics @0x4818B9..0x481A5C]
 	if (m.vel_x == 0 && m.vel_y == 0 && m.speed == 0 && m.wheel_rate_bam == 0 &&
@@ -1357,7 +1478,7 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
 		pz = io::bam_sub(pz, m.slide_z);
 		m.slide_z >>= 1;
 		vehicle_rest_state(world, veh, VehicleFamily::Watercraft);
-		veh.position.z = float(from_fixed(pz));
+		veh.position.z.q16 = pz;
 		return;
 	}
 	vehicle_expire_contact_wake(world, veh);
@@ -1398,12 +1519,18 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
     // World transform: the pose matrix from {Pos, Yaw, Pitch, Roll} — the
     // boat's live attitude rides air_pitch_bam/air_roll_bam (the shared
     // attitude fields the sim mirrors to the row).
-	VehicleEulerBasis basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
-	const double *fwdv = basis.fwd;
-	const double *sidev = basis.side;
-	const double *upv = basis.up;
+	const VehicleEulerBasis basis =
+			vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+    // The probes ride the head matrix, the hull's effective scale included.
+    // [orig: @0x481BEE..0x481C45]
+	const CollisionMatrix head = vehicle_solve_matrix(veh);
     int32_t probes[7][3];
-    place_probes(basis, probes_model, px, py, pz, probes);
+	place_probes(head, probes_model, px, py, pz, probes);
+	// The occupant matrix (isUnderwater in the IDB): the head's rows extracted and set back, not
+	// normalized. The fits and the euler extraction after them read it.
+	// [orig: @0x481C48..0x481CAF; the readers @0x483BBE / @0x483D00 / @0x483F2B, @0x483BD0 /
+	//  @0x483D1C / @0x483F3D]
+	CollisionMatrix occupant = vehicle_matrix_rows(head);
 
     // ---- §4/§6 first force pass + severity response (plat_probe_pass).
     const int32_t soft = cos22_of_bam_x87(traits.max_slope);
@@ -1411,7 +1538,8 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
     PlatProbeForce forces[7];
 	EntityHandle hit_entity;
 	const int32_t sev =
-			plat_probe_pass(world, veh, probes, radii, soft, hard, forces, px, py, pz, &hit_entity);
+			plat_probe_pass(world, veh, ProbeForcePass::ComputeCollisionForces, probes, radii, soft,
+					hard, forces, px, py, pz, &hit_entity);
 	vehicle_contact_impact(world, veh, traits, sev, hit_entity, px, py, pz);
 	// The decay per severity [orig: @0x4821E7 (1), @0x4822A4 (2), @0x4822C9 (3)]. The shared
 	// contact fold applies authority damage, sound and momentum. The quarter-speed cut requires
@@ -1433,7 +1561,8 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
         for (int i = 0; i < 7; ++i) { probes[i][0] += int32_t(dX); probes[i][1] += int32_t(dY); }
         PlatProbeForce forces2[7];
 		const int32_t sev2 =
-				plat_probe_pass(world, veh, probes, radii, soft, hard, forces2, px, py, pz);
+				plat_probe_pass(world, veh, ProbeForcePass::ComputeCollisionForces, probes, radii,
+						soft, hard, forces2, px, py, pz);
 		for (int i = 0; i < 7; ++i)
 			zc[i] = forces2[i].fz;
 		if (sev2 != 0) {
@@ -1464,8 +1593,9 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
         liftHi = int32_t(double(t_pitch_vel) * F * 0.004);
         liftLo = liftHi >> 1;
         planeSpd = 20000;
-        const double arz = std::abs(sidev[2]) * 65536.0;
-        if (arz > double(0x2000)) { // heavily rolled [orig: @0x482259]
+        // Heavily rolled: the head's row 1 z, its extract's word.
+        // [orig: `mov eax, [esp+..+var_244]` (row 1 z of the @0x481C55 extract) @0x482259]
+        if (io::bam_abs(head.m[9] >> 6) > 0x2000) {
             pitchThr = int32_t(double(t_pitch) * 0.1 * 409.6);
             liftHi = 250;
         } else {
@@ -1505,42 +1635,23 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
 	detail::vehicle_water_entry(
 			world, veh, probes[water_pad][0], probes[water_pad][1], trail_was_water);
 
-	// ---- §9 lever corners around the CURRENT pose + machines. Built through
-	// the same Q22 rotate as the probes — the witnessed corner products are
-	// round-half-up 16.16 through the pose matrix [orig: @0x482E31..0x48346D],
-	// not double-precision basis-row sums.
+	// ---- §9 lever corners around the CURRENT pose + machines, off the rows of the matrix the
+	// solve rebuilds unscaled from the euler words (vehicle_platform_corners). The crash state's
+	// righting below replaces the rows but not these corners.
+	// [orig: Math_BuildFixedPointMatrixFromEulerAngles (the call @0x482DCA) and its extracts
+	//  @0x482DDC..0x482E2C; no corner build after the righting @0x4835EF / @0x483642]
+	const CollisionMatrix &raw = basis.q22;
 	int32_t c[4][3];
-	{
-        const int32_t hb2 = hb >> 1, hl2 = hl >> 1;
-        const int32_t corner_model[4][3] = {
-            {+hl2, -hb2, 0}, // c0: (-hb/2)*right + (+hl/2)*fwd
-            {+hl2, +hb2, 0}, // c1
-            {-hl2, -hb2, 0}, // c2
-            {-hl2, +hb2, 0}, // c3
-        };
-        for (int k = 0; k < 4; ++k) {
-            int32_t rotated[3];
-            basis.q22.rotate_point(corner_model[k], rotated);
-            c[k][0] = px + rotated[0];
-            c[k][1] = py + rotated[1];
-            c[k][2] = pz + rotated[2];
-        }
-    }
-	vehicle_crash_state(world, veh, traits, nullptr, int32_t(upv[2] * 65536.0));
-	basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
-	// Righting can replace the attitude after the first lever-corner build.
-	{
-		const int32_t hx = hl >> 1, hy = hb >> 1;
-		const int32_t local[4][3] = { { hx, -hy, 0 }, { hx, hy, 0 }, { -hx, -hy, 0 },
-			{ -hx, hy, 0 } };
-		for (int k = 0; k < 4; ++k) {
-			int32_t rotated[3];
-			basis.q22.rotate_point(local[k], rotated);
-			c[k][0] = io::bam_add(px, rotated[0]);
-			c[k][1] = io::bam_add(py, rotated[1]);
-			c[k][2] = io::bam_add(pz, rotated[2]);
-		}
-	}
+	vehicle_platform_corners(raw, hb, hl, px, py, pz, c);
+	// The crash state reads that matrix's row 2 z; a righting replaces the occupant, and the rows
+	// read from here on are then its extracts.
+	// [orig: `mov ecx, [esp+..+var_25C]` @0x483467; Entity_BuildOrientationFromVectors @0x458DF0
+	//  (the call @0x4835EF) / Entity_RebuildOrientationMatrixFromAxes @0x4632E0 (the call
+	//  @0x483642) into isUnderwater, the re-extracts @0x483601..0x483625 / @0x483654..0x483678]
+	const VehicleEulerBasis rows =
+			vehicle_crash_state(world, veh, traits, nullptr, raw.m[10] >> 6, &occupant)
+			? vehicle_basis_from_matrix(occupant)
+			: basis;
 
 	// Accumulator ramp [orig: @0x483680..0x4836E6].
 	for (int k = 0; k < 4; ++k)
@@ -1551,37 +1662,59 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
     // driver's [136] is the §1.8 current/received average, and the solve reads
     // that averaged command, not the raw wire value.
     const int32_t cmd = m.cmd_speed;
-    const double fwd_z_now = fwdv[2] * 65536.0;
+	// The forward z word: the rows' (the righting's, else the rebuild's), re-extracted from the
+	// rebuild's matrix when the bow arm runs, whose whole body afloat gates.
+	// [orig: Math_ExtractRow0FromFixedPoint22 (the call @0x483723) from `matrix` under the speed
+	//  and lift gates @0x4836EC..0x483710, the afloat test @0x48372B, the reads of var_250
+	//  @0x4837BF / @0x4839D7 / @0x483B04, the cmd test @0x483741 -> @0x483881]
+	int32_t fwd_z_now = rows.q22.m[8] >> 6;
     if (m.speed > 0 && liftLo > 0 && liftHi > 0) {
-        if (m.plat_afloat && cmd > 0) {
+		fwd_z_now = raw.m[8] >> 6;
+		if (m.plat_afloat && cmd > 0) {
             m.plat_acc[0] = m.plat_acc[1] = 0;
             m.plat_planing = true;
             if (!m.plat_porpoise) {
-                if (fwd_z_now > double(pitchThr)) {
-                    // dist/293 > (cmd/293)*0.5 -> latch (the per-tick travel
-                    // is our speed here; the saved-pose dist is equivalent
-                    // between integrations).
-                    if (m.speed / 293 > (cmd / 293) / 2) m.plat_porpoise = true;
+                if (fwd_z_now > pitchThr) {
+                    // The hull's XY travel since the mover's entry stamp, not its speed
+                    // register: the integration and the push above moved it by its
+                    // velocity words and the contact share, so the length of
+                    // savedLivePose - Position (capped at flt_7C19E0, truncated) / 293
+                    // against (cmd / 293) * 0.5 truncated latches the dip
+                    // (D-NET-NEW-L6-41).
+                    // [orig: the travel @0x48376B..0x4837A1, the cap flt_7C19E0
+                    //  (2147418112.0f) @0x4837A3..0x4837B6, the command half (flt_7C3B94
+                    //  0.5f) @0x4837D2..0x48380B, the travel's ftol and /293 @0x48380D..0x483825,
+                    //  `jle` @0x483829, the latch @0x48382B; Entity_UpdateWatercraftPhysics
+                    //  @0x48D480 - the entry stamp @0x48D4AC..0x48D4C5, the integration
+                    //  @0x48ECA8..0x48ECC6]. A row no mover stamped reads no travel.
+                    const double tx = veh.saved_live_valid
+                            ? double(io::bam_sub(veh.saved_live_pos[0], px)) : 0.0;
+                    const double ty = veh.saved_live_valid
+                            ? double(io::bam_sub(veh.saved_live_pos[1], py)) : 0.0;
+                    const int32_t travel =
+                            int32_t(std::min(std::sqrt(ty * ty + tx * tx), 2147418112.0));
+                    if (travel / 293 > int32_t(double(cmd / 293) * 0.5)) m.plat_porpoise = true;
                 } else {
                     const int32_t lift = (m.speed >= planeSpd) ? liftHi : liftLo;
                     c[0][2] += lift;
                     c[1][2] += lift; // bow rises
                 }
             } else {
-                if (fwd_z_now < double(dipExit)) m.plat_porpoise = false;
+                if (fwd_z_now < dipExit) m.plat_porpoise = false;
                 else { c[0][2] -= liftHi; c[1][2] -= liftHi; }
             }
-        } else if (cmd <= 0) {
+        } else if (m.plat_afloat) {
             m.plat_planing = false;
         }
     }
 	// Post-machine adjustments [orig: @0x483893..0x48398C].
 	if (m.plat_planing) {
+		// The side z word: the rows' row 1 z. [orig: `mov edi, [esp+..+var_244]` @0x48389A]
 		if (m.plat_afloat && m.speed > 0x2000) {
-			vehicle_boat_lean(veh, traits, basis.q22.m[9] >> 6);
+			vehicle_boat_lean(veh, traits, rows.q22.m[9] >> 6);
 			m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] = m.plat_acc[3] = 0;
 		} else {
-			const int32_t error = basis.q22.m[9] >> 6;
+			const int32_t error = rows.q22.m[9] >> 6;
 			m.byte_2ef = 0;
 			m.air_roll_rate = io::bam_abs(error) > 240 ? (error < 0 ? -2386239 : 2386092) : 0;
 			m.part_spin.angle = 0;
@@ -1622,14 +1755,15 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
             c[k][2] += lift;
         }
         m.slide_z = 0; // [orig: @0x483F25]
-		vehicle_boat_suspension_fit(world, veh, traits, c, fit, px, py, pz);
+		vehicle_boat_suspension_fit(world, veh, traits, occupant, c, fit, px, py, pz);
 		pz = fit.z_avg;
 		m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] = m.plat_acc[3] = 0;
 	} else {
         // At-rest bob arm [orig: @0x4839C5..0x483A29].
         int32_t floatH_eff = floatH;
-        if (m.speed < 100 && m.plat_afloat &&
-            std::abs(fwd_z_now) < 5.0 && std::abs(sidev[2] * 65536.0) < 5.0) {
+        // [orig: |var_250| < 5 @0x4839D7..0x4839E3, |edi| (var_244) < 5 @0x4839E5..0x4839EF]
+        if (m.speed < 100 && m.plat_afloat && io::bam_abs(fwd_z_now) < 5 &&
+                io::bam_abs(rows.q22.m[9] >> 6) < 5) {
             if (!m.plat_at_rest) {
                 m.plat_at_rest = true;
                 m.plat_bob_phase = 4.71f; // 3pi/2 [orig: flt_7C6F84]
@@ -1658,7 +1792,7 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
                 }
                 c[k][2] += lift;
             }
-			vehicle_boat_suspension_fit(world, veh, traits, c, fit, px, py, pz);
+			vehicle_boat_suspension_fit(world, veh, traits, occupant, c, fit, px, py, pz);
 			pz = fit.z_avg;
 		} else {
 			// C. Settled / airborne.
@@ -1671,7 +1805,7 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
                     if (k != lowest && c[k][2] < c[second][2]) second = k;
                 if (cmd <= 0) {
                     m.plat_acc[lowest] = m.plat_acc[second] = 0;
-                    if (fwd_z_now < 100.0)
+                    if (fwd_z_now < 100)
                         m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] =
                                 m.plat_acc[3] = 0;
                 }
@@ -1683,7 +1817,7 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
             // The wheeled solver's settled/airborne fit: same 4-normal fit;
             // Z = the average of the ABOVE-ground corners, rise-clamped
             // +0x2000/tick (blockers §3).
-			vehicle_suspension_fit(world, veh, c, nullptr, fit, px, py, pz);
+			vehicle_suspension_fit(world, veh, occupant, c, nullptr, fit, px, py, pz);
 			if (m.plat_afloat) {
 				// The wheeled solver's settled-fit Z: the average of the
 				// ABOVE-ZERO corners only, rise-clamped +0x2000/tick
@@ -1703,9 +1837,9 @@ void VehicleSystem::watercraft_platform_solve(Entity &veh, const VehicleTraits &
     m.plat_airborne_ticks =
             (veh.flags & kEntityFlagInAir) != 0 ? m.plat_airborne_ticks + 1 : 0;
 
-    veh.position.x = float(from_fixed(px));
-    veh.position.y = float(from_fixed(py));
-    veh.position.z = float(from_fixed(pz));
+    veh.position.x.q16 = px;
+    veh.position.y.q16 = py;
+    veh.position.z.q16 = pz;
 }
 
 namespace {
@@ -1732,9 +1866,9 @@ void watercraft_seed_platform_latch(World &world, Entity &veh,
         {traits.foot_x_lo + q, traits.foot_y_lo + q, zb},
         {traits.foot_x_lo + q, traits.foot_y_hi - q, zb},
     };
-    const int32_t pos[3] = {to_fixed(veh.position.x),
-                            to_fixed(veh.position.y),
-                            to_fixed(veh.position.z)};
+    const int32_t pos[3] = {veh.position.x.q16,
+                            veh.position.y.q16,
+                            veh.position.z.q16};
     const int32_t origin[3] = {};
     const CollisionMatrix basis = collision_matrix_from_euler(
             m.yaw_bam, m.air_pitch_bam, m.air_roll_bam, origin);
@@ -1753,39 +1887,11 @@ void watercraft_seed_platform_latch(World &world, Entity &veh,
     // already occupy instead of evaluating the dry-entry arm at the waterline.
     const int32_t afloat_draft =
             static_cast<int32_t>(double(avg) - 0.9 * double(q));
-    m.plat_afloat = world.env.water_z != 0 &&
-            afloat_draft + v210 < world.env.water_z;
+    // The solve's compare reads the water word raw (plat_water_flag).
+    m.plat_afloat = afloat_draft + v210 < world.env.water_z;
     m.plat_solve_valid = true;
 	const bool trail_was_water = (veh.flags & 0x8000u) != 0;
 	veh.flags = m.plat_afloat ? (veh.flags | 0x8000u) : (veh.flags & ~0x8000u);
-	detail::vehicle_trail_water_transition(veh, traits, trail_was_water);
-}
-
-// The inmatch headless host boots World without the shell's model-box
-// resolution (VehicleTraits.box_z_* is stamped only by the binding's
-// simulation_assets resolve), so its watercraft have no platform
-// geometry and the solver cannot produce an afloat latch. This water-plane
-// stand-in covers exactly that path; resolved hulls always consume the
-// prior platform solve.
-void watercraft_refresh_fallback_afloat(World &world, Entity &veh, const VehicleTraits &traits) {
-	Entity::VehicleMotorState &m = veh.veh;
-	bool afloat = false;
-	if (world.env.water_z != 0) {
-        if (world.tables.terrain == nullptr) {
-            afloat = true;
-        } else {
-            const int32_t pos[3] = {to_fixed(veh.position.x),
-                                    to_fixed(veh.position.y),
-                                    to_fixed(veh.position.z)};
-            const GroundClearance clearance{};
-            const int32_t ground = calc_average_ground_height(
-                    *world.tables.terrain, pos, 0, clearance);
-            afloat = ground == INT32_MIN || ground < world.env.water_z;
-        }
-    }
-    m.plat_afloat = afloat;
-	const bool trail_was_water = (veh.flags & 0x8000u) != 0;
-	veh.flags = afloat ? (veh.flags | 0x8000u) : (veh.flags & ~0x8000u);
 	detail::vehicle_trail_water_transition(veh, traits, trail_was_water);
 }
 
@@ -1799,9 +1905,9 @@ static void watercraft_motor_core(World &world, Entity &veh,
 // Entity_UpdateAircraftPhysics @0x490310, carrier @0x4905BC..0x49095B]
 void carrier_pose_fixed(const Entity &e, int32_t pos[3], int32_t &yaw,
                         int32_t &pitch, int32_t &roll) {
-    pos[0] = to_fixed(e.position.x);
-    pos[1] = to_fixed(e.position.y);
-    pos[2] = to_fixed(e.position.z);
+    pos[0] = e.position.x.q16;
+    pos[1] = e.position.y.q16;
+    pos[2] = e.position.z.q16;
 	if (e.veh.yaw_seeded) {
 		yaw = e.veh.yaw_bam;
 		pitch = e.veh.air_pitch_bam;
@@ -1809,9 +1915,9 @@ void carrier_pose_fixed(const Entity &e, int32_t pos[3], int32_t &yaw,
 	} else {
 		// An unmoved row: its placement angles in the spawn form.
 		// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6]
-		yaw = spawn_angle_bam(90 - e.yaw);
-		pitch = spawn_angle_bam(e.pitch);
-		roll = spawn_angle_bam(e.roll);
+		yaw = e.heading;
+		pitch = e.pitch_bam;
+		roll = e.roll_bam;
 	}
 }
 
@@ -1823,28 +1929,37 @@ void stamp_saved_live_pose(Entity &e) {
 
 void VehicleSystem::watercraft_client_tick(Entity &veh, const VehicleTraits &traits) {
 	if (traits.physics == 0) {
-		tick_simple_motor(veh, traits, nullptr, true);
+		tick_simple_motor(veh, traits, true);
 		return;
 	}
 	World &world = world_;
 	Entity::VehicleMotorState &m = veh.veh;
 	if (!m.net_predicted) return;
-	update_engine_sound(veh, traits);
 	if (!m.yaw_seeded) {
 		// [orig: Entity_UpdateWatercraftPhysics @0x48D4B2 reads the row's Yaw,
 		//  unmoved = the spawn form, Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
-		m.yaw_bam = spawn_angle_bam(90 - veh.yaw);
+		m.yaw_bam = veh.heading;
 		m.yaw_seeded = true;
 	}
+	// A client row the class init never brained jumps from the stamp (the pass
+	// stamped it ahead of this call) to the matrix-build tail: no claimant edge,
+	// chase, motion or sound. [orig: Entity_UpdateWatercraftPhysics `mov ebp,
+	//  [esi+64h]` @0x48D499, the stamp @0x48D4AC..0x48D4E9, `jz` @0x48D4EF -> the
+	//  tail @0x48EF50..0x48EF63]
+	if (world.ai.for_handle(veh.handle) == nullptr) {
+		veh.engine_flags |= kEntityFlagMatrixBuilt;
+		return;
+	}
+	update_engine_sound(veh, traits);
 
 	vehicle_refresh_ground_link(world, veh, traits);
 	vehicle_follow_carrier(world, veh);
 
 	// ---- 1. Per-record chase (the §5.38e vehicle template) on the world pose.
 	vehicle_client_chase(veh, VehicleChaseFamily::Plain, 0);
-	if (!watercraft_has_platform_geometry(traits)) {
-		watercraft_refresh_fallback_afloat(world, veh, traits);
-	} else if (!m.plat_solve_valid) {
+	// A hull with no platform geometry runs no platform solve, so its afloat
+	// latch stays as it stands (see watercraft_platform_solve).
+	if (watercraft_has_platform_geometry(traits) && !m.plat_solve_valid) {
 		// An exact-handle wire-materialized joiner hull has no earlier local frame, but the mover
 		// consumes the PREVIOUS platform solve's afloat/attitude state. Seed
 		// that state before its first thrust/drag pass instead of treating a
@@ -1856,17 +1971,26 @@ void VehicleSystem::watercraft_client_tick(Entity &veh, const VehicleTraits &tra
 	// retains the authored steering input.
 	// Witness sites: [orig: @0x48DDD4, @0x48DDF4, @0x490C9E]
 	if (Entity *local_driver = resolve_local_vehicle_controller(world, veh, traits)) {
-		stage_player_vehicle_input(world_, veh, *local_driver, traits);
-		// Retail reconciles only longitudinal command on the controlling
-		// client; its steer target stays owned by current local LOOK/input.
-		m.cmd_speed = io::bam_sar(
-                io::bam_add(m.cmd_speed, m.net_recv_speed), 1);
+		// The boat parks on the dead bit alone [orig: @0x48DFB6..0x48DFBA].
+		if (((veh.flags | veh.engine_flags) & kEntityFlagDead) != 0) {
+			vehicle_park_inputs(veh);
+		} else {
+			stage_player_vehicle_input(world_, veh, *local_driver, traits);
+			// Retail reconciles only longitudinal command on the controlling
+			// client; its steer target stays owned by current local LOOK/input.
+			m.cmd_speed = io::bam_sar(
+                    io::bam_add(m.cmd_speed, m.net_recv_speed), 1);
+		}
 	} else {
 		m.cmd_speed = m.net_recv_speed;
 		m.steer_target_bam = m.net_recv_steer_bam;
 	}
 
 	watercraft_motor_core(world, veh, traits);
+	// The client runs the same mover to the same matrix-build tail, which sets Flags
+	// 0x20000 (kEntityFlagMatrixBuilt, homed on engine_flags) as the authority's does.
+	// [orig: Entity_UpdateWatercraftPhysics @0x48EF50..0x48EF63]
+	veh.engine_flags |= kEntityFlagMatrixBuilt;
 }
 
 // Blocks 12..19 of the cbot mover — the steer integrator through the yaw apply.
@@ -1879,9 +2003,9 @@ void VehicleSystem::watercraft_client_tick(Entity &veh, const VehicleTraits &tra
 static void watercraft_motor_core(World &world, Entity &veh,
                                   const VehicleTraits &traits) {
     Entity::VehicleMotorState &m = veh.veh;
-    int32_t px = to_fixed(veh.position.x);
-    int32_t py = to_fixed(veh.position.y);
-    int32_t pz = to_fixed(veh.position.z);
+    int32_t px = veh.position.x.q16;
+    int32_t py = veh.position.y.q16;
+    int32_t pz = veh.position.z.q16;
 
     // ---- 3. Steer/rudder integrator [orig: @0x48E82C..0x48E926].
     {
@@ -2002,44 +2126,30 @@ static void watercraft_motor_core(World &world, Entity &veh,
     // sheds + yaw-rate shed + gravity slideDecay -= 167 [orig:
     // @0x48EBD3..0x48EC13, the -167 @0x48EBD9]; afloat + at-rest: the heave
     // counterweight slideDecay -= 8350 [orig: @0x48EBBE..0x48EBC7]; afloat +
-    // moving: no vertical write. A BOXLESS row (the solve early-returns)
-    // keeps the terrain-derived stand-in and no gravity (Z stays
-    // chase-owned there).
-    const bool solve_active =
-            traits.box_z_hi != traits.box_z_lo && traits.box_y_hi != traits.box_y_lo;
+    // moving: no vertical write. The latch is the last platform solve's: a hull
+    // no solve runs for keeps it as it stands. A model with no box extents keeps
+    // its chase-owned Z with no gravity (the stand-in for a model retail's solve
+    // would fault on).
+    const bool retail_row = !veh.has_graphic_model || watercraft_has_platform_geometry(traits);
     {
-        bool afloat;
-        if (solve_active) {
-            afloat = m.plat_afloat;
-        } else {
-            afloat = false;
-            int32_t ground_here = INT32_MIN;
-            if (world.tables.terrain != nullptr) {
-                const int32_t pos3[3] = {px, py, pz};
-                const GroundClearance clearance{};
-                ground_here =
-                        calc_average_ground_height(*world.tables.terrain, pos3, 0, clearance);
-            }
-            if (world.env.water_z != 0 && ground_here != INT32_MIN)
-                afloat = ground_here < world.env.water_z;
-            else if (world.env.water_z != 0 && world.tables.terrain == nullptr)
-                afloat = true; // headless/no-terrain world with water: float
-        }
+        const bool afloat = m.plat_afloat;
         if (!afloat) {
             m.vel_x -= (m.vel_x + 4) >> 3;
             m.vel_y -= (m.vel_y + 4) >> 3;
             m.wheel_rate_bam = io::bam_sub(
                     m.wheel_rate_bam,
                     io::bam_sar(io::bam_add(m.wheel_rate_bam, 2), 2));
-            if (solve_active) m.slide_z -= 167; // [orig: @0x48EBD9]
-        } else if (solve_active && m.plat_at_rest) {
+            if (retail_row) m.slide_z -= 167; // [orig: @0x48EBD9]
+        } else if (retail_row && m.plat_at_rest) {
             m.slide_z -= 8350; // [orig: @0x48EBC7]
         }
         // Shore look-ahead: the witnessed single bilinear sample at the NEXT
         // position [orig: Terrain_SampleHeightBilinear(pos + vel)
         // @0x48EC19..0x48EC2D] — radius 0 with default clearance collapses
-        // calc_average_ground_height to exactly that center-only column.
-        if (world.tables.terrain != nullptr && world.env.water_z != 0) {
+        // calc_average_ground_height to exactly that center-only column. The
+        // sample is compared with the water word raw, no dry gate [orig: `cmp eax,
+        // g_EnvWaterHeightFixed; jl` @0x48EC35..0x48EC3B].
+        if (world.tables.terrain != nullptr) {
             const int32_t ahead3[3] = {px + m.vel_x, py + m.vel_y, pz};
             const GroundClearance clearance{};
             const int32_t ground =
@@ -2063,11 +2173,10 @@ static void watercraft_motor_core(World &world, Entity &veh,
     // ---- 7. Integration -> solve -> yaw, the witnessed order
     // [orig: Position += velocity (X/Y/Z all UNCONDITIONAL)
     // @0x48ECA8..0x48ECC6; the wheel-rate self-decay @0x48ECC9..0x48ECE1;
-    // the platform call @0x48ECE7; Yaw += modelPtr0 AFTER it @0x48ECF2]. A
-    // boxless row keeps its chase-owned Z (no slide integration).
+    // the platform call @0x48ECE7; Yaw += modelPtr0 AFTER it @0x48ECF2].
     px += m.vel_x;
     py += m.vel_y;
-    if (solve_active) pz += m.slide_z; // [orig: add [esi+0Ch] @0x48ECC6]
+    if (retail_row) pz += m.slide_z; // [orig: add [esi+0Ch] @0x48ECC6]
     {
         const int32_t r = m.wheel_rate_bam;
         m.wheel_rate_bam = io::bam_sub(
@@ -2075,9 +2184,9 @@ static void watercraft_motor_core(World &world, Entity &veh,
                 io::bam_sar(r, 31)); // decay toward zero
     }
 
-    veh.position.x = static_cast<float>(from_fixed(px));
-    veh.position.y = static_cast<float>(from_fixed(py));
-    veh.position.z = static_cast<float>(from_fixed(pz));
+    veh.position.x.q16 = px;
+    veh.position.y.q16 = py;
+    veh.position.z.q16 = pz;
 
     // The platform solve runs every tick after integration, exactly where the
     // retail caller sits [orig: call @0x48ECE7 — after Position += velocity,
@@ -2086,8 +2195,7 @@ static void watercraft_motor_core(World &world, Entity &veh,
     // template's airborne-only Z-step gate). Yaw applies only AFTER this call.
     world.vehicles.watercraft_platform_solve(veh, traits);
     m.yaw_bam = io::bam_add(m.yaw_bam, m.wheel_rate_bam);
-    veh.yaw = static_cast<int16_t>(std::lround(
-            mission_yaw_deg_from_bam_heading(m.yaw_bam)));
+    veh.heading = m.yaw_bam;
 	detail::vehicle_sample_trails(world, veh, traits, m.cmd_speed);
 	// No rotor machine here: Entity_UpdateWatercraftPhysics @0x48D480..0x48EF74
 	// calls neither @0x4928B0 nor @0x48FA70, and its wheel phase is the thrust
@@ -2098,10 +2206,10 @@ static void watercraft_motor_core(World &world, Entity &veh,
 // motor, then apply the authority capsize drain.
 // Witness sites: [orig: @0x48DF7F, @0x48DFA2, @0x48D51F, @0x48D6DA, @0x48DACD, @0x48DE04,
 // @0x48DE7B, @0x48DFD3, @0x48DFDF, @0x48ECF5, @0x48D480]
-void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &traits, const VehicleDriveCmd *ai_cmd) {
+void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &traits) {
     World &world = world_;
 	if (traits.physics == 0) {
-		tick_simple_motor(veh, traits, ai_cmd, false);
+		tick_simple_motor(veh, traits, false);
 		return;
 	}
 	Entity::VehicleMotorState &m = veh.veh;
@@ -2109,21 +2217,27 @@ void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &trai
 		// The unmoved hull's placement angles, as the entry copy reads them.
 		// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6;
 		//  Entity_UpdateWatercraftPhysics @0x48D4B2/@0x48D4BB/@0x48D4CB]
-		m.yaw_bam = spawn_angle_bam(90 - veh.yaw);
-        m.air_pitch_bam = spawn_angle_bam(veh.pitch);
-        m.air_roll_bam = spawn_angle_bam(veh.roll);
+		m.yaw_bam = veh.heading;
+        m.air_pitch_bam = veh.pitch_bam;
+        m.air_roll_bam = veh.roll_bam;
         m.yaw_seeded = true;
+	}
+	// A hull with no brain (+0x64) jumps from the stamp (the pass stamped it ahead
+	// of this call) to the matrix-build tail: no ground probe, carrier ride, health
+	// cadence, claimant edge, input, motion or sound fold (@0x48EEB4).
+	// [orig: Entity_UpdateWatercraftPhysics `mov ebp, [esi+64h]` @0x48D499, the
+	//  stamp @0x48D4AC..0x48D4E9, `jz` @0x48D4EF -> the tail @0x48EF50..0x48EF63]
+	if (world.ai.for_handle(veh.handle) == nullptr) {
+		veh.engine_flags |= kEntityFlagMatrixBuilt;
+		return;
 	}
 	vehicle_refresh_ground_link(world, veh, traits);
 	vehicle_follow_carrier(world, veh);
 	// The platform solve owns Z/attitude/afloat from the first tick; an authored
 	// hull starts with no prior solve frame, so seed the latch exactly like the
 	// client path does before its first thrust pass.
-	if (!watercraft_has_platform_geometry(traits)) {
-		watercraft_refresh_fallback_afloat(world, veh, traits);
-	} else if (!m.plat_solve_valid) {
+	if (watercraft_has_platform_geometry(traits) && !m.plat_solve_valid)
 		watercraft_seed_platform_latch(world, veh, traits);
-	}
 
 	tick_health(veh, traits);
 	update_engine_sound(veh, traits);
@@ -2162,36 +2276,47 @@ void VehicleSystem::tick_watercraft_motor(Entity &veh, const VehicleTraits &trai
     // @0x48DFA8..0x48DFCD — no attrib 0x40 means the whole block is skipped and
     // the core runs on the persisted registers]
     if (traits.player_control) {
+        // The entry split reads the seat and the hull's dead bit alone: no
+        // occupant life (a body that dies seated has left at its own death edge,
+        // ahead of this pool-1 update) and no disable bit.
+        // [orig: @0x48DFA8..0x48DFBA; Entity_UpdateInfantryAI @0x4B9910
+        //  (@0x4B9C57..0x4B9C60)]
         Entity *occ = world.vehicles.resolve_controller(veh);
-        if (occ != nullptr && (!occ->alive || occ->health <= 0)) occ = nullptr;
         const bool player_occupant =
                 occ != nullptr && occ->handle.pool() == 0 && occ->player_class != 0;
-        if (occ == nullptr) {
+        // Every arm runs here, after the mover's head (the carrier ride, the health
+        // cadence, the capsize drain).
+        AiEntity *brain = world.ai.for_handle(veh.handle);
+        VehicleDriveCmd cmd;
+        if (occ == nullptr || ((veh.flags | veh.engine_flags) & kEntityFlagDead) != 0) {
             // Parked/no controller: hold heading, zero command and ramp, lights
-            // off. The state-22 stamp and the stuck escalation live with the
-            // brain in watercraft_ai_drive. [orig: @0x48E7EE..0x48E81E]
-            m.steer_target_bam = m.yaw_bam;
-            m.cmd_speed = 0;
-            m.steer_ramp_bam = 0;
-            veh.flags &= ~0x80u;
-        } else if (player_occupant && !watercraft_driver_submerged(world, *occ)) {
-            // The human-driver leg: 8-way keys + analog through waterSpeed, the
-            // boat bit6/bit7 overrides, the 45-deg ramp cap, walk/creep halving,
-            // lights [orig: @0x48DFE5..0x48E20F]. A player whose head is under
-            // the water plane routes to the AI leg instead [orig: the
-            // submerged-driver cut @0x48DFD3..0x48DFDF].
-            m.stuck_ticks = 0; // [orig: `moveTimer = 0` at the entry split @0x48DFA8..0x48DFCD]
-			stage_player_vehicle_input(world_, veh, *occ, traits);
-		} else if (ai_cmd != nullptr && ai_cmd->ai_drive) {
-			// The AI-driver leg's outputs (AiSystem::watercraft_ai_drive)
-            // [orig: @0x48E247..0x48E756 writes aiComp[132]/[136]].
+            // off; watercraft_ai_drive's parked arm stamps state 22 and counts the
+            // stuck escalation. [orig: @0x48E7EE..0x48E81E]
+            vehicle_park_inputs(veh);
+            world.ai.watercraft_ai_drive(world, veh, occ, traits, cmd);
+        } else {
+            // Occupied and not dead: the stuck count rests whatever the leg
+            // [orig: `moveTimer = 0` @0x48DFC0].
             m.stuck_ticks = 0;
-            m.steer_target_bam = ai_cmd->steer_target_bam;
-            m.cmd_speed = ai_cmd->cmd_speed;
-            m.steer_ramp_bam = 0;
-		}
-		// A live non-player controller with no drive command holds the previous
-        // targets.
+            if (player_occupant && !watercraft_driver_submerged(world, *occ)) {
+                // The human-driver leg: state 22, then 8-way keys + analog through
+                // waterSpeed, the boat bit6/bit7 overrides, the 45-deg ramp cap,
+                // walk/creep halving, lights [orig: @0x48DFE5..0x48E20F, state 22
+                // @0x48DFF5]. A player whose head is under the water plane routes to
+                // the AI leg instead [orig: the submerged-driver cut
+                // @0x48DFD3..0x48DFDF].
+                if (brain != nullptr) brain->brain.f[AiBrain::kCurState] = 22;
+                stage_player_vehicle_input(world_, veh, *occ, traits);
+            } else {
+                // The AI-driver leg writes the command registers in place, the ramp
+                // only in its boarders' hold [orig: @0x48E247..0x48E7EC].
+                world.ai.watercraft_ai_drive(world, veh, occ, traits, cmd);
+                if (cmd.ai_drive) {
+                    m.steer_target_bam = cmd.steer_target_bam;
+                    m.cmd_speed = cmd.cmd_speed;
+                }
+            }
+        }
     }
 
     watercraft_motor_core(world, veh, traits);
@@ -2214,7 +2339,7 @@ void VehicleSystem::ground_client_tick(Entity &veh, const VehicleTraits &traits)
 	// @0x48F000..0x48F007, Entity_DispatchPhysics_cbike @0x48EFF0..0x48EFF7].
 	if (traits.physics == 0 && traits.family != VehicleFamily::Tank &&
 			traits.family != VehicleFamily::Bike) {
-		tick_simple_motor(veh, traits, nullptr, true);
+		tick_simple_motor(veh, traits, true);
 		return;
 	}
 	// [orig: Entity_DispatchPhysicsUpdate @0x48F010]
@@ -2222,7 +2347,10 @@ void VehicleSystem::ground_client_tick(Entity &veh, const VehicleTraits &traits)
 		VehicleTraits afloat = traits;
 		afloat.family = VehicleFamily::Watercraft;
 		watercraft_client_tick(veh, afloat);
-		update_ground_sound(veh, afloat, veh.health <= 0, false);
+		// The boat mover's fold call (@0x48EEB4) lies inside its brainless bail
+		// (@0x48D4EF -> @0x48EF50).
+		if (world_.ai.for_handle(veh.handle) != nullptr)
+			update_ground_sound(veh, afloat, veh.health <= 0, false);
 		return;
 	}
 	World &world = world_;
@@ -2232,13 +2360,20 @@ void VehicleSystem::ground_client_tick(Entity &veh, const VehicleTraits &traits)
         // [orig: the movers' entry copy reads the row's Yaw, unmoved = the spawn
         //  form, Entity_UpdateVehiclePhysics @0x48AF7A; Entity_SpawnFromBMSRecord
         //  @0x40EB42..0x40EB66]
-        m.yaw_bam = spawn_angle_bam(90 - veh.yaw);
+        m.yaw_bam = veh.heading;
         m.yaw_seeded = true;
     }
 	// The prologue's savedLivePose stamp precedes the chase.
 	// [orig: ctan @0x488B24..0x488B50, chase @0x48912B; cveh
 	//  @0x48AF74..0x48AFA0; cbik @0x484054..0x484080]
 	stamp_saved_live_pose(veh);
+	// The brainless bail precedes the chase: a client row the class init never
+	// brained keeps its wire pose. [orig: ctan @0x488B56 -> @0x48AEB6, chase
+	//  @0x48912B; cveh @0x48AFA6 -> @0x48D43E; cbik @0x484086 -> @0x486A04]
+	if (world.ai.for_handle(veh.handle) == nullptr) {
+		veh.engine_flags |= kEntityFlagMatrixBuilt;
+		return;
+	}
 	// The bike's chase reads the up.z of the mover-entry matrix, built before
 	// the carrier follow [orig: Entity_UpdateLightVehiclePhysics @0x484039].
 	const int32_t entry_up_z16 =
@@ -2253,14 +2388,20 @@ void VehicleSystem::ground_client_tick(Entity &veh, const VehicleTraits &traits)
 	// Register mirror / local-driver gate (see the watercraft mirror note).
 	if (Entity *local_driver =
                 resolve_local_vehicle_controller(world, veh, traits)) {
-		stage_player_vehicle_input(world_, veh, *local_driver, traits);
-		// The controlling client halves its staged command against the
-		// received register every tick — the same longitudinal-only
-		// reconciliation as the boat; steer stays owned by current local
-		// LOOK/input [orig: ground @0x48bbef; bike @0x484dad —
-		// [136] = ([136] + [177]) >> 1].
-		m.cmd_speed = io::bam_sar(
-                io::bam_add(m.cmd_speed, m.net_recv_speed), 1);
+		// The driving client parks a parked hull as the authority does
+		// [orig: cveh @0x48B980..0x48B987 -> @0x48C002].
+		if (vehicle_hull_parked(veh)) {
+			vehicle_park_inputs(veh);
+		} else {
+			stage_player_vehicle_input(world_, veh, *local_driver, traits);
+			// The controlling client halves its staged command against the
+			// received register every tick — the same longitudinal-only
+			// reconciliation as the boat; steer stays owned by current local
+			// LOOK/input [orig: ground @0x48bbef; bike @0x484dad —
+			// [136] = ([136] + [177]) >> 1].
+			m.cmd_speed = io::bam_sar(
+                    io::bam_add(m.cmd_speed, m.net_recv_speed), 1);
+		}
     } else {
         m.cmd_speed = m.net_recv_speed;
         m.steer_target_bam = m.net_recv_steer_bam;
@@ -2271,7 +2412,7 @@ void VehicleSystem::ground_client_tick(Entity &veh, const VehicleTraits &traits)
     // [orig: ctan input gate @0x489522..0x489545 vs the ungated tail gates
     //  @0x48AAC4..0x48AADA and @0x48AD94..0x48AE3D; cveh @0x48B949..0x48B96C vs
     //  @0x48D38B..0x48D42B; cbik @0x486941..0x4869EA]
-    world.vehicles.tick_motor(veh, traits, nullptr, /*prediction=*/true);
+    world.vehicles.tick_motor(veh, traits, /*prediction=*/true);
 }
 
 } // namespace opennova::world

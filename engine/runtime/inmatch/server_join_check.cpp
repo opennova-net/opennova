@@ -3,7 +3,9 @@
 #include <runtime/inmatch/game_config.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
-#include <runtime/inmatch/server_ban_lists.h> // Server_ValidateJoinBans (29 / 30 / 31)
+#include <runtime/inmatch/server_ban_lists.h> // Server_ValidateJoinAccount (23..25, 28..31)
+#include <runtime/inmatch/server_flags.h>     // server_flag::kTeamChoice
+#include <runtime/inmatch/server_initial_state.h> // build_server_config_flags (the leg's gate)
 
 #include <base/io/crt_ftol.h>  // retail_atol (the VERSIONCRCSTRING compare)
 #include <base/io/strutil.h>   // iequals (Napi_StrCaseEqual)
@@ -136,13 +138,33 @@ uint32_t validate_spectator_join(const GameConfig &config,
 	return 0;
 }
 
-// The side-password leg follows spectator admission. TR is already narrowed
-// by the auth tag loader; -1 accepts either password (or an unlocked side).
-// [orig: Server_ValidatePlayerJoinRequest @0x5124A2..0x5125D4; the password
-//  compare Napi_StrCaseEqual @0x616e70]
-uint32_t validate_side_password(const GameConfig &config, const NapiNPConnection &conn) {
-	if ((config.mp_attributes & GameConfig::kMpAttribTeamChoose) == 0 ||
-			conn.link.spectator) return 0;
+// The side-password leg follows spectator admission, under BuildFlags' team-choose bit called
+// at the join: the cfg block's live mp-attribute word OR, in a team game, the create's copy, and
+// none out of session (D-NET-NEW-L1-41). So a team host created with TeamChoose keeps the leg
+// after an admin SET ChangeTeam 0, and a host whose SET ChangeTeam 1 armed the live word runs it
+// whatever its game type. TR is already narrowed by the auth tag loader; -1 accepts either
+// password (or an unlocked side).
+// [orig: Server_ValidatePlayerJoinRequest @0x512100 - CNapiServerConfig_BuildFlags(&g_NapiNPCtx)
+//  @0x512495, `test al, 4` @0x51249A, the spectator test @0x5124A2; the legs
+//  @0x5124AF..0x5125D4; the password compare Napi_StrCaseEqual @0x616e70]
+// The squad leg ahead of it (DPC 21: the password Server_GenerateSquadPassword
+// derives from g_SquadPasswordSeed and the joiner's key) runs only while
+// g_SquadPasswordRequired is set, and nothing reachable sets it or the seed:
+// every new round state stores 0 to both, and the toggle and the seed setter
+// are bodies with no reference anywhere in the image (no xref, no pointer), so
+// the leg and Server_SendSquadPasswordsToPlayers (which returns at a zero seed)
+// never run in JO (D-NET-167).
+// [orig: Server_ValidatePlayerJoinRequest @0x512100 - the required test
+//  @0x512432..0x51243D, the seed read @0x51243F, Server_GenerateSquadPassword
+//  called @0x512455; Server_InitNewRoundState @0x51C8E0 (ebx 0 @0x51C93E, the
+//  stores @0x51CAB0 / @0x51CAB6); the unreferenced Squad_SetPasswordSeed @0x4FDEA0
+//  (the store @0x4FDEA8) and Squad_TogglePasswordRequired @0x4FE890 (@0x4FE8AE);
+//  Server_SendSquadPasswordsToPlayers
+//  @0x50C950 (the seed test @0x50C964)]
+uint32_t validate_side_password(const NapiNPServerCtx &ctx, const GameConfig &config,
+		const NapiNPConnection &conn) {
+	if ((build_server_config_flags(ctx) & server_flag::kTeamChoice) == 0 || conn.link.spectator)
+		return 0;
 	const auto matches = [&](const std::string &password) {
 		return password.empty() || strutil::iequals(password, conn.join_password);
 	};
@@ -169,7 +191,7 @@ void read_join_cd_key_ids(NapiNPConnection &conn, const std::vector<uint8_t> &jo
 
 uint32_t Server_ValidatePlayerJoinRequest(const GameConfig &config, NapiNPServerCtx *ctx,
 		NapiNPConnection &conn, const std::vector<NapiNPConnection> &roster,
-		const std::vector<uint8_t> &join_payload, bool pcid_decrypted) {
+		const std::vector<uint8_t> &join_payload) {
 	const TitleIdentity *title = ctx != nullptr ? ctx->np_protocol.identity : nullptr;
 	uint32_t reject_dpc = validate_join_environment(conn.join_environment, title_join_build(title));
 	if (reject_dpc == 0 && ctx != nullptr)
@@ -180,10 +202,10 @@ uint32_t Server_ValidatePlayerJoinRequest(const GameConfig &config, NapiNPServer
 		reject_dpc = validate_join_request(config, join_payload);
 	if (reject_dpc == 0)
 		reject_dpc = validate_spectator_join(config, conn, roster);
-	if (reject_dpc == 0)
-		reject_dpc = validate_side_password(config, conn);
 	if (reject_dpc == 0 && ctx != nullptr)
-		reject_dpc = Server_ValidateJoinBans(*ctx, conn, pcid_decrypted); // 29 / 30 / 31
+		reject_dpc = validate_side_password(*ctx, config, conn);
+	if (reject_dpc == 0 && ctx != nullptr)
+		reject_dpc = Server_ValidateJoinAccount(*ctx, conn); // 23 / 24 / 25 / 29 / 30 / 28 / 31
 	return reject_dpc;
 }
 

@@ -323,7 +323,7 @@ RID NvgViewDevice::pipeline_for(RenderingDevice *p_rd, int64_t p_format, Blend p
 	TypedArray<Ref<RDPipelineColorBlendStateAttachment>> attachments;
 	attachments.push_back(attachment);
 	blend->set_attachments(attachments);
-	const RID pipeline = p_rd->render_pipeline_create(shader_, p_format,
+	const RID pipeline = create_rd_render_pipeline(p_rd, shader_, p_format,
 			RenderingDevice::INVALID_FORMAT_ID, RenderingDevice::RENDER_PRIMITIVE_TRIANGLE_STRIPS,
 			raster, multisample, depth, blend);
 	if (pipeline.is_valid())

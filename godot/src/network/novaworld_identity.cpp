@@ -1,5 +1,6 @@
 #include "network/novaworld_identity.h"
 
+#include <formats/gamecfg/game_cfg.h> // gamecfg::display_size
 #include <net/novaworld/lobby_identity.h>
 
 #include <godot_cpp/classes/display_server.hpp>
@@ -14,7 +15,7 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -52,23 +53,56 @@ LocaleCodes locale_codes(std::string locale) {
 	return out;
 }
 
-std::string dimensions(const Vector2i &size) {
-	return std::to_string(size.x) + "x" + std::to_string(size.y);
+// The boot's sample of the NWHWI device facts (sample_device_identity), held for the process.
+std::optional<opennova::HardwareIdentity> &device_identity() {
+	static std::optional<opennova::HardwareIdentity> sample;
+	return sample;
 }
 
-Vector2i usable_size(Vector2i preferred, Vector2i fallback) {
-	if (preferred.x > 0 && preferred.y > 0) return preferred;
-	if (fallback.x > 0 && fallback.y > 0) return fallback;
-	return Vector2i(1920, 1080);
+// The NWHWI device facts (engine HardwareIdentity, make_nwhwi): on Windows the engine's reads,
+// retail's own (read_display_adapter on the cfg's hw3d_deviceno, read_primary_screen_size);
+// elsewhere the renderer's adapter name and memory and the display server's primary screen stand
+// in. The physical memory is the OS's. A failed DxDiag query leaves the display memory 0.
+opennova::HardwareIdentity read_device_identity(const opennova::gamecfg::GameCfg &cfg) {
+	opennova::HardwareIdentity hw;
+	if (!opennova::read_display_adapter(static_cast<uint32_t>(cfg.hw3d_deviceno), hw)) {
+		if (RenderingServer *rendering = RenderingServer::get_singleton()) {
+			hw.adapter_description = to_std(rendering->get_video_adapter_name());
+			hw.has_adapter = !hw.adapter_description.empty();
+			if (RenderingDevice *device = rendering->get_rendering_device()) {
+				uint64_t video_memory = device->get_device_total_memory();
+				if (video_memory == 0) video_memory = device->get_driver_total_memory();
+				// In retail's 32-bit view, as the engine's read gives it (wow64_display_memory_mb).
+				hw.display_memory_mb =
+						opennova::wow64_display_memory_mb(static_cast<int64_t>(video_memory >> 20u));
+			}
+		}
+	}
+	opennova::read_total_physical_memory(hw.total_phys_bytes);
+	const Vector2i desktop = primary_desktop_size();
+	hw.desktop_width = desktop.x;
+	hw.desktop_height = desktop.y;
+	return hw;
 }
 
 } // namespace
 
-opennova::LobbyIdentityParams collect_lobby_identity_params(uint32_t client_index,
-		uint32_t client_key) {
+Vector2i primary_desktop_size() {
+	int32_t width = 0;
+	int32_t height = 0;
+	if (opennova::read_primary_screen_size(width, height)) return Vector2i(width, height);
+	if (DisplayServer *display = DisplayServer::get_singleton())
+		return display->screen_get_size(DisplayServer::SCREEN_PRIMARY);
+	return Vector2i();
+}
+
+void sample_device_identity(const opennova::gamecfg::GameCfg &cfg) {
+	std::optional<opennova::HardwareIdentity> &sample = device_identity();
+	if (!sample) sample = read_device_identity(cfg);
+}
+
+opennova::LobbyIdentityParams collect_lobby_identity_params(const opennova::gamecfg::GameCfg &cfg) {
 	opennova::LobbyIdentityParams out;
-	out.client_index = client_index;
-	out.client_key = client_key;
 
 	OS *os = OS::get_singleton();
 	// The engine reads the locale trio where the retail APIs exist (Windows); elsewhere the
@@ -96,42 +130,27 @@ opennova::LobbyIdentityParams collect_lobby_identity_params(uint32_t client_inde
 		}
 	}
 
+	// NWHWI at the connect only formats: the boot's device facts (a process that skipped the boot's
+	// sample takes it here, once) and game.cfg's display mode now.
+	sample_device_identity(cfg);
+	opennova::HardwareIdentity hw = *device_identity();
+	opennova::gamecfg::display_size(cfg, hw.desktop_width, hw.desktop_height, hw.display_width,
+			hw.display_height);
+	out.nwhwi = opennova::make_nwhwi(hw);
+
+	// The stand-in tokens' machine words take the renderer's adapter name (the model name, then
+	// "OpenNova", where it has none).
 	RenderingServer *rendering = RenderingServer::get_singleton();
-	std::string adapter_name;
-	uint64_t video_memory_mib = 0;
-	uint64_t max_texture_size = 2048;
-	if (rendering) {
-		adapter_name = to_std(rendering->get_video_adapter_name());
-		if (RenderingDevice *device = rendering->get_rendering_device()) {
-			uint64_t video_memory = device->get_device_total_memory();
-			if (video_memory == 0) video_memory = device->get_driver_total_memory();
-			video_memory_mib = video_memory >> 20u;
-			const uint64_t limit = device->limit_get(RenderingDevice::LIMIT_MAX_TEXTURE_SIZE_2D);
-			if (limit > 0 && limit < static_cast<uint64_t>(std::numeric_limits<int32_t>::max())) {
-				max_texture_size = limit;
-			}
-		}
-	}
+	std::string adapter_name =
+			rendering ? to_std(rendering->get_video_adapter_name()) : std::string();
 	if (adapter_name.empty() && os) adapter_name = to_std(os->get_model_name());
 	if (adapter_name.empty()) adapter_name = "OpenNova";
 	std::replace(adapter_name.begin(), adapter_name.end(), '$', '_');
 
-	Vector2i window_size;
-	Vector2i screen_size;
-	if (DisplayServer *display = DisplayServer::get_singleton()) {
-		window_size = display->window_get_size();
-		screen_size = display->screen_get_size();
-	}
-	window_size = usable_size(window_size, screen_size);
-	screen_size = usable_size(screen_size, window_size);
-	out.nwhwi = adapter_name + "$" + std::to_string(video_memory_mib) + "$"
-			+ std::to_string(max_texture_size) + "$" + dimensions(window_size) + "$"
-			+ dimensions(screen_size);
-
-	// Retail derives these telemetry-only tokens from stable volume/MAC data.
-	// Godot exposes a platform-stable opaque ID instead; hash it before applying
-	// the existing fixed-length A-Z encoding so raw machine identifiers never
-	// enter the wire or the portable protocol library.
+	// Retail derives these telemetry-only tokens from stable volume/MAC data. Off
+	// Windows, Godot's platform-stable opaque ID stands in: hashed into the words
+	// retail's inputs would supply, then retail's own encoders (engine
+	// fallback_machine_tokens), so no raw machine identifier reaches the wire.
 	std::string stable_identity = os ? to_std(os->get_unique_id()) : std::string();
 	if (stable_identity.empty() && os) {
 		stable_identity = to_std(os->get_processor_name()) + "|" + to_std(os->get_model_name());

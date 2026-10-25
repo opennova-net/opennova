@@ -1,5 +1,6 @@
 #pragma once
 
+#include <godot_cpp/variant/aabb.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
@@ -107,6 +108,19 @@ public:
 	// triangle-strip batches through kWaterStripIndexTable
 	// (engine: formats/env/env_water_render.h).
 	PackedInt32Array strip_indices() const;
+
+	// The last march as the bytes of the surface the arrays above make (the
+	// RenderingServer's own packing of VERTEX, COLOR, TEX_UV and the three
+	// RGBA_FLOAT customs, uncompressed): each vertex's position as three
+	// floats, and its attributes in one 60-byte record (the colour as four
+	// bytes truncated from channel * 255, the UV pair, the three customs'
+	// floats), with the AABB the server computes over the positions. The
+	// strip's surface is rewritten from these in place while the march keeps
+	// its row count (Water's beauty strip, D-NET-NEW-LF-22).
+	static constexpr int kStripVertexStride = 12;
+	static constexpr int kStripAttributeStride = 60;
+	void strip_surface_bytes(PackedByteArray &r_vertices, PackedByteArray &r_attributes,
+			AABB &r_aabb) const;
 };
 
 } // namespace godot

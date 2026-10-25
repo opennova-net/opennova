@@ -18,11 +18,15 @@ namespace godot {
 // devtools/scripted_input.h carries the schedule and its timing rules): a
 // probe instrument, inert until a script is armed. Attached at the device
 // seam (ControlsModel::set_scripted_input), its held tokens read held like
-// keyboard slots; the input router steps it once per frame before its device
-// sample and feeds its look pixels through the mouse-motion path, under the
-// same gates the real mouse passes. Compiled in every flavour, as the
-// debug-control automation rows are; only the source-only scenario_play probe
-// arms it.
+// keyboard slots; the input router steps it in every input frame (the
+// frame's sample and each later tick's, at the logic tick it runs as) before
+// that frame's device sample, and hands its look steps to the session as
+// axis input at their own tick (MissionFrameInput.set_look_delta), under
+// the same gates the real mouse passes; the seam replays its typed
+// characters as keystrokes in that input frame
+// (ControlsModel::advance_scripted_input). Compiled in
+// every flavour, as the debug-control automation rows are; only the
+// source-only scenario_play probe arms it.
 class ScriptedInput : public RefCounted {
 	GDCLASS(ScriptedInput, RefCounted)
 
@@ -37,7 +41,8 @@ public:
 
 	// The shared script's "steps" array as JSON parses it: each step an
 	// object with an integral "tick" and exactly one of "down" / "up" /
-	// "press" (an integral action code), "look_px" ([dx, dy]) or "end"
+	// "press" (an integral action code), "look_px" ([dx, dy]), "char" (a
+	// one-character string: backspace, return or printable ASCII) or "end"
 	// (true); other keys are ignored. ERR_INVALID_PARAMETER with get_error()
 	// naming the step when the shape or the engine's validation refuses it.
 	Error load_steps(const Array &p_steps);

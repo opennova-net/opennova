@@ -120,11 +120,19 @@ void hud_layout_from_hudpos(const DefHudPosFile &file, HudLayout &out,
 	// [orig: HUD_ParseHudposToken @0x59FB3B..0x59FB84 -> dword_2723810/14/18].
 	out.breath_time = pos_record2(hud.breath_time[0], hud.breath_time[1]);
 	out.breath_time.align = hud.breath_time[2];
+	// CONNECTSTATUS x, y, align; STARTTIMER x, y, w, h (hud_frame.h HudLayout).
+	out.connect_status = pos_record2(hud.connect_status[0], hud.connect_status[1]);
+	out.connect_status.align = hud.connect_status[2];
+	for (size_t i = 0; i < out.start_timer.size(); ++i) out.start_timer[i] = hud.starttimer[i];
 	// LFP_FLAGS — the AAS zone status panel's anchor (retail g_HUDZonePanelX/Y,
 	// written by the hudpos parse @0x5a0563/@0x5a057b).
 	out.lfp_anchor_x = hud.lfp_flags[0];
 	out.lfp_anchor_y = hud.lfp_flags[1];
 	out.lfp_anchor_present = true;
+	// LFP_TAKEOVERDLG — the takeover dialog's anchor (retail
+	// g_HUDLfpTakeoverDlgX/Y, written by the hudpos parse @0x5a05a7/@0x5a05bf).
+	out.lfp_takeover_x = hud.lfp_takeover_dlg[0];
+	out.lfp_takeover_y = hud.lfp_takeover_dlg[1];
 	// HUDVEHSTANCEPOS — the vehicle panel's base before the stance offset.
 	out.veh_stance_pos = pos_record2(hud.veh_stance_pos[0], hud.veh_stance_pos[1]);
 	out.clip_pos = pos_record2(hud.clip_pos[0], hud.clip_pos[1]);

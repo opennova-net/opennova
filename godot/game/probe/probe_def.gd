@@ -243,6 +243,13 @@ static func _build_definitions() -> Array[ProbeDef]:
 				RUNTIME + "world_reveal_probe.gd", {
 					"timeout_ms": { "type": "integer", "minimum": 1000, "default": 60000 },
 				}, [], false, true, 120_000),
+		ProbeDef.make("load_timeline",
+				"The last mission load's timing (GameWorld.last_load_timeline()): its label, "
+				+ "total ms and top-20 summary, each span's name, depth, end and duration in "
+				+ "microseconds, and the ticks_usec and unix ms clocks at the read, which put each "
+				+ "span on a capture's clock; a failed load keeps its timeline too. An instrument "
+				+ "that changes nothing.",
+				RUNTIME + "load_timeline_probe.gd", {}, [], false, false, 60_000),
 
 		ProbeDef.make("perf_sample",
 				"Sample the shell's frame-time counters (world tick legs, the audio "
@@ -263,7 +270,7 @@ static func _build_definitions() -> Array[ProbeDef]:
 				+ "reflection, particle tick, handlers, _process). Fails on a firing regression.",
 				PERF + "perf_fire_probe.gd", {
 					"pose_json": { "type": "string", "default": "" },
-					"look_dy": { "type": "number", "default": 120.0 },
+					"look_dy": { "type": "number", "default": 15.0 },
 					"fire_seconds": { "type": "number", "minimum": 0.1, "default": 3.0 },
 					"baseline_only": { "type": "boolean", "default": false },
 					"weapon": { "type": "string", "default": "" },
@@ -288,6 +295,17 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"show_overlay": { "type": "boolean", "default": false },
 					"output": { "type": "string", "default": "" },
 				}, [], true, true, 1_200_000),
+		ProbeDef.make("perf_round_end",
+				"The round-end frame breakdown: drain FrameStats once per frame and, at each "
+				+ "round end (the match outcome or the S2C 0x1D header), record the frames "
+				+ "around it with every span; waits through the rotation for `rounds` round "
+				+ "ends and writes one JSON record (headless lacks only the draw legs).",
+				PERF + "perf_round_end_probe.gd", {
+					"rounds": { "type": "integer", "minimum": 1, "default": 3 },
+					"frames_before": { "type": "integer", "minimum": 0, "default": 20 },
+					"frames_after": { "type": "integer", "minimum": 1, "default": 90 },
+					"output": { "type": "string", "default": "" },
+				}, [], false, true, 1_800_000),
 		ProbeDef.make("frame_stats",
 				"The F3 Stats acceptance probe: open the dev tools' Stats window, let the "
 				+ "capture fill, snapshot every row twice, pass when the load-bearing rows "
@@ -296,6 +314,15 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"settle_ms": { "type": "integer", "minimum": 0, "default": 3000 },
 					"window_ms": { "type": "integer", "minimum": 100, "default": 2000 },
 				}, [], true, true, 120_000),
+		ProbeDef.make("gpu_passes",
+				"The frame's GPU time per viewport and per pass: read the RenderingDevice's "
+				+ "captured timestamps every frame of the window, split them per viewport "
+				+ "(vp_begin_ / vp_end_) and charge each interval to the label that opens it "
+				+ "(the renderer's pass labels need the engine's --gpu-profile flag).",
+				PERF + "gpu_passes_probe.gd", {
+					"warmup_seconds": { "type": "number", "minimum": 0.0, "default": 3.0 },
+					"window_seconds": { "type": "number", "minimum": 0.5, "default": 10.0 },
+				}, [], true, true, 300_000),
 		ProbeDef.make("render_fixture_capture",
 				"The exact-pose production-world capture for one docs/render/render-fixtures-v1.json "
 				+ "fixture: boots its saved mission, realizes the catalog camera/TOD, captures "
@@ -402,11 +429,11 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"output_dir": { "type": "string", "default": "" },
 				}, [], true, false, 120_000),
 		ProbeDef.make("retail_parity_visual",
-				"The D-HUD-11 / D-ITEM-16 / D-ITEM-17 annotated stages through the public "
+				"The D-HUD-11 / D-ITEM-16 annotated stages through the public "
 				+ "runtime/presentation seams: attach (the attach-label gate), debris "
-				+ "(collision-triangle section debris), glass (glass userpoint shatter).",
+				+ "(collision-triangle section debris).",
 				STAGE + "retail_parity_visual_probe.gd", {
-					"mode": { "type": "string", "enum": ["attach", "debris", "glass"] },
+					"mode": { "type": "string", "enum": ["attach", "debris"] },
 					"output_dir": { "type": "string", "default": "" },
 				}, ["mode"], true, false, 120_000),
 		ProbeDef.make("loading_screen_stage",
@@ -481,7 +508,7 @@ static func _build_definitions() -> Array[ProbeDef]:
 				RUNTIME + "fp_impact_probe.gd", {
 					"weapon": { "type": "string", "default": "" },
 					"walk_frames": { "type": "integer", "minimum": 0, "default": 120 },
-					"look_px": { "type": "number", "default": 300.0 },
+					"look_px": { "type": "number", "default": 37.5 },
 					"burst_frames": { "type": "integer", "minimum": 1, "default": 20 },
 					"output_dir": { "type": "string", "default": "" },
 				}, [], true, true, 300_000),
@@ -515,6 +542,15 @@ static func _build_definitions() -> Array[ProbeDef]:
 				+ "the witnessed colors, captured over the loaded mission.",
 				RUNTIME + "hud_killfeed_probe.gd", {
 					"output_dir": { "type": "string", "default": "" },
+				}, [], true, true, 300_000),
+		ProbeDef.make("hud_pass_call_site",
+				"The HUD pass's call site (D-NET-NEW-L8-50): per state, the frame's "
+				+ "hud_pass_called verdict, the HUD's element count and a PNG: live play, the F1 "
+				+ "help held open through the real key path, the debug on-foot chase view, live "
+				+ "play again and, with `kill`, the local player's death; the pass is called "
+				+ "only in live play.",
+				RUNTIME + "hud_pass_call_site_probe.gd", {
+					"kill": { "type": "boolean", "default": false },
 				}, [], true, true, 300_000),
 		ProbeDef.make("vm_bone_dump",
 				"The first-person viewmodel bone dump: equip `weapon`, write the rig's "
@@ -662,14 +698,124 @@ static func _build_definitions() -> Array[ProbeDef]:
 				"Play one shared network-parity scenario (the JSON the retail onHook driver "
 				+ "consumes: setup pose, then retail action-code steps keyed on the logic "
 				+ "tick) through the scripted input device at the binding seam, on any role: "
-				+ "the setup pose by teleport_local_player (host, single player) or "
-				+ "apply_local_pose (joiner), then the steps; the verdict carries the start "
+				+ "the setup pose by apply_local_pose (the onHook bridge's ApplyPose write, "
+				+ "every role), then the steps; the verdict carries the start "
 				+ "and end logic ticks and each step's applied tick. `wait` false returns once "
 				+ "the start latched; a run with neither `scenario` nor `path` collects the "
-				+ "attached scenario.",
+				+ "attached scenario. `aim_read` (a pool-0 handle, alone) plays nothing and "
+				+ "answers the runner's aim_at reads: the local player's heading BAM, its and "
+				+ "the handle's mission positions, the session's mouse sensitivity word. "
+				+ "`place_read` (true, alone) answers the runner's window-open wait: the "
+				+ "local player's mission position and heading BAM at this logic tick.",
 				NET + "scenario_play_probe.gd", {
 					"scenario": { "type": "object", "default": {} },
 					"path": { "type": "string", "default": "" },
 					"wait": { "type": "boolean", "default": true },
+					"aim_read": { "type": "integer", "minimum": -1, "maximum": 4095,
+							"default": -1 },
+					"place_read": { "type": "boolean", "default": false },
 				}, [], false, true, 1_800_000),
+		ProbeDef.make("stage_slot",
+				"The parity runner's slot staging on an OpenNova host: each `staging` entry "
+				+ "{slot, position_bms} writes the three Position words of the body that player "
+				+ "slot holds (the authority-side twin of the onHook bridge's apply_pose_slot); "
+				+ "position only, any other field refused; a result per entry, passing only if "
+				+ "every entry staged. `stage_tick` above 0 stages on the first frame whose "
+				+ "logic tick (from the mission start) reaches it, at most `stage_tolerance` "
+				+ "past it, and fails past that (the runner's staging_tick).",
+				NET + "stage_slot_probe.gd", {
+					"staging": { "type": "array", "minItems": 1, "items": { "type": "object" } },
+					"stage_tick": { "type": "integer", "minimum": 0, "maximum": 65535,
+							"default": 0 },
+					"stage_tolerance": { "type": "integer", "minimum": 0, "maximum": 64,
+							"default": 0 },
+				}, ["staging"], false, true, 60_000),
+		ProbeDef.make("use_press_trace",
+				"The USE readout (Simulation.debug_use_press_trace): the engine's last 64 USE "
+				+ "records from `from_seq`. Each press: the arm it took, the local body's Flags "
+				+ "& 0x800 / 0x400000 / 0x200, its mount, the active slot's current / next "
+				+ "action. Each release's toggle gate. Each joiner seat scan: the candidate, "
+				+ "its pick and whether the 0x26 queued, with the runtime's framed-0x26 count "
+				+ "to show it left. `watch_ms` keeps polling each frame. `watch_handle` names one "
+				+ "registry entity whose scan inputs every record carries while the run lasts "
+				+ "(its Flags, its pool-1 table row and radius, the local body's slice "
+				+ "membership); an instrument that changes nothing.",
+				NET + "use_press_trace_probe.gd", {
+					"from_seq": { "type": "integer", "minimum": 0, "default": 0 },
+					"watch_ms": { "type": "integer", "minimum": 0, "maximum": 590_000,
+							"default": 0 },
+					"watch_handle": { "type": "integer", "minimum": -1, "maximum": 65534,
+							"default": -1 },
+				}, [], false, true, 600_000),
+		ProbeDef.make("joiner_net_trace",
+				"The joiner net readout (Simulation.debug_joiner_net_trace): the engine's last "
+				+ "2048 client net frame records from `from_seq`. Each frame: its clocks (frame "
+				+ "tick, network tick, wall ms, loop), the send countdown ahead of its step, the "
+				+ "dictated period, whether the block opened and the 0x0C left, the applied 0x0A "
+				+ "count; the 62-frame quality fold's inputs, terms, window and level; a 0x4C's "
+				+ "level. `watch_ms` keeps polling each frame. The verdict histograms the "
+				+ "countdown at each 0x0A receipt and each uplink's frames since the last one; "
+				+ "an instrument that changes nothing.",
+				NET + "joiner_net_trace_probe.gd", {
+					"from_seq": { "type": "integer", "minimum": 0, "default": 0 },
+					"watch_ms": { "type": "integer", "minimum": 0, "maximum": 590_000,
+							"default": 0 },
+				}, [], false, true, 600_000),
+		ProbeDef.make("model_list_dump",
+				"The model-list readout (Simulation.debug_mission_start_model_nodes): the "
+				+ "model-def list this mission's load froze, head first, foliage nodes "
+				+ "included: each node's file, mark, load index and page index, with the page's "
+				+ "count (a joiner's C2S 0x3D page, a host's S2C 0x68 wrap). `log_names` logs "
+				+ "each node; an instrument that changes nothing.",
+				NET + "model_list_dump_probe.gd", {
+					"log_names": { "type": "boolean", "default": false },
+				}, [], false, true, 120_000),
+		ProbeDef.make("body_trace",
+				"The body readout (Simulation.debug_body_trace): per logic tick, each of up to 8 "
+				+ "watched registry handles' (`watch_handles`, plus the local body's own with "
+				+ "`watch_local`) Position, velocity triple, Flags words, Health, seat, "
+				+ "+0x28 ground target and collision model instance; and the events on it: the "
+				+ "movement resolver's settle-tail ground probe (start, height, hit, the hit's "
+				+ "collision model), the collision force kick and a blast's damage leg. "
+				+ "`trigger_handle` keeps the window from `pre_ticks` before that entity's first "
+				+ "tick at Health <= 0 to `post_ticks` after, and ends the run there; an "
+				+ "instrument that changes nothing.",
+				NET + "body_trace_probe.gd", {
+					"watch_handles": { "type": "array", "maxItems": 8, "default": [],
+							"items": { "type": "integer", "minimum": 0, "maximum": 65534 } },
+					"watch_local": { "type": "boolean", "default": false },
+					"watch_ms": { "type": "integer", "minimum": 0, "maximum": 590_000,
+							"default": 60_000 },
+					"trigger_handle": { "type": "integer", "minimum": -1, "maximum": 65534,
+							"default": -1 },
+					"pre_ticks": { "type": "integer", "minimum": 0, "maximum": 3_100,
+							"default": 62 },
+					"post_ticks": { "type": "integer", "minimum": 0, "maximum": 3_100,
+							"default": 310 },
+				}, [], false, true, 600_000),
+		ProbeDef.make("join_screen",
+				"The join screen (pre.mnu PRE_GAME_MENU), driven as a player drives it, one "
+				+ "`op` a run. `state` reads only. `join` dials `address`:`port` from the "
+				+ "menus (`port` 0: the target's default), the `--lan-join` hook's dial with "
+				+ "no role answered, so a session offering a choice opens its panels. "
+				+ "`set_text` types `text` into GAME_PASSWORD or TEAM_PASSWORD. `press` "
+				+ "activates ACCEPT, BACK or ABORT_CANCEL through the screen's menu driver. "
+				+ "Either refuses a control whose pre.mnu window is hidden. The run then "
+				+ "waits up to `wait_ms` for `until` (open, closed, or a panel showing) and "
+				+ "returns the screen's read: open, the panel, the pre.mnu windows shown, the "
+				+ "MESSAGES line, both edits' text, the SPECTATE radio and the shell state.",
+				NET + "join_screen_probe.gd", {
+					"op": { "type": "string", "enum": ["state", "join", "set_text", "press"],
+							"default": "state" },
+					"address": { "type": "string", "default": "" },
+					"port": { "type": "integer", "minimum": 0, "maximum": 65535, "default": 0 },
+					"control": { "type": "string", "enum": ["", "GAME_PASSWORD",
+							"TEAM_PASSWORD", "ACCEPT", "BACK", "ABORT_CANCEL"], "default": "" },
+					"text": { "type": "string", "default": "" },
+					"until": { "type": "string", "enum": ["", "open", "closed", "progress",
+							"error", "game_password", "spectate", "spectator_password",
+							"team_password"], "default": "" },
+					"wait_ms": { "type": "integer", "minimum": 0, "maximum": 590_000,
+							"default": 0 },
+				}, [], false, false, 600_000),
 	]

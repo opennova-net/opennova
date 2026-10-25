@@ -551,13 +551,16 @@ void test_allammo_refuses_full_kit() {
     inv.pools[11] = 59;
     powerup_pickup(rig.world, ammo, rig.picker, rig.ctx(true));
     CHECK(rig.get(ammo) == nullptr);
-    // seed 90, the 30 loaded rounds return (120, the cap), a clip is drawn (90)
-    CHECK(inv.pools[11] == 90 && inv.slots[kRifleCombo].clip == 30);
+    // the 30 loaded rounds cleared, seed 90, a clip is drawn (60)
+    CHECK(inv.pools[11] == 60 && inv.slots[kRifleCombo].clip == 30);
 }
 
-// `allammo` on a populated local slot: the class pool re-seeds from the def,
-// the magazine returns and redraws, and the held weapon's FSM takes the redrawn
-// clip now (the next pump mirrors the FSM clip back into the inventory).
+// `allammo` on a populated local slot: the magazine is cleared, the class pool re-seeds
+// from the def and a clip is drawn, and the held weapon's FSM takes the redrawn clip now
+// (the next pump mirrors the FSM clip back into the inventory).
+// [orig: Entity_UpdateWeaponOverlayFrameState @0x4DC340 - WeaponSlots_ClearLoadedRounds
+//  called @0x4DC373 (@0x4DC3B1 for the local player without a slot), the seed @0x4DC387,
+//  the redraw @0x4DC38F]
 void test_allammo_refills_populated_slot() {
     Rig rig;
     const EntityHandle ammo = rig.spawn_powerup(3);
@@ -569,11 +572,45 @@ void test_allammo_refills_populated_slot() {
     inv.pools[11] = 0;
     rig.local->weapon.slot.clip = 3;
     powerup_pickup(rig.world, ammo, rig.picker, rig.ctx(true));
-    // seed 90, the 3 loaded rounds return (93), a 30-round clip is drawn (63)
-    CHECK(inv.pools[11] == 63);
+    // the 3 loaded rounds cleared, seed 90, a 30-round clip is drawn (60)
+    CHECK(inv.pools[11] == 60);
     CHECK(inv.slots[kRifleCombo].clip == 30);
     CHECK(rig.local->weapon.slot.clip == 30);
     CHECK(rig.world.out.powerup_grants.empty());
+}
+
+// D-NET-NEW-LI-28 (LI-s25 row 1): Entity_UpdateWeaponOverlayFrameState over the local player,
+// which the cheat rows' codes 120 and 121 run as the allammo pickup does: every loaded round
+// cleared, the pools seeded from the defs, every clip redrawn and the FSM taking the clip. And
+// under the infinite-ammo bit every pool read through the seat is the class's carry cap,
+// ahead of the class-1 leg. (Retail indexes g_AmmoClassMaxCarry unchecked; a class past the
+// table reading 0 is ours' bound, not a witnessed value.)
+// [orig: Entity_UpdateWeaponOverlayFrameState @0x4DC340 - WeaponSlots_ClearLoadedRounds
+//  @0x4DC3B1, WeaponSlots_SeedAmmoPoolsFromDefs @0x4DC3CF, WeaponSlots_RecalculateAmmoFromCapacity
+//  @0x4DC3E1; Entity_GetScoreValueBySlotType @0x5406E0 - `test g_DebugCheatFlags, 100h`
+//  @0x5406E3, g_AmmoClassMaxCarry @0x5406F4, the class-1 leg after it @0x540742]
+void test_weapon_overlay_refresh_and_the_cheat_caps() {
+    Rig rig;
+    WeaponInventory &inv = rig.local->inventory;
+    inv.slots[kRifleCombo].adm_index = 4;
+    inv.slots[kRifleCombo].clip = 3;
+    inv.equipped_combo = kRifleCombo;
+    inv.pools[11] = 7;
+    rig.local->weapon.slot.clip = 3;
+    rig.local->refresh_weapon_overlay();
+    // the 3 loaded rounds cleared, seed 90, a 30-round clip drawn (60)
+    CHECK(inv.pools[11] == 60 && inv.slots[kRifleCombo].clip == 30);
+    CHECK(rig.local->weapon.slot.clip == 30);
+    const Entity &player = *rig.get(rig.picker);
+    const WeaponAmmoSeat plain = entity_ammo_seat(rig.world, player);
+    CHECK(plain.cheat_carry_caps == nullptr);
+    CHECK(weapon_seat_pool(plain, 11, 5) == 5 && weapon_seat_pool(plain, 1, 5) == 5);
+    rig.world.rules.ignore_weapon_ammo_cost = true;
+    const WeaponAmmoSeat cheat = entity_ammo_seat(rig.world, player);
+    CHECK(cheat.cheat_carry_caps != nullptr);
+    CHECK(weapon_seat_pool(cheat, 11, 5) == 120 && weapon_seat_pool(cheat, 12, 5) == 90);
+    CHECK(weapon_seat_pool(cheat, 1, 5) == 6);
+    CHECK(weapon_seat_pool(cheat, 200, 5) == 0); // ours' bound past the cap table (unwitnessed)
 }
 
 // A row that refills AND heals, touched at full health by a remote player: the
@@ -611,8 +648,8 @@ void test_server_applies_remote_grants() {
     im::NapiNPConnection &conn = server.np_protocol.connection_list[0];
     conn.phase = im::ConnectionPhase::PlayerAdded;
     conn.link.owned_entity = remote;
-    conn.weapon_slots[static_cast<uint16_t>(kRifleCombo)].adm_index = 4;
-    conn.weapon_slots[static_cast<uint16_t>(kRifleCombo)].clip = 3;
+    rig.get(remote)->weapon_slots[static_cast<uint16_t>(kRifleCombo)].adm_index = 4;
+    rig.get(remote)->weapon_slots[static_cast<uint16_t>(kRifleCombo)].clip = 3;
     conn.reply.ammo_pools[11] = 0;
     im::NapiNPConnection &bystander = server.np_protocol.connection_list[1];
     bystander.phase = im::ConnectionPhase::PlayerAdded;
@@ -630,10 +667,11 @@ void test_server_applies_remote_grants() {
 
     im::Server_ApplyPowerupGrants(server.np_protocol.connection_list, rig.world);
     CHECK(rig.world.out.powerup_grants.empty());
-    // allammo: seed 90 + the 3 returned rounds - the 30-round redraw = 63,
-    // then the class grant adds 30 (cap 120)
-    CHECK(conn.reply.ammo_pools[11] == 93);
-    CHECK(conn.weapon_slots[static_cast<uint16_t>(kRifleCombo)].clip == 30);
+    // allammo: the 3 loaded rounds cleared, seed 90, the 30-round redraw = 60, then the
+    // class grant adds 30 (cap 120) [orig: Entity_UpdateWeaponOverlayFrameState @0x4DC340 -
+    //  WeaponSlots_ClearLoadedRounds called @0x4DC373 ahead of the seed @0x4DC387]
+    CHECK(conn.reply.ammo_pools[11] == 90);
+    CHECK(rig.get(remote)->weapon_slots[static_cast<uint16_t>(kRifleCombo)].clip == 30);
     CHECK(conn.reply.ammo_pools[13] == 4);
     CHECK(bystander.reply.ammo_pools[11] == 7);
     // The listen host's own player never routes through a grant.
@@ -887,14 +925,14 @@ void test_server_weapon_grant_fan() {
     im::ServerRemoteWeaponTables tables(server.np_protocol.connection_list);
     rig.world.remote_weapon_tables = &tables;
     // Full on its connection: refused.
-    conn.weapon_slots[static_cast<uint16_t>(kPistolCombo)].adm_index = 5;
-    conn.weapon_slots[static_cast<uint16_t>(kPistolCombo)].clip = 7;
+    rig.get(remote)->weapon_slots[static_cast<uint16_t>(kPistolCombo)].adm_index = 5;
+    rig.get(remote)->weapon_slots[static_cast<uint16_t>(kPistolCombo)].clip = 7;
     conn.reply.ammo_pools[12] = 14;
     powerup_pickup(rig.world, row, remote, rig.ctx(true));
     CHECK(rig.world.out.powerup_weapon_grants.empty());
     CHECK(rig.get(row) != nullptr && !rig.get(row)->hidden);
     // Short: granted, routed onto the connection.
-    conn.weapon_slots.clear();
+    rig.get(remote)->weapon_slots.clear();
     conn.reply.ammo_pools[12] = 0;
     powerup_pickup(rig.world, row, remote, rig.ctx(true));
     powerup_pickup(rig.world, row2, rig.picker, rig.ctx(true));
@@ -902,13 +940,13 @@ void test_server_weapon_grant_fan() {
     CHECK(rig.world.out.powerup_weapon_grants.size() == 2);
     im::Server_BroadcastWeaponOverlayUpdates(server, rig.world);
     CHECK(rig.world.out.powerup_weapon_grants.empty());
-    const auto landed = conn.weapon_slots.find(static_cast<uint16_t>(kPistolCombo));
-    CHECK(landed != conn.weapon_slots.end());
-    if (landed != conn.weapon_slots.end())
+    const auto landed = rig.get(remote)->weapon_slots.find(static_cast<uint16_t>(kPistolCombo));
+    CHECK(landed != rig.get(remote)->weapon_slots.end());
+    if (landed != rig.get(remote)->weapon_slots.end())
         CHECK(landed->second.adm_index == 5 && landed->second.clip == 7);
     CHECK(conn.reply.ammo_pools[12] == 14);
     // The listen host's own pickup wrote its live inventory, never a connection.
-    CHECK(host.weapon_slots.empty());
+    CHECK(rig.get(rig.picker)->weapon_slots.empty());
     CHECK(rig.local->inventory.slots[kPistolCombo].adm_index == 5);
     std::vector<opennova::WeaponPickupNotice> sent;
     opennova::replication::Datagram datagram;
@@ -982,6 +1020,7 @@ int main() {
     test_allammo_local();
     test_allammo_refuses_full_kit();
     test_allammo_refills_populated_slot();
+    test_weapon_overlay_refresh_and_the_cheat_caps();
     test_full_health_keeps_staged_grant();
     test_server_applies_remote_grants();
     test_placeholder_row_runs_nothing();

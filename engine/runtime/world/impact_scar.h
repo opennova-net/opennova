@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include <base/io/bam.h>
@@ -25,14 +26,18 @@ struct ProjectileHit;
 //  Scar_RenderCache @0x5CD830 under Scar_RenderAllCaches @0x5CDF70;
 //  g_ScarTable @0x8417A8 with its 32-byte texture-name strip @0x8413A8].
 //
-// The GLASS userpoint leg is a SEPARATE mechanism: when the struck model has
-// a GLASS userpoint of the 35-row surface-material table @0x841980 within the
-// row's radius of the hit, Terrain_SpawnSurfaceEffectsAtUserPoints @0x5CEA90
-// takes the projected-decal path (Scar_ProjectDecalOntoEntity @0x5CE4A0)
-// plus the four effects rolled on the table's MAIN probability column, and the
-// ring scar is SKIPPED. Every row keys a building model, so vehicle glass
-// always takes the ring scar. RESIDUAL (the one open item of this port): the
-// leg is unported, so a building-glass hit writes the ring scar instead.
+// The GLASS userpoint leg is a SEPARATE mechanism, tried first: GLASS1..GLASS4
+// in turn, the chain stopping at the first key that matched a userpoint; when
+// the struck model has a userpoint of the 35-row surface-material table
+// @0x841980 within the row's box of the hit, Terrain_SpawnSurfaceEffectsAtUserPoints
+// @0x5CEA90 takes the projected-decal path (Scar_ProjectDecalOntoEntity
+// @0x5CE4A0) plus the four effects rolled on the table's MAIN probability
+// column, and the ring scar is SKIPPED. Every row keys a building model, so
+// vehicle glass always takes the ring scar. Ported below as its stream-faithful
+// structure (the PRNG draws, the CRT reseeds, the per-entity decal list's
+// first-hit rule); the decal mesh itself (the render-LOD triangle walk into the
+// 1 MB scar pool) is presentation the engine does not build, and its pool
+// exhaustion and eviction are not modeled (the NARROWED remainder, D-ITEM-6).
 
 // The ring: 256 slots of 64 bytes behind a 4-byte owner id, with the cursor
 // dword after the slots [orig: the slot pointer `cache + 4 + (cursor << 6)`
@@ -300,6 +305,27 @@ struct ScarRing {
 	void advance_cursor();
 };
 
+// THE PROJECTED DECAL LIST — a pool-2 entity's "SCAR RNDR INFO" head (+0x228)
+// and its "SCAR RDATA" nodes, each linked at the head with its origin (+4..+0xC),
+// texture (+0) and radius (+0x10), plus the entity's last-decal stamp (+0x22C,
+// g_CurrentTick, the eviction scan's key) [orig: Scar_ProjectDecalOntoEntity
+// @0x5CE4A0 - the stamp @0x5CE646, the head @0x5CE655..0x5CE66B, the node
+// @0x5CE67E..0x5CE6A0, its words @0x5CE6D6..0x5CE6F4]. Only the origins decide a
+// draw (Scar_HasProjectedDecalAt's first-hit rule); the node's mesh (its faces
+// and vertices) is the renderer's and is not held here. Keyed by the owner's
+// handle and registry spawn id, as the rings are.
+struct ProjectedDecal {
+	int32_t origin[3] = {0, 0, 0}; // Q16, the decal's world origin
+	int texture = 0;                // the scar texture strip
+	int32_t radius_q16 = 0;
+};
+struct ProjectedDecalList {
+	EntityHandle owner;
+	uint64_t lease = 0;
+	uint32_t stamp_tick = 0;             // [orig: entity+0x22C]
+	std::vector<ProjectedDecal> nodes;   // head first [orig: node+0x9C next]
+};
+
 // The 128-ring entity cache plus the shared world ring. Entity rings are
 // keyed by the owner's handle AND its registry spawn id (retail keys by entity
 // pointer with no eviction; a reused slot therefore inherited a dead owner's
@@ -323,13 +349,21 @@ public:
 	// owner dword of every shared-ring slot this entity wrote (256 slots at
 	// 0x2BDB7FC, stride 64) and memsets the entity's own ring, releasing it;
 	// called from Entity_Destroy @0x43e8e4 and Entity_AttachCarriedObject @0x43c155].
+	// It frees the entity's projected decals too [orig: the
+	// Scar_FreeProjectedDecals call @0x5CCF13].
 	void clear_entity(EntityHandle owner);
 	void reset();
 	int leased_count() const;
 
+	// The owner's projected-decal list (null when it has none, or the handle's
+	// list belongs to an earlier spawn); `decals_for` creates it.
+	const ProjectedDecalList *find_decals(EntityHandle owner, uint64_t lease) const;
+	ProjectedDecalList &decals_for(EntityHandle owner, uint64_t lease);
+
 private:
 	std::vector<ScarRing> rings_; // kScarCacheEntities
 	ScarRing world_;
+	std::vector<ProjectedDecalList> decals_;
 };
 
 // Build the quad basis for a Q16 unit normal: the witnessed tangent ladder,
@@ -338,14 +372,112 @@ private:
 void scar_basis(const int32_t normal_q16[3], uint16_t spin_word,
 		int32_t out_a[3], int32_t out_b[3]);
 
-// Write one scar for a round stop on `target` with the ammo's `scar_type`.
-// Applies the kind and def gates, the water/husk/face gates, selects the ring
-// by pool, stores the slot in the ring's frame (section-local through the
-// entity's live section matrix for entity rings, world space for the shared
-// ring), draws the spin word and then — for the normal scar only — the texture
-// word from the SHARED mission stream, and appends at the ring cursor. Returns
-// true when a slot was written. [orig: Impact_SpawnGlassEffectsOrScar @0x5CF1B0
-// -> Scar_AddEntry @0x5CC830]
+// ---------------------------------------------------------------------------
+// THE BULLET GLASS LEG
+// ---------------------------------------------------------------------------
+
+// The scar table g_ScarTable @0x8417A8: {id, first, last, radius} per id, the
+// texture range inclusive into the strip, then a zero row @0x8418A8 (no -1
+// terminator: an id the table lacks walks on into g_SurfaceEffectProbTable
+// @0x8418B8; every id a shipped ammo kind or GLASS row passes is listed).
+struct ScarTableRow {
+	int32_t id;
+	int32_t first;
+	int32_t last;
+	int32_t radius_q16;
+};
+inline constexpr ScarTableRow kScarTable[] = {
+	{1, 0, 3, 0x2000}, {2, 4, 4, 0x20000}, {3, 5, 8, 0x3CCCC}, {4, 9, 10, 0x29999},
+	{7, 11, 12, 0x79999}, {8, 13, 14, 0x33333}, {9, 15, 16, 0x23333}, {10, 17, 18, 0x46666},
+	{11, 19, 20, 0x140000}, {12, 21, 22, 0xCCCCC}, {13, 23, 23, 0xB3333}, {14, 17, 18, 0x4B851},
+	{15, 24, 25, 0x10CCCC}, {16, 24, 25, 0xE147A}, {17, 26, 26, 0x40000}, {18, 27, 27, 0x1000},
+	{0, 0, 0, 0}};
+
+// The id's texture strip, drawing `first + PRNG_Next16() % (last - first + 1)`
+// from the shared mission stream only when the range spans more than one
+// texture; -1 for an id the table lacks (retail's walk past the zero row, never
+// reached by shipped data). [orig: Scar_TextureForId @0x5CC360 (the byte
+// argument; the walk @0x5CC36E..0x5CC382; the draw @0x5CC393..0x5CC3A2)]
+int scar_texture_for_id(World &world, uint8_t id);
+
+// One row of the 192-byte surface-material table @0x841980 (35 rows, the
+// sentinel @0x8433C0): the key @0, the userpoint name @16, the model's GHDR
+// name @32, the scar id @176 and the box half-extent @180. Every shipped row
+// carries the same four effects (@48 / @80 / @112 / @144:
+// kSurfaceMaterialEffects) and sets +184 (the origin is the userpoint) and +188
+// (the projected decal, not a ring scar), so those words are not carried.
+struct SurfaceMaterialRow {
+	const char *key;
+	const char *userpoint;
+	const char *model;
+	uint8_t scar_id;
+	int32_t radius_q16;
+};
+inline constexpr int kSurfaceMaterialRowCount = 35;
+extern const SurfaceMaterialRow kSurfaceMaterialTable[kSurfaceMaterialRowCount];
+inline constexpr const char *kSurfaceMaterialEffects[4] = {
+	"Effect_BldGlassExp", "Effect_BldPaperExp", "Effect_BldFireExp", "Effect_BldDustExp"};
+// The first row whose key and model name both match, ASCII case-insensitively.
+// [orig: Terrain_FindSurfaceMaterialEntry @0x5CC280 (the stricmp pair @0x5CC2BD)]
+const SurfaceMaterialRow *find_surface_material_row(const char *key, const std::string &model);
+
+// g_SurfaceEffectProbTable @0x8418B8: 40-byte rows {name[32], main, alt}.
+struct SurfaceEffectProbRow {
+	const char *name;
+	float main;
+	float alt;
+};
+inline constexpr SurfaceEffectProbRow kSurfaceEffectProbTable[4] = {
+	{"Effect_BldGlassExp", 1.0f, 0.33f}, {"Effect_BldPaperExp", 0.1f, 0.05f},
+	{"Effect_BldFireExp", 0.2f, 0.05f}, {"Effect_BldDustExp", 0.33f, 0.1f}};
+
+// The effect's roll: an empty name or one the table lacks passes with no draw;
+// a listed one draws a seed from the shared stream and reseeds the effects CRT
+// with it (the render/effects owner of D-NET-115's split, base/crt/crt_rng.h),
+// then draws the roll `PRNG_Next16() % 100`, passing when it is at or under
+// ftol(p * 100.0) of the main (or alt) column. [orig:
+// Effect_RollSurfaceEffectProbability @0x5CC1F0 (the walk @0x5CC20B..0x5CC224,
+// the seed @0x5CC22E, srand @0x5CC234, the roll @0x5CC24E, the column
+// @0x5CC250..0x5CC257, `fmul flt_7C4654` and the truncation @0x5CC25A..)]
+bool effect_roll_surface_probability(World &world, const char *name, bool use_alt);
+
+// The first-hit rule: the id's texture is drawn (and dropped) first, then the
+// list is searched for a node at exactly this origin. [orig:
+// Scar_HasProjectedDecalAt @0x5CC700 (the draw @0x5CC705, the walk
+// @0x5CC718..0x5CC74D)]
+bool scar_has_projected_decal_at(World &world, const Entity &entity, const int32_t origin[3],
+		uint8_t scar_id);
+
+// The decal's decision structure: a pool-2 entity with a loaded model, an
+// origin above the water plane and a hit on a face that may scar; no node at
+// the origin yet (the first-hit rule); then the entity's stamp, a node at the
+// head and the node's texture draw. True when a decal node was added.
+// [orig: Scar_ProjectDecalOntoEntity @0x5CE4A0 (the gates @0x5CE4C9..0x5CE5A2,
+//  the rule @0x5CE624, the stamp @0x5CE646, the node @0x5CE67E..0x5CE6A0, the
+//  return @0x5CEA28..0x5CEA3A)]
+bool scar_project_decal_onto_entity(World &world, const Entity &entity, const ProjectileHit &hit,
+		const int32_t origin[3], uint8_t scar_id);
+
+// One GLASS key's walk over the struck model's userpoints: the row for the key
+// and the model's name, the ammo kind's and the row's texture gates, then for
+// each userpoint of the row's name whose world position lies within the row's
+// box of the hit: one match, the decal, and when it was added the four effect
+// rolls and their spawns. Returns the match count. [orig:
+// Terrain_SpawnSurfaceEffectsAtUserPoints @0x5CEA90]
+int surface_effects_at_userpoints(World &world, const char *key, const Entity &entity,
+		const ProjectileHit &hit, int scar_type);
+
+// The impact's mark for a round stop on `target` with the ammo's `scar_type`:
+// the kind and def gates, then the GLASS1..GLASS4 chain (the first key that
+// matches ends it and no ring scar follows), then for every kind but 2 the ring
+// scar: the water/husk/face gates, the ring by pool, the slot in the ring's
+// frame (section-local through the entity's live section matrix for entity
+// rings, world space for the shared ring), the spin word and then (for the
+// normal scar only) the texture word from the SHARED mission stream, appended
+// at the ring cursor. True when a GLASS key matched or a ring slot was written.
+// [orig: Impact_SpawnGlassEffectsOrScar @0x5CF1B0 (the chain @0x5CF217 /
+//  @0x5CF23A / @0x5CF259 / @0x5CF278, the kind-2 skip @0x5CF289) ->
+//  Scar_AddEntry @0x5CC830]
 bool scar_add_entry(World &world, const ProjectileHit &hit, const Entity &target,
 		int scar_type);
 

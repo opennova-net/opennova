@@ -3,10 +3,15 @@
 #include <cstdint>
 
 #include <godot_cpp/classes/compositor.hpp>
+#include <godot_cpp/classes/compositor_effect.hpp>
+#include <godot_cpp/classes/world_environment.hpp>
+#include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/callable_method_pointer.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include "env/water.h"
+#include "render/world_environment_lookup.h"
 
 namespace godot {
 namespace {
@@ -113,6 +118,13 @@ void EnvironmentCubeCapture::set_terrain_data(
 		const Ref<TerrainData> &p_data) {
 	terrain_data_ = p_data;
 	force_pending_ = true;
+	// The node outlives a mission: no frame of this one samples the last one's
+	// cube; its first capture readies it again.
+	cube_ready_ = false;
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (rs != nullptr && !globals_held_) {
+		_write_global(rs, "opennova_environment_cube_ready", false);
+	}
 }
 
 int64_t EnvironmentCubeCapture::get_device_publish_count() const {
@@ -153,6 +165,7 @@ void EnvironmentCubeCapture::_notification(int p_what) {
 		force_pending_ = true;
 	} else if (p_what == NOTIFICATION_READY) {
 		_ensure_capture_nodes();
+		_ensure_draw_effect();
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
 		_publish_inactive();
 	}
@@ -180,7 +193,9 @@ void EnvironmentCubeCapture::_ensure_capture_nodes() {
 		// beauty camera carries the terminal display decode. Godot's tonemap
 		// would sRGB-encode this offscreen target a second time, so keep it
 		// HDR 2D: the texture then stores exactly the numbers the shaders
-		// wrote, which is what the raw-sampling blit expects.
+		// wrote, which is what the raw-sampling blit expects. (The world
+		// environment's display decode table, FrameFx::install_display_table,
+		// clamps them to [0, 1] on the way, as the blit's own clamp does.)
 		viewport->set_use_hdr_2d(true);
 		add_child(viewport);
 
@@ -205,8 +220,10 @@ void EnvironmentCubeCapture::_ensure_capture_nodes() {
 void EnvironmentCubeCapture::advance_frame(
 		const Vector3 &p_player_position) {
 	_ensure_capture_nodes();
-	// Recovery only: a dummy/headless renderer or a temporarily unavailable
-	// target can leave the prior request pending.
+	_ensure_draw_effect();
+	// The previous request's copy ran in its own frame's draw; this closes it
+	// (and copies here when no beauty view drew that frame, or recovers a
+	// dummy/headless renderer or a temporarily unavailable target).
 	if (capture_pending_ && _publish_completed_capture()) {
 		capture_pending_ = false;
 	}
@@ -214,12 +231,13 @@ void EnvironmentCubeCapture::advance_frame(
 	if (!capture_pending_ &&
 			opennova::renderer::environment_cube_refresh_due(
 					render_frame_index_, force_pending_, cube_ready_)) {
-		// Retail renders all six faces in the offscreen-preparation leg of the
-		// same frame. Here the six UPDATE_ONCE faces render with this frame's
-		// ordinary draw and the device copy publishes at the next
-		// advance_frame: one frame of latency on a 128-frame cadence, instead
-		// of a re-entrant force_draw() that re-rendered every viewport (the
-		// beauty frame included) from inside the frame pipeline.
+		// Retail renders all six faces ahead of the scene's draws in the frame
+		// that samples them. Here the six UPDATE_ONCE faces render with this
+		// frame's ordinary draw, ahead of the beauty view, and the copy into
+		// the cube runs in that view's pre-opaque pass of the same draw
+		// (EnvironmentCubeCompositorEffect), instead of a re-entrant
+		// force_draw() that re-rendered every viewport from inside the frame
+		// pipeline.
 		_request_capture(p_player_position);
 	}
 	++render_frame_index_;
@@ -248,21 +266,55 @@ void EnvironmentCubeCapture::_request_capture(
 	}
 	capture_pending_ = true;
 	force_pending_ = false;
+	copy_armed_ = false;
+	// The copy is armed for this frame's draw, and the cube (made by the
+	// mission load's render subsystems) is wired now, so the frame that
+	// renders the faces samples them.
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (is_selected_renderer(rs) && _arm_copy(rs) && blit_->cube_texture().is_valid()) {
+		_wire_cube(rs);
+	}
+}
+
+// The six face targets the copy reads, armed on the render thread so a
+// threaded server's draw of an earlier frame never takes it.
+bool EnvironmentCubeCapture::_arm_copy(RenderingServer *p_rs) {
+	_ensure_blit();
+	if (blit_->device_failed()) {
+		return false;
+	}
+	EnvironmentCubeBlit::Request request;
+	for (int layer = 0; layer < kFaceCount; ++layer) {
+		const int capture = kCubeLayerToCapture[layer];
+		const RID viewport_texture =
+				p_rs->viewport_get_texture(viewports_[capture]->get_viewport_rid());
+		if (!viewport_texture.is_valid()) {
+			return false;
+		}
+		request[layer].viewport_texture = viewport_texture;
+		request[layer].orientation = orientation_for_capture(capture);
+	}
+	armed_request_ = request;
+	++requested_publishes_;
+	copy_armed_ = true;
+	p_rs->call_on_render_thread(callable_mp(this,
+			&EnvironmentCubeCapture::_arm_on_render_thread));
+	return true;
 }
 
 // The six rendered faces are copied on the render thread into the RD
-// cubemap (orientation and the 0x60 byte multiply applied there), then the
-// cube is wired to the shader global. Under the default render model the
-// callable runs before this returns; under a threaded one the copy completes
-// during this frame's draw and is wired on the next advance.
+// cubemap (orientation and the 0x60 byte multiply applied there) in the
+// request frame's draw; the next advance closes the capture. A request that
+// could not arm its copy arms it here, a frame with no beauty view to run the
+// armed copy copies here from the faces the request rendered (the default
+// render model runs the callable before this returns), and a failed copy is
+// armed again.
 bool EnvironmentCubeCapture::_publish_completed_capture() {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	if (!is_selected_renderer(rs)) {
 		return false;
 	}
-	if (!blit_) {
-		blit_ = std::make_unique<EnvironmentCubeBlit>();
-	}
+	_ensure_blit();
 	if (blit_->device_failed()) {
 		// Latched until the next exit-tree release: the shader/pipeline/cube
 		// creation failed, the object shaders keep their hemisphere fallback,
@@ -275,37 +327,29 @@ bool EnvironmentCubeCapture::_publish_completed_capture() {
 		}
 		return false;
 	}
-	if (blit_->completed_requests() < requested_publishes_) {
+	if (!copy_armed_) {
+		_arm_copy(rs);
 		return false;
 	}
-	if (requested_publishes_ > wired_publishes_ && blit_->last_request_ok()) {
-		return _wire_cube(rs);
-	}
-
-	EnvironmentCubeBlit::Request request;
-	for (int layer = 0; layer < kFaceCount; ++layer) {
-		const int capture = kCubeLayerToCapture[layer];
-		const RID viewport_texture =
-				rs->viewport_get_texture(viewports_[capture]->get_viewport_rid());
-		if (!viewport_texture.is_valid()) {
+	if (blit_->completed_requests() < requested_publishes_) {
+		rs->call_on_render_thread(callable_mp(this,
+				&EnvironmentCubeCapture::_publish_on_render_thread));
+		if (blit_->completed_requests() < requested_publishes_) {
 			return false;
 		}
-		request[layer].viewport_texture = viewport_texture;
-		request[layer].orientation = orientation_for_capture(capture);
 	}
-	blit_->set_request(request);
-	++requested_publishes_;
-	rs->call_on_render_thread(callable_mp(this,
-			&EnvironmentCubeCapture::_publish_on_render_thread));
-	if (blit_->completed_requests() == requested_publishes_ &&
-			blit_->last_request_ok()) {
-		return _wire_cube(rs);
+	copy_armed_ = false;
+	if (!blit_->last_request_ok()) {
+		_arm_copy(rs);
+		return false;
 	}
-	return false;
+	return _wire_cube(rs);
 }
 
-bool EnvironmentCubeCapture::_wire_cube(RenderingServer *p_rs) {
-	const RID cube = blit_->cube_texture();
+// The cube on its shader global (once per device cube; the ready flag says
+// whether it holds this mission's faces).
+bool EnvironmentCubeCapture::_bind_cube(RenderingServer *p_rs) {
+	const RID cube = blit_ ? blit_->cube_texture() : RID();
 	if (!cube.is_valid()) {
 		return false;
 	}
@@ -318,6 +362,13 @@ bool EnvironmentCubeCapture::_wire_cube(RenderingServer *p_rs) {
 		if (!globals_held_) {
 			_write_global(p_rs, "opennova_environment_cube", environment_cube_);
 		}
+	}
+	return true;
+}
+
+bool EnvironmentCubeCapture::_wire_cube(RenderingServer *p_rs) {
+	if (!_bind_cube(p_rs)) {
+		return false;
 	}
 	wired_publishes_ = requested_publishes_;
 	cube_ready_ = true;
@@ -356,9 +407,109 @@ void EnvironmentCubeCapture::publish_absent() {
 	_write_global(rs, "opennova_environment_cube", Variant());
 }
 
+void EnvironmentCubeCapture::create_cube_device() {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (!is_inside_tree() || !is_selected_renderer(rs)) {
+		return;
+	}
+	_ensure_blit();
+	_ensure_draw_effect();
+	rs->call_on_render_thread(callable_mp(this, &EnvironmentCubeCapture::_create_on_render_thread));
+	// Bound as the load makes it (unready), so the frame of the first capture
+	// changes no texture binding of the materials that sample it.
+	_bind_cube(rs);
+}
+
+void EnvironmentCubeCapture::_ensure_blit() {
+	if (!blit_) {
+		blit_ = std::make_unique<EnvironmentCubeBlit>();
+	}
+	if (draw_effect_.is_valid()) {
+		draw_effect_->set_blit(blit_.get());
+	}
+}
+
+// The draw's copy joins the compositor of the WorldEnvironment the beauty view
+// draws with (created when it has none), followed into whatever compositor the
+// environment holds now: FrameFx and DisplayDecode replace it with a fresh one
+// carrying the previous effects.
+void EnvironmentCubeCapture::_ensure_draw_effect() {
+	if (!is_inside_tree()) {
+		return;
+	}
+	if (draw_effect_.is_null()) {
+		draw_effect_.instantiate();
+		draw_effect_->set_blit(blit_.get());
+	}
+	WorldEnvironment *environment = Object::cast_to<WorldEnvironment>(
+			ObjectDB::get_instance(world_environment_id_));
+	if (environment == nullptr || !environment->is_inside_tree()) {
+		environment = find_world_environment(get_parent() != nullptr ? get_parent() : this);
+		if (environment == nullptr) {
+			return;
+		}
+		world_environment_id_ = ObjectID(environment->get_instance_id());
+	}
+	Ref<Compositor> compositor = environment->get_compositor();
+	if (compositor.is_null()) {
+		compositor.instantiate();
+		environment->set_compositor(compositor);
+	}
+	if (draw_effect_installed_into_ == compositor) {
+		return;
+	}
+	_uninstall_draw_effect();
+	TypedArray<Ref<CompositorEffect>> effects = compositor->get_compositor_effects();
+	bool present = false;
+	for (int64_t i = 0; i < effects.size(); ++i) {
+		Ref<CompositorEffect> existing = effects[i];
+		if (existing.is_valid() &&
+				existing->get_instance_id() == draw_effect_->get_instance_id()) {
+			present = true;
+			break;
+		}
+	}
+	if (!present) {
+		effects.push_back(draw_effect_);
+		compositor->set_compositor_effects(effects);
+	}
+	draw_effect_installed_into_ = compositor;
+}
+
+void EnvironmentCubeCapture::_uninstall_draw_effect() {
+	if (draw_effect_installed_into_.is_valid() && draw_effect_.is_valid()) {
+		const TypedArray<Ref<CompositorEffect>> effects =
+				draw_effect_installed_into_->get_compositor_effects();
+		TypedArray<Ref<CompositorEffect>> kept;
+		for (int64_t i = 0; i < effects.size(); ++i) {
+			Ref<CompositorEffect> existing = effects[i];
+			if (existing.is_valid() &&
+					existing->get_instance_id() == draw_effect_->get_instance_id()) {
+				continue;
+			}
+			kept.push_back(existing);
+		}
+		draw_effect_installed_into_->set_compositor_effects(kept);
+	}
+	draw_effect_installed_into_.unref();
+}
+
+void EnvironmentCubeCapture::_arm_on_render_thread() {
+	if (blit_) {
+		blit_->arm(armed_request_);
+	}
+}
+
 void EnvironmentCubeCapture::_publish_on_render_thread() {
 	if (blit_) {
-		blit_->publish();
+		blit_->publish_armed();
+	}
+}
+
+void EnvironmentCubeCapture::_create_on_render_thread() {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (blit_ && rs != nullptr) {
+		blit_->create_device(rs->get_rendering_device());
 	}
 }
 
@@ -378,6 +529,12 @@ void EnvironmentCubeCapture::_publish_inactive() {
 		environment_cube_->set_texture_rd_rid(RID());
 		environment_cube_.unref();
 	}
+	// The draw's copy leaves the compositor and lets go of the blit; the drain
+	// below finishes any callback already running with it.
+	_uninstall_draw_effect();
+	if (draw_effect_.is_valid()) {
+		draw_effect_->set_blit(nullptr);
+	}
 	if (blit_ && rs != nullptr && rs->get_rendering_device() != nullptr) {
 		// Drain any copy still queued, then free the device objects on the
 		// render thread while the device is live (the FrameFx exit pattern).
@@ -388,6 +545,7 @@ void EnvironmentCubeCapture::_publish_inactive() {
 	blit_.reset();
 	requested_publishes_ = 0;
 	wired_publishes_ = 0;
+	copy_armed_ = false;
 	warned_device_failure_ = false;
 	capture_pending_ = false;
 	cube_ready_ = false;

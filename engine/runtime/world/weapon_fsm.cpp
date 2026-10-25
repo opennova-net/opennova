@@ -259,7 +259,18 @@ void handler_fire(const WeaponFsmDef &def, const WeaponFsmAction &desc,
         begin_active(desc, slot, in, out); // [orig: @ 0x542db9]
         return;
     }
-    out.fired_clip_before_consume = slot.clip;
+    // The mode byte's high bits are the slot's own word +0x10, which only a
+    // weapon without an ammo bucket (def+0xDC == 0) ever writes: a bucket
+    // weapon's loaded rounds are the bucket's, so its word keeps the slot
+    // init's zero and every shot's byte is 0x02. [orig: WeaponAction_Fire
+    // @0x542B10 (`movzx edx, byte ptr [esi+10h]` @0x542BFC..0x542C11); the
+    // word's writers, each on the bucketless leg alone: WeaponSlot_InitFromDef
+    // @0x53EE70 (the memset @0x53EE86), Weapon_ConsumeAmmo @0x540850
+    // (@0x540907..0x540913), WeaponSlot_ReloadAmmo @0x541720 (@0x54183D..0x541850),
+    // WeaponSlots_RecalculateAmmoFromCapacity @0x542280 (@0x54238F..0x54239E),
+    // WeaponSlots_ClearLoadedRounds @0x5423C0 (@0x54242B..0x54243A); the bucket
+    // def+0xDC WeaponDefs_ParseLineCallback @0x543680 (the store @0x544045)]
+    out.fired_clip_before_consume = slot.shared_clip ? 0 : slot.clip;
     out.fired = true; // Entity_FireWeaponAndSendPacket seam [orig: @ 0x542c5e]
     if (def.clip_capacity >= 0) { // [orig: Weapon_ConsumeAmmo @ 0x542c75, clip leg]
         if (slot.clip > 0) --slot.clip;
@@ -387,9 +398,10 @@ void handler_reload(const WeaponFsmDef &def, const WeaponFsmAction &desc,
                 }
             }
         }
-        if (in.is_authority) {
+        if (in.is_authority && in.reload_refills) {
             // Listen-host/SP zero-latency loopback of the §5.58 round-trip: the
-            // authority applies WeaponSlot_ReloadAmmo when it relays the request.
+            // authority applies WeaponSlot_ReloadAmmo when it relays the request,
+            // as its own S2C 0x49 echo would.
             apply_reload_ammo(def, slot);
             out.reload_applied = true;
         }
@@ -428,8 +440,11 @@ void handler_switchto(const WeaponFsmDef &, const WeaponFsmAction &desc,
         slot.phase = weapon_phase::kDone;
         return;
     }
-    // (the instant-switch -901 branch reads the pending slot's def Flags & 0x80 —
-    //  weapon-switch seam [orig: @ 0x54323e])
+    // The local player's pending slot naming an Emplaced def holds the draw: -901
+    // on every call, so the timer never turns positive while the word stays.
+    // [orig: the local test @0x54321E, g_PendingWeaponSlot @0x543226..0x54322D, its
+    //  def's Flags 0x80 @0x54322F..0x54323E, -901 @0x543240]
+    if (in.is_local && in.pending_emplaced) slot.switch_timer = -901;
     if (slot.switch_timer <= 0) {
         slot.switch_timer = static_cast<int16_t>(slot.switch_timer + 30); // [orig: @ 0x54327b]
         slot.counter = desc.delay_end;
@@ -718,8 +733,47 @@ void weapon_fsm_bake(const WeaponFsmActionRow *rows, size_t row_count,
     }
 }
 
+bool weapon_fsm_fire_request_taken(const WeaponFsmDef &def, const WeaponSlotState &slot) {
+    // [orig: WeaponSlot_RequestFire @0x53EFA0; the declaration carries the returns]
+    switch (slot.current) {
+        case weapon_action::kIdle:
+            return true; // @0x53EFE5
+        case weapon_action::kEmptyIdle:
+            return !def.auto_fire; // the semi leg's state 1 @0x53F020..0x53F028; auto @0x53F013
+        case weapon_action::kFire:
+        case weapon_action::kRecoil:
+        case weapon_action::kScopeUp:
+        case weapon_action::kScopeDown:
+            return def.auto_fire; // @0x53F005 / @0x53EFE5
+        default:
+            return false;
+    }
+}
+
+bool weapon_fsm_can_fire_in_current_state(const WeaponFsmDef &def, const WeaponSlotState &slot) {
+    // [orig: WeaponSlot_CanFireInCurrentState @0x53F0B0; the declaration carries the cases]
+    if (!def.auto_fire) return slot.current == weapon_action::kIdle; // @0x53F0EE
+    switch (slot.current) {
+        case weapon_action::kIdle:
+        case weapon_action::kFire:
+        case weapon_action::kRecoil:
+        case weapon_action::kScopeUp:
+        case weapon_action::kScopeDown:
+            return true; // @0x53F0E6
+        default:
+            return false;
+    }
+}
+
+bool weapon_fsm_has_ammo_available(const WeaponFsmDef &def, const WeaponSlotState &slot) {
+    // [orig: WeaponSlot_HasAmmoAvailable @0x541B30; the declaration carries the order]
+    if (def.clip_capacity < 0) return slot.reserve != 0; // @0x541B47 -> @0x541B85
+    return slot.clip != 0 || slot.reserve != 0;           // @0x541B65 / @0x541B8F
+}
+
 bool weapon_fsm_request_fire(const WeaponFsmDef &def, WeaponSlotState &slot) {
     // [orig: WeaponSlot_RequestFire @ 0x53efa0]
+    const bool taken = weapon_fsm_fire_request_taken(def, slot);
     if (def.auto_fire) {
         switch (slot.current) {
             case weapon_action::kIdle:
@@ -727,27 +781,28 @@ bool weapon_fsm_request_fire(const WeaponFsmDef &def, WeaponSlotState &slot) {
             case weapon_action::kScopeUp:
             case weapon_action::kScopeDown:
                 slot.next = weapon_action::kFire;
-                return true;
+                break;
             case weapon_action::kEmptyIdle:
                 slot.next = weapon_action::kEmpty;
-                return false;
+                break;
             case weapon_action::kFire:
                 // A fire request landing mid-FIRE re-queues itself as a deferred
-                // event — the loop self-sustains until a state that accepts the
-                // dispatch consumes it (RECOIL banks the shot, even if the trigger
-                // was already released). [orig: @ 0x53effd Input_QueueDeferredEvent]
+                // event: the loop self-sustains, one dispatch a tick, while the
+                // trigger stays down, until a state that accepts the dispatch
+                // consumes it (RECOIL banks the shot); a release drops it at the
+                // next dispatch (the fire record's live binding test). The call
+                // still returns 1. [orig: @ 0x53effd Input_QueueDeferredEvent, the
+                // return @0x53F005; the dispatch's binding test @0x4E07D9]
                 slot.refire_queued = true;
-                return false;
+                break;
             default:
-                return false;
+                break;
         }
+        return taken;
     }
-    if (slot.current == weapon_action::kIdle) {
-        slot.next = weapon_action::kFire;
-        return true;
-    }
-    if (slot.current == weapon_action::kEmptyIdle) slot.next = weapon_action::kEmpty;
-    return false;
+    if (slot.current == weapon_action::kIdle) slot.next = weapon_action::kFire;
+    else if (slot.current == weapon_action::kEmptyIdle) slot.next = weapon_action::kEmpty;
+    return taken;
 }
 
 void weapon_fsm_request_reload(WeaponSlotState &slot) {
@@ -796,13 +851,14 @@ void weapon_fsm_queue_scope_down(WeaponSlotState &slot) {
         slot.next = weapon_action::kIdle;
 }
 
-void weapon_fsm_queue_switch_from(WeaponSlotState &slot) {
+bool weapon_fsm_queue_switch_from(WeaponSlotState &slot) {
     // [orig: WeaponSlot_ForceQueueSwitchFrom @ 0x53f170 — refused while SWITCHFROM
-    //  or SWITCHTO is current; a complete phase resets the slot and queues
-    //  SWITCHFROM, otherwise the action is forced back to idle first]
+    //  or SWITCHTO is current (0 @0x53F1BD); a complete phase resets the slot and queues
+    //  SWITCHFROM, otherwise the action is forced back to idle first (1 @0x53F19B /
+    //  @0x53F1B7)]
     if (slot.current == weapon_action::kSwitchFrom ||
         slot.current == weapon_action::kSwitchTo)
-        return;
+        return false;
     if (slot.phase == weapon_phase::kDone || slot.phase == weapon_phase::kHeld ||
         slot.phase == weapon_phase::kNone) {
         slot.counter = 0;       // [orig: *(slot+0) = 0]
@@ -814,6 +870,7 @@ void weapon_fsm_queue_switch_from(WeaponSlotState &slot) {
     } else {
         slot.next = weapon_action::kIdle;
     }
+    return true;
 }
 
 void weapon_fsm_queue_switch_rank(WeaponSlotState &slot) {
@@ -882,6 +939,23 @@ void weapon_fsm_replay_action(const WeaponFsmDef &def, WeaponSlotState &slot,
     }
 }
 
+void weapon_fsm_arm_network_fire(const WeaponFsmDef &def, WeaponSlotState &slot,
+                                 const WeaponFsmInputs &in, WeaponFsmEvents &out) {
+    out = WeaponFsmEvents{};
+    slot.counter = 0;                     // [orig: @0x50C2B0]
+    slot.phase = weapon_phase::kHeld;     // [orig: +90 = 64 @0x50C2C4]
+    slot.current = weapon_action::kFire;  // [orig: +44 = 2 @0x50C2F0]
+    if (!in.owner_present) return;        // [orig: WeaponAction_Fire @0x542B24..0x542B2E]
+    const WeaponFsmAction &desc = def.actions[weapon_action::kFire];
+    if (def.burst3) // [orig: @0x542C8A]
+        slot.burst = slot.burst != 0 ? static_cast<uint8_t>(slot.burst - 1) : 2;
+    slot.next = weapon_action::kRecoil; // [orig: @0x542C9E]
+    begin_active(desc, slot, in, out);  // [orig: ExecuteActionTick @0x542CB4]
+    const WeaponFsmAction &recoil = def.actions[weapon_action::kRecoil];
+    kick_add(slot, recoil.delay_start + recoil.delay_end + slot.counter + 10); // [orig: @0x542CF1..0x542D0F]
+    finish_active(def, desc, slot, slot.next, out); // [orig: @0x542D1A]
+}
+
 void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,
                      const WeaponFsmInputs &in, WeaponFsmEvents &out) {
     out = WeaponFsmEvents{};
@@ -889,13 +963,24 @@ void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,
     // Input-dispatcher writers run before the frame pump [orig: the input layer
     // dispatches binding events ahead of WeaponAction_ProcessAllEntities in the
     // frame]. Held-trigger auto fire is NOT a per-tick re-request: the press edge
-    // starts the volley and the recoil window's deferred re-queue sustains it,
-    // consumed here one tick after it was queued — the deferred dispatch
-    // [orig: Input_QueueDeferredEvent @ 0x4993e0 -> WeaponSlot_RequestFire @ 0x53efa0].
+    // starts the volley and the recoil window's deferred re-queue sustains it. The
+    // re-queue is the tick's output (refire_queued), which the caller's deferred
+    // input queue takes: the next input frame's flush dispatches it as a fire
+    // record, whose press leg requests fire (in.fire_pressed) only while the binding
+    // is still active, past the record's gates (world::LocalPlayer::deferred_events,
+    // inmatch::Role::drain_input_events).
+    // [orig: Input_QueueDeferredEvent @0x4993E0; Input_ProcessFrame @0x49D520
+    //  (Input_FlushDeferredEvents @0x49D591, the dispatch @0x49D5D8);
+    //  Input_HandleActionBinding_0 @0x4E0420 (case 0x95: Input_IsBindingActive(149)
+    //  @0x4E07D9)]
     if (in.reload_pressed) weapon_fsm_request_reload(slot);
-    const bool fire_request = in.fire_pressed || slot.refire_queued;
-    slot.refire_queued = false; // consumed (RequestFire may re-queue it mid-FIRE)
-    if (fire_request) weapon_fsm_request_fire(def, slot);
+    slot.refire_queued = false; // the last tick's re-queue is the caller's queue's
+    // The dry click reads the request's return: an automatic def's mid-FIRE deferral returns
+    // 1 too, so its next action becomes the click over the shot's RECOIL.
+    // [orig: Input_HandleActionBinding_0 - the return's test @0x4E0A0E, nextAction = 5
+    //  @0x4E0A1E; WeaponSlot_RequestFire @0x53F005]
+    if (in.fire_pressed && weapon_fsm_request_fire(def, slot) && in.fire_dry)
+        slot.next = weapon_action::kEmpty;
 
     // --- the pump tail [orig: WeaponAction_ProcessFrame @ 0x541262..0x5414ac] -----
 

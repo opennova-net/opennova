@@ -862,7 +862,8 @@ static int test_defs_and_coo() {
 	TEST_EXPECT(find_blank_factory_for_role("sndprof_def")->kind == AssetKind::SoundProfileDefs);
 
 	const std::vector<uint8_t> coo = make("nw_cdata", "nw_cdata.coo");
-	const std::vector<uint8_t> expected = {0, 0, 0, 0, 'R', 'S', 'T', 'R'};
+	// The empty jar as the game writes it: the leading word 1, the magic "2OOC" (D-NET-NEW-L9-59).
+	const std::vector<uint8_t> expected = {1, 0, 0, 0, '2', 'O', 'O', 'C'};
 	TEST_EXPECT(coo == expected);
 	return 0;
 }

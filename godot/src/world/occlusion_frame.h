@@ -13,9 +13,7 @@
 
 #include "devtools/frame_stats.h"
 
-namespace opennova::renderer {
-struct ScenePassGateEdges;
-} // namespace opennova::renderer
+#include <runtime/renderer/scene_pass_gates.h>
 
 namespace godot {
 
@@ -64,12 +62,18 @@ class Water;
 //    visibility is re-asserted first each frame and this frame's hides land
 //    on top. The leg table keeps that order; nothing here
 //    reorders it.
-//  * water.visible has TWO writers in one frame: GameWorld.
-//    render_water_frame reads LAST frame's blink-water verdict
-//    (Water.set_blink_water_visible, exactly as retail reads it — the
-//    Terrain_SetupViewAndLighting 0x60fe40 witness cited on that leg),
-//    then apply_frame below rewrites the node's visibility from THIS
-//    frame's verdict. Both stay.
+//  * the water reads the collect twice in one frame: GameWorld.
+//    render_water_frame's water-active test reads the latch the last
+//    scene's water pass stored (Water::latch_blink_water, exactly as retail
+//    reads it — the Terrain_SetupViewAndLighting 0x60fe40 witness cited on
+//    that leg), then apply_frame below lands THIS frame's water letter label
+//    on the strip (Water::set_blink_water_views) and stores the latch. The
+//    label reaches the strips alone, never the node, the mirrors or the
+//    bloom's redraw (renderer::scene_water_visible). A label reads the one
+//    g_BlinkWaterVisible word ahead of its scene's collect: the word its
+//    water mirror's collect left when that scene's water pass is active
+//    (Simulation::run_mirror_occlusion, run first), else the last collect's,
+//    the previous scene's; every collect then writes it (blink_water_word_).
 //  * the world's is_water_render_active() gate decides the water_z handed to
 //    run_occlusion_frame: an inactive water (no load, a load in progress)
 //    passes the -100000 sentinel, never its retained authored height.
@@ -136,9 +140,13 @@ public:
 	// in pixels, the projector's focal source. (The marched iris-exposure
 	// weather feed that renders alongside stays on GameWorld's frozen-pose
 	// iris stamp.) `object_detail` is the session's object detail the frame's
-	// death pieces draw at (GameWorld's session copy).
+	// death pieces draw at (GameWorld's session copy). `mirror_eye` is the
+	// view block the scene's water mirror collects from (GameWorld::
+	// main_mirror_collect_eye: `camera_xform` without the scene's optics
+	// offsets).
 	void apply_frame(Camera3D *p_camera, float p_viewport_width,
-			const Transform3D &p_camera_xform, bool p_forces_indoors, int p_object_detail);
+			const Transform3D &p_camera_xform, bool p_forces_indoors, int p_object_detail,
+			const Transform3D &p_mirror_eye);
 	// The weapon Inset pass's own collect, after this frame's main one
 	// (engine: world/occlusion.h OcclusionView carries the witness): the sim
 	// runs it over `camera` on the Inset view's frame words, and its verdicts
@@ -147,11 +155,23 @@ public:
 	// set_static_instance_inset_occlusion_hidden); an entity the Inset collect
 	// gives no verdict follows the main view's. `viewport_width` is the Inset
 	// target's width, the projector's focal source for that view.
+	// `mirror_block` is the view block the Inset's water mirror reflects
+	// (HudInsetScope::get_view_block_transform), the eye its mirror's collect
+	// runs over, null while that mirror cannot render; the Inset's terrain
+	// bounds reach the water first.
 	void apply_inset_frame(Camera3D *p_camera, float p_viewport_width, bool p_forces_indoors,
-			int p_object_detail);
+			int p_object_detail, const Transform3D *p_mirror_block);
 	// The Inset stopped rendering (or the world unloads): every Inset verdict
 	// releases onto the main view's and the sim forgets the Inset baselines.
 	void release_inset();
+	// A water mirror's own collect lands on what its reflected subscene draws
+	// (engine inmatch/occlusion_collect.h MirrorViewLists): its verdicts as
+	// changes on the models (ObjectModel::set_mirror_occlusion_*) and the wire
+	// rows (EntityPresenter::set_render_culled_mirror), for view 0 (the main
+	// scene's mirror) or 1 (the weapon Inset's), whose eye is below the water
+	// or not. A mirror that did not render this frame releases instead.
+	void apply_mirror_view(int p_view, bool p_ran, bool p_below_water);
+	void release_mirror(int p_view);
 	// The last Inset collect's MODEL foliage anchors (Godot space; the main
 	// collect's are Simulation::get_foliage_mask_anchor_positions), empty
 	// while the Inset is closed.
@@ -159,8 +179,8 @@ public:
 		return inset_foliage_mask_anchors_;
 	}
 
-	// The probe A/B seam, entering the occlusion skip: restore the water to
-	// the authored blink state, then release every occlusion override.
+	// The probe A/B seam, entering the occlusion skip: restore the water
+	// strip to the authored blink state, then release every occlusion override.
 	// Mission blink/indoors semantics remain authoritative (release keeps
 	// them; iris keeps sampling on the world).
 	void enter_probe_skip();
@@ -258,12 +278,20 @@ private:
 	// The local player's latched blink letters (render-occlusion-re.md §4):
 	// accum bit 0x2 hides the terrain render, the detail-foliage passes (not
 	// the MODEL masks) and the mirror's sky bracket, bit 0x4 the main frame's
-	// sky bracket (apply_scene_pass_gates), bit 0x8 the water passes.
+	// sky bracket (apply_scene_pass_gates), bit 0x8 the water strips.
 	uint32_t blink_letters_ = 0;
 	bool blink_indoors_ = false;
 	// The last terrain gate written (edge-triggered).
 	bool terrain_gate_ = true;
 	bool blink_water_suppressed_ = false;
+	// The one g_BlinkWaterVisible word every collect writes (the main scene's,
+	// the Inset's and each water mirror's) and each scene's water letter label
+	// reads ahead of its own collect; it carries from scene to scene and frame
+	// to frame (engine renderer/scene_pass_gates.h SceneWaterWord).
+	opennova::renderer::SceneWaterWord blink_water_word_;
+	// The main scene's label this frame, which the Inset's apply keeps on the
+	// main strip.
+	bool main_water_label_ = true;
 	bool probe_timing_ = false;
 	// bms_id -> resolved ObjectModel, so steady frames skip registry lookups;
 	// every node this frame hid or masked is in it, so the release walk (A/B
@@ -274,6 +302,8 @@ private:
 	// release walk's set), and whether an Inset collect ran since then.
 	HashMap<uint64_t, ObjectID> inset_nodes_;
 	bool inset_active_ = false;
+	// Whether each water mirror's verdicts are applied (apply_mirror_view).
+	bool mirror_active_[2] = { false, false };
 	PackedVector3Array inset_foliage_mask_anchors_;
 	// The two apply_frame halves, valid while probe/stats timing runs: the
 	// native run_occlusion_frame call and the node application.

@@ -5,8 +5,12 @@
 #include <formats/def/def.h>
 #include <formats/rtxt/rtxt.h>
 #include <formats/playersav/player_sav.h>
+#include <net/novaworld/lobby_vars.h> // resolve_address_without_dns, in_addr_text
+#include <net/npwire/net_ports.h>
+#include <net/npwire/nw_session_framing.h> // NapiPrng
 #include <runtime/inmatch/host_role.h> // singleplayer_game_config
 #include <runtime/inmatch/host_settings.h>
+#include <runtime/inmatch/punt_log.h> // ConnectLog, net_tearing_down_socket_text
 #include <runtime/inmatch/server_session.h>
 
 #include <memory>
@@ -49,14 +53,19 @@ gamecfg::WeaponRoster game_cfg_weapon_roster(const ResourceIndex &index) {
 	return roster;
 }
 
-gamecfg::DefaultTexts game_cfg_default_texts(const rtxt::File *gametext) {
+gamecfg::DefaultTexts game_cfg_default_texts(const rtxt::File *gametext,
+		const rtxt::File *text_override) {
 	gamecfg::DefaultTexts texts;
 	if (gametext == nullptr) return texts;
 	// [orig: GameText_GetStringWithFallback @0x51EB90: the fallback when the
-	//  table lacks the entry, else the entry's text]
-	if (const rtxt::Entry *entry = gametext->find_in_section("Menu", "UNTITLED"))
+	//  table lacks the entry, else the entry's text; the lookup @0x51EBB6
+	//  searches the override table first (TextResource_FindEntryBySectionAndKey
+	//  @0x75D250, @0x75D27B)]
+	if (const rtxt::Entry *entry =
+			rtxt::find_with_override(text_override, *gametext, "Menu", "UNTITLED"))
 		texts.untitled = entry->text;
-	if (const rtxt::Entry *entry = gametext->find_in_section("Menu", "USERMESSAGE"))
+	if (const rtxt::Entry *entry =
+			rtxt::find_with_override(text_override, *gametext, "Menu", "USERMESSAGE"))
 		texts.user_message = entry->text;
 	return texts;
 }
@@ -66,15 +75,29 @@ void apply_session_create_words(GameConfig &config, const gamecfg::GameCfg &cfg)
 	config.use_lineup_queue = cfg.mp_use_lineup_queue;
 	config.lineup_queue_size = cfg.mp_lineup_queue_size;
 	config.punt_duplicate_pcids = cfg.mp_host_punt_same_pcids;
+	// The host's own pre.mnu SPECTATE word, which the create reads for its own slot and
+	// connection [orig: Server_InitNewRoundState @0x51CA67; CNapiGameSession_BuildAndCreateSession
+	//  @0x5697FD].
+	config.join_spectate = cfg.join_spectate;
+	// The per-weapon availability words the first mission's table build reads
+	// [orig: Game_ApplySessionSettingsToGlobals @0x5517C5 (weaponAvailability_5F0)].
+	for (size_t i = 0; i < config.weapon_availability.size() &&
+			i < static_cast<size_t>(gamecfg::kWeaponAvailabilityCount); ++i)
+		config.weapon_availability[i] = cfg.weapon_availability[i];
+	// And the per-class words its class mask reads [orig: @0x551882 (classAvailability_9EC)].
+	for (size_t i = 0; i < config.class_availability.size() &&
+			i < static_cast<size_t>(gamecfg::kClassAvailabilityCount); ++i)
+		config.class_availability[i] = cfg.class_availability[i];
 }
 
 HostConfig shell_host_config(const ShellHostSource &source) {
 	HostConfig host;
 	if (source.lan_config != nullptr) {
+		// The name as the request carries it, empty included: the create copies the block's
+		// word with no default [orig: CNapiGameSession_BuildAndCreateSession @0x5695D2
+		// Napi_CopyString(.., serverName_3A5, 32); Game_ApplySessionSettingsToGlobals
+		// @0x551FEB strncpy(g_ServerNameStr, serverName_3A5, 0x1F)].
 		host.config = *source.lan_config;
-		// Ours: a host-screen config that carries no name (a tool's or a
-		// test's; the screen seeds Menu/UNTITLED) still advertises one.
-		if (host.config.server_name.empty()) host.config.server_name = "OpenNova LAN Host";
 		host.config.max_players = source.lan_max_players;
 		host.config.dedicated_server = !source.lan_serve_and_play;
 		host.socket_mode = SocketMode::Lan;
@@ -82,6 +105,9 @@ HostConfig shell_host_config(const ShellHostSource &source) {
 		host.network_type = source.lan_network_type;
 	} else {
 		host.config = singleplayer_game_config(source.sp_game_type, source.profile);
+		// [orig: SinglePlayer_StartMission @0x561AF0 (the copy into g_MapFileName
+		//  @0x561B69..0x561B80)]
+		if (!source.sp_mission_file.empty()) host.config.mission_file = source.sp_mission_file;
 		// Single player's fill reads game.cfg's own zoom option
 		// [orig: g_GameConfigState.allowSniperScopeZoom_5EC @0x53EF1F].
 		if (source.cfg_block != nullptr)
@@ -98,15 +124,26 @@ HostConfig shell_host_config(const ShellHostSource &source) {
 	return host;
 }
 
+int32_t store_session_player_cap(gamecfg::GameCfg *block, int32_t requested, int title) {
+	const int32_t cap = session_player_cap(requested, title);
+	if (block != nullptr) block->mp_max_players = cap;
+	return cap;
+}
+
 HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
+	// In session, the cap goes into 1..65 (dfx2.exe: 1..251) before the apply,
+	// written back into the block (store_session_player_cap carries the witness).
+	const int title = cfg.table == gamecfg::ConfigTable::Dfx2 ? gameprofile::GAME_DFX2
+	                                                         : gameprofile::GAME_JO;
+	(void)store_session_player_cap(&cfg, cfg.mp_max_players, title);
+	return host_screen_from_block(cfg);
+}
+
+HostScreenState host_screen_from_block(const gamecfg::GameCfg &cfg) {
 	// The block's table is its title's (gamecfg::config_var_rows): dfx2.exe's
 	// carries the one row Jointops.exe's lacks, so the session runs that title.
 	const int title = cfg.table == gamecfg::ConfigTable::Dfx2 ? gameprofile::GAME_DFX2
 	                                                         : gameprofile::GAME_JO;
-	// In session, the cap goes into 1..65 (dfx2.exe: 1..251) before the apply,
-	// written back into the block (session_player_cap carries the witness).
-	cfg.mp_max_players = session_player_cap(cfg.mp_max_players, title);
-
 	HostScreenState host;
 	GameConfig &config = host.config;
 	config.title = title;
@@ -115,6 +152,17 @@ HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	// by the apply's cap @0x551B30].
 	host.serve_and_play = cfg.dedicated == 0;
 	host.game_type_setting = cfg.mp_gametype;
+	// The session's cap, already 1..65 (or 1..251) [orig: game_settings.max_players
+	// @0x56963F], and the dedicated word the slot limit adds the host's own
+	// slot for (GameConfig::player_slot_limit) [orig: @0x551B20..0x551B35]; in
+	// session the apply's 65 ceiling never cuts.
+	config.max_players = static_cast<uint32_t>(host.player_limit);
+	config.dedicated_server = !host.serve_and_play;
+	apply_block_session_settings(config, cfg);
+	return host;
+}
+
+void apply_block_session_settings(GameConfig &config, const gamecfg::GameCfg &cfg) {
 	// The create's words: mpreset, the lineup queue the 0x42 gate admits past
 	// the cap [CNapiNetwork_ValidateJoinRequest @0x4C6220..0x4C624E] and the
 	// duplicate-PCID word.
@@ -160,13 +208,10 @@ HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	config.no_crosshair_spread = cfg.mp_no_crosshair_spread;
 	config.no_scope_drift = cfg.mp_no_scope_drift;
 
-	// The session's cap, already 1..65 (or 1..251) [orig: game_settings.max_players
-	// @0x56963F], and the dedicated word the slot limit adds the host's own
-	// slot for (GameConfig::player_slot_limit) [orig: @0x551B20..0x551B35]; in
-	// session the apply's 65 ceiling never cuts.
-	config.max_players = static_cast<uint32_t>(host.player_limit);
-	config.dedicated_server = !host.serve_and_play;
 	config.num_teams = static_cast<uint8_t>(cfg.mp_numteams); // g_NumTeamsConfig @0x551BAC
+	// The block's own game type, which the remote add's TDM preference test reads
+	// (GameConfig::cfg_game_type) [orig: Server_PlayerAdd @0x51CC6C].
+	config.cfg_game_type = cfg.mp_gametype;
 	// The net config's side byte [orig: (char)g_GameConfigState.sideRequirement_424 @0x5697C3].
 	config.host_side_request = static_cast<int8_t>(cfg.side_req);
 	config.mp_attributes = static_cast<uint32_t>(cfg.mpattrib); // game_settings @0x56967F
@@ -183,13 +228,13 @@ HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	config.auto_balance_min_difference = cfg.autobalance_on_recycle_diff_min; // @0x551BDA
 	config.auto_balance_trigger_difference = cfg.autobalance_on_recycle_diff_max; // @0x551BEB
 
-	// The rule globals [orig: Game_ApplySessionSettingsToGlobals]: g_RespawnTime
-	// from `time_limit` @0x551CD2, g_TimeLimitMinutes from `koth_limit`
+	// The rule globals [orig: Game_ApplySessionSettingsToGlobals]: g_RoundTimeLimitMinutes
+	// from `time_limit` @0x551CD2, g_KothLimitMinutes from `koth_limit`
 	// @0x551CD8..0x551CDF, g_ReplayEnabled @0x551CBA, g_MaxTeamLives @0x551B67,
 	// g_ScoreLimit from `max_kills` and g_KillLimit from `max_score`
 	// @0x551B6D..0x551B8C, g_KothDelta @0x551CF4, g_FlagReturnTime2 @0x551CFE,
-	// g_WeaponViolationLimit from `mp_flagresettime` @0x551D0A.
-	config.respawn_time = static_cast<uint32_t>(cfg.time_limit);
+	// g_FlagCarryLimitSeconds from `mp_flagresettime` @0x551D0A.
+	config.round_time_limit_minutes = static_cast<uint32_t>(cfg.time_limit);
 	config.time_limit_minutes = session_koth_limit_minutes(cfg.koth_limit);
 	config.replay_enabled = static_cast<uint32_t>(cfg.replay);
 	config.max_team_lives = static_cast<uint32_t>(cfg.max_team_lives);
@@ -233,14 +278,107 @@ HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	// [orig: g_SessionDifficulty = multiplayerDifficulty_484 on the authority
 	// @0x551E80 / @0x551F75].
 	config.config_bytes[6] = static_cast<uint8_t>(cfg.mp_difficulty);
-	// [orig: g_SessionPermanentDeath = permanentDeath_5E4 @0x5522AA, byte_A821F0 =
-	//  allowSniperScopeZoom_5EC != 0 @0x5522B9, both in session on the authority]
+	// [orig: g_SessionPermanentDeath = permanentDeath_5E4 @0x5522AA,
+	//  g_SessionAllowSniperScopeZoom = allowSniperScopeZoom_5EC != 0 @0x5522B9, both in
+	//  session on the authority]
 	config.permanent_death = cfg.mp_permanent_death != 0;
 	config.allow_sniper_scope_zoom = cfg.mp_allowsniperscopezoom != 0;
 	// The LAN send cadence reads the block's word [orig:
 	// NapiNPServer_GetSendHoldoffTicks @0x4C4AD1, lanMode_544].
 	config.lan_mode = static_cast<uint32_t>(cfg.lanmode);
-	return host;
+}
+
+TransportPortQuad transport_port_quad(const gamecfg::GameCfg &cfg, NetworkType type,
+		bool authority, std::optional<uint32_t> first) {
+	TransportPortQuad quad{cfg.mp_lan_server_port_min, cfg.mp_lan_server_port_max,
+			cfg.mp_lan_server_port_delta, 0};
+	if (type == NetworkType::NovaWorld) {
+		quad = {cfg.mp_novaworld_port_min, cfg.mp_novaworld_port_max, cfg.mp_novaworld_port_delta,
+				cfg.mp_novaworld_port_random};
+	} else if (!authority) {
+		quad = {cfg.mp_lan_client_port_min, cfg.mp_lan_client_port_max,
+				cfg.mp_lan_client_port_delta, cfg.mp_lan_client_port_random};
+	}
+	if (first) quad.min = static_cast<int32_t>(*first);
+	return quad;
+}
+
+namespace {
+
+// NapiUdpSocket_CreateAndBind's scan over a stored quad (transport_bind_ports' declaration
+// carries the witness).
+std::vector<uint16_t> bind_ports_of_quad(const TransportPortQuad &quad) {
+	const uint32_t start = static_cast<uint32_t>(quad.min);
+	uint32_t start_index = 0;
+	if (quad.random != 0) {
+		const uint32_t attempts = bind_scan_attempts(
+				start, static_cast<uint32_t>(quad.max), static_cast<uint32_t>(quad.delta));
+		if (attempts > 1) {
+			NapiPrng prng(napi_prng_platform_seed());
+			start_index = static_cast<uint32_t>(
+					prng.next_in_range(0, static_cast<int32_t>(attempts) - 1));
+		}
+	}
+	return lan_host_bind_ports(start, static_cast<uint32_t>(quad.max),
+			static_cast<uint32_t>(quad.delta), start_index);
+}
+
+} // namespace
+
+std::vector<uint16_t> transport_bind_ports(const gamecfg::GameCfg &cfg, NetworkType type,
+		bool authority, std::optional<uint32_t> first) {
+	return bind_ports_of_quad(transport_port_quad(cfg, type, authority, first));
+}
+
+TransportPortQuad gate_port_quad(const gamecfg::GameCfg &cfg) {
+	// [orig: CNapiGateManager_WaitForConnect @0x4CE7DE..0x4CE810]
+	return {cfg.mp_gate_port_min, cfg.mp_gate_port_max, cfg.mp_gate_port_delta,
+			cfg.mp_gate_port_random};
+}
+
+std::vector<uint16_t> gate_bind_ports(const gamecfg::GameCfg &cfg) {
+	return bind_ports_of_quad(gate_port_quad(cfg));
+}
+
+uint32_t transport_bind_address(const gamecfg::GameCfg &cfg) {
+	return resolve_address_without_dns(cfg.mp_ip_address_string);
+}
+
+std::string transport_socket_error_text(uint32_t address, const TransportPortQuad &quad) {
+	// The failure's sprintf (transport_socket_error_text's declaration carries the witness).
+	return "NET SOCKET SETUP ERROR!!!!!!!!  CANNOT CREATE SOCKET WITH PARAMS: IP=" +
+	       in_addr_text(address) + ", PORTMIN=" + std::to_string(quad.min) +
+	       " PORTMAX=" + std::to_string(quad.max) + ", PORTDELTA=" + std::to_string(quad.delta) +
+	       ", PORTRANDOM=" + std::to_string(quad.random) + "!!!!!";
+}
+
+std::string transport_socket_setup_text(uint32_t address, uint32_t port) {
+	// Napi_FormatAddress's "%s:%ld" inside the line's brackets.
+	return "NET SOCKET SETUP [" + in_addr_text(address) + ":" + std::to_string(port) + "]";
+}
+
+void write_transport_socket_open_lines(ConnectLog &log, const PeerAddr *bound, uint32_t address,
+		const TransportPortQuad &quad) {
+	// The declaration carries the witness.
+	log.line("NET SETTING UP SOCKET....");
+	if (bound != nullptr) {
+		log.line(transport_socket_setup_text(bound->ip, bound->port));
+		return;
+	}
+	log.line(transport_socket_error_text(address, quad));
+	log.line(net_tearing_down_socket_text());
+}
+
+void write_novaworld_socket_open_lines(ConnectLog &log, const gamecfg::GameCfg &cfg,
+		const PeerAddr *bound) {
+	// The declaration carries the witness.
+	write_transport_socket_open_lines(log, bound, transport_bind_address(cfg),
+			transport_port_quad(cfg, NetworkType::NovaWorld, /*authority=*/false));
+}
+
+void write_transport_socket_teardown_line(ConnectLog *log, bool socket_open) {
+	// The declaration carries the witness.
+	if (log != nullptr && socket_open) log->line(net_tearing_down_socket_text());
 }
 
 void store_server_command_config(

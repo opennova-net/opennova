@@ -1347,6 +1347,7 @@ func test_every_capture_variant_must_match_its_post_capture_renderer_state() -> 
 			"world": {
 				"loaded": true,
 				"visible": true,
+				"presented": true,
 			},
 			"terrain": {
 				"available": true,
@@ -1399,7 +1400,7 @@ func test_every_capture_variant_must_match_its_post_capture_renderer_state() -> 
 				variant, stale_debug, realized_variant),
 				"variant %s must reject stale debug-draw state" % variant.id)
 		for hidden_path in [
-			["world", "visible"],
+			["world", "presented"],
 			["terrain", "visible"],
 			["terrain", "visible_in_tree"],
 			["shadows", "dynamic", "visible"],
@@ -1420,7 +1421,7 @@ func test_every_capture_variant_must_match_its_post_capture_renderer_state() -> 
 func test_selected_caster_variants_require_exact_independently_realized_suppression() -> void:
 	var variant = RenderFixtureContract.shadow_attribution_variants(PackedInt32Array([58]))[3]
 	var diagnostics := {
-		"world": {"loaded": true, "visible": true},
+		"world": {"loaded": true, "visible": true, "presented": true},
 		"terrain": {"available": true, "visible": true, "visible_in_tree": true},
 		"renderer": {"debug_draw": int(variant.debug_draw)},
 		"shadows": {

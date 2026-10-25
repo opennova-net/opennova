@@ -2,8 +2,11 @@
 // (husk first, huskfinal fallback — apart from the death-piece pick), the
 // destroyed entity's presentation identity (the dynamic-vs-authored
 // discriminator + the key it spells), and the settling graft's yaw-only tilt
-// retention [orig: Entity_RaycastCollisionModel @ 0x413086; the collision
-// pick @ 0x538720; the piece pick @ 0x4934af].
+// retention [orig: Render_SectorEntity @ 0x5C4190 (the Flags & 4 test
+// @ 0x5C41A0); the collision picks Entity_RaycastCollisionModel @ 0x413060
+// (@ 0x41307B..0x413088) and Physics_RaycastAgainstEntityPool @ 0x538720
+// (@ 0x538A15); the piece pick @ 0x4934af]; the huskfinal fallback is ours
+// (present_passes.h).
 
 #include <runtime/world/entity.h>
 #include <runtime/world/present_passes.h>

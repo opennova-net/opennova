@@ -38,6 +38,15 @@ class World;
 constexpr int32_t kScopeEaseSteps = 15;
 constexpr int32_t kScopeEaseStepsInset = 7;
 constexpr int32_t kScopeEaseStepsHipfire = 1;
+// The weapon view's lower / raise ease lengths: 31 steps, a raise onto an
+// Emplaced def (Flags 0x80) one [orig: Player_StartWeaponLowerRaiseInterp @0x4DF960 -
+// the lower's 31 @0x4DFA2E, the raise's 1 @0x4DF9E9 / 31 @0x4DFA08 behind the
+// Flags 0x80 test @0x4DF9D1..0x4DF9DB].
+constexpr int32_t kWeaponLowerRaiseSteps = 31;
+constexpr int32_t kWeaponRaiseStepsEmplaced = 1;
+// The lowered pose's drop: 65536.0 off the def's view Z [orig: flt_7C32BC,
+// subtracted @0x4DF99B].
+constexpr double kWeaponLowerDropQ16 = 65536.0;
 // [orig: g_CameraFovTargetQ16 @ 0x26C6848 default 0x500000 = 80.0 horizontal degrees]
 constexpr float kPlayerCameraFovHDeg = 80.0f;
 // [orig: binocular camera fov constant in Player_UpdateFirstPersonCamera]
@@ -51,16 +60,15 @@ constexpr float kBinocularAimOffsetDeg = 2.8125f;
 // [orig: the five NVG gain positions selected by actions 56/57]
 constexpr int32_t kNvgGainMin = 0;
 constexpr int32_t kNvgGainMax = 4;
-// [orig: the chase anchor ease @ 0x437c8d — one quarter per 62 Hz tick]
-constexpr float kTpAnchorEase = 0.25f;
 // The first-person eye pull-back along the full view rotation: -0x3000 on the
 // view-frame FORWARD axis [orig: Math_FixedPointTransformPoint22 of
-// (-0x3000, 0, 0) added onto g_ViewPosX/Y @ 0x438001..0x438031].
-constexpr float kFpEyePullback = 0.1875f;
+// (-0x3000, 0, 0) stored into g_ViewPosX..Z @ 0x438001..0x438031].
+constexpr int32_t kFpEyePullbackQ16 = 0x3000;
 // The CameraOffset floor and the non-person eye bump.
 // [orig: the 0x2000 floor @ 0x4b6b98; the +0x10000 bump @ 0x437e8f]
 constexpr float kEyeMinAbovePosition = 0.125f;
-constexpr float kNonPersonEyeBump = 1.0f;
+constexpr int32_t kNonPersonEyeBumpQ16 = 0x10000;
+constexpr float kNonPersonEyeBump = static_cast<float>(kNonPersonEyeBumpQ16) / 65536.0f;
 // The head-bone eye's terrain floor (the D-INF-18 residual, ported): the probe
 // offset (0x4000 = 0.25 u) and the per-sample clearance (0x1000 = 0.0625 u).
 // [orig: Entity_UpdateInfantryPlayerBody @ 0x4b6c23 / @ 0x4b6c2d]
@@ -77,23 +85,24 @@ constexpr float kAimProjectRange = 1000.0f;
 //  orbit zeroed @ 0x4a3d56/5b); nudge R*(0x2000,0x2000,0x2000) @ 0x43818a;
 //  0.25u march steps @ 0x438243, gate @ 0x4381e9]
 constexpr int32_t kTpDistanceQ16 = 0x10000;
-constexpr float kTpPivotNudge = 0.125f;
-constexpr float kTpMarchStep = 0.25f;
-constexpr float kTpMarchGate = 8.0f;
+constexpr int32_t kTpPivotNudgeQ16 = 0x2000;
+constexpr int32_t kTpMarchGateQ16 = 0x80000;
 // weapon.def `pos`/`tpos` file unit -> world units [orig: the parser stores
 // atof(str) * 256 (flt_7D1D70 @ 0x544770) and the camera ftol's it onto the
 // 16.16 view position — the net world offset is file_value / 256].
 constexpr float kWeaponDefPosScale = 256.0f;
 
-// The FP viewmodel motion lead: a per-render-frame damped tracker of the
-// tracked entity's per-tick movement delta (<<8), whose output >> 7 — clamped
-// ±1024 on x/y and ±4096 on z (16.16) — is added component-wise onto the
-// view-LOCAL camera offset BEFORE the view rotation (the witnessed
-// pre-rotation add takes the world-delta components raw; no frame
-// conversion). Steady velocity decays the lead toward zero — it responds to
-// speed changes, not speed. [orig: the tracker
-// vel += (prev_sample - new_sample - vel + 16) >> 5 @ 0x437bac..0x437c0e in
-// ThirdPersonCamera_Update; the >> 7 + clamps @ 0x4dd4f2..0x4dd54f in
+// The FP viewmodel motion lead: a per-UPDATE damped tracker of the tracked
+// entity's displacement since its mover-entry stamp (Position - savedLivePose,
+// << 8), stepped by the camera update on every main-frame update, paused ones
+// included; each rendered frame reads it >> 7 — clamped ±1024 on x/y and ±4096
+// on z (16.16) — and adds it component-wise onto the view-LOCAL camera offset
+// BEFORE the view rotation (the witnessed pre-rotation add takes the
+// world-delta components raw; no frame conversion). Steady velocity decays the
+// lead toward zero — it responds to speed changes, not speed. [orig: the
+// tracker vel += (prev_sample - new_sample - vel + 16) >> 5 @ 0x437bac..0x437c0e
+// in ThirdPersonCamera_Update, its samples (Position - +0x80..+0x88) << 8
+// @0x437B92..0x437BB2; the >> 7 + clamps @ 0x4dd4f2..0x4dd54f in
 // Player_UpdateFirstPersonCamera]
 struct PlayerViewMotionLead {
     int32_t vel[3] = {0, 0, 0};
@@ -101,12 +110,13 @@ struct PlayerViewMotionLead {
 };
 constexpr int32_t kFpLeadClampXy = 1024;
 constexpr int32_t kFpLeadClampZ = 4096;
-// Advances the tracker one render frame from the entity's current per-tick
-// movement delta (world units) and returns the clamped lead (16.16, the same
-// value order the retail camera adds).
-void player_view_motion_lead_update(PlayerViewMotionLead &lead,
-                                    const float tick_delta_units[3],
-                                    int32_t out_lead_q16[3]);
+// Steps the tracker one update from the entity's displacement since its
+// mover-entry stamp (16.16 words).
+void player_view_motion_lead_step(PlayerViewMotionLead &lead,
+                                  const int32_t displacement_q16[3]);
+// The clamped lead a rendered frame adds (16.16, the same value order the
+// retail camera adds); reading never steps the tracker.
+void player_view_motion_lead_read(const PlayerViewMotionLead &lead, int32_t out_lead_q16[3]);
 
 // The 4:3 framing compensation: with the viewport aspect at 4:3 or narrower
 // (3*width <= 4*height), the FP camera offset drops 0x500 (0.0195 u) on the
@@ -136,11 +146,11 @@ struct MountedCameraInput {
     // its heading [orig: Math_TransformPointFixedPoint22 @0x412E90 of
     //  parentMatrix(+0xB4) x (0x60000, 0, 0), called @0x438855].
     int32_t lookahead_target_q16[3] = {0, 0, 0};
-    float bound_radius = 0.0f;              // carrier +0, mission units
+    PositionWord bound_radius;              // carrier +0: the word, its float view in units
     bool aircraft = false;                  // unit_type 3/4 [orig: @0x43861D]
     // The water plane every chase eye clears, on foot as well as mounted
     // [orig: g_EnvWaterHeightFixed + 0x4000 @0x438409..0x43841E].
-    float water_z = 0.0f;                   // g_EnvWaterHeightFixed, units
+    int32_t water_q16 = 0;                  // g_EnvWaterHeightFixed, 16.16
 };
 
 // THE FIRST-PERSON CAMERA SHAKE. A single counter drives an angular jitter on
@@ -350,13 +360,12 @@ inline int32_t screen_flash_revive_channel(const ScreenFlashState &st) {
 // camera shake 10, both capped at 255, then a radar damage blip is added at
 // `pos_q16` (mission 16.16) for `source` — kind 255 for self damage, else 2
 // when the source's +0x170 entity is class 6, else 0 (radar_damage_kind) —
-// and two per-player-slot words are stamped. Every one of retail's five call
-// sites is gated on the victim being the local player; this function is the
-// arm they share. A world with no bound local player state is a no-op.
-//
-// UNPORTED here, deliberately: the unk_26C77A0[100 * (shadowSlot1 & 0x7FFF)]
-// words +11 = 6 / +12 = 10 [orig: @0x4dd907..0x4dd916], whose consumers are
-// unwitnessed.
+// and the local player's facial row takes the damage face, the expression
+// override 6 (DISGUST) for 10 transitions [orig: @0x4DD907..0x4DD916], on a
+// facial slot the player owns only (retail's unguarded row-0 write is not
+// ported: PERMANENT (Q22-1 (a)), D-NET-NEW-LI-21). Every one of retail's five
+// call sites is gated on the victim being the local player; this function is
+// the arm they share. A world with no bound local player state is a no-op.
 void player_on_damage_received(World &world, const RadarSource &source,
                                const int32_t pos_q16[3]);
 
@@ -374,14 +383,36 @@ struct PlayerViewBiasInterp {
     PlayerViewPose velocity;
     uint32_t remaining = 0;
     bool active = false;
-    int32_t position_bias_q16[3] = {};
-    int32_t rotation_bias_bam[3] = {};
+};
+
+// THE PUBLISHED VIEW BIAS: six process words, not an interp's own. Every step of
+// either view interp (the scope's, then the lower / raise) writes all six, so the
+// last step of a frame wins; a call that moves no lane writes none; the mount
+// request clears them; the first-person camera alone reads them, adding them to the
+// held def's Bone, which moves the viewmodel. Position in 16.16 (the truncating
+// ftol of the current pose less the bound def's +0x10C copy), rotation the BAM
+// difference. No aim or fire word reads the camera they move: its other readers place
+// the muzzle-flash / heat-glow emitter, the action effects and the NVG laser beam.
+// [orig: g_ViewPosBiasX / Y / Z @0xB76520 / @0xB76524 / @0xB76528, g_ViewRotBiasYaw /
+//  Pitch / Roll @0xB7652C / @0xB76530 / @0xB76534 - the writers Player_StepFpViewBiasInterp
+//  @0x4DDF42..0x4DDFC3 and Player_MountWeaponSlot @0x4DFBCF..0x4DFBE8, the one reader
+//  Player_UpdateFirstPersonCamera @0x4DD380 (@0x4DD444..0x4DD450, @0x4DD4CE..0x4DD4DA),
+//  whose g_ViewMatrix Entity_GetCameraTransform @0x4B8C00 serves to
+//  Entity_ComputeWeaponFireTransform @0x4011F0 (WeaponAction_ProcessFrame's emitter
+//  @0x5411DB), Entity_ComputeActionTransform @0x401310 (ActionSlot_SpawnEffect
+//  @0x402002) and Entity_ComputeBoneTransform @0x401890 (through
+//  Entity_ComputeBoneTransformWithClear @0x4DC950 from Entity_RenderNVGLaserBeam @0x5C6090)]
+struct PlayerViewBias {
+    int32_t position_q16[3] = {};
+    int32_t rotation_bam[3] = {};
 };
 
 void player_view_bias_interp_setup(PlayerViewBiasInterp &interp, uint32_t steps,
                                   const PlayerViewPose &idle_source,
                                   const PlayerViewPose &target);
-void player_view_bias_interp_step(PlayerViewBiasInterp &interp, const PlayerViewPose &hip);
+// One step; a step that moves a lane publishes the six words into `published`.
+void player_view_bias_interp_step(PlayerViewBiasInterp &interp, const PlayerViewPose &hip,
+                                  PlayerViewBias &published);
 
 struct PlayerViewState {
     // THE ADS SCOPE TRI-STATE beside the FP camera interp below.
@@ -403,12 +434,33 @@ struct PlayerViewState {
     // endpoints (WeaponDef +0x10C hip copy / +0x124 tpos) and the six-lane
     // interpolator every Setup targets. Its `active` latch IS the ease gate
     // the toggle tests, its completion IS what the settle promoter waits
-    // for, and its published biases ARE the camera's position/rotation
-    // offsets; there is no separate scalar clock.
+    // for, and its steps publish the camera's position/rotation offsets
+    // (`view_bias`); there is no separate scalar clock.
     PlayerViewPose weapon_hip_pose;
     PlayerViewPose weapon_ads_pose;
     PlayerViewBiasInterp weapon_pose_interp;
     bool weapon_pose_bound = false; // fpCameraInterp.entitySlotPtr + its non-null Def
+    // The bound slot's def +0x10C hip copy, the scope interp step's bias reference: the
+    // EquippedSlot's def after a camera reset or an install, the mounted slot's def from a
+    // mount request on, ahead of the commit that stores it [orig: Player_StepFpViewBiasInterp
+    // @0x4DDD20 - entitySlotPtr @0x4DDD25, its def @0x4DDF42, the def's +0x10C @0x4DDF48;
+    // Player_MountWeaponSlot @0x4DFC4B binds the slot].
+    PlayerViewPose weapon_pose_bound_hip;
+    // THE WEAPON VIEW'S LOWER / RAISE INTERP, the same interpolator on its own
+    // record [orig: g_WeaponLowerRaiseInterp @0x82CEA0 -- the counter +0,
+    // entitySlotPtr +76, activeFlag +80]: a cross-category mount's queued
+    // SWITCHFROM lowers the held def's view pose, a SWITCHFROM completion raises
+    // the committed one's (player_view_start_weapon_lower / _raise). Its active
+    // latch is the same-category mount's gate (player_view_weapon_lower_raise_active).
+    // `weapon_lower_raise_hip_pose` is the bound slot's def +0x10C at the start,
+    // the step's bias reference. Its steps publish `view_bias` after the scope's,
+    // so the viewmodel drops and rises with it. Player_InitPlayer's clear stops it
+    // (local_player_init_player_clears) [orig: Player_InitPlayer @0x4E15F0
+    // (@0x4E171C / @0x4E1722), called @0x525BBC].
+    PlayerViewBiasInterp weapon_lower_raise_interp;
+    PlayerViewPose weapon_lower_raise_hip_pose;
+    // The six published bias words both interps' steps write (PlayerViewBias).
+    PlayerViewBias view_bias;
     // The movement-held latch: written by the input pack only, from the packed
     // word's direction bits, so a joiner's latches once per send boundary.
     // [orig: g_MovementKeyHeld @ 0xB7653B; Player_PackInputStateToEntity
@@ -436,12 +488,19 @@ struct PlayerViewState {
     // @0x5ca1f4..0x5ca24b]: the client-local death screen and its sub-mode
     // (g_DeathScreenSubMode: 0 free / 1 chase / 2 first person on the target; the
     // writers are the replica's spectate state), the local dead bit (`Flags & 2`), the
-    // end-of-round gate (g_SpawnSuccessGate) with the on-foot test
+    // end-of-round gate (g_RoundOver) with the on-foot test
     // (parentEntity == 0), and the two g_RulesFlags bits (bit 0 = no death
     // camera, bit 0x40 = server force-first-person while in session — both
     // admin `set` commands, no wire fold yet).
     bool death_screen_active = false;
     int death_screen_submode = 0;
+    // The drawn scene frame skips its world: a cine plays, or the command map is the open
+    // menu screen. The camera compose still runs; the main scene's terrain prepass and
+    // facial pass, the world and the Inset pass inside it do not. The session sets it
+    // each frame it advances (inmatch::Session::advance, FrameOutcome::world_skipped)
+    // [orig: Render_ProcessMainSceneFrame @0x5CA171..0x5CA190 (ebx), the skips
+    //  @0x5CA4EA..0x5CA4EC and @0x5CA620..0x5CA640].
+    bool world_skipped = false;
     bool local_dead = false;
     bool round_ended = false;
     // The client's decided round winner (g_EndRoundWinnerTeam, the S2C
@@ -478,7 +537,13 @@ struct PlayerViewState {
     bool binoculars_view_active = false; // [orig: first-person view g_BinocularsViewActive @ 0xB76538]
     bool nvg_active = false;
     int32_t nvg_gain = kNvgGainMin;
+    // The follow anchor is seeded (a tracked entity is set): it eases on every
+    // update from then on, whatever the view mode; a tracked-entity change
+    // reseeds it at the Position after that update's ease (tp_anchor_reseed)
+    // [orig: g_CameraTrackedEntity, the `if` @0x437AFB; Camera_SetTrackedEntity
+    //  @0x4391D0 (the anchor stores @0x439227..0x43923B)].
     bool tp_anchor_valid = false;
+    bool tp_anchor_reseed = false;
     float tp_anchor[3] = {0.0f, 0.0f, 0.0f}; // mission space (Z-up)
     // The mounted anchor's exact 16.16 carrier: the mounted ease integrates
     // it (>> 4 on x/y, >> 5 on z, half-step rounded) and `tp_anchor` mirrors
@@ -513,7 +578,7 @@ struct PlayerViewState {
     // The camera's tracked entity as a key: 0 the local player, else the
     // spectate target the death screen's first-person sub-mode tracks
     // (kCameraTrackedTargetKey | its wire handle) [orig: g_CameraTrackedEntity
-    // @0xA890CC; Camera_SetTrackedEntity @0x4391e0..0x4391f9].
+    // @0xA890CC; Camera_SetTrackedEntity @0x4391D0 (@0x4391E7..0x4391F9)].
     uint32_t camera_tracked = 0;
 };
 
@@ -605,23 +670,70 @@ inline constexpr int kViewActionChase = 402;       // viewchase, F4
 void player_view_apply_view_action(PlayerViewState &v, uint32_t *input_action_bits,
                                    int action);
 
-// One 62.5 Hz tick: resolve the camera mode, step the six-lane scope-camera
-// interp toward its target and promote the settled byte on the tick its
-// active latch drops [orig: Player_UpdatePerFrame -- the step runs only
-// behind an active interp @0x4de4c7 -> Player_StepFpViewBiasInterp @0x4de4c9,
-// then `if (!activeFlag)` @0x4de4d9 -> g_WeaponScopeActive = (g_ScopeEngaged
-// != 0) @0x4de4f7; the stepper reports done on the call AFTER the last
-// moving lane snapped, so a 15-step authored ease promotes on tick 16, and
-// an unbound slot (null entitySlotPtr/Def) deactivates on its first step
-// @0x4DDD2B..0x4DDDBC and promotes at once], and chase the
-// third-person anchor toward `eye` (mission space). Entering third person
-// seeds the anchor at the eye [orig: Camera_SetTrackedEntity @ 0x4391d0
-// resets the track on change]; leaving invalidates it. In a control seat the
-// anchor chases the carrier position lifted max(1.0, 0.375 r) instead, a
-// sixteenth per tick horizontally and a thirty-second vertically in 16.16
-// [orig: ThirdPersonCamera_Update — the lift @0x437B1F..0x437B4B, the ease
-// @0x437C56..0x437C79].
-void player_view_tick(PlayerViewState &v, const float eye[3]);
+// One 62.5 Hz tick: player_view_promote_tick, then player_view_anchor_tick over
+// a body whose CameraOffset is zero (its Position is `eye_q16`).
+void player_view_tick(PlayerViewState &v, const int32_t eye_q16[3]);
+
+// The tick's Player_UpdatePerFrame leg: resolve the camera mode, step the
+// six-lane scope-camera interp toward its target and promote the settled byte
+// on the tick its active latch drops [orig: Player_UpdatePerFrame -- the step
+// runs only behind an active interp @0x4de4c7 -> Player_StepFpViewBiasInterp
+// @0x4de4c9, then `if (!activeFlag)` @0x4de4d9 -> g_WeaponScopeActive =
+// (g_ScopeEngaged != 0) @0x4de4f7; the stepper reports done on the call AFTER
+// the last moving lane snapped, so a 15-step authored ease promotes on tick
+// 16, and an unbound slot (null entitySlotPtr/Def) deactivates on its first
+// step @0x4DDD2B..0x4DDDBC and promotes at once]. Then the weapon view's
+// lower / raise interp steps behind its own active latch, through the same
+// stepper; its completion callback has no writer, so its drop runs nothing
+// [orig: Player_UpdatePerFrame @0x4DE4FD..0x4DE522 - the latch test @0x4DE4FD,
+// Player_StepFpViewBiasInterp @0x4DE50A, g_WeaponLowerRaiseDoneCallback
+// @0x4DE517..0x4DE522].
+// Retail steps both once per main frame, and the main frame is the logic tick
+// (Game_ProcessMainFrame @0x5263F0 advances g_CurrentTick once per call), so
+// this leg runs once per tick. A paused single-player
+// update skips it, as Client_ProcessNetworkFrame skips Player_UpdatePerFrame
+// under the pause word [orig: @0x42C184..0x42C18E].
+void player_view_promote_tick(PlayerViewState &v);
+
+// The weapon view's lower: the held def's view pose (its Bone +0xF4, which the
+// weapon.def parse copies into the hip pose +0x10C, so `weapon_hip_pose`) eased
+// in 31 steps to the lowered pose, the same X / Y, Z 65536.0 lower and the three
+// rotation words zero. A cross-category mount runs it when its forced SWITCHFROM
+// queued (handle_weapon_switch_outcome). [orig: Player_StartWeaponLowerRaiseInterp
+// @0x4DF960 type 0 - the lowered pose @0x4DF969..0x4DF9B4, entitySlotPtr
+// @0x4DF9A1, Setup(31, &Bone, lowered) @0x4DFA19..0x4DFA35; the pos copy
+// WeaponDefs_ParseLineCallback @0x5446DB..0x544717]
+void player_view_start_weapon_lower(PlayerViewState &v);
+
+// The weapon view's raise: the lowered pose of the def a SWITCHFROM completion
+// committed (its view pose `weapon_hip_pose` as the commit's mount bound it)
+// eased to that hip pose in 31 steps, or 1 for an Emplaced def (Flags 0x80).
+// A running interp eases on from its current pose (CNetPlayerInterp_Setup).
+// [orig: Player_StartWeaponLowerRaiseInterp @0x4DF960 type 1 - Setup(1 / 31,
+// lowered, +0x10C) @0x4DF9C0..0x4DFA0F; called by WeaponAction_SwitchFrom
+// @0x5433B0 @0x5434AA, after WeaponSlot_TryQueueSwitchTo @0x5434A3]
+void player_view_start_weapon_raise(PlayerViewState &v, bool emplaced);
+
+// The lower / raise interp's active latch: a same-category mount queues no
+// SWITCHRANK while it is set [orig: Player_MountWeaponSlot @0x4DFB8D..0x4DFB93,
+// g_WeaponLowerRaiseInterp.activeFlag].
+bool player_view_weapon_lower_raise_active(const PlayerViewState &v);
+
+// The follow anchor's update, whatever the view mode: a seeded anchor chases
+// `eye_q16` a quarter step in 16.16, `(target - anchor + 4) >> 2` [orig:
+// ThirdPersonCamera_Update @0x437AF0 (@0x437C83..0x437CB5)]; in a control seat
+// it chases the carrier position lifted max(1.0, 0.375 r) instead, a sixteenth
+// per tick horizontally and a thirty-second vertically in 16.16 [orig:
+// ThirdPersonCamera_Update @0x437AF0 — the lift @0x437B1F..0x437B4B, the ease
+// @0x437C56..0x437C79]. An unseeded anchor (no tracked entity yet) or a
+// tracked-entity change (tp_anchor_reseed, after this update's ease) seeds it
+// at `position_q16`, with no CameraOffset [orig: the tracked test @0x437AFB;
+// Camera_SetTrackedEntity @0x4391D0 (@0x439227..0x43923B)]. It runs on every
+// main-frame update, paused ones included (local_player_camera_update).
+// `position_q16` / `eye_q16`: the tracked body's Position, and Position +
+// CameraOffset, 16.16 words.
+void player_view_anchor_tick(PlayerViewState &v, const int32_t position_q16[3],
+                             const int32_t eye_q16[3]);
 
 // Whether the scope-camera interp is mid-ease: its active latch, which holds
 // one call past the last lane snap. Every scope toggle is REFUSED while it
@@ -644,7 +756,9 @@ inline bool player_view_scope_settled(const PlayerViewState &v) {
 // The weapon FSM's bare `g_WeaponScopeActive = 0`: the promoted byte alone,
 // the target, the interp and the hipfire latch untouched (no ease, no FOV
 // write, no tip). [orig: WeaponAction_Idle @0x5429f0; WeaponAction_EmptyIdle
-//  @0x542ad3; WeaponAction_ProcessFrame @0x5413a0, ahead of its toggle]
+//  @0x542ad3; WeaponAction_ProcessFrame @0x5413a0, ahead of its toggle;
+//  WeaponAction_SwitchRank @0x54357C, a local completion's new EquippedSlot def with
+//  no optic]
 inline void player_view_clear_scope_promoted(PlayerViewState &v) {
     v.scope_settled = false;
 }
@@ -657,11 +771,30 @@ void player_view_scope_reset(PlayerViewState &v);
 // copy angle velocity into current, then deactivate the interpolator.
 // [orig: Player_ResetCameraAndMovementState @0x4DE1F0..0x4DE281]
 void player_view_weapon_switch_reset(PlayerViewState &v);
-// A direct mount clears only the published biases. Same-category mounts keep
-// the promoted byte; ForceScoped sets it; an optical promoted mount sets up a
-// one-step transition to the new def's ADS pose without stepping it here.
-// [orig: Player_MountWeaponSlot @0x4DFB31..0x4DFC9A]
+// A mount's view words, as an install that ran no mount request writes them: same-category
+// mounts keep the promoted byte; ForceScoped sets it; a category change clears it; then the
+// bind (player_view_weapon_mount_bind) on the installed def's poses. A switch's commit writes
+// none (its mount request wrote them, mount_queue_switch_out) but a SWITCHRANK's bare clear
+// of the byte for a def with no optic (player_view_clear_scope_promoted).
+// [orig: Player_MountWeaponSlot @0x4DFB31..0x4DFB66, @0x4DFC35..0x4DFC9A]
 void player_view_weapon_mount(PlayerViewState &v, int32_t flags, bool category_changed);
+// The mount's bind of the first-person camera interp to the mounted slot, past its bias clear:
+// bound for an optic def (Flags & 3) or a 0x04000000 one, the step's reference that def's hip
+// pose; an optic def with the promoted byte set engages the scope and sets up a one-step
+// transition to its ADS pose, not stepped here; the running pose is retained.
+// [orig: Player_MountWeaponSlot @0x4DFA40 - entitySlotPtr @0x4DFC4B, Flags & 3 @0x4DFC44..0x4DFC51,
+//  g_WeaponScopeActive @0x4DFC53, g_ScopeEngaged = 1 @0x4DFC5B, CNetPlayerInterp_Setup(1, +0x10C,
+//  +0x124) @0x4DFC65..0x4DFC7D, g_ScopeHipfire = 0 @0x4DFC83, the 0x04000000 test and the unbind
+//  @0x4DFC8E..0x4DFC9A]
+void player_view_weapon_mount_bind(PlayerViewState &v, int32_t flags, const PlayerViewPose &hip,
+                                   const PlayerViewPose &ads);
+// The mount request's clear of the six published bias words, past its queue (and the
+// lower that queue starts), ahead of its first-person camera update; the commit that
+// later stores the slot clears nothing.
+// [orig: Player_MountWeaponSlot @0x4DFA40 - @0x4DFBCF..0x4DFBE8, Player_UpdateFirstPersonCamera
+//  @0x4DFBED; WeaponAction_SwitchFrom @0x5433B0 / WeaponAction_SwitchRank @0x543500 write
+//  none of them]
+void player_view_mount_clear_bias(PlayerViewState &v);
 
 // Whether a scope request for `engaged` has anything to do: false when that
 // target is already reached or in flight. The one exception is the engaged
@@ -743,7 +876,7 @@ void player_view_binocular_sway_offset(float unit_random,
 // suppressed by a direction bit in the frame's input word, death, and round
 // end, but survives third person; the optical view additionally requires
 // first person. [orig: Player_UpdatePerFrame @0x4de37b..0x4de3c8 -- Health
-// @0x4de38d, g_SpawnSuccessGate @0x4de39e, `g_InputFlags & 0x1E` @0x4de3ae,
+// @0x4de38d, g_RoundOver @0x4de39e, `g_InputFlags & 0x1E` @0x4de3ae,
 // g_CameraMode == 1 @0x4de3bf]
 void player_view_update_effective_modes(PlayerViewState &v, bool alive, bool round_ended);
 
@@ -806,6 +939,21 @@ float fov_vertical_from_horizontal_deg(float fov_h_deg, float aspect);
 // (renderer/d3d9_raster.h): the surface's pixels, since retail stretches the
 // pass through its projection onto the backbuffer itself; a shell whose pixel
 // centres sit at i + 0.5 translates its clip image by it.
+// That backbuffer is the device's, made at the game's init (and again only by a
+// display-mode change); no mission start, teardown, map change or view without
+// a player makes or frees one, so a shell's target stands for it while its mode
+// is selected, held (drawing nothing) through every exit from live play, never
+// built again per mission. The mode itself is selected at each mission start,
+// ahead of its loads: the start sets the stretch from the session's aspect mode
+// [orig: Game_StartMission @0x524360 - Render_SetAspectRatioMode @0x58D870 (the
+//  call @0x524732)], so a shell's target for that mode stands (held) from the
+// mission start on, and no live frame makes it.
+// [orig: Game_Run @0x4A7FB0 - Game_InitSubsystems @0x4A6CD0 (the call
+//  @0x4A7FD5); Game_InitSubsystems - Renderer_SetDisplayModeWithFallback
+//  @0x587370 (the call @0x4A722A); Renderer_SetDisplayModeWithFallback -
+//  CD3DDevice_InitializeDisplay @0x679890 (the calls @0x587426 / @0x587461 /
+//  @0x5874A7 / @0x5874E2); CD3DDevice_InitializeDisplay - CGfxDevice_CreateDevice
+//  @0x67E5D0 (the call @0x6798FB)]
 struct ViewProjection {
     float fov_h_deg = 0.0f; // the horizontal fov, mode-invariant
     float fov_v_deg = 0.0f; // 2 * atan(tan(fov_h/2) * selected)
@@ -847,9 +995,10 @@ ViewProjection nvg_view_projection(const ViewProjection &frame,
 float viewmodel_focal_ratio(float world_fov_h_deg, float renderfov_h_deg);
 
 // The first-person view position in RAW weapon.def units: the def `pos`
-// (+0xF4) plus the interp's PUBLISHED position bias (g_ViewPosBiasX/Y/Z,
-// the truncating ftol of interp_current - the hip copy at +0x10C, in the
-// def's *256 Q16 scale) brought back to file units over kWeaponDefPosScale.
+// (+0xF4) plus the PUBLISHED position bias (view_bias, g_ViewPosBiasX/Y/Z:
+// the last step's truncating ftol of its interp's current - the hip copy at
+// +0x10C, in the def's *256 Q16 scale) brought back to file units over
+// kWeaponDefPosScale.
 // Zero bias at the hip, tpos - pos once the lanes snap; no float blend and no
 // tpos input, the ADS endpoint lives in the bound pose. [orig:
 // Player_UpdateFirstPersonCamera @ 0x4dd380 -- ftol(Bone +0xF4) @0x4dd479..
@@ -880,13 +1029,14 @@ float player_view_fp_pitch_recoil_deg(int32_t recoil_pitch_bam);
 //  g_ViewRotRoll = entity+0x2DC + (entity+0xB0 >> 2)]
 float player_view_fp_roll_deg(int32_t torso_roll_bam, int32_t lean_bam);
 
-// The chase camera's collision-march NO-COLLISION landing [orig:
-// @ 0x438213..0x43832e]: under 8.0u the eye marches back in 0.25u steps for
-// stepIndex 1..numSteps-1 (numSteps = floor(dist/0.25)) and stays on the LAST
-// step — never the full distance (numSteps <= 1 leaves the eye at the pivot
-// @ 0x43821f). The per-step bone-collision FORCES (the obstruction pull-in)
-// stay a tracked deferral (net-re §5.39).
-float player_view_tp_effective_distance(float distance);
+// The chase camera's collision-march NO-COLLISION landing, 16.16 [orig:
+// @ 0x438213..0x43832e]: under 8.0u (0x80000) the eye marches back in 0.25u
+// steps for stepIndex 1..numSteps-1 (numSteps = dist >> 14) and stays on the
+// LAST step, (numSteps - 1) * 0x4000 behind the pivot, never the full
+// distance (numSteps <= 1 leaves the eye at the pivot @ 0x43821f). The
+// per-step bone-collision FORCES (the obstruction pull-in) stay a tracked
+// deferral (net-re §5.39).
+int32_t player_view_tp_effective_distance(int32_t distance_q16);
 
 // Advance the three filters from ONE weather-PRNG word and return the BAM32
 // deltas to add to the FP view rotation. A zero counter produces nothing and
@@ -934,54 +1084,73 @@ void player_view_floor_eye_to_terrain(const terrain::TerrainHeightField *terrain
                                       bool indoors, float eye[3]);
 
 // The camera legs of one Camera_ComputeThirdPersonView call that need no
-// world lookup, mission space — the witnessed pose math; the presenting shell
-// converts frames and stamps the Camera3D node. The mode-0 carrier legs and
-// the ground-entity leg run before this (local_player_camera_compose,
-// world/local_player_view.h). `anchor_eye` is live Position + the motor's
-// CameraOffset; pass valid=false for a non-person entity. `aim_yaw/pitch_deg`
-// are the body's aim angles and `entity_roll_deg` its own Roll word.
-// `terrain` + `indoors` feed the chase clearances; the motor already floors
-// the on-foot head. `march_candidates` is the entity's proximity-candidate
-// count being non-zero (the chase march's gate). Advances the composition's
-// own state: the person leg clears the ground-entity lift and the mounted
-// chase eases the look-ahead.
+// world lookup. The call composes the view in WORDS, as retail does: the
+// g_ViewPos 16.16 words and the g_ViewRot BAM words; the float mirror is the
+// presenting shell's (it converts frames and stamps the Camera3D node). The
+// mode-0 carrier legs and the ground-entity leg run before this
+// (local_player_camera_compose, world/local_player_view.h). `anchor_eye_q16`
+// is Position + the motor's CameraOffset (the integer adds @0x437FA2..0x437FB7);
+// pass valid=false for a non-person entity. `yaw_bam` / `pitch_bam` are the
+// tracked entity's Yaw (+0x10) and Pitch (+0x14) words and `entity_roll_bam`
+// its Roll (+0x18). `terrain` + `indoors` feed the chase clearances; the motor
+// already floors the on-foot head. `march_candidates` is the entity's
+// proximity-candidate count being non-zero (the chase march's gate). Advances
+// the composition's own state: the person leg clears the ground-entity lift
+// and the mounted chase eases the look-ahead.
 // First person [orig: Camera_ComputeThirdPersonView @ 0x437d10 mode 0, the
-// person leg @ 0x437f9c..0x438031]: eye = the floored anchor pulled back
-// kFpEyePullback along the view forward; pitch adds the doubled recoil;
-// roll = torsoRoll + lean/4. A non-person entity takes the +1.0 bump over
-// Position under its own rotation triple instead [orig: @0x437E89..0x437E99].
-// Third person [orig: mode 1 @ 0x4380E4..0x438650 and the look-at
-// @0x4387DF..0x43892D]: the anchor-translated view matrix places the eye
-// `distance` back (or on the collision march's landing) and the pivot nudge
-// R*(nudge,nudge,nudge) is the look-at target; the clearances apply to every
-// chase eye; roll 0. Mounted (`v.mount.control_seat`) [orig: the mounted arm
-// of mode 1 — yaw @0x438138..0x43814A, pitch @0x438150, distance
-// @0x438121..0x438136, the slope march @0x43846E..0x438619, the aircraft
-// drop @0x43861D..0x43864C, the look-ahead @0x438811..0x4388AF]: the eye sits
-// mount_distance(r) behind the eased mounted anchor along the quarter-damped
-// look yaw at the fixed downward pitch, is floored by the clearances and the
-// slope raise, dropped r/2 on an aircraft, and the final angles look at the
-// pivot plus the eased look-ahead (world/tp_camera_mount.h carries the
-// constants).
+// person leg @ 0x437f9c..0x438031]: pitch adds the doubled recoil
+// (@0x437FBD..0x437FC7), roll = torsoRoll + (lean sar 2) (@0x437FCD..0x437FE6);
+// the euler matrix over the eye and that rotation (@0x437FEC) carries
+// (-0x3000, 0, 0) to the eye (@0x438001..0x438031). A non-person entity takes
+// the +0x10000 bump over Position under its own rotation triple instead
+// [orig: @0x437E89..0x437E99; the triple @0x437D6F..0x437D9B].
+// Third person [orig: mode 1 @ 0x4380E4..0x438681 and the look-at
+// @0x4387DF..0x438933]: the euler matrix over the anchor words and the seed
+// angles (@0x438155..0x438179) carries (0x2000, 0x2000, 0x2000) to the pivot
+// (@0x43817E..0x4381A4), the pivot REPLACES the matrix translation
+// (@0x4381B9..0x4381C4), and the eye is that matrix's image of (-distance, 0,
+// 0) (@0x4383E0..0x4383FB) or of the march landing; the clearances apply to
+// every chase eye; the look-at from the eye to the pivot is ftol(fpatan *
+// dbl_7C19D8) for the yaw, and for the pitch over the Q22 table horizontal
+// (@0x4388B5..0x43892D); roll 0. Mounted (`v.mount.control_seat`) [orig: the
+// mounted arm of mode 1, yaw @0x438138..0x43814A, pitch @0x438150, distance
+// @0x438121..0x438136, the slope march @0x43846E..0x438619, the aircraft drop
+// @0x43861D..0x43864C, the look-ahead @0x438811..0x4388AF]: the eye sits
+// mount_distance_q16(r) behind the pivot along the quarter-damped look yaw at
+// the fixed downward pitch, is floored by the clearances and the slope raise,
+// dropped r/2 on an aircraft, and the final angles look at the pivot plus the
+// eased look-ahead (world/tp_camera_mount.h carries the legs).
 // Mode 4 [orig: the lerp @0x4389eb..0x438b49]: the death camera's FROM/TO
-// poses lerped against `v.view_tick` (world/death_camera.h), converted
-// through world/angle.h; roll rides the same lerp.
+// poses lerped against `v.view_tick` (world/death_camera.h); roll rides the
+// same lerp.
 struct PlayerCameraPose {
+    // The view words the call leaves for every reader until the next call
+    // [orig: g_ViewPosX..Z @0xA890D4..0xA890DC; g_ViewRotYaw / Pitch / Roll
+    //  @0xA890E0..0xA890E8, the yaw the BAM heading].
+    int32_t pos_q16[3] = {0, 0, 0};
+    int32_t yaw_bam = 0;
+    int32_t pitch_bam = 0;
+    int32_t roll_bam = 0;
+    // The presentation mirror of the words (player_camera_pose_present): the
+    // shell's read, which the main scene's optics adjust per rendered frame.
     float eye[3] = {0.0f, 0.0f, 0.0f}; // mission units
     float yaw_deg = 0.0f;              // mission-euler view angles
     float pitch_deg = 0.0f;
     float roll_deg = 0.0f;
     bool third_person = false;
 };
+// Refresh the float mirror from the words: the eye's 16.16 views, the mission
+// yaw (90 - heading) and the pitch / roll degrees.
+void player_camera_pose_present(PlayerCameraPose &pose);
 void player_view_compose_camera(PlayerViewState &v,
-                                const float position[3],
-                                const float anchor_eye[3], bool anchor_valid,
+                                const int32_t position_q16[3],
+                                const int32_t anchor_eye_q16[3], bool anchor_valid,
                                 const terrain::TerrainHeightField *terrain,
                                 bool indoors,
-                                float aim_yaw_deg, float aim_pitch_deg,
+                                int32_t yaw_bam, int32_t pitch_bam,
                                 int32_t recoil_pitch_bam,
                                 int32_t torso_roll_bam, int32_t lean_bam,
-                                bool march_candidates, float entity_roll_deg,
+                                bool march_candidates, int32_t entity_roll_bam,
                                 PlayerCameraPose &out);
 
 } // namespace opennova::world

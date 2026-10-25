@@ -5,7 +5,7 @@
 // [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66 (heading), @0x40EB69..0x40EBA6
 //  (pitch, roll); the movers' entry copies Entity_UpdateVehiclePhysics @0x48AF7A..0x48AF8C,
 //  Entity_UpdateWatercraftPhysics @0x48D4B2..0x48D4CB, Entity_UpdateAircraftPhysics
-//  @0x49034C..0x49035E, Entity_ProcessInfantryPhysics @0x46E133..0x46E14C]
+//  @0x49034C..0x49035E, Vehicle_ProcessSelectorZeroGround @0x46E133..0x46E14C]
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/entity.h>
@@ -46,9 +46,9 @@ struct Rig {
         veh.has_item_def = true;
         veh.net_id = 200;
         veh.position = {100.0f, 200.0f, 10.0f};
-        veh.yaw = 1;
-        veh.pitch = 10;
-        veh.roll = -3;
+        veh.heading = placed_heading_bam(1);
+        veh.pitch_bam = spawn_angle_bam(10); // the placed words (D-NET-NEW-L6-3)
+        veh.roll_bam = spawn_angle_bam(-3);
         veh.health = veh.health_max = 3000;
         veh.alive = true;
         veh_h = w.registry.spawn(1, veh);
@@ -97,7 +97,7 @@ void test_ground_seeds_read_the_spawn_form() {
 void test_simple_motor_seed_reads_the_spawn_form() {
     Rig r;
     const VehicleTraits t = motor_traits(VehicleFamily::Ground, 0);
-    r.w.vehicles.tick_simple_motor(r.veh(), t, nullptr, false);
+    r.w.vehicles.tick_simple_motor(r.veh(), t, false);
     CHECK(r.veh().saved_live_yaw == kHeading89);
     CHECK(r.veh().saved_live_pitch == kPitch10);
     CHECK(r.veh().saved_live_roll == kRollMinus3);
@@ -199,14 +199,14 @@ void test_seat_point_reads_the_spawn_form() {
     for (const bool tilted : {false, true}) {
         Rig r;
         Entity &placed = r.veh();
-        placed.yaw = 37;
-        placed.pitch = tilted ? -12 : 0;
-        placed.roll = tilted ? 17 : 0;
+        placed.heading = placed_heading_bam(37);
+        placed.pitch_bam = spawn_angle_bam(tilted ? -12 : 0);
+        placed.roll_bam = spawn_angle_bam(tilted ? 17 : 0);
         Entity seeded = placed;
         seeded.veh.yaw_seeded = true;
         seeded.veh.yaw_bam = spawn_angle_bam(90 - 37);
-        seeded.veh.air_pitch_bam = spawn_angle_bam(placed.pitch);
-        seeded.veh.air_roll_bam = spawn_angle_bam(placed.roll);
+        seeded.veh.air_pitch_bam = placed.pitch_bam;
+        seeded.veh.air_roll_bam = placed.roll_bam;
         const Vec3 a = entity_local_point_world(placed, local);
         const Vec3 b = entity_local_point_world(seeded, local);
         CHECK(a.x == b.x && a.y == b.y && a.z == b.z);

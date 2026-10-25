@@ -155,6 +155,10 @@ int synthetic_every_key() {
 	// name with a space quoted; what the model holds nothing of (the comment, NOSUCHKEY) left out.
 	CHECK(text.find("AMMOCOUNTPOS\t168,616,0,right\r\n") != std::string::npos);
 	CHECK(text.find("ZONEINFO\t1012,386,center\r\n") != std::string::npos);
+	// CONNECTSTATUS is the three-field form: its third token the alignment (D-NET-NEW-LI-42)
+	// [orig: HUD_ParseHudposToken @0x59FAE9..0x59FB32].
+	CHECK(hud.connect_status[0] == 1012 && hud.connect_status[1] == 10 && hud.connect_status[2] == 1);
+	CHECK(text.find("CONNECTSTATUS\t1012,10,right\r\n") != std::string::npos);
 	CHECK(text.find("EXPPOINTS\t8,96,0,left\r\n") != std::string::npos);
 	CHECK(text.find("fonthud1_lo\t\"my font.fnt\"\r\n") != std::string::npos);
 	CHECK(text.find("alphafade\t40,70.25,1.5\r\n") != std::string::npos);

@@ -57,6 +57,11 @@ public:
 		EVENT_MOUSE_SCALE_NEGATIVE = opennova::hud::hud_toggle_event::kMouseScaleNegative,
 		EVENT_JOIN_LOCK_TOGGLED = opennova::hud::hud_toggle_event::kJoinLockToggled,
 	};
+	// The mousescale record's argument above the event bits of a 64-bit event word (engine
+	// hud_toggle_event::kMouseScaleParamShift carries the witness).
+	enum {
+		MOUSE_SCALE_PARAM_SHIFT = opennova::hud::hud_toggle_event::kMouseScaleParamShift,
+	};
 	// The special-key legs' result bits (engine hud_special_key).
 	enum SpecialKey {
 		SPECIAL_KEY_CONSUMED = opennova::hud::hud_special_key::kConsumed,
@@ -70,6 +75,7 @@ public:
 		ROUND_OVER_CONSUMED = opennova::hud::hud_round_over::kConsumed,
 		ROUND_OVER_RESTART = opennova::hud::hud_round_over::kRestart,
 		ROUND_OVER_EXIT = opennova::hud::hud_round_over::kExit,
+		ROUND_OVER_ARM = opennova::hud::hud_round_over::kArm,
 	};
 	// The polled catalog rows, one bit each (engine HudToggleRow).
 	enum Row {
@@ -102,16 +108,24 @@ public:
 
 	// One frame's poll over the sampled rows (a mask of 1 << Row); returns the
 	// Event bits.
-	// `local_alive` feeds the commander_menu row's dead-player gate;
+	// `local_alive` feeds the bit-0 rows' dead-player gate;
 	// `authority` / `mp_session_peer` are the connection mode's two bits (the
 	// ToggleServer row, the map-legend gate and the playerlist reroute);
 	// `mouse_scale_negative` is the mousescale fire's sign bit
-	// (ControlsModel.is_token_fire_signed). The bits are the engine's unsigned
+	// (ControlsModel.is_token_fire_signed); `head_drops` the rows (1 << Row)
+	// whose event the dispatcher's head drops by their flags (engine
+	// HudKeyPoll::head_drops). The bits are the engine's unsigned
 	// 32-bit word, EVENT_JOIN_LOCK_TOGGLED its top bit, so the result is 64-bit.
 	int64_t poll(int p_rows_down, bool p_active,
 			bool p_in_session, bool p_objective_game, bool p_local_alive = true,
 			bool p_authority = false, bool p_mp_session_peer = false,
-			bool p_mouse_scale_negative = false);
+			bool p_mouse_scale_negative = false, int p_head_drops = 0);
+	// One input frame's dispatched row events (a mask of 1 << Row, each one event;
+	// engine hud_toggles_dispatch), under the poll's gates; returns the Event bits.
+	int64_t dispatch(int p_rows_fired, bool p_active,
+			bool p_in_session, bool p_objective_game, bool p_local_alive = true,
+			bool p_authority = false, bool p_mp_session_peer = false,
+			bool p_mouse_scale_negative = false, int p_head_drops = 0);
 	// The escape action's HUD-window close chain; returns the Event bits.
 	int escape(bool p_in_session, bool p_spawn_gate, bool p_authority = false);
 	// The session create / destroy's status-view rule (engine

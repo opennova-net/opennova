@@ -1063,10 +1063,13 @@ void MissionViewportApplier::tick(const opennova::editor::ViewportModel &viewpor
 
 void MissionViewportApplier::unhusk_(Husk &husk) {
 	// The intact entity as it stood (simulation/husk_swap: its parts shown, a carved static's rows
-	// back, its terrain shadow its own again), the husk model freed.
+	// back, its terrain shadow its own again), the husk model freed. The swap hands the husk's
+	// destroyed sections to the intact model; this view keeps them on the husk alone (the frame's
+	// hidden_sections) and draws an intact entity whole, so the husk lets go of them first.
+	ObjectModel *model = Object::cast_to<ObjectModel>(ObjectDB::get_instance(husk.graft.husk));
+	if (model != nullptr) model->set_destroyed_section_mask(0);
 	husk_graft_restore(placer_.ptr(), husk.graft);
-	if (ObjectModel *model =
-					Object::cast_to<ObjectModel>(ObjectDB::get_instance(husk.graft.husk))) {
+	if (model != nullptr) {
 		model->set_visible(false);
 		model->queue_free();
 	}
@@ -1247,7 +1250,7 @@ void MissionViewportApplier::present(double dt) {
 	const int64_t effects_start = now_us();
 	layers_->present_particles(clock_ms_);
 	layers_->present_drops();
-	layers_->present_overlay(shown_lights_ ? lights_.ptr() : nullptr);
+	layers_->present_overlay(shown_lights_ ? lights_.ptr() : nullptr, clock_ms_);
 	leg_us_[2] = now_us() - effects_start;
 	layers_->present_frame_effects();
 	layers_->present_clear_and_cube();

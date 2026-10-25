@@ -103,6 +103,25 @@ func test_all_finite_family_and_render_policy_resources_load() -> void:
 			"manifest covers the bounded resource matrix")
 
 
+# The renderer loads its whole effect set as it starts (retail's boot subsystem
+# init loads every .fx, HLSLEffect_InitAndLoadAll @ 0x5B0080; a material only
+# looks its effect up later): a ready GameWorld leaves every manifest resource
+# loaded and held, and a later load adds none.
+func test_the_effect_set_loads_at_the_renderers_start() -> void:
+	WorldFixture.make_world(self)
+	var cache := ObjectShaderCache.get_singleton()
+	var manifest: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(
+			"res://shaders/object/pipeline_manifest.json"))
+	assert_eq(cache.get_effect_set_size(), int(manifest.get("total_resource_count", -1)),
+			"every reachable technique and policy, the post-multiply proxies too")
+	# Each compiles with the set: the device compiles a shader at its first material bind, so the
+	# set's held material binds every one (D-NET-NEW-LF-21; retail's D3DXCreateEffect compiles the
+	# whole effect as it loads, HLSLEffect_LoadFromFile @ 0x5AE690).
+	assert_eq(cache.get_effect_set_bind_count(), cache.get_effect_set_size(),
+			"a held material binds every shader of the set at its load")
+	assert_eq(cache.load_effect_set(), 0, "the set loads once")
+
+
 func test_configure_material_selects_compile_time_techniques() -> void:
 	var cache = ObjectShaderCache.get_singleton()
 

@@ -56,7 +56,7 @@ std::vector<playersav::BindingEntry> default_binding_table() {
 	const controls::ActionDef *rows = controls::catalog(&count);
 	std::vector<const controls::ActionDef *> filtered;
 	for (size_t i = 0; i < count; ++i) {
-		// [orig: `(flags & 0x4000000) != 0` @0x54c2e5]
+		// [orig: `test edx, 4000000h` @0x54C2DF, its `jz` @0x54C2E5]
 		if ((rows[i].flags & kDefaultTableFlag) != 0 && controls::action_code(rows[i].id) >= 0)
 			filtered.push_back(&rows[i]);
 	}

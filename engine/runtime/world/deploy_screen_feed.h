@@ -36,7 +36,7 @@ inline constexpr int32_t kDeployRefreshTicks = 16;
 //  (g_DeployScreenActive || (int)(g_CurrentTick - g_CameraLerpStartTick) >
 //  240)` @0x554737..0x554752, CWnd_SetShown(DEATH_SHROUD, 1) @0x554771,
 //  `(g_CurrentTick & 0xF) == 0` -> UI_UpdateDeathScreenContent @0x55477d;
-//  run from UI_TeardownScene @0x54e67c]
+//  run from UI_ProcessMenuScreenFrame @0x54e67c]
 inline constexpr int32_t kDeathShroudRevealTicks = 240;
 inline bool death_shroud_revealed(bool deploy_screen_active, int32_t ticks_since_death) {
 	return deploy_screen_active || ticks_since_death > kDeathShroudRevealTicks;

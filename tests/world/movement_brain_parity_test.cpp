@@ -1,6 +1,9 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/world.h>
+
+#include "../common/hull_brain.h"
+
 #include <cstdio>
 #include <memory>
 
@@ -87,6 +90,7 @@ void player_motor_vectors() {
     seat.bone_index = 1;
     vehicle.seats.push_back(seat);
     const auto vh = w.registry.spawn(1, vehicle);
+    test_common::brain_hull(w, vh); // the mover runs past its head
     Entity driver;
     driver.kind = EntityKind::Organic;
     driver.health = driver.health_max = 100;
@@ -128,7 +132,7 @@ void player_motor_vectors() {
         drv.net_analog_x = static_cast<int8_t>(v[1]);
         drv.net_analog_y = static_cast<int8_t>(v[2]);
         drv.net_analog_z = static_cast<int8_t>(v[3]);
-        drv.yaw = 64; // rounded mirror; the body owns the full input angle
+        drv.heading = placed_heading_bam(64); // rounded mirror; the body owns the full input angle
         body.heading = body.inf.target_heading = v[4];
         w.vehicles.tick_motor(veh, traits);
         const int32_t actual[] = {veh.veh.cmd_speed, veh.veh.steer_target_bam,
@@ -154,6 +158,7 @@ void aircraft_recovery_vectors() {
     };
     auto world = std::make_unique<World>();
     auto &w = *world;
+    w.registry.configure_pool(1, 8); // the brain's row (its position words)
     const int first = w.ai.attach(EntityHandle::make(1, 0));
     const int second = w.ai.attach(EntityHandle::make(1, 1));
     for (const auto &v : cases) {

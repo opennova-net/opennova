@@ -16,15 +16,15 @@ using namespace sim_internal;
 
 bool Simulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int p_team) {
 	if (!world_installed_) return false;
-	// P7: the inmatch listen server auto-spawns the host's own player at bring-up (the faithful §5.0
-	// mode-3 path), so an explicit spawn is a no-op success there. The legacy LAN host + any non-listen
-	// caller (no auto-spawn) still spawn at the requested pose below.
+	// P7: the inmatch listen server's mission start spawns the host's own player at its round
+	// init (the faithful §5.0 mode-3 path, past the PreMission pass), so an explicit spawn is a
+	// no-op success there. Any caller with no host role still spawns at the requested pose below.
 	if (has_local_player()) return true;
 	opennova::world::PlayerSpawn spawn;
 	// Godot (x,y,z) -> mission (x, -z, y): the inverse of the present (x,y,z) -> (x, z, -y) remap.
 	spawn.position = {static_cast<float>(p_position.x), static_cast<float>(-p_position.z),
 	                  static_cast<float>(p_position.y)};
-	spawn.yaw = static_cast<int16_t>(p_yaw_deg);
+	spawn.heading = opennova::world::placed_heading_bam(static_cast<int32_t>(p_yaw_deg));
 	spawn.team = static_cast<uint8_t>(p_team);
 	if (listen_server_) spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
 	return kernel_->spawn_local_player(spawn);
@@ -39,8 +39,8 @@ uint32_t Simulation::mission_game_type() const {
 
 int Simulation::spawn_local_player_at_start() {
 	if (!world_installed_) return -1;
-	// The inmatch listen server auto-spawns the host's own player at
-	// bring-up via the SAME retail spawn-pose operation
+	// The inmatch listen server's mission start spawns the host's own player at
+	// its round init via the SAME retail spawn-pose operation
 	// (Server_BuildPlayerInfoAndAdd), so when a player already exists this is
 	// a no-op success. The bare path runs the kernel's marker-select spawn
 	// (engine: runtime/world/spawn_select.h).
@@ -83,9 +83,9 @@ void Simulation::set_player_input(bool p_forward, bool p_back, bool p_left, bool
 			p_lean_left, p_lean_right, p_jump);
 }
 
-// One frame of mouse pixels onto the kernel's look accumulator
-// (the center-lock accumulator, the scoped sensitivity reduction, the prone
-// up-limit) (engine: runtime/world/local_player.cpp).
+// Axis input straight onto the kernel's look pipeline, past the session's
+// mouse pump (the scoped sensitivity reduction, the prone up-limit)
+// (engine: runtime/world/local_player.cpp).
 void Simulation::add_local_player_look(float p_dx_px, float p_dy_px) {
 	kernel_->local.look(p_dx_px, p_dy_px);
 }
@@ -139,7 +139,7 @@ bool Simulation::local_player_light_query(Vector3 &r_position, int32_t &r_radius
 			? kernel_->world.registry.get(kernel_->world.cached.local_player) : nullptr;
 	if (entity == nullptr) return false;
 	r_position = Vector3(entity->position.x, entity->position.z, -entity->position.y);
-	r_radius_q16 = opennova::io::float_to_fp16_16_round_sat(entity->bound_radius);
+	r_radius_q16 = entity->bound_radius.q16; // entity+0's word (D-NET-507)
 	return true;
 }
 
@@ -157,9 +157,9 @@ bool Simulation::local_player_position_q16(int32_t (&r_pos)[3]) const {
 	if (!kernel_->world.cached.local_player.valid()) return false;
 	const AiEntity *body = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
 	if (body == nullptr) return false;
-	r_pos[0] = body->pos[0];
-	r_pos[1] = body->pos[1];
-	r_pos[2] = body->pos[2];
+	r_pos[0] = body->self->position.x.q16;
+	r_pos[1] = body->self->position.y.q16;
+	r_pos[2] = body->self->position.z.q16;
 	return true;
 }
 
@@ -209,16 +209,6 @@ int Simulation::get_hud_map_mode() const {
 
 int Simulation::get_hud_big_zoom_q16() const {
 	return kernel_->local.hud_map_control.big_zoom_q16;
-}
-
-void Simulation::tick_hud_map_death_gate() {
-	// The render gate zeroes the mode whenever the local player is dead;
-	// respawn re-opens nothing — only the M key does (witness at
-	// hud::HudMapControl::on_local_player_dead).
-	if (kernel_->local.hud_map_control.mode == 0) return;
-	// The joiner reads its recipient-specific 0x0A health tail, the authority
-	// its entity flags — the one local_player_dead() seam.
-	if (local_player_dead()) kernel_->local.hud_map_control.on_local_player_dead();
 }
 
 bool Simulation::get_hud_map_flip_180() const {
@@ -364,11 +354,40 @@ int Simulation::get_local_player_character_id() const {
 		if (e) return static_cast<int>(e->minimap_net_id);
 	}
 	// A joiner that has learned its record but not yet materialized L (the
-	// deploy-screen hold, the challenge prewarm) reads the record itself.
-	if (is_joiner() && runtime_ && runtime_->has_self_handle()) {
+	// deploy-screen hold, the challenge prewarm) reads the word its 0x0C fold
+	// stored on the self row (restamped when the joiner's avatar table lacks the
+	// wire id, D-NET-NEW-L2-27), else the record itself.
+	if (has_learned_self_record()) {
+		const opennova::replication::ClientEntityState *self =
+				runtime_->state().find(runtime_->self_handle());
+		if (self != nullptr && self->cls == opennova::EntityClass::Player)
+			return static_cast<int>(self->net_id);
 		return static_cast<int>(runtime_->spawn_pose().net_id);
 	}
 	return 0;
+}
+
+// The local body's type word: the one its def binds by (D-NET-348; the witness
+// is engine/runtime/mission/placement_traits.h's and world/player_spawn.cpp's).
+int Simulation::get_local_player_type_id() const {
+	if (kernel_ && kernel_->world.cached.local_player.valid()) {
+		const opennova::world::Entity *e = kernel_->world.registry.get(kernel_->world.cached.local_player);
+		if (e) return static_cast<int>(e->item_id);
+	}
+	// A joiner ahead of L's birth: the type L's birth binds, its self row's (the mission start's
+	// reload stored the class's camouflage item there, D-NET-NEW-L2-57), else its record's (engine
+	// inmatch::JoinerRole::init_local_player_at_mission_start carries the witness).
+	if (has_learned_self_record()) {
+		const opennova::replication::ClientEntityState *self =
+				runtime_->state().find(runtime_->self_handle());
+		if (self != nullptr && self->type_id != 0) return static_cast<int>(self->type_id);
+		return static_cast<int>(runtime_->spawn_pose().item_type_id);
+	}
+	return static_cast<int>(opennova::world::kPlayerInfantryTypeId);
+}
+
+bool Simulation::has_learned_self_record() const {
+	return is_joiner() && runtime_ && runtime_->has_self_handle();
 }
 
 int Simulation::get_local_player_class() const {

@@ -71,8 +71,9 @@ public:
 	void set_spawn_loadout(const Ref<PlayerSpawnLoadout> &p_loadout) { spawn_loadout_ = p_loadout; }
 	Ref<PlayerSpawnLoadout> spawn_loadout() const { return spawn_loadout_; }
 	// The runtime-start projection of the staged loadout (the engine's
-	// spawn_loadout_plan, world/player_present.h): the class commit, the
-	// mission-kit precedence, the kit apply and the inventory sync.
+	// spawn_loadout_plan, world/player_present.h): the mission-kit precedence,
+	// the kit apply and the inventory sync (no class commit: the body keeps the
+	// mission start's class word).
 	void apply_local_player_spawn_loadout();
 
 	// The soldier's THIRD-PERSON gun. Built as a SIBLING of the avatar rather
@@ -94,26 +95,33 @@ public:
 	// no BMS placement of its own). The caller (LocalPlayerPresenter)
 	// positions it and swaps its visual/shadow policy per first/third person.
 	// In first person the body remains a live SHADOWS_ONLY source, but
-	// neither the gameplay beauty camera nor the water mirror renders it:
-	// retail's reflected entity collector has no player/person leg (engine: runtime/environment/water_mirror.h). Null when the
-	// resource root / item graphic is unavailable. The player runtime type id
-	// is the bound MissionObjectPlacer.PLAYER_RUNTIME_TYPE_ID [net-re §5.2b].
-	ObjectModel *build_local_player_avatar();
+	// neither the gameplay beauty camera nor the water mirror renders it; drawn
+	// in third person it reflects as any person does, below the water alone
+	// (engine: runtime/environment/water_mirror.h). Null when the
+	// resource root / item graphic is unavailable. `p_type_id` is the local
+	// body's own type word (local_player_type_id()): its def is the one the
+	// item model comes from, as for every body [net-re §5.2b; D-NET-348].
+	ObjectModel *build_local_player_avatar(int p_type_id);
 	// Resolve the .3DI definitions that LocalPlayerPresenter would otherwise
 	// load only on its first visible frame. Retail's
 	// Game_ReloadEntityModelsAndCallbacks and HUD model pass load the player +
-	// current weapon overlay before CEffectWorld_RebuildAllModelBuffers freezes
+	// current weapon overlay before CEffectWorld_ResolveMaterialsAndRebuildChallengeList freezes
 	// the C2S 0x3D source; doing the lightweight data lookup here gives our
 	// snapshot the same boundary without constructing hidden scene nodes.
 	// Later builders hit the placer's cache, so they cannot introduce a
 	// definition just after freeze. Returns the graphics warmed, in order.
 	PackedStringArray prewarm_loaded_model_challenge_definitions();
-	// Armory apply, presentation side: point the FP viewmodel + action FSM at
-	// `weapon_name`. Validates against weapon.def; the caller (main_game)
-	// drops the old viewmodel so the per-frame pass rebuilds gun/arms/FSM from
-	// the new def [orig: the ACCEPT re-mount, WeaponLoadout_ApplyFromBuffer
-	// @0x565cd0 -> Player_MountWeaponSlot @0x4dfa40].
+	// A mount the embedder asks for: point the FP viewmodel at `weapon_name` and mount it in
+	// the sim on a fresh slot. Validates against weapon.def; the caller drops the old
+	// viewmodel so the per-frame pass rebuilds gun/arms from the new def. A loadout apply
+	// mounts in the sim itself [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 ->
+	// Player_MountWeaponSlot @0x4dfa40], and the shell then presents its def
+	// (present_local_player_weapon), never this.
 	bool set_local_player_weapon_by_name(const String &p_weapon_name, bool p_preserve_slot_state = false);
+	// A switch the sim's own commit mounted (world::WeaponPresentationEvent::installed):
+	// the render-side half alone -- the def record the viewmodel reads and the FP model's
+	// availability reset -- with no sim install. False for a name weapon.def lacks.
+	bool present_local_player_weapon(const String &p_weapon_name);
 	// Armory NONE (or a spawn kit that equips nothing): clear the equipped
 	// render/FSM state; nothing first-person draws until a weapon equips.
 	void clear_local_player_weapon();
@@ -131,6 +139,17 @@ public:
 	// (player_viewmodel_rig.cpp). Null when the placer or both models fail to
 	// resolve.
 	Node3D *build_local_player_viewmodel();
+	// The load's forced frame's warm of that build (GameWorld::build_person_pipeline_warm): the gun
+	// and arms build_local_player_viewmodel builds, under `p_parent`, with the view model's pass
+	// flags, and none of its state (no parts list, no availability, no report, no def memo). The
+	// def is the presented weapon's, else, ahead of the mission start's spawn-kit apply, the staged
+	// kit's first weapon, the one that apply presents; the arms are the character `p_type_id` /
+	// `p_character_id` resolves to (the identity the caller warms the body with). The caller frees
+	// them past the frame. Returns the parts built (0 with no def).
+	int build_viewmodel_pipeline_warm(Node3D *p_parent, int p_type_id, int p_character_id);
+	// The placer's model-file and animation-map reads since the last take (an instrument:
+	// LocalPlayerPresenter's model builds print them under --verbose). C++ siblings only.
+	MissionObjectPlacer::LoadProfile take_placer_load_profile();
 	// The FP viewmodel's typed model parts (arms/gun), rebuilt with the
 	// container -- the rig consumes this instead of scanning children (the
 	// live ones; a freed part drops out).
@@ -177,6 +196,9 @@ public:
 	// record) -- the one word its third-person body/head and first-person arms
 	// key on, read from the sim rather than re-derived from team + profile.
 	int local_player_character_id() const;
+	// The local body's runtime type word (Simulation::get_local_player_type_id):
+	// the def its avatar's item model, visual spec and 0x3D prewarm bind by.
+	int local_player_type_id() const;
 
 protected:
 	static void _bind_methods();
@@ -192,7 +214,11 @@ private:
 	MissionEnvironment *environment() const;
 	Ref<MissionData> loaded_mission() const;
 	void set_first_person_model_available(bool p_available);
-	void sync_local_player_weapon_from_inventory(const Ref<Simulation> &p_sim);
+	// The viewmodel onto the inventory's equipped weapon: `p_mount` mounts it in the sim too,
+	// with none of the mount's view words (Simulation::install_local_player_spawn_weapon_by_name);
+	// past a loadout apply, whose mount, if any, is the sim's own, only the render side follows
+	// (present_local_player_weapon).
+	void sync_local_player_weapon_from_inventory(const Ref<Simulation> &p_sim, bool p_mount);
 
 	// The GameWorld whose local player these visuals present (public surface only).
 	ObjectID world_id_;

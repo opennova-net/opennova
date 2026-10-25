@@ -16,7 +16,9 @@ namespace godot {
 // the three kit slots with their clip counts, the profile class, the two
 // per-side character selections the join profile projects (nationality /
 // division / combo tree indices + class) and the profile record's voice
-// override pair it reads beside them. Presence is part of the record --
+// override pair it reads beside them, and each side block's raw packed character word
+// (the record's, which the join carries as it is, resolved or not; -1 = none carried,
+// D-PLAYERINFO-33). Presence is part of the record --
 // a slot whose name was never set is absent (the historical fallback), a slot
 // set to "" explicitly requests NONE; the class likewise commits only when it
 // was set. The shell decodes the PLAYER_INFO snapshot once through
@@ -28,10 +30,11 @@ namespace godot {
 	X(nationality, -1)              \
 	X(division, -1)                 \
 	X(combo, -1)                    \
-	X(player_class, opennova::inmatch::kJoinDefaultPlayerClass)
+	X(player_class, opennova::inmatch::kJoinDefaultPlayerClass) \
+	X(character_id, -1)
 
 // One int read off a PLAYER_INFO profile Dictionary (a side selection's
-// nationality / division / combo / player_class), `def` when the key is absent.
+// nationality / division / combo / player_class / avatar_packed), `def` when the key is absent.
 inline int profile_dict_int(const Dictionary &d, const char *key, int def) {
 	return d.has(key) ? (int)d[key] : def;
 }

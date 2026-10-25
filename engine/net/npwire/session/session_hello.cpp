@@ -3,6 +3,7 @@
 #include <base/io/le.h>
 #include <base/io/strutil.h>
 #include <net/napi/tlv.h>
+#include <net/novaworld/lobby_identity.h> // read_exe_basename, kLobbyApChars
 #include <net/npwire/flat_tlv.h>
 #include <net/title/title_identity.h>
 
@@ -97,7 +98,16 @@ ClientHello make_title_client_hello(const TitleIdentity &title, uint32_t client_
 	ClientHello hello;
 	hello.nvs = title.nvs;
 	hello.co = title.co;
-	hello.ap = title.ap;
+	// AP is the running executable's file name, which the network init reads off its command
+	// line and keeps to 63 characters, whatever the title; the 0x41, the 0x42 and a host's 0x81
+	// each read that one copy (D-NET-NEW-L9-2).
+	// [orig: CNapiNetwork_Init @0x4ca4a0 - Napi_GetExeBasename @0x62e0b0 (the call @0x4ca747),
+	//  Napi_CopyString(proto+0x58, .., 0x40) @0x4ca759; read by NapiNPSession_SendAnnouncePacket
+	//  @0x61fb3a, CNapiNPConnection_SendClientJoin @0x61ff52, NapiNPProtocol_SendServerInfoPacket
+	//  @0x6205ea]
+	// [orig: CNapiNetwork_Init @0x4ca610 - Napi_GetExeBasename @0x7161e0 (the call @0x4ca8b7),
+	//  the copy to proto+0x58 @0x4ca8c9 (dfx2.exe)]
+	hello.ap = read_exe_basename().substr(0, kLobbyApChars);
 	hello.bdat = title.bdat;
 	hello.pn = title.pn;
 	hello.pg = *title.guid;
@@ -435,6 +445,14 @@ std::vector<uint8_t> client_goodbye_to_bytes(uint32_t remote_session_key) {
 
 std::vector<uint8_t> server_goodbye_to_bytes(uint32_t client_ck, const DisconnectEvent &event) {
 	return disconnect_packet_body_to_bytes(client_ck, event);
+}
+
+std::vector<uint8_t> service_goodbye_answer_to_bytes(uint32_t client_ck) {
+	std::vector<uint8_t> buf;
+	buf.reserve(13);
+	io::append_u32_le(buf, client_ck);
+	append_u32_field(buf, "DS", 2);
+	return buf;
 }
 
 // [orig: CNapiNPConnection_HandleDescriptionPacket @0x621ae0]. The retail walk reads name-keyed

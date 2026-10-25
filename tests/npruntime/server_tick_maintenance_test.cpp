@@ -32,9 +32,16 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_loadout_grant.h>
 #include <runtime/inmatch/server_message_dispatch.h>
+#include <runtime/inmatch/server_initial_state.h> // Server_SendInitialGameStateToPlayer (the host's own join)
 #include <runtime/inmatch/server_session.h>
+#include <runtime/inmatch/server_player_death.h> // Server_ProcessPlayerDeath
 #include <runtime/inmatch/server_spawn.h>
 #include <runtime/inmatch/server_tick.h>
+#include <runtime/inmatch/server_chat.h>            // the 0x32 join line (D-NET-593)
+#include <runtime/inmatch/server_status_feed.h>     // the status page (D-NET-593)
+#include <runtime/inmatch/server_visible_players.h> // the 0x4C snapshot (D-NET-593)
+#include <runtime/hud/hud_server_status.h>
+#include <net/npwire/visible_players.h>
 
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/session_transport.h>
@@ -56,9 +63,11 @@
 #include <runtime/world/world.h>
 
 #include <algorithm>
+#include <memory>
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <map>
 #include <initializer_list>
 #include <utility>
 #include <vector>
@@ -72,6 +81,13 @@ using namespace opennova;
 namespace inmatch = opennova::inmatch;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
+
+// The player entity's own weapon table (world::Entity::weapon_slots), the host's
+// per-player slot rows since D-NET-336's move.
+std::map<uint16_t, w::PersonalWeaponSlot> &slots_of(w::World &world,
+		const inmatch::NapiNPConnection &conn) {
+	return world.registry.get(conn.link.owned_entity)->weapon_slots;
+}
 using conn_fixture::make_seeded_conn;
 
 bool expect(bool cond, const char *msg) {
@@ -174,7 +190,10 @@ void install_rifle_armory(w::World &world) {
 // --------------------------------------------------------------------------
 
 bool check_spawn_protection_seeded_at_creation() {
-	// A remote joiner: 620 at creation regardless of the spawn-zone hold.
+	// A remote joiner: the add's body is hidden with no protection; its C2S 0x0B's join
+	// stores the 620 after the 0x0F, whatever the spawn-zone hold (D-NET-503).
+	// [orig: Entity_SpawnFromAnimSlotProperty @0x43C433 / @0x43C508; Server_OnPlayerJoin
+	//  @0x51A882]
 	{
 		inmatch::NapiNPServerCtx ctx;
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
@@ -197,14 +216,20 @@ bool check_spawn_protection_seeded_at_creation() {
 		const w::EntityHandle player =
 				inmatch::Server_BuildPlayerInfoAndAdd(ctx, live, world, /*round_init=*/false);
 		const w::Entity *entity = world.registry.get(player);
+		if (!expect(entity != nullptr && (entity->flags & 1u) != 0 && entity->damage_state == 0,
+				"a remote add's body is hidden, with no spawn protection"))
+			return false;
+		std::vector<ProtocolMessage> join_replies;
+		inmatch::Server_HandlePlayerJoinRequest(&ctx, live, &world, /*now_tick=*/1, {0x00}, join_replies);
+		entity = world.registry.get(player);
 		if (!expect(entity != nullptr && entity->damage_state == 620,
-				"a zone-less joiner's entity is created under the 620-tick protection"))
+				"a zone-less joiner's join stores the 620-tick protection"))
 			return false;
 		if (!expect(live.link.armory_reuse_seconds == 0 && !live.link.preround_loadout_latch,
 				"the join zeroes the armory cooldown and clears the latch outside pre-round"))
 			return false;
 	}
-	// The listen host's own player takes the same creation seed.
+	// The listen host's own player takes the same 620 at its join, its own C2S 0x0B's.
 	{
 		w::World world;
 		world.registry.configure_pool(0, 8);
@@ -219,13 +244,21 @@ bool check_spawn_protection_seeded_at_creation() {
 		ctx.world = &world;
 		inmatch::Server_InitNewRoundState(ctx);
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ctx, world) == 1,
-				"host-own creation fixture spawns the local player"))
+				"host-own creation fixture adds the local player"))
 			return false;
+		// The mission start's round-counters reset arms the pre-round timer (StartDelay 7), then
+		// its round init (D-NET-NEW-L1-51, D-NET-NEW-L7-39) [orig: Game_StartMission @0x524360 -
+		//  Server_ResetRoundCounters @0x525B90, Server_InitAllPlayerEntitiesForRound @0x525BAF].
+		inmatch::store_preround_delay_timer(ctx);
+		inmatch::test::round_init_own_body(ctx);
+		inmatch::NapiNPConnection &own = ctx.np_protocol.connection_list.front();
+		std::vector<inmatch::InitialStateMessage> own_burst;
+		(void)inmatch::test::drive_host_own_burst_and_join(ctx, own, /*now_tick=*/1, own_burst);
 		const w::Entity *host = world.registry.get(world.cached.local_player);
-		if (!expect(host != nullptr && host->damage_state == 620,
-				"the host's own player is created under the 620-tick protection"))
+		if (!expect(own.burst.spawned && host != nullptr && host->damage_state == 620,
+				"the host's own player joins under the 620-tick protection"))
 			return false;
-		return expect(ctx.np_protocol.connection_list.front().link.preround_loadout_latch,
+		return expect(own.link.preround_loadout_latch,
 				"a pre-round join sets the loadout latch");
 	}
 }
@@ -299,7 +332,7 @@ bool check_spawn_protection_cleared_by_validated_fire() {
 	roster.push_back(make_seeded_conn(3, 1, nullptr, ns::TransportMode::Client, shooter, true));
 	roster.push_back(make_seeded_conn(4, 1, nullptr, ns::TransportMode::Client, other, true));
 	inmatch::NapiNPConnection &conn = roster[0];
-	conn.weapon_slots[3 * 65 + 2] = inmatch::WeaponSlotState{5, 30}; // the grant's rifle
+	slots_of(world, conn)[3 * 65 + 2] = w::PersonalWeaponSlot{5, 30}; // the grant's rifle
 	w::Entity *entity = world.registry.get(shooter);
 	entity->damage_state = 500;
 	uint32_t client_tick = conn.tick_seed;
@@ -460,7 +493,7 @@ bool check_recount_precedes_the_entity_update() {
 		body.health = 5;
 		body.team = 2;
 		body.net_id = net_id;
-		body.pos[0] = static_cast<int32_t>(x * 65536.0f);
+		body.self->position.x.q16 = static_cast<int32_t>(x * 65536.0f);
 		return h;
 	};
 	const w::EntityHandle victim = spawn_member(5.0f, 0x21);
@@ -675,23 +708,29 @@ bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
 			flag_entity->position.x == 5.0f && flag_entity->position.y == 6.0f,
 			"at the limit the counter resets, the carry breaks, the flag snaps home and Health is -1"))
 		return false;
-	// The same second's refresh already publishes the home pose; the drop and
-	// sync records queued by the sweep are drained on the following tick.
-	if (!expect(objective_states(limit_second).size() == 1 && !saw_flag_return_feed(limit_second),
-			"the limit second carries the refresh 0x2F and no 0x1E return event"))
+	// The sweep's drop and re-sync send their 0x2F inline, ahead of the same
+	// second's refresh, which publishes the home pose again (D-NET-NEW-V3-1)
+	// [orig: Server_CheckPlayerViolations - Entity_DropCarriedObject @0x51AC84 (its
+	//  0x2F @0x439F34), Entity_SyncPositionFromDefinition @0x51AC8A; then
+	//  Server_RefreshNextFlagState @0x51DF64].
+	const std::vector<ObjectiveEntityState> limit_states = objective_states(limit_second);
+	if (!expect(limit_states.size() == 3 && limit_states[0].entity_handle == flag.packed &&
+			limit_states[0].attach_handle == 0xFFFF &&
+			limit_states[0].pos_x == w::to_fixed(carrier_position.x) &&
+			limit_states[0].pos_y == w::to_fixed(carrier_position.y) &&
+			limit_states[1].entity_handle == flag.packed && limit_states[1].attach_handle == 0xFFFF &&
+			limit_states[1].pos_x == 5 * 65536 && limit_states[1].pos_y == 6 * 65536 &&
+			limit_states[2].entity_handle == flag.packed &&
+			limit_states[2].pos_x == 5 * 65536 && limit_states[2].pos_y == 6 * 65536,
+			"the limit second fans the drop-pose 0x2F, the home-pose 0x2F, then the refresh's"))
 		return false;
-	inmatch::Server_RouteFrameTailEdges(ctx); // host_session_pump's post-flush leg
-	inmatch::Server_TickUpdate(ctx);
+	if (!expect(!saw_flag_return_feed(limit_second),
+			"the carry break never emits a 0x23..0x25 return feed"))
+		return false;
+	inmatch::Server_TickUpdate(ctx); // the limit second's entity-update sends lead it
 	const std::vector<ns::Datagram> next_tick = drain(remote);
-	const std::vector<ObjectiveEntityState> pair = objective_states(next_tick);
-	if (!expect(pair.size() == 2 && pair[0].entity_handle == flag.packed &&
-			pair[0].attach_handle == 0xFFFF && pair[0].pos_x == w::to_fixed(carrier_position.x) &&
-			pair[0].pos_y == w::to_fixed(carrier_position.y) &&
-			pair[1].entity_handle == flag.packed && pair[1].attach_handle == 0xFFFF &&
-			pair[1].pos_x == 5 * 65536 && pair[1].pos_y == 6 * 65536,
-			"the carry break fans the drop-pose 0x2F then the home-pose 0x2F"))
-		return false;
-	if (!expect(!saw_flag_return_feed(next_tick), "the carry break never emits a 0x23..0x25 return feed"))
+	if (!expect(objective_states(next_tick).empty() && !saw_flag_return_feed(next_tick),
+			"nothing of the carry break waits for the next tick but the death"))
 		return false;
 	bool saw_death = false;
 	for (const ns::Datagram &d : next_tick)
@@ -704,7 +743,8 @@ bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
 
 // The flag reset's death is the player body's edge on its Health -1, raised in
 // the same frame's entity update, after the tick's send pump and ahead of the
-// next receive pump (D-NET-550). A C2S 0x4D in that next pump therefore kills
+// next receive pump (D-NET-550; the edge's own since D-AI-9's org2 half, its
+// sends leading the next frame's queue). A C2S 0x4D in that next pump therefore kills
 // the already dead body a second time (the team change has no dead gate) and
 // its penalty holds stand last; a C2S 0x41 there stores its unfloored timeout
 // over the death's floored holds and raises nothing (the body is dead).
@@ -760,23 +800,20 @@ bool check_flag_reset_dies_ahead_of_the_next_pump(uint8_t next_pump_tag, bool up
 				++deaths;
 	};
 
-	tick_to_periodic_second(ctx); // the limit second: Health -1
-	count_deaths();
-	if (!expect(world.registry.get(carrier)->health == -1 && deaths == 0,
-			"flag-reset: the limit second stores Health -1 and raises nothing yet"))
-		return false;
-	inmatch::Server_RouteFrameTailEdges(ctx); // the frame's entity update
+	tick_to_periodic_second(ctx); // the limit second: Health -1, then its entity update
 	count_deaths();
 	const bool tail_death = expect(
-			deaths == 1 && (world.registry.get(carrier)->flags & w::kEntityFlagDead) != 0,
-			"flag-reset: the frame tail's edge raises the death ahead of the next pump");
+			world.registry.get(carrier)->health == -1 && deaths == 0 &&
+					(world.registry.get(carrier)->flags & w::kEntityFlagDead) != 0 &&
+					conn.link.respawn_delay_seconds == 3,
+			"flag-reset: the limit second's entity update raises the death ahead of the "
+			"next pump, its sends staged for the next frame");
 	inmatch::ServerDispatchInputs inputs;
 	inputs.server_ctx = &ctx;
 	(void)inmatch::dispatch_session_replies(ctx.config, conn,
 			{make_protocol_message(next_pump_tag, {})}, 100,
 			ctx.np_protocol.connection_list, &world, inputs);
 	inmatch::Server_TickUpdate(ctx);
-	inmatch::Server_RouteFrameTailEdges(ctx);
 	count_deaths();
 	if (next_pump_tag == c2s::TEAM_CHANGE_REQUEST)
 		return expect(deaths == 2 && world.registry.get(carrier)->team == 2 &&
@@ -825,6 +862,11 @@ bool check_flag_reset_credits_a_staged_attacker(bool staged) {
 	body->death_anim_state = staged
 			? w::compute_death_anim_state(0, 0, w::death_cause::kGeneric)
 			: 0;
+	// The 64-tick think fired just before: its health tail would stage the
+	// default selection for a Health <= 0 body in the reset's own update.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B4BC9..0x4B4BE9;
+	//  Entity_HandleDamageAndTriggerZones @0x407ACF..0x407AE7]
+	body->spawn_phase = 64;
 
 	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
@@ -837,7 +879,6 @@ bool check_flag_reset_credits_a_staged_attacker(bool staged) {
 	ctx.np_protocol.connection_list.push_back(
 			make_seeded_conn(3, 1, &remote, ns::TransportMode::Client, carrier, true));
 	tick_to_periodic_second(ctx);
-	inmatch::Server_RouteFrameTailEdges(ctx);
 	const w::MatchPlayer *stats = world.match.player(shooter);
 	const int32_t kills = stats != nullptr ? stats->stats[w::MatchStats::kEnemyKills] : -1;
 	return expect((world.registry.get(carrier)->flags & w::kEntityFlagDead) != 0 &&
@@ -846,12 +887,13 @@ bool check_flag_reset_credits_a_staged_attacker(bool staged) {
 			       : "flag-reset: an unstaged edge clears the attacker, so no kill is credited");
 }
 
-// A flag reset in a frame whose entity update does not run (the pre-round
-// phase) leaves its edge waiting; a C2S 0x4D before the next entity update
-// kills the body and latches its dead bit, so the waiting edge, which skips a
-// dead body, raises no second death. [orig: Entity_UpdateInfantryPlayerBody
-// -- the dead bit @0x4B4BFE; NapiNPServerMsg_0x04D_ChangeTeam -- Flags |= 2
-// @0x519061 / @0x5190CF]
+// A flag reset in a frame whose entity update does not run (a host that also
+// plays, its own client's copy of the pre-round byte still up) leaves its edge
+// waiting; a C2S 0x4D before the next entity update kills the body and latches
+// its dead bit, so the waiting edge, which skips a dead body, raises no second
+// death. [orig: Game_ProcessMainFrame -- `cmp g_ClientPreRoundTimer` @0x52672C;
+// Entity_UpdateInfantryPlayerBody -- the dead bit @0x4B4BFE;
+// NapiNPServerMsg_0x04D_ChangeTeam -- Flags |= 2 @0x519061 / @0x5190CF]
 bool check_flag_reset_waiting_edge_skips_a_dead_body() {
 	w::World world;
 	world.rules.mp_session = true;
@@ -874,7 +916,8 @@ bool check_flag_reset_waiting_edge_skips_a_dead_body() {
 	flag_seed.flags = w::kEntityFlagCarried;
 	const w::EntityHandle flag = world.registry.spawn(1, flag_seed);
 	world.registry.get(carrier)->mounted_child = flag;
-	world.preround_delay_seconds = 2; // the limit second's entity update holds
+	world.preround_delay_seconds = 2;
+	world.cached.client_preround_timer = 2; // the own client's copy holds the update
 
 	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
@@ -898,10 +941,9 @@ bool check_flag_reset_waiting_edge_skips_a_dead_body() {
 	};
 
 	tick_to_periodic_second(ctx); // the limit second, in the pre-round
-	inmatch::Server_RouteFrameTailEdges(ctx);
 	count_deaths();
 	if (!expect(world.registry.get(carrier)->health == -1 && deaths == 0 &&
-					!ctx.entity_update_ran,
+					(world.registry.get(carrier)->flags & w::kEntityFlagDead) == 0,
 			"waiting-edge: the pre-round limit second stores Health -1 and its edge waits"))
 		return false;
 	inmatch::ServerDispatchInputs inputs;
@@ -912,15 +954,17 @@ bool check_flag_reset_waiting_edge_skips_a_dead_body() {
 	count_deaths();
 	if (!expect(deaths == 1, "waiting-edge: the team change kills the waiting body"))
 		return false;
-	// Run until an entity update has run and its tail has drained.
-	for (int frame = 0; frame < 400 && !ctx.entity_update_ran; ++frame) {
-		inmatch::Server_TickUpdate(ctx);
-		inmatch::Server_RouteFrameTailEdges(ctx);
-	}
+	// The pre-round ends and the own client's copy clears: the next entity
+	// update runs and its edge skips the dead body. (While the pre-round runs,
+	// each 0x0A clears the dead bit and the edge re-kills the body, D-NET-439:
+	// npruntime_player_state_writer.)
+	world.preround_delay_seconds = 0;
+	world.cached.client_preround_timer = 0;
+	const uint32_t updates = world.entity_update_counter;
 	inmatch::Server_TickUpdate(ctx);
-	inmatch::Server_RouteFrameTailEdges(ctx);
+	inmatch::Server_TickUpdate(ctx);
 	count_deaths();
-	return expect(ctx.entity_update_ran && deaths == 1 &&
+	return expect(world.entity_update_counter > updates && deaths == 1 &&
 					conn.link.respawn_delay_seconds >= 55,
 			"waiting-edge: the first entity update after it skips the dead body");
 }
@@ -984,17 +1028,18 @@ bool check_team_downed_resend() {
 		return count;
 	};
 
-	// The revivable kill: another player, no knife/headshot cause bits. The round
-	// sim zeroes Health before it raises the death; the routing marks the body dead.
+	// The revivable kill: another player, no knife/headshot cause bits, raised by
+	// the victim body's edge in the previous frame's entity update (the
+	// transaction latches the body dead here, as the edge would have).
 	world.registry.get(victim)->health = 0;
 	w::RoundDeath death;
 	death.victim = victim;
 	death.killer = killer;
 	death.victim_handle = victim.packed;
 	death.killer_handle = killer.packed;
-	world.round_sim.deaths.push_back(death);
-	// Tick 1: the death routes (window 120), the shared periodic second already
-	// decrements it to 119, then the zero-armed resend countdown fires.
+	inmatch::Server_ProcessPlayerDeath(ctx, world, death);
+	// Tick 1: the window stands at 120, the shared periodic second decrements it
+	// to 119, then the zero-armed resend countdown fires.
 	inmatch::Server_TickUpdate(ctx);
 	if (!expect(roster[0].link.death_cause_revivable &&
 			roster[0].link.downed_revive_seconds == 119,
@@ -1123,6 +1168,10 @@ bool check_death_consumer_reads_and_clears_the_reported_cause_bit() {
 	roster[2].reply.player_slot = 3;
 	roster[3].reply.player_slot = 4;
 
+	// The lethal hit: Health 0, its cause bits, its shooter (+0x178) and its
+	// staged death selection (+0x2C0, which keeps the shooter through the edge).
+	// The body's edge raises the transaction in the next entity update, and
+	// its 0x1E leads the frame after.
 	auto raise_death = [&](w::EntityHandle victim, w::EntityHandle by, uint32_t cause) {
 		w::Entity *body = world.registry.get(victim);
 		body->health = 0;
@@ -1130,18 +1179,15 @@ bool check_death_consumer_reads_and_clears_the_reported_cause_bit() {
 		// The lethal hit re-armed the plyr think (spawnPhase = 64), so the
 		// cadence clear cannot race this tick's consumer.
 		body->spawn_phase = 64;
-		w::RoundDeath death;
-		death.victim = victim;
-		death.killer = by;
-		death.victim_handle = victim.packed;
-		death.killer_handle = by.packed;
-		world.round_sim.deaths.push_back(death);
+		body->last_attacker = by;
+		body->death_anim_state = w::compute_death_anim_state(0, 0, w::death_cause::kGeneric);
+		inmatch::Server_TickUpdate(ctx);
+		inmatch::Server_TickUpdate(ctx);
 	};
 
 	// A critical (head-zone) kill: the 0x1E ships the STRCND08 family 10..12,
 	// the reported 0x800 is cleared on the body, and no revive window opens.
 	raise_death(head, killer, 0x800u);
-	inmatch::Server_TickUpdate(ctx);
 	std::vector<uint8_t> feed = death_feed_types(killer_wire);
 	if (!expect(feed.size() == 1 && feed[0] >= 10 && feed[0] <= 12,
 			"a latched 0x800 reports the headshot family"))
@@ -1155,7 +1201,6 @@ bool check_death_consumer_reads_and_clears_the_reported_cause_bit() {
 	// Both 0x100 and 0x800 latched: 0x100 wins the ladder (event 32) and ONLY
 	// that bit is cleared; the head-zone bit stays on the body.
 	raise_death(multi, killer, 0x900u);
-	inmatch::Server_TickUpdate(ctx);
 	feed = death_feed_types(killer_wire);
 	if (!expect(feed.size() == 1 && feed[0] == 32 &&
 			world.registry.get(multi)->cause_flags == 0x800u,
@@ -1164,7 +1209,6 @@ bool check_death_consumer_reads_and_clears_the_reported_cause_bit() {
 
 	// The suicide branch returns before the ladder, so nothing is cleared.
 	raise_death(self, self, 0x800u);
-	inmatch::Server_TickUpdate(ctx);
 	feed = death_feed_types(killer_wire);
 	return expect(feed.size() == 1 && feed[0] >= 1 && feed[0] <= 3 &&
 			world.registry.get(self)->cause_flags == 0x800u,
@@ -1203,13 +1247,9 @@ bool check_spectator_latch_mirrors_onto_the_roster_row() {
 			!world.match.player(player)->spectator,
 			"a joined player's roster row starts non-spectator"))
 		return false;
-	if (!expect(inmatch::Server_SetPlayerSpectator(ctx, roster[0], world, true) &&
+	return expect(inmatch::Server_SetPlayerSpectator(ctx, roster[0], world, true) &&
 			roster[0].link.spectator && world.match.player(player)->spectator,
-			"the runtime spectator convert mirrors the latch onto the roster row"))
-		return false;
-	(void)inmatch::Server_SetPlayerSpectator(ctx, roster[0], world, false);
-	return expect(!roster[0].link.spectator && !world.match.player(player)->spectator,
-			"leaving spectator mode clears the roster latch");
+			"the runtime spectator convert mirrors the latch onto the roster row");
 }
 
 // --------------------------------------------------------------------------
@@ -1340,6 +1380,701 @@ bool check_armory_reuse_cooldown() {
 // The 744-tick priority-target sweep.
 // --------------------------------------------------------------------------
 
+// The S2C 0x68 rides each quartet unless the host's game.cfg allowcustomskins
+// word is set, on a dedicated host as on a listen host; its cursor advances by
+// 50 and wraps to 0 at the host's own frozen loaded-model list count (the
+// count retail's misnamed viewport getter returns): with 305 frozen rows it
+// asks 50, 100, ..., 300, then 0, 50; with none frozen every request wraps to
+// 0; with allowcustomskins set no 0x68 goes at all.
+// [orig: Server_SendLoadedModelPageRequest @0x511360 - the allowcustomskins test
+//  @0x511363..0x51136A (Config_ParseSettingsLine @0x54F818 / @0x54F837), +50
+//  @0x51137E, the `jb` against g_LoadedModelChallengeCount
+//  (CEffectWorld_GetLoadedModelPage @0x5B1578) @0x511391, the wrap
+//  @0x511393, the send @0x5113D4]
+bool check_model_page_cursor_wraps_at_the_list_count() {
+	const auto cursors = [](uint32_t list_count, int quartets, int32_t allow_custom_skins) {
+		inmatch::NapiNPServerCtx ctx;
+		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+		inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
+		inmatch::GameConfig config;
+		config.max_players = 4;
+		config.allow_custom_skins = allow_custom_skins;
+		inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+		auto heap = std::make_unique<w::World>();
+		w::World &world = *heap;
+		world.rules.mp_session = true;
+		world.registry.configure_pool(0, 8);
+		const w::EntityHandle player = w::spawn_remote_player(world, w::PlayerSpawn{});
+		ctx.world = &world;
+		ctx.loaded_model_list_count = list_count;
+		ns::UdpSessionTransport transport(ns::UdpSessionTransport::Role::Host);
+		ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+				7, inmatch::NapiNPConnection::kTypeServerSide, &transport,
+				ns::TransportMode::Client, player, true));
+		auto &peer = ctx.np_protocol.connection_list.back();
+		peer.reply.player_slot = 1;
+		world.match.upsert_player({player, 1, "Peer"});
+		world.match.player(player)->play_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
+		std::vector<uint32_t> out;
+		for (int q = 0; q < quartets; ++q) {
+			peer.reply.control_request_countdown = 0;
+			peer.reply.charattr_unanswered_count = 0;
+			peer.reply.time_sync_unanswered_count = 0;
+			inmatch::Server_TickUpdate(ctx);
+			for (const ns::Datagram &d : drain(transport))
+				if (d.tag == s2c::LOADED_MODEL_PAGE_REQUEST && d.body.size() == 4)
+					out.push_back(static_cast<uint32_t>(d.body[0]) |
+							(static_cast<uint32_t>(d.body[1]) << 8) |
+							(static_cast<uint32_t>(d.body[2]) << 16) |
+							(static_cast<uint32_t>(d.body[3]) << 24));
+		}
+		return out;
+	};
+	bool ok = expect(cursors(305, 8, 0) ==
+					std::vector<uint32_t>({50, 100, 150, 200, 250, 300, 0, 50}),
+			"a dedicated host's 0x68 cursor wraps to 0 at the 305-row list");
+	ok = expect(cursors(0, 2, 0) == std::vector<uint32_t>({0, 0}),
+			"with no list frozen every 0x68 asks row 0") && ok;
+	ok = expect(cursors(305, 2, 1).empty(),
+			"allowcustomskins set sends no 0x68") && ok;
+	return ok;
+}
+
+// A remote slot whose spectator latch is set takes no control quartet (and
+// draws no silence punt), mature or not; its latch cleared, the next walk sends
+// the 0x39 / 0x42 / 0x43 / 0x68.
+// [orig: Server_UpdateAllActivePlayerSlots - the spectator latch +0x188D7
+//  @0x5189CE ahead of the live age @0x5189DA and the punts @0x5189EF..0x518A3A]
+bool check_quartet_skips_a_spectator_slot() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
+	inmatch::GameConfig config;
+	config.max_players = 4;
+	inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	const w::EntityHandle player = w::spawn_remote_player(world, w::PlayerSpawn{});
+	ctx.world = &world;
+	ns::UdpSessionTransport transport(ns::UdpSessionTransport::Role::Host);
+	ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+			7, inmatch::NapiNPConnection::kTypeServerSide, &transport,
+			ns::TransportMode::Client, player, true));
+	auto &peer = ctx.np_protocol.connection_list.back();
+	peer.reply.player_slot = 1;
+	peer.link.spectator = true;
+	world.match.upsert_player({player, 1, "Peer"});
+	world.match.player(player)->play_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
+	peer.reply.control_request_countdown = 0;
+	peer.reply.charattr_unanswered_count = 8; // a silence the punt would read
+	const auto quartet_tags = [&]() {
+		int n = 0;
+		for (const ns::Datagram &d : drain(transport))
+			if (d.tag == s2c::CHARATTR_CRC_CHALLENGE || d.tag == s2c::CHARATTR_DISABLED_PROPERTIES ||
+					d.tag == s2c::TIME_SYNC_PING || d.tag == s2c::LOADED_MODEL_PAGE_REQUEST)
+				++n;
+		return n;
+	};
+	inmatch::Server_TickUpdate(ctx);
+	if (!expect(quartet_tags() == 0 && !peer.host_disconnect_sent &&
+	                    peer.reply.control_request_countdown == 0,
+	            "a spectator slot takes no quartet and no silence punt"))
+		return false;
+	peer.link.spectator = false;
+	peer.reply.charattr_unanswered_count = 0;
+	inmatch::Server_TickUpdate(ctx);
+	return expect(quartet_tags() == 4, "the latch cleared, the next walk sends the quartet");
+}
+
+// A silence punt does not end the slot's visit: the countdown runs in the same
+// visit (one punted visit leaves it one lower), and at its zero the quartet's
+// state moves (the counts, the time-sync sequence, the model cursor) while the
+// connection, its description gone, queues nothing more: the wire carries the
+// description alone.
+// [orig: Server_UpdateAllActivePlayerSlots @0x518820 - the punts
+//  @0x5189EF..0x518A3A falling to the countdown @0x518A42..0x518A5D;
+//  CNapiNPConnection_QueueMessage @0x628640, the `desc_sent` drop @0x62864D]
+bool check_silence_punt_falls_through_to_the_countdown() {
+	const auto ctx_owner = std::make_unique<inmatch::NapiNPServerCtx>();
+	inmatch::NapiNPServerCtx &ctx = *ctx_owner;
+	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
+	inmatch::GameConfig config;
+	config.max_players = 4;
+	inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+	ctx.loaded_model_list_count = 305;
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	const w::EntityHandle pa = w::spawn_remote_player(world, w::PlayerSpawn{});
+	const w::EntityHandle pb = w::spawn_remote_player(world, w::PlayerSpawn{});
+	ctx.world = &world;
+	const auto ta_owner = std::make_unique<ns::UdpSessionTransport>(ns::UdpSessionTransport::Role::Host);
+	const auto tb_owner = std::make_unique<ns::UdpSessionTransport>(ns::UdpSessionTransport::Role::Host);
+	ns::UdpSessionTransport &ta = *ta_owner;
+	ns::UdpSessionTransport &tb = *tb_owner;
+	ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+			7, inmatch::NapiNPConnection::kTypeServerSide, &ta, ns::TransportMode::Client, pa, true));
+	ctx.np_protocol.connection_list.back().reply.player_slot = 1;
+	ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+			8, inmatch::NapiNPConnection::kTypeServerSide, &tb, ns::TransportMode::Client, pb, true));
+	ctx.np_protocol.connection_list.back().reply.player_slot = 2;
+	inmatch::NapiNPConnection &a = ctx.np_protocol.connection_list[0];
+	inmatch::NapiNPConnection &b = ctx.np_protocol.connection_list[1];
+	world.match.upsert_player({pa, 1, "A"});
+	world.match.upsert_player({pb, 2, "B"});
+	for (const w::EntityHandle h : {pa, pb})
+		world.match.player(h)->play_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
+	// Peer A: the character-attribute silence (the 16 arm), countdown 2.
+	a.reply.charattr_unanswered_count = 8;
+	a.reply.control_request_countdown = 2;
+	// Peer B: answered challenges, the time-sync silence (the 24 arm), and a
+	// countdown that reaches zero in the punted visit.
+	b.reply.time_sync_unanswered_count = 8;
+	b.reply.control_request_countdown = 1;
+	b.reply.control_challenge_seed = 0x1234;
+	const uint32_t sequence = b.reply.time_sync_sequence;
+	const auto tags = [](ns::UdpSessionTransport &t) {
+		std::vector<uint8_t> out;
+		for (const ns::Datagram &d : drain(t)) out.push_back(d.tag);
+		return out;
+	};
+	inmatch::Server_TickUpdate(ctx);
+	const std::vector<uint8_t> a_tags = tags(ta);
+	const std::vector<uint8_t> b_tags = tags(tb);
+	const auto punted = [](const std::vector<uint8_t> &t) {
+		return std::count(t.begin(), t.end(), hightag::DESCRIPTION_PACKET) == 1 &&
+				std::count(t.begin(), t.end(), s2c::CHARATTR_CRC_CHALLENGE) == 0 &&
+				std::count(t.begin(), t.end(), s2c::CHARATTR_DISABLED_PROPERTIES) == 0 &&
+				std::count(t.begin(), t.end(), s2c::TIME_SYNC_PING) == 0 &&
+				std::count(t.begin(), t.end(), s2c::LOADED_MODEL_PAGE_REQUEST) == 0;
+	};
+	if (!expect(a.host_disconnect_sent && a.host_disconnect_mismatch_type == 16 &&
+	                    punted(a_tags) && a.reply.control_request_countdown == 1,
+	            "the 16 punt's visit runs the countdown on (2 -> 1)"))
+		return false;
+	return expect(b.host_disconnect_sent && b.host_disconnect_mismatch_type == 24 &&
+	                      punted(b_tags) &&
+	                      b.reply.control_request_countdown ==
+	                              inmatch::CONTROL_REQUEST_PERIOD_TICKS &&
+	                      b.reply.charattr_unanswered_count == 1 &&
+	                      b.reply.time_sync_unanswered_count == 9 &&
+	                      b.reply.time_sync_sequence == sequence + 1u &&
+	                      b.reply.loaded_model_page_cursor == 50u,
+	              "the 24 punt's visit reaches the zero: the quartet's state moves, "
+	              "nothing queues after the description");
+}
+
+// The integrity family spends one PRNG_Next16 draw per request it sends, the
+// slot's word filled and zeroed again, so every request carries 0: a 0x31
+// boundary draws once per resolvable ADM row (the unresolved peer sends and
+// draws nothing; a resolved row with no round type sends 0xFF, the low byte
+// of adm+4's default -1, and draws), the next boundary's 0x30 to all three
+// peers draws three times.
+// [orig: Server_BroadcastWeaponSlotStateToPlayers @0x508540 - the 0x30 draw
+//  @0x5085A6..0x5085B9, the 0x31's ADM row @0x508605..0x508611, its draw
+//  @0x508613..0x508626 and byte @0x50863E; PRNG_Next16 @0x6130A0]
+bool check_integrity_family_draws_once_per_send() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
+	inmatch::GameConfig config;
+	config.max_players = 4;
+	inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	world.tables.weapons.entries.resize(0x21);
+	world.tables.weapons.entries[0x20].valid = true;
+	world.tables.weapons.entries[0x20].ammo_index = 0x1A;
+	// A row with no round type keeps adm+4's default -1
+	// [orig: AdmDef_InitEntryDefaults @0x53FF16 / @0x53FF58].
+	world.tables.weapons.entries[0x1F].valid = true;
+	world.tables.weapons.entries[0x1F].ammo_index = -1;
+	ctx.world = &world;
+	ns::UdpSessionTransport ta(ns::UdpSessionTransport::Role::Host);
+	ns::UdpSessionTransport tb(ns::UdpSessionTransport::Role::Host);
+	ns::UdpSessionTransport tc(ns::UdpSessionTransport::Role::Host);
+	const w::EntityHandle pa = w::spawn_remote_player(world, w::PlayerSpawn{});
+	const w::EntityHandle pb = w::spawn_remote_player(world, w::PlayerSpawn{});
+	const w::EntityHandle pc = w::spawn_remote_player(world, w::PlayerSpawn{});
+	for (const w::EntityHandle h : {pa, pb, pc}) {
+		// Hold the bodies so only the family draws from the stream
+		// [orig: Entity_UpdateAllEntities @0x4C2460..0x4C2474 skips a held +0x1C4].
+		world.registry.get(h)->motor_suspended = true;
+	}
+	world.registry.get(pa)->equipped_adm_index = 0x20;
+	world.registry.get(pb)->equipped_adm_index = 0xFF; // no ADM row
+	world.registry.get(pc)->equipped_adm_index = 0x1F; // a row, no round type
+	ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+			7, inmatch::NapiNPConnection::kTypeServerSide, &ta, ns::TransportMode::Client, pa, true));
+	ctx.np_protocol.connection_list.back().reply.player_slot = 1;
+	ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+			8, inmatch::NapiNPConnection::kTypeServerSide, &tb, ns::TransportMode::Client, pb, true));
+	ctx.np_protocol.connection_list.back().reply.player_slot = 2;
+	ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+			9, inmatch::NapiNPConnection::kTypeServerSide, &tc, ns::TransportMode::Client, pc, true));
+	ctx.np_protocol.connection_list.back().reply.player_slot = 3;
+	world.match.upsert_player({pa, 1, "A"});
+	world.match.upsert_player({pb, 1, "B"});
+	world.match.upsert_player({pc, 1, "C"});
+	world.prng16_state = 1;
+	ctx.integrity_entity_family_next = false;
+	const auto requests = [](ns::UdpSessionTransport &t, uint8_t tag) {
+		std::vector<std::vector<uint8_t>> out;
+		for (const ns::Datagram &d : drain(t))
+			if (d.tag == tag) out.push_back(d.body);
+		return out;
+	};
+	// PRNG_Next16 from state 1: s = rol4(s + rol11(s)) ^ 1.
+	const auto state_after = [](int draws) {
+		uint32_t s = 1;
+		for (int i = 0; i < draws; ++i) {
+			const uint32_t sum = s + ((s << 11) | (s >> 21));
+			s = ((sum << 4) | (sum >> 28)) ^ 1u;
+		}
+		return s;
+	};
+	ctx.scoreboard_broadcast_timer = 0x136u;
+	inmatch::Server_TickUpdate(ctx);
+	const auto a31 = requests(ta, s2c::LOADOUT_CRC_REQ);
+	const auto b31 = requests(tb, s2c::LOADOUT_CRC_REQ);
+	const auto c31 = requests(tc, s2c::LOADOUT_CRC_REQ);
+	if (!expect(a31.size() == 1 && a31[0] == std::vector<uint8_t>({0x1A, 0x00, 0x00}) &&
+	                    b31.empty() && world.prng16_state == state_after(2),
+	            "a 0x31 boundary draws once per resolvable row and sends 0"))
+		return false;
+	// The row resolves, so the request goes with the low byte of -1
+	// [orig: @0x508611, `mov ecx, [edi+4]` @0x50863E].
+	if (!expect(c31.size() == 1 && c31[0] == std::vector<uint8_t>({0xFF, 0x00, 0x00}),
+	            "a resolved row with no round type sends 0xFF and draws"))
+		return false;
+	ctx.scoreboard_broadcast_timer = 0x136u;
+	inmatch::Server_TickUpdate(ctx);
+	const auto a30 = requests(ta, s2c::ENTITY_CHECKSUM_REQ);
+	const auto b30 = requests(tb, s2c::ENTITY_CHECKSUM_REQ);
+	const auto c30 = requests(tc, s2c::ENTITY_CHECKSUM_REQ);
+	return expect(a30.size() == 1 && b30.size() == 1 && c30.size() == 1 &&
+	                      a30[0] == std::vector<uint8_t>({0xFF, 0x00, 0x00}) &&
+	                      b30[0] == a30[0] && c30[0] == a30[0] &&
+	                      world.prng16_state == state_after(5),
+	              "the next boundary's 0x30 to all three peers draws three times");
+}
+
+// D-NET-NEW-L3-5: the per-slot 0x0A runs in or out of a session; only the 0x57
+// beside it is session-gated. A closed session's in-match peer still takes its
+// 0x0A and no 0x57; an open one takes both.
+// [orig: Server_TickUpdate - is_in_session @0x51E211..0x51E217 lands on the
+//  per-slot loop @0x51E385, the 0x0A call @0x51E3E4, the 0x57's session test
+//  @0x51E3EC]
+bool check_entity_state_fan_runs_out_of_session() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
+	inmatch::GameConfig config;
+	config.max_players = 4;
+	inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	const w::EntityHandle player = w::spawn_remote_player(world, w::PlayerSpawn{});
+	ctx.world = &world;
+	ns::UdpSessionTransport transport(ns::UdpSessionTransport::Role::Host);
+	ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+			7, inmatch::NapiNPConnection::kTypeServerSide, &transport,
+			ns::TransportMode::Client, player, true));
+	ctx.np_protocol.connection_list.back().reply.player_slot = 1;
+	world.match.upsert_player({player, 1, "Peer"});
+	const auto tags = [&]() {
+		std::vector<uint8_t> out;
+		for (const ns::Datagram &d : drain(transport)) out.push_back(d.tag);
+		return out;
+	};
+	const auto has = [](const std::vector<uint8_t> &t, uint8_t tag) {
+		return std::find(t.begin(), t.end(), tag) != t.end();
+	};
+	ctx.is_in_session = 0;
+	inmatch::Server_TickUpdate(ctx);
+	const std::vector<uint8_t> closed = tags();
+	if (!expect(has(closed, s2c::PER_FRAME_UPDATE) && !has(closed, s2c::RTT_ECHO),
+	            "a closed session's peer takes its 0x0A and no 0x57"))
+		return false;
+	ctx.is_in_session = 1;
+	ctx.np_protocol.connection_list.back().reply.rtt_request_countdown = 0;
+	inmatch::Server_TickUpdate(ctx);
+	const std::vector<uint8_t> open = tags();
+	return expect(has(open, s2c::PER_FRAME_UPDATE) && has(open, s2c::RTT_ECHO),
+	              "an open session's peer takes its 0x0A and the 0x57");
+}
+
+// D-NET-441: a joiner loading between its add and its join (its slot out of
+// state 6) takes no proximity-pass service (its event-25 tick here) and no
+// place in the capture census, while a joined slot in the same zone takes
+// both; once it joins, its next pass counts it.
+// [orig: Server_UpdateCaptureZoneProximity - state 6 @0x50872A, the clear
+//  @0x50872E, `jnz` @0x508735; CaptureZone_CalculateControlDelta - state 6
+//  @0x501188, the presence compare @0x50120D..0x501248; Server_OnPlayerJoin's
+//  state 6 @0x51A712]
+bool check_a_loading_joiner_takes_no_proximity_or_census_place() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
+	inmatch::GameConfig config;
+	config.max_players = 4;
+	config.game_type = game_type::kTeamDeathmatch;
+	inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 4);
+	w::MatchRules rules;
+	rules.game_type = game_type::kTeamDeathmatch;
+	world.match.configure(rules);
+	ctx.world = &world;
+	w::Entity zone;
+	zone.kind = w::EntityKind::Item;
+	zone.is_capture_trigger = true;
+	zone.zone_number = 1;
+	zone.zone_radius = 20;
+	zone.team = 1;
+	zone.health = 1;
+	zone.alive = true;
+	world.registry.spawn(1, zone);
+	const w::EntityHandle joined = w::spawn_remote_player(world, player_spawn(0, 0, 0, 1));
+	const w::EntityHandle loading = w::spawn_remote_player(world, player_spawn(0, 0, 0, 1));
+	ns::UdpSessionTransport tj(ns::UdpSessionTransport::Role::Host);
+	ns::UdpSessionTransport tl(ns::UdpSessionTransport::Role::Host);
+	ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+			7, inmatch::NapiNPConnection::kTypeServerSide, &tj, ns::TransportMode::Client, joined, true));
+	ctx.np_protocol.connection_list.back().reply.player_slot = 1;
+	ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+			8, inmatch::NapiNPConnection::kTypeServerSide, &tl, ns::TransportMode::Client, loading, false));
+	inmatch::NapiNPConnection &joiner = ctx.np_protocol.connection_list.back();
+	joiner.reply.player_slot = 2;
+	joiner.phase = inmatch::ConnectionPhase::PlayerAdded;
+	joiner.slot_state = inmatch::PlayerSlotState::AwaitJoin; // its world stream ended, no 0x0B yet
+	world.match.upsert_player({joined, 1, "Joined"});
+	world.match.upsert_player({loading, 2, "Loading"});
+	for (const w::EntityHandle h : {joined, loading}) world.match.set_player_slot_team(h, 1);
+	const auto friendlies = [&]() {
+		int out = -1;
+		for (const ns::Datagram &d : drain(tj))
+			if (d.tag == s2c::ZONE_TIMER_VALUE && d.body.size() == 15) out = d.body[13];
+		(void)drain(tl);
+		return out;
+	};
+	// Two passes: the session's first tick (the zero-armed countdown fires at
+	// once), then a periodic second later.
+	inmatch::Server_TickUpdate(ctx);
+	(void)friendlies();
+	tick_to_periodic_second(ctx);
+	const w::MatchPlayer *jr = world.match.player(joined);
+	const w::MatchPlayer *lr = world.match.player(loading);
+	if (!expect(jr->periodic_score_ticks == 2, "the joined slot takes both passes' event-25 ticks"))
+		return false;
+	if (!expect(lr->periodic_score_ticks == 0, "the loading joiner takes no event-25 tick"))
+		return false;
+	if (!expect(friendlies() == 1, "the capture census counts the joined slot alone"))
+		return false;
+	// The join: state 6, and its initial-state stream completes.
+	joiner.slot_state = inmatch::PlayerSlotState::Joined;
+	joiner.phase = inmatch::ConnectionPhase::InMatch;
+	joiner.burst.spawned = true;
+	tick_to_periodic_second(ctx);
+	if (!expect(lr->periodic_score_ticks == 1, "joined, its next pass counts it"))
+		return false;
+	return expect(friendlies() == 2, "joined, the census counts both");
+}
+
+// D-NET-593: a script team write moves a body's team byte alone; the readers
+// of the slot's own team byte keep the slot's. The visible-players snapshot
+// lists the requester's slot-team mates, the 0x32 join line carries the slot
+// team, and the status page colours by it.
+// [orig: NetPacket_SerializeVisiblePlayersSnapshot @0x50636B / @0x506422..0x506429;
+//  Server_PlayerAdd @0x51D25C; Server_DrawStatusScreen @0x50A565]
+bool check_slot_team_readers_ignore_a_body_team_write() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
+	inmatch::GameConfig config;
+	config.max_players = 4;
+	config.game_type = game_type::kTeamDeathmatch;
+	inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	ctx.world = &world;
+	std::array<ns::UdpSessionTransport, 3> wires{
+			ns::UdpSessionTransport(ns::UdpSessionTransport::Role::Host),
+			ns::UdpSessionTransport(ns::UdpSessionTransport::Role::Host),
+			ns::UdpSessionTransport(ns::UdpSessionTransport::Role::Host)};
+	const std::array<uint8_t, 3> slot_teams{1, 1, 2};
+	for (int i = 0; i < 3; ++i) {
+		const w::EntityHandle h =
+				w::spawn_remote_player(world, player_spawn(10.0f * float(i), 0, 0, slot_teams[i]));
+		ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+				static_cast<uint32_t>(7 + i), inmatch::NapiNPConnection::kTypeServerSide,
+				&wires[i], ns::TransportMode::Client, h, true));
+		inmatch::NapiNPConnection &c = ctx.np_protocol.connection_list.back();
+		c.reply.player_slot = static_cast<uint32_t>(i + 1);
+		c.reply.player_name = std::string(1, static_cast<char>('A' + i));
+		c.assigned_team = slot_teams[i];
+		c.assigned_team_valid = true;
+	}
+	inmatch::NapiNPConnection &a = ctx.np_protocol.connection_list[0];
+	world.registry.get(a.link.owned_entity)->team = 2; // the script's write to the body
+	VisiblePlayers seen;
+	const std::vector<uint8_t> snapshot = inmatch::build_visible_players_snapshot(
+			a, ctx.np_protocol.connection_list, game_type::kTeamDeathmatch, false,
+			/*requester_body_destroyed=*/false);
+	decode_visible_players(snapshot.data(), snapshot.size(), seen);
+	if (!expect(seen.entries.size() == 2 && seen.entries[0].slot == 1 && seen.entries[1].slot == 2,
+	            "the snapshot lists the requester's slot-team mates"))
+		return false;
+	for (auto &wire : wires) (void)drain(wire);
+	inmatch::broadcast_player_joined_text(ctx.np_protocol.connection_list, a);
+	const std::vector<uint8_t> line = {1, 'A', 0, 1};
+	bool carried = false;
+	for (const ns::Datagram &d : drain(wires[1]))
+		carried = carried || (d.tag == s2c::FORMATTED_GAME_TEXT && d.body == line);
+	if (!expect(carried, "the join line carries the slot team"))
+		return false;
+	hud::ServerStatusPageState page;
+	inmatch::fill_server_status_page(page, ctx, &world);
+	return expect(page.slots.size() > 1 && page.slots[1].team == 1,
+	              "the status page colours by the slot team");
+}
+
+// The host's CNetQuality sample runs in the main frame ahead of the server
+// tick, so ahead of the receive pump: a ping the pump stores this frame
+// reaches the next sample, not this one.
+// [orig: Game_ProcessMainFrame - CNetQuality_UpdateMetrics @0x52658B ahead of
+//  the Server_TickUpdate call @0x5266B6; Server_TickUpdate's receive pump
+//  @0x51D895]
+bool check_host_quality_samples_ahead_of_the_receive_pump() {
+	const auto sample = [](uint32_t ring_before, bool pump_writes) {
+		inmatch::NapiNPServerCtx ctx;
+		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+		inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
+		inmatch::GameConfig config;
+		config.max_players = 4;
+		inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+		auto heap = std::make_unique<w::World>();
+		w::World &world = *heap;
+		world.rules.mp_session = true;
+		world.registry.configure_pool(0, 8);
+		ctx.world = &world;
+		ctx.stats_avg_fps = 62;
+		const w::EntityHandle player = w::spawn_remote_player(world, w::PlayerSpawn{});
+		ns::UdpSessionTransport transport(ns::UdpSessionTransport::Role::Host);
+		ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+				7, inmatch::NapiNPConnection::kTypeServerSide, &transport,
+				ns::TransportMode::Client, player, true));
+		inmatch::NapiNPConnection &peer = ctx.np_protocol.connection_list.back();
+		peer.reply.player_slot = 1;
+		world.match.upsert_player({player, 1, "Peer"});
+		world.match.player(player)->play_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
+		for (uint32_t &r : peer.reply.rtt_ring) r = ring_before;
+		ctx.net_quality_sample_countdown = 1; // this frame samples
+		if (pump_writes)
+			ctx.receive_pump = [&peer]() {
+				for (uint32_t &r : peer.reply.rtt_ring) r = 250;
+			};
+		inmatch::Server_TickUpdate(ctx);
+		return ctx.host_network_quality;
+	};
+	const uint8_t before = sample(0, false);
+	const uint8_t pumped = sample(0, true);
+	const uint8_t slow = sample(250, false);
+	if (!expect(before != slow, "a 250 ms ring samples apart from a zero one"))
+		return false;
+	return expect(pumped == before, "the pump's ping waits for the next sample");
+}
+
+// D-NET-NEW-L3-4: a designator round (a DesignateTarget ammo) flies nothing:
+// the authority marks its firer's mode-1 designation at the spawn point with
+// the weapon's life (+0x458) and radius (+0x454), and a fresh mode-1 row sends
+// S2C 0x1E [0x30][the firer's pool-0 index][0xFF 0xFF][0 0 0 0] to every
+// in-match slot on the firer's team; the owner's next mark refreshes its row
+// with no second notice.
+// [orig: RoundData_SpawnRound @0x4EC249..0x4EC270; EntityTracker_RegisterOrUpdate
+//  @0x511580 - the notice test @0x5115D4..0x5115DC, the body @0x511608..0x511632, the send
+//  @0x511645, the stores @0x511656..0x511676]
+bool check_designator_round_marks_and_notifies_the_team() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
+	inmatch::GameConfig config;
+	config.max_players = 4;
+	config.game_type = game_type::kTeamDeathmatch;
+	inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.rules.mp_session = true;
+	world.rules.projectile_authority = true;
+	world.registry.configure_pool(0, 8);
+	ctx.world = &world;
+	world.tables.ammo.entries.resize(1);
+	world.tables.ammo.entries[0].valid = true;
+	world.tables.ammo.entries[0].flags = w::kAmmoFlagDesignateTarget;
+	world.tables.weapons.entries.resize(0x21);
+	world.tables.weapons.entries[0x20].valid = true;
+	world.tables.weapons.entries[0x20].designation_ticks = 30 * 62;
+	world.tables.weapons.entries[0x20].hud_splash_radius = 10;
+	std::array<ns::UdpSessionTransport, 3> wires{
+			ns::UdpSessionTransport(ns::UdpSessionTransport::Role::Host),
+			ns::UdpSessionTransport(ns::UdpSessionTransport::Role::Host),
+			ns::UdpSessionTransport(ns::UdpSessionTransport::Role::Host)};
+	const std::array<uint8_t, 3> teams{1, 1, 2};
+	std::array<w::EntityHandle, 3> bodies{};
+	for (int i = 0; i < 3; ++i) {
+		bodies[i] = w::spawn_remote_player(world, player_spawn(10.0f * float(i), 0, 0, teams[i]));
+		ctx.np_protocol.connection_list.push_back(make_seeded_conn(
+				static_cast<uint32_t>(7 + i), inmatch::NapiNPConnection::kTypeServerSide,
+				&wires[i], ns::TransportMode::Client, bodies[i], true));
+		inmatch::NapiNPConnection &c = ctx.np_protocol.connection_list.back();
+		c.reply.player_slot = static_cast<uint32_t>(i + 1);
+		c.assigned_team = teams[i];
+		c.assigned_team_valid = true;
+	}
+	w::RoundSpawnParams shot;
+	shot.owner = bodies[0];
+	shot.ammo_index = 0;
+	shot.adm_index = 0x20;
+	shot.origin = {100.0f, 200.0f, 5.0f};
+	if (!expect(world.round_sim.spawn(world, shot, w::RoundConsequenceMode::Authoritative) == -1 &&
+	                    world.out.designation_marks.size() == 1,
+	            "a designator round flies nothing and leaves one mark"))
+		return false;
+	for (auto &wire : wires) (void)drain(wire);
+	inmatch::Server_TickUpdate(ctx); // the tick head routes the marks
+	const std::vector<uint8_t> notice = {0x30, static_cast<uint8_t>(bodies[0].slot()),
+			0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00};
+	const auto notices = [&](ns::UdpSessionTransport &wire) {
+		int n = 0;
+		for (const ns::Datagram &d : drain(wire))
+			if (d.tag == s2c::GAME_EVENT && d.body == notice) ++n;
+		return n;
+	};
+	if (!expect(notices(wires[0]) == 1 && notices(wires[1]) == 1 && notices(wires[2]) == 0,
+	            "the fresh mode-1 row notifies the firer's team alone"))
+		return false;
+	const inmatch::ServerDesignation *row = nullptr;
+	for (const inmatch::ServerDesignation &r : ctx.designations)
+		if (r.owner == bodies[0]) row = &r;
+	if (!expect(row != nullptr && row->mode == 1 && row->point[0] == 100 * 65536 &&
+	                    row->point[1] == 200 * 65536 && row->point[2] == 5 * 65536 &&
+	                    row->radius_q16 == 10 * 65536 && row->remaining_ticks == 30 * 62 - 1,
+	            "the row holds the point, the radius and the life (one tick aged)"))
+		return false;
+	(void)world.round_sim.spawn(world, shot, w::RoundConsequenceMode::Authoritative);
+	inmatch::Server_TickUpdate(ctx);
+	return expect(notices(wires[0]) == 0 && notices(wires[1]) == 0 &&
+	                      row->remaining_ticks == 30 * 62 - 1,
+	              "the owner's next mark refreshes its row with no second notice");
+}
+
+// The 1 Hz capture pass sends each zone's 0x6F to every in-match slot on
+// every pass, once, whether or not its record changed and whatever the
+// recipient's state; the 0x6E goes, once, to a slot whose body's dead bit or
+// hold is set, and a Health-0 body with its dead bit clear (a death its edge
+// has not latched yet) gets none.
+// [orig: Server_UpdateCaptureZoneEntities @0x519690 - send_mask 0x80 @0x5197B1,
+//  userParam 1 @0x5197D9; Server_TickUpdate - `test [eax+24h], 2` @0x51E083, the
+//  hold @0x51E089, userParam 1 @0x51E0C4]
+bool check_zone_timer_every_pass_and_wave_status_by_the_dead_bit() {
+	inmatch::NapiNPServerCtx ctx;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = game_type::kTeamDeathmatch;
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.rules.mp_session = true;
+	ctx.world = &world;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 4);
+	w::MatchRules rules;
+	rules.game_type = ctx.config.game_type;
+	world.match.configure(rules);
+	w::Entity zone;
+	zone.kind = w::EntityKind::Item;
+	zone.is_capture_trigger = true;
+	zone.zone_number = 1;
+	zone.zone_radius = 20;
+	zone.team = 1;
+	zone.health = 1;
+	zone.alive = true;
+	const w::EntityHandle zone_handle = world.registry.spawn(1, zone);
+	world.zones.build_chain_from_mission();
+	w::Entity body;
+	body.kind = w::EntityKind::Organic;
+	body.player_class = 8;
+	body.team = 1;
+	body.health = 150;
+	body.alive = true;
+	body.position = {500.0f, 0.0f, 0.0f};
+	const w::EntityHandle player = world.registry.spawn(0, body);
+	world.match.upsert_player({player, 0, "Blue", {}});
+	ns::UdpSessionTransport transport(ns::UdpSessionTransport::Role::Host);
+	inmatch::NapiNPConnection conn;
+	conn.type = 1;
+	conn.phase = inmatch::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.link.mode = ns::TransportMode::Client;
+	conn.link.transport = &transport;
+	conn.link.owned_entity = player;
+	ctx.np_protocol.connection_list.push_back(std::move(conn));
+
+	struct Pass {
+		int zone_records = 0;
+		bool zone_reliable = false;
+		int wave_status = 0;
+		bool wave_reliable = false;
+	};
+	const auto next_second = [&]() {
+		do {
+			inmatch::Server_TickUpdate(ctx);
+		} while (!world.match.periodic_second());
+		Pass out;
+		ns::Datagram d;
+		while (transport.pop_outbound(d)) {
+			if (d.tag == s2c::ZONE_TIMER_VALUE && d.body.size() >= 2 &&
+					(d.body[0] | (d.body[1] << 8)) == zone_handle.packed) {
+				++out.zone_records;
+				out.zone_reliable = out.zone_reliable || d.reliable;
+			}
+			if (d.tag == s2c::SPAWN_WAVE_STATUS) {
+				++out.wave_status;
+				out.wave_reliable = out.wave_reliable || d.reliable;
+			}
+		}
+		return out;
+	};
+	(void)next_second();
+	const Pass unchanged = next_second();
+	bool ok = expect(unchanged.zone_records == 1 && !unchanged.zone_reliable &&
+					unchanged.wave_status == 0,
+			"an unchanged zone's 0x6F reaches a live slot again, sent once");
+	w::Entity *e = world.registry.get(player);
+	e->health = 0;
+	const Pass unlatched = next_second();
+	ok = expect(unlatched.zone_records == 1 && unlatched.wave_status == 0,
+			"a Health-0 body with its dead bit clear draws no 0x6E") && ok;
+	e->health = 150;
+	e->engine_flags |= w::kEntityFlagDead;
+	const Pass dead = next_second();
+	ok = expect(dead.wave_status == 1 && !dead.wave_reliable,
+			"the dead bit draws the one-send 0x6E") && ok;
+	return ok;
+}
+
 bool check_priority_target_sweep() {
 	w::World world;
 	world.registry.configure_pool(0, 4);
@@ -1435,7 +2170,7 @@ bool check_kit_weight_recompute() {
 		return body != nullptr ? body->inf.loadout_weight_fp16 : -1;
 	};
 	if (!expect(remote_conn.reply.ammo_pools[0] == 60 &&
-			remote_conn.weapon_slots[combo].clip == 30 && remote_weight() == 0x60000,
+			slots_of(world, remote_conn)[combo].clip == 30 && remote_weight() == 0x60000,
 			"the loadout accept seeds the host-side rows and stamps the remote kit weight"))
 		return false;
 	remote_entity->flags &= ~w::kEntityFlagDead;
@@ -1453,7 +2188,7 @@ bool check_kit_weight_recompute() {
 	};
 	tick_to_periodic_second(ctx); // the periodic second that precedes the shots
 	fire(30);
-	if (!expect(remote_conn.weapon_slots[combo].clip == 0 &&
+	if (!expect(slots_of(world, remote_conn)[combo].clip == 0 &&
 			remote_weight() == 0x60000,
 			"a spent clip does not change the weight before the periodic second"))
 		return false;
@@ -1470,7 +2205,7 @@ bool check_kit_weight_recompute() {
 				{make_protocol_message(c2s::WEAPON_RELOAD_REQUEST, encode_weapon_reload(reload))},
 				100, roster, &world);
 	}
-	if (!expect(remote_conn.weapon_slots[combo].clip == 30 && remote_conn.reply.ammo_pools[0] == 30,
+	if (!expect(slots_of(world, remote_conn)[combo].clip == 30 && remote_conn.reply.ammo_pools[0] == 30,
 			"the host-side reload draws the clip out of the ammo pool"))
 		return false;
 	tick_to_periodic_second(ctx);
@@ -1520,7 +2255,7 @@ bool check_kit_weight_reads_the_seat() {
 	std::vector<inmatch::NapiNPConnection> roster;
 	roster.push_back(make_seeded_conn(3, 1, nullptr, ns::TransportMode::Client, remote, true));
 	inmatch::NapiNPConnection &conn = roster.front();
-	conn.weapon_slots[3 * 65 + 2] = inmatch::WeaponSlotState{5, 30};
+	slots_of(world, conn)[3 * 65 + 2] = w::PersonalWeaponSlot{5, 30};
 	conn.reply.ammo_pools[0] = 60;
 	auto weight = [&]() -> int32_t {
 		inmatch::Server_RecalculateAllPlayerKitWeights(roster, world);
@@ -1584,7 +2319,7 @@ bool check_deploy_rebuilds_the_kit_from_the_loadout_buffer() {
 			100, roster, &world);
 	const std::vector<uint8_t> granted = conn.reply.last_loadout_reply;
 	if (!expect(conn.reply.loadout_buffer_set && conn.reply.ammo_pools[0] == 60 &&
-			conn.weapon_slots[combo].clip == 30 && !granted.empty(),
+			slots_of(world, conn)[combo].clip == 30 && !granted.empty(),
 			"the accept keeps the buffer and seeds 60 + one 30-round clip"))
 		return false;
 	body->flags &= ~w::kEntityFlagDead;
@@ -1599,7 +2334,7 @@ bool check_deploy_rebuilds_the_kit_from_the_loadout_buffer() {
 	};
 	spend_clip();
 	conn.reply.ammo_pools[0] = 7; // a reload or two in the last life
-	if (!expect(conn.weapon_slots[combo].clip == 0, "the last life spent the clip")) return false;
+	if (!expect(slots_of(world, conn)[combo].clip == 0, "the last life spent the clip")) return false;
 
 	auto deploy = [&]() {
 		body->flags |= w::kEntityFlagDead;
@@ -1613,7 +2348,7 @@ bool check_deploy_rebuilds_the_kit_from_the_loadout_buffer() {
 		return std::vector<uint8_t>{};
 	};
 	std::vector<ProtocolMessage> replies = deploy();
-	if (!expect(conn.reply.ammo_pools[0] == 60 && conn.weapon_slots[combo].clip == 30,
+	if (!expect(conn.reply.ammo_pools[0] == 60 && slots_of(world, conn)[combo].clip == 30,
 			"the deploy rebuilds the pool and the clip from the loadout buffer"))
 		return false;
 	if (!expect(loadout_body(replies) == granted,
@@ -1628,7 +2363,7 @@ bool check_deploy_rebuilds_the_kit_from_the_loadout_buffer() {
 	conn.reply.ammo_pools[0] = 7;
 	conn.reply.revive_pose_valid = true;
 	replies = deploy();
-	if (!expect(conn.reply.ammo_pools[0] == 7 && conn.weapon_slots[combo].clip == 0,
+	if (!expect(conn.reply.ammo_pools[0] == 7 && slots_of(world, conn)[combo].clip == 0,
 			"a revive deploy leaves the kit the player died with"))
 		return false;
 	bool seed = false;
@@ -1659,23 +2394,26 @@ bool check_deploy_rebuilds_an_unsubmitted_slot_empty() {
 	auto &roster = ctx.np_protocol.connection_list;
 	roster.push_back(make_seeded_conn(3, 1, &remote_wire, ns::TransportMode::Client, remote, true));
 	inmatch::NapiNPConnection &conn = roster[0];
-	conn.weapon_slots[3 * 65 + 2] = inmatch::WeaponSlotState{5, 30}; // a picked-up rifle
+	slots_of(world, conn)[3 * 65 + 2] = w::PersonalWeaponSlot{5, 30}; // a picked-up rifle
 	conn.reply.ammo_pools[0] = 40;
 	w::Entity *body = world.registry.get(remote);
 	body->flags |= w::kEntityFlagDead;
 	body->alive = false;
 	body->health = 0;
 	(void)inmatch::Server_ReleasePlayerDeployment(ctx.config, conn, world, {}, 0xFFFF);
-	return expect(conn.weapon_slots.empty() && conn.reply.ammo_pools[0] == 0,
+	return expect(slots_of(world, conn).empty() && conn.reply.ammo_pools[0] == 0,
 			"an unsubmitted slot's deploy leaves no row and no pool");
 }
 
-// The listen host's own slot is kept apart from its local inventory (D-NET-479)
-// and takes no 0x2F: its deploy leaves the kit, its carry bits included, and the
-// slot's rows, where an empty rebuild would strip them.
-// [orig: Server_DeployPlayer @0x5178E1 over the host's slot, whose buffer is
-//  g_SpawnLoadoutBuffer (Server_InitAllPlayerEntitiesForRound @0x516BCA..0x516BE3)]
-bool check_deploy_leaves_the_listen_hosts_kit() {
+// The listen host's own slot table is its local table (D-NET-479): its deploy rebuilds
+// the local table from the slot's loadout buffer (the round init's seed of the spawn
+// buffer, or its accepts' kept entries), the rifle's 3 clips (90 rounds, one 30-round clip
+// drawn) and the fill's carry bits; the body's own rows, which the local player never
+// reads, are left alone.
+// [orig: Player_InitPlayer @0x4E18A8..0x4E18C1; Server_DeployPlayer @0x5178E1 ->
+//  PlayerSlot_InitWeaponsFromLoadout @0x515550 - the fill @0x515571..0x515581 (its carry
+//  clear WeaponSlotTable_LoadAllFromDefs @0x541503), the counts @0x5156C1..0x5156EA]
+bool check_deploy_rebuilds_the_listen_hosts_local_table() {
 	w::World world;
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
@@ -1697,17 +2435,23 @@ bool check_deploy_leaves_the_listen_hosts_kit() {
 	auto &roster = ctx.np_protocol.connection_list;
 	roster.push_back(make_seeded_conn(0, 1, nullptr, ns::TransportMode::Client, host, true));
 	inmatch::NapiNPConnection &conn = roster[0];
-	conn.weapon_slots[3 * 65 + 2] = inmatch::WeaponSlotState{5, 30};
+	conn.slot_class = 8;
+	conn.reply.loadout_buffer.entries.push_back(LoadoutSubmitEntry{5, 3, 0xFF, 0});
+	conn.reply.loadout_buffer_set = true;
+	slots_of(world, conn)[3 * 65 + 2] = w::PersonalWeaponSlot{5, 30};
 	w::Entity *body = world.registry.get(host);
-	body->carry_flags |= 0x18u; // the local kit's armor and parachute
+	body->carry_flags |= 0x18u; // the previous kit's armor and parachute
 	body->flags |= w::kEntityFlagDead;
 	body->alive = false;
 	body->health = 0;
 	(void)inmatch::Server_ReleasePlayerDeployment(ctx.config, conn, world, {}, 0xFFFF);
 	body = world.registry.get(host);
-	return expect(body != nullptr && (body->carry_flags & 0x18u) == 0x18u &&
-					conn.weapon_slots.size() == 1,
-			"the listen host's deploy keeps its kit's carry bits and rows");
+	const w::WeaponInventorySlot *rifle = local.inventory.slot(3 * 65 + 2);
+	return expect(body != nullptr && (body->carry_flags & 0x18u) == 0u &&
+					local.inventory_valid && rifle != nullptr && rifle->adm_index == 5 &&
+					rifle->clip == 30 && local.inventory.pools[0] == 60 &&
+					slots_of(world, conn).size() == 1 && conn.reply.ammo_pools[0] == 0,
+			"the listen host's deploy rebuilds its local table from the slot's buffer");
 }
 
 // The deploy's pool leg looks the buffered name up again: of two weapons sharing a name,
@@ -1762,18 +2506,21 @@ bool check_round_init_rebuilds_the_kept_kit() {
 	(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn,
 			{make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(request))},
 			100, roster, &world);
-	if (!expect(conn.reply.ammo_pools[0] == 0 && conn.weapon_slots[3 * 65 + 2].clip == 30,
+	if (!expect(conn.reply.ammo_pools[0] == 0 && slots_of(world, conn)[3 * 65 + 2].clip == 30,
 			"the one-magazine accept draws its clip and leaves no reserve"))
 		return false;
 	inmatch::reset_slot_for_next_mission(conn);
-	if (!expect(conn.reply.loadout_buffer_set && conn.weapon_slots.size() == 1 &&
-					conn.weapon_slots[3 * 65 + 2].clip == 30 &&
+	if (!expect(conn.reply.loadout_buffer_set &&
 					conn.reply.loadout_buffer.entries.size() == 1,
-			"the map change keeps the slot's buffer and its rows"))
+			"the map change keeps the slot's buffer"))
 		return false;
-	conn.weapon_slots[3 * 65 + 2].clip = 4; // a spent clip the round init redraws
+	// The rows are the player entity's; the round init rebuilds them on the slot's
+	// entity from the kept buffer whatever they held.
+	auto &rows = world.registry.get(remote)->weapon_slots;
+	rows[3 * 65 + 2].clip = 4; // a spent clip the round init redraws
+	rows[3 * 65 + 7] = w::PersonalWeaponSlot{5, 9}; // a row the buffer does not name
 	inmatch::PlayerSlot_RebuildKitForRound(conn, world, *world.registry.get(remote));
-	return expect(conn.weapon_slots.size() == 1 && conn.weapon_slots[3 * 65 + 2].clip == 30 &&
+	return expect(rows.size() == 1 && rows[3 * 65 + 2].clip == 30 &&
 					conn.reply.ammo_pools[0] == 60,
 			"the round init rebuilds the rifle with its seeded 90 less one clip");
 }
@@ -2030,15 +2777,15 @@ bool check_loadout_sub_variant_rows() {
 			"the rifle's row skips its semi mode; the launcher outside the skip is a row"))
 		return false;
 	auto row_adm = [&](uint16_t combo) -> int {
-		const auto it = conn.weapon_slots.find(combo);
-		return it != conn.weapon_slots.end() ? it->second.adm_index : -1;
+		const auto it = slots_of(world, conn).find(combo);
+		return it != slots_of(world, conn).end() ? it->second.adm_index : -1;
 	};
-	if (!expect(conn.weapon_slots.size() == 3 && row_adm(195) == 1 && row_adm(196) == 2 &&
+	if (!expect(slots_of(world, conn).size() == 3 && row_adm(195) == 1 && row_adm(196) == 2 &&
 					row_adm(200) == 3,
 			"the host rows hold the rifle, its semi mode and its launcher; the rifle keeps its combo"))
 		return false;
 	if (!expect(conn.reply.ammo_pools[0] == 270 && conn.reply.ammo_pools[2] == 10 &&
-					conn.reply.shared_clips[1] == 30 && conn.weapon_slots[200].clip == 2,
+					conn.reply.shared_clips[1] == 30 && slots_of(world, conn)[200].clip == 2,
 			"the pools and the shared bucket after the accept's draw"))
 		return false;
 
@@ -2076,7 +2823,7 @@ bool check_loadout_sub_variant_rows() {
 	accept({{4, 0xFF, 0xFF, 0}});
 	if (!expect(conn.reply.ammo_pools[0] == 0 && conn.reply.ammo_pools[2] == 0 &&
 					conn.reply.ammo_pools[3] == 40 && conn.reply.shared_clips[1] == 0 &&
-					conn.weapon_slots.size() == 1 && conn.weapon_slots[195].adm_index == 4,
+					slots_of(world, conn).size() == 1 && slots_of(world, conn)[195].adm_index == 4,
 			"a kit change leaves the dropped classes at zero"))
 		return false;
 
@@ -2091,7 +2838,7 @@ bool check_loadout_sub_variant_rows() {
 	accept({{1, 0xFF, 0xFF, 0}});
 	if (!expect(conn.reply.ammo_pools[0] == 300 && conn.reply.ammo_pools[2] == 12 &&
 					conn.reply.ammo_pools[3] == 0 && conn.reply.shared_clips[1] == 0 &&
-					conn.weapon_slots[200].clip == 0,
+					slots_of(world, conn)[200].clip == 0,
 			"a UseGun seat's accept draws no clip"))
 		return false;
 
@@ -2113,7 +2860,7 @@ bool check_loadout_sub_variant_rows() {
 					seated.slots.size() == 2 && seated.slots[0].ammo_primary == 10 &&
 					seated.slots[0].ammo_secondary == 6 && conn.reply.ammo_pools[0] == 300 &&
 					conn.reply.ammo_pools[2] == 12 && conn.reply.shared_clips[1] == 0 &&
-					conn.weapon_slots[200].clip == 1,
+					slots_of(world, conn)[200].clip == 1,
 			"a controller seat's draws read the carrier's reserve and spend nothing");
 }
 
@@ -2153,7 +2900,7 @@ bool check_sub_variant_fire_after_the_grant() {
 	fire(3); // the launcher
 	if (!expect(world.out.rounds.count == 2 && world.out.rounds.records[0].adm_index == 2 &&
 					world.out.rounds.records[1].adm_index == 3 &&
-					conn.reply.shared_clips[1] == 29 && conn.weapon_slots[200].clip == 1,
+					conn.reply.shared_clips[1] == 29 && slots_of(world, conn)[200].clip == 1,
 			"the semi mode spends the shared bucket and the launcher its own clip"))
 		return false;
 	fire(4); // another weapon on the rifle's combo
@@ -2163,7 +2910,7 @@ bool check_sub_variant_fire_after_the_grant() {
 		return false;
 	world.tables.weapons.entries[4].rank = 7;
 	fire(4);
-	return expect(world.out.rounds.count == 3 && conn.weapon_slots.count(3 * 65 + 7) == 0,
+	return expect(world.out.rounds.count == 3 && slots_of(world, conn).count(3 * 65 + 7) == 0,
 			"a combo the kit left empty refuses the fire and makes no slot");
 }
 
@@ -2762,7 +3509,7 @@ bool check_shared_loaded_ammo_fire_and_reload() {
     conn.reply.shared_clips[1] = 2;
     conn.reply.ammo_pools[0] = 5;
     for (uint8_t adm : {5,6}) {
-        auto &slot = conn.weapon_slots[3*65+table.entries[adm].rank];
+        auto &slot = slots_of(world, conn)[3*65+table.entries[adm].rank];
         slot.adm_index = adm; slot.clip = 123;
     }
     uint32_t client_tick = conn.tick_seed;
@@ -2781,7 +3528,7 @@ bool check_shared_loaded_ammo_fire_and_reload() {
             "reload fills the shared clip from its reserve pool")) return false;
     fire(5);
     return expect(conn.reply.shared_clips[1]==4 && world.out.rounds.count==3 &&
-            conn.weapon_slots[197].clip==123 && conn.weapon_slots[198].clip==123,
+            slots_of(world, conn)[197].clip==123 && slots_of(world, conn)[198].clip==123,
             "the other weapon sees the reload without rewriting either private clip");
 }
 
@@ -2806,7 +3553,7 @@ bool check_validated_fire_scores_one_shot() {
 	roster.push_back(make_seeded_conn(3, 1, nullptr, ns::TransportMode::Client, shooter, true));
 	roster.push_back(make_seeded_conn(4, 1, nullptr, ns::TransportMode::Client, other, true));
 	inmatch::NapiNPConnection &conn = roster[0];
-	conn.weapon_slots[3 * 65 + 2] = inmatch::WeaponSlotState{5, 30}; // the grant's rifle
+	slots_of(world, conn)[3 * 65 + 2] = w::PersonalWeaponSlot{5, 30}; // the grant's rifle
 	uint32_t client_tick = conn.tick_seed;
 	auto dispatch_fire = [&](std::vector<uint8_t> body) {
 		std::vector<ProtocolMessage> msgs;
@@ -2859,7 +3606,8 @@ bool check_host_tracks_the_remote_equipped_slot() {
 	inmatch::NapiNPConnection &conn = roster.front();
 	const uint16_t rifle_combo = 3 * 65 + 2;
 	const uint16_t chute_combo = 3 * 65 + 1;
-	using Ref = inmatch::NapiNPConnection::EquippedSlotRef;
+	using Ref = w::WeaponSlotRef;
+	const auto equipped = [&]() { return world.registry.get(shooter)->equipped_slot; };
 	auto submit = [&](uint32_t slot) {
 		LoadoutSubmit request;
 		request.team = 1;
@@ -2874,26 +3622,38 @@ bool check_host_tracks_the_remote_equipped_slot() {
 				100, roster, &world);
 	};
 	submit(rifle_combo);
-	if (!expect(conn.weapon_slots.count(rifle_combo) == 1 && conn.equipped_slot.kind == Ref::kPersonal &&
-					conn.equipped_slot.combo == rifle_combo,
+	if (!expect(slots_of(world, conn).count(rifle_combo) == 1 && equipped().kind == Ref::kPersonal &&
+					equipped().combo == rifle_combo,
 			"a selectable submitted slot is the EquippedSlot"))
 		return false;
 	submit(3 * 65 + 9);
-	if (!expect(conn.equipped_slot.kind == Ref::kNone, "an empty submitted slot clears it"))
+	if (!expect(equipped().kind == Ref::kNone, "an empty submitted slot clears it"))
 		return false;
 	submit(chute_combo);
-	if (!expect(conn.equipped_slot.kind == Ref::kNone, "a NoSelect submitted slot clears it"))
+	if (!expect(equipped().kind == Ref::kNone, "a NoSelect submitted slot clears it"))
 		return false;
 	uint32_t client_tick = conn.tick_seed;
+	// A gun's slot held on foot (a refused UseGun attach, D-NET-420) is no seat:
+	// the fire takes the personal slot and re-points to it.
+	world.registry.get(shooter)->equipped_slot.kind = Ref::kMount;
+	world.registry.get(shooter)->equipped_slot.mount = shooter;
 	(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn,
 			{make_protocol_message(c2s::FIRED_ROUND, fire_body(conn, shooter.packed, 5, client_tick))},
 			100, roster, &world);
-	return expect(world.out.rounds.count == 1 && conn.equipped_slot.kind == Ref::kPersonal &&
-					conn.equipped_slot.combo == rifle_combo,
+	return expect(world.out.rounds.count == 1 && equipped().kind == Ref::kPersonal &&
+					equipped().combo == rifle_combo,
 			"an accepted fire re-points the EquippedSlot at the fired combo");
 }
 
-bool check_guidance_waits_for_spawn_frame() {
+// A guided motor's 0x44 is queued at the motor, in the entity pass's send order, so the
+// next tick routes it with the pass's other inline records at its head, ahead of its
+// 0x0A, and no slot frame boundary holds it (the queue's build waits for the boundary,
+// not the send). A group-3 update keeps its call site's 310-flush lifetime.
+// [orig: Entity_SendEffectPacket @0x445C40 (NapiNPServer_SendFiltered called @0x445CA2)
+//  from Entity_UpdateGuidedMissile_0 @0x446060 (group 3 with 0x136 @0x446345), run by
+//  Weapon_UpdateAllProjectiles, called @0x4C223A in Entity_UpdateAllEntities, which
+//  Game_ProcessMainFrame calls @0x52674B after Server_TickUpdate @0x51D7E0 (called @0x5266B6)]
+bool check_guidance_leads_the_next_frame() {
     inmatch::NapiNPServerCtx ctx;
     inmatch::set_connection_mode(ctx,inmatch::ConnectionMode::HostOnly);
     ctx.is_in_session=1;
@@ -2909,31 +3669,36 @@ bool check_guidance_waits_for_spawn_frame() {
     ctx.np_protocol.connection_list.push_back(make_seeded_conn(3,1,&transport,ns::TransportMode::Client,player,true));
     auto &conn=ctx.np_protocol.connection_list.front();
     conn.s2c_send_boundary_open=false;
-    w::RoundSim::GuidedUpdate update{};
-    update.shooter=player.packed; update.net_id=9; update.groups=1u<<3;
+    w::GuidedUpdateEvent update{};
+    update.shooter=player.packed; update.net_id=9; update.group=3;
     update.state.target=0x1001; update.state.steer[0]=1234;
-    world.round_sim.guided_updates.push_back(update);
+    world.out.entity_events.push_back(update); // the entity pass's queued send
     inmatch::Server_TickUpdate(ctx);
-    for (const auto &d:drain(transport))
-        if (!expect(d.tag!=0x44,"guidance waits while the spawn frame boundary is closed")) return false;
-    if (!expect(conn.pending_guidance.size()==1,"guidance survives the closed send boundary")) return false;
+    int held=0;
+    for (const auto &d:drain(transport)) {
+        if (d.tag!=0x44) continue;
+        ++held;
+        if (!expect(d.retention_flushes==0x136,"group 3 keeps its 310-flush lifetime")) return false;
+    }
+    if (!expect(held==1,"a closed frame boundary holds no guidance")) return false;
     conn.s2c_send_boundary_open=true;
+    world.out.entity_events.push_back(update);
     inmatch::Server_TickUpdate(ctx);
     bool frame=false, guidance=false;
     for (const auto &d:drain(transport)) {
-        if (d.tag==0x0A) frame=true;
         if (d.tag==0x44) {
-            if (!expect(frame,"the fire-bearing frame precedes queued guidance")) return false;
+            if (!expect(!frame,"the pass's guidance leads the tick's 0x0A")) return false;
             guidance=true;
         }
+        if (d.tag==0x0A) frame=true;
     }
-    return expect(guidance && conn.pending_guidance.empty(),"queued guidance drains once at the open boundary");
+    return expect(guidance && frame,"the open tick carries the guidance, then its frame");
 }
 
 } // namespace
 
 int main() {
-	bool ok = check_shared_loaded_ammo_fire_and_reload() && check_guidance_waits_for_spawn_frame();
+	bool ok = check_shared_loaded_ammo_fire_and_reload() && check_guidance_leads_the_next_frame();
 	ok = check_validated_fire_scores_one_shot() && ok;
 	ok = check_host_tracks_the_remote_equipped_slot() && ok;
 	ok = check_spawn_protection_seeded_at_creation() && ok;
@@ -2959,12 +3724,22 @@ int main() {
 	ok = check_death_consumer_reads_and_clears_the_reported_cause_bit() && ok;
 	ok = check_spectator_latch_mirrors_onto_the_roster_row() && ok;
 	ok = check_armory_reuse_cooldown() && ok;
+	ok = check_model_page_cursor_wraps_at_the_list_count() && ok;
+	ok = check_quartet_skips_a_spectator_slot() && ok;
+	ok = check_silence_punt_falls_through_to_the_countdown() && ok;
+	ok = check_integrity_family_draws_once_per_send() && ok;
+	ok = check_entity_state_fan_runs_out_of_session() && ok;
+	ok = check_a_loading_joiner_takes_no_proximity_or_census_place() && ok;
+	ok = check_slot_team_readers_ignore_a_body_team_write() && ok;
+	ok = check_host_quality_samples_ahead_of_the_receive_pump() && ok;
+	ok = check_designator_round_marks_and_notifies_the_team() && ok;
+	ok = check_zone_timer_every_pass_and_wave_status_by_the_dead_bit() && ok;
 	ok = check_priority_target_sweep() && ok;
 	ok = check_kit_weight_recompute() && ok;
 	ok = check_kit_weight_reads_the_seat() && ok;
 	ok = check_deploy_rebuilds_the_kit_from_the_loadout_buffer() && ok;
 	ok = check_deploy_rebuilds_an_unsubmitted_slot_empty() && ok;
-	ok = check_deploy_leaves_the_listen_hosts_kit() && ok;
+	ok = check_deploy_rebuilds_the_listen_hosts_local_table() && ok;
 	ok = check_deploy_pools_follow_the_buffered_name() && ok;
 	ok = check_round_init_rebuilds_the_kept_kit() && ok;
 	ok = check_loadout_damage_class_bytes() && ok;

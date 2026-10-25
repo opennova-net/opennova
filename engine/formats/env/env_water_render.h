@@ -320,7 +320,12 @@ inline constexpr int kWaterStripMaxRows = 1024;
 // primitives [orig: @ 0x5c3195 (8n-10); DrawPrimitive(5, start, 8n-12)
 // @ 0x5c3209; batch walk @ 0x5c3164..0x5c329e]. (env-tod-re.md's "8*rows-10
 // primitives" is the witnessed VERTEX count; the draw call submits two
-// fewer.) Batches with fewer than 2 rows are skipped.
+// fewer.) Batches with fewer than 2 rows are skipped. Each batch's vertices are
+// written into the one dynamic vertex buffer the strip keeps, locked and unlocked
+// around the copy on every call [orig: Render_WaterStripDetailed @0x5C27D0 -
+// CDynamicVB_Lock (the call @0x5C31A6), CDynamicVB_Unlock (the call @0x5C31EE)]:
+// no buffer is made per frame (the device's strip surface is rewritten in place
+// while the row count holds, D-NET-NEW-LF-22).
 struct WaterStripBatch {
 	int32_t first_row = 0;
 	int32_t rows = 0;

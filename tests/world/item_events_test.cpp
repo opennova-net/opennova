@@ -27,6 +27,108 @@ EntityHandle spawn(World &w, int pool, int id, ItemDeathClass cls) {
     w.tables.item_death_traits.set(id, t);
     return h;
 }
+// D-ITEM-23 / D-SND-28: an ele0 item runs its mover on its pool's visit. It stamps savedLivePose,
+// steps its lift (+0x1A8), Z and vertical step (+0xA0) by (state << 10) - 0x400, then picks the
+// next state: 0 while the lift is above 0, else 1; 2 below 8 units while its +0x28 ground entity
+// stands on it. On a change it stores the state in +0x2A0 (the word the pool-2/3 record streams),
+// plays the def's door-open set on a stop (state 1) and registers its first loop (lane 0,
+// 10 ticks, pitch 1.0, full volume). A pool-2 elevator moves on its tick & 7 cohort alone.
+// [orig: Entity_UpdateFallAndLandState @0x4A20E0 - the stamp @0x4A20E8..0x4A2141, the step
+//  @0x4A2116..0x4A2133, the states @0x4A2147..0x4A217B, the change @0x4A2187..0x4A2191, the cue
+//  @0x4A21A5, the loop @0x4A21AD..0x4A21F2; Entity_UpdateAllEntities - pool 2's update call
+//  @0x4C22E7]
+int test_elevator_mover() {
+    auto heap = std::make_unique<World>();
+    auto &w = *heap;
+    for (int pool = 0; pool <= 2; ++pool) w.registry.configure_pool(pool, 8);
+    const auto lift = spawn(w, 1, 20, ItemDeathClass::kElevator);
+    auto *traits = w.tables.item_death_traits.get_mutable(20);
+    traits->regional_loops[0] = "Lift";
+    traits->door_open_set = "Clunk";
+    Entity *e = w.registry.get(lift);
+    e->elevator_motion = true;
+    e->position.set_q16({1 << 16, 2 << 16, 10 << 16});
+    e->script_next_ssn = 5; // the record's next_ssn the spawn stored in +0x2A0
+    w.logic_tick = 1;
+    step_item_pool(w, 1);
+    e = w.registry.get(lift);
+    CHECK(e->saved_live_valid && e->saved_live_pos[2] == 10 << 16);
+    CHECK(e->elevator_lift == -0x400 && e->veh.slide_z == -0x400);
+    CHECK(e->position.z.q16 == (10 << 16) - 0x400);
+    CHECK(e->veh.speed == 1 && e->script_next_ssn == 1);
+    CHECK(w.out.slot_sounds.size() == 1 && std::strcmp(w.out.slot_sounds[0].set_name, "Clunk") == 0);
+    CHECK(w.out.slot_sounds[0].source_handle == lift.packed);
+    const auto &loops = w.out.sound_emitters.pending();
+    CHECK(loops.size() == 1 && loops[0].set_name == "Lift" && loops[0].lifetime_ticks == 10);
+    CHECK(loops[0].lane == 0 && loops[0].volume_q8_8 == 0xFFFF && loops[0].pitch_q16 == 0x10000);
+    // Stopped: no step, no change, no sound.
+    w.out.slot_sounds.clear();
+    w.out.sound_emitters.clear();
+    w.logic_tick = 2;
+    step_item_pool(w, 1);
+    e = w.registry.get(lift);
+    CHECK(e->position.z.q16 == (10 << 16) - 0x400 && e->veh.slide_z == 0);
+    CHECK(w.out.slot_sounds.empty() && w.out.sound_emitters.empty());
+    // A rider whose ground is the lift, the lift's ground the rider: raising (no cue, the loop).
+    Entity rider_seed;
+    rider_seed.kind = EntityKind::Item;
+    const auto rider = w.registry.spawn(0, rider_seed);
+    w.registry.get(rider)->ground_target = lift;
+    w.registry.get(lift)->ground_target = rider;
+    w.logic_tick = 3;
+    step_item_pool(w, 1);
+    e = w.registry.get(lift);
+    CHECK(e->veh.speed == 2 && e->script_next_ssn == 2 && e->veh.slide_z == 0);
+    CHECK(w.out.slot_sounds.empty() && w.out.sound_emitters.size() == 1);
+    w.out.sound_emitters.clear();
+    w.logic_tick = 4;
+    step_item_pool(w, 1);
+    e = w.registry.get(lift);
+    CHECK(e->elevator_lift == 0 && e->veh.slide_z == 0x400 && e->veh.speed == 2);
+    CHECK(e->position.z.q16 == 10 << 16 && w.out.sound_emitters.empty());
+    // At 8 units it stops (the cue); with the rider gone it lowers (the loop alone).
+    e->elevator_lift = 0x80000 - 0x400;
+    w.logic_tick = 5;
+    step_item_pool(w, 1);
+    e = w.registry.get(lift);
+    CHECK(e->elevator_lift == 0x80000 && e->veh.speed == 1 && w.out.slot_sounds.size() == 1);
+    w.out.slot_sounds.clear();
+    w.out.sound_emitters.clear();
+    e->ground_target = {};
+    w.logic_tick = 6;
+    step_item_pool(w, 1);
+    e = w.registry.get(lift);
+    CHECK(e->veh.speed == 0 && e->script_next_ssn == 0 && e->veh.slide_z == 0);
+    CHECK(w.out.slot_sounds.empty() && w.out.sound_emitters.size() == 1);
+    w.logic_tick = 7;
+    step_item_pool(w, 1);
+    CHECK(w.registry.get(lift)->elevator_lift == 0x80000 - 0x400);
+    // A def with no first loop registers none (retail faults on the null set: D-NET-NEW-L4-24).
+    traits->regional_loops[0].clear();
+    w.out.sound_emitters.clear();
+    w.registry.get(lift)->elevator_lift = 0x400;
+    w.logic_tick = 8;
+    step_item_pool(w, 1);
+    CHECK(w.registry.get(lift)->veh.speed == 1 && w.out.sound_emitters.empty());
+    // A pool-2 elevator in slot 3 steps on the tick & 7 == 3 cohort alone.
+    Entity seed;
+    seed.item_id = 20;
+    seed.has_item_def = true;
+    seed.item_type_index = 7;
+    seed.kind = EntityKind::Item;
+    seed.elevator_motion = true;
+    EntityHandle in_pool2;
+    for (int slot = 0; slot <= 3; ++slot) in_pool2 = w.registry.spawn(2, seed);
+    CHECK(in_pool2.slot() == 3);
+    const int32_t z0 = w.registry.get(in_pool2)->position.z.q16;
+    for (uint32_t t = 8; t <= 11; ++t) {
+        w.logic_tick = t;
+        step_item_pool(w, 2);
+    }
+    CHECK(w.registry.get(in_pool2)->position.z.q16 == z0 - 0x400);
+    CHECK(w.registry.get(in_pool2)->elevator_lift == -0x400);
+    return 0;
+}
 int test_regional_sound() {
     auto heap = std::make_unique<World>();
     auto &w = *heap;
@@ -121,9 +223,9 @@ int test_flag_callback() {
     }
     destruction_notify_item_damage(w, flag, 0);
     CHECK(flag.position.x == 0 && flag.engine_flags == 0);
-    flag.position = {1.99f, 0, 1.99f};
+    flag.position = {1.984375f, 0, 1.984375f}; // just under 2, a 16.16 word
     for (int visit = 0; visit < 7; ++visit) destruction_notify_item_damage(w, flag, 0);
-    CHECK(flag.position.x == 1.99f); // Near home keeps rearming.
+    CHECK(flag.position.x == 1.984375f); // Near home keeps rearming.
     Entity body;
     body.team = 1;
     body.position = {7, 8, 9};
@@ -132,7 +234,7 @@ int test_flag_callback() {
     flag.team = 1;
     flag.primary_occupant = carrier;
     destruction_notify_item_damage(w, flag, 0);
-    CHECK(flag.position.x == 7 && flag.position.y == 8 && flag.position.z == 1.99f);
+    CHECK(flag.position.x == 7 && flag.position.y == 8 && flag.position.z == 1.984375f);
     flag.team = 2;
     flag.position.x = 3;
     destruction_notify_item_damage(w, flag, 0);
@@ -157,7 +259,7 @@ int test_building_collapse() {
     traits->model_max_q16[1] = 3 * 65536;
     traits->particledeath = "Dust";
     traits->sound_death = "Collapse";
-    entity.yaw = 90; // Identity in the mission placement frame.
+    entity.heading = placed_heading_bam(90); // Identity in the mission placement frame.
     entity.position = {2, 4, 6};
     entity.uniform_scale_q16 = 4 * 65536; // Perimeter ignores entity scale.
     destruction_notify_item_damage(w, entity, 0);
@@ -296,7 +398,7 @@ int test_emitter_lifetime() {
     traits->particlefx_point_q16[0] = 2 * 65536;
     traits->particlefx_direction_q16[2] = 65536;
     traits->regional_sounds[0].base_ticks = 40;
-    entity.yaw = 90;
+    entity.heading = placed_heading_bam(90);
     entity.position = {10, 20, 30};
     entity.uniform_scale_q16 = 2 * 65536;
     auto scene = std::make_shared<p::EffectScene>();
@@ -366,7 +468,7 @@ int test_palm_sections() {
     t->model_pivots_q16 = {{{0, 0, 2*65536}}, {{0, 0, 4*65536}}};
     t->sound_death = "PalmBreak";
     w.tables.item_death_traits.set(900, *t);
-    e.position = {8, 16, 3}; e.yaw = 90;
+    e.position = {8, 16, 3}; e.heading = placed_heading_bam(90);
     destruction_notify_item_damage(w, e, 1, {2, 100});
     CHECK(e.palm_state == 0 && spawner.pieces.empty());
     CHECK(item_hidden_sections(e) == 0x38);
@@ -380,7 +482,7 @@ int test_palm_sections() {
     // [orig: Palm_SpawnFragment @0x53C35D].
     CHECK(leaf.item_section_piece && !leaf.section_clone);
     CHECK(leaf.position.z == 7 && leaf.engine_flags == kEntityFlagDead);
-    CHECK(leaf.health == 20 && leaf.pitch == 0 && leaf.roll == 0);
+    CHECK(leaf.health == 20 && leaf.pitch_bam == 0 && leaf.roll_bam == 0);
     // The spawn stores the sector builder into item 900's collision and scar
     // callbacks, not its draw: the fragment draws by item 900's own render tag
     // (none here: every section at its own origin) and collides through the
@@ -416,10 +518,10 @@ int test_palm_sections() {
     tick_item_death_motion(w, leaf, nullptr, 0, w.out.destruction);
     CHECK(leaf.position.x == 8 && leaf.position.z == .25f);
     CHECK(leaf.veh.vel_x == 1024 && leaf.veh.vel_y == -1024 && leaf.veh.slide_z == 16384);
-    const float yaw = leaf.yaw;
+    const float yaw = mission_yaw_whole_deg(leaf.heading);
     tick_item_death_motion(w, leaf, nullptr, 0, w.out.destruction);
     CHECK(leaf.position.x == 8.015625f && leaf.position.z == .5f);
-    CHECK(leaf.veh.slide_z == 16384 - 167 && leaf.yaw != yaw && leaf.pitch == 0);
+    CHECK(leaf.veh.slide_z == 16384 - 167 && mission_yaw_whole_deg(leaf.heading) != yaw && leaf.pitch_bam == 0);
     CHECK(leaf.saved_live_pos[2] == 16384);
     e.health = 0;
     destruction_notify_item_damage(w, e, 2);
@@ -449,7 +551,7 @@ int test_tower_sections() {
     w.registry.configure_pool(2, 16); w.rules.mp_session = true;
     TestPieceSpawner spawner(w); w.item_piece_spawner = &spawner;
     const auto h = spawn(w, 2, 50, ItemDeathClass::kTower);
-    auto &e = *w.registry.get(h); e.position = {1,2,3}; e.yaw = 90;
+    auto &e = *w.registry.get(h); e.position = {1,2,3}; e.heading = placed_heading_bam(90);
     auto *t = w.tables.item_death_traits.get_mutable(50);
     t->model_loaded = true; t->husk_sub_part_count = 4;
     t->model_section_origins_q16 = {{{0,0,0}},{{0,0,4*65536}},{{0,0,8*65536}},{{0,0,12*65536}}};
@@ -536,7 +638,7 @@ int test_tower_sections() {
     piece.veh.slide_z = 65536;
     tick_item_death_motion(w, piece, nullptr, 0, w.out.destruction);
     CHECK(piece.position.z == 12 && piece.veh.slide_z == 32768);
-    piece.position.z = .25f; piece.pitch = 120; piece.veh.slide_z = 0;
+    piece.position.z = .25f; piece.pitch_bam = spawn_angle_bam(120); piece.veh.slide_z = 0;
     piece.death_anim_state &= ~3;
     tick_item_death_motion(w, piece, nullptr, 0, w.out.destruction);
     CHECK(piece.death_motion == DeathMotionMode::SectionSettled);
@@ -845,7 +947,87 @@ int test_class_scoring_and_explosion_draws() {
     return 0;
 }
 
+// The chel row's world callback, after its +0x138 collapse, hides by the rotor
+// speed (+0x460, compared signed) and the airborne flag. A def with rotor_parts
+// 1 2 3 4 and aux_parts 5 6 names sections 1 / 2 / 3 / 4 at def+0x890 / +0x891 /
+// +0x894 / +0x895 and 5 / 6 at +0x896 / +0x897: a stopped rotor hides 2, 4 and
+// 6, a rotor faster than 0x28F5C27 hides 1 and 3, a slower one 2 and 4,
+// exactly 0x28F5C27 neither pair, and Flags 0x2000 adds 5. The hides OR with
+// the husk piece mask, while a +0x134 section stays drawn (the callback reads
+// +0x138 alone); a row under another render tag (no bytes) hides nothing by
+// them.
+// [orig: Entity_BuildAndApplyBoneMatrices @0x48F210 (the collapse test
+//  @0x48F39D; Flags & 0x2000 @0x48F3B2..0x48F3CE; +0x460 == 0
+//  @0x48F3D4..0x48F3F0; above @0x48F3F6..0x48F416 / @0x48F43D..0x48F458;
+//  below @0x48F41C..0x48F437 / @0x48F45E..0x48F479)]
+int test_chel_rotor_hidden_sections() {
+    constexpr int32_t kThreshold = 0x28F5C27; // 42949671
+    Entity e;
+    e.chel_section_bytes = {1, 2, 0, 0, 3, 4, 5, 6}; // def+0x890..+0x897
+    e.veh.part_spin.speed = 0;
+    CHECK(item_hidden_sections(e) == ((1u << 2) | (1u << 4) | (1u << 6)));
+    e.veh.part_spin.speed = kThreshold + 1;
+    CHECK(item_hidden_sections(e) == ((1u << 1) | (1u << 3)));
+    e.veh.part_spin.speed = kThreshold;
+    CHECK(item_hidden_sections(e) == 0);
+    e.veh.part_spin.speed = kThreshold - 1;
+    CHECK(item_hidden_sections(e) == ((1u << 2) | (1u << 4)));
+    // A signed compare: a negative word is below the threshold, not above.
+    e.veh.part_spin.speed = -1;
+    CHECK(item_hidden_sections(e) == ((1u << 2) | (1u << 4)));
+    e.veh.part_spin.speed = 0;
+    e.flags |= kEntityFlagInAir;
+    CHECK(item_hidden_sections(e) == ((1u << 2) | (1u << 4) | (1u << 5) | (1u << 6)));
+    e.veh.part_spin.speed = 0x0CCCCCC0; // full rotor speed
+    CHECK(item_hidden_sections(e) == ((1u << 1) | (1u << 3) | (1u << 5)));
+    e.flags &= ~kEntityFlagInAir;
+    e.section_mask = 1u << 9;
+    e.engine_flags |= kEntityFlagHusk;
+    e.spawned_piece_mask = 1u << 8;
+    CHECK(item_hidden_sections(e) == ((1u << 1) | (1u << 3) | (1u << 8)));
+    // A zero byte hides nothing.
+    e.chel_section_bytes = {1, 0, 0, 0, 0, 0, 0, 0};
+    e.section_mask = e.spawned_piece_mask = 0;
+    e.veh.part_spin.speed = 0;
+    CHECK(item_hidden_sections(e) == 0);
+    Entity plain;
+    plain.flags |= kEntityFlagInAir;
+    CHECK(item_hidden_sections(plain) == 0);
+    plain.veh.part_spin.speed = kThreshold + 1;
+    CHECK(item_hidden_sections(plain) == 0);
+    return 0;
+}
+
+// Only the person bone walk drops a +0x134 section from the draw: a building's
+// shot-out or blast-broken section and a vehicle's stay drawn (their world
+// callbacks collapse the +0x138 piece word alone), while a person's hides.
+// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 (the test @0x4B1F1D);
+//  BoneCallback_bldg_World @0x4E21A0 (the read @0x4E22CF);
+//  Entity_BuildDeathSectionTransforms @0x492AF0 (the test @0x492C8D)]
+int test_section_mask_draws_only_on_persons() {
+    Entity building;
+    building.kind = EntityKind::Building;
+    building.bldg_section_pivot = true;
+    building.section_mask = 1u << 3; // a pane broken by a round or a blast
+    CHECK(item_hidden_sections(building) == 0);
+    building.engine_flags |= kEntityFlagHusk;
+    building.spawned_piece_mask = 1u << 2;
+    CHECK(item_hidden_sections(building) == (1u << 2));
+    Entity vehicle;
+    vehicle.kind = EntityKind::Item;
+    vehicle.death_section_pivot = true;
+    vehicle.section_mask = 1u << 4;
+    CHECK(item_hidden_sections(vehicle) == 0);
+    Entity person;
+    person.kind = EntityKind::Organic;
+    person.section_mask = 0x00010002u;
+    CHECK(item_hidden_sections(person) == 0x00010002u);
+    return 0;
+}
+
 int main() {
+    if (test_chel_rotor_hidden_sections() != 0) return 1;
+    if (test_section_mask_draws_only_on_persons() != 0) return 1;
     if (test_destroy_fade_phases() || test_destroy_phases_and_ambient() ||
             test_class_scoring_and_explosion_draws()) return 1;
     if (test_tower_sections() != 0) return 1;
@@ -857,6 +1039,7 @@ int main() {
     if (test_building_collapse() != 0) return 1;
     if (test_flag_callback() != 0) return 1;
     if (test_regional_sound() != 0) return 1;
+    if (test_elevator_mover() != 0) return 1;
     auto heap = std::make_unique<World>();
     auto &w = *heap;
     for (int pool = 0; pool <= 3; ++pool) w.registry.configure_pool(pool, 8);

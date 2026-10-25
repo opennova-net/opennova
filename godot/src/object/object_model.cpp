@@ -163,8 +163,11 @@ ObjectModel::~ObjectModel() {
 	foliage_mask_models_.erase(this);
 	authored_lod_models_.erase(this);
 	pixel_cull_models_.erase(this);
-	free_view_twins();
+	free_all_view_twins();
 	inset_view_models_.erase(this);
+	inset_view_walk_models_.erase(this);
+	mirror_view_models_.erase(this);
+	mirror_view_walk_models_.erase(this);
 	retire_geometry_instances();
 }
 
@@ -226,6 +229,7 @@ void ObjectModel::add_presentation_link(ObjectModel *p_model,
 	presentation_links_.push_back(link);
 	p_model->set_match_terrain_enabled(match_terrain_enabled_);
 	p_model->set_thermal_entity_wave(thermal_entity_wave_);
+	p_model->set_presentation_layer(presentation_layer_);
 	// A linked part draws inside its owner's submission: its CLIP arming is
 	// the owner's.
 	p_model->water_mirror_clip_inherited_ = true;
@@ -375,12 +379,44 @@ void ObjectModel::set_shadow_caster_layer_enabled(uint32_t p_layer, bool p_enabl
 	apply_presentation_layer_below(this);
 }
 
+// The composed avatar is ONE retail entity submission, and the first-person
+// skip is a verdict on the entity that decides every part's submit, so in
+// first person no part reaches the camera while every part stays a slot
+// caster (the witness is engine world/player_present.cpp's
+// presents_third_person). Every linked part takes the owner's layer: a part
+// left on its own world layer drew again whenever one of its own writes (a
+// water mirror's verdict edge, a level rebuild) re-applied that layer, which
+// stranded the local avatar's head on the camera after a third-person frame.
 void ObjectModel::set_presentation_layer(PresentationLayer p_layer) {
 	if (presentation_layer_ == p_layer) {
 		return;
 	}
 	presentation_layer_ = p_layer;
 	apply_presentation_layer_below(this);
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->set_presentation_layer(p_layer);
+	}
+	relist_view_walks();
+}
+
+void ObjectModel::set_mirror_collected(bool p_collected) {
+	if (mirror_collected_ == p_collected) {
+		return;
+	}
+	mirror_collected_ = p_collected;
+	apply_presentation_layer_below(this);
+	relist_view_walks();
+}
+
+// The world layer by the mirror policy: off both mirrors where the reflected
+// collect never walks the model's population (the scene-view bit no mirror
+// mask carries), else the Flags match on either side of the water (WORLD) or
+// the below-water view's unfiltered collect alone (WORLD_NO_MIRROR).
+uint32_t ObjectModel::mirror_policy_world_layer() const {
+	if (!mirror_collected_) {
+		return LAYER_SCENE_VIEW_NO_REFLECTION;
+	}
+	return mirror_reflected_ ? LAYER_WORLD : LAYER_WORLD_NO_MIRROR;
 }
 
 uint32_t ObjectModel::presentation_layer_mask(bool p_auxiliary) const {
@@ -391,11 +427,16 @@ uint32_t ObjectModel::presentation_layer_mask(bool p_auxiliary) const {
 			// Mission placement has already resolved the engine's two-part
 			// building/vehicle reflection policy; this device leg only maps
 			// that typed decision to Godot visibility layers.
-			base = mirror_reflected_ ? LAYER_WORLD : LAYER_WORLD_NO_MIRROR;
+			base = mirror_policy_world_layer();
 			markers = !p_auxiliary;
 			break;
 		case PRESENTATION_LAYER_LOCAL_BODY:
-			base = LAYER_WORLD;
+			// The drawn local body is a person entity like any other: the
+			// mirrors take it by the same Flags rule (engine
+			// mission/placement_traits.h item_is_mirror_reflected; no person
+			// carries the Reflective bit), so above the water it is off both
+			// mirrors and below it they collect it unfiltered.
+			base = mirror_policy_world_layer();
 			break;
 		case PRESENTATION_LAYER_LOCAL_BODY_HIDDEN:
 			base = LAYER_FP_BODY_SHADOW_ONLY;
@@ -410,12 +451,27 @@ uint32_t ObjectModel::presentation_layer_mask(bool p_auxiliary) const {
 	if (camera_pixel_culled_ && presentation_layer_ != PRESENTATION_LAYER_VIEWMODEL) {
 		base = LAYER_FP_BODY_SHADOW_ONLY;
 	}
-	// While the weapon Inset's verdicts differ the node draws the main view's
-	// only: the world bits swap for the main-view bits the Inset camera lacks
-	// (a twin draws the Inset's, object_model_views.cpp).
-	if (view_split_) {
+	// While a water mirror's verdict differs the node leaves that mirror: the
+	// world bits swap for the scene-view bits no mirror admits (beauty and
+	// Inset, or beauty alone while the Inset differs too) plus the private bit
+	// of each mirror that still sees the node by its water side (a twin draws
+	// a differing mirror's, object_model_views.cpp).
+	if ((mirror_[0].split || mirror_[1].split) &&
+			(base == LAYER_WORLD || base == LAYER_WORLD_NO_MIRROR)) {
+		uint32_t views = view_split_ ? LAYER_MAIN_VIEW_NO_REFLECTION : LAYER_SCENE_VIEW_NO_REFLECTION;
+		for (int m = 0; m < 2; ++m) {
+			if (!mirror_[m].split && mirror_admits_base(m)) {
+				views |= m == 0 ? LAYER_MIRROR_VIEW : LAYER_INSET_MIRROR_VIEW;
+			}
+		}
+		base = views;
+	} else if (view_split_) {
+		// While the weapon Inset's verdicts differ the node draws the main
+		// view's only: the world bits swap for the main-view bits the Inset
+		// camera lacks (a twin draws the Inset's).
 		base = base == LAYER_WORLD ? LAYER_MAIN_VIEW
 				: base == LAYER_WORLD_NO_MIRROR ? LAYER_MAIN_VIEW_NO_MIRROR
+				: base == LAYER_SCENE_VIEW_NO_REFLECTION ? LAYER_MAIN_VIEW_NO_REFLECTION
 				: base;
 	}
 	return markers ? (base | shadow_caster_layers_) : base;
@@ -465,7 +521,7 @@ void ObjectModel::apply_presentation_layer_below(Node *p_root) {
 
 // The composed avatar is ONE retail entity submission: the head and the body
 // draw inside the same Terrain_RenderSectorEntitiesBySide iteration (the head
-// submit @0x5c7ffc, the body submit @0x5c8020) under the lighting block the
+// submit @0x5c7ffc, the body submit @0x5c8039) under the lighting block the
 // frame set once around that wave (CTerrainRenderer_BuildLightingShaderConstants(1)
 // @0x5c9511 / @0x5c95f8), so the wave lane stamped here reaches every linked
 // part; add_presentation_link seeds a part linked after the flag was set.
@@ -715,6 +771,7 @@ void ObjectModel::set_camera_pixel_culled(bool p_culled) {
 	if (camera_pixel_culled_ == p_culled) return;
 	camera_pixel_culled_ = p_culled;
 	apply_presentation_layer_below(this);
+	relist_view_walks();
 }
 
 ObjectModel *ObjectModel::get_authored_lod_owner() const {
@@ -895,6 +952,9 @@ void ObjectModel::set_ctrl_override_native(
 
 void ObjectModel::clear_ctrl_override_native(const std::string &p_owner, int p_ordinal) {
 	if (p_ordinal < 0 || p_ordinal >= opennova::threedi::THREEDI_CTRL_REGISTER_COUNT) return;
+	// Nothing held and nothing linked: nothing to clear (the per-frame zero stamps of every
+	// placed row, EntityPresenter::stamp_destroy_phases, take this path).
+	if (presentation_links_.is_empty() && !controls_.has(p_ordinal)) return;
 	for (int i = 0, count = presentation_links_.size(); i < count; ++i) {
 		const PresentationLink link = presentation_links_[i];
 		if (link.part_local_registers[static_cast<size_t>(p_ordinal)]) continue;
@@ -993,6 +1053,7 @@ void ObjectModel::mark_render_order_dirty_all() {
 // their one process loop. There is no per-node _process, so nothing self-clocks
 // off Godot's frame outside that one driver.
 HashSet<ObjectModel *> ObjectModel::awake_models_;
+bool ObjectModel::world_skipped_ = false;
 HashSet<ObjectModel *> ObjectModel::alpha_strip_models_;
 HashSet<ObjectModel *> ObjectModel::water_mirror_clip_models_;
 HashSet<ObjectModel *> ObjectModel::match_terrain_models_;
@@ -1001,6 +1062,39 @@ HashSet<ObjectModel *> ObjectModel::authored_lod_models_;
 HashSet<ObjectModel *> ObjectModel::pixel_cull_models_;
 uint64_t ObjectModel::lifetime_generation_ = 0;
 int64_t ObjectModel::live_geometry_instance_count_ = 0;
+int64_t ObjectModel::build_profile_[ObjectModel::BUILD_PROFILE_SLOT_COUNT] = {};
+
+PackedInt64Array ObjectModel::take_build_profile() {
+	PackedInt64Array result;
+	result.resize(BUILD_PROFILE_SLOT_COUNT);
+	for (int slot = 0; slot < BUILD_PROFILE_SLOT_COUNT; ++slot) {
+		result.set(slot, build_profile_[slot]);
+		build_profile_[slot] = 0;
+	}
+	return result;
+}
+
+String ObjectModel::format_build_profile(const PackedInt64Array &p_profile) {
+	if (p_profile.size() < BUILD_PROFILE_SLOT_COUNT) return String();
+	const auto ms = [&p_profile](BuildProfileSlot p_slot) {
+		return static_cast<int>(p_profile[p_slot] / 1000);
+	};
+	// The materials phase is its slots together, then each (the creates with their shader binds,
+	// which follow apart).
+	const int64_t creates_us = p_profile[BUILD_PROFILE_MATERIAL_CREATES_US] +
+			p_profile[BUILD_PROFILE_MATERIAL_SHADERS_US];
+	const int64_t materials_us = p_profile[BUILD_PROFILE_MATERIAL_TEXTURES_US] + creates_us +
+			p_profile[BUILD_PROFILE_ALPHA_COPIES_US] + p_profile[BUILD_PROFILE_MATERIALS_US];
+	return vformat("%d build(s): head %d ms, meshes %d ms, materials %d ms (textures %d ms, "
+				   "creates %d ms (shaders %d ms), alpha copies %d ms, rows %d ms), nodes %d ms, "
+				   "levels %d ms, occluders %d ms, tail %d ms",
+			static_cast<int>(p_profile[BUILD_PROFILE_BUILDS]), ms(BUILD_PROFILE_SKELETON_US),
+			ms(BUILD_PROFILE_MESHES_US), static_cast<int>(materials_us / 1000),
+			ms(BUILD_PROFILE_MATERIAL_TEXTURES_US), static_cast<int>(creates_us / 1000),
+			ms(BUILD_PROFILE_MATERIAL_SHADERS_US), ms(BUILD_PROFILE_ALPHA_COPIES_US),
+			ms(BUILD_PROFILE_MATERIALS_US), ms(BUILD_PROFILE_NODES_US), ms(BUILD_PROFILE_LEVELS_US),
+			ms(BUILD_PROFILE_OCCLUDERS_US), ms(BUILD_PROFILE_TAIL_US));
+}
 
 void ObjectModel::retire_geometry_instances() {
 	live_geometry_instance_count_ -= geometry_instance_count_;
@@ -1196,9 +1290,9 @@ void ObjectModel::refresh_match_terrain_frame(Terrain *p_terrain) {
 	for (ObjectModel *model : match_terrain_models_) {
 		batch.push_back(model);
 	}
-	const Ref<Texture2DArray> cache = p_terrain != nullptr
+	const Ref<TextureLayered> cache = p_terrain != nullptr
 			? p_terrain->get_tile_cache_texture()
-			: Ref<Texture2DArray>();
+			: Ref<TextureLayered>();
 	for (ObjectModel *model : batch) {
 		if (!match_terrain_models_.has(model)) {
 			continue;
@@ -1361,12 +1455,18 @@ void ObjectModel::_notification(int p_what) {
 		point_light_draw_parts_dirty_ = true;
 		wake_runtime_frame();
 		// An ancestor's edge reaches the Inset twins too (they are no nodes).
-		if (inset_view_open_ && inset_view_models_.has(this)) {
+		if ((inset_view_open_ && inset_view_models_.has(this)) ||
+				mirror_view_models_.has(this)) {
 			refresh_view_split();
 		}
+	} else if (p_what == NOTIFICATION_ENTER_TREE) {
+		// Back in the tree: the views reconcile the node again, under the
+		// owner it now draws inside.
+		view_owner_cached_ = false;
+		relist_view_walks();
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
 		// The twins live in the world's scenario, not under this node.
-		free_view_twins();
+		free_all_view_twins();
 	} else if (p_what == NOTIFICATION_TRANSFORM_CHANGED) {
 		// Models with blended strips or their own mirror CLIP arming enable
 		// this notification: a moved model re-classifies its strips against
@@ -1390,8 +1490,11 @@ void ObjectModel::_notification(int p_what) {
 		}
 		alpha_strip_models_.erase(this);
 		water_mirror_clip_models_.erase(this);
-		free_view_twins();
+		free_all_view_twins();
 		inset_view_models_.erase(this);
+		inset_view_walk_models_.erase(this);
+		mirror_view_models_.erase(this);
+		mirror_view_walk_models_.erase(this);
 		retire_geometry_instances();
 	}
 }
@@ -1425,7 +1528,9 @@ void ObjectModel::advance_runtime_frame_profiled(double p_delta,
 	// A model the weapon Inset pass draws through its twins is submitted
 	// there even while the main view hides the node: its pose, PANM and
 	// materials advance for the twins (object_model_views.cpp).
-	const bool renderable = (is_visible_in_tree() && on_screen_) || !view_twins_.empty();
+	// A frame that skips its world submits no model (set_world_skipped).
+	const bool renderable = !world_skipped_ &&
+			((is_visible_in_tree() && on_screen_) || has_view_twins());
 	if (p_profile != nullptr && renderable) {
 		++p_profile->renderable_models;
 	}
@@ -1768,7 +1873,7 @@ void ObjectModel::set_on_screen(bool p_value) {
 // draw parts dirty + the runtime wake) fires exactly on the product's edges.
 void ObjectModel::apply_node_visibility() {
 	set_visible(present_visible_ && !occlusion_hidden_ && !subpixel_hidden_);
-	if (inset_view_open_ && inset_view_models_.has(this)) {
+	if ((inset_view_open_ && inset_view_models_.has(this)) || mirror_view_models_.has(this)) {
 		refresh_view_split();
 	}
 }
@@ -1984,8 +2089,15 @@ void ObjectModel::_bind_methods() {
 					"inset_camera", "inset_width", "object_detail"),
 			&ObjectModel::update_authored_lods_for_views,
 			DEFVAL(opennova::renderer::kObjectLodDetailLevelMax));
+	ClassDB::bind_static_method("ObjectModel",
+			D_METHOD("update_authored_lods_for_mirror_view", "main_camera", "main_width",
+					"mirror_eye", "object_detail"),
+			&ObjectModel::update_authored_lods_for_mirror_view,
+			DEFVAL(opennova::renderer::kObjectLodDetailLevelMax));
 	ClassDB::bind_static_method("ObjectModel", D_METHOD("sync_view_twins"),
 			&ObjectModel::sync_view_twins);
+	ClassDB::bind_static_method("ObjectModel", D_METHOD("take_build_profile"),
+			&ObjectModel::take_build_profile);
 	ClassDB::bind_method(D_METHOD("set_inset_occlusion_hidden", "hidden"),
 			&ObjectModel::set_inset_occlusion_hidden);
 	ClassDB::bind_method(D_METHOD("set_inset_occlusion_section_mask", "raw_mask", "forced_mask"),
@@ -2000,6 +2112,22 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_inset_view_drawn"), &ObjectModel::is_inset_view_drawn);
 	ClassDB::bind_method(D_METHOD("get_inset_view_section_mask"),
 			&ObjectModel::get_inset_view_section_mask);
+	ClassDB::bind_method(D_METHOD("set_mirror_occlusion_hidden", "view", "hidden"),
+			&ObjectModel::set_mirror_occlusion_hidden);
+	ClassDB::bind_method(D_METHOD("set_mirror_occlusion_section_mask", "view", "raw_mask",
+								 "forced_mask"),
+			&ObjectModel::set_mirror_occlusion_section_mask);
+	ClassDB::bind_method(D_METHOD("clear_mirror_occlusion", "view"),
+			&ObjectModel::clear_mirror_occlusion);
+	ClassDB::bind_static_method("ObjectModel",
+			D_METHOD("set_mirror_view_state", "view", "open", "below_water"),
+			&ObjectModel::set_mirror_view_state);
+	ClassDB::bind_method(D_METHOD("is_mirror_view_split", "view"),
+			&ObjectModel::is_mirror_view_split);
+	ClassDB::bind_method(D_METHOD("get_mirror_view_twin_count", "view"),
+			&ObjectModel::get_mirror_view_twin_count);
+	ClassDB::bind_static_method("ObjectModel", D_METHOD("get_view_marked_count"),
+			&ObjectModel::get_view_marked_count);
 	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("get_live_geometry_instance_count"),
 			&ObjectModel::get_live_geometry_instance_count);
@@ -2020,6 +2148,14 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_mirror_reflected);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "mirror_reflected"),
 			"set_mirror_reflected", "get_mirror_reflected");
+	ClassDB::bind_method(D_METHOD("set_mirror_collected", "collected"),
+			&ObjectModel::set_mirror_collected);
+	ClassDB::bind_method(D_METHOD("get_mirror_collected"),
+			&ObjectModel::get_mirror_collected);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "mirror_collected"),
+			"set_mirror_collected", "get_mirror_collected");
+	ClassDB::bind_method(D_METHOD("set_presentation_layer", "layer"),
+			&ObjectModel::set_presentation_layer);
 	ClassDB::bind_method(D_METHOD("set_avatar_part", "part"), &ObjectModel::set_avatar_part);
 	ClassDB::bind_method(D_METHOD("get_avatar_part"), &ObjectModel::get_avatar_part);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "avatar_part", PROPERTY_HINT_ENUM,
@@ -2122,6 +2258,8 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_attachment_pixel_cull);
 	ClassDB::bind_method(D_METHOD("is_camera_pixel_culled"),
 			&ObjectModel::is_camera_pixel_culled);
+	ClassDB::bind_method(D_METHOD("is_mirror_pixel_culled", "view"),
+			&ObjectModel::is_mirror_pixel_culled);
 	ClassDB::bind_method(D_METHOD("get_authored_lod_projection_owner"),
 			&ObjectModel::get_authored_lod_projection_owner);
     ClassDB::bind_method(D_METHOD("set_geometry_visible", "visible"), &ObjectModel::set_geometry_visible);
@@ -2265,6 +2403,20 @@ void ObjectModel::_bind_methods() {
 	BIND_ENUM_CONSTANT(AWAKE_PROFILE_AWAKE_MODELS);
 	BIND_ENUM_CONSTANT(AWAKE_PROFILE_RENDERABLE_MODELS);
 	BIND_ENUM_CONSTANT(AWAKE_PROFILE_SLOT_COUNT);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_BUILDS);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_SKELETON_US);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_MESHES_US);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_MATERIALS_US);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_NODES_US);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_LEVELS_US);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_OCCLUDERS_US);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_TAIL_US);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_MATERIAL_TEXTURES_US);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_MATERIAL_CREATES_US);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_ALPHA_COPIES_US);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_MATERIAL_SHADERS_US);
+	BIND_ENUM_CONSTANT(BUILD_PROFILE_SLOT_COUNT);
+	BIND_ENUM_CONSTANT(PRESENTATION_LAYER_WORLD);
 	BIND_ENUM_CONSTANT(PRESENTATION_LAYER_LOCAL_BODY);
 	BIND_ENUM_CONSTANT(PRESENTATION_LAYER_LOCAL_BODY_HIDDEN);
 	BIND_ENUM_CONSTANT(PRESENTATION_LAYER_VIEWMODEL);

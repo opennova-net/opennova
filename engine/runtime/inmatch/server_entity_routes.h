@@ -1,8 +1,8 @@
 #pragma once
 
 // The host tick's routes for the records the world produced: the item and
-// removal events with the HUD relays, the water-surface crossings and the
-// guided-round updates. Server_TickUpdate orders them (server_tick.cpp). Beside
+// removal events (the guided-round updates among them) with the HUD relays and
+// the water-surface crossings. Server_TickUpdate orders them (server_tick.cpp). Beside
 // them, the door record's other S2C 0x37 leg: the answer to a client's request.
 
 #include <cstdint>
@@ -18,16 +18,15 @@ class World;
 
 namespace opennova::inmatch {
 
-// Item callbacks' state packets, explosion effects, authoritative removals
-// and the HUD relays, fanned to the active remote slots, then released.
+// Item callbacks' state packets, explosion effects, authoritative removals,
+// the guided motors' updates (S2C 0x44, queued at the motor in the entity pass's
+// send order, so they lead the next frame's queue ahead of its 0x0A) and the HUD
+// relays, fanned to the active remote slots, then released.
 void Server_FanEntityEvents(NapiNPServerCtx &ctx, world::World &world);
 // The water-surface crossings the motor recorded, one S2C 0x34 each to every
 // in-match player, dead or alive (the authority's own as a local slot sound
 // through its loopback, single player included), then released.
 void Server_RouteWaterCrossings(NapiNPServerCtx &ctx, world::World &world);
-// The guided-round updates, queued behind the tick's 0x0A so each follows the
-// frame that carried its round's birth.
-void Server_RouteGuidance(NapiNPServerCtx &ctx, world::World &world);
 
 // The host side of a client's door request (C2S 0x1A -> S2C 0x37). The sender
 // must hold a player slot; the body [u16 handle][i16 value][u8 number] (zero

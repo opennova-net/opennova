@@ -6,10 +6,14 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/replication_model.h> // PlayerReplicationState (the 0x46 resend input)
 #include <runtime/inmatch/server_message_dispatch.h> // is_medic_recipient
+#include <runtime/inmatch/server_player_death.h>     // the entity update's staged sends
 #include <runtime/inmatch/server_tick.h>             // Server_RerollPlayerTickSeed
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/world.h>
+
+#include <algorithm>
+#include <vector>
 
 namespace opennova::inmatch {
 
@@ -39,8 +43,8 @@ uint8_t pool0_index(world::EntityHandle h) {
 // @0x517E63..0x517EB6 and the heal @0x50DEAC..0x50DF02].
 void send_medic_event(NapiNPServerCtx &ctx, uint8_t event, world::EntityHandle victim_handle,
 		world::EntityHandle healer_handle, const world::Entity &victim) {
-	const int32_t x = world::to_fixed(victim.position.x);
-	const int32_t y = world::to_fixed(victim.position.y);
+	const int32_t x = victim.position.x.q16;
+	const int32_t y = victim.position.y.q16;
 	const uint16_t x_hi = static_cast<uint16_t>(static_cast<uint32_t>(x) >> 16);
 	const uint16_t y_hi = static_cast<uint16_t>(static_cast<uint32_t>(y) >> 16);
 	const std::vector<uint8_t> body = {
@@ -49,7 +53,7 @@ void send_medic_event(NapiNPServerCtx &ctx, uint8_t event, world::EntityHandle v
 			static_cast<uint8_t>(y_hi & 0xFF), static_cast<uint8_t>(y_hi >> 8)};
 	for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
 		if (!is_in_match(c) || c.link.transport == nullptr) continue;
-		c.link.transport->host_send(s2c::GAME_EVENT, body);
+		send_entity_update_message(ctx, c, s2c::GAME_EVENT, body);
 	}
 }
 
@@ -98,7 +102,7 @@ void revive_player(NapiNPServerCtx &ctx, world::World &world,
 		for (NapiNPConnection &candidate : ctx.np_protocol.connection_list) {
 			if (!is_medic_recipient(candidate, world, static_cast<int8_t>(victim->team)))
 				continue;
-			candidate.link.transport->host_send(s2c::PLAYER_DOWNED_STATE, body);
+			send_entity_update_message(ctx, candidate, s2c::PLAYER_DOWNED_STATE, body);
 		}
 	}
 	// The medic's MEDICSAVE [orig: GameEvent_RevivePlayer @0x517CD0 (the
@@ -111,9 +115,9 @@ void revive_player(NapiNPServerCtx &ctx, world::World &world,
 	// [orig: @0x517DCD..0x517E09; the reader Server_PositionPlayerForSpawn @0x50D60A]
 	{
 		SessionReplyState &st = victim_connection->reply;
-		st.revive_pos[0] = world::to_fixed(victim->position.x);
-		st.revive_pos[1] = world::to_fixed(victim->position.y);
-		st.revive_pos[2] = world::to_fixed(victim->position.z) + kRevivePoseRaise;
+		st.revive_pos[0] = victim->position.x.q16;
+		st.revive_pos[1] = victim->position.y.q16;
+		st.revive_pos[2] = victim->position.z.q16 + kRevivePoseRaise;
 	}
 	// The window again and the medic request cleared
 	// [orig: +368 = 0 @0x517E14, byte +89856 = 0 @0x517E1A].
@@ -122,9 +126,9 @@ void revive_player(NapiNPServerCtx &ctx, world::World &world,
 	// 0x3A (empty, mask 160 -> the victim's active slot, class 1 reliable)
 	// then the seed reroll [orig: @0x517E29..0x517E47].
 	if (is_in_match(*victim_connection) && victim_connection->link.transport != nullptr) {
-		victim_connection->link.transport->host_send(s2c::MEDIC_REVIVING, {});
-		victim_connection->link.transport->host_send(
-				s2c::TICK_SEED, Server_RerollPlayerTickSeed(*victim_connection));
+		send_entity_update_message(ctx, *victim_connection, s2c::MEDIC_REVIVING, {});
+		send_entity_update_message(ctx, *victim_connection, s2c::TICK_SEED,
+				Server_RerollPlayerTickSeed(*victim_connection, world.out.rounds.frame_clock));
 	}
 	// 0x1E event 38 only when the healer slot's hide bytes +97536/+97537 are
 	// clear (+97536 tracks the spectator latch +100567, +97537 is never set)
@@ -154,23 +158,37 @@ void heal_player(NapiNPServerCtx &ctx, world::World &world,
 
 } // namespace
 
+// GameEvent_HandleMedicInteraction's two transactions. dfx2.exe's medic
+// dispatcher keeps the tests and calls two empty functions where Jointops.exe
+// revives and heals (docs/titles/dfx2-vs-jo-re.md DFX2-19)
+// [orig: GameEvent_HandleMedicInteraction @0x4e6790 (@0x4e67d8, @0x4e6805)]
+// [orig: @0x4e38d0 - nullsub_114 @0x4fcff0 from @0x4e3918, nullsub_115
+//  @0x4fd000 from @0x4e3945 (dfx2.exe)].
+static void process_medic_interaction(NapiNPServerCtx &ctx, world::World &world,
+		const world::MedicInteraction &interaction) {
+	if (world.rules.title == gameprofile::GAME_DFX2) return;
+	if (interaction.revive)
+		revive_player(ctx, world, interaction);
+	else
+		heal_player(ctx, world, interaction);
+}
+
+// See napi_np_server_ctx.h: the explosion queue's medic arm, run where it
+// meets the target, ahead of the pool-0 walk, with its sends staged for the
+// next tick's head.
+// [orig: Entity_UpdateAllEntities -- Projectile_ProcessExplosionQueue @0x4C223F
+//  ahead of the pool-0 walk @0x4C2426; Projectile_ProcessExplosionQueue
+//  @0x4EADFC -> GameEvent_HandleMedicInteraction @0x4E6790]
+void ServerEntityUpdateTransactions::medic_interaction(world::World &world,
+		const world::MedicInteraction &interaction) {
+	if (ctx == nullptr) return;
+	EntityUpdateStaging staging(*ctx, world, interaction.victim);
+	process_medic_interaction(*ctx, world, interaction);
+}
+
 void Server_RouteMedicInteractions(NapiNPServerCtx &ctx, world::World &world) {
-	if (world.round_sim.medic_interactions.empty()) return;
-	// dfx2.exe's medic dispatcher keeps the tests and calls two empty functions
-	// where Jointops.exe revives and heals (docs/titles/dfx2-vs-jo-re.md DFX2-19)
-	// [orig: GameEvent_HandleMedicInteraction @0x4e6790 (@0x4e67d8, @0x4e6805)]
-	// [orig: @0x4e38d0 - nullsub_114 @0x4fcff0 from @0x4e3918, nullsub_115
-	//  @0x4fd000 from @0x4e3945 (dfx2.exe)].
-	if (world.rules.title == gameprofile::GAME_DFX2) {
-		world.round_sim.medic_interactions.clear();
-		return;
-	}
-	for (const world::MedicInteraction &interaction : world.round_sim.medic_interactions) {
-		if (interaction.revive)
-			revive_player(ctx, world, interaction);
-		else
-			heal_player(ctx, world, interaction);
-	}
+	for (const world::MedicInteraction &interaction : world.round_sim.medic_interactions)
+		process_medic_interaction(ctx, world, interaction);
 	world.round_sim.medic_interactions.clear();
 }
 
@@ -204,11 +222,22 @@ void Server_ResendTeamDownedStates(NapiNPServerCtx &ctx, world::World &world) {
 		fire = --world.team_downed_resend_countdown == 0;
 	if (!fire) return;
 	world.team_downed_resend_countdown = 62;
-	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (conn.phase < ConnectionPhase::PlayerAdded ||
-				conn.phase >= ConnectionPhase::Goodbye ||
-				!conn.link.owned_entity.valid())
-			continue;
+	// The victims are the active rows in slot order, an orphaned row too (D-NET-NEW-L1-24):
+	// its downed body is resent to its team like any row's; the recipients are the
+	// connections, each by its current row's team.
+	// [orig: Server_TickUpdate - the row walk @0x51E2F7..0x51E378 (the active byte
+	//  @0x51E310, the entity @0x51E316); NapiNPServer_SendFiltered's connection walk
+	//  @0x4C8858..0x4C89F6, each connection's current row (+0xC0) @0x4C888C]
+	std::vector<NapiNPConnection *> rows;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list)
+		if (conn.phase >= ConnectionPhase::PlayerAdded && conn.phase < ConnectionPhase::Goodbye)
+			rows.push_back(&conn);
+	for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) rows.push_back(&orphan.row);
+	std::stable_sort(rows.begin(), rows.end(), [](const NapiNPConnection *a,
+			const NapiNPConnection *b) { return a->reply.player_slot < b->reply.player_slot; });
+	for (NapiNPConnection *row : rows) {
+		NapiNPConnection &conn = *row;
+		if (!conn.link.owned_entity.valid()) continue;
 		const world::Entity *victim = world.registry.get(conn.link.owned_entity);
 		if (victim == nullptr || victim->health > 0 ||
 				((victim->flags | victim->engine_flags) & world::kEntityFlagDead) == 0u ||

@@ -12,6 +12,13 @@ Ref<ConnectionError> ConnectionError::make(const opennova::inmatch::ConnectionEr
 	return out;
 }
 
+Ref<ConnectionError> ConnectionError::make_absent() {
+	Ref<ConnectionError> out;
+	out.instantiate();
+	out->absent_ = true;
+	return out;
+}
+
 Ref<ConnectionError> ConnectionError::from_fields(int p_connect_error, int p_connect_param,
 		const String &p_connect_text, int p_disconnect_code, int p_disconnect_param,
 		const String &p_disconnect_text) {
@@ -26,17 +33,19 @@ Ref<ConnectionError> ConnectionError::from_fields(int p_connect_error, int p_con
 }
 
 bool ConnectionError::is_set() const {
-	return record_.connect_error != 0 || record_.disconnect_code != 0;
+	return absent_ || record_.connect_error != 0 || record_.disconnect_code != 0;
 }
 
 String ConnectionError::reason_key() const {
 	if (!is_set()) return String();
-	return String(opennova::inmatch::disconnect_reason_key(&record_).key.c_str());
+	return String(
+			opennova::inmatch::disconnect_reason_key(absent_ ? nullptr : &record_).key.c_str());
 }
 
 String ConnectionError::reason_text(const Ref<RtxtStringFile> &p_override_table,
 		const Ref<RtxtStringFile> &p_gameerr) const {
-	return opennova::cp1252_to_gd(opennova::inmatch::disconnect_reason_string(&record_,
+	return opennova::cp1252_to_gd(opennova::inmatch::disconnect_reason_string(
+			absent_ ? nullptr : &record_,
 			p_override_table.is_valid() ? &p_override_table->get_native() : nullptr,
 			p_gameerr.is_valid() ? &p_gameerr->get_native() : nullptr));
 }
@@ -44,6 +53,7 @@ String ConnectionError::reason_text(const Ref<RtxtStringFile> &p_override_table,
 bool ConnectionError::refuses_this_install() const {
 	// NCC007 (the PV2 game-version gate), GCC003 (a banned address), and the
 	// game-layer version (GDC002..008, GDC048) and expansion (GDC047) refusals.
+	if (absent_) return false;
 	if (record_.connect_error == 7) return true;
 	if (record_.connect_error == 14) return record_.connect_param == 3;
 	if (record_.connect_error != 0 || record_.disconnect_code != 2) return false;

@@ -60,7 +60,7 @@ bool throwable_surface_accepts_stick(const FixedVec3 &normal_q16) {
 // +0x200000 rounding [orig: Math_BuildFixedPointRotationMatrixYXZ @ 0x615400
 // (yaw, 0, 0); Matrix_Transpose3x3WithNegateCol3 @ 0x6136d0;
 // Math_TransformPointFixedPoint22 @ 0x412e90], then each atan2 leg scales by
-// dbl_7C57B8 = -2^31/pi (truncated) and folds -0x40000000 off the caller bias.
+// g_NegBamPerRadian = -2^31/pi (truncated) and folds -0x40000000 off the caller bias.
 // Yaw is written back verbatim; pitch reads atan2(z, y), roll atan2(z, x).
 void throwable_stick_pose(const int32_t normal_q16[3], int32_t yaw_bam,
                           int32_t pitch_bias_bam, int32_t roll_bias_bam,
@@ -73,7 +73,7 @@ void throwable_stick_pose(const int32_t normal_q16[3], int32_t yaw_bam,
     const int32_t lx = static_cast<int32_t>((ny * s + nx * c + 0x200000) >> 22);
     const int32_t ly = static_cast<int32_t>((ny * c + nx * -s + 0x200000) >> 22);
     const int32_t lz = normal_q16[2];
-    // Both legs scale by dbl_7C57B8 = -kBamPerRad.
+    // Both legs scale by g_NegBamPerRadian = -kBamPerRad.
     const int32_t roll_leg = static_cast<int32_t>(
             std::atan2(static_cast<double>(lz), static_cast<double>(lx)) * -kBamPerRad);
     const int32_t pitch_leg = static_cast<int32_t>(
@@ -102,6 +102,8 @@ ThrowClass throw_class_from_tag(const char *tag) {
     if (eq("nade")) return ThrowClass::kNade;
     if (eq("schl")) return ThrowClass::kSatchel;
     if (eq("clym")) return ThrowClass::kClaymore;
+    if (eq("aflr")) return ThrowClass::kAirFlare;    // [orig: the event row @0x813330]
+    if (eq("gflr")) return ThrowClass::kGroundFlare; // [orig: the event row @0x813348]
     if (eq("vmne")) return ThrowClass::kAVMine;
     if (eq("lndm")) return ThrowClass::kLandmine;
     return ThrowClass::kNone;
@@ -115,13 +117,16 @@ ThrowClass throw_motor_from_move_function(const char *move_function) {
     case PhysicsClass::Nade: return ThrowClass::kNade;
     case PhysicsClass::Schl: return ThrowClass::kSatchel;
     case PhysicsClass::Clym: return ThrowClass::kClaymore;
+    case PhysicsClass::Aflr: return ThrowClass::kAirFlare;
+    case PhysicsClass::Gflr: return ThrowClass::kGroundFlare;
     default: return ThrowClass::kNone;
     }
 }
 
 // [orig: the release leg of the fire binding @ 0x4e07e9 — held < 0x1F ticks ->
 // 0xFF; else clamp((held - 31) * (1/93), 0.1, 1.0) * 255 (flt_7CD390 = 1/93,
-// flt_7C69F4 = 0.1, flt_7CA29C = 255); a 0 result falls back to 0 = unscaled.]
+// flt_7C69F4 = 0.1, flt_7CA29C = 255); a 0 result falls back to 1 (@0x4E0856..0x4E085A,
+// ebx = 1 @0x4E0446), which the 0.1 floor (25 at the least) never reaches.]
 uint8_t power_throw_charge_from_hold(int32_t held_ticks) {
     if (held_ticks < 31) return 255;
     double v = double(held_ticks - 31) * (1.0 / 93.0);
@@ -150,10 +155,11 @@ struct MotorFrame {
 };
 
 int32_t throwable_water_q16(const World &world) {
-    // Environment zero means no authored water. Fixed-point cannot represent
-    // the host's -1e9 dry sentinel, so INT32_MIN is the lowest equivalent
-    // plane for the motor comparisons.
-    return world.env.water_z != 0 ? world.env.water_z : INT32_MIN;
+    // Every motor compare reads the water word raw, 0 when no water is authored
+    // (no dry sentinel; D-NET-507). [orig: Entity_UpdateGrenadePhysics @0x443F50 -
+    //  `cmp eax, g_EnvWaterHeightFixed` @0x443FF4, @0x44497F..0x444984;
+    //  Entity_UpdateClaymorePhysics @0x4473C1; Entity_UpdateSatchelPhysics @0x448371]
+    return world.env.water_z;
 }
 
 Entity *entity_for_lifetime(World &world, EntityHandle handle, uint64_t spawn_id) {
@@ -163,27 +169,22 @@ Entity *entity_for_lifetime(World &world, EntityHandle handle, uint64_t spawn_id
     return entity;
 }
 
-int16_t item_angle_degrees_from_bam(int32_t bam) {
-    return static_cast<int16_t>(std::lround(double(bam) * kDegreesPerBam));
-}
-
+// The motors read and write the round's Position and velocity words in place
+// (D-NET-507). [orig: Entity_UpdateGrenadePhysics @0x4443D0 - the entity's
+//  +4/+8/+0xC and +0x98/+0x9C/+0xA0]
 void load_frame(const LiveRound &r, MotorFrame &f) {
-    f.px = to_fixed(r.pos.x);
-    f.py = to_fixed(r.pos.y);
-    f.pz = to_fixed(r.pos.z);
-    f.vx = to_fixed(r.vel.x);
-    f.vy = to_fixed(r.vel.y);
-    f.vz = to_fixed(r.vel.z);
+    f.px = r.pos.x.q16;
+    f.py = r.pos.y.q16;
+    f.pz = r.pos.z.q16;
+    f.vx = r.vel.x.q16;
+    f.vy = r.vel.y.q16;
+    f.vz = r.vel.z.q16;
     f.prev_z = f.pz;
 }
 
 void store_frame(LiveRound &r, const MotorFrame &f) {
-    r.pos.x = static_cast<float>(from_fixed(f.px));
-    r.pos.y = static_cast<float>(from_fixed(f.py));
-    r.pos.z = static_cast<float>(from_fixed(f.pz));
-    r.vel.x = static_cast<float>(from_fixed(f.vx));
-    r.vel.y = static_cast<float>(from_fixed(f.vy));
-    r.vel.z = static_cast<float>(from_fixed(f.vz));
+    r.pos.set_q16({f.px, f.py, f.pz});
+    r.vel.set_q16({f.vx, f.vy, f.vz});
 }
 
 int32_t horizontal_speed_q16(const MotorFrame &f) {
@@ -235,10 +236,7 @@ void push_motor_effect(World &world, RoundSim &sim, const LiveRound &r, int tag,
 // (mission_x, -mission_y) — the collision.cpp convention.]
 int32_t ground_q16(const terrain::TerrainHeightField *terrain, int32_t x, int32_t y) {
     if (terrain == nullptr || !terrain->valid()) return INT32_MIN;
-    const float h = terrain::height_field_height_mission_bilinear(
-            *terrain, static_cast<float>(from_fixed(x)),
-            static_cast<float>(from_fixed(y)));
-    return to_fixed(h);
+    return terrain::height_field_height_bilinear_fixed(*terrain, x, y); // the words (D-NET-507)
 }
 
 // The contact presentation's descriptor carries the sound bit while the
@@ -396,16 +394,14 @@ void follow_parent(World &world, LiveRound &r) {
         return;
     }
 	CarrierMotionPose p;
-	p.pos[0] = to_fixed(r.pos.x);
-	p.pos[1] = to_fixed(r.pos.y);
-    p.pos[2] = to_fixed(r.pos.z);
+	p.pos[0] = r.pos.x.q16;
+	p.pos[1] = r.pos.y.q16;
+    p.pos[2] = r.pos.z.q16;
     p.yaw_bam = r.yaw_bam;
     p.pitch_bam = r.pitch_bam;
     p.roll_bam = r.roll_bam;
 	follow_carrier_motion(*parent, p);
-	r.pos.x = static_cast<float>(from_fixed(p.pos[0]));
-	r.pos.y = static_cast<float>(from_fixed(p.pos[1]));
-    r.pos.z = static_cast<float>(from_fixed(p.pos[2]));
+	r.pos.set_q16({p.pos[0], p.pos[1], p.pos[2]});
     r.yaw_bam = p.yaw_bam;
     r.pitch_bam = p.pitch_bam;
     r.roll_bam = p.roll_bam;
@@ -418,8 +414,7 @@ void follow_parent(World &world, LiveRound &r) {
 // ----------------------------------------------------------------------------
 static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
                        const AmmoTableEntry &ammo, CollisionWorld *collision,
-                       const terrain::TerrainHeightField *terrain,
-                       bool allow_consequences) {
+                       const terrain::TerrainHeightField *terrain) {
     MotorFrame f;
     load_frame(r, f);
     // The round's savedLivePose: its last tick's committed position, the
@@ -527,9 +522,9 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
         saved = FixedVec3{f.px, f.py, f.pz};
         store_frame(r, f);
         follow_parent(world, r);
-        f.px = to_fixed(r.pos.x);
-        f.py = to_fixed(r.pos.y);
-        f.pz = to_fixed(r.pos.z);
+        f.px = r.pos.x.q16;
+        f.py = r.pos.y.q16;
+        f.pz = r.pos.z.q16;
     }
     // The floor under the saved point, queried 0x2000 above it: a pool-2/1
     // face below, else the terrain, which the round's Flags 0x800000 (its BB
@@ -636,22 +631,27 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
     // push tests no class. [orig: the flag @0x444A29; the push @0x444A0F]
     const int32_t remaining = r.max_age_ticks - elapsed;
     if (remaining == 2) {
-        if (r.pos.z >= from_fixed(water)) {
+        // The Z word against the water word, and the depth a word difference
+        // past 0x30000 (D-NET-507) [orig: `cmp ecx, eax; jge` @0x444984..0x444986,
+        //  `sub edx, ecx` / `cmp edx, 30000h` @0x4449A2..0x4449A4, `jg` @0x4449C2].
+        if (r.pos.z.q16 >= water) {
             r.det_at_expiry = true;
         } else {
-            const double depth = from_fixed(water) - r.pos.z;
+            const int32_t depth = io::bam_sub(water, r.pos.z.q16);
             // Tags 27 and 26 sit at the water surface, tag 25 at the round
             // [orig: the descriptor z = g_EnvWaterHeightFixed @0x4449BE for
             //  the calls @0x4449CC (26) / @0x4449DE (27); the round z
             //  restored @0x4449EE for @0x4449F2 (25)].
             const Vec3 surface{r.pos.x, r.pos.y, static_cast<float>(from_fixed(water))};
-            if (depth > 3.0) {
+            if (depth > 0x30000) {
                 push_motor_effect(world, sim, r, 27, surface, world.logic_tick);
                 push_motor_effect(world, sim, r, 25, r.pos, world.logic_tick);
             } else {
                 push_motor_effect(world, sim, r, 26, surface, world.logic_tick);
             }
-            if (allow_consequences) detonate_round(world, r, r.pos, ammo);
+            // The submerged push tests no authority either (FX-1) [orig:
+            //  WeaponEffect_PushExplosionQueueEntry call @0x444A0F].
+            detonate_round(world, r, r.pos, ammo);
             r.det_at_expiry = false;
             return false; // slot releases
         }
@@ -870,9 +870,9 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
         start = FixedVec3{f.px, f.py, f.pz};
         store_frame(r, f);
         follow_parent(world, r);
-        f.px = to_fixed(r.pos.x);
-        f.py = to_fixed(r.pos.y);
-        f.pz = to_fixed(r.pos.z);
+        f.px = r.pos.x.q16;
+        f.py = r.pos.y.q16;
+        f.pz = r.pos.z.q16;
     }
     // The swept item raycast under the motor's ray context (the velocity over
     // the 3-D speed, that speed as the length; each pool's hit kept only below
@@ -997,18 +997,24 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
     // [orig: satchel @0x4489F6..0x448A22, the conversion @0x448A2E..0x448C12,
     //  the client leg @0x448C1A..0x448C24; claymore @0x447981..0x4479AD,
     //  @0x4479B9..0x447B93, @0x447B9B..0x447BA5]
-    if (!r.parent.valid()) r.pos.z += static_cast<float>(from_fixed(4096));
+    // The Z word lifts by 0x1000, a word add (D-NET-507) [orig: `add edx, 1000h`
+    //  / `mov [esi+0Ch], edx` @0x448A07..0x448A0D; claymore @0x447992..0x447998].
+    if (!r.parent.valid()) r.pos.z.q16 = io::bam_add(r.pos.z.q16, 0x1000);
+    r.update_nulled = !r.parent.valid(); // [orig: @0x448A10; claymore @0x44799B]
     r.spin_yaw = 0;
     r.spin_pitch = 0;
-    r.vel.z = 0.0f;
+    r.vel.z.q16 = 0;
     if (allow_consequences) {
-        r.vel = Vec3{0.0f, 0.0f, 0.0f};
+        r.vel.set_q16({0, 0, 0});
         world.throwables.place_from_round(world, r, ammo);
         return false; // the round slot releases [orig: source round expires]
     }
     r.motor = ThrowClass::kNone;
     r.rest_follows_parent = r.parent.valid();
-    // The age word becomes 248 and the post-motor decrement takes one.
+    // The +0x114 noage bit clears and the age word becomes 248; the post-motor
+    // decrement takes one [orig: @0x448C1A / @0x448C24; claymore @0x447B9B /
+    // @0x447BA5].
+    r.noage = false;
     r.max_age_ticks = r.age_ticks + 248 - 1;
     return true;
 }
@@ -1033,11 +1039,86 @@ static void refresh_round_indoors(World &world, LiveRound &round,
     if (type == def::DEF_ITEM_TYPE_BUILDING || type == def::DEF_ITEM_TYPE_VEHICLE ||
             type == def::DEF_ITEM_TYPE_PERSON)
         return;
-    const int32_t at[3] = {to_fixed(round.pos.x), to_fixed(round.pos.y),
-                           to_fixed(round.pos.z)};
+    const int32_t at[3] = {round.pos.x.q16, round.pos.y.q16, round.pos.z.q16};
     BlinkAccum accum;
     collision->query_blink_boxes_at_point(world, at, accum);
     round.indoors_flags = (accum.flags & kBlinkIndoorsBit) != 0;
+}
+
+// The arti row's motor: the shell a mortar fires (AMMO_60MM_MORTAR's TrcrID item binds
+// move_function arti; WPN_MORTAR, WPN_EMPLMORTAR and the WAC ammoarea fire it). The flight
+// drag first, then the words advance, Z under the -167 gravity step; a shell crossing
+// into the water, under the terrain or into a pool-2/1 entity stops there and arms the
+// 0x1000 bit the update head detonates on (the terrain and hit arms also clear the +0x114
+// bit 0x400000, which ours' rounds do not carry). The arti name binds no event row, so the
+// shell takes no class init. [orig: Entity_UpdateArtiShell @0x445500 (the physics row
+// "arti" @0x82AC7C); the event table @0x813000 holds no "arti" row]
+static bool motor_arti(World &world, RoundSim &sim, LiveRound &r, const AmmoTableEntry &ammo,
+                       CollisionWorld *collision, const terrain::TerrainHeightField *terrain) {
+    // [orig: Entity_ApplyDragAndBounceForce(round, 1, 0) @0x445530]
+    FixedVec3 dragged = r.vel.q16();
+    projectile_apply_drag(dragged, ammo, r.pos.z.q16, world.env.water_z);
+    r.vel.set_q16(dragged);
+    MotorFrame f;
+    load_frame(r, f);
+    // The saved pose is the last tick's committed position [orig: +0x80..+0x88, stored
+    // @0x4459B4..0x4459C6].
+    const FixedVec3 saved{f.px, f.py, f.pz};
+    // [orig: @0x445535..0x44557D]
+    if (f.vx != 0) f.px += f.vx;
+    if (f.vy != 0) f.py += f.vy;
+    f.vz -= 167;
+    f.pz += f.vz;
+    // The 3-D speed, clamped and truncated; under 0x800 it is none [orig: @0x445562..0x4455BE].
+    int32_t speed = speed3_q16(f);
+    if (speed < 0x800) speed = 0;
+    const int32_t water = throwable_water_q16(world);
+    // Into the water: the splash, the horizontal words at a quarter, armed
+    // [orig: the tests @0x4455C0..0x4455DB, the effect @0x445615, @0x44561A..0x44566C].
+    if (f.pz <= water && saved.z > water && speed != 0) {
+        push_motor_effect(world, sim, r, 11,
+                          Vec3{static_cast<float>(from_fixed(f.px)),
+                               static_cast<float>(from_fixed(f.py)),
+                               static_cast<float>(from_fixed(water))},
+                          world.logic_tick);
+        f.vx = qmul(f.vx, 0x4000);
+        f.vy = qmul(f.vy, 0x4000);
+        store_frame(r, f);
+        r.det_at_expiry = true;
+        return true;
+    }
+    // Under the terrain: armed where it stands [orig: @0x445686..0x4456CA].
+    const int32_t ground = ground_q16(terrain, f.px, f.py);
+    if (ground != INT32_MIN && f.pz < ground) {
+        store_frame(r, f);
+        r.det_at_expiry = true;
+        return true;
+    }
+    // The pool-2/1 walks along the unit direction over the speed: a hit nearer than the
+    // speed backs off 0x800, takes the shell there and lands the round's damage on the
+    // entity [orig: the direction @0x4456CB..0x445750, the walks @0x445842 / @0x44587A
+    //  and their keeps @0x445855..0x44589E, the back-off @0x4458A9..0x445922,
+    //  Projectile_ProcessDamageOnTarget @0x4E7FB0 called @0x445936].
+    const int32_t inv = speed != 0 ? static_cast<int32_t>(0x100000000LL / speed) : 0;
+    const int32_t dir[3] = {qmul(inv, f.vx), qmul(inv, f.vy), qmul(inv, f.vz)};
+    ProjectileHit hit;
+    if (motor_item_sweep(world, collision, r, saved, f, speed, hit, dir, speed) &&
+            hit.distance_q16 < speed) {
+        const int32_t back = hit.distance_q16 > 0x800 ? hit.distance_q16 - 0x800 : 0;
+        f.px = saved.x + qmul(back, dir[0]);
+        f.py = saved.y + qmul(back, dir[1]);
+        f.pz = saved.z + qmul(back, dir[2]);
+        store_frame(r, f);
+        FixedVec3 velocity = r.vel.q16();
+        sim.process_damage_hit(world, r, hit, velocity);
+        r.vel.set_q16(velocity);
+        // The phase the hit stored arms the round [orig: +0x2AC = 2 @0x44592C, the test
+        //  @0x445999..0x4459A2].
+        r.det_at_expiry = true;
+        return true;
+    }
+    store_frame(r, f);
+    return true;
 }
 
 bool throwable_motor_tick(World &world, RoundSim &sim, LiveRound &round,
@@ -1045,10 +1126,17 @@ bool throwable_motor_tick(World &world, RoundSim &sim, LiveRound &round,
                           const terrain::TerrainHeightField *terrain,
                           bool allow_consequences) {
     bool alive = true;
+    // A round whose TrcrID item binds the arti row runs that row's update.
+    // [orig: Projectile_UpdatePhysics @0x4E9D70 - the useownmove leg's +452 call
+    //  @0x4E9F1E; Entity_InitFromItemDef @0x49E550 (+0x1C4 @0x49E586..0x49E58C)]
+    if (round.move_row == PhysicsClass::Arti) {
+        alive = motor_arti(world, sim, round, ammo, collision, terrain);
+        refresh_round_indoors(world, round, collision);
+        return alive;
+    }
     switch (round.motor) {
     case ThrowClass::kNade:
-        alive = motor_nade(world, sim, round, ammo, collision, terrain,
-                           allow_consequences);
+        alive = motor_nade(world, sim, round, ammo, collision, terrain);
         break;
     case ThrowClass::kSatchel:
     case ThrowClass::kAVMine: // AT mine authors move_function schl
@@ -1058,6 +1146,10 @@ bool throwable_motor_tick(World &world, RoundSim &sim, LiveRound &round,
     case ThrowClass::kClaymore:
         alive = motor_charge(world, sim, round, ammo, collision, terrain, true,
                              allow_consequences);
+        break;
+    case ThrowClass::kAirFlare:
+    case ThrowClass::kGroundFlare:
+        flare_motor_tick(world, sim, round, terrain);
         break;
     default:
         // A charge round at rest on a non-authority peer follows its parent
@@ -1076,6 +1168,122 @@ bool throwable_motor_tick(World &world, RoundSim &sim, LiveRound &round,
     }
     refresh_round_indoors(world, round, collision);
     return alive;
+}
+
+namespace {
+
+// The 16.16 product the flare motor's words take: the 64-bit product plus the half
+// unit, its bits 16..47 [orig: `imul`, `add eax, 8000h`, `adc edx, 0`, `shrd eax, edx,
+// 10h` - Entity_UpdateShellBounce @0x443E00..0x443E11 / @0x443E25..0x443E36 /
+// @0x443E85..0x443E96].
+int32_t flare_q16_mul(int32_t value, int32_t factor) {
+    return static_cast<int32_t>(static_cast<uint32_t>(
+            static_cast<uint64_t>(static_cast<int64_t>(value) * factor + 0x8000) >> 16));
+}
+
+} // namespace
+
+void flare_motor_tick(World &world, RoundSim &sim, LiveRound &r,
+                      const terrain::TerrainHeightField *terrain) {
+    // [orig: Entity_UpdateShellBounce @0x443DF0]
+    const int32_t vx = flare_q16_mul(r.vel.x.q16, 0xFC28); // @0x443DF5..0x443E1B
+    const int32_t vy = flare_q16_mul(r.vel.y.q16, 0xFC28); // @0x443E15..0x443E36
+    r.pos.y.q16 += vy;                                     // @0x443E3A
+    const int32_t vz = r.vel.z.q16 - 167;                  // @0x443E3D
+    r.pos.x.q16 += vx;                                     // @0x443E53
+    r.pos.z.q16 += vz;                                     // @0x443E56
+    r.vel.x.q16 = vx;
+    r.vel.y.q16 = vy;                                      // @0x443E59
+    r.vel.z.q16 = vz;
+    // The ring record [orig: ProjectileTargetRing_Update(round, +0x29C, 10)
+    //  @0x443E5F..0x443E7B, the call @0x443E69].
+    r.target_ring_slot = sim.target_ring.update(
+            static_cast<int32_t>(&r - sim.rounds.data()), r.target_ring_slot, 10);
+    // The heat word: (heat << 16) times 0xFD70, its high half arithmetic
+    // [orig: @0x443E6E..0x443E9A, the store @0x443EA7].
+    const int32_t heat = flare_q16_mul(
+            static_cast<int32_t>(static_cast<uint32_t>(r.heat_sig) << 16), 0xFD70);
+    r.heat_sig = static_cast<uint16_t>(heat >> 16);
+    bool ends = r.target_ring_slot < 0; // @0x443EA0..0x443EB0
+    // The ground: the terrain under it while it drifts, else its +0x88 word
+    // [orig: @0x443EB6..0x443ED8].
+    const int32_t ground = (vx != 0 || vy != 0)
+            ? ground_q16(terrain, r.pos.x.q16, r.pos.y.q16)
+            : r.prev_z_q16;
+    if (r.pos.z.q16 < throwable_water_q16(world)) { // @0x443EE0..0x443EE9
+        ends = true;
+    } else if (r.pos.z.q16 < ground) {               // @0x443EEB..0x443EED
+        r.pos.z.q16 = ground;                        // @0x443EEF
+        // A signed byte compare [orig: `cmp al, 8; jge` @0x443EF8..0x443EFA].
+        if (static_cast<int8_t>(r.bounce_count) >= 8) {
+            ends = true;                             // @0x443F23
+        } else {
+            r.vel.x.q16 >>= 1;                       // @0x443F02
+            r.vel.y.q16 >>= 1;                       // @0x443F08
+            r.vel.z.q16 = -r.vel.z.q16 >> 2;         // @0x443F0E..0x443F15
+            ++r.bounce_count;                        // @0x443F13..0x443F1B
+        }
+        if (r.vel.z.q16 == 0) ends = true;           // @0x443F29..0x443F32
+    }
+    // Life -1 [orig: the +0x2AC stores @0x443EB0 / @0x443F23 / @0x443F32], which the
+    // next pass's head releases [orig: Projectile_UpdatePhysics @0x4E9D70
+    //  (@0x4E9DA7..0x4E9DAE)].
+    if (ends) r.max_age_ticks = r.age_ticks;
+}
+
+void throwable_round_init(World &world, LiveRound &r, const ThrowableClassRow *row) {
+    // The item's init callback is its ai_function row's (def+0x148): only the nade, schl and
+    // vmne rows spin the round, 1 deg/tick on all three words; the clym row zeroes them and
+    // stores 1 into +0x2A8 (the word the spawn's mass took); a row with no init leaves the
+    // allocation's zeroes, as does the rokt and hlfr rows' init (a memset of +0x2B8..+0x30B);
+    // the guided rows' inits are init_guided's.
+    // [orig: Entity_InitFromItemDef @0x49E550 (the tail-call @0x49E5D5..0x49E5EA); the event
+    //  rows @0x813138 / @0x813150 / @0x813168 / @0x813180; RoktClass_InitFromDef @0x443410
+    //  (the memset @0x443414..0x44341E); Entity_InitThrowableSpin_Nade
+    //  @0x4435A0, Entity_InitThrowableSpin_Satchel @0x4435C0, Entity_InitThrowableSpin_AVMine
+    //  @0x443610, Entity_InitThrowableSpin_Claymore @0x4435E0 (@0x4435F8);
+    //  CEntityManager_AllocateSlot @0x4EAAD0 (the memset @0x4EABC8); RoundData_SpawnRound
+    //  @0x4EC0D0 (the mass @0x4EC6B7 ahead of the bind @0x4EC7B7)]
+    const ThrowClass think = row != nullptr ? row->think : ThrowClass::kNone;
+    if (think == ThrowClass::kNade || think == ThrowClass::kSatchel || think == ThrowClass::kAVMine) {
+        r.spin_yaw = 11930464; // 1 deg/tick
+        r.spin_pitch = 11930464;
+        r.spin_roll = 11930464;
+        return;
+    }
+    if (think == ThrowClass::kClaymore) {
+        r.spin_yaw = r.spin_pitch = r.spin_roll = 0;
+        r.mass_q16 = 1;
+        return;
+    }
+    if (think != ThrowClass::kAirFlare && think != ThrowClass::kGroundFlare) return;
+    // The round's source (+0x170) [orig: RoundData_SpawnRound @0x4EC0D0 (@0x4EC670)].
+    const Entity *source = world.registry.get(r.owner);
+    if (think == ThrowClass::kAirFlare) {
+        // The source's last move joins the drift: its Position less its savedLivePose
+        // (a source never stamped reads no move) [orig: the aflr init AflrClass_InitFromDef @0x4434B0 -
+        //  @0x4434B5..0x4434D7].
+        if (source != nullptr && source->saved_live_valid) {
+            r.vel.x.q16 += source->position.x.q16 - source->saved_live_pos[0];
+            r.vel.y.q16 += source->position.y.q16 - source->saved_live_pos[1];
+        }
+        r.heat_sig = static_cast<uint16_t>(row->heat_sig); // @0x4434DD..0x4434EA
+    } else if (source != nullptr) {
+        // The source's velocity words, 0x538 more fall [orig: the gflr init GflrClass_InitFromDef @0x443510 -
+        //  @0x443521..0x443554].
+        r.vel.x.q16 = source->veh.vel_x;
+        r.vel.y.q16 = source->veh.vel_y;
+        r.vel.z.q16 = source->veh.slide_z + 0x538;
+        r.heat_sig = static_cast<uint16_t>(row->heat_sig);
+    } else {
+        r.vel.x.q16 = 0; // @0x443564..0x443570
+        r.vel.y.q16 = 0;
+        r.vel.z.q16 = 0x538;
+    }
+    // The ground under the round into +0x88 [orig: @0x4434F4..0x443505 /
+    //  @0x44357A..0x44358A]. The ItemTypeIndex -1 store beside the heat word
+    // (@0x4434F6 / @0x44355B) only feeds the +0x1C readers, which test it nonzero.
+    r.prev_z_q16 = ground_q16(world.tables.terrain, r.pos.x.q16, r.pos.y.q16);
 }
 
 // ----------------------------------------------------------------------------
@@ -1110,20 +1318,28 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     seed.kind = EntityKind::Item;
     seed.has_item_def = true;
     seed.position = round.pos;
-    seed.yaw = static_cast<int16_t>(
-            std::lround(mission_yaw_deg_from_bam_heading(round.yaw_bam)));
-    seed.pitch = item_angle_degrees_from_bam(round.pitch_bam);
-    seed.roll = item_angle_degrees_from_bam(round.roll_bam);
+    seed.heading = round.yaw_bam;
+    seed.pitch_bam = round.pitch_bam;
+    seed.roll_bam = round.roll_bam;
     seed.ground_target = parent_handle;
     seed.team = round.team;
     seed.item_id = item_id;
     // The copy carries the round's Flags 0x800000, its BB state as the last
     // tick's refresh left it (this tick's runs after the motor), which the
-    // device keeps until its first think visit rebuilds it; the +0x114 bit
-    // rides along too, read by no device leg.
+    // device keeps until its first think visit rebuilds it; the +0x114 Indoors
+    // bit rides along too, read by no device leg.
     // [orig: Entity_ConvertRoundToPlacedEntity @0x5455B0 - the memcpy
     //  @0x5455D6; Entity_UpdatePool1Slot @0x4B8E1B..0x4B8E25]
     if (round.indoors_flags) seed.flags |= kEntityFlagIndoors;
+    // The same copy carries the round's ammo-flags word with its noage bit, as
+    // the spawn stored it; the authority's round keeps the bit until the
+    // conversion clears it on the ROUND after the copy. The device is then no
+    // slice's dynamic candidate.
+    // [orig: RoundData_SpawnRound @0x4EC0D0 - the +0x114 store @0x4EC615;
+    //  Entity_ConvertRoundToPlacedEntity @0x5455B0 - the copy @0x5455D6, the
+    //  round's clear @0x5455E2; Entity_BuildProximityListsFromPools @0x4B8EB0
+    //  - @0x4B8FCA / @0x4B920A]
+    seed.ammo_word_noage = round.noage;
     if (const ThrowableClassRow *row = classes.get(item_id)) {
         seed.item_type_index = row->item_type_index; // the template's +0x1C
         // [orig: Entity_InitFromItemDef @ 0x49e550 — Health/Armor from the def]
@@ -1219,23 +1435,34 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     d.think_delay_ticks = ammo.max_age_ticks;
     devices.push_back(d);
 
-    ThrowableEvents::DeviceSpawn ev;
-    ev.entity = handle.packed;
-    ev.item_id = item_id;
-    ev.owner_handle = d.owner_handle != EntityHandle::kInvalid
-                              ? d.owner_handle
-                              : d.owner.packed;
-    ev.item_friendly = d.item_friendly;
-    ev.item_enemy = d.item_enemy;
-    ev.parent_handle = d.parent.valid()
-                               ? d.parent.packed
-                               : EntityHandle::kInvalid;
-    ev.team = d.team;
-    ev.pos = d.pos;
-    ev.yaw_bam = d.yaw_bam;
-    ev.pitch_bam = d.pitch_bam;
-    ev.roll_bam = d.roll_bam;
-    events.spawns.push_back(ev);
+    // The motor's S2C 0x59 (mask 0x90) at its call, after the conversion and
+    // ahead of the cap, into the entity pass's call-order queue: the projectile
+    // walk's 0x59s and 0x12s interleave with its guided 0x44s round by round
+    // (D-NET-NEW-L7-14). The callers run on the authority alone; outside a
+    // session the send reaches nobody, so nothing is queued.
+    // [orig: Entity_UpdateSatchelPhysics @0x4482A0 - the conversion call
+    //  @0x448A3E, send_mask 90h @0x448BCB, the NapiNPServer_SendFiltered(0x59)
+    //  call @0x448BD5; Entity_UpdateClaymorePhysics @0x4472F0 - @0x447B4C,
+    //  @0x447B56]
+    if (world.rules.mp_session) {
+        DeviceSpawnEvent ev;
+        ev.entity = handle.packed;
+        ev.item_id = item_id;
+        ev.owner_handle = d.owner_handle != EntityHandle::kInvalid
+                                  ? d.owner_handle
+                                  : d.owner.packed;
+        ev.item_friendly = d.item_friendly;
+        ev.item_enemy = d.item_enemy;
+        ev.parent_handle = d.parent.valid()
+                                   ? d.parent.packed
+                                   : EntityHandle::kInvalid;
+        ev.team = d.team;
+        ev.pos = d.pos;
+        ev.yaw_bam = d.yaw_bam;
+        ev.pitch_bam = d.pitch_bam;
+        ev.roll_bam = d.roll_bam;
+        world.out.entity_events.push_back(ev);
+    }
     // Both authority conversion motors enforce the cap AFTER their 0x59
     // send; the MOTOR keys it (AT mines author move_function schl and ride
     // the satchel motor's max-3 call with their own def id). A device still
@@ -1243,8 +1470,9 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     // all-arming surplus persists -- the retail null no-op.
     // [orig: Server_EnforcePlacedDeviceCapByOwner @0x5119e0 -- owner +368 +
     //  itemDef+80 match, min over +684 seeded 0 with strict < @0x511a42-44,
-    //  count > max -> Server_RemoveEntityAndNotify @0x50a270 (null-safe);
-    //  satchel motor caller @0x448be6 max 3; claymore @0x447b67 max 4]
+    //  count > max -> Server_RemoveEntityAndNotify @0x50a270 (null-safe, the
+    //  call @0x511A53); satchel motor caller @0x448be6 max 3 (the call
+    //  @0x448BEC); claymore @0x447b67 max 4 (@0x447B6D)]
     if (round.motor == ThrowClass::kSatchel ||
         round.motor == ThrowClass::kAVMine)
         enforce_device_cap(world, devices.back(), 3);
@@ -1301,9 +1529,13 @@ void ThrowableSim::remove_device(World &world, PlacedDevice &device) {
         return;
     }
     device.active = false;
-    ThrowableEvents::DeviceRemove ev;
-    ev.entity = device.entity.packed;
-    events.removes.push_back(ev);
+    // The notifying removal's S2C 0x12 (mask 0x90) at its call, into the same
+    // call-order queue: the cap's right behind its conversion's 0x59 in the
+    // projectile walk, a pool-1 visit's in the pool-1 walk (D-NET-NEW-L7-14).
+    // [orig: Server_RemoveEntityAndNotify @0x50A270 - send_mask 90h @0x50A284,
+    //  the 0x12's NapiNPServer_SendFiltered call @0x50A2AC]
+    if (world.rules.mp_session)
+        world.out.entity_events.push_back(EntityRemoveEvent{device.entity.packed});
     world.registry.despawn(device.entity);
 }
 
@@ -1329,7 +1561,20 @@ void ThrowableSim::detonate_device(World &world, PlacedDevice &device,
         p.shot_seq = RoundSim::kFreshRoundWord;
         world.round_sim.spawn(world, p);
     }
-    remove_device(world, device);
+    // The think's tail: +0x170 cleared, the kill packet (S2C 0x26, the device's handle and
+    // section 0) in a session, then Entity_Destroy, which notifies nobody (no S2C 0x12): a
+    // joiner's device dies by that 0x26, whose kill runs its own event-4 think
+    // (D-NET-NEW-L6-7; the joiner's mirror row is tombstoned, not re-materialized).
+    // [orig: Entity_SatchelThink @0x443670 - @0x443885, @0x443891..0x443895, @0x44389E;
+    //  Entity_ClaymoreThink @0x4438C0 - @0x443B75, @0x443B81..0x443B85, @0x443B8E;
+    //  Entity_AVMineThink @0x443BB0 - @0x443D97, @0x443DA3..0x443DA7, @0x443DB0;
+    //  Server_SendEntityStatePacket @0x509D70 (type 0x26 @0x509DBD)]
+    device.active = false;
+    Entity *entity = entity_for_lifetime(world, device.entity, device.entity_spawn_id);
+    if (entity == nullptr) return;
+    entity->primary_occupant = EntityHandle{};
+    if (world.rules.logic_authority && world.rules.mp_session) emit_item_state(world, *entity, 0);
+    world.commands.remove_ssn(entity->handle);
 }
 
 bool ThrowableSim::enemy_in_cone(World &world, CollisionWorld *collision,
@@ -1345,8 +1590,7 @@ bool ThrowableSim::enemy_in_cone(World &world, CollisionWorld *collision,
     const size_t cap = world.registry.pool_capacity(pool);
     // Both variants trace from 0.3 u above the device [orig: +0x4CCC @0x43CA29
     // / @0x43CBD9].
-    const int32_t dev[3] = {to_fixed(device.pos.x), to_fixed(device.pos.y),
-                            to_fixed(device.pos.z)};
+    const int32_t dev[3] = {device.pos.x.q16, device.pos.y.q16, device.pos.z.q16};
     const int32_t eye[3] = {dev[0], dev[1], dev[2] + 0x4CCC};
     const int32_t max_range = to_fixed(max_range_units);
     for (size_t s = 0; s < cap; ++s) {
@@ -1372,15 +1616,15 @@ bool ThrowableSim::enemy_in_cone(World &world, CollisionWorld *collision,
         // The distance is the fixed-point deltas' length, capped at
         // 2147418112.0 and truncated, against the fixed range [orig:
         // @0x43CA97..0x43CAE9 / @0x43CC38..0x43CC8B, _ftol2_sse].
-        const int32_t pos[3] = {to_fixed(e->position.x), to_fixed(e->position.y),
-                                to_fixed(e->position.z)};
+        const int32_t pos[3] = {e->position.x.q16, e->position.y.q16,
+                                e->position.z.q16};
         const double dx = double(int32_t(uint32_t(pos[0]) - uint32_t(dev[0])));
         const double dy = double(int32_t(uint32_t(pos[1]) - uint32_t(dev[1])));
         const double dz = double(int32_t(uint32_t(pos[2]) - uint32_t(dev[2])));
         double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
         if (dist > 2147418112.0) dist = 2147418112.0; // [orig: flt_7C19E0]
         if (io::retail_ftol_sse2(dist) > max_range) continue;
-        // atan2 scales by dbl_7C57B8 = -kBamPerRad under the round-toward-zero
+        // atan2 scales by g_NegBamPerRadian = -kBamPerRad under the round-toward-zero
         // control word into a qword whose low dword is kept, and the angle is
         // -Yaw minus that: bearing minus Yaw. The abs is cdq/xor/sub and the
         // compare unsigned (`ja`), so 0x7FFFFFFF passes every bearing but the
@@ -1482,6 +1726,88 @@ void ThrowableSim::think_device(World &world, PlacedDevice &d, Entity *e,
     }
 }
 
+// See throwables.h. The round descriptor is the device thinks' (detonate_device's shape).
+void ThrowableSim::think_device_row_body(World &world, Entity &body, ThrowClass think,
+                                         int event) {
+    const bool authority = world.rules.logic_authority;
+    if (!authority && event != 4) return;
+    // The body in a device's shape: its words and facing, its team, its ground carrier
+    // (+0x28) and its +0x170 word (a person's ride link) as the owner.
+    PlacedDevice d;
+    d.entity = body.handle;
+    d.entity_spawn_id = body.registry_spawn_id;
+    d.owner = body.primary_occupant;
+    if (const Entity *owner = world.registry.get(d.owner)) d.owner_handle = owner->handle.packed;
+    d.team = body.team;
+    d.pos = body.position;
+    d.yaw_bam = body.heading;
+    d.pitch_bam = body.pitch_bam;
+    d.roll_bam = body.roll_bam;
+    d.parent = body.ground_target;
+    bool fire = !authority;
+    if (authority) {
+        // The cone test over the ammo at the body's +0x26C word (a person's: the organic
+        // fire's last advanced ammo, 0 on a player body), then the health test.
+        // [orig: g_AmmoDefTable[276 * +0x26C] +52 / +60 @0x443A3F / @0x443CC7; the
+        //  Health tests @0x443A5B / @0x443CE3]
+        if (think != ThrowClass::kSatchel) {
+            const AiEntity *ai = world.ai.for_handle(body.handle);
+            const AmmoTableEntry *ammo =
+                    world.tables.ammo.by_index(ai != nullptr ? ai->inf.last_advanced_ammo : 0);
+            CollisionWorld *collision = world.collision;
+            if (ammo != nullptr)
+                fire = enemy_in_cone(world, collision,
+                        collision != nullptr ? collision->terrain : nullptr, d,
+                        ammo->kz_minradius, ammo->kz_pieslice_bam, think == ThrowClass::kAVMine);
+        }
+        fire = fire || body.health <= 0;
+    }
+    if (!fire) return;
+    const auto spawn_round = [&](const char *name) {
+        const int index = world.tables.ammo.index_of(name);
+        if (index < 0) return;
+        RoundSpawnParams p;
+        p.owner = d.owner;
+        p.shooter_handle = d.owner_handle;
+        p.origin = d.pos;
+        p.dir_yaw_bam = d.yaw_bam;
+        p.dir_pitch_bam = d.pitch_bam;
+        p.ammo_index = index;
+        p.shot_seq = RoundSim::kFreshRoundWord; // D-NET-776, as the devices'
+        world.round_sim.spawn(world, p);
+    };
+    // [orig: Entity_SatchelThink @0x443670 (the RoundData_SpawnRound call @0x4437E2, satchelboom);
+    //  Entity_ClaymoreThink @0x4438C0 (the calls @0x443ACC / @0x443B32, claymoreshrapnel,
+    //  claymorekillzone); Entity_AVMineThink @0x443BB0 (the call @0x443D54, AV_Minekillzone)]
+    if (think == ThrowClass::kSatchel) {
+        spawn_round("satchelboom");
+    } else if (think == ThrowClass::kClaymore) {
+        spawn_round("claymoreshrapnel");
+        spawn_round("claymorekillzone");
+    } else {
+        spawn_round("AV_Minekillzone");
+    }
+    // +0x170 cleared, the state packet in a session, then Entity_Destroy [orig:
+    //  @0x443885 / @0x443891..0x443895 / @0x44389E; @0x443B75 / @0x443B81..0x443B85 /
+    //  @0x443B8E; @0x443D97 / @0x443DA3..0x443DA7 / @0x443DB0]
+    body.primary_occupant = EntityHandle{};
+    if (authority && world.rules.mp_session) emit_item_state(world, body, 0);
+    world.commands.remove_ssn(body.handle);
+}
+
+// See throwables.h.
+void ThrowableSim::device_class_event(World &world, Entity &item, ThrowClass think, int event) {
+    if (world.rules.logic_authority) {
+        if (PlacedDevice *device = device_for(item)) {
+            CollisionWorld *collision = world.collision;
+            think_device(world, *device, &item, collision,
+                    collision != nullptr ? collision->terrain : nullptr);
+            return;
+        }
+    }
+    think_device_row_body(world, item, think, event);
+}
+
 void ThrowableSim::follow_parent(World &world, PlacedDevice &d, Entity *e) {
     // Ride the stuck-to parent [orig: the placed motor +452 =
     // Entity_InterpolateFromParentDelta @ 0x4a8d60, installed by
@@ -1493,24 +1819,22 @@ void ThrowableSim::follow_parent(World &world, PlacedDevice &d, Entity *e) {
             // [orig: @ 0x4a8d7d..0x4a8db4].
             stamp_saved_live_pose(*e);
             CarrierMotionPose p;
-            p.pos[0] = to_fixed(d.pos.x);
-            p.pos[1] = to_fixed(d.pos.y);
-            p.pos[2] = to_fixed(d.pos.z);
+            p.pos[0] = e->position.x.q16;
+            p.pos[1] = e->position.y.q16;
+            p.pos[2] = e->position.z.q16;
             p.yaw_bam = d.yaw_bam;
             p.pitch_bam = d.pitch_bam;
             p.roll_bam = d.roll_bam;
             follow_carrier_motion(*parent, p);
-            d.pos = Vec3{ static_cast<float>(from_fixed(p.pos[0])),
-                static_cast<float>(from_fixed(p.pos[1])),
-                static_cast<float>(from_fixed(p.pos[2])) };
+            d.pos.set_q16({p.pos[0], p.pos[1], p.pos[2]});
             d.yaw_bam = p.yaw_bam;
             d.pitch_bam = p.pitch_bam;
             d.roll_bam = p.roll_bam;
-            e->position = d.pos;
-            e->yaw = static_cast<int16_t>(
-                    std::lround(mission_yaw_deg_from_bam_heading(d.yaw_bam)));
-            e->pitch = item_angle_degrees_from_bam(d.pitch_bam);
-            e->roll = item_angle_degrees_from_bam(d.roll_bam);
+            // The followed pose's words, stored raw (D-NET-507).
+            e->position.set_q16({p.pos[0], p.pos[1], p.pos[2]});
+            e->heading = d.yaw_bam;
+            e->pitch_bam = d.pitch_bam;
+            e->roll_bam = d.roll_bam;
             e->ground_target = d.parent;
         } else {
             d.parent = EntityHandle{};

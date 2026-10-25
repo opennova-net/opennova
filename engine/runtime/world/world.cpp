@@ -71,16 +71,16 @@ static void pose_emplacement_attachments(World &world) {
         if (!snapshot.mounted) return;
         Entity *occupant = world.registry.get(snapshot.handle);
         const Entity *target = world.registry.get(snapshot.mount_target);
+        Seat seat;
         if (occupant == nullptr || target == nullptr ||
             !target->emplacement_parent.valid() ||
-            snapshot.mount_seat < 0 ||
-            snapshot.mount_seat >= static_cast<int>(target->seats.size()))
+            !world.vehicles.rider_seat(snapshot, *target, seat))
             return;
         if (AiEntity *body = world.ai.for_handle(snapshot.handle)) {
             world.ai.refresh_mounted_pose(*body, world);
             return;
         }
-        world.vehicles.pose_mounted_occupant(*occupant, *target, target->seats[snapshot.mount_seat]);
+        world.vehicles.pose_mounted_occupant(*occupant, *target, seat);
     });
     lap.mark(devtools::Slot::SIM_ATTACHMENT_RIDERS);
 }
@@ -92,6 +92,7 @@ static void pose_emplacement_attachments(World &world) {
 // Precipitation_Reset precedes mission entities and consumes the shared B stream.
 // [orig: Game_StartMission @ 0x524360, seed @ 0x52460B / reset @ 0x5249D4]
 World::World() : commands(*this), vehicles(*this), rotor_wash(*this), zones(*this) {
+    ai.bind_registry(&registry);
 	weather.precipitation.reset(&io::rotating_prng_callback, &prng16_b_state);
 }
 
@@ -225,9 +226,20 @@ static void finish_entity_update(World &world, const TickContext &ctx, devtools:
     // @0x4b9340 every tick (@0x4c240a) + Entity_BuildProximityListsFromPools
     // @0x4b8eb0 (per-entity candidate slices, every 17th tick @0x4c2416); the statics
     // table is Entity_BuildAllProximityLists @0x4c20f0 at mission start/teleport]
+    // A joiner's decoded rows join the tables here too (D-NET-196): the pool-1 walk and
+    // the projectiles above read the previous update's build.
+    if (world.before_proximity_build) world.before_proximity_build();
     if (world.ai.collision != nullptr) world.ai.collision->build_tick_tables(world);
     lap.mark(devtools::Slot::SIM_UPDATE_PROXIMITY);
-    // The pool-0 walk in slot order: each organic row's +0x1C4 body update.
+    // A joiner's replica pool-0 rows through its own body's slot: they update ahead
+    // of the own body, as the pool-0 walk reaches their slots first (D-NET-196).
+    if (world.before_pool0_walk) world.before_pool0_walk();
+    // The pool-0 walk in slot order: each organic row's +0x1C4 body update, its bound
+    // row's move function. A body on the null row is skipped whole, its tail with it; any
+    // other row's runs the update (org0's a bare return), then the tail.
+    // [orig: Entity_UpdateAllEntities @0x4C2100 - the read @0x4C2460, the Entity_UpdateNullClass
+    //  compare @0x4C2466..0x4C246B and the null test @0x4C246F to the next slot, the call
+    //  @0x4C2472, the tail from @0x4C2477]
     const size_t pool0 = world.registry.pool_capacity(0);
     for (size_t slot = 0; slot < pool0; ++slot) {
         const Entity *row = world.registry.get(EntityHandle::make(0, static_cast<int>(slot)));
@@ -235,6 +247,7 @@ static void finish_entity_update(World &world, const TickContext &ctx, devtools:
         AiEntity *body = world.ai.for_handle(row->handle);
         if (body == nullptr || body->brain.f[AiBrain::kOwner] == 0 || !body->inf.active)
             continue;
+        if (body_move_row(world, *body, row) == PhysicsClass::Null) continue;
         world.ai.update_organic(*body, world, ctx.logic_tick);
         if (const Entity *live =
                     world.registry.get(EntityHandle::make(0, static_cast<int>(slot))))
@@ -261,6 +274,19 @@ static void finish_entity_update(World &world, const TickContext &ctx, devtools:
 
 void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     row.pool1_visited = true; // [orig: Entity_UpdatePool1Slot @0x4B8DE1]
+    // Retail's +0x144 removal countdown (the authority removes the row at 0, a
+    // non-authority skips that visit) is not carried: its one non-zero writer is
+    // the C2S 0x18 weapon drop's template word, which no stock client sends and
+    // an opennova host leaves unhandled (D-PWR-5); no other code stores the word
+    // (the spawns zero their template or row, a joiner's load records and S2C
+    // 0x22 create zero theirs, a clone copies a row whose word is 0), so it is 0
+    // on every row.
+    // [orig: Entity_UpdatePool1Slot @0x4B8DEE..0x4B8E1A (Server_RemoveEntityAndNotify
+    //  @0x4B8E11); NapiNPServerMsg_HandleWeaponDrop @0x51A020 (the template word
+    //  @0x51A429, the clone @0x51A487); Entity_ExpireOwnerWeaponDrops
+    //  @0x507F20 (@0x507F62); NetPacket_HandleEntityCreate @0x42EC90 (@0x42ED16);
+    //  NapiNPClientMsg_0x00D @0x432C40 (@0x432D23); Entity_SpawnFromBMSRecord
+    //  @0x40E9F0 (@0x40EA27)]
     const EntityHandle handle = row.handle;
     const uint64_t lifetime = row.registry_spawn_id;
     // Every leg may destroy the row (and a spawn may reuse its slot), so each
@@ -276,14 +302,14 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     // motor (throwables.cpp); the item update callback still follows it.
     if (ctx.is_authority && body == nullptr) {
         if (PlacedDevice *device = throwables.device_for(row)) {
+            const devtools::ProfileScope device_scope(profile, devtools::Slot::SIM_WALK_DEVICES);
             throwables.update_device(*this, *device, ai.collision, tables.terrain);
             if (Entity *e = live()) {
                 update_item_destroy_fade(*this, *e);
                 if (e->squib.motor) {
                     tick_squib(*this, *e);
                 } else {
-                    const float water_z = env.water_z != 0
-                            ? static_cast<float>(env.water_z) / 65536.0f : -1.0e9f;
+                    const float water_z = static_cast<float>(env.water_z) / 65536.0f;
                     tick_item_death_motion(*this, *e, tables.terrain, water_z, out.destruction);
                 }
             }
@@ -300,8 +326,10 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     else if (body == nullptr && !row.is_ai_capable) kind = ThinkKind::Item;
     // A mounted non-organic brain takes the seat-follow shortcut: no think and
     // no clock step this visit (its row still runs the motor legs).
-    if (brain != nullptr && !row.motor_suspended && ai.pose_if_mounted(*brain, *this))
-        kind = ThinkKind::None;
+    if (brain != nullptr && !row.motor_suspended && row.health > 0) {
+        const devtools::ProfileScope mounted_scope(profile, devtools::Slot::SIM_WALK_MOUNTED);
+        if (ai.pose_if_mounted(*brain, *this)) kind = ThinkKind::None;
+    }
     auto clock_of = [kind](Entity &e) -> int32_t * {
         switch (kind) {
         case ThinkKind::Brain: return &e.spawn_phase;
@@ -317,6 +345,7 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     //  the Entity_BuildProximityList call @0x4B8E25 (CollisionWorld::refresh_blink),
     //  `call eax` @0x4B8E3C]
     if (clock != nullptr && *clock <= 0) {
+        const devtools::ProfileScope think_scope(profile, devtools::Slot::SIM_WALK_THINK);
         if (ai.collision != nullptr) ai.collision->refresh_blink(*this, row);
         switch (kind) {
         case ThinkKind::Brain:
@@ -340,28 +369,48 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     // [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53]
     Entity *e = live();
     if (e == nullptr) return;
-    vehicles.update_motor(*e, ctx.is_authority);
-    if ((e = live()) == nullptr) return;
-    tick_emplaced_weapon_class_update(*this, *e);
-    if (body != nullptr && body->inf.active && body->brain.f[AiBrain::kOwner] != 0)
-        ai.update_organic(*body, *this, ctx.logic_tick);
-    if ((e = live()) == nullptr) return;
-    update_item_destroy_fade(*this, *e);
-    if (e->squib.motor) {
-        tick_squib(*this, *e);
-    } else {
-        const float water_z =
-                env.water_z != 0 ? static_cast<float>(env.water_z) / 65536.0f : -1.0e9f;
-        tick_item_death_motion(*this, *e, tables.terrain, water_z, out.destruction);
+    {
+        const devtools::ProfileScope motor_scope(profile, devtools::Slot::SIM_WALK_MOTOR);
+        vehicles.update_motor(*e, ctx.is_authority);
     }
     if ((e = live()) == nullptr) return;
-    // A dropped carried object's installed fall or ride (Match owns the
-    // carry objects), or a genx def's own ride.
-    if (e->drop_motion != DropMotion::None) update_dropped_object(*this, *e);
-    if ((e = live()) == nullptr) return;
+    {
+        const devtools::ProfileScope ewep_scope(profile, devtools::Slot::SIM_WALK_EWEP);
+        tick_emplaced_weapon_class_update(*this, *e);
+    }
+    if (body != nullptr && body->inf.active && body->brain.f[AiBrain::kOwner] != 0)
+        ai.update_organic(*body, *this, ctx.logic_tick);
+    {
+        const devtools::ProfileScope items_scope(profile, devtools::Slot::SIM_WALK_ITEMS);
+        if ((e = live()) == nullptr) return;
+        update_item_destroy_fade(*this, *e);
+        if (e->squib.motor) {
+            tick_squib(*this, *e);
+        } else {
+            const float water_z = static_cast<float>(env.water_z) / 65536.0f;
+            tick_item_death_motion(*this, *e, tables.terrain, water_z, out.destruction);
+        }
+        if ((e = live()) == nullptr) return;
+        // A dropped carried object's installed fall or ride (Match owns the
+        // carry objects), or a genx def's own ride.
+        if (e->drop_motion != DropMotion::None) update_dropped_object(*this, *e);
+        if ((e = live()) == nullptr) return;
+        // An ele0 def's own mover [orig: Entity_UpdateFallAndLandState @0x4A20E0 through
+        //  @0x4B8E53].
+        if (e->elevator_motion) update_item_elevator(*this, *e);
+    }
+    // The +0x1C4 call ends here, whichever class leg it took: a joiner's decoded row
+    // takes its visit at this slot (D-NET-196). [orig: Entity_UpdatePool1Slot
+    //  @0x4B8E41..0x4B8E53, the return @0x4B8E55]
+    if (pool1_slot_leg) {
+        pool1_slot_leg(handle);
+        if ((e = live()) == nullptr) return;
+    }
     // A mounted non-organic brain re-poses on its seat after the mover ran.
-    if (brain != nullptr && ctx.is_authority && brain->brain.f[AiBrain::kOwner] != 0)
+    if (brain != nullptr && ctx.is_authority && brain->brain.f[AiBrain::kOwner] != 0) {
+        const devtools::ProfileScope mounted_scope(profile, devtools::Slot::SIM_WALK_MOUNTED);
         ai.refresh_mounted_pose(*brain, *this);
+    }
     // The trailing decrement, every visit whether or not the row thought.
     // [orig: `add [esi+2ACh],-1` @0x4B8EA0]
     if ((e = live()) == nullptr) return;
@@ -384,8 +433,6 @@ void World::update_all_entities(const TickContext &ctx) {
     ai.is_in_session = rules.mp_session;
     if (ai.collision != nullptr)
         ai.collision->local_player = cached.local_player; // blink accumulation target
-    // These presentation events describe only the current authoritative tick.
-    if (is_authority) throwables.events.clear();
 
     // The SP epilog screen runs a reduced pass: every pool-1 row's pose is
     // copied into its saved pose and only a row a player drives (its occupant
@@ -432,7 +479,12 @@ void World::update_all_entities(const TickContext &ctx) {
     for (size_t slot = 0; slot < pool1; ++slot) {
         const EntityHandle handle = EntityHandle::make(1, static_cast<int>(slot));
         Entity *row = registry.get(handle);
-        if (row == nullptr || row->pool1_visited) continue;
+        if (row == nullptr) {
+            // A decoded row with no registry row visits at its own slot (D-NET-196).
+            if (pool1_slot_leg) pool1_slot_leg(handle);
+            continue;
+        }
+        if (row->pool1_visited) continue;
         if (Entity *p1 = unvisited_parent(row)) {
             if (Entity *p2 = unvisited_parent(p1)) {
                 if (Entity *p3 = unvisited_parent(p2)) update_pool1_slot(*p3, ctx);
@@ -487,11 +539,11 @@ void World::update_all_entities(const TickContext &ctx) {
     // [orig: Weapon_UpdateAllProjectiles @0x4ec020; §5.60]
     const bool round_host =
             is_authority || (rules.mp_session && !rules.projectile_authority);
-    // The water plane: env.water_z (16.16, the #265 sound-profile home) —
-    // zero means "no water authored", the same read the wreck gates use
-    // [orig: g_EnvWaterHeightFixed @0x26c6454].
-    const float water_z =
-            env.water_z != 0 ? static_cast<float>(env.water_z) / 65536.0f : -1.0e9f;
+    // The water plane: env.water_z (16.16, the #265 sound-profile home), 0 when
+    // none is authored (retail keeps no dry sentinel; D-NET-507)
+    // [orig: g_EnvWaterHeightFixed @0x26C6454; Environment_InitDefaults @0x57C010 -
+    //  the memset @0x57C011..0x57C01E].
+    const float water_z = static_cast<float>(env.water_z) / 65536.0f;
     // [orig: DeathPiece_TickAll @0x57b900, the call @0x4c221c]
     if (round_host) death_pieces.tick(*this, tables.terrain, water_z, out.destruction);
     // The timed AI events, before this tick's projectiles: a damage event the
@@ -523,6 +575,8 @@ void World::update_all_entities(const TickContext &ctx) {
     tick_item_event_pool(*this, 3);
     lap.mark(devtools::Slot::SIM_UPDATE_EXPLOSIONS);
     finish_entity_update(*this, ctx, lap);
+    // The body readout's per-tick record (an instrument, no behaviour; body_trace.h).
+    body_trace_tick(*this);
 }
 
 // The whole frame: the embedders without a server tick (the bare local
@@ -570,8 +624,11 @@ TickContext World::begin_tick(bool is_authority, TickPhase phase) {
     // boundary. [orig: WacScript_ExecuteBytecode @0x4F58F4]
     // The frame's HUD counters, ahead of its input, server tick and entity
     // update [orig: Game_ProcessMainFrame @0x5265D5 -> Game_TickHudFrameCounters];
-    // the menu pause runs no tick here (HudFrameCounters).
-    hud_frames.step(/*menu_paused=*/false, epilog_screen_active());
+    // the menu pause runs no tick here (HudFrameCounters). The resuming update's
+    // counters already stepped as paused ahead of its input frame
+    // (SessionRules::update_head_stepped).
+    if (!rules.update_head_stepped)
+        hud_frames.step(/*menu_paused=*/false, epilog_screen_active());
     TickContext ctx;
     ctx.world = this;
     ctx.logic_tick = logic_tick;
@@ -612,10 +669,15 @@ void World::run_entity_pass(const TickContext &ctx) {
     devtools::ProfileLap lap(profile);
     const bool pre_mission = ctx.phase == TickPhase::PreMission;
     const bool gameplay = ctx.phase == TickPhase::Gameplay;
-    // The entity update, on every peer, behind the frame's admission gate.
-    // [orig: Game_ProcessMainFrame @0x5263F0 (the Entity_UpdateAllEntities
-    //  call @0x52674B)]
-    if (gameplay && entity_update_admitted(ctx.is_authority)) update_all_entities(ctx);
+    // The entity update, on every peer, behind the frame's admission gate. The
+    // authority's PreRound phase is its own pre-round timer, which the gate does
+    // not read (its pre-round half is the local client's copy, cached), so the
+    // authority's update runs through the pre-round; a joiner's PreRound phase
+    // is that copy. [orig: Game_ProcessMainFrame @0x5263F0 (the gate
+    //  @0x526703..0x526742, `cmp g_ClientPreRoundTimer` @0x52672C, the
+    //  Entity_UpdateAllEntities call @0x52674B)]
+    const bool update_phase = ctx.is_authority ? !pre_mission : gameplay;
+    if (update_phase && entity_update_admitted(ctx.is_authority)) update_all_entities(ctx);
     lap.restart();
     item_emitters.sync_owners(*this);
     // The waypoint current-selection pass, from the local player's position (the
@@ -627,8 +689,8 @@ void World::run_entity_pass(const TickContext &ctx) {
         if (const Entity *lp = registry.get(cached.local_player)) {
             WaypointFrameInputs in;
             static_cast<WaypointCycleContext &>(in) = waypoint_context();
-            in.player_x = static_cast<int32_t>(lp->position.x * 65536.0f);
-            in.player_y = static_cast<int32_t>(lp->position.y * 65536.0f);
+            in.player_x = lp->position.x.q16;
+            in.player_y = lp->position.y.q16;
             in.subgoals_won = script.subgoals.won; // [orig: dword_AC86F4 @0x452e14]
             in.local = lp;
             script.waypoints.tick_advance(in);
@@ -644,30 +706,71 @@ void World::run_entity_pass(const TickContext &ctx) {
     // latest-intent rows on the same logic clock so old entity lifetimes cannot
     // occupy mailbox admission indefinitely.
     out.sound_emitters.prune(logic_tick);
-    script.voice.refresh(*this);
+    // The scripted voice's anchor reset and validation are the scene frame's, never the
+    // update's (ScriptVoiceChannel::frame).
     lap.mark(devtools::Slot::SIM_WORLD_HOUSEKEEPING);
 }
 
 // An unoccupied EWEAP row whose MountSlot is still hot keeps its own pump
-// until the heat window closes: the window, the kick and the action clocks
-// run on, but with no owner the fire handler returns before any round and the
-// owner-keyed cues stay silent.
+// until the heat window closes. Its handlers run for the slot's owner, the
+// gunner who last attached (the detach keeps it): the owner-keyed cues (the
+// kick's trail-off, the fire loop) sound at that gunner, and a FIRE the gunner
+// had latched fires for it, a dismounted owner's round from its own eye along
+// its look. Only a slot no one owns runs ownerless.
 // [orig: WeaponAction_ProcessAllEntities @0x5426E9..0x542716 ->
 //  WeaponAction_ProcessFrame @0x540E60 (the def test @0x540E74, the heat
-//  window @0x540FED..0x541262); WeaponAction_Fire's owner test @0x542B24]
+//  window @0x540FED..0x541262, the owner's trail-off @0x541281..0x54129B and
+//  loop @0x5412B3..0x54132A, the handler calls with slot->owner @0x5413FF /
+//  @0x54142A / @0x541482 / @0x5414A2); WeaponAction_Fire @0x542B10 (the owner
+//  test @0x542B24, the Entity_CalcWeaponFirePosition call @0x542BF7, the send
+//  @0x542C5E); Entity_CalcWeaponFirePosition @0x4DC750 (no parent: Position +
+//  CameraOffset, Yaw, Pitch + pitchBlend @0x4DC847..0x4DC880)]
 static void pump_unoccupied_weapon_slot(World &world, Entity &row, uint32_t frame_tick) {
     const WeaponTableEntry *weapon = world.tables.weapons.by_index(row.primary_weapon_slot_adm);
     if (weapon == nullptr) return;
+    const Entity *owner = world.registry.get(row.primary_weapon_owner);
     WeaponFsmInputs inputs;
-    inputs.owner_present = false;
+    inputs.owner_present = owner != nullptr;
     inputs.is_local = false;
     inputs.is_authority = world.ai.is_authority;
     inputs.auto_reload = world.rules.auto_reload; // [orig: g_AutoReloadEnabled @ 0x24D2118]
     inputs.current_tick = static_cast<int32_t>(frame_tick);
-    weapon_fire_environment_inputs(world, row, inputs);
+    // Ours addresses the RELOAD to the walked gun: an authority queues its C2S 0x25
+    // ([gun][FF FF], the EWeap param), which only a playing authority's own client
+    // sends, and only its S2C 0x49 echo refills the gun (none on a dedicated host).
+    // Retail's handler addresses the slot's owner instead (its +0x16C parent when its
+    // +0x168 is 3); no shipped item reaches this leg's RELOAD (a heat def with a finite
+    // clip and a reserve), so that stays out of scope by the retail-player rule
+    // (D-NET-NEW-L4-30).
+    // [orig: WeaponAction_ProcessAllEntities @0x542690 (the pool-1 walk
+    //  @0x5426E9..0x542716); WeaponAction_Reload @0x5430B0 (@0x5430CA..0x543103);
+    //  NetPacket_SendReloadRequest @0x432930 (@0x43296C..0x432974)]
+    inputs.reload_refills = reload_echo_refills(world, row);
+    // The fire gate reads the owner (its carrier chain, its head, its drowning bit); the
+    // heat window's water gate reads the walked gun's body.
+    // [orig: WeaponSlot_CanFire @0x541BA0 - the owner +0x24 @0x541BBA; WeaponAction_ProcessFrame
+    //  - the walked entity's Z @0x541004..0x54100D]
+    weapon_fire_environment_inputs(world, owner != nullptr ? *owner : row, inputs);
+    inputs.submerged = row.position.z.q16 <= world.env.water_z;
     WeaponFsmEvents events;
     weapon_fsm_tick(weapon->action_fsm, row.primary_weapon_slot, inputs, events);
-    weapon_sound_publish(world, row, weapon->action_fsm, events);
+    weapon_sound_publish(world, owner != nullptr ? *owner : row, weapon->action_fsm, events);
+    if (events.reload_requested && world.ai.is_authority)
+        queue_walk_reload(world, row, *weapon);
+    // The latched shot leaves as the owner's round, on foot from its eye.
+    if (!events.fired || !world.ai.is_authority || owner == nullptr || owner->mounted) return;
+    AiEntity *shooter = world.ai.for_handle(owner->handle);
+    if (shooter == nullptr) return;
+    const int32_t fire[3] = {
+        io::bam_add(shooter->self->position.x.q16, shooter->inf.eye_offset_x),
+        io::bam_add(shooter->self->position.y.q16, shooter->inf.eye_offset_y),
+        io::bam_add(shooter->self->position.z.q16, shooter->inf.eye_offset_z),
+    };
+    // [orig: WeaponAction_Fire - the mode byte @0x542C11, the adm @0x542C1C..0x542C2F]
+    const int32_t fire_mode = ((events.fired_clip_before_consume & 3) << 4) | 2;
+    (void)world.ai.fire_ai_round(world, *shooter, fire, shooter->heading,
+            io::bam_add(shooter->pitch, shooter->inf.recoil_pitch), weapon->ammo_index, fire_mode,
+            row.primary_weapon_slot_adm);
 }
 
 void World::pump_weapon_actions() {
@@ -689,11 +792,28 @@ void World::pump_weapon_actions() {
     const size_t pool0 = registry.pool_capacity(0);
     for (size_t slot = 0; slot < pool0; ++slot) {
         const EntityHandle handle = EntityHandle::make(0, static_cast<int>(slot));
+        // A row whose ItemTypeIndex is 0 is skipped, the local player's too.
+        // [orig: WeaponAction_ProcessAllEntities @0x542690 (the ItemTypeIndex test
+        //  @0x5426B9)]
+        const Entity *row = registry.get(handle);
+        if (row == nullptr || row->item_type_index == 0) continue;
         if (local_player_state != nullptr && handle == local) {
             local_player_state->pump_local_weapon();
+            // Its reload request queues at its own visit, in the walk's order with
+            // every other row's (D-NET-336) [orig: WeaponAction_Reload @0x5430B0
+            //  (the send @0x543103) -> NetPacket_SendReloadRequest @0x432930 (the
+            //  queue @0x4329B7)].
+            LocalWeaponReloadWire &reload = local_player_state->last_reload;
+            if (reload.valid) {
+                WeaponReloadRequest request;
+                request.entity_handle = reload.entity_handle;
+                request.reload_param = reload.reload_param;
+                out.weapon_reloads.push_back(request);
+                reload = LocalWeaponReloadWire{};
+            }
             continue;
         }
-        if (Entity *row = registry.get(handle)) ai.pump_gunner_slot(*this, *row, frame_tick);
+        ai.pump_gunner_slot(*this, *registry.get(handle), frame_tick);
     }
     // Then pool 1 in slot order: a row with no occupant (+0x170), an EWEAP
     // definition and a slot whose heat window (+0x14) is still open.
@@ -705,8 +825,9 @@ void World::pump_weapon_actions() {
     for (size_t slot = 0; slot < pool1; ++slot) {
         Entity *row = registry.get(EntityHandle::make(1, static_cast<int>(slot)));
         if (row == nullptr) continue;
-        ai.release_stale_gunner_link(*this, *row);
-        if (row->primary_occupant.valid() || !row->has_item_def ||
+        // [orig: WeaponAction_ProcessAllEntities @0x542690 (the ItemTypeIndex test
+        //  @0x5426F2)]
+        if (row->primary_occupant.valid() || row->item_type_index == 0 || !row->has_item_def ||
                 (row->item_attrib & kItemAttribEweap) == 0 ||
                 row->primary_weapon_slot.heat_window_end_tick == 0)
             continue;
@@ -718,6 +839,11 @@ void World::pump_weapon_actions() {
 // transport emits the per-recipient wire transaction from this frozen result.
 void World::process_round_end(int32_t winning_team) {
     if (!match.finish(winning_team, *this)) return; // double-run guard + frozen board [orig: @0x516502/@0x516528]
+    // A latch inside the script pass sends here, at the call: the records the
+    // pass raised before it, then the round end's own (D-NET-NEW-V3-1)
+    // [orig: Server_ProcessRoundEnd @0x5164F0 - the per-slot sends
+    //  @0x516790..0x51685E, ahead of the SP tail @0x51691D].
+    if (script_pass_sends != nullptr) script_pass_sends->send_round_end(*this);
     // Match::finish applies the winner marker and builds the immutable board in
     // the original pre-send order [orig: GameEvent_ProcessScoring @0x52f550;
     // Server_BuildEndOfRoundScoreboard @0x508f30]. The authority net tail sends,
@@ -744,14 +870,26 @@ void World::process_round_end(int32_t winning_team) {
     // @0x525581 opens it on the is_client bit, which mode 3 single player
     // carries). The music leg is host presentation: the effect carries the
     // winner (a) and the end track (b); the shell, in SP only, signals the
-    // track. Dialog_ResetAll clears the world's dialog table, its waiting lines
-    // with it (the playing line's stop is D-HUD-46).
+    // track. The playing dialog line stops first, then Dialog_ResetAll clears
+    // the world's dialog table, its waiting lines with it. The LOSE cine's start
+    // shuts the audio channels down after its own dialog reset. The embedder's
+    // audio device runs both stops (WorldOutbox::dialog_line_stop,
+    // WorldOutbox::audio_channels_shutdown).
+    // Past the latch, every role's round end clears the local view's four words, the SP tail
+    // after them [orig: Server_ProcessRoundEnd @0x5168E4 (the latch), @0x5168EA..0x5168FC].
+    if (local_player_state != nullptr) local_player_state->round_end_view_clear();
     if (!rules.mp_session) {
+        // [orig: DialogAudio_PlayNextChunkOrStop(0) @0x51694B]
+        out.dialog_line_stop = true;
         script.dialog.reset(); // [orig: Dialog_ResetAll @0x516953 -> @0x44dc90]
-        if (winning_team == 1)
+        if (winning_team == 1) {
             epilog.begin_win(registry.get(cached.local_player)); // [orig: @0x516965]
-        else
+        } else {
             epilog.begin_lose(); // [orig: @0x51697b]
+            // [orig: Cine_StartPlayback @0x577840 - Dialog_ResetAll @0x57784E, the
+            //  Audio_ShutdownChannelsAndDeviceTable call @0x577853]
+            out.audio_channels_shutdown = true;
+        }
     }
     const int32_t end_track = winning_team == 1 ? 1 : 2;
     out.effects.push({"round_end", winning_team, end_track, 0, 0, std::string()});
@@ -883,6 +1021,7 @@ World::Snapshot World::snapshot() const {
     s.facials = facials;
     s.teammates = teammates;
     s.vehicle_ai_spawn_phase = vehicle_ai_spawn_phase;
+    s.bms_spawn_phase_counter = bms_spawn_phase_counter;
     s.match = match;
     s.kill_stats = kill_stats;
     s.epilog = epilog;
@@ -978,6 +1117,10 @@ void World::restore(const Snapshot &s) {
     load_systems(); // systems re-init their per-mission state
     teammates = s.teammates;
     vehicle_ai_spawn_phase = s.vehicle_ai_spawn_phase;
+    // A restart re-runs the load, which replays the counter from its zero to
+    // the play-start value [orig: Game_StartMission @0x524360 -> Mission_LoadBMSFile
+    //  @0x40F4E0 (the calls @0x524B5D / @0x524FFA)].
+    bms_spawn_phase_counter = s.bms_spawn_phase_counter;
     script.heli_lift_active_count = int32_t(teammates.count());
     // on_load clears the WAC input arrays. A sealed play-start baseline may
     // already contain controls authored by the initial script execution.
@@ -986,7 +1129,9 @@ void World::restore(const Snapshot &s) {
     script.squad_events = s.squad_events;
     script.forced_animation = s.forced_animation;
     diagnostics = s.diagnostics; // retain boot gaps, discard findings from the previous playthrough
-    if (collision != nullptr) collision->refresh_after_registry_change(*this);
+    // The restart's reload builds every table, the statics with them [orig: Mission_LoadBMSFile
+    //  re-run -> Entity_InitAllFromModels @0x40E460 - Entity_BuildAllProximityLists @0x40E5A1].
+    if (collision != nullptr) collision->build_all_tables(*this);
     registry.for_each([&](const Entity &vehicle) {
         if (vehicle.primary_occupant.valid())
             vehicles.emit_control_started(vehicle);

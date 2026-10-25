@@ -253,7 +253,8 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
         } else if (key_is(key, "exppoints")) {
             parse_pos_aligned(vals, nvals, hud->exp_points);
         } else if (key_is(key, "connectstatus")) {
-            parse_pos_aligned(vals, nvals, hud->connect_status);
+            /* x, y, alignment word [orig: @0x59FAE9..0x59FB32] */
+            parse_pos_align3(vals, nvals, hud->connect_status);
         } else if (key_is(key, "hudteamxy")) {
             parse_pos_aligned(vals, nvals, hud->team_xy);
         } else if (key_is(key, "hudplayercount")) {

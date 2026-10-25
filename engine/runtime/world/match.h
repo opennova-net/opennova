@@ -14,7 +14,6 @@
 namespace opennova::world {
 
 class World;
-struct RoundDeath;
 
 // score.ini FIELD records use these one-based IDs and retain their byte-sized
 // visibility flag in file order. They are both the match's board schema and the
@@ -37,9 +36,9 @@ struct MatchRules {
     int title = gameprofile::GAME_JO;
     uint32_t game_type = 0;
     uint32_t game_time_minutes =
-        0;                    // SET GameTime / g_RespawnTime, despite the old host-field name
+        0;                    // SET GameTime / g_RoundTimeLimitMinutes, despite the old host-field name
     uint32_t score_limit = 0; // SET KillLimit / g_ScoreLimit
-    uint32_t hill_limit_minutes = 0; // cfg koth_limit / g_TimeLimitMinutes
+    uint32_t hill_limit_minutes = 0; // cfg koth_limit / g_KothLimitMinutes
     uint32_t hill_delta = 5;         // cfg koth_delta / dword_24D2148
     uint32_t max_score = 0;          // SET MaxScore / g_KillLimit
     uint32_t flag_return_ticks = 210;
@@ -101,7 +100,7 @@ uint16_t default_score_exp_fanfare(int title);
 // Field 11 is the FLAGSAVE counter: GameEvent_ProcessScoring @0x52F550 case 8
 // (@0x52f8d1: ++slot dword 29 = field 11 @0x52f8d7, points += scoringTable[83]
 // = score.ini VAR slot 9 "FLAGSAVE" in the shipped name table off_830348),
-// dispatched by Server_BroadcastEntityDeathEvent @0x517A90 (push 8 @0x517b03)
+// dispatched by Server_BroadcastFlagSaveEvent @0x517A90 (push 8 @0x517b03)
 // from the flag-return interaction in Entity_ProcessWaypointInteraction
 // @0x4AD820 (@0x4ad8dc / @0x4ad921). The 0x56 row's sixth i16 reads it as
 // CPlayerStats_GetFieldPlusOne(stats, 0xA) @0x50918a. Retail's "ASSISTS" is
@@ -175,14 +174,13 @@ struct MatchPlayerIdentity {
     EntityHandle entity;
     uint8_t slot = 0;
     std::string name;
-    // The 0x56 row's third string: the NovaWorld clan-list node tag (node+81),
-    // keyed by the slot's account netId (+100572) and filled only by a join
-    // carrying a nonzero account id at join+0x1A4 (name join+0x1A8, tag
-    // join+0x1E8). A LAN join carries none, so the host leaves this empty; the
-    // NovaWorld-account join leg is a separate slice. (The row's SECOND string
-    // is the literal empty string on every retail host and has no model field.)
+    // The 0x56 row's third string: the NovaWorld squad node's tag (node+81)
+    // the slot's squad key (+100572) finds, which the host's round end writes
+    // from its squad registry as it builds the board (announce_round_end); a
+    // LAN slot has none. (The row's SECOND string is the literal empty string
+    // on every retail host and has no model field.)
     // [orig: Server_BuildEndOfRoundScoreboard @0x5090D3..@0x509116;
-    // Server_PlayerAdd clan-list leg @0x51CDF0..@0x51CE2E]
+    // Server_PlayerAdd's squad leg @0x51CDF0..@0x51CE2E]
     std::string tag;
 };
 
@@ -251,6 +249,17 @@ struct MatchPlayer {
     //  Server_UpdateCaptureZoneProximity @0x508C95; Entity_SetTeamByNetId
     //  @0x43C680]
     uint8_t slot_team = 0;
+    // Player-slot +0x20 == 6, the state the join enters: the proximity pass
+    // (after its mask clear), the alive-holder count and the capture delta's
+    // census skip a slot in any other state, so a joiner loading between its
+    // add (state 1) and its join takes no mask, no event-25 tick, no capture
+    // timer and no census place. The authority stamps it from its slot word
+    // ahead of each match tick; a row no session stamps (a World ticked
+    // without the authority) counts as joined.
+    // [orig: Server_UpdateCaptureZoneProximity @0x50872A..0x508735;
+    //  Game_CountAlivePlayersPerTeam @0x500208; CaptureZone_CalculateControlDelta
+    //  @0x501188 / `jnz` @0x50118C; Server_OnPlayerJoin's state 6 @0x51A712]
+    bool slot_in_game = true;
 };
 
 // The match requests a disconnect without owning the transport. The authority
@@ -264,7 +273,7 @@ struct MatchPlayerPunt {
 
 // One outcome latch for every producer: automatic multiplayer rules and the
 // WAC/BMS Co-op/SP actions all converge here. Team 0 is a draw/no-team outcome.
-// [orig: g_SpawnSuccessGate @0x24c1928 (latched by Server_ProcessRoundEnd
+// [orig: g_RoundOver @0x24c1928 (latched by Server_ProcessRoundEnd
 // @0x5164F0 at @0x5168e4, cleared by Game_StartMission @0x524a1f),
 // g_RoundWinningTeam @0x24c1924, the scoreboard winner @0x24c1970 (= S2C 0x1D
 // payload byte 0; memset 0 at mission start, so it stays 0 until the round ends)]
@@ -335,8 +344,10 @@ struct MatchGameplayEvent {
     MatchGameplayEventKind kind = MatchGameplayEventKind::FlagPickup;
     EntityHandle actor;
     EntityHandle objective;
-    Vec3 position;           // event/feed position before capture/reset
-    Vec3 objective_position; // post-transition S2C 0x2F position
+    // The flag's position words (D-NET-507): before the capture/reset (the feed), and
+    // after the transition (the S2C 0x2F, which streams entity+4/+8/+0xC raw).
+    EntityPosition position;
+    EntityPosition objective_position;
     uint8_t objective_flags = 0;
     EntityHandle parent;
     EntityHandle ground;
@@ -364,7 +375,7 @@ class Match {
     // MaxScore, KOTHLimit, ChangeTeamDelay and GameTime store the rule globals the round reads,
     // and GameTime restarts the round clock at `3720 * value` (a zero ends a timed round at its
     // next check). [orig: CAdminServer_HandleSetCommand @0x405A60 -- g_ScoreLimit, g_KillLimit,
-    // g_TimeLimitMinutes, g_CaptureDuration, g_RespawnTime and g_RoundTimeRemaining]
+    // g_KothLimitMinutes, g_CaptureDuration, g_RoundTimeLimitMinutes and g_RoundTimeRemaining]
     MatchRules &live_rules() { return rules_; }
     void set_remaining_ticks(int32_t ticks) { remaining_ticks_ = ticks; }
     const MatchOutcome &outcome() const { return outcome_; }
@@ -405,6 +416,7 @@ class Match {
     // [orig: Server_ChangeEntityTeam @0x518DEF; Server_ConvertPlayerToSpectator
     //  @0x519E6E]
     void set_player_slot_team(EntityHandle entity, uint8_t team);
+    void set_player_slot_in_game(EntityHandle entity, bool in_game);
     const MatchStats &team_stats(uint8_t team) const;
 
     // Script player operations validate the registered slot, not the Player
@@ -429,13 +441,29 @@ class Match {
     void record_death(World &world, EntityHandle victim,
                       EntityHandle killer = EntityHandle{},
                       uint32_t cause_flags = 0);
+    // Scorer event 3's own-death leg for a slot row that files no roster player (a Serve
+    // Only host's own row 0, whose hidden body's death resolves the row, D-NET-352):
+    // RecordEvent 6 (Deaths) and the DEATH points on the row's CPlayerStats, then the same
+    // on its team row in team modes. [orig: GameEvent_PlayerDeath @0x516F06 ->
+    // GameEvent_ProcessScoring - the row through Entity_ValidatePtr @0x52F67C, case 3's
+    // own-death leg @0x53074E..0x5307A7]
+    void score_row_death(MatchStats &row, uint8_t team);
+    // The death's first leg alone, which a spectator-latched slot's death
+    // still runs: every pool-0 AI body whose +0x170 point-share link names the
+    // Player victim is unlinked. [orig: GameEvent_PlayerDeath
+    // @0x516E07..0x516E45, ahead of the latch return @0x516E5A..0x516E60]
+    void unlink_point_share_links(World &world, EntityHandle victim);
 
-    // The kill accounting a damage-pass lethal edge runs (RoundDeath::
-    // kill_event): with a killer and a victim whose ItemDef `score` word is
-    // nonzero, scorer event 12 in every session, then outside a network
-    // session the single-player tallies world.kill_stats.
-    // [orig: Score_ProcessKillEvent @0x4FD400]
-    void process_kill_event(World &world, const RoundDeath &death);
+    // The kill accounting a damage-pass lethal edge runs: on the authority, with
+    // a killer and a victim whose ItemDef `score` word is nonzero, scorer event
+    // 12 in every session, then outside a network session the single-player
+    // tallies world.kill_stats. Each of the five edges calls it at its site, at
+    // once, while the victim exists.
+    // [orig: Score_ProcessKillEvent @0x4FD400 (killer, victim), its five
+    //  callers: Entity_MovementCollisionResolver @0x4B39E2,
+    //  Entity_ApplyKnifeKillZoneDamage @0x4E6773, Entity_ApplyWeaponDamage
+    //  @0x4E6BFE / @0x4E6FB4, Projectile_ProcessDamageOnTarget @0x4E8133]
+    void process_kill_event(World &world, EntityHandle killer, EntityHandle victim);
     // Scorer event 12: the victim's `score` word adds to the killer's field 30
     // (and its team row in team modes).
     // [orig: Score_ProcessKillEvent @0x4FD400 (the event-12 call @0x4FD438)]
@@ -471,12 +499,25 @@ class Match {
     // @0x500DC5]
     void record_psp_takeover(const World &world, EntityHandle capturer);
 
-    // Called once per authoritative 62.5 Hz logic tick after the pre-round gate.
-    // Advance the server-owned match services for one frame. The periodic
-    // proximity/score pass remains live during PreRound, as it does after the
-    // retail countdown block; carried-objective motion and round time do not.
-    void advance_tick(World &world,
-                      TickPhase phase = TickPhase::Gameplay);
+    // The main frame's round-clock step, once per authoritative frame ahead of
+    // the server tick (Server_TickUpdate's head runs it, under that call's
+    // authority and pause gates): no step through the epilog screen or a
+    // running pre-round countdown, none at or below zero, and no round-over
+    // latch, so the clock keeps counting through the post-round linger. Every
+    // reader inside the server tick (the server-info refresh, the 0x0A, the
+    // capture delta, the win check) reads the stepped clock.
+    // [orig: Game_ProcessMainFrame @0x5263F0 - `cmp is_authority` @0x5265DA,
+    //  the pause word @0x5265E2, g_EpilogScreenActive @0x5265EA,
+    //  g_PreRoundDelayTimer @0x5265F2, `cmp g_RoundTimeRemaining` @0x5265FA /
+    //  `jle` @0x526600, the `sub` @0x526602; the Server_TickUpdate call
+    //  @0x5266B6 under the same two gates @0x5266A6 / @0x5266AE]
+    void step_round_clock(const World &world);
+
+    // Called once per authoritative 62.5 Hz logic tick inside the server tick.
+    // Advance the server-owned match services for one frame: the shared
+    // one-second countdown and its proximity/score pass, which remains live
+    // during PreRound, as it does after the retail countdown block.
+    void advance_tick(World &world);
 
     // The movement callbacks the frame's entity update left in the collision
     // stream (a player touching a flag or a bay): retail runs them inline in
@@ -504,7 +545,7 @@ class Match {
     // A client's round-over latch: S2C 0x1D raises the gate the host's round
     // end raises (the entity update and the target filters read it), with no
     // scoring pass and no board; the next mission start's fresh Match clears it.
-    // [orig: NapiNPClientMsg_0x01D @0x430840 -- `mov g_SpawnSuccessGate,1`
+    // [orig: NapiNPClientMsg_0x01D @0x430840 -- `mov g_RoundOver,1`
     //  @0x430858 under !is_authority; cleared by Game_StartMission @0x524A1F]
     void latch_round_over() { outcome_.ended = true; }
 
@@ -538,14 +579,14 @@ class Match {
     struct CarryObjectiveState {
         EntityHandle objective;
         uint64_t spawn_id = 0;
-        Vec3 home;
+        EntityPosition home; // the definition pose's words (D-NET-507)
         int32_t return_ticks = 0;
         int32_t previous_x_q16 = 0;
         int32_t previous_y_q16 = 0;
-        // The authored heading as its whole-degree placement yaw: the
-        // definition pose's yaw word is its spawn angle, spawn_angle_bam(90 -
-        // yaw) (aiRuntime f0_7[7]).
-        int16_t home_yaw = 0;
+        // The definition pose's Yaw word (aiRuntime f0_7[7]): the row's word
+        // at its first carry service, its placement's spawn angle
+        // (D-NET-NEW-L6-2).
+        int32_t home_heading = 0;
     };
 
     void share_experience(const World &world, MatchPlayer &recipient, int32_t amount);
@@ -592,7 +633,17 @@ class Match {
     MatchResult result_;
     std::vector<MatchPlayer> players_;
     std::vector<MatchPlayerPunt> player_punts_;
-    std::array<MatchStats, 5> teams_{};
+    // The team records: 70 of them, indexed by the entity's team byte with no bound test, so a
+    // kill bonus of a team 5..69 lands in a record the boards never walk; the spawn positioning
+    // reads the deaths of its slot team's record (spawn_select.cpp no_pick_pose). A team past
+    // the table (70..127, and 128..255 sign-extended before it) is retail's out-of-bounds write,
+    // which ours drops (D-NET-680, PERMANENT: a deliberate fix of a retail bug).
+    // [orig: Game_CountAlivePlayersPerTeam @0x5001D5 (the clear's 0x46 records);
+    //  GameEvent_ProcessScoring @0x52F65F..0x52F66C / @0x52F6AB..0x52F6B8 (movsx, imul 154h);
+    //  Server_PositionPlayerForSpawn @0x50D1C6..0x50D1DB (movzx of the slot team)]
+    // On the heap: the World a test holds on its stack does not grow by the 65 extra records.
+    static constexpr size_t kTeamRecordCount = 70;
+    std::vector<MatchStats> teams_ = std::vector<MatchStats>(kTeamRecordCount);
     std::array<int32_t, 5> team_hold_ticks_{};
     int32_t periodic_second_timer_ = 0;
     bool periodic_second_fired_ = false;
@@ -608,7 +659,7 @@ class Match {
 // and pitch, its Flags (the indoors bit), its blink quad, and its identity as
 // the drop sound's source (none for a replica-only carrier).
 struct DropCarrierPose {
-    Vec3 position;
+    EntityPosition position;
     int32_t heading_bam = 0;
     int32_t pitch_bam = 0;
     uint32_t flags = 0;

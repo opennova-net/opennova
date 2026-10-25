@@ -24,6 +24,7 @@
 #include <vector>
 
 #include <runtime/controls/controls.h>
+#include <runtime/controls/key_event_queue.h>
 
 namespace opennova::controls {
 
@@ -79,6 +80,24 @@ class BindingSet;
 //  KeyBinding_FormatDisplayString call @0x5b6a46 (its star reads the
 //  record's own +4 flags, `test [esi+4], 200h` @0x49715f)]
 std::string display_string_for_token(const BindingSet &set, const std::string &token);
+
+// The console's SAVEKEYS dump, keylist.key's text: a version line with the filtered
+// table's count, a column header, then one line per filtered binding (the records,
+// by action code, whose static flags carry 0x4000000): the filtered index, the live
+// record's code word, both keys, both key modifiers, the mouse mask and modifier,
+// the joystick button and modifier bytes, the code, the SEQ star (flags 0x800), the
+// filter star (0x4000000), the action's "Text" help name right-justified in 27, the
+// in-game display string and " Action on Key Up only" for flags 0x800000. Written
+// in text mode: every line ends CR LF. The lines are fprintf'd as their own format
+// strings, so a '%' in a name would be read as a conversion; no shipped name has one.
+// [orig: KeyBinding_DumpAllToFile @0x54C0A0 - DeleteFileA / fopen("keylist.key",
+//  "a+t") @0x54c0ba..0x54c0ca, the version line @0x54c0f9 (0x31313230 and
+//  dword_2550190), the header @0x54c127, the row format @0x54c252 over
+//  g_FilteredKeyBindings (KeyBinding_BuildFilteredTable @0x54C2B0, run after the
+//  re-lay KeyBinding_SortBySequentialId @0x498260 in Game_InitSubsystems
+//  @0x4a6de7 / @0x4a70a1), KeyBinding_FormatDisplayString @0x496BD0,
+//  KeyHelp_GetStringWithFallback("Text", token, name) @0x54c1c5]
+std::string keylist_text(const BindingSet &set);
 
 struct BindingRecord {
   uint16_t primary = 0;        // slot-1 VK scan (0 = unbound)
@@ -186,8 +205,53 @@ class BindingSet {
   // 0 while the keyboard is captured (below).
   int pressed_key(int index, const std::function<bool(int)> &key_down) const;
 
-  // The key scan's two live gates, which the embedder sets once a frame
-  // ahead of the polls: the death screen (g_DeathScreenActive) selects the
+  // The catalog row one dequeued key event fires, or -1: the event's scan code
+  // (key_event_scan_code) against the modifier pass's first eligible row,
+  // else, for an event that pass left, the fallback's. `key_down` is the
+  // device's key state as the scan runs (the modifier words read it live, not
+  // the event's flag word). `fallback_signed`, when given, is set for a
+  // fallback fire whose queued id carries the sign bit (Shift held, or the
+  // row's flag 0x200). An OS auto-repeat is an event like any press, so a held
+  // key fires its row once per repeat. The open text line's take of the
+  // event (the capture branch) is the drain's, ahead of this scan.
+  // [orig: Input_ProcessKeyboardEvents @0x49d1f0 - per dequeued event
+  //  (Input_DequeueKeyEvent, the calls @0x49d2d2 / @0x49d4a0): the modifier
+  //  pass @0x49d327..0x49d3ac, its fire @0x49d42f and jump past the fallback
+  //  @0x49d437; the fallback @0x49d3ba..0x49d44a, the sign @0x49d452..0x49d470,
+  //  its fire @0x49d488; the capture branch @0x49d2e3 -> Chat_HandleInputChar
+  //  @0x49d498]
+  int event_row(int scan_code, const std::function<bool(int)> &key_down,
+                bool *fallback_signed = nullptr) const;
+
+  // The release pass's row for a key: the first row of the walk (by action
+  // code) holding the key in either slot whose flags carry the release bit
+  // 0x80000000 or the release-only 0x800000 (ToSpecial and attack_1 in the
+  // catalog), or -1. No scan gate, no mode bit, no modifier word.
+  // [orig: Input_ProcessKeyboardEvents @0x49d1f0 - the mask 0x80800000
+  //  @0x49d236, the walk @0x49d252..0x49d27f (the slots @0x49d260 /
+  //  @0x49d268, the flags test @0x49d26f)]
+  int release_row(int key) const;
+
+  // The keyboard pass's release pass, ahead of its first dequeue: every key
+  // whose press latch is set and whose key state reads up, in key order,
+  // queues its release row's event (the sign: Shift's key state, or flag
+  // 0x200 of the record the walk's second pointer reaches, the row whose code
+  // is the key's index, which no catalog row carries) and clears its latch;
+  // an open text line (keyboard_captured) clears the latch with no event, and
+  // a key no release row holds keeps its latch. `key_state` is the device's
+  // key state alone (a menu close's reset honoured; no scan gate, no special
+  // key's take).
+  // [orig: Input_ProcessKeyboardEvents @0x49d1f0 - the loop @0x49d22f..
+  //  0x49d2cc (the latch @0x49d240, the key state @0x49d249), Shift's state
+  //  @0x49d283 or [edi] & 0x200 @0x49d28c -> 0x80000000 @0x49d298, the
+  //  capture word @0x49d29f, Input_QueueEvent(sign | code) @0x49d2b1, the
+  //  clear @0x49d2b9; no row found leaves the latch @0x49d281]
+  std::vector<KeyRowEvent> release_pass(
+      KeyPressLatch &latch, const std::function<bool(int)> &key_state) const;
+
+  // The key scan's two live gates, which the embedder sets at the head of
+  // every input frame (each logic tick's) ahead of its polls: the death
+  // screen (g_DeathScreenActive) selects the
   // mode bit, and the scan word is set on a dedicated authority (in a
   // session, the authority, not a session peer) and otherwise while the
   // local body's dead bit (Flags & 2) is up.
@@ -198,6 +262,7 @@ class BindingSet {
     scan_death_screen_ = death_screen;
     scan_word_ = scan_word;
   }
+  bool scan_death_screen() const { return scan_death_screen_; }
 
   // Whether the record's fire RIGHT NOW carries the sign bit (bit 31 of the
   // queued binding id, which steps mousescale down): the keyboard fallback
@@ -241,6 +306,30 @@ class BindingSet {
   bool pressed_mouse(int index, uint16_t held_mask,
       const std::function<bool(int)> &key_down, bool dead = false) const;
   int mouse_event_action(uint16_t mask,
+      const std::function<bool(int)> &key_down, bool dead = false) const;
+  // The row a mouse button message's event queues (the click records, D-CTRL-6): the
+  // window procedure maps the messages onto events (left down 2 / up 4 / double click
+  // 1024, right 8 / 0x10 / 2048, middle 32 / 64 / 4096; the class's CS_DBLCLKS style sends
+  // a double click's second press as its own message), and the binding walk queues the
+  // first eligible row whose mouse word the event takes, on the walk's modifier order
+  // (mouse_event_action's): a button-down or double click takes its button's row (mouse
+  // word 1 / 2 / 16) unless the row is a held row (flag 4: the walk passes the seventh
+  // argument 0); a button-up takes the left or right button's row only with the release
+  // flag 0x400000, a held row's too; middle-up takes none. -1 = no row. The record carries
+  // the Shift sign or the row's 0x200 bit (@0x49919E..0x4991A4; fire_signed's mouse arm).
+  // The walk's head gate is dead in play: its word is the cine editor's open word, which
+  // only the editor's toggle raises and the escape case lowers [orig: Input_ProcessBindings
+  //  @0x4DDA50 (the gate @0x4DDA58..0x4DDA6F); CineEditor_Toggle @0x41AA20 (the store
+  //  @0x41AA4F); Input_HandleActionBinding @0x49AD40 (case 18's lowering
+  //  @0x49B313..0x49B323)].
+  // [orig: WinMain @0x763A80 (the class style 8, CS_DBLCLKS, @0x763AFC); Game_WindowProc
+  //  @0x7624C0 (Input_DispatchMouseEvent @0x762574); Input_DispatchMouseEvent @0x761470 (the
+  //  messages 0x201..0x209 onto the events @0x76151A..0x76156A); Input_ProcessBindings
+  //  @0x4DDA50 (event 1 leaves @0x4DDB09, the walk @0x4DDB15..0x4DDBF4, the arguments 0
+  //  @0x4DDB6D..0x4DDB78); Input_TryDispatchBindingByWeaponType @0x499180 (the flag-4 test
+  //  @0x4991A9..0x4991E1, the first switch @0x4991F7..0x4992B7, the second @0x4992C3..0x499327,
+  //  Input_QueueEvent @0x499251)]
+  int mouse_click_action(uint32_t event,
       const std::function<bool(int)> &key_down, bool dead = false) const;
 
   // Buttons 1..128 followed by four four-bit POV hats. The caller retains

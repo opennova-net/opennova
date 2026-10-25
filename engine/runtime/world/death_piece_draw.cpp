@@ -2,6 +2,7 @@
 
 #include <base/io/fixed.h>
 #include <runtime/renderer/object_lod.h>
+#include <runtime/world/angle.h>
 #include <runtime/world/occlusion.h>
 #include <runtime/world/world.h>
 
@@ -49,10 +50,11 @@ bool death_piece_draw(const DeathPiece &piece, const DeathPieceModel &model,
 		if (static_cast<size_t>(out.section) < model.section_origin_q16.size())
 			out.pivot_q16 = model.section_origin_q16[static_cast<size_t>(out.section)];
 	}
+	// The presentation view of the piece's words (D-NET-507).
 	out.pos = piece.pos;
-	out.heading = piece.heading;
-	out.pitch = piece.pitch;
-	out.roll = piece.roll;
+	out.heading = static_cast<float>(degrees_from_angle_bam(piece.heading));
+	out.pitch = static_cast<float>(degrees_from_angle_bam(piece.pitch));
+	out.roll = static_cast<float>(degrees_from_angle_bam(piece.roll));
 	// The scale rides the matrix as ftol(piece+0x88 * 65536.0)
 	// [orig: @ 0x57b724..0x57b730].
 	out.scale = static_cast<float>(static_cast<int32_t>(piece.render_scale * io::kFp16OneD)) *
@@ -60,7 +62,7 @@ bool death_piece_draw(const DeathPiece &piece, const DeathPieceModel &model,
 	// Transparents go to the below-water queue unless the piece is strictly
 	// above the water plane [orig: `cmp ecx, g_EnvWaterHeightFixed; setnle`
 	// @ 0x57b7fb..0x57b80e].
-	out.below_water = !(to_fixed(piece.pos.z) > water_z_q16);
+	out.below_water = !(piece.pos.z.q16 > water_z_q16);
 	out.projected_radius_q16 = projected_radius_q16;
 	return true;
 }
@@ -70,7 +72,7 @@ bool death_piece_draw(const DeathPiece &piece, const DeathPieceModel &model,
 //  (@ 0x57b5b4..0x57b5de, `jg` skips), the view depth against radius + fog
 //  (Math_FixedPointTransformPoint22 @ 0x57b5ef, `jge` @ 0x57b607), the
 //  viewport clip (Viewport_TransformAndClipPoint @ 0x57b614, 1 = culled) and
-//  the recorded projected radius dword_A784F0 @ 0x57b627; then
+//  the recorded projected radius g_MainViewportProjectedRadiusQ16 @ 0x57b627; then
 //  DeathPiece_RenderVisible @ 0x57b830 walks the rows at the frame's detail
 //  level]
 void OcclusionWorld::collect_death_piece_draws(const World &world,
@@ -84,8 +86,7 @@ void OcclusionWorld::collect_death_piece_draws(const World &world,
 		if (!piece.active) continue;
 		const ItemDeathTraits *traits = world.tables.item_death_traits.get(piece.item_id);
 		if (traits == nullptr || !traits->piece_model.loaded()) continue;
-		const int32_t pos[3] = {to_fixed(piece.pos.x), to_fixed(piece.pos.y),
-				to_fixed(piece.pos.z)};
+		const int32_t pos[3] = {piece.pos.x.q16, piece.pos.y.q16, piece.pos.z.q16};
 		const int64_t reach = static_cast<int64_t>(piece.radius_q16) + cam.fog_dist;
 		if (std::llabs(static_cast<int64_t>(pos[0]) - cam.pos_fixed[0]) > reach ||
 				std::llabs(static_cast<int64_t>(pos[1]) - cam.pos_fixed[1]) > reach)

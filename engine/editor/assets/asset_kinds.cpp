@@ -248,7 +248,7 @@ constexpr AssetKindRow kRows[] = {
 	        .names_files()
 	        .folder("defs")
 	        .row,
-	Kind(AssetKind::StringTableCoo, "string_table_coo", "NovaWorld string table")
+	Kind(AssetKind::StringTableCoo, "string_table_coo", "NovaWorld cookie jar")
 	        .folder("strings")
 	        .row,
 	// S13 A8: no kind before, so the build left the NovaWorld screens out; a build packs them with the

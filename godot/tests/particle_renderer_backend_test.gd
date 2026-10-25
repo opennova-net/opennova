@@ -233,6 +233,9 @@ func test_world_emitter_subsets_reverse_at_the_water_plane() -> void:
 	camera.position = Vector3(0.0, 10.0, 5.0)
 	camera.current = true
 	viewport.add_child(camera)
+	# The eye looks at the emitters: one out of its view never submits (retail
+	# CParticleEmitter_TrySubmitForRender @ 0x5e7540).
+	camera.look_at(Vector3.ZERO, Vector3.UP)
 	var renderer := ParticleRenderer.new()
 	# Equality is above-inclusive in retail. Keeping one emitter exactly on the
 	# plane makes this integration vector cover that boundary as well as the
@@ -255,6 +258,7 @@ func test_world_emitter_subsets_reverse_at_the_water_plane() -> void:
 	assert_eq(int(near.get("water_filtered_emitters", -1)), 1)
 
 	camera.position.y = -10.0
+	camera.look_at(Vector3.ZERO, Vector3.UP)
 	renderer.render_now(GameWorld.current_frame_clock_ms())
 	report = renderer.get_debug_draw_list_report()
 	far = report.get("world_far_side", {})
@@ -263,6 +267,46 @@ func test_world_emitter_subsets_reverse_at_the_water_plane() -> void:
 			"a below-water camera draws above/equal emitters first")
 	assert_eq(int(near.get("selected_emitters", -1)), 1,
 			"the strict-below emitter moves to the camera-side pass")
+
+
+# The render submit reads the view's own eye: an emitter behind the camera never joins
+# the render list, so it is neither partitioned, depth-sorted nor built, and turning the
+# eye toward it submits it (retail CParticleEmitter_TrySubmitForRender @ 0x5e7540 tests
+# the emitter's bounds against the view before it registers).
+func test_an_emitter_out_of_the_view_never_submits() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(64, 64)
+	viewport.own_world_3d = true
+	add_child_autofree(viewport)
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 0.0, 5.0)
+	camera.current = true
+	viewport.add_child(camera)
+	var renderer := ParticleRenderer.new()
+	# One emitter ahead of the eye (looking down -Z), one 15 m behind it.
+	var scene := _live_world_scene_at_heights(PackedFloat32Array())
+	for z in [0.0, 20.0]:
+		var transform := Transform3D.IDENTITY
+		transform.origin.z = z
+		assert_eq(scene.spawn(EffectSpawnRequest.make(scene.intern("GPU effect"),
+				transform)).status, EffectScene.SPAWN_STATUS_SPAWNED)
+	scene.advance_in_place(0.1)
+	renderer.scene = scene
+	renderer.procedural_fallback_enabled = true
+	viewport.add_child(renderer)
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+
+	var near: Dictionary = renderer.get_debug_draw_list_report().get("world_camera_side", {})
+	assert_eq(int(near.get("selected_emitters", -1)), 1, "the emitter ahead submits")
+	assert_eq(int(near.get("frustum_culled_emitters", -1)), 1,
+			"the emitter behind the eye never submits")
+	assert_gt(int(near.get("rendered_quad_count", 0)), 0)
+
+	camera.look_at(Vector3(0.0, 0.0, 20.0), Vector3.UP)
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+	near = renderer.get_debug_draw_list_report().get("world_camera_side", {})
+	assert_eq(int(near.get("selected_emitters", -1)), 1, "turned around, the other submits")
+	assert_eq(int(near.get("frustum_culled_emitters", -1)), 1)
 
 
 func test_world_backend_executes_a_live_gpu_submission() -> void:
@@ -365,6 +409,64 @@ func test_pipeline_warm_is_serviced_by_the_real_rd_compositor() -> void:
 	renderer.shutdown()
 	assert_engine_error_count(0,
 			"explicit shutdown frees warmed RenderingDevice resources exactly once")
+
+
+const OVERLAY_BACKENDS := ["world_overlay_backend", "reflection_overlay_backend",
+	"second_scene_overlay_backend", "inset_mirror_overlay_backend"]
+
+
+# The overlay passes' warm (D-NET-NEW-L3-73): every view's overlay pass takes the
+# request with the particle passes', and the frame's callback makes every
+# overlay combine's pipeline for its view's framebuffer format into the one
+# device every view's overlay pass shares, drawing nothing, so no view's first
+# draw of a combine (the first tracer seen in a reflection) makes one. Retail's
+# tail draws through render states made with the device and the mission
+# textures (engine renderer/scene_overlay.h kSceneOverlayPipelineStates carries
+# the witness).
+func test_the_overlay_warm_makes_every_combine_pipeline_in_the_shared_device() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(64, 64)
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child_autofree(viewport)
+	var camera := Camera3D.new()
+	camera.position = Vector3(0, 0, 5)
+	camera.current = true
+	viewport.add_child(camera)
+	var renderer := ParticleRenderer.new()
+	viewport.add_child(renderer)
+	await get_tree().process_frame
+
+	renderer.warm_pipelines(Vector3.ZERO)
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+	var report := renderer.get_debug_draw_list_report()
+	var device_id := int((report.get("world_overlay_backend", {}) as Dictionary).get("device_id", 0))
+	assert_ne(device_id, 0)
+	for key in OVERLAY_BACKENDS:
+		var overlay: Dictionary = report.get(key, {})
+		assert_eq(int(overlay.get("pipeline_warm_requests", 0)), 1, "%s takes the warm request" % key)
+		assert_eq(int(overlay.get("device_id", -1)), device_id,
+				"%s draws through the one shared device" % key)
+	RenderingServer.force_draw(true)
+	RenderingServer.force_sync()
+	report = renderer.get_debug_draw_list_report()
+	var world: Dictionary = report.get("world_overlay_backend", {})
+	if not bool(world.get("callback_seen", false)):
+		renderer.shutdown()
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	assert_eq(int(world.get("pipeline_warm_requests_serviced", 0)), 1,
+			String(world.get("failure", "the overlay warm was not serviced")))
+	var formats := int(world.get("warmed_framebuffer_formats", 0))
+	assert_gt(formats, 0)
+	assert_eq(int(world.get("device_pipelines", 0)), int(world.get("pipeline_states", -1)) * formats,
+			"every combine's pipeline, once per framebuffer format, and no draw made one")
+	assert_eq(int((report.get("second_scene_overlay_backend", {}) as Dictionary).get(
+			"device_pipelines", -1)), int(world.get("device_pipelines", 0)),
+			"the Inset's pass finds them in the shared device")
+	renderer.shutdown()
+	assert_engine_error_count(0,
+			"explicit shutdown frees the shared overlay device exactly once")
 
 
 func test_camera_compositor_coordinates_multiple_particle_renderers() -> void:
@@ -558,8 +660,9 @@ func test_reflection_camera_receives_two_ordered_camera_correct_submissions() ->
 	assert_true(reflection_camera.compositor.get_compositor_effects()[2]
 			is SceneOverlayCompositorEffect)
 	var report := renderer.get_debug_draw_list_report()
-	# The mirror's reflected scene draws only its coronas after its particle
-	# passes [orig: Water_RenderReflectedWorldScene @ 0x5c85fd].
+	# The mirror's reflected scene draws its tracer ribbons, then its coronas,
+	# after its particle passes [orig: Water_RenderReflectedWorldScene @ 0x5c85f6,
+	# @ 0x5c85fd].
 	assert_eq(String(_slot(report, "reflection_overlay_backend").get("view_kind", "")),
 			"mirror")
 	assert_eq(String(_slot(report, "world_overlay_backend").get("view_kind", "")),
@@ -708,12 +811,16 @@ func test_second_scene_submission_is_compiled_for_its_own_eye() -> void:
 	camera.position = Vector3(0.0, 10.0, 5.0)
 	camera.current = true
 	viewport.add_child(camera)
+	# Each eye looks at the emitters: one out of a view never submits there (retail
+	# CParticleEmitter_TrySubmitForRender @ 0x5e7540).
+	camera.look_at(Vector3.ZERO, Vector3.UP)
 	# Clearly not the main eye: below the water plane, elsewhere, turned and
-	# rolled, under a narrow field of view.
+	# rolled, under a narrower field of view.
 	var second_camera := _shared_world_camera(viewport)
 	second_camera.position = Vector3(30.0, -10.0, -20.0)
-	second_camera.rotation_degrees = Vector3(15.0, 120.0, 40.0)
-	second_camera.fov = 5.0
+	second_camera.look_at(Vector3(0.0, 0.5, 0.0), Vector3.UP)
+	second_camera.rotate_object_local(Vector3.FORWARD, deg_to_rad(40.0))
+	second_camera.fov = 30.0
 
 	var renderer := ParticleRenderer.new()
 	renderer.scene = _live_world_scene_at_heights(PackedFloat32Array([-2.0, 0.0, 3.0]))
@@ -787,7 +894,7 @@ func test_second_scene_backend_draws_the_particle_into_its_own_target() -> void:
 
 	var renderer := ParticleRenderer.new()
 	renderer.scene = _single_quad_scene("impact", 0)
-	renderer.texture_provider = _overlap_texture  # opaque red
+	renderer.image_provider = _overlap_source_image  # opaque red
 	renderer.set_water_plane(-100.0, null)
 	renderer.set_second_scene_camera(second_camera)
 	viewport.add_child(renderer)
@@ -941,13 +1048,13 @@ func test_second_scene_view_follows_every_renderer_lifecycle_leg() -> void:
 	assert_engine_error_count(0)
 
 
-func _overlap_texture(name: String) -> Texture2D:
+func _overlap_source_image(name: String) -> Image:
 	var image := Image.create(32, 32, false, Image.FORMAT_RGBA8)
 	var color := Color(0.5, 0.5, 1.0, 1.0)
 	if name == "impact.tga":
 		color = Color.RED
 	image.fill(color)
-	return ImageTexture.create_from_image(image)
+	return image
 
 
 func _overlap_document(name: String, blend: int, properties: String = "") -> String:
@@ -1021,7 +1128,7 @@ void fragment() {
 	scene.open([file])
 	var renderer := ParticleRenderer.new()
 	renderer.scene = scene
-	renderer.texture_provider = _overlap_texture
+	renderer.image_provider = _overlap_source_image
 	renderer.set_water_plane(-100.0, null)
 	viewport.add_child(renderer)
 	renderer.attach_distortion_row(fx)
@@ -1100,12 +1207,159 @@ func test_distortion_particles_draw_in_the_framefx_row() -> void:
 	assert_gt(_column_contrast(after, 4, 16), 0.8, "outside the haze the frame is untouched")
 
 
-func _asymmetric_dirt_texture(_name: String) -> Texture2D:
+# The distortion row's content gate counts every class-7 child of a visible
+# group, ahead of the render submit's live-count and view tests (retail
+# EffectWorld_HasDistortionParticles @ 0x5F6640 tests neither): a haze behind
+# the eye compiles no quad, yet the row still runs.
+func test_an_out_of_view_haze_still_runs_the_distortion_row() -> void:
+	var viewport := _main_view()
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 1.0, 5.0)
+	camera.current = true
+	viewport.add_child(camera)
+	var scene := EffectScene.new()
+	scene.open([ParticleFixture.parse(self, _overlap_document("haze", 7))])
+	var renderer := ParticleRenderer.new()
+	renderer.scene = scene
+	renderer.procedural_fallback_enabled = true
+	renderer.set_water_plane(-100.0, null)
+	viewport.add_child(renderer)
+	_overlap_spawn(scene, "haze", 20.0)
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+
+	var report := renderer.get_debug_draw_list_report()
+	var distortion := _slot(report, "distortion")
+	assert_eq(int(distortion.get("selected_emitters", -1)), 0, "the haze behind the eye never submits")
+	assert_eq(int(distortion.get("frustum_culled_emitters", -1)), 1)
+	assert_true(bool(report.get("distortion_present", false)),
+			"the row runs for any class-7 emitter, in view or not")
+
+
+# Each water mirror's reflected scene culls by the mirror's own eye: retail
+# Render_MainScene rebuilds g_MainViewport from the mirrored camera block over
+# the RTT's square rect, at the pass's horizontal fov, ahead of
+# Water_RenderReflectedWorldScene, which builds none (D-NET-NEW-L3-36 follow-up
+# 3). So an emitter only the main eye sees never submits to the mirror's passes.
+func test_each_mirror_culls_by_its_own_eye_over_a_square() -> void:
+	# A mirror's reflected scene builds no viewport of its own: its passes submit against the
+	# mirror eye Render_MainScene rebuilt last (the mirrored block, the RTT's square rect, the
+	# pass's horizontal fov; engine renderer/particle_frame.h ParticleViewInput::frustum).
+	var viewport := _main_view()
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 0.0, 5.0)
+	camera.current = true
+	viewport.add_child(camera)
+	var mirror_camera := _shared_world_camera(viewport)
+	mirror_camera.position = Vector3(0.0, 0.0, 5.0)
+	mirror_camera.rotation_degrees = Vector3(0.0, 180.0, 0.0)
+	var renderer := ParticleRenderer.new()
+	renderer.scene = _live_world_scene()
+	renderer.procedural_fallback_enabled = true
+	renderer.set_water_plane(-100.0, mirror_camera)
+	viewport.add_child(renderer)
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+
+	var report := renderer.get_debug_draw_list_report()
+	assert_eq(int(_slot(report, "world_camera_side").get("selected_emitters", -1)), 1)
+	assert_eq(int(_slot(report, "reflection_camera_side").get("selected_emitters", -1)), 0,
+			"the mirror's eye faces away: its pass submits nothing the main eye sees")
+	assert_eq(int(_slot(report, "reflection_camera_side").get("frustum_culled_emitters", -1)), 1)
+
+	# The square: a wide mirror frame whose own field is short vertically still
+	# submits an emitter inside its horizontal fov's square.
+	(mirror_camera.get_viewport() as SubViewport).size = Vector2i(128, 32)
+	mirror_camera.keep_aspect = Camera3D.KEEP_WIDTH
+	mirror_camera.fov = 60.0
+	mirror_camera.rotation_degrees = Vector3.ZERO
+	mirror_camera.position = Vector3(0.0, -2.5, 5.0)
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+	report = renderer.get_debug_draw_list_report()
+	assert_eq(int(_slot(report, "reflection_camera_side").get("selected_emitters", -1)), 1,
+			"26.6 degrees up: outside the frame's 8.2-degree half height, inside the 30-degree square")
+
+	# The mirror's passes run inside its reflected scene, which a frame renders only while
+	# its water pass runs (retail Render_TerrainScene's g_WaterActive test ahead of
+	# Water_ReflectionPrerender): a mirror the water left unrendered compiles none.
+	(mirror_camera.get_viewport() as SubViewport).render_target_update_mode = \
+			SubViewport.UPDATE_DISABLED
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+	report = renderer.get_debug_draw_list_report()
+	assert_true(_slot(report, "reflection_camera_side").is_empty(),
+			"an unrendered mirror compiles no pass")
+	assert_true(_slot(report, "reflection_far_side").is_empty())
+	assert_eq(int(_slot(report, "world_camera_side").get("selected_emitters", -1)), 1)
+
+
+func test_the_inset_mirror_compiles_its_own_pair_while_it_renders() -> void:
+	# The weapon Inset pass's own prerender runs the reflected scene again, its particle
+	# pair for its own eye (engine environment/water_mirror.h inset_mirror_source,
+	# renderer/particle_frame.h compiles_mirror_particles), only on a frame whose Inset
+	# pass renders that mirror.
+	var viewport := _main_view()
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 0.0, 5.0)
+	camera.current = true
+	viewport.add_child(camera)
+	var inset_mirror := _shared_world_camera(viewport)
+	(inset_mirror.get_viewport() as SubViewport).size = Vector2i(64, 64)
+	inset_mirror.keep_aspect = Camera3D.KEEP_WIDTH
+	inset_mirror.fov = 9.5
+	inset_mirror.position = Vector3(0.0, 0.0, 5.0)
+	var renderer := ParticleRenderer.new()
+	renderer.scene = _live_world_scene()
+	renderer.procedural_fallback_enabled = true
+	renderer.set_water_plane(-100.0, null)
+	renderer.set_inset_mirror_camera(inset_mirror)
+	viewport.add_child(renderer)
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+
+	var report := renderer.get_debug_draw_list_report()
+	assert_eq(renderer.get_inset_mirror_camera(), inset_mirror)
+	assert_true(bool(report.get("inset_mirror_compositor_attached", false)))
+	# Its overlay pass follows its pair and leads with its own tracer ribbons, then
+	# the mirror's tail (engine renderer/scene_overlay.h kInsetMirrorOverlayOrder).
+	assert_not_null(inset_mirror.compositor)
+	var effects: Array = []
+	if inset_mirror.compositor != null:
+		effects = inset_mirror.compositor.get_compositor_effects()
+	assert_eq(effects.size(), 3, "the Inset mirror's pair, then its overlay pass")
+	if effects.size() == 3:
+		assert_true(effects[2] is SceneOverlayCompositorEffect)
+	assert_eq(String(_slot(report, "inset_mirror_overlay_backend").get("view_kind", "")),
+			"inset_mirror")
+	assert_eq(int(_slot(report, "inset_mirror_camera_side").get("selected_emitters", -1)), 1,
+			"the Inset mirror's own eye sees the emitter")
+	assert_true(_slot(report, "reflection_camera_side").is_empty(), "no main mirror this frame")
+
+	# Its narrow square culls by its own eye.
+	inset_mirror.position = Vector3(3.0, 0.0, 5.0)
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+	report = renderer.get_debug_draw_list_report()
+	assert_eq(int(_slot(report, "inset_mirror_camera_side").get("selected_emitters", -1)), 0)
+	assert_eq(int(_slot(report, "inset_mirror_camera_side").get("frustum_culled_emitters", -1)), 1)
+
+	# The Inset pass left its mirror unrendered: no pair.
+	(inset_mirror.get_viewport() as SubViewport).render_target_update_mode = \
+			SubViewport.UPDATE_DISABLED
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+	report = renderer.get_debug_draw_list_report()
+	assert_true(_slot(report, "inset_mirror_camera_side").is_empty())
+	assert_true(_slot(report, "inset_mirror_far_side").is_empty())
+	assert_eq(int(_slot(report, "world_camera_side").get("selected_emitters", -1)), 1)
+
+	renderer.set_inset_mirror_camera(null)
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+	report = renderer.get_debug_draw_list_report()
+	assert_false(bool(report.get("inset_mirror_compositor_attached", true)),
+			"no Inset mirror: its pair detaches")
+
+
+func _asymmetric_dirt_image(_name: String) -> Image:
 	var image := Image.create(32, 32, false, Image.FORMAT_RGBA8)
 	for y in image.get_height():
 		for x in image.get_width():
 			image.set_pixel(x, y, Color(1.0, 0.0, 0.0, 1.0 - float(y) / 31.0))
-	return ImageTexture.create_from_image(image)
+	return image
 
 
 func test_dirt_splash_keeps_its_dense_base_below_its_fading_top() -> void:
@@ -1131,7 +1385,7 @@ func test_dirt_splash_keeps_its_dense_base_below_its_fading_top() -> void:
 	scene.open([file])
 	var renderer := ParticleRenderer.new()
 	renderer.scene = scene
-	renderer.texture_provider = _asymmetric_dirt_texture
+	renderer.image_provider = _asymmetric_dirt_image
 	renderer.set_water_plane(-100.0, null)
 	viewport.add_child(renderer)
 	_overlap_spawn(scene, "dirt", 0.0)
@@ -1170,7 +1424,7 @@ func test_bump_adds_its_specular_colour_and_does_not_fog() -> void:
 	viewport.add_child(background)
 	var renderer := ParticleRenderer.new()
 	renderer.scene = _live_lit_scene()
-	renderer.texture_provider = _overlap_texture
+	renderer.image_provider = _overlap_source_image
 	renderer.set_water_plane(-100.0, null)
 	var fog_source := _live_fog_source()
 	viewport.add_child(fog_source)
@@ -1222,7 +1476,7 @@ func _thermal_pixel(blend: int, thermal: bool, background: Color,
 	viewport.add_child(clear)
 	var renderer := ParticleRenderer.new()
 	renderer.scene = _single_quad_scene("thermal", blend)
-	renderer.texture_provider = _overlap_texture
+	renderer.image_provider = _overlap_source_image
 	renderer.set_water_plane(1.5 if far_side else -100.0, null)
 	var source := _thermal_view_source(thermal)
 	viewport.add_child(source)
@@ -1283,7 +1537,7 @@ func test_atlas_pages_carry_their_three_point_mip_levels() -> void:
 		viewport.add_child(camera)
 		var renderer := ParticleRenderer.new()
 		renderer.scene = _single_quad_scene("mips%d" % blend, blend)
-		renderer.texture_provider = _overlap_texture
+		renderer.image_provider = _overlap_source_image
 		viewport.add_child(renderer)
 		renderer.render_now(GameWorld.current_frame_clock_ms())
 		var pages: Array = renderer.get_debug_draw_list_report().get("atlas_pages", [])
@@ -1314,7 +1568,7 @@ func test_atlas_pages_follow_the_session_compression_and_density() -> void:
 	viewport.add_child(camera)
 	var renderer := ParticleRenderer.new()
 	renderer.scene = _single_quad_scene("pagewords", 0)
-	renderer.texture_provider = _overlap_texture
+	renderer.image_provider = _overlap_source_image
 	viewport.add_child(renderer)
 	var cases := [
 		# [texcompression, density, flags, dxt5, device side]
@@ -1341,18 +1595,18 @@ func test_atlas_pages_follow_the_session_compression_and_density() -> void:
 			assert_true(bool(page.get("texture_mipmaps", false)), "the page texture is mipmapped")
 
 
-func _solid_texture(color: Color) -> Texture2D:
+func _solid_image(color: Color) -> Image:
 	var image := Image.create(32, 32, false, Image.FORMAT_RGBA8)
 	image.fill(color)
-	return ImageTexture.create_from_image(image)
+	return image
 
 
-func _red_texture(_name: String) -> Texture2D:
-	return _solid_texture(Color.RED)
+func _red_image(_name: String) -> Image:
+	return _solid_image(Color.RED)
 
 
-func _green_texture(_name: String) -> Texture2D:
-	return _solid_texture(Color.GREEN)
+func _green_image(_name: String) -> Image:
+	return _solid_image(Color.GREEN)
 
 
 # The page textures pass A's render-list runs bind (ParticleFarPass: the
@@ -1368,7 +1622,7 @@ func _far_run_textures(renderer: ParticleRenderer) -> Array:
 	return textures
 
 
-# A catalog rebuild (here a new texture provider) builds new atlas pages, and
+# A catalog rebuild (here a new image provider) builds new atlas pages, and
 # pass A's runs draw with them: the far-pass materials are made again with the
 # pages, never kept from the catalog they were first made for.
 func test_far_pass_materials_follow_a_catalog_rebuild() -> void:
@@ -1377,9 +1631,13 @@ func test_far_pass_materials_follow_a_catalog_rebuild() -> void:
 	camera.position = Vector3(0.0, 10.0, 5.0)
 	camera.current = true
 	viewport.add_child(camera)
+	# The eye looks at the quad: an emitter out of its view never submits, so it
+	# would run no pass at all (retail CParticleEmitter_TrySubmitForRender
+	# @ 0x5e7540 tests the bounds against the view before it registers).
+	camera.look_at(Vector3(0.0, 1.0, 0.0), Vector3.UP)
 	var renderer := ParticleRenderer.new()
 	renderer.scene = _single_quad_scene("rebuilt", 0)
-	renderer.texture_provider = _red_texture
+	renderer.image_provider = _red_image
 	# The quad at y 1 sits below the plane and the eye above it: pass A. The
 	# uncompressed page words keep the page readable.
 	renderer.set_water_plane(5.0, null)
@@ -1390,7 +1648,7 @@ func test_far_pass_materials_follow_a_catalog_rebuild() -> void:
 	var before := _far_run_textures(renderer)
 	assert_eq(before.size(), 1, "one pass-A run")
 
-	renderer.texture_provider = _green_texture
+	renderer.image_provider = _green_image
 	renderer.render_now(GameWorld.current_frame_clock_ms())
 	var after := _far_run_textures(renderer)
 	assert_eq(after.size(), 1, "one pass-A run after the rebuild")
@@ -1440,7 +1698,7 @@ func test_views_build_particles_in_the_scene_pass_stride() -> void:
 	_overlap_spawn(scene, "stride", 0.0)
 	var renderer := ParticleRenderer.new()
 	renderer.scene = scene
-	renderer.texture_provider = _overlap_texture
+	renderer.image_provider = _overlap_source_image
 	viewport.add_child(renderer)
 	var built := {}
 	for words in [[2, false], [1, false], [0, false], [2, true], [0, true]]:

@@ -34,12 +34,31 @@ void read_session_listing_columns(
 		r.region_index = static_cast<int>(ctx.mission->header.climate);
 	// [orig: dword_24D211C @0x4FEB03]
 	r.published_cap = static_cast<int>(config.player_slot_limit());
+	// MI1..MI3: the host CNetQuality's send-window averages (its +0x14 / +0x18 / +0x1C), the
+	// frame-pressure, ping and loss terms over the window's five samples as the main frame's last
+	// sample left them, 0 from a mission start's reset to its first sample (D-NET-NEW-L9-50).
+	// [orig: Lobby_UpdateServerInfo @0x4FE8C0 - g_NetQualityHostAvgBandwidth read @0x4FEB3C
+	//  ("MI1", the SetOrCreate called @0x4FEB6C), g_NetQualityHostAvgPing @0x4FEB71 ("MI2"),
+	//  g_NetQualityHostAvgLoss @0x4FEBA6 ("MI3"), each "%ld"; CNetQuality_UpdateMetrics @0x4C52C0 -
+	//  this+5..7 stored @0x4C557F..0x4C5585 and clamped @0x4C5588..0x4C55B3, `this`
+	//  g_NetQualityLevel (Game_ProcessMainFrame @0x5263F0 - the this load @0x526586, the call
+	//  @0x52658B)]
+	r.mi1 = ctx.host_quality_window.avg_bandwidth;
+	r.mi2 = ctx.host_quality_window.avg_ping;
+	r.mi3 = ctx.host_quality_window.avg_loss;
 	// [orig: g_ServerJoinLocked @0xC94794 — Locked @0x4FEC57, Country @0x4FEEED]
 	r.locked = ctx.join_locked;
 	// [orig: dword_24D218C @0x4FECD7]
 	r.skins = config.allow_custom_skins != 0;
-	// [orig: g_RoundTimeRemaining @0x24C1958, read @0x4FED57]
-	r.round_time_remaining_ticks = ctx.world != nullptr ? ctx.world->match.remaining_ticks() : -1;
+	// The mission environment's time-of-day class (World::env, the host boot's)
+	// [orig: g_EnvTimeOfDayEnum @0x24D2364, read @0x4FF038]
+	if (ctx.world != nullptr) r.time_of_day = ctx.world->env.time_of_day_enum;
+	// [orig: g_RoundTimeRemaining @0x24C1958, read @0x4FED57]. With no world (a map change's
+	// load, its old World gone with the teardown) the registration's own stands: the global holds
+	// the last round's value until the next mission start's store, which follows its update
+	// [orig: Game_StartMission - `mov g_RoundTimeRemaining, esi` (-1) @0x524A5D and the limit's
+	//  store @0x525251, both past Lobby_UpdateServerInfo @0x5248F5].
+	if (ctx.world != nullptr) r.round_time_remaining_ticks = ctx.world->match.remaining_ticks();
 	// [orig: the strlen of the password @0x24D1FE4 @0x4FEDCA..0x4FEDDD]
 	r.password = !config.server_password.empty();
 	// [orig: `test byte g_RulesFlags, 1` @0x4FEE48]
@@ -49,6 +68,21 @@ void read_session_listing_columns(
 	r.country = config.country;
 	// [orig: g_ServerCustomText @0x24D21C4, pushed @0x4FEF46]
 	r.server_message = config.custom_text;
+	// The cookie-key ring's current key (the round init's, then each refresh's).
+	// [orig: Lobby_UpdateServerInfo @0x4FE8C0 - g_NapiCookieKeyTable's `keys[keys[6]]`
+	//  @0x4FF191..0x4FF196, "%ld" @0x4FF1AB]
+	r.pcid_key = ctx.cookie_key_table.current();
+	// The round init's draw (Server_InitNewRoundState).
+	// [orig: g_GameServerBaffleKey, read @0x4FF1CC]
+	r.game_server_baffle_key = ctx.game_server_baffle_key;
+}
+
+void apply_mission_start_columns(HostRegistration &r, const std::string &mission_text_title,
+		const std::string &header_name, int32_t climate, int32_t last_round_ticks) {
+	r.mission_name = !mission_text_title.empty() ? mission_text_title : header_name;
+	r.region_index = climate;
+	r.time_of_day = 0;
+	r.round_time_remaining_ticks = last_round_ticks;
 }
 
 bool Server_ToggleJoinLock(NapiNPServerCtx &ctx) {

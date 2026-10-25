@@ -50,17 +50,20 @@ begin "Light Post"
   graphic Lpost01
 end
 """
-# The player's body (105310, the placer's PLAYER_VISUAL_ITEM_ID) over the
-# synthetic 19-bone person, leading the file (a type id resolves to its FIRST
-# row; blink_reopen_edge_test.gd). The template it spawns from (105305) is the
-# minimal pack's.
+# The player's body (105305, the row its type word 0x14B9 names, D-NET-348)
+# over the synthetic 19-bone person, leading the file (a type id resolves to its
+# FIRST row; blink_reopen_edge_test.gd); it is the body's spawn row too, so it
+# carries the boot fixture's 105305 keys.
 const PLAYER_DEFS := """begin "Player Character"
-  id 105310
+  id 105305
   type person
   graphic person
   sid player
   anim_def soldier
-  hp 100
+  hp 150
+  ai_function plyr
+  disk_function PLAYER
+  move_function org2
 end
 """
 const LANE_TEXEL := 9
@@ -124,8 +127,11 @@ func _stage_root() -> String:
 	for clip in ["soldier.adm", "idle.bad", "walk.bad"]:
 		TestFs.copy(self, "res://../fixtures/anim/" + clip, root_dir.path_join(clip))
 	var items := FileAccess.get_file_as_string(root_dir.path_join("items.def"))
+	# The "Null" marker leads, as in the shipped table: the player's row at
+	# ordinal 0 would build its body no proximity slice [orig:
+	# Entity_BuildProximityListsFromPools @0x4B8EB0, the +0x1C test @0x4B8EF9].
 	TestFs.write_text(self, root_dir.path_join("items.def"),
-			PLAYER_DEFS + "\n" + items + "\n" + ITEM_DEFS)
+			ItemDbFixture.NULL_ROW + "\n" + PLAYER_DEFS + "\n" + items + "\n" + ITEM_DEFS)
 	return root_dir
 
 
