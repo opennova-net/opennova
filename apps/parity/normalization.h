@@ -665,6 +665,18 @@ inline constexpr Normalization kNormalizations[] = {
 			"a score is a per-frame distance/view weight to moving entities "
 			"(Server_BuildEntityPriorityListForPlayer's top-4 interest pairs): compared as "
 			"per-slot distributions, the occupancy exact" },
+	{ "uplink.priority_death_slice", MaskKind::Field, 'C', 0x00C, "priority_score samples", 0,
+			"an S2C 0x13 naming the recipient's body zeroes its Health "
+			"(NapiNPClientMsg_EntityDeath @0x42EB50, the store @0x42EBD6) and the uplink builder "
+			"refuses a Health of 0 (Player_BuildTag0CInputBody @0x42A550, @0x42A58F), so where "
+			"the recipient dies in the window and sends nothing after, its occupied samples count "
+			"the window's opening phase against that death: the final's 01tr-coop-aikill joiner "
+			"died on the 10th 0x0A after the staging on every cell, OO's window opened one "
+			"uplink period later (its at-rest wait took a third read), and its 7 samples "
+			"(medians 2800 / 2022 / 1954 / 1927 against RR's 2806 / 2024 / 1954 / 1925) failed "
+			"the 8-sample floor (L4-s40). Where that death ends the occupancy on both RR and the "
+			"subject, a subject short of 8 samples still compares its slot's median (any sample "
+			"at all); without it the shortfall is not comparable, as before" },
 	{ "frame.carried", MaskKind::Field, 'S', 0x00A, "carried", 0,
 			"the carried object handle is session-local: compared as none/bound" },
 	{ "frame.mount_handle", MaskKind::Field, 'S', 0x00A, "mount_handle", 0,

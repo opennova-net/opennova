@@ -3752,6 +3752,53 @@ void add_tag_at(wire::ParityTrace &trace, uint64_t at, uint16_t identity) {
 	}
 }
 
+// The final's 01tr-coop-aikill OO (LX-s37, L4-s40): the joiner died on the same 0x0A after the
+// staging on every cell, but OO's window opened one uplink period later, so its occupancy held
+// 7 samples against RR's 8 (medians 2800 against 2806) and the 8-sample floor failed it. Where
+// the recipient's own death ends the occupancy on both sides, a short subject still compares
+// its median (uplink.priority_death_slice).
+void test_priority_death_slice() {
+	// `sends` uplinks from the window start every 190 ms, slot 0 scored about `score`, then the
+	// recipient's S2C 0x13 at `death` (0: none) and no uplink after.
+	auto run = [](uint32_t seed, size_t sends, uint64_t death, int score) {
+		wire::ParityTrace trace = scripted(seed);
+		std::vector<wire::ParityUplinkState> kept;
+		wire::ParityUplinkState model;
+		for (const wire::ParityUplinkState &u : trace.uplinks) {
+			if (u.ts_ns < kSteadyStart)
+				kept.push_back(u);
+			else
+				model = u;
+		}
+		for (size_t k = 0; k < sends; ++k) {
+			model.ts_ns = kSteadyStart + 50 * kMs + k * 190 * kMs;
+			model.priority_score[0] = uint32_t(score + int(k % 3));
+			kept.push_back(model);
+		}
+		trace.uplinks = std::move(kept);
+		if (death != 0)
+			splice(trace, 'S', 0x013, kSteadyStart + death, bytes({ 0x00, 0x10, 0x00, 0x00 }));
+		return trace;
+	};
+	{
+		// Without the rule the subject's 7 samples fail the floor.
+		const Case c = judge_case(run(1, 8, 1580 * kMs, 2800), run(2, 9, 1770 * kMs, 2800),
+				run(3, 7, 1390 * kMs, 2800), "OO");
+		expect_row(c, 'C', "uplink_priority_score_p50", "0", "pass");
+		const VerdictRow *row = find_row(c.verdict.rows, 'C', "uplink_priority_score_p50", "0");
+		check(row && row->value.comparable && row->value.subject == "2801",
+				"the death-cut occupancy compares its median");
+	}
+	// A run whose uplinks stop without its death still fails the floor.
+	expect_row(judge_case(run(1, 8, 1580 * kMs, 2800), run(2, 9, 1770 * kMs, 2800),
+					   run(3, 7, 0, 2800), "OO"),
+			'C', "uplink_priority_score_p50", "0", "fail", "UPLINK_PRIORITY_MISMATCH");
+	// The medians still compare at the 1/8x..8x band.
+	expect_row(judge_case(run(1, 8, 1580 * kMs, 2800), run(2, 9, 1770 * kMs, 2800),
+					   run(3, 7, 1390 * kMs, 280), "OO"),
+			'C', "uplink_priority_score_p50", "0", "fail", "UPLINK_PRIORITY_MISMATCH");
+}
+
 // The final's tdh-i3a-tdm-round OO (LX-s37): in the round end's linger the host acks the
 // joiner's 5 s C2S 0x4C at its first open boundary, header-only unless a reliable message
 // (the 0x16) is queued there, which is the joiner's send phase against the host's: two of OO's
@@ -4397,6 +4444,7 @@ int main() {
 	test_sub_quantum_step();
 	test_entity_mission_split();
 	test_header_only_acks();
+	test_priority_death_slice();
 	test_round_target();
 	if (g_failures) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);

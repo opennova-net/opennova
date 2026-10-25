@@ -324,8 +324,11 @@ double median(std::vector<double> values) {
 // ---------------------------------------------------------------------------
 // C2S 0x0C
 
+// `death_slice`: both runs' occupancy ends at the recipient's own death inside the window
+// (uplink.priority_death_slice), so a subject short of 8 samples is the window's phase and
+// its median still compares.
 void priority_score_metric(std::vector<MetricValue> &out, int slot, const std::vector<double> &a,
-		const std::vector<double> &b) {
+		const std::vector<double> &b, bool death_slice) {
 	static_assert(has_normalization("uplink.priority_score"));
 	const double ma = median(a);
 	if (a.size() < kDynamicMinSamples || !(ma > 0.0))
@@ -334,7 +337,7 @@ void priority_score_metric(std::vector<MetricValue> &out, int slot, const std::v
 			"UPLINK_PRIORITY_MISMATCH");
 	value.floor = kDynamicRatioFloor;
 	value.reference = render_number(ma);
-	if (b.size() < kDynamicMinSamples) {
+	if (b.size() < kDynamicMinSamples && !(death_slice && !b.empty())) {
 		value.comparable = false;
 		value.subject = std::to_string(b.size()) + " samples";
 		value.detail = "fewer than 8 occupied samples";
@@ -344,7 +347,10 @@ void priority_score_metric(std::vector<MetricValue> &out, int slot, const std::v
 	const double mb = median(b);
 	value.distance = mb > 0.0 ? std::fabs(std::log2(mb / ma)) : 64.0;
 	value.subject = render_number(mb);
-	value.detail = "|log2(subject / RR)| of the slot's median score; 3 is the 1/8x..8x band";
+	value.detail = b.size() < kDynamicMinSamples
+			? "|log2(subject / RR)| of the slot's median score over " + std::to_string(b.size()) +
+					" samples, the occupancy cut by the recipient's death on both sides"
+			: "|log2(subject / RR)| of the slot's median score; 3 is the 1/8x..8x band";
 	out.push_back(value);
 }
 
@@ -367,6 +373,38 @@ bool own_handle(const RunFacts &run, uint32_t &handle) {
 	handle = std::max_element(handles.begin(), handles.end(), [](const auto &x, const auto &y) {
 		return x.second < y.second;
 	})->first;
+	return true;
+}
+
+// The recipient's sends end at its own death inside the window: an S2C 0x13 naming its body
+// zeroes the body's Health [orig: NapiNPClientMsg_EntityDeath @0x42EB50 (the store
+// @0x42EBD6)] and the uplink builder refuses a Health of 0 [orig: Player_BuildTag0CInputBody
+// @0x42A550 (@0x42A58F)], so the steady C2S 0x0C stops at the first such 0x13 in the window and
+// no steady uplink follows it. The 8 occupied samples a priority-score median needs then
+// count the window's opening phase against the death: the final's 01tr-coop-aikill joiner died
+// on the 10th 0x0A after the staging on every cell, and OO's window, its at-rest wait taking a
+// third read, opened one uplink period later, 7 samples against RR's 8 with medians 2800 /
+// 2022 / 1954 / 1927 against 2806 / 2024 / 1954 / 1925 (L4-s40) (uplink.priority_death_slice).
+bool occupancy_ends_at_death(const RunFacts &run) {
+	static_assert(has_normalization("uplink.priority_death_slice"));
+	uint32_t own = 0;
+	if (!own_handle(run, own))
+		return false;
+	uint64_t death = 0;
+	for (const wire::ParityEvent &event : run.trace.events) {
+		if (event.dir != 'S' || event_identity(event) != 0x013 || event.body.size() < 2 ||
+				!run.in_steady(event.ts_ns))
+			continue;
+		if (uint32_t(event.body[0] | (event.body[1] << 8)) == (own & 0xFFFFu)) {
+			death = event.ts_ns;
+			break;
+		}
+	}
+	if (death == 0)
+		return false;
+	for (const wire::ParityUplinkState *state : steady_uplinks(run))
+		if (state->ts_ns > death)
+			return false;
 	return true;
 }
 
@@ -515,6 +553,7 @@ void compare_uplinks(const RunFacts &rr, const RunFacts &other, std::vector<Metr
 	});
 	// The scores are continuous distance/view weights (uplink.priority_score): each
 	// slot's median within the 1/8x..8x band of RR's.
+	const bool death_slice = occupancy_ends_at_death(rr) && occupancy_ends_at_death(other);
 	for (int slot = 0; slot < 4; ++slot) {
 		auto scores = [&occupied, slot](const std::vector<const U *> &states) {
 			std::vector<double> out;
@@ -523,7 +562,7 @@ void compare_uplinks(const RunFacts &rr, const RunFacts &other, std::vector<Metr
 					out.push_back(double(s->priority_score[slot]));
 			return out;
 		};
-		priority_score_metric(out, slot, scores(a), scores(b));
+		priority_score_metric(out, slot, scores(a), scores(b), death_slice);
 	}
 
 	auto any = [](const std::vector<const U *> &states, const std::function<bool(const U &)> &f) {
