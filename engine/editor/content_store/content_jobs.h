@@ -170,6 +170,72 @@ private:
 	bool up_to_date_ = false;
 };
 
+// The folder's standing against its content project: the project's head (asked of the service) and
+// the folder's changes since its base (its files scanned), so a status says how many revisions the
+// base is behind and what the folder changed. A service it cannot reach leaves the head unknown and
+// still reads the changes.
+class ContentCheck : public ContentJob {
+public:
+	ContentCheck(ContentTransport &transport, ContentAccount account, ProjectPaths paths,
+			std::string export_dir, ContentBinding binding);
+
+	ContentJobState step(uint64_t budget) override;
+	ContentJobProgress progress() const override;
+	void cancel() override;
+
+	// Once Done.
+	bool remote_known() const { return remote_known_; } // false: `remote_error()` says why
+	const std::string &remote_error() const { return remote_error_; }
+	const RemoteProject &remote() const { return remote_; }
+	const std::vector<LocalChange> &changes() const { return changes_; }
+	const std::vector<std::string> &problems() const { return problems_; }
+
+private:
+	enum class Phase : uint8_t { AskHead, Scan, Done };
+
+	ProjectPaths paths_;
+	std::string export_dir_;
+	ContentBinding binding_;
+	Phase phase_ = Phase::AskHead;
+	ContentCall call_;
+	bool remote_known_ = false;
+	std::string remote_error_;
+	RemoteProject remote_;
+	std::unique_ptr<ContentScan> scan_;
+	std::vector<LocalChange> changes_;
+	std::vector<std::string> problems_;
+};
+
+// The folder made a working copy of the project `binding.key` as it stands: its base the project's
+// head (the head's manifest read) and its binding at the head, its files untouched, so whatever the
+// folder holds otherwise is its change to push. What makes a folder kept before the store (a
+// project on a disk, a stock install imported afresh) the project's working copy; for a project
+// with no revision yet, its base is no file and every file of the folder is its first push.
+class ContentBind : public ContentJob {
+public:
+	ContentBind(ContentTransport &transport, ContentAccount account, ProjectPaths paths,
+			ContentBinding binding);
+
+	ContentJobState step(uint64_t budget) override;
+	ContentJobProgress progress() const override;
+	void cancel() override;
+
+	// Once Done: the binding written.
+	const ContentBinding &binding() const { return binding_; }
+
+private:
+	enum class Phase : uint8_t { AskHead, ReadManifest, Done };
+
+	ContentJobState write(const std::vector<content::ContentFile> &base);
+
+	ProjectPaths paths_;
+	ContentBinding binding_;
+	Phase phase_ = Phase::AskHead;
+	ContentCall call_;
+	RemoteProject remote_;
+	std::optional<RemoteRevision> head_;
+};
+
 // What a push came to.
 enum class PushOutcome : uint8_t {
 	Pushed, // the folder's files are revision `revision()`

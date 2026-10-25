@@ -331,6 +331,157 @@ ContentJobState ContentPull::step(uint64_t budget) {
 	return state_;
 }
 
+// --- ContentCheck ---
+
+ContentCheck::ContentCheck(ContentTransport &transport, ContentAccount account, ProjectPaths paths,
+		std::string export_dir, ContentBinding binding) :
+		ContentJob(transport, std::move(account)),
+		paths_(std::move(paths)),
+		export_dir_(std::move(export_dir)),
+		binding_(std::move(binding)) {}
+
+void ContentCheck::cancel() {
+	call_ = ContentCall();
+	if (state_ == ContentJobState::Running)
+		state_ = ContentJobState::Cancelled;
+}
+
+ContentJobProgress ContentCheck::progress() const {
+	if (phase_ == Phase::AskHead)
+		return { "Asking " + binding_.key + "'s newest revision", 0, 0, false };
+	if (!scan_ || scan_->listing())
+		return { "Listing the folder's files", scan_ ? scan_->files_listed() : 0, 0, false };
+	return { "Reading the folder's files", scan_->bytes_hashed(), scan_->bytes_to_hash(), true };
+}
+
+ContentJobState ContentCheck::step(uint64_t budget) {
+	if (state_ != ContentJobState::Running)
+		return state_;
+	uint64_t spent = 0;
+	do {
+		switch (phase_) {
+			case Phase::AskHead: {
+				if (!call_.started())
+					call_ = ContentCall(transport_, content_api::project(account_, binding_.key));
+				spent += kCallCost;
+				if (!call_.poll())
+					return state_;
+				// The service's answer, or why there is none: the folder's own changes are read
+				// either way.
+				if (!note_session(call_.reply())) {
+					remote_error_ = "the session ended: sign in again";
+				} else {
+					std::optional<RemoteRevision> head;
+					ContentApiError error;
+					remote_known_ = content_api::read_project(call_.reply(), remote_, head, error);
+					if (!remote_known_)
+						remote_error_ = error.line();
+				}
+				call_ = ContentCall();
+				scan_ = std::make_unique<ContentScan>(paths_, export_dir_);
+				phase_ = Phase::Scan;
+				break;
+			}
+			case Phase::Scan: {
+				if (!scan_->step(budget > spent ? budget - spent : 1))
+					return state_;
+				std::vector<content::ContentFile> base;
+				std::string error;
+				if (!read_content_base(ContentPaths::for_project(paths_), base, error))
+					return fail(error);
+				changes_ = local_changes(base, scan_->files(), scan_->unread());
+				problems_ = scan_->problems();
+				phase_ = Phase::Done;
+				state_ = ContentJobState::Done;
+				return state_;
+			}
+			case Phase::Done:
+				return state_;
+		}
+	} while (spent < budget && state_ == ContentJobState::Running);
+	return state_;
+}
+
+// --- ContentBind ---
+
+ContentBind::ContentBind(ContentTransport &transport, ContentAccount account, ProjectPaths paths,
+		ContentBinding binding) :
+		ContentJob(transport, std::move(account)),
+		paths_(std::move(paths)),
+		binding_(std::move(binding)) {}
+
+void ContentBind::cancel() {
+	call_ = ContentCall();
+	if (state_ == ContentJobState::Running)
+		state_ = ContentJobState::Cancelled;
+}
+
+ContentJobProgress ContentBind::progress() const {
+	if (phase_ == Phase::AskHead)
+		return { "Asking " + binding_.key + "'s newest revision", 0, 0, false };
+	return { "Reading revision " + std::to_string(remote_.head) + "'s files", 0, 0, false };
+}
+
+ContentJobState ContentBind::write(const std::vector<content::ContentFile> &base) {
+	const ContentPaths content_paths = ContentPaths::for_project(paths_);
+	binding_.revision = remote_.head;
+	std::string error;
+	if (!write_content_base(content_paths, base, error) ||
+			!write_content_binding(content_paths, binding_, error))
+		return fail("the folder's binding is not written: " + error);
+	phase_ = Phase::Done;
+	state_ = ContentJobState::Done;
+	return state_;
+}
+
+ContentJobState ContentBind::step(uint64_t budget) {
+	if (state_ != ContentJobState::Running)
+		return state_;
+	uint64_t spent = 0;
+	do {
+		switch (phase_) {
+			case Phase::AskHead: {
+				if (!call_.started())
+					call_ = ContentCall(transport_, content_api::project(account_, binding_.key));
+				spent += kCallCost;
+				if (!call_.poll())
+					return state_;
+				if (!note_session(call_.reply()))
+					return fail("the session ended: sign in again");
+				ContentApiError error;
+				if (!content_api::read_project(call_.reply(), remote_, head_, error))
+					return fail("cannot read " + binding_.key + ": " + error.line());
+				call_ = ContentCall();
+				if (remote_.head == 0)
+					return write({}); // no revision yet: every file of the folder is its first push
+				phase_ = Phase::ReadManifest;
+				break;
+			}
+			case Phase::ReadManifest: {
+				if (!call_.started())
+					call_ = ContentCall(transport_,
+							content_api::manifest(account_, binding_.key, remote_.head));
+				spent += kCallCost;
+				if (!call_.poll())
+					return state_;
+				if (!note_session(call_.reply()))
+					return fail("the session ended: sign in again");
+				std::vector<content::ContentFile> base;
+				ContentApiError error;
+				if (!content_api::read_manifest(call_.reply(),
+							head_ ? head_->manifest_sha256 : std::string(), base, error))
+					return fail("cannot read revision " + std::to_string(remote_.head) + ": " +
+							error.line());
+				call_ = ContentCall();
+				return write(base);
+			}
+			case Phase::Done:
+				return state_;
+		}
+	} while (spent < budget && state_ == ContentJobState::Running);
+	return state_;
+}
+
 // --- ContentPush ---
 
 ContentPush::ContentPush(ContentTransport &transport, ContentAccount account, ProjectPaths paths,

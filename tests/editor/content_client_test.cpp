@@ -397,6 +397,61 @@ static int test_accounts() {
 	return 0;
 }
 
+static int test_bind_and_check() {
+	test_temp::TempDir dir("opennova_content_client_bind");
+	const std::string first = dir.file("First"), kept = dir.file("Kept");
+	FakeService service;
+	TEST_EXPECT(put(first + "/defs/a.def", "a1") && put(first + "/defs/b.def", "b1"));
+	TEST_EXPECT(push(service, first, "r1") == editor::PushOutcome::Pushed);
+	TEST_EXPECT(put(first + "/defs/a.def", "a2"));
+	TEST_EXPECT(push(service, first, "r2") == editor::PushOutcome::Pushed && service.head == 2);
+
+	// A folder kept before the store, holding revision 1's files and one of its own: bound at the
+	// head, its files untouched, what differs from the head its change.
+	TEST_EXPECT(put(kept + "/defs/a.def", "a1") && put(kept + "/defs/b.def", "b1") &&
+			put(kept + "/defs/c.def", "c1"));
+	{
+		editor::ContentBind bind(service, account(kAdminCookie),
+				editor::ProjectPaths::for_root(kept), { kServer, "MOD", 0 });
+		TEST_EXPECT(run(bind) == editor::ContentJobState::Done && bind.binding().revision == 2);
+	}
+	TEST_EXPECT(binding_of(kept).revision == 2 && files_of(kept).at("defs/a.def") == "a1");
+	{
+		editor::ContentCheck check(
+				service, account(""), editor::ProjectPaths::for_root(kept), "", binding_of(kept));
+		TEST_EXPECT(run(check) == editor::ContentJobState::Done && check.remote_known() &&
+				check.remote().head == 2);
+		const auto &changes = check.changes();
+		TEST_EXPECT(changes.size() == 2 && changes[0].path == "defs/a.def" &&
+				changes[0].change == editor::ContentChange::Modified &&
+				changes[1].path == "defs/c.def" &&
+				changes[1].change == editor::ContentChange::Added);
+	}
+	// Pushed from there: revision 3 is the kept folder's.
+	TEST_EXPECT(push(service, kept, "kept") == editor::PushOutcome::Pushed && service.head == 3);
+
+	// A check whose service will not answer still reads the folder's changes.
+	TEST_EXPECT(put(kept + "/defs/b.def", "b2"));
+	{
+		editor::ContentCheck check(service, account(kExpiredCookie),
+				editor::ProjectPaths::for_root(kept), "", binding_of(kept));
+		TEST_EXPECT(run(check) == editor::ContentJobState::Done && !check.remote_known() &&
+				!check.remote_error().empty() && check.changes().size() == 1);
+	}
+	// A project with no revision yet: bound at none, every file the first push's.
+	FakeService empty;
+	const std::string fresh = dir.file("Fresh");
+	TEST_EXPECT(put(fresh + "/defs/a.def", "a"));
+	{
+		editor::ContentBind bind(empty, account(kAdminCookie),
+				editor::ProjectPaths::for_root(fresh), { kServer, "MOD", 0 });
+		TEST_EXPECT(run(bind) == editor::ContentJobState::Done && bind.binding().revision == 0);
+	}
+	TEST_EXPECT(push(empty, fresh, "first") == editor::PushOutcome::Pushed && empty.head == 1);
+	std::printf("bind and check: a kept folder bound at the head, its changes read, offline too\n");
+	return 0;
+}
+
 static int test_api_shapes() {
 	// The server as the client keeps it, and the session cookie a login reply signs in.
 	TEST_EXPECT(editor::content_server(" opennova.net/ ") == "https://opennova.net");
@@ -444,6 +499,7 @@ int main() {
 	int failures = 0;
 	failures += test_share_and_pull();
 	failures += test_accounts();
+	failures += test_bind_and_check();
 	failures += test_api_shapes();
 	if (failures == 0)
 		std::printf("content_client: all tests passed\n");
