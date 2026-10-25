@@ -7,6 +7,7 @@
 //                     who is signed in, the CD keys DFX2 activates
 //   Hosting           the hosted servers: the fleet's machines and servers, what
 //                     they use, their static addresses, the game data they run
+//                     and the editor projects it is made from
 //   People and money  the accounts, their subscriptions, and what AWS charges
 //   Operations        the deployment as it runs: its programs and AWS resources,
 //                     and the background jobs
@@ -56,6 +57,7 @@ export const ADMIN_AREAS: readonly AdminArea[] = [
       { to: '/admin/usage', label: 'Server usage', description: 'What every live server uses of its slot' },
       { to: '/admin/addresses', label: 'Static addresses', description: "Dedicated machines' fixed addresses and names" },
       { to: '/admin/data-sets', label: 'Game data', description: 'The data sets servers run on, and their updates' },
+      { to: '/admin/content', label: 'Content', description: "The editor projects' files, kept by revision" },
     ],
   },
   {

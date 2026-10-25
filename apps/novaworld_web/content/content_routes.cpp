@@ -816,7 +816,7 @@ crow::response ContentRoutes::patch(const crow::request &req, const std::string 
 }
 
 // DELETE /api/admin/content/projects/<key> — 204, the project's rows gone and then its objects
-// (content/<key>/); 404 not_found; 409 in_use (an expansion's project builds on it).
+// (content/<key>/); 404 not_found; 409 has_expansion (an expansion's project builds on it).
 crow::response ContentRoutes::remove(const crow::request &req, const std::string &key) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -831,7 +831,7 @@ crow::response ContentRoutes::remove(const crow::request &req, const std::string
 				break;
 			case ProjectOutcome::InUse:
 				return json_error(
-						409, "in_use", "an expansion's content project builds on this one");
+						409, "has_expansion", "an expansion's content project builds on this one");
 			default:
 				return no_such_project();
 		}

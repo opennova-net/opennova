@@ -42,6 +42,7 @@ import ProgramDetailSection from '../pages/admin/ProgramDetailSection.vue';
 import InfraResourceSection from '../pages/admin/InfraResourceSection.vue';
 import CdKeysSection from '../pages/admin/CdKeysSection.vue';
 import DataSetsSection from '../pages/admin/DataSetsSection.vue';
+import ContentSection from '../pages/admin/ContentSection.vue';
 import AddressesSection from '../pages/admin/AddressesSection.vue';
 import { requireUser } from './guards';
 
@@ -140,6 +141,7 @@ const router = createRouter({
         },
         { path: 'cd-keys', component: CdKeysSection, meta: { title: 'Admin: CD keys' } },
         { path: 'data-sets', component: DataSetsSection, meta: { title: 'Admin: Game data' } },
+        { path: 'content', component: ContentSection, meta: { title: 'Admin: Content' } },
         // The sections' names before the admin pages were rebuilt, and the
         // NovaWorld service's and sessions' pages before they were one: old
         // links land on their new pages.

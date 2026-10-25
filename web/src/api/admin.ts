@@ -4,7 +4,7 @@
 // server's own `message` text is never shown. The users' calls are in
 // users.ts, the CD keys' in cdKeys.ts, the billing overview's in
 // adminBilling.ts, the background jobs' in jobs.ts, the infrastructure view's in infra.ts, the static
-// addresses' in adminAddresses.ts; here are the
+// addresses' in adminAddresses.ts, the content store's in content.ts; here are the
 // NovaWorld service's status, sessions and lobby instances, and
 // the hosted fleet (/api/admin/hosted*, /api/admin/fleet/*: its machines, a
 // machine's page, the roll preview and the roll).
@@ -97,6 +97,12 @@ export type AdminErrorCode =
   | 'not_retryable'
   | 'address_limit'
   | 'addresses_disabled'
+  // The content store's admin routes (content.ts).
+  | 'duplicate_key'
+  | 'data_set_taken'
+  | 'no_such_data_set'
+  | 'no_such_base'
+  | 'has_expansion'
   // The log route (logs.ts).
   | 'no_log_store'
   | 'logs_unavailable'
@@ -167,6 +173,11 @@ const KNOWN_ADMIN_CODES: ReadonlySet<string> = new Set<AdminErrorCode>([
   'not_retryable',
   'address_limit',
   'addresses_disabled',
+  'duplicate_key',
+  'data_set_taken',
+  'no_such_data_set',
+  'no_such_base',
+  'has_expansion',
   'no_log_store',
   'logs_unavailable',
 ]);
@@ -276,6 +287,16 @@ function adminMessageFor(code: AdminErrorCode): string {
       return 'That account has a static address for every dedicated machine it has. Grant it another dedicated machine first.';
     case 'addresses_disabled':
       return 'This NovaWorld service sells no static address (ONNET_FLEET_MAX_ADDRESSES is 0, or its address settings are incomplete: the boot log says which).';
+    case 'duplicate_key':
+      return 'Another content project already has that key.';
+    case 'data_set_taken':
+      return "Another content project's releases already update that data set.";
+    case 'no_such_data_set':
+      return 'No data set has that id. Refresh the list.';
+    case 'no_such_base':
+      return 'No content project has that base key.';
+    case 'has_expansion':
+      return "An expansion's content project builds on this one. Delete the expansion's first.";
     case 'no_log_store':
       return 'This NovaWorld service reads no log store (ONNET_LOG_STORE is unset or malformed: the boot log says which).';
     case 'logs_unavailable':
