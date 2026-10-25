@@ -156,6 +156,7 @@ target_link_libraries(opennova_novaworld_billing
 # hold and the data program's jobs over the object store (the mission
 # catalog a tree's missions are read with is the runtime group's).
 add_library(opennova_novaworld_data_sets STATIC
+    data_sets/content_repository.cpp
     data_sets/data_set_files.cpp
     data_sets/data_set_jobs.cpp
     data_sets/data_set_repository.cpp

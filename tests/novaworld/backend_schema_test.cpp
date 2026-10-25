@@ -84,7 +84,8 @@ int test_migrations_create_expected_tables() {
 	const std::vector<std::string> expected = { "active_hosts", "active_user_sessions",
 		"billing_checkout_reservations", "billing_customers", "billing_events",
 		"billing_subscriptions", "billing_sync_backoff", "billing_sync_state",
-		"cd_key_activations", "cd_keys", "comp_grants", "data_set_trees", "data_sets",
+		"cd_key_activations", "cd_keys", "comp_grants", "content_blobs", "content_projects",
+		"content_revisions", "data_set_trees", "data_sets",
 		"fleet_launch_backoff", "fleet_leader", "fleet_machine_egress", "fleet_machine_events",
 		"fleet_machine_hourly", "fleet_machine_samples", "fleet_machine_trees",
 		"fleet_machines", "fleet_slot_reports",
@@ -114,7 +115,7 @@ int test_migrations_create_expected_tables() {
 	const std::vector<std::string> expected_flags = {
 		"billing_customers.livemode", "billing_events.livemode",
 		"billing_subscriptions.cancel_at_period_end", "billing_subscriptions.livemode",
-		"billing_sync_state.prices_checked", "billing_sync_state.prices_ok",
+		"billing_sync_state.prices_checked", "billing_sync_state.prices_ok", "content_projects.retail",
 		"data_sets.retail_updater", "fleet_machines.launch_refused", "fleet_machines.was_draining",
 		"fleet_slot_reports.oom",
 		"hosted_console_commands.record", "hosted_console_commands.sent",

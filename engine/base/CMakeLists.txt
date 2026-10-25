@@ -1,4 +1,4 @@
-# opennova_base — the engine base services (vfs, resource_index, gameprofile,
+# opennova_base — the engine base services (content, vfs, resource_index, gameprofile,
 # pcapio, os_random, proc), one STATIC group target (Shape A). The header-only
 # base/io leaf keeps its own INTERFACE target in its subdirectory.
 #
@@ -6,6 +6,8 @@
 # consumes pff/scr/bfc1, so this group PUBLIC-links opennova_formats.
 
 add_library(opennova_base STATIC
+    # content — the content store's revision manifest and path rules (ADR 0069), the service's and the editor's
+    ${CMAKE_CURRENT_SOURCE_DIR}/content/content_manifest.cpp
     # gameprofile — game identity, required-resource tables, the player's own files, the graphics log
     ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/gameprofile.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/graphics_log.cpp

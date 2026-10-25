@@ -4,6 +4,7 @@
     "devtools",
     "pcapio",
     "base/vfs/vfs_decode.cpp",
+    "base/content",
     "base/os_random",
     "base/proc",
     "net/novaworld/service",

@@ -1078,6 +1078,16 @@ target_compile_definitions(data_set_repository_test PRIVATE OPENNOVA_SOURCE_DIR=
 opennova_add_pg_test(data_set_repository COMMAND data_set_repository_test)
 set_tests_properties(data_set_repository PROPERTIES TIMEOUT 300)
 
+# The content store's rows (data_sets/content_repository.h, migration 0023, ADR 0069): the seeded
+# projects and who lists them, a project's writes and refusals, the files a store holds, pushes
+# moving the head one at a time (the loser told the winner) and the history paged.
+add_executable(content_repository_test novaworld/content_repository_test.cpp)
+target_link_libraries(content_repository_test PRIVATE
+    opennova_novaworld_data_sets opennova_novaworld_service Threads::Threads)
+target_include_directories(content_repository_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(content_repository_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+opennova_add_pg_test(content_repository COMMAND content_repository_test)
+
 # The data sets' jobs (data_sets/data_set_jobs.h, ADR 0064) on a migrated database and a local
 # object store in a scratch directory, each run as the workers run it: a packed synthetic
 # tree finalized (its manifest, missions, version; the refusals; an expansion's pair) and
