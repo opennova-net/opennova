@@ -671,6 +671,12 @@ opennova_add_editor_test(file_chores LIBS opennova_project_cli)
 opennova_add_editor_test(project_cli_session NAME project_cli_session
                          LIBS opennova_project_cli)
 
+# A project's export from its files alone (ADR 0069, the content store's server-built release): a copy
+# without `.opennova/`, the export folder or a game install exports the project's very bytes, for a
+# project imported whole from a minted install, one with an import source, and an expansion over its
+# base game's project beside it. Run on Linux too, whose file names are case-sensitive.
+opennova_add_editor_test(content_export LIBS opennova_project_cli)
+
 # opennova-project validate over the deepest menus the game reads (formats/mnu/mnu.cpp's bounds: 2017
 # nested windows, the 4031-deep LAN_LIST chain): it completes on the test's own stack, in time linear in
 # the windows, with the findings it always gave.
