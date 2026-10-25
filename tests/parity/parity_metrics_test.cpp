@@ -4107,7 +4107,11 @@ void test_entity_mission_split() {
 // is that rounding phase (state.sub_quantum_step).
 void test_sub_quantum_step() {
 	// Three boats in every steady frame (the scripted vehicle dropped), their z offset 5
-	// units plus `units` mantissa steps of 128 (shift 3), cycling.
+	// units plus `units` mantissa steps of 128 (shift 3), cycling. Their x offsets stay ahead
+	// of the moving anchor (56..196 units), where each decodes exactly: behind it they crossed
+	// -128 units, where the compress's mantissa clamp lands one record 2048 off
+	// (Network_CompressFixedPoint @0x4C2780, the clamp @0x4C27B8..0x4C27BF), and the motion
+	// row's exact keys read a still boat as moving.
 	auto boats = [](uint32_t seed, const std::vector<int> &units) {
 		wire::ParityTrace trace = scripted(seed);
 		std::vector<wire::ParityEntity> kept;
@@ -4129,7 +4133,7 @@ void test_sub_quantum_step() {
 				e.cls = 'V';
 				e.handle = 0x1003 + h;
 				e.type_id = 1293;
-				e.pos_x = network_compress_fixedpoint(int32_t(900 + 10 * h) * 65536 - f.anchor_x);
+				e.pos_x = network_compress_fixedpoint(int32_t(1200 + 10 * h) * 65536 - f.anchor_x);
 				e.pos_y = network_compress_fixedpoint(2050 * 65536 - f.anchor_y);
 				e.pos_z = network_compress_fixedpoint(5 * 65536 + u * 128);
 				e.orient_a = 64;
