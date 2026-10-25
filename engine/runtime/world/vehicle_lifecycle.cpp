@@ -298,7 +298,8 @@ void VehicleSystem::rerun_class_init(Entity &e) {
 void VehicleSystem::respawn(Entity &e) {
 	// The ai_function class init runs first; only when the def binds one do the
 	// rotor speed/rate words drop. Every vehicle row binds one, whether the row
-	// has a brain or not (a joiner's row never has), so the drop runs on every
+	// has a brain or not (the class init brains an AIData row on the authority
+	// and the client alike; any other row has none), so the drop runs on every
 	// peer. A CHel / cpln row's init ends in its slot leg, brain or none, so an
 	// EWeap helicopter respawns with its slot bound and seeded afresh.
 	// [orig: `cmp [eax+148h],ebx ... call ecx` @0x45FF53..0x45FF68; +0x468/+0x460 = 0

@@ -474,7 +474,8 @@ private:
 	// The ai_function class init re-run at the head of respawn: the brain exists,
 	// so it re-seeds the route, ammo, speeds and turret words, re-staggers the
 	// think phase, re-enters the current state and rebuilds the gunner list.
-	// A row with no AI component (a joiner's) has none of this to re-run.
+	// A row with no AI component (one the class init did not brain: not AIData,
+	// on any peer) has none of this to re-run.
 	// [orig: Entity_RespawnVehicle @0x45FF53..0x45FF68 -> ItemDef+0x148]
 	void rerun_class_init(Entity &vehicle);
 
