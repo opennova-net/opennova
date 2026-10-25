@@ -10,19 +10,21 @@ Use this runbook to probe the four Joint Operations LAN paths:
 Two MCP servers, one client layer. The onHook MCP bridge is the only retail
 driver: an external `opennova-int` executable (`onhook-mcp.exe`) that the
 repository adapter shells out to, located by the mandatory `-OnHookMcpPath`
-argument. A session may also have it registered as an MCP server (the
-`onhook_*` tools), but the runner never depends on that registration. An agent
-that does not have that executable on disk cannot run any retail leg of this
-runbook and must report the parity leg as BLOCKED rather than substitute a
-different probe. OpenNova endpoints are driven through the game's own
-`opennova-game` MCP (`docs/mcp.md`): the runner launches each OpenNova role on
-launch flags with `--mcp-port` (host 8975, joiner 8976 by default;
-`-HostMcpPort`/`-JoinerMcpPort`) and reads readiness, the motion exercise and
-the cooperative stop through it. The former Python corpus exporter, generated
-matrix, manifest, verifier, the manual retail launchers and the file-IPC
-joiner driver are retired. A run is evidence only for the exact mission, game
-type, expansion, binaries, retail trees, hook build, port, and callsigns
-recorded with it.
+argument. The repository's `.mcp.json` registers only `opennova-game` and
+`opennova-editor`; a maintainer machine may also register a user-level `onhook`
+MCP server (the `onhook_*` tools: `onhook_run_lan_pair`, `onhook_stop_run`,
+`onhook_host_lan` and others), but the runner never depends on that
+registration. An agent that does not have that executable on disk cannot run
+any retail leg of this runbook and must report the parity leg as BLOCKED
+rather than substitute a different probe. OpenNova endpoints are driven
+through the game's own `opennova-game` MCP (`docs/mcp.md`): the runner
+launches each OpenNova role on launch flags with `--mcp-port` (host 8975,
+joiner 8976 by default; `-HostMcpPort`/`-JoinerMcpPort`) and reads readiness,
+the motion exercise and the cooperative stop through it. The former Python
+corpus exporter, generated matrix, manifest, verifier, the manual retail
+launchers and the file-IPC joiner driver are retired. A run is evidence only
+for the exact mission, game type, expansion, binaries, retail trees, hook
+build, port, and callsigns recorded with it.
 
 ## Safety and evidence
 
@@ -76,7 +78,7 @@ pwsh -File scripts/net/run_parity_topology.ps1 `
     -Mission 01TR.bms `
     -Port 32786 `
     -GameType 65568 `
-    -HostSessionName 'Untitled' `
+    -HostSessionName 'Untitled ' `
     -ReadinessMode in_match `
     -RunId 01tr-rr-001 `
     -MissionArtifactPath C:\retail\corpus\missions\01TR.bms `
@@ -97,7 +99,8 @@ e.g. `opennova-extract --game <install> /exp jox01 --out <corpus>\missions 01TR.
 and `... --out <corpus> items.def` (from git-bash, set `MSYS_NO_PATHCONV=1` or
 `/exp` is rewritten as a path and the base `items.def` comes out).
 `HostSessionName` must equal the SERVER copy's `game.cfg` `game_name` exactly,
-the name a retail host advertises (JO:CA ships `Untitled`).
+the name a retail host advertises (JO:CA ships `"Untitled "`, with the
+trailing space).
 
 Run the command once for each of `RR`, `RO`, `OR`, and `OO`, changing `RunId`
 for every cell while holding all other case inputs fixed. A retail LAN host
@@ -159,9 +162,10 @@ the oracles the computed sources must reproduce (the
 `npruntime_integrity_sources` ctest pins jox01's).
 
 For a cold retail-to-retail session, the lower-level call is
-`onhook_run_lan_pair`, a method of the external onHook executable and invoked
-through it, not a tool the agent can call directly. Preserve both returned run
-and instance IDs and stop them with `onhook_stop_run`. Prefer the repository topology runner when
+`onhook_run_lan_pair`, a method of the external onHook executable: invoked
+through it, or as a tool where a user-level `onhook` server is registered
+(above). Preserve both returned run and instance IDs and stop them with
+`onhook_stop_run`. Prefer the repository topology runner when
 comparing all four paths because it applies the same capture, readiness, and
 artifact layout to each cell.
 
@@ -171,8 +175,9 @@ Run `scripts/net/parity_preflight.ps1` first (read-only): the retail copies,
 the hook pair, the SERVER `game.cfg`, the pinned corpus, Godot, capture, the
 judges, the CI GDExtension of `-DllRunId` and the ports, one PASS / FAIL line
 each. The OpenNova cells run the CI `gdext_windows_template_debug` build of a
-commit whose `engine/` and `godot/` trees equal the checkout's, never a local
-one. `run_parity_suite.ps1 -ReferencePrefix <prefix>` reuses an earlier
+commit whose `engine/`, `godot/src`, `godot/game`, `godot/probes` and
+`godot/bin/opennova.gdextension` equal the checkout's, never a local one.
+`run_parity_suite.ps1 -ReferencePrefix <prefix>` reuses an earlier
 suite's RR and RR-aa cells while the retail identity and hook configs match.
 After a suite, `scripts/net/diff_verdicts.py` compares its verdicts with an
 earlier suite's, labels each failing row with its D-NET row

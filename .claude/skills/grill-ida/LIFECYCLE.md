@@ -78,7 +78,7 @@ get edited by hand). Periodically — before a release, or when resuming after a
 2. Join against the `docs/correspondence.md` rows by address.
 3. Report, diff-style, for review before fixing: markers without a row, rows without a marker, and
    name mismatches (names drift legitimately — the address decides who's right).
-4. The D-ID half is the `re-doc` skill's cross-file step 3: grep `D-<DOMAIN>-` across source vs
+4. The D-ID half is the `re-doc` skill's cross-file step 5: grep `D-<DOMAIN>-` across source vs
    records and confirm both directions resolve.
 5. Steps 1–3 against the live IDB are mechanical: `python scripts/ida/cite_sweep.py` (needs IDA on
    `127.0.0.1:13337`; `scripts/ida/README.md`) joins every marker and IDB `reimpl:` back-link by

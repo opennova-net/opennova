@@ -33,11 +33,13 @@ own load paths. The rules that bind it (what may include or link it, the library
     identities), the `ChangeSet` a document answers since a state, `FieldSchema`.
   - The finding codes (`finding_code_row`): every finding is made from a row, the editor's own
     `CoreFinding` table's or its document type's `findings`, and keeps it (`Diagnostic::row`).
-- `documents`: the document types over the engine's own records: the def catalogs, string
-  tables, menus, stylesheets and models (a `.3di`'s engine features over an immutable parsed
-  base), and the text types, a `TextDocument` each (a script through the WAC compiler, its
-  operands as references with spans; a music script as its MUS text; credits as a CBIN file's
-  ConfigFile text; a shader in its SCR form; a configuration or a text). `document_types` is
+- `documents`: the document types over the engine's own records (every one a row of
+  `document_types.cpp`), among them the def catalogs, string tables, menus, stylesheets,
+  models (a `.3di`'s engine features over an immutable parsed base), missions, terrains,
+  textures and sound banks, and the text types, a `TextDocument` each (a script through the
+  WAC compiler, its operands as references with spans; a music script as its MUS text; credits
+  as a CBIN file's ConfigFile text; a shader in its SCR form; a particle file, the HUD layout,
+  a configuration or a text). `document_types` is
   the registry the session and the windows reach a type through: each type's `validate_file`
   (its file's own findings, from its document alone, kept per file by `validation_cache`) and
   its `project_check` (a check across the project's files that keeps state between
@@ -50,9 +52,10 @@ own load paths. The rules that bind it (what may include or link it, the library
   (the graph's update, each file's own findings, the use checks, the graph's findings).
 - `import`: the importers (a font set's glyph sheet to a `.fnt`, `font_import`; a PNG to the
   texture file its uses read, by the record's options; the terrain importer, `terrain_import`,
-  baking a terrain set's images with TrnGen.exe's bake, `formats/cpt/trngen`), the `.import`
-  sidecars and the import pass whose outputs the scan lists, and the one-shot converters (an
-  `.o3d` to a `.3di`, an `.o3a` to its `.adm` and `.bad` files).
+  baking a terrain set's images with TrnGen.exe's bake, `formats/cpt/trngen`; a wave to the
+  form the game plays, `wave_source`), the `.import` sidecars and the import pass whose outputs
+  the scan lists, and the one-shot converters (an `.o3d` to a `.3di`, an `.o3a` to its `.adm`
+  and `.bad` files, a Black Hawk Down GP `.3di` migrated to the 3DI3 the game loads).
 - `preview`: the viewports.
   - A viewport is one per (document, kind) from a compiled-in kind table (`viewport_kinds`),
     kept by the session (`viewports`, with the one preview clock), changed by a SetViewport
@@ -67,10 +70,12 @@ own load paths. The rules that bind it (what may include or link it, the library
     The Shell's devices are `godot/src/authoring`'s, over the runtime's `MenuFrame`,
     `ObjectModel` and, for a mission, the game's own environment, sky, water, terrain,
     placer, foliage, particle renderer and light director.
-  - The kinds: the menu's (`menu_viewport`: its screen compiled headless, what a drag of a
-    window's handles and an arrange write); the model's (`model_viewport`: its orbit camera,
-    the level the game draws, a clip on its rig); the mission's (`mission_viewport`, the
-    Document tab's Main view: `mission_scene`, `mission_camera`, `mission_overlay`,
+  - The kinds, twelve (`session/view/viewport_kind.h`: a menu, a model, a script, a mission
+    and its map, a texture, an effect, a HUD, a definition, an environment, a terrain, a
+    font), among them the menu's (`menu_viewport`: its screen compiled headless, what a drag
+    of a window's handles and an arrange write); the model's (`model_viewport`: its orbit
+    camera, the level the game draws, a clip on its rig); the mission's (`mission_viewport`,
+    the Document tab's Main view: `mission_scene`, `mission_camera`, `mission_overlay`,
     `mission_handle_edit`, `mission_items`, `mission_effects`).
   - The render check, the menu type's project check: every menu screen compiled headless, its
     compiler notes as Problems rows, a menu rendered again only when it, a file it read or a

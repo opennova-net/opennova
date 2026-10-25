@@ -12,28 +12,32 @@
 # Usage: scripts/build_godot.sh [Dev|DebugFull|Release] [--jobs N] [--runtime-only]
 #   (default: Dev)
 #   --jobs N  -> build parallelism (default: the machine's CPU count)
-#   --runtime-only -> only the runtime variant (libopennova.*); by default both
-#                variants are built: the runtime-only libopennova.* the game
-#                and the Play child ship, and the editor-enabled
-#                libopennova_editor.* the OpenNova Editor ships and every source
-#                run (the Godot editor, GUT) loads (ADR 0046 d2).
-#   Dev       -> lib*.<platform>.template_debug.x86_64.<dll|so>  (editor)
+#   --runtime-only -> only the runtime variant (opennovad.dll on Windows,
+#                libopennova.* elsewhere); by default both variants are built:
+#                the runtime-only one the game and the Play child ship, and the
+#                editor-enabled one (oneditord.dll, libopennova_editor.*) the
+#                OpenNova Editor ships and every source run (the Godot editor,
+#                GUT) loads (ADR 0046 d2).
+#   Dev       -> opennovad.dll / oneditord.dll on Windows,
+#                lib*.<platform>.template_debug.<arch>.<so|dylib> elsewhere  (editor)
 #                RelWithDebInfo: optimized native code (/O2 + symbols). This is
 #                the flavor every editor session and every game runtime it
 #                launches (F5/F6) load; an
 #                unoptimized build here costs ~1.5x whole-frame time in-game
 #                (MSVC Debug is /Od /RTC1: ~5-10x on native sim work). The
-#                artifact NAME stays template_debug — godot-cpp derives it from
+#                artifact NAME stays the debug one — derived from
 #                GODOTCPP_TARGET, not the CMake config — so the editor picks it
 #                up unchanged.
-#   DebugFull -> same template_debug artifact, true Debug (/Od, runtime checks,
+#   DebugFull -> same debug artifact, true Debug (/Od, runtime checks,
 #                asserts live). Use when stepping through native code or chasing
 #                memory corruption; do not judge performance on it.
-#   Release   -> same template_debug artifact, plain Release (/O2, no symbols).
+#   Release   -> same debug artifact, plain Release (/O2, no symbols).
 #                GODOTCPP_TARGET is never passed here, so no flavor of this
-#                script produces the template_release-named DLL an
-#                --export-release exe loads; scripts/package_godot_windows.ps1
-#                (-ExportMode release) is the only producer of that one.
+#                script produces the release DLL (opennova.dll / oneditor.dll,
+#                template_release elsewhere) an --export-release exe loads;
+#                scripts/package_godot_windows.ps1 (-ExportMode release) builds
+#                that one locally, CI's build-gdextension-windows
+#                template_release leg on master pushes and manual runs.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

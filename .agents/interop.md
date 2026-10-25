@@ -17,16 +17,20 @@ Pick and record one topology before launching anything:
   with that address, or its **OpenNova NovaWorld** for the production service). Do
   not use `127.0.0.1` on a second retail machine.
 - Docker/dev stack:
-  override the dev compose example IP. Set both `ONNET_PUBLIC_HOST` and
-  `ONNET_CLIENT_REFLECT_IP` to the actual reachable adapter IP for the run.
+  `scripts/dev_stack.sh up` finds this machine's LAN address and announces it as
+  `ONNET_PUBLIC_HOST` (`--address <ipv4>` names another, never loopback);
+  `ONNET_CLIENT_REFLECT_IP` defaults to it (DEVELOPING.md "Run the NovaWorld
+  servers locally").
 
 Ports to check:
 
 - `ONNET_GATE_UDP_PORT`, default `7597/udp`
 - `ONNET_NW_UDP_PORT`, default `64206/udp`
-- `ONNET_HTTP_PORT`, default `8080/tcp`
+- `ONNET_HTTP_PORT`, default `8080/tcp` (on the dev stack, the portal's retail
+  server in front of web's, which refuses `/api/`)
+- The dev stack's portal (the site and its `/api`), `8000/tcp`
 - Vite dev UI, default `5173/tcp`
-- Retail host reflection defaults:
+- Retail host reflection defaults (the dev stack's):
   `ONNET_CLIENT_REFLECT_GATE_PORT=49152` and
   `ONNET_CLIENT_REFLECT_NOVAWORLD_PORT=32768`
 
@@ -56,7 +60,8 @@ Godot direct-launch flags, passed after `--` (the full table is
 - API polling through `/api/health`, `/api/hosts`, `/api/lobbies`,
   `/api/server-info` (the switcher's address, `ONNET_PUBLIC_HOST`), and
   `/api/unknowns` (`/api/hosts` and `/api/unknowns` with the Bearer
-  `ADMIN_API_TOKEN`).
+  `ADMIN_API_TOKEN`), on the dev stack through the portal at
+  `http://localhost:8000` (`ONNET_API_PROXY_ONLY`: its 8080 refuses `/api/`).
 - Packet decode with `opennova-wire`.
 
 Direct LAN host/join no longer requires menu navigation: the debug hook's
