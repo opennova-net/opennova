@@ -75,3 +75,34 @@ INSERT INTO content_projects (key, title, visibility, retail, data_set_id, base_
 SELECT 'JOX01', d.display_name, 'private', true, d.id, p.id
 FROM data_sets d JOIN content_projects p ON p.data_set_id = d.parent_id
 WHERE d.kind = 'expansion' AND d.command_file = 'JOEPTR.CMD';
+
+-- A release built from a content project's revision (ADR 0069 d7; data_sets/release_build.h): the
+-- data program's release.build job exports the revision (an expansion's beside its base's
+-- revision), packs it whole (our own game's) or as what changed since the stock revision's export
+-- (a retail game's), and hands the package to release.validate as an uploaded one is. building ->
+-- validating, or invalid with `error`; build_log what the tools said. content_revision and
+-- base_revision are the revisions built, version the package's.
+ALTER TABLE releases
+    DROP CONSTRAINT releases_status_check,
+    ADD CONSTRAINT releases_status_check CHECK (status IN
+        ('uploading', 'building', 'validating', 'invalid', 'draft', 'published', 'retired')),
+    ADD COLUMN content_project_id bigint REFERENCES content_projects(id) ON DELETE SET NULL,
+    ADD COLUMN content_revision   bigint,
+    ADD COLUMN base_revision      bigint,
+    ADD COLUMN version            text NOT NULL DEFAULT '',
+    ADD COLUMN build_log          text NOT NULL DEFAULT '';
+
+-- A data set's updater product as its packages name it (the release build's, which
+-- scripts/package_release.py's table was): the command file's PRODUCT and the executable its DONE
+-- runs ('' for an expansion). Each by its login, as the seeds above find our own.
+ALTER TABLE data_sets
+    ADD COLUMN product_name text NOT NULL DEFAULT '',
+    ADD COLUMN product_exe  text NOT NULL DEFAULT '';
+UPDATE data_sets SET product_name = 'Joint Operations', product_exe = 'Jointops.exe'
+WHERE updater_login = 'JOTRus';
+UPDATE data_sets SET product_name = 'Joint Operations: Escalation' WHERE updater_login = 'JOEus';
+UPDATE data_sets SET product_name = 'Delta Force Xtreme 2', product_exe = 'dfx2.exe'
+WHERE updater_login = 'DFX2';
+UPDATE data_sets SET product_name = 'OpenNova', product_exe = 'opennova.exe'
+WHERE updater_login = 'OPENNOVA';
+UPDATE data_sets SET product_name = 'Indigo Storm' WHERE updater_login = 'ONJO1';

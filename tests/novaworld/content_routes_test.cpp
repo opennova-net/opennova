@@ -460,12 +460,60 @@ int test_admin_projects(Harness &h) {
 	std::string error;
 	TEST_EXPECT(h.store.head(content::blob_key("MOD", sha_of("mod file")), exists, size, error) &&
 			exists);
-	TEST_EXPECT(refused(admin("DELETE", "/api/admin/content/projects/JO"), 409, "in_use"));
+	TEST_EXPECT(refused(admin("DELETE", "/api/admin/content/projects/JO"), 409, "has_expansion"));
 	const auto gone = admin("DELETE", "/api/admin/content/projects/MOD");
 	TEST_EXPECT(gone.transport_ok && gone.code == 204);
 	TEST_EXPECT(h.store.head(content::blob_key("MOD", sha_of("mod file")), exists, size, error) &&
 			!exists);
 	TEST_EXPECT(refused(admin("DELETE", "/api/admin/content/projects/MOD"), 404, "not_found"));
+	return 0;
+}
+
+// A release built from a revision (data_sets/release_build.h): refused with no version, no data
+// set or no such revision, a player refused; made building with its build queued, and kept from
+// deletion while the data program is on it.
+int test_release_route(Harness &h) {
+	const auto admin = [&](const char *method, const std::string &path,
+							   const std::string &body = {}) {
+		return h.send(method, path, { kJson, kBearer }, body);
+	};
+	const std::string jo = "/api/admin/content/projects/JO/releases";
+	TEST_EXPECT(refused(admin("POST", jo, "{\"version\": \"1.x\"}"), 400, "invalid_field"));
+	TEST_EXPECT(refused(admin("POST", jo, "{}"), 400, "invalid_field"));
+	TEST_EXPECT(refused(admin("POST", jo, "{\"version\": \"1.0\", \"revision\": 99}"), 400,
+			"no_revision"));
+	TEST_EXPECT(refused(admin("POST", "/api/admin/content/projects/JOX01/releases",
+								"{\"version\": \"1.0\"}"),
+			400, "no_revision"));
+	TEST_EXPECT(json_of(admin("POST", "/api/admin/content/projects",
+								"{\"key\": \"NOSET\", \"title\": \"x\", \"visibility\": \"public\"}"),
+			201));
+	TEST_EXPECT(refused(admin("POST", "/api/admin/content/projects/NOSET/releases",
+								"{\"version\": \"1.0\"}"),
+			400, "no_data_set"));
+	TEST_EXPECT(refused(admin("POST", "/api/admin/content/projects/NOPE/releases",
+								"{\"version\": \"1.0\"}"),
+			404, "not_found"));
+	TEST_EXPECT(refused(h.send("POST", jo, { kJson, kCsrf, h.player }, "{\"version\": \"1.0\"}"),
+			403, "forbidden"));
+
+	const auto head = json_of(h.send("GET", "/api/content/projects/JO", { h.admin }), 200);
+	TEST_EXPECT(head && head["project"]["head"].i() >= 1);
+	const int64_t number = head ? head["project"]["head"].i() : 0;
+	const auto made = json_of(admin("POST", jo, "{\"version\": \"1.0.1\"}"), 201);
+	TEST_EXPECT(made && std::string(made["release"]["status"].s()) == "building" &&
+			std::string(made["release"]["source"]["project"].s()) == "JO" &&
+			made["release"]["source"]["revision"].i() == number &&
+			std::string(made["release"]["version"].s()) == "1.0.1" &&
+			std::string(made["release"]["name"].s()) == "JO 1.0.1");
+	const int64_t id = made ? made["release"]["id"].i() : 0;
+	const auto queued = h.pool.acquire()->query(
+			"SELECT count(*) FROM jobs WHERE kind = 'release.build' AND "
+			"(payload->>'release_id')::bigint = $1;",
+			{ opennova::db::BindValue(id) });
+	TEST_EXPECT(!queued.empty() && queued.front().as_int(0).value_or(0) == 1);
+	TEST_EXPECT(
+			refused(admin("DELETE", "/api/admin/releases/" + std::to_string(id)), 409, "building"));
 	return 0;
 }
 
@@ -519,6 +567,7 @@ int main(int argc, char **argv) {
 			{ "who_pushes", test_who_pushes },
 			{ "push", test_push },
 			{ "admin_projects", test_admin_projects },
+			{ "release_route", test_release_route },
 		};
 		rc = 0;
 		for (const Case &c : cases) {

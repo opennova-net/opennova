@@ -516,7 +516,7 @@ locals {
     web    = merge(local.common_env, local.public_env, local.site_env, local.web_env, local.update_env, local.cache_env, local.mail_env, local.hosted_policy_env, local.infra_status_env)
     fleet  = merge(local.common_env, local.public_env, local.hosted_policy_env)
     worker = merge(local.common_env, local.public_env, local.site_env, local.mail_env, local.hosted_policy_env, local.hosted_driver_env)
-    data   = merge(local.common_env, local.store_env)
+    data   = merge(local.common_env, local.store_env, { ONNET_UPDATE_HOST = local.update_host })
   }
 
   # The secrets each reads, SecureStrings `secrets sync` writes under

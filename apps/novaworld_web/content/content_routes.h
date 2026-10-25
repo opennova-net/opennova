@@ -21,6 +21,9 @@
 //                                                            data_set_id?, base?}: a new project
 //   PATCH  /api/admin/content/projects/<key>                 {title?, visibility?}
 //   DELETE /api/admin/content/projects/<key>                 a project with its objects gone
+//   POST   /api/admin/content/projects/<key>/releases        {version, revision?, base_revision?}:
+//                                                            a release built from a revision
+//                                                            (building; data_sets/release_build.h)
 //
 // A file moves straight between the editor and the object store where the store signs URLs of its
 // own (S3's presigned GET and PUT, content_urls.h, ADR 0069 d6): a download and an upload are then
@@ -96,6 +99,7 @@ private:
 	crow::response create(const crow::request &req);
 	crow::response patch(const crow::request &req, const std::string &key);
 	crow::response remove(const crow::request &req, const std::string &key);
+	crow::response release(const crow::request &req, const std::string &key);
 
 	// A file in the scratch directory for one request's bytes, its name its own; "" with
 	// `error` when there is no scratch directory.

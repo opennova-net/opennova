@@ -4,6 +4,9 @@
 #include "core/loggable.h"
 #include "core/object_store.h"
 #include "data_sets/content_repository.h"
+#include "data_sets/data_set_repository.h"
+#include "data_sets/release_build.h"
+#include "data_sets/release_routes.h"
 #include "http_json.h"
 
 #include <base/content/content_manifest.h>
@@ -69,6 +72,26 @@ bool valid_key(std::string_view key) {
 		if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'))
 			return false;
 	return true;
+}
+
+// A release's version: one to four numbers between dots ("0.2.0", "1.7.5.8"), as a command
+// file's VERSION reads.
+bool valid_version(std::string_view version) {
+	if (version.empty() || version.size() > 32)
+		return false;
+	int dots = 0;
+	size_t digits = 0;
+	for (const char c : version) {
+		if (c >= '0' && c <= '9') {
+			++digits;
+			continue;
+		}
+		if (c != '.' || digits == 0)
+			return false;
+		++dots;
+		digits = 0;
+	}
+	return digits > 0 && dots < 4;
 }
 
 bool valid_title(std::string_view title) {
@@ -265,6 +288,10 @@ void ContentRoutes::register_routes(WebApp &app) {
 	CROW_ROUTE(app, "/api/admin/content/projects/<string>")
 			.methods("DELETE"_method)([this](const crow::request &req, const std::string &key) {
 				return remove(req, key);
+			});
+	CROW_ROUTE(app, "/api/admin/content/projects/<string>/releases")
+			.methods("POST"_method)([this](const crow::request &req, const std::string &key) {
+				return release(req, key);
 			});
 }
 
@@ -844,6 +871,70 @@ crow::response ContentRoutes::remove(const crow::request &req, const std::string
 				"[http] DELETE /api/admin/content/projects/%s: its objects stay in the store: %s\n",
 				loggable(key).c_str(), error.c_str());
 	return crow::response(204);
+}
+
+// POST /api/admin/content/projects/<key>/releases — {"version", "revision"?, "base_revision"?}: a
+// release the data program builds (data_sets/release_build.h) from the revision (the head when
+// none is named) and, for an expansion's project, its base's (its head), its package's version
+// `version`: 201 {"release"}, building, its release.build queued in the same transaction; 400
+// invalid_json, invalid_field, no_data_set (the project's releases update none), no_revision (no
+// such revision, or none pushed yet); 404 not_found; 503 store_unavailable.
+crow::response ContentRoutes::release(const crow::request &req, const std::string &key) {
+	auto caller = access_.require_admin(req);
+	if (caller.refusal)
+		return std::move(*caller.refusal);
+	if (store_ == nullptr)
+		return store_unavailable();
+	auto body = JsonBody::parse(req.body);
+	if (!body)
+		return json_error(400, "invalid_json");
+	const auto version = body->text("version");
+	const auto revision = body->null("revision") ? std::nullopt : body->integer("revision");
+	const auto base_revision =
+			body->null("base_revision") ? std::nullopt : body->integer("base_revision");
+	if (body->wrong_type())
+		return json_error(400, "invalid_field");
+	if (!version || !valid_version(*version))
+		return field_error(400, "invalid_field", "version",
+				"a version is one to four numbers between dots: 0.2.0, 1.7.5.8");
+	try {
+		auto db_conn = pool_.acquire();
+		db::Transaction tx(*db_conn);
+		const auto p = find_project(*db_conn, key);
+		if (!p)
+			return no_such_project();
+		if (!p->data_set_id)
+			return json_error(400, "no_data_set", "the project's releases update no data set");
+		const int64_t number = revision.value_or(p->head);
+		if (number <= 0 || !find_revision(*db_conn, p->id, number))
+			return json_error(400, "no_revision", "the project has no such revision");
+		int64_t base_number = 0;
+		if (p->base_project_id) {
+			const auto base = find_project_by_id(*db_conn, *p->base_project_id);
+			base_number = base ? base_revision.value_or(base->head) : 0;
+			if (!base || base_number <= 0 || !find_revision(*db_conn, base->id, base_number))
+				return json_error(
+						400, "no_revision", "the base game's project has no such revision");
+		}
+		hosted::NewBuiltRelease made;
+		made.name = p->key + " " + *version;
+		made.created_by = caller.user ? "admin " + caller.user->username : std::string("token");
+		made.content_project_id = p->id;
+		made.content_revision = number;
+		made.base_revision = base_number;
+		made.version = *version;
+		const int64_t id = hosted::create_built_release(*db_conn, made);
+		hosted::enqueue_release_build(*db_conn, id);
+		tx.commit();
+		const auto row = hosted::find_release(*db_conn, id);
+		if (!row)
+			return json_error(500, "db_error");
+		crow::json::wvalue out;
+		out["release"] = hosted::release_json(*db_conn, *row);
+		return no_store(json_reply(201, out));
+	} catch (const db::Error &e) {
+		return db_failure("POST /api/admin/content/projects/<key>/releases", e);
+	}
 }
 
 } // namespace opennova::novaworld_server::content

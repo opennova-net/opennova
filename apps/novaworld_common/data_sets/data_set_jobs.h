@@ -47,6 +47,8 @@
 //                     are complete installs and build from empty instead; standalone updater
 //                     products queue no apply job. A refusal fails the tree with the
 //                     error; the release stays published (the admin retires it).
+//   release.build     {release_id}, cap 1: a release built from a content project's revision,
+//                     handed to release.validate as an upload is (release_build.h, ADR 0069).
 //   tree.prune        {}, cap 1. The objects of every tree prunable_trees names removed, its
 //                     uploads in flight aborted, the row marked pruned. Hourly
 //                     (data_set_schedule), after each job above, and from the delete routes.

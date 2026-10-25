@@ -545,9 +545,11 @@ run "environments" {
     condition = (
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_UPDATE_HOST"] == "update.example.com" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_UPDATE_PORTS"] == "20044,20556,21068,21580" &&
-      alltrue([for p in ["gate", "lobby", "fleet", "worker", "data"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_UPDATE_")])
+      alltrue([for p in ["gate", "lobby", "fleet", "worker"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_UPDATE_")]) &&
+      { for e in jsondecode(aws_ecs_task_definition.program["data"].container_definitions)[0].environment : e.name => e.value }["ONNET_UPDATE_HOST"] == "update.example.com" &&
+      !strcontains(aws_ecs_task_definition.program["data"].container_definitions, "ONNET_UPDATE_PORTS")
     )
-    error_message = "web alone serves the update service: at the update record's name, on the updater's four ports"
+    error_message = "web alone serves the update service: at the update record's name, on the updater's four ports; data's release build names the host in our own game's UPDATE.WIZ"
   }
   assert {
     condition = (alltrue([

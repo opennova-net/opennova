@@ -38,6 +38,10 @@ struct DataSetRow {
 	std::string updater_login; // "" when the update service does not serve it
 	std::string command_file;
 	bool retail_updater = false;
+	// The updater product as its packages name it (the command file's PRODUCT) and the executable
+	// its DONE runs ("" for an expansion): what a release build packs (release_build.h).
+	std::string product_name;
+	std::string product_exe;
 	std::optional<int64_t> current_tree_id;
 	std::optional<int64_t> baseline_tree_id;
 	std::optional<int64_t> published_release_id;
@@ -81,7 +85,9 @@ struct DataSetTree {
 	std::string pruned_at;
 };
 
-enum class ReleaseStatus : uint8_t { Uploading, Validating, Invalid, Draft, Published, Retired };
+// Building: a release the data program builds from a content project's revision (release_build.h)
+// before it validates it as an uploaded one.
+enum class ReleaseStatus : uint8_t { Uploading, Validating, Invalid, Draft, Published, Retired, Building };
 const char *release_status_name(ReleaseStatus status);
 std::optional<ReleaseStatus> release_status_from_name(std::string_view name);
 
@@ -97,6 +103,13 @@ struct ReleaseRow {
 	std::string created_at;
 	std::string published_at;
 	std::string retired_at;
+	// A built release's source (ADR 0069 d7): its content project, the revision built and, for an
+	// expansion's, its base's; the version its package carries; what the build's tools said.
+	std::optional<int64_t> content_project_id;
+	int64_t content_revision = 0;
+	int64_t base_revision = 0;
+	std::string version;
+	std::string build_log;
 };
 
 struct ReleaseSection {
@@ -241,6 +254,24 @@ int count_tree_pins(db::Database &db, int64_t id);
 
 int64_t create_release(db::Database &db, const std::string &name, int64_t bytes,
 		const std::string &created_by);
+// A release the data program builds (building), from `revision` of the content project
+// `content_project_id` (an expansion's on `base_revision` of its base's), its package's version
+// `version`, named `name`. The caller enqueues its release.build in the same transaction.
+struct NewBuiltRelease {
+	std::string name;
+	std::string created_by;
+	int64_t content_project_id = 0;
+	int64_t content_revision = 0;
+	int64_t base_revision = 0; // 0 for a base game's
+	std::string version;
+};
+int64_t create_built_release(db::Database &db, const NewBuiltRelease &release);
+// building -> validating, its package uploaded (release_upload_key) and `build_log` kept; false
+// when the row left building.
+bool set_release_built(db::Database &db, int64_t id, const std::string &build_log);
+// building -> invalid with `error` and `build_log`; false when the row left building.
+bool set_release_build_failed(
+		db::Database &db, int64_t id, const std::string &error, const std::string &build_log);
 std::optional<ReleaseRow> find_release(db::Database &db, int64_t id);
 std::optional<int64_t> find_release_by_sha(db::Database &db, std::string_view sha256);
 // Every release, newest first.

@@ -70,6 +70,11 @@ public:
 			std::string_view from_prefix, std::string_view to_prefix, std::string &error) = 0;
 	virtual bool list(
 			std::string_view prefix, std::vector<StoredObject> &out, std::string &error) = 0;
+	// Every object under `prefix` downloaded into the directory `dir` at its key below the
+	// prefix, one already there at its size left as it is (S3's `aws s3 sync`), so a directory
+	// kept between calls fetches only what is new: a release build's content files, each named by
+	// its SHA-256 (data_sets/release_build.h).
+	virtual bool sync_down(std::string_view prefix, const std::string &dir, std::string &error) = 0;
 	// Whether `key` is there, and its size when it is.
 	virtual bool head(std::string_view key, bool &exists, uint64_t &size, std::string &error) = 0;
 	virtual bool remove(std::string_view key, std::string &error) = 0;

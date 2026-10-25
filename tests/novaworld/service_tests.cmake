@@ -1137,6 +1137,24 @@ target_compile_definitions(data_set_jobs_test PRIVATE OPENNOVA_SOURCE_DIR="${CMA
 opennova_add_pg_test(data_set_jobs COMMAND data_set_jobs_test)
 set_tests_properties(data_set_jobs PROPERTIES TIMEOUT 300)
 
+# A release built from a content project's revision (data_sets/release_build.h, ADR 0069 d7),
+# its jobs run with the real tools as child processes: a retail game's edit packed against its
+# stock revision into a draft of one section, our own game's revision packed whole with its
+# UPDATE.WIZ, and the refusals (no data set; a revision that is no project, the export's words
+# kept as the build's log).
+add_executable(release_build_test novaworld/release_build_test.cpp)
+target_link_libraries(release_build_test PRIVATE
+    opennova_novaworld_data_sets opennova_novaworld_service opennova_project_cli opennova_editor
+    Threads::Threads)
+target_include_directories(release_build_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(release_build_test PRIVATE
+    OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    OPENNOVA_PROJECT_TOOL="$<TARGET_FILE:opennova_project>"
+    OPENNOVA_UPDATE_TOOL="$<TARGET_FILE:opennova_update_tool>")
+add_dependencies(release_build_test opennova_project opennova_update_tool)
+opennova_add_pg_test(release_build COMMAND release_build_test)
+set_tests_properties(release_build PROPERTIES TIMEOUT 300)
+
 # The fleet in the database (apps/novaworld_common/hosted/model/fleet_repository.h, migration
 # 0003_fleet.sql): a machine's row and its one-time token (its SHA-256 alone), every lifecycle
 # move a compare-and-set, the bootstrap's redeem, the agent's secret, a sync's report and its

@@ -14,19 +14,20 @@ constexpr std::array<const char *, 3> kKindNames = { "base", "expansion", "updat
 constexpr std::array<const char *, 6> kTreeStateNames = { "uploading", "finalizing", "building",
 	"ready", "failed", "pruned" };
 constexpr std::array<const char *, 2> kTreeSourceNames = { "baseline", "release" };
-constexpr std::array<const char *, 6> kReleaseStatusNames = { "uploading", "validating", "invalid",
-	"draft", "published", "retired" };
+constexpr std::array<const char *, 7> kReleaseStatusNames = { "uploading", "validating", "invalid",
+	"draft", "published", "retired", "building" };
 
 constexpr const char *kDataSetColumns =
 		"id, display_name, kind, parent_id, expansion_code, title, game, updater_login, "
 		"command_file, retail_updater, current_tree_id, baseline_tree_id, published_release_id, "
-		"created_by, created_at, updated_at";
+		"created_by, created_at, updated_at, product_name, product_exe";
 constexpr const char *kTreeColumns =
 		"id, data_set_id, state, source, release_id, baseline_tree_id, version_text, "
 		"manifest::text, missions::text, bytes, error, created_by, created_at, ready_at, pruned_at";
 constexpr const char *kReleaseColumns =
 		"id, status, sha256, bytes, package_product, name, error, created_by, created_at, "
-		"published_at, retired_at";
+		"published_at, retired_at, content_project_id, content_revision, base_revision, version, "
+		"build_log";
 
 BindValue optional_id(std::optional<int64_t> id) {
 	if (!id)
@@ -52,6 +53,8 @@ DataSetRow row_to_data_set(const db::Row &r) {
 	d.created_by = r.as_text(13).value_or("");
 	d.created_at = r.as_text(14).value_or("");
 	d.updated_at = r.as_text(15).value_or("");
+	d.product_name = r.as_text(16).value_or("");
+	d.product_exe = r.as_text(17).value_or("");
 	return d;
 }
 
@@ -88,6 +91,11 @@ ReleaseRow row_to_release(const db::Row &r) {
 	rel.created_at = r.as_text(8).value_or("");
 	rel.published_at = r.as_text(9).value_or("");
 	rel.retired_at = r.as_text(10).value_or("");
+	rel.content_project_id = r.as_int(11);
+	rel.content_revision = r.as_int(12).value_or(0);
+	rel.base_revision = r.as_int(13).value_or(0);
+	rel.version = r.as_text(14).value_or("");
+	rel.build_log = r.as_text(15).value_or("");
 	return rel;
 }
 
@@ -424,6 +432,33 @@ int64_t create_release(db::Database &db, const std::string &name, int64_t bytes,
 			"INSERT INTO releases (name, bytes, created_by) VALUES ($1, $2, $3) RETURNING id;",
 			{ BindValue(name), BindValue(bytes), BindValue(created_by) });
 	return rows.front().as_int(0).value_or(0);
+}
+
+int64_t create_built_release(db::Database &db, const NewBuiltRelease &release) {
+	const auto rows = db.query(
+			"INSERT INTO releases (status, name, created_by, content_project_id, content_revision, "
+			"base_revision, version) VALUES ('building', $1, $2, $3, $4, $5, $6) RETURNING id;",
+			{ BindValue(release.name), BindValue(release.created_by),
+					BindValue(release.content_project_id), BindValue(release.content_revision),
+					release.base_revision > 0 ? BindValue(release.base_revision)
+											  : BindValue(std::monostate{}),
+					BindValue(release.version) });
+	return rows.front().as_int(0).value_or(0);
+}
+
+bool set_release_built(db::Database &db, int64_t id, const std::string &build_log) {
+	db.exec("UPDATE releases SET status = 'validating', build_log = $2 "
+			"WHERE id = $1 AND status = 'building';",
+			{ BindValue(id), BindValue(build_log) });
+	return db.changes() > 0;
+}
+
+bool set_release_build_failed(
+		db::Database &db, int64_t id, const std::string &error, const std::string &build_log) {
+	db.exec("UPDATE releases SET status = 'invalid', error = $2, build_log = $3 "
+			"WHERE id = $1 AND status = 'building';",
+			{ BindValue(id), BindValue(error), BindValue(build_log) });
+	return db.changes() > 0;
 }
 
 std::optional<ReleaseRow> find_release(db::Database &db, int64_t id) {

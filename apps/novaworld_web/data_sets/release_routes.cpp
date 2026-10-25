@@ -2,6 +2,7 @@
 
 #include "core/loggable.h"
 #include "core/object_store.h"
+#include "data_sets/content_repository.h"
 #include "data_sets/data_set_jobs.h"
 #include "data_sets/data_set_repository.h"
 #include "data_sets/data_set_routes.h"
@@ -112,6 +113,22 @@ crow::json::wvalue release_json(db::Database &db, const ReleaseRow &r) {
 	out["created_at"] = r.created_at;
 	out["published_at"] = r.published_at; // "" until published, and again once retired
 	out["retired_at"] = r.retired_at; // "" until retired
+	// A built release's source (ADR 0069 d7): its content project's key, the revisions built, the
+	// version, and what the build's tools said; null for an uploaded package.
+	const auto project =
+			r.content_project_id ? content::find_project_by_id(db, *r.content_project_id) : std::nullopt;
+	if (project) {
+		out["source"]["project"] = project->key;
+		out["source"]["revision"] = r.content_revision;
+		if (r.base_revision > 0)
+			out["source"]["base_revision"] = r.base_revision;
+		else
+			out["source"]["base_revision"] = nullptr;
+	} else {
+		out["source"] = nullptr;
+	}
+	out["version"] = r.version;
+	out["build_log"] = r.build_log;
 	return out;
 }
 
@@ -375,7 +392,7 @@ crow::response ReleaseRoutes::retire(const crow::request &req, uint64_t id) {
 // release: its package objects removed (the upload key, which an invalid one keeps, with
 // the upload in flight aborted, and the validated key once it has a sha; a missing object
 // is no failure), the row gone, 204; 404 not_found; 409 published (retire it first),
-// validating (the data program is on it); 502 store_error; 503 store_unavailable.
+// validating or building (the data program is on it); 502 store_error; 503 store_unavailable.
 crow::response ReleaseRoutes::remove(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -390,6 +407,9 @@ crow::response ReleaseRoutes::remove(const crow::request &req, uint64_t id) {
 		if (release->status == ReleaseStatus::Validating)
 			return json_error(
 					409, "validating", "the data program is validating this release; wait for it");
+		if (release->status == ReleaseStatus::Building)
+			return json_error(
+					409, "building", "the data program is building this release; wait for it");
 		if (store_ == nullptr)
 			return store_unavailable();
 		std::string error;

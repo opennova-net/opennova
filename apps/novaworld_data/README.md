@@ -2,7 +2,10 @@
 
 The NovaWorld service's data program: the job pool (`ONNET_WORKER_THREADS` threads) over the
 hosted data sets' jobs alone (`tree.finalize`, `release.validate`, `release.apply`,
-`tree.prune`; `../novaworld_common/data_sets/data_set_jobs.h`, ADR 0064) on the game data's
+`tree.prune`; `../novaworld_common/data_sets/data_set_jobs.h`, ADR 0064; and `release.build`, a
+release built from a content project's revision, `../novaworld_common/data_sets/release_build.h`,
+ADR 0069, which runs `opennova-project` and `opennova-update-tool` from beside the program, with
+the system's environment alone, and names `ONNET_UPDATE_HOST` in our own game's `UPDATE.WIZ`) on the game data's
 object store (`ONNET_OBJECT_STORE_URL`), and the scheduler of their prune, in every data
 process with no election. A tree's files and a release's package pass through its disk (40 GiB
 of task storage in a deployment); it holds the store's credentials and nothing of the fleet,

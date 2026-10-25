@@ -43,7 +43,9 @@ struct ReleaseRow; // data_sets/data_set_repository.h
 
 // A release as the admin's JSON: {id, status, name, sha256, bytes, package_product, error,
 // sections ([{data_set_id, display_name, expansion, command_file, version, tree ({id,
-// state} or null)}]), created_by, created_at, published_at, retired_at ("" until set)}.
+// state} or null)}]), created_by, created_at, published_at, retired_at ("" until set), source
+// (a built release's {project, revision, base_revision (or null)}, null for an upload), version,
+// build_log}.
 crow::json::wvalue release_json(db::Database &db, const ReleaseRow &release);
 
 class ReleaseRoutes {

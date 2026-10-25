@@ -134,6 +134,12 @@ bool S3ObjectStore::copy_prefix(
 			timeouts_.transfer_ms, out, error);
 }
 
+bool S3ObjectStore::sync_down(
+		std::string_view prefix, const std::string &dir, std::string &error) {
+	std::string out;
+	return run(s3("sync", { s3_url(with_slash(prefix)), dir }), timeouts_.transfer_ms, out, error);
+}
+
 bool S3ObjectStore::list(
 		std::string_view prefix, std::vector<StoredObject> &out, std::string &error) {
 	out.clear();

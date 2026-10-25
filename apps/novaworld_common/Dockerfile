@@ -36,8 +36,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /src
 COPY . .
 
-# Configure the whole tree (cheap) but compile only the six programs and
-# their lib deps. OPENNOVA_NOVAWORLD_SERVICE=ON defines the service and its
+# Configure the whole tree (cheap) but compile only the six programs, the two
+# tools the data program's release build runs (opennova-project's export,
+# opennova-update-tool's package builder; data_sets/release_build.h) and their
+# lib deps. OPENNOVA_NOVAWORLD_SERVICE=ON defines the service and its
 # programs; BUILD_NOVAWORLD_HTTP=ON pulls Crow + standalone Asio via
 # FetchContent (web, the fleet, the worker and data build with it).
 # GDExtension is never touched (godot/src is its own project). Mirrors the
@@ -48,7 +50,7 @@ RUN cmake -S . -B build -G Ninja \
         -DBUILD_NOVAWORLD_HTTP=ON \
     && cmake --build build --target opennova_novaworld_gate opennova_novaworld_lobby \
         opennova_novaworld_web opennova_novaworld_fleet opennova_novaworld_worker \
-        opennova_novaworld_data
+        opennova_novaworld_data opennova_project opennova_update_tool
 
 # ---- AWS CLI stage ---------------------------------------------------------
 # The hosted servers' ec2 machine driver (hosted/cloud/ec2_machine_driver.h), the
@@ -271,10 +273,14 @@ ENTRYPOINT ["/app/opennova-novaworld-worker"]
 # ---- data ------------------------------------------------------------------
 # The data sets' jobs over the game data's store (S3 through the AWS CLI in a
 # deployment; the compose stack's directory volume at /var/lib/opennova/store):
-# a tree's files and a release's package pass through its disk.
+# a tree's files and a release's package pass through its disk, and a release
+# built from a content project's revision runs the two tools beside the program
+# (release_build.h).
 FROM runtime-aws AS data
 COPY --from=build /src/build/apps/novaworld_data/opennova-novaworld-data /app/
-RUN ! ldd /app/opennova-novaworld-data | grep -q 'not found'
+COPY --from=build /src/build/apps/project/opennova-project /app/
+COPY --from=build /src/build/apps/update_tool/opennova-update-tool /app/
+RUN ! ldd /app/opennova-novaworld-data /app/opennova-project /app/opennova-update-tool | grep -q 'not found'
 ENV ONNET_HOSTED_AWS_CLI=/usr/local/bin/aws
 USER 10002
 EXPOSE 8081/tcp
